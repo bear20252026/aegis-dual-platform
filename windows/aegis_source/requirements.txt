@@ -13,7 +13,10 @@ PySide6==6.11.1
 cryptography==50.0.0
 keyring==25.4.1
 # Windows 正式入口：pywebview + WebView2；bottle 是桥接服务依赖。
-pywebview==5.4
+# 2026-08-15 升级重锁：5.4 → 6.2.1（6.x 引入 request_sent/state 管理/
+# initialized 事件等；Aegis 未用 6.0 移除的 FileDialog 常量/get_element/
+# DRAG_REGION_SELECTOR，升级安全）。bottle 保持 0.13.2（桥接稳定线）。
+pywebview==6.2.1
 bottle==0.13.2
 
 # ---- 打包（仅打包时安装；与运行依赖分离）----
