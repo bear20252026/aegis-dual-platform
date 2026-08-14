@@ -1,0 +1,61 @@
+# Aegis CI —— 双端代码质量检查
+# 触发：push 到 master / 任意 pull request
+# 环境：ubuntu-latest（Python 3.14）
+# 检查项：validate_release / ruff / bandit / mypy（Windows 源码 + 校验脚本）
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  python-checks:
+    name: Python 质量检查（ruff / bandit / mypy / validate_release）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: windows/aegis_source
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: 安装检查工具
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff bandit mypy types-pywin32
+
+      - name: 静态验证（AST / JSON / XML / 版本声明）
+        run: python ../../validate_release.py
+
+      - name: ruff 检查（Lint + 格式，0 错误）
+        run: ruff check .
+
+      - name: bandit 安全扫描（无 Medium/High）
+        run: bandit -r app/ -q
+
+      - name: mypy 类型检查（新栈 0 错误）
+        run: |
+          mypy main_webview.py \
+            app/api_bridge.py app/nav_queue.py app/shell_toolbar.py \
+            app/config.py app/threat_feed.py app/asset_scheme.py \
+            app/paths.py app/bookmark_store.py app/history_store.py \
+            app/database.py app/security.py app/backdrop.py \
+            crash_reporter.py
+
+  android-lint:
+    name: Android 编译与检查（Kotlin 语法级）
+    runs-on: ubuntu-latest
+    if: false
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+      - name: 占位
+        run: echo "Android Lint 需 Gradle Wrapper 后启用（当前工程无 wrapper）"
