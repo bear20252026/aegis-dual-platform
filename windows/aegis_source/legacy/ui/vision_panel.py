@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """vision_panel.py —— 模式 A：AI 视觉问答面板（设计文档 §6）。
 
 发送当前标签页截图给视觉模型（本地 Ollama / 云端 OpenAI 兼容），
@@ -9,14 +8,19 @@
 
 import base64
 
+from app.vision_client import capture_current_tab, describe_screen
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QTextEdit,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
 )
-
-from app.vision_client import capture_current_tab, describe_screen
 
 
 class VisionPanel(QDialog):

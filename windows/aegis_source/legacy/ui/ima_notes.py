@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """ima_notes.py —— "边看网页，边存笔记到 IMA 知识库"对话框。
 
 把当前正在看的网页（标题 + 网址）连同你写的备注、选中的原文，整理成一篇
@@ -12,11 +11,18 @@ Markdown 笔记，保存到你的 IMA（腾讯云知识库）。全部走 IMA Op
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QPlainTextEdit, QLabel, QComboBox, QFrame,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
-import app.ima_client as ima_client
+from app import ima_client
 
 _ACCENT = "#0071e3"
 

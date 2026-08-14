@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """vision_client.py —— AI 视觉能力客户端（设计文档 §4/§5）。
 
 提供：

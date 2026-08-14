@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """password_tools.py —— 密码生成器 + 本地泄露检测（对标商业浏览器的密码健康）。
 
 - 生成：用 secrets 生成高强度密码，可配长度与字符集，显示熵估算。
@@ -10,13 +9,21 @@
 
 import string
 
+import app.password_tools as pw
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QLabel, QTabWidget, QCheckBox, QSpinBox, QApplication, QMessageBox,
+    QApplication,
+    QCheckBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
 )
-
-import app.password_tools as pw
 
 
 class _BreachWorker(QThread):
@@ -32,7 +39,7 @@ class _BreachWorker(QThread):
         try:
             count, status = pw.check_breach(self._pwd)
             self.done.emit(count, status)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.done.emit(-1, f"error:{e}")
 
 

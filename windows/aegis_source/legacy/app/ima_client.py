@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """ima_client.py —— Aegis 调用 IMA（腾讯云知识库）OpenAPI 的纯 Python 封装。
 
 设计要点（与项目 P0 规则一致）：
@@ -12,9 +11,9 @@
 依赖：仅标准库（os / json / subprocess / re / datetime）。
 """
 
+import json
 import os
 import re
-import json
 import subprocess
 from datetime import datetime, timezone
 

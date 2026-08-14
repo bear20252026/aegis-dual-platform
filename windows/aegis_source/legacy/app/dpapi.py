@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """dpapi.py —— Windows DPAPI 数据保护（P1-5）。
 
 在 Windows 上用 CryptProtectData/CryptUnprotectData 把敏感字节（如 Fernet

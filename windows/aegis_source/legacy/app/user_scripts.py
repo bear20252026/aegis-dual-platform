@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """user_scripts.py —— 用户脚本管理器（QtWebEngine 下的"轻量扩展"能力）。
 
 QtWebEngine 不开放 Chrome 扩展 API，但原生支持 QWebEngineScript

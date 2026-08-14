@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """site_info.py —— 站点信息 / 证书查看器（对标商业浏览器锁形详情）。
 
 展示当前地址、连接安全性，以及（HTTPS 时）证书链：
@@ -8,10 +7,14 @@
 
 import hashlib
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QPlainTextEdit, QFrame,
-)
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QLabel,
+    QPlainTextEdit,
+    QVBoxLayout,
+)
 
 
 def _fmt_fp(der: bytes) -> str:

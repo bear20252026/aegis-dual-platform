@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """new_tab_page.py —— 新建标签页（快捷拨号首页，v2.1.3 视觉升级）。
 
 极光云母玻璃态背景 + 中央玻璃搜索胶囊 + 玻璃拨号卡网格（最近常用 + 书签），
@@ -10,18 +9,23 @@
 导航统一经 navigate 信号走主窗口 safe_url 关口。
 """
 
-from PySide6.QtCore import Qt, QSize, QRect, QPoint, Signal
-from PySide6.QtGui import (QIcon, QColor, QFont, QPainter, QLinearGradient,
-                           QPen)
+from PySide6.QtCore import QRect, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLineEdit, QLabel, QPushButton,
-    QGridLayout, QFrame, QScrollArea, QToolButton,
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .glass import AuroraBackground
-from .icons_dial import brand_palette, brand_char
-from .theme import (ApplePalette, RADIUS_CARD, APP_FONT_FAMILY,
-                    to_qcolor, _adjust_alpha)
+from .icons_dial import brand_char, brand_palette
+from .theme import APP_FONT_FAMILY, RADIUS_CARD, ApplePalette, _adjust_alpha, to_qcolor
 
 # 极光背景恒为深色，故此页固定用深色 token
 _P = ApplePalette(True)

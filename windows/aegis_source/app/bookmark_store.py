@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """bookmark_store.py —— 基于 SQLite 的书签存储。
 
 支持多级文件夹 + 排序。并提供导出为标准 Netscape bookmark HTML 格式

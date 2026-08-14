@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """os_integration.py —— 操作系统深度集成（标准 #35）。
 
 - Windows 任务栏分组：设置 AppUserModelID

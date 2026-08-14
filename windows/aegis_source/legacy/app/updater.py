@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """updater.py —— 签名更新框架（安全基线：离线签名 + HTTPS + 可选证书锁定）。
 
 商业级浏览器更新的信任模型（本实现采用）：
@@ -27,12 +26,10 @@ import json
 import os
 import tempfile
 
-from PySide6.QtCore import QObject, QUrl, Signal
-from PySide6.QtNetwork import QNetworkRequest, QSslCertificate
-from PySide6.QtCore import QCryptographicHash
+from PySide6.QtCore import QCryptographicHash, QObject, QUrl, Signal
+from PySide6.QtNetwork import QNetworkRequest
 
 from .version import APP_VERSION, is_newer
-
 
 # --------------------------------------------------------------------------- #
 # 受信任公钥集（R5 密钥轮换）：key_id -> base64 公钥。

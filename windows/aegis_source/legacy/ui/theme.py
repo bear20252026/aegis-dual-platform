@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """theme.py —— Fluent Mica × Apple Liquid Glass 融合设计系统主题（v2.1.3 重设计）。
 
 设计来源（两者兼收，服从项目 P0 规则）：
@@ -175,7 +174,7 @@ def _split_rgba(color: str):
     if color.startswith("rgba"):
         parts = [p.strip() for p in color[5:-1].split(",")]
         r, g, b = (int(float(v)) for v in parts[:3])
-        return "#{:02x}{:02x}{:02x}".format(r, g, b), float(parts[3])
+        return f"#{r:02x}{g:02x}{b:02x}", float(parts[3])
     return color, 1.0
 
 
@@ -230,7 +229,7 @@ def _lighten_hex(color: str, amount: float) -> str:
 
         def adj(v):
             return max(0, min(255, int(v + 255 * amount)))
-        return "#{:02x}{:02x}{:02x}".format(adj(r), adj(g), adj(b))
+        return f"#{adj(r):02x}{adj(g):02x}{adj(b):02x}"
     except Exception:
         return color
 

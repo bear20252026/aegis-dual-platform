@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """main.py —— Aegis 程序入口。
 
 启动流程：
@@ -9,21 +8,22 @@
 4. 创建 BrowserContext 与主窗口
 """
 
-import sys
-import os
-import time
-import secrets
 import argparse
 import hashlib
+import os
+import secrets
+import sys
+import time
+
+from app.browser import BrowserContext
+from app.version import APP_NAME
 
 # ---- 必须在创建 QApplication 之前导入 WebEngine ----
-from PySide6.QtCore import Qt, QLockFile
+from PySide6.QtCore import QLockFile, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QApplication
 
-from app.browser import BrowserContext
 from app.paths import resolve_data_dir
-from app.version import APP_NAME
 
 _IPC_PREFIX = "Aegis-ipc-"
 
@@ -109,6 +109,7 @@ class IpcServer:
 
     def __init__(self, data_dir: str, window):
         from PySide6.QtNetwork import QLocalServer
+
         from app.security import harden_perms
         self.window = window
         self._data_dir = data_dir
@@ -281,8 +282,7 @@ def main():
 
     # 系统协议集成：aegis://https://... -> https://...
     url = args.url or ""
-    if url.startswith("aegis://"):
-        url = url[len("aegis://"):]
+    url = url.removeprefix("aegis://")
 
     window, ctx = create_window(
         incognito=args.incognito,

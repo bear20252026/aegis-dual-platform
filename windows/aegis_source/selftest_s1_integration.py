@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """selftest_s1_integration.py —— S1 拆分后的集成自检（等效 smoke-test 的代码层）。
 
 背景：真实 --smoke-test 需要 pywebview + WebView2 Runtime（本机未安装，
@@ -12,14 +11,12 @@
 """
 
 import sys
-import threading
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.api_bridge import Api, on_loaded, START_URL
-from app.nav_queue import NavQueue
+from app.api_bridge import START_URL, Api, on_loaded
 from app.shell_toolbar import build_toolbar_js
 
 failures = []

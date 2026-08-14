@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """reading_list.py —— 阅读清单（稍后读的轻量实现）。"""
 
 import time

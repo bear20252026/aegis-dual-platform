@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """system_theme.py —— 操作系统深浅色检测（主题"跟随系统"）。
 
 Windows：注册表 AppsUseLightTheme；macOS：defaults；Linux：GTK 主题名嗅探。

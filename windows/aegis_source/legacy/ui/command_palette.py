@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """command_palette.py —— 命令面板（超标对标：多数商业浏览器无此能力）。
 
 类 VSCode 命令面板：Ctrl+Shift+P 唤起，输入即过滤，↑↓ 选择，Enter 执行。
@@ -9,12 +8,15 @@
 - 不硬编码颜色（沿用系统主题）。
 """
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLineEdit, QListWidget, QListWidgetItem,
-)
-from PySide6.QtCore import Qt
-
 from app.i18n import tr
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QDialog,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QVBoxLayout,
+)
 
 
 class CommandPalette(QDialog):

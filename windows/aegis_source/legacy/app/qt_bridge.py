@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """qt_bridge.py —— 跨线程回主线程投递桥（v2.1.1 修复 P0-3）。
 
 缺陷背景：在 daemon threading.Thread 的工作线程里调用

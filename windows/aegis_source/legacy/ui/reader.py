@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """reader.py —— 阅读模式。
 
 通过注入 JS 提取页面正文，再以清爽的阅读排版重新渲染，
@@ -57,19 +56,19 @@ def sanitize_html(body: str) -> str:
     body = re.sub(
         r"<\s*(script|style|iframe|object|embed|form|button|link|meta|svg|canvas)"
         r"[^>]*>.*?<\s*/\s*\1\s*>",
-        "", body, flags=re.I | re.S)
+        "", body, flags=re.IGNORECASE | re.DOTALL)
     # 2) 单独出现（含自闭合）的危险标签
     body = re.sub(
         r"<\s*(script|style|iframe|object|embed|form|button|link|meta|svg|canvas)"
-        r"[^>]*/?\s*>", "", body, flags=re.I)
+        r"[^>]*/?\s*>", "", body, flags=re.IGNORECASE)
     # 3) 事件属性 on*=
-    body = re.sub(r"\son\w+\s*=\s*\"[^\"]*\"", "", body, flags=re.I)
-    body = re.sub(r"\son\w+\s*=\s*'[^']*'", "", body, flags=re.I)
-    body = re.sub(r"\son\w+\s*=\s*[^\s>]+", "", body, flags=re.I)
+    body = re.sub(r"\son\w+\s*=\s*\"[^\"]*\"", "", body, flags=re.IGNORECASE)
+    body = re.sub(r"\son\w+\s*=\s*'[^']*'", "", body, flags=re.IGNORECASE)
+    body = re.sub(r"\son\w+\s*=\s*[^\s>]+", "", body, flags=re.IGNORECASE)
     # 4) javascript:/vbscript:/data: 伪协议链接 Neutralization
     body = re.sub(
         r"(href|src|action)\s*=\s*([\"'])\s*(?:javascript|vbscript|data)\s*:[^\"']*\2",
-        r'\1=\2#\2', body, flags=re.I)
+        r'\1=\2#\2', body, flags=re.IGNORECASE)
     return body
 
 

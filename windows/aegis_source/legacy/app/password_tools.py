@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """password_tools.py —— 密码生成器 + 本地泄露检测（纯逻辑，可单测）。
 
 泄露检测采用 HaveIBeenPwned 的 k-匿名（k-anonymity）模型：
@@ -11,8 +10,8 @@
 import hashlib
 import secrets
 import string
-import urllib.request
 import urllib.error
+import urllib.request
 
 # 常见 Windows 上可双击打开的应用名（供快速唤起时提示）
 DEFAULT_QWEN_NAMES = ("Qwen.exe", "通义千问.exe", "qwen.exe")

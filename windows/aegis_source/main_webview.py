@@ -19,11 +19,11 @@ import sys
 import threading
 from typing import Any
 
-from app.api_bridge import Api, on_loaded, START_URL, SEARCH_ENGINES
+from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
 
 
 def main() -> int:
-    import webview
+    import webview  # type: ignore[import-not-found]  # pywebview 为运行时依赖，类型桩缺失时忽略
 
     # 关键：新窗口请求（target=_blank 链接）必须在当前窗口打开，
     # 而不是交给系统默认浏览器（默认 True 会导致点百度热搜跳去谷歌浏览器）。
@@ -171,6 +171,6 @@ def _smoke_test(webview: Any) -> int:
 
 
 if __name__ == "__main__":
-    import threading  # noqa: E402 — _smoke_test 内使用，延迟导入保持薄壳
+    import threading
 
     sys.exit(main())

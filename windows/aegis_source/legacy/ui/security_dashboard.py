@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """security_dashboard.py —— 安全态势仪表盘（超越项：让用户看见"被保护到了什么程度"）。
 
 商业级浏览器往往把安全能力藏在角落，用户无法直观判断自己是否真的被保护。
@@ -11,16 +10,17 @@ Aegis 的安全仪表盘如实汇总所有防护开关的真实状态，并诚�
 - 颜色仅用语义色（绿=生效，黄=有限，红=关闭/风险），不靠 emoji。
 """
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QWidget, QScrollArea,
-    QFrame, QSizePolicy,
-)
-
-from app.version import APP_NAME, APP_VERSION, engine_version, pyside_version
 from app.hsts import preload_count
-
+from app.version import APP_NAME, APP_VERSION, engine_version, pyside_version
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
+)
 
 # 语义色（遵循项目唯一强调色体系，不引入紫粉渐变）
 _C_GOOD = "#30d158"     # 生效
@@ -58,7 +58,7 @@ class _Row(QWidget):
                    f"  <span style='color:{'rgba(255,255,255,.55)' if dark else 'rgba(0,0,0,.5)'};'>{detail}</span>",
                    self)
         s.setWordWrap(True)
-        s.setStyleSheet(f"font-size:12px;")
+        s.setStyleSheet("font-size:12px;")
         text.addWidget(t)
         text.addWidget(s)
         lay.addLayout(text, 1)

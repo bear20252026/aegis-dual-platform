@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """version.py —— 应用版本与语义化比较（更新器依赖）。
 
 诚实原则：APP_VERSION 为本浏览器自身版本；引擎版本（Chromium）由

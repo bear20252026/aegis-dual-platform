@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """productivity.py —— v1.5 生产力功能对话框。
 
 包含：标签搜索（Ctrl+Shift+A）、阅读清单、用户脚本管理器。
@@ -7,8 +6,16 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QListWidget,
-    QListWidgetItem, QPushButton, QLabel, QCheckBox, QPlainTextEdit,
+    QCheckBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
 from .icons import icon

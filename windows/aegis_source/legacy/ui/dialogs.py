@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """dialogs.py —— 主窗口高频对话框（从 main_window 提取，架构瘦身）。
 
 包含：历史记录（按日分组 + 多选删除）、书签管理器（搜索/多选删除）、
@@ -13,12 +12,23 @@ from datetime import date, datetime, timedelta
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem,
-    QMessageBox, QPushButton, QVBoxLayout,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
 )
 
-from .settings_dialog import (CONTROL_HEIGHT, DIALOG_MARGINS, section_label,
-                              unify_control_heights)
+from .settings_dialog import (
+    CONTROL_HEIGHT,
+    DIALOG_MARGINS,
+    section_label,
+    unify_control_heights,
+)
 
 
 class HistoryDialog(QDialog):

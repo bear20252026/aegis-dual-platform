@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """sync.py —— 加密同步备份（云同步的客户端侧，标准 #34）。
 
 本地侧能力（已完备）：
@@ -157,7 +156,7 @@ class WebDAVTransport:
         if token:
             self._auth = "Bearer " + token
         elif username:
-            raw = f"{username}:{password}".encode("utf-8")
+            raw = f"{username}:{password}".encode()
             self._auth = "Basic " + base64.b64encode(raw).decode("ascii")
 
     def _request(self, method: str, data: bytes = None):

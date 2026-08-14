@@ -1,17 +1,17 @@
-# -*- coding: utf-8 -*-
 """browser_tab.py —— 标签页页面组件。
 
 封装 QWebEngineView，提供加载状态、证书错误处理、右键菜单
 （用默认浏览器打开/新标签打开/复制链接/图片）、打印等。
 """
 
+import json
+
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QIcon
-from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QMenu, QApplication, QFileDialog
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWidgets import QApplication, QFileDialog, QMenu, QVBoxLayout, QWidget
 
-import json
 
 # 用默认浏览器打开链接（v1.4 L9 修复：仅放行 http/https）
 def _open_external(url: str):
@@ -333,6 +333,7 @@ font-size:15px;}}
         try:
             # R7：安全拦截事件审计（记录域名，不记完整 URL）
             from urllib.parse import urlparse
+
             from app.security_audit import audit
             audit(getattr(sb, "data_dir", ""), "sb_blocked",
                   urlparse(url).hostname or "", "blocked")

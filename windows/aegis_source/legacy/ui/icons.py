@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """icons.py —— 统一内联 SVG 图标（套壳浏览器 UI 专用）。
 
 规则（对照项目 P0 绝对规则）：
@@ -8,7 +7,7 @@
 - 尺寸由调用方 setIconSize 控制（16/20/24px）。
 """
 
-from PySide6.QtCore import QByteArray, QSize
+from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """download_manager.py —— 下载管理器。
 
 监听 QtWebEngine 的下载事件，维护下载列表（进度/速度/状态），
@@ -8,6 +7,7 @@
 import json
 import os
 import time
+
 from PySide6.QtCore import QObject, Signal
 
 

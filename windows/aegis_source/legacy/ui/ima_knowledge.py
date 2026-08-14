@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """ima_knowledge.py —— 浏览并阅读 IMA 知识库（如「昆仑山知识库」）。
 
 读取你 IMA 里的知识库列表、某个库下的内容（文件 / 文件夹 / 笔记），
@@ -11,11 +10,18 @@
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
-    QPushButton, QListWidget, QListWidgetItem, QPlainTextEdit,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
-import app.ima_client as ima_client
+from app import ima_client
 
 _ACCENT = "#0071e3"
 

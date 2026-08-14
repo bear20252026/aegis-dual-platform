@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """threat_feed.py —— 恶意站点情报订阅源（SafeBrowsing 的数据补给线）。
 
 支持订阅远端纯文本黑名单（每行一个域名），兼容常见语法子集：
@@ -76,7 +75,9 @@ def fetch_feed(feed_url: str, timeout: float = 15.0) -> list:
     url = validate_feed_url(feed_url)
     if not url:
         raise ValueError("订阅源地址必须为 https://（file:// 需显式开启离线测试开关）")
-    with urllib.request.urlopen(url, timeout=timeout) as resp:
+    # nosec B310: url 已由 validate_feed_url 强制为 https（上方校验），
+    # 非 https 地址在此路径前已抛 ValueError。
+    with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
         raw = resp.read().decode("utf-8", "ignore")
     domains = []
     seen = set()
@@ -126,7 +127,9 @@ class ThreatFeedUpdater:
         def _worker():
             try:
                 import urllib.request
-                with urllib.request.urlopen(feed_url, timeout=15.0) as resp:
+                # nosec B310: feed_url 已由 validate_feed_url 强制为 https（见上文），
+                # 且可选 verify 签名校验；非 https 地址在此路径前已被拒绝。
+                with urllib.request.urlopen(feed_url, timeout=15.0) as resp:  # nosec B310
                     raw = resp.read()
                 if verify is not None:
                     ok = False

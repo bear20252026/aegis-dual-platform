@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """tab_strip.py —— Edge 风格融合式标签栏（v2.1.3 重设计）。
 
 视觉语言（Fluent Mica × Apple Liquid Glass，色值全部来自 theme 令牌）：
@@ -10,14 +9,35 @@
   悬停关闭按钮等交互能力全部保留。
 """
 
-from PySide6.QtCore import (Qt, QRect, QRectF, QPoint, QPointF, QTimer, QSize,
-                            Signal, QPropertyAnimation, QEasingCurve)
-from PySide6.QtGui import (QPainter, QColor, QFont, QIcon, QPixmap, QPolygonF,
-                          QPen, QFontMetrics, QLinearGradient, QPainterPath)
-from PySide6.QtWidgets import (QTabBar, QTabWidget, QStyle, QStyleOptionTab,
-                               QApplication, QGraphicsOpacityEffect)
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPoint,
+    QPointF,
+    QPropertyAnimation,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QFontMetrics,
+    QLinearGradient,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPolygonF,
+)
+from PySide6.QtWidgets import (
+    QGraphicsOpacityEffect,
+    QTabBar,
+    QTabWidget,
+)
 
-from .theme import RADIUS_TAB, APPLE_BLUE, chrome
+from .theme import APPLE_BLUE, RADIUS_TAB, chrome
 
 # 标签切换淡入（U-5）：150ms 平滑缓动，不用弹性曲线
 _FADE_MS = 150
@@ -582,7 +602,11 @@ class BrowserTabBar(QTabBar):
         painter.drawLine(cx + pad, cy - pad, cx - pad, cy + pad)
 
 
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout  # 缩略图浮层依赖（B2，模块级）
+from PySide6.QtWidgets import (  # 缩略图浮层依赖（B2，模块级）
+    QFrame,
+    QLabel,
+    QVBoxLayout,
+)
 
 
 class TabPreview(QFrame):

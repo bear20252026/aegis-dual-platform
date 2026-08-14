@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 """profile.py —— 用户配置文件管理。
 
 支持多个配置文件，每个配置拥有独立的书签/历史/密码/缓存，互不干扰。
 """
 
-import os
 import json
+import os
 
 from .paths import ensure_dir, profile_dir, sanitize_profile_name
 

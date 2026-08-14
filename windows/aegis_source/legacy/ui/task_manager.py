@@ -1,14 +1,18 @@
-# -*- coding: utf-8 -*-
 """task_manager.py —— 任务管理器。
 
 列出当前窗口的标签页（标题/网址/粗略内存），支持跳转与结束标签页。
 内存取页面 performance.memory 的近似值（异步刷新）。
 """
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QLabel, QMessageBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
 
 

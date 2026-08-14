@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """glass.py —— 液态玻璃控件辅助（v2.1.3 重设计：Fluent mesh × Apple glass）。
 
 提供：
@@ -12,8 +11,7 @@ P0：不使用 emoji；光斑颜色取自 Apple 蓝调体系（accent / #5ac8fa 
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import (QColor, QRadialGradient, QBrush, QPainter,
-                           QLinearGradient)
+from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QRadialGradient
 from PySide6.QtWidgets import QFrame, QWidget
 
 

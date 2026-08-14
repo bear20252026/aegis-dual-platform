@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """ai_assistant.py —— 本地 AI 助手面板（对标/超标商业浏览器的 AI 能力）。
 
 能力：
@@ -15,18 +14,26 @@
 - 不使用 emoji 图标；不硬编码颜色（沿用系统主题与项目强调色 #0071e3）。
 """
 
-import os
 import json
+import os
 import subprocess
 
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
-    QPlainTextEdit, QLabel, QComboBox, QTabWidget, QInputDialog,
-    QApplication, QWidget,
+    QComboBox,
+    QDialog,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
-import app.ai_client as ai_client
+from app import ai_client
 
 # 供应商预设（仅作默认值，用户可改；端点均为 OpenAI 兼容 /v1/chat/completions）
 PROVIDER_PRESETS = {
@@ -110,7 +117,7 @@ class _AIWorker(QThread):
         try:
             out = self._fn(*self._args, **self._kwargs)
             self.done.emit(out or "")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             self.failed.emit(str(e))
 
 
@@ -439,7 +446,7 @@ class AegisAIPanel(QDialog):
                     subprocess.Popen([path])
                 self._app_status.setText(f"已唤起 {name} 应用，可在其中免费对话。")
                 return
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 self._app_status.setText(f"唤起失败：{e}")
                 return
         self._app_status.setText(

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """selftest_shell_toolbar.py —— shell_toolbar 模块自检（独立 UTF-8 脚本，避免 shell 编码污染）。
 
 验证点：

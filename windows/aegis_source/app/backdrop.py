@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """backdrop.py —— Windows 系统级亚克力/Mica 背景（单文件单职责）。
 
 职责：在 Windows 11 上为浏览器主窗口启用系统级背景材质（Mica /

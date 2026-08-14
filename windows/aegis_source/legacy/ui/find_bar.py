@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """find_bar.py —— 页面内查找栏（Ctrl+F）。
 
 顶部浮动查找输入框，支持上一个/下一个/区分大小写，实时高亮。
@@ -6,7 +5,12 @@
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QLineEdit, QToolButton, QLabel, QHBoxLayout, QCheckBox,
+    QCheckBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QToolButton,
+    QWidget,
 )
 
 from .icons import icon

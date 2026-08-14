@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """translate_client.py —— 本地/在线翻译客户端（OpenAI 兼容接口，纯逻辑可测）。
 
 设计原则：
@@ -9,8 +8,8 @@
 """
 
 import json
-import urllib.request
 import urllib.error
+import urllib.request
 
 _SYSTEM = (
     "你是一个翻译助手。只输出译文，不要解释、不要附加任何额外文字。"

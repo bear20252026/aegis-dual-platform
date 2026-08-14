@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """history_store.py —— 基于 SQLite 的历史记录存储。
 
 采用与主流浏览器一致的访问日志模型：一个 URL 可对应多条访问记录，
@@ -7,7 +6,7 @@
 
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
 from .database import Database
 
@@ -100,7 +99,9 @@ class HistoryStore:
         db = self._check()
         if db is None:
             return {"total": 0, "today": 0}
-        today_start = int(datetime.now().replace(
+        # DTZ005 修复：now() 显式传 UTC 再转本地时区，保持"本地今日"语义
+        now_local = datetime.now(timezone.utc).astimezone()
+        today_start = int(now_local.replace(
             hour=0, minute=0, second=0, microsecond=0).timestamp())
         return {
             "total": db.query_one("SELECT COUNT(*) n FROM visits")["n"],

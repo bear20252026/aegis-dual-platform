@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """api_bridge.py —— 暴露给 JS 的 Python 桥（单文件单职责）。
 
 职责：Aegis 浏览器前端（注入式工具栏/新标签页）通过 pywebview js_api
@@ -17,7 +16,6 @@ pywebview 注入 js_api 时用 dir(obj) 遍历本对象所有属性并递归扫�
 导致注入线程无限递归卡死。因此重写 __dir__ 只暴露 js_api 方法白名单。
 """
 
-import json
 import threading
 import urllib.parse
 from pathlib import Path

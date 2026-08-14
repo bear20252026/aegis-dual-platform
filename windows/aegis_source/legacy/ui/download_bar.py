@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """download_bar.py —— 下载管理条。
 
 固定在窗口底部的下载任务浮层：显示进行中的下载、进度、速度，
@@ -6,15 +5,26 @@
 """
 
 import os
-from PySide6.QtCore import (Qt, QPoint, QPropertyAnimation, QEasingCurve,
-                          QAbstractAnimation, Signal)
+
+from app.i18n import tr
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QPoint,
+    QPropertyAnimation,
+)
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QToolButton, QProgressBar,
-    QFrame, QScrollArea, QPushButton,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QScrollArea,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .icons import icon
-from app.i18n import tr
 
 STATE_TEXT = {
     "downloading": "下载中",
@@ -75,7 +85,8 @@ class HistoryRow(QFrame):
             self._open_folder(path)
 
     def _open_folder(self, path):
-        import subprocess, sys
+        import subprocess
+        import sys
         if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
         elif sys.platform == "darwin":
@@ -125,7 +136,8 @@ class DownloadRow(QFrame):
                 self._open_folder(path)
 
     def _open_folder(self, path):
-        import subprocess, sys
+        import subprocess
+        import sys
         if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
         elif sys.platform == "darwin":
@@ -234,7 +246,7 @@ class DownloadBar(QWidget):
             w = item.widget()
             if w:
                 w.deleteLater()
-        recs = getattr(self.manager, "history", lambda: [])()[:10]
+        recs = getattr(self.manager, "history", list)()[:10]
         if not recs:
             lbl = QLabel(tr("暂无历史记录"), self.history_frame)
             lbl.setStyleSheet(

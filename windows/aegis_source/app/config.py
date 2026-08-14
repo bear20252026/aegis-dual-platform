@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """config.py —— 应用配置（类型化、带默认值、JSON 持久化）。
 
 商业级要求配置项"真正生效"，因此这里集中管理所有可配置项，
@@ -7,7 +6,7 @@
 
 import json
 import os
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
 
 @dataclass
@@ -157,11 +156,10 @@ class AppConfig:
                         elif isinstance(dft, str):
                             if isinstance(v, str):
                                 setattr(cfg, k, v)
-                        elif isinstance(dft, dict):
-                            if isinstance(v, dict):
-                                setattr(cfg, k, {
-                                    str(a): b for a, b in v.items()
-                                    if isinstance(b, (int, float))})
+                        elif isinstance(dft, dict) and isinstance(v, dict):
+                            setattr(cfg, k, {
+                                str(a): b for a, b in v.items()
+                                if isinstance(b, (int, float))})
             except (json.JSONDecodeError, OSError):
                 pass
         # ---- 字段级约束（类型通过后再做语义校验）----

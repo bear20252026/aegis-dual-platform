@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """computer_use.py —— 模式 B：计算机使用闭环（设计文档 §7）。
 
 截图 → 视觉模型决策（JSON 动作）→ 页面内执行（runJavaScript）→ 再截图……

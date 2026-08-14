@@ -1,21 +1,31 @@
-# -*- coding: utf-8 -*-
 """settings_dialog.py —— 设置对话框。
 
 所有设置项均写回 AppConfig 并立即/重启生效，非"摆设"。
 """
 
-import os
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QLabel,
-    QComboBox, QCheckBox, QSpinBox, QPushButton, QGroupBox, QFormLayout,
-    QLineEdit, QFileDialog, QDialogButtonBox, QMessageBox, QListWidget,
-    QListWidgetItem,
-)
-
+from app.i18n import tr
 from app.password_store import password_security_note
 from app.permissions import FEATURE_NAMES
-from app.i18n import tr
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 # U-8：高频对话框统一的"呼吸感"——外边距、分区间距与控件高度
 DIALOG_MARGINS = (20, 18, 20, 16)
@@ -471,7 +481,6 @@ class PermissionsDialog(QDialog):
 
     def _refresh(self):
         self.listw.clear()
-        from PySide6.QtWidgets import QListWidgetItem
         sites = self._store.all_sites() if self._store else []
         if not sites:
             item = QListWidgetItem("（暂无已记忆的权限决策）")

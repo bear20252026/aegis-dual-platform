@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """adblock.py —— 广告拦截。
 
 基于 QWebEngineUrlRequestInterceptor 的请求级拦截：
@@ -8,7 +7,8 @@
 """
 
 from PySide6.QtWebEngineCore import (
-    QWebEngineUrlRequestInterceptor, QWebEngineUrlRequestInfo,
+    QWebEngineUrlRequestInfo,
+    QWebEngineUrlRequestInterceptor,
 )
 
 # 常见广告/追踪「主机名段」（v1.4 L3 修复：按主机名段精确匹配，

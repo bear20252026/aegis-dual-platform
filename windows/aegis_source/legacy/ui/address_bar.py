@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """address_bar.py —— 商用级地址栏。
 
 特性：
@@ -9,12 +8,15 @@
 """
 
 import urllib.parse
-from PySide6.QtCore import Qt, QUrl, QRect, QTimer, QObject, Signal
-from PySide6.QtGui import QIcon, QFont, QColor
+
+from PySide6.QtCore import QRect, Qt, QTimer, QUrl, Signal
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PySide6.QtWidgets import (
-    QLineEdit, QListWidget, QListWidgetItem, QFrame, QLabel,
-    QHBoxLayout, QVBoxLayout,
+    QFrame,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QVBoxLayout,
 )
 
 from .icons import icon

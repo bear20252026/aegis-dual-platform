@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """error_pages.py —— Apple 风格友好错误页与安全提示页（依据 DESIGN.md）。
 
 页面加载失败（离线/DNS/拒绝连接等）时展示极简错误页，

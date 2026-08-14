@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """view_source.py —— 查看源代码对话框。
 
 行为对标商业浏览器（Chrome/Firefox 的「查看源代码 / View Source」）：
@@ -14,11 +13,17 @@
 
 import re
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import (QFont, QSyntaxHighlighter, QTextCharFormat, QColor)
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QFont, QSyntaxHighlighter, QTextCharFormat
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPlainTextEdit, QLabel,
-    QLineEdit, QPushButton, QApplication,
+    QApplication,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
 )
 
 

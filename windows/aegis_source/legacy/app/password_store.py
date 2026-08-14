@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """password_store.py —— 密码加密存储。
 
 安全策略：
@@ -15,7 +14,6 @@
 
 import json
 import os
-import base64
 import stat
 
 # 尝试导入加密库
@@ -46,7 +44,7 @@ class PasswordStore:
             # 不得让整个浏览器启动崩溃——降级为"密码保存禁用"并保留原因。
             try:
                 self._cipher = Fernet(self._get_or_create_key())
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 self._cipher = None
                 self.key_error = str(e)
         # 安全底线（v1.4 H1 修复）：无加密能力时绝不落明文，
@@ -191,6 +189,7 @@ class PasswordStore:
         不会误配到 bank.com）。
         """
         from urllib.parse import urlparse
+
         from .security import normalize_credential_host
         want = normalize_credential_host(host)
         if not want:

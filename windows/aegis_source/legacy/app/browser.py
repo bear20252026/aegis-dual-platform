@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """browser.py —— 浏览器运行时上下文。
 
 聚合配置、存储、下载、广告拦截等服务，供 UI 层统一访问，
@@ -6,19 +5,20 @@
 """
 
 import os
+
 from PySide6.QtWebEngineCore import QWebEngineProfile
 
-from .config import AppConfig
-from .history_store import HistoryStore
-from .bookmark_store import BookmarkStore
-from .password_store import PasswordStore
-from .download_manager import DownloadManager
 from .adblock import AdBlocker
-from .session import SessionManager
-from .search_engines import SearchEngines
-from .safe_browsing import SafeBrowsing
+from .bookmark_store import BookmarkStore
+from .config import AppConfig
+from .download_manager import DownloadManager
+from .history_store import HistoryStore
+from .password_store import PasswordStore
+from .paths import cache_dir, profile_dir, webengine_dir
 from .permissions import PermissionStore
-from .paths import cache_dir, webengine_dir, temp_dir, profile_dir
+from .safe_browsing import SafeBrowsing
+from .search_engines import SearchEngines
+from .session import SessionManager
 
 
 class _EmptyDials:
@@ -81,10 +81,10 @@ class BrowserContext:
         self.permissions = PermissionStore(self.data_dir)
 
         # v1.5 新增能力
-        from .reading_list import ReadingList
-        from .user_scripts import UserScriptStore
-        from .threat_feed import ThreatFeedUpdater
         from .logging_setup import setup_logging
+        from .reading_list import ReadingList
+        from .threat_feed import ThreatFeedUpdater
+        from .user_scripts import UserScriptStore
         self.logger = setup_logging(self.data_dir)
         self.reading = ReadingList(self.data_dir)
         self.user_scripts = UserScriptStore(self.data_dir)
@@ -156,7 +156,7 @@ class BrowserContext:
         # v2.1.5：安装随包资产 scheme handler（aegisasset://，只读白名单壁纸），
         # 供新标签页渲染壁纸。持有引用防 GC（Qt 不接管其生命周期）。
         try:
-            from .asset_scheme import AegisAssetHandler, SCHEME_NAME
+            from .asset_scheme import SCHEME_NAME, AegisAssetHandler
             self._asset_handler = AegisAssetHandler()
             prof.installUrlSchemeHandler(SCHEME_NAME, self._asset_handler)
         except Exception:

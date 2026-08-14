@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """logging_setup.py —— 最小文件日志（排障与审计痕迹）。
 
 写到数据目录 logs/aegis.log；单文件 1MB，保留 3 份滚动。

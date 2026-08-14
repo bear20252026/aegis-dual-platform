@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """bookmark_bar.py —— Chrome 风格书签栏。
 
 导航栏下方的一行书签按钮：
@@ -8,9 +7,14 @@
 QSS 样式见 theme.py 中 `#bookmarkBar` 段落。
 """
 
-from PySide6.QtCore import Qt, QObject, QEvent, Signal
+from PySide6.QtCore import QEvent, QObject, Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QToolButton, QHBoxLayout, QLabel, QMenu, QApplication,
+    QApplication,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QToolButton,
+    QWidget,
 )
 
 

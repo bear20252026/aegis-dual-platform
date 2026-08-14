@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """clear_data.py —— 清除浏览数据对话框（对标商业浏览器隐私清理）。
 
 细粒度选择：浏览历史 / Cookie 及其他站点数据 / 缓存 / 已保存密码。
@@ -6,7 +5,11 @@
 """
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QCheckBox, QLabel, QDialogButtonBox,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QLabel,
+    QVBoxLayout,
 )
 
 

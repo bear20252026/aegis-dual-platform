@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """selftest_api_bridge.py —— api_bridge 模块自检（独立 UTF-8 脚本）。
 
 验证点（不依赖 pywebview / Qt，全部离线）：
@@ -15,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from app.api_bridge import Api, normalize_url, on_loaded, START_URL
+from app.api_bridge import START_URL, Api, normalize_url, on_loaded
 from app.nav_queue import NavQueue
 
 failures = []

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """nav_queue.py —— 导航线程队列（单文件单职责）。
 
 职责：把 pywebview 窗口操作（load_url / evaluate_js）从 js_api 回调线程
@@ -18,7 +17,14 @@
 
 import queue
 import threading
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from functools import partial
+from typing import Any
+
+
+def _load_url_op(w: Any, url: str) -> None:
+    """模块级辅助：执行 load_url（独立函数，mypy 可推断参数类型）。"""
+    w.load_url(url)
 
 
 class NavQueue:
@@ -35,7 +41,7 @@ class NavQueue:
         self.window: Any = None          # create_window 之后由 bind_window 绑定
         self._lock = threading.RLock()
         self._nav_q: queue.Queue = queue.Queue()
-        self._nav_thread: Optional[threading.Thread] = None
+        self._nav_thread: threading.Thread | None = None
         self._nav_stop = False
 
     # ------------------------------------------------------------------ #
@@ -95,10 +101,10 @@ class NavQueue:
             try:
                 if action == "load":
                     self._run_with_timeout(
-                        lambda w=w, arg=arg: w.load_url(arg), "load_url")
+                        partial(_load_url_op, w, arg), "load_url")
                 elif action == "eval":
                     self._run_with_timeout(
-                        lambda w=w, arg=arg: self._exec_script_impl(w, arg),
+                        partial(self._exec_script_impl, w, arg),
                         "evaluate_js")
             except Exception:
                 pass  # 窗口销毁竞态 / WebView 不可用时静默

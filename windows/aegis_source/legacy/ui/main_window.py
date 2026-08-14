@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """main_window.py —— 浏览器主窗口（编排层）。
 
 整合地址栏、标签页、书签栏、查找栏、下载栏、菜单与各服务，
@@ -6,39 +5,58 @@
 """
 
 import os
-from PySide6.QtCore import (Qt, QUrl, QSize, QPoint, QPropertyAnimation,
-                          QEasingCurve, QAbstractAnimation)
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QToolButton, QLabel, QLineEdit,
-    QHBoxLayout, QVBoxLayout, QMenu, QStatusBar, QMessageBox, QFileDialog,
-    QDialog, QApplication, QToolBar,
-)
 
 from app.browser import BrowserContext
 from app.hsts import maybe_upgrade
 from app.i18n import tr
-from .theme import style_for, load_app_font, font_family_css
-from .icons import icon, set_theme as set_icon_theme
+from PySide6.QtCore import (
+    QAbstractAnimation,
+    QEasingCurve,
+    QPoint,
+    QPropertyAnimation,
+    QSize,
+    Qt,
+    QUrl,
+)
+from PySide6.QtWidgets import (
+    QApplication,
+    QDialog,
+    QFileDialog,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QStatusBar,
+    QToolBar,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
+
 from .address_bar import AddressBar
-from .browser_tab import BrowserTab
-from .find_bar import FindBar
-from .download_bar import DownloadBar
-from .settings_dialog import (SettingsDialog, PermissionsDialog,
-                              CONTROL_HEIGHT, DIALOG_MARGINS, section_label,
-                              unify_control_heights)
-from .dialogs import BookmarkManagerDialog, HistoryDialog, PasswordDialog, DialsDialog
-from .tab_strip import BrowserTabWidget
-from .bookmark_bar import BookmarkBar
-from .security_dashboard import SecurityDashboard
-from .view_source import ViewSource
-from .clear_data import ClearBrowsingData
-from .site_info import SiteInfo
-from .command_palette import CommandPalette
 from .ai_assistant import AegisAIPanel
-from .password_tools import PasswordToolsDialog
-from .ima_notes import ImaNotesDialog
+from .bookmark_bar import BookmarkBar
+from .browser_tab import BrowserTab
+from .clear_data import ClearBrowsingData
+from .command_palette import CommandPalette
+from .dialogs import BookmarkManagerDialog, DialsDialog, HistoryDialog, PasswordDialog
+from .download_bar import DownloadBar
+from .find_bar import FindBar
+from .icons import icon
+from .icons import set_theme as set_icon_theme
 from .ima_knowledge import ImaKnowledgeDialog
+from .ima_notes import ImaNotesDialog
+from .password_tools import PasswordToolsDialog
+from .security_dashboard import SecurityDashboard
+from .settings_dialog import (
+    PermissionsDialog,
+    SettingsDialog,
+)
+from .site_info import SiteInfo
+from .tab_strip import BrowserTabWidget
+from .theme import font_family_css, load_app_font, style_for
+from .view_source import ViewSource
 
 HOME_PAGE = "https://www.baidu.com"
 
@@ -234,8 +252,7 @@ class MainWindow(QMainWindow):
         self._build_tools_menu(mb.addMenu("工具"))
         self._build_help_menu(mb.addMenu("帮助"))
         # v1.5 全局快捷键：Ctrl+L 地址栏 / Ctrl+Tab 切换标签
-        from PySide6.QtGui import QShortcut
-        from PySide6.QtGui import QKeySequence
+        from PySide6.QtGui import QKeySequence, QShortcut
         QShortcut(QKeySequence("Ctrl+L"), self, activated=self._focus_address)
         QShortcut(QKeySequence("Ctrl+J"), self,
                   activated=self._show_download_bar)
@@ -484,7 +501,9 @@ class MainWindow(QMainWindow):
           form-action 限 https:，彻底封死存储型 XSS。
         """
         import html as html_mod
+
         from app.system_theme import resolve_dark
+
         from app.security import safe_url
         dark = resolve_dark(self.config.theme)
         dials = []
@@ -502,7 +521,6 @@ class MainWindow(QMainWindow):
             _add(rec["title"] or rec["url"], rec["url"])
         for b in self.ctx.bookmarks.all()[:6]:
             _add(b["title"] or b["url"], b["url"])
-        from .new_tab_page import DEFAULT_DIALS
         from .icons_dial import dial_icon_svg
 
         # v2.1.5：自定义首页拨号优先——用户已自定义则只用自定义列表，
@@ -568,7 +586,7 @@ class MainWindow(QMainWindow):
                 "radial-gradient(900px 520px at 18% 12%, rgba(0,113,227,0.17), transparent 62%),"
                 "radial-gradient(760px 460px at 84% 8%, rgba(90,200,250,0.10), transparent 60%),"
                 "radial-gradient(820px 560px at 62% 96%, rgba(41,151,255,0.08), transparent 62%),"
-                f"linear-gradient(180deg, #05060a 0%, #0a0d13 58%, #0e1219 100%)")
+                "linear-gradient(180deg, #05060a 0%, #0a0d13 58%, #0e1219 100%)")
         else:
             (bg, fg, fg_sub, glass, glass_hi, glass_edge,
              float_shadow, tile_shadow, tagline_c, search_ico,
@@ -584,7 +602,7 @@ class MainWindow(QMainWindow):
                 "radial-gradient(900px 520px at 18% 10%, rgba(0,113,227,0.16), transparent 62%),"
                 "radial-gradient(760px 460px at 84% 6%, rgba(90,200,250,0.18), transparent 60%),"
                 "radial-gradient(820px 560px at 60% 98%, rgba(29,125,255,0.12), transparent 62%),"
-                f"linear-gradient(180deg, #f7f8fa 0%, #f5f5f7 60%, #eff1f5 100%)")
+                "linear-gradient(180deg, #f7f8fa 0%, #f5f5f7 60%, #eff1f5 100%)")
 
         # ---- v2.1.5：NTP 壁纸（随包资产，aegisasset:// 白名单加载） ----
         # 壁纸 URL 仅由白名单文件名经 asset_scheme.wallpaper_url() 生成，
@@ -862,8 +880,13 @@ class MainWindow(QMainWindow):
     # v1.5 加密同步备份
     # ================================================================== #
     def _export_sync(self):
+        from app.sync import (
+            LocalFileTransport,
+            SyncCollector,
+            SyncError,
+            encrypt_bundle,
+        )
         from PySide6.QtWidgets import QInputDialog
-        from app.sync import SyncCollector, encrypt_bundle, LocalFileTransport, SyncError
         pwd, ok = QInputDialog.getText(
             self, "导出同步备份", "设置同步口令（导入时需要）：",
             QLineEdit.Password)
@@ -883,8 +906,13 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "已导出", f"加密备份已导出：\n{path}")
 
     def _import_sync(self):
+        from app.sync import (
+            LocalFileTransport,
+            SyncCollector,
+            SyncError,
+            decrypt_bundle,
+        )
         from PySide6.QtWidgets import QInputDialog
-        from app.sync import SyncCollector, decrypt_bundle, LocalFileTransport, SyncError
         path, _ = QFileDialog.getOpenFileName(
             self, "选择同步备份", "", "Aegis 同步包 (*.absync)")
         if not path:
@@ -910,9 +938,14 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ #
     def _sync_webdav_push(self):
         """把加密同步包上传到 WebDAV（后台线程，不阻塞 UI）。"""
+        from app.sync import (
+            SyncCollector,
+            SyncError,
+            WebDAVTransport,
+            encrypt_bundle,
+            load_webdav_auth,
+        )
         from PySide6.QtWidgets import QInputDialog
-        from app.sync import (SyncCollector, encrypt_bundle, WebDAVTransport,
-                              SyncError, load_webdav_auth)
         url = self.config.sync_webdav_url
         if not url:
             QMessageBox.information(self, "同步",
@@ -958,9 +991,14 @@ class MainWindow(QMainWindow):
 
     def _sync_webdav_pull(self):
         """从 WebDAV 拉取并合并加密同步包（后台线程）。"""
+        from app.sync import (
+            SyncCollector,
+            SyncError,
+            WebDAVTransport,
+            decrypt_bundle,
+            load_webdav_auth,
+        )
         from PySide6.QtWidgets import QInputDialog
-        from app.sync import (SyncCollector, decrypt_bundle, WebDAVTransport,
-                              SyncError, load_webdav_auth)
         url = self.config.sync_webdav_url
         if not url:
             QMessageBox.information(self, "同步",
@@ -1272,8 +1310,9 @@ class MainWindow(QMainWindow):
     def _on_download_requested(self, download):
         """下载请求：危险类型二次确认，按设置询问保存位置或直接保存。"""
         # v1.4 M7 修复：可执行/脚本类下载必须显式确认
-        from app.security import is_dangerous_download
         from app.download_manager import _dl_suggested
+
+        from app.security import is_dangerous_download
         suggested = _dl_suggested(download) or \
             download.url().toString().split("/")[-1] or "download"
         if is_dangerous_download(suggested):
@@ -1466,7 +1505,7 @@ class MainWindow(QMainWindow):
         t = self.current_tab()
         if not t:
             return
-        from .reader import extract_reader_js, build_reader_html
+        from .reader import build_reader_html, extract_reader_js
         # 提前捕获标题/URL，避免 JS 回调时标签已被关闭
         fallback_title = t.title() or ""
         fallback_url = t.url() or ""
@@ -1794,7 +1833,6 @@ class MainWindow(QMainWindow):
     # ================================================================== #
     def _session_tabs(self) -> list:
         """收集可恢复的标签（过滤 newtab/reader/about 等伪 URL）。"""
-        from urllib.parse import urlparse
         tabs = []
         for i in range(self.tabs.count()):
             tab = self.tabs.widget(i)

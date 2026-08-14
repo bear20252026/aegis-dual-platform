@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """safe_browsing.py —— 恶意/钓鱼网站防护（真实机制 + 诚实覆盖度声明）。
 
 设计原则（对照原版"仅 .example 占位域名"的空壳）：
@@ -130,6 +129,7 @@ class GoogleSafeBrowsingProvider(SafeBrowsingProvider):
         # platformTypes 按实际运行平台上报（此前固定 WINDOWS，
         # Linux/macOS 上运行的浏览器无法匹配对应平台的威胁条目）。
         import sys as _sys
+
         from .version import APP_VERSION
         platform_map = {"win32": "WINDOWS", "linux": "LINUX",
                         "darwin": "OSX"}
@@ -202,7 +202,7 @@ class GoogleAsyncChecker(QObject):
             return
         if not getattr(self._provider, "api_key", ""):
             return
-        from PySide6.QtCore import QThread   # 延迟导入：离线自测桩无需 QThread
+        from PySide6.QtCore import QThread  # 延迟导入：离线自测桩无需 QThread
         thread = QThread()
         worker = _GoogleLookupWorker(self._provider, url)
         worker.moveToThread(thread)

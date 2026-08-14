@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """security_audit.py —— R7 结构化安全审计日志（JSON Lines，本地）。
 
 事件类型（枚举）：

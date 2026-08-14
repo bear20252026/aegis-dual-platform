@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """ai_client.py —— 本地/兼容 OpenAI 的 AI 调用客户端（纯逻辑，可单测）。
 
 统一服务于：
@@ -17,8 +16,8 @@
 import json
 import os
 import re
-import urllib.request
 import urllib.error
+import urllib.request
 
 _SYSTEM_TRANSLATE = (
     "你是一个翻译助手。只输出译文，不要解释、不要附加任何额外文字。"

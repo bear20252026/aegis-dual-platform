@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """computer_use_panel.py —— 模式 B：AI 上网代理面板（设计文档 §7）。
 
 截图 → 视觉模型决策（JSON 动作）→ GATE 等级门控 → 页面执行 → 循环，
@@ -13,17 +12,22 @@
 import base64
 import time
 
+from app.computer_use import GateError, PageActor, check_level, screen_fingerprint
+from app.vision_client import NATIVE_ACTIONS, capture_current_tab, decide_action
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QComboBox, QPlainTextEdit, QFrame, QMessageBox,
+    QComboBox,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
 )
-
-from app.vision_client import (capture_current_tab, decide_action,
-                               NATIVE_ACTIONS)
-from app.computer_use import (check_level, PageActor, GateError,
-                              screen_fingerprint)
 
 LEVEL_NAMES = ["L0 只读", "L1 浏览", "L2 输入", "L3 凭据"]
 
