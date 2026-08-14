@@ -159,7 +159,7 @@ class WebDAVTransport:
             raw = f"{username}:{password}".encode()
             self._auth = "Basic " + base64.b64encode(raw).decode("ascii")
 
-    def _request(self, method: str, data: bytes = None):
+    def _request(self, method: str, data: bytes | None = None):
         import urllib.request
 
         orig_netloc = self.url.split("//", 1)[-1].split("/", 1)[0]
@@ -192,10 +192,10 @@ class WebDAVTransport:
         # 这里不吞掉，交由调用方提示用户。
         return opener.open(req, timeout=30)
 
-    def save(self, blob: bytes, path: str = None):
+    def save(self, blob: bytes, path: str | None = None):
         self._request("PUT", data=blob).close()
 
-    def load(self, path: str = None) -> bytes:
+    def load(self, path: str | None = None) -> bytes:
         return self._request("GET").read()
 
 

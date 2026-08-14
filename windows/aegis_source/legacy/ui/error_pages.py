@@ -29,12 +29,12 @@ _FONT = ("'SF Pro Display','SF Pro Text','Helvetica Neue',"
 def _palette(dark: bool) -> dict:
     """深/浅两套 Apple token（摘自 DESIGN.md）。"""
     if dark:
-        return dict(bg="#000000", fg="#ffffff", sub="rgba(255,255,255,0.6)",
-                    host="rgba(255,255,255,0.42)", ico="rgba(255,255,255,0.08)",
-                    pill_border="rgba(255,255,255,0.4)", pill_fg="#ffffff")
-    return dict(bg="#f5f5f7", fg="#1d1d1f", sub="rgba(0,0,0,0.8)",
-                host="rgba(0,0,0,0.48)", ico="rgba(0,0,0,0.05)",
-                pill_border="#1d1d1f", pill_fg="#1d1d1f")
+        return {"bg": "#000000", "fg": "#ffffff", "sub": "rgba(255,255,255,0.6)",
+                    "host": "rgba(255,255,255,0.42)", "ico": "rgba(255,255,255,0.08)",
+                    "pill_border": "rgba(255,255,255,0.4)", "pill_fg": "#ffffff"}
+    return {"bg": "#f5f5f7", "fg": "#1d1d1f", "sub": "rgba(0,0,0,0.8)",
+                "host": "rgba(0,0,0,0.48)", "ico": "rgba(0,0,0,0.05)",
+                "pill_border": "#1d1d1f", "pill_fg": "#1d1d1f"}
 
 
 def build_error_html(failed_url: str, reason: str = "generic",

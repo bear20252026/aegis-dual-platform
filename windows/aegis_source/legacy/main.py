@@ -228,7 +228,7 @@ def _install_crash_hooks(base_dir: str):
     def _hook(typ, val, tb):
         try:
             with open(crash_file, "a", encoding="utf-8") as f:
-                f.write("\n=== %s ===\n" % time.strftime("%Y-%m-%d %H:%M:%S"))
+                f.write("\n=== {} ===\n".format(time.strftime("%Y-%m-%d %H:%M:%S")))
                 f.write("".join(_tb.format_exception(typ, val, tb)))
         except Exception:
             pass
@@ -272,7 +272,7 @@ def main():
     _apply_window_icon(app)
 
     # 单实例：已有实例运行时把 URL 转发给它然后退出
-    lock, is_new = acquire_single_instance(base_dir)
+    _lock, is_new = acquire_single_instance(base_dir)
     if not is_new and not args.new_window:
         if args.url and try_forward_url(base_dir, args.url):
             print("Aegis 已在运行，已把网址发送至现有窗口。")

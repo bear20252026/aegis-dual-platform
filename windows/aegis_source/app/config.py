@@ -19,6 +19,9 @@ class AppConfig:
     font_size: int = 13
     language: str = "zh-CN"           # 界面语言（R11：zh-CN | en，重启生效）
     show_bookmark_bar: bool = True
+    # R1 用户快捷键覆盖（JSON 字符串，如 '{"new_tab":"n","close_tab":"x"}'；
+    # 空串=使用默认表 DEFAULT_KEYBINDINGS）。值须为单字符按键。
+    keybindings_json: str = ""
 
     # ---- 搜索与主页 ----
     engine: str = "baidu"             # baidu | bing | google | sogou

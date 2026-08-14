@@ -229,10 +229,9 @@ class BrowserTabBar(QTabBar):
         super().leaveEvent(event)
 
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            if self.tabAt(event.pos()) < 0:
-                self.new_tab_requested.emit()
-                return
+        if event.button() == Qt.LeftButton and self.tabAt(event.pos()) < 0:
+            self.new_tab_requested.emit()
+            return
         super().mouseDoubleClickEvent(event)
 
     def contextMenuEvent(self, event):

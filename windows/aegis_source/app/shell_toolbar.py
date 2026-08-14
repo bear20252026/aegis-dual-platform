@@ -16,6 +16,15 @@
 
 import json
 
+# R1 借鉴 min 的 defaultKeybindings/keybindings 分离：
+# 默认快捷键表独立为常量（单一来源），用户可在 config 中覆盖
+# （build_toolbar_js 注入生效的映射，TOOLBAR_JS 不再硬编码按键）。
+DEFAULT_KEYBINDINGS: dict[str, str] = {
+    "new_tab": "t",      # Ctrl/Meta + T → 新标签
+    "close_tab": "w",    # Ctrl/Meta + W → 关闭当前标签
+    "focus_url": "l",    # Ctrl/Meta + L → 聚焦地址栏
+}
+
 # 注入式工具栏：单行紧凑设计（苹果风格）。
 # - 高度 40px，毛玻璃半透明深蓝紫（与 aurora 壁纸同色系），白色文字
 # - 左侧标签条（紧凑胶囊）+ 新建标签 + 后退/前进/刷新/主页 + 地址栏
@@ -157,22 +166,23 @@ TOOLBAR_JS = r"""
       });
     }
 
-    // —— 快捷键（一次绑定）：
-    //    Ctrl+T 新标签 / Ctrl+W 关闭当前标签 / Ctrl+L 聚焦地址栏 ——
+    // —— 快捷键（一次绑定；按键表由 __KEYBINDINGS_JSON__ 注入，
+    //    默认来自 DEFAULT_KEYBINDINGS，用户可在 config 覆盖）——
     if (window.pywebview && pywebview.api && !window.__aegis_keys_hooked) {
       window.__aegis_keys_hooked = true;
+      var KB = __KEYBINDINGS_JSON__ || {};
       window.addEventListener('keydown', function (e) {
         try {
           if (!(e.ctrlKey || e.metaKey)) return;
           var k = (e.key || '').toLowerCase();
-          if (k === 't') {
+          if (KB.new_tab && k === KB.new_tab) {
             e.preventDefault();
             pywebview.api.new_tab();
-          } else if (k === 'w') {
+          } else if (KB.close_tab && k === KB.close_tab) {
             e.preventDefault();
             var ci = (TABS_DATA && TABS_DATA.current) || 0;
             pywebview.api.close_tab(ci);
-          } else if (k === 'l') {
+          } else if (KB.focus_url && k === KB.focus_url) {
             e.preventDefault();
             var urlInput = document.getElementById('aegis-url');
             if (urlInput) { urlInput.focus(); urlInput.select(); }
@@ -185,14 +195,18 @@ TOOLBAR_JS = r"""
 """
 
 
-def build_toolbar_js(current_url: str, tabs_snapshot: dict) -> str:
-    """把当前 URL 与标签快照注入占位符，返回可 evaluate 的完整脚本。
+def build_toolbar_js(current_url: str, tabs_snapshot: dict,
+                     keybindings: dict | None = None) -> str:
+    """把当前 URL / 标签快照 / 快捷键表注入占位符，返回可 evaluate 的完整脚本。
 
-    占位符值一律经 json.dumps 注入 —— 输出永远是合法 JSON 字面量，
-    无论 URL / 标题含什么字符都不会造成 JS 注入或语法错误。
+    keybindings 为 None 时用 DEFAULT_KEYBINDINGS（默认表）；调用方可传入
+    用户覆盖后的生效表。占位符值一律经 json.dumps 注入 —— 输出永远是
+    合法 JSON 字面量，无论 URL / 标题含什么字符都不会造成 JS 注入。
     """
+    kb = DEFAULT_KEYBINDINGS if keybindings is None else dict(keybindings)
     return (
         TOOLBAR_JS
         .replace("__AEGIS_URL__", json.dumps(current_url))
         .replace("__TABS_JSON__", json.dumps(tabs_snapshot))
+        .replace("__KEYBINDINGS_JSON__", json.dumps(kb))
     )

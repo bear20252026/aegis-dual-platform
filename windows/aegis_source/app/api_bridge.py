@@ -65,6 +65,7 @@ class Api:
         "get_search_engine", "set_search_engine",
         "get_tabs", "new_tab", "switch_tab", "close_tab",
         "pin_tab", "unpin_tab",
+        "set_tab_group", "get_tab_groups",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
         "get_bookmarks", "add_bookmark", "remove_bookmark",
@@ -84,6 +85,7 @@ class Api:
         self._lock = threading.RLock()
         self._tabs: list[dict[str, Any]] = [{
             "title": "新标签页", "url": START_URL, "pinned": False,
+            "group": "默认",
         }]
         self._current: int = 0
         self._engine: str = DEFAULT_ENGINE
@@ -173,7 +175,8 @@ class Api:
     def new_tab(self, url: str = "") -> None:
         target = normalize_url(url) if url else START_URL
         with self._lock:
-            self._tabs.append({"title": "新标签页", "url": target, "pinned": False})
+            self._tabs.append({"title": "新标签页", "url": target,
+                               "pinned": False, "group": "默认"})
             self._current = len(self._tabs) - 1
         self._load(target)
 
@@ -247,6 +250,38 @@ class Api:
             if t is tab:
                 return i
         return self._current
+
+    def set_tab_group(self, index: Any, group: Any) -> bool:
+        """把标签归入分组（R4 task 层；组名为字符串，空串=默认组）。
+
+        借鉴 min 的 tabState 分层：tab（单标签状态）/ task（标签分组）。
+        返回是否成功；越界或组名非法返回 False。
+        """
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return False
+        name = str(group or "").strip()[:32]
+        if not name:
+            name = "默认"
+        with self._lock:
+            if not (0 <= index < len(self._tabs)):
+                return False
+            self._tabs[index]["group"] = name
+        return True
+
+    def get_tab_groups(self) -> list:
+        """返回全部分组名（有序去重，供分组栏/标签着色使用）。"""
+        with self._lock:
+            names = [t.get("group") or "默认" for t in self._tabs]
+        # 保持首次出现顺序去重
+        seen: set = set()
+        out: list = []
+        for n in names:
+            if n not in seen:
+                seen.add(n)
+                out.append(n)
+        return out
 
     def _tabs_snapshot(self) -> dict:
         """线程安全地返回标签快照（副本，避免调用方拿到活引用）。"""
@@ -425,7 +460,19 @@ def on_loaded(window: Any, api: Api) -> None:
     api._update_current(url)
     try:
         # 内嵌标签数据 → 单次注入，零 HTTP 往返。
-        js = build_toolbar_js(url, api.get_tabs())
+        kb = None  # None = 默认表 DEFAULT_KEYBINDINGS
+        try:
+            cfg = getattr(api, "config", None)
+            raw = getattr(cfg, "keybindings_json", "") if cfg else ""
+            if raw:
+                import json as _json
+                parsed = _json.loads(raw)
+                if isinstance(parsed, dict):
+                    kb = {k: str(v)[:1] for k, v in parsed.items()
+                          if isinstance(v, str) and v}
+        except Exception:
+            kb = None  # 用户配置解析失败时静默回退默认表
+        js = build_toolbar_js(url, api.get_tabs(), keybindings=kb)
         api._eval(js)
     except Exception:
         pass  # 页面不允许注入（CSP 严格站点 / 空白页）时静默降级

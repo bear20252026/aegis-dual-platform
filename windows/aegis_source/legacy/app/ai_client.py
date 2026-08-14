@@ -89,7 +89,7 @@ def save_api_key(provider: str, key: str) -> None:
 
 
 def _chat(endpoint: str, payload: dict, timeout: float = 60.0,
-         api_key: str = None) -> str:
+         api_key: str | None = None) -> str:
     """POST 到 OpenAI 兼容端点，返回原始响应文本；失败返回空串。
 
     api_key 非空时附带 ``Authorization: Bearer`` 头（云端服务如 DeepSeek 需要）。
@@ -123,7 +123,7 @@ def _system_by_lang(target: str) -> str:
 
 
 def translate(text: str, endpoint: str, model: str, target: str,
-              timeout: float = 30.0, api_key: str = None) -> str:
+              timeout: float = 30.0, api_key: str | None = None) -> str:
     """单条翻译（兼容旧接口）。成功返回译文；失败返回空串。"""
     if not text or not endpoint:
         return ""
@@ -164,7 +164,7 @@ def _parse_numbered(raw: str, n: int):
 
 def translate_many(texts: list, endpoint: str, model: str, target: str,
                    timeout: float = 60.0, chunk: int = 25,
-                   api_key: str = None) -> list:
+                   api_key: str | None = None) -> list:
     """批量翻译（双语对照用）。texts 为字符串列表，返回等长译文列表。
 
     每 chunk 条合成一个编号 prompt，一次请求完成，显著降低本地 AI 调用次数。
@@ -200,7 +200,7 @@ def translate_many(texts: list, endpoint: str, model: str, target: str,
 
 def summarize(text: str, endpoint: str, model: str,
              lang: str = "中文", timeout: float = 90.0,
-             api_key: str = None) -> str:
+             api_key: str | None = None) -> str:
     """总结网页正文。返回摘要文本；失败返回空串。"""
     if not text or not endpoint:
         return ""
@@ -217,7 +217,7 @@ def summarize(text: str, endpoint: str, model: str,
 
 
 def ask(question: str, context: str, endpoint: str, model: str,
-        timeout: float = 90.0, api_key: str = None) -> str:
+        timeout: float = 90.0, api_key: str | None = None) -> str:
     """基于网页正文回答用户问题。返回回答；失败返回空串。"""
     if not question or not endpoint:
         return ""

@@ -1249,9 +1249,8 @@ class MainWindow(QMainWindow):
         index = self.tabs.indexOf(tab) if tab else -1
         if index >= 0:
             self.tabbar.set_loading(index, 0 < p < 100)
-        if index == self.tabs.currentIndex():
-            if 0 < p < 100:
-                self.progress_label.setText(f"加载 {p}%")
+        if index == self.tabs.currentIndex() and 0 < p < 100:
+            self.progress_label.setText(f"加载 {p}%")
         if p >= 100:
             self.progress_label.clear()
             self._refresh_nav()

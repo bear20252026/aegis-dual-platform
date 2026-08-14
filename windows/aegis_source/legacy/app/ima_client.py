@@ -240,7 +240,7 @@ def append_note(note_id, content, timeout=30.0):
     if not content.strip():
         return (False, "追加内容为空。")
     body = {"note_id": note_id, "content_format": _CONTENT_FORMAT, "content": content}
-    ok, data, err = _call("openapi/note/v1/append_doc", body, timeout)
+    ok, _data, err = _call("openapi/note/v1/append_doc", body, timeout)
     if not ok:
         return (False, err)
     return (True, None)
