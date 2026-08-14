@@ -54,7 +54,7 @@ fun VerticalTabBar(
             modifier
                 .width(180.dp)
                 .fillMaxHeight()
-                .background(Color(0xCC101827)),
+                .background(ToolbarBackground),
     ) {
         // 按分组渲染：先在 @Composable 上下文收集有序分组名（保留出现顺序）
         val groups = rememberOrderedGroups(tabs)
@@ -68,7 +68,7 @@ fun VerticalTabBar(
                     Text(
                         text = group,
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color(0x99FFFFFF),
+                        color = GroupLabelColor,
                         modifier = Modifier.padding(start = 8.dp, top = 6.dp, bottom = 2.dp),
                     )
                 }
@@ -89,7 +89,7 @@ fun VerticalTabBar(
             modifier = Modifier.fillMaxWidth().padding(6.dp).height(36.dp),
             colors =
                 ButtonDefaults.buttonColors(
-                    containerColor = Color(0x33FFFFFF),
+                    containerColor = ButtonOverlay,
                     contentColor = Color.White,
                 ),
         ) {
@@ -109,7 +109,7 @@ private fun VerticalTabChip(
     Surface(
         onClick = onSelect,
         shape = MaterialTheme.shapes.small,
-        color = if (active) Color(0x3DFFFFFF) else Color(0x1AFFFFFF),
+        color = if (active) TabActiveHighlight else TabInactiveHighlight,
         modifier = Modifier.fillMaxWidth().height(34.dp),
     ) {
         Row(

@@ -13,15 +13,6 @@
     <ID>LongParameterList:MainActivity.kt$( address: String, onAddressChange: (String) -&gt; Unit, onOpen: () -&gt; Unit, onBack: () -&gt; Unit, onForward: () -&gt; Unit, onReload: () -&gt; Unit, )</ID>
     <ID>LongParameterList:TabBar.kt$( tabs: List&lt;Tab&gt;, activeIndex: Int, onSelect: (Int) -&gt; Unit, onClose: (Int) -&gt; Unit, onNewTab: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>LongParameterList:VerticalTabBar.kt$( tabs: List&lt;Tab&gt;, activeIndex: Int, onSelect: (Int) -&gt; Unit, onClose: (Int) -&gt; Unit, onNewTab: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
-    <ID>MagicNumber:TabBar.kt$0x1AFFFFFF</ID>
-    <ID>MagicNumber:TabBar.kt$0x33FFFFFF</ID>
-    <ID>MagicNumber:TabBar.kt$0x3DFFFFFF</ID>
-    <ID>MagicNumber:TabBar.kt$0xCC101827</ID>
-    <ID>MagicNumber:VerticalTabBar.kt$0x1AFFFFFF</ID>
-    <ID>MagicNumber:VerticalTabBar.kt$0x33FFFFFF</ID>
-    <ID>MagicNumber:VerticalTabBar.kt$0x3DFFFFFF</ID>
-    <ID>MagicNumber:VerticalTabBar.kt$0x99FFFFFF</ID>
-    <ID>MagicNumber:VerticalTabBar.kt$0xCC101827</ID>
     <ID>ReturnCount:TabManager.kt$TabManager$fun closeTab(index: Int): Boolean</ID>
   </CurrentIssues>
 </SmellBaseline>

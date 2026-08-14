@@ -622,13 +622,16 @@ style:
   MagicNumber:
     active: true
     excludes: ['**/test/**', '**/androidTest/**', '**/commonTest/**', '**/jvmTest/**', '**/androidUnitTest/**', '**/androidInstrumentedTest/**', '**/jsTest/**', '**/iosTest/**', '**/*.kts']
+    # 工具链 P0（detekt 基线收敛）：颜色常量表（UiColors.kt）用命名常量
+    # 定义 Color(0x...) —— 属性声明中的数字正是"命名化"的目的，忽略之
+    # （detekt 官方配置项；仅影响属性声明，不影响函数体内字面量）
+    ignorePropertyDeclaration: true
     ignoreNumbers:
       - '-1'
       - '0'
       - '1'
       - '2'
     ignoreHashCodeFunction: true
-    ignorePropertyDeclaration: false
     ignoreLocalVariableDeclaration: false
     ignoreConstantDeclaration: true
     ignoreCompanionObjectPropertyDeclaration: true

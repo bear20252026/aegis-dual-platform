@@ -5,3 +5,6 @@ assets/fonts/source-han-sans-sc.zip
 assets/fonts/**/*.otf
 assets/fonts/inter/
 assets/fonts/source-han-sans-sc/
+
+# pyscn 工具输出目录（报告归档于 docs/quality-reports/，此处不重复入库）
+.pyscn/

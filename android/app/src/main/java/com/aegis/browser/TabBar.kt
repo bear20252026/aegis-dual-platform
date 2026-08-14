@@ -55,7 +55,7 @@ fun TabBar(
             modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .background(Color(0xCC101827)),
+                .background(ToolbarBackground),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         contentPadding = PaddingValues(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -74,7 +74,7 @@ fun TabBar(
                 modifier = Modifier.height(32.dp),
                 colors =
                     ButtonDefaults.buttonColors(
-                        containerColor = Color(0x33FFFFFF),
+                        containerColor = ButtonOverlay,
                         contentColor = Color.White,
                     ),
             ) {
@@ -95,7 +95,7 @@ private fun TabChip(
     Surface(
         onClick = onSelect,
         shape = MaterialTheme.shapes.small,
-        color = if (active) Color(0x3DFFFFFF) else Color(0x1AFFFFFF),
+        color = if (active) TabActiveHighlight else TabInactiveHighlight,
         modifier = Modifier.height(32.dp),
     ) {
         Row(
