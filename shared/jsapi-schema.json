@@ -27,6 +27,7 @@
       "pin_tab",
       "reload_page",
       "remove_bookmark",
+      "search_history_fulltext",
       "set_search_engine",
       "set_tab_group",
       "set_wallpaper",
@@ -313,6 +314,23 @@
         "returns": "None",
         "exposed_to_js": true,
         "n_required_params": 1
+      },
+      "search_history_fulltext": {
+        "name": "search_history_fulltext",
+        "description": "FTS5 全文搜索历史（落地建议③，借鉴 min fullTextSearch）。",
+        "params": [
+          {
+            "name": "keyword",
+            "required": true
+          },
+          {
+            "name": "limit",
+            "required": true
+          }
+        ],
+        "returns": "list",
+        "exposed_to_js": true,
+        "n_required_params": 2
       },
       "set_search_engine": {
         "name": "set_search_engine",
