@@ -13,6 +13,7 @@
       "get_history",
       "get_most_visited",
       "get_search_engine",
+      "get_tab_groups",
       "get_tabs",
       "get_wallpaper",
       "go_back",
@@ -27,6 +28,7 @@
       "reload_page",
       "remove_bookmark",
       "set_search_engine",
+      "set_tab_group",
       "set_wallpaper",
       "switch_tab",
       "unpin_tab"
@@ -151,6 +153,14 @@
         "description": "返回 {engine, engines:[{key,name}]}。",
         "params": [],
         "returns": "dict",
+        "exposed_to_js": true,
+        "n_required_params": 0
+      },
+      "get_tab_groups": {
+        "name": "get_tab_groups",
+        "description": "返回全部分组名（有序去重，供分组栏/标签着色使用）。",
+        "params": [],
+        "returns": "list",
         "exposed_to_js": true,
         "n_required_params": 0
       },
@@ -316,6 +326,23 @@
         "returns": "None",
         "exposed_to_js": true,
         "n_required_params": 1
+      },
+      "set_tab_group": {
+        "name": "set_tab_group",
+        "description": "把标签归入分组（R4 task 层；组名为字符串，空串=默认组）。",
+        "params": [
+          {
+            "name": "index",
+            "required": true
+          },
+          {
+            "name": "group",
+            "required": true
+          }
+        ],
+        "returns": "bool",
+        "exposed_to_js": true,
+        "n_required_params": 2
       },
       "set_wallpaper": {
         "name": "set_wallpaper",

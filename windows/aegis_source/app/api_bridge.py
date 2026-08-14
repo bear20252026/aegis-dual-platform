@@ -56,6 +56,21 @@ def normalize_url(text: str | None, engine: str = DEFAULT_ENGINE) -> str:
     return "https://" + text
 
 
+def _is_navigation_safe(url: str) -> bool:
+    """H-C1 审计修复：外部导航目标安全校验。
+
+    只放行 http/https 与显式 about:blank；file:/javascript:/vbscript:/
+    data:/blob: 等一律拒绝（复用 security.safe_url 白名单，
+    allow_internal=False 确保 data:/blob: 等内部伪协议不被外部输入放行）。
+    """
+    if not url:
+        return False
+    if url == "about:blank":
+        return True
+    from .security import safe_url
+    return bool(safe_url(url, allow_internal=False))
+
+
 class Api:
     """暴露给 JS 的 Python 桥。JS 侧调用 pywebview.api.navigate(...) 等。"""
 
@@ -173,7 +188,14 @@ class Api:
         return self._tabs_snapshot()
 
     def new_tab(self, url: str = "") -> None:
-        target = normalize_url(url) if url else START_URL
+        # H-C1 审计修复：用户显式传入的 url 必须过安全校验；
+        # 空 url（UI 新建标签）仍用受信任的 START_URL，行为不变。
+        if url:
+            target = normalize_url(url)
+            if target != "about:blank" and not _is_navigation_safe(target):
+                return
+        else:
+            target = START_URL
         with self._lock:
             self._tabs.append({"title": "新标签页", "url": target,
                                "pinned": False, "group": "默认"})
@@ -304,6 +326,12 @@ class Api:
     # ================= 导航 =================
     def navigate(self, text: str) -> None:
         url = normalize_url(text, self._engine)
+        # H-C1 审计修复：外部导航入口强制过安全关口。
+        # 只放行 http/https 与显式 about:blank；file:/javascript:/data:/blob:
+        # 等一律拒绝（normalize_url 对 file:// 前缀原样返回，此前可被地址栏
+        # 输入 file:///C:/... 加载本地文件 —— 与 README 安全声明脱节）。
+        if url != "about:blank" and not _is_navigation_safe(url):
+            return
         try:
             if self.history is not None:
                 self.history.add(url, text)

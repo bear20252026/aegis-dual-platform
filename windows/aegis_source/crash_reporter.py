@@ -28,6 +28,28 @@ from pathlib import Path
 from typing import Any
 
 _APP_VERSION = "2.1.6"
+
+
+def _resolve_app_version() -> str:
+    """从 shared/version.properties 读取版本（单一来源，审计 E 修复）。
+
+    读取失败时回退内置固定值（崩溃报告必须永不失效）。
+    仅用于崩溃报告元信息，不影响任何功能。
+    """
+    try:
+        root = Path(__file__).resolve().parent.parent.parent
+        props = root / "shared" / "version.properties"
+        for line in props.read_text(encoding="utf-8").splitlines():
+            if line.startswith("VERSION_NAME="):
+                v = line.split("=", 1)[1].strip()
+                if v:
+                    return v
+    except Exception:
+        pass
+    return _APP_VERSION
+
+
+_APP_VERSION = _resolve_app_version()
 _report_cache: Path | None = None
 _installed = False
 
