@@ -14,3 +14,6 @@ signing.properties
 *.jks
 *.keystore
 *.p12
+
+# skylos 工具输出目录（报告归档于 docs/quality-reports/，此处不重复入库）
+.skylos/

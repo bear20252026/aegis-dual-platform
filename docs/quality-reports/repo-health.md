@@ -4,8 +4,8 @@
 
 - **repository:** android (`D:\abrowser\review\aegis_dual_platform\android`)
 - **stack:** android
-- **scanned:** 2026-08-14T21:10:27.627Z · **tool:** v1.0.20 · **duration:** 0.1s
-- **files:** 31 (32.2 MB)
+- **scanned:** 2026-08-14T21:39:01.123Z · **tool:** v1.0.20 · **duration:** 0.1s
+- **files:** 31 (7.4 MB)
 
 ## Health score
 
@@ -40,23 +40,23 @@
 
 #### 2 heavy font file(s) (high) — `assets-heavy-font-file`
 - **severity:** high | **confidence:** confirmed | **category:** assets | **horizon:** this_sprint
-- **what:** 2 font file(s) exceed the 488.3 KB threshold, totaling 31.5 MB.
+- **what:** 2 font file(s) exceed the 488.3 KB threshold, totaling 6.7 MB.
 - **why it matters:** Heavy font files significantly increase app size. Consider subsetting to include only the glyphs you need.
-- **impact:** 31.5 MB could potentially be saved by subsetting these fonts. (33076160 bytes)
+- **impact:** 6.7 MB could potentially be saved by subsetting these fonts. (7054516 bytes)
 - **fix:** Subset the font to include only required glyphs, or switch to a variable font to reduce the number of files.
 - **evidence:**
-  - `app/src/main/res/font/source_han_sans_sc_medium.otf` (15.8 MB)
-  - `app/src/main/res/font/source_han_sans_sc_regular.otf` (15.8 MB)
+  - `app/src/main/res/font/source_han_sans_sc_medium.otf` (3.4 MB)
+  - `app/src/main/res/font/source_han_sans_sc_regular.otf` (3.4 MB)
 
 #### 2 oversized font file(s) (high) — `assets-oversized-font`
 - **severity:** high | **confidence:** confirmed | **category:** assets | **horizon:** today
-- **what:** Found 2 font file(s) exceeding the high size threshold, totalling 31.5 MB.
+- **what:** Found 2 font file(s) exceeding the high size threshold, totalling 6.7 MB.
 - **why it matters:** Large font files increase app bundle size, slow down downloads, and consume more device storage and memory.
-- **impact:** 31.5 MB can be saved by optimizing these files. (33076160 bytes)
+- **impact:** 6.7 MB can be saved by optimizing these files. (7054516 bytes)
 - **fix:** Compress or resize the font files, convert to a more efficient format (e.g., WebP for images), or consider lazy-loading.
 - **evidence:**
-  - `app/src/main/res/font/source_han_sans_sc_medium.otf` (15.8 MB)
-  - `app/src/main/res/font/source_han_sans_sc_regular.otf` (15.8 MB)
+  - `app/src/main/res/font/source_han_sans_sc_medium.otf` (3.4 MB)
+  - `app/src/main/res/font/source_han_sans_sc_regular.otf` (3.4 MB)
 
 ### Low (6)
 
@@ -127,13 +127,13 @@
 
 #### Top 20 largest files in the repository — `assets-top-size-contributors`
 - **severity:** info | **confidence:** confirmed | **category:** assets | **horizon:** later
-- **what:** The 20 largest files account for 32.2 MB of repository size. Review these to identify optimization opportunities.
+- **what:** The 20 largest files account for 7.4 MB of repository size. Review these to identify optimization opportunities.
 - **why it matters:** Understanding which files contribute most to repository size helps prioritize optimization efforts for maximum impact.
-- **impact:** These 20 files total 32.2 MB. (33805039 bytes)
+- **impact:** These 20 files total 7.4 MB. (7783395 bytes)
 - **fix:** Review each large file to determine if it can be compressed, optimized, moved to a CDN, or removed if unused.
 - **evidence:**
-  - `app/src/main/res/font/source_han_sans_sc_medium.otf` (15.8 MB) — 15.8 MB
-  - `app/src/main/res/font/source_han_sans_sc_regular.otf` (15.8 MB) — 15.8 MB
+  - `app/src/main/res/font/source_han_sans_sc_regular.otf` (3.4 MB) — 3.4 MB
+  - `app/src/main/res/font/source_han_sans_sc_medium.otf` (3.4 MB) — 3.4 MB
   - `app/src/main/res/font/inter_regular.otf` (595.3 KB) — 595.3 KB
   - `gradle/wrapper/gradle-wrapper.jar` (46.4 KB) — 46.4 KB
   - `detekt.yml` (21.6 KB) — 21.6 KB
