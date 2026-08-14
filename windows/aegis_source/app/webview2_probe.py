@@ -96,6 +96,132 @@ def build_probe_report(window: Any = None) -> dict:
     }
 
 
+def watch_runtime_update(window: Any, on_new_version=None) -> bool:
+    """监听 WebView2 NewBrowserVersionAvailable 事件（版本对比监控，落地①）。
+
+    微软建议：Evergreen Runtime 后台下载新版本后，持续运行的应用会继续用
+    旧版本（有安全影响），应监听该事件并提示用户重启以采用新 Runtime。
+
+    返回是否成功绑定；API 未暴露/失败返回 False（静默降级，不影响浏览）。
+    """
+    try:
+        gui = getattr(window, "gui", None)
+        webview_ctrl = getattr(gui, "webview", None)
+        core = getattr(webview_ctrl, "CoreWebView2", None)
+        if core is None:
+            return False
+        # NewBrowserVersionAvailable 事件在 Environment 上（非 Core 上）
+        env = getattr(core, "Environment", None)
+        if env is None or not hasattr(env, "NewBrowserVersionAvailable"):
+            return False
+
+        def _on_new_version(sender=None, args=None) -> None:
+            try:
+                ver = str(getattr(args, "NewVersion", "") or "") if args else ""
+                if on_new_version is not None:
+                    on_new_version(ver)
+            except Exception:
+                pass
+
+        env.NewBrowserVersionAvailable += _on_new_version
+        return True
+    except Exception:
+        return False
+
+
+# --------------------------------------------------------------------------- #
+# 落地④：性能基线监控 —— 进程内存 / GPU / 标签数快照 + 基线对比
+# --------------------------------------------------------------------------- #
+def _browser_pid(window: Any = None) -> int:
+    """读取 WebView2 浏览器进程 PID（尽力而为；失败返回 0）。"""
+    try:
+        gui = getattr(window, "gui", None)
+        webview_ctrl = getattr(gui, "webview", None)
+        core = getattr(webview_ctrl, "CoreWebView2", None)
+        pid = getattr(core, "BrowserProcessId", 0)
+        return int(pid or 0)
+    except Exception:
+        return 0
+
+
+def _process_memory_mb(pid: int) -> int:
+    """读取指定 PID 进程的内存占用（MB；尽力而为，失败返回 0）。
+
+    优先 psutil（若已安装），回退 Windows 自带命令行 tasklist 解析，
+    避免为一次性探测引入新依赖（政府内网离线环境友好）。
+    """
+    if pid <= 0:
+        return 0
+    try:
+        import psutil  # type: ignore[import-not-found, import-untyped]  # 可选依赖
+        return int(psutil.Process(pid).memory_info().rss / 1048576)
+    except Exception:
+        pass
+    try:
+        import subprocess
+        # text=True 默认 UTF-8 解码，中文 Windows 的 tasklist 输出为 GBK
+        # → UnicodeDecodeError；改用 bytes + errors='ignore' 兼容任意本地编码
+        raw = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            capture_output=True, timeout=8.0, check=False).stdout
+        out: str = raw.decode("utf-8", errors="ignore")
+        # 形如 "chrome.exe","1234","Console","1","123,456 K"
+        parts = out.strip().split('","')
+        if len(parts) >= 5:
+            kbytes = parts[4].replace(" K", "").replace(",", "").replace('"', "")
+            return int(float(kbytes) / 1024)
+    except Exception:
+        pass
+    return 0
+
+
+def _gpu_process_active() -> bool:
+    """探测 WebView2 GPU 进程是否存活（硬件加速开启时存在）。"""
+    try:
+        import subprocess
+        # 同 _process_memory_mb：bytes + errors='ignore' 兼容中文 Windows GBK 输出
+        raw = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq msedgewebview2.exe", "/FO", "CSV"],
+            capture_output=True, timeout=8.0, check=False).stdout
+        out: str = raw.decode("utf-8", errors="ignore")
+        return "msedgewebview2.exe" in out
+    except Exception:
+        return False
+
+
+def probe_performance(window: Any = None, tab_count: int = 0) -> dict:
+    """采集性能快照（落地④）：进程内存 / GPU / 标签数。"""
+    pid = _browser_pid(window)
+    return {
+        "browser_pid": pid,
+        "process_memory_mb": _process_memory_mb(pid),
+        "gpu_process_active": _gpu_process_active(),
+        "tab_count": int(tab_count or 0),
+    }
+
+
+def compare_baseline(current: dict, baseline: dict, memory_threshold_mb: int = 300) -> dict:
+    """对比当前与上次性能基线，返回差异报告（落地④）。
+
+    memory_threshold_mb：内存涨幅超过该值视为显著（默认 300MB）。
+    任一输入为空时返回空报告（无基线可对比，不误报）。
+    """
+    if not current or not baseline:
+        return {"has_baseline": False, "notes": "无基线可对比（首次运行）"}
+    cur_mem = int(current.get("process_memory_mb", 0) or 0)
+    base_mem = int(baseline.get("process_memory_mb", 0) or 0)
+    delta = cur_mem - base_mem
+    significant = abs(delta) >= memory_threshold_mb
+    return {
+        "has_baseline": True,
+        "memory_delta_mb": delta,
+        "significant": significant,
+        "gpu_changed": current.get("gpu_process_active")
+        != baseline.get("gpu_process_active"),
+        "notes": ("内存显著变化" if significant else "内存平稳"),
+    }
+
+
 # --------------------------------------------------------------------------- #
 # 自动化回归入口：validate_release + 三个自检一键执行
 # --------------------------------------------------------------------------- #
@@ -127,3 +253,9 @@ def run_selftests() -> int:
         return 1
     print("[probe] 全部自动化回归通过")
     return 0
+
+
+if __name__ == "__main__":
+    # 模块入口：`python -m app.webview2_probe` → 运行自动化回归
+    # （CI compat.yml 直接调用；无窗口环境跑纯逻辑回归）
+    sys.exit(run_selftests())

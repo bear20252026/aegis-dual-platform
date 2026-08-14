@@ -183,6 +183,36 @@ def log_event(msg: str) -> None:
         pass
 
 
+def log_webview2_crash(crash_report: Any, kind: str = "") -> None:
+    """记录 WebView2 进程崩溃报告（落地③，ProcessFailed.CrashReport）。
+
+    2026-07 起 WebView2 SDK 1.0.4126 在 ProcessFailed 事件提供 CrashReport
+    （异常码/故障模块/故障偏移/崩溃 ID/bucket ID/报告时间）。渲染进程崩溃
+    时 Python 主进程仍存活，此函数把崩溃详情记入 events.log 供定位。
+
+    判空约定（微软）：CrashReport 为 None 表示非崩溃失败（正常退出/
+    外部 kill/启动失败/挂起），此时仅记录 ProcessFailedKind 概要。
+    """
+    if crash_report is None:
+        log_event(f"[webview2] 进程失败（无崩溃报告） kind={kind or 'unknown'}")
+        return
+    try:
+        fields = {
+            "code": getattr(crash_report, "ExceptionCode", None),
+            "module": getattr(crash_report, "FaultingModuleName", None),
+            "module_ver": getattr(crash_report, "FaultingModuleVersion", None),
+            "offset": getattr(crash_report, "FaultOffset", None),
+            "crash_id": getattr(crash_report, "CrashReportId", None),
+            "bucket": getattr(crash_report, "BucketId", None),
+            "time": getattr(crash_report, "ReportTime", None),
+        }
+        parts = [f"{k}={v}" for k, v in fields.items() if v is not None]
+        log_event(f"[webview2] 崩溃报告 kind={kind or 'unknown'} "
+                  + " ".join(parts))
+    except Exception:
+        pass  # 提取失败静默（崩溃报告是诊断增强，不影响浏览）
+
+
 # ============================================================================
 # 看门狗（Watchdog）：检测"挂起/死锁" —— 异常收集器抓不到的死锁场景
 # ============================================================================

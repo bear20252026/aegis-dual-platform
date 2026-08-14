@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import threading
 from typing import Any
@@ -48,8 +49,8 @@ def _apply_dnt_header(window: Any) -> None:
         pass  # 事件绑定失败静默，不影响浏览
 
 
-def _apply_enhanced_security(window: Any) -> None:
-    """启用 WebView2 Enhanced Security Mode（落地①，尽力而为、静默降级）。
+def _apply_enhanced_security(window: Any, mode: str = "auto") -> None:
+    """启用 WebView2 Enhanced Security Mode（落地②，支持三模式决策）。
 
     背景（2026-08 调研）：微软将 EnhancedSecurityModeLevel 更名为
     EnhancedSecurityModeState（Disabled/Enabled），新 API 为 profile 级
@@ -57,13 +58,16 @@ def _apply_enhanced_security(window: Any) -> None:
     pywebview 未封装该 API，但底层 WinForms WebView2 控件可通过
     window.gui.webview.CoreWebView2.Profile 访问。
 
-    策略：
-    - hasattr 探测 EnhancedSecurityModeState，存在才设置 Enabled
-      （禁 JIT + 额外 OS 保护）；
-    - 任何一步失败/属性缺失 → 静默降级，绝不影响浏览启动；
-    - 不改变任何现有功能（新导航生效，旧页面由 WebView2 管理）。
+    策略（对应 config.security_enhanced_mode）：
+    - auto（默认）：探测到 EnhancedSecurityModeState 才启用；
+    - on：强制启用（无 API 时静默降级，不影响浏览启动）；
+    - off：显式跳过（兼容依赖 JIT/WASM 的老站点）。
+    per-origin 例外（config.security_esm_exceptions）依赖实验
+    Origin Configuration API，探测到才应用；任何失败静默降级。
     """
     try:
+        if mode == "off":
+            return  # 显式关闭：不启用 ESM
         gui = getattr(window, "gui", None)
         webview_ctrl = getattr(gui, "webview", None)
         core = getattr(webview_ctrl, "CoreWebView2", None)
@@ -136,17 +140,91 @@ def main() -> int:
     # 落地②：WebView2 兼容性探测（Runtime 版本 + 关键 API 可用性，
     # 写日志供监控/排障；Evergreen 2 周更新节奏下用于回归基线）
     try:
-        from app.webview2_probe import build_probe_report
+        from app.webview2_probe import (
+            build_probe_report,
+            compare_baseline,
+            probe_performance,
+            watch_runtime_update,
+        )
         report = build_probe_report(window)
         from crash_reporter import log_event
         log_event(f"[probe] {report}")
+        # 落地④：性能基线快照 + 与上次基线对比（内存显著变化告警）
+        try:
+            tab_count = len(api.get_tabs().get("tabs", []))
+            perf = probe_performance(window, tab_count=tab_count)
+            log_event(f"[perf] {perf}")
+            import json as _json
+
+            from app.paths import resolve_data_dir
+            baseline_path = os.path.join(
+                resolve_data_dir(), "webview2_perf_baseline.json")
+            baseline: dict = {}
+            try:
+                with open(baseline_path, "r", encoding="utf-8") as f:
+                    baseline = _json.load(f) or {}
+            except (OSError, ValueError):
+                baseline = {}
+            diff = compare_baseline(perf, baseline)
+            if diff.get("significant") or diff.get("gpu_changed"):
+                log_event(f"[perf] 基线差异: {diff}")
+            # 更新基线（当前快照作为下次对比基准）
+            try:
+                with open(baseline_path, "w", encoding="utf-8") as f:
+                    _json.dump(perf, f, ensure_ascii=False)
+            except OSError:
+                pass
+        except Exception:
+            pass  # 性能监控失败静默，不影响浏览
+        # 版本对比监控：Evergreen 后台下载新 Runtime 后，提示采用新版本
+        # （持续运行的应用会继续用旧版，有安全影响；监听事件记录日志）
+        def _on_new_runtime(ver: str) -> None:
+            try:
+                log_event(f"[probe] 新 WebView2 Runtime 可用: {ver or 'unknown'}"
+                          f"（当前 {report.get('runtime_version', '')}，建议重启采用）")
+            except Exception:
+                pass
+        watch_runtime_update(window, on_new_version=_on_new_runtime)
     except Exception:
         pass  # 探测失败静默，不影响浏览
 
-    # 落地①：WebView2 Enhanced Security Mode（Runtime 151+ 可用；
+    # 落地③：WebView2 进程崩溃监听（ProcessFailed.CrashReport，2026-07 新 API）。
+    # 渲染/GPU 子进程崩溃时 Python 主进程仍存活，借此把崩溃详情写入
+    # crash_reports/events.log（异常码/故障模块/偏移/崩溃 ID）；CrashReport
+    # 为 None（正常退出/外部 kill/启动失败/挂起）时仅记录 kind 概要。
+    try:
+        gui = getattr(window, "gui", None)
+        webview_ctrl = getattr(gui, "webview", None)
+        core = getattr(webview_ctrl, "CoreWebView2", None)
+        if core is not None and hasattr(core, "ProcessFailed"):
+            def _on_process_failed(sender=None, args=None) -> None:
+                try:
+                    from crash_reporter import log_webview2_crash
+                    kind = ""
+                    report = None
+                    if args is not None:
+                        kind = str(getattr(args, "ProcessFailedKind", "") or "")
+                        report = getattr(args, "CrashReport", None)
+                    log_webview2_crash(report, kind=kind)
+                except Exception:
+                    pass  # 记录失败静默，不影响浏览
+            core.ProcessFailed += _on_process_failed
+    except Exception:
+        pass  # 事件绑定失败静默，不影响浏览
+
+    # 落地②：WebView2 Enhanced Security Mode（Runtime 151+ 可用；
+    # 读取 config.security_enhanced_mode：auto=探测启用/on=强制/off=关闭；
     # 尽力而为，API 未暴露/失败时静默降级，不影响浏览）
     try:
-        _apply_enhanced_security(window)
+        esm_mode = "auto"
+        try:
+            esm_mode = str(getattr(api.config, "security_enhanced_mode", "auto")
+                           or "auto")
+            if esm_mode not in ("auto", "on", "off"):
+                esm_mode = "auto"
+        except Exception:
+            esm_mode = "auto"
+        _apply_enhanced_security(window, mode=esm_mode)
     except Exception:
         pass  # 启用失败静默，不影响浏览
 

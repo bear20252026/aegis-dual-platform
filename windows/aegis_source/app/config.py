@@ -53,6 +53,13 @@ class AppConfig:
     safe_browsing_provider: str = "local"   # local | google
     safe_browsing_api_key: str = ""        # Google Safe Browsing API 密钥
     webrtc_ip_leak_protection: bool = True  # 防 WebRTC 泄露真实 IP
+    # security_enhanced_mode: WebView2 Enhanced Security Mode（落地②）
+    #   auto=探测到 API 即启用（默认，当前行为）| on=强制启用 | off=显式关闭
+    # （ESM=禁 JIT + 额外 OS 保护，Runtime 151+ 可用；off 用于兼容老站点）
+    security_enhanced_mode: str = "auto"
+    # security_esm_exceptions: ESM per-origin 例外源（JSON 数组字符串，
+    # 如 '["https://oa.internal.gov.cn"]'；依赖实验 Origin Configuration API）
+    security_esm_exceptions: str = ""
     # 隐私审计标注（docs/privacy-defaults-audit.md）：
     # 以下字段默认值已对齐 LibreWolf 隐私理念；接入状态（2026-08-15 更新）：
     # ✅ 已接入：do_not_track（DNT 头）/ safe_browsing（threat_feed 黑名单）/
