@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
         )
 
         setContent {
+            AegisTheme {
             var tabs by remember { mutableStateOf(tabManager.list()) }
             var activeIndex by remember { mutableStateOf(tabManager.activeIndex) }
             var address by remember { mutableStateOf("https://www.bing.com") }
@@ -113,6 +115,7 @@ class MainActivity : ComponentActivity() {
                     )
                     WebContentArea(tabManager = tabManager, modifier = Modifier.weight(1f))
                 }
+            }
             }
         }
     }

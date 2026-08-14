@@ -2,7 +2,7 @@ import java.util.Properties
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    // AGP 9.0+ 内置 Kotlin 支持：org.jetbrains.kotlin.android 不再需要（官方迁移指引）
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
@@ -14,12 +14,12 @@ if (signingPropertiesFile.exists()) {
 
 android {
     namespace = "com.aegis.browser"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.aegis.browser"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = 20106
         versionName = "2.1.6"
     }
@@ -51,21 +51,25 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    // AGP 9 默认关闭 BuildConfig 生成；BrowserEngine 依赖 BuildConfig.DEBUG
+    buildFeatures {
+        buildConfig = true
+    }
 }
 
-kotlin {
-    jvmToolchain(17)
-}
+// AGP 9.0+ 内置 Kotlin：不再需要 kotlin { jvmToolchain() } 块
+// （Kotlin 编译由 AGP 管理，使用运行 Gradle 的 JDK；已移除旧配置）
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.12.01")
+    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
-    implementation("androidx.activity:activity-compose:1.10.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-    implementation("androidx.webkit:webkit:1.12.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
+    implementation("androidx.webkit:webkit:1.15.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

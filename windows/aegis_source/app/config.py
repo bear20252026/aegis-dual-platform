@@ -17,6 +17,10 @@ class AppConfig:
     theme: str = "auto"             # auto(跟随系统) | dark | light
     accent_color: str = "#0071e3"     # Apple Blue（唯一强调色，DESIGN.md）
     font_size: int = 13
+    # font_family: 全局统一字体栈（空串=默认苹果风格栈）。
+    # 默认栈：Inter(≈SF Pro 英文) + Source Han Sans SC(≈苹方 中文)，
+    # 回退系统无衬线。字体文件随包分发于 assets/fonts/（OFL 开源，可再分发）。
+    font_family: str = ""
     language: str = "zh-CN"           # 界面语言（R11：zh-CN | en，重启生效）
     show_bookmark_bar: bool = True
     # R1 用户快捷键覆盖（JSON 字符串，如 '{"new_tab":"n","close_tab":"x"}'；
@@ -50,12 +54,13 @@ class AppConfig:
     safe_browsing_api_key: str = ""        # Google Safe Browsing API 密钥
     webrtc_ip_leak_protection: bool = True  # 防 WebRTC 泄露真实 IP
     # 隐私审计标注（docs/privacy-defaults-audit.md）：
-    # 以下字段默认值已对齐 LibreWolf 隐私理念，但当前为"声明保留"状态——
-    # 其运行时实现随 Qt 旧栈归档于 legacy/（S2），新栈（pywebview 路线）
-    # 尚未接入。非安全漏洞（无代码读取它们执行危险操作），但勿误以为已生效；
-    # 接入路线见 docs/privacy-defaults-audit.md「后续建议」。
-    # 影子字段：adblock / do_not_track / safe_browsing / safe_browsing_api_key /
-    #           webrtc_ip_leak_protection / search_suggestions / save_passwords
+    # 以下字段默认值已对齐 LibreWolf 隐私理念；接入状态（2026-08-15 更新）：
+    # ✅ 已接入：do_not_track（DNT 头）/ safe_browsing（threat_feed 黑名单）/
+    #            search_suggestions（地址栏联想开关）
+    # 📋 声明保留（新栈实现成本高，路线图见 audit 文档）：adblock /
+    #    save_passwords / safe_browsing_api_key / webrtc_ip_leak_protection
+    # 影子字段（仅声明未生效）：adblock / save_passwords / safe_browsing_api_key /
+    #           webrtc_ip_leak_protection
 
     # ---- 性能 ----
     hibernate_background_mins: int = 10   # 后台标签休眠阈值，0=关闭（标准 #6）

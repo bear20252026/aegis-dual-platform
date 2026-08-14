@@ -45,7 +45,7 @@ TOOLBAR_JS = r"""
       '-webkit-backdrop-filter:blur(16px) saturate(150%)',
       'border-bottom:1px solid rgba(255,255,255,0.14)',
       'box-shadow:0 2px 12px rgba(15,10,40,0.35)','box-sizing:border-box',
-      'font-family:system-ui,-apple-system,"SF Pro Text","Segoe UI",sans-serif'
+      'font-family:' + (__FONT_FAMILY__ || 'Inter,"Source Han Sans SC",system-ui,-apple-system,"Segoe UI",sans-serif')
     ].join(';');
 
     // —— 标签条（紧凑胶囊，限宽省略）——
@@ -154,8 +154,12 @@ TOOLBAR_JS = r"""
     document.documentElement.appendChild(suggWrap);
     var suggTimer = null;
     function closeSuggest() { suggWrap.style.display = 'none'; }
+    // 影子字段接入：search_suggestions 开关（__SEARCH_SUGGEST__ 注入
+    // true/false 布尔字面量；关闭时完全禁用联想，回车导航不受影响）
+    var suggestEnabled = __SEARCH_SUGGEST__;
     inp.addEventListener('input', function () {
       if (suggTimer) clearTimeout(suggTimer);
+      if (!suggestEnabled) { closeSuggest(); return; }
       var v = inp.value.trim();
       if (v.length < 2) { closeSuggest(); return; }  // 短输入不搜索
       suggTimer = setTimeout(function () {
@@ -327,12 +331,17 @@ def _inject_vtabs_data(tabs_snapshot: dict) -> str:
 
 def build_toolbar_js(current_url: str, tabs_snapshot: dict,
                      keybindings: dict | None = None,
-                     tabs_position: str = "top") -> str:
+                     tabs_position: str = "top",
+                     font_family: str = "",
+                     search_suggestions: bool = True) -> str:
     """把当前 URL / 标签快照 / 快捷键表注入占位符，返回可 evaluate 的完整脚本。
 
     keybindings 为 None 时用 DEFAULT_KEYBINDINGS（默认表）；调用方可传入
     用户覆盖后的生效表。tabs_position 支持 "top"（默认顶部标签条）与
     "left"（追加左侧垂直标签栏，对应 config.tabs_position）。
+    font_family 非空时覆盖默认字体栈（对应 config.font_family，苹果风格）。
+    search_suggestions 对应 config.search_suggestions（影子字段接入：
+    关闭时地址栏不显示联想，回车导航不受影响）。
     占位符值一律经 json.dumps 注入 —— 输出永远是合法 JSON 字面量，
     无论 URL / 标题含什么字符都不会造成 JS 注入。
     """
@@ -342,6 +351,8 @@ def build_toolbar_js(current_url: str, tabs_snapshot: dict,
         .replace("__AEGIS_URL__", json.dumps(current_url))
         .replace("__TABS_JSON__", json.dumps(tabs_snapshot))
         .replace("__KEYBINDINGS_JSON__", json.dumps(kb))
+        .replace("__FONT_FAMILY__", json.dumps(font_family or ""))
+        .replace("__SEARCH_SUGGEST__", "true" if search_suggestions else "false")
     )
     if tabs_position == "left":
         # 先注入垂直标签栏所需的数据，再追加垂直标签栏脚本

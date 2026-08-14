@@ -55,13 +55,13 @@ fun VerticalTabBar(
             .fillMaxHeight()
             .background(Color(0xCC101827)),
     ) {
+        // 按分组渲染：先在 @Composable 上下文收集有序分组名（保留出现顺序）
+        val groups = rememberOrderedGroups(tabs)
         LazyColumn(
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(6.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
-            // 按分组渲染：先收集有序分组名（保留出现顺序）
-            val groups = rememberOrderedGroups(tabs)
             groups.forEach { group ->
                 item(key = "group-$group") {
                     Text(

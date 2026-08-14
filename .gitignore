@@ -1,0 +1,7 @@
+
+# 字体下载 zip 中间产物（不入库；本地保留于 D:/software 与 assets/fonts）
+assets/fonts/inter.zip
+assets/fonts/source-han-sans-sc.zip
+assets/fonts/**/*.otf
+assets/fonts/inter/
+assets/fonts/source-han-sans-sc/

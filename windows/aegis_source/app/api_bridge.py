@@ -555,16 +555,20 @@ def on_loaded(window: Any, api: Api) -> None:
             kb = None  # 用户配置解析失败时静默回退默认表
         # 标签位置：读取 config.tabs_position（top/left），默认 top
         tabs_pos = "top"
+        # 影子字段接入：地址栏联想开关（config.search_suggestions，默认开）
+        sugg_enabled = True
         try:
             cfg = getattr(api, "config", None)
             if cfg is not None:
                 tp = getattr(cfg, "tabs_position", "top") or "top"
                 if tp in ("top", "left"):
                     tabs_pos = tp
+                sugg_enabled = bool(getattr(cfg, "search_suggestions", True))
         except Exception:
             tabs_pos = "top"
         js = build_toolbar_js(url, api.get_tabs(), keybindings=kb,
-                              tabs_position=tabs_pos)
+                              tabs_position=tabs_pos,
+                              search_suggestions=sugg_enabled)
         api._eval(js)
     except Exception:
         pass  # 页面不允许注入（CSP 严格站点 / 空白页）时静默降级

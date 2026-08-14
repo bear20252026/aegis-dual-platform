@@ -58,10 +58,15 @@ class ReaderDecision:
 class ReaderView:
     """生成阅读模式视图 HTML（标题 + 正文段落，内联样式）。"""
 
-    # 内联 CSS：无外部依赖，离线可渲染；克制配色（政府项目风格）
+    # 内联 CSS：无外部依赖，离线可渲染；克制配色（政府项目风格）。
+    # 字体栈与工具栏一致（config.font_family 可覆盖；默认苹果风格：
+    # Inter≈SF Pro 英文 + Source Han Sans SC≈苹方 中文，回退系统无衬线）。
+    _FONT_FAMILY = ('Inter,"Source Han Sans SC",system-ui,-apple-system,'
+                    '"Segoe UI",sans-serif')
     _CSS = (
         "body{max-width:720px;margin:0 auto;padding:24px 20px;"
-        "font-family:system-ui,'Segoe UI',sans-serif;line-height:1.75;"
+        "font-family:" + _FONT_FAMILY + ";"
+        "line-height:1.75;"
         "color:#1a1a1a;background:#fafafa;}"
         "h1{font-size:24px;margin-bottom:8px;}"
         ".reader-meta{color:#888;font-size:13px;margin-bottom:20px;}"

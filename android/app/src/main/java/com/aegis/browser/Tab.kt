@@ -21,4 +21,6 @@ data class Tab(
     var url: String,
     val webView: WebView,
     var suspended: Boolean = false,
+    var pinned: Boolean = false,   // 固定标签（置顶显示，与 Windows 端一致）
+    var group: String = "默认",    // 标签分组/工作区（与 Windows 端一致）
 )
