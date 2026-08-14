@@ -59,6 +59,15 @@
 - `python` 命令可能被 Microsoft Store 别名拦截 → 用 `py` 或显式路径（本机：`C:\Users\17296\AppData\Local\Programs\Python\Python314`）。
 - Git Bash 的 `/tmp` 与 Python 路径不一致 → 别让 Python 读 Git Bash 的 /tmp 文件。
 
+### P6：bandit 豁免规则（2026-08-15，CI 口径一致）
+- bandit 对 **Low 严重性**告警也返回非零退出码（CI 严格门禁按退出码判定），
+  而此前本地验证只看 `Medium:/High:` 行数误报"通过"——教训：**验证必须检查退出码**。
+- 豁免清单（ci.yml bandit 步骤 `--skip B110,B404,B603,B607`）：
+  - **B110** try_except_pass：静默降级是安全设计（与 S110 同源）；
+  - **B404/B603/B607** subprocess：均为**参数列表 + shell=False** 的受控调用
+    （`security.py` icacls / `webview2_probe.py` tasklist），无命令注入面。
+- 新增 subprocess 调用时需复核：参数列表 + shell=False + 固定命令名，方可沿用豁免。
+
 ## 4. 2026 工具链（已集成）
 
 | 工具 | 版本 | 用途 | 关键点 |

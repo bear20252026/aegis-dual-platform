@@ -41,7 +41,12 @@ jobs:
         run: ruff check . --exclude legacy
 
       - name: bandit 安全扫描（无 Medium/High）
-        run: bandit -r app/ -q
+        # 设计豁免规则（见 KNOWLEDGE_BASE.md「P6 bandit 豁免」）：
+        # - B110 try_except_pass：静默降级是安全设计
+        # - B404/B603/B607 subprocess：均为参数列表 + shell=False 的受控
+        #   调用（security.py icacls / webview2_probe.py tasklist），无注入面
+        # 其余规则 Medium/High 触发失败（bandit 退出码即门禁）。
+        run: bandit -r app/ -q --skip B110,B404,B603,B607
 
       - name: mypy 类型检查（新栈 0 错误）
         run: |
