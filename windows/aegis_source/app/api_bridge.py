@@ -245,18 +245,28 @@ class Api:
             url = self._tabs[idx]["url"]
         self._load(url)
 
+    def _remove_tab(self, idx: int):
+        """移除标签并调整 current（标签管理核心操作，供 close_tab 使用）。
+
+        重构热点：把"移除 + current 调整"集中于此，减少标签管理高频
+        变更点（HotspotTriage churn 驱动）。返回新当前标签 url（供导航）
+        或 None（无有效标签可移除）。调用方需持锁（本方法不加锁）。
+        """
+        if len(self._tabs) <= 1 or not (0 <= idx < len(self._tabs)):
+            return None
+        self._tabs.pop(idx)
+        if self._current >= idx and self._current > 0:
+            self._current -= 1
+        return self._tabs[self._current]["url"]
+
     def close_tab(self, index: Any) -> None:
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
         with self._lock:
-            if len(self._tabs) <= 1 or not (0 <= idx < len(self._tabs)):
-                return
-            self._tabs.pop(idx)
-            if self._current >= idx and self._current > 0:
-                self._current -= 1
-            url = self._tabs[self._current]["url"]
-        self._load(url)
+            url = self._remove_tab(idx)
+        if url is not None:
+            self._load(url)
 
     def pin_tab(self, index: Any) -> None:
         """固定标签：置顶（pinned 标签排在最前，顺序稳定）。"""
