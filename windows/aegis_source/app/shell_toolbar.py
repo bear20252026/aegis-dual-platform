@@ -32,6 +32,7 @@ DEFAULT_KEYBINDINGS: dict[str, str] = {
 # 直接内嵌进脚本，一次 evaluate 完成渲染 —— 零 HTTP 往返。
 TOOLBAR_JS = r"""
 (function () {
+  function bootUI() {
   try {
     if (document.getElementById('aegis-chrome')) return;
     var TABS_DATA = __TABS_JSON__;
@@ -249,6 +250,23 @@ TOOLBAR_JS = r"""
       });
     }
   } catch (e) { /* 注入失败绝不影响页面本身 */ }
+  }
+
+  // 双保险初始化（方向②-P1）：pywebview.api 不保证在 onload 可用，
+  // 官方建议订阅 pywebviewready（js_api 完全注入后触发）。
+  // 三重保险：①立即尝试（api 可能已就绪）②pywebviewready 事件
+  // ③setTimeout 兜底（防 React/Vite 等错过事件，issue #1290）。
+  var _booted = false;
+  function _tryBoot() {
+    if (_booted) return;
+    if (window.pywebview && window.pywebview.api) {
+      _booted = true;
+      bootUI();
+    }
+  }
+  window.addEventListener('pywebviewready', _tryBoot);
+  _tryBoot();
+  setTimeout(_tryBoot, 150);
 })();
 """
 

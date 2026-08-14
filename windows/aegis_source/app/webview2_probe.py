@@ -15,6 +15,8 @@ Aegis 核心功能，启动时探测 Runtime 版本与关键 API 可用性，输
 import os
 import platform
 import sys
+import threading
+import time
 import winreg
 from typing import Any
 
@@ -220,6 +222,55 @@ def compare_baseline(current: dict, baseline: dict, memory_threshold_mb: int = 3
         != baseline.get("gpu_process_active"),
         "notes": ("内存显著变化" if significant else "内存平稳"),
     }
+
+
+def start_periodic_sampling(window: Any = None, tab_count_fn=None,
+                            interval_hours: float = 24.0,
+                            baseline_path: str = "") -> threading.Thread | None:
+    """启动周期性能复采样（方向④-P2：慢速内存泄漏趋势监控）。
+
+    每 interval_hours 采集一次性能快照，与上次基线对比；显著变化/GPU
+    切换写 log（复用 compare_baseline）；并更新基线供下次对比。
+
+    守护线程，绝不影响主流程；任何异常静默。返回线程对象（供测试停止）。
+    """
+    try:
+        import json as _json
+
+        def _sample_loop() -> None:
+            while True:
+                try:
+                    time.sleep(interval_hours * 3600)
+                    if window is None:
+                        continue
+                    count = int(tab_count_fn()) if tab_count_fn else 0
+                    perf = probe_performance(window, tab_count=count)
+                    baseline: dict = {}
+                    try:
+                        if baseline_path and os.path.exists(baseline_path):
+                            with open(baseline_path, "r", encoding="utf-8") as f:
+                                baseline = _json.load(f) or {}
+                    except (OSError, ValueError):
+                        baseline = {}
+                    diff = compare_baseline(perf, baseline)
+                    if diff.get("significant") or diff.get("gpu_changed"):
+                        from crash_reporter import log_event
+                        log_event(f"[perf-periodic] {diff}")
+                    if baseline_path:
+                        try:
+                            with open(baseline_path, "w", encoding="utf-8") as f:
+                                _json.dump(perf, f, ensure_ascii=False)
+                        except OSError:
+                            pass
+                except Exception:
+                    pass  # 周期采样失败静默，不影响主流程
+
+        t = threading.Thread(target=_sample_loop, daemon=True,
+                             name="perf-periodic")
+        t.start()
+        return t
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- #

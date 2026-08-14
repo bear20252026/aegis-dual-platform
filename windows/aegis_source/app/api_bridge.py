@@ -36,6 +36,33 @@ from .url_utils import (
 # 保持旧私有名兼容（_is_navigation_safe 供 Api._is_navigation_safe_url 使用）
 _is_navigation_safe = is_navigation_safe
 
+
+def _to_int(value: Any, default: Any = None) -> Any:
+    """js_api 参数校验助手（方向①-S3）：安全转 int；失败返回 default。
+
+    pywebview 传参可能是字符串/浮点/畸形值，统一在此收敛类型转换，
+    避免各方法重复 try/except 且行为不一致。
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_nonneg_int(value: Any, default: Any = None) -> Any:
+    """转 int 且要求非负；否则返回 default（索引类参数专用）。"""
+    n = _to_int(value, None)
+    if n is None or n < 0:
+        return default
+    return n
+
+
+def _to_str(value: Any, default: Any = None) -> Any:
+    """确认是 str；None→default，非 str→default（文本类参数专用）。"""
+    if value is None:
+        return default
+    return value if isinstance(value, str) else default
+
 _DEFAULT_WALLPAPER = "aurora-twilight.jpg"
 
 
@@ -195,41 +222,38 @@ class Api:
         self._load(target)
 
     def switch_tab(self, index: Any) -> None:
-        try:
-            index = int(index)
-        except (TypeError, ValueError):
+        idx = _to_nonneg_int(index, None)
+        if idx is None:
             return
         with self._lock:
-            if not (0 <= index < len(self._tabs)):
+            if not (0 <= idx < len(self._tabs)):
                 return
-            self._current = index
-            url = self._tabs[index]["url"]
+            self._current = idx
+            url = self._tabs[idx]["url"]
         self._load(url)
 
     def close_tab(self, index: Any) -> None:
-        try:
-            index = int(index)
-        except (TypeError, ValueError):
+        idx = _to_nonneg_int(index, None)
+        if idx is None:
             return
         with self._lock:
-            if len(self._tabs) <= 1 or not (0 <= index < len(self._tabs)):
+            if len(self._tabs) <= 1 or not (0 <= idx < len(self._tabs)):
                 return
-            self._tabs.pop(index)
-            if self._current >= index and self._current > 0:
+            self._tabs.pop(idx)
+            if self._current >= idx and self._current > 0:
                 self._current -= 1
             url = self._tabs[self._current]["url"]
         self._load(url)
 
     def pin_tab(self, index: Any) -> None:
         """固定标签：置顶（pinned 标签排在最前，顺序稳定）。"""
-        try:
-            index = int(index)
-        except (TypeError, ValueError):
+        idx = _to_nonneg_int(index, None)
+        if idx is None:
             return
         with self._lock:
-            if not (0 <= index < len(self._tabs)):
+            if not (0 <= idx < len(self._tabs)):
                 return
-            tab = self._tabs[index]
+            tab = self._tabs[idx]
             if tab.get("pinned"):
                 return
             tab["pinned"] = True
@@ -238,14 +262,13 @@ class Api:
 
     def unpin_tab(self, index: Any) -> None:
         """取消固定：回到普通标签区（pinned 之后）。"""
-        try:
-            index = int(index)
-        except (TypeError, ValueError):
+        idx = _to_nonneg_int(index, None)
+        if idx is None:
             return
         with self._lock:
-            if not (0 <= index < len(self._tabs)):
+            if not (0 <= idx < len(self._tabs)):
                 return
-            tab = self._tabs[index]
+            tab = self._tabs[idx]
             if not tab.get("pinned"):
                 return
             tab["pinned"] = False
@@ -271,11 +294,10 @@ class Api:
         借鉴 min 的 tabState 分层：tab（单标签状态）/ task（标签分组）。
         返回是否成功；越界或组名非法返回 False。
         """
-        try:
-            index = int(index)
-        except (TypeError, ValueError):
+        idx = _to_nonneg_int(index, None)
+        if idx is None:
             return False
-        name = str(group or "").strip()[:32]
+        name = (_to_str(group, "") or "").strip()[:32]
         if not name:
             name = "默认"
         with self._lock:
@@ -317,6 +339,7 @@ class Api:
 
     # ================= 导航 =================
     def navigate(self, text: str) -> None:
+        text = _to_str(text, "") or ""
         url = normalize_url(text, self._engine)
         # H-C1/A-② 审计修复：外部导航入口双层校验（协议安全 + 威胁黑名单）。
         # 只放行 http/https 与显式 about:blank；file:/javascript:/data:/blob:
@@ -438,45 +461,79 @@ class Api:
         return {"imported": 0, "total": 0, "source": ""}
 
     # ================= 历史 =================
-    def get_history(self, limit: Any = 100) -> list:
-        """返回历史 [{id,url,title,time}]。"""
+    def get_history(self, limit: Any = 100,
+                    cursor_id: Any = None, cursor_time: Any = None) -> list:
+        """返回历史 [{id,url,title,time}]（支持游标分页，方向②-P2）。
+
+        cursor_id/cursor_time 同时提供时返回下一页（上一页末条的
+        id+visit_time 作游标），避免深分页全表扫描。
+        """
+        n = _to_nonneg_int(limit, None) or 100
+        cid = _to_nonneg_int(cursor_id, None)
+        ctime = _to_int(cursor_time, None)
         try:
             if self.history is None:
                 return []
-            n = int(limit) if limit else 100
-            rows = self.history.all(n)
-            return [
-                {"id": r[0], "url": r[1], "title": r[2], "time": r[3]}
-                for r in rows
-            ]
+            if cid is not None and ctime is not None:
+                rows = self.history.all(n, cursor_id=cid, cursor_time=ctime)
+            else:
+                rows = self.history.all(n)
+            out = []
+            for r in rows:
+                if isinstance(r, dict):
+                    # Database.query 返回 dict 行 → 按键取值
+                    out.append({
+                        "id": r.get("id"), "url": r.get("url"),
+                        "title": r.get("title"),
+                        "time": r.get("visit_time"),
+                    })
+                else:
+                    # 兼容 tuple/序列行（防御式）
+                    out.append({
+                        "id": r[0], "url": r[1], "title": r[2],
+                        "time": r[3],
+                    })
+            return out
         except Exception:
             return []
 
     def get_most_visited(self, limit: Any = 12) -> list:
+        n = _to_nonneg_int(limit, None) or 12
         try:
             if self.history is None:
                 return []
-            n = int(limit) if limit else 12
             rows = self.history.most_visited(n)
             return [{"id": r[0], "url": r[1], "title": r[2]} for r in rows]
         except Exception:
             return []
 
-    def search_history_fulltext(self, keyword: Any, limit: Any = 50) -> list:
+    def search_history_fulltext(self, keyword: Any, limit: Any = 50,
+                                cursor_id: Any = None,
+                                cursor_time: Any = None) -> list:
         """FTS5 全文搜索历史（落地建议③，借鉴 min fullTextSearch）。
 
         返回 [{id,url,title,visit_time}]；keyword 为空或存储不可用时
-        返回空列表（静默，不影响浏览）。注意：fulltext_search 返回
-        dict 行（Database.query 语义），此处按 dict 键取值。
+        返回空列表（静默，不影响浏览）。cursor_id/cursor_time 同时提供
+        时返回更低下页（(visit_time,id) 复合游标，方向②-P2，与
+        get_history 语义一致；FTS5 rank 不可作游标——未显式 bm25 时
+        所有匹配行 rank 相同）。
         """
+        kw = _to_str(keyword, "")
+        n = _to_nonneg_int(limit, None) or 50
+        cid = _to_nonneg_int(cursor_id, None)
+        ctime = _to_int(cursor_time, None)
         try:
-            if self.history is None or not isinstance(keyword, str):
+            if self.history is None or not kw:
                 return []
-            n = int(limit) if limit else 50
-            rows = self.history.fulltext_search(keyword, n)
+            if cid is not None and ctime is not None:
+                rows = self.history.fulltext_search(
+                    kw, n, cursor_id=cid, cursor_time=ctime)
+            else:
+                rows = self.history.fulltext_search(kw, n)
             out = []
             for r in rows:
                 if isinstance(r, dict):
+                    # FTS5 join 返回 dict 行 → 按键取值
                     out.append({
                         "id": r.get("id"), "url": r.get("url"),
                         "title": r.get("title"),

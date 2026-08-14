@@ -49,6 +49,83 @@ def _apply_dnt_header(window: Any) -> None:
         pass  # 事件绑定失败静默，不影响浏览
 
 
+def _apply_disk_cache_limit(window: Any, cache_mb: int = 0) -> None:
+    """注入 --disk-cache-size 限制磁盘缓存（方向④-P2，尽力而为）。
+
+    调研（微软 Q&A）：大缓存会拖慢冷启动；`--disk-cache-size` 可限制
+    EBWebView 用户数据目录膨胀。经 CoreWebView2EnvironmentOptions.
+    AdditionalBrowserArguments 注入（pywebview 底层对象，探测+静默）。
+    cache_mb<=0 表示不限制（默认，保持现状）。
+    """
+    if cache_mb <= 0:
+        return  # 未配置缓存上限 → 不注入，保持默认
+    try:
+        gui = getattr(window, "gui", None)
+        webview_ctrl = getattr(gui, "webview", None)
+        core = getattr(webview_ctrl, "CoreWebView2", None)
+        env = getattr(core, "Environment", None)
+        options = getattr(env, "Options", None)
+        if options is None or not hasattr(options, "AdditionalBrowserArguments"):
+            return  # API 未暴露 → 静默
+        current = str(getattr(options, "AdditionalBrowserArguments", "") or "")
+        flag = f"--disk-cache-size={int(cache_mb) * 1024 * 1024}"
+        if flag not in current:
+            options.AdditionalBrowserArguments = current + " " + flag
+    except Exception:
+        pass  # 注入失败静默，不影响浏览
+
+
+def _warmup_webview2(window: Any) -> None:
+    """启动预热 WebView2（方向④-P2，尽力而为、静默降级）。
+
+    调研（微软官方 + issue #1629）：WebView2 冷启动需拉起浏览器/渲染/
+    GPU 进程并建磁盘缓存，可致数秒延迟。启动早期触碰底层对象触发
+    Environment/Core 初始化，使后续首次导航更快；失败静默不影响浏览。
+    """
+    try:
+        gui = getattr(window, "gui", None)
+        webview_ctrl = getattr(gui, "webview", None)
+        core = getattr(webview_ctrl, "CoreWebView2", None)
+        if core is None:
+            return
+        _ = getattr(core, "BrowserProcessId", 0)  # 触碰触发初始化
+        env = getattr(core, "Environment", None)
+        _ = getattr(env, "BrowserVersionString", "") if env else ""
+    except Exception:
+        pass  # 预热失败静默，不影响浏览
+
+
+def _apply_webview2_settings(window: Any) -> None:
+    """按官方安全清单限制 WebView2 功能（方向①-S4，探测+静默降级）。
+
+    微软《Develop secure WebView2 apps》建议：不期望页面访问的功能一律
+    关闭，避免 web 内容越权访问宿主资源：
+    - AreHostObjectsAllowed=false       （禁止页面访问宿主对象）
+    - IsWebMessageEnabled=false         （禁止页面主动发 web 消息）
+    - IsScriptEnabled=false             （纯静态页场景；Aegis 需 JS 保持 true）
+    - AreDefaultScriptDialogsEnabled=false（禁止 alert/prompt 弹窗）
+
+    Aegis 前端依赖 JS（工具栏注入），故 IsScriptEnabled 保持 true；
+    其余按清单收紧。所有属性 hasattr 探测，缺失/失败静默降级。
+    """
+    try:
+        gui = getattr(window, "gui", None)
+        webview_ctrl = getattr(gui, "webview", None)
+        core = getattr(webview_ctrl, "CoreWebView2", None)
+        settings = getattr(core, "Settings", None)
+        if settings is None:
+            return  # 旧 Runtime / API 未暴露 → 静默
+        # 收紧项：宿主对象访问 / web 消息 / 脚本弹窗（JS 本体保持启用）
+        if hasattr(settings, "AreHostObjectsAllowed"):
+            settings.AreHostObjectsAllowed = False
+        if hasattr(settings, "IsWebMessageEnabled"):
+            settings.IsWebMessageEnabled = False
+        if hasattr(settings, "AreDefaultScriptDialogsEnabled"):
+            settings.AreDefaultScriptDialogsEnabled = False
+    except Exception:
+        pass  # 收紧失败静默，不影响浏览
+
+
 def _apply_enhanced_security(window: Any, mode: str = "auto") -> None:
     """启用 WebView2 Enhanced Security Mode（落地②，支持三模式决策）。
 
@@ -78,6 +155,52 @@ def _apply_enhanced_security(window: Any, mode: str = "auto") -> None:
         profile.EnhancedSecurityModeState = 1
     except Exception:
         pass  # 启用失败静默，不影响浏览
+
+
+def _apply_esm_exceptions(window: Any, exceptions_json: str = "") -> None:
+    """ESM per-origin 例外接入（方向①-P1，Origin Configuration API）。
+
+    调研（微软 specs/TrustedOriginSetting.md）：ICoreWebView2Profile3 提供
+    CreateOriginFeatureSetting / SetOriginFeatures / GetEffectiveFeaturesForOrigin；
+    特性枚举含 EnhancedSecurityMode。对受信任源（如政府内网 OA）关闭 ESM
+    （Disabled），其余源保持 profile 级启用。
+
+    实现（探测+静默）：
+    - exceptions_json 为空或非 JSON 数组 → 直接返回（无例外配置）
+    - 探测 profile 是否暴露 SetOriginFeatures/CreateOriginFeatureSetting
+      （staging/实验 API，hasattr 兜底；未暴露则静默放弃）
+    - 对每个例外源创建 EnhancedSecurityMode=Disabled 设置并应用
+    任何失败静默降级，绝不影响浏览启动。
+    """
+    if not exceptions_json:
+        return
+    try:
+        import json as _json
+        origins = _json.loads(exceptions_json)
+        if not isinstance(origins, list) or not origins:
+            return  # 非数组/空 → 无例外
+        origins = [str(o) for o in origins if isinstance(o, str) and o]
+        if not origins:
+            return
+        gui = getattr(window, "gui", None)
+        webview_ctrl = getattr(gui, "webview", None)
+        core = getattr(webview_ctrl, "CoreWebView2", None)
+        profile = getattr(core, "Profile", None)
+        if profile is None:
+            return
+        if not (hasattr(profile, "SetOriginFeatures")
+                and hasattr(profile, "CreateOriginFeatureSetting")):
+            return  # 实验 API 未暴露（旧 Runtime）→ 静默放弃
+        # 创建 EnhancedSecurityMode=Disabled 设置（枚举值：2=Disabled）
+        setting = profile.CreateOriginFeatureSetting(
+            1,  # COREWEBVIEW2_ORIGIN_FEATURE_ENHANCED_SECURITY_MODE
+            2,  # COREWEBVIEW2_ORIGIN_FEATURE_STATE_DISABLED
+        )
+        if setting is None:
+            return
+        profile.SetOriginFeatures(len(origins), origins, [setting])
+    except Exception:
+        pass  # 例外配置失败静默，不影响浏览
 
 
 def main() -> int:
@@ -185,6 +308,20 @@ def main() -> int:
             except Exception:
                 pass
         watch_runtime_update(window, on_new_version=_on_new_runtime)
+        # 方向④-P2：24h 周期性能复采样（慢速内存泄漏趋势；守护线程，
+        # 复用 compare_baseline，显著变化/GPU 切换写日志）
+        try:
+            from app.paths import resolve_data_dir
+            from app.webview2_probe import start_periodic_sampling
+            start_periodic_sampling(
+                window,
+                tab_count_fn=lambda: len(api.get_tabs().get("tabs", [])),
+                interval_hours=24.0,
+                baseline_path=os.path.join(
+                    resolve_data_dir(), "webview2_perf_baseline.json"),
+            )
+        except Exception:
+            pass  # 复采样启动失败静默，不影响浏览
     except Exception:
         pass  # 探测失败静默，不影响浏览
 
@@ -212,6 +349,28 @@ def main() -> int:
     except Exception:
         pass  # 事件绑定失败静默，不影响浏览
 
+    # 方向①-S4：按官方安全清单限制 WebView2 功能（宿主对象/web 消息/弹窗，
+    # 探测+静默；JS 保持启用以支撑工具栏注入）
+    try:
+        _apply_webview2_settings(window)
+    except Exception:
+        pass  # 收紧失败静默，不影响浏览
+
+    # 方向④-P2：启动预热 WebView2（触碰底层对象触发初始化，缩短首次导航）
+    try:
+        _warmup_webview2(window)
+    except Exception:
+        pass  # 预热失败静默，不影响浏览
+
+    # 方向④-P2：--disk-cache-size 注入（config.http_cache_mb 限制磁盘缓存）
+    try:
+        cache_mb = 0
+        if api.config is not None:
+            cache_mb = int(getattr(api.config, "http_cache_mb", 0) or 0)
+        _apply_disk_cache_limit(window, cache_mb=cache_mb)
+    except Exception:
+        pass  # 注入失败静默，不影响浏览
+
     # 落地②：WebView2 Enhanced Security Mode（Runtime 151+ 可用；
     # 读取 config.security_enhanced_mode：auto=探测启用/on=强制/off=关闭；
     # 尽力而为，API 未暴露/失败时静默降级，不影响浏览）
@@ -225,6 +384,14 @@ def main() -> int:
         except Exception:
             esm_mode = "auto"
         _apply_enhanced_security(window, mode=esm_mode)
+        # 方向①-P1：ESM per-origin 例外（受信任源关闭 ESM；实验 API 探测+静默）
+        try:
+            _apply_esm_exceptions(
+                window,
+                str(getattr(api.config, "security_esm_exceptions", "") or ""),
+            )
+        except Exception:
+            pass  # 例外配置失败静默，不影响浏览
     except Exception:
         pass  # 启用失败静默，不影响浏览
 

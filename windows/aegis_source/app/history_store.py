@@ -65,13 +65,25 @@ class HistoryStore:
             "INSERT INTO visits(url,title,visit_time) VALUES(?,?,?)",
             (url, title or url, int(time.time())))
 
-    def all(self, limit=500):
+    def all(self, limit=500, cursor_id=None, cursor_time=None):
+        """按时间倒序返回历史（支持游标分页，方向②-P2）。
+
+        cursor_id/cursor_time 同时提供时，返回"早于该 (visit_time,id)"
+        的下一页（复合游标），避免深分页 OFFSET 全表扫描；列表滚动
+        加载用上一页最后一条的 id+time 作为下一页游标。
+        """
         db = self._check()
         if db is None:
             return []
+        if cursor_id is not None and cursor_time is not None:
+            return db.query(
+                "SELECT id,url,title,visit_time FROM visits "
+                "WHERE (visit_time < ?) OR (visit_time = ? AND id < ?) "
+                "ORDER BY visit_time DESC, id DESC LIMIT ?",
+                (cursor_time, cursor_time, cursor_id, limit))
         return db.query(
             "SELECT id,url,title,visit_time FROM visits "
-            "ORDER BY visit_time DESC LIMIT ?", (limit,))
+            "ORDER BY visit_time DESC, id DESC LIMIT ?", (limit,))
 
     def search(self, keyword: str, limit=50):
         db = self._check()
@@ -108,11 +120,17 @@ class HistoryStore:
         if db:
             db.execute("DELETE FROM visits WHERE url=?", (url,))
 
-    def fulltext_search(self, keyword: str, limit=50):
+    def fulltext_search(self, keyword: str, limit=50,
+                        cursor_id=None, cursor_time=None):
         """FTS5 全文搜索历史（落地建议③，借鉴 min fullTextSearch）。
 
-        对 url+title 做全文索引查询；旧库首次查询时重建索引。
-        FTS5 不可用时回退 LIKE 搜索（功能不失效）。
+        对 url+title 做全文索引查询（external content 表，join visits
+        取行数据）；旧库首次查询时重建索引。FTS5 不可用时回退 LIKE。
+
+        游标分页（方向②-P2）：FTS5 未显式 bm25() 时所有匹配行 rank 相同
+        （-1e-06），rank 无法作游标；故与 get_history 一致采用
+        **(visit_time, id) 复合游标**（时间倒序 + id 决胜），稳定正确、
+        避免深分页，且与历史浏览语义统一。
         """
         db = self._check()
         if db is None or not keyword:
@@ -125,20 +143,38 @@ class HistoryStore:
             self._ensure_fts_rebuilt(db)
             # FTS5 MATCH 语法：用户输入做短语化，防语法注入
             quoted = '"' + kw.replace('"', '""') + '"'
-            rows = db.query(
-                "SELECT id,url,title,visit_time FROM visits_fts "
-                "WHERE visits_fts MATCH ? ORDER BY rank LIMIT ?",
-                (quoted, limit))
+            if cursor_id is not None and cursor_time is not None:
+                rows = db.query(
+                    "SELECT v.id, v.url, v.title, v.visit_time "
+                    "FROM visits_fts f JOIN visits v ON v.id = f.rowid "
+                    "WHERE visits_fts MATCH ? "
+                    "AND ((v.visit_time < ?) OR (v.visit_time = ? AND v.id < ?)) "
+                    "ORDER BY v.visit_time DESC, v.id DESC LIMIT ?",
+                    (quoted, cursor_time, cursor_time, cursor_id, limit))
+            else:
+                rows = db.query(
+                    "SELECT v.id, v.url, v.title, v.visit_time "
+                    "FROM visits_fts f JOIN visits v ON v.id = f.rowid "
+                    "WHERE visits_fts MATCH ? "
+                    "ORDER BY v.visit_time DESC, v.id DESC LIMIT ?",
+                    (quoted, limit))
             if rows:
                 return rows
         except Exception:
             pass  # FTS5 不可用/损坏 → 回退 LIKE
-        # 回退：LIKE 子串匹配
+        # 回退：LIKE 子串匹配（时间倒序，与 FTS5 分支排序一致）
         kw2 = f"%{kw}%"
+        if cursor_id is not None and cursor_time is not None:
+            return db.query(
+                "SELECT id,url,title,visit_time FROM visits "
+                "WHERE (url LIKE ? OR title LIKE ?) "
+                "AND ((visit_time < ?) OR (visit_time = ? AND id < ?)) "
+                "ORDER BY visit_time DESC, id DESC LIMIT ?",
+                (kw2, kw2, cursor_time, cursor_time, cursor_id, limit))
         return db.query(
             "SELECT id,url,title,visit_time FROM visits "
             "WHERE url LIKE ? OR title LIKE ? "
-            "ORDER BY visit_time DESC LIMIT ?", (kw2, kw2, limit))
+            "ORDER BY visit_time DESC, id DESC LIMIT ?", (kw2, kw2, limit))
 
     @staticmethod
     def _ensure_fts_rebuilt(db):
