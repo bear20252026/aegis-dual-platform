@@ -108,6 +108,29 @@ class ThreatFeedUpdater:
             pass
         return set()
 
+
+def host_is_blocked(host: str, blocked: set) -> bool:
+    """判断 host 是否命中黑名单（精确或子域后缀匹配，落地 A-②）。
+
+    blocked 为 ThreatFeedUpdater.load_cached() 返回的域名集合。
+    - 精确：example.com in blocked
+    - 子域：evil.example.com 命中 blocked 中的 example.com
+    - blocked 为空 → 一律放行（未配置订阅源时不影响正常浏览）
+    """
+    if not host or not blocked:
+        return False
+    h = (host or "").strip().lower().rstrip(".")
+    if not h:
+        return False
+    if h in blocked:
+        return True
+    # 子域后缀匹配：逐级剥离最左标签
+    parts = h.split(".")
+    for i in range(1, len(parts)):
+        if ".".join(parts[i:]) in blocked:
+            return True
+    return False
+
     def refresh(self, feed_url: str, on_done=None, on_error=None,
                 verify=None):
         """后台线程拉取；完成回调 (count)，失败回调 (message)。

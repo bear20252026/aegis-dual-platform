@@ -187,12 +187,36 @@ class Api:
         """返回 {tabs:[{title,url}], current:int}（快照）。"""
         return self._tabs_snapshot()
 
+    def _is_navigation_safe_url(self, url: str) -> bool:
+        """H-C1 + A-② 双层校验：URL 协议安全 + 威胁情报黑名单。
+
+        返回 True 表示可导航；任一检查失败返回 False（拒绝导航）。
+        黑名单为空（未配置订阅源）时安全浏览检查放行，不影响正常功能。
+        """
+        if url != "about:blank" and not _is_navigation_safe(url):
+            return False
+        # A-②：复用 threat_feed 缓存黑名单（精确/子域匹配）
+        try:
+            from urllib.parse import urlparse
+
+            from .threat_feed import ThreatFeedUpdater, host_is_blocked
+            updater = ThreatFeedUpdater(self._data_dir)
+            blocked = updater.load_cached()
+            if not blocked:
+                return True  # 未配置订阅源 → 放行
+            host = (urlparse(url).hostname or "").lower()
+            if host and host_is_blocked(host, blocked):
+                return False  # 命中黑名单 → 拒绝导航
+        except Exception:
+            pass  # 检查失败放行（安全浏览是纵深防御，不阻塞浏览）
+        return True
+
     def new_tab(self, url: str = "") -> None:
-        # H-C1 审计修复：用户显式传入的 url 必须过安全校验；
+        # H-C1/A-② 审计修复：用户显式传入的 url 必须过安全+黑名单校验；
         # 空 url（UI 新建标签）仍用受信任的 START_URL，行为不变。
         if url:
             target = normalize_url(url)
-            if target != "about:blank" and not _is_navigation_safe(target):
+            if not self._is_navigation_safe_url(target):
                 return
         else:
             target = START_URL
@@ -326,11 +350,10 @@ class Api:
     # ================= 导航 =================
     def navigate(self, text: str) -> None:
         url = normalize_url(text, self._engine)
-        # H-C1 审计修复：外部导航入口强制过安全关口。
+        # H-C1/A-② 审计修复：外部导航入口双层校验（协议安全 + 威胁黑名单）。
         # 只放行 http/https 与显式 about:blank；file:/javascript:/data:/blob:
-        # 等一律拒绝（normalize_url 对 file:// 前缀原样返回，此前可被地址栏
-        # 输入 file:///C:/... 加载本地文件 —— 与 README 安全声明脱节）。
-        if url != "about:blank" and not _is_navigation_safe(url):
+        # 等一律拒绝；命中 threat_feed 黑名单域名同样拒绝。
+        if not self._is_navigation_safe_url(url):
             return
         try:
             if self.history is not None:

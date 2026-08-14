@@ -22,6 +22,32 @@ from typing import Any
 from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
 
 
+def _apply_dnt_header(window: Any) -> None:
+    """为每个 HTTP 请求注入 DNT: 1 头（落地 A-①）。
+
+    通过 pywebview 的 request_sent 事件（WebView2 WebResourceRequested）
+    修改请求头。pywebview 版本不支持该事件/请求头修改时静默降级。
+    """
+    try:
+        events = getattr(window, "events", None)
+        if events is None:
+            return
+        if not hasattr(events, "request_sent"):
+            return  # 版本不支持 → 静默降级
+
+        def _on_request(request: Any) -> None:
+            try:
+                headers = getattr(request, "headers", None)
+                if headers is not None:
+                    headers["DNT"] = "1"
+            except Exception:
+                pass  # 单个请求修改失败不影响其他请求
+
+        events.request_sent += _on_request
+    except Exception:
+        pass  # 事件绑定失败静默，不影响浏览
+
+
 def main() -> int:
     import webview  # type: ignore[import-not-found]  # pywebview 为运行时依赖，类型桩缺失时忽略
 
@@ -78,6 +104,20 @@ def main() -> int:
         print("[fatal] create_window 返回 None，无法启动", file=sys.stderr)
         return 1
     api.window = window      # 创建后再绑定 window 引用，供桥方法调用
+
+    # 落地 A-①：隐私影子字段新栈接入 — DNT 请求头。
+    # config.do_not_track=True 时通过 pywebview request_sent 事件为
+    # 每个 HTTP 请求注入 DNT: 1 头（底层 WebView2 WebResourceRequested）。
+    # pywebview 版本不支持该事件时静默降级，不影响浏览。
+    try:
+        from app.config import AppConfig
+        dnt_enabled = True  # 默认开启（与 config 默认值一致）
+        if api.config is not None:
+            dnt_enabled = bool(getattr(api.config, "do_not_track", True))
+        if dnt_enabled:
+            _apply_dnt_header(window)
+    except Exception:
+        pass  # DNT 注入失败静默，不影响浏览
 
     # S5：Windows 11 系统级亚克力/Mica 背景（尽力而为，失败静默降级到 CSS 毛玻璃）
     try:

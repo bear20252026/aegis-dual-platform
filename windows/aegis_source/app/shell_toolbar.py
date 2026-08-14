@@ -141,6 +141,60 @@ TOOLBAR_JS = r"""
     });
     bar.appendChild(inp);
 
+    // —— 落地 C：全文搜索历史联想（借鉴 min searchbar placeSuggestions）——
+    // 输入防抖 250ms 后调用 search_history_fulltext（js_api 异步 Promise）；
+    // 结果下拉固定定位在地址栏下方；点击联想项导航；Esc/失焦关闭。
+    // 安全：结果一律用 textContent 渲染（杜绝 HTML 注入）；失败静默。
+    var suggWrap = document.createElement('div');
+    suggWrap.id = 'aegis-suggest';
+    suggWrap.style.cssText = 'position:fixed;top:40px;left:0;right:0;display:none;' +
+      'background:rgba(28,24,62,0.96);border-bottom:1px solid rgba(255,255,255,0.14);' +
+      'box-shadow:0 4px 16px rgba(15,10,40,0.4);z-index:2147483646;max-height:320px;' +
+      'overflow-y:auto;font-size:12px;color:#fff;';
+    document.documentElement.appendChild(suggWrap);
+    var suggTimer = null;
+    function closeSuggest() { suggWrap.style.display = 'none'; }
+    inp.addEventListener('input', function () {
+      if (suggTimer) clearTimeout(suggTimer);
+      var v = inp.value.trim();
+      if (v.length < 2) { closeSuggest(); return; }  // 短输入不搜索
+      suggTimer = setTimeout(function () {
+        try {
+          if (!(window.pywebview && pywebview.api && pywebview.api.search_history_fulltext)) return;
+          pywebview.api.search_history_fulltext(v, 8).then(function (items) {
+            if (!(items && items.length)) { closeSuggest(); return; }
+            suggWrap.textContent = '';
+            for (var i = 0; i < items.length; i++) {
+              (function (it) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:8px;' +
+                  'padding:6px 12px;cursor:pointer;';
+                row.onmouseenter = function(){ row.style.background = 'rgba(255,255,255,0.10)'; };
+                row.onmouseleave = function(){ row.style.background = 'transparent'; };
+                var t = document.createElement('span');
+                t.textContent = (it.title || it.url || '');
+                t.style.cssText = 'flex:0 1 45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+                var u = document.createElement('span');
+                u.textContent = (it.url || '');
+                u.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;' +
+                  'white-space:nowrap;color:rgba(255,255,255,0.6);';
+                row.appendChild(t); row.appendChild(u);
+                row.onclick = function () {
+                  closeSuggest();
+                  try { if (window.pywebview && pywebview.api) pywebview.api.navigate(it.url); } catch (e2) {}
+                };
+                suggWrap.appendChild(row);
+              })(items[i]);
+            }
+            suggWrap.style.display = 'block';
+          }).catch(function () { closeSuggest(); });
+        } catch (e3) { closeSuggest(); }
+      }, 250);
+    });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') closeSuggest();
+    });
+
     var root = document.documentElement || document;
     root.appendChild(bar);
     if (document.body) document.body.style.marginTop = '40px';

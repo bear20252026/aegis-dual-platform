@@ -24,13 +24,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
 /**
- * 主界面（薄壳，仅负责组装；多标签逻辑在 TabManager，标签栏在 TabBar）。
+ * 主界面（薄壳，仅负责组装；多标签逻辑在 TabManager，标签栏在 TabBar/VerticalTabBar）。
  *
  * S4 变更（对比旧版单 WebView）：
  * - 每个标签持有独立 WebView（TabManager 管理），切换时显示/隐藏，
  *   保留各页面状态；
  * - 所有 WebView 经 SecureWebViewFactory 创建（安全配置统一）；
  * - onDestroy 统一释放全部 WebView。
+ *
+ * 落地 B：支持标签栏布局切换（tabsPosition = "top" 顶部横排 | "left" 左侧垂直），
+ * 默认 top（与既有行为一致）；left 走 VerticalTabBar（按分组/工作区渲染）。
  */
 class MainActivity : ComponentActivity() {
 
@@ -48,76 +51,68 @@ class MainActivity : ComponentActivity() {
             var tabs by remember { mutableStateOf(tabManager.list()) }
             var activeIndex by remember { mutableStateOf(tabManager.activeIndex) }
             var address by remember { mutableStateOf("https://www.bing.com") }
+            // 落地 B：标签栏布局（默认 top；可在设置中切换 left）
+            var tabsPosition by remember { mutableStateOf("top") }
 
             fun refresh() {
                 tabs = tabManager.list()
                 activeIndex = tabManager.activeIndex
             }
 
+            fun newTab() {
+                tabManager.addTab(
+                    SecureWebViewFactory.create(this@MainActivity),
+                    url = "https://www.bing.com",
+                )
+                refresh()
+            }
+
             Column(modifier = Modifier.fillMaxSize()) {
-                // —— 标签栏 ——
-                TabBar(
-                    tabs = tabs,
-                    activeIndex = activeIndex,
-                    onSelect = { index ->
-                        tabManager.switchTo(index)
-                        refresh()
-                    },
-                    onClose = { index ->
-                        tabManager.closeTab(index)
-                        refresh()
-                    },
-                    onNewTab = {
-                        tabManager.addTab(
-                            SecureWebViewFactory.create(this@MainActivity),
-                            url = "https://www.bing.com",
+                // —— 标签栏（top 横排 / left 垂直，按布局切换）——
+                if (tabsPosition == "left") {
+                    Row(modifier = Modifier.fillMaxSize()) {
+                        VerticalTabBar(
+                            tabs = tabs,
+                            activeIndex = activeIndex,
+                            onSelect = { index ->
+                                tabManager.switchTo(index)
+                                refresh()
+                            },
+                            onClose = { index ->
+                                tabManager.closeTab(index)
+                                refresh()
+                            },
+                            onNewTab = ::newTab,
                         )
-                        refresh()
-                    },
-                )
-
-                // —— 地址栏 + 导航按钮 ——
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    OutlinedTextField(
-                        value = address,
-                        onValueChange = { address = it },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true,
-                        label = { Text("地址") },
+                        WebContentArea(tabManager = tabManager, modifier = Modifier.weight(1f))
+                    }
+                } else {
+                    TabBar(
+                        tabs = tabs,
+                        activeIndex = activeIndex,
+                        onSelect = { index ->
+                            tabManager.switchTo(index)
+                            refresh()
+                        },
+                        onClose = { index ->
+                            tabManager.closeTab(index)
+                            refresh()
+                        },
+                        onNewTab = ::newTab,
                     )
-                    Button(onClick = {
-                        val wv = tabManager.current()?.webView ?: return@Button
-                        BrowserEngine(wv).load(address)
-                    }) { Text("打开") }
+                    AddressBarAndNav(
+                        address = address,
+                        onAddressChange = { address = it },
+                        onOpen = {
+                            val wv = tabManager.current()?.webView ?: return@AddressBarAndNav
+                            BrowserEngine(wv).load(address)
+                        },
+                        onBack = { tabManager.current()?.webView?.goBack() },
+                        onForward = { tabManager.current()?.webView?.goForward() },
+                        onReload = { tabManager.current()?.webView?.reload() },
+                    )
+                    WebContentArea(tabManager = tabManager, modifier = Modifier.weight(1f))
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Button(onClick = { tabManager.current()?.webView?.goBack() }) { Text("后退") }
-                    Button(onClick = { tabManager.current()?.webView?.goForward() }) { Text("前进") }
-                    Button(onClick = { tabManager.current()?.webView?.reload() }) { Text("刷新") }
-                }
-
-                // —— 页面容器：显示当前标签的 WebView ——
-                AndroidView(
-                    modifier = Modifier.weight(1f).fillMaxWidth(),
-                    factory = { FrameLayout(it) },
-                    update = { container ->
-                        val current = tabManager.current()
-                        if (current == null) return@AndroidView
-                        val wv = current.webView
-                        // 仅当容器尚未持有该 WebView 时才挂载（避免重复 addView 崩溃）
-                        if (container.indexOfChild(wv) < 0) {
-                            container.removeAllViews()
-                            (wv.parent as? ViewGroup)?.removeView(wv)
-                            container.addView(wv)
-                        }
-                    },
-                )
             }
         }
     }
@@ -132,4 +127,58 @@ class MainActivity : ComponentActivity() {
         }
         super.onDestroy()
     }
+}
+
+/** 地址栏 + 导航按钮（top 布局专用，抽离保持薄壳；按钮功能经回调上抛）。 */
+@Composable
+private fun AddressBarAndNav(
+    address: String,
+    onAddressChange: (String) -> Unit,
+    onOpen: () -> Unit,
+    onBack: () -> Unit,
+    onForward: () -> Unit,
+    onReload: () -> Unit,
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            OutlinedTextField(
+                value = address,
+                onValueChange = onAddressChange,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                label = { Text("地址") },
+            )
+            Button(onClick = onOpen) { Text("打开") }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Button(onClick = onBack) { Text("后退") }
+            Button(onClick = onForward) { Text("前进") }
+            Button(onClick = onReload) { Text("刷新") }
+        }
+    }
+}
+
+/** 页面容器：显示当前标签的 WebView（两种布局共用）。 */
+@Composable
+private fun WebContentArea(tabManager: TabManager, modifier: Modifier = Modifier) {
+    AndroidView(
+        modifier = modifier.fillMaxWidth(),
+        factory = { FrameLayout(it) },
+        update = { container ->
+            val current = tabManager.current()
+            if (current == null) return@AndroidView
+            val wv = current.webView
+            if (container.indexOfChild(wv) < 0) {
+                container.removeAllViews()
+                (wv.parent as? ViewGroup)?.removeView(wv)
+                container.addView(wv)
+            }
+        },
+    )
 }
