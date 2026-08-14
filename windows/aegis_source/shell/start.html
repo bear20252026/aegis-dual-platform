@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Aegis 新标签页</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; overflow:hidden; }
+  body {
+    font-family: system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    color:#fff;
+  }
+  /* 全屏壁纸背景（默认暮蓝，由 JS 按配置切换） */
+  #wallpaper {
+    position:fixed; inset:0; z-index:0;
+    background:url('wallpapers/aurora-twilight.jpg') center/cover no-repeat;
+    transition:background-image .5s ease;
+  }
+  #wallpaper::after {
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(180deg, rgba(10,15,40,0.25) 0%, rgba(10,15,40,0.15) 45%, rgba(10,15,40,0.45) 100%);
+  }
+  .center {
+    position:relative; z-index:1; height:100%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding-bottom:8vh;
+  }
+  .logo {
+    width:64px; height:64px; border-radius:18px;
+    background:linear-gradient(135deg,#3FB8FF,#7F7BFF 45%,#FF7AB6 75%,#FFB27A);
+    display:flex; align-items:center; justify-content:center;
+    font-size:30px; color:#fff; font-weight:800;
+    box-shadow:0 12px 32px rgba(0,0,0,0.30);
+    margin-bottom:22px;
+  }
+  h1 { font-size:30px; font-weight:700; letter-spacing:2px; text-shadow:0 2px 12px rgba(0,0,0,0.4); margin-bottom:30px; }
+  /* 微软 Bing 风格大搜索框 */
+  .search {
+    width:600px; max-width:88vw; height:56px; display:flex; align-items:center;
+    background:rgba(255,255,255,0.92); border-radius:28px;
+    padding:0 8px 0 26px; backdrop-filter:blur(8px);
+    box-shadow:0 10px 40px rgba(0,0,0,0.25);
+  }
+  .search input {
+    flex:1; border:0; outline:0; font-size:17px; background:transparent; color:#22303f;
+  }
+  .search input::placeholder { color:#8a94a6; }
+  .search button {
+    border:0; height:42px; padding:0 26px; border-radius:21px;
+    background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff;
+    font-size:15px; cursor:pointer; font-weight:600;
+  }
+  /* 壁纸切换控件（右下角） */
+  .wallpapers {
+    position:fixed; right:22px; bottom:22px; z-index:5;
+    display:flex; align-items:center; gap:10px;
+    background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.25);
+    backdrop-filter:blur(10px); border-radius:22px; padding:8px 14px;
+  }
+  .wp {
+    width:34px; height:34px; border-radius:50%; cursor:pointer; border:2px solid transparent;
+    background-size:cover; background-position:center; transition:transform .15s, border-color .15s;
+  }
+  .wp:hover { transform:scale(1.15); }
+  .wp.active { border-color:#fff; box-shadow:0 0 0 3px rgba(63,184,255,0.5); }
+  .wp-label { font-size:12px; color:rgba(255,255,255,0.9); padding-right:4px; }
+  /* 书签宫格 */
+  .bookmarks { margin-top:44px; display:flex; flex-wrap:wrap; gap:14px; justify-content:center; max-width:760px; }
+  .bm {
+    width:92px; padding:12px 8px; background:rgba(255,255,255,0.14);
+    border:1px solid rgba(255,255,255,0.18); backdrop-filter:blur(8px);
+    border-radius:16px; cursor:pointer; text-align:center; transition:transform .12s, background .12s;
+  }
+  .bm:hover { transform:translateY(-3px); background:rgba(255,255,255,0.24); }
+  .bm-ico {
+    width:36px; height:36px; margin:0 auto 8px; border-radius:11px;
+    background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px;
+  }
+  .bm-name { font-size:12px; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  .bm-empty { font-size:13px; color:rgba(255,255,255,0.85); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  .footer { position:fixed; left:0; right:0; bottom:10px; z-index:4; text-align:center; font-size:12px; color:rgba(255,255,255,0.7); text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  /* 搜索引擎胶囊徽标（苹果风格小胶囊，点击切换） */
+  .engine-pill {
+    display:inline-flex; align-items:center; gap:4px; height:24px;
+    padding:0 10px; border-radius:12px; cursor:pointer; flex:0 0 auto;
+    background:rgba(63,184,255,0.18); border:1px solid rgba(255,255,255,0.35);
+    color:#fff; font-size:11px; letter-spacing:.5px; transition:background .15s;
+  }
+  .engine-pill:hover { background:rgba(63,184,255,0.32); }
+  .engine-pill .dot { width:6px; height:6px; border-radius:50%; background:#3FB8FF; }
+</style>
+</head>
+<body>
+  <div id="wallpaper"></div>
+
+  <div class="center">
+    <div class="logo">A</div>
+    <h1>Aegis 安全浏览器</h1>
+    <div class="search">
+      <div class="engine-pill" id="enginePill" title="切换搜索引擎" onclick="cycleEngine()">
+        <span class="dot"></span><span id="engineName">百度</span>
+      </div>
+      <input id="q" placeholder="搜索网页或输入网址…" autofocus>
+      <button onclick="go()">搜索</button>
+    </div>
+    <div class="bookmarks" id="bm"></div>
+  </div>
+
+  <!-- 壁纸切换 -->
+  <div class="wallpapers">
+    <span class="wp-label">壁纸</span>
+    <div id="wpList"></div>
+  </div>
+  <div class="footer">Enter 打开 · Ctrl+L 聚焦地址栏</div>
+
+  <script>
+    // JS 错误上报：页面任何异常 → Python 日志（后台静默）
+    window.addEventListener('error', function (e) {
+      try {
+        if (window.pywebview && pywebview.api) pywebview.api.js_error(
+          e.message || 'unknown', e.filename || '', e.lineno, e.colno,
+          (e.error && e.error.stack) || '');
+      } catch (err) {}
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      try {
+        if (window.pywebview && pywebview.api) pywebview.api.js_error(
+          'Promise rejection: ' + (e.reason || ''), '', 0, 0,
+          (e.reason && e.reason.stack) || '');
+      } catch (err) {}
+    });
+
+    var WALLPAPERS = [
+      {name:'aurora-magenta.jpg', url:'wallpapers/aurora-magenta.jpg'},
+      {name:'aurora-lime.jpg',    url:'wallpapers/aurora-lime.jpg'},
+      {name:'aurora-twilight.jpg',url:'wallpapers/aurora-twilight.jpg'},
+      {name:'aurora-violet.jpg',  url:'wallpapers/aurora-violet.jpg'}
+    ];
+    var current = 'aurora-twilight.jpg';
+    // 搜索引擎状态
+    var ENGINES = [];           // [{key,name}]
+    var engineIdx = 0;
+
+    function renderEngine() {
+      var el = document.getElementById('engineName');
+      if (el && ENGINES.length) el.textContent = ENGINES[engineIdx].name;
+    }
+    function cycleEngine() {
+      if (!ENGINES.length) return;
+      engineIdx = (engineIdx + 1) % ENGINES.length;
+      renderEngine();
+      if (window.pywebview && pywebview.api) {
+        try { pywebview.api.set_search_engine(ENGINES[engineIdx].key); } catch (e) {}
+      }
+    }
+    // 读取当前搜索引擎（配置持久化）
+    if (window.pywebview && pywebview.api) {
+      try {
+        pywebview.api.get_search_engine().then(function (data) {
+          if (!data) return;
+          ENGINES = data.engines || [];
+          for (var i = 0; i < ENGINES.length; i++) {
+            if (ENGINES[i].key === data.engine) { engineIdx = i; break; }
+          }
+          renderEngine();
+        });
+      } catch (e) {}
+    }
+
+    function go() {
+      var v = document.getElementById('q').value.trim();
+      if (v && window.pywebview && pywebview.api) pywebview.api.navigate(v);
+    }
+    function openUrl(u) {
+      if (window.pywebview && pywebview.api) pywebview.api.navigate(u);
+    }
+    document.getElementById('q').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') go();
+    });
+    document.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
+        e.preventDefault(); document.getElementById('q').focus(); document.getElementById('q').select();
+      }
+    });
+
+    function setWallpaper(name) {
+      var hit = null;
+      for (var i = 0; i < WALLPAPERS.length; i++) {
+        if (WALLPAPERS[i].name === name) { hit = WALLPAPERS[i]; break; }
+      }
+      if (!hit) return;
+      current = name;
+      document.getElementById('wallpaper').style.backgroundImage = "url('" + hit.url + "')";
+      var dots = document.getElementById('wpList').children;
+      for (var j = 0; j < dots.length; j++) {
+        dots[j].className = 'wp' + (WALLPAPERS[dots[j].dataset.i].name === name ? ' active' : '');
+      }
+      if (window.pywebview && pywebview.api) {
+        try { pywebview.api.set_wallpaper(name); } catch (e) {}
+      }
+    }
+
+    // 渲染壁纸切换圆点
+    var wl = document.getElementById('wpList');
+    for (var i = 0; i < WALLPAPERS.length; i++) {
+      (function (idx) {
+        var d = document.createElement('div');
+        d.className = 'wp';
+        d.dataset.i = idx;
+        d.style.backgroundImage = "url('" + WALLPAPERS[idx].url + "')";
+        d.title = WALLPAPERS[idx].name;
+        d.onclick = function () { setWallpaper(WALLPAPERS[idx].name); };
+        wl.appendChild(d);
+      })(i);
+    }
+
+    // 读取当前壁纸（配置持久化）
+    if (window.pywebview && pywebview.api) {
+      try {
+        pywebview.api.get_wallpaper().then(function (name) {
+          if (name) setWallpaper(name);
+        });
+      } catch (e) {}
+    }
+
+    // 渲染书签
+    function renderBookmarks() {
+      var box = document.getElementById('bm');
+      if (!box) return;
+      try {
+        if (!(window.pywebview && pywebview.api)) return;
+        pywebview.api.get_bookmarks().then(function (items) {
+          if (!items || !items.length) {
+            box.innerHTML = '<div class="bm-empty">还没有书签 — 在网页地址栏旁点击「收藏」即可添加</div>';
+            return;
+          }
+          var html = '';
+          for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            var host = '';
+            try { host = new URL(it.url).host; } catch (e) { host = it.url; }
+            html += '<div class="bm" onclick="openUrl(\'' + encodeURI(it.url).replace(/'/g, "\\'") + '\')">' +
+              '<div class="bm-ico">' + (host.charAt(0) || '?').toUpperCase() + '</div>' +
+              '<div class="bm-name">' + (it.title || host) + '</div></div>';
+          }
+          box.innerHTML = html;
+        });
+      } catch (e) {}
+    }
+    setTimeout(renderBookmarks, 200);
+  </script>
+</body>
+</html>

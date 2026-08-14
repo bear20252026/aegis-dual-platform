@@ -1,0 +1,16 @@
+# 签名私钥（绝不可提交）
+.update_signing_key
+*.pem
+
+# Python
+__pycache__/
+*.pyc
+
+# 构建产物与缓存
+.build/
+dist/
+.ruff_cache/
+*.spec
+
+# 本地数据（运行期生成）
+data/
