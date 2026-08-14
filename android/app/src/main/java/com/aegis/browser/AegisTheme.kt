@@ -17,33 +17,38 @@ import androidx.compose.ui.unit.sp
  * - 中文：Source Han Sans SC（≈ 苹方 PingFang SC）
  * 字体文件位于 res/font/（OFL 开源，可再分发），随包打包。
  */
-val AegisFontFamily: FontFamily = FontFamily(
-    Font(R.font.inter_regular, FontWeight.Normal),
-    Font(R.font.source_han_sans_sc_regular, FontWeight.Normal),
-    Font(R.font.source_han_sans_sc_medium, FontWeight.Medium),
-)
+val aegisFontFamily: FontFamily =
+    FontFamily(
+        Font(R.font.inter_regular, FontWeight.Normal),
+        Font(R.font.source_han_sans_sc_regular, FontWeight.Normal),
+        Font(R.font.source_han_sans_sc_medium, FontWeight.Medium),
+    )
 
 /** 应用级 MaterialTheme：统一字体族，其余样式沿用 Material3 默认。 */
 @Composable
 fun AegisTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        typography = Typography(
-            bodySmall = TextStyle(
-                fontFamily = AegisFontFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 12.sp,
+        typography =
+            Typography(
+                bodySmall =
+                    TextStyle(
+                        fontFamily = aegisFontFamily,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 12.sp,
+                    ),
+                bodyMedium =
+                    TextStyle(
+                        fontFamily = aegisFontFamily,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 14.sp,
+                    ),
+                labelSmall =
+                    TextStyle(
+                        fontFamily = aegisFontFamily,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 11.sp,
+                    ),
             ),
-            bodyMedium = TextStyle(
-                fontFamily = AegisFontFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 14.sp,
-            ),
-            labelSmall = TextStyle(
-                fontFamily = AegisFontFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 11.sp,
-            ),
-        ),
         content = content,
     )
 }

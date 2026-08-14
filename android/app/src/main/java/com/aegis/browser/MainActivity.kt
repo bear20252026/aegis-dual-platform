@@ -37,7 +37,6 @@ import androidx.compose.ui.viewinterop.AndroidView
  * 默认 top（与既有行为一致）；left 走 VerticalTabBar（按分组/工作区渲染）。
  */
 class MainActivity : ComponentActivity() {
-
     private lateinit var tabManager: TabManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,30 +49,46 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AegisTheme {
-            var tabs by remember { mutableStateOf(tabManager.list()) }
-            var activeIndex by remember { mutableStateOf(tabManager.activeIndex) }
-            var address by remember { mutableStateOf("https://www.bing.com") }
-            // 落地 B：标签栏布局（默认 top；可在设置中切换 left）
-            var tabsPosition by remember { mutableStateOf("top") }
+                var tabs by remember { mutableStateOf(tabManager.list()) }
+                var activeIndex by remember { mutableStateOf(tabManager.activeIndex) }
+                var address by remember { mutableStateOf("https://www.bing.com") }
+                // 落地 B：标签栏布局（默认 top；可在设置中切换 left）
+                var tabsPosition by remember { mutableStateOf("top") }
 
-            fun refresh() {
-                tabs = tabManager.list()
-                activeIndex = tabManager.activeIndex
-            }
+                fun refresh() {
+                    tabs = tabManager.list()
+                    activeIndex = tabManager.activeIndex
+                }
 
-            fun newTab() {
-                tabManager.addTab(
-                    SecureWebViewFactory.create(this@MainActivity),
-                    url = "https://www.bing.com",
-                )
-                refresh()
-            }
+                fun newTab() {
+                    tabManager.addTab(
+                        SecureWebViewFactory.create(this@MainActivity),
+                        url = "https://www.bing.com",
+                    )
+                    refresh()
+                }
 
-            Column(modifier = Modifier.fillMaxSize()) {
-                // —— 标签栏（top 横排 / left 垂直，按布局切换）——
-                if (tabsPosition == "left") {
-                    Row(modifier = Modifier.fillMaxSize()) {
-                        VerticalTabBar(
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // —— 标签栏（top 横排 / left 垂直，按布局切换）——
+                    if (tabsPosition == "left") {
+                        Row(modifier = Modifier.fillMaxSize()) {
+                            VerticalTabBar(
+                                tabs = tabs,
+                                activeIndex = activeIndex,
+                                onSelect = { index ->
+                                    tabManager.switchTo(index)
+                                    refresh()
+                                },
+                                onClose = { index ->
+                                    tabManager.closeTab(index)
+                                    refresh()
+                                },
+                                onNewTab = ::newTab,
+                            )
+                            WebContentArea(tabManager = tabManager, modifier = Modifier.weight(1f))
+                        }
+                    } else {
+                        TabBar(
                             tabs = tabs,
                             activeIndex = activeIndex,
                             onSelect = { index ->
@@ -86,36 +101,20 @@ class MainActivity : ComponentActivity() {
                             },
                             onNewTab = ::newTab,
                         )
+                        AddressBarAndNav(
+                            address = address,
+                            onAddressChange = { address = it },
+                            onOpen = {
+                                val wv = tabManager.current()?.webView ?: return@AddressBarAndNav
+                                BrowserEngine(wv).load(address)
+                            },
+                            onBack = { tabManager.current()?.webView?.goBack() },
+                            onForward = { tabManager.current()?.webView?.goForward() },
+                            onReload = { tabManager.current()?.webView?.reload() },
+                        )
                         WebContentArea(tabManager = tabManager, modifier = Modifier.weight(1f))
                     }
-                } else {
-                    TabBar(
-                        tabs = tabs,
-                        activeIndex = activeIndex,
-                        onSelect = { index ->
-                            tabManager.switchTo(index)
-                            refresh()
-                        },
-                        onClose = { index ->
-                            tabManager.closeTab(index)
-                            refresh()
-                        },
-                        onNewTab = ::newTab,
-                    )
-                    AddressBarAndNav(
-                        address = address,
-                        onAddressChange = { address = it },
-                        onOpen = {
-                            val wv = tabManager.current()?.webView ?: return@AddressBarAndNav
-                            BrowserEngine(wv).load(address)
-                        },
-                        onBack = { tabManager.current()?.webView?.goBack() },
-                        onForward = { tabManager.current()?.webView?.goForward() },
-                        onReload = { tabManager.current()?.webView?.reload() },
-                    )
-                    WebContentArea(tabManager = tabManager, modifier = Modifier.weight(1f))
                 }
-            }
             }
         }
     }
@@ -169,7 +168,10 @@ private fun AddressBarAndNav(
 
 /** 页面容器：显示当前标签的 WebView（两种布局共用）。 */
 @Composable
-private fun WebContentArea(tabManager: TabManager, modifier: Modifier = Modifier) {
+private fun WebContentArea(
+    tabManager: TabManager,
+    modifier: Modifier = Modifier,
+) {
     AndroidView(
         modifier = modifier.fillMaxWidth(),
         factory = { FrameLayout(it) },

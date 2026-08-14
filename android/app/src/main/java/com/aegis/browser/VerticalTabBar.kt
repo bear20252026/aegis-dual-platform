@@ -50,10 +50,11 @@ fun VerticalTabBar(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier
-            .width(180.dp)
-            .fillMaxHeight()
-            .background(Color(0xCC101827)),
+        modifier =
+            modifier
+                .width(180.dp)
+                .fillMaxHeight()
+                .background(Color(0xCC101827)),
     ) {
         // 按分组渲染：先在 @Composable 上下文收集有序分组名（保留出现顺序）
         val groups = rememberOrderedGroups(tabs)
@@ -86,10 +87,11 @@ fun VerticalTabBar(
         Button(
             onClick = onNewTab,
             modifier = Modifier.fillMaxWidth().padding(6.dp).height(36.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color(0x33FFFFFF),
-                contentColor = Color.White,
-            ),
+            colors =
+                ButtonDefaults.buttonColors(
+                    containerColor = Color(0x33FFFFFF),
+                    contentColor = Color.White,
+                ),
         ) {
             Text("+ 新建标签")
         }
@@ -115,8 +117,9 @@ private fun VerticalTabChip(
             modifier = Modifier.padding(start = 10.dp, end = 4.dp),
         ) {
             Text(
-                text = (if (tab.pinned) "\uD83D\uDCCC " else "") +
-                    tab.title.ifBlank { "新标签页" },
+                text =
+                    (if (tab.pinned) "\uD83D\uDCCC " else "") +
+                        tab.title.ifBlank { "新标签页" },
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 color = Color.White,

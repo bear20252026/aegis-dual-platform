@@ -14,7 +14,6 @@ import android.webkit.WebView
  *   2. 一处配置、处处生效，后续加安全策略只改这里。
  */
 object SecureWebViewFactory {
-
     /** 创建并完成安全配置的 WebView。 */
     fun create(context: Context): WebView {
         val webView = WebView(context)

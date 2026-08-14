@@ -22,7 +22,6 @@ class TabManager(
     private val pause: (WebView) -> Unit = WebView::onPause,
     private val resume: (WebView) -> Unit = WebView::onResume,
 ) {
-
     private val tabs = mutableListOf<Tab>()
     private var nextId = 0L
 
@@ -35,9 +34,19 @@ class TabManager(
         get() = tabs.size
 
     /** 新增标签并激活。返回新标签（id 由管理器分配）。 */
-    fun addTab(webView: WebView, url: String = "", title: String = "新标签页"): Tab {
-        val tab = Tab(id = nextId++, title = title, url = url, webView = webView,
-            lastUsed = System.currentTimeMillis())
+    fun addTab(
+        webView: WebView,
+        url: String = "",
+        title: String = "新标签页",
+    ): Tab {
+        val tab =
+            Tab(
+                id = nextId++,
+                title = title,
+                url = url,
+                webView = webView,
+                lastUsed = System.currentTimeMillis(),
+            )
         tabs.add(tab)
         // 挂起旧标签，保证活跃标签数不超过上限（LRU：优先最久未用）
         suspendOldestBeyondLimit()
@@ -117,19 +126,20 @@ class TabManager(
 
     /** 当活跃（未挂起）标签数超过 maxActive 时，挂起最久未用的非活跃标签。
 
-        LRU 策略（落地③：多标签性能优化，借鉴微软内存管理最佳实践）：
-        优先挂起 lastUsed 最小的后台标签（而非按列表顺序），更贴近
-        "最近最少使用"语义，减少用户近期将访问标签被挂起的概率。
+     LRU 策略（落地③：多标签性能优化，借鉴微软内存管理最佳实践）：
+     优先挂起 lastUsed 最小的后台标签（而非按列表顺序），更贴近
+     "最近最少使用"语义，减少用户近期将访问标签被挂起的概率。
      */
     private fun suspendOldestBeyondLimit() {
         val active = tabs.filter { !it.suspended }
         val excess = active.size - maxActive
         if (excess <= 0) return
         // 按 lastUsed 升序（最久未用在前）取待挂起标签，排除当前标签
-        val candidates = tabs
-            .filter { !it.suspended && it.id != current()?.id }
-            .sortedBy { it.lastUsed }
-            .take(excess)
+        val candidates =
+            tabs
+                .filter { !it.suspended && it.id != current()?.id }
+                .sortedBy { it.lastUsed }
+                .take(excess)
         for (tab in candidates) {
             pause(tab.webView)
             tab.suspended = true

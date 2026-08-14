@@ -51,10 +51,11 @@ fun TabBar(
     modifier: Modifier = Modifier,
 ) {
     LazyRow(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(44.dp)
-            .background(Color(0xCC101827)),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .height(44.dp)
+                .background(Color(0xCC101827)),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         contentPadding = PaddingValues(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -71,10 +72,11 @@ fun TabBar(
             Button(
                 onClick = onNewTab,
                 modifier = Modifier.height(32.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0x33FFFFFF),
-                    contentColor = Color.White,
-                ),
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor = Color(0x33FFFFFF),
+                        contentColor = Color.White,
+                    ),
             ) {
                 Text("+")
             }

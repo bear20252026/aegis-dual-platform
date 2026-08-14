@@ -4,6 +4,26 @@ plugins {
     id("com.android.application")
     // AGP 9.0+ 内置 Kotlin 支持：org.jetbrains.kotlin.android 不再需要（官方迁移指引）
     id("org.jetbrains.kotlin.plugin.compose")
+    // 工具链 P0：Kotlin 风格检查（锁定 ktlint 1.8.0）
+    id("org.jlleitschuh.gradle.ktlint")
+    // 工具链 P0：Kotlin 静态分析/代码异味（detekt v1.23.8）
+    id("io.gitlab.arturbosch.detekt")
+}
+
+// 工具链 P0：ktlint 配置（锁定 ktlint 版本，防止插件 patch 版本间默认值漂移）
+ktlint {
+    version = "1.8.0"
+    // 仅检查本模块源码（Android 模块）
+    android = true
+}
+
+// 工具链 P0：detekt 配置（基线文件对遗留项目友好——首跑生成基线，
+// 仅新引入的问题触发失败，存量告警基线化）
+detekt {
+    buildUponDefaultConfig = true
+    allRules = false
+    config.setFrom(rootProject.files("detekt.yml"))
+    baseline = file("detekt-baseline.xml")
 }
 
 val signingProperties = Properties()
@@ -43,7 +63,7 @@ android {
             isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro",
             )
         }
     }

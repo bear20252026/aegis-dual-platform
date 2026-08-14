@@ -7,7 +7,9 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import java.net.URI
 
-class BrowserEngine(private val webView: WebView) {
+class BrowserEngine(
+    private val webView: WebView,
+) {
     companion object {
         private val allowedSchemes = setOf("http", "https")
     }
@@ -26,11 +28,13 @@ class BrowserEngine(private val webView: WebView) {
         webView.settings.mediaPlaybackRequiresUserGesture = true
         webView.settings.safeBrowsingEnabled = true
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
-        webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
-                return !isAllowed(request.url.toString())
+        webView.webViewClient =
+            object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(
+                    view: WebView,
+                    request: WebResourceRequest,
+                ): Boolean = !isAllowed(request.url.toString())
             }
-        }
     }
 
     fun load(url: String) {
@@ -47,10 +51,9 @@ class BrowserEngine(private val webView: WebView) {
         return if (isAllowed(withScheme)) withScheme else null
     }
 
-    private fun isAllowed(url: String): Boolean {
-        return runCatching {
+    private fun isAllowed(url: String): Boolean =
+        runCatching {
             val uri = URI(url)
             uri.scheme?.lowercase() in allowedSchemes && !uri.host.isNullOrBlank()
         }.getOrDefault(false)
-    }
 }
