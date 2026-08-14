@@ -36,9 +36,10 @@ class TabManager(
 
     /** 新增标签并激活。返回新标签（id 由管理器分配）。 */
     fun addTab(webView: WebView, url: String = "", title: String = "新标签页"): Tab {
-        val tab = Tab(id = nextId++, title = title, url = url, webView = webView)
+        val tab = Tab(id = nextId++, title = title, url = url, webView = webView,
+            lastUsed = System.currentTimeMillis())
         tabs.add(tab)
-        // 挂起旧标签，保证活跃标签数不超过上限
+        // 挂起旧标签，保证活跃标签数不超过上限（LRU：优先最久未用）
         suspendOldestBeyondLimit()
         switchTo(tabs.size - 1)
         return tab
@@ -53,12 +54,13 @@ class TabManager(
             pause(prev.webView)
             prev.suspended = true
         }
-        // 恢复目标标签
+        // 恢复目标标签并更新 LRU 时间戳（落地③：多标签性能优化）
         val target = tabs[index]
         if (target.suspended) {
             resume(target.webView)
             target.suspended = false
         }
+        target.lastUsed = System.currentTimeMillis()
         activeIndex = index
         return true
     }
@@ -113,20 +115,24 @@ class TabManager(
     // 私有：活跃上限策略
     // ------------------------------------------------------------------ //
 
-    /** 当活跃（未挂起）标签数超过 maxActive 时，挂起最旧的非活跃标签。 */
+    /** 当活跃（未挂起）标签数超过 maxActive 时，挂起最久未用的非活跃标签。
+
+        LRU 策略（落地③：多标签性能优化，借鉴微软内存管理最佳实践）：
+        优先挂起 lastUsed 最小的后台标签（而非按列表顺序），更贴近
+        "最近最少使用"语义，减少用户近期将访问标签被挂起的概率。
+     */
     private fun suspendOldestBeyondLimit() {
         val active = tabs.filter { !it.suspended }
         val excess = active.size - maxActive
         if (excess <= 0) return
-        // 最旧的非活跃标签 = 列表中靠前且未被挂起的；逐个挂起直至不超限
-        var toSuspend = excess
-        for (tab in tabs) {
-            if (toSuspend <= 0) break
-            if (!tab.suspended && tab.id != current()?.id) {
-                pause(tab.webView)
-                tab.suspended = true
-                toSuspend--
-            }
+        // 按 lastUsed 升序（最久未用在前）取待挂起标签，排除当前标签
+        val candidates = tabs
+            .filter { !it.suspended && it.id != current()?.id }
+            .sortedBy { it.lastUsed }
+            .take(excess)
+        for (tab in candidates) {
+            pause(tab.webView)
+            tab.suspended = true
         }
     }
 }

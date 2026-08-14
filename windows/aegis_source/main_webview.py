@@ -48,6 +48,34 @@ def _apply_dnt_header(window: Any) -> None:
         pass  # 事件绑定失败静默，不影响浏览
 
 
+def _apply_enhanced_security(window: Any) -> None:
+    """启用 WebView2 Enhanced Security Mode（落地①，尽力而为、静默降级）。
+
+    背景（2026-08 调研）：微软将 EnhancedSecurityModeLevel 更名为
+    EnhancedSecurityModeState（Disabled/Enabled），新 API 为 profile 级
+    （COM ICoreWebView2ExperimentalProfile17，Runtime 151+ 可用）。
+    pywebview 未封装该 API，但底层 WinForms WebView2 控件可通过
+    window.gui.webview.CoreWebView2.Profile 访问。
+
+    策略：
+    - hasattr 探测 EnhancedSecurityModeState，存在才设置 Enabled
+      （禁 JIT + 额外 OS 保护）；
+    - 任何一步失败/属性缺失 → 静默降级，绝不影响浏览启动；
+    - 不改变任何现有功能（新导航生效，旧页面由 WebView2 管理）。
+    """
+    try:
+        gui = getattr(window, "gui", None)
+        webview_ctrl = getattr(gui, "webview", None)
+        core = getattr(webview_ctrl, "CoreWebView2", None)
+        profile = getattr(core, "Profile", None)
+        if profile is None or not hasattr(profile, "EnhancedSecurityModeState"):
+            return  # Runtime 过旧/API 未暴露 → 静默降级
+        # Enabled=1（对应枚举 CoreWebView2EnhancedSecurityModeState.Enabled）
+        profile.EnhancedSecurityModeState = 1
+    except Exception:
+        pass  # 启用失败静默，不影响浏览
+
+
 def main() -> int:
     import webview  # type: ignore[import-not-found]  # pywebview 为运行时依赖，类型桩缺失时忽略
 
@@ -104,6 +132,23 @@ def main() -> int:
         print("[fatal] create_window 返回 None，无法启动", file=sys.stderr)
         return 1
     api.window = window      # 创建后再绑定 window 引用，供桥方法调用
+
+    # 落地②：WebView2 兼容性探测（Runtime 版本 + 关键 API 可用性，
+    # 写日志供监控/排障；Evergreen 2 周更新节奏下用于回归基线）
+    try:
+        from app.webview2_probe import build_probe_report
+        report = build_probe_report(window)
+        from crash_reporter import log_event
+        log_event(f"[probe] {report}")
+    except Exception:
+        pass  # 探测失败静默，不影响浏览
+
+    # 落地①：WebView2 Enhanced Security Mode（Runtime 151+ 可用；
+    # 尽力而为，API 未暴露/失败时静默降级，不影响浏览）
+    try:
+        _apply_enhanced_security(window)
+    except Exception:
+        pass  # 启用失败静默，不影响浏览
 
     # 落地 A-①：隐私影子字段新栈接入 — DNT 请求头。
     # config.do_not_track=True 时通过 pywebview request_sent 事件为
