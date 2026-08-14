@@ -17,58 +17,26 @@ pywebview 注入 js_api 时用 dir(obj) 遍历本对象所有属性并递归扫�
 """
 
 import threading
-import urllib.parse
-from pathlib import Path
 from typing import Any
 
+# 结构审计拆分：页面加载完成回调收敛到 bridge_hooks（独立职责）。
+from .bridge_hooks import on_loaded  # noqa: F401  # re-export 保持兼容
 from .nav_queue import NavQueue
-from .shell_toolbar import build_toolbar_js
 
-# 应用根目录（aegis_source/），用于定位 shell/start.html
-ROOT = Path(__file__).resolve().parent.parent
-START_URL = (ROOT / "shell" / "start.html").as_uri()
+# 结构审计拆分：模块级常量与 URL 纯函数收敛到 url_utils（单文件单职责）。
+# re-export 保持兼容 —— selftest/main_webview 仍从 api_bridge 导入。
+from .url_utils import (
+    DEFAULT_ENGINE,
+    SEARCH_ENGINES,
+    START_URL,
+    is_navigation_safe,
+    normalize_url,
+)
+
+# 保持旧私有名兼容（_is_navigation_safe 供 Api._is_navigation_safe_url 使用）
+_is_navigation_safe = is_navigation_safe
+
 _DEFAULT_WALLPAPER = "aurora-twilight.jpg"
-
-# 搜索引擎表：key -> (名称, 搜索 URL 模板)
-SEARCH_ENGINES: dict[str, tuple[str, str]] = {
-    "baidu":  ("百度", "https://www.baidu.com/s?wd={}"),
-    "bing":   ("必应", "https://www.bing.com/search?q={}"),
-    "google": ("谷歌", "https://www.google.com/search?q={}"),
-    "sogou":  ("搜狗", "https://www.sogou.com/web?query={}"),
-}
-DEFAULT_ENGINE = "baidu"
-
-
-def normalize_url(text: str | None, engine: str = DEFAULT_ENGINE) -> str:
-    """把用户输入变成可导航 URL：无协议补 https://，非网址当搜索词。"""
-    text = (text or "").strip()
-    if not text:
-        return START_URL
-    if text == "about:blank":
-        return "about:blank"
-    lowered = text.lower()
-    if lowered.startswith(("http://", "https://", "file://")):
-        return text
-    # 含空格或没有点号 → 视为搜索
-    if " " in text or "." not in text:
-        template = SEARCH_ENGINES.get(engine, SEARCH_ENGINES[DEFAULT_ENGINE])[1]
-        return template.format(urllib.parse.quote(text))
-    return "https://" + text
-
-
-def _is_navigation_safe(url: str) -> bool:
-    """H-C1 审计修复：外部导航目标安全校验。
-
-    只放行 http/https 与显式 about:blank；file:/javascript:/vbscript:/
-    data:/blob: 等一律拒绝（复用 security.safe_url 白名单，
-    allow_internal=False 确保 data:/blob: 等内部伪协议不被外部输入放行）。
-    """
-    if not url:
-        return False
-    if url == "about:blank":
-        return True
-    from .security import safe_url
-    return bool(safe_url(url, allow_internal=False))
 
 
 class Api:
@@ -525,50 +493,4 @@ class Api:
             return []
 
 
-def on_loaded(window: Any, api: Api) -> None:
-    """每页加载完成后：刷新当前标签 url/title，并注入工具栏（含新标签页）。
-
-    注意：该回调在 pywebview 的后台线程中执行；本函数自身绝不抛异常。
-    get_current_url 属于只读查询（winforms 后端线程安全），可直接调用；
-    注入（evaluate_js）统一走 api._eval 投递到导航线程执行。
-    """
-    if window is None or api is None:
-        return
-    try:
-        url = window.get_current_url() or ""
-    except Exception:
-        url = ""
-    api._update_current(url)
-    try:
-        # 内嵌标签数据 → 单次注入，零 HTTP 往返。
-        kb = None  # None = 默认表 DEFAULT_KEYBINDINGS
-        try:
-            cfg = getattr(api, "config", None)
-            raw = getattr(cfg, "keybindings_json", "") if cfg else ""
-            if raw:
-                import json as _json
-                parsed = _json.loads(raw)
-                if isinstance(parsed, dict):
-                    kb = {k: str(v)[:1] for k, v in parsed.items()
-                          if isinstance(v, str) and v}
-        except Exception:
-            kb = None  # 用户配置解析失败时静默回退默认表
-        # 标签位置：读取 config.tabs_position（top/left），默认 top
-        tabs_pos = "top"
-        # 影子字段接入：地址栏联想开关（config.search_suggestions，默认开）
-        sugg_enabled = True
-        try:
-            cfg = getattr(api, "config", None)
-            if cfg is not None:
-                tp = getattr(cfg, "tabs_position", "top") or "top"
-                if tp in ("top", "left"):
-                    tabs_pos = tp
-                sugg_enabled = bool(getattr(cfg, "search_suggestions", True))
-        except Exception:
-            tabs_pos = "top"
-        js = build_toolbar_js(url, api.get_tabs(), keybindings=kb,
-                              tabs_position=tabs_pos,
-                              search_suggestions=sugg_enabled)
-        api._eval(js)
-    except Exception:
-        pass  # 页面不允许注入（CSP 严格站点 / 空白页）时静默降级
+# on_loaded 已随结构审计拆分至 app/bridge_hooks.py（文件顶部 re-export 保持兼容）。
