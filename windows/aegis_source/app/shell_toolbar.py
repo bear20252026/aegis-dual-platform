@@ -148,6 +148,30 @@ TOOLBAR_JS = r"""
         } catch (err) {}
       });
     }
+
+    // —— 快捷键（一次绑定）：
+    //    Ctrl+T 新标签 / Ctrl+W 关闭当前标签 / Ctrl+L 聚焦地址栏 ——
+    if (window.pywebview && pywebview.api && !window.__aegis_keys_hooked) {
+      window.__aegis_keys_hooked = true;
+      window.addEventListener('keydown', function (e) {
+        try {
+          if (!(e.ctrlKey || e.metaKey)) return;
+          var k = (e.key || '').toLowerCase();
+          if (k === 't') {
+            e.preventDefault();
+            pywebview.api.new_tab();
+          } else if (k === 'w') {
+            e.preventDefault();
+            var ci = (TABS_DATA && TABS_DATA.current) || 0;
+            pywebview.api.close_tab(ci);
+          } else if (k === 'l') {
+            e.preventDefault();
+            var urlInput = document.getElementById('aegis-url');
+            if (urlInput) { urlInput.focus(); urlInput.select(); }
+          }
+        } catch (err) {}
+      });
+    }
   } catch (e) { /* 注入失败绝不影响页面本身 */ }
 })();
 """
