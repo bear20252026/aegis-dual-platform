@@ -85,7 +85,7 @@ class Api:
         "current_url", "js_error",
         "get_bookmarks", "add_bookmark", "remove_bookmark",
         "import_bookmarks", "import_history",
-        "get_history", "get_most_visited",
+        "get_history", "get_most_visited", "search_history_fulltext",
     })
 
     def __dir__(self) -> list[str]:
@@ -471,6 +471,36 @@ class Api:
         except Exception:
             return []
 
+    def search_history_fulltext(self, keyword: Any, limit: Any = 50) -> list:
+        """FTS5 全文搜索历史（落地建议③，借鉴 min fullTextSearch）。
+
+        返回 [{id,url,title,visit_time}]；keyword 为空或存储不可用时
+        返回空列表（静默，不影响浏览）。注意：fulltext_search 返回
+        dict 行（Database.query 语义），此处按 dict 键取值。
+        """
+        try:
+            if self.history is None or not isinstance(keyword, str):
+                return []
+            n = int(limit) if limit else 50
+            rows = self.history.fulltext_search(keyword, n)
+            out = []
+            for r in rows:
+                if isinstance(r, dict):
+                    out.append({
+                        "id": r.get("id"), "url": r.get("url"),
+                        "title": r.get("title"),
+                        "visit_time": r.get("visit_time"),
+                    })
+                else:
+                    # 兼容 tuple/序列行（防御式）
+                    out.append({
+                        "id": r[0], "url": r[1], "title": r[2],
+                        "visit_time": r[3],
+                    })
+            return out
+        except Exception:
+            return []
+
 
 def on_loaded(window: Any, api: Api) -> None:
     """每页加载完成后：刷新当前标签 url/title，并注入工具栏（含新标签页）。
@@ -500,7 +530,18 @@ def on_loaded(window: Any, api: Api) -> None:
                           if isinstance(v, str) and v}
         except Exception:
             kb = None  # 用户配置解析失败时静默回退默认表
-        js = build_toolbar_js(url, api.get_tabs(), keybindings=kb)
+        # 标签位置：读取 config.tabs_position（top/left），默认 top
+        tabs_pos = "top"
+        try:
+            cfg = getattr(api, "config", None)
+            if cfg is not None:
+                tp = getattr(cfg, "tabs_position", "top") or "top"
+                if tp in ("top", "left"):
+                    tabs_pos = tp
+        except Exception:
+            tabs_pos = "top"
+        js = build_toolbar_js(url, api.get_tabs(), keybindings=kb,
+                              tabs_position=tabs_pos)
         api._eval(js)
     except Exception:
         pass  # 页面不允许注入（CSP 严格站点 / 空白页）时静默降级

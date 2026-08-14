@@ -20,6 +20,24 @@ CREATE TABLE IF NOT EXISTS visits (
 );
 CREATE INDEX IF NOT EXISTS idx_visits_time ON visits(visit_time DESC);
 CREATE INDEX IF NOT EXISTS idx_visits_url ON visits(url);
+-- 落地建议③（借鉴 min fullTextSearch）：FTS5 全文索引（url+title），
+-- 通过触发器与 visits 保持同步；新库自动生效，旧库在首次查询时重建。
+CREATE VIRTUAL TABLE IF NOT EXISTS visits_fts USING fts5(
+    url, title, content='visits', content_rowid='id', tokenize='unicode61');
+CREATE TRIGGER IF NOT EXISTS visits_fts_ai AFTER INSERT ON visits BEGIN
+    INSERT INTO visits_fts(rowid, url, title)
+    VALUES (new.id, new.url, new.title);
+END;
+CREATE TRIGGER IF NOT EXISTS visits_fts_ad AFTER DELETE ON visits BEGIN
+    INSERT INTO visits_fts(visits_fts, rowid, url, title)
+    VALUES ('delete', old.id, old.url, old.title);
+END;
+CREATE TRIGGER IF NOT EXISTS visits_fts_au AFTER UPDATE ON visits BEGIN
+    INSERT INTO visits_fts(visits_fts, rowid, url, title)
+    VALUES ('delete', old.id, old.url, old.title);
+    INSERT INTO visits_fts(rowid, url, title)
+    VALUES (new.id, new.url, new.title);
+END;
 """
 
 
@@ -89,6 +107,47 @@ class HistoryStore:
         db = self._check()
         if db:
             db.execute("DELETE FROM visits WHERE url=?", (url,))
+
+    def fulltext_search(self, keyword: str, limit=50):
+        """FTS5 全文搜索历史（落地建议③，借鉴 min fullTextSearch）。
+
+        对 url+title 做全文索引查询；旧库首次查询时重建索引。
+        FTS5 不可用时回退 LIKE 搜索（功能不失效）。
+        """
+        db = self._check()
+        if db is None or not keyword:
+            return []
+        kw = keyword.strip()
+        if not kw:
+            return []
+        # 尝试 FTS5（含旧库索引重建）；失败静默回退 LIKE
+        try:
+            self._ensure_fts_rebuilt(db)
+            # FTS5 MATCH 语法：用户输入做短语化，防语法注入
+            quoted = '"' + kw.replace('"', '""') + '"'
+            rows = db.query(
+                "SELECT id,url,title,visit_time FROM visits_fts "
+                "WHERE visits_fts MATCH ? ORDER BY rank LIMIT ?",
+                (quoted, limit))
+            if rows:
+                return rows
+        except Exception:
+            pass  # FTS5 不可用/损坏 → 回退 LIKE
+        # 回退：LIKE 子串匹配
+        kw2 = f"%{kw}%"
+        return db.query(
+            "SELECT id,url,title,visit_time FROM visits "
+            "WHERE url LIKE ? OR title LIKE ? "
+            "ORDER BY visit_time DESC LIMIT ?", (kw2, kw2, limit))
+
+    @staticmethod
+    def _ensure_fts_rebuilt(db):
+        """旧库（无 FTS 索引内容）时重建，保证新库/旧库行为一致。"""
+        try:
+            # 'rebuild' 对 content= 外部内容表安全且幂等
+            db.execute("INSERT INTO visits_fts(visits_fts) VALUES('rebuild')")
+        except Exception:
+            pass  # 空表 rebuild 也可能报错，忽略
 
     def clear(self):
         db = self._check()

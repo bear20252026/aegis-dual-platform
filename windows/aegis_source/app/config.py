@@ -42,13 +42,20 @@ class AppConfig:
 
     # ---- 隐私 ----
     adblock: bool = True              # 广告拦截
-    do_not_track: bool = True
+    do_not_track: bool = True         # DNT 请求头
     save_passwords: bool = True
     use_system_proxy: bool = True     # 使用系统代理
     safe_browsing: bool = True        # 恶意/钓鱼网站防护
     safe_browsing_provider: str = "local"   # local | google
     safe_browsing_api_key: str = ""        # Google Safe Browsing API 密钥
     webrtc_ip_leak_protection: bool = True  # 防 WebRTC 泄露真实 IP
+    # 隐私审计标注（docs/privacy-defaults-audit.md）：
+    # 以下字段默认值已对齐 LibreWolf 隐私理念，但当前为"声明保留"状态——
+    # 其运行时实现随 Qt 旧栈归档于 legacy/（S2），新栈（pywebview 路线）
+    # 尚未接入。非安全漏洞（无代码读取它们执行危险操作），但勿误以为已生效；
+    # 接入路线见 docs/privacy-defaults-audit.md「后续建议」。
+    # 影子字段：adblock / do_not_track / safe_browsing / safe_browsing_api_key /
+    #           webrtc_ip_leak_protection / search_suggestions / save_passwords
 
     # ---- 性能 ----
     hibernate_background_mins: int = 10   # 后台标签休眠阈值，0=关闭（标准 #6）

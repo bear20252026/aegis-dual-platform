@@ -194,19 +194,102 @@ TOOLBAR_JS = r"""
 })();
 """
 
+# 左侧垂直标签栏（tabs_position="left" 时由 build_toolbar_js 追加注入）。
+# 独立 IIFE：读取 TOOLBAR_JS 已注入的 TABS_DATA，复用其 JS 桥调用；
+# 与顶部标签条并存 —— 顶部条保留导航/地址栏，垂直栏专职标签切换。
+# 布局：固定左侧 200px 栏，标签竖排；失败静默（回退纯顶部布局）。
+VERTICAL_TABS_JS = r"""
+(function () {
+  try {
+    if (document.getElementById('aegis-vtabs')) return;
+    if (document.getElementById('aegis-chrome')) {
+      document.body.style.marginLeft = '200px';
+    }
+    var V = document.createElement('div');
+    V.id = 'aegis-vtabs';
+    V.style.cssText = 'position:fixed;top:40px;left:0;bottom:0;width:200px;' +
+      'overflow-y:auto;background:rgba(24,20,48,0.92);' +
+      'border-right:1px solid rgba(255,255,255,0.10);' +
+      'z-index:2147483646;box-sizing:border-box;padding:6px 4px;';
+    var data = window.__aegis_vtabs_data || {};
+    var tabs = (data && data.tabs) || [];
+    var cur = (data && data.current) || 0;
+    function mkTab(idx) {
+      var t = document.createElement('div');
+      t.style.cssText = 'display:flex;align-items:center;gap:4px;height:30px;' +
+        'padding:0 6px;border-radius:6px;cursor:pointer;font-size:12px;' +
+        'color:rgba(255,255,255,0.85);margin-bottom:2px;' +
+        'background:' + (idx === cur ? 'rgba(255,255,255,0.16)' : 'transparent') + ';';
+      var label = document.createElement('span');
+      var tp = (tabs[idx] && tabs[idx].pinned) ? '\u{1F4CC} ' : '';
+      label.textContent = tp + ((tabs[idx] && tabs[idx].title) || '新标签页');
+      label.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;' +
+        'white-space:nowrap;';
+      t.appendChild(label);
+      var x = document.createElement('span');
+      x.textContent = '\u00d7';
+      x.style.cssText = 'width:16px;height:16px;line-height:14px;text-align:center;' +
+        'border-radius:50%;cursor:pointer;font-size:12px;flex:0 0 auto;' +
+        'color:rgba(255,255,255,0.6);';
+      x.onclick = function (e) {
+        e.stopPropagation();
+        try { if (window.pywebview && pywebview.api) pywebview.api.close_tab(idx); } catch (err) {}
+      };
+      t.onclick = function () {
+        if (idx !== cur && window.pywebview && pywebview.api) {
+          try { pywebview.api.switch_tab(idx); } catch (err) {}
+        }
+      };
+      t.onauxclick = function (e) {
+        if (e.button !== 1) return;
+        e.preventDefault();
+        try { if (window.pywebview && pywebview.api) pywebview.api.close_tab(idx); } catch (err) {}
+      };
+      t.appendChild(x);
+      return t;
+    }
+    for (var i = 0; i < tabs.length; i++) { V.appendChild(mkTab(i)); }
+    var nb = document.createElement('div');
+    nb.textContent = '+ 新建标签';
+    nb.style.cssText = 'height:28px;line-height:28px;text-align:center;' +
+      'border-radius:6px;cursor:pointer;font-size:12px;margin-top:4px;' +
+      'color:rgba(255,255,255,0.75);background:rgba(255,255,255,0.06);';
+    nb.onclick = function () {
+      try { if (window.pywebview && pywebview.api) pywebview.api.new_tab(); } catch (err) {}
+    };
+    V.appendChild(nb);
+    document.documentElement.appendChild(V);
+  } catch (e) { /* 垂直标签栏失败静默：回退顶部标签布局 */ }
+})();
+"""
+
+
+def _inject_vtabs_data(tabs_snapshot: dict) -> str:
+    """把标签快照作为 window.__aegis_vtabs_data 注入（垂直标签栏读取）。"""
+    return (
+        "window.__aegis_vtabs_data=" + json.dumps(tabs_snapshot) + ";"
+    )
+
 
 def build_toolbar_js(current_url: str, tabs_snapshot: dict,
-                     keybindings: dict | None = None) -> str:
+                     keybindings: dict | None = None,
+                     tabs_position: str = "top") -> str:
     """把当前 URL / 标签快照 / 快捷键表注入占位符，返回可 evaluate 的完整脚本。
 
     keybindings 为 None 时用 DEFAULT_KEYBINDINGS（默认表）；调用方可传入
-    用户覆盖后的生效表。占位符值一律经 json.dumps 注入 —— 输出永远是
-    合法 JSON 字面量，无论 URL / 标题含什么字符都不会造成 JS 注入。
+    用户覆盖后的生效表。tabs_position 支持 "top"（默认顶部标签条）与
+    "left"（追加左侧垂直标签栏，对应 config.tabs_position）。
+    占位符值一律经 json.dumps 注入 —— 输出永远是合法 JSON 字面量，
+    无论 URL / 标题含什么字符都不会造成 JS 注入。
     """
     kb = DEFAULT_KEYBINDINGS if keybindings is None else dict(keybindings)
-    return (
+    js = (
         TOOLBAR_JS
         .replace("__AEGIS_URL__", json.dumps(current_url))
         .replace("__TABS_JSON__", json.dumps(tabs_snapshot))
         .replace("__KEYBINDINGS_JSON__", json.dumps(kb))
     )
+    if tabs_position == "left":
+        # 先注入垂直标签栏所需的数据，再追加垂直标签栏脚本
+        js += _inject_vtabs_data(tabs_snapshot) + VERTICAL_TABS_JS
+    return js
