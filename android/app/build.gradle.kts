@@ -46,7 +46,18 @@ android {
 
     signingConfigs {
         create("release") {
-            if (signingPropertiesFile.exists()) {
+            // 签名凭据治理（工具链修复）：环境变量优先（凭据零落地，
+            // 政府项目推荐），回退 signing.properties（本地开发）。
+            val envStore = System.getenv("AEGIS_KEYSTORE_FILE")
+            val envStorePass = System.getenv("AEGIS_KEYSTORE_PASSWORD")
+            val envAlias = System.getenv("AEGIS_KEY_ALIAS")
+            val envKeyPass = System.getenv("AEGIS_KEY_PASSWORD")
+            if (envStore != null && envStorePass != null) {
+                storeFile = file(envStore)
+                storePassword = envStorePass
+                keyAlias = envAlias ?: "aegis-release"
+                keyPassword = envKeyPass ?: envStorePass
+            } else if (signingPropertiesFile.exists()) {
                 storeFile = file(signingProperties.getProperty("storeFile"))
                 storePassword = signingProperties.getProperty("storePassword")
                 keyAlias = signingProperties.getProperty("keyAlias")
@@ -57,7 +68,9 @@ android {
 
     buildTypes {
         release {
-            if (signingPropertiesFile.exists()) {
+            if (signingPropertiesFile.exists() ||
+                System.getenv("AEGIS_KEYSTORE_FILE") != null
+            ) {
                 signingConfig = signingConfigs.getByName("release")
             }
             isMinifyEnabled = true

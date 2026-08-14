@@ -4,8 +4,8 @@
 
 - **repository:** android (`D:\abrowser\review\aegis_dual_platform\android`)
 - **stack:** android
-- **scanned:** 2026-08-14T20:54:36.797Z · **tool:** v1.0.20 · **duration:** 0.1s
-- **files:** 30 (32.2 MB)
+- **scanned:** 2026-08-14T21:10:27.627Z · **tool:** v1.0.20 · **duration:** 0.1s
+- **files:** 31 (32.2 MB)
 
 ## Health score
 
@@ -36,7 +36,7 @@
 - **impact:** Removing 1 hardcoded signing secret eliminates leaked release-signing material. (1 count)
 - **fix:** Move signing credentials to a git-ignored keystore.properties file or CI environment variables, and read them via System.getenv("...") or project.findProperty("...") in signingConfigs.
 - **evidence:**
-  - `app/build.gradle.kts:51` — storePassword "***"
+  - `app/build.gradle.kts:62` — storePassword "***"
 
 #### 2 heavy font file(s) (high) — `assets-heavy-font-file`
 - **severity:** high | **confidence:** confirmed | **category:** assets | **horizon:** this_sprint
@@ -129,29 +129,29 @@
 - **severity:** info | **confidence:** confirmed | **category:** assets | **horizon:** later
 - **what:** The 20 largest files account for 32.2 MB of repository size. Review these to identify optimization opportunities.
 - **why it matters:** Understanding which files contribute most to repository size helps prioritize optimization efforts for maximum impact.
-- **impact:** These 20 files total 32.2 MB. (33804250 bytes)
+- **impact:** These 20 files total 32.2 MB. (33805039 bytes)
 - **fix:** Review each large file to determine if it can be compressed, optimized, moved to a CDN, or removed if unused.
 - **evidence:**
   - `app/src/main/res/font/source_han_sans_sc_medium.otf` (15.8 MB) — 15.8 MB
   - `app/src/main/res/font/source_han_sans_sc_regular.otf` (15.8 MB) — 15.8 MB
   - `app/src/main/res/font/inter_regular.otf` (595.3 KB) — 595.3 KB
   - `gradle/wrapper/gradle-wrapper.jar` (46.4 KB) — 46.4 KB
-  - `detekt.yml` (21.3 KB) — 21.3 KB
+  - `detekt.yml` (21.6 KB) — 21.6 KB
   - `gradlew` (8.5 KB) — 8.5 KB
   - `app/src/main/java/com/aegis/browser/MainActivity.kt` (7.3 KB) — 7.3 KB
   - `app/src/main/java/com/aegis/browser/VerticalTabBar.kt` (5.3 KB) — 5.3 KB
   - `app/src/main/java/com/aegis/browser/TabManager.kt` (5.3 KB) — 5.3 KB
   - `app/src/main/java/com/aegis/browser/TabBar.kt` (4.1 KB) — 4.1 KB
-  - `app/build.gradle.kts` (3.2 KB) — 3.2 KB
+  - `app/build.gradle.kts` (4.0 KB) — 4.0 KB
   - `gradlew.bat` (2.8 KB) — 2.8 KB
-  - `app/detekt-baseline.xml` (2.6 KB) — 2.6 KB
+  - `app/detekt-baseline.xml` (2.1 KB) — 2.1 KB
   - `app/src/main/java/com/aegis/browser/BrowserEngine.kt` (2.1 KB) — 2.1 KB
   - `app/src/main/java/com/aegis/browser/AegisTheme.kt` (1.9 KB) — 1.9 KB
   - `app/src/main/java/com/aegis/browser/Tab.kt` (1.1 KB) — 1.1 KB
   - `app/src/main/AndroidManifest.xml` (1.1 KB) — 1.1 KB
+  - `app/src/main/java/com/aegis/browser/UiColors.kt` (1.0 KB) — 1.0 KB
   - `app/src/main/java/com/aegis/browser/SecureWebViewFactory.kt` (963 B) — 963 B
   - `app/src/main/java/com/aegis/browser/DownloadPolicy.kt` (927 B) — 927 B
-  - `build-android.ps1` (900 B) — 900 B
 
 #### Module inventory: 2 module(s) detected — `structure-module-inventory`
 - **severity:** info | **confidence:** confirmed | **category:** structure | **horizon:** later

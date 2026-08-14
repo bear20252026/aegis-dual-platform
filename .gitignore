@@ -8,3 +8,9 @@ assets/fonts/source-han-sans-sc/
 
 # pyscn 工具输出目录（报告归档于 docs/quality-reports/，此处不重复入库）
 .pyscn/
+
+# 签名凭据（政府项目红线：绝不入库；example 为占位符可入库）
+signing.properties
+*.jks
+*.keystore
+*.p12
