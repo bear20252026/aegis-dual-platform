@@ -1,7 +1,9 @@
 package com.aegis.browser
 
 import android.os.Bundle
+import android.view.ViewGroup
 import android.webkit.WebView
+import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -21,64 +23,113 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
+/**
+ * 主界面（薄壳，仅负责组装；多标签逻辑在 TabManager，标签栏在 TabBar）。
+ *
+ * S4 变更（对比旧版单 WebView）：
+ * - 每个标签持有独立 WebView（TabManager 管理），切换时显示/隐藏，
+ *   保留各页面状态；
+ * - 所有 WebView 经 SecureWebViewFactory 创建（安全配置统一）；
+ * - onDestroy 统一释放全部 WebView。
+ */
 class MainActivity : ComponentActivity() {
-    private var ownedWebView: WebView? = null
+
+    private lateinit var tabManager: TabManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        tabManager = TabManager()
+        tabManager.addTab(
+            SecureWebViewFactory.create(this),
+            url = "https://www.bing.com",
+        )
+
         setContent {
+            var tabs by remember { mutableStateOf(tabManager.list()) }
+            var activeIndex by remember { mutableStateOf(tabManager.activeIndex) }
             var address by remember { mutableStateOf("https://www.bing.com") }
-            var webViewRef: WebView? by remember { mutableStateOf(null) }
-            val engine = webViewRef?.let { BrowserEngine(it) }
+
+            fun refresh() {
+                tabs = tabManager.list()
+                activeIndex = tabManager.activeIndex
+            }
 
             Column(modifier = Modifier.fillMaxSize()) {
+                // —— 标签栏 ——
+                TabBar(
+                    tabs = tabs,
+                    activeIndex = activeIndex,
+                    onSelect = { index ->
+                        tabManager.switchTo(index)
+                        refresh()
+                    },
+                    onClose = { index ->
+                        tabManager.closeTab(index)
+                        refresh()
+                    },
+                    onNewTab = {
+                        tabManager.addTab(
+                            SecureWebViewFactory.create(this@MainActivity),
+                            url = "https://www.bing.com",
+                        )
+                        refresh()
+                    },
+                )
+
+                // —— 地址栏 + 导航按钮 ——
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     OutlinedTextField(
                         value = address,
                         onValueChange = { address = it },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        label = { Text("地址") }
+                        label = { Text("地址") },
                     )
-                    Button(onClick = { engine?.load(address) }) { Text("打开") }
+                    Button(onClick = {
+                        val wv = tabManager.current()?.webView ?: return@Button
+                        BrowserEngine(wv).load(address)
+                    }) { Text("打开") }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Button(onClick = { webViewRef?.goBack() }) { Text("后退") }
-                    Button(onClick = { webViewRef?.goForward() }) { Text("前进") }
-                    Button(onClick = { webViewRef?.reload() }) { Text("刷新") }
+                    Button(onClick = { tabManager.current()?.webView?.goBack() }) { Text("后退") }
+                    Button(onClick = { tabManager.current()?.webView?.goForward() }) { Text("前进") }
+                    Button(onClick = { tabManager.current()?.webView?.reload() }) { Text("刷新") }
                 }
+
+                // —— 页面容器：显示当前标签的 WebView ——
                 AndroidView(
-                    modifier = Modifier.weight(1f),
-                    factory = { context ->
-                        WebView(context).also { view ->
-                            webViewRef = view
-                            ownedWebView = view
-                            BrowserEngine(view).configure()
-                            BrowserEngine(view).load(address)
+                    modifier = Modifier.weight(1f).fillMaxWidth(),
+                    factory = { FrameLayout(it) },
+                    update = { container ->
+                        val current = tabManager.current()
+                        if (current == null) return@AndroidView
+                        val wv = current.webView
+                        // 仅当容器尚未持有该 WebView 时才挂载（避免重复 addView 崩溃）
+                        if (container.indexOfChild(wv) < 0) {
+                            container.removeAllViews()
+                            (wv.parent as? ViewGroup)?.removeView(wv)
+                            container.addView(wv)
                         }
                     },
-                    update = { webViewRef = it }
                 )
             }
         }
     }
 
     override fun onDestroy() {
-        // WebView 持有 Chromium 资源，必须在 Activity 销毁时主动释放。
-        ownedWebView?.apply {
-            stopLoading()
-            loadUrl("about:blank")
-            clearHistory()
-            removeAllViews()
-            destroy()
+        // 释放全部 WebView 持有的 Chromium 资源
+        tabManager.suspendAll()
+        tabManager.list().forEach { tab ->
+            tab.webView.stopLoading()
+            tab.webView.loadUrl("about:blank")
+            tab.webView.destroy()
         }
-        ownedWebView = null
         super.onDestroy()
     }
 }

@@ -5,7 +5,10 @@ import json
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-root = Path('/home/ubuntu/aegis_dual_platform')
+# S1-6 修复（H1）：此前硬编码打包机路径 /home/ubuntu/aegis_dual_platform，
+# 在任意其他机器上运行必然 FileNotFoundError。改为基于本文件位置的
+# 相对路径，跨平台可移植（Windows/Linux/macOS 均生效）。
+root = Path(__file__).resolve().parent
 windows = root / 'windows' / 'aegis_source'
 failures: list[str] = []
 python_files = list(windows.rglob('*.py'))
