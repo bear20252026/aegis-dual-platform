@@ -9,6 +9,24 @@ import os
 from dataclasses import asdict, dataclass, field
 
 
+def _enum_fallback(cfg, name: str, allowed: tuple, defaults) -> None:
+    """枚举白名单回退（重构热点 #3）：cfg.name 不在 allowed 时回退默认。
+
+    数据驱动替代 6 处同构的 `if cfg.x not in (...): cfg.x = defaults.x`，
+    语义不变（非法档位一律回退默认）。
+    """
+    if getattr(cfg, name) not in allowed:
+        setattr(cfg, name, getattr(defaults, name))
+
+
+def _clamp(cfg, name: str, lo, hi) -> None:
+    """数值范围钳制（重构热点 #3）：cfg.name 越界收敛到 [lo,hi]。
+
+    数据驱动替代 12 处同构的 `max(lo, min(hi, cfg.x))`；int/float 通用。
+    """
+    setattr(cfg, name, max(lo, min(hi, getattr(cfg, name))))
+
+
 @dataclass
 class AppConfig:
     """全局配置。新增配置项时只需在此增加字段与默认值。"""
@@ -153,7 +171,12 @@ class AppConfig:
     @classmethod
     def load(cls, data_dir: str) -> "AppConfig":
         """从磁盘加载。v1.4 M5 修复：逐字段类型校验，
-        非法值一律回退默认（杜绝把 homepage 改成 javascript: 之类的注入）。"""
+        非法值一律回退默认（杜绝把 homepage 改成 javascript: 之类的注入）。
+
+        重构热点 #3：枚举白名单回退与数值范围钳制收敛为数据驱动
+        辅助（_enum_fallback / _clamp），减少重复分支、降圈复杂度；
+        类型校验与 URL 安全校验语义保持不变。
+        """
         cfg = cls()
         defaults = cls()
         path = os.path.join(data_dir, "config.json")
@@ -185,14 +208,28 @@ class AppConfig:
             except (json.JSONDecodeError, OSError):
                 pass
         # ---- 字段级约束（类型通过后再做语义校验）----
-        if cfg.theme not in ("auto", "dark", "light"):
-            cfg.theme = defaults.theme
-        if cfg.language not in ("zh-CN", "en"):
-            cfg.language = defaults.language
-        cfg.font_size = max(11, min(20, cfg.font_size))
-        cfg.devtools_port = max(0, min(65535, cfg.devtools_port))
-        cfg.http_cache_mb = max(0, min(4096, cfg.http_cache_mb))
-        cfg.hibernate_background_mins = max(0, min(1440, cfg.hibernate_background_mins))
+        # 枚举白名单回退（数据驱动；非法值一律回退默认）
+        _enum_fallback(cfg, "theme", ("auto", "dark", "light"), defaults)
+        _enum_fallback(cfg, "language", ("zh-CN", "en"), defaults)
+        _enum_fallback(cfg, "vision_provider",
+                       ("ollama", "cloud", "custom"), defaults)
+        _enum_fallback(cfg, "https_first_mode",
+                       ("off", "balanced", "strict"), defaults)
+        _enum_fallback(cfg, "doh_mode", ("off", "auto", "secure"), defaults)
+        _enum_fallback(cfg, "tabs_position", ("top", "left"), defaults)
+        # 数值范围钳制（数据驱动；越界收敛到 [lo,hi]）
+        _clamp(cfg, "font_size", 11, 20)
+        _clamp(cfg, "devtools_port", 0, 65535)
+        _clamp(cfg, "http_cache_mb", 0, 4096)
+        _clamp(cfg, "hibernate_background_mins", 0, 1440)
+        _clamp(cfg, "vision_max_image_width", 320, 2560)
+        _clamp(cfg, "vision_jpeg_quality", 40, 95)
+        _clamp(cfg, "vision_step_limit", 1, 500)
+        _clamp(cfg, "vision_step_timeout", 5.0, 120.0)
+        _clamp(cfg, "vision_interval_ms", 500, 10000)
+        _clamp(cfg, "vision_permission_level", 0, 3)
+        _clamp(cfg, "vision_l3_max_sites", 1, 20)
+        _clamp(cfg, "vision_qr_wait_sec", 30, 600)
         # URL 字段 scheme 白名单：拒绝 javascript:/file: 等
         from .security import safe_url
         if not safe_url(cfg.homepage):
@@ -203,29 +240,9 @@ class AppConfig:
         # threat_feed_url：仅 https；file:// 需显式开启离线测试开关
         from .threat_feed import validate_feed_url
         cfg.threat_feed_url = validate_feed_url(cfg.threat_feed_url)
-        # ---- AI 视觉能力校验（设计文档 §3.2）----
-        if cfg.vision_provider not in ("ollama", "cloud", "custom"):
-            cfg.vision_provider = defaults.vision_provider
-        cfg.vision_max_image_width = max(320, min(2560, cfg.vision_max_image_width))
-        cfg.vision_jpeg_quality = max(40, min(95, cfg.vision_jpeg_quality))
-        cfg.vision_step_limit = max(1, min(500, cfg.vision_step_limit))
-        cfg.vision_step_timeout = max(5.0, min(120.0, cfg.vision_step_timeout))
-        cfg.vision_interval_ms = max(500, min(10000, cfg.vision_interval_ms))
-        cfg.vision_permission_level = max(0, min(3, cfg.vision_permission_level))
-        cfg.vision_l3_max_sites = max(1, min(20, cfg.vision_l3_max_sites))
-        cfg.vision_qr_wait_sec = max(30, min(600, cfg.vision_qr_wait_sec))
         # 云同步 WebDAV 地址强制 HTTPS（明文传输凭据会被窃听）
         if cfg.sync_webdav_url and not cfg.sync_webdav_url.lower().startswith("https://"):
             cfg.sync_webdav_url = defaults.sync_webdav_url
-        # HTTPS-First（R4）：非法档位回退 balanced
-        if cfg.https_first_mode not in ("off", "balanced", "strict"):
-            cfg.https_first_mode = defaults.https_first_mode
-        # DoH（R3）：非法档位回退 off
-        if cfg.doh_mode not in ("off", "auto", "secure"):
-            cfg.doh_mode = defaults.doh_mode
-        # ---- v2.1.5：标签布局 / NTP 壁纸白名单校验 ----
-        if cfg.tabs_position not in ("top", "left"):
-            cfg.tabs_position = defaults.tabs_position
         # 壁纸白名单：只允许随包登记的文件名或空（回退渐变），杜绝
         # 把任意路径/URL 写进背景值（样式注入 + 本地文件探测面）。
         try:

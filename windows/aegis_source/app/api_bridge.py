@@ -63,6 +63,19 @@ def _to_str(value: Any, default: Any = None) -> Any:
         return default
     return value if isinstance(value, str) else default
 
+
+def _row_to_tuple(r: Any):
+    """历史行统一为 (id,url,title,visit_time) 元组（重构热点 #2）。
+
+    Database.query 返回 dict 行（按键取值）或 tuple 行（下标取值），
+    get_history / search_history_fulltext 共用此辅助消除重复分支；
+    键名契约（"time"/"visit_time"）仍由各方法自行组装。
+    """
+    if isinstance(r, dict):
+        return (r.get("id"), r.get("url"), r.get("title"),
+                r.get("visit_time"))
+    return (r[0], r[1], r[2], r[3])
+
 _DEFAULT_WALLPAPER = "aurora-twilight.jpg"
 
 
@@ -478,21 +491,14 @@ class Api:
                 rows = self.history.all(n, cursor_id=cid, cursor_time=ctime)
             else:
                 rows = self.history.all(n)
+            # 重构热点 #2：统一行转换（dict/tuple 兼容收敛到 _row_to_tuple）
             out = []
             for r in rows:
-                if isinstance(r, dict):
-                    # Database.query 返回 dict 行 → 按键取值
-                    out.append({
-                        "id": r.get("id"), "url": r.get("url"),
-                        "title": r.get("title"),
-                        "time": r.get("visit_time"),
-                    })
-                else:
-                    # 兼容 tuple/序列行（防御式）
-                    out.append({
-                        "id": r[0], "url": r[1], "title": r[2],
-                        "time": r[3],
-                    })
+                rid, url, title, visit_time = _row_to_tuple(r)
+                out.append({
+                    "id": rid, "url": url, "title": title,
+                    "time": visit_time,
+                })
             return out
         except Exception:
             return []
@@ -530,21 +536,14 @@ class Api:
                     kw, n, cursor_id=cid, cursor_time=ctime)
             else:
                 rows = self.history.fulltext_search(kw, n)
+            # 重构热点 #2：统一行转换（与 get_history 共用 _row_to_tuple）
             out = []
             for r in rows:
-                if isinstance(r, dict):
-                    # FTS5 join 返回 dict 行 → 按键取值
-                    out.append({
-                        "id": r.get("id"), "url": r.get("url"),
-                        "title": r.get("title"),
-                        "visit_time": r.get("visit_time"),
-                    })
-                else:
-                    # 兼容 tuple/序列行（防御式）
-                    out.append({
-                        "id": r[0], "url": r[1], "title": r[2],
-                        "visit_time": r[3],
-                    })
+                rid, url, title, visit_time = _row_to_tuple(r)
+                out.append({
+                    "id": rid, "url": url, "title": title,
+                    "visit_time": visit_time,
+                })
             return out
         except Exception:
             return []

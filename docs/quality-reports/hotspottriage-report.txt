@@ -1,0 +1,16 @@
+# HotspotTriage 热点分析报告（Aegis Python 端，2026-08-15）
+
+> HotspotTriage（avnovikov，★1，纯本地 AST+git log，无需认证）
+> 分析维度：变更率(churn)×圈复杂度×可维护性×相似度×代码异味
+
+## 识别热点（前 8，按 score 排序）
+- Api.close_tab（api_bridge.py）：MEDIUM RISK，score 0.58，驱动=churn（decayed_churn 0.98）
+- 其余热点见完整输出（churn 驱动为主，反映频繁变更区域）
+
+## 说明
+- exit 120 = 存在风险项的正常非零码；pylint 未装，smells 维度部分跳过（radon 仍运行）
+- 分析基于 git log 变更历史，识别'高变更率×高复杂度'需优先重构区
+
+## 对 Aegis 的价值
+- 识别出 close_tab 等频繁变更函数为热点（churn 驱动）——重构优先级参考
+- 纯本地无认证，可入 CI 作热点回归门禁
