@@ -64,9 +64,11 @@ class Api:
         "get_wallpaper", "set_wallpaper",
         "get_search_engine", "set_search_engine",
         "get_tabs", "new_tab", "switch_tab", "close_tab",
+        "pin_tab", "unpin_tab",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
         "get_bookmarks", "add_bookmark", "remove_bookmark",
+        "import_bookmarks", "import_history",
         "get_history", "get_most_visited",
     })
 
@@ -80,7 +82,9 @@ class Api:
         self.config: Any = None
         self._data_dir: str = ""
         self._lock = threading.RLock()
-        self._tabs: list[dict[str, str]] = [{"title": "新标签页", "url": START_URL}]
+        self._tabs: list[dict[str, Any]] = [{
+            "title": "新标签页", "url": START_URL, "pinned": False,
+        }]
         self._current: int = 0
         self._engine: str = DEFAULT_ENGINE
         # 导航队列（独立线程执行全部窗口操作）
@@ -169,7 +173,7 @@ class Api:
     def new_tab(self, url: str = "") -> None:
         target = normalize_url(url) if url else START_URL
         with self._lock:
-            self._tabs.append({"title": "新标签页", "url": target})
+            self._tabs.append({"title": "新标签页", "url": target, "pinned": False})
             self._current = len(self._tabs) - 1
         self._load(target)
 
@@ -198,6 +202,51 @@ class Api:
                 self._current -= 1
             url = self._tabs[self._current]["url"]
         self._load(url)
+
+    def pin_tab(self, index: Any) -> None:
+        """固定标签：置顶（pinned 标签排在最前，顺序稳定）。"""
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            if not (0 <= index < len(self._tabs)):
+                return
+            tab = self._tabs[index]
+            if tab.get("pinned"):
+                return
+            tab["pinned"] = True
+            self._reorder_pinned()
+            self._current = self._find_index(tab)
+
+    def unpin_tab(self, index: Any) -> None:
+        """取消固定：回到普通标签区（pinned 之后）。"""
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return
+        with self._lock:
+            if not (0 <= index < len(self._tabs)):
+                return
+            tab = self._tabs[index]
+            if not tab.get("pinned"):
+                return
+            tab["pinned"] = False
+            self._reorder_pinned()
+            self._current = self._find_index(tab)
+
+    def _reorder_pinned(self) -> None:
+        """置顶重排：pinned 在前（保持各自相对顺序），普通标签在后。"""
+        pinned = [t for t in self._tabs if t.get("pinned")]
+        normal = [t for t in self._tabs if not t.get("pinned")]
+        self._tabs[:] = pinned + normal
+
+    def _find_index(self, tab: dict) -> int:
+        """按对象身份查找标签索引（重排后定位当前标签）。"""
+        for i, t in enumerate(self._tabs):
+            if t is tab:
+                return i
+        return self._current
 
     def _tabs_snapshot(self) -> dict:
         """线程安全地返回标签快照（副本，避免调用方拿到活引用）。"""
@@ -290,6 +339,49 @@ class Api:
                 self.bookmarks.remove(url)
         except Exception:
             pass
+
+    def import_bookmarks(self) -> dict:
+        """从 Chrome/Edge 导入书签（自动探测本机文件）。
+
+        返回 {"imported": 新增数, "total": 解析总数, "source": 来源文件}。
+        解析失败或存储不可用时静默返回 0（导入是可选功能，不影响浏览）。
+        """
+        try:
+            from .browser_import import find_bookmarks_files, parse_bookmarks_json
+            for path in find_bookmarks_files():
+                items = parse_bookmarks_json(path)
+                if not items:
+                    continue
+                imported = 0
+                for item in items:
+                    if (self.bookmarks is not None
+                            and self.bookmarks.add(item["title"], item["url"])):
+                        imported += 1
+                return {"imported": imported, "total": len(items), "source": path}
+        except Exception:
+            pass
+        return {"imported": 0, "total": 0, "source": ""}
+
+    def import_history(self, limit: int = 500) -> dict:
+        """从 Chrome/Edge 导入最近历史（自动探测本机文件）。
+
+        返回 {"imported": 新增数, "total": 解析总数, "source": 来源文件}。
+        """
+        try:
+            from .browser_import import find_history_files, parse_history_db
+            for path in find_history_files():
+                items = parse_history_db(path, limit)
+                if not items:
+                    continue
+                imported = 0
+                for item in items:
+                    if (self.history is not None
+                            and self.history.add(item["url"], item["title"])):
+                        imported += 1
+                return {"imported": imported, "total": len(items), "source": path}
+        except Exception:
+            pass
+        return {"imported": 0, "total": 0, "source": ""}
 
     # ================= 历史 =================
     def get_history(self, limit: Any = 100) -> list:

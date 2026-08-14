@@ -55,7 +55,9 @@ TOOLBAR_JS = r"""
           'background:' + (idx === cur ? 'rgba(255,255,255,0.18)' : 'transparent') + ';' +
           'border:1px solid ' + (idx === cur ? 'rgba(255,255,255,0.22)' : 'transparent') + ';';
         var label = document.createElement('span');
-        label.textContent = (tabs[idx] && tabs[idx].title) || '新标签页';
+        var isPin = !!(tabs[idx] && tabs[idx].pinned);
+        label.textContent = (isPin ? '\u{1F4CC} ' : '') + ((tabs[idx] && tabs[idx].title) || '新标签页');
+        label.title = isPin ? '固定标签（右键取消固定）' : '';
         label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;';
         var x = document.createElement('span');
         x.textContent = '\u00d7';
@@ -73,6 +75,12 @@ TOOLBAR_JS = r"""
           if (idx !== cur && window.pywebview && pywebview.api) {
             try { pywebview.api.switch_tab(idx); } catch (err) {}
           }
+        };
+        // 中键（button===1）关闭标签；preventDefault 阻止 WebView 中键自动滚动
+        t.onauxclick = function (e) {
+          if (e.button !== 1) return;
+          e.preventDefault();
+          try { if (window.pywebview && pywebview.api) pywebview.api.close_tab(idx); } catch (err) {}
         };
         tabsWrap.appendChild(t);
       })(i);
