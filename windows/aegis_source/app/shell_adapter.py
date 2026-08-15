@@ -128,6 +128,7 @@ class PytauriShell(Shell):
             ) from exc
         self._window_kwargs: dict = {}
         self._frontend_dir = None
+        self._tauri_dir = None
 
     def _resolve_frontend_dir(self, url: str, kwargs: dict) -> Any:
         """解析前端资源目录（frontend_dist）优先级：显式 → url 本地目录 → 就近。
@@ -148,20 +149,70 @@ class PytauriShell(Shell):
             return p.parent if p.is_file() else p
         return Path(__file__).resolve().parent
 
+    def _resolve_tauri_dir(self, kwargs: dict) -> Any:
+        """解析 Tauri 配置目录（含 Tauri.toml/tauri.conf.json）优先级：
+        显式 tauri_conf_dir → 就近查找（模块目录向上）→ 清晰报错。
+
+        pytauri context_factory(src_tauri_dir) 要求该目录含 Tauri 配置
+        （productName/identifier/frontendDist 等）——与前端资源目录
+        （frontend_dist）是两个不同概念，须分别解析。
+        """
+        from pathlib import Path
+
+        explicit = kwargs.get("tauri_conf_dir")
+        if explicit:
+            p = Path(explicit)
+            return p if p.is_dir() else p.parent
+        # 就近向上查找 Tauri.toml / tauri.conf.json
+        cur = Path(__file__).resolve().parent
+        for cand in (cur, cur.parent, cur.parent.parent):
+            if (cand / "Tauri.toml").exists() or (cand / "tauri.conf.json").exists():
+                return cand
+        raise ValueError(
+            "PytauriShell 需要 Tauri 配置目录（含 Tauri.toml/tauri.conf.json，"
+            "可经 kwargs tauri_conf_dir 显式指定）；缺失时无法构建 pytauri 应用"
+        )
+
     def create_window(self, js_api: Any, url: str, **kwargs: Any) -> Any:
         # 可用级：注册 js_api 白名单方法为命令（与 capabilities 映射一致），
-        # 保存窗口参数（title/width/height），解析前端资源目录。
+        # 保存窗口参数（title/width/height），解析前端资源目录与
+        # Tauri 配置目录。
         self._window_kwargs = {
             k: kwargs.get(k) for k in ("title", "width", "height")
             if kwargs.get(k) is not None
         }
         self._frontend_dir = self._resolve_frontend_dir(url, kwargs)
+        self._tauri_dir = self._resolve_tauri_dir(kwargs)
         exposed = getattr(js_api, "_JS_EXPOSED", None)
         if exposed:
+            import json as _json
+
+            def _make_wrapper(m: Any):
+                """工厂：闭包绑定 js_api 方法，wrapper 仅接收 pytauri 已知
+                参数 body（带注解），返回 str（JSON 序列化 js_api 结果）。
+                pytauri wrap_pyfunc 要求参数/返回均有类型注解，且
+                parse_parameters 拒绝已知参数名（body 等）之外的任何参数——
+                故 js_api 方法须经本适配器（业务代码零改动）。"""
+                def wrapper(body: dict | None = None) -> str:
+                    try:
+                        if isinstance(body, dict):
+                            result = m(**body)
+                        elif body is None:
+                            result = m()
+                        else:
+                            result = m(body)
+                        return _json.dumps(result, ensure_ascii=False,
+                                           default=str)
+                    except Exception as exc:  # 命令执行异常 → JSON 错误串
+                        return _json.dumps({"error": repr(exc)})
+                return wrapper
+
             for name in sorted(exposed):
                 method = getattr(js_api, name, None)
                 if callable(method):
-                    self._commands.command(name)(method)
+                    wrapper = _make_wrapper(method)
+                    wrapper.__name__ = name
+                    self._commands.command(name)(wrapper)
         return self
 
     def start(self, func: Callable | None = None) -> None:
