@@ -23,7 +23,8 @@
       "method": "POST",
       "body": { "required": ["amount"] },
       "risk": "high",
-      "confirm": "required"
+      "confirm": "required",
+      "condition": { "param": "amount", "operator": "lte", "value": 5000 }
     },
     {
       "semantic": "export_data",
@@ -31,7 +32,8 @@
       "method": "POST",
       "body": { "required": ["format"] },
       "risk": "high",
-      "confirm": "required"
+      "confirm": "required",
+      "condition": { "param": "rows", "operator": "lte", "value": 10000 }
     }
   ]
 }

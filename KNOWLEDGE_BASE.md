@@ -399,3 +399,12 @@
   - 配置示例：`docs/release/agent-sitemap.example.json`（domain=intra.gov.cn，4 动作：view_docs/search_records（low）/create_order/export_data（high+confirm））
 - **验证**：语法/三自检/ruff 0/mypy Success/bandit 0 + sitemap 匹配 4 场景（低风险匹配/高风险匹配/未登记/方法不匹配）全过。
 - **三级纵深**（Agent 安全）：工具层（mcp 白名单）→ 域层（阶段 A）→ 动作层（阶段 B sitemap）。
+
+### 23.6 C2 阶段 C 实施（2026-08-15 已落地——condition 动态策略）
+- **全球搜索**（中英全覆盖）：ceLLMate Cond 谓词（args 运行时提取（DOM/HTTP）+ allowPurchaseIfAmountLeq（params maxAmount + args totalAmount）+ browser lockout 防 stale 值）+ Microsoft agent-governance-toolkit（DYNAMIC-POLICY-CONDITIONS-1.0 spec——DynamicContext/time_window/预算条件（token_count/cost_per_window——累积 ≤ limit）+ 评估语义（静态→动态→都真才匹配）+ 审计元数据 + fail-closed）+ 掘金 Harness 8 层（PermissionBudget.spend/BudgetExhaustedError——防穷举）+ PDP 架构（结构化决策日志——审计价值）。
+- **实现**（main_webview 扩展 + 配置更新）：
+  - `_eval_agent_condition(action, url)`：URL query 参数 vs value——operator（lte/gte/eq）比较；返回 True=超限（标记可观测）；无 condition/参数缺失/格式无效 → False（保守不标记）
+  - `_on_request` 扩展：action 带 condition → 评估 → 超限标记 `X-Aegis-Agent-Condition: exceeded` + `[agent] 条件超限` 日志（零风险可观测——与阶段 A/B 一致）
+  - sitemap 示例更新：create_order（amount ≤ 5000）/export_data（rows ≤ 10000）加 condition
+- **验证**：语法/三自检/ruff 0/mypy Success/bandit 0 + condition 评估 4 场景（超限标记/未超限不标记/无 condition 不评估/参数缺失保守不标记）全过。
+- **Agent 安全四级纵深**：工具层（mcp）→ 域层（A）→ 动作层（B sitemap）→ **条件层（C condition 阈值）**。

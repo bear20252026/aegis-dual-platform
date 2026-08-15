@@ -68,6 +68,40 @@ def _match_agent_action(sitemap: dict | None, method: str, url: str) -> dict | N
     return None
 
 
+def _eval_agent_condition(action: dict | None, url: str) -> bool:
+    """评估 sitemap 动作 condition（URL query 参数 vs value——operator 比较）。
+
+    返回 True=条件超限（违反约束——标记可观测）；无 condition/参数缺失/
+    格式无效 → False（保守不标记）。condition 定义允许值（lte=<= 等）。
+    """
+    if not action:
+        return False
+    cond = action.get("condition")
+    if not cond:
+        return False
+    from urllib.parse import parse_qs, urlparse
+    param = cond.get("param", "")
+    operator = cond.get("operator", "lte")
+    value = cond.get("value")
+    if not param or value is None:
+        return False
+    vals = parse_qs(urlparse(url).query).get(param)
+    if not vals:
+        return False  # 参数缺失——保守不标记
+    try:
+        actual = float(vals[0])
+        limit = float(value)
+    except (TypeError, ValueError):
+        return False  # 格式无效——保守不标记
+    if operator == "lte":
+        return actual > limit
+    if operator == "gte":
+        return actual < limit
+    if operator == "eq":
+        return actual != limit
+    return False
+
+
 def _apply_request_policy(window: Any, blocked: set | None = None,
                           shell: Any = None, api: Any = None) -> None:
     """统一请求策略管线（A 级落地，P0-①：DNT→威胁拦截统一回调链）。
@@ -182,6 +216,13 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                                 headers["X-Aegis-Agent-Action"] = "high"
                                 log_event(
                                     f"[agent] Agent 高风险动作: {action.get('semantic')} {url}"
+                                )
+                            # C2C（ceLLMate Cond 谓词 + 掘金预算）：condition 动态
+                            # 策略评估（金额阈值等——URL query 参数 vs value）
+                            if _eval_agent_condition(action, url):
+                                headers["X-Aegis-Agent-Condition"] = "exceeded"
+                                log_event(
+                                    f"[agent] Agent 条件超限: {action.get('semantic')} {url}"
                                 )
                         else:
                             headers["X-Aegis-Agent-Action"] = "unregistered"
