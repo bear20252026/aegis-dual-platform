@@ -1,0 +1,90 @@
+# release.yml —— Aegis 发布 workflow 草稿（B4 实施，发布期——与 ci.yml 分离）
+# 发布期实施产物（docs/release/——不触碰开发分支）
+# 基于全球调研（sigstore-python 官方 release.yml + ADR 0014 + Shaken Fist + 腾讯云）
+# 使用前：①配置 GitHub Environment "release"（required reviewer）
+#        ②配置受保护 v* 标签规则集 ③PyPI Trusted Publisher 指向本 workflow
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions: {}
+
+jobs:
+  build:                       # Job 1：构建（B1 混淆隔离 + B3 SBOM）
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build deps
+        run: |
+          python -m pip install pyarmor nuitka cyclonedx-bom
+      - name: Build release artifacts (B1 obfuscation isolation)
+        run: python docs/release/build_release.py
+      - name: Generate SBOM (B3)
+        run: |
+          cyclonedx-py requirements windows/aegis_source/requirements.txt \
+            -o dist/sbom-aegis.json
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 90
+
+  sign:                        # Job 2：签名（B2 sigstore——ambient OIDC）
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write          # 仅签名 job 需要（最小权限）
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: dist/
+      - name: Install sigstore
+        run: python -m pip install sigstore
+      - name: Sign artifacts (sigstore keyless)
+        run: |
+          for f in dist/core/*.pyd dist/obfuscated/*.py; do
+            python -m sigstore sign "$f" --bundle "${f}.sigstore"
+          done
+      - name: Verify signatures (ambient OIDC identity)
+        run: |
+          for f in dist/core/*.pyd dist/obfuscated/*.py; do
+            python -m sigstore verify identity "$f" \
+              --bundle "${f}.sigstore" \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              --cert-identity "${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}"
+          done
+      - name: Upload signed artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-signed
+          path: dist/
+
+  publish:                     # Job 3：发布（受保护环境审批 + Trusted Publishing）
+    needs: sign
+    runs-on: ubuntu-latest
+    environment: release       # 受保护 Environment（required reviewer）
+    permissions:
+      id-token: write          # OIDC Trusted Publishing
+      contents: write          # gh release create
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-signed
+          path: dist/
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/**
+          generate_release_notes: true
+      # （可选）PyPI 发布：pypa/gh-action-pypi-publish（Trusted Publishing——
+      #   OIDC 无 API token；本 workflow 名须与 PyPI Trusted Publisher 配置一致）
