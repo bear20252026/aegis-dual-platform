@@ -95,3 +95,54 @@
 | R6 | 本文档体系 | FreeDom | ✅ 本次 |
 | R7 | 可选指纹/隐身（默认关） | ShardBrowser/Cloak | 待评估 |
 | R8 | 阅读模式（视图/决策分离） | min `readerView` | 待实施 |
+
+## 7. 开源浏览器审计结论（2026-08-15，详见 docs/open-source-browser-audit.md）
+
+### 7.1 六项目审计要点（精简）
+- **FreeDom**（C11 纯 C）：可信父进程+每标签 re-exec worker；**四层沙箱**（seccomp-bpf 白名单/W^X/Landlock/每 tab 命名空间）；worker 无 socket 全部请求父进程代理**重放完整策略**；策略为**纯函数 fail-closed**（17 个 libFuzzer harness 直接测试）；TLS1.3+后量子、JS 默认关按域 allowlist。
+- **brave**（Chromium 增量）：Rust adblock 引擎+cxx FFI；**统一请求回调链**（site_hacks→AdBlockTP→CSP→重定向，块→1×1 stub→头改写）；**per-site 确定性 farbling**（FarbleKey：站点 token+PRNG 生成全部指纹值）；ContentSettings 全局默认+per-site 覆盖。
+- **ShardBrowser**（Tauri2 壳+独立 Chromium）：API 回环绑定+**JWT 即时轮换吊销**；**临时 profile 关闭自删+启动 purge 残留**；CDP `--remote-debugging-port=0` 自动取端口。⚠️ 反面：csp:null/任意文件读/`--remote-allow-origins=*`/cookie 密钥硬编码。
+- **CloakBrowser**：⚠️ **仓库无内核源码**（Vite 脚手架+预编译二进制，反指纹 C++ 补丁不可验证）；理念：拟人输入 humanize/二进制自更新。
+- **electron-browser-shell**：极简标签浏览器+Chrome 扩展支持（理念参考）。
+- **browser-shell**：浏览器内 Linux VM（v86+Plan9），Cache Storage 状态缓存（概念参考）。
+
+### 7.2 可借鉴点（对 Aegis 下一步，按优先级）
+- 🔴 **A-立即**：
+  1. **统一请求拦截管线**（brave）：扩展 `request_sent`（main_webview `_apply_dnt_header`）为 DNT→威胁拦截→1×1 stub 统一回调链，一次请求走全量策略；
+  2. **纯策略函数 fail-closed+可单测**（FreeDom）：收敛 `safe_url`/威胁决策为单一可单测 Python 策略模块（现分散 security/threat_feed/url_utils）。
+- 🟡 **B-中期**：
+  3. per-site 确定性 farbling（brave FarbleKey）→ `fingerprint.py` 改确定性模式；
+  4. 白名单覆盖黑名单 hosts 风格（FreeDom）→ threat_feed 明确白名单优先语义；
+  5. 临时 profile 自删+purge（ShardBrowser）→ Android TabManager 挂起清理。
+- ⚪ **C-参考**：组件自更新（CloakBrowser，Aegis 已有 watch_runtime_update）、扩展支持、VM 缓存。
+
+### 7.3 进一步开发建议
+1. 下一开发批次：A 级两项（统一拦截管线 + 策略收敛），均映射现有代码改动可控；
+2. B 级评估：fingerprint 确定性化/白名单优先/Android 清理；
+3. ShardBrowser 4 处安全风险**已全部被 Aegis 现有设计规避**（验证纵深有效性）；CDP 若开启必须回环+鉴权；
+4. 跟踪：FreeDom 沙箱（若需更严格隔离）、brave shields 迭代（WebView2 无对应则记录）。
+
+## 8. 2026 浏览器架构趋势审计（2026-08-15，中英双语权威信源核实）
+
+### 8.1 趋势一：去 WebView 化反思（微软实证 + 学术支撑）
+- **微软 Copilot 反面实证**（Windows Latest/Windows Report 2026-04）：新 Copilot 内置完整 Edge fork（WebView2 容器渲染 web.copilot.com），**RAM 500MB-1GB vs 原生 WinUI <100MB**——套壳内存代价的实锤；印证"初始 UI/重 UI 不用 WebView2"。
+- **ACM SIGMETRICS 2026 "Shiny Objects"**（UVA，cs.virginia.edu/venkat）：对象级 Chromium 内存特征（僵尸对象/内存污染/分配热区）——为内存优化提供理论支撑。
+- **混合架构共识**：WebView2 官方（Microsoft Learn）确认"原生壳+WebView 画板"混合模式 + WebMessage 异步通信为推荐。
+
+### 8.2 趋势二：Agent 原生浏览器兴起
+- **Cloudflare Kitesurf**（2026-08-06 发布，官方博客+TechCrunch）：**无 Chromium**，V8 isolate + Rust→Wasm（Blitz 渲染+Stylo CSS+Boa JS）；CPU 3.1-3.8×/内存 4.7-7× 低于 Chromium；每页视为不可信输入、SandboxOutbound 唯一网络出口；215K+ WPT；CDP 兼容；将开源。
+- **北大 WAB**（ACM WWW 2026 Companion）：Wasm 克服 Agent 浏览器"三堵墙"（内存/网络/安全）。
+- **Agent 安全威胁**：IEEE S&P 2026 "Site Isolation is Dead"（IPC 通道攻击面：提示注入+LLM 数据外泄，2 开源浏览器+7 扩展全中招）；WAAA!（arXiv 2026-05：20 种攻击分类，同源策略被 agent 中介绕过）。
+
+### 8.3 趋势三：安全架构革命
+- **PQC 已默认落地**：Chrome 131+/Brave 1.73.86+/Edge/Firefox 132+ **默认 X25519MLKEM768**（Kyber 混合）——WebView2 底层继承，Aegis 零成本；Chrome MTCs 量子抗性证书（Phase 3 Q3 2027 CQRS）；PQ-TLS 测量无延迟增加（arXiv 2607.29005）。
+
+### 8.4 混合原生壳+异步消息驱动（落地核实）
+- **Helium**（imputnet/helium 0.11.7.1）：⚠️ 核实为 Chromium 系（AppImage 147MB），**非"7.6MB 极致轻量"**（该说法不可证实）；极致轻量参考 Kitesurf 思路。
+- **Servo/servoshell**（0.0.6/2026-03-31，Rust 引擎）真实。
+- **WebView2 官方**：ScenarioWebMessage 异步通信 + ContentLoading RemoveHostObjectFromScript + 非提权宿主最佳实践——与 Aegis NavQueue 模式同构。
+
+### 8.5 对 Aegis 适用性结论
+- ✅ **已满足（零动作）**：混合壳架构（pywebview 原生壳+WebView 内容）、异步消息驱动（NavQueue 即此模式）、初始 UI 轻页、PQC 底层继承、性能基线监控。
+- 🟡 **评估**：混合原生壳进一步分离（地址栏/书签原生化，受 pywebview 约束）；Helium 7.6MB 信息已纠正。
+- 🔵 **新方向**：Agent 友好 API 标准化（mcp.py 雏形扩展 js_api schema）；Agent 安全防护（MCP 接入注意通道隔离+工具最小权限，OWASP Agent Cheat Sheet）；Wasm 插件沙箱（远期，北大 WAB 思路）。
