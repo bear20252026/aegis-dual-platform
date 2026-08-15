@@ -42,3 +42,7 @@ aegis-source-architecture.md
 
 # 审查材料 MD 生成产物（不入库）
 aegis-review-materials.md
+
+# windows_host 构建产物（.NET——不入库）
+windows_host/bin/
+windows_host/obj/
