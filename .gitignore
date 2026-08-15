@@ -46,3 +46,7 @@ aegis-review-materials.md
 # windows_host 构建产物（.NET——不入库）
 windows_host/bin/
 windows_host/obj/
+
+# windows/src 构建产物（.NET——不入库）
+windows/src/**/bin/
+windows/src/**/obj/
