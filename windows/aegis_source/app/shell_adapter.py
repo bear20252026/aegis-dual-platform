@@ -114,10 +114,14 @@ class PytauriShell(Shell):
             # pytauri 使用前设置）
             environ.setdefault("_PYTAURI_DIST", "pytauri-wheel")
             from anyio.from_thread import start_blocking_portal  # noqa: F401
+
             # pytauri-wheel 为运行时依赖（可选壳），未装时无类型桩——
             # 与 main_webview 的 webview import 同惯例忽略 import-not-found
             from pytauri import Commands  # type: ignore[import-not-found]
-            from pytauri_wheel.lib import builder_factory, context_factory  # type: ignore[import-not-found]
+            from pytauri_wheel.lib import (  # type: ignore[import-not-found]
+                builder_factory,
+                context_factory,
+            )
             self._builder_factory = builder_factory
             self._context_factory = context_factory
             self._commands = Commands()
