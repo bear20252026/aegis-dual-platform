@@ -23,7 +23,8 @@ from typing import Any
 from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
 
 
-def _apply_request_policy(window: Any, blocked: set | None = None) -> None:
+def _apply_request_policy(window: Any, blocked: set | None = None,
+                          shell: Any = None) -> None:
     """统一请求策略管线（A 级落地，P0-①：DNT→威胁拦截统一回调链）。
 
     通过 pywebview request_sent 事件（底层 WebView2 WebResourceRequested）
@@ -63,6 +64,20 @@ def _apply_request_policy(window: Any, blocked: set | None = None) -> None:
                     host = urlparse(url).hostname or ""
                 except Exception:
                     host = ""
+                # A4（final-development-checklist）：按来源动态 CoreWebView2Settings
+                # （微软官方"Update settings based on the origin of the new page"）——
+                # 非信任站点（远程网页）禁用 WebMessage 通道 + 脚本对话框；本地页面
+                # 保持开启。js_api 桥不依赖 IsWebMessageEnabled（零功能影响）；设置
+                # 幂等（每次请求按来源设置，下个导航生效——pywebview 无导航事件）。
+                try:
+                    core = shell.core(window) if shell is not None else None
+                    settings = getattr(core, "Settings", None) if core is not None else None
+                    if settings is not None:
+                        remote = bool(host)  # host 非空 = 远程网页（非信任）
+                        settings.IsWebMessageEnabled = not remote
+                        settings.AreDefaultScriptDialogsEnabled = not remote
+                except Exception:
+                    pass  # 设置失败静默（版本不支持/属性缺失，不影响请求）
                 if host and blocked:
                     from app.threat_feed import host_is_blocked
                     if host_is_blocked(host, blocked):
@@ -465,7 +480,7 @@ def main() -> int:
                 blocked = ThreatFeedUpdater(resolve_data_dir()).load_cached()
             except Exception:
                 blocked = set()  # 黑名单快照失败 → 仅 DNT，不影响浏览
-            _apply_request_policy(window, blocked=blocked)
+            _apply_request_policy(window, blocked=blocked, shell=shell)
     except Exception:
         pass  # 统一策略绑定失败静默，不影响浏览
 
