@@ -18,7 +18,9 @@ on:
     tags: ['v*']
   workflow_dispatch: {}  # dry-run 演练（publish tag-gated 跳过）
 
-permissions: {}
+permissions:
+  contents: read        # GITHUB_TOKEN 读私有仓库（checkout 必需——之前
+                        # {} 导致 pin-check 的 Repository not found）
 
 jobs:
   pin-check:                 # S-04：所有 uses 必须完整 40 字符 SHA
@@ -39,6 +41,7 @@ jobs:
     permissions:
       id-token: write        # SLSA provenance 签名
       attestations: write
+      contents: read        # checkout 私有仓库（Repository not found 修复）
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b
@@ -70,6 +73,7 @@ jobs:
     permissions:
       id-token: write
       attestations: write
+      contents: read        # checkout 私有仓库（Repository not found 修复）
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
