@@ -356,3 +356,13 @@
 
 ### 21.3 B 实施整体状态
 - **发布路线端到端就绪**：核心保护（Nuitka .pyd）✅ + XOR 加固 ✅ + release.yml 签名/发布 ✅ + 不编译模块分层 ✅ + B 整体跑通 ✅——B 级（免费路线）全部落地，实施产物在 docs/release/（不触碰开发分支）。
+
+## 22. P1 评估与落地（2026-08-15：Edge LNA + SRI）
+
+### 22.1 全球调研（中英全覆盖）
+- **Edge LNA**（官方 Announcement #126，2026-02 Breaking Change + 微软中文 2026-03）：`msWebViewAllowLocalNetworkAccessChecks` flag（默认关闭/145 起 force-allow fallback）；Chromium LNA 限制网页访问 localhost/192.168/10.x（防未授权本地访问/SSRF 类）；**WebView2 LNA 权限提示不显示（直接阻塞/拒绝）**；service-worker iframe gap 后 **kill-switch 禁用**（直到未来 SetPermissionState/PermissionRequested API 就绪——flag 将移除）；Edge 143 起限制子资源/fetch/子帧（WebSocket 待扩展/主框架不限制）；**Android WebView 不适用**（受 Android 本地网络权限约束）。
+- **SRI Integrity-Policy**（MDN + w3c PR #133）：`blocked-destinations=(script)` 强制 script 带 integrity；**非 Baseline（WebKit/Firefox 正面未实现）**。
+
+### 22.2 P1 评估结论
+- **Edge LNA**：✅ 适用（Aegis 浏览器无本地网络依赖——LNA 是理想安全增强——防网页访问内网）；⚠️ **pywebview 6.2.1 不支持 WebView2 环境参数（AdditionalBrowserArguments/EnvironmentOptions grep 为空）**——**LNA flag 无法经 pywebview API 传递**；启用需 pywebview 支持或 WebView2 未来权限 API——**当前不可经 pywebview 启用**（记录方案待条件成熟——季度复核跟踪 pywebview 支持/WebView2 API）。
+- **SRI Integrity-Policy**：Aegis 资源本地化（无 CDN）场景不适用 + 头非 Baseline——**记录**（若未来引入 CDN 外部资源则启用 SRI integrity 属性）。
