@@ -24,6 +24,9 @@ detekt {
     allRules = false
     config.setFrom(rootProject.files("detekt.yml"))
     baseline = file("detekt-baseline.xml")
+    // 注：detekt 1.23.8 的 jvmTarget 配置在 Gradle 9.7 下类型兼容存疑
+    // （JvmTarget/String 均脚本编译错误）——已移除——Kotlin 编译目标 21 由
+    // compileOptions + compilerOptions 设置（detekt 跟随——远端 JDK 21 一致）
 }
 
 val signingProperties = Properties()
@@ -114,4 +117,13 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.webkit:webkit:1.15.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+}
+
+// detekt/Kotlin 编译目标显式 21（与 CI JDK 21 一致——detekt jvm-target 兼容——
+// AGP 9 内置 Kotlin 不支持 android 块内 kotlinOptions（脚本编译失败）——
+// 任务级配置用 compilerOptions DSL（kotlinOptions 已废弃——Gradle 9.7 编译报错）
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
+    }
 }
