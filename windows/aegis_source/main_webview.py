@@ -23,13 +23,23 @@ from typing import Any
 from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
 
 
-def _apply_dnt_header(window: Any) -> None:
-    """为每个 HTTP 请求注入 DNT: 1 头（落地 A-①，P2-① 强化）。
+def _apply_request_policy(window: Any, blocked: set | None = None) -> None:
+    """统一请求策略管线（A 级落地，P0-①：DNT→威胁拦截统一回调链）。
 
     通过 pywebview request_sent 事件（底层 WebView2 WebResourceRequested）
     修改请求头。pywebview 6.x（已锁 6.2.1）**正式支持**该事件：回调接收
     Request 对象，`request.headers` 为字典，**变异后即用于请求**（官方
     语义，见 pywebview.flowrl.com/api window.events.request_sent）。
+
+    统一回调链（一次请求走全量请求策略）：
+    1. **DNT 注入**：do_not_track 开启时注入 `DNT: 1`（落地 A-①）；
+    2. **威胁域名标记**：命中 threat_feed 黑名单的请求标记
+       `X-Aegis-Threat: 1`（A-②，尽力而为的请求头标记——pywebview 6.x
+       request_sent 仅能改请求头、不能拦截响应；**权威拦截仍在导航层**
+       safe_url + host_is_blocked 实时判断）。
+
+    blocked 为启动时黑名单快照（ThreatFeedUpdater.load_cached 一次），
+    请求层标记尽力而为；导航层拦截用实时缓存（权威关口）。
     更旧版本不支持该事件/请求头修改时静默降级。
     """
     try:
@@ -42,8 +52,21 @@ def _apply_dnt_header(window: Any) -> None:
         def _on_request(request: Any) -> None:
             try:
                 headers = getattr(request, "headers", None)
-                if headers is not None:
-                    headers["DNT"] = "1"  # 变异 headers 即生效（6.x 官方语义）
+                if headers is None:
+                    return
+                headers["DNT"] = "1"  # 变异 headers 即生效（6.x 官方语义）
+                # 威胁域名标记（尽力而为；命中黑名单 → 请求头标记）
+                url = getattr(request, "url", "") or ""
+                host = ""
+                try:
+                    from urllib.parse import urlparse
+                    host = urlparse(url).hostname or ""
+                except Exception:
+                    host = ""
+                if host and blocked:
+                    from app.threat_feed import host_is_blocked
+                    if host_is_blocked(host, blocked):
+                        headers["X-Aegis-Threat"] = "1"
             except Exception:
                 pass  # 单个请求修改失败不影响其他请求
 
@@ -398,19 +421,27 @@ def main() -> int:
     except Exception:
         pass  # 启用失败静默，不影响浏览
 
-    # 落地 A-①：隐私影子字段新栈接入 — DNT 请求头。
-    # config.do_not_track=True 时通过 pywebview request_sent 事件为
-    # 每个 HTTP 请求注入 DNT: 1 头（底层 WebView2 WebResourceRequested）。
-    # pywebview 版本不支持该事件时静默降级，不影响浏览。
+    # A-① + A-② 统一请求策略管线（A 级落地，P0-①）：
+    # request_sent 回调统一执行全量请求策略（DNT 注入 + 威胁域名头标记）。
+    # blocked 为启动时黑名单快照（请求层标记尽力而为）；权威拦截仍在
+    # 导航层（safe_url + host_is_blocked 实时）。pywebview 不支持该事件
+    # 时静默降级，不影响浏览。
     try:
         from app.config import AppConfig
         dnt_enabled = True  # 默认开启（与 config 默认值一致）
         if api.config is not None:
             dnt_enabled = bool(getattr(api.config, "do_not_track", True))
         if dnt_enabled:
-            _apply_dnt_header(window)
+            blocked: set = set()
+            try:
+                from app.paths import resolve_data_dir
+                from app.threat_feed import ThreatFeedUpdater
+                blocked = ThreatFeedUpdater(resolve_data_dir()).load_cached()
+            except Exception:
+                blocked = set()  # 黑名单快照失败 → 仅 DNT，不影响浏览
+            _apply_request_policy(window, blocked=blocked)
     except Exception:
-        pass  # DNT 注入失败静默，不影响浏览
+        pass  # 统一策略绑定失败静默，不影响浏览
 
     # S5：Windows 11 系统级亚克力/Mica 背景（尽力而为，失败静默降级到 CSS 毛玻璃）
     try:

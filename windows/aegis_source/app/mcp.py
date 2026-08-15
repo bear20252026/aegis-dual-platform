@@ -35,8 +35,11 @@ def _ok(req_id: Any, result: Any) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# 工具定义（白名单）。name → (描述, 参数 schema, 处理函数)
+# 工具定义（白名单）。name → (描述, 参数 JSON Schema, 处理函数)
 # 处理函数签名：fn(api, **kwargs) -> Any
+# 参数 schema 为标准 JSON Schema（properties/required/description）——
+# Agent 友好标准化（R2 + 2026 架构趋势审计第 8.5 节新方向）：
+# LLM/Agent 可直接据 schema 生成参数，且与 OpenAPI/MCP inputSchema 兼容。
 # --------------------------------------------------------------------------- #
 def _t_navigate(api, **kw):
     text = kw.get("text", "")
@@ -84,41 +87,89 @@ def _t_get_search_engine(api, **kw):
     return api.get_search_engine()
 
 
-# 工具白名单（唯一登记处；新增动作必须在此添加并写明用途）
+# 工具白名单（唯一登记处；新增动作必须在此添加并写明用途）。
+# 参数 schema 为标准 JSON Schema（Agent 友好，tools/list 原样输出）。
 _TOOLS: dict[str, dict[str, Any]] = {
     "navigate": {
         "description": "在当前标签导航到 URL 或搜索词",
-        "parameters": {"text": {"type": "string", "required": True}},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "URL 或搜索词（非空）",
+                },
+            },
+            "required": ["text"],
+        },
         "fn": _t_navigate,
     },
     "new_tab": {
         "description": "新建标签页（可选 URL）",
-        "parameters": {"url": {"type": "string", "required": False}},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "新标签的起始 URL（空则默认页）",
+                },
+            },
+        },
         "fn": _t_new_tab,
     },
     "switch_tab": {
         "description": "切换到指定索引的标签",
-        "parameters": {"index": {"type": "integer", "required": True}},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "目标标签索引（非负）",
+                },
+            },
+            "required": ["index"],
+        },
         "fn": _t_switch_tab,
     },
     "close_tab": {
         "description": "关闭指定索引的标签",
-        "parameters": {"index": {"type": "integer", "required": True}},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "要关闭的标签索引（非负）",
+                },
+            },
+            "required": ["index"],
+        },
         "fn": _t_close_tab,
     },
     "pin_tab": {
         "description": "固定指定索引的标签（置顶）",
-        "parameters": {"index": {"type": "integer", "required": True}},
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "要固定的标签索引（非负）",
+                },
+            },
+            "required": ["index"],
+        },
         "fn": _t_pin_tab,
     },
     "get_tabs": {
         "description": "返回全部标签快照（标题/URL/固定/分组）",
-        "parameters": {},
+        "parameters": {"type": "object", "properties": {}},
         "fn": _t_get_tabs,
     },
     "get_search_engine": {
         "description": "返回当前搜索引擎与可选列表",
-        "parameters": {},
+        "parameters": {"type": "object", "properties": {}},
         "fn": _t_get_search_engine,
     },
 }
