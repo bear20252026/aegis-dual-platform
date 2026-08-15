@@ -114,6 +114,13 @@ def _write_report(kind: str, exc_text: str) -> str:
             (d / "latest.log").write_text("\n".join(lines), encoding="utf-8")
         except OSError:
             pass
+        # W-07 整改（国防级审查）：日志文件平台权限收紧（目录 ACL——
+        # POSIX 0600 / Windows DACL——security.harden_perms）
+        try:
+            from app.security import harden_perms
+            harden_perms(str(path))
+        except Exception:
+            pass
     except OSError:
         return ""
     return str(path)
@@ -186,6 +193,13 @@ def log_event(msg: str) -> None:
         line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
         with open(d / "events.log", "a", encoding="utf-8") as f:
             f.write(line)
+        # W-07 整改（国防级审查）：事件日志文件权限收紧（目录 ACL——
+        # POSIX 0600 / Windows DACL——security.harden_perms）
+        try:
+            from app.security import harden_perms
+            harden_perms(str(d / "events.log"))
+        except Exception:
+            pass
     except OSError:
         pass
 

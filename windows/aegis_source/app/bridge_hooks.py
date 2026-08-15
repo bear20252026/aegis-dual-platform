@@ -51,7 +51,10 @@ def on_loaded(window: Any, api: Any) -> None:
                 sugg_enabled = bool(getattr(cfg, "search_suggestions", True))
         except Exception:
             tabs_pos = "top"
-        js = build_toolbar_js(url, api.get_tabs(), keybindings=kb,
+        # W-02（国防级审查）：工具栏注入脚本已最小化（B0-W-01 移除敏感
+        # 方法——注入仅剩非敏感 UI 导航/标签操作）；原生受信 WebUI 迁移
+        # 为发布期架构项（注入式 UI 与远程页面同 DOM 的彻底隔离）
+        js = build_toolbar_js(url, {}, keybindings=kb,  # B0-W-01：不再传全量标签（敏感读取移除——标签列表 UI 降级；空 dict 匹配类型）
                               tabs_position=tabs_pos,
                               search_suggestions=sugg_enabled)
         api._eval(js)

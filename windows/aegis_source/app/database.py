@@ -56,6 +56,17 @@ class Database:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA synchronous=NORMAL")
+        # W-08 整改（国防级审查）：数据库文件 + WAL/SHM sidecar 平台权限
+        # 收紧（POSIX 0600 / Windows DACL 当前用户——security.harden_perms）
+        try:
+            from .security import harden_perms
+            harden_perms(self.db_path)
+            import os as _os
+            for _side in (self.db_path + "-wal", self.db_path + "-shm"):
+                if _os.path.exists(_side):
+                    harden_perms(_side)
+        except Exception:
+            pass
         return conn
 
     def connect(self) -> sqlite3.Connection:

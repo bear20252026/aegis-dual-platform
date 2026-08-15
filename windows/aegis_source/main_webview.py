@@ -160,7 +160,8 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                 if host and blocked:
                     from app.threat_feed import host_is_blocked
                     if host_is_blocked(host, blocked):
-                        headers["X-Aegis-Threat"] = "1"
+                        # W-04 整改（国防级审查）：不再向远端发送安全决策头
+                        # （X-Aegis-Threat——泄露内部安全状态）——仅内部日志
                         # 六维上下文记录增强（docs/threat-context-design.md 第 1 步）：
                         # method + request_type 推断（Content-Type/扩展名）入威胁日志，
                         # 可观测性增强——不改变拦截语义（政府级零风险门禁）
@@ -194,7 +195,7 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                         and time.time() - (getattr(api, "_agent_session", None) or 0.0) < 60
                     )
                     if session_active and host and host not in AGENT_ALLOWED_HOSTS:
-                        headers["X-Aegis-Agent-Blocked"] = "1"
+                        # W-04 整改：不再发送 X-Aegis-Agent-Blocked（仅日志）
                         try:
                             from crash_reporter import log_event
                             log_event(f"[agent] Agent 请求非白名单域: {url}")
@@ -213,19 +214,19 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                         from crash_reporter import log_event
                         if action:
                             if action.get("risk") == "high":
-                                headers["X-Aegis-Agent-Action"] = "high"
+                                # W-04 整改：不再发送 X-Aegis-Agent-Action（仅日志）
                                 log_event(
                                     f"[agent] Agent 高风险动作: {action.get('semantic')} {url}"
                                 )
                             # C2C（ceLLMate Cond 谓词 + 掘金预算）：condition 动态
                             # 策略评估（金额阈值等——URL query 参数 vs value）
                             if _eval_agent_condition(action, url):
-                                headers["X-Aegis-Agent-Condition"] = "exceeded"
+                                # W-04 整改：不再发送 X-Aegis-Agent-Condition（仅日志）
                                 log_event(
                                     f"[agent] Agent 条件超限: {action.get('semantic')} {url}"
                                 )
                         else:
-                            headers["X-Aegis-Agent-Action"] = "unregistered"
+                            # W-04 整改：不再发送 X-Aegis-Agent-Action（仅日志）
                             log_event(f"[agent] Agent 未登记动作: {url}")
                 except Exception:
                     pass  # sitemap 策略失败静默（不影响请求）

@@ -65,6 +65,9 @@ def _walk(node, out: list, seen: set) -> None:
                 _walk(child, out, seen)
 
 
+# W-03 整改（国防级审查）：本机 Chrome/Edge 导入仅允许原生受信 UI 明示
+# 授权的最小读取（JS 桥入口已断——B0-W-01 从 _JS_EXPOSED 移除
+# import_bookmarks/import_history——恶意页面不可触发导入）
 def parse_bookmarks_json(path: str) -> list:
     """解析指定 Bookmarks JSON 文件，返回 [{title, url}, ...]。
 

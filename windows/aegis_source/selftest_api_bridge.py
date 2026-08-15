@@ -34,7 +34,13 @@ exposed = set(dir(api))
 check("__dir__ 只含白名单方法", exposed == api._JS_EXPOSED,
       f"extra={sorted(exposed - api._JS_EXPOSED)}")
 check("白名单含关键方法", {"new_tab", "switch_tab", "close_tab",
-                        "navigate", "get_tabs"} <= api._JS_EXPOSED)
+                        "navigate"} <= api._JS_EXPOSED)
+# B0-W-01 整改验证（国防级审查）：敏感读取/导入方法不得在 JS 白名单
+# （历史/书签/标签 URL 读取 + 本机 Chrome/Edge 导入——恶意页面不可达）
+check("白名单无敏感方法", not {"get_tabs", "get_history", "get_most_visited",
+                        "search_history_fulltext", "get_bookmarks",
+                        "import_bookmarks", "import_history",
+                        "get_tab_groups"} & api._JS_EXPOSED)
 
 # 3) 标签管理
 api.new_tab("https://a.cn")

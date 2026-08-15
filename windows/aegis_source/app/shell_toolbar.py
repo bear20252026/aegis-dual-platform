@@ -165,6 +165,9 @@ TOOLBAR_JS = r"""
       if (v.length < 2) { closeSuggest(); return; }  // 短输入不搜索
       suggTimer = setTimeout(function () {
         try {
+          // B0-W-01 整改：search_history_fulltext 已从桥移除（敏感读取——
+          // 历史搜索 UI 降级禁用；保留原逻辑注释供后续原生 UI 恢复）
+          return;
           if (!(window.pywebview && pywebview.api && pywebview.api.search_history_fulltext)) return;
           pywebview.api.search_history_fulltext(v, 8).then(function (items) {
             if (!(items && items.length)) { closeSuggest(); return; }

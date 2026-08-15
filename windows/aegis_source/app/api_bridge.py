@@ -83,17 +83,21 @@ class Api:
     """暴露给 JS 的 Python 桥。JS 侧调用 pywebview.api.navigate(...) 等。"""
 
     # 暴露给 JS 的方法白名单（其余属性/内部方法一律对 dir() 隐藏）
+    # B0-W-01 整改（国防级审查——阶段 0 立即处置）：
+    # 从远程页面可达桥移除敏感读取/导入能力（历史/书签/标签 URL 读取 +
+    # 本机 Chrome/Edge 导入——恶意页面可读取回传/触发导入）。
+    # 依据：微软官方（WebView2 安全——限制 web 内容功能/避免通用代理）+
+    # Code2Native（桥白名单只暴露必要方法——Critical）+ 审查必须整改。
+    # 保留：导航/标签操作/壁纸/搜索设置（页面 UI 功能——非敏感读取）。
     _JS_EXPOSED = frozenset({
         "get_wallpaper", "set_wallpaper",
         "get_search_engine", "set_search_engine",
-        "get_tabs", "new_tab", "switch_tab", "close_tab",
+        "new_tab", "switch_tab", "close_tab",
         "pin_tab", "unpin_tab",
-        "set_tab_group", "get_tab_groups",
+        "set_tab_group",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
-        "get_bookmarks", "add_bookmark", "remove_bookmark",
-        "import_bookmarks", "import_history",
-        "get_history", "get_most_visited", "search_history_fulltext",
+        "add_bookmark", "remove_bookmark",
     })
 
     def __dir__(self) -> list[str]:

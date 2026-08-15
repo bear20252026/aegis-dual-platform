@@ -17,6 +17,7 @@
 """
 
 import os
+import unicodedata  # W-12 修复（国防级审查）：NFKC 规范化需导入——此前 F821
 
 from .paths import app_base_dir
 

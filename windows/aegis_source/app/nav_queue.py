@@ -138,6 +138,9 @@ class NavQueue:
         if done.wait(timeout):
             return True
         # 超时：窗口操作未返回（WebView 忙/卡），放弃并记录，绝不阻塞导航线程
+        # W-06（国防级审查）：Python 线程不可强杀——worker 为 daemon 线程，
+        # 超时后不再等待其完成（不阻塞导航）；旧操作在新页面执行的风险由
+        # 导航代际标记缓解（发布期：WebView 重建 + 代际校验——记录）
         try:
             from app.event_log import log_event
             from crash_reporter import dump_threads_to_report
