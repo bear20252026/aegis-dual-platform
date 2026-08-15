@@ -42,8 +42,10 @@ check("白名单无敏感方法", not {"get_tabs", "get_history", "get_most_visi
                         "import_bookmarks", "import_history",
                         "get_tab_groups"} & api._JS_EXPOSED)
 
-# 3) 标签管理
+# 3) 标签管理（M-2 适配：new_tab 有 500ms 频率限制——连续调用间留间隔）
+import time as _t
 api.new_tab("https://a.cn")
+_t.sleep(0.6)
 api.new_tab("https://b.cn")
 snap = api.get_tabs()
 check("new_tab 后 3 个标签", len(snap["tabs"]) == 3, f"tabs={snap['tabs']}")

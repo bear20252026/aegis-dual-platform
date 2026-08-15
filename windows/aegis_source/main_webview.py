@@ -182,6 +182,12 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                                 f"[threat] 请求头标记威胁域名: {url} "
                                 f"(method={method}, type={rtype})"
                             )
+                        # M-3 记录（防御性安全审查）：威胁拦截当前仅日志不阻断
+                        # 子资源（主文档导航由导航层兜底拦截——请求层子资源
+                        # 缺口：黑名单域脚本/图片/XHR 仍加载）。发布期方案：
+                        # WebView2 WebResourceRequested 返回空响应（204/
+                        # 1×1 stub——brave 思路）——pywebview 6.x request_sent
+                        # 不支持响应改写——需 shell.core(window) 直挂底层事件。
                         except Exception:
                             pass
                 # C2 阶段 A（ceLLMate 借鉴）：Agent 会话活跃时应用白名单域策略

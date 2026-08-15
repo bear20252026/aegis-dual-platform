@@ -10,4 +10,6 @@
 # Result/AppError——app/result.py——逐步递减，不永久忽略）
 [lint]
 select = ["E", "F", "I", "B", "BLE", "TRY", "RUF"]
-ignore = ["BLE001", "S110"]
+# RUF002（docstring 全角字符）对中文项目不适用（中文注释全角标点正常）——
+# 忽略恢复门禁；BLE001/S110 为现有基线豁免（发布期迁移 Result——逐步递减）
+ignore = ["BLE001", "S110", "RUF002"]

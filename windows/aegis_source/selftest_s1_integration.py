@@ -63,7 +63,9 @@ check("navigate 已投递 load_url", "https://example.com" in win.loaded_urls,
 check("地址栏输入被记录到当前标签", api.get_tabs()["tabs"][0]["url"] == "https://example.com")
 
 # 3) new_tab / switch_tab / close_tab 全链路
+# M-2 适配：new_tab 有 500ms 频率限制——连续调用间留间隔
 api.new_tab("https://b.cn")
+time.sleep(0.6)
 api.new_tab("https://c.cn")
 time.sleep(0.5)
 snap = api.get_tabs()

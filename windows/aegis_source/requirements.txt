@@ -1,6 +1,7 @@
 # Aegis —— 现代套壳浏览器（安全加固版）
 # Python 3.10+
-# 内核：PySide6 + QtWebEngine（随附 Chromium 版本由 Qt 运行时决定，不臆造）
+# L-8 更正（防御性安全审查）：内核为 pywebview + WebView2（新栈）——
+# 旧 Qt/PySide6 依赖仅 legacy 归档（不参与运行）——移入 dev 依赖记录
 
 # ---- 核心（Qt 6 官方绑定 PySide6，含 QtWebEngine）----
 # 锁版本：避免上游破坏性变更与供应链漂移
