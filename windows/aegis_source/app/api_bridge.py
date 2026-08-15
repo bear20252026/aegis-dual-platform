@@ -220,6 +220,25 @@ class Api:
         """
         if url != "about:blank" and not _is_navigation_safe(url):
             return False
+        # P0-03 修复（专家审查）：Agent 会话活跃时——未配置 allowlist 或
+        # 非白名单域——导航层真正拒绝（放函数开头——不被威胁检查提前返回跳过）
+        try:
+            import os
+            from urllib.parse import urlparse
+            if getattr(self, "_agent_session", None) or 0.0:
+                allow_raw = os.environ.get("AEGIS_AGENT_ALLOWED_HOSTS", "").strip()
+                allow_hosts = {h.strip().lower() for h in allow_raw.split(",") if h.strip()}
+                if not allow_hosts:
+                    from crash_reporter import log_event
+                    log_event("[agent] 拒绝 Agent 导航（未配置 AEGIS_AGENT_ALLOWED_HOSTS——allowlist 为空）")
+                    return False
+                host = (urlparse(url).hostname or "").lower().rstrip(".")
+                if not any(host == c or host.endswith("." + c) for c in allow_hosts):
+                    from crash_reporter import log_event
+                    log_event(f"[agent] 拒绝 Agent 导航非白名单域: {url}")
+                    return False
+        except Exception:
+            pass
         # A-②：复用 threat_feed 缓存黑名单（精确/子域匹配）
         try:
             from urllib.parse import urlparse
@@ -249,6 +268,14 @@ class Api:
         return True
 
     def new_tab(self, url: str = "") -> None:
+        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 new_tab（来源不受信）")
+            except Exception:
+                pass
+            return
         # M-2 修复（防御性安全审查）：new_tab 频率限制——500ms 最小间隔
         # + 20 标签上限（防 tab-bomb——恶意页面循环调用）
         import time as _t
@@ -271,6 +298,14 @@ class Api:
         self._load(target)
 
     def switch_tab(self, index: Any) -> None:
+        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 switch_tab（来源不受信）")
+            except Exception:
+                pass
+            return
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -296,6 +331,14 @@ class Api:
         return self._tabs[self._current]["url"]
 
     def close_tab(self, index: Any) -> None:
+        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 close_tab（来源不受信）")
+            except Exception:
+                pass
+            return
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -306,6 +349,14 @@ class Api:
 
     def pin_tab(self, index: Any) -> None:
         """固定标签：置顶（pinned 标签排在最前，顺序稳定）。"""
+        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 pin_tab（来源不受信）")
+            except Exception:
+                pass
+            return
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -321,6 +372,14 @@ class Api:
 
     def unpin_tab(self, index: Any) -> None:
         """取消固定：回到普通标签区（pinned 之后）。"""
+        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 unpin_tab（来源不受信）")
+            except Exception:
+                pass
+            return
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -353,6 +412,14 @@ class Api:
         借鉴 min 的 tabState 分层：tab（单标签状态）/ task（标签分组）。
         返回是否成功；越界或组名非法返回 False。
         """
+        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 set_tab_group（来源不受信）")
+            except Exception:
+                pass
+            return False
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return False
@@ -400,6 +467,15 @@ class Api:
 
     # ================= 导航 =================
     def navigate(self, text: str) -> None:
+        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝——
+        # chrome UI 迁移前——远程内容不能控制浏览器导航）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 navigate（来源不受信）")
+            except Exception:
+                pass
+            return
         text = _to_str(text, "") or ""
         url = normalize_url(text, self._engine)
         # H-C1/A-② 审计修复：外部导航入口双层校验（协议安全 + 威胁黑名单）。

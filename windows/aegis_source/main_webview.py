@@ -48,6 +48,14 @@ def _load_agent_sitemap() -> dict | None:
     return None
 
 
+def host_matches(host: str, configured: str) -> bool:
+    """P0-03 修复（专家审查）：精确/子域边界匹配（替代 host in domain——
+    防 portal.www.gov.cn 与 gov.cn 误配——DNS 边界后缀匹配）。"""
+    h = (host or "").lower().rstrip(".")
+    c = (configured or "").lower().rstrip(".")
+    return bool(h and c) and (h == c or h.endswith("." + c))
+
+
 def _match_agent_action(sitemap: dict | None, method: str, url: str) -> dict | None:
     """按 sitemap 匹配请求的语义动作（url_pattern + method）；未匹配返回 None。"""
     if not sitemap:
@@ -201,10 +209,12 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                         and time.time() - (getattr(api, "_agent_session", None) or 0.0) < 60
                     )
                     if session_active and host and host not in AGENT_ALLOWED_HOSTS:
-                        # W-04 整改：不再发送 X-Aegis-Agent-Blocked（仅日志）
+                        # P0-03 修复（专家审查）：未配置 allowlist 时 Agent 网络
+                        # 副作用一律拒绝——请求层记录拒绝语义；导航层由 api_bridge
+                        # Agent 白名单检查真正阻断（不再"仅日志"）
                         try:
                             from crash_reporter import log_event
-                            log_event(f"[agent] Agent 请求非白名单域: {url}")
+                            log_event(f"[agent] 拒绝 Agent 请求非白名单域: {url}")
                         except Exception:
                             pass
                 except Exception:
@@ -214,7 +224,7 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                 # 标记 + 日志（可观测不拦截——零风险；sitemap 未配置时跳过）
                 try:
                     sitemap = _load_agent_sitemap()
-                    if session_active and sitemap and host in sitemap.get("domain", ""):
+                    if session_active and sitemap and host_matches(host, sitemap.get("domain", "")):
                         method = getattr(request, "method", "") or "GET"
                         action = _match_agent_action(sitemap, method, url)
                         from crash_reporter import log_event

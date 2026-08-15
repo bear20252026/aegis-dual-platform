@@ -18,6 +18,8 @@ computer_use 的"动作白名单 × 权限"模式，但更轻量、纯逻辑可�
 """
 
 import json
+import time
+from dataclasses import dataclass
 from typing import Any
 
 # JSON-RPC 2.0 版本号
@@ -32,6 +34,59 @@ def _err(code: int, message: str) -> dict:
 
 def _ok(req_id: Any, result: Any) -> dict:
     return {"jsonrpc": _JSONRPC, "id": req_id, "result": result}
+
+
+# --------------------------------------------------------------------------- #
+# P0-02 修复（专家审查 2026-08-16——MCP 信任边界重建——中英搜索对齐：
+# MCP 2026-07-28 授权规范（scope 最小权限）+ 掘金五层权限模型）
+# 认证上下文/资源预算/scope 映射——传输层验证 token 后构造，网页内容不得构造
+# --------------------------------------------------------------------------- #
+MAX_RAW_REQUEST_BYTES = 64 * 1024
+MAX_ARGUMENT_BYTES = 16 * 1024
+MAX_TEXT_BYTES = 8 * 1024
+MAX_RESULT_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class AgentAuthContext:
+    """认证上下文（短期令牌/主体/scope/nonce——一次性消费——审计）。"""
+    principal: str
+    scopes: frozenset
+    expires_at: float
+    nonce: str
+
+    def allows(self, scope: str) -> bool:
+        return bool(self.principal) and time.time() < self.expires_at and scope in self.scopes
+
+
+_TOOL_SCOPE = {
+    "navigate": "navigation:write",
+    "new_tab": "tabs:write",
+    "switch_tab": "tabs:write",
+    "close_tab": "tabs:write",
+    "pin_tab": "tabs:write",
+    "get_search_engine": "settings:read",
+    "get_tabs": "tabs:sensitive_read",
+}
+
+
+def _json_within_limit(value: Any, limit: int) -> bool:
+    try:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= limit
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _redact_url(value: Any) -> str:
+    """P0-03 修复：敏感读取最小化——去除 query/fragment（防 query secret 泄露）。"""
+    from urllib.parse import urlsplit, urlunsplit
+    if not isinstance(value, str):
+        return ""
+    try:
+        p = urlsplit(value)
+        return urlunsplit((p.scheme, p.netloc, p.path, "", ""))
+    except ValueError:
+        return ""
 
 
 # --------------------------------------------------------------------------- #
@@ -57,7 +112,7 @@ def _t_new_tab(api, **kw):
 
 def _t_switch_tab(api, **kw):
     idx = kw.get("index")
-    if not isinstance(idx, int) or idx < 0:
+    if type(idx) is not int or idx < 0:  # P0-03：type(x) is int——True 不被当作索引
         raise ValueError("index 必须为非负整数")
     api.switch_tab(idx)
     return {"ok": True}
@@ -80,7 +135,20 @@ def _t_pin_tab(api, **kw):
 
 
 def _t_get_tabs(api, **kw):
-    return api.get_tabs()
+    # P0-03 修复：敏感读取最小化——去 query/fragment + 长度限制（防敏感泄露）
+    snapshot = api.get_tabs()
+    if not isinstance(snapshot, dict):
+        return {"tabs": [], "current": -1}
+    tabs = []
+    for tab in snapshot.get("tabs", []):
+        if isinstance(tab, dict):
+            tabs.append({
+                "title": str(tab.get("title", ""))[:256],
+                "url": _redact_url(tab.get("url", "")),
+                "pinned": bool(tab.get("pinned", False)),
+                "group": str(tab.get("group", "默认"))[:64],
+            })
+    return {"tabs": tabs, "current": snapshot.get("current", -1)}
 
 
 def _t_get_search_engine(api, **kw):
@@ -183,13 +251,17 @@ _TOOLS: dict[str, dict[str, Any]] = {
 # --------------------------------------------------------------------------- #
 # JSON-RPC 2.0 请求处理（纯函数）
 # --------------------------------------------------------------------------- #
-def handle_request(api: Any, raw: str | dict) -> dict:
+def handle_request(api: Any, raw: str | dict, auth: AgentAuthContext | None = None) -> dict:
     """处理一条 MCP 请求（JSON 字符串或 dict），返回响应 dict。
 
-    - 非法 JSON / 非 JSON-RPC 对象 → 错误响应（id=None）
-    - 未知 method → method not found
-    - 工具执行异常 → 包装为错误响应，绝不抛出
+    P0-02 修复（专家审查）：未认证默认拒绝（auth None/过期/超长 raw）；
+    工具调用前校验 scope/资源预算。传输层验证 token 后构造 auth。
     """
+    # P0-02：未认证/过期/超长请求一律拒绝（默认关闭未认证 MCP）
+    if auth is None or not auth.principal or time.time() >= auth.expires_at:
+        return _err(-32001, "未认证或身份已过期")
+    if isinstance(raw, str) and len(raw.encode("utf-8")) > MAX_RAW_REQUEST_BYTES:
+        return _err(-32602, "请求过大")
     if isinstance(raw, str):
         try:
             req = json.loads(raw)
@@ -224,14 +296,17 @@ def handle_request(api: Any, raw: str | dict) -> dict:
             return _err(-32602, f"unknown tool: {name}")
         if not isinstance(arguments, dict):
             return _err(-32602, "arguments 必须为对象")
-        # A5（final-development-checklist）：OWASP 严格 JSON Schema 执行侧——
-        # 拒绝未声明参数（additionalProperties:false 语义落地；工具参数
-        # 视为不受信（来自 LLM 输出），防参数注入）
+        # P0-02 修复：scope 校验（未授权工具拒绝）+ 参数/文本资源预算
+        need = _TOOL_SCOPE.get(name)
+        if need and not auth.allows(need):
+            return _err(-32003, f"无权限调用 {name}（需 scope: {need}）")
+        if not _json_within_limit(arguments, MAX_ARGUMENT_BYTES):
+            return _err(-32602, "arguments 过大")
+        # P0-03 修复：additionalProperties:false 无条件执行（空 schema 也拒绝额外参数）
         declared = set((tool["parameters"].get("properties") or {}).keys())
-        if declared:
-            extra = set(arguments.keys()) - declared
-            if extra:
-                return _err(-32602, f"unexpected arguments: {sorted(extra)}")
+        extra = set(arguments.keys()) - declared
+        if extra:
+            return _err(-32602, f"unexpected arguments: {sorted(extra)}")
         # A5：工具调用审计（OWASP MCP 安全——审计回放理念；可观测性，
         # 不改变功能；参数/结果摘要截断防敏感外泄）
         try:
@@ -244,8 +319,7 @@ def handle_request(api: Any, raw: str | dict) -> dict:
             # C2 阶段 A（ceLLMate 借鉴）：工具调用刷新 Agent 会话活跃标记
             # （请求管线据此对 Agent 请求应用白名单域策略）
             try:
-                import time
-                api._agent_session = time.time()
+                api._agent_session = time.time()  # 用顶部全局 import time
             except Exception:
                 pass
             # A5：输出不可信标注（WebMCP untrustedContentHint 理念——

@@ -7,14 +7,20 @@
 
 import os
 import sys
+import unicodedata
 from urllib.parse import urlparse
 
 # 外部可导航 scheme（白名单）
 EXTERNAL_SAFE_SCHEMES = {"http", "https"}
 # about: 用于空白页
 ABOUT_SCHEMES = {"about"}
-# 壳层内部伪协议（setHtml 场景，不应来自外部输入）
-INTERNAL_SCHEMES = {"aegis", "reader", "data", "blob"}
+# 壳层内部伪协议（setHtml 场景，不应来自外部输入）——P0-01 修复
+# （专家审查 2026-08-16）：移除 data:/blob:（外部输入默认拒绝——仅
+# 壳层显式 allow_internal=True 的 aegis:/reader: 放行）
+INTERNAL_SCHEMES = {"aegis", "reader"}
+# P0-01 修复：URL 长度上限 + 控制字符/空白拒绝（WHATWG invalid-URL-unit）
+MAX_URL_LENGTH = 8192
+_CONTROL_CHARS = frozenset(chr(i) for i in range(0x20)) | {"\x7f"}
 
 # 可执行/脚本类危险下载扩展名（Windows 为主）
 DANGEROUS_EXTENSIONS = {
@@ -31,20 +37,38 @@ def scheme_of(url: str) -> str:
         return ""
 
 
-def safe_url(url: str, allow_internal: bool = True) -> str:
+def safe_url(url: str, allow_internal: bool = False) -> str:
     """统一导航过滤：返回可安全加载的 URL，否则返回空串。
 
-    - http/https 永远放行
-    - about: 与内部伪协议仅在 allow_internal=True（壳层自身流程）时放行
+    P0-01 修复（专家审查 2026-08-16——OWASP/WHATWG 对齐）：
+    - 默认 allow_internal=False（外部入口最小权限——data:/blob: 一律拒绝）
+    - http/https：拒绝 userinfo/控制字符/空白/无 host/非法端口/IDNA 异常/超长
+    - 仅壳层显式 allow_internal=True 的 about:blank / aegis: / reader: 放行
     - file:/javascript:/vbscript:/chrome: 等一律拒绝
     """
-    url = (url or "").strip()
+    if not isinstance(url, str) or len(url) > MAX_URL_LENGTH:
+        return ""
+    if any(ch in _CONTROL_CHARS or ch.isspace() for ch in url):
+        return ""
+    url = unicodedata.normalize("NFKC", url).strip()
     if not url:
         return ""
     s = scheme_of(url)
     if s in EXTERNAL_SAFE_SCHEMES:
+        try:
+            parsed = urlparse(url)
+            if parsed.username is not None or parsed.password is not None:
+                return ""
+            if not parsed.hostname:
+                return ""
+            _ = parsed.port  # 强制非法端口拒绝
+            parsed.hostname.encode("idna")
+            return url
+        except (UnicodeError, ValueError):
+            return ""
+    if allow_internal and s == "about" and url.lower() == "about:blank":
         return url
-    if allow_internal and (s in ABOUT_SCHEMES or s in INTERNAL_SCHEMES):
+    if allow_internal and s in INTERNAL_SCHEMES:
         return url
     return ""
 
