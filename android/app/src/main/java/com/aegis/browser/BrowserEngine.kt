@@ -58,6 +58,20 @@ class BrowserEngine(
                     callback.backToSafety(true)
                     android.util.Log.w("Aegis", "SafeBrowsing 命中阻断: ${request.url} threatType=$threatType")
                 }
+
+                // R-12 整改（体验/功能审查）：页面加载事件——地址/标题/进度
+                // 同步（单向状态流事件——状态消费/UI 更新为发布期 ViewModel）
+                override fun onPageStarted(
+                    view: WebView,
+                    url: String?,
+                    favicon: android.graphics.Bitmap?,
+                ) {
+                    android.util.Log.i("Aegis", "R12 pageStarted: $url")
+                }
+
+                override fun onPageFinished(view: WebView, url: String?) {
+                    android.util.Log.i("Aegis", "R12 pageFinished: $url")
+                }
             }
         // A-02 整改（国防级审查）：下载接入 DownloadPolicy——危险扩展名
         // （exe/ps1/lnk 等）默认拒绝（发布期可接入原生确认 UI——A-07 最小化）
@@ -81,6 +95,16 @@ class BrowserEngine(
                     filePathCallback: ValueCallback<Array<Uri>>,
                     fileChooserParams: WebChromeClient.FileChooserParams,
                 ): Boolean = false
+
+                // R-12 整改（体验/功能审查）：进度/标题回调——状态同步事件
+                // （onProgressChanged/onReceivedTitle——地址栏/标签标题同步）
+                override fun onProgressChanged(view: WebView, newProgress: Int) {
+                    android.util.Log.i("Aegis", "R12 progress: ${newProgress.coerceIn(0, 100)}")
+                }
+
+                override fun onReceivedTitle(view: WebView, title: String?) {
+                    android.util.Log.i("Aegis", "R12 title: ${title?.take(256).orEmpty()}")
+                }
             }
         // A-03 整改（国防级审查）：默认限制第三方 Cookie（WebView 默认
         // 接受——审查要求显式限制，防跨站追踪）

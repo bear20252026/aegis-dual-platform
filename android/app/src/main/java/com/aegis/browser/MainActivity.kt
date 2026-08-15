@@ -50,8 +50,11 @@ class MainActivity : ComponentActivity() {
         // A1：System WebView 版本检查（CVE-2026-12438/11295 防御——
         // 过旧则提示更新，不阻塞浏览）
         WebViewVersionCheck.checkAndPrompt(this) { webViewAlertMessage = it }
+        // R-12 整改（体验/功能审查）：创建标签立即加载——首屏不再空白
+        val initialWebView = SecureWebViewFactory.create(this)
+        BrowserEngine(initialWebView).load("https://www.bing.com")
         tabManager.addTab(
-            SecureWebViewFactory.create(this),
+            initialWebView,
             url = "https://www.bing.com",
         )
 
@@ -61,6 +64,9 @@ class MainActivity : ComponentActivity() {
                 var activeIndex by remember { mutableStateOf(tabManager.activeIndex) }
                 var address by remember { mutableStateOf("https://www.bing.com") }
                 // 落地 B：标签栏布局（默认 top；可在设置中切换 left）
+                // R-13 整改（体验/功能审查）：标签布局应可设置/可持久化/可访问
+                // （当前 top 固定——left 垂直布局的入口为发布期：设置持久化 +
+                // 地址栏/导航控件在任意布局下同容器——记录）
                 var tabsPosition by remember { mutableStateOf("top") }
                 // A1：System WebView 版本过旧提示（null=不提示）
                 var webViewAlert by remember { mutableStateOf(webViewAlertMessage) }
@@ -71,10 +77,10 @@ class MainActivity : ComponentActivity() {
                 }
 
                 fun newTab() {
-                    tabManager.addTab(
-                        SecureWebViewFactory.create(this@MainActivity),
-                        url = "https://www.bing.com",
-                    )
+                    // R-12 整改（体验/功能审查）：新标签创建立即加载
+                    val wv = SecureWebViewFactory.create(this@MainActivity)
+                    BrowserEngine(wv).load("https://www.bing.com")
+                    tabManager.addTab(wv, url = "https://www.bing.com")
                     refresh()
                 }
 
