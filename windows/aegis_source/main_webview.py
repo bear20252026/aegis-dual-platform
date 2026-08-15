@@ -67,10 +67,26 @@ def _apply_request_policy(window: Any, blocked: set | None = None) -> None:
                     from app.threat_feed import host_is_blocked
                     if host_is_blocked(host, blocked):
                         headers["X-Aegis-Threat"] = "1"
-                        # 观察项 2 优化：威胁命中记录（可观测性，不改变功能）
+                        # 六维上下文记录增强（docs/threat-context-design.md 第 1 步）：
+                        # method + request_type 推断（Content-Type/扩展名）入威胁日志，
+                        # 可观测性增强——不改变拦截语义（政府级零风险门禁）
                         try:
                             from crash_reporter import log_event
-                            log_event(f"[threat] 请求头标记威胁域名: {url}")
+                            method = getattr(request, "method", "") or "GET"
+                            ctype = (headers.get("Content-Type") or "").lower()
+                            path = url.split("?")[0].lower()
+                            rtype = "other"
+                            if "image" in ctype or path.endswith(
+                                    (".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico")):
+                                rtype = "image"
+                            elif "javascript" in ctype or path.endswith(".js"):
+                                rtype = "script"
+                            elif "html" in ctype or path.endswith(".html"):
+                                rtype = "document"
+                            log_event(
+                                f"[threat] 请求头标记威胁域名: {url} "
+                                f"(method={method}, type={rtype})"
+                            )
                         except Exception:
                             pass
             except Exception:
