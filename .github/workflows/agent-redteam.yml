@@ -1,0 +1,27 @@
+name: Agent-Redteam
+on:
+  push:
+    paths: ['agent/**', 'contracts/policy/**']
+  pull_request:
+    paths: ['agent/**', 'contracts/policy/**']
+  workflow_dispatch: {}
+
+jobs:
+  redteam:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b
+        with:
+          python-version: '3.12'
+      - name: Red team tests (提示注入/投毒/重放/预算——无未批准副作用——阶段 G)
+        run: |
+          python agent/tests/redteam_test.py
+      - name: Action catalog validation (default_deny——首批只读——Agent 门禁)
+        run: |
+          python -c "
+            import yaml
+            c = yaml.safe_load(open('contracts/policy/action-catalog.yaml', encoding='utf-8'))
+            assert c['default_deny'] is True
+            assert all(a['read_only'] for a in c['actions'])
+            print('✅ action-catalog default_deny + 首批只读——Agent 门禁闭合')"

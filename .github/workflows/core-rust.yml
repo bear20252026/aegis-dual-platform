@@ -1,0 +1,29 @@
+name: Core-Rust
+on:
+  push:
+    paths: ['core/rust-policy-core/**']
+  pull_request:
+    paths: ['core/rust-policy-core/**']
+  workflow_dispatch: {}
+
+jobs:
+  cargo-gate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/rust-policy-core
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          components: clippy, rustfmt
+      - name: cargo fmt (蓝图阶段 F——cargo fmt 门禁)
+        run: cargo fmt --all -- --check
+      - name: cargo clippy (蓝图——clippy 门禁——-D warnings)
+        run: cargo clippy -- -D warnings
+      - name: cargo test (vectors 差分——与 C#/Kotlin reference 一致)
+        run: cargo test
+      - name: cargo audit (Rust 依赖审计——供应链门禁)
+        run: |
+          cargo install cargo-audit --locked 2>/dev/null || true
+          cargo audit

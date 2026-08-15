@@ -1,0 +1,31 @@
+name: Supply-Chain
+on:
+  push:
+    paths: ['requirements*', 'windows/**', 'core/rust-policy-core/**']
+  pull_request:
+    paths: ['requirements*', 'windows/**', 'core/rust-policy-core/**']
+  workflow_dispatch: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b
+        with:
+          python-version: '3.12'
+      - name: pip-audit (Python 依赖——requirements-lock——依赖门禁——失败即阻断)
+        run: |
+          python -m pip install pip-audit
+          pip-audit -r windows/aegis_source/requirements-lock.txt
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+      - name: cargo audit (Rust 依赖——core——依赖门禁——失败即阻断)
+        working-directory: core/rust-policy-core
+        run: |
+          cargo install cargo-audit --locked 2>/dev/null || true
+          cargo audit
+      - name: SBOM generation (CycloneDX——随制品存档——依赖门禁证据)
+        run: |
+          python release/tools/generate_sbom/generate_sbom.py \
+            contracts/vectors/update-manifest-valid.json /tmp/sbom.cdx.json
+          python -c "import json; json.load(open('/tmp/sbom.cdx.json')); print('✅ SBOM 生成（CycloneDX——依赖门禁证据）')"
