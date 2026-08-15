@@ -198,3 +198,22 @@
 - **pytauri 生态状态**：★1381、v0.8.0（2025-09-02）、80 releases、5 contributors（主维护 WSH032）、Apache-2.0、Last push 2026-06-08；create-pytauri-app 脚手架（0.6+ 推荐，uv+copier）；启动语义（Discussion #172：Python 主线程+Tauri 同线程、asyncio 子线程、async 勿跨 FFI 边界）。
 - **分发成本提醒**（Life OS 类实践）：桌面分发=代码签名+notarization+开发者账号+跨平台 CI 矩阵（"boring half"）；政府内网分发可评估免签名路径，但 Windows 侧需考虑。
 - **中文专门评测稀缺**（pytauri 较新），以官方文档+GitHub+源码为准。
+
+### 11.4 pytauri 停滞状态核实（2026-08-15 第四轮，重要）
+- **⚠️ 停滞确认（深度核实）**：PyPI pytauri/pytauri-wheel 最新均 0.8.0（2025-09-02），**此后近 11 个月无新版本、无新代码提交**（最近 commit 2025-09-10 仅依赖更新）；releases 全为 0.8.0 线；无活跃开发分支。作者 README 明示"难以在没有社区激励下维护"。
+- **替代项目**：**pyloid**（★516，"Electron for Python"，Builder/Tray/Store 内置，跨平台）= 潜在 B 替代（需核渲染内核/体积）；**tauri-plugin-python**（★159，2026-06-20 活跃，Rust 主导+PyO3/RustPython）= 与 pytauri 互补非替代（需写 Rust）；**PyWry**（★93，2026-02 新，**底层依赖 PyTauri**）= pytauri 停滞会波及，不能作替代。
+- **评估调整（禁止被困原则落地）**：① 版本策略改"**长期 3.12.13**"（生命周期至 2028-10，不再等待上游补 cp314）；② 季度复核升级**双目标**（pytauri 是否复苏 / pyloid 是否成熟）；③ PoC 已验证可用（0.8.0 可安装可构建），B 路线当下收益结论不变，远期演进重新定位。
+
+### 11.5 pyloid 与 tauri-plugin-python 深度调研（2026-08-15 第五轮）
+- **pyloid（★516/更新 2026-07-27/v0.27.1-beta 活跃）**：渲染内核=**PySide6.QtWebEngine（Chromium）**（browser_window.py QWebEngineView）；依赖 pyside6 6.9.2、python >=3.9,<3.14；功能全（Builder/Tray/Store/Timer/Monitor/线程安全 RPC）；**⚠️ 体积大（Qt WebEngine ~100MB+）内存高（作者 issue #3 + pythonguis 技术站确认）**——与 Aegis"轻量壳"目标相悖，**不构成 B 有效替代**（Aegis 现状 pywebview 体积/内存反而优于它）；降级观察项（仅未来需 Chromium 渲染一致性时评估）。
+- **tauri-plugin-python（★161/更新 2026-07-29/v0.3.9 活跃）**：架构=Rust 插件（Cargo.toml `default = ["venv","pyo3"]`，可选 `rustpython`）；PyO3 默认（完整 CPython 兼容需 libpython）vs RustPython（免目标机 Python 但 stdlib 受限非完整 Python）；安全模型（runPython/register 默认禁用）；**Rust 主导路线**（README 明示"想全 Python 开发请看 pytauri"）——**不替代 B**（违背免 Rust 初衷）。
+- **评估结论**：**B 路线（pytauri-wheel）仍是最优**（免 Rust + 系统 WebView 轻量 + PoC 已验证）；pyloid/tauri-plugin-python 均不构成有效替代，pyloid 降观察。
+
+### 11.6 Python 桌面壳全景调研（2026-08-15 第六轮：热门框架定位盘点）
+- **热门 Python 框架（★ 均远超 pytauri）定位全不同**：Textual ★36936（TUI 终端）、Reflex ★28788（Web 全栈编译 React）、NiceGUI ★15970（Vue/Quasar+FastAPI，native mode 边缘相关）、Flet ★16401（**Flutter 自绘渲染**非系统 WebView）、imgui_bundle ★1342（即时 GUI）；中文四层选型体系多站转载（阿里云/掘金/DEV/火山引擎 2026-04：原型层 Streamlit/Gradio、轻量层 NiceGUI/Flet、工程化层 Reflex、重型层 PySide6/DearPyGui）。
+- **核心结论**：不是"只有 py"，而是 **"pytauri 的定位（免 Rust + 系统 WebView + 浏览器壳）没有竞争者"**——更热门的框架定位是 Web 应用/TUI/Flutter 自绘（解决"Python 写 UI"，非"系统 WebView 壳"）；更"壳"的 pyloid 渲染内核相悖（QtWebEngine 重量级）；tauri-plugin-python 需 Rust。**B 路线仍唯一匹配；pytauri 停滞时 Aegis 有现成退路（pywebview 现状）**；观察项 NiceGUI native mode / pyloid。
+
+### 11.7 Flet 深度调研 + 壳项目盘点（2026-08-15 第七轮）
+- **Flet（★16579/v0.86.5/最近 commit 2026-08-14 非常活跃）**：渲染=**Flutter 自绘**（编译的 Flutter 桌面客户端二进制，PR #6309 从 wheel 移 GitHub Releases 按需下载）；**⚠️ 体积知名痛点**（flet pack 77.8MB/flet build 100MB+/v0.25.2 打包 80.2MB，issue #4620/#3048 多用户反馈；社区建议旧版 v0.19.0 11-17.7MB）；**不推荐作为 Aegis 壳/替代**（Flutter 自绘非系统 WebView，无法承载任意网页渲染 + 安全纵深；体积与轻量目标相悖；仅观察其活跃社区模式）。
+- **pywebview（Aegis 现状库）**：★5950/v6.2.1（2026-04-15）/月下载 158 万（PyRank 确认 Actively Maintained）——**Aegis 现状库非常健康**（比 pytauri 活跃得多），退路坚实。
+- **cefpython（★3234/更新 2026-08-10）**：捆绑 Chromium（Electron 式）；**社区确认已弃维护**（issue #673：仅支持到 Python 3.11，"pywebview 是最好的替代"；PR #691 加 CEF147/Python 3.10-3.14 未合并）——不选。
