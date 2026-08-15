@@ -20,3 +20,6 @@ signing.properties
 
 # hotspottriage 工具输出目录（报告归档于 docs/quality-reports/，此处不重复入库）
 .hotspottriage/
+
+# 运行时日志目录（events.log 等，不入库）
+windows/crash_reports/

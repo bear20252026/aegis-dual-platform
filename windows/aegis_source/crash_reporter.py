@@ -172,6 +172,13 @@ def install_crash_reporter(data_dir: str | None = None) -> None:
 
 def log_event(msg: str) -> None:
     """主动记录一条运行事件（非崩溃，供排查）。追加到 events.log。"""
+    # 内存凭据不落地（KNOWLEDGE_BASE 第 14 节借鉴 FreeDom 反 dump）：
+    # 日志写入前经 credential_guard 脱敏凭据值（防御式，不改变功能）
+    try:
+        from app.credential_guard import redact
+        msg = redact(msg)
+    except Exception:
+        pass  # 脱敏失败保持原样，不影响日志
     d = _report_dir()
     if d is None:
         return
