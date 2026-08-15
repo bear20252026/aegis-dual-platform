@@ -34,6 +34,14 @@ for path in (root / 'windows' / 'packaging').glob('*.template'):
         failures.append(f'XML {path.relative_to(root)}: {exc}')
 if (windows / 'aegis_webview.nsi').exists():
     failures.append('Deprecated NSIS script still exists in the Windows working copy')
+# ABC 级闭环（B3 依赖 hash 锁定）：锁文件门禁——requirements-lock.txt 必须
+# 存在且含 hash（pip-compile --generate-hashes 生成——可复现安装前提——
+# 张显达实践：改依赖未更新锁文件 → 直接失败）
+lock_file = windows / 'requirements-lock.txt'
+if not lock_file.is_file():
+    failures.append('缺 requirements-lock.txt（pip-compile --generate-hashes 生成）')
+elif '--hash=' not in lock_file.read_text(encoding='utf-8'):
+    failures.append('requirements-lock.txt 无 hash（--generate-hashes 重新生成）')
 print(f'python_files={len(python_files)}')
 print(f'failures={len(failures)}')
 for failure in failures:
