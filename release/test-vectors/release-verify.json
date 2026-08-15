@@ -1,0 +1,13 @@
+{
+  "description": "阶段 E（蓝图 release/test-vectors）：发布验证测试向量——逐工件闭合（fail-closed）——任何失败终止发布",
+  "vectors": [
+    { "case": "missing_artifact", "expected": "deny", "note": "manifest 枚举工件缺失——拒绝发布" },
+    { "case": "hash_mismatch", "expected": "deny", "note": "工件哈希不符——拒绝发布" },
+    { "case": "unlisted_artifact", "expected": "deny", "note": "dist 实际工件未在 manifest（双向集合相等）——拒绝" },
+    { "case": "rollback_version", "expected": "deny", "note": "版本回滚（低于 min_version）——拒绝（P0-04 防回滚）" },
+    { "case": "threshold_insufficient", "expected": "deny", "note": "签名阈值不足——拒绝" },
+    { "case": "sbom_missing", "expected": "deny", "note": "缺 SBOM（CycloneDX 随制品存档）——拒绝" },
+    { "case": "provenance_missing", "expected": "deny", "note": "缺 provenance attestation——拒绝（gh attestation verify 失败）" },
+    { "case": "signer_identity_mismatch", "expected": "deny", "note": "signer workflow 身份不符（--signer-workflow 固定）——拒绝" }
+  ]
+}

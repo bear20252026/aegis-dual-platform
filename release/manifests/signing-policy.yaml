@@ -1,0 +1,20 @@
+# 阶段 E（蓝图 release/manifests/signing-policy.yaml）：签名策略
+# 依据：BAUER GROUP CRA 规范（cosign sign-blob/verify-blob——keyless 公开项目
+# OIDC——certificate-identity 校验）+ 张显达（部署侧强制校验签名与哈希——
+# 失败即阻断——证据包）
+#
+# 所有发布制品（二进制/SBOM/清单）必须签名；验证失败终止发布（fail-closed）。
+
+policy:
+  version: "1.0"
+  signing_tool: cosign            # Sigstore（keyless 或密钥——按项目公开性）
+  keyless_oidc_issuer: "https://token.actions.githubusercontent.com"
+  # 验证绑定的关键字符串（cosign 2.x——certificate-identity 必须固定——不扩大信任集）
+  certificate_identity: "https://github.com/bear20252026/aegis-dual-platform/.github/workflows/release.yml@refs/tags/v*"
+  threshold: 2                    # 阈值签名（多 key——与 update_verifier 一致）
+  rollback:
+    protection: required          # 防回滚（版本单调——SemVer 字符串——P0-04）
+    keep_previous_artifacts: true # 回滚保留上一版制品与签名（张显达——证据包）
+  verify:
+    fail_closed: true             # 签名/哈希校验失败即阻断发布（不允许 || true）
+    artifacts: all                # 全部工件逐件验证（不允许截断 head -200）
