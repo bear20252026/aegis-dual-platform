@@ -36,12 +36,19 @@ OPTIONAL_CORE = [
 ]
 
 ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aegis_dual_platform）
+SRC_DIR = ROOT / "windows" / "aegis_source"  # 源码目录（CORE_MODULES 相对它）
 DIST = ROOT / "dist"
 
 
 def run(cmd: list[str]) -> None:
+    # 投产修复：subprocess 用同一解释器（sys.executable——venv 3.12.13
+    # 含 Nuitka）——"python" 在 Windows 可能解析到 uv shim（无 nuitka——
+    # No module named nuitka 失败）
+    if cmd and cmd[0] == "python":
+        cmd = [sys.executable, *cmd[1:]]
     print(f"==> {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=ROOT, check=True)
+    # cwd 须为源码目录（app/security.py 等相对 windows/aegis_source）
+    subprocess.run(cmd, cwd=SRC_DIR, check=True)
 
 
 def main() -> int:
@@ -55,7 +62,9 @@ def main() -> int:
     for mod in CORE_MODULES + OPTIONAL_CORE:
         run(["python", "-m", "nuitka", "--module", mod,
              f"--output-dir={DIST / 'core'}",
-             "--include-package=app"])  # 动态导入兜底声明
+             "--include-package=app",  # 动态导入兜底声明
+             "--no-debug-immortal-assumptions"])  # 投产（CSDN 3.12 必需——
+        # Python 3.12 编译不加此参数会报 immortal objects 错误（3.11 及以下不需要）
 
     # 步骤 2：不编译模块分层（保护措施——KNOWLEDGE_BASE 18.2 + 20 调研）：
     #   a. 小模块（935 行/32KB 内）→ PyArmor 混淆 + --pack onedir
