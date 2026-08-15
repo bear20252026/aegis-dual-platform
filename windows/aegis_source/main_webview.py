@@ -230,12 +230,16 @@ def _apply_esm_exceptions(window: Any, exceptions_json: str = "") -> None:
 
 
 def main() -> int:
-    import webview  # type: ignore[import-not-found]  # pywebview 为运行时依赖，类型桩缺失时忽略
+    # 壳抽象（禁止被困原则落地，2026-08-15）：通过 shell_adapter 获取
+    # 壳实现，默认 pywebview；pytauri 为可插拔实现（壳可随时替换，
+    # 业务 api_bridge/nav_queue 等零影响）。pywebview 为运行时依赖。
+    from app.shell_adapter import get_shell
+    shell = get_shell()  # 默认 pywebview（配置/参数可切 pytauri）
 
     # 关键：新窗口请求（target=_blank 链接）必须在当前窗口打开，
     # 而不是交给系统默认浏览器（默认 True 会导致点百度热搜跳去谷歌浏览器）。
     try:
-        webview.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = False
+        shell.settings()['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = False
     except Exception:
         pass
 
@@ -253,7 +257,7 @@ def main() -> int:
         pass
 
     if "--smoke-test" in sys.argv:
-        return _smoke_test(webview)
+        return _smoke_test(shell)
 
     api = Api()
     try:
@@ -273,10 +277,10 @@ def main() -> int:
     except Exception:
         pass  # 书签/历史/配置不可用时降级为纯浏览
 
-    window = webview.create_window(
-        "Aegis 安全浏览器",
-        url=START_URL,
-        js_api=api,          # js_api 必须在 create_window 时传入（renderer 从 _js_api 读取）
+    window = shell.create_window(
+        api,
+        START_URL,
+        title="Aegis 安全浏览器",
         width=1280,
         height=820,
         min_size=(900, 600),
@@ -485,17 +489,18 @@ def main() -> int:
     except Exception:
         pass  # 看门狗不可用时降级
 
-    webview.start()
+    # 启动壳事件循环（经壳抽象——pywebview/pytauri 可插拔）
+    shell.start()
     return 0
 
 
-def _smoke_test(webview: Any) -> int:
+def _smoke_test(shell: Any) -> int:
     """无窗口自检：确认系统内核 WebView 能创建并加载真实页面后自动退出。"""
     import time
 
     result: dict[str, Any] = {"loaded": False, "url": None, "err": ""}
-    w = webview.create_window(
-        "Aegis smoke", url=START_URL, width=500, height=360, hidden=True,
+    w = shell.create_window(
+        None, START_URL, title="Aegis smoke", width=500, height=360, hidden=True,
     )
     if w is None:
         print("[smoke] FAIL — create_window 返回 None")
@@ -507,7 +512,7 @@ def _smoke_test(webview: Any) -> int:
             result["url"] = w.get_current_url()
         except Exception as e:
             result["err"] = repr(e)
-        for ww in list(webview.windows):
+        for ww in shell.windows():
             try:
                 ww.destroy()
             except Exception:
@@ -519,14 +524,14 @@ def _smoke_test(webview: Any) -> int:
         time.sleep(10)
         if not result["loaded"]:
             result["err"] = "loaded 事件 10 秒内未触发"
-            for ww in list(webview.windows):
+            for ww in shell.windows():
                 try:
                     ww.destroy()
                 except Exception:
                     pass
 
     threading.Timer(1.0, fallback).start()
-    webview.start()
+    shell.start()
     if result.get("loaded"):
         print(f"[smoke] OK — 系统内核 WebView 可用（loaded: {result.get('url')!r}）")
         return 0
