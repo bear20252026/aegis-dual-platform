@@ -410,6 +410,20 @@ class Api:
                  col: Any = None, stack: str = "") -> None:
         """接收页面 JS 错误，写入崩溃报告 events.log（后台静默）。"""
         try:
+            # A2（final-development-checklist）：消息来源验证（CVE-2026-33118
+            # spoofing 防御）——source 为空（页面内联错误）或与当前页面 host
+            # 同源才记录；跨域来源（伪造上报）丢弃。不改变功能（合法错误照常
+            # 记录，仅非法来源被拒）。
+            if source:
+                from urllib.parse import urlparse
+                page_host = ""
+                try:
+                    page_host = (urlparse(self.current_url()).hostname or "").lower()
+                except Exception:
+                    page_host = ""
+                src_host = (urlparse(source).hostname or "").lower()
+                if src_host and page_host and src_host != page_host:
+                    return  # 跨域来源 → 丢弃（防伪造来源上报）
             from crash_reporter import log_event
             line = int(line) if line else ""
             col = int(col) if col else ""
