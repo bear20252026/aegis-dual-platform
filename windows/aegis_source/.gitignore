@@ -11,6 +11,7 @@ __pycache__/
 dist/
 .ruff_cache/
 *.spec
+!aegis_webview.spec  # B1 发布打包必需（远端 build 的 PyInstaller spec——入库）
 
 # 本地数据（运行期生成）
 data/
