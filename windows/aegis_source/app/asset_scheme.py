@@ -99,6 +99,14 @@ class AegisAssetHandler:
                     url = job.requestUrl()
                     host = (url.host() or "").lower()
                     name = (url.path() or "").lstrip("/")
+                    # A7（pyscg-0044 Canonicalize Input Before Validating，
+                    # OpenSSF Python 安全编码指南）：验证前规范化输入——
+                    # NFKC 防 Unicode 变体绕过（如全角/兼容字符伪装路径
+                    # 穿越，CWE-180 变体）；零风险（合法名规范化后不变）
+                    try:
+                        name = unicodedata.normalize("NFKC", name)
+                    except Exception:
+                        pass  # 规范化失败保持原样（校验仍按原样执行）
                     # host 必须是 wallpapers；文件名须在白名单且无路径穿越
                     ok = (host == WP_HOST and name in WALLPAPERS
                           and "/" not in name and "\\" not in name

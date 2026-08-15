@@ -285,3 +285,13 @@
 ### 16.3 攻击面认知（沙箱非绝对——纵深防御补充）
 - **SBX Escape**（沙箱逃逸——Browser 进程 IPC 漏洞/Mojo IPC 内存破坏）与 **SBX Bypass**（OS 级 LPE）——沙箱不能 100% 防逃逸，Aegis 的纵深防御（白名单/拦截/凭据治理）是沙箱之外的补充层。
 - **隔离成本权衡**（Chrome 125 官方数据）：严格站点隔离内存 +10-13%、GPU 独立进程 +60MB——政府内网环境按资源评估启用级别。
+
+## 17. A7 OpenSSF pyscg 对照（2026-08-15：Python 安全编码金标准）
+
+### 17.1 pyscg 概要（首版 2026-05-12，50+ 规则/9 大节）
+- OpenSSF Secure Coding Guide for Python（best.openssf.org）——CPython >=3.9 标准库，noncompliant/compliant 示例对；9 大节：Intro（信任边界/凭据外部化/进程隔离）/Encoding（locale/输入规范化/一致编码）/Numbers（精度/回绕 8 规则）/Neutralization（命令注入/SQL/反序列化）/Exception（具体类型/错误清理）/Logging（敏感数据排除/日志中和）/Concurrency/Coding Standards（副本/资源清理）。
+
+### 17.2 Aegis 对照（关键规则——多数已合规）
+- ✅ 合规：0041 凭据外部化（环境变量）/0047 白名单（双关口）/0019 日志排除敏感（credential_guard）/0022 日志中和（威胁日志）/0040 进程隔离（WebView2 继承）/0031 迭代副本（_tabs_snapshot）。
+- 🟡 落地：**0044 输入规范化（NFKC）**——asset_scheme name 校验加 NFKC（防全角/兼容字符伪装路径穿越，CWE-180 变体；合法名不变零功能影响）。
+- 🟡 待对照（非紧急）：0050 错误输出清理/0014 具体异常类型/0043 locale 显式——评估记录。
