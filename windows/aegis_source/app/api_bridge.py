@@ -214,6 +214,12 @@ class Api:
                 return True  # 未配置订阅源 → 放行
             host = (urlparse(url).hostname or "").lower()
             if host and host_is_blocked(host, blocked):
+                # 观察项 2 优化：威胁拦截命中记录（可观测性，不改变功能）
+                try:
+                    from crash_reporter import log_event
+                    log_event(f"[threat] 导航拦截威胁域名: {url}")
+                except Exception:
+                    pass
                 return False  # 命中黑名单 → 拒绝导航
         except Exception:
             pass  # 检查失败放行（安全浏览是纵深防御，不阻塞浏览）

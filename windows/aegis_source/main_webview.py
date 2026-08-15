@@ -67,6 +67,12 @@ def _apply_request_policy(window: Any, blocked: set | None = None) -> None:
                     from app.threat_feed import host_is_blocked
                     if host_is_blocked(host, blocked):
                         headers["X-Aegis-Threat"] = "1"
+                        # 观察项 2 优化：威胁命中记录（可观测性，不改变功能）
+                        try:
+                            from crash_reporter import log_event
+                            log_event(f"[threat] 请求头标记威胁域名: {url}")
+                        except Exception:
+                            pass
             except Exception:
                 pass  # 单个请求修改失败不影响其他请求
 

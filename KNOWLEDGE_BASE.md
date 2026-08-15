@@ -217,3 +217,12 @@
 - **Flet（★16579/v0.86.5/最近 commit 2026-08-14 非常活跃）**：渲染=**Flutter 自绘**（编译的 Flutter 桌面客户端二进制，PR #6309 从 wheel 移 GitHub Releases 按需下载）；**⚠️ 体积知名痛点**（flet pack 77.8MB/flet build 100MB+/v0.25.2 打包 80.2MB，issue #4620/#3048 多用户反馈；社区建议旧版 v0.19.0 11-17.7MB）；**不推荐作为 Aegis 壳/替代**（Flutter 自绘非系统 WebView，无法承载任意网页渲染 + 安全纵深；体积与轻量目标相悖；仅观察其活跃社区模式）。
 - **pywebview（Aegis 现状库）**：★5950/v6.2.1（2026-04-15）/月下载 158 万（PyRank 确认 Actively Maintained）——**Aegis 现状库非常健康**（比 pytauri 活跃得多），退路坚实。
 - **cefpython（★3234/更新 2026-08-10）**：捆绑 Chromium（Electron 式）；**社区确认已弃维护**（issue #673：仅支持到 Python 3.11，"pywebview 是最好的替代"；PR #691 加 CEF147/Python 3.10-3.14 未合并）——不选。
+
+## 12. 2026 全面审计结论（2026-08-15，详见 docs/audit-2026.md）
+
+### 12.1 综合评级 A（架构合规/安全/代码/功能边界四维）
+- **架构合规（2026 最推荐）**：混合原生壳 + 异步消息驱动（NavQueue）+ 壳抽象可插拔 + ESM per-origin + PQC 底层继承 + Agent 白名单（mcp 7 工具）——**高度合规，无重大偏离**。
+- **安全**：✅ 无注入面（eval 封装+硬编码脚本）、无路径遍历（asset_scheme 白名单+穿越防护）、subprocess 受控（参数列表+shell=False）、凭据治理（.gitignore+环境变量）。
+- **代码逐行**：✅ shell_adapter 240 行逐行精读无逻辑 bug（_make_wrapper 工厂闭包绑定正确）；api_bridge 下标访问均为结构固定数据；nav_queue 三层防死锁（timeout 0.5s+6s 超时+RLock）。
+- **功能边界**：✅ js_api 白名单 27 个全部有效（无缺失无多余）；错误处理 15 处 except 返回安全值；9 处 _lock 覆盖写操作；空状态安全返回。
+- **观察项（非 bug）**：🟡 _tabs_snapshot 锁外只读（无并发写冲突证据）、105 处静默降级（设计性，KNOWLEDGE_BASE B110 记录）；🟢 CI 转绿待确认（PyInstaller 修复已推送 e2fc3ba）。
