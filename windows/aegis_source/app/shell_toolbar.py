@@ -268,6 +268,75 @@ TOOLBAR_JS = r"""
   _tryBoot();
   setTimeout(_tryBoot, 150);
 })();
+
+// —— hints 键盘导航模式（qutebrowser/Vimium 借鉴，2026-08-15）——
+// 裸 f 触发（现有快捷键体系全为 Ctrl/Meta 组合键，无冲突）；
+// 非输入焦点时启用（地址栏/联想输入框聚焦不触发）；Escape 退出。
+// 机制映射 Vimium link_hints.js：发现可点击元素 → 叠加唯一字符标记 →
+// 按键递增匹配 → 唯一匹配自动 click() 激活（与鼠标点击等价，零新能力面）。
+(function () {
+  var _hints = { active: false, query: '', markers: [], chars: 'asdfghjklqwertyuiop' };
+  function _hintLabel(n) {
+    var s = '', base = _hints.chars.length;
+    do { s = _hints.chars[n % base] + s; n = Math.floor(n / base) - 1; } while (n >= 0);
+    return s;
+  }
+  function _hintExit() {
+    _hints.active = false; _hints.query = '';
+    for (var i = 0; i < _hints.markers.length; i++) {
+      var m = _hints.markers[i];
+      if (m.node && m.node.parentNode) m.node.parentNode.removeChild(m.node);
+    }
+    _hints.markers = [];
+  }
+  function _hintEnter() {
+    _hintExit();
+    var els = document.querySelectorAll('a[href], button, input[type=button], input[type=submit]');
+    var shown = [];
+    for (var i = 0; i < els.length; i++) {
+      var el = els[i], r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0) shown.push(el);
+    }
+    for (var j = 0; j < shown.length; j++) {
+      var el2 = shown[j], r2 = el2.getBoundingClientRect(), label = _hintLabel(j);
+      var mark = document.createElement('div');
+      mark.textContent = label;
+      mark.style.cssText = 'position:fixed;z-index:999999;background:#3D7EFF;color:#fff;' +
+        'font:bold 11px monospace;padding:1px 4px;border-radius:3px;pointer-events:none;' +
+        'left:' + (r2.left + r2.width / 2) + 'px;top:' + (r2.top + 2) + 'px;' +
+        'transform:translateX(-50%);';
+      mark.setAttribute('data-hint', label);
+      document.body.appendChild(mark);
+      _hints.markers.push({ node: mark, label: label, target: el2 });
+    }
+    _hints.active = true;
+  }
+  function _hintUpdate() {
+    var q = _hints.query;
+    for (var i = 0; i < _hints.markers.length; i++) {
+      var m = _hints.markers[i];
+      m.node.style.display = (m.label.indexOf(q) === 0) ? '' : 'none';
+    }
+    var exact = null;
+    for (var j = 0; j < _hints.markers.length; j++) {
+      if (_hints.markers[j].label === q) { exact = _hints.markers[j]; break; }
+    }
+    if (exact) { exact.target.click(); _hintExit(); }
+  }
+  document.addEventListener('keydown', function (e) {
+    try {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      var tag = (document.activeElement && document.activeElement.tagName) || '';
+      var inInput = (tag === 'INPUT' || tag === 'TEXTAREA');
+      if (!_hints.active && e.key === 'f' && !inInput) { e.preventDefault(); _hintEnter(); return; }
+      if (!_hints.active) return;
+      if (e.key === 'Escape') { e.preventDefault(); _hintExit(); return; }
+      if (e.key === 'Backspace') { e.preventDefault(); _hints.query = _hints.query.slice(0, -1); _hintUpdate(); return; }
+      var c = (e.key || '').toLowerCase();
+      if (c.length === 1 && _hints.chars.indexOf(c) >= 0) { e.preventDefault(); _hints.query += c; _hintUpdate(); }
+    } catch (err) { /* hints 异常静默，不影响页面 */ }
+  });
+})();
 """
 
 # 左侧垂直标签栏（tabs_position="left" 时由 build_toolbar_js 追加注入）。
