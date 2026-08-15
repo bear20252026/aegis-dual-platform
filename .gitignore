@@ -23,3 +23,7 @@ signing.properties
 
 # 运行时日志目录（events.log 等，不入库）
 windows/crash_reports/
+
+# Python 缓存（不入库）
+__pycache__/
+*.pyc
