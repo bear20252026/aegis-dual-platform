@@ -295,3 +295,21 @@
 - ✅ 合规：0041 凭据外部化（环境变量）/0047 白名单（双关口）/0019 日志排除敏感（credential_guard）/0022 日志中和（威胁日志）/0040 进程隔离（WebView2 继承）/0031 迭代副本（_tabs_snapshot）。
 - 🟡 落地：**0044 输入规范化（NFKC）**——asset_scheme name 校验加 NFKC（防全角/兼容字符伪装路径穿越，CWE-180 变体；合法名不变零功能影响）。
 - 🟡 待对照（非紧急）：0050 错误输出清理/0014 具体异常类型/0043 locale 显式——评估记录。
+
+## 18. 免费代码保护路线（2026-08-15：Nuitka 纯编译最优选择）
+
+### 18.1 调研结论（全球中英全覆盖）
+- **Nuitka 团队官方**（Reddit）：**不要同时用 PyArmor 和 Nuitka**（组合不被支持——"Nuitka by itself will be good enough"）；Nuitka **Apache-2.0 免费商业可用**（DEV 确认——无许可费）。
+- **PyArmor 免费版限制**：大脚本 32KB/935-940 行限制（Stack Overflow/pyobfus 实测）——Aegis 大模块（api_bridge 568 行）超限；**不能与 Nuitka 组合**。
+- **Cython**：社区最主流免费方案（CSDN——编译型混淆 .pyd/.so，零运行时开销；非加密——字符串需 XOR 加固）。
+- **pyobfus**：开源 Apache-2.0 核心 + $45 Pro（AST 级保护偏弱）。
+
+### 18.2 Aegis 最优免费路线（多层组合，全免费）
+- **主：Nuitka 纯编译**核心敏感模块（security/credential_guard/threat_feed/mcp → .pyd 编译级保护）
+- **备：Cython 编译**（若 Nuitka 兼容性问题——社区主流备选）
+- **加固**：常量数据 XOR 混淆 + 嵌入密钥（免费替代 Nuitka Commercial）
+- **分发**：PyInstaller --onedir（免费）+ B2 sigstore keyless 签名（免费）
+- **排除**：PyArmor 试用版（大脚本限制 + 不能与 Nuitka 组合）/pyobfus（AST 偏弱）
+
+### 18.3 B 实施调整（重要）
+- build_release.py 原设计"PyArmor 混淆其余"需调整：**改为 Nuitka 编译全部敏感模块（或 Cython 备选）**——免费零成本 + 官方推荐路径（避开 PyArmor 付费许可 + 组合不支持问题）。
