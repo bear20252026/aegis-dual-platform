@@ -15,6 +15,8 @@ Aegis 是一款**双平台安全浏览器**：Windows 端基于 Python + pywebvi
 | `android` | Kotlin + Jetpack Compose + Android WebView 浏览器工程（含多标签、安全 WebView 工厂） |
 | `shared` | 双端版本、发布与更新清单协议 |
 | `scripts` | 从单一版本配置同步双端版本声明的脚本 |
+| `docs` | 项目文档（KNOWLEDGE_BASE 21 节项目记忆 + 25 份调研/审计/设计/评估报告） |
+| `docs/release` | **B 级发布期实施产物**（build_release.py 构建 / xor_obfuscate.py 加固 / release.yml 签名发布流水线） |
 | `legacy`（位于 `windows/aegis_source/legacy`） | 已归档的 QtWebEngine 旧栈（不再维护，仅供历史参照） |
 
 ## 架构
@@ -33,11 +35,20 @@ Python + pywebview           Kotlin + Jetpack Compose
 | 文件 | 职责 |
 |---|---|
 | `main_webview.py` | 薄入口：参数解析、建窗口、绑定 Api、启动看门狗 |
-| `app/shell_toolbar.py` | 注入式工具栏脚本（标签条/导航/地址栏/毛玻璃） |
+| `app/shell_adapter.py` | **壳抽象**：Shell 协议（create_window/start/events/core/settings/windows）+ pywebview/pytauri 可插拔（壳可替换——禁止被困原则） |
+| `app/shell_toolbar.py` | 注入式工具栏脚本（标签条/导航/地址栏/毛玻璃/快捷键/hints 键盘模式） |
 | `app/nav_queue.py` | 导航线程队列（窗口操作串行化，杜绝 js_api 死锁） |
-| `app/api_bridge.py` | js_api 桥（标签/导航/书签/历史/壁纸/搜索） |
+| `app/api_bridge.py` | js_api 桥（标签/导航/书签/历史/壁纸/搜索/JS 错误上报——含消息来源验证） |
 | `app/security.py` | 统一安全关口（URL 白名单、权限收紧） |
+| `app/threat_feed.py` | 威胁黑名单订阅（host_is_blocked 精确/子域匹配——deny 优先） |
+| `app/credential_guard.py` | 凭据脱敏（日志写入前屏蔽凭据值——FreeDom 反 dump 理念） |
+| `app/event_log.py` | 统一日志接口（业务层委托 crash_reporter——DRY 消重） |
+| `app/mcp.py` | Agent 桥（MCP 7 工具白名单 + 调用审计 + untrusted 标注 + 严格 Schema） |
+| `app/webview2_probe.py` | WebView2 性能基线 + ESM 探测（EnhancedSecurityModeState） |
+| `app/asset_scheme.py` | 壁纸资源白名单（NFKC 输入规范化——pyscg-0044） |
 | `app/backdrop.py` | Windows 11 系统级 Mica/亚克力背景（尽力而为） |
+| `app/config.py` / `paths.py` / `bookmark_store.py` / `history_store.py` / `database.py` | 类型化配置 / 路径 / 书签 / 历史 / 数据库存储 |
+| `app/url_utils.py` / `reader.py` / `browser_import.py` / `fingerprint.py` / `bridge_hooks.py` | URL 工具 / 阅读模式 / 浏览器导入 / 指纹配置（默认关）/ 桥钩子 |
 
 ### Android 端模块
 
@@ -58,6 +69,12 @@ Python + pywebview           Kotlin + Jetpack Compose
 - **敏感文件权限**：POSIX 0600 / Windows DACL 仅当前用户
 - **无痕模式**：密码/历史/拨号强制不落盘
 - **计算机使用（模式 B）**：动作白名单 × 权限等级（L0-L3）交叉校验，密码明文不进模型上下文
+- **威胁拦截 deny 优先**：`threat_feed` 黑名单命中优先于白名单放行（导航层 + 请求管线双关口）
+- **凭据治理**：环境变量外部化（不落地）+ `credential_guard` 日志脱敏（FreeDom 反 dump 理念）
+- **统一日志**：`event_log` 单入口（业务层零散日志收敛——DRY）
+- **Agent 安全**（mcp.py）：7 工具白名单 + 调用审计 + untrusted 标注 + 严格 JSON Schema（防参数注入）
+- **ESM 禁 JIT**：EnhancedSecurityModeState 探测 + 按来源动态 CoreWebView2Settings（A4）
+- **核心模块编译保护**（B 级）：Nuitka 编译 security/credential_guard/threat_feed/mcp 为 .pyd（免费路线）
 
 ## 静态验证
 
@@ -82,6 +99,17 @@ mypy main_webview.py app/          # 类型检查
 2. 安装并验证 Python、PyInstaller、Windows SDK 的 `makeappx` 与 `signtool`，执行 Windows `build-windows.ps1`
 3. 配置代码签名证书或可信签名服务，生成签名 APK/AAB/MSIX
 4. 在干净 Windows 与 Android 设备上测试安装、升级、卸载、数据保留与下载验证
+
+### B 级发布期实施（docs/release/——发布流水线，不触碰开发分支）
+
+```bash
+# ① 构建（Nuitka 编译核心敏感模块 + 不编译模块分层）
+python docs/release/build_release.py
+# ② XOR 常量加固（数据文件加密，密钥嵌入编译模块）
+python docs/release/xor_obfuscate.py encrypt <file>
+# ③ 签名/发布流水线（sigstore keyless + Trusted Publishing——release.yml 草稿）
+#    详见 docs/release/release.yml（受保护环境审批 + OIDC 无 token）
+```
 
 ### 运行（源码，Windows）
 
