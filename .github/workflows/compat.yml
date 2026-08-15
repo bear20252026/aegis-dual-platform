@@ -25,10 +25,10 @@ jobs:
         working-directory: windows/aegis_source
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
 
       - name: 安装 Python 3.14
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b
         with:
           python-version: "3.14"
 
@@ -48,7 +48,7 @@ jobs:
           echo "基线已归档: probe-$stamp.json"
 
       - name: 上传报告为 CI 制品（便于下载核对）
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: webview2-probe-report
           path: docs/compat-baselines/probe-latest.json

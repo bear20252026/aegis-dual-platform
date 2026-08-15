@@ -30,3 +30,6 @@ __pycache__/
 
 # 构建产物（dist/——不入库，由 release.yml 构建）
 dist/
+
+# 生成的 MD 单文件（aegis-source-all.md——不入库）
+aegis-source-all.md

@@ -1,5 +1,8 @@
 # ruff: noqa: BLE001 —— 验证脚本捕获文件/JSON/XML 解析异常是设计性盲捕
 #（政府级：验证脚本须报告一切解析失败，不因异常类型收窄而漏报）
+# S-06 整改（国防级审查）：本脚本为开发期快速检查（AST/JSON/XML 语法）；
+# 发布期实际验证（build/测试/SBOM/签名/provenance 对账）由 release.yml
+# verify job 覆盖（B0-S 整改——docs/release/release.yml fail-closed）
 
 from __future__ import annotations
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Aegis Cross-platform Release Manifest",
   "type": "object",
-  "required": ["schema", "product", "version", "channel", "artifacts"],
+  "required": ["schema", "product", "version", "channel", "artifacts", "signature"],
   "properties": {
     "schema": { "type": "integer", "const": 1 },
     "product": { "type": "string", "const": "Aegis" },
