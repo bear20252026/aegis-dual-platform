@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aegis Capability（能力声明——最小权限）",
+  "description": "蓝图阶段 B（contracts 冻结）：能力声明——scope 到资源/动作的映射。默认拒绝（default-deny）——未声明的能力不可用。",
+  "type": "object",
+  "required": ["scope", "actions", "resources"],
+  "properties": {
+    "scope": { "type": "string", "minLength": 1 },
+    "actions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "resources": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "requires_confirmation": { "type": "boolean", "default": false }
+  },
+  "additionalProperties": false
+}

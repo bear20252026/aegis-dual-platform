@@ -1,0 +1,15 @@
+{
+  "description": "蓝图阶段 B（contracts/vectors）：合法更新清单测试向量（signatures[] + SemVer 字符串——与 update_verifier P0-04 对齐）",
+  "vectors": [
+    {
+      "manifest": {
+        "schema": 1, "product": "Aegis", "version": "1.2.3", "channel": "stable",
+        "expires_at": "2026-09-01T00:00:00Z",
+        "artifacts": [{ "platform": "windows-x64", "format": "msix",
+                       "url": "https://a.gov.cn/x.msix", "sha256": "a".repeat(64), "size": 10 }],
+        "signatures": [{ "key_id": "k1", "sig": "AAAA" }, { "key_id": "k2", "sig": "BBBB" }]
+      },
+      "min_version": "1.0.0", "threshold": 2, "expected": "valid"
+    }
+  ]
+}

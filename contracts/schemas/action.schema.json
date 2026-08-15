@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aegis Action（ProposedAction / AuthorizedAction）",
+  "description": "蓝图阶段 B（contracts 冻结）：Action 是唯一允许进入副作用服务的凭据/意图。ProposedAction 由 Agent/UI 提交；AuthorizedAction 仅由 Capability Broker 在验证 origin/capability/scope/预算/批准/nonce 后产生。",
+  "type": "object",
+  "required": ["session_id", "tab_id", "document_generation", "origin", "method", "canonical_parameters", "scope", "expires_at", "nonce", "policy_version"],
+  "properties": {
+    "session_id": { "type": "string", "minLength": 1 },
+    "tab_id": { "type": "string", "minLength": 1 },
+    "document_generation": { "type": "integer", "minimum": 0 },
+    "origin": { "type": "string", "pattern": "^https?://" },
+    "method": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "NAVIGATE", "DOWNLOAD"] },
+    "canonical_parameters": { "type": "string", "description": "规范化参数（参数变化使批准失效）" },
+    "scope": { "type": "string", "minLength": 1 },
+    "expires_at": { "type": "string", "format": "date-time" },
+    "nonce": { "type": "string", "minLength": 1 },
+    "policy_version": { "type": "string", "minLength": 1 }
+  },
+  "additionalProperties": false
+}
