@@ -24,7 +24,7 @@ jobs:
         working-directory: android
     steps:
       - name: 检出代码
-        uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
 
       - name: 安装 JDK 21（AGP 9.3 要求 ≥17；detekt/ktlint 兼容）
         uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa

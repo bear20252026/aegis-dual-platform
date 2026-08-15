@@ -24,7 +24,7 @@ jobs:
   pin-check:                 # S-04：所有 uses 必须完整 40 字符 SHA
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - name: Pin check (fail-closed)
         run: |
           if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' \
@@ -40,7 +40,7 @@ jobs:
       id-token: write        # SLSA provenance 签名
       attestations: write
     steps:
-      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b
         with:
           python-version: "3.12"
@@ -71,7 +71,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
           name: release-dist
@@ -95,7 +95,7 @@ jobs:
       attestations: read
       contents: read
     steps:
-      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
           name: release-dist
@@ -131,7 +131,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
           name: release-dist

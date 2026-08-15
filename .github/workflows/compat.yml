@@ -25,7 +25,7 @@ jobs:
         working-directory: windows/aegis_source
     steps:
       - name: 检出代码
-        uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
 
       - name: 安装 Python 3.14
         uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b
