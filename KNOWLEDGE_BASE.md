@@ -146,3 +146,55 @@
 - ✅ **已满足（零动作）**：混合壳架构（pywebview 原生壳+WebView 内容）、异步消息驱动（NavQueue 即此模式）、初始 UI 轻页、PQC 底层继承、性能基线监控。
 - 🟡 **评估**：混合原生壳进一步分离（地址栏/书签原生化，受 pywebview 约束）；Helium 7.6MB 信息已纠正。
 - 🔵 **新方向**：Agent 友好 API 标准化（mcp.py 雏形扩展 js_api schema）；Agent 安全防护（MCP 接入注意通道隔离+工具最小权限，OWASP Agent Cheat Sheet）；Wasm 插件沙箱（远期，北大 WAB 思路）。
+
+## 9. Tauri 迁移调研结论（2026-08-15，详见 docs/tauri-migration-report.md）
+
+### 9.1 核实事实
+- **Tauri 2.0 实测**（johal.in 2026-04）：安装包 ~5MB（vs pywebview PyInstaller 实测 200MB）、空闲内存 42MB、冷启动 320ms、输入延迟 12ms；ACL 权限模型默认拒绝 + scope deny 优先（官方中文文档）；Tauri 官方已不再做与 Electron 的官方对比。
+- **浏览器生态 = 实验期**：Verso 已正式停滞（仓库归档，Servo 更新过快+人力有限；Tauri 转探索 Servo 可选渲染）；CNTRL（Tauri v2+SolidJS 三级 AI 路由，Phase 1-3/7 半成品）；Adaptive（★344 API 驱动 UI）；MCP Browser（Tauri 内置 MCP server）；**无生产级 Tauri 浏览器成功案例**。
+- **社区**：r/learnpython 打包 200MB 是 pywebview 痛点；HN ActivityWatch 迁 Tauri（跨平台打包驱动）；掘金 6 问题选型框架（C 端轻量→Tauri、内部工具→pywebview/Electron）；**关键案例 Tune PR #7（pywebview→Tauri 2.x + Python sidecar，前端不变仅换桥）——Sidecar 平滑过渡已验证可行**。
+
+### 9.2 结论（理性评估）
+- **不建议立即整体迁移**：Tauri 浏览器生态实验期（无生产级案例）+ Aegis Python 安全纵深（25 文件 4571 行 + 统一拦截管线 + 凭据治理）需 Rust 全量重做（回归风险）+ 团队 Rust 成本。
+- **架构理念同源**：Tauri 也是"壳"（系统 WebView），迁移是换壳语言非换架构；Aegis 已具备等价物（js_api 白名单≈ACL、NavQueue≈异步消息驱动、mcp.py≈MCP Browser）。
+- **路径**：立即零成本借鉴（ACL deny 优先复核白名单、CNTRL WASM 沙箱理念、Adaptive API 驱动）；中期若生态出现生产级案例/CNTRL 完成/团队 Rust 就绪 → **Sidecar 平滑过渡**（Tune 案例）；长期维持 Python+pywebview 栈持续吸收理念。
+
+### 9.3 大胆求索深化（2026-08-15 补充调研，详见报告第七节）
+- **pytauri（★1410/v0.8.0/2026-08-14 活跃）= 中期首选备选**：pyo3 桥 + standalone 模式（主线程 Python+Tauri）——**全部 Python 业务保留仅换壳**，比 sidecar 更平滑（同进程无通信开销）；风险：pyo3 异步勿跨 FFI 边界（HN 讨论）。
+- **立即四项**（零成本）：① ACL deny 优先复核 Aegis 白名单（黑名单命中须优先于白名单放行）；② `_apply_request_policy` 补 deny 语义自检；③ WASM 沙箱理念评估（CNTRL：WASI 受限 syscall + JS Worker 沙箱）；④ DataZen 实证借鉴（Tauri+AI+MCP <10MB，2026-08-07）。
+- **中期 PoC 三关**：体积/内存/启动实测 vs 现有 pywebview 基线，不过关不迁移（路径 A=sidecar/Tune 案例、路径 B=pytauri）。
+- **生态观察**：Tauri 2.11.5（2026-07）移动端多窗口+IPC 死锁修复；DataZen/Code Déjà Vu 类 Tauri AI 工具实证积累。
+
+### 9.4 第二轮调研结论（2026-08-15，详见 docs/tauri-migration-report-2.md）
+- **Tauri 状态**：v2.11.5（2026-07-01）★110213；pytauri ★1410/v0.8.0 活跃，README：几乎不写 Rust、**pytauri-wheel 全 Python 免编译器**、无 IPC 开销（Pyo3 直连）、明确"替代 pywebview"目标、可集成 nicegui/gradio/FastAPI。
+- **收益 vs 风险（多信源实测）**：体积 128→5MB（-96%）、内存 49MB/实例（-72%）、启动 1.5s→500ms（LOL 工具/生产案例/基准交叉验证）；**最大风险=系统 WebView 三引擎渲染不一致**（Noi 案例 2023 Tauri→Electron 隐藏大坑：授权弹窗/文件下载/远程页拦截/API 少；2026 重试 v2 再失望→"工具可用、平台慎用"）。
+- **结论**：**整体迁移（Rust 全量重写）风险 > 收益**（渲染一致性 + 安全纵深重建回归）；**部分重构（pytauri/Sidecar 保留 Python 业务）收益 > 风险**（pytauri 免 Rust + 无 IPC 开销 + Aegis 壳 UI 简单渲染风险可控）。
+- **分步走路径**：① ACL deny 复核（零风险本周）→ ② pytauri 演示预研 → ③ pytauri-wheel PoC 三关实测 → ④ 按层分模块迁移（smoodit 经验：Aegis 分层清晰已具备）→ ⑤ 三关达标才迁移，否则季度复核维持。
+
+## 10. 2026 Rust 桌面架构全景（2026-08-15，详见 docs/rust-desktop-landscape-2026.md）
+
+### 10.1 Rust 是否 2026 新选（权威信源）
+- **是"新选之一"但非唯一**：Rust GUI 已从"早期"进入"可用"阶段（Wren 2026-03：egui 即时模式最火/Dioxus React 风格/Iced Elm 架构/Xilem 未就绪）；**Tauri 2 成 Web 栈跨平台新默认**（Vanja 2026-05，106k★）；egui 1300万+ 下载（技术栈 2026-04 流行度：egui > Tauri > Dioxus 2.5w★ > Iced 1.9w★）；中文支持 Tauri 第一（码客说 2026-04 五维度）。
+
+### 10.2 Tauri 之外选择（横向对比）
+- **纯 Rust GUI 均不适合浏览器壳**：egui（工具风）、Iced（渲染受限）、Slint（嵌入式）、**GPUI（唯一一线用户=Zed；Longbridge 迁入需自建 60+ 组件库=无开箱组件）**、Xilem（未生产就绪）——渲染/组件生态不足。
+- **非 Rust 壳**：Wails 3（Go，12.3MB/70MB/0.5s，v3 内置 WebEngine Core Blink，无移动端）；NeutralinoJS（2-5MB 极轻但能力/生态受限）；Electron 34（渲染一致但 150MB+ 重量级）；**pywebview（Aegis 现状）= Python 壳浏览器最优**。
+- **结论**：Tauri（或 pytauri）仍是 Rust 生态中壳浏览器最匹配；Aegis 现状（pywebview）已处"Python 生态+壳浏览器"最优位置，无需为换而换；若求 Rust 收益走 pytauri 部分重构（分步走见 9.4）。
+
+## 11. pytauri 部分重构技术路线（2026-08-15，详见 docs/pytauri-migration-technical-plan.md）
+
+### 11.1 三条路线选型（官方文档+examples 源码+Tune 源码核实）
+- **B. pytauri-wheel（全 Python）= 主路线**：免 Rust 编译器（`pip install "pytauri-wheel == 0.8.*"` 预编译 wheel）、Pyo3 直连（无 IPC 开销）、**Windows Tier 1**（作者主环境 Win10=Aegis 目标）、wheel+sdist 分发、Cython 源码保护、examples/tauri-app-wheel 完整。
+- **A. standalone = 备选**：需 Rust 编译器 + python-build-standalone 捆绑（pyembed/PYTAURI_STANDALONE/PYO3_PYTHON/RUSTFLAGS rpath/install_name 补丁/tauri build bundle-release），产出独立可执行（内网免 Python 运行时）；触发条件=政府内网需独立可执行。
+- **C. sidecar = 不推荐**：JSON-RPC 进程通信改造成本高于 B（NavQueue 语义需重构）；仅 wheel 平台覆盖问题才回退（Tune 案例 src-tauri/src/sidecar.rs 为参考）。
+
+### 11.2 Aegis 落地要点
+- Tauri.toml（frontendDist=start.html + [[app.windows]]）+ capabilities（ipc 权限≈现 js_api 白名单映射）+ main.py 改桥层（webview.create_window→pytauri 窗口 API）
+- 分步：①ACL deny 复核→②跑通 examples/tauri-app-wheel（已确认可跑）→③pytauri-wheel PoC 最小壳（三关实测）→④分模块迁移（壳→桥→安全）→⑤达标才迁移
+- 已克隆源码：D:/abrowser/research/pytauri（examples 三个）+ D:/abrowser/research/Tune（sidecar.rs）
+
+### 11.3 补充调研（2026-08-15 第三轮）
+- **pytauri-wheel 0.8.0 平台覆盖（PyPI 核实）**：Windows win_amd64（cp39-cp313）+ win_arm64（cp311-cp313）、macosx 13/14、manylinux_2_35；**⚠️ cp314 wheel=0——Aegis 本机 Python 3.14 无预编译 wheel**（会回退 sdist 源码编译=违背免 Rust 初衷）→ **解决方案：用本机已有 CPython 3.12.13（cp312-win_amd64 wheel 存在）或 3.13**。
+- **pytauri 生态状态**：★1381、v0.8.0（2025-09-02）、80 releases、5 contributors（主维护 WSH032）、Apache-2.0、Last push 2026-06-08；create-pytauri-app 脚手架（0.6+ 推荐，uv+copier）；启动语义（Discussion #172：Python 主线程+Tauri 同线程、asyncio 子线程、async 勿跨 FFI 边界）。
+- **分发成本提醒**（Life OS 类实践）：桌面分发=代码签名+notarization+开发者账号+跨平台 CI 矩阵（"boring half"）；政府内网分发可评估免签名路径，但 Windows 侧需考虑。
+- **中文专门评测稀缺**（pytauri 较新），以官方文档+GitHub+源码为准。
