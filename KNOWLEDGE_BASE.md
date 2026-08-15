@@ -313,3 +313,17 @@
 
 ### 18.3 B 实施调整（重要）
 - build_release.py 原设计"PyArmor 混淆其余"需调整：**改为 Nuitka 编译全部敏感模块（或 Cython 备选）**——免费零成本 + 官方推荐路径（避开 PyArmor 付费许可 + 组合不支持问题）。
+
+## 19. Nuitka dry-run 验证（2026-08-15：B 实施发布路线实测）
+
+### 19.1 编译环境需求（全球调研确认）
+- **Windows 编译器**：Visual Studio 2022+（默认优先，英文包最佳）或 **MinGW64（Nuitka 自动下载，⚠️ 不支持 Python 3.13+）** 或 Zig（--zig 仅 x64）；本机实测**检测到 MSVC cl 14.5**（VS 已装——发布环境就绪）。
+- **常见问题**（GitHub #3671/#3770 + 博客园实战）：无编译器 FATAL（VS Developer Prompt 环境）；Windows SDK 检测需 `--msvc=latest`；CI 非交互需 `--assume-yes-for-downloads`（Dependency Walker）；Nuitka 注入 TCL_LIBRARY 环境变量致子进程崩溃（get_clean_env 清理）；`sys.executable` 不可靠（用 `__compiled__` 检测打包态）；无 --windows-installer（standalone + Inno Setup 两步）。
+
+### 19.2 dry-run 实测结果（发布路线可行）
+- **Nuitka 4.1.3**（3.12.13 venv）+ `python -m nuitka --module app/security.py --assume-yes-for-downloads` → **编译成功**（security.cp312-win_amd64.pyd，261632 字节，exit 0）。
+- **产物验证**：可导入（PyInit_security 匹配——模块名须与文件名一致）+ **函数集一致**（6 公开函数全在）+ **行为等价**（safe_url 拒绝 javascript:→空串/放行 https 与源码一致）。
+- **回归**：源码开发流程未受影响（dry-run 产物在 research/ 不入库）。
+
+### 19.3 B 实施就绪状态
+- **发布路线实测可行**（Nuitka 免费编译 + MSVC 已备）——核心模块 .pyd 编译验证通过；后续按 build_release.py（docs/release/）扩展编译其余敏感模块 + XOR 常量加固 + release.yml 签名/发布流水线。
