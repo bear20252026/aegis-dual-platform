@@ -408,3 +408,14 @@
   - sitemap 示例更新：create_order（amount ≤ 5000）/export_data（rows ≤ 10000）加 condition
 - **验证**：语法/三自检/ruff 0/mypy Success/bandit 0 + condition 评估 4 场景（超限标记/未超限不标记/无 condition 不评估/参数缺失保守不标记）全过。
 - **Agent 安全四级纵深**：工具层（mcp）→ 域层（A）→ 动作层（B sitemap）→ **条件层（C condition 阈值）**。
+
+## 24. C 级收官（2026-08-15：C1/C2/C3 全部完成）
+
+### 24.1 C 级三项完成状态（final-development-checklist C 级观察项闭环）
+- **C1 SRI（Subresource Integrity）**：✅ 全球调研（MDN/w3c PR #133——Integrity-Policy 头非 Baseline）+ 评估（Aegis 资源本地化无 CDN——场景不适用）+ 记录（若未来引入 CDN 外部资源则启用 SRI integrity 属性）——KNOWLEDGE_BASE 22.2。
+- **C2 ceLLMate（Agent 浏览器沙箱）**：✅ 全球调研（arXiv 2512.12594 + earlence 开源 + mozilla-ai/aaf + Microsoft agent-governance-toolkit + 掘金 Harness + PDP 架构）+ 评估（纵深补充）+ **阶段 A（域白名单）/B（agent sitemap 语义动作）/C（condition 动态策略）全落地**——Agent 安全四级纵深（工具层→域层→动作层→条件层）——KNOWLEDGE_BASE 23。
+- **C3 Edge 进程隔离（LNA/OriginKeyed）**：✅ 全球调研（Announcement #126 + 微软中文——LNA 默认关/kill-switch/未来 API）+ 评估（Aegis 适用——pywebview 6.2.1 不支持环境参数——LNA 启用受限记录，季度复核跟踪）——KNOWLEDGE_BASE 22。
+
+### 24.2 C 级收官总结
+- **C 级观察项全部调研/评估/落地闭环**（2026-08-15）——A 级（开发期）7 项 + B 级（发布期）4 项 + C 级（前瞻）3 项全部完成。
+- **Agent 安全体系**（四级纵深 + 供应链 + 保护）：mcp 工具层白名单/审计 → 请求管线（域/动作/条件三层策略）→ SBOM/依赖审计 → Nuitka 核心编译保护——完整纵深防御。
