@@ -253,3 +253,19 @@
 ### 14.2 对 Aegis（Windows WebView2）借鉴结论
 - **代码不可移植**（Linux 机制），但**设计哲学高度同构**：白名单（js_api/URL 已同哲学）、分层纵深（Aegis 多层防御同哲学）、**W^X ↔ ESM 禁 JIT**（WebView 层等价物）、进程隔离（WebView2 多进程由内核提供，底层更强）、优雅降级（Aegis 静默降级同哲学）。
 - **新增可借鉴点**：反 dump 的"**内存凭据不落地**"理念——Aegis 凭据治理（.gitignore+环境变量）的强化方向（零风险记录待评估）。
+
+## 15. brave adblock 引擎调研（2026-08-15，Rust 引擎源码精读）
+
+### 15.1 引擎结构（components/brave_shields/core/common/adblock/rs/src/）
+- **URL 匹配**（engine.rs）：`matches()` → `check_network_request_subset`（`Request::preparsed` 六维上下文：URL/hostname/initiator/request_type/third_party/method + `previously_matched_rule`/`force_check_exceptions` 参数）。
+- **规则结构**（filter_set.rs）：`FilterSet` 包装 adblock crate 的 InnerFilterSet + `add_filter_list`/`add_filter_list_with_permissions`（批量规则 + 权限）。
+- **规则解析**（convert.rs）：InnerBlockerResult/RegexManagerDiscardPolicy 等调试转换。
+- **资源过滤**（resource_storage.rs）：`BraveCoreResourceStorage` 包装 `InMemoryResourceStorage` + 资源 JSON 解析/克隆/扩展（被拦请求回 1×1 透明图存根）。
+- **cxx FFI**：Rust 引擎 + cxx crate 桥（Cargo.toml/BUILD.gn），C++ 侧调用高性能匹配。
+
+### 15.2 对 Aegis 威胁拦截借鉴结论
+- 🟡 **六维请求上下文匹配**（preparsed Request）——Aegis 目前 host 级（host_is_blocked）；可评估扩展资源类型/第三方判断提升拦截精确性（区分文档/子资源请求）。
+- ✅ **例外/主规则分层**（previously_matched_rule + force_check_exceptions）——Aegis 已 deny 优先同哲学；可强化"例外强制检查"语义。
+- 🟡 FilterSet 批量规则带权限元数据——threat_feed 规则集加载可借鉴（规则源可信度分级）。
+- ⚠️ **资源存根替换**（1×1 透明图）——受 WebView2 限制（pywebview 6.x request_sent 仅改头不能改响应），记录为拦截语义增强方向（导航层已兜底）。
+- ✅ Rust 高性能匹配（cxx FFI）——Aegis 用 set 查找已高效（小规则集）。
