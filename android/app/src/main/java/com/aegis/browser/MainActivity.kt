@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -39,9 +41,15 @@ import androidx.compose.ui.viewinterop.AndroidView
 class MainActivity : ComponentActivity() {
     private lateinit var tabManager: TabManager
 
+    // A1（final-development-checklist）：System WebView 版本过旧提示文案（null=不提示）
+    private var webViewAlertMessage: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tabManager = TabManager()
+        // A1：System WebView 版本检查（CVE-2026-12438/11295 防御——
+        // 过旧则提示更新，不阻塞浏览）
+        WebViewVersionCheck.checkAndPrompt(this) { webViewAlertMessage = it }
         tabManager.addTab(
             SecureWebViewFactory.create(this),
             url = "https://www.bing.com",
@@ -54,6 +62,8 @@ class MainActivity : ComponentActivity() {
                 var address by remember { mutableStateOf("https://www.bing.com") }
                 // 落地 B：标签栏布局（默认 top；可在设置中切换 left）
                 var tabsPosition by remember { mutableStateOf("top") }
+                // A1：System WebView 版本过旧提示（null=不提示）
+                var webViewAlert by remember { mutableStateOf(webViewAlertMessage) }
 
                 fun refresh() {
                     tabs = tabManager.list()
@@ -66,6 +76,26 @@ class MainActivity : ComponentActivity() {
                         url = "https://www.bing.com",
                     )
                     refresh()
+                }
+
+                // A1：版本过旧 → 安全提示对话框（CVE-2026-12438/11295 防御）
+                webViewAlert?.let { msg ->
+                    AlertDialog(
+                        onDismissRequest = { webViewAlert = null },
+                        title = { Text("安全提示") },
+                        text = { Text(msg) },
+                        confirmButton = {
+                            TextButton(
+                                onClick = {
+                                    webViewAlert = null
+                                    WebViewVersionCheck.openUpdate(this@MainActivity)
+                                },
+                            ) { Text("去更新") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { webViewAlert = null }) { Text("稍后") }
+                        },
+                    )
                 }
 
                 Column(modifier = Modifier.fillMaxSize()) {
