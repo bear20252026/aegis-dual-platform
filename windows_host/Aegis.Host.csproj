@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Aegis.Host</AssemblyName>
+    <RootNamespace>Aegis.Host</RootNamespace>
+    <!-- 指定 Program.Main 为唯一入口（避免与 WPF App.xaml 自动生成入口冲突——CS0017） -->
+    <StartupObject>Aegis.Host.Program</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- WebView2 SDK（NuGet——重构第 1 阶段：C#/.NET 10 原生 WebView2 壳） -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+</Project>
