@@ -48,10 +48,12 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build final packages (B1 obfuscation + assembly)
+        env:
+          PYTHONIOENCODING: "utf-8"  # build_release.py print 中文——Windows runner 编码修复
         run: |
           python -m pip install -r windows/aegis_source/requirements-lock.txt
           python docs/release/build_release.py          # Nuitka .pyd + dist 组装
-          python -m PyInstaller --onedir aegis_webview.spec  # 最终可分发包
+          python -m PyInstaller --noconfirm windows/aegis_source/aegis_webview.spec  # 最终可分发包
       - name: Generate SHA-256 checksums (all final artifacts)
         run: |
           cd dist && Get-ChildItem -Recurse -File | Get-FileHash -Algorithm SHA256 |
