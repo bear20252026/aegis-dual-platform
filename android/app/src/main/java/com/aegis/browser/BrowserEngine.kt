@@ -69,7 +69,10 @@ class BrowserEngine(
                     android.util.Log.i("Aegis", "R12 pageStarted: $url")
                 }
 
-                override fun onPageFinished(view: WebView, url: String?) {
+                override fun onPageFinished(
+                    view: WebView,
+                    url: String?,
+                ) {
                     android.util.Log.i("Aegis", "R12 pageFinished: $url")
                 }
             }
@@ -98,22 +101,32 @@ class BrowserEngine(
 
                 // R-12 整改（体验/功能审查）：进度/标题回调——状态同步事件
                 // （onProgressChanged/onReceivedTitle——地址栏/标签标题同步）
-                override fun onProgressChanged(view: WebView, newProgress: Int) {
+                override fun onProgressChanged(
+                    view: WebView,
+                    newProgress: Int,
+                ) {
                     android.util.Log.i("Aegis", "R12 progress: ${newProgress.coerceIn(0, 100)}")
                 }
 
-                override fun onReceivedTitle(view: WebView, title: String?) {
+                override fun onReceivedTitle(
+                    view: WebView,
+                    title: String?,
+                ) {
                     android.util.Log.i("Aegis", "R12 title: ${title?.take(256).orEmpty()}")
                 }
             }
         // A-03 整改（国防级审查）：默认限制第三方 Cookie（WebView 默认
         // 接受——审查要求显式限制，防跨站追踪）
-        android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)
+        android.webkit.CookieManager
+            .getInstance()
+            .setAcceptThirdPartyCookies(webView, false)
     }
 
     /** A-03 整改（国防级审查）：无痕/会话结束清理序列（Cookie/缓存/历史）。 */
     fun clearPrivateData() {
-        android.webkit.CookieManager.getInstance().removeAllCookies(null)
+        android.webkit.CookieManager
+            .getInstance()
+            .removeAllCookies(null)
         webView.clearCache(true)
         webView.clearHistory()
     }
