@@ -269,3 +269,19 @@
 - 🟡 FilterSet 批量规则带权限元数据——threat_feed 规则集加载可借鉴（规则源可信度分级）。
 - ⚠️ **资源存根替换**（1×1 透明图）——受 WebView2 限制（pywebview 6.x request_sent 仅改头不能改响应），记录为拦截语义增强方向（导航层已兜底）。
 - ✅ Rust 高性能匹配（cxx FFI）——Aegis 用 set 查找已高效（小规则集）。
+
+## 16. A6 浏览器沙箱定位（2026-08-15：'安全沙箱'叙事文档化）
+
+### 16.1 定位叙事（全球调研依据）
+- **浏览器即边界/PEP**（CSA 2026-01"Browser as PEP in Zero Trust"——NIST SP 800-207 锚定）：浏览器是零信任架构的策略执行点——Aegis 的定位叙事权威依据。
+- **Aegis = 轻量安全沙箱浏览器**：继承 WebView2/Chromium 多进程架构（Site Isolation + Renderer Sandbox），将不同来源网页隔离在权限极低的独立进程——"浏览器即安全沙箱"定位。
+
+### 16.2 Aegis 沙箱能力清单
+- **进程隔离**（底层继承）：Site Isolation（Windows 上 Chrome 始终启用）+ WebView2 多进程（浏览器/渲染/GPU）。
+- **可配置强化**（Edge 官方策略参考）：OriginKeyedProcessesEnabled（origin 级隔离）/ProcessIsolationEnabled（防进程读取）——WebView2 环境选项可评估。
+- **沙箱缓解策略**（底层含）：ACG（Arbitrary Code Guard 禁可执行内存，V8 JIT 例外）+ Win32k Lockdown（禁 win32k.sys 调用）+ Job Object（禁新进程/剪贴板/桌面访问）。
+- **应用层纵深**（Aegis 自有）：ESM 禁 JIT + 白名单双关口 + 威胁拦截 deny 优先 + 凭据脱敏（与沙箱互补）。
+
+### 16.3 攻击面认知（沙箱非绝对——纵深防御补充）
+- **SBX Escape**（沙箱逃逸——Browser 进程 IPC 漏洞/Mojo IPC 内存破坏）与 **SBX Bypass**（OS 级 LPE）——沙箱不能 100% 防逃逸，Aegis 的纵深防御（白名单/拦截/凭据治理）是沙箱之外的补充层。
+- **隔离成本权衡**（Chrome 125 官方数据）：严格站点隔离内存 +10-13%、GPU 独立进程 +60MB——政府内网环境按资源评估启用级别。
