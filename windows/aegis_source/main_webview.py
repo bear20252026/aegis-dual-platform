@@ -24,10 +24,13 @@ from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
 
 
 def _apply_dnt_header(window: Any) -> None:
-    """为每个 HTTP 请求注入 DNT: 1 头（落地 A-①）。
+    """为每个 HTTP 请求注入 DNT: 1 头（落地 A-①，P2-① 强化）。
 
-    通过 pywebview 的 request_sent 事件（WebView2 WebResourceRequested）
-    修改请求头。pywebview 版本不支持该事件/请求头修改时静默降级。
+    通过 pywebview request_sent 事件（底层 WebView2 WebResourceRequested）
+    修改请求头。pywebview 6.x（已锁 6.2.1）**正式支持**该事件：回调接收
+    Request 对象，`request.headers` 为字典，**变异后即用于请求**（官方
+    语义，见 pywebview.flowrl.com/api window.events.request_sent）。
+    更旧版本不支持该事件/请求头修改时静默降级。
     """
     try:
         events = getattr(window, "events", None)
@@ -40,7 +43,7 @@ def _apply_dnt_header(window: Any) -> None:
             try:
                 headers = getattr(request, "headers", None)
                 if headers is not None:
-                    headers["DNT"] = "1"
+                    headers["DNT"] = "1"  # 变异 headers 即生效（6.x 官方语义）
             except Exception:
                 pass  # 单个请求修改失败不影响其他请求
 

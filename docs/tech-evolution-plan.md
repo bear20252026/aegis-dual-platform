@@ -117,6 +117,16 @@ Aegis 落地（按需，分阶段）：
 
 **复核机制**：每季度（Q3：2026-09-30 前）更新本表；触发条件 = 任一框架转 stable 或发布 1.0；复核产出 = 更新本记录 + 若条件满足启动 PoC 评估（成本/安全/渲染一致性三项）。
 
+### 3.4 季度复核执行记录（2026-Q3 中期，2026-08-15）
+
+| 框架 | 本次复核发现（2026-08-15 复核） | 结论（维持/调整） |
+|---|---|---|
+| **Deno Desktop** | Deno **8.06**（2026-08 发布）持续修复 desktop 模块（`fix(desktop): handle colored HMR URLs and page loads #36316`、`fix(desktop): retain update signature verification op #36152`）；**仍无 stable 公告**（desktop 处于持续修复期） | 🔴 **维持不迁移**（未稳定）；下次复核：stable 公告或 3.x 里程碑 |
+| **Bunlet** | 无新版本/新报道（仍 v0.3.0 早期） | 🔴 **维持不迁移**（早期）；下次复核：v1.0 |
+| **触发检查** | 无任一框架转 stable/发布 1.0 | ✅ **未触发 PoC 评估** |
+
+**复核结论**：Q3 中期复核完成——Deno Desktop 仍在活跃修复（desktop 模块 bug 持续收敛是正面信号，但距 stable 尚远），Bunlet 无进展；Aegis 维持 Python+pywebview 栈，不迁移判断不变。下次复核：2026-09-30 前（Q3 末）。
+
 ---
 
 ## 方向 ④：WebView2 性能最佳实践落地
