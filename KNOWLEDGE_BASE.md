@@ -239,3 +239,17 @@
 - **安全更新模型**（QtWebEngine patch 回移安全修复）——Aegis WebView2 **Evergreen 2 周节奏更优** ✅。
 - **键盘驱动深度**（vim-like + hints 模式）——Aegis 已有快捷键（R1 借鉴 min）；qutebrowser 11k★ 验证"Python 浏览器+键盘驱动"大规模可行——**hints 模式可作未来增强评估**（不改变功能，先记录）。
 - **结论**：Tune/qutebrowser 核心经验 Aegis 多数已对应落地（NavQueue/log_event/Evergreen）——印证 Aegis 架构选择正确；新增借鉴点已记录（CREATE_NO_WINDOW + hints 模式，均零风险待评估）。
+
+## 14. FreeDom 四层沙箱精读（2026-08-15，src/os_sandbox.c 14933 字节）
+
+### 14.1 四层实现（Linux 原生机制，逐层精读）
+- **第一层 seccomp-bpf**：`os_allowed` 白名单 30 个 syscall（read/write/mmap/mprotect/futex/clock_gettime 等）；**io_uring/process_vm_readv/bpf/userfaultfd 等旁路原语按构造拒绝**（注释："denylist could forget them"——白名单优于黑名单）。
+- **第二层 W^X**：`os_prot_allowed`——mmap/mprotect 一律拒绝 PROT_EXEC（可执行内存请求被拒）。
+- **第三层 Landlock**（os_sandbox.c:227 起）：landlock_create_ruleset/add_rule syscall 封装（文件系统访问控制）。
+- **第四层 命名空间**：`os_namespace_flags` = CLONE_NEWUSER|NEWNET|NEWIPC|NEWUTS；`os_isolate_namespaces` 用 unshare()，EPERM/EINVAL/ENOSYS 优雅降级（seccomp 仍强制边界）。
+- **反 dump**：`os_no_dump`（prctl undumpable + no core，防凭据外泄）。
+- **调用链**：tab.c:1363-1366（fork 子进程→触碰内容前 os_isolate_namespaces+os_no_dump+os_harden→TAB_READY）+ renderer.c:29-30（os_no_dump+os_harden→_exit(90)）；worker 无网络父进程双管道代理。
+
+### 14.2 对 Aegis（Windows WebView2）借鉴结论
+- **代码不可移植**（Linux 机制），但**设计哲学高度同构**：白名单（js_api/URL 已同哲学）、分层纵深（Aegis 多层防御同哲学）、**W^X ↔ ESM 禁 JIT**（WebView 层等价物）、进程隔离（WebView2 多进程由内核提供，底层更强）、优雅降级（Aegis 静默降级同哲学）。
+- **新增可借鉴点**：反 dump 的"**内存凭据不落地**"理念——Aegis 凭据治理（.gitignore+环境变量）的强化方向（零风险记录待评估）。
