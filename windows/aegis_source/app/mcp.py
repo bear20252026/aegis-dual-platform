@@ -94,6 +94,9 @@ _TOOLS: dict[str, dict[str, Any]] = {
         "description": "在当前标签导航到 URL 或搜索词",
         "parameters": {
             "type": "object",
+            # A5（final-development-checklist）：OWASP 严格 JSON Schema——
+            # additionalProperties:false 防参数注入（工具参数视为不受信）
+            "additionalProperties": False,
             "properties": {
                 "text": {
                     "type": "string",
@@ -102,6 +105,8 @@ _TOOLS: dict[str, dict[str, Any]] = {
             },
             "required": ["text"],
         },
+        # A5：返回网页内容——输出不可信标注（WebMCP untrustedContentHint）
+        "untrusted_result": True,
         "fn": _t_navigate,
     },
     "new_tab": {
@@ -205,6 +210,9 @@ def handle_request(api: Any, raw: str | dict) -> dict:
                 "name": name,
                 "description": t["description"],
                 "parameters": t["parameters"],
+                # A5（final-development-checklist）：readOnly 声明（WebMCP
+                # readOnlyHint 理念——查询类工具只读，Agent 决策参考）
+                "readOnly": name.startswith(("get_", "current_")),
             })
         return _ok(req_id, {"tools": tools})
 
@@ -216,9 +224,30 @@ def handle_request(api: Any, raw: str | dict) -> dict:
             return _err(-32602, f"unknown tool: {name}")
         if not isinstance(arguments, dict):
             return _err(-32602, "arguments 必须为对象")
+        # A5（final-development-checklist）：OWASP 严格 JSON Schema 执行侧——
+        # 拒绝未声明参数（additionalProperties:false 语义落地；工具参数
+        # 视为不受信（来自 LLM 输出），防参数注入）
+        declared = set((tool["parameters"].get("properties") or {}).keys())
+        if declared:
+            extra = set(arguments.keys()) - declared
+            if extra:
+                return _err(-32602, f"unexpected arguments: {sorted(extra)}")
+        # A5：工具调用审计（OWASP MCP 安全——审计回放理念；可观测性，
+        # 不改变功能；参数/结果摘要截断防敏感外泄）
+        try:
+            from app.event_log import log_event
+            log_event(f"[mcp] 工具调用: {name} args={str(arguments)[:120]}")
+        except Exception:
+            pass
         try:
             result = tool["fn"](api, **arguments)
-            return _ok(req_id, {"ok": True, "result": result})
+            # A5：输出不可信标注（WebMCP untrustedContentHint 理念——
+            # 工具结果可能含外部数据（网页内容等），标注 untrusted 帮助
+            # Agent 提高警惕；不改变功能）
+            resp: dict = {"ok": True, "result": result}
+            if tool.get("untrusted_result"):
+                resp["untrusted"] = True
+            return _ok(req_id, resp)
         except (TypeError, ValueError) as exc:
             return _err(-32602, f"invalid arguments: {exc}")
         except Exception as exc:
