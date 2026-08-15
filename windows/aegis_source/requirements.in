@@ -12,3 +12,6 @@ keyring==25.4.1
 pywebview==6.2.1
 bottle==0.13.2
 PyInstaller==6.22.0
+# B1 混淆隔离编译依赖（build_release.py 的 Nuitka 编译——锁文件须含——
+# 远端 build 曾 No module named nuitka）
+nuitka==4.1.3
