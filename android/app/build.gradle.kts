@@ -127,3 +127,11 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21)
     }
 }
+
+// jvmToolchain 21（工具链强制——本地 JDK 25 也能跑 detekt（Gradle 自动用
+// JDK 21 工具链——jvm-target 21——与 CI JDK 21 一致——质量门禁验证打通）
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
+}
