@@ -22,9 +22,14 @@ from typing import Any
 
 from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
 
+# C2 阶段 A（ceLLMate 借鉴）：Agent 请求白名单域（agent-browser domain
+# allowlist 模式——Agent 会话活跃时仅允许这些域的请求；默认空=Agent 活跃
+# 时非白名单域请求标记 + 日志（可观测不拦截）——政府内网按需配置内网域）
+AGENT_ALLOWED_HOSTS: set[str] = set()
+
 
 def _apply_request_policy(window: Any, blocked: set | None = None,
-                          shell: Any = None) -> None:
+                          shell: Any = None, api: Any = None) -> None:
     """统一请求策略管线（A 级落地，P0-①：DNT→威胁拦截统一回调链）。
 
     通过 pywebview request_sent 事件（底层 WebView2 WebResourceRequested）
@@ -104,6 +109,25 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                             )
                         except Exception:
                             pass
+                # C2 阶段 A（ceLLMate 借鉴）：Agent 会话活跃时应用白名单域策略
+                # （agent-browser domain allowlist 模式——防 Agent 数据外泄到
+                # 非白名单域；标记 + 日志可观测，不改变拦截语义——零风险）
+                try:
+                    import time
+                    session_active = (
+                        api is not None
+                        and (getattr(api, "_agent_session", None) or 0.0)
+                        and time.time() - (getattr(api, "_agent_session", None) or 0.0) < 60
+                    )
+                    if session_active and host and host not in AGENT_ALLOWED_HOSTS:
+                        headers["X-Aegis-Agent-Blocked"] = "1"
+                        try:
+                            from crash_reporter import log_event
+                            log_event(f"[agent] Agent 请求非白名单域: {url}")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass  # Agent 策略失败静默（不影响请求）
             except Exception:
                 pass  # 单个请求修改失败不影响其他请求
 
@@ -480,7 +504,7 @@ def main() -> int:
                 blocked = ThreatFeedUpdater(resolve_data_dir()).load_cached()
             except Exception:
                 blocked = set()  # 黑名单快照失败 → 仅 DNT，不影响浏览
-            _apply_request_policy(window, blocked=blocked, shell=shell)
+            _apply_request_policy(window, blocked=blocked, shell=shell, api=api)
     except Exception:
         pass  # 统一策略绑定失败静默，不影响浏览
 

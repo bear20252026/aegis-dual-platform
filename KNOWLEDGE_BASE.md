@@ -383,3 +383,10 @@
 - **阶段 B（P2 按需）**：agent sitemap 内网自定义（语义动作 ↔ HTTP 消息映射——内网 OA 场景）。
 - **阶段 C（P3 评估）**：condition 动态策略（运行时条件评估——金额阈值等）。
 - **不实施（记录）**：完整 agent sitemap 标准（需网站生态协作）+ WebSocket 拦截（ceLLMate 未来工作）。
+
+### 23.4 C2 阶段 A 实施（2026-08-15 已落地）
+- **实现**（三文件增量，基于进一步调研——agent-browser domain allowlist 模式 + CurrentStack 治理 + 掘金白名单/最小权限）：
+  - `api_bridge.py`：Api 增加 `_agent_session`（Agent 会话活跃时间戳——0=非活跃）
+  - `mcp.py`：工具调用刷新 `_agent_session`（会话标记——工具层与请求层打通）
+  - `main_webview.py`：`_apply_request_policy` 加 api 参数 + Agent 会话检查（活跃 60s 内）+ 非白名单域请求标记 `X-Aegis-Agent-Blocked` + `[agent]` 日志（可观测不拦截——零风险）；`AGENT_ALLOWED_HOSTS` 常量（默认空=全标记记录，内网按需配置）
+- **验证**：语法/三自检/ruff 0/mypy Success/bandit 0 + 策略逻辑 4 场景（活跃非白名单标记/白名单放行/非活跃不标记/过期失效）全过。

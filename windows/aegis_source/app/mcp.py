@@ -241,6 +241,13 @@ def handle_request(api: Any, raw: str | dict) -> dict:
             pass
         try:
             result = tool["fn"](api, **arguments)
+            # C2 阶段 A（ceLLMate 借鉴）：工具调用刷新 Agent 会话活跃标记
+            # （请求管线据此对 Agent 请求应用白名单域策略）
+            try:
+                import time
+                api._agent_session = time.time()
+            except Exception:
+                pass
             # A5：输出不可信标注（WebMCP untrustedContentHint 理念——
             # 工具结果可能含外部数据（网页内容等），标注 untrusted 帮助
             # Agent 提高警惕；不改变功能）

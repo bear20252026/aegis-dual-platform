@@ -106,6 +106,9 @@ class Api:
         self.config: Any = None
         self._data_dir: str = ""
         self._lock = threading.RLock()
+        # C2 阶段 A（ceLLMate 借鉴）：Agent 会话活跃时间戳（mcp 工具调用
+        # 刷新；0=非活跃）。请求管线据此对 Agent 请求应用白名单域策略。
+        self._agent_session: float = 0.0
         self._tabs: list[dict[str, Any]] = [{
             "title": "新标签页", "url": START_URL, "pinned": False,
             "group": "默认",
