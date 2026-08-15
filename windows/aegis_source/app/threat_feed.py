@@ -158,7 +158,9 @@ class ThreatFeedUpdater:
                 # nosec B310: feed_url 已由 validate_feed_url 强制为 https（见上文），
                 # 且可选 verify 签名校验；非 https 地址在此路径前已被拒绝。
                 with urllib.request.urlopen(feed_url, timeout=15.0) as resp:  # nosec B310
-                    raw = resp.read()
+                    # P1-2 修复（专家审查）：复用 _read_limited（限流读取——
+                    # 防失控/恶意订阅源耗尽内存——N-12）
+                    raw = _read_limited(resp, max_bytes=5 * 1024 * 1024)
                 if verify is not None:
                     ok = False
                     try:
@@ -175,8 +177,14 @@ class ThreatFeedUpdater:
                         seen.add(d)
                         domains.append(d)
                 os.makedirs(self._dir, exist_ok=True)
-                with open(self._file, "w", encoding="utf-8") as f:
+                # P1-2 修复（专家审查）：临时文件 + fsync + 原子 os.replace——
+                # 防半写缓存（读取中断时旧缓存保持完整——N-12）
+                tmp = self._file + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
                     f.write("\n".join(domains))
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, self._file)
                 from .security import harden_perms
                 harden_perms(self._file)
                 if on_done:

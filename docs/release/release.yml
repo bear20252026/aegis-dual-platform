@@ -108,13 +108,21 @@ jobs:
           path: dist
       - name: Verify SLSA provenance on every artifact
         run: |
-          for f in $(find dist -type f | head -200); do
-            gh attestation verify "$f" --predicate-type https://slsa.dev/provenance/v1 || exit 1
-          done
+          # P0-06 修复（专家审查）：逐文件 NUL 安全验证（移除 head -200——
+          # 全部工件验证——缺失 attestation 是失败不是跳过）
+          while IFS= read -r -d '' f; do
+            gh attestation verify "$f" \
+              --owner "$GITHUB_REPOSITORY_OWNER" \
+              --predicate-type https://slsa.dev/provenance/v1
+          done < <(find dist -type f -print0)
       - name: Verify SBOM attestation
         run: |
-          gh attestation verify dist/SHA256SUMS.json --predicate-type https://spdx.dev/Document || true
-          # SBOM attestation 完整性：gh attestation verify（attestations 齐全）
+          # P0-06 修复（专家审查）：逐文件 SBOM 验证（移除 || true——
+          # 不允许只验证单一文件——CycloneDX predicate 与 sbom job 一致）
+          while IFS= read -r -d '' f; do
+            gh attestation verify "$f" --owner "$GITHUB_REPOSITORY_OWNER" \
+              --predicate-type https://cyclonedx.org/bom
+          done < <(find dist -type f -print0)
       - name: Checksum reconciliation (byte-identical invariant)
         run: |
           python - <<'PY'
