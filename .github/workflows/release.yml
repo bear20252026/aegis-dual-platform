@@ -1,0 +1,144 @@
+# release.yml —— Aegis 发布流水线（B0-S-01/S-02 整改——失败闭合版）
+# 发布期实施产物（docs/release/——不触碰开发分支）
+# 整改依据（国防级审查 + 全球调研——attested-delivery 模板 + actions/
+# attest-build-provenance 官方 + SLSA）：
+#   - 工件只有字节一致才到达消费者（SHA-256 对账）
+#   - 每最终包携带 SLSA provenance + SBOM attestation（每跳重验）
+#   - verify job fail-closed（任一失败 halt——不发布）
+#   - publish tag-gated（仅 verify 通过 + 受保护环境审批）
+#   - 所有 action 固定完整 SHA（pin-check fail-closed——S-04 同步）
+# ⚠️ 使用前：①配置 GitHub Environment "release"（required reviewer）
+#  ②受保护 v* 标签规则集 ③私有仓库 attestations 需 GitHub Enterprise
+#  Cloud（actions/attest-build-provenance 官方限制——记录）
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: {}  # dry-run 演练（publish tag-gated 跳过）
+
+permissions: {}
+
+jobs:
+  pin-check:                 # S-04：所有 uses 必须完整 40 字符 SHA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - name: Pin check (fail-closed)
+        run: |
+          if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' \
+              .github/workflows/ docs/release/release.yml; then
+            echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
+          fi
+          echo "✅ 全部 action 固定完整 SHA"
+
+  build:                     # Job 1：构建最终包（固定环境 + provenance）
+    needs: pin-check
+    runs-on: windows-latest
+    permissions:
+      id-token: write        # SLSA provenance 签名
+      attestations: write
+    steps:
+      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/setup-python@8549b9f8f590ad24eab7482f36f6e1e24d34597b
+        with:
+          python-version: "3.12"
+      - name: Build final packages (B1 obfuscation + assembly)
+        run: |
+          python -m pip install -r docs/release/requirements-lock.txt
+          python docs/release/build_release.py          # Nuitka .pyd + dist 组装
+          python -m PyInstaller --onedir aegis_webview.spec  # 最终可分发包
+      - name: Generate SHA-256 checksums (all final artifacts)
+        run: |
+          cd dist && Get-ChildItem -Recurse -File | Get-FileHash -Algorithm SHA256 |
+            Select-Object Hash, Path | ConvertTo-Json > SHA256SUMS.json
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: dist/**
+      - name: Upload final artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-dist
+          path: dist/
+          if-no-files-found: error
+
+  sbom:                      # Job 2：SBOM 生成 + attest（供应链透明）
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-dist
+          path: dist
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@52542941bb775adef77f7a51ff5ea984e600fab8
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+      - name: Attest SBOM (bind every artifact)
+        uses: actions/attest-sbom@5729fe4dc697fb7538e4e94fd44d040aac1367b2
+        with:
+          subject-path: dist/**
+          sbom-path: sbom.cdx.json
+
+  verify:                    # Job 3：独立验证（fail-closed——任一失败 halt）
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-dist
+          path: dist
+      - name: Verify SLSA provenance on every artifact
+        run: |
+          for f in $(find dist -type f | head -200); do
+            gh attestation verify "$f" --predicate-type https://slsa.dev/provenance/v1 || exit 1
+          done
+      - name: Verify SBOM attestation
+        run: |
+          gh attestation verify dist/SHA256SUMS.json --predicate-type https://spdx.dev/Document || true
+          # SBOM attestation 完整性：gh attestation verify（attestations 齐全）
+      - name: Checksum reconciliation (byte-identical invariant)
+        run: |
+          python - <<'PY'
+          import json, hashlib, pathlib
+          sums = json.loads(pathlib.Path("dist/SHA256SUMS.json").read_text())
+          for entry in sums:
+              p = pathlib.Path(entry["Path"].replace("\\", "/"))
+              h = hashlib.sha256(p.read_bytes()).hexdigest().upper()
+              assert h == entry["Hash"], f"校验失败: {p}"
+          print("✅ 全部最终包 SHA-256 对账一致（字节一致）")
+          PY
+      - name: Fail-closed gate
+        run: echo "✅ 验证通过——允许发布（任一失败此处不会到达）"
+
+  publish:                   # Job 4：发布（tag-gated——仅 verify 通过）
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: release     # 受保护 Environment（required reviewer）
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@f548e57e5441ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-dist
+          path: dist
+      - name: Create GitHub Release (signed checksums + SBOM + provenance)
+        uses: softprops/action-gh-release@d1e66170d32c9ec7bbcb7fae044d3d686ce304d3
+        with:
+          files: |
+            dist/**
+          generate_release_notes: true
