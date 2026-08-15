@@ -50,3 +50,6 @@ windows_host/obj/
 # windows/src 构建产物（.NET——不入库）
 windows/src/**/bin/
 windows/src/**/obj/
+
+# Rust 构建产物（cargo target——不入库）
+core/rust-policy-core/target/
