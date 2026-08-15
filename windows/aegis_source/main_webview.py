@@ -27,6 +27,46 @@ from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
 # 时非白名单域请求标记 + 日志（可观测不拦截）——政府内网按需配置内网域）
 AGENT_ALLOWED_HOSTS: set[str] = set()
 
+# C2 阶段 B（ceLLMate sitemap）：内网 Agent sitemap 路径（JSON——语义动作
+# ↔ HTTP 消息映射，见 docs/release/agent-sitemap.example.json；默认空=未
+# 启用（仅阶段 A 域白名单）——内网运维按需配置）
+AGENT_SITEMAP_PATH = ""
+
+
+def _load_agent_sitemap() -> dict | None:
+    """加载内网 Agent sitemap（JSON）；未配置/失败返回 None（静默）。"""
+    if not AGENT_SITEMAP_PATH:
+        return None
+    try:
+        import json
+        from pathlib import Path
+        p = Path(AGENT_SITEMAP_PATH)
+        if p.is_file():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return None
+
+
+def _match_agent_action(sitemap: dict | None, method: str, url: str) -> dict | None:
+    """按 sitemap 匹配请求的语义动作（url_pattern + method）；未匹配返回 None。"""
+    if not sitemap:
+        return None
+    from urllib.parse import urlparse
+    path = urlparse(url).path or "/"
+    for act in sitemap.get("actions", []):
+        pattern = act.get("url_pattern", "")
+        # url_pattern 形如 "GET /api/docs/*"（方法 + 路径）；* 前缀通配
+        parts = pattern.split(" ", 1)
+        if len(parts) == 2 and parts[0] == method:
+            p = parts[1]
+            if p.endswith("*"):
+                if path.startswith(p[:-1]):
+                    return act
+            elif path == p:
+                return act
+    return None
+
 
 def _apply_request_policy(window: Any, blocked: set | None = None,
                           shell: Any = None, api: Any = None) -> None:
@@ -128,6 +168,26 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                             pass
                 except Exception:
                     pass  # Agent 策略失败静默（不影响请求）
+                # C2 阶段 B（ceLLMate sitemap）：Agent 会话活跃时按 sitemap
+                # 识别语义动作（url_pattern+method 匹配）——高风险/未登记动作
+                # 标记 + 日志（可观测不拦截——零风险；sitemap 未配置时跳过）
+                try:
+                    sitemap = _load_agent_sitemap()
+                    if session_active and sitemap and host in sitemap.get("domain", ""):
+                        method = getattr(request, "method", "") or "GET"
+                        action = _match_agent_action(sitemap, method, url)
+                        from crash_reporter import log_event
+                        if action:
+                            if action.get("risk") == "high":
+                                headers["X-Aegis-Agent-Action"] = "high"
+                                log_event(
+                                    f"[agent] Agent 高风险动作: {action.get('semantic')} {url}"
+                                )
+                        else:
+                            headers["X-Aegis-Agent-Action"] = "unregistered"
+                            log_event(f"[agent] Agent 未登记动作: {url}")
+                except Exception:
+                    pass  # sitemap 策略失败静默（不影响请求）
             except Exception:
                 pass  # 单个请求修改失败不影响其他请求
 

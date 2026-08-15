@@ -390,3 +390,12 @@
   - `mcp.py`：工具调用刷新 `_agent_session`（会话标记——工具层与请求层打通）
   - `main_webview.py`：`_apply_request_policy` 加 api 参数 + Agent 会话检查（活跃 60s 内）+ 非白名单域请求标记 `X-Aegis-Agent-Blocked` + `[agent]` 日志（可观测不拦截——零风险）；`AGENT_ALLOWED_HOSTS` 常量（默认空=全标记记录，内网按需配置）
 - **验证**：语法/三自检/ruff 0/mypy Success/bandit 0 + 策略逻辑 4 场景（活跃非白名单标记/白名单放行/非活跃不标记/过期失效）全过。
+
+### 23.5 C2 阶段 B 实施（2026-08-15 已落地——agent sitemap 内网自定义）
+- **全球调研**（中英全覆盖）：ceLLMate sitemap 形式化（sitemap 条目=HTTP 请求+semantic name——σ: H→A；Policy 元组 P=(Name,Effect,Actions,Cond?,Args?)——背景引擎 URL/method/body 查找表）+ mozilla-ai/aaf（data-agent-* 属性 + `/.well-known/agent-manifest.json` + "LLM 选意图运行时执行" + WebMCP 桥）+ Tony Bai Agentic API（动词驱动——CANCEL/REFUND 意图明确 + action 细粒度 token）+ ADL（声明式规范 + 网络白名单 domainWhitelist + 目录/回滚/审计）。
+- **实现**（main_webview 扩展 + 配置）：
+  - `AGENT_SITEMAP_PATH` 常量 + `_load_agent_sitemap()` + `_match_agent_action()`（url_pattern+method 匹配——`*` 前缀通配）
+  - `_on_request` 扩展：Agent 会话活跃时按 sitemap 识别语义动作——高风险动作（`X-Aegis-Agent-Action: high` + 日志）/ 未登记动作（`unregistered` + 日志）——可观测不拦截（零风险）
+  - 配置示例：`docs/release/agent-sitemap.example.json`（domain=intra.gov.cn，4 动作：view_docs/search_records（low）/create_order/export_data（high+confirm））
+- **验证**：语法/三自检/ruff 0/mypy Success/bandit 0 + sitemap 匹配 4 场景（低风险匹配/高风险匹配/未登记/方法不匹配）全过。
+- **三级纵深**（Agent 安全）：工具层（mcp 白名单）→ 域层（阶段 A）→ 动作层（阶段 B sitemap）。
