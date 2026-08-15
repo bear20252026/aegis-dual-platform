@@ -28,9 +28,12 @@ jobs:
           python-version: "3.14"
 
       - name: 安装检查工具
+        # 从 requirements-dev.txt 安装（== 锁定版本，P6 教训：CI 与本地
+        # 口径一致，杜绝 pip 装最新版导致的检查结果漂移）；types-pywin32
+        # 为 mypy 类型桩（security.py 依赖），单独追加。
         run: |
           python -m pip install --upgrade pip
-          pip install ruff bandit mypy types-pywin32
+          pip install -r requirements-dev.txt types-pywin32
 
       - name: 静态验证（AST / JSON / XML / 版本声明）
         run: python ../../validate_release.py
