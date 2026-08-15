@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "XBsidak9nf0=",
+  "success": true,
+  "projectFilePath": "D:\\abrowser\\review\\aegis_dual_platform\\windows\\src\\Aegis.Windows.App\\Aegis.Windows.App.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\17296\\.nuget\\packages\\microsoft.web.webview2\\1.0.2903.40\\microsoft.web.webview2.1.0.2903.40.nupkg.sha512"
+  ],
+  "logs": []
+}

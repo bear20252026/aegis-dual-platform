@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Aegis.Windows.App</AssemblyName>
+    <RootNamespace>Aegis.Windows</RootNamespace>
+    <StartupObject>Aegis.Windows.Program</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- WebView2 SDK（阶段 C：WPF + 原生 WebView2——调研交叉比对选型：
+         官方支持 + 中文实测性能略胜 + 成熟简单——ADR-001） -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+</Project>
