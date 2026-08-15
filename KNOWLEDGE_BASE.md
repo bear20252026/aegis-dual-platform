@@ -226,3 +226,16 @@
 - **代码逐行**：✅ shell_adapter 240 行逐行精读无逻辑 bug（_make_wrapper 工厂闭包绑定正确）；api_bridge 下标访问均为结构固定数据；nav_queue 三层防死锁（timeout 0.5s+6s 超时+RLock）。
 - **功能边界**：✅ js_api 白名单 27 个全部有效（无缺失无多余）；错误处理 15 处 except 返回安全值；9 处 _lock 覆盖写操作；空状态安全返回。
 - **观察项（非 bug）**：🟡 _tabs_snapshot 锁外只读（无并发写冲突证据）、105 处静默降级（设计性，KNOWLEDGE_BASE B110 记录）；🟢 CI 转绿待确认（PyInstaller 修复已推送 e2fc3ba）。
+
+## 13. 开源项目精读借鉴（2026-08-15：Tune + qutebrowser）
+
+### 13.1 Tune（pywebview→Tauri sidecar 生产案例，src-tauri/src/sidecar.rs 精读）
+- **CREATE_NO_WINDOW**（sidecar.rs:80，Windows 隐藏后端控制台窗口）——**未来 C 路线（sidecar）设计要点**：Aegis 若走 sidecar，后端进程必须隐藏控制台窗口（当前壳抽象无 sidecar 进程，纯记录零风险）。
+- **JSON-RPC id 匹配分发**（reader thread 响应/事件分发）——Aegis js_api 事件桥（on_loaded/request_sent）理念已对应 ✅。
+- **sidecar_log 可观测性**——Aegis 已有 log_event（crash_reporter）✅ 对应（威胁拦截已加 log_event）。
+
+### 13.2 qutebrowser（★11641，2014 至今，GPL-3.0，Python+QtWebEngine 成熟键盘浏览器）
+- **"重活放 C++ 层 + GIL 释放"**（FAQ 明确）——Aegis NavQueue 已有同理念（窗口操作串行化到导航线程）✅。
+- **安全更新模型**（QtWebEngine patch 回移安全修复）——Aegis WebView2 **Evergreen 2 周节奏更优** ✅。
+- **键盘驱动深度**（vim-like + hints 模式）——Aegis 已有快捷键（R1 借鉴 min）；qutebrowser 11k★ 验证"Python 浏览器+键盘驱动"大规模可行——**hints 模式可作未来增强评估**（不改变功能，先记录）。
+- **结论**：Tune/qutebrowser 核心经验 Aegis 多数已对应落地（NavQueue/log_event/Evergreen）——印证 Aegis 架构选择正确；新增借鉴点已记录（CREATE_NO_WINDOW + hints 模式，均零风险待评估）。
