@@ -41,6 +41,11 @@ class BookmarkStore:
 
     def add(self, title: str, url: str, folder_id=0) -> bool:
         db = self._check()
+        # H-1 修复（防御性安全审查）：URL 必须过 safe_url 白名单
+        # （allow_internal=False——外部入口——防恶意 URL 入库/注入——
+        # 与导入路径同标准）
+        from .security import safe_url
+        url = safe_url(url or "", allow_internal=False) or ""
         if not url:
             return False
         if db.query_one("SELECT id FROM bookmarks WHERE url=?",
@@ -125,8 +130,12 @@ class BookmarkStore:
         for r in rows:
             title = (r["title"] or r["url"]).replace("&", "&amp;").replace(
                 "<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+            # H-1 修复（防御性安全审查）：URL 同样实体转义（quote=True
+            # 覆盖双引号——防存储型 HTML 注入——导出文件打开时不执行注入）
+            import html as _html
+            url_out = _html.escape(r["url"] or "", quote=True)
             lines.append(
-                f'    <DT><A HREF="{r["url"]}">{title}</A>')
+                f'    <DT><A HREF="{url_out}">{title}</A>')
         lines.append("</DL><p>")
         try:
             # 相对文件名（如 "bookmarks.html"）时 dirname 为空，makedirs 会抛错

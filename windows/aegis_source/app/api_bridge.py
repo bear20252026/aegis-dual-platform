@@ -118,6 +118,7 @@ class Api:
             "group": "默认",
         }]
         self._current: int = 0
+        self._last_new_tab: float = 0.0  # M-2：new_tab 频率限制（防 tab-bomb）
         self._engine: str = DEFAULT_ENGINE
         # 导航队列（独立线程执行全部窗口操作）
         self._nav = NavQueue()
@@ -184,6 +185,15 @@ class Api:
 
     def set_search_engine(self, key: str) -> None:
         """切换搜索引擎并持久化（白名单校验）。"""
+        # M-2 修复（防御性安全审查）：敏感写操作来源校验——远程页面
+        # 调用拒绝（防搜索引擎篡改）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 set_search_engine（来源不受信）")
+            except Exception:
+                pass
+            return
         try:
             if key not in SEARCH_ENGINES:
                 return
@@ -229,10 +239,23 @@ class Api:
                     pass
                 return False  # 命中黑名单 → 拒绝导航
         except Exception:
-            pass  # 检查失败放行（安全浏览是纵深防御，不阻塞浏览）
+            # M-5 修复（防御性安全审查）：威胁检查异常不再静默——留痕
+            # （缓存读取/解析失败放行但记日志——至少带日志放行）
+            try:
+                from crash_reporter import log_event
+                log_event("[threat] 黑名单检查异常——本次放行（已留痕）")
+            except Exception:
+                pass
         return True
 
     def new_tab(self, url: str = "") -> None:
+        # M-2 修复（防御性安全审查）：new_tab 频率限制——500ms 最小间隔
+        # + 20 标签上限（防 tab-bomb——恶意页面循环调用）
+        import time as _t
+        _now = _t.time()
+        if _now - self._last_new_tab < 0.5 or len(self._tabs) >= 20:
+            return
+        self._last_new_tab = _now
         # H-C1/A-② 审计修复：用户显式传入的 url 必须过安全+黑名单校验；
         # 空 url（UI 新建标签）仍用受信任的 START_URL，行为不变。
         if url:
@@ -337,9 +360,11 @@ class Api:
         if not name:
             name = "默认"
         with self._lock:
-            if not (0 <= index < len(self._tabs)):
+            # L-1 修复（防御性安全审查）：判断与取值统一用 idx（转换后的
+            # 整数）——原始 index 可能为字符串/浮点（TypeError——专家发现）
+            if not (0 <= idx < len(self._tabs)):
                 return False
-            self._tabs[index]["group"] = name
+            self._tabs[idx]["group"] = name
         return True
 
     def get_tab_groups(self) -> list:
@@ -412,6 +437,17 @@ class Api:
         except Exception:
             return ""
 
+    def _check_trusted_source(self) -> bool:
+        """M-2 修复（防御性安全审查）：敏感写操作来源校验——当前标签
+        URL 的 host 为空（本地壳页/新标签页）即受信；远程页面调用拒绝
+        （防书签投毒/搜索引擎篡改——专家建议受信集）。"""
+        try:
+            from urllib.parse import urlparse
+            host = urlparse(self.current_url() or "").hostname or ""
+            return host == ""  # 本地壳页（file:///空白）受信；远程拒绝
+        except Exception:
+            return False
+
     # ---- JS 错误上报（JS 侧 window.onerror / unhandledrejection → 这里）----
     def js_error(self, message: str, source: str = "", line: Any = None,
                  col: Any = None, stack: str = "") -> None:
@@ -434,9 +470,14 @@ class Api:
             from crash_reporter import log_event
             line = int(line) if line else ""
             col = int(col) if col else ""
+            # L-5 修复（防御性安全审查）：message/source/stack 换行过滤
+            # （\r\n → 空格——防恶意 message 注入伪造日志条目）
+            msg_safe = str(message)[:200].replace("\r", " ").replace("\n", " ")
+            src_safe = str(source)[:120].replace("\r", " ").replace("\n", " ")
+            stk_safe = str(stack)[:300].replace("\r", " ").replace("\n", " ")
             log_event(
-                f"JS错误: {str(message)[:200]} | src={str(source)[:120]} "
-                f"@{line}:{col} | stack={str(stack)[:300]}"
+                f"JS错误: {msg_safe} | src={src_safe} "
+                f"@{line}:{col} | stack={stk_safe}"
             )
         except Exception:
             pass  # 日志失败绝不影响页面
@@ -453,6 +494,15 @@ class Api:
             return []
 
     def add_bookmark(self, title: str, url: str) -> bool:
+        # M-2 修复（防御性安全审查）：敏感写操作来源校验——远程页面
+        # 调用拒绝（防书签投毒）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 add_bookmark（来源不受信）")
+            except Exception:
+                pass
+            return False
         try:
             if self.bookmarks is not None:
                 return self.bookmarks.add(title, url)
@@ -461,6 +511,15 @@ class Api:
         return False
 
     def remove_bookmark(self, url: str) -> None:
+        # M-2 修复（防御性安全审查）：敏感写操作来源校验——远程页面
+        # 调用拒绝（防书签删除投毒）
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 remove_bookmark（来源不受信）")
+            except Exception:
+                pass
+            return
         try:
             if self.bookmarks is not None:
                 self.bookmarks.remove(url)

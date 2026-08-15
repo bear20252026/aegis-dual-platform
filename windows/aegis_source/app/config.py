@@ -232,7 +232,10 @@ class AppConfig:
         _clamp(cfg, "vision_qr_wait_sec", 30, 600)
         # URL 字段 scheme 白名单：拒绝 javascript:/file: 等
         from .security import safe_url
-        if not safe_url(cfg.homepage):
+        # M-1 修复（防御性安全审查）：外部输入入口（homepage）显式
+        # allow_internal=False——data:/blob: 不得成为主页（防配置篡改
+        # 加载 data:text/html 脚本——与文档声明一致）
+        if not safe_url(cfg.homepage, allow_internal=False):
             cfg.homepage = defaults.homepage
         # 更新源与情报订阅源强制 HTTPS（明文 http 可被投毒/中间人篡改）
         if cfg.update_url and not cfg.update_url.lower().startswith("https://"):

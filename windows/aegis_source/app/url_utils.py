@@ -29,7 +29,9 @@ def normalize_url(text: str | None, engine: str = DEFAULT_ENGINE) -> str:
     if text == "about:blank":
         return "about:blank"
     lowered = text.lower()
-    if lowered.startswith(("http://", "https://", "file://")):
+    # L-2 修复（防御性安全审查）：移除 file:// 放行（纵深一致——file://
+    # 仅受信路径（START_URL 壳页）单独处理——防新调用点漏配成本地读取面）
+    if lowered.startswith(("http://", "https://")):
         return text
     # 含空格或没有点号 → 视为搜索
     if " " in text or "." not in text:

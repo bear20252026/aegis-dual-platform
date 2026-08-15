@@ -50,13 +50,22 @@ def safe_url(url: str, allow_internal: bool = True) -> str:
 
 
 def is_dangerous_download(path_or_url: str) -> bool:
-    """判断下载目标是否为可执行/脚本类高危类型。"""
+    """判断下载目标是否为可执行/脚本类高危类型。
+
+    M-4 修复（防御性安全审查）：Windows 落盘语义——反复剥离尾部点与
+    空格后再判定（a.exe. → .exe——CWE-59 变体）；URL 解码覆盖 %2E 等
+    编码变体；解析异常 fail-closed（按危险处理——拒绝）。
+    """
     try:
         path = urlparse(path_or_url).path if "://" in path_or_url else path_or_url
+        from urllib.parse import unquote
+        path = unquote(path)
+        while path.endswith((".", " ")):
+            path = path[:-1]
         ext = os.path.splitext(path)[1].lower()
         return ext in DANGEROUS_EXTENSIONS
     except Exception:
-        return False
+        return True  # M-4：解析异常 fail-closed——按危险处理
 
 
 def normalize_credential_host(host: str) -> str:

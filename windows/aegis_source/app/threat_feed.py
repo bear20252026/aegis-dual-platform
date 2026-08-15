@@ -78,7 +78,10 @@ def fetch_feed(feed_url: str, timeout: float = 15.0) -> list:
     # nosec B310: url 已由 validate_feed_url 强制为 https（上方校验），
     # 非 https 地址在此路径前已抛 ValueError。
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
-        raw = resp.read().decode("utf-8", "ignore")
+        # L-4 修复（防御性安全审查）：订阅源大小上限——防恶意/失控源
+        # 耗尽内存（Content-Length 预检 + 流式读取 5MB 上限）
+        raw_bytes = _read_limited(resp, max_bytes=5 * 1024 * 1024)
+        raw = raw_bytes.decode("utf-8", "ignore")
     domains = []
     seen = set()
     for line in raw.splitlines():
@@ -87,6 +90,29 @@ def fetch_feed(feed_url: str, timeout: float = 15.0) -> list:
             seen.add(d)
             domains.append(d)
     return domains
+
+
+def _read_limited(resp, max_bytes: int) -> bytes:
+    """L-4：读取响应但限制最大字节（Content-Length 预检 + 流式截断）。"""
+    try:
+        cl = int(resp.headers.get("Content-Length") or 0)
+        if cl > max_bytes:
+            raise ValueError("订阅源过大（Content-Length 超限）")
+    except ValueError:
+        raise
+    except Exception:
+        pass
+    chunks = []
+    total = 0
+    while True:
+        chunk = resp.read(min(65536, max_bytes - total + 1))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise ValueError("订阅源过大（超过 5MB 上限）")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 class ThreatFeedUpdater:
