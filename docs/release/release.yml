@@ -38,31 +38,29 @@ jobs:
           path: dist/
           retention-days: 90
 
-  sign:                        # Job 2：签名（B2 sigstore——ambient OIDC）
+  sign:                        # Job 2：签名（B2 sigstore——官方 action + ambient OIDC）
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      id-token: write          # 仅签名 job 需要（最小权限）
+      id-token: write          # OIDC 地基（sigstore 签名必需——最小权限）
     steps:
       - uses: actions/download-artifact@v4
         with:
           name: release-dist
           path: dist/
-      - name: Install sigstore
-        run: python -m pip install sigstore
+      # 官方 action（sigstore/gh-action-sigstore-python@v3.4.0）——
+      # 替代 python -m sigstore 手动签名；verify: true 签名后即验
+      # （smoke test——确认签名产物生成 + Rekor 提交）
       - name: Sign artifacts (sigstore keyless)
-        run: |
-          for f in dist/core/*.pyd dist/obfuscated/*.py; do
-            python -m sigstore sign "$f" --bundle "${f}.sigstore"
-          done
-      - name: Verify signatures (ambient OIDC identity)
-        run: |
-          for f in dist/core/*.pyd dist/obfuscated/*.py; do
-            python -m sigstore verify identity "$f" \
-              --bundle "${f}.sigstore" \
-              --cert-oidc-issuer https://token.actions.githubusercontent.com \
-              --cert-identity "${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}"
-          done
+        uses: sigstore/gh-action-sigstore-python@v3.4.0
+        with:
+          inputs: |
+            dist/core/*.pyd
+            dist/obfuscated/*.py
+          verify: true
+          verify-oidc-issuer: https://token.actions.githubusercontent.com
+          verify-cert-identity: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+          upload-signing-artifacts: true
       - name: Upload signed artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -87,4 +85,10 @@ jobs:
           files: dist/**
           generate_release_notes: true
       # （可选）PyPI 发布：pypa/gh-action-pypi-publish（Trusted Publishing——
-      #   OIDC 无 API token；本 workflow 名须与 PyPI Trusted Publisher 配置一致）
+      #   OIDC 无 API token）
+      # Trusted Publishing 配置要点（lhx-kit 实战——易错点）：
+      #   1. 本 workflow 文件名（release.yml）须与 PyPI/npm Trusted
+      #      Publisher 配置的 Workflow filename 完全一致（含 .yml 扩展名）
+      #   2. 只填仓库短名（不带 URL）；Environment 留空（除非 workflow
+      #      用了 environment: 块）
+      #   3. id-token: write 是 OIDC 地基——缺失则发布 401

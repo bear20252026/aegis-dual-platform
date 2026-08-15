@@ -70,9 +70,11 @@ def main() -> int:
     # 步骤 3：XOR 常量加固（Nuitka 免费版常量数据未混淆——issue #556；
     # 免费替代 Nuitka Commercial data-hiding 插件）
     # 说明：敏感常量（密钥/凭据）建议走环境变量（Aegis 已实现——凭据
-    # 外部化），代码内常量经 XOR 混淆 + 嵌入密钥（发布期脚本/手工处理）
+    # 外部化），代码内常量经 XOR 混淆 + 嵌入密钥（发布期工具：
+    # docs/release/xor_obfuscate.py——encrypt <file> 生成 .enc，
+    # 密钥嵌入 Nuitka 编译模块后难以提取）
     print("==> XOR 常量加固：敏感常量建议环境变量（Aegis 已实现）+ "
-          "代码常量 XOR 混淆（发布期 workaround）")
+          "代码常量用 docs/release/xor_obfuscate.py 加密（发布期）")
 
     print("==> B 调整构建完成：dist/core/*.pyd + dist/plain/*")
     print("==> 产物交 sign job 签名（B2 sigstore）——见 docs/release/release.yml")
