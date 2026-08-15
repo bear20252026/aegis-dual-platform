@@ -366,3 +366,20 @@
 ### 22.2 P1 评估结论
 - **Edge LNA**：✅ 适用（Aegis 浏览器无本地网络依赖——LNA 是理想安全增强——防网页访问内网）；⚠️ **pywebview 6.2.1 不支持 WebView2 环境参数（AdditionalBrowserArguments/EnvironmentOptions grep 为空）**——**LNA flag 无法经 pywebview API 传递**；启用需 pywebview 支持或 WebView2 未来权限 API——**当前不可经 pywebview 启用**（记录方案待条件成熟——季度复核跟踪 pywebview 支持/WebView2 API）。
 - **SRI Integrity-Policy**：Aegis 资源本地化（无 CDN）场景不适用 + 头非 Baseline——**记录**（若未来引入 CDN 外部资源则启用 SRI integrity 属性）。
+
+## 23. C 剩余观察项：ceLLMate 评估与方案（2026-08-15）
+
+### 23.1 全球调研（中英全覆盖）
+- **ceLLMate**（arXiv 2512.12594，2025-12 + earlence-security/cellmate 开源）：BUA（浏览器 Agent）沙箱框架——**HTTP 层沙箱核心洞察**（所有 side-effecting UI 操作最终化为 HTTP 请求——HTTP 层是稳定全面中介点；UI 层策略脆弱）；**Agent Sitemap**（semantic_action + url pattern + method + body + args（dom/request_body）——语义桥，类似 CSP/robots.txt/OAuth scopes 先例）；**Policy**（allow/deny/condition + 运行时 JS 函数评估）；**LLM 两阶段自动策略选择**（Domain Prediction + Policy Instantiation——94%+ 准确率）；实现=agent-agnostic Chrome 扩展（MV2——Chromium ≤138 需 legacy flag）；效果=WASP 阻止提示词注入（7.25-15% 延迟 + 25MB 内存）。
+- **ECC 中文实践**（2026 Agent 安全）：6 层防御（基线/可观测性/Kill Switch/内存安全）+ 2026 最低安全标准（agent 身份分离/短期 scoped 凭据/容器沙箱/默认禁出站网络/记录 tool calls/MCP 配置当供应链制品扫描）。
+
+### 23.2 Aegis 适用性评估（差距分析）
+- **层级不同**：Aegis 工具层沙箱（mcp 7 工具白名单+审计+untrusted——覆盖 Agent 显式工具调用）vs ceLLMate HTTP 层（覆盖 Agent 隐式浏览器操作——点击/表单/导航不经工具）。
+- **Aegis 优势基础**：已具备 ceLLMate 理念的两个关键件——① 工具层沙箱 ② 统一请求拦截管线（_apply_request_policy/request_sent 可扩展为 HTTP 层策略强制）。
+- **结论**：🟡 纵深补充——ceLLMate 的 HTTP 层强制可轻量落地（request_sent 管线语义策略）。
+
+### 23.3 Aegis 落地方案（分阶段）
+- **阶段 A（P1 先做）**：`_apply_request_policy` 扩展 Agent 请求语义策略——mcp 会话标记的请求按策略拦截（Agent 导航/表单仅白名单域 + deny 敏感动作）——基于现有管线零风险。
+- **阶段 B（P2 按需）**：agent sitemap 内网自定义（语义动作 ↔ HTTP 消息映射——内网 OA 场景）。
+- **阶段 C（P3 评估）**：condition 动态策略（运行时条件评估——金额阈值等）。
+- **不实施（记录）**：完整 agent sitemap 标准（需网站生态协作）+ WebSocket 拦截（ceLLMate 未来工作）。
