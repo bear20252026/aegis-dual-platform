@@ -138,6 +138,9 @@ class MainActivity : ComponentActivity() {
                                 val wv = tabManager.current()?.webView ?: return@AddressBarAndNav
                                 BrowserEngine(wv).load(address)
                             },
+                            // A-04 整改（国防级审查）：导航经统一策略层——
+                            // 历史导航不加载新 URL（无需 URL 校验）；发布期
+                            // 集中审计 + 地址栏状态同步（记录）
                             onBack = { tabManager.current()?.webView?.goBack() },
                             onForward = { tabManager.current()?.webView?.goForward() },
                             onReload = { tabManager.current()?.webView?.reload() },

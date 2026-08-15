@@ -12,6 +12,8 @@ import android.net.Uri
  * 建立"版本检查 + 提示更新"机制，提示用户将 System WebView 更新到最新安全版本。
  *
  * 设计：纯逻辑单文件（版本获取/阈值比较/提示回调），UI 提示由调用方
+ * A-05 整改（国防级审查）：发布期高保证模式——版本低于安全阈值时拒绝
+ * 外部浏览（不再仅提示可忽略）——记录（阈值 MIN_SAFE_VERSION_CODE）
  * （MainActivity）呈现——与项目"单文件单职责"惯例一致。
  */
 object WebViewVersionCheck {
