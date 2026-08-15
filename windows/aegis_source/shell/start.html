@@ -232,19 +232,37 @@
         if (!(window.pywebview && pywebview.api)) return;
         pywebview.api.get_bookmarks().then(function (items) {
           if (!items || !items.length) {
-            box.innerHTML = '<div class="bm-empty">还没有书签 — 在网页地址栏旁点击「收藏」即可添加</div>';
+            box.textContent = '';
+            var empty = document.createElement('div');
+            empty.className = 'bm-empty';
+            empty.textContent = '还没有书签 — 在网页地址栏旁点击「收藏」即可添加';
+            box.appendChild(empty);
             return;
           }
-          var html = '';
+          // R-06 整改（体验/功能审查）：禁止 innerHTML 字符串拼接——
+          // 标题/URL/图标文本全部经 textContent 写入 DOM（防特殊字符
+          // 破坏显示与注入——实施手册 R-06 bookmarkCard 示例）
+          var frag = document.createDocumentFragment();
           for (var i = 0; i < items.length; i++) {
             var it = items[i];
             var host = '';
             try { host = new URL(it.url).host; } catch (e) { host = it.url; }
-            html += '<div class="bm" onclick="openUrl(\'' + encodeURI(it.url).replace(/'/g, "\\'") + '\')">' +
-              '<div class="bm-ico">' + (host.charAt(0) || '?').toUpperCase() + '</div>' +
-              '<div class="bm-name">' + (it.title || host) + '</div></div>';
+            var card = document.createElement('div');
+            card.className = 'bm';
+            card.addEventListener('click', (function (u) {
+              return function () { openUrl(u); };
+            })(it.url));
+            var ico = document.createElement('div');
+            ico.className = 'bm-ico';
+            ico.textContent = (host.charAt(0) || '?').toUpperCase();
+            var name = document.createElement('div');
+            name.className = 'bm-name';
+            name.textContent = (it.title || host);
+            card.appendChild(ico);
+            card.appendChild(name);
+            frag.appendChild(card);
           }
-          box.innerHTML = html;
+          box.replaceChildren(frag);
         });
       } catch (e) {}
     }

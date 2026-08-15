@@ -39,3 +39,31 @@ def redact(text: Any) -> Any:
     for pat in _CRED_PATTERNS:
         out = pat.sub(lambda m: f"{m.group(1)}={_REDACTED}", out)
     return out
+
+
+# R-08 整改（体验/功能审查）：URL 日志最小化——敏感 query 键脱敏
+# （token/code/password/session/key 等——防日志泄露凭据/授权码——
+# 实施手册 R-08 日志最小化示例）
+SENSITIVE_QUERY_KEYS = {
+    "token", "code", "state", "password", "passwd", "session", "key",
+    "secret", "api_key", "apikey",
+}
+
+
+def redact_url(raw: str) -> str:
+    """脱敏 URL 的敏感 query 参数（R-08 日志最小化——保留主机/路径）。"""
+    if not raw:
+        return raw
+    try:
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+        parsed = urlsplit(raw)
+        pairs = [
+            (k, "[REDACTED]" if k.lower() in SENSITIVE_QUERY_KEYS else v)
+            for k, v in parse_qsl(parsed.query, keep_blank_values=True)
+        ]
+        return urlunsplit(
+            (parsed.scheme, parsed.netloc, parsed.path,
+             urlencode(pairs, safe="[]"), "")  # safe="[]" 保留 [REDACTED] 可读标记
+        )
+    except Exception:
+        return raw  # 解析失败保持原样（调用方另行兜底）

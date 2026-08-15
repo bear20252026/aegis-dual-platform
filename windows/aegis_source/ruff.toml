@@ -5,5 +5,9 @@
 # - S110  (try-except-pass): 降级路径（书签/历史/壁纸不可用）刻意静默，
 #   保证"纯浏览"永不因可选功能失败而中断。
 # 这两个规则在 main_webview.py 中以显式注释说明，此处统一豁免。
+# R-21 整改（体验/功能审查）：宽泛异常门禁——select 含 TRY（宽泛捕获
+# 检查——新代码遵守）；BLE001/S110 为现有基线豁免（发布期迁移至
+# Result/AppError——app/result.py——逐步递减，不永久忽略）
 [lint]
+select = ["E", "F", "I", "B", "BLE", "TRY", "RUF"]
 ignore = ["BLE001", "S110"]
