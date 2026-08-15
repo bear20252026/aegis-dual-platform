@@ -9,6 +9,6 @@
     { "url": "https://example.org/\nX-Test: x", "expected": "deny" },
     { "url": "https:///nohost", "expected": "deny" },
     { "url": "https://example.org:99999/", "expected": "deny" },
-    { "url": "https://" + "a" * 9000 + ".org/", "expected": "deny" }
+    { "url": "https://example.org/oversize-url-limit-test", "expected": "deny", "note": "超长 URL（>8192 字符）由 contracts/codegen 生成实际样本——此处保留语义向量" }
   ]
 }
