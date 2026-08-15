@@ -86,6 +86,20 @@ def main() -> int:
 
     print("==> B 调整构建完成：dist/core/*.pyd + dist/plain/*")
     print("==> 产物交 sign job 签名（B2 sigstore）——见 docs/release/release.yml")
+
+    # B0-S-01 整改（国防级审查）：最终包 SHA-256 校验文件（字节一致不变式——
+    # release.yml verify job 按此对账；防手工组装/重建漂移）
+    import hashlib, json
+    sums = []
+    for p in sorted(DIST.rglob("*")):
+        if p.is_file():
+            sums.append({
+                "Hash": hashlib.sha256(p.read_bytes()).hexdigest().upper(),
+                "Path": str(p.relative_to(DIST)).replace("\\", "/"),
+            })
+    (DIST / "SHA256SUMS.json").write_text(
+        json.dumps(sums, indent=2), encoding="utf-8")
+    print(f"==> B0-S-01：SHA256SUMS.json 已生成（{len(sums)} 个产物——release.yml verify 对账依据）")
     return 0
 
 

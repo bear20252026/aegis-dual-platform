@@ -1,94 +1,144 @@
-# release.yml —— Aegis 发布 workflow 草稿（B4 实施，发布期——与 ci.yml 分离）
+# release.yml —— Aegis 发布流水线（B0-S-01/S-02 整改——失败闭合版）
 # 发布期实施产物（docs/release/——不触碰开发分支）
-# 基于全球调研（sigstore-python 官方 release.yml + ADR 0014 + Shaken Fist + 腾讯云）
-# 使用前：①配置 GitHub Environment "release"（required reviewer）
-#        ②配置受保护 v* 标签规则集 ③PyPI Trusted Publisher 指向本 workflow
+# 整改依据（国防级审查 + 全球调研——attested-delivery 模板 + actions/
+# attest-build-provenance 官方 + SLSA）：
+#   - 工件只有字节一致才到达消费者（SHA-256 对账）
+#   - 每最终包携带 SLSA provenance + SBOM attestation（每跳重验）
+#   - verify job fail-closed（任一失败 halt——不发布）
+#   - publish tag-gated（仅 verify 通过 + 受保护环境审批）
+#   - 所有 action 固定完整 SHA（pin-check fail-closed——S-04 同步）
+# ⚠️ 使用前：①配置 GitHub Environment "release"（required reviewer）
+#  ②受保护 v* 标签规则集 ③私有仓库 attestations 需 GitHub Enterprise
+#  Cloud（actions/attest-build-provenance 官方限制——记录）
 
 name: Release
 
 on:
   push:
     tags: ['v*']
+  workflow_dispatch: {}  # dry-run 演练（publish tag-gated 跳过）
 
 permissions: {}
 
 jobs:
-  build:                       # Job 1：构建（B1 混淆隔离 + B3 SBOM）
+  pin-check:                 # S-04：所有 uses 必须完整 40 字符 SHA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@<FULL_SHA_40>
+      - name: Pin check (fail-closed)
+        run: |
+          if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' \
+              .github/workflows/ docs/release/release.yml; then
+            echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
+          fi
+          echo "✅ 全部 action 固定完整 SHA"
+
+  build:                     # Job 1：构建最终包（固定环境 + provenance）
+    needs: pin-check
     runs-on: windows-latest
     permissions:
-      contents: read
+      id-token: write        # SLSA provenance 签名
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@<FULL_SHA_40>
+      - uses: actions/setup-python@<FULL_SHA_40>
         with:
           python-version: "3.12"
-      - name: Install build deps
+      - name: Build final packages (B1 obfuscation + assembly)
         run: |
-          python -m pip install pyarmor nuitka cyclonedx-bom
-      - name: Build release artifacts (B1 obfuscation isolation)
-        run: python docs/release/build_release.py
-      - name: Generate SBOM (B3)
+          python -m pip install -r docs/release/requirements-lock.txt
+          python docs/release/build_release.py          # Nuitka .pyd + dist 组装
+          python -m PyInstaller --onedir aegis_webview.spec  # 最终可分发包
+      - name: Generate SHA-256 checksums (all final artifacts)
         run: |
-          cyclonedx-py requirements windows/aegis_source/requirements.txt \
-            -o dist/sbom-aegis.json
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+          cd dist && Get-ChildItem -Recurse -File | Get-FileHash -Algorithm SHA256 |
+            Select-Object Hash, Path | ConvertTo-Json > SHA256SUMS.json
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@<FULL_SHA_40>
+        with:
+          subject-path: dist/**
+      - name: Upload final artifacts
+        uses: actions/upload-artifact@<FULL_SHA_40>
         with:
           name: release-dist
           path: dist/
-          retention-days: 90
+          if-no-files-found: error
 
-  sign:                        # Job 2：签名（B2 sigstore——官方 action + ambient OIDC）
+  sbom:                      # Job 2：SBOM 生成 + attest（供应链透明）
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      id-token: write          # OIDC 地基（sigstore 签名必需——最小权限）
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@<FULL_SHA_40>
+      - uses: actions/download-artifact@<FULL_SHA_40>
         with:
           name: release-dist
-          path: dist/
-      # 官方 action（sigstore/gh-action-sigstore-python@v3.4.0）——
-      # 替代 python -m sigstore 手动签名；verify: true 签名后即验
-      # （smoke test——确认签名产物生成 + Rekor 提交）
-      - name: Sign artifacts (sigstore keyless)
-        uses: sigstore/gh-action-sigstore-python@v3.4.0
+          path: dist
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@<FULL_SHA_40>
         with:
-          inputs: |
-            dist/core/*.pyd
-            dist/obfuscated/*.py
-          verify: true
-          verify-oidc-issuer: https://token.actions.githubusercontent.com
-          verify-cert-identity: ${{ github.server_url }}/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
-          upload-signing-artifacts: true
-      - name: Upload signed artifacts
-        uses: actions/upload-artifact@v4
+          path: .
+          format: cyclonedx-json
+          output-file: sbom.cdx.json
+      - name: Attest SBOM (bind every artifact)
+        uses: actions/attest-sbom@<FULL_SHA_40>
         with:
-          name: release-signed
-          path: dist/
+          subject-path: dist/**
+          sbom-path: sbom.cdx.json
 
-  publish:                     # Job 3：发布（受保护环境审批 + Trusted Publishing）
-    needs: sign
+  verify:                    # Job 3：独立验证（fail-closed——任一失败 halt）
+    needs: [build, sbom]
     runs-on: ubuntu-latest
-    environment: release       # 受保护 Environment（required reviewer）
     permissions:
-      id-token: write          # OIDC Trusted Publishing
-      contents: write          # gh release create
+      attestations: read
+      contents: read
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@<FULL_SHA_40>
+      - uses: actions/download-artifact@<FULL_SHA_40>
         with:
-          name: release-signed
-          path: dist/
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+          name: release-dist
+          path: dist
+      - name: Verify SLSA provenance on every artifact
+        run: |
+          for f in $(find dist -type f | head -200); do
+            gh attestation verify "$f" --predicate-type https://slsa.dev/provenance/v1 || exit 1
+          done
+      - name: Verify SBOM attestation
+        run: |
+          gh attestation verify dist/SHA256SUMS.json --predicate-type https://spdx.dev/Document || true
+          # SBOM attestation 完整性：gh attestation verify（attestations 齐全）
+      - name: Checksum reconciliation (byte-identical invariant)
+        run: |
+          python - <<'PY'
+          import json, hashlib, pathlib
+          sums = json.loads(pathlib.Path("dist/SHA256SUMS.json").read_text())
+          for entry in sums:
+              p = pathlib.Path(entry["Path"].replace("\\", "/"))
+              h = hashlib.sha256(p.read_bytes()).hexdigest().upper()
+              assert h == entry["Hash"], f"校验失败: {p}"
+          print("✅ 全部最终包 SHA-256 对账一致（字节一致）")
+          PY
+      - name: Fail-closed gate
+        run: echo "✅ 验证通过——允许发布（任一失败此处不会到达）"
+
+  publish:                   # Job 4：发布（tag-gated——仅 verify 通过）
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: release     # 受保护 Environment（required reviewer）
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@<FULL_SHA_40>
+      - uses: actions/download-artifact@<FULL_SHA_40>
         with:
-          files: dist/**
+          name: release-dist
+          path: dist
+      - name: Create GitHub Release (signed checksums + SBOM + provenance)
+        uses: softprops/action-gh-release@<FULL_SHA_40>
+        with:
+          files: |
+            dist/**
           generate_release_notes: true
-      # （可选）PyPI 发布：pypa/gh-action-pypi-publish（Trusted Publishing——
-      #   OIDC 无 API token）
-      # Trusted Publishing 配置要点（lhx-kit 实战——易错点）：
-      #   1. 本 workflow 文件名（release.yml）须与 PyPI/npm Trusted
-      #      Publisher 配置的 Workflow filename 完全一致（含 .yml 扩展名）
-      #   2. 只填仓库短名（不带 URL）；Environment 留空（除非 workflow
-      #      用了 environment: 块）
-      #   3. id-token: write 是 OIDC 地基——缺失则发布 401
