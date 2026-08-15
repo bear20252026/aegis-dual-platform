@@ -342,3 +342,17 @@
 
 ### 20.3 B 实施完成状态
 - **4 核心敏感模块（security/credential_guard/threat_feed/mcp）Nuitka 编译验证全部通过**——免费路线（Apache-2.0）核心保护落地；后续：XOR 常量加固 + release.yml 签名/发布流水线 + 不编译模块分层（PyArmor 小模块/PyInstaller）。
+
+## 21. B 整体跑通（2026-08-15：发布路线端到端演练）
+
+### 21.1 全球调研（中英全覆盖）
+- **英文**：Nuitka-Action（官方多平台编译）+ Multidist（多程序共享模块）+ Stack Overflow（多 .py 编译为单 .pyd）+ SlowBooks-Pro 全流程（PyInstaller onedir → smoke test → Azure 签名 → zip+Inno Setup → GitHub Release）；**--mode=standalone 优先**（onefile 难诊断）。
+- **中文**：掘金 build.ps1 全流程（环境检查→清理→编译→打包）；**PyInstaller 目录模式强烈推荐**（_internal 备份/替换 exe 增量更新 + bootstrap 解压 + os.add_dll_directory DLL 路径）。
+
+### 21.2 B 整体跑通实测（发布路线端到端）
+- **dist/core 组装**：4 核心模块 .pyd（security/credential_guard/threat_feed/mcp）全部汇总到 dist/core（Nuitka 编译产物——免费路线核心保护产物）。
+- **验证**：dist/core 4 个 .pyd 全部可导入 + 函数集一致（6/2/7/2）+ 回归（源码语法 + S1/api_bridge 自检——开发流程未受影响）。
+- **产物策略**：dist/ 构建产物**不入库**（.gitignore 排除——按 research/ 惯例）；发布流程产物由 release.yml 构建。
+
+### 21.3 B 实施整体状态
+- **发布路线端到端就绪**：核心保护（Nuitka .pyd）✅ + XOR 加固 ✅ + release.yml 签名/发布 ✅ + 不编译模块分层 ✅ + B 整体跑通 ✅——B 级（免费路线）全部落地，实施产物在 docs/release/（不触碰开发分支）。

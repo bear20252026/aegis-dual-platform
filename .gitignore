@@ -27,3 +27,6 @@ windows/crash_reports/
 # Python 缓存（不入库）
 __pycache__/
 *.pyc
+
+# 构建产物（dist/——不入库，由 release.yml 构建）
+dist/
