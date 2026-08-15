@@ -139,7 +139,8 @@ class NavQueue:
             return True
         # 超时：窗口操作未返回（WebView 忙/卡），放弃并记录，绝不阻塞导航线程
         try:
-            from crash_reporter import dump_threads_to_report, log_event
+            from app.event_log import log_event
+            from crash_reporter import dump_threads_to_report
             log_event(f"导航操作超时被放弃: {name} ({timeout}s)")
             dump_threads_to_report(f"nav-op-timeout:{name}")
         except Exception:
@@ -200,7 +201,7 @@ class NavQueue:
                 self._nav_thread = None
             # 重启导航线程
             self._ensure_thread()
-            from crash_reporter import log_event
+            from app.event_log import log_event
             log_event("看门狗：导航线程疑似卡死，已重启")
         except Exception:
             pass

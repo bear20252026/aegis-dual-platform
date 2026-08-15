@@ -254,7 +254,7 @@ def start_periodic_sampling(window: Any = None, tab_count_fn=None,
                         baseline = {}
                     diff = compare_baseline(perf, baseline)
                     if diff.get("significant") or diff.get("gpu_changed"):
-                        from crash_reporter import log_event
+                        from app.event_log import log_event
                         log_event(f"[perf-periodic] {diff}")
                     if baseline_path:
                         try:

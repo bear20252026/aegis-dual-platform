@@ -216,7 +216,7 @@ class Api:
             if host and host_is_blocked(host, blocked):
                 # 观察项 2 优化：威胁拦截命中记录（可观测性，不改变功能）
                 try:
-                    from crash_reporter import log_event
+                    from app.event_log import log_event
                     log_event(f"[threat] 导航拦截威胁域名: {url}")
                 except Exception:
                     pass
