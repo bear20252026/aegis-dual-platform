@@ -35,6 +35,15 @@ if (signingPropertiesFile.exists()) {
 android {
     namespace = "com.aegis.browser"
     compileSdk = 36
+    // detekt 兼容修复（ktlint/detekt 门禁）：显式 jvmTarget 21——本地/CI
+    // JDK 25 运行时 detekt 的 --jvm-target 25 无效（detekt 仅支持 ≤22）——
+    // 锁定 21 与远端 android-quality（JDK 21）一致
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+    // 注：AGP 9 内置 Kotlin——不再支持 kotlinOptions 块（脚本编译失败）；
+    // Kotlin jvmTarget 跟随 compileOptions（Java 21）——detekt 兼容
 
     defaultConfig {
         applicationId = "com.aegis.browser"
