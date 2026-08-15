@@ -57,15 +57,23 @@ def main() -> int:
              f"--output-dir={DIST / 'core'}",
              "--include-package=app"])  # 动态导入兜底声明
 
-    # 步骤 2：不编译模块分层（保护措施——KNOWLEDGE_BASE 18.2）：
-    #   a. 小模块（935 行/32KB 内）→ PyArmor 试用版混淆（免费）
-    #      （PyArmor 与 PyInstaller 组合官方支持——Stack Overflow 确认）
-    #   b. 大模块 → 保持源码 + PyInstaller 打包（PyInstaller 官方支持
-    #      PyArmor——见 a）；逻辑分离（敏感逻辑已移入 Nuitka 编译模块）
-    #   c. 运行时纵深：凭据外部化（环境变量）+ credential_guard 脱敏
+    # 步骤 2：不编译模块分层（保护措施——KNOWLEDGE_BASE 18.2 + 20 调研）：
+    #   a. 小模块（935 行/32KB 内）→ PyArmor 混淆 + --pack onedir
+    #      （PyArmor 官方：混淆 + PyInstaller 打包一步；注意 --mix-str
+    #      试用版不可用——Basic 选项即可）
+    #   b. 大模块 → PyInstaller --onedir（目录模式——CSDN/官方调研：
+    #      单文件双进程/AV 误报高/崩溃写爆磁盘——目录模式稳定，
+    #      Nuitka 机器码误报率低于 PyInstaller）
+    #   c. 资源路径（PyWebview 注意）：前端资源（shell/start.html 等）
+    #      需 --include-data-dir 打包 + 运行期 __file__/sys._MEIPASS
+    #      动态定位（CSDN 实战——Aegis 前端资源必须显式包含）
+    #   d. 运行时纵深：凭据外部化（环境变量）+ credential_guard 脱敏
     #      + B2 sigstore 签名（防篡改——改了就失效）
-    print("==> 不编译模块分层（见注释 a/b/c）——dist/plain/ 保持源码")
-    # 占位：dist/plain/ 由发布流程按分层策略组装（PyArmor 混淆或源码）
+    print("==> 不编译模块分层（见注释 a/b/c/d）——dist/plain/ 组装：")
+    print("    a) 小模块 PyArmor --pack onedir（混淆+打包一步）")
+    print("    b) 大模块 PyInstaller --onedir（目录模式——AV 误报低/稳定）")
+    print("    c) 前端资源 --include-data-dir + 动态路径（Aegis shell/）")
+    # 占位：dist/plain/ 由发布流程按分层策略组装（PyArmor 或 PyInstaller）
 
     # 步骤 3：XOR 常量加固（Nuitka 免费版常量数据未混淆——issue #556；
     # 免费替代 Nuitka Commercial data-hiding 插件）
