@@ -327,3 +327,18 @@
 
 ### 19.3 B 实施就绪状态
 - **发布路线实测可行**（Nuitka 免费编译 + MSVC 已备）——核心模块 .pyd 编译验证通过；后续按 build_release.py（docs/release/）扩展编译其余敏感模块 + XOR 常量加固 + release.yml 签名/发布流水线。
+
+## 20. B 扩展验证（2026-08-15：核心模块 .pyd 全部编译验证通过）
+
+### 20.1 多模块编译约束（全球调研——官方 Use Cases）
+- **"An extension module can never include other extension modules"**（需 wheel）——编译模块间**静态包含**不可行；**运行时 import 走 Python 原生机制正常**（.pyd 在 sys.path 被源码/其他 .pyd import）。
+- 编译产物**绑定 CPython 版本**（cp312-win_amd64 标签）；同目录时 **.pyd 优先加载**（替换源码）。
+- 整包编译：`--module pkg --include-package=pkg`（含子包）；动态导入需 --include-module 显式；模块模式不打包第三方依赖（运行时 pip 安装）；.pyi 桩（mypy.stubgen）保 IDE 补全。
+- Nuitka 编译 pyd 保持 logging 文件名/行号（Cython 丢失——可调试性优势，CSDN 确认）。
+
+### 20.2 B 扩展实测（4 核心模块全部编译验证通过）
+- **编译**：security（261KB）+ credential_guard（1039KB）+ threat_feed（1056KB）+ mcp（1058KB）——`.cp312-win_amd64.pyd` 全部生成（exit 0）。
+- **验证**：各 .pyd 可导入（PyInit 匹配）+ **函数集一致**（2/7/2/6 公开函数全在）+ **行为等价**（safe_url 拒绝 javascript:/redact 脱敏/host_is_blocked 命中放行——与源码一致）+ 回归（源码语法 + S1/api_bridge 自检——开发流程未受影响，产物在 research/ 不入库）。
+
+### 20.3 B 实施完成状态
+- **4 核心敏感模块（security/credential_guard/threat_feed/mcp）Nuitka 编译验证全部通过**——免费路线（Apache-2.0）核心保护落地；后续：XOR 常量加固 + release.yml 签名/发布流水线 + 不编译模块分层（PyArmor 小模块/PyInstaller）。
