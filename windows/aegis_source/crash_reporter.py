@@ -177,6 +177,21 @@ def install_crash_reporter(data_dir: str | None = None) -> None:
     _installed = True
 
 
+def _rotate_if_large(path: Path, max_bytes: int, backups: int = 3) -> None:
+    """crash_reporter 补审：日志大小轮换（超限 → .1/.2/... 保留备份份数）。"""
+    try:
+        if path.stat().st_size <= max_bytes:
+            return
+        for i in range(backups - 1, 0, -1):
+            src = path.with_name(f"{path.name}.{i}")
+            dst = path.with_name(f"{path.name}.{i + 1}")
+            if src.exists():
+                src.rename(dst)
+        path.rename(path.with_name(f"{path.name}.1"))
+    except OSError:
+        pass  # 轮换失败静默（日志不中断）
+
+
 def log_event(msg: str) -> None:
     """主动记录一条运行事件（非崩溃，供排查）。追加到 events.log。"""
     # 内存凭据不落地（KNOWLEDGE_BASE 第 14 节借鉴 FreeDom 反 dump）：
@@ -190,14 +205,21 @@ def log_event(msg: str) -> None:
     if d is None:
         return
     try:
-        line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
-        with open(d / "events.log", "a", encoding="utf-8") as f:
+        # crash_reporter 补审（官方日志最佳实践）：msg 换行清洗（\r\n →
+        # 空格——防日志注入伪造条目——官方"Remove other control chars"）
+        msg_clean = str(msg).replace("\r", " ").replace("\n", " ")
+        line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg_clean}\n"
+        log_path = d / "events.log"
+        with open(log_path, "a", encoding="utf-8") as f:
             f.write(line)
+        # crash_reporter 补审（官方 RotatingFileHandler 最佳实践）：大小
+        # 轮换——events.log 超限（5MB）→ .1/.2/.3（保留 3 份——防磁盘填满）
+        _rotate_if_large(log_path, max_bytes=5 * 1024 * 1024, backups=3)
         # W-07 整改（国防级审查）：事件日志文件权限收紧（目录 ACL——
         # POSIX 0600 / Windows DACL——security.harden_perms）
         try:
             from app.security import harden_perms
-            harden_perms(str(d / "events.log"))
+            harden_perms(str(log_path))
         except Exception:
             pass
     except OSError:

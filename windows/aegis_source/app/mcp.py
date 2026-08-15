@@ -258,6 +258,13 @@ def handle_request(api: Any, raw: str | dict) -> dict:
         except (TypeError, ValueError) as exc:
             return _err(-32602, f"invalid arguments: {exc}")
         except Exception as exc:
-            return _err(-32603, f"tool error: {exc}")
+            # MCP 补审（官方 schema 2026-07：工具错误应在 result 内
+            # isError=true——非协议级错误——LLM 才能看到并 self-correct；
+            # 协议级 -32603 仅用于"找不到工具/服务不支持"等异常条件）
+            resp_err: dict = {"ok": False, "isError": True,
+                              "error": f"tool error: {exc}"}
+            if tool.get("untrusted_result"):
+                resp_err["untrusted"] = True
+            return _ok(req_id, resp_err)
 
     return _err(-32601, f"method not found: {method}")
