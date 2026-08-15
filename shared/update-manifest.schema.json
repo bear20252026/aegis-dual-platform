@@ -2,22 +2,24 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Aegis Cross-platform Release Manifest",
   "type": "object",
-  "required": ["schema", "product", "version", "channel", "artifacts", "signature"],
+  "required": ["schema", "product", "version", "channel", "expires_at", "artifacts", "signature"],
   "properties": {
     "schema": { "type": "integer", "const": 1 },
     "product": { "type": "string", "const": "Aegis" },
     "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
     "channel": { "type": "string", "enum": ["stable", "beta", "nightly"] },
+    "expires_at": { "type": "string", "format": "date-time", "description": "R-17：清单过期时间（客户端拒绝过期更新——防回滚配套）" },
     "artifacts": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["platform", "format", "url", "sha256"],
+        "required": ["platform", "format", "url", "sha256", "size"],
         "properties": {
           "platform": { "type": "string", "enum": ["windows-x64", "windows-arm64", "android-universal"] },
           "format": { "type": "string", "enum": ["msix", "appinstaller", "apk", "aab"] },
           "url": { "type": "string", "pattern": "^https://" },
-          "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" }
+          "sha256": { "type": "string", "pattern": "^[a-fA-F0-9]{64}$" },
+          "size": { "type": "integer", "minimum": 1, "description": "R-17：工件大小（客户端下载前校验）" }
         },
         "additionalProperties": false
       }
