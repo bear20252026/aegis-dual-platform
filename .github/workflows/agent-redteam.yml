@@ -16,12 +16,14 @@ jobs:
           python-version: '3.12'
       - name: Red team tests (提示注入/投毒/重放/预算——无未批准副作用——阶段 G)
         run: |
+          python -m pip install pyyaml -q
           python agent/tests/redteam_test.py
       - name: Action catalog validation (default_deny——首批只读——Agent 门禁)
         run: |
-          python -c "
+          python - <<'PYEOF'
             import yaml
             c = yaml.safe_load(open('contracts/policy/action-catalog.yaml', encoding='utf-8'))
             assert c['default_deny'] is True
             assert all(a['read_only'] for a in c['actions'])
-            print('✅ action-catalog default_deny + 首批只读——Agent 门禁闭合')"
+            print('✅ action-catalog default_deny + 首批只读——Agent 门禁闭合')
+          PYEOF

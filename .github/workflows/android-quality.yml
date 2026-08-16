@@ -35,8 +35,7 @@ jobs:
       - name: 设置 Android SDK（API 36）
         uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
         with:
-          api-level: 36
-          build-tools-version: "36.0.0"
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
 
       - name: 缓存 Gradle
         uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca

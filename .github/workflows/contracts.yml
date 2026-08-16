@@ -16,11 +16,12 @@ jobs:
           python-version: '3.12'
       - name: Validate contracts JSON + vectors (单一事实来源——蓝图阶段 B)
         run: |
-          python -c "
+          python - <<'PYEOF'
             import json, glob
             for f in glob.glob('contracts/schemas/*.json') + glob.glob('contracts/vectors/*.json'):
                 json.load(open(f, encoding='utf-8'))
-            print('✅ contracts JSON 全部有效（schemas/vectors——契约事实来源）')"
+            print('✅ contracts JSON 全部有效（schemas/vectors——契约事实来源）')
+          PYEOF
       - name: Cross-language vectors differential (Python reference——蓝图)
         run: |
           python - <<'PYEOF'
