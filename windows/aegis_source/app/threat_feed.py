@@ -129,7 +129,7 @@ class ThreatFeedUpdater:
         try:
             if os.path.exists(self._file):
                 with open(self._file, "r", encoding="utf-8") as f:
-                    return {l.strip() for l in f if l.strip()}
+                    return {line.strip() for line in f if line.strip()}
         except OSError:
             pass
         return set()
@@ -166,7 +166,7 @@ class ThreatFeedUpdater:
                     try:
                         ok = bool(verify(raw))
                     except Exception as e:
-                        raise ValueError(f"签名校验异常：{e}")
+                        raise ValueError(f"签名校验异常：{e}") from e
                     if not ok:
                         raise ValueError("签名校验失败，拒绝落盘")
                 domains = []
