@@ -19,6 +19,8 @@ jobs:
           python -m pip install pip-audit
           pip-audit -r windows/aegis_source/requirements-lock.txt
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
       - name: cargo audit (Rust 依赖——core——依赖门禁——失败即阻断)
         working-directory: core/rust-policy-core
         run: |
