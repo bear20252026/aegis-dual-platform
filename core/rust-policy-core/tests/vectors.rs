@@ -41,7 +41,10 @@ fn update_manifest_duplicate_key_counts_once() {
     // contracts/vectors/update-manifest-invalid.json duplicate_key 场景）
     let mut keys = std::collections::HashMap::new();
     keys.insert("k1".to_string(), [0u8; 32].to_vec()); // 合成公钥（仅测计数逻辑）
-    let sigs = vec![json!({"key_id": "k1", "sig": "AAAA"}), json!({"key_id": "k1", "sig": "BBBB"})];
+    let sigs = vec![
+        json!({"key_id": "k1", "sig": "AAAA"}),
+        json!({"key_id": "k1", "sig": "BBBB"}),
+    ];
     let payload = canonical_unsigned(&json!({"version": "1.2.3"}));
     // 重复 key 只计一次（不足 threshold 2——即使同 key 两条签名）
     assert!(!verify_threshold(&keys, &sigs, &payload, 2));

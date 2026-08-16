@@ -114,7 +114,10 @@ pub fn verify_threshold(
         };
         let signature = Signature::from_bytes(&sig_arr);
         // verify_strict：严格验证——防 malleability（Houseme 生产实践）
-        if verifying_key.verify_strict(canonical_payload, &signature).is_ok() {
+        if verifying_key
+            .verify_strict(canonical_payload, &signature)
+            .is_ok()
+        {
             valid_key_ids.insert(key_id);
         }
     }
@@ -124,8 +127,7 @@ pub fn verify_threshold(
 /// 基础 base64 解码（纯函数——无外部 crate 依赖的简版；生产用 base64 crate——
 /// 蓝图最小依赖取舍：此实现仅试点，后续迁移 base64 crate）。
 fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
-    const TABLE: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = Vec::new();
     let mut buf = 0u32;
     let mut bits = 0u32;

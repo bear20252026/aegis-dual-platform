@@ -10,7 +10,10 @@ pub fn try_parse_external(raw: &str) -> Option<(String, String)> {
     if raw.is_empty() || raw.len() > MAX_URL_LENGTH {
         return None;
     }
-    if raw.bytes().any(|b| b < 0x20 || b == 0x7f || b.is_ascii_whitespace()) {
+    if raw
+        .bytes()
+        .any(|b| b < 0x20 || b == 0x7f || b.is_ascii_whitespace())
+    {
         return None;
     }
     let (scheme, rest) = raw.split_once("://")?;
@@ -43,8 +46,14 @@ mod tests {
 
     #[test]
     fn valid_origins_allow() {
-        assert_eq!(try_parse_external("https://a.gov.cn/page"), Some(("https".into(), "a.gov.cn".into())));
-        assert_eq!(try_parse_external("http://example.org/"), Some(("http".into(), "example.org".into())));
+        assert_eq!(
+            try_parse_external("https://a.gov.cn/page"),
+            Some(("https".into(), "a.gov.cn".into()))
+        );
+        assert_eq!(
+            try_parse_external("http://example.org/"),
+            Some(("http".into(), "example.org".into()))
+        );
     }
 
     #[test]
