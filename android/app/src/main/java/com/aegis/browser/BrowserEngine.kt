@@ -18,6 +18,8 @@ class BrowserEngine(
 ) {
     companion object {
         private val allowedSchemes = setOf("http", "https")
+        private const val MAX_PROGRESS = 100
+        private const val MAX_TITLE_LENGTH = 256
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -105,14 +107,14 @@ class BrowserEngine(
                     view: WebView,
                     newProgress: Int,
                 ) {
-                    android.util.Log.i("Aegis", "R12 progress: ${newProgress.coerceIn(0, 100)}")
+                    android.util.Log.i("Aegis", "R12 progress: ${newProgress.coerceIn(0, MAX_PROGRESS)}")
                 }
 
                 override fun onReceivedTitle(
                     view: WebView,
                     title: String?,
                 ) {
-                    android.util.Log.i("Aegis", "R12 title: ${title?.take(256).orEmpty()}")
+                    android.util.Log.i("Aegis", "R12 title: ${title?.take(MAX_TITLE_LENGTH).orEmpty()}")
                 }
             }
         // A-03 整改（国防级审查）：默认限制第三方 Cookie（WebView 默认
