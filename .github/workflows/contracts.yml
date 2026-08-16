@@ -30,6 +30,6 @@ jobs:
           for f in glob.glob('contracts/vectors/*.json'):
               data = json.load(open(f, encoding='utf-8'))
               for v in data.get('vectors', []):
-                  assert v.get('expected') in ('allow', 'valid', 'deny'), f'向量断言缺失: {f}'
+                  assert v.get('expected') in ('allow', 'valid', 'deny', 'deny_rollback', 'deny_threshold', 'deny_expired', 'deny_schema'), f'向量断言缺失: {f}'
           print('✅ 契约向量完整（allow/deny 断言——跨语言差分一致——阶段 B 完成标准）')
           PYEOF
