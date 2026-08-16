@@ -116,6 +116,8 @@ jobs:
             --owner "$GITHUB_REPOSITORY_OWNER" \
             --predicate-type https://slsa.dev/provenance/v1
       - name: Verify SBOM attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # P0-06 修复（专家审查）：逐文件 SBOM 验证（移除 || true——
           # 不允许只验证单一文件——CycloneDX predicate 与 sbom job 一致）
