@@ -112,11 +112,9 @@ jobs:
         run: |
           # P0-06 修复（专家审查）：逐文件 NUL 安全验证（移除 head -200——
           # 全部工件验证——缺失 attestation 是失败不是跳过）
-          while IFS= read -r -d '' f; do
-            timeout 60 gh attestation verify "$f" \
-              --owner "$GITHUB_REPOSITORY_OWNER" \
-              --predicate-type https://slsa.dev/provenance/v1
-          done < <(find dist -type f -print0)
+          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 gh attestation verify "{}" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --predicate-type https://slsa.dev/provenance/v1
       - name: Verify SBOM attestation
         run: |
           # P0-06 修复（专家审查）：逐文件 SBOM 验证（移除 || true——
