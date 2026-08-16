@@ -192,6 +192,9 @@ jeepney==0.9.0 \
 SecretStorage==3.5.0; platform_system == "Linux" \
     --hash=sha256:0ce65888c0725fcb2c5bc0fdb8e5438eece02c523557ea40ce0703c266248137
     # via keyring
+jeepney==0.9.0; platform_system == "Linux" \
+    --hash=sha256:97e5714520c16fc0a45695e5365a2e11b81ea79bba796e26f9f1d178cb182683
+    # via keyring
 more-itertools==11.1.0 \
     --hash=sha256:48e8f4d9e7e5878571ecf6f2b4e57634f93cd474cc8cfbd2376f2d11b396e30d \
     --hash=sha256:4b65538ae22f6fed0ce4874efd317463a7489796a0939fa66824dd542125a192
