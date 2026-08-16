@@ -22,7 +22,7 @@ def main() -> int:
     ]
     for rel, note in steps:
         print(f"--- {note} ---")
-        r = subprocess.run([sys.executable, str(ROOT / rel)], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, str(ROOT / rel)], capture_output=True, text=True, check=False)
         print(r.stdout.strip().splitlines()[-1] if r.stdout else "")
         if r.returncode != 0:
             print(f"❌ {rel} 失败——安全 e2e 未通过")

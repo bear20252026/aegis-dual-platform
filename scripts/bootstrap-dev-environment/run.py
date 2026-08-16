@@ -17,9 +17,9 @@ def _check(tool: str, version_cmd: list[str]) -> tuple[bool, str]:
     if exe is None:
         return False, f"{tool} 未安装"
     try:
-        out = subprocess.run(version_cmd, capture_output=True, text=True, timeout=15)
+        out = subprocess.run(version_cmd, capture_output=True, text=True, timeout=15, check=False)
         return True, out.stdout.strip().splitlines()[0] if out.stdout else f"{tool} 可用"
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         return False, f"{tool} 检查失败: {e}"
 
 

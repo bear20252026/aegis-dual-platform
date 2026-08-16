@@ -98,7 +98,8 @@ def main() -> int:
 
     # B0-S-01 整改（国防级审查）：最终包 SHA-256 校验文件（字节一致不变式——
     # release.yml verify job 按此对账；防手工组装/重建漂移）
-    import hashlib, json
+    import hashlib
+    import json
     sums = []
     for p in sorted(DIST.rglob("*")):
         if p.is_file():

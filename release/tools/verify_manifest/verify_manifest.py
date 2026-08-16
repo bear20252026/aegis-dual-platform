@@ -16,7 +16,7 @@ from pathlib import Path
 
 # 复用 P0-04 更新验证器（契约统一——contracts/schemas/update-manifest.schema.json）
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from release.update_verifier import UpdateRejected, verify_manifest  # noqa: E402
+from release.update_verifier import UpdateRejected, verify_manifest
 
 
 def main() -> int:

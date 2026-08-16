@@ -9,7 +9,6 @@ contracts/Windows Broker/AndroidBroker 同语义（Default Deny——fail-closed
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional
 
 
 @dataclasses.dataclass
@@ -19,14 +18,14 @@ class ProposedAction:
     budget_used: int
     nonce: str
     generation: int
-    tool_description_hash: Optional[str] = None
+    tool_description_hash: str | None = None
 
 
 class E2EBroker:
     """红队 e2e 模拟 broker（与 contracts Decision 语义一致——Default Deny）。"""
 
     # 与 contracts/policy/action-catalog.yaml 一致：首批只读低风险——未登记 action 不可用
-    ALLOWED_INTENTS = {"get_current_title", "get_current_origin"}
+    ALLOWED_INTENTS: frozenset[str] = frozenset({"get_current_title", "get_current_origin"})
 
     def __init__(self, policy_version: str = "1.0", max_actions: int = 5):
         self.policy_version = policy_version

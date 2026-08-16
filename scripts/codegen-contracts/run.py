@@ -23,7 +23,7 @@ def main() -> int:
     ]
     for script, note in steps:
         print(f"--- {note} ---")
-        r = subprocess.run([sys.executable, str(CODEGEN / script)], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, str(CODEGEN / script)], capture_output=True, text=True, check=False)
         print(r.stdout.strip())
         if r.returncode != 0:
             print(f"❌ {script} 失败")

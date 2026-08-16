@@ -28,7 +28,7 @@ def verify_provenance(dist_dir: Path, owner: str, signer_workflow: str) -> list[
             "--signer-workflow", signer_workflow,
             "--predicate-type", PREDICATE_TYPE,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if result.returncode != 0:
             failures.append(f"provenance 验证失败（缺失 attestation——fail-closed）: {p.name}")
     return failures

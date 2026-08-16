@@ -23,7 +23,7 @@ def check_schemas() -> list[str]:
     for f in sorted(SCHEMAS.glob("*.json")):
         try:
             json.loads(f.read_text(encoding="utf-8"))
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             failures.append(f"schema JSON 无效: {f.name}（{e}）")
     return failures
 
@@ -33,7 +33,7 @@ def check_vectors() -> list[str]:
     for f in sorted(VECTORS.glob("*.json")):
         try:
             json.loads(f.read_text(encoding="utf-8"))
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             failures.append(f"vector JSON 无效: {f.name}（{e}）")
     return failures
 

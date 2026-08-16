@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """gen_jsapi_schema.py —— 从 Api 桥生成 js_api JSON Schema 文档（R2）。
 
 借鉴 steel-browser / ShardBrowser 的 openapi.yaml 模式：把隐式
