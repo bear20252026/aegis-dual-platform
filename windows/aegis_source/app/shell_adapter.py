@@ -88,7 +88,7 @@ class PywebviewShell(Shell):
     def settings(self) -> dict:
         """壳模块级设置项（pywebview.settings 原引用——直接修改生效）；
         无则返回空 dict。"""
-        return self._webview.settings
+        return dict(self._webview.settings)
 
     def windows(self) -> list:
         return list(self._webview.windows)
@@ -113,7 +113,7 @@ class PytauriShell(Shell):
             # pytauri-wheel 内部标识（官方 examples 同款，须在任何
             # pytauri 使用前设置）
             environ.setdefault("_PYTAURI_DIST", "pytauri-wheel")
-            from anyio.from_thread import start_blocking_portal  # noqa: F401
+            from anyio.from_thread import start_blocking_portal  # type: ignore[import-not-found]  # noqa: F401
 
             # pytauri-wheel 为运行时依赖（可选壳），未装时无类型桩——
             # 与 main_webview 的 webview import 同惯例忽略 import-not-found

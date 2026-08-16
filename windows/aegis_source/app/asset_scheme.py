@@ -56,7 +56,7 @@ def ensure_registered():
     if _registered:
         return
     try:
-        from PySide6.QtWebEngineCore import QWebEngineUrlScheme
+        from PySide6.QtWebEngineCore import QWebEngineUrlScheme  # type: ignore[import-not-found]
         scheme = QWebEngineUrlScheme(SCHEME_NAME)
         # Host 段为 wallpapers，路径为文件名；启用 CORS 便于 CSS 背景引用
         scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
@@ -92,7 +92,7 @@ class AegisAssetHandler:
     """
 
     def __new__(cls, parent=None):
-        from PySide6.QtWebEngineCore import QWebEngineUrlSchemeHandler
+        from PySide6.QtWebEngineCore import QWebEngineUrlSchemeHandler  # type: ignore[import-not-found]
 
         class _Handler(QWebEngineUrlSchemeHandler):
             def requestStarted(self, job):
