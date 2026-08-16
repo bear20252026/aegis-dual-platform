@@ -17,19 +17,19 @@ jobs:
       - name: Validate contracts JSON + vectors (单一事实来源——蓝图阶段 B)
         run: |
           python - <<'PYEOF'
-            import json, glob
-            for f in glob.glob('contracts/schemas/*.json') + glob.glob('contracts/vectors/*.json'):
-                json.load(open(f, encoding='utf-8'))
-            print('✅ contracts JSON 全部有效（schemas/vectors——契约事实来源）')
+          import json, glob
+          for f in glob.glob('contracts/schemas/*.json') + glob.glob('contracts/vectors/*.json'):
+              json.load(open(f, encoding='utf-8'))
+          print('✅ contracts JSON 全部有效（schemas/vectors——契约事实来源）')
           PYEOF
       - name: Cross-language vectors differential (Python reference——蓝图)
         run: |
           python - <<'PYEOF'
-            import json, glob
-            # 与 Rust core (cargo test) / C# reference 对同一 vectors 结果一致（蓝图阶段 B）
-            for f in glob.glob('contracts/vectors/*.json'):
-                data = json.load(open(f, encoding='utf-8'))
-                for v in data.get('vectors', []):
-                    assert v.get('expected') in ('allow', 'valid', 'deny'), f'向量断言缺失: {f}'
-            print('✅ 契约向量完整（allow/deny 断言——跨语言差分一致——阶段 B 完成标准）')
+          import json, glob
+          # 与 Rust core (cargo test) / C# reference 对同一 vectors 结果一致（蓝图阶段 B）
+          for f in glob.glob('contracts/vectors/*.json'):
+              data = json.load(open(f, encoding='utf-8'))
+              for v in data.get('vectors', []):
+                  assert v.get('expected') in ('allow', 'valid', 'deny'), f'向量断言缺失: {f}'
+          print('✅ 契约向量完整（allow/deny 断言——跨语言差分一致——阶段 B 完成标准）')
           PYEOF

@@ -21,9 +21,9 @@ jobs:
       - name: Action catalog validation (default_deny——首批只读——Agent 门禁)
         run: |
           python - <<'PYEOF'
-            import yaml
-            c = yaml.safe_load(open('contracts/policy/action-catalog.yaml', encoding='utf-8'))
-            assert c['default_deny'] is True
-            assert all(a['read_only'] for a in c['actions'])
-            print('✅ action-catalog default_deny + 首批只读——Agent 门禁闭合')
+          import yaml
+          c = yaml.safe_load(open('contracts/policy/action-catalog.yaml', encoding='utf-8'))
+          assert c['default_deny'] is True
+          assert all(a['read_only'] for a in c['actions'])
+          print('✅ action-catalog default_deny + 首批只读——Agent 门禁闭合')
           PYEOF
