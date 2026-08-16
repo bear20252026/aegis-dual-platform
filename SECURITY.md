@@ -1,61 +1,37 @@
-# 安全说明（Security）
+# Security Policy（SECURITY.md）
 
-本项目是安全浏览器，**安全是最高优先级**。本文件说明安全边界、漏洞披露流程与安全贡献要求。
+> 依据：蓝图目标树 SECURITY.md + 代码门禁（危险 API 有审查清单）+ ADR-002/003
+> （安全边界——三信任域——Capability Broker 唯一副作用点）+ 阶段 E（发布链）。
 
-## 目录
+## 安全边界（ADR-002/003——三信任域）
 
-- [安全边界](#安全边界)
-- [漏洞报告（负责任披露）](#漏洞报告负责任披露)
-- [安全贡献要求](#安全贡献要求)
-- [已知安全相关事项](#已知安全相关事项)
+- 远程网页域：无 native bridge/无 MCP token/无本地命令（ADR-003）
+- 本地 chrome UI 域：固定 origin——经 Broker 请求 action
+- Capability broker 域：唯一副作用点——Default Deny（ADR-002）
+- 发布链：逐工件闭合 fail-closed（阶段 E）——supply-chain 依赖审计
 
-## 安全边界
+## 漏洞报告
 
-Aegis 的内核级安全设计（代码已实现，勿弱化）：
+- 私密披露（GitHub Security Advisory 协调披露流程）
+- 报告内容：影响面/复现/缓解建议——不含敏感载荷
+- 响应：确认 → 评估（threat-model：trust-boundaries/agent/release-threat-model）→
+  修复 → 回归测试（CI 分层——contracts/core-rust/agent-redteam/supply-chain）→
+  发布（release-checklist——阶段 E 独立验证）
 
-| 边界 | 说明 |
-|---|---|
-| **URL 白名单** | `app/security.py` 的 `safe_url()`：所有导航入口（IPC/会话恢复/书签/历史/拨号/命令行/地址栏）加载前必经过滤，仅放行 http/https；file:/javascript:/vbscript:/chrome: 一律拒绝 |
-| **WebView 硬边界（Android）** | `BrowserEngine`：http/https 唯一协议；关闭文件访问、内容访问、file URL 跨域、混合内容；非 DEBUG 构建禁用 WebView 调试 |
-| **密码存储** | Fernet + Windows DPAPI / 系统密钥环；无加密能力时**拒绝明文落盘**（`password_store.py`） |
-| **危险下载拦截** | 可执行/脚本类扩展名（exe/bat/ps1/js/hta 等）二次确认（`security.py`） |
-| **敏感文件权限** | POSIX 0600 / Windows DACL 仅当前用户（含回退 icacls） |
-| **无痕模式** | 密码/历史/拨号强制不落盘；凭据不进模型上下文（computer_use 模式 B） |
-| **系统背景材质** | `backdrop.py` 尽力而为，任何失败静默降级，不影响浏览 |
+## 危险 API 审查清单（代码门禁补充——蓝图"危险 API 有审查清单"）
 
-**开发者红线**：
-- 不允许绕过 `safe_url()` 为任何外部输入开放导航
-- 不允许为通过检查而删除/弱化安全断言（"修好"而非"藏好"）
-- 不允许把 token、密钥、证书、`key.properties`、`.jks` 提交进仓库
+| 语言 | 危险 API | 审查要点（禁止/受限） |
+|---|---|---|
+| Python | eval/exec/compile | 禁止（动态执行——无未过滤输入可执行） |
+| Python | subprocess/os.system | 受限（参数经校验——无 shell 拼接面——CVE-2025-6514 场景） |
+| Python | 反射（getattr 动态调用） | 受限（仅受信来源——白名单——不自动暴露命令） |
+| Python | pickle/yaml.load | 禁止 yaml.load（用 safe_load）——pickle 仅受信数据 |
+| C# | 反射（Activator/GetMethod 动态调用） | 禁止自动暴露命令（ADR-001——无动态反射命令面） |
+| C# | dynamic/动态绑定 | 受限（强类型 IPC——Chrome → Broker） |
+| Kotlin | 反射（KClass 动态调用） | 受限（webview-adapter 只事件转换——无动态命令） |
 
-## 漏洞报告（负责任披露）
+## 依赖与发布安全
 
-发现安全漏洞时，**请勿公开披露可利用细节**（不要在 Issue/PR/讨论中粘贴 PoC、token、密钥）。
-
-流程：
-
-1. **私密报告**：通过私有渠道联系维护者（GitHub 仓库的 Security 标签页 → 私密漏洞报告；或直接邮件维护者）
-2. **提供信息**：受影响版本、漏洞类型（如 XSS/注入/路径穿越/权限提升）、复现步骤、影响范围；敏感细节仅私密提供
-3. **等待修复**：维护者确认后通常会在 14 天内给出修复计划；在修复发布前请保密
-4. **公开致谢**：修复发布后，欢迎在 CHANGELOG 或致谢区公开署名（可选）
-
-## 安全贡献要求
-
-提交涉及安全敏感路径的改动（URL 过滤/密码/下载/权限/认证）时：
-
-- 必须说明安全考虑与攻击面
-- 必须通过 `bandit -r app/`（无 Medium/High）与 `ruff check .`（0 错误）
-- 必须补充或更新对应自检脚本（`selftest_*.py`）
-- 涉及凭据时，仅通过安全渠道沟通，绝不在公开内容中出现
-
-## 已知安全相关事项
-
-- **AI 供应商 API Key**：存于 `~/.config/aegis/<provider>.key`（0600/DACL 收紧）；建议配置用量上限，泄露后立即撤销重生成
-- **威胁情报订阅源**：仅接受 https://（`validate_feed_url` 强制），可选签名校验
-- **ThreatFeed / Safe Browsing**：覆盖度如实声明，属于纵深防御而非唯一防线
-- **证书签名**：正式发布需代码签名证书（MSIX/APK），当前为开发期未签名
-- **第三方依赖**：Python 依赖在 `requirements.txt` 锁版本；升级安全敏感依赖（如 cryptography）需注明理由
-
-## 联系
-
-安全相关问题仅通过私有渠道：GitHub 仓库 Security 标签页的私密报告功能（推荐）。
+- 依赖：requirements-lock（hash）+ Cargo.lock + supply-chain.yml（pip-audit/cargo audit/SBOM）
+- 发布：release.yml（v* 标签——失败闭合）+ 发布链独立验证（阶段 E 工具）——无 || true/截断验证
+- 更新：signatures[] 阈值 + 防回滚（P0-04/contracts 统一）
