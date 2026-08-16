@@ -55,13 +55,14 @@ jobs:
         run: bandit -r app/ -q --skip B110,B404,B603,B607
 
       - name: mypy 类型检查（新栈 0 错误）
+        shell: bash
         run: |
           mypy main_webview.py \
             app/api_bridge.py app/nav_queue.py app/shell_toolbar.py \
             app/config.py app/threat_feed.py app/asset_scheme.py \
             app/paths.py app/bookmark_store.py app/history_store.py \
             app/database.py app/security.py app/backdrop.py \
-            crash_reporter.py
+            crash_reporter.py --exclude "System Volume Information"
 
   android-lint:
     name: Android 编译与检查（Kotlin 语法级）
