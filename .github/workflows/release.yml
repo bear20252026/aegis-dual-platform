@@ -121,10 +121,8 @@ jobs:
         run: |
           # P0-06 修复（专家审查）：逐文件 SBOM 验证（移除 || true——
           # 不允许只验证单一文件——CycloneDX predicate 与 sbom job 一致）
-          while IFS= read -r -d '' f; do
-            gh attestation verify "$f" --owner "$GITHUB_REPOSITORY_OWNER" \
-              --predicate-type https://cyclonedx.org/bom
-          done < <(find dist -type f -print0)
+          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 gh attestation verify "{}" --owner "$GITHUB_REPOSITORY_OWNER" \
+            --predicate-type https://cyclonedx.org/bom
       - name: Checksum reconciliation (byte-identical invariant)
         run: |
           python - <<'PY'
