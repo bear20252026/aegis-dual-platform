@@ -107,6 +107,8 @@ jobs:
           name: release-dist
           path: dist
       - name: Verify SLSA provenance on every artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # P0-06 修复（专家审查）：逐文件 NUL 安全验证（移除 head -200——
           # 全部工件验证——缺失 attestation 是失败不是跳过）
