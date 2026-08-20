@@ -24,4 +24,4 @@ data class ApprovalRequest(
 )
 
 /** 拒绝原因（类型化——fail-closed——审计可追溯）。 */
-data class DenyReason(val code: String, val detail: String)
+data class DenyReason(val code: String, val detail: String, val explanation: String = "")
