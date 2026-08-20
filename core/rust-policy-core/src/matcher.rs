@@ -147,9 +147,7 @@ fn covers(a: &[Tok], b: &[Tok], ai: usize, bi: usize, flat: bool) -> bool {
         return false;
     }
     match (&a[ai], &b[bi]) {
-        (Tok::DStar, _) => {
-            covers(a, b, ai + 1, bi, flat) || covers(a, b, ai, bi + 1, flat)
-        }
+        (Tok::DStar, _) => covers(a, b, ai + 1, bi, flat) || covers(a, b, ai, bi + 1, flat),
         (Tok::Star, Tok::Star) | (Tok::Star, Tok::DStar) => covers(a, b, ai + 1, bi + 1, flat),
         (Tok::Star, _) => {
             if flat || !matches!(b[bi], Tok::Lit('/')) {
