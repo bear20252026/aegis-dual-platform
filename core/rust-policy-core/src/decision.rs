@@ -45,4 +45,6 @@ pub struct ApprovalRequest {
 pub struct DenyReason {
     pub code: String,
     pub detail: String,
+    /// 人类可读的审计说明（照搬 warden Verdict.explanation 模式）。
+    pub explanation: String,
 }

@@ -8,7 +8,10 @@
 //! Ed25519 阈值验证；第二项：URL/Origin canonicalization。
 //! 与 C#/Kotlin reference + contracts/vectors 差分一致（跨语言测试向量）。
 
+pub mod broker;
 pub mod decision;
 pub mod matcher;
+pub mod oracle;
 pub mod origin;
+pub mod policy;
 pub mod update_manifest;
