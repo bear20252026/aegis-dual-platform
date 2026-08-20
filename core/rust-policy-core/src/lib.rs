@@ -9,5 +9,6 @@
 //! 与 C#/Kotlin reference + contracts/vectors 差分一致（跨语言测试向量）。
 
 pub mod decision;
+pub mod matcher;
 pub mod origin;
 pub mod update_manifest;
