@@ -19,4 +19,6 @@ data class AuthorizedAction(
     val expiresAt: Instant,
     val nonce: String,
     val policyVersion: String,
+    /** 人类可读的审计说明（照搬 warden Verdict.explanation 模式）。 */
+    val explanation: String = "",
 )

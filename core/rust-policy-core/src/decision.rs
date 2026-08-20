@@ -13,6 +13,7 @@ pub enum Decision {
 
 /// AuthorizedAction——唯一允许进入副作用服务的凭据（ADR-002）。
 /// 绑定字段任一变化使批准失效。
+/// explanation：人类可读的审计说明（照搬 warden Verdict.explanation 模式）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthorizedAction {
     pub session_id: String,
@@ -22,9 +23,10 @@ pub struct AuthorizedAction {
     pub method: String,
     pub canonical_parameters: String,
     pub scope: String,
-    pub expires_at: u64, // Unix 秒（epoch）——纯函数（时间由参数注入——无系统时间依赖）
+    pub expires_at: u64,
     pub nonce: String,
     pub policy_version: String,
+    pub explanation: String,
 }
 
 /// 审批请求（高风险副作用——原生确认——nonce 一次性/过期——重放拒绝）。

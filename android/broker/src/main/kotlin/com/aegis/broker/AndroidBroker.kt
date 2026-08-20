@@ -26,6 +26,7 @@ class AndroidBroker(private val policyVersion: String = "1.0") {
                 .plus(kotlin.time.Duration.parse("120s")),
             nonce = java.util.UUID.randomUUID().toString().replace("-", ""),
             policyVersion = policyVersion,
+            explanation = "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion",
         )
         return Decision.Allow(action)
     }
