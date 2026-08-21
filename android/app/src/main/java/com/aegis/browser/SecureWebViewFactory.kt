@@ -19,9 +19,12 @@ object SecureWebViewFactory {
     private val broker = AndroidBroker()
     private var sessionCounter = 0L
 
+    /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
+    private const val SESSION_SEED_BYTES = 32
+
     /** 每会话随机种子（32 字节 hex）——注入 JS 噪声时用。 */
     private val sessionSeed: String by lazy {
-        val bytes = ByteArray(32)
+        val bytes = ByteArray(SESSION_SEED_BYTES)
         java.security.SecureRandom().nextBytes(bytes)
         bytes.joinToString("") { "%02x".format(it) }
     }

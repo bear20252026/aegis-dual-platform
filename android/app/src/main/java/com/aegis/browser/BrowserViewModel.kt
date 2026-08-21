@@ -90,19 +90,14 @@ class BrowserViewModel : ViewModel() {
             .load(_address.value)
     }
 
-    /** 后退。 */
-    fun goBack() {
-        tabManager.current()?.webView?.goBack()
-    }
-
-    /** 前进。 */
-    fun goForward() {
-        tabManager.current()?.webView?.goForward()
-    }
-
-    /** 刷新当前页。 */
-    fun reload() {
-        tabManager.current()?.webView?.reload()
+    /** 历史导航（后退/前进/刷新——合并减少函数数——detekt TooManyFunctions）。 */
+    fun navigateHistory(action: HistoryAction) {
+        val wv = tabManager.current()?.webView ?: return
+        when (action) {
+            HistoryAction.BACK -> wv.goBack()
+            HistoryAction.FORWARD -> wv.goForward()
+            HistoryAction.RELOAD -> wv.reload()
+        }
     }
 
     /** 设置安全提示（System WebView 版本过旧）。 */
@@ -118,3 +113,6 @@ class BrowserViewModel : ViewModel() {
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */
     fun getTabManager(): TabManager? = if (::tabManager.isInitialized) tabManager else null
 }
+
+/** 历史导航动作。 */
+enum class HistoryAction { BACK, FORWARD, RELOAD }

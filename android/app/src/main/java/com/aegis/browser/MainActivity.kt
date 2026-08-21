@@ -40,9 +40,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 class MainActivity : ComponentActivity() {
     private val viewModel: BrowserViewModel by viewModels()
 
-    // A1（final-development-checklist）：System WebView 版本过旧提示文案（null=不提示）
-    private var webViewAlertMessage: String? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // A1：System WebView 版本检查（CVE-2026-12438/11295 防御——
@@ -104,9 +101,9 @@ class MainActivity : ComponentActivity() {
                             address = address,
                             onAddressChange = { viewModel.updateAddress(it) },
                             onOpen = { viewModel.navigateToAddress() },
-                            onBack = { viewModel.goBack() },
-                            onForward = { viewModel.goForward() },
-                            onReload = { viewModel.reload() },
+                            onBack = { viewModel.navigateHistory(HistoryAction.BACK) },
+                            onForward = { viewModel.navigateHistory(HistoryAction.FORWARD) },
+                            onReload = { viewModel.navigateHistory(HistoryAction.RELOAD) },
                         )
                         WebContentArea(tabManager = viewModel.getTabManager()!!, modifier = Modifier.weight(1f))
                     }
