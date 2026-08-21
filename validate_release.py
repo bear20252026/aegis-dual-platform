@@ -15,7 +15,7 @@ from pathlib import Path
 # 在任意其他机器上运行必然 FileNotFoundError。改为基于本文件位置的
 # 相对路径，跨平台可移植（Windows/Linux/macOS 均生效）。
 root = Path(__file__).resolve().parent
-windows = root / 'windows' / 'aegis_source'
+windows = root / 'legacy' / 'windows-pywebview'
 failures: list[str] = []
 python_files = list(windows.rglob('*.py'))
 for path in python_files:
