@@ -31,9 +31,9 @@ impl FingerprintShield {
             .as_nanos();
         let pid = std::process::id() as u128;
         // 逐字节填充（避免大位移溢出）
-        for i in 0..32usize {
+        for (i, byte) in seed.iter_mut().enumerate() {
             let val = nanos.wrapping_mul(pid.wrapping_add(i as u128 + 1));
-            seed[i] = ((val >> ((i % 16) * 8)) & 0xFF) as u8;
+            *byte = ((val >> ((i % 16) * 8)) & 0xFF) as u8;
         }
         Self { seed }
     }
