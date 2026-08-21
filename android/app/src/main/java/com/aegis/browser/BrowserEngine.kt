@@ -39,15 +39,8 @@ class BrowserEngine(
         // WebViewClient 由 SecureWebViewFactory 统一注入 AegisWebViewClient（经 Broker 决策），
         // BrowserEngine 不得覆盖——单路径收敛（专家审计）。
         // onPageStarted/onPageFinished 的日志由 AegisWebViewClient 回调替代。
-        // A-02 整改（国防级审查）：下载接入 DownloadPolicy——危险扩展名
-        // （exe/ps1/lnk 等）默认拒绝（发布期可接入原生确认 UI——A-07 最小化）
-        webView.setDownloadListener { url, _, _, _, _ ->
-            if (DownloadPolicy.requiresExplicitConfirmation(url)) {
-                android.util.Log.w("Aegis", "拒绝危险下载: $url")
-            } else {
-                android.util.Log.i("Aegis", "受控下载: $url")
-            }
-        }
+        // 下载由 Broker→Executor 单路径处理（INV-02：Executor 是唯一副作用点）——
+        // BrowserEngine 不再直接处理下载（单路径收敛——专家审计）。
         // A-02 整改（国防级审查）：WebChromeClient——权限/文件选择默认拒绝
         // （Android 官方：不可信内容不授予权限；onShowFileChooser 无来源校验）
         webView.webChromeClient =
