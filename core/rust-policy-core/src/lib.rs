@@ -9,6 +9,7 @@
 //! 与 C#/Kotlin reference + contracts/vectors 差分一致（跨语言测试向量）。
 
 pub mod action_policy;
+pub mod adblock;
 pub mod broker;
 pub mod bridge_guard;
 pub mod capability;
@@ -19,5 +20,6 @@ pub mod matcher;
 pub mod oracle;
 pub mod origin;
 pub mod policy;
+pub mod security_policy;
 pub mod shield;
 pub mod update_manifest;
