@@ -66,6 +66,7 @@ jobs:
             app/config.py app/threat_feed.py app/asset_scheme.py \
             app/paths.py app/bookmark_store.py app/history_store.py \
             app/database.py app/security.py app/backdrop.py \
+            app/fingerprint_pipeline.py app/bridge_hooks.py \
             crash_reporter.py --exclude "System Volume Information"
 
   android-lint:
