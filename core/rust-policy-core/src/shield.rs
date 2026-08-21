@@ -100,6 +100,12 @@ const __AEGIS_SESSION_SEED = '{hex}';
     }
 }
 
+impl Default for FingerprintShield {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

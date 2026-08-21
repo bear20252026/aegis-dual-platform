@@ -27,7 +27,7 @@ pub enum CapabilityScope {
 }
 
 impl CapabilityScope {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "navigation:read" | "tabs:read" | "history:read" => Some(Self::Read),
             "download" | "export" | "file:write" => Some(Self::Write),
@@ -59,7 +59,7 @@ pub struct Capability {
 
 impl Capability {
     pub fn is_exhausted(&self) -> bool {
-        self.max_uses.map_or(false, |max| self.uses_count >= max)
+        self.max_uses.is_some_and(|max| self.uses_count >= max)
     }
 
     pub fn is_origin_allowed(&self, origin: &str) -> bool {
@@ -71,6 +71,12 @@ impl Capability {
 #[derive(Debug)]
 pub struct CapabilityRegistry {
     capabilities: HashMap<String, Capability>,
+}
+
+impl Default for CapabilityRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CapabilityRegistry {

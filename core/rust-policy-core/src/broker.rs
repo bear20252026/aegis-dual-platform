@@ -37,7 +37,6 @@ impl SessionContext {
 /// 一次性 nonce 消费记录（防重放）。
 #[derive(Debug, Clone)]
 struct NonceRecord {
-    consumed_at: Instant,
     session_id: String,
 }
 
@@ -180,7 +179,6 @@ impl ContextBroker {
         self.consumed_nonces.insert(
             nonce.to_string(),
             NonceRecord {
-                consumed_at: Instant::now(),
                 session_id: session_id.to_string(),
             },
         );

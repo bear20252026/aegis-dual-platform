@@ -12,7 +12,7 @@
 //! 可拼接：通过 `AuditEvent` 与 executor/audit 层对接。
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 /// 快照记录（副作用执行前后的状态）。
 #[derive(Debug, Clone)]
@@ -56,6 +56,12 @@ pub enum VerifyVerdict {
 pub struct Oracle {
     snapshots: Vec<Snapshot>,
     reports: Vec<DiffReport>,
+}
+
+impl Default for Oracle {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Oracle {

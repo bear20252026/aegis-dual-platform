@@ -96,7 +96,7 @@ fn hex_encode(data: &[u8]) -> String {
 /// hex 解码（零依赖——每 2 字符→1 字节）。
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     let bytes = s.as_bytes();
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return None;
     }
     let mut out = Vec::with_capacity(bytes.len() / 2);

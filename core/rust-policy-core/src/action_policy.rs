@@ -12,7 +12,6 @@
 //! 可拆卸：本模块不依赖 UI/网络/文件。
 //! 可拼接：通过 Decision trait 与 broker/executor 层对接。
 
-use crate::decision::{AuthorizedAction, Decision, DenyReason};
 use crate::matcher::glob_match;
 
 /// 策略规则（action + condition → decision）。
@@ -71,7 +70,7 @@ impl ActionPolicy {
                 glob_match(&r.action_pattern, action, false)
                     && r.condition
                         .as_ref()
-                        .map_or(true, |c| context.contains(c.as_str()))
+                        .is_none_or(|c| context.contains(c.as_str()))
             })
             .collect();
 

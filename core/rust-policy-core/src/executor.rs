@@ -57,6 +57,12 @@ pub struct Executor {
     handlers: HashMap<String, Box<dyn CommandHandler>>,
 }
 
+impl Default for Executor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Executor {
     pub fn new() -> Self {
         Self {

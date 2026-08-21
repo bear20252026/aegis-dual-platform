@@ -19,6 +19,12 @@ pub struct HttpsOnlyState {
     total_upgrades: u64,
 }
 
+impl Default for HttpsOnlyState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HttpsOnlyState {
     pub fn new() -> Self {
         Self {

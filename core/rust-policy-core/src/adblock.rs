@@ -7,8 +7,7 @@
  * 改动：将 Kotlin 实现翻译为 Rust，适配 Aegis 架构（无 Android 依赖）。
  */
 
-use std::collections::{HashMap, HashSet};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::collections::HashSet;
 
 /// 广告拦截提供者（照搬 Omni Browser AdBlockProvider）。
 #[derive(Debug, Clone)]
@@ -28,6 +27,12 @@ pub struct AdBlockManager {
     blocked_domains: HashSet<String>,
     total_blocked: u64,
     is_enabled: bool,
+}
+
+impl Default for AdBlockManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AdBlockManager {
