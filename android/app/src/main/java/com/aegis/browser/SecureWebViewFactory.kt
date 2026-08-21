@@ -77,7 +77,6 @@ object SecureWebViewFactory {
   };
 })();
 """.trimIndent()
-}
 
     /** 指纹防护 JS（照搬 voidbrowser FingerprintShield——canvas/WebGL/Audio 噪声）。 */
     private val FINGERPRINT_SHIELD_JS: String
