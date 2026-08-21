@@ -100,14 +100,9 @@ class BrowserViewModel : ViewModel() {
         }
     }
 
-    /** 设置安全提示（System WebView 版本过旧）。 */
+    /** 设置/清除安全提示（null = 清除）。 */
     fun setWebViewAlert(message: String?) {
         _webViewAlert.value = message
-    }
-
-    /** 清除安全提示。 */
-    fun dismissWebViewAlert() {
-        _webViewAlert.value = null
     }
 
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */

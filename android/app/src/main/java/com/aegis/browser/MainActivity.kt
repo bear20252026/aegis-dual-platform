@@ -59,19 +59,19 @@ class MainActivity : ComponentActivity() {
                 // A1：版本过旧 → 安全提示对话框（CVE-2026-12438/11295 防御）
                 webViewAlert?.let { msg ->
                     AlertDialog(
-                        onDismissRequest = { viewModel.dismissWebViewAlert() },
+                        onDismissRequest = { viewModel.setWebViewAlert(null) },
                         title = { Text("安全提示") },
                         text = { Text(msg) },
                         confirmButton = {
                             TextButton(
                                 onClick = {
-                                    viewModel.dismissWebViewAlert()
+                                    viewModel.setWebViewAlert(null)
                                     WebViewVersionCheck.openUpdate(this@MainActivity)
                                 },
                             ) { Text("去更新") }
                         },
                         dismissButton = {
-                            TextButton(onClick = { viewModel.dismissWebViewAlert() }) { Text("稍后") }
+                            TextButton(onClick = { viewModel.setWebViewAlert(null) }) { Text("稍后") }
                         },
                     )
                 }
