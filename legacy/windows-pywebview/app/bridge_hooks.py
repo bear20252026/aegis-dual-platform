@@ -7,7 +7,11 @@
 
 from typing import Any
 
+from .fingerprint_pipeline import build_fingerprint_pipeline_js, generate_session_seed
 from .shell_toolbar import build_toolbar_js
+
+# 指纹防护管道：每会话生成一次种子，所有页面共享
+_session_seed = generate_session_seed()
 
 
 def on_loaded(window: Any, api: Any) -> None:
@@ -24,6 +28,42 @@ def on_loaded(window: Any, api: Any) -> None:
     except Exception:
         url = ""
     api._update_current(url)
+    try:
+        # 注入指纹防护 9 阶段管道（参照 Rust fingerprint_pipeline + Android FINGERPRINT_SHIELD_JS）
+        fp_js = build_fingerprint_pipeline_js(_session_seed)
+        api._eval(fp_js)
+    except Exception:
+        pass  # 页面不允许注入时静默降级
+    try:
+        # 注入链接拦截——所有链接在浏览器内打开，不跳转系统默认浏览器
+        link_intercept_js = """
+(function() {
+  // 拦截所有 <a> 标签点击
+  document.addEventListener('click', function(e) {
+    var a = e.target;
+    while (a && a.tagName !== 'A') a = a.parentNode;
+    if (!a || !a.href) return;
+    // 允许锚点链接和 javascript: 链接
+    if (a.href.startsWith('#') || a.href.startsWith('javascript:')) return;
+    // 允许下载链接
+    if (a.hasAttribute('download')) return;
+    // 阻止默认行为（在系统浏览器打开）
+    e.preventDefault();
+    e.stopPropagation();
+    // 在当前窗口导航
+    window.location.href = a.href;
+  }, true);
+  // 拦截 window.open 调用
+  var origOpen = window.open;
+  window.open = function(url) {
+    if (url) window.location.href = url;
+    return null;
+  };
+})();
+"""
+        api._eval(link_intercept_js)
+    except Exception:
+        pass  # 页面不允许注入时静默降级
     try:
         # 内嵌标签数据 → 单次注入，零 HTTP 往返。
         kb = None  # None = 默认表 DEFAULT_KEYBINDINGS

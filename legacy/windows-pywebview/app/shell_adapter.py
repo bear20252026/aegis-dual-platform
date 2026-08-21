@@ -88,7 +88,7 @@ class PywebviewShell(Shell):
     def settings(self) -> dict:
         """壳模块级设置项（pywebview.settings 原引用——直接修改生效）；
         无则返回空 dict。"""
-        return dict(self._webview.settings)
+        return self._webview.settings
 
     def windows(self) -> list:
         return list(self._webview.windows)

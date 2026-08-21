@@ -469,6 +469,31 @@ def main() -> int:
         return 1
     api.window = window      # 创建后再绑定 window 引用，供桥方法调用
 
+    # === 原生层链接拦截（WebView2 NewWindowRequested）===
+    # JS 注入只能拦截页面内 <a> 标签点击——但 target="_blank" 链接和
+    # window.open() 在 WebView2 原生层处理，JS 来不及拦截。
+    # 这里用 WebView2 的 NewWindowRequested 事件在原生层拦截，
+    # 把新窗口请求重定向到当前窗口内导航（根本解决方案）。
+    try:
+        core = shell.core(window)
+        if core is not None:
+            def _on_new_window_requested(sender, args):
+                """WebView2 NewWindowRequested 事件处理器。
+                拦截所有新窗口请求（target=_blank / window.open），
+                在当前窗口内导航，不交给系统浏览器。"""
+                try:
+                    uri = args.get_Uri()
+                    if uri:
+                        args.put_Handled(True)  # 阻止 WebView2 打开新窗口
+                        window.load_url(uri)     # 在当前窗口导航
+                except Exception:
+                    pass  # 静默降级
+            core.add_NewWindowRequested(_on_new_window_requested)
+            from crash_reporter import log_event
+            log_event("[nav] NewWindowRequested 拦截已注册（链接在浏览器内打开）")
+    except Exception:
+        pass  # WebView2 核心不可用时降级为 JS 拦截
+
     # 落地②：WebView2 兼容性探测（Runtime 版本 + 关键 API 可用性，
     # 写日志供监控/排障；Evergreen 2 周更新节奏下用于回归基线）
     try:
