@@ -12,6 +12,7 @@ on:
     paths:
       - 'core/rust-policy-core/**'
   workflow_dispatch: {}
+  workflow_call: {}
 
 permissions:
   contents: read

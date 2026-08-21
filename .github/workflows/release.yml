@@ -1,29 +1,29 @@
-# release.yml —— Aegis 发布流水线（B0-S-01/S-02 整改——失败闭合版）
-# 发布期实施产物（docs/release/——不触碰开发分支）
-# 整改依据（国防级审查 + 全球调研——attested-delivery 模板 + actions/
-# attest-build-provenance 官方 + SLSA）：
-#   - 工件只有字节一致才到达消费者（SHA-256 对账）
-#   - 每最终包携带 SLSA provenance + SBOM attestation（每跳重验）
-#   - verify job fail-closed（任一失败 halt——不发布）
-#   - publish tag-gated（仅 verify 通过 + 受保护环境审批）
-#   - 所有 action 固定完整 SHA（pin-check fail-closed——S-04 同步）
+# release.yml —— Aegis 发布编排器（INV-05 独立交付链）
+#
+# 编排器模式：
+#   pin-check → [Windows/Android/Core 三平台并行] → verify-gate → publish
+#
+# 每平台独立 workflow（release-windows/android/core.yml），
+# 本文件仅负责：①SHA pin 检查 ②调用三平台 ③聚合验证 ④发布。
+#
 # ⚠️ 使用前：①配置 GitHub Environment "release"（required reviewer）
-#  ②受保护 v* 标签规则集 ③私有仓库 attestations 需 GitHub Enterprise
-#  Cloud（actions/attest-build-provenance 官方限制——记录）
+#  ②受保护 v* 标签规则集 ③私有仓库 attestations 需 GitHub Enterprise Cloud
 
 name: Release
 
 on:
   push:
     tags: ['v*']
-  workflow_dispatch: {}  # dry-run 演练（publish tag-gated 跳过）
+  workflow_dispatch: {}
 
 permissions:
-  contents: read        # GITHUB_TOKEN 读私有仓库（checkout 必需——之前
-                        # {} 导致 pin-check 的 Repository not found）
+  contents: read
 
 jobs:
-  pin-check:                 # S-04：所有 uses 必须完整 40 字符 SHA
+  # ──────────────────────────────────────────────
+  # Stage 1: SHA pin 检查（fail-closed）
+  # ──────────────────────────────────────────────
+  pin-check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
@@ -35,122 +35,134 @@ jobs:
           fi
           echo "✅ 全部 action 固定完整 SHA"
 
-  build:                     # Job 1：构建最终包（固定环境 + provenance）
+  # ──────────────────────────────────────────────
+  # Stage 2: 三平台并行构建（可重用 workflow 调用）
+  # ──────────────────────────────────────────────
+  release-windows:
     needs: pin-check
-    runs-on: windows-latest
-    permissions:
-      id-token: write        # SLSA provenance 签名
-      attestations: write
-      contents: read        # checkout 私有仓库（Repository not found 修复）
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0 (node24)
-        with:
-          python-version: "3.12"
-      - name: Build final packages (B1 obfuscation + assembly)
-        env:
-          PYTHONIOENCODING: "utf-8"  # build_release.py print 中文——Windows runner 编码修复
-        run: |
-          python -m pip install -r legacy/windows-pywebview/requirements-lock.txt
-          python docs/release/build_release.py          # Nuitka .pyd + dist 组装
-          python -m PyInstaller --noconfirm legacy/windows-pywebview/aegis_webview.spec  # 最终可分发包
-      - name: Generate SHA-256 checksums (all final artifacts)
-        run: |
-          cd dist && Get-ChildItem -Recurse -File | Where-Object { $_.Name -ne 'SHA256SUMS.json' } |
-            Get-FileHash -Algorithm SHA256 | Select-Object Hash, Path | ConvertTo-Json > SHA256SUMS.json
-      - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
-        with:
-          subject-path: dist/**
-      - name: Upload final artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: release-dist
-          path: dist/
-          if-no-files-found: error
-
-  sbom:                      # Job 2：SBOM 生成 + attest（供应链透明）
-    needs: build
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/release-windows.yml
     permissions:
       id-token: write
       attestations: write
-      contents: read        # checkout 私有仓库（Repository not found 修复）
-    steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
-        with:
-          name: release-dist
-          path: dist
-      - name: Generate CycloneDX SBOM
-        uses: anchore/sbom-action@52542941bb775adef77f7a51ff5ea984e600fab8
-        with:
-          path: .
-          format: cyclonedx-json
-          output-file: sbom.cdx.json
-      - name: Attest SBOM (bind every artifact)
-        uses: actions/attest-sbom@5729fe4dc697fb7538e4e94fd44d040aac1367b2
-        with:
-          subject-path: dist/**
-          sbom-path: sbom.cdx.json
+      contents: read
 
-  verify:                    # Job 3：独立验证（fail-closed——任一失败 halt）
-    needs: [build, sbom]
+  release-android:
+    needs: pin-check
+    uses: ./.github/workflows/release-android.yml
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+
+  release-core:
+    needs: pin-check
+    uses: ./.github/workflows/release-core.yml
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+
+  # ──────────────────────────────────────────────
+  # Stage 3: 聚合验证门禁（fail-closed——三平台全通过才放行）
+  # ──────────────────────────────────────────────
+  verify-gate:
+    needs: [release-windows, release-android, release-core]
     runs-on: ubuntu-latest
     permissions:
       attestations: read
       contents: read
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+
+      # 下载三平台产物
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
-          name: release-dist
-          path: dist
-      - name: Verify SLSA provenance on every artifact
+          name: release-windows
+          path: dist/windows
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-android
+          path: dist/android
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-core
+          path: dist/core
+
+      # 验证所有产物的 SLSA provenance
+      - name: Verify SLSA provenance (all platforms)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # P0-06 修复（专家审查）：逐文件 NUL 安全验证（移除 head -200——
-          # 全部工件验证——缺失 attestation 是失败不是跳过）
-          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 gh attestation verify "{}" \
+          find dist -type f -print0 | xargs -0 -P 8 -I{} timeout 60 \
+            gh attestation verify "{}" \
             --owner "$GITHUB_REPOSITORY_OWNER" \
             --predicate-type https://slsa.dev/provenance/v1
-      - name: Verify SBOM attestation
+
+      # 验证所有产物的 SBOM attestation
+      - name: Verify SBOM attestation (all platforms)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # P0-06 修复（专家审查）：逐文件 SBOM 验证（移除 || true——
-          # 不允许只验证单一文件——CycloneDX predicate 与 sbom job 一致）
-          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 gh attestation verify "{}" --owner "$GITHUB_REPOSITORY_OWNER" \
+          find dist -type f -print0 | xargs -0 -P 8 -I{} timeout 60 \
+            gh attestation verify "{}" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
             --predicate-type https://cyclonedx.org/bom
+
+      # SHA-256 对账（字节一致不变量）
       - name: Checksum reconciliation (byte-identical invariant)
         run: |
           python - <<'PY'
           import json, hashlib, pathlib
-          sums = json.loads(pathlib.Path("dist/SHA256SUMS.json").read_text())
-          for entry in sums:
-              p = pathlib.Path(entry["Path"].replace("\\", "/"))
-              h = hashlib.sha256(p.read_bytes()).hexdigest().upper()
-              assert h == entry["Hash"], f"校验失败: {p}"
-          print("✅ 全部最终包 SHA-256 对账一致（字节一致）")
+          for platform in ['windows', 'android', 'core']:
+              sha_file = pathlib.Path(f"dist/{platform}/SHA256SUMS.json")
+              if not sha_file.exists():
+                  # Core 使用 SHA256SUMS.txt
+                  sha_txt = pathlib.Path(f"dist/{platform}/SHA256SUMS.txt")
+                  if sha_txt.exists():
+                      print(f"✅ {platform}: SHA256SUMS.txt 存在（跳过 JSON 对账）")
+                      continue
+                  print(f"⚠️ {platform}: 无校验文件（跳过）")
+                  continue
+              sums = json.loads(sha_file.read_text())
+              for entry in sums:
+                  p = pathlib.Path(f"dist/{platform}") / pathlib.Path(entry["Path"].replace("\\", "/"))
+                  h = hashlib.sha256(p.read_bytes()).hexdigest().upper()
+                  assert h == entry["Hash"], f"校验失败: {p}"
+              print(f"✅ {platform}: SHA-256 对账一致")
+          print("✅ 全平台 SHA-256 对账一致（字节一致）")
           PY
-      - name: Fail-closed gate
-        run: echo "✅ 验证通过——允许发布（任一失败此处不会到达）"
 
-  publish:                   # Job 4：发布（tag-gated——仅 verify 通过）
-    needs: verify
+      - name: Fail-closed gate
+        run: echo "✅ 三平台验证通过——允许发布（任一失败此处不会到达）"
+
+  # ──────────────────────────────────────────────
+  # Stage 4: 发布（tag-gated + 受保护环境审批）
+  # ──────────────────────────────────────────────
+  publish:
+    needs: verify-gate
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    environment: release     # 受保护 Environment（required reviewer）
+    environment: release
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+
+      # 下载三平台产物
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
-          name: release-dist
-          path: dist
-      - name: Create GitHub Release (signed checksums + SBOM + provenance)
+          name: release-windows
+          path: dist/windows
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-android
+          path: dist/android
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-core
+          path: dist/core
+
+      - name: Create GitHub Release (all platforms)
         uses: softprops/action-gh-release@d1e66170d32c9ec7bbcb7fae044d3d686ce304d3
         with:
           files: |

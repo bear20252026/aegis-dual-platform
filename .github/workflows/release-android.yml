@@ -11,7 +11,8 @@ on:
     tags: ['v*']
     paths:
       - 'android/**'
-  workflow_dispatch: {}  # 独立调试
+  workflow_dispatch: {}
+  workflow_call: {}
 
 permissions:
   contents: read

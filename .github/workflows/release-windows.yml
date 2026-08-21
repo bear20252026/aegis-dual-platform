@@ -14,6 +14,7 @@ on:
       - 'windows/**'
       - 'docs/release/**'
   workflow_dispatch: {}  # 独立调试
+  workflow_call: {}      # 编排器调用
 
 permissions:
   contents: read
