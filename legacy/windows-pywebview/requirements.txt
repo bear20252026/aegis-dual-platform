@@ -1,0 +1,28 @@
+# Aegis —— 现代套壳浏览器（安全加固版）
+# Python 3.10+
+# L-8 更正（防御性安全审查）：内核为 pywebview + WebView2（新栈）——
+# 旧 Qt/PySide6 依赖仅 legacy 归档（不参与运行）——移入 dev 依赖记录
+
+# ---- 核心依赖（直接依赖声明见 requirements.in；安装用 requirements-lock.txt）----
+# S-07 修复（ABC 级闭环）：PySide6 已移除（legacy 旧栈遗留——新栈
+# pywebview + WebView2 不需要——可信基缩减）；依赖 hash 锁定见
+# requirements-lock.txt（pip-compile --generate-hashes 生成——pip
+# install --require-hashes -r requirements-lock.txt 可复现安装）
+
+# ---- 密码加密（硬依赖：缺失即视为"密码功能不可用"，UI 明确标红）----
+# v2.1.2：cryptography 由 43.0.3 提级到 50.0.0 —— 43.x 线已累积多个
+# 上游安全修复（含 X.509/PEM 解析类缺陷），安全敏感依赖不锁在旧线上。
+cryptography==50.0.0
+keyring==25.4.1
+# Windows 正式入口：pywebview + WebView2；bottle 是桥接服务依赖。
+# 2026-08-15 升级重锁：5.4 → 6.2.1（6.x 引入 request_sent/state 管理/
+# initialized 事件等；Aegis 未用 6.0 移除的 FileDialog 常量/get_element/
+# DRAG_REGION_SELECTOR，升级安全）。bottle 保持 0.13.2（桥接稳定线）。
+pywebview==6.2.1
+bottle==0.13.2
+
+# ---- 打包（仅打包时安装；与运行依赖分离）----
+PyInstaller==6.22.0
+
+# 说明：运行依赖必须全部安装，否则启动即自检失败（不做静默降级）。
+# 锁定次要版本以平衡可复现性与安全补丁获取。

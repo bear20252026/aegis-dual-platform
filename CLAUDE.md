@@ -11,7 +11,7 @@ Aegis 双端安全浏览器：Windows（Python + pywebview + WebView2）+ Androi
 ```bash
 # Windows 端静态验证（改动 Python 代码后必跑）
 python validate_release.py            # AST/JSON/XML/版本声明
-cd windows/aegis_source
+cd legacy/windows-pywebview
 ruff check .                          # Lint + 格式（活跃代码 0 错误）
 bandit -r app/ -q                     # 安全扫描（Medium/High 必须为 0）
 mypy main_webview.py app/             # 类型检查（0 错误）
@@ -48,12 +48,12 @@ python selftest_shell_toolbar.py
 
 | 路径 | 职责 |
 |---|---|
-| `windows/aegis_source/main_webview.py` | 薄入口（建窗/绑定/看门狗） |
-| `windows/aegis_source/app/api_bridge.py` | js_api 桥（标签/导航/书签/历史/导入） |
-| `windows/aegis_source/app/nav_queue.py` | 导航线程队列（防死锁） |
-| `windows/aegis_source/app/shell_toolbar.py` | 注入式工具栏（标签条/快捷键/毛玻璃） |
-| `windows/aegis_source/app/security.py` | URL 白名单 / 权限收紧 |
-| `windows/aegis_source/app/browser_import.py` | Chrome/Edge 书签与历史导入 |
+| `legacy/windows-pywebview/main_webview.py` | 薄入口（建窗/绑定/看门狗） |
+| `legacy/windows-pywebview/app/api_bridge.py` | js_api 桥（标签/导航/书签/历史/导入） |
+| `legacy/windows-pywebview/app/nav_queue.py` | 导航线程队列（防死锁） |
+| `legacy/windows-pywebview/app/shell_toolbar.py` | 注入式工具栏（标签条/快捷键/毛玻璃） |
+| `legacy/windows-pywebview/app/security.py` | URL 白名单 / 权限收紧 |
+| `legacy/windows-pywebview/app/browser_import.py` | Chrome/Edge 书签与历史导入 |
 | `android/app/src/main/java/com/aegis/browser/` | Android 端（TabManager/TabBar/SecureWebViewFactory） |
 | `shared/version.properties` | 双端版本单一来源 |
 

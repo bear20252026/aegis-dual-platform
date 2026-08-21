@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: windows/aegis_source
+        working-directory: legacy/windows-pywebview
     steps:
       - name: 检出代码
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a

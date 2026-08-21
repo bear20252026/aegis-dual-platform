@@ -1,0 +1,17 @@
+# Aegis 直接依赖声明（requirements.in）
+# 用法：pip-compile --generate-hashes -o requirements-lock.txt requirements.in
+# ABC 级闭环（B3 依赖 hash 锁定——张显达/TrueSight/pip-tools 官方实践）：
+#   锁文件含全部传递依赖 + pip 8 风格 --hash——pip install --require-hashes
+#   可复现安装（防供应链投毒——版本被篡改但版本号不变的攻击）
+# S-07 修复（可信基缩减）：移除 PySide6==6.11.1（legacy 旧栈遗留——新栈
+# pywebview + WebView2 不需要——asset_scheme 的 Qt 引用为遗留未接线——
+# 数百 MB 供应链面缩减）
+
+cryptography==50.0.0
+keyring==25.4.1
+pywebview==6.2.1
+bottle==0.13.2
+PyInstaller==6.22.0
+# B1 混淆隔离编译依赖（build_release.py 的 Nuitka 编译——锁文件须含——
+# 远端 build 曾 No module named nuitka）
+nuitka==4.1.3

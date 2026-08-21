@@ -20,7 +20,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: windows/aegis_source
+        working-directory: legacy/windows-pywebview
     steps:
       - name: 检出代码
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
@@ -44,7 +44,7 @@ jobs:
       - name: ruff 检查（Lint + 格式，0 错误）
         # 口径与本地一致：仅检查活跃新栈，排除 legacy/（Qt 旧栈归档，
         # 61 个 Python 不参与运行面——全量扫描会误报 11 处存量风格问题）
-        run: ruff check . --exclude legacy --exclude "windows/aegis_source/**" --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
+        run: ruff check . --exclude legacy --exclude "legacy/windows-pywebview/**" --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
 
       - name: bandit 安全扫描（无 Medium/High）
         # 设计豁免规则（见 KNOWLEDGE_BASE.md「P6 bandit 豁免」）：
