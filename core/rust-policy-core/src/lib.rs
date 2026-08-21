@@ -13,6 +13,7 @@ pub mod adblock;
 pub mod bridge_guard;
 pub mod broker;
 pub mod capability;
+pub mod command_bar;
 pub mod decision;
 pub mod executor;
 pub mod ext_proxy;
