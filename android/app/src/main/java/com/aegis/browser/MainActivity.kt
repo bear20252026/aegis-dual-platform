@@ -17,11 +17,10 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.viewModels
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -39,67 +38,43 @@ import androidx.compose.ui.viewinterop.AndroidView
  * 默认 top（与既有行为一致）；left 走 VerticalTabBar（按分组/工作区渲染）。
  */
 class MainActivity : ComponentActivity() {
-    private lateinit var tabManager: TabManager
+    private val viewModel: BrowserViewModel by viewModels()
 
     // A1（final-development-checklist）：System WebView 版本过旧提示文案（null=不提示）
     private var webViewAlertMessage: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        tabManager = TabManager()
         // A1：System WebView 版本检查（CVE-2026-12438/11295 防御——
         // 过旧则提示更新，不阻塞浏览）
-        WebViewVersionCheck.checkAndPrompt(this) { webViewAlertMessage = it }
-        // R-12 整改（体验/功能审查）：创建标签立即加载——首屏不再空白
-        val initialWebView = SecureWebViewFactory.create(this)
-        BrowserEngine(initialWebView).load("https://www.bing.com")
-        tabManager.addTab(
-            initialWebView,
-            url = "https://www.bing.com",
-        )
+        WebViewVersionCheck.checkAndPrompt(this) { viewModel.setWebViewAlert(it) }
+        // 初始化 ViewModel（TabManager + 首个标签）
+        viewModel.init(this)
 
         setContent {
             AegisTheme {
-                var tabs by remember { mutableStateOf(tabManager.list()) }
-                var activeIndex by remember { mutableStateOf(tabManager.activeIndex) }
-                var address by remember { mutableStateOf("https://www.bing.com") }
-                // 落地 B：标签栏布局（默认 top；可在设置中切换 left）
-                // R-13 整改（体验/功能审查）：标签布局应可设置/可持久化/可访问
-                // （当前 top 固定——left 垂直布局的入口为发布期：设置持久化 +
-                // 地址栏/导航控件在任意布局下同容器——记录）
-                var tabsPosition by remember { mutableStateOf("top") }
-                // A1：System WebView 版本过旧提示（null=不提示）
-                var webViewAlert by remember { mutableStateOf(webViewAlertMessage) }
-
-                fun refresh() {
-                    tabs = tabManager.list()
-                    activeIndex = tabManager.activeIndex
-                }
-
-                fun newTab() {
-                    // R-12 整改（体验/功能审查）：新标签创建立即加载
-                    val wv = SecureWebViewFactory.create(this@MainActivity)
-                    BrowserEngine(wv).load("https://www.bing.com")
-                    tabManager.addTab(wv, url = "https://www.bing.com")
-                    refresh()
-                }
+                val tabs by viewModel.tabs.collectAsState()
+                val activeIndex by viewModel.activeIndex.collectAsState()
+                val address by viewModel.address.collectAsState()
+                val tabsPosition by viewModel.tabsPosition.collectAsState()
+                val webViewAlert by viewModel.webViewAlert.collectAsState()
 
                 // A1：版本过旧 → 安全提示对话框（CVE-2026-12438/11295 防御）
                 webViewAlert?.let { msg ->
                     AlertDialog(
-                        onDismissRequest = { webViewAlert = null },
+                        onDismissRequest = { viewModel.dismissWebViewAlert() },
                         title = { Text("安全提示") },
                         text = { Text(msg) },
                         confirmButton = {
                             TextButton(
                                 onClick = {
-                                    webViewAlert = null
+                                    viewModel.dismissWebViewAlert()
                                     WebViewVersionCheck.openUpdate(this@MainActivity)
                                 },
                             ) { Text("去更新") }
                         },
                         dismissButton = {
-                            TextButton(onClick = { webViewAlert = null }) { Text("稍后") }
+                            TextButton(onClick = { viewModel.dismissWebViewAlert() }) { Text("稍后") }
                         },
                     )
                 }
@@ -111,47 +86,29 @@ class MainActivity : ComponentActivity() {
                             VerticalTabBar(
                                 tabs = tabs,
                                 activeIndex = activeIndex,
-                                onSelect = { index ->
-                                    tabManager.switchTo(index)
-                                    refresh()
-                                },
-                                onClose = { index ->
-                                    tabManager.closeTab(index)
-                                    refresh()
-                                },
-                                onNewTab = ::newTab,
+                                onSelect = { viewModel.switchTo(it) },
+                                onClose = { viewModel.closeTab(it) },
+                                onNewTab = { viewModel.newTab(this@MainActivity) },
                             )
-                            WebContentArea(tabManager = tabManager, modifier = Modifier.weight(1f))
+                            WebContentArea(tabManager = viewModel.getTabManager()!!, modifier = Modifier.weight(1f))
                         }
                     } else {
                         TabBar(
                             tabs = tabs,
                             activeIndex = activeIndex,
-                            onSelect = { index ->
-                                tabManager.switchTo(index)
-                                refresh()
-                            },
-                            onClose = { index ->
-                                tabManager.closeTab(index)
-                                refresh()
-                            },
-                            onNewTab = ::newTab,
+                            onSelect = { viewModel.switchTo(it) },
+                            onClose = { viewModel.closeTab(it) },
+                            onNewTab = { viewModel.newTab(this@MainActivity) },
                         )
                         AddressBarAndNav(
                             address = address,
-                            onAddressChange = { address = it },
-                            onOpen = {
-                                val wv = tabManager.current()?.webView ?: return@AddressBarAndNav
-                                BrowserEngine(wv).load(address)
-                            },
-                            // A-04 整改（国防级审查）：导航经统一策略层——
-                            // 历史导航不加载新 URL（无需 URL 校验）；发布期
-                            // 集中审计 + 地址栏状态同步（记录）
-                            onBack = { tabManager.current()?.webView?.goBack() },
-                            onForward = { tabManager.current()?.webView?.goForward() },
-                            onReload = { tabManager.current()?.webView?.reload() },
+                            onAddressChange = { viewModel.updateAddress(it) },
+                            onOpen = { viewModel.navigateToAddress() },
+                            onBack = { viewModel.goBack() },
+                            onForward = { viewModel.goForward() },
+                            onReload = { viewModel.reload() },
                         )
-                        WebContentArea(tabManager = tabManager, modifier = Modifier.weight(1f))
+                        WebContentArea(tabManager = viewModel.getTabManager()!!, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -160,11 +117,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         // 释放全部 WebView 持有的 Chromium 资源
-        tabManager.suspendAll()
-        tabManager.list().forEach { tab ->
-            tab.webView.stopLoading()
-            tab.webView.loadUrl("about:blank")
-            tab.webView.destroy()
+        viewModel.getTabManager()?.let { tm ->
+            tm.suspendAll()
+            tm.list().forEach { tab ->
+                tab.webView.stopLoading()
+                tab.webView.loadUrl("about:blank")
+                tab.webView.destroy()
+            }
         }
         super.onDestroy()
     }
