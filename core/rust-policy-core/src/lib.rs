@@ -29,6 +29,7 @@ pub mod query_strip;
 pub mod security_policy;
 pub mod session_state;
 pub mod shield;
+pub mod space_routing;
 pub mod timer_prec;
 pub mod tostring_guard;
 pub mod update_manifest;
