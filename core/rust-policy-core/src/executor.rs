@@ -66,7 +66,8 @@ impl Executor {
 
     /// 注册命令处理器。
     pub fn register_handler(&mut self, handler: Box<dyn CommandHandler>) {
-        self.handlers.insert(handler.command_type().to_string(), handler);
+        self.handlers
+            .insert(handler.command_type().to_string(), handler);
     }
 
     /// 5阶段执行管线：解析 → 验证 → 路由 → 策略强制 → 执行。
@@ -131,7 +132,9 @@ mod tests {
 
     struct MockHandler;
     impl CommandHandler for MockHandler {
-        fn command_type(&self) -> &str { "test" }
+        fn command_type(&self) -> &str {
+            "test"
+        }
         fn execute(&self, _cmd: &ParsedCommand) -> ExecuteResult {
             ExecuteResult::Success("mock executed".into())
         }

@@ -120,7 +120,8 @@ impl AdBlockManager {
 
     /// 从 URL 提取主机名。
     fn extract_host(url: &str) -> Option<String> {
-        let without_scheme = url.strip_prefix("https://")
+        let without_scheme = url
+            .strip_prefix("https://")
             .or_else(|| url.strip_prefix("http://"))
             .unwrap_or(url);
         without_scheme.split('/').next().map(|h| h.to_lowercase())

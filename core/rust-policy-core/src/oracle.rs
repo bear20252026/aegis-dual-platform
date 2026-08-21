@@ -139,8 +139,14 @@ mod tests {
             action_id: action.into(),
             session_id: "s1".into(),
             captured_at: Instant::now(),
-            state_before: before.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
-            state_after: after.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+            state_before: before
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
+            state_after: after
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
         }
     }
 
@@ -160,11 +166,7 @@ mod tests {
     #[test]
     fn changed_field_detected() {
         let mut oracle = Oracle::new();
-        let snap = make_snapshot(
-            "a2",
-            vec![("status", "ok")],
-            vec![("status", "modified")],
-        );
+        let snap = make_snapshot("a2", vec![("status", "ok")], vec![("status", "modified")]);
         let report = oracle.verify(&snap);
         assert!(matches!(report.verdict, VerifyVerdict::Fail(_)));
         assert_eq!(report.mismatches.len(), 1);
@@ -173,11 +175,7 @@ mod tests {
     #[test]
     fn missing_field_detected() {
         let mut oracle = Oracle::new();
-        let snap = make_snapshot(
-            "a3",
-            vec![("key", "val")],
-            vec![],
-        );
+        let snap = make_snapshot("a3", vec![("key", "val")], vec![]);
         let report = oracle.verify(&snap);
         assert!(matches!(report.verdict, VerifyVerdict::Fail(_)));
         assert_eq!(report.mismatches[0].actual, "<missing>");

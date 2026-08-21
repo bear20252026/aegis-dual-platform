@@ -60,7 +60,13 @@ impl SessionState {
             can_go_forward: meta.get("canGoForward")?.as_bool().unwrap_or(false),
         };
         let timestamp = map.get("timestamp")?.as_u64().unwrap_or(0);
-        Some(Self { schema_version, tab_id, session_state_bytes, metadata, timestamp })
+        Some(Self {
+            schema_version,
+            tab_id,
+            session_state_bytes,
+            metadata,
+            timestamp,
+        })
     }
 
     /// 序列化为 JSON 字符串（照搬 Omni Browser toJson）。
@@ -90,7 +96,9 @@ fn hex_encode(data: &[u8]) -> String {
 /// hex 解码（零依赖——每 2 字符→1 字节）。
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     let bytes = s.as_bytes();
-    if bytes.len() % 2 != 0 { return None; }
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
     let mut out = Vec::with_capacity(bytes.len() / 2);
     for pair in bytes.chunks(2) {
         let hi = hex_digit(pair[0])?;

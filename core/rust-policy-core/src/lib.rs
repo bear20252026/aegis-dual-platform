@@ -10,8 +10,8 @@
 
 pub mod action_policy;
 pub mod adblock;
-pub mod broker;
 pub mod bridge_guard;
+pub mod broker;
 pub mod capability;
 pub mod decision;
 pub mod executor;

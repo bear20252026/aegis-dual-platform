@@ -11,15 +11,13 @@
 const ALLOWED_NAVIGATION_SCHEMES: &[&str] = &["http", "https", "about", "file", "content"];
 
 /// 外部意图危险 scheme 黑名单。
-const DANGEROUS_EXTERNAL_SCHEMES: &[&str] = &[
-    "javascript", "data", "blob", "intent", "market", "chrome",
-];
+const DANGEROUS_EXTERNAL_SCHEMES: &[&str] =
+    &["javascript", "data", "blob", "intent", "market", "chrome"];
 
 /// Windows 保留设备名。
 const RESERVED_NAMES: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL",
-    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
 const MAX_FILENAME_LENGTH: usize = 200;
@@ -110,7 +108,11 @@ impl SecurityPolicy {
             }
         }
 
-        if sanitized.is_empty() { "download".to_string() } else { sanitized }
+        if sanitized.is_empty() {
+            "download".to_string()
+        } else {
+            sanitized
+        }
     }
 
     /// 手动 URL 解码（零依赖——处理 %XX 编码）。
@@ -154,7 +156,9 @@ mod tests {
 
     #[test]
     fn javascript_dangerous() {
-        assert!(SecurityPolicy::is_dangerous_external_scheme(Some("javascript")));
+        assert!(SecurityPolicy::is_dangerous_external_scheme(Some(
+            "javascript"
+        )));
     }
 
     #[test]

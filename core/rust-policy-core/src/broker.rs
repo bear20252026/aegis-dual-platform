@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::decision::{AuthorizedAction, DenyReason, Decision};
+use crate::decision::{AuthorizedAction, Decision, DenyReason};
 
 /// 单个会话上下文（persona session——隔离绑定）。
 #[derive(Debug, Clone)]
@@ -81,12 +81,14 @@ impl ContextBroker {
     /// 销毁会话（清理 nonce 记录）。
     pub fn destroy_session(&mut self, session_id: &str) {
         self.sessions.remove(session_id);
-        self.consumed_nonces.retain(|_, r| r.session_id != session_id);
+        self.consumed_nonces
+            .retain(|_, r| r.session_id != session_id);
     }
 
     /// 清理过期会话（LRU 淘汰）。
     pub fn evict_expired(&mut self) {
-        let expired: Vec<String> = self.sessions
+        let expired: Vec<String> = self
+            .sessions
             .iter()
             .filter(|(_, ctx)| ctx.is_expired())
             .map(|(id, _)| id.clone())

@@ -121,7 +121,9 @@ mod tests {
     #[test]
     fn local_policy_match_returns_allow() {
         let engine = PolicyEngine::new(
-            Box::new(MockLocalPolicy { allow_action: "read".into() }),
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
             None,
         );
         let result = engine.evaluate("read", "ctx");
@@ -132,7 +134,9 @@ mod tests {
     #[test]
     fn no_match_fail_safe_deny() {
         let engine = PolicyEngine::new(
-            Box::new(MockLocalPolicy { allow_action: "read".into() }),
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
             None,
         );
         let result = engine.evaluate("write", "ctx");
