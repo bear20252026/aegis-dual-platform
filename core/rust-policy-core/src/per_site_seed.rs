@@ -59,7 +59,10 @@ impl PerSiteSeed {
             let mut acc = self.session_seed[i % 32] as u32;
             for (j, &db) in domain_bytes.iter().enumerate() {
                 // 乘法混叠 + 异或折叠
-                acc = acc.wrapping_mul(31).wrapping_add(db as u32).wrapping_add(j as u32);
+                acc = acc
+                    .wrapping_mul(31)
+                    .wrapping_add(db as u32)
+                    .wrapping_add(j as u32);
                 acc ^= acc >> 16;
             }
             *byte = (acc & 0xFF) as u8;
@@ -69,7 +72,10 @@ impl PerSiteSeed {
 
     /// 为指定域名生成 per-site 种子的十六进制表示。
     pub fn derive_hex(&self, domain: &str) -> String {
-        self.derive(domain).iter().map(|b| format!("{b:02x}")).collect()
+        self.derive(domain)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
     }
 
     /// 生成 per-site 种子注入 JS 脚本。
@@ -161,7 +167,12 @@ mod tests {
     #[test]
     fn script_contains_site_seed_marker() {
         let pss = PerSiteSeed::new(test_seed());
-        let script = pss.inject_script(&pss.session_seed.iter().map(|b| format!("{b:02x}")).collect::<String>());
+        let script = pss.inject_script(
+            &pss.session_seed
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>(),
+        );
         assert!(script.contains("__AEGIS_SITE_SEED"));
         assert!(script.contains("getETLD1"));
         assert!(script.contains("deriveSeed"));

@@ -22,21 +22,45 @@ use std::fmt;
 /// 每个参数名都是精确匹配（区分大小写）。
 const TRACKING_PARAMS: &[&str] = &[
     // Google Analytics / Ads
-    "__hsfp", "__hssc", "__hstc", "__s", "_hsenc", "_openstat",
-    "dclid", "gbraid", "gclid", "hsCtaTracking", "mc_eid",
-    "ml_subscriber", "ml_subscriber_hash", "msclkid", "wbraid",
+    "__hsfp",
+    "__hssc",
+    "__hstc",
+    "__s",
+    "_hsenc",
+    "_openstat",
+    "dclid",
+    "gbraid",
+    "gclid",
+    "hsCtaTracking",
+    "mc_eid",
+    "ml_subscriber",
+    "ml_subscriber_hash",
+    "msclkid",
+    "wbraid",
     // Facebook
     "fbclid",
     // Instagram
     "igshid",
     // Microsoft / Outlook
-    "oft_c", "oft_ck", "oft_d", "oft_id", "oft_ids", "oft_k",
-    "oft_lk", "oft_sk",
+    "oft_c",
+    "oft_ck",
+    "oft_d",
+    "oft_id",
+    "oft_ids",
+    "oft_k",
+    "oft_lk",
+    "oft_sk",
     // Omniture / Adobe
-    "oly_anon_id", "oly_enc_id",
+    "oly_anon_id",
+    "oly_enc_id",
     // Other trackers
-    "rb_clickid", "s_cid", "twclid", "vero_conv", "vero_id",
-    "wickedid", "yclid",
+    "rb_clickid",
+    "s_cid",
+    "twclid",
+    "vero_conv",
+    "vero_id",
+    "wickedid",
+    "yclid",
 ];
 
 /// QueryStripper — URL 追踪参数剥离器。

@@ -71,9 +71,7 @@ impl FontNormalizer {
 
     /// 用自定义安全字体列表创建。
     pub fn with_fonts(fonts: Vec<String>) -> Self {
-        Self {
-            safe_fonts: fonts,
-        }
+        Self { safe_fonts: fonts }
     }
 
     /// 生成字体归一化 JS 注入脚本。
