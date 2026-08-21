@@ -104,7 +104,7 @@ class TabManager(
     fun suspendAll() {
         // TabManager 补审（Android 官方）：挂起全部标签——onPause 实例级
         // + pauseTimers 全局暂停 JS timers（后台标签不继续跑 JS——资源/隐私）
-        android.webkit.WebView.pauseTimers()
+        tabs.first().webView.pauseTimers()
         tabs.forEach {
             if (!it.suspended) {
                 pause(it.webView)
@@ -121,7 +121,7 @@ class TabManager(
                 it.suspended = false
                 // TabManager 补审（Android 官方）：恢复时重启全局 JS timers
                 // （resumeTimers——与 suspendAll 的 pauseTimers 成对）
-                android.webkit.WebView.resumeTimers()
+                tabs.first().webView.resumeTimers()
             }
         }
     }

@@ -36,48 +36,9 @@ class BrowserEngine(
         webView.settings.mediaPlaybackRequiresUserGesture = true
         webView.settings.safeBrowsingEnabled = true
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
-        webView.webViewClient =
-            object : WebViewClient() {
-                override fun shouldOverrideUrlLoading(
-                    view: WebView,
-                    request: WebResourceRequest,
-                ): Boolean = !isAllowed(request.url.toString())
-
-                // A-02 整改（国防级审查）：渲染器崩溃——保持系统默认（不静默吞掉）
-                override fun onRenderProcessGone(
-                    view: WebView,
-                    detail: RenderProcessGoneDetail,
-                ): Boolean = super.onRenderProcessGone(view, detail)
-
-                // A-08 整改（国防级审查）：Safe Browsing 命中默认阻断（不
-                // 继续到恶意页——Android 官方保持用户安全）+ 审计记录
-                override fun onSafeBrowsingHit(
-                    view: WebView,
-                    request: WebResourceRequest,
-                    threatType: Int,
-                    callback: SafeBrowsingResponse,
-                ) {
-                    callback.backToSafety(true)
-                    android.util.Log.w("Aegis", "SafeBrowsing 命中阻断: ${request.url} threatType=$threatType")
-                }
-
-                // R-12 整改（体验/功能审查）：页面加载事件——地址/标题/进度
-                // 同步（单向状态流事件——状态消费/UI 更新为发布期 ViewModel）
-                override fun onPageStarted(
-                    view: WebView,
-                    url: String?,
-                    favicon: android.graphics.Bitmap?,
-                ) {
-                    android.util.Log.i("Aegis", "R12 pageStarted: $url")
-                }
-
-                override fun onPageFinished(
-                    view: WebView,
-                    url: String?,
-                ) {
-                    android.util.Log.i("Aegis", "R12 pageFinished: $url")
-                }
-            }
+        // WebViewClient 由 SecureWebViewFactory 统一注入 AegisWebViewClient（经 Broker 决策），
+        // BrowserEngine 不得覆盖——单路径收敛（专家审计）。
+        // onPageStarted/onPageFinished 的日志由 AegisWebViewClient 回调替代。
         // A-02 整改（国防级审查）：下载接入 DownloadPolicy——危险扩展名
         // （exe/ps1/lnk 等）默认拒绝（发布期可接入原生确认 UI——A-07 最小化）
         webView.setDownloadListener { url, _, _, _, _ ->
