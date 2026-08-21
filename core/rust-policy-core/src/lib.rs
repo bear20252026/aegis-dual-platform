@@ -21,5 +21,6 @@ pub mod oracle;
 pub mod origin;
 pub mod policy;
 pub mod security_policy;
+pub mod session_state;
 pub mod shield;
 pub mod update_manifest;
