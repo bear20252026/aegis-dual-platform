@@ -130,5 +130,29 @@ const __AEGIS_SESSION_SEED = '$sessionSeed';
     get: () => 2 + (seed % 7)
   });
 })();
+
+// Aegis LetterboxShield — 屏幕/窗口尺寸圆整（参照 Mullvad/Tor Browser letterboxing）
+// 原始实现：Tor Project (MPL-2.0) / Mullvad VPN (MPL-2.0)
+// 策略：将尺寸圆整到 200×100px 网格，使所有用户落入有限"桶"中
+(function() {
+  var WS = 200, HS = 100;
+  function roundTo(v, s) { return Math.max(s, Math.round(v / s) * s); }
+  try {
+    var osW = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'width');
+    var osH = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'height');
+    var osAW = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'availWidth');
+    var osAH = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'availHeight');
+    if (osW) Object.defineProperty(screen, 'width', { get: function() { return roundTo(osW.get.call(this), WS); } });
+    if (osH) Object.defineProperty(screen, 'height', { get: function() { return roundTo(osH.get.call(this), HS); } });
+    if (osAW) Object.defineProperty(screen, 'availWidth', { get: function() { return roundTo(osAW.get.call(this), WS); } });
+    if (osAH) Object.defineProperty(screen, 'availHeight', { get: function() { return roundTo(osAH.get.call(this), HS); } });
+  } catch(e) {}
+  try {
+    Object.defineProperty(window, 'innerWidth', { get: function() { return roundTo(window.innerWidth, WS); } });
+    Object.defineProperty(window, 'innerHeight', { get: function() { return roundTo(window.innerHeight, HS); } });
+    Object.defineProperty(window, 'outerWidth', { get: function() { return roundTo(window.outerWidth, WS); } });
+    Object.defineProperty(window, 'outerHeight', { get: function() { return roundTo(window.outerHeight, HS); } });
+  } catch(e) {}
+})();
             """.trimIndent()
 }

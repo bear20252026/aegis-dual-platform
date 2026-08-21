@@ -16,6 +16,7 @@ pub mod capability;
 pub mod decision;
 pub mod executor;
 pub mod https_only;
+pub mod letterbox;
 pub mod matcher;
 pub mod oracle;
 pub mod origin;
@@ -24,3 +25,20 @@ pub mod security_policy;
 pub mod session_state;
 pub mod shield;
 pub mod update_manifest;
+
+/// 指纹防护注入管线（管道化组合所有防护阶段）。
+///
+/// 每个阶段独立、可拆卸、可组合——移除/新增阶段不影响其他阶段。
+/// 管线顺序：FingerprintShield → LetterboxShield
+///
+/// # 用法
+/// ```rust
+/// use aegis_policy_core::fingerprint_pipeline;
+/// let shield = aegis_policy_core::shield::FingerprintShield::new();
+/// let script = fingerprint_pipeline(&shield);
+/// // script 包含 Canvas/WebGL/Audio 噪声 + Letterboxing
+/// ```
+pub fn fingerprint_pipeline(shield: &shield::FingerprintShield) -> String {
+    let letterbox = letterbox::LetterboxShield::new();
+    format!("{}\n{}", shield.inject_script(), letterbox.inject_script())
+}
