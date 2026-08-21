@@ -18,6 +18,10 @@ jobs:
     # ctypes.windll 仅在 Windows 有类型桩；Linux 上会误报（P6 教训延伸：
     # CI 平台须与目标/本地环境一致）
     runs-on: windows-latest
+    # PYTHONUTF8=1：Windows 默认 charmap 编码无法编码中文输出（如 validate_release.py
+    # 的「缺」字）——强制 Python 用 UTF-8，避免 UnicodeEncodeError
+    env:
+      PYTHONUTF8: "1"
     defaults:
       run:
         working-directory: legacy/windows-pywebview
