@@ -48,6 +48,11 @@ impl FingerprintShield {
         self.seed.iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    /// 种子的原始字节（供 PerSiteSeed 等管道阶段使用）。
+    pub fn seed_bytes(&self) -> [u8; 32] {
+        self.seed
+    }
+
     /// 生成 JS 注入脚本（注入 WebView——canvas/WebGL/Audio 噪声）。
     ///
     /// 返回的脚本设置全局 `__AEGIS_SESSION_SEED` 常量，

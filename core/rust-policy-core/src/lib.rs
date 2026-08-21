@@ -20,6 +20,7 @@ pub mod letterbox;
 pub mod matcher;
 pub mod oracle;
 pub mod origin;
+pub mod per_site_seed;
 pub mod policy;
 pub mod security_policy;
 pub mod session_state;
@@ -29,16 +30,23 @@ pub mod update_manifest;
 /// 指纹防护注入管线（管道化组合所有防护阶段）。
 ///
 /// 每个阶段独立、可拆卸、可组合——移除/新增阶段不影响其他阶段。
-/// 管线顺序：FingerprintShield → LetterboxShield
+/// 管线顺序：PerSiteSeed → FingerprintShield → LetterboxShield
 ///
 /// # 用法
 /// ```rust
 /// use aegis_policy_core::fingerprint_pipeline;
 /// let shield = aegis_policy_core::shield::FingerprintShield::new();
 /// let script = fingerprint_pipeline(&shield);
-/// // script 包含 Canvas/WebGL/Audio 噪声 + Letterboxing
+/// // script 包含 per-site 种子 + Canvas/WebGL/Audio 噪声 + Letterboxing
 /// ```
 pub fn fingerprint_pipeline(shield: &shield::FingerprintShield) -> String {
+    let session_hex = shield.seed_hex();
+    let per_site = per_site_seed::PerSiteSeed::new(shield.seed_bytes());
     let letterbox = letterbox::LetterboxShield::new();
-    format!("{}\n{}", shield.inject_script(), letterbox.inject_script())
+    format!(
+        "{}\n{}\n{}",
+        per_site.inject_script(&session_hex),
+        shield.inject_script(),
+        letterbox.inject_script()
+    )
 }
