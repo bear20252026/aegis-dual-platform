@@ -1,0 +1,155 @@
+# release-core.yml —— Rust Core 独立交付链（INV-05）
+# 独立可追溯：build → sbom → provenance → verify
+# 可独立运行（workflow_dispatch）调试友好；release.yml 编排器触发时亦可调用。
+#
+# ⚠️ 使用前：私有仓库 attestations 需 GitHub Enterprise Cloud
+
+name: Release-Core
+
+on:
+  push:
+    tags: ['v*']
+    paths:
+      - 'core/rust-policy-core/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - name: Pin check (fail-closed)
+        run: |
+          if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' \
+              .github/workflows/release-core.yml; then
+            echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
+          fi
+          echo "✅ 全部 action 固定完整 SHA"
+
+  quality-gate:
+    needs: pin-check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/rust-policy-core
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          components: clippy, rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+      - name: cargo clippy -D warnings
+        run: cargo clippy -- -D warnings
+      - name: cargo test
+        run: cargo test
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked 2>/dev/null || true
+          cargo audit
+
+  build:
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+      - name: Build release library
+        run: cargo build --release --manifest-path core/rust-policy-core/Cargo.toml
+      - name: Collect artifacts + SHA-256
+        run: |
+          mkdir -p dist
+          cp core/rust-policy-core/target/release/libaegis_policy_core.so dist/ 2>/dev/null || true
+          cp core/rust-policy-core/target/release/libaegis_policy_core.a dist/ 2>/dev/null || true
+          cp core/rust-policy-core/target/release/aegis_policy_core.dll dist/ 2>/dev/null || true
+          # 至少有一个产物
+          if [ -z "$(ls -A dist/)" ]; then
+            echo "❌ 未找到构建产物" && exit 1
+          fi
+          cd dist && sha256sum * > SHA256SUMS.txt
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: dist/**
+      - name: Upload Core artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-core
+          path: dist/
+          if-no-files-found: error
+
+  sbom:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-core
+          path: dist
+      - name: Generate CycloneDX SBOM (cargo deps)
+        uses: anchore/sbom-action@52542941bb775adef77f7a51ff5ea984e600fab8
+        with:
+          path: core/rust-policy-core
+          format: cyclonedx-json
+          output-file: sbom-core.cdx.json
+      - name: Attest SBOM (bind every artifact)
+        uses: actions/attest-sbom@5729fe4dc697fb7538e4e94fd44d040aac1367b2
+        with:
+          subject-path: dist/**
+          sbom-path: sbom-core.cdx.json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sbom-core
+          path: sbom-core.cdx.json
+
+  verify:
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-core
+          path: dist
+      - name: Verify SLSA provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 \
+            gh attestation verify "{}" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --predicate-type https://slsa.dev/provenance/v1
+      - name: Verify SBOM attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 \
+            gh attestation verify "{}" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --predicate-type https://cyclonedx.org/bom
+      - name: Checksum reconciliation
+        run: |
+          cd dist
+          sha256sum -c SHA256SUMS.txt
+          echo "✅ Rust Core 产物 SHA-256 对账一致"
+      - name: Fail-closed gate
+        run: echo "✅ Rust Core 平台验证通过"

@@ -1,0 +1,154 @@
+# release-android.yml —— Android 平台独立交付链（INV-05）
+# 独立可追溯：build → sbom → provenance → verify
+# 可独立运行（workflow_dispatch）调试友好；release.yml 编排器触发时亦可调用。
+#
+# ⚠️ 使用前：私有仓库 attestations 需 GitHub Enterprise Cloud
+
+name: Release-Android
+
+on:
+  push:
+    tags: ['v*']
+    paths:
+      - 'android/**'
+  workflow_dispatch: {}  # 独立调试
+
+permissions:
+  contents: read
+
+jobs:
+  pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - name: Pin check (fail-closed)
+        run: |
+          if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' \
+              .github/workflows/release-android.yml; then
+            echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
+          fi
+          echo "✅ 全部 action 固定完整 SHA"
+
+  build:
+    needs: pin-check
+    runs-on: windows-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - name: Install JDK 21
+        uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Setup Android SDK (API 36)
+        uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+      - name: Cache Gradle
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Build release APK
+        run: ./gradlew.bat :app:assembleRelease --no-daemon
+      - name: Collect APK + generate SHA-256
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path ../dist
+          Copy-Item app/build/outputs/apk/release/*.apk ../dist/
+          cd ../dist
+          Get-ChildItem -Recurse -File |
+            Where-Object { $_.Name -ne 'SHA256SUMS.json' } |
+            Get-FileHash -Algorithm SHA256 |
+            Select-Object Hash, Path | ConvertTo-Json > SHA256SUMS.json
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: dist/**
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-android
+          path: dist/
+          if-no-files-found: error
+
+  sbom:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-android
+          path: dist
+      - name: Generate CycloneDX SBOM (gradle deps)
+        uses: anchore/sbom-action@52542941bb775adef77f7a51ff5ea984e600fab8
+        with:
+          path: android
+          format: cyclonedx-json
+          output-file: sbom-android.cdx.json
+      - name: Attest SBOM (bind every artifact)
+        uses: actions/attest-sbom@5729fe4dc697fb7538e4e94fd44d040aac1367b2
+        with:
+          subject-path: dist/**
+          sbom-path: sbom-android.cdx.json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sbom-android
+          path: sbom-android.cdx.json
+
+  verify:
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-android
+          path: dist
+      - name: Verify SLSA provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 \
+            gh attestation verify "{}" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --predicate-type https://slsa.dev/provenance/v1
+      - name: Verify SBOM attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 \
+            gh attestation verify "{}" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --predicate-type https://cyclonedx.org/bom
+      - name: Checksum reconciliation
+        run: |
+          python - <<'PY'
+          import json, hashlib, pathlib
+          sums = json.loads(pathlib.Path("dist/SHA256SUMS.json").read_text())
+          for entry in sums:
+              p = pathlib.Path(entry["Path"].replace("\\", "/"))
+              h = hashlib.sha256(p.read_bytes()).hexdigest().upper()
+              assert h == entry["Hash"], f"校验失败: {p}"
+          print("✅ Android 产物 SHA-256 对账一致")
+          PY
+      - name: Fail-closed gate
+        run: echo "✅ Android 平台验证通过"
