@@ -50,12 +50,16 @@ object SecureWebViewFactory {
         "aegis.local", "localhost", "127.0.0.1"
     )
 
+    /** bridge 域名白名单 JSON（ktlint 可解析——避免嵌套 \${} 复杂表达式）。 */
+    private val allowedHostsJson: String =
+        ALLOWED_BRIDGE_HOSTS.joinToString(",") { "\"$it\"" }
+
     /** Bridge 硬化 JS（照搬 SecureWebViewContainer NativeBridge origin 校验）。 */
     private val BRIDGE_GUARD_JS: String
         get() = """
 // Aegis BridgeGuard — origin 校验拦截（fetch/XMLHttpRequest 未授权调用拒绝）
 (function() {
-  const ALLOWED_HOSTS = ${ALLOWED_BRIDGE_HOSTS.joinToString(",") { "\"$it\"" }};
+  const ALLOWED_HOSTS = $allowedHostsJson;
   const origFetch = window.fetch;
   window.fetch = function(url) {
     try {
