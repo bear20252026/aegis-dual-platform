@@ -15,6 +15,7 @@ pub mod broker;
 pub mod capability;
 pub mod decision;
 pub mod executor;
+pub mod ext_proxy;
 pub mod font_norm;
 pub mod https_only;
 pub mod letterbox;
@@ -35,7 +36,7 @@ pub mod webgl_spoof;
 /// 指纹防护注入管线（管道化组合所有防护阶段）。
 ///
 /// 每个阶段独立、可拆卸、可组合——移除/新增阶段不影响其他阶段。
-/// 管线顺序：ToStringGuard → PerSiteSeed → FingerprintShield → LetterboxShield → QueryStripper → FontNormalizer → WebGLSpoof → TimerPrecision
+/// 管线顺序：ToStringGuard → PerSiteSeed → FingerprintShield → LetterboxShield → QueryStripper → FontNormalizer → WebGLSpoof → TimerPrecision → ExtProxy
 ///
 /// # 用法
 /// ```rust
@@ -52,8 +53,9 @@ pub fn fingerprint_pipeline(shield: &shield::FingerprintShield) -> String {
     let font_norm = font_norm::FontNormalizer::new();
     let webgl_spoof = webgl_spoof::WebGLSpoof::new();
     let timer_prec = timer_prec::TimerPrecision::new();
+    let ext_proxy = ext_proxy::ExtProxy::new();
     format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
+        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         tostring_guard.inject_script(),
         per_site.inject_script(&session_hex),
         shield.inject_script(),
@@ -61,6 +63,7 @@ pub fn fingerprint_pipeline(shield: &shield::FingerprintShield) -> String {
         query_strip.inject_script(),
         font_norm.inject_script(),
         webgl_spoof.inject_script(),
-        timer_prec.inject_script()
+        timer_prec.inject_script(),
+        ext_proxy.inject_script()
     )
 }
