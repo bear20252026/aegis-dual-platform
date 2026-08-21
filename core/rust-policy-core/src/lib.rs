@@ -24,6 +24,7 @@ pub mod oracle;
 pub mod origin;
 pub mod per_site_seed;
 pub mod policy;
+pub mod protection_mode;
 pub mod query_strip;
 pub mod security_policy;
 pub mod session_state;
