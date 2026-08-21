@@ -14,7 +14,6 @@ import kotlinx.coroutines.flow.asStateFlow
  * 替代 MainActivity 的 remember { mutableStateOf(...) }（违反 INV-04）。
  */
 class BrowserViewModel : ViewModel() {
-
     private val _tabs = MutableStateFlow<List<TabState>>(emptyList())
     val tabs: StateFlow<List<TabState>> = _tabs.asStateFlow()
 
@@ -37,7 +36,9 @@ class BrowserViewModel : ViewModel() {
         if (::tabManager.isInitialized) return
         tabManager = TabManager()
         val initialWebView = SecureWebViewFactory.create(context)
-        com.aegis.browser.BrowserEngine(initialWebView).load("https://www.bing.com")
+        com.aegis.browser
+            .BrowserEngine(initialWebView)
+            .load("https://www.bing.com")
         tabManager.addTab(initialWebView, url = "https://www.bing.com")
         refresh()
     }
@@ -54,7 +55,9 @@ class BrowserViewModel : ViewModel() {
     fun newTab(context: android.content.Context) {
         if (!::tabManager.isInitialized) return
         val wv = SecureWebViewFactory.create(context)
-        com.aegis.browser.BrowserEngine(wv).load("https://www.bing.com")
+        com.aegis.browser
+            .BrowserEngine(wv)
+            .load("https://www.bing.com")
         tabManager.addTab(wv, url = "https://www.bing.com")
         refresh()
     }
@@ -82,23 +85,35 @@ class BrowserViewModel : ViewModel() {
     fun navigateToAddress() {
         if (!::tabManager.isInitialized) return
         val wv = tabManager.current()?.webView ?: return
-        com.aegis.browser.BrowserEngine(wv).load(_address.value)
+        com.aegis.browser
+            .BrowserEngine(wv)
+            .load(_address.value)
     }
 
     /** 后退。 */
-    fun goBack() { tabManager.current()?.webView?.goBack() }
+    fun goBack() {
+        tabManager.current()?.webView?.goBack()
+    }
 
     /** 前进。 */
-    fun goForward() { tabManager.current()?.webView?.goForward() }
+    fun goForward() {
+        tabManager.current()?.webView?.goForward()
+    }
 
     /** 刷新当前页。 */
-    fun reload() { tabManager.current()?.webView?.reload() }
+    fun reload() {
+        tabManager.current()?.webView?.reload()
+    }
 
     /** 设置安全提示（System WebView 版本过旧）。 */
-    fun setWebViewAlert(message: String?) { _webViewAlert.value = message }
+    fun setWebViewAlert(message: String?) {
+        _webViewAlert.value = message
+    }
 
     /** 清除安全提示。 */
-    fun dismissWebViewAlert() { _webViewAlert.value = null }
+    fun dismissWebViewAlert() {
+        _webViewAlert.value = null
+    }
 
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */
     fun getTabManager(): TabManager? = if (::tabManager.isInitialized) tabManager else null

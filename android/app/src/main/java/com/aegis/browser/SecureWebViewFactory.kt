@@ -18,6 +18,7 @@ import com.aegis.webviewadapter.AegisWebViewClient
 object SecureWebViewFactory {
     private val broker = AndroidBroker()
     private var sessionCounter = 0L
+
     /** 每会话随机种子（32 字节 hex）——注入 JS 噪声时用。 */
     private val sessionSeed: String by lazy {
         val bytes = ByteArray(32)
@@ -30,11 +31,12 @@ object SecureWebViewFactory {
         val webView = WebView(context)
         BrowserEngine(webView).configure()
         val sessionId = "session-${++sessionCounter}"
-        webView.webViewClient = AegisWebViewClient(
-            broker = broker,
-            sessionId = sessionId,
-            onRendererGone = { /* renderer gone cleanup handled by caller */ },
-        )
+        webView.webViewClient =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = sessionId,
+                onRendererGone = { /* renderer gone cleanup handled by caller */ },
+            )
         // 指纹防护 JS 注入（canvas/WebGL/Audio 噪声 + hardwareConcurrency 伪装）
         webView.evaluateJavascript(FINGERPRINT_SHIELD_JS, null)
         // Bridge 硬化 JS 注入（域白名单 + HTTPS 强制——照搬 SecureWebViewContainer）
@@ -46,9 +48,12 @@ object SecureWebViewFactory {
     fun broker(): AndroidBroker = broker
 
     /** 允许的 bridge 域名白名单（可动态扩展）。 */
-    private val ALLOWED_BRIDGE_HOSTS = listOf(
-        "aegis.local", "localhost", "127.0.0.1"
-    )
+    private val ALLOWED_BRIDGE_HOSTS =
+        listOf(
+            "aegis.local",
+            "localhost",
+            "127.0.0.1",
+        )
 
     /** bridge 域名白名单 JSON（ktlint 可解析——避免嵌套 \${} 复杂表达式）。 */
     private val allowedHostsJson: String =
@@ -56,7 +61,8 @@ object SecureWebViewFactory {
 
     /** Bridge 硬化 JS（照搬 SecureWebViewContainer NativeBridge origin 校验）。 */
     private val BRIDGE_GUARD_JS: String
-        get() = """
+        get() =
+            """
 // Aegis BridgeGuard — origin 校验拦截（fetch/XMLHttpRequest 未授权调用拒绝）
 (function() {
   const ALLOWED_HOSTS = $allowedHostsJson;
@@ -76,11 +82,12 @@ object SecureWebViewFactory {
     return origFetch.apply(this, arguments);
   };
 })();
-""".trimIndent()
+            """.trimIndent()
 
     /** 指纹防护 JS（照搬 voidbrowser FingerprintShield——canvas/WebGL/Audio 噪声）。 */
     private val FINGERPRINT_SHIELD_JS: String
-        get() = """
+        get() =
+            """
 // Aegis FingerprintShield — 每会话确定性噪声种子
 const __AEGIS_SESSION_SEED = '$sessionSeed';
 
@@ -120,5 +127,5 @@ const __AEGIS_SESSION_SEED = '$sessionSeed';
     get: () => 2 + (seed % 7)
   });
 })();
-""".trimIndent()
+            """.trimIndent()
 }
