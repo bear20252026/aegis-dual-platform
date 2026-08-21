@@ -417,8 +417,10 @@ def main() -> int:
 
     # 关键：新窗口请求（target=_blank 链接）必须在当前窗口打开，
     # 而不是交给系统默认浏览器（默认 True 会导致点百度热搜跳去谷歌浏览器）。
+    # 注意：shell.settings() 返回副本——直接修改 pywebview 模块的 settings 才生效。
     try:
-        shell.settings()['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = False
+        import webview as _wv_mod
+        _wv_mod.settings['OPEN_EXTERNAL_LINKS_IN_BROWSER'] = False
     except Exception:
         pass
 
