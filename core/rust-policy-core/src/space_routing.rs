@@ -93,21 +93,9 @@ impl RoutingRule {
     }
 }
 
-/// 从 URL 提取主机名。
+/// 从 URL 提取主机名（委托 util::extract_host，去端口+小写）。
 fn extract_hostname(url: &str) -> String {
-    let without_scheme = if let Some(pos) = url.find("://") {
-        &url[pos + 3..]
-    } else {
-        url
-    };
-    let host_end = without_scheme.find('/').unwrap_or(without_scheme.len());
-    let host_with_port = &without_scheme[..host_end];
-    // 去掉端口号
-    if let Some(pos) = host_with_port.rfind(':') {
-        host_with_port[..pos].to_string()
-    } else {
-        host_with_port.to_string()
-    }
+    crate::util::extract_host(url).unwrap_or_default()
 }
 
 /// SpaceRouting — URL 到工作区路由引擎。

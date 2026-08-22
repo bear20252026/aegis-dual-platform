@@ -123,13 +123,9 @@ impl AdBlockManager {
         false
     }
 
-    /// 从 URL 提取主机名。
+    /// 从 URL 提取主机名（委托 util::extract_host）。
     fn extract_host(url: &str) -> Option<String> {
-        let without_scheme = url
-            .strip_prefix("https://")
-            .or_else(|| url.strip_prefix("http://"))
-            .unwrap_or(url);
-        without_scheme.split('/').next().map(|h| h.to_lowercase())
+        crate::util::extract_host(url)
     }
 
     /// 获取拦截计数。

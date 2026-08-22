@@ -19,6 +19,7 @@ pub mod executor;
 pub mod ext_proxy;
 pub mod font_norm;
 pub mod https_only;
+pub mod js_inject;
 pub mod letterbox;
 pub mod matcher;
 pub mod oracle;
@@ -34,6 +35,7 @@ pub mod space_routing;
 pub mod timer_prec;
 pub mod tostring_guard;
 pub mod update_manifest;
+pub mod util;
 pub mod webgl_spoof;
 
 /// 指纹防护注入管线（管道化组合所有防护阶段）。
