@@ -13,6 +13,7 @@ pub mod adblock;
 pub mod bridge_guard;
 pub mod broker;
 pub mod capability;
+pub mod ffi;
 pub mod command_bar;
 pub mod decision;
 pub mod executor;
@@ -37,6 +38,9 @@ pub mod tostring_guard;
 pub mod update_manifest;
 pub mod util;
 pub mod webgl_spoof;
+
+// UniFFI 官方要求（proc-macro 模式）：crate 根调用 setup_scaffolding!()
+uniffi::setup_scaffolding!();
 
 /// 指纹防护注入管线（管道化组合所有防护阶段）。
 ///
