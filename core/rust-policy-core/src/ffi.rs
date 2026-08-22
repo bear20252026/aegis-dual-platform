@@ -113,8 +113,7 @@ pub fn extract_host(url: String) -> Option<String> {
 pub fn build_fingerprint_pipeline(session_seed: String) -> String {
     // 注：fingerprint_pipeline 的 JS 生成在 Python 侧（legacy），
     // Rust 侧提供 seed 派生；此处导出便于后续迁移。
-    crate::shield::FingerprintShield::from_seed(hex_seed_to_bytes(&session_seed))
-        .inject_script()
+    crate::shield::FingerprintShield::from_seed(hex_seed_to_bytes(&session_seed)).inject_script()
 }
 
 /// 十六进制种子转字节数组（内部辅助）。
@@ -170,9 +169,7 @@ impl FfiBroker {
                     reason: FfiDenyReason {
                         code: "url_policy".into(),
                         detail: format!("拒绝 URL: {raw_url}"),
-                        explanation: format!(
-                            "denied origin — URL parsing failed: {raw_url}"
-                        ),
+                        explanation: format!("denied origin — URL parsing failed: {raw_url}"),
                     },
                 };
             }
@@ -200,9 +197,7 @@ impl FfiBroker {
             expires_at: 120,
             nonce,
             policy_version,
-            explanation: format!(
-                "allowed origin {scheme}://{host} — scheme {scheme}, host {host}"
-            ),
+            explanation: format!("allowed origin {scheme}://{host} — scheme {scheme}, host {host}"),
         };
         // 会话验证（fail-closed）
         let guard = self.inner.lock().map_err(|_| ()).ok();

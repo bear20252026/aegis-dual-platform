@@ -1,0 +1,8 @@
+# 开发/CI 依赖（运行时依赖见 requirements.txt）
+# 版本锁定（2026-08-15 升级后重锁）：与本地/CI 口径一致，杜绝
+# pip 装最新版导致的检查结果漂移（P6 教训：mypy 版本差异曾致 CI 失败）
+ruff==0.16.3
+mypy==2.3.0
+bandit==1.9.4
+pyinstaller==6.22.0
+Pillow==12.3.0

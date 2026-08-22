@@ -1,0 +1,15 @@
+[package]
+name = "aegis-policy-core"
+version = "0.1.0"
+edition = "2021"
+description = "Aegis 纯策略核心（蓝图阶段 F——Rust 试点——无 UI/网络/文件——纯函数依赖注入）"
+license = "MIT"
+
+[dependencies]
+# 最小 crate 依赖（蓝图：最小依赖 + 固定 toolchain + cargo audit/deny——CI 门禁）
+ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
+sha2 = "0.10"
+serde_json = "1"
+
+[dev-dependencies]
+hex = "0.4"

@@ -1,0 +1,58 @@
+namespace Aegis.Windows.WebView;
+
+using System;
+using Microsoft.Web.WebView2.Core;
+
+/// <summary>WebView2 封装（阶段 C——蓝图 windows/src/Aegis.Windows.WebView）。
+/// 只负责 WebView2 API 与事件转换——不拥有安全策略（ADR-002）。
+/// 远程页面无 native bridge——不注入 host object（ADR-003）。</summary>
+public sealed class HostWebView
+{
+    private readonly Broker.BrowserPolicyBroker _broker;
+    private readonly string _sessionId;
+
+    public HostWebView(Broker.BrowserPolicyBroker broker, string sessionId)
+    {
+        _broker = broker;
+        _sessionId = sessionId;
+    }
+
+    public void WireEvents(CoreWebView2 webView)
+    {
+        // 导航决策（NavigationStarting 可 disallow——Microsoft 官方——真实取消语义）
+        webView.NavigationStarting += (_, e) =>
+        {
+            var decision = _broker.EvaluateNavigation(_sessionId, "tab-0", 0, e.Uri, "navigation");
+            if (decision is Broker.Decision.Deny)
+                e.Cancel = true;  // 非允许导航真实取消（不再"仅日志"）
+        };
+        // 子框架导航同样经 broker（FrameNavigationStarting——iframe 策略）
+        webView.FrameNavigationStarting += (_, e) =>
+        {
+            var decision = _broker.EvaluateNavigation(_sessionId, "tab-0", 0, e.Uri, "navigation");
+            if (decision is Broker.Decision.Deny)
+                e.Cancel = true;
+        };
+        // 新窗口请求经 broker（NewWindowRequested——禁止绕过导航决策）
+        webView.NewWindowRequested += (_, e) =>
+        {
+            var decision = _broker.EvaluateNavigation(_sessionId, "tab-0", 0, e.Uri, "navigation");
+            if (decision is Broker.Decision.Deny)
+                e.Handled = true;  // 拒绝新窗口（不打开）
+        };
+        // 消息只接受受信 chrome UI origin（远程页面无 native bridge——WebMessage 忽略）
+        webView.WebMessageReceived += (_, e) =>
+        {
+            if (!IsTrustedChromeOrigin(e.Source))
+                return;  // 远程消息忽略——无本地能力（后续接 broker ProposedAction）
+        };
+        // 权限请求（PermissionRequested）默认拒绝——最小授权（中文零信任实践）
+        webView.PermissionRequested += (_, e) =>
+        {
+            e.State = CoreWebView2PermissionState.Deny;  // 远程页面无摄像头/麦克风/定位
+        };
+    }
+
+    private static bool IsTrustedChromeOrigin(string source) =>
+        source.StartsWith("file://", StringComparison.OrdinalIgnoreCase);
+}
