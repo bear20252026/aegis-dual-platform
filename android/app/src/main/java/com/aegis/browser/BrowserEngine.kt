@@ -20,6 +20,7 @@ class BrowserEngine(
         private val allowedSchemes = setOf("http", "https")
         private const val MAX_PROGRESS = 100
         private const val MAX_TITLE_LENGTH = 256
+        private const val TEXT_ZOOM_DEFAULT = 100
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -41,7 +42,7 @@ class BrowserEngine(
         webView.settings.setSupportZoom(true)
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
-        webView.settings.textZoom = 100
+        webView.settings.textZoom = TEXT_ZOOM_DEFAULT
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         // WebViewClient 由 SecureWebViewFactory 统一注入 AegisWebViewClient（经 Broker 决策），
         // BrowserEngine 不得覆盖——单路径收敛（专家审计）。
