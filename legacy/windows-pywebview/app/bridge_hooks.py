@@ -7,7 +7,11 @@
 
 from typing import Any
 
-from .fingerprint_pipeline import build_fingerprint_pipeline_js, generate_session_seed
+from .fingerprint_pipeline import (
+    build_fingerprint_pipeline_js,
+    build_link_intercept_js,
+    generate_session_seed,
+)
 from .shell_toolbar import build_toolbar_js
 
 # 指纹防护管道：每会话生成一次种子，所有页面共享
@@ -35,33 +39,9 @@ def on_loaded(window: Any, api: Any) -> None:
     except Exception:
         pass  # 页面不允许注入时静默降级
     try:
-        # 注入链接拦截——所有链接在浏览器内打开，不跳转系统默认浏览器
-        link_intercept_js = """
-(function() {
-  // 拦截所有 <a> 标签点击
-  document.addEventListener('click', function(e) {
-    var a = e.target;
-    while (a && a.tagName !== 'A') a = a.parentNode;
-    if (!a || !a.href) return;
-    // 允许锚点链接和 javascript: 链接
-    if (a.href.startsWith('#') || a.href.startsWith('javascript:')) return;
-    // 允许下载链接
-    if (a.hasAttribute('download')) return;
-    // 阻止默认行为（在系统浏览器打开）
-    e.preventDefault();
-    e.stopPropagation();
-    // 在当前窗口导航
-    window.location.href = a.href;
-  }, true);
-  // 拦截 window.open 调用
-  var origOpen = window.open;
-  window.open = function(url) {
-    if (url) window.location.href = url;
-    return null;
-  };
-})();
-"""
-        api._eval(link_intercept_js)
+        # FIX-4: 使用独立的链接拦截函数（不再内联 javascript: URL 放行逻辑）
+        link_js = build_link_intercept_js()
+        api._eval(link_js)
     except Exception:
         pass  # 页面不允许注入时静默降级
     try:

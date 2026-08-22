@@ -493,6 +493,21 @@ def main() -> int:
             core.add_NewWindowRequested(_on_new_window_requested)
             from crash_reporter import log_event
             log_event("[nav] NewWindowRequested 拦截已注册（链接在浏览器内打开）")
+
+            # FIX-1: 注入时序——指纹防护 JS 在页面脚本执行前注入
+            # AddScriptToExecuteOnDocumentCreated 确保防护在任何页面 JS 前生效
+            # 比 on_loaded（页面加载后）更早，无法被页面脚本绕过
+            try:
+                from app.fingerprint_pipeline import (
+                    build_fingerprint_pipeline_js,
+                    generate_session_seed,
+                )
+                _fp_seed = generate_session_seed()
+                _fp_js = build_fingerprint_pipeline_js(_fp_seed)
+                core.AddScriptToExecuteOnDocumentCreated(_fp_js)
+                log_event("[security] 指纹防护已注入（页面脚本前生效——FIX-1）")
+            except Exception:
+                pass  # 降级为 on_loaded 注入（bridge_hooks.py 已有兜底）
     except Exception:
         pass  # WebView2 核心不可用时降级为 JS 拦截
 

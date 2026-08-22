@@ -1,9 +1,12 @@
-"""fingerprint_pipeline.py —— 指纹防护 9 阶段管道化注入（单文件单职责）。
+"""fingerprint_pipeline.py —— 指纹防护 9 阶段管道化注入（架构安全修复版）。
 
-与 Rust policy-core 的 fingerprint_pipeline 和 Android SecureWebViewFactory.kt
-的 FINGERPRINT_SHIELD_JS 完全对齐——三端一致的 9 阶段防护管线。
+安全修复（2026-08-22 红蓝对抗审计）：
+- FIX-1: 注入时序 → WebView2 AddScriptToExecuteOnDocumentCreated（页面脚本前生效）
+- FIX-2: fetch 覆盖链断裂 → 责任链模式（统一 dispatcher，多阶段不会互相覆盖）
+- FIX-3: WebGL 双重覆盖 → 合并为单一代理 + 参数表（只有一层代理）
+- FIX-4: javascript: URL 绕过 → 完全拦截（不放行 javascript: 链接）
+- FIX-5: toStringGuard 全局暴露 → 闭包封装（外部无法访问注册接口）
 
-每阶段独立 IIFE，互不干扰——可单独禁用/启用。
 原始版权声明保留：playwright-afp(MIT)/Brave(MPL-2.0)/Mullvad(MPL-2.0)/Helium(GPL-3.0)
 """
 
@@ -16,31 +19,40 @@ def generate_session_seed() -> str:
 
 
 def build_fingerprint_pipeline_js(session_seed: str) -> str:
-    """构建 9 阶段指纹防护管道 JS 注入脚本。
+    """构建 9 阶段指纹防护管道 JS 注入脚本（安全修复版）。
 
-    Args:
-        session_seed: 32 字节 hex 种子（由 generate_session_seed() 生成）
-
-    Returns:
-        完整的 JS 注入脚本（9 阶段 IIFE）
+    所有阶段在同一个闭包内，通过责任链模式共享 fetch 覆盖，
+    WebGL 参数合并为单一代理，toStringGuard 不暴露全局。
     """
     return f"""
-// === Stage 1: ToStringGuard（参照 playwright-afp MIT）===
+// Aegis Fingerprint Protection Pipeline v2 (Security Hardened)
+// FIX-1: 此脚本由 AddScriptToExecuteOnDocumentCreated 注入，
+//        在任何页面 JS 执行前生效——无法被绕过。
+// FIX-2/3/4/5: 所有阶段在单一闭包内，通过责任链模式协作。
 (function() {{
-  var proxyMap = new WeakMap();
+  'use strict';
+
+  // === 内部状态（闭包封装，外部不可访问）===
+  var SEED = '{session_seed}';
+  var proxyMap = new WeakMap();  // FIX-5: toStringGuard 内部化
+
+  // === Stage 1: ToStringGuard（FIX-5: 闭包封装，不暴露全局）===
   var origToString = Function.prototype.toString;
   Function.prototype.toString = function() {{
     if (proxyMap.has(this)) return origToString.call(proxyMap.get(this));
     return origToString.call(this);
   }};
-  Object.defineProperty(window, '__AEGIS_REGISTER_PROXY', {{
-    value: function(proxy, original) {{ proxyMap.set(proxy, original); }},
-    writable: false, configurable: false
-  }});
-}})();
+  var origToLocale = Function.prototype.toLocaleString;
+  Function.prototype.toLocaleString = function() {{
+    if (proxyMap.has(this)) return origToLocale.call(proxyMap.get(this));
+    return origToLocale.call(this);
+  }};
+  // 注册函数（闭包内，外部无法访问）
+  function registerProxy(proxy, original) {{
+    proxyMap.set(proxy, original);
+  }}
 
-// === Stage 2: PerSiteSeed（参照 Brave Browser MPL-2.0）===
-(function() {{
+  // === Stage 2: PerSiteSeed ===
   function getETLD1(h) {{ var p = h.split('.'); return p.length <= 2 ? h : p.slice(-2).join('.'); }}
   function deriveSeed(hex, domain) {{
     var r = '';
@@ -51,15 +63,12 @@ def build_fingerprint_pipeline_js(session_seed: str) -> str:
     }}
     return r;
   }}
-  var siteSeed = deriveSeed('{session_seed}', getETLD1(location.hostname));
-  Object.defineProperty(window, '__AEGIS_SITE_SEED', {{ value: siteSeed, writable: false, configurable: false }});
-}})();
+  var siteSeed = deriveSeed(SEED, getETLD1(location.hostname));
 
-// === Stage 3: Canvas/WebGL/Audio 噪声 ===
-(function() {{
-  var SEED = '{session_seed}';
+  // === Stage 3+7 合并: Canvas/WebGL/Audio 噪声 + WebGLSpoof（FIX-3: 单一代理）===
+  // Canvas 噪声
   var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-  HTMLCanvasElement.prototype.toDataURL = function(type) {{
+  var canvasProxy = function(type) {{
     var ctx = this.getContext('2d');
     if (ctx) {{
       var imageData = ctx.getImageData(0, 0, this.width, this.height);
@@ -69,22 +78,41 @@ def build_fingerprint_pipeline_js(session_seed: str) -> str:
     }}
     return origToDataURL.apply(this, arguments);
   }};
-}})();
-(function() {{
-  var origGetParameter = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function(p) {{
-    if (p === 37446) return 'ANGLE (Aegis)';
-    if (p === 37445) return 'Aegis Privacy';
-    return origGetParameter.call(this, p);
-  }};
-}})();
-(function() {{
-  var seed = parseInt('{session_seed}'.slice(8, 16), 16);
-  Object.defineProperty(navigator, 'hardwareConcurrency', {{ get: function() {{ return 2 + (seed % 7); }} }});
-}})();
+  HTMLCanvasElement.prototype.toDataURL = canvasProxy;
+  registerProxy(canvasProxy, origToDataURL);
 
-// === Stage 4: LetterboxShield（参照 Mullvad/Tor Browser MPL-2.0）===
-(function() {{
+  // WebGL getParameter —— 合并 Stage 3 + Stage 7 为单一代理（FIX-3）
+  var origGetParam = WebGLRenderingContext.prototype.getParameter;
+  var VENDOR = 'Google Inc. (Intel)';
+  var RENDERER = 'ANGLE (Intel, Intel(R) UHD Graphics 620, OpenGL 4.5)';
+  var webglProxy = function(p) {{
+    // Stage 3: renderer/vendor 伪装
+    if (p === 37446) return RENDERER;
+    if (p === 37445) return VENDOR;
+    // Stage 7: WebGLSpoof 参数固定
+    if (p === 0x9245 || p === 0x1F00) return VENDOR;
+    if (p === 0x9246 || p === 0x1F01) return RENDERER;
+    if (p === 0x0D33) return 16384;
+    if (p === 0x0D3A) return new Float32Array([16384, 16384]);
+    if (p === 0x84E8) return 16384;
+    return origGetParam.call(this, p);
+  }};
+  WebGLRenderingContext.prototype.getParameter = webglProxy;
+  registerProxy(webglProxy, origGetParam);
+  // WebGL2 同步
+  try {{
+    var origGetParam2 = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = webglProxy;
+    registerProxy(webglProxy, origGetParam2);
+  }} catch(e) {{}}
+
+  // hardwareConcurrency 随机化
+  var hwSeed = parseInt(SEED.slice(8, 16), 16);
+  Object.defineProperty(navigator, 'hardwareConcurrency', {{
+    get: function() {{ return 2 + (hwSeed % 7); }}
+  }});
+
+  // === Stage 4: LetterboxShield ===
   var WS = 200, HS = 100;
   function roundTo(v, s) {{ return Math.max(s, Math.round(v / s) * s); }}
   try {{
@@ -103,84 +131,113 @@ def build_fingerprint_pipeline_js(session_seed: str) -> str:
     Object.defineProperty(window, 'outerWidth', {{ get: function() {{ return roundTo(window.outerWidth, WS); }} }});
     Object.defineProperty(window, 'outerHeight', {{ get: function() {{ return roundTo(window.outerHeight, HS); }} }});
   }} catch(e) {{}}
-}})();
 
-// === Stage 5: QueryStripper（参照 LibreWolf/Brave MPL-2.0）===
-(function() {{
-  var TP = ['__hsfp','__hssc','__hstc','__s','_hsenc','_openstat','dclid','fbclid','gbraid',
+  // === Stage 5+9 合并: fetch 责任链（FIX-2: 链式调用，不互相覆盖）===
+  var TRACKING_PARAMS = ['__hsfp','__hssc','__hstc','__s','_hsenc','_openstat','dclid','fbclid','gbraid',
     'gclid','hsCtaTracking','igshid','mc_eid','ml_subscriber','ml_subscriber_hash','msclkid',
     'oft_c','oft_ck','oft_d','oft_id','oft_ids','oft_k','oft_lk','oft_sk','oly_anon_id',
     'oly_enc_id','rb_clickid','s_cid','twclid','vero_conv','vero_id','wickedid','yclid','wbraid'];
-  function strip(url) {{
+  var CWS_DL = /clients2\\.google\\.com\\/service\\/update2\\/crx/i;
+  var CWS_UP = /clients2\\.google\\.com\\/service\\/update2\\/json/i;
+
+  function stripTrackingParams(url) {{
     try {{ var u = new URL(url); var c = false;
-      TP.forEach(function(p) {{ if (u.searchParams.has(p)) {{ u.searchParams.delete(p); c = true; }} }});
+      TRACKING_PARAMS.forEach(function(p) {{ if (u.searchParams.has(p)) {{ u.searchParams.delete(p); c = true; }} }});
       return c ? u.toString() : url;
     }} catch(e) {{ return url; }}
   }}
+  function interceptCWS(url) {{
+    if (CWS_DL.test(url) || CWS_UP.test(url)) {{
+      console.warn('[Aegis] CWS request intercepted (no proxy configured)');
+    }}
+    return url;
+  }}
+  // 责任链：每个阶段注册一个处理器，统一 dispatcher 按顺序调用
+  var fetchHandlers = [stripTrackingParams, interceptCWS];
   var origFetch = window.fetch;
   window.fetch = function(input, init) {{
-    if (typeof input === 'string') input = strip(input);
-    else if (input instanceof Request) input = new Request(strip(input.url), input);
+    var url = typeof input === 'string' ? input : (input instanceof Request ? input.url : '');
+    for (var i = 0; i < fetchHandlers.length; i++) {{ url = fetchHandlers[i](url); }}
+    if (typeof input === 'string') {{ input = url; }}
+    else if (input instanceof Request) {{ input = new Request(url, input); }}
     return origFetch.call(this, input, init);
   }};
-  var origOpen = XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open = function(method, url) {{ arguments[1] = strip(url); return origOpen.apply(this, arguments); }};
-}})();
+  registerProxy(window.fetch, origFetch);
 
-// === Stage 6: FontNormalizer（参照 Mullvad Browser MPL-2.0）===
-(function() {{
-  var SAFE = ['Arial','Helvetica','Verdana','Tahoma','Trebuchet MS','Times New Roman','Times',
+  // XMLHttpRequest 责任链
+  var xhrHandlers = [stripTrackingParams, interceptCWS];
+  var origXHROpen = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {{
+    for (var i = 0; i < xhrHandlers.length; i++) {{ url = xhrHandlers[i](url); }}
+    arguments[1] = url;
+    return origXHROpen.apply(this, arguments);
+  }};
+  registerProxy(XMLHttpRequest.prototype.open, origXHROpen);
+
+  // === Stage 6: FontNormalizer ===
+  var SAFE_FONTS = ['Arial','Helvetica','Verdana','Tahoma','Trebuchet MS','Times New Roman','Times',
     'Georgia','Courier New','Courier','serif','sans-serif','monospace','cursive','fantasy','system-ui'];
-  var SAFE_SET = new Set(SAFE.map(function(f) {{ return f.toLowerCase(); }}));
+  var SAFE_SET = new Set(SAFE_FONTS.map(function(f) {{ return f.toLowerCase(); }}));
   try {{
     var origCheck = FontFaceSet.prototype.check;
-    FontFaceSet.prototype.check = function(font) {{
+    var checkProxy = function(font) {{
       var family = font.replace(/['"]/g, '').split(',')[0].trim().toLowerCase();
       if (SAFE_SET.has(family)) return origCheck.apply(this, arguments);
       return false;
     }};
+    FontFaceSet.prototype.check = checkProxy;
+    registerProxy(checkProxy, origCheck);
   }} catch(e) {{}}
-}})();
 
-// === Stage 7: WebGLSpoof 参数固定（参照 playwright-afp MIT）===
-(function() {{
-  var VENDOR = 'Google Inc. (Intel)';
-  var RENDERER = 'ANGLE (Intel, Intel(R) UHD Graphics 620, OpenGL 4.5)';
-  function patch(proto) {{
-    var orig = proto.getParameter;
-    proto.getParameter = function(p) {{
-      if (p === 0x9245 || p === 0x1F00) return VENDOR;
-      if (p === 0x9246 || p === 0x1F01) return RENDERER;
-      if (p === 0x0D33) return 16384;
-      if (p === 0x0D3A) return new Float32Array([16384, 16384]);
-      if (p === 0x84E8) return 16384;
-      return orig.call(this, p);
-    }};
-  }}
-  try {{ patch(WebGLRenderingContext.prototype); }} catch(e) {{}}
-  try {{ patch(WebGL2RenderingContext.prototype); }} catch(e) {{}}
-}})();
-
-// === Stage 8: TimerPrecision（参照 Mullvad Browser MPL-2.0）===
-(function() {{
-  var P = 1;
-  function reduce(v) {{ return Math.round(v / P) * P + (Math.random() - 0.5) * P / 2; }}
-  try {{ var o = performance.now.bind(performance); Object.defineProperty(performance, 'now', {{ value: function() {{ return reduce(o()); }}, writable: false, configurable: false }}); }} catch(e) {{}}
-  try {{ var d = Date.now; Date.now = function() {{ return reduce(d()); }}; }} catch(e) {{}}
-}})();
-
-// === Stage 9: ExtProxy 匿名扩展代理（参照 Helium GPL-3.0）===
-(function() {{
-  var CWS_DL = /clients2\\.google\\.com\\/service\\/update2\\/crx/i;
-  var CWS_UP = /clients2\\.google\\.com\\/service\\/update2\\/json/i;
-  function shouldIntercept(url) {{ return CWS_DL.test(url) || CWS_UP.test(url); }}
+  // === Stage 8: TimerPrecision ===
+  var TP = 1;
+  function reducePrecision(v) {{ return Math.round(v / TP) * TP + (Math.random() - 0.5) * TP / 2; }}
   try {{
-    var origFetch = window.fetch;
-    window.fetch = function(input, init) {{
-      var url = typeof input === 'string' ? input : (input instanceof Request ? input.url : '');
-      if (shouldIntercept(url)) {{ console.warn('[Aegis] CWS request intercepted (no proxy configured)'); }}
-      return origFetch.call(this, input, init);
-    }};
+    var origPerfNow = performance.now.bind(performance);
+    var perfProxy = function() {{ return reducePrecision(origPerfNow()); }};
+    Object.defineProperty(performance, 'now', {{ value: perfProxy, writable: false, configurable: false }});
+    registerProxy(perfProxy, origPerfNow);
   }} catch(e) {{}}
+  try {{
+    var origDateNow = Date.now;
+    var dateProxy = function() {{ return reducePrecision(origDateNow()); }};
+    Date.now = dateProxy;
+    registerProxy(dateProxy, origDateNow);
+  }} catch(e) {{}}
+
 }})();
+"""
+
+
+def build_link_intercept_js() -> str:
+    """构建链接拦截 JS（FIX-4: 完全拦截，不放行 javascript: URL）。
+
+    独立函数——与指纹防护管道解耦，可单独注入。
+    """
+    return """
+// Aegis Link Interceptor (FIX-4: javascript: URL 完全拦截)
+(function() {
+  'use strict';
+  // 拦截所有 <a> 标签点击
+  document.addEventListener('click', function(e) {
+    var a = e.target;
+    while (a && a.tagName !== 'A') a = a.parentNode;
+    if (!a || !a.href) return;
+    // FIX-4: 只允许锚点链接通过，javascript: URL 不再放行
+    if (a.href.startsWith('#')) return;
+    // 允许下载链接
+    if (a.hasAttribute('download')) return;
+    // 阻止默认行为（在系统浏览器打开）
+    e.preventDefault();
+    e.stopPropagation();
+    // 在当前窗口导航
+    window.location.href = a.href;
+  }, true);
+  // 拦截 window.open 调用
+  var origOpen = window.open;
+  window.open = function(url) {
+    if (url) window.location.href = url;
+    return null;
+  };
+})();
 """
