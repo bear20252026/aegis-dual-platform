@@ -57,7 +57,9 @@ if (requireNativePolicyCore) {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
+    // ApprovalRequest/AuthorizedAction 的公开 expiresAt 字段使用 Instant；
+    // 该类型出现在模块 API 中，消费者必须能在编译期解析它。
+    api("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
     implementation("net.java.dev.jna:jna:5.12.0@aar")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20230227")

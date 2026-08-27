@@ -129,7 +129,7 @@ class BrowserViewModel : ViewModel() {
         }
         _pendingNavigationConfirmation.value = null
         val approved = SecureWebViewFactory.navigatorFor(pending.webView)
-            ?.approvePendingNavigation(pending.webView) == true
+            ?.approvePendingNavigation() == true
         if (!approved) _webViewAlert.value = "确认请求已失效、被拒绝或无法安全恢复导航。"
         return approved
     }

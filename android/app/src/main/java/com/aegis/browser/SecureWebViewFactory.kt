@@ -313,6 +313,12 @@ class SecureNavigator internal constructor(
         return client.navigate(webView, normalized)
     }
 
+    /** 仅由受信 Compose chrome 的明确批准操作调用；客户端仍负责 Rust 批准与 nonce 消费。 */
+    fun approvePendingNavigation(): Boolean = client.approvePendingNavigation(webView)
+
+    /** 对话框关闭、拒绝、标签关闭或生命周期销毁时撤销待审批导航。 */
+    fun rejectPendingNavigation(): Boolean = client.rejectPendingNavigation()
+
     fun navigateHistory(action: HistoryAction): Boolean =
         when (action) {
             HistoryAction.BACK -> {
