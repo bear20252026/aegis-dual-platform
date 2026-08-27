@@ -3,5 +3,5 @@ using System.Collections.Generic;
 namespace Aegis.Windows.Contracts.Generated;
 
 public sealed record VersionContract(
-    string version,
+    string version
 );

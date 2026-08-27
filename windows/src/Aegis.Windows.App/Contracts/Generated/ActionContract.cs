@@ -12,5 +12,5 @@ public sealed record ActionContract(
     string scope,
     string expires_at,
     string nonce,
-    string policy_version,
+    string policy_version
 );

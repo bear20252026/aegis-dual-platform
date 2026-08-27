@@ -7,5 +7,5 @@ data class ApprovalContract(
     val path: String,
     val scope: String,
     val expires_at: String,
-    val nonce: String,
+    val nonce: String
 )

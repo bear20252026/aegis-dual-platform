@@ -39,8 +39,10 @@ def generate(schema: dict, name: str) -> str:
         "",
         f"public sealed record {name}(",
     ]
-    for pname, p in props.items():
-        lines.append(f"    {cs_type(p)} {pname},")
+    properties = list(props.items())
+    for index, (pname, p) in enumerate(properties):
+        suffix = "," if index < len(properties) - 1 else ""
+        lines.append(f"    {cs_type(p)} {pname}{suffix}")
     lines.append(");")
     return "\n".join(lines)
 

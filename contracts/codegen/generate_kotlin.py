@@ -38,8 +38,10 @@ def generate(schema: dict, name: str) -> str:
         "",
         f"data class {name}(",
     ]
-    for pname, p in props.items():
-        lines.append(f"    val {pname}: {kt_type(p)},")
+    properties = list(props.items())
+    for index, (pname, p) in enumerate(properties):
+        suffix = "," if index < len(properties) - 1 else ""
+        lines.append(f"    val {pname}: {kt_type(p)}{suffix}")
     lines.append(")")
     return "\n".join(lines)
 

@@ -8,5 +8,5 @@ data class UpdateManifestContract(
     val channel: String,
     val expires_at: String,
     val artifacts: List<Any>,
-    val signatures: List<Any>,
+    val signatures: List<Any>
 )

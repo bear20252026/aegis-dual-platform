@@ -8,5 +8,5 @@ public sealed record ApprovalContract(
     string path,
     string scope,
     string expires_at,
-    string nonce,
+    string nonce
 );

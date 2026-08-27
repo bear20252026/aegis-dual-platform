@@ -8,5 +8,5 @@ data class AuditEventContract(
     val scope: String,
     val origin: String,
     val reason: String,
-    val tab_id: String,
+    val tab_id: String
 )

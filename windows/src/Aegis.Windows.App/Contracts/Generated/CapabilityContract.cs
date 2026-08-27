@@ -6,5 +6,5 @@ public sealed record CapabilityContract(
     string scope,
     List<string> actions,
     List<string> resources,
-    bool requires_confirmation,
+    bool requires_confirmation
 );

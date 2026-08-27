@@ -9,5 +9,5 @@ public sealed record AuditEventContract(
     string scope,
     string origin,
     string reason,
-    string tab_id,
+    string tab_id
 );

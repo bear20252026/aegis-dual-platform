@@ -9,5 +9,5 @@ public sealed record UpdateManifestContract(
     string channel,
     string expires_at,
     List<object> artifacts,
-    List<object> signatures,
+    List<object> signatures
 );
