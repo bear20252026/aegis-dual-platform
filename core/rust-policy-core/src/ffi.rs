@@ -2,7 +2,7 @@
 //! UniFFI 跨语言 FFI 导出层（官方规范 0.32——proc-macro 模式）。
 //!
 //! 包装 Rust policy-core 的 Broker/Decision/Origin 类型，
-//! 供 C#/Kotlin/Python 通过 FFI 调用——消除跨平台三语言重复。
+//! 为后续生成的跨语言绑定提供稳定、可测试的策略边界。
 //!
 //! 设计原则：
 //! - 不修改内部类型（decision.rs/broker.rs 保持纯 Rust），仅包装
@@ -155,7 +155,7 @@ fn hex_seed_to_bytes(hex: &str) -> [u8; 32] {
 
 /// FFI 版 Broker——跨语言导航决策（委托 ContextBroker）。
 ///
-/// C#/Kotlin/Python 各自实例化，替代三语言重复的 Broker 实现。
+/// 平台运行时接入须使用生成的绑定和受验证的原生制品；在此之前此类型仅定义共享边界。
 /// 内部用 Mutex 提供可变性——UniFFI Object 方法只支持 &self（Arc 只读）。
 #[derive(uniffi::Object)]
 pub struct FfiBroker {
@@ -429,5 +429,64 @@ mod tests {
         ));
         assert!(broker.advance_document_generation("s1".into(), "t1".into(), 1));
         assert!(!broker.advance_document_generation("s1".into(), "t1".into(), 1));
+    }
+
+    #[test]
+    fn ffi_canonicalization_normalizes_default_ports_and_ignores_fragments() {
+        let canonical = canonicalize_external("HTTPS://Example.COM:443/a?b=1#section".into())
+            .expect("valid HTTPS URL should canonicalize");
+
+        assert_eq!(canonical.origin, "https://example.com");
+        assert_eq!(canonical.canonical_parameters, "/a?b=1");
+
+        let non_default = canonicalize_external("http://example.com:8080?x=1".into())
+            .expect("non-default port should be retained");
+        assert_eq!(non_default.origin, "http://example.com:8080");
+        assert_eq!(non_default.canonical_parameters, "/?x=1");
+    }
+
+    #[test]
+    fn ffi_consume_navigation_accepts_equivalent_fragment_and_rejects_replay() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        let FfiDecision::Allow { action } = broker.evaluate_navigation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/path?query=1#requested".into(),
+            "navigation".into(),
+        ) else {
+            panic!("active matching session should produce an authorization");
+        };
+        let replay = FfiAuthorizedAction {
+            session_id: action.session_id.clone(),
+            tab_id: action.tab_id.clone(),
+            document_generation: action.document_generation,
+            origin: action.origin.clone(),
+            method: action.method.clone(),
+            canonical_parameters: action.canonical_parameters.clone(),
+            scope: action.scope.clone(),
+            expires_at: action.expires_at,
+            nonce: action.nonce.clone(),
+            policy_version: action.policy_version.clone(),
+            explanation: action.explanation.clone(),
+        };
+
+        assert!(matches!(
+            broker.consume_navigation(
+                action,
+                "https://example.com/path?query=1#executed".into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Allow { .. }
+        ));
+        assert!(matches!(
+            broker.consume_navigation(
+                replay,
+                "https://example.com/path?query=1".into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Deny { .. }
+        ));
     }
 }

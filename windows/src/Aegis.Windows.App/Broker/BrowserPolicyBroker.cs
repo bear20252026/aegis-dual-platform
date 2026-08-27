@@ -29,14 +29,15 @@ public sealed class BrowserPolicyBroker
         }
     }
 
-    /// <summary>文档代际推进时同步会话状态，阻止错标签和回退代际。</summary>
+    /// <summary>文档代际推进时同步会话状态；仅同标签严格单步推进，阻止跳跃和回退。</summary>
     public bool UpdateDocumentGeneration(string sessionId, string tabId, ulong generation)
     {
         lock (_sessionLock)
         {
             if (!_sessions.TryGetValue(sessionId, out var session)
                 || !string.Equals(session.TabId, tabId, StringComparison.Ordinal)
-                || generation < session.DocumentGeneration)
+                || session.DocumentGeneration == ulong.MaxValue
+                || generation != session.DocumentGeneration + 1)
                 return false;
             session.DocumentGeneration = generation;
             return true;

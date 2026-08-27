@@ -69,6 +69,17 @@ class AndroidBrokerTest {
     }
 
     @Test
+    fun documentGenerationAdvancesOnlyOneStepForTheRegisteredTab() {
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("session-1", "tab-1"))
+
+        assertFalse(broker.updateDocumentGeneration("session-1", "other-tab", 1))
+        assertFalse(broker.updateDocumentGeneration("session-1", "tab-1", 2))
+        assertFalse(broker.updateDocumentGeneration("session-1", "tab-1", 0))
+        assertTrue(broker.updateDocumentGeneration("session-1", "tab-1", 1))
+    }
+
+    @Test
     fun destroyingSessionInvalidatesFutureNavigation() {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("session-1", "tab-1"))

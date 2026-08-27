@@ -26,11 +26,12 @@ class AndroidBroker(
         }
     }
 
-    /** 文档代际推进后立即同步；拒绝由已销毁或错标签会话发起的更新。 */
+    /** 文档代际推进后立即同步；仅同标签严格单步推进，拒绝跳跃、回退和已销毁会话。 */
     fun updateDocumentGeneration(sessionId: String, tabId: String, generation: Long): Boolean {
         return synchronized(authorizationLock) {
             val session = sessions[sessionId] ?: return@synchronized false
-            if (session.tabId != tabId || generation < session.documentGeneration) return@synchronized false
+            if (session.tabId != tabId || session.documentGeneration == Long.MAX_VALUE ||
+                generation != session.documentGeneration + 1) return@synchronized false
             session.documentGeneration = generation
             true
         }

@@ -47,6 +47,17 @@ public sealed class BrowserPolicyBrokerTests
     }
 
     [Fact]
+    public void DocumentGenerationAdvancesOnlyOneStepForTheRegisteredTab()
+    {
+        var broker = CreateRegisteredBroker();
+
+        Assert.False(broker.UpdateDocumentGeneration("session-1", "other-tab", 1));
+        Assert.False(broker.UpdateDocumentGeneration("session-1", "tab-1", 2));
+        Assert.False(broker.UpdateDocumentGeneration("session-1", "tab-1", 0));
+        Assert.True(broker.UpdateDocumentGeneration("session-1", "tab-1", 1));
+    }
+
+    [Fact]
     public void DestroyedSessionCannotCreateNewAuthorizations()
     {
         var broker = CreateRegisteredBroker();

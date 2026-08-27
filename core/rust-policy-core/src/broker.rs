@@ -94,7 +94,10 @@ impl ContextBroker {
         let Some(session) = self.sessions.get_mut(session_id) else {
             return false;
         };
-        if session.tab_id != tab_id || next_generation != session.generation.saturating_add(1) {
+        let Some(expected_generation) = session.generation.checked_add(1) else {
+            return false;
+        };
+        if session.tab_id != tab_id || next_generation != expected_generation {
             return false;
         }
         session.generation = next_generation;
@@ -365,5 +368,29 @@ mod tests {
             broker.validate_and_consume(&action),
             Decision::Deny(_)
         ));
+    }
+
+    #[test]
+    fn document_generation_requires_the_same_tab_and_next_step() {
+        let mut broker = ContextBroker::new("1.0".into());
+        broker.create_session("s1".into(), "tab-0".into(), 4, Duration::from_secs(3600));
+
+        assert!(!broker.advance_document_generation("s1", "other-tab", 5));
+        assert!(!broker.advance_document_generation("s1", "tab-0", 6));
+        assert!(!broker.advance_document_generation("s1", "tab-0", 4));
+        assert!(broker.advance_document_generation("s1", "tab-0", 5));
+        assert!(matches!(
+            broker.validate_action(&make_action("s1", 5, "n2")),
+            Decision::Allow(_)
+        ));
+    }
+
+    #[test]
+    fn destroyed_session_cannot_advance_document_generation() {
+        let mut broker = ContextBroker::new("1.0".into());
+        broker.create_session("s1".into(), "tab-0".into(), 0, Duration::from_secs(3600));
+        broker.destroy_session("s1");
+
+        assert!(!broker.advance_document_generation("s1", "tab-0", 1));
     }
 }
