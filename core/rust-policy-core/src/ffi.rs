@@ -57,11 +57,22 @@ pub struct FfiDenyReason {
     pub explanation: String,
 }
 
+/// FFI 版审批请求；确认 UI 必须展示并绑定其完整语义，不能仅信任 origin/method。
+#[derive(uniffi::Record)]
+pub struct FfiApprovalRequest {
+    pub origin: String,
+    pub method: String,
+    pub path: String,
+    pub scope: String,
+    pub expires_at: u64,
+    pub nonce: String,
+}
+
 /// FFI 版安全决策（枚举——Allow/Deny/RequireConfirmation）。
 #[derive(uniffi::Enum)]
 pub enum FfiDecision {
     Allow { action: FfiAuthorizedAction },
-    RequireConfirmation { origin: String, method: String },
+    RequireConfirmation { request: FfiApprovalRequest },
     Deny { reason: FfiDenyReason },
 }
 
@@ -72,8 +83,14 @@ impl From<Decision> for FfiDecision {
                 action: FfiAuthorizedAction::from(a),
             },
             Decision::RequireConfirmation(request) => FfiDecision::RequireConfirmation {
-                origin: request.origin,
-                method: request.method,
+                request: FfiApprovalRequest {
+                    origin: request.origin,
+                    method: request.method,
+                    path: request.path,
+                    scope: request.scope,
+                    expires_at: request.expires_at,
+                    nonce: request.nonce,
+                },
             },
             Decision::Deny(r) => FfiDecision::Deny {
                 reason: FfiDenyReason {

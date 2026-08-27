@@ -5,7 +5,7 @@
 //! `aegis_policy_core_string_free` 释放；未知会话、无效输入和内部错误一律返回
 //! 类型化的 deny JSON，而非允许宿主改用不一致的策略路径。
 
-use crate::ffi::{FfiAuthorizedAction, FfiBroker, FfiDecision};
+use crate::ffi::{FfiApprovalRequest, FfiAuthorizedAction, FfiBroker, FfiDecision};
 use crate::POLICY_CORE_ABI_VERSION;
 use serde_json::{json, Value};
 use std::ffi::{c_char, CStr, CString};
@@ -60,6 +60,17 @@ fn action_json(action: FfiAuthorizedAction) -> Value {
     })
 }
 
+fn approval_request_json(request: FfiApprovalRequest) -> Value {
+    json!({
+        "origin": request.origin,
+        "method": request.method,
+        "path": request.path,
+        "scope": request.scope,
+        "expires_at": request.expires_at,
+        "nonce": request.nonce,
+    })
+}
+
 fn decision_json(decision: FfiDecision) -> Value {
     match decision {
         FfiDecision::Allow { action } => json!({
@@ -67,10 +78,10 @@ fn decision_json(decision: FfiDecision) -> Value {
             "decision": "allow",
             "action": action_json(action),
         }),
-        FfiDecision::RequireConfirmation { origin, method } => json!({
+        FfiDecision::RequireConfirmation { request } => json!({
             "abi_version": POLICY_CORE_ABI_VERSION,
             "decision": "require_confirmation",
-            "request": { "origin": origin, "method": method },
+            "request": approval_request_json(request),
         }),
         FfiDecision::Deny { reason } => json!({
             "abi_version": POLICY_CORE_ABI_VERSION,
@@ -403,6 +414,26 @@ mod tests {
     fn c_abi_rejects_empty_policy_version() {
         let empty = c_string("");
         assert!(aegis_policy_core_broker_new(empty.as_ptr()).is_null());
+    }
+
+    #[test]
+    fn c_abi_encodes_complete_confirmation_request() {
+        let decision = decision_json(FfiDecision::RequireConfirmation {
+            request: FfiApprovalRequest {
+                origin: "https://payments.example".into(),
+                method: "POST".into(),
+                path: "/transfers".into(),
+                scope: "payment:create".into(),
+                expires_at: 1_700_000_000,
+                nonce: "approval-nonce".into(),
+            },
+        });
+
+        assert_eq!(decision["decision"], "require_confirmation");
+        assert_eq!(decision["request"]["path"], "/transfers");
+        assert_eq!(decision["request"]["scope"], "payment:create");
+        assert_eq!(decision["request"]["expires_at"], 1_700_000_000);
+        assert_eq!(decision["request"]["nonce"], "approval-nonce");
     }
 
     #[test]

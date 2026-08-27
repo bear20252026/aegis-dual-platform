@@ -212,6 +212,9 @@ public sealed class BrowserPolicyBroker : IDisposable
             case Decision.Deny deny:
                 RecordAudit("deny", scope, "native-policy-core", deny.Reason.Code);
                 break;
+            case Decision.RequireConfirmation confirmation:
+                RecordAudit("require_confirmation", confirmation.Request.Scope, confirmation.Request.Origin, null);
+                break;
         }
     }
 

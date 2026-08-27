@@ -109,6 +109,24 @@ public sealed class BrowserPolicyBrokerTests
     }
 
     [Fact]
+    public void NativePolicyCoreBridgeMapsCompleteConfirmationRequest()
+    {
+        var decision = NativePolicyCoreBridge.ParseDecisionPayload("""
+            {"abi_version":1,"decision":"require_confirmation","request":{
+              "origin":"https://payments.example","method":"POST","path":"/transfers",
+              "scope":"payment:create","expires_at":1700000000,"nonce":"approval-nonce"}}
+            """);
+
+        var confirmation = Assert.IsType<Decision.RequireConfirmation>(decision);
+        Assert.Equal("https://payments.example", confirmation.Request.Origin);
+        Assert.Equal("POST", confirmation.Request.Method);
+        Assert.Equal("/transfers", confirmation.Request.Path);
+        Assert.Equal("payment:create", confirmation.Request.Scope);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1_700_000_000).UtcDateTime, confirmation.Request.ExpiresAt);
+        Assert.Equal("approval-nonce", confirmation.Request.Nonce);
+    }
+
+    [Fact]
     public void BrowserPolicyBrokerUsesNativeDecisionWhenNativeModeIsEnabled()
     {
         var libraryPath = Environment.GetEnvironmentVariable(NativePolicyCoreGate.LibraryPathEnvironmentVariable);

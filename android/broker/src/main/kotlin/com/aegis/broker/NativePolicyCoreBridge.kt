@@ -164,6 +164,19 @@ class NativePolicyCoreBridge private constructor(
                         ),
                     )
                 }
+                "require_confirmation" -> {
+                    val request = root.getJSONObject("request")
+                    Decision.RequireConfirmation(
+                        ApprovalRequest(
+                            origin = request.getString("origin"),
+                            method = request.getString("method"),
+                            path = request.getString("path"),
+                            scope = request.getString("scope"),
+                            expiresAt = Instant.fromEpochSeconds(request.getLong("expires_at")),
+                            nonce = request.getString("nonce"),
+                        ),
+                    )
+                }
                 else -> throw IllegalArgumentException("unsupported native decision")
             }
         }

@@ -167,21 +167,28 @@ public sealed class NativePolicyCoreBridge : IDisposable
         {
             var payload = Marshal.PtrToStringUTF8(response)
                 ?? throw new InvalidOperationException("native response was not UTF-8");
-            using var document = JsonDocument.Parse(payload);
-            var root = document.RootElement;
-            if (root.GetProperty("abi_version").GetUInt32() != ExpectedAbiVersion)
-                throw new InvalidOperationException("native response ABI mismatch");
-            return root.GetProperty("decision").GetString() switch
-            {
-                "allow" => new Decision.Allow(ParseAction(root.GetProperty("action"))),
-                "deny" => new Decision.Deny(ParseDeny(root.GetProperty("reason"))),
-                _ => Deny("native_policy_core_decision_invalid", "原生策略核心返回了未支持的决策"),
-            };
+            return ParseDecisionPayload(payload);
         }
         finally
         {
             _stringFree(response);
         }
+    }
+
+    /// <summary>解析 Rust C ABI JSON；未知决策保留为拒绝，避免协议升级时意外放行。</summary>
+    internal static Decision ParseDecisionPayload(string payload)
+    {
+        using var document = JsonDocument.Parse(payload);
+        var root = document.RootElement;
+        if (root.GetProperty("abi_version").GetUInt32() != ExpectedAbiVersion)
+            throw new InvalidOperationException("native response ABI mismatch");
+        return root.GetProperty("decision").GetString() switch
+        {
+            "allow" => new Decision.Allow(ParseAction(root.GetProperty("action"))),
+            "require_confirmation" => new Decision.RequireConfirmation(ParseApprovalRequest(root.GetProperty("request"))),
+            "deny" => new Decision.Deny(ParseDeny(root.GetProperty("reason"))),
+            _ => Deny("native_policy_core_decision_invalid", "原生策略核心返回了未支持的决策"),
+        };
     }
 
     private static AuthorizedAction ParseAction(JsonElement action)
@@ -199,6 +206,14 @@ public sealed class NativePolicyCoreBridge : IDisposable
             action.GetProperty("nonce").GetString() ?? throw new InvalidOperationException(),
             action.GetProperty("policy_version").GetString() ?? throw new InvalidOperationException());
     }
+
+    private static ApprovalRequest ParseApprovalRequest(JsonElement request) => new(
+        request.GetProperty("origin").GetString() ?? throw new InvalidOperationException(),
+        request.GetProperty("method").GetString() ?? throw new InvalidOperationException(),
+        request.GetProperty("path").GetString() ?? throw new InvalidOperationException(),
+        request.GetProperty("scope").GetString() ?? throw new InvalidOperationException(),
+        DateTimeOffset.FromUnixTimeSeconds(request.GetProperty("expires_at").GetInt64()).UtcDateTime,
+        request.GetProperty("nonce").GetString() ?? throw new InvalidOperationException());
 
     private static DenyReason ParseDeny(JsonElement reason) => new(
         reason.GetProperty("code").GetString() ?? "native_policy_core_denied",

@@ -145,6 +145,18 @@ class AndroidBrokerTest {
                 "code":"nonce_replay","detail":"nonce already consumed","explanation":"denied"}}""",
         ) as Decision.Deny
         assertEquals("nonce_replay", deny.reason.code)
+
+        val confirmation = NativePolicyCoreBridge.parseDecisionJson(
+            """{"abi_version":1,"decision":"require_confirmation","request":{
+                "origin":"https://payments.example","method":"POST","path":"/transfers",
+                "scope":"payment:create","expires_at":1700000000,"nonce":"approval-nonce"}}""",
+        ) as Decision.RequireConfirmation
+        assertEquals("https://payments.example", confirmation.request.origin)
+        assertEquals("POST", confirmation.request.method)
+        assertEquals("/transfers", confirmation.request.path)
+        assertEquals("payment:create", confirmation.request.scope)
+        assertEquals(1_700_000_000, confirmation.request.expiresAt.epochSeconds)
+        assertEquals("approval-nonce", confirmation.request.nonce)
     }
 
     @Test
