@@ -11,6 +11,8 @@
 //! - library mode 绑定生成（官方推荐——proc-macro 必须用 library mode）
 
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
+use crate::capability::CapabilityRegistry;
+use crate::policy::PolicyEngine;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -209,7 +211,11 @@ impl FfiBroker {
     #[uniffi::constructor]
     pub fn new(policy_version: String) -> Self {
         Self {
-            inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(policy_version.clone())),
+            inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(
+                policy_version.clone(),
+                PolicyEngine::default(),
+                CapabilityRegistry::new(),
+            )),
             issued_actions: std::sync::Mutex::new(HashMap::new()),
             pending_navigation_approvals: std::sync::Mutex::new(HashMap::new()),
             policy_version,

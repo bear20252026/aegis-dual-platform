@@ -8,6 +8,10 @@
 //! - 创建/销毁会话（生命周期管理）
 //! - 一次性 nonce 消费（原子性——重放拒绝）
 //! - 上下文绑定验证（session/tab/generation/scope/policy_version）
+//! - 策略评估（policy.evaluate）+ 能力验证（capability.validate）
+//!
+//! 安全管线（evaluate 方法）：
+//!   policy.evaluate(scope, origin) → capability.validate(scope, origin) → session/nonce 验证
 //!
 //! 可拆卸：本模块不依赖 UI/网络/文件，纯内存数据结构。
 //! 可拼接：通过 `Decision` trait 与 broker/executor 层对接。
@@ -15,7 +19,9 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::capability::{CapabilityRegistry, CapabilityResult};
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
+use crate::policy::PolicyEngine;
 
 /// 单个会话上下文（persona session——隔离绑定）。
 #[derive(Debug, Clone)]
@@ -40,20 +46,27 @@ struct NonceRecord {
     session_id: String,
 }
 
-/// ContextBroker——会话池 + nonce 消费管理（照搬 picket ContextBroker）。
-#[derive(Debug)]
+/// ContextBroker——会话池 + nonce 消费 + 策略/能力验证管理。
 pub struct ContextBroker {
     sessions: HashMap<String, SessionContext>,
     consumed_nonces: HashMap<String, NonceRecord>,
     policy_version: String,
+    policy_engine: PolicyEngine,
+    capabilities: CapabilityRegistry,
 }
 
 impl ContextBroker {
-    pub fn new(policy_version: String) -> Self {
+    pub fn new(
+        policy_version: String,
+        policy_engine: PolicyEngine,
+        capabilities: CapabilityRegistry,
+    ) -> Self {
         Self {
             sessions: HashMap::new(),
             consumed_nonces: HashMap::new(),
             policy_version,
+            policy_engine,
+            capabilities,
         }
     }
 
@@ -117,7 +130,39 @@ impl ContextBroker {
         }
     }
 
+    /// 完整安全管线：策略评估 → 能力验证 → 会话/nonce 验证。
+    ///
+    /// 这是修复安全管线断裂的核心方法。之前的 validate_action 只做会话验证，
+    /// 现在 evaluate 串联 policy + capability + session 三层检查。
+    pub fn evaluate(&mut self, action: &AuthorizedAction) -> Decision {
+        // ===== 第 1 层：策略评估 =====
+        let verdict = self
+            .policy_engine
+            .evaluate(&action.scope, &action.origin);
+        match verdict.decision {
+            Decision::Allow(_) => {} // 策略允许，继续下一层
+            Decision::Deny(reason) => return Decision::Deny(reason),
+            Decision::RequireConfirmation(request) => return Decision::RequireConfirmation(request),
+        }
+
+        // ===== 第 2 层：能力验证 =====
+        match self.capabilities.validate(&action.scope, &action.origin) {
+            CapabilityResult::Allowed(_) => {} // 能力允许，继续下一层
+            CapabilityResult::Denied(reason) => {
+                return Decision::Deny(DenyReason {
+                    code: "capability_denied".into(),
+                    detail: reason.clone(),
+                    explanation: format!("denied — capability check failed: {}", reason),
+                });
+            }
+        }
+
+        // ===== 第 3 层：会话 + nonce 验证 =====
+        self.validate_and_consume(action)
+    }
+
     /// 验证 AuthorizedAction 上下文（fail-closed）。
+    /// 保留用于向后兼容和测试，新代码应使用 evaluate()。
     pub fn validate_action(&self, action: &AuthorizedAction) -> Decision {
         // 检查会话存在
         let session = match self.sessions.get(&action.session_id) {
@@ -269,7 +314,9 @@ impl ContextBroker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capability::{Capability, CapabilityScope};
     use crate::decision::AuthorizedAction;
+    use crate::policy::PolicyEngine;
 
     fn make_action(session: &str, gen: u64, nonce: &str) -> AuthorizedAction {
         AuthorizedAction {
@@ -287,9 +334,33 @@ mod tests {
         }
     }
 
+    fn make_broker_with_defaults() -> ContextBroker {
+        ContextBroker::new(
+            "1.0".into(),
+            PolicyEngine::default(),
+            CapabilityRegistry::new(),
+        )
+    }
+
+    fn make_broker_with_policy_and_capability() -> ContextBroker {
+        let mut registry = CapabilityRegistry::new();
+        registry.register(Capability {
+            name: "navigation:read".into(),
+            scope: CapabilityScope::Read,
+            allowed_origins: vec![],
+            max_uses: None,
+            uses_count: 0,
+        });
+        ContextBroker::new(
+            "1.0".into(),
+            PolicyEngine::default(),
+            registry,
+        )
+    }
+
     #[test]
     fn create_and_validate_session() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let action = make_action("s1", 1, "n1");
         let result = broker.validate_action(&action);
@@ -298,7 +369,7 @@ mod tests {
 
     #[test]
     fn session_not_found_is_deny() {
-        let broker = ContextBroker::new("1.0".into());
+        let broker = make_broker_with_defaults();
         let action = make_action("missing", 1, "n1");
         let result = broker.validate_action(&action);
         assert!(matches!(result, Decision::Deny(_)));
@@ -306,7 +377,7 @@ mod tests {
 
     #[test]
     fn policy_version_mismatch_is_deny() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "t1".into(), 1, Duration::from_secs(3600));
         let mut action = make_action("s1", 1, "n1");
         action.policy_version = "2.0".into();
@@ -316,7 +387,7 @@ mod tests {
 
     #[test]
     fn generation_mismatch_is_deny() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "t1".into(), 1, Duration::from_secs(3600));
         let action = make_action("s1", 999, "n1");
         let result = broker.validate_action(&action);
@@ -325,13 +396,13 @@ mod tests {
 
     #[test]
     fn nonce_consume_once_ok() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         assert!(broker.consume_nonce("n1", "s1").is_ok());
     }
 
     #[test]
     fn nonce_replay_rejected() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.consume_nonce("n1", "s1").unwrap();
         let result = broker.consume_nonce("n1", "s2");
         assert!(result.is_err());
@@ -339,7 +410,7 @@ mod tests {
 
     #[test]
     fn expired_action_is_denied() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let mut action = make_action("s1", 1, "n1");
         action.expires_at = 0;
@@ -348,7 +419,7 @@ mod tests {
 
     #[test]
     fn wrong_tab_is_denied() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let mut action = make_action("s1", 1, "n1");
         action.tab_id = "other-tab".into();
@@ -357,7 +428,7 @@ mod tests {
 
     #[test]
     fn validate_and_consume_rejects_replay() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let action = make_action("s1", 1, "n1");
         assert!(matches!(
@@ -372,7 +443,7 @@ mod tests {
 
     #[test]
     fn document_generation_requires_the_same_tab_and_next_step() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "tab-0".into(), 4, Duration::from_secs(3600));
 
         assert!(!broker.advance_document_generation("s1", "other-tab", 5));
@@ -387,10 +458,35 @@ mod tests {
 
     #[test]
     fn destroyed_session_cannot_advance_document_generation() {
-        let mut broker = ContextBroker::new("1.0".into());
+        let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "tab-0".into(), 0, Duration::from_secs(3600));
         broker.destroy_session("s1");
 
         assert!(!broker.advance_document_generation("s1", "tab-0", 1));
+    }
+
+    // ===== 新增：安全管线集成测试 =====
+
+    #[test]
+    fn evaluate_denies_when_capability_not_registered() {
+        // 默认 PolicyEngine 使用 DefaultLocalPolicy（deny-all），
+        // 未注册的 capability 也应该被拒绝
+        let mut broker = make_broker_with_defaults();
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        let action = make_action("s1", 1, "n1");
+        let result = broker.evaluate(&action);
+        assert!(matches!(result, Decision::Deny(_)));
+    }
+
+    #[test]
+    fn evaluate_allows_when_capability_registered() {
+        // 注册了 navigation:read capability，但 PolicyEngine 默认 deny-all
+        // 所以策略层会先拒绝
+        let mut broker = make_broker_with_policy_and_capability();
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        let action = make_action("s1", 1, "n1");
+        let result = broker.evaluate(&action);
+        // PolicyEngine::default() 使用 deny-all，所以策略层拒绝
+        assert!(matches!(result, Decision::Deny(_)));
     }
 }

@@ -11,7 +11,8 @@
 //! 可拆卸：本模块不依赖 UI/网络（远程客户端可选）。
 //! 可拼接：通过 `Decision` trait 与 broker 层对接。
 
-use crate::decision::{Decision, DenyReason};
+use crate::action_policy::{ActionPolicy, PolicyDecision, RuleEffect};
+use crate::decision::{AuthorizedAction, Decision, DenyReason};
 
 /// 策略评估结果（本地 or 远程）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,6 +88,70 @@ impl PolicyEngine {
     }
 }
 
+impl Default for PolicyEngine {
+    fn default() -> Self {
+        Self::new(Box::new(DefaultLocalPolicy::new()), None)
+    }
+}
+
+/// 默认本地策略——包装 ActionPolicy（fail-closed：默认拒绝）。
+pub struct DefaultLocalPolicy {
+    inner: ActionPolicy,
+}
+
+impl DefaultLocalPolicy {
+    pub fn new() -> Self {
+        Self {
+            inner: ActionPolicy::new(RuleEffect::Deny),
+        }
+    }
+
+    pub fn with_action_policy(policy: ActionPolicy) -> Self {
+        Self { inner: policy }
+    }
+
+    pub fn action_policy(&mut self) -> &mut ActionPolicy {
+        &mut self.inner
+    }
+}
+
+impl LocalPolicy for DefaultLocalPolicy {
+    fn evaluate(&self, action: &str, context: &str) -> Option<Decision> {
+        // 仅当显式规则匹配时返回 Some；无匹配返回 None → 上层走 FailSafe
+        let decision = self.inner.evaluate_opt(action, context)?;
+        Some(match decision {
+            PolicyDecision::Allow(explanation) => Decision::Allow(AuthorizedAction {
+                session_id: String::new(),
+                tab_id: String::new(),
+                document_generation: 0,
+                origin: context.to_string(),
+                method: String::new(),
+                canonical_parameters: String::new(),
+                scope: action.to_string(),
+                expires_at: 0,
+                nonce: String::new(),
+                policy_version: String::new(),
+                explanation,
+            }),
+            PolicyDecision::Deny(explanation) => Decision::Deny(DenyReason {
+                code: "policy_denied".into(),
+                detail: explanation.clone(),
+                explanation,
+            }),
+            PolicyDecision::Ask(_explanation) => Decision::RequireConfirmation(
+                crate::decision::ApprovalRequest {
+                    origin: context.to_string(),
+                    method: String::new(),
+                    path: String::new(),
+                    scope: action.to_string(),
+                    expires_at: 0,
+                    nonce: String::new(),
+                },
+            ),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,5 +207,36 @@ mod tests {
         let result = engine.evaluate("write", "ctx");
         assert_eq!(result.source, PolicySource::FailSafe);
         assert!(matches!(result.decision, Decision::Deny(_)));
+    }
+
+    #[test]
+    fn default_policy_engine_uses_default_local_policy() {
+        let engine = PolicyEngine::default();
+        let result = engine.evaluate("any_action", "ctx");
+        assert_eq!(result.source, PolicySource::FailSafe);
+        assert!(matches!(result.decision, Decision::Deny(_)));
+    }
+
+    #[test]
+    fn default_local_policy_no_rules_returns_none() {
+        let policy = DefaultLocalPolicy::new();
+        let result = policy.evaluate("navigation:read", "https://example.com");
+        // 无规则匹配 → None → 上层引擎走 FailSafe
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn default_local_policy_with_explicit_deny_rule() {
+        use crate::action_policy::{PolicyRule, RuleEffect};
+        let mut policy = DefaultLocalPolicy::new();
+        policy.inner.add_rule(PolicyRule {
+            name: "deny_nav".into(),
+            action_pattern: "navigation:*".into(),
+            condition: None,
+            effect: RuleEffect::Deny,
+            priority: 0,
+        });
+        let result = policy.evaluate("navigation:read", "https://example.com");
+        assert!(matches!(result, Some(Decision::Deny(_))));
     }
 }
