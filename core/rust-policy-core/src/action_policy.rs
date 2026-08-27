@@ -63,6 +63,21 @@ impl ActionPolicy {
 
     /// 评估动作（deny > ask > allow 优先级——DenyOverrides 模式）。
     pub fn evaluate(&self, action: &str, context: &str) -> PolicyDecision {
+        match self.evaluate_opt(action, context) {
+            Some(decision) => decision,
+            None => match &self.default_effect {
+                RuleEffect::Deny => PolicyDecision::Deny("no rule matched — default deny".into()),
+                RuleEffect::Ask => PolicyDecision::Ask("no rule matched — default ask".into()),
+                RuleEffect::Allow => {
+                    PolicyDecision::Allow("no rule matched — default allow".into())
+                }
+            },
+        }
+    }
+
+    /// 评估动作（仅当有规则匹配时返回 Some，否则 None）。
+    /// 用于让上层策略引擎区分「显式匹配」与「无匹配走 fail-safe」。
+    pub fn evaluate_opt(&self, action: &str, context: &str) -> Option<PolicyDecision> {
         let matches: Vec<&PolicyRule> = self
             .rules
             .iter()
@@ -74,35 +89,31 @@ impl ActionPolicy {
             })
             .collect();
 
+        if matches.is_empty() {
+            return None;
+        }
+
         // DenyOverrides：deny > ask > allow
-        if let Some(top) = matches.iter().map(|r| r.effect.restrictiveness()).max() {
-            let rule = matches
-                .iter()
-                .find(|r| r.effect.restrictiveness() == top)
-                .unwrap();
+        let top = matches.iter().map(|r| r.effect.restrictiveness()).max()?;
+        let rule = matches
+            .iter()
+            .find(|r| r.effect.restrictiveness() == top)
+            .unwrap();
 
-            return match &rule.effect {
-                RuleEffect::Deny => PolicyDecision::Deny(format!(
-                    "deny rule '{}' matched action '{}' — {}",
-                    rule.name, action, rule.action_pattern
-                )),
-                RuleEffect::Ask => PolicyDecision::Ask(format!(
-                    "ask rule '{}' matched action '{}' — requires confirmation",
-                    rule.name, action
-                )),
-                RuleEffect::Allow => PolicyDecision::Allow(format!(
-                    "allow rule '{}' matched action '{}'",
-                    rule.name, action
-                )),
-            };
-        }
-
-        // 无匹配——默认效果
-        match &self.default_effect {
-            RuleEffect::Deny => PolicyDecision::Deny("no rule matched — default deny".into()),
-            RuleEffect::Ask => PolicyDecision::Ask("no rule matched — default ask".into()),
-            RuleEffect::Allow => PolicyDecision::Allow("no rule matched — default allow".into()),
-        }
+        Some(match &rule.effect {
+            RuleEffect::Deny => PolicyDecision::Deny(format!(
+                "deny rule '{}' matched action '{}' — {}",
+                rule.name, action, rule.action_pattern
+            )),
+            RuleEffect::Ask => PolicyDecision::Ask(format!(
+                "ask rule '{}' matched action '{}' — requires confirmation",
+                rule.name, action
+            )),
+            RuleEffect::Allow => PolicyDecision::Allow(format!(
+                "allow rule '{}' matched action '{}'",
+                rule.name, action
+            )),
+        })
     }
 }
 
