@@ -18,12 +18,22 @@ class AndroidBroker(
     private val consumedNonces = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, SessionContext>()
     private val authorizationLock = Any()
+    private val nativePolicyCoreBridge = if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+        NativePolicyCoreBridge.tryCreate(policyVersion)
+    } else {
+        null
+    }
 
     /** 注册由受控 WebView 创建的会话；未知会话上的所有副作用均应被拒绝。 */
     fun registerSession(sessionId: String, tabId: String, generation: Long = 0): Boolean {
         if (sessionId.isBlank() || tabId.isBlank() || generation < 0) return false
         return synchronized(authorizationLock) {
-            sessions.putIfAbsent(sessionId, SessionContext(tabId, generation)) == null
+            if (sessions.containsKey(sessionId)) return@synchronized false
+            if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE && nativePolicyCoreBridge?.createSession(
+                    sessionId, tabId, generation, 120,
+                ) != true) return@synchronized false
+            sessions[sessionId] = SessionContext(tabId, generation)
+            true
         }
     }
 
@@ -33,6 +43,9 @@ class AndroidBroker(
             val session = sessions[sessionId] ?: return@synchronized false
             if (session.tabId != tabId || session.documentGeneration == Long.MAX_VALUE ||
                 generation != session.documentGeneration + 1) return@synchronized false
+            if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE && nativePolicyCoreBridge?.advanceDocumentGeneration(
+                    sessionId, tabId, generation,
+                ) != true) return@synchronized false
             session.documentGeneration = generation
             true
         }
@@ -41,6 +54,9 @@ class AndroidBroker(
     /** 关闭标签时销毁会话并移除其已消费 nonce，避免状态残留。 */
     fun destroySession(sessionId: String) {
         synchronized(authorizationLock) {
+            if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE && nativePolicyCoreBridge != null) {
+                nativePolicyCoreBridge.destroySession(sessionId)
+            }
             sessions.remove(sessionId)
             consumedNonces.removeIf { nonce -> nonce.startsWith("$sessionId:") }
         }
@@ -60,6 +76,14 @@ class AndroidBroker(
                 nativeGate.denialCode ?: "native_policy_core_unavailable",
                 "已启用的原生策略核心不可用或不兼容",
             )
+        }
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            val bridge = nativePolicyCoreBridge ?: return deny(
+                "native_policy_core_bridge_unavailable",
+                "原生策略核心桥接不可用",
+            )
+            return bridge.evaluateNavigation(sessionId, tabId, generation, rawUrl, scope)
+                ?: deny("native_policy_core_protocol", "原生策略核心响应无效或不可读取")
         }
         val session = sessions[sessionId]
             ?: return deny("session_not_found", "会话不存在或已销毁")
@@ -105,6 +129,14 @@ class AndroidBroker(
         scope: String,
     ): Boolean {
         if (!nativePolicyCoreGate.probe().allowsPlatformBroker) return false
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            val bridge = nativePolicyCoreBridge ?: return false
+            return synchronized(authorizationLock) {
+                if (!isValid(action, currentGeneration) || action == null ||
+                    action.sessionId != sessionId || action.tabId != tabId) return@synchronized false
+                bridge.consumeNavigation(action, rawUrl, scope) && consumedNonces.add(action.nonce)
+            }
+        }
         val uri = OriginPolicy.tryParseExternal(rawUrl) ?: return false
         return synchronized(authorizationLock) {
             if (!isValid(action, currentGeneration) || action == null) return@synchronized false

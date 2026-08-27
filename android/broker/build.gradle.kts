@@ -60,4 +60,5 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
     implementation("net.java.dev.jna:jna:5.12.0@aar")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20230227")
 }

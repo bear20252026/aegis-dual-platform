@@ -1,5 +1,6 @@
 package com.aegis.broker
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -120,6 +121,30 @@ class AndroidBrokerTest {
         } else {
             assertTrue(result.allowsPlatformBroker)
         }
+    }
+
+    @Test
+    fun nativeDecisionJsonMapsAuthorizationFieldsAndDenyReason() {
+        val allow = NativePolicyCoreBridge.parseDecisionJson(
+            """{
+                "abi_version":1,"decision":"allow","action":{
+                "session_id":"native-session","tab_id":"native-tab","document_generation":2,
+                "origin":"https://example.com","method":"GET","canonical_parameters":"/path?x=1",
+                "scope":"navigation","expires_at":1700000000,"nonce":"nonce-1","policy_version":"1.0",
+                "explanation":"allowed"}}""",
+        ) as Decision.Allow
+
+        assertEquals("native-session", allow.action.sessionId)
+        assertEquals(2, allow.action.documentGeneration)
+        assertEquals("https://example.com", allow.action.origin)
+        assertEquals("/path?x=1", allow.action.canonicalParameters)
+        assertEquals(1_700_000_000, allow.action.expiresAt.epochSeconds)
+
+        val deny = NativePolicyCoreBridge.parseDecisionJson(
+            """{"abi_version":1,"decision":"deny","reason":{
+                "code":"nonce_replay","detail":"nonce already consumed","explanation":"denied"}}""",
+        ) as Decision.Deny
+        assertEquals("nonce_replay", deny.reason.code)
     }
 
     @Test

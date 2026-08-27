@@ -43,8 +43,7 @@ object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
         if (abiVersion != expectedAbiVersion) {
             return NativePolicyCoreGateResult.block("native_policy_core_abi_mismatch")
         }
-        // ABI 探测成功并不等同于策略决策已经委托给 Rust；在适配器落地前禁止本地规则接管。
-        return NativePolicyCoreGateResult.block("native_policy_core_adapter_unavailable")
+        return NativePolicyCoreGateResult.enabled()
     }
 }
 
