@@ -59,8 +59,10 @@ jobs:
         working-directory: core/rust-policy-core
         run: |
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.0.12433566"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          export ANDROID_NDK="$ANDROID_NDK_HOME"
           test -d "$ANDROID_NDK_HOME"
-          cargo ndk -p 26 \
+          cargo ndk --platform 26 \
             -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
             -o "$GITHUB_WORKSPACE/dist/native-policy/android" \
             build --release --locked
