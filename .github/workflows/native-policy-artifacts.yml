@@ -31,6 +31,22 @@ jobs:
             dist/native-policy/windows/win-x64/aegis_policy_core.dll
           python release/native_artifact_manifest.py --root dist/native-policy `
             --output dist/native-policy/windows-manifest.json --require windows
+      - name: Probe DLL ABI and verify WPF publish contains the controlled library
+        shell: pwsh
+        run: |
+          $policyDll = (Resolve-Path dist/native-policy/windows/win-x64/aegis_policy_core.dll).Path
+          $env:AEGIS_NATIVE_POLICY_CORE_TEST_PATH = $policyDll
+          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release
+          dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained false `
+            --output dist/native-policy/windows/wpf-publish `
+            -p:RequireNativePolicyCore=true `
+            -p:NativePolicyCorePath=$policyDll
+          if (-not (Test-Path dist/native-policy/windows/wpf-publish/aegis_policy_core.dll)) {
+            throw "WPF 发布目录缺少受控原生策略 DLL"
+          }
       - name: Upload Windows policy DLL
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:

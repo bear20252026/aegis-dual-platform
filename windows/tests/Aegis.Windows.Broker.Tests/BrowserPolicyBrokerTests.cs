@@ -72,6 +72,19 @@ public sealed class BrowserPolicyBrokerTests
     }
 
     [Fact]
+    public void BuiltNativePolicyCoreDllHasExpectedAbiWhenProvided()
+    {
+        var libraryPath = Environment.GetEnvironmentVariable("AEGIS_NATIVE_POLICY_CORE_TEST_PATH");
+        if (string.IsNullOrWhiteSpace(libraryPath))
+            return;
+
+        var result = NativePolicyCoreGate.ProbeLibrary(libraryPath);
+
+        Assert.True(result.AllowsPlatformBroker);
+        Assert.Null(result.DenialCode);
+    }
+
+    [Fact]
     public void DestroyedSessionCannotCreateNewAuthorizations()
     {
         var broker = CreateRegisteredBroker();

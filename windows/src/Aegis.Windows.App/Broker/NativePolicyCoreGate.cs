@@ -18,7 +18,18 @@ public static class NativePolicyCoreGate
         if (!string.Equals(Environment.GetEnvironmentVariable(EnableEnvironmentVariable), "1", StringComparison.Ordinal))
             return NativePolicyCoreGateResult.Disabled();
 
-        if (!NativeLibrary.TryLoad("aegis_policy_core", out var handle))
+        return ProbeLibrary("aegis_policy_core");
+    }
+
+    /// <summary>
+    /// 探测指定的策略核心库。仅供启动期门禁和构建制品测试使用；失败信息不包含本机绝对路径。
+    /// </summary>
+    public static NativePolicyCoreGateResult ProbeLibrary(string libraryNameOrPath)
+    {
+        if (string.IsNullOrWhiteSpace(libraryNameOrPath))
+            return NativePolicyCoreGateResult.Block("native_policy_core_path_invalid");
+
+        if (!NativeLibrary.TryLoad(libraryNameOrPath, out var handle))
             return NativePolicyCoreGateResult.Block("native_policy_core_unavailable");
 
         try
