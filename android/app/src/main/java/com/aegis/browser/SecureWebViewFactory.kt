@@ -40,14 +40,18 @@ object SecureWebViewFactory {
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
         val sessionSeed = newSessionSeed()
         installDocumentStartScripts(webView, sessionSeed)
-        webView.webViewClient =
+        val client =
             AegisWebViewClient(
                 broker = broker,
                 sessionId = sessionId,
                 tabId = "tab-$sessionId",
                 onRendererGone = { /* renderer gone cleanup handled by caller */ },
             )
-        webView.setTag(navigatorTagKey, SecureNavigator(webView, webView.webViewClient as AegisWebViewClient))
+        webView.webViewClient = client
+        webView.setTag(
+            navigatorTagKey,
+            SecureNavigator(webView, client),
+        )
         return webView
     }
 
@@ -56,14 +60,25 @@ object SecureWebViewFactory {
         webView.getTag(navigatorTagKey) as? SecureNavigator
 
     /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */
-    private fun installDocumentStartScripts(webView: WebView, sessionSeed: String) {
+    private fun installDocumentStartScripts(
+        webView: WebView,
+        sessionSeed: String,
+    ) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             android.util.Log.w("Aegis", "WebView 不支持 document-start 脚本；隐私增强未启用")
             return
         }
         val allowedOrigins = setOf("https://*", "http://*")
-        WebViewCompat.addDocumentStartJavaScript(webView, fingerprintShieldScript(sessionSeed), allowedOrigins)
-        WebViewCompat.addDocumentStartJavaScript(webView, BRIDGE_GUARD_JS, allowedOrigins)
+        WebViewCompat.addDocumentStartJavaScript(
+            webView,
+            fingerprintShieldScript(sessionSeed),
+            allowedOrigins,
+        )
+        WebViewCompat.addDocumentStartJavaScript(
+            webView,
+            BRIDGE_GUARD_JS,
+            allowedOrigins,
+        )
     }
 
     /** 获取 broker 实例（供外部校验/审计）。 */
@@ -108,7 +123,7 @@ object SecureWebViewFactory {
 
     /** 指纹防护 JS（管道化组合——参照 Rust fingerprint_pipeline）。 */
     private fun fingerprintShieldScript(sessionSeed: String): String =
-            """
+        """
 window.__AEGIS_PROTECTION_VERSION = '1';
 // === Stage 1: ToStringGuard（参照 playwright-afp MIT）===
 (function() {
@@ -268,7 +283,7 @@ window.__AEGIS_PROTECTION_VERSION = '1';
     };
   } catch(e) {}
 })();
-            """.trimIndent()
+        """.trimIndent()
 }
 
 /** 将 URL 规范化、Broker 授权和 WebView 副作用收敛到单一路径。 */
