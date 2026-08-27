@@ -80,6 +80,37 @@ class AndroidBrokerTest {
     }
 
     @Test
+    fun requiredNativePolicyCoreFailureClosesNavigationAndConsumption() {
+        val broker = AndroidBroker(
+            nativePolicyCoreGate = NativePolicyCoreGate {
+                NativePolicyCoreGateResult.block("native_policy_core_unavailable")
+            },
+        )
+        assertTrue(broker.registerSession("session-1", "tab-1"))
+
+        val denied = broker.evaluateNavigation(
+            "session-1",
+            "tab-1",
+            0,
+            "https://example.com",
+            "navigation",
+        )
+
+        assertTrue(denied is Decision.Deny)
+        assertTrue((denied as Decision.Deny).reason.code == "native_policy_core_unavailable")
+        assertFalse(
+            broker.consumeNavigation(
+                null,
+                "session-1",
+                "tab-1",
+                0,
+                "https://example.com",
+                "navigation",
+            ),
+        )
+    }
+
+    @Test
     fun destroyingSessionInvalidatesFutureNavigation() {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("session-1", "tab-1"))

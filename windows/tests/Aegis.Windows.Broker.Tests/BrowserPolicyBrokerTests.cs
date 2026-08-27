@@ -58,6 +58,20 @@ public sealed class BrowserPolicyBrokerTests
     }
 
     [Fact]
+    public void RequiredNativePolicyCoreFailureClosesNavigationAndConsumption()
+    {
+        var broker = new BrowserPolicyBroker(
+            () => NativePolicyCoreGateResult.Block("native_policy_core_unavailable"));
+        Assert.True(broker.RegisterSession("session-1", "tab-1"));
+
+        var denied = Assert.IsType<Decision.Deny>(
+            broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation"));
+
+        Assert.Equal("native_policy_core_unavailable", denied.Reason.Code);
+        Assert.False(broker.TryConsumeNavigation(null, "session-1", "tab-1", 0, "https://example.com", "navigation"));
+    }
+
+    [Fact]
     public void DestroyedSessionCannotCreateNewAuthorizations()
     {
         var broker = CreateRegisteredBroker();

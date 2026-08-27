@@ -13,6 +13,7 @@ package com.aegis.broker
 class AndroidBroker(
     private val policyVersion: String = "1.0",
     private val mode: BrokerMode = BrokerMode.FirstMatch,
+    private val nativePolicyCoreGate: NativePolicyCoreGate = DefaultNativePolicyCoreGate,
 ) {
     private val consumedNonces = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, SessionContext>()
@@ -53,6 +54,13 @@ class AndroidBroker(
         rawUrl: String,
         scope: String,
     ): Decision {
+        val nativeGate = nativePolicyCoreGate.probe()
+        if (!nativeGate.allowsPlatformBroker) {
+            return deny(
+                nativeGate.denialCode ?: "native_policy_core_unavailable",
+                "已启用的原生策略核心不可用或不兼容",
+            )
+        }
         val session = sessions[sessionId]
             ?: return deny("session_not_found", "会话不存在或已销毁")
         if (session.tabId != tabId) return deny("tab_mismatch", "标签与会话不匹配")
@@ -96,6 +104,7 @@ class AndroidBroker(
         rawUrl: String,
         scope: String,
     ): Boolean {
+        if (!nativePolicyCoreGate.probe().allowsPlatformBroker) return false
         val uri = OriginPolicy.tryParseExternal(rawUrl) ?: return false
         return synchronized(authorizationLock) {
             if (!isValid(action, currentGeneration) || action == null) return@synchronized false

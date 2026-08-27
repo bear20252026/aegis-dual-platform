@@ -14,6 +14,12 @@ public sealed class BrowserPolicyBroker
     private readonly Dictionary<string, SessionContext> _sessions = new(StringComparer.Ordinal);
     private readonly object _nonceLock = new();
     private readonly object _sessionLock = new();
+    private readonly Func<NativePolicyCoreGateResult> _nativePolicyCoreGate;
+
+    public BrowserPolicyBroker(Func<NativePolicyCoreGateResult>? nativePolicyCoreGate = null)
+    {
+        _nativePolicyCoreGate = nativePolicyCoreGate ?? NativePolicyCoreGate.ProbeFromEnvironment;
+    }
 
     /// <summary>注册由受控 WebView 创建的会话；未知会话上的副作用一律拒绝。</summary>
     public bool RegisterSession(string sessionId, string tabId, ulong generation = 0)
@@ -57,6 +63,8 @@ public sealed class BrowserPolicyBroker
     public Decision EvaluateNavigation(string sessionId, string tabId, ulong generation,
         string rawUrl, string scope)
     {
+        if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
+            return nativeDenied;
         if (!HasCurrentSession(sessionId, tabId, generation))
         {
             RecordAudit("deny", scope, rawUrl, "session_context");
@@ -86,6 +94,8 @@ public sealed class BrowserPolicyBroker
     public bool TryConsumeNavigation(AuthorizedAction? action, string sessionId, string tabId,
         ulong currentGeneration, string rawUrl, string scope)
     {
+        if (!_nativePolicyCoreGate().AllowsPlatformBroker)
+            return false;
         if (action is null || !OriginPolicy.TryParseExternal(rawUrl, out var uri))
             return false;
         // 与 DestroySession 使用相同锁序列，避免会话销毁后仍可消费旧授权。
@@ -111,6 +121,23 @@ public sealed class BrowserPolicyBroker
     {
         _auditLog.Add(new Audit.AuditEvent(
             Guid.NewGuid().ToString("N"), DateTime.UtcNow, decision, scope, origin, reason));
+    }
+
+    private bool AllowsNavigationUnderNativePolicyRequirement(
+        string scope,
+        string rawUrl,
+        out Decision.Deny nativeDenied)
+    {
+        var result = _nativePolicyCoreGate();
+        if (result.AllowsPlatformBroker)
+        {
+            nativeDenied = null!;
+            return true;
+        }
+        var code = result.DenialCode ?? "native_policy_core_unavailable";
+        RecordAudit("deny", scope, "native-policy-core", code);
+        nativeDenied = new Decision.Deny(new DenyReason(code, "已启用的原生策略核心不可用或不兼容"));
+        return false;
     }
 
     private bool HasCurrentSession(string sessionId, string tabId, ulong generation)

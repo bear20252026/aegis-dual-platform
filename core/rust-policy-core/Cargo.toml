@@ -10,6 +10,14 @@ license = "MIT"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+[features]
+uniffi-bindgen = ["uniffi/cli"]
+
+[[bin]]
+name = "aegis-uniffi-bindgen"
+path = "src/bin/aegis_uniffi_bindgen.rs"
+required-features = ["uniffi-bindgen"]
+
 [dependencies]
 # 最小 crate 依赖（蓝图：最小依赖 + 固定 toolchain + cargo audit/deny——CI 门禁）
 ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }

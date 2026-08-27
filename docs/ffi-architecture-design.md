@@ -17,7 +17,7 @@
 | **Opaque Handle** | 不透明指针——Rust 类型在 C 侧表现为 `void*`，生命周期由 Rust 管理 | rustbridge |
 | **JSON Transport** | 复杂数据通过 JSON 字符串跨 FFI 边界，避免手动序列化 | rustbridge |
 | **Panic Guard** | `catch_unwind` 包装——Rust panic 不会跨 FFI 边界传播 | rustbridge |
-| **UniFFI** | Mozilla 的 Rust→Kotlin/Swift/Python 绑定生成器 | Mozilla/HyperWhisper |
+| **UniFFI** | Mozilla 的 Rust→Kotlin/Swift/Python 绑定生成器 | Mozilla |
 | **PyO3** | Rust→Python 绑定库（成熟，★12k+） | PyO3 |
 | **cbindgen** | Rust→C 头文件生成器（用于 C# P/Invoke） | Mozilla |
 
@@ -74,7 +74,8 @@
 │  │ uniffi-bindgen                  │    │
 │  │ 自动生成：                       │    │
 │  │  ├── aegis_core.swift (macOS)   │    │
-│  │  ├── aegis_core.cs (Windows)    │    │
+│  │  ├── Kotlin/Swift/Python 官方绑定 │    │
+│  │  └── C# 仅可使用第三方生成器     │    │
 │  │  ├── aegis_core.kt (Android)    │    │
 │  │  └── aegis_core.py (Python)     │    │
 │  └─────────────────────────────────┘    │
@@ -119,19 +120,19 @@
 
 | 方案 | 优势 | 劣势 | 适用性 |
 |------|------|------|--------|
-| **UniFFI** | 自动生成 Kotlin/Swift/Python 绑定；Mozilla 维护 | C# 支持依赖社区（uniffi-bindgen-cs）；版本锁定 | ★★★ 首选 |
+| **UniFFI** | 自动生成 Kotlin/Swift/Python 绑定；Mozilla 维护 | C# 不属官方支持范围；版本锁定 | ★★★ Android 首选 |
 | **PyO3** | Python 绑定最成熟（★12k） | 仅 Python；C#/Kotlin 需其他方案 | ★★☆ Python 专用 |
 | **cbindgen + P/Invoke** | C# 原生支持；成熟 | Kotlin 需 JNI；Python 需 ctypes | ★★☆ C# 优先 |
 | **rustbridge** | 全语言支持；JSON 传输 | 较新（★少）；引入运行时依赖 | ★★☆ 参考 |
 | **C ABI 直连** | 零依赖；最大控制 | 手动管理内存/生命周期；样板代码多 | ★☆☆ 备选 |
 
-### 2.3 推荐方案：UniFFI（主） + PyO3（Python 备选）
+### 2.3 推荐方案：UniFFI（Android） + 最小 C ABI/PInvoke（Windows）
 
 **理由**：
-1. UniFFI 由 Mozilla 维护，HyperWhisper 已验证 C#/Kotlin/Swift 全平台
-2. `#[uniffi::export]` 宏自动处理 FFI 边界的内存管理/类型转换
-3. 绑定代码自动生成——Rust 改一处，三语言绑定同步更新
-4. Python 可用 UniFFI 的 Python 绑定或 PyO3（更成熟）
+1. UniFFI 由 Mozilla 维护，并官方支持 Kotlin；生成器和 Rust crate 必须由同一锁定版本提供。
+2. Windows 不把第三方 C# 生成器放在安全关键路径；以小型版本化 C ABI 和 P/Invoke 控制 ABI、内存与错误边界。
+3. 原生库缺失或 ABI 校验失败时，开启原生策略开关的会话必须失败闭合，不得静默回退。
+4. Python 属 legacy 路线，不是现役 Windows 出货线的依赖。
 
 ---
 
