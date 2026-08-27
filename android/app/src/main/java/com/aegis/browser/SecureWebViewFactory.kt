@@ -305,8 +305,14 @@ class SecureNavigator internal constructor(
 
     fun navigateHistory(action: HistoryAction): Boolean =
         when (action) {
-            HistoryAction.BACK -> webView.canGoBack().also { if (it) webView.goBack() }
-            HistoryAction.FORWARD -> webView.canGoForward().also { if (it) webView.goForward() }
+            HistoryAction.BACK -> {
+                webView.canGoBack().also { if (it) webView.goBack() }
+            }
+
+            HistoryAction.FORWARD -> {
+                webView.canGoForward().also { if (it) webView.goForward() }
+            }
+
             HistoryAction.RELOAD -> {
                 webView.reload()
                 true
