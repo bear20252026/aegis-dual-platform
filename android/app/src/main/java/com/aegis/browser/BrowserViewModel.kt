@@ -72,7 +72,10 @@ class BrowserViewModel : ViewModel() {
 
     /** 关闭指定标签。 */
     fun closeTab(index: Int) {
-        if (!::tabManager.isInitialized) return
+        if (!::tabManager.isInitialized || tabManager.size <= 1) return
+        tabManager.list().getOrNull(index)?.let { tab ->
+            SecureWebViewFactory.navigatorFor(tab.webView)?.close()
+        }
         tabManager.closeTab(index)
         refresh()
     }
@@ -94,10 +97,8 @@ class BrowserViewModel : ViewModel() {
     /** 历史导航（后退/前进/刷新——合并减少函数数——detekt TooManyFunctions）。 */
     fun navigateHistory(action: HistoryAction) {
         val wv = tabManager.current()?.webView ?: return
-        when (action) {
-            HistoryAction.BACK -> wv.goBack()
-            HistoryAction.FORWARD -> wv.goForward()
-            HistoryAction.RELOAD -> wv.reload()
+        if (!SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(action).orFalse()) {
+            _webViewAlert.value = "当前标签没有可执行的历史导航操作"
         }
     }
 

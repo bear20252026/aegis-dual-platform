@@ -8,10 +8,16 @@ name: Android-Quality
   push:
     paths:
       - "android/**"
+      - "shared/version.properties"
+      - "scripts/sync_versions.py"
+      - "scripts/verify_versions.py"
       - ".github/workflows/android-quality.yml"
   pull_request:
     paths:
       - "android/**"
+      - "shared/version.properties"
+      - "scripts/sync_versions.py"
+      - "scripts/verify_versions.py"
   workflow_dispatch: {}
 
 jobs:
@@ -49,8 +55,14 @@ jobs:
       - name: ktlint 检查（0 错误门禁）
         run: ./gradlew.bat :app:ktlintCheck --no-daemon
 
+      - name: Verify shared product version declarations
+        run: python ../scripts/verify_versions.py
+
       - name: detekt 检查（基线门禁：仅新问题失败）
         run: ./gradlew.bat :app:detekt --no-daemon
+
+      - name: Broker 授权生命周期单元测试
+        run: ./gradlew.bat :broker:testDebugUnitTest --no-daemon
 
       - name: 上传 detekt 报告（排障用）
         if: always()

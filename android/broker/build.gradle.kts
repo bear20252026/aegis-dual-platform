@@ -17,4 +17,5 @@ android {
 
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
+    testImplementation("junit:junit:4.13.2")
 }

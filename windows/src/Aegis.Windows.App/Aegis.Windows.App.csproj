@@ -8,6 +8,11 @@
     <AssemblyName>Aegis.Windows.App</AssemblyName>
     <RootNamespace>Aegis.Windows</RootNamespace>
     <StartupObject>Aegis.Windows.Program</StartupObject>
+    <Version>2.1.6</Version>
+    <AssemblyVersion>2.1.6.0</AssemblyVersion>
+    <FileVersion>2.1.6.0</FileVersion>
+    <PackageId>Aegis.Project.AegisWebView</PackageId>
+    <Product>Aegis WebView</Product>
   </PropertyGroup>
   <ItemGroup>
     <!-- WebView2 SDK（阶段 C：WPF + 原生 WebView2——调研交叉比对选型：

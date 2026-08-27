@@ -72,13 +72,23 @@ class AegisWebViewClient(
 
     override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
         documentGeneration += 1
+        broker.updateDocumentGeneration(sessionId, tabId, documentGeneration)
         onRendererGone(view)
         return true
     }
 
     override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
         documentGeneration += 1
+        if (!broker.updateDocumentGeneration(sessionId, tabId, documentGeneration)) {
+            android.util.Log.e("Aegis", "未注册或陈旧会话尝试加载页面；已停止加载")
+            view.stopLoading()
+        }
         super.onPageStarted(view, url, favicon)
+    }
+
+    /** 标签关闭时显式释放 Broker 会话，禁止遗留 WebView 再消费旧授权。 */
+    fun close() {
+        broker.destroySession(sessionId)
     }
 
     // 安全回调（从 BrowserEngine.configure() 移入——单路径收敛——专家审计）：

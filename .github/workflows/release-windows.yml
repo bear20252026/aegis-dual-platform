@@ -37,6 +37,14 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: '10.0.x'
+      - name: Verify shared version and release tag
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            python scripts/verify_versions.py --tag "${{ github.ref_name }}"
+          } else {
+            python scripts/verify_versions.py
+          }
       - name: Build current Windows application
         run: |
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `

@@ -15,6 +15,27 @@ class AndroidBroker(
     private val mode: BrokerMode = BrokerMode.FirstMatch,
 ) {
     private val consumedNonces = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val sessions = java.util.concurrent.ConcurrentHashMap<String, SessionContext>()
+
+    /** 注册由受控 WebView 创建的会话；未知会话上的所有副作用均应被拒绝。 */
+    fun registerSession(sessionId: String, tabId: String, generation: Long = 0): Boolean {
+        if (sessionId.isBlank() || tabId.isBlank() || generation < 0) return false
+        return sessions.putIfAbsent(sessionId, SessionContext(tabId, generation)) == null
+    }
+
+    /** 文档代际推进后立即同步；拒绝由已销毁或错标签会话发起的更新。 */
+    fun updateDocumentGeneration(sessionId: String, tabId: String, generation: Long): Boolean {
+        val session = sessions[sessionId] ?: return false
+        if (session.tabId != tabId || generation < session.documentGeneration) return false
+        session.documentGeneration = generation
+        return true
+    }
+
+    /** 关闭标签时销毁会话并移除其已消费 nonce，避免状态残留。 */
+    fun destroySession(sessionId: String) {
+        sessions.remove(sessionId)
+        consumedNonces.removeIf { nonce -> nonce.startsWith("$sessionId:") }
+    }
 
     /** 评估导航意图（ProposedAction → Decision——默认拒绝——fail-closed）。 */
     fun evaluateNavigation(
@@ -24,29 +45,37 @@ class AndroidBroker(
         rawUrl: String,
         scope: String,
     ): Decision {
+        val session = sessions[sessionId]
+            ?: return deny("session_not_found", "会话不存在或已销毁")
+        if (session.tabId != tabId) return deny("tab_mismatch", "标签与会话不匹配")
+        if (session.documentGeneration != generation) {
+            return deny("generation_mismatch", "文档代际与会话状态不匹配")
+        }
         val uri = OriginPolicy.tryParseExternal(rawUrl)
-            ?: return Decision.Deny(
-                DenyReason("url_policy", "拒绝 URL: $rawUrl", explanation = "denied origin — URL parsing failed: $rawUrl — policy version $policyVersion"),
-            )
+            ?: return deny("url_policy", "拒绝 URL: $rawUrl")
         val origin = canonicalOrigin(uri)
         val action = AuthorizedAction(
             sessionId = sessionId, tabId = tabId, documentGeneration = generation,
             origin = origin, method = "GET", canonicalParameters = canonicalPathAndQuery(uri),
             scope = scope, expiresAt = kotlinx.datetime.Clock.System.now()
                 .plus(kotlin.time.Duration.parse("120s")),
-            nonce = java.util.UUID.randomUUID().toString().replace("-", ""),
+            nonce = "$sessionId:${java.util.UUID.randomUUID().toString().replace("-", "")}",
             policyVersion = policyVersion,
             explanation = "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion",
         )
         return Decision.Allow(action)
     }
 
-    /** 校验 AuthorizedAction 是否仍有效（代际/过期/策略版本——fail-closed）。 */
-    fun isValid(action: AuthorizedAction?, currentGeneration: Long): Boolean =
-        action != null
-            && action.policyVersion == policyVersion
-            && action.documentGeneration == currentGeneration
-            && action.expiresAt > kotlinx.datetime.Clock.System.now()
+    /** 校验 AuthorizedAction 是否仍有效（会话/标签/代际/过期/策略版本——fail-closed）。 */
+    fun isValid(action: AuthorizedAction?, currentGeneration: Long): Boolean {
+        val presentAction = action ?: return false
+        val session = sessions[presentAction.sessionId] ?: return false
+        return presentAction.policyVersion == policyVersion &&
+            presentAction.tabId == session.tabId &&
+            presentAction.documentGeneration == currentGeneration &&
+            presentAction.documentGeneration == session.documentGeneration &&
+            presentAction.expiresAt > kotlinx.datetime.Clock.System.now()
+    }
 
     /** 在实际导航前校验上下文并消费 nonce，避免授权对象被跨标签或跨请求重放。 */
     fun consumeNavigation(
@@ -67,6 +96,15 @@ class AndroidBroker(
         return consumedNonces.add(action.nonce)
     }
 
+    private fun deny(code: String, detail: String): Decision.Deny =
+        Decision.Deny(
+            DenyReason(
+                code,
+                detail,
+                explanation = "denied — $detail — policy version $policyVersion",
+            ),
+        )
+
     private fun canonicalOrigin(uri: java.net.URI): String {
         val scheme = uri.scheme.lowercase()
         val port = uri.port
@@ -79,6 +117,11 @@ class AndroidBroker(
         val path = uri.rawPath?.ifEmpty { "/" } ?: "/"
         return uri.rawQuery?.let { "$path?$it" } ?: path
     }
+
+    private data class SessionContext(
+        val tabId: String,
+        @Volatile var documentGeneration: Long,
+    )
 }
 
 /** 评估模式（照搬 warden Mode——FirstMatch/DenyOverrides）。 */

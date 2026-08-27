@@ -7,6 +7,9 @@ name: Contracts
       - 'core/rust-policy-core/**'
       - 'windows/src/Aegis.Windows.App/**'
       - 'android/**'
+      - 'scripts/sync_versions.py'
+      - 'scripts/verify_versions.py'
+      - 'shared/version.properties'
       - '.github/workflows/contracts.yml'
   pull_request:
     paths:
@@ -14,6 +17,9 @@ name: Contracts
       - 'core/rust-policy-core/**'
       - 'windows/src/Aegis.Windows.App/**'
       - 'android/**'
+      - 'scripts/sync_versions.py'
+      - 'scripts/verify_versions.py'
+      - 'shared/version.properties'
       - '.github/workflows/contracts.yml'
   workflow_dispatch: {}
 
@@ -28,6 +34,8 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
+      - name: Verify shared product version declarations
+        run: python scripts/verify_versions.py
       - name: Validate contracts JSON and expected decisions
         run: |
           python - <<'PYEOF'
@@ -72,6 +80,8 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Compile Windows broker and generated contracts
         run: dotnet build windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj --configuration Release
+      - name: Test Windows broker authorization lifecycle
+        run: dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release
 
   android-contract-build:
     runs-on: windows-latest

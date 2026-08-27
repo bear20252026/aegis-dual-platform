@@ -39,13 +39,15 @@ object SecureWebViewFactory {
         val webView = WebView(context)
         BrowserEngine(webView).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
+        val tabId = "tab-$sessionId"
+        check(broker.registerSession(sessionId, tabId)) { "无法注册安全浏览会话" }
         val sessionSeed = newSessionSeed()
         installDocumentStartScripts(webView, sessionSeed)
         val client =
             AegisWebViewClient(
                 broker = broker,
                 sessionId = sessionId,
-                tabId = "tab-$sessionId",
+                tabId = tabId,
                 onRendererGone = { /* renderer gone cleanup handled by caller */ },
             )
         webView.webViewClient = client
@@ -299,5 +301,19 @@ class SecureNavigator internal constructor(
     fun navigateExternal(input: String): Boolean {
         val normalized = BrowserEngine.normalizeExternal(input) ?: return false
         return client.navigate(webView, normalized)
+    }
+
+    fun navigateHistory(action: HistoryAction): Boolean =
+        when (action) {
+            HistoryAction.BACK -> webView.canGoBack().also { if (it) webView.goBack() }
+            HistoryAction.FORWARD -> webView.canGoForward().also { if (it) webView.goForward() }
+            HistoryAction.RELOAD -> {
+                webView.reload()
+                true
+            }
+        }
+
+    fun close() {
+        client.close()
     }
 }
