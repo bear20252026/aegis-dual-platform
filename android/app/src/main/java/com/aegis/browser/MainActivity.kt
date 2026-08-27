@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
                 val address by viewModel.address.collectAsState()
                 val tabsPosition by viewModel.tabsPosition.collectAsState()
                 val webViewAlert by viewModel.webViewAlert.collectAsState()
+                val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsState()
 
                 // A1：版本过旧 → 安全提示对话框（CVE-2026-12438/11295 防御）
                 webViewAlert?.let { msg ->
@@ -72,6 +73,32 @@ class MainActivity : ComponentActivity() {
                         },
                         dismissButton = {
                             TextButton(onClick = { viewModel.setWebViewAlert(null) }) { Text("稍后") }
+                        },
+                    )
+                }
+
+                // 受信 Compose chrome 审批层：远程页面没有该回调或授权对象；默认关闭即拒绝。
+                pendingConfirmation?.let { pending ->
+                    AlertDialog(
+                        onDismissRequest = { viewModel.rejectPendingNavigationConfirmation() },
+                        title = { Text("需要确认的导航") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("来源：${pending.request.origin}")
+                                Text("路径与查询：${pending.request.path}")
+                                Text("权限范围：${pending.request.scope}")
+                                Text("此请求将在 ${pending.request.expiresAt} 过期。")
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { viewModel.approvePendingNavigationConfirmation() }) {
+                                Text("批准并继续")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { viewModel.rejectPendingNavigationConfirmation() }) {
+                                Text("拒绝")
+                            }
                         },
                     )
                 }

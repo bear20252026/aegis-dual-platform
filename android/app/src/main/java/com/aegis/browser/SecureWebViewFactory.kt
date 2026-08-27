@@ -6,6 +6,7 @@ import android.webkit.WebView
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.aegis.broker.AndroidBroker
+import com.aegis.broker.ApprovalRequest
 import com.aegis.webviewadapter.AegisWebViewClient
 import java.util.concurrent.atomic.AtomicLong
 
@@ -35,7 +36,11 @@ object SecureWebViewFactory {
     }
 
     /** 创建并完成安全配置的 WebView（导航经 Broker 决策 + 指纹防护注入）。 */
-    fun create(context: Context): WebView {
+    fun create(
+        context: Context,
+        onNavigationConfirmationRequested: (WebView, ApprovalRequest) -> Unit = { _, _ -> },
+        onNavigationConfirmationResolved: (WebView) -> Unit = {},
+    ): WebView {
         val webView = WebView(context)
         BrowserEngine(webView).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
@@ -49,6 +54,11 @@ object SecureWebViewFactory {
                 sessionId = sessionId,
                 tabId = tabId,
                 onRendererGone = { /* renderer gone cleanup handled by caller */ },
+                requireNavigationConfirmation = BuildConfig.REQUIRE_NAVIGATION_CONFIRMATION,
+                onNavigationConfirmationRequested = { request ->
+                    onNavigationConfirmationRequested(webView, request)
+                },
+                onNavigationConfirmationResolved = { onNavigationConfirmationResolved(webView) },
             )
         webView.webViewClient = client
         webView.setTag(

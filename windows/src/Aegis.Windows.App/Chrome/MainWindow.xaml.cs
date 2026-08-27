@@ -19,6 +19,8 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _host = new WebView.HostWebView(_broker, _sessionId);
+        _host.NavigationConfirmationRequested += OnNavigationConfirmationRequested;
+        _host.NavigationConfirmationResolved += OnNavigationConfirmationResolved;
         Browser.CoreWebView2InitializationCompleted += OnWebViewReady;
         Browser.Source = new Uri("about:blank");
     }
@@ -54,9 +56,41 @@ public partial class MainWindow : Window
     private void Refresh_Click(object sender, RoutedEventArgs e) => Browser.Reload();
     private void Stop_Click(object sender, RoutedEventArgs e) => Browser.Stop();
 
+    private void OnNavigationConfirmationRequested(
+        object? sender,
+        WebView.NavigationConfirmationRequestedEventArgs e)
+    {
+        ApprovalOrigin.Text = e.Request.Origin;
+        ApprovalPath.Text = e.Request.Path;
+        ApprovalScope.Text = e.Request.Scope;
+        ApprovalExpiry.Text = $"此请求将在 {e.Request.ExpiresAt.ToLocalTime():yyyy-MM-dd HH:mm:ss} 过期。";
+        ApprovalPanel.Visibility = Visibility.Visible;
+    }
+
+    private void OnNavigationConfirmationResolved(object? sender, EventArgs e) =>
+        ApprovalPanel.Visibility = Visibility.Collapsed;
+
+    private void ApprovalAllow_Click(object sender, RoutedEventArgs e)
+    {
+        if (Browser.CoreWebView2 is null || !_host.ApprovePendingNavigation(Browser.CoreWebView2))
+        {
+            ErrorPage.Text = "确认请求已失效、被拒绝或无法安全恢复导航。";
+            ErrorPage.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void ApprovalDeny_Click(object sender, RoutedEventArgs e)
+    {
+        _host.RejectPendingNavigation();
+        ErrorPage.Text = "已拒绝该导航请求。";
+        ErrorPage.Visibility = Visibility.Visible;
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         Browser.CoreWebView2InitializationCompleted -= OnWebViewReady;
+        _host.NavigationConfirmationRequested -= OnNavigationConfirmationRequested;
+        _host.NavigationConfirmationResolved -= OnNavigationConfirmationResolved;
         _host.Dispose();
         _broker.Dispose();
         Browser.Dispose();

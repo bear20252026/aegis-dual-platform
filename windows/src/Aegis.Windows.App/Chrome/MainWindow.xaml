@@ -12,7 +12,29 @@
       <Button x:Name="StopButton" Content="■" Click="Stop_Click" Width="32" ToolTip="停止"/>
       <TextBox x:Name="AddressBar" KeyDown="AddressBar_KeyDown" Margin="4,0" ToolTip="地址栏（导航经 Broker 决策——真实取消）"/>
     </DockPanel>
-    <wv2:WebView2 x:Name="Browser"/>
+    <Grid>
+      <wv2:WebView2 x:Name="Browser"/>
+      <!-- 受信 chrome 审批层：不由远程页面注入；默认取消，展示内容仅来自 Rust 核心确认请求。 -->
+      <Border x:Name="ApprovalPanel" Visibility="Collapsed" Panel.ZIndex="10"
+              HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"
+              Padding="20" Background="White" BorderBrush="#334155" BorderThickness="1"
+              CornerRadius="8">
+        <StackPanel>
+          <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+          <TextBlock Text="来源" FontWeight="SemiBold"/>
+          <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <TextBlock Text="路径与查询" FontWeight="SemiBold"/>
+          <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <TextBlock Text="权限范围" FontWeight="SemiBold"/>
+          <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Margin="0,0,0,8"/>
+          <TextBlock x:Name="ApprovalExpiry" Foreground="#475569" TextWrapping="Wrap" Margin="0,0,0,16"/>
+          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88" Margin="0,0,8,0"/>
+            <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112"/>
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </Grid>
     <!-- 阶段 C 错误页（导航失败——NavigationCompleted WebErrorStatus——安全错误可见） -->
     <TextBlock x:Name="ErrorPage" DockPanel.Dock="Top" Visibility="Collapsed"
                Foreground="DarkRed" Margin="8" TextWrapping="Wrap"/>
