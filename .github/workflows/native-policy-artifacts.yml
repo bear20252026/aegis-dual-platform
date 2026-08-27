@@ -111,11 +111,10 @@ jobs:
           for abi in arm64-v8a armeabi-v7a x86_64 x86; do
             grep -Fx "lib/$abi/libaegis_policy_core.so" <<< "$apk_entries"
           done
-      - name: Verify enabled Android native gate fails closed before adapter rollout
+      - name: Run full Android Broker tests with controlled native policy artifacts
         working-directory: android
         run: |
           bash ./gradlew :broker:testDebugUnitTest --no-daemon \
-            --tests com.aegis.broker.AndroidBrokerTest.defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore \
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
       - name: Upload Android policy libraries and Kotlin binding
