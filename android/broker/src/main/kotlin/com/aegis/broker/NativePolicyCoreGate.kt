@@ -20,6 +20,8 @@ data class NativePolicyCoreGateResult(
     companion object {
         fun disabled() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
 
+        fun enabled() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
+
         fun block(denialCode: String) = NativePolicyCoreGateResult(
             allowsPlatformBroker = false,
             denialCode = denialCode,
