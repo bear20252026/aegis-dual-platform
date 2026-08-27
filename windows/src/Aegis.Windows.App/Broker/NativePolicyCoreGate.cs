@@ -12,7 +12,8 @@ public static class NativePolicyCoreGate
 {
     public const string EnableEnvironmentVariable = "AEGIS_REQUIRE_NATIVE_POLICY_CORE";
     public const string LibraryPathEnvironmentVariable = "AEGIS_NATIVE_POLICY_CORE_PATH";
-    public const uint ExpectedAbiVersion = 1;
+    /// <summary>C ABI v2 要求确认请求携带完整的审批绑定字段。</summary>
+    public const uint ExpectedAbiVersion = 2;
 
     public static bool IsRequired =>
         string.Equals(Environment.GetEnvironmentVariable(EnableEnvironmentVariable), "1", StringComparison.Ordinal);

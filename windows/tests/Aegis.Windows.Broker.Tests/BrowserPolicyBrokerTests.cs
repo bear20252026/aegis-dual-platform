@@ -112,7 +112,7 @@ public sealed class BrowserPolicyBrokerTests
     public void NativePolicyCoreBridgeMapsCompleteConfirmationRequest()
     {
         var decision = NativePolicyCoreBridge.ParseDecisionPayload("""
-            {"abi_version":1,"decision":"require_confirmation","request":{
+            {"abi_version":2,"decision":"require_confirmation","request":{
               "origin":"https://payments.example","method":"POST","path":"/transfers",
               "scope":"payment:create","expires_at":1700000000,"nonce":"approval-nonce"}}
             """);
@@ -124,6 +124,18 @@ public sealed class BrowserPolicyBrokerTests
         Assert.Equal("payment:create", confirmation.Request.Scope);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1_700_000_000).UtcDateTime, confirmation.Request.ExpiresAt);
         Assert.Equal("approval-nonce", confirmation.Request.Nonce);
+    }
+
+    [Fact]
+    public void NativePolicyCoreBridgeRejectsPreviousAbiResponse()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            NativePolicyCoreBridge.ParseDecisionPayload("""
+                {"abi_version":1,"decision":"deny","reason":{
+                  "code":"legacy","detail":"legacy ABI","explanation":"denied"}}
+                """));
+
+        Assert.Contains("ABI", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]

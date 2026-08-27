@@ -127,7 +127,7 @@ class AndroidBrokerTest {
     fun nativeDecisionJsonMapsAuthorizationFieldsAndDenyReason() {
         val allow = NativePolicyCoreBridge.parseDecisionJson(
             """{
-                "abi_version":1,"decision":"allow","action":{
+                "abi_version":2,"decision":"allow","action":{
                 "session_id":"native-session","tab_id":"native-tab","document_generation":2,
                 "origin":"https://example.com","method":"GET","canonical_parameters":"/path?x=1",
                 "scope":"navigation","expires_at":1700000000,"nonce":"nonce-1","policy_version":"1.0",
@@ -141,13 +141,13 @@ class AndroidBrokerTest {
         assertEquals(1_700_000_000, allow.action.expiresAt.epochSeconds)
 
         val deny = NativePolicyCoreBridge.parseDecisionJson(
-            """{"abi_version":1,"decision":"deny","reason":{
+            """{"abi_version":2,"decision":"deny","reason":{
                 "code":"nonce_replay","detail":"nonce already consumed","explanation":"denied"}}""",
         ) as Decision.Deny
         assertEquals("nonce_replay", deny.reason.code)
 
         val confirmation = NativePolicyCoreBridge.parseDecisionJson(
-            """{"abi_version":1,"decision":"require_confirmation","request":{
+            """{"abi_version":2,"decision":"require_confirmation","request":{
                 "origin":"https://payments.example","method":"POST","path":"/transfers",
                 "scope":"payment:create","expires_at":1700000000,"nonce":"approval-nonce"}}""",
         ) as Decision.RequireConfirmation
@@ -157,6 +157,18 @@ class AndroidBrokerTest {
         assertEquals("payment:create", confirmation.request.scope)
         assertEquals(1_700_000_000, confirmation.request.expiresAt.epochSeconds)
         assertEquals("approval-nonce", confirmation.request.nonce)
+    }
+
+    @Test
+    fun nativeDecisionJsonRejectsPreviousAbiVersion() {
+        val exception = runCatching {
+            NativePolicyCoreBridge.parseDecisionJson(
+                """{"abi_version":1,"decision":"deny","reason":{
+                    "code":"legacy","detail":"legacy ABI","explanation":"denied"}}""",
+            )
+        }.exceptionOrNull()
+
+        assertTrue(exception is IllegalStateException)
     }
 
     @Test

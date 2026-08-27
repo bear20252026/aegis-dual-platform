@@ -30,7 +30,8 @@ data class NativePolicyCoreGateResult(
 }
 
 object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
-    private const val expectedAbiVersion = 1
+    // C ABI v2 要求确认请求携带完整的审批绑定字段。
+    private const val expectedAbiVersion = 2
 
     override fun probe(): NativePolicyCoreGateResult {
         if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return NativePolicyCoreGateResult.disabled()

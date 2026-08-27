@@ -119,7 +119,8 @@ class NativePolicyCoreBridge private constructor(
     }
 
     companion object {
-        private const val expectedAbiVersion = 1
+        // C ABI v2 要求确认请求携带完整的审批绑定字段。
+        private const val expectedAbiVersion = 2
 
         fun tryCreate(policyVersion: String): NativePolicyCoreBridge? = try {
             val native = Native.load("aegis_policy_core", NativePolicyCoreAbi::class.java)
