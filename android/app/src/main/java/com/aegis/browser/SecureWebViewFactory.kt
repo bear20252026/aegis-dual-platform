@@ -122,6 +122,7 @@ object SecureWebViewFactory {
             """.trimIndent()
 
     /** 指纹防护 JS（管道化组合——参照 Rust fingerprint_pipeline）。 */
+    @Suppress("LongMethod") // 该方法仅承载版本化脚本文本，不包含 Android 业务控制流。
     private fun fingerprintShieldScript(sessionSeed: String): String =
         """
 window.__AEGIS_PROTECTION_VERSION = '1';
