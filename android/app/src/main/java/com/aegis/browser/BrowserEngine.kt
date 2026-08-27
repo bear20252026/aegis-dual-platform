@@ -109,5 +109,4 @@ class BrowserEngine(
         webView.clearCache(true)
         webView.clearHistory()
     }
-
 }

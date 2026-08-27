@@ -7,6 +7,7 @@ import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.aegis.broker.AndroidBroker
 import com.aegis.webviewadapter.AegisWebViewClient
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 安全 WebView 工厂（单文件单职责：统一创建带完整安全边界的 WebView）。
@@ -20,7 +21,7 @@ import com.aegis.webviewadapter.AegisWebViewClient
  */
 object SecureWebViewFactory {
     private val broker = AndroidBroker()
-    private val sessionCounter = java.util.concurrent.atomic.AtomicLong(0)
+    private val sessionCounter = AtomicLong(0)
     private val navigatorTagKey = View.generateViewId()
 
     /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
@@ -56,8 +57,7 @@ object SecureWebViewFactory {
     }
 
     /** 仅工厂创建的 WebView 才拥有受控导航器；不存在时调用方必须拒绝外部导航。 */
-    fun navigatorFor(webView: WebView): SecureNavigator? =
-        webView.getTag(navigatorTagKey) as? SecureNavigator
+    fun navigatorFor(webView: WebView): SecureNavigator? = webView.getTag(navigatorTagKey) as? SecureNavigator
 
     /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */
     private fun installDocumentStartScripts(
