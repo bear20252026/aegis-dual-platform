@@ -105,8 +105,10 @@ jobs:
           bash ./gradlew :app:assembleDebug --no-daemon \
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | \
-            grep -F 'lib/arm64-v8a/libaegis_policy_core.so'
+          apk_entries="$(unzip -Z1 app/build/outputs/apk/debug/app-debug.apk)"
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            grep -Fx "lib/$abi/libaegis_policy_core.so" <<< "$apk_entries"
+          done
       - name: Verify enabled Android native gate fails closed before adapter rollout
         working-directory: android
         run: |
