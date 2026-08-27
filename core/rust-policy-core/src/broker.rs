@@ -136,13 +136,13 @@ impl ContextBroker {
     /// 现在 evaluate 串联 policy + capability + session 三层检查。
     pub fn evaluate(&mut self, action: &AuthorizedAction) -> Decision {
         // ===== 第 1 层：策略评估 =====
-        let verdict = self
-            .policy_engine
-            .evaluate(&action.scope, &action.origin);
+        let verdict = self.policy_engine.evaluate(&action.scope, &action.origin);
         match verdict.decision {
             Decision::Allow(_) => {} // 策略允许，继续下一层
             Decision::Deny(reason) => return Decision::Deny(reason),
-            Decision::RequireConfirmation(request) => return Decision::RequireConfirmation(request),
+            Decision::RequireConfirmation(request) => {
+                return Decision::RequireConfirmation(request)
+            }
         }
 
         // ===== 第 2 层：能力验证 =====
@@ -351,11 +351,7 @@ mod tests {
             max_uses: None,
             uses_count: 0,
         });
-        ContextBroker::new(
-            "1.0".into(),
-            PolicyEngine::default(),
-            registry,
-        )
+        ContextBroker::new("1.0".into(), PolicyEngine::default(), registry)
     }
 
     #[test]

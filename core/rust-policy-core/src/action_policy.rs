@@ -68,7 +68,9 @@ impl ActionPolicy {
             None => match &self.default_effect {
                 RuleEffect::Deny => PolicyDecision::Deny("no rule matched — default deny".into()),
                 RuleEffect::Ask => PolicyDecision::Ask("no rule matched — default ask".into()),
-                RuleEffect::Allow => PolicyDecision::Allow("no rule matched — default allow".into()),
+                RuleEffect::Allow => {
+                    PolicyDecision::Allow("no rule matched — default allow".into())
+                }
             },
         }
     }

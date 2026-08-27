@@ -10,8 +10,8 @@
 //! - setup_scaffolding!() 在 crate 根调用（官方要求）
 //! - library mode 绑定生成（官方推荐——proc-macro 必须用 library mode）
 
-use crate::decision::{AuthorizedAction, Decision, DenyReason};
 use crate::capability::CapabilityRegistry;
+use crate::decision::{AuthorizedAction, Decision, DenyReason};
 use crate::policy::PolicyEngine;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};

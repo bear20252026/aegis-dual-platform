@@ -138,16 +138,16 @@ impl LocalPolicy for DefaultLocalPolicy {
                 detail: explanation.clone(),
                 explanation,
             }),
-            PolicyDecision::Ask(_explanation) => Decision::RequireConfirmation(
-                crate::decision::ApprovalRequest {
+            PolicyDecision::Ask(_explanation) => {
+                Decision::RequireConfirmation(crate::decision::ApprovalRequest {
                     origin: context.to_string(),
                     method: String::new(),
                     path: String::new(),
                     scope: action.to_string(),
                     expires_at: 0,
                     nonce: String::new(),
-                },
-            ),
+                })
+            }
         })
     }
 }
