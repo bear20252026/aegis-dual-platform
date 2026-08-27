@@ -19,6 +19,9 @@ public sealed class NativePolicyCoreBridge : IDisposable
     private readonly DestroySessionDelegate _destroySession;
     private readonly AdvanceGenerationDelegate _advanceGeneration;
     private readonly EvaluateNavigationDelegate _evaluateNavigation;
+    private readonly RequestNavigationConfirmationDelegate _requestNavigationConfirmation;
+    private readonly ApproveNavigationConfirmationDelegate _approveNavigationConfirmation;
+    private readonly RejectNavigationConfirmationDelegate _rejectNavigationConfirmation;
     private readonly ConsumeNavigationDelegate _consumeNavigation;
     private bool _disposed;
 
@@ -31,6 +34,9 @@ public sealed class NativePolicyCoreBridge : IDisposable
         DestroySessionDelegate destroySession,
         AdvanceGenerationDelegate advanceGeneration,
         EvaluateNavigationDelegate evaluateNavigation,
+        RequestNavigationConfirmationDelegate requestNavigationConfirmation,
+        ApproveNavigationConfirmationDelegate approveNavigationConfirmation,
+        RejectNavigationConfirmationDelegate rejectNavigationConfirmation,
         ConsumeNavigationDelegate consumeNavigation)
     {
         _library = library;
@@ -41,6 +47,9 @@ public sealed class NativePolicyCoreBridge : IDisposable
         _destroySession = destroySession;
         _advanceGeneration = advanceGeneration;
         _evaluateNavigation = evaluateNavigation;
+        _requestNavigationConfirmation = requestNavigationConfirmation;
+        _approveNavigationConfirmation = approveNavigationConfirmation;
+        _rejectNavigationConfirmation = rejectNavigationConfirmation;
         _consumeNavigation = consumeNavigation;
     }
 
@@ -67,6 +76,9 @@ public sealed class NativePolicyCoreBridge : IDisposable
             var destroySession = GetDelegate<DestroySessionDelegate>(library, "aegis_policy_core_broker_destroy_session");
             var advanceGeneration = GetDelegate<AdvanceGenerationDelegate>(library, "aegis_policy_core_broker_advance_document_generation");
             var evaluateNavigation = GetDelegate<EvaluateNavigationDelegate>(library, "aegis_policy_core_broker_evaluate_navigation_json");
+            var requestNavigationConfirmation = GetDelegate<RequestNavigationConfirmationDelegate>(library, "aegis_policy_core_broker_request_navigation_confirmation_json");
+            var approveNavigationConfirmation = GetDelegate<ApproveNavigationConfirmationDelegate>(library, "aegis_policy_core_broker_approve_navigation_confirmation_json");
+            var rejectNavigationConfirmation = GetDelegate<RejectNavigationConfirmationDelegate>(library, "aegis_policy_core_broker_reject_navigation_confirmation");
             var consumeNavigation = GetDelegate<ConsumeNavigationDelegate>(library, "aegis_policy_core_broker_consume_navigation_json");
             var versionPointer = Utf8(policyVersion);
             try
@@ -86,6 +98,9 @@ public sealed class NativePolicyCoreBridge : IDisposable
                     destroySession,
                     advanceGeneration,
                     evaluateNavigation,
+                    requestNavigationConfirmation,
+                    approveNavigationConfirmation,
+                    rejectNavigationConfirmation,
                     consumeNavigation);
                 return true;
             }
@@ -122,6 +137,47 @@ public sealed class NativePolicyCoreBridge : IDisposable
         catch (Exception)
         {
             return Deny("native_policy_core_protocol", "原生策略核心响应无效或不可读取");
+        }
+    }
+
+    /// <summary>登记由策略核心保留的确认型导航；返回值绝不包含可立即消费的授权。</summary>
+    public Decision RequestNavigationConfirmation(string sessionId, string tabId, ulong generation, string rawUrl, string scope)
+    {
+        try
+        {
+            return InvokeFourStrings(sessionId, tabId, rawUrl, scope, (session, tab, url, requestedScope) =>
+                ParseDecision(_requestNavigationConfirmation(_broker, session, tab, generation, url, requestedScope)));
+        }
+        catch (Exception)
+        {
+            return Deny("native_policy_core_protocol", "原生策略核心确认请求无效或不可读取");
+        }
+    }
+
+    /// <summary>仅按原生核心登记的 nonce 显式批准，并由核心返回原始绑定授权。</summary>
+    public Decision ApproveNavigationConfirmation(ApprovalRequest request, string rawUrl, string scope)
+    {
+        try
+        {
+            return InvokeThreeStrings(request.Nonce, rawUrl, scope, (nonce, url, requestedScope) =>
+                ParseDecision(_approveNavigationConfirmation(_broker, nonce, url, requestedScope)));
+        }
+        catch (Exception)
+        {
+            return Deny("native_policy_core_protocol", "原生策略核心确认批准响应无效或不可读取");
+        }
+    }
+
+    /// <summary>显式拒绝待审批导航；异常或未知 nonce 均返回 false。</summary>
+    public bool RejectNavigationConfirmation(ApprovalRequest request)
+    {
+        try
+        {
+            return InvokeOneString(request.Nonce, nonce => _rejectNavigationConfirmation(_broker, nonce) == 1);
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 
@@ -312,6 +368,12 @@ public sealed class NativePolicyCoreBridge : IDisposable
     private delegate byte AdvanceGenerationDelegate(IntPtr broker, IntPtr sessionId, IntPtr tabId, ulong nextGeneration);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate IntPtr EvaluateNavigationDelegate(IntPtr broker, IntPtr sessionId, IntPtr tabId, ulong generation, IntPtr rawUrl, IntPtr scope);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr RequestNavigationConfirmationDelegate(IntPtr broker, IntPtr sessionId, IntPtr tabId, ulong generation, IntPtr rawUrl, IntPtr scope);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate IntPtr ApproveNavigationConfirmationDelegate(IntPtr broker, IntPtr nonce, IntPtr rawUrl, IntPtr scope);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate byte RejectNavigationConfirmationDelegate(IntPtr broker, IntPtr nonce);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate IntPtr ConsumeNavigationDelegate(IntPtr broker, IntPtr actionJson, IntPtr rawUrl, IntPtr scope);
 }

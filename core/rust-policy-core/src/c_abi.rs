@@ -286,6 +286,88 @@ pub extern "C" fn aegis_policy_core_broker_evaluate_navigation_json(
 }
 
 /// 在副作用执行点重新校验 URL/scope，并一次性消费 action nonce。
+/// 登记待审批导航并返回调用方拥有的 JSON 确认请求；不返回可消费授权。
+#[no_mangle]
+pub extern "C" fn aegis_policy_core_broker_request_navigation_confirmation_json(
+    broker: *mut CAbiBroker,
+    session_id: *const c_char,
+    tab_id: *const c_char,
+    generation: u64,
+    raw_url: *const c_char,
+    scope: *const c_char,
+) -> *mut c_char {
+    catch_unwind(AssertUnwindSafe(|| {
+        let (Ok(session_id), Ok(tab_id), Ok(raw_url), Ok(scope)) = (
+            read_utf8(session_id),
+            read_utf8(tab_id),
+            read_utf8(raw_url),
+            read_utf8(scope),
+        ) else {
+            return input_deny("ffi_input_invalid");
+        };
+        let Some(decision) = with_broker(broker, |value| {
+            value.inner.request_navigation_confirmation(
+                session_id.to_owned(),
+                tab_id.to_owned(),
+                generation,
+                raw_url.to_owned(),
+                scope.to_owned(),
+            )
+        }) else {
+            return input_deny("ffi_broker_null");
+        };
+        write_response(decision_json(decision))
+    }))
+    .unwrap_or_else(|_| write_response(deny("native_panic", "native policy core panicked")))
+}
+
+/// 显式批准待审批导航并返回可消费的 JSON 授权；nonce、URL 或 scope 不匹配一律拒绝。
+#[no_mangle]
+pub extern "C" fn aegis_policy_core_broker_approve_navigation_confirmation_json(
+    broker: *mut CAbiBroker,
+    nonce: *const c_char,
+    raw_url: *const c_char,
+    scope: *const c_char,
+) -> *mut c_char {
+    catch_unwind(AssertUnwindSafe(|| {
+        let (Ok(nonce), Ok(raw_url), Ok(scope)) =
+            (read_utf8(nonce), read_utf8(raw_url), read_utf8(scope))
+        else {
+            return input_deny("ffi_input_invalid");
+        };
+        let Some(decision) = with_broker(broker, |value| {
+            value.inner.approve_navigation_confirmation(
+                nonce.to_owned(),
+                raw_url.to_owned(),
+                scope.to_owned(),
+            )
+        }) else {
+            return input_deny("ffi_broker_null");
+        };
+        write_response(decision_json(decision))
+    }))
+    .unwrap_or_else(|_| write_response(deny("native_panic", "native policy core panicked")))
+}
+
+/// 显式拒绝待审批导航；未知、已兑换或已撤销 nonce 返回 0。
+#[no_mangle]
+pub extern "C" fn aegis_policy_core_broker_reject_navigation_confirmation(
+    broker: *mut CAbiBroker,
+    nonce: *const c_char,
+) -> u8 {
+    catch_unwind(AssertUnwindSafe(|| {
+        let Ok(nonce) = read_utf8(nonce) else {
+            return 0;
+        };
+        with_broker(broker, |value| {
+            value.inner.reject_navigation_confirmation(nonce.to_owned())
+        })
+        .unwrap_or(false) as u8
+    }))
+    .unwrap_or(0)
+}
+
+/// 在副作用执行点重新校验 URL/scope，并一次性消费 action nonce。
 #[no_mangle]
 pub extern "C" fn aegis_policy_core_broker_consume_navigation_json(
     broker: *mut CAbiBroker,
@@ -375,6 +457,124 @@ mod tests {
         ));
         assert_eq!(replay["decision"], "deny");
         assert_eq!(replay["reason"]["code"], "nonce_replay");
+        // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
+        unsafe { aegis_policy_core_broker_free(broker) };
+    }
+
+    #[test]
+    fn c_abi_requires_explicit_approval_before_issuing_navigation_action() {
+        let version = c_string("1.0");
+        let broker = aegis_policy_core_broker_new(version.as_ptr());
+        let session = c_string("confirmation-session");
+        let tab = c_string("confirmation-tab");
+        let url = c_string("https://example.com/confirm?transfer=1");
+        let mismatched_url = c_string("https://example.com/confirm?transfer=2");
+        let scope = c_string("navigation");
+        assert_eq!(
+            aegis_policy_core_broker_create_session(broker, session.as_ptr(), tab.as_ptr(), 0, 60),
+            1
+        );
+        let pending = read_response(
+            aegis_policy_core_broker_request_navigation_confirmation_json(
+                broker,
+                session.as_ptr(),
+                tab.as_ptr(),
+                0,
+                url.as_ptr(),
+                scope.as_ptr(),
+            ),
+        );
+        assert_eq!(pending["decision"], "require_confirmation");
+        let nonce = c_string(
+            pending["request"]["nonce"]
+                .as_str()
+                .expect("approval nonce"),
+        );
+
+        let mismatch = read_response(
+            aegis_policy_core_broker_approve_navigation_confirmation_json(
+                broker,
+                nonce.as_ptr(),
+                mismatched_url.as_ptr(),
+                scope.as_ptr(),
+            ),
+        );
+        assert_eq!(mismatch["decision"], "deny");
+        assert_eq!(mismatch["reason"]["code"], "approval_binding_mismatch");
+        let unavailable = read_response(
+            aegis_policy_core_broker_approve_navigation_confirmation_json(
+                broker,
+                nonce.as_ptr(),
+                url.as_ptr(),
+                scope.as_ptr(),
+            ),
+        );
+        assert_eq!(unavailable["reason"]["code"], "approval_not_pending");
+
+        let pending = read_response(
+            aegis_policy_core_broker_request_navigation_confirmation_json(
+                broker,
+                session.as_ptr(),
+                tab.as_ptr(),
+                0,
+                url.as_ptr(),
+                scope.as_ptr(),
+            ),
+        );
+        let nonce = c_string(
+            pending["request"]["nonce"]
+                .as_str()
+                .expect("approval nonce"),
+        );
+        let approved = read_response(
+            aegis_policy_core_broker_approve_navigation_confirmation_json(
+                broker,
+                nonce.as_ptr(),
+                url.as_ptr(),
+                scope.as_ptr(),
+            ),
+        );
+        assert_eq!(approved["decision"], "allow");
+        let action = c_string(&approved["action"].to_string());
+        let consumed = read_response(aegis_policy_core_broker_consume_navigation_json(
+            broker,
+            action.as_ptr(),
+            url.as_ptr(),
+            scope.as_ptr(),
+        ));
+        assert_eq!(consumed["decision"], "allow");
+
+        let pending = read_response(
+            aegis_policy_core_broker_request_navigation_confirmation_json(
+                broker,
+                session.as_ptr(),
+                tab.as_ptr(),
+                0,
+                url.as_ptr(),
+                scope.as_ptr(),
+            ),
+        );
+        let rejected_nonce = c_string(
+            pending["request"]["nonce"]
+                .as_str()
+                .expect("approval nonce"),
+        );
+        assert_eq!(
+            aegis_policy_core_broker_reject_navigation_confirmation(
+                broker,
+                rejected_nonce.as_ptr()
+            ),
+            1
+        );
+        let rejected = read_response(
+            aegis_policy_core_broker_approve_navigation_confirmation_json(
+                broker,
+                rejected_nonce.as_ptr(),
+                url.as_ptr(),
+                scope.as_ptr(),
+            ),
+        );
+        assert_eq!(rejected["reason"]["code"], "approval_not_pending");
         // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
         unsafe { aegis_policy_core_broker_free(broker) };
     }
@@ -525,6 +725,151 @@ mod tests {
                     replay["reason"]["code"], *expected_replay_code,
                     "{name}: replay denial"
                 );
+            }
+            // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
+            unsafe { aegis_policy_core_broker_free(broker) };
+        }
+    }
+
+    #[test]
+    fn c_abi_matches_native_navigation_confirmation_vectors() {
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../../contracts/vectors/native-navigation-confirmation.json"
+        ))
+        .expect("native navigation confirmation vectors must be valid JSON");
+
+        for vector in vectors["vectors"].as_array().expect("vectors array") {
+            let name = vector["name"].as_str().expect("vector name");
+            let version = c_string("1.0");
+            let broker = aegis_policy_core_broker_new(version.as_ptr());
+            assert!(!broker.is_null(), "{name}: broker creation");
+            let session = c_string("confirmation-vector-session");
+            let tab = c_string("confirmation-vector-tab");
+            let generation = vector["generation"].as_u64().expect("generation");
+            if vector["register_session"].as_bool().expect("registration") {
+                assert_eq!(
+                    aegis_policy_core_broker_create_session(
+                        broker,
+                        session.as_ptr(),
+                        tab.as_ptr(),
+                        generation,
+                        120,
+                    ),
+                    1,
+                    "{name}: session registration"
+                );
+            }
+            let url = c_string(vector["url"].as_str().expect("url"));
+            let scope = c_string(vector["scope"].as_str().expect("scope"));
+            let requested = read_response(
+                aegis_policy_core_broker_request_navigation_confirmation_json(
+                    broker,
+                    session.as_ptr(),
+                    tab.as_ptr(),
+                    generation,
+                    url.as_ptr(),
+                    scope.as_ptr(),
+                ),
+            );
+            assert_eq!(
+                requested["decision"], vector["expected_request"],
+                "{name}: request decision"
+            );
+            if requested["decision"] == "deny" {
+                assert_eq!(
+                    requested["reason"]["code"], vector["expected_request_code"],
+                    "{name}: request denial"
+                );
+                // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
+                unsafe { aegis_policy_core_broker_free(broker) };
+                continue;
+            }
+            let nonce = c_string(
+                requested["request"]["nonce"]
+                    .as_str()
+                    .expect("approval nonce"),
+            );
+            if let Some(next_generation) = vector.get("advance_generation") {
+                assert_eq!(
+                    aegis_policy_core_broker_advance_document_generation(
+                        broker,
+                        session.as_ptr(),
+                        tab.as_ptr(),
+                        next_generation.as_u64().expect("next generation"),
+                    ),
+                    1,
+                    "{name}: generation advance"
+                );
+            }
+            if vector
+                .get("reject")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                assert_eq!(
+                    aegis_policy_core_broker_reject_navigation_confirmation(broker, nonce.as_ptr(),),
+                    1,
+                    "{name}: explicit rejection"
+                );
+            }
+            let approve_url = c_string(vector["approve_url"].as_str().expect("approve URL"));
+            let approve_scope = c_string(vector["approve_scope"].as_str().expect("approve scope"));
+            let approved = read_response(
+                aegis_policy_core_broker_approve_navigation_confirmation_json(
+                    broker,
+                    nonce.as_ptr(),
+                    approve_url.as_ptr(),
+                    approve_scope.as_ptr(),
+                ),
+            );
+            assert_eq!(
+                approved["decision"], vector["expected_approve"],
+                "{name}: approve decision"
+            );
+            if let Some(expected_code) = vector.get("expected_approve_code") {
+                assert_eq!(
+                    approved["reason"]["code"], *expected_code,
+                    "{name}: approve denial"
+                );
+            }
+            if let Some(expected_code) = vector.get("expected_second_approve_code") {
+                let second = read_response(
+                    aegis_policy_core_broker_approve_navigation_confirmation_json(
+                        broker,
+                        nonce.as_ptr(),
+                        approve_url.as_ptr(),
+                        approve_scope.as_ptr(),
+                    ),
+                );
+                assert_eq!(
+                    second["reason"]["code"], *expected_code,
+                    "{name}: second approval"
+                );
+            }
+            if approved["decision"] == "allow" {
+                let action = c_string(&approved["action"].to_string());
+                let consumed = read_response(aegis_policy_core_broker_consume_navigation_json(
+                    broker,
+                    action.as_ptr(),
+                    approve_url.as_ptr(),
+                    approve_scope.as_ptr(),
+                ));
+                assert_eq!(
+                    consumed["decision"], vector["expected_consume"],
+                    "{name}: consume decision"
+                );
+                if let Some(expected_code) = vector.get("expected_replay_code") {
+                    let replay = read_response(aegis_policy_core_broker_consume_navigation_json(
+                        broker,
+                        action.as_ptr(),
+                        approve_url.as_ptr(),
+                        approve_scope.as_ptr(),
+                    ));
+                    assert_eq!(
+                        replay["reason"]["code"], *expected_code,
+                        "{name}: replay denial"
+                    );
+                }
             }
             // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
             unsafe { aegis_policy_core_broker_free(broker) };

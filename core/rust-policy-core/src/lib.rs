@@ -43,9 +43,9 @@ pub mod webgl_spoof;
 // UniFFI 官方要求（proc-macro 模式）：crate 根调用 setup_scaffolding!()
 uniffi::setup_scaffolding!();
 
-/// C ABI v2：`require_confirmation.request` 固定包含完整的审批绑定字段。
+/// C ABI v3：新增 Rust 托管的确认登记、批准兑换与拒绝接口。
 /// Windows/Android 宿主在调用策略接口前必须验证该版本，旧宿主应失败闭合。
-pub const POLICY_CORE_ABI_VERSION: u32 = 2;
+pub const POLICY_CORE_ABI_VERSION: u32 = 3;
 
 /// 供受管理平台探测动态库兼容性的无状态、无分配 C ABI 入口。
 ///
@@ -62,7 +62,7 @@ mod native_abi_tests {
     #[test]
     fn c_abi_version_is_stable() {
         assert_eq!(aegis_policy_core_abi_version(), POLICY_CORE_ABI_VERSION);
-        assert_eq!(POLICY_CORE_ABI_VERSION, 2);
+        assert_eq!(POLICY_CORE_ABI_VERSION, 3);
     }
 }
 

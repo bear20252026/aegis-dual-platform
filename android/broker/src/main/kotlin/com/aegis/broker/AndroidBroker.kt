@@ -106,6 +106,62 @@ class AndroidBroker(
         return Decision.Allow(action)
     }
 
+    /**
+     * 登记由 Rust 核心托管的待审批导航。默认托管路径不得自行重建确认授权，
+     * 因此非原生模式、门禁失败或桥接故障均返回拒绝。
+     */
+    fun requestNavigationConfirmation(
+        sessionId: String,
+        tabId: String,
+        generation: Long,
+        rawUrl: String,
+        scope: String,
+    ): Decision {
+        val nativeGate = nativePolicyCoreGate.probe()
+        if (!nativeGate.allowsPlatformBroker) {
+            return deny(
+                nativeGate.denialCode ?: "native_policy_core_unavailable",
+                "已启用的原生策略核心不可用或不兼容",
+            )
+        }
+        if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            return deny("native_confirmation_core_required", "确认型导航必须由原生策略核心托管")
+        }
+        val bridge = nativePolicyCoreBridge ?: return deny(
+            "native_policy_core_bridge_unavailable",
+            "原生策略核心桥接不可用",
+        )
+        return bridge.requestNavigationConfirmation(sessionId, tabId, generation, rawUrl, scope)
+            ?: deny("native_policy_core_protocol", "原生策略核心确认请求无效或不可读取")
+    }
+
+    /** 仅按 Rust 核心登记的 nonce 显式批准，并由核心返回原始绑定授权。 */
+    fun approveNavigationConfirmation(request: ApprovalRequest, rawUrl: String, scope: String): Decision {
+        val nativeGate = nativePolicyCoreGate.probe()
+        if (!nativeGate.allowsPlatformBroker) {
+            return deny(
+                nativeGate.denialCode ?: "native_policy_core_unavailable",
+                "已启用的原生策略核心不可用或不兼容",
+            )
+        }
+        if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            return deny("native_confirmation_core_required", "确认型导航必须由原生策略核心托管")
+        }
+        val bridge = nativePolicyCoreBridge ?: return deny(
+            "native_policy_core_bridge_unavailable",
+            "原生策略核心桥接不可用",
+        )
+        return bridge.approveNavigationConfirmation(request, rawUrl, scope)
+            ?: deny("native_policy_core_protocol", "原生策略核心确认批准响应无效或不可读取")
+    }
+
+    /** 显式拒绝待审批导航；任何模式、门禁、桥接或 nonce 错误都返回 false。 */
+    fun rejectNavigationConfirmation(request: ApprovalRequest): Boolean {
+        if (!nativePolicyCoreGate.probe().allowsPlatformBroker ||
+            !BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return false
+        return nativePolicyCoreBridge?.rejectNavigationConfirmation(request) == true
+    }
+
     /** 校验 AuthorizedAction 是否仍有效（会话/标签/代际/过期/策略版本——fail-closed）。 */
     fun isValid(action: AuthorizedAction?, currentGeneration: Long): Boolean {
         return synchronized(authorizationLock) {

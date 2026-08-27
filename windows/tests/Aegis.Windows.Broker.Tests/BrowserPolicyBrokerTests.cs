@@ -112,7 +112,7 @@ public sealed class BrowserPolicyBrokerTests
     public void NativePolicyCoreBridgeMapsCompleteConfirmationRequest()
     {
         var decision = NativePolicyCoreBridge.ParseDecisionPayload("""
-            {"abi_version":2,"decision":"require_confirmation","request":{
+            {"abi_version":3,"decision":"require_confirmation","request":{
               "origin":"https://payments.example","method":"POST","path":"/transfers",
               "scope":"payment:create","expires_at":1700000000,"nonce":"approval-nonce"}}
             """);
@@ -124,6 +124,37 @@ public sealed class BrowserPolicyBrokerTests
         Assert.Equal("payment:create", confirmation.Request.Scope);
         Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1_700_000_000).UtcDateTime, confirmation.Request.ExpiresAt);
         Assert.Equal("approval-nonce", confirmation.Request.Nonce);
+    }
+
+    [Fact]
+    public void NativePolicyCoreBridgeRequiresApprovalBeforeConfirmationNavigationCanConsume()
+    {
+        var libraryPath = Environment.GetEnvironmentVariable("AEGIS_NATIVE_POLICY_CORE_TEST_PATH");
+        if (string.IsNullOrWhiteSpace(libraryPath))
+            return;
+
+        Assert.True(NativePolicyCoreBridge.TryCreate("1.0", libraryPath, out var bridge));
+        using (bridge!)
+        {
+            const string url = "https://example.com/confirmation?flow=1";
+            Assert.True(bridge.CreateSession("confirmation-session", "confirmation-tab", 0, 120));
+            var pending = Assert.IsType<Decision.RequireConfirmation>(
+                bridge.RequestNavigationConfirmation(
+                    "confirmation-session", "confirmation-tab", 0, url, "navigation"));
+
+            var approved = Assert.IsType<Decision.Allow>(
+                bridge.ApproveNavigationConfirmation(pending.Request, url, "navigation"));
+            Assert.True(bridge.TryConsumeNavigation(approved.Action, url, "navigation"));
+            Assert.False(bridge.TryConsumeNavigation(approved.Action, url, "navigation"));
+
+            var rejected = Assert.IsType<Decision.RequireConfirmation>(
+                bridge.RequestNavigationConfirmation(
+                    "confirmation-session", "confirmation-tab", 0, url, "navigation"));
+            Assert.True(bridge.RejectNavigationConfirmation(rejected.Request));
+            var afterRejection = Assert.IsType<Decision.Deny>(
+                bridge.ApproveNavigationConfirmation(rejected.Request, url, "navigation"));
+            Assert.Equal("approval_not_pending", afterRejection.Reason.Code);
+        }
     }
 
     [Fact]

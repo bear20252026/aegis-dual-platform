@@ -30,8 +30,8 @@ data class NativePolicyCoreGateResult(
 }
 
 object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
-    // C ABI v2 要求确认请求携带完整的审批绑定字段。
-    private const val expectedAbiVersion = 2
+    // C ABI v3 要求提供 Rust 托管的确认登记、批准和拒绝入口。
+    private const val expectedAbiVersion = 3
 
     override fun probe(): NativePolicyCoreGateResult {
         if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return NativePolicyCoreGateResult.disabled()

@@ -39,6 +39,31 @@ class NativePolicyCoreBridge private constructor(
         )
     }
 
+    /** 登记由 Rust 核心托管的待审批导航；结果不会包含可立即消费的授权。 */
+    fun requestNavigationConfirmation(
+        sessionId: String,
+        tabId: String,
+        generation: Long,
+        rawUrl: String,
+        scope: String,
+    ): Decision? = invokeDecision {
+        native.aegis_policy_core_broker_request_navigation_confirmation_json(
+            broker, sessionId, tabId, generation, rawUrl, scope,
+        )
+    }
+
+    /** 仅用 Rust 核心登记的 nonce 显式批准，核心重新返回原始绑定授权。 */
+    fun approveNavigationConfirmation(request: ApprovalRequest, rawUrl: String, scope: String): Decision? =
+        invokeDecision {
+            native.aegis_policy_core_broker_approve_navigation_confirmation_json(
+                broker, request.nonce, rawUrl, scope,
+            )
+        }
+
+    /** 显式拒绝待审批导航；调用异常、未知或已撤销 nonce 一律返回 false。 */
+    fun rejectNavigationConfirmation(request: ApprovalRequest): Boolean =
+        invokeBoolean { native.aegis_policy_core_broker_reject_navigation_confirmation(broker, request.nonce) }
+
     fun consumeNavigation(action: AuthorizedAction, rawUrl: String, scope: String): Boolean {
         val actionJson = JSONObject()
             .put("session_id", action.sessionId)
@@ -110,6 +135,24 @@ class NativePolicyCoreBridge private constructor(
             rawUrl: String,
             scope: String,
         ): Pointer?
+        fun aegis_policy_core_broker_request_navigation_confirmation_json(
+            broker: Pointer,
+            sessionId: String,
+            tabId: String,
+            generation: Long,
+            rawUrl: String,
+            scope: String,
+        ): Pointer?
+        fun aegis_policy_core_broker_approve_navigation_confirmation_json(
+            broker: Pointer,
+            nonce: String,
+            rawUrl: String,
+            scope: String,
+        ): Pointer?
+        fun aegis_policy_core_broker_reject_navigation_confirmation(
+            broker: Pointer,
+            nonce: String,
+        ): Byte
         fun aegis_policy_core_broker_consume_navigation_json(
             broker: Pointer,
             actionJson: String,
@@ -119,8 +162,8 @@ class NativePolicyCoreBridge private constructor(
     }
 
     companion object {
-        // C ABI v2 要求确认请求携带完整的审批绑定字段。
-        private const val expectedAbiVersion = 2
+        // C ABI v3 新增 Rust 托管的确认登记、批准兑换与拒绝接口。
+        private const val expectedAbiVersion = 3
 
         fun tryCreate(policyVersion: String): NativePolicyCoreBridge? = try {
             val native = Native.load("aegis_policy_core", NativePolicyCoreAbi::class.java)

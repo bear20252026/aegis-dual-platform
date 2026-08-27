@@ -109,6 +109,46 @@ public sealed class BrowserPolicyBroker : IDisposable
         return new Decision.Allow(action);
     }
 
+    /// <summary>
+    /// 登记需要显式用户确认的导航。确认状态与可兑换授权仅存在于 Rust 核心；
+    /// 默认托管路径不得自行重建或签发确认授权。
+    /// </summary>
+    public Decision RequestNavigationConfirmation(string sessionId, string tabId, ulong generation,
+        string rawUrl, string scope)
+    {
+        if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
+            return nativeDenied;
+        if (!_nativePolicyCoreRequired || _nativePolicyCoreBridge is null)
+            return NativeBridgeDenied(scope, "native_confirmation_core_required");
+        var decision = _nativePolicyCoreBridge.RequestNavigationConfirmation(sessionId, tabId, generation, rawUrl, scope);
+        RecordNativeDecision(scope, decision);
+        return decision;
+    }
+
+    /// <summary>仅将原生核心已登记的确认请求兑换为其原始绑定授权；异常和不匹配均拒绝。</summary>
+    public Decision ApproveNavigationConfirmation(ApprovalRequest request, string rawUrl, string scope)
+    {
+        if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
+            return nativeDenied;
+        if (!_nativePolicyCoreRequired || _nativePolicyCoreBridge is null)
+            return NativeBridgeDenied(scope, "native_confirmation_core_required");
+        var decision = _nativePolicyCoreBridge.ApproveNavigationConfirmation(request, rawUrl, scope);
+        RecordNativeDecision(scope, decision);
+        return decision;
+    }
+
+    /// <summary>显式拒绝确认请求；未知 nonce、桥接故障或非原生模式均失败闭合。</summary>
+    public bool RejectNavigationConfirmation(ApprovalRequest request)
+    {
+        if (!_nativePolicyCoreGate().AllowsPlatformBroker
+            || !_nativePolicyCoreRequired
+            || _nativePolicyCoreBridge is null
+            || !_nativePolicyCoreBridge.RejectNavigationConfirmation(request))
+            return false;
+        RecordAudit("deny", request.Scope, request.Origin, "confirmation_rejected");
+        return true;
+    }
+
     /// <summary>校验 AuthorizedAction 是否仍有效（会话/标签/代际/过期/策略版本——fail-closed）。</summary>
     public bool IsValid(AuthorizedAction? action, ulong currentGeneration)
     {

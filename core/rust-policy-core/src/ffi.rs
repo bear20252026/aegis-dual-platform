@@ -181,6 +181,8 @@ pub struct FfiBroker {
     /// 仅允许消费本 Broker 签发且仍处于当前会话生命周期内的授权。
     /// 这阻止宿主伪造结构正确的 FFI 授权对象绕过策略评估。
     issued_actions: std::sync::Mutex<HashMap<String, IssuedAuthorization>>,
+    /// 仅由策略核心登记的待审批动作；平台不能凭展示用请求重建授权。
+    pending_navigation_approvals: std::sync::Mutex<HashMap<String, AuthorizedAction>>,
     policy_version: String,
 }
 
@@ -209,6 +211,7 @@ impl FfiBroker {
         Self {
             inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(policy_version.clone())),
             issued_actions: std::sync::Mutex::new(HashMap::new()),
+            pending_navigation_approvals: std::sync::Mutex::new(HashMap::new()),
             policy_version,
         }
     }
@@ -300,6 +303,160 @@ impl FfiBroker {
         }
     }
 
+    /// 将当前导航登记为待审批请求。它复用完整的策略评估和会话验证，
+    /// 但不会向宿主发放可消费授权；只有同一 Broker 的显式批准才能兑换原始动作。
+    pub fn request_navigation_confirmation(
+        &self,
+        session_id: String,
+        tab_id: String,
+        generation: u64,
+        raw_url: String,
+        scope: String,
+    ) -> FfiDecision {
+        let authorized =
+            match self.evaluate_navigation(session_id, tab_id, generation, raw_url, scope) {
+                FfiDecision::Allow { action } => AuthorizedAction {
+                    session_id: action.session_id,
+                    tab_id: action.tab_id,
+                    document_generation: action.document_generation,
+                    origin: action.origin,
+                    method: action.method,
+                    canonical_parameters: action.canonical_parameters,
+                    scope: action.scope,
+                    expires_at: action.expires_at,
+                    nonce: action.nonce,
+                    policy_version: action.policy_version,
+                    explanation: action.explanation,
+                },
+                other => return other,
+            };
+        let removed_from_issued = match self.issued_actions.lock() {
+            Ok(mut issued_actions) => matches!(
+                issued_actions.remove(&authorized.nonce),
+                Some(IssuedAuthorization::Pending(issued)) if *issued == authorized
+            ),
+            Err(_) => {
+                return ffi_deny(
+                    "authorization_ledger",
+                    "授权账本锁获取失败",
+                    "denied — issued authorization ledger lock poisoned",
+                );
+            }
+        };
+        if !removed_from_issued {
+            return ffi_deny(
+                "authorization_ledger",
+                "策略核心未能登记待审批授权",
+                "denied — evaluated authorization was missing from the issued ledger",
+            );
+        }
+        let request = FfiApprovalRequest {
+            origin: authorized.origin.clone(),
+            method: authorized.method.clone(),
+            path: authorized.canonical_parameters.clone(),
+            scope: authorized.scope.clone(),
+            expires_at: authorized.expires_at,
+            nonce: authorized.nonce.clone(),
+        };
+        match self.pending_navigation_approvals.lock() {
+            Ok(mut pending_approvals) => {
+                pending_approvals.insert(authorized.nonce.clone(), authorized);
+                FfiDecision::RequireConfirmation { request }
+            }
+            Err(_) => ffi_deny(
+                "approval_ledger",
+                "待审批账本锁获取失败",
+                "denied — pending approval ledger lock poisoned",
+            ),
+        }
+    }
+
+    /// 显式批准当前待审批导航。该入口仅兑换策略核心保留的精确授权，
+    /// 并再次绑定当前 URL/scope、会话、代际、策略版本与过期时间。
+    pub fn approve_navigation_confirmation(
+        &self,
+        nonce: String,
+        raw_url: String,
+        scope: String,
+    ) -> FfiDecision {
+        if nonce.is_empty() {
+            return ffi_deny(
+                "approval_not_pending",
+                "审批 nonce 为空",
+                "denied — approval nonce was empty",
+            );
+        }
+        let authorized = match self.pending_navigation_approvals.lock() {
+            Ok(mut pending_approvals) => pending_approvals.remove(&nonce),
+            Err(_) => {
+                return ffi_deny(
+                    "approval_ledger",
+                    "待审批账本锁获取失败",
+                    "denied — pending approval ledger lock poisoned",
+                );
+            }
+        };
+        let Some(authorized) = authorized else {
+            return ffi_deny(
+                "approval_not_pending",
+                "审批请求不存在、已拒绝或已兑换",
+                "denied — approval request was not pending",
+            );
+        };
+        let Some(canonical_url) = crate::origin::canonicalize_external(&raw_url) else {
+            return deny_url(raw_url);
+        };
+        if authorized.method != "GET"
+            || authorized.scope != scope
+            || authorized.origin != canonical_url.origin
+            || authorized.canonical_parameters != canonical_url.canonical_parameters
+        {
+            return ffi_deny(
+                "approval_binding_mismatch",
+                "审批请求与当前导航参数不匹配",
+                "denied — approval URL or scope no longer matches the pending request",
+            );
+        }
+        let decision = match self.inner.lock() {
+            Ok(broker) => broker.validate_action(&authorized),
+            Err(_) => Decision::Deny(DenyReason {
+                code: "broker_lock".into(),
+                detail: "Broker 锁获取失败".into(),
+                explanation: "denied — broker lock poisoned".into(),
+            }),
+        };
+        let Decision::Allow(authorized) = decision else {
+            return FfiDecision::from(decision);
+        };
+        match self.issued_actions.lock() {
+            Ok(mut issued_actions) => {
+                issued_actions.insert(
+                    authorized.nonce.clone(),
+                    IssuedAuthorization::Pending(Box::new(authorized.clone())),
+                );
+                FfiDecision::Allow {
+                    action: FfiAuthorizedAction::from(authorized),
+                }
+            }
+            Err(_) => ffi_deny(
+                "authorization_ledger",
+                "授权账本锁获取失败",
+                "denied — issued authorization ledger lock poisoned",
+            ),
+        }
+    }
+
+    /// 显式拒绝待审批导航。未知、已过期、已兑换或已拒绝的 nonce 一律返回 false。
+    pub fn reject_navigation_confirmation(&self, nonce: String) -> bool {
+        if nonce.is_empty() {
+            return false;
+        }
+        match self.pending_navigation_approvals.lock() {
+            Ok(mut pending_approvals) => pending_approvals.remove(&nonce).is_some(),
+            Err(_) => false,
+        }
+    }
+
     /// 创建新会话（ttl 秒）。
     pub fn create_session(
         &self,
@@ -334,6 +491,9 @@ impl FfiBroker {
         if let Ok(mut issued_actions) = self.issued_actions.lock() {
             issued_actions.retain(|_, authorization| authorization.session_id() != session_id);
         }
+        if let Ok(mut pending_approvals) = self.pending_navigation_approvals.lock() {
+            pending_approvals.retain(|_, action| action.session_id != session_id);
+        }
         destroyed
     }
 
@@ -353,6 +513,9 @@ impl FfiBroker {
         if advanced {
             if let Ok(mut issued_actions) = self.issued_actions.lock() {
                 issued_actions.retain(|_, authorization| authorization.session_id() != session_id);
+            }
+            if let Ok(mut pending_approvals) = self.pending_navigation_approvals.lock() {
+                pending_approvals.retain(|_, action| action.session_id != session_id);
             }
         }
         advanced
@@ -457,6 +620,16 @@ fn deny_url(raw_url: String) -> FfiDecision {
             code: "url_policy".into(),
             detail: format!("拒绝 URL: {raw_url}"),
             explanation: format!("denied origin — URL parsing failed: {raw_url}"),
+        },
+    }
+}
+
+fn ffi_deny(code: &str, detail: &str, explanation: &str) -> FfiDecision {
+    FfiDecision::Deny {
+        reason: FfiDenyReason {
+            code: code.into(),
+            detail: detail.into(),
+            explanation: explanation.into(),
         },
     }
 }
@@ -658,6 +831,82 @@ mod tests {
         match broker.consume_navigation(action, "https://example.com".into(), "navigation".into()) {
             FfiDecision::Deny { reason } => assert_eq!(reason.code, "action_not_issued"),
             _ => panic!("generation advance must revoke the issued authorization"),
+        }
+    }
+
+    #[test]
+    fn ffi_confirmation_requires_explicit_approval_before_navigation_consumes() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        let confirmation = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/confirm?flow=1".into(),
+            "navigation".into(),
+        );
+        let FfiDecision::RequireConfirmation { request } = confirmation else {
+            panic!("valid navigation must remain pending until explicitly approved");
+        };
+        assert_eq!(request.path, "/confirm?flow=1");
+        let approved = broker.approve_navigation_confirmation(
+            request.nonce,
+            "https://example.com/confirm?flow=1#approved".into(),
+            "navigation".into(),
+        );
+        let FfiDecision::Allow { action } = approved else {
+            panic!("matching explicit approval must exchange the pending action");
+        };
+        assert!(matches!(
+            broker.consume_navigation(
+                action,
+                "https://example.com/confirm?flow=1".into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Allow { .. }
+        ));
+    }
+
+    #[test]
+    fn ffi_confirmation_rejection_and_generation_change_revoke_pending_request() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        let FfiDecision::RequireConfirmation { request } = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/reject".into(),
+            "navigation".into(),
+        ) else {
+            panic!("valid navigation must be pending");
+        };
+        assert!(broker.reject_navigation_confirmation(request.nonce.clone()));
+        match broker.approve_navigation_confirmation(
+            request.nonce,
+            "https://example.com/reject".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
+            _ => panic!("rejected confirmation must not be approved"),
+        }
+
+        let FfiDecision::RequireConfirmation { request } = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/stale".into(),
+            "navigation".into(),
+        ) else {
+            panic!("valid navigation must be pending");
+        };
+        assert!(broker.advance_document_generation("s1".into(), "t1".into(), 1));
+        match broker.approve_navigation_confirmation(
+            request.nonce,
+            "https://example.com/stale".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
+            _ => panic!("generation advance must revoke pending confirmation"),
         }
     }
 }
