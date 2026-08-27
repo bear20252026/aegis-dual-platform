@@ -11,6 +11,7 @@
 //! - library mode 绑定生成（官方推荐——proc-macro 必须用 library mode）
 
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ===== UniFFI 类型包装（Record/Enum）=====
@@ -177,7 +178,27 @@ fn hex_seed_to_bytes(hex: &str) -> [u8; 32] {
 #[derive(uniffi::Object)]
 pub struct FfiBroker {
     inner: std::sync::Mutex<crate::broker::ContextBroker>,
+    /// 仅允许消费本 Broker 签发且仍处于当前会话生命周期内的授权。
+    /// 这阻止宿主伪造结构正确的 FFI 授权对象绕过策略评估。
+    issued_actions: std::sync::Mutex<HashMap<String, IssuedAuthorization>>,
     policy_version: String,
+}
+
+/// 原生策略核心签发的授权状态。已消费记录保留到会话撤销，
+/// 使精确重放仍可返回 `nonce_replay`，而不是退化为未签发。
+#[derive(Debug, Clone)]
+enum IssuedAuthorization {
+    Pending(Box<AuthorizedAction>),
+    Consumed { session_id: String },
+}
+
+impl IssuedAuthorization {
+    fn session_id(&self) -> &str {
+        match self {
+            Self::Pending(action) => &action.session_id,
+            Self::Consumed { session_id } => session_id,
+        }
+    }
 }
 
 #[uniffi::export]
@@ -187,6 +208,7 @@ impl FfiBroker {
     pub fn new(policy_version: String) -> Self {
         Self {
             inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(policy_version.clone())),
+            issued_actions: std::sync::Mutex::new(HashMap::new()),
             policy_version,
         }
     }
@@ -255,7 +277,27 @@ impl FfiBroker {
                 explanation: "denied — broker lock poisoned".into(),
             }),
         };
-        FfiDecision::from(decision)
+        match decision {
+            Decision::Allow(authorized) => match self.issued_actions.lock() {
+                Ok(mut issued_actions) => {
+                    issued_actions.insert(
+                        authorized.nonce.clone(),
+                        IssuedAuthorization::Pending(Box::new(authorized.clone())),
+                    );
+                    FfiDecision::Allow {
+                        action: FfiAuthorizedAction::from(authorized),
+                    }
+                }
+                Err(_) => FfiDecision::Deny {
+                    reason: FfiDenyReason {
+                        code: "authorization_ledger".into(),
+                        detail: "授权账本锁获取失败".into(),
+                        explanation: "denied — issued authorization ledger lock poisoned".into(),
+                    },
+                },
+            },
+            other => FfiDecision::from(other),
+        }
     }
 
     /// 创建新会话（ttl 秒）。
@@ -282,13 +324,17 @@ impl FfiBroker {
 
     /// 销毁会话。
     pub fn destroy_session(&self, session_id: String) -> bool {
-        match self.inner.lock() {
+        let destroyed = match self.inner.lock() {
             Ok(mut g) => {
                 g.destroy_session(&session_id);
                 true
             }
             Err(_) => false,
+        };
+        if let Ok(mut issued_actions) = self.issued_actions.lock() {
+            issued_actions.retain(|_, authorization| authorization.session_id() != session_id);
         }
+        destroyed
     }
 
     /// 顶层文档切换后推进会话代际；错标签、跳跃与回退均拒绝。
@@ -298,12 +344,18 @@ impl FfiBroker {
         tab_id: String,
         next_generation: u64,
     ) -> bool {
-        match self.inner.lock() {
+        let advanced = match self.inner.lock() {
             Ok(mut broker) => {
                 broker.advance_document_generation(&session_id, &tab_id, next_generation)
             }
             Err(_) => false,
+        };
+        if advanced {
+            if let Ok(mut issued_actions) = self.issued_actions.lock() {
+                issued_actions.retain(|_, authorization| authorization.session_id() != session_id);
+            }
         }
+        advanced
     }
 
     /// 在导航副作用执行点校验当前 URL/scope 并消费授权，拒绝参数替换或 nonce 重放。
@@ -343,6 +395,40 @@ impl FfiBroker {
                 },
             };
         }
+        let issued_action = match self.issued_actions.lock() {
+            Ok(issued_actions) => issued_actions.get(&action.nonce).cloned(),
+            Err(_) => {
+                return FfiDecision::Deny {
+                    reason: FfiDenyReason {
+                        code: "authorization_ledger".into(),
+                        detail: "授权账本锁获取失败".into(),
+                        explanation: "denied — issued authorization ledger lock poisoned".into(),
+                    },
+                };
+            }
+        };
+        match issued_action {
+            Some(IssuedAuthorization::Pending(issued)) if *issued == action => {}
+            Some(IssuedAuthorization::Consumed { .. }) => {
+                return FfiDecision::Deny {
+                    reason: FfiDenyReason {
+                        code: "nonce_replay".into(),
+                        detail: "授权动作已被消费".into(),
+                        explanation: "denied — issued authorization nonce already consumed".into(),
+                    },
+                };
+            }
+            _ => {
+                return FfiDecision::Deny {
+                    reason: FfiDenyReason {
+                        code: "action_not_issued".into(),
+                        detail: "授权动作不是当前策略核心签发或已被撤销".into(),
+                        explanation: "denied — action was not issued by this broker or was revoked"
+                            .into(),
+                    },
+                };
+            }
+        }
         let decision = match self.inner.lock() {
             Ok(mut broker) => broker.validate_and_consume(&action),
             Err(_) => Decision::Deny(DenyReason {
@@ -351,6 +437,16 @@ impl FfiBroker {
                 explanation: "denied — broker lock poisoned".into(),
             }),
         };
+        if matches!(decision, Decision::Allow(_)) {
+            if let Ok(mut issued_actions) = self.issued_actions.lock() {
+                issued_actions.insert(
+                    action.nonce.clone(),
+                    IssuedAuthorization::Consumed {
+                        session_id: action.session_id.clone(),
+                    },
+                );
+            }
+        }
         FfiDecision::from(decision)
     }
 }
@@ -505,5 +601,63 @@ mod tests {
             ),
             FfiDecision::Deny { .. }
         ));
+    }
+
+    #[test]
+    fn ffi_broker_rejects_structurally_valid_but_unissued_action() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        let FfiDecision::Allow { action } = broker.evaluate_navigation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/path?query=1".into(),
+            "navigation".into(),
+        ) else {
+            panic!("active matching session should produce an authorization");
+        };
+        let forged_action = FfiAuthorizedAction {
+            session_id: action.session_id,
+            tab_id: action.tab_id,
+            document_generation: action.document_generation,
+            origin: action.origin,
+            method: action.method,
+            canonical_parameters: action.canonical_parameters,
+            scope: action.scope,
+            expires_at: action.expires_at,
+            nonce: "host-forged-nonce".into(),
+            policy_version: action.policy_version,
+            explanation: action.explanation,
+        };
+
+        match broker.consume_navigation(
+            forged_action,
+            "https://example.com/path?query=1".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "action_not_issued"),
+            _ => panic!("host-forged action must fail closed"),
+        }
+    }
+
+    #[test]
+    fn ffi_broker_revokes_issued_actions_after_generation_advance() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        let FfiDecision::Allow { action } = broker.evaluate_navigation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com".into(),
+            "navigation".into(),
+        ) else {
+            panic!("active matching session should produce an authorization");
+        };
+        assert!(broker.advance_document_generation("s1".into(), "t1".into(), 1));
+
+        match broker.consume_navigation(action, "https://example.com".into(), "navigation".into()) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "action_not_issued"),
+            _ => panic!("generation advance must revoke the issued authorization"),
+        }
     }
 }
