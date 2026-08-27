@@ -404,4 +404,99 @@ mod tests {
         let empty = c_string("");
         assert!(aegis_policy_core_broker_new(empty.as_ptr()).is_null());
     }
+
+    #[test]
+    fn c_abi_matches_native_navigation_decision_vectors() {
+        let vectors: Value = serde_json::from_str(include_str!(
+            "../../../contracts/vectors/native-navigation-decision.json"
+        ))
+        .expect("native navigation decision vectors must be valid JSON");
+
+        for vector in vectors["vectors"].as_array().expect("vectors array") {
+            let name = vector["name"].as_str().expect("vector name");
+            let version = c_string("1.0");
+            let broker = aegis_policy_core_broker_new(version.as_ptr());
+            assert!(!broker.is_null(), "{name}: broker creation");
+            let session = c_string("vector-session");
+            let tab = c_string("vector-tab");
+            let generation = vector["generation"].as_u64().expect("generation");
+            if vector["register_session"].as_bool().expect("registration") {
+                assert_eq!(
+                    aegis_policy_core_broker_create_session(
+                        broker,
+                        session.as_ptr(),
+                        tab.as_ptr(),
+                        generation,
+                        120,
+                    ),
+                    1,
+                    "{name}: session registration"
+                );
+            }
+            let url = c_string(vector["url"].as_str().expect("url"));
+            let scope = c_string(vector["scope"].as_str().expect("scope"));
+            let evaluated = read_response(aegis_policy_core_broker_evaluate_navigation_json(
+                broker,
+                session.as_ptr(),
+                tab.as_ptr(),
+                generation,
+                url.as_ptr(),
+                scope.as_ptr(),
+            ));
+            assert_eq!(
+                evaluated["decision"], vector["expected_evaluate"],
+                "{name}: evaluate decision"
+            );
+            if evaluated["decision"] == "deny" {
+                assert_eq!(
+                    evaluated["reason"]["code"], vector["expected_deny_code"],
+                    "{name}: evaluate denial code"
+                );
+                // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
+                unsafe { aegis_policy_core_broker_free(broker) };
+                continue;
+            }
+            assert_eq!(
+                evaluated["action"]["origin"], vector["expected_origin"],
+                "{name}: canonical origin"
+            );
+            assert_eq!(
+                evaluated["action"]["canonical_parameters"], vector["expected_parameters"],
+                "{name}: canonical parameters"
+            );
+            let action = c_string(&evaluated["action"].to_string());
+            let consume_url = c_string(vector["consume_url"].as_str().expect("consume URL"));
+            let consume_scope = c_string(vector["consume_scope"].as_str().expect("consume scope"));
+            let consumed = read_response(aegis_policy_core_broker_consume_navigation_json(
+                broker,
+                action.as_ptr(),
+                consume_url.as_ptr(),
+                consume_scope.as_ptr(),
+            ));
+            assert_eq!(
+                consumed["decision"], vector["expected_consume"],
+                "{name}: consume decision"
+            );
+            if let Some(expected_code) = vector.get("expected_consume_code") {
+                assert_eq!(
+                    consumed["reason"]["code"], *expected_code,
+                    "{name}: consume denial"
+                );
+            }
+            if let Some(expected_replay_code) = vector.get("expected_replay_code") {
+                let replay = read_response(aegis_policy_core_broker_consume_navigation_json(
+                    broker,
+                    action.as_ptr(),
+                    consume_url.as_ptr(),
+                    consume_scope.as_ptr(),
+                ));
+                assert_eq!(
+                    replay["reason"]["code"], *expected_replay_code,
+                    "{name}: replay denial"
+                );
+            }
+            // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
+            unsafe { aegis_policy_core_broker_free(broker) };
+        }
+    }
 }
