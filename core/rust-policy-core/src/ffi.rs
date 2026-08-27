@@ -95,12 +95,32 @@ pub struct FfiOrigin {
     pub host: String,
 }
 
+/// FFI 版规范化 URL 授权绑定：fragment 不参与副作用授权。
+#[derive(uniffi::Record)]
+pub struct FfiCanonicalUrl {
+    pub scheme: String,
+    pub host: String,
+    pub origin: String,
+    pub canonical_parameters: String,
+}
+
 /// URL 校验（委托 origin 模块——消除 C#/Kotlin/Python 重复实现）。
 ///
 /// 返回 `FfiOrigin { scheme, host }` 或 None（URL 非法）。
 #[uniffi::export]
 pub fn try_parse_external(raw_url: String) -> Option<FfiOrigin> {
     crate::origin::try_parse_external(&raw_url).map(|(scheme, host)| FfiOrigin { scheme, host })
+}
+
+/// 跨端导航使用的规范化入口，确保授权绑定到一致的 origin 与 path/query。
+#[uniffi::export]
+pub fn canonicalize_external(raw_url: String) -> Option<FfiCanonicalUrl> {
+    crate::origin::canonicalize_external(&raw_url).map(|url| FfiCanonicalUrl {
+        scheme: url.scheme,
+        host: url.host,
+        origin: url.origin,
+        canonical_parameters: url.canonical_parameters,
+    })
 }
 
 /// URL 主机名提取（委托 util 模块）。
@@ -164,8 +184,7 @@ impl FfiBroker {
         scope: String,
     ) -> FfiDecision {
         // URL 解析（fail-closed：解析失败 → Deny）
-        let parsed = crate::origin::try_parse_external(&raw_url);
-        let (scheme, host) = match parsed {
+        let canonical_url = match crate::origin::canonicalize_external(&raw_url) {
             Some(p) => p,
             None => {
                 return FfiDecision::Deny {
@@ -197,14 +216,17 @@ impl FfiBroker {
             session_id: session_id.clone(),
             tab_id: tab_id.clone(),
             document_generation: generation,
-            origin: format!("{scheme}://{host}"),
+            origin: canonical_url.origin.clone(),
             method: "GET".into(),
-            canonical_parameters: String::new(),
+            canonical_parameters: canonical_url.canonical_parameters,
             scope: scope.clone(),
             expires_at,
             nonce,
             policy_version: self.policy_version.clone(),
-            explanation: format!("allowed origin {scheme}://{host} — scheme {scheme}, host {host}"),
+            explanation: format!(
+                "allowed origin {} — scheme {}, host {}",
+                canonical_url.origin, canonical_url.scheme, canonical_url.host
+            ),
         };
         // 会话验证（fail-closed）
         let guard = self.inner.lock().map_err(|_| ()).ok();
@@ -252,8 +274,31 @@ impl FfiBroker {
         }
     }
 
-    /// 在副作用执行点校验并消费授权动作，拒绝失效或已使用的 nonce。
-    pub fn consume_authorized_action(&self, action: FfiAuthorizedAction) -> FfiDecision {
+    /// 顶层文档切换后推进会话代际；错标签、跳跃与回退均拒绝。
+    pub fn advance_document_generation(
+        &self,
+        session_id: String,
+        tab_id: String,
+        next_generation: u64,
+    ) -> bool {
+        match self.inner.lock() {
+            Ok(mut broker) => {
+                broker.advance_document_generation(&session_id, &tab_id, next_generation)
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// 在导航副作用执行点校验当前 URL/scope 并消费授权，拒绝参数替换或 nonce 重放。
+    pub fn consume_navigation(
+        &self,
+        action: FfiAuthorizedAction,
+        raw_url: String,
+        scope: String,
+    ) -> FfiDecision {
+        let Some(canonical_url) = crate::origin::canonicalize_external(&raw_url) else {
+            return deny_url(raw_url);
+        };
         let action = AuthorizedAction {
             session_id: action.session_id,
             tab_id: action.tab_id,
@@ -267,6 +312,20 @@ impl FfiBroker {
             policy_version: action.policy_version,
             explanation: action.explanation,
         };
+        if action.method != "GET"
+            || action.scope != scope
+            || action.origin != canonical_url.origin
+            || action.canonical_parameters != canonical_url.canonical_parameters
+        {
+            return FfiDecision::Deny {
+                reason: FfiDenyReason {
+                    code: "action_binding_mismatch".into(),
+                    detail: "授权动作与当前导航参数不匹配".into(),
+                    explanation: "denied — action origin, path/query, method, or scope changed"
+                        .into(),
+                },
+            };
+        }
         let decision = match self.inner.lock() {
             Ok(mut broker) => broker.validate_and_consume(&action),
             Err(_) => Decision::Deny(DenyReason {
@@ -276,6 +335,16 @@ impl FfiBroker {
             }),
         };
         FfiDecision::from(decision)
+    }
+}
+
+fn deny_url(raw_url: String) -> FfiDecision {
+    FfiDecision::Deny {
+        reason: FfiDenyReason {
+            code: "url_policy".into(),
+            detail: format!("拒绝 URL: {raw_url}"),
+            explanation: format!("denied origin — URL parsing failed: {raw_url}"),
+        },
     }
 }
 
@@ -309,7 +378,11 @@ mod tests {
                 assert_eq!(action.policy_version, "1.0");
                 assert!(action.expires_at > 120);
                 assert!(matches!(
-                    broker.consume_authorized_action(action),
+                    broker.consume_navigation(
+                        action,
+                        "https://example.com/path?query=1".into(),
+                        "navigation".into(),
+                    ),
                     FfiDecision::Allow { .. }
                 ));
             }
@@ -330,5 +403,31 @@ mod tests {
             ),
             FfiDecision::Deny { .. }
         ));
+    }
+
+    #[test]
+    fn ffi_broker_binds_authorization_to_path_query_and_generation() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        let decision = broker.evaluate_navigation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/path?query=1".into(),
+            "navigation".into(),
+        );
+        let FfiDecision::Allow { action } = decision else {
+            panic!("active matching session should produce an authorization");
+        };
+        assert!(matches!(
+            broker.consume_navigation(
+                action,
+                "https://example.com/path?query=2".into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Deny { .. }
+        ));
+        assert!(broker.advance_document_generation("s1".into(), "t1".into(), 1));
+        assert!(!broker.advance_document_generation("s1".into(), "t1".into(), 1));
     }
 }

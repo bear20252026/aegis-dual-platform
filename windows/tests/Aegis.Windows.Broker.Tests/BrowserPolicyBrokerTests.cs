@@ -67,6 +67,22 @@ public sealed class BrowserPolicyBrokerTests
         Assert.False(broker.TryConsumeNavigation(action, "session-1", "tab-1", 0, url, "navigation"));
     }
 
+    [Theory]
+    [InlineData("HTTPS://Example.Org:443/a?b=1#ignored", "https://example.org", "/a?b=1")]
+    [InlineData("http://example.org:8080?x=1", "http://example.org:8080", "/?x=1")]
+    public void NavigationAuthorizationCanonicalizesOriginAndPathQuery(
+        string rawUrl,
+        string expectedOrigin,
+        string expectedParameters)
+    {
+        var broker = CreateRegisteredBroker();
+        var action = Assert.IsType<Decision.Allow>(
+            broker.EvaluateNavigation("session-1", "tab-1", 0, rawUrl, "navigation")).Action;
+
+        Assert.Equal(expectedOrigin, action.Origin);
+        Assert.Equal(expectedParameters, action.CanonicalParameters);
+    }
+
     private static BrowserPolicyBroker CreateRegisteredBroker()
     {
         var broker = new BrowserPolicyBroker();

@@ -84,6 +84,23 @@ impl ContextBroker {
             .retain(|_, r| r.session_id != session_id);
     }
 
+    /// 推进会话的顶层文档代际；只允许同一标签严格单步推进，拒绝回退和跳跃。
+    pub fn advance_document_generation(
+        &mut self,
+        session_id: &str,
+        tab_id: &str,
+        next_generation: u64,
+    ) -> bool {
+        let Some(session) = self.sessions.get_mut(session_id) else {
+            return false;
+        };
+        if session.tab_id != tab_id || next_generation != session.generation.saturating_add(1) {
+            return false;
+        }
+        session.generation = next_generation;
+        true
+    }
+
     /// 清理过期会话（LRU 淘汰）。
     pub fn evict_expired(&mut self) {
         let expired: Vec<String> = self

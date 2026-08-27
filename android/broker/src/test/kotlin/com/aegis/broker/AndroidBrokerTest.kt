@@ -110,4 +110,22 @@ class AndroidBrokerTest {
             ),
         )
     }
+
+    @Test
+    fun navigationAuthorizationCanonicalizesOriginAndPathQuery() {
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("session-1", "tab-1"))
+        val decision = broker.evaluateNavigation(
+            "session-1",
+            "tab-1",
+            0,
+            "HTTPS://Example.Org:443/a?b=1#ignored",
+            "navigation",
+        )
+        assertTrue(decision is Decision.Allow)
+        val action = (decision as Decision.Allow).action
+
+        assertTrue(action.origin == "https://example.org")
+        assertTrue(action.canonicalParameters == "/a?b=1")
+    }
 }
