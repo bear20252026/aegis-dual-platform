@@ -86,7 +86,7 @@ jobs:
       - name: Package Android debug APK with controlled native policy artifacts
         working-directory: android
         run: |
-          ./gradlew :app:assembleDebug --no-daemon \
+          bash ./gradlew :app:assembleDebug --no-daemon \
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
           unzip -l app/build/outputs/apk/debug/app-debug.apk | \
@@ -94,7 +94,7 @@ jobs:
       - name: Verify enabled Android native gate fails closed before adapter rollout
         working-directory: android
         run: |
-          ./gradlew :broker:testDebugUnitTest --no-daemon \
+          bash ./gradlew :broker:testDebugUnitTest --no-daemon \
             --tests com.aegis.broker.AndroidBrokerTest.defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore \
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
