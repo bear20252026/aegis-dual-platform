@@ -53,6 +53,17 @@ pub extern "C" fn aegis_policy_core_abi_version() -> u32 {
     POLICY_CORE_ABI_VERSION
 }
 
+#[cfg(test)]
+mod native_abi_tests {
+    use super::*;
+
+    #[test]
+    fn c_abi_version_is_stable() {
+        assert_eq!(aegis_policy_core_abi_version(), POLICY_CORE_ABI_VERSION);
+        assert_eq!(POLICY_CORE_ABI_VERSION, 1);
+    }
+}
+
 /// 指纹防护注入管线（管道化组合所有防护阶段）。
 ///
 /// 每个阶段独立、可拆卸、可组合——移除/新增阶段不影响其他阶段。

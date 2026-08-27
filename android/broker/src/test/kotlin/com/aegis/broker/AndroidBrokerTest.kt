@@ -111,6 +111,18 @@ class AndroidBrokerTest {
     }
 
     @Test
+    fun defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore() {
+        val result = DefaultNativePolicyCoreGate.probe()
+
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            assertFalse(result.allowsPlatformBroker)
+            assertTrue(result.denialCode == "native_policy_core_not_packaged")
+        } else {
+            assertTrue(result.allowsPlatformBroker)
+        }
+    }
+
+    @Test
     fun destroyingSessionInvalidatesFutureNavigation() {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("session-1", "tab-1"))
