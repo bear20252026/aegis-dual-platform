@@ -9,10 +9,11 @@
 """
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
+
+from verify_checksum_json import verify_manifest
 
 
 def verify_bundle(bundle_dir: Path) -> None:
@@ -36,14 +37,7 @@ def verify_bundle(bundle_dir: Path) -> None:
     sums_path = dist / "SHA256SUMS.json"
     if not sums_path.is_file():
         sys.exit("缺 SHA256SUMS.json——摘要不完整（拒绝发布）")
-    sums = json.loads(sums_path.read_text(encoding="utf-8"))
-    for entry in sums:
-        p = dist / entry["Path"]
-        if not p.is_file():
-            sys.exit(f"SHA256SUMS 指向缺失文件: {entry['Path']}")
-        actual = hashlib.sha256(p.read_bytes()).hexdigest().upper()
-        if actual != entry["Hash"]:
-            sys.exit(f"SHA-256 不匹配: {entry['Path']}")
+    checksum_count = verify_manifest(dist, sums_path)
 
     # 签名文件（.sigstore）与 SBOM（.cdx.json/spdx.json）齐全——缺一拒绝
     sig = [p for p in files if p.suffix == ".sigstore"]
@@ -53,7 +47,7 @@ def verify_bundle(bundle_dir: Path) -> None:
     if not sbom:
         sys.exit("缺 SBOM——供应链不透明（拒绝发布）")
 
-    print(f"✅ verify_release 通过：{metadata['platform']} v{metadata['version_name']} / {len(files)} 制品 / "
+    print(f"✅ verify_release 通过：{metadata['platform']} v{metadata['version_name']} / {checksum_count} 个受摘要覆盖制品 / "
           f"{len(sig)} 签名 / {len(sbom)} SBOM——SHA-256 对账一致")
 
 

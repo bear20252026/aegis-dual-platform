@@ -77,11 +77,7 @@ jobs:
       - name: Write build metadata
         run: python release/build_metadata.py --platform windows --output dist/build-metadata.json
       - name: Generate SHA-256 checksums
-        run: |
-          Get-ChildItem dist -Recurse -File |
-            Where-Object { $_.Name -ne 'SHA256SUMS.json' } |
-            Get-FileHash -Algorithm SHA256 |
-            Select-Object Hash, Path | ConvertTo-Json > dist/SHA256SUMS.json
+        run: python release/write_checksum_json.py --root dist --output dist/SHA256SUMS.json
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
@@ -146,13 +142,4 @@ jobs:
         run: |
           find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 gh attestation verify "{}" --owner "$GITHUB_REPOSITORY_OWNER" --predicate-type https://cyclonedx.org/bom
       - name: Checksum reconciliation
-        run: |
-          python - <<'PY'
-          import json, hashlib, pathlib
-          sums = json.loads(pathlib.Path('dist/SHA256SUMS.json').read_text())
-          for entry in sums:
-              path = pathlib.Path(entry['Path'].replace('\\', '/'))
-              actual = hashlib.sha256(path.read_bytes()).hexdigest().upper()
-              assert actual == entry['Hash'], f'校验失败: {path}'
-          print('✅ Windows 产物 SHA-256 对账一致')
-          PY
+        run: python release/verify_checksum_json.py --root dist --manifest dist/SHA256SUMS.json

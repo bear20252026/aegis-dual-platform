@@ -179,15 +179,6 @@ jobs:
             --owner "$GITHUB_REPOSITORY_OWNER" \
             --predicate-type https://cyclonedx.org/bom
       - name: Checksum reconciliation
-        run: |
-          python - <<'PY'
-          import json, hashlib, pathlib
-          sums = json.loads(pathlib.Path("dist/SHA256SUMS.json").read_text())
-          for entry in sums:
-              p = pathlib.Path(entry["Path"].replace("\\", "/"))
-              h = hashlib.sha256(p.read_bytes()).hexdigest().upper()
-              assert h == entry["Hash"], f"校验失败: {p}"
-          print("✅ Android 产物 SHA-256 对账一致")
-          PY
+        run: python release/verify_checksum_json.py --root dist --manifest dist/SHA256SUMS.json
       - name: Fail-closed gate
         run: echo "✅ Android 平台验证通过"

@@ -50,7 +50,8 @@ def main() -> None:
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"✅ 已写入 {args.platform} 构建元数据：{args.output}")
+    # Windows GitHub-hosted runner 默认控制台可能为 cp1252；发布链日志必须可移植。
+    print(f"Wrote {args.platform} build metadata: {args.output}")
 
 
 if __name__ == "__main__":
