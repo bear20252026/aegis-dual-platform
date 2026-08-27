@@ -58,6 +58,7 @@ public partial class MainWindow : Window
     {
         Browser.CoreWebView2InitializationCompleted -= OnWebViewReady;
         _host.Dispose();
+        _broker.Dispose();
         Browser.Dispose();
         base.OnClosed(e);
     }

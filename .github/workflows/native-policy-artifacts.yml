@@ -36,6 +36,8 @@ jobs:
         run: |
           $policyDll = (Resolve-Path dist/native-policy/windows/win-x64/aegis_policy_core.dll).Path
           $env:AEGIS_NATIVE_POLICY_CORE_TEST_PATH = $policyDll
+          $env:AEGIS_NATIVE_POLICY_CORE_PATH = $policyDll
+          $env:AEGIS_REQUIRE_NATIVE_POLICY_CORE = "1"
           dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `

@@ -11,14 +11,20 @@ using System.Runtime.InteropServices;
 public static class NativePolicyCoreGate
 {
     public const string EnableEnvironmentVariable = "AEGIS_REQUIRE_NATIVE_POLICY_CORE";
+    public const string LibraryPathEnvironmentVariable = "AEGIS_NATIVE_POLICY_CORE_PATH";
     public const uint ExpectedAbiVersion = 1;
+
+    public static bool IsRequired =>
+        string.Equals(Environment.GetEnvironmentVariable(EnableEnvironmentVariable), "1", StringComparison.Ordinal);
+
+    public static string? LibraryPath => Environment.GetEnvironmentVariable(LibraryPathEnvironmentVariable);
 
     public static NativePolicyCoreGateResult ProbeFromEnvironment()
     {
-        if (!string.Equals(Environment.GetEnvironmentVariable(EnableEnvironmentVariable), "1", StringComparison.Ordinal))
+        if (!IsRequired)
             return NativePolicyCoreGateResult.Disabled();
 
-        return ProbeLibrary("aegis_policy_core");
+        return ProbeLibrary(LibraryPath ?? "aegis_policy_core");
     }
 
     /// <summary>

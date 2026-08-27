@@ -6,7 +6,7 @@ using System.Collections.Generic;
 /// <summary>Capability Broker——唯一允许产生本地副作用的边界（ADR-002/蓝图阶段 C）。
 /// 验证来源/会话/标签代际/scope/参数/预算/批准/nonce——没有 AuthorizedAction
 /// 不能导航/下载/导出/改策略。默认拒绝（fail-closed）。</summary>
-public sealed class BrowserPolicyBroker
+public sealed class BrowserPolicyBroker : IDisposable
 {
     public string PolicyVersion { get; } = "1.0";
     private readonly List<Audit.AuditEvent> _auditLog = new();
@@ -15,10 +15,20 @@ public sealed class BrowserPolicyBroker
     private readonly object _nonceLock = new();
     private readonly object _sessionLock = new();
     private readonly Func<NativePolicyCoreGateResult> _nativePolicyCoreGate;
+    private readonly NativePolicyCoreBridge? _nativePolicyCoreBridge;
+    private readonly bool _nativePolicyCoreRequired;
+    private bool _disposed;
 
-    public BrowserPolicyBroker(Func<NativePolicyCoreGateResult>? nativePolicyCoreGate = null)
+    public BrowserPolicyBroker(
+        Func<NativePolicyCoreGateResult>? nativePolicyCoreGate = null,
+        NativePolicyCoreBridge? nativePolicyCoreBridge = null)
     {
         _nativePolicyCoreGate = nativePolicyCoreGate ?? NativePolicyCoreGate.ProbeFromEnvironment;
+        _nativePolicyCoreRequired = NativePolicyCoreGate.IsRequired;
+        if (_nativePolicyCoreRequired)
+            NativePolicyCoreBridge.TryCreate(PolicyVersion, NativePolicyCoreGate.LibraryPath, out _nativePolicyCoreBridge);
+        else
+            _nativePolicyCoreBridge = nativePolicyCoreBridge;
     }
 
     /// <summary>注册由受控 WebView 创建的会话；未知会话上的副作用一律拒绝。</summary>
@@ -29,6 +39,9 @@ public sealed class BrowserPolicyBroker
         lock (_sessionLock)
         {
             if (_sessions.ContainsKey(sessionId))
+                return false;
+            if (_nativePolicyCoreRequired && (_nativePolicyCoreBridge is null
+                || !_nativePolicyCoreBridge.CreateSession(sessionId, tabId, generation, 120)))
                 return false;
             _sessions.Add(sessionId, new SessionContext(tabId, generation));
             return true;
@@ -45,6 +58,9 @@ public sealed class BrowserPolicyBroker
                 || session.DocumentGeneration == ulong.MaxValue
                 || generation != session.DocumentGeneration + 1)
                 return false;
+            if (_nativePolicyCoreRequired && (_nativePolicyCoreBridge is null
+                || !_nativePolicyCoreBridge.AdvanceDocumentGeneration(sessionId, tabId, generation)))
+                return false;
             session.DocumentGeneration = generation;
             return true;
         }
@@ -53,6 +69,8 @@ public sealed class BrowserPolicyBroker
     /// <summary>销毁标签会话并清理其 nonce，禁止遗留 WebView 消费旧授权。</summary>
     public void DestroySession(string sessionId)
     {
+        if (_nativePolicyCoreRequired)
+            _nativePolicyCoreBridge?.DestroySession(sessionId);
         lock (_sessionLock)
             _sessions.Remove(sessionId);
         lock (_nonceLock)
@@ -65,6 +83,14 @@ public sealed class BrowserPolicyBroker
     {
         if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
             return nativeDenied;
+        if (_nativePolicyCoreRequired)
+        {
+            if (_nativePolicyCoreBridge is null)
+                return NativeBridgeDenied(scope, "native_policy_core_bridge_unavailable");
+            var nativeDecision = _nativePolicyCoreBridge.EvaluateNavigation(sessionId, tabId, generation, rawUrl, scope);
+            RecordNativeDecision(scope, nativeDecision);
+            return nativeDecision;
+        }
         if (!HasCurrentSession(sessionId, tabId, generation))
         {
             RecordAudit("deny", scope, rawUrl, "session_context");
@@ -96,7 +122,24 @@ public sealed class BrowserPolicyBroker
     {
         if (!_nativePolicyCoreGate().AllowsPlatformBroker)
             return false;
-        if (action is null || !OriginPolicy.TryParseExternal(rawUrl, out var uri))
+        if (action is null)
+            return false;
+        if (_nativePolicyCoreRequired)
+        {
+            if (_nativePolicyCoreBridge is null)
+                return false;
+            lock (_sessionLock)
+            {
+                if (!IsValidInCurrentSession(action, currentGeneration)
+                    || action.SessionId != sessionId || action.TabId != tabId)
+                    return false;
+                if (!_nativePolicyCoreBridge.TryConsumeNavigation(action, rawUrl, scope))
+                    return false;
+                lock (_nonceLock)
+                    return _consumedNonces.Add(action.Nonce);
+            }
+        }
+        if (!OriginPolicy.TryParseExternal(rawUrl, out var uri))
             return false;
         // 与 DestroySession 使用相同锁序列，避免会话销毁后仍可消费旧授权。
         lock (_sessionLock)
@@ -116,6 +159,19 @@ public sealed class BrowserPolicyBroker
     /// <summary>阶段 C：脱敏审计（记录决策——不含 token/网页内容/query secret——
     /// 与 contracts/schemas/audit-event.schema.json 对齐）。</summary>
     public IReadOnlyList<Audit.AuditEvent> AuditLog => _auditLog;
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        lock (_sessionLock)
+            _sessions.Clear();
+        lock (_nonceLock)
+            _consumedNonces.Clear();
+        _nativePolicyCoreBridge?.Dispose();
+        GC.SuppressFinalize(this);
+    }
 
     private void RecordAudit(string decision, string scope, string origin, string? reason)
     {
@@ -138,6 +194,25 @@ public sealed class BrowserPolicyBroker
         RecordAudit("deny", scope, "native-policy-core", code);
         nativeDenied = new Decision.Deny(new DenyReason(code, "已启用的原生策略核心不可用或不兼容"));
         return false;
+    }
+
+    private Decision.Deny NativeBridgeDenied(string scope, string code)
+    {
+        RecordAudit("deny", scope, "native-policy-core", code);
+        return new Decision.Deny(new DenyReason(code, "已启用的原生策略核心桥接不可用"));
+    }
+
+    private void RecordNativeDecision(string scope, Decision decision)
+    {
+        switch (decision)
+        {
+            case Decision.Allow allow:
+                RecordAudit("allow", scope, allow.Action.Origin, null);
+                break;
+            case Decision.Deny deny:
+                RecordAudit("deny", scope, "native-policy-core", deny.Reason.Code);
+                break;
+        }
     }
 
     private bool HasCurrentSession(string sessionId, string tabId, ulong generation)

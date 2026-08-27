@@ -85,6 +85,51 @@ public sealed class BrowserPolicyBrokerTests
     }
 
     [Fact]
+    public void NativePolicyCoreBridgeMapsDecisionAndRejectsReplayWhenEnabled()
+    {
+        var libraryPath = Environment.GetEnvironmentVariable("AEGIS_NATIVE_POLICY_CORE_TEST_PATH");
+        if (string.IsNullOrWhiteSpace(libraryPath))
+            return;
+
+        Assert.True(NativePolicyCoreBridge.TryCreate("1.0", libraryPath, out var bridge));
+        using (bridge!)
+        {
+            Assert.True(bridge.CreateSession("native-session", "native-tab", 0, 120));
+            var allow = Assert.IsType<Decision.Allow>(
+                bridge.EvaluateNavigation("native-session", "native-tab", 0,
+                    "HTTPS://Example.COM:443/path?x=1#ignored", "navigation"));
+
+            Assert.Equal("https://example.com", allow.Action.Origin);
+            Assert.Equal("/path?x=1", allow.Action.CanonicalParameters);
+            Assert.True(bridge.TryConsumeNavigation(
+                allow.Action, "https://example.com/path?x=1#executed", "navigation"));
+            Assert.False(bridge.TryConsumeNavigation(
+                allow.Action, "https://example.com/path?x=1", "navigation"));
+        }
+    }
+
+    [Fact]
+    public void BrowserPolicyBrokerUsesNativeDecisionWhenNativeModeIsEnabled()
+    {
+        var libraryPath = Environment.GetEnvironmentVariable(NativePolicyCoreGate.LibraryPathEnvironmentVariable);
+        if (!string.Equals(Environment.GetEnvironmentVariable(NativePolicyCoreGate.EnableEnvironmentVariable), "1", StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(libraryPath))
+            return;
+
+        using var broker = new BrowserPolicyBroker();
+        Assert.True(broker.RegisterSession("native-broker-session", "native-broker-tab"));
+        var allow = Assert.IsType<Decision.Allow>(broker.EvaluateNavigation(
+            "native-broker-session", "native-broker-tab", 0,
+            "https://example.com/native?ready=1", "navigation"));
+        Assert.True(broker.TryConsumeNavigation(
+            allow.Action, "native-broker-session", "native-broker-tab", 0,
+            "https://example.com/native?ready=1#fragment", "navigation"));
+        Assert.False(broker.TryConsumeNavigation(
+            allow.Action, "native-broker-session", "native-broker-tab", 0,
+            "https://example.com/native?ready=1", "navigation"));
+    }
+
+    [Fact]
     public void DestroyedSessionCannotCreateNewAuthorizations()
     {
         var broker = CreateRegisteredBroker();
