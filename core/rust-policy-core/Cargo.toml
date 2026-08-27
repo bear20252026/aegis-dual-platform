@@ -13,6 +13,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 # 最小 crate 依赖（蓝图：最小依赖 + 固定 toolchain + cargo audit/deny——CI 门禁）
 ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
+getrandom = "0.2"
 sha2 = "0.10"
 serde_json = "1"
 # UniFFI（官方最新 0.32——跨语言绑定生成；proc-macro 模式）

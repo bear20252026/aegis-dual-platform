@@ -13,7 +13,7 @@
 //! 可拼接：通过 `Decision` trait 与 broker/executor 层对接。
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
 
@@ -126,6 +126,27 @@ impl ContextBroker {
             });
         }
 
+        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs(),
+            Err(_) => {
+                return Decision::Deny(DenyReason {
+                    code: "system_clock".into(),
+                    detail: "系统时间不可用".into(),
+                    explanation: "denied — system clock is before UNIX epoch".into(),
+                });
+            }
+        };
+        if action.expires_at <= now {
+            return Decision::Deny(DenyReason {
+                code: "action_expired".into(),
+                detail: "授权动作已过期".into(),
+                explanation: format!(
+                    "denied — action expired at {}, current time {}",
+                    action.expires_at, now
+                ),
+            });
+        }
+
         // 检查策略版本
         if action.policy_version != self.policy_version {
             return Decision::Deny(DenyReason {
@@ -156,7 +177,36 @@ impl ContextBroker {
             });
         }
 
+        if action.tab_id != session.tab_id {
+            return Decision::Deny(DenyReason {
+                code: "tab_mismatch".into(),
+                detail: format!(
+                    "标签不匹配：期望 {}，实际 {}",
+                    session.tab_id, action.tab_id
+                ),
+                explanation: format!(
+                    "denied — tab mismatch: expected {}, got {}",
+                    session.tab_id, action.tab_id
+                ),
+            });
+        }
+
         Decision::Allow(action.clone())
+    }
+
+    /// 校验并消费授权动作。调用方应只在即将执行本地副作用时调用，
+    /// 以确保通过校验的 nonce 不能被重放。
+    pub fn validate_and_consume(&mut self, action: &AuthorizedAction) -> Decision {
+        match self.validate_action(action) {
+            Decision::Allow(authorized) => {
+                match self.consume_nonce(&authorized.nonce, &authorized.session_id) {
+                    Ok(()) => Decision::Allow(authorized),
+                    Err(reason) => Decision::Deny(reason),
+                }
+            }
+            Decision::RequireConfirmation(request) => Decision::RequireConfirmation(request),
+            Decision::Deny(reason) => Decision::Deny(reason),
+        }
     }
 
     /// 原子消费 nonce（一次性——重放拒绝）。
@@ -220,7 +270,7 @@ mod tests {
     #[test]
     fn create_and_validate_session() {
         let mut broker = ContextBroker::new("1.0".into());
-        broker.create_session("s1".into(), "t1".into(), 1, Duration::from_secs(3600));
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let action = make_action("s1", 1, "n1");
         let result = broker.validate_action(&action);
         assert!(matches!(result, Decision::Allow(_)));
@@ -265,5 +315,38 @@ mod tests {
         broker.consume_nonce("n1", "s1").unwrap();
         let result = broker.consume_nonce("n1", "s2");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn expired_action_is_denied() {
+        let mut broker = ContextBroker::new("1.0".into());
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        let mut action = make_action("s1", 1, "n1");
+        action.expires_at = 0;
+        assert!(matches!(broker.validate_action(&action), Decision::Deny(_)));
+    }
+
+    #[test]
+    fn wrong_tab_is_denied() {
+        let mut broker = ContextBroker::new("1.0".into());
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        let mut action = make_action("s1", 1, "n1");
+        action.tab_id = "other-tab".into();
+        assert!(matches!(broker.validate_action(&action), Decision::Deny(_)));
+    }
+
+    #[test]
+    fn validate_and_consume_rejects_replay() {
+        let mut broker = ContextBroker::new("1.0".into());
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        let action = make_action("s1", 1, "n1");
+        assert!(matches!(
+            broker.validate_and_consume(&action),
+            Decision::Allow(_)
+        ));
+        assert!(matches!(
+            broker.validate_and_consume(&action),
+            Decision::Deny(_)
+        ));
     }
 }

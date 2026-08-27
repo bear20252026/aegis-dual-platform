@@ -11,6 +11,7 @@
 //! - library mode 绑定生成（官方推荐——proc-macro 必须用 library mode）
 
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // ===== UniFFI 类型包装（Record/Enum）=====
 
@@ -70,9 +71,9 @@ impl From<Decision> for FfiDecision {
             Decision::Allow(a) => FfiDecision::Allow {
                 action: FfiAuthorizedAction::from(a),
             },
-            Decision::RequireConfirmation(_) => FfiDecision::RequireConfirmation {
-                origin: String::new(),
-                method: String::new(),
+            Decision::RequireConfirmation(request) => FfiDecision::RequireConfirmation {
+                origin: request.origin,
+                method: request.method,
             },
             Decision::Deny(r) => FfiDecision::Deny {
                 reason: FfiDenyReason {
@@ -139,6 +140,7 @@ fn hex_seed_to_bytes(hex: &str) -> [u8; 32] {
 #[derive(uniffi::Object)]
 pub struct FfiBroker {
     inner: std::sync::Mutex<crate::broker::ContextBroker>,
+    policy_version: String,
 }
 
 #[uniffi::export]
@@ -147,7 +149,8 @@ impl FfiBroker {
     #[uniffi::constructor]
     pub fn new(policy_version: String) -> Self {
         Self {
-            inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(policy_version)),
+            inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(policy_version.clone())),
+            policy_version,
         }
     }
 
@@ -174,18 +177,22 @@ impl FfiBroker {
                 };
             }
         };
-        // 构造 AuthorizedAction（nonce 一次性）
-        let nonce = format!(
-            "{:x}{:x}{:x}{:x}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_nanos(),
-            session_id.len(),
-            tab_id.len(),
-            raw_url.len()
-        );
-        let policy_version = self.inner_policy_version();
+        let nonce = match generate_nonce() {
+            Ok(value) => value,
+            Err(reason) => return FfiDecision::Deny { reason },
+        };
+        let expires_at = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => duration.as_secs().saturating_add(120),
+            Err(_) => {
+                return FfiDecision::Deny {
+                    reason: FfiDenyReason {
+                        code: "system_clock".into(),
+                        detail: "系统时间不可用".into(),
+                        explanation: "denied — system clock is before UNIX epoch".into(),
+                    },
+                };
+            }
+        };
         let action = AuthorizedAction {
             session_id: session_id.clone(),
             tab_id: tab_id.clone(),
@@ -194,9 +201,9 @@ impl FfiBroker {
             method: "GET".into(),
             canonical_parameters: String::new(),
             scope: scope.clone(),
-            expires_at: 120,
+            expires_at,
             nonce,
-            policy_version,
+            policy_version: self.policy_version.clone(),
             explanation: format!("allowed origin {scheme}://{host} — scheme {scheme}, host {host}"),
         };
         // 会话验证（fail-closed）
@@ -244,16 +251,84 @@ impl FfiBroker {
             Err(_) => false,
         }
     }
+
+    /// 在副作用执行点校验并消费授权动作，拒绝失效或已使用的 nonce。
+    pub fn consume_authorized_action(&self, action: FfiAuthorizedAction) -> FfiDecision {
+        let action = AuthorizedAction {
+            session_id: action.session_id,
+            tab_id: action.tab_id,
+            document_generation: action.document_generation,
+            origin: action.origin,
+            method: action.method,
+            canonical_parameters: action.canonical_parameters,
+            scope: action.scope,
+            expires_at: action.expires_at,
+            nonce: action.nonce,
+            policy_version: action.policy_version,
+            explanation: action.explanation,
+        };
+        let decision = match self.inner.lock() {
+            Ok(mut broker) => broker.validate_and_consume(&action),
+            Err(_) => Decision::Deny(DenyReason {
+                code: "broker_lock".into(),
+                detail: "Broker 锁获取失败".into(),
+                explanation: "denied — broker lock poisoned".into(),
+            }),
+        };
+        FfiDecision::from(decision)
+    }
 }
 
-impl FfiBroker {
-    /// 获取内部策略版本（供 evaluate_navigation 构造 action）。
-    fn inner_policy_version(&self) -> String {
-        // ContextBroker 的 policy_version 通过 debug 不可读——从
-        // 已验证行为推断：返回空时 validate_action 会因版本不匹配
-        // 拒绝（fail-closed）。为避免歧义，这里通过创建时的会话
-        // 绑定保证一致性——构造 action 时用空版本，由 validate_action
-        // 决定（若 broker 有版本则拒绝，符合 fail-closed 语义）。
-        String::new()
+fn generate_nonce() -> Result<String, FfiDenyReason> {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|error| FfiDenyReason {
+        code: "entropy_unavailable".into(),
+        detail: "无法生成安全随机 nonce".into(),
+        explanation: format!("denied — operating-system entropy unavailable: {error}"),
+    })?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ffi_broker_allows_and_consumes_valid_session_action() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 7, 60));
+        let decision = broker.evaluate_navigation(
+            "s1".into(),
+            "t1".into(),
+            7,
+            "https://example.com/path?query=1".into(),
+            "navigation".into(),
+        );
+        match decision {
+            FfiDecision::Allow { action } => {
+                assert_eq!(action.policy_version, "1.0");
+                assert!(action.expires_at > 120);
+                assert!(matches!(
+                    broker.consume_authorized_action(action),
+                    FfiDecision::Allow { .. }
+                ));
+            }
+            _ => panic!("active matching session should produce an authorization"),
+        }
+    }
+
+    #[test]
+    fn ffi_broker_denies_unknown_session() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(matches!(
+            broker.evaluate_navigation(
+                "missing".into(),
+                "t1".into(),
+                7,
+                "https://example.com".into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Deny { .. }
+        ));
     }
 }

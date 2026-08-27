@@ -23,22 +23,21 @@ public sealed class HostWebView
         webView.NavigationStarting += (_, e) =>
         {
             var decision = _broker.EvaluateNavigation(_sessionId, "tab-0", 0, e.Uri, "navigation");
-            if (decision is Broker.Decision.Deny)
-                e.Cancel = true;  // 非允许导航真实取消（不再"仅日志"）
+            e.Cancel = decision is not Broker.Decision.Allow allow
+                || !_broker.TryConsumeNavigation(allow.Action, _sessionId, "tab-0", 0, e.Uri, "navigation");
         };
         // 子框架导航同样经 broker（FrameNavigationStarting——iframe 策略）
         webView.FrameNavigationStarting += (_, e) =>
         {
             var decision = _broker.EvaluateNavigation(_sessionId, "tab-0", 0, e.Uri, "navigation");
-            if (decision is Broker.Decision.Deny)
-                e.Cancel = true;
+            e.Cancel = decision is not Broker.Decision.Allow allow
+                || !_broker.TryConsumeNavigation(allow.Action, _sessionId, "tab-0", 0, e.Uri, "navigation");
         };
         // 新窗口请求经 broker（NewWindowRequested——禁止绕过导航决策）
         webView.NewWindowRequested += (_, e) =>
         {
-            var decision = _broker.EvaluateNavigation(_sessionId, "tab-0", 0, e.Uri, "navigation");
-            if (decision is Broker.Decision.Deny)
-                e.Handled = true;  // 拒绝新窗口（不打开）
+            // 没有已注册的受控子 WebView executor 时，禁止弹窗导航，避免策略被绕过。
+            e.Handled = true;
         };
         // 消息只接受受信 chrome UI origin（远程页面无 native bridge——WebMessage 忽略）
         webView.WebMessageReceived += (_, e) =>
@@ -54,5 +53,8 @@ public sealed class HostWebView
     }
 
     private static bool IsTrustedChromeOrigin(string source) =>
-        source.StartsWith("file://", StringComparison.OrdinalIgnoreCase);
+        Uri.TryCreate(source, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && uri.Host.Equals("chrome.aegis.local", StringComparison.OrdinalIgnoreCase)
+        && uri.IsDefaultPort;
 }

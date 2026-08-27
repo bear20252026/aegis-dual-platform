@@ -1,9 +1,9 @@
 name: Supply-Chain
-on:
+"on":
   push:
-    paths: ['requirements*', 'windows/**', 'core/rust-policy-core/**']
+    paths: ['requirements*', 'windows/**', 'core/rust-policy-core/**', 'android/**']
   pull_request:
-    paths: ['requirements*', 'windows/**', 'core/rust-policy-core/**']
+    paths: ['requirements*', 'windows/**', 'core/rust-policy-core/**', 'android/**']
   workflow_dispatch: {}
 
 jobs:
@@ -24,7 +24,7 @@ jobs:
       - name: cargo audit (Rust 依赖——core——依赖门禁——失败即阻断)
         working-directory: core/rust-policy-core
         run: |
-          cargo install cargo-audit --locked 2>/dev/null || true
+          cargo install cargo-audit --locked
           cargo audit
       - name: SBOM generation (CycloneDX——随制品存档——依赖门禁证据)
         run: |

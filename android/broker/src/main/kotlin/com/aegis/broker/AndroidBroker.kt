@@ -14,6 +14,7 @@ class AndroidBroker(
     private val policyVersion: String = "1.0",
     private val mode: BrokerMode = BrokerMode.FirstMatch,
 ) {
+    private val consumedNonces = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** 评估导航意图（ProposedAction → Decision——默认拒绝——fail-closed）。 */
     fun evaluateNavigation(
@@ -27,10 +28,10 @@ class AndroidBroker(
             ?: return Decision.Deny(
                 DenyReason("url_policy", "拒绝 URL: $rawUrl", explanation = "denied origin — URL parsing failed: $rawUrl — policy version $policyVersion"),
             )
-        val origin = "${uri.scheme}://${uri.host}"
+        val origin = canonicalOrigin(uri)
         val action = AuthorizedAction(
             sessionId = sessionId, tabId = tabId, documentGeneration = generation,
-            origin = origin, method = "GET", canonicalParameters = uri.path,
+            origin = origin, method = "GET", canonicalParameters = canonicalPathAndQuery(uri),
             scope = scope, expiresAt = kotlinx.datetime.Clock.System.now()
                 .plus(kotlin.time.Duration.parse("120s")),
             nonce = java.util.UUID.randomUUID().toString().replace("-", ""),
@@ -46,6 +47,38 @@ class AndroidBroker(
             && action.policyVersion == policyVersion
             && action.documentGeneration == currentGeneration
             && action.expiresAt > kotlinx.datetime.Clock.System.now()
+
+    /** 在实际导航前校验上下文并消费 nonce，避免授权对象被跨标签或跨请求重放。 */
+    fun consumeNavigation(
+        action: AuthorizedAction?,
+        sessionId: String,
+        tabId: String,
+        currentGeneration: Long,
+        rawUrl: String,
+        scope: String,
+    ): Boolean {
+        val uri = OriginPolicy.tryParseExternal(rawUrl) ?: return false
+        if (!isValid(action, currentGeneration) || action == null) return false
+        if (action.sessionId != sessionId || action.tabId != tabId || action.scope != scope ||
+            action.method != "GET" || action.origin != canonicalOrigin(uri) ||
+            action.canonicalParameters != canonicalPathAndQuery(uri)) {
+            return false
+        }
+        return consumedNonces.add(action.nonce)
+    }
+
+    private fun canonicalOrigin(uri: java.net.URI): String {
+        val scheme = uri.scheme.lowercase()
+        val port = uri.port
+        val defaultPort = if (scheme == "https") 443 else 80
+        val authority = if (port == -1 || port == defaultPort) uri.host.lowercase() else "${uri.host.lowercase()}:$port"
+        return "$scheme://$authority"
+    }
+
+    private fun canonicalPathAndQuery(uri: java.net.URI): String {
+        val path = uri.rawPath?.ifEmpty { "/" } ?: "/"
+        return uri.rawQuery?.let { "$path?$it" } ?: path
+    }
 }
 
 /** 评估模式（照搬 warden Mode——FirstMatch/DenyOverrides）。 */

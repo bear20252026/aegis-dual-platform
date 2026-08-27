@@ -1,7 +1,10 @@
 package com.aegis.browser
 
 import android.content.Context
+import android.view.View
 import android.webkit.WebView
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.aegis.broker.AndroidBroker
 import com.aegis.webviewadapter.AegisWebViewClient
 
@@ -17,34 +20,50 @@ import com.aegis.webviewadapter.AegisWebViewClient
  */
 object SecureWebViewFactory {
     private val broker = AndroidBroker()
-    private var sessionCounter = 0L
+    private val sessionCounter = java.util.concurrent.atomic.AtomicLong(0)
+    private val navigatorTagKey = View.generateViewId()
 
     /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
     private const val SESSION_SEED_BYTES = 32
 
     /** 每会话随机种子（32 字节 hex）——注入 JS 噪声时用。 */
-    private val sessionSeed: String by lazy {
+    private fun newSessionSeed(): String {
         val bytes = ByteArray(SESSION_SEED_BYTES)
         java.security.SecureRandom().nextBytes(bytes)
-        bytes.joinToString("") { "%02x".format(it) }
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
     /** 创建并完成安全配置的 WebView（导航经 Broker 决策 + 指纹防护注入）。 */
     fun create(context: Context): WebView {
         val webView = WebView(context)
         BrowserEngine(webView).configure()
-        val sessionId = "session-${++sessionCounter}"
+        val sessionId = "session-${sessionCounter.incrementAndGet()}"
+        val sessionSeed = newSessionSeed()
+        installDocumentStartScripts(webView, sessionSeed)
         webView.webViewClient =
             AegisWebViewClient(
                 broker = broker,
                 sessionId = sessionId,
+                tabId = "tab-$sessionId",
                 onRendererGone = { /* renderer gone cleanup handled by caller */ },
             )
-        // 指纹防护 JS 注入（canvas/WebGL/Audio 噪声 + hardwareConcurrency 伪装）
-        webView.evaluateJavascript(FINGERPRINT_SHIELD_JS, null)
-        // Bridge 硬化 JS 注入（域白名单 + HTTPS 强制——照搬 SecureWebViewContainer）
-        webView.evaluateJavascript(BRIDGE_GUARD_JS, null)
+        webView.setTag(navigatorTagKey, SecureNavigator(webView, webView.webViewClient as AegisWebViewClient))
         return webView
+    }
+
+    /** 仅工厂创建的 WebView 才拥有受控导航器；不存在时调用方必须拒绝外部导航。 */
+    fun navigatorFor(webView: WebView): SecureNavigator? =
+        webView.getTag(navigatorTagKey) as? SecureNavigator
+
+    /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */
+    private fun installDocumentStartScripts(webView: WebView, sessionSeed: String) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            android.util.Log.w("Aegis", "WebView 不支持 document-start 脚本；隐私增强未启用")
+            return
+        }
+        val allowedOrigins = setOf("https://*", "http://*")
+        WebViewCompat.addDocumentStartJavaScript(webView, fingerprintShieldScript(sessionSeed), allowedOrigins)
+        WebViewCompat.addDocumentStartJavaScript(webView, BRIDGE_GUARD_JS, allowedOrigins)
     }
 
     /** 获取 broker 实例（供外部校验/审计）。 */
@@ -77,7 +96,7 @@ object SecureWebViewFactory {
         console.warn('[Aegis] Bridge blocked: non-HTTPS', u.href);
         return Promise.reject(new Error('Aegis: non-HTTPS bridge blocked'));
       }
-      if (ALLOWED_HOSTS.length > 0 && !ALLOWED_HOSTS.includes(u.hostname) && !location.hostname.includes(u.hostname)) {
+      if (ALLOWED_HOSTS.length > 0 && !ALLOWED_HOSTS.includes(u.hostname) && u.origin !== location.origin) {
         console.warn('[Aegis] Bridge blocked: host not allowed', u.hostname);
         return Promise.reject(new Error('Aegis: host not in allowlist'));
       }
@@ -88,9 +107,9 @@ object SecureWebViewFactory {
             """.trimIndent()
 
     /** 指纹防护 JS（管道化组合——参照 Rust fingerprint_pipeline）。 */
-    private val FINGERPRINT_SHIELD_JS: String
-        get() =
+    private fun fingerprintShieldScript(sessionSeed: String): String =
             """
+window.__AEGIS_PROTECTION_VERSION = '1';
 // === Stage 1: ToStringGuard（参照 playwright-afp MIT）===
 (function() {
   var proxyMap = new WeakMap();
@@ -128,7 +147,7 @@ object SecureWebViewFactory {
     const ctx = this.getContext('2d');
     if (ctx) {
       const imageData = ctx.getImageData(0, 0, this.width, this.height);
-      const seed = parseInt(__AEGIS_SESSION_SEED.slice(0, 8), 16);
+      const seed = parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16);
       for (let i = 0; i < imageData.data.length; i += 4) { imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1; }
       ctx.putImageData(imageData, 0, 0);
     }
@@ -144,7 +163,7 @@ object SecureWebViewFactory {
   };
 })();
 (function() {
-  const seed = parseInt(__AEGIS_SESSION_SEED.slice(8, 16), 16);
+  const seed = parseInt(window.__AEGIS_SITE_SEED.slice(8, 16), 16);
   Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 2 + (seed % 7) });
 })();
 
@@ -163,10 +182,11 @@ object SecureWebViewFactory {
     if (osAH) Object.defineProperty(screen, 'availHeight', { get: function() { return roundTo(osAH.get.call(this), HS); } });
   } catch(e) {}
   try {
-    Object.defineProperty(window, 'innerWidth', { get: function() { return roundTo(window.innerWidth, WS); } });
-    Object.defineProperty(window, 'innerHeight', { get: function() { return roundTo(window.innerHeight, HS); } });
-    Object.defineProperty(window, 'outerWidth', { get: function() { return roundTo(window.outerWidth, WS); } });
-    Object.defineProperty(window, 'outerHeight', { get: function() { return roundTo(window.outerHeight, HS); } });
+    var iw = window.innerWidth, ih = window.innerHeight, ow = window.outerWidth, oh = window.outerHeight;
+    Object.defineProperty(window, 'innerWidth', { value: roundTo(iw, WS), configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: roundTo(ih, HS), configurable: true });
+    Object.defineProperty(window, 'outerWidth', { value: roundTo(ow, WS), configurable: true });
+    Object.defineProperty(window, 'outerHeight', { value: roundTo(oh, HS), configurable: true });
   } catch(e) {}
 })();
 
@@ -249,4 +269,19 @@ object SecureWebViewFactory {
   } catch(e) {}
 })();
             """.trimIndent()
+}
+
+/** 将 URL 规范化、Broker 授权和 WebView 副作用收敛到单一路径。 */
+class SecureNavigator internal constructor(
+    private val webView: WebView,
+    private val client: AegisWebViewClient,
+) {
+    fun openTrustedHome() {
+        webView.loadUrl(BrowserEngine.HOME_URL)
+    }
+
+    fun navigateExternal(input: String): Boolean {
+        val normalized = BrowserEngine.normalizeExternal(input) ?: return false
+        return client.navigate(webView, normalized)
+    }
 }

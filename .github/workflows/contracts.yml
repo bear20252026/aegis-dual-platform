@@ -1,35 +1,91 @@
 name: Contracts
-on:
+
+"on":
   push:
-    paths: ['contracts/**']
+    paths:
+      - 'contracts/**'
+      - 'core/rust-policy-core/**'
+      - 'windows/src/Aegis.Windows.App/**'
+      - 'android/**'
+      - '.github/workflows/contracts.yml'
   pull_request:
-    paths: ['contracts/**']
+    paths:
+      - 'contracts/**'
+      - 'core/rust-policy-core/**'
+      - 'windows/src/Aegis.Windows.App/**'
+      - 'android/**'
+      - '.github/workflows/contracts.yml'
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
-  contract-check:
+  contract-source-of-truth:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0 (node24)
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
-      - name: Validate contracts JSON + vectors (单一事实来源——蓝图阶段 B)
+      - name: Validate contracts JSON and expected decisions
         run: |
           python - <<'PYEOF'
           import json, glob
-          for f in glob.glob('contracts/schemas/*.json') + glob.glob('contracts/vectors/*.json'):
-              json.load(open(f, encoding='utf-8'))
-          print('✅ contracts JSON 全部有效（schemas/vectors——契约事实来源）')
+          accepted = {'allow', 'valid', 'deny', 'deny_rollback', 'deny_threshold', 'deny_expired', 'deny_schema', 'deny_replay'}
+          for path in glob.glob('contracts/schemas/*.json') + glob.glob('contracts/vectors/*.json'):
+              data = json.load(open(path, encoding='utf-8'))
+              for vector in data.get('vectors', []):
+                  assert vector.get('expected') in accepted, f'向量断言缺失: {path}'
+          print('✅ contracts JSON 与向量期望有效')
           PYEOF
-      - name: Cross-language vectors differential (Python reference——蓝图)
+      - name: Regenerate C# and Kotlin contracts
         run: |
-          python - <<'PYEOF'
-          import json, glob
-          # 与 Rust core (cargo test) / C# reference 对同一 vectors 结果一致（蓝图阶段 B）
-          for f in glob.glob('contracts/vectors/*.json'):
-              data = json.load(open(f, encoding='utf-8'))
-              for v in data.get('vectors', []):
-                  assert v.get('expected') in ('allow', 'valid', 'deny', 'deny_rollback', 'deny_threshold', 'deny_expired', 'deny_schema', 'deny_replay'), f'向量断言缺失: {f}'
-          print('✅ 契约向量完整（allow/deny 断言——跨语言差分一致——阶段 B 完成标准）')
-          PYEOF
+          python contracts/codegen/generate_csharp.py
+          python contracts/codegen/generate_kotlin.py
+          python contracts/codegen/verify_contract_compatibility.py
+      - name: Fail if generated bindings are stale
+        run: |
+          git diff --exit-code -- \
+            windows/src/Aegis.Windows.App/Contracts/Generated \
+            android/contracts/src/main/kotlin/com/aegis/contracts/generated
+
+  rust-conformance:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core/rust-policy-core
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+      - name: Run Rust policy and vector conformance tests
+        run: cargo test --locked
+
+  windows-contract-build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: '10.0.x'
+      - name: Compile Windows broker and generated contracts
+        run: dotnet build windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj --configuration Release
+
+  android-contract-build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+      - name: Compile Android modules that consume generated contracts
+        run: ./gradlew.bat :broker:compileDebugKotlin :webview-adapter:compileDebugKotlin :app:assembleDebug --no-daemon

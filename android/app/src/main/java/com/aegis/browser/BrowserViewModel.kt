@@ -16,7 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 class BrowserViewModel : ViewModel() {
     companion object {
         /** 自定义首页（Android assets 本地加载）。 */
-        const val HOME_URL = "file:///android_asset/start.html"
+        const val HOME_URL = BrowserEngine.HOME_URL
     }
 
     private val _tabs = MutableStateFlow<List<Tab>>(emptyList<Tab>())
@@ -41,9 +41,7 @@ class BrowserViewModel : ViewModel() {
         if (::tabManager.isInitialized) return
         tabManager = TabManager()
         val initialWebView = SecureWebViewFactory.create(context)
-        com.aegis.browser
-            .BrowserEngine(initialWebView)
-            .load(HOME_URL)
+        SecureWebViewFactory.navigatorFor(initialWebView)?.openTrustedHome()
         tabManager.addTab(initialWebView, url = HOME_URL)
         refresh()
     }
@@ -60,9 +58,7 @@ class BrowserViewModel : ViewModel() {
     fun newTab(context: android.content.Context) {
         if (!::tabManager.isInitialized) return
         val wv = SecureWebViewFactory.create(context)
-        com.aegis.browser
-            .BrowserEngine(wv)
-            .load(HOME_URL)
+        SecureWebViewFactory.navigatorFor(wv)?.openTrustedHome()
         tabManager.addTab(wv, url = HOME_URL)
         refresh()
     }
@@ -90,9 +86,9 @@ class BrowserViewModel : ViewModel() {
     fun navigateToAddress() {
         if (!::tabManager.isInitialized) return
         val wv = tabManager.current()?.webView ?: return
-        com.aegis.browser
-            .BrowserEngine(wv)
-            .load(_address.value)
+        if (!SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(_address.value).orFalse()) {
+            _webViewAlert.value = "该地址无法通过安全策略验证"
+        }
     }
 
     /** 历史导航（后退/前进/刷新——合并减少函数数——detekt TooManyFunctions）。 */
@@ -113,6 +109,8 @@ class BrowserViewModel : ViewModel() {
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */
     fun getTabManager(): TabManager? = if (::tabManager.isInitialized) tabManager else null
 }
+
+private fun Boolean?.orFalse(): Boolean = this ?: false
 
 /** 历史导航动作。 */
 enum class HistoryAction { BACK, FORWARD, RELOAD }
