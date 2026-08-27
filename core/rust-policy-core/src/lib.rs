@@ -12,6 +12,7 @@ pub mod action_policy;
 pub mod adblock;
 pub mod bridge_guard;
 pub mod broker;
+pub mod c_abi;
 pub mod capability;
 pub mod command_bar;
 pub mod decision;
