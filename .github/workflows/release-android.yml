@@ -74,6 +74,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path ../dist
           Copy-Item app/build/outputs/apk/release/*.apk ../dist/
+          python ../release/build_metadata.py --platform android --output ../dist/build-metadata.json
           cd ../dist
           Get-ChildItem -Recurse -File |
             Where-Object { $_.Name -ne 'SHA256SUMS.json' } |

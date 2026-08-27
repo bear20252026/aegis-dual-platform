@@ -53,6 +53,8 @@ jobs:
             --self-contained false `
             --output dist/aegis-windows
           Compress-Archive -Path dist/aegis-windows/* -DestinationPath dist/Aegis.Windows.zip -Force
+      - name: Write build metadata
+        run: python release/build_metadata.py --platform windows --output dist/build-metadata.json
       - name: Generate SHA-256 checksums
         run: |
           Get-ChildItem dist -Recurse -File |
