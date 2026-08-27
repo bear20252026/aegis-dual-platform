@@ -94,9 +94,12 @@ jobs:
           python "$GITHUB_WORKSPACE/release/native_artifact_manifest.py" \
             --root "$GITHUB_WORKSPACE/dist/native-policy" \
             --output "$GITHUB_WORKSPACE/dist/native-policy-manifest.json" --require android
-      - name: Run full Android Broker tests with the native navigation decision core
+      - name: Run full Android Broker tests including native JSON decision mapping
+        run: bash ./gradlew :broker:testDebugUnitTest --no-daemon
+      - name: Verify enabled Android native gate fails closed in JVM unit tests
         run: |
           bash ./gradlew :broker:testDebugUnitTest --no-daemon \
+            --tests com.aegis.broker.AndroidBrokerTest.defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore \
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
       - name: Build release APK with the native navigation decision core
