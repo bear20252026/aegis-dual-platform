@@ -37,6 +37,9 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: '10.0.x'
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
       - name: Verify shared version and release tag
         shell: pwsh
         run: |
@@ -45,13 +48,31 @@ jobs:
           } else {
             python scripts/verify_versions.py
           }
-      - name: Build current Windows application
+      - name: Build versioned Rust navigation decision DLL
+        shell: pwsh
         run: |
+          cargo build --manifest-path core/rust-policy-core/Cargo.toml --release --target x86_64-pc-windows-msvc
+          New-Item -ItemType Directory -Force -Path dist/native-policy/windows/win-x64
+          Copy-Item core/rust-policy-core/target/x86_64-pc-windows-msvc/release/aegis_policy_core.dll `
+            dist/native-policy/windows/win-x64/aegis_policy_core.dll
+      - name: Verify native bridge and build current Windows application
+        shell: pwsh
+        run: |
+          $policyDll = (Resolve-Path dist/native-policy/windows/win-x64/aegis_policy_core.dll).Path
+          $env:AEGIS_REQUIRE_NATIVE_POLICY_CORE = "1"
+          $env:AEGIS_NATIVE_POLICY_CORE_PATH = $policyDll
+          $env:AEGIS_NATIVE_POLICY_CORE_TEST_PATH = $policyDll
+          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
             --self-contained false `
-            --output dist/aegis-windows
+            --output dist/aegis-windows `
+            -p:RequireNativePolicyCore=true `
+            -p:NativePolicyCorePath=$policyDll
+          if (-not (Test-Path dist/aegis-windows/aegis_policy_core.dll)) {
+            throw "Windows 发布目录缺少 Rust 原生策略核心 DLL"
+          }
           Compress-Archive -Path dist/aegis-windows/* -DestinationPath dist/Aegis.Windows.zip -Force
       - name: Write build metadata
         run: python release/build_metadata.py --platform windows --output dist/build-metadata.json
