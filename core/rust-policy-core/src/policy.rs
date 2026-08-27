@@ -115,6 +115,12 @@ impl DefaultLocalPolicy {
     }
 }
 
+impl Default for DefaultLocalPolicy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalPolicy for DefaultLocalPolicy {
     fn evaluate(&self, action: &str, context: &str) -> Option<Decision> {
         // 仅当显式规则匹配时返回 Some；无匹配返回 None → 上层走 FailSafe
