@@ -2,7 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
-        Title="Aegis" Height="800" Width="1200">
+        Title="Aegis" Height="800" Width="1200"
+        Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
   <!-- 受信 chrome UI（本地固定 origin——远程页面无 native bridge——ADR-003） -->
   <DockPanel>
     <DockPanel DockPanel.Dock="Top" Margin="4">
@@ -14,26 +15,27 @@
     </DockPanel>
     <Grid>
       <wv2:WebView2 x:Name="Browser"/>
-      <!-- 受信 chrome 审批层：不由远程页面注入；默认取消，展示内容仅来自 Rust 核心确认请求。 -->
-      <Border x:Name="ApprovalPanel" Visibility="Collapsed" Panel.ZIndex="10"
-              HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"
-              Padding="20" Background="White" BorderBrush="#334155" BorderThickness="1"
-              CornerRadius="8">
-        <StackPanel>
-          <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
-          <TextBlock Text="来源" FontWeight="SemiBold"/>
-          <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Margin="0,0,0,8"/>
-          <TextBlock Text="路径与查询" FontWeight="SemiBold"/>
-          <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Margin="0,0,0,8"/>
-          <TextBlock Text="权限范围" FontWeight="SemiBold"/>
-          <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Margin="0,0,0,8"/>
-          <TextBlock x:Name="ApprovalExpiry" Foreground="#475569" TextWrapping="Wrap" Margin="0,0,0,16"/>
-          <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88" Margin="0,0,8,0"/>
-            <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112"/>
+      <!-- 全窗口受信模态遮罩：拦截底层点击；只展示 Rust 核心给出的最小审批字段。 -->
+      <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#990F172A">
+        <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"
+                Padding="20" Background="White" BorderBrush="#334155" BorderThickness="1"
+                CornerRadius="8">
+          <StackPanel>
+            <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
+            <TextBlock Text="来源" FontWeight="SemiBold"/>
+            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <TextBlock Text="路径与查询" FontWeight="SemiBold"/>
+            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <TextBlock Text="权限范围" FontWeight="SemiBold"/>
+            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Margin="0,0,0,8"/>
+            <TextBlock x:Name="ApprovalExpiry" Foreground="#475569" TextWrapping="Wrap" Margin="0,0,0,16"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88" Margin="0,0,8,0"/>
+              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112"/>
+            </StackPanel>
           </StackPanel>
-        </StackPanel>
-      </Border>
+        </Border>
+      </Grid>
     </Grid>
     <!-- 阶段 C 错误页（导航失败——NavigationCompleted WebErrorStatus——安全错误可见） -->
     <TextBlock x:Name="ErrorPage" DockPanel.Dock="Top" Visibility="Collapsed"

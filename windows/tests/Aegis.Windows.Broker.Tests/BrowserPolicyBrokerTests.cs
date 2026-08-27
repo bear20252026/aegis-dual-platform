@@ -92,18 +92,18 @@ public sealed class BrowserPolicyBrokerTests
             return;
 
         Assert.True(NativePolicyCoreBridge.TryCreate("1.0", libraryPath, out var bridge));
-        using (bridge!)
+        using (var nativeBridge = Assert.IsType<NativePolicyCoreBridge>(bridge))
         {
-            Assert.True(bridge.CreateSession("native-session", "native-tab", 0, 120));
+            Assert.True(nativeBridge.CreateSession("native-session", "native-tab", 0, 120));
             var allow = Assert.IsType<Decision.Allow>(
-                bridge.EvaluateNavigation("native-session", "native-tab", 0,
+                nativeBridge.EvaluateNavigation("native-session", "native-tab", 0,
                     "HTTPS://Example.COM:443/path?x=1#ignored", "navigation"));
 
             Assert.Equal("https://example.com", allow.Action.Origin);
             Assert.Equal("/path?x=1", allow.Action.CanonicalParameters);
-            Assert.True(bridge.TryConsumeNavigation(
+            Assert.True(nativeBridge.TryConsumeNavigation(
                 allow.Action, "https://example.com/path?x=1#executed", "navigation"));
-            Assert.False(bridge.TryConsumeNavigation(
+            Assert.False(nativeBridge.TryConsumeNavigation(
                 allow.Action, "https://example.com/path?x=1", "navigation"));
         }
     }
@@ -134,25 +134,25 @@ public sealed class BrowserPolicyBrokerTests
             return;
 
         Assert.True(NativePolicyCoreBridge.TryCreate("1.0", libraryPath, out var bridge));
-        using (bridge!)
+        using (var nativeBridge = Assert.IsType<NativePolicyCoreBridge>(bridge))
         {
             const string url = "https://example.com/confirmation?flow=1";
-            Assert.True(bridge.CreateSession("confirmation-session", "confirmation-tab", 0, 120));
+            Assert.True(nativeBridge.CreateSession("confirmation-session", "confirmation-tab", 0, 120));
             var pending = Assert.IsType<Decision.RequireConfirmation>(
-                bridge.RequestNavigationConfirmation(
+                nativeBridge.RequestNavigationConfirmation(
                     "confirmation-session", "confirmation-tab", 0, url, "navigation"));
 
             var approved = Assert.IsType<Decision.Allow>(
-                bridge.ApproveNavigationConfirmation(pending.Request, url, "navigation"));
-            Assert.True(bridge.TryConsumeNavigation(approved.Action, url, "navigation"));
-            Assert.False(bridge.TryConsumeNavigation(approved.Action, url, "navigation"));
+                nativeBridge.ApproveNavigationConfirmation(pending.Request, url, "navigation"));
+            Assert.True(nativeBridge.TryConsumeNavigation(approved.Action, url, "navigation"));
+            Assert.False(nativeBridge.TryConsumeNavigation(approved.Action, url, "navigation"));
 
             var rejected = Assert.IsType<Decision.RequireConfirmation>(
-                bridge.RequestNavigationConfirmation(
+                nativeBridge.RequestNavigationConfirmation(
                     "confirmation-session", "confirmation-tab", 0, url, "navigation"));
-            Assert.True(bridge.RejectNavigationConfirmation(rejected.Request));
+            Assert.True(nativeBridge.RejectNavigationConfirmation(rejected.Request));
             var afterRejection = Assert.IsType<Decision.Deny>(
-                bridge.ApproveNavigationConfirmation(rejected.Request, url, "navigation"));
+                nativeBridge.ApproveNavigationConfirmation(rejected.Request, url, "navigation"));
             Assert.Equal("approval_not_pending", afterRejection.Reason.Code);
         }
     }

@@ -152,8 +152,15 @@ public sealed class HostWebView : IDisposable
 
     private bool TryResumeApprovedNavigation(string rawUrl)
     {
-        if (_pendingResumption is not { } pending || !string.Equals(pending.RawUrl, rawUrl, StringComparison.Ordinal))
+        if (_pendingResumption is not { } pending)
             return false;
+        // 批准只允许恢复紧随其后的同一 URL。任何 URL 变化都放弃宿主持有的已批准动作，
+        // 不能让后续请求借用过期的恢复状态；核心账本中的不可达动作仍会按自身过期规则失效。
+        if (!string.Equals(pending.RawUrl, rawUrl, StringComparison.Ordinal))
+        {
+            _pendingResumption = null;
+            return false;
+        }
         _pendingResumption = null;
         return _broker.TryConsumeNavigation(
             pending.Action,

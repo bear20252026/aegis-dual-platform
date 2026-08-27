@@ -140,6 +140,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        // Activity 销毁是确认 UI 的退出边界；任何待审批导航均须先撤销，不留可恢复能力。
+        viewModel.rejectPendingNavigationConfirmation()
         // 释放全部 WebView 持有的 Chromium 资源
         viewModel.getTabManager()?.let { tm ->
             tm.suspendAll()
@@ -150,6 +152,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         super.onDestroy()
+    }
+
+    override fun onPause() {
+        // 应用转后台或进入系统遮罩时没有持续可见的明确同意；恢复后必须重新请求审批。
+        viewModel.rejectPendingNavigationConfirmation()
+        super.onPause()
     }
 }
 

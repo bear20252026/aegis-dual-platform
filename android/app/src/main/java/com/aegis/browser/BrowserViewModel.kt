@@ -63,6 +63,8 @@ class BrowserViewModel : ViewModel() {
     /** 新建标签页。 */
     fun newTab(context: android.content.Context) {
         if (!::tabManager.isInitialized) return
+        // 新标签会切换当前 WebView；不能把旧标签的明确批准带入新上下文。
+        rejectPendingNavigationConfirmation()
         val wv = createSecureWebView(context)
         SecureWebViewFactory.navigatorFor(wv)?.openTrustedHome()
         tabManager.addTab(wv, url = HOME_URL)
@@ -72,8 +74,10 @@ class BrowserViewModel : ViewModel() {
     /** 切换到指定标签。 */
     fun switchTo(index: Int) {
         if (!::tabManager.isInitialized) return
-        tabManager.switchTo(index)
-        refresh()
+        if (index !in tabManager.list().indices) return
+        // 待审批状态不得跨标签保留；切换时撤销 Rust 核心的 pending nonce，回到原标签也需重新请求。
+        if (index != tabManager.activeIndex) rejectPendingNavigationConfirmation()
+        if (tabManager.switchTo(index)) refresh()
     }
 
     /** 关闭指定标签。 */
