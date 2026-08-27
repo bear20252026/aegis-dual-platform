@@ -41,12 +41,53 @@ jobs:
       - name: Validate contracts JSON and expected decisions
         run: |
           python - <<'PYEOF'
-          import json, glob
-          accepted = {'allow', 'valid', 'deny', 'deny_rollback', 'deny_threshold', 'deny_expired', 'deny_schema', 'deny_replay'}
+          import json, glob, re
+
+          # 单步协议：顶层 expected 字段
+          SINGLE_STEP_ACCEPTED = {
+              'allow', 'valid', 'deny', 'deny_rollback', 'deny_threshold',
+              'deny_expired', 'deny_schema', 'deny_replay'
+          }
+
+          # 多步流协议：每步各自的 expected_* 字段
+          # 值域：allow / deny / require_confirmation
+          MULTI_STEP_ACCEPTED = {'allow', 'deny', 'require_confirmation'}
+
+          # 多步流字段前缀（按协议步骤命名）
+          MULTI_STEP_PREFIXES = ('expected_request', 'expected_approve',
+                                 'expected_consume', 'expected_evaluate')
+
+          def validate_vector(vector, path):
+              """根据协议类型验证向量断言。
+
+              两种协议分类：
+              1. 单步协议 — 顶层 'expected' 字段
+              2. 多步流协议 — 'expected_request'/'expected_approve'/'expected_consume' 等
+              """
+              # 单步协议
+              if 'expected' in vector:
+                  assert vector['expected'] in SINGLE_STEP_ACCEPTED, \
+                      f'单步协议 expected 值非法: {path} → {vector["expected"]!r}'
+                  return
+
+              # 多步流协议：收集所有 expected_* 字段
+              multi_step_fields = [
+                  k for k in vector
+                  if k.startswith(MULTI_STEP_PREFIXES)
+                  and not k.endswith('_code')  # _code 字段是错误码，不是决策
+              ]
+              assert multi_step_fields, \
+                  f'向量缺少断言字段（既无 expected 也无 expected_*）: {path}'
+
+              for field in multi_step_fields:
+                  value = vector[field]
+                  assert value in MULTI_STEP_ACCEPTED, \
+                      f'多步流 {field} 值非法: {path} → {value!r}'
+
           for path in glob.glob('contracts/schemas/*.json') + glob.glob('contracts/vectors/*.json'):
               data = json.load(open(path, encoding='utf-8'))
               for vector in data.get('vectors', []):
-                  assert vector.get('expected') in accepted, f'向量断言缺失: {path}'
+                  validate_vector(vector, path)
           print('✅ contracts JSON 与向量期望有效')
           PYEOF
       - name: Regenerate C# and Kotlin contracts
