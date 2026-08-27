@@ -123,9 +123,9 @@ public sealed class HostWebView : IDisposable
                 RejectPendingNavigation();
                 return false;
             }
-            var decision = _broker.RequestNavigationConfirmation(
+            var confirmationDecision = _broker.RequestNavigationConfirmation(
                 _sessionId, _tabId, _documentGeneration, rawUrl, "navigation");
-            if (decision is Broker.Decision.RequireConfirmation confirmation)
+            if (confirmationDecision is Broker.Decision.RequireConfirmation confirmation)
             {
                 _pendingConfirmation = new PendingNavigationConfirmation(rawUrl, "navigation", confirmation.Request);
                 NavigationConfirmationRequested?.Invoke(
@@ -134,7 +134,7 @@ public sealed class HostWebView : IDisposable
                 return false;
             }
             // 原生核心、会话或协议错误均不能继续；若未来策略直接 Allow，仍走既有消费边界。
-            if (decision is not Broker.Decision.Allow immediate
+            if (confirmationDecision is not Broker.Decision.Allow immediate
                 || !_broker.TryConsumeNavigation(immediate.Action, _sessionId, _tabId, _documentGeneration, rawUrl, "navigation"))
                 return false;
             return AdvanceDocumentGenerationIfNeeded();
