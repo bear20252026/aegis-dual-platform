@@ -24,6 +24,7 @@ jobs:
       - name: Build versioned Windows policy DLL
         shell: pwsh
         run: |
+          $env:PYTHONUTF8 = "1"
           cargo build --release --locked --manifest-path core/rust-policy-core/Cargo.toml --target x86_64-pc-windows-msvc
           New-Item -ItemType Directory -Force dist/native-policy/windows/win-x64 | Out-Null
           Copy-Item core/rust-policy-core/target/x86_64-pc-windows-msvc/release/aegis_policy_core.dll `
@@ -55,13 +56,14 @@ jobs:
       - name: Install locked Android Rust build tool
         run: cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build four Android ABI policy libraries
+        working-directory: core/rust-policy-core
         run: |
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.0.12433566"
           test -d "$ANDROID_NDK_HOME"
           cargo ndk -p 26 \
             -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
             -o "$GITHUB_WORKSPACE/dist/native-policy/android" \
-            build --release --locked --manifest-path "$GITHUB_WORKSPACE/core/rust-policy-core/Cargo.toml"
+            build --release --locked
       - name: Generate Kotlin binding from Android cdylib
         working-directory: core/rust-policy-core
         run: |

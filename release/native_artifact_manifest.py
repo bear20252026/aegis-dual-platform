@@ -114,16 +114,16 @@ def main() -> int:
             existing = read_manifest(args.output)
             if existing != manifest:
                 raise ValueError("原生制品清单与当前文件、路径或 SHA-256 不一致")
-            print(f"✅ 原生制品清单复核通过: {args.output}")
+            print(f"OK: native artifact manifest verified: {args.output}")
         else:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(
                 json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
-            print(f"✅ 已生成原生制品清单: {args.output}")
+            print(f"OK: native artifact manifest written: {args.output}")
     except ValueError as error:
-        print(f"❌ {error}", file=sys.stderr)
+        print(f"ERROR: native artifact manifest rejected: {error}", file=sys.stderr)
         return 1
     return 0
 
