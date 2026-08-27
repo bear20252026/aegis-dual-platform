@@ -44,12 +44,20 @@ def generate(schema: dict, name: str) -> str:
     return "\n".join(lines)
 
 
+def contract_name(schema_file: pathlib.Path) -> str:
+    """将 action.schema.json 转为稳定且合法的 ActionContract 类型名。"""
+    stem = schema_file.stem.removesuffix(".schema")
+    return "".join(part[:1].upper() + part[1:] for part in stem.split("-")) + "Contract"
+
+
 def main() -> int:
     out_dir = OUT
     out_dir.mkdir(parents=True, exist_ok=True)
+    for stale_file in out_dir.glob("*.schema.kt"):
+        stale_file.unlink()
     for f in sorted(SCHEMAS.glob("*.json")):
         schema = json.loads(f.read_text(encoding="utf-8"))
-        name = "".join(part.capitalize() for part in f.stem.split("-"))
+        name = contract_name(f)
         (out_dir / f"{name}.kt").write_text(generate(schema, name) + "\n", encoding="utf-8")
         print(f"  ✅ 生成 Kotlin 模型: {name}.kt")
     print(f"Kotlin 模型生成完成（{len(list(out_dir.glob('*.kt')))} 个——contracts 事实来源）")
