@@ -1,4 +1,5 @@
 using Aegis.Windows.Broker;
+using Xunit;
 
 namespace Aegis.Windows.Broker.Tests;
 
