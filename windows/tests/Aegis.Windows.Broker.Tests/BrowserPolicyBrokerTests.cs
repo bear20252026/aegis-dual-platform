@@ -8,7 +8,7 @@ public sealed class BrowserPolicyBrokerTests
     [Fact]
     public void AuthorizedNavigationCanBeConsumedOnlyOnce()
     {
-        var broker = new BrowserPolicyBroker();
+        var broker = CreateRegisteredBroker();
         const string url = "https://example.com/path?query=1";
         var action = Assert.IsType<Decision.Allow>(
             broker.EvaluateNavigation("session-1", "tab-1", 0, url, "navigation")).Action;
@@ -20,7 +20,7 @@ public sealed class BrowserPolicyBrokerTests
     [Fact]
     public void ChangedNavigationParametersInvalidateAuthorization()
     {
-        var broker = new BrowserPolicyBroker();
+        var broker = CreateRegisteredBroker();
         const string authorizedUrl = "https://example.com/path?query=1";
         var action = Assert.IsType<Decision.Allow>(
             broker.EvaluateNavigation("session-1", "tab-1", 0, authorizedUrl, "navigation")).Action;
@@ -33,5 +33,44 @@ public sealed class BrowserPolicyBrokerTests
                 0,
                 "https://example.com/path?query=2",
                 "navigation"));
+    }
+
+    [Fact]
+    public void UnregisteredOrStaleSessionIsDenied()
+    {
+        var broker = new BrowserPolicyBroker();
+
+        Assert.IsType<Decision.Deny>(broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation"));
+        Assert.True(broker.RegisterSession("session-1", "tab-1"));
+        Assert.True(broker.UpdateDocumentGeneration("session-1", "tab-1", 1));
+        Assert.IsType<Decision.Deny>(broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation"));
+    }
+
+    [Fact]
+    public void DestroyedSessionCannotCreateNewAuthorizations()
+    {
+        var broker = CreateRegisteredBroker();
+        broker.DestroySession("session-1");
+
+        Assert.IsType<Decision.Deny>(broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation"));
+    }
+
+    [Fact]
+    public void DestroyedSessionCannotConsumeAnAlreadyIssuedAuthorization()
+    {
+        var broker = CreateRegisteredBroker();
+        const string url = "https://example.com";
+        var action = Assert.IsType<Decision.Allow>(
+            broker.EvaluateNavigation("session-1", "tab-1", 0, url, "navigation")).Action;
+        broker.DestroySession("session-1");
+
+        Assert.False(broker.TryConsumeNavigation(action, "session-1", "tab-1", 0, url, "navigation"));
+    }
+
+    private static BrowserPolicyBroker CreateRegisteredBroker()
+    {
+        var broker = new BrowserPolicyBroker();
+        Assert.True(broker.RegisterSession("session-1", "tab-1"));
+        return broker;
     }
 }

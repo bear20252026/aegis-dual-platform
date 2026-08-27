@@ -84,4 +84,30 @@ class AndroidBrokerTest {
             ) is Decision.Deny,
         )
     }
+
+    @Test
+    fun destroyingSessionInvalidatesAnAlreadyIssuedAuthorization() {
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("session-1", "tab-1"))
+        val decision = broker.evaluateNavigation(
+            "session-1",
+            "tab-1",
+            0,
+            "https://example.com",
+            "navigation",
+        )
+        assertTrue(decision is Decision.Allow)
+        broker.destroySession("session-1")
+
+        assertFalse(
+            broker.consumeNavigation(
+                (decision as Decision.Allow).action,
+                "session-1",
+                "tab-1",
+                0,
+                "https://example.com",
+                "navigation",
+            ),
+        )
+    }
 }

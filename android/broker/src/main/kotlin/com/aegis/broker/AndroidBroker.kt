@@ -16,25 +16,32 @@ class AndroidBroker(
 ) {
     private val consumedNonces = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, SessionContext>()
+    private val authorizationLock = Any()
 
     /** 注册由受控 WebView 创建的会话；未知会话上的所有副作用均应被拒绝。 */
     fun registerSession(sessionId: String, tabId: String, generation: Long = 0): Boolean {
         if (sessionId.isBlank() || tabId.isBlank() || generation < 0) return false
-        return sessions.putIfAbsent(sessionId, SessionContext(tabId, generation)) == null
+        return synchronized(authorizationLock) {
+            sessions.putIfAbsent(sessionId, SessionContext(tabId, generation)) == null
+        }
     }
 
     /** 文档代际推进后立即同步；拒绝由已销毁或错标签会话发起的更新。 */
     fun updateDocumentGeneration(sessionId: String, tabId: String, generation: Long): Boolean {
-        val session = sessions[sessionId] ?: return false
-        if (session.tabId != tabId || generation < session.documentGeneration) return false
-        session.documentGeneration = generation
-        return true
+        return synchronized(authorizationLock) {
+            val session = sessions[sessionId] ?: return@synchronized false
+            if (session.tabId != tabId || generation < session.documentGeneration) return@synchronized false
+            session.documentGeneration = generation
+            true
+        }
     }
 
     /** 关闭标签时销毁会话并移除其已消费 nonce，避免状态残留。 */
     fun destroySession(sessionId: String) {
-        sessions.remove(sessionId)
-        consumedNonces.removeIf { nonce -> nonce.startsWith("$sessionId:") }
+        synchronized(authorizationLock) {
+            sessions.remove(sessionId)
+            consumedNonces.removeIf { nonce -> nonce.startsWith("$sessionId:") }
+        }
     }
 
     /** 评估导航意图（ProposedAction → Decision——默认拒绝——fail-closed）。 */
@@ -68,13 +75,15 @@ class AndroidBroker(
 
     /** 校验 AuthorizedAction 是否仍有效（会话/标签/代际/过期/策略版本——fail-closed）。 */
     fun isValid(action: AuthorizedAction?, currentGeneration: Long): Boolean {
-        val presentAction = action ?: return false
-        val session = sessions[presentAction.sessionId] ?: return false
-        return presentAction.policyVersion == policyVersion &&
-            presentAction.tabId == session.tabId &&
-            presentAction.documentGeneration == currentGeneration &&
-            presentAction.documentGeneration == session.documentGeneration &&
-            presentAction.expiresAt > kotlinx.datetime.Clock.System.now()
+        return synchronized(authorizationLock) {
+            val presentAction = action ?: return@synchronized false
+            val session = sessions[presentAction.sessionId] ?: return@synchronized false
+            presentAction.policyVersion == policyVersion &&
+                presentAction.tabId == session.tabId &&
+                presentAction.documentGeneration == currentGeneration &&
+                presentAction.documentGeneration == session.documentGeneration &&
+                presentAction.expiresAt > kotlinx.datetime.Clock.System.now()
+        }
     }
 
     /** 在实际导航前校验上下文并消费 nonce，避免授权对象被跨标签或跨请求重放。 */
@@ -87,13 +96,15 @@ class AndroidBroker(
         scope: String,
     ): Boolean {
         val uri = OriginPolicy.tryParseExternal(rawUrl) ?: return false
-        if (!isValid(action, currentGeneration) || action == null) return false
-        if (action.sessionId != sessionId || action.tabId != tabId || action.scope != scope ||
-            action.method != "GET" || action.origin != canonicalOrigin(uri) ||
-            action.canonicalParameters != canonicalPathAndQuery(uri)) {
-            return false
+        return synchronized(authorizationLock) {
+            if (!isValid(action, currentGeneration) || action == null) return@synchronized false
+            if (action.sessionId != sessionId || action.tabId != tabId || action.scope != scope ||
+                action.method != "GET" || action.origin != canonicalOrigin(uri) ||
+                action.canonicalParameters != canonicalPathAndQuery(uri)) {
+                return@synchronized false
+            }
+            consumedNonces.add(action.nonce)
         }
-        return consumedNonces.add(action.nonce)
     }
 
     private fun deny(code: String, detail: String): Decision.Deny =

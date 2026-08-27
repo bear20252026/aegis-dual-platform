@@ -53,4 +53,12 @@ public partial class MainWindow : Window
     private void Forward_Click(object sender, RoutedEventArgs e) => Browser.GoForward();
     private void Refresh_Click(object sender, RoutedEventArgs e) => Browser.Reload();
     private void Stop_Click(object sender, RoutedEventArgs e) => Browser.Stop();
+
+    protected override void OnClosed(EventArgs e)
+    {
+        Browser.CoreWebView2InitializationCompleted -= OnWebViewReady;
+        _host.Dispose();
+        Browser.Dispose();
+        base.OnClosed(e);
+    }
 }
