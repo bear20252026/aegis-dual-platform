@@ -116,7 +116,7 @@ class AndroidBrokerTest {
 
         if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
             assertFalse(result.allowsPlatformBroker)
-            assertTrue(result.denialCode == "native_policy_core_not_packaged")
+            assertTrue(result.denialCode == "native_policy_core_unavailable")
         } else {
             assertTrue(result.allowsPlatformBroker)
         }

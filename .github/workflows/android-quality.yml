@@ -64,12 +64,6 @@ jobs:
       - name: Broker 授权生命周期单元测试
         run: ./gradlew.bat :broker:testDebugUnitTest --no-daemon
 
-      - name: 原生策略开关失败闭合测试
-        run: >-
-          ./gradlew.bat :broker:testDebugUnitTest
-          --tests com.aegis.broker.AndroidBrokerTest.defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore
-          -PrequireNativePolicyCore=true --no-daemon
-
       - name: 上传 detekt 报告（排障用）
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

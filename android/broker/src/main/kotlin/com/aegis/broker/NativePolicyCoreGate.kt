@@ -1,5 +1,8 @@
 package com.aegis.broker
 
+import com.sun.jna.Library
+import com.sun.jna.Native
+
 /**
  * 原生策略核心的显式启用门禁。
  *
@@ -17,8 +20,6 @@ data class NativePolicyCoreGateResult(
     companion object {
         fun disabled() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
 
-        fun enabled() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
-
         fun block(denialCode: String) = NativePolicyCoreGateResult(
             allowsPlatformBroker = false,
             denialCode = denialCode,
@@ -27,11 +28,26 @@ data class NativePolicyCoreGateResult(
 }
 
 object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
-    override fun probe(): NativePolicyCoreGateResult =
-        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
-            // 原生 Kotlin 绑定和各 ABI .so 制品尚未被接入应用。显式启用时拒绝而非分叉执行。
-            NativePolicyCoreGateResult.block("native_policy_core_not_packaged")
-        } else {
-            NativePolicyCoreGateResult.disabled()
+    private const val expectedAbiVersion = 1
+
+    override fun probe(): NativePolicyCoreGateResult {
+        if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return NativePolicyCoreGateResult.disabled()
+        val abiVersion = try {
+            Native.load("aegis_policy_core", NativePolicyCoreAbi::class.java)
+                .aegis_policy_core_abi_version()
+        } catch (_: LinkageError) {
+            return NativePolicyCoreGateResult.block("native_policy_core_unavailable")
+        } catch (_: Exception) {
+            return NativePolicyCoreGateResult.block("native_policy_core_probe_failed")
         }
+        if (abiVersion != expectedAbiVersion) {
+            return NativePolicyCoreGateResult.block("native_policy_core_abi_mismatch")
+        }
+        // ABI 探测成功并不等同于策略决策已经委托给 Rust；在适配器落地前禁止本地规则接管。
+        return NativePolicyCoreGateResult.block("native_policy_core_adapter_unavailable")
+    }
+}
+
+private interface NativePolicyCoreAbi : Library {
+    fun aegis_policy_core_abi_version(): Int
 }

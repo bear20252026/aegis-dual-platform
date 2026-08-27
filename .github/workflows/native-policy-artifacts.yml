@@ -53,6 +53,10 @@ jobs:
       - uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
         with:
           packages: 'ndk;28.0.12433566'
+      - uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
+        with:
+          distribution: temurin
+          java-version: '21'
       - name: Install locked Android Rust build tool
         run: cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build four Android ABI policy libraries
@@ -79,6 +83,21 @@ jobs:
         run: |
           python release/native_artifact_manifest.py --root dist/native-policy \
             --output dist/native-policy/android-manifest.json --require android
+      - name: Package Android debug APK with controlled native policy artifacts
+        working-directory: android
+        run: |
+          ./gradlew :app:assembleDebug --no-daemon \
+            -PrequireNativePolicyCore=true \
+            -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
+          unzip -l app/build/outputs/apk/debug/app-debug.apk | \
+            grep -F 'lib/arm64-v8a/libaegis_policy_core.so'
+      - name: Verify enabled Android native gate fails closed before adapter rollout
+        working-directory: android
+        run: |
+          ./gradlew :broker:testDebugUnitTest --no-daemon \
+            --tests com.aegis.broker.AndroidBrokerTest.defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore \
+            -PrequireNativePolicyCore=true \
+            -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
       - name: Upload Android policy libraries and Kotlin binding
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
