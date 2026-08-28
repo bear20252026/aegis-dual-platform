@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-08-28 10:13 UTC",
+  "generated_at": "2026-08-28 10:17 UTC",
   "version": "2.1.6",
   "versionCode": "20106",
-  "commit": "6357b17",
-  "commit_subject": "﻿docs: add review & hardening report for 2026-08-28 (#4)",
-  "file_count": 277,
+  "commit": "d7cc10a",
+  "commit_subject": "refactor: generate aegis-专家评审包 from canonical source (#5)",
+  "file_count": 285,
   "files": [
     {
       "path": ".github/workflows/agent-redteam.yml",
@@ -65,6 +65,41 @@
       "path": ".github/workflows/supply-chain.yml",
       "sha256": "0c8eb6b06b95fe5a2e6c1b75b26c8267c40f3b613832ffc97f98383e165521ed",
       "bytes": 1492
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "169a3ce2d4b4c7f17dae5b04b497fe8db8d00a46475181ed6b416eaffd017642",
+      "bytes": 3250
+    },
+    {
+      "path": "CLAUDE.md",
+      "sha256": "8fd2eb569efca8e8c06a3da4c7eab459fa126afca9c2b05dd5c534bdd335be46",
+      "bytes": 3749
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "sha256": "7eefa5487d912d9daf8d9d8d286c145540d5958b7d5e299dfbc2ab586febd33a",
+      "bytes": 3502
+    },
+    {
+      "path": "DESIGN.md",
+      "sha256": "3557249da1dfed62898fef8847e4f8a970d7c44bde95930b7a23b64170fb7608",
+      "bytes": 37658
+    },
+    {
+      "path": "KNOWLEDGE_BASE.md",
+      "sha256": "7de63de6fa160cc9b1f052214a10680795f1622126e88b2bfb27a93f7b78e800",
+      "bytes": 50908
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "87b61c21465ed83a551cc0ec07972e17693396440c151a36e470337101a42448",
+      "bytes": 1104
+    },
+    {
+      "path": "README.md",
+      "sha256": "42d06289700b9a91253b465940527eea25b6f6a24fcb9136881dfcfac6761b92",
+      "bytes": 2790
     },
     {
       "path": "SECURITY.md",
@@ -1205,6 +1240,11 @@
       "path": "legacy/windows-pywebview/shell/start.html",
       "sha256": "818555f8d9b5689ece2b96359c427999a0bb204af862e97ea9b904c949fe0697",
       "bytes": 11404
+    },
+    {
+      "path": "pyproject.toml",
+      "sha256": "41cca80698724d4905f6bdd39732ed4f3e331511fb91976a5d7738063b678513",
+      "bytes": 1132
     },
     {
       "path": "shared/jsapi-schema.json",

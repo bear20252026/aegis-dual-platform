@@ -48,8 +48,16 @@ TREE_COPY: list[tuple[str, str]] = [
     (".github/workflows", ".github/workflows"),
 ]
 
-# 复制到评审包根目录的单个规范文件
+# 复制到评审包根目录的单个规范文件（全部为评审相关文档/配置）
 FILE_COPY: list[str] = [
+    "README.md",
+    "DESIGN.md",            # UI 设计语言事实来源（代码/README 均有引用）
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "CLAUDE.md",
+    "KNOWLEDGE_BASE.md",    # 架构决策与工程知识（ADR/踩坑记录）
+    "LICENSE",
+    "pyproject.toml",       # 根 Python（ruff）配置
     "SECURITY.md",
     "validate_release.py",
 ]
