@@ -108,28 +108,55 @@ object SecureWebViewFactory {
     private val allowedHostsJson: String =
         ALLOWED_BRIDGE_HOSTS.joinToString(",") { "\"$it\"" }
 
-    /** Bridge 硬化 JS（照搬 SecureWebViewContainer NativeBridge origin 校验）。 */
+    /**
+     * Bridge 硬化 JS（fetch / XMLHttpRequest / sendBeacon / WebSocket 未授权调用拒绝）。
+     * 与 Rust 侧 BridgeGuard::inject_script 同一份逻辑：只有「调用方自身
+     * hostname ∈ [ALLOWED_BRIDGE_HOSTS]」的受信内页（chrome UI）才能调用本机 bridge；
+     * 远程页一律拒绝（fail-closed）。注：`[$allowedHostsJson]` 必须包裹方括号，否则
+     * `const ALLOWED_HOSTS = "a","b"` 为 JS 语法错误（旧实现因此整体失效）。
+     */
     private val BRIDGE_GUARD_JS: String
         get() =
             """
-// Aegis BridgeGuard — origin 校验拦截（fetch/XMLHttpRequest 未授权调用拒绝）
+// Aegis BridgeGuard — 受信调用方校验（fetch / XMLHttpRequest / sendBeacon / WebSocket）
 (function() {
-  const ALLOWED_HOSTS = $allowedHostsJson;
-  const origFetch = window.fetch;
-  window.fetch = function(url) {
-    try {
-      const u = new URL(url, location.href);
-      if (u.protocol !== 'https:' && u.protocol !== 'http:' && u.hostname !== 'localhost') {
-        console.warn('[Aegis] Bridge blocked: non-HTTPS', u.href);
-        return Promise.reject(new Error('Aegis: non-HTTPS bridge blocked'));
-      }
-      if (ALLOWED_HOSTS.length > 0 && !ALLOWED_HOSTS.includes(u.hostname) && u.origin !== location.origin) {
-        console.warn('[Aegis] Bridge blocked: host not allowed', u.hostname);
-        return Promise.reject(new Error('Aegis: host not in allowlist'));
-      }
-    } catch(e) {}
-    return origFetch.apply(this, arguments);
+  const ALLOWED_HOSTS = [$allowedHostsJson];
+  // 仅容许「受信内页」（自身 hostname ∈ 白名单）调用本机 bridge。
+  const trustedCaller = ALLOWED_HOSTS.includes(location.hostname);
+  function isBridgeTarget(urlLike) {
+    try { return ALLOWED_HOSTS.includes(new URL(urlLike, location.href).hostname); }
+    catch (e) { return false; }
+  }
+  function shouldBlock(urlLike) {
+    if (!isBridgeTarget(urlLike)) return false;   // 普通站点流量放行
+    if (!trustedCaller) return true;              // 调用方非受信内页 → 拒绝
+    return false;
+  }
+  function deny(reason) { console.warn('[Aegis] Bridge blocked: ' + reason); }
+  const fetch0 = window.fetch;
+  window.fetch = function(input, init) {
+    if (shouldBlock(input && input.url ? input.url : input)) { deny('fetch'); return Promise.reject(new Error('Aegis: bridge blocked')); }
+    return fetch0.apply(this, arguments);
   };
+  const open0 = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    if (shouldBlock(url)) { deny('xhr'); throw new Error('Aegis: bridge blocked'); }
+    return open0.apply(this, arguments);
+  };
+  const beacon0 = navigator.sendBeacon && navigator.sendBeacon;
+  navigator.sendBeacon = function(url) {
+    if (shouldBlock(url)) { deny('beacon'); return false; }
+    return beacon0.apply(navigator, arguments);
+  };
+  const WS = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    if (shouldBlock(url)) { deny('websocket'); throw new Error('Aegis: bridge blocked'); }
+    return new WS(url, protocols);
+  };
+  window.WebSocket.CONNECTING = WS.CONNECTING;
+  window.WebSocket.OPEN = WS.OPEN;
+  window.WebSocket.CLOSING = WS.CLOSING;
+  window.WebSocket.CLOSED = WS.CLOSED;
 })();
             """.trimIndent()
 
