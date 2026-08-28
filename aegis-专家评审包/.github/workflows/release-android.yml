@@ -1,0 +1,193 @@
+# release-android.yml —— Android 平台独立交付链（INV-05）
+# 独立可追溯：build → sbom → provenance → verify
+# 可独立运行（workflow_dispatch）调试友好；release.yml 编排器触发时亦可调用。
+#
+# ⚠️ 使用前：私有仓库 attestations 需 GitHub Enterprise Cloud
+
+name: Release-Android
+
+on:
+  push:
+    tags: ['v*']
+    paths:
+      - 'android/**'
+  workflow_dispatch: {}
+  workflow_call: {}
+
+permissions:
+  contents: read
+
+jobs:
+  pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - name: Pin check (fail-closed)
+        run: |
+          if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' \
+              .github/workflows/release-android.yml; then
+            echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
+          fi
+          echo "✅ 全部 action 固定完整 SHA"
+
+  build:
+    needs: pin-check
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+      - name: Install JDK 21
+        uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Verify shared version and release tag
+        shell: bash
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            python ../scripts/verify_versions.py --tag "${{ github.ref_name }}"
+          else
+            python ../scripts/verify_versions.py
+          fi
+      - name: Setup Android SDK (API 36)
+        uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0 ndk;28.0.12433566"
+      - name: Cache Gradle
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Build four Android ABI native policy libraries
+        working-directory: core/rust-policy-core
+        run: |
+          cargo install cargo-ndk --version 4.1.2 --locked
+          export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.0.12433566"
+          export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
+          export ANDROID_NDK="$ANDROID_NDK_HOME"
+          test -d "$ANDROID_NDK_HOME"
+          cargo ndk --platform 26 \
+            -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+            -o "$GITHUB_WORKSPACE/dist/native-policy/android" \
+            build --release --locked
+      - name: Generate Kotlin binding and native policy manifest
+        working-directory: core/rust-policy-core
+        run: |
+          cargo run --locked --features uniffi-bindgen --bin aegis-uniffi-bindgen -- \
+            generate "$GITHUB_WORKSPACE/dist/native-policy/android/arm64-v8a/libaegis_policy_core.so" \
+            --language kotlin \
+            --out-dir "$GITHUB_WORKSPACE/dist/native-policy/android/kotlin" \
+            --no-format
+          python "$GITHUB_WORKSPACE/release/native_artifact_manifest.py" \
+            --root "$GITHUB_WORKSPACE/dist/native-policy" \
+            --output "$GITHUB_WORKSPACE/dist/native-policy-manifest.json" --require android
+      - name: Run full Android Broker tests including native JSON decision mapping
+        run: bash ./gradlew :broker:testDebugUnitTest --no-daemon
+      - name: Verify enabled Android native gate fails closed in JVM unit tests
+        run: |
+          bash ./gradlew :broker:testDebugUnitTest --no-daemon \
+            --tests com.aegis.broker.AndroidBrokerTest.defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore \
+            -PrequireNativePolicyCore=true \
+            -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
+      - name: Build release APK with the native navigation decision core
+        run: |
+          bash ./gradlew :app:assembleRelease --no-daemon \
+            -PrequireNativePolicyCore=true \
+            -PrequireNavigationConfirmation=true \
+            -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
+          apk_entries="$(unzip -Z1 app/build/outputs/apk/release/*.apk)"
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            grep -Fx "lib/$abi/libaegis_policy_core.so" <<< "$apk_entries"
+          done
+      - name: Collect APK + generate SHA-256
+        shell: bash
+        run: |
+          cp app/build/outputs/apk/release/*.apk ../dist/
+          python ../release/build_metadata.py --platform android --output ../dist/build-metadata.json
+          python ../release/write_checksum_json.py --root ../dist --output ../dist/SHA256SUMS.json
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: dist/**
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-android
+          path: dist/
+          if-no-files-found: error
+
+  sbom:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-android
+          path: dist
+      - name: Generate CycloneDX SBOM (gradle deps)
+        uses: anchore/sbom-action@52542941bb775adef77f7a51ff5ea984e600fab8
+        with:
+          path: android
+          format: cyclonedx-json
+          output-file: sbom-android.cdx.json
+      - name: Attest SBOM (bind every artifact)
+        uses: actions/attest-sbom@5729fe4dc697fb7538e4e94fd44d040aac1367b2
+        with:
+          subject-path: dist/**
+          sbom-path: sbom-android.cdx.json
+      - name: Upload SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: sbom-android
+          path: sbom-android.cdx.json
+
+  verify:
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: read
+    steps:
+      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-android
+          path: dist
+      - name: Verify SLSA provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 \
+            gh attestation verify "{}" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --predicate-type https://slsa.dev/provenance/v1
+      - name: Verify SBOM attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 \
+            gh attestation verify "{}" \
+            --owner "$GITHUB_REPOSITORY_OWNER" \
+            --predicate-type https://cyclonedx.org/bom
+      - name: Checksum reconciliation
+        run: python release/verify_checksum_json.py --root dist --manifest dist/SHA256SUMS.json
+      - name: Fail-closed gate
+        run: echo "✅ Android 平台验证通过"

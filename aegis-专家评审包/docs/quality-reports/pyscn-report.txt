@@ -1,0 +1,21 @@
+📊 Unified HTML report generated: D:\abrowser\review\aegis_dual_platform\.pyscn\reports\analyze_20260815_045340.html
+
+📊 Analysis Summary:
+Health Score: 84/100 (Grade: B)
+Total time: 181ms
+
+📈 Detailed Scores:
+  Complexity:      90/100 ✅  (avg: 3.0, high-risk: 21 functions)
+  Dead Code:      100/100 ✅  (1 issues, 1 critical)
+  Coupling (CBO):  75/100 👍  (avg: 2.2, 0/10 high-coupling)
+  Cohesion (LCOM): 95/100 ✅  (avg: 1.2, 0/14 high-lcom)
+  Dependencies:    85/100 👍  (no cycles, depth: 4)
+  Architecture:    96/100 ✅  (96% compliant)
+
+
+--------------------------------------------------
+[Badge] Add this to your README to show off your score:
+[![pyscn quality](https://img.shields.io/badge/pyscn-B-yellow)](https://github.com/ludo-technologies/pyscn)
+
+[Star] Finding pyscn useful? https://github.com/ludo-technologies/pyscn
+--------------------------------------------------

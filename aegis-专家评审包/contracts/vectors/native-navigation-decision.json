@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "description": "Rust 原生导航决策 C ABI 的跨端语义向量；每项均绑定 session/tab/generation/origin/path+query/scope/nonce。",
+  "vectors": [
+    {
+      "name": "canonical_url_fragment_and_replay",
+      "register_session": true,
+      "generation": 0,
+      "url": "HTTPS://Example.COM:443/path?query=1#request",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://example.com",
+      "expected_parameters": "/path?query=1",
+      "consume_url": "https://example.com/path?query=1#execute",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "expected_replay_code": "nonce_replay"
+    },
+    {
+      "name": "unknown_session_fails_closed",
+      "register_session": false,
+      "generation": 0,
+      "url": "https://example.com/known",
+      "scope": "navigation",
+      "expected_evaluate": "deny",
+      "expected_deny_code": "session_not_found"
+    },
+    {
+      "name": "invalid_scheme_fails_closed",
+      "register_session": true,
+      "generation": 0,
+      "url": "javascript:alert(1)",
+      "scope": "navigation",
+      "expected_evaluate": "deny",
+      "expected_deny_code": "url_policy"
+    },
+    {
+      "name": "scope_change_invalidates_authorization",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://example.com:8080/export?format=json",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "http://example.com:8080",
+      "expected_parameters": "/export?format=json",
+      "consume_url": "http://example.com:8080/export?format=json",
+      "consume_scope": "download",
+      "expected_consume": "deny",
+      "expected_consume_code": "action_binding_mismatch"
+    }
+  ]
+}

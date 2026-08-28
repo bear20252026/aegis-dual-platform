@@ -1,0 +1,1395 @@
+{
+  "generated_at": "2026-08-28 10:13 UTC",
+  "version": "2.1.6",
+  "versionCode": "20106",
+  "commit": "6357b17",
+  "commit_subject": "﻿docs: add review & hardening report for 2026-08-28 (#4)",
+  "file_count": 277,
+  "files": [
+    {
+      "path": ".github/workflows/agent-redteam.yml",
+      "sha256": "a9de2277f4e1f5d79d78021a2f61d901884aaf938cbce85e636c808c362a0d4e",
+      "bytes": 1130
+    },
+    {
+      "path": ".github/workflows/android-quality.yml",
+      "sha256": "32d661c6b00f9a097e08092d6523429fc38c153526abb0287154309a0e8fb33a",
+      "bytes": 2624
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "b7beac8993ea70740638bad70df5db17d7a86d9425dacabbb108a54531d4d420",
+      "bytes": 3925
+    },
+    {
+      "path": ".github/workflows/compat.yml",
+      "sha256": "333286e43e4367b40444d5b8677d2c72dc04c112623292d21523b6a36e242138",
+      "bytes": 2846
+    },
+    {
+      "path": ".github/workflows/contracts.yml",
+      "sha256": "b325b6237d5b58ab5ad9bd5ea59d8c31282752d83fa07467744b78ccb1821698",
+      "bytes": 5800
+    },
+    {
+      "path": ".github/workflows/core-rust.yml",
+      "sha256": "874513fe37fa82c408bf6358df9b598c92daee33d38adbeb625abb7e13fc9d81",
+      "bytes": 1651
+    },
+    {
+      "path": ".github/workflows/native-policy-artifacts.yml",
+      "sha256": "eb7ac2b21726240cd7d461ce8ef2da5fed9611d096a2d03aa85990c8d2be1b79",
+      "bytes": 7844
+    },
+    {
+      "path": ".github/workflows/release-android.yml",
+      "sha256": "cbc344ac9767bd9c828af1c4d1729773bd43d3a296368c7dc7f7617b6f1ff51e",
+      "bytes": 8041
+    },
+    {
+      "path": ".github/workflows/release-core.yml",
+      "sha256": "417619eda9363da4079f31040c227f1049aa134dcda551aebcab3bf472ef9140",
+      "bytes": 5586
+    },
+    {
+      "path": ".github/workflows/release-windows.yml",
+      "sha256": "9ff63e56bc52458446b51de7cb5d3af1195608c679aef40fc5142779ba5ca9da",
+      "bytes": 6104
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "sha256": "be31a38e46c830d5178ab5bbd447fa263af78f0cf167f304b1838df699994fb7",
+      "bytes": 7460
+    },
+    {
+      "path": ".github/workflows/supply-chain.yml",
+      "sha256": "0c8eb6b06b95fe5a2e6c1b75b26c8267c40f3b613832ffc97f98383e165521ed",
+      "bytes": 1492
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "8c572f9a77d70648e5cfc33fbc8287714961dd9335b2b0fdee25c893c4e25f48",
+      "bytes": 2283
+    },
+    {
+      "path": "android/.editorconfig",
+      "sha256": "4367bc6d08e5518e6c59f8c040e923def21853a966d133b97bf4ae1b909adadf",
+      "bytes": 662
+    },
+    {
+      "path": "android/.gitignore",
+      "sha256": "61d639c0aaf36fa68c4d2723fb44348b0cfeec4a9e0f7f5004fa09d550fb484e",
+      "bytes": 124
+    },
+    {
+      "path": "android/README.md",
+      "sha256": "66c72f6377fdecaa4cc1a45870c8e257f9872b4462be633eaebbd5de9b6ee5e5",
+      "bytes": 1050
+    },
+    {
+      "path": "android/app/build.gradle.kts",
+      "sha256": "344fc2ff05a9466c639171fb00d7076850c9b6ecb490cc6a28576903a0e9aa41",
+      "bytes": 6342
+    },
+    {
+      "path": "android/app/detekt-baseline.xml",
+      "sha256": "c2ca4f1b3463e1fe1b710378855c1bfbed7e1d972b285eb47bbd571b2b6bddfc",
+      "bytes": 2182
+    },
+    {
+      "path": "android/app/proguard-rules.pro",
+      "sha256": "db8da37584ee03aa0ee9573bcb6c074fe81517026f7956acc6d261e5bb955a25",
+      "bytes": 199
+    },
+    {
+      "path": "android/app/src/main/AndroidManifest.xml",
+      "sha256": "4d1b15363c9a3461ec63015f5281ecaaed49ba13103c357b69252634692f1b7a",
+      "bytes": 1328
+    },
+    {
+      "path": "android/app/src/main/assets/start.html",
+      "sha256": "818555f8d9b5689ece2b96359c427999a0bb204af862e97ea9b904c949fe0697",
+      "bytes": 11404
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/AegisTheme.kt",
+      "sha256": "23d646198b983b9df95be2e3715c901d8939e367cc4cc2462d21f7f928117cee",
+      "bytes": 2009
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/BrowserEngine.kt",
+      "sha256": "326efd0921def16e6c45f024c4343913eeea9ff105615893d5b90585120f2f35",
+      "bytes": 5231
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/BrowserViewModel.kt",
+      "sha256": "672a1afe4c9e8164cb234ba4dfbf688b104fcb95a85912c5446e078fc0e57370",
+      "bytes": 7587
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/DownloadPolicy.kt",
+      "sha256": "5847e971ab9f97a469f82b847f99e5371e0e780f3f8e786fc1a8305d0a1af94b",
+      "bytes": 970
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/MainActivity.kt",
+      "sha256": "5b651d50e06b613320ad174f917cb5b0d0e4aaf36fb6a1590fa2258fac218b1c",
+      "bytes": 9895
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/README.md",
+      "sha256": "897335db57ba8ff64d4d19b2abc822679e44f71eed31bdbe22a027641866ccc9",
+      "bytes": 2295
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/SecureWebViewFactory.kt",
+      "sha256": "8859675c34556d34a0034f695699d4ce698f3eb85e99b7bc8d57e02bf63a33da",
+      "bytes": 16739
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/Tab.kt",
+      "sha256": "fc6edcb7232a4dc27f5d5d6ef53a37a5f071cbebcd1eb56f63118d73a97f2397",
+      "bytes": 1179
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/TabBar.kt",
+      "sha256": "bbf6d5c04b6e5d49457bda9c1b1fd062d5ca72023108ba42218c3f1049bc246a",
+      "bytes": 4319
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/TabManager.kt",
+      "sha256": "1e3d77f9b1bf52a8366ba0a90545636d6bee959bcad59fa9341a6f007df0f3e4",
+      "bytes": 6077
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/UiColors.kt",
+      "sha256": "493a96a6f9c24b01bb2517264c0a771e378925264addb0d72ac93ddfe7f783d7",
+      "bytes": 1088
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/VerticalTabBar.kt",
+      "sha256": "e93c2d4a7a9732d59bd4eb36501cc8c738793ccc5b1f68c46e7caceb3398a417",
+      "bytes": 5616
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/WebViewVersionCheck.kt",
+      "sha256": "67be20a03e15cd261bfcc9d17a8f64277320f0f6a18791af638ff8696448a152",
+      "bytes": 3266
+    },
+    {
+      "path": "android/app/src/main/res/values/styles.xml",
+      "sha256": "8d42ccddf06cf0c95279557e5d822de0bca0b0dd67157602123bd9c8881f7cd8",
+      "bytes": 467
+    },
+    {
+      "path": "android/app/src/main/res/xml/network_security_config.xml",
+      "sha256": "30fc8a0e88088a7ce796e730e6a04b4a74b10d5f5ad106ae701b46e645961a73",
+      "bytes": 892
+    },
+    {
+      "path": "android/broker/build.gradle.kts",
+      "sha256": "8d742cf007cd9add5cd05e57a981c821b0e9d8fef42fc4696f0687fca9a6da24",
+      "bytes": 2156
+    },
+    {
+      "path": "android/broker/src/main/AndroidManifest.xml",
+      "sha256": "cdc831ea0b767fccc665ee60d24560ef91bf3a94d9dea0ff20927db1c1422ba0",
+      "bytes": 124
+    },
+    {
+      "path": "android/broker/src/main/kotlin/com/aegis/broker/AndroidBroker.kt",
+      "sha256": "2145f52ab47329f3d898f412cb90e3074b48823e8c44a92ffc41444ecee73f24",
+      "bytes": 11937
+    },
+    {
+      "path": "android/broker/src/main/kotlin/com/aegis/broker/AuthorizedAction.kt",
+      "sha256": "c4aa566d264e6168a994de97a53462656915734309624cc27ad659ff6a9a6a02",
+      "bytes": 829
+    },
+    {
+      "path": "android/broker/src/main/kotlin/com/aegis/broker/Decision.kt",
+      "sha256": "d498fb9e45e783a40ed7be652a98a0b1b882c71d0f3fe564ccbce504310c6be0",
+      "bytes": 1057
+    },
+    {
+      "path": "android/broker/src/main/kotlin/com/aegis/broker/NativePolicyCoreBridge.kt",
+      "sha256": "4889c725c9a64d8bc4fb0770d576904a6744e30cf519689a920c72d6b7de01b7",
+      "bytes": 9613
+    },
+    {
+      "path": "android/broker/src/main/kotlin/com/aegis/broker/NativePolicyCoreGate.kt",
+      "sha256": "4617a4b0cd0ea95c7f58095da4ff71bb0220d2b6b3e77042469ae7b08cb2e316",
+      "bytes": 2037
+    },
+    {
+      "path": "android/broker/src/main/kotlin/com/aegis/broker/OriginPolicy.kt",
+      "sha256": "1222003b022dcd0267245ad99c20ef3c82ad1dfee06e46393d0a9b7f2918914c",
+      "bytes": 1064
+    },
+    {
+      "path": "android/broker/src/test/kotlin/com/aegis/broker/AndroidBrokerTest.kt",
+      "sha256": "46d9ebf4b023a20b96802af831afda60e0ed0cc379ead0dc836f0c6f37ff39c0",
+      "bytes": 8877
+    },
+    {
+      "path": "android/build-android.ps1",
+      "sha256": "fcc07e289636d23c550f1fbb8dbc8aaff02d0af0f926d6d0f9d66e60bdbe4f53",
+      "bytes": 929
+    },
+    {
+      "path": "android/build.gradle.kts",
+      "sha256": "ea9ada8472e3a45b8c770ced646c37238a0e4066e920a39871a3c22c11df4e1a",
+      "bytes": 622
+    },
+    {
+      "path": "android/chrome-ui/src/main/kotlin/com/aegis/chromeui/BrowserScreen.kt",
+      "sha256": "a2016c0401cbf13b03b52de791803cbb1ec10c05b82a7ab227b8098c8ce6bb80",
+      "bytes": 1699
+    },
+    {
+      "path": "android/chrome-ui/src/main/kotlin/com/aegis/chromeui/BrowserState.kt",
+      "sha256": "c8bbdd0cdbd6068adf4537be9efb4e719c358bb90f70a265244e981e3b79e609",
+      "bytes": 1112
+    },
+    {
+      "path": "android/contracts/src/main/kotlin/com/aegis/contracts/Contracts.kt",
+      "sha256": "ab8de33d0171cc9fc2c2e1d923d65ed964f23f412498e2d4796f6665b2cd0c4d",
+      "bytes": 691
+    },
+    {
+      "path": "android/contracts/src/main/kotlin/com/aegis/contracts/generated/ActionContract.kt",
+      "sha256": "6b5576631584007d21ab3dfd049fd4fa10cb628ce7cae92facc389763ee4b7af",
+      "bytes": 480
+    },
+    {
+      "path": "android/contracts/src/main/kotlin/com/aegis/contracts/generated/ApprovalContract.kt",
+      "sha256": "96c991948b2b27692af18ce232517085cdd01898aec9ec62f71102df6ba137d8",
+      "bytes": 343
+    },
+    {
+      "path": "android/contracts/src/main/kotlin/com/aegis/contracts/generated/AuditEventContract.kt",
+      "sha256": "01a29c06be722001dd8a3d07a7f2a7ebca34f930f556a92e1a49c26ea542147e",
+      "bytes": 376
+    },
+    {
+      "path": "android/contracts/src/main/kotlin/com/aegis/contracts/generated/CapabilityContract.kt",
+      "sha256": "5d468df0a690cbcdf23a99c021d53e8d14c4f56ddd40d16aca3b395d84dc8239",
+      "bytes": 326
+    },
+    {
+      "path": "android/contracts/src/main/kotlin/com/aegis/contracts/generated/UpdateManifestContract.kt",
+      "sha256": "a67924081188254803eb2ca9701f02909cc1a9f7d169ab1c435a7a37ad8dc19b",
+      "bytes": 392
+    },
+    {
+      "path": "android/contracts/src/main/kotlin/com/aegis/contracts/generated/VersionContract.kt",
+      "sha256": "29085e3f4756daca727867a04c3cd61ea8898c9a795e83b24cba5f42e269e13d",
+      "bytes": 218
+    },
+    {
+      "path": "android/detekt.yml",
+      "sha256": "4c296becc3251bf134503ef4881c03e3871863bc25b6e7cdf621220b5876ee65",
+      "bytes": 22871
+    },
+    {
+      "path": "android/diagnostics/src/main/kotlin/com/aegis/diagnostics/Diagnostics.kt",
+      "sha256": "8ffa8b466ffa4fa88e04ff539cbe09e939d2256e80f7861fff9aa70f5c25d2d8",
+      "bytes": 661
+    },
+    {
+      "path": "android/gradle.properties",
+      "sha256": "4d4c47dc7c2e4ffb98b97a6275112596734b0ccf22c203583868ea5cc733cf40",
+      "bytes": 137
+    },
+    {
+      "path": "android/gradle/wrapper/gradle-wrapper.properties",
+      "sha256": "e0a965f2b4922f9bd052443cf2edf22a9afddca055e7ddd669438bdea20a0adf",
+      "bytes": 290
+    },
+    {
+      "path": "android/gradlew",
+      "sha256": "0367e8c7d789376a26af723e17b3f05cb09f07361da0ac0aef75d4693c42b001",
+      "bytes": 8904
+    },
+    {
+      "path": "android/gradlew.bat",
+      "sha256": "d539676c48b596afda64c963ec8f7ee56c7b3fe7e3b81d1dbe2d1a1e3dd9e9f8",
+      "bytes": 2848
+    },
+    {
+      "path": "android/settings.gradle.kts",
+      "sha256": "900bd8fdcd93d7e9e45dfa246427bffc29ef84a1469dc9a35987835b9c32b940",
+      "bytes": 399
+    },
+    {
+      "path": "android/signing.properties.example",
+      "sha256": "49d1912614c2fb80d84211e5d73c3303fb660f22b693ebccf1599853fb9335bd",
+      "bytes": 253
+    },
+    {
+      "path": "android/storage/src/main/kotlin/com/aegis/storage/StorageService.kt",
+      "sha256": "653bc2b2a0e02bfef101cb1388cc2260a6edcdc20f5a2e2501c99b2d7debcef5",
+      "bytes": 674
+    },
+    {
+      "path": "android/webview-adapter/build.gradle.kts",
+      "sha256": "6cf6f7644b90e9688d4dc777b74a0863f8c9b2abdb3add047c60de209f727720",
+      "bytes": 447
+    },
+    {
+      "path": "android/webview-adapter/src/main/AndroidManifest.xml",
+      "sha256": "cdc831ea0b767fccc665ee60d24560ef91bf3a94d9dea0ff20927db1c1422ba0",
+      "bytes": 124
+    },
+    {
+      "path": "android/webview-adapter/src/main/kotlin/com/aegis/webviewadapter/AegisWebViewClient.kt",
+      "sha256": "cbcab0971f781e1444b5aafa49a13c3adcbac0f71552bcab5c0e9756cf539acf",
+      "bytes": 8046
+    },
+    {
+      "path": "contracts/codegen/analyze_action_catalog.py",
+      "sha256": "819a9a4f0ee21fa1e4ffd3aa8764ed1d9689902a472c685f25cf50a625838aae",
+      "bytes": 2747
+    },
+    {
+      "path": "contracts/codegen/generate_csharp.py",
+      "sha256": "0e74648c198bccdc376db689c47b058ab8307d00ec30d18e67213a4ef6207ed5",
+      "bytes": 2573
+    },
+    {
+      "path": "contracts/codegen/generate_kotlin.py",
+      "sha256": "154fb83c990697a1aa8727f4aedc011f102faa4565785d851227229fae017ebb",
+      "bytes": 2558
+    },
+    {
+      "path": "contracts/codegen/verify_contract_compatibility.py",
+      "sha256": "5a2a81f67f8366b7e5a0c9aa7f830786b04972fe3271986bb9a8bb9953139038",
+      "bytes": 2886
+    },
+    {
+      "path": "contracts/policy/action-catalog.yaml",
+      "sha256": "485fb650f7b16d62b6951bb9c1b57aabe6c6ad129051852974cc6d08951e3a25",
+      "bytes": 1499
+    },
+    {
+      "path": "contracts/schemas/action.schema.json",
+      "sha256": "6c6d51ffd569964963a8116070fdfde5fba8478e44d56a293f55a11ada0bf60a",
+      "bytes": 1326
+    },
+    {
+      "path": "contracts/schemas/approval.schema.json",
+      "sha256": "cc74be0b36d434ab9d3a3f847131dab3be4377c5f6254e7ad62699c86d1f48d9",
+      "bytes": 793
+    },
+    {
+      "path": "contracts/schemas/audit-event.schema.json",
+      "sha256": "d4468a33770c79b1dab4e67ef8445edd7d7bc220a6b3e1a90a200357b38a441e",
+      "bytes": 814
+    },
+    {
+      "path": "contracts/schemas/capability.schema.json",
+      "sha256": "5c92a32275b1d8becee0a2a0085212d3fa723c391aea85a21f5fef4293d5d289",
+      "bytes": 746
+    },
+    {
+      "path": "contracts/schemas/update-manifest.schema.json",
+      "sha256": "bb73724fa54b60fc7626946d5ad39907a61ad2ad50c7e911e46bcd8641c8e4cb",
+      "bytes": 2048
+    },
+    {
+      "path": "contracts/schemas/version.schema.json",
+      "sha256": "3c9b4b5897694e353d8927fdce12748dadb2d8bdb9c85aeb1aa0f64cfd4ee9ce",
+      "bytes": 540
+    },
+    {
+      "path": "contracts/vectors/approvals-replay-and-expiry.json",
+      "sha256": "0a2a57f6cd1ee64305eec56a29c5c956188310b16abd9acccf87487fd08dac97",
+      "bytes": 498
+    },
+    {
+      "path": "contracts/vectors/native-navigation-confirmation.json",
+      "sha256": "bc7f48b30fb8455cbb9c42c5c72cb7ee55a0a0dd76b985e25fca6a3533b7bbd0",
+      "bytes": 2360
+    },
+    {
+      "path": "contracts/vectors/native-navigation-decision.json",
+      "sha256": "ebd25acd53243a5a9ca24c9468578aa2e14e28ddacc60fb806c8bcc980257313",
+      "bytes": 1825
+    },
+    {
+      "path": "contracts/vectors/update-manifest-invalid.json",
+      "sha256": "f2019334b1d4a56073a5465f48d90dbe2ccd5b82223b367641c07c78f213abf6",
+      "bytes": 717
+    },
+    {
+      "path": "contracts/vectors/update-manifest-valid.json",
+      "sha256": "805cbc87d0087e8d56f19267e75fae7c1240878cb70f7ff2034173cf3562e7f4",
+      "bytes": 751
+    },
+    {
+      "path": "contracts/vectors/url-origin-invalid.json",
+      "sha256": "f9dfadc57f37ecbaf23a0e7028906cc31b5d767de676c56d8c261f2db658bdf7",
+      "bytes": 901
+    },
+    {
+      "path": "contracts/vectors/url-origin-valid.json",
+      "sha256": "363b8ae3cb9edd118b3d549524a87d24e1e23a9ad38401245be192fe733ba500",
+      "bytes": 371
+    },
+    {
+      "path": "core/rust-policy-core/Cargo.lock",
+      "sha256": "2d8eef386996607a02f36c3522da2b2fac0f662ee42fe57b9293f7b0f6732cc9",
+      "bytes": 25711
+    },
+    {
+      "path": "core/rust-policy-core/Cargo.toml",
+      "sha256": "f5820a75f78a922884f302318bcab2748ef1a6c36b246e6964bfb012514cd978",
+      "bytes": 1053
+    },
+    {
+      "path": "core/rust-policy-core/bindings/aegis_policy_core.py",
+      "sha256": "bfc7fc5b43e1f868c5e9a9550309f0d0f4adf352f595fd0add7a60ba6118d52f",
+      "bytes": 49714
+    },
+    {
+      "path": "core/rust-policy-core/fuzz/Cargo.toml",
+      "sha256": "0e7730a04a852fa7ece06556e31f453ac38f5866b6403a633a24a15639b075a4",
+      "bytes": 531
+    },
+    {
+      "path": "core/rust-policy-core/fuzz/fuzz_targets/fuzz_origin.rs",
+      "sha256": "bd6325d51dbf6134fa89102d5016e41be49609f5322cd11b7bbba819ba50f2b7",
+      "bytes": 470
+    },
+    {
+      "path": "core/rust-policy-core/src/action_policy.rs",
+      "sha256": "5d6d8cd9ba4f0975d8885bde50ca33b987230a7cadbfb39d5013d8cd3d6d1bdf",
+      "bytes": 5569
+    },
+    {
+      "path": "core/rust-policy-core/src/adblock.rs",
+      "sha256": "84fd318d421f153ba022e152c2ef4c279e34893c510457dccc947ab312db30a2",
+      "bytes": 5967
+    },
+    {
+      "path": "core/rust-policy-core/src/bridge_guard.rs",
+      "sha256": "8939ba2c6f9e3244e7778cbdcb7860f5bcd04853cfd082402db0c9af501113cc",
+      "bytes": 7312
+    },
+    {
+      "path": "core/rust-policy-core/src/broker.rs",
+      "sha256": "4d205f3278b34c773ccf4b76d170c547d3d48868af3517c97fe78ee68d7f8579",
+      "bytes": 19383
+    },
+    {
+      "path": "core/rust-policy-core/src/c_abi.rs",
+      "sha256": "f7a1ea055ea60bb3f91ac41a77045800b1270732aa39ecfffb0f803ef8b898f6",
+      "bytes": 33790
+    },
+    {
+      "path": "core/rust-policy-core/src/capability.rs",
+      "sha256": "43a5703a9f7ffd2a9c11439db5cb934d9658b9c85edee0a55ca7950e042f2d8b",
+      "bytes": 6224
+    },
+    {
+      "path": "core/rust-policy-core/src/command_bar.rs",
+      "sha256": "ce99379f82dee891cbfd6b9d139a671acb3732f8aaa4c066ac306968c2ff5c43",
+      "bytes": 11020
+    },
+    {
+      "path": "core/rust-policy-core/src/decision.rs",
+      "sha256": "4daf92dd87c4b52713baa1f6395a5cf430875a32e71a8e3b97fac021ca9c1bb9",
+      "bytes": 1763
+    },
+    {
+      "path": "core/rust-policy-core/src/executor.rs",
+      "sha256": "a37c71978242e423dcb0b9d50641aefa0e43a75dbe9ac7e44a62fb59e2ddfba1",
+      "bytes": 5347
+    },
+    {
+      "path": "core/rust-policy-core/src/ext_proxy.rs",
+      "sha256": "a127c5375461d1f292edff9125a5badcdd41156bb4013bf5dafa3df4c980188a",
+      "bytes": 6549
+    },
+    {
+      "path": "core/rust-policy-core/src/ffi.rs",
+      "sha256": "48aafdeadeea4d2203abe8799503e134287c6603951b24120894e3b35b7e2381",
+      "bytes": 35771
+    },
+    {
+      "path": "core/rust-policy-core/src/font_norm.rs",
+      "sha256": "347eb7f46510992aa58efa51200677a765b06cdf6e09fe863c7d4f772a3a1575",
+      "bytes": 5792
+    },
+    {
+      "path": "core/rust-policy-core/src/https_only.rs",
+      "sha256": "d47cdea354989c206ca3ddd04a79d3d0aa70af5f3cf034f424259fe289d4911c",
+      "bytes": 3847
+    },
+    {
+      "path": "core/rust-policy-core/src/js_inject.rs",
+      "sha256": "c6ab74764d99c64316807955e4d48b06cd6cfd0d2d7d229b5e3cdf215905dae1",
+      "bytes": 4751
+    },
+    {
+      "path": "core/rust-policy-core/src/letterbox.rs",
+      "sha256": "5acb15724df338c2e6d29fe4811cee7402b22ac2a590bf89e88aba87380e406d",
+      "bytes": 6673
+    },
+    {
+      "path": "core/rust-policy-core/src/lib.rs",
+      "sha256": "7c75a964cc497bc797e5b48519333debc5a5c3eedafedfafdc4eed8d404853c0",
+      "bytes": 3673
+    },
+    {
+      "path": "core/rust-policy-core/src/matcher.rs",
+      "sha256": "fe8ae2a77a5332194f77814c96c5d949c5b0ef2b9339ab7c3c5544ed0b6ca0d1",
+      "bytes": 6869
+    },
+    {
+      "path": "core/rust-policy-core/src/oracle.rs",
+      "sha256": "ddd3a12411345cc5ff91ece658c3e926932696962cf722101146e307342e81c6",
+      "bytes": 6086
+    },
+    {
+      "path": "core/rust-policy-core/src/origin.rs",
+      "sha256": "471af781e1d89a90088076ae2f4b88abb5e94392ceb1438b102044c0072933d2",
+      "bytes": 5003
+    },
+    {
+      "path": "core/rust-policy-core/src/per_site_seed.rs",
+      "sha256": "4cc0ad0366ee366b42e2198b42d42d07191f0e1d77ee7ff83ee9238ecb3c5526",
+      "bytes": 6309
+    },
+    {
+      "path": "core/rust-policy-core/src/policy.rs",
+      "sha256": "b3bbad6d15f9b3b352791d9dc855656809cbe8bdb6cf4b139f6e221b7394aae3",
+      "bytes": 8506
+    },
+    {
+      "path": "core/rust-policy-core/src/protection_mode.rs",
+      "sha256": "2e2ec5d98ba46f0d48ea8469cd8c815ba0a2f4a111df36faa536257fe8cf9e06",
+      "bytes": 8560
+    },
+    {
+      "path": "core/rust-policy-core/src/query_strip.rs",
+      "sha256": "15969315e8373f90b14ef86981df5cec57163ed12c7564fbb2801d41646a8951",
+      "bytes": 7477
+    },
+    {
+      "path": "core/rust-policy-core/src/security_policy.rs",
+      "sha256": "fc03f1cebb46bdc20bc9ffa043d6952e7f57a49dfb483888a7c4f95f71482cab",
+      "bytes": 5994
+    },
+    {
+      "path": "core/rust-policy-core/src/session_state.rs",
+      "sha256": "7dde244d66830a617659982d3ed89853003cd626f2f60e1f56088baf6dbc49a8",
+      "bytes": 6097
+    },
+    {
+      "path": "core/rust-policy-core/src/shield.rs",
+      "sha256": "938066d5f5ac4d4461b808e60cda87a10001ac41ccc96511cceb8e40e03a7f5b",
+      "bytes": 4840
+    },
+    {
+      "path": "core/rust-policy-core/src/space_routing.rs",
+      "sha256": "0d0fa0ec798237562640107728a417712f6e7bc13b5e2fbad9e388e61fb877d6",
+      "bytes": 9561
+    },
+    {
+      "path": "core/rust-policy-core/src/timer_prec.rs",
+      "sha256": "9a337e139b6840bfe29ef487b9e103a1ce18a7b1d6937b384417a5c08940fd39",
+      "bytes": 5131
+    },
+    {
+      "path": "core/rust-policy-core/src/tostring_guard.rs",
+      "sha256": "74edc2adaab021fb8d5740dd263212f58049ce9e3d48e05661295a090a4fc5cb",
+      "bytes": 3684
+    },
+    {
+      "path": "core/rust-policy-core/src/update_manifest.rs",
+      "sha256": "e8d6df3d05ef0940597ed083535f3d654b2910fbbed835dadbd945a3ec318eae",
+      "bytes": 5740
+    },
+    {
+      "path": "core/rust-policy-core/src/util.rs",
+      "sha256": "8255499d336e19c432880e0c05f9626e7223c3df9d37aee479c9ca775d95c448",
+      "bytes": 3551
+    },
+    {
+      "path": "core/rust-policy-core/src/webgl_spoof.rs",
+      "sha256": "d473f135e10ed4378eb368df1e4c35cf61077378174269b6932ea5db195ee91a",
+      "bytes": 5591
+    },
+    {
+      "path": "core/rust-policy-core/tests/vectors.rs",
+      "sha256": "98a0c95ab5e792d1c0f462e16e0dd1a93a110982abba04bb5b93b29c54689c55",
+      "bytes": 2573
+    },
+    {
+      "path": "docs/adr/ADR-001-windows-host-webview2.md",
+      "sha256": "98361088c90608a19fb51ed151ddcc01103eb5043e1625c45fad04f2b097c772",
+      "bytes": 1130
+    },
+    {
+      "path": "docs/adr/ADR-002-capability-broker.md",
+      "sha256": "cccf2f95d9c4f8f84a56e7ea47f9dca5d82bf77ba8180d6587028e37c5376938",
+      "bytes": 1145
+    },
+    {
+      "path": "docs/adr/ADR-003-no-remote-native-bridge.md",
+      "sha256": "91b4f28c7115658a49c3c22b5983cfaf111cccc66f1c07e3dd00329d23de392d",
+      "bytes": 1121
+    },
+    {
+      "path": "docs/adr/ADR-004-agent-mcp-reenablement.md",
+      "sha256": "b76429ef4476ca11a623999cb13e5f0e1d01f566b36a1db020127dd000108c7c",
+      "bytes": 1157
+    },
+    {
+      "path": "docs/adr/ADR-005-rust-policy-core-pilot.md",
+      "sha256": "01ddc24d23a72f6e0977e24a548cb9ca01a361e3b62e8f74591d8448804d6adf",
+      "bytes": 1201
+    },
+    {
+      "path": "docs/adr/ADR-006-native-policy-core-binding-rollout.md",
+      "sha256": "3833f909f2dc2f93d068795089c5be7c5ca2a1fe9846fa9627514c746fa78785",
+      "bytes": 2819
+    },
+    {
+      "path": "docs/architecture-audit-2026-08-22.md",
+      "sha256": "02f21408a5da1e2954e87da85b64c3da38200041c2d0a65c6b970b57ad3a61a5",
+      "bytes": 11413
+    },
+    {
+      "path": "docs/architecture-overview.md",
+      "sha256": "bd6bcba12b92c86ce0dc81f37c897e44bb4cf147b5c8b2cc3f33a9b6582977c3",
+      "bytes": 5811
+    },
+    {
+      "path": "docs/audit-2026.md",
+      "sha256": "0b0a6121bcc0d8fa6aac576511933a187785b6cccad11cde4ac765e456f5ab8f",
+      "bytes": 5538
+    },
+    {
+      "path": "docs/audit-report.md",
+      "sha256": "c0bf3c28de38d3561792b1bd87d0f4b6e2eca515fcf2ad4f1d9a93f921e06c08",
+      "bytes": 6035
+    },
+    {
+      "path": "docs/browser-ecosystem-research.md",
+      "sha256": "14697b1b29ded6af40b0fdef7e62e6904bdf140acdcaa7f6bccdb27c889f553e",
+      "bytes": 3463
+    },
+    {
+      "path": "docs/code-quality-assessment.md",
+      "sha256": "71b8b25830feb96f003072d5e6232413481570b46512eea9c8c42e4df9dcc701",
+      "bytes": 4598
+    },
+    {
+      "path": "docs/code-signing-design.md",
+      "sha256": "bfa5be07b6b5da872a7026250e5931358898c38c6da8508a8101238656b9fccd",
+      "bytes": 3941
+    },
+    {
+      "path": "docs/code-structure-review-2026.md",
+      "sha256": "56384173ff14e9e5691dba4ecef8480c07646f9e811fce7aa714006a51cf5489",
+      "bytes": 3216
+    },
+    {
+      "path": "docs/compat-baselines/README.md",
+      "sha256": "882534f88a62cfb5d4dcee7bc3ee8e205e50601c2ab1ef2a2ee480f226d19062",
+      "bytes": 340
+    },
+    {
+      "path": "docs/dependency-audit-2026.md",
+      "sha256": "7a1cfcbbdeea818fa7b48fe1d07a5a3b82bffe8f0259d5d611feb5df0f2c6434",
+      "bytes": 1600
+    },
+    {
+      "path": "docs/expert-audit-report.md",
+      "sha256": "c6c756c059830343850c805ccf193137607c69e594b7fc48cba3a90230f3d73d",
+      "bytes": 6169
+    },
+    {
+      "path": "docs/expert-review-2026.md",
+      "sha256": "bcea8b1bae79f5ad6c4aeec9d4fa07e05b990391993420fcdded0456e4ebcfa3",
+      "bytes": 4509
+    },
+    {
+      "path": "docs/ffi-architecture-design.md",
+      "sha256": "a2876b92391d8725a0755bc11ed65d70eddd95f5837ccde97b055667f74564ff",
+      "bytes": 17279
+    },
+    {
+      "path": "docs/final-development-checklist.md",
+      "sha256": "da364b614fdd1797f2dd40b6f51095c9203cdf4ea5ec7fead7d07c9479386951",
+      "bytes": 4465
+    },
+    {
+      "path": "docs/inv05-delivery-chain-design.md",
+      "sha256": "1d32b77868075ceb6abaef622950fcbd9d5b85f1acefe47f2d5b2912cef573b7",
+      "bytes": 2630
+    },
+    {
+      "path": "docs/obfuscation-isolation-design.md",
+      "sha256": "f6df53c4d0edb702211183558c8014ce9e7566751f6e05289fc2b32acb1dc509",
+      "bytes": 4422
+    },
+    {
+      "path": "docs/open-source-browser-audit-batch2.md",
+      "sha256": "b43362f669a68247c72e17e54240fe8d52ca9155254f990db7879e9e80f78a0a",
+      "bytes": 8888
+    },
+    {
+      "path": "docs/open-source-browser-audit-batch3.md",
+      "sha256": "9dee28ab0ee97e51885877feba63e3901212aabba695dac9ec64599fc890b0d1",
+      "bytes": 17468
+    },
+    {
+      "path": "docs/open-source-browser-audit.md",
+      "sha256": "9b978d8a58a0e44fdacb0e9e39856a12290bc00684db45f45274113354a48dfc",
+      "bytes": 6512
+    },
+    {
+      "path": "docs/optimization-plan.md",
+      "sha256": "5382e9339495cf4174fbb7958d1e2bce0da98777ca50dbd7af981bbe00045f4e",
+      "bytes": 3802
+    },
+    {
+      "path": "docs/privacy-defaults-audit.md",
+      "sha256": "e26c9883e552014fd13fa4a418c38d9903d9da5e8122ac652691106565a5ba3b",
+      "bytes": 3701
+    },
+    {
+      "path": "docs/product/privacy-defaults.md",
+      "sha256": "6ed53bd07cc22c6661b17aa25e83b3384812086d12c0b404dba3e61860c40c58",
+      "bytes": 979
+    },
+    {
+      "path": "docs/product/supported-features.md",
+      "sha256": "27d5ccc8689503b792dde847cd4ab3e068828d158e09ab13d828ba69ed0f9a5f",
+      "bytes": 1378
+    },
+    {
+      "path": "docs/pytauri-capabilities-mapping.md",
+      "sha256": "3162931ace227dcd49e75a4b8decf9f21fc4aeebd028af11486fe1e6950e5d6e",
+      "bytes": 4845
+    },
+    {
+      "path": "docs/pytauri-migration-technical-plan.md",
+      "sha256": "18a7c6f42c9a2f9da1823b7ee7eec33dcf2aaee8013f9715265cf2b4ab8af14f",
+      "bytes": 6176
+    },
+    {
+      "path": "docs/quality-reports/hotspottriage-report.txt",
+      "sha256": "d7bc2820c213b9f6f73ca8cad1ac983b8db77ec6ea62f9ab40faacd0b4113c79",
+      "bytes": 871
+    },
+    {
+      "path": "docs/quality-reports/pyscn-report.txt",
+      "sha256": "995a080fbf9008d20642b194f5a656b393e4f6c3658479d3c95514ffa3d2f8a3",
+      "bytes": 921
+    },
+    {
+      "path": "docs/quality-reports/repo-health.html",
+      "sha256": "53bae7a2381b92f9209fe2ba932540f769732468bebd64fe54a4e2e0ceec4784",
+      "bytes": 90980
+    },
+    {
+      "path": "docs/quality-reports/repo-health.md",
+      "sha256": "4692cc0d836eacc0bd07732cc86adcefdb3ecf76099eadaaf1948caf3655a40a",
+      "bytes": 12203
+    },
+    {
+      "path": "docs/quality-reports/skylos-report.txt",
+      "sha256": "28b24f9a419c48da0215c02fe3868cba0c40291a58e4c861509e71b48eb465f8",
+      "bytes": 1931
+    },
+    {
+      "path": "docs/quality-reports/valknut-report.txt",
+      "sha256": "2f5775a6c620324f6b90af89a71fd19efeb5b8ab402993a8629f53b25e9ff1a3",
+      "bytes": 1075
+    },
+    {
+      "path": "docs/quality-reports/valknut-report/report_20260814_221203.html",
+      "sha256": "f4750b284b46e644aeb7d6bcb7cd682b696967aa2577b9808cd2339d5b41e1fb",
+      "bytes": 72135
+    },
+    {
+      "path": "docs/refactor-final-route.md",
+      "sha256": "d374c4f7efc56a90fd9b00600df83ae09dfb7752f978a9d1e72243a8074364f4",
+      "bytes": 7912
+    },
+    {
+      "path": "docs/release-workflow-design.md",
+      "sha256": "c76bc76ca5ba571041ccfe4e14e5a93ca987c3cd0b9d2f311da2acfd6234cf0b",
+      "bytes": 4171
+    },
+    {
+      "path": "docs/release/AegisSetup.iss",
+      "sha256": "33bd69ffa6aaa01650183a87ef78c63a66fa869dc53bc0120af75b47b653bdbb",
+      "bytes": 1690
+    },
+    {
+      "path": "docs/release/agent-sitemap.example.json",
+      "sha256": "7627d012e93941b1a03a169b89e7a4825cec544598342a6ca4f7a8e54c5e6362",
+      "bytes": 1267
+    },
+    {
+      "path": "docs/release/b4-enable-notes.md",
+      "sha256": "9ea1da43bb17e54341a973dc63d33db568e4fc974ff2f912a3d991c8bb655a77",
+      "bytes": 2824
+    },
+    {
+      "path": "docs/release/build_release.py",
+      "sha256": "66bcf96dc61bc746a498063fffe9b30b5974b3cb7947ae09ca467e30ef9aaf94",
+      "bytes": 6396
+    },
+    {
+      "path": "docs/release/release.yml",
+      "sha256": "ace22004c5b36f34c5d4026f7c3191b19265eb18eca92f89c93708789d9715ca",
+      "bytes": 7287
+    },
+    {
+      "path": "docs/release/xor_obfuscate.py",
+      "sha256": "062afadadf51ace087aa182538ca7a12646955d42721062e8ceae196ea8a07de",
+      "bytes": 2626
+    },
+    {
+      "path": "docs/review-and-hardening-2026-08-28.md",
+      "sha256": "64fca8036e9a3399eb07f3ddfee400c6e65b1aba5a9305997e0c36175bb019e9",
+      "bytes": 7847
+    },
+    {
+      "path": "docs/runbooks/device-validation.md",
+      "sha256": "a36dbec79f274437e43b04af40873a9dc410d208733de01579fe305b5809f2f5",
+      "bytes": 3226
+    },
+    {
+      "path": "docs/runbooks/release-checklist.md",
+      "sha256": "7273ab20eff67f4984181406228d12841778811ab9ae13bf61e6c16f2277aaf1",
+      "bytes": 2554
+    },
+    {
+      "path": "docs/runbooks/windows-run-guide.md",
+      "sha256": "2617cbc955addf0074b6620d78f7af17eb0f70c037ac454643bce4ff0364fffb",
+      "bytes": 1587
+    },
+    {
+      "path": "docs/rust-desktop-landscape-2026.md",
+      "sha256": "3ed45d2bbb13005bda5a6ebe2ee1248fee136ebc0992245e38afc7375553df23",
+      "bytes": 6109
+    },
+    {
+      "path": "docs/sbom-aegis-2026.json",
+      "sha256": "97b260c237bb15a3795c79ec2d8bddd9588c87a272474709634e42ed01d43319",
+      "bytes": 6638
+    },
+    {
+      "path": "docs/security-audit-red-blue-2026-08-22.md",
+      "sha256": "47ded3abc8969a375af05629e40b37d14b20439a1861e5203365e9b21bc3d8a0",
+      "bytes": 4136
+    },
+    {
+      "path": "docs/security-testing-guide.md",
+      "sha256": "a9b800ba6e8a3a96208e5de309561f7b2fced6e45ad266497e463352bd0e7c05",
+      "bytes": 10994
+    },
+    {
+      "path": "docs/source-study-report.md",
+      "sha256": "84b68d976708a87ca58fa2adbaf6bc5e892dc4f8dc31f154f42a48417dc0b78b",
+      "bytes": 6445
+    },
+    {
+      "path": "docs/tauri-migration-report-2.md",
+      "sha256": "0ec63b6b2e5e94e6d3df1e048c21a23d63d1e34e2083e6090970c6a75cbf9d88",
+      "bytes": 6721
+    },
+    {
+      "path": "docs/tauri-migration-report.md",
+      "sha256": "e3a301b3f576df4aa3409a5fe7674582f3e407f1027927444b4fffd14164f43a",
+      "bytes": 10363
+    },
+    {
+      "path": "docs/tech-evolution-plan.md",
+      "sha256": "eb82af078b69228c5c9238a8528346b6894064e52f6f84c90ce04c3a06200f27",
+      "bytes": 15028
+    },
+    {
+      "path": "docs/threat-context-design.md",
+      "sha256": "c4964f014bb61402cd3535d9ca8f9007896112711b49ac42f54d0d31bae34db4",
+      "bytes": 3637
+    },
+    {
+      "path": "docs/threat-feed-mirror-plan.md",
+      "sha256": "eb04d9f552a3c54ea788a1e18e674fd2c95357d3344ab0a1065c45fd385d67c7",
+      "bytes": 4781
+    },
+    {
+      "path": "docs/threat-model/agent-threat-model.md",
+      "sha256": "0f9befa926e8c23260d636c9a91715ba79a416bf2eb62bedb589a23541f15f61",
+      "bytes": 1526
+    },
+    {
+      "path": "docs/threat-model/release-threat-model.md",
+      "sha256": "beab3ff22cb699bc1644a07c64a6cddab2c0ce9e4af3af54bf92a54c432c52b0",
+      "bytes": 1432
+    },
+    {
+      "path": "docs/threat-model/trust-boundaries.md",
+      "sha256": "ec0bfe486ee382a59bdbf778a8728234783160ce448807803c462a1b1c5404f9",
+      "bytes": 1878
+    },
+    {
+      "path": "docs/toolchain-plan.md",
+      "sha256": "9546247b67b34dac611994a570102b408023389b814b513858f2d3dc1464f631",
+      "bytes": 7610
+    },
+    {
+      "path": "docs/uniffi-integration-technical-plan.md",
+      "sha256": "2f73c6c8c4f15985bb6dbe424a5e4e00668bb4a3a5168e5ef8b371bb3bee0241",
+      "bytes": 16218
+    },
+    {
+      "path": "docs/webview2-extensions-research.md",
+      "sha256": "941cd3d2c8964d0f0a4291e356d1a738f80cabb6470e43cfe60b32ff05045e21",
+      "bytes": 4147
+    },
+    {
+      "path": "legacy/windows-pywebview/.gitignore",
+      "sha256": "04bf613699cdd9f5de7a5e4433606c3a0c194656fe5028ab4a56780ce5587d93",
+      "bytes": 306
+    },
+    {
+      "path": "legacy/windows-pywebview/.importlinter",
+      "sha256": "45cdc90a3350786eb4b1bedd2302702b9a515c34577172f75896b81fc6cf7a76",
+      "bytes": 927
+    },
+    {
+      "path": "legacy/windows-pywebview/DESIGN.md",
+      "sha256": "5d39c12dc6689891511bb6664bb3b4814a0d5c0db063cfbf86f9101e158c83f1",
+      "bytes": 29655
+    },
+    {
+      "path": "legacy/windows-pywebview/LICENSE.txt",
+      "sha256": "117fd344e1f660c06e63abdbba0349ffbcbe1e17d7f3b1d1440306c8e52df163",
+      "bytes": 1088
+    },
+    {
+      "path": "legacy/windows-pywebview/MIGRATION.md",
+      "sha256": "73554f87df64ecfdea46c0e84a19ce3f1318680a879450d163e18478c6fc7862",
+      "bytes": 3109
+    },
+    {
+      "path": "legacy/windows-pywebview/README.md",
+      "sha256": "21b954acd2928f413bab23579266953dd83b5cf394302e57c567b2735cdd5140",
+      "bytes": 24533
+    },
+    {
+      "path": "legacy/windows-pywebview/SECURITY.md",
+      "sha256": "71fbd25ba7974fa2587d11a7afe588f60ea25eb84dcdd0b36e4663d00f3fe8f8",
+      "bytes": 4068
+    },
+    {
+      "path": "legacy/windows-pywebview/app/README.md",
+      "sha256": "9938b61e59fc49d69cd11d7e3e34597c26e22a775e369796ef839a85393a6a60",
+      "bytes": 2790
+    },
+    {
+      "path": "legacy/windows-pywebview/app/__init__.py",
+      "sha256": "f59d910f51315ddcd4ad0e0646747a8e6ff02e964e391489ac1c80df95c27439",
+      "bytes": 38
+    },
+    {
+      "path": "legacy/windows-pywebview/app/api_bridge.py",
+      "sha256": "b2cf16cac10afddd82f20f9d18a397166004568094d7b90ae42c6dc749a7e0d0",
+      "bytes": 31621
+    },
+    {
+      "path": "legacy/windows-pywebview/app/asset_scheme.py",
+      "sha256": "eb44fe4ccf3121ad31a918a4fd866fa9555b4191d56ea8b1e858e9db984cb88e",
+      "bytes": 5527
+    },
+    {
+      "path": "legacy/windows-pywebview/app/backdrop.py",
+      "sha256": "3d806187163f1a844358f5444ac45702d839e5827dd7ed6874f37f273bab1e38",
+      "bytes": 3348
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bookmark_store.py",
+      "sha256": "393ac4562b19d4d9bd6b204fab1c6cff4082f54a770c0f012a81bda5eb5c274e",
+      "bytes": 6190
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge_hooks.py",
+      "sha256": "0a3daf73e28f78371b5da8d727b5d7a8f7838f1586580a786a07a7f0bdb6a464",
+      "bytes": 3806
+    },
+    {
+      "path": "legacy/windows-pywebview/app/browser_import.py",
+      "sha256": "4d97f540136e859cf863ded5b2886e70ee3ae9295f9cf2967bf066d28483a051",
+      "bytes": 5323
+    },
+    {
+      "path": "legacy/windows-pywebview/app/config.py",
+      "sha256": "e4407db77d42e23d5d42d03c367f4c6c65df62850f76d1fc54ddcdd1c6d07918",
+      "bytes": 14196
+    },
+    {
+      "path": "legacy/windows-pywebview/app/credential_guard.py",
+      "sha256": "8b9539753b42b55c6116a9383c237824a4a3bb45af89aadbbdbb1b9aefaf0c59",
+      "bytes": 2855
+    },
+    {
+      "path": "legacy/windows-pywebview/app/database.py",
+      "sha256": "9fc1420498bb81b52eafb5cb468a7879370f4df63f116aa1b1e86ab1f2838461",
+      "bytes": 5376
+    },
+    {
+      "path": "legacy/windows-pywebview/app/event_log.py",
+      "sha256": "e274ac4d33974c954003fe9af6ed676cc561dc38509e6dfcf7a29b55403c58eb",
+      "bytes": 1252
+    },
+    {
+      "path": "legacy/windows-pywebview/app/features.py",
+      "sha256": "c7a534cda8aff1856608a61a785c591aa651a8493c8d4a1b236fe08d60cfd6e0",
+      "bytes": 2839
+    },
+    {
+      "path": "legacy/windows-pywebview/app/fingerprint.py",
+      "sha256": "24ca43581cc7fc15d14562f690e6d8bb79ae998dd6bbd0f421f9b41216b62ad7",
+      "bytes": 3931
+    },
+    {
+      "path": "legacy/windows-pywebview/app/fingerprint_pipeline.py",
+      "sha256": "ed83eb550f57c6654a043c055283fcaf3f0cbf4fa10769934c4c20807758629b",
+      "bytes": 14763
+    },
+    {
+      "path": "legacy/windows-pywebview/app/history_store.py",
+      "sha256": "89a0b61c01e61c52eb199d23c1e0312a9dd398bfe08f8f05ea7cd44f2f7f3701",
+      "bytes": 9420
+    },
+    {
+      "path": "legacy/windows-pywebview/app/ima/ima_api.cjs",
+      "sha256": "92cdf56c7b7a9777b913e908babee35118a0bf1960149153f18631c75365e2d4",
+      "bytes": 4723
+    },
+    {
+      "path": "legacy/windows-pywebview/app/ima/meta.json",
+      "sha256": "99eb4ae2f245be9289103696128ab1f1624566a2e1eacd60e24a69bb031e7c52",
+      "bytes": 246
+    },
+    {
+      "path": "legacy/windows-pywebview/app/mcp.py",
+      "sha256": "7e55b04bf3695414e1c6c607ae849440377841749fa7fc991a2619c80a69235d",
+      "bytes": 13837
+    },
+    {
+      "path": "legacy/windows-pywebview/app/nav_queue.py",
+      "sha256": "2b7e1f969cd69e0afd5710761e4ff8ade178610c347054d1f462e123ef3c055e",
+      "bytes": 8462
+    },
+    {
+      "path": "legacy/windows-pywebview/app/paths.py",
+      "sha256": "98e987a70285adbad2b789553999904f3c5e5721948b36e7e49b46050fcf867b",
+      "bytes": 2531
+    },
+    {
+      "path": "legacy/windows-pywebview/app/reader.py",
+      "sha256": "1b504e3924b287814cf214faf60892d7e3c950e94d959c06a89db5a9b7803064",
+      "bytes": 5496
+    },
+    {
+      "path": "legacy/windows-pywebview/app/result.py",
+      "sha256": "395d851a92a3b818c1955f5b2bfff3adba3c0413f0f62e145ebdcf15b6b589a9",
+      "bytes": 1328
+    },
+    {
+      "path": "legacy/windows-pywebview/app/security.py",
+      "sha256": "5f36129ec544a59ae79e9e4c56bced2fe890dbbb9e41642e78881805732c3fff",
+      "bytes": 7375
+    },
+    {
+      "path": "legacy/windows-pywebview/app/settings_registry.py",
+      "sha256": "7f7b1ff6c8983ce07563f5e73ef3349a92372fb221f1bc3b6c283d8ccbbd04fb",
+      "bytes": 1726
+    },
+    {
+      "path": "legacy/windows-pywebview/app/shell_adapter.py",
+      "sha256": "e0b180cd4a841768c263970bfa2f0b1f71a4f95b8bde877ce33bf0e78aeee606",
+      "bytes": 11230
+    },
+    {
+      "path": "legacy/windows-pywebview/app/shell_toolbar.py",
+      "sha256": "40d4f42b57c8430e7ff6f3a344467a35bad1742ae9703821522e07109f2b3d02",
+      "bytes": 19809
+    },
+    {
+      "path": "legacy/windows-pywebview/app/tab_state.py",
+      "sha256": "4509e71b2b21ec56477d89681d6052d06794e7062a882dc06c94cfe61b192005",
+      "bytes": 3107
+    },
+    {
+      "path": "legacy/windows-pywebview/app/threat_feed.py",
+      "sha256": "7ba7f1e5e3998d8855fc9ff04d81c8818645752cb1a430b6cd5282ec28d6bc99",
+      "bytes": 8614
+    },
+    {
+      "path": "legacy/windows-pywebview/app/url_utils.py",
+      "sha256": "0f37ac7bee025e99eab393a35706a1e1641bb01d1f0cec4d1b54a1edc50749fa",
+      "bytes": 2305
+    },
+    {
+      "path": "legacy/windows-pywebview/app/webview2_probe.py",
+      "sha256": "0ab776875f9d82b9c956ca7ad60f5e16f2111b123667c36b0ee2f0011c5eb85d",
+      "bytes": 13243
+    },
+    {
+      "path": "legacy/windows-pywebview/crash_reporter.py",
+      "sha256": "9ebbfd4670a6851757f0787bd9ea79c94c8678686b55e319162bd52d977da52d",
+      "bytes": 11927
+    },
+    {
+      "path": "legacy/windows-pywebview/main_webview.py",
+      "sha256": "40096b12246c99583df4c0749f1a2e5eb71ce685ac0262e8e027bd5591b777d8",
+      "bytes": 37026
+    },
+    {
+      "path": "legacy/windows-pywebview/requirements-dev.txt",
+      "sha256": "defbc2a2db4ff34f4cc6df2244ffb6f9f8042698cbfe8bf1bb88320b7cce996e",
+      "bytes": 323
+    },
+    {
+      "path": "legacy/windows-pywebview/requirements-lock.txt",
+      "sha256": "32f146438216cbb01467749facf18838af7ab47131333bc75d1c42420f8e6e7b",
+      "bytes": 18614
+    },
+    {
+      "path": "legacy/windows-pywebview/requirements.in",
+      "sha256": "0ca11aba5e2ca8fd4e249fc0fdc10c13b106270770d11952484f7a8a04061c4f",
+      "bytes": 884
+    },
+    {
+      "path": "legacy/windows-pywebview/requirements.txt",
+      "sha256": "bcb01ad1adde43f4d08e0aaf82152ac6bb52a9004ae521a7d85cf24faa32c25e",
+      "bytes": 1632
+    },
+    {
+      "path": "legacy/windows-pywebview/ruff.toml",
+      "sha256": "93a71eeed324bfe19fbce097898f74226d775d244dc9e869d02526d56c607e5c",
+      "bytes": 1112
+    },
+    {
+      "path": "legacy/windows-pywebview/selftest_api_bridge.py",
+      "sha256": "e6d464a9d0132fa548474a88e687427620d46b69258a1303dfb43afa998464f1",
+      "bytes": 4100
+    },
+    {
+      "path": "legacy/windows-pywebview/selftest_s1_integration.py",
+      "sha256": "31b6c3bc73a03d23a03a9afc1f359366cefb08b806f1ad75e9e559de6d25774c",
+      "bytes": 4121
+    },
+    {
+      "path": "legacy/windows-pywebview/selftest_shell_toolbar.py",
+      "sha256": "fa888f90bf052cf3ced7a81acb45cc60c834ba7b679eeee26d2f13121c366640",
+      "bytes": 2923
+    },
+    {
+      "path": "legacy/windows-pywebview/selftest_tab_state.py",
+      "sha256": "a53c378390cc3d309246aa82d973f7221124140f742ffd0c1f7c01a1896be81b",
+      "bytes": 1947
+    },
+    {
+      "path": "legacy/windows-pywebview/shell/start.html",
+      "sha256": "818555f8d9b5689ece2b96359c427999a0bb204af862e97ea9b904c949fe0697",
+      "bytes": 11404
+    },
+    {
+      "path": "shared/jsapi-schema.json",
+      "sha256": "df1cb8fe93218d2c4d80075d37d6e0cb8a4768ced91746ace83058fab51a02bf",
+      "bytes": 11118
+    },
+    {
+      "path": "shared/release.json",
+      "sha256": "89cc4c3e0fe4602a4ba206c1900ba183e45f62622d6960d2033afa1fa3d6c10e",
+      "bytes": 590
+    },
+    {
+      "path": "shared/update-manifest.schema.json",
+      "sha256": "01f3445b75104c49255216e0128de552ae51e746be36e6151ef29ffc3e8b42c9",
+      "bytes": 1930
+    },
+    {
+      "path": "shared/version.properties",
+      "sha256": "db538d2ed401449b3be51b0b231f6299d960c1198a82ae3237c1820c1443d808",
+      "bytes": 211
+    },
+    {
+      "path": "validate_release.py",
+      "sha256": "9cce7dd737ec38a0c9a7a02385ff2983ae2c935e918b70765d838efad85faecc",
+      "bytes": 2602
+    },
+    {
+      "path": "windows/packaging/Aegis-WebView.appinstaller.template",
+      "sha256": "33a1eb83de43485084640780a1d6b5f44f8898702de883cc596aafbd0663e519",
+      "bytes": 593
+    },
+    {
+      "path": "windows/packaging/AppxManifest.xml.template",
+      "sha256": "8b0667fc9fd36b60318880efe8f0112de7d16ca39a94238823909dad6d0b1b7c",
+      "bytes": 1815
+    },
+    {
+      "path": "windows/packaging/build-windows.ps1",
+      "sha256": "e7ae18440d370b4f8de9d1ba6dda8afd9c589f2b63fcdb3f89d74a65d3c6dbee",
+      "bytes": 3641
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj",
+      "sha256": "c22b2b7b83622e746a5fc4deae83e9d9656c4ed1c056a510027377fe1d56a7bc",
+      "bytes": 1709
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/App.xaml",
+      "sha256": "eeb0a4762e4d07b12f594e270d49df3b2852314426e4b8ac8997ac9c49c412a1",
+      "bytes": 258
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/App.xaml.cs",
+      "sha256": "6aa9aa0a1077e4aa6a342be8d50670300e925fb03040592eea3f92077e3e9345",
+      "bytes": 99
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/Approval/ApprovalManager.cs",
+      "sha256": "b1c1c666b1d688ea077a4d7fa79df2adbec0a88fffb6435d77c73dd51e83906f",
+      "bytes": 1764
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/Audit/AuditEvent.cs",
+      "sha256": "bb60698e1170bf91adc722797d964d77a86e7d7462ef9503b88c7de0a60b3e8d",
+      "bytes": 417
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/AuthorizedAction.cs",
+      "sha256": "4c3b4b8f2df337751479e05d233ec5859e4ac5abbf7454388a8683f6a8034b03",
+      "bytes": 599
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/BrowserPolicyBroker.cs",
+      "sha256": "2313bd26a8616ded1e1e89ab6d20409901e6de84108e91f71ae4897051c1710f",
+      "bytes": 14058
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/Decision.cs",
+      "sha256": "de66225476744cc3c65027de6dde482292c9d64b180d62557216cc8830de5fe5",
+      "bytes": 941
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/KillSwitch.cs",
+      "sha256": "fbae0bc906b5f29fc15602f96aaf34c8e5d32f4ad2a3ef60609c061958d11eb3",
+      "bytes": 913
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/NativePolicyCoreBridge.cs",
+      "sha256": "b8f6500b8de16fef6ba72a0f40cf2e02698c7775fc15fce7caa36feac27adac5",
+      "bytes": 18817
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/NativePolicyCoreGate.cs",
+      "sha256": "bf969fedc6f61a5d71e37c8f9d72ab2fa09a8966c566eddc939ac3673f9ba3c9",
+      "bytes": 3168
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Broker/OriginPolicy.cs",
+      "sha256": "453822181e958d36a94bac658f37a0481a0f012ad4315b5760c97eddcdc2a5bc",
+      "bytes": 1173
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml",
+      "sha256": "a0fd4ef6e821c5f2261db86323e670229c072db30239f97f5eec683f0153b1aa",
+      "bytes": 3046
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml.cs",
+      "sha256": "c7dcab51f3c2db81bcf318810cc82d8ab5f302a074ec422eb01c9b76a11dd499",
+      "bytes": 5563
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Contracts/Contracts.cs",
+      "sha256": "2075c2d5c62d26faacbec1356064cdaa799486c0667056bd3b64ce5deb73ef21",
+      "bytes": 791
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Contracts/Generated/ActionContract.cs",
+      "sha256": "bb209b8d9cd52827ac81c86e94225453bd8c6323ea1583747fc22a90d4eaea5f",
+      "bytes": 483
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Contracts/Generated/ApprovalContract.cs",
+      "sha256": "dcedc5276395aafa2ca3885935aecc47e62ae4070b8b71bd2fb1126c5e646234",
+      "bytes": 366
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Contracts/Generated/AuditEventContract.cs",
+      "sha256": "b8a8ced345603821efda6594b939977cae701488c87fbd5aceaeb13859cc1a57",
+      "bytes": 394
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Contracts/Generated/CapabilityContract.cs",
+      "sha256": "94f3422f8f34271d2f56ba6b173ce005497c2dbcab9153df9dea51de6959dfaf",
+      "bytes": 356
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Contracts/Generated/UpdateManifestContract.cs",
+      "sha256": "03da02ee010ebc89b1e76a410030db360cd52198cc2bfc82ba5988f2ae196280",
+      "bytes": 416
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Contracts/Generated/VersionContract.cs",
+      "sha256": "2315418be6fed4ee1d44cc64b0488a30e0f33a237dc1756cca13ac06191d4880",
+      "bytes": 266
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Diagnostics/Diagnostics.cs",
+      "sha256": "3098eff6a6673b351d97b72340a00213c8a3064a0a092d99792397db9a91d21f",
+      "bytes": 762
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Program.cs",
+      "sha256": "441aeb5e1aabc4b2f6461b9eba4b668a1f18d36b22829a69819a11d314078999",
+      "bytes": 553
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Properties/AssemblyInfo.cs",
+      "sha256": "7fb5fb9ca9f72ac0964a95c1292f3a5b6b580fae731b210b7e970f05e67dc4da",
+      "bytes": 209
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/Storage/StorageService.cs",
+      "sha256": "d44e3ca6f22a2a974a10f4b0affa01fcdc01744ce93499219856c9540b59fb26",
+      "bytes": 694
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/WebView/HostWebView.cs",
+      "sha256": "0d75bf82edaef365527109cba8108280aa34154d888f35cc1bfc4176a68e7cc7",
+      "bytes": 8994
+    },
+    {
+      "path": "windows/src/Aegis.Windows.App/WebView/NavigationConfirmationGate.cs",
+      "sha256": "55375ec6fae1b1095aae67615eb468302def1fbfa5b1fea204bfae10693e1f53",
+      "bytes": 603
+    },
+    {
+      "path": "windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj",
+      "sha256": "e2876abd86845d1e46a89aa11ca670d24dc457924ccaed83f77a2922a0922aa9",
+      "bytes": 847
+    },
+    {
+      "path": "windows/tests/Aegis.Windows.Broker.Tests/BrowserPolicyBrokerTests.cs",
+      "sha256": "75ceee98e4a53d7a3367055714248b8f635fee2c7138bc65fd470f677a344fff",
+      "bytes": 10884
+    }
+  ]
+}

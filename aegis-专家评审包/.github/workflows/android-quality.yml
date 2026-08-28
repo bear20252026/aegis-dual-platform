@@ -1,0 +1,73 @@
+# Aegis Android 质量门禁（工具链 P0：ktlint + detekt）
+# 触发：对 android/** 的 push / PR / 手动。windows-latest 自带 JDK 21 兼容，
+# 使用项目 Gradle 9.7.0 wrapper。ktlintCheck + detekt 作为合并门禁，
+# detekt 基线文件（detekt-baseline.xml）对遗留项目友好——仅新引入问题失败。
+name: Android-Quality
+
+"on":
+  push:
+    paths:
+      - "android/**"
+      - "shared/version.properties"
+      - "scripts/sync_versions.py"
+      - "scripts/verify_versions.py"
+      - ".github/workflows/android-quality.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "shared/version.properties"
+      - "scripts/sync_versions.py"
+      - "scripts/verify_versions.py"
+  workflow_dispatch: {}
+
+jobs:
+  android-quality:
+    name: ktlint + detekt 质量门禁
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+
+      - name: 安装 JDK 21（AGP 9.3 要求 ≥17；detekt/ktlint 兼容）
+        uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: 设置 Android SDK（API 36）
+        uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+
+      - name: 缓存 Gradle
+        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: ktlint 检查（0 错误门禁）
+        run: ./gradlew.bat :app:ktlintCheck --no-daemon
+
+      - name: Verify shared product version declarations
+        run: python ../scripts/verify_versions.py
+
+      - name: detekt 检查（基线门禁：仅新问题失败）
+        run: ./gradlew.bat :app:detekt --no-daemon
+
+      - name: Broker 授权生命周期单元测试
+        run: ./gradlew.bat :broker:testDebugUnitTest --no-daemon
+
+      - name: 上传 detekt 报告（排障用）
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: detekt-report
+          path: android/app/build/reports/detekt/
+          if-no-files-found: ignore

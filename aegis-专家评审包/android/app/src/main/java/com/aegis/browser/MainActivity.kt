@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
                 val address by viewModel.address.collectAsState()
                 val tabsPosition by viewModel.tabsPosition.collectAsState()
                 val webViewAlert by viewModel.webViewAlert.collectAsState()
+                val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsState()
 
                 // A1：版本过旧 → 安全提示对话框（CVE-2026-12438/11295 防御）
                 webViewAlert?.let { msg ->
@@ -72,6 +73,32 @@ class MainActivity : ComponentActivity() {
                         },
                         dismissButton = {
                             TextButton(onClick = { viewModel.setWebViewAlert(null) }) { Text("稍后") }
+                        },
+                    )
+                }
+
+                // 受信 Compose chrome 审批层：远程页面没有该回调或授权对象；默认关闭即拒绝。
+                pendingConfirmation?.let { pending ->
+                    AlertDialog(
+                        onDismissRequest = { viewModel.rejectPendingNavigationConfirmation() },
+                        title = { Text("需要确认的导航") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("来源：${pending.request.origin}")
+                                Text("路径与查询：${pending.request.path}")
+                                Text("权限范围：${pending.request.scope}")
+                                Text("此请求将在 ${pending.request.expiresAt} 过期。")
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { viewModel.approvePendingNavigationConfirmation() }) {
+                                Text("批准并继续")
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { viewModel.rejectPendingNavigationConfirmation() }) {
+                                Text("拒绝")
+                            }
                         },
                     )
                 }
@@ -113,6 +140,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        // Activity 销毁是确认 UI 的退出边界；任何待审批导航均须先撤销，不留可恢复能力。
+        viewModel.rejectPendingNavigationConfirmation()
         // 释放全部 WebView 持有的 Chromium 资源
         viewModel.getTabManager()?.let { tm ->
             tm.suspendAll()
@@ -123,6 +152,12 @@ class MainActivity : ComponentActivity() {
             }
         }
         super.onDestroy()
+    }
+
+    override fun onPause() {
+        // 应用转后台或进入系统遮罩时没有持续可见的明确同意；恢复后必须重新请求审批。
+        viewModel.rejectPendingNavigationConfirmation()
+        super.onPause()
     }
 }
 

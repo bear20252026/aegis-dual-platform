@@ -1,9 +1,14 @@
 package com.aegis.browser
 
 import android.content.Context
+import android.view.View
 import android.webkit.WebView
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import com.aegis.broker.AndroidBroker
+import com.aegis.broker.ApprovalRequest
 import com.aegis.webviewadapter.AegisWebViewClient
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * 安全 WebView 工厂（单文件单职责：统一创建带完整安全边界的 WebView）。
@@ -17,34 +22,75 @@ import com.aegis.webviewadapter.AegisWebViewClient
  */
 object SecureWebViewFactory {
     private val broker = AndroidBroker()
-    private var sessionCounter = 0L
+    private val sessionCounter = AtomicLong(0)
+    private val navigatorTagKey = View.generateViewId()
 
     /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
     private const val SESSION_SEED_BYTES = 32
 
     /** 每会话随机种子（32 字节 hex）——注入 JS 噪声时用。 */
-    private val sessionSeed: String by lazy {
+    private fun newSessionSeed(): String {
         val bytes = ByteArray(SESSION_SEED_BYTES)
         java.security.SecureRandom().nextBytes(bytes)
-        bytes.joinToString("") { "%02x".format(it) }
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 
     /** 创建并完成安全配置的 WebView（导航经 Broker 决策 + 指纹防护注入）。 */
-    fun create(context: Context): WebView {
+    fun create(
+        context: Context,
+        onNavigationConfirmationRequested: (WebView, ApprovalRequest) -> Unit = { _, _ -> },
+        onNavigationConfirmationResolved: (WebView) -> Unit = {},
+    ): WebView {
         val webView = WebView(context)
         BrowserEngine(webView).configure()
-        val sessionId = "session-${++sessionCounter}"
-        webView.webViewClient =
+        val sessionId = "session-${sessionCounter.incrementAndGet()}"
+        val tabId = "tab-$sessionId"
+        check(broker.registerSession(sessionId, tabId)) { "无法注册安全浏览会话" }
+        val sessionSeed = newSessionSeed()
+        installDocumentStartScripts(webView, sessionSeed)
+        val client =
             AegisWebViewClient(
                 broker = broker,
                 sessionId = sessionId,
+                tabId = tabId,
                 onRendererGone = { /* renderer gone cleanup handled by caller */ },
+                requireNavigationConfirmation = BuildConfig.REQUIRE_NAVIGATION_CONFIRMATION,
+                onNavigationConfirmationRequested = { request ->
+                    onNavigationConfirmationRequested(webView, request)
+                },
+                onNavigationConfirmationResolved = { onNavigationConfirmationResolved(webView) },
             )
-        // 指纹防护 JS 注入（canvas/WebGL/Audio 噪声 + hardwareConcurrency 伪装）
-        webView.evaluateJavascript(FINGERPRINT_SHIELD_JS, null)
-        // Bridge 硬化 JS 注入（域白名单 + HTTPS 强制——照搬 SecureWebViewContainer）
-        webView.evaluateJavascript(BRIDGE_GUARD_JS, null)
+        webView.webViewClient = client
+        webView.setTag(
+            navigatorTagKey,
+            SecureNavigator(webView, client),
+        )
         return webView
+    }
+
+    /** 仅工厂创建的 WebView 才拥有受控导航器；不存在时调用方必须拒绝外部导航。 */
+    fun navigatorFor(webView: WebView): SecureNavigator? = webView.getTag(navigatorTagKey) as? SecureNavigator
+
+    /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */
+    private fun installDocumentStartScripts(
+        webView: WebView,
+        sessionSeed: String,
+    ) {
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            android.util.Log.w("Aegis", "WebView 不支持 document-start 脚本；隐私增强未启用")
+            return
+        }
+        val allowedOrigins = setOf("https://*", "http://*")
+        WebViewCompat.addDocumentStartJavaScript(
+            webView,
+            fingerprintShieldScript(sessionSeed),
+            allowedOrigins,
+        )
+        WebViewCompat.addDocumentStartJavaScript(
+            webView,
+            BRIDGE_GUARD_JS,
+            allowedOrigins,
+        )
     }
 
     /** 获取 broker 实例（供外部校验/审计）。 */
@@ -62,35 +108,63 @@ object SecureWebViewFactory {
     private val allowedHostsJson: String =
         ALLOWED_BRIDGE_HOSTS.joinToString(",") { "\"$it\"" }
 
-    /** Bridge 硬化 JS（照搬 SecureWebViewContainer NativeBridge origin 校验）。 */
+    /**
+     * Bridge 硬化 JS（fetch / XMLHttpRequest / sendBeacon / WebSocket 未授权调用拒绝）。
+     * 与 Rust 侧 BridgeGuard::inject_script 同一份逻辑：只有「调用方自身
+     * hostname ∈ [ALLOWED_BRIDGE_HOSTS]」的受信内页（chrome UI）才能调用本机 bridge；
+     * 远程页一律拒绝（fail-closed）。注：`[$allowedHostsJson]` 必须包裹方括号，否则
+     * `const ALLOWED_HOSTS = "a","b"` 为 JS 语法错误（旧实现因此整体失效）。
+     */
     private val BRIDGE_GUARD_JS: String
         get() =
             """
-// Aegis BridgeGuard — origin 校验拦截（fetch/XMLHttpRequest 未授权调用拒绝）
+// Aegis BridgeGuard — 受信调用方校验（fetch / XMLHttpRequest / sendBeacon / WebSocket）
 (function() {
-  const ALLOWED_HOSTS = $allowedHostsJson;
-  const origFetch = window.fetch;
-  window.fetch = function(url) {
-    try {
-      const u = new URL(url, location.href);
-      if (u.protocol !== 'https:' && u.protocol !== 'http:' && u.hostname !== 'localhost') {
-        console.warn('[Aegis] Bridge blocked: non-HTTPS', u.href);
-        return Promise.reject(new Error('Aegis: non-HTTPS bridge blocked'));
-      }
-      if (ALLOWED_HOSTS.length > 0 && !ALLOWED_HOSTS.includes(u.hostname) && !location.hostname.includes(u.hostname)) {
-        console.warn('[Aegis] Bridge blocked: host not allowed', u.hostname);
-        return Promise.reject(new Error('Aegis: host not in allowlist'));
-      }
-    } catch(e) {}
-    return origFetch.apply(this, arguments);
+  const ALLOWED_HOSTS = [$allowedHostsJson];
+  // 仅容许「受信内页」（自身 hostname ∈ 白名单）调用本机 bridge。
+  const trustedCaller = ALLOWED_HOSTS.includes(location.hostname);
+  function isBridgeTarget(urlLike) {
+    try { return ALLOWED_HOSTS.includes(new URL(urlLike, location.href).hostname); }
+    catch (e) { return false; }
+  }
+  function shouldBlock(urlLike) {
+    if (!isBridgeTarget(urlLike)) return false;   // 普通站点流量放行
+    if (!trustedCaller) return true;              // 调用方非受信内页 → 拒绝
+    return false;
+  }
+  function deny(reason) { console.warn('[Aegis] Bridge blocked: ' + reason); }
+  const fetch0 = window.fetch;
+  window.fetch = function(input, init) {
+    if (shouldBlock(input && input.url ? input.url : input)) { deny('fetch'); return Promise.reject(new Error('Aegis: bridge blocked')); }
+    return fetch0.apply(this, arguments);
   };
+  const open0 = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(method, url) {
+    if (shouldBlock(url)) { deny('xhr'); throw new Error('Aegis: bridge blocked'); }
+    return open0.apply(this, arguments);
+  };
+  const beacon0 = navigator.sendBeacon && navigator.sendBeacon;
+  navigator.sendBeacon = function(url) {
+    if (shouldBlock(url)) { deny('beacon'); return false; }
+    return beacon0.apply(navigator, arguments);
+  };
+  const WS = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    if (shouldBlock(url)) { deny('websocket'); throw new Error('Aegis: bridge blocked'); }
+    return new WS(url, protocols);
+  };
+  window.WebSocket.CONNECTING = WS.CONNECTING;
+  window.WebSocket.OPEN = WS.OPEN;
+  window.WebSocket.CLOSING = WS.CLOSING;
+  window.WebSocket.CLOSED = WS.CLOSED;
 })();
             """.trimIndent()
 
     /** 指纹防护 JS（管道化组合——参照 Rust fingerprint_pipeline）。 */
-    private val FINGERPRINT_SHIELD_JS: String
-        get() =
-            """
+    @Suppress("LongMethod") // 该方法仅承载版本化脚本文本，不包含 Android 业务控制流。
+    private fun fingerprintShieldScript(sessionSeed: String): String =
+        """
+window.__AEGIS_PROTECTION_VERSION = '1';
 // === Stage 1: ToStringGuard（参照 playwright-afp MIT）===
 (function() {
   var proxyMap = new WeakMap();
@@ -128,7 +202,7 @@ object SecureWebViewFactory {
     const ctx = this.getContext('2d');
     if (ctx) {
       const imageData = ctx.getImageData(0, 0, this.width, this.height);
-      const seed = parseInt(__AEGIS_SESSION_SEED.slice(0, 8), 16);
+      const seed = parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16);
       for (let i = 0; i < imageData.data.length; i += 4) { imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1; }
       ctx.putImageData(imageData, 0, 0);
     }
@@ -144,7 +218,7 @@ object SecureWebViewFactory {
   };
 })();
 (function() {
-  const seed = parseInt(__AEGIS_SESSION_SEED.slice(8, 16), 16);
+  const seed = parseInt(window.__AEGIS_SITE_SEED.slice(8, 16), 16);
   Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 2 + (seed % 7) });
 })();
 
@@ -163,10 +237,11 @@ object SecureWebViewFactory {
     if (osAH) Object.defineProperty(screen, 'availHeight', { get: function() { return roundTo(osAH.get.call(this), HS); } });
   } catch(e) {}
   try {
-    Object.defineProperty(window, 'innerWidth', { get: function() { return roundTo(window.innerWidth, WS); } });
-    Object.defineProperty(window, 'innerHeight', { get: function() { return roundTo(window.innerHeight, HS); } });
-    Object.defineProperty(window, 'outerWidth', { get: function() { return roundTo(window.outerWidth, WS); } });
-    Object.defineProperty(window, 'outerHeight', { get: function() { return roundTo(window.outerHeight, HS); } });
+    var iw = window.innerWidth, ih = window.innerHeight, ow = window.outerWidth, oh = window.outerHeight;
+    Object.defineProperty(window, 'innerWidth', { value: roundTo(iw, WS), configurable: true });
+    Object.defineProperty(window, 'innerHeight', { value: roundTo(ih, HS), configurable: true });
+    Object.defineProperty(window, 'outerWidth', { value: roundTo(ow, WS), configurable: true });
+    Object.defineProperty(window, 'outerHeight', { value: roundTo(oh, HS), configurable: true });
   } catch(e) {}
 })();
 
@@ -248,5 +323,46 @@ object SecureWebViewFactory {
     };
   } catch(e) {}
 })();
-            """.trimIndent()
+        """.trimIndent()
+}
+
+/** 将 URL 规范化、Broker 授权和 WebView 副作用收敛到单一路径。 */
+class SecureNavigator internal constructor(
+    private val webView: WebView,
+    private val client: AegisWebViewClient,
+) {
+    fun openTrustedHome() {
+        webView.loadUrl(BrowserEngine.HOME_URL)
+    }
+
+    fun navigateExternal(input: String): Boolean {
+        val normalized = BrowserEngine.normalizeExternal(input) ?: return false
+        return client.navigate(webView, normalized)
+    }
+
+    /** 仅由受信 Compose chrome 的明确批准操作调用；客户端仍负责 Rust 批准与 nonce 消费。 */
+    fun approvePendingNavigation(): Boolean = client.approvePendingNavigation(webView)
+
+    /** 对话框关闭、拒绝、标签关闭或生命周期销毁时撤销待审批导航。 */
+    fun rejectPendingNavigation(): Boolean = client.rejectPendingNavigation()
+
+    fun navigateHistory(action: HistoryAction): Boolean =
+        when (action) {
+            HistoryAction.BACK -> {
+                webView.canGoBack().also { if (it) webView.goBack() }
+            }
+
+            HistoryAction.FORWARD -> {
+                webView.canGoForward().also { if (it) webView.goForward() }
+            }
+
+            HistoryAction.RELOAD -> {
+                webView.reload()
+                true
+            }
+        }
+
+    fun close() {
+        client.close()
+    }
 }

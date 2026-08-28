@@ -1,0 +1,22 @@
+# valknut 质量分析报告（Aegis，2026-08-15）
+
+> valknut 1.5.1（sibyllinesoft，Rust，npm 安装，CLI 无需认证；Gemini --oracle 可选）
+
+## analyze（结构/AST 复杂度/依赖/克隆/健康度）
+- Overall health score: 88.2 / 100
+- Total issues: 83
+- HTML 报告: docs/quality-reports/valknut-report/report_20260814_221203.html
+
+## doc-audit 文档审计（679 项文档问题）
+- 5 个目录超复杂度阈值且缺 README：
+  * assets/fonts/inter/web（39 项）
+  * windows/aegis_source/legacy（64 项，Qt 旧栈归档）
+  * android/app/src/main/java/com/aegis/browser（10 项，源码目录）
+  * android/.gradle/9.7.0（14 项，构建缓存，应忽略）
+  * windows/aegis_source/app（23 项，核心源码目录）
+- Stale README: 无
+
+## 对 Aegis 的价值
+- 文档审计发现核心源码目录（app、com/aegis/browser）缺 README——可补模块级说明
+- health 88.2 与 pyscn 84/Skylos 扫描结论一致，三角交叉验证可信
+- 纯本地无认证可入 CI；MCP stdio 可接 Claude Code（可选）
