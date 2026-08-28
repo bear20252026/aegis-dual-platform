@@ -65,6 +65,7 @@ legacy/windows-pywebview/__pycache__/
 # ── 仓库卫生修正（新增：此前未覆盖、已随历史提交入库的构建/交付产物）──
 # .NET 生成产物（obj/bin——覆盖 windows 与评审包镜像；Rust 的 src/bin 为真实源码，不受影响）
 **/obj/
+**/tests/**/bin/
 aegis-专家评审包/windows/**/bin/
 
 # Android 构建产物（含评审包镜像）
