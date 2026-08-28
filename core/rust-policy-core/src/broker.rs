@@ -23,13 +23,20 @@ use crate::capability::{CapabilityRegistry, CapabilityResult};
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
 use crate::policy::PolicyEngine;
 
+/// 已消费 nonce 账本上限——防止长期会话下无界内存增长。
+/// fail-closed：达到上限后拒绝新的消费，绝不淘汰旧 nonce（以免削弱一次性/重放保护）。
+const MAX_CONSUMED_NONCES: usize = 50_000;
+
 /// 单个会话上下文（persona session——隔离绑定）。
+///
+/// 注意：策略版本校验在 `validate_action` 中直接与 broker 的 `policy_version`
+/// 比对（fail-closed），而不是挂在会话上，因此会话不再保存一份冗余的
+/// `policy_version`，避免"会话级"与"broker 级"版本语义混淆。
 #[derive(Debug, Clone)]
 pub struct SessionContext {
     pub session_id: String,
     pub tab_id: String,
     pub generation: u64,
-    pub policy_version: String,
     pub created_at: Instant,
     pub ttl: Duration,
 }
@@ -82,7 +89,6 @@ impl ContextBroker {
             session_id: session_id.clone(),
             tab_id,
             generation,
-            policy_version: self.policy_version.clone(),
             created_at: Instant::now(),
             ttl,
         };
@@ -287,6 +293,17 @@ impl ContextBroker {
                 explanation: format!(
                     "denied — nonce {} already consumed by session {} — replay rejected",
                     nonce, record.session_id
+                ),
+            });
+        }
+
+        // 账本已达上限：fail-closed 拒绝，绝不淘汰旧记录。
+        if self.consumed_nonces.len() >= MAX_CONSUMED_NONCES {
+            return Err(DenyReason {
+                code: "nonce_ledger_full".into(),
+                detail: format!("nonce 账本已达上限 {MAX_CONSUMED_NONCES}"),
+                explanation: format!(
+                    "denied — nonce ledger full ({MAX_CONSUMED_NONCES}) — fail-closed"
                 ),
             });
         }
