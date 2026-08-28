@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "domain": "intra.gov.cn",
+  "_comment": "Aegis 内网 Agent sitemap 示例（C2B 阶段——ceLLMate 语义动作映射 + ADL 治理 + 动词驱动）。由内网运维定义（类似 API 文档）；实际执行经 MCP/请求管线。risk=low/high；confirm=required/optional（高风险动作需确认）。",
+  "actions": [
+    {
+      "semantic": "view_docs",
+      "url_pattern": "GET /api/docs/*",
+      "method": "GET",
+      "risk": "low",
+      "confirm": "optional"
+    },
+    {
+      "semantic": "search_records",
+      "url_pattern": "GET /api/search",
+      "method": "GET",
+      "risk": "low",
+      "confirm": "optional"
+    },
+    {
+      "semantic": "create_order",
+      "url_pattern": "POST /api/orders",
+      "method": "POST",
+      "body": { "required": ["amount"] },
+      "risk": "high",
+      "confirm": "required",
+      "condition": { "param": "amount", "operator": "lte", "value": 5000 }
+    },
+    {
+      "semantic": "export_data",
+      "url_pattern": "POST /api/export",
+      "method": "POST",
+      "body": { "required": ["format"] },
+      "risk": "high",
+      "confirm": "required",
+      "condition": { "param": "rows", "operator": "lte", "value": 10000 }
+    }
+  ]
+}

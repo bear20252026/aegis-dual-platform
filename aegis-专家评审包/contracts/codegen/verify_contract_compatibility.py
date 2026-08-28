@@ -18,6 +18,12 @@ SCHEMAS = ROOT / "schemas"
 VECTORS = ROOT / "vectors"
 
 
+def contract_name(schema_file: pathlib.Path) -> str:
+    """与 C#/Kotlin 生成器一致地生成稳定且合法的契约类型名。"""
+    stem = schema_file.stem.removesuffix(".schema")
+    return "".join(part[:1].upper() + part[1:] for part in stem.split("-")) + "Contract"
+
+
 def check_schemas() -> list[str]:
     failures = []
     for f in sorted(SCHEMAS.glob("*.json")):
@@ -46,7 +52,7 @@ def check_generated_models() -> list[str]:
     generated_kt = (ROOT / ".." / "android" / "contracts" / "src" / "main" / "kotlin"
                     / "com" / "aegis" / "contracts" / "generated")
     for f in sorted(SCHEMAS.glob("*.json")):
-        name = "".join(part.capitalize() for part in f.stem.split("-"))
+        name = contract_name(f)
         if not (generated_cs / f"{name}.cs").is_file():
             failures.append(f"C# 模型缺失: {name}.cs（运行 generate_csharp.py）")
         if not (generated_kt / f"{name}.kt").is_file():

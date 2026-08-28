@@ -1,0 +1,18 @@
+# Aegis Android 端代码风格（EditorConfig + ktlint）
+# 工具链 P0：ktlint 官方配置 —— Compose 组件函数遵循 JetBrains 规范
+# （@Composable 函数 PascalCase 命名），通过 ignore_when_annotated_with 豁免，
+# 而非逐个 @Suppress 或改名（改名会破坏 Compose 约定）。
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+indent_size = 4
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{kt,kts}]
+# ktlint：忽略带 @Composable 注解的组件函数命名检查（官方 Compose 约定 PascalCase）
+ktlint_function_naming_ignore_when_annotated_with = Composable

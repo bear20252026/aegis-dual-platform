@@ -18,8 +18,24 @@ class BrowserEngine(
 ) {
     companion object {
         private val allowedSchemes = setOf("http", "https")
+        const val HOME_URL = "file:///android_asset/start.html"
         private const val MAX_PROGRESS = 100
         private const val MAX_TITLE_LENGTH = 256
+        private const val TEXT_ZOOM_DEFAULT = 100
+
+        /** 只规范化远程 URL；实际外部导航必须由 SecureNavigator 经 Broker 执行。 */
+        fun normalizeExternal(input: String): String? {
+            val candidate = input.trim()
+            if (candidate.isEmpty()) return null
+            val withScheme = if (candidate.contains("://")) candidate else "https://$candidate"
+            return if (isAllowed(withScheme)) withScheme else null
+        }
+
+        private fun isAllowed(url: String): Boolean =
+            runCatching {
+                val uri = URI(url)
+                uri.scheme?.lowercase() in allowedSchemes && !uri.host.isNullOrBlank()
+            }.getOrDefault(false)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -41,7 +57,7 @@ class BrowserEngine(
         webView.settings.setSupportZoom(true)
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
-        webView.settings.textZoom = 100
+        webView.settings.textZoom = TEXT_ZOOM_DEFAULT
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         // WebViewClient 由 SecureWebViewFactory 统一注入 AegisWebViewClient（经 Broker 决策），
         // BrowserEngine 不得覆盖——单路径收敛（专家审计）。
@@ -93,24 +109,4 @@ class BrowserEngine(
         webView.clearCache(true)
         webView.clearHistory()
     }
-
-    fun load(url: String) {
-        val normalized = normalize(url) ?: return
-        webView.loadUrl(normalized)
-    }
-
-    fun canNavigate(url: String): Boolean = normalize(url) != null
-
-    private fun normalize(input: String): String? {
-        val candidate = input.trim()
-        if (candidate.isEmpty()) return null
-        val withScheme = if (candidate.contains("://")) candidate else "https://$candidate"
-        return if (isAllowed(withScheme)) withScheme else null
-    }
-
-    private fun isAllowed(url: String): Boolean =
-        runCatching {
-            val uri = URI(url)
-            uri.scheme?.lowercase() in allowedSchemes && !uri.host.isNullOrBlank()
-        }.getOrDefault(false)
 }

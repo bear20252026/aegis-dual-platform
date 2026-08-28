@@ -1,0 +1,23 @@
+{
+  "product": "Aegis",
+  "displayName": "Aegis WebView",
+  "version": "2.1.6",
+  "versionCode": 20106,
+  "windows": {
+    "packageIdentity": "Aegis.Project.AegisWebView",
+    "executable": "Aegis.exe",
+    "architecture": ["x64", "arm64"],
+    "distribution": "msix-appinstaller",
+    "runtime": "webview2-evergreen"
+  },
+  "android": {
+    "applicationId": "com.aegis.browser",
+    "distribution": ["play-aab", "direct-apk"],
+    "engine": "android-webview-adapter"
+  },
+  "updateManifest": {
+    "schema": 1,
+    "signature": "ed25519",
+    "hash": "sha256"
+  }
+}

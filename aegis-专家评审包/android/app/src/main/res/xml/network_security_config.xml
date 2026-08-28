@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- B0-A-01 整改（国防级审查）：Android 网络安全配置——全局禁用明文流量。
+     依据 Android 官方（Network security configuration）：cleartextTrafficPermitted=false
+     保护应用免遭意外明文流量；debug-overrides 允许调试期用户证书而不影响 release。 -->
+<network-security-config>
+    <!-- 默认全部域禁用明文（HTTP）——仅 HTTPS 允许 -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!-- 调试期允许用户安装证书（仅 debug 构建生效——不影响 release） -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>
