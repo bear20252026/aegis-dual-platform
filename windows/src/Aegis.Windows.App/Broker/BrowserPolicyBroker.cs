@@ -9,6 +9,9 @@ using System.Collections.Generic;
 public sealed class BrowserPolicyBroker : IDisposable
 {
     public string PolicyVersion { get; } = "1.0";
+    // 与 Rust 侧 broker.rs 的 MAX_CONSUMED_NONCES 保持对等：达到上限即 fail-closed 拒绝，
+    // 绝不淘汰旧 nonce（以免削弱一次性/重放保护）。
+    private const int MaxConsumedNonces = 50_000;
     private readonly List<Audit.AuditEvent> _auditLog = new();
     private readonly HashSet<string> _consumedNonces = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SessionContext> _sessions = new(StringComparer.Ordinal);
@@ -175,8 +178,7 @@ public sealed class BrowserPolicyBroker : IDisposable
                     return false;
                 if (!_nativePolicyCoreBridge.TryConsumeNavigation(action, rawUrl, scope))
                     return false;
-                lock (_nonceLock)
-                    return _consumedNonces.Add(action.Nonce);
+                return TryRecordConsumedNonce(action.Nonce);
             }
         }
         if (!OriginPolicy.TryParseExternal(rawUrl, out var uri))
@@ -189,10 +191,7 @@ public sealed class BrowserPolicyBroker : IDisposable
                 || action.Method != "GET" || action.Origin != uri.GetLeftPart(UriPartial.Authority)
                 || action.CanonicalParameters != uri.GetComponents(UriComponents.PathAndQuery, UriFormat.UriEscaped))
                 return false;
-            lock (_nonceLock)
-            {
-                return _consumedNonces.Add(action.Nonce);
-            }
+            return TryRecordConsumedNonce(action.Nonce);
         }
     }
 
@@ -217,6 +216,18 @@ public sealed class BrowserPolicyBroker : IDisposable
     {
         _auditLog.Add(new Audit.AuditEvent(
             Guid.NewGuid().ToString("N"), DateTime.UtcNow, decision, scope, origin, reason));
+    }
+
+    /// <summary>记录已消费 nonce；达上限即 fail-closed 拒绝（与 Rust 侧 broker.rs 对等）。
+    /// 不淘汰旧 nonce，避免削弱一次性/重放保护。</summary>
+    private bool TryRecordConsumedNonce(string nonce)
+    {
+        lock (_nonceLock)
+        {
+            if (_consumedNonces.Count >= MaxConsumedNonces)
+                return false;
+            return _consumedNonces.Add(nonce);
+        }
     }
 
     private bool AllowsNavigationUnderNativePolicyRequirement(
