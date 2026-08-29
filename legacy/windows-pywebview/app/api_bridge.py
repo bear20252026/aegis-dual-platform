@@ -33,6 +33,10 @@ from .url_utils import (
     normalize_url,
 )
 
+# 标签增强（move_tab/close_current_tab/会话恢复）以 mixin 混入——
+# 独立职责独立文件（api_bridge 已超 500 行红线，不再增重）。
+from .tab_ops import TabOpsMixin
+
 # 保持旧私有名兼容（_is_navigation_safe 供 Api._is_navigation_safe_url 使用）
 _is_navigation_safe = is_navigation_safe
 
@@ -79,22 +83,32 @@ def _row_to_tuple(r: Any):
 _DEFAULT_WALLPAPER = "aurora-twilight.jpg"
 
 
-class Api:
+class Api(TabOpsMixin):
     """暴露给 JS 的 Python 桥。JS 侧调用 pywebview.api.navigate(...) 等。"""
 
     # 暴露给 JS 的方法白名单（其余属性/内部方法一律对 dir() 隐藏）
     # B0-W-01 整改（国防级审查——阶段 0 立即处置）：
-    # 从远程页面可达桥移除敏感读取/导入能力（历史/书签/标签 URL 读取 +
+    # 从远程页面可达桥移除敏感读取/导入能力（历史/标签 URL 读取 +
     # 本机 Chrome/Edge 导入——恶意页面可读取回传/触发导入）。
     # 依据：微软官方（WebView2 安全——限制 web 内容功能/避免通用代理）+
     # Code2Native（桥白名单只暴露必要方法——Critical）+ 审查必须整改。
     # 保留：导航/标签操作/壁纸/搜索设置（页面 UI 功能——非敏感读取）。
+    # B0-W-01 复审（2026-08-30，随 PR #7）：get_bookmarks 以
+    # 「白名单恢复 + 方法内受信来源校验」回归——远程页面调用返回空
+    # （原整改一刀切移除，导致 start.html 书签宫格静默失效）。
+    # 导入向导（scan/import）同样按此口径回归——远程页不可达。
     _JS_EXPOSED = frozenset({
         "get_wallpaper", "set_wallpaper",
         "get_search_engine", "set_search_engine",
-        "new_tab", "switch_tab", "close_tab",
-        "pin_tab", "unpin_tab",
+        "new_tab", "switch_tab", "close_tab", "close_current_tab",
+        "move_tab", "pin_tab", "unpin_tab",
         "set_tab_group",
+        # 会话恢复（restore 含 URL——受信校验在方法内；has_saved 仅返回计数）
+        "restore_session", "has_saved_session",
+        # 书签读取（受信来源校验在方法内——远程页返回空列表）
+        "get_bookmarks",
+        # 导入向导（扫描/导入均受信来源校验在方法内——远程页不可达）
+        "scan_import_sources", "import_bookmarks", "import_history",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
         "add_bookmark", "remove_bookmark",
@@ -268,14 +282,13 @@ class Api:
         return True
 
     def new_tab(self, url: str = "") -> None:
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 new_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，随「标签增强」落地）：标签结构操作放行
+        # 来源校验——用户在远程页面上按 Ctrl+T / 点「+」也必须可用（原
+        # 一刀切拒绝导致远程页上无法新建任何标签）。安全性依据：
+        # ① 无任何数据读取；② 带 URL 仍过 _is_navigation_safe_url 双层
+        # 校验；③ M-2 频率限制 + 20 上限保留（tab-bomb 防护不变）；
+        # ④ window.open 等价能力本就存在（NewWindowRequested 同窗重定向）。
+        # 敏感操作（navigate/搜索引擎/书签/会话恢复）维持 P1-1 严格校验。
         # M-2 修复（防御性安全审查）：new_tab 频率限制——500ms 最小间隔
         # + 20 标签上限（防 tab-bomb——恶意页面循环调用）
         import time as _t
@@ -295,17 +308,12 @@ class Api:
             self._tabs.append({"title": "新标签页", "url": target,
                                "pinned": False, "group": "默认"})
             self._current = len(self._tabs) - 1
+        self._persist_session()
         self._load(target)
 
     def switch_tab(self, index: Any) -> None:
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 switch_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
+        # （switch 仅切换已开标签的显示，无读取、无新导航面）。
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -314,6 +322,7 @@ class Api:
                 return
             self._current = idx
             url = self._tabs[idx]["url"]
+        self._persist_session()
         self._load(url)
 
     def _remove_tab(self, idx: int):
@@ -331,14 +340,7 @@ class Api:
         return self._tabs[self._current]["url"]
 
     def close_tab(self, index: Any) -> None:
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 close_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -346,17 +348,11 @@ class Api:
             url = self._remove_tab(idx)
         if url is not None:
             self._load(url)
+            self._persist_session()
 
     def pin_tab(self, index: Any) -> None:
         """固定标签：置顶（pinned 标签排在最前，顺序稳定）。"""
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 pin_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -369,17 +365,11 @@ class Api:
             tab["pinned"] = True
             self._reorder_pinned()
             self._current = self._find_index(tab)
+        self._persist_session()
 
     def unpin_tab(self, index: Any) -> None:
         """取消固定：回到普通标签区（pinned 之后）。"""
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 unpin_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -392,6 +382,7 @@ class Api:
             tab["pinned"] = False
             self._reorder_pinned()
             self._current = self._find_index(tab)
+        self._persist_session()
 
     def _reorder_pinned(self) -> None:
         """置顶重排：pinned 在前（保持各自相对顺序），普通标签在后。"""
@@ -412,14 +403,7 @@ class Api:
         借鉴 min 的 tabState 分层：tab（单标签状态）/ task（标签分组）。
         返回是否成功；越界或组名非法返回 False。
         """
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 set_tab_group（来源不受信）")
-            except Exception:
-                pass
-            return False
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return False
@@ -432,6 +416,7 @@ class Api:
             if not (0 <= idx < len(self._tabs)):
                 return False
             self._tabs[idx]["group"] = name
+        self._persist_session()
         return True
 
     def get_tab_groups(self) -> list:
@@ -464,6 +449,7 @@ class Api:
                     self._tabs[self._current]["url"] = url
                 if title:
                     self._tabs[self._current]["title"] = title[:80]
+        self._persist_session()
 
     # ================= 导航 =================
     def navigate(self, text: str) -> None:
@@ -560,7 +546,18 @@ class Api:
 
     # ================= 书签 =================
     def get_bookmarks(self) -> list:
-        """返回书签列表 [{id,title,url}]。"""
+        """返回书签列表 [{id,title,url}]（B0-W-01 复审：受信来源校验）。
+
+        仅本地壳页（start.html 书签宫格）可达——远程页面调用返回空
+        （原 B0-W-01 整改一刀切移除，导致宫格静默失效——本次恢复读取
+        通道但维持「远程页零数据」边界）。"""
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 get_bookmarks（来源不受信）")
+            except Exception:
+                pass
+            return []
         try:
             if self.bookmarks is None:
                 return []
@@ -602,48 +599,101 @@ class Api:
         except Exception:
             pass
 
-    def import_bookmarks(self) -> dict:
-        """从 Chrome/Edge 导入书签（自动探测本机文件）。
+    def _deny_remote(self, op: str) -> bool:
+        """受信来源校验统一入口：远程页面调用 → 留痕并返回 True。
 
-        返回 {"imported": 新增数, "total": 解析总数, "source": 来源文件}。
+        返回 False = 来源受信（调用方继续执行）。新桥方法统一走此入口
+        （存量方法保留各自内联块——本方法只收敛新增代码，不扩散改动）。
+        """
+        if self._check_trusted_source():
+            return False
+        try:
+            from crash_reporter import log_event
+            log_event(f"[bridge] 拒绝远程页面 {op}（来源不受信）")
+        except Exception:
+            pass
+        return True
+
+    # ================= 导入向导（Chrome/Edge 书签与历史） =================
+    def scan_import_sources(self) -> list:
+        """探测本机可导入来源（仅探测文件存在——不读取任何内容）。
+
+        返回 [{"browser": "chrome"|"edge", "bookmarks": bool,
+        "history": bool}]；受信来源校验在方法内（远程页返回空）。
+        """
+        if self._deny_remote("scan_import_sources"):
+            return []
+        try:
+            from .browser_import import find_import_sources
+            return find_import_sources()
+        except Exception:
+            return []
+
+    def import_bookmarks(self, source: str = "") -> dict:
+        """从 Chrome/Edge 导入书签（导入向导执行步）。
+
+        source 可选（"chrome"/"edge"；空=全部来源）。返回
+        {"imported": 总新增, "total": 解析总数,
+         "results": [{"browser", "imported", "total"}, ...]}。
         解析失败或存储不可用时静默返回 0（导入是可选功能，不影响浏览）。
         """
+        if self._deny_remote("import_bookmarks"):
+            return {"imported": 0, "total": 0, "results": []}
+        src = _to_str(source, "") or ""
+        if src not in ("", "chrome", "edge"):
+            src = ""
+        out: dict = {"imported": 0, "total": 0, "results": []}
         try:
             from .browser_import import find_bookmarks_files, parse_bookmarks_json
-            for path in find_bookmarks_files():
+            for browser, path in find_bookmarks_files(src):
                 items = parse_bookmarks_json(path)
-                if not items:
-                    continue
                 imported = 0
                 for item in items:
                     if (self.bookmarks is not None
                             and self.bookmarks.add(item["title"], item["url"])):
                         imported += 1
-                return {"imported": imported, "total": len(items), "source": path}
+                out["results"].append(
+                    {"browser": browser, "imported": imported,
+                     "total": len(items)})
+                out["imported"] += imported
+                out["total"] += len(items)
         except Exception:
             pass
-        return {"imported": 0, "total": 0, "source": ""}
+        return out
 
-    def import_history(self, limit: int = 500) -> dict:
-        """从 Chrome/Edge 导入最近历史（自动探测本机文件）。
+    def import_history(self, limit: Any = 500, source: str = "") -> dict:
+        """从 Chrome/Edge 导入最近历史（导入向导执行步）。
 
-        返回 {"imported": 新增数, "total": 解析总数, "source": 来源文件}。
+        limit 为每来源条数上限（1–2000，默认 500）；source 同
+        import_bookmarks。返回结构同 import_bookmarks。
         """
+        if self._deny_remote("import_history"):
+            return {"imported": 0, "total": 0, "results": []}
+        n = _to_nonneg_int(limit, 500) or 500
+        n = min(n, 2000)
+        src = _to_str(source, "") or ""
+        if src not in ("", "chrome", "edge"):
+            src = ""
+        out: dict = {"imported": 0, "total": 0, "results": []}
         try:
             from .browser_import import find_history_files, parse_history_db
-            for path in find_history_files():
-                items = parse_history_db(path, limit)
-                if not items:
-                    continue
+            for browser, path in find_history_files(src):
+                items = parse_history_db(path, n)
                 imported = 0
                 for item in items:
-                    if (self.history is not None
-                            and self.history.add(item["url"], item["title"])):
+                    if self.history is not None:
+                        # HistoryStore.add 为 visit 追加（无返回值/无去重
+                        # ——历史是访问流水不是键值表）——计数即解析条数
+                        self.history.add(item["url"], item["title"])
                         imported += 1
-                return {"imported": imported, "total": len(items), "source": path}
+                out["results"].append(
+                    {"browser": browser, "imported": imported,
+                     "total": len(items)})
+                out["imported"] += imported
+                out["total"] += len(items)
         except Exception:
             pass
-        return {"imported": 0, "total": 0, "source": ""}
+        return out
 
     # ================= 历史 =================
     def get_history(self, limit: Any = 100,

@@ -1,9 +1,7 @@
 name: Agent-Redteam
-on:
-  push:
-    paths: ['agent/**', 'contracts/policy/**']
-  pull_request:
-    paths: ['agent/**', 'contracts/policy/**']
+"on":
+  push: {}
+  pull_request: {}
   workflow_dispatch: {}
 
 jobs:

@@ -13,6 +13,8 @@ Apple 设计语言版（参照 DESIGN.md apple 设计规范）：
 
 import json
 
+from .tabstrip_js import TABSTRIP_JS
+
 DEFAULT_KEYBINDINGS: dict[str, str] = {
     "new_tab": "t",
     "close_tab": "w",
@@ -29,6 +31,9 @@ TOOLBAR_JS = r"""
   try {
     if (document.getElementById('aegis-chrome')) return;
     var TABS_DATA = __TABS_JSON__;
+    // 标签条数据全局化：tabstrip_js.TABSTRIP_JS 由此读取并渲染
+    // （B0-W-01：bridge_hooks 仅对受信本地页注入真实快照——远程页为空）
+    window.__AEGIS_TABS__ = TABS_DATA;
 
     // === Apple Design System Tokens ===
     var COLORS = {
@@ -62,74 +67,13 @@ TOOLBAR_JS = r"""
       'font-family:' + FONT
     ].join(';');
 
-    // === 标签条 ===
+    // === 标签条（容器——渲染/拖拽/右键菜单在 tabstrip_js.TABSTRIP_JS，
+    // 单文件单职责；数据经 window.__AEGIS_TABS__ 传递） ===
     var tabsWrap = document.createElement('div');
+    tabsWrap.id = 'aegis-tabs';
     tabsWrap.style.cssText = 'display:flex;align-items:center;gap:4px;height:32px;' +
       'overflow:hidden;flex:0 1 auto;min-width:0;max-width:50%;';
     bar.appendChild(tabsWrap);
-
-    var tabs = (TABS_DATA && TABS_DATA.tabs) || [];
-    var cur = (TABS_DATA && TABS_DATA.current) || 0;
-
-    for (var i = 0; i < tabs.length; i++) {
-      (function (idx) {
-        var isActive = (idx === cur);
-        var t = document.createElement('div');
-        t.style.cssText = 'display:inline-flex;align-items:center;gap:6px;max-width:140px;height:30px;' +
-          'padding:0 8px 0 12px;border-radius:' + RADIUS.sm + 'px;cursor:pointer;font-size:13px;' +
-          'color:' + (isActive ? COLORS.ink : COLORS.bodyMuted) + ';' +
-          'background:' + (isActive ? COLORS.canvasParchment : 'transparent') + ';' +
-          'font-weight:' + (isActive ? '500' : '400') + ';' +
-          'transition:background 0.15s ease;';
-
-        var label = document.createElement('span');
-        var isPin = !!(tabs[idx] && tabs[idx].pinned);
-        label.textContent = (isPin ? '\u{1F4CC} ' : '') + ((tabs[idx] && tabs[idx].title) || '新标签页');
-        label.style.cssText = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
-
-        var x = document.createElement('span');
-        x.textContent = '\u00d7';
-        x.style.cssText = 'width:16px;height:16px;line-height:14px;text-align:center;border-radius:50%;' +
-          'cursor:pointer;color:' + COLORS.bodyMuted + ';font-size:11px;flex:0 0 auto;' +
-          'transition:background 0.15s ease;';
-        x.onmouseenter = function(){ x.style.background = COLORS.chipBg; };
-        x.onmouseleave = function(){ x.style.background = 'transparent'; };
-        x.onclick = function (e) {
-          e.stopPropagation();
-          try { if (window.pywebview && pywebview.api) pywebview.api.close_tab(idx); } catch (err) {}
-        };
-        t.onmouseenter = function(){ if (!isActive) t.style.background = COLORS.divider; };
-        t.onmouseleave = function(){ if (!isActive) t.style.background = 'transparent'; };
-        t.onclick = function () {
-          if (idx !== cur && window.pywebview && pywebview.api) {
-            try { pywebview.api.switch_tab(idx); } catch (err) {}
-          }
-        };
-        t.onauxclick = function (e) {
-          if (e.button !== 1) return;
-          e.preventDefault();
-          try { if (window.pywebview && pywebview.api) pywebview.api.close_tab(idx); } catch (err) {}
-        };
-        t.appendChild(label);
-        t.appendChild(x);
-        tabsWrap.appendChild(t);
-      })(i);
-    }
-
-    // 新建标签按钮（+）
-    var nb = document.createElement('div');
-    nb.textContent = '+';
-    nb.title = '新标签页 (Ctrl+T)';
-    nb.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;' +
-      'width:28px;height:28px;border-radius:' + RADIUS.sm + 'px;cursor:pointer;' +
-      'color:' + COLORS.bodyMuted + ';font-size:18px;font-weight:300;flex:0 0 auto;' +
-      'transition:background 0.15s ease;';
-    nb.onmouseenter = function(){ nb.style.background = COLORS.canvasParchment; };
-    nb.onmouseleave = function(){ nb.style.background = 'transparent'; };
-    nb.onclick = function () {
-      try { if (window.pywebview && pywebview.api) pywebview.api.new_tab(); } catch (err) {}
-    };
-    tabsWrap.appendChild(nb);
 
     // === 分隔线 ===
     var sep = document.createElement('div');
@@ -322,8 +266,9 @@ TOOLBAR_JS = r"""
             pywebview.api.new_tab();
           } else if (KB.close_tab && k === KB.close_tab) {
             e.preventDefault();
-            var ci = (TABS_DATA && TABS_DATA.current) || 0;
-            pywebview.api.close_tab(ci);
+            // Ctrl+W 修复：TABS_DATA.current 是注入时刻的冻结快照（多标签
+            // 下会关错）——改用后端实时 _current（tab_ops.close_current_tab）
+            pywebview.api.close_current_tab();
           } else if (KB.focus_url && k === KB.focus_url) {
             e.preventDefault();
             var urlInput = document.getElementById('aegis-url');
@@ -452,6 +397,10 @@ def build_toolbar_js(
     js = js.replace("__KEYBINDINGS_JSON__", kb_json)
     js = js.replace("__SEARCH_SUGGEST__", "true" if search_suggestions else "false")
     js = js.replace("__FONT_FAMILY__", json.dumps(font_family))
+
+    # 标签条（拖拽排序/固定菜单/中键关闭）——独立脚本段（单文件单职责）；
+    # 数据经 window.__AEGIS_TABS__ 共享，无需额外占位符
+    js += "\n" + TABSTRIP_JS
 
     if tabs_position == "left":
         js += "\n" + VERTICAL_TABS_JS

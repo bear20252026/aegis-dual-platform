@@ -35,12 +35,18 @@ check("__dir__ 只含白名单方法", exposed == api._JS_EXPOSED,
       f"extra={sorted(exposed - api._JS_EXPOSED)}")
 check("白名单含关键方法", {"new_tab", "switch_tab", "close_tab",
                         "navigate"} <= api._JS_EXPOSED)
-# B0-W-01 整改验证（国防级审查）：敏感读取/导入方法不得在 JS 白名单
-# （历史/书签/标签 URL 读取 + 本机 Chrome/Edge 导入——恶意页面不可达）
+# B0-W-01 整改验证（国防级审查）：敏感读取方法不得在 JS 白名单
+# （历史/标签 URL 读取——恶意页面不可达）。
+# B0-W-01 复审（PR #7）：get_bookmarks / 导入向导（scan_import_sources /
+# import_bookmarks / import_history）以「白名单 + 方法内受信来源校验」
+# 回归（start.html 宫格/向导恢复）——历史读取类仅受信壳页可达。
 check("白名单无敏感方法", not {"get_tabs", "get_history", "get_most_visited",
-                        "search_history_fulltext", "get_bookmarks",
-                        "import_bookmarks", "import_history",
+                        "search_history_fulltext",
                         "get_tab_groups"} & api._JS_EXPOSED)
+check("get_bookmarks 受信回归白名单", "get_bookmarks" in api._JS_EXPOSED)
+check("导入向导回归白名单",
+      {"scan_import_sources", "import_bookmarks", "import_history"}
+      <= api._JS_EXPOSED)
 
 # 3) 标签管理（M-2 适配：new_tab 有 500ms 频率限制——连续调用间留间隔）
 import time as _t
@@ -92,6 +98,156 @@ check("_load 空 URL 返回 False", api._load("") is False)
 # 7) NavQueue 组合关系：Api.window property 委托给 nav
 nav = NavQueue()
 check("Api 内部持有 NavQueue", isinstance(api._nav, NavQueue))
+
+# 8) 标签增强（tab_ops mixin）：move_tab / close_current_tab
+# 前置状态（第 3 节后）：tabs=[默认, a.cn]，current=0
+_t.sleep(0.6)
+api.new_tab("https://c.cn")
+_t.sleep(0.6)
+api.new_tab("https://d.cn")
+snap = api.get_tabs()
+check("move_tab 前置 4 个标签", len(snap["tabs"]) == 4, f"n={len(snap['tabs'])}")
+
+# tabs=[默认, a.cn, c.cn, d.cn]，current=3 → move 3→1
+api.move_tab(3, 1)
+snap = api.get_tabs()
+check("move_tab 3→1 位置正确", snap["tabs"][1]["url"] == "https://d.cn")
+check("move_tab 后 current 跟随移动标签", snap["current"] == 1)
+
+# tabs=[默认, d.cn, a.cn, c.cn] → 切到 0（默认），移动非当前标签 3→2
+api.switch_tab(0)
+api.move_tab(3, 2)
+snap = api.get_tabs()
+check("移动非当前标签不改 current", snap["current"] == 0, f"cur={snap['current']}")
+check("移动后落位正确", snap["tabs"][2]["url"] == "https://c.cn")
+
+api.pin_tab(0)  # 固定默认标签 → pinned 区 = [0]
+api.move_tab(0, 3)  # pinned 想移到 3 → 钳制回 pinned 区内（不动）
+snap = api.get_tabs()
+check("pinned 拖拽钳制在 pinned 区",
+      snap["tabs"][0]["pinned"] is True and snap["tabs"][1]["url"] == "https://d.cn",
+      f"{snap['tabs'][0]}")
+
+api.move_tab(99, 0)
+api.move_tab(-1, 0)
+api.move_tab(1, 1)
+check("move_tab 非法参数不崩溃", len(api.get_tabs()["tabs"]) == 4)
+
+# 9) close_current_tab（后端实时 _current——Ctrl+W 修复）
+api.switch_tab(2)  # c.cn
+api.close_current_tab()
+snap = api.get_tabs()
+check("close_current_tab 关掉的是实时当前标签",
+      len(snap["tabs"]) == 3 and snap["current"] == 1,
+      f"n={len(snap['tabs'])}, cur={snap['current']}")
+
+# 10) 会话恢复：seed_session / _persist_session / has_saved_session / restore_session
+import tempfile
+
+tmp = tempfile.mkdtemp(prefix="aegis_bridge_")
+api2 = Api()
+api2._data_dir = tmp
+api2.seed_session([
+    {"title": "S1", "url": "https://s1.cn", "pinned": False, "group": "默认"},
+    {"title": "S2", "url": "https://s2.cn", "pinned": True, "group": "默认"},
+], 0)
+api2._persist_session()
+check("has_saved_session 返回标签数", api2.has_saved_session() == 2)
+
+api3 = Api()
+api3._data_dir = tmp
+check("restore_session 成功", api3.restore_session() is True)
+snap = api3.get_tabs()
+check("restore 后 2 个标签", len(snap["tabs"]) == 2)
+check("restore 后 pinned 保持", snap["tabs"][1]["pinned"] is True)
+
+api4 = Api()
+api4._data_dir = tempfile.mkdtemp(prefix="aegis_empty_")
+check("无会话 restore_session → False", api4.restore_session() is False)
+check("无会话 has_saved_session → 0", api4.has_saved_session() == 0)
+
+# 会话保存钩子：new_tab / close_current_tab 后自动落盘（静默持久化）
+api5 = Api()
+api5._data_dir = tempfile.mkdtemp(prefix="aegis_hook_")
+_t.sleep(0.6)
+api5.new_tab("https://hook.cn")
+check("new_tab 钩子落盘会话", api5.has_saved_session() == 2)  # 默认标签 + 新建
+api5.close_current_tab()
+check("close_current_tab 钩子更新会话", api5.has_saved_session() == 1)
+
+# 11) get_bookmarks 受信来源校验（B0-W-01 复审回归）
+# api.window 未绑定 → current_url "" → 受信 → 返回列表（store 未绑定 → []）
+check("受信 get_bookmarks 返回列表", api.get_bookmarks() == [])
+
+class _RemoteWin:
+    def get_current_url(self):
+        return "https://evil.example/page"
+
+api6 = Api()
+api6.window = _RemoteWin()  # 远程页来源
+check("远程页 get_bookmarks 返回空", api6.get_bookmarks() == [])
+
+# 12) 导入向导：scan_import_sources / import_bookmarks / import_history
+#     （monkeypatch browser_import._SOURCES → 临时目录夹具，不触真实本机）
+import json as _json
+import os as _os
+import sqlite3 as _sq
+
+import app.browser_import as _bi
+
+_fx = tempfile.mkdtemp(prefix="aegis_imp_")
+_chrome = _os.path.join(_fx, "chrome_ud")
+_edge = _os.path.join(_fx, "edge_ud")
+_os.makedirs(_os.path.join(_chrome, "Default"))
+_os.makedirs(_os.path.join(_edge, "Default"))
+_bm = {"roots": {"bookmark_bar": {"type": "folder", "children": [
+        {"type": "url", "name": "站点甲", "url": "https://jia.cn"},
+        {"type": "url", "name": "站点乙", "url": "https://yi.cn/x?a=1"},
+        {"type": "url", "name": "坏协议", "url": "javascript:x"},
+    ]}, "other": None, "synced": None}}
+with open(_os.path.join(_chrome, "Default", "Bookmarks"), "w", encoding="utf-8") as f:
+    _json.dump(_bm, f, ensure_ascii=False)
+_conn = _sq.connect(_os.path.join(_edge, "Default", "History"))
+_conn.execute("CREATE TABLE urls(url TEXT, title TEXT, last_visit_time INTEGER)")
+_conn.execute("INSERT INTO urls VALUES('https://his.cn','历史页', 100)")
+_conn.execute("INSERT INTO urls VALUES('javascript:x','坏', 200)")
+_conn.commit()
+_conn.close()
+_bi._SOURCES = (("chrome", _chrome), ("edge", _edge))
+
+api7 = Api()
+api7._data_dir = tempfile.mkdtemp(prefix="aegis_impdata_")
+from app.bookmark_store import BookmarkStore
+from app.history_store import HistoryStore
+api7.bookmarks = BookmarkStore(api7._data_dir)
+api7.history = HistoryStore(api7._data_dir)
+
+scan = api7.scan_import_sources()
+check("scan 探测到两个来源", [s["browser"] for s in scan] == ["chrome", "edge"],
+      f"{scan}")
+check("scan 内容标志正确", scan[0]["bookmarks"] is True and scan[0]["history"] is False
+      and scan[1]["history"] is True and scan[1]["bookmarks"] is False)
+
+rb = api7.import_bookmarks("chrome")
+check("import_bookmarks 仅 chrome（2 条，坏协议被滤）",
+      rb["imported"] == 2 and rb["total"] == 2 and
+      rb["results"][0]["browser"] == "chrome", f"{rb}")
+check("书签已入库", api7.bookmarks.contains("https://jia.cn"))
+rb2 = api7.import_bookmarks("chrome")
+check("import_bookmarks 去重（二导 0 新增）", rb2["imported"] == 0)
+
+rh = api7.import_history(10, "edge")
+check("import_history 仅 edge（坏协议被滤）",
+      rh["imported"] == 1 and rh["results"][0]["browser"] == "edge", f"{rh}")
+
+check("非法来源参数回退全部", api7.import_bookmarks("firefox")["total"] == 2)
+
+# 远程页不可达（W-03/B0-W-01 复审口径）
+api8 = Api()
+api8.window = _RemoteWin()
+check("远程页 scan 返回空", api8.scan_import_sources() == [])
+check("远程页 import_bookmarks 拒绝",
+      api8.import_bookmarks() == {"imported": 0, "total": 0, "results": []})
 
 if failures:
     print("FAIL")

@@ -458,9 +458,37 @@ def main() -> int:
     except Exception:
         pass  # 书签/历史/配置不可用时降级为纯浏览
 
+    # 启动恢复上次会话（CHANGELOG Planned：会话恢复；config.resume_session
+    # 开启时生效）。恢复失败静默回退默认启动页——绝不阻断浏览启动。
+    restored_url = ""
+    try:
+        if api.config is not None and bool(
+                getattr(api.config, "resume_session", False)):
+            from app.session_store import SessionStore
+            _session_dir = ""
+            try:
+                from app.paths import resolve_data_dir
+                _session_dir = resolve_data_dir()
+            except Exception:
+                _session_dir = ""
+            data = SessionStore(_session_dir).load()
+            if data:
+                restored_url = api.seed_session(
+                    data["tabs"], data.get("current", 0))
+                if restored_url:
+                    try:
+                        from crash_reporter import log_event
+                        log_event(
+                            f"[session] 已恢复上次会话（{len(data['tabs'])} 个标签）")
+                    except Exception:
+                        pass
+    except Exception:
+        restored_url = ""
+        pass  # 会话恢复失败静默——回退默认启动页
+
     window = shell.create_window(
         api,
-        START_URL,
+        restored_url or START_URL,
         title="Aegis 安全浏览器",
         width=1280,
         height=820,

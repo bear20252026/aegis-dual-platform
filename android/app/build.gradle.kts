@@ -34,12 +34,16 @@ val signingPropertiesFile = rootProject.file("signing.properties")
 if (signingPropertiesFile.exists()) {
     signingPropertiesFile.inputStream().use(signingProperties::load)
 }
-val requireNativePolicyCore = providers.gradleProperty("requireNativePolicyCore")
-    .map { it == "true" }
-    .getOrElse(false)
-val requireNavigationConfirmation = providers.gradleProperty("requireNavigationConfirmation")
-    .map { it == "true" }
-    .getOrElse(false)
+val requireNativePolicyCore =
+    providers
+        .gradleProperty("requireNativePolicyCore")
+        .map { it == "true" }
+        .getOrElse(false)
+val requireNavigationConfirmation =
+    providers
+        .gradleProperty("requireNavigationConfirmation")
+        .map { it == "true" }
+        .getOrElse(false)
 
 check(!requireNavigationConfirmation || requireNativePolicyCore) {
     "requireNavigationConfirmation=true 时必须同时设置 -PrequireNativePolicyCore=true"

@@ -108,12 +108,22 @@ object SecureWebViewFactory {
     private val allowedHostsJson: String =
         ALLOWED_BRIDGE_HOSTS.joinToString(",") { "\"$it\"" }
 
+    /** REQUIRE_HTTPS 占位符注入值（模板归一化为 __AEGIS_REQUIRE_HTTPS__）。 */
+    private val requireHttpsJson: String = REQUIRE_HTTPS_BRIDGE.toString()
+
+    /**
+     * bridge 目标强制 HTTPS（与 Rust BridgeGuard.require_https 对应）。
+     * 生产接线尚未开启（两端一致）；配置化时须同步 BridgeGuard::new 调用点。
+     */
+    private const val REQUIRE_HTTPS_BRIDGE = false
+
     /**
      * Bridge 硬化 JS（fetch / XMLHttpRequest / sendBeacon / WebSocket 未授权调用拒绝）。
-     * 与 Rust 侧 BridgeGuard::inject_script 同一份逻辑：只有「调用方自身
-     * hostname ∈ [ALLOWED_BRIDGE_HOSTS]」的受信内页（chrome UI）才能调用本机 bridge；
-     * 远程页一律拒绝（fail-closed）。注：`[$allowedHostsJson]` 必须包裹方括号，否则
-     * `const ALLOWED_HOSTS = "a","b"` 为 JS 语法错误（旧实现因此整体失效）。
+     *
+     * 单一事实源（ADR-007）：本模板必须与
+     * `contracts/schemas/bridge_guard.template.js` 逐行一致（占位符归一化后），
+     * 由 `contracts/codegen/verify_bridge_guard.py` 门禁校验——禁止手工改动
+     * 本模板而不更新规范文件（fail-open 漂移即此模式的产物）。
      */
     private val BRIDGE_GUARD_JS: String
         get() =
@@ -121,6 +131,7 @@ object SecureWebViewFactory {
 // Aegis BridgeGuard — 受信调用方校验（fetch / XMLHttpRequest / sendBeacon / WebSocket）
 (function() {
   const ALLOWED_HOSTS = [$allowedHostsJson];
+  const REQUIRE_HTTPS = $requireHttpsJson;
   // 仅容许「受信内页」（自身 hostname ∈ 白名单）调用本机 bridge。
   const trustedCaller = ALLOWED_HOSTS.includes(location.hostname);
   function isBridgeTarget(urlLike) {
@@ -130,6 +141,9 @@ object SecureWebViewFactory {
   function shouldBlock(urlLike) {
     if (!isBridgeTarget(urlLike)) return false;   // 普通站点流量放行
     if (!trustedCaller) return true;              // 调用方非受信内页 → 拒绝
+    if (REQUIRE_HTTPS) {
+      try { if (new URL(urlLike, location.href).protocol !== 'https:') return true; } catch (e) {}
+    }
     return false;
   }
   function deny(reason) { console.warn('[Aegis] Bridge blocked: ' + reason); }

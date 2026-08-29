@@ -5,19 +5,8 @@
 name: Android-Quality
 
 "on":
-  push:
-    paths:
-      - "android/**"
-      - "shared/version.properties"
-      - "scripts/sync_versions.py"
-      - "scripts/verify_versions.py"
-      - ".github/workflows/android-quality.yml"
-  pull_request:
-    paths:
-      - "android/**"
-      - "shared/version.properties"
-      - "scripts/sync_versions.py"
-      - "scripts/verify_versions.py"
+  push: {}
+  pull_request: {}
   workflow_dispatch: {}
 
 jobs:

@@ -58,6 +58,7 @@ core/rust-policy-core/target/
 core/rust-policy-core/fuzz/target/
 
 # Legacy Python (只读归档——不参与现役构建)
+legacy/crash_reports/
 legacy/windows-pywebview/dist/
 legacy/windows-pywebview/build/
 legacy/windows-pywebview/__pycache__/
