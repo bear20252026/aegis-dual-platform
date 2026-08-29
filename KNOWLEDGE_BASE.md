@@ -451,5 +451,12 @@
 - **TranslateEntry.kt**：translatetheweb（微软 Edge 同款、国内可达）；URL 外发翻译服务 = 用户显式触发（隐私原则：默认不外发）；导航仍走 navigateExternal 安全策略。
 - **INV-04**：阅读内容经 BrowserViewModel `_readerContent` StateFlow 流转，Compose 无局部 remember 浏览器状态；detekt baseline 同步 AddressBarAndNav 新签名。
 
-### 25.6 验证（全绿）
+### 25.6 Android 质量门禁修复（README 遗留项闭环，2026-08-30）
+- **ktlint 1.8.0 KDoc 解析 bug**：KDoc 注释中反引号代码段以 `` `[ `` 开头且含 `$`（如 `` `[$x]` ``）→ 整文件 "Not a valid Kotlin file (identifier expected)"。最小复现确认；SecureWebViewFactory.kt 注释改写规避。**项目内新写注释须避免该模式**。
+- **工具链复现方法**：ktlint-cli-1.8.0-all.jar / detekt-cli-1.23.8-all.jar（Maven Central）+ JDK 21 本地即可复现 CI 门禁，无需 Gradle 环境。
+- **detekt 存量基线化**：BrowserViewModel TooManyFunctions(13>11)/ReturnCount(3>2) 经 --create-baseline 基线化（类级签名 `TooManyFunctions:...$BrowserViewModel : ViewModel`——注意无括号）。
+- **双通道**：`:app:ktlintCheck`（.kt）与 `:app:ktlintKotlinScriptCheck`（.kts）均需 0 错误——.kts 存量问题经 --format 修复。
+- **新增 ReaderController**：reader/translate 状态与动作独立文件（构造注入回调），BrowserViewModel 函数数回落存量水平。
+
+### 25.7 验证（全绿）
 validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed）｜ bandit --skip 同 CI（0 Medium/High）｜ mypy 32 文件 0 错误｜ selftest ×5 全过｜ node --check 注入 JS 语法。
