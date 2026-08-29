@@ -3,14 +3,14 @@
   <ManuallySuppressedIssues/>
   <CurrentIssues>
     <ID>FunctionNaming:AegisTheme.kt$@Composable fun AegisTheme(content: @Composable () -&gt; Unit)</ID>
-    <ID>FunctionNaming:MainActivity.kt$@Composable private fun AddressBarAndNav( address: String, onAddressChange: (String) -&gt; Unit, onOpen: () -&gt; Unit, onBack: () -&gt; Unit, onForward: () -&gt; Unit, onReload: () -&gt; Unit, )</ID>
+    <ID>FunctionNaming:MainActivity.kt$@Composable private fun AddressBarAndNav( address: String, onAddressChange: (String) -&gt; Unit, onOpen: () -&gt; Unit, onBack: () -&gt; Unit, onForward: () -&gt; Unit, onReload: () -&gt; Unit, onReader: () -&gt; Unit, onTranslate: () -&gt; Unit, )</ID>
     <ID>FunctionNaming:MainActivity.kt$@Composable private fun WebContentArea( tabManager: TabManager, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:TabBar.kt$@Composable fun TabBar( tabs: List&lt;Tab&gt;, activeIndex: Int, onSelect: (Int) -&gt; Unit, onClose: (Int) -&gt; Unit, onNewTab: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:TabBar.kt$@Composable private fun TabChip( tab: Tab, active: Boolean, onSelect: () -&gt; Unit, onClose: () -&gt; Unit, )</ID>
     <ID>FunctionNaming:VerticalTabBar.kt$@Composable fun VerticalTabBar( tabs: List&lt;Tab&gt;, activeIndex: Int, onSelect: (Int) -&gt; Unit, onClose: (Int) -&gt; Unit, onNewTab: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>FunctionNaming:VerticalTabBar.kt$@Composable private fun VerticalTabChip( tab: Tab, active: Boolean, onSelect: () -&gt; Unit, onClose: () -&gt; Unit, )</ID>
     <ID>LongMethod:MainActivity.kt$MainActivity$override fun onCreate(savedInstanceState: Bundle?)</ID>
-    <ID>LongParameterList:MainActivity.kt$( address: String, onAddressChange: (String) -&gt; Unit, onOpen: () -&gt; Unit, onBack: () -&gt; Unit, onForward: () -&gt; Unit, onReload: () -&gt; Unit, )</ID>
+    <ID>LongParameterList:MainActivity.kt$( address: String, onAddressChange: (String) -&gt; Unit, onOpen: () -&gt; Unit, onBack: () -&gt; Unit, onForward: () -&gt; Unit, onReload: () -&gt; Unit, onReader: () -&gt; Unit, onTranslate: () -&gt; Unit, )</ID>
     <ID>LongParameterList:TabBar.kt$( tabs: List&lt;Tab&gt;, activeIndex: Int, onSelect: (Int) -&gt; Unit, onClose: (Int) -&gt; Unit, onNewTab: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>LongParameterList:VerticalTabBar.kt$( tabs: List&lt;Tab&gt;, activeIndex: Int, onSelect: (Int) -&gt; Unit, onClose: (Int) -&gt; Unit, onNewTab: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>ReturnCount:TabManager.kt$TabManager$fun closeTab(index: Int): Boolean</ID>

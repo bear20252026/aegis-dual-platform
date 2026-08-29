@@ -12,7 +12,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
@@ -56,6 +59,29 @@ class MainActivity : ComponentActivity() {
                 val tabsPosition by viewModel.tabsPosition.collectAsState()
                 val webViewAlert by viewModel.webViewAlert.collectAsState()
                 val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsState()
+                val readerContent by viewModel.readerContent.collectAsState()
+
+                // 阅读模式：提取到的正文以对话框渲染（INV-04：状态来自 ViewModel）
+                readerContent?.let { content ->
+                    AlertDialog(
+                        onDismissRequest = { viewModel.dismissReader() },
+                        title = { Text(content.title) },
+                        text = {
+                            Column {
+                                Text(
+                                    text = content.text,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = 420.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { viewModel.dismissReader() }) { Text("关闭") }
+                        },
+                    )
+                }
 
                 // A1：版本过旧 → 安全提示对话框（CVE-2026-12438/11295 防御）
                 webViewAlert?.let { msg ->
@@ -131,6 +157,8 @@ class MainActivity : ComponentActivity() {
                             onBack = { viewModel.navigateHistory(HistoryAction.BACK) },
                             onForward = { viewModel.navigateHistory(HistoryAction.FORWARD) },
                             onReload = { viewModel.navigateHistory(HistoryAction.RELOAD) },
+                            onReader = { viewModel.toggleReaderMode() },
+                            onTranslate = { viewModel.translateCurrentPage() },
                         )
                         WebContentArea(tabManager = viewModel.getTabManager()!!, modifier = Modifier.weight(1f))
                     }
@@ -170,6 +198,8 @@ private fun AddressBarAndNav(
     onBack: () -> Unit,
     onForward: () -> Unit,
     onReload: () -> Unit,
+    onReader: () -> Unit,
+    onTranslate: () -> Unit,
 ) {
     Column {
         Row(
@@ -192,6 +222,8 @@ private fun AddressBarAndNav(
             Button(onClick = onBack) { Text("后退") }
             Button(onClick = onForward) { Text("前进") }
             Button(onClick = onReload) { Text("刷新") }
+            Button(onClick = onReader) { Text("阅读") }
+            Button(onClick = onTranslate) { Text("翻译") }
         }
     }
 }

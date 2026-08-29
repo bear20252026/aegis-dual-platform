@@ -23,6 +23,11 @@
 - **新标签页书签宫格失效**（B0-W-01 复审）：`get_bookmarks` 被一刀切移出白名单导致 start.html 宫格静默失效——以「白名单恢复 + 方法内受信来源校验」回归（远程页调用返回空列表，维持零泄露边界）
 - 自检与实现不一致修正（master 存量 FAIL）：selftest_shell_toolbar 中文转义断言（实现为 `ensure_ascii=False` 字面量注入，行为正确）；selftest_s1_integration 场景顺序（P1-1 语义下远程页写操作本应被拒）
 
+### 新增（2026-08-30：Android 阅读模式与整页翻译入口——Planned 落地）
+- **阅读模式**：`ReaderMode.kt` 页内正文提取（只读 evaluateJavascript——article/main/[role=main] → 最大文本块 → body 兜底；JSONTokener 两段解析防畸形返回；正文 200K 截断 + 最小 200 字判定），Compose AlertDialog 渲染（状态经 ViewModel 流转——INV-04）
+- **整页翻译入口**：`TranslateEntry.kt` 构建 translatetheweb.com 整页翻译地址（国内可达）；导航仍经 SecureNavigator.navigateExternal（http/https 白名单 + Broker 授权）；用户显式点击触发（URL 外发翻译服务——隐私边界注释明示）
+- 导航栏新增「阅读」「翻译」按钮；detekt baseline 同步 AddressBarAndNav 新签名
+
 ### 新增（Planned，待做）
 - Windows 11 系统级 Mica/亚克力窗口背景（`app/backdrop.py` 已就绪，待真机验证）
 - 导入向导：从 Chrome/Edge 导入书签与历史

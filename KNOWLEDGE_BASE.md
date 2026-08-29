@@ -446,5 +446,10 @@
 - **存量修复**：`import_history` imported 恒 0（HistoryStore.add 为 visit 追加无返回值）。
 - **UI**：start.html 向导（扫描 → 选择来源/内容/上限 → 执行 → 分来源结果），textContent 构建（R-06），Escape 关闭，导入后刷新宫格。
 
-### 25.5 验证（全绿）
+### 25.5 Android 阅读模式与翻译入口（Planned 第三项，2026-08-30）
+- **ReaderMode.kt**：正文提取只读 JS（无宿主注入）；两段 JSON 解析防畸形返回；200K 截断/200 字下限。
+- **TranslateEntry.kt**：translatetheweb（微软 Edge 同款、国内可达）；URL 外发翻译服务 = 用户显式触发（隐私原则：默认不外发）；导航仍走 navigateExternal 安全策略。
+- **INV-04**：阅读内容经 BrowserViewModel `_readerContent` StateFlow 流转，Compose 无局部 remember 浏览器状态；detekt baseline 同步 AddressBarAndNav 新签名。
+
+### 25.6 验证（全绿）
 validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed）｜ bandit --skip 同 CI（0 Medium/High）｜ mypy 32 文件 0 错误｜ selftest ×5 全过｜ node --check 注入 JS 语法。

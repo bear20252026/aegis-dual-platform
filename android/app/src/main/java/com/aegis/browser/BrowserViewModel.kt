@@ -40,6 +40,10 @@ class BrowserViewModel : ViewModel() {
     val pendingNavigationConfirmation: StateFlow<PendingNavigationConfirmation?> =
         _pendingNavigationConfirmation.asStateFlow()
 
+    /** 阅读模式内容（null = 未开启/已关闭——INV-04：状态经 ViewModel 流转）。 */
+    private val _readerContent = MutableStateFlow<ReaderContent?>(null)
+    val readerContent: StateFlow<ReaderContent?> = _readerContent.asStateFlow()
+
     private lateinit var tabManager: TabManager
 
     /** 初始化 TabManager 并创建首个标签。 */
@@ -119,6 +123,37 @@ class BrowserViewModel : ViewModel() {
     /** 设置/清除安全提示（null = 清除）。 */
     fun setWebViewAlert(message: String?) {
         _webViewAlert.value = message
+    }
+
+    /** 阅读模式：提取当前标签正文（只读 evaluateJavascript，异步回填状态）。 */
+    fun toggleReaderMode() {
+        val wv = if (::tabManager.isInitialized) tabManager.current()?.webView else null
+        ReaderMode.extract(wv) { content ->
+            if (content == null) {
+                _webViewAlert.value = "当前页面没有可提取的正文"
+            } else {
+                _readerContent.value = content
+            }
+        }
+    }
+
+    /** 关闭阅读模式对话框。 */
+    fun dismissReader() {
+        _readerContent.value = null
+    }
+
+    /** 整页翻译入口：当前页包装为翻译服务地址后走安全导航。 */
+    fun translateCurrentPage() {
+        if (!::tabManager.isInitialized) return
+        val tab = tabManager.current() ?: return
+        val target = TranslateEntry.buildUrl(tab.url)
+        if (target == null) {
+            _webViewAlert.value = "当前页面不是可翻译的网页"
+            return
+        }
+        if (!SecureWebViewFactory.navigatorFor(tab.webView)?.navigateExternal(target).orFalse()) {
+            _webViewAlert.value = "翻译入口未通过安全策略验证"
+        }
     }
 
     /**
