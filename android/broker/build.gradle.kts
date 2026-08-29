@@ -3,19 +3,24 @@ plugins {
     id("com.android.library")
 }
 
-val requireNativePolicyCore = providers.gradleProperty("requireNativePolicyCore")
-    .map { it == "true" }
-    .getOrElse(false)
-val nativePolicyCoreDir = providers.gradleProperty("nativePolicyCoreDir")
-    .orNull
-    ?.let(::file)
-val nativePolicyCoreFiles = listOf(
-    "arm64-v8a/libaegis_policy_core.so",
-    "armeabi-v7a/libaegis_policy_core.so",
-    "x86_64/libaegis_policy_core.so",
-    "x86/libaegis_policy_core.so",
-    "kotlin/uniffi/aegis_policy_core/aegis_policy_core.kt",
-)
+val requireNativePolicyCore =
+    providers
+        .gradleProperty("requireNativePolicyCore")
+        .map { it == "true" }
+        .getOrElse(false)
+val nativePolicyCoreDir =
+    providers
+        .gradleProperty("nativePolicyCoreDir")
+        .orNull
+        ?.let(::file)
+val nativePolicyCoreFiles =
+    listOf(
+        "arm64-v8a/libaegis_policy_core.so",
+        "armeabi-v7a/libaegis_policy_core.so",
+        "x86_64/libaegis_policy_core.so",
+        "x86/libaegis_policy_core.so",
+        "kotlin/uniffi/aegis_policy_core/aegis_policy_core.kt",
+    )
 
 android {
     namespace = "com.aegis.broker"
