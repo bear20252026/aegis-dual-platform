@@ -89,6 +89,14 @@
   }
   .engine-pill:hover { background:rgba(63,184,255,0.32); }
   .engine-pill .dot { width:6px; height:6px; border-radius:50%; background:#3FB8FF; }
+  /* 恢复上次会话入口（会话持久化 CHANGELOG Planned） */
+  .restore-btn {
+    border:1px solid rgba(255,255,255,0.35); height:38px; padding:0 22px;
+    border-radius:19px; cursor:pointer; font-size:14px; color:#fff;
+    background:rgba(255,255,255,0.18); backdrop-filter:blur(8px);
+    transition:background .15s;
+  }
+  .restore-btn:hover { background:rgba(255,255,255,0.3); }
 </style>
 </head>
 <body>
@@ -105,6 +113,9 @@
       <button onclick="go()">搜索</button>
     </div>
     <div class="bookmarks" id="bm"></div>
+    <div id="restoreBox" style="display:none;margin-top:26px;">
+      <button id="restoreBtn" class="restore-btn">恢复上次会话</button>
+    </div>
   </div>
 
   <!-- 壁纸切换 -->
@@ -220,6 +231,26 @@
       try {
         pywebview.api.get_wallpaper().then(function (name) {
           if (name) setWallpaper(name);
+        });
+      } catch (e) {}
+    }
+
+    // 恢复上次会话入口（resume_session 自动恢复之外的手动入口；
+    // 仅当已保存会话 >1 个标签时显示——has_saved_session 只返回计数）
+    if (window.pywebview && pywebview.api) {
+      try {
+        pywebview.api.has_saved_session().then(function (n) {
+          n = parseInt(n, 10) || 0;
+          if (n > 1) {
+            var box = document.getElementById('restoreBox');
+            var btn = document.getElementById('restoreBtn');
+            if (!box || !btn) return;
+            btn.textContent = '恢复上次会话（' + n + ' 个标签）';
+            box.style.display = 'block';
+            btn.onclick = function () {
+              try { pywebview.api.restore_session(); } catch (e) {}
+            };
+          }
         });
       } catch (e) {}
     }

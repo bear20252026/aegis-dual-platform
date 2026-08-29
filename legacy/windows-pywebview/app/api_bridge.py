@@ -33,6 +33,10 @@ from .url_utils import (
     normalize_url,
 )
 
+# 标签增强（move_tab/close_current_tab/会话恢复）以 mixin 混入——
+# 独立职责独立文件（api_bridge 已超 500 行红线，不再增重）。
+from .tab_ops import TabOpsMixin
+
 # 保持旧私有名兼容（_is_navigation_safe 供 Api._is_navigation_safe_url 使用）
 _is_navigation_safe = is_navigation_safe
 
@@ -79,7 +83,7 @@ def _row_to_tuple(r: Any):
 _DEFAULT_WALLPAPER = "aurora-twilight.jpg"
 
 
-class Api:
+class Api(TabOpsMixin):
     """暴露给 JS 的 Python 桥。JS 侧调用 pywebview.api.navigate(...) 等。"""
 
     # 暴露给 JS 的方法白名单（其余属性/内部方法一律对 dir() 隐藏）
@@ -92,9 +96,11 @@ class Api:
     _JS_EXPOSED = frozenset({
         "get_wallpaper", "set_wallpaper",
         "get_search_engine", "set_search_engine",
-        "new_tab", "switch_tab", "close_tab",
-        "pin_tab", "unpin_tab",
+        "new_tab", "switch_tab", "close_tab", "close_current_tab",
+        "move_tab", "pin_tab", "unpin_tab",
         "set_tab_group",
+        # 会话恢复（restore 含 URL——受信校验在方法内；has_saved 仅返回计数）
+        "restore_session", "has_saved_session",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
         "add_bookmark", "remove_bookmark",
@@ -268,14 +274,13 @@ class Api:
         return True
 
     def new_tab(self, url: str = "") -> None:
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 new_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，随「标签增强」落地）：标签结构操作放行
+        # 来源校验——用户在远程页面上按 Ctrl+T / 点「+」也必须可用（原
+        # 一刀切拒绝导致远程页上无法新建任何标签）。安全性依据：
+        # ① 无任何数据读取；② 带 URL 仍过 _is_navigation_safe_url 双层
+        # 校验；③ M-2 频率限制 + 20 上限保留（tab-bomb 防护不变）；
+        # ④ window.open 等价能力本就存在（NewWindowRequested 同窗重定向）。
+        # 敏感操作（navigate/搜索引擎/书签/会话恢复）维持 P1-1 严格校验。
         # M-2 修复（防御性安全审查）：new_tab 频率限制——500ms 最小间隔
         # + 20 标签上限（防 tab-bomb——恶意页面循环调用）
         import time as _t
@@ -295,17 +300,12 @@ class Api:
             self._tabs.append({"title": "新标签页", "url": target,
                                "pinned": False, "group": "默认"})
             self._current = len(self._tabs) - 1
+        self._persist_session()
         self._load(target)
 
     def switch_tab(self, index: Any) -> None:
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 switch_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
+        # （switch 仅切换已开标签的显示，无读取、无新导航面）。
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -314,6 +314,7 @@ class Api:
                 return
             self._current = idx
             url = self._tabs[idx]["url"]
+        self._persist_session()
         self._load(url)
 
     def _remove_tab(self, idx: int):
@@ -331,14 +332,7 @@ class Api:
         return self._tabs[self._current]["url"]
 
     def close_tab(self, index: Any) -> None:
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 close_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -346,17 +340,11 @@ class Api:
             url = self._remove_tab(idx)
         if url is not None:
             self._load(url)
+            self._persist_session()
 
     def pin_tab(self, index: Any) -> None:
         """固定标签：置顶（pinned 标签排在最前，顺序稳定）。"""
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 pin_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -369,17 +357,11 @@ class Api:
             tab["pinned"] = True
             self._reorder_pinned()
             self._current = self._find_index(tab)
+        self._persist_session()
 
     def unpin_tab(self, index: Any) -> None:
         """取消固定：回到普通标签区（pinned 之后）。"""
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 unpin_tab（来源不受信）")
-            except Exception:
-                pass
-            return
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return
@@ -392,6 +374,7 @@ class Api:
             tab["pinned"] = False
             self._reorder_pinned()
             self._current = self._find_index(tab)
+        self._persist_session()
 
     def _reorder_pinned(self) -> None:
         """置顶重排：pinned 在前（保持各自相对顺序），普通标签在后。"""
@@ -412,14 +395,7 @@ class Api:
         借鉴 min 的 tabState 分层：tab（单标签状态）/ task（标签分组）。
         返回是否成功；越界或组名非法返回 False。
         """
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 set_tab_group（来源不受信）")
-            except Exception:
-                pass
-            return False
+        # 口径调整（P1-1 复审，见 new_tab 注释）：标签结构操作放行来源校验
         idx = _to_nonneg_int(index, None)
         if idx is None:
             return False
@@ -432,6 +408,7 @@ class Api:
             if not (0 <= idx < len(self._tabs)):
                 return False
             self._tabs[idx]["group"] = name
+        self._persist_session()
         return True
 
     def get_tab_groups(self) -> list:
@@ -464,6 +441,7 @@ class Api:
                     self._tabs[self._current]["url"] = url
                 if title:
                     self._tabs[self._current]["title"] = title[:80]
+        self._persist_session()
 
     # ================= 导航 =================
     def navigate(self, text: str) -> None:

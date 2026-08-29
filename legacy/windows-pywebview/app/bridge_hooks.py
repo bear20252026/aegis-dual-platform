@@ -74,7 +74,29 @@ def on_loaded(window: Any, api: Any) -> None:
         # W-02（国防级审查）：工具栏注入脚本已最小化（B0-W-01 移除敏感
         # 方法——注入仅剩非敏感 UI 导航/标签操作）；原生受信 WebUI 迁移
         # 为发布期架构项（注入式 UI 与远程页面同 DOM 的彻底隔离）
-        js = build_toolbar_js(url, {}, keybindings=kb,  # B0-W-01：不再传全量标签（敏感读取移除——标签列表 UI 降级；空 dict 匹配类型）
+        #
+        # 标签条快照（CHANGELOG Planned：标签增强落地）：
+        # - 受信本地页（host 为空——壳页/新标签页）：注入**脱敏快照**
+        #   （title/pinned/group——无 URL；标签条渲染/拖拽/固定所需最小集）；
+        # - 远程页面：维持 B0-W-01 空快照（同 DOM 注入模型下，URL/标题
+        #   均可被页面 DOM 读取——零泄露）。
+        snapshot: dict = {}
+        try:
+            from urllib.parse import urlparse
+            page_host = (urlparse(url).hostname or "") if url else ""
+            if not page_host:  # 本地受信页（file:/// 壳页等）
+                raw = api._tabs_snapshot()
+                snapshot = {
+                    "tabs": [
+                        {k: t.get(k) for k in ("title", "pinned", "group")}
+                        for t in raw.get("tabs", [])
+                    ],
+                    "current": raw.get("current", 0),
+                }
+        except Exception:
+            snapshot = {}  # 快照失败 → 空标签条（与 B0-W-01 行为一致）
+        js = build_toolbar_js(url, snapshot,
+                              keybindings=kb,
                               tabs_position=tabs_pos,
                               search_suggestions=sugg_enabled)
         api._eval(js)

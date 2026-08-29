@@ -55,14 +55,10 @@ api.window = win  # 绑定（NavQueue.window 同步）
 snap = api.get_tabs()
 check("初始 1 个标签", len(snap["tabs"]) == 1)
 
-# 2) navigate 投递导航并写历史（历史未绑定 → 降级不崩溃）
-api.navigate("example.com")
-time.sleep(0.7)  # 等导航线程消费
-check("navigate 已投递 load_url", "https://example.com" in win.loaded_urls,
-      f"loaded_urls={win.loaded_urls}")
-check("地址栏输入被记录到当前标签", api.get_tabs()["tabs"][0]["url"] == "https://example.com")
-
-# 3) new_tab / switch_tab / close_tab 全链路
+# 2) 标签操作全链路（受信壳页状态）。
+#    存量修复（原脚本 FAIL）：P1-1 来源校验落地后，远程页面（当前 URL
+#    host 非空）的 new_tab/close_tab 一律被拒——这是安全语义而非回归；
+#    原场景在 navigate 之后再建标签，与校验冲突。改为先建标签后导航。
 # M-2 适配：new_tab 有 500ms 频率限制——连续调用间留间隔
 api.new_tab("https://b.cn")
 time.sleep(0.6)
@@ -76,11 +72,18 @@ check("当前为最后标签", snap["current"] == 2)
 api.switch_tab(0)
 time.sleep(0.4)
 check("switch_tab 回第 0 标签", api.get_tabs()["current"] == 0)
-check("switch_tab 触发 load_url", win.loaded_urls[-1] == "https://example.com")
+check("switch_tab 触发 load_url", win.loaded_urls[-1] == START_URL)
 
 api.close_tab(2)
 time.sleep(0.4)
 check("close_tab 后 2 个标签", len(api.get_tabs()["tabs"]) == 2)
+
+# 3) navigate 投递导航并写历史（历史未绑定 → 降级不崩溃）
+api.navigate("example.com")
+time.sleep(0.7)  # 等导航线程消费
+check("navigate 已投递 load_url", "https://example.com" in win.loaded_urls,
+      f"loaded_urls={win.loaded_urls}")
+check("地址栏输入被记录到当前标签", api.get_tabs()["tabs"][0]["url"] == "https://example.com")
 
 # 4) on_loaded（模拟页面加载完成）→ 注入工具栏
 win._url = "https://c.cn"

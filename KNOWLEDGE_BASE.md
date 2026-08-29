@@ -419,3 +419,24 @@
 ### 24.2 C 级收官总结
 - **C 级观察项全部调研/评估/落地闭环**（2026-08-15）——A 级（开发期）7 项 + B 级（发布期）4 项 + C 级（前瞻）3 项全部完成。
 - **Agent 安全体系**（四级纵深 + 供应链 + 保护）：mcp 工具层白名单/审计 → 请求管线（域/动作/条件三层策略）→ SBOM/依赖审计 → Nuitka 核心编译保护——完整纵深防御。
+
+## 25. Windows 标签增强 + 会话恢复（2026-08-30）
+
+> 变更：PR「feat: Windows 标签增强（拖拽排序/固定/中键关闭/Ctrl+T/W/会话恢复）」
+
+### 25.1 落地内容（CHANGELOG Unreleased 规划项）
+- **拖拽排序**：`app/tab_ops.py` `move_tab(from,to)`——pinned 区边界钳制（固定标签永不沉入普通区，与 pin_tab 语义一致）；`app/tabstrip_js.py` 鼠标拖拽（≥4px 触发、插入线指示、本地即时重渲染）。
+- **固定标签 UI**：标签右键菜单（固定/取消固定/关闭）——pin_tab/unpin_tab 自后端首次获得 UI 入口。
+- **会话恢复**：`app/session_store.py`——session.json 原子写（tmp+os.replace）+ URL 白名单清洗（仅 http/https + START_URL；title≤80/group≤32/≤20 标签）；标签增删/切换/固定/分组/导航自动落盘（`_persist_session` 静默）；`config.resume_session=True` 启动自动恢复（main_webview seed_session）+ start.html「恢复上次会话」按钮（has_saved_session 仅返回计数——非敏感）。
+- **标签条恢复**：bridge_hooks 仅对受信本地页（host 为空）注入脱敏快照（title/pinned/group——**无 URL**，B0-W-01 口径不变）；远程页维持空快照。
+
+### 25.2 两处口径调整（复审记录，均经测试验证）
+1. **Ctrl+W 关错标签**：注入侧 TABS_DATA.current 为注入时刻冻结快照（多标签下恒 0）——新增 `close_current_tab`（后端实时 _current），TOOLBAR_JS 改调它。
+2. **P1-1 复审——标签结构操作放行来源校验**：原一刀切拒绝导致用户在远程页上无法新建/切换/关闭标签（"+"按钮与 Ctrl+T 全部失效——远程页 new_tab 后当前页即远程，后续所有标签写操作被拒）。安全依据：无数据读取 / move 仅重排已开标签 / close 最多关到远程页自己 / M-2 频率限制 + 20 上限 + URL 双层校验全保留；敏感操作（navigate/搜索引擎/书签/restore_session）维持严格校验。
+
+### 25.3 存量自检修复（master 上本就 FAIL）
+- selftest_shell_toolbar 中文 `\uXXXX` 断言 vs 实现 `ensure_ascii=False`（字面量注入，行为正确）——断言修正。
+- selftest_s1_integration 在 navigate（远程页）后 new_tab——与 P1-1 语义冲突——场景重排（先建标签后导航）。
+
+### 25.4 验证（全绿）
+validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed）｜ bandit --skip 同 CI（0 Medium/High）｜ mypy 32 文件 0 错误｜ selftest ×5 全过｜ node --check 注入 JS 语法。
