@@ -36,11 +36,14 @@ check("__dir__ 只含白名单方法", exposed == api._JS_EXPOSED,
 check("白名单含关键方法", {"new_tab", "switch_tab", "close_tab",
                         "navigate"} <= api._JS_EXPOSED)
 # B0-W-01 整改验证（国防级审查）：敏感读取/导入方法不得在 JS 白名单
-# （历史/书签/标签 URL 读取 + 本机 Chrome/Edge 导入——恶意页面不可达）
+# （历史/标签 URL 读取 + 本机 Chrome/Edge 导入——恶意页面不可达）。
+# B0-W-01 复审（PR #7）：get_bookmarks 以「白名单 + 方法内受信来源
+# 校验」回归（start.html 书签宫格恢复）——仍禁止历史/导入类读取。
 check("白名单无敏感方法", not {"get_tabs", "get_history", "get_most_visited",
-                        "search_history_fulltext", "get_bookmarks",
+                        "search_history_fulltext",
                         "import_bookmarks", "import_history",
                         "get_tab_groups"} & api._JS_EXPOSED)
+check("get_bookmarks 受信回归白名单", "get_bookmarks" in api._JS_EXPOSED)
 
 # 3) 标签管理（M-2 适配：new_tab 有 500ms 频率限制——连续调用间留间隔）
 import time as _t
@@ -168,6 +171,18 @@ api5.new_tab("https://hook.cn")
 check("new_tab 钩子落盘会话", api5.has_saved_session() == 2)  # 默认标签 + 新建
 api5.close_current_tab()
 check("close_current_tab 钩子更新会话", api5.has_saved_session() == 1)
+
+# 11) get_bookmarks 受信来源校验（B0-W-01 复审回归）
+# api.window 未绑定 → current_url "" → 受信 → 返回列表（store 未绑定 → []）
+check("受信 get_bookmarks 返回列表", api.get_bookmarks() == [])
+
+class _RemoteWin:
+    def get_current_url(self):
+        return "https://evil.example/page"
+
+api6 = Api()
+api6.window = _RemoteWin()  # 远程页来源
+check("远程页 get_bookmarks 返回空", api6.get_bookmarks() == [])
 
 if failures:
     print("FAIL")

@@ -434,6 +434,8 @@
 1. **Ctrl+W 关错标签**：注入侧 TABS_DATA.current 为注入时刻冻结快照（多标签下恒 0）——新增 `close_current_tab`（后端实时 _current），TOOLBAR_JS 改调它。
 2. **P1-1 复审——标签结构操作放行来源校验**：原一刀切拒绝导致用户在远程页上无法新建/切换/关闭标签（"+"按钮与 Ctrl+T 全部失效——远程页 new_tab 后当前页即远程，后续所有标签写操作被拒）。安全依据：无数据读取 / move 仅重排已开标签 / close 最多关到远程页自己 / M-2 频率限制 + 20 上限 + URL 双层校验全保留；敏感操作（navigate/搜索引擎/书签/restore_session）维持严格校验。
 
+3. **B0-W-01 复审——get_bookmarks 受信回归**：原整改一刀切移出白名单导致 start.html 书签宫格静默失效——以「白名单恢复 + 方法内 `_check_trusted_source`（远程页返回空列表）」回归，维持远程页零数据边界；历史/导入类读取仍禁止。
+
 ### 25.3 存量自检修复（master 上本就 FAIL）
 - selftest_shell_toolbar 中文 `\uXXXX` 断言 vs 实现 `ensure_ascii=False`（字面量注入，行为正确）——断言修正。
 - selftest_s1_integration 在 navigate（远程页）后 new_tab——与 P1-1 语义冲突——场景重排（先建标签后导航）。

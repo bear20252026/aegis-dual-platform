@@ -14,6 +14,7 @@
 ### 修复（2026-08-30）
 - **Ctrl+W 关错标签**：注入侧 `TABS_DATA.current` 是注入时刻的冻结快照（多标签下恒 0）——新增 `close_current_tab`（后端实时 `_current`），TOOLBAR_JS 快捷键改调它
 - **远程页面标签操作失效**（P1-1 复审口径调整）：来源校验一刀切导致用户在远程页上无法新建/切换/关闭标签（"+"按钮与 Ctrl+T 全部无效）——标签结构操作（new_tab/switch_tab/close_tab/close_current_tab/move_tab/pin/unpin/set_tab_group）放行来源校验：无数据读取、M-2 频率限制 + 20 上限 + URL 双层校验保留；敏感操作（navigate/搜索引擎/书签/restore_session）维持严格校验
+- **新标签页书签宫格失效**（B0-W-01 复审）：`get_bookmarks` 被一刀切移出白名单导致 start.html 宫格静默失效——以「白名单恢复 + 方法内受信来源校验」回归（远程页调用返回空列表，维持零泄露边界）
 - 自检与实现不一致修正（master 存量 FAIL）：selftest_shell_toolbar 中文转义断言（实现为 `ensure_ascii=False` 字面量注入，行为正确）；selftest_s1_integration 场景顺序（P1-1 语义下远程页写操作本应被拒）
 
 ### 新增（Planned，待做）

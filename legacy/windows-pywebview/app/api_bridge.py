@@ -88,11 +88,14 @@ class Api(TabOpsMixin):
 
     # 暴露给 JS 的方法白名单（其余属性/内部方法一律对 dir() 隐藏）
     # B0-W-01 整改（国防级审查——阶段 0 立即处置）：
-    # 从远程页面可达桥移除敏感读取/导入能力（历史/书签/标签 URL 读取 +
+    # 从远程页面可达桥移除敏感读取/导入能力（历史/标签 URL 读取 +
     # 本机 Chrome/Edge 导入——恶意页面可读取回传/触发导入）。
     # 依据：微软官方（WebView2 安全——限制 web 内容功能/避免通用代理）+
     # Code2Native（桥白名单只暴露必要方法——Critical）+ 审查必须整改。
     # 保留：导航/标签操作/壁纸/搜索设置（页面 UI 功能——非敏感读取）。
+    # B0-W-01 复审（2026-08-30，随 PR #7）：get_bookmarks 以
+    # 「白名单恢复 + 方法内受信来源校验」回归——远程页面调用返回空
+    # （原整改一刀切移除，导致 start.html 书签宫格静默失效）。
     _JS_EXPOSED = frozenset({
         "get_wallpaper", "set_wallpaper",
         "get_search_engine", "set_search_engine",
@@ -101,6 +104,8 @@ class Api(TabOpsMixin):
         "set_tab_group",
         # 会话恢复（restore 含 URL——受信校验在方法内；has_saved 仅返回计数）
         "restore_session", "has_saved_session",
+        # 书签读取（受信来源校验在方法内——远程页返回空列表）
+        "get_bookmarks",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
         "add_bookmark", "remove_bookmark",
@@ -538,7 +543,18 @@ class Api(TabOpsMixin):
 
     # ================= 书签 =================
     def get_bookmarks(self) -> list:
-        """返回书签列表 [{id,title,url}]。"""
+        """返回书签列表 [{id,title,url}]（B0-W-01 复审：受信来源校验）。
+
+        仅本地壳页（start.html 书签宫格）可达——远程页面调用返回空
+        （原 B0-W-01 整改一刀切移除，导致宫格静默失效——本次恢复读取
+        通道但维持「远程页零数据」边界）。"""
+        if not self._check_trusted_source():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 拒绝远程页面 get_bookmarks（来源不受信）")
+            except Exception:
+                pass
+            return []
         try:
             if self.bookmarks is None:
                 return []
