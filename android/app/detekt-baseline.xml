@@ -13,6 +13,8 @@
     <ID>LongParameterList:MainActivity.kt$( address: String, onAddressChange: (String) -&gt; Unit, onOpen: () -&gt; Unit, onBack: () -&gt; Unit, onForward: () -&gt; Unit, onReload: () -&gt; Unit, onReader: () -&gt; Unit, onTranslate: () -&gt; Unit, )</ID>
     <ID>LongParameterList:TabBar.kt$( tabs: List&lt;Tab&gt;, activeIndex: Int, onSelect: (Int) -&gt; Unit, onClose: (Int) -&gt; Unit, onNewTab: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
     <ID>LongParameterList:VerticalTabBar.kt$( tabs: List&lt;Tab&gt;, activeIndex: Int, onSelect: (Int) -&gt; Unit, onClose: (Int) -&gt; Unit, onNewTab: () -&gt; Unit, modifier: Modifier = Modifier, )</ID>
+    <ID>ReturnCount:BrowserViewModel.kt$BrowserViewModel$fun approvePendingNavigationConfirmation(): Boolean</ID>
     <ID>ReturnCount:TabManager.kt$TabManager$fun closeTab(index: Int): Boolean</ID>
+    <ID>TooManyFunctions:BrowserViewModel.kt$BrowserViewModel : ViewModel</ID>
   </CurrentIssues>
 </SmellBaseline>

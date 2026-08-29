@@ -12,7 +12,7 @@ import org.json.JSONTokener
  * 安全边界：
 - 提取脚本只读取 DOM 文本（title/innerText），不注入任何宿主对象；
 - 结果经 JSONTokener 两段解析（页内脚本返回的是「含 JSON 的字符串」
-  的 JSON 表示——防畸形返回崩溃）；
+ 的 JSON 表示——防畸形返回崩溃）；
 - 正文长度上限 MAX_TEXT（防超长页面拖垮 Compose 渲染）。
  */
 data class ReaderContent(
@@ -31,7 +31,8 @@ object ReaderMode {
      * 正文提取脚本：优先 article/main/[role=main]，否则取文本量最大
      * 的块级元素，兜底 body。只读，不触碰页面状态。
      */
-    private val EXTRACT_JS = """
+    private val EXTRACT_JS =
+        """
         (function() {
           try {
             var node = document.querySelector('article')
@@ -54,13 +55,16 @@ object ReaderMode {
             });
           } catch (e) { return JSON.stringify({ ok: false }); }
         })();
-    """.trimIndent()
+        """.trimIndent()
 
     /**
      * 提取当前页面正文（异步——回调在 UI 线程）。
      * onResult 收到 null = 提取失败/无正文（调用方提示，不进阅读模式）。
      */
-    fun extract(webView: WebView?, onResult: (ReaderContent?) -> Unit) {
+    fun extract(
+        webView: WebView?,
+        onResult: (ReaderContent?) -> Unit,
+    ) {
         if (webView == null) {
             onResult(null)
             return
@@ -75,11 +79,12 @@ object ReaderMode {
         if (raw.isNullOrBlank()) return null
         return runCatching {
             val value = JSONTokener(raw).nextValue()
-            val payload = when (value) {
-                is org.json.JSONObject -> value
-                is String -> JSONTokener(value).nextValue() as? org.json.JSONObject
-                else -> null
-            } ?: return@runCatching null
+            val payload =
+                when (value) {
+                    is org.json.JSONObject -> value
+                    is String -> JSONTokener(value).nextValue() as? org.json.JSONObject
+                    else -> null
+                } ?: return@runCatching null
             if (!payload.optBoolean("ok", false)) return@runCatching null
             val text = (payload.optString("text", "")).take(MAX_TEXT)
             if (text.isBlank()) return@runCatching null

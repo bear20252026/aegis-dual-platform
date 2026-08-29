@@ -112,7 +112,8 @@ object SecureWebViewFactory {
      * Bridge 硬化 JS（fetch / XMLHttpRequest / sendBeacon / WebSocket 未授权调用拒绝）。
      * 与 Rust 侧 BridgeGuard::inject_script 同一份逻辑：只有「调用方自身
      * hostname ∈ [ALLOWED_BRIDGE_HOSTS]」的受信内页（chrome UI）才能调用本机 bridge；
-     * 远程页一律拒绝（fail-closed）。注：`[$allowedHostsJson]` 必须包裹方括号，否则
+     * 远程页一律拒绝（fail-closed）。注：白名单必须以数组形式注入
+     * （方括号包裹 allowedHostsJson），否则
      * `const ALLOWED_HOSTS = "a","b"` 为 JS 语法错误（旧实现因此整体失效）。
      */
     private val BRIDGE_GUARD_JS: String

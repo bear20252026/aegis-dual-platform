@@ -27,6 +27,6 @@ object TranslateEntry {
         val url = pageUrl?.trim().orEmpty()
         if (!url.startsWith("http://") && !url.startsWith("https://")) return null
         val encoded = Uri.encode(url)
-        return "${SERVICE}?from=auto&to=$TARGET_LANG&a=$encoded"
+        return "$SERVICE?from=auto&to=$TARGET_LANG&a=$encoded"
     }
 }

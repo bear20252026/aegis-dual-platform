@@ -59,26 +59,27 @@ class MainActivity : ComponentActivity() {
                 val tabsPosition by viewModel.tabsPosition.collectAsState()
                 val webViewAlert by viewModel.webViewAlert.collectAsState()
                 val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsState()
-                val readerContent by viewModel.readerContent.collectAsState()
+                val readerContent by viewModel.reader.content.collectAsState()
 
                 // 阅读模式：提取到的正文以对话框渲染（INV-04：状态来自 ViewModel）
                 readerContent?.let { content ->
                     AlertDialog(
-                        onDismissRequest = { viewModel.dismissReader() },
+                        onDismissRequest = { viewModel.reader.dismissReader() },
                         title = { Text(content.title) },
                         text = {
                             Column {
                                 Text(
                                     text = content.text,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = 420.dp)
-                                        .verticalScroll(rememberScrollState()),
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 420.dp)
+                                            .verticalScroll(rememberScrollState()),
                                 )
                             }
                         },
                         confirmButton = {
-                            TextButton(onClick = { viewModel.dismissReader() }) { Text("关闭") }
+                            TextButton(onClick = { viewModel.reader.dismissReader() }) { Text("关闭") }
                         },
                     )
                 }
@@ -157,8 +158,8 @@ class MainActivity : ComponentActivity() {
                             onBack = { viewModel.navigateHistory(HistoryAction.BACK) },
                             onForward = { viewModel.navigateHistory(HistoryAction.FORWARD) },
                             onReload = { viewModel.navigateHistory(HistoryAction.RELOAD) },
-                            onReader = { viewModel.toggleReaderMode() },
-                            onTranslate = { viewModel.translateCurrentPage() },
+                            onReader = { viewModel.reader.toggleReaderMode() },
+                            onTranslate = { viewModel.reader.translateCurrentPage() },
                         )
                         WebContentArea(tabManager = viewModel.getTabManager()!!, modifier = Modifier.weight(1f))
                     }

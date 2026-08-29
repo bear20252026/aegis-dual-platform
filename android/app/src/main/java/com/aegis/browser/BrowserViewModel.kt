@@ -1,7 +1,7 @@
 package com.aegis.browser
 
-import androidx.lifecycle.ViewModel
 import android.webkit.WebView
+import androidx.lifecycle.ViewModel
 import com.aegis.broker.ApprovalRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,9 +40,31 @@ class BrowserViewModel : ViewModel() {
     val pendingNavigationConfirmation: StateFlow<PendingNavigationConfirmation?> =
         _pendingNavigationConfirmation.asStateFlow()
 
-    /** 阅读模式内容（null = 未开启/已关闭——INV-04：状态经 ViewModel 流转）。 */
-    private val _readerContent = MutableStateFlow<ReaderContent?>(null)
-    val readerContent: StateFlow<ReaderContent?> = _readerContent.asStateFlow()
+    /**
+     * 阅读模式 + 整页翻译（ReaderController——单文件单职责；INV-04：
+     * 状态经本 ViewModel 层暴露的 StateFlow 流转，UI 不持有浏览器状态）。
+     * lazy：首次访问需 init() 已建 tabManager。
+     */
+    val reader: ReaderController by lazy {
+        ReaderController(
+            currentWebView = {
+                if (::tabManager.isInitialized) tabManager.current()?.webView else null
+            },
+            currentUrl = {
+                if (::tabManager.isInitialized) tabManager.current()?.url else null
+            },
+            navigateExternal = { url ->
+                if (::tabManager.isInitialized) {
+                    tabManager.current()?.webView?.let {
+                        SecureWebViewFactory.navigatorFor(it)?.navigateExternal(url).orFalse()
+                    } ?: false
+                } else {
+                    false
+                }
+            },
+            alert = { message -> _webViewAlert.value = message },
+        )
+    }
 
     private lateinit var tabManager: TabManager
 
@@ -125,37 +147,6 @@ class BrowserViewModel : ViewModel() {
         _webViewAlert.value = message
     }
 
-    /** 阅读模式：提取当前标签正文（只读 evaluateJavascript，异步回填状态）。 */
-    fun toggleReaderMode() {
-        val wv = if (::tabManager.isInitialized) tabManager.current()?.webView else null
-        ReaderMode.extract(wv) { content ->
-            if (content == null) {
-                _webViewAlert.value = "当前页面没有可提取的正文"
-            } else {
-                _readerContent.value = content
-            }
-        }
-    }
-
-    /** 关闭阅读模式对话框。 */
-    fun dismissReader() {
-        _readerContent.value = null
-    }
-
-    /** 整页翻译入口：当前页包装为翻译服务地址后走安全导航。 */
-    fun translateCurrentPage() {
-        if (!::tabManager.isInitialized) return
-        val tab = tabManager.current() ?: return
-        val target = TranslateEntry.buildUrl(tab.url)
-        if (target == null) {
-            _webViewAlert.value = "当前页面不是可翻译的网页"
-            return
-        }
-        if (!SecureWebViewFactory.navigatorFor(tab.webView)?.navigateExternal(target).orFalse()) {
-            _webViewAlert.value = "翻译入口未通过安全策略验证"
-        }
-    }
-
     /**
      * Compose 的明确批准操作。只允许当前活动标签的待审批请求恢复导航，防止标签切换后
      * 在错误 WebView 上消费授权；客户端仍会在恢复前调用 Rust 核心批准并消费。
@@ -167,8 +158,10 @@ class BrowserViewModel : ViewModel() {
             return false
         }
         _pendingNavigationConfirmation.value = null
-        val approved = SecureWebViewFactory.navigatorFor(pending.webView)
-            ?.approvePendingNavigation() == true
+        val approved =
+            SecureWebViewFactory
+                .navigatorFor(pending.webView)
+                ?.approvePendingNavigation() == true
         if (!approved) _webViewAlert.value = "确认请求已失效、被拒绝或无法安全恢复导航。"
         return approved
     }
