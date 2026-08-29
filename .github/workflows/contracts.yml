@@ -1,28 +1,8 @@
 name: Contracts
 
 "on":
-  push:
-    paths:
-      - 'contracts/**'
-      - 'core/rust-policy-core/**'
-      - 'windows/src/Aegis.Windows.App/**'
-      - 'windows/tests/**'
-      - 'android/**'
-      - 'scripts/sync_versions.py'
-      - 'scripts/verify_versions.py'
-      - 'shared/version.properties'
-      - '.github/workflows/contracts.yml'
-  pull_request:
-    paths:
-      - 'contracts/**'
-      - 'core/rust-policy-core/**'
-      - 'windows/src/Aegis.Windows.App/**'
-      - 'windows/tests/**'
-      - 'android/**'
-      - 'scripts/sync_versions.py'
-      - 'scripts/verify_versions.py'
-      - 'shared/version.properties'
-      - '.github/workflows/contracts.yml'
+  push: {}
+  pull_request: {}
   workflow_dispatch: {}
 
 permissions:
@@ -95,6 +75,8 @@ jobs:
           python contracts/codegen/generate_csharp.py
           python contracts/codegen/generate_kotlin.py
           python contracts/codegen/verify_contract_compatibility.py
+      - name: Verify bridge guard JS single source (Rust include_str + Kotlin parity)
+        run: python contracts/codegen/verify_bridge_guard.py
       - name: Fail if generated bindings are stale
         run: |
           git diff --exit-code -- \

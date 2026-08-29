@@ -458,5 +458,11 @@
 - **双通道**：`:app:ktlintCheck`（.kt）与 `:app:ktlintKotlinScriptCheck`（.kts）均需 0 错误——.kts 存量问题经 --format 修复。
 - **新增 ReaderController**：reader/translate 状态与动作独立文件（构造注入回调），BrowserViewModel 函数数回落存量水平。
 
-### 25.7 验证（全绿）
+### 25.7 ADR-007：单一正典 + 守卫单源 + 门禁常跑（2026-08-30）
+- **D1 单一正典**：C#/.NET = 目标发布栈；legacy/windows-pywebview = 现役功能栈（目录名不改，语义重定义）；Qt = 死代码。权威文档双标消除。
+- **D2 守卫单源**：contracts/schemas/bridge_guard.template.js 为唯一模板；Rust include_str!（编译期单源）；Kotlin 归一化比对（占位符映射：`[$allowedHostsJson]`→`__AEGIS_HOSTS__`，`$requireHttpsJson`→`__AEGIS_REQUIRE_HTTPS__`）；verify_bridge_guard.py 入 contracts.yml。**漂移实锤修复**：Kotlin 侧曾缺失 REQUIRE_HTTPS 段。
+- **D3 门禁常跑**：5 个门禁型 workflow 去 paths 过滤；构建型（native-policy-artifacts/release-*）保留；5 自检入 ci.yml。ktlint 在 master 长期 FAIL 未被发现 = paths 过滤之害的实证。
+- **工具链注记**：Rust include_str! 路径相对源文件（`../../../contracts/...`）；cargo test 149+4 全绿验证。
+
+### 25.8 验证（全绿）
 validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed）｜ bandit --skip 同 CI（0 Medium/High）｜ mypy 32 文件 0 错误｜ selftest ×5 全过｜ node --check 注入 JS 语法。

@@ -70,6 +70,16 @@ jobs:
             app/fingerprint_pipeline.py app/bridge_hooks.py \
             crash_reporter.py --exclude "System Volume Information"
 
+      - name: 自检脚本（session_store / api_bridge / s1 集成 / shell_toolbar / tab_state）
+        # 门禁全量常跑（ADR-007）：CLAUDE.md 要求改动后必跑的 5 个离线自检
+        # 全部入 CI——自检与实现不一致（master 曾双 FAIL）在合入前即暴露
+        run: |
+          python selftest_session_store.py
+          python selftest_api_bridge.py
+          python selftest_s1_integration.py
+          python selftest_shell_toolbar.py
+          python selftest_tab_state.py
+
   android-lint:
     name: Android 编译与检查（Kotlin 语法级）
     runs-on: ubuntu-latest

@@ -1,9 +1,7 @@
 name: Supply-Chain
 "on":
-  push:
-    paths: ['requirements*', 'windows/**', 'core/rust-policy-core/**', 'android/**']
-  pull_request:
-    paths: ['requirements*', 'windows/**', 'core/rust-policy-core/**', 'android/**']
+  push: {}
+  pull_request: {}
   workflow_dispatch: {}
 
 jobs:

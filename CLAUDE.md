@@ -6,28 +6,38 @@
 
 Aegis 双端安全浏览器：Windows（Python + pywebview + WebView2）+ Android（Kotlin + Compose + System WebView），隐私与安全优先。
 
+**Windows 双栈口径（ADR-007）**：C#/.NET 10（`windows/`）为目标发布栈；
+`legacy/windows-pywebview/` 为**现役功能栈**（目录名 `legacy` 是 Qt 迁移期
+历史遗留——语义为「迁移中」而非「废弃」）；`legacy/` 下的 Qt 与 `legacy/ui/`
+为已归档死代码，禁止 import。
+
 ## 关键命令（必须先跑）
 
 ```bash
-# Windows 端静态验证（改动 Python 代码后必跑）
-python validate_release.py            # AST/JSON/XML/版本声明
+# Windows 端静态验证（改动 Python 代码后必跑）——与 CI 口径一致
+python validate_release.py            # AST/JSON/XML/版本声明（仓库根运行）
 cd legacy/windows-pywebview
-ruff check .                          # Lint + 格式（活跃代码 0 错误）
-bandit -r app/ -q                     # 安全扫描（Medium/High 必须为 0）
+ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
+bandit -r app/ -q --skip B110,B404,B603,B607   # 安全扫描（无 Medium/High）
 mypy main_webview.py app/             # 类型检查（0 错误）
 
-# 自检（改动标签/桥/工具栏后必跑）
-python selftest_s1_integration.py
+# 自检（改动标签/桥/工具栏/会话后必跑——已入 CI）
+python selftest_session_store.py
 python selftest_api_bridge.py
+python selftest_s1_integration.py
 python selftest_shell_toolbar.py
+python selftest_tab_state.py
 
-# Android 端（需 Android Studio 环境）
+# Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
+python contracts/codegen/verify_bridge_guard.py
+
+# Android 端（需 Android Studio 环境；CI 以 ktlint/detekt 为准）
 ./gradlew.bat :app:lintDebug
 ```
 
 ## 架构红线（改动前必须确认）
 
-1. **Windows 正式入口是 `main_webview.py`**（薄壳）。`legacy/` 是已归档的 Qt 旧栈，**禁止**从活跃代码 import 它。
+1. **Windows 正式入口是 `main_webview.py`**（薄壳；现役功能栈见 ADR-007 双栈口径）。`legacy/windows-pywebview/legacy/` 与 `legacy/ui/` 是已归档的 Qt 旧栈，**禁止**从活跃代码 import 它。
 2. **单文件单职责**：新文件 ≤ 300 行；改造后 ≤ 500 行。不为拆而拆，也不堆职责。
 3. **URL 安全关口**：所有导航入口（IPC/会话/书签/历史/拨号/命令行/地址栏）加载 URL 前必须经 `app/security.py` 的 `safe_url()`。
 4. **js_api 白名单**：暴露给 JS 的方法必须加入 `app/api_bridge.py` 的 `_JS_EXPOSED`（防 pywebview 递归注入死锁）。

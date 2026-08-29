@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### 架构收敛（2026-08-30：ADR-007——复审三项系统性修复）
+- **单一正典栈**（D1）：ADR-007 收敛 Windows 双栈口径——C#/.NET 10 为目标发布栈，
+  `legacy/windows-pywebview` 语义重定义为「现役功能栈（迁移中）」；
+  README/CLAUDE.md 权威文档对齐（原文档互相矛盾）
+- **Bridge 守卫单一事实源**（D2）：规范模板唯一存于
+  `contracts/schemas/bridge_guard.template.js`；Rust 经 `include_str!` 编译期嵌入；
+  Kotlin 内嵌副本归一化比对；`contracts/codegen/verify_bridge_guard.py` 入 CI 门禁——
+  **修复实际已发生的漂移**（Kotlin 侧缺失 REQUIRE_HTTPS 段），fail-open 类 bug 结构性消除
+- **门禁全量常跑**（D3）：android-quality/contracts/core-rust/agent-redteam/supply-chain
+  五个 workflow 移除 paths 过滤（ktlint 门禁在 master 长期 FAIL 未被发现即实证）；
+  5 个离线自检入 ci.yml（python-checks）；构建型 workflow 保留触发过滤
+
+
 ### 新增（2026-08-30：Windows 标签增强——Planned 首项落地）
 - **拖拽排序**：`app/tab_ops.py` 新增 `move_tab(from,to)`（pinned 区边界钳制——固定标签永不混入普通区）；`app/tabstrip_js.py` 注入式标签条支持鼠标拖拽（≥4px 触发、插入线指示、本地即时重渲染，无需等待页面重载）
 - **固定标签 UI**：标签右键菜单（固定/取消固定/关闭标签）——`pin_tab`/`unpin_tab` 首次获得 UI 入口
