@@ -96,6 +96,7 @@ class Api(TabOpsMixin):
     # B0-W-01 复审（2026-08-30，随 PR #7）：get_bookmarks 以
     # 「白名单恢复 + 方法内受信来源校验」回归——远程页面调用返回空
     # （原整改一刀切移除，导致 start.html 书签宫格静默失效）。
+    # 导入向导（scan/import）同样按此口径回归——远程页不可达。
     _JS_EXPOSED = frozenset({
         "get_wallpaper", "set_wallpaper",
         "get_search_engine", "set_search_engine",
@@ -106,6 +107,8 @@ class Api(TabOpsMixin):
         "restore_session", "has_saved_session",
         # 书签读取（受信来源校验在方法内——远程页返回空列表）
         "get_bookmarks",
+        # 导入向导（扫描/导入均受信来源校验在方法内——远程页不可达）
+        "scan_import_sources", "import_bookmarks", "import_history",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
         "add_bookmark", "remove_bookmark",
@@ -596,48 +599,101 @@ class Api(TabOpsMixin):
         except Exception:
             pass
 
-    def import_bookmarks(self) -> dict:
-        """从 Chrome/Edge 导入书签（自动探测本机文件）。
+    def _deny_remote(self, op: str) -> bool:
+        """受信来源校验统一入口：远程页面调用 → 留痕并返回 True。
 
-        返回 {"imported": 新增数, "total": 解析总数, "source": 来源文件}。
+        返回 False = 来源受信（调用方继续执行）。新桥方法统一走此入口
+        （存量方法保留各自内联块——本方法只收敛新增代码，不扩散改动）。
+        """
+        if self._check_trusted_source():
+            return False
+        try:
+            from crash_reporter import log_event
+            log_event(f"[bridge] 拒绝远程页面 {op}（来源不受信）")
+        except Exception:
+            pass
+        return True
+
+    # ================= 导入向导（Chrome/Edge 书签与历史） =================
+    def scan_import_sources(self) -> list:
+        """探测本机可导入来源（仅探测文件存在——不读取任何内容）。
+
+        返回 [{"browser": "chrome"|"edge", "bookmarks": bool,
+        "history": bool}]；受信来源校验在方法内（远程页返回空）。
+        """
+        if self._deny_remote("scan_import_sources"):
+            return []
+        try:
+            from .browser_import import find_import_sources
+            return find_import_sources()
+        except Exception:
+            return []
+
+    def import_bookmarks(self, source: str = "") -> dict:
+        """从 Chrome/Edge 导入书签（导入向导执行步）。
+
+        source 可选（"chrome"/"edge"；空=全部来源）。返回
+        {"imported": 总新增, "total": 解析总数,
+         "results": [{"browser", "imported", "total"}, ...]}。
         解析失败或存储不可用时静默返回 0（导入是可选功能，不影响浏览）。
         """
+        if self._deny_remote("import_bookmarks"):
+            return {"imported": 0, "total": 0, "results": []}
+        src = _to_str(source, "") or ""
+        if src not in ("", "chrome", "edge"):
+            src = ""
+        out: dict = {"imported": 0, "total": 0, "results": []}
         try:
             from .browser_import import find_bookmarks_files, parse_bookmarks_json
-            for path in find_bookmarks_files():
+            for browser, path in find_bookmarks_files(src):
                 items = parse_bookmarks_json(path)
-                if not items:
-                    continue
                 imported = 0
                 for item in items:
                     if (self.bookmarks is not None
                             and self.bookmarks.add(item["title"], item["url"])):
                         imported += 1
-                return {"imported": imported, "total": len(items), "source": path}
+                out["results"].append(
+                    {"browser": browser, "imported": imported,
+                     "total": len(items)})
+                out["imported"] += imported
+                out["total"] += len(items)
         except Exception:
             pass
-        return {"imported": 0, "total": 0, "source": ""}
+        return out
 
-    def import_history(self, limit: int = 500) -> dict:
-        """从 Chrome/Edge 导入最近历史（自动探测本机文件）。
+    def import_history(self, limit: Any = 500, source: str = "") -> dict:
+        """从 Chrome/Edge 导入最近历史（导入向导执行步）。
 
-        返回 {"imported": 新增数, "total": 解析总数, "source": 来源文件}。
+        limit 为每来源条数上限（1–2000，默认 500）；source 同
+        import_bookmarks。返回结构同 import_bookmarks。
         """
+        if self._deny_remote("import_history"):
+            return {"imported": 0, "total": 0, "results": []}
+        n = _to_nonneg_int(limit, 500) or 500
+        n = min(n, 2000)
+        src = _to_str(source, "") or ""
+        if src not in ("", "chrome", "edge"):
+            src = ""
+        out: dict = {"imported": 0, "total": 0, "results": []}
         try:
             from .browser_import import find_history_files, parse_history_db
-            for path in find_history_files():
-                items = parse_history_db(path, limit)
-                if not items:
-                    continue
+            for browser, path in find_history_files(src):
+                items = parse_history_db(path, n)
                 imported = 0
                 for item in items:
-                    if (self.history is not None
-                            and self.history.add(item["url"], item["title"])):
+                    if self.history is not None:
+                        # HistoryStore.add 为 visit 追加（无返回值/无去重
+                        # ——历史是访问流水不是键值表）——计数即解析条数
+                        self.history.add(item["url"], item["title"])
                         imported += 1
-                return {"imported": imported, "total": len(items), "source": path}
+                out["results"].append(
+                    {"browser": browser, "imported": imported,
+                     "total": len(items)})
+                out["imported"] += imported
+                out["total"] += len(items)
         except Exception:
             pass
-        return {"imported": 0, "total": 0, "source": ""}
+        return out
 
     # ================= 历史 =================
     def get_history(self, limit: Any = 100,

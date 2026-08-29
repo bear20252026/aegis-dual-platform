@@ -440,5 +440,11 @@
 - selftest_shell_toolbar 中文 `\uXXXX` 断言 vs 实现 `ensure_ascii=False`（字面量注入，行为正确）——断言修正。
 - selftest_s1_integration 在 navigate（远程页）后 new_tab——与 P1-1 语义冲突——场景重排（先建标签后导航）。
 
-### 25.4 验证（全绿）
+### 25.4 导入向导（Planned 第二项，2026-08-30）
+- **桥口径**（B0-W-01 复审一致）：`scan_import_sources`（零读取探测）/ `import_bookmarks(source)` / `import_history(limit, source)`——白名单 + 方法内受信校验；远程页 scan 返回 []、import 返回零结果。
+- **来源显式化**：`browser_import._iter_source_files` yield `(来源key, 路径)`——不从路径猜浏览器（防目录布局变化误判）；`_SOURCES` 模块级表（测试可 monkeypatch）。
+- **存量修复**：`import_history` imported 恒 0（HistoryStore.add 为 visit 追加无返回值）。
+- **UI**：start.html 向导（扫描 → 选择来源/内容/上限 → 执行 → 分来源结果），textContent 构建（R-06），Escape 关闭，导入后刷新宫格。
+
+### 25.5 验证（全绿）
 validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed）｜ bandit --skip 同 CI（0 Medium/High）｜ mypy 32 文件 0 错误｜ selftest ×5 全过｜ node --check 注入 JS 语法。

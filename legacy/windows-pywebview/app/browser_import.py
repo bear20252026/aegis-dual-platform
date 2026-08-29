@@ -31,6 +31,9 @@ _CHROME_DIR = os.path.join(
 _EDGE_DIR = os.path.join(
     os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Edge", "User Data")
 
+# 导入向导来源表（key → 用户数据目录；顺序即 UI 展示优先级）
+_SOURCES = (("chrome", _CHROME_DIR), ("edge", _EDGE_DIR))
+
 # roots 中按序检查的顶层节点（bar 优先，其次 other/synced）
 _ROOT_KEYS = ("bookmark_bar", "other", "synced")
 
@@ -88,16 +91,46 @@ def parse_bookmarks_json(path: str) -> list:
     return out
 
 
-def find_bookmarks_files() -> Iterable[str]:
-    """返回本机存在的 Chrome / Edge Bookmarks 文件路径（按序）。
+def find_import_sources() -> list:
+    """探测本机可导入来源（仅探测文件存在——不读取内容）。
 
-    Chrome 优先，其次 Edge；均缺失时为空迭代。
+    返回 [{"browser": "chrome"|"edge", "bookmarks": bool, "history": bool}]；
+    供导入向导第一步展示（扫描不产生任何读取/写入副作用）。
     """
-    for base in (_CHROME_DIR, _EDGE_DIR):
-        # 默认用户目录（Default）；忽略其他 Profile 目录，保持简单可预期
-        path = os.path.join(base, "Default", "Bookmarks")
+    out: list = []
+    for key, base in _SOURCES:
+        if not base:
+            continue
+        bm = os.path.isfile(os.path.join(base, "Default", "Bookmarks"))
+        hi = os.path.isfile(os.path.join(base, "Default", "History"))
+        if bm or hi:
+            out.append({"browser": key, "bookmarks": bm, "history": hi})
+    return out
+
+
+def _iter_source_files(filename: str, source: str = ""):
+    """按来源过滤迭代本机存在的浏览器数据文件（yield (来源key, 路径)）。
+
+    source 为空 = 全部来源（chrome 优先）；非空仅匹配该来源。
+    来源 key 显式随路径返回（不从路径猜浏览器——防目录布局变化误判）。
+    """
+    for key, base in _SOURCES:
+        if source and key != source:
+            continue
+        if not base:
+            continue
+        path = os.path.join(base, "Default", filename)
         if os.path.isfile(path):
-            yield path
+            yield key, path
+
+
+def find_bookmarks_files(source: str = "") -> Iterable:
+    """返回本机存在的 Chrome / Edge Bookmarks（yield (来源key, 路径)）。
+
+    Chrome 优先，其次 Edge；均缺失时为空迭代。source 可选
+    （"chrome"/"edge"——导入向导按来源导入；空=全部）。
+    """
+    yield from _iter_source_files("Bookmarks", source)
 
 
 def parse_history_db(path: str, limit: int = 500) -> list:
@@ -130,9 +163,9 @@ def parse_history_db(path: str, limit: int = 500) -> list:
     return out
 
 
-def find_history_files() -> Iterable[str]:
-    """返回本机存在的 Chrome / Edge History 文件路径（按序）。"""
-    for base in (_CHROME_DIR, _EDGE_DIR):
-        path = os.path.join(base, "Default", "History")
-        if os.path.isfile(path):
-            yield path
+def find_history_files(source: str = "") -> Iterable:
+    """返回本机存在的 Chrome / Edge History（yield (来源key, 路径)）。
+
+    source 可选（"chrome"/"edge"；空=全部）。
+    """
+    yield from _iter_source_files("History", source)

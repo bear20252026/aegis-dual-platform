@@ -10,6 +10,12 @@
 - **会话恢复**：`app/session_store.py` 会话持久化（session.json 原子写 + URL 白名单清洗：仅 http/https 与壳页 START_URL，≤20 标签）；标签增删/切换/固定/分组/导航自动落盘；`config.resume_session=True` 启动自动恢复 + 新标签页「恢复上次会话」按钮（`has_saved_session` 仅返回计数）
 - **标签条恢复**：`bridge_hooks` 仅对受信本地页注入**脱敏**标签快照（title/pinned/group——无 URL，B0-W-01 口径不变；远程页维持空快照）
 - 新增自检 `selftest_session_store.py`；扩展 selftest_api_bridge / selftest_shell_toolbar（move_tab 钳制/close_current_tab/会话 round-trip/标签条 JS 结构断言）
+- **导入向导**（Chrome/Edge 书签与历史，Planned 第二项落地）：
+  - `app/browser_import.py`：`find_import_sources()` 来源探测（仅探测文件存在，零读取）+ `find_bookmarks_files/find_history_files(source)` 按来源过滤（yield (来源key, 路径)——显式来源，不从路径猜）
+  - 桥入口（B0-W-01 复审口径）：`scan_import_sources` / `import_bookmarks(source)` / `import_history(limit, source)`——白名单恢复 + 方法内受信来源校验（远程页不可达）
+  - start.html 向导 UI：NTP 入口 → 扫描来源 → 选择来源/内容/历史上限（100–2000）→ 执行 → 分来源结果；全部 textContent 构建（R-06）；导入后自动刷新书签宫格
+  - 修复存量：`import_history` 的 `imported` 恒为 0（`HistoryStore.add` 无返回值——历史为 visit 流水，计数即解析条数）
+
 
 ### 修复（2026-08-30）
 - **Ctrl+W 关错标签**：注入侧 `TABS_DATA.current` 是注入时刻的冻结快照（多标签下恒 0）——新增 `close_current_tab`（后端实时 `_current`），TOOLBAR_JS 快捷键改调它
