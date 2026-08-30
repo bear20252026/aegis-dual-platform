@@ -206,27 +206,35 @@
   .back-fab:active { transform:scale(0.94); }
 
   /* —— 贪吃蛇（双端统一：首页内置小游戏，键盘/滑动手势双控）—— */
+  /* 全屏页面化（BUG-014 版本替换）：与首页同一视觉语言 */
   .snake-overlay {
     position:fixed; inset:0; z-index:40; display:none;
-    align-items:center; justify-content:center;
-    background:rgba(8,12,32,0.62); backdrop-filter:blur(6px);
+    flex-direction:column; align-items:center; justify-content:center;
+    background:linear-gradient(180deg, rgba(10,15,40,0.55) 0%, rgba(8,12,32,0.88) 100%);
+    backdrop-filter:blur(10px);
   }
   .snake-panel {
-    background:rgba(16,36,28,0.96); border-radius:18px;
-    border:1px solid rgba(255,255,255,0.14);
-    padding:18px 18px 14px; box-shadow:0 18px 48px rgba(0,0,0,0.45);
-    display:flex; flex-direction:column; align-items:center; gap:10px;
+    background:rgba(16,36,28,0.94); border-radius:22px;
+    border:1px solid rgba(255,255,255,0.16);
+    padding:18px 18px 12px; box-shadow:0 18px 48px rgba(0,0,0,0.5);
+    display:flex; flex-direction:column; align-items:center; gap:12px;
+    width:min(92vw, 560px);
   }
-  .snake-head { display:flex; align-items:center; gap:14px; width:100%; }
-  .snake-head .title { color:#B9E4C7; font-size:15px; font-weight:600; }
-  .snake-head .score { color:#8BC34A; font-size:15px; font-weight:700; margin-left:auto; }
+  .snake-head { display:flex; align-items:center; gap:12px; width:100%; }
+  .snake-head .title { color:#B9E4C7; font-size:16px; font-weight:700; }
+  .snake-head .score { color:#8BC34A; font-size:16px; font-weight:700; margin-left:auto; }
+  .snake-head .best {
+    color:#7FA98C; font-size:13px; font-weight:600;
+    background:rgba(139,195,74,0.12); border-radius:10px; padding:3px 8px;
+  }
   .snake-close {
-    width:30px; height:30px; border-radius:50%; border:0; cursor:pointer;
+    width:32px; height:32px; border-radius:50%; border:0; cursor:pointer;
     background:rgba(255,255,255,0.14); color:#fff; font-size:15px;
   }
   #snakeCanvas {
-    border-radius:12px; touch-action:none;
-    background:#0B1B14; max-width:86vw; max-height:52vh;
+    border-radius:14px; touch-action:none; width:100%;
+    background:#0B1B14;
+    border:1px solid rgba(139,195,74,0.25);
   }
   .snake-tip { color:#7FA98C; font-size:12px; text-align:center; }
 </style>
@@ -293,6 +301,7 @@
       <div class="snake-head">
         <span class="title">🐍 贪吃蛇</span>
         <span class="score" id="snakeScore">0</span>
+        <span class="best" id="snakeBest">最高 0</span>
         <button class="snake-close" id="snakeClose" title="退出" onclick="Snake.close()">&#10005;</button>
       </div>
       <canvas id="snakeCanvas" width="360" height="360"></canvas>
@@ -382,8 +391,8 @@
 
     // ================= 贪吃蛇（首页内置——双端统一） =================
     var Snake = (function () {
-      var N = 18, CELL, ctx, timer = null, running = false, paused = false;
-      var snake, dir, nextDir, food, score, speed, shown = 360;
+      var N = 20, CELL, ctx, timer = null, running = false, paused = false;
+      var snake, dir, nextDir, food, score, speed, shown = 360, best = 0;
 
       function open() {
         var cv = document.getElementById('snakeCanvas');
@@ -394,14 +403,14 @@
         ctx = cv.getContext('2d');
         ctx.scale(dpr, dpr); CELL = shown / N;
         document.getElementById('snakeOverlay').style.display = 'flex';
-        reset(); start();
+        loadBest(); reset(); start();
       }
       function close() {
         stop();
         document.getElementById('snakeOverlay').style.display = 'none';
       }
       function reset() {
-        snake = [{x:5,y:9},{x:4,y:9},{x:3,y:9}];  // 出生点偏左——右侧跑道 13 格，反应时间翻倍
+        snake = [{x:6,y:10},{x:5,y:10},{x:4,y:10}];  // 出生点偏左——右侧跑道充足，反应时间充裕
         dir = {x:1,y:0}; nextDir = dir; score = 0; speed = 170;
         placeFood(); updScore(); draw(false);
       }
@@ -411,6 +420,15 @@
       }
       function updScore() {
         document.getElementById('snakeScore').textContent = String(score);
+        if (score > best) {
+          best = score;
+          try { localStorage.setItem('snakeBest', String(best)); } catch (e) { /* file:// 下可能禁用——降级内存 */ }
+          document.getElementById('snakeBest').textContent = '最高 ' + best;
+        }
+      }
+      function loadBest() {
+        try { best = parseInt(localStorage.getItem('snakeBest') || '0', 10) || 0; } catch (e) { best = 0; }
+        document.getElementById('snakeBest').textContent = '最高 ' + best;
       }
       function start() {
         stop(); running = true; paused = false;

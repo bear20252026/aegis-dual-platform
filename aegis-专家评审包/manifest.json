@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-08-30 16:44 UTC",
+  "generated_at": "2026-08-30 17:51 UTC",
   "version": "2.1.7",
   "versionCode": "20107",
-  "commit": "ce841ac",
-  "commit_subject": "fix: unify back button + snake game across platforms (BUG-011/012)",
-  "file_count": 756,
+  "commit": "d9ab6d2",
+  "commit_subject": "fix(android): back gesture/key exits app on gesture-nav devices (BUG-013)",
+  "file_count": 755,
   "files": [
     {
       "path": ".github/workflows/agent-redteam.yml",
@@ -128,13 +128,8 @@
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
-      "sha256": "4d1b15363c9a3461ec63015f5281ecaaed49ba13103c357b69252634692f1b7a",
-      "bytes": 1328
-    },
-    {
-      "path": "android/app/src/main/java/com/aegis/browser/AddressBarSnake.kt",
-      "sha256": "6bdee951d8412a8454e8655790473556df17d49e680e5d980fb1e58fb1475bc1",
-      "bytes": 12502
+      "sha256": "914570fc2f1d1ea17a29141099835e22248d4b850a5399b0ccf2cb98f685b0e8",
+      "bytes": 1380
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt",
@@ -163,8 +158,8 @@
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/MainActivity.kt",
-      "sha256": "0ed1cd7128c78e17db4853bde0a3cafe7f162517f3930a5a4cefe3ba33d32ac1",
-      "bytes": 10791
+      "sha256": "d2cf1264a24dd8201edca063e58205e41098190c14cac47017b8b5d1a442eddc",
+      "bytes": 13437
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/README.md",
@@ -3608,8 +3603,8 @@
     },
     {
       "path": "shared/shell/start.html",
-      "sha256": "cdd4382cf39224d96b978d20d4ccf013da38c685333380a85f8b172e519bc38b",
-      "bytes": 39202
+      "sha256": "c7a11f374cd6b14cd479b5c1da4daf8b9db8730c2e34d8b762f08f97d4355d65",
+      "bytes": 40158
     },
     {
       "path": "shared/update-manifest.schema.json",

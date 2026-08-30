@@ -1,7 +1,7 @@
 # Aegis Browser 专家评审包
-# 生成时间: 2026-08-30 16:44 UTC
+# 生成时间: 2026-08-30 17:51 UTC
 # 版本: 2.1.7
-# 提交: ce841ac (fix: unify back button + snake game across platforms (BUG-011/012))
+# 提交: d9ab6d2 (fix(android): back gesture/key exits app on gesture-nav devices (BUG-013))
 
 ## 包含内容（由 scripts/build_review_package.py 从规范源码自动生成）
 - 源代码: Rust policy-core + Android + Windows Python + C# + contracts + shared 约束

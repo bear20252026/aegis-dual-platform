@@ -44,6 +44,14 @@ test('BUG-011/012: 双端统一——首页返回按钮 + 贪吃蛇游戏（单�
   assert.match(HTML, /id="snakeCanvas"/, '必须有贪吃蛇画布');
   assert.match(HTML, /touchmove[\s\S]{0,80}preventDefault/, '画布必须拦截 touchmove（否则滑动触发页面滚动）');
   assert.match(HTML, /Host\.has\('snake'\)/, '贪吃蛇入口必须走能力面声明');
+  // BUG-014 版本替换：全屏网格页 + 最高分持久化；旧地址栏版必须移除
+  assert.match(HTML, /id="snakeBest"/, '必须有最高分显示');
+  assert.match(HTML, /snakeBest'/, '最高分必须持久化（localStorage，降级内存）');
+  assert.match(HTML, /flex-direction:column; align-items:center; justify-content:center;/, '覆盖层必须全屏页面化');
+  const snakeKt = join(ROOT, 'android', 'app', 'src', 'main', 'java', 'com', 'aegis', 'browser', 'AddressBarSnake.kt');
+  assert.ok(!existsSync(snakeKt), '旧版地址栏贪吃蛇（AddressBarSnake.kt）必须已删除');
+  const mainKt = readFileSync(join(ROOT, 'android', 'app', 'src', 'main', 'java', 'com', 'aegis', 'browser', 'MainActivity.kt'), 'utf8');
+  assert.ok(!/AddressBarWithSnake/.test(mainKt), 'MainActivity 不得残留旧版调用');
 });
 
 test('BUG-003 搜索框 UI 错乱：#searchForm 必须承担 flex 行布局', () => {

@@ -173,7 +173,7 @@ class MainActivity : ComponentActivity() {
                             onClose = { viewModel.closeTab(it) },
                             onNewTab = { viewModel.newTab(this@MainActivity) },
                         )
-                        AddressBarWithSnake(
+                        AddressBarRow(
                             address = address,
                             onAddressChange = { viewModel.updateAddress(it) },
                             onOpen = { viewModel.navigateToAddress() },
@@ -189,6 +189,51 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+/**
+ * 地址栏 + 导航按钮（纯浏览态）。
+ *
+ * 贪吃蛇已迁移至首页 start.html（BUG-014 版本替换——单源双端一致），
+ * 旧版地址栏游戏（AddressBarSnake.kt / 🎮 入口 / 5 倍放大游戏带）删除。
+ */
+@Composable
+private fun AddressBarRow(
+    address: String,
+    onAddressChange: (String) -> Unit,
+    onOpen: () -> Unit,
+    onBack: () -> Unit,
+    onForward: () -> Unit,
+    onReload: () -> Unit,
+    onReader: () -> Unit,
+    onTranslate: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(
+                value = address,
+                onValueChange = onAddressChange,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                label = { Text("地址") },
+            )
+            Button(onClick = onOpen) { Text("打开") }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Button(onClick = onBack) { Text("后退") }
+            Button(onClick = onForward) { Text("前进") }
+            Button(onClick = onReload) { Text("刷新") }
+            Button(onClick = onReader) { Text("阅读") }
+            Button(onClick = onTranslate) { Text("翻译") }
+        }
+    }
+}
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
