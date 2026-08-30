@@ -114,6 +114,12 @@ jobs:
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
       - name: Build release APK with the native navigation decision core
+        env:
+          # secrets 只能显式注入——签名凭据四件套透传给 gradle（FILE 已由
+          # restore 步骤写入 GITHUB_ENV）
+          AEGIS_KEYSTORE_PASSWORD: ${{ secrets.AEGIS_KEYSTORE_PASSWORD }}
+          AEGIS_KEY_ALIAS: ${{ secrets.AEGIS_KEY_ALIAS }}
+          AEGIS_KEY_PASSWORD: ${{ secrets.AEGIS_KEY_PASSWORD }}
         run: |
           bash ./gradlew :app:assembleRelease --no-daemon \
             -PrequireNativePolicyCore=true \
