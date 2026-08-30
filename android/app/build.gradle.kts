@@ -109,7 +109,10 @@ android {
             ) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            isMinifyEnabled = true
+            // R8 混淆暂停（2026-08-30）：JNA 按名映射 / androidx.webkit setTag(R$id)
+            // 连环踩坑——keep 规则补一个漏一个，真机三连崩。止血：关闭混淆
+            // 保可用性（体积 +~7MB），R8 规则全量真机回归后再启用。
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
