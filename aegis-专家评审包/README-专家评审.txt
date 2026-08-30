@@ -1,7 +1,7 @@
 # Aegis Browser 专家评审包
-# 生成时间: 2026-08-30 15:44 UTC
+# 生成时间: 2026-08-30 16:21 UTC
 # 版本: 2.1.7
-# 提交: 72d95c6 (chore: clear all re-review residuals (dead module/orphan dir/docs move/minor lint))
+# 提交: 105f648 (docs+ci: ADR-008 single-ABI distribution rule + whitelist assertion hardening)
 
 ## 包含内容（由 scripts/build_review_package.py 从规范源码自动生成）
 - 源代码: Rust policy-core + Android + Windows Python + C# + contracts + shared 约束

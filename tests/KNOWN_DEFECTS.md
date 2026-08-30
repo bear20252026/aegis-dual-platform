@@ -30,3 +30,6 @@
 - CI 每个 job 输出 TAP/摘要；**任何 job 失败 = GitHub Run 红 = 阻断合并/发布**
 - E2E 失败输出 `[e2e][FAIL]` 行 + 截图（/tmp/e2e_after.png）人工复核
 - 新缺陷修复流程：修复 → 本库登记 → 断言入库 → CI 永久回归
+
+| BUG-011 | Android 地址栏贪吃蛇完全不动（滑动无效） | `tick` 状态只在循环自增、从未在组合中读取——Canvas 读的 `game` 引用不变，Compose 永不重绘，蛇视觉冻结 | `neverEqualPolicy` + 每 tick 重赋 `game` 强制重绘 | AddressBarSnake.kt |
+| BUG-012 | 首页返回按钮双端缺失/贪吃蛇 Win 缺失 | 返回键只存在于 Win 原生工具栏；贪吃蛇为 Android Compose 独占 | start.html 单源内置返回按钮（Host.goBack 分发）+ 贪吃蛇游戏（键盘/滑动双控），双端一致 | shared/shell/start.html, AegisHomeBridge.kt |

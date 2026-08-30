@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-08-30 15:44 UTC",
+  "generated_at": "2026-08-30 16:21 UTC",
   "version": "2.1.7",
   "versionCode": "20107",
-  "commit": "72d95c6",
-  "commit_subject": "chore: clear all re-review residuals (dead module/orphan dir/docs move/minor lint)",
+  "commit": "105f648",
+  "commit_subject": "docs+ci: ADR-008 single-ABI distribution rule + whitelist assertion hardening",
   "file_count": 756,
   "files": [
     {
@@ -133,13 +133,13 @@
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/AddressBarSnake.kt",
-      "sha256": "ce574c3c5b0a1a29ab305c3af71f513e88494a1d993fd5a9b2a822b0dc089426",
-      "bytes": 11943
+      "sha256": "9d25b05e043cbf05234b962873a41005f8d57ede8cc1b86c2e9a1a8f5bd3b7f1",
+      "bytes": 12295
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt",
-      "sha256": "ebb04e1cfbac9ff519813d60901bc0ec6b337f807d4990374066cf546e0cc858",
-      "bytes": 3938
+      "sha256": "097c4f3d621814b82a068974aeadfbd27df31e64573be1f900fdda735539eb85",
+      "bytes": 4408
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/AegisTheme.kt",
@@ -1098,7 +1098,7 @@
     },
     {
       "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.3.db",
-      "sha256": "6dca7000e2920bc8cc07348fd846c9d747133e84291623115737ed2b45678993",
+      "sha256": "95a7046987cecc949e12b4332659485812c6b4e55968eca01ad212ba7771b816",
       "bytes": 270336
     },
     {
@@ -3608,8 +3608,8 @@
     },
     {
       "path": "shared/shell/start.html",
-      "sha256": "2ba352ce0414f657f5d7c6002c9334b2b9ac7e4dd6c6ec9906956596f98a57ba",
-      "bytes": 30554
+      "sha256": "6c3474a88a9d166a9955bb37375b4545a8798ee340e57e37f72f7a12906eeb7d",
+      "bytes": 39136
     },
     {
       "path": "shared/update-manifest.schema.json",

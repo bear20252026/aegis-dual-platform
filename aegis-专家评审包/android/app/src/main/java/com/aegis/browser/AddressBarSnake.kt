@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -201,8 +202,12 @@ private fun SnakeGameArea(
 ) {
     var cols by remember { mutableIntStateOf(0) }
     var rows by remember { mutableIntStateOf(0) }
-    var game by remember(restartKey) { mutableStateOf<SnakeGame?>(null) }
-    var tick by remember(restartKey) { mutableIntStateOf(0) }
+    // neverEqualPolicy：SnakeGame 是可变对象（tick 原地改列表）——引用不变但
+    // 内容每 tick 变化，用 never-equal 强制重绘（BUG-011：此前 tick 自增
+    // 从未在组合中读取 → Canvas 永不重绘 → 蛇视觉冻结、滑动「无效」假象）
+    var game by remember(restartKey) {
+        mutableStateOf<SnakeGame?>(null, neverEqualPolicy())
+    }
 
     Box(
         modifier = modifier
@@ -281,10 +286,10 @@ private fun SnakeGameArea(
             try {
                 val g = game ?: continue
                 if (g.alive) {
-                    tick++ // 触发重组刷新画布
                     if (!g.tick()) {
                         onGameOver()
                     }
+                    game = g  // neverEqualPolicy：每 tick 强制重绘（BUG-011）
                 }
             } catch (e: Exception) {
                 android.util.Log.e("AegisSnake", "game loop error: ${e.message}")

@@ -88,6 +88,20 @@ class AegisHomeBridge(
         return true
     }
 
+    /**
+     * 首页返回按钮（start.html 单源——与 Windows go_back 同名能力）：
+     * 经受控导航器逐级回退 WebView 历史栈，无历史时 no-op（不退出应用）。
+     */
+    @JavascriptInterface
+    fun goBack() {
+        val wv = webViewProvider() ?: return
+        wv.post {
+            if (wv.canGoBack()) {
+                SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK)
+            }
+        }
+    }
+
     private fun buildTargetUrl(text: String): String? {
         val looksLikeUrl = !text.contains(" ") && text.contains(".") &&
             !text.endsWith(".")

@@ -191,10 +191,49 @@
   @media (pointer: coarse) {
     .wp, .quick-btn, .search button, .engine-pill { min-height:40px; }
   }
+
+  /* —— 返回按钮（双端统一：Win 原生工具栏之外，首页自身的返回入口）—— */
+  .back-fab {
+    position:fixed; top:14px; left:14px; z-index:30;
+    width:42px; height:42px; border-radius:50%;
+    border:1px solid rgba(255,255,255,0.35); cursor:pointer;
+    background:rgba(255,255,255,0.18); backdrop-filter:blur(8px);
+    color:#fff; font-size:20px; line-height:1;
+    display:flex; align-items:center; justify-content:center;
+    transition:background .15s ease, transform .15s ease;
+  }
+  .back-fab:hover { background:rgba(255,255,255,0.3); }
+  .back-fab:active { transform:scale(0.94); }
+
+  /* —— 贪吃蛇（双端统一：首页内置小游戏，键盘/滑动手势双控）—— */
+  .snake-overlay {
+    position:fixed; inset:0; z-index:40; display:none;
+    align-items:center; justify-content:center;
+    background:rgba(8,12,32,0.62); backdrop-filter:blur(6px);
+  }
+  .snake-panel {
+    background:rgba(16,36,28,0.96); border-radius:18px;
+    border:1px solid rgba(255,255,255,0.14);
+    padding:18px 18px 14px; box-shadow:0 18px 48px rgba(0,0,0,0.45);
+    display:flex; flex-direction:column; align-items:center; gap:10px;
+  }
+  .snake-head { display:flex; align-items:center; gap:14px; width:100%; }
+  .snake-head .title { color:#B9E4C7; font-size:15px; font-weight:600; }
+  .snake-head .score { color:#8BC34A; font-size:15px; font-weight:700; margin-left:auto; }
+  .snake-close {
+    width:30px; height:30px; border-radius:50%; border:0; cursor:pointer;
+    background:rgba(255,255,255,0.14); color:#fff; font-size:15px;
+  }
+  #snakeCanvas {
+    border-radius:12px; touch-action:none;
+    background:#0B1B14; max-width:86vw; max-height:52vh;
+  }
+  .snake-tip { color:#7FA98C; font-size:12px; text-align:center; }
 </style>
 </head>
 <body>
   <div id="wallpaper"></div>
+  <button class="back-fab" id="backBtn" title="返回上一页" onclick="Host.goBack()">&#8592;</button>
 
   <div class="center">
     <div class="logo">A</div>
@@ -212,6 +251,9 @@
     </div>
     <!-- 几何画板快捷入口（离线 GeoGebra——点击跳转内置画板页） -->
     <div class="quick-row">
+      <button id="snakeBtn" class="quick-btn" title="贪吃蛇小游戏 · 离线可玩" onclick="openSnake()">
+        <span class="ico">🐍</span><span>贪吃蛇</span>
+      </button>
       <button id="geoBtn" class="quick-btn" title="离线几何画板 · 无需网络">
         <span class="ico">📐</span><span>几何画板</span>
       </button>
@@ -244,7 +286,21 @@
   </div>
   <div class="footer">Enter 打开 · Ctrl+L 聚焦地址栏</div>
 
-  <script>
+  
+  <!-- 贪吃蛇覆盖层（键盘方向键/WASD + 滑动手势双控——双端一致） -->
+  <div class="snake-overlay" id="snakeOverlay">
+    <div class="snake-panel">
+      <div class="snake-head">
+        <span class="title">🐍 贪吃蛇</span>
+        <span class="score" id="snakeScore">0</span>
+        <button class="snake-close" id="snakeClose" title="退出" onclick="Snake.close()">&#10005;</button>
+      </div>
+      <canvas id="snakeCanvas" width="360" height="360"></canvas>
+      <div class="snake-tip">方向键 / WASD 或滑动手势 · 空格暂停</div>
+    </div>
+  </div>
+
+<script>
     // JS 错误上报：页面任何异常 → Python 日志（后台静默）
     // ================= 跨端宿主桥适配层（ADR-007 单源首页） =================
     // Windows：pywebview.api（异步 Promise）；Android：AegisBridge
@@ -264,7 +320,7 @@
           var k = this.kind();
           if (!k) return false;
           if (k === 'win') return true;
-          var androidFeats = { error: 1, engine: 1, navigate: 1, wallpaper: 1, geo: 1 };
+          var androidFeats = { error: 1, engine: 1, navigate: 1, wallpaper: 1, geo: 1, back: 1, snake: 1 };
           return !!androidFeats[feat];
         },
         jsError: function () {
@@ -282,6 +338,10 @@
         navigate: function (url) {
           var w = winApi(); if (w) { w.navigate(url); return; }
           var a = andApi(); if (a) a.navigate(url);
+        },
+        goBack: function () {
+          var w = winApi(); if (w) { w.go_back(); return; }
+          var a = andApi(); if (a) a.goBack();
         },
         setWallpaper: function (name) {
           var w = winApi(); if (w) { w.set_wallpaper(name); return; }
@@ -319,6 +379,132 @@
         },
       };
     })();
+
+    // ================= 贪吃蛇（首页内置——双端统一） =================
+    var Snake = (function () {
+      var N = 18, CELL, ctx, timer = null, running = false, paused = false;
+      var snake, dir, nextDir, food, score, speed, shown = 360;
+
+      function open() {
+        var cv = document.getElementById('snakeCanvas');
+        ctx = cv.getContext('2d');
+        var dpr = window.devicePixelRatio || 1;
+        shown = Math.min(cv.clientWidth || 360, 360) || 360;
+        cv.width = shown * dpr; cv.height = shown * dpr;
+        ctx = cv.getContext('2d');
+        ctx.scale(dpr, dpr); CELL = shown / N;
+        document.getElementById('snakeOverlay').style.display = 'flex';
+        reset(); start();
+      }
+      function close() {
+        stop();
+        document.getElementById('snakeOverlay').style.display = 'none';
+      }
+      function reset() {
+        snake = [{x:9,y:9},{x:8,y:9},{x:7,y:9}];
+        dir = {x:1,y:0}; nextDir = dir; score = 0; speed = 150;
+        placeFood(); updScore(); draw(false);
+      }
+      function placeFood() {
+        do { food = { x: (Math.random()*N)|0, y: (Math.random()*N)|0 }; }
+        while (snake.some(function (c) { return c.x===food.x && c.y===food.y; }));
+      }
+      function updScore() {
+        document.getElementById('snakeScore').textContent = String(score);
+      }
+      function start() {
+        stop(); running = true; paused = false;
+        timer = setInterval(step, speed);
+      }
+      function stop() { if (timer) { clearInterval(timer); timer = null; } running = false; }
+      function step() {
+        if (paused || !running) return;
+        dir = nextDir;
+        var head = { x: snake[0].x + dir.x, y: snake[0].y + dir.y };
+        if (head.x < 0 || head.y < 0 || head.x >= N || head.y >= N ||
+            snake.some(function (c) { return c.x===head.x && c.y===head.y; })) {
+          stop(); draw(true); return;   // 撞墙/撞身：定格显示
+        }
+        snake.unshift(head);
+        if (head.x === food.x && head.y === food.y) {
+          score += 10; updScore(); placeFood();
+          if (speed > 70) { speed -= 4; stop(); start(); }  // 提速（重设 interval）
+        } else {
+          snake.pop();
+        }
+        draw(false);
+      }
+      function draw(dead) {
+        ctx.fillStyle = '#0B1B14'; ctx.fillRect(0, 0, shown, shown);
+        ctx.strokeStyle = 'rgba(29,58,46,0.9)'; ctx.lineWidth = 1;
+        for (var i = 1; i < N; i++) {
+          ctx.beginPath(); ctx.moveTo(i*CELL, 0); ctx.lineTo(i*CELL, shown); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, i*CELL); ctx.lineTo(shown, i*CELL); ctx.stroke();
+        }
+        ctx.fillStyle = '#FF5252';
+        ctx.beginPath();
+        ctx.arc(food.x*CELL + CELL/2, food.y*CELL + CELL/2, CELL*0.36, 0, 7);
+        ctx.fill();
+        snake.forEach(function (c, i) {
+          ctx.fillStyle = i === 0 ? '#8BC34A' : '#4CAF50';
+          ctx.fillRect(c.x*CELL + 1, c.y*CELL + 1, CELL - 2, CELL - 2);
+        });
+        if (dead) {
+          ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(0, 0, shown, shown);
+          ctx.fillStyle = '#fff'; ctx.textAlign = 'center';
+          ctx.font = 'bold 22px sans-serif';
+          ctx.fillText('游戏结束 · 得分 ' + score, shown/2, shown/2 - 8);
+          ctx.font = '13px sans-serif'; ctx.fillStyle = '#B9E4C7';
+          ctx.fillText('按空格或点击画布再来一局', shown/2, shown/2 + 18);
+        }
+      }
+      function turn(x, y) {
+        if (x === -dir.x && y === -dir.y) return;  // 禁止 180° 掉头
+        nextDir = { x: x, y: y };
+      }
+      function togglePause() { if (running) paused = !paused; }
+
+      // 键盘（桌面端）
+      document.addEventListener('keydown', function (e) {
+        var ov = document.getElementById('snakeOverlay');
+        if (!ov || ov.style.display === 'none') return;
+        var k = e.key;
+        if (k === 'ArrowUp' || k === 'w' || k === 'W') { turn(0,-1); e.preventDefault(); }
+        else if (k === 'ArrowDown' || k === 's' || k === 'S') { turn(0,1); e.preventDefault(); }
+        else if (k === 'ArrowLeft' || k === 'a' || k === 'A') { turn(-1,0); e.preventDefault(); }
+        else if (k === 'ArrowRight' || k === 'd' || k === 'D') { turn(1,0); e.preventDefault(); }
+        else if (k === ' ') {
+          if (!running) { reset(); start(); } else togglePause();
+          e.preventDefault();
+        }
+      });
+      // 滑动手势（移动端）
+      (function () {
+        var sx = 0, sy = 0, on = false;
+        var el = document.getElementById('snakeCanvas');
+        el.addEventListener('touchstart', function (e) {
+          sx = e.touches[0].clientX; sy = e.touches[0].clientY; on = true;
+        }, { passive: true });
+        el.addEventListener('touchmove', function (e) { e.preventDefault(); }, { passive: false });
+        el.addEventListener('touchend', function (e) {
+          if (!on) return; on = false;
+          var dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+          if (Math.abs(dx) < 18 && Math.abs(dy) < 18) {   // 轻点：死亡后重开
+            if (!running && !timer) { reset(); start(); }
+            return;
+          }
+          if (Math.abs(dx) > Math.abs(dy)) turn(dx > 0 ? 1 : -1, 0);
+          else turn(0, dy > 0 ? 1 : -1);
+        });
+        el.addEventListener('click', function () {
+          if (!running && !timer) { reset(); start(); }
+        });
+      })();
+
+      return { open: open, close: close };
+    })();
+
+    function openSnake() { if (Host.has('snake')) Snake.open(); }
 
     window.addEventListener('error', function (e) {
       try {

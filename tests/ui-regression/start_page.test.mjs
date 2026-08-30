@@ -34,6 +34,18 @@ test('BUG-002 搜索 IME 失效：form submit + type=search + enterkeyhint 必�
   assert.match(HTML, /enterkeyhint="search"/, '必须声明 enterkeyhint');
 });
 
+test('BUG-011/012: 双端统一——首页返回按钮 + 贪吃蛇游戏（单源 start.html）', () => {
+  // BUG-012：Android 首页曾无返回入口（返回键只在 Win 原生工具栏）——
+  // start.html 必须自带返回按钮，经 Host.goBack 分发双端
+  assert.match(HTML, /back-fab[^>]*onclick="Host\.goBack\(\)"/, '首页必须有返回按钮并经 Host.goBack 分发');
+  assert.match(HTML, /goBack: function \(\)/, 'Host 适配层必须有 goBack（Win→go_back / Android→goBack）');
+  // BUG-011：贪吃蛇曾为 Android 地址栏独占（Win 完全没有）——首页单源内置
+  assert.match(HTML, /id="snakeBtn"[^>]*onclick="openSnake\(\)"/, '首页必须有贪吃蛇入口按钮');
+  assert.match(HTML, /id="snakeCanvas"/, '必须有贪吃蛇画布');
+  assert.match(HTML, /touchmove[\s\S]{0,80}preventDefault/, '画布必须拦截 touchmove（否则滑动触发页面滚动）');
+  assert.match(HTML, /Host\.has\('snake'\)/, '贪吃蛇入口必须走能力面声明');
+});
+
 test('BUG-003 搜索框 UI 错乱：#searchForm 必须承担 flex 行布局', () => {
   assert.match(HTML, /#searchForm\s*\{[^}]*display:flex/, 'form 打断外层 flex 的回归');
   assert.match(HTML, /#searchForm\s*\{[^}]*flex:1/, 'form 必须占满行宽');
