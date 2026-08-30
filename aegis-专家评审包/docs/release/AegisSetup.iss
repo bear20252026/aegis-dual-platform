@@ -8,6 +8,8 @@
 #define MyAppExeName "Aegis.exe"
 
 [Setup]
+; 安装器 EXE 自身品牌图标（快捷方式图标继承目标 EXE——assets/icon.ico）
+SetupIconFile=setup_icon.ico
 AppId={{A7B8C9D0-E1F2-4A5B-8C7D-9E0F1A2B3C4D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}

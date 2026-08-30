@@ -1,10 +1,10 @@
 {
-  "generated_at": "2026-08-30 18:41 UTC",
+  "generated_at": "2026-08-30 19:02 UTC",
   "version": "2.1.7",
   "versionCode": "20107",
-  "commit": "1eb2f83",
-  "commit_subject": "fix(android): missing Alignment import in MainActivity (AddressBarRow)",
-  "file_count": 755,
+  "commit": "7d93ea0",
+  "commit_subject": "build(android): max parse-compatibility hardening — legacy packaging, v3 signing, 16K ELF (ADR-009)",
+  "file_count": 758,
   "files": [
     {
       "path": ".github/workflows/agent-redteam.yml",
@@ -128,8 +128,8 @@
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
-      "sha256": "914570fc2f1d1ea17a29141099835e22248d4b850a5399b0ccf2cb98f685b0e8",
-      "bytes": 1380
+      "sha256": "e560474383f6996da4822ee98450d980a1e690935899500365a30f26fe0e1cfa",
+      "bytes": 1479
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt",
@@ -215,6 +215,21 @@
       "path": "android/app/src/main/java/com/aegis/browser/WebViewVersionCheck.kt",
       "sha256": "67be20a03e15cd261bfcc9d17a8f64277320f0f6a18791af638ff8696448a152",
       "bytes": 3266
+    },
+    {
+      "path": "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml",
+      "sha256": "17de17d5ab2bbc338e0d2f1c7e6a9d16a49f222ee6206d11ba4467cdaf19bbd4",
+      "bytes": 273
+    },
+    {
+      "path": "android/app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml",
+      "sha256": "17de17d5ab2bbc338e0d2f1c7e6a9d16a49f222ee6206d11ba4467cdaf19bbd4",
+      "bytes": 273
+    },
+    {
+      "path": "android/app/src/main/res/values/colors.xml",
+      "sha256": "ac57723b3ba3f4ce5d4bd418fb8fb64a1f82450f914d5e7df7aac1b57dc68dd1",
+      "bytes": 125
     },
     {
       "path": "android/app/src/main/res/values/styles.xml",
@@ -903,8 +918,8 @@
     },
     {
       "path": "docs/release/AegisSetup.iss",
-      "sha256": "f9382bd54f131e26de129c5922894517e22df45f1a6995cfd40ef7d5a6cd1940",
-      "bytes": 1690
+      "sha256": "08307b8b70c3c46307d8f24431fbbc421cce149e8ed6609517b626afa4593b52",
+      "bytes": 1817
     },
     {
       "path": "docs/release/agent-sitemap.example.json",
