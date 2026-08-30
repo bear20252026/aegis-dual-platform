@@ -39,6 +39,30 @@ class BookmarkStore:
             self._db = Database(":memory:", SCHEMA)
         return self._db
 
+    # 预置书签种子（「外带」功能入口——首次启动书签为空时注入，幂等）。
+    # 用户诉求：浏览器自带「几何画板」外挂链接（GeoGebra Geometry——
+    # 微软官方推荐的同款画板类 Web 工具，https 直连、无登录即可用）。
+    DEFAULT_SEEDS: tuple[tuple[str, str], ...] = (
+        ("几何画板", "https://www.geogebra.org/geometry"),
+    )
+
+    def seed_defaults(self) -> int:
+        """书签表为空时注入预置种子（幂等：非空库零写入）。
+
+        返回注入条数。全空库判定用 count 查询（与 add 的 URL 去重
+        语义解耦——用户手动删光书签后下次启动会再注入，可接受）。
+        """
+        db = self._check()
+        row = db.query_one("SELECT COUNT(*) AS n FROM bookmarks")
+        n = (row.get("n") if isinstance(row, dict) else row[0]) or 0
+        if n:
+            return 0
+        added = 0
+        for title, url in self.DEFAULT_SEEDS:
+            if self.add(title, url):
+                added += 1
+        return added
+
     def add(self, title: str, url: str, folder_id=0) -> bool:
         db = self._check()
         # H-1 修复（防御性安全审查）：URL 必须过 safe_url 白名单

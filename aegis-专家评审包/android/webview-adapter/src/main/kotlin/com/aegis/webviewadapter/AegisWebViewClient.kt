@@ -94,43 +94,48 @@ class AegisWebViewClient(
         mayRequireConfirmation: Boolean,
     ): Boolean {
         val url = upgradeToHttpsIfNeeded(rawUrl)
-        if (requireNavigationConfirmation && mayRequireConfirmation) {
-            if (pendingConfirmation != null) {
-                // 不能自动替换或自动批准旧请求；新的顶层导航先使旧 nonce 失效。
-                rejectPendingNavigation()
-                return false
-            }
-            when (val decision = broker.requestNavigationConfirmation(
-                sessionId, tabId, documentGeneration, url, "navigation",
-            )) {
-                is Decision.RequireConfirmation -> {
+        if (requireNavigationConfirmation && mayRequireConfirmation && pendingConfirmation != null) {
+            // 不能自动替换或自动批准旧请求；新的顶层导航先使旧 nonce 失效。
+            rejectPendingNavigation()
+            return false
+        }
+        // 统一走策略询问：require_confirmation 是策略级决策（与 BuildConfig
+        // 无关）。确认开关只决定「弹面板」还是「自动批准」——此前直接判
+        // decision is Allow 导致关闭开关后 RequireConfirmation 全被
+        // fail-closed 拒绝（搜索修复上线后再次失效的根因）。
+        when (val decision = broker.requestNavigationConfirmation(
+            sessionId, tabId, documentGeneration, url, "navigation",
+        )) {
+            is Decision.RequireConfirmation -> {
+                if (requireNavigationConfirmation && mayRequireConfirmation) {
                     pendingConfirmation = PendingNavigationConfirmation(url, "navigation", decision.request)
                     onNavigationConfirmationRequested(decision.request)
                     return false
                 }
-
-                is Decision.Allow -> {
-                    val consumed = broker.consumeNavigation(
-                        decision.action, sessionId, tabId, documentGeneration, url, "navigation",
-                    )
-                    if (consumed && loadWhenAllowed) view.loadUrl(url)
-                    return consumed
-                }
-
-                is Decision.Deny -> return false
+                // 自动批准：保留 Rust 核心 nonce 语义（等同用户批准后兑换）
+                val approved = broker.approveNavigationConfirmation(decision.request, url, "navigation")
+                val consumed = approved is Decision.Allow && broker.consumeNavigation(
+                    action = approved.action,
+                    sessionId = sessionId,
+                    tabId = tabId,
+                    currentGeneration = documentGeneration,
+                    rawUrl = url,
+                    scope = "navigation",
+                )
+                if (consumed && loadWhenAllowed) view.loadUrl(url)
+                return consumed
             }
+
+            is Decision.Allow -> {
+                val consumed = broker.consumeNavigation(
+                    decision.action, sessionId, tabId, documentGeneration, url, "navigation",
+                )
+                if (consumed && loadWhenAllowed) view.loadUrl(url)
+                return consumed
+            }
+
+            is Decision.Deny -> return false
         }
-        val decision = broker.evaluateNavigation(sessionId, tabId, documentGeneration, url, "navigation")
-        val allowed = decision is Decision.Allow && broker.consumeNavigation(
-            action = decision.action,
-            sessionId = sessionId,
-            tabId = tabId,
-            currentGeneration = documentGeneration,
-            rawUrl = url,
-            scope = "navigation",
-        )
-        if (allowed && loadWhenAllowed) view.loadUrl(url)
-        return allowed
     }
 
     private fun upgradeToHttpsIfNeeded(url: String): String {

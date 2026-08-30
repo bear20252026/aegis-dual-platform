@@ -1,7 +1,7 @@
 package com.aegis.browser
 
-import androidx.lifecycle.ViewModel
 import android.webkit.WebView
+import androidx.lifecycle.ViewModel
 import com.aegis.broker.ApprovalRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -40,9 +40,39 @@ class BrowserViewModel : ViewModel() {
     val pendingNavigationConfirmation: StateFlow<PendingNavigationConfirmation?> =
         _pendingNavigationConfirmation.asStateFlow()
 
+    /**
+     * 阅读模式 + 整页翻译（ReaderController——单文件单职责；INV-04：
+     * 状态经本 ViewModel 层暴露的 StateFlow 流转，UI 不持有浏览器状态）。
+     * lazy：首次访问需 init() 已建 tabManager。
+     */
+    val reader: ReaderController by lazy {
+        ReaderController(
+            currentWebView = {
+                if (::tabManager.isInitialized) tabManager.current()?.webView else null
+            },
+            currentUrl = {
+                if (::tabManager.isInitialized) tabManager.current()?.url else null
+            },
+            navigateExternal = { url ->
+                if (::tabManager.isInitialized) {
+                    tabManager.current()?.webView?.let {
+                        SecureWebViewFactory.navigatorFor(it)?.navigateExternal(url).orFalse()
+                    } ?: false
+                } else {
+                    false
+                }
+            },
+            alert = { message -> _webViewAlert.value = message },
+        )
+    }
+
     private lateinit var tabManager: TabManager
 
     /** 初始化 TabManager 并创建首个标签。 */
+    /** 当前标签的 WebView（系统回退键消费 WebView 历史栈——未初始化返回 null）。 */
+    fun currentWebViewOrNull(): WebView? =
+        if (::tabManager.isInitialized) tabManager.current()?.webView else null
+
     fun init(context: android.content.Context) {
         if (::tabManager.isInitialized) return
         tabManager = TabManager()
@@ -132,8 +162,10 @@ class BrowserViewModel : ViewModel() {
             return false
         }
         _pendingNavigationConfirmation.value = null
-        val approved = SecureWebViewFactory.navigatorFor(pending.webView)
-            ?.approvePendingNavigation() == true
+        val approved =
+            SecureWebViewFactory
+                .navigatorFor(pending.webView)
+                ?.approvePendingNavigation() == true
         if (!approved) _webViewAlert.value = "确认请求已失效、被拒绝或无法安全恢复导航。"
         return approved
     }

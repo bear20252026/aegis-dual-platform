@@ -1,6 +1,6 @@
 """shell_toolbar.py —— 注入式工具栏脚本（单文件单职责）。
 
-Apple 设计语言版（参照 DESIGN.md apple 设计规范）：
+Apple 设计语言版（参照 docs/DESIGN.md apple 设计规范）：
 - SF Pro 字体系统
 - 白色/珠光灰背景（#fafafc / #f5f5f7）
 - Action Blue (#0066cc) 交互色

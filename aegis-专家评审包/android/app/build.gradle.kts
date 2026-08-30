@@ -34,16 +34,11 @@ val signingPropertiesFile = rootProject.file("signing.properties")
 if (signingPropertiesFile.exists()) {
     signingPropertiesFile.inputStream().use(signingProperties::load)
 }
-val requireNativePolicyCore = providers.gradleProperty("requireNativePolicyCore")
-    .map { it == "true" }
-    .getOrElse(false)
-val requireNavigationConfirmation = providers.gradleProperty("requireNavigationConfirmation")
-    .map { it == "true" }
-    .getOrElse(false)
-
-check(!requireNavigationConfirmation || requireNativePolicyCore) {
-    "requireNavigationConfirmation=true 时必须同时设置 -PrequireNativePolicyCore=true"
-}
+val requireNativePolicyCore =
+    providers
+        .gradleProperty("requireNativePolicyCore")
+        .map { it == "true" }
+        .getOrElse(false)
 
 android {
     namespace = "com.aegis.browser"
@@ -62,9 +57,13 @@ android {
         applicationId = "com.aegis.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20106
-        versionName = "2.1.6"
-        buildConfigField("boolean", "REQUIRE_NAVIGATION_CONFIRMATION", requireNavigationConfirmation.toString())
+        versionCode = 20107
+        versionName = "2.1.7"
+        ndk {
+            // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
+            // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -86,6 +85,10 @@ android {
                 keyAlias = signingProperties.getProperty("keyAlias")
                 keyPassword = signingProperties.getProperty("keyPassword")
             }
+            // 双签名方案（AGP 在 minSdk>=24 时默认关闭 v1——部分国产 ROM
+            // 与文件管理器的解析器仍走 v1，v2-only 会报 packageInfo null）
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
@@ -96,7 +99,10 @@ android {
             ) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            isMinifyEnabled = true
+            // R8 混淆暂停（2026-08-30）：JNA 按名映射 / androidx.webkit setTag(R$id)
+            // 连环踩坑——keep 规则补一个漏一个，真机三连崩。止血：关闭混淆
+            // 保可用性（体积 +~7MB），R8 规则全量真机回归后再启用。
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -109,6 +115,11 @@ android {
     }
 
     // AGP 9 默认关闭 BuildConfig 生成；BrowserEngine 依赖 BuildConfig.DEBUG
+    sourceSets {
+        // 首页资源单一事实源（ADR-007）：shared/shell（start.html + wallpapers）
+        // 与 Windows 端（PyInstaller datas）共用同一目录——一处修改两端生效
+        getByName("main").assets.srcDir(rootProject.file("../shared/shell"))
+    }
     buildFeatures {
         buildConfig = true
     }

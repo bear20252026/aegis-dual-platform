@@ -45,12 +45,23 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          targets: aarch64-linux-android  # 单架构：arm64-v8a（99% 真机）
       - name: Install JDK 21
         uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
         with:
           distribution: temurin
           java-version: "21"
+      - name: Restore release signing keystore (from secrets)
+        env:
+          AEGIS_KEYSTORE_FILE_B64: ${{ secrets.AEGIS_KEYSTORE_FILE }}
+        run: |
+          if [ -z "$AEGIS_KEYSTORE_FILE_B64" ]; then
+            echo "::warning::AEGIS_KEYSTORE_FILE 未配置——本构建产出未签名 APK"
+          else
+            echo "$AEGIS_KEYSTORE_FILE_B64" | base64 -d > "$RUNNER_TEMP/aegis-release.jks"
+            echo "AEGIS_KEYSTORE_FILE=$RUNNER_TEMP/aegis-release.jks" >> "$GITHUB_ENV"
+            echo "✅ 签名 keystore 已就绪"
+          fi
       - name: Verify shared version and release tag
         shell: bash
         run: |
@@ -71,7 +82,11 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
           restore-keys: gradle-${{ runner.os }}-
-      - name: Build four Android ABI native policy libraries
+      - name: Prepare offline GeoGebra pad into APK assets
+        uses: ./.github/actions/prepare-geogebra
+        with:
+          dest-dir: android/app/src/main/assets/geogebra
+      - name: Build Android arm64-v8a native policy library
         working-directory: core/rust-policy-core
         run: |
           cargo install cargo-ndk --version 4.1.2 --locked
@@ -80,7 +95,7 @@ jobs:
           export ANDROID_NDK="$ANDROID_NDK_HOME"
           test -d "$ANDROID_NDK_HOME"
           cargo ndk --platform 26 \
-            -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+            -t arm64-v8a \
             -o "$GITHUB_WORKSPACE/dist/native-policy/android" \
             build --release --locked
       - name: Generate Kotlin binding and native policy manifest
@@ -103,13 +118,20 @@ jobs:
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
       - name: Build release APK with the native navigation decision core
+        env:
+          # secrets 只能显式注入——签名凭据四件套透传给 gradle（FILE 已由
+          # restore 步骤写入 GITHUB_ENV）
+          AEGIS_KEYSTORE_PASSWORD: ${{ secrets.AEGIS_KEYSTORE_PASSWORD }}
+          AEGIS_KEY_ALIAS: ${{ secrets.AEGIS_KEY_ALIAS }}
+          AEGIS_KEY_PASSWORD: ${{ secrets.AEGIS_KEY_PASSWORD }}
         run: |
+          # requireNavigationConfirmation 关闭（用户决策 2026-08-30）：
+          # 每次导航弹确认不可用——Broker allow/deny 策略仍在，仅免确认弹窗
           bash ./gradlew :app:assembleRelease --no-daemon \
             -PrequireNativePolicyCore=true \
-            -PrequireNavigationConfirmation=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
           apk_entries="$(unzip -Z1 app/build/outputs/apk/release/*.apk)"
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+          for abi in arm64-v8a; do
             grep -Fx "lib/$abi/libaegis_policy_core.so" <<< "$apk_entries"
           done
       - name: Collect APK + generate SHA-256

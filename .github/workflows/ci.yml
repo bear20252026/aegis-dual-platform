@@ -52,7 +52,7 @@ jobs:
         run: ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
 
       - name: bandit 安全扫描（无 Medium/High）
-        # 设计豁免规则（见 KNOWLEDGE_BASE.md「P6 bandit 豁免」）：
+        # 设计豁免规则（见 docs/KNOWLEDGE_BASE.md「P6 bandit 豁免」）：
         # - B110 try_except_pass：静默降级是安全设计
         # - B404/B603/B607 subprocess：均为参数列表 + shell=False 的受控
         #   调用（security.py icacls / webview2_probe.py tasklist），无注入面

@@ -409,6 +409,26 @@ def _apply_esm_exceptions(window: Any, exceptions_json: str = "") -> None:
 
 
 def main() -> int:
+    """启动编排（H-3：340 行主线拆为阶段函数——每段职责单一、可独立测试）。"""
+    shell = _init_shell_and_reporter()
+    if "--smoke-test" in sys.argv:
+        return _smoke_test(shell)
+    api, restored_url = _init_stores_and_session()
+    window = _create_window(api, shell, restored_url)
+    if window is None:
+        return 1
+    _install_native_interception(window, shell)
+    _install_probe_and_monitoring(window, api)
+    _install_crash_listener(window)
+    _apply_window_hardening(window, api, shell)
+    window.events.loaded += lambda: on_loaded(window, api)
+    _start_watchdog(api)
+    shell.start()
+    return 0
+
+
+def _init_shell_and_reporter():
+    """壳抽象获取 + 外链设置 + 崩溃报告安装（411-438 段迁移）。"""
     # 壳抽象（禁止被困原则落地，2026-08-15）：通过 shell_adapter 获取
     # 壳实现，默认 pywebview；pytauri 为可插拔实现（壳可随时替换，
     # 业务 api_bridge/nav_queue 等零影响）。pywebview 为运行时依赖。
@@ -436,10 +456,14 @@ def main() -> int:
         install_crash_reporter(data_dir0 or None)
     except Exception:
         pass
+    return shell
 
-    if "--smoke-test" in sys.argv:
-        return _smoke_test(shell)
 
+def _init_stores_and_session():
+    """构建 Api + 存储/配置装载 + 会话恢复（443-492 段迁移）。
+
+    返回 (api, restored_url)——restored_url 为空表示回退默认启动页。
+    """
     api = Api()
     try:
         from app.bookmark_store import BookmarkStore
@@ -449,6 +473,11 @@ def main() -> int:
         data_dir = resolve_data_dir()
         api._data_dir = data_dir
         api.bookmarks = BookmarkStore(data_dir)
+        # 预置书签种子（首次启动空库时注入「几何画板」等外挂入口——幂等）
+        try:
+            api.bookmarks.seed_defaults()
+        except Exception:
+            pass  # 种子注入失败不影响浏览
         api.history = HistoryStore(data_dir)
         api.config = AppConfig.load(data_dir)
         if api.config is not None:
@@ -458,9 +487,41 @@ def main() -> int:
     except Exception:
         pass  # 书签/历史/配置不可用时降级为纯浏览
 
+    # 启动恢复上次会话（CHANGELOG Planned：会话恢复；config.resume_session
+    # 开启时生效）。恢复失败静默回退默认启动页——绝不阻断浏览启动。
+    restored_url = ""
+    try:
+        if api.config is not None and bool(
+                getattr(api.config, "resume_session", False)):
+            from app.session_store import SessionStore
+            _session_dir = ""
+            try:
+                from app.paths import resolve_data_dir
+                _session_dir = resolve_data_dir()
+            except Exception:
+                _session_dir = ""
+            data = SessionStore(_session_dir).load()
+            if data:
+                restored_url = api.seed_session(
+                    data["tabs"], data.get("current", 0))
+                if restored_url:
+                    try:
+                        from crash_reporter import log_event
+                        log_event(
+                            f"[session] 已恢复上次会话（{len(data['tabs'])} 个标签）")
+                    except Exception:
+                        pass
+    except Exception:
+        restored_url = ""
+        pass  # 会话恢复失败静默——回退默认启动页
+    return api, restored_url
+
+
+def _create_window(api, shell, restored_url):
+    """创建主窗口并绑定桥引用（494-505 段迁移）。返回 None=失败。"""
     window = shell.create_window(
         api,
-        START_URL,
+        restored_url or START_URL,
         title="Aegis 安全浏览器",
         width=1280,
         height=820,
@@ -470,7 +531,11 @@ def main() -> int:
         print("[fatal] create_window 返回 None，无法启动", file=sys.stderr)
         return 1
     api.window = window      # 创建后再绑定 window 引用，供桥方法调用
+    return window
 
+
+def _install_native_interception(window, shell):
+    """原生层链接拦截 + 指纹防护前置注入（507-545 段迁移）。"""
     # === 原生层链接拦截（WebView2 NewWindowRequested）===
     # JS 注入只能拦截页面内 <a> 标签点击——但 target="_blank" 链接和
     # window.open() 在 WebView2 原生层处理，JS 来不及拦截。
@@ -511,6 +576,9 @@ def main() -> int:
     except Exception:
         pass  # WebView2 核心不可用时降级为 JS 拦截
 
+
+def _install_probe_and_monitoring(window, api):
+    """WebView2 探测/性能基线/Runtime 监控/24h 复采样（547-610 段迁移）。"""
     # 落地②：WebView2 兼容性探测（Runtime 版本 + 关键 API 可用性，
     # 写日志供监控/排障；Evergreen 2 周更新节奏下用于回归基线）
     try:
@@ -576,6 +644,9 @@ def main() -> int:
     except Exception:
         pass  # 探测失败静默，不影响浏览
 
+
+def _install_crash_listener(window):
+    """WebView2 进程崩溃监听（612-634 段迁移）。"""
     # 落地③：WebView2 进程崩溃监听（ProcessFailed.CrashReport，2026-07 新 API）。
     # 渲染/GPU 子进程崩溃时 Python 主进程仍存活，借此把崩溃详情写入
     # crash_reports/events.log（异常码/故障模块/偏移/崩溃 ID）；CrashReport
@@ -600,6 +671,9 @@ def main() -> int:
     except Exception:
         pass  # 事件绑定失败静默，不影响浏览
 
+
+def _apply_window_hardening(window, api, shell):
+    """窗口加固束：功能收紧/预热/磁盘缓存/ESM/请求策略/背景（636-709 段迁移）。"""
     # 方向①-S4：按官方安全清单限制 WebView2 功能（宿主对象/web 消息/弹窗，
     # 探测+静默；JS 保持启用以支撑工具栏注入）
     try:
@@ -652,7 +726,6 @@ def main() -> int:
     # 导航层（safe_url + host_is_blocked 实时）。pywebview 不支持该事件
     # 时静默降级，不影响浏览。
     try:
-        from app.config import AppConfig
         dnt_enabled = True  # 默认开启（与 config 默认值一致）
         if api.config is not None:
             dnt_enabled = bool(getattr(api.config, "do_not_track", True))
@@ -675,8 +748,9 @@ def main() -> int:
     except Exception:
         pass  # 非 Win11 / DWM 不可用等情形下静默，不影响浏览
 
-    window.events.loaded += lambda: on_loaded(window, api)
 
+def _start_watchdog(api):
+    """导航线程看门狗（713-744 段迁移）。"""
     # 看门狗：监控导航线程健康度，疑似卡死 → dump 线程栈 + 自动重启导航线程
     try:
         from crash_reporter import dump_threads_to_report, log_event, start_watchdog
@@ -709,10 +783,6 @@ def main() -> int:
         start_watchdog(_watch, interval=2.0, timeout=4.0, name="nav")
     except Exception:
         pass  # 看门狗不可用时降级
-
-    # 启动壳事件循环（经壳抽象——pywebview/pytauri 可插拔）
-    shell.start()
-    return 0
 
 
 def _smoke_test(shell: Any) -> int:

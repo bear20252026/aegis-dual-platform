@@ -167,12 +167,24 @@ class NativePolicyCoreBridge private constructor(
 
         fun tryCreate(policyVersion: String): NativePolicyCoreBridge? = try {
             val native = Native.load("aegis_policy_core", NativePolicyCoreAbi::class.java)
-            if (native.aegis_policy_core_abi_version() != expectedAbiVersion) return null
-            val broker = native.aegis_policy_core_broker_new(policyVersion) ?: return null
-            NativePolicyCoreBridge(native, broker)
-        } catch (_: LinkageError) {
+            if (native.aegis_policy_core_abi_version() != expectedAbiVersion) {
+                // 诊断留痕（真机排障：so 在但 ABI 与 Kotlin 期望不一致）
+                android.util.Log.e("AegisBroker", "native abi_version mismatch: expected $expectedAbiVersion")
+                null
+            } else {
+                val broker = native.aegis_policy_core_broker_new(policyVersion)
+                if (broker == null) {
+                    android.util.Log.e("AegisBroker", "aegis_policy_core_broker_new returned null")
+                }
+                broker?.let { NativePolicyCoreBridge(native, it) }
+            }
+        } catch (e: LinkageError) {
+            // 诊断留痕（真机排障：libjnidispatch/libaegis_policy_core 加载失败——
+            // 典型为 R8 混淆掉 JNA 按名映射的 Abi 接口，见 app/proguard-rules.pro）
+            android.util.Log.e("AegisBroker", "native core load failed: ${e.javaClass.simpleName}: ${e.message}")
             null
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("AegisBroker", "native core init failed: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
 

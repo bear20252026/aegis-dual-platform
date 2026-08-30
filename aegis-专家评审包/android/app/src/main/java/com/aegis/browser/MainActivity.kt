@@ -1,5 +1,6 @@
 package com.aegis.browser
 
+import android.view.KeyEvent
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -12,7 +13,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
@@ -56,6 +60,30 @@ class MainActivity : ComponentActivity() {
                 val tabsPosition by viewModel.tabsPosition.collectAsState()
                 val webViewAlert by viewModel.webViewAlert.collectAsState()
                 val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsState()
+                val readerContent by viewModel.reader.content.collectAsState()
+
+                // 阅读模式：提取到的正文以对话框渲染（INV-04：状态来自 ViewModel）
+                readerContent?.let { content ->
+                    AlertDialog(
+                        onDismissRequest = { viewModel.reader.dismissReader() },
+                        title = { Text(content.title) },
+                        text = {
+                            Column {
+                                Text(
+                                    text = content.text,
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(max = 420.dp)
+                                            .verticalScroll(rememberScrollState()),
+                                )
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(onClick = { viewModel.reader.dismissReader() }) { Text("关闭") }
+                        },
+                    )
+                }
 
                 // A1：版本过旧 → 安全提示对话框（CVE-2026-12438/11295 防御）
                 webViewAlert?.let { msg ->
@@ -124,19 +152,33 @@ class MainActivity : ComponentActivity() {
                             onClose = { viewModel.closeTab(it) },
                             onNewTab = { viewModel.newTab(this@MainActivity) },
                         )
-                        AddressBarAndNav(
+                        AddressBarWithSnake(
                             address = address,
                             onAddressChange = { viewModel.updateAddress(it) },
                             onOpen = { viewModel.navigateToAddress() },
                             onBack = { viewModel.navigateHistory(HistoryAction.BACK) },
                             onForward = { viewModel.navigateHistory(HistoryAction.FORWARD) },
                             onReload = { viewModel.navigateHistory(HistoryAction.RELOAD) },
+                            onReader = { viewModel.reader.toggleReaderMode() },
+                            onTranslate = { viewModel.reader.translateCurrentPage() },
                         )
                         WebContentArea(tabManager = viewModel.getTabManager()!!, modifier = Modifier.weight(1f))
                     }
                 }
             }
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            val wv = viewModel.currentWebViewOrNull()
+            // 消费 WebView 历史栈逐级回退；无历史（如首页）放行系统默认
+            if (wv != null && wv.canGoBack()) {
+                SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK)
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onDestroy() {
@@ -161,40 +203,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** 地址栏 + 导航按钮（top 布局专用，抽离保持薄壳；按钮功能经回调上抛）。 */
-@Composable
-private fun AddressBarAndNav(
-    address: String,
-    onAddressChange: (String) -> Unit,
-    onOpen: () -> Unit,
-    onBack: () -> Unit,
-    onForward: () -> Unit,
-    onReload: () -> Unit,
-) {
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            OutlinedTextField(
-                value = address,
-                onValueChange = onAddressChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                label = { Text("地址") },
-            )
-            Button(onClick = onOpen) { Text("打开") }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Button(onClick = onBack) { Text("后退") }
-            Button(onClick = onForward) { Text("前进") }
-            Button(onClick = onReload) { Text("刷新") }
-        }
-    }
-}
 
 /** 页面容器：显示当前标签的 WebView（两种布局共用）。 */
 @Composable

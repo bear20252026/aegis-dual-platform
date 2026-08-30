@@ -30,7 +30,7 @@
 | 发布/集成 | Python | `validate_release.py`、CI（`ci.yml`/`compat.yml`/`supply-chain.yml`） |
 
 ### 1.2 方法
-- 通读架构/安全文档（`DESIGN.md`、`SECURITY.md`、`docs/audit-2026.md`、`docs/expert-review-2026.md`）建立基线。
+- 通读架构/安全文档（`docs/DESIGN.md`、`SECURITY.md`、`docs/audit-2026.md`、`docs/expert-review-2026.md`）建立基线。
 - 针对「跨平台一致的安全性」逐点比对 Rust 与 C# 两端实现。
 - 用真实构建工具链实测：`cargo test`+`clippy`+`fmt`、`dotnet build`+单测、node JS 验证、`validate_release.py` 回归。
 

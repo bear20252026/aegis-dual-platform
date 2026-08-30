@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Aegis 新标签页</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; overflow:hidden; }
+  body {
+    font-family: system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    color:#fff;
+  }
+  /* 全屏壁纸背景（默认暮蓝，由 JS 按配置切换） */
+  #wallpaper {
+    position:fixed; inset:0; z-index:0;
+    background:url('wallpapers/aurora-twilight.jpg') center/cover no-repeat;
+    transition:background-image .5s ease;
+  }
+  #wallpaper::after {
+    content:''; position:absolute; inset:0;
+    background:linear-gradient(180deg, rgba(10,15,40,0.25) 0%, rgba(10,15,40,0.15) 45%, rgba(10,15,40,0.45) 100%);
+  }
+  .center {
+    position:relative; z-index:1; height:100%;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding-bottom:8vh;
+  }
+  .logo {
+    width:64px; height:64px; border-radius:18px;
+    background:linear-gradient(135deg,#3FB8FF,#7F7BFF 45%,#FF7AB6 75%,#FFB27A);
+    display:flex; align-items:center; justify-content:center;
+    font-size:30px; color:#fff; font-weight:800;
+    box-shadow:0 12px 32px rgba(0,0,0,0.30);
+    margin-bottom:22px;
+  }
+  h1 { font-size:30px; font-weight:700; letter-spacing:2px; text-shadow:0 2px 12px rgba(0,0,0,0.4); margin-bottom:30px; }
+  /* 微软 Bing 风格大搜索框 */
+  .search {
+    width:600px; max-width:88vw; height:56px; display:flex; align-items:center;
+    background:rgba(255,255,255,0.92); border-radius:28px;
+    padding:0 8px 0 26px; backdrop-filter:blur(8px);
+    box-shadow:0 10px 40px rgba(0,0,0,0.25);
+  }
+  .search input {
+    flex:1; border:0; outline:0; font-size:17px; background:transparent; color:#22303f;
+  }
+  .search input::placeholder { color:#8a94a6; }
+  .search input[type=search] { -webkit-appearance:none; }
+  /* form 打断外层 flex——form 自身承担 flex 行（input+button 同行） */
+  #searchForm {
+    display:flex; flex:1; align-items:center; height:100%;
+    margin:0; padding:0; border:0; background:transparent;
+  }
+  .search input[type=search]::-webkit-search-cancel-button {
+    -webkit-appearance:none; width:18px; height:18px; cursor:pointer;
+    background:linear-gradient(45deg,transparent 44%,#8a94a6 44%,#8a94a6 56%,transparent 56%),
+               linear-gradient(-45deg,transparent 44%,#8a94a6 44%,#8a94a6 56%,transparent 56%);
+    border-radius:50%;
+  }
+  .search button {
+    border:0; height:42px; padding:0 26px; border-radius:21px;
+    background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff;
+    font-size:15px; cursor:pointer; font-weight:600;
+  }
+  /* 壁纸切换控件（右下角） */
+  .wallpapers {
+    position:fixed; right:22px; bottom:22px; z-index:5;
+    display:flex; align-items:center; gap:10px;
+    background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.25);
+    backdrop-filter:blur(10px); border-radius:22px; padding:8px 14px;
+  }
+  .wp {
+    width:34px; height:34px; border-radius:50%; cursor:pointer; border:2px solid transparent;
+    background-size:cover; background-position:center; transition:transform .15s, border-color .15s;
+  }
+  .wp:hover { transform:scale(1.15); }
+  .wp.active { border-color:#fff; box-shadow:0 0 0 3px rgba(63,184,255,0.5); }
+  .wp-label { font-size:12px; color:rgba(255,255,255,0.9); padding-right:4px; }
+  /* 书签宫格 */
+  .bookmarks { margin-top:44px; display:flex; flex-wrap:wrap; gap:14px; justify-content:center; max-width:760px; }
+  .bm {
+    width:92px; padding:12px 8px; background:rgba(255,255,255,0.14);
+    border:1px solid rgba(255,255,255,0.18); backdrop-filter:blur(8px);
+    border-radius:16px; cursor:pointer; text-align:center; transition:transform .12s, background .12s;
+  }
+  .bm:hover { transform:translateY(-3px); background:rgba(255,255,255,0.24); }
+  .bm-ico {
+    width:36px; height:36px; margin:0 auto 8px; border-radius:11px;
+    background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px;
+  }
+  .bm-name { font-size:12px; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  .bm-empty { font-size:13px; color:rgba(255,255,255,0.85); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  .footer { position:fixed; left:0; right:0; bottom:10px; z-index:4; text-align:center; font-size:12px; color:rgba(255,255,255,0.7); text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  /* 搜索引擎胶囊徽标（苹果风格小胶囊，点击切换） */
+  .engine-pill {
+    display:inline-flex; align-items:center; gap:4px; height:24px;
+    padding:0 10px; border-radius:12px; cursor:pointer; flex:0 0 auto;
+    background:rgba(63,184,255,0.18); border:1px solid rgba(255,255,255,0.35);
+    color:#fff; font-size:11px; letter-spacing:.5px; transition:background .15s;
+  }
+  .engine-pill:hover { background:rgba(63,184,255,0.32); }
+  .engine-pill .dot { width:6px; height:6px; border-radius:50%; background:#3FB8FF; }
+  /* 恢复上次会话入口（会话持久化 CHANGELOG Planned） */
+  .restore-btn {
+    border:1px solid rgba(255,255,255,0.35); height:38px; padding:0 22px;
+    border-radius:19px; cursor:pointer; font-size:14px; color:#fff;
+    background:rgba(255,255,255,0.18); backdrop-filter:blur(8px);
+    transition:background .15s;
+  }
+  .restore-btn:hover { background:rgba(255,255,255,0.3); }
+  /* 几何画板快捷入口（离线 GeoGebra——安装包内置资源） */
+  .quick-row {
+    margin-top:20px; display:flex; gap:14px; justify-content:center;
+  }
+  .quick-btn {
+    display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 28px;
+    border:1px solid rgba(255,255,255,0.4); border-radius:24px; cursor:pointer;
+    background:linear-gradient(135deg, rgba(63,184,255,0.30), rgba(127,123,255,0.30));
+    backdrop-filter:blur(10px); color:#fff; font-size:15px; font-weight:600;
+    font-family:inherit; letter-spacing:1px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.22);
+    transition:transform .15s ease, background .15s ease, box-shadow .15s ease;
+  }
+  .quick-btn:hover {
+    transform:translateY(-3px);
+    background:linear-gradient(135deg, rgba(63,184,255,0.48), rgba(127,123,255,0.48));
+    box-shadow:0 12px 32px rgba(63,184,255,0.35);
+  }
+  .quick-btn:active { transform:translateY(0); }
+  .quick-btn .ico { font-size:20px; line-height:1; }
+  .quick-btn.unavailable { opacity:.45; }
+  /* 导入向导（玻璃拟态，与 NTP 风格一致） */
+  .link-btn {
+    border:0; background:transparent; color:rgba(255,255,255,0.85);
+    font-size:13px; cursor:pointer; text-decoration:underline;
+    text-underline-offset:3px; padding:4px 8px; transition:color .15s;
+  }
+  .link-btn:hover { color:#fff; }
+  #importModal {
+    position:fixed; inset:0; z-index:50; display:flex;
+    align-items:center; justify-content:center;
+    background:rgba(10,15,40,0.45); backdrop-filter:blur(4px);
+  }
+  .im-card {
+    width:460px; max-width:92vw; max-height:80vh; overflow-y:auto;
+    background:rgba(255,255,255,0.95); border-radius:22px;
+    padding:26px 28px; color:#22303f;
+    box-shadow:0 18px 60px rgba(0,0,0,0.35);
+    font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  .im-title { font-size:18px; font-weight:700; margin-bottom:16px; }
+  .im-row { display:flex; align-items:center; gap:10px; padding:8px 0; font-size:14px; }
+  .im-row input[type=checkbox] { width:16px; height:16px; accent-color:#3FB8FF; }
+  .im-row select {
+    border:1px solid #d5dbe6; border-radius:8px; padding:3px 6px;
+    font-size:13px; color:#22303f; background:#fff;
+  }
+  .im-section { font-size:13px; color:#6b7688; margin:14px 0 4px; }
+  .im-result { font-size:14px; padding:6px 0; }
+  .im-empty { font-size:14px; color:#6b7688; padding:12px 0; }
+  .im-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:20px; }
+  .im-actions button {
+    border:0; height:36px; padding:0 20px; border-radius:18px;
+    font-size:14px; cursor:pointer; font-weight:600;
+  }
+  #imClose { background:#eef1f6; color:#22303f; }
+  #imNext { background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff; }
+  #imNext:disabled { opacity:.5; cursor:default; }
+
+  /* —— 移动端响应式（≤640px：手机竖屏与窄窗）—— */
+  @media (max-width: 640px) {
+    .center { padding-bottom:12vh; padding-left:16px; padding-right:16px; }
+    .logo { width:52px; height:52px; border-radius:14px; font-size:24px; margin-bottom:16px; }
+    h1 { font-size:22px; margin-bottom:20px; }
+    .search { width:100%; height:50px; border-radius:25px; padding:0 6px 0 18px; }
+    .search input { font-size:15px; }
+    .search button { height:38px; padding:0 18px; font-size:13px; flex:0 0 auto; }
+    .quick-row { width:100%; }
+    .quick-btn { width:100%; justify-content:center; height:44px; font-size:14px; }
+    .bookmarks { margin-top:28px; gap:10px; width:100%; }
+    .bm { width:calc(50% - 5px); }
+    .quick-row { margin-top:16px; }
+    .wallpapers { right:12px; bottom:14px; padding:6px 10px; gap:8px; }
+    .wp { width:28px; height:28px; }
+    .footer { font-size:10px; bottom:6px; }
+    #importEntry { font-size:12px; }
+  }
+  /* 触摸目标保底（移动端可用性） */
+  @media (pointer: coarse) {
+    .wp, .quick-btn, .search button, .engine-pill { min-height:40px; }
+  }
+</style>
+</head>
+<body>
+  <div id="wallpaper"></div>
+
+  <div class="center">
+    <div class="logo">A</div>
+    <h1>Aegis 安全浏览器</h1>
+    <div class="search">
+      <div class="engine-pill" id="enginePill" title="切换搜索引擎" onclick="cycleEngine()">
+        <span class="dot"></span><span id="engineName">百度</span>
+      </div>
+      <!-- form+submit：兼容移动端 IME「搜索/前往」action（不走 keydown Enter） -->
+      <form id="searchForm" onsubmit="event.preventDefault(); go();">
+      <input id="q" type="search" enterkeyhint="search" autocomplete="off"
+             placeholder="搜索网页或输入网址…" autofocus>
+      <button type="button" id="searchBtn" onclick="go()">搜索</button>
+      </form>
+    </div>
+    <!-- 几何画板快捷入口（离线 GeoGebra——点击跳转内置画板页） -->
+    <div class="quick-row">
+      <button id="geoBtn" class="quick-btn" title="离线几何画板 · 无需网络">
+        <span class="ico">📐</span><span>几何画板</span>
+      </button>
+    </div>
+    <div class="bookmarks" id="bm"></div>
+    <div id="restoreBox" style="display:none;margin-top:26px;">
+      <button id="restoreBtn" class="restore-btn">恢复上次会话</button>
+    </div>
+    <div style="margin-top:14px;">
+      <button id="importEntry" class="link-btn">从 Chrome / Edge 导入书签与历史</button>
+    </div>
+  </div>
+
+  <!-- 导入向导弹层（步骤内容全部由 JS 以 textContent 构建——R-06） -->
+  <div id="importModal" style="display:none;">
+    <div class="im-card">
+      <div class="im-title">从 Chrome / Edge 导入</div>
+      <div id="imBody"></div>
+      <div class="im-actions">
+        <button id="imClose">关闭</button>
+        <button id="imNext">下一步</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 壁纸切换 -->
+  <div class="wallpapers">
+    <span class="wp-label">壁纸</span>
+    <div id="wpList"></div>
+  </div>
+  <div class="footer">Enter 打开 · Ctrl+L 聚焦地址栏</div>
+
+  <script>
+    // JS 错误上报：页面任何异常 → Python 日志（后台静默）
+    // ================= 跨端宿主桥适配层（ADR-007 单源首页） =================
+    // Windows：pywebview.api（异步 Promise）；Android：AegisBridge
+    // （@JavascriptInterface，同步返回——由适配层统一包装成 thenable）。
+    // 能力面差异：Android 首页当前能力 = 错误上报/引擎/导航/壁纸/画板；
+    // 书签宫格、导入向导、会话恢复为 Windows 能力（Android 上自动隐藏）。
+    var Host = (function () {
+      var winApi = function () { return (window.pywebview && pywebview.api) || null; };
+      var andApi = function () { return window.AegisBridge || null; };
+      var sync = function (v) {
+        return { then: function (f) { try { f(v); } catch (e) {} return sync(v); },
+                 catch: function () { return sync(v); } };
+      };
+      return {
+        kind: function () { return winApi() ? 'win' : (andApi() ? 'android' : null); },
+        has: function (feat) {
+          var k = this.kind();
+          if (!k) return false;
+          if (k === 'win') return true;
+          var androidFeats = { error: 1, engine: 1, navigate: 1, wallpaper: 1, geo: 1 };
+          return !!androidFeats[feat];
+        },
+        jsError: function () {
+          var w = winApi(); if (w) { w.js_error.apply(w, arguments); return; }
+          var a = andApi(); if (a) a.logError([].slice.call(arguments).join(' | '));
+        },
+        setEngine: function (key) {
+          var w = winApi(); if (w) { w.set_search_engine(key); return; }
+          var a = andApi(); if (a) a.setEngine(key);
+        },
+        getEngine: function (cb) {
+          var w = winApi(); if (w) { w.get_search_engine().then(cb); return; }
+          var a = andApi(); if (a) cb(a.getEngine());
+        },
+        navigate: function (url) {
+          var w = winApi(); if (w) { w.navigate(url); return; }
+          var a = andApi(); if (a) a.navigate(url);
+        },
+        setWallpaper: function (name) {
+          var w = winApi(); if (w) { w.set_wallpaper(name); return; }
+          var a = andApi(); if (a) a.setWallpaper(name);
+        },
+        getWallpaper: function (cb) {
+          var w = winApi(); if (w) { w.get_wallpaper().then(cb); return; }
+          var a = andApi(); if (a) cb(a.getWallpaper());
+        },
+        openGeo: function (onFail) {
+          var w = winApi();
+          if (w) { w.open_geogebra().then(function (ok) { if (!ok) onFail(); }); return; }
+          var a = andApi(); if (a && !a.openGeogebra()) onFail();
+        },
+        hasSaved: function (cb) {
+          var w = winApi(); if (w) { w.has_saved_session().then(cb); return; }
+          cb(0);  // Android：会话恢复为 Windows 能力
+        },
+        restoreSession: function () { var w = winApi(); if (w) w.restore_session(); },
+        bookmarks: function (cb) {
+          var w = winApi(); if (w) { w.get_bookmarks().then(cb); return; }
+          cb([]);  // Android：书签宫格暂无数据源
+        },
+        importScan: function (cb) {
+          var w = winApi(); if (w) { w.scan_import_sources().then(cb); return; }
+          cb([]);  // Android：导入向导为 Windows 能力
+        },
+        importBookmarks: function (src, cb) {
+          var w = winApi(); if (w) { w.import_bookmarks(src).then(cb); return; }
+          cb({ imported: 0, total: 0 });
+        },
+        importHistory: function (limit, src, cb) {
+          var w = winApi(); if (w) { w.import_history(limit, src).then(cb); return; }
+          cb({ imported: 0, total: 0 });
+        },
+      };
+    })();
+
+    window.addEventListener('error', function (e) {
+      try {
+        Host.jsError(
+          e.message || 'unknown', e.filename || '', e.lineno, e.colno,
+          (e.error && e.error.stack) || '');
+      } catch (err) {}
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      try {
+        Host.jsError(
+          'Promise rejection: ' + (e.reason || ''), '', 0, 0,
+          (e.reason && e.reason.stack) || '');
+      } catch (err) {}
+    });
+
+    var WALLPAPERS = [
+      {name:'aurora-magenta.jpg', url:'wallpapers/aurora-magenta.jpg'},
+      {name:'aurora-lime.jpg',    url:'wallpapers/aurora-lime.jpg'},
+      {name:'aurora-twilight.jpg',url:'wallpapers/aurora-twilight.jpg'},
+      {name:'aurora-violet.jpg',  url:'wallpapers/aurora-violet.jpg'}
+    ];
+    var current = 'aurora-twilight.jpg';
+    // 搜索引擎状态
+    var ENGINES = [];           // [{key,name}]
+    var engineIdx = 0;
+
+    function renderEngine() {
+      var el = document.getElementById('engineName');
+      if (el && ENGINES.length) el.textContent = ENGINES[engineIdx].name;
+    }
+    function cycleEngine() {
+      if (!ENGINES.length) return;
+      engineIdx = (engineIdx + 1) % ENGINES.length;
+      renderEngine();
+      try { Host.setEngine(ENGINES[engineIdx].key); } catch (e) {}
+    }
+    // 读取当前搜索引擎（配置持久化）
+    {
+      try {
+        Host.getEngine(function (data) {
+          if (!data) return;
+          ENGINES = data.engines || [];
+          for (var i = 0; i < ENGINES.length; i++) {
+            if (ENGINES[i].key === data.engine) { engineIdx = i; break; }
+          }
+          renderEngine();
+        });
+      } catch (e) {}
+    }
+
+    var _searchBusy = false;
+    function go() {
+      if (_searchBusy) return;
+      var v = document.getElementById('q').value.trim();
+      if (!v || !Host.has('navigate')) return;
+      _searchBusy = true;
+      var btn = document.getElementById('searchBtn');
+      var orig = btn.textContent;
+      btn.textContent = '搜索中…';
+      try { Host.navigate(v); } catch (e) { Host.jsError('navigate failed: ' + e); }
+      // 导航被 Broker 确认面板挂起或失败时复原按钮（成功则页面随即卸载）
+      setTimeout(function () { btn.textContent = orig; _searchBusy = false; }, 1200);
+    }
+    function openUrl(u) {
+      if (Host.has('navigate')) Host.navigate(u);
+    }
+    document.getElementById('q').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') go();
+    });
+    document.addEventListener('keydown', function (e) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
+        e.preventDefault(); document.getElementById('q').focus(); document.getElementById('q').select();
+      }
+    });
+
+    function setWallpaper(name) {
+      var hit = null;
+      for (var i = 0; i < WALLPAPERS.length; i++) {
+        if (WALLPAPERS[i].name === name) { hit = WALLPAPERS[i]; break; }
+      }
+      if (!hit) return;
+      current = name;
+      document.getElementById('wallpaper').style.backgroundImage = "url('" + hit.url + "')";
+      var dots = document.getElementById('wpList').children;
+      for (var j = 0; j < dots.length; j++) {
+        dots[j].className = 'wp' + (WALLPAPERS[dots[j].dataset.i].name === name ? ' active' : '');
+      }
+      try { Host.setWallpaper(name); } catch (e) {}
+    }
+
+    // 渲染壁纸切换圆点
+    var wl = document.getElementById('wpList');
+    for (var i = 0; i < WALLPAPERS.length; i++) {
+      (function (idx) {
+        var d = document.createElement('div');
+        d.className = 'wp';
+        d.dataset.i = idx;
+        d.style.backgroundImage = "url('" + WALLPAPERS[idx].url + "')";
+        d.title = WALLPAPERS[idx].name;
+        d.onclick = function () { setWallpaper(WALLPAPERS[idx].name); };
+        wl.appendChild(d);
+      })(i);
+    }
+
+    // 读取当前壁纸（配置持久化）
+    {
+      try {
+        Host.getWallpaper(function (name) {
+          if (name) setWallpaper(name);
+        });
+      } catch (e) {}
+    }
+
+    // 几何画板快捷入口（离线 GeoGebra——后端加载内置资源页；
+    // 资源未随包时返回 false → 按钮置灰提示）
+    (function () {
+      var btn = document.getElementById('geoBtn');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        try {
+          if (!Host.has('geo')) return;
+          Host.openGeo(function () {
+            if (!ok) {
+              btn.classList.add('unavailable');
+              btn.title = '当前安装包未包含画板资源';
+            }
+          });
+        } catch (e) {}
+      });
+    })();
+
+    // 恢复上次会话入口（resume_session 自动恢复之外的手动入口；
+    // 仅当已保存会话 >1 个标签时显示——has_saved_session 只返回计数）
+    {
+      try {
+        Host.hasSaved(function (n) {
+          n = parseInt(n, 10) || 0;
+          if (n > 1) {
+            var box = document.getElementById('restoreBox');
+            var btn = document.getElementById('restoreBtn');
+            if (!box || !btn) return;
+            btn.textContent = '恢复上次会话（' + n + ' 个标签）';
+            box.style.display = 'block';
+            btn.onclick = function () {
+              try { Host.restoreSession(); } catch (e) {}
+            };
+          }
+        });
+      } catch (e) {}
+    }
+
+    // ================= 导入向导（Chrome/Edge 书签与历史） =================
+    // 受信壳页专用——桥方法内再做来源校验（远程页不可达）。
+    // R-06：全部 DOM 以 textContent/replaceChildren 构建（无 innerHTML）。
+    (function () {
+      var modal = document.getElementById('importModal');
+      var body = document.getElementById('imBody');
+      var nextBtn = document.getElementById('imNext');
+      var closeBtn = document.getElementById('imClose');
+      var entry = document.getElementById('importEntry');
+      if (!modal || !body || !nextBtn || !closeBtn || !entry) return;
+
+      var sources = [];      // scan_import_sources() 结果
+    // Android 宿主无导入能力——隐藏入口（Host.has 能力面声明）
+    if (!Host.has('import')) entry.style.display = 'none';
+      var step = 'pick';     // pick | running | done
+      var pickedChecks = []; // 来源复选框（.browser）
+      var bmCheck = null, hiCheck = null, limitSel = null;
+
+      function api() { return Host; }
+      function label(b) { return b === 'chrome' ? 'Chrome' : 'Edge'; }
+
+      function close() {
+        modal.style.display = 'none';
+        body.textContent = '';
+        step = 'pick';
+        nextBtn.disabled = false;
+      }
+
+      function checkboxRow(text, checked) {
+        var row = document.createElement('label');
+        row.className = 'im-row';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!checked;
+        var txt = document.createElement('span');
+        txt.textContent = text;
+        row.appendChild(cb);
+        row.appendChild(txt);
+        row._cb = cb;
+        return row;
+      }
+
+      function hint(text) {
+        var d = document.createElement('div');
+        d.className = 'im-empty';
+        d.textContent = text;
+        return d;
+      }
+
+      function renderPick() {
+        body.textContent = '';
+        step = 'pick';
+        if (!sources.length) {
+          nextBtn.style.display = 'none';
+          body.appendChild(hint('未检测到 Chrome / Edge 数据（仅支持 Default 配置目录）。'));
+          return;
+        }
+        nextBtn.style.display = '';
+        nextBtn.textContent = '开始导入';
+        var sec = document.createElement('div');
+        sec.className = 'im-section';
+        sec.textContent = '检测到以下来源：';
+        body.appendChild(sec);
+        pickedChecks = [];
+        sources.forEach(function (s, i) {
+          var parts = [];
+          if (s.bookmarks) parts.push('书签');
+          if (s.history) parts.push('历史');
+          var row = checkboxRow(label(s.browser) + '（' + parts.join(' + ') + '）', i === 0);
+          row._browser = s.browser;
+          pickedChecks.push(row);
+          body.appendChild(row);
+        });
+        var sec2 = document.createElement('div');
+        sec2.className = 'im-section';
+        sec2.textContent = '导入内容：';
+        body.appendChild(sec2);
+        var bmRow = checkboxRow('书签', true);
+        bmCheck = bmRow._cb;
+        body.appendChild(bmRow);
+        var hiRow = checkboxRow('历史（最近）', true);
+        hiCheck = hiRow._cb;
+        body.appendChild(hiRow);
+        var limRow = document.createElement('div');
+        limRow.className = 'im-row';
+        var limText = document.createElement('span');
+        limText.textContent = '历史条数上限：';
+        limitSel = document.createElement('select');
+        [100, 500, 1000, 2000].forEach(function (n) {
+          var o = document.createElement('option');
+          o.value = String(n);
+          o.textContent = String(n);
+          if (n === 500) o.selected = true;
+          limitSel.appendChild(o);
+        });
+        limRow.appendChild(limText);
+        limRow.appendChild(limitSel);
+        body.appendChild(limRow);
+      }
+
+      function collect(kind, browser, r) {
+        r = r || {};
+        var imp = parseInt(r.imported, 10) || 0;
+        var tot = parseInt(r.total, 10) || 0;
+        agg.imported += imp;
+        agg.total += tot;
+        agg.lines.push(label(browser) + ' ' + kind + '：导入 ' + imp + ' / ' + tot);
+      }
+
+      var agg = { imported: 0, total: 0, lines: [] };
+
+      function runImport() {
+        var picked = [];
+        pickedChecks.forEach(function (row) {
+          if (row._cb.checked) picked.push(row._browser);
+        });
+        var doBm = !!(bmCheck && bmCheck.checked);
+        var doHi = !!(hiCheck && hiCheck.checked);
+        if (!picked.length || (!doBm && !doHi)) { close(); return; }
+        var a = api();
+        if (!a) { close(); return; }
+        step = 'running';
+        nextBtn.disabled = true;
+        body.textContent = '';
+        body.appendChild(hint('正在导入…（浏览器数据库只读访问，不影响源浏览器）'));
+        var lim = parseInt(limitSel ? limitSel.value : '500', 10) || 500;
+        agg = { imported: 0, total: 0, lines: [] };
+        var chain = Promise.resolve();
+        picked.forEach(function (src) {
+          if (doBm) {
+            chain = chain.then(function () { return a.importBookmarks(src); })
+              .then(function (r) { collect('书签', src, r); });
+          }
+          if (doHi) {
+            chain = chain.then(function () { return a.importHistory(lim, src, function () {}); })
+              .then(function (r) { collect('历史', src, r); });
+          }
+        });
+        chain.then(renderDone).catch(renderDone);
+      }
+
+      function renderDone() {
+        body.textContent = '';
+        step = 'done';
+        nextBtn.disabled = false;
+        nextBtn.textContent = '完成';
+        var sum = document.createElement('div');
+        sum.className = 'im-result';
+        sum.textContent = '导入完成：共新增 ' + agg.imported + ' 条（解析 ' + agg.total + ' 条）。';
+        body.appendChild(sum);
+        agg.lines.forEach(function (line) {
+          var d = document.createElement('div');
+          d.className = 'im-result';
+          d.textContent = '· ' + line;
+          body.appendChild(d);
+        });
+        if (agg.imported > 0 && typeof renderBookmarks === 'function') {
+          renderBookmarks();  // 刷新宫格
+        }
+      }
+
+      function openWizard() {
+        var a = api();
+        if (!a) return;
+        modal.style.display = 'flex';
+        body.textContent = '';
+        step = 'pick';
+        nextBtn.disabled = true;
+        nextBtn.textContent = '扫描中…';
+        nextBtn.style.display = '';
+        body.appendChild(hint('正在扫描本机 Chrome / Edge 数据…'));
+        try {
+          Host.importScan(function (list) {
+            sources = Array.isArray(list) ? list : [];
+            nextBtn.disabled = false;
+            renderPick();
+          }).catch(function () {
+            sources = [];
+            nextBtn.disabled = false;
+            renderPick();
+          });
+        } catch (e) {
+          sources = [];
+          nextBtn.disabled = false;
+          renderPick();
+        }
+      }
+
+      entry.addEventListener('click', openWizard);
+      closeBtn.addEventListener('click', close);
+      nextBtn.addEventListener('click', function () {
+        if (step === 'pick') runImport();
+        else if (step === 'done') close();
+      });
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && modal.style.display !== 'none') close();
+      });
+    })();
+
+    // 渲染书签
+    function renderBookmarks() {
+      var box = document.getElementById('bm');
+      if (!box) return;
+      try {
+        if (!Host.has('bookmarks')) return;
+        Host.bookmarks(function (items) {
+          if (!items || !items.length) {
+            box.textContent = '';
+            var empty = document.createElement('div');
+            empty.className = 'bm-empty';
+            empty.textContent = '还没有书签 — 在网页地址栏旁点击「收藏」即可添加';
+            box.appendChild(empty);
+            return;
+          }
+          // R-06 整改（体验/功能审查）：禁止 innerHTML 字符串拼接——
+          // 标题/URL/图标文本全部经 textContent 写入 DOM（防特殊字符
+          // 破坏显示与注入——实施手册 R-06 bookmarkCard 示例）
+          var frag = document.createDocumentFragment();
+          for (var i = 0; i < items.length; i++) {
+            var it = items[i];
+            var host = '';
+            try { host = new URL(it.url).host; } catch (e) { host = it.url; }
+            var card = document.createElement('div');
+            card.className = 'bm';
+            card.addEventListener('click', (function (u) {
+              return function () { openUrl(u); };
+            })(it.url));
+            var ico = document.createElement('div');
+            ico.className = 'bm-ico';
+            ico.textContent = (host.charAt(0) || '?').toUpperCase();
+            var name = document.createElement('div');
+            name.className = 'bm-name';
+            name.textContent = (it.title || host);
+            card.appendChild(ico);
+            card.appendChild(name);
+            frag.appendChild(card);
+          }
+          box.replaceChildren(frag);
+        });
+      } catch (e) {}
+    }
+    setTimeout(renderBookmarks, 200);
+  </script>
+</body>
+</html>

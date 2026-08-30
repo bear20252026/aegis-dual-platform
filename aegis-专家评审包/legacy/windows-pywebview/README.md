@@ -158,7 +158,7 @@ AI 助手（翻译/双语对照/总结/问答）· 密码工具（生成 + 本�
 - **自测**：`python tools/selftest_security.py`（安全）与
   `python tools/selftest_vision.py`（AI 视觉逻辑）可离线运行。
 
-> 项目根目录的 `DESIGN.md` 是界面设计的事实来源（Apple 设计系统）。其第 10 节「Application Chrome — Liquid Glass（液态玻璃）」记录了浏览器外框采用 Windows DWM 原生毛玻璃的实现要点与合规约束（不硬编码颜色、不使用 emoji 图标、禁止紫色渐变）。
+> 项目 `docs/DESIGN.md` 是界面设计的事实来源（Apple 设计系统）。其第 10 节「Application Chrome — Liquid Glass（液态玻璃）」记录了浏览器外框采用 Windows DWM 原生毛玻璃的实现要点与合规约束（不硬编码颜色、不使用 emoji 图标、禁止紫色渐变）。
 
 ---
 

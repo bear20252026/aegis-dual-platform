@@ -33,7 +33,7 @@ class AppConfig:
 
     # ---- 外观 ----
     theme: str = "auto"             # auto(跟随系统) | dark | light
-    accent_color: str = "#0071e3"     # Apple Blue（唯一强调色，DESIGN.md）
+    accent_color: str = "#0071e3"     # Apple Blue（唯一强调色，docs/DESIGN.md）
     font_size: int = 13
     # font_family: 全局统一字体栈（空串=默认苹果风格栈）。
     # 默认栈：Inter(≈SF Pro 英文) + Source Han Sans SC(≈苹方 中文)，

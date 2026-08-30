@@ -4,12 +4,29 @@
 本文件收敛其模块级纯函数与常量，不依赖 Api 类状态，可独立单测）。
 """
 
+import sys
 import urllib.parse
 from pathlib import Path
 
-# 应用根目录（aegis_source/），用于定位 shell/start.html
+# 应用根目录（legacy/windows-pywebview/）
 ROOT = Path(__file__).resolve().parent.parent
-START_URL = (ROOT / "shell" / "start.html").as_uri()
+
+
+def _shell_dir() -> Path:
+    """定位首页资源目录（shared/shell——ADR-007 UI 资源单一事实源）。
+
+    源码运行：仓库根 shared/shell/；PyInstaller 打包：_MEIPASS/shell/
+    （spec datas 把 shared/shell 打为 _internal/shell，相对结构一致——
+    start.html 内的壁纸相对路径 wallpapers/*.jpg 两端均可解析）。
+    """
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", "")
+        if meipass:
+            return Path(meipass) / "shell"
+    return ROOT.parent.parent / "shared" / "shell"
+
+
+START_URL = (_shell_dir() / "start.html").as_uri()
 
 # 搜索引擎表：key -> (名称, 搜索 URL 模板)
 SEARCH_ENGINES: dict[str, tuple[str, str]] = {

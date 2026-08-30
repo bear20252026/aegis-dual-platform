@@ -419,3 +419,50 @@
 ### 24.2 C 级收官总结
 - **C 级观察项全部调研/评估/落地闭环**（2026-08-15）——A 级（开发期）7 项 + B 级（发布期）4 项 + C 级（前瞻）3 项全部完成。
 - **Agent 安全体系**（四级纵深 + 供应链 + 保护）：mcp 工具层白名单/审计 → 请求管线（域/动作/条件三层策略）→ SBOM/依赖审计 → Nuitka 核心编译保护——完整纵深防御。
+
+## 25. Windows 标签增强 + 会话恢复（2026-08-30）
+
+> 变更：PR「feat: Windows 标签增强（拖拽排序/固定/中键关闭/Ctrl+T/W/会话恢复）」
+
+### 25.1 落地内容（CHANGELOG Unreleased 规划项）
+- **拖拽排序**：`app/tab_ops.py` `move_tab(from,to)`——pinned 区边界钳制（固定标签永不沉入普通区，与 pin_tab 语义一致）；`app/tabstrip_js.py` 鼠标拖拽（≥4px 触发、插入线指示、本地即时重渲染）。
+- **固定标签 UI**：标签右键菜单（固定/取消固定/关闭）——pin_tab/unpin_tab 自后端首次获得 UI 入口。
+- **会话恢复**：`app/session_store.py`——session.json 原子写（tmp+os.replace）+ URL 白名单清洗（仅 http/https + START_URL；title≤80/group≤32/≤20 标签）；标签增删/切换/固定/分组/导航自动落盘（`_persist_session` 静默）；`config.resume_session=True` 启动自动恢复（main_webview seed_session）+ start.html「恢复上次会话」按钮（has_saved_session 仅返回计数——非敏感）。
+- **标签条恢复**：bridge_hooks 仅对受信本地页（host 为空）注入脱敏快照（title/pinned/group——**无 URL**，B0-W-01 口径不变）；远程页维持空快照。
+
+### 25.2 两处口径调整（复审记录，均经测试验证）
+1. **Ctrl+W 关错标签**：注入侧 TABS_DATA.current 为注入时刻冻结快照（多标签下恒 0）——新增 `close_current_tab`（后端实时 _current），TOOLBAR_JS 改调它。
+2. **P1-1 复审——标签结构操作放行来源校验**：原一刀切拒绝导致用户在远程页上无法新建/切换/关闭标签（"+"按钮与 Ctrl+T 全部失效——远程页 new_tab 后当前页即远程，后续所有标签写操作被拒）。安全依据：无数据读取 / move 仅重排已开标签 / close 最多关到远程页自己 / M-2 频率限制 + 20 上限 + URL 双层校验全保留；敏感操作（navigate/搜索引擎/书签/restore_session）维持严格校验。
+
+3. **B0-W-01 复审——get_bookmarks 受信回归**：原整改一刀切移出白名单导致 start.html 书签宫格静默失效——以「白名单恢复 + 方法内 `_check_trusted_source`（远程页返回空列表）」回归，维持远程页零数据边界；历史/导入类读取仍禁止。
+
+### 25.3 存量自检修复（master 上本就 FAIL）
+- selftest_shell_toolbar 中文 `\uXXXX` 断言 vs 实现 `ensure_ascii=False`（字面量注入，行为正确）——断言修正。
+- selftest_s1_integration 在 navigate（远程页）后 new_tab——与 P1-1 语义冲突——场景重排（先建标签后导航）。
+
+### 25.4 导入向导（Planned 第二项，2026-08-30）
+- **桥口径**（B0-W-01 复审一致）：`scan_import_sources`（零读取探测）/ `import_bookmarks(source)` / `import_history(limit, source)`——白名单 + 方法内受信校验；远程页 scan 返回 []、import 返回零结果。
+- **来源显式化**：`browser_import._iter_source_files` yield `(来源key, 路径)`——不从路径猜浏览器（防目录布局变化误判）；`_SOURCES` 模块级表（测试可 monkeypatch）。
+- **存量修复**：`import_history` imported 恒 0（HistoryStore.add 为 visit 追加无返回值）。
+- **UI**：start.html 向导（扫描 → 选择来源/内容/上限 → 执行 → 分来源结果），textContent 构建（R-06），Escape 关闭，导入后刷新宫格。
+
+### 25.5 Android 阅读模式与翻译入口（Planned 第三项，2026-08-30）
+- **ReaderMode.kt**：正文提取只读 JS（无宿主注入）；两段 JSON 解析防畸形返回；200K 截断/200 字下限。
+- **TranslateEntry.kt**：translatetheweb（微软 Edge 同款、国内可达）；URL 外发翻译服务 = 用户显式触发（隐私原则：默认不外发）；导航仍走 navigateExternal 安全策略。
+- **INV-04**：阅读内容经 BrowserViewModel `_readerContent` StateFlow 流转，Compose 无局部 remember 浏览器状态；detekt baseline 同步 AddressBarAndNav 新签名。
+
+### 25.6 Android 质量门禁修复（README 遗留项闭环，2026-08-30）
+- **ktlint 1.8.0 KDoc 解析 bug**：KDoc 注释中反引号代码段以 `` `[ `` 开头且含 `$`（如 `` `[$x]` ``）→ 整文件 "Not a valid Kotlin file (identifier expected)"。最小复现确认；SecureWebViewFactory.kt 注释改写规避。**项目内新写注释须避免该模式**。
+- **工具链复现方法**：ktlint-cli-1.8.0-all.jar / detekt-cli-1.23.8-all.jar（Maven Central）+ JDK 21 本地即可复现 CI 门禁，无需 Gradle 环境。
+- **detekt 存量基线化**：BrowserViewModel TooManyFunctions(13>11)/ReturnCount(3>2) 经 --create-baseline 基线化（类级签名 `TooManyFunctions:...$BrowserViewModel : ViewModel`——注意无括号）。
+- **双通道**：`:app:ktlintCheck`（.kt）与 `:app:ktlintKotlinScriptCheck`（.kts）均需 0 错误——.kts 存量问题经 --format 修复。
+- **新增 ReaderController**：reader/translate 状态与动作独立文件（构造注入回调），BrowserViewModel 函数数回落存量水平。
+
+### 25.7 ADR-007：单一正典 + 守卫单源 + 门禁常跑（2026-08-30）
+- **D1 单一正典**：C#/.NET = 目标发布栈；legacy/windows-pywebview = 现役功能栈（目录名不改，语义重定义）；Qt = 死代码。权威文档双标消除。
+- **D2 守卫单源**：contracts/schemas/bridge_guard.template.js 为唯一模板；Rust include_str!（编译期单源）；Kotlin 归一化比对（占位符映射：`[$allowedHostsJson]`→`__AEGIS_HOSTS__`，`$requireHttpsJson`→`__AEGIS_REQUIRE_HTTPS__`）；verify_bridge_guard.py 入 contracts.yml。**漂移实锤修复**：Kotlin 侧曾缺失 REQUIRE_HTTPS 段。
+- **D3 门禁常跑**：5 个门禁型 workflow 去 paths 过滤；构建型（native-policy-artifacts/release-*）保留；5 自检入 ci.yml。ktlint 在 master 长期 FAIL 未被发现 = paths 过滤之害的实证。
+- **工具链注记**：Rust include_str! 路径相对源文件（`../../../contracts/...`）；cargo test 149+4 全绿验证。
+
+### 25.8 验证（全绿）
+validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed）｜ bandit --skip 同 CI（0 Medium/High）｜ mypy 32 文件 0 错误｜ selftest ×5 全过｜ node --check 注入 JS 语法。

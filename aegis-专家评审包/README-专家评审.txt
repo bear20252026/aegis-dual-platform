@@ -1,7 +1,7 @@
 # Aegis Browser 专家评审包
-# 生成时间: 2026-08-28 10:17 UTC
-# 版本: 2.1.6
-# 提交: d7cc10a (refactor: generate aegis-专家评审包 from canonical source (#5))
+# 生成时间: 2026-08-30 15:27 UTC
+# 版本: 2.1.7
+# 提交: 969d2ff (refactor: H-4 Rust core split — ffi/ and c_abi/ module directories)
 
 ## 包含内容（由 scripts/build_review_package.py 从规范源码自动生成）
 - 源代码: Rust policy-core + Android + Windows Python + C# + contracts + shared 约束

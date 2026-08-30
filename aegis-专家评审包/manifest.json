@@ -1,25 +1,25 @@
 {
-  "generated_at": "2026-08-28 10:17 UTC",
-  "version": "2.1.6",
-  "versionCode": "20106",
-  "commit": "d7cc10a",
-  "commit_subject": "refactor: generate aegis-专家评审包 from canonical source (#5)",
-  "file_count": 285,
+  "generated_at": "2026-08-30 15:27 UTC",
+  "version": "2.1.7",
+  "versionCode": "20107",
+  "commit": "969d2ff",
+  "commit_subject": "refactor: H-4 Rust core split — ffi/ and c_abi/ module directories",
+  "file_count": 756,
   "files": [
     {
       "path": ".github/workflows/agent-redteam.yml",
-      "sha256": "a9de2277f4e1f5d79d78021a2f61d901884aaf938cbce85e636c808c362a0d4e",
-      "bytes": 1130
+      "sha256": "b1b42a248eee4d2b3f9e5989aa2fb9110f5e56e2c23c6c4372255bc8f28aa90b",
+      "bytes": 1042
     },
     {
       "path": ".github/workflows/android-quality.yml",
-      "sha256": "32d661c6b00f9a097e08092d6523429fc38c153526abb0287154309a0e8fb33a",
-      "bytes": 2624
+      "sha256": "437059210754e78cbd7be65461944cb9edb2a3a899eb97d5044953a5fd6290f8",
+      "bytes": 2291
     },
     {
       "path": ".github/workflows/ci.yml",
-      "sha256": "b7beac8993ea70740638bad70df5db17d7a86d9425dacabbb108a54531d4d420",
-      "bytes": 3925
+      "sha256": "5321e436e0a8ede706a6bf47182c1c7d6717e390929c5c82c7018fff9186ce4a",
+      "bytes": 5261
     },
     {
       "path": ".github/workflows/compat.yml",
@@ -28,23 +28,23 @@
     },
     {
       "path": ".github/workflows/contracts.yml",
-      "sha256": "b325b6237d5b58ab5ad9bd5ea59d8c31282752d83fa07467744b78ccb1821698",
-      "bytes": 5800
+      "sha256": "19fa0a1c01b72ce5cba18deb062ec52fbc534d22cfb6217c33796d08a938afb5",
+      "bytes": 5315
     },
     {
       "path": ".github/workflows/core-rust.yml",
-      "sha256": "874513fe37fa82c408bf6358df9b598c92daee33d38adbeb625abb7e13fc9d81",
-      "bytes": 1651
+      "sha256": "7bdd8b5b1a0449d99be40bf660d41651b8307f0cf319d2fd5b7979ab4f4bfd24",
+      "bytes": 1577
     },
     {
       "path": ".github/workflows/native-policy-artifacts.yml",
-      "sha256": "eb7ac2b21726240cd7d461ce8ef2da5fed9611d096a2d03aa85990c8d2be1b79",
-      "bytes": 7844
+      "sha256": "153ff2da6f729054c5f00908ece2355aabafdd5ffde05375211e3198acad6c84",
+      "bytes": 7750
     },
     {
       "path": ".github/workflows/release-android.yml",
-      "sha256": "cbc344ac9767bd9c828af1c4d1729773bd43d3a296368c7dc7f7617b6f1ff51e",
-      "bytes": 8041
+      "sha256": "9626b056bd216293ae84422cb8395c165b789f207b9c27c4f22f49ebca131d9e",
+      "bytes": 9207
     },
     {
       "path": ".github/workflows/release-core.yml",
@@ -53,8 +53,8 @@
     },
     {
       "path": ".github/workflows/release-windows.yml",
-      "sha256": "9ff63e56bc52458446b51de7cb5d3af1195608c679aef40fc5142779ba5ca9da",
-      "bytes": 6104
+      "sha256": "aa1185cb5c1543e4f542928404cec032d508fda631426b73546d59b4dbeb4f56",
+      "bytes": 7920
     },
     {
       "path": ".github/workflows/release.yml",
@@ -63,33 +63,23 @@
     },
     {
       "path": ".github/workflows/supply-chain.yml",
-      "sha256": "0c8eb6b06b95fe5a2e6c1b75b26c8267c40f3b613832ffc97f98383e165521ed",
-      "bytes": 1492
+      "sha256": "4420e27f7dd53009e72c45ddb861b57e3d98a58ae888f9032106828a0c466178",
+      "bytes": 1326
     },
     {
       "path": "CHANGELOG.md",
-      "sha256": "169a3ce2d4b4c7f17dae5b04b497fe8db8d00a46475181ed6b416eaffd017642",
-      "bytes": 3250
+      "sha256": "8218f09efc101861d65969b9d8ae16956058552b8f72a5db028ad3da00ba67d8",
+      "bytes": 9311
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "8fd2eb569efca8e8c06a3da4c7eab459fa126afca9c2b05dd5c534bdd335be46",
-      "bytes": 3749
+      "sha256": "2482c60e8d200b6051d315221a31dfc85d31ceab557daa9363246414c8c3cf5d",
+      "bytes": 4465
     },
     {
       "path": "CONTRIBUTING.md",
       "sha256": "7eefa5487d912d9daf8d9d8d286c145540d5958b7d5e299dfbc2ab586febd33a",
       "bytes": 3502
-    },
-    {
-      "path": "DESIGN.md",
-      "sha256": "3557249da1dfed62898fef8847e4f8a970d7c44bde95930b7a23b64170fb7608",
-      "bytes": 37658
-    },
-    {
-      "path": "KNOWLEDGE_BASE.md",
-      "sha256": "7de63de6fa160cc9b1f052214a10680795f1622126e88b2bfb27a93f7b78e800",
-      "bytes": 50908
     },
     {
       "path": "LICENSE",
@@ -98,8 +88,8 @@
     },
     {
       "path": "README.md",
-      "sha256": "42d06289700b9a91253b465940527eea25b6f6a24fcb9136881dfcfac6761b92",
-      "bytes": 2790
+      "sha256": "a4ef5e8eaa1856a522ee58caed9770695eaf2f6b7bba8a9e4f490bddee12af28",
+      "bytes": 3948
     },
     {
       "path": "SECURITY.md",
@@ -123,18 +113,18 @@
     },
     {
       "path": "android/app/build.gradle.kts",
-      "sha256": "344fc2ff05a9466c639171fb00d7076850c9b6ecb490cc6a28576903a0e9aa41",
-      "bytes": 6342
+      "sha256": "6bf981f2094f5a21a805619c7cc5c191c6455905723fcc63201549c522ab962b",
+      "bytes": 7051
     },
     {
       "path": "android/app/detekt-baseline.xml",
-      "sha256": "c2ca4f1b3463e1fe1b710378855c1bfbed7e1d972b285eb47bbd571b2b6bddfc",
-      "bytes": 2182
+      "sha256": "cc8e370727879bf2193108114b5fc5d491e0ecbef2afd5b4d6eaca80e9f72565",
+      "bytes": 2483
     },
     {
       "path": "android/app/proguard-rules.pro",
-      "sha256": "db8da37584ee03aa0ee9573bcb6c074fe81517026f7956acc6d261e5bb955a25",
-      "bytes": 199
+      "sha256": "b4e0d3e6baa0ab87a805c96f0f89155c1bd215ea0082bef7d884217b77876d36",
+      "bytes": 1076
     },
     {
       "path": "android/app/src/main/AndroidManifest.xml",
@@ -142,9 +132,14 @@
       "bytes": 1328
     },
     {
-      "path": "android/app/src/main/assets/start.html",
-      "sha256": "818555f8d9b5689ece2b96359c427999a0bb204af862e97ea9b904c949fe0697",
-      "bytes": 11404
+      "path": "android/app/src/main/java/com/aegis/browser/AddressBarSnake.kt",
+      "sha256": "ce574c3c5b0a1a29ab305c3af71f513e88494a1d993fd5a9b2a822b0dc089426",
+      "bytes": 11943
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt",
+      "sha256": "ebb04e1cfbac9ff519813d60901bc0ec6b337f807d4990374066cf546e0cc858",
+      "bytes": 3938
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/AegisTheme.kt",
@@ -158,8 +153,8 @@
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/BrowserViewModel.kt",
-      "sha256": "672a1afe4c9e8164cb234ba4dfbf688b104fcb95a85912c5446e078fc0e57370",
-      "bytes": 7587
+      "sha256": "3973340aa3831254e11c3bf290bdc10d2400823611ac1f3c63d3f82e2ef8fdba",
+      "bytes": 8917
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/DownloadPolicy.kt",
@@ -168,8 +163,8 @@
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/MainActivity.kt",
-      "sha256": "5b651d50e06b613320ad174f917cb5b0d0e4aaf36fb6a1590fa2258fac218b1c",
-      "bytes": 9895
+      "sha256": "0ed1cd7128c78e17db4853bde0a3cafe7f162517f3930a5a4cefe3ba33d32ac1",
+      "bytes": 10791
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/README.md",
@@ -177,9 +172,19 @@
       "bytes": 2295
     },
     {
+      "path": "android/app/src/main/java/com/aegis/browser/ReaderController.kt",
+      "sha256": "2ba442e28e8530aa12fe137afcf51989ea74f76cb085eed777051782a9f204ea",
+      "bytes": 2152
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/ReaderMode.kt",
+      "sha256": "0713a78b8be58c0b6aecdb3e1d9ec95cfec0253a5a5a4bb3de716e54fc52c395",
+      "bytes": 3691
+    },
+    {
       "path": "android/app/src/main/java/com/aegis/browser/SecureWebViewFactory.kt",
-      "sha256": "8859675c34556d34a0034f695699d4ce698f3eb85e99b7bc8d57e02bf63a33da",
-      "bytes": 16739
+      "sha256": "f62dec933dcb6751967feda837be2497d991ff65a69b9477bdefae4f2d15ccea",
+      "bytes": 19141
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/Tab.kt",
@@ -195,6 +200,11 @@
       "path": "android/app/src/main/java/com/aegis/browser/TabManager.kt",
       "sha256": "1e3d77f9b1bf52a8366ba0a90545636d6bee959bcad59fa9341a6f007df0f3e4",
       "bytes": 6077
+    },
+    {
+      "path": "android/app/src/main/java/com/aegis/browser/TranslateEntry.kt",
+      "sha256": "7c02b00aff3e5454ca5d8ef7e70ecdc3bdcdc2b403b22eebbb0cbc0e7bedb4a3",
+      "bytes": 1272
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/UiColors.kt",
@@ -223,8 +233,8 @@
     },
     {
       "path": "android/broker/build.gradle.kts",
-      "sha256": "8d742cf007cd9add5cd05e57a981c821b0e9d8fef42fc4696f0687fca9a6da24",
-      "bytes": 2156
+      "sha256": "e97d803c56da95531c7be4ddeaecb31f055002d44d653bc79cc4114f8e6c497b",
+      "bytes": 2968
     },
     {
       "path": "android/broker/src/main/AndroidManifest.xml",
@@ -248,8 +258,8 @@
     },
     {
       "path": "android/broker/src/main/kotlin/com/aegis/broker/NativePolicyCoreBridge.kt",
-      "sha256": "4889c725c9a64d8bc4fb0770d576904a6744e30cf519689a920c72d6b7de01b7",
-      "bytes": 9613
+      "sha256": "89032bbdf95abfc09210c6c8981aa28beff65d01f75bdbe5024b979d83fd64fd",
+      "bytes": 10465
     },
     {
       "path": "android/broker/src/main/kotlin/com/aegis/broker/NativePolicyCoreGate.kt",
@@ -378,8 +388,8 @@
     },
     {
       "path": "android/webview-adapter/src/main/kotlin/com/aegis/webviewadapter/AegisWebViewClient.kt",
-      "sha256": "cbcab0971f781e1444b5aafa49a13c3adcbac0f71552bcab5c0e9756cf539acf",
-      "bytes": 8046
+      "sha256": "6c75226e2419ac32ba7eafa578dbb6ecbb5dc399c9e80eaf8ea09f9f1a723bed",
+      "bytes": 8588
     },
     {
       "path": "contracts/codegen/analyze_action_catalog.py",
@@ -395,6 +405,11 @@
       "path": "contracts/codegen/generate_kotlin.py",
       "sha256": "154fb83c990697a1aa8727f4aedc011f102faa4565785d851227229fae017ebb",
       "bytes": 2558
+    },
+    {
+      "path": "contracts/codegen/verify_bridge_guard.py",
+      "sha256": "6336de776cb293276587231006375bd59ade5ac5a83d1811bc8dc1e84316a711",
+      "bytes": 5206
     },
     {
       "path": "contracts/codegen/verify_contract_compatibility.py",
@@ -420,6 +435,11 @@
       "path": "contracts/schemas/audit-event.schema.json",
       "sha256": "d4468a33770c79b1dab4e67ef8445edd7d7bc220a6b3e1a90a200357b38a441e",
       "bytes": 814
+    },
+    {
+      "path": "contracts/schemas/bridge_guard.template.js",
+      "sha256": "626d8a323320f027093bf8d61d6bac9a07a1385d2b585ee7db41a0b95fb21095",
+      "bytes": 2085
     },
     {
       "path": "contracts/schemas/capability.schema.json",
@@ -508,8 +528,8 @@
     },
     {
       "path": "core/rust-policy-core/src/bridge_guard.rs",
-      "sha256": "8939ba2c6f9e3244e7778cbdcb7860f5bcd04853cfd082402db0c9af501113cc",
-      "bytes": 7312
+      "sha256": "de5cd4004d938210abeb81f695c72b8f692fcf9c1c268472570a06f2f74a382f",
+      "bytes": 5623
     },
     {
       "path": "core/rust-policy-core/src/broker.rs",
@@ -517,9 +537,14 @@
       "bytes": 19383
     },
     {
-      "path": "core/rust-policy-core/src/c_abi.rs",
-      "sha256": "f7a1ea055ea60bb3f91ac41a77045800b1270732aa39ecfffb0f803ef8b898f6",
-      "bytes": 33790
+      "path": "core/rust-policy-core/src/c_abi/mod.rs",
+      "sha256": "1f3c45dbbc6b0a0794ccc827d68c09cd4f1e7c5ad8be56acfd9a4e73b2923277",
+      "bytes": 26640
+    },
+    {
+      "path": "core/rust-policy-core/src/c_abi/navigation.rs",
+      "sha256": "ed82abea793ab40eafb2b5cb53b125a848e08dfa8d3d70bcfe6d7a30d32ebf81",
+      "bytes": 7307
     },
     {
       "path": "core/rust-policy-core/src/capability.rs",
@@ -547,9 +572,14 @@
       "bytes": 6549
     },
     {
-      "path": "core/rust-policy-core/src/ffi.rs",
-      "sha256": "48aafdeadeea4d2203abe8799503e134287c6603951b24120894e3b35b7e2381",
-      "bytes": 35771
+      "path": "core/rust-policy-core/src/ffi/broker.rs",
+      "sha256": "f231f2f44fa0d173022e44233914f7753af629148bc0f873054b8671f499def0",
+      "bytes": 19514
+    },
+    {
+      "path": "core/rust-policy-core/src/ffi/mod.rs",
+      "sha256": "66b6bd385c3ebde44046193f0ef1915df7846cfd731991f7bc1f1ccf2a1e7af3",
+      "bytes": 16382
     },
     {
       "path": "core/rust-policy-core/src/font_norm.rs",
@@ -662,6 +692,16 @@
       "bytes": 2573
     },
     {
+      "path": "docs/DESIGN.md",
+      "sha256": "3557249da1dfed62898fef8847e4f8a970d7c44bde95930b7a23b64170fb7608",
+      "bytes": 37658
+    },
+    {
+      "path": "docs/KNOWLEDGE_BASE.md",
+      "sha256": "da803269bc6c7d02cd1a037d393ed4a47f34eccb2a42a69ac2df729e7d6c6215",
+      "bytes": 57284
+    },
+    {
       "path": "docs/adr/ADR-001-windows-host-webview2.md",
       "sha256": "98361088c90608a19fb51ed151ddcc01103eb5043e1625c45fad04f2b097c772",
       "bytes": 1130
@@ -692,14 +732,19 @@
       "bytes": 2819
     },
     {
+      "path": "docs/adr/ADR-007-canonical-stack-and-single-source-guards.md",
+      "sha256": "fc21d3e7415cecf44326f6ed5a0d82eb2de728d8a0f5d5dc638259e1288433b3",
+      "bytes": 4291
+    },
+    {
       "path": "docs/architecture-audit-2026-08-22.md",
       "sha256": "02f21408a5da1e2954e87da85b64c3da38200041c2d0a65c6b970b57ad3a61a5",
       "bytes": 11413
     },
     {
       "path": "docs/architecture-overview.md",
-      "sha256": "bd6bcba12b92c86ce0dc81f37c897e44bb4cf147b5c8b2cc3f33a9b6582977c3",
-      "bytes": 5811
+      "sha256": "9070450ee78a23ac83d2441670ce464f8208b81ad829fa2e58c31837d20ebd12",
+      "bytes": 5816
     },
     {
       "path": "docs/audit-2026.md",
@@ -863,7 +908,7 @@
     },
     {
       "path": "docs/release/AegisSetup.iss",
-      "sha256": "33bd69ffa6aaa01650183a87ef78c63a66fa869dc53bc0120af75b47b653bdbb",
+      "sha256": "f9382bd54f131e26de129c5922894517e22df45f1a6995cfd40ef7d5a6cd1940",
       "bytes": 1690
     },
     {
@@ -893,8 +938,8 @@
     },
     {
       "path": "docs/review-and-hardening-2026-08-28.md",
-      "sha256": "64fca8036e9a3399eb07f3ddfee400c6e65b1aba5a9305997e0c36175bb019e9",
-      "bytes": 7847
+      "sha256": "497d9f797da9ddfc3173912c60e4394c73ad4223b2f61e8a23120ca441e66ae6",
+      "bytes": 7852
     },
     {
       "path": "docs/runbooks/device-validation.md",
@@ -988,18 +1033,108 @@
     },
     {
       "path": "docs/webview2-extensions-research.md",
-      "sha256": "941cd3d2c8964d0f0a4291e356d1a738f80cabb6470e43cfe60b32ff05045e21",
-      "bytes": 4147
+      "sha256": "01eddf1e4dfcba617f7b25ed2ee75690ca790d29e0c15d083313ac2ed3e42667",
+      "bytes": 4152
     },
     {
       "path": "legacy/windows-pywebview/.gitignore",
-      "sha256": "04bf613699cdd9f5de7a5e4433606c3a0c194656fe5028ab4a56780ce5587d93",
-      "bytes": 306
+      "sha256": "888bb8409c6be1bbecebeaf71ffa1888c7a73a465d9814a725b5e7a935239202",
+      "bytes": 240
     },
     {
       "path": "legacy/windows-pywebview/.importlinter",
       "sha256": "45cdc90a3350786eb4b1bedd2302702b9a515c34577172f75896b81fc6cf7a76",
       "bytes": 927
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/.gitignore",
+      "sha256": "ffbb394643c112f2356bb5f3184e95e33fd732146892f4eeead126975570ff39",
+      "bytes": 36
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.0.db",
+      "sha256": "7c99ee77d37d3e3c7d087b77af44fffa028b7d4b263e7511b62d0a1a4fa2b258",
+      "bytes": 147456
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.1.db",
+      "sha256": "3b77d165b81ec819b05c61aecc4ac7fddcfc42967b0c02192a0df627909ec638",
+      "bytes": 421888
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.10.db",
+      "sha256": "7ca16f0555c65ef046c8c7bdce976685fb1791dea41c5edd3960adcf6fb252a4",
+      "bytes": 860160
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.11.db",
+      "sha256": "402be122a6edcbdad19a18a1230729d33655304ea0c3f62327bbc7e3f650d45d",
+      "bytes": 307200
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.12.db",
+      "sha256": "ec831c843d879204f33d40888cf1fca02327f32aa088c164e583fccf6e589308",
+      "bytes": 176128
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.13.db",
+      "sha256": "97d7c5f694d864366455c63d89558e89f57d369320a101d0065f5e2bb6ce2348",
+      "bytes": 221184
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.14.db",
+      "sha256": "a70dfcfbec4e963fb6d238319c50376c8b61e02ef7c792cebf1750e0647f9483",
+      "bytes": 2408448
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.15.db",
+      "sha256": "23613be6d374462dc2715d44f9ab8a265d0b369d1620f9e9c766c00a7c1252a7",
+      "bytes": 339968
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.2.db",
+      "sha256": "4a409fd7954746fde450ceee60f11c70c3753f217053e3805a082c2c6b369c4d",
+      "bytes": 434176
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.3.db",
+      "sha256": "709f5e790f343f948936339b1bcb2542c7cd331aea3b54d05f8196145aa68bf6",
+      "bytes": 270336
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.4.db",
+      "sha256": "57222069c7c918b6cf4cf36b61bd8e6efc632f0458799600becbd24007e99b55",
+      "bytes": 2514944
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.5.db",
+      "sha256": "3ceb710cf4165cea05c59b42c75426cd38d914bc2a7ec2c711595adc02060280",
+      "bytes": 1327104
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.6.db",
+      "sha256": "7ef4a43ec9aa231f6dc48a0221498cc8060af89edbb401527a420f4aa66c84b4",
+      "bytes": 638976
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.7.db",
+      "sha256": "926a5e8ae4a9c1afe223b9aff523ed6ed3749fc4d1705d941a4e9002e6f3343c",
+      "bytes": 778240
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.8.db",
+      "sha256": "cafe1dfba4e9033daee9beafe70ed84cd3c57da2ce3276529f21740986b93f94",
+      "bytes": 229376
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.9.db",
+      "sha256": "bf8ff321157a17fd03f37d3646563d1e52e22bd14e15739242a286170c3d02c0",
+      "bytes": 720896
+    },
+    {
+      "path": "legacy/windows-pywebview/.mypy_cache/CACHEDIR.TAG",
+      "sha256": "70ebb54facb76f7dab3058261eefb43a2315d28d10fcf90a85538c05a72b8d1e",
+      "bytes": 193
     },
     {
       "path": "legacy/windows-pywebview/DESIGN.md",
@@ -1018,13 +1153,23 @@
     },
     {
       "path": "legacy/windows-pywebview/README.md",
-      "sha256": "21b954acd2928f413bab23579266953dd83b5cf394302e57c567b2735cdd5140",
-      "bytes": 24533
+      "sha256": "e2f7250b7b266bd9701b0f3abea0e2ccae812c494a433f36f2b1ba32ffd9c7cd",
+      "bytes": 24526
     },
     {
       "path": "legacy/windows-pywebview/SECURITY.md",
       "sha256": "71fbd25ba7974fa2587d11a7afe588f60ea25eb84dcdd0b36e4663d00f3fe8f8",
       "bytes": 4068
+    },
+    {
+      "path": "legacy/windows-pywebview/_selftest_support.py",
+      "sha256": "f3096e32f7dc2774d17bb1224bd8318541f8819da0158b5ece4e7aa789b5d78f",
+      "bytes": 515
+    },
+    {
+      "path": "legacy/windows-pywebview/aegis_webview.spec",
+      "sha256": "3e2f10e482793dbf6b63b7a627d0a90eefea96dbd17fe6ad132d2a78b8372a22",
+      "bytes": 2456
     },
     {
       "path": "legacy/windows-pywebview/app/README.md",
@@ -1038,8 +1183,8 @@
     },
     {
       "path": "legacy/windows-pywebview/app/api_bridge.py",
-      "sha256": "b2cf16cac10afddd82f20f9d18a397166004568094d7b90ae42c6dc749a7e0d0",
-      "bytes": 31621
+      "sha256": "aa362ad7e1d0a88abd209a7f60614c41728abd16d7be6d32bddc605baa28c7d3",
+      "bytes": 7832
     },
     {
       "path": "legacy/windows-pywebview/app/asset_scheme.py",
@@ -1053,23 +1198,63 @@
     },
     {
       "path": "legacy/windows-pywebview/app/bookmark_store.py",
-      "sha256": "393ac4562b19d4d9bd6b204fab1c6cff4082f54a770c0f012a81bda5eb5c274e",
-      "bytes": 6190
+      "sha256": "e0ce8526ee8cabd89813c8b4cb9e6c6bcda90d0441baa94636368d364fab39e9",
+      "bytes": 7292
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge/__init__.py",
+      "sha256": "133e90c2bff9a2bd95fa8918c2747b10c4db4ef2cc656388703c063b4ba65890",
+      "bytes": 59
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge/bookmarks.py",
+      "sha256": "eb213b97e9af00ecbea4535709e6674fe41e5d6328b1b4e25970b47029ea352a",
+      "bytes": 4243
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge/geogebra.py",
+      "sha256": "4cb10d4d926157d05c61e8a3044488f851a15b840a1b39a1e6dceb56af5a626a",
+      "bytes": 2247
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge/history.py",
+      "sha256": "852889cbc260779df858be6df02787299e62f9f92719f09ac419ab0e826473a0",
+      "bytes": 4349
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge/imports.py",
+      "sha256": "b58352b75ba8a764888a67d6475f820960a01086de98cf6ec59a66872efbf27f",
+      "bytes": 4498
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge/navigation.py",
+      "sha256": "cea2b1ff4cd9318f2119ad049caabf67533f1c8ee5b0a6eb1308764693a70bc2",
+      "bytes": 5154
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge/search_engine.py",
+      "sha256": "7421413d101728e3b74fa82e6710bd8275e3d82bc9739821f84ef5bd21cd22e7",
+      "bytes": 2127
+    },
+    {
+      "path": "legacy/windows-pywebview/app/bridge/wallpaper.py",
+      "sha256": "189273cd91730a207c073153c12f6bf54a146b9bc361f225ffd6575063a3021b",
+      "bytes": 1605
     },
     {
       "path": "legacy/windows-pywebview/app/bridge_hooks.py",
-      "sha256": "0a3daf73e28f78371b5da8d727b5d7a8f7838f1586580a786a07a7f0bdb6a464",
-      "bytes": 3806
+      "sha256": "dbc71d6d7cd3d5dedb8b4725761455f467814859a382fdd120f5780fbf32aa4a",
+      "bytes": 4853
     },
     {
       "path": "legacy/windows-pywebview/app/browser_import.py",
-      "sha256": "4d97f540136e859cf863ded5b2886e70ee3ae9295f9cf2967bf066d28483a051",
-      "bytes": 5323
+      "sha256": "8e1ee89b72ae5aa78ba9e276740a795efbe07f121bdd868914d5a1132684b4d3",
+      "bytes": 6629
     },
     {
       "path": "legacy/windows-pywebview/app/config.py",
-      "sha256": "e4407db77d42e23d5d42d03c367f4c6c65df62850f76d1fc54ddcdd1c6d07918",
-      "bytes": 14196
+      "sha256": "69db0099d2dab6d8b0b95027e5e112935f0b80b45304f034a65db47f05b6594e",
+      "bytes": 14201
     },
     {
       "path": "legacy/windows-pywebview/app/credential_guard.py",
@@ -1085,11 +1270,6 @@
       "path": "legacy/windows-pywebview/app/event_log.py",
       "sha256": "e274ac4d33974c954003fe9af6ed676cc561dc38509e6dfcf7a29b55403c58eb",
       "bytes": 1252
-    },
-    {
-      "path": "legacy/windows-pywebview/app/features.py",
-      "sha256": "c7a534cda8aff1856608a61a785c591aa651a8493c8d4a1b236fe08d60cfd6e0",
-      "bytes": 2839
     },
     {
       "path": "legacy/windows-pywebview/app/fingerprint.py",
@@ -1132,24 +1312,14 @@
       "bytes": 2531
     },
     {
-      "path": "legacy/windows-pywebview/app/reader.py",
-      "sha256": "1b504e3924b287814cf214faf60892d7e3c950e94d959c06a89db5a9b7803064",
-      "bytes": 5496
-    },
-    {
-      "path": "legacy/windows-pywebview/app/result.py",
-      "sha256": "395d851a92a3b818c1955f5b2bfff3adba3c0413f0f62e145ebdcf15b6b589a9",
-      "bytes": 1328
-    },
-    {
       "path": "legacy/windows-pywebview/app/security.py",
       "sha256": "5f36129ec544a59ae79e9e4c56bced2fe890dbbb9e41642e78881805732c3fff",
       "bytes": 7375
     },
     {
-      "path": "legacy/windows-pywebview/app/settings_registry.py",
-      "sha256": "7f7b1ff6c8983ce07563f5e73ef3349a92372fb221f1bc3b6c283d8ccbbd04fb",
-      "bytes": 1726
+      "path": "legacy/windows-pywebview/app/session_store.py",
+      "sha256": "d1464efbfc67d189e3bf573a827a84a0680de8272f4a9533e33f30f5bb7ab62c",
+      "bytes": 3944
     },
     {
       "path": "legacy/windows-pywebview/app/shell_adapter.py",
@@ -1158,13 +1328,23 @@
     },
     {
       "path": "legacy/windows-pywebview/app/shell_toolbar.py",
-      "sha256": "40d4f42b57c8430e7ff6f3a344467a35bad1742ae9703821522e07109f2b3d02",
-      "bytes": 19809
+      "sha256": "c2a123e3d1bc96e5954719a8c47aff0b64754e03609899468ca56a45e4af4b11",
+      "bytes": 17358
+    },
+    {
+      "path": "legacy/windows-pywebview/app/tab_ops.py",
+      "sha256": "10729abd70e1c90fff67bb8ab0661bc182b56856acfbac29e9c609f3512a9b45",
+      "bytes": 18003
     },
     {
       "path": "legacy/windows-pywebview/app/tab_state.py",
       "sha256": "4509e71b2b21ec56477d89681d6052d06794e7062a882dc06c94cfe61b192005",
       "bytes": 3107
+    },
+    {
+      "path": "legacy/windows-pywebview/app/tabstrip_js.py",
+      "sha256": "48b9ccd96b8ee376c9cbbf6e4de80a1eecd31e227303de53efae06cfbd37c448",
+      "bytes": 11431
     },
     {
       "path": "legacy/windows-pywebview/app/threat_feed.py",
@@ -1173,13 +1353,18 @@
     },
     {
       "path": "legacy/windows-pywebview/app/url_utils.py",
-      "sha256": "0f37ac7bee025e99eab393a35706a1e1641bb01d1f0cec4d1b54a1edc50749fa",
-      "bytes": 2305
+      "sha256": "bb13821ceb964a8dc5cc9b6005cb7ed2818c9ce1e9948d47ebf1d6479fee25b6",
+      "bytes": 2889
+    },
+    {
+      "path": "legacy/windows-pywebview/app/validators.py",
+      "sha256": "35784be238f776d5e445d2e058bbe53d2dd130b081dc941f223ae565995ef762",
+      "bytes": 1384
     },
     {
       "path": "legacy/windows-pywebview/app/webview2_probe.py",
-      "sha256": "0ab776875f9d82b9c956ca7ad60f5e16f2111b123667c36b0ee2f0011c5eb85d",
-      "bytes": 13243
+      "sha256": "1d906e8e6e53826b2aed42537f24201c33f317adf220d52aad7a98511771e347",
+      "bytes": 13652
     },
     {
       "path": "legacy/windows-pywebview/crash_reporter.py",
@@ -1187,9 +1372,2174 @@
       "bytes": 11927
     },
     {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
+      "sha256": "36ede66c9a242e3caca8cbe6194ded4485c4afdb15c633737f2ad1dd26a2c4a8",
+      "bytes": 343356
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/app-header.css",
+      "sha256": "c54ecbecd2da977053d9235ddbd5decbdd4a76c88002e46de0f9fb95606a367a",
+      "bytes": 6902
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/av-styles.css",
+      "sha256": "526f8708a54846ee434e4d12bf26a6689a0561439173adfc57dcc34791d45dda",
+      "bytes": 14778
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/bundles/bundle.css",
+      "sha256": "01ee01366e109da80ea8048530eafd611fd8ce008bfc4d67a544c1d3ff95a494",
+      "bytes": 227156
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/bundles/simple-bundle.css",
+      "sha256": "e9eead6d0336eb155ee6db4c9b48654b8bce1edb3073e95652d12c7dda7c829f",
+      "bytes": 35647
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/colorMap.css",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/colors.css",
+      "sha256": "fa1c1fb3509886682a88ce4412a9bfc1eb4382c628f300b750754b6c5fba29cd",
+      "bytes": 206
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/component-styles.css",
+      "sha256": "c0f7612ccd96a2da53443e792eb7b9259fbce3b2396e5c425d5442a4ee8e7648",
+      "bytes": 37688
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/context-menu.css",
+      "sha256": "a1c45b54edcf70c848cb4619195584462ec7249efd999498154f37dc9977f907",
+      "bytes": 6055
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/dialog-styles.css",
+      "sha256": "481f0c17e8ba066dfa83ae63922de6abb7b9c9a625c95727ec0fb6cf0f2c2945",
+      "bytes": 41003
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/dimens.css",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/editor.css",
+      "sha256": "e2471853b14da77f00dec1fc358e4e1cc47962aa2d3f986f615c7de3856d9085",
+      "bytes": 17140
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/ev-styles.css",
+      "sha256": "5f4c036e51c6fc9e0c5907972b3be337234dc1cd5e193f97b78eaf173fb28648",
+      "bytes": 14076
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/evaluator-styles.css",
+      "sha256": "695d4d50cc1d6c011c86d70b222efb3028c1721bf85a87a3a39e6996f9868be9",
+      "bytes": 139
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/exam.css",
+      "sha256": "f50d366b5c837432620925855abbf8048a19836f941266d26f6c51e20734a874",
+      "bytes": 126
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/fonts.css",
+      "sha256": "4fb321733ce0506bbaf150ececde5b62465e624ef42844d297a33564cf8f3dd9",
+      "bytes": 7992
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/general.css",
+      "sha256": "3b784a0801c9f750e30470131463c711e15dc33c91d7c2be508eaeee9c1357f6",
+      "bytes": 2638
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/greek-font.css",
+      "sha256": "4e4e32f53dc14f9b05f4f5fb43eb2d968608e33fe68ad4694757266608d24efc",
+      "bytes": 10753
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/header.css",
+      "sha256": "33c67fd5522f98d049ec373c5a2f767a7593fdfd81050f33be7d57a1959085e8",
+      "bytes": 2151
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/headerbar.css",
+      "sha256": "4d91253856fd192fca345df4d3509253e1c653b215c979aaa51c01913a987afe",
+      "bytes": 11325
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/info-card.css",
+      "sha256": "ca54248aafc9b59c22fee69592a66da4474f834550b21375fe52609aae1adb7f",
+      "bytes": 856
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/keyboard-styles.css",
+      "sha256": "5c122df63cc3b5e9340a1a642ad44f82ebb1992258b51a4fe3fae89ec8c076b4",
+      "bytes": 5630
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/layout.css",
+      "sha256": "d0d001c27ba900d65bf2f806ebdc2a4920c2196b3e2685f40b4f6e1021c91b87",
+      "bytes": 4126
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/menu-styles.css",
+      "sha256": "676a3e54fbddf01fad78a43ea442b9328d949ff3a9206cf8acd170ab2b3fa16c",
+      "bytes": 3406
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/mow-toolbox.css",
+      "sha256": "4a9408909ff38cc496d24fea827b31caa3ca21b93991dc479b2c0e8237328dea",
+      "bytes": 2932
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/mow-topbar.css",
+      "sha256": "890d6871ef7869eb4cdfaadbafbe0291eac08525bd6b75b39d956bf3b211e3c9",
+      "bytes": 269
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/mow.css",
+      "sha256": "80d9a117fb7e70246ec2980918efe1cd2fd83cf5d75052107e0d4b1b0afe1f3a",
+      "bytes": 9888
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/open-screen.css",
+      "sha256": "380aa81acb046b9b223b485f49cf262eeed3353c528565e2225c4233f0b6590a",
+      "bytes": 16439
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/popup-styles.css",
+      "sha256": "567c93d770df092bad4a3c5ca8c7770a8008ba5597d23b0bc3fc2c95be5fe735",
+      "bytes": 8804
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/print.css",
+      "sha256": "8780918fdccd10900b87de1e045f7c532d9d036dbb56f997a07fb79aa65f6e05",
+      "bytes": 863
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/probability-layout.css",
+      "sha256": "722b20df8784e78f6fa1acd2097ba8f925f162b324e73f802f06767d2c3bbc3d",
+      "bytes": 2178
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/reset.css",
+      "sha256": "71bb4ce58bc977bb8c144bbbae6d41d6a4cefd7c11112bcfb906f039fc8d8844",
+      "bytes": 7232
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/scientific-layout.css",
+      "sha256": "dace1ccd5083b5a8eca9211d4c15b68d9d6ed46c47ae9636302735ae40cfa60f",
+      "bytes": 2691
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/settings-styles.css",
+      "sha256": "c79d9ee9fafd3b0ce0ef7a5b081d5a7d477068e7d46ed5dafb6785fc7d157c36",
+      "bytes": 9639
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/shared.css",
+      "sha256": "53bcd4f70ffc37a08f250d4d5fdec14aba57a2902e2a00a00473e60a3a98652a",
+      "bytes": 4364
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/snackbar.css",
+      "sha256": "f340978a3fbcb9a518ea8558b3393fe96280ac22a3b56b6711f8f3cc9abd3f9d",
+      "bytes": 3254
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/spreadsheet-tab.css",
+      "sha256": "6b19d6145ec19f12c2b579daf06705bc4735a53dc6f6458ee198d9b0f43f3e47",
+      "bytes": 340
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/spreadsheet.css",
+      "sha256": "c9649e4c7890df87ede67648f20f14704f36294f11ca1640cc3a6c297b46c13d",
+      "bytes": 3560
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/tableview.css",
+      "sha256": "d271e7fdd730f442106e7f38b727e1c7e66d815e32de50f5e9c80449529ad146",
+      "bytes": 7161
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/text-styles.css",
+      "sha256": "a8f41303d4d3b357f7b10856a047a3178156dbe8d65f9d2ffedad5280d6f7e52",
+      "bytes": 524
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/toolbar-styles.css",
+      "sha256": "2988a46a610448c5445a09e319418bd251062c3c4512fe4e374fea37b847a4c2",
+      "bytes": 8284
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/web-styles-global.css",
+      "sha256": "4bc7b8644724a9e9d51ad6cd9078f5ca6e40efd6968a3ad5e3372637140a72a6",
+      "bytes": 3420
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/web-styles.css",
+      "sha256": "cdb8d7448d043c4f2345ba439c5fc990fddf0bc947a38f9eb6854b1fcbdb4ed7",
+      "bytes": 51344
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/css/z-index.css",
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "bytes": 1
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/BD63B116F66F9CAFD0241E1C1EB84743.cache.js",
+      "sha256": "107f58fe29a061179828bfe2f93b3a518abf33b66c791d7b7acecf204ebe299a",
+      "bytes": 7001401
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/1.cache.js",
+      "sha256": "92fe823158e2573e68323839d4b3aaf6118e1aed303d081bedc36d3d3cde7159",
+      "bytes": 141948
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/10.cache.js",
+      "sha256": "4ab50beb9c41cf199763195eda1aec079830f42a2fca235b0c1cb2d95dbc1cb5",
+      "bytes": 181522
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/11.cache.js",
+      "sha256": "d1977e87626fe5a582957ef481ceba1aa77a9fb57f041447974afb141b41e147",
+      "bytes": 83918
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/12.cache.js",
+      "sha256": "271dc95e81dd22c99565a53d09cc61239a1cc17ffe9221f4e1c7b8db990fd472",
+      "bytes": 732804
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/13.cache.js",
+      "sha256": "157081ad5fea30a79d73be87594b031bd59500be943f5f270a8db5033eac0421",
+      "bytes": 495924
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/14.cache.js",
+      "sha256": "3eaa2073c24655dfd295a30f65129c851913279c1c53f052989404487cf755ed",
+      "bytes": 1738975
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/15.cache.js",
+      "sha256": "dbcaaf86c405062b7085982de0db799a325258c020a3578b974858c66ae20c0a",
+      "bytes": 3809
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/2.cache.js",
+      "sha256": "e4b8a0606c031c61774369e394d8c59820eddee3657ef36177773840516e1dc5",
+      "bytes": 102
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/3.cache.js",
+      "sha256": "599589960e4031471af13f8badc0e94ffa90873c4e112e0075a49990930124cc",
+      "bytes": 10185288
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/4.cache.js",
+      "sha256": "2a6964f03d0b33e2af3109d7552c303b70a1efe17852645258af9ea37f420d17",
+      "bytes": 226788
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/5.cache.js",
+      "sha256": "06f8adde90715e802275bea1ab3f186d857beab26c18adb3d607ca0790330ed6",
+      "bytes": 513576
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/6.cache.js",
+      "sha256": "0373ffab7ded69cd7afc3bc520422d46d944e61ae10f10ee4c6b9ff70fc1a12e",
+      "bytes": 52335
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/7.cache.js",
+      "sha256": "eb1ab4ce7be5e2cdf3d5b1c380f81289b597f70b8b54c96d24deeea34c17a1fe",
+      "bytes": 180794
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/8.cache.js",
+      "sha256": "471113e2e4694bdd0f600e13895765c87665813d8a298cb568d75eb77cf41245",
+      "bytes": 58515
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/deferredjs/BD63B116F66F9CAFD0241E1C1EB84743/9.cache.js",
+      "sha256": "23a54128fa5b11a84acc3bfcdae79074ae8d0756f2877663a11a680142e98d4a",
+      "bytes": 163895
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/base/jlm_cmmi10.js",
+      "sha256": "99943749890c7c57e01dd16b1292d4feacb035fc03745dd9077d0ccf2f103624",
+      "bytes": 71022
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/base/jlm_cmmib10.js",
+      "sha256": "e75d176e86bf167cb482f72ce2bfdb11d80556eb6f75d3a82c598380d04c9e63",
+      "bytes": 83766
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/cyrillic/jlm_wnbx10.js",
+      "sha256": "35789ed6d1a1a70b9e5bb7614622fd35fa56926a115bebd95889283f5f4d2ccf",
+      "bytes": 90796
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/cyrillic/jlm_wnbxti10.js",
+      "sha256": "7742c896aa97129e538fd1a29e3b7f77aedca94495b793f7f835e7803a18fc05",
+      "bytes": 156977
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/cyrillic/jlm_wnr10.js",
+      "sha256": "6e1598cb21e385c5e0881b71a90c9f16628295a67e02595060e8ec5be4cc9e60",
+      "bytes": 102118
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/cyrillic/jlm_wnss10.js",
+      "sha256": "c9d99d9e7e105ec39afd2630886161b05e136adb7fba3fed0ee5cced2072fe6f",
+      "bytes": 49509
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/cyrillic/jlm_wnssbx10.js",
+      "sha256": "66a8814b9098ba56656392c4132a533c6af99946ccbc2843f61632e200ab6acd",
+      "bytes": 87228
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/cyrillic/jlm_wnssi10.js",
+      "sha256": "5ab4795551b9c32691736e11d20fadf5b38bc7787ae7959b86fe2daa39faf75d",
+      "bytes": 69527
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/cyrillic/jlm_wnti10.js",
+      "sha256": "13119cf310cfa80eca1d64e8c711b207ab0d9e765a053e9bd3ef48638b908a08",
+      "bytes": 151215
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/cyrillic/jlm_wntt10.js",
+      "sha256": "d73a2332c96e87228352ea9dc860a2937eac89e3861e1d31e705498450a9eb45",
+      "bytes": 94607
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/euler/jlm_eufb10.js",
+      "sha256": "4fce21db5b204fa29a41875370d02b68da21d65e08fecfd27c48cfb5a655154b",
+      "bytes": 58932
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/euler/jlm_eufm10.js",
+      "sha256": "7986522e2926f26177edb538e6d9ce58eca8eeb9c188b966c2676e0a73f5a794",
+      "bytes": 57318
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/greek/jlm_fcmbipg.js",
+      "sha256": "9965740782ca00f5238ffc8f8f91c6a61775f5158b925f033c01f155c8f197b1",
+      "bytes": 191184
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/greek/jlm_fcmbpg.js",
+      "sha256": "a4409e517004072997cb4fce746d0125e670db6d77343e8d36ce9fa582e1adda",
+      "bytes": 187896
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/greek/jlm_fcmripg.js",
+      "sha256": "01f25b65a79240b1e0a745a2d2e6c07d7096abe0155bd006e405efb926230e64",
+      "bytes": 198725
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/greek/jlm_fcmrpg.js",
+      "sha256": "e6376b6f084749ef2bf87abc6f75cb1aedef2699f5d5694bb1d16eaf104ff750",
+      "bytes": 190616
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/greek/jlm_fcsbpg.js",
+      "sha256": "984ac62d52c2cd370dcd27f7365d61b82266b66d1139c38f0fb787e2517d9973",
+      "bytes": 141549
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/greek/jlm_fcsropg.js",
+      "sha256": "f46d8cc7f8ae419752b39d5ab4d69ddd19629d499a5edf2aecd9bdcae743a14e",
+      "bytes": 160767
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/greek/jlm_fcsrpg.js",
+      "sha256": "4881edb5986e454bb82d5638e8f5e580161b06088b903b372ec3d9becec3812a",
+      "bytes": 137603
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/greek/jlm_fctrpg.js",
+      "sha256": "83b8c5cffbef19164354dcb76221c515bbff0a683a35c9366ca61979adf168cd",
+      "bytes": 171156
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_cmr10.js",
+      "sha256": "bb511da6a41be435a5444db3747c3a0e52c038d4f79e3e87a19e5b87ba435e94",
+      "bytes": 56137
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmbi10.js",
+      "sha256": "e901a4c13f8b9c8451476c620d1a0c843aa2db22a45a195a1246861d59818c2b",
+      "bytes": 6800
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmbx10.js",
+      "sha256": "92ec8936f085424c1153f7ea35e70c3cf3b89c9a8aa006fbb310e3fefb6ff258",
+      "bytes": 6431
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmi10.js",
+      "sha256": "9c824b5e72a40eb3d24892ade386033a32f98255ef837c89d8ef493495438bdb",
+      "bytes": 6375
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmr10.js",
+      "sha256": "223da9a3fc3ba25488780a3977fa5bb4d9576fa986ffd56671d38fa3c3dbc956",
+      "bytes": 9165
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmsb10.js",
+      "sha256": "e06c00db26716747e8ed52bdca03e73a69ec2e88f16862628176206930702cb8",
+      "bytes": 6169
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmsbi10.js",
+      "sha256": "7b3a4b308db522a26557b3b28bf8946caf1b88351b37fc324c3d67387b22f6fa",
+      "bytes": 5863
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmsi10.js",
+      "sha256": "da6c1c0e9ad3b69d45502568c1d87d0fe0ebad261f01120ffa89c989356ceb45",
+      "bytes": 4704
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmss10.js",
+      "sha256": "775c64591cee2840cd2509d13f903e632f30c876311b4685318d509f4e42b9cc",
+      "bytes": 4234
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/jlm_jlmtt10.js",
+      "sha256": "94ac26a8d32eb1fc7b632bf8e114faec74a2b469f2e2551f6bf8fcd0857ef397",
+      "bytes": 4514
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/optional/jlm_cmbx10.js",
+      "sha256": "dc88769b6c8230a7c4d96095d18272f5c84cdf2a782057a1f21af4674a6110e0",
+      "bytes": 58085
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/optional/jlm_cmbxti10.js",
+      "sha256": "9e6682215b4356bf59bbf8e434ae26642b3c93a18a156de373b366cf84ecadc6",
+      "bytes": 85561
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/optional/jlm_cmssbx10.js",
+      "sha256": "b60e86d9b0100a2dd1167d9adc3dd2d4e2831e0c9094ec1bbec5dd3b453593f4",
+      "bytes": 61389
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/optional/jlm_cmssi10.js",
+      "sha256": "8f2382c01e336640d20fb397f4b4f3e295d5c704c02105db29cf362e5d13386b",
+      "bytes": 36546
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/optional/jlm_cmti10.js",
+      "sha256": "9e1be5c35e0e270eda2d8eab91afb70e3bbb69ce4d3d051a6fbd61ed4a2e026e",
+      "bytes": 93348
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/latin/optional/jlm_cmtt10.js",
+      "sha256": "f7e378e37208b7d3cb30b191b29c8d71abc85c018972317dc034146ee5178737",
+      "bytes": 68586
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/licences/Knuth_License.txt",
+      "sha256": "8dfa2050f50d341636748e7ab0ed175dde130e33d722678cfa99351c6aded331",
+      "bytes": 395
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/licences/License_for_dsrom.txt",
+      "sha256": "6c4321c24c91ce63ce7f77286207eddf59066b1daa9e393f3e697d578ce4789e",
+      "bytes": 260
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/licences/OFL.txt",
+      "sha256": "c5f826ca32b56a30e0f22467be9f51068b747a6e461314b7650238c3b90ee819",
+      "bytes": 4630
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/maths/jlm_cmbsy10.js",
+      "sha256": "6e7689bf049d5f1bdf503e9e5324fee1d4fe14a53b4f3d20b662e628cc7f9286",
+      "bytes": 67294
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/maths/jlm_msam10.js",
+      "sha256": "0bc61dea2bd894a941deee8c83e8ddc9f70eeac9fb9c52bff56cf512fabf68ce",
+      "bytes": 54230
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/maths/jlm_msbm10.js",
+      "sha256": "af0e0ccee8935a1324f75e49fd6eabcd1573bade08f3a541d6fc626559e39c61",
+      "bytes": 81054
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/maths/jlm_rsfs10.js",
+      "sha256": "e0f751e98f4c0b85f4af17283a64111f7d5618d8c15da3cd238abaec0ebd5144",
+      "bytes": 30402
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/maths/jlm_special.js",
+      "sha256": "47f742ee0e1e1673a3ed7b9d0034c2c1b6e1858c7630ad3e36a2f7705463d1d0",
+      "bytes": 1785
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/maths/jlm_stmary10.js",
+      "sha256": "9abdfb92cf4a3bdd4b7ba74bce5c5784a089c110bfd1ae66b00ba77562a16a6d",
+      "bytes": 51376
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/fonts/maths/optional/jlm_dsrom10.js",
+      "sha256": "d60e4ece5d492a2bcf7d8bead4c697baf75097920a0a78db84d2bf6864facc88",
+      "bytes": 23187
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/html/ggtcallback.html",
+      "sha256": "50502f1cd6832f18e27ab741afb3d9150c11ef71c468a01956ed1c025ae0319f",
+      "bytes": 708
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/html/windowslive.html",
+      "sha256": "8c2387cf0977c70bbe2fce0e5bce1031518477a1393787ed82855a5949061501",
+      "bytes": 160
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/Roboto.js",
+      "sha256": "17c5f552f0e01c3244d643a6d1a85d448f8fa94f7829e99d1277d840648d104e",
+      "bytes": 203810
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/RobotoSerif.js",
+      "sha256": "36947e79db055204c552943aed89d5906cb438e75093b4053b8866e2f4dc98f5",
+      "bytes": 153011
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/canvas-to-svg.umd.min.js",
+      "sha256": "1160cf1096ba539a8e128cfd0bae18d378cf8da459033aa513054a9e6541476c",
+      "bytes": 18496
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/canvas2pdf.js",
+      "sha256": "b9a11a533a83cda9bb3507e68235653cc44604d83447255d96110da7ea614bb1",
+      "bytes": 40449
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/canvas2pdf.min.js",
+      "sha256": "eee797a71f23fafafe591f2d9643e6ab4f9ded3a926fca3ea191b54bdc4ccfd9",
+      "bytes": 31953
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/gifshot.min.js",
+      "sha256": "85d41e59942640fc93ebe2555638ce20930120855335ceb753c8b458661d9731",
+      "bytes": 26319
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_af.js",
+      "sha256": "2e46fd66a2937a02ea9d6cf83248cd76f09e9b9269a5712c2fc2a2b4cb8e4983",
+      "bytes": 177130
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_am.js",
+      "sha256": "89b3b0e2704530757d58d61d12670e68ddabb1d3e03a1df5919dbcf9c93a1258",
+      "bytes": 241223
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ar-MA.js",
+      "sha256": "3d3ba9505f323ec1fbb260ed35f34624ce30439072459059490a05e2f4fabc2b",
+      "bytes": 445924
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ar-SY.js",
+      "sha256": "42bdaf44678b422a3ef125425b08ecb261083ff500e058fdafe9c919bcaf9f4d",
+      "bytes": 443822
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ar-TN.js",
+      "sha256": "38eb1200ded2a9144de0977cbcd59d42d07a51c3aa6af7afc4eb4b4a583796b8",
+      "bytes": 440802
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ar.js",
+      "sha256": "0f0ecf9ba5c2ec4bd42d5e7dfd4e071504481b7267cc35db8219400d5901b00a",
+      "bytes": 443810
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_az.js",
+      "sha256": "9338835a8d7e11ce932bf0fecd3452f6397ce18ba7b5b28066dea84d1dc37a48",
+      "bytes": 237979
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_bg.js",
+      "sha256": "69bdffbf7e227a2a8d8f19eb3745bef8bda4ddce6e14d5ba4c645d13b2129833",
+      "bytes": 576875
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_bn.js",
+      "sha256": "a31acb59029330f4b8f244c68f8bc21c346ea2db0b84aee02941ba96d107f7f2",
+      "bytes": 179910
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_br.js",
+      "sha256": "8e7d78d6878e28606ce7f085329607575eb0aeafa9358a5f5d6a8f1f3f52b507",
+      "bytes": 184060
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_bs.js",
+      "sha256": "31c8b55fbfe1d2f9b06aae185966552b048fbfeaaecb95fa60d44ce9088306e4",
+      "bytes": 200696
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ca-XV.js",
+      "sha256": "176ea225510f9f0643c4d62422fbf74f4b0ae99f3be39e767116360d413335e4",
+      "bytes": 205975
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ca.js",
+      "sha256": "c65142788e140e77d434e0373c46f3326bffd62daa3ea408d76e4154d464a788",
+      "bytes": 203681
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_cs.js",
+      "sha256": "05fd9b910e7427c5fe052a3b291cf662a7a0bada4bdfc2715dc1e830093de4c0",
+      "bytes": 227410
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_cy.js",
+      "sha256": "3078e0c9654984cf959e846b204a365905f4706b91b9895bc20f8f5f5c83d898",
+      "bytes": 181066
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_da.js",
+      "sha256": "9826c4e24fb44b9bb640cd9f42281ad729ad45b2ad68177ba9f71d756c82622a",
+      "bytes": 188416
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_de-AT.js",
+      "sha256": "9f409c05f86c640a918f8ce2de6f9f2fb4d1633f688e5a12f77ff7cc69ed92ef",
+      "bytes": 196607
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_de.js",
+      "sha256": "941a0765eb36b420cbcd5c317baed230dd160181abfd7e1c47e97c931946b243",
+      "bytes": 196592
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_el.js",
+      "sha256": "a1b3d8432382579877690b62e41a31a8e6073381b2ee36123f2eded63d65c1f4",
+      "bytes": 613143
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_en-AU.js",
+      "sha256": "f0e73c585d12d8abff4f581bd7fb87922fc014f5353ba48a5f8bd44c839a1404",
+      "bytes": 177031
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_en-GB.js",
+      "sha256": "fbe7955bd87c300e7fae99255d97fe7e1dd4ee3dbe68cc931eef49ebc09e2455",
+      "bytes": 177170
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_en.js",
+      "sha256": "74c9c270e77f7065a000ae3d884b26521e4973cdad3a210ecc30f9cdfe7dd56e",
+      "bytes": 176923
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_eo.js",
+      "sha256": "b12afef0b731aeba6aabbd566404601470ad547a955e787b28fc2a4db90570a7",
+      "bytes": 180261
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_es-ES.js",
+      "sha256": "ccdf8d1f9eb71588730e0fbd77e9a2596e1a0485539295a1871f128fdeb81e1b",
+      "bytes": 205780
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_es-UY.js",
+      "sha256": "3fd5f87d7d59f0686f12de4008ff68404f29417c9604bc44640ede9e52784846",
+      "bytes": 201987
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_es.js",
+      "sha256": "acad7ee21897fdea588a345cbed87f7448eca558e088c992ef148834eb85c42d",
+      "bytes": 201996
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_et.js",
+      "sha256": "845f476b52d0bd5dabbc19cfe22fc1e1769ab51b48c85d1fe5aaf2787c3948af",
+      "bytes": 196971
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_eu.js",
+      "sha256": "210923a401f26e1536e181ab2335b10af315d4f3d57c6fb0b86cde74a4081a4b",
+      "bytes": 194109
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_fa.js",
+      "sha256": "2448527617fe1967b54d8291540848e7896c996c83c45ffdc789b66c2dba1d06",
+      "bytes": 372627
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_fi.js",
+      "sha256": "3321fd47bfb7ec9841f72a878856f84122a51830bb79cedfe2f76e340550629c",
+      "bytes": 198883
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_fil.js",
+      "sha256": "e7d7c2efe80cf43bad9c132637e32dc453bab83f78ed61c13d40ec9893f8e42f",
+      "bytes": 180631
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_fr.js",
+      "sha256": "fc1c03676818a7ddc27508d38c6e922b3833357796296ae581c7903ff8e4d573",
+      "bytes": 200191
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_gl.js",
+      "sha256": "89d605e04e858bb108a7267379bba5085bdc5f88fe378024d22a0b1167ce4dfa",
+      "bytes": 208807
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_he.js",
+      "sha256": "0ea289582de05ae8b7334f860093ab450d26f7d9eb0671f85e6483833620ee30",
+      "bytes": 359562
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_hi.js",
+      "sha256": "f8bae7cdd140c0764580883604e0254b383f3e84098b9bb1b96368a6d5bbf4f8",
+      "bytes": 454726
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_hr.js",
+      "sha256": "d7fb641dd160120be64ae6a120b4b0cfc5745e33683f45217075453f0a327d0e",
+      "bytes": 200570
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_hu.js",
+      "sha256": "69f49032d6b0d99bdec5a4cf7242f64a34ca0fdb16661736e343848a8e6a863e",
+      "bytes": 231395
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_hy.js",
+      "sha256": "5cdba99e2eeda77a14f6d6538a472c1d254ace500b806190d17b3ae9947af805",
+      "bytes": 504482
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_id.js",
+      "sha256": "b4baf1d4a52b972308109a4b9c7923c1fd6ba8a8c61887f65e6446948833f311",
+      "bytes": 181310
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_is.js",
+      "sha256": "d7b21ed0783bf85f2bb438cd2403293e11ad3351ccae8ced34474f6ca24c2de6",
+      "bytes": 211739
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_it.js",
+      "sha256": "fcd3b561bf9042fa4f5ccfc322ef8a87430f4a399ccc8a3eb2c63d41e4be3e62",
+      "bytes": 190538
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ja.js",
+      "sha256": "916b71677f9a1bc8269658abf7c0621d283ba6be5262f745464864f0587655ad",
+      "bytes": 305324
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ka.js",
+      "sha256": "2871912ce1b5f4f17dde5d2b0e420dc46465e3c614a66908412ded9abef167dd",
+      "bytes": 544383
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_kk.js",
+      "sha256": "c8b425d17ee7de384e1abe2542e488959e4f60cdedcf6e82cbd19137017d2045",
+      "bytes": 485176
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_km.js",
+      "sha256": "bb96b733d6d0b35af4e8822a044ca7d2282dafdd9f9e3169af64c28b5ac9729b",
+      "bytes": 187126
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_kn.js",
+      "sha256": "4c8bc588cf8c70793f7dd73309a2bf177ce48203d3da290a23a06d877d79b4ea",
+      "bytes": 452022
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ko.js",
+      "sha256": "3da8882b9d04f332864e489d6960a2297afa1f8c178adce1183dcab5066458d9",
+      "bytes": 298349
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_lt.js",
+      "sha256": "aac101b490513759d184562f6ac9c4f061f0b61cac578fa50bb70cc5813c161c",
+      "bytes": 216734
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_lv.js",
+      "sha256": "40c48a1d13b8ab08ffbd695895b59c338213b0968055c4a681dd700868313a01",
+      "bytes": 208270
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_mk.js",
+      "sha256": "24309e181856b70e4150fe33b8bb668a623d830656565fb9095935c136a4a398",
+      "bytes": 506172
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ml.js",
+      "sha256": "050c20d507d81527ad7e0bafbff92763ecdc6c837f63027f4455bf75c1c74fd1",
+      "bytes": 198671
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_mn-Mong.js",
+      "sha256": "4b24be589aa373957a63672c4e718cc0f74aae85e275f1542d84a99afbf0fd99",
+      "bytes": 584453
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_mn.js",
+      "sha256": "f1cfd799d9f4c22623fabfb69bfedfbebcf547155e0ad22dc7f74a02605ce01c",
+      "bytes": 584433
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_mr.js",
+      "sha256": "97d54e4d342837a90cab47cb972f62f2ebde2094806acb8f86929f395d543c02",
+      "bytes": 316763
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ms.js",
+      "sha256": "dbf756d270e872545b97697291402cf7fd9e27fc4a6f84995edfe4e29cf2989e",
+      "bytes": 181779
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_nb.js",
+      "sha256": "34a5178edbd3eb09bdf2621264ba517ca2cec9ba98b9c59e34dbff91ecfac159",
+      "bytes": 186497
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ne.js",
+      "sha256": "d64db859edfcb39b6597367feee994b09851894391cffe4b870526bed53dd561",
+      "bytes": 428562
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_nl-NL.js",
+      "sha256": "a1739986c24efd6d29dbea6ec10812788dc53bd380a7d00fdf19f37aa578596b",
+      "bytes": 185959
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_nl.js",
+      "sha256": "8c1005926b78b98ea6cdf5049fb07ea576b478b533bde43ba7a9c467db273a08",
+      "bytes": 187146
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_nn.js",
+      "sha256": "d73828999f1522403dd6939b60dfac2372b9fcf4af58869b4a046499e02ea30a",
+      "bytes": 185813
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_pl.js",
+      "sha256": "fb51cf2244f1f0f0b996086f3be2d47b387c41c0f3a9a339c3ffb579c5c67c99",
+      "bytes": 215193
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_pt-PT.js",
+      "sha256": "7a295fa310474e2d8489d2bc2a1e99b70302b5176665a9a395917370b9c0d104",
+      "bytes": 209033
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_pt.js",
+      "sha256": "0dad5cefdbf0359be1cb14576f1b304a0ec3675b3bea3601a8cde79dcb68bd59",
+      "bytes": 210067
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ro.js",
+      "sha256": "1ef75d292a0fc72d4bda343b8ade1752c765a6d611a2ecdf8f2dd834c6ab9f5c",
+      "bytes": 211452
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ru.js",
+      "sha256": "961284e0220060a6741e19b3e04743d5e7f1941067a5561857a728fea0c3536e",
+      "bytes": 505773
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_si.js",
+      "sha256": "a4517d2968a7fed3114379783e16867578b7a9b3fbffb1bba3355d138dea5f37",
+      "bytes": 390129
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_sk.js",
+      "sha256": "6a4f8f5a8053c4a711bd1c98ccf0f28151f696f71be9429cb4b110dae93406f0",
+      "bytes": 213871
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_sl.js",
+      "sha256": "3c91ee6a4a28929cb1404774b01f34f0ffb9fccdc67345ac7e4ef1b62684b03d",
+      "bytes": 196618
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_sq.js",
+      "sha256": "f2ce0d677ad883eb37c20de0455428d0746262e7f7ea5f221bf1539120699ec7",
+      "bytes": 183588
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_sr.js",
+      "sha256": "a67d56cb54e19e198e115e8396a394bf228a6ac5700da0bfb8fcadf8d19ae536",
+      "bytes": 193724
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_sv.js",
+      "sha256": "62482d3c9481838ac6a682d7e71d41e7448b26d4e27ccd7d904d129f056525a2",
+      "bytes": 200590
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ta.js",
+      "sha256": "49db49e4575015d63e641fceff018f935414a0f35e1021d6e1a0a25bc89b1c87",
+      "bytes": 358555
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_tg.js",
+      "sha256": "4957b6e028b8a09524362354cbd12f783e5eeeddd84fe8e6687a5a289f801306",
+      "bytes": 323701
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_th.js",
+      "sha256": "c3c1147254d68d2ba195ee5b4d3f687390f1bffedba050b6c59a7f95eabda16b",
+      "bytes": 497773
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_tr.js",
+      "sha256": "1011f4534c20bf9eb22e04ee5cc96177fcb6baa72f2fe740848d723e316808df",
+      "bytes": 230791
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_ug.js",
+      "sha256": "eeb8e4993a890aadca17cd6b2b35e19d0e7ad38006caf8db438a1413acf1e91a",
+      "bytes": 551870
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_uk.js",
+      "sha256": "e8447b2293b2c4cddf5c69841915be114f2032ec2c5e0988a4d6b7ded0f64799",
+      "bytes": 562599
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_uz.js",
+      "sha256": "14ee0e3ad0fe7e6a1d98bb71d001ee57f92743da38424c2d30c6ecf7f3d9da1d",
+      "bytes": 195453
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_vi.js",
+      "sha256": "50ac22f4c0611937aad10d79ea0ac16355879b592e438314e34db51668ed630a",
+      "bytes": 266665
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_xh.js",
+      "sha256": "2858bd994ece41afe41431ba70e3e9d5268159b36c3a044b4c951be7a3eb8d50",
+      "bytes": 189241
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_yi.js",
+      "sha256": "52a90d334d875012b1f6b5f76556f39924038dd684f4f65c9e48055531e8e1cd",
+      "bytes": 372708
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_zh-CN.js",
+      "sha256": "a3c7c9fe8d60e79b7f9e6880c79c06fbc7ee3b73289e605a5c3c6a0037cc9b51",
+      "bytes": 261001
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/properties_keys_zh-TW.js",
+      "sha256": "fc4b235f6a4750aa4ad05204f51b9312e7678a71740b4f53079fcc65897f5fad",
+      "bytes": 235844
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/whammy.js",
+      "sha256": "c91aeadd939a6debd7975b8392484d7f329a8c39e46a0505c9d86c936b624cd1",
+      "bytes": 5199
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/js/whammy.min.js",
+      "sha256": "02cb2a3ba7ee4a411d83b8482bffe4986c01704fe9154cdd6bd4405604a64249",
+      "bytes": 3836
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/sworker-locked.js",
+      "sha256": "5eafa521fd4acc16ca2095e3ed059145863a8cc11d22340e1091b2c2009aebf7",
+      "bytes": 13299
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/web.nocache.js",
+      "sha256": "6a01721540eebb04848cf2c58fb3cdc0050f2c33b41bd039232be57ce413183e",
+      "bytes": 5393
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web/web.nocache.mjs",
+      "sha256": "f2ec87aa8a6232dbf546b291d884c1123f2b9e627882c806a2afd41f868ff360",
+      "bytes": 13820
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/38DDB4543208AF14503E6553B520534C.cache.js",
+      "sha256": "3bc1f4cd8b312926415fac54e122aae629e95dec2e7e66beb85201ffaf1ac544",
+      "bytes": 7891104
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/1.cache.js",
+      "sha256": "95c2767565ae599790dad852dbba1eb2af08f1ba27d2b70133b376e5ce213fd9",
+      "bytes": 141905
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/10.cache.js",
+      "sha256": "20cefc7eef81b9a2e03b7ac51e2005365fe5e1c1e79b32d61279674aeca68d3b",
+      "bytes": 18654
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/11.cache.js",
+      "sha256": "ef35f4678a6a427bf0c5751392efe62d60a955e9203c5a0617c799da9f0ab6ad",
+      "bytes": 83922
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/12.cache.js",
+      "sha256": "363074672c643f1432eb50c6449dbb62c4db2fbcff8ddc318cc0ae3197bad078",
+      "bytes": 732808
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/13.cache.js",
+      "sha256": "51f271115187e99caf6277439ba095c3d80dbe665811d1d0566eb9a02b08419d",
+      "bytes": 495928
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/14.cache.js",
+      "sha256": "e79f1fefa42be0db40f0c7e9acfb404510cf296b1d14300315f9b88f4ff1f3bd",
+      "bytes": 1738998
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/15.cache.js",
+      "sha256": "7281f5cf8fe4fe0795075a6fea87efbf61e6682c58d6461e1a586a85a3108cb4",
+      "bytes": 4118
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/2.cache.js",
+      "sha256": "62bfec8c8803609e390c3581130799e6086a6604cd0605fb8b2ebd2b90cb20b1",
+      "bytes": 10185292
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/3.cache.js",
+      "sha256": "5809a342d9546225fe5f158392cfacd70498e542a597e9ba028d1c433c99974f",
+      "bytes": 226794
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/4.cache.js",
+      "sha256": "b6c4e4129b880650f52e447ad4d5ba602c16e0f6ece4e420617a04c2364e4158",
+      "bytes": 513798
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/5.cache.js",
+      "sha256": "6cf62afbabc42b0f4b16abee75486af0586e05138bc333f2e752d602bba710fd",
+      "bytes": 55782
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/6.cache.js",
+      "sha256": "d37c92166104a55237c321aacfe2aca8e26e85aeecff4f9c48fb6c1437c4188a",
+      "bytes": 160761
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/7.cache.js",
+      "sha256": "be2820c911796b9092161c6901596f4093f9950107152cb8bd2a123ff0fce3d9",
+      "bytes": 59451
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/8.cache.js",
+      "sha256": "04f8b57a6a1392387e21b31bcfeda59097418c81b81077a7dfa9941245a8680d",
+      "bytes": 163901
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/deferredjs/38DDB4543208AF14503E6553B520534C/9.cache.js",
+      "sha256": "622dd566c554ec05caed9346741be6bac6da6c841ce68f615d0d80247bf2ec7e",
+      "bytes": 181546
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/base/jlm_cmmi10.js",
+      "sha256": "99943749890c7c57e01dd16b1292d4feacb035fc03745dd9077d0ccf2f103624",
+      "bytes": 71022
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/base/jlm_cmmib10.js",
+      "sha256": "e75d176e86bf167cb482f72ce2bfdb11d80556eb6f75d3a82c598380d04c9e63",
+      "bytes": 83766
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/cyrillic/jlm_wnbx10.js",
+      "sha256": "35789ed6d1a1a70b9e5bb7614622fd35fa56926a115bebd95889283f5f4d2ccf",
+      "bytes": 90796
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/cyrillic/jlm_wnbxti10.js",
+      "sha256": "7742c896aa97129e538fd1a29e3b7f77aedca94495b793f7f835e7803a18fc05",
+      "bytes": 156977
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/cyrillic/jlm_wnr10.js",
+      "sha256": "6e1598cb21e385c5e0881b71a90c9f16628295a67e02595060e8ec5be4cc9e60",
+      "bytes": 102118
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/cyrillic/jlm_wnss10.js",
+      "sha256": "c9d99d9e7e105ec39afd2630886161b05e136adb7fba3fed0ee5cced2072fe6f",
+      "bytes": 49509
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/cyrillic/jlm_wnssbx10.js",
+      "sha256": "66a8814b9098ba56656392c4132a533c6af99946ccbc2843f61632e200ab6acd",
+      "bytes": 87228
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/cyrillic/jlm_wnssi10.js",
+      "sha256": "5ab4795551b9c32691736e11d20fadf5b38bc7787ae7959b86fe2daa39faf75d",
+      "bytes": 69527
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/cyrillic/jlm_wnti10.js",
+      "sha256": "13119cf310cfa80eca1d64e8c711b207ab0d9e765a053e9bd3ef48638b908a08",
+      "bytes": 151215
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/cyrillic/jlm_wntt10.js",
+      "sha256": "d73a2332c96e87228352ea9dc860a2937eac89e3861e1d31e705498450a9eb45",
+      "bytes": 94607
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/euler/jlm_eufb10.js",
+      "sha256": "4fce21db5b204fa29a41875370d02b68da21d65e08fecfd27c48cfb5a655154b",
+      "bytes": 58932
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/euler/jlm_eufm10.js",
+      "sha256": "7986522e2926f26177edb538e6d9ce58eca8eeb9c188b966c2676e0a73f5a794",
+      "bytes": 57318
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/greek/jlm_fcmbipg.js",
+      "sha256": "9965740782ca00f5238ffc8f8f91c6a61775f5158b925f033c01f155c8f197b1",
+      "bytes": 191184
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/greek/jlm_fcmbpg.js",
+      "sha256": "a4409e517004072997cb4fce746d0125e670db6d77343e8d36ce9fa582e1adda",
+      "bytes": 187896
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/greek/jlm_fcmripg.js",
+      "sha256": "01f25b65a79240b1e0a745a2d2e6c07d7096abe0155bd006e405efb926230e64",
+      "bytes": 198725
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/greek/jlm_fcmrpg.js",
+      "sha256": "e6376b6f084749ef2bf87abc6f75cb1aedef2699f5d5694bb1d16eaf104ff750",
+      "bytes": 190616
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/greek/jlm_fcsbpg.js",
+      "sha256": "984ac62d52c2cd370dcd27f7365d61b82266b66d1139c38f0fb787e2517d9973",
+      "bytes": 141549
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/greek/jlm_fcsropg.js",
+      "sha256": "f46d8cc7f8ae419752b39d5ab4d69ddd19629d499a5edf2aecd9bdcae743a14e",
+      "bytes": 160767
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/greek/jlm_fcsrpg.js",
+      "sha256": "4881edb5986e454bb82d5638e8f5e580161b06088b903b372ec3d9becec3812a",
+      "bytes": 137603
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/greek/jlm_fctrpg.js",
+      "sha256": "83b8c5cffbef19164354dcb76221c515bbff0a683a35c9366ca61979adf168cd",
+      "bytes": 171156
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_cmr10.js",
+      "sha256": "bb511da6a41be435a5444db3747c3a0e52c038d4f79e3e87a19e5b87ba435e94",
+      "bytes": 56137
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmbi10.js",
+      "sha256": "e901a4c13f8b9c8451476c620d1a0c843aa2db22a45a195a1246861d59818c2b",
+      "bytes": 6800
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmbx10.js",
+      "sha256": "92ec8936f085424c1153f7ea35e70c3cf3b89c9a8aa006fbb310e3fefb6ff258",
+      "bytes": 6431
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmi10.js",
+      "sha256": "9c824b5e72a40eb3d24892ade386033a32f98255ef837c89d8ef493495438bdb",
+      "bytes": 6375
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmr10.js",
+      "sha256": "223da9a3fc3ba25488780a3977fa5bb4d9576fa986ffd56671d38fa3c3dbc956",
+      "bytes": 9165
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmsb10.js",
+      "sha256": "e06c00db26716747e8ed52bdca03e73a69ec2e88f16862628176206930702cb8",
+      "bytes": 6169
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmsbi10.js",
+      "sha256": "7b3a4b308db522a26557b3b28bf8946caf1b88351b37fc324c3d67387b22f6fa",
+      "bytes": 5863
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmsi10.js",
+      "sha256": "da6c1c0e9ad3b69d45502568c1d87d0fe0ebad261f01120ffa89c989356ceb45",
+      "bytes": 4704
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmss10.js",
+      "sha256": "775c64591cee2840cd2509d13f903e632f30c876311b4685318d509f4e42b9cc",
+      "bytes": 4234
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/jlm_jlmtt10.js",
+      "sha256": "94ac26a8d32eb1fc7b632bf8e114faec74a2b469f2e2551f6bf8fcd0857ef397",
+      "bytes": 4514
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/optional/jlm_cmbx10.js",
+      "sha256": "dc88769b6c8230a7c4d96095d18272f5c84cdf2a782057a1f21af4674a6110e0",
+      "bytes": 58085
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/optional/jlm_cmbxti10.js",
+      "sha256": "9e6682215b4356bf59bbf8e434ae26642b3c93a18a156de373b366cf84ecadc6",
+      "bytes": 85561
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/optional/jlm_cmssbx10.js",
+      "sha256": "b60e86d9b0100a2dd1167d9adc3dd2d4e2831e0c9094ec1bbec5dd3b453593f4",
+      "bytes": 61389
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/optional/jlm_cmssi10.js",
+      "sha256": "8f2382c01e336640d20fb397f4b4f3e295d5c704c02105db29cf362e5d13386b",
+      "bytes": 36546
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/optional/jlm_cmti10.js",
+      "sha256": "9e1be5c35e0e270eda2d8eab91afb70e3bbb69ce4d3d051a6fbd61ed4a2e026e",
+      "bytes": 93348
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/latin/optional/jlm_cmtt10.js",
+      "sha256": "f7e378e37208b7d3cb30b191b29c8d71abc85c018972317dc034146ee5178737",
+      "bytes": 68586
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/licences/Knuth_License.txt",
+      "sha256": "8dfa2050f50d341636748e7ab0ed175dde130e33d722678cfa99351c6aded331",
+      "bytes": 395
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/licences/License_for_dsrom.txt",
+      "sha256": "6c4321c24c91ce63ce7f77286207eddf59066b1daa9e393f3e697d578ce4789e",
+      "bytes": 260
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/licences/OFL.txt",
+      "sha256": "c5f826ca32b56a30e0f22467be9f51068b747a6e461314b7650238c3b90ee819",
+      "bytes": 4630
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/maths/jlm_cmbsy10.js",
+      "sha256": "6e7689bf049d5f1bdf503e9e5324fee1d4fe14a53b4f3d20b662e628cc7f9286",
+      "bytes": 67294
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/maths/jlm_msam10.js",
+      "sha256": "0bc61dea2bd894a941deee8c83e8ddc9f70eeac9fb9c52bff56cf512fabf68ce",
+      "bytes": 54230
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/maths/jlm_msbm10.js",
+      "sha256": "af0e0ccee8935a1324f75e49fd6eabcd1573bade08f3a541d6fc626559e39c61",
+      "bytes": 81054
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/maths/jlm_rsfs10.js",
+      "sha256": "e0f751e98f4c0b85f4af17283a64111f7d5618d8c15da3cd238abaec0ebd5144",
+      "bytes": 30402
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/maths/jlm_special.js",
+      "sha256": "47f742ee0e1e1673a3ed7b9d0034c2c1b6e1858c7630ad3e36a2f7705463d1d0",
+      "bytes": 1785
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/maths/jlm_stmary10.js",
+      "sha256": "9abdfb92cf4a3bdd4b7ba74bce5c5784a089c110bfd1ae66b00ba77562a16a6d",
+      "bytes": 51376
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/fonts/maths/optional/jlm_dsrom10.js",
+      "sha256": "d60e4ece5d492a2bcf7d8bead4c697baf75097920a0a78db84d2bf6864facc88",
+      "bytes": 23187
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/html/ggtcallback.html",
+      "sha256": "50502f1cd6832f18e27ab741afb3d9150c11ef71c468a01956ed1c025ae0319f",
+      "bytes": 708
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/html/windowslive.html",
+      "sha256": "8c2387cf0977c70bbe2fce0e5bce1031518477a1393787ed82855a5949061501",
+      "bytes": 160
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/Roboto.js",
+      "sha256": "17c5f552f0e01c3244d643a6d1a85d448f8fa94f7829e99d1277d840648d104e",
+      "bytes": 203810
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/RobotoSerif.js",
+      "sha256": "36947e79db055204c552943aed89d5906cb438e75093b4053b8866e2f4dc98f5",
+      "bytes": 153011
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/canvas-to-svg.umd.min.js",
+      "sha256": "1160cf1096ba539a8e128cfd0bae18d378cf8da459033aa513054a9e6541476c",
+      "bytes": 18496
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/canvas2pdf.js",
+      "sha256": "b9a11a533a83cda9bb3507e68235653cc44604d83447255d96110da7ea614bb1",
+      "bytes": 40449
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/canvas2pdf.min.js",
+      "sha256": "eee797a71f23fafafe591f2d9643e6ab4f9ded3a926fca3ea191b54bdc4ccfd9",
+      "bytes": 31953
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/gifshot.min.js",
+      "sha256": "85d41e59942640fc93ebe2555638ce20930120855335ceb753c8b458661d9731",
+      "bytes": 26319
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_af.js",
+      "sha256": "2e46fd66a2937a02ea9d6cf83248cd76f09e9b9269a5712c2fc2a2b4cb8e4983",
+      "bytes": 177130
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_am.js",
+      "sha256": "89b3b0e2704530757d58d61d12670e68ddabb1d3e03a1df5919dbcf9c93a1258",
+      "bytes": 241223
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ar-MA.js",
+      "sha256": "3d3ba9505f323ec1fbb260ed35f34624ce30439072459059490a05e2f4fabc2b",
+      "bytes": 445924
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ar-SY.js",
+      "sha256": "42bdaf44678b422a3ef125425b08ecb261083ff500e058fdafe9c919bcaf9f4d",
+      "bytes": 443822
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ar-TN.js",
+      "sha256": "38eb1200ded2a9144de0977cbcd59d42d07a51c3aa6af7afc4eb4b4a583796b8",
+      "bytes": 440802
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ar.js",
+      "sha256": "0f0ecf9ba5c2ec4bd42d5e7dfd4e071504481b7267cc35db8219400d5901b00a",
+      "bytes": 443810
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_az.js",
+      "sha256": "9338835a8d7e11ce932bf0fecd3452f6397ce18ba7b5b28066dea84d1dc37a48",
+      "bytes": 237979
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_bg.js",
+      "sha256": "69bdffbf7e227a2a8d8f19eb3745bef8bda4ddce6e14d5ba4c645d13b2129833",
+      "bytes": 576875
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_bn.js",
+      "sha256": "a31acb59029330f4b8f244c68f8bc21c346ea2db0b84aee02941ba96d107f7f2",
+      "bytes": 179910
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_br.js",
+      "sha256": "8e7d78d6878e28606ce7f085329607575eb0aeafa9358a5f5d6a8f1f3f52b507",
+      "bytes": 184060
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_bs.js",
+      "sha256": "31c8b55fbfe1d2f9b06aae185966552b048fbfeaaecb95fa60d44ce9088306e4",
+      "bytes": 200696
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ca-XV.js",
+      "sha256": "176ea225510f9f0643c4d62422fbf74f4b0ae99f3be39e767116360d413335e4",
+      "bytes": 205975
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ca.js",
+      "sha256": "c65142788e140e77d434e0373c46f3326bffd62daa3ea408d76e4154d464a788",
+      "bytes": 203681
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_cs.js",
+      "sha256": "05fd9b910e7427c5fe052a3b291cf662a7a0bada4bdfc2715dc1e830093de4c0",
+      "bytes": 227410
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_cy.js",
+      "sha256": "3078e0c9654984cf959e846b204a365905f4706b91b9895bc20f8f5f5c83d898",
+      "bytes": 181066
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_da.js",
+      "sha256": "9826c4e24fb44b9bb640cd9f42281ad729ad45b2ad68177ba9f71d756c82622a",
+      "bytes": 188416
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_de-AT.js",
+      "sha256": "9f409c05f86c640a918f8ce2de6f9f2fb4d1633f688e5a12f77ff7cc69ed92ef",
+      "bytes": 196607
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_de.js",
+      "sha256": "941a0765eb36b420cbcd5c317baed230dd160181abfd7e1c47e97c931946b243",
+      "bytes": 196592
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_el.js",
+      "sha256": "a1b3d8432382579877690b62e41a31a8e6073381b2ee36123f2eded63d65c1f4",
+      "bytes": 613143
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_en-AU.js",
+      "sha256": "f0e73c585d12d8abff4f581bd7fb87922fc014f5353ba48a5f8bd44c839a1404",
+      "bytes": 177031
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_en-GB.js",
+      "sha256": "fbe7955bd87c300e7fae99255d97fe7e1dd4ee3dbe68cc931eef49ebc09e2455",
+      "bytes": 177170
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_en.js",
+      "sha256": "74c9c270e77f7065a000ae3d884b26521e4973cdad3a210ecc30f9cdfe7dd56e",
+      "bytes": 176923
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_eo.js",
+      "sha256": "b12afef0b731aeba6aabbd566404601470ad547a955e787b28fc2a4db90570a7",
+      "bytes": 180261
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_es-ES.js",
+      "sha256": "ccdf8d1f9eb71588730e0fbd77e9a2596e1a0485539295a1871f128fdeb81e1b",
+      "bytes": 205780
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_es-UY.js",
+      "sha256": "3fd5f87d7d59f0686f12de4008ff68404f29417c9604bc44640ede9e52784846",
+      "bytes": 201987
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_es.js",
+      "sha256": "acad7ee21897fdea588a345cbed87f7448eca558e088c992ef148834eb85c42d",
+      "bytes": 201996
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_et.js",
+      "sha256": "845f476b52d0bd5dabbc19cfe22fc1e1769ab51b48c85d1fe5aaf2787c3948af",
+      "bytes": 196971
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_eu.js",
+      "sha256": "210923a401f26e1536e181ab2335b10af315d4f3d57c6fb0b86cde74a4081a4b",
+      "bytes": 194109
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_fa.js",
+      "sha256": "2448527617fe1967b54d8291540848e7896c996c83c45ffdc789b66c2dba1d06",
+      "bytes": 372627
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_fi.js",
+      "sha256": "3321fd47bfb7ec9841f72a878856f84122a51830bb79cedfe2f76e340550629c",
+      "bytes": 198883
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_fil.js",
+      "sha256": "e7d7c2efe80cf43bad9c132637e32dc453bab83f78ed61c13d40ec9893f8e42f",
+      "bytes": 180631
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_fr.js",
+      "sha256": "fc1c03676818a7ddc27508d38c6e922b3833357796296ae581c7903ff8e4d573",
+      "bytes": 200191
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_gl.js",
+      "sha256": "89d605e04e858bb108a7267379bba5085bdc5f88fe378024d22a0b1167ce4dfa",
+      "bytes": 208807
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_he.js",
+      "sha256": "0ea289582de05ae8b7334f860093ab450d26f7d9eb0671f85e6483833620ee30",
+      "bytes": 359562
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_hi.js",
+      "sha256": "f8bae7cdd140c0764580883604e0254b383f3e84098b9bb1b96368a6d5bbf4f8",
+      "bytes": 454726
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_hr.js",
+      "sha256": "d7fb641dd160120be64ae6a120b4b0cfc5745e33683f45217075453f0a327d0e",
+      "bytes": 200570
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_hu.js",
+      "sha256": "69f49032d6b0d99bdec5a4cf7242f64a34ca0fdb16661736e343848a8e6a863e",
+      "bytes": 231395
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_hy.js",
+      "sha256": "5cdba99e2eeda77a14f6d6538a472c1d254ace500b806190d17b3ae9947af805",
+      "bytes": 504482
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_id.js",
+      "sha256": "b4baf1d4a52b972308109a4b9c7923c1fd6ba8a8c61887f65e6446948833f311",
+      "bytes": 181310
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_is.js",
+      "sha256": "d7b21ed0783bf85f2bb438cd2403293e11ad3351ccae8ced34474f6ca24c2de6",
+      "bytes": 211739
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_it.js",
+      "sha256": "fcd3b561bf9042fa4f5ccfc322ef8a87430f4a399ccc8a3eb2c63d41e4be3e62",
+      "bytes": 190538
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ja.js",
+      "sha256": "916b71677f9a1bc8269658abf7c0621d283ba6be5262f745464864f0587655ad",
+      "bytes": 305324
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ka.js",
+      "sha256": "2871912ce1b5f4f17dde5d2b0e420dc46465e3c614a66908412ded9abef167dd",
+      "bytes": 544383
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_kk.js",
+      "sha256": "c8b425d17ee7de384e1abe2542e488959e4f60cdedcf6e82cbd19137017d2045",
+      "bytes": 485176
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_km.js",
+      "sha256": "bb96b733d6d0b35af4e8822a044ca7d2282dafdd9f9e3169af64c28b5ac9729b",
+      "bytes": 187126
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_kn.js",
+      "sha256": "4c8bc588cf8c70793f7dd73309a2bf177ce48203d3da290a23a06d877d79b4ea",
+      "bytes": 452022
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ko.js",
+      "sha256": "3da8882b9d04f332864e489d6960a2297afa1f8c178adce1183dcab5066458d9",
+      "bytes": 298349
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_lt.js",
+      "sha256": "aac101b490513759d184562f6ac9c4f061f0b61cac578fa50bb70cc5813c161c",
+      "bytes": 216734
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_lv.js",
+      "sha256": "40c48a1d13b8ab08ffbd695895b59c338213b0968055c4a681dd700868313a01",
+      "bytes": 208270
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_mk.js",
+      "sha256": "24309e181856b70e4150fe33b8bb668a623d830656565fb9095935c136a4a398",
+      "bytes": 506172
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ml.js",
+      "sha256": "050c20d507d81527ad7e0bafbff92763ecdc6c837f63027f4455bf75c1c74fd1",
+      "bytes": 198671
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_mn-Mong.js",
+      "sha256": "4b24be589aa373957a63672c4e718cc0f74aae85e275f1542d84a99afbf0fd99",
+      "bytes": 584453
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_mn.js",
+      "sha256": "f1cfd799d9f4c22623fabfb69bfedfbebcf547155e0ad22dc7f74a02605ce01c",
+      "bytes": 584433
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_mr.js",
+      "sha256": "97d54e4d342837a90cab47cb972f62f2ebde2094806acb8f86929f395d543c02",
+      "bytes": 316763
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ms.js",
+      "sha256": "dbf756d270e872545b97697291402cf7fd9e27fc4a6f84995edfe4e29cf2989e",
+      "bytes": 181779
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_nb.js",
+      "sha256": "34a5178edbd3eb09bdf2621264ba517ca2cec9ba98b9c59e34dbff91ecfac159",
+      "bytes": 186497
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ne.js",
+      "sha256": "d64db859edfcb39b6597367feee994b09851894391cffe4b870526bed53dd561",
+      "bytes": 428562
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_nl-NL.js",
+      "sha256": "a1739986c24efd6d29dbea6ec10812788dc53bd380a7d00fdf19f37aa578596b",
+      "bytes": 185959
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_nl.js",
+      "sha256": "8c1005926b78b98ea6cdf5049fb07ea576b478b533bde43ba7a9c467db273a08",
+      "bytes": 187146
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_nn.js",
+      "sha256": "d73828999f1522403dd6939b60dfac2372b9fcf4af58869b4a046499e02ea30a",
+      "bytes": 185813
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_pl.js",
+      "sha256": "fb51cf2244f1f0f0b996086f3be2d47b387c41c0f3a9a339c3ffb579c5c67c99",
+      "bytes": 215193
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_pt-PT.js",
+      "sha256": "7a295fa310474e2d8489d2bc2a1e99b70302b5176665a9a395917370b9c0d104",
+      "bytes": 209033
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_pt.js",
+      "sha256": "0dad5cefdbf0359be1cb14576f1b304a0ec3675b3bea3601a8cde79dcb68bd59",
+      "bytes": 210067
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ro.js",
+      "sha256": "1ef75d292a0fc72d4bda343b8ade1752c765a6d611a2ecdf8f2dd834c6ab9f5c",
+      "bytes": 211452
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ru.js",
+      "sha256": "961284e0220060a6741e19b3e04743d5e7f1941067a5561857a728fea0c3536e",
+      "bytes": 505773
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_si.js",
+      "sha256": "a4517d2968a7fed3114379783e16867578b7a9b3fbffb1bba3355d138dea5f37",
+      "bytes": 390129
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_sk.js",
+      "sha256": "6a4f8f5a8053c4a711bd1c98ccf0f28151f696f71be9429cb4b110dae93406f0",
+      "bytes": 213871
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_sl.js",
+      "sha256": "3c91ee6a4a28929cb1404774b01f34f0ffb9fccdc67345ac7e4ef1b62684b03d",
+      "bytes": 196618
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_sq.js",
+      "sha256": "f2ce0d677ad883eb37c20de0455428d0746262e7f7ea5f221bf1539120699ec7",
+      "bytes": 183588
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_sr.js",
+      "sha256": "a67d56cb54e19e198e115e8396a394bf228a6ac5700da0bfb8fcadf8d19ae536",
+      "bytes": 193724
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_sv.js",
+      "sha256": "62482d3c9481838ac6a682d7e71d41e7448b26d4e27ccd7d904d129f056525a2",
+      "bytes": 200590
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ta.js",
+      "sha256": "49db49e4575015d63e641fceff018f935414a0f35e1021d6e1a0a25bc89b1c87",
+      "bytes": 358555
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_tg.js",
+      "sha256": "4957b6e028b8a09524362354cbd12f783e5eeeddd84fe8e6687a5a289f801306",
+      "bytes": 323701
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_th.js",
+      "sha256": "c3c1147254d68d2ba195ee5b4d3f687390f1bffedba050b6c59a7f95eabda16b",
+      "bytes": 497773
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_tr.js",
+      "sha256": "1011f4534c20bf9eb22e04ee5cc96177fcb6baa72f2fe740848d723e316808df",
+      "bytes": 230791
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_ug.js",
+      "sha256": "eeb8e4993a890aadca17cd6b2b35e19d0e7ad38006caf8db438a1413acf1e91a",
+      "bytes": 551870
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_uk.js",
+      "sha256": "e8447b2293b2c4cddf5c69841915be114f2032ec2c5e0988a4d6b7ded0f64799",
+      "bytes": 562599
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_uz.js",
+      "sha256": "14ee0e3ad0fe7e6a1d98bb71d001ee57f92743da38424c2d30c6ecf7f3d9da1d",
+      "bytes": 195453
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_vi.js",
+      "sha256": "50ac22f4c0611937aad10d79ea0ac16355879b592e438314e34db51668ed630a",
+      "bytes": 266665
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_xh.js",
+      "sha256": "2858bd994ece41afe41431ba70e3e9d5268159b36c3a044b4c951be7a3eb8d50",
+      "bytes": 189241
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_yi.js",
+      "sha256": "52a90d334d875012b1f6b5f76556f39924038dd684f4f65c9e48055531e8e1cd",
+      "bytes": 372708
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_zh-CN.js",
+      "sha256": "a3c7c9fe8d60e79b7f9e6880c79c06fbc7ee3b73289e605a5c3c6a0037cc9b51",
+      "bytes": 261001
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/properties_keys_zh-TW.js",
+      "sha256": "fc4b235f6a4750aa4ad05204f51b9312e7678a71740b4f53079fcc65897f5fad",
+      "bytes": 235844
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/whammy.js",
+      "sha256": "c91aeadd939a6debd7975b8392484d7f329a8c39e46a0505c9d86c936b624cd1",
+      "bytes": 5199
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/js/whammy.min.js",
+      "sha256": "02cb2a3ba7ee4a411d83b8482bffe4986c01704fe9154cdd6bd4405604a64249",
+      "bytes": 3836
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/sworker-locked.js",
+      "sha256": "2891b9127be96c52ac17efdf4776740c689cdf73653ce2510ff0025f4579b1d8",
+      "bytes": 13611
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/web3d.nocache.js",
+      "sha256": "b253663cfd1c5b5c8f201469eb07ff56c4566f09ce62491b748530d6440556cd",
+      "bytes": 5455
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/web3d/web3d.nocache.mjs",
+      "sha256": "fa15e0ecb25786e01d707e59aa04ab020e62cf24cf871da3889e75bc44e47b7c",
+      "bytes": 29416
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/ECC1757E6D7F0FC424067CDDFBF52F4A.cache.js",
+      "sha256": "de13fb2252de951ee43ef574faa18fc82e757ab5f5a3d9cbbbd7435e80b6ae52",
+      "bytes": 3923620
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/1.cache.js",
+      "sha256": "6f6da876daefd095f86877c1a11a782497314c7181e40ee6454167a2df394022",
+      "bytes": 141975
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/10.cache.js",
+      "sha256": "b4e496a6a0f7fa3330aad3ba5c17a44f303ab4467b5da81661fca145a278fbe0",
+      "bytes": 732820
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/11.cache.js",
+      "sha256": "32aa428278c44dbe259698d9d6c10e72f4ce8f422c68551ff4c18979c8d08ab6",
+      "bytes": 9510
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/2.cache.js",
+      "sha256": "2eb738f81436869a07a9f3ca2b75d72e4138f81640c6c20a988d14bb9fea1af7",
+      "bytes": 114
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/3.cache.js",
+      "sha256": "b9f61e9e15025e74e4c306b5c8238b2341692a3d3482e29f18441520b76bf50f",
+      "bytes": 10185294
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/4.cache.js",
+      "sha256": "d444060bae1e4cb7b7d76088a09e4116d788d229a9ea7fb9fecd5bf3eff861e8",
+      "bytes": 513687
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/5.cache.js",
+      "sha256": "e50876b601fc8937866092ef66aaf1dbd799be166ae5d8185b410469f92c5dde",
+      "bytes": 297143
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/6.cache.js",
+      "sha256": "f410b98c6b19fff259aa67f9720d744bb2bfbf3401a3e853b3dce76e97177d77",
+      "bytes": 182515
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/7.cache.js",
+      "sha256": "eacf9fa831ea51a27ce93b0a9d98b07bccbc8f51c162a4e7ebf32f3031a83163",
+      "bytes": 76912
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/8.cache.js",
+      "sha256": "4aaa07fc0e5e988313d53021d95beb49ee3704eb46fed4a38bff245153037142",
+      "bytes": 257879
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/deferredjs/ECC1757E6D7F0FC424067CDDFBF52F4A/9.cache.js",
+      "sha256": "6de0c65e42a8d7059290b8012da5a91c19de88849a775947f62a9aaa98b5329e",
+      "bytes": 182928
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/base/jlm_cmmi10.js",
+      "sha256": "99943749890c7c57e01dd16b1292d4feacb035fc03745dd9077d0ccf2f103624",
+      "bytes": 71022
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/base/jlm_cmmib10.js",
+      "sha256": "e75d176e86bf167cb482f72ce2bfdb11d80556eb6f75d3a82c598380d04c9e63",
+      "bytes": 83766
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/cyrillic/jlm_wnbx10.js",
+      "sha256": "35789ed6d1a1a70b9e5bb7614622fd35fa56926a115bebd95889283f5f4d2ccf",
+      "bytes": 90796
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/cyrillic/jlm_wnbxti10.js",
+      "sha256": "7742c896aa97129e538fd1a29e3b7f77aedca94495b793f7f835e7803a18fc05",
+      "bytes": 156977
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/cyrillic/jlm_wnr10.js",
+      "sha256": "6e1598cb21e385c5e0881b71a90c9f16628295a67e02595060e8ec5be4cc9e60",
+      "bytes": 102118
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/cyrillic/jlm_wnss10.js",
+      "sha256": "c9d99d9e7e105ec39afd2630886161b05e136adb7fba3fed0ee5cced2072fe6f",
+      "bytes": 49509
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/cyrillic/jlm_wnssbx10.js",
+      "sha256": "66a8814b9098ba56656392c4132a533c6af99946ccbc2843f61632e200ab6acd",
+      "bytes": 87228
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/cyrillic/jlm_wnssi10.js",
+      "sha256": "5ab4795551b9c32691736e11d20fadf5b38bc7787ae7959b86fe2daa39faf75d",
+      "bytes": 69527
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/cyrillic/jlm_wnti10.js",
+      "sha256": "13119cf310cfa80eca1d64e8c711b207ab0d9e765a053e9bd3ef48638b908a08",
+      "bytes": 151215
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/cyrillic/jlm_wntt10.js",
+      "sha256": "d73a2332c96e87228352ea9dc860a2937eac89e3861e1d31e705498450a9eb45",
+      "bytes": 94607
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/euler/jlm_eufb10.js",
+      "sha256": "4fce21db5b204fa29a41875370d02b68da21d65e08fecfd27c48cfb5a655154b",
+      "bytes": 58932
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/euler/jlm_eufm10.js",
+      "sha256": "7986522e2926f26177edb538e6d9ce58eca8eeb9c188b966c2676e0a73f5a794",
+      "bytes": 57318
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/greek/jlm_fcmbipg.js",
+      "sha256": "9965740782ca00f5238ffc8f8f91c6a61775f5158b925f033c01f155c8f197b1",
+      "bytes": 191184
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/greek/jlm_fcmbpg.js",
+      "sha256": "a4409e517004072997cb4fce746d0125e670db6d77343e8d36ce9fa582e1adda",
+      "bytes": 187896
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/greek/jlm_fcmripg.js",
+      "sha256": "01f25b65a79240b1e0a745a2d2e6c07d7096abe0155bd006e405efb926230e64",
+      "bytes": 198725
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/greek/jlm_fcmrpg.js",
+      "sha256": "e6376b6f084749ef2bf87abc6f75cb1aedef2699f5d5694bb1d16eaf104ff750",
+      "bytes": 190616
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/greek/jlm_fcsbpg.js",
+      "sha256": "984ac62d52c2cd370dcd27f7365d61b82266b66d1139c38f0fb787e2517d9973",
+      "bytes": 141549
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/greek/jlm_fcsropg.js",
+      "sha256": "f46d8cc7f8ae419752b39d5ab4d69ddd19629d499a5edf2aecd9bdcae743a14e",
+      "bytes": 160767
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/greek/jlm_fcsrpg.js",
+      "sha256": "4881edb5986e454bb82d5638e8f5e580161b06088b903b372ec3d9becec3812a",
+      "bytes": 137603
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/greek/jlm_fctrpg.js",
+      "sha256": "83b8c5cffbef19164354dcb76221c515bbff0a683a35c9366ca61979adf168cd",
+      "bytes": 171156
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_cmr10.js",
+      "sha256": "bb511da6a41be435a5444db3747c3a0e52c038d4f79e3e87a19e5b87ba435e94",
+      "bytes": 56137
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmbi10.js",
+      "sha256": "e901a4c13f8b9c8451476c620d1a0c843aa2db22a45a195a1246861d59818c2b",
+      "bytes": 6800
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmbx10.js",
+      "sha256": "92ec8936f085424c1153f7ea35e70c3cf3b89c9a8aa006fbb310e3fefb6ff258",
+      "bytes": 6431
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmi10.js",
+      "sha256": "9c824b5e72a40eb3d24892ade386033a32f98255ef837c89d8ef493495438bdb",
+      "bytes": 6375
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmr10.js",
+      "sha256": "223da9a3fc3ba25488780a3977fa5bb4d9576fa986ffd56671d38fa3c3dbc956",
+      "bytes": 9165
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmsb10.js",
+      "sha256": "e06c00db26716747e8ed52bdca03e73a69ec2e88f16862628176206930702cb8",
+      "bytes": 6169
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmsbi10.js",
+      "sha256": "7b3a4b308db522a26557b3b28bf8946caf1b88351b37fc324c3d67387b22f6fa",
+      "bytes": 5863
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmsi10.js",
+      "sha256": "da6c1c0e9ad3b69d45502568c1d87d0fe0ebad261f01120ffa89c989356ceb45",
+      "bytes": 4704
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmss10.js",
+      "sha256": "775c64591cee2840cd2509d13f903e632f30c876311b4685318d509f4e42b9cc",
+      "bytes": 4234
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/jlm_jlmtt10.js",
+      "sha256": "94ac26a8d32eb1fc7b632bf8e114faec74a2b469f2e2551f6bf8fcd0857ef397",
+      "bytes": 4514
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/optional/jlm_cmbx10.js",
+      "sha256": "dc88769b6c8230a7c4d96095d18272f5c84cdf2a782057a1f21af4674a6110e0",
+      "bytes": 58085
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/optional/jlm_cmbxti10.js",
+      "sha256": "9e6682215b4356bf59bbf8e434ae26642b3c93a18a156de373b366cf84ecadc6",
+      "bytes": 85561
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/optional/jlm_cmssbx10.js",
+      "sha256": "b60e86d9b0100a2dd1167d9adc3dd2d4e2831e0c9094ec1bbec5dd3b453593f4",
+      "bytes": 61389
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/optional/jlm_cmssi10.js",
+      "sha256": "8f2382c01e336640d20fb397f4b4f3e295d5c704c02105db29cf362e5d13386b",
+      "bytes": 36546
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/optional/jlm_cmti10.js",
+      "sha256": "9e1be5c35e0e270eda2d8eab91afb70e3bbb69ce4d3d051a6fbd61ed4a2e026e",
+      "bytes": 93348
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/latin/optional/jlm_cmtt10.js",
+      "sha256": "f7e378e37208b7d3cb30b191b29c8d71abc85c018972317dc034146ee5178737",
+      "bytes": 68586
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/licences/Knuth_License.txt",
+      "sha256": "8dfa2050f50d341636748e7ab0ed175dde130e33d722678cfa99351c6aded331",
+      "bytes": 395
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/licences/License_for_dsrom.txt",
+      "sha256": "6c4321c24c91ce63ce7f77286207eddf59066b1daa9e393f3e697d578ce4789e",
+      "bytes": 260
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/licences/OFL.txt",
+      "sha256": "c5f826ca32b56a30e0f22467be9f51068b747a6e461314b7650238c3b90ee819",
+      "bytes": 4630
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/maths/jlm_cmbsy10.js",
+      "sha256": "6e7689bf049d5f1bdf503e9e5324fee1d4fe14a53b4f3d20b662e628cc7f9286",
+      "bytes": 67294
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/maths/jlm_msam10.js",
+      "sha256": "0bc61dea2bd894a941deee8c83e8ddc9f70eeac9fb9c52bff56cf512fabf68ce",
+      "bytes": 54230
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/maths/jlm_msbm10.js",
+      "sha256": "af0e0ccee8935a1324f75e49fd6eabcd1573bade08f3a541d6fc626559e39c61",
+      "bytes": 81054
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/maths/jlm_rsfs10.js",
+      "sha256": "e0f751e98f4c0b85f4af17283a64111f7d5618d8c15da3cd238abaec0ebd5144",
+      "bytes": 30402
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/maths/jlm_special.js",
+      "sha256": "47f742ee0e1e1673a3ed7b9d0034c2c1b6e1858c7630ad3e36a2f7705463d1d0",
+      "bytes": 1785
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/maths/jlm_stmary10.js",
+      "sha256": "9abdfb92cf4a3bdd4b7ba74bce5c5784a089c110bfd1ae66b00ba77562a16a6d",
+      "bytes": 51376
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/fonts/maths/optional/jlm_dsrom10.js",
+      "sha256": "d60e4ece5d492a2bcf7d8bead4c697baf75097920a0a78db84d2bf6864facc88",
+      "bytes": 23187
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/html/ggtcallback.html",
+      "sha256": "50502f1cd6832f18e27ab741afb3d9150c11ef71c468a01956ed1c025ae0319f",
+      "bytes": 708
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/html/windowslive.html",
+      "sha256": "8c2387cf0977c70bbe2fce0e5bce1031518477a1393787ed82855a5949061501",
+      "bytes": 160
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/js/Roboto.js",
+      "sha256": "17c5f552f0e01c3244d643a6d1a85d448f8fa94f7829e99d1277d840648d104e",
+      "bytes": 203810
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/js/RobotoSerif.js",
+      "sha256": "36947e79db055204c552943aed89d5906cb438e75093b4053b8866e2f4dc98f5",
+      "bytes": 153011
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/js/canvas-to-svg.umd.min.js",
+      "sha256": "1160cf1096ba539a8e128cfd0bae18d378cf8da459033aa513054a9e6541476c",
+      "bytes": 18496
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/js/canvas2pdf.js",
+      "sha256": "b9a11a533a83cda9bb3507e68235653cc44604d83447255d96110da7ea614bb1",
+      "bytes": 40449
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/js/canvas2pdf.min.js",
+      "sha256": "eee797a71f23fafafe591f2d9643e6ab4f9ded3a926fca3ea191b54bdc4ccfd9",
+      "bytes": 31953
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/js/gifshot.min.js",
+      "sha256": "85d41e59942640fc93ebe2555638ce20930120855335ceb753c8b458661d9731",
+      "bytes": 26319
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/js/whammy.js",
+      "sha256": "c91aeadd939a6debd7975b8392484d7f329a8c39e46a0505c9d86c936b624cd1",
+      "bytes": 5199
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/js/whammy.min.js",
+      "sha256": "02cb2a3ba7ee4a411d83b8482bffe4986c01704fe9154cdd6bd4405604a64249",
+      "bytes": 3836
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/sworker-locked.js",
+      "sha256": "4afb71f606125009fb4e4b58bd725228de8aaa9614dbe6f24ba87a1536c366de",
+      "bytes": 13803
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/webSimple.nocache.js",
+      "sha256": "de27befdef6a29624cc3c4a722a7aa7ecebe8513acf301f6d67c90d1e339606a",
+      "bytes": 5367
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/HTML5/5.0/webSimple/webSimple.nocache.mjs",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/GeoGebra/deployggb.js",
+      "sha256": "05ab5b0acd5ef9bd686bc0873d4a19283574191af92a50fe3594785c84c7ae7d",
+      "bytes": 37188
+    },
+    {
+      "path": "legacy/windows-pywebview/geogebra/README.txt",
+      "sha256": "61bfe8dfb0ddd644300b4b5ac09651818210dbfec3a528df2e4563c5723ec35c",
+      "bytes": 1024
+    },
+    {
       "path": "legacy/windows-pywebview/main_webview.py",
-      "sha256": "40096b12246c99583df4c0749f1a2e5eb71ce685ac0262e8e027bd5591b777d8",
-      "bytes": 37026
+      "sha256": "c35a2739c22d2b37bb281d611191a6da8a3f23d68c263667add45bcf8ca235d5",
+      "bytes": 40106
     },
     {
       "path": "legacy/windows-pywebview/requirements-dev.txt",
@@ -1218,28 +3568,28 @@
     },
     {
       "path": "legacy/windows-pywebview/selftest_api_bridge.py",
-      "sha256": "e6d464a9d0132fa548474a88e687427620d46b69258a1303dfb43afa998464f1",
-      "bytes": 4100
+      "sha256": "80d5d6efa97ed681c7cb918a3425ea038bf32ca8914418175e16b1bdd2ebc7a5",
+      "bytes": 11961
     },
     {
       "path": "legacy/windows-pywebview/selftest_s1_integration.py",
-      "sha256": "31b6c3bc73a03d23a03a9afc1f359366cefb08b806f1ad75e9e559de6d25774c",
-      "bytes": 4121
+      "sha256": "f510e18c16241d8531d6a24ba08367be3cc0ed6a3c2d8b1b8227a4cd452a3a72",
+      "bytes": 4334
+    },
+    {
+      "path": "legacy/windows-pywebview/selftest_session_store.py",
+      "sha256": "ee9c4311b9ea66abaf6a87b1b8e050f198a2f64872ee3e965ac8504f2fb74f8b",
+      "bytes": 3449
     },
     {
       "path": "legacy/windows-pywebview/selftest_shell_toolbar.py",
-      "sha256": "fa888f90bf052cf3ced7a81acb45cc60c834ba7b679eeee26d2f13121c366640",
-      "bytes": 2923
+      "sha256": "97061282a22f68b609e27ef76bc0a820ddc48a6b46442206c51dd2b5352286ea",
+      "bytes": 4684
     },
     {
       "path": "legacy/windows-pywebview/selftest_tab_state.py",
       "sha256": "a53c378390cc3d309246aa82d973f7221124140f742ffd0c1f7c01a1896be81b",
       "bytes": 1947
-    },
-    {
-      "path": "legacy/windows-pywebview/shell/start.html",
-      "sha256": "818555f8d9b5689ece2b96359c427999a0bb204af862e97ea9b904c949fe0697",
-      "bytes": 11404
     },
     {
       "path": "pyproject.toml",
@@ -1257,13 +3607,18 @@
       "bytes": 590
     },
     {
+      "path": "shared/shell/start.html",
+      "sha256": "2ba352ce0414f657f5d7c6002c9334b2b9ac7e4dd6c6ec9906956596f98a57ba",
+      "bytes": 30554
+    },
+    {
       "path": "shared/update-manifest.schema.json",
       "sha256": "01f3445b75104c49255216e0128de552ae51e746be36e6151ef29ffc3e8b42c9",
       "bytes": 1930
     },
     {
       "path": "shared/version.properties",
-      "sha256": "db538d2ed401449b3be51b0b231f6299d960c1198a82ae3237c1820c1443d808",
+      "sha256": "62d817c210ce09a028af21eada7779f8ddad868b854fc2c6caff6205b80b588d",
       "bytes": 211
     },
     {
@@ -1288,7 +3643,7 @@
     },
     {
       "path": "windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj",
-      "sha256": "c22b2b7b83622e746a5fc4deae83e9d9656c4ed1c056a510027377fe1d56a7bc",
+      "sha256": "3ac0b9a6e63855f0a6e6ae229eb5598620726df8920240a7811722273469c82f",
       "bytes": 1709
     },
     {

@@ -1,9 +1,7 @@
 name: Core-Rust
-on:
-  push:
-    paths: ['core/rust-policy-core/**']
-  pull_request:
-    paths: ['core/rust-policy-core/**']
+"on":
+  push: {}
+  pull_request: {}
   workflow_dispatch: {}
 
 jobs:

@@ -23,7 +23,13 @@ import java.util.concurrent.atomic.AtomicLong
 object SecureWebViewFactory {
     private val broker = AndroidBroker()
     private val sessionCounter = AtomicLong(0)
-    private val navigatorTagKey = View.generateViewId()
+
+    // 导航器注册表（弱引用——WebView 销毁后自动可回收）。
+    // 历史教训：曾用 View.setTag(generateViewId(), ...) 存导航器——
+    // generateViewId() 的 package id 是 0x01（framework 区段），
+    // 而 setTag(int,...) 要求 ≥0x02 的应用资源 id → 真机启动必崩。
+    // WeakHashMap 彻底绕开 View tag 机制。
+    private val navigators = java.util.WeakHashMap<android.webkit.WebView, SecureNavigator>()
 
     /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
     private const val SESSION_SEED_BYTES = 32
@@ -45,7 +51,16 @@ object SecureWebViewFactory {
         BrowserEngine(webView).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
         val tabId = "tab-$sessionId"
-        check(broker.registerSession(sessionId, tabId)) { "无法注册安全浏览会话" }
+        if (!broker.registerSession(sessionId, tabId)) {
+            // fail-closed 前留根因线索（logcat -s AegisBroker；典型：
+            // release minified 混淆 JNA Abi 接口 → native 符号映射失败）
+            android.util.Log.e(
+                "AegisBroker",
+                "registerSession failed: session=$sessionId, " +
+                    "REQUIRE_NATIVE_POLICY_CORE=${com.aegis.broker.BuildConfig.REQUIRE_NATIVE_POLICY_CORE}",
+            )
+            check(false) { "无法注册安全浏览会话（详见 logcat -s AegisBroker）" }
+        }
         val sessionSeed = newSessionSeed()
         installDocumentStartScripts(webView, sessionSeed)
         val client =
@@ -54,22 +69,26 @@ object SecureWebViewFactory {
                 sessionId = sessionId,
                 tabId = tabId,
                 onRendererGone = { /* renderer gone cleanup handled by caller */ },
-                requireNavigationConfirmation = BuildConfig.REQUIRE_NAVIGATION_CONFIRMATION,
+                requireNavigationConfirmation =
+                    com.aegis.broker.BuildConfig.REQUIRE_NAVIGATION_CONFIRMATION,
                 onNavigationConfirmationRequested = { request ->
                     onNavigationConfirmationRequested(webView, request)
                 },
                 onNavigationConfirmationResolved = { onNavigationConfirmationResolved(webView) },
             )
         webView.webViewClient = client
-        webView.setTag(
-            navigatorTagKey,
-            SecureNavigator(webView, client),
+        navigators[webView] = SecureNavigator(webView, client)
+        // 首页宿主桥（ADR-003 复审口径）：仅暴露入口级无敏感操作
+        // （导航走 Broker 授权；壁纸/引擎为偏好写入；画板为内置资源跳转）
+        webView.addJavascriptInterface(
+            AegisHomeBridge(context.applicationContext) { webView },
+            "AegisBridge",
         )
         return webView
     }
 
     /** 仅工厂创建的 WebView 才拥有受控导航器；不存在时调用方必须拒绝外部导航。 */
-    fun navigatorFor(webView: WebView): SecureNavigator? = webView.getTag(navigatorTagKey) as? SecureNavigator
+    fun navigatorFor(webView: WebView): SecureNavigator? = navigators[webView]
 
     /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */
     private fun installDocumentStartScripts(
@@ -80,17 +99,22 @@ object SecureWebViewFactory {
             android.util.Log.w("Aegis", "WebView 不支持 document-start 脚本；隐私增强未启用")
             return
         }
-        val allowedOrigins = setOf("https://*", "http://*")
-        WebViewCompat.addDocumentStartJavaScript(
-            webView,
-            fingerprintShieldScript(sessionSeed),
-            allowedOrigins,
-        )
-        WebViewCompat.addDocumentStartJavaScript(
-            webView,
-            BRIDGE_GUARD_JS,
-            allowedOrigins,
-        )
+        // allowedOriginRules 语法：AndroidX 不接受 "https://*" 全域通配
+        // （IllegalArgumentException）——单星号 "*" 才是「匹配所有源
+        // （含 file:// 壳页）」的合法写法，与防护脚本全页注入的意图一致。
+        // 降级原则：注入失败（WebView provider 异常等）只警告不崩——
+        // 防护可降级、浏览器不可崩（配套 proguard keep androidx.webkit.R$id）。
+        val allowedOrigins = setOf("*")
+        val hardenedScripts =
+            listOf("fingerprint-shield" to fingerprintShieldScript(sessionSeed),
+                "bridge-guard" to BRIDGE_GUARD_JS)
+        hardenedScripts.forEach { (name, script) ->
+            try {
+                WebViewCompat.addDocumentStartJavaScript(webView, script, allowedOrigins)
+            } catch (e: Exception) {
+                android.util.Log.e("Aegis", "document-start 注入失败[$name]: ${e.message}")
+            }
+        }
     }
 
     /** 获取 broker 实例（供外部校验/审计）。 */
@@ -108,12 +132,22 @@ object SecureWebViewFactory {
     private val allowedHostsJson: String =
         ALLOWED_BRIDGE_HOSTS.joinToString(",") { "\"$it\"" }
 
+    /** REQUIRE_HTTPS 占位符注入值（模板归一化为 __AEGIS_REQUIRE_HTTPS__）。 */
+    private val requireHttpsJson: String = REQUIRE_HTTPS_BRIDGE.toString()
+
+    /**
+     * bridge 目标强制 HTTPS（与 Rust BridgeGuard.require_https 对应）。
+     * 生产接线尚未开启（两端一致）；配置化时须同步 BridgeGuard::new 调用点。
+     */
+    private const val REQUIRE_HTTPS_BRIDGE = false
+
     /**
      * Bridge 硬化 JS（fetch / XMLHttpRequest / sendBeacon / WebSocket 未授权调用拒绝）。
-     * 与 Rust 侧 BridgeGuard::inject_script 同一份逻辑：只有「调用方自身
-     * hostname ∈ [ALLOWED_BRIDGE_HOSTS]」的受信内页（chrome UI）才能调用本机 bridge；
-     * 远程页一律拒绝（fail-closed）。注：`[$allowedHostsJson]` 必须包裹方括号，否则
-     * `const ALLOWED_HOSTS = "a","b"` 为 JS 语法错误（旧实现因此整体失效）。
+     *
+     * 单一事实源（ADR-007）：本模板必须与
+     * `contracts/schemas/bridge_guard.template.js` 逐行一致（占位符归一化后），
+     * 由 `contracts/codegen/verify_bridge_guard.py` 门禁校验——禁止手工改动
+     * 本模板而不更新规范文件（fail-open 漂移即此模式的产物）。
      */
     private val BRIDGE_GUARD_JS: String
         get() =
@@ -121,6 +155,7 @@ object SecureWebViewFactory {
 // Aegis BridgeGuard — 受信调用方校验（fetch / XMLHttpRequest / sendBeacon / WebSocket）
 (function() {
   const ALLOWED_HOSTS = [$allowedHostsJson];
+  const REQUIRE_HTTPS = $requireHttpsJson;
   // 仅容许「受信内页」（自身 hostname ∈ 白名单）调用本机 bridge。
   const trustedCaller = ALLOWED_HOSTS.includes(location.hostname);
   function isBridgeTarget(urlLike) {
@@ -130,6 +165,9 @@ object SecureWebViewFactory {
   function shouldBlock(urlLike) {
     if (!isBridgeTarget(urlLike)) return false;   // 普通站点流量放行
     if (!trustedCaller) return true;              // 调用方非受信内页 → 拒绝
+    if (REQUIRE_HTTPS) {
+      try { if (new URL(urlLike, location.href).protocol !== 'https:') return true; } catch (e) {}
+    }
     return false;
   }
   function deny(reason) { console.warn('[Aegis] Bridge blocked: ' + reason); }

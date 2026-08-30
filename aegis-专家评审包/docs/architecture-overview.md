@@ -66,7 +66,7 @@ android/app/src/main/java/com/aegis/browser/
 （open-source-browser-audit/source-study-report/browser-ecosystem/rust-desktop
 /tauri-migration×2/pytauri-technical）+ 计划类（optimization-plan/threat-context
 /tech-evolution）+ 架构类（pytauri-capabilities-mapping/code-quality-assessment）
-+ KNOWLEDGE_BASE.md（15 节项目记忆）
++ docs/KNOWLEDGE_BASE.md（15 节项目记忆）
 
 ## 二、框架结构（六层架构）
 

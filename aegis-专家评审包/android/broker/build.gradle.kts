@@ -3,25 +3,32 @@ plugins {
     id("com.android.library")
 }
 
-val requireNativePolicyCore = providers.gradleProperty("requireNativePolicyCore")
-    .map { it == "true" }
-    .getOrElse(false)
-val nativePolicyCoreDir = providers.gradleProperty("nativePolicyCoreDir")
-    .orNull
-    ?.let(::file)
-val nativePolicyCoreFiles = listOf(
-    "arm64-v8a/libaegis_policy_core.so",
-    "armeabi-v7a/libaegis_policy_core.so",
-    "x86_64/libaegis_policy_core.so",
-    "x86/libaegis_policy_core.so",
-    "kotlin/uniffi/aegis_policy_core/aegis_policy_core.kt",
-)
+val requireNativePolicyCore =
+    providers
+        .gradleProperty("requireNativePolicyCore")
+        .map { it == "true" }
+        .getOrElse(false)
+val nativePolicyCoreDir =
+    providers
+        .gradleProperty("nativePolicyCoreDir")
+        .orNull
+        ?.let(::file)
+val nativePolicyCoreFiles =
+    listOf(
+        "arm64-v8a/libaegis_policy_core.so",  // 单架构：arm64-v8a
+        "kotlin/uniffi/aegis_policy_core/aegis_policy_core.kt",
+    )
 
 android {
     namespace = "com.aegis.broker"
     compileSdk = 36
     buildFeatures {
         buildConfig = true
+    }
+    testOptions {
+        // NativePolicyCoreBridge 失败路径用 android.util.Log 留痕——
+        // JVM 单测无 Android 框架，默认值兜底（否则 Log.e 未 mock 即崩）
+        unitTests.isReturnDefaultValues = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
@@ -30,6 +37,15 @@ android {
     defaultConfig {
         minSdk = 26
         buildConfigField("boolean", "REQUIRE_NATIVE_POLICY_CORE", requireNativePolicyCore.toString())
+        // M-3 策略域配置单源：导航确认开关并入 broker（app 只读 broker BuildConfig）
+        val requireNavigationConfirmation = providers
+            .gradleProperty("requireNavigationConfirmation")
+            .map { it == "true" }
+            .getOrElse(false)
+        buildConfigField("boolean", "REQUIRE_NAVIGATION_CONFIRMATION", requireNavigationConfirmation.toString())
+        check(!requireNavigationConfirmation || requireNativePolicyCore) {
+            "requireNavigationConfirmation=true 时必须同时设置 -PrequireNativePolicyCore=true"
+        }
     }
     sourceSets {
         getByName("main").apply {
