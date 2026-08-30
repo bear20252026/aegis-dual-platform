@@ -15,10 +15,7 @@ val nativePolicyCoreDir =
         ?.let(::file)
 val nativePolicyCoreFiles =
     listOf(
-        "arm64-v8a/libaegis_policy_core.so",
-        "armeabi-v7a/libaegis_policy_core.so",
-        "x86_64/libaegis_policy_core.so",
-        "x86/libaegis_policy_core.so",
+        "arm64-v8a/libaegis_policy_core.so",  // 单架构：arm64-v8a
         "kotlin/uniffi/aegis_policy_core/aegis_policy_core.kt",
     )
 

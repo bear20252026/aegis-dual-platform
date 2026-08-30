@@ -69,6 +69,11 @@ android {
         versionCode = 20106
         versionName = "2.1.6"
         buildConfigField("boolean", "REQUIRE_NAVIGATION_CONFIRMATION", requireNavigationConfirmation.toString())
+        ndk {
+            // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
+            // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     signingConfigs {

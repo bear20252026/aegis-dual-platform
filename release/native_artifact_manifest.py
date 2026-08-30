@@ -30,21 +30,8 @@ EXPECTED_ARTIFACTS = {
             "target": "aarch64-linux-android",
             "relative_path": "android/arm64-v8a/libaegis_policy_core.so",
         },
-        {
-            "abi": "armeabi-v7a",
-            "target": "armv7-linux-androideabi",
-            "relative_path": "android/armeabi-v7a/libaegis_policy_core.so",
-        },
-        {
-            "abi": "x86_64",
-            "target": "x86_64-linux-android",
-            "relative_path": "android/x86_64/libaegis_policy_core.so",
-        },
-        {
-            "abi": "x86",
-            "target": "i686-linux-android",
-            "relative_path": "android/x86/libaegis_policy_core.so",
-        },
+        # 单架构策略（2026-08-30）：仅 arm64-v8a——99% 真机覆盖；
+        # armeabi-v7a（32 位老架构）与 x86/x86_64（模拟器）不再构建/分发
     ),
 }
 

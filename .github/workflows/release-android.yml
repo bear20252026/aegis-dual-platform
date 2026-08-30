@@ -45,7 +45,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          targets: aarch64-linux-android  # 单架构：arm64-v8a（99% 真机）
       - name: Install JDK 21
         uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
         with:
@@ -71,7 +71,7 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
           restore-keys: gradle-${{ runner.os }}-
-      - name: Build four Android ABI native policy libraries
+      - name: Build Android arm64-v8a native policy library
         working-directory: core/rust-policy-core
         run: |
           cargo install cargo-ndk --version 4.1.2 --locked
@@ -80,7 +80,7 @@ jobs:
           export ANDROID_NDK="$ANDROID_NDK_HOME"
           test -d "$ANDROID_NDK_HOME"
           cargo ndk --platform 26 \
-            -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+            -t arm64-v8a \
             -o "$GITHUB_WORKSPACE/dist/native-policy/android" \
             build --release --locked
       - name: Generate Kotlin binding and native policy manifest
@@ -109,7 +109,7 @@ jobs:
             -PrequireNavigationConfirmation=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
           apk_entries="$(unzip -Z1 app/build/outputs/apk/release/*.apk)"
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+          for abi in arm64-v8a; do
             grep -Fx "lib/$abi/libaegis_policy_core.so" <<< "$apk_entries"
           done
       - name: Collect APK + generate SHA-256

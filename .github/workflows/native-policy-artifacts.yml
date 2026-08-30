@@ -68,7 +68,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
-          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+          targets: aarch64-linux-android  # 单架构：arm64-v8a
       - uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
         with:
           packages: 'ndk;28.0.12433566'
@@ -86,7 +86,7 @@ jobs:
           export ANDROID_NDK="$ANDROID_NDK_HOME"
           test -d "$ANDROID_NDK_HOME"
           cargo ndk --platform 26 \
-            -t arm64-v8a -t armeabi-v7a -t x86_64 -t x86 \
+            -t arm64-v8a \
             -o "$GITHUB_WORKSPACE/dist/native-policy/android" \
             build --release --locked
       - name: Generate Kotlin binding from Android cdylib
@@ -110,7 +110,7 @@ jobs:
             -PrequireNavigationConfirmation=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
           apk_entries="$(unzip -Z1 app/build/outputs/apk/debug/app-debug.apk)"
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+          for abi in arm64-v8a; do
             grep -Fx "lib/$abi/libaegis_policy_core.so" <<< "$apk_entries"
           done
       - name: Run full Android Broker tests including native JSON decision mapping
