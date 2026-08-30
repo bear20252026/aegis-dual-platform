@@ -466,3 +466,15 @@
 
 ### 25.8 验证（全绿）
 validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed）｜ bandit --skip 同 CI（0 Medium/High）｜ mypy 32 文件 0 错误｜ selftest ×5 全过｜ node --check 注入 JS 语法。
+
+## ADR-008 Android 单架构分发（永久规则）
+
+**决策**（用户，2026-08-30）：APK 只含 `arm64-v8a`（99% 真机覆盖）。`armeabi-v7a`（32 位老架构）与 `x86`/`x86_64`（模拟器）**永久禁止**入包——它们只徒增体积，无真实用户。
+
+**强制层**（防回归，不是口头约定）：
+1. `native-policy-artifacts.yml`：Rust 只编 `aarch64-linux-android`（manifest 清单 fail-closed 校验）
+2. `app/build.gradle.kts`：`ndk.abiFilters += "arm64-v8a"`（打包层双保险）
+3. `release-android.yml`：构建后白名单断言——正向（arm64 so 必在）+ 反向（出现其他 ABI 即 fail）+ 单架构 APK 体积突变视为打包内容异常信号
+4. `broker`：`nativePolicyCoreFiles` 仅列 arm64
+
+**附带规则**：构建期临时文件（如 geogebra.zip）禁止残留在打包目录——曾致 +32MB 体积事故；打包体积突变 = 内容异常高保真信号，必须查因后再发版。

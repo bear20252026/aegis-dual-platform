@@ -131,9 +131,15 @@ jobs:
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
           apk_entries="$(unzip -Z1 app/build/outputs/apk/release/*.apk)"
-          for abi in arm64-v8a; do
-            grep -Fx "lib/$abi/libaegis_policy_core.so" <<< "$apk_entries"
-          done
+          # 单架构分发规则（用户决策 2026-08-30 永久生效，ADR-008）：
+          # lib/ 白名单 = arm64-v8a——正向断言必须存在，反向断言禁止
+          # armeabi-v7a（32 位老架构）与 x86/x86_64（模拟器）入包，
+          # 任一违反即构建失败（防止体积无端膨胀的规则性防线）
+          grep -Fx "lib/arm64-v8a/libaegis_policy_core.so" <<< "$apk_entries"
+          if grep -Eq "^lib/(armeabi-v7a|x86|x86_64)/" <<< "$apk_entries"; then
+            echo "FAIL: 发现非 arm64-v8a ABI 入包（违反单架构分发规则）"
+            exit 1
+          fi
       - name: Collect APK + generate SHA-256
         shell: bash
         run: |

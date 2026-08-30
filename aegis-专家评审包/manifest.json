@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-08-30 15:27 UTC",
+  "generated_at": "2026-08-30 15:44 UTC",
   "version": "2.1.7",
   "versionCode": "20107",
-  "commit": "969d2ff",
-  "commit_subject": "refactor: H-4 Rust core split — ffi/ and c_abi/ module directories",
+  "commit": "72d95c6",
+  "commit_subject": "chore: clear all re-review residuals (dead module/orphan dir/docs move/minor lint)",
   "file_count": 756,
   "files": [
     {
@@ -43,8 +43,8 @@
     },
     {
       "path": ".github/workflows/release-android.yml",
-      "sha256": "9626b056bd216293ae84422cb8395c165b789f207b9c27c4f22f49ebca131d9e",
-      "bytes": 9207
+      "sha256": "f4f2025a1238ba81090b86ffcb0e4b75f9990ff717e6ef891906b4448164c539",
+      "bytes": 9717
     },
     {
       "path": ".github/workflows/release-core.yml",
@@ -698,8 +698,8 @@
     },
     {
       "path": "docs/KNOWLEDGE_BASE.md",
-      "sha256": "da803269bc6c7d02cd1a037d393ed4a47f34eccb2a42a69ac2df729e7d6c6215",
-      "bytes": 57284
+      "sha256": "579e7dea0b43c917b4ac0440582ba7937778f2e94d22d536f14117d6f6bb1066",
+      "bytes": 58247
     },
     {
       "path": "docs/adr/ADR-001-windows-host-webview2.md",
@@ -1058,7 +1058,7 @@
     },
     {
       "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.1.db",
-      "sha256": "3b77d165b81ec819b05c61aecc4ac7fddcfc42967b0c02192a0df627909ec638",
+      "sha256": "87bd7477bec326740615978ef5dc1f48bdff7282533be4113f43c828ae4e2f38",
       "bytes": 421888
     },
     {
@@ -1098,7 +1098,7 @@
     },
     {
       "path": "legacy/windows-pywebview/.mypy_cache/3.14/cache.3.db",
-      "sha256": "709f5e790f343f948936339b1bcb2542c7cd331aea3b54d05f8196145aa68bf6",
+      "sha256": "6dca7000e2920bc8cc07348fd846c9d747133e84291623115737ed2b45678993",
       "bytes": 270336
     },
     {

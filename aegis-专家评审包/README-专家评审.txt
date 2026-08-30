@@ -1,7 +1,7 @@
 # Aegis Browser 专家评审包
-# 生成时间: 2026-08-30 15:27 UTC
+# 生成时间: 2026-08-30 15:44 UTC
 # 版本: 2.1.7
-# 提交: 969d2ff (refactor: H-4 Rust core split — ffi/ and c_abi/ module directories)
+# 提交: 72d95c6 (chore: clear all re-review residuals (dead module/orphan dir/docs move/minor lint))
 
 ## 包含内容（由 scripts/build_review_package.py 从规范源码自动生成）
 - 源代码: Rust policy-core + Android + Windows Python + C# + contracts + shared 约束
