@@ -168,7 +168,7 @@ jobs:
       - name: 安装 Inno Setup 6
         run: choco install innosetup -y --no-progress
       - name: 编译安装包（AegisBrowser-Setup-2.1.6.exe）
-        shell: pwsh
+        shell: cmd
         run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" docs\release\AegisSetup.iss'
       - name: Upload Windows installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
