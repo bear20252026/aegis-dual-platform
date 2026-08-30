@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Added (Android)
+- 地址栏贪吃蛇游戏：首页地址栏尾部「🎮」启动，地址栏区域平滑放大 5 倍作为游戏带
+  （滑动手势控制方向、计分、游戏结束可退出/再来一局）；游戏期间保留迷你地址栏
+  常规功能（输入网址回车自动退出游戏并导航）；游戏循环异常自动回退浏览状态。
+  实现参考 MIT 项目 TurzimmGit/Snake-Game-APK 与 mukeshsolanki/snake-game-android
+  （版权声明见 AddressBarSnake.kt 文件头）。回退键逐级返回（含游戏退出）。
+
+
 ### 架构收敛（2026-08-30：ADR-007——复审三项系统性修复）
 - **单一正典栈**（D1）：ADR-007 收敛 Windows 双栈口径——C#/.NET 10 为目标发布栈，
   `legacy/windows-pywebview` 语义重定义为「现役功能栈（迁移中）」；

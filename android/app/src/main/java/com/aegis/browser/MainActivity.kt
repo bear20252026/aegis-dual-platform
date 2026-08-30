@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
                             onClose = { viewModel.closeTab(it) },
                             onNewTab = { viewModel.newTab(this@MainActivity) },
                         )
-                        AddressBarAndNav(
+                        AddressBarWithSnake(
                             address = address,
                             onAddressChange = { viewModel.updateAddress(it) },
                             onOpen = { viewModel.navigateToAddress() },
@@ -203,44 +203,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** 地址栏 + 导航按钮（top 布局专用，抽离保持薄壳；按钮功能经回调上抛）。 */
-@Composable
-private fun AddressBarAndNav(
-    address: String,
-    onAddressChange: (String) -> Unit,
-    onOpen: () -> Unit,
-    onBack: () -> Unit,
-    onForward: () -> Unit,
-    onReload: () -> Unit,
-    onReader: () -> Unit,
-    onTranslate: () -> Unit,
-) {
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            OutlinedTextField(
-                value = address,
-                onValueChange = onAddressChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                label = { Text("地址") },
-            )
-            Button(onClick = onOpen) { Text("打开") }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Button(onClick = onBack) { Text("后退") }
-            Button(onClick = onForward) { Text("前进") }
-            Button(onClick = onReload) { Text("刷新") }
-            Button(onClick = onReader) { Text("阅读") }
-            Button(onClick = onTranslate) { Text("翻译") }
-        }
-    }
-}
 
 /** 页面容器：显示当前标签的 WebView（两种布局共用）。 */
 @Composable
