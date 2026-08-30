@@ -22,5 +22,7 @@ runs:
         cd "${{ inputs.dest-dir }}"
         gh release download "${{ inputs.release-tag }}" --pattern "*.zip" --output geogebra.zip --clobber
         python -c "import zipfile; zipfile.ZipFile('geogebra.zip').extractall('.')"
+        # zip 本身必须删除——残留会被 AGP/PyInstaller 打进安装包（+32MB）
+        rm geogebra.zip
         python -c "import os; p='GeoGebra/HTML5/5.0/GeoGebra.html'; assert os.path.isfile(p), 'entry missing: '+p"
         echo "[geogebra] assets ready at ${{ inputs.dest-dir }}"
