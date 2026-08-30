@@ -109,6 +109,8 @@ class Api(TabOpsMixin):
         "get_bookmarks",
         # 导入向导（扫描/导入均受信来源校验在方法内——远程页不可达）
         "scan_import_sources", "import_bookmarks", "import_history",
+        # 离线几何画板（内部资源跳转——受信校验在方法内）
+        "open_geogebra",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
         "add_bookmark", "remove_bookmark",
@@ -562,7 +564,17 @@ class Api(TabOpsMixin):
             if self.bookmarks is None:
                 return []
             rows = self.bookmarks.all()
-            return [{"id": r[0], "title": r[1], "url": r[2]} for r in rows]
+            # 行格式兼容：Database.query 返回 dict 行（r["id"]）——
+            # 存量 bug（下标访问 dict → KeyError → 静默 []）：书签宫格
+            # 即使有数据也一直显示空。统一 dict/tuple 双格式解析。
+            out: list = []
+            for r in rows:
+                if isinstance(r, dict):
+                    out.append({"id": r.get("id"), "title": r.get("title"),
+                                "url": r.get("url")})
+                else:
+                    out.append({"id": r[0], "title": r[1], "url": r[2]})
+            return out
         except Exception:
             return []
 
@@ -612,6 +624,38 @@ class Api(TabOpsMixin):
             log_event(f"[bridge] 拒绝远程页面 {op}（来源不受信）")
         except Exception:
             pass
+        return True
+
+    # ================= 离线几何画板（GeoGebra Math Apps Bundle） =================
+    def open_geogebra(self) -> bool:
+        """打开离线几何画板（安装包内置资源——file:// 内部受信加载）。
+
+        资源路径为编译期常量（PyInstaller _MEIPASS/_internal 或源码树
+        geogebra/），与 START_URL 同级的内部壳页语义——不经 safe_url
+        （内部资源白名单：路径由代码固定，非用户输入，无注入面）。
+        资源未随包（常规打包/开发树未拉取 bundle）→ False（静默降级）。
+        """
+        if self._deny_remote("open_geogebra"):
+            return False
+        import sys
+        from pathlib import Path
+
+        if getattr(sys, "frozen", False):
+            meipass = getattr(sys, "_MEIPASS", "")
+            if not meipass:
+                return False  # 打包环境缺资源元数据 → 未随包（fail-closed）
+            base = Path(meipass)
+        else:
+            base = Path(__file__).resolve().parents[1]
+        entry = base / "geogebra" / "GeoGebra" / "HTML5" / "5.0" / "GeoGebra.html"
+        if not entry.is_file():
+            try:
+                from crash_reporter import log_event
+                log_event("[bridge] 几何画板资源缺失（构建未随包）")
+            except Exception:
+                pass
+            return False
+        self._load(entry.as_uri())
         return True
 
     # ================= 导入向导（Chrome/Edge 书签与历史） =================

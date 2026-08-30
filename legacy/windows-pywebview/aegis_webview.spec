@@ -14,16 +14,24 @@ from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 PROJECT = SPECPATH
 
+# 离线几何画板（GeoGebra Math Apps Bundle——构建期由 CI 从仓库 Release
+# 资产拉取解压到 geogebra/；本地无该目录时跳过——不阻塞常规打包）。
+_geogebra_dir = os.path.join(PROJECT, "geogebra")
+
+_datas = [
+    (os.path.join(PROJECT, "shell", "start.html"), "shell"),
+    (os.path.join(PROJECT, "shell", "wallpapers"), "shell/wallpapers"),
+    (os.path.join(PROJECT, "assets"), "assets"),
+    *collect_data_files("webview"),
+]
+if os.path.isdir(_geogebra_dir):
+    _datas.append((_geogebra_dir, "geogebra"))
+
 a = Analysis(
     [os.path.join(PROJECT, "main_webview.py")],
     pathex=[PROJECT],
     binaries=[],
-    datas=[
-        (os.path.join(PROJECT, "shell", "start.html"), "shell"),
-        (os.path.join(PROJECT, "shell", "wallpapers"), "shell/wallpapers"),
-        (os.path.join(PROJECT, "assets"), "assets"),
-        *collect_data_files("webview"),
-    ],
+    datas=_datas,
     hiddenimports=[
         *collect_submodules("app"),
         "webview",

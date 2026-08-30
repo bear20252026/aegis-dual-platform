@@ -249,6 +249,33 @@ check("远程页 scan 返回空", api8.scan_import_sources() == [])
 check("远程页 import_bookmarks 拒绝",
       api8.import_bookmarks() == {"imported": 0, "total": 0, "results": []})
 
+# 13) 预置书签种子（「几何画板」外挂入口——空库注入、幂等）
+api9 = Api()
+api9._data_dir = tempfile.mkdtemp(prefix="aegis_seed_")
+api9.bookmarks = BookmarkStore(api9._data_dir)
+check("空库注入种子 1 条", api9.bookmarks.seed_defaults() == 1)
+check("种子为几何画板(GeoGebra)",
+      api9.bookmarks.contains("https://www.geogebra.org/geometry"))
+check("非空库不再注入（幂等）", api9.bookmarks.seed_defaults() == 0)
+check("种子随 get_bookmarks 可读（受信）",
+      len(api9.get_bookmarks()) == 1)
+
+# 14) 离线几何画板桥：open_geogebra（源码树已解压 bundle → True；
+#     monkeypatch frozen 基路径模拟未随包 → False）
+check("open_geogebra 源码树加载成功", api.open_geogebra() is True)
+import sys as _sys
+
+_real_frozen = getattr(_sys, "frozen", None)
+_sys.frozen = True  # 模拟打包环境且无 _MEIPASS 属性 → 资源缺失
+try:
+    api10 = Api()
+    check("未随包 open_geogebra → False", api10.open_geogebra() is False)
+finally:
+    if _real_frozen is None:
+        del _sys.frozen
+    else:
+        _sys.frozen = _real_frozen
+
 if failures:
     print("FAIL")
     for f in failures:

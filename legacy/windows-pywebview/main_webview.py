@@ -449,6 +449,11 @@ def main() -> int:
         data_dir = resolve_data_dir()
         api._data_dir = data_dir
         api.bookmarks = BookmarkStore(data_dir)
+        # 预置书签种子（首次启动空库时注入「几何画板」等外挂入口——幂等）
+        try:
+            api.bookmarks.seed_defaults()
+        except Exception:
+            pass  # 种子注入失败不影响浏览
         api.history = HistoryStore(data_dir)
         api.config = AppConfig.load(data_dir)
         if api.config is not None:

@@ -97,6 +97,27 @@
     transition:background .15s;
   }
   .restore-btn:hover { background:rgba(255,255,255,0.3); }
+  /* 几何画板快捷入口（离线 GeoGebra——安装包内置资源） */
+  .quick-row {
+    margin-top:20px; display:flex; gap:14px; justify-content:center;
+  }
+  .quick-btn {
+    display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 28px;
+    border:1px solid rgba(255,255,255,0.4); border-radius:24px; cursor:pointer;
+    background:linear-gradient(135deg, rgba(63,184,255,0.30), rgba(127,123,255,0.30));
+    backdrop-filter:blur(10px); color:#fff; font-size:15px; font-weight:600;
+    font-family:inherit; letter-spacing:1px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.22);
+    transition:transform .15s ease, background .15s ease, box-shadow .15s ease;
+  }
+  .quick-btn:hover {
+    transform:translateY(-3px);
+    background:linear-gradient(135deg, rgba(63,184,255,0.48), rgba(127,123,255,0.48));
+    box-shadow:0 12px 32px rgba(63,184,255,0.35);
+  }
+  .quick-btn:active { transform:translateY(0); }
+  .quick-btn .ico { font-size:20px; line-height:1; }
+  .quick-btn.unavailable { opacity:.45; }
   /* 导入向导（玻璃拟态，与 NTP 风格一致） */
   .link-btn {
     border:0; background:transparent; color:rgba(255,255,255,0.85);
@@ -148,6 +169,12 @@
       </div>
       <input id="q" placeholder="搜索网页或输入网址…" autofocus>
       <button onclick="go()">搜索</button>
+    </div>
+    <!-- 几何画板快捷入口（离线 GeoGebra——点击跳转内置画板页） -->
+    <div class="quick-row">
+      <button id="geoBtn" class="quick-btn" title="离线几何画板 · 无需网络">
+        <span class="ico">📐</span><span>几何画板</span>
+      </button>
     </div>
     <div class="bookmarks" id="bm"></div>
     <div id="restoreBox" style="display:none;margin-top:26px;">
@@ -286,6 +313,24 @@
         });
       } catch (e) {}
     }
+
+    // 几何画板快捷入口（离线 GeoGebra——后端加载内置资源页；
+    // 资源未随包时返回 false → 按钮置灰提示）
+    (function () {
+      var btn = document.getElementById('geoBtn');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        try {
+          if (!(window.pywebview && pywebview.api)) return;
+          pywebview.api.open_geogebra().then(function (ok) {
+            if (!ok) {
+              btn.classList.add('unavailable');
+              btn.title = '当前安装包未包含画板资源';
+            }
+          });
+        } catch (e) {}
+      });
+    })();
 
     // 恢复上次会话入口（resume_session 自动恢复之外的手动入口；
     // 仅当已保存会话 >1 个标签时显示——has_saved_session 只返回计数）
