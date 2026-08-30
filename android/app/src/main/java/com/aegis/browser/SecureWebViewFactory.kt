@@ -51,7 +51,7 @@ object SecureWebViewFactory {
             android.util.Log.e(
                 "AegisBroker",
                 "registerSession failed: session=$sessionId, " +
-                    "REQUIRE_NATIVE_POLICY_CORE=${BuildConfig.REQUIRE_NATIVE_POLICY_CORE}",
+                    "REQUIRE_NATIVE_POLICY_CORE=${com.aegis.broker.BuildConfig.REQUIRE_NATIVE_POLICY_CORE}",
             )
             check(false) { "无法注册安全浏览会话（详见 logcat -s AegisBroker）" }
         }
