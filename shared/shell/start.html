@@ -46,6 +46,13 @@
     flex:1; border:0; outline:0; font-size:17px; background:transparent; color:#22303f;
   }
   .search input::placeholder { color:#8a94a6; }
+  .search input[type=search] { -webkit-appearance:none; }
+  .search input[type=search]::-webkit-search-cancel-button {
+    -webkit-appearance:none; width:18px; height:18px; cursor:pointer;
+    background:linear-gradient(45deg,transparent 44%,#8a94a6 44%,#8a94a6 56%,transparent 56%),
+               linear-gradient(-45deg,transparent 44%,#8a94a6 44%,#8a94a6 56%,transparent 56%);
+    border-radius:50%;
+  }
   .search button {
     border:0; height:42px; padding:0 26px; border-radius:21px;
     background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff;
@@ -191,8 +198,12 @@
       <div class="engine-pill" id="enginePill" title="切换搜索引擎" onclick="cycleEngine()">
         <span class="dot"></span><span id="engineName">百度</span>
       </div>
-      <input id="q" placeholder="搜索网页或输入网址…" autofocus>
-      <button onclick="go()">搜索</button>
+      <!-- form+submit：兼容移动端 IME「搜索/前往」action（不走 keydown Enter） -->
+      <form id="searchForm" onsubmit="event.preventDefault(); go();">
+      <input id="q" type="search" enterkeyhint="search" autocomplete="off"
+             placeholder="搜索网页或输入网址…" autofocus>
+      <button type="submit" id="searchBtn">搜索</button>
+      </form>
     </div>
     <!-- 几何画板快捷入口（离线 GeoGebra——点击跳转内置画板页） -->
     <div class="quick-row">
@@ -354,9 +365,18 @@
       } catch (e) {}
     }
 
+    var _searchBusy = false;
     function go() {
+      if (_searchBusy) return;
       var v = document.getElementById('q').value.trim();
-      if (v && Host.has('navigate')) Host.navigate(v);
+      if (!v || !Host.has('navigate')) return;
+      _searchBusy = true;
+      var btn = document.getElementById('searchBtn');
+      var orig = btn.textContent;
+      btn.textContent = '搜索中…';
+      try { Host.navigate(v); } catch (e) { Host.jsError('navigate failed: ' + e); }
+      // 导航被 Broker 确认面板挂起或失败时复原按钮（成功则页面随即卸载）
+      setTimeout(function () { btn.textContent = orig; _searchBusy = false; }, 1200);
     }
     function openUrl(u) {
       if (Host.has('navigate')) Host.navigate(u);
