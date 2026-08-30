@@ -95,6 +95,10 @@ android {
                 keyAlias = signingProperties.getProperty("keyAlias")
                 keyPassword = signingProperties.getProperty("keyPassword")
             }
+            // 双签名方案（AGP 在 minSdk>=24 时默认关闭 v1——部分国产 ROM
+            // 与文件管理器的解析器仍走 v1，v2-only 会报 packageInfo null）
+            enableV1Signing = true
+            enableV2Signing = true
         }
     }
 
