@@ -1,0 +1,26 @@
+name: 'Prepare offline GeoGebra pad'
+description: >
+  从仓库 Release 资产拉取 GeoGebra Math Apps Bundle 并解压到目标目录，
+  断言入口文件存在（fail-closed）。供 release-android（APK assets）与
+  release-windows（PyInstaller datas）复用——单一修改点，杜绝步骤漂移。
+inputs:
+  dest-dir:
+    description: '解压目标目录（相对仓库根）'
+    required: true
+  release-tag:
+    description: 'GeoGebra bundle 的 Release tag'
+    required: false
+    default: 'resources/geogebra-5.4.929.3'
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        mkdir -p "${{ inputs.dest-dir }}"
+        cd "${{ inputs.dest-dir }}"
+        gh release download "${{ inputs.release-tag }}" --pattern "*.zip" --output geogebra.zip --clobber
+        python -c "import zipfile; zipfile.ZipFile('geogebra.zip').extractall('.')"
+        python -c "import os; p='GeoGebra/HTML5/5.0/GeoGebra.html'; assert os.path.isfile(p), 'entry missing: '+p"
+        echo "[geogebra] assets ready at ${{ inputs.dest-dir }}"

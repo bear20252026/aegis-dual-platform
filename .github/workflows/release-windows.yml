@@ -163,14 +163,9 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r legacy/windows-pywebview/requirements.txt -r legacy/windows-pywebview/requirements-dev.txt types-pywin32
       - name: 准备离线几何画板资源（GeoGebra Math Apps Bundle）
-        working-directory: legacy/windows-pywebview
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download resources/geogebra-5.4.929.3 --pattern "*.zip" --output geogebra.zip --clobber
-          python -c "import zipfile; zipfile.ZipFile('geogebra.zip').extractall('geogebra')"
-          python -c "import os; p=os.path.join('geogebra','GeoGebra','HTML5','5.0','GeoGebra.html'); assert os.path.isfile(p), 'entry missing: '+p"
-          echo "[geogebra] 资源就绪"
+        uses: ./.github/actions/prepare-geogebra
+        with:
+          dest-dir: legacy/windows-pywebview/geogebra
       - name: PyInstaller 打包（onedir——dist/AegisWebView）
         working-directory: legacy/windows-pywebview
         run: python -m PyInstaller aegis_webview.spec --noconfirm --distpath dist --workpath build
