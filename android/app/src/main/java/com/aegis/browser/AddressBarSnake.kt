@@ -1,6 +1,6 @@
 package com.aegis.browser
 
-import androidx.compose.animation.animateDpAsState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -55,7 +55,7 @@ private enum class Dir { UP, DOWN, LEFT, RIGHT }
 
 private data class Cell(val x: Int, val y: Int)
 
-private class SnakeGame(cols: Int, rows: Int) {
+private class SnakeGame(private val cols: Int, private val rows: Int) {
     var snake = mutableListOf(Cell(cols / 2, rows / 2))
     var dir = Dir.RIGHT
     var food = Cell(0, 0)
