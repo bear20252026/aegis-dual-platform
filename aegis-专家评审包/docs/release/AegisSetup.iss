@@ -11,8 +11,8 @@
 ; 安装器 EXE 自身品牌图标（快捷方式图标继承目标 EXE——assets/icon.ico）
 SetupIconFile=setup_icon.ico
 ; 安装器向导界面图（用户提供品牌图——星球；modern 风格 192x386）
-WizardImageFile=../legacy/windows-pywebview/assets/installer_welcome.bmp
-WizardSmallImageFile=../legacy/windows-pywebview/assets/installer_small.bmp
+WizardImageFile=installer_welcome.bmp
+WizardSmallImageFile=installer_small.bmp
 AppId={{A7B8C9D0-E1F2-4A5B-8C7D-9E0F1A2B3C4D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}

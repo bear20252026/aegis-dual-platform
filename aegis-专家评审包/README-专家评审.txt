@@ -1,7 +1,7 @@
 # Aegis Browser 专家评审包
-# 生成时间: 2026-08-30 20:29 UTC
+# 生成时间: 2026-08-30 20:45 UTC
 # 版本: 2.1.7
-# 提交: a0bceb9 (feat(brand): app launcher icons both platforms (Android adaptive + installer icon))
+# 提交: 3a68c45 (fix(windows): ship wizard images beside iss (runner could not resolve ../legacy path))
 
 ## 包含内容（由 scripts/build_review_package.py 从规范源码自动生成）
 - 源代码: Rust policy-core + Android + Windows Python + C# + contracts + shared 约束

@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-08-30 20:29 UTC",
+  "generated_at": "2026-08-30 20:45 UTC",
   "version": "2.1.7",
   "versionCode": "20107",
-  "commit": "a0bceb9",
-  "commit_subject": "feat(brand): app launcher icons both platforms (Android adaptive + installer icon)",
+  "commit": "3a68c45",
+  "commit_subject": "fix(windows): ship wizard images beside iss (runner could not resolve ../legacy path)",
   "file_count": 758,
   "files": [
     {
@@ -918,8 +918,8 @@
     },
     {
       "path": "docs/release/AegisSetup.iss",
-      "sha256": "8951333771d28aaaa63b609120c58681414a6f5d20abed1713efe99a70626b2a",
-      "bytes": 2059
+      "sha256": "da768a64cc262a4773b7689318802d9b2c9d3277f2ac176a94c046616ec63132",
+      "bytes": 1989
     },
     {
       "path": "docs/release/agent-sitemap.example.json",
