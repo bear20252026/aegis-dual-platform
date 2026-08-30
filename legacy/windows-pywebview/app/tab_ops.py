@@ -34,7 +34,7 @@ def _clamp_idx(value: Any) -> int | None:
     延迟导入 _to_nonneg_int（api_bridge → tab_ops 单向依赖，避免循环导入）。
     """
     try:
-        from .api_bridge import _to_nonneg_int
+        from .validators import to_nonneg_int as _to_nonneg_int
         return _to_nonneg_int(value, None)
     except Exception:
         return None

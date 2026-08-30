@@ -56,11 +56,15 @@ test('BUG-005 离线画板：按钮 + 桥调用 + 双端打包配置必须齐备
   // Windows 打包链
   const spec = readFileSync(join(ROOT, 'legacy', 'windows-pywebview', 'aegis_webview.spec'), 'utf8');
   assert.match(spec, /geogebra/, 'Windows spec 必须条件打包 geogebra');
-  // Android 打包链
+  // Android 打包链（M-4 后经复合 action——单源无漂移）
   const wf = readFileSync(join(ROOT, '.github', 'workflows', 'release-android.yml'), 'utf8');
-  assert.match(wf, /geogebra\.zip'\)\.extractall\('app\/src\/main\/assets\/geogebra'\)/,
-    'Android 构建必须解压画板到 assets（此前步骤静默缺失导致按钮失效）');
-  assert.match(wf, /GeoGebra\.html'; assert/, '入口断言必须存在（fail-closed）');
+  assert.match(wf, /uses: \.\/\.github\/actions\/prepare-geogebra/,
+    'Android 构建必须引用 prepare-geogebra 复合 action（此前内联步骤静默缺失导致按钮失效）');
+  assert.match(wf, /dest-dir: android\/app\/src\/main\/assets\/geogebra/, 'dest-dir 必须指向 APK assets');
+  const action = readFileSync(join(ROOT, '.github', 'actions', 'prepare-geogebra', 'action.yml'), 'utf8');
+  assert.match(action, /GeoGebra\.html'; assert/, '复合 action 入口断言必须存在（fail-closed）');
+  const wfw = readFileSync(join(ROOT, '.github', 'workflows', 'release-windows.yml'), 'utf8');
+  assert.match(wfw, /uses: \.\/\.github\/actions\/prepare-geogebra/, 'Windows 构建同样必须引用复合 action');
 });
 
 test('BUG-006 allowedOriginRules 全域通配崩溃：不得出现 "https://*" 规则', () => {

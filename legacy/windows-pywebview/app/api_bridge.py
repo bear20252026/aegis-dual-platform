@@ -37,35 +37,12 @@ from .url_utils import (
 # 独立职责独立文件（api_bridge 已超 500 行红线，不再增重）。
 from .tab_ops import TabOpsMixin
 
-# 保持旧私有名兼容（_is_navigation_safe 供 Api._is_navigation_safe_url 使用）
+# 类型校验工具单源化（M-1）：实现移 app/validators.py；旧私有名别名
+# 保持 api_bridge 内 22 处调用点与潜在外部引用兼容
+from .validators import host_of, to_int as _to_int, to_nonneg_int as _to_nonneg_int, to_str as _to_str
+
+# 旧私有名兼容（api_bridge 内 3 处使用——语义=url_utils.is_navigation_safe）
 _is_navigation_safe = is_navigation_safe
-
-
-def _to_int(value: Any, default: Any = None) -> Any:
-    """js_api 参数校验助手（方向①-S3）：安全转 int；失败返回 default。
-
-    pywebview 传参可能是字符串/浮点/畸形值，统一在此收敛类型转换，
-    避免各方法重复 try/except 且行为不一致。
-    """
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _to_nonneg_int(value: Any, default: Any = None) -> Any:
-    """转 int 且要求非负；否则返回 default（索引类参数专用）。"""
-    n = _to_int(value, None)
-    if n is None or n < 0:
-        return default
-    return n
-
-
-def _to_str(value: Any, default: Any = None) -> Any:
-    """确认是 str；None→default，非 str→default（文本类参数专用）。"""
-    if value is None:
-        return default
-    return value if isinstance(value, str) else default
 
 
 def _row_to_tuple(r: Any):
@@ -240,7 +217,6 @@ class Api(TabOpsMixin):
         # 非白名单域——导航层真正拒绝（放函数开头——不被威胁检查提前返回跳过）
         try:
             import os
-            from urllib.parse import urlparse
             if getattr(self, "_agent_session", None) or 0.0:
                 allow_raw = os.environ.get("AEGIS_AGENT_ALLOWED_HOSTS", "").strip()
                 allow_hosts = {h.strip().lower() for h in allow_raw.split(",") if h.strip()}
@@ -248,7 +224,7 @@ class Api(TabOpsMixin):
                     from crash_reporter import log_event
                     log_event("[agent] 拒绝 Agent 导航（未配置 AEGIS_AGENT_ALLOWED_HOSTS——allowlist 为空）")
                     return False
-                host = (urlparse(url).hostname or "").lower().rstrip(".")
+                host = host_of(url)
                 if not any(host == c or host.endswith("." + c) for c in allow_hosts):
                     from crash_reporter import log_event
                     log_event(f"[agent] 拒绝 Agent 导航非白名单域: {url}")
@@ -257,14 +233,12 @@ class Api(TabOpsMixin):
             pass
         # A-②：复用 threat_feed 缓存黑名单（精确/子域匹配）
         try:
-            from urllib.parse import urlparse
-
             from .threat_feed import ThreatFeedUpdater, host_is_blocked
             updater = ThreatFeedUpdater(self._data_dir)
             blocked = updater.load_cached()
             if not blocked:
                 return True  # 未配置订阅源 → 放行
-            host = (urlparse(url).hostname or "").lower()
+            host = host_of(url)
             if host and host_is_blocked(host, blocked):
                 # 观察项 2 优化：威胁拦截命中记录（可观测性，不改变功能）
                 try:
@@ -506,8 +480,7 @@ class Api(TabOpsMixin):
         URL 的 host 为空（本地壳页/新标签页）即受信；远程页面调用拒绝
         （防书签投毒/搜索引擎篡改——专家建议受信集）。"""
         try:
-            from urllib.parse import urlparse
-            host = urlparse(self.current_url() or "").hostname or ""
+            host = host_of(self.current_url() or "")
             return host == ""  # 本地壳页（file:///空白）受信；远程拒绝
         except Exception:
             return False
