@@ -84,6 +84,10 @@ jobs:
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.0.12433566"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           export ANDROID_NDK="$ANDROID_NDK_HOME"
+          # ELF 段 16KB 对齐（ADR-009）：16KB 页设备（Android 15+ 部分
+          # 机型）安装时要求 LOAD 段 16K 对齐，否则 INSTALL_FAILED_INVALID_APK
+          export RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384"
+
           test -d "$ANDROID_NDK_HOME"
           cargo ndk --platform 26 \
             -t arm64-v8a \

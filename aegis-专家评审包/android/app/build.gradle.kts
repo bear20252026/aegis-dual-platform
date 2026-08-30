@@ -89,6 +89,8 @@ android {
             // 与文件管理器的解析器仍走 v1，v2-only 会报 packageInfo null）
             enableV1Signing = true
             enableV2Signing = true
+            // v3：密钥轮换支持 + 部分新 ROM 解析路径优先验证 v3
+            enableV3Signing = true
         }
     }
 
@@ -112,6 +114,14 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        jniLibs {
+            // 压缩原生库（useLegacyPackaging——解析兼容性最大化，ADR-009）：
+            // 未压缩 so 依赖 ZIP 对齐，部分 ROM 解析器/传输中转（FAT32 等）
+            // 对其敏感——曾现「Failed to extract native libraries res=-2」类
+            // INSTALL_FAILED_INVALID_APK。压缩存储在安装期由系统解包，
+            // 对任意路径来源的 APK 副本最宽容。代价：安装后占盘略增。
+            useLegacyPackaging = true
+        }
     }
 
     // AGP 9 默认关闭 BuildConfig 生成；BrowserEngine 依赖 BuildConfig.DEBUG

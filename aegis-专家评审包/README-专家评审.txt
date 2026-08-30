@@ -1,7 +1,7 @@
 # Aegis Browser 专家评审包
-# 生成时间: 2026-08-30 17:51 UTC
+# 生成时间: 2026-08-30 18:41 UTC
 # 版本: 2.1.7
-# 提交: d9ab6d2 (fix(android): back gesture/key exits app on gesture-nav devices (BUG-013))
+# 提交: 1eb2f83 (fix(android): missing Alignment import in MainActivity (AddressBarRow))
 
 ## 包含内容（由 scripts/build_review_package.py 从规范源码自动生成）
 - 源代码: Rust policy-core + Android + Windows Python + C# + contracts + shared 约束

@@ -478,3 +478,15 @@ validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed�
 4. `broker`：`nativePolicyCoreFiles` 仅列 arm64
 
 **附带规则**：构建期临时文件（如 geogebra.zip）禁止残留在打包目录——曾致 +32MB 体积事故；打包体积突变 = 内容异常高保真信号，必须查因后再发版。
+
+## ADR-009 APK 解析兼容性最大化（分发增强）
+
+**背景**：APK 经微信/QQ 分发到任意手机，接收副本必须最大化「可解析」概率——历史坑（packageInfo null / Failed to extract native libraries res=-2 / 16KB 设备 INSTALL_FAILED_INVALID_APK）全部来自签名方案不全与未压缩 so 的对齐敏感。
+
+**构建规范**（永久）：
+1. 签名 v1+v2+v3 全开（enableV1/V2/V3Signing）——覆盖 Android 4.0~16 全部解析路径
+2. `packaging.jniLibs.useLegacyPackaging = true`——原生库压缩进 APK，安装期系统解包；规避未压缩 so 的 ZIP 对齐敏感类失败（对 FAT32 中转/非标准路径副本最宽容）。代价：安装后占盘略增
+3. Rust so 链接加 `-Wl,-z,max-page-size=16384`（RUSTFLAGS）——ELF 段 16KB 对齐，16KB 页设备可用
+4. CI 构建后 `zipalign -c -P 16 4` 校验（fail-closed）
+
+**传输现实**（微信/QQ 规格设计，非 bug）：接收 APK 自动追加 `.1` 后缀 → 重命名或聊天内「用其他应用打开」。正确包大小 49,237,446 字节。

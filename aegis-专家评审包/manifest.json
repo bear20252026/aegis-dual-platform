@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-08-30 17:51 UTC",
+  "generated_at": "2026-08-30 18:41 UTC",
   "version": "2.1.7",
   "versionCode": "20107",
-  "commit": "d9ab6d2",
-  "commit_subject": "fix(android): back gesture/key exits app on gesture-nav devices (BUG-013)",
+  "commit": "1eb2f83",
+  "commit_subject": "fix(android): missing Alignment import in MainActivity (AddressBarRow)",
   "file_count": 755,
   "files": [
     {
@@ -38,13 +38,13 @@
     },
     {
       "path": ".github/workflows/native-policy-artifacts.yml",
-      "sha256": "153ff2da6f729054c5f00908ece2355aabafdd5ffde05375211e3198acad6c84",
-      "bytes": 7750
+      "sha256": "2149a68c04de470bf011830202f49833e394e4813ee8fbef7cd1c805aca74b66",
+      "bytes": 7999
     },
     {
       "path": ".github/workflows/release-android.yml",
-      "sha256": "f4f2025a1238ba81090b86ffcb0e4b75f9990ff717e6ef891906b4448164c539",
-      "bytes": 9717
+      "sha256": "fed3efb41b3de81f32934e0af84773521c691a8d1d466a2dc6b48521c82850a5",
+      "bytes": 10030
     },
     {
       "path": ".github/workflows/release-core.yml",
@@ -113,8 +113,8 @@
     },
     {
       "path": "android/app/build.gradle.kts",
-      "sha256": "6bf981f2094f5a21a805619c7cc5c191c6455905723fcc63201549c522ab962b",
-      "bytes": 7051
+      "sha256": "ab69b1e6719a27dd436080e9bdb7a46fa1ea42c0efcbdebf458b7ba7521fa40b",
+      "bytes": 7713
     },
     {
       "path": "android/app/detekt-baseline.xml",
@@ -158,8 +158,8 @@
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/MainActivity.kt",
-      "sha256": "d2cf1264a24dd8201edca063e58205e41098190c14cac47017b8b5d1a442eddc",
-      "bytes": 13437
+      "sha256": "223f173f5d7cb3eb7f1db004740a63971ce7e2fab7fc372bd069909f8e3830a1",
+      "bytes": 13475
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/README.md",
@@ -693,8 +693,8 @@
     },
     {
       "path": "docs/KNOWLEDGE_BASE.md",
-      "sha256": "579e7dea0b43c917b4ac0440582ba7937778f2e94d22d536f14117d6f6bb1066",
-      "bytes": 58247
+      "sha256": "4b4cb46f3c492c11e9ac5ac114e21a20b19e37a62a040457aab31ff51116313b",
+      "bytes": 59327
     },
     {
       "path": "docs/adr/ADR-001-windows-host-webview2.md",
