@@ -130,9 +130,10 @@ jobs:
           AEGIS_KEY_ALIAS: ${{ secrets.AEGIS_KEY_ALIAS }}
           AEGIS_KEY_PASSWORD: ${{ secrets.AEGIS_KEY_PASSWORD }}
         run: |
+          # requireNavigationConfirmation 关闭（用户决策 2026-08-30）：
+          # 每次导航弹确认不可用——Broker allow/deny 策略仍在，仅免确认弹窗
           bash ./gradlew :app:assembleRelease --no-daemon \
             -PrequireNativePolicyCore=true \
-            -PrequireNavigationConfirmation=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
           apk_entries="$(unzip -Z1 app/build/outputs/apk/release/*.apk)"
           for abi in arm64-v8a; do

@@ -1,5 +1,6 @@
 package com.aegis.browser
 
+import android.view.KeyEvent
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -166,6 +167,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            val wv = viewModel.currentWebViewOrNull()
+            // 消费 WebView 历史栈逐级回退；无历史（如首页）放行系统默认
+            if (wv != null && wv.canGoBack()) {
+                SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK)
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
     }
 
     override fun onDestroy() {
