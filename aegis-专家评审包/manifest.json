@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-08-30 19:02 UTC",
+  "generated_at": "2026-08-30 20:29 UTC",
   "version": "2.1.7",
   "versionCode": "20107",
-  "commit": "7d93ea0",
-  "commit_subject": "build(android): max parse-compatibility hardening — legacy packaging, v3 signing, 16K ELF (ADR-009)",
+  "commit": "a0bceb9",
+  "commit_subject": "feat(brand): app launcher icons both platforms (Android adaptive + installer icon)",
   "file_count": 758,
   "files": [
     {
@@ -228,7 +228,7 @@
     },
     {
       "path": "android/app/src/main/res/values/colors.xml",
-      "sha256": "ac57723b3ba3f4ce5d4bd418fb8fb64a1f82450f914d5e7df7aac1b57dc68dd1",
+      "sha256": "1ff64d109f4173e84bf4d6ed9957b6f37f3456b0db3b19bb17d3a3c1de2687e4",
       "bytes": 125
     },
     {
@@ -918,8 +918,8 @@
     },
     {
       "path": "docs/release/AegisSetup.iss",
-      "sha256": "08307b8b70c3c46307d8f24431fbbc421cce149e8ed6609517b626afa4593b52",
-      "bytes": 1817
+      "sha256": "8951333771d28aaaa63b609120c58681414a6f5d20abed1713efe99a70626b2a",
+      "bytes": 2059
     },
     {
       "path": "docs/release/agent-sitemap.example.json",

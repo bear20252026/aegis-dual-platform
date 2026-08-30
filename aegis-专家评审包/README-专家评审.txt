@@ -1,7 +1,7 @@
 # Aegis Browser 专家评审包
-# 生成时间: 2026-08-30 19:02 UTC
+# 生成时间: 2026-08-30 20:29 UTC
 # 版本: 2.1.7
-# 提交: 7d93ea0 (build(android): max parse-compatibility hardening — legacy packaging, v3 signing, 16K ELF (ADR-009))
+# 提交: a0bceb9 (feat(brand): app launcher icons both platforms (Android adaptive + installer icon))
 
 ## 包含内容（由 scripts/build_review_package.py 从规范源码自动生成）
 - 源代码: Rust policy-core + Android + Windows Python + C# + contracts + shared 约束
