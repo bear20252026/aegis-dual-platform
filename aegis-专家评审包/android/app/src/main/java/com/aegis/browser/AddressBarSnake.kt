@@ -186,6 +186,7 @@ fun AddressBarWithSnake(
                 restartKey = restartKey,
                 modifier = Modifier.weight(1f),
                 onGameOver = { phase = SnakePhase.OVER },
+                onRestart = { restartKey++ },
                 onExit = { phase = SnakePhase.IDLE },
             )
         }
@@ -198,6 +199,7 @@ private fun SnakeGameArea(
     restartKey: Int,
     modifier: Modifier = Modifier,
     onGameOver: () -> Unit,
+    onRestart: () -> Unit,
     onExit: () -> Unit,
 ) {
     var cols by remember { mutableIntStateOf(0) }
@@ -272,6 +274,7 @@ private fun SnakeGameArea(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text("游戏结束 · 得分 ${g.score}", color = Color.White)
+                Button(onClick = onRestart) { Text("再来一局") }
                 Button(onClick = { onExit() }) { Text("退出") }
             }
         }
@@ -280,7 +283,7 @@ private fun SnakeGameArea(
     // 游戏循环（协程 tick）；异常自动回退浏览状态——游戏永不拖垮浏览器
     LaunchedEffect(restartKey, cols, rows) {
         if (cols == 0 || rows == 0) return@LaunchedEffect
-        val speed = 160L
+        val speed = 200L  // 初速放缓——横向跑道长，给玩家反应时间
         while (true) {
             kotlinx.coroutines.delay(speed)
             try {

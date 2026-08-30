@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-08-30 16:21 UTC",
+  "generated_at": "2026-08-30 16:44 UTC",
   "version": "2.1.7",
   "versionCode": "20107",
-  "commit": "105f648",
-  "commit_subject": "docs+ci: ADR-008 single-ABI distribution rule + whitelist assertion hardening",
+  "commit": "ce841ac",
+  "commit_subject": "fix: unify back button + snake game across platforms (BUG-011/012)",
   "file_count": 756,
   "files": [
     {
@@ -133,8 +133,8 @@
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/AddressBarSnake.kt",
-      "sha256": "9d25b05e043cbf05234b962873a41005f8d57ede8cc1b86c2e9a1a8f5bd3b7f1",
-      "bytes": 12295
+      "sha256": "6bdee951d8412a8454e8655790473556df17d49e680e5d980fb1e58fb1475bc1",
+      "bytes": 12502
     },
     {
       "path": "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt",
@@ -3608,8 +3608,8 @@
     },
     {
       "path": "shared/shell/start.html",
-      "sha256": "6c3474a88a9d166a9955bb37375b4545a8798ee340e57e37f72f7a12906eeb7d",
-      "bytes": 39136
+      "sha256": "cdd4382cf39224d96b978d20d4ccf013da38c685333380a85f8b172e519bc38b",
+      "bytes": 39202
     },
     {
       "path": "shared/update-manifest.schema.json",

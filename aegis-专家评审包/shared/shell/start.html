@@ -401,8 +401,8 @@
         document.getElementById('snakeOverlay').style.display = 'none';
       }
       function reset() {
-        snake = [{x:9,y:9},{x:8,y:9},{x:7,y:9}];
-        dir = {x:1,y:0}; nextDir = dir; score = 0; speed = 150;
+        snake = [{x:5,y:9},{x:4,y:9},{x:3,y:9}];  // 出生点偏左——右侧跑道 13 格，反应时间翻倍
+        dir = {x:1,y:0}; nextDir = dir; score = 0; speed = 170;
         placeFood(); updScore(); draw(false);
       }
       function placeFood() {
