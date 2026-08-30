@@ -33,3 +33,5 @@
 
 | BUG-011 | Android 地址栏贪吃蛇完全不动（滑动无效） | `tick` 状态只在循环自增、从未在组合中读取——Canvas 读的 `game` 引用不变，Compose 永不重绘，蛇视觉冻结 | `neverEqualPolicy` + 每 tick 重赋 `game` 强制重绘 | AddressBarSnake.kt |
 | BUG-012 | 首页返回按钮双端缺失/贪吃蛇 Win 缺失 | 返回键只存在于 Win 原生工具栏；贪吃蛇为 Android Compose 独占 | start.html 单源内置返回按钮（Host.goBack 分发）+ 贪吃蛇游戏（键盘/滑动双控），双端一致 | shared/shell/start.html, AegisHomeBridge.kt |
+
+| BUG-013 | 手势导航设备上边缘滑动/返回键直接退出应用（回退从未生效） | targetSdk 36 起系统默认经 OnBackInvokedCallback 分发返回事件——onKeyDown(KEYCODE_BACK) 在手势导航设备上永远收不到；此前"验证通过"实为误读（进程存活 ≠ Activity 存活，截图实为桌面） | OnBackPressedCallback 接管（androidx 桥接手势/按键双路径）+ manifest enableOnBackInvokedCallback | MainActivity.kt |

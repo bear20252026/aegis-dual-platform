@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,26 @@ class MainActivity : ComponentActivity() {
         WebViewVersionCheck.checkAndPrompt(this) { viewModel.setWebViewAlert(it) }
         // 初始化 ViewModel（TabManager + 首个标签）
         viewModel.init(this)
+
+        // 返回事件统一接管（BUG-013）：targetSdk 36 起系统默认经
+        // OnBackInvokedCallback 分发返回（手势导航的边缘滑动与
+        // KEYCODE_BACK 都不再经过 onKeyDown——此前 onKeyDown 实现
+        // 在手势导航设备上从未生效，边缘滑动直接退出应用）。
+        // OnBackPressedCallback 由 androidx 桥接两种分发路径；
+        // 无历史时保留原退出语义。
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    val wv = viewModel.currentWebViewOrNull()
+                    if (wv != null && wv.canGoBack()) {
+                        SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK)
+                    } else {
+                        finish()
+                    }
+                }
+            },
+        )
 
         setContent {
             AegisTheme {
