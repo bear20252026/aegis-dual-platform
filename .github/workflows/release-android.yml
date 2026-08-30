@@ -51,6 +51,17 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Restore release signing keystore (from secrets)
+        env:
+          AEGIS_KEYSTORE_FILE_B64: ${{ secrets.AEGIS_KEYSTORE_FILE }}
+        run: |
+          if [ -z "$AEGIS_KEYSTORE_FILE_B64" ]; then
+            echo "::warning::AEGIS_KEYSTORE_FILE 未配置——本构建产出未签名 APK"
+          else
+            echo "$AEGIS_KEYSTORE_FILE_B64" | base64 -d > "$RUNNER_TEMP/aegis-release.jks"
+            echo "AEGIS_KEYSTORE_FILE=$RUNNER_TEMP/aegis-release.jks" >> "$GITHUB_ENV"
+            echo "✅ 签名 keystore 已就绪"
+          fi
       - name: Verify shared version and release tag
         shell: bash
         run: |
