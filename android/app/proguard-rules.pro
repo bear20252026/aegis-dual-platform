@@ -14,3 +14,9 @@
 -keep interface com.aegis.broker.NativePolicyCoreBridge$NativePolicyCoreAbi { *; }
 -keep class com.aegis.broker.NativePolicyCoreBridge { *; }
 -keep class com.sun.jna.internal.** { *; }
+
+# ---- androidx.webkit：document-start 注入用 View.setTag(key=R$id) ——
+# R8 优化掉未引用的 R$id 字段后 key=0 → IllegalArgumentException 启动崩
+-keep class androidx.webkit.R$id { *; }
+-keep class androidx.webkit.** { *; }
+-dontwarn androidx.webkit.**

@@ -92,17 +92,19 @@ object SecureWebViewFactory {
         // allowedOriginRules 语法：AndroidX 不接受 "https://*" 全域通配
         // （IllegalArgumentException）——单星号 "*" 才是「匹配所有源
         // （含 file:// 壳页）」的合法写法，与防护脚本全页注入的意图一致。
+        // 降级原则：注入失败（WebView provider 异常等）只警告不崩——
+        // 防护可降级、浏览器不可崩（配套 proguard keep androidx.webkit.R$id）。
         val allowedOrigins = setOf("*")
-        WebViewCompat.addDocumentStartJavaScript(
-            webView,
-            fingerprintShieldScript(sessionSeed),
-            allowedOrigins,
-        )
-        WebViewCompat.addDocumentStartJavaScript(
-            webView,
-            BRIDGE_GUARD_JS,
-            allowedOrigins,
-        )
+        val hardenedScripts =
+            listOf("fingerprint-shield" to fingerprintShieldScript(sessionSeed),
+                "bridge-guard" to BRIDGE_GUARD_JS)
+        hardenedScripts.forEach { (name, script) ->
+            try {
+                WebViewCompat.addDocumentStartJavaScript(webView, script, allowedOrigins)
+            } catch (e: Exception) {
+                android.util.Log.e("Aegis", "document-start 注入失败[$name]: ${e.message}")
+            }
+        }
     }
 
     /** 获取 broker 实例（供外部校验/审计）。 */
