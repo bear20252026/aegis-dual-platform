@@ -73,7 +73,9 @@ class AegisHomeBridge(
         if (text.isEmpty()) return
         val url = buildTargetUrl(text) ?: return
         val wv = webViewProvider() ?: return
-        SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url)
+        // @JavascriptInterface 运行在 JS 后台线程——WebView API 必须
+        // 主线程调用（WrongThreadViolation：loadUrl 被吞 → 导航静默失效）
+        wv.post { SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url) }
     }
 
     /** 打开离线几何画板（assets 内置资源——build.gradle sourceSets 打包）。 */
