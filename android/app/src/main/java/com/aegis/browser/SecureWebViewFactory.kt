@@ -89,7 +89,10 @@ object SecureWebViewFactory {
             android.util.Log.w("Aegis", "WebView 不支持 document-start 脚本；隐私增强未启用")
             return
         }
-        val allowedOrigins = setOf("https://*", "http://*")
+        // allowedOriginRules 语法：AndroidX 不接受 "https://*" 全域通配
+        // （IllegalArgumentException）——单星号 "*" 才是「匹配所有源
+        // （含 file:// 壳页）」的合法写法，与防护脚本全页注入的意图一致。
+        val allowedOrigins = setOf("*")
         WebViewCompat.addDocumentStartJavaScript(
             webView,
             fingerprintShieldScript(sessionSeed),
