@@ -82,6 +82,15 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
           restore-keys: gradle-${{ runner.os }}-
+      - name: Prepare offline GeoGebra pad into APK assets
+        working-directory: android
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download resources/geogebra-5.4.929.3 --pattern "*.zip" --output geogebra.zip --clobber
+          python -c "import zipfile; zipfile.ZipFile('geogebra.zip').extractall('app/src/main/assets/geogebra')"
+          python -c "import os; p='app/src/main/assets/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html'; assert os.path.isfile(p), 'entry missing: '+p"
+          echo "[geogebra] assets ready"
       - name: Build Android arm64-v8a native policy library
         working-directory: core/rust-policy-core
         run: |
