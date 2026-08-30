@@ -39,15 +39,6 @@ val requireNativePolicyCore =
         .gradleProperty("requireNativePolicyCore")
         .map { it == "true" }
         .getOrElse(false)
-val requireNavigationConfirmation =
-    providers
-        .gradleProperty("requireNavigationConfirmation")
-        .map { it == "true" }
-        .getOrElse(false)
-
-check(!requireNavigationConfirmation || requireNativePolicyCore) {
-    "requireNavigationConfirmation=true 时必须同时设置 -PrequireNativePolicyCore=true"
-}
 
 android {
     namespace = "com.aegis.browser"
@@ -68,7 +59,6 @@ android {
         targetSdk = 36
         versionCode = 20107
         versionName = "2.1.7"
-        buildConfigField("boolean", "REQUIRE_NAVIGATION_CONFIRMATION", requireNavigationConfirmation.toString())
         ndk {
             // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
             // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）

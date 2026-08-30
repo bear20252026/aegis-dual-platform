@@ -69,7 +69,8 @@ object SecureWebViewFactory {
                 sessionId = sessionId,
                 tabId = tabId,
                 onRendererGone = { /* renderer gone cleanup handled by caller */ },
-                requireNavigationConfirmation = BuildConfig.REQUIRE_NAVIGATION_CONFIRMATION,
+                requireNavigationConfirmation =
+                    com.aegis.broker.BuildConfig.REQUIRE_NAVIGATION_CONFIRMATION,
                 onNavigationConfirmationRequested = { request ->
                     onNavigationConfirmationRequested(webView, request)
                 },

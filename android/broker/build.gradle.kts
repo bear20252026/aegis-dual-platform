@@ -37,6 +37,15 @@ android {
     defaultConfig {
         minSdk = 26
         buildConfigField("boolean", "REQUIRE_NATIVE_POLICY_CORE", requireNativePolicyCore.toString())
+        // M-3 策略域配置单源：导航确认开关并入 broker（app 只读 broker BuildConfig）
+        val requireNavigationConfirmation = providers
+            .gradleProperty("requireNavigationConfirmation")
+            .map { it == "true" }
+            .getOrElse(false)
+        buildConfigField("boolean", "REQUIRE_NAVIGATION_CONFIRMATION", requireNavigationConfirmation.toString())
+        check(!requireNavigationConfirmation || requireNativePolicyCore) {
+            "requireNavigationConfirmation=true 时必须同时设置 -PrequireNativePolicyCore=true"
+        }
     }
     sourceSets {
         getByName("main").apply {
