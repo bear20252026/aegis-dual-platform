@@ -27,6 +27,9 @@ test('BUG-001 启动闪退：不得用 generateViewId 作 setTag key（WeakHashM
 test('BUG-002 搜索 IME 失效：form submit + type=search + enterkeyhint 必须存在', () => {
   assert.match(HTML, /<form id="searchForm"/, '搜索框必须有 form 容器（IME action 触发路径）');
   assert.match(HTML, /onsubmit="event\.preventDefault\(\); go\(\);"/, 'submit 必须走 go()');
+  // BUG-009：file:// 页面的 form submit 可能不触发 onsubmit——按钮必须
+  // 同时保留 onclick 直调路径（双保险，修后再次失效的教训）
+  assert.match(HTML, /id="searchBtn" onclick="go\(\)"/, '搜索按钮必须 onclick 直调 go()');
   assert.match(HTML, /type="search"/, 'input 必须是 search 型（键盘出「搜索」键）');
   assert.match(HTML, /enterkeyhint="search"/, '必须声明 enterkeyhint');
 });
