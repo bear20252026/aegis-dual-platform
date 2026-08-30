@@ -163,9 +163,12 @@ def _process_memory_mb(pid: int) -> int:
         import subprocess
         # text=True 默认 UTF-8 解码，中文 Windows 的 tasklist 输出为 GBK
         # → UnicodeDecodeError；改用 bytes + errors='ignore' 兼容任意本地编码
+        # CREATE_NO_WINDOW：GUI 进程（console=False 打包）里 subprocess
+        # 不加该标志会闪终端黑框（启动链每次探测弹两下——用户报告）
         raw = subprocess.run(
             ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            capture_output=True, timeout=8.0, check=False).stdout
+            capture_output=True, timeout=8.0, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
         out: str = raw.decode("utf-8", errors="ignore")
         # 形如 "chrome.exe","1234","Console","1","123,456 K"
         parts = out.strip().split('","')
@@ -182,9 +185,11 @@ def _gpu_process_active() -> bool:
     try:
         import subprocess
         # 同 _process_memory_mb：bytes + errors='ignore' 兼容中文 Windows GBK 输出
+        # CREATE_NO_WINDOW：防 GUI 进程内 subprocess 闪终端黑框（同上）
         raw = subprocess.run(
             ["tasklist", "/FI", "IMAGENAME eq msedgewebview2.exe", "/FO", "CSV"],
-            capture_output=True, timeout=8.0, check=False).stdout
+            capture_output=True, timeout=8.0, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
         out: str = raw.decode("utf-8", errors="ignore")
         return "msedgewebview2.exe" in out
     except Exception:
