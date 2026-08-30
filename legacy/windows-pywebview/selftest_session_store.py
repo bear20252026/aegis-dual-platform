@@ -8,6 +8,8 @@
 5. MAX_TABS=20 截断；current 钳制
 6. 损坏文件 / 空目录 / 版本不匹配 → load 返回 None（fail-closed）
 """
+from _selftest_support import check, failures  # M-6 共享支撑
+
 
 import json
 import sys
@@ -17,13 +19,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.session_store import MAX_TABS, START_URL, SessionStore
-
-failures = []
-
-
-def check(name: str, cond: bool, detail: str = ""):
-    if not cond:
-        failures.append(f"{name}: {detail}")
 
 
 tmp = tempfile.mkdtemp(prefix="aegis_selftest_")

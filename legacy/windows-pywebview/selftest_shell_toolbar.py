@@ -8,6 +8,8 @@
 5. 引号/反斜杠被 JSON 转义
 6. 注入后的标签 JSON 可被 json.loads 还原（round-trip）
 """
+from _selftest_support import check, failures  # M-6 共享支撑
+
 
 import json
 import sys
@@ -16,13 +18,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.shell_toolbar import TOOLBAR_JS, build_toolbar_js
-
-failures = []
-
-
-def check(name: str, cond: bool, detail: str = ""):
-    if not cond:
-        failures.append(f"{name}: {detail}")
 
 
 # 1) TOOLBAR_JS 含两个占位符

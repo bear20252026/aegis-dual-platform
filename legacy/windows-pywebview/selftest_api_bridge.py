@@ -8,6 +8,8 @@
 5. on_loaded 注入：占位符替换后无残留
 6. window 未绑定时 _load/_eval 不崩溃（NavQueue 静默降级）
 """
+from _selftest_support import check, failures  # M-6 共享支撑
+
 
 import sys
 from pathlib import Path
@@ -16,13 +18,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.api_bridge import START_URL, Api, normalize_url, on_loaded
 from app.nav_queue import NavQueue
-
-failures = []
-
-
-def check(name: str, cond: bool, detail: str = ""):
-    if not cond:
-        failures.append(f"{name}: {detail}")
 
 
 # 1) 模块可导入
