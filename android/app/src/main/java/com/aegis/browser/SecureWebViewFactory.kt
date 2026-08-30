@@ -23,7 +23,13 @@ import java.util.concurrent.atomic.AtomicLong
 object SecureWebViewFactory {
     private val broker = AndroidBroker()
     private val sessionCounter = AtomicLong(0)
-    private val navigatorTagKey = View.generateViewId()
+
+    // 导航器注册表（弱引用——WebView 销毁后自动可回收）。
+    // 历史教训：曾用 View.setTag(generateViewId(), ...) 存导航器——
+    // generateViewId() 的 package id 是 0x01（framework 区段），
+    // 而 setTag(int,...) 要求 ≥0x02 的应用资源 id → 真机启动必崩。
+    // WeakHashMap 彻底绕开 View tag 机制。
+    private val navigators = java.util.WeakHashMap<android.webkit.WebView, SecureNavigator>()
 
     /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
     private const val SESSION_SEED_BYTES = 32
@@ -70,15 +76,12 @@ object SecureWebViewFactory {
                 onNavigationConfirmationResolved = { onNavigationConfirmationResolved(webView) },
             )
         webView.webViewClient = client
-        webView.setTag(
-            navigatorTagKey,
-            SecureNavigator(webView, client),
-        )
+        navigators[webView] = SecureNavigator(webView, client)
         return webView
     }
 
     /** 仅工厂创建的 WebView 才拥有受控导航器；不存在时调用方必须拒绝外部导航。 */
-    fun navigatorFor(webView: WebView): SecureNavigator? = webView.getTag(navigatorTagKey) as? SecureNavigator
+    fun navigatorFor(webView: WebView): SecureNavigator? = navigators[webView]
 
     /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */
     private fun installDocumentStartScripts(
