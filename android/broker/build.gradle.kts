@@ -25,6 +25,11 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    testOptions {
+        // NativePolicyCoreBridge 失败路径用 android.util.Log 留痕——
+        // JVM 单测无 Android 框架，默认值兜底（否则 Log.e 未 mock 即崩）
+        unitTests.isReturnDefaultValues = true
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21

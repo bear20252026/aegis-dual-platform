@@ -45,7 +45,16 @@ object SecureWebViewFactory {
         BrowserEngine(webView).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
         val tabId = "tab-$sessionId"
-        check(broker.registerSession(sessionId, tabId)) { "无法注册安全浏览会话" }
+        if (!broker.registerSession(sessionId, tabId)) {
+            // fail-closed 前留根因线索（logcat -s AegisBroker；典型：
+            // release minified 混淆 JNA Abi 接口 → native 符号映射失败）
+            android.util.Log.e(
+                "AegisBroker",
+                "registerSession failed: session=$sessionId, " +
+                    "REQUIRE_NATIVE_POLICY_CORE=${BuildConfig.REQUIRE_NATIVE_POLICY_CORE}",
+            )
+            check(false) { "无法注册安全浏览会话（详见 logcat -s AegisBroker）" }
+        }
         val sessionSeed = newSessionSeed()
         installDocumentStartScripts(webView, sessionSeed)
         val client =
