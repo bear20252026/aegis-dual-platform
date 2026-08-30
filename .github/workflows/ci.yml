@@ -91,3 +91,22 @@ jobs:
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - name: 占位
         run: echo "Android Lint 需 Gradle Wrapper 后启用（当前工程无 wrapper）"
+
+  ui-regression:
+    # 质量门禁（S6）：shared/shell 单源首页的 UI 回归——已知缺陷逐条断言
+    # （缺陷库 tests/KNOWN_DEFECTS.md；失败 = 阻断 push/PR）
+    name: UI Regression (start.html)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+      - name: 安装 Node 22
+        uses: actions/setup-node@1d0ff469b7ec7b3cb9d8673fde0c81c44821de2a
+        with:
+          node-version: '22'
+      - name: 运行 UI 回归测试
+        run: node --test tests/ui-regression/start_page.test.mjs
+      - name: 测试报告
+        if: always()
+        run: echo "UI 回归结果见上方 TAP 输出（pass/fail 计数）；失败即门禁阻断"
