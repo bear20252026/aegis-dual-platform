@@ -66,8 +66,8 @@ android {
         applicationId = "com.aegis.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20106
-        versionName = "2.1.6"
+        versionCode = 20107
+        versionName = "2.1.7"
         buildConfigField("boolean", "REQUIRE_NAVIGATION_CONFIRMATION", requireNavigationConfirmation.toString())
         ndk {
             // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
