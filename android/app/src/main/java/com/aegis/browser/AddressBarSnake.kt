@@ -183,6 +183,7 @@ fun AddressBarWithSnake(
         } else {
             SnakeGameArea(
                 restartKey = restartKey,
+                modifier = Modifier.weight(1f),
                 onGameOver = { phase = SnakePhase.OVER },
                 onExit = { phase = SnakePhase.IDLE },
             )
@@ -194,6 +195,7 @@ fun AddressBarWithSnake(
 @Composable
 private fun SnakeGameArea(
     restartKey: Int,
+    modifier: Modifier = Modifier,
     onGameOver: () -> Unit,
     onExit: () -> Unit,
 ) {
@@ -203,10 +205,9 @@ private fun SnakeGameArea(
     var tick by remember(restartKey) { mutableIntStateOf(0) }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
-            .weight(1f)
             .onSizeChanged { size ->
                 // 网格初始化（尺寸阶段一次完成——不在 draw 阶段写 state）
                 if (cols == 0 && size.width > 0 && size.height > 0) {
