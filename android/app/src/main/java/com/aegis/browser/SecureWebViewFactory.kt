@@ -77,6 +77,12 @@ object SecureWebViewFactory {
             )
         webView.webViewClient = client
         navigators[webView] = SecureNavigator(webView, client)
+        // 首页宿主桥（ADR-003 复审口径）：仅暴露入口级无敏感操作
+        // （导航走 Broker 授权；壁纸/引擎为偏好写入；画板为内置资源跳转）
+        webView.addJavascriptInterface(
+            AegisHomeBridge(context.applicationContext) { webView },
+            "AegisBridge",
+        )
         return webView
     }
 

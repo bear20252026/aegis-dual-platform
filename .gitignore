@@ -76,3 +76,4 @@ aegis-专家评审包/windows/**/bin/
 **/docs/release/installer_output/
 assets/fonts/fonts-bundle.zip
 aegis-*.zip
+android/app/src/main/assets/geogebra/

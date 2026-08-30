@@ -125,6 +125,11 @@ android {
     }
 
     // AGP 9 默认关闭 BuildConfig 生成；BrowserEngine 依赖 BuildConfig.DEBUG
+    sourceSets {
+        // 首页资源单一事实源（ADR-007）：shared/shell（start.html + wallpapers）
+        // 与 Windows 端（PyInstaller datas）共用同一目录——一处修改两端生效
+        getByName("main").assets.srcDir(rootProject.file("../shared/shell"))
+    }
     buildFeatures {
         buildConfig = true
     }

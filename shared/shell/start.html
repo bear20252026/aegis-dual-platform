@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Aegis 新标签页</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
@@ -155,6 +156,29 @@
   #imClose { background:#eef1f6; color:#22303f; }
   #imNext { background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff; }
   #imNext:disabled { opacity:.5; cursor:default; }
+
+  /* —— 移动端响应式（≤640px：手机竖屏与窄窗）—— */
+  @media (max-width: 640px) {
+    .center { padding-bottom:12vh; padding-left:16px; padding-right:16px; }
+    .logo { width:52px; height:52px; border-radius:14px; font-size:24px; margin-bottom:16px; }
+    h1 { font-size:22px; margin-bottom:20px; }
+    .search { width:100%; height:50px; border-radius:25px; padding:0 6px 0 18px; }
+    .search input { font-size:15px; }
+    .search button { height:38px; padding:0 18px; font-size:13px; flex:0 0 auto; }
+    .quick-row { width:100%; }
+    .quick-btn { width:100%; justify-content:center; height:44px; font-size:14px; }
+    .bookmarks { margin-top:28px; gap:10px; width:100%; }
+    .bm { width:calc(50% - 5px); }
+    .quick-row { margin-top:16px; }
+    .wallpapers { right:12px; bottom:14px; padding:6px 10px; gap:8px; }
+    .wp { width:28px; height:28px; }
+    .footer { font-size:10px; bottom:6px; }
+    #importEntry { font-size:12px; }
+  }
+  /* 触摸目标保底（移动端可用性） */
+  @media (pointer: coarse) {
+    .wp, .quick-btn, .search button, .engine-pill { min-height:40px; }
+  }
 </style>
 </head>
 <body>
@@ -206,16 +230,90 @@
 
   <script>
     // JS 错误上报：页面任何异常 → Python 日志（后台静默）
+    // ================= 跨端宿主桥适配层（ADR-007 单源首页） =================
+    // Windows：pywebview.api（异步 Promise）；Android：AegisBridge
+    // （@JavascriptInterface，同步返回——由适配层统一包装成 thenable）。
+    // 能力面差异：Android 首页当前能力 = 错误上报/引擎/导航/壁纸/画板；
+    // 书签宫格、导入向导、会话恢复为 Windows 能力（Android 上自动隐藏）。
+    var Host = (function () {
+      var winApi = function () { return (window.pywebview && pywebview.api) || null; };
+      var andApi = function () { return window.AegisBridge || null; };
+      var sync = function (v) {
+        return { then: function (f) { try { f(v); } catch (e) {} return sync(v); },
+                 catch: function () { return sync(v); } };
+      };
+      return {
+        kind: function () { return winApi() ? 'win' : (andApi() ? 'android' : null); },
+        has: function (feat) {
+          var k = this.kind();
+          if (!k) return false;
+          if (k === 'win') return true;
+          var androidFeats = { error: 1, engine: 1, navigate: 1, wallpaper: 1, geo: 1 };
+          return !!androidFeats[feat];
+        },
+        jsError: function () {
+          var w = winApi(); if (w) { w.js_error.apply(w, arguments); return; }
+          var a = andApi(); if (a) a.logError([].slice.call(arguments).join(' | '));
+        },
+        setEngine: function (key) {
+          var w = winApi(); if (w) { w.set_search_engine(key); return; }
+          var a = andApi(); if (a) a.setEngine(key);
+        },
+        getEngine: function (cb) {
+          var w = winApi(); if (w) { w.get_search_engine().then(cb); return; }
+          var a = andApi(); if (a) cb(a.getEngine());
+        },
+        navigate: function (url) {
+          var w = winApi(); if (w) { w.navigate(url); return; }
+          var a = andApi(); if (a) a.navigate(url);
+        },
+        setWallpaper: function (name) {
+          var w = winApi(); if (w) { w.set_wallpaper(name); return; }
+          var a = andApi(); if (a) a.setWallpaper(name);
+        },
+        getWallpaper: function (cb) {
+          var w = winApi(); if (w) { w.get_wallpaper().then(cb); return; }
+          var a = andApi(); if (a) cb(a.getWallpaper());
+        },
+        openGeo: function (onFail) {
+          var w = winApi();
+          if (w) { w.open_geogebra().then(function (ok) { if (!ok) onFail(); }); return; }
+          var a = andApi(); if (a && !a.openGeogebra()) onFail();
+        },
+        hasSaved: function (cb) {
+          var w = winApi(); if (w) { w.has_saved_session().then(cb); return; }
+          cb(0);  // Android：会话恢复为 Windows 能力
+        },
+        restoreSession: function () { var w = winApi(); if (w) w.restore_session(); },
+        bookmarks: function (cb) {
+          var w = winApi(); if (w) { w.get_bookmarks().then(cb); return; }
+          cb([]);  // Android：书签宫格暂无数据源
+        },
+        importScan: function (cb) {
+          var w = winApi(); if (w) { w.scan_import_sources().then(cb); return; }
+          cb([]);  // Android：导入向导为 Windows 能力
+        },
+        importBookmarks: function (src, cb) {
+          var w = winApi(); if (w) { w.import_bookmarks(src).then(cb); return; }
+          cb({ imported: 0, total: 0 });
+        },
+        importHistory: function (limit, src, cb) {
+          var w = winApi(); if (w) { w.import_history(limit, src).then(cb); return; }
+          cb({ imported: 0, total: 0 });
+        },
+      };
+    })();
+
     window.addEventListener('error', function (e) {
       try {
-        if (window.pywebview && pywebview.api) pywebview.api.js_error(
+        Host.jsError(
           e.message || 'unknown', e.filename || '', e.lineno, e.colno,
           (e.error && e.error.stack) || '');
       } catch (err) {}
     });
     window.addEventListener('unhandledrejection', function (e) {
       try {
-        if (window.pywebview && pywebview.api) pywebview.api.js_error(
+        Host.jsError(
           'Promise rejection: ' + (e.reason || ''), '', 0, 0,
           (e.reason && e.reason.stack) || '');
       } catch (err) {}
@@ -240,14 +338,12 @@
       if (!ENGINES.length) return;
       engineIdx = (engineIdx + 1) % ENGINES.length;
       renderEngine();
-      if (window.pywebview && pywebview.api) {
-        try { pywebview.api.set_search_engine(ENGINES[engineIdx].key); } catch (e) {}
-      }
+      try { Host.setEngine(ENGINES[engineIdx].key); } catch (e) {}
     }
     // 读取当前搜索引擎（配置持久化）
-    if (window.pywebview && pywebview.api) {
+    {
       try {
-        pywebview.api.get_search_engine().then(function (data) {
+        Host.getEngine(function (data) {
           if (!data) return;
           ENGINES = data.engines || [];
           for (var i = 0; i < ENGINES.length; i++) {
@@ -260,10 +356,10 @@
 
     function go() {
       var v = document.getElementById('q').value.trim();
-      if (v && window.pywebview && pywebview.api) pywebview.api.navigate(v);
+      if (v && Host.has('navigate')) Host.navigate(v);
     }
     function openUrl(u) {
-      if (window.pywebview && pywebview.api) pywebview.api.navigate(u);
+      if (Host.has('navigate')) Host.navigate(u);
     }
     document.getElementById('q').addEventListener('keydown', function (e) {
       if (e.key === 'Enter') go();
@@ -286,9 +382,7 @@
       for (var j = 0; j < dots.length; j++) {
         dots[j].className = 'wp' + (WALLPAPERS[dots[j].dataset.i].name === name ? ' active' : '');
       }
-      if (window.pywebview && pywebview.api) {
-        try { pywebview.api.set_wallpaper(name); } catch (e) {}
-      }
+      try { Host.setWallpaper(name); } catch (e) {}
     }
 
     // 渲染壁纸切换圆点
@@ -306,9 +400,9 @@
     }
 
     // 读取当前壁纸（配置持久化）
-    if (window.pywebview && pywebview.api) {
+    {
       try {
-        pywebview.api.get_wallpaper().then(function (name) {
+        Host.getWallpaper(function (name) {
           if (name) setWallpaper(name);
         });
       } catch (e) {}
@@ -321,8 +415,8 @@
       if (!btn) return;
       btn.addEventListener('click', function () {
         try {
-          if (!(window.pywebview && pywebview.api)) return;
-          pywebview.api.open_geogebra().then(function (ok) {
+          if (!Host.has('geo')) return;
+          Host.openGeo(function () {
             if (!ok) {
               btn.classList.add('unavailable');
               btn.title = '当前安装包未包含画板资源';
@@ -334,9 +428,9 @@
 
     // 恢复上次会话入口（resume_session 自动恢复之外的手动入口；
     // 仅当已保存会话 >1 个标签时显示——has_saved_session 只返回计数）
-    if (window.pywebview && pywebview.api) {
+    {
       try {
-        pywebview.api.has_saved_session().then(function (n) {
+        Host.hasSaved(function (n) {
           n = parseInt(n, 10) || 0;
           if (n > 1) {
             var box = document.getElementById('restoreBox');
@@ -345,7 +439,7 @@
             btn.textContent = '恢复上次会话（' + n + ' 个标签）';
             box.style.display = 'block';
             btn.onclick = function () {
-              try { pywebview.api.restore_session(); } catch (e) {}
+              try { Host.restoreSession(); } catch (e) {}
             };
           }
         });
@@ -364,11 +458,13 @@
       if (!modal || !body || !nextBtn || !closeBtn || !entry) return;
 
       var sources = [];      // scan_import_sources() 结果
+    // Android 宿主无导入能力——隐藏入口（Host.has 能力面声明）
+    if (!Host.has('import')) entry.style.display = 'none';
       var step = 'pick';     // pick | running | done
       var pickedChecks = []; // 来源复选框（.browser）
       var bmCheck = null, hiCheck = null, limitSel = null;
 
-      function api() { return (window.pywebview && pywebview.api) || null; }
+      function api() { return Host; }
       function label(b) { return b === 'chrome' ? 'Chrome' : 'Edge'; }
 
       function close() {
@@ -480,11 +576,11 @@
         var chain = Promise.resolve();
         picked.forEach(function (src) {
           if (doBm) {
-            chain = chain.then(function () { return a.import_bookmarks(src); })
+            chain = chain.then(function () { return a.importBookmarks(src); })
               .then(function (r) { collect('书签', src, r); });
           }
           if (doHi) {
-            chain = chain.then(function () { return a.import_history(lim, src); })
+            chain = chain.then(function () { return a.importHistory(lim, src, function () {}); })
               .then(function (r) { collect('历史', src, r); });
           }
         });
@@ -522,7 +618,7 @@
         nextBtn.style.display = '';
         body.appendChild(hint('正在扫描本机 Chrome / Edge 数据…'));
         try {
-          a.scan_import_sources().then(function (list) {
+          Host.importScan(function (list) {
             sources = Array.isArray(list) ? list : [];
             nextBtn.disabled = false;
             renderPick();
@@ -554,8 +650,8 @@
       var box = document.getElementById('bm');
       if (!box) return;
       try {
-        if (!(window.pywebview && pywebview.api)) return;
-        pywebview.api.get_bookmarks().then(function (items) {
+        if (!Host.has('bookmarks')) return;
+        Host.bookmarks(function (items) {
           if (!items || !items.length) {
             box.textContent = '';
             var empty = document.createElement('div');

@@ -19,7 +19,8 @@ PROJECT = SPECPATH
 _geogebra_dir = os.path.join(PROJECT, "geogebra")
 
 _datas = [
-    (os.path.join(PROJECT, "shell", "start.html"), "shell"),
+    # 首页资源单一事实源（ADR-007）：shared/shell（start.html + wallpapers）
+    (os.path.join(PROJECT, "..", "..", "shared", "shell"), "shell"),
     (os.path.join(PROJECT, "shell", "wallpapers"), "shell/wallpapers"),
     (os.path.join(PROJECT, "assets"), "assets"),
     *collect_data_files("webview"),
