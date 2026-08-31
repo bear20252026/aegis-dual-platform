@@ -147,7 +147,14 @@ jobs:
       - name: Collect APK + generate SHA-256
         shell: bash
         run: |
-          cp app/build/outputs/apk/release/*.apk ../dist/
+          APK_FILE=$(ls app/build/outputs/apk/release/*.apk)
+          VERSION=$(sed -n 's/^VERSION_NAME=//p' ../shared/version.properties)
+          APK_NAME="Aegis-${VERSION}-android-arm64.apk"
+          cp "$APK_FILE" "../dist/$APK_NAME"
+          # 方案 A（用户实测定案 2026-08-31，永久流程）：
+          # 分发一律用 zip——QQ 接收 .apk 强制加 .1 后缀致 MIUI 不识别为安装包，
+          # zip 无此问题。发布物 = APK + APK 同名 zip，两者都进 SHA256SUMS。
+          (cd ../dist && zip -9 "Aegis-${VERSION}-android-arm64.zip" "$APK_NAME")
           python ../release/build_metadata.py --platform android --output ../dist/build-metadata.json
           python ../release/write_checksum_json.py --root ../dist --output ../dist/SHA256SUMS.json
       - name: Attest build provenance (SLSA)
