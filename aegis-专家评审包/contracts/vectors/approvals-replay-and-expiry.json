@@ -1,8 +1,0 @@
-{
-  "description": "蓝图阶段 B（contracts/vectors）：审批重放与过期测试向量（approval 绑定 nonce/过期——重放/过期拒绝）",
-  "vectors": [
-    { "nonce": "n1", "expires_at": "2026-08-16T00:00:00Z", "replayed": false, "expected": "valid" },
-    { "nonce": "n1", "expires_at": "2026-08-16T00:00:00Z", "replayed": true, "expected": "deny_replay" },
-    { "nonce": "n2", "expires_at": "2020-01-01T00:00:00Z", "replayed": false, "expected": "deny_expired" }
-  ]
-}

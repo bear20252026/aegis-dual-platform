@@ -1,8 +1,0 @@
-{
-  "description": "蓝图阶段 B（contracts/vectors）：合法 URL/Origin 测试向量（与 OriginPolicy/safe_url 对齐——http/https 放行）",
-  "vectors": [
-    { "url": "https://a.gov.cn/page", "expected": "allow" },
-    { "url": "https://sub.a.gov.cn/path?q=1", "expected": "allow" },
-    { "url": "http://example.org/", "expected": "allow" }
-  ]
-}

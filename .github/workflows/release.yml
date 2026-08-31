@@ -34,14 +34,11 @@ jobs:
             echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
           fi
           echo "✅ 全部 action 固定完整 SHA"
-      - name: 评审包与规范源码同步（fail-closed）
-        run: |
-          if ! python3 scripts/build_review_package.py --check; then
-            echo "❌ aegis-专家评审包 与规范源码不同步"
-            echo "   → 运行 python scripts/build_review_package.py --build 后一并提交"
-            exit 1
-          fi
-          echo "✅ aegis-专家评审包 与规范源码同步"
+      - name: 评审包生成器自检（dry-run 到临时目录）
+        # A-4（架构审计 2026-08-31）：评审包不再作为快照入库——改为
+        # 发布时从规范源码自动生成（见 publish 的 review-package 步骤），
+        # 杜绝快照随主仓库推进而漂移。此处仅验证生成器可运行。
+        run: python3 scripts/build_review_package.py --build --out /tmp/review-pkg-dryrun
 
   # ──────────────────────────────────────────────
   # Stage 2: 三平台并行构建（可重用 workflow 调用）
@@ -169,6 +166,9 @@ jobs:
         with:
           name: release-core
           path: dist/core
+
+      - name: 从规范源码生成评审包（A-4：发布时生成，不再入库）
+        run: python scripts/build_review_package.py --build --out dist/review-package
 
       - name: Create GitHub Release (all platforms)
         uses: softprops/action-gh-release@d1e66170d32c9ec7bbcb7fae044d3d686ce304d3

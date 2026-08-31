@@ -67,7 +67,13 @@ KEEP_FILES = {"README-专家评审.txt"}
 
 # 规范源码中明确"归档、不参与运行面"的子树（canonical 目录 -> 其下要跳过的顶层目录名）。
 # 例如 legacy/windows-pywebview/ 下的 legacy/（旧 Qt 栈 61 个 Python）被 CI/README 归档。
-EXCLUDE_SUBTREES: set[tuple[str, str]] = {("legacy/windows-pywebview", "legacy")}
+# A-4（架构审计 2026-08-31）：geogebra 第三方应用 bundle（50MB+/数千 js/html/css）
+# 是构建期注入的外部资源、非本项目源码——评审包剔除（改由 Release 资产拉取，见
+# .github/actions/prepare-geogebra）。
+EXCLUDE_SUBTREES: set[tuple[str, str]] = {
+    ("legacy/windows-pywebview", "legacy"),
+    ("legacy/windows-pywebview", "geogebra"),
+}
 
 # 目录名命中即跳过（构建产物 / 缓存 / IDE 状态）
 EXCLUDE_DIRS = {

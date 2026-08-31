@@ -20,12 +20,13 @@ contracts/  唯一安全协议事实来源（schemas/vectors/codegen——六类
             bridge_guard.template.js 为三端守卫 JS 单一事实源——ADR-007）
 core/       Rust 纯策略核心（canonicalization + Ed25519 阈值验证——无 I/O）
 windows/    C#/.NET 10 + 原生 WebView2（App/Chrome/WebView/Broker——能力代理）
-android/    Kotlin/Compose（broker/webview-adapter/chrome-ui——状态机）
+android/    Kotlin/Compose（app/broker/webview-adapter——分层单源）
 agent/      Agent/MCP 逐项复开（action-catalog——红队 fixtures——测试优先）
 release/    发布链独立验证产品（逐工件闭合——fail-closed）
 docs/       ADR/threat-model/runbooks/product（蓝图目标树）
-.github/    CI 分层门禁（contracts/windows/android/core-rust/agent-redteam/
-            supply-chain/release——8 个；ADR-007 起门禁全量常跑——无 paths 过滤）
+.github/    CI 分层门禁（12 个 workflow——contracts/windows/android/core-rust/
+            agent-redteam/supply-chain/release 编排 + release-{windows,android,core}
+            平台链 + compat/native-policy-artifacts；ADR-007 起门禁全量常跑）
 ```
 
 **三个信任域**（ADR-002/003）：远程网页域（无 native bridge）/本地 chrome UI 域
