@@ -39,9 +39,9 @@ def generate(schema: dict, name: str) -> str:
         f"data class {name}(",
     ]
     properties = list(props.items())
-    for index, (pname, p) in enumerate(properties):
-        suffix = "," if index < len(properties) - 1 else ""
-        lines.append(f"    val {pname}: {kt_type(p)}{suffix}")
+    for pname, p in properties:
+        # 尾逗恒定输出（ktlint trailing-comma-on-declaration-site——A-2 门禁扩面）
+        lines.append(f"    val {pname}: {kt_type(p)},")
     lines.append(")")
     return "\n".join(lines)
 

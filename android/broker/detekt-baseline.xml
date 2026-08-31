@@ -1,0 +1,45 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ComplexCondition:AndroidBroker.kt$AndroidBroker$!isValid(action, currentGeneration) || action == null || action.sessionId != sessionId || action.tabId != tabId</ID>
+    <ID>ComplexCondition:AndroidBroker.kt$AndroidBroker$action.sessionId != sessionId || action.tabId != tabId || action.scope != scope || action.method != "GET" || action.origin != canonicalOrigin(uri) || action.canonicalParameters != canonicalPathAndQuery(uri)</ID>
+    <ID>CyclomaticComplexMethod:AndroidBroker.kt$AndroidBroker$fun consumeNavigation( action: AuthorizedAction?, sessionId: String, tabId: String, currentGeneration: Long, rawUrl: String, scope: String, ): Boolean</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_abi_version(): Int</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_advance_document_generation( broker: Pointer, sessionId: String, tabId: String, nextGeneration: Long, ): Byte</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_approve_navigation_confirmation_json( broker: Pointer, nonce: String, rawUrl: String, scope: String, ): Pointer?</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_consume_navigation_json( broker: Pointer, actionJson: String, rawUrl: String, scope: String, ): Pointer?</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_create_session( broker: Pointer, sessionId: String, tabId: String, generation: Long, ttlSeconds: Long, ): Byte</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_destroy_session( broker: Pointer, sessionId: String, ): Byte</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_evaluate_navigation_json( broker: Pointer, sessionId: String, tabId: String, generation: Long, rawUrl: String, scope: String, ): Pointer?</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_free(broker: Pointer)</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_new(policyVersion: String): Pointer?</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_reject_navigation_confirmation( broker: Pointer, nonce: String, ): Byte</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_broker_request_navigation_confirmation_json( broker: Pointer, sessionId: String, tabId: String, generation: Long, rawUrl: String, scope: String, ): Pointer?</ID>
+    <ID>FunctionNaming:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$fun aegis_policy_core_string_free(response: Pointer)</ID>
+    <ID>FunctionNaming:NativePolicyCoreGate.kt$NativePolicyCoreAbi$fun aegis_policy_core_abi_version(): Int</ID>
+    <ID>LongParameterList:AndroidBroker.kt$AndroidBroker$( action: AuthorizedAction?, sessionId: String, tabId: String, currentGeneration: Long, rawUrl: String, scope: String, )</ID>
+    <ID>LongParameterList:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.NativePolicyCoreAbi$( broker: Pointer, sessionId: String, tabId: String, generation: Long, rawUrl: String, scope: String, )</ID>
+    <ID>MagicNumber:AndroidBroker.kt$AndroidBroker$120</ID>
+    <ID>MagicNumber:AndroidBroker.kt$AndroidBroker$443</ID>
+    <ID>MagicNumber:AndroidBroker.kt$AndroidBroker$80</ID>
+    <ID>MagicNumber:OriginPolicy.kt$OriginPolicy$0x20</ID>
+    <ID>MagicNumber:OriginPolicy.kt$OriginPolicy$0x7f</ID>
+    <ID>MaxLineLength:AndroidBroker.kt$AndroidBroker$explanation = "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion"</ID>
+    <ID>MaxLineLength:NativePolicyCoreBridge.kt$NativePolicyCoreBridge$)</ID>
+    <ID>MaxLineLength:NativePolicyCoreBridge.kt$NativePolicyCoreBridge$fun destroySession(sessionId: String): Boolean</ID>
+    <ID>ReturnCount:AndroidBroker.kt$AndroidBroker$fun approveNavigationConfirmation( request: ApprovalRequest, rawUrl: String, scope: String, ): Decision</ID>
+    <ID>ReturnCount:AndroidBroker.kt$AndroidBroker$fun consumeNavigation( action: AuthorizedAction?, sessionId: String, tabId: String, currentGeneration: Long, rawUrl: String, scope: String, ): Boolean</ID>
+    <ID>ReturnCount:AndroidBroker.kt$AndroidBroker$fun evaluateNavigation( sessionId: String, tabId: String, generation: Long, rawUrl: String, scope: String, ): Decision</ID>
+    <ID>ReturnCount:AndroidBroker.kt$AndroidBroker$fun requestNavigationConfirmation( sessionId: String, tabId: String, generation: Long, rawUrl: String, scope: String, ): Decision</ID>
+    <ID>ReturnCount:NativePolicyCoreGate.kt$DefaultNativePolicyCoreGate$override fun probe(): NativePolicyCoreGateResult</ID>
+    <ID>ReturnCount:OriginPolicy.kt$OriginPolicy$fun tryParseExternal(raw: String?): java.net.URI?</ID>
+    <ID>SwallowedException:OriginPolicy.kt$OriginPolicy$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.Companion$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:OriginPolicy.kt$OriginPolicy$e: Exception</ID>
+    <ID>TooManyFunctions:AndroidBroker.kt$AndroidBroker</ID>
+    <ID>TooManyFunctions:NativePolicyCoreBridge.kt$NativePolicyCoreBridge : AutoCloseable</ID>
+    <ID>TooManyFunctions:NativePolicyCoreBridge.kt$NativePolicyCoreBridge$NativePolicyCoreAbi : Library</ID>
+    <ID>UnusedPrivateProperty:AndroidBroker.kt$AndroidBroker$private val mode: BrokerMode = BrokerMode.FirstMatch</ID>
+  </CurrentIssues>
+</SmellBaseline>

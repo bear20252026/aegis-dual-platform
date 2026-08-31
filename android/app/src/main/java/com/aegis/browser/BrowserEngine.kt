@@ -11,6 +11,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.aegis.broker.OriginPolicy
 
 class BrowserEngine(
     private val webView: WebView,
@@ -30,13 +31,15 @@ class BrowserEngine(
          * 与决策层可得出不同判定。现收敛为 OriginPolicy.tryParseExternal 的
          * 薄封装：补 https 前缀 + host 小写化（对齐 Rust canonicalize_external）。
          */
-        fun normalizeExternal(input: String): String? {
-            val candidate = input.trim()
-            if (candidate.isEmpty()) return null
-            val withScheme = if (candidate.contains("://")) candidate else "https://$candidate"
-            val uri =
-                com.aegis.broker.OriginPolicy
-                    .tryParseExternal(withScheme) ?: return null
+        fun normalizeExternal(input: String): String? =
+            input
+                .trim()
+                .takeIf { it.isNotEmpty() }
+                ?.let { candidate -> if (candidate.contains("://")) candidate else "https://$candidate" }
+                ?.let(OriginPolicy::tryParseExternal)
+                ?.let(::canonicalize)
+
+        private fun canonicalize(uri: java.net.URI): String? {
             val host = uri.host?.lowercase() ?: return null
             val port =
                 uri.port

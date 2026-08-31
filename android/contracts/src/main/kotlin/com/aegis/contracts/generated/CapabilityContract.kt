@@ -5,5 +5,5 @@ data class CapabilityContract(
     val scope: String,
     val actions: List<String>,
     val resources: List<String>,
-    val requires_confirmation: Boolean
+    val requires_confirmation: Boolean,
 )

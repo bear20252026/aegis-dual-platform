@@ -11,13 +11,14 @@ class AndroidBrokerTest {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("session-1", "tab-1"))
 
-        val decision = broker.evaluateNavigation(
-            sessionId = "session-1",
-            tabId = "tab-1",
-            generation = 0,
-            rawUrl = "https://example.com/path?query=1",
-            scope = "navigation",
-        )
+        val decision =
+            broker.evaluateNavigation(
+                sessionId = "session-1",
+                tabId = "tab-1",
+                generation = 0,
+                rawUrl = "https://example.com/path?query=1",
+                scope = "navigation",
+            )
         assertTrue(decision is Decision.Allow)
         val action = (decision as Decision.Allow).action
 
@@ -82,20 +83,23 @@ class AndroidBrokerTest {
 
     @Test
     fun requiredNativePolicyCoreFailureClosesNavigationAndConsumption() {
-        val broker = AndroidBroker(
-            nativePolicyCoreGate = NativePolicyCoreGate {
-                NativePolicyCoreGateResult.block("native_policy_core_unavailable")
-            },
-        )
+        val broker =
+            AndroidBroker(
+                nativePolicyCoreGate =
+                    NativePolicyCoreGate {
+                        NativePolicyCoreGateResult.block("native_policy_core_unavailable")
+                    },
+            )
         assertTrue(broker.registerSession("session-1", "tab-1"))
 
-        val denied = broker.evaluateNavigation(
-            "session-1",
-            "tab-1",
-            0,
-            "https://example.com",
-            "navigation",
-        )
+        val denied =
+            broker.evaluateNavigation(
+                "session-1",
+                "tab-1",
+                0,
+                "https://example.com",
+                "navigation",
+            )
 
         assertTrue(denied is Decision.Deny)
         assertTrue((denied as Decision.Deny).reason.code == "native_policy_core_unavailable")
@@ -125,14 +129,15 @@ class AndroidBrokerTest {
 
     @Test
     fun nativeDecisionJsonMapsAuthorizationFieldsAndDenyReason() {
-        val allow = NativePolicyCoreBridge.parseDecisionJson(
-            """{
+        val allow =
+            NativePolicyCoreBridge.parseDecisionJson(
+                """{
                 "abi_version":3,"decision":"allow","action":{
                 "session_id":"native-session","tab_id":"native-tab","document_generation":2,
                 "origin":"https://example.com","method":"GET","canonical_parameters":"/path?x=1",
                 "scope":"navigation","expires_at":1700000000,"nonce":"nonce-1","policy_version":"1.0",
                 "explanation":"allowed"}}""",
-        ) as Decision.Allow
+            ) as Decision.Allow
 
         assertEquals("native-session", allow.action.sessionId)
         assertEquals(2, allow.action.documentGeneration)
@@ -140,17 +145,19 @@ class AndroidBrokerTest {
         assertEquals("/path?x=1", allow.action.canonicalParameters)
         assertEquals(1_700_000_000, allow.action.expiresAt.epochSeconds)
 
-        val deny = NativePolicyCoreBridge.parseDecisionJson(
-            """{"abi_version":3,"decision":"deny","reason":{
+        val deny =
+            NativePolicyCoreBridge.parseDecisionJson(
+                """{"abi_version":3,"decision":"deny","reason":{
                 "code":"nonce_replay","detail":"nonce already consumed","explanation":"denied"}}""",
-        ) as Decision.Deny
+            ) as Decision.Deny
         assertEquals("nonce_replay", deny.reason.code)
 
-        val confirmation = NativePolicyCoreBridge.parseDecisionJson(
-            """{"abi_version":3,"decision":"require_confirmation","request":{
+        val confirmation =
+            NativePolicyCoreBridge.parseDecisionJson(
+                """{"abi_version":3,"decision":"require_confirmation","request":{
                 "origin":"https://payments.example","method":"POST","path":"/transfers",
                 "scope":"payment:create","expires_at":1700000000,"nonce":"approval-nonce"}}""",
-        ) as Decision.RequireConfirmation
+            ) as Decision.RequireConfirmation
         assertEquals("https://payments.example", confirmation.request.origin)
         assertEquals("POST", confirmation.request.method)
         assertEquals("/transfers", confirmation.request.path)
@@ -164,13 +171,14 @@ class AndroidBrokerTest {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("confirmation-session", "confirmation-tab"))
 
-        val pending = broker.requestNavigationConfirmation(
-            "confirmation-session",
-            "confirmation-tab",
-            0,
-            "https://example.com/confirmation",
-            "navigation",
-        )
+        val pending =
+            broker.requestNavigationConfirmation(
+                "confirmation-session",
+                "confirmation-tab",
+                0,
+                "https://example.com/confirmation",
+                "navigation",
+            )
 
         assertTrue(pending is Decision.Deny)
         assertEquals("native_confirmation_core_required", (pending as Decision.Deny).reason.code)
@@ -178,12 +186,13 @@ class AndroidBrokerTest {
 
     @Test
     fun nativeDecisionJsonRejectsPreviousAbiVersion() {
-        val exception = runCatching {
-            NativePolicyCoreBridge.parseDecisionJson(
-                """{"abi_version":1,"decision":"deny","reason":{
+        val exception =
+            runCatching {
+                NativePolicyCoreBridge.parseDecisionJson(
+                    """{"abi_version":1,"decision":"deny","reason":{
                     "code":"legacy","detail":"legacy ABI","explanation":"denied"}}""",
-            )
-        }.exceptionOrNull()
+                )
+            }.exceptionOrNull()
 
         assertTrue(exception is IllegalStateException)
     }
@@ -209,13 +218,14 @@ class AndroidBrokerTest {
     fun destroyingSessionInvalidatesAnAlreadyIssuedAuthorization() {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("session-1", "tab-1"))
-        val decision = broker.evaluateNavigation(
-            "session-1",
-            "tab-1",
-            0,
-            "https://example.com",
-            "navigation",
-        )
+        val decision =
+            broker.evaluateNavigation(
+                "session-1",
+                "tab-1",
+                0,
+                "https://example.com",
+                "navigation",
+            )
         assertTrue(decision is Decision.Allow)
         broker.destroySession("session-1")
 
@@ -235,13 +245,14 @@ class AndroidBrokerTest {
     fun navigationAuthorizationCanonicalizesOriginAndPathQuery() {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("session-1", "tab-1"))
-        val decision = broker.evaluateNavigation(
-            "session-1",
-            "tab-1",
-            0,
-            "HTTPS://Example.Org:443/a?b=1#ignored",
-            "navigation",
-        )
+        val decision =
+            broker.evaluateNavigation(
+                "session-1",
+                "tab-1",
+                0,
+                "HTTPS://Example.Org:443/a?b=1#ignored",
+                "navigation",
+            )
         assertTrue(decision is Decision.Allow)
         val action = (decision as Decision.Allow).action
 

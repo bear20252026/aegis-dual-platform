@@ -9,5 +9,5 @@ package com.aegis.contracts
  */
 object Contracts {
     const val CONTRACT_ROOT = "../../../../contracts"
-    const val POLICY_VERSION = "1.0"  // 与 contracts/version.schema.json 语义一致
+    const val POLICY_VERSION = "1.0" // 与 contracts/version.schema.json 语义一致
 }

@@ -2,5 +2,5 @@
 package com.aegis.contracts.generated
 
 data class VersionContract(
-    val version: String
+    val version: String,
 )

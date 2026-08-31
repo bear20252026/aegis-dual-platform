@@ -18,6 +18,8 @@ jobs:
           python-version: '3.12'
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
+      - name: Verify cross-end data lists (wallpapers/engines——A-7)
+        run: python scripts/verify_cross_end_lists.py
       - name: Validate contracts JSON and expected decisions
         run: |
           python - <<'PYEOF'

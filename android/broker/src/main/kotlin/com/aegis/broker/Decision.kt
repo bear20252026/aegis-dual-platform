@@ -8,9 +8,17 @@ import kotlinx.datetime.Instant
  * Decision = Allow(AuthorizedAction) | RequireConfirmation | Deny（默认拒绝 fail-closed）。
  */
 sealed interface Decision {
-    data class Allow(val action: AuthorizedAction) : Decision
-    data class RequireConfirmation(val request: ApprovalRequest) : Decision
-    data class Deny(val reason: DenyReason) : Decision
+    data class Allow(
+        val action: AuthorizedAction,
+    ) : Decision
+
+    data class RequireConfirmation(
+        val request: ApprovalRequest,
+    ) : Decision
+
+    data class Deny(
+        val reason: DenyReason,
+    ) : Decision
 }
 
 /** 审批请求（高风险副作用——原生确认 UI——绑定参数与一次性 nonce——重放拒绝）。 */
@@ -24,4 +32,8 @@ data class ApprovalRequest(
 )
 
 /** 拒绝原因（类型化——fail-closed——审计可追溯）。 */
-data class DenyReason(val code: String, val detail: String, val explanation: String = "")
+data class DenyReason(
+    val code: String,
+    val detail: String,
+    val explanation: String = "",
+)

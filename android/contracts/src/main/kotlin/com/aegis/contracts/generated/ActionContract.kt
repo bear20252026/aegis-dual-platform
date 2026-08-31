@@ -11,5 +11,5 @@ data class ActionContract(
     val scope: String,
     val expires_at: String,
     val nonce: String,
-    val policy_version: String
+    val policy_version: String,
 )

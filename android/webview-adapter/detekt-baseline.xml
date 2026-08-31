@@ -1,0 +1,10 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongParameterList:AegisWebViewClient.kt$AegisWebViewClient$( private val broker: AndroidBroker, private val sessionId: String, private val tabId: String, private val onRendererGone: (WebView) -&gt; Unit, private val requireNavigationConfirmation: Boolean = false, private val onNavigationConfirmationRequested: (ApprovalRequest) -&gt; Unit = {}, private val onNavigationConfirmationResolved: () -&gt; Unit = {}, )</ID>
+    <ID>ReturnCount:AegisWebViewClient.kt$AegisWebViewClient$fun approvePendingNavigation(view: WebView): Boolean</ID>
+    <ID>ReturnCount:AegisWebViewClient.kt$AegisWebViewClient$private fun authorizeNavigation( view: WebView, rawUrl: String, loadWhenAllowed: Boolean, mayRequireConfirmation: Boolean, ): Boolean</ID>
+    <ID>TooManyFunctions:AegisWebViewClient.kt$AegisWebViewClient : WebViewClient</ID>
+  </CurrentIssues>
+</SmellBaseline>

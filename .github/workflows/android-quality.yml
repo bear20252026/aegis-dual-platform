@@ -42,13 +42,13 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: ktlint 检查（0 错误门禁）
-        run: ./gradlew.bat :app:ktlintCheck --no-daemon
+        run: ./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck --no-daemon
 
       - name: Verify shared product version declarations
         run: python ../scripts/verify_versions.py
 
       - name: detekt 检查（基线门禁：仅新问题失败）
-        run: ./gradlew.bat :app:detekt --no-daemon
+        run: ./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt --no-daemon
 
       - name: Broker 授权生命周期单元测试
         run: ./gradlew.bat :broker:testDebugUnitTest --no-daemon

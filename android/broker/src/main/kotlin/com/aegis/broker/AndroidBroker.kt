@@ -15,37 +15,62 @@ class AndroidBroker(
     private val mode: BrokerMode = BrokerMode.FirstMatch,
     private val nativePolicyCoreGate: NativePolicyCoreGate = DefaultNativePolicyCoreGate,
 ) {
-    private val consumedNonces = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val consumedNonces =
+        java.util.concurrent.ConcurrentHashMap
+            .newKeySet<String>()
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, SessionContext>()
     private val authorizationLock = Any()
-    private val nativePolicyCoreBridge = if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
-        NativePolicyCoreBridge.tryCreate(policyVersion)
-    } else {
-        null
-    }
+    private val nativePolicyCoreBridge =
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            NativePolicyCoreBridge.tryCreate(policyVersion)
+        } else {
+            null
+        }
 
     /** 注册由受控 WebView 创建的会话；未知会话上的所有副作用均应被拒绝。 */
-    fun registerSession(sessionId: String, tabId: String, generation: Long = 0): Boolean {
+    fun registerSession(
+        sessionId: String,
+        tabId: String,
+        generation: Long = 0,
+    ): Boolean {
         if (sessionId.isBlank() || tabId.isBlank() || generation < 0) return false
         return synchronized(authorizationLock) {
             if (sessions.containsKey(sessionId)) return@synchronized false
             if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE && nativePolicyCoreBridge?.createSession(
-                    sessionId, tabId, generation, 120,
-                ) != true) return@synchronized false
+                    sessionId,
+                    tabId,
+                    generation,
+                    120,
+                ) != true
+            ) {
+                return@synchronized false
+            }
             sessions[sessionId] = SessionContext(tabId, generation)
             true
         }
     }
 
     /** 文档代际推进后立即同步；仅同标签严格单步推进，拒绝跳跃、回退和已销毁会话。 */
-    fun updateDocumentGeneration(sessionId: String, tabId: String, generation: Long): Boolean {
+    fun updateDocumentGeneration(
+        sessionId: String,
+        tabId: String,
+        generation: Long,
+    ): Boolean {
         return synchronized(authorizationLock) {
             val session = sessions[sessionId] ?: return@synchronized false
             if (session.tabId != tabId || session.documentGeneration == Long.MAX_VALUE ||
-                generation != session.documentGeneration + 1) return@synchronized false
+                generation != session.documentGeneration + 1
+            ) {
+                return@synchronized false
+            }
             if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE && nativePolicyCoreBridge?.advanceDocumentGeneration(
-                    sessionId, tabId, generation,
-                ) != true) return@synchronized false
+                    sessionId,
+                    tabId,
+                    generation,
+                ) != true
+            ) {
+                return@synchronized false
+            }
             session.documentGeneration = generation
             true
         }
@@ -78,31 +103,42 @@ class AndroidBroker(
             )
         }
         if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
-            val bridge = nativePolicyCoreBridge ?: return deny(
-                "native_policy_core_bridge_unavailable",
-                "原生策略核心桥接不可用",
-            )
+            val bridge =
+                nativePolicyCoreBridge ?: return deny(
+                    "native_policy_core_bridge_unavailable",
+                    "原生策略核心桥接不可用",
+                )
             return bridge.evaluateNavigation(sessionId, tabId, generation, rawUrl, scope)
                 ?: deny("native_policy_core_protocol", "原生策略核心响应无效或不可读取")
         }
-        val session = sessions[sessionId]
-            ?: return deny("session_not_found", "会话不存在或已销毁")
+        val session =
+            sessions[sessionId]
+                ?: return deny("session_not_found", "会话不存在或已销毁")
         if (session.tabId != tabId) return deny("tab_mismatch", "标签与会话不匹配")
         if (session.documentGeneration != generation) {
             return deny("generation_mismatch", "文档代际与会话状态不匹配")
         }
-        val uri = OriginPolicy.tryParseExternal(rawUrl)
-            ?: return deny("url_policy", "拒绝 URL: $rawUrl")
+        val uri =
+            OriginPolicy.tryParseExternal(rawUrl)
+                ?: return deny("url_policy", "拒绝 URL: $rawUrl")
         val origin = canonicalOrigin(uri)
-        val action = AuthorizedAction(
-            sessionId = sessionId, tabId = tabId, documentGeneration = generation,
-            origin = origin, method = "GET", canonicalParameters = canonicalPathAndQuery(uri),
-            scope = scope, expiresAt = kotlinx.datetime.Clock.System.now()
-                .plus(kotlin.time.Duration.parse("120s")),
-            nonce = "$sessionId:${java.util.UUID.randomUUID().toString().replace("-", "")}",
-            policyVersion = policyVersion,
-            explanation = "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion",
-        )
+        val action =
+            AuthorizedAction(
+                sessionId = sessionId,
+                tabId = tabId,
+                documentGeneration = generation,
+                origin = origin,
+                method = "GET",
+                canonicalParameters = canonicalPathAndQuery(uri),
+                scope = scope,
+                expiresAt =
+                    kotlinx.datetime.Clock.System
+                        .now()
+                        .plus(kotlin.time.Duration.parse("120s")),
+                nonce = "$sessionId:${java.util.UUID.randomUUID().toString().replace("-", "")}",
+                policyVersion = policyVersion,
+                explanation = "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion",
+            )
         return Decision.Allow(action)
     }
 
@@ -127,16 +163,21 @@ class AndroidBroker(
         if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
             return deny("native_confirmation_core_required", "确认型导航必须由原生策略核心托管")
         }
-        val bridge = nativePolicyCoreBridge ?: return deny(
-            "native_policy_core_bridge_unavailable",
-            "原生策略核心桥接不可用",
-        )
+        val bridge =
+            nativePolicyCoreBridge ?: return deny(
+                "native_policy_core_bridge_unavailable",
+                "原生策略核心桥接不可用",
+            )
         return bridge.requestNavigationConfirmation(sessionId, tabId, generation, rawUrl, scope)
             ?: deny("native_policy_core_protocol", "原生策略核心确认请求无效或不可读取")
     }
 
     /** 仅按 Rust 核心登记的 nonce 显式批准，并由核心返回原始绑定授权。 */
-    fun approveNavigationConfirmation(request: ApprovalRequest, rawUrl: String, scope: String): Decision {
+    fun approveNavigationConfirmation(
+        request: ApprovalRequest,
+        rawUrl: String,
+        scope: String,
+    ): Decision {
         val nativeGate = nativePolicyCoreGate.probe()
         if (!nativeGate.allowsPlatformBroker) {
             return deny(
@@ -147,10 +188,11 @@ class AndroidBroker(
         if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
             return deny("native_confirmation_core_required", "确认型导航必须由原生策略核心托管")
         }
-        val bridge = nativePolicyCoreBridge ?: return deny(
-            "native_policy_core_bridge_unavailable",
-            "原生策略核心桥接不可用",
-        )
+        val bridge =
+            nativePolicyCoreBridge ?: return deny(
+                "native_policy_core_bridge_unavailable",
+                "原生策略核心桥接不可用",
+            )
         return bridge.approveNavigationConfirmation(request, rawUrl, scope)
             ?: deny("native_policy_core_protocol", "原生策略核心确认批准响应无效或不可读取")
     }
@@ -158,12 +200,18 @@ class AndroidBroker(
     /** 显式拒绝待审批导航；任何模式、门禁、桥接或 nonce 错误都返回 false。 */
     fun rejectNavigationConfirmation(request: ApprovalRequest): Boolean {
         if (!nativePolicyCoreGate.probe().allowsPlatformBroker ||
-            !BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return false
+            !BuildConfig.REQUIRE_NATIVE_POLICY_CORE
+        ) {
+            return false
+        }
         return nativePolicyCoreBridge?.rejectNavigationConfirmation(request) == true
     }
 
     /** 校验 AuthorizedAction 是否仍有效（会话/标签/代际/过期/策略版本——fail-closed）。 */
-    fun isValid(action: AuthorizedAction?, currentGeneration: Long): Boolean {
+    fun isValid(
+        action: AuthorizedAction?,
+        currentGeneration: Long,
+    ): Boolean {
         return synchronized(authorizationLock) {
             val presentAction = action ?: return@synchronized false
             val session = sessions[presentAction.sessionId] ?: return@synchronized false
@@ -171,7 +219,9 @@ class AndroidBroker(
                 presentAction.tabId == session.tabId &&
                 presentAction.documentGeneration == currentGeneration &&
                 presentAction.documentGeneration == session.documentGeneration &&
-                presentAction.expiresAt > kotlinx.datetime.Clock.System.now()
+                presentAction.expiresAt >
+                kotlinx.datetime.Clock.System
+                    .now()
         }
     }
 
@@ -189,7 +239,10 @@ class AndroidBroker(
             val bridge = nativePolicyCoreBridge ?: return false
             return synchronized(authorizationLock) {
                 if (!isValid(action, currentGeneration) || action == null ||
-                    action.sessionId != sessionId || action.tabId != tabId) return@synchronized false
+                    action.sessionId != sessionId || action.tabId != tabId
+                ) {
+                    return@synchronized false
+                }
                 bridge.consumeNavigation(action, rawUrl, scope) && consumedNonces.add(action.nonce)
             }
         }
@@ -198,14 +251,18 @@ class AndroidBroker(
             if (!isValid(action, currentGeneration) || action == null) return@synchronized false
             if (action.sessionId != sessionId || action.tabId != tabId || action.scope != scope ||
                 action.method != "GET" || action.origin != canonicalOrigin(uri) ||
-                action.canonicalParameters != canonicalPathAndQuery(uri)) {
+                action.canonicalParameters != canonicalPathAndQuery(uri)
+            ) {
                 return@synchronized false
             }
             consumedNonces.add(action.nonce)
         }
     }
 
-    private fun deny(code: String, detail: String): Decision.Deny =
+    private fun deny(
+        code: String,
+        detail: String,
+    ): Decision.Deny =
         Decision.Deny(
             DenyReason(
                 code,
@@ -237,6 +294,7 @@ class AndroidBroker(
 enum class BrokerMode {
     /** 顺序遍历规则，第一个匹配生效（默认）。 */
     FirstMatch,
+
     /** 收集所有匹配规则，deny > ask > allow 最严格优先（XACML/Cedar 语义）。 */
     DenyOverrides,
 }
