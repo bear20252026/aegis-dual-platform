@@ -369,8 +369,26 @@ class SecureNavigator internal constructor(
     private val webView: WebView,
     private val client: AegisWebViewClient,
 ) {
+    companion object {
+        /** 内置受信资产白名单（H-5：第一方资源，路径编译期固定）。 */
+        private val TRUSTED_ASSET_PATHS = setOf(
+            "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
+        )
+    }
     fun openTrustedHome() {
         webView.loadUrl(BrowserEngine.HOME_URL)
+    }
+
+    /**
+     * H-5 修复（审计 2026-08-31）：内置受信资产加载收敛到导航器单一路径。
+     * 常量白名单校验——仅放行编译期固定的第一方 assets 资源（与
+     * openTrustedHome 同信任级：file:// 不经 Broker，但路径不可被调用方
+     * 控制）；白名单外一律拒绝。桥接层不得直接持有 webView.loadUrl。
+     */
+    fun openTrustedAsset(assetPath: String): Boolean {
+        if (assetPath !in TRUSTED_ASSET_PATHS) return false
+        webView.loadUrl("file:///android_asset/$assetPath")
+        return true
     }
 
     fun navigateExternal(input: String): Boolean {

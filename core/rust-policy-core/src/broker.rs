@@ -13,6 +13,13 @@
 //! 安全管线（evaluate 方法）：
 //!   policy.evaluate(scope, origin) → capability.validate(scope, origin) → session/nonce 验证
 //!
+//! ⚠️ H-7 审计注记（2026-08-31）：上述三层管线仅在嵌入式宿主直接调用
+//! `ContextBroker::evaluate` 时生效。FFI 导航通路（ffi/broker.rs 的
+//! evaluate_navigation）执行的是 validate_action——会话/代际/nonce 验证；
+//! 策略层与能力层未接入 FFI 通路（直接接线会以默认 deny-all 引擎拒绝
+//! 全部导航，属产品级变更）。该口径由 ffi/broker.rs 的
+//! ffi_navigation_tests 回归测试锁定。
+//!
 //! 可拆卸：本模块不依赖 UI/网络/文件，纯内存数据结构。
 //! 可拼接：通过 `Decision` trait 与 broker/executor 层对接。
 

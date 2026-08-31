@@ -54,6 +54,11 @@ impl FfiBroker {
     }
 
     /// 评估导航意图（URL 解析 + 会话验证 → FfiDecision——fail-closed）。
+    ///
+    /// ⚠️ H-7 审计注记（2026-08-31）：本通路执行会话/代际/nonce 验证，
+    /// 不含 policy.evaluate / capability.validate（后者默认 deny-all，
+    /// 接线属产品级变更——见 broker.rs 模块文档 H-7 注记）。FFI 语义由
+    /// 本文件 ffi_navigation_tests 回归测试锁定。
     pub fn evaluate_navigation(
         &self,
         session_id: String,
@@ -479,4 +484,70 @@ fn generate_nonce() -> Result<String, FfiDenyReason> {
         explanation: format!("denied — operating-system entropy unavailable: {error}"),
     })?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+// ============================ H-7 审计回归测试 ============================ //
+// 审计 2026-08-31：FfiBroker 导航通路执行的是「会话/代际/nonce」验证，
+// 策略层（PolicyEngine）与能力层（CapabilityRegistry）仅在嵌入式宿主直接
+// 使用 ContextBroker::evaluate 时生效（见 broker.rs 模块文档）。以下测试
+// 锁定 FFI 通路的 fail-closed 语义，防止该口径被无声变更。
+
+#[cfg(test)]
+mod ffi_navigation_tests {
+    use super::*;
+
+    const POLICY_VERSION: &str = "test-policy-1";
+
+    #[test]
+    fn evaluate_navigation_denies_unknown_session() {
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        let decision = broker.evaluate_navigation(
+            "no-such-session".into(),
+            "tab-1".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        );
+        assert!(
+            matches!(decision, FfiDecision::Deny { .. }),
+            "未知会话必须拒绝（fail-closed）"
+        );
+    }
+
+    #[test]
+    fn evaluate_navigation_allows_valid_session() {
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "tab-1".into(), 1, 60));
+        let decision = broker.evaluate_navigation(
+            "s1".into(),
+            "tab-1".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        );
+        assert!(
+            matches!(
+                decision,
+                FfiDecision::Allow { .. } | FfiDecision::RequireConfirmation { .. }
+            ),
+            "有效会话 + 可解析 https URL 应放行或要求确认"
+        );
+    }
+
+    #[test]
+    fn evaluate_navigation_denies_unparseable_url() {
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s2".into(), "tab-1".into(), 1, 60));
+        let decision = broker.evaluate_navigation(
+            "s2".into(),
+            "tab-1".into(),
+            1,
+            "file:///etc/passwd".into(),
+            "navigation".into(),
+        );
+        assert!(
+            matches!(decision, FfiDecision::Deny { .. }),
+            "file:// 非 http(s) scheme 必须在 URL 解析层拒绝"
+        );
+    }
 }

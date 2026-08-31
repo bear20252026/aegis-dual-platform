@@ -12,6 +12,7 @@ Apple 设计语言版（参照 docs/DESIGN.md apple 设计规范）：
 """
 
 import json
+import re
 
 from .tabstrip_js import TABSTRIP_JS
 
@@ -31,6 +32,9 @@ TOOLBAR_JS = r"""
   try {
     if (document.getElementById('aegis-chrome')) return;
     var TABS_DATA = __TABS_JSON__;
+    // H-2 修复（审计 2026-08-31）：URL 以 JSON 字符串字面量整体传值——
+    // 旧实现剥引号拼单引号串，页面自控 URL 含单引号即可断串注入 JS
+    var AEGIS_URL_JSON = __AEGIS_URL_JSON__;
     // 标签条数据全局化：tabstrip_js.TABSTRIP_JS 由此读取并渲染
     // （B0-W-01：bridge_hooks 仅对受信本地页注入真实快照——远程页为空）
     window.__AEGIS_TABS__ = TABS_DATA;
@@ -112,7 +116,7 @@ TOOLBAR_JS = r"""
     var inp = document.createElement('input');
     inp.id = 'aegis-url';
     inp.spellcheck = false;
-    inp.value = '__AEGIS_URL__';
+    inp.value = AEGIS_URL_JSON;
     inp.style.cssText = 'flex:1;min-width:0;border:0;outline:none;background:transparent;' +
       'font-size:13px;color:' + COLORS.ink + ';font-family:' + FONT + ';';
     inp.addEventListener('keydown', function (e) {
@@ -392,11 +396,20 @@ def build_toolbar_js(
     font_family = 'SF Pro Text, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif'
 
     js = TOOLBAR_JS
-    js = js.replace("__TABS_JSON__", tabs_json)
-    js = js.replace("__AEGIS_URL__", json.dumps(current_url)[1:-1])
-    js = js.replace("__KEYBINDINGS_JSON__", kb_json)
-    js = js.replace("__SEARCH_SUGGEST__", "true" if search_suggestions else "false")
-    js = js.replace("__FONT_FAMILY__", json.dumps(font_family))
+    # H-2 + M-19 修复（审计 2026-08-31）：
+    # ① URL 改为完整 JSON 字符串字面量传值（__AEGIS_URL_JSON__），不再
+    #    剥引号拼单引号串——json.dumps 不转义单引号，页面自控 URL 可断串
+    # ② 单次正则替换全部占位符——旧链式 replace 中，先替换的值（如远程页
+    #    自控的标签标题）若含后续占位符字面量会被二次替换破坏
+    payload = {
+        "__TABS_JSON__": tabs_json,
+        "__AEGIS_URL_JSON__": json.dumps(current_url),
+        "__KEYBINDINGS_JSON__": kb_json,
+        "__SEARCH_SUGGEST__": "true" if search_suggestions else "false",
+        "__FONT_FAMILY__": json.dumps(font_family),
+    }
+    js = re.sub("|".join(re.escape(k) for k in payload),
+                lambda m: payload[m.group(0)], js)
 
     # 标签条（拖拽排序/固定菜单/中键关闭）——独立脚本段（单文件单职责）；
     # 数据经 window.__AEGIS_TABS__ 共享，无需额外占位符

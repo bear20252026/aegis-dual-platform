@@ -21,15 +21,31 @@ from app.shell_toolbar import TOOLBAR_JS, build_toolbar_js
 
 
 # 1) TOOLBAR_JS 含两个占位符
-check("TOOLBAR_JS 含 __AEGIS_URL__", "__AEGIS_URL__" in TOOLBAR_JS)
+check("TOOLBAR_JS 含 __AEGIS_URL_JSON__", "__AEGIS_URL_JSON__" in TOOLBAR_JS)
 check("TOOLBAR_JS 含 __TABS_JSON__", "__TABS_JSON__" in TOOLBAR_JS)
+# H-2 回归：旧占位符（剥引号单引号串注入）必须绝迹
+check("旧 __AEGIS_URL__ 占位符已移除", "__AEGIS_URL__" not in TOOLBAR_JS
+      or "__AEGIS_URL_JSON__" in TOOLBAR_JS)
 
 # 2) build 输出替换全部占位符
 url = "https://example.com/a?b=1&c=2"
 tabs = {"tabs": [{"title": "测试\"引号\"", "url": "https://x.cn"}], "current": 0}
 out = build_toolbar_js(url, tabs)
-check("占位符 __AEGIS_URL__ 已替换", "__AEGIS_URL__" not in out)
+check("占位符 __AEGIS_URL_JSON__ 已替换", "__AEGIS_URL_JSON__" not in out)
 check("占位符 __TABS_JSON__ 已替换", "__TABS_JSON__" not in out)
+
+# H-2 回归：含单引号的恶意 URL 不得破坏 JS 字符串（JSON 字面量整体传值）
+evil_url = "https://evil.com/?x=';alert(1);//"
+out_evil = build_toolbar_js(evil_url, tabs)
+check("单引号 URL 经 JSON 转义整体注入",
+      "var AEGIS_URL_JSON = " + json.dumps(evil_url) in out_evil)
+
+# M-19 回归：远程页可控的标签标题含占位符字面量，不得被二次替换
+poison_tabs = {"tabs": [{"title": "__AEGIS_URL_JSON__", "url": "https://x.cn"}],
+               "current": 0}
+out_poison = build_toolbar_js("https://a.cn", poison_tabs)
+check("标签标题含占位符字面量不被二次替换",
+      '"__AEGIS_URL_JSON__"' in out_poison)
 
 # 3) URL 原样保留
 check("URL 原样保留", "example.com/a?b=1&c=2" in out)

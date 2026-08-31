@@ -21,6 +21,7 @@ import threading
 from typing import Any
 
 from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
+from app.url_utils import is_navigation_safe as _is_navigation_safe
 
 # C2 阶段 A（ceLLMate 借鉴）：Agent 请求白名单域（agent-browser domain
 # allowlist 模式——Agent 会话活跃时仅允许这些域的请求；默认空=Agent 活跃
@@ -417,7 +418,7 @@ def main() -> int:
     window = _create_window(api, shell, restored_url)
     if window is None:
         return 1
-    _install_native_interception(window, shell)
+    _install_native_interception(window, shell, api)
     _install_probe_and_monitoring(window, api)
     _install_crash_listener(window)
     _apply_window_hardening(window, api, shell)
@@ -529,12 +530,13 @@ def _create_window(api, shell, restored_url):
     )
     if window is None:
         print("[fatal] create_window 返回 None，无法启动", file=sys.stderr)
-        return 1
+        return None  # M-1 修复（审计 2026-08-31）：原误 return 1，调用方
+                     # `if window is None` 永不触发，导致后续 AttributeError
     api.window = window      # 创建后再绑定 window 引用，供桥方法调用
     return window
 
 
-def _install_native_interception(window, shell):
+def _install_native_interception(window, shell, api):
     """原生层链接拦截 + 指纹防护前置注入（507-545 段迁移）。"""
     # === 原生层链接拦截（WebView2 NewWindowRequested）===
     # JS 注入只能拦截页面内 <a> 标签点击——但 target="_blank" 链接和
@@ -552,7 +554,18 @@ def _install_native_interception(window, shell):
                     uri = args.get_Uri()
                     if uri:
                         args.put_Handled(True)  # 阻止 WebView2 打开新窗口
-                        window.load_url(uri)     # 在当前窗口导航
+                        # H-1 修复（审计 2026-08-31）：新窗口请求与普通导航
+                        # 同权——必须过 H-C1 白名单（file:/javascript:/data:/
+                        # blob: 等一律拒绝）；且经 NavQueue 投递，绝不在
+                        # WebView2 事件线程直接 load_url（死锁 + 越权双因）
+                        if uri != "about:blank" and not _is_navigation_safe(uri):
+                            try:
+                                from crash_reporter import log_event
+                                log_event("[security] NewWindowRequested 拒绝非白名单 URI")
+                            except Exception:
+                                pass
+                            return
+                        api._load(uri)
                 except Exception:
                     pass  # 静默降级
             core.add_NewWindowRequested(_on_new_window_requested)

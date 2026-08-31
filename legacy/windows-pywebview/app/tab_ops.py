@@ -22,6 +22,7 @@ CHANGELOG「Unreleased/Planned：Windows 标签增强」落地：
 
 from __future__ import annotations
 
+import os
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -186,22 +187,26 @@ class TabOpsMixin:
             return False
         # P0-03 修复（专家审查）：Agent 会话活跃时——未配置 allowlist 或
         # 非白名单域——导航层真正拒绝（放函数开头——不被威胁检查提前返回跳过）
-        try:
-            import os
-            if getattr(self, "_agent_session", None) or 0.0:
-                allow_raw = os.environ.get("AEGIS_AGENT_ALLOWED_HOSTS", "").strip()
-                allow_hosts = {h.strip().lower() for h in allow_raw.split(",") if h.strip()}
-                if not allow_hosts:
-                    from crash_reporter import log_event
-                    log_event("[agent] 拒绝 Agent 导航（未配置 AEGIS_AGENT_ALLOWED_HOSTS——allowlist 为空）")
-                    return False
-                host = host_of(url)
-                if not any(host == c or host.endswith("." + c) for c in allow_hosts):
-                    from crash_reporter import log_event
-                    log_event(f"[agent] 拒绝 Agent 导航非白名单域: {url}")
-                    return False
-        except Exception:
-            pass
+        # H-3 修复（审计 2026-08-31）：
+        # ① 校验移出 try/except——原实现日志故障即跳过拒绝逻辑放行（fail-open）
+        # ② 补 60s 过期判断（对齐 main_webview.py 请求层同款语义）——原实现
+        #    只判真值，_agent_session 一旦激活永久生效
+        import time as _time
+        agent_session = getattr(self, "_agent_session", None) or 0.0
+        session_active = bool(agent_session) and (
+            _time.time() - agent_session) < 60
+        if session_active:
+            allow_raw = os.environ.get("AEGIS_AGENT_ALLOWED_HOSTS", "").strip()
+            allow_hosts = {h.strip().lower() for h in allow_raw.split(",") if h.strip()}
+            if not allow_hosts:
+                from crash_reporter import log_event
+                log_event("[agent] 拒绝 Agent 导航（未配置 AEGIS_AGENT_ALLOWED_HOSTS——allowlist 为空）")
+                return False
+            host = host_of(url)
+            if not any(host == c or host.endswith("." + c) for c in allow_hosts):
+                from crash_reporter import log_event
+                log_event(f"[agent] 拒绝 Agent 导航非白名单域: {url}")
+                return False
         # A-②：复用 threat_feed 缓存黑名单（精确/子域匹配）
         try:
             from .threat_feed import ThreatFeedUpdater, host_is_blocked

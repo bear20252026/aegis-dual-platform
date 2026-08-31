@@ -12,7 +12,7 @@ import android.webkit.WebView
  *   完整安全策略（normalizeExternal + Broker 授权），非旁路；
  * - setEngine/getEngine：搜索引擎选择（SharedPreferences 持久化）；
  * - setWallpaper/getWallpaper：首页壁纸选择（SharedPreferences 持久化）；
- * - openGeogebra()：离线几何画板（assets 内置资源，file:///android_asset 加载）；
+ * - openGeogebra()：离线几何画板（经导航器 openTrustedAsset 常量白名单加载）；
  * - logError(message)：首页 JS 异常上报（Log.e 留痕）。
  *
  * 安全口径（ADR-003 复审）：addJavascriptInterface 对所有页面可见——
@@ -78,12 +78,19 @@ class AegisHomeBridge(
         wv.post { SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url) }
     }
 
-    /** 打开离线几何画板（assets 内置资源——build.gradle sourceSets 打包）。 */
+    /**
+     * 打开离线几何画板（assets 内置资源——build.gradle sourceSets 打包）。
+     * H-5 修复（审计 2026-08-31）：不再直接 wv.loadUrl——经导航器
+     * openTrustedAsset 常量白名单加载，加载路径收敛到 SecureNavigator
+     * 单一路径，消除桥接层 file:// 直载旁路。
+     */
     @JavascriptInterface
     fun openGeogebra(): Boolean {
         val wv = webViewProvider() ?: return false
         wv.post {
-            wv.loadUrl("file:///android_asset/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html")
+            SecureWebViewFactory.navigatorFor(wv)?.openTrustedAsset(
+                "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
+            )
         }
         return true
     }
