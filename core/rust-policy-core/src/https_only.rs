@@ -71,7 +71,10 @@ impl HttpsOnlyState {
         }
 
         // 升级为 HTTPS
-        let upgraded = format!("https://{}", &url[url.find("://").map(|i| i + 3).unwrap_or(0)..]);
+        let upgraded = format!(
+            "https://{}",
+            &url[url.find("://").map(|i| i + 3).unwrap_or(0)..]
+        );
         let count = self.upgrade_counts.entry(tab_id.to_string()).or_insert(0);
         *count += 1;
         self.total_upgrades += 1;
@@ -151,4 +154,3 @@ mod tests {
         );
     }
 }
-

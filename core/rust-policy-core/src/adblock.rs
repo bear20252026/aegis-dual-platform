@@ -207,4 +207,3 @@ mod tests {
         assert!(mgr.should_block("https://tracker.app/x"));
     }
 }
-

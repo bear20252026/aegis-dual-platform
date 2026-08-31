@@ -2,7 +2,6 @@
 
 use super::*;
 
-
 #[no_mangle]
 pub extern "C" fn aegis_policy_core_broker_create_session(
     broker: *mut CAbiBroker,
@@ -214,4 +213,3 @@ pub extern "C" fn aegis_policy_core_broker_consume_navigation_json(
     }))
     .unwrap_or_else(|_| write_response(deny("native_panic", "native policy core panicked")))
 }
-
