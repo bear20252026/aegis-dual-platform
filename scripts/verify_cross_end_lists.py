@@ -12,7 +12,8 @@
    - android/.../AegisHomeBridge.kt（Android 白名单）
 2. 搜索引擎清单 2 处：
    - legacy/windows-pywebview/app/url_utils.py（Windows 引擎表）
-   - android/.../AegisHomeBridge.kt ENGINE_URLS
+   - android/.../SearchEngines.kt ENGINE_URLS（搜索审计 2026-09-01：
+     引擎表自 AegisHomeBridge 迁至 SearchEngines 单源，锚点同步）
 """
 from __future__ import annotations
 
@@ -73,12 +74,14 @@ def engines_from_url_utils() -> set[str]:
 
 
 def engines_from_kotlin() -> set[str]:
-    text = (ROOT / "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt").read_text(
+    # 搜索审计 2026-09-01：ENGINE_URLS 迁至 SearchEngines.kt 单源
+    # （AegisHomeBridge 改为引用该单源）——锚点同步更新
+    text = (ROOT / "android/app/src/main/java/com/aegis/browser/SearchEngines.kt").read_text(
         encoding="utf-8"
     )
-    block = re.search(r"ENGINE_URLS\s*=\s*mapOf\((.*?)\)\s*$", text, re.S | re.M)
+    block = re.search(r"ENGINE_URLS[^=]*=\s*mapOf\(\s*(.*?)\)", text, re.S)
     if not block:
-        fail("AegisHomeBridge.kt: 未找到 ENGINE_URLS 表")
+        fail("SearchEngines.kt: 未找到 ENGINE_URLS 表")
         return set()
     return set(re.findall(r'"([^"]+)"\s+to\s+"', block.group(1)))
 
@@ -102,7 +105,7 @@ def main() -> int:
 
     py_eng = engines_from_url_utils()
     kt_eng = engines_from_kotlin()
-    diff("搜索引擎", py_eng, kt_eng, "AegisHomeBridge.kt 相对 url_utils.py")
+    diff("搜索引擎", py_eng, kt_eng, "SearchEngines.kt 相对 url_utils.py")
 
     if failures:
         print("❌ 跨端清单不一致：")
