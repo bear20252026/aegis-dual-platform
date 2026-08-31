@@ -77,6 +77,8 @@ dependencies {
     // 该类型出现在模块 API 中，消费者必须能在编译期解析它。
     api("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
     implementation("net.java.dev.jna:jna:5.12.0@aar")
+    // A-2 接线：契约对齐守卫测试需要对照生成物 ActionContract 的字段面
+    testImplementation(project(":contracts"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20230227")
 }

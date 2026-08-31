@@ -11,31 +11,45 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import java.net.URI
 
 class BrowserEngine(
     private val webView: WebView,
 ) {
     companion object {
-        private val allowedSchemes = setOf("http", "https")
         const val HOME_URL = "file:///android_asset/start.html"
         private const val MAX_PROGRESS = 100
         private const val MAX_TITLE_LENGTH = 256
         private const val TEXT_ZOOM_DEFAULT = 100
 
-        /** 只规范化远程 URL；实际外部导航必须由 SecureNavigator 经 Broker 执行。 */
+        /**
+         * 只规范化远程 URL；实际外部导航必须由 SecureNavigator 经 Broker 执行。
+         *
+         * A-3 修复（架构审计 2026-08-31）：原自带的 isAllowed 是全项目最弱的
+         * URL 校验（不拒 userinfo/控制字符/超长，host 不小写化）——与决策层
+         * OriginPolicy（contracts url-origin-* 向量）语义漂移，同一 URL 展示层
+         * 与决策层可得出不同判定。现收敛为 OriginPolicy.tryParseExternal 的
+         * 薄封装：补 https 前缀 + host 小写化（对齐 Rust canonicalize_external）。
+         */
         fun normalizeExternal(input: String): String? {
             val candidate = input.trim()
             if (candidate.isEmpty()) return null
             val withScheme = if (candidate.contains("://")) candidate else "https://$candidate"
-            return if (isAllowed(withScheme)) withScheme else null
+            val uri =
+                com.aegis.broker.OriginPolicy
+                    .tryParseExternal(withScheme) ?: return null
+            val host = uri.host?.lowercase() ?: return null
+            val port =
+                uri.port
+                    .takeIf { it != -1 }
+                    ?.let { ":$it" }
+                    .orEmpty()
+            return buildString {
+                append(uri.scheme).append("://").append(host).append(port)
+                uri.rawPath?.let { append(it) }
+                uri.rawQuery?.let { append('?').append(it) }
+                uri.rawFragment?.let { append('#').append(it) }
+            }
         }
-
-        private fun isAllowed(url: String): Boolean =
-            runCatching {
-                val uri = URI(url)
-                uri.scheme?.lowercase() in allowedSchemes && !uri.host.isNullOrBlank()
-            }.getOrDefault(false)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
