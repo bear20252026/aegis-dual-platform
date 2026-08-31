@@ -9,7 +9,6 @@ import android.webkit.CookieManager
 import android.webkit.WebView
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
-import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
 import com.aegis.webviewadapter.AegisWebViewClient
 import java.util.concurrent.atomic.AtomicLong
@@ -25,7 +24,6 @@ import java.util.concurrent.atomic.AtomicLong
  * 每会话随机种子确定性——同一会话内指纹一致但跨会话不同。
  */
 object SecureWebViewFactory {
-    private val broker = AndroidBroker()
     private val sessionCounter = AtomicLong(0)
 
     // 导航器注册表（显式生命周期——H-4 修复）。
@@ -55,6 +53,9 @@ object SecureWebViewFactory {
         onNavigationConfirmationRequested: (WebView, ApprovalRequest) -> Unit = { _, _ -> },
         onNavigationConfirmationResolved: (WebView) -> Unit = {},
     ): WebView {
+        // A-6 修复（架构审计 2026-08-31）：Broker 由 Application 持有——
+        // 工厂不再静态单例持有（可测试、可隔离、生命周期显式）
+        val broker = (context.applicationContext as AegisApplication).broker
         val webView = WebView(context)
         BrowserEngine(webView).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
@@ -207,9 +208,6 @@ object SecureWebViewFactory {
             }
         }
     }
-
-    /** 获取 broker 实例（供外部校验/审计）。 */
-    fun broker(): AndroidBroker = broker
 
     /** 允许的 bridge 域名白名单（可动态扩展）。 */
     private val ALLOWED_BRIDGE_HOSTS =

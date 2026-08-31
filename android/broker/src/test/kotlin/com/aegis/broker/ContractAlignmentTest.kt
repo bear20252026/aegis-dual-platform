@@ -3,8 +3,6 @@ package com.aegis.broker
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.reflect.KClass
-import kotlin.reflect.full.memberProperties
 
 /**
  * A-2 对齐守卫（架构审计 2026-08-31）：手写模型 AuthorizedAction 与
@@ -18,42 +16,40 @@ import kotlin.reflect.full.memberProperties
 class ContractAlignmentTest {
     private val exemptions = setOf("explanation")
 
-    private fun KClass<*>.propertyNames() = memberProperties.map { it.name }.toSet()
+    /** Java 反射取字段名（broker 不引 kotlin-reflect——保持依赖最小）。 */
+    private fun fieldNames(c: Class<*>): Set<String> = c.declaredFields.map { it.name }.toSet()
 
     private fun String.toSnakeCase(): String =
         replace(Regex("([a-z0-9])([A-Z])")) { m ->
             m.groupValues[1] + "_" + m.groupValues[2].lowercase()
         }.lowercase()
 
+    private fun String.toCamelCase(): String =
+        split('_')
+            .mapIndexed { i, part ->
+                if (i == 0) part else part.replaceFirstChar { it.uppercase() }
+            }.joinToString("")
+
     @Test
     fun `authorized action mirrors action contract field-for-field`() {
-        val actionNames = AuthorizedAction::class.propertyNames()
-        val contractNames = com.aegis.contracts.generated.ActionContract::class.propertyNames()
-
-        val actionInSnake = actionNames - exemptions
+        val actionNames = fieldNames(AuthorizedAction::class.java) - exemptions
+        val contractNames = fieldNames(com.aegis.contracts.generated.ActionContract::class.java)
         assertEquals(
             "AuthorizedAction 与 ActionContract 字段集漂移——同步 contracts/action.schema.json 与生成器",
             contractNames,
-            actionInSnake.map { it.toSnakeCase() }.toSet(),
+            actionNames.map { it.toSnakeCase() }.toSet(),
         )
     }
 
     @Test
     fun `explanation is the only documented extra field`() {
         val extras =
-            AuthorizedAction::class.propertyNames() -
-                com.aegis.contracts.generated.ActionContract::class
-                    .propertyNames()
+            fieldNames(AuthorizedAction::class.java) -
+                fieldNames(com.aegis.contracts.generated.ActionContract::class.java)
                     .map { it.toCamelCase() }
                     .toSet()
         assertEquals(setOf("explanation"), extras)
     }
-
-    private fun String.toCamelCase(): String =
-        split('_')
-            .mapIndexed { i, part ->
-                if (i == 0) part else part.replaceFirstChar { it.uppercase() }
-            }.joinToString("")
 
     @Test
     fun `contract module is on the compile classpath of broker tests`() {
