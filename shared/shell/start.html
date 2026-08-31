@@ -342,7 +342,12 @@
         },
         getEngine: function (cb) {
           var w = winApi(); if (w) { w.get_search_engine().then(cb); return; }
-          var a = andApi(); if (a) cb(a.getEngine());
+          // P1-2 修复（搜索审计 2026-09-01）：Android 桥返回 JSON 字符串
+          // （与 Windows get_search_engine 同构）——旧实现直接回传 key 字符串，
+          // data.engines 为 undefined → ENGINES=[] → 引擎 pill 点击无响应
+          var a = andApi(); if (a) {
+            try { cb(JSON.parse(a.getEngine())); } catch (e) { cb(null); }
+          }
         },
         navigate: function (url) {
           var w = winApi(); if (w) { w.navigate(url); return; }

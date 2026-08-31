@@ -483,7 +483,11 @@ class SecureNavigator internal constructor(
     }
 
     fun navigateExternal(input: String): Boolean {
-        val normalized = BrowserEngine.normalizeExternal(input) ?: return false
+        // P0-2 修复（搜索审计 2026-09-01）：归一走 SearchEngines 单源并传
+        // 当前引擎 key——地址栏输入搜索词拼搜索引擎 URL（此前被当主机名
+        // 拼成 https://<搜索词> 导航到 DNS 错误页）
+        val engineKey = SearchEngines.currentEngine(webView.context)
+        val normalized = BrowserEngine.normalizeExternal(input, engineKey) ?: return false
         return client.navigate(webView, normalized)
     }
 

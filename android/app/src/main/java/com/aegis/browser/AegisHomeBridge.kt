@@ -26,14 +26,8 @@ class AegisHomeBridge(
     private val prefs = context.getSharedPreferences("aegis_home", Context.MODE_PRIVATE)
 
     companion object {
-        private val ENGINE_URLS =
-            mapOf(
-                "baidu" to "https://www.baidu.com/s?wd=",
-                "bing" to "https://www.bing.com/search?q=",
-                "google" to "https://www.google.com/search?q=",
-                "sogou" to "https://www.sogou.com/web?query=",
-            )
-        private const val DEFAULT_ENGINE = "baidu"
+        /** 引擎显示名（P1-2：与 Windows SEARCH_ENGINES 中文名对齐）。 */
+        private val ENGINE_NAMES = mapOf("baidu" to "百度", "bing" to "必应", "google" to "谷歌", "sogou" to "搜狗")
 
         /** 首页壁纸白名单（与 shared/shell/wallpapers 文件一一对应）。 */
         private val WALLPAPERS =
@@ -52,13 +46,37 @@ class AegisHomeBridge(
 
     @JavascriptInterface
     fun setEngine(key: String) {
-        if (ENGINE_URLS.containsKey(key)) {
+        if (SearchEngines.ENGINE_URLS.containsKey(key)) {
             prefs.edit().putString("engine", key).apply()
         }
     }
 
+    /**
+     * P1-2 修复（搜索审计 2026-09-01）：返回 JSON 对象字符串，与 Windows
+     * `get_search_engine()` 同构——`{"engine":"baidu","engines":[{"key","name"}]}`。
+     * 旧实现只返回引擎 key 字符串，start.html 期望对象结构 → `ENGINES=[]`
+     * → 引擎 pill 永远显示初始"百度"且点击无响应（cycleEngine 直接 return）。
+     */
     @JavascriptInterface
-    fun getEngine(): String = prefs.getString("engine", DEFAULT_ENGINE) ?: DEFAULT_ENGINE
+    fun getEngine(): String {
+        val current = prefs.getString("engine", SearchEngines.DEFAULT_ENGINE) ?: SearchEngines.DEFAULT_ENGINE
+        val engines =
+            org.json.JSONArray().apply {
+                SearchEngines.ENGINE_URLS.keys.forEach { key ->
+                    put(
+                        org.json.JSONObject().apply {
+                            put("key", key)
+                            put("name", ENGINE_NAMES[key] ?: key)
+                        },
+                    )
+                }
+            }
+        return org.json
+            .JSONObject()
+            .put("engine", current)
+            .put("engines", engines)
+            .toString()
+    }
 
     @JavascriptInterface
     fun setWallpaper(name: String) {
@@ -70,12 +88,15 @@ class AegisHomeBridge(
     @JavascriptInterface
     fun getWallpaper(): String = prefs.getString("wallpaper", "") ?: ""
 
-    /** 首页搜索/地址栏跳转：搜索词拼引擎 URL，网址走白名单校验后导航。 */
+    /** 首页搜索/地址栏跳转：归一走 SearchEngines 单源（搜索词/网址同语义）。 */
     @JavascriptInterface
     fun navigate(input: String) {
         val text = input?.trim().orEmpty()
         if (text.isEmpty()) return
-        val url = buildTargetUrl(text) ?: return
+        // P0-2/P1-1 修复（搜索审计 2026-09-01）：与地址栏共用 normalizeInput
+        // 单源——旧 buildTargetUrl 会把 `https://www.baidu.com` 拼成
+        // `https://https://...`（looksLikeUrl 只看含点号，不看已有 scheme）
+        val url = SearchEngines.normalizeInput(text, SearchEngines.currentEngine(context)) ?: return
         val wv = webViewProvider() ?: return
         // @JavascriptInterface 运行在 JS 后台线程——WebView API 必须
         // 主线程调用（WrongThreadViolation：loadUrl 被吞 → 导航静默失效）
@@ -110,18 +131,6 @@ class AegisHomeBridge(
             if (wv.canGoBack()) {
                 SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK)
             }
-        }
-    }
-
-    private fun buildTargetUrl(text: String): String? {
-        val looksLikeUrl =
-            !text.contains(" ") && text.contains(".") &&
-                !text.endsWith(".")
-        return if (looksLikeUrl) {
-            "https://$text"
-        } else {
-            val engine = ENGINE_URLS[getEngine()] ?: ENGINE_URLS[DEFAULT_ENGINE]!!
-            engine + android.net.Uri.encode(text)
         }
     }
 }

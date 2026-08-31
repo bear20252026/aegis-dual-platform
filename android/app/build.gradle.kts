@@ -151,6 +151,9 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.webkit:webkit:1.15.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    // JVM 单元测试（搜索归一 classifyInput/canonicalizeExternal——纯 Kotlin +
+    // OriginPolicy(java.net.URI) 均不依赖 Android 框架类）
+    testImplementation("junit:junit:4.13.2")
 }
 
 // detekt/Kotlin 编译目标显式 21（与 CI JDK 21 一致——detekt jvm-target 兼容——

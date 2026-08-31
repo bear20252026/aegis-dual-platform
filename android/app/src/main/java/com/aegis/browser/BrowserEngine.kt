@@ -11,7 +11,6 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import com.aegis.broker.OriginPolicy
 
 class BrowserEngine(
     private val webView: WebView,
@@ -30,29 +29,15 @@ class BrowserEngine(
          * OriginPolicy（contracts url-origin-* 向量）语义漂移，同一 URL 展示层
          * 与决策层可得出不同判定。现收敛为 OriginPolicy.tryParseExternal 的
          * 薄封装：补 https 前缀 + host 小写化（对齐 Rust canonicalize_external）。
+         *
+         * P0-2 修复（搜索审计 2026-09-01）：搜索词 vs 网址判定 + 引擎拼接
+         * 下沉到 [SearchEngines.normalizeInput] 单源（与 Windows
+         * normalize_url 跨端对齐）——本函数保留薄委托以维持既有调用点兼容。
          */
-        fun normalizeExternal(input: String): String? =
-            input
-                .trim()
-                .takeIf { it.isNotEmpty() }
-                ?.let { candidate -> if (candidate.contains("://")) candidate else "https://$candidate" }
-                ?.let(OriginPolicy::tryParseExternal)
-                ?.let(::canonicalize)
-
-        private fun canonicalize(uri: java.net.URI): String? {
-            val host = uri.host?.lowercase() ?: return null
-            val port =
-                uri.port
-                    .takeIf { it != -1 }
-                    ?.let { ":$it" }
-                    .orEmpty()
-            return buildString {
-                append(uri.scheme).append("://").append(host).append(port)
-                uri.rawPath?.let { append(it) }
-                uri.rawQuery?.let { append('?').append(it) }
-                uri.rawFragment?.let { append('#').append(it) }
-            }
-        }
+        fun normalizeExternal(
+            input: String,
+            engineKey: String = SearchEngines.DEFAULT_ENGINE,
+        ): String? = SearchEngines.normalizeInput(input, engineKey)
     }
 
     @SuppressLint("SetJavaScriptEnabled")
