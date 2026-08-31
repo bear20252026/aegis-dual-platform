@@ -50,8 +50,8 @@ jobs:
       - name: detekt 检查（基线门禁：仅新问题失败）
         run: ./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt --no-daemon
 
-      - name: Broker 授权生命周期单元测试
-        run: ./gradlew.bat :broker:testDebugUnitTest --no-daemon
+      - name: 单元测试（broker 授权生命周期 + app 搜索归一）
+        run: ./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest --no-daemon
 
       - name: 上传 detekt 报告（排障用）
         if: always()
