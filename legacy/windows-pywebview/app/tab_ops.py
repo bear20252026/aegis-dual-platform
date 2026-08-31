@@ -182,8 +182,14 @@ class TabOpsMixin:
 
         返回 True 表示可导航；任一检查失败返回 False（拒绝导航）。
         黑名单为空（未配置订阅源）时安全浏览检查放行，不影响正常功能。
+
+        P0-1 补丁（搜索审计 2026-09-01）：受信本地壳页 START_URL 显式
+        白名单（与 about:blank 同待遇）——地址栏空输入/首页按钮会导航到
+        START_URL（file:// 壳页），此前被 safe_url 的 file: 拒绝拦截，
+        表现为"空输入无法回首页"。START_URL 由本模块 url_utils 单源
+        生成（shared/shell 资源），非用户可控路径，放行无风险。
         """
-        if url != "about:blank" and not _is_navigation_safe(url):
+        if url != "about:blank" and url != START_URL and not _is_navigation_safe(url):
             return False
         # P0-03 修复（专家审查）：Agent 会话活跃时——未配置 allowlist 或
         # 非白名单域——导航层真正拒绝（放函数开头——不被威胁检查提前返回跳过）

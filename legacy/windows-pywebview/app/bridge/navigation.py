@@ -22,21 +22,40 @@ class NavigationMixin:
     _is_navigation_safe_url: Callable[[str], bool]
     # ---- 导航 ----
     def navigate(self, text: str) -> None:
-        # P1-1 过渡（专家审查）：桥写操作强制来源校验（远程页面拒绝——
-        # chrome UI 迁移前——远程内容不能控制浏览器导航）
-        if not self._check_trusted_source():
-            try:
-                from crash_reporter import log_event
-                log_event("[bridge] 拒绝远程页面 navigate（来源不受信）")
-            except Exception:
-                pass
-            return
+        """导航到用户输入——地址栏 / 首页搜索框 / 右键"搜索选中文本"共用入口。
+
+        P0-1 修复（搜索功能审计 2026-09-01）：移除入口的
+        `_check_trusted_source()` 门槛。地址栏是注入到**每一个页面**顶部的
+        浏览器 Chrome UI（`shell_toolbar.py` 的 `aegis-chrome`）——一旦离开
+        首页，`current_url()` 返回远程 host，来源校验即把用户主动发起的
+        地址栏导航 / 右键搜索 100% 静默拒绝（实测 7 场景仅 2 个可用，
+        浏览器基本功能不可用）。
+
+        安全取舍（威胁等价分析——不是放宽，是边界归位）：
+          远程页面调用 `navigate()` 所能获得的权限，等价于它自身的
+          `location.href` 赋值——浏览器里远程内容本就能导航自己；而
+          `navigate()` 不写任何持久化状态（无书签/偏好/会话写入），
+          因此"来源校验"对导航操作**没有增量安全收益**，只有功能代价。
+          真正有效的边界是**导航目标**，故安全判断全部由
+          `_is_navigation_safe_url()` 承担：协议白名单（http/https +
+          about:blank）、userinfo/控制字符/无 host/非法端口/超长拒绝、
+          威胁情报黑名单、Agent 域白名单。
+
+        `_check_trusted_source()` 仍保留并用于**写操作**（书签增删改、
+        搜索引擎偏好修改、会话恢复）——那里才是 M-2 的原始目标。
+        """
         text = _to_str(text, "") or ""
         url = normalize_url(text, self._engine)
         # H-C1/A-② 审计修复：外部导航入口双层校验（协议安全 + 威胁黑名单）。
         # 只放行 http/https 与显式 about:blank；file:/javascript:/data:/blob:
         # 等一律拒绝；命中 threat_feed 黑名单域名同样拒绝。
         if not self._is_navigation_safe_url(url):
+            # 可观测性：旧实现静默 return，用户侧表现为"地址栏点了没反应"
+            try:
+                from crash_reporter import log_event
+                log_event(f"[bridge] 拒绝 navigate（目标不安全）: {url[:200]}")
+            except Exception:
+                pass
             return
         try:
             if self.history is not None:
@@ -69,9 +88,14 @@ class NavigationMixin:
             return ""
 
     def _check_trusted_source(self) -> bool:
-        """M-2 修复（防御性安全审查）：敏感写操作来源校验——当前标签
+        """M-2 修复（防御性安全审查）：敏感**写操作**来源校验——当前标签
         URL 的 host 为空（本地壳页/新标签页）即受信；远程页面调用拒绝
-        （防书签投毒/搜索引擎篡改——专家建议受信集）。"""
+        （防书签投毒/搜索引擎篡改——专家建议受信集）。
+
+        适用范围：书签增删改、`set_engine` 偏好修改、会话恢复等**改变
+        持久化状态**的操作。P0-1（2026-09-01）起**不再用于 navigate**——
+        导航操作无持久化副作用，来源校验会误伤注入式地址栏 Chrome UI，
+        详见 `navigate()` docstring 的威胁等价分析。"""
         try:
             host = host_of(self.current_url() or "")
             return host == ""  # 本地壳页（file:///空白）受信；远程拒绝

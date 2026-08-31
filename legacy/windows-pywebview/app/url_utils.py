@@ -4,12 +4,20 @@
 本文件收敛其模块级纯函数与常量，不依赖 Api 类状态，可独立单测）。
 """
 
+import re
 import sys
 import urllib.parse
 from pathlib import Path
 
 # 应用根目录（legacy/windows-pywebview/）
 ROOT = Path(__file__).resolve().parent.parent
+
+# 伪 scheme 前缀识别（P0-1 补丁 2026-09-01）：`file:///...` / `javascript:`
+# 等输入既不是搜索词也不是网址，绝不能补 `https://` 拼成
+# `https://file:///...`（urlparse 会把 `file:` 解析成合法 host 名放行——
+# 虽然 WebView2 DNS 失败只显示错误页，但语义必须 fail-closed）。
+_SCHEME_PREFIX_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*):")
+_ALLOWED_SCHEMES_IN_INPUT = {"http", "https"}
 
 
 def _shell_dir() -> Path:
@@ -39,7 +47,18 @@ DEFAULT_ENGINE = "baidu"
 
 
 def normalize_url(text: str | None, engine: str = DEFAULT_ENGINE) -> str:
-    """把用户输入变成可导航 URL：无协议补 https://，非网址当搜索词。"""
+    """把用户输入变成可导航 URL：无协议补 https://，非网址当搜索词。
+
+    返回空串表示"拒绝导航"（不可识别的非导航 scheme）——调用方
+    （navigate → _is_navigation_safe_url）对空串一律拒绝。
+
+    P0-1 补丁（搜索审计 2026-09-01）：
+    ① 带 scheme 前缀但非 http/https/about 的输入（file:/javascript:/data:
+       等）直接拒绝，不再落入"含点号→当网址→拼 https://"的盲区
+       （`https://file:///...` 会因 urlparse 把 `file:` 当合法 host 放行）
+    ② D-1：完整 URL 内的空格编码为 %20（浏览器同款行为），不再原样
+       返回后被 safe_url 以空白字符为由拒绝
+    """
     text = (text or "").strip()
     if not text:
         return START_URL
@@ -48,8 +67,12 @@ def normalize_url(text: str | None, engine: str = DEFAULT_ENGINE) -> str:
     lowered = text.lower()
     # L-2 修复（防御性安全审查）：移除 file:// 放行（纵深一致——file://
     # 仅受信路径（START_URL 壳页）单独处理——防新调用点漏配成本地读取面）
+    scheme_m = _SCHEME_PREFIX_RE.match(text)
+    if scheme_m and scheme_m.group(1).lower() not in _ALLOWED_SCHEMES_IN_INPUT:
+        return ""  # file:/javascript:/data:/chrome: 等非导航 scheme → 拒绝
     if lowered.startswith(("http://", "https://")):
-        return text
+        # D-1：URL 路径/查询中的空格按浏览器惯例编码为 %20
+        return urllib.parse.quote(text, safe=":/?#[]@!$&'()*+,;=%")
     # 含空格或没有点号 → 视为搜索
     if " " in text or "." not in text:
         template = SEARCH_ENGINES.get(engine, SEARCH_ENGINES[DEFAULT_ENGINE])[1]
