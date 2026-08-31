@@ -26,19 +26,23 @@ class AegisHomeBridge(
     private val prefs = context.getSharedPreferences("aegis_home", Context.MODE_PRIVATE)
 
     companion object {
-        private val ENGINE_URLS = mapOf(
-            "baidu" to "https://www.baidu.com/s?wd=",
-            "bing" to "https://www.bing.com/search?q=",
-            "google" to "https://www.google.com/search?q=",
-            "sogou" to "https://www.sogou.com/web?query=",
-        )
+        private val ENGINE_URLS =
+            mapOf(
+                "baidu" to "https://www.baidu.com/s?wd=",
+                "bing" to "https://www.bing.com/search?q=",
+                "google" to "https://www.google.com/search?q=",
+                "sogou" to "https://www.sogou.com/web?query=",
+            )
         private const val DEFAULT_ENGINE = "baidu"
 
         /** 首页壁纸白名单（与 shared/shell/wallpapers 文件一一对应）。 */
-        private val WALLPAPERS = setOf(
-            "aurora-magenta.jpg", "aurora-lime.jpg",
-            "aurora-twilight.jpg", "aurora-violet.jpg",
-        )
+        private val WALLPAPERS =
+            setOf(
+                "aurora-magenta.jpg",
+                "aurora-lime.jpg",
+                "aurora-twilight.jpg",
+                "aurora-violet.jpg",
+            )
     }
 
     @JavascriptInterface
@@ -110,8 +114,9 @@ class AegisHomeBridge(
     }
 
     private fun buildTargetUrl(text: String): String? {
-        val looksLikeUrl = !text.contains(" ") && text.contains(".") &&
-            !text.endsWith(".")
+        val looksLikeUrl =
+            !text.contains(" ") && text.contains(".") &&
+                !text.endsWith(".")
         return if (looksLikeUrl) {
             "https://$text"
         } else {

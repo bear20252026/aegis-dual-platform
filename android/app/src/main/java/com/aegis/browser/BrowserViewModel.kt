@@ -68,11 +68,10 @@ class BrowserViewModel : ViewModel() {
 
     private lateinit var tabManager: TabManager
 
-    /** 初始化 TabManager 并创建首个标签。 */
     /** 当前标签的 WebView（系统回退键消费 WebView 历史栈——未初始化返回 null）。 */
-    fun currentWebViewOrNull(): WebView? =
-        if (::tabManager.isInitialized) tabManager.current()?.webView else null
+    fun currentWebViewOrNull(): WebView? = if (::tabManager.isInitialized) tabManager.current()?.webView else null
 
+    /** 初始化 TabManager 并创建首个标签。 */
     fun init(context: android.content.Context) {
         if (::tabManager.isInitialized) return
         tabManager = TabManager()

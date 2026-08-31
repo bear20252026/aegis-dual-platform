@@ -106,8 +106,10 @@ object SecureWebViewFactory {
         // 防护可降级、浏览器不可崩（配套 proguard keep androidx.webkit.R$id）。
         val allowedOrigins = setOf("*")
         val hardenedScripts =
-            listOf("fingerprint-shield" to fingerprintShieldScript(sessionSeed),
-                "bridge-guard" to BRIDGE_GUARD_JS)
+            listOf(
+                "fingerprint-shield" to fingerprintShieldScript(sessionSeed),
+                "bridge-guard" to BRIDGE_GUARD_JS,
+            )
         hardenedScripts.forEach { (name, script) ->
             try {
                 WebViewCompat.addDocumentStartJavaScript(webView, script, allowedOrigins)
@@ -371,10 +373,12 @@ class SecureNavigator internal constructor(
 ) {
     companion object {
         /** 内置受信资产白名单（H-5：第一方资源，路径编译期固定）。 */
-        private val TRUSTED_ASSET_PATHS = setOf(
-            "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
-        )
+        private val TRUSTED_ASSET_PATHS =
+            setOf(
+                "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
+            )
     }
+
     fun openTrustedHome() {
         webView.loadUrl(BrowserEngine.HOME_URL)
     }
