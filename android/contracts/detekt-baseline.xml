@@ -1,0 +1,17 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>ConstructorParameterNaming:ActionContract.kt$ActionContract$val canonical_parameters: String</ID>
+    <ID>ConstructorParameterNaming:ActionContract.kt$ActionContract$val document_generation: Long</ID>
+    <ID>ConstructorParameterNaming:ActionContract.kt$ActionContract$val expires_at: String</ID>
+    <ID>ConstructorParameterNaming:ActionContract.kt$ActionContract$val policy_version: String</ID>
+    <ID>ConstructorParameterNaming:ActionContract.kt$ActionContract$val session_id: String</ID>
+    <ID>ConstructorParameterNaming:ActionContract.kt$ActionContract$val tab_id: String</ID>
+    <ID>ConstructorParameterNaming:ApprovalContract.kt$ApprovalContract$val expires_at: String</ID>
+    <ID>ConstructorParameterNaming:AuditEventContract.kt$AuditEventContract$val event_id: String</ID>
+    <ID>ConstructorParameterNaming:AuditEventContract.kt$AuditEventContract$val tab_id: String</ID>
+    <ID>ConstructorParameterNaming:CapabilityContract.kt$CapabilityContract$val requires_confirmation: Boolean</ID>
+    <ID>ConstructorParameterNaming:UpdateManifestContract.kt$UpdateManifestContract$val expires_at: String</ID>
+  </CurrentIssues>
+</SmellBaseline>
