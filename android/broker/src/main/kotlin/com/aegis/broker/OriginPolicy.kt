@@ -8,6 +8,9 @@ package com.aegis.broker
 object OriginPolicy {
     private const val MAX_URL_LENGTH = 8192
 
+    /** TCP 端口上限（RFC 6335——A-3 跨端口径对齐：越界拒绝）。 */
+    private const val MAX_PORT = 65535
+
     /** 解析外部 URL（仅 http/https——非法返回 null——fail-closed）。 */
     fun tryParseExternal(raw: String?): java.net.URI? {
         if (raw.isNullOrBlank() || raw.length > MAX_URL_LENGTH) return null
@@ -24,7 +27,7 @@ object OriginPolicy {
         if (uri.host.isNullOrBlank()) return null
         // A-3 对齐（跨端口径）：java.net.URI 不校验端口上限——99999 这类
         // 越界端口 Rust origin.rs/Python security.py 均拒绝，此处显式对齐
-        if (uri.port > 65535) return null
+        if (uri.port > MAX_PORT) return null
         return uri
     }
 }
