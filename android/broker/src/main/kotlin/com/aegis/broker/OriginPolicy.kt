@@ -22,6 +22,9 @@ object OriginPolicy {
         if (scheme != "http" && scheme != "https") return null
         if (uri.rawUserInfo != null) return null
         if (uri.host.isNullOrBlank()) return null
+        // A-3 对齐（跨端口径）：java.net.URI 不校验端口上限——99999 这类
+        // 越界端口 Rust origin.rs/Python security.py 均拒绝，此处显式对齐
+        if (uri.port > 65535) return null
         return uri
     }
 }
