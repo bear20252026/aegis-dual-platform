@@ -111,10 +111,15 @@ impl AdBlockManager {
                 self.total_blocked += 1;
                 return true;
             }
-            // 检查父域名（example.ads.com → ads.com）
-            for part in host.split('.') {
-                let domain = part.to_string();
-                if self.blocked_domains.contains(&domain) {
+            // H-8 修复（审计 2026-08-31）：父域迭代匹配——原实现是
+            // host.split('.') 逐「单段」精确比对（ads.example.com 会拿
+            // ads/example/com 三个单词查表），黑名单含常见单词域即大面积
+            // 误拦、两段父域（ads.com）永远无法命中。改为逐级剥去最左
+            // 标签：a.ads.com → ads.com → com（真正的父域链检查）。
+            let mut host = host.as_str();
+            while let Some((_, rest)) = host.split_once('.') {
+                host = rest;
+                if self.blocked_domains.contains(host) {
                     self.total_blocked += 1;
                     return true;
                 }
@@ -181,4 +186,25 @@ mod tests {
         let mgr = AdBlockManager::new();
         assert!(mgr.providers().len() >= 4);
     }
+    #[test]
+    fn parent_domain_iteration_blocks_registered_parent() {
+        // H-8 回归：黑名单 ads.com 必须命中 a.ads.com（旧实现逐单段
+        // 匹配——两段父域永远无法命中）
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(vec!["ads.com".into()]);
+        assert!(mgr.should_block("https://a.ads.com/x"));
+        assert!(mgr.should_block("https://b.c.ads.com/x"));
+    }
+
+    #[test]
+    fn parent_domain_no_false_positive_on_single_label() {
+        // H-8 回归：黑名单含常见单词段时不得误拦无关站点
+        // （旧实现会把 host 拆成单段逐词查表——"app"、"m" 等单词段
+        // 误命中；com.app.com 不得因 "com" 入黑名单而全网误拦）
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(vec!["tracker.app".into()]);
+        assert!(!mgr.should_block("https://my.app.example.com/x"));
+        assert!(mgr.should_block("https://tracker.app/x"));
+    }
 }
+

@@ -11,18 +11,33 @@ inputs:
     description: 'GeoGebra bundle 的 Release tag'
     required: false
     default: 'resources/geogebra-5.4.929.3'
+  zip-sha256:
+    description: 'GeoGebra zip 的 SHA256（完整性校验，M-20 修复）'
+    required: false
+    default: '8855e7577fb766108e3feed1991c42649b691ef4a4d88c2ddb431b893d58811e'
 runs:
   using: 'composite'
   steps:
     - shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        GEOGEBRA_DEST_DIR: ${{ inputs.dest-dir }}
+        GEOGEBRA_RELEASE_TAG: ${{ inputs.release-tag }}
+        GEOGEBRA_ZIP_SHA256: ${{ inputs.zip-sha256 }}
       run: |
-        mkdir -p "${{ inputs.dest-dir }}"
-        cd "${{ inputs.dest-dir }}"
-        gh release download "${{ inputs.release-tag }}" --pattern "*.zip" --output geogebra.zip --clobber
+        mkdir -p "$GEOGEBRA_DEST_DIR"
+        cd "$GEOGEBRA_DEST_DIR"
+        gh release download "$GEOGEBRA_RELEASE_TAG" --pattern "*.zip" --output geogebra.zip --clobber
+        # M-20 修复（审计 2026-08-31）：外部资源完整性校验（fail-closed）——
+        # SHA256 与仓内登记值不符（资产被篡改/仓库被接管）即构建失败，
+        # 杜绝未经校验的外部 zip 直接进入 APK / 安装包制品
+        echo "$GEOGEBRA_ZIP_SHA256  geogebra.zip" | sha256sum -c - || {
+          echo "FAIL: GeoGebra zip SHA256 校验不符——拒绝进入制品链" >&2
+          rm -f geogebra.zip
+          exit 1
+        }
         python -c "import zipfile; zipfile.ZipFile('geogebra.zip').extractall('.')"
         # zip 本身必须删除——残留会被 AGP/PyInstaller 打进安装包（+32MB）
         rm geogebra.zip
         python -c "import os; p='GeoGebra/HTML5/5.0/GeoGebra.html'; assert os.path.isfile(p), 'entry missing: '+p"
-        echo "[geogebra] assets ready at ${{ inputs.dest-dir }}"
+        echo "[geogebra] assets ready at $GEOGEBRA_DEST_DIR"

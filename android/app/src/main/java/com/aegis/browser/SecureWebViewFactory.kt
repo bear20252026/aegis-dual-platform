@@ -1,7 +1,11 @@
 package com.aegis.browser
 
+import android.app.DownloadManager
 import android.content.Context
+import android.net.Uri
+import android.os.Environment
 import android.view.View
+import android.webkit.CookieManager
 import android.webkit.WebView
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -24,12 +28,16 @@ object SecureWebViewFactory {
     private val broker = AndroidBroker()
     private val sessionCounter = AtomicLong(0)
 
-    // 导航器注册表（弱引用——WebView 销毁后自动可回收）。
-    // 历史教训：曾用 View.setTag(generateViewId(), ...) 存导航器——
+    // 导航器注册表（显式生命周期——H-4 修复）。
+    // 历史教训一：曾用 View.setTag(generateViewId(), ...) 存导航器——
     // generateViewId() 的 package id 是 0x01（framework 区段），
     // 而 setTag(int,...) 要求 ≥0x02 的应用资源 id → 真机启动必崩。
-    // WeakHashMap 彻底绕开 View tag 机制。
-    private val navigators = java.util.WeakHashMap<android.webkit.WebView, SecureNavigator>()
+    // 历史教训二（H-4 审计 2026-08-31）：曾用 WeakHashMap——但值
+    // （SecureNavigator）强引用键（WebView），键永不可达、条目永不回收，
+    // 每次新建标签泄漏一个 WebView 及其 Chromium 资源。
+    // 现改为显式注册表：create() 注册，release() 注销并销毁 Broker 会话。
+    private val navigators =
+        java.util.concurrent.ConcurrentHashMap<android.webkit.WebView, SecureNavigator>()
 
     /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
     private const val SESSION_SEED_BYTES = 32
@@ -84,11 +92,92 @@ object SecureWebViewFactory {
             AegisHomeBridge(context.applicationContext) { webView },
             "AegisBridge",
         )
+        // H-6 修复（审计 2026-08-31）：下载防线接线——原 DownloadPolicy
+        // 为死代码，WebView 默认下载行为未处理（危险扩展确认机制不存在、
+        // 下载静默失败）。统一收口：DownloadPolicy 判定 → DownloadManager。
+        webView.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
+            handleDownload(webView, url.orEmpty(), mimeType.orEmpty(), contentDisposition.orEmpty())
+        }
         return webView
     }
 
+    /**
+     * 下载统一入口（H-6）：
+     * - 仅放行 http/https（DownloadManager 不支持 blob/data 等 scheme）；
+     * - 危险扩展（exe/bat/apk 等——DownloadPolicy 白名单反查）直接拦截
+     *   并以 Toast 明示用户，绝不静默放行；
+     * - 其余交系统 DownloadManager（带会话 Cookie）。
+     */
+    private fun handleDownload(
+        webView: WebView,
+        url: String,
+        mimeType: String,
+        contentDisposition: String,
+    ) {
+        val context = webView.context
+        val scheme = Uri.parse(url).scheme?.lowercase()
+        if (scheme != "http" && scheme != "https") {
+            android.util.Log.w("AegisDownload", "拦截非 http(s) 下载: $scheme")
+            android.widget.Toast
+                .makeText(context, "已拦截不支持的下载类型", android.widget.Toast.LENGTH_SHORT)
+                .show()
+            return
+        }
+        if (DownloadPolicy.requiresExplicitConfirmation(url)) {
+            android.util.Log.w("AegisDownload", "拦截危险扩展下载: $url")
+            android.widget.Toast
+                .makeText(context, "已拦截危险文件类型的下载", android.widget.Toast.LENGTH_LONG)
+                .show()
+            return
+        }
+        val fileName = resolveDownloadFileName(url, contentDisposition, mimeType)
+        val request =
+            DownloadManager
+                .Request(Uri.parse(url))
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
+                .setMimeType(mimeType)
+        CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+        runCatching {
+            context.getSystemService(DownloadManager::class.java).enqueue(request)
+            android.widget.Toast
+                .makeText(context, "开始下载：$fileName", android.widget.Toast.LENGTH_SHORT)
+                .show()
+        }.onFailure {
+            android.util.Log.e("AegisDownload", "下载入队失败: ${it.message}")
+            android.widget.Toast
+                .makeText(context, "下载失败，无法入队下载管理器", android.widget.Toast.LENGTH_SHORT)
+                .show()
+        }
+    }
+
+    /** 下载文件名解析优先级：Content-Disposition → URL 路径段 → 时间戳兜底。 */
+    private fun resolveDownloadFileName(
+        url: String,
+        mimeType: String,
+        contentDisposition: String,
+    ): String =
+        contentDisposition
+            .substringAfter("filename=", "")
+            .trim(' ', '"', ';')
+            .takeIf { it.isNotEmpty() }
+            ?: Uri
+                .parse(url)
+                .lastPathSegment
+                ?.takeIf { it.isNotBlank() }
+            ?: "aegis-download-${System.currentTimeMillis()}.${mimeType.substringAfter('/', "").ifEmpty { "bin" }}"
+
     /** 仅工厂创建的 WebView 才拥有受控导航器；不存在时调用方必须拒绝外部导航。 */
     fun navigatorFor(webView: WebView): SecureNavigator? = navigators[webView]
+
+    /**
+     * H-4 修复（审计 2026-08-31）：标签关闭 / Activity 销毁时的统一释放口。
+     * 注销导航器并销毁对应 Broker 会话——未注销的 WebView 不再能消费授权，
+     * 注册表条目随标签生命周期精确回收（替代失效的 WeakHashMap 语义）。
+     */
+    fun release(webView: WebView) {
+        navigators.remove(webView)?.close()
+    }
 
     /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */
     private fun installDocumentStartScripts(

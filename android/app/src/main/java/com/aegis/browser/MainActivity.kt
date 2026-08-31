@@ -260,6 +260,8 @@ class MainActivity : ComponentActivity() {
             tm.list().forEach { tab ->
                 tab.webView.stopLoading()
                 tab.webView.loadUrl("about:blank")
+                // H-4 修复（审计 2026-08-31）：注销导航器 + 销毁 Broker 会话
+                SecureWebViewFactory.release(tab.webView)
                 tab.webView.destroy()
             }
         }

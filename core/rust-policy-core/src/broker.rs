@@ -34,6 +34,11 @@ use crate::policy::PolicyEngine;
 /// fail-closed：达到上限后拒绝新的消费，绝不淘汰旧 nonce（以免削弱一次性/重放保护）。
 const MAX_CONSUMED_NONCES: usize = 50_000;
 
+/// M-16 修复（审计 2026-08-31）：会话池软上限——宿主（含 C ABI 直暴露的
+/// create_session）无法再无限创建会话耗尽内存；达上限先 evict_expired，
+/// 仍满即拒绝新会话（fail-closed）。
+const MAX_SESSIONS: usize = 1024;
+
 /// 单个会话上下文（persona session——隔离绑定）。
 ///
 /// 注意：策略版本校验在 `validate_action` 中直接与 broker 的 `policy_version`
@@ -85,13 +90,24 @@ impl ContextBroker {
     }
 
     /// 创建新会话（persona context）。
+    ///
+    /// M-16 修复（审计 2026-08-31）：会话池软上限——达到上限先清理过期
+    /// 会话（evict_expired 首次接入生产路径），仍满则拒绝（fail-closed），
+    /// 堵住宿主无限 create_session 的内存耗尽 DoS 面。原实现同时存在
+    /// `insert 后 get 的 unwrap()`（逻辑上不可达的 panic 路径），一并消除。
     pub fn create_session(
         &mut self,
         session_id: String,
         tab_id: String,
         generation: u64,
         ttl: Duration,
-    ) -> &SessionContext {
+    ) -> Option<&SessionContext> {
+        if self.sessions.len() >= MAX_SESSIONS && !self.sessions.contains_key(&session_id) {
+            self.evict_expired();
+            if self.sessions.len() >= MAX_SESSIONS {
+                return None;
+            }
+        }
         let ctx = SessionContext {
             session_id: session_id.clone(),
             tab_id,
@@ -100,7 +116,7 @@ impl ContextBroker {
             ttl,
         };
         self.sessions.insert(session_id.clone(), ctx);
-        self.sessions.get(&session_id).unwrap()
+        self.sessions.get(&session_id)
     }
 
     /// 销毁会话（清理 nonce 记录）。
@@ -509,4 +525,26 @@ mod tests {
         // PolicyEngine::default() 使用 deny-all，所以策略层拒绝
         assert!(matches!(result, Decision::Deny(_)));
     }
+    #[test]
+    fn session_pool_cap_fails_closed() {
+        // M-16 回归：会话池达上限后拒绝新会话；销毁后可复用容量
+        let mut broker = ContextBroker::new(
+            "pv".into(),
+            PolicyEngine::default(),
+            CapabilityRegistry::new(),
+        );
+        for i in 0..MAX_SESSIONS {
+            assert!(broker
+                .create_session(format!("s{i}"), "t".into(), 1, Duration::from_secs(60))
+                .is_some());
+        }
+        assert!(broker
+            .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
+            .is_none());
+        broker.destroy_session("s0");
+        assert!(broker
+            .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
+            .is_some());
+    }
 }
+

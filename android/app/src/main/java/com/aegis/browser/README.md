@@ -26,7 +26,7 @@
 |---|---|
 | `SecureWebViewFactory.kt` | 统一创建 + 安全配置 WebView（禁 file/混合内容/调试，复用 BrowserEngine 边界） |
 | `BrowserEngine.kt` | 安全导航（URL 白名单 http/https）+ 设置收紧 |
-| `DownloadPolicy.kt` | 下载策略（允许的 URL scheme 判定） |
+| `DownloadPolicy.kt` | 下载策略（危险扩展拦截判定；由 SecureWebViewFactory.setDownloadListener 接线——H-6 审计修复） |
 
 ## 运行关系
 

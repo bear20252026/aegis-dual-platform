@@ -78,6 +78,14 @@ class SessionStore:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False)
             os.replace(tmp, self.path)  # 原子替换（Windows 同卷支持）
+            # M-2 修复（审计 2026-08-31）：session.json 保存完整浏览 URL——
+            # 与 database.py/threat_feed.py 同级敏感度，落盘后收紧 ACL
+            # （0600 / 仅当前用户），否则同机其他账户可读
+            try:
+                from .security import harden_perms
+                harden_perms(self.path)
+            except Exception:
+                pass  # 权限收紧失败不阻断保存（静默降级——与全文件口径一致）
             return True
         except OSError:
             try:

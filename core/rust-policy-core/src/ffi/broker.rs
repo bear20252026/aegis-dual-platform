@@ -27,6 +27,10 @@ enum IssuedAuthorization {
     Consumed { session_id: String },
 }
 
+/// M-15 修复（审计 2026-08-31）：授权账本上限——镜像 consumed_nonces 的
+/// fail-closed 模式（满时先惰性清理，仍满即拒绝，绝不无界增长）。
+const MAX_ISSUED_ACTIONS: usize = 50_000;
+
 impl IssuedAuthorization {
     fn session_id(&self) -> &str {
         match self {
@@ -125,6 +129,14 @@ impl FfiBroker {
         match decision {
             Decision::Allow(authorized) => match self.issued_actions.lock() {
                 Ok(mut issued_actions) => {
+                    // M-15 修复（审计 2026-08-31）：账本容量 fail-closed
+                    if !ledger_can_admit(&mut issued_actions) {
+                        return ffi_deny(
+                            "authorization_ledger_full",
+                            "授权账本已达上限（惰性清理后仍满）",
+                            "denied — authorization ledger exhausted its fail-closed capacity",
+                        );
+                    }
                     issued_actions.insert(
                         authorized.nonce.clone(),
                         IssuedAuthorization::Pending(Box::new(authorized.clone())),
@@ -272,6 +284,15 @@ impl FfiBroker {
         };
         match self.issued_actions.lock() {
             Ok(mut issued_actions) => {
+                // M-15 修复（审计 2026-08-31）：账本容量 fail-closed——
+                // 满时先惰性清理过期 Pending，仍满则拒绝签发（绝不无界增长）
+                if !ledger_can_admit(&mut issued_actions) {
+                    return ffi_deny(
+                        "authorization_ledger_full",
+                        "授权账本已达上限（惰性清理后仍满）",
+                        "denied — authorization ledger exhausted its fail-closed capacity",
+                    );
+                }
                 issued_actions.insert(
                     authorized.nonce.clone(),
                     IssuedAuthorization::Pending(Box::new(authorized.clone())),
@@ -308,15 +329,16 @@ impl FfiBroker {
         ttl_seconds: u64,
     ) -> bool {
         match self.inner.lock() {
-            Ok(mut g) => {
-                g.create_session(
+            // M-16 修复（审计 2026-08-31）：会话池满（fail-closed）时
+            // 返回 false——原实现无条件 true，掩盖了容量拒绝
+            Ok(mut g) => g
+                .create_session(
                     session_id,
                     tab_id,
                     generation,
                     std::time::Duration::from_secs(ttl_seconds),
-                );
-                true
-            }
+                )
+                .is_some(),
             Err(_) => false,
         }
     }
@@ -444,6 +466,17 @@ impl FfiBroker {
         };
         if matches!(decision, Decision::Allow(_)) {
             if let Ok(mut issued_actions) = self.issued_actions.lock() {
+                // M-15 修复（审计 2026-08-31）：Consumed 记录同样受账本
+                // 上限约束（惰性清理过期 Pending 后仍满 → 本次导航转为
+                // Deny——nonce 已被 validate_and_consume 消费，重放天然
+                // 失败，fail-closed 语义保持闭合）
+                if !ledger_can_admit(&mut issued_actions) {
+                    return ffi_deny(
+                        "authorization_ledger_full",
+                        "授权账本已达上限（惰性清理后仍满）",
+                        "denied — authorization ledger exhausted its fail-closed capacity",
+                    );
+                }
                 issued_actions.insert(
                     action.nonce.clone(),
                     IssuedAuthorization::Consumed {
@@ -454,6 +487,24 @@ impl FfiBroker {
         }
         FfiDecision::from(decision)
     }
+}
+
+/// M-15 修复（审计 2026-08-31）：授权账本容量门（fail-closed）。
+/// 未达上限直接放行；达上限先惰性清理已过期的 Pending 记录
+/// （Consumed 记录保留到会话撤销，不参与清理），仍满则拒绝登记。
+fn ledger_can_admit(issued: &mut HashMap<String, IssuedAuthorization>) -> bool {
+    if issued.len() < MAX_ISSUED_ACTIONS {
+        return true;
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(u64::MAX);
+    issued.retain(|_, authorization| match authorization {
+        IssuedAuthorization::Pending(action) => action.expires_at >= now,
+        IssuedAuthorization::Consumed { .. } => true,
+    });
+    issued.len() < MAX_ISSUED_ACTIONS
 }
 
 fn deny_url(raw_url: String) -> FfiDecision {
