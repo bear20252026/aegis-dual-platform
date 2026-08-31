@@ -174,6 +174,7 @@ fn hex_seed_to_bytes(hex: &str) -> [u8; 32] {
 mod broker;
 pub use broker::*;
 
+#[cfg(test)]
 mod tests {
     use super::*;
 

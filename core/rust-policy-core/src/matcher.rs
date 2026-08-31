@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn url_pattern() {
         assert!(glob_match("https://*.gov.cn", "https://a.gov.cn", true));
-        assert!(glob_match("https://*.gov.cn", "https://evil.com", true) == false);
+        assert!(!glob_match("https://*.gov.cn", "https://evil.com", true));
     }
 
     #[test]
