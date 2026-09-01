@@ -256,10 +256,9 @@ TOOLBAR_JS = r"""
         try { if (window.pywebview && pywebview.api) pywebview.api.reload_page(); } catch(err) {}
       }});
       items.push({label: '查看页面源代码', action: function() {
-        // P2 修复（全量复审 2026-09-01）：view_source 不在桥白名单
-        // （view-source: 不在协议白名单——安全策略），原先静默无反应。
-        // 实现（需放行 view-source:）或移除菜单项留待产品决策，先给可见反馈。
-        var unsupported = function () { window.__aegisToast('查看源代码不可用（安全策略未开放该协议）'); };
+        // 内置源码查看器（2026-09-01 实现）：桥内抓取当前页 HTML，
+        // 全转义纯文本展示（零脚本执行），不新增任何导航协议。
+        var unsupported = function () { window.__aegisToast('当前页面不支持查看源代码'); };
         try {
           if (window.pywebview && pywebview.api && pywebview.api.view_source) {
             pywebview.api.view_source();

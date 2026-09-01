@@ -27,6 +27,11 @@ def _load_url_op(w: Any, url: str) -> None:
     w.load_url(url)
 
 
+def _load_html_op(w: Any, content: str) -> None:
+    """模块级辅助：执行 load_html（独立函数，mypy 可推断参数类型）。"""
+    w.load_html(content)
+
+
 class NavQueue:
     """导航线程队列：所有窗口操作串行执行，杜绝 js_api 线程死锁。
 
@@ -73,6 +78,17 @@ class NavQueue:
         except Exception:
             return False
 
+    def load_html(self, content: str) -> bool:
+        """投递 HTML 内容加载请求，立即返回（源码查看器等壳层生成页面）。"""
+        if not content:
+            return False
+        try:
+            self._ensure_thread()
+            self._nav_q.put(("load_html", content))
+            return True
+        except Exception:
+            return False
+
     # ------------------------------------------------------------------ #
     # 导航线程
     # ------------------------------------------------------------------ #
@@ -106,6 +122,9 @@ class NavQueue:
                     self._run_with_timeout(
                         partial(self._exec_script_impl, w, arg),
                         "evaluate_js")
+                elif action == "load_html":
+                    self._run_with_timeout(
+                        partial(_load_html_op, w, arg), "load_html")
             except Exception:
                 pass  # 窗口销毁竞态 / WebView 不可用时静默
 

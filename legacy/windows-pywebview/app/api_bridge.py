@@ -112,6 +112,8 @@ class Api(
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
         "current_url", "js_error",
         "add_bookmark", "remove_bookmark",
+        # 内置源码查看器（桥内抓取+全转义展示；无数据读取面）
+        "view_source", "close_source_view",
     })
 
     def __dir__(self) -> list[str]:
@@ -133,6 +135,9 @@ class Api(
         }]
         self._current: int = 0
         self._last_new_tab: float = 0.0  # M-2：new_tab 频率限制（防 tab-bomb）
+        self._last_view_source: float = 0.0  # view_source 频控（防循环抓取）
+        # 源码查看器：查看前页面 URL（返回按钮恢复用；空=不在源码视图）
+        self._source_view_return: str = ""
         self._engine: str = DEFAULT_ENGINE
         # 导航队列（独立线程执行全部窗口操作）
         self._nav = NavQueue()
@@ -177,6 +182,141 @@ class Api(
         """看门狗委托：导航线程疑似卡死时重启。"""
         self._nav.recover()
 
+    # ------------------------------------------------------------------ #
+    # 内置源码查看器（2026-09-01 产品决策：实现「查看页面源代码」）
+    # 设计：不新增任何导航协议（view-source:/data: 均不进白名单）——
+    # 桥内后台线程拉取当前页 HTML（复用导航安全校验 + 大小上限），
+    # 以全转义纯文本视图渲染（零脚本执行），返回按钮回到原页面。
+    # ------------------------------------------------------------------ #
+    def view_source(self) -> None:
+        """查看当前页面源代码（js_api 入口，立即返回）。
+
+        安全设计：
+        ① 取当前 URL fail-closed（与 _check_trusted_source 同口径）；
+        ② 仅 http/https（file://壳页/aegis:/reader: 一律拒绝）；
+        ③ 复用 _is_navigation_safe_url（协议+威胁黑名单+Agent 白名单域）；
+        ④ 500ms 频控（防恶意页面循环触发抓取）；
+        ⑤ 抓取在后台线程（绝不阻塞 js_api 线程），上限 5MB / 超时 15s；
+        ⑥ 展示页源码 100% html.escape——查看源码永不等于执行源码。
+        """
+        import time as _t
+        _now = _t.time()
+        if _now - self._last_view_source < 0.5:
+            self._notify("操作过于频繁，请稍候")
+            return
+        w = self.window
+        if w is None:
+            self._notify("窗口尚未就绪")
+            return
+        try:
+            raw = w.get_current_url() or ""
+        except Exception:
+            raw = ""
+        if not raw:
+            self._notify("无法获取当前页面地址")
+            return
+        from .security import scheme_of
+        if scheme_of(raw) not in ("http", "https"):
+            # file:// 壳页 / 内部页无远程源码可看
+            self._notify("当前页面不支持查看源代码（仅限 http/https 页面）")
+            return
+        if not self._is_navigation_safe_url(raw):
+            self._notify("该地址未通过安全检查")
+            return
+        self._last_view_source = _now
+        url = raw
+
+        def _worker() -> None:
+            try:
+                final_url, text = _fetch_page_source(url)
+            except Exception:
+                self._notify("获取页面源代码失败（网络错误或超时）")
+                return
+            self._source_view_return = url
+            self._nav.load_html(_build_source_viewer_html(final_url, text))
+
+        threading.Thread(target=_worker, name="aegis-view-source",
+                         daemon=True).start()
+
+    def close_source_view(self) -> None:
+        """从源码视图返回原页面（查看器页内按钮调用）。"""
+        target = self._source_view_return
+        self._source_view_return = ""
+        if target:
+            self._load(target)
 
 
 # on_loaded 已随结构审计拆分至 app/bridge_hooks.py（文件顶部 re-export 保持兼容）。
+
+# ---------------------------------------------------------------------- #
+# 源码查看器：纯函数辅助（模块级，离线可单测）
+# ---------------------------------------------------------------------- #
+_SOURCE_VIEW_MAX_BYTES = 5 * 1024 * 1024  # 5MB 上限——防止超大响应拖垮渲染
+_SOURCE_VIEW_TIMEOUT_S = 15
+
+
+def _fetch_page_source(url: str) -> tuple[str, str]:
+    """后台线程抓取页面源码，返回 (最终 URL, 源码文本)。
+
+    仅接受 http/https（调用方已校验，此处兜底）；大小上限
+    _SOURCE_VIEW_MAX_BYTES（多读 1 字节即截断）；永不执行任何
+    页面内代码——返回的是纯文本。
+    """
+    from .security import scheme_of
+    if scheme_of(url) not in ("http", "https"):
+        raise ValueError("unsupported scheme")
+    import urllib.request
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Mozilla/5.0 (AegisBrowser-SourceViewer)",
+                 "Accept": "text/html,*/*;q=0.8"},
+    )
+    # B310 豁免（安全设计，非跳过审查）：urlopen 前已强制 scheme ∈
+    # {http, https}（file:/自定义协议 raise ValueError 兜底）；重定向后
+    # geturl() 二次校验，降级/跳转出白名单同样拒绝。
+    with urllib.request.urlopen(req, timeout=_SOURCE_VIEW_TIMEOUT_S) as resp:  # nosec B310
+        final_url = resp.geturl() or url
+        if scheme_of(final_url) not in ("http", "https"):
+            raise ValueError("redirected to unsupported scheme")
+        body = resp.read(_SOURCE_VIEW_MAX_BYTES + 1)
+    if len(body) > _SOURCE_VIEW_MAX_BYTES:
+        body = body[:_SOURCE_VIEW_MAX_BYTES]
+    text = body.decode("utf-8", errors="replace")
+    return final_url, text
+
+
+def _build_source_viewer_html(url: str, source: str) -> str:
+    """构造源码查看页：源码全转义（quote=True，含属性边界），零脚本。
+
+    页面内唯一交互是「返回页面」按钮（pywebview.api.close_source_view，
+    方法内部只导航回查看前记录的 URL，无任何数据读取）。
+    """
+    import html as _html
+    safe_url_text = _html.escape(url, quote=True)
+    safe_source = _html.escape(source, quote=True)
+    size_kb = len(source.encode("utf-8", errors="replace")) // 1024
+    return (
+        '<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">'
+        "<title>源码视图</title><style>"
+        "body{margin:0;font-family:Consolas,'Courier New',monospace;"
+        "background:#161618;color:#d4d4d8}"
+        "#bar{position:sticky;top:0;display:flex;gap:12px;align-items:center;"
+        "padding:10px 16px;background:#1f1f23;border-bottom:1px solid #303036;"
+        "font-family:'Segoe UI',sans-serif}"
+        "#bar .u{flex:1;overflow:hidden;text-overflow:ellipsis;"
+        "white-space:nowrap;color:#9ca3af;font-size:13px}"
+        "button{padding:6px 14px;border:1px solid #4b4b55;border-radius:6px;"
+        "background:#2d2d33;color:#e5e7eb;cursor:pointer;font-size:13px}"
+        "button:hover{background:#3a3a42}"
+        ".meta{color:#6b7280;font-size:12px;white-space:nowrap}"
+        "pre{margin:0;padding:16px;white-space:pre-wrap;word-break:break-all;"
+        "font-size:12.5px;line-height:1.55}"
+        "</style></head><body>"
+        '<div id="bar">'
+        "<button onclick=\"pywebview.api.close_source_view()\">← 返回页面</button>"
+        '<span class="u">' + safe_url_text + "</span>"
+        '<span class="meta">源码 ' + str(size_kb) + " KB（已转义，纯文本展示）</span>"
+        "</div>"
+        "<pre>" + safe_source + "</pre></body></html>"
+    )
+

@@ -80,6 +80,7 @@ jobs:
           python selftest_shell_toolbar.py
           python selftest_tab_state.py
           python selftest_navigation_search.py
+          python selftest_view_source.py
 
   android-lint:
     name: Android 编译与检查（Kotlin 语法级）
