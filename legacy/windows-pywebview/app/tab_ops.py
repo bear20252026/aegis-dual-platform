@@ -22,7 +22,6 @@ CHANGELOG「Unreleased/Planned：Windows 标签增强」落地：
 
 from __future__ import annotations
 
-import os
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -112,6 +111,14 @@ class TabOpsMixin:
 
         入口即校验：非 dict / URL 白名单不过的条目一律丢弃（与
         SessionStore._sanitize_tab 同规则——双保险，接受任何来源）。
+
+        P1-8 修复（全量复审 2026-09-01）：恢复链路统一过
+        _is_navigation_safe_url 双层校验——_sanitize_tab 只做协议白名单
+        （http/https + START_URL），此前 session.json 被篡改注入威胁
+        黑名单域时恢复链路照样放行。这里补 A-② 实时黑名单检查
+        （启动恢复时 Agent 会话未激活，Agent 门禁自然跳过）。
+        启动恢复（main_webview._init_stores_and_session）与用户恢复
+        （restore_session）两条链路均经本方法，单点收口。
         """
         if not isinstance(tabs, list):
             return ""
@@ -119,7 +126,8 @@ class TabOpsMixin:
         from .session_store import _sanitize_tab
         for raw in tabs[:MAX_TABS]:
             tab = _sanitize_tab(raw)
-            if tab is not None:
+            if (tab is not None
+                    and self._is_navigation_safe_url(tab["url"])):
                 clean.append(tab)
         if not clean:
             return ""
@@ -202,14 +210,16 @@ class TabOpsMixin:
         session_active = bool(agent_session) and (
             _time.time() - agent_session) < 60
         if session_active:
-            allow_raw = os.environ.get("AEGIS_AGENT_ALLOWED_HOSTS", "").strip()
-            allow_hosts = {h.strip().lower() for h in allow_raw.split(",") if h.strip()}
+            # P1-9 修复（全量复审 2026-09-01）：allowlist 解析/匹配收敛到
+            # app/agent_allowlist.py 单源（与请求层 main_webview 同源同语义）
+            from .agent_allowlist import host_allowed, load_agent_allowlist
+            allow_hosts = load_agent_allowlist()
             if not allow_hosts:
                 from crash_reporter import log_event
                 log_event("[agent] 拒绝 Agent 导航（未配置 AEGIS_AGENT_ALLOWED_HOSTS——allowlist 为空）")
                 return False
             host = host_of(url)
-            if not any(host == c or host.endswith("." + c) for c in allow_hosts):
+            if not host_allowed(host, allow_hosts):
                 from crash_reporter import log_event
                 log_event(f"[agent] 拒绝 Agent 导航非白名单域: {url}")
                 return False

@@ -138,12 +138,34 @@ TOOLBAR_JS = r"""
       b.onmouseenter = function(){ b.style.background = COLORS.canvasParchment; };
       b.onmouseleave = function(){ b.style.background = 'transparent'; };
       b.onclick = function(){
-        try { if (window.pywebview && pywebview.api) pywebview.api[act](); } catch (e) {}
+        // P1-7：act 为空表示按钮由专属 onclick 接管（如下拉菜单按钮）
+        try { if (act && window.pywebview && pywebview.api) pywebview.api[act](); } catch (e) {}
       };
       bar.appendChild(b);
       return b;
     }
-    toolBtn('\u2261', '菜单', 'show_menu');
+    // P1-7 修复（全量复审 2026-09-01）：show_menu 此前未实现且不在
+    // _JS_EXPOSED 白名单——点击静默无效。改为纯 JS 下拉菜单（复用
+    // ctxMenu 渲染），动作全部来自 _JS_EXPOSED 已白名单 API
+    // （go_home/new_tab/open_geogebra），不新增任何桥面。
+    var menuBtn = toolBtn('\u2261', '菜单', null);
+    menuBtn.onclick = function (e) {
+      e.stopPropagation();  // 防止 document 级 click 监听立即收起菜单
+      var items = [
+        { label: '主页', action: function () {
+            try { if (window.pywebview && pywebview.api) pywebview.api.go_home(); } catch (err) {}
+        }},
+        { label: '新建标签页', action: function () {
+            try { if (window.pywebview && pywebview.api) pywebview.api.new_tab(); } catch (err) {}
+        }},
+        { separator: true },
+        { label: '几何画板', action: function () {
+            try { if (window.pywebview && pywebview.api) pywebview.api.open_geogebra(); } catch (err) {}
+        }}
+      ];
+      showCtxMenu(menuBtn.getBoundingClientRect().left - 160,
+                  menuBtn.getBoundingClientRect().bottom + 4, items);
+    };
 
     // === 右键上下文菜单 ===
     var ctxMenu = document.createElement('div');

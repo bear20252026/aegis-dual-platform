@@ -650,11 +650,12 @@
       btn.addEventListener('click', function () {
         try {
           if (!Host.has('geo')) return;
+          // P1-12 修复（全量复审 2026-09-01）：openGeo 的回调即 onFail——
+          // 仅在打开失败时调用（此前回调里引用未定义变量 ok，
+          // ReferenceError 被 try 吞掉 → 置灰提示永不生效）
           Host.openGeo(function () {
-            if (!ok) {
-              btn.classList.add('unavailable');
-              btn.title = '当前安装包未包含画板资源';
-            }
+            btn.classList.add('unavailable');
+            btn.title = '当前安装包未包含画板资源';
           });
         } catch (e) {}
       });

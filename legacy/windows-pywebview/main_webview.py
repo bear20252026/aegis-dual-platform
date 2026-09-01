@@ -39,9 +39,9 @@ from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
 from app.url_utils import is_navigation_safe as _is_navigation_safe
 
 # C2 阶段 A（ceLLMate 借鉴）：Agent 请求白名单域（agent-browser domain
-# allowlist 模式——Agent 会话活跃时仅允许这些域的请求；默认空=Agent 活跃
-# 时非白名单域请求标记 + 日志（可观测不拦截）——政府内网按需配置内网域）
-AGENT_ALLOWED_HOSTS: set[str] = set()
+# allowlist 模式——Agent 会话活跃时仅允许这些域的请求）。
+# P1-9 修复（全量复审 2026-09-01）：原模块级写死空集导致 env 配置永不
+# 生效——解析/匹配收敛到 app/agent_allowlist.py 单源（与导航层同源）。
 
 
 def _apply_request_policy(window: Any, blocked: set | None = None,
@@ -142,15 +142,30 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                         and (getattr(api, "_agent_session", None) or 0.0)
                         and time.time() - (getattr(api, "_agent_session", None) or 0.0) < 60
                     )
-                    if session_active and host and host not in AGENT_ALLOWED_HOSTS:
-                        # P0-03 修复（专家审查）：未配置 allowlist 时 Agent 网络
-                        # 副作用一律拒绝——请求层记录拒绝语义；导航层由 api_bridge
-                        # Agent 白名单检查真正阻断（不再"仅日志"）
+                    if session_active and host:
+                        # P1-9 修复（全量复审 2026-09-01）：复用导航层同款
+                        # allowlist 单源（env 解析 + 后缀匹配）——原实现
+                        # 写死空集，AEGIS_AGENT_ALLOWED_HOSTS 配置在请求层
+                        # 永不生效。请求层仅标记 + 日志（可观测不拦截）——
+                        # 权威阻断仍在导航层（api_bridge Agent 白名单检查）。
                         try:
-                            from crash_reporter import log_event
-                            log_event(f"[agent] 拒绝 Agent 请求非白名单域: {url}")
+                            from app.agent_allowlist import (
+                                host_allowed,
+                                load_agent_allowlist,
+                            )
+                            allow_hosts = load_agent_allowlist()
+                            if not host_allowed(host, allow_hosts):
+                                from crash_reporter import log_event
+                                if not allow_hosts:
+                                    log_event(
+                                        "[agent] 拒绝 Agent 请求"
+                                        "（未配置 AEGIS_AGENT_ALLOWED_HOSTS）: "
+                                        + url)
+                                else:
+                                    log_event(
+                                        f"[agent] 拒绝 Agent 请求非白名单域: {url}")
                         except Exception:
-                            pass
+                            pass  # 白名单解析失败静默（不影响请求）
                 except Exception:
                     pass  # Agent 策略失败静默（不影响请求）
                 # C2 阶段 B（ceLLMate sitemap）：Agent 会话活跃时按 sitemap

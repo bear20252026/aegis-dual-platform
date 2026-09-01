@@ -31,6 +31,16 @@ enum IssuedAuthorization {
 /// fail-closed 模式（满时先惰性清理，仍满即拒绝，绝不无界增长）。
 const MAX_ISSUED_ACTIONS: usize = 50_000;
 
+/// P1-10 修复（全量复审 2026-09-01）：导航授权动作有效期（秒）——
+/// 原 120 为硬编码字面量（无语义名、多处漂移风险）。注意与「会话 TTL」
+/// 是两个概念：这是签发授权的可消费窗口，超期后 consume 过期拒绝。
+const ACTION_EXPIRY_SECONDS: u64 = 120;
+
+/// P1-11 修复（全量复审 2026-09-01）：FFI create_session 的 TTL 下限（秒）。
+/// 宿主传 0 会得到"返回成功、即刻过期"的静默失效会话——钳到下限保底。
+/// 上限维持宿主自由（会话暴露面由 M-16 会话池 fail-closed 容量约束）。
+const MIN_SESSION_TTL_SECONDS: u64 = 30;
+
 impl IssuedAuthorization {
     fn session_id(&self) -> &str {
         match self {
@@ -89,7 +99,7 @@ impl FfiBroker {
             Err(reason) => return FfiDecision::Deny { reason },
         };
         let expires_at = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(duration) => duration.as_secs().saturating_add(120),
+            Ok(duration) => duration.as_secs().saturating_add(ACTION_EXPIRY_SECONDS),
             Err(_) => {
                 return FfiDecision::Deny {
                     reason: FfiDenyReason {
@@ -321,6 +331,10 @@ impl FfiBroker {
     }
 
     /// 创建新会话（ttl 秒）。
+    ///
+    /// P1-11 修复（全量复审 2026-09-01）：TTL 下限钳制——宿主传 0 会
+    /// 得到"签发成功、即刻过期"的静默失效会话（fail-open 陷阱面）。
+    /// 钳到 MIN_SESSION_TTL_SECONDS 保底；上限维持宿主自由。
     pub fn create_session(
         &self,
         session_id: String,
@@ -328,6 +342,7 @@ impl FfiBroker {
         generation: u64,
         ttl_seconds: u64,
     ) -> bool {
+        let effective_ttl = ttl_seconds.max(MIN_SESSION_TTL_SECONDS);
         match self.inner.lock() {
             // M-16 修复（审计 2026-08-31）：会话池满（fail-closed）时
             // 返回 false——原实现无条件 true，掩盖了容量拒绝
@@ -336,7 +351,7 @@ impl FfiBroker {
                     session_id,
                     tab_id,
                     generation,
-                    std::time::Duration::from_secs(ttl_seconds),
+                    std::time::Duration::from_secs(effective_ttl),
                 )
                 .is_some(),
             Err(_) => false,
@@ -599,6 +614,28 @@ mod ffi_navigation_tests {
         assert!(
             matches!(decision, FfiDecision::Deny { .. }),
             "file:// 非 http(s) scheme 必须在 URL 解析层拒绝"
+        );
+    }
+
+    /// P1-11 回归（全量复审 2026-09-01）：ttl=0 必须钳到下限——
+    /// 原实现会签发"成功、即刻过期"的静默失效会话。
+    #[test]
+    fn create_session_clamps_zero_ttl_to_minimum() {
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s-min".into(), "tab-1".into(), 1, 0));
+        let decision = broker.evaluate_navigation(
+            "s-min".into(),
+            "tab-1".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        );
+        assert!(
+            matches!(
+                decision,
+                FfiDecision::Allow { .. } | FfiDecision::RequireConfirmation { .. }
+            ),
+            "ttl=0 钳到 MIN_SESSION_TTL_SECONDS 后会话应在窗口内有效"
         );
     }
 }

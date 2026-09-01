@@ -68,12 +68,16 @@ class BrowserViewModel : ViewModel() {
 
     private lateinit var tabManager: TabManager
 
+    /** P1-3 修复：渲染进程崩溃重建 WebView 需要 Context（init 时存应用级引用）。 */
+    private var appContext: android.content.Context? = null
+
     /** 当前标签的 WebView（系统回退键消费 WebView 历史栈——未初始化返回 null）。 */
     fun currentWebViewOrNull(): WebView? = if (::tabManager.isInitialized) tabManager.current()?.webView else null
 
     /** 初始化 TabManager 并创建首个标签。 */
     fun init(context: android.content.Context) {
         if (::tabManager.isInitialized) return
+        appContext = context.applicationContext
         tabManager = TabManager()
         val initialWebView = createSecureWebView(context)
         SecureWebViewFactory.navigatorFor(initialWebView)?.openTrustedHome()
@@ -179,6 +183,29 @@ class BrowserViewModel : ViewModel() {
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */
     fun getTabManager(): TabManager? = if (::tabManager.isInitialized) tabManager else null
 
+    /** P1-3 修复：渲染进程崩溃后原位重建 WebView 并重载原 URL（主线程异步执行）。 */
+    private fun rebuildAfterRendererGone(deadWebView: WebView) {
+        val context = appContext ?: return
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            if (!::tabManager.isInitialized) return@post
+            val index = tabManager.list().indexOfFirst { it.webView === deadWebView }
+            if (index < 0) return@post
+            val crashedUrl = tabManager.list()[index].url
+            SecureWebViewFactory.release(deadWebView)
+            deadWebView.destroy()
+            val fresh = createSecureWebView(context)
+            tabManager.replaceWebView(index, fresh)
+            val navigator = SecureWebViewFactory.navigatorFor(fresh)
+            if (crashedUrl.isNotBlank() && crashedUrl != HOME_URL) {
+                navigator?.navigateExternal(crashedUrl)
+            } else {
+                navigator?.openTrustedHome()
+            }
+            refresh()
+            _webViewAlert.value = "页面进程已恢复，正在重新加载"
+        }
+    }
+
     private fun createSecureWebView(context: android.content.Context): WebView =
         SecureWebViewFactory.create(
             context = context,
@@ -198,6 +225,20 @@ class BrowserViewModel : ViewModel() {
                         "session_expired" -> "浏览会话已过期，已自动续期失败——请重试或新建标签"
                         else -> "该地址无法通过安全策略验证（$code）"
                     }
+            },
+            onPageUrlObserved = { webView, url ->
+                // P1-6 修复（全量复审 2026-09-01）：地址栏随实际页面同步。
+                if (url.isNotBlank()) {
+                    tabManager.list().firstOrNull { it.webView === webView }?.url = url
+                    if (tabManager.current()?.webView === webView) {
+                        _address.value = url
+                    }
+                }
+            },
+            onRendererGone = { deadWebView ->
+                // P1-3 修复（全量复审 2026-09-01）：渲染进程崩溃后重建当前标签
+                // 的 WebView 并重载原 URL（原 no-op——标签永久白屏）。
+                rebuildAfterRendererGone(deadWebView)
             },
         )
 }

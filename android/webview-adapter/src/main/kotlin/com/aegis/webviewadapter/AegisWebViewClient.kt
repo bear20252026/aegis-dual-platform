@@ -26,6 +26,7 @@ class AegisWebViewClient(
     private val onNavigationConfirmationRequested: (ApprovalRequest) -> Unit = {},
     private val onNavigationConfirmationResolved: () -> Unit = {},
     private val onNavigationDenied: (code: String, detail: String) -> Unit = { _, _ -> },
+    private val onPageUrlObserved: (String) -> Unit = {},
 ) : WebViewClient() {
     /** 用户手动放行的 HTTP 域名（会话内有效——照搬 voidbrowser https_only）。 */
     private val allowedHttpDomains = mutableSetOf<String>()
@@ -105,9 +106,10 @@ class AegisWebViewClient(
     ): Boolean {
         val url = upgradeToHttpsIfNeeded(rawUrl)
         if (requireNavigationConfirmation && mayRequireConfirmation && pendingConfirmation != null) {
-            // 不能自动替换或自动批准旧请求；新的顶层导航先使旧 nonce 失效。
+            // P1-4 修复（全量复审 2026-09-01）：不能自动批准旧请求；新顶层导航
+            // 先撤销旧 nonce，再对新 URL 重新走确认流程（旧实现直接 return false
+            // ——确认框打开期间新导航被静默吞掉，既不弹窗也不提示）。
             rejectPendingNavigation()
-            return false
         }
         // 统一走策略询问：require_confirmation 是策略级决策（与 BuildConfig
         // 无关）。确认开关只决定「弹面板」还是「自动批准」——此前直接判
@@ -230,6 +232,9 @@ class AegisWebViewClient(
             android.util.Log.e("Aegis", "未注册或陈旧会话尝试加载页面；已停止加载")
             view.stopLoading()
         }
+        // P1-6 修复（全量复审 2026-09-01）：真实页面 URL 上抛——地址栏随实际
+        // 页面同步（此前重定向/页内跳转后地址栏永远显示陈旧 URL）。
+        if (!url.isNullOrBlank()) onPageUrlObserved(url)
         super.onPageStarted(view, url, favicon)
     }
 

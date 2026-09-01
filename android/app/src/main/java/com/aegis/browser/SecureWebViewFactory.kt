@@ -47,12 +47,21 @@ object SecureWebViewFactory {
         return bytes.joinToString("") { "%02x".format(it) }
     }
 
-    /** 创建并完成安全配置的 WebView（导航经 Broker 决策 + 指纹防护注入）。 */
+    /**
+     * 创建并完成安全配置的 WebView（导航经 Broker 决策 + 指纹防护注入）。
+     *
+     * LongParameterList 豁免（批次二 P1-3/4/6）：6 个参数全部是导航
+     * 回调装配点——与 [AegisWebViewClient] 构造器同口径（回调装配点
+     * 参数多属设计使然，拆分反而引入状态对象间接层）。
+     */
+    @Suppress("LongParameterList")
     fun create(
         context: Context,
         onNavigationConfirmationRequested: (WebView, ApprovalRequest) -> Unit = { _, _ -> },
         onNavigationConfirmationResolved: (WebView) -> Unit = {},
         onNavigationDenied: (WebView, String, String) -> Unit = { _, _, _ -> },
+        onPageUrlObserved: (WebView, String) -> Unit = { _, _ -> },
+        onRendererGone: (WebView) -> Unit = {},
     ): WebView {
         // A-6 修复（架构审计 2026-08-31）：Broker 由 Application 持有——
         // 工厂不再静态单例持有（可测试、可隔离、生命周期显式）
@@ -78,7 +87,11 @@ object SecureWebViewFactory {
                 broker = broker,
                 sessionId = sessionId,
                 tabId = tabId,
-                onRendererGone = { /* renderer gone cleanup handled by caller */ },
+                onRendererGone = { deadWebView ->
+                    // P1-3 修复（全量复审 2026-09-01）：上抛调用方重建（原 no-op
+                    // ——渲染进程崩溃后标签永久白屏）
+                    onRendererGone(deadWebView)
+                },
                 requireNavigationConfirmation =
                     com.aegis.broker.BuildConfig.REQUIRE_NAVIGATION_CONFIRMATION,
                 onNavigationConfirmationRequested = { request ->
@@ -87,6 +100,9 @@ object SecureWebViewFactory {
                 onNavigationConfirmationResolved = { onNavigationConfirmationResolved(webView) },
                 onNavigationDenied = { code, detail ->
                     onNavigationDenied(webView, code, detail)
+                },
+                onPageUrlObserved = { url ->
+                    onPageUrlObserved(webView, url)
                 },
             )
         webView.webViewClient = client

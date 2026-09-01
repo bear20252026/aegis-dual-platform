@@ -96,6 +96,21 @@ class TabManager(
     /** 当前激活标签；无标签时返回 null。 */
     fun current(): Tab? = tabs.getOrNull(activeIndex)
 
+    /**
+     * P1-3 修复（全量复审 2026-09-01）：渲染进程崩溃后原位替换 WebView。
+     * 保留标签 id/标题/挂起状态，返回旧 WebView（清理由调用方负责：
+     * SecureWebViewFactory.release + destroy）；越界返回 null。
+     */
+    fun replaceWebView(
+        index: Int,
+        newWebView: WebView,
+    ): WebView? {
+        if (index !in tabs.indices) return null
+        val old = tabs[index].webView
+        tabs[index] = tabs[index].copy(webView = newWebView)
+        return old
+    }
+
     /** 返回标签列表快照（防调用方改动内部结构）。 */
     fun list(): List<Tab> = tabs.toList()
 
