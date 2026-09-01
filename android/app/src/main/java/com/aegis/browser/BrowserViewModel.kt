@@ -190,6 +190,15 @@ class BrowserViewModel : ViewModel() {
                     _pendingNavigationConfirmation.value = null
                 }
             },
+            onNavigationDenied = { _, code, _ ->
+                // P0 修复（全量复审 2026-09-01）：顶层导航被拒不再静默——经
+                // webViewAlert 上抛 UI（此前用户只看到白屏/无反应）。
+                _webViewAlert.value =
+                    when (code) {
+                        "session_expired" -> "浏览会话已过期，已自动续期失败——请重试或新建标签"
+                        else -> "该地址无法通过安全策略验证（$code）"
+                    }
+            },
         )
 }
 

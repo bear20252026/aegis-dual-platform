@@ -27,6 +27,15 @@ class AndroidBroker(
             null
         }
 
+    companion object {
+        /**
+         * 原生核心会话 TTL（秒）。P0 修复（全量复审 2026-09-01）：此前硬编码
+         * 在 registerSession 调用点且无续期——应用启动 2 分钟后所有导航被
+         * session_expired 拒绝（真机复现）。常量单源 + renewSession 滑动续期。
+         */
+        const val SESSION_TTL_SECONDS = 120L
+    }
+
     /** 注册由受控 WebView 创建的会话；未知会话上的所有副作用均应被拒绝。 */
     fun registerSession(
         sessionId: String,
@@ -40,12 +49,39 @@ class AndroidBroker(
                     sessionId,
                     tabId,
                     generation,
-                    120,
+                    SESSION_TTL_SECONDS,
                 ) != true
             ) {
                 return@synchronized false
             }
             sessions[sessionId] = SessionContext(tabId, generation)
+            true
+        }
+    }
+
+    /**
+     * 会话滑动续期（P0 修复——全量复审 2026-09-01）：导航前重调原生核心
+     * createSession 对同 session_id 覆盖式重注册（重置 created_at，generation
+     * 传当前值保持双端一致），消除「启动 2 分钟后所有导航被 session_expired
+     * 拒绝」。仅在会话存在且标签匹配时续期；待审批确认期间不续期（由调用方
+     * 保证），避免孤儿化 pending nonce。非原生模式会话本无时效——恒真。
+     */
+    fun renewSession(
+        sessionId: String,
+        tabId: String,
+    ): Boolean {
+        return synchronized(authorizationLock) {
+            val session = sessions[sessionId] ?: return@synchronized false
+            if (session.tabId != tabId) return@synchronized false
+            if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE && nativePolicyCoreBridge?.createSession(
+                    sessionId,
+                    tabId,
+                    session.documentGeneration,
+                    SESSION_TTL_SECONDS,
+                ) != true
+            ) {
+                return@synchronized false
+            }
             true
         }
     }
@@ -134,7 +170,7 @@ class AndroidBroker(
                 expiresAt =
                     kotlinx.datetime.Clock.System
                         .now()
-                        .plus(kotlin.time.Duration.parse("120s")),
+                        .plus(kotlin.time.Duration.parse("${SESSION_TTL_SECONDS}s")),
                 nonce = "$sessionId:${java.util.UUID.randomUUID().toString().replace("-", "")}",
                 policyVersion = policyVersion,
                 explanation = "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion",

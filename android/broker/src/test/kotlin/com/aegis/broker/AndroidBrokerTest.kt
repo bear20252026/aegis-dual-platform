@@ -71,6 +71,46 @@ class AndroidBrokerTest {
     }
 
     @Test
+    fun renewSessionOnlyWorksForLiveSessionWithMatchingTab() {
+        val broker = AndroidBroker()
+        assertFalse(broker.renewSession("missing", "tab-1"))
+
+        assertTrue(broker.registerSession("session-1", "tab-1"))
+        assertFalse(broker.renewSession("session-1", "other-tab"))
+        assertTrue(broker.renewSession("session-1", "tab-1"))
+
+        broker.destroySession("session-1")
+        assertFalse(broker.renewSession("session-1", "tab-1"))
+    }
+
+    @Test
+    fun renewalPreservesSessionGenerationState() {
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("session-1", "tab-1"))
+        assertTrue(broker.updateDocumentGeneration("session-1", "tab-1", 1))
+        assertTrue(broker.renewSession("session-1", "tab-1"))
+        // 续期不重置本地代际：旧代际仍拒绝、当前代际仍放行
+        assertTrue(
+            broker.evaluateNavigation(
+                "session-1",
+                "tab-1",
+                0,
+                "https://example.com",
+                "navigation",
+            ) is Decision.Deny,
+        )
+        assertTrue(
+            broker.evaluateNavigation(
+                "session-1",
+                "tab-1",
+                1,
+                "https://example.com",
+                "navigation",
+            ) is Decision.Allow,
+        )
+    }
+
+    @Test
     fun documentGenerationAdvancesOnlyOneStepForTheRegisteredTab() {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("session-1", "tab-1"))

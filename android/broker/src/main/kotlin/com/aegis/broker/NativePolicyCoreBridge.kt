@@ -118,15 +118,20 @@ class NativePolicyCoreBridge private constructor(
         native.aegis_policy_core_broker_free(broker)
     }
 
+    // JNI 边界必须吞掉所有异常转 fail-closed 布尔值（同名规则豁免见 C ABI 注释）
+    @Suppress("TooGenericExceptionCaught")
     private fun invokeBoolean(call: () -> Byte): Boolean =
         try {
             call() == 1.toByte()
-        } catch (_: LinkageError) {
+        } catch (e: LinkageError) {
+            android.util.Log.e("AegisBroker", "native 调用链接失败: ${e.javaClass.simpleName}: ${e.message}")
             false
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("AegisBroker", "native 调用异常: ${e.javaClass.simpleName}: ${e.message}")
             false
         }
 
+    @Suppress("TooGenericExceptionCaught")
     private fun invokeDecision(call: () -> Pointer?): Decision? =
         try {
             val response = call() ?: return null
@@ -135,9 +140,11 @@ class NativePolicyCoreBridge private constructor(
             } finally {
                 native.aegis_policy_core_string_free(response)
             }
-        } catch (_: LinkageError) {
+        } catch (e: LinkageError) {
+            android.util.Log.e("AegisBroker", "native 决策链接失败: ${e.javaClass.simpleName}: ${e.message}")
             null
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("AegisBroker", "native 决策异常: ${e.javaClass.simpleName}: ${e.message}")
             null
         }
 

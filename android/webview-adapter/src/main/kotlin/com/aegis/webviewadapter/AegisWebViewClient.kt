@@ -13,7 +13,10 @@ import com.aegis.broker.Decision
  * 转换为请求（不拥有安全策略——ADR-002）。导航/新窗口经 broker 决策（真实拒绝）；
  * onRenderProcessGone 返回 true + 清理 WebView（官方 Termination Handling API——
  * 不返回 true 则系统 kill Activity——调研交叉确认）。
+ *
+ * 构造参数全部为安全链路显式依赖（回调缺省安全——no-op）。
  */
+@Suppress("LongParameterList")
 class AegisWebViewClient(
     private val broker: AndroidBroker,
     private val sessionId: String,
@@ -22,6 +25,7 @@ class AegisWebViewClient(
     private val requireNavigationConfirmation: Boolean = false,
     private val onNavigationConfirmationRequested: (ApprovalRequest) -> Unit = {},
     private val onNavigationConfirmationResolved: () -> Unit = {},
+    private val onNavigationDenied: (code: String, detail: String) -> Unit = { _, _ -> },
 ) : WebViewClient() {
     /** 用户手动放行的 HTTP 域名（会话内有效——照搬 voidbrowser https_only）。 */
     private val allowedHttpDomains = mutableSetOf<String>()
@@ -109,6 +113,12 @@ class AegisWebViewClient(
         // 无关）。确认开关只决定「弹面板」还是「自动批准」——此前直接判
         // decision is Allow 导致关闭开关后 RequireConfirmation 全被
         // fail-closed 拒绝（搜索修复上线后再次失效的根因）。
+        //
+        // P0 修复（全量复审 2026-09-01）：决策前滑动续期会话——此前原生核心
+        // 会话 TTL=120s 且无续期，应用启动 2 分钟后所有导航被 session_expired
+        // 拒绝（真机复现：连搜索词都被弹「安全提示」）。待审批确认期间不续期，
+        // 避免覆盖式重注册孤儿化 pending nonce。
+        renewSessionBeforeDecision()
         when (
             val decision =
                 broker.requestNavigationConfirmation(
@@ -156,9 +166,30 @@ class AegisWebViewClient(
             }
 
             is Decision.Deny -> {
-                return false
+                return denied(decision.reason, mayRequireConfirmation, url)
             }
         }
+    }
+
+    /** P0 修复（全量复审 2026-09-01）：决策前滑动续期会话（待审批确认期间不续期）。 */
+    private fun renewSessionBeforeDecision() {
+        if (pendingConfirmation == null) {
+            broker.renewSession(sessionId, tabId)
+        }
+    }
+
+    /**
+     * P0 修复（全量复审 2026-09-01）：拒绝不再静默——顶层导航拒绝上抛 UI 提示
+     * （此前用户只看到白屏/无反应）；子框架拒绝留日志。
+     */
+    private fun denied(
+        reason: com.aegis.broker.DenyReason,
+        topLevel: Boolean,
+        url: String,
+    ): Boolean {
+        android.util.Log.w("AegisWebView", "导航被拒: code=${reason.code} detail=${reason.detail} url=$url")
+        if (topLevel) onNavigationDenied(reason.code, reason.detail)
+        return false
     }
 
     private fun upgradeToHttpsIfNeeded(url: String): String {

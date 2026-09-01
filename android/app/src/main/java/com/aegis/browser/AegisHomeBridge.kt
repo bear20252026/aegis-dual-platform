@@ -100,7 +100,16 @@ class AegisHomeBridge(
         val wv = webViewProvider() ?: return
         // @JavascriptInterface 运行在 JS 后台线程——WebView API 必须
         // 主线程调用（WrongThreadViolation：loadUrl 被吞 → 导航静默失效）
-        wv.post { SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url) }
+        // P0 修复（全量复审 2026-09-01）：失败不再静默——此前返回值被丢弃，
+        // 会话过期/策略拒绝时首页搜索与地址栏跳转零反馈（用户以为点了没反应）
+        wv.post {
+            val ok = SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url) == true
+            if (!ok) {
+                android.widget.Toast
+                    .makeText(context, "无法打开：未通过安全策略验证", android.widget.Toast.LENGTH_SHORT)
+                    .show()
+            }
+        }
     }
 
     /**

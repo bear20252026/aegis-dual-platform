@@ -52,6 +52,7 @@ object SecureWebViewFactory {
         context: Context,
         onNavigationConfirmationRequested: (WebView, ApprovalRequest) -> Unit = { _, _ -> },
         onNavigationConfirmationResolved: (WebView) -> Unit = {},
+        onNavigationDenied: (WebView, String, String) -> Unit = { _, _, _ -> },
     ): WebView {
         // A-6 修复（架构审计 2026-08-31）：Broker 由 Application 持有——
         // 工厂不再静态单例持有（可测试、可隔离、生命周期显式）
@@ -84,6 +85,9 @@ object SecureWebViewFactory {
                     onNavigationConfirmationRequested(webView, request)
                 },
                 onNavigationConfirmationResolved = { onNavigationConfirmationResolved(webView) },
+                onNavigationDenied = { code, detail ->
+                    onNavigationDenied(webView, code, detail)
+                },
             )
         webView.webViewClient = client
         navigators[webView] = SecureNavigator(webView, client)
