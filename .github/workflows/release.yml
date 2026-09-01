@@ -46,6 +46,7 @@ jobs:
   release-windows:
     needs: pin-check
     uses: ./.github/workflows/release-windows.yml
+    secrets: inherit
     permissions:
       id-token: write
       attestations: write
@@ -54,6 +55,11 @@ jobs:
   release-android:
     needs: pin-check
     uses: ./.github/workflows/release-android.yml
+    # 签名根因修复（v2.1.12 实测）：可复用工作流不会自动继承 secrets——
+    # 不传 inherit 时被调方 secrets.AEGIS_KEYSTORE_* 全为空 → 静默走
+    # 「未签名 APK」warning 路径，无签名包被 publish 上 Release（真机安装报
+    # INSTALL_PARSE_FAILED_NO_CERTIFICATES）。三平台统一 inherit 防回归。
+    secrets: inherit
     permissions:
       id-token: write
       attestations: write
@@ -62,6 +68,7 @@ jobs:
   release-core:
     needs: pin-check
     uses: ./.github/workflows/release-core.yml
+    secrets: inherit
     permissions:
       id-token: write
       attestations: write
