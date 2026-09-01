@@ -114,10 +114,7 @@ class TabManager(
     /** 返回标签列表快照（防调用方改动内部结构）。 */
     fun list(): List<Tab> = tabs.toList()
 
-    /** 按 id 查找标签；不存在返回 null。 */
-    fun findById(id: Long): Tab? = tabs.firstOrNull { it.id == id }
-
-    /** 全部挂起（窗口不可见 / Activity 暂停时调用）。 */
+    /** 全部挂起（Activity 销毁兜底时调用——唯一调用点 MainActivity.onDestroy）。 */
     fun suspendAll() {
         // TabManager 补审（Android 官方）：挂起全部标签——onPause 实例级
         // + pauseTimers 全局暂停 JS timers（后台标签不继续跑 JS——资源/隐私）
@@ -132,19 +129,9 @@ class TabManager(
         }
     }
 
-    /** 仅恢复当前标签（窗口重新可见时调用）。 */
-    fun resumeCurrent() {
-        current()?.let {
-            if (it.suspended) {
-                resume(it.webView)
-                it.suspended = false
-            }
-        }
-        // TabManager 补审（Android 官方）：恢复时重启全局 JS timers
-        // （resumeTimers——与 suspendAll 的 pauseTimers 成对；幂等，无条件调用，
-        // P2 修复：原先仅在 suspended 分支内，极端时序下 timers 停在暂停态）
-        tabs.firstOrNull()?.webView?.resumeTimers()
-    }
+    // 2026-09-01 死代码清理（用户确认）：删除 findById / resumeCurrent。
+    // 二者全工程 0 调用——suspendAll 仅在 onDestroy 兜底场景存在，无恢复
+    // 路径亦无需求（销毁即终止）；未来若引入多标签挂起/恢复机制再按需重建。
 
     // ------------------------------------------------------------------ //
     // 私有：活跃上限策略
