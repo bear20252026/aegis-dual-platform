@@ -183,6 +183,11 @@ jobs:
           zip -qr "Aegis-${GITHUB_REF_NAME#v}-review-package.zip" review-package
           rm -rf review-package
 
+      # 三平台 dist 目录存在同名文件（build-metadata.json / SHA256SUMS.json 等）——
+      # softprops 对重复上传走 update-metadata 路径，GitHub API 404 竞态导致步骤失败（v2.1.11 实测）
+      - name: 跨平台同名资产去重（加平台前缀）
+        run: python scripts/dedup_release_assets.py dist/windows dist/android dist/core
+
       - name: Create GitHub Release (all platforms)
         uses: softprops/action-gh-release@d1e66170d32c9ec7bbcb7fae044d3d686ce304d3
         with:

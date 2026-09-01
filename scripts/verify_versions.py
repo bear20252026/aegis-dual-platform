@@ -26,6 +26,8 @@ def main() -> int:
     values = load_properties(ROOT / "shared" / "version.properties")
     android_text = (ROOT / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
     windows_text = (ROOT / "windows" / "src" / "Aegis.Windows.App" / "Aegis.Windows.App.csproj").read_text(encoding="utf-8")
+    iss_text = (ROOT / "docs" / "release" / "AegisSetup.iss").read_text(encoding="utf-8")
+    iss_version = re.search(r'(?m)^#define MyAppVersion "([^"]+)"', iss_text)
     expected = {
         "Android versionCode": (expected_assignment(android_text, "versionCode"), values["VERSION_CODE"]),
         "Android versionName": (expected_assignment(android_text, "versionName"), values["VERSION_NAME"]),
@@ -34,6 +36,7 @@ def main() -> int:
         "Windows FileVersion": (expected_xml_value(windows_text, "FileVersion"), values["WINDOWS_PACKAGE_VERSION"]),
         "Windows PackageId": (expected_xml_value(windows_text, "PackageId"), values["WINDOWS_PACKAGE_IDENTITY"]),
         "Windows Product": (expected_xml_value(windows_text, "Product"), values["DISPLAY_NAME"]),
+        "Windows Installer MyAppVersion": (iss_version.group(1) if iss_version else None, values["VERSION_NAME"]),
     }
     failures = [f"{label}: found {actual!r}, expected {wanted!r}" for label, (actual, wanted) in expected.items() if actual != wanted]
     if args.tag and args.tag != f"v{values['VERSION_NAME']}":

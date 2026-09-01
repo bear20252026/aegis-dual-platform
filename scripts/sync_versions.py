@@ -61,6 +61,20 @@ def main() -> None:
     replace_xml_value(windows_project, "PackageId", values["WINDOWS_PACKAGE_IDENTITY"])
     replace_xml_value(windows_project, "Product", values["DISPLAY_NAME"])
 
+    # Windows Inno Setup 安装包版本（v2.1.11 发布实测：iss 写死 2.1.7——
+    # CI 一直用旧版号打安装包。单源收口到 version.properties）
+    windows_installer = ROOT / "docs" / "release" / "AegisSetup.iss"
+    installer_text = windows_installer.read_text(encoding="utf-8")
+    installer_updated, iss_count = re.subn(
+        r'(?m)^#define MyAppVersion "[^"]*"$',
+        f'#define MyAppVersion "{values["VERSION_NAME"]}"',
+        installer_text,
+        count=1,
+    )
+    if iss_count != 1:
+        raise RuntimeError("expected #define MyAppVersion not found in AegisSetup.iss")
+    windows_installer.write_text(installer_updated, encoding="utf-8")
+
     print("Version declarations synchronized from shared/version.properties")
 
 
