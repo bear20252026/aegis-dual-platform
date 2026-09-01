@@ -121,7 +121,9 @@ class TabManager(
     fun suspendAll() {
         // TabManager 补审（Android 官方）：挂起全部标签——onPause 实例级
         // + pauseTimers 全局暂停 JS timers（后台标签不继续跑 JS——资源/隐私）
-        tabs.first().webView.pauseTimers()
+        // P2 修复（全量复审 2026-09-01）：firstOrNull 防空列表崩溃
+        // （原先 tabs.first() 在无标签时抛 NoSuchElementException）
+        tabs.firstOrNull()?.webView?.pauseTimers()
         tabs.forEach {
             if (!it.suspended) {
                 pause(it.webView)
@@ -136,11 +138,12 @@ class TabManager(
             if (it.suspended) {
                 resume(it.webView)
                 it.suspended = false
-                // TabManager 补审（Android 官方）：恢复时重启全局 JS timers
-                // （resumeTimers——与 suspendAll 的 pauseTimers 成对）
-                tabs.first().webView.resumeTimers()
             }
         }
+        // TabManager 补审（Android 官方）：恢复时重启全局 JS timers
+        // （resumeTimers——与 suspendAll 的 pauseTimers 成对；幂等，无条件调用，
+        // P2 修复：原先仅在 suspended 分支内，极端时序下 timers 停在暂停态）
+        tabs.firstOrNull()?.webView?.resumeTimers()
     }
 
     // ------------------------------------------------------------------ //

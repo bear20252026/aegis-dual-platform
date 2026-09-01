@@ -14,6 +14,7 @@ from ..validators import host_of, to_int as _to_int, to_nonneg_int as _to_nonneg
 class SearchEngineMixin:
     # 宿主 Api 成员声明（协议模式——运行时由组合后的 Api 提供）
     _engine: str
+    _notify: Callable[[str], bool]
     config: Any
     _data_dir: str
     _check_trusted_source: Callable[[], bool]
@@ -35,9 +36,13 @@ class SearchEngineMixin:
                 log_event("[bridge] 拒绝远程页面 set_search_engine（来源不受信）")
             except Exception:
                 pass
+            # P2 修复（全量复审 2026-09-01）：静默拒绝 → 可见反馈
+            self._notify("搜索引擎设置需在主页（新标签页）操作")
             return
         try:
             if key not in SEARCH_ENGINES:
+                # P2 修复：静默拒绝 → 可见反馈
+                self._notify("搜索引擎设置失败：未知引擎")
                 return
             self._engine = key
             if self.config is None:
@@ -47,5 +52,9 @@ class SearchEngineMixin:
             if self._data_dir:
                 self.config.save(self._data_dir)
         except Exception:
-            pass  # 配置失败不影响本次切换
+            # P2 修复：静默失败 → 可见反馈
+            try:
+                self._notify("搜索引擎设置失败：配置写入异常")
+            except Exception:
+                pass  # 配置失败不影响本次切换
 

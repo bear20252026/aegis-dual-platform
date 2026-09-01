@@ -154,6 +154,21 @@ class Api(
     def _eval(self, script: str) -> bool:
         return self._nav.eval(script)
 
+    def _notify(self, message: str) -> bool:
+        """P2 修复（全量复审 2026-09-01）：桥方法静默失败的统一用户可见反馈。
+
+        经注入式壳层工具栏的 window.__aegisToast 提示（shell_toolbar 单源）。
+        提示失败只影响提示本身，绝不影响主流程——各调用点保持原语义。
+        """
+        try:
+            safe = (str(message).replace("\\", "\\\\")
+                    .replace("'", "\\'").replace("\n", " ").replace("\r", " "))
+            return self._eval(
+                "window.__aegisToast && window.__aegisToast('%s')" % safe
+            )
+        except Exception:
+            return False
+
     def _nav_healthy(self) -> bool:
         """看门狗委托：导航线程健康度。"""
         return self._nav.healthy()

@@ -16,8 +16,7 @@ class AndroidBroker(
     private val nativePolicyCoreGate: NativePolicyCoreGate = DefaultNativePolicyCoreGate,
 ) {
     private val consumedNonces =
-        java.util.concurrent.ConcurrentHashMap
-            .newKeySet<String>()
+        java.util.LinkedHashSet<String>()
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, SessionContext>()
     private val authorizationLock = Any()
     private val nativePolicyCoreBridge =
@@ -34,6 +33,13 @@ class AndroidBroker(
          * session_expired 拒绝（真机复现）。常量单源 + renewSession 滑动续期。
          */
         const val SESSION_TTL_SECONDS = 120L
+
+        /**
+         * P2 修复（全量复审 2026-09-01）：已消费 nonce 有界（FIFO 逐出最旧）。
+         * 逐出的 nonce 对应授权对象 SESSION_TTL_SECONDS 内即过期（isValid
+         * 校验 expiresAt），重放窗口远小于逐出周期——有界性不以安全性换取。
+         */
+        const val MAX_CONSUMED_NONCES = 50_000
     }
 
     /** 注册由受控 WebView 创建的会话；未知会话上的所有副作用均应被拒绝。 */
@@ -279,7 +285,7 @@ class AndroidBroker(
                 ) {
                     return@synchronized false
                 }
-                bridge.consumeNavigation(action, rawUrl, scope) && consumedNonces.add(action.nonce)
+                bridge.consumeNavigation(action, rawUrl, scope) && trackConsumedNonce(action.nonce)
             }
         }
         val uri = OriginPolicy.tryParseExternal(rawUrl) ?: return false
@@ -291,8 +297,20 @@ class AndroidBroker(
             ) {
                 return@synchronized false
             }
-            consumedNonces.add(action.nonce)
+            trackConsumedNonce(action.nonce)
         }
+    }
+
+    /** 登记已消费 nonce（调用方须持 authorizationLock）；超上限 FIFO 逐出最旧。 */
+    private fun trackConsumedNonce(nonce: String): Boolean {
+        val added = consumedNonces.add(nonce)
+        while (consumedNonces.size > MAX_CONSUMED_NONCES) {
+            val iterator = consumedNonces.iterator()
+            if (!iterator.hasNext()) break
+            iterator.next()
+            iterator.remove()
+        }
+        return added
     }
 
     private fun deny(

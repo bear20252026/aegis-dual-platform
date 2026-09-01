@@ -222,7 +222,9 @@ TOOLBAR_JS = r"""
       var items = [];
       if (link) {
         items.push({label: '在新标签页打开链接', action: function() {
-          try { if (window.pywebview && pywebview.api) pywebview.api.navigate(link.href); } catch(err) {}
+          // P2 修复（全量复审 2026-09-01）：原先调 navigate()——实为当前页
+          // 导航（菜单项语义与行为不符）；new_tab 才是新标签语义
+          try { if (window.pywebview && pywebview.api) pywebview.api.new_tab(link.href); } catch(err) {}
         }});
         items.push({label: '复制链接地址', shortcut: '', action: function() {
           navigator.clipboard.writeText(link.href).catch(function(){});
@@ -254,7 +256,15 @@ TOOLBAR_JS = r"""
         try { if (window.pywebview && pywebview.api) pywebview.api.reload_page(); } catch(err) {}
       }});
       items.push({label: '查看页面源代码', action: function() {
-        try { if (window.pywebview && pywebview.api) pywebview.api.view_source(); } catch(err) {}
+        // P2 修复（全量复审 2026-09-01）：view_source 不在桥白名单
+        // （view-source: 不在协议白名单——安全策略），原先静默无反应。
+        // 实现（需放行 view-source:）或移除菜单项留待产品决策，先给可见反馈。
+        var unsupported = function () { window.__aegisToast('查看源代码不可用（安全策略未开放该协议）'); };
+        try {
+          if (window.pywebview && pywebview.api && pywebview.api.view_source) {
+            pywebview.api.view_source();
+          } else { unsupported(); }
+        } catch(err) { unsupported(); }
       }});
       showCtxMenu(e.clientX, e.clientY, items);
     });
@@ -262,6 +272,29 @@ TOOLBAR_JS = r"""
     // 点击其他地方关闭菜单
     document.addEventListener('click', hideCtxMenu);
     document.addEventListener('keydown', function(e) { if (e.key === 'Escape') hideCtxMenu(); });
+
+    // === P2 修复（全量复审 2026-09-01）：统一用户可见反馈 toast ===
+    // 桥方法静默失败（壁纸/引擎/恢复会话/频控/安全拒绝等）经
+    // window.__aegisToast 提示——Python 侧 _notify() 单点调用
+    window.__aegisToast = function (msg) {
+      try {
+        var t = document.getElementById('aegis-toast');
+        if (!t) {
+          t = document.createElement('div');
+          t.id = 'aegis-toast';
+          t.style.cssText = 'position:fixed;left:50%;bottom:64px;transform:translateX(-50%);' +
+            'z-index:2147483646;background:rgba(20,20,20,0.92);color:#fff;padding:8px 18px;' +
+            'border-radius:8px;font-size:13px;font-family:' + FONT + ';pointer-events:none;' +
+            'opacity:0;transition:opacity 0.2s ease;max-width:70vw;white-space:nowrap;' +
+            'overflow:hidden;text-overflow:ellipsis;';
+          (document.body || document.documentElement).appendChild(t);
+        }
+        t.textContent = msg;
+        t.style.opacity = '1';
+        clearTimeout(window.__aegisToastTimer);
+        window.__aegisToastTimer = setTimeout(function () { t.style.opacity = '0'; }, 2600);
+      } catch (err) {}
+    };
 
     // === 挂载工具栏 ===
     var root = document.documentElement || document;

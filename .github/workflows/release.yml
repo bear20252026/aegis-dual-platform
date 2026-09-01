@@ -166,9 +166,22 @@ jobs:
         with:
           name: release-core
           path: dist/core
+      # Windows 安装包是独立 artifact（release-windows-installer），必须一并下载
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+        with:
+          name: release-windows-installer
+          path: dist/windows
 
       - name: 从规范源码生成评审包（A-4：发布时生成，不再入库）
         run: python scripts/build_review_package.py --build --out dist/review-package
+
+      # 评审包 ~300 个规范源文件，必须压成单 zip 再上传——
+      # 否则 files: dist/** 会把每个源文件逐个发布成 Release 资产（v2.1.10 实测 318 个垃圾资产）
+      - name: 打包评审包为单 zip
+        run: |
+          cd dist
+          zip -qr "Aegis-${GITHUB_REF_NAME#v}-review-package.zip" review-package
+          rm -rf review-package
 
       - name: Create GitHub Release (all platforms)
         uses: softprops/action-gh-release@d1e66170d32c9ec7bbcb7fae044d3d686ce304d3

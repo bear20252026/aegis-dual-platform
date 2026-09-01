@@ -140,7 +140,18 @@ check("close_current_tab 关掉的是实时当前标签",
 import tempfile
 
 tmp = tempfile.mkdtemp(prefix="aegis_bridge_")
+
+
+class ShellWindow:
+    """模拟本地壳页（P2 修复后 _check_trusted_source fail-closed：
+    window 未绑定 / 拿不到 URL 一律不受信——恢复会话测试须绑定壳页窗口）。"""
+
+    def get_current_url(self):
+        return START_URL  # file:// → host 为空 → 受信
+
+
 api2 = Api()
+api2.window = ShellWindow()
 api2._data_dir = tmp
 api2.seed_session([
     {"title": "S1", "url": "https://s1.cn", "pinned": False, "group": "默认"},
@@ -150,6 +161,7 @@ api2._persist_session()
 check("has_saved_session 返回标签数", api2.has_saved_session() == 2)
 
 api3 = Api()
+api3.window = ShellWindow()
 api3._data_dir = tmp
 check("restore_session 成功", api3.restore_session() is True)
 snap = api3.get_tabs()
@@ -171,7 +183,9 @@ api5.close_current_tab()
 check("close_current_tab 钩子更新会话", api5.has_saved_session() == 1)
 
 # 11) get_bookmarks 受信来源校验（B0-W-01 复审回归）
-# api.window 未绑定 → current_url "" → 受信 → 返回列表（store 未绑定 → []）
+# P2 修复后 _check_trusted_source fail-closed：受信需绑定壳页窗口
+# （file:// → host 空）；window 未绑定/拿不到 URL 一律不受信
+api.window = ShellWindow()
 check("受信 get_bookmarks 返回列表", api.get_bookmarks() == [])
 
 class _RemoteWin:
@@ -211,6 +225,7 @@ _conn.close()
 _bi._SOURCES = (("chrome", _chrome), ("edge", _edge))
 
 api7 = Api()
+api7.window = ShellWindow()
 api7._data_dir = tempfile.mkdtemp(prefix="aegis_impdata_")
 from app.bookmark_store import BookmarkStore
 from app.history_store import HistoryStore
@@ -246,6 +261,7 @@ check("远程页 import_bookmarks 拒绝",
 
 # 13) 预置书签种子（「几何画板」外挂入口——空库注入、幂等）
 api9 = Api()
+api9.window = ShellWindow()
 api9._data_dir = tempfile.mkdtemp(prefix="aegis_seed_")
 api9.bookmarks = BookmarkStore(api9._data_dir)
 check("空库注入种子 1 条", api9.bookmarks.seed_defaults() == 1)

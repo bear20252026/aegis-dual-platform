@@ -7,6 +7,7 @@ M-1 后续：api_bridge 818 行超 500 行红线，按节拆分为 mixin 组合
 from typing import Any, Callable
 
 from ..url_utils import SEARCH_ENGINES, START_URL, normalize_url  # noqa: F401
+from ..security import MAX_URL_LENGTH
 from ..validators import host_of, to_int as _to_int, to_nonneg_int as _to_nonneg_int, to_str as _to_str  # noqa: F401
 
 
@@ -18,6 +19,7 @@ class NavigationMixin:
     window: Any
     _load: Callable[[str], bool]
     _eval: Callable[[str], bool]
+    _notify: Callable[[str], bool]
     _update_current: Callable[..., None]
     _is_navigation_safe_url: Callable[[str], bool]
     # ---- 导航 ----
@@ -49,8 +51,24 @@ class NavigationMixin:
         # H-C1/A-② 审计修复：外部导航入口双层校验（协议安全 + 威胁黑名单）。
         # 只放行 http/https 与显式 about:blank；file:/javascript:/data:/blob:
         # 等一律拒绝；命中 threat_feed 黑名单域名同样拒绝。
+        if not url:
+            # P2 修复（全量复审 2026-09-01）：超长查询（中文 >8192 归一化为
+            # 搜索 URL 后超 MAX_URL_LENGTH）/不可识别 scheme 此前静默拒——
+            # 用户侧"点了没反应"。给出可见反馈（security.py 静默拒的出口）。
+            self._notify("无法打开：地址无效或内容过长")
+            try:
+                from crash_reporter import log_event
+                log_event(f"[bridge] 拒绝 navigate（归一化为空）: {text[:200]}")
+            except Exception:
+                pass
+            return
         if not self._is_navigation_safe_url(url):
-            # 可观测性：旧实现静默 return，用户侧表现为"地址栏点了没反应"
+            # 可观测性 + P2 修复：旧实现静默 return，用户侧"点了没反应"。
+            # 超长内容（中文长查询归一化为搜索 URL 后超 MAX_URL_LENGTH）给专用文案。
+            if len(url) > MAX_URL_LENGTH:
+                self._notify(f"无法打开：内容过长（上限 {MAX_URL_LENGTH} 字符）")
+            else:
+                self._notify("无法打开：地址未通过安全检查")
             try:
                 from crash_reporter import log_event
                 log_event(f"[bridge] 拒绝 navigate（目标不安全）: {url[:200]}")
@@ -96,11 +114,20 @@ class NavigationMixin:
         持久化状态**的操作。P0-1（2026-09-01）起**不再用于 navigate**——
         导航操作无持久化副作用，来源校验会误伤注入式地址栏 Chrome UI，
         详见 `navigate()` docstring 的威胁等价分析。"""
+        w = self.window
+        if w is None:
+            return False
+        # P2 修复（全量复审 2026-09-01）：不再经由吞异常的 current_url()——
+        # 该路径下 get_current_url() 异常/为空都会得到 ""，host_of("")==""
+        # 被误判为"本地壳页受信"。来源校验必须 fail-closed：拿不到 URL
+        # 或 URL 为空 ≠ 本地壳页——一律拒绝。
         try:
-            host = host_of(self.current_url() or "")
-            return host == ""  # 本地壳页（file:///空白）受信；远程拒绝
+            raw = w.get_current_url() or ""
         except Exception:
             return False
+        if not raw:
+            return False
+        return host_of(raw) == ""
 
     # ---- JS 错误上报（JS 侧 window.onerror / unhandledrejection → 这里）----
     def js_error(self, message: str, source: str = "", line: Any = None,

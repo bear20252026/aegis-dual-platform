@@ -19,6 +19,9 @@ class BrowserViewModel : ViewModel() {
     companion object {
         /** 自定义首页（Android assets 本地加载）。 */
         const val HOME_URL = BrowserEngine.HOME_URL
+
+        /** 「打开」按钮防抖间隔（毫秒）——P2 修复（全量复审 2026-09-01）。 */
+        const val NAVIGATE_DEBOUNCE_MS = 500L
     }
 
     private val _tabs = MutableStateFlow<List<Tab>>(emptyList<Tab>())
@@ -29,6 +32,14 @@ class BrowserViewModel : ViewModel() {
 
     private val _address = MutableStateFlow(HOME_URL)
     val address: StateFlow<String> = _address.asStateFlow()
+
+    /**
+     * P2 修复（全量复审 2026-09-01）：地址栏编辑草稿标记——用户输入未提交时，
+     * 标签切换 / 后台页面事件不得覆盖输入内容（原先 _address 全局单字段被
+     * refresh()/onPageUrlObserved 直接覆盖，多标签下互相踩踏）。
+     * 提交（navigateToAddress）或切换标签即清除草稿，恢复派生自 Tab.url。
+     */
+    private var addressDraftActive = false
 
     private val _tabsPosition = MutableStateFlow("top")
     val tabsPosition: StateFlow<String> = _tabsPosition.asStateFlow()
@@ -90,7 +101,9 @@ class BrowserViewModel : ViewModel() {
         if (!::tabManager.isInitialized) return
         _tabs.value = tabManager.list()
         _activeIndex.value = tabManager.activeIndex
-        _address.value = tabManager.current()?.url ?: HOME_URL
+        if (!addressDraftActive) {
+            _address.value = tabManager.current()?.url?.takeIf { it.isNotBlank() } ?: HOME_URL
+        }
     }
 
     /** 新建标签页。 */
@@ -98,6 +111,7 @@ class BrowserViewModel : ViewModel() {
         if (!::tabManager.isInitialized) return
         // 新标签会切换当前 WebView；不能把旧标签的明确批准带入新上下文。
         rejectPendingNavigationConfirmation()
+        addressDraftActive = false
         val wv = createSecureWebView(context)
         SecureWebViewFactory.navigatorFor(wv)?.openTrustedHome()
         tabManager.addTab(wv, url = HOME_URL)
@@ -109,7 +123,11 @@ class BrowserViewModel : ViewModel() {
         if (!::tabManager.isInitialized) return
         if (index !in tabManager.list().indices) return
         // 待审批状态不得跨标签保留；切换时撤销 Rust 核心的 pending nonce，回到原标签也需重新请求。
-        if (index != tabManager.activeIndex) rejectPendingNavigationConfirmation()
+        if (index != tabManager.activeIndex) {
+            rejectPendingNavigationConfirmation()
+            // 切换标签 = 放弃未提交的地址栏草稿，地址栏显示目标标签 URL
+            addressDraftActive = false
+        }
         if (tabManager.switchTo(index)) refresh()
     }
 
@@ -127,19 +145,38 @@ class BrowserViewModel : ViewModel() {
         refresh()
     }
 
-    /** 更新地址栏内容。 */
+    /** 更新地址栏内容（编辑草稿——未提交前不受标签切换/页面事件覆盖）。 */
     fun updateAddress(newAddress: String) {
+        addressDraftActive = true
         _address.value = newAddress
     }
 
     /** 导航到地址栏 URL。 */
     fun navigateToAddress() {
-        if (!::tabManager.isInitialized) return
-        val wv = tabManager.current()?.webView ?: return
-        if (!SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(_address.value).orFalse()) {
+        val wv = if (::tabManager.isInitialized) tabManager.current()?.webView else null
+        if (wv == null || !navigateDebounceOk()) return
+        val target = _address.value
+        // 提交即清除草稿：后续 onPageStarted→onPageUrlObserved 正常同步地址栏
+        addressDraftActive = false
+        if (!SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(target).orFalse()) {
             _webViewAlert.value = "该地址无法通过安全策略验证"
         }
     }
+
+    /**
+     * P2 修复（全量复审 2026-09-01）：导航防抖——待审批确认期间忽略重复提交
+     * （连点会撤销待确认 nonce 并触发误导性提示）；[NAVIGATE_DEBOUNCE_MS]
+     * 内重复点击忽略。单出口无提前 return（detekt ReturnCount/MagicNumber）。
+     */
+    private fun navigateDebounceOk(): Boolean {
+        val noPendingConfirmation = _pendingNavigationConfirmation.value == null
+        val elapsed = android.os.SystemClock.uptimeMillis() - lastNavigateAttemptAt
+        val allowed = noPendingConfirmation && elapsed >= NAVIGATE_DEBOUNCE_MS
+        if (allowed) lastNavigateAttemptAt = android.os.SystemClock.uptimeMillis()
+        return allowed
+    }
+
+    private var lastNavigateAttemptAt = 0L
 
     /** 历史导航（后退/前进/刷新——合并减少函数数——detekt TooManyFunctions）。 */
     fun navigateHistory(action: HistoryAction) {
@@ -228,9 +265,10 @@ class BrowserViewModel : ViewModel() {
             },
             onPageUrlObserved = { webView, url ->
                 // P1-6 修复（全量复审 2026-09-01）：地址栏随实际页面同步。
+                // P2 修复：用户编辑草稿期间不覆盖输入（提交后恢复正常同步）。
                 if (url.isNotBlank()) {
                     tabManager.list().firstOrNull { it.webView === webView }?.url = url
-                    if (tabManager.current()?.webView === webView) {
+                    if (!addressDraftActive && tabManager.current()?.webView === webView) {
                         _address.value = url
                     }
                 }

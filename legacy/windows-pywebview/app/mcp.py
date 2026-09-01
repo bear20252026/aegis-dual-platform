@@ -315,13 +315,16 @@ def handle_request(api: Any, raw: str | dict, auth: AgentAuthContext | None = No
         except Exception:
             pass
         try:
-            result = tool["fn"](api, **arguments)
             # C2 阶段 A（ceLLMate 借鉴）：工具调用刷新 Agent 会话活跃标记
             # （请求管线据此对 Agent 请求应用白名单域策略）
+            # P2 修复（全量复审 2026-09-01）：改在工具执行【前】刷新——原先
+            # 在执行后刷新，长工具（>60s）执行期间活跃标记已过期，请求管线
+            # 把 Agent 请求当普通请求处理，白名单域策略静默失效
             try:
                 api._agent_session = time.time()  # 用顶部全局 import time
             except Exception:
                 pass
+            result = tool["fn"](api, **arguments)
             # A5：输出不可信标注（WebMCP untrustedContentHint 理念——
             # 工具结果可能含外部数据（网页内容等），标注 untrusted 帮助
             # Agent 提高警惕；不改变功能）

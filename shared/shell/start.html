@@ -346,7 +346,23 @@
           // （与 Windows get_search_engine 同构）——旧实现直接回传 key 字符串，
           // data.engines 为 undefined → ENGINES=[] → 引擎 pill 点击无响应
           var a = andApi(); if (a) {
-            try { cb(JSON.parse(a.getEngine())); } catch (e) { cb(null); }
+            // P2 修复（全量复审 2026-09-01）：解析失败/空结构不再静默 cb(null)
+            // （引擎胶囊无响应）——回退默认引擎集（与 Android
+            // SearchEngines.ENGINE_URLS 同构），胶囊保持可用
+            function engineFallback() {
+              return { engine: 'baidu', engines: [
+                { key: 'baidu', name: '百度' },
+                { key: 'bing', name: '必应' },
+                { key: 'google', name: '谷歌' },
+                { key: 'sogou', name: '搜狗' }
+              ]};
+            }
+            try {
+              var parsed = JSON.parse(a.getEngine());
+              cb(parsed && parsed.engines && parsed.engines.length ? parsed : engineFallback());
+            } catch (e) {
+              cb(engineFallback());
+            }
           }
         },
         navigate: function (url) {

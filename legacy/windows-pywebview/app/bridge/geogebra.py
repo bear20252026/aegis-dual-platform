@@ -14,6 +14,7 @@ from ..validators import host_of, to_int as _to_int, to_nonneg_int as _to_nonneg
 class GeoMixin:
     # 宿主 Api 成员声明（协议模式——运行时由组合后的 Api 提供）
     _load: Callable[[str], bool]
+    _notify: Callable[[str], bool]
     _deny_remote: Callable[[str], bool]
 
     # ================= 离线几何画板（GeoGebra Math Apps Bundle） =================
@@ -42,6 +43,12 @@ class GeoMixin:
             try:
                 from crash_reporter import log_event
                 log_event("[bridge] 几何画板资源缺失（构建未随包）")
+            except Exception:
+                pass
+            # P2 修复（全量复审 2026-09-01）：静默降级 → 可见反馈
+            # （start.html openGeo onFail 置灰是页面侧；此处覆盖直接调用）
+            try:
+                self._notify("几何画板未随当前安装包提供")
             except Exception:
                 pass
             return False

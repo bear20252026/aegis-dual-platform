@@ -55,8 +55,11 @@ class TabOpsMixin:
         _lock: threading.RLock
         _data_dir: str
 
+        _engine: str
+
         def _load(self, url: str) -> bool: ...
         def _eval(self, script: str) -> bool: ...
+        def _notify(self, message: str) -> bool: ...
         def _check_trusted_source(self) -> bool: ...
 
     def move_tab(self, from_idx: Any, to_idx: Any) -> None:
@@ -146,19 +149,30 @@ class TabOpsMixin:
                 log_event("[bridge] 拒绝远程页面 restore_session（来源不受信）")
             except Exception:
                 pass
+            # P2 修复（全量复审 2026-09-01）：静默拒绝 → 可见反馈
+            self._notify("会话恢复需在主页（新标签页）操作")
             return False
         try:
             if not self._data_dir:
                 return False
             data = SessionStore(self._data_dir).load()
             if not data or not data.get("tabs"):
+                # P2 修复：静默失败 → 可见反馈
+                self._notify("没有已保存的会话")
                 return False
             url = self.seed_session(data["tabs"], data.get("current", 0))
             if not url:
+                # P2 修复：清洗后无有效标签（P1-8 双层校验收口）→ 可见反馈
+                self._notify("会话内容未通过安全校验，未恢复")
                 return False
             self._load(url)
             return True
         except Exception:
+            # P2 修复：静默失败 → 可见反馈
+            try:
+                self._notify("会话恢复失败")
+            except Exception:
+                pass
             return False
 
     def has_saved_session(self) -> int:
@@ -261,14 +275,24 @@ class TabOpsMixin:
         # + 20 标签上限（防 tab-bomb——恶意页面循环调用）
         import time as _t
         _now = _t.time()
-        if _now - self._last_new_tab < 0.5 or len(self._tabs) >= 20:
+        if _now - self._last_new_tab < 0.5:
+            # P2 修复（全量复审 2026-09-01）：频控静默拒绝 → 可见反馈
+            self._notify("新建标签过于频繁，请稍候")
+            return
+        if len(self._tabs) >= 20:
+            # P2 修复：tab-bomb 上限静默拒绝 → 可见反馈
+            self._notify("已达标签数量上限（20 个）")
             return
         self._last_new_tab = _now
         # H-C1/A-② 审计修复：用户显式传入的 url 必须过安全+黑名单校验；
         # 空 url（UI 新建标签）仍用受信任的 START_URL，行为不变。
         if url:
-            target = normalize_url(url)
+            # P2 修复（全量复审 2026-09-01）：归一化传当前引擎——原先吃默认
+            # 引擎，用户固定百度时裸文本/搜索词在新标签被别的引擎接管
+            target = normalize_url(url, self._engine)
             if not self._is_navigation_safe_url(target):
+                # P2 修复：静默拒绝 → 可见反馈
+                self._notify("无法在新标签打开：地址未通过安全检查")
                 return
         else:
             target = START_URL
