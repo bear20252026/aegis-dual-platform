@@ -23,8 +23,8 @@ fn vectors_dir() -> std::path::PathBuf {
 
 fn load_vectors(name: &str) -> Vec<Value> {
     let path = vectors_dir().join(name);
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("读取向量文件失败 {path:?}: {e}"));
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("读取向量文件失败 {path:?}: {e}"));
     let root: Value = serde_json::from_str(&text).expect("向量 JSON 必须合法");
     root["vectors"]
         .as_array()
