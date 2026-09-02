@@ -276,8 +276,14 @@ class BrowserViewModel : ViewModel() {
             onTitleObserved = { webView, title ->
                 // P0 修复（全库审计 2026-09-02）：页面标题回填 Tab.title——
                 // 此前 onReceivedTitle 仅打日志，标签栏永远显示「新标签页」。
+                // P0 修复2（真机复测 2026-09-02）：原地改 var title 后 refresh()
+                // 不触发发射——list() 快照与 StateFlow 旧值持同一 Tab 实例，
+                // data class self-equals 恒 true。收敛到 TabManager.updateTitle
+                // （copy 替换实例）单写点。
                 if (title.isNotBlank()) {
-                    tabManager.list().firstOrNull { it.webView === webView }?.title = title
+                    val target = tabManager.list().firstOrNull { it.webView === webView }
+                    android.util.Log.i("Aegis", "R12 titleHit tab=${target?.id} title=$title")
+                    target?.let { tabManager.updateTitle(it.id, title) }
                     refresh()
                 }
             },
