@@ -273,6 +273,14 @@ class BrowserViewModel : ViewModel() {
                     }
                 }
             },
+            onTitleObserved = { webView, title ->
+                // P0 修复（全库审计 2026-09-02）：页面标题回填 Tab.title——
+                // 此前 onReceivedTitle 仅打日志，标签栏永远显示「新标签页」。
+                if (title.isNotBlank()) {
+                    tabManager.list().firstOrNull { it.webView === webView }?.title = title
+                    refresh()
+                }
+            },
             onRendererGone = { deadWebView ->
                 // P1-3 修复（全量复审 2026-09-01）：渲染进程崩溃后重建当前标签
                 // 的 WebView 并重载原 URL（原 no-op——标签永久白屏）。

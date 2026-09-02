@@ -218,15 +218,12 @@ class NativePolicyCoreBridge private constructor(
     }
 
     companion object {
-        // C ABI v3 新增 Rust 托管的确认登记、批准兑换与拒绝接口。
-        private const val EXPECTED_ABI_VERSION = 3
-
         fun tryCreate(policyVersion: String): NativePolicyCoreBridge? =
             try {
                 val native = Native.load("aegis_policy_core", NativePolicyCoreAbi::class.java)
-                if (native.aegis_policy_core_abi_version() != EXPECTED_ABI_VERSION) {
+                if (native.aegis_policy_core_abi_version() != EXPECTED_C_ABI_VERSION) {
                     // 诊断留痕（真机排障：so 在但 ABI 与 Kotlin 期望不一致）
-                    android.util.Log.e("AegisBroker", "native abi_version mismatch: expected $EXPECTED_ABI_VERSION")
+                    android.util.Log.e("AegisBroker", "native abi_version mismatch: expected $EXPECTED_C_ABI_VERSION")
                     null
                 } else {
                     val broker = native.aegis_policy_core_broker_new(policyVersion)
@@ -247,7 +244,7 @@ class NativePolicyCoreBridge private constructor(
 
         internal fun parseDecisionJson(payload: String): Decision {
             val root = JSONObject(payload)
-            check(root.getInt("abi_version") == EXPECTED_ABI_VERSION) { "native ABI response mismatch" }
+            check(root.getInt("abi_version") == EXPECTED_C_ABI_VERSION) { "native ABI response mismatch" }
             return when (root.getString("decision")) {
                 "allow" -> {
                     val action = root.getJSONObject("action")

@@ -29,7 +29,7 @@ class AegisWebViewClient(
     private val onPageUrlObserved: (String) -> Unit = {},
 ) : WebViewClient() {
     private var documentGeneration = 0L
-    private var pendingConfirmation: PendingNavigationConfirmation? = null
+    private var pendingConfirmation: PendingConfirmedNavigation? = null
 
     override fun shouldOverrideUrlLoading(
         view: WebView,
@@ -38,7 +38,13 @@ class AegisWebViewClient(
         val requestedUrl = request.url.toString()
         // http 请求必须由客户端经 authorizeNavigation 升级加载（loadWhenAllowed=true，
         // 阻断 WebView 原始 http load）；升级本身在 authorizeNavigation 内单次执行。
-        val isHttp = android.net.Uri.parse(requestedUrl).scheme.orEmpty().lowercase() == "http"
+        val isHttp =
+            android
+                .net.Uri
+                .parse(requestedUrl)
+                .scheme
+                .orEmpty()
+                .lowercase() == "http"
         if (isHttp) {
             authorizeNavigation(
                 view,
@@ -133,7 +139,7 @@ class AegisWebViewClient(
         ) {
             is Decision.RequireConfirmation -> {
                 if (requireNavigationConfirmation && mayRequireConfirmation) {
-                    pendingConfirmation = PendingNavigationConfirmation(url, "navigation", decision.request)
+                    pendingConfirmation = PendingConfirmedNavigation(url, "navigation", decision.request)
                     onNavigationConfirmationRequested(decision.request)
                     return false
                 }
@@ -238,7 +244,7 @@ class AegisWebViewClient(
         broker.destroySession(sessionId)
     }
 
-    private data class PendingNavigationConfirmation(
+    private data class PendingConfirmedNavigation(
         val url: String,
         val scope: String,
         val request: ApprovalRequest,

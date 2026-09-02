@@ -61,13 +61,14 @@ object SecureWebViewFactory {
         onNavigationConfirmationResolved: (WebView) -> Unit = {},
         onNavigationDenied: (WebView, String, String) -> Unit = { _, _, _ -> },
         onPageUrlObserved: (WebView, String) -> Unit = { _, _ -> },
+        onTitleObserved: (WebView, String) -> Unit = { _, _ -> },
         onRendererGone: (WebView) -> Unit = {},
     ): WebView {
         // A-6 修复（架构审计 2026-08-31）：Broker 由 Application 持有——
         // 工厂不再静态单例持有（可测试、可隔离、生命周期显式）
         val broker = (context.applicationContext as AegisApplication).broker
         val webView = WebView(context)
-        BrowserEngine(webView).configure()
+        BrowserEngine(webView, onTitleObserved = { onTitleObserved(webView, it) }).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
         val tabId = "tab-$sessionId"
         if (!broker.registerSession(sessionId, tabId)) {

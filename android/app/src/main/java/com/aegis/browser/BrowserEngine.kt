@@ -14,6 +14,7 @@ import android.webkit.WebViewClient
 
 class BrowserEngine(
     private val webView: WebView,
+    private val onTitleObserved: (String) -> Unit = {},
 ) {
     companion object {
         const val HOME_URL = "file:///android_asset/start.html"
@@ -93,7 +94,12 @@ class BrowserEngine(
                     view: WebView,
                     title: String?,
                 ) {
-                    android.util.Log.i("Aegis", "R12 title: ${title?.take(MAX_TITLE_LENGTH).orEmpty()}")
+                    // P0 修复（全库审计 2026-09-02）：标题此前仅打日志——Tab.title
+                    // 全工程无回填点，标签栏永远显示「新标签页」。经工厂回调单路径
+                    // 上抛 ViewModel（对齐 onPageUrlObserved 同一接线模式）。
+                    val safeTitle = title?.take(MAX_TITLE_LENGTH).orEmpty()
+                    android.util.Log.i("Aegis", "R12 title: $safeTitle")
+                    onTitleObserved(safeTitle)
                 }
             }
         // A-03 整改（国防级审查）：默认限制第三方 Cookie（WebView 默认

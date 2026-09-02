@@ -31,9 +31,6 @@ data class NativePolicyCoreGateResult(
 }
 
 object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
-    // C ABI v3 要求提供 Rust 托管的确认登记、批准和拒绝入口。
-    private const val EXPECTED_ABI_VERSION = 3
-
     override fun probe(): NativePolicyCoreGateResult {
         if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return NativePolicyCoreGateResult.disabled()
         val abiVersion =
@@ -46,12 +43,20 @@ object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
             } catch (_: Exception) {
                 return NativePolicyCoreGateResult.block("native_policy_core_probe_failed")
             }
-        if (abiVersion != EXPECTED_ABI_VERSION) {
+        if (abiVersion != EXPECTED_C_ABI_VERSION) {
             return NativePolicyCoreGateResult.block("native_policy_core_abi_mismatch")
         }
         return NativePolicyCoreGateResult.enabled()
     }
 }
+
+/**
+ * C ABI 版本单源（全库审计 2026-09-02 收敛）：此前 EXPECTED_ABI_VERSION 在
+ * NativePolicyCoreGate 与 NativePolicyCoreBridge 双份定义——ABI 升级时漏改
+ * 任一处即出现「门禁通过、桥接失配」（或反之）的静默漂移。v3 新增 Rust
+ * 托管的确认登记、批准兑换与拒绝接口。
+ */
+internal const val EXPECTED_C_ABI_VERSION = 3
 
 // JNI 绑定函数名必须与 C ABI 符号逐字一致（snake_case）——豁免命名规范
 @Suppress("ktlint:standard:function-naming")
