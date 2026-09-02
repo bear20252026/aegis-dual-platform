@@ -3,33 +3,71 @@
 //!
 //! 覆盖：update-manifest-valid/invalid（阈值/回滚/重复 key——TUF THRESHOLD
 //! counting）+ url-origin-valid/invalid（contracts 向量）。
+//!
+//! 全库审计 2026-09-02 收敛：向量不再手工内联复制到测试代码——直接解析
+//! `contracts/vectors/*.json`（单一事实源，schema 变更时测试自动跟随；
+//! c_abi 集成测试此前已按此口径消费 JSON）。
 
 use aegis_policy_core::origin::try_parse_external;
 use aegis_policy_core::update_manifest::{canonical_unsigned, verify_threshold, version_tuple};
-use serde_json::json;
+use serde_json::{json, Value};
+
+/// contracts/vectors 目录（仓库布局：core/rust-policy-core → ../../contracts/vectors）。
+fn vectors_dir() -> std::path::PathBuf {
+    let manifest = env!("CARGO_MANIFEST_DIR");
+    std::path::Path::new(manifest)
+        .join("../../contracts/vectors")
+        .canonicalize()
+        .expect("contracts/vectors 目录必须存在（仓库布局契约）")
+}
+
+fn load_vectors(name: &str) -> Vec<Value> {
+    let path = vectors_dir().join(name);
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("读取向量文件失败 {path:?}: {e}"));
+    let root: Value = serde_json::from_str(&text).expect("向量 JSON 必须合法");
+    root["vectors"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{name}: 缺少 vectors 数组"))
+        .clone()
+}
 
 #[test]
 fn url_origin_vectors_match_contracts() {
-    // contracts/vectors/url-origin-valid.json
-    assert!(try_parse_external("https://a.gov.cn/page").is_some());
-    assert!(try_parse_external("http://example.org/").is_some());
-    // contracts/vectors/url-origin-invalid.json
-    for bad in [
-        "data:text/html,<script>alert(1)</script>",
-        "blob:https://a.gov.cn/x",
-        "javascript:alert(1)",
-        "file:///C:/sensitive.txt",
-        "https://user:pass@example.org/",
-        "https:///nohost",
-        "https://example.org:99999/",
-    ] {
-        assert!(try_parse_external(bad).is_none(), "应拒绝: {bad}");
+    // contracts/vectors/url-origin-valid.json —— 全部放行
+    for v in load_vectors("url-origin-valid.json") {
+        let url = v["url"].as_str().expect("向量必须有 url 字段");
+        let expected = v["expected"].as_str().unwrap_or("allow");
+        assert_eq!(
+            try_parse_external(url).is_some(),
+            expected == "allow",
+            "向量结果不符: {url} (expected={expected})"
+        );
+    }
+
+    // contracts/vectors/url-origin-invalid.json —— 全部拒绝
+    for v in load_vectors("url-origin-invalid.json") {
+        let raw = v["url"].as_str().expect("向量必须有 url 字段");
+        // oversize 占位向量按 JSON note 物化为真实超长 URL（>8192 字符）——
+        // JSON 保持可读，实际样本在消费端展开（与 Kotlin OriginPolicyTest 同口径）
+        let url = if raw.contains("oversize-url-limit-test") {
+            format!("https://example.org/{}", "a".repeat(9000))
+        } else {
+            raw.to_string()
+        };
+        let expected = v["expected"].as_str().unwrap_or("deny");
+        assert_eq!(
+            try_parse_external(&url).is_some(),
+            expected == "allow",
+            "向量结果不符: {raw} (expected={expected})"
+        );
     }
 }
 
 #[test]
 fn update_manifest_valid_vectors() {
-    // contracts/vectors/update-manifest-valid.json（合法——阈值满足——SemVer 字符串）
+    // SemVer 解析语义抽查（解析器单元语义；清单级向量见 c_abi 集成测试
+    // 对 update-manifest-valid.json 的完整消费）
     assert_eq!(version_tuple("1.2.3"), Some((1, 2, 3)));
     assert_eq!(version_tuple("0.9.0"), Some((0, 9, 0)));
     assert_eq!(version_tuple("1.0"), None); // 无效 SemVer
