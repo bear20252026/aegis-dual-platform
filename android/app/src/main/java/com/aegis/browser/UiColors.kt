@@ -23,3 +23,16 @@ val TabInactiveHighlight = Color(0x1AFFFFFF)
 
 /** 分组标题文字（次级白色） */
 val GroupLabelColor = Color(0x99FFFFFF)
+
+/** 窗口实底（edge-to-edge 下状态栏/导航栏挖空区的衬底——与工具栏同色系不透明版） */
+val ChromeBackground = Color(0xFF101827)
+
+/** 地址栏胶囊底色（深色玻璃） */
+val FieldBackground = Color(0x1FFFFFFF)
+
+/** 地址栏胶囊描边（聚焦/默认两档） */
+val FieldBorderFocused = Color(0x66FFFFFF)
+val FieldBorderIdle = Color(0x2EFFFFFF)
+
+/** 次级文字（地址栏占位符） */
+val TextSecondary = Color(0xB3FFFFFF)

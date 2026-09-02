@@ -8,18 +8,29 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -27,8 +38,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
 
 /**
  * 主界面（薄壳，仅负责组装；多标签逻辑在 TabManager，标签栏在 TabBar/VerticalTabBar）。
@@ -47,6 +61,13 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // edge-to-edge（targetSdk 36 在 Android 15+ 强制启用）：内容默认延伸进
+        // 状态栏/导航栏挖空区——此前标签栏画在透明状态栏下面，系统时钟/电量
+        // 与「新标签页 ×」文字叠印（真机回归 2026-09-02 实锤）。显式声明
+        // 不适配 + 深色 chrome → 状态栏图标转浅色，根布局用 insets padding 让位。
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        insetsController.isAppearanceLightStatusBars = false
         // A1：System WebView 版本检查（CVE-2026-12438/11295 防御——
         // 过旧则提示更新，不阻塞浏览）
         WebViewVersionCheck.checkAndPrompt(this) { viewModel.setWebViewAlert(it) }
@@ -152,7 +173,14 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                Column(modifier = Modifier.fillMaxSize()) {
+                Column(
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .background(ChromeBackground)
+                            .statusBarsPadding()
+                            .navigationBarsPadding(),
+                ) {
                     // —— 标签栏（top 横排 / left 垂直，按布局切换）——
                     if (tabsPosition == "left") {
                         Row(modifier = Modifier.fillMaxSize()) {
@@ -193,8 +221,9 @@ class MainActivity : ComponentActivity() {
     /**
      * 地址栏 + 导航按钮（纯浏览态）。
      *
-     * 贪吃蛇已迁移至首页 start.html（BUG-014 版本替换——单源双端一致），
-     * 旧版地址栏游戏（AddressBarSnake.kt / 🎮 入口 / 5 倍放大游戏带）删除。
+     * 2026-09-02 视觉重构：两行大按钮改为单行——玻璃圆钮（后退/前进/刷新/阅读/翻译）
+     * + 深色玻璃胶囊地址栏；「打开」并入地址栏尾部按键与 IME「搜索」动作，
+     * 不再占独立按钮位。贪吃蛇已迁移至首页 start.html（BUG-014——单源双端一致）。
      */
     @Composable
     private fun AddressBarRow(
@@ -207,30 +236,69 @@ class MainActivity : ComponentActivity() {
         onReader: () -> Unit,
         onTranslate: () -> Unit,
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = address,
-                    onValueChange = onAddressChange,
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    label = { Text("地址") },
-                )
-                Button(onClick = onOpen) { Text("打开") }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Button(onClick = onBack) { Text("后退") }
-                Button(onClick = onForward) { Text("前进") }
-                Button(onClick = onReload) { Text("刷新") }
-                Button(onClick = onReader) { Text("阅读") }
-                Button(onClick = onTranslate) { Text("翻译") }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ChromeIconButton("←", onBack)
+            ChromeIconButton("→", onForward)
+            ChromeIconButton("⟳", onReload)
+            OutlinedTextField(
+                value = address,
+                onValueChange = onAddressChange,
+                modifier = Modifier.weight(1f),
+                singleLine = true,
+                placeholder = { Text("搜索或输入网址", color = TextSecondary) },
+                shape = CircleShape,
+                colors =
+                    OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = FieldBorderFocused,
+                        unfocusedBorderColor = FieldBorderIdle,
+                        focusedContainerColor = FieldBackground,
+                        unfocusedContainerColor = FieldBackground,
+                        cursorColor = Color.White,
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                    ),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { onOpen() }),
+                trailingIcon = {
+                    Text(
+                        text = "打开",
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier =
+                            Modifier
+                                .padding(end = 6.dp)
+                                .clickable(onClick = onOpen),
+                    )
+                },
+            )
+            ChromeIconButton("阅", onReader)
+            ChromeIconButton("译", onTranslate)
+        }
+    }
+
+    /**
+     * 玻璃圆钮：工具栏图标按钮（半透明白圆形 + 居中字符图标）。
+     *
+     * Composable 命名按 UI 惯例 PascalCase（与 [TabChipCore] 同口径）。
+     */
+    @Suppress("FunctionNaming")
+    @Composable
+    private fun ChromeIconButton(
+        glyph: String,
+        onClick: () -> Unit,
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = CircleShape,
+            color = ButtonOverlay,
+            modifier = Modifier.size(38.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Text(text = glyph, color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }

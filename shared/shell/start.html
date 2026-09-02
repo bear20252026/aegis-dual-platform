@@ -9,7 +9,7 @@
   html,body { height:100%; overflow:hidden; }
   body {
     font-family: system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
-    color:#fff;
+    color:#fff; -webkit-font-smoothing:antialiased;
   }
   /* 全屏壁纸背景（默认暮蓝，由 JS 按配置切换） */
   #wallpaper {
@@ -19,33 +19,37 @@
   }
   #wallpaper::after {
     content:''; position:absolute; inset:0;
-    background:linear-gradient(180deg, rgba(10,15,40,0.25) 0%, rgba(10,15,40,0.15) 45%, rgba(10,15,40,0.45) 100%);
+    background:linear-gradient(180deg, rgba(8,12,28,0.30) 0%, rgba(8,12,28,0.18) 45%, rgba(8,12,28,0.52) 100%);
   }
   .center {
     position:relative; z-index:1; height:100%;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
     padding-bottom:8vh;
   }
+  /* 玻璃单色徽标（去糖果渐变——2026-09-02 视觉重构） */
   .logo {
-    width:64px; height:64px; border-radius:18px;
-    background:linear-gradient(135deg,#3FB8FF,#7F7BFF 45%,#FF7AB6 75%,#FFB27A);
+    width:56px; height:56px; border-radius:16px;
+    background:rgba(255,255,255,0.10);
+    border:1px solid rgba(255,255,255,0.22);
+    backdrop-filter:blur(12px);
     display:flex; align-items:center; justify-content:center;
-    font-size:30px; color:#fff; font-weight:800;
-    box-shadow:0 12px 32px rgba(0,0,0,0.30);
-    margin-bottom:22px;
+    font-size:24px; color:#fff; font-weight:600; letter-spacing:1px;
+    box-shadow:0 8px 28px rgba(0,0,0,0.28);
+    margin-bottom:20px;
   }
-  h1 { font-size:30px; font-weight:700; letter-spacing:2px; text-shadow:0 2px 12px rgba(0,0,0,0.4); margin-bottom:30px; }
-  /* 微软 Bing 风格大搜索框 */
+  h1 { font-size:23px; font-weight:600; letter-spacing:3px; text-shadow:0 1px 10px rgba(0,0,0,0.45); margin-bottom:28px; }
+  /* 大搜索框（白色胶囊 + 纯黑主按钮——Geist 式高对比） */
   .search {
     width:600px; max-width:88vw; height:56px; display:flex; align-items:center;
-    background:rgba(255,255,255,0.92); border-radius:28px;
-    padding:0 8px 0 26px; backdrop-filter:blur(8px);
-    box-shadow:0 10px 40px rgba(0,0,0,0.25);
+    background:rgba(255,255,255,0.96); border-radius:28px;
+    padding:0 6px 0 8px; backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,0.60);
+    box-shadow:0 12px 36px rgba(0,0,0,0.22);
   }
   .search input {
-    flex:1; border:0; outline:0; font-size:17px; background:transparent; color:#22303f;
+    flex:1; border:0; outline:0; font-size:16px; background:transparent; color:#111;
   }
-  .search input::placeholder { color:#8a94a6; }
+  .search input::placeholder { color:#9aa1ad; }
   .search input[type=search] { -webkit-appearance:none; }
   /* form 打断外层 flex——form 自身承担 flex 行（input+button 同行） */
   #searchForm {
@@ -54,82 +58,88 @@
   }
   .search input[type=search]::-webkit-search-cancel-button {
     -webkit-appearance:none; width:18px; height:18px; cursor:pointer;
-    background:linear-gradient(45deg,transparent 44%,#8a94a6 44%,#8a94a6 56%,transparent 56%),
-               linear-gradient(-45deg,transparent 44%,#8a94a6 44%,#8a94a6 56%,transparent 56%);
+    background:linear-gradient(45deg,transparent 44%,#9aa1ad 44%,#9aa1ad 56%,transparent 56%),
+               linear-gradient(-45deg,transparent 44%,#9aa1ad 44%,#9aa1ad 56%,transparent 56%);
     border-radius:50%;
   }
   .search button {
-    border:0; height:42px; padding:0 26px; border-radius:21px;
-    background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff;
-    font-size:15px; cursor:pointer; font-weight:600;
+    border:0; height:44px; padding:0 24px; border-radius:22px;
+    background:#111; color:#fff;
+    font-size:14px; cursor:pointer; font-weight:500; letter-spacing:2px;
+    transition:background .15s;
   }
+  .search button:hover { background:#2c2c2e; }
   /* 壁纸切换控件（右下角） */
   .wallpapers {
     position:fixed; right:22px; bottom:22px; z-index:5;
     display:flex; align-items:center; gap:10px;
-    background:rgba(255,255,255,0.18); border:1px solid rgba(255,255,255,0.25);
-    backdrop-filter:blur(10px); border-radius:22px; padding:8px 14px;
+    background:rgba(15,20,32,0.42); border:1px solid rgba(255,255,255,0.18);
+    backdrop-filter:blur(12px); border-radius:999px; padding:8px 14px;
   }
   .wp {
     width:34px; height:34px; border-radius:50%; cursor:pointer; border:2px solid transparent;
     background-size:cover; background-position:center; transition:transform .15s, border-color .15s;
   }
-  .wp:hover { transform:scale(1.15); }
-  .wp.active { border-color:#fff; box-shadow:0 0 0 3px rgba(63,184,255,0.5); }
-  .wp-label { font-size:12px; color:rgba(255,255,255,0.9); padding-right:4px; }
-  /* 书签宫格 */
-  .bookmarks { margin-top:44px; display:flex; flex-wrap:wrap; gap:14px; justify-content:center; max-width:760px; }
+  .wp:hover { transform:scale(1.12); }
+  .wp.active { border-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,0.25); }
+  .wp-label { font-size:12px; color:rgba(255,255,255,0.78); padding-right:4px; letter-spacing:1px; }
+  /* 书签宫格（深色玻璃单色系） */
+  .bookmarks { margin-top:40px; display:flex; flex-wrap:wrap; gap:12px; justify-content:center; max-width:760px; }
   .bm {
-    width:92px; padding:12px 8px; background:rgba(255,255,255,0.14);
-    border:1px solid rgba(255,255,255,0.18); backdrop-filter:blur(8px);
-    border-radius:16px; cursor:pointer; text-align:center; transition:transform .12s, background .12s;
+    width:92px; padding:14px 8px 12px; background:rgba(15,20,32,0.34);
+    border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px);
+    border-radius:14px; cursor:pointer; text-align:center;
+    transition:transform .12s, background .12s, border-color .12s;
   }
-  .bm:hover { transform:translateY(-3px); background:rgba(255,255,255,0.24); }
+  .bm:hover { transform:translateY(-2px); background:rgba(15,20,32,0.50); border-color:rgba(255,255,255,0.28); }
   .bm-ico {
-    width:36px; height:36px; margin:0 auto 8px; border-radius:11px;
-    background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff;
-    display:flex; align-items:center; justify-content:center; font-weight:700; font-size:15px;
+    width:38px; height:38px; margin:0 auto 8px; border-radius:12px;
+    background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.16);
+    color:#fff;
+    display:flex; align-items:center; justify-content:center; font-weight:600; font-size:15px;
   }
   .bm-name { font-size:12px; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   .bm-empty { font-size:13px; color:rgba(255,255,255,0.85); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   .footer { position:fixed; left:0; right:0; bottom:10px; z-index:4; text-align:center; font-size:12px; color:rgba(255,255,255,0.7); text-shadow:0 1px 4px rgba(0,0,0,0.5); }
-  /* 搜索引擎胶囊徽标（苹果风格小胶囊，点击切换） */
+  /* 搜索引擎胶囊（白底上的中性深色，与主按钮同语言） */
   .engine-pill {
-    display:inline-flex; align-items:center; gap:4px; height:24px;
-    padding:0 10px; border-radius:12px; cursor:pointer; flex:0 0 auto;
-    background:rgba(63,184,255,0.18); border:1px solid rgba(255,255,255,0.35);
-    color:#fff; font-size:11px; letter-spacing:.5px; transition:background .15s;
+    display:inline-flex; align-items:center; gap:6px; height:30px;
+    margin-left:12px;
+    padding:0 12px; border-radius:15px; cursor:pointer; flex:0 0 auto;
+    background:rgba(17,17,17,0.06); border:1px solid rgba(17,17,17,0.10);
+    color:#111; font-size:12px; letter-spacing:.5px; transition:background .15s;
   }
-  .engine-pill:hover { background:rgba(63,184,255,0.32); }
-  .engine-pill .dot { width:6px; height:6px; border-radius:50%; background:#3FB8FF; }
+  .engine-pill:hover { background:rgba(17,17,17,0.10); }
+  .engine-pill .dot { width:6px; height:6px; border-radius:50%; background:#111; opacity:.55; }
   /* 恢复上次会话入口（会话持久化 CHANGELOG Planned） */
   .restore-btn {
-    border:1px solid rgba(255,255,255,0.35); height:38px; padding:0 22px;
-    border-radius:19px; cursor:pointer; font-size:14px; color:#fff;
-    background:rgba(255,255,255,0.18); backdrop-filter:blur(8px);
-    transition:background .15s;
+    border:1px solid rgba(255,255,255,0.28); height:40px; padding:0 22px;
+    border-radius:20px; cursor:pointer; font-size:14px; color:#fff;
+    background:rgba(15,20,32,0.40); backdrop-filter:blur(12px);
+    transition:background .15s, border-color .15s;
   }
-  .restore-btn:hover { background:rgba(255,255,255,0.3); }
+  .restore-btn:hover { background:rgba(15,20,32,0.58); border-color:rgba(255,255,255,0.40); }
   /* 几何画板快捷入口（离线 GeoGebra——安装包内置资源） */
   .quick-row {
-    margin-top:20px; display:flex; gap:14px; justify-content:center;
+    margin-top:18px; display:flex; gap:12px; justify-content:center;
   }
   .quick-btn {
-    display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 28px;
-    border:1px solid rgba(255,255,255,0.4); border-radius:24px; cursor:pointer;
-    background:linear-gradient(135deg, rgba(63,184,255,0.30), rgba(127,123,255,0.30));
-    backdrop-filter:blur(10px); color:#fff; font-size:15px; font-weight:600;
-    font-family:inherit; letter-spacing:1px;
-    box-shadow:0 8px 24px rgba(0,0,0,0.22);
-    transition:transform .15s ease, background .15s ease, box-shadow .15s ease;
+    display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 24px;
+    border:1px solid rgba(255,255,255,0.22); border-radius:24px; cursor:pointer;
+    background:rgba(15,20,32,0.40);
+    backdrop-filter:blur(12px); color:#fff; font-size:14px; font-weight:500;
+    font-family:inherit; letter-spacing:2px;
+    box-shadow:0 8px 24px rgba(0,0,0,0.18);
+    transition:transform .15s ease, background .15s ease, border-color .15s ease;
   }
   .quick-btn:hover {
-    transform:translateY(-3px);
-    background:linear-gradient(135deg, rgba(63,184,255,0.48), rgba(127,123,255,0.48));
-    box-shadow:0 12px 32px rgba(63,184,255,0.35);
+    transform:translateY(-2px);
+    background:rgba(15,20,32,0.58);
+    border-color:rgba(255,255,255,0.36);
   }
   .quick-btn:active { transform:translateY(0); }
-  .quick-btn .ico { font-size:20px; line-height:1; }
+  .quick-btn .ico { display:flex; align-items:center; }
+  .quick-btn .ico svg { width:20px; height:20px; }
   .quick-btn.unavailable { opacity:.45; }
   /* 导入向导（玻璃拟态，与 NTP 风格一致） */
   .link-btn {
@@ -141,21 +151,21 @@
   #importModal {
     position:fixed; inset:0; z-index:50; display:flex;
     align-items:center; justify-content:center;
-    background:rgba(10,15,40,0.45); backdrop-filter:blur(4px);
+    background:rgba(8,12,28,0.45); backdrop-filter:blur(4px);
   }
   .im-card {
     width:460px; max-width:92vw; max-height:80vh; overflow-y:auto;
-    background:rgba(255,255,255,0.95); border-radius:22px;
-    padding:26px 28px; color:#22303f;
+    background:rgba(255,255,255,0.97); border-radius:20px;
+    padding:26px 28px; color:#111;
     box-shadow:0 18px 60px rgba(0,0,0,0.35);
     font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
   }
   .im-title { font-size:18px; font-weight:700; margin-bottom:16px; }
   .im-row { display:flex; align-items:center; gap:10px; padding:8px 0; font-size:14px; }
-  .im-row input[type=checkbox] { width:16px; height:16px; accent-color:#3FB8FF; }
+  .im-row input[type=checkbox] { width:16px; height:16px; accent-color:#111; }
   .im-row select {
     border:1px solid #d5dbe6; border-radius:8px; padding:3px 6px;
-    font-size:13px; color:#22303f; background:#fff;
+    font-size:13px; color:#111; background:#fff;
   }
   .im-section { font-size:13px; color:#6b7688; margin:14px 0 4px; }
   .im-result { font-size:14px; padding:6px 0; }
@@ -165,20 +175,20 @@
     border:0; height:36px; padding:0 20px; border-radius:18px;
     font-size:14px; cursor:pointer; font-weight:600;
   }
-  #imClose { background:#eef1f6; color:#22303f; }
-  #imNext { background:linear-gradient(135deg,#3FB8FF,#7F7BFF); color:#fff; }
+  #imClose { background:#eef1f6; color:#111; }
+  #imNext { background:#111; color:#fff; }
   #imNext:disabled { opacity:.5; cursor:default; }
 
   /* —— 移动端响应式（≤640px：手机竖屏与窄窗）—— */
   @media (max-width: 640px) {
     .center { padding-bottom:12vh; padding-left:16px; padding-right:16px; }
-    .logo { width:52px; height:52px; border-radius:14px; font-size:24px; margin-bottom:16px; }
-    h1 { font-size:22px; margin-bottom:20px; }
-    .search { width:100%; height:50px; border-radius:25px; padding:0 6px 0 18px; }
+    .logo { width:48px; height:48px; border-radius:14px; font-size:20px; margin-bottom:16px; }
+    h1 { font-size:20px; margin-bottom:22px; letter-spacing:2px; }
+    .search { width:100%; height:52px; border-radius:26px; padding:0 5px 0 6px; }
     .search input { font-size:15px; }
-    .search button { height:38px; padding:0 18px; font-size:13px; flex:0 0 auto; }
+    .search button { height:42px; padding:0 18px; font-size:13px; flex:0 0 auto; letter-spacing:1px; }
     .quick-row { width:100%; }
-    .quick-btn { width:100%; justify-content:center; height:44px; font-size:14px; }
+    .quick-btn { width:100%; justify-content:center; height:46px; font-size:14px; }
     .bookmarks { margin-top:28px; gap:10px; width:100%; }
     .bm { width:calc(50% - 5px); }
     .quick-row { margin-top:16px; }
@@ -196,13 +206,13 @@
   .back-fab {
     position:fixed; top:14px; left:14px; z-index:30;
     width:42px; height:42px; border-radius:50%;
-    border:1px solid rgba(255,255,255,0.35); cursor:pointer;
-    background:rgba(255,255,255,0.18); backdrop-filter:blur(8px);
+    border:1px solid rgba(255,255,255,0.28); cursor:pointer;
+    background:rgba(15,20,32,0.40); backdrop-filter:blur(12px);
     color:#fff; font-size:20px; line-height:1;
     display:flex; align-items:center; justify-content:center;
     transition:background .15s ease, transform .15s ease;
   }
-  .back-fab:hover { background:rgba(255,255,255,0.3); }
+  .back-fab:hover { background:rgba(15,20,32,0.58); }
   .back-fab:active { transform:scale(0.94); }
 
   /* —— 贪吃蛇（双端统一：首页内置小游戏，键盘/滑动手势双控）—— */
@@ -260,10 +270,10 @@
     <!-- 几何画板快捷入口（离线 GeoGebra——点击跳转内置画板页） -->
     <div class="quick-row">
       <button id="snakeBtn" class="quick-btn" title="贪吃蛇小游戏 · 离线可玩" onclick="openSnake()">
-        <span class="ico">🐍</span><span>贪吃蛇</span>
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5h-9a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H4"/><circle cx="20.2" cy="5" r="1.4" fill="currentColor" stroke="none"/></svg></span><span>贪吃蛇</span>
       </button>
       <button id="geoBtn" class="quick-btn" title="离线几何画板 · 无需网络">
-        <span class="ico">📐</span><span>几何画板</span>
+        <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.5 21 20H3z"/><path d="M12 11v4.5"/><path d="M9.8 13.2h4.4"/></svg></span><span>几何画板</span>
       </button>
     </div>
     <div class="bookmarks" id="bm"></div>
@@ -299,7 +309,7 @@
   <div class="snake-overlay" id="snakeOverlay">
     <div class="snake-panel">
       <div class="snake-head">
-        <span class="title">🐍 贪吃蛇</span>
+        <span class="title">贪吃蛇</span>
         <span class="score" id="snakeScore">0</span>
         <span class="best" id="snakeBest">最高 0</span>
         <button class="snake-close" id="snakeClose" title="退出" onclick="Snake.close()">&#10005;</button>

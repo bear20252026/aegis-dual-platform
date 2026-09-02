@@ -2,13 +2,17 @@ package com.aegis.browser
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -60,22 +64,24 @@ fun TabBar(
             TabChipCore(
                 tab = tab,
                 active = index == activeIndex,
-                modifier = Modifier.height(32.dp),
+                modifier =
+                    Modifier
+                        .height(32.dp)
+                        .widthIn(max = 200.dp),
                 onSelect = { onSelect(index) },
                 onClose = { onClose(index) },
             )
         }
         item {
-            Button(
+            Surface(
                 onClick = onNewTab,
-                modifier = Modifier.height(32.dp),
-                colors =
-                    ButtonDefaults.buttonColors(
-                        containerColor = ButtonOverlay,
-                        contentColor = Color.White,
-                    ),
+                shape = CircleShape,
+                color = ButtonOverlay,
+                modifier = Modifier.size(32.dp),
             ) {
-                Text("+")
+                Box(contentAlignment = Alignment.Center) {
+                    Text(text = "+", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                }
             }
         }
     }
