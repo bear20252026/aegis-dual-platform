@@ -110,6 +110,22 @@ class TabManager(
         return old
     }
 
+    /**
+     * P0 修复2（真机复测 2026-09-02）：标题回填的实例替换单写点。
+     * 原实现经 `tab.title = ...` 原地改 var——list() 快照与 StateFlow 旧值
+     * 持有同一实例，data class self-equals 恒 true → StateFlow 不发射 →
+     * UI 永不重组（chip 标题停在「新标签页」）。改用 copy 替换实例
+     * （与 [replaceWebView] 同模式），StateFlow 依赖 equals 感知变化。
+     * 越界静默忽略（对齐类内索引操作约定）。
+     */
+    fun updateTitle(
+        id: Long,
+        title: String,
+    ) {
+        val index = tabs.indexOfFirst { it.id == id }
+        if (index >= 0) tabs[index] = tabs[index].copy(title = title)
+    }
+
     /** 返回标签列表快照（防调用方改动内部结构）。 */
     fun list(): List<Tab> = tabs.toList()
 
