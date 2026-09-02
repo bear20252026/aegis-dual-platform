@@ -80,9 +80,8 @@ class TabManager(
         if (tabs.size <= 1) return false // 保留至少一个标签（浏览器约定）
         val removed = tabs.removeAt(index)
         pause(removed.webView) // 释放被关闭 WebView 的绘制资源
-        // H-4 修复（审计 2026-08-31）：注销导航器 + 销毁 Broker 会话
-        SecureWebViewFactory.release(removed.webView)
-        removed.webView.destroy()
+        // H-4 修复（审计 2026-08-31）：统一销毁序列（停载/摘除/注销/destroy 单源）
+        SecureWebViewFactory.tearDown(removed.webView)
         activeIndex = if (index < tabs.size) index else tabs.size - 1
         current()?.let {
             if (it.suspended) {

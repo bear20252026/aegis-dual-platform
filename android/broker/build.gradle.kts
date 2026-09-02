@@ -1,4 +1,3 @@
-// 由账号2生成
 plugins {
     id("com.android.library")
     id("org.jlleitschuh.gradle.ktlint")

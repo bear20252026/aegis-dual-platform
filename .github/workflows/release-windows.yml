@@ -179,7 +179,7 @@ jobs:
         run: python -m PyInstaller aegis_webview.spec --noconfirm --distpath dist --workpath build
       - name: 安装 Inno Setup 6
         run: choco install innosetup -y --no-progress
-      - name: 编译安装包（AegisBrowser-Setup-2.1.6.exe）
+      - name: 编译安装包（版本号由 shared/version.properties 单源，sync_versions.py 写入 iss）
         shell: cmd
         run: '"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" docs\release\AegisSetup.iss'
       - name: 安装包 SHA-256 清单（M-21）

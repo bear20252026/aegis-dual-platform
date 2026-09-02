@@ -102,13 +102,4 @@ class BrowserEngine(
             .getInstance()
             .setAcceptThirdPartyCookies(webView, false)
     }
-
-    /** A-03 整改（国防级审查）：无痕/会话结束清理序列（Cookie/缓存/历史）。 */
-    fun clearPrivateData() {
-        android.webkit.CookieManager
-            .getInstance()
-            .removeAllCookies(null)
-        webView.clearCache(true)
-        webView.clearHistory()
-    }
 }

@@ -28,20 +28,22 @@ windows/crash_reports/
 __pycache__/
 *.pyc
 
+# ruff 缓存（报告归档于 docs/quality-reports/）
+.ruff_cache/
+
+# 专家评审包（已改为发布时由 build_review_package.py 生成，不入库）
+aegis-专家评审包/
+
 # 构建产物（dist/——不入库，由 release.yml 构建）
 dist/
 
 # 生成的 MD 单文件（aegis-source-all.md——不入库）
 aegis-source-all.md
 
-# 生成的归档 zip（不入库）
-aegis-source-2026-08-15.zip
-
-# 生成的架构 MD 单文件（不入库）
-aegis-source-architecture.md
-
-# 审查材料 MD 生成产物（不入库）
-aegis-review-materials.md
+# 生成的归档 zip / MD 产物（不入库；通配规则，不再逐个登记文件名）
+aegis-source-*.zip
+aegis-source-*.md
+aegis-review-*.md
 
 # windows_host 构建产物（.NET——不入库）
 windows_host/bin/

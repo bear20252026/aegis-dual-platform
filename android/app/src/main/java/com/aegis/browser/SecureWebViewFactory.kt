@@ -200,6 +200,18 @@ object SecureWebViewFactory {
         navigators.remove(webView)?.close()
     }
 
+    /**
+     * WebView 销毁统一序列（单源）：停载 → 摘除页面 → 注销导航器/Broker 会话 → destroy。
+     * 标签关闭（TabManager.closeTab）与 Activity 销毁（MainActivity.onDestroy）共用，
+     * 此前两处各自手写一半序列（审计 2026-09-02 收敛）。
+     */
+    fun tearDown(webView: WebView) {
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        release(webView)
+        webView.destroy()
+    }
+
     /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */
     private fun installDocumentStartScripts(
         webView: WebView,

@@ -5,6 +5,9 @@ import re
 import sys
 from pathlib import Path
 
+# 平铺导入兜底：脱离 scripts/ 工作目录（如 CI 从仓库根调用）也能导入同目录模块。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from sync_versions import ROOT, load_properties
 
 
