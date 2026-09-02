@@ -61,13 +61,14 @@ object SecureWebViewFactory {
         onNavigationConfirmationResolved: (WebView) -> Unit = {},
         onNavigationDenied: (WebView, String, String) -> Unit = { _, _, _ -> },
         onPageUrlObserved: (WebView, String) -> Unit = { _, _ -> },
+        onTitleObserved: (WebView, String) -> Unit = { _, _ -> },
         onRendererGone: (WebView) -> Unit = {},
     ): WebView {
         // A-6 修复（架构审计 2026-08-31）：Broker 由 Application 持有——
         // 工厂不再静态单例持有（可测试、可隔离、生命周期显式）
         val broker = (context.applicationContext as AegisApplication).broker
         val webView = WebView(context)
-        BrowserEngine(webView).configure()
+        BrowserEngine(webView, onTitleObserved = { onTitleObserved(webView, it) }).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
         val tabId = "tab-$sessionId"
         if (!broker.registerSession(sessionId, tabId)) {
@@ -198,6 +199,18 @@ object SecureWebViewFactory {
      */
     fun release(webView: WebView) {
         navigators.remove(webView)?.close()
+    }
+
+    /**
+     * WebView 销毁统一序列（单源）：停载 → 摘除页面 → 注销导航器/Broker 会话 → destroy。
+     * 标签关闭（TabManager.closeTab）与 Activity 销毁（MainActivity.onDestroy）共用，
+     * 此前两处各自手写一半序列（审计 2026-09-02 收敛）。
+     */
+    fun tearDown(webView: WebView) {
+        webView.stopLoading()
+        webView.loadUrl("about:blank")
+        release(webView)
+        webView.destroy()
     }
 
     /** 在每个主文档创建前注入策略脚本；不支持时显式降级，不伪称已受保护。 */

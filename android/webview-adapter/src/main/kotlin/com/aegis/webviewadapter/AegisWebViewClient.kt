@@ -28,21 +28,27 @@ class AegisWebViewClient(
     private val onNavigationDenied: (code: String, detail: String) -> Unit = { _, _ -> },
     private val onPageUrlObserved: (String) -> Unit = {},
 ) : WebViewClient() {
-    /** 用户手动放行的 HTTP 域名（会话内有效——照搬 voidbrowser https_only）。 */
-    private val allowedHttpDomains = mutableSetOf<String>()
     private var documentGeneration = 0L
-    private var pendingConfirmation: PendingNavigationConfirmation? = null
+    private var pendingConfirmation: PendingConfirmedNavigation? = null
 
     override fun shouldOverrideUrlLoading(
         view: WebView,
         request: WebResourceRequest,
     ): Boolean {
         val requestedUrl = request.url.toString()
-        val securedUrl = upgradeToHttpsIfNeeded(requestedUrl)
-        if (securedUrl != requestedUrl) {
+        // http 请求必须由客户端经 authorizeNavigation 升级加载（loadWhenAllowed=true，
+        // 阻断 WebView 原始 http load）；升级本身在 authorizeNavigation 内单次执行。
+        val isHttp =
+            android
+                .net.Uri
+                .parse(requestedUrl)
+                .scheme
+                .orEmpty()
+                .lowercase() == "http"
+        if (isHttp) {
             authorizeNavigation(
                 view,
-                securedUrl,
+                requestedUrl,
                 loadWhenAllowed = true,
                 mayRequireConfirmation = request.isForMainFrame,
             )
@@ -50,7 +56,7 @@ class AegisWebViewClient(
         }
         return !authorizeNavigation(
             view,
-            securedUrl,
+            requestedUrl,
             loadWhenAllowed = false,
             mayRequireConfirmation = request.isForMainFrame,
         )
@@ -133,7 +139,7 @@ class AegisWebViewClient(
         ) {
             is Decision.RequireConfirmation -> {
                 if (requireNavigationConfirmation && mayRequireConfirmation) {
-                    pendingConfirmation = PendingNavigationConfirmation(url, "navigation", decision.request)
+                    pendingConfirmation = PendingConfirmedNavigation(url, "navigation", decision.request)
                     onNavigationConfirmationRequested(decision.request)
                     return false
                 }
@@ -197,18 +203,12 @@ class AegisWebViewClient(
     private fun upgradeToHttpsIfNeeded(url: String): String {
         val uri = android.net.Uri.parse(url)
         val scheme = uri.scheme.orEmpty().lowercase()
-        val host = uri.host.orEmpty().lowercase()
-        if (scheme == "http" && host !in allowedHttpDomains) {
+        if (scheme == "http") {
             val upgraded = url.replaceFirst("http://", "https://")
             android.util.Log.i("Aegis", "HTTPS-only: 升级 $url → $upgraded")
             return upgraded
         }
         return url
-    }
-
-    /** 用户手动放行 HTTP 域名（会话内有效）。 */
-    fun allowHttpDomain(domain: String) {
-        allowedHttpDomains.add(domain)
     }
 
     override fun onRenderProcessGone(
@@ -244,7 +244,7 @@ class AegisWebViewClient(
         broker.destroySession(sessionId)
     }
 
-    private data class PendingNavigationConfirmation(
+    private data class PendingConfirmedNavigation(
         val url: String,
         val scope: String,
         val request: ApprovalRequest,

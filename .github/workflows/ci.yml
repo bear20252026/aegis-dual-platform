@@ -1,7 +1,11 @@
 # Aegis CI —— 双端代码质量检查
 # 触发：push 到 master / 任意 pull request
-# 环境：ubuntu-latest（Python 3.14）
 # 检查项：validate_release / ruff / bandit / mypy（Windows 源码 + 校验脚本）
+#         + UI 回归（start.html 已知缺陷断言）
+# 说明：Android（ktlint/detekt/单测）由 android-quality.yml 门禁、
+#       C#（dotnet build/test）由 contracts.yml 门禁——均为全量 PR/push
+#       触发，本文件不再重复（全库审计 2026-09-02：删除 android-lint 占位 job——
+#       原内容为纯 echo，名为门禁实为摆设）。
 
 name: CI
 
@@ -81,18 +85,6 @@ jobs:
           python selftest_tab_state.py
           python selftest_navigation_search.py
           python selftest_view_source.py
-
-  android-lint:
-    name: Android 编译与检查（Kotlin 语法级）
-    runs-on: ubuntu-latest
-    # S-05 整改（国防级审查）：移除 if: false——Android job 设为不可绕过
-    # 门禁（android-quality.yml 已覆盖 detekt/ktlint 质量检查；本 job 跑
-    # Kotlin 编译——gradlew 已提交）
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - name: 占位
-        run: echo "Android Lint 需 Gradle Wrapper 后启用（当前工程无 wrapper）"
 
   ui-regression:
     # 质量门禁（S6）：shared/shell 单源首页的 UI 回归——已知缺陷逐条断言

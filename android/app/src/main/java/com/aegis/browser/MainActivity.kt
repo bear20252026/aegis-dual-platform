@@ -1,7 +1,6 @@
 package com.aegis.browser
 
 import android.os.Bundle
-import android.view.KeyEvent
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.widget.FrameLayout
@@ -236,34 +235,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onKeyDown(
-        keyCode: Int,
-        event: KeyEvent?,
-    ): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK) {
-            val wv = viewModel.currentWebViewOrNull()
-            // 消费 WebView 历史栈逐级回退；无历史（如首页）放行系统默认
-            if (wv != null && wv.canGoBack()) {
-                SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK)
-                return true
-            }
-        }
-        return super.onKeyDown(keyCode, event)
-    }
-
     override fun onDestroy() {
         // Activity 销毁是确认 UI 的退出边界；任何待审批导航均须先撤销，不留可恢复能力。
         viewModel.rejectPendingNavigationConfirmation()
-        // 释放全部 WebView 持有的 Chromium 资源
+        // 释放全部 WebView 持有的 Chromium 资源（统一销毁序列单源）
         viewModel.getTabManager()?.let { tm ->
             tm.suspendAll()
-            tm.list().forEach { tab ->
-                tab.webView.stopLoading()
-                tab.webView.loadUrl("about:blank")
-                // H-4 修复（审计 2026-08-31）：注销导航器 + 销毁 Broker 会话
-                SecureWebViewFactory.release(tab.webView)
-                tab.webView.destroy()
-            }
+            tm.list().forEach { tab -> SecureWebViewFactory.tearDown(tab.webView) }
         }
         super.onDestroy()
     }

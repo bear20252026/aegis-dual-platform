@@ -33,8 +33,12 @@ object SearchEngines {
 
     const val DEFAULT_ENGINE: String = "baidu"
 
-    private const val PREFS_NAME: String = "aegis_home"
-    private const val KEY_ENGINE: String = "engine"
+    /**
+     * 首页偏好文件/键单源（全库审计 2026-09-02 收敛）：AegisHomeBridge 与
+     * 本对象共用同一 SharedPreferences 文件与引擎键——此前字面量双处硬编码。
+     */
+    internal const val PREFS_NAME: String = "aegis_home"
+    internal const val KEY_ENGINE: String = "engine"
 
     /** scheme 前缀识别（含 RFC 3986 scheme 字符集，末尾必须有冒号）。 */
     private val SCHEME_PREFIX = Regex("^([a-zA-Z][a-zA-Z0-9+.\\-]*):")

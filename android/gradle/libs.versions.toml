@@ -1,0 +1,27 @@
+# 依赖版本目录（全库审计 2026-09-02 收敛）：此前 webkit 1.15.0 在 app 与
+# webview-adapter 双处硬编码、junit 4.13.2 三处复制、ktlint 1.8.0 四处散落
+# ——升级时漏改任一处即产生隐性版本漂移。统一在此登记，构建脚本经
+# libs.xxx 访问（Gradle 自动加载本文件）。
+
+[versions]
+# AndroidX
+androidx-webview = "1.15.0"
+androidx-activityCompose = "1.13.0"
+androidx-lifecycleRuntimeCompose = "2.10.0"
+composeBom = "2026.06.00"
+# 工具链
+ktlint = "1.8.0"
+# 第三方
+kotlinxDatetime = "0.6.2"
+# jna：登记为文档单源（broker 的 @aar 分类器依赖无法走 catalog，字面量需与此同步）
+jna = "5.12.0"
+orgJson = "20230227"
+junit = "4.13.2"
+
+[libraries]
+androidx-webview = { module = "androidx.webkit:webkit", version.ref = "androidx-webview" }
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
+androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidx-lifecycleRuntimeCompose" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
+org-json = { module = "org.json:json", version.ref = "orgJson" }
+junit = { module = "junit:junit", version.ref = "junit" }

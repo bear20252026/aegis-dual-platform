@@ -3,19 +3,13 @@ package com.aegis.browser
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -34,6 +28,8 @@ import androidx.compose.ui.unit.dp
  * 视觉接近亚克力毛玻璃；所有文字/控件转白色保证深色底上的可读性。
  * 全版本兼容 —— 不依赖 Android 12+ 的 RenderEffect 模糊，仅用 alpha
  * 混合模拟，避免在 WebView 内容上做实时模糊的性能损耗。
+ *
+ * 标签胶囊骨架由 [TabChipCore] 单源提供（与 VerticalTabBar 共用）。
  *
  * @param tabs       标签列表（含标题/URL）
  * @param activeIndex 当前激活标签索引
@@ -61,9 +57,10 @@ fun TabBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         itemsIndexed(tabs) { index, tab ->
-            TabChip(
+            TabChipCore(
                 tab = tab,
                 active = index == activeIndex,
+                modifier = Modifier.height(32.dp),
                 onSelect = { onSelect(index) },
                 onClose = { onClose(index) },
             )
@@ -79,40 +76,6 @@ fun TabBar(
                     ),
             ) {
                 Text("+")
-            }
-        }
-    }
-}
-
-/** 单个标签胶囊：标题 + 关闭按钮；激活态用更亮的半透明白高亮。 */
-@Composable
-private fun TabChip(
-    tab: Tab,
-    active: Boolean,
-    onSelect: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Surface(
-        onClick = onSelect,
-        shape = MaterialTheme.shapes.small,
-        color = if (active) TabActiveHighlight else TabInactiveHighlight,
-        modifier = Modifier.height(32.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 12.dp, end = 4.dp),
-        ) {
-            Text(
-                text = tab.title.ifBlank { "新标签页" },
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                color = Color.White,
-            )
-            TextButton(
-                onClick = onClose,
-                modifier = Modifier.width(32.dp),
-            ) {
-                Text("×", color = Color.White)
             }
         }
     }

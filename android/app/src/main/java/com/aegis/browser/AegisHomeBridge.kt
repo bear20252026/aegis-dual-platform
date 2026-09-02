@@ -23,7 +23,7 @@ class AegisHomeBridge(
     private val context: Context,
     private val webViewProvider: () -> WebView?,
 ) {
-    private val prefs = context.getSharedPreferences("aegis_home", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences(SearchEngines.PREFS_NAME, Context.MODE_PRIVATE)
 
     companion object {
         /** 引擎显示名（P1-2：与 Windows SEARCH_ENGINES 中文名对齐）。 */
@@ -47,7 +47,7 @@ class AegisHomeBridge(
     @JavascriptInterface
     fun setEngine(key: String) {
         if (SearchEngines.ENGINE_URLS.containsKey(key)) {
-            prefs.edit().putString("engine", key).apply()
+            prefs.edit().putString(SearchEngines.KEY_ENGINE, key).apply()
         }
     }
 
@@ -59,7 +59,7 @@ class AegisHomeBridge(
      */
     @JavascriptInterface
     fun getEngine(): String {
-        val current = prefs.getString("engine", SearchEngines.DEFAULT_ENGINE) ?: SearchEngines.DEFAULT_ENGINE
+        val current = prefs.getString(SearchEngines.KEY_ENGINE, null) ?: SearchEngines.DEFAULT_ENGINE
         val engines =
             org.json.JSONArray().apply {
                 SearchEngines.ENGINE_URLS.keys.forEach { key ->

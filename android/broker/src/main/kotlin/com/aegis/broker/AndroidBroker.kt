@@ -5,14 +5,9 @@ package com.aegis.broker
  * 产生本地副作用的边界（ADR-002）。验证来源/会话/标签代际/scope/参数/预算/批准/
  * nonce——没有 AuthorizedAction 不能导航/下载/导出/改策略。默认拒绝（fail-closed）。
  * 与 Windows BrowserPolicyBroker 同语义——同一 contracts（url-origin 向量）。
- *
- * Mode（照搬 warden evaluate 模式）：
- * - FirstMatch：顺序遍历规则，第一个匹配生效（默认）
- * - DenyOverrides：收集所有匹配规则，deny > ask > allow 最严格优先（XACML/Cedar 语义）
  */
 class AndroidBroker(
     private val policyVersion: String = "1.0",
-    private val mode: BrokerMode = BrokerMode.FirstMatch,
     private val nativePolicyCoreGate: NativePolicyCoreGate = DefaultNativePolicyCoreGate,
 ) {
     private val consumedNonces =
@@ -342,13 +337,4 @@ class AndroidBroker(
         val tabId: String,
         @Volatile var documentGeneration: Long,
     )
-}
-
-/** 评估模式（照搬 warden Mode——FirstMatch/DenyOverrides）。 */
-enum class BrokerMode {
-    /** 顺序遍历规则，第一个匹配生效（默认）。 */
-    FirstMatch,
-
-    /** 收集所有匹配规则，deny > ask > allow 最严格优先（XACML/Cedar 语义）。 */
-    DenyOverrides,
 }

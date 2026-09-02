@@ -10,9 +10,9 @@ plugins {
     id("io.gitlab.arturbosch.detekt")
 }
 
-// 工具链 P0：ktlint 配置（锁定 ktlint 版本，防止插件 patch 版本间默认值漂移）
+// 工具链 P0：ktlint 配置（版本登记于 gradle/libs.versions.toml 单源）
 ktlint {
-    version = "1.8.0"
+    version = libs.versions.ktlint.get()
     // 仅检查本模块源码（Android 模块）
     android = true
 }
@@ -144,16 +144,16 @@ dependencies {
     implementation(project(":webview-adapter"))
     implementation(composeBom)
     androidTestImplementation(composeBom)
-    implementation("androidx.activity:activity-compose:1.13.0")
+    implementation(libs.androidx.activity.compose)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
-    implementation("androidx.webkit:webkit:1.15.0")
+    implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.webview)
     debugImplementation("androidx.compose.ui:ui-tooling")
     // JVM 单元测试（搜索归一 classifyInput/canonicalizeExternal——纯 Kotlin +
     // OriginPolicy(java.net.URI) 均不依赖 Android 框架类）
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
 }
 
 // detekt/Kotlin 编译目标显式 21（与 CI JDK 21 一致——detekt jvm-target 兼容——

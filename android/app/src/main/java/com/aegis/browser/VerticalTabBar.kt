@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -15,11 +14,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -33,6 +29,8 @@ import androidx.compose.ui.unit.dp
  * - 纯 UI 组件，不持有状态 —— 数据来自 [tabs]/[activeIndex]，
  *   交互通过回调上抛，由 MainActivity + TabManager 处理；
  * - 玻璃风格与 [TabBar] 一致（半透明深蓝紫，全版本兼容）。
+ *
+ * 标签胶囊骨架由 [TabChipCore] 单源提供（与 TabBar 共用）。
  *
  * @param tabs        标签列表（含标题/URL/分组）
  * @param activeIndex 当前激活标签索引
@@ -74,9 +72,11 @@ fun VerticalTabBar(
                 }
                 itemsIndexed(tabs) { index, tab ->
                     if (tab.group == group) {
-                        VerticalTabChip(
+                        TabChipCore(
                             tab = tab,
                             active = index == activeIndex,
+                            modifier = Modifier.fillMaxWidth().height(34.dp),
+                            titleModifier = Modifier.weight(1f),
                             onSelect = { onSelect(index) },
                             onClose = { onClose(index) },
                         )
@@ -94,43 +94,6 @@ fun VerticalTabBar(
                 ),
         ) {
             Text("+ 新建标签")
-        }
-    }
-}
-
-/** 单个垂直标签行：分组标记 + 标题 + 关闭按钮；激活态高亮。 */
-@Composable
-private fun VerticalTabChip(
-    tab: Tab,
-    active: Boolean,
-    onSelect: () -> Unit,
-    onClose: () -> Unit,
-) {
-    Surface(
-        onClick = onSelect,
-        shape = MaterialTheme.shapes.small,
-        color = if (active) TabActiveHighlight else TabInactiveHighlight,
-        modifier = Modifier.fillMaxWidth().height(34.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 10.dp, end = 4.dp),
-        ) {
-            Text(
-                text =
-                    (if (tab.pinned) "\uD83D\uDCCC " else "") +
-                        tab.title.ifBlank { "新标签页" },
-                style = MaterialTheme.typography.bodySmall,
-                maxLines = 1,
-                color = Color.White,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(
-                onClick = onClose,
-                modifier = Modifier.width(32.dp),
-            ) {
-                Text("×", color = Color.White)
-            }
         }
     }
 }
