@@ -24,7 +24,7 @@ android {
 
 // 工具链 P0（A-2 门禁扩面 2026-08-31）：与 :app 同款质量门禁
 ktlint {
-    version = "1.8.0"
+    version = libs.versions.ktlint.get()
     android = true
 }
 

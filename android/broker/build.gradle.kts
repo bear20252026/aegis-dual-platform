@@ -5,7 +5,7 @@ plugins {
 }
 
 ktlint {
-    version = "1.8.0"
+    version = libs.versions.ktlint.get()
     android = true
 }
 
@@ -89,10 +89,11 @@ if (requireNativePolicyCore) {
 dependencies {
     // ApprovalRequest/AuthorizedAction 的公开 expiresAt 字段使用 Instant；
     // 该类型出现在模块 API 中，消费者必须能在编译期解析它。
-    api("org.jetbrains.kotlinx:kotlinx-datetime:0.6.2")
+    api(libs.kotlinx.datetime)
+    // @aar 分类器无法在 version catalog 表达（Gradle 限制）——唯一保留字面量的依赖
     implementation("net.java.dev.jna:jna:5.12.0@aar")
     // A-2 接线：契约对齐守卫测试需要对照生成物 ActionContract 的字段面
     testImplementation(project(":contracts"))
-    testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20230227")
+    testImplementation(libs.junit)
+    testImplementation(libs.org.json)
 }

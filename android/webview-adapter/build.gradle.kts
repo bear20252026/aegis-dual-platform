@@ -5,7 +5,7 @@ plugins {
 }
 
 ktlint {
-    version = "1.8.0"
+    version = libs.versions.ktlint.get()
     android = true
 }
 
@@ -30,5 +30,5 @@ android {
 
 dependencies {
     implementation(project(":broker"))
-    implementation("androidx.webkit:webkit:1.15.0")
+    implementation(libs.androidx.webview)
 }
