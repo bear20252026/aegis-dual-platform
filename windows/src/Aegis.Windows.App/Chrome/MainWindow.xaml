@@ -3,42 +3,157 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="Aegis" Height="800" Width="1200"
+        Background="#FF101827" FontFamily="Segoe UI, Microsoft YaHei UI"
         Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
+  <Window.Resources>
+    <!-- 色板与 Android UiColors.kt 一一对应（ChromeBackground/ButtonOverlay/
+         FieldBackground/FieldBorder/TextSecondary——双端同值的跨端契约） -->
+    <SolidColorBrush x:Key="ChromeBackgroundBrush" Color="#FF101827"/>
+    <SolidColorBrush x:Key="ButtonOverlayBrush" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="ButtonOverlayHoverBrush" Color="#4DFFFFFF"/>
+    <SolidColorBrush x:Key="ButtonOverlayPressedBrush" Color="#66FFFFFF"/>
+    <SolidColorBrush x:Key="FieldBackgroundBrush" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="FieldBorderBrush" Color="#2EFFFFFF"/>
+    <SolidColorBrush x:Key="FieldBorderFocusedBrush" Color="#66FFFFFF"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B3FFFFFF"/>
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFFFF"/>
+
+    <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton） -->
+    <Style x:Key="NavButton" TargetType="Button">
+      <Setter Property="Width" Value="36"/>
+      <Setter Property="Height" Value="36"/>
+      <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+      <Setter Property="FontSize" Value="15"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome" CornerRadius="18" Background="{StaticResource ButtonOverlayBrush}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource ButtonOverlayHoverBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource ButtonOverlayPressedBrush}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter TargetName="Chrome" Property="Background" Value="Transparent"/>
+                <Setter Property="Opacity" Value="0.35"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- 胶囊内嵌「打开」钮（白底黑字——Geist 式高对比，对齐首页搜索按钮） -->
+    <Style x:Key="OpenButton" TargetType="Button">
+      <Setter Property="Foreground" Value="#FF0B1220"/>
+      <Setter Property="Background" Value="#FFFFFFFF"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Margin" Value="4"/>
+      <Setter Property="Padding" Value="12,0"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome" CornerRadius="14" Background="{TemplateBinding Background}"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="#FFE2E8F0"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="#FFCBD5E1"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.35"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
   <!-- 受信 chrome UI（本地固定 origin——远程页面无 native bridge——ADR-003） -->
   <DockPanel>
-    <DockPanel DockPanel.Dock="Top" Margin="4">
-      <Button x:Name="BackButton" Content="←" Click="Back_Click" Width="32" ToolTip="后退"/>
-      <Button x:Name="ForwardButton" Content="→" Click="Forward_Click" Width="32" ToolTip="前进"/>
-      <Button x:Name="RefreshButton" Content="⟳" Click="Refresh_Click" Width="32" ToolTip="刷新"/>
-      <Button x:Name="StopButton" Content="■" Click="Stop_Click" Width="32" ToolTip="停止"/>
-      <TextBox x:Name="AddressBar" KeyDown="AddressBar_KeyDown" Margin="4,0" ToolTip="地址栏（导航经 Broker 决策——真实取消）"/>
-    </DockPanel>
+    <Border DockPanel.Dock="Top" Background="{StaticResource ChromeBackgroundBrush}" Padding="8,6">
+      <DockPanel>
+        <StackPanel Orientation="Horizontal">
+          <Button x:Name="BackButton" Style="{StaticResource NavButton}" Content="←" Click="Back_Click" ToolTip="后退"/>
+          <Button x:Name="ForwardButton" Style="{StaticResource NavButton}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
+          <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
+          <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="■" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止"/>
+        </StackPanel>
+        <!-- 胶囊地址栏：深色玻璃 + 聚焦描边 + 占位符 + 内嵌「打开」 -->
+        <Border x:Name="AddressPill" Margin="10,0,0,0" CornerRadius="18"
+                Background="{StaticResource FieldBackgroundBrush}" BorderThickness="1">
+          <Border.Style>
+            <Style TargetType="Border">
+              <Setter Property="BorderBrush" Value="{StaticResource FieldBorderBrush}"/>
+              <Style.Triggers>
+                <Trigger Property="IsKeyboardFocusWithin" Value="True">
+                  <Setter Property="BorderBrush" Value="{StaticResource FieldBorderFocusedBrush}"/>
+                </Trigger>
+              </Style.Triggers>
+            </Style>
+          </Border.Style>
+          <Grid>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*"/>
+              <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Grid Grid.Column="0" Margin="14,0,4,0">
+              <TextBlock x:Name="AddressHint" Text="搜索网页或输入网址" VerticalAlignment="Center"
+                         Foreground="{StaticResource TextSecondaryBrush}" IsHitTestVisible="False"/>
+              <TextBox x:Name="AddressBar" BorderThickness="0" Background="Transparent"
+                       Foreground="{StaticResource TextPrimaryBrush}" CaretBrush="#FFFFFFFF"
+                       VerticalAlignment="Center" VerticalContentAlignment="Center" Height="30"
+                       ToolTip="地址栏（搜索词自动拼引擎；导航经 Broker 决策——真实取消）"
+                       TextChanged="AddressBar_TextChanged" KeyDown="AddressBar_KeyDown"/>
+            </Grid>
+            <Button x:Name="OpenButton" Grid.Column="1" Style="{StaticResource OpenButton}"
+                    Content="打开" Click="Open_Click" ToolTip="导航到地址栏输入"/>
+          </Grid>
+        </Border>
+      </DockPanel>
+    </Border>
+    <!-- 阶段 C 错误页（导航失败——NavigationCompleted WebErrorStatus——安全错误可见） -->
+    <Border x:Name="ErrorPagePanel" DockPanel.Dock="Top" Background="#FF2A1215" Padding="12,8"
+            Visibility="Collapsed">
+      <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
+    </Border>
     <Grid>
       <wv2:WebView2 x:Name="Browser"/>
       <!-- 全窗口受信模态遮罩：拦截底层点击；只展示 Rust 核心给出的最小审批字段。 -->
-      <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#990F172A">
+      <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#99101827">
         <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"
-                Padding="20" Background="White" BorderBrush="#334155" BorderThickness="1"
-                CornerRadius="8">
+                Padding="20" Background="#FF1B2537" BorderBrush="#66FFFFFF" BorderThickness="1"
+                CornerRadius="12">
           <StackPanel>
-            <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12"/>
-            <TextBlock Text="来源" FontWeight="SemiBold"/>
-            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Margin="0,0,0,8"/>
-            <TextBlock Text="路径与查询" FontWeight="SemiBold"/>
-            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Margin="0,0,0,8"/>
-            <TextBlock Text="权限范围" FontWeight="SemiBold"/>
-            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Margin="0,0,0,8"/>
-            <TextBlock x:Name="ApprovalExpiry" Foreground="#475569" TextWrapping="Wrap" Margin="0,0,0,16"/>
+            <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Foreground="#FFFFFFFF" Margin="0,0,0,12"/>
+            <TextBlock Text="来源" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
+            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
+            <TextBlock Text="路径与查询" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
+            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
+            <TextBlock Text="权限范围" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
+            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
+            <TextBlock x:Name="ApprovalExpiry" Foreground="#80FFFFFF" TextWrapping="Wrap" Margin="0,0,0,16"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88" Margin="0,0,8,0"/>
-              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112"/>
+              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88"
+                      Margin="0,0,8,0" Style="{StaticResource NavButton}" Width="Auto" Height="32" FontSize="13"/>
+              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112" Style="{StaticResource OpenButton}"/>
             </StackPanel>
           </StackPanel>
         </Border>
       </Grid>
     </Grid>
-    <!-- 阶段 C 错误页（导航失败——NavigationCompleted WebErrorStatus——安全错误可见） -->
-    <TextBlock x:Name="ErrorPage" DockPanel.Dock="Top" Visibility="Collapsed"
-               Foreground="DarkRed" Margin="8" TextWrapping="Wrap"/>
   </DockPanel>
 </Window>
