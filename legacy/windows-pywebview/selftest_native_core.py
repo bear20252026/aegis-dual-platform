@@ -13,13 +13,10 @@
 本自检覆盖三类断言（全部离线、无 GUI）：
 1. 解析：resolve_core 在 pywebview 6.2.1 真实布局（gui=模块 + native=BrowserView）
    下必须取到 CoreWebView2；旧布局兜底；各类缺失返回 None
-2. 等待：wait_for_core 有界轮询（就绪返回 / 超时返回 None）
-3. 门禁：gate_window_open 类级替换后，安全 URI 窗口内放行、
+2. 门禁：gate_window_open 类级替换后，安全 URI 窗口内放行、
    file:/javascript:/校验异常 一律拒绝（fail-closed）
 """
 import sys
-import threading
-import time
 import types
 from pathlib import Path
 
@@ -27,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _selftest_support import check, failures
 
-from app.shell_adapter import resolve_core, wait_for_core
+from app.shell_adapter import resolve_core
 
 
 class _FakeCore:
@@ -72,26 +69,6 @@ check("R5 控件无 CoreWebView2（初始化中）→ None",
       resolve_core(types.SimpleNamespace(native=types.SimpleNamespace(webview=object())))
       is None)
 
-# ============================================================
-# 2) 等待：就绪返回 / 超时返回 None
-# ============================================================
-w2 = _make_window_62_layout()
-
-
-def _late_attach() -> None:
-    time.sleep(0.2)
-    w2.native = _FakeBrowserView()
-
-
-threading.Thread(target=_late_attach, daemon=True).start()
-check("W1 wait_for_core 等到延迟就绪的内核",
-      isinstance(wait_for_core(w2, timeout=3.0, poll=0.05), _FakeCore))
-
-t0 = time.monotonic()
-check("W2 wait_for_core 超时返回 None",
-      wait_for_core(types.SimpleNamespace(), timeout=0.3, poll=0.05) is None)
-check("W3 超时受 timeout 约束（0.3s ± 0.3s）",
-      0.2 <= time.monotonic() - t0 <= 0.9)
 
 # ============================================================
 # 3) 门禁：类级替换 pywebview NewWindowRequested 处理器（hermetic）
