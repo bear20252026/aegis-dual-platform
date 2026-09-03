@@ -52,6 +52,15 @@ class BrowserViewModel : ViewModel() {
         _pendingNavigationConfirmation.asStateFlow()
 
     /**
+     * P2-1 修复（全面审计 2026-09-04）：页面级错误状态（SSL 证书失败 / 主框架
+     * 加载失败 / 主框架 HTTP >= 400；null = 无错误）。INV-04：错误状态经
+     * ViewModel StateFlow 流转，UI 只渲染不持有（原实现无任何错误回调——
+     * 证书错误/DNS 失败一律静默白屏）。
+     */
+    private val _pageError = MutableStateFlow<PageError?>(null)
+    val pageError: StateFlow<PageError?> = _pageError.asStateFlow()
+
+    /**
      * 阅读模式 + 整页翻译（ReaderController——单文件单职责；INV-04：
      * 状态经本 ViewModel 层暴露的 StateFlow 流转，UI 不持有浏览器状态）。
      * lazy：首次访问需 init() 已建 tabManager。
@@ -81,6 +90,34 @@ class BrowserViewModel : ViewModel() {
 
     /** P1-3 修复：渲染进程崩溃重建 WebView 需要 Context（init 时存应用级引用）。 */
     private var appContext: android.content.Context? = null
+
+    /**
+     * 宿主 Activity 弱引用（P0-5 修复（全面审计 2026-09-04）——P0-6 崩溃
+     * 重建需要主题化 Activity context 创建 WebView）。@Volatile：写入仅在
+     * 主线程生命周期回调（attach/detach），读可能来自渲染崩溃回调链。
+     */
+    @Volatile
+    private var hostActivityRef: java.lang.ref.WeakReference<android.app.Activity>? = null
+
+    /** P0-5 修复（全面审计 2026-09-04）：MainActivity onCreate 注入宿主引用。 */
+    fun attachActivity(activity: android.app.Activity) {
+        hostActivityRef = java.lang.ref.WeakReference(activity)
+    }
+
+    /**
+     * P0-5 修复（全面审计 2026-09-04）：MainActivity onDestroy 且 isFinishing
+     * 时解除引用（配置变更重建绝不 detach——新 Activity 会重新 attach）。
+     * 弱引用持有，不阻止 Activity 被 GC。
+     */
+    fun detachActivity() {
+        hostActivityRef = null
+    }
+
+    /** 可用的宿主 Activity（已 finish/destroy 的引用视为不可用，返回 null）。 */
+    private fun hostActivityOrNull(): android.app.Activity? {
+        val candidate = hostActivityRef?.get() ?: return null
+        return candidate.takeUnless { it.isFinishing || it.isDestroyed }
+    }
 
     /** 当前标签的 WebView（系统回退键消费 WebView 历史栈——未初始化返回 null）。 */
     fun currentWebViewOrNull(): WebView? = if (::tabManager.isInitialized) tabManager.current()?.webView else null
@@ -192,6 +229,28 @@ class BrowserViewModel : ViewModel() {
     }
 
     /**
+     * P2-1 修复（全面审计 2026-09-04）：清除页面错误面板。新导航开始
+     * （onPageStarted → URL 变化）时由 [createSecureWebView] 的回调自动触发，
+     * 重试 / 返回安全页按钮也走此入口，保证旧错误不残留。
+     */
+    fun clearPageError() {
+        _pageError.value = null
+    }
+
+    /** P2-1 修复：错误面板「重试」——清错误状态后 reload 当前标签。 */
+    fun retryCurrentPage() {
+        clearPageError()
+        navigateHistory(HistoryAction.RELOAD)
+    }
+
+    /** P2-1 修复：错误面板「返回安全页」——当前标签回到受信首页。 */
+    fun returnToSafeHome() {
+        val wv = if (::tabManager.isInitialized) tabManager.current()?.webView else null
+        clearPageError()
+        SecureWebViewFactory.navigatorFor(wv ?: return)?.openTrustedHome()
+    }
+
+    /**
      * Compose 的明确批准操作。只允许当前活动标签的待审批请求恢复导航，防止标签切换后
      * 在错误 WebView 上消费授权；客户端仍会在恢复前调用 Rust 核心批准并消费。
      */
@@ -222,7 +281,10 @@ class BrowserViewModel : ViewModel() {
 
     /** P1-3 修复：渲染进程崩溃后原位重建 WebView 并重载原 URL（主线程异步执行）。 */
     private fun rebuildAfterRendererGone(deadWebView: WebView) {
-        val context = appContext ?: return
+        // P0-6 修复（全面审计 2026-09-04）：优先用宿主 Activity context 创建
+        // WebView——appContext（无主题）创建的 WebView 一弹原生对话框
+        // （<select>/日期选择等）即崩（token null）。
+        val context = resolveRebuildContext() ?: return
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             if (!::tabManager.isInitialized) return@post
             val index = tabManager.list().indexOfFirst { it.webView === deadWebView }
@@ -241,6 +303,18 @@ class BrowserViewModel : ViewModel() {
             refresh()
             _webViewAlert.value = "页面进程已恢复，正在重新加载"
         }
+    }
+
+    /**
+     * P0-6 修复（全面审计 2026-09-04）：崩溃重建 context 解析——优先宿主
+     * Activity；拿不到（配置变更重建间隙 / 已退出 detach）回退 appContext
+     * 并 Log.w 留痕（此路径下页面原生对话框不可用，属已知降级）。
+     */
+    private fun resolveRebuildContext(): android.content.Context? {
+        val activity = hostActivityOrNull()
+        if (activity != null) return activity
+        android.util.Log.w("Aegis", "P0-6: 崩溃重建拿不到宿主 Activity，回退 appContext（原生对话框可能不可用）")
+        return appContext
     }
 
     private fun createSecureWebView(context: android.content.Context): WebView =
@@ -266,6 +340,11 @@ class BrowserViewModel : ViewModel() {
             onPageUrlObserved = { webView, url ->
                 // P1-6 修复（全量复审 2026-09-01）：地址栏随实际页面同步。
                 // P2 修复：用户编辑草稿期间不覆盖输入（提交后恢复正常同步）。
+                // P2-1 修复（全面审计 2026-09-04）：onPageStarted → URL 变化即
+                // 清除错误面板（重试/新导航开始后旧错误不残留）。
+                if (tabManager.current()?.webView === webView) {
+                    _pageError.value = null
+                }
                 if (url.isNotBlank()) {
                     tabManager.list().firstOrNull { it.webView === webView }?.url = url
                     if (!addressDraftActive && tabManager.current()?.webView === webView) {
@@ -292,6 +371,18 @@ class BrowserViewModel : ViewModel() {
                 // 的 WebView 并重载原 URL（原 no-op——标签永久白屏）。
                 rebuildAfterRendererGone(deadWebView)
             },
+            onPageError = { webView, description, isSsl, url ->
+                // P2-1 修复（全面审计 2026-09-04）：仅当前活动标签的错误上屏
+                // （后台标签的加载失败不遮蔽当前页内容）。
+                if (tabManager.current()?.webView === webView) {
+                    _pageError.value =
+                        PageError(
+                            description = description,
+                            isSsl = isSsl,
+                            url = url,
+                        )
+                }
+            },
         )
 }
 
@@ -299,6 +390,19 @@ class BrowserViewModel : ViewModel() {
 data class PendingNavigationConfirmation internal constructor(
     internal val webView: WebView,
     val request: ApprovalRequest,
+)
+
+/**
+ * P2-1 修复（全面审计 2026-09-04）：页面级错误（不可变数据类）。
+ *
+ * @param description 简短中文错误说明（错误面板主文案）
+ * @param isSsl       是否为 SSL 证书错误（面板标题区分「安全连接失败」）
+ * @param url         出错页面的 URL（面板展示定位）
+ */
+data class PageError(
+    val description: String,
+    val isSsl: Boolean,
+    val url: String,
 )
 
 private fun Boolean?.orFalse(): Boolean = this ?: false

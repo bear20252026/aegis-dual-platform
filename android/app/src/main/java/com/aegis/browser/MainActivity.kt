@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -73,6 +74,10 @@ class MainActivity : ComponentActivity() {
         WebViewVersionCheck.checkAndPrompt(this) { viewModel.setWebViewAlert(it) }
         // 初始化 ViewModel（TabManager + 首个标签）
         viewModel.init(this)
+        // P0-5 修复（全面审计 2026-09-04）：向 ViewModel 注入宿主引用（弱引用
+        // 持有）——P0-6 崩溃重建需用 Activity context 创建 WebView；onDestroy
+        // 且 isFinishing 时 detach。
+        viewModel.attachActivity(this)
 
         // 返回事件统一接管（BUG-013）：targetSdk 36 起系统默认经
         // OnBackInvokedCallback 分发返回（手势导航的边缘滑动与
@@ -102,6 +107,7 @@ class MainActivity : ComponentActivity() {
                 val tabsPosition by viewModel.tabsPosition.collectAsState()
                 val webViewAlert by viewModel.webViewAlert.collectAsState()
                 val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsState()
+                val pageError by viewModel.pageError.collectAsState()
                 val readerContent by viewModel.reader.content.collectAsState()
 
                 // 阅读模式：提取到的正文以对话框渲染（INV-04：状态来自 ViewModel）
@@ -191,7 +197,13 @@ class MainActivity : ComponentActivity() {
                                 onClose = { viewModel.closeTab(it) },
                                 onNewTab = { viewModel.newTab(this@MainActivity) },
                             )
-                            WebContentArea(tabManager = viewModel.getTabManager()!!, modifier = Modifier.weight(1f))
+                            WebContentArea(
+                                tabManager = viewModel.getTabManager()!!,
+                                pageError = pageError,
+                                onRetry = { viewModel.retryCurrentPage() },
+                                onBackToSafePage = { viewModel.returnToSafeHome() },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     } else {
                         TabBar(
@@ -211,7 +223,13 @@ class MainActivity : ComponentActivity() {
                             onReader = { viewModel.reader.toggleReaderMode() },
                             onTranslate = { viewModel.reader.translateCurrentPage() },
                         )
-                        WebContentArea(tabManager = viewModel.getTabManager()!!, modifier = Modifier.weight(1f))
+                        WebContentArea(
+                            tabManager = viewModel.getTabManager()!!,
+                            pageError = pageError,
+                            onRetry = { viewModel.retryCurrentPage() },
+                            onBackToSafePage = { viewModel.returnToSafeHome() },
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                 }
             }
@@ -304,12 +322,22 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        // Activity 销毁是确认 UI 的退出边界；任何待审批导航均须先撤销，不留可恢复能力。
-        viewModel.rejectPendingNavigationConfirmation()
-        // 释放全部 WebView 持有的 Chromium 资源（统一销毁序列单源）
-        viewModel.getTabManager()?.let { tm ->
-            tm.suspendAll()
-            tm.list().forEach { tab -> SecureWebViewFactory.tearDown(tab.webView) }
+        // P0-5 修复（全面审计 2026-09-04）：仅真正退出（isFinishing）才执行
+        // 销毁。density/字号/locale/折叠屏等未在 configChanges 声明的变更会
+        // 触发 Activity 重建而 ViewModel 存活（isChangingConfigurations）——
+        // 此前无条件 suspendAll + tearDown(destroy WebView) 后 init() 早退
+        // 不重建，全部标签持有已销毁 WebView（整窗白屏/崩溃）；重建场景
+        // WebViews 必须保留供新 Activity 重新挂载。
+        if (isFinishing) {
+            // Activity 真正退出是确认 UI 的退出边界；任何待审批导航均须先撤销，不留可恢复能力。
+            viewModel.rejectPendingNavigationConfirmation()
+            // 释放全部 WebView 持有的 Chromium 资源（统一销毁序列单源）
+            viewModel.getTabManager()?.let { tm ->
+                tm.suspendAll()
+                tm.list().forEach { tab -> SecureWebViewFactory.tearDown(tab.webView) }
+            }
+            // P0-5 修复：解除宿主引用（弱引用，不阻止 Activity 回收）。
+            viewModel.detachActivity()
         }
         super.onDestroy()
     }
@@ -321,24 +349,106 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/** 页面容器：显示当前标签的 WebView（两种布局共用）。 */
+/**
+ * 页面容器：显示当前标签的 WebView（两种布局共用）。
+ *
+ * P2-1 修复（全面审计 2026-09-04）：错误状态非空时在内容区上方渲染
+ * [PageErrorPanel]（原实现 SSL/加载错误静默白屏，无任何反馈）。
+ */
+@Suppress("FunctionNaming")
 @Composable
 private fun WebContentArea(
     tabManager: TabManager,
+    pageError: PageError?,
+    onRetry: () -> Unit,
+    onBackToSafePage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    AndroidView(
-        modifier = modifier.fillMaxWidth(),
-        factory = { FrameLayout(it) },
-        update = { container ->
-            val current = tabManager.current()
-            if (current == null) return@AndroidView
-            val wv = current.webView
-            if (container.indexOfChild(wv) < 0) {
-                container.removeAllViews()
-                (wv.parent as? ViewGroup)?.removeView(wv)
-                container.addView(wv)
+    Box(modifier = modifier) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { FrameLayout(it) },
+            update = { container ->
+                val current = tabManager.current()
+                if (current == null) return@AndroidView
+                val wv = current.webView
+                if (container.indexOfChild(wv) < 0) {
+                    container.removeAllViews()
+                    (wv.parent as? ViewGroup)?.removeView(wv)
+                    container.addView(wv)
+                }
+            },
+        )
+        pageError?.let { error ->
+            PageErrorPanel(
+                error = error,
+                onRetry = onRetry,
+                onBackToSafePage = onBackToSafePage,
+            )
+        }
+    }
+}
+
+/**
+ * P2-1 修复（全面审计 2026-09-04）：页面错误面板——半透明遮罩盖住 WebView
+ * 内容区。「重试」reload 当前标签；「返回安全页」回到受信首页。
+ */
+@Suppress("FunctionNaming")
+@Composable
+private fun PageErrorPanel(
+    error: PageError,
+    onRetry: () -> Unit,
+    onBackToSafePage: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .background(ErrorOverlayBackground)
+                .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text(
+                text = if (error.isSsl) "安全连接失败" else "页面加载失败",
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                text = error.description,
+                color = TextSecondary,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+            Text(
+                text = error.url,
+                color = TextSecondary,
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Surface(onClick = onRetry, shape = CircleShape, color = ButtonOverlay) {
+                    Text(
+                        text = "重试",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
+                    )
+                }
+                Surface(onClick = onBackToSafePage, shape = CircleShape, color = ButtonOverlay) {
+                    Text(
+                        text = "返回安全页",
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
+                    )
+                }
             }
-        },
-    )
+        }
+    }
 }

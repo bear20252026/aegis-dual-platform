@@ -1,7 +1,11 @@
 package com.aegis.webviewadapter
 
+import android.net.http.SslError
 import android.webkit.SafeBrowsingResponse
+import android.webkit.SslErrorHandler
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.aegis.broker.AndroidBroker
@@ -13,6 +17,10 @@ import com.aegis.broker.Decision
  * 转换为请求（不拥有安全策略——ADR-002）。导航/新窗口经 broker 决策（真实拒绝）；
  * onRenderProcessGone 返回 true + 清理 WebView（官方 Termination Handling API——
  * 不返回 true 则系统 kill Activity——调研交叉确认）。
+ *
+ * P2-1 修复（全面审计 2026-09-04）：补齐 SSL/加载错误回调——原实现无任何
+ * 错误处理，证书错误/DNS 失败/HTTP 5xx 一律静默白屏；错误经 [onPageError]
+ * 上抛 UI 错误面板（SSL 一律 cancel 绝不 proceed，透明不降级）。
  *
  * 构造参数全部为安全链路显式依赖（回调缺省安全——no-op）。
  */
@@ -27,9 +35,15 @@ class AegisWebViewClient(
     private val onNavigationConfirmationResolved: () -> Unit = {},
     private val onNavigationDenied: (code: String, detail: String) -> Unit = { _, _ -> },
     private val onPageUrlObserved: (String) -> Unit = {},
+    private val onPageError: (description: String, isSsl: Boolean, url: String) -> Unit = { _, _, _ -> },
 ) : WebViewClient() {
     private var documentGeneration = 0L
     private var pendingConfirmation: PendingConfirmedNavigation? = null
+
+    private companion object {
+        /** P2-1 修复：HTTP 错误状态码阈值（>= 该值视为服务器端错误）。 */
+        const val HTTP_ERROR_MIN = 400
+    }
 
     override fun shouldOverrideUrlLoading(
         view: WebView,
@@ -236,6 +250,98 @@ class AegisWebViewClient(
         // 页面同步（此前重定向/页内跳转后地址栏永远显示陈旧 URL）。
         if (!url.isNullOrBlank()) onPageUrlObserved(url)
         super.onPageStarted(view, url, favicon)
+    }
+
+    /**
+     * P2-1 修复（全面审计 2026-09-04）：SSL 证书错误——保持默认行为 cancel
+     * （绝不调用 handler.proceed()：跳过证书校验等于向中间人攻击放行），
+     * 并上报 UI 错误面板（原默认 cancel 后静默白屏，用户无从得知被拦截原因）。
+     */
+    override fun onReceivedSslError(
+        view: WebView,
+        handler: SslErrorHandler,
+        error: SslError,
+    ) {
+        handler.cancel()
+        val url = error.url
+        android.util.Log.w(
+            "AegisWebView",
+            "SSL 证书校验失败已取消: url=$url primaryError=${error.primaryError}",
+        )
+        onPageError("证书校验失败（${sslPrimaryErrorName(error.primaryError)}）", true, url)
+    }
+
+    /**
+     * P2-1 修复（全面审计 2026-09-04）：主框架加载失败上报（DNS 失败/断网/
+     * 不支持 scheme 等——原实现静默白屏）；子框架错误不上报（不阻塞整页展示）。
+     */
+    override fun onReceivedError(
+        view: WebView,
+        request: WebResourceRequest,
+        error: WebResourceError,
+    ) {
+        super.onReceivedError(view, request, error)
+        if (!request.isForMainFrame) return
+        val description = error.description?.toString().orEmpty()
+        android.util.Log.w(
+            "AegisWebView",
+            "主框架加载错误: code=${error.errorCode} desc=$description url=${request.url}",
+        )
+        val text = mainFrameErrorText(error.errorCode, description)
+        onPageError(text, false, request.url.toString())
+    }
+
+    /**
+     * P2-1 修复（全面审计 2026-09-04）：主框架 HTTP >= 400 上报。该回调对
+     * 任意资源都会触发——子框架/子资源的 4xx/5xx 不应遮蔽整页内容，仅
+     * `request.isForMainFrame` 时上报。
+     */
+    override fun onReceivedHttpError(
+        view: WebView,
+        request: WebResourceRequest,
+        errorResponse: WebResourceResponse,
+    ) {
+        super.onReceivedHttpError(view, request, errorResponse)
+        if (!request.isForMainFrame) return
+        if (errorResponse.statusCode < HTTP_ERROR_MIN) return
+        android.util.Log.w(
+            "AegisWebView",
+            "主框架 HTTP 错误: status=${errorResponse.statusCode} url=${request.url}",
+        )
+        onPageError("服务器返回错误（HTTP ${errorResponse.statusCode}）", false, request.url.toString())
+    }
+
+    /** P2-1 修复：SslError.primaryError → 简短中文说明（错误面板文案）。 */
+    private fun sslPrimaryErrorName(primaryError: Int): String =
+        when (primaryError) {
+            SslError.SSL_DATE_INVALID -> "证书日期无效"
+            SslError.SSL_EXPIRED -> "证书已过期"
+            SslError.SSL_IDMISMATCH -> "证书域名不匹配"
+            SslError.SSL_NOTYETVALID -> "证书尚未生效"
+            SslError.SSL_UNTRUSTED -> "证书颁发机构不受信任"
+            SslError.SSL_INVALID -> "证书无效"
+            else -> "未知证书错误"
+        }
+
+    /** P2-1 修复：主框架错误码/描述 → 中文文案（未识别错误码回退原始描述）。 */
+    private fun mainFrameErrorText(
+        errorCode: Int,
+        description: String,
+    ): String {
+        val reason =
+            when (errorCode) {
+                // ERROR_* 常量定义在 WebViewClient（非 WebResourceError）
+                WebViewClient.ERROR_HOST_LOOKUP -> "找不到服务器"
+
+                WebViewClient.ERROR_CONNECT -> "无法连接服务器"
+
+                WebViewClient.ERROR_TIMEOUT -> "连接超时"
+
+                WebViewClient.ERROR_UNSUPPORTED_SCHEME -> "不支持的地址类型"
+
+                else -> description.ifBlank { "加载失败" }
+            }
+        return "页面加载失败：$reason"
     }
 
     /** 标签关闭时显式释放 Broker 会话，禁止遗留 WebView 再消费旧授权。 */

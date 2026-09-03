@@ -36,3 +36,9 @@ val FieldBorderIdle = Color(0x2EFFFFFF)
 
 /** 次级文字（地址栏占位符） */
 val TextSecondary = Color(0xB3FFFFFF)
+
+/**
+ * P2-1 修复（全面审计 2026-09-04）：页面错误面板遮罩（深蓝紫近实底半透明
+ * ——压住白屏/空白内容，保证错误文案可读；同工具栏色系）。
+ */
+val ErrorOverlayBackground = Color(0xE6101827)

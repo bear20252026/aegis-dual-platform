@@ -18,6 +18,12 @@ import android.webkit.WebView
  * 安全口径（ADR-003 复审）：addJavascriptInterface 对所有页面可见——
  * 本桥仅暴露「无数据读取、无状态篡改」的入口级操作（与 Windows 端
  * 标签结构操作放行同口径）；壁纸/引擎偏好写入仅限白名单值。
+ *
+ * P1-1 修复（全面审计 2026-09-04）：注入对象对任意远端页面可见且
+ * `window.AegisBridge` 存在性是指纹探针——所有 @JavascriptInterface 方法
+ * 入口先经 [isTrustedShellPage] 校验：宿主 WebView 当前 URL 仅允许本地壳页
+ * （`file:///android_asset/` 前缀的内置资源）或 `about:blank`；远端页面
+ * 调用一律拒绝执行并 Log.w 留痕（壳页调用频率低，校验无性能影响）。
  */
 class AegisHomeBridge(
     private val context: Context,
@@ -37,15 +43,38 @@ class AegisHomeBridge(
                 "aurora-twilight.jpg",
                 "aurora-violet.jpg",
             )
+
+        /** P1-1 修复：受信壳页 URL 前缀（本地 assets 内置资源——首页/画板等）。 */
+        private const val TRUSTED_SHELL_PREFIX = "file:///android_asset/"
+    }
+
+    /**
+     * P1-1 修复（全面审计 2026-09-04）：受信壳页校验（单一判定点）。宿主
+     * WebView 当前 URL 仅允许本地壳页前缀或 about:blank。@JavascriptInterface
+     * 运行在 JS 后台线程，getUrl 以 runCatching 包裹——异常按拒绝处理
+     * （fail-closed），不因跨线程读取崩溃放行。
+     */
+    private fun isTrustedShellPage(): Boolean {
+        val url =
+            webViewProvider()
+                ?.let { wv -> runCatching { wv.url }.getOrNull() }
+                .orEmpty()
+        val trusted = url == "about:blank" || url.startsWith(TRUSTED_SHELL_PREFIX)
+        if (!trusted) {
+            android.util.Log.w("AegisHome", "[security] AegisBridge 拒绝非壳页调用: $url")
+        }
+        return trusted
     }
 
     @JavascriptInterface
     fun logError(message: String) {
+        if (!isTrustedShellPage()) return
         android.util.Log.e("AegisHome", message ?: "")
     }
 
     @JavascriptInterface
     fun setEngine(key: String) {
+        if (!isTrustedShellPage()) return
         if (SearchEngines.ENGINE_URLS.containsKey(key)) {
             prefs.edit().putString(SearchEngines.KEY_ENGINE, key).apply()
         }
@@ -59,6 +88,7 @@ class AegisHomeBridge(
      */
     @JavascriptInterface
     fun getEngine(): String {
+        if (!isTrustedShellPage()) return ""
         val current = prefs.getString(SearchEngines.KEY_ENGINE, null) ?: SearchEngines.DEFAULT_ENGINE
         val engines =
             org.json.JSONArray().apply {
@@ -80,17 +110,22 @@ class AegisHomeBridge(
 
     @JavascriptInterface
     fun setWallpaper(name: String) {
+        if (!isTrustedShellPage()) return
         if (name in WALLPAPERS) {
             prefs.edit().putString("wallpaper", name).apply()
         }
     }
 
     @JavascriptInterface
-    fun getWallpaper(): String = prefs.getString("wallpaper", "") ?: ""
+    fun getWallpaper(): String {
+        if (!isTrustedShellPage()) return ""
+        return prefs.getString("wallpaper", "") ?: ""
+    }
 
     /** 首页搜索/地址栏跳转：归一走 SearchEngines 单源（搜索词/网址同语义）。 */
     @JavascriptInterface
     fun navigate(input: String) {
+        if (!isTrustedShellPage()) return
         val text = input?.trim().orEmpty()
         if (text.isEmpty()) return
         // P0-2/P1-1 修复（搜索审计 2026-09-01）：与地址栏共用 normalizeInput
@@ -120,13 +155,14 @@ class AegisHomeBridge(
      */
     @JavascriptInterface
     fun openGeogebra(): Boolean {
-        val wv = webViewProvider() ?: return false
-        wv.post {
+        // P1-1 修复（全面审计 2026-09-04）：受信壳页校验合并进 provider 判定（detekt ReturnCount ≤ 2）
+        val wv = if (isTrustedShellPage()) webViewProvider() else null
+        wv?.post {
             SecureWebViewFactory.navigatorFor(wv)?.openTrustedAsset(
                 "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
             )
         }
-        return true
+        return wv != null
     }
 
     /**
@@ -135,6 +171,7 @@ class AegisHomeBridge(
      */
     @JavascriptInterface
     fun goBack() {
+        if (!isTrustedShellPage()) return
         val wv = webViewProvider() ?: return
         wv.post {
             if (wv.canGoBack()) {
