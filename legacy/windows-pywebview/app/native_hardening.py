@@ -26,8 +26,11 @@ from app.agent_sitemap import (
 from app.shell_adapter import (
     resolve_core as _resolve_core,
 )
+
+
 def _apply_request_policy(window: Any, blocked: set | None = None,
-                          shell: Any = None, api: Any = None) -> None:
+                          shell_adapter: Any = None,
+                          api: Any = None) -> None:
     """统一请求策略管线（A 级落地，P0-①：DNT→威胁拦截统一回调链）。
 
     通过 pywebview request_sent 事件（底层 WebView2 WebResourceRequested）
@@ -73,7 +76,8 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                 # 保持开启。js_api 桥不依赖 IsWebMessageEnabled（零功能影响）；设置
                 # 幂等（每次请求按来源设置，下个导航生效——pywebview 无导航事件）。
                 try:
-                    core = shell.core(window) if shell is not None else None
+                    core = (shell_adapter.core(window)
+                            if shell_adapter is not None else None)
                     settings = getattr(core, "Settings", None) if core is not None else None
                     if settings is not None:
                         remote = bool(host)  # host 非空 = 远程网页（非信任）
@@ -422,7 +426,8 @@ def _apply_window_hardening(window, api, shell, core: Any = None):
                 blocked = ThreatFeedUpdater(resolve_data_dir()).load_cached()
             except Exception:
                 blocked = set()  # 黑名单快照失败 → 仅 DNT，不影响浏览
-            _apply_request_policy(window, blocked=blocked, shell=shell, api=api)
+            _apply_request_policy(window, blocked=blocked,
+                                  shell_adapter=shell, api=api)
     except Exception:
         pass  # 统一策略绑定失败静默，不影响浏览
 
