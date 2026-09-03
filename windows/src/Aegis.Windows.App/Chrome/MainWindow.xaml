@@ -142,6 +142,15 @@
           <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
           <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="■" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止"/>
         </StackPanel>
+        <!-- M2 数据闭环工具组：搜索引擎切换 / 收藏☆ / 历史记录 -->
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
+          <ComboBox x:Name="EngineCombo" Width="86" Height="30" VerticalAlignment="Center"
+                    SelectionChanged="Engine_SelectionChanged" ToolTip="搜索引擎"/>
+          <Button x:Name="StarButton" Style="{StaticResource NavButton}" Content="☆"
+                  Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"/>
+          <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="历"
+                  Click="History_Click" Margin="6,0,0,0" ToolTip="历史记录"/>
+        </StackPanel>
         <!-- 胶囊地址栏：深色玻璃 + 聚焦描边 + 占位符 + 内嵌「打开」 -->
         <Border x:Name="AddressPill" Margin="10,0,0,0" CornerRadius="18"
                 Background="{StaticResource FieldBackgroundBrush}" BorderThickness="1">
@@ -185,6 +194,11 @@
     <ProgressBar x:Name="LoadingBar" DockPanel.Dock="Top" Height="2" IsIndeterminate="True"
                  Background="Transparent" Foreground="#FF3B82F6" BorderThickness="0"
                  Visibility="Collapsed"/>
+    <!-- M2 操作反馈条（收藏等——用户可见，2.5s 自动隐藏，不静默） -->
+    <Border x:Name="FeedbackBar" DockPanel.Dock="Top" Background="#FF0F2A1B" Padding="12,8"
+            Visibility="Collapsed">
+      <TextBlock x:Name="FeedbackText" Foreground="#FF86EFAC" TextWrapping="Wrap"/>
+    </Border>
     <Grid>
       <!-- M1-T1：每标签一 WebView2 实例（TabRuntime 创建/挂接）——切换即可见性
            切换，页面状态/滚动/表单天然保留（ADR-009 D2） -->

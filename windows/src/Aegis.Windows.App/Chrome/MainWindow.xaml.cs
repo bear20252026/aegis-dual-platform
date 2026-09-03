@@ -10,7 +10,10 @@ using System.Windows;
 using System.Windows.Input;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Core;
+using Aegis.Windows.Core.Bookmarks;
+using Aegis.Windows.Core.History;
 using Aegis.Windows.Core.Security;
+using Aegis.Windows.Core.Settings;
 using Aegis.Windows.Core.Tabs;
 using Microsoft.Web.WebView2.Core;
 
@@ -28,6 +31,14 @@ public partial class MainWindow : Window
     private string? _activeTabId;
     private string? _pendingConfirmTabId;
     private bool _suppressTabSelection;
+    private readonly BookmarkStore _bookmarks =
+        new(Path.Combine(AppPaths.DataDir, "bookmarks.db"));
+    private readonly HistoryStore _history =
+        new(Path.Combine(AppPaths.DataDir, "history.db"));
+    private readonly AppSettings _settings =
+        AppSettings.Load(AppSettings.DefaultPath);
+    private HistoryWindow? _historyWindow;
+    private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
 
     private const string HomeUrl = "about:blank";
 
@@ -40,6 +51,22 @@ public partial class MainWindow : Window
         TabStrip.ItemsSource = _tabs.Tabs;
         RestoreSessionOrStart();
         StartThreatFeedRefresh();
+        InitEngineCombo();
+    }
+
+    /// <summary>M2：搜索引擎下拉（AppSettings 持久化——重启动保持偏好）。</summary>
+    private void InitEngineCombo()
+    {
+        EngineCombo.ItemsSource = UrlNormalizer.EngineUrls.Keys.ToList();
+        EngineCombo.SelectedValue = _settings.SearchEngine;
+    }
+
+    private void Engine_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (EngineCombo.SelectedValue is not string engine)
+            return;
+        _settings.SearchEngine = engine;
+        _settings.Save(AppSettings.DefaultPath);
     }
 
     /// <summary>M1-T2：威胁黑名单启动快照 + 订阅源后台刷新（对齐 Python 批次 2-1）。
@@ -201,7 +228,7 @@ public partial class MainWindow : Window
     {
         // 输入归一单源（UrlNormalizer——与 Android SearchEngines.kt 跨端契约对齐）；
         // 最终仍经该标签 HostWebView 的 NavigationStarting → Broker 决策。
-        var target = UrlNormalizer.Normalize(AddressBar.Text);
+        var target = UrlNormalizer.Normalize(AddressBar.Text, _settings.SearchEngine);
         if (target is null)
         {
             ErrorPage.Text = "无法导航：输入为空，或属于非导航协议（file:/javascript:/data: 等已被拒绝）。";
@@ -222,6 +249,57 @@ public partial class MainWindow : Window
 
     private Microsoft.Web.WebView2.Wpf.WebView2? ActiveControl() =>
         _activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var r) ? r.Control : null;
+
+    /// <summary>M2 收藏☆：toggle 当前页（零页面可控参数——URL/标题服务端取，
+    /// 与 Android AegisBridge/Python toggle_bookmark 同安全模型）。</summary>
+    private void Star_Click(object sender, RoutedEventArgs e)
+    {
+        var tab = _tabs.Current;
+        if (tab is null || !Uri.TryCreate(tab.Url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            ShowFeedback("当前页面不支持收藏", isWarning: true);
+            return;
+        }
+        var ok = _bookmarks.Contains(tab.Url)
+            ? _bookmarks.Remove(tab.Url)
+            : _bookmarks.Add(string.IsNullOrWhiteSpace(tab.Title) ? uri.Host : tab.Title, tab.Url);
+        ShowFeedback(ok ? (ok ? "已收藏" : "操作失败") : "已取消收藏", isWarning: !ok);
+        if (!ok)
+            ShowFeedback("操作失败", isWarning: true);
+    }
+
+    private void History_Click(object sender, RoutedEventArgs e)
+    {
+        if (_historyWindow is null || !_historyWindow.IsLoaded)
+        {
+            _historyWindow = new HistoryWindow(_history);
+            _historyWindow.Owner = this;
+        }
+        _historyWindow.Show();
+        _historyWindow.Activate();
+    }
+
+    /// <summary>反馈条显示（2.5s 自动隐藏——不静默原则的轻量实现）。</summary>
+    private void ShowFeedback(string message, bool isWarning = false)
+    {
+        FeedbackText.Text = message;
+        FeedbackBar.Background = new System.Windows.Media.SolidColorBrush(
+            isWarning ? System.Windows.Media.Color.FromArgb(0xFF, 0x2A, 0x12, 0x15)
+                      : System.Windows.Media.Color.FromArgb(0xFF, 0x0F, 0x2A, 0x1B));
+        FeedbackBar.Visibility = Visibility.Visible;
+        _feedbackTimer ??= new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(2.5),
+        };
+        _feedbackTimer.Tick += (_, _) =>
+        {
+            FeedbackBar.Visibility = Visibility.Collapsed;
+            _feedbackTimer.Stop();
+        };
+        _feedbackTimer.Stop();
+        _feedbackTimer.Start();
+    }
 
     private void Back_Click(object sender, RoutedEventArgs e) => ActiveControl()?.GoBack();
     private void Forward_Click(object sender, RoutedEventArgs e) => ActiveControl()?.GoForward();
