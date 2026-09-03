@@ -287,6 +287,47 @@ finally:
     else:
         _sys.frozen = _real_frozen
 
+# 14) P0-4 回归（全面审计 2026-09-04）：current_url 移出白名单 +
+#     js_error 受信来源门禁（远程页不可探针/伪造上报）
+check("current_url 已移出 _JS_EXPOSED", "current_url" not in api._JS_EXPOSED)
+check("__dir__ 不再暴露 current_url", "current_url" not in dir(api))
+
+
+class _LogCapture:
+    """捕获 crash_reporter.log_event 调用（js_error 在调用点动态 import）。"""
+
+    def __init__(self):
+        self.lines: list = []
+        self._orig = None
+
+    def __enter__(self):
+        import crash_reporter
+        self._orig = crash_reporter.log_event
+        crash_reporter.log_event = lambda msg, *a, **k: self.lines.append(str(msg))
+        return self
+
+    def __exit__(self, *exc):
+        import crash_reporter
+        crash_reporter.log_event = self._orig
+        return False
+
+
+# 受信壳页（start.html / 工具栏壳层——host 为空）上报照常记录
+api_trusted = Api()
+api_trusted.window = ShellWindow()
+with _LogCapture() as cap:
+    api_trusted.js_error("TypeError: x is undefined", "", 1, 1, "stack")
+check("壳页 js_error 照常记录", len(cap.lines) == 1, f"{cap.lines}")
+
+# 远程页面：source 为空（旧 A2 绕过口）也必须丢弃
+api_remote = Api()
+api_remote.window = _RemoteWin()
+with _LogCapture() as cap:
+    api_remote.js_error("probe", "", 0, 0, "")
+    api_remote.js_error("spoof", "https://evil.example/x.js", 1, 1, "")
+check("远程页 js_error 一律丢弃（含空 source 绕过）", cap.lines == [],
+      f"{cap.lines}")
+
 if failures:
     print("FAIL")
     for f in failures:
