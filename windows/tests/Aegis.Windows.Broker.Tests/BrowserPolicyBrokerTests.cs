@@ -72,6 +72,21 @@ public sealed class BrowserPolicyBrokerTests
     }
 
     [Fact]
+    public void DownloadAttemptsAreDeniedAndAudited()
+    {
+        // 审计 C1（全面审计 2026-09-04）：下载没有契约授权动作——
+        // DenyDownload 必须 fail-closed 留痕，供 HostWebView 调用。
+        var broker = CreateRegisteredBroker();
+
+        broker.DenyDownload("session-1", "tab-1", "https://example.com/file.zip");
+
+        var entry = Assert.Single(broker.AuditLog, e => e.Scope == "download");
+        Assert.Equal("deny", entry.Decision);
+        Assert.Equal("https://example.com/file.zip", entry.Origin);
+        Assert.Equal("download_not_authorized", entry.Reason);
+    }
+
+    [Fact]
     public void BuiltNativePolicyCoreDllHasExpectedAbiWhenProvided()
     {
         var libraryPath = Environment.GetEnvironmentVariable("AEGIS_NATIVE_POLICY_CORE_TEST_PATH");

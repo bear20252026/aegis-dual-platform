@@ -110,7 +110,11 @@ class Api(
         # 离线几何画板（内部资源跳转——受信校验在方法内）
         "open_geogebra",
         "navigate", "go_back", "go_forward", "reload_page", "go_home",
-        "current_url", "js_error",
+        # P0-4 修复（全面审计 2026-09-04）：current_url 移出白名单——任意
+        # 远程页面可经 pywebview.api.current_url() 读取当前标签完整 URL
+        # （含 query/token，跨站跟踪/凭据窃取面）。全仓无 JS 消费点
+        # （grep 证实，仅 Python 内部调用），方法保留供桥内部使用。
+        "js_error",
         "add_bookmark", "remove_bookmark",
         # 内置源码查看器（桥内抓取+全转义展示；无数据读取面）
         "view_source", "close_source_view",

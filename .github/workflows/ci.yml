@@ -72,10 +72,12 @@ jobs:
             app/paths.py app/bookmark_store.py app/history_store.py \
             app/database.py app/security.py app/backdrop.py \
             app/fingerprint_pipeline.py app/bridge_hooks.py \
+            app/native_hardening.py app/native_interception.py \
+            app/native_monitoring.py \
             crash_reporter.py --exclude "System Volume Information"
 
-      - name: 自检脚本（session_store / api_bridge / s1 集成 / shell_toolbar / tab_state / navigation_search）
-        # 门禁全量常跑（ADR-007）：CLAUDE.md 要求改动后必跑的 5 个离线自检
+      - name: 自检脚本（session_store / api_bridge / s1 集成 / shell_toolbar / tab_state / navigation_search / view_source / native_core）
+        # 门禁全量常跑（ADR-007）：CLAUDE.md 要求改动后必跑的离线自检
         # 全部入 CI——自检与实现不一致（master 曾双 FAIL）在合入前即暴露
         run: |
           python selftest_session_store.py
@@ -85,6 +87,7 @@ jobs:
           python selftest_tab_state.py
           python selftest_navigation_search.py
           python selftest_view_source.py
+          python selftest_native_core.py
 
   ui-regression:
     # 质量门禁（S6）：shared/shell 单源首页的 UI 回归——已知缺陷逐条断言

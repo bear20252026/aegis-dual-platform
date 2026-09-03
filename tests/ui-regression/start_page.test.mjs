@@ -1,6 +1,8 @@
-// start_page.test.mjs —— shared/shell/start.html UI 回归测试
+// start_page.test.mjs —— shared/shell/ 单源首页 UI 回归测试
 // 每个断言对应一个已修复缺陷（缺陷库见 tests/KNOWN_DEFECTS.md）。
 // 运行：node --test tests/ui-regression/
+// A8 拆分跟进（全面审计 2026-09-04）：start.html 已拆为 html + start.css +
+// start.snake.js + start.import.js——断言目标随内容迁移到对应单源文件。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -10,8 +12,12 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SHELL = join(ROOT, 'shared', 'shell');
 const HTML = readFileSync(join(SHELL, 'start.html'), 'utf8');
-// 抽取 <script> 体做语法与内容断言
-const scriptBody = HTML.match(/<script>([\s\S]*)<\/script>/)?.[1] ?? '';
+const CSS = readFileSync(join(SHELL, 'start.css'), 'utf8');
+const SNAKE = readFileSync(join(SHELL, 'start.snake.js'), 'utf8');
+const IMPORT = readFileSync(join(SHELL, 'start.import.js'), 'utf8');
+// 抽取全部内联 <script> 体（非贪婪逐块——贪心跨块会把 src 标签吞进来）
+const scriptBody = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+  .map(m => m[1]).join('\n');
 
 function syntaxOk(body) {
   // 去宿主对象引用后应可解析（宿主对象运行时由两端注入）
@@ -42,12 +48,13 @@ test('BUG-011/012: 双端统一——首页返回按钮 + 贪吃蛇游戏（单�
   // BUG-011：贪吃蛇曾为 Android 地址栏独占（Win 完全没有）——首页单源内置
   assert.match(HTML, /id="snakeBtn"[^>]*onclick="openSnake\(\)"/, '首页必须有贪吃蛇入口按钮');
   assert.match(HTML, /id="snakeCanvas"/, '必须有贪吃蛇画布');
-  assert.match(HTML, /touchmove[\s\S]{0,80}preventDefault/, '画布必须拦截 touchmove（否则滑动触发页面滚动）');
-  assert.match(HTML, /Host\.has\('snake'\)/, '贪吃蛇入口必须走能力面声明');
+  // A8 拆分后：画布行为/持久化/能力面调用在 start.snake.js，全屏样式在 start.css
+  assert.match(SNAKE, /touchmove[\s\S]{0,80}preventDefault/, '画布必须拦截 touchmove（否则滑动触发页面滚动）');
+  assert.match(SNAKE, /Host\.has\('snake'\)/, '贪吃蛇入口必须走能力面声明');
   // BUG-014 版本替换：全屏网格页 + 最高分持久化；旧地址栏版必须移除
   assert.match(HTML, /id="snakeBest"/, '必须有最高分显示');
-  assert.match(HTML, /snakeBest'/, '最高分必须持久化（localStorage，降级内存）');
-  assert.match(HTML, /flex-direction:column; align-items:center; justify-content:center;/, '覆盖层必须全屏页面化');
+  assert.match(SNAKE, /snakeBest'/, '最高分必须持久化（localStorage，降级内存）');
+  assert.match(CSS, /flex-direction:column; align-items:center; justify-content:center;/, '覆盖层必须全屏页面化');
   const snakeKt = join(ROOT, 'android', 'app', 'src', 'main', 'java', 'com', 'aegis', 'browser', 'AddressBarSnake.kt');
   assert.ok(!existsSync(snakeKt), '旧版地址栏贪吃蛇（AddressBarSnake.kt）必须已删除');
   const mainKt = readFileSync(join(ROOT, 'android', 'app', 'src', 'main', 'java', 'com', 'aegis', 'browser', 'MainActivity.kt'), 'utf8');
@@ -55,8 +62,9 @@ test('BUG-011/012: 双端统一——首页返回按钮 + 贪吃蛇游戏（单�
 });
 
 test('BUG-003 搜索框 UI 错乱：#searchForm 必须承担 flex 行布局', () => {
-  assert.match(HTML, /#searchForm\s*\{[^}]*display:flex/, 'form 打断外层 flex 的回归');
-  assert.match(HTML, /#searchForm\s*\{[^}]*flex:1/, 'form 必须占满行宽');
+  // A8 拆分后：布局样式单源在 start.css
+  assert.match(CSS, /#searchForm\s*\{[^}]*display:flex/, 'form 打断外层 flex 的回归');
+  assert.match(CSS, /#searchForm\s*\{[^}]*flex:1/, 'form 必须占满行宽');
 });
 
 test('BUG-004 首页壁纸 404：壁纸文件必须随单源目录存在且引用为相对路径', () => {
@@ -104,6 +112,9 @@ test('BUG-008 宿主桥单源：12+ 调用点必须收敛 Host 适配层，无 p
   });
 });
 
-test('语法完整性：脚本体必须可解析（防 UI 白屏）', () => {
-  assert.ok(syntaxOk(scriptBody));
+test('语法完整性：全部脚本体必须可解析（防 UI 白屏）', () => {
+  // A8 拆分后：内联块 + snake + import 三个脚本体分别解析
+  assert.ok(syntaxOk(scriptBody), 'start.html 内联脚本体语法错误');
+  assert.ok(syntaxOk(SNAKE), 'start.snake.js 语法错误');
+  assert.ok(syntaxOk(IMPORT), 'start.import.js 语法错误');
 });

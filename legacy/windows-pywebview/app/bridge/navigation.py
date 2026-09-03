@@ -132,12 +132,23 @@ class NavigationMixin:
     # ---- JS 错误上报（JS 侧 window.onerror / unhandledrejection → 这里）----
     def js_error(self, message: str, source: str = "", line: Any = None,
                  col: Any = None, stack: str = "") -> None:
-        """接收页面 JS 错误，写入崩溃报告 events.log（后台静默）。"""
+        """接收页面 JS 错误，写入崩溃报告 events.log（后台静默）。
+
+        P0-4 修复（全面审计 2026-09-04）：加受信来源门禁——仅本地壳页
+        （host 为空：start.html/工具栏壳层）的上报才记录；远程页面的
+        js_error 调用一律丢弃。修复两个问题：
+        ① 任意远程页面可经 pywebview.api.js_error 探针/伪造内联上报
+           （与 B0-W-01「远程页零敏感面」口径一致）；
+        ② 旧 A2 检查在 source 为空时跳过同源校验——伪造来源可绕过。
+        现在信任基点改为「当前页面是否受信」（服务端判定，不可被 JS
+        参数伪造），source 同源检查保留作为第二层。
+        """
         try:
+            if not self._check_trusted_source():
+                return  # 远程页面/未知来源 → 丢弃（不记录、不报错）
             # A2（final-development-checklist）：消息来源验证（CVE-2026-33118
             # spoofing 防御）——source 为空（页面内联错误）或与当前页面 host
-            # 同源才记录；跨域来源（伪造上报）丢弃。不改变功能（合法错误照常
-            # 记录，仅非法来源被拒）。
+            # 同源才记录；跨域来源（伪造上报）丢弃。
             if source:
                 # host_of（validators 单源）替代逐处 urlparse 提取
                 page_host = ""

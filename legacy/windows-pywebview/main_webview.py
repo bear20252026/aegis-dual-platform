@@ -15,350 +15,33 @@
 
 from __future__ import annotations
 
-import os
 import sys
 import threading
 from typing import Any
 
-from app.agent_sitemap import (
-    eval_agent_condition as _eval_agent_condition,
-)
-
-# A-5 拆分（架构审计 2026-08-31）：agent sitemap 策略下沉 app/agent_sitemap.py
-# （本文件只保留常量与转发——旧导入路径兼容）
-from app.agent_sitemap import (  # noqa: F401——转发兼容旧导入路径
-    host_matches,
-)
-from app.agent_sitemap import (
-    load_agent_sitemap as _load_agent_sitemap,
-)
-from app.agent_sitemap import (
-    match_agent_action as _match_agent_action,
-)
 from app.api_bridge import SEARCH_ENGINES, START_URL, Api, on_loaded
-from app.url_utils import is_navigation_safe as _is_navigation_safe
 
-# C2 阶段 A（ceLLMate 借鉴）：Agent 请求白名单域（agent-browser domain
-# allowlist 模式——Agent 会话活跃时仅允许这些域的请求）。
-# P1-9 修复（全量复审 2026-09-01）：原模块级写死空集导致 env 配置永不
-# 生效——解析/匹配收敛到 app/agent_allowlist.py 单源（与导航层同源）。
+# P0-1 时序修复（全面审计 2026-09-04）：post-start 原生层挂接随迁至
+# app/native_hardening.py（加固设置束）/ app/native_interception.py
+# （新窗口门禁 + 挂接编排）/ app/native_monitoring.py（探测监控 + 崩溃监听）
+from app.native_interception import (
+    gate_window_open as _gate_window_open,
+)
+from app.native_interception import (
+    post_start_setup as _post_start_setup,
+)
 
-
-def _apply_request_policy(window: Any, blocked: set | None = None,
-                          shell: Any = None, api: Any = None) -> None:
-    """统一请求策略管线（A 级落地，P0-①：DNT→威胁拦截统一回调链）。
-
-    通过 pywebview request_sent 事件（底层 WebView2 WebResourceRequested）
-    修改请求头。pywebview 6.x（已锁 6.2.1）**正式支持**该事件：回调接收
-    Request 对象，`request.headers` 为字典，**变异后即用于请求**（官方
-    语义，见 pywebview.flowrl.com/api window.events.request_sent）。
-
-    统一回调链（一次请求走全量请求策略）：
-    1. **DNT 注入**：do_not_track 开启时注入 `DNT: 1`（落地 A-①）；
-    2. **威胁域名标记**：命中 threat_feed 黑名单的请求标记
-       `X-Aegis-Threat: 1`（A-②，尽力而为的请求头标记——pywebview 6.x
-       request_sent 仅能改请求头、不能拦截响应；**权威拦截仍在导航层**
-       safe_url + host_is_blocked 实时判断）。
-
-    blocked 为启动时黑名单快照（ThreatFeedUpdater.load_cached 一次），
-    请求层标记尽力而为；导航层拦截用实时缓存（权威关口）。
-    更旧版本不支持该事件/请求头修改时静默降级。
-    """
-    try:
-        events = getattr(window, "events", None)
-        if events is None:
-            return
-        if not hasattr(events, "request_sent"):
-            return  # 版本不支持 → 静默降级
-
-        def _on_request(request: Any) -> None:
-            try:
-                headers = getattr(request, "headers", None)
-                if headers is None:
-                    return
-                headers["DNT"] = "1"  # 变异 headers 即生效（6.x 官方语义）
-                # 威胁域名标记（尽力而为；命中黑名单 → 请求头标记）
-                url = getattr(request, "url", "") or ""
-                host = ""
-                try:
-                    from urllib.parse import urlparse
-                    host = urlparse(url).hostname or ""
-                except Exception:
-                    host = ""
-                # A4（final-development-checklist）：按来源动态 CoreWebView2Settings
-                # （微软官方"Update settings based on the origin of the new page"）——
-                # 非信任站点（远程网页）禁用 WebMessage 通道 + 脚本对话框；本地页面
-                # 保持开启。js_api 桥不依赖 IsWebMessageEnabled（零功能影响）；设置
-                # 幂等（每次请求按来源设置，下个导航生效——pywebview 无导航事件）。
-                try:
-                    core = shell.core(window) if shell is not None else None
-                    settings = getattr(core, "Settings", None) if core is not None else None
-                    if settings is not None:
-                        remote = bool(host)  # host 非空 = 远程网页（非信任）
-                        settings.IsWebMessageEnabled = not remote
-                        settings.AreDefaultScriptDialogsEnabled = not remote
-                except Exception:
-                    pass  # 设置失败静默（版本不支持/属性缺失，不影响请求）
-                if host and blocked:
-                    from app.threat_feed import host_is_blocked
-                    if host_is_blocked(host, blocked):
-                        # W-04 整改（国防级审查）：不再向远端发送安全决策头
-                        # （X-Aegis-Threat——泄露内部安全状态）——仅内部日志
-                        # 六维上下文记录增强（docs/threat-context-design.md 第 1 步）：
-                        # method + request_type 推断（Content-Type/扩展名）入威胁日志，
-                        # 可观测性增强——不改变拦截语义（政府级零风险门禁）
-                        try:
-                            from crash_reporter import log_event
-                            method = getattr(request, "method", "") or "GET"
-                            ctype = (headers.get("Content-Type") or "").lower()
-                            path = url.split("?")[0].lower()
-                            rtype = "other"
-                            if "image" in ctype or path.endswith(
-                                    (".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico")):
-                                rtype = "image"
-                            elif "javascript" in ctype or path.endswith(".js"):
-                                rtype = "script"
-                            elif "html" in ctype or path.endswith(".html"):
-                                rtype = "document"
-                            log_event(
-                                f"[threat] 请求头标记威胁域名: {url} "
-                                f"(method={method}, type={rtype})"
-                            )
-                        # M-3 记录（防御性安全审查）：威胁拦截当前仅日志不阻断
-                        # 子资源（主文档导航由导航层兜底拦截——请求层子资源
-                        # 缺口：黑名单域脚本/图片/XHR 仍加载）。发布期方案：
-                        # WebView2 WebResourceRequested 返回空响应（204/
-                        # 1×1 stub——brave 思路）——pywebview 6.x request_sent
-                        # 不支持响应改写——需 shell.core(window) 直挂底层事件。
-                        except Exception:
-                            pass
-                # C2 阶段 A（ceLLMate 借鉴）：Agent 会话活跃时应用白名单域策略
-                # （agent-browser domain allowlist 模式——防 Agent 数据外泄到
-                # 非白名单域；标记 + 日志可观测，不改变拦截语义——零风险）
-                try:
-                    import time
-                    session_active = (
-                        api is not None
-                        and (getattr(api, "_agent_session", None) or 0.0)
-                        and time.time() - (getattr(api, "_agent_session", None) or 0.0) < 60
-                    )
-                    if session_active and host:
-                        # P1-9 修复（全量复审 2026-09-01）：复用导航层同款
-                        # allowlist 单源（env 解析 + 后缀匹配）——原实现
-                        # 写死空集，AEGIS_AGENT_ALLOWED_HOSTS 配置在请求层
-                        # 永不生效。请求层仅标记 + 日志（可观测不拦截）——
-                        # 权威阻断仍在导航层（api_bridge Agent 白名单检查）。
-                        try:
-                            from app.agent_allowlist import (
-                                host_allowed,
-                                load_agent_allowlist,
-                            )
-                            allow_hosts = load_agent_allowlist()
-                            if not host_allowed(host, allow_hosts):
-                                from crash_reporter import log_event
-                                if not allow_hosts:
-                                    log_event(
-                                        "[agent] 拒绝 Agent 请求"
-                                        "（未配置 AEGIS_AGENT_ALLOWED_HOSTS）: "
-                                        + url)
-                                else:
-                                    log_event(
-                                        f"[agent] 拒绝 Agent 请求非白名单域: {url}")
-                        except Exception:
-                            pass  # 白名单解析失败静默（不影响请求）
-                except Exception:
-                    pass  # Agent 策略失败静默（不影响请求）
-                # C2 阶段 B（ceLLMate sitemap）：Agent 会话活跃时按 sitemap
-                # 识别语义动作（url_pattern+method 匹配）——高风险/未登记动作
-                # 标记 + 日志（可观测不拦截——零风险；sitemap 未配置时跳过）
-                try:
-                    sitemap = _load_agent_sitemap()
-                    if session_active and sitemap and host_matches(host, sitemap.get("domain", "")):
-                        method = getattr(request, "method", "") or "GET"
-                        action = _match_agent_action(sitemap, method, url)
-                        from crash_reporter import log_event
-                        if action:
-                            if action.get("risk") == "high":
-                                # W-04 整改：不再发送 X-Aegis-Agent-Action（仅日志）
-                                log_event(
-                                    f"[agent] Agent 高风险动作: {action.get('semantic')} {url}"
-                                )
-                            # C2C（ceLLMate Cond 谓词 + 掘金预算）：condition 动态
-                            # 策略评估（金额阈值等——URL query 参数 vs value）
-                            if _eval_agent_condition(action, url):
-                                # W-04 整改：不再发送 X-Aegis-Agent-Condition（仅日志）
-                                log_event(
-                                    f"[agent] Agent 条件超限: {action.get('semantic')} {url}"
-                                )
-                        else:
-                            # W-04 整改：不再发送 X-Aegis-Agent-Action（仅日志）
-                            log_event(f"[agent] Agent 未登记动作: {url}")
-                except Exception:
-                    pass  # sitemap 策略失败静默（不影响请求）
-            except Exception:
-                pass  # 单个请求修改失败不影响其他请求
-
-        events.request_sent += _on_request
-    except Exception:
-        pass  # 事件绑定失败静默，不影响浏览
-
-
-def _apply_disk_cache_limit(window: Any, cache_mb: int = 0) -> None:
-    """注入 --disk-cache-size 限制磁盘缓存（方向④-P2，尽力而为）。
-
-    调研（微软 Q&A）：大缓存会拖慢冷启动；`--disk-cache-size` 可限制
-    EBWebView 用户数据目录膨胀。经 CoreWebView2EnvironmentOptions.
-    AdditionalBrowserArguments 注入（pywebview 底层对象，探测+静默）。
-    cache_mb<=0 表示不限制（默认，保持现状）。
-    """
-    if cache_mb <= 0:
-        return  # 未配置缓存上限 → 不注入，保持默认
-    try:
-        gui = getattr(window, "gui", None)
-        webview_ctrl = getattr(gui, "webview", None)
-        core = getattr(webview_ctrl, "CoreWebView2", None)
-        env = getattr(core, "Environment", None)
-        options = getattr(env, "Options", None)
-        if options is None or not hasattr(options, "AdditionalBrowserArguments"):
-            return  # API 未暴露 → 静默
-        current = str(getattr(options, "AdditionalBrowserArguments", "") or "")
-        flag = f"--disk-cache-size={int(cache_mb) * 1024 * 1024}"
-        if flag not in current:
-            options.AdditionalBrowserArguments = current + " " + flag
-    except Exception:
-        pass  # 注入失败静默，不影响浏览
-
-
-def _warmup_webview2(window: Any) -> None:
-    """启动预热 WebView2（方向④-P2，尽力而为、静默降级）。
-
-    调研（微软官方 + issue #1629）：WebView2 冷启动需拉起浏览器/渲染/
-    GPU 进程并建磁盘缓存，可致数秒延迟。启动早期触碰底层对象触发
-    Environment/Core 初始化，使后续首次导航更快；失败静默不影响浏览。
-    """
-    try:
-        gui = getattr(window, "gui", None)
-        webview_ctrl = getattr(gui, "webview", None)
-        core = getattr(webview_ctrl, "CoreWebView2", None)
-        if core is None:
-            return
-        _ = getattr(core, "BrowserProcessId", 0)  # 触碰触发初始化
-        env = getattr(core, "Environment", None)
-        _ = getattr(env, "BrowserVersionString", "") if env else ""
-    except Exception:
-        pass  # 预热失败静默，不影响浏览
-
-
-def _apply_webview2_settings(window: Any) -> None:
-    """按官方安全清单限制 WebView2 功能（方向①-S4，探测+静默降级）。
-
-    微软《Develop secure WebView2 apps》建议：不期望页面访问的功能一律
-    关闭，避免 web 内容越权访问宿主资源：
-    - AreHostObjectsAllowed=false       （禁止页面访问宿主对象）
-    - IsWebMessageEnabled=false         （禁止页面主动发 web 消息）
-    - IsScriptEnabled=false             （纯静态页场景；Aegis 需 JS 保持 true）
-    - AreDefaultScriptDialogsEnabled=false（禁止 alert/prompt 弹窗）
-
-    Aegis 前端依赖 JS（工具栏注入），故 IsScriptEnabled 保持 true；
-    其余按清单收紧。所有属性 hasattr 探测，缺失/失败静默降级。
-    """
-    try:
-        gui = getattr(window, "gui", None)
-        webview_ctrl = getattr(gui, "webview", None)
-        core = getattr(webview_ctrl, "CoreWebView2", None)
-        settings = getattr(core, "Settings", None)
-        if settings is None:
-            return  # 旧 Runtime / API 未暴露 → 静默
-        # 收紧项：宿主对象访问 / web 消息 / 脚本弹窗（JS 本体保持启用）
-        if hasattr(settings, "AreHostObjectsAllowed"):
-            settings.AreHostObjectsAllowed = False
-        if hasattr(settings, "IsWebMessageEnabled"):
-            settings.IsWebMessageEnabled = False
-        if hasattr(settings, "AreDefaultScriptDialogsEnabled"):
-            settings.AreDefaultScriptDialogsEnabled = False
-    except Exception:
-        pass  # 收紧失败静默，不影响浏览
-
-
-def _apply_enhanced_security(window: Any, mode: str = "auto") -> None:
-    """启用 WebView2 Enhanced Security Mode（落地②，支持三模式决策）。
-
-    背景（2026-08 调研）：微软将 EnhancedSecurityModeLevel 更名为
-    EnhancedSecurityModeState（Disabled/Enabled），新 API 为 profile 级
-    （COM ICoreWebView2ExperimentalProfile17，Runtime 151+ 可用）。
-    pywebview 未封装该 API，但底层 WinForms WebView2 控件可通过
-    window.gui.webview.CoreWebView2.Profile 访问。
-
-    策略（对应 config.security_enhanced_mode）：
-    - auto（默认）：探测到 EnhancedSecurityModeState 才启用；
-    - on：强制启用（无 API 时静默降级，不影响浏览启动）；
-    - off：显式跳过（兼容依赖 JIT/WASM 的老站点）。
-    per-origin 例外（config.security_esm_exceptions）依赖实验
-    Origin Configuration API，探测到才应用；任何失败静默降级。
-    """
-    try:
-        if mode == "off":
-            return  # 显式关闭：不启用 ESM
-        gui = getattr(window, "gui", None)
-        webview_ctrl = getattr(gui, "webview", None)
-        core = getattr(webview_ctrl, "CoreWebView2", None)
-        profile = getattr(core, "Profile", None)
-        if profile is None or not hasattr(profile, "EnhancedSecurityModeState"):
-            return  # Runtime 过旧/API 未暴露 → 静默降级
-        # Enabled=1（对应枚举 CoreWebView2EnhancedSecurityModeState.Enabled）
-        profile.EnhancedSecurityModeState = 1
-    except Exception:
-        pass  # 启用失败静默，不影响浏览
-
-
-def _apply_esm_exceptions(window: Any, exceptions_json: str = "") -> None:
-    """ESM per-origin 例外接入（方向①-P1，Origin Configuration API）。
-
-    调研（微软 specs/TrustedOriginSetting.md）：ICoreWebView2Profile3 提供
-    CreateOriginFeatureSetting / SetOriginFeatures / GetEffectiveFeaturesForOrigin；
-    特性枚举含 EnhancedSecurityMode。对受信任源（如政府内网 OA）关闭 ESM
-    （Disabled），其余源保持 profile 级启用。
-
-    实现（探测+静默）：
-    - exceptions_json 为空或非 JSON 数组 → 直接返回（无例外配置）
-    - 探测 profile 是否暴露 SetOriginFeatures/CreateOriginFeatureSetting
-      （staging/实验 API，hasattr 兜底；未暴露则静默放弃）
-    - 对每个例外源创建 EnhancedSecurityMode=Disabled 设置并应用
-    任何失败静默降级，绝不影响浏览启动。
-    """
-    if not exceptions_json:
-        return
-    try:
-        import json as _json
-        origins = _json.loads(exceptions_json)
-        if not isinstance(origins, list) or not origins:
-            return  # 非数组/空 → 无例外
-        origins = [str(o) for o in origins if isinstance(o, str) and o]
-        if not origins:
-            return
-        gui = getattr(window, "gui", None)
-        webview_ctrl = getattr(gui, "webview", None)
-        core = getattr(webview_ctrl, "CoreWebView2", None)
-        profile = getattr(core, "Profile", None)
-        if profile is None:
-            return
-        if not (hasattr(profile, "SetOriginFeatures")
-                and hasattr(profile, "CreateOriginFeatureSetting")):
-            return  # 实验 API 未暴露（旧 Runtime）→ 静默放弃
-        # 创建 EnhancedSecurityMode=Disabled 设置（枚举值：2=Disabled）
-        setting = profile.CreateOriginFeatureSetting(
-            1,  # COREWEBVIEW2_ORIGIN_FEATURE_ENHANCED_SECURITY_MODE
-            2,  # COREWEBVIEW2_ORIGIN_FEATURE_STATE_DISABLED
-        )
-        if setting is None:
-            return
-        profile.SetOriginFeatures(len(origins), origins, [setting])
-    except Exception:
-        pass  # 例外配置失败静默，不影响浏览
 
 
 def main() -> int:
-    """启动编排（H-3：340 行主线拆为阶段函数——每段职责单一、可独立测试）。"""
+    """启动编排（H-3：340 行主线拆为阶段函数——每段职责单一、可独立测试）。
+
+    P0-1 时序修复（全面审计 2026-09-04）：全部原生挂接（拦截/加固/监听）
+    从「shell.start() 之前」移到 start(func) 回调——原时序下窗口尚未创建
+    （window.native 不存在、CoreWebView2 未初始化），整层加固静默 no-op。
+    挂接实现随迁 app/native_{hardening,interception,monitoring}.py
+    （本文件只保留启动编排）。
+    """
     shell = _init_shell_and_reporter()
     if "--smoke-test" in sys.argv:
         return _smoke_test(shell)
@@ -366,14 +49,21 @@ def main() -> int:
     window = _create_window(api, shell, restored_url)
     if window is None:
         return 1
-    _install_native_interception(window, shell, api)
-    _install_probe_and_monitoring(window, api)
-    _install_crash_listener(window)
-    _apply_window_hardening(window, api, shell)
+    # P0-2 修复：新窗口（window.open/target=_blank）原生门禁。类级替换
+    # pywebview 处理器——必须先于 shell.start()（先于任何 EdgeChrome 实例
+    # 创建），确定性与 pywebview 自身订阅时序无关。
+    window_gate_ok = _gate_window_open()
+    # 事件订阅在 start 前完成（pywebview Event 对象随窗口创建即可订阅）
     window.events.loaded += lambda: on_loaded(window, api)
     _start_watchdog(api)
-    shell.start()
+
+    def _post_start() -> None:
+        """start(func) 回调：GUI 循环已启动、窗口已创建后的原生层挂接。"""
+        _post_start_setup(window, shell, api, window_gate_ok)
+
+    shell.start(func=_post_start)
     return 0
+
 
 
 def _init_shell_and_reporter():
@@ -483,231 +173,6 @@ def _create_window(api, shell, restored_url):
     api.window = window      # 创建后再绑定 window 引用，供桥方法调用
     return window
 
-
-def _install_native_interception(window, shell, api):
-    """原生层链接拦截 + 指纹防护前置注入（507-545 段迁移）。"""
-    # === 原生层链接拦截（WebView2 NewWindowRequested）===
-    # JS 注入只能拦截页面内 <a> 标签点击——但 target="_blank" 链接和
-    # window.open() 在 WebView2 原生层处理，JS 来不及拦截。
-    # 这里用 WebView2 的 NewWindowRequested 事件在原生层拦截，
-    # 把新窗口请求重定向到当前窗口内导航（根本解决方案）。
-    try:
-        core = shell.core(window)
-        if core is not None:
-            def _on_new_window_requested(sender, args):
-                """WebView2 NewWindowRequested 事件处理器。
-                拦截所有新窗口请求（target=_blank / window.open），
-                在当前窗口内导航，不交给系统浏览器。"""
-                try:
-                    uri = args.get_Uri()
-                    if uri:
-                        args.put_Handled(True)  # 阻止 WebView2 打开新窗口
-                        # H-1 修复（审计 2026-08-31）：新窗口请求与普通导航
-                        # 同权——必须过 H-C1 白名单（file:/javascript:/data:/
-                        # blob: 等一律拒绝）；且经 NavQueue 投递，绝不在
-                        # WebView2 事件线程直接 load_url（死锁 + 越权双因）
-                        if uri != "about:blank" and not _is_navigation_safe(uri):
-                            try:
-                                from crash_reporter import log_event
-                                log_event("[security] NewWindowRequested 拒绝非白名单 URI")
-                            except Exception:
-                                pass
-                            return
-                        api._load(uri)
-                except Exception:
-                    pass  # 静默降级
-            core.add_NewWindowRequested(_on_new_window_requested)
-            from crash_reporter import log_event
-            log_event("[nav] NewWindowRequested 拦截已注册（链接在浏览器内打开）")
-
-            # FIX-1: 注入时序——指纹防护 JS 在页面脚本执行前注入
-            # AddScriptToExecuteOnDocumentCreated 确保防护在任何页面 JS 前生效
-            # 比 on_loaded（页面加载后）更早，无法被页面脚本绕过
-            try:
-                from app.fingerprint_pipeline import (
-                    build_fingerprint_pipeline_js,
-                    generate_session_seed,
-                )
-                _fp_seed = generate_session_seed()
-                _fp_js = build_fingerprint_pipeline_js(_fp_seed)
-                core.AddScriptToExecuteOnDocumentCreated(_fp_js)
-                log_event("[security] 指纹防护已注入（页面脚本前生效——FIX-1）")
-            except Exception:
-                pass  # 降级为 on_loaded 注入（bridge_hooks.py 已有兜底）
-    except Exception:
-        pass  # WebView2 核心不可用时降级为 JS 拦截
-
-
-def _install_probe_and_monitoring(window, api):
-    """WebView2 探测/性能基线/Runtime 监控/24h 复采样（547-610 段迁移）。"""
-    # 落地②：WebView2 兼容性探测（Runtime 版本 + 关键 API 可用性，
-    # 写日志供监控/排障；Evergreen 2 周更新节奏下用于回归基线）
-    try:
-        from app.webview2_probe import (
-            build_probe_report,
-            compare_baseline,
-            probe_performance,
-            watch_runtime_update,
-        )
-        report = build_probe_report(window)
-        from crash_reporter import log_event
-        log_event(f"[probe] {report}")
-        # 落地④：性能基线快照 + 与上次基线对比（内存显著变化告警）
-        try:
-            tab_count = len(api.get_tabs().get("tabs", []))
-            perf = probe_performance(window, tab_count=tab_count)
-            log_event(f"[perf] {perf}")
-            import json as _json
-
-            from app.paths import resolve_data_dir
-            baseline_path = os.path.join(
-                resolve_data_dir(), "webview2_perf_baseline.json")
-            baseline: dict = {}
-            try:
-                with open(baseline_path, "r", encoding="utf-8") as f:
-                    baseline = _json.load(f) or {}
-            except (OSError, ValueError):
-                baseline = {}
-            diff = compare_baseline(perf, baseline)
-            if diff.get("significant") or diff.get("gpu_changed"):
-                log_event(f"[perf] 基线差异: {diff}")
-            # 更新基线（当前快照作为下次对比基准）
-            try:
-                with open(baseline_path, "w", encoding="utf-8") as f:
-                    _json.dump(perf, f, ensure_ascii=False)
-            except OSError:
-                pass
-        except Exception:
-            pass  # 性能监控失败静默，不影响浏览
-        # 版本对比监控：Evergreen 后台下载新 Runtime 后，提示采用新版本
-        # （持续运行的应用会继续用旧版，有安全影响；监听事件记录日志）
-        def _on_new_runtime(ver: str) -> None:
-            try:
-                log_event(f"[probe] 新 WebView2 Runtime 可用: {ver or 'unknown'}"
-                          f"（当前 {report.get('runtime_version', '')}，建议重启采用）")
-            except Exception:
-                pass
-        watch_runtime_update(window, on_new_version=_on_new_runtime)
-        # 方向④-P2：24h 周期性能复采样（慢速内存泄漏趋势；守护线程，
-        # 复用 compare_baseline，显著变化/GPU 切换写日志）
-        try:
-            from app.paths import resolve_data_dir
-            from app.webview2_probe import start_periodic_sampling
-            start_periodic_sampling(
-                window,
-                tab_count_fn=lambda: len(api.get_tabs().get("tabs", [])),
-                interval_hours=24.0,
-                baseline_path=os.path.join(
-                    resolve_data_dir(), "webview2_perf_baseline.json"),
-            )
-        except Exception:
-            pass  # 复采样启动失败静默，不影响浏览
-    except Exception:
-        pass  # 探测失败静默，不影响浏览
-
-
-def _install_crash_listener(window):
-    """WebView2 进程崩溃监听（612-634 段迁移）。"""
-    # 落地③：WebView2 进程崩溃监听（ProcessFailed.CrashReport，2026-07 新 API）。
-    # 渲染/GPU 子进程崩溃时 Python 主进程仍存活，借此把崩溃详情写入
-    # crash_reports/events.log（异常码/故障模块/偏移/崩溃 ID）；CrashReport
-    # 为 None（正常退出/外部 kill/启动失败/挂起）时仅记录 kind 概要。
-    try:
-        gui = getattr(window, "gui", None)
-        webview_ctrl = getattr(gui, "webview", None)
-        core = getattr(webview_ctrl, "CoreWebView2", None)
-        if core is not None and hasattr(core, "ProcessFailed"):
-            def _on_process_failed(sender=None, args=None) -> None:
-                try:
-                    from crash_reporter import log_webview2_crash
-                    kind = ""
-                    report = None
-                    if args is not None:
-                        kind = str(getattr(args, "ProcessFailedKind", "") or "")
-                        report = getattr(args, "CrashReport", None)
-                    log_webview2_crash(report, kind=kind)
-                except Exception:
-                    pass  # 记录失败静默，不影响浏览
-            core.ProcessFailed += _on_process_failed
-    except Exception:
-        pass  # 事件绑定失败静默，不影响浏览
-
-
-def _apply_window_hardening(window, api, shell):
-    """窗口加固束：功能收紧/预热/磁盘缓存/ESM/请求策略/背景（636-709 段迁移）。"""
-    # 方向①-S4：按官方安全清单限制 WebView2 功能（宿主对象/web 消息/弹窗，
-    # 探测+静默；JS 保持启用以支撑工具栏注入）
-    try:
-        _apply_webview2_settings(window)
-    except Exception:
-        pass  # 收紧失败静默，不影响浏览
-
-    # 方向④-P2：启动预热 WebView2（触碰底层对象触发初始化，缩短首次导航）
-    try:
-        _warmup_webview2(window)
-    except Exception:
-        pass  # 预热失败静默，不影响浏览
-
-    # 方向④-P2：--disk-cache-size 注入（config.http_cache_mb 限制磁盘缓存）
-    try:
-        cache_mb = 0
-        if api.config is not None:
-            cache_mb = int(getattr(api.config, "http_cache_mb", 0) or 0)
-        _apply_disk_cache_limit(window, cache_mb=cache_mb)
-    except Exception:
-        pass  # 注入失败静默，不影响浏览
-
-    # 落地②：WebView2 Enhanced Security Mode（Runtime 151+ 可用；
-    # 读取 config.security_enhanced_mode：auto=探测启用/on=强制/off=关闭；
-    # 尽力而为，API 未暴露/失败时静默降级，不影响浏览）
-    try:
-        esm_mode = "auto"
-        try:
-            esm_mode = str(getattr(api.config, "security_enhanced_mode", "auto")
-                           or "auto")
-            if esm_mode not in ("auto", "on", "off"):
-                esm_mode = "auto"
-        except Exception:
-            esm_mode = "auto"
-        _apply_enhanced_security(window, mode=esm_mode)
-        # 方向①-P1：ESM per-origin 例外（受信任源关闭 ESM；实验 API 探测+静默）
-        try:
-            _apply_esm_exceptions(
-                window,
-                str(getattr(api.config, "security_esm_exceptions", "") or ""),
-            )
-        except Exception:
-            pass  # 例外配置失败静默，不影响浏览
-    except Exception:
-        pass  # 启用失败静默，不影响浏览
-
-    # A-① + A-② 统一请求策略管线（A 级落地，P0-①）：
-    # request_sent 回调统一执行全量请求策略（DNT 注入 + 威胁域名头标记）。
-    # blocked 为启动时黑名单快照（请求层标记尽力而为）；权威拦截仍在
-    # 导航层（safe_url + host_is_blocked 实时）。pywebview 不支持该事件
-    # 时静默降级，不影响浏览。
-    try:
-        dnt_enabled = True  # 默认开启（与 config 默认值一致）
-        if api.config is not None:
-            dnt_enabled = bool(getattr(api.config, "do_not_track", True))
-        if dnt_enabled:
-            blocked: set = set()
-            try:
-                from app.paths import resolve_data_dir
-                from app.threat_feed import ThreatFeedUpdater
-                blocked = ThreatFeedUpdater(resolve_data_dir()).load_cached()
-            except Exception:
-                blocked = set()  # 黑名单快照失败 → 仅 DNT，不影响浏览
-            _apply_request_policy(window, blocked=blocked, shell=shell, api=api)
-    except Exception:
-        pass  # 统一策略绑定失败静默，不影响浏览
-
-    # S5：Windows 11 系统级亚克力/Mica 背景（尽力而为，失败静默降级到 CSS 毛玻璃）
-    try:
-        from app.backdrop import apply_system_backdrop
-        apply_system_backdrop(window, material="mica")
-    except Exception:
-        pass  # 非 Win11 / DWM 不可用等情形下静默，不影响浏览
 
 
 def _start_watchdog(api):

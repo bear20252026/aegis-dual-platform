@@ -46,6 +46,7 @@ object SecureWebViewFactory {
         onPageUrlObserved: (WebView, String) -> Unit = { _, _ -> },
         onTitleObserved: (WebView, String) -> Unit = { _, _ -> },
         onRendererGone: (WebView) -> Unit = {},
+        onPageError: (WebView, String, Boolean, String) -> Unit = { _, _, _, _ -> },
     ): WebView {
         // A-6 修复（架构审计 2026-08-31）：Broker 由 Application 持有——
         // 工厂不再静态单例持有（可测试、可隔离、生命周期显式）
@@ -86,6 +87,11 @@ object SecureWebViewFactory {
                 },
                 onPageUrlObserved = { url ->
                     onPageUrlObserved(webView, url)
+                },
+                onPageError = { description, isSsl, url ->
+                    // P2-1 修复（全面审计 2026-09-04）：SSL/加载错误上抛调用方
+                    // （ViewModel 错误面板——原静默白屏）。
+                    onPageError(webView, description, isSsl, url)
                 },
             )
         webView.webViewClient = client

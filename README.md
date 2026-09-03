@@ -39,7 +39,7 @@ docs/       ADR/threat-model/runbooks/product（蓝图目标树）
   `python main_webview.py`（运行）；门禁：`python ../../validate_release.py` +
   `ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001` +
   `bandit -r app/ -q --skip B110,B404,B603,B607` + `mypy main_webview.py app/` +
-  5 个自检（`selftest_*.py`——已入 CI）
+  8 个自检（`selftest_*.py`——已入 CI）
 - **Rust 核心**（core/rust-policy-core）：`cargo test`（vectors 差分全绿）
 - **契约代码生成**（contracts/codegen）：`python generate_csharp.py / generate_kotlin.py`
   （从 schemas 生成 C#/Kotlin 模型——不平行 Schema）+ `verify_contract_compatibility.py`
