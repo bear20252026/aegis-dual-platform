@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——ADR-009 M1-T1)
+- **多标签骨架**：`Core/Tabs`（TabManager/Tab/TabSessionStore——纯逻辑领域层，
+  14 个单测全绿）；每标签一 WebView2 实例（切换即可见性切换——页面状态/
+  滚动/表单天然保留，架构性修复 Python 栈「切标签全量重载丢状态」缺陷）；
+  原生标签条（新建 ✕关闭 点击切换——与页面 DOM 彻底隔离，ADR-003 彻底版）；
+  每标签独立 broker 会话（session/tabId 账本键隔离）；Ctrl+T/Ctrl+W/Ctrl+L
+  快捷键；会话 SQLite 持久化（导航完成即落盘——崩溃后重启恢复最后的页面
+  集合；真机冒烟验证落盘）
+- **依赖治理**：新增 Microsoft.Data.Sqlite 10.0.0（数据层统一 SQLite——
+  ADR-009 D2），显式升级 SQLitePCLRaw 2.1.12（修复 NU1903 高危漏洞
+  GHSA-2m69-gcr7-jv3q）
+
 ### 架构决策（2026-09-04：ADR-009——全功能迁移至 C#）
 - **owner 拍板 B 路线终局**：C#/.NET 10 + 原生 WebView2 为唯一 Windows 正典栈，
   Python 现役栈全部功能迁移（保留功能不缩水）；`legacy/windows-pywebview/`
