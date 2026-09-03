@@ -179,19 +179,7 @@ impl FfiBroker {
     ) -> FfiDecision {
         let authorized =
             match self.evaluate_navigation(session_id, tab_id, generation, raw_url, scope) {
-                FfiDecision::Allow { action } => AuthorizedAction {
-                    session_id: action.session_id,
-                    tab_id: action.tab_id,
-                    document_generation: action.document_generation,
-                    origin: action.origin,
-                    method: action.method,
-                    canonical_parameters: action.canonical_parameters,
-                    scope: action.scope,
-                    expires_at: action.expires_at,
-                    nonce: action.nonce,
-                    policy_version: action.policy_version,
-                    explanation: action.explanation,
-                },
+                FfiDecision::Allow { action } => AuthorizedAction::from(action),
                 other => return other,
             };
         let removed_from_issued = match self.issued_actions.lock() {
@@ -410,19 +398,7 @@ impl FfiBroker {
         let Some(canonical_url) = crate::origin::canonicalize_external(&raw_url) else {
             return deny_url(raw_url);
         };
-        let action = AuthorizedAction {
-            session_id: action.session_id,
-            tab_id: action.tab_id,
-            document_generation: action.document_generation,
-            origin: action.origin,
-            method: action.method,
-            canonical_parameters: action.canonical_parameters,
-            scope: action.scope,
-            expires_at: action.expires_at,
-            nonce: action.nonce,
-            policy_version: action.policy_version,
-            explanation: action.explanation,
-        };
+        let action = AuthorizedAction::from(action);
         if action.method != "GET"
             || action.scope != scope
             || action.origin != canonical_url.origin
