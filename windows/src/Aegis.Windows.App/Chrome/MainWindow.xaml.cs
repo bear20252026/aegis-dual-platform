@@ -37,20 +37,48 @@ public partial class MainWindow : Window
             if (!args.IsSuccess && args.WebErrorStatus != CoreWebView2WebErrorStatus.OperationCanceled)
             {
                 ErrorPage.Text = $"导航失败：{args.WebErrorStatus}（已拒绝/无法加载）";
-                ErrorPage.Visibility = Visibility.Visible;
+                ErrorPagePanel.Visibility = Visibility.Visible;
             }
             else
             {
-                ErrorPage.Visibility = Visibility.Collapsed;
+                ErrorPagePanel.Visibility = Visibility.Collapsed;
             }
+            // 地址栏随实际页面同步（对齐 Android P1-6——聚焦编辑时不抢）
+            if (!AddressBar.IsKeyboardFocused)
+                AddressBar.Text = Browser.Source?.ToString() ?? string.Empty;
         };
+        // 窗口标题随页面标题变化（对齐 Android Tab.title 回填语义）
+        Browser.CoreWebView2.DocumentTitleChanged += (_, _) =>
+        {
+            var title = Browser.CoreWebView2.DocumentTitle;
+            Title = string.IsNullOrWhiteSpace(title) ? "Aegis" : $"{title} · Aegis";
+        };
+    }
+
+    private void AddressBar_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+        AddressHint.Visibility = AddressBar.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    private void NavigateFromAddressBar()
+    {
+        // 输入归一单源（UrlNormalizer——与 Android SearchEngines.kt 跨端契约对齐）：
+        // 搜索词拼引擎 URL；非导航 scheme 拒绝；最终仍经 Broker 决策。
+        var target = UrlNormalizer.Normalize(AddressBar.Text);
+        if (target is null)
+        {
+            ErrorPage.Text = "无法导航：输入为空，或属于非导航协议（file:/javascript:/data: 等已被拒绝）。";
+            ErrorPagePanel.Visibility = Visibility.Visible;
+            return;
+        }
+        Browser.Source = new Uri(target);  // 导航经 NavigationStarting → Broker 决策（真实取消）
     }
 
     private void AddressBar_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && Uri.TryCreate(AddressBar.Text, UriKind.Absolute, out var uri))
-            Browser.Source = uri;  // 导航经 NavigationStarting → Broker 决策（真实取消）
+        if (e.Key == Key.Enter)
+            NavigateFromAddressBar();
     }
+
+    private void Open_Click(object sender, RoutedEventArgs e) => NavigateFromAddressBar();
 
     private void Back_Click(object sender, RoutedEventArgs e) => Browser.GoBack();
     private void Forward_Click(object sender, RoutedEventArgs e) => Browser.GoForward();
@@ -86,13 +114,13 @@ public partial class MainWindow : Window
         {
             _host.RejectPendingNavigation();
             ErrorPage.Text = "确认请求已失效、被拒绝或无法安全恢复导航。";
-            ErrorPage.Visibility = Visibility.Visible;
+            ErrorPagePanel.Visibility = Visibility.Visible;
             return;
         }
         if (!_host.ApprovePendingNavigation(Browser.CoreWebView2))
         {
             ErrorPage.Text = "确认请求已失效、被拒绝或无法安全恢复导航。";
-            ErrorPage.Visibility = Visibility.Visible;
+            ErrorPagePanel.Visibility = Visibility.Visible;
         }
     }
 
@@ -100,16 +128,24 @@ public partial class MainWindow : Window
     {
         _host.RejectPendingNavigation();
         ErrorPage.Text = "已拒绝该导航请求。";
-        ErrorPage.Visibility = Visibility.Visible;
+        ErrorPagePanel.Visibility = Visibility.Visible;
     }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // Ctrl+L 聚焦并全选地址栏（start.html 页脚提示的跨端快捷键契约）
+        if (e.Key == Key.L && Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            AddressBar.Focus();
+            AddressBar.SelectAll();
+            e.Handled = true;
+            return;
+        }
         if (ApprovalOverlay.Visibility != Visibility.Visible || e.Key != Key.Escape)
             return;
         _host.RejectPendingNavigation();
         ErrorPage.Text = "已拒绝该导航请求。";
-        ErrorPage.Visibility = Visibility.Visible;
+        ErrorPagePanel.Visibility = Visibility.Visible;
         e.Handled = true;
     }
 
@@ -118,6 +154,7 @@ public partial class MainWindow : Window
     private void SetNavigationControlsEnabled(bool isEnabled)
     {
         AddressBar.IsEnabled = isEnabled;
+        OpenButton.IsEnabled = isEnabled;
         BackButton.IsEnabled = isEnabled;
         ForwardButton.IsEnabled = isEnabled;
         RefreshButton.IsEnabled = isEnabled;
