@@ -16,7 +16,7 @@
     <ID>ReturnCount:AegisHomeBridge.kt$AegisHomeBridge$@JavascriptInterface fun navigate(input: String)</ID>
     <ID>ReturnCount:BrowserViewModel.kt$BrowserViewModel$fun approvePendingNavigationConfirmation(): Boolean</ID>
     <ID>ReturnCount:TabManager.kt$TabManager$fun closeTab(index: Int): Boolean</ID>
-    <ID>TooGenericExceptionCaught:SecureWebViewFactory.kt$SecureWebViewFactory$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:WebViewHardening.kt$WebViewHardening$e: Exception</ID>
     <ID>TooManyFunctions:BrowserViewModel.kt$BrowserViewModel : ViewModel</ID>
   </CurrentIssues>
 </SmellBaseline>
