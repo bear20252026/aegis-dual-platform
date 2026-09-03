@@ -1,0 +1,69 @@
+{
+  "description": "update manifest canonical JSON 字节级 golden 向量——发布链权威实现 release/update_verifier.py 生成；Rust tests/vectors.rs 断言一致（批次4-3：跨端 canonicalization 无字节级兼容保证的修复锁定）",
+  "vectors": [
+    {
+      "name": "regular_manifest",
+      "expected": "valid",
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2026-09-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AAAA"
+          }
+        ]
+      },
+      "expected_canonical_hex": "7b22617274696661637473223a5b7b22666f726d6174223a226d736978222c22706c6174666f726d223a2277696e646f77732d783634222c22736861323536223a2261616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161222c2273697a65223a31302c2275726c223a2268747470733a2f2f612e676f762e636e2f782e6d736978227d5d2c226368616e6e656c223a22737461626c65222c22657870697265735f6174223a22323032362d30392d30315430303a30303a30305a222c2270726f64756374223a224165676973222c22736368656d61223a312c2276657273696f6e223a22312e322e33227d"
+    },
+    {
+      "name": "special_characters",
+      "expected": "valid",
+      "manifest": {
+        "product": "带\"引号\"与\\反斜杠与换行\n与制表\t与控制\u0001与中文",
+        "nested": {
+          "quote": "\"",
+          "backslash": "\\",
+          "newline": "a\nb"
+        },
+        "array": [
+          "x\"y",
+          "p\\q",
+          "m\nn",
+          "中文"
+        ],
+        "signatures": [
+          {
+            "key_id": "evil",
+            "sig": "should-be-stripped"
+          }
+        ]
+      },
+      "expected_canonical_hex": "7b226172726179223a5b22785c2279222c22705c5c71222c226d5c6e6e222c22e4b8ade69687225d2c226e6573746564223a7b226261636b736c617368223a225c5c222c226e65776c696e65223a22615c6e62222c2271756f7465223a225c22227d2c2270726f64756374223a22e5b8a65c22e5bc95e58fb75c22e4b88e5c5ce58f8de6969ce69da0e4b88ee68da2e8a18c5c6ee4b88ee588b6e8a1a85c74e4b88ee68ea7e588b65c7530303031e4b88ee4b8ade69687227d"
+    },
+    {
+      "name": "signatures_key_only_top_level",
+      "expected": "valid",
+      "manifest": {
+        "signatures": "top-level-must-strip",
+        "keep": {
+          "signatures": "nested-must-keep"
+        },
+        "version": "2.0.0"
+      },
+      "expected_canonical_hex": "7b226b656570223a7b227369676e617475726573223a226e65737465642d6d7573742d6b656570227d2c2276657273696f6e223a22322e302e30227d"
+    }
+  ]
+}

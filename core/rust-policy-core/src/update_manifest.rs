@@ -8,11 +8,27 @@
 
 use ed25519_dalek::{Signature, VerifyingKey};
 
-/// TUF canonical JSON（排序键 + 紧凑分隔——与 Python canonical_unsigned 一致）。
+/// TUF canonical JSON（排序键 + 紧凑分隔——与 Python canonical_unsigned 字节级一致）。
 /// canonicalization 是签名验证前提（TUF 官方）。
+///
+/// 批次4-3 修复（全面审计 2026-09-04）：与发布链权威实现
+/// `release/update_verifier.py::canonical_unsigned` 对齐——
+/// ① 剔除**顶层** `signatures` 键（签名不参与被签载荷）；
+/// ② 字符串按 JSON 标准转义（此前直出原始字节——值含 `"`/`\`/控制字符时
+///    产生非法或歧义 canonical 字节，签名两端校验不一致 = 验证旁路面）。
+/// 字节级一致性由 `contracts/vectors/update-manifest-canonical.json`
+/// golden 向量锁定（Python 侧生成、Rust 断言——tests/vectors.rs 消费）。
 pub fn canonical_unsigned(manifest: &serde_json::Value) -> Vec<u8> {
     let mut bytes = Vec::new();
-    canonical_write(manifest, &mut bytes);
+    match manifest.as_object() {
+        // 仅剔除顶层 signatures（Python 字典推导同语义——嵌套对象不动）
+        Some(map) => {
+            let mut filtered = map.clone();
+            filtered.remove("signatures");
+            canonical_write(&serde_json::Value::Object(filtered), &mut bytes);
+        }
+        None => canonical_write(manifest, &mut bytes),
+    }
     bytes
 }
 
@@ -26,7 +42,7 @@ fn canonical_write(value: &serde_json::Value, out: &mut Vec<u8>) {
                 if i > 0 {
                     out.push(b',');
                 }
-                canonical_write(&serde_json::Value::String((*key).clone()), out);
+                write_json_string(key, out);
                 out.push(b':');
                 canonical_write(&map[*key], out);
             }
@@ -42,13 +58,35 @@ fn canonical_write(value: &serde_json::Value, out: &mut Vec<u8>) {
             }
             out.push(b']');
         }
-        serde_json::Value::String(s) => {
-            out.push(b'"');
-            out.extend_from_slice(s.as_bytes());
-            out.push(b'"');
-        }
+        serde_json::Value::String(s) => write_json_string(s, out),
         other => out.extend_from_slice(other.to_string().as_bytes()),
     }
+}
+
+/// JSON 字符串序列化（与 Python `json.dumps(ensure_ascii=False)` 转义语义
+/// 一致）：`"`/`\`/控制字符转义，短转义优先（\b\f\n\r\t），其余 <0x20 用
+/// `\u00xx`（4 位小写 hex）；非 ASCII 原样 UTF-8 输出（ensure_ascii=False）。
+fn write_json_string(s: &str, out: &mut Vec<u8>) {
+    out.push(b'"');
+    for ch in s.chars() {
+        match ch {
+            '"' => out.extend_from_slice(b"\\\""),
+            '\\' => out.extend_from_slice(b"\\\\"),
+            '\u{08}' => out.extend_from_slice(b"\\b"),
+            '\u{0C}' => out.extend_from_slice(b"\\f"),
+            '\n' => out.extend_from_slice(b"\\n"),
+            '\r' => out.extend_from_slice(b"\\r"),
+            '\t' => out.extend_from_slice(b"\\t"),
+            c if (c as u32) < 0x20 => {
+                out.extend_from_slice(format!("\\u{:04x}", c as u32).as_bytes());
+            }
+            c => {
+                let mut buf = [0u8; 4];
+                out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
+            }
+        }
+    }
+    out.push(b'"');
 }
 
 /// 解析 SemVer 字符串（与 contracts/version.schema.json 一致——拒绝无效格式）。

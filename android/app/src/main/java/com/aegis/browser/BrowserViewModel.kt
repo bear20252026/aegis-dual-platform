@@ -201,6 +201,19 @@ class BrowserViewModel : ViewModel() {
     }
 
     /**
+     * P1-4 修复（全面审计批次4）：外链 intent 消费——Manifest 声明了
+     * http/https VIEW intent-filter，但此前无 intent?.data 读取、无
+     * onNewIntent：其他 App「用 Aegis 打开」只落到首页，URL 静默丢失。
+     * 经 [navigateToAddress] 同一安全链路（归一 + OriginPolicy + broker），
+     * 非法 scheme 走既有拒绝反馈（fail-closed），不新增特权入口。
+     */
+    fun openExternalUrl(url: String?) {
+        if (url.isNullOrBlank()) return
+        _address.value = url
+        navigateToAddress()
+    }
+
+    /**
      * P2 修复（全量复审 2026-09-01）：导航防抖——待审批确认期间忽略重复提交
      * （连点会撤销待确认 nonce 并触发误导性提示）；[NAVIGATE_DEBOUNCE_MS]
      * 内重复点击忽略。单出口无提前 return（detekt ReturnCount/MagicNumber）。
