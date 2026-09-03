@@ -22,11 +22,13 @@ public sealed class HostWebView : IDisposable
     /// <summary>待审批导航被批准、拒绝、替换或销毁时通知受信 chrome 关闭展示。</summary>
     public event EventHandler? NavigationConfirmationResolved;
 
-    public HostWebView(Broker.BrowserPolicyBroker broker, string sessionId)
+    public HostWebView(Broker.BrowserPolicyBroker broker, string sessionId, string? tabId = null)
     {
         _broker = broker;
         _sessionId = sessionId;
-        _tabId = $"tab-{sessionId}";
+        // M1-T1（ADR-009 多标签）：tabId 显式传入——每标签一个 HostWebView 实例
+        //（每实例一个 broker session，账本键独立）。缺省保留旧单标签行为。
+        _tabId = tabId ?? $"tab-{sessionId}";
     }
 
     public void WireEvents(CoreWebView2 webView)

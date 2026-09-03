@@ -9,14 +9,14 @@
 
 | 功能 | 安全门禁要求 | Python 参考 | C# 状态 |
 |---|---|---|---|
-| 多标签：新建/关闭/切换 | 每标签独立会话/broker session | tab_ops.py | ☐ |
+| 多标签：新建/关闭/切换 | 每标签独立会话/broker session | tab_ops.py | ☑ 骨架（M1-T1：TabManager/TabRuntime/原生标签条；拖拽排序独立行） |
 | 多标签：拖拽排序 | — | tabstrip_js.py | ☐ |
 | 标签标题/进度实时同步 | 无 DOM 泄露（原生 UI 天然满足） | bridge_hooks | ☐ |
 | 地址栏：focus 选中/Enter 导航 | safe_url 双层校验经 broker | shell_toolbar | ☐ |
 | 地址栏：搜索词 vs URL 判定 | 与 Android SearchEngines 同语义 | url_utils.normalize_url | ☐ |
 | 加载进度条 | — | （Python 缺失▲） | ☐ |
 | 后退/前进/刷新/主页 | 导航经 broker 决策+consume | navigation.py | ☐ |
-| 会话恢复（自动+手动） | 恢复 URL 过 safe_url | session_store.py/tab_ops.seed | ☐ |
+| 会话恢复（自动+手动） | 恢复 URL 过 safe_url | session_store.py/tab_ops.seed | ☑ 自动恢复（M1-T1：SQLite+启动还原）；手动入口随 M3 新标签页 |
 | NewWindowRequested 门禁 | 白名单 fail-closed + 审计 | 批次1 native_interception | ☐ |
 | WebView2 功能收紧 | AreHostObjects/ScriptDialogs=false | 批次1 hardening | ☐ |
 | ESM（探测启用） | 显式留痕 | 批次1 enhanced_security | ☐ |

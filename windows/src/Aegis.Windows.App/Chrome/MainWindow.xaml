@@ -1,7 +1,6 @@
 <Window x:Class="Aegis.Windows.Chrome.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         Title="Aegis" Height="800" Width="1200"
         Background="#FF101827" FontFamily="Segoe UI, Microsoft YaHei UI"
         Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
@@ -84,6 +83,57 @@
 
   <!-- 受信 chrome UI（本地固定 origin——远程页面无 native bridge——ADR-003） -->
   <DockPanel>
+    <!-- M1-T1 原生标签条（ADR-009 D2：chrome 与页面 DOM 彻底隔离——
+         标签条不再是注入 JS；点击切换/✕ 关闭/＋ 新建，全部原生控件） -->
+    <Border DockPanel.Dock="Top" Background="{StaticResource ChromeBackgroundBrush}" Padding="8,4">
+      <DockPanel>
+        <Button x:Name="NewTabButton" DockPanel.Dock="Right" Style="{StaticResource NavButton}"
+                Content="＋" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"/>
+        <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
+          <ListBox x:Name="TabStrip" SelectionMode="Single" Background="Transparent"
+                   BorderThickness="0" SelectionChanged="TabStrip_SelectionChanged">
+            <ListBox.ItemsPanel>
+              <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal"/>
+              </ItemsPanelTemplate>
+            </ListBox.ItemsPanel>
+            <ListBox.ItemContainerStyle>
+              <Style TargetType="ListBoxItem">
+                <Setter Property="Focusable" Value="False"/>
+                <Setter Property="Template">
+                  <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                      <Border x:Name="Chip" CornerRadius="8" Margin="0,0,4,0" Padding="10,5"
+                              Background="{StaticResource ButtonOverlayBrush}">
+                        <DockPanel>
+                          <Button DockPanel.Dock="Right" Content="✕" Click="TabClose_Click"
+                                  Tag="{Binding TabId}" Focusable="False" Cursor="Hand"
+                                  FontSize="10" Margin="8,0,0,0"
+                                  Foreground="{StaticResource TextSecondaryBrush}"
+                                  Background="Transparent" BorderThickness="0"
+                                  ToolTip="关闭标签（Ctrl+W）"/>
+                          <TextBlock Text="{Binding Title}" FontSize="12" MaxWidth="160"
+                                     TextTrimming="CharacterEllipsis"
+                                     Foreground="{StaticResource TextPrimaryBrush}"/>
+                        </DockPanel>
+                      </Border>
+                      <ControlTemplate.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                          <Setter TargetName="Chip" Property="Background" Value="#FF1F2937"/>
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                          <Setter TargetName="Chip" Property="Background" Value="{StaticResource ButtonOverlayHoverBrush}"/>
+                        </Trigger>
+                      </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                  </Setter.Value>
+                </Setter>
+              </Style>
+            </ListBox.ItemContainerStyle>
+          </ListBox>
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
     <Border DockPanel.Dock="Top" Background="{StaticResource ChromeBackgroundBrush}" Padding="8,6">
       <DockPanel>
         <StackPanel Orientation="Horizontal">
@@ -131,7 +181,9 @@
       <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
     </Border>
     <Grid>
-      <wv2:WebView2 x:Name="Browser"/>
+      <!-- M1-T1：每标签一 WebView2 实例（TabRuntime 创建/挂接）——切换即可见性
+           切换，页面状态/滚动/表单天然保留（ADR-009 D2） -->
+      <Grid x:Name="WebViewHost"/>
       <!-- 全窗口受信模态遮罩：拦截底层点击；只展示 Rust 核心给出的最小审批字段。 -->
       <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#99101827">
         <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"

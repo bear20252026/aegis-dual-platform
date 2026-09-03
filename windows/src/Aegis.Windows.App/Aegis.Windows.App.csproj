@@ -25,6 +25,12 @@
     <!-- WebView2 SDK（阶段 C：WPF + 原生 WebView2——调研交叉比对选型：
          官方支持 + 中文实测性能略胜 + 成熟简单——ADR-001） -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+    <!-- ADR-009 D2：数据层统一 SQLite（标签会话/书签/历史——FTS5 后续里程碑） -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <!-- NU1903 修复：显式升级 SQLitePCLRaw 传递依赖（2.1.11 高危漏洞 GHSA-2m69-gcr7-jv3q） -->
+    <PackageReference Include="SQLitePCLRaw.core" Version="2.1.12" />
+    <PackageReference Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.12" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
   </ItemGroup>
   <ItemGroup Condition="Exists('$(NativePolicyCorePath)')">
     <None Include="$(NativePolicyCorePath)"
