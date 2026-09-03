@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### 架构决策（2026-09-04：ADR-009——全功能迁移至 C#）
+- **owner 拍板 B 路线终局**：C#/.NET 10 + 原生 WebView2 为唯一 Windows 正典栈，
+  Python 现役栈全部功能迁移（保留功能不缩水）；`legacy/windows-pywebview/`
+  进入**冻结维护**（只修 P0/P1 安全缺陷，功能 PR 一律拒绝）
+- 目标架构：每标签一 WebView 实例、原生 WPF chrome（与页面 DOM 彻底隔离）、
+  领域服务层（Core/Tabs|Bookmarks|History|Downloads|Settings，全部可单测）、
+  SQLite+FTS5 数据层、AppSettings 强类型（杜绝影子配置）
+- 迁移路线图 M1 骨架可用 → M2 数据闭环 → M3 功能补齐（含原生下载管理器——
+  pywebview 天花板特性的原生兑现）→ M4 收尾退役（Python 归档+发布链单轨）
+- 验收机械核对表：`docs/product/feature-parity-checklist.md`（安全门禁列
+  强制同 PR 接线——防「机制建了没接线」病灶复发）；C# 产物以 2.2.0-beta 渠道
+  发布，PyInstaller 包继续为 stable 直至 M4
+- 完整决策/架构/纪律：[ADR-009](docs/adr/ADR-009-full-migration-to-csharp.md)
+
 ### Security（2026-09-04：全面审计批次 1——安全止血）
 > 报告见 `docs/quality-reports/full-audit-2026-09-04.md`，逐项修复记录见
 > `docs/quality-reports/fix-log-2026-09-04.md`（层次/原文件/界限/提交历史）。
