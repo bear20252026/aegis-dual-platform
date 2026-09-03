@@ -19,6 +19,55 @@ events 钩子挂接）；新增壳实现需实现全部接口方法（缺失用 
 from collections.abc import Callable
 from typing import Any
 
+import time
+
+
+# ================= P0-1 修复（全面审计 2026-09-04）：内核对象单源解析 =================
+# 旧实现走 window.gui.webview.CoreWebView2——在 pywebview 6.x 上恒为 None：
+# `window.gui` 是平台**模块**（webview.platforms.winforms，guilib.initialize()
+# 返回模块本身），模块上没有 webview 属性；每窗口的 WebView2 控件挂在
+# `window.native`（BrowserView 实例）上，`BrowserView.__init__` 里
+# `self.webview = self.browser.webview`（winforms.py 实测）。
+# 后果：main_webview 全部原生挂接（NewWindowRequested 拦截/指纹前置注入/
+# 设置收紧/ESM/崩溃监听/probe）被 `if core is not None` 静默跳过——整层
+# 加固从未生效。本函数为全仓唯一解析点（shell.core 与 webview2_probe、
+# main_webview 各调用点统一走此单源），两种布局兼容、旧路径兜底。
+def resolve_core(window: Any) -> Any:
+    """解析窗口的底层内核对象（pywebview: CoreWebView2）；不可达返回 None。"""
+    if window is None:
+        return None
+    try:
+        # pywebview ≥5 实际布局：window.native（BrowserView）.webview.CoreWebView2
+        native = getattr(window, "native", None)
+        wv = getattr(native, "webview", None)
+        core = getattr(wv, "CoreWebView2", None)
+        if core is not None:
+            return core
+        # 兜底：旧宿主/其他壳把 webview 控件直接挂在 gui 上的布局
+        gui = getattr(window, "gui", None)
+        wv2 = getattr(gui, "webview", None)
+        return getattr(wv2, "CoreWebView2", None)
+    except Exception:
+        return None
+
+
+def wait_for_core(window: Any, timeout: float = 15.0,
+                  poll: float = 0.1) -> Any:
+    """轮询等待内核对象就绪（WebView2 初始化在窗口创建后异步完成）。
+
+    P0-1 配套：全部原生挂接已移到 shell.start(func) 回调（窗口创建后），
+    但 CoreWebView2 就绪晚于窗口创建——此处有界轮询（默认 15s）。
+    超时返回 None，由调用方显式记录降级日志（不再静默）。
+    """
+    deadline = time.monotonic() + max(0.0, timeout)
+    while True:
+        core = resolve_core(window)
+        if core is not None:
+            return core
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(poll)
+
 
 class Shell:
     """壳抽象基类：定义所有壳实现的公共接口（协议，非强制继承）。"""
@@ -78,12 +127,7 @@ class PywebviewShell(Shell):
         return getattr(window, "events", None)
 
     def core(self, window: Any) -> Any:
-        try:
-            gui = getattr(window, "gui", None)
-            wv = getattr(gui, "webview", None)
-            return getattr(wv, "CoreWebView2", None)
-        except Exception:
-            return None
+        return resolve_core(window)
 
     def settings(self) -> dict:
         """壳模块级设置项（pywebview.settings 原引用——直接修改生效）；

@@ -64,9 +64,11 @@ def probe_capabilities(window: Any = None) -> dict:
     window 为 pywebview 窗口对象（可为 None）；无窗口时仅做静态探测。
     """
     result = {}
-    gui = getattr(window, "gui", None) if window is not None else None
-    webview_ctrl = getattr(gui, "webview", None) if gui is not None else None
-    core = getattr(webview_ctrl, "CoreWebView2", None) if webview_ctrl is not None else None
+    # P0-1 修复（全面审计 2026-09-04）：解析改走 shell_adapter.resolve_core
+    # 单源——旧 window.gui.webview 路径在 pywebview 6.x 恒为 None（探测
+    # 结果全 False 的根因）。
+    from .shell_adapter import resolve_core
+    core = resolve_core(window)
     profile = getattr(core, "Profile", None) if core is not None else None
 
     result["EnhancedSecurityModeState"] = bool(
@@ -107,9 +109,9 @@ def watch_runtime_update(window: Any, on_new_version=None) -> bool:
     返回是否成功绑定；API 未暴露/失败返回 False（静默降级，不影响浏览）。
     """
     try:
-        gui = getattr(window, "gui", None)
-        webview_ctrl = getattr(gui, "webview", None)
-        core = getattr(webview_ctrl, "CoreWebView2", None)
+        # P0-1 修复（全面审计 2026-09-04）：解析走 resolve_core 单源
+        from .shell_adapter import resolve_core
+        core = resolve_core(window)
         if core is None:
             return False
         # NewBrowserVersionAvailable 事件在 Environment 上（非 Core 上）
@@ -137,9 +139,9 @@ def watch_runtime_update(window: Any, on_new_version=None) -> bool:
 def _browser_pid(window: Any = None) -> int:
     """读取 WebView2 浏览器进程 PID（尽力而为；失败返回 0）。"""
     try:
-        gui = getattr(window, "gui", None)
-        webview_ctrl = getattr(gui, "webview", None)
-        core = getattr(webview_ctrl, "CoreWebView2", None)
+        # P0-1 修复（全面审计 2026-09-04）：解析走 resolve_core 单源
+        from .shell_adapter import resolve_core
+        core = resolve_core(window)
         pid = getattr(core, "BrowserProcessId", 0)
         return int(pid or 0)
     except Exception:
