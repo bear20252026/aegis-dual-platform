@@ -61,6 +61,26 @@ class SearchEnginesTest {
         assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("vbscript:msgbox(1)"))
     }
 
+    @Test
+    fun `host with port classifies as DOMAIN (T1 regression)`() {
+        // T1 修复（全面审计批次2）：字母开头的 host:port（localhost:8000）
+        // 此前被 SCHEME_PREFIX 匹配成 scheme → FORBIDDEN。数字开头的
+        // 192.168.1.1:8080 原本就不匹配 scheme 正则（首字符限定字母）——
+        // 一并列断言锁最终行为。
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("localhost:8000"))
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("192.168.1.1:8080"))
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("example.com:8080/path"))
+        // 全链路：host:port → https 补全 + 端口保留
+        assertEquals("https://localhost:8000", SearchEngines.canonicalizeExternal("https://localhost:8000"))
+    }
+
+    @Test
+    fun `scheme-like words with portless colon stay FORBIDDEN`() {
+        // 端口段非数字 → 仍按真 scheme 处理（fail-closed 不回退）
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("localhost:abc"))
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("javascript:alert(1)"))
+    }
+
     // ---------- normalizeInput 全链路 ----------
 
     @Test

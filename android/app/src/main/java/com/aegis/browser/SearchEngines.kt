@@ -93,17 +93,34 @@ object SearchEngines {
         }
 
     private fun classifyWithScheme(trimmed: String): InputKind {
-        val scheme =
+        val matched =
             SCHEME_PREFIX
                 .find(trimmed)
                 ?.groupValues
                 ?.get(1)
-                ?.lowercase()
+                ?: return if (looksLikeUrl(trimmed)) InputKind.DOMAIN else InputKind.SEARCH
+        // T1 修复（全面审计批次2 2026-09-04）：host:port 误杀——SCHEME_PREFIX
+        // 会把字母开头的 host（`localhost:8000`、`intranet:80`）匹配成 scheme
+        // → FORBIDDEN（开发/内网最高频输入形态被拒）。真 scheme 永不含点
+        // （RFC 3986 字母数字+/-）；prefix 含点必为 host → 按 DOMAIN（依
+        // looksLikeUrl 保留尾点降级）。prefix 不含点但首个 '/' 前为 1-5 位
+        // 纯数字端口段 → host:port 形态直接按 DOMAIN（不能走 looksLikeUrl——
+        // 它要求含点，`localhost:8000` 恰好不含点会误降级为 SEARCH）。
+        // 其余保持 FORBIDDEN（javascript:/data:/file: 语义不变）。
+        if (matched.contains('.')) {
+            return if (looksLikeUrl(trimmed)) InputKind.DOMAIN else InputKind.SEARCH
+        }
+        val afterColon = trimmed.substring(matched.length + 1)
+        val portSegment = afterColon.substringBefore('/')
+        if (portSegment.isNotEmpty() && portSegment.length <= 5 &&
+            portSegment.all { it.isDigit() }
+        ) {
+            return InputKind.DOMAIN
+        }
+        val scheme = matched.lowercase()
         return when {
-            scheme != null && scheme in NAV_SCHEMES -> InputKind.ABSOLUTE_URL
-            scheme != null -> InputKind.FORBIDDEN_SCHEME
-            looksLikeUrl(trimmed) -> InputKind.DOMAIN
-            else -> InputKind.SEARCH
+            scheme in NAV_SCHEMES -> InputKind.ABSOLUTE_URL
+            else -> InputKind.FORBIDDEN_SCHEME
         }
     }
 
