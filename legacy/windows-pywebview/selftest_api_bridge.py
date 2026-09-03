@@ -328,6 +328,31 @@ with _LogCapture() as cap:
 check("远程页 js_error 一律丢弃（含空 source 绕过）", cap.lines == [],
       f"{cap.lines}")
 
+# 15) 批次3-8 回归（全面审计 2026-09-04）：toggle_bookmark——书签无添加入口
+from app.bookmark_store import BookmarkStore as _BS
+
+api_tg = Api()
+api_tg.window = ShellWindow()  # file:// 壳页
+api_tg._data_dir = tempfile.mkdtemp(prefix="aegis_tg_")
+api_tg.bookmarks = _BS(api_tg._data_dir)
+check("壳页 toggle → unsupported", api_tg.toggle_bookmark() == "unsupported")
+
+
+class _HttpWin:
+    def __init__(self, u):
+        self.u = u
+
+    def get_current_url(self):
+        return self.u
+
+
+api_tg.window = _HttpWin("https://example.com/page?a=1")
+check("未收藏 toggle → added", api_tg.toggle_bookmark() == "added")
+check("书签入库", api_tg.bookmarks.contains("https://example.com/page?a=1"))
+check("再 toggle → removed", api_tg.toggle_bookmark() == "removed")
+check("确认移除", not api_tg.bookmarks.contains("https://example.com/page?a=1"))
+check("toggle_bookmark 入白名单", "toggle_bookmark" in api._JS_EXPOSED)
+
 if failures:
     print("FAIL")
     for f in failures:

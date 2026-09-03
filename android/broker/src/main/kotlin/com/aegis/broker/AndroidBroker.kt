@@ -321,6 +321,9 @@ class AndroidBroker(
         )
 
     private fun canonicalOrigin(uri: java.net.URI): String {
+        // T2 配套（全面审计批次2 2026-09-04）：about:blank 为 opaque URI
+        // （host=null）——直接归一会 NPE；固定返回原字面量。
+        if (uri.scheme.equals("about", ignoreCase = true)) return "about:blank"
         val scheme = uri.scheme.lowercase()
         val port = uri.port
         val defaultPort = if (scheme == "https") 443 else 80

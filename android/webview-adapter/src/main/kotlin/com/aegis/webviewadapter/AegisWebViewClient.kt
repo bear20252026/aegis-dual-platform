@@ -218,7 +218,10 @@ class AegisWebViewClient(
         val uri = android.net.Uri.parse(url)
         val scheme = uri.scheme.orEmpty().lowercase()
         if (scheme == "http") {
-            val upgraded = url.replaceFirst("http://", "https://")
+            // T3 修复（全面审计批次2 2026-09-04）：原 replaceFirst("http://")
+            // 大小写敏感——`HTTP://EXAMPLE.com` 原样放行明文（scheme 判定处
+            // 已 lowercase 但升级未同步）。改忽略大小写替换前缀。
+            val upgraded = url.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
             android.util.Log.i("Aegis", "HTTPS-only: 升级 $url → $upgraded")
             return upgraded
         }

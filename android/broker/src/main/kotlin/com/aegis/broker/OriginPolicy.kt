@@ -14,6 +14,14 @@ object OriginPolicy {
     /** 解析外部 URL（仅 http/https——非法返回 null——fail-closed）。 */
     fun tryParseExternal(raw: String?): java.net.URI? {
         if (raw.isNullOrBlank() || raw.length > MAX_URL_LENGTH) return null
+        // T2 修复（全面审计批次2 2026-09-04）：归一层（SearchEngines
+        // normalizeInput）放行精确 about:blank，但本函数只认 http/https →
+        // broker 必拒——用户输 about:blank 得到误导性报错（自相矛盾死路径）。
+        // 仅放行精确 about:blank（trim + 大小写不敏感）；about:evil 等
+        // 其他 about 变体仍拒绝。
+        if (raw.trim().equals("about:blank", ignoreCase = true)) {
+            return java.net.URI("about:blank")
+        }
         if (raw.any { it.code < 0x20 || it.code == 0x7f || it.isWhitespace() }) return null
         val uri =
             try {

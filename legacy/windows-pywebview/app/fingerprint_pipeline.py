@@ -321,30 +321,73 @@ def build_fingerprint_pipeline_js(session_seed: str) -> str:
 """
 
 
-def build_link_intercept_js() -> str:
-    """构建链接拦截 JS（FIX-4: 完全拦截，不放行 javascript: URL）。
+def build_link_intercept_js(blocked_hosts=None) -> str:
+    """构建链接拦截 JS（FIX-4 + 批次2-2：点击导航经客户端黑名单门禁）。
 
-    独立函数——与指纹防护管道解耦，可单独注入。
+    P1-3 修复（全面审计 2026-09-04）：旧实现 preventDefault 后
+    `location.href = a.href` **原生放行**——威胁黑名单/Agent 白名单对页内
+    点击导航完全不生效（权威拦截只覆盖地址栏/新标签/会话恢复三入口）。
+    远程页面上桥被禁用（B0-W-01），无法回传桥导航——故在注入时嵌入
+    **黑名单快照**（启动时 load_cached 一次，注入参数化），点击时客户端
+    判定：命中 → 阻止导航 + 可见 toast（尽力而为——工具栏未注入时静默）。
+    快照不含 URL 等敏感数据（纯域名集合），且远程页本就不可信 DOM——
+    页面读取黑名单的增量风险 = 它自己探测可达性即可获得，可接受。
+
+    顺带修复两处既有 bug：
+    - `a.href.startsWith('#')` 恒为假（.href 是解析后的绝对 URL）——纯锚点
+      链接被 preventDefault 破坏页面内导航语义。改用原始 getAttribute 判定。
+    - window.open(url) 重定向同样嵌入门禁（旧版任意 URL 直载）。
     """
+    hosts_js = "[]"
+    if blocked_hosts:
+        safe = sorted(h for h in blocked_hosts
+                      if isinstance(h, str) and h and len(h) < 256)
+        import json as _json
+        hosts_js = _json.dumps(safe, ensure_ascii=False)
     return """
-// Aegis Link Interceptor (FIX-4: javascript: URL 完全拦截)
+// Aegis Link Interceptor (FIX-4 + P1-3: 点击导航客户端黑名单门禁)
 (function() {
   'use strict';
+  var BLOCKED = %BLOCKED_HOSTS%;
+  function hostBlocked(href) {
+    try {
+      var u = new URL(href);
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return true;
+      var h = (u.hostname || '').toLowerCase().replace(/\\.+$/, '');
+      if (!h) return true;
+      if (BLOCKED.indexOf(h) >= 0) return true;
+      var parts = h.split('.');
+      for (var i = 1; i < parts.length; i++) {
+        if (BLOCKED.indexOf(parts.slice(i).join('.')) >= 0) return true;
+      }
+      return false;
+    } catch (e) { return true; }
+  }
+  function deny(a) {
+    try { if (window.__aegisToast) window.__aegisToast('该地址被安全策略拦截'); } catch (e) {}
+  }
   document.addEventListener('click', function(e) {
     var a = e.target;
     while (a && a.tagName !== 'A') a = a.parentNode;
-    if (!a || !a.href) return;
-    if (a.href.startsWith('#')) return;
+    if (!a) return;
+    var raw = a.getAttribute('href') || '';
+    if (!raw || raw.charAt(0) === '#') return;  // 纯锚点——页面默认行为
     if (a.hasAttribute('download')) return;
+    var href = a.href;
+    if (!href) return;
     e.preventDefault();
     e.stopPropagation();
-    window.location.href = a.href;
+    if (hostBlocked(href)) { deny(a); return; }
+    window.location.href = href;
   }, true);
   var origOpen = window.open;
   window.open = function(url) {
-    if (url) window.location.href = url;
+    if (url) {
+      if (hostBlocked(url)) { deny(null); return null; }
+      window.location.href = url;
+    }
     return null;
   };
 })();
-"""
+""".replace("%BLOCKED_HOSTS%", hosts_js)
 

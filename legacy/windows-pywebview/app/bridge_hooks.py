@@ -39,8 +39,9 @@ def on_loaded(window: Any, api: Any) -> None:
     except Exception:
         pass  # 页面不允许注入时静默降级
     try:
-        # FIX-4: 使用独立的链接拦截函数（不再内联 javascript: URL 放行逻辑）
-        link_js = build_link_intercept_js()
+        # FIX-4 + P1-3: 链接拦截（嵌入黑名单快照——远程页不可达桥，客户端判定）
+        blocked = frozenset(getattr(api, "_blocked_hosts", None) or ())
+        link_js = build_link_intercept_js(blocked)
         api._eval(link_js)
     except Exception:
         pass  # 页面不允许注入时静默降级

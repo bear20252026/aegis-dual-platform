@@ -45,6 +45,9 @@ object SearchEngines {
 
     private val NAV_SCHEMES = setOf("http", "https")
 
+    /** host:port 形态的端口段长度上限（TCP 端口 ≤5 位数字——T1）。 */
+    private const val MAX_PORT_SEGMENT_LENGTH = 5
+
     /** 读取当前搜索引擎 key（与 AegisHomeBridge 同一偏好文件/键——单源）。 */
     fun currentEngine(context: android.content.Context): String =
         context
@@ -93,18 +96,33 @@ object SearchEngines {
         }
 
     private fun classifyWithScheme(trimmed: String): InputKind {
-        val scheme =
+        val matched =
             SCHEME_PREFIX
                 .find(trimmed)
                 ?.groupValues
                 ?.get(1)
-                ?.lowercase()
+        // T1 修复（全面审计批次2 2026-09-04）：host:port 误杀——SCHEME_PREFIX
+        // 会把字母开头的 host（`localhost:8000`、`intranet:80`）匹配成 scheme
+        // → FORBIDDEN（开发/内网最高频输入形态被拒）。真 scheme 永不含点
+        // （RFC 3986 字母数字+/-）：prefix 含点必为 host → 按 DOMAIN（依
+        // looksLikeUrl 保留尾点降级）；prefix 不含点但首个 '/' 前为纯数字
+        // 端口段 → host:port 形态直接按 DOMAIN（不能走 looksLikeUrl——
+        // 它要求含点，`localhost:8000` 恰好不含点会误降级为 SEARCH）。
+        // 其余保持 FORBIDDEN（javascript:/data:/file: 语义不变）。
         return when {
-            scheme != null && scheme in NAV_SCHEMES -> InputKind.ABSOLUTE_URL
-            scheme != null -> InputKind.FORBIDDEN_SCHEME
-            looksLikeUrl(trimmed) -> InputKind.DOMAIN
-            else -> InputKind.SEARCH
+            matched == null -> if (looksLikeUrl(trimmed)) InputKind.DOMAIN else InputKind.SEARCH
+            matched.contains('.') -> if (looksLikeUrl(trimmed)) InputKind.DOMAIN else InputKind.SEARCH
+            isPortSegment(trimmed.substring(matched.length + 1)) -> InputKind.DOMAIN
+            else -> if (matched.lowercase() in NAV_SCHEMES) InputKind.ABSOLUTE_URL else InputKind.FORBIDDEN_SCHEME
         }
+    }
+
+    /** T1：host:port 判定——首个 '/' 前为 1-5 位纯数字端口段。 */
+    private fun isPortSegment(afterColon: String): Boolean {
+        val segment = afterColon.substringBefore('/')
+        return segment.isNotEmpty() &&
+            segment.length <= MAX_PORT_SEGMENT_LENGTH &&
+            segment.all { it.isDigit() }
     }
 
     private fun looksLikeUrl(text: String): Boolean = !text.contains(' ') && '.' in text && !text.endsWith(".")

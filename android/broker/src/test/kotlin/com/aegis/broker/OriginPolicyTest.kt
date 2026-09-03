@@ -55,4 +55,21 @@ class OriginPolicyTest {
         assertNotNull(uri)
         assertEquals(8443, uri?.port)
     }
+
+    @Test
+    fun `exact about blank is allowed (T2 regression)`() {
+        // T2 修复（全面审计批次2）：归一层放行 about:blank 而决策层必拒的
+        // 自相矛盾死路径——现在精确 about:blank 放行
+        assertNotNull(OriginPolicy.tryParseExternal("about:blank"))
+        assertNotNull(OriginPolicy.tryParseExternal("ABOUT:BLANK"))
+        assertNotNull(OriginPolicy.tryParseExternal("  about:blank  "))
+    }
+
+    @Test
+    fun `other about variants stay rejected`() {
+        // 只放行精确 about:blank——about:evil/about:config 等仍 fail-closed
+        assertNull(OriginPolicy.tryParseExternal("about:evil"))
+        assertNull(OriginPolicy.tryParseExternal("about:config"))
+        assertNull(OriginPolicy.tryParseExternal("about:blank/extra"))
+    }
 }

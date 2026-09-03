@@ -53,15 +53,61 @@ def main() -> int:
     # pywebview 处理器——必须先于 shell.start()（先于任何 EdgeChrome 实例
     # 创建），确定性与 pywebview 自身订阅时序无关。
     window_gate_ok = _gate_window_open()
+    post_start_ran = threading.Event()
+
+    # 原生挂接点（真机两轮定位 2026-09-04）：
+    # ① start(func) 后台线程触碰 WinForms 控件属性 → 跨 STA 线程阻塞；
+    # ② loaded 事件线程同样非 UI 线程（"CoreWebView2 can only be accessed
+    #    from the UI thread"）。正确的挂钩是 .NET 平台规定的
+    #    CoreWebView2InitializationCompleted——.NET 保证在 UI 线程回调，
+    #    且早于任何文档加载（FIX-1 对首文档亦生效）。订阅动作只读纯
+    #    Python 属性（window.native.webview），不触碰 .NET 属性。
+    def _on_core_ready(sender: Any = None, args: Any = None) -> None:
+        """UI 线程回调：核心就绪即一次性挂接全部原生层。"""
+        if post_start_ran.is_set():
+            return
+        post_start_ran.set()
+        _post_start_setup(window, shell, api, window_gate_ok)
+
+    def _subscribe_core_ready() -> None:
+        """start(func) 线程：等窗口控件出现后订阅就绪事件（有界 30s）。"""
+        import time as _t
+        deadline = _t.monotonic() + 30.0
+        while _t.monotonic() < deadline:
+            native = getattr(window, "native", None)
+            wv = getattr(native, "webview", None)
+            if wv is not None and hasattr(wv, "CoreWebView2InitializationCompleted"):
+                try:
+                    wv.CoreWebView2InitializationCompleted += _on_core_ready
+                except Exception as exc:
+                    from crash_reporter import log_event
+                    log_event(f"[native] 核心就绪事件订阅失败: {exc!r}")
+                return
+            _t.sleep(0.1)
+        from crash_reporter import log_event
+        log_event("[native] 窗口控件 30 秒未出现——启动后挂接未订阅"
+                  "（显式降级留痕）")
+
+    threading.Thread(target=_subscribe_core_ready, daemon=True,
+                     name="aegis-core-ready-subscribe").start()
+
+    def _install_watchdog() -> None:
+        """挂接看门狗：就绪回调 30 秒未发生时显式留痕。"""
+        if not post_start_ran.wait(30.0):
+            try:
+                from crash_reporter import log_event
+                log_event("[native] 核心就绪回调 30 秒未发生——启动后原生挂接"
+                          "未执行（显式降级留痕）")
+            except Exception:
+                pass
+
+    threading.Thread(target=_install_watchdog, daemon=True,
+                     name="aegis-install-watchdog").start()
     # 事件订阅在 start 前完成（pywebview Event 对象随窗口创建即可订阅）
     window.events.loaded += lambda: on_loaded(window, api)
     _start_watchdog(api)
-
-    def _post_start() -> None:
-        """start(func) 回调：GUI 循环已启动、窗口已创建后的原生层挂接。"""
-        _post_start_setup(window, shell, api, window_gate_ok)
-
-    shell.start(func=_post_start)
+    _start_threat_feed_refresh(api)  # 批次2-1：黑名单快照 + 订阅源后台刷新
+    shell.start(func=_subscribe_core_ready)
     return 0
 
 
@@ -154,6 +200,57 @@ def _init_stores_and_session():
         restored_url = ""
         pass  # 会话恢复失败静默——回退默认启动页
     return api, restored_url
+
+
+def _start_threat_feed_refresh(api) -> None:
+    """威胁黑名单：启动快照 + 订阅源后台刷新（批次2-1 接线）。
+
+    P1-4 修复（全面审计 2026-09-04）：ThreatFeedUpdater.refresh 此前零
+    生产调用者——默认安装黑名单恒为空集，safe_browsing 类防护实际不存在
+    （承诺与实现脱节）。现在：
+    ① 启动时 load_cached 快照写入 api._blocked_hosts（链接拦截注入嵌入用
+       ——批次2-2 客户端门禁数据源）；
+    ② config.threat_feed_url 非空时后台线程 refresh（threat_feed 自带
+       https 强制 + 5MB 上限 + 原子落盘），完成后刷新快照，成败均留痕。
+    """
+    from crash_reporter import log_event
+
+    def _load_snapshot() -> set:
+        try:
+            from app.paths import resolve_data_dir
+            from app.threat_feed import ThreatFeedUpdater
+            return ThreatFeedUpdater(resolve_data_dir()).load_cached()
+        except Exception:
+            return set()
+
+    api._blocked_hosts = _load_snapshot()
+    cfg = getattr(api, "config", None)
+    feed_url = str(getattr(cfg, "threat_feed_url", "") or "") if cfg else ""
+    if not feed_url:
+        n = len(api._blocked_hosts)
+        log_event(f"[threat] 黑名单快照 {n} 条（未配置 threat_feed_url——"
+                  f"如需恶意站点防护请在配置中设置 https 订阅源）")
+        return
+    updater_counts = {"n": 0}
+
+    def _on_done(count: int) -> None:
+        updater_counts["n"] = count
+        api._blocked_hosts = _load_snapshot()
+        log_event(f"[threat] 订阅源刷新完成：{count} 条域名入黑名单"
+                  f"（快照共 {len(api._blocked_hosts)} 条）")
+
+    def _on_error(message: str) -> None:
+        log_event(f"[threat] 订阅源刷新失败（保持旧快照 {len(api._blocked_hosts)} 条）: "
+                  f"{message}")
+
+    try:
+        from app.threat_feed import ThreatFeedUpdater
+        from app.paths import resolve_data_dir
+        ThreatFeedUpdater(resolve_data_dir()).refresh(
+            feed_url, on_done=_on_done, on_error=_on_error)
+        log_event(f"[threat] 订阅源后台刷新已启动（快照 {len(api._blocked_hosts)} 条）")
+    except Exception as exc:
+        log_event(f"[threat] 刷新调度失败: {exc!r}")
 
 
 def _create_window(api, shell, restored_url):

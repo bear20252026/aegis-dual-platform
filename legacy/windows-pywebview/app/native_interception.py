@@ -16,7 +16,6 @@ from app.native_monitoring import (
 )
 from app.shell_adapter import (
     resolve_core as _resolve_core,
-    wait_for_core as _wait_for_core,
 )
 from app.url_utils import is_navigation_safe as _is_navigation_safe
 
@@ -114,8 +113,23 @@ def _install_native_interception(window, shell, api, core=None,
         )
         _fp_seed = generate_session_seed()
         _fp_js = build_fingerprint_pipeline_js(_fp_seed)
-        core.AddScriptToExecuteOnDocumentCreated(_fp_js)
-        log_event("[security] 指纹防护已注入（页面脚本前生效——FIX-1）")
+        # 真机冒烟（2026-09-04）：pythonnet 对该方法的暴露名随 SDK 版本
+        # 存在差异——按候选探测，全部不可达时显式降级（不静默）。
+        _inject = None
+        for _name in ("AddScriptToExecuteOnDocumentCreated",
+                      "AddScriptToExecuteOnDocumentCreatedAsync",
+                      "add_ScriptToExecuteOnDocumentCreated"):
+            _candidate = getattr(core, _name, None)
+            if _candidate is not None:
+                _inject = _candidate
+                break
+        if _inject is None:
+            log_event("[security] FIX-1 未注入：pythonnet 未暴露"
+                      " AddScriptToExecuteOnDocumentCreated（SDK/运行时差异）——"
+                      "降级 on_loaded 注入（bridge_hooks 兜底）")
+        else:
+            _inject(_fp_js)
+            log_event("[security] 指纹防护已注入（页面脚本前生效——FIX-1）")
     except Exception as exc:
         # P0-1 修复：不再静默——显式留痕降级（bridge_hooks.py on_loaded 兜底）
         log_event(f"[security] FIX-1 指纹前置注入失败，降级 on_loaded 注入: "
@@ -173,7 +187,7 @@ def _install_native_interception(window, shell, api, core=None,
                 api._notify("当前版本不支持下载，该操作已取消")
             except Exception:
                 pass  # 提示失败不影响取消语义
-        core.add_DownloadStarting(_on_download_starting)
+        core.DownloadStarting += _on_download_starting
         log_event("[nav] 下载显式提示已注册（下载默认禁用——P0-3）")
     except Exception as exc:
         log_event(f"[nav] DownloadStarting 订阅失败（pywebview 默认取消仍生效）: "
@@ -187,9 +201,12 @@ def post_start_setup(window, shell, api, window_gate_ok: bool = False) -> None:
     崩溃监听 → 窗口加固束。每步失败显式留痕（不再静默吞）。
     """
     from crash_reporter import log_event
-    core = _wait_for_core(window, timeout=15.0)
+    # 真机跟进修复（2026-09-04）：本函数现于首个 loaded 事件（GUI 线程）
+    # 调用——CoreWebView2 必已就绪，单次解析即可；不再后台线程轮询
+    # （跨 STA 线程触碰 WinForms 属性会挂死，真机实测）。
+    core = _resolve_core(window)
     if core is None:
-        log_event("[native] WebView2 核心 15 秒内未就绪——原生加固层降级"
+        log_event("[native] WebView2 核心不可用——原生加固层降级"
                   "（NewWindowRequested 仅类级门禁兜底，指纹防护退 on_loaded 注入）")
     _install_native_interception(window, shell, api, core,
                                  window_gate_ok=window_gate_ok)

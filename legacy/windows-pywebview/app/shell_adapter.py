@@ -19,8 +19,6 @@ events 钩子挂接）；新增壳实现需实现全部接口方法（缺失用 
 from collections.abc import Callable
 from typing import Any
 
-import time
-
 
 # ================= P0-1 修复（全面审计 2026-09-04）：内核对象单源解析 =================
 # 旧实现走 window.gui.webview.CoreWebView2——在 pywebview 6.x 上恒为 None：
@@ -50,23 +48,6 @@ def resolve_core(window: Any) -> Any:
     except Exception:
         return None
 
-
-def wait_for_core(window: Any, timeout: float = 15.0,
-                  poll: float = 0.1) -> Any:
-    """轮询等待内核对象就绪（WebView2 初始化在窗口创建后异步完成）。
-
-    P0-1 配套：全部原生挂接已移到 shell.start(func) 回调（窗口创建后），
-    但 CoreWebView2 就绪晚于窗口创建——此处有界轮询（默认 15s）。
-    超时返回 None，由调用方显式记录降级日志（不再静默）。
-    """
-    deadline = time.monotonic() + max(0.0, timeout)
-    while True:
-        core = resolve_core(window)
-        if core is not None:
-            return core
-        if time.monotonic() >= deadline:
-            return None
-        time.sleep(poll)
 
 
 class Shell:
