@@ -152,6 +152,17 @@ public sealed class BrowserPolicyBroker : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// 下载请求默认拒绝（审计 C1——全面审计 2026-09-04）：当前契约没有
+    /// 下载授权动作，DownloadStarting 不得绕过 broker 直接放行；调用方
+    /// （HostWebView）据此 Handled 抑制原生下载流程，本方法仅留痕。
+    /// 与「没有 AuthorizedAction 不能导航/下载/导出」的类声明对齐。
+    /// </summary>
+    public void DenyDownload(string sessionId, string tabId, string origin)
+    {
+        RecordAudit("deny", "download", origin, "download_not_authorized");
+    }
+
     /// <summary>校验 AuthorizedAction 是否仍有效（会话/标签/代际/过期/策略版本——fail-closed）。</summary>
     public bool IsValid(AuthorizedAction? action, ulong currentGeneration)
     {

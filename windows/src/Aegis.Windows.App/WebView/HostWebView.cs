@@ -49,6 +49,23 @@ public sealed class HostWebView : IDisposable
             // 没有已注册的受控子 WebView executor 时，禁止弹窗导航，避免策略被绕过。
             e.Handled = true;
         };
+        // 下载经 broker 默认拒绝（DownloadStarting——审计 C1：全面审计
+        // 2026-09-04 发现下载此前完全绕过 broker）。当前契约没有下载授权
+        // 动作 → fail-closed：Handled 抑制原生下载流程 + 审计留痕。
+        webView.DownloadStarting += (_, e) =>
+        {
+            e.Handled = true;
+            string origin = "unknown";
+            try
+            {
+                origin = e.DownloadOperation?.Uri ?? origin;
+            }
+            catch (Exception)
+            {
+                // URI 读取失败不改变拒绝语义——仍按 unknown 留痕
+            }
+            _broker.DenyDownload(_sessionId, _tabId, origin);
+        };
         // 消息只接受受信 chrome UI origin（远程页面无 native bridge——WebMessage 忽略）
         webView.WebMessageReceived += (_, e) =>
         {
