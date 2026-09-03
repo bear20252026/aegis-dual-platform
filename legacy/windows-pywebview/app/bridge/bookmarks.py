@@ -16,6 +16,7 @@ class BookmarksMixin:
     bookmarks: Any
     _data_dir: str
     _check_trusted_source: Callable[[], bool]
+    window: Any  # 批次3-8 toggle_bookmark：服务端取当前页 URL 用
     # ================= 书签 =================
     def get_bookmarks(self) -> list:
         """返回书签列表 [{id,title,url}]（B0-W-01 复审：受信来源校验）。
@@ -95,3 +96,50 @@ class BookmarksMixin:
         except Exception:
             pass
         return True
+
+    def toggle_bookmark(self) -> str:
+        """收藏/取消收藏当前页（P1-6 修复，全面审计批次3-8：书签无添加入口）。
+
+        start.html 空书签文案引导用户「点收藏」——但工具栏从来没有收藏
+        按钮，add_bookmark 零 UI 调用者（审计实证的「承诺性文案」）。
+
+        威胁等价分析（不走 _check_trusted_source 的依据——与 navigate
+        的 P0-1 同款思路）：本方法**零 JS 可控参数**——URL 一律服务端取
+        （get_current_url），标题由 URL 派生。远程页面恶意调用的最坏效果
+        = 把用户当前正在看的页面加入/移出书签（toast 可见、宫格可见、
+        可再点撤销）——与导航按钮同风险级。反之来源校验会把收藏按钮
+        锁死在壳页（远程页正是收藏的主场景），功能失去意义。
+
+        仅 http/https 页面可收藏（壳页/内部页返回 unsupported）。
+        返回 "added"/"removed"/"unsupported"/"error"（JS toast 依据）。
+        """
+        w = self.window
+        if w is None:
+            return "error"
+        try:
+            url = w.get_current_url() or ""
+        except Exception:
+            return "error"
+        if not url:
+            return "error"
+        from ..security import scheme_of
+        if scheme_of(url) not in ("http", "https"):
+            return "unsupported"
+        if self.bookmarks is None:
+            return "error"
+        try:
+            if self.bookmarks.contains(url):
+                self.bookmarks.remove(url)
+                return "removed"
+            # 标题由 URL 派生（页面真实 title 未采集——P2-7 关联债；
+            # host+path 截断是当前信息面下的诚实选择）
+            from ..validators import host_of
+            host = host_of(url)
+            title = host if host else url
+            if len(title) > 48:
+                title = title[:45] + "…"
+            if self.bookmarks.add(title, url):
+                return "added"
+            return "error"
+        except Exception:
+            return "error"

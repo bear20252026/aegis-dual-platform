@@ -116,6 +116,9 @@ class Api(
         # （grep 证实，仅 Python 内部调用），方法保留供桥内部使用。
         "js_error",
         "add_bookmark", "remove_bookmark",
+        # 收藏当前页（批次3-8：零 JS 可控参数——URL 服务端取，威胁等价
+        # 分析见 BookmarksMixin.toggle_bookmark）
+        "toggle_bookmark",
         # 内置源码查看器（桥内抓取+全转义展示；无数据读取面）
         "view_source", "close_source_view",
     })

@@ -1,20 +1,49 @@
 # 支持功能（supported-features.md）
 
 > 依据：蓝图 docs/product/supported-features + 阶段 A 完成标准（"支持功能说明
-> 不再宣称超出现实能力"）——当前产品能力（阶段 C/D 最小安全壳——不宣称未实现
-> 功能）。
+> 不再宣称超出现实能力"）。**本表按代码现实维护**（2026-09-04 全面审计后重写
+> ——此前版本把已实现功能列进「不做」、宣称不存在的状态机，属文档漂移）。
 
-## 当前支持（阶段 C/D 最小壳落地）
+## 当前支持（按实际载体记录）
 
-| 平台 | 支持功能 |
-|---|---|
-| Windows（C#/.NET 10 + WebView2——阶段 C） | 地址栏导航（经 Broker 决策）、后退/前进/刷新/停止、安全错误页、单标签浏览、导航真实取消（NavigationStarting/Frame/NewWindow）、权限默认拒绝（PermissionRequested）、脱敏审计、审批管理（ApprovalManager）、终止开关（KillSwitch） |
-| Android（Kotlin/Compose——阶段 D） | 导航经 broker 决策、renderer crash 恢复（onRenderProcessGone 返回 true）、BrowserState 状态机（Active/Background/Suspended/Restoring/Crashed/Closed）、错误页/恢复指示 |
+### Windows 现役功能栈（legacy/windows-pywebview——全部浏览器功能的真实载体）
 
-## 明确不做（蓝图"不做清单"——不宣称）
+- 多标签（新建/关闭/切换/拖拽排序/固定）；会话保存与恢复（启动自动 + 首页手动入口）
+- 地址栏导航（safe_url 门禁 + 威胁黑名单 + Agent 白名单域）、注入式工具栏（后退/前进/刷新/主页/菜单/收藏）
+- 书签：宫格展示（start.html）、Chrome/Edge 导入向导、**收藏当前页（工具栏 ☆ 按钮）**
+- 历史：记录（只写——查看/清除 UI 未实现，见「明确不做」）
+- 搜索引擎切换（百度/必应/谷歌/搜狗，首页胶囊 + 桥）
+- 壁纸切换、离线几何画板、贪吃蛇、内置页面源码查看器
+- 安全：URL 门禁（safe_url 双层校验）、`window.open/target=_blank` 原生门禁、
+  页内点击客户端黑名单门禁、WebView2 功能收紧（宿主对象/原生弹窗关闭）、
+  FIX-1 指纹前置注入、崩溃监听、DNT、请求层威胁标记
+- **下载：不支持**（下载发起时明确提示并留痕——PyInstaller 栈未实现下载管理器）
+
+### Windows 目标发布栈（windows/src——C#/.NET 10 + WebView2，阶段 C 壳）
+
+- 地址栏导航（经 Broker 决策）、后退/前进/刷新/停止、导航确认审批、
+  导航真实取消、新窗口禁弹、权限默认拒绝、下载 fail-closed 拒绝（经 broker 审计）、
+  脱敏审计。**无**书签/历史/多标签/下载等用户功能（迁移未完成——见 ADR-007）
+
+### Android（Kotlin/Compose——阶段 D）
+
+- 导航经 broker 决策、地址栏/首页搜索框归一单源、多标签（含崩溃恢复）、
+  SSL/HTTP/加载错误中文错误页（可重试/返回安全页）、书签宫格、引擎切换、
+  壁纸、画板、贪吃蛇、下载（DownloadManager，文件名净化 + 危险扩展拦截）、
+  WebView 版本检查提示、阅读模式入口、翻译入口
+- 安全：AegisBridge 壳页来源校验、safe browsing、权限默认拒绝、cleartext 禁用
+
+## 明确不做
 
 - Chromium fork / CEF 产品化 / 浏览器扩展生态
 - 任意远程网页 native bridge / 网页工具栏 DOM 注入
 - HTTP MCP server / Agent 自动下载/上传/导出 / 自动执行网页"指令"
 - 云端同步密码 / 用户脚本 / 插件系统
-- 书签导入/主题/阅读器/AI/同步/复杂工具栏（阶段 C 明确"先不做"——蓝图）
+- 主题/AI/同步（阶段 C 明确"先不做"——蓝图）
+
+## 已知缺口（诚实清单——对应全面审计 2026-09-04）
+
+- 历史查看/清除 UI（Windows 只写不清——隐私合规注意）
+- 页面真实标题采集（标签/书签名用 URL 派生值）
+- Windows 下载管理器（当前明确提示不支持）
+- 地址栏联想（配置字段存在，功能未实现）

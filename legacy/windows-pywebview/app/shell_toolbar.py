@@ -127,6 +127,29 @@ TOOLBAR_JS = r"""
     inpWrap.appendChild(inp);
     bar.appendChild(inpWrap);
 
+    // === 收藏按钮（批次3-8：书签无添加入口——start.html 空书签文案
+    // 引导的「收藏」此前不存在）。零参数桥（URL 服务端取），结果 toast。 ===
+    var starBtn = document.createElement('button');
+    starBtn.textContent = '\u2606';
+    starBtn.title = '收藏此页';
+    starBtn.style.cssText = 'width:30px;height:30px;border:0;background:transparent;' +
+      'border-radius:' + RADIUS.sm + 'px;font-size:15px;cursor:pointer;' +
+      'color:' + COLORS.bodyMuted + ';flex:0 0 auto;line-height:1;margin-left:6px;' +
+      'transition:background 0.15s ease;display:flex;align-items:center;justify-content:center;';
+    starBtn.onmouseenter = function(){ starBtn.style.background = COLORS.canvasParchment; };
+    starBtn.onmouseleave = function(){ starBtn.style.background = 'transparent'; };
+    starBtn.onclick = function () {
+      try {
+        if (!window.pywebview || !pywebview.api) return;
+        pywebview.api.toggle_bookmark().then(function (r) {
+          var msg = { added: '已收藏', removed: '已取消收藏',
+                      unsupported: '当前页面不支持收藏', error: '操作失败' };
+          try { if (window.__aegisToast) window.__aegisToast(msg[r] || '操作失败'); } catch (e) {}
+        });
+      } catch (e) {}
+    };
+    bar.appendChild(starBtn);
+
     // === 工具按钮（右侧） ===
     function toolBtn(glyph, title, act) {
       var b = document.createElement('button');
