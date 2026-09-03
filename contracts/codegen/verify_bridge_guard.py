@@ -5,7 +5,8 @@
 ADR-007 起，规范模板唯一存于 contracts/schemas/bridge_guard.template.js：
 
 - Rust：bridge_guard.rs 经 include_str! 编译期嵌入（消费规范文件本身）；
-- Kotlin：SecureWebViewFactory.kt 内嵌副本，占位符经 Kotlin 插值注入，
+- Kotlin：WebViewHardening.kt 内嵌副本（重构 2026-09-03 自 SecureWebViewFactory.kt
+  拆出，模板逐字节未变），占位符经 Kotlin 插值注入，
   本脚本做「占位符归一化 → 逐行比对」校验；
 - C#：无注入 JS（走 WebView2 Settings 收紧路径），不在本门禁范围。
 
@@ -20,7 +21,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL = ROOT / "contracts" / "schemas" / "bridge_guard.template.js"
 RUST = ROOT / "core" / "rust-policy-core" / "src" / "bridge_guard.rs"
-KOTLIN = ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "aegis" / "browser" / "SecureWebViewFactory.kt"
+KOTLIN = ROOT / "android" / "app" / "src" / "main" / "java" / "com" / "aegis" / "browser" / "WebViewHardening.kt"
 
 # Kotlin 模板占位符 → 规范占位符（归一化映射）
 KOTLIN_PLACEHOLDERS = {
