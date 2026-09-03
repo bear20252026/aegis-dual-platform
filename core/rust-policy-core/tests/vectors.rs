@@ -95,3 +95,30 @@ fn canonical_json_deterministic() {
     let b = canonical_unsigned(&json!({"a": 1, "b": 2}));
     assert_eq!(a, b, "canonicalization 必须确定（与键顺序无关）");
 }
+
+#[test]
+fn canonical_json_matches_python_golden_vectors() {
+    // 批次4-3（全面审计 2026-09-04）：与发布链权威实现
+    // release/update_verifier.py::canonical_unsigned 的字节级一致性——
+    // golden 向量（contracts/vectors/update-manifest-canonical.json）由
+    // Python 侧生成、此处断言 Rust 输出逐字节相同。覆盖：常规清单 /
+    // 特殊字符（引号/反斜杠/换行/控制字符/中文）/ 顶层 signatures 剔除
+    // （嵌套 signatures 保留）。
+    let vectors = load_vectors("update-manifest-canonical.json");
+    assert!(
+        !vectors.is_empty(),
+        "update-manifest-canonical 向量不得为空"
+    );
+    for v in &vectors {
+        let name = v["name"].as_str().unwrap_or("unnamed");
+        let expected_hex = v["expected_canonical_hex"].as_str().unwrap_or_else(|| {
+            panic!("向量 {name} 缺少 expected_canonical_hex");
+        });
+        let actual = canonical_unsigned(&v["manifest"]);
+        let actual_hex: String = actual.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            actual_hex, expected_hex,
+            "canonical 字节与 Python 权威实现不一致: {name}"
+        );
+    }
+}

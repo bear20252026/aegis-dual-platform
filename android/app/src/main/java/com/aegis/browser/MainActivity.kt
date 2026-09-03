@@ -1,5 +1,6 @@
 package com.aegis.browser
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.ViewGroup
 import android.webkit.WebView
@@ -78,6 +79,9 @@ class MainActivity : ComponentActivity() {
         // 持有）——P0-6 崩溃重建需用 Activity context 创建 WebView；onDestroy
         // 且 isFinishing 时 detach。
         viewModel.attachActivity(this)
+        // P1-4 修复（全面审计批次4）：冷启动外链消费——VIEW intent 的 URL
+        // 经安全导航链路加载（此前声明了 intent-filter 却静默丢弃 URL）
+        viewModel.openExternalUrl(intent?.data?.toString())
 
         // 返回事件统一接管（BUG-013）：targetSdk 36 起系统默认经
         // OnBackInvokedCallback 分发返回（手势导航的边缘滑动与
@@ -319,6 +323,14 @@ class MainActivity : ComponentActivity() {
                 Text(text = glyph, color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // P1-4 修复（全面审计批次4）：热启动外链消费——launchMode 调整或
+        // singleTop 复用时 VIEW intent 经此分发；与 onCreate 冷启动路径
+        // 同走 openExternalUrl 安全链路。
+        viewModel.openExternalUrl(intent?.data?.toString())
     }
 
     override fun onDestroy() {

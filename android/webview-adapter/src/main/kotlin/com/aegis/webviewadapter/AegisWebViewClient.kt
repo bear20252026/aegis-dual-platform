@@ -59,12 +59,20 @@ class AegisWebViewClient(
                 .scheme
                 .orEmpty()
                 .lowercase() == "http"
-        if (isHttp) {
+        // P1-2 修复（全面审计批次4）：仅**主框架** http 才走「阻断+升级+
+        // loadUrl 升级版」。子框架（iframe）http 此前同样 loadWhenAllowed=true
+        // ——authorizeNavigation 决策通过后 view.loadUrl 把 iframe 的 URL
+        // 加载进整个 Activity 顶层（页面内任一 http iframe 即可顶替主文档，
+        // 导航劫持面）。子框架改落通用分支：broker 决策（Deny → return true
+        // 阻断留痕；Allow → return false 放行原始加载——明文由
+        // network_security_config 的 cleartext 禁用兜底，iframe 加载失败
+        // 但绝不劫持顶层、绝不放行明文）。
+        if (isHttp && request.isForMainFrame) {
             authorizeNavigation(
                 view,
                 requestedUrl,
                 loadWhenAllowed = true,
-                mayRequireConfirmation = request.isForMainFrame,
+                mayRequireConfirmation = true,
             )
             return true
         }
