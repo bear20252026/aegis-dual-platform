@@ -4,6 +4,34 @@
 
 ## [Unreleased]
 
+### Security（2026-09-04：全面审计批次 1——安全止血）
+> 报告见 `docs/quality-reports/full-audit-2026-09-04.md`，逐项修复记录见
+> `docs/quality-reports/fix-log-2026-09-04.md`（层次/原文件/界限/提交历史）。
+
+- **Windows 现役栈原生加固层复活**（P0-1/P0-2/P0-3 实证修复）：
+  `shell_adapter.resolve_core()` 修正 CoreWebView2 解析路径（pywebview 6.x
+  `window.gui` 为平台模块、控件在 `window.native`——旧路径恒 None，
+  全仓 10 处坏解析收敛单源）；全部原生挂接移到 `shell.start(func)` 回调
+  （原时序在窗口创建前，整层加固从未生效）；`window.open/target=_blank`
+  新窗口 URI 强制过 safe_url 门禁（类级替换 pywebview 零校验处理器，
+  fail-closed）；下载发起时给用户明确提示 + 安全日志（pywebview 默认
+  取消语义不变）；关键降级点由静默吞改为显式留痕。`main_webview.py`
+  797→267 行，挂接实现拆至 `app/native_{hardening,interception,monitoring}.py`；
+  新增 `selftest_native_core.py`（已入 ci.yml，现 8 个自检）
+- **Windows js_api 桥面收口**（P0-4）：`current_url` 移出 `_JS_EXPOSED`
+  （远程页面不可再读含 token 的完整 URL，零 JS 消费点）；`js_error` 加
+  受信来源门禁（远程页上报丢弃，关闭「空 source 绕过同源校验」口）
+- **C# 栈下载门禁**（P1）：`HostWebView` 订阅 `DownloadStarting` →
+  `Handled=true` + `Broker.DenyDownload` 审计留痕——修复下载完全绕过
+  broker 与「无 AuthorizedAction 不能下载」声明的矛盾（新增单测）
+- **Android 修复五项**（P0-5/P0-6/P1-1/P2-1/P2-5）：`onDestroy` 仅
+  `isFinishing` 时销毁（修复 density/字号/locale/折叠屏变更致全部标签
+  白屏/崩溃）；渲染进程崩溃恢复改用宿主 Activity context（修复原生
+  对话框必崩）；新增 SSL/HTTP/加载错误中文错误页（SSL 绝不 proceed，
+  可重试/返回安全页）；`AegisBridge` 全部方法加壳页来源校验（远端页面
+  不可再调 setEngine/navigate 等）；下载文件名净化 + 危险扩展判定修复
+  （尾点/查询串直链漏判已消除）
+
 ### Added (Android)
 - 地址栏贪吃蛇游戏：首页地址栏尾部「🎮」启动，地址栏区域平滑放大 5 倍作为游戏带
   （滑动手势控制方向、计分、游戏结束可退出/再来一局）；游戏期间保留迷你地址栏

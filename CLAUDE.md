@@ -21,12 +21,15 @@ ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,R
 bandit -r app/ -q --skip B110,B404,B603,B607   # 安全扫描（无 Medium/High）
 mypy main_webview.py app/             # 类型检查（0 错误）
 
-# 自检（改动标签/桥/工具栏/会话后必跑——已入 CI）
+# 自检（改动标签/桥/工具栏/会话/原生挂接后必跑——8 个均已入 CI）
 python selftest_session_store.py
 python selftest_api_bridge.py
 python selftest_s1_integration.py
 python selftest_shell_toolbar.py
 python selftest_tab_state.py
+python selftest_navigation_search.py
+python selftest_view_source.py
+python selftest_native_core.py
 
 # Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
 python contracts/codegen/verify_bridge_guard.py
