@@ -3,6 +3,7 @@
   "vectors": [
     {
       "name": "regular_manifest",
+      "expected": "valid",
       "manifest": {
         "schema": 1,
         "product": "Aegis",
@@ -29,6 +30,7 @@
     },
     {
       "name": "special_characters",
+      "expected": "valid",
       "manifest": {
         "product": "带\"引号\"与\\反斜杠与换行\n与制表\t与控制\u0001与中文",
         "nested": {
@@ -53,6 +55,7 @@
     },
     {
       "name": "signatures_key_only_top_level",
+      "expected": "valid",
       "manifest": {
         "signatures": "top-level-must-strip",
         "keep": {
