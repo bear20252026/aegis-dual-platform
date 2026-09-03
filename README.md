@@ -7,11 +7,12 @@ broker（唯一副作用点）——从"补丁驱动开发"走向"边界驱动�
 
 > 许可证：MIT（详见 [LICENSE](LICENSE)）｜ 安全边界见 [SECURITY.md](SECURITY.md)
 
-> **Windows 双栈现状（ADR-007）**：目标发布栈为 C#/.NET 10（`windows/`）；
-> 当前全部浏览器功能（标签/书签/历史/导入/会话恢复）由**现役 Python 功能栈**
-> `legacy/windows-pywebview/` 承载（目录名 `legacy` 为 Qt 迁移期历史遗留，
-> 语义为「迁移中」而非「废弃」）。详见
-> [ADR-007](docs/adr/ADR-007-canonical-stack-and-single-source-guards.md)。
+> **Windows 双栈终局（ADR-009，2026-09-04 owner 拍板）**：C#/.NET 10（`windows/`）
+> 为唯一正典栈，**全功能迁移进行中**（路线图 M1-M4：
+> [ADR-009](docs/adr/ADR-009-full-migration-to-csharp.md)）；迁移期用户可用的
+> stable 渠道仍为 `legacy/windows-pywebview/` 的 **Python 功能栈**（冻结维护——
+> 只修安全缺陷不加功能，M4 完成后归档）。功能 parity 核对表见
+> [feature-parity-checklist](docs/product/feature-parity-checklist.md)。
 
 ## 架构（蓝图目标树——阶段 A-G 落地后）
 

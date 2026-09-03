@@ -6,10 +6,13 @@
 
 Aegis 双端安全浏览器：Windows（Python + pywebview + WebView2）+ Android（Kotlin + Compose + System WebView），隐私与安全优先。
 
-**Windows 双栈口径（ADR-007）**：C#/.NET 10（`windows/`）为目标发布栈；
-`legacy/windows-pywebview/` 为**现役功能栈**（目录名 `legacy` 是 Qt 迁移期
-历史遗留——语义为「迁移中」而非「废弃」）；`legacy/` 下的 Qt 与 `legacy/ui/`
-为已归档死代码，禁止 import。
+**Windows 双栈口径（ADR-009，2026-09-04 owner 拍板——取代 ADR-007 的「迁移中」悬置）**：
+- **C#/.NET 10（`windows/`）= 唯一 Windows 正典栈**，全功能迁移进行中
+  （路线图 M1-M4 与验收标准见 ADR-009，parity 核对表见
+  `docs/product/feature-parity-checklist.md`）；
+- **`legacy/windows-pywebview/` = 冻结维护**：只修 P0/P1 安全缺陷，
+  **功能 PR 一律拒绝**（ADR-009 D4 冻结纪律）；M4 完成后整体归档；
+- `legacy/` 下的 Qt 与 `legacy/ui/` 为已归档死代码，禁止 import。
 
 ## 关键命令（必须先跑）
 
