@@ -52,6 +52,26 @@ impl From<AuthorizedAction> for FfiAuthorizedAction {
     }
 }
 
+/// 反向转换（重构 2026-09-03）：宿主回传授权时统一走此实现，
+/// 替换 broker.rs 内两处逐字段手写——字段漂移只需改一处。
+impl From<FfiAuthorizedAction> for AuthorizedAction {
+    fn from(a: FfiAuthorizedAction) -> Self {
+        Self {
+            session_id: a.session_id,
+            tab_id: a.tab_id,
+            document_generation: a.document_generation,
+            origin: a.origin,
+            method: a.method,
+            canonical_parameters: a.canonical_parameters,
+            scope: a.scope,
+            expires_at: a.expires_at,
+            nonce: a.nonce,
+            policy_version: a.policy_version,
+            explanation: a.explanation,
+        }
+    }
+}
+
 /// FFI 版拒绝原因。
 #[derive(uniffi::Record)]
 pub struct FfiDenyReason {
