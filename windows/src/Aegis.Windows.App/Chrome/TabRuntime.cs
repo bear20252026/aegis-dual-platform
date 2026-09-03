@@ -35,10 +35,14 @@ public sealed class TabRuntime : IDisposable
     /// <summary>导航完成（错误页/地址栏同步的 UI 数据源——isSuccess=false 时不静默）。</summary>
     public event Action<bool, CoreWebView2WebErrorStatus>? NavigationCompleted;
 
+    /// <summary>导航开始（加载指示条显示的触发源）。</summary>
+    public event Action? NavigationStarted;
+
     /// <summary>CoreWebView2 就绪后挂接安全事件与页面事件（每标签一次）。</summary>
     public void OnCoreReady(CoreWebView2 coreWebView2)
     {
         Host.WireEvents(coreWebView2);
+        coreWebView2.NavigationStarting += (_, _) => NavigationStarted?.Invoke();
         coreWebView2.DocumentTitleChanged += (_, _) =>
             Tab.Title = coreWebView2.DocumentTitle;
         coreWebView2.NavigationCompleted += (_, args) =>

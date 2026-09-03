@@ -3,11 +3,14 @@ namespace Aegis.Windows.Chrome;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Core;
+using Aegis.Windows.Core.Security;
 using Aegis.Windows.Core.Tabs;
 using Microsoft.Web.WebView2.Core;
 
@@ -36,6 +39,40 @@ public partial class MainWindow : Window
         _tabs.TabSwitched += OnTabSwitched;
         TabStrip.ItemsSource = _tabs.Tabs;
         RestoreSessionOrStart();
+        StartThreatFeedRefresh();
+    }
+
+    /// <summary>M1-T2：威胁黑名单启动快照 + 订阅源后台刷新（对齐 Python 批次 2-1）。
+    /// 订阅源经环境变量 AEGIS_THREAT_FEED_URL 配置（M4 移入设置界面）。</summary>
+    private void StartThreatFeedRefresh()
+    {
+        var cachePath = Path.Combine(AppPaths.DataDir, "threat_feed.txt");
+        var snapshot = ThreatFeedUpdater.LoadCached(cachePath);
+        _broker.UpdateBlockedHosts(new BlockedHosts(snapshot));
+        SecurityLog.Write($"[threat] 黑名单快照 {snapshot.Count} 条");
+        var feedUrl = Environment.GetEnvironmentVariable("AEGIS_THREAT_FEED_URL");
+        if (string.IsNullOrWhiteSpace(feedUrl))
+            return;
+        var validated = ThreatFeedUpdater.ValidateFeedUrl(feedUrl);
+        if (validated is null)
+        {
+            SecurityLog.Write("[threat] 订阅源非法（仅支持 https）——保持旧快照");
+            return;
+        }
+        Task.Run(() =>
+        {
+            try
+            {
+                var count = ThreatFeedUpdater.FetchAndStore(validated, cachePath);
+                _broker.UpdateBlockedHosts(new BlockedHosts(
+                    ThreatFeedUpdater.LoadCached(cachePath)));
+                SecurityLog.Write($"[threat] 订阅源刷新完成：{count} 条域名入黑名单");
+            }
+            catch (Exception ex)
+            {
+                SecurityLog.Write($"[threat] 订阅源刷新失败（保持旧快照）: {ex.Message}");
+            }
+        });
     }
 
     // ================= 标签生命周期（TabManager 事件 → runtime 管理） =================
