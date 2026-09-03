@@ -2,6 +2,7 @@ namespace Aegis.Windows.Broker;
 
 using System;
 using System.Collections.Generic;
+using Aegis.Windows.Core.Security;
 
 /// <summary>Capability Broker——唯一允许产生本地副作用的边界（ADR-002/蓝图阶段 C）。
 /// 验证来源/会话/标签代际/scope/参数/预算/批准/nonce——没有 AuthorizedAction
@@ -20,11 +21,15 @@ public sealed class BrowserPolicyBroker : IDisposable
     private readonly Func<NativePolicyCoreGateResult> _nativePolicyCoreGate;
     private readonly NativePolicyCoreBridge? _nativePolicyCoreBridge;
     private readonly bool _nativePolicyCoreRequired;
+    // M1-T2（ADR-009）：威胁黑名单（可变引用——订阅刷新后整体替换快照）。
+    // 策略数据归 broker（ADR-002：broker 唯一策略裁决点），HostWebView 只消费。
+    private IBlockedHosts _blockedHosts;
     private bool _disposed;
 
     public BrowserPolicyBroker(
         Func<NativePolicyCoreGateResult>? nativePolicyCoreGate = null,
-        NativePolicyCoreBridge? nativePolicyCoreBridge = null)
+        NativePolicyCoreBridge? nativePolicyCoreBridge = null,
+        IBlockedHosts? blockedHosts = null)
     {
         _nativePolicyCoreGate = nativePolicyCoreGate ?? NativePolicyCoreGate.ProbeFromEnvironment;
         _nativePolicyCoreRequired = NativePolicyCoreGate.IsRequired;
@@ -32,7 +37,16 @@ public sealed class BrowserPolicyBroker : IDisposable
             NativePolicyCoreBridge.TryCreate(PolicyVersion, NativePolicyCoreGate.LibraryPath, out _nativePolicyCoreBridge);
         else
             _nativePolicyCoreBridge = nativePolicyCoreBridge;
+        _blockedHosts = blockedHosts ?? NoBlockedHosts.Instance;
     }
+
+    /// <summary>替换黑名单快照（订阅源后台刷新完成时调用——原子换引用）。</summary>
+    public void UpdateBlockedHosts(IBlockedHosts blockedHosts) =>
+        _blockedHosts = blockedHosts ?? NoBlockedHosts.Instance;
+
+    /// <summary>子资源层黑名单查询（HostWebView WebResourceRequested 真拦截——
+    /// 命中返回 403 stub。导航层的同名单独在 EvaluateNavigation 内强制）。</summary>
+    public bool IsHostBlocked(string host) => _blockedHosts.IsBlocked(host);
 
     /// <summary>注册由受控 WebView 创建的会话；未知会话上的副作用一律拒绝。</summary>
     public bool RegisterSession(string sessionId, string tabId, ulong generation = 0)
@@ -103,6 +117,13 @@ public sealed class BrowserPolicyBroker : IDisposable
         {
             RecordAudit("deny", scope, rawUrl, "url_policy");
             return new Decision.Deny(new DenyReason("url_policy", $"拒绝 URL: {rawUrl}"));
+        }
+        // M1-T2：威胁黑名单门禁（host 精确+子域后缀匹配；命中 fail-closed 留痕）
+        if (_blockedHosts.IsBlocked(uri.Host))
+        {
+            RecordAudit("deny", scope, rawUrl, "threat_blocklist");
+            SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {rawUrl}");
+            return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
         }
         var origin = uri.GetLeftPart(UriPartial.Authority);
         var action = new AuthorizedAction(sessionId, tabId, generation, origin, "GET",

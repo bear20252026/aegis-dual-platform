@@ -79,6 +79,34 @@ public sealed class HostWebView : IDisposable
         {
             e.State = CoreWebView2PermissionState.Deny;  // 远程页面无摄像头/麦克风/定位
         };
+        // M1-T2（ADR-009）：加固束 + 原生红利接线
+        WebView2Hardening.Apply(webView, _tabId);
+        // 顶层/子框架导航时按来源翻转 WebMessage（远程页面禁用——fail-closed）
+        webView.NavigationStarting += (_, e) => WebView2Hardening.SetPerOrigin(webView, e.Uri);
+        webView.FrameNavigationStarting += (_, e) => WebView2Hardening.SetPerOrigin(webView, e.Uri);
+        // DNT 注入 + 黑名单子资源真拦截（WebResourceRequested 原生返回 403——
+        // pywebview 时代只能标记不能拦截的缺口，原生 API 直接闭合）
+        webView.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
+        webView.WebResourceRequested += (_, e) =>
+        {
+            try
+            {
+                e.Request.Headers.SetHeader("DNT", "1");
+                if (Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
+                    && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                    && _broker.IsHostBlocked(uri.Host))
+                {
+                    Core.Security.SecurityLog.Write(
+                        $"[threat] 子资源拦截（黑名单命中）: {e.Request.Uri}");
+                    e.Response = webView.Environment.CreateWebResourceResponse(
+                        null, 403, "Blocked", "Content-Type: text/plain");
+                }
+            }
+            catch (Exception)
+            {
+                // 单请求处理失败不影响其他请求（保持原始响应路径）
+            }
+        };
     }
 
     private static bool IsTrustedChromeOrigin(string source) =>

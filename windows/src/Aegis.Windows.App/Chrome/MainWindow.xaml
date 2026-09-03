@@ -180,6 +180,11 @@
             Visibility="Collapsed">
       <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
     </Border>
+    <!-- M1-T2 加载指示（WebView2 不暴露页面加载进度——不定态细条，修复
+         Python/Android「无加载反馈」审计缺陷的可观测部分） -->
+    <ProgressBar x:Name="LoadingBar" DockPanel.Dock="Top" Height="2" IsIndeterminate="True"
+                 Background="Transparent" Foreground="#FF3B82F6" BorderThickness="0"
+                 Visibility="Collapsed"/>
     <Grid>
       <!-- M1-T1：每标签一 WebView2 实例（TabRuntime 创建/挂接）——切换即可见性
            切换，页面状态/滚动/表单天然保留（ADR-009 D2） -->
