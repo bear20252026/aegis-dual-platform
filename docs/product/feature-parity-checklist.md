@@ -33,13 +33,13 @@
 
 | 功能 | 安全门禁要求 | Python 参考 | C# 状态 |
 |---|---|---|---|
-| 书签：SQLite 存储/增删查 | 写操作来源受信（原生 chrome 天然受信） | bookmark_store.py | ☐ |
-| 书签：收藏☆（当前页 toggle） | URL 服务端取（零页面可控参数） | 批次3 toggle_bookmark | ☐ |
+| 书签：SQLite 存储/增删查 | 写操作来源受信（原生 chrome 天然受信） | bookmark_store.py | ☑ M2 |
+| 书签：收藏☆（当前页 toggle） | URL 服务端取（零页面可控参数） | 批次3 toggle_bookmark | ☑ M2（工具栏☆+反馈条） |
 | 书签：新标签页宫格 | 渲染数据经宿主注入而非页面读取 | start.html renderBookmarks | ☐ |
 | 书签：Chrome/Edge 导入向导 | 只读打开历史库（immutable） | browser_import.py | ☐ |
-| 历史：记录/FTS5 搜索 | 记录脱敏（无 query secret） | history_store.py | ☐ |
-| 历史：查看/清除 UI | 清除不可恢复提示 | （Python 缺失▲） | ☐ |
-| 搜索引擎：四引擎切换 | 偏好写入经受信校验 | search_engine.py | ☐ |
+| 历史：记录/搜索 | 记录脱敏（无 query secret） | history_store.py | ☑ M2（LIKE 子串——CJK 决策见 ADR-009） |
+| 历史：查看/清除 UI | 清除不可恢复提示 | （Python 缺失▲） | ☑ M2（HistoryWindow+二次确认） |
+| 搜索引擎：四引擎切换 | 偏好写入经受信校验 | search_engine.py | ☑ M2（ComboBox+AppSettings） |
 | **M2 真机验收** | 导入→收藏→搜历史→清理全流程 | — | ☐ |
 
 ## M3 功能补齐
