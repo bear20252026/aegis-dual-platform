@@ -48,6 +48,29 @@ public sealed class BrowserPolicyBroker : IDisposable
     /// 命中返回 403 stub。导航层的同名单独在 EvaluateNavigation 内强制）。</summary>
     public bool IsHostBlocked(string host) => _blockedHosts.IsBlocked(host);
 
+    /// <summary>M3 下载授权（ADR-009：下载策略的原生兑现）：会话/标签/代际
+    /// 校验通过后登记允许下载（危险扩展已由调用方完成用户确认）。
+    /// Rust 契约当前无 download scope——授权在托管 broker 完成（审计留痕），
+    /// 未来契约扩展 download 动作时迁移至原生核心托管。</summary>
+    public bool AllowDownload(string sessionId, string tabId, string origin,
+        string fileName, bool userConfirmed)
+    {
+        lock (_sessionLock)
+        {
+            if (_disposed || !_sessions.TryGetValue(sessionId, out var session)
+                || session.TabId != tabId)
+            {
+                RecordAudit("deny", "download", origin, "download_session_context");
+                return false;
+            }
+        }
+        RecordAudit("allow", "download", origin,
+            userConfirmed ? "user_confirmed" : null);
+        SecurityLog.Write($"[download] 允许下载: {fileName}（来源 {origin}，"
+                          + (userConfirmed ? "用户已确认危险扩展" : "常规下载") + "）");
+        return true;
+    }
+
     /// <summary>注册由受控 WebView 创建的会话；未知会话上的副作用一律拒绝。</summary>
     public bool RegisterSession(string sessionId, string tabId, ulong generation = 0)
     {

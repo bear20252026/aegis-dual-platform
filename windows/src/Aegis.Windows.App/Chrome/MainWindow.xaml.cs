@@ -301,6 +301,50 @@ public partial class MainWindow : Window
         _feedbackTimer.Start();
     }
 
+    /// <summary>M3 源码查看器（Ctrl+U）：后台线程抓取当前页（15s/5MB 上限），
+    /// 全转义纯文本展示于独立窗口——查看源码永不等于执行源码
+    /// （Python api_bridge.view_source 语义移植）。</summary>
+    private void OpenSourceViewer()
+    {
+        var tab = _tabs.Current;
+        if (tab is null
+            || !Uri.TryCreate(tab.Url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            ShowFeedback("当前页面不支持查看源代码（仅限 http/https）", isWarning: true);
+            return;
+        }
+        var url = tab.Url;
+        ShowFeedback("正在获取页面源代码…");
+        Task.Run(async () =>
+        {
+            try
+            {
+                using var http = new System.Net.Http.HttpClient
+                {
+                    Timeout = TimeSpan.FromSeconds(15),
+                };
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (AegisBrowser-SourceViewer)");
+                using var response = await http.GetAsync(url);
+                response.EnsureSuccessStatusCode();
+                var bytes = await response.Content.ReadAsByteArrayAsync();
+                if (bytes.Length > 5 * 1024 * 1024)
+                    throw new InvalidOperationException("源码超过 5MB 上限");
+                var text = System.Text.Encoding.UTF8.GetString(bytes);
+                Dispatcher.Invoke(() =>
+                {
+                    new SourceViewerWindow(url, text) { Owner = this }.Show();
+                    ShowFeedback("源码已加载（全转义，零脚本执行）");
+                });
+            }
+            catch (Exception ex)
+            {
+                Dispatcher.Invoke(() =>
+                    ShowFeedback($"获取源码失败：{ex.Message}", isWarning: true));
+            }
+        });
+    }
+
     private void Back_Click(object sender, RoutedEventArgs e) => ActiveControl()?.GoBack();
     private void Forward_Click(object sender, RoutedEventArgs e) => ActiveControl()?.GoForward();
     private void Refresh_Click(object sender, RoutedEventArgs e) => ActiveControl()?.Reload();
@@ -377,6 +421,10 @@ public partial class MainWindow : Window
                     return;
                 case Key.W when _tabs.CurrentTabId is not null:
                     _tabs.CloseTab(_tabs.CurrentTabId);
+                    e.Handled = true;
+                    return;
+                case Key.U:
+                    OpenSourceViewer();
                     e.Handled = true;
                     return;
             }

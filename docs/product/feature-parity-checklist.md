@@ -46,17 +46,17 @@
 
 | 功能 | 安全门禁要求 | Python 参考 | C# 状态 |
 |---|---|---|---|
-| 下载管理器：进度/暂停 | DownloadStarting 经 broker 授权 | （Python 不支持▲） | ☐ |
-| 下载：危险扩展拦截+确认 | 扩展判定对齐 Android DownloadPolicy | security.is_dangerous | ☐ |
-| 下载：文件名净化 | 剥路径段/控制字符/尾点 | 批次1 Android sanitize | ☐ |
+| 下载管理器：进度/暂停 | DownloadStarting 经 broker 授权 | （Python 不支持▲） | ☑ M3（原生下载+broker 审计+反馈；完整进度面板随 M4） |
+| 下载：危险扩展拦截+确认 | 扩展判定对齐 Android DownloadPolicy | security.is_dangerous | ☑ M3（含查询串直链强判定▲） |
+| 下载：文件名净化 | 剥路径段/控制字符/尾点 | 批次1 Android sanitize | ☑ M3（对齐 Android 语义） |
 | 新标签页：start.html 虚拟主机 | 资源映射不暴露文件系统 | shell/start.html | ☐ |
 | 新标签页：会话恢复入口 | has_saved/restore 经 broker | start.html restoreBox | ☐ |
-| 页面源码查看器 | 抓取复用 safe_url+大小上限+全转义 | api_bridge.view_source | ☐ |
+| 页面源码查看器 | 抓取复用 safe_url+大小上限+全转义 | api_bridge.view_source | ☑ M3（Ctrl+U+独立窗口+零脚本执行） |
 | 壁纸切换 | — | bridge/wallpaper.py | ☐ |
 | 离线几何画板 | 内部资源固定 URI | bridge/geogebra.py | ☐ |
 | 贪吃蛇 | — | start.snake.js | ☐ |
 | 指纹防护全量管道 | canvas 噪声仅扰动读路径（修 Python 缺陷） | fingerprint_pipeline | ☐ |
-| 链接点击门禁 | 原生处理（无需客户端快照 hack） | 批次2 link_intercept | ☐ |
+| 链接点击门禁 | 原生处理（无需客户端快照 hack） | 批次2 link_intercept | ☑ 原生架构天然满足（NavigationStarting 全量经 broker） |
 | **M3 真机验收** | 下载/画板/新标签页全流程 | — | ☐ |
 
 ## M4 收尾退役
