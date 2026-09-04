@@ -21,6 +21,9 @@ public sealed class AppSettings
     /// <summary>历史记录开关（消费者：导航完成记录）。默认开——与 Chrome 惯例一致。</summary>
     public bool HistoryEnabled { get; set; } = true;
 
+    /// <summary>威胁黑名单订阅源（消费者：启动刷新——仅 https，设置窗口校验）。</summary>
+    public string ThreatFeedUrl { get; set; } = "";
+
     public static string DefaultPath =>
         Path.Combine(AppPaths.DataDir, "settings.json");
 

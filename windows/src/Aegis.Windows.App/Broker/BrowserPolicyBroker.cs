@@ -25,6 +25,9 @@ public sealed class BrowserPolicyBroker : IDisposable
     // 策略数据归 broker（ADR-002：broker 唯一策略裁决点），HostWebView 只消费。
     private IBlockedHosts _blockedHosts;
     private bool _disposed;
+    // M4-a（ADR-009 审计遗留清零）：KillSwitch 此前全仓零调用点（审计实证）。
+    // broker 持有单例，导航/下载/确认全链强制检查；Chrome 经属性暴露触发。
+    public KillSwitch KillSwitch { get; } = new();
 
     public BrowserPolicyBroker(
         Func<NativePolicyCoreGateResult>? nativePolicyCoreGate = null,
@@ -55,6 +58,11 @@ public sealed class BrowserPolicyBroker : IDisposable
     public bool AllowDownload(string sessionId, string tabId, string origin,
         string fileName, bool userConfirmed)
     {
+        if (KillSwitch.IsEngaged)
+        {
+            RecordAudit("deny", "download", origin, "kill_switch_engaged");
+            return false;
+        }
         lock (_sessionLock)
         {
             if (_disposed || !_sessions.TryGetValue(sessionId, out var session)
@@ -121,6 +129,11 @@ public sealed class BrowserPolicyBroker : IDisposable
     public Decision EvaluateNavigation(string sessionId, string tabId, ulong generation,
         string rawUrl, string scope)
     {
+        if (KillSwitch.IsEngaged)
+        {
+            RecordAudit("deny", scope, rawUrl, "kill_switch_engaged");
+            return new Decision.Deny(new DenyReason("kill_switch_engaged", "紧急终止开关已触发——全部导航冻结"));
+        }
         if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
             return nativeDenied;
         if (_nativePolicyCoreRequired)
@@ -175,6 +188,11 @@ public sealed class BrowserPolicyBroker : IDisposable
     /// <summary>仅将原生核心已登记的确认请求兑换为其原始绑定授权；异常和不匹配均拒绝。</summary>
     public Decision ApproveNavigationConfirmation(ApprovalRequest request, string rawUrl, string scope)
     {
+        if (KillSwitch.IsEngaged)
+        {
+            RecordAudit("deny", request.Scope, request.Origin, "kill_switch_engaged");
+            return new Decision.Deny(new DenyReason("kill_switch_engaged", "紧急终止开关已触发——批准链冻结"));
+        }
         if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
             return nativeDenied;
         if (!_nativePolicyCoreRequired || _nativePolicyCoreBridge is null)
