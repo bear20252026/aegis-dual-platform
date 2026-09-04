@@ -4,14 +4,14 @@
 
 ## 项目一句话
 
-Aegis 双端安全浏览器：Windows（Python + pywebview + WebView2）+ Android（Kotlin + Compose + System WebView），隐私与安全优先。
+Aegis 双端安全浏览器：Windows（C#/.NET 10 + 原生 WebView2——唯一正典栈）+ Android（Kotlin + Compose + System WebView），隐私与安全优先。
 
-**Windows 双栈口径（ADR-009，2026-09-04 owner 拍板——取代 ADR-007 的「迁移中」悬置）**：
-- **C#/.NET 10（`windows/`）= 唯一 Windows 正典栈**，全功能迁移进行中
-  （路线图 M1-M4 与验收标准见 ADR-009，parity 核对表见
-  `docs/product/feature-parity-checklist.md`）；
-- **`legacy/windows-pywebview/` = 冻结维护**：只修 P0/P1 安全缺陷，
-  **功能 PR 一律拒绝**（ADR-009 D4 冻结纪律）；M4 完成后整体归档；
+**Windows 终局口径（ADR-009；M1-M4 已全部落地——取代「迁移中」悬置）**：
+- **C#/.NET 10（`windows/`）= 唯一 Windows 正典栈与唯一发布制品**（发布链
+  单轨——PyInstaller 包已移除）；迁移路线图 M1-M4 完成，parity 清单
+  （`docs/product/feature-parity-checklist.md`）代码项 100% 勾验；
+- **`legacy/windows-pywebview/` = 只读归档**：**功能与安全修复一律不在该栈
+  进行**；P0 安全缺陷仅经安全披露通道评估（ADR-009 D4 冻结纪律的归档终态）；
 - `legacy/` 下的 Qt 与 `legacy/ui/` 为已归档死代码，禁止 import。
 
 ## 关键命令（必须先跑）

@@ -7,12 +7,12 @@ broker（唯一副作用点）——从"补丁驱动开发"走向"边界驱动�
 
 > 许可证：MIT（详见 [LICENSE](LICENSE)）｜ 安全边界见 [SECURITY.md](SECURITY.md)
 
-> **Windows 双栈终局（ADR-009，2026-09-04 owner 拍板）**：C#/.NET 10（`windows/`）
-> 为唯一正典栈，**全功能迁移进行中**（路线图 M1-M4：
-> [ADR-009](docs/adr/ADR-009-full-migration-to-csharp.md)）；迁移期用户可用的
-> stable 渠道仍为 `legacy/windows-pywebview/` 的 **Python 功能栈**（冻结维护——
-> 只修安全缺陷不加功能，M4 完成后归档）。功能 parity 核对表见
-> [feature-parity-checklist](docs/product/feature-parity-checklist.md)。
+> **Windows 终局（ADR-009，2026-09-04 owner 拍板；M1-M4 已全部落地）**：
+> C#/.NET 10（`windows/`）为唯一 Windows 正典栈与**唯一发布制品**（C# 安装包
+> ——发布链单轨）。全功能迁移已完成（parity 清单 100% 代码项勾验：
+> [feature-parity-checklist](docs/product/feature-parity-checklist.md)）；
+> `legacy/windows-pywebview/` 的 Python 功能栈已**归档（只读）**——仅 P0
+> 安全缺陷经安全通道评估修复，功能 PR 一律拒绝。
 
 ## 架构（蓝图目标树——阶段 A-G 落地后）
 
@@ -35,8 +35,9 @@ docs/       ADR/threat-model/runbooks/product（蓝图目标树）
 
 ## 构建方法
 
-- **Windows 目标栈**（windows/src/Aegis.Windows.App）：`dotnet build`（.NET 10.0.302——0 警告）
-- **Windows 现役功能栈**（legacy/windows-pywebview）：
+- **Windows 目标栈**（windows/src/Aegis.Windows.App）：`dotnet build`（.NET 10.0.302——0 警告）。
+  **唯一发布制品 = C# 安装包**（release-windows.yml 单轨——Inno Setup + SBOM + SLSA attestation）
+- **Windows 归档功能栈**（legacy/windows-pywebview——**只读归档**）：
   `python main_webview.py`（运行）；门禁：`python ../../validate_release.py` +
   `ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001` +
   `bandit -r app/ -q --skip B110,B404,B603,B607` + `mypy main_webview.py app/` +

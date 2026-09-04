@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——ADR-009 M4 收尾退役)
+- **发布链单轨**：release-windows.yml 删除 installer-pywebview job——C# 安装包
+  为唯一 Windows 发布制品（SBOM/SLSA attestation/校验和链对 C# 制品不变）；
+  Python 栈（legacy/windows-pywebview）整体归档只读——仅 P0 安全缺陷经安全
+  披露通道评估修复（归档声明入 legacy README）
+- **文档终版口径**：README/CLAUDE.md 终局声明（C# 唯一正典栈+唯一制品；
+  parity 清单代码项 100% 勾验）；ADR-009 执行状态注记（M1-M4 全部落地，
+  M4 真机验收待发布走查）
+
 ### Added (Windows C# 正典栈——ADR-009 M4 下载管理面板)
 - **DownloadsWindow 原生下载管理面板**（pywebview 天花板特性的完整兑现）：
   进度百分比/字节摘要/状态（进行中/已完成/已中断/已取消——UserCanceled

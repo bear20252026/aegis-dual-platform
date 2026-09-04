@@ -1,5 +1,12 @@
 # Aegis —— 加固版套壳浏览器（旧栈归档说明）
 
+> **ARCHIVED（ADR-009 M4，2026-09-05）**：本 Python 功能栈已**整体归档（只读）**。
+> Windows 唯一正典栈为 `windows/src/Aegis.Windows.App`（C#/.NET 10 + 原生
+> WebView2）——全功能迁移已完成（parity 清单见
+> `docs/product/feature-parity-checklist.md`），发布链已单轨（PyInstaller 包
+> 移除）。本目录**不再接受任何功能 PR**；P0 安全缺陷仅经安全披露通道评估修复
+> （ADR-009 D4 冻结纪律的归档终态）。
+
 > **R-20 整改（体验/功能审查）**：本文档描述的是已归档的 QtWebEngine
 > 旧栈（legacy——`windows/aegis_source/legacy/`，不再维护——仅供历史
 > 参照）。**当前 Windows 新栈以 `main_webview.py`（pywebview + WebView2）
