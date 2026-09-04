@@ -106,9 +106,12 @@ public sealed class HostWebView : IDisposable
         };
         // M1-T2（ADR-009）：加固束 + 原生红利接线
         WebView2Hardening.Apply(webView, _tabId);
-        // 顶层/子框架导航时按来源翻转 WebMessage（远程页面禁用——fail-closed）
+        // 顶层导航时按来源翻转 WebMessage（远程页面禁用——fail-closed）。
+        // 注意：只按顶层 NavigationStarting 翻转，**绝不因内嵌 iframe 的
+        // 来源启用**（IsWebMessageEnabled 是 core 级全局开关——若子框架为
+        // ntp.aegis.local 就把全局打开，远程页可内嵌该帧驱动受信桥——
+        // 审计 M4 发现并封死）。
         webView.NavigationStarting += (_, e) => WebView2Hardening.SetPerOrigin(webView, e.Uri);
-        webView.FrameNavigationStarting += (_, e) => WebView2Hardening.SetPerOrigin(webView, e.Uri);
         // DNT 注入 + 黑名单子资源真拦截（WebResourceRequested 原生返回 403——
         // pywebview 时代只能标记不能拦截的缺口，原生 API 直接闭合）
         webView.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);

@@ -47,7 +47,7 @@
 | 功能 | 安全门禁要求 | Python 参考 | C# 状态 |
 |---|---|---|---|
 | 下载管理器：进度/暂停 | DownloadStarting 经 broker 授权 | （Python 不支持▲） | ☑ M3+M4（原生下载+broker 审计+反馈；M4 下载管理面板——进度/暂停/继续/取消/打开所在文件夹，全部受信 chrome 直达原生 API） |
-| 下载：危险扩展拦截+确认 | 扩展判定对齐 Android DownloadPolicy | security.is_dangerous | ☑ M3（含查询串直链强判定▲） |
+| 下载：危险扩展拦截+确认 | 扩展判定对齐 Android DownloadPolicy | security.is_dangerous | ☑ M3+M4（扩展判定+查询串强判定；审计 M4 补接原生确认对话框——此前仅判定未接线门禁形同虚设；窗口关闭仍 fail-closed） |
 | 下载：文件名净化 | 剥路径段/控制字符/尾点 | 批次1 Android sanitize | ☑ M3（对齐 Android 语义） |
 | 新标签页：start.html 虚拟主机 | 资源映射不暴露文件系统 | shell/start.html | ☑ M3（SetVirtualHostNameToFolderMapping→发布输出 ntp/ 目录——shared/shell 跨端单源） |
 | 新标签页：会话恢复入口 | has_saved/restore 经 broker | start.html restoreBox | ☑ M3（NtpBridge hasSaved/restoreSession——恢复 URL 仍逐条过 broker） |

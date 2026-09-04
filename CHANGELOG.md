@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——M4 全量审计 2026-09-05)
+- **[安全·发布阻断] WebMessage 受信通道绕过**：远程页内嵌 ntp.aegis.local 帧即可把
+  core 级 IsWebMessageEnabled 打开并驱动本地桥——封死：① 移除
+  `FrameNavigationStarting→SetPerOrigin`（内嵌帧不得启用全局 WebMessage）；
+  ② 宿主桥入口增加顶层文档门禁（core.Source 必须为 NTP host——帧内嵌来源拒绝）
+- **[运行时·发布阻断] restoreSession 撞已释放 CoreWebView2**：会话恢复同步拆除
+  发送标签后向已释放 core 回写响应 → 未处理异常；响应注入容错（try/catch 静默丢弃）
+- **[功能·M3 死特性] 危险扩展下载确认从未接线**：DownloadConfirmationRequested
+  全仓零订阅 → 危险文件恒被静默拒绝。现于 MainWindow 接线为原生确认对话框
+  （窗口已关闭仍 fail-closed 拒绝）
+- **星标反馈文案错误**：取消收藏误报「已收藏」——改为按实际操作提示
+- **反馈条定时器事件累积泄漏**：Tick 处理器改为首次创建时订阅一次
+
 ### Added (Windows C# 正典栈——ADR-009 M4 收尾退役)
 - **发布链单轨**：release-windows.yml 删除 installer-pywebview job——C# 安装包
   为唯一 Windows 发布制品（SBOM/SLSA attestation/校验和链对 C# 制品不变）；

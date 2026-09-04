@@ -125,14 +125,34 @@ public partial class MainWindow : Window
             var core = runtime.Control.CoreWebView2;
             BindVirtualHosts(core);
             runtime.OnCoreReady(core);
-            // M3 新标签页宿主桥：仅 ntp.aegis.local 来源可达（远程页 per-origin
-            // 关闭 WebMessage + 本桥双重校验）；导航意图回归 NavigationStarting→
-            // broker 唯一授权路径
+            // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
+            // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
+            //（内嵌 iframe 伪装 ntp 来源的请求在顶层门禁处拒绝——ADR-003 无桥
+            // 保证的纵深防御）；导航意图回归 NavigationStarting→broker 唯一路径
             var ntp = CreateNtpBridge(runtime);
-            core.WebMessageReceived += (_, ev) => ntp.TryHandle(
-                ev.Source, ev.WebMessageAsJson,
-                result => core.PostWebMessageAsJson(
-                    System.Text.Json.JsonSerializer.Serialize(result)));
+            core.WebMessageReceived += (_, ev) =>
+            {
+                // 顶层文档（core.Source）必须是 NTP 虚拟主机；发送来源（ev.Source）
+                // 由 NtpBridge 二次校验。二者任一不符即静默忽略——帧内嵌不可达。
+                if (!IsTopLevelNtpDocument(core))
+                    return;
+                ntp.TryHandle(
+                    ev.Source, ev.WebMessageAsJson,
+                    result =>
+                    {
+                        // restoreSession 会同步拆除当前标签（含发送标签）——
+                        // core 可能已被释放；响应注入必须容错，绝不抛未处理异常
+                        try
+                        {
+                            core.PostWebMessageAsJson(
+                                System.Text.Json.JsonSerializer.Serialize(result));
+                        }
+                        catch (Exception)
+                        {
+                            // 发送标签已随会话重建销毁——响应无处可达，静默丢弃
+                        }
+                    });
+            };
         };
         runtime.NavigationCompleted += (ok, status) => OnTabNavigationCompleted(tab.TabId, ok, status);
         // M4 下载管理面板：授权通过的 DownloadOperation 注入共享数据源
@@ -156,6 +176,20 @@ public partial class MainWindow : Window
             ShowConfirmation(e);
         };
         runtime.Host.NavigationConfirmationResolved += (_, _) => HideConfirmation();
+        // M3 危险扩展下载确认（审计补缺——此前 DownloadConfirmationRequested
+        // 全仓零订阅者 → 危险下载恒被静默拒绝，该功能形同虚设）。用户显式
+        // 确认才放行；窗口已关闭/异常仍 fail-closed 拒绝。
+        runtime.DownloadConfirmationRequested += (downloadUrl, fileName) =>
+        {
+            if (!IsLoaded)
+                return false;
+            return MessageBox.Show(
+                this,
+                $"此文件的类型可能存在风险，是否允许下载？\n\n文件：{fileName}\n来源：{downloadUrl}",
+                "下载确认",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        };
         WebViewHost.Children.Add(runtime.Control);
     }
 
@@ -178,6 +212,13 @@ public partial class MainWindow : Window
                 CoreWebView2HostResourceAccessKind.Allow);
         }
     }
+
+    /// <summary>M3：新标签页宿主桥的顶层文档门禁——core.Source 为当前顶层
+    /// 文档（非任一 iframe）。远程顶层页面即使内嵌 ntp.aegis.local 帧，顶层
+    /// 来源仍为远程 host → 拒绝；从根上封死「帧内嵌复用受信桥」的绕过面。</summary>
+    private static bool IsTopLevelNtpDocument(CoreWebView2 core) =>
+        Uri.TryCreate(core.Source, UriKind.Absolute, out var uri)
+        && uri.Host.Equals(Chrome.Ntp.NtpAssets.HostName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>M3：新标签页宿主桥服务组装（每标签一份——navigate/goBack/openGeo
     /// 作用于该标签自己的 WebView；数据服务共享单源）。</summary>
@@ -490,12 +531,11 @@ public partial class MainWindow : Window
             ShowFeedback("当前页面不支持收藏", isWarning: true);
             return;
         }
-        var ok = _bookmarks.Contains(tab.Url)
+        var wasStarred = _bookmarks.Contains(tab.Url);
+        var ok = wasStarred
             ? _bookmarks.Remove(tab.Url)
             : _bookmarks.Add(string.IsNullOrWhiteSpace(tab.Title) ? uri.Host : tab.Title, tab.Url);
-        ShowFeedback(ok ? (ok ? "已收藏" : "操作失败") : "已取消收藏", isWarning: !ok);
-        if (!ok)
-            ShowFeedback("操作失败", isWarning: true);
+        ShowFeedback(ok ? (wasStarred ? "已取消收藏" : "已收藏") : "操作失败", isWarning: !ok);
     }
 
     private void Settings_Click(object sender, RoutedEventArgs e)
@@ -538,15 +578,20 @@ public partial class MainWindow : Window
             isWarning ? System.Windows.Media.Color.FromArgb(0xFF, 0x2A, 0x12, 0x15)
                       : System.Windows.Media.Color.FromArgb(0xFF, 0x0F, 0x2A, 0x1B));
         FeedbackBar.Visibility = Visibility.Visible;
-        _feedbackTimer ??= new System.Windows.Threading.DispatcherTimer
+        // Tick 处理器只在首次创建时订阅一次（审计 M4：#Bug5 此前每次调用都
+        // 追加一个新闭包且不摘除——长会话内事件累积成为驻留对象泄漏）
+        if (_feedbackTimer is null)
         {
-            Interval = TimeSpan.FromSeconds(2.5),
-        };
-        _feedbackTimer.Tick += (_, _) =>
-        {
-            FeedbackBar.Visibility = Visibility.Collapsed;
-            _feedbackTimer.Stop();
-        };
+            _feedbackTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(2.5),
+            };
+            _feedbackTimer.Tick += (_, _) =>
+            {
+                FeedbackBar.Visibility = Visibility.Collapsed;
+                _feedbackTimer!.Stop();
+            };
+        }
         _feedbackTimer.Stop();
         _feedbackTimer.Start();
     }
