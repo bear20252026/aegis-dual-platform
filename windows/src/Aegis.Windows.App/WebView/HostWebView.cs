@@ -1,6 +1,7 @@
 namespace Aegis.Windows.WebView;
 
 using System;
+using System.IO;
 using Microsoft.Web.WebView2.Core;
 
 /// <summary>WebView2 封装（阶段 C——蓝图 windows/src/Aegis.Windows.WebView）。
@@ -21,6 +22,10 @@ public sealed class HostWebView : IDisposable
 
     /// <summary>待审批导航被批准、拒绝、替换或销毁时通知受信 chrome 关闭展示。</summary>
     public event EventHandler? NavigationConfirmationResolved;
+
+    /// <summary>M3：危险扩展下载的用户确认请求（返回 true=允许下载）。
+    /// 无订阅者时危险下载 fail-closed 拒绝。</summary>
+    public event Func<string, string, bool>? DownloadConfirmationRequested;
 
     public HostWebView(Broker.BrowserPolicyBroker broker, string sessionId, string? tabId = null)
     {
@@ -51,22 +56,42 @@ public sealed class HostWebView : IDisposable
             // 没有已注册的受控子 WebView executor 时，禁止弹窗导航，避免策略被绕过。
             e.Handled = true;
         };
-        // 下载经 broker 默认拒绝（DownloadStarting——审计 C1：全面审计
-        // 2026-09-04 发现下载此前完全绕过 broker）。当前契约没有下载授权
-        // 动作 → fail-closed：Handled 抑制原生下载流程 + 审计留痕。
+        // M3 下载管理（ADR-009：pywebview 硬编码禁用下载的天花板在原生栈
+        // 不复存在）。全量经 broker 审计；危险扩展（对齐 Android DownloadPolicy）
+        // 需用户显式确认——无确认订阅者时 fail-closed 拒绝。
         webView.DownloadStarting += (_, e) =>
         {
-            e.Handled = true;
-            string origin = "unknown";
+            var downloadUrl = string.Empty;
+            var suggested = string.Empty;
             try
             {
-                origin = e.DownloadOperation?.Uri ?? origin;
+                downloadUrl = e.DownloadOperation?.Uri ?? string.Empty;
+                // SDK 1.0.2903.40 无 SuggestedFileName——从结果路径提取
+                suggested = Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty);
             }
             catch (Exception)
             {
-                // URI 读取失败不改变拒绝语义——仍按 unknown 留痕
+                // 元数据读取失败不影响策略判定
             }
-            _broker.DenyDownload(_sessionId, _tabId, origin);
+            var fileName = Core.Downloads.DownloadPolicy.SanitizeFileName(suggested);
+            var dangerous = Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(downloadUrl, fileName);
+            if (dangerous
+                && (DownloadConfirmationRequested is null
+                    || !DownloadConfirmationRequested.Invoke(downloadUrl, fileName)))
+            {
+                e.Handled = true;
+                try
+                {
+                    e.DownloadOperation?.Cancel();
+                }
+                catch (Exception)
+                {
+                    // 操作可能尚未启动——拒绝语义已由 Handled 保证
+                }
+                _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
+                return;
+            }
+            _broker.AllowDownload(_sessionId, _tabId, downloadUrl, fileName, dangerous);
         };
         // 消息只接受受信 chrome UI origin（远程页面无 native bridge——WebMessage 忽略）
         webView.WebMessageReceived += (_, e) =>

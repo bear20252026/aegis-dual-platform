@@ -38,11 +38,36 @@ public sealed class TabRuntime : IDisposable
     /// <summary>导航开始（加载指示条显示的触发源）。</summary>
     public event Action? NavigationStarted;
 
+    /// <summary>M3 下载确认请求转发（危险扩展——chrome 弹确认对话框）。</summary>
+    public event Func<string, string, bool>? DownloadConfirmationRequested
+    {
+        add => Host.DownloadConfirmationRequested += value;
+        remove => Host.DownloadConfirmationRequested -= value;
+    }
+
+    /// <summary>M3 下载启动通知（反馈条显示）。</summary>
+    public event Action<string, bool>? DownloadStarted;
+
     /// <summary>CoreWebView2 就绪后挂接安全事件与页面事件（每标签一次）。</summary>
     public void OnCoreReady(CoreWebView2 coreWebView2)
     {
         Host.WireEvents(coreWebView2);
         coreWebView2.NavigationStarting += (_, _) => NavigationStarted?.Invoke();
+        coreWebView2.DownloadStarting += (_, e) =>
+        {
+            try
+            {
+                DownloadStarted?.Invoke(
+                    System.IO.Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty),
+                    Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(
+                        e.DownloadOperation?.Uri ?? string.Empty,
+                        System.IO.Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty)));
+            }
+            catch
+            {
+                // 通知失败不影响下载
+            }
+        };
         coreWebView2.DocumentTitleChanged += (_, _) =>
             Tab.Title = coreWebView2.DocumentTitle;
         coreWebView2.NavigationCompleted += (_, args) =>
