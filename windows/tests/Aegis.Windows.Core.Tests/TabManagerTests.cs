@@ -137,4 +137,48 @@ public sealed class TabManagerTests
 
         Assert.Equal("tab-b", restored);
     }
+
+    [Fact]
+    public void MoveTabReordersAndKeepsCurrentActive()
+    {
+        var manager = new TabManager();
+        var t1 = manager.NewTab("about:blank");
+        var t2 = manager.NewTab("about:blank");
+        var t3 = manager.NewTab("about:blank");
+
+        manager.MoveTab(0, 2);
+
+        Assert.Equal([t2.TabId, t3.TabId, t1.TabId], manager.Tabs.Select(t => t.TabId));
+        Assert.Equal(t3.TabId, manager.CurrentTabId);
+    }
+
+    [Fact]
+    public void MoveTabAcrossCurrentAdjustsCurrentIndex()
+    {
+        var manager = new TabManager();
+        var t1 = manager.NewTab("about:blank");
+        var t2 = manager.NewTab("about:blank");
+        var t3 = manager.NewTab("about:blank");
+        manager.SwitchTo(t3.TabId);
+
+        manager.MoveTab(2, 0);
+
+        Assert.Equal(t3.TabId, manager.CurrentTabId);
+        Assert.Equal([t3.TabId, t1.TabId, t2.TabId], manager.Tabs.Select(t => t.TabId));
+    }
+
+    [Fact]
+    public void MoveTabInvalidArgumentsAreNoOp()
+    {
+        var manager = new TabManager();
+        var t1 = manager.NewTab("about:blank");
+        var t2 = manager.NewTab("about:blank");
+
+        manager.MoveTab(-1, 1);
+        manager.MoveTab(0, 5);
+        manager.MoveTab(1, 1);
+
+        Assert.Equal(t1.TabId, manager.Tabs[0].TabId);
+        Assert.Equal(t2.TabId, manager.CurrentTabId);
+    }
 }

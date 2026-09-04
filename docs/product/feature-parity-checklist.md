@@ -9,13 +9,13 @@
 
 | 功能 | 安全门禁要求 | Python 参考 | C# 状态 |
 |---|---|---|---|
-| 多标签：新建/关闭/切换 | 每标签独立会话/broker session | tab_ops.py | ☑ 骨架（M1-T1：TabManager/TabRuntime/原生标签条；拖拽排序独立行） |
-| 多标签：拖拽排序 | — | tabstrip_js.py | ☐ |
-| 标签标题/进度实时同步 | 无 DOM 泄露（原生 UI 天然满足） | bridge_hooks | ☐ |
-| 地址栏：focus 选中/Enter 导航 | safe_url 双层校验经 broker | shell_toolbar | ☐ |
-| 地址栏：搜索词 vs URL 判定 | 与 Android SearchEngines 同语义 | url_utils.normalize_url | ☐ |
-| 加载进度条 | — | （Python 缺失▲） | ☑ 不定态指示条（WebView2 无进度事件——架构限制内的最优实现） |
-| 后退/前进/刷新/主页 | 导航经 broker 决策+consume | navigation.py | ☐ |
+| 多标签：新建/关闭/切换 | 每标签独立会话/broker session | tab_ops.py | ☑ M1-T1（TabManager/TabRuntime/原生标签条） |
+| 多标签：拖拽排序 | — | tabstrip_js.py | ☑ M1-T3（ListBox 原生拖放 + TabManager.MoveTab 单测——当前标签索引随动） |
+| 标签标题/进度实时同步 | 无 DOM 泄露（原生 UI 天然满足） | bridge_hooks | ☑ M1-T3（DocumentTitleChanged→INPC 原生绑定；不定态加载条接线导航开始/完成） |
+| 地址栏：focus 选中/Enter 导航 | safe_url 双层校验经 broker | shell_toolbar | ☑ M1-T3（Enter 导航；Ctrl+L 与点击聚焦均全选） |
+| 地址栏：搜索词 vs URL 判定 | 与 Android SearchEngines 同语义 | url_utils.normalize_url | ☑ M1-T3（UrlNormalizer 单源——fail-closed 拒绝非导航协议） |
+| 加载进度条 | — | （Python 缺失▲） | ☑ 不定态指示条（WebView2 无进度事件——架构限制内的最优实现；M1-T3 完成接线） |
+| 后退/前进/刷新/主页 | 导航经 broker 决策+consume | navigation.py | ☑ M1-T3（←/→/⟳/■/⌂ 全钮——最终经 NavigationStarting→broker） |
 | 会话恢复（自动+手动） | 恢复 URL 过 safe_url | session_store.py/tab_ops.seed | ☑ 自动恢复（M1-T1：SQLite+启动还原）；手动入口随 M3 新标签页 |
 | NewWindowRequested 门禁 | 白名单 fail-closed + 审计 | 批次1 native_interception | ☑（HostWebView Handled——既有语义保持） |
 | WebView2 功能收紧 | AreHostObjects/ScriptDialogs=false | 批次1 hardening | ☑（原生直写+留痕） |
@@ -25,8 +25,8 @@
 | 威胁黑名单：订阅刷新 | https 强制/5MB 上限/原子落盘 | threat_feed.py | ☑（AEGIS_THREAT_FEED_URL 环境变量；M4 移入设置） |
 | 威胁黑名单：导航门禁 | 命中拒绝+审计 | url_utils/security.py | ☑（broker threat_blocklist + 子资源 403 真拦截▲） |
 | DNT 请求头 | request_sent 等价物（原生事件） | 批次1 request_policy | ☑（WebResourceRequested 原生注入） |
-| per-origin 设置翻转 | 远程页禁 WebMessage/弹窗 | 批次1 per-origin | ☐ |
-| 错误页（导航失败/SSL） | SSL 绝不绕过——展示不 proceed | （Python 缺失▲） | ☐ |
+| per-origin 设置翻转 | 远程页禁 WebMessage/弹窗 | 批次1 per-origin | ☑ M1-T2（SetPerOrigin 原生直翻——每次顶层/子框架导航） |
+| 错误页（导航失败/SSL） | SSL 绝不绕过——展示不 proceed | （Python 缺失▲） | ☑ M1-T3（导航失败横幅——仅展示无 proceed 通道；确认拒绝同样可见） |
 | **M1 真机验收** | 连续真实浏览 1 小时无阻断 | — | ☐ |
 
 ## M2 数据闭环

@@ -121,6 +121,12 @@ public partial class MainWindow : Window
                 runtime.OnCoreReady(runtime.Control.CoreWebView2);
         };
         runtime.NavigationCompleted += (ok, status) => OnTabNavigationCompleted(tab.TabId, ok, status);
+        // M1 加载指示接线：导航开始显示不定态条，完成/失败隐藏
+        runtime.NavigationStarted += () =>
+        {
+            if (tab.TabId == _activeTabId)
+                LoadingBar.Visibility = Visibility.Visible;
+        };
         runtime.Host.NavigationConfirmationRequested += (_, e) =>
         {
             _pendingConfirmTabId = tab.TabId;
@@ -168,6 +174,8 @@ public partial class MainWindow : Window
         {
             ErrorPagePanel.Visibility = Visibility.Collapsed;
         }
+        if (tabId == _activeTabId)
+            LoadingBar.Visibility = Visibility.Collapsed;
         SyncAddressBar(tab.Url);
         // 每次导航完成即落盘（对齐 Python 栈崩溃恢复能力——强杀/崩溃后
         // 重启仍可恢复到最后的页面集合，而非仅正常关闭时的快照）
@@ -221,6 +229,11 @@ public partial class MainWindow : Window
 
     private void AddressBar_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
         AddressHint.Visibility = AddressBar.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>M1：地址栏获得焦点即全选（Ctrl+L 与鼠标点击同语义——
+    /// 对齐 Python shell_toolbar 聚焦选中契约）。</summary>
+    private void AddressBar_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
+        AddressBar.SelectAll();
 
     private void SyncAddressBar(string url)
     {
@@ -363,6 +376,66 @@ public partial class MainWindow : Window
     private void Forward_Click(object sender, RoutedEventArgs e) => ActiveControl()?.GoForward();
     private void Refresh_Click(object sender, RoutedEventArgs e) => ActiveControl()?.Reload();
     private void Stop_Click(object sender, RoutedEventArgs e) => ActiveControl()?.Stop();
+    /// <summary>M1 主页：回到新标签页（导航仍经 broker 决策）。</summary>
+    private void Home_Click(object sender, RoutedEventArgs e)
+    {
+        if (ActiveControl() is { } control)
+            control.Source = new Uri(HomeUrl);
+    }
+
+    // ================= M1 标签条拖拽排序 =================
+
+    private void TabStrip_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed)
+            return;
+        if (TabItemIndexUnderMouse(e.GetPosition(TabStrip)) is not int fromIndex)
+            return;
+        // 容器级拖放（数据=来源索引）；DragOver/Drop 完成重排
+        DragDrop.DoDragDrop(TabStrip, fromIndex, DragDropEffects.Move);
+    }
+
+    private void TabStrip_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = TabItemIndexUnderMouse(e.GetPosition(TabStrip)) is int
+                    && e.Data.GetDataPresent(typeof(int))
+            ? DragDropEffects.Move
+            : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void TabStrip_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(typeof(int))
+            || TabItemIndexUnderMouse(e.GetPosition(TabStrip)) is not int toIndex)
+            return;
+        var fromIndex = (int)e.Data.GetData(typeof(int));
+        // drop 落点为标签中心右侧时插入其后（末位拖动体验）
+        if (toIndex > fromIndex && TabItemCenterIsBefore(e.GetPosition(TabStrip), toIndex))
+            toIndex--;
+        _tabs.MoveTab(Math.Min(fromIndex, _tabs.Tabs.Count - 1), Math.Max(0, toIndex));
+        e.Handled = true;
+    }
+
+    /// <summary>标签条坐标下的标签索引（ListBox 容器命中——非标签区域返回 null）。</summary>
+    private int? TabItemIndexUnderMouse(System.Windows.Point position)
+    {
+        var element = TabStrip.InputHitTest(position) as System.Windows.DependencyObject;
+        while (element is not null && element is not System.Windows.Controls.ListBoxItem)
+            element = System.Windows.Media.VisualTreeHelper.GetParent(element);
+        return element is System.Windows.Controls.ListBoxItem item
+            && TabStrip.ItemContainerGenerator.IndexFromContainer(item) is var idx && idx >= 0
+            ? idx
+            : null;
+    }
+
+    private bool TabItemCenterIsBefore(System.Windows.Point tabStripPosition, int index)
+    {
+        if (TabStrip.ItemContainerGenerator.ContainerFromIndex(index) is not System.Windows.Controls.ListBoxItem item)
+            return false;
+        var point = tabStripPosition - item.TranslatePoint(default, TabStrip);
+        return point.X > item.ActualWidth / 2;
+    }
 
     // ================= 导航确认面板（转发到发起标签的 HostWebView） =================
 
@@ -466,6 +539,7 @@ public partial class MainWindow : Window
         ForwardButton.IsEnabled = isEnabled;
         RefreshButton.IsEnabled = isEnabled;
         StopButton.IsEnabled = isEnabled;
+        HomeButton.IsEnabled = isEnabled;
     }
 
     protected override void OnClosed(EventArgs e)

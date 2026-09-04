@@ -75,6 +75,30 @@ public sealed class TabManager
         return CurrentTabId;
     }
 
+    /// <summary>拖拽排序（M1：标签条重排——ObservableCollection.Move 保持
+    /// 绑定刷新）。当前标签索引随动（不改变激活标签，只改位置）；越界/非法
+    /// 参数为 no-op（UI 层 drop 位置由框架约束，此处只保证领域层不越界）。</summary>
+    public void MoveTab(int fromIndex, int toIndex)
+    {
+        if (fromIndex < 0 || fromIndex >= _tabs.Count
+            || toIndex < 0 || toIndex >= _tabs.Count
+            || fromIndex == toIndex)
+            return;
+        _tabs.Move(fromIndex, toIndex);
+        if (_currentIndex == fromIndex)
+        {
+            _currentIndex = toIndex;
+        }
+        else if (fromIndex < _currentIndex && toIndex >= _currentIndex)
+        {
+            _currentIndex--;
+        }
+        else if (fromIndex > _currentIndex && toIndex <= _currentIndex)
+        {
+            _currentIndex++;
+        }
+    }
+
     /// <summary>切换当前标签；未知 tabId 或已是当前为 no-op。</summary>
     public void SwitchTo(string tabId)
     {

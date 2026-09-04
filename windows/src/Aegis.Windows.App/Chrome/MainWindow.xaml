@@ -91,7 +91,9 @@
                 Content="＋" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"/>
         <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
           <ListBox x:Name="TabStrip" SelectionMode="Single" Background="Transparent"
-                   BorderThickness="0" SelectionChanged="TabStrip_SelectionChanged">
+                   BorderThickness="0" SelectionChanged="TabStrip_SelectionChanged"
+                   AllowDrop="True" PreviewMouseMove="TabStrip_PreviewMouseMove"
+                   Drop="TabStrip_Drop" DragOver="TabStrip_DragOver">
             <ListBox.ItemsPanel>
               <ItemsPanelTemplate>
                 <StackPanel Orientation="Horizontal"/>
@@ -141,6 +143,7 @@
           <Button x:Name="ForwardButton" Style="{StaticResource NavButton}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
           <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
           <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="■" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止"/>
+          <Button x:Name="HomeButton" Style="{StaticResource NavButton}" Content="⌂" Click="Home_Click" Margin="6,0,0,0" ToolTip="主页（新标签页）"/>
         </StackPanel>
         <!-- M2 数据闭环工具组：搜索引擎切换 / 收藏☆ / 历史记录 -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
@@ -178,7 +181,8 @@
                        Foreground="{StaticResource TextPrimaryBrush}" CaretBrush="#FFFFFFFF"
                        VerticalAlignment="Center" VerticalContentAlignment="Center" Height="30"
                        ToolTip="地址栏（搜索词自动拼引擎；导航经 Broker 决策——真实取消）"
-                       TextChanged="AddressBar_TextChanged" KeyDown="AddressBar_KeyDown"/>
+                       TextChanged="AddressBar_TextChanged" KeyDown="AddressBar_KeyDown"
+                       GotKeyboardFocus="AddressBar_GotKeyboardFocus"/>
             </Grid>
             <Button x:Name="OpenButton" Grid.Column="1" Style="{StaticResource OpenButton}"
                     Content="打开" Click="Open_Click" ToolTip="导航到地址栏输入"/>

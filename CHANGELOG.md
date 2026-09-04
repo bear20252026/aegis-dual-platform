@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——ADR-009 M1-T3)
+- **M1 收尾（parity 清单 7 项勾验）**：标签条拖拽排序（ListBox 原生拖放 +
+  `TabManager.MoveTab`——当前标签索引随动，3 个单测）；不定态加载指示条完成
+  接线（导航开始显示/完成或失败隐藏）；地址栏聚焦全选（Ctrl+L 与鼠标点击同
+  语义）；主页按钮（⌂）；per-origin 翻转与错误页横幅 parity 留痕
+
 ### Added (Windows C# 正典栈——ADR-009 M1-T1)
 - **多标签骨架**：`Core/Tabs`（TabManager/Tab/TabSessionStore——纯逻辑领域层，
   14 个单测全绿）；每标签一 WebView2 实例（切换即可见性切换——页面状态/
