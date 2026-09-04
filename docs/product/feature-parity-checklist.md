@@ -35,8 +35,8 @@
 |---|---|---|---|
 | 书签：SQLite 存储/增删查 | 写操作来源受信（原生 chrome 天然受信） | bookmark_store.py | ☑ M2 |
 | 书签：收藏☆（当前页 toggle） | URL 服务端取（零页面可控参数） | 批次3 toggle_bookmark | ☑ M2（工具栏☆+反馈条） |
-| 书签：新标签页宫格 | 渲染数据经宿主注入而非页面读取 | start.html renderBookmarks | ☐ |
-| 书签：Chrome/Edge 导入向导 | 只读打开历史库（immutable） | browser_import.py | ☐ |
+| 书签：新标签页宫格 | 渲染数据经宿主注入而非页面读取 | start.html renderBookmarks | ☑ M3（NtpBridge WebMessage 注入 title/url——仅受信 ntp.aegis.local 来源） |
+| 书签：Chrome/Edge 导入向导 | 只读打开历史库（immutable） | browser_import.py | ☑ M3（NTP 导入向导单源 UI——历史库拷贝只读副本打开，锁定安全；书签解析只读） |
 | 历史：记录/搜索 | 记录脱敏（无 query secret） | history_store.py | ☑ M2（LIKE 子串——CJK 决策见 ADR-009） |
 | 历史：查看/清除 UI | 清除不可恢复提示 | （Python 缺失▲） | ☑ M2（HistoryWindow+二次确认） |
 | 搜索引擎：四引擎切换 | 偏好写入经受信校验 | search_engine.py | ☑ M2（ComboBox+AppSettings） |
@@ -49,12 +49,12 @@
 | 下载管理器：进度/暂停 | DownloadStarting 经 broker 授权 | （Python 不支持▲） | ☑ M3（原生下载+broker 审计+反馈；完整进度面板随 M4） |
 | 下载：危险扩展拦截+确认 | 扩展判定对齐 Android DownloadPolicy | security.is_dangerous | ☑ M3（含查询串直链强判定▲） |
 | 下载：文件名净化 | 剥路径段/控制字符/尾点 | 批次1 Android sanitize | ☑ M3（对齐 Android 语义） |
-| 新标签页：start.html 虚拟主机 | 资源映射不暴露文件系统 | shell/start.html | ☐ |
-| 新标签页：会话恢复入口 | has_saved/restore 经 broker | start.html restoreBox | ☐ |
+| 新标签页：start.html 虚拟主机 | 资源映射不暴露文件系统 | shell/start.html | ☑ M3（SetVirtualHostNameToFolderMapping→发布输出 ntp/ 目录——shared/shell 跨端单源） |
+| 新标签页：会话恢复入口 | has_saved/restore 经 broker | start.html restoreBox | ☑ M3（NtpBridge hasSaved/restoreSession——恢复 URL 仍逐条过 broker） |
 | 页面源码查看器 | 抓取复用 safe_url+大小上限+全转义 | api_bridge.view_source | ☑ M3（Ctrl+U+独立窗口+零脚本执行） |
-| 壁纸切换 | — | bridge/wallpaper.py | ☐ |
-| 离线几何画板 | 内部资源固定 URI | bridge/geogebra.py | ☐ |
-| 贪吃蛇 | — | start.snake.js | ☐ |
+| 壁纸切换 | — | bridge/wallpaper.py | ☑ M3（白名单四张随单源 shell/wallpapers；AppSettings.NtpWallpaper 持久化——NtpBridge 校验） |
+| 离线几何画板 | 内部资源固定 URI | bridge/geogebra.py | ☑ M3（geo.aegis.local 虚拟主机映射固定路径；资源未随包 fail-closed 置灰——与 Python 同语义） |
+| 贪吃蛇 | — | start.snake.js | ☑ M3（start.snake.js 单源覆盖层随 NTP 加载） |
 | 指纹防护全量管道 | canvas 噪声仅扰动读路径（修 Python 缺陷） | fingerprint_pipeline | ☐ |
 | 链接点击门禁 | 原生处理（无需客户端快照 hack） | 批次2 link_intercept | ☑ 原生架构天然满足（NavigationStarting 全量经 broker） |
 | **M3 真机验收** | 下载/画板/新标签页全流程 | — | ☐ |

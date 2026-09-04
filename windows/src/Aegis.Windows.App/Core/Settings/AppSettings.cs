@@ -24,6 +24,10 @@ public sealed class AppSettings
     /// <summary>威胁黑名单订阅源（消费者：启动刷新——仅 https，设置窗口校验）。</summary>
     public string ThreatFeedUrl { get; set; } = "";
 
+    /// <summary>新标签页壁纸文件名（消费者：NtpBridge——白名单校验，与 Python
+    /// ntp_wallpaper 同语义；空值回退 NtpAssets.DefaultWallpaper）。</summary>
+    public string NtpWallpaper { get; set; } = "";
+
     public static string DefaultPath =>
         Path.Combine(AppPaths.DataDir, "settings.json");
 

@@ -69,13 +69,16 @@ public static class WebView2Hardening
     }
 
     /// <summary>按来源翻转 IsWebMessageEnabled（每次顶层/子框架导航时调用）。
-    /// 远程 http/https 页面禁用——js_api 无桥架构（ADR-003）下此通道必须关死。</summary>
+    /// 远程 http/https 页面禁用——js_api 无桥架构（ADR-003）下此通道必须关死。
+    /// 唯一例外：受信本地虚拟主机（ntp.aegis.local——M3 新标签页宿主桥；
+    /// chrome.aegis.local 预留）——虚拟主机只映射发布资源目录，非远程内容。</summary>
     public static void SetPerOrigin(CoreWebView2 core, string? url)
     {
         try
         {
             var isRemote = Uri.TryCreate(url, UriKind.Absolute, out var uri)
-                           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+                           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
+                           && !IsTrustedLocalHost(uri.Host);
             core.Settings.IsWebMessageEnabled = !isRemote;
         }
         catch
@@ -84,6 +87,12 @@ public static class WebView2Hardening
             core.Settings.IsWebMessageEnabled = false;
         }
     }
+
+    /// <summary>受信本地虚拟主机白名单（NTP 宿主桥唯一激活面；请求通道另经
+    /// NtpBridge.IsTrustedSource 双重校验——远程页即便伪装也不可达）。</summary>
+    public static bool IsTrustedLocalHost(string host) =>
+        host.Equals(Chrome.Ntp.NtpAssets.HostName, StringComparison.OrdinalIgnoreCase)
+        || host.Equals("chrome.aegis.local", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>指纹防护前置脚本（M3 全量管道前的最小有效集——读路径扰动，
     /// 不污染画布本体；时区/时间精度收敛）。单引号内嵌注意转义。</summary>

@@ -41,7 +41,7 @@ public partial class MainWindow : Window
     private SettingsWindow? _settingsWindow;
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
 
-    private const string HomeUrl = "about:blank";
+    private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
     public MainWindow()
     {
@@ -117,8 +117,19 @@ public partial class MainWindow : Window
         _runtimes[tab.TabId] = runtime;
         runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
         {
-            if (e.IsSuccess)
-                runtime.OnCoreReady(runtime.Control.CoreWebView2);
+            if (!e.IsSuccess)
+                return;
+            var core = runtime.Control.CoreWebView2;
+            BindVirtualHosts(core);
+            runtime.OnCoreReady(core);
+            // M3 新标签页宿主桥：仅 ntp.aegis.local 来源可达（远程页 per-origin
+            // 关闭 WebMessage + 本桥双重校验）；导航意图回归 NavigationStarting→
+            // broker 唯一授权路径
+            var ntp = CreateNtpBridge(runtime);
+            core.WebMessageReceived += (_, ev) => ntp.TryHandle(
+                ev.Source, ev.WebMessageAsJson,
+                result => core.PostWebMessageAsJson(
+                    System.Text.Json.JsonSerializer.Serialize(result)));
         };
         runtime.NavigationCompleted += (ok, status) => OnTabNavigationCompleted(tab.TabId, ok, status);
         // M1 加载指示接线：导航开始显示不定态条，完成/失败隐藏
@@ -134,6 +145,150 @@ public partial class MainWindow : Window
         };
         runtime.Host.NavigationConfirmationResolved += (_, _) => HideConfirmation();
         WebViewHost.Children.Add(runtime.Control);
+    }
+
+    /// <summary>M3：虚拟主机资源映射（start.html 单源 + 可选 GeoGebra 随包）。
+    /// 只映射发布输出目录内容——不暴露任意文件系统路径。</summary>
+    private void BindVirtualHosts(CoreWebView2 core)
+    {
+        var ntpRoot = Chrome.Ntp.NtpAssets.ResolveContentRoot();
+        if (ntpRoot is not null)
+        {
+            core.SetVirtualHostNameToFolderMapping(
+                Chrome.Ntp.NtpAssets.HostName, ntpRoot,
+                CoreWebView2HostResourceAccessKind.Allow);
+        }
+        var geoRoot = Chrome.Ntp.NtpAssets.ResolveGeoRoot();
+        if (geoRoot is not null)
+        {
+            core.SetVirtualHostNameToFolderMapping(
+                Chrome.Ntp.NtpAssets.GeoHostName, geoRoot,
+                CoreWebView2HostResourceAccessKind.Allow);
+        }
+    }
+
+    /// <summary>M3：新标签页宿主桥服务组装（每标签一份——navigate/goBack/openGeo
+    /// 作用于该标签自己的 WebView；数据服务共享单源）。</summary>
+    private Chrome.Ntp.NtpBridge CreateNtpBridge(TabRuntime runtime)
+    {
+        return new Chrome.Ntp.NtpBridge(new Chrome.Ntp.NtpBridge.Services(
+            SearchEngine: () => _settings.SearchEngine,
+            SetSearchEngine: engine =>
+            {
+                _settings.SearchEngine = engine;
+                _settings.Save(AppSettings.DefaultPath);
+                EngineCombo.SelectedValue = engine;
+            },
+            Wallpaper: () => string.IsNullOrWhiteSpace(_settings.NtpWallpaper)
+                ? Chrome.Ntp.NtpAssets.DefaultWallpaper
+                : _settings.NtpWallpaper,
+            SetWallpaper: name =>
+            {
+                _settings.NtpWallpaper = name;
+                _settings.Save(AppSettings.DefaultPath);
+            },
+            Bookmarks: () => _bookmarks.All(),
+            SavedSessionCount: () => _sessionStore.Load().Count,
+            RestoreSession: RestoreSavedSession,
+            Navigate: target =>
+            {
+                // 桥已归一（非导航协议 fail-closed）——此处直接进入
+                // NavigationStarting→broker 唯一授权路径
+                runtime.Control.Source = new Uri(target!);
+            },
+            GoBack: () =>
+            {
+                if (runtime.Control.CanGoBack)
+                {
+                    runtime.Control.GoBack();
+                    return true;
+                }
+                return false;
+            },
+            OpenGeo: () =>
+            {
+                if (Chrome.Ntp.NtpAssets.ResolveGeoRoot() is null)
+                    return false;  // 资源未随包——fail-closed 降级（按钮置灰）
+                runtime.Control.Source = new Uri(
+                    $"https://{Chrome.Ntp.NtpAssets.GeoHostName}/{Chrome.Ntp.NtpAssets.GeoEntryPath}");
+                return true;
+            },
+            ImportSources: () =>
+            {
+                // 探测 = 仅文件存在性检查（不读取内容）；书签/历史能力按来源汇总
+                var byBrowser = new Dictionary<string, (bool Bookmarks, bool History)>();
+                foreach (var source in BookmarkImporter.DetectSources())
+                    byBrowser[source.Browser] = (true, false);
+                foreach (var source in Core.History.HistoryImporter.DetectSources())
+                    byBrowser[source.Browser] = byBrowser.TryGetValue(source.Browser, out var known)
+                        ? (known.Bookmarks, true)
+                        : (false, true);
+                var sources = new List<Chrome.Ntp.NtpBridge.ImportSourceSnapshot>();
+                foreach (var pair in byBrowser)
+                    sources.Add(new(pair.Key, pair.Value.Bookmarks, pair.Value.History));
+                return sources;
+            },
+            ImportBookmarks: sourceFilter =>
+            {
+                var imported = 0;
+                var total = 0;
+                var results = new List<Chrome.Ntp.NtpBridge.ImportResult>();
+                foreach (var source in FilterSources(BookmarkImporter.DetectSources(), sourceFilter, s => s.Browser))
+                {
+                    try
+                    {
+                        var candidates = BookmarkImporter.Parse(source.Path);
+                        var (one, all) = BookmarkImporter.ImportTo(_bookmarks, candidates);
+                        results.Add(new(source.Browser, one, all));
+                        imported += one;
+                        total += all;
+                    }
+                    catch (Exception)
+                    {
+                        // 单来源失败不阻断其余来源（可选功能——对齐 Python 口径）
+                    }
+                }
+                return (imported, total, results);
+            },
+            ImportHistory: (limit, sourceFilter) =>
+            {
+                var imported = 0;
+                var total = 0;
+                var results = new List<Chrome.Ntp.NtpBridge.ImportResult>();
+                foreach (var source in FilterSources(Core.History.HistoryImporter.DetectSources(), sourceFilter, s => s.Browser))
+                {
+                    try
+                    {
+                        var candidates = Core.History.HistoryImporter.Parse(source.Path, limit);
+                        var (one, all) = Core.History.HistoryImporter.ImportTo(_history, candidates);
+                        results.Add(new(source.Browser, one, all));
+                        imported += one;
+                        total += all;
+                    }
+                    catch (Exception)
+                    {
+                        // 单来源失败不阻断其余来源（可选功能——对齐 Python 口径）
+                    }
+                }
+                return (imported, total, results);
+            }));
+    }
+
+    /// <summary>导入来源过滤（空/all = 全部来源；否则仅指定浏览器）。</summary>
+    private static IEnumerable<T> FilterSources<T>(
+        IReadOnlyList<T> sources, string? browserFilter, Func<T, string> browserOf)
+    {
+        if (string.IsNullOrEmpty(browserFilter) || browserFilter == "all")
+        {
+            foreach (var source in sources)
+                yield return source;
+            yield break;
+        }
+        foreach (var source in sources)
+        {
+            if (browserOf(source) == browserFilter)
+                yield return source;
+        }
     }
 
     private void OnTabClosed(string tabId)
@@ -223,7 +378,52 @@ public partial class MainWindow : Window
             OnTabSwitched(active);
     }
 
-    private void SaveSession() => _sessionStore.Save(_tabs.Tabs, _tabs.CurrentTabId);
+    private void SaveSession()
+    {
+        if (_restoring)
+            return;  // 恢复流程中关闭旧标签不落盘——避免覆盖待恢复快照
+        _sessionStore.Save(_tabs.Tabs, _tabs.CurrentTabId);
+    }
+
+    // ================= M3 会话恢复（新标签页手动入口） =================
+
+    private bool _restoring;
+
+    /// <summary>M3：手动恢复上次会话（NTP「恢复上次会话」按钮——重启后
+    /// 重开上次页面集合；自动恢复仍由启动流程承担）。恢复期间抑制 SaveSession
+    /// （关闭现有标签会触发落盘，否则会覆盖即将恢复的快照）。</summary>
+    private void RestoreSavedSession()
+    {
+        var saved = _sessionStore.Load(out var currentTabId);
+        if (saved.Count == 0)
+        {
+            ShowFeedback("没有可恢复的已保存会话", isWarning: true);
+            return;
+        }
+        _restoring = true;
+        try
+        {
+            foreach (var tab in _tabs.Tabs.ToList())
+                _tabs.CloseTab(tab.TabId);
+            _tabs.SeedSession(
+                saved.Select(t => (t.TabId, t.Url, t.Title)),
+                currentTabId);
+            foreach (var tab in _tabs.Tabs)
+            {
+                CreateRuntime(tab, tab.Url);
+                _tabs.UpdateUrl(tab.TabId, tab.Url);
+            }
+            var active = _tabs.Current;
+            if (active is not null)
+                OnTabSwitched(active);
+        }
+        finally
+        {
+            _restoring = false;
+        }
+        SaveSession();
+        ShowFeedback($"已恢复上次会话（{saved.Count} 个标签）");
+    }
 
     // ================= 地址栏与导航 =================
 

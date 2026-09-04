@@ -80,32 +80,57 @@
     // JS 错误上报：页面任何异常 → Python 日志（后台静默）
     // ================= 跨端宿主桥适配层（ADR-007 单源首页） =================
     // Windows：pywebview.api（异步 Promise）；Android：AegisBridge
-    // （@JavascriptInterface，同步返回——由适配层统一包装成 thenable）。
+    // （@JavascriptInterface，同步返回——由适配层统一包装成 thenable）；
+    // Windows C#（ADR-009 正典栈）：WebView2 postMessage 桥（ntp.aegis.local
+    // 受信虚拟主机——远程页面上 WebMessage 被宿主按来源关闭，本桥不可达）。
     // 能力面差异：Android 首页当前能力 = 错误上报/引擎/导航/壁纸/画板；
     // 书签宫格、导入向导、会话恢复为 Windows 能力（Android 上自动隐藏）。
     var Host = (function () {
       var winApi = function () { return (window.pywebview && pywebview.api) || null; };
       var andApi = function () { return window.AegisBridge || null; };
+      var csApi = function () {
+        return (window.chrome && chrome.webview && chrome.webview.postMessage) ? chrome.webview : null;
+      };
       var sync = function (v) {
         return { then: function (f) { try { f(v); } catch (e) {} return sync(v); },
                  catch: function () { return sync(v); } };
       };
+      // C# 桥请求通道：postMessage 关联 id + 单一 message 监听分发响应
+      var _csSeq = 0, _csPending = {}, _csListening = false;
+      function csCall(op, args, cb) {
+        var w = csApi(); if (!w) { if (cb) cb(null); return; }
+        if (!_csListening) {
+          _csListening = true;
+          w.addEventListener('message', function (e) {
+            var d = e.data;
+            if (d && d.__aegisRes && _csPending[d.id]) {
+              var f = _csPending[d.id]; delete _csPending[d.id];
+              try { f(d.result); } catch (err) { try { Host.jsError('ntp callback: ' + err); } catch (e2) {} }
+            }
+          });
+        }
+        var id = ++_csSeq;
+        _csPending[id] = cb || function () {};
+        w.postMessage({ __aegis: 1, id: id, op: op, args: args || [] });
+      }
       return {
-        kind: function () { return winApi() ? 'win' : (andApi() ? 'android' : null); },
+        kind: function () { return winApi() ? 'win' : (andApi() ? 'android' : (csApi() ? 'cs' : null)); },
         has: function (feat) {
           var k = this.kind();
           if (!k) return false;
-          if (k === 'win') return true;
+          if (k === 'win' || k === 'cs') return true;
           var androidFeats = { error: 1, engine: 1, navigate: 1, wallpaper: 1, geo: 1, back: 1, snake: 1 };
           return !!androidFeats[feat];
         },
         jsError: function () {
           var w = winApi(); if (w) { w.js_error.apply(w, arguments); return; }
-          var a = andApi(); if (a) a.logError([].slice.call(arguments).join(' | '));
+          var a = andApi(); if (a) { a.logError([].slice.call(arguments).join(' | ')); return; }
+          var c = csApi(); if (c) csCall('jsError', [].slice.call(arguments));
         },
         setEngine: function (key) {
           var w = winApi(); if (w) { w.set_search_engine(key); return; }
-          var a = andApi(); if (a) a.setEngine(key);
+          var a = andApi(); if (a) { a.setEngine(key); return; }
+          csCall('setEngine', [key]);
         },
         getEngine: function (cb) {
           var w = winApi(); if (w) { w.get_search_engine().then(cb); return; }
@@ -130,49 +155,64 @@
             } catch (e) {
               cb(engineFallback());
             }
+            return;
           }
+          csCall('getEngine', [], cb);
         },
         navigate: function (url) {
           var w = winApi(); if (w) { w.navigate(url); return; }
-          var a = andApi(); if (a) a.navigate(url);
+          var a = andApi(); if (a) { a.navigate(url); return; }
+          csCall('navigate', [url]);
         },
         goBack: function () {
           var w = winApi(); if (w) { w.go_back(); return; }
-          var a = andApi(); if (a) a.goBack();
+          var a = andApi(); if (a) { a.goBack(); return; }
+          csCall('goBack', []);
         },
         setWallpaper: function (name) {
           var w = winApi(); if (w) { w.set_wallpaper(name); return; }
-          var a = andApi(); if (a) a.setWallpaper(name);
+          var a = andApi(); if (a) { a.setWallpaper(name); return; }
+          csCall('setWallpaper', [name]);
         },
         getWallpaper: function (cb) {
           var w = winApi(); if (w) { w.get_wallpaper().then(cb); return; }
-          var a = andApi(); if (a) cb(a.getWallpaper());
+          var a = andApi(); if (a) { cb(a.getWallpaper()); return; }
+          csCall('getWallpaper', [], cb);
         },
         openGeo: function (onFail) {
           var w = winApi();
           if (w) { w.open_geogebra().then(function (ok) { if (!ok) onFail(); }); return; }
-          var a = andApi(); if (a && !a.openGeogebra()) onFail();
+          var a = andApi(); if (a) { if (!a.openGeogebra()) onFail(); return; }
+          csCall('openGeo', [], function (ok) { if (!ok) onFail(); });
         },
         hasSaved: function (cb) {
           var w = winApi(); if (w) { w.has_saved_session().then(cb); return; }
-          cb(0);  // Android：会话恢复为 Windows 能力
+          if (andApi()) { cb(0); return; }  // Android：会话恢复为 Windows 能力
+          csCall('hasSaved', [], cb);
         },
-        restoreSession: function () { var w = winApi(); if (w) w.restore_session(); },
+        restoreSession: function () {
+          var w = winApi(); if (w) { w.restore_session(); return; }
+          csCall('restoreSession', []);
+        },
         bookmarks: function (cb) {
           var w = winApi(); if (w) { w.get_bookmarks().then(cb); return; }
-          cb([]);  // Android：书签宫格暂无数据源
+          if (andApi()) { cb([]); return; }  // Android：书签宫格暂无数据源
+          csCall('bookmarks', [], cb);
         },
         importScan: function (cb) {
           var w = winApi(); if (w) { w.scan_import_sources().then(cb); return; }
-          cb([]);  // Android：导入向导为 Windows 能力
+          if (andApi()) { cb([]); return; }  // Android：导入向导为 Windows 能力
+          csCall('importScan', [], cb);
         },
         importBookmarks: function (src, cb) {
           var w = winApi(); if (w) { w.import_bookmarks(src).then(cb); return; }
-          cb({ imported: 0, total: 0 });
+          if (andApi()) { cb({ imported: 0, total: 0 }); return; }
+          csCall('importBookmarks', [src], cb);
         },
         importHistory: function (limit, src, cb) {
           var w = winApi(); if (w) { w.import_history(limit, src).then(cb); return; }
-          cb({ imported: 0, total: 0 });
+          if (andApi()) { cb({ imported: 0, total: 0 }); return; }
+          csCall('importHistory', [limit, src], cb);
         },
       };
     })();

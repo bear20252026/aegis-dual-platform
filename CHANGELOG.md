@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——ADR-009 M3 功能补齐)
+- **新标签页（start.html 跨端单源）**：`SetVirtualHostNameToFolderMapping` 加载
+  shared/shell（发布输出 ntp/ 目录——资源映射不暴露文件系统）；Host 适配层新增
+  C# WebView2 postMessage 桥（第三适配——pywebview/Android 语义不变）
+- **NtpBridge 宿主桥**：仅受信 ntp.aegis.local 来源可达（远程页 per-origin 关闭
+  WebMessage + 桥双重校验）；壁纸白名单（对齐 Python asset_scheme.WALLPAPERS）、
+  引擎切换、书签宫格数据注入、会话恢复入口、导航意图桥内归一后回归
+  NavigationStarting→broker 唯一授权路径（12 个单测）
+- **导入向导**：Chrome/Edge 书签（既有 BookmarkImporter 接线）+ 历史
+  （HistoryImporter——urls 表拷贝只读副本解析，锁定安全；仅 http/https）
+- **离线几何画板/贪吃蛇**：geo.aegis.local 虚拟主机（资源未随包 fail-closed
+  置灰——与 Python 同语义）；贪吃蛇随单源 start.snake.js 开箱可用
+
 ### Added (Windows C# 正典栈——ADR-009 M1-T3)
 - **M1 收尾（parity 清单 7 项勾验）**：标签条拖拽排序（ListBox 原生拖放 +
   `TabManager.MoveTab`——当前标签索引随动，3 个单测）；不定态加载指示条完成
