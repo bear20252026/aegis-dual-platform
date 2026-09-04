@@ -60,10 +60,11 @@ public static class WebView2Hardening
         };
         applied++;
 
-        // 指纹防护前置注入（文档创建前执行——页面脚本无法绕过；M3 补全量管道，
-        // 本版为读路径扰动的最小有效集）
-        core.AddScriptToExecuteOnDocumentCreatedAsync(FingerprintShieldScript);
-        SecurityLog.Write($"[security] 标签 {tabId}: 指纹防护已注入（页面脚本前生效）");
+        // 指纹防护前置注入（文档创建前执行——页面脚本无法绕过；M3 全量
+        // 红蓝对抗管道——每标签会话独立 32 字节加密随机种子）
+        core.AddScriptToExecuteOnDocumentCreatedAsync(
+            FingerprintShield.BuildScript(FingerprintShield.NewSessionSeed()));
+        SecurityLog.Write($"[security] 标签 {tabId}: 指纹防护全量管道已注入（页面脚本前生效）");
         applied++;
         return applied;
     }
@@ -93,48 +94,4 @@ public static class WebView2Hardening
     public static bool IsTrustedLocalHost(string host) =>
         host.Equals(Chrome.Ntp.NtpAssets.HostName, StringComparison.OrdinalIgnoreCase)
         || host.Equals("chrome.aegis.local", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>指纹防护前置脚本（M3 全量管道前的最小有效集——读路径扰动，
-    /// 不污染画布本体；时区/时间精度收敛）。单引号内嵌注意转义。</summary>
-    private const string FingerprintShieldScript = """
-        (function() {
-          'use strict';
-          try {
-            // 时间精度收敛（高精度计时器指纹）
-            var origDateNow = Date.now;
-            Date.now = function() { return Math.floor(origDateNow() / 100) * 100; };
-            var origPerf = performance.now.bind(performance);
-            performance.now = function() { return Math.floor(origPerf() / 100) * 100; };
-          } catch (e) {}
-          try {
-            // canvas 指纹：只扰动读路径（getImageData/toBlob/toDataURL）——
-            // 修 Python 侧缺陷：绝不 putImageData 写回可见画布
-            var seed = 0x5f3759df;
-            function perturb(data) {
-              for (var i = 0; i < data.length; i += 997) {
-                data[i] = (data[i] + ((seed + i) % 3) - 1) & 0xff;
-              }
-              return data;
-            }
-            var proto = HTMLCanvasElement.prototype;
-            var origToDataURL = proto.toDataURL;
-            proto.toDataURL = function() {
-              try {
-                var ctx = this.getContext('2d');
-                if (ctx && this.width && this.height) {
-                  // Brave farbling 语义：扰动仅在离屏副本上进行——可见画布
-                  // 像素永不写回（修 Python 侧「污染画布本体」缺陷）
-                  var d = ctx.getImageData(0, 0, this.width, this.height);
-                  perturb(d.data);
-                  var tmp = document.createElement('canvas');
-                  tmp.width = this.width; tmp.height = this.height;
-                  tmp.getContext('2d').putImageData(d, 0, 0);
-                  return origToDataURL.apply(tmp, arguments);
-                }
-              } catch (e) { /* tainted canvas——跳过扰动 */ }
-              return origToDataURL.apply(this, arguments);
-            };
-          } catch (e) {}
-        })();
-        """;
 }

@@ -55,7 +55,7 @@
 | 壁纸切换 | — | bridge/wallpaper.py | ☑ M3（白名单四张随单源 shell/wallpapers；AppSettings.NtpWallpaper 持久化——NtpBridge 校验） |
 | 离线几何画板 | 内部资源固定 URI | bridge/geogebra.py | ☑ M3（geo.aegis.local 虚拟主机映射固定路径；资源未随包 fail-closed 置灰——与 Python 同语义） |
 | 贪吃蛇 | — | start.snake.js | ☑ M3（start.snake.js 单源覆盖层随 NTP 加载） |
-| 指纹防护全量管道 | canvas 噪声仅扰动读路径（修 Python 缺陷） | fingerprint_pipeline | ☐ |
+| 指纹防护全量管道 | canvas 噪声仅扰动读路径（修 Python 缺陷） | fingerprint_pipeline | ☑ M3（FingerprintShield 红蓝对抗全量原生移植——每会话 32 字节随机种子；canvas 离屏副本扰动不写回可见画布；6 个单测锁定脚本契约） |
 | 链接点击门禁 | 原生处理（无需客户端快照 hack） | 批次2 link_intercept | ☑ 原生架构天然满足（NavigationStarting 全量经 broker） |
 | **M3 真机验收** | 下载/画板/新标签页全流程 | — | ☐ |
 

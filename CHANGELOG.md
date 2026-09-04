@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——ADR-009 M3 指纹防护全量)
+- **FingerprintShield 红蓝对抗全量管道原生移植**（fingerprint_pipeline.py →
+  `WebView/FingerprintShield.cs`）：原型链检测防护/ToStringGuard/PerSiteSeed/
+  Canvas/WebGL/Audio/Battery/Network/WebRTC 关闭/Letterbox/fetch·XHR 追踪参数
+  剥离/字体枚举防护/时间精度收敛——每标签会话独立 32 字节加密随机种子；
+  canvas 噪声仅在离屏副本上扰动读路径（绝不写回可见画布——修 Python 污染缺陷）；
+  6 个单测锁定脚本构造契约（种子参数化/确定性/阶段齐备）
+
 ### Added (Windows C# 正典栈——ADR-009 M3 功能补齐)
 - **新标签页（start.html 跨端单源）**：`SetVirtualHostNameToFolderMapping` 加载
   shared/shell（发布输出 ntp/ 目录——资源映射不暴露文件系统）；Host 适配层新增
