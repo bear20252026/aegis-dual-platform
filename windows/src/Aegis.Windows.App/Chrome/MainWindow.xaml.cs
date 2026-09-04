@@ -39,7 +39,10 @@ public partial class MainWindow : Window
         AppSettings.Load(AppSettings.DefaultPath);
     private HistoryWindow? _historyWindow;
     private SettingsWindow? _settingsWindow;
+    private DownloadsWindow? _downloadsWindow;
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
+    // M4 下载管理面板数据源（跨标签共享——DownloadItem 由 TabRuntime 下载事件注入）
+    private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
@@ -132,6 +135,15 @@ public partial class MainWindow : Window
                     System.Text.Json.JsonSerializer.Serialize(result)));
         };
         runtime.NavigationCompleted += (ok, status) => OnTabNavigationCompleted(tab.TabId, ok, status);
+        // M4 下载管理面板：授权通过的 DownloadOperation 注入共享数据源
+        runtime.DownloadOperationStarted += (operation, dangerous) => Dispatcher.Invoke(() =>
+        {
+            _downloads.Insert(0, new Core.Downloads.DownloadItem(
+                operation,
+                System.IO.Path.GetFileName(operation.ResultFilePath ?? string.Empty),
+                operation.Uri ?? string.Empty,
+                dangerous));
+        });
         // M1 加载指示接线：导航开始显示不定态条，完成/失败隐藏
         runtime.NavigationStarted += () =>
         {
@@ -505,6 +517,17 @@ public partial class MainWindow : Window
         }
         _historyWindow.Show();
         _historyWindow.Activate();
+    }
+
+    /// <summary>M4 下载管理面板（共享数据源——新下载自动进入列表）。</summary>
+    private void Downloads_Click(object sender, RoutedEventArgs e)
+    {
+        if (_downloadsWindow is null || !_downloadsWindow.IsLoaded)
+        {
+            _downloadsWindow = new DownloadsWindow(_downloads) { Owner = this };
+        }
+        _downloadsWindow.Show();
+        _downloadsWindow.Activate();
     }
 
     /// <summary>反馈条显示（2.5s 自动隐藏——不静默原则的轻量实现）。</summary>

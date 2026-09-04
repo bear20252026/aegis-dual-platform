@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——ADR-009 M4 下载管理面板)
+- **DownloadsWindow 原生下载管理面板**（pywebview 天花板特性的完整兑现）：
+  进度百分比/字节摘要/状态（进行中/已完成/已中断/已取消——UserCanceled
+  单列）、暂停/继续/取消/打开所在文件夹，全部受信 chrome 按钮直达原生
+  DownloadOperation API——远程页面无触达通道；工具栏 ⤓ 入口，新下载自动入列
+
 ### Added (Windows C# 正典栈——ADR-009 M3 指纹防护全量)
 - **FingerprintShield 红蓝对抗全量管道原生移植**（fingerprint_pipeline.py →
   `WebView/FingerprintShield.cs`）：原型链检测防护/ToStringGuard/PerSiteSeed/

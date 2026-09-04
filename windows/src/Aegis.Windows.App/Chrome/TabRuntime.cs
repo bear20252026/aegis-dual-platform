@@ -48,6 +48,10 @@ public sealed class TabRuntime : IDisposable
     /// <summary>M3 下载启动通知（反馈条显示）。</summary>
     public event Action<string, bool>? DownloadStarted;
 
+    /// <summary>M4 下载管理面板数据源：授权通过的 DownloadOperation 转交
+    /// （dangerous=经用户显式确认的危险扩展下载）。</summary>
+    public event Action<CoreWebView2DownloadOperation, bool>? DownloadOperationStarted;
+
     /// <summary>CoreWebView2 就绪后挂接安全事件与页面事件（每标签一次）。</summary>
     public void OnCoreReady(CoreWebView2 coreWebView2)
     {
@@ -57,11 +61,14 @@ public sealed class TabRuntime : IDisposable
         {
             try
             {
+                var dangerous = Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(
+                    e.DownloadOperation?.Uri ?? string.Empty,
+                    System.IO.Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty));
                 DownloadStarted?.Invoke(
                     System.IO.Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty),
-                    Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(
-                        e.DownloadOperation?.Uri ?? string.Empty,
-                        System.IO.Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty)));
+                    dangerous);
+                if (e.DownloadOperation is { } operation)
+                    DownloadOperationStarted?.Invoke(operation, dangerous);
             }
             catch
             {

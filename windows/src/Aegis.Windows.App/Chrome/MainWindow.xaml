@@ -151,6 +151,8 @@
                     SelectionChanged="Engine_SelectionChanged" ToolTip="搜索引擎"/>
           <Button x:Name="StarButton" Style="{StaticResource NavButton}" Content="☆"
                   Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"/>
+          <Button x:Name="DownloadsButton" Style="{StaticResource NavButton}" Content="⤓"
+                  Click="Downloads_Click" Margin="6,0,0,0" ToolTip="下载管理"/>
           <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="历"
                   Click="History_Click" Margin="6,0,0,0" ToolTip="历史记录"/>
           <Button x:Name="SettingsButton" Style="{StaticResource NavButton}" Content="⚙"
