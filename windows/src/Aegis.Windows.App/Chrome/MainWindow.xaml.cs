@@ -38,6 +38,7 @@ public partial class MainWindow : Window
     private readonly AppSettings _settings =
         AppSettings.Load(AppSettings.DefaultPath);
     private HistoryWindow? _historyWindow;
+    private SettingsWindow? _settingsWindow;
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
 
     private const string HomeUrl = "about:blank";
@@ -77,7 +78,10 @@ public partial class MainWindow : Window
         var snapshot = ThreatFeedUpdater.LoadCached(cachePath);
         _broker.UpdateBlockedHosts(new BlockedHosts(snapshot));
         SecurityLog.Write($"[threat] 黑名单快照 {snapshot.Count} 条");
-        var feedUrl = Environment.GetEnvironmentVariable("AEGIS_THREAT_FEED_URL");
+        // M4-b：设置窗口优先；环境变量后备（headless/CI 场景）
+        var feedUrl = string.IsNullOrWhiteSpace(_settings.ThreatFeedUrl)
+            ? Environment.GetEnvironmentVariable("AEGIS_THREAT_FEED_URL")
+            : _settings.ThreatFeedUrl;
         if (string.IsNullOrWhiteSpace(feedUrl))
             return;
         var validated = ThreatFeedUpdater.ValidateFeedUrl(feedUrl);
@@ -267,6 +271,16 @@ public partial class MainWindow : Window
         ShowFeedback(ok ? (ok ? "已收藏" : "操作失败") : "已取消收藏", isWarning: !ok);
         if (!ok)
             ShowFeedback("操作失败", isWarning: true);
+    }
+
+    private void Settings_Click(object sender, RoutedEventArgs e)
+    {
+        if (_settingsWindow is null || !_settingsWindow.IsLoaded)
+        {
+            _settingsWindow = new SettingsWindow(_settings, _broker) { Owner = this };
+        }
+        _settingsWindow.Show();
+        _settingsWindow.Activate();
     }
 
     private void History_Click(object sender, RoutedEventArgs e)

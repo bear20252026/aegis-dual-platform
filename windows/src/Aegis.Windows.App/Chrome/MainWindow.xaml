@@ -150,6 +150,8 @@
                   Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"/>
           <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="历"
                   Click="History_Click" Margin="6,0,0,0" ToolTip="历史记录"/>
+          <Button x:Name="SettingsButton" Style="{StaticResource NavButton}" Content="⚙"
+                  Click="Settings_Click" Margin="6,0,0,0" ToolTip="设置"/>
         </StackPanel>
         <!-- 胶囊地址栏：深色玻璃 + 聚焦描边 + 占位符 + 内嵌「打开」 -->
         <Border x:Name="AddressPill" Margin="10,0,0,0" CornerRadius="18"
