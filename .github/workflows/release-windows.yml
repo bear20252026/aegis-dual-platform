@@ -75,6 +75,15 @@ jobs:
             throw "Windows 发布目录缺少 Rust 原生策略核心 DLL"
           }
           Compress-Archive -Path dist/aegis-windows/* -DestinationPath dist/Aegis.Windows.zip -Force
+      - name: Install Inno Setup 6 (C# installer)
+        run: choco install innosetup -y --no-progress
+      - name: Build C# installer (ADR-009 beta channel — version injected from single source)
+        shell: pwsh
+        run: |
+          $version = ((Get-Content shared/version.properties) | Where-Object { $_ -match '^VERSION_NAME=' }) -replace '^VERSION_NAME=', ''
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersionOverride=$version docs\release\AegisSetup-CSharp.iss
+          if ($LASTEXITCODE -ne 0) { throw "C# installer compilation failed" }
+          if (-not (Test-Path "dist/AegisBrowser-CSharp-Setup-$version.exe")) { throw "C# installer not generated" }
       - name: Write build metadata
         run: python release/build_metadata.py --platform windows --output dist/build-metadata.json
       - name: Generate SHA-256 checksums
