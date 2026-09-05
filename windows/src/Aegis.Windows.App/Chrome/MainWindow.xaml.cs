@@ -116,6 +116,7 @@ public partial class MainWindow : Window
 
     private void CreateRuntime(Tab tab, string initialUrl)
     {
+        Core.Security.SecurityLog.Write($"[tab] 创建标签 {tab.TabId} url={initialUrl}");
         var runtime = new TabRuntime(_broker, tab, initialUrl);
         _runtimes[tab.TabId] = runtime;
         runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
@@ -380,9 +381,17 @@ public partial class MainWindow : Window
     {
         _activeTabId = tab.TabId;
         foreach (var pair in _runtimes)
-            pair.Value.Control.Visibility = pair.Key == _activeTabId
-                ? Visibility.Visible
-                : Visibility.Collapsed;
+        {
+            var isActive = pair.Key == _activeTabId;
+            // WebView2 是 HWND 承载控件：仅切 Visibility 在部分 WPF 版本中
+            // 不足以刷新层级。显式控制 Z 序、命中测试和可见性，保证激活
+            // 标签永远位于其它标签之上（ApprovalOverlay 的 Z=10 仍保持最顶层）。
+            System.Windows.Controls.Panel.SetZIndex(pair.Value.Control, isActive ? 5 : 0);
+            pair.Value.Control.Visibility = isActive ? Visibility.Visible : Visibility.Collapsed;
+            pair.Value.Control.IsHitTestVisible = isActive;
+            pair.Value.Control.IsEnabled = isActive;
+        }
+        WebViewHost.UpdateLayout();
         SyncAddressBar(tab.Url);
         _suppressTabSelection = true;
         TabStrip.SelectedItem = tab;
