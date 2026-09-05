@@ -245,7 +245,7 @@ public partial class HistoryWindow : Window
         ApplyFilter();
     }
 
-    private void CustomDate_SelectedDateChanged(object sender, SelectionChangedEventArgs e)
+    private void CustomDate_SelectedDateChanged(object sender, EventArgs e)
     {
         if (!_initialized || _suppressFilter)
             return;
@@ -257,7 +257,7 @@ public partial class HistoryWindow : Window
         ApplyFilter();
     }
 
-    private void RangeDate_Changed(object sender, SelectionChangedEventArgs e)
+    private void RangeDate_Changed(object sender, EventArgs e)
     {
         if (!_initialized)
             return;
@@ -304,6 +304,13 @@ public partial class HistoryWindow : Window
     }
 
     // ============ 模型 ============
+
+    /// <summary>关闭时释放列表引用（内存卫生——尽快让分组/行模型可回收）。</summary>
+    protected override void OnClosed(EventArgs e)
+    {
+        HistoryList.ItemsSource = null;
+        base.OnClosed(e);
+    }
 
     /// <summary>日期分组（iOS 分组列表的一节）。</summary>
     public sealed record DayGroup(string DateLabel, IReadOnlyList<HistoryRow> Rows);

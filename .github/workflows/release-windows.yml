@@ -32,7 +32,7 @@ jobs:
     permissions:
       id-token: write
       attestations: write
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
@@ -89,6 +89,16 @@ jobs:
         run: python release/build_metadata.py --platform windows --output dist/build-metadata.json
       - name: Generate SHA-256 checksums
         run: python release/write_checksum_json.py --root dist --output dist/SHA256SUMS.json
+      - name: Publish GitHub Release (tag builds only — 云端构建产物分发)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = ((Get-Content shared/version.properties) | Where-Object { $_ -match '^VERSION_NAME=' }) -replace '^VERSION_NAME=', ''
+          $assets = @("dist/AegisBrowser-CSharp-Setup-$version.exe", "dist/SHA256SUMS.json", "dist/build-metadata.json")
+          gh release create "$env:GITHUB_REF_NAME" @assets --title "Aegis $env:GITHUB_REF_NAME" --generate-notes 2>$null
+          if ($LASTEXITCODE -ne 0) { gh release upload "$env:GITHUB_REF_NAME" $assets --clobber }
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:

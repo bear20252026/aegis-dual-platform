@@ -38,6 +38,19 @@ public sealed class WindowSmokeTests
         });
     }
 
+    [Fact]
+    public void DateFieldConstructsAndSelectionUpdatesLabel()
+    {
+        RunSta(() =>
+        {
+            var field = new DateField();
+            Assert.Null(field.SelectedDate);
+            field.SelectedDate = new DateTime(2026, 9, 6);
+            Assert.Equal(new DateTime(2026, 9, 6), field.SelectedDate);
+            Assert.Equal("2026-09-06", field.FieldText);
+        });
+    }
+
     private static void RunSta(Action action)
     {
         Exception? caught = null;
