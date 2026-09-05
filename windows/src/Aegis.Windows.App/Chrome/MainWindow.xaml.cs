@@ -374,21 +374,32 @@ public partial class MainWindow : Window
 
     private void OnTabNavigationCompleted(string tabId, bool isSuccess, CoreWebView2WebErrorStatus status)
     {
-        var tab = _tabs.Tabs.Count > 0 && tabId == _activeTabId ? _tabs.Current : null;
+        var tab = _tabs.Tabs.FirstOrDefault(t => t.TabId == tabId);
         if (tab is null)
             return;
-        if (!isSuccess && status != CoreWebView2WebErrorStatus.OperationCanceled)
+        var isActive = tabId == _activeTabId;
+        if (isActive && !isSuccess && status != CoreWebView2WebErrorStatus.OperationCanceled)
         {
             ErrorPage.Text = $"导航失败：{status}（已拒绝/无法加载）";
             ErrorPagePanel.Visibility = Visibility.Visible;
         }
-        else
+        else if (isActive)
         {
             ErrorPagePanel.Visibility = Visibility.Collapsed;
         }
-        if (tabId == _activeTabId)
+        if (isActive)
+        {
             LoadingBar.Visibility = Visibility.Collapsed;
-        SyncAddressBar(tab.Url);
+            SyncAddressBar(tab.Url);
+        }
+        // 浏览历史记录（M2 缺口修复——此前仅导入写入，浏览从未落库）：
+        // 成功导航 + 历史开关开 + 非内部页（首页/画板/空白页——避免「历史
+        // 全被首页占满」）。后台标签完成导航同样记录。
+        if (isSuccess && _settings.HistoryEnabled
+            && Core.History.HistoryRecorder.IsRecordableUrl(tab.Url))
+        {
+            _history.Add(tab.Url, tab.Title);
+        }
         // 每次导航完成即落盘（对齐 Python 栈崩溃恢复能力——强杀/崩溃后
         // 重启仍可恢复到最后的页面集合，而非仅正常关闭时的快照）
         SaveSession();

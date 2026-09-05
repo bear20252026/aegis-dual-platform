@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——浏览历史记录缺口，2026-09-05)
+- **历史记录从未落库**（M2 parity 勾验后漏接线——浏览时 `_history.Add` 从未被
+  调用，仅导入写入）：现于导航完成时记录成功访问（后台标签同样记录），受
+  `HistoryEnabled` 开关门控（该设置终于真正生效）
+- **内部页不入历史**：新标签页/离线画板虚拟主机、about:blank、非 http/https
+  一律过滤——杜绝「历史被首页占满」；`HistoryRecorder.IsRecordableUrl` 纯静态
+  判定，10 个单测
+
 ### Fixed (Windows C# 正典栈——多标签切换，2026-09-05)
 - **标签点击切换不可靠**：自定义 ListBoxItem 模板内含关闭按钮/子 DockPanel 且
   项不可聚焦，部分环境仅靠 SelectionChanged 隐式命中会失效（表现为「只有一个

@@ -37,7 +37,7 @@
 | 书签：收藏☆（当前页 toggle） | URL 服务端取（零页面可控参数） | 批次3 toggle_bookmark | ☑ M2（工具栏☆+反馈条） |
 | 书签：新标签页宫格 | 渲染数据经宿主注入而非页面读取 | start.html renderBookmarks | ☑ M3（NtpBridge WebMessage 注入 title/url——仅受信 ntp.aegis.local 来源） |
 | 书签：Chrome/Edge 导入向导 | 只读打开历史库（immutable） | browser_import.py | ☑ M3（NTP 导入向导单源 UI——历史库拷贝只读副本打开，锁定安全；书签解析只读） |
-| 历史：记录/搜索 | 记录脱敏（无 query secret） | history_store.py | ☑ M2（LIKE 子串——CJK 决策见 ADR-009） |
+| 历史：记录/搜索 | 记录脱敏（无 query secret） | history_store.py | ☑ M2+M4（搜索/查看/清除已 M2；**记录缺口 2026-09-05 补齐**——导航完成落库，内部页首页/画板/空白页过滤不入历史，后台标签同样记录，受 HistoryEnabled 开关门控） |
 | 历史：查看/清除 UI | 清除不可恢复提示 | （Python 缺失▲） | ☑ M2（HistoryWindow+二次确认） |
 | 搜索引擎：四引擎切换 | 偏好写入经受信校验 | search_engine.py | ☑ M2（ComboBox+AppSettings） |
 | **M2 真机验收** | 导入→收藏→搜历史→清理全流程 | — | ☐ 待真机（导入向导已迁移至 NTP——随 M4 发布走查一并执行） |
