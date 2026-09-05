@@ -161,6 +161,12 @@ public sealed class HistoryStore
                 """;
             ensure.ExecuteNonQuery();
             MigrateAddVisitedDate(connection);
+            // 失效空日期行归一（迁移回填遗漏的残留——归为「未知日期」以免分组遗漏）
+            using (var sanitize = connection.CreateCommand())
+            {
+                sanitize.CommandText = "UPDATE visits SET visited_date = '未知日期' WHERE visited_date = '' OR visited_date IS NULL";
+                sanitize.ExecuteNonQuery();
+            }
             return connection;
         }
         catch
