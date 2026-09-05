@@ -46,5 +46,12 @@
              Link="ntp\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
+    <!-- M3 离线几何画板（GeoGebra Math Apps Bundle——117MB 随包；entry 存在时
+         才打包，否则几何画板按钮 fail-closed 置灰）。历史栈同目录只读引用。 -->
+    <Content Include="..\..\..\legacy\windows-pywebview\geogebra\**\*"
+             Link="geogebra\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="Always"
+             Condition="Exists('..\..\..\legacy\windows-pywebview\geogebra\GeoGebra\HTML5\5.0\GeoGebra.html')" />
   </ItemGroup>
 </Project>

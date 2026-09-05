@@ -49,6 +49,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        ApplyTheme(_settings.Theme);
         _tabs.TabOpened += OnTabOpened;
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
@@ -63,6 +64,33 @@ public partial class MainWindow : Window
     {
         EngineCombo.ItemsSource = UrlNormalizer.EngineUrls.Keys.ToList();
         EngineCombo.SelectedValue = _settings.SearchEngine;
+    }
+
+    // ================= 深/浅主题（对齐 Edge 明暗外观） =================
+
+    /// <summary>按设置应用浏览器 chrome 主题（dark/light——九块 DynamicResource
+    /// 色刷运行时替换，工具栏/标签/地址栏即时切换；其余独立窗口暂保持深色）。</summary>
+    public void ApplyTheme(string? theme)
+    {
+        var light = string.Equals(theme, "light", StringComparison.OrdinalIgnoreCase);
+        SetBrush("ChromeBackgroundBrush", light ? "#FFF5F5F7" : "#FF101827");
+        SetBrush("ButtonOverlayBrush", light ? "#14000000" : "#33FFFFFF");
+        SetBrush("ButtonOverlayHoverBrush", light ? "#20000000" : "#4DFFFFFF");
+        SetBrush("ButtonOverlayPressedBrush", light ? "#2E000000" : "#66FFFFFF");
+        SetBrush("FieldBackgroundBrush", light ? "#FFFFFFFF" : "#1FFFFFFF");
+        SetBrush("FieldBorderBrush", light ? "#FFDADCE0" : "#2EFFFFFF");
+        SetBrush("FieldBorderFocusedBrush", light ? "#FF0B57D0" : "#66FFFFFF");
+        SetBrush("TextPrimaryBrush", light ? "#FF1A1A1A" : "#FFFFFFFF");
+        SetBrush("TextSecondaryBrush", light ? "#FF5F6368" : "#B3FFFFFF");
+        Background = light
+            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0xF5, 0xF7))
+            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x10, 0x18, 0x27));
+    }
+
+    private void SetBrush(string key, string hex)
+    {
+        if (System.Windows.Media.ColorConverter.ConvertFromString(hex) is System.Windows.Media.Color color)
+            Resources[key] = new System.Windows.Media.SolidColorBrush(color);
     }
 
     private void Engine_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -467,6 +495,8 @@ public partial class MainWindow : Window
     /// 命中标签项即切换，命中关闭按钮则交给其自身的 Click（不动手切换）。</summary>
     private void TabStrip_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
+        // 记录按下起点——拖拽需超过阈值移动才判定为拖拽（防误触发吞点击）
+        _tabDragStart = e.GetPosition(TabStrip);
         if (TabStrip.InputHitTest(e.GetPosition(TabStrip)) is not DependencyObject hit)
             return;
         var node = hit;
@@ -620,7 +650,7 @@ public partial class MainWindow : Window
     {
         if (_settingsWindow is null || !_settingsWindow.IsLoaded)
         {
-            _settingsWindow = new SettingsWindow(_settings, _broker) { Owner = this };
+            _settingsWindow = new SettingsWindow(_settings, _broker, this) { Owner = this };
         }
         _settingsWindow.Show();
         _settingsWindow.Activate();
@@ -738,14 +768,40 @@ public partial class MainWindow : Window
 
     // ================= M1 标签条拖拽排序 =================
 
+    private System.Windows.Point _tabDragStart;
+
     private void TabStrip_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed)
             return;
-        if (TabItemIndexUnderMouse(e.GetPosition(TabStrip)) is not int fromIndex)
+        var pos = e.GetPosition(TabStrip);
+        // 真实移动超过系统最小拖拽阈值才进入拖拽——否则点按 ✕ 时的微小抖动
+        // 会误触发拖拽、吞掉关闭点击（「标签只能新增不能删除」的根因）
+        if (Math.Abs(pos.X - _tabDragStart.X) < SystemParameters.MinimumHorizontalDragDistance
+            && Math.Abs(pos.Y - _tabDragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
             return;
+        if (IsOverCloseButton(pos))
+            return;  // 关闭按钮区域不拖拽——交由其 Click 处理
+        if (TabItemIndexUnderMouse(pos) is not int fromIndex)
+            return;
+        _tabDragStart = pos;  // 抑制重复 DoDragDrop
         // 容器级拖放（数据=来源索引）；DragOver/Drop 完成重排
         DragDrop.DoDragDrop(TabStrip, fromIndex, DragDropEffects.Move);
+    }
+
+    /// <summary>命中点是否落在某标签的关闭（✕）按钮上。</summary>
+    private bool IsOverCloseButton(System.Windows.Point position)
+    {
+        if (TabStrip.InputHitTest(position) is not DependencyObject hit)
+            return false;
+        var probe = hit;
+        while (probe is not null)
+        {
+            if (probe is System.Windows.Controls.Button button && button.Tag is string)
+                return true;
+            probe = System.Windows.Media.VisualTreeHelper.GetParent(probe);
+        }
+        return false;
     }
 
     private void TabStrip_DragOver(object sender, DragEventArgs e)

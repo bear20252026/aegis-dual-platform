@@ -21,22 +21,22 @@
     <Style x:Key="NavButton" TargetType="Button">
       <Setter Property="Width" Value="36"/>
       <Setter Property="Height" Value="36"/>
-      <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
       <Setter Property="FontSize" Value="15"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Focusable" Value="False"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="Button">
-            <Border x:Name="Chrome" CornerRadius="18" Background="{StaticResource ButtonOverlayBrush}">
+            <Border x:Name="Chrome" CornerRadius="18" Background="{DynamicResource ButtonOverlayBrush}">
               <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource ButtonOverlayHoverBrush}"/>
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ButtonOverlayHoverBrush}"/>
               </Trigger>
               <Trigger Property="IsPressed" Value="True">
-                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource ButtonOverlayPressedBrush}"/>
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ButtonOverlayPressedBrush}"/>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter TargetName="Chrome" Property="Background" Value="Transparent"/>
@@ -86,7 +86,7 @@
     <!-- M1-T1 原生标签条（ADR-009 D2：chrome 与页面 DOM 彻底隔离——
          标签条不再是注入 JS；点击切换/✕ 关闭/＋ 新建，全部原生控件；
          切换经 TabStrip_PreviewMouseLeftButtonDown 显式命中 + SelectionChanged 兜底） -->
-    <Border DockPanel.Dock="Top" Background="{StaticResource ChromeBackgroundBrush}" Padding="8,4">
+    <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBackgroundBrush}" Padding="8,4">
       <DockPanel>
         <Button x:Name="NewTabButton" DockPanel.Dock="Right" Style="{StaticResource NavButton}"
                 Content="＋" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"/>
@@ -112,7 +112,7 @@
                       <Border x:Name="Chip" CornerRadius="8,8,0,0" Margin="0,0,0,0"
                               Padding="12,6" BorderThickness="1,1,1,0"
                               BorderBrush="Transparent"
-                              Background="{StaticResource ChromeBackgroundBrush}">
+                              Background="{DynamicResource ChromeBackgroundBrush}">
                         <DockPanel>
                           <Button DockPanel.Dock="Right" Content="✕" Click="TabClose_Click"
                                   Tag="{Binding TabId}" Focusable="False" Cursor="Hand"
@@ -121,7 +121,7 @@
                                   ToolTip="关闭标签（Ctrl+W）">
                             <Button.Style>
                               <Style TargetType="Button">
-                                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
                                 <Setter Property="Background" Value="Transparent"/>
                                 <Setter Property="BorderThickness" Value="0"/>
                                 <Setter Property="FontSize" Value="10"/>
@@ -147,18 +147,18 @@
                                    VerticalAlignment="Center" Fill="#FF3B82F6"/>
                           <TextBlock x:Name="TabTitle" Text="{Binding Title}" FontSize="12" MaxWidth="150"
                                      TextTrimming="CharacterEllipsis"
-                                     Foreground="{StaticResource TextSecondaryBrush}"/>
+                                     Foreground="{DynamicResource TextSecondaryBrush}"/>
                         </DockPanel>
                       </Border>
                       <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
                           <!-- 激活标签：与下方工具栏同底色连成一体，标题转白 -->
-                          <Setter TargetName="Chip" Property="Background" Value="{StaticResource ChromeBackgroundBrush}"/>
+                          <Setter TargetName="Chip" Property="Background" Value="{DynamicResource ChromeBackgroundBrush}"/>
                           <Setter TargetName="Chip" Property="BorderBrush" Value="#22FFFFFF"/>
                           <Setter TargetName="TabTitle" Property="Foreground" Value="#FFFFFFFF"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                          <Setter TargetName="Chip" Property="Background" Value="{StaticResource ButtonOverlayHoverBrush}"/>
+                          <Setter TargetName="Chip" Property="Background" Value="{DynamicResource ButtonOverlayHoverBrush}"/>
                           <Setter TargetName="TabTitle" Property="Foreground" Value="#FFFFFFFF"/>
                         </Trigger>
                       </ControlTemplate.Triggers>
@@ -171,7 +171,7 @@
         </ScrollViewer>
       </DockPanel>
     </Border>
-    <Border DockPanel.Dock="Top" Background="{StaticResource ChromeBackgroundBrush}" Padding="8,6">
+    <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBackgroundBrush}" Padding="8,6">
       <DockPanel>
         <StackPanel Orientation="Horizontal">
           <Button x:Name="BackButton" Style="{StaticResource NavButton}" Content="←" Click="Back_Click" ToolTip="后退"/>
@@ -198,13 +198,13 @@
         </StackPanel>
         <!-- 胶囊地址栏：深色玻璃 + 聚焦描边 + 占位符 + 内嵌「打开」 -->
         <Border x:Name="AddressPill" Margin="10,0,0,0" CornerRadius="18"
-                Background="{StaticResource FieldBackgroundBrush}" BorderThickness="1">
+                Background="{DynamicResource FieldBackgroundBrush}" BorderThickness="1">
           <Border.Style>
             <Style TargetType="Border">
-              <Setter Property="BorderBrush" Value="{StaticResource FieldBorderBrush}"/>
+              <Setter Property="BorderBrush" Value="{DynamicResource FieldBorderBrush}"/>
               <Style.Triggers>
                 <Trigger Property="IsKeyboardFocusWithin" Value="True">
-                  <Setter Property="BorderBrush" Value="{StaticResource FieldBorderFocusedBrush}"/>
+                  <Setter Property="BorderBrush" Value="{DynamicResource FieldBorderFocusedBrush}"/>
                 </Trigger>
               </Style.Triggers>
             </Style>
@@ -216,9 +216,9 @@
             </Grid.ColumnDefinitions>
             <Grid Grid.Column="0" Margin="14,0,4,0">
               <TextBlock x:Name="AddressHint" Text="搜索网页或输入网址" VerticalAlignment="Center"
-                         Foreground="{StaticResource TextSecondaryBrush}" IsHitTestVisible="False"/>
+                         Foreground="{DynamicResource TextSecondaryBrush}" IsHitTestVisible="False"/>
               <TextBox x:Name="AddressBar" BorderThickness="0" Background="Transparent"
-                       Foreground="{StaticResource TextPrimaryBrush}" CaretBrush="#FFFFFFFF"
+                       Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="#FFFFFFFF"
                        VerticalAlignment="Center" VerticalContentAlignment="Center" Height="30"
                        ToolTip="地址栏（搜索词自动拼引擎；导航经 Broker 决策——真实取消）"
                        TextChanged="AddressBar_TextChanged" KeyDown="AddressBar_KeyDown"

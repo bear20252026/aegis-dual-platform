@@ -28,6 +28,10 @@ public sealed class AppSettings
     /// ntp_wallpaper 同语义；空值回退 NtpAssets.DefaultWallpaper）。</summary>
     public string NtpWallpaper { get; set; } = "";
 
+    /// <summary>浏览器 chrome 主题（"dark"/"light"——消费者：MainWindow.ApplyTheme）。
+    /// 默认深色（历史遗留美学）；切换经设置窗口。</summary>
+    public string Theme { get; set; } = "dark";
+
     public static string DefaultPath =>
         Path.Combine(AppPaths.DataDir, "settings.json");
 

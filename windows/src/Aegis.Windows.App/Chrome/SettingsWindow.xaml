@@ -12,6 +12,12 @@
     <CheckBox x:Name="HistoryToggle" Content="记录浏览历史" Foreground="#FFB3FFFFFF"
               Checked="HistoryToggle_Changed" Unchecked="HistoryToggle_Changed"/>
 
+    <TextBlock Text="外观主题" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
+    <ComboBox x:Name="ThemeBox" Height="30" SelectionChanged="ThemeBox_SelectionChanged">
+      <ComboBoxItem Content="深色"/>
+      <ComboBoxItem Content="浅色"/>
+    </ComboBox>
+
     <TextBlock Text="威胁黑名单订阅源" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
     <TextBox x:Name="ThreatFeedBox" Height="30" VerticalContentAlignment="Center"
              LostFocus="ThreatFeedBox_LostFocus"

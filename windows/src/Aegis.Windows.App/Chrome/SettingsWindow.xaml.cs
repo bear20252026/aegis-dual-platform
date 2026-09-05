@@ -13,18 +13,21 @@ public partial class SettingsWindow : Window
 {
     private readonly AppSettings _settings;
     private readonly BrowserPolicyBroker _broker;
+    private readonly MainWindow _owner;
     private bool _suppressEvents;
 
-    public SettingsWindow(AppSettings settings, BrowserPolicyBroker broker)
+    public SettingsWindow(AppSettings settings, BrowserPolicyBroker broker, MainWindow owner)
     {
         InitializeComponent();
         _settings = settings;
         _broker = broker;
+        _owner = owner;
         _suppressEvents = true;
         EngineBox.ItemsSource = UrlNormalizer.EngineUrls.Keys.ToList();
         EngineBox.SelectedValue = _settings.SearchEngine;
         HistoryToggle.IsChecked = _settings.HistoryEnabled;
         ThreatFeedBox.Text = _settings.ThreatFeedUrl;
+        ThemeBox.SelectedIndex = string.Equals(_settings.Theme, "light", System.StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         if (_broker.KillSwitch.IsEngaged)
             KillSwitchButton.IsEnabled = false;
         _suppressEvents = false;
@@ -44,6 +47,15 @@ public partial class SettingsWindow : Window
             return;
         _settings.HistoryEnabled = HistoryToggle.IsChecked == true;
         Save();
+    }
+
+    private void ThemeBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressEvents || ThemeBox.SelectedIndex < 0)
+            return;
+        _settings.Theme = ThemeBox.SelectedIndex == 1 ? "light" : "dark";
+        Save();
+        _owner.ApplyTheme(_settings.Theme);
     }
 
     private void ThreatFeedBox_LostFocus(object sender, RoutedEventArgs e)
