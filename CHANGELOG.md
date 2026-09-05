@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——历史窗口精细化 + 日历查询，2026-09-06)
+- **可展开日历查询**：WPF DatePicker 展开日历选某一天；支持起止日期「范围」查询
+  （两个日历）、快捷日期芯片（全部/今天/昨天/近7天/本月）；数据层新增
+  `SearchRange`（参数绑定区间查询）。
+- **精细化 UI**：玻璃卡片 + 圆角 + 阴影；日期分组头含「月日 + 星期 + 条数徽标」；
+  条目含时刻胶囊/标题/域名/悬停删除；搜索带图标与占位；跟随深浅主题。
+
+
+
 ### Fixed (Windows C# 正典栈——历史窗口闪退根因，2026-09-06)
 - **历史窗口闪退/无法显示**：`HistoryWindow.ApplyTheme` 里 `ColorConverter.ConvertFromString`
   对同一合法色值抛 `FormatException: 令牌无效`（栈定位），点历即崩。改为手动解析

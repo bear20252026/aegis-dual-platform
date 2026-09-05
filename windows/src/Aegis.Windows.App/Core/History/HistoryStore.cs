@@ -90,6 +90,36 @@ public sealed class HistoryStore
         return list;
     }
 
+    /// <summary>按日期区间查询（from/to=yyyy-MM-dd，可为空不限一端），可叠加文本。
+    /// 全部参数绑定。空文本+空区间回退 Recent。</summary>
+    public IReadOnlyList<HistoryEntry> SearchRange(string query, string? from, string? to, int limit = 1000)
+    {
+        var hasText = !string.IsNullOrWhiteSpace(query);
+        var hasFrom = !string.IsNullOrEmpty(from);
+        var hasTo = !string.IsNullOrEmpty(to);
+        if (!hasText && !hasFrom && !hasTo)
+            return Recent(limit);
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        var clauses = new List<string>();
+        if (hasText)
+            clauses.Add("(url LIKE $q OR title LIKE $q)");
+        if (hasFrom)
+            clauses.Add("visited_date >= $from");
+        if (hasTo)
+            clauses.Add("visited_date <= $to");
+        select.CommandText = $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {string.Join(" AND ", clauses)} ORDER BY visited_at DESC LIMIT $lim";
+        if (hasText)
+            select.Parameters.AddWithValue("$q", $"%{query}%");
+        if (hasFrom)
+            select.Parameters.AddWithValue("$from", from);
+        if (hasTo)
+            select.Parameters.AddWithValue("$to", to);
+        select.Parameters.AddWithValue("$lim", limit);
+        using var reader = select.ExecuteReader();
+        return ReadEntries(reader);
+    }
+
     /// <summary>删除单条历史（不可恢复——UI 层负责确认）。</summary>
     public bool Delete(long id)
     {
