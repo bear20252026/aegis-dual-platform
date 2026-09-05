@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——多标签可见性与切换，2026-09-05)
+- 切换时同时设置激活标签 Z 序、Visibility、命中测试与布局刷新，避免 HWND WebView2 层叠导致最后标签盖住其它标签。
+- 增加标签创建日志，便于确认多标签创建与初始化。
+
 ### Fixed (Windows C# 正典栈——NTP 首页渲染（实则根因）+ 首页清理，2026-09-05)
 - **[渲染根因] NTP 导航 ConnectionAborted**：同一调用栈里
   `SetVirtualHostNameToFolderMapping` 后立即导航虚拟主机，映射尚未传播到渲染
