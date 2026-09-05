@@ -22,8 +22,18 @@ public partial class HistoryWindow : Window
         _history = history;
         Loaded += (_, _) =>
         {
-            RefreshDateFilter();
-            Reload(SearchBox.Text, SelectedDate());
+            try
+            {
+                RefreshDateFilter();
+                Reload(SearchBox.Text, SelectedDate());
+            }
+            catch (Exception ex)
+            {
+                Aegis.Windows.Core.Security.SecurityLog.Write(
+                    $"[history] 加载历史窗口异常（已兜底）: {ex.GetType().Name}: {ex.Message}");
+                EmptyHint.Text = "历史记录加载失败，请稍后重试。";
+                HistoryList.ItemsSource = null;
+            }
         };
     }
 
