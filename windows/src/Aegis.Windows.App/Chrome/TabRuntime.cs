@@ -54,6 +54,14 @@ public sealed class TabRuntime : IDisposable
         remove => Host.DownloadConfirmationRequested -= value;
     }
 
+    /// <summary>target=_blank/window.open 请求转发：由 MainWindow 在现有标签条
+    /// 中新建标签（不创建独立弹窗）。</summary>
+    public event Action<string>? NewWindowRequested
+    {
+        add => Host.NewWindowRequested += value;
+        remove => Host.NewWindowRequested -= value;
+    }
+
     /// <summary>M3 下载启动通知（反馈条显示）。</summary>
     public event Action<string, bool>? DownloadStarted;
 

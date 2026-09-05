@@ -27,6 +27,11 @@ public sealed class HostWebView : IDisposable
     /// 无订阅者时危险下载 fail-closed 拒绝。</summary>
     public event Func<string, string, bool>? DownloadConfirmationRequested;
 
+    /// <summary>新窗口请求（target=_blank / window.open 等）。宿主拦截原生弹窗，
+    /// 把 URL 交给受信 chrome 在新标签页打开——链接点击不再失效（此前一律
+    /// Handled=true 静默丢弃 → 新闻/热搜等 target=_blank 链接点击无反应）。</summary>
+    public event Action<string>? NewWindowRequested;
+
     public HostWebView(Broker.BrowserPolicyBroker broker, string sessionId, string? tabId = null)
     {
         _broker = broker;
@@ -50,11 +55,13 @@ public sealed class HostWebView : IDisposable
         {
             e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: false);
         };
-        // 新窗口请求经 broker（NewWindowRequested——禁止绕过导航决策）
+        // 新窗口请求（target=_blank / window.open）：拦截原生弹窗（避免策略被
+        // 绕过），但把 URL 交给受信 chrome 决定是否在新标签打开——链接点击可跳转
         webView.NewWindowRequested += (_, e) =>
         {
-            // 没有已注册的受控子 WebView executor 时，禁止弹窗导航，避免策略被绕过。
-            e.Handled = true;
+            e.Handled = true;  // 一律不弹独立窗口
+            if (!string.IsNullOrWhiteSpace(e.Uri))
+                NewWindowRequested?.Invoke(e.Uri);
         };
         // M3 下载管理（ADR-009：pywebview 硬编码禁用下载的天花板在原生栈
         // 不复存在）。全量经 broker 审计；危险扩展（对齐 Android DownloadPolicy）

@@ -191,6 +191,18 @@ public partial class MainWindow : Window
             ShowConfirmation(e);
         };
         runtime.Host.NavigationConfirmationResolved += (_, _) => HideConfirmation();
+        // target=_blank / window.open 链接：不再静默丢弃，改为验证公网地址后
+        // 在当前窗口新建标签打开（对齐主流浏览器）。非法协议/内网/环回/保留
+        // 地址一律拒绝（安全约束）。
+        runtime.NewWindowRequested += targetUrl =>
+        {
+            if (!Core.UrlSafety.IsPublicHttpUrl(targetUrl))
+            {
+                ShowFeedback("已拒绝打开该链接（非公网地址）", isWarning: true);
+                return;
+            }
+            _tabs.NewTab(targetUrl);
+        };
         // M3 危险扩展下载确认（审计补缺——此前 DownloadConfirmationRequested
         // 全仓零订阅者 → 危险下载恒被静默拒绝，该功能形同虚设）。用户显式
         // 确认才放行；窗口已关闭/异常仍 fail-closed 拒绝。
