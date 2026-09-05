@@ -116,7 +116,7 @@ jobs:
     permissions:
       id-token: write
       attestations: write
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
