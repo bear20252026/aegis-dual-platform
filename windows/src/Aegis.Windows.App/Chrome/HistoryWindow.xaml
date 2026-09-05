@@ -16,6 +16,7 @@
     <SolidColorBrush x:Key="FieldBorderBrush" Color="#2EFFFFFF"/>
     <SolidColorBrush x:Key="AccentBrush" Color="#FF3B82F6"/>
     <SolidColorBrush x:Key="DangerBrush" Color="#FF7F1D1D"/>
+
     <Style x:Key="GhostButton" TargetType="Button">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
@@ -38,6 +39,36 @@
         </Setter.Value>
       </Setter>
     </Style>
+
+    <!-- 日期分组头 -->
+    <DataTemplate x:Key="DayHeaderTemplate">
+      <Border Background="{DynamicResource AccentBrush}" CornerRadius="8,8,0,0" Padding="12,7" Margin="0,10,0,0">
+        <DockPanel>
+          <TextBlock Text="{Binding Date}" Foreground="White" FontSize="13" FontWeight="SemiBold"/>
+          <TextBlock Text="{Binding CountText}" DockPanel.Dock="Right" Foreground="#CCFFFFFF"
+                     FontSize="11" VerticalAlignment="Center"/>
+        </DockPanel>
+      </Border>
+    </DataTemplate>
+
+    <!-- 单条历史 -->
+    <DataTemplate x:Key="HistoryRowTemplate">
+      <Border Background="{DynamicResource CardBrush}" CornerRadius="0,0,8,8"
+              Margin="0,0,0,1" Padding="12,8">
+        <DockPanel>
+          <Button DockPanel.Dock="Right" Content="✕" Style="{StaticResource GhostButton}"
+                  Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除这条记录" Margin="6,0,0,0"/>
+          <TextBlock DockPanel.Dock="Left" Text="{Binding TimeText}" Foreground="{DynamicResource TextMutedBrush}"
+                     FontSize="11" Width="52" Margin="0,0,10,0" VerticalAlignment="Center"/>
+          <StackPanel>
+            <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimaryBrush}"
+                       FontSize="13" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/>
+            <TextBlock Text="{Binding Host}" Foreground="{DynamicResource TextSecondaryBrush}"
+                       FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+          </StackPanel>
+        </DockPanel>
+      </Border>
+    </DataTemplate>
   </Window.Resources>
 
   <DockPanel Margin="16">
@@ -66,46 +97,10 @@
     <TextBlock x:Name="EmptyHint" DockPanel.Dock="Top" Margin="0,4,0,0" FontSize="12"
                Foreground="{DynamicResource TextMutedBrush}"/>
 
-    <!-- 按日期分组的记录列表 -->
-    <ListBox x:Name="HistoryList" Margin="0,6,0,0" Background="Transparent" BorderThickness="0"
-             ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
-      <ListBox.GroupStyle>
-        <GroupStyle>
-          <GroupStyle.HeaderTemplate>
-            <DataTemplate>
-              <Border Background="{DynamicResource AccentBrush}" CornerRadius="8,8,0,0" Padding="12,7" Margin="0,8,0,0">
-                <DockPanel>
-                  <TextBlock Text="{Binding Name}" Foreground="White" FontSize="13" FontWeight="SemiBold"/>
-                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <TextBlock Text="{Binding ItemCount}" Foreground="#CCFFFFFF" FontSize="11"
-                               VerticalAlignment="Center"/>
-                    <TextBlock Text=" 条" Foreground="#CCFFFFFF" FontSize="11" VerticalAlignment="Center"/>
-                  </StackPanel>
-                </DockPanel>
-              </Border>
-            </DataTemplate>
-          </GroupStyle.HeaderTemplate>
-        </GroupStyle>
-      </ListBox.GroupStyle>
-      <ListBox.ItemTemplate>
-        <DataTemplate>
-          <Border Background="{DynamicResource CardBrush}" CornerRadius="0,0,8,8"
-                  Margin="0,0,0,1" Padding="12,8">
-            <DockPanel>
-              <Button DockPanel.Dock="Right" Content="✕" Style="{StaticResource GhostButton}"
-                      Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除这条记录" Margin="6,0,0,0"/>
-              <TextBlock DockPanel.Dock="Left" Text="{Binding TimeText}" Foreground="{DynamicResource TextMutedBrush}"
-                         FontSize="11" Width="52" Margin="0,0,10,0" VerticalAlignment="Center"/>
-              <StackPanel>
-                <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimaryBrush}"
-                           FontSize="13" TextTrimming="CharacterEllipsis" FontWeight="SemiBold"/>
-                <TextBlock Text="{Binding Host}" Foreground="{DynamicResource TextSecondaryBrush}"
-                           FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
-              </StackPanel>
-            </DockPanel>
-          </Border>
-        </DataTemplate>
-      </ListBox.ItemTemplate>
-    </ListBox>
+    <!-- 纯 ItemsControl：预分组（日期头 + 条目）列表，经 DataTemplateSelector 渲染，
+         不使用 CollectionViewSource 分组（规避渲染期 FormatException） -->
+    <ScrollViewer DockPanel.Dock="Bottom" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+      <ItemsControl x:Name="HistoryList" Margin="0,6,0,0"/>
+    </ScrollViewer>
   </DockPanel>
 </Window>

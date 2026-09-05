@@ -19,7 +19,7 @@ public partial class App : Application
         try
         {
             SecurityLog.Write(
-                $"[fatal] 未处理异常（已拦截，应用继续运行）: {e.Exception?.GetType().Name}: {e.Exception?.Message}");
+                $"[fatal] 未处理异常（已拦截，应用继续运行）: {e.Exception?.GetType().Name}: {e.Exception?.Message}{Environment.NewLine}{e.Exception}");
         }
         catch
         {

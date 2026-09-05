@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——历史窗口闪退根因，2026-09-06)
+- **历史窗口闪退/无法显示**：`HistoryWindow.ApplyTheme` 里 `ColorConverter.ConvertFromString`
+  对同一合法色值抛 `FormatException: 令牌无效`（栈定位），点历即崩。改为手动解析
+  ARGB 十六进制（`Convert.ToByte(hex,16)`），确定性不再抛；MainWindow.SetBrush 同步。
+- 历史窗口改为「预分组列表 + DataTemplateSelector」渲染（日期头+条目），不再依赖
+  CollectionViewSource 分组，规避渲染期格式异常；日期分组/搜索/日期筛选/删除/清空保留。
+- 兜底日志记录完整异常堆栈（`[fatal]` 含栈）便于后续精确定位。
+
+
+
 ### Added (Windows C# 正典栈——历史记录全面升级，2026-09-06)
 - **按日期保存与查询**：HistoryStore 新增 visited_date 列（本地日期），支持按日期
   查询（ByDate）、文本+日期组合查询、日期列表、单条删除；旧库自动迁移补列并回填。

@@ -89,8 +89,28 @@ public partial class MainWindow : Window
 
     private void SetBrush(string key, string hex)
     {
-        if (System.Windows.Media.ColorConverter.ConvertFromString(hex) is System.Windows.Media.Color color)
-            Resources[key] = new System.Windows.Media.SolidColorBrush(color);
+        // 手动解析 ARGB（与 HistoryWindow.Brush 同——规避 ColorConverter
+        // 对同一合法色值抛「Invalid token」的运行时异常）
+        var h = hex.TrimStart('#');
+        if (h.Length is 6 or 8)
+        {
+            byte a = 0xFF, r, g, b;
+            if (h.Length == 8)
+            {
+                a = Convert.ToByte(h.Substring(0, 2), 16);
+                r = Convert.ToByte(h.Substring(2, 2), 16);
+                g = Convert.ToByte(h.Substring(4, 2), 16);
+                b = Convert.ToByte(h.Substring(6, 2), 16);
+            }
+            else
+            {
+                r = Convert.ToByte(h.Substring(0, 2), 16);
+                g = Convert.ToByte(h.Substring(2, 2), 16);
+                b = Convert.ToByte(h.Substring(4, 2), 16);
+            }
+            Resources[key] = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromArgb(a, r, g, b));
+        }
     }
 
     private void Engine_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
