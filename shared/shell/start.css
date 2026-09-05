@@ -76,27 +76,30 @@
   .wp:hover { transform:scale(1.12); }
   .wp.active { border-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,0.25); }
   .wp-label { font-size:12px; color:rgba(255,255,255,0.78); padding-right:4px; letter-spacing:1px; }
-  /* 书签紧凑横条：不再以大宫格占满首页，超出内容水平滚动 */
+  /* 常用站点磁贴（对齐 Edge 新标签页：居中宫格、圆形站点图标+名称、
+     最多 8 个 + “添加”磁贴） */
   .bookmarks {
-    margin-top:24px; display:flex; flex-wrap:nowrap; gap:8px; justify-content:flex-start;
-    max-width:min(760px, 88vw); overflow-x:auto; padding:4px 8px 8px;
-    scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.28) transparent;
+    margin-top:28px; display:flex; flex-wrap:wrap; gap:8px 12px; justify-content:center;
+    max-width:min(560px, 92vw);
   }
   .bm {
-    flex:0 0 auto; width:auto; max-width:150px; padding:7px 10px;
-    display:flex; align-items:center; gap:7px; background:rgba(15,20,32,0.30);
-    border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px);
-    border-radius:18px; cursor:pointer; text-align:left;
-    transition:transform .12s, background .12s, border-color .12s;
+    flex:0 0 auto; width:88px; padding:10px 6px 8px;
+    display:flex; flex-direction:column; align-items:center; gap:6px;
+    background:transparent; border:0; border-radius:14px; cursor:pointer;
+    transition:background .12s, transform .12s;
   }
-  .bm:hover { transform:translateY(-1px); background:rgba(15,20,32,0.50); border-color:rgba(255,255,255,0.28); }
+  .bm:hover { background:rgba(15,20,32,0.40); transform:translateY(-1px); }
   .bm-ico {
-    width:22px; height:22px; flex:0 0 22px; margin:0; border-radius:50%;
-    background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.16);
-    color:#fff; display:flex; align-items:center; justify-content:center;
-    font-weight:600; font-size:10px;
+    width:46px; height:46px; border-radius:50%;
+    background:rgba(255,255,255,0.10); border:1px solid rgba(255,255,255,0.16);
+    backdrop-filter:blur(10px); color:#fff; display:flex; align-items:center; justify-content:center;
+    font-weight:600; font-size:18px;
+    box-shadow:0 6px 18px rgba(0,0,0,0.22);
   }
-  .bm-name { max-width:105px; font-size:11px; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  .bm-name { max-width:82px; font-size:11px; color:rgba(255,255,255,0.92); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  /* 添加常用站点磁贴（浅色虚线圈 + 提示） */
+  .bm-add .bm-ico { background:rgba(255,255,255,0.05); border:1px dashed rgba(255,255,255,0.34); color:#fff; font-size:24px; }
+  .bm-add .bm-name { color:rgba(255,255,255,0.66); }
   .bm-empty { font-size:12px; color:rgba(255,255,255,0.72); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   .footer { position:fixed; left:0; right:0; bottom:10px; z-index:4; text-align:center; font-size:12px; color:rgba(255,255,255,0.7); text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   /* 搜索引擎胶囊（白底上的中性深色，与主按钮同语言） */

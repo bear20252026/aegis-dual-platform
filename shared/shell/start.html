@@ -416,6 +416,22 @@
             card.appendChild(name);
             frag.appendChild(card);
           }
+          // “添加常用站点”磁贴（对齐 Edge）：点击聚焦搜索框输入网址
+          var addTile = document.createElement('div');
+          addTile.className = 'bm bm-add';
+          addTile.addEventListener('click', function () {
+            var q = document.getElementById('q');
+            if (q) { q.focus(); q.select(); }
+          });
+          var addIco = document.createElement('div');
+          addIco.className = 'bm-ico';
+          addIco.textContent = '＋';
+          var addName = document.createElement('div');
+          addName.className = 'bm-name';
+          addName.textContent = '添加常用站点';
+          addTile.appendChild(addIco);
+          addTile.appendChild(addName);
+          frag.appendChild(addTile);
           box.replaceChildren(frag);
         });
       } catch (e) {}

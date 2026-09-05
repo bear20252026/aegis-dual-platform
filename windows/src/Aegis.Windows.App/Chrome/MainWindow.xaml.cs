@@ -722,11 +722,18 @@ public partial class MainWindow : Window
     private void Forward_Click(object sender, RoutedEventArgs e) => ActiveControl()?.GoForward();
     private void Refresh_Click(object sender, RoutedEventArgs e) => ActiveControl()?.Reload();
     private void Stop_Click(object sender, RoutedEventArgs e) => ActiveControl()?.Stop();
-    /// <summary>M1 主页：回到新标签页（导航仍经 broker 决策）。</summary>
+    /// <summary>主页（Edge 对齐：回到新标签页，导航仍经 broker 决策）。</summary>
     private void Home_Click(object sender, RoutedEventArgs e)
     {
         if (ActiveControl() is { } control)
             control.Source = new Uri(HomeUrl);
+    }
+
+    /// <summary>个人资料占位：无账号体系，点击聚焦地址栏（对齐 Edge 圆钮位置）。</summary>
+    private void Profile_Click(object sender, RoutedEventArgs e)
+    {
+        AddressBar.Focus();
+        AddressBar.SelectAll();
     }
 
     // ================= M1 标签条拖拽排序 =================
