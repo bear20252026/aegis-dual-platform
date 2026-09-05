@@ -9,59 +9,58 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using Aegis.Windows.Core.History;
 
-/// <summary>历史记录窗口（精细化版）：支持文本搜索、快捷日期（今天/昨天/近7天/本月）、
-/// 可展开日历按某天查询、起止日期范围查询；按日期分组（日期+星期+条数）、
-/// 条目含时刻/标题/域名/悬停删除；跟随深浅主题。数据层全部参数绑定。</summary>
+/// <summary>历史记录窗口（Apple 风格精细化版）：
+/// - 查询：文本搜索 + 快捷日期分段（全部/今天/昨天/近7天/本月）+ 可展开日历选某天 + 起止范围；
+/// - 展示：iOS 分组列表（「今天/昨天/9月4日」小节头 + 圆角卡片 + 发丝分隔线），
+///   条目含时刻/标题/域名/删除；外层 ListBox 虚拟化 + 分页加载，千条数据流畅；
+/// - 数据层全部参数绑定（安全约束）；主题跟随主窗口深浅。</summary>
 public partial class HistoryWindow : Window
 {
     private readonly HistoryStore _history;
-    private readonly HistoryTemplateSelector _selector;
     private bool _suppressFilter;
-    private bool _initialized;  // InitializeComponent 完成前忽略控件事件（防 NRE）
+    private bool _initialized;
+    private int _limit = 200;
 
     public HistoryWindow(HistoryStore history)
     {
         InitializeComponent();
         _history = history;
-        _selector = new HistoryTemplateSelector(
-            (DataTemplate)Resources["DayHeaderTemplate"],
-            (DataTemplate)Resources["HistoryRowTemplate"]);
-        HistoryList.ItemTemplateSelector = _selector;
-        _initialized = true;  // 此后控件事件才允许处理（初始化期事件一律忽略）
+        _initialized = true;  // 此后控件事件才处理（初始化期事件一律忽略——防 NRE）
         Loaded += (_, _) =>
         {
             try
             {
-                RefreshDateFilter();
                 ApplyFilter();
             }
             catch (Exception ex)
             {
                 Aegis.Windows.Core.Security.SecurityLog.Write(
-                    $"[history] 加载历史窗口异常（已兜底）: {ex.GetType().Name}: {ex.Message}");
+                    $"[history] 加载历史窗口异常（已兜底）: {ex.GetType().Name}: {ex.Message}{Environment.NewLine}{ex}");
                 EmptyHint.Text = "历史记录加载失败，请稍后重试。";
             }
         };
     }
 
-    /// <summary>主窗口主题联动（同步 self-contained 色刷）。</summary>
+    /// <summary>主窗口主题联动（iOS 深浅色板）。</summary>
     public void ApplyTheme(string? theme)
     {
         var light = string.Equals(theme, "light", StringComparison.OrdinalIgnoreCase);
-        Resources["ChromeBackgroundBrush"] = Brush(light ? "#FFF1F3F4" : "#FF101827");
-        Resources["SurfaceBrush"] = Brush(light ? "#FFFFFFFF" : "#FF1B2537");
-        Resources["CardBrush"] = Brush(light ? "#FFFFFFFF" : "#FF1F2A3D");
-        Resources["CardHoverBrush"] = Brush(light ? "#FFE8EAED" : "#FF2A3A55");
+        Resources["ChromeBackgroundBrush"] = Brush(light ? "#FFF2F2F7" : "#FF1C1C1E");
+        Resources["CardBrush"] = Brush(light ? "#FFFFFFFF" : "#FF2C2C2E");
+        Resources["SeparatorBrush"] = Brush(light ? "#FFE5E5EA" : "#FF38383A");
+        Resources["SegmentedBrush"] = Brush(light ? "#FFE9E9EB" : "#FF2C2C2E");
+        Resources["SegmentedSelectedBrush"] = Brush(light ? "#FFFFFFFF" : "#FF5A5A5E");
+        Resources["FieldBackgroundBrush"] = Brush(light ? "#FFE9E9EB" : "#FF2C2C2E");
         Resources["TextPrimaryBrush"] = Brush(light ? "#FF1A1A1A" : "#FFFFFFFF");
-        Resources["TextSecondaryBrush"] = Brush(light ? "#FF5F6368" : "#FFB3FFFFFF");
-        Resources["TextMutedBrush"] = Brush(light ? "#FF80868B" : "#FF8A93A6");
-        Resources["FieldBackgroundBrush"] = Brush(light ? "#FFFFFFFF" : "#FF1B2537");
-        Resources["FieldBorderBrush"] = Brush(light ? "#FFDADCE0" : "#FF2E3B55");
-        Resources["AccentSoftBrush"] = Brush(light ? "#1A0B57D0" : "#223B82F6");
+        Resources["TextSecondaryBrush"] = Brush(light ? "#FF8A8A8E" : "#FF98989F");
+        Resources["TextMutedBrush"] = Brush(light ? "#FFAEAEB2" : "#FF6C6C70");
+        Resources["AccentBrush"] = Brush(light ? "#FF007AFF" : "#FF0A84FF");
+        Resources["AccentSoftBrush"] = Brush(light ? "#1A007AFF" : "#220A84FF");
     }
 
     private static System.Windows.Media.Brush Brush(string hex)
     {
+        // 手动解析 #AARRGGBB / #RRGGBB——规避 ColorConverter 运行时「Invalid token」异常
         var h = hex.TrimStart('#');
         byte a = 0xFF, r, g, b;
         if (h.Length == 8)
@@ -83,13 +82,7 @@ public partial class HistoryWindow : Window
         return brush;
     }
 
-    private void RefreshDateFilter()
-    {
-        // 快捷芯片初始态：全部选中；范围面板收起
-        RangePanel.Visibility = Visibility.Collapsed;
-    }
-
-    // ============ 日期/搜索筛选 ============
+    // ============ 筛选 ============
 
     private void ApplyFilter()
     {
@@ -104,23 +97,32 @@ public partial class HistoryWindow : Window
         {
             _suppressFilter = false;
         }
-        Reload(SearchBox.Text, from, to);
+        try
+        {
+            Reload(SearchBox.Text, from, to);
+        }
+        catch (Exception ex)
+        {
+            Aegis.Windows.Core.Security.SecurityLog.Write(
+                $"[history] 筛选异常（已兜底）: {ex.GetType().Name}: {ex.Message}");
+            EmptyHint.Text = "查询失败，请调整筛选条件后重试。";
+        }
     }
 
-    /// <summary>由当前激活的筛选控件计算日期区间（yyyy-MM-dd，可为空）。</summary>
+    /// <summary>由激活的筛选控件计算日期区间（yyyy-MM-dd，空=不限）。</summary>
     private void ComputeRange(out string? from, out string? to)
     {
         var today = DateTime.Today;
+        from = null;
+        to = null;
         if (ChipToday.IsChecked == true)
         {
-            from = today.ToString("yyyy-MM-dd");
-            to = today.ToString("yyyy-MM-dd");
+            from = to = today.ToString("yyyy-MM-dd");
         }
         else if (ChipYesterday.IsChecked == true)
         {
             var y = today.AddDays(-1);
-            from = y.ToString("yyyy-MM-dd");
-            to = y.ToString("yyyy-MM-dd");
+            from = to = y.ToString("yyyy-MM-dd");
         }
         else if (ChipWeek.IsChecked == true)
         {
@@ -140,71 +142,60 @@ public partial class HistoryWindow : Window
         }
         else if (CustomDate.SelectedDate is { } d)
         {
-            from = d.ToString("yyyy-MM-dd");
-            to = d.ToString("yyyy-MM-dd");
-        }
-        else
-        {
-            from = null;
-            to = null;
+            from = to = d.ToString("yyyy-MM-dd");
         }
     }
 
     private void Reload(string query, string? from, string? to)
     {
-        var entries = _history.SearchRange(query, from, to, 1000);
-        var items = BuildGrouped(entries);
-        HistoryList.ItemsSource = items;
-        var rowCount = entries.Count;
-        var dayCount = entries.Select(e => e.VisitedDate).Where(d => !string.IsNullOrEmpty(d)).Distinct().Count();
-        SummaryText.Text = $"{rowCount} 条 · {dayCount} 天";
-        EmptyHint.Visibility = rowCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var entries = _history.SearchRange(query, from, to, _limit);
+        var groups = BuildGroups(entries);
+        HistoryList.ItemsSource = groups;
+        var dayCount = groups.Count;
+        SummaryText.Text = $"{entries.Count} 条 · {dayCount} 天";
+        EmptyHint.Visibility = entries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyHint.Text = "没有匹配的历史记录。";
+        LoadMoreButton.Visibility = entries.Count >= _limit ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    /// <summary>按日期倒序预分组：每条为「日期头 + 若干条目」，日期头含星期与条数。</summary>
-    private static List<object> BuildGrouped(IReadOnlyList<HistoryEntry> entries)
+    /// <summary>按日期倒序分组：日期标签（今天/昨天/9月4日 星期五）+ 该日条目。</summary>
+    private static List<DayGroup> BuildGroups(IReadOnlyList<HistoryEntry> entries)
     {
-        var list = new List<object>();
-        string? currentDay = null;
-        var dayItems = new List<HistoryRow>();
-        void Flush()
+        var groups = new List<DayGroup>();
+        var byDay = entries
+            .GroupBy(e => string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate)
+            .OrderByDescending(g => g.Key, StringComparer.Ordinal);
+        foreach (var g in byDay)
         {
-            if (currentDay is not null && dayItems.Count > 0)
-            {
-                list.Add(MakeHeader(currentDay, dayItems.Count));
-                list.AddRange(dayItems);
-                dayItems.Clear();
-            }
+            var date = g.Key;
+            groups.Add(new DayGroup(
+                DateLabel(date),
+                g.Select(e => new HistoryRow(
+                    e.Id,
+                    string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
+                    TryHost(e.Url),
+                    ParseLocalTime(e.VisitedAt))).ToList()));
         }
-        foreach (var e in entries)
-        {
-            var day = string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate;
-            if (day != currentDay)
-            {
-                Flush();
-                currentDay = day;
-            }
-            dayItems.Add(ToRow(e));
-        }
-        Flush();
-        return list;
+        return groups;
     }
 
-    private static DayHeader MakeHeader(string date, int count)
+    /// <summary>iOS 风格日期标签：今天 / 昨天 / 9月4日 星期五 / 未知日期。</summary>
+    private static string DateLabel(string date)
     {
-        var display = date;
-        var weekday = "";
-        if (DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+        if (date == "未知日期")
+            return date;
+        if (!DateTime.TryParseExact(date, "yyyy-MM-dd", CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out var d))
-        {
-            display = $"{d.Month}月{d.Day}日";
-            weekday = WeekdayName(d.DayOfWeek);
-        }
-        return new DayHeader(date, display, weekday, $"{count} 条");
+            return date;
+        var today = DateTime.Today;
+        if (d == today)
+            return $"今天 · {d.Month}月{d.Day}日";
+        if (d == today.AddDays(-1))
+            return $"昨天 · {d.Month}月{d.Day}日";
+        return $"{d.Month}月{d.Day}日 {Weekday(d.DayOfWeek)}";
     }
 
-    private static string WeekdayName(DayOfWeek d) => d switch
+    private static string Weekday(DayOfWeek d) => d switch
     {
         DayOfWeek.Monday => "星期一",
         DayOfWeek.Tuesday => "星期二",
@@ -214,12 +205,6 @@ public partial class HistoryWindow : Window
         DayOfWeek.Saturday => "星期六",
         _ => "星期日",
     };
-
-    private static HistoryRow ToRow(HistoryEntry e) => new(
-        e.Id,
-        string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
-        TryHost(e.Url),
-        ParseLocalTime(e.VisitedAt));
 
     private static string ParseLocalTime(string iso)
     {
@@ -238,7 +223,7 @@ public partial class HistoryWindow : Window
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
-        SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
+        SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Collapsed : Visibility.Visible;
         ApplyFilter();
     }
 
@@ -248,7 +233,6 @@ public partial class HistoryWindow : Window
             return;
         if (!(tb.IsChecked == true))
             return;
-        // 芯片互斥：勾选一个，取消其它；自定义日期清空
         _suppressFilter = true;
         foreach (var chip in new[] { ChipAll, ChipToday, ChipYesterday, ChipWeek, ChipMonth, ChipRange })
         {
@@ -256,10 +240,7 @@ public partial class HistoryWindow : Window
                 chip.IsChecked = false;
         }
         CustomDate.SelectedDate = null;
-        if (ReferenceEquals(tb, ChipRange))
-            RangePanel.Visibility = Visibility.Visible;
-        else
-            RangePanel.Visibility = Visibility.Collapsed;
+        RangePanel.Visibility = ReferenceEquals(tb, ChipRange) ? Visibility.Visible : Visibility.Collapsed;
         _suppressFilter = false;
         ApplyFilter();
     }
@@ -268,7 +249,6 @@ public partial class HistoryWindow : Window
     {
         if (!_initialized || _suppressFilter)
             return;
-        // 选择自定义日期：取消所有快捷芯片
         _suppressFilter = true;
         foreach (var chip in new[] { ChipAll, ChipToday, ChipYesterday, ChipWeek, ChipMonth, ChipRange })
             chip.IsChecked = false;
@@ -281,6 +261,12 @@ public partial class HistoryWindow : Window
     {
         if (!_initialized)
             return;
+        ApplyFilter();
+    }
+
+    private void LoadMore_Click(object sender, RoutedEventArgs e)
+    {
+        _limit += 300;
         ApplyFilter();
     }
 
@@ -305,38 +291,23 @@ public partial class HistoryWindow : Window
             return;
         var confirmed = MessageBox.Show(
             this,
-            $"将清除全部历史记录（{(_history.Recent(1).Count > 0 ? "不可恢复" : "暂无记录")}）。确定继续？",
+            "将清除全部历史记录（不可恢复）。确定继续？",
             "清除历史",
             MessageBoxButton.YesNo,
             MessageBoxImage.Warning);
         if (confirmed != MessageBoxResult.Yes)
             return;
         _history.Clear();
-        Reload("", null, null);
+        _limit = 200;
+        ApplyFilter();
         MessageBox.Show(this, "历史记录已清空。", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     // ============ 模型 ============
 
-    /// <summary>日期分组头模型。</summary>
-    public sealed record DayHeader(string Date, string DisplayDate, string Weekday, string CountText);
+    /// <summary>日期分组（iOS 分组列表的一节）。</summary>
+    public sealed record DayGroup(string DateLabel, IReadOnlyList<HistoryRow> Rows);
 
     /// <summary>单条历史模型。</summary>
     public sealed record HistoryRow(long Id, string Title, string Host, string TimeText);
-
-    /// <summary>根据项类型选择模板：日期头 / 单条。</summary>
-    public sealed class HistoryTemplateSelector : DataTemplateSelector
-    {
-        private readonly DataTemplate _dayHeader;
-        private readonly DataTemplate _row;
-
-        public HistoryTemplateSelector(DataTemplate dayHeader, DataTemplate row)
-        {
-            _dayHeader = dayHeader;
-            _row = row;
-        }
-
-        public override DataTemplate? SelectTemplate(object item, DependencyObject container) =>
-            item is DayHeader ? _dayHeader : _row;
-    }
 }

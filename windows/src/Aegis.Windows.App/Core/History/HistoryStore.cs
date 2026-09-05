@@ -191,6 +191,15 @@ public sealed class HistoryStore
                 """;
             ensure.ExecuteNonQuery();
             MigrateAddVisitedDate(connection);
+            // 性能索引：按日期/时间查询与排序走索引（千条级数据毫秒返回）
+            using (var index = connection.CreateCommand())
+            {
+                index.CommandText = """
+                    CREATE INDEX IF NOT EXISTS idx_visits_date_time
+                        ON visits(visited_date, visited_at DESC);
+                    """;
+                index.ExecuteNonQuery();
+            }
             // 失效空日期行归一（迁移回填遗漏的残留——归为「未知日期」以免分组遗漏）
             using (var sanitize = connection.CreateCommand())
             {

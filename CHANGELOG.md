@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Changed (Windows C# 正典栈——历史窗口 Apple 风格重设计 + 性能优化，2026-09-06)
+- **性能**：外层改 ListBox 虚拟化（Recycling）替代非虚拟化 ItemsControl；移除每行
+  DropShadowEffect（GPU 重负载）；数据库加索引 `idx_visits_date_time`；默认加载 200 条
+  +「加载更多」分页——千条数据首屏毫秒级、滚动流畅。
+- **Apple 风格 UI**：iOS 系统色板（浅 #F2F2F7/白卡/#007AFF，深 #1C1C1E/#2C2C2E/#0A84FF）、
+  大标题、圆角 14 分组卡片 + 发丝分隔线、iOS 分段控件日期快捷（全部/今天/昨天/近7天/本月）、
+  可展开日历（自定义某天）+ 起止范围查询、日期分组头友好化（今天/昨天 · 9月6日）。
+- 筛选路径全部 try/catch 兜底（日期点击不再可能崩溃）。
+
+
+
 ### Fixed (Windows C# 正典栈——历史窗口闪退真因，2026-09-06)
 - **非法颜色字面量 `#FFB3FFFFFF`（10 位十六进制）**：合法仅 3/4/6/8 位。它先使
   `ColorConverter.ConvertFromString` 抛「令牌无效」（已改手动解析绕过），后又使 XAML
