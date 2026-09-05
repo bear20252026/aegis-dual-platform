@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——标签关闭加固，2026-09-06)
+- **新建标签删不掉（部分）**：新建 NTP 标签的导航经 Dispatcher.BeginInvoke 延迟；
+  若立即点击 ✕ 关闭会先销毁 WebView，随后延迟回调在已释放控件上设 Source→抛异常。
+  已加「标签仍在才执行」防护 + 关闭过程 try/catch 容错 + tabId 双来源兜底（Tag/DataContext），
+  并新增关闭日志便于定位。拖拽阈值与关闭按钮排除保留。
+
+
+
 ### Fixed (Windows C# 正典栈——GeoGebra/标签关闭/主题，2026-09-06)
 - **几何画板不可用**：GeoGebra bundle 未进入 C# 发布输出，`ResolveGeoRoot` 永远
   返回空。csproj 现在条件包含 legacy GeoGebra 资源（117MB），发布后映射

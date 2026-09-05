@@ -166,7 +166,13 @@ public partial class MainWindow : Window
             if (Chrome.Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
             {
                 var targetUrl = tab.Url;
-                Dispatcher.BeginInvoke(() => runtime.Control.Source = new Uri(targetUrl));
+                Dispatcher.BeginInvoke(() =>
+                {
+                    // 若该标签在延迟导航前已被关闭（销毁），直接跳过设置——否则
+                    // 在已释放控件上设 Source 会抛异常，导致「新建标签删不掉」。
+                    if (_runtimes.TryGetValue(tab.TabId, out var current) && ReferenceEquals(current, runtime))
+                        runtime.Control.Source = new Uri(targetUrl);
+                });
             }
             // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
             // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
@@ -412,7 +418,16 @@ public partial class MainWindow : Window
         {
             // 安全顺序（Android P2-9 教训）：先摘视觉树再 dispose
             WebViewHost.Children.Remove(runtime.Control);
-            runtime.Dispose();
+            try
+            {
+                runtime.Dispose();
+            }
+            catch (Exception ex)
+            {
+                // 个别 WebView 未完全初始化的 Dispose 可能抛——标签集合已移除、
+                // 视觉树已摘除，关闭成功；此处容错不阻断
+                Core.Security.SecurityLog.Write($"[tab] 标签 {tabId} 销毁容错: {ex.GetType().Name}: {ex.Message}");
+            }
         }
         SaveSession();
     }
@@ -477,8 +492,23 @@ public partial class MainWindow : Window
 
     private void TabClose_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as System.Windows.Controls.Button)?.Tag is string tabId)
+        // tabId 来源：优先按钮 Tag（="{Binding TabId}"）；Tag 未命中时回退到
+        // 按钮 DataContext（列表项即 Tab），两者兼取保证关闭可靠触发
+        if (sender is not System.Windows.FrameworkElement fe)
+            return;
+        var tabId = fe.Tag as string
+            ?? (fe.DataContext as Core.Tabs.Tab)?.TabId;
+        if (string.IsNullOrEmpty(tabId))
+            return;
+        Core.Security.SecurityLog.Write($"[tab] 请求关闭标签 {tabId}");
+        try
+        {
             _tabs.CloseTab(tabId);
+        }
+        catch (Exception ex)
+        {
+            Core.Security.SecurityLog.Write($"[tab] 关闭标签异常（已捕获，不阻断）: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private void TabStrip_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
