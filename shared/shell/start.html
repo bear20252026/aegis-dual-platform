@@ -394,8 +394,11 @@
           // 标题/URL/图标文本全部经 textContent 写入 DOM（防特殊字符
           // 破坏显示与注入——实施手册 R-06 bookmarkCard 示例）
           var frag = document.createDocumentFragment();
-          for (var i = 0; i < items.length; i++) {
-            var it = items[i];
+          // 首页只展示最近 8 个书签；完整数据仍保留在书签库中，避免
+          // 大量历史/书签标签铺满主屏（横条可水平滚动）。
+          var visibleItems = items.slice(0, 8);
+          for (var i = 0; i < visibleItems.length; i++) {
+            var it = visibleItems[i];
             var host = '';
             try { host = new URL(it.url).host; } catch (e) { host = it.url; }
             var card = document.createElement('div');

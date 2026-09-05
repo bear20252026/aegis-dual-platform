@@ -79,3 +79,6 @@ aegis-专家评审包/windows/**/bin/
 assets/fonts/fonts-bundle.zip
 aegis-*.zip
 android/app/src/main/assets/geogebra/
+
+# Mimosa 扫描器本地会话状态（hook 运行时产物——不得入库）
+.mimosa/

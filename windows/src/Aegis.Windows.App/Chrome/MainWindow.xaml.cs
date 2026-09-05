@@ -121,14 +121,24 @@ public partial class MainWindow : Window
         runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
         {
             if (!e.IsSuccess)
+            {
+                Core.Security.SecurityLog.Write(
+                    $"[init] 标签 {tab.TabId} 初始化失败: {e.InitializationException?.Message ?? "e.IsSuccess=false（未知原因）"}");
                 return;
+            }
             var core = runtime.Control.CoreWebView2;
             BindVirtualHosts(core);
             runtime.OnCoreReady(core);
-            // 虚拟主机地址（NTP/画板）映射就绪后才导航——构造时预置会在映射前
-            // 发起首次导航 → 空白页（首页无法显示的根因修复）
+            // 虚拟主机地址（NTP/画板）：映射就绪后才导航，且**推迟到下一
+            // Dispatcher 周期**——同一调用栈里 SetVirtualHostNameToFolderMapping
+            // 后立即导航会因映射尚未传播到渲染进程而 ConnectionAborted
+            //（实机复现：点主页能渲染、初始化时同步导航即 abort）。推迟后
+            // 与「点主页成功」路径一致。
             if (Chrome.Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
-                runtime.Control.Source = new Uri(tab.Url);
+            {
+                var targetUrl = tab.Url;
+                Dispatcher.BeginInvoke(() => runtime.Control.Source = new Uri(targetUrl));
+            }
             // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
             // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
             //（内嵌 iframe 伪装 ntp 来源的请求在顶层门禁处拒绝——ADR-003 无桥
@@ -198,15 +208,20 @@ public partial class MainWindow : Window
     }
 
     /// <summary>M3：虚拟主机资源映射（start.html 单源 + 可选 GeoGebra 随包）。
-    /// 只映射发布输出目录内容——不暴露任意文件系统路径。</summary>
+    /// 只映射发布输出目录内容——不暴露任意文件系统路径。映射结果写入安全
+    /// 日志——NTP 加载失败时可据此区分「资源根缺失」与「映射未生效」。</summary>
     private void BindVirtualHosts(CoreWebView2 core)
     {
         var ntpRoot = Chrome.Ntp.NtpAssets.ResolveContentRoot();
+        Core.Security.SecurityLog.Write(
+            $"[init] ntp 资源根 = {ntpRoot ?? "<null>"}（BaseDirectory={AppContext.BaseDirectory}）");
         if (ntpRoot is not null)
         {
             core.SetVirtualHostNameToFolderMapping(
                 Chrome.Ntp.NtpAssets.HostName, ntpRoot,
                 CoreWebView2HostResourceAccessKind.Allow);
+            Core.Security.SecurityLog.Write(
+                $"[init] {Chrome.Ntp.NtpAssets.HostName} 已映射 -> {ntpRoot}");
         }
         var geoRoot = Chrome.Ntp.NtpAssets.ResolveGeoRoot();
         if (geoRoot is not null)
@@ -214,6 +229,8 @@ public partial class MainWindow : Window
             core.SetVirtualHostNameToFolderMapping(
                 Chrome.Ntp.NtpAssets.GeoHostName, geoRoot,
                 CoreWebView2HostResourceAccessKind.Allow);
+            Core.Security.SecurityLog.Write(
+                $"[init] {Chrome.Ntp.NtpAssets.GeoHostName} 已映射 -> {geoRoot}");
         }
     }
 

@@ -76,23 +76,28 @@
   .wp:hover { transform:scale(1.12); }
   .wp.active { border-color:#fff; box-shadow:0 0 0 3px rgba(255,255,255,0.25); }
   .wp-label { font-size:12px; color:rgba(255,255,255,0.78); padding-right:4px; letter-spacing:1px; }
-  /* 书签宫格（深色玻璃单色系） */
-  .bookmarks { margin-top:40px; display:flex; flex-wrap:wrap; gap:12px; justify-content:center; max-width:760px; }
+  /* 书签紧凑横条：不再以大宫格占满首页，超出内容水平滚动 */
+  .bookmarks {
+    margin-top:24px; display:flex; flex-wrap:nowrap; gap:8px; justify-content:flex-start;
+    max-width:min(760px, 88vw); overflow-x:auto; padding:4px 8px 8px;
+    scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.28) transparent;
+  }
   .bm {
-    width:92px; padding:14px 8px 12px; background:rgba(15,20,32,0.34);
+    flex:0 0 auto; width:auto; max-width:150px; padding:7px 10px;
+    display:flex; align-items:center; gap:7px; background:rgba(15,20,32,0.30);
     border:1px solid rgba(255,255,255,0.14); backdrop-filter:blur(12px);
-    border-radius:14px; cursor:pointer; text-align:center;
+    border-radius:18px; cursor:pointer; text-align:left;
     transition:transform .12s, background .12s, border-color .12s;
   }
-  .bm:hover { transform:translateY(-2px); background:rgba(15,20,32,0.50); border-color:rgba(255,255,255,0.28); }
+  .bm:hover { transform:translateY(-1px); background:rgba(15,20,32,0.50); border-color:rgba(255,255,255,0.28); }
   .bm-ico {
-    width:38px; height:38px; margin:0 auto 8px; border-radius:12px;
+    width:22px; height:22px; flex:0 0 22px; margin:0; border-radius:50%;
     background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.16);
-    color:#fff;
-    display:flex; align-items:center; justify-content:center; font-weight:600; font-size:15px;
+    color:#fff; display:flex; align-items:center; justify-content:center;
+    font-weight:600; font-size:10px;
   }
-  .bm-name { font-size:12px; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
-  .bm-empty { font-size:13px; color:rgba(255,255,255,0.85); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  .bm-name { max-width:105px; font-size:11px; color:#fff; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  .bm-empty { font-size:12px; color:rgba(255,255,255,0.72); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   .footer { position:fixed; left:0; right:0; bottom:10px; z-index:4; text-align:center; font-size:12px; color:rgba(255,255,255,0.7); text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   /* 搜索引擎胶囊（白底上的中性深色，与主按钮同语言） */
   .engine-pill {
@@ -112,27 +117,21 @@
     transition:background .15s, border-color .15s;
   }
   .restore-btn:hover { background:rgba(15,20,32,0.58); border-color:rgba(255,255,255,0.40); }
-  /* 几何画板快捷入口（离线 GeoGebra——安装包内置资源） */
+  /* 轻量快捷入口：功能保留，但不再以大按钮占据首页中心 */
   .quick-row {
-    margin-top:18px; display:flex; gap:12px; justify-content:center;
+    margin-top:14px; display:flex; gap:8px; justify-content:center;
   }
   .quick-btn {
-    display:inline-flex; align-items:center; gap:10px; height:48px; padding:0 24px;
-    border:1px solid rgba(255,255,255,0.22); border-radius:24px; cursor:pointer;
-    background:rgba(15,20,32,0.40);
-    backdrop-filter:blur(12px); color:#fff; font-size:14px; font-weight:500;
-    font-family:inherit; letter-spacing:2px;
-    box-shadow:0 8px 24px rgba(0,0,0,0.18);
-    transition:transform .15s ease, background .15s ease, border-color .15s ease;
+    display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 12px;
+    border:1px solid rgba(255,255,255,0.18); border-radius:15px; cursor:pointer;
+    background:rgba(15,20,32,0.24); backdrop-filter:blur(8px); color:rgba(255,255,255,0.86);
+    font-size:12px; font-weight:400; font-family:inherit; letter-spacing:0;
+    transition:background .15s ease, border-color .15s ease, color .15s ease;
   }
-  .quick-btn:hover {
-    transform:translateY(-2px);
-    background:rgba(15,20,32,0.58);
-    border-color:rgba(255,255,255,0.36);
-  }
+  .quick-btn:hover { background:rgba(15,20,32,0.48); border-color:rgba(255,255,255,0.32); color:#fff; }
   .quick-btn:active { transform:translateY(0); }
   .quick-btn .ico { display:flex; align-items:center; }
-  .quick-btn .ico svg { width:20px; height:20px; }
+  .quick-btn .ico svg { width:15px; height:15px; }
   .quick-btn.unavailable { opacity:.45; }
   /* 导入向导（玻璃拟态，与 NTP 风格一致） */
   .link-btn {
@@ -181,10 +180,10 @@
     .search input { font-size:15px; }
     .search button { height:42px; padding:0 18px; font-size:13px; flex:0 0 auto; letter-spacing:1px; }
     .quick-row { width:100%; }
-    .quick-btn { width:100%; justify-content:center; height:46px; font-size:14px; }
-    .bookmarks { margin-top:28px; gap:10px; width:100%; }
-    .bm { width:calc(50% - 5px); }
-    .quick-row { margin-top:16px; }
+    .quick-btn { width:auto; justify-content:center; height:30px; font-size:12px; padding:0 10px; }
+    .bookmarks { margin-top:20px; gap:7px; width:88vw; }
+    .bm { width:auto; max-width:135px; }
+    .quick-row { margin-top:12px; }
     .wallpapers { right:12px; bottom:14px; padding:6px 10px; gap:8px; }
     .wp { width:28px; height:28px; }
     .footer { font-size:10px; bottom:6px; }
@@ -196,17 +195,8 @@
   }
 
   /* —— 返回按钮（双端统一：Win 原生工具栏之外，首页自身的返回入口）—— */
-  .back-fab {
-    position:fixed; top:14px; left:14px; z-index:30;
-    width:42px; height:42px; border-radius:50%;
-    border:1px solid rgba(255,255,255,0.28); cursor:pointer;
-    background:rgba(15,20,32,0.40); backdrop-filter:blur(12px);
-    color:#fff; font-size:20px; line-height:1;
-    display:flex; align-items:center; justify-content:center;
-    transition:background .15s ease, transform .15s ease;
-  }
-  .back-fab:hover { background:rgba(15,20,32,0.58); }
-  .back-fab:active { transform:scale(0.94); }
+  /* 返回由浏览器工具栏统一提供：首页不再额外悬浮按钮，保持视觉留白 */
+  .back-fab { display:none; }
 
   /* —— 贪吃蛇（双端统一：首页内置小游戏，键盘/滑动手势双控）—— */
   /* 全屏页面化（BUG-014 版本替换）：与首页同一视觉语言 */
