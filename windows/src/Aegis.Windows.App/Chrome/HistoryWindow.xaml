@@ -12,7 +12,7 @@
     <SolidColorBrush x:Key="CardBrush" Color="#FF1F2A3D"/>
     <SolidColorBrush x:Key="CardHoverBrush" Color="#FF2A3A55"/>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFFFF"/>
-    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#FFB3FFFFFF"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B3FFFFFF"/>
     <SolidColorBrush x:Key="TextMutedBrush" Color="#FF8A93A6"/>
     <SolidColorBrush x:Key="FieldBackgroundBrush" Color="#FF1B2537"/>
     <SolidColorBrush x:Key="FieldBorderBrush" Color="#FF2E3B55"/>

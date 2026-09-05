@@ -14,12 +14,17 @@ using Xunit;
 public sealed class WindowSmokeTests
 {
     [Fact]
-    public void HistoryWindowConstructsWithoutThrowing()
+    public void HistoryWindowConstructsAndAppliesBothThemesWithoutThrowing()
     {
         RunSta(() =>
         {
             var store = new HistoryStore(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
-            _ = new HistoryWindow(store);
+            var w = new HistoryWindow(store);
+            // ApplyTheme 会替换资源字典值 → 触发 XAML 延迟资源的创建/解析。
+            // 曾因非法颜色字面量（#FFB3FFFFFF，10 位十六进制）在此抛
+            // FormatException「令牌无效」→ 历史窗口闪退。深浅各调一次锁定。
+            w.ApplyTheme("dark");
+            w.ApplyTheme("light");
         });
     }
 

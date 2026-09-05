@@ -9,7 +9,7 @@
     <ComboBox x:Name="EngineBox" Height="30" SelectionChanged="EngineBox_SelectionChanged"/>
 
     <TextBlock Text="历史记录" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <CheckBox x:Name="HistoryToggle" Content="记录浏览历史" Foreground="#FFB3FFFFFF"
+    <CheckBox x:Name="HistoryToggle" Content="记录浏览历史" Foreground="#B3FFFFFF"
               Checked="HistoryToggle_Changed" Unchecked="HistoryToggle_Changed"/>
 
     <TextBlock Text="外观主题" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>

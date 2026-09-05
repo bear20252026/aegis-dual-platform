@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——历史窗口闪退真因，2026-09-06)
+- **非法颜色字面量 `#FFB3FFFFFF`（10 位十六进制）**：合法仅 3/4/6/8 位。它先使
+  `ColorConverter.ConvertFromString` 抛「令牌无效」（已改手动解析绕过），后又使 XAML
+  资源字典在 ApplyTheme 触发延迟资源创建时被 `ParseColor` 抛出 → XamlParseException
+  → 历史窗口闪退。已修正为 `#B3FFFFFF`（HistoryWindow/SettingsWindow 两处）。
+- **全仓 XAML 颜色字面量扫描**：脚本化校验所有 `#hex` 长度 ∈ {3,4,6,8}——复扫全部合法。
+- **回归测试升级**：窗口冒烟测试现调用 `ApplyTheme("dark")+("light")`，强制触发
+  XAML 延迟资源解析——非法字面量存在时测试即失败，同类问题无法再溜进构建。
+
+
+
 ### Fixed (Windows C# 正典栈——历史窗口构造期 NRE，2026-09-06)
 - **历史窗口打开即异常**：XAML `ChipAll IsChecked=True` 在 InitializeComponent 阶段就触发
   `Checked`，而 `ChipFilter_Changed` 引用的 `CustomDate/RangePanel` 尚未初始化 →
