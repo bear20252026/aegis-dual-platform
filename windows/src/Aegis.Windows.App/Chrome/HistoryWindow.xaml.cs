@@ -17,6 +17,7 @@ public partial class HistoryWindow : Window
     private readonly HistoryStore _history;
     private readonly HistoryTemplateSelector _selector;
     private bool _suppressFilter;
+    private bool _initialized;  // InitializeComponent 完成前忽略控件事件（防 NRE）
 
     public HistoryWindow(HistoryStore history)
     {
@@ -26,6 +27,7 @@ public partial class HistoryWindow : Window
             (DataTemplate)Resources["DayHeaderTemplate"],
             (DataTemplate)Resources["HistoryRowTemplate"]);
         HistoryList.ItemTemplateSelector = _selector;
+        _initialized = true;  // 此后控件事件才允许处理（初始化期事件一律忽略）
         Loaded += (_, _) =>
         {
             try
@@ -242,7 +244,7 @@ public partial class HistoryWindow : Window
 
     private void ChipFilter_Changed(object sender, RoutedEventArgs e)
     {
-        if (_suppressFilter || sender is not ToggleButton tb)
+        if (!_initialized || _suppressFilter || sender is not ToggleButton tb)
             return;
         if (!(tb.IsChecked == true))
             return;
@@ -264,7 +266,7 @@ public partial class HistoryWindow : Window
 
     private void CustomDate_SelectedDateChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressFilter)
+        if (!_initialized || _suppressFilter)
             return;
         // 选择自定义日期：取消所有快捷芯片
         _suppressFilter = true;
@@ -275,11 +277,16 @@ public partial class HistoryWindow : Window
         ApplyFilter();
     }
 
-    private void RangeDate_Changed(object sender, SelectionChangedEventArgs e) => ApplyFilter();
+    private void RangeDate_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_initialized)
+            return;
+        ApplyFilter();
+    }
 
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement fe)
+        if (!_initialized || sender is not FrameworkElement fe)
             return;
         long id = 0;
         if (fe.Tag is long tag)
@@ -294,6 +301,8 @@ public partial class HistoryWindow : Window
 
     private void Clear_Click(object sender, RoutedEventArgs e)
     {
+        if (!_initialized)
+            return;
         var confirmed = MessageBox.Show(
             this,
             $"将清除全部历史记录（{(_history.Recent(1).Count > 0 ? "不可恢复" : "暂无记录")}）。确定继续？",

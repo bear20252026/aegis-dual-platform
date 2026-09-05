@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——历史窗口构造期 NRE，2026-09-06)
+- **历史窗口打开即异常**：XAML `ChipAll IsChecked=True` 在 InitializeComponent 阶段就触发
+  `Checked`，而 `ChipFilter_Changed` 引用的 `CustomDate/RangePanel` 尚未初始化 →
+  NullReferenceException。为所有筛选/删除/清除事件加 `_initialized` 守卫（初始化完成前
+  忽略），与设置窗口 `_suppressEvents` 模式对齐。
+- **回归防护**：新增 WPF 窗口构造冒烟测试（STA 线程实例化 History/Downloads 窗口，
+  任何构造异常即失败），杜绝「事件早于控件初始化」一类构造崩溃复发；兜底日志带完整堆栈。
+
+
+
 ### Added (Windows C# 正典栈——历史窗口精细化 + 日历查询，2026-09-06)
 - **可展开日历查询**：WPF DatePicker 展开日历选某一天；支持起止日期「范围」查询
   （两个日历）、快捷日期芯片（全部/今天/昨天/近7天/本月）；数据层新增
