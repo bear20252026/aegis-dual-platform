@@ -21,7 +21,15 @@ public sealed class TabRuntime : IDisposable
         Tab = tab;
         var sessionId = $"s-{tab.TabId}";
         Host = new HostWebView(broker, sessionId, tab.TabId);
-        Control = new WebView2 { Source = ResolveInitialUri(initialUrl) };
+        // 虚拟主机地址（NTP/画板）不在构造时预置 Source——映射就绪前发起
+        // 的首次导航会失败成空白页。由 Chrome 在 CoreWebView2InitializationCompleted
+        // 里映射虚拟主机后再导航（见 MainWindow.CreateRuntime）。
+        Control = new WebView2
+        {
+            Source = Chrome.Ntp.NtpAssets.IsVirtualHostUrl(initialUrl)
+                ? null
+                : ResolveInitialUri(initialUrl),
+        };
     }
 
     public Tab Tab { get; }

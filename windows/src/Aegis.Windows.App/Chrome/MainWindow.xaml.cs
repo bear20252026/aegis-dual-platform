@@ -125,6 +125,10 @@ public partial class MainWindow : Window
             var core = runtime.Control.CoreWebView2;
             BindVirtualHosts(core);
             runtime.OnCoreReady(core);
+            // 虚拟主机地址（NTP/画板）映射就绪后才导航——构造时预置会在映射前
+            // 发起首次导航 → 空白页（首页无法显示的根因修复）
+            if (Chrome.Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
+                runtime.Control.Source = new Uri(tab.Url);
             // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
             // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
             //（内嵌 iframe 伪装 ntp 来源的请求在顶层门禁处拒绝——ADR-003 无桥

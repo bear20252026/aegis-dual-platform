@@ -51,6 +51,15 @@ public static class NtpAssets
         return false;
     }
 
+    /// <summary>是否为受信虚拟主机地址（NTP/画板）。此类地址的首次导航必须在
+    /// SetVirtualHostNameToFolderMapping 映射就绪之后发起——构造时预置 Source
+    /// 会在映射前解析 → 空白页（首页无法显示的根因）。</summary>
+    public static bool IsVirtualHostUrl(string? url) =>
+        !string.IsNullOrWhiteSpace(url)
+        && Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && (uri.Host.Equals(HostName, StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals(GeoHostName, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>定位发布输出的 ntp/ 资源根（exe 旁——csproj 单源拷贝）。
     /// 缺失返回 null（虚拟主机不映射——NTP 显示宿主错误页，绝不回退 file://）。</summary>
     public static string? ResolveContentRoot()
