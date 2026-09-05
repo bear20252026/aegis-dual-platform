@@ -84,7 +84,8 @@
   <!-- 受信 chrome UI（本地固定 origin——远程页面无 native bridge——ADR-003） -->
   <DockPanel>
     <!-- M1-T1 原生标签条（ADR-009 D2：chrome 与页面 DOM 彻底隔离——
-         标签条不再是注入 JS；点击切换/✕ 关闭/＋ 新建，全部原生控件） -->
+         标签条不再是注入 JS；点击切换/✕ 关闭/＋ 新建，全部原生控件；
+         切换经 TabStrip_PreviewMouseLeftButtonDown 显式命中 + SelectionChanged 兜底） -->
     <Border DockPanel.Dock="Top" Background="{StaticResource ChromeBackgroundBrush}" Padding="8,4">
       <DockPanel>
         <Button x:Name="NewTabButton" DockPanel.Dock="Right" Style="{StaticResource NavButton}"
@@ -92,6 +93,7 @@
         <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
           <ListBox x:Name="TabStrip" SelectionMode="Single" Background="Transparent"
                    BorderThickness="0" SelectionChanged="TabStrip_SelectionChanged"
+                   PreviewMouseLeftButtonDown="TabStrip_PreviewMouseLeftButtonDown"
                    AllowDrop="True" PreviewMouseMove="TabStrip_PreviewMouseMove"
                    Drop="TabStrip_Drop" DragOver="TabStrip_DragOver">
             <ListBox.ItemsPanel>

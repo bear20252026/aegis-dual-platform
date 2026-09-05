@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——多标签切换，2026-09-05)
+- **标签点击切换不可靠**：自定义 ListBoxItem 模板内含关闭按钮/子 DockPanel 且
+  项不可聚焦，部分环境仅靠 SelectionChanged 隐式命中会失效（表现为「只有一个
+  标签切不过去」）。新增显式 `TabStrip_PreviewMouseLeftButtonDown`——命中标签项
+  即调用 `SwitchTo`（命中 ✕ 交按钮自身处理，不动手切换）；SelectionChanged
+  保留为兜底。跨标签每标签独立 WebView 实例，切换即可见性切换天然可用。
+
 ### Fixed (Windows C# 正典栈——NTP 首页空白页，2026-09-05)
 - **虚拟主机映射与首次导航时序**：TabRuntime 构造时预置 `Source=https://ntp.aegis.local/start.html`，
   但该 host 的 SetVirtualHostNameToFolderMapping 要到 CoreWebView2 初始化完成后才注册——

@@ -412,6 +412,31 @@ public partial class MainWindow : Window
             _tabs.SwitchTo(tab.TabId);
     }
 
+    /// <summary>显式标签点击切换（兜底）：自定义 ListBoxItem 模板里同时有
+    /// 关闭按钮与 DockPanel 子元素，部分环境下仅靠 SelectionChanged 的
+    /// 隐式命中可能失效（表现为「新建了标签但点击切不过去」）。此处直接
+    /// 命中标签项即切换，命中关闭按钮则交给其自身的 Click（不动手切换）。</summary>
+    private void TabStrip_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (TabStrip.InputHitTest(e.GetPosition(TabStrip)) is not DependencyObject hit)
+            return;
+        var node = hit;
+        while (node is not null && node is not System.Windows.Controls.ListBoxItem)
+            node = System.Windows.Media.VisualTreeHelper.GetParent(node);
+        if (node is not System.Windows.Controls.ListBoxItem item
+            || item.DataContext is not Core.Tabs.Tab tab)
+            return;
+        // 命中关闭按钮（✕）→ 让按钮自己的 Click 处理关闭，不在此切换
+        var probe = hit;
+        while (probe is not null)
+        {
+            if (probe is System.Windows.Controls.Button button && ReferenceEquals(button.Tag, tab.TabId))
+                return;
+            probe = System.Windows.Media.VisualTreeHelper.GetParent(probe);
+        }
+        _tabs.SwitchTo(tab.TabId);
+    }
+
     // ================= 会话持久化 =================
 
     private void RestoreSessionOrStart()
