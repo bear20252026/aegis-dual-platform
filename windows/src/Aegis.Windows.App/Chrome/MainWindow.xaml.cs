@@ -692,6 +692,7 @@ public partial class MainWindow : Window
         {
             _historyWindow = new HistoryWindow(_history);
             _historyWindow.Owner = this;
+            _historyWindow.ApplyTheme(_settings.Theme);
         }
         _historyWindow.Show();
         _historyWindow.Activate();
