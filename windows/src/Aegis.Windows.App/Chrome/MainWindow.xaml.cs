@@ -59,10 +59,17 @@ public partial class MainWindow : Window
         InitEngineCombo();
     }
 
-    /// <summary>M2：搜索引擎下拉（AppSettings 持久化——重启动保持偏好）。</summary>
+    /// <summary>搜索引擎下拉项（key + 展示名）。</summary>
+    public sealed record EngineOption(string Key, string Name);
+
+    /// <summary>M2：搜索引擎下拉（展示名 + AppSettings 持久化——重启动保持偏好）。</summary>
     private void InitEngineCombo()
     {
-        EngineCombo.ItemsSource = UrlNormalizer.EngineUrls.Keys.ToList();
+        EngineCombo.ItemsSource = UrlNormalizer.EngineOrder
+            .Select(k => new EngineOption(k, UrlNormalizer.EngineName(k)))
+            .ToList();
+        EngineCombo.DisplayMemberPath = nameof(EngineOption.Name);
+        EngineCombo.SelectedValuePath = nameof(EngineOption.Key);
         EngineCombo.SelectedValue = _settings.SearchEngine;
     }
 

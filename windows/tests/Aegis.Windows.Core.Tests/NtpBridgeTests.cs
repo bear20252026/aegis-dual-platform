@@ -63,7 +63,7 @@ public sealed class NtpBridgeTests
         var bridge = new NtpBridge(FakeServices(onSetEngine: applied.Add));
 
         bridge.Dispatch("setEngine", Args("sogou"));
-        bridge.Dispatch("setEngine", Args("duckduckgo"));
+        bridge.Dispatch("setEngine", Args("unknown-engine"));
 
         Assert.Equal(["sogou"], applied);
     }
@@ -79,6 +79,41 @@ public sealed class NtpBridgeTests
         bridge.Dispatch("setWallpaper", Args("aurora-unknown.jpg"));
 
         Assert.Equal(["aurora-lime.jpg"], applied);
+    }
+
+    [Fact]
+    public void NavigateUsesCurrentSearchEngine()
+    {
+        // 回归：首页搜索此前漏传引擎 → 永远走默认百度（搜索切换失效根因）
+        var navigated = new List<string?>();
+        var bridge = new NtpBridge(FakeServices(
+            engine: "bing",
+            onNavigate: navigated.Add));
+
+        bridge.Dispatch("navigate", Args("hello world"));
+
+        Assert.Equal(["https://www.bing.com/search?q=hello%20world"], navigated);
+    }
+
+    [Fact]
+    public void EngineTableCoversMainstreamEngines()
+    {
+        var bridge = new NtpBridge(FakeServices());
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            bridge.Dispatch("getEngine", EmptyArgs()));
+
+        // 主流引擎全覆盖 + 展示名单源（中文优先，拉丁品牌保持原名）
+        var expectedNames = new Dictionary<string, string>
+        {
+            ["baidu"] = "百度", ["bing"] = "必应", ["google"] = "谷歌", ["sogou"] = "搜狗",
+            ["so360"] = "360搜索", ["duckduckgo"] = "DuckDuckGo", ["brave"] = "Brave",
+            ["startpage"] = "Startpage", ["ecosia"] = "Ecosia", ["yandex"] = "Yandex",
+        };
+        foreach (var pair in expectedNames)
+        {
+            Assert.Contains("\"" + pair.Key + "\"", json);
+            Assert.Equal(pair.Value, Chrome.UrlNormalizer.EngineName(pair.Key));
+        }
     }
 
     [Fact]

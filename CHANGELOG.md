@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——搜索引擎切换真因 + 主流引擎全覆盖 + 切换 UI 重做，2026-09-06)
+- **切换失效真因**：首页搜索走的 `NtpBridge.navigate` 归一化漏传当前引擎，永远拼默认百度（地址栏路径正常）。修复：桥内按 `_services.SearchEngine()` 归一。
+- **主流引擎全覆盖（10 个）**：百度/必应/谷歌/搜狗/360搜索/DuckDuckGo/Brave/Startpage/Ecosia/Yandex；展示名单源 `EngineNames`（中文优先）+ `EngineOrder` 固定顺序；工具栏与设置下拉改显示中文名。
+- **首页切换 UI 重做**：引擎胶囊改为点击展开的玻璃卡片下拉菜单（逐项选择+选中勾标+外点关闭），替换「点击循环」；跨端单源（Android 同步受益）。
+- 回归测试：首页搜索按当前引擎拼 URL + 引擎表覆盖/名单（3 个新用例，133 全绿）。
+
+
 ### Changed (Windows C# 正典栈——历史窗口 Apple 风格重设计 + 性能优化，2026-09-06)
 - **性能**：外层改 ListBox 虚拟化（Recycling）替代非虚拟化 ItemsControl；移除每行
   DropShadowEffect（GPU 重负载）；数据库加索引 `idx_visits_date_time`；默认加载 200 条

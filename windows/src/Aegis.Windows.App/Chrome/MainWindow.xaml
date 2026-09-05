@@ -182,7 +182,7 @@
         </StackPanel>
         <!-- M2 数据闭环工具组：搜索引擎切换 / 收藏☆ / 历史记录 -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
-          <ComboBox x:Name="EngineCombo" Width="86" Height="30" VerticalAlignment="Center"
+          <ComboBox x:Name="EngineCombo" Width="120" Height="32" VerticalAlignment="Center" FontSize="12"
                     SelectionChanged="Engine_SelectionChanged" ToolTip="搜索引擎"/>
           <Button x:Name="StarButton" Style="{StaticResource NavButton}" Content="☆"
                   Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"/>

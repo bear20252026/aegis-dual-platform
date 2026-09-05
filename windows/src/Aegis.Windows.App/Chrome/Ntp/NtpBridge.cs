@@ -14,16 +14,6 @@ using System.Text.Json;
 ///   Broker 决策（与地址栏同一条唯一授权路径）。</summary>
 public sealed class NtpBridge
 {
-    /// <summary>引擎展示名（与 Android/Python 双端同构的 {key,name} 结构）。</summary>
-    private static readonly IReadOnlyDictionary<string, string> EngineNames =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["baidu"] = "百度",
-            ["bing"] = "必应",
-            ["google"] = "谷歌",
-            ["sogou"] = "搜狗",
-        };
-
     private readonly Services _services;
 
     /// <summary>宿主服务快照（由受信 chrome 注入——本类不创建任何副作用域）。</summary>
@@ -94,8 +84,8 @@ public sealed class NtpBridge
             case "getEngine":
                 var current = _services.SearchEngine();
                 var engines = new List<object>();
-                foreach (var key in Chrome.UrlNormalizer.EngineUrls.Keys)
-                    engines.Add(new { key, name = EngineNames.GetValueOrDefault(key, key) });
+                foreach (var key in Chrome.UrlNormalizer.EngineOrder)
+                    engines.Add(new { key, name = Chrome.UrlNormalizer.EngineName(key) });
                 return new { engine = current, engines };
             case "setEngine":
                 if (ArgString(args, 0) is { } engine
@@ -116,9 +106,11 @@ public sealed class NtpBridge
             case "navigate":
                 if (ArgString(args, 0) is { } target)
                 {
-                    // 归一在桥内完成：非导航协议（javascript:/file:/data: 等）
-                    // 在此 fail-closed——宿主仅接收可导航目标
-                    var normalized = Chrome.UrlNormalizer.Normalize(target);
+                    // 归一在桥内完成：① 非导航协议（javascript:/file:/data: 等）
+                    // fail-closed；② **使用当前搜索引擎**拼搜索 URL——此前漏传
+                    // 引擎导致首页搜索永远走默认百度（搜索切换失效的根因）
+                    var normalized = Chrome.UrlNormalizer.Normalize(
+                        target, _services.SearchEngine());
                     if (normalized is not null)
                         _services.Navigate(normalized);
                 }

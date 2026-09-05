@@ -19,6 +19,14 @@ public static class UrlNormalizer
 {
     public const string DefaultEngine = "baidu";
 
+    /// <summary>搜索引擎展示顺序（UI 下拉/首页菜单按此排列）。</summary>
+    public static readonly IReadOnlyList<string> EngineOrder =
+    [
+        "baidu", "bing", "google", "sogou", "so360",
+        "duckduckgo", "brave", "startpage", "ecosia", "yandex",
+    ];
+
+    /// <summary>主流搜索引擎表（key → 搜索 URL 前缀；市场主流全覆盖）。</summary>
     public static readonly IReadOnlyDictionary<string, string> EngineUrls =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -26,7 +34,33 @@ public static class UrlNormalizer
             ["bing"] = "https://www.bing.com/search?q=",
             ["google"] = "https://www.google.com/search?q=",
             ["sogou"] = "https://www.sogou.com/web?query=",
+            ["so360"] = "https://www.so.com/s?q=",
+            ["duckduckgo"] = "https://duckduckgo.com/?q=",
+            ["brave"] = "https://search.brave.com/search?q=",
+            ["startpage"] = "https://www.startpage.com/sp/search?query=",
+            ["ecosia"] = "https://www.ecosia.org/search?q=",
+            ["yandex"] = "https://yandex.com/search/?text=",
         };
+
+    /// <summary>引擎展示名单源（中文优先；工具栏/设置/首页菜单共用）。</summary>
+    public static readonly IReadOnlyDictionary<string, string> EngineNames =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["baidu"] = "百度",
+            ["bing"] = "必应",
+            ["google"] = "谷歌",
+            ["sogou"] = "搜狗",
+            ["so360"] = "360搜索",
+            ["duckduckgo"] = "DuckDuckGo",
+            ["brave"] = "Brave",
+            ["startpage"] = "Startpage",
+            ["ecosia"] = "Ecosia",
+            ["yandex"] = "Yandex",
+        };
+
+    /// <summary>引擎展示名（未知 key 回退 key 本身）。</summary>
+    public static string EngineName(string key) =>
+        EngineNames.GetValueOrDefault(key, key);
 
     /// <summary>RFC 3986 scheme 前缀识别（末尾必须有冒号）。</summary>
     private static readonly Regex SchemePrefix = new(@"^([a-zA-Z][a-zA-Z0-9+.\-]*):", RegexOptions.Compiled);

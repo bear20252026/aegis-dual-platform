@@ -111,6 +111,25 @@
     color:#111; font-size:12px; letter-spacing:.5px; transition:background .15s;
   }
   .engine-pill:hover { background:rgba(17,17,17,0.10); }
+  /* 引擎下拉菜单（自定义：玻璃卡片 + 圆角 + 悬停高亮 + 选中勾） */
+  .engine-wrap { position:relative; display:inline-flex; }
+  .engine-pill .caret { font-size:10px; opacity:.55; margin-left:2px; }
+  .engine-menu {
+    display:none; position:absolute; top:calc(100% + 10px); left:50%; transform:translateX(-50%);
+    min-width:152px; max-height:300px; overflow:auto; z-index:30; padding:6px;
+    background:rgba(20,26,40,0.94); backdrop-filter:blur(18px);
+    border:1px solid rgba(255,255,255,0.16); border-radius:14px;
+    box-shadow:0 18px 44px rgba(0,0,0,0.38);
+  }
+  .engine-item {
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:8px 12px; border-radius:9px; cursor:pointer;
+    font-size:13px; color:rgba(255,255,255,0.86);
+  }
+  .engine-item:hover { background:rgba(255,255,255,0.10); }
+  .engine-item.active { color:#fff; font-weight:600; }
+  .engine-item .mark { color:#4da3ff; font-weight:700; }
+
   .engine-pill .dot { width:6px; height:6px; border-radius:50%; background:#111; opacity:.55; }
   /* 恢复上次会话入口（会话持久化 CHANGELOG Planned） */
   .restore-btn {

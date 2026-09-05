@@ -23,7 +23,11 @@ public partial class SettingsWindow : Window
         _broker = broker;
         _owner = owner;
         _suppressEvents = true;
-        EngineBox.ItemsSource = UrlNormalizer.EngineUrls.Keys.ToList();
+        EngineBox.ItemsSource = UrlNormalizer.EngineOrder
+            .Select(k => new { Key = k, Name = UrlNormalizer.EngineName(k) })
+            .ToList();
+        EngineBox.DisplayMemberPath = "Name";
+        EngineBox.SelectedValuePath = "Key";
         EngineBox.SelectedValue = _settings.SearchEngine;
         HistoryToggle.IsChecked = _settings.HistoryEnabled;
         ThreatFeedBox.Text = _settings.ThreatFeedUrl;

@@ -14,8 +14,11 @@
     <div class="logo">A</div>
     <h1>Aegis 安全浏览器</h1>
     <div class="search">
-      <div class="engine-pill" id="enginePill" title="切换搜索引擎" onclick="cycleEngine()">
-        <span class="dot"></span><span id="engineName">百度</span>
+      <div class="engine-wrap">
+        <div class="engine-pill" id="enginePill" title="切换搜索引擎" onclick="toggleEngineMenu(event)">
+          <span class="dot"></span><span id="engineName">百度</span><span class="caret">▾</span>
+        </div>
+        <div class="engine-menu" id="engineMenu"></div>
       </div>
       <!-- form+submit：兼容移动端 IME「搜索/前往」action（不走 keydown Enter） -->
       <form id="searchForm" onsubmit="event.preventDefault(); go();">
@@ -252,12 +255,65 @@
       var el = document.getElementById('engineName');
       if (el && ENGINES.length) el.textContent = ENGINES[engineIdx].name;
     }
-    function cycleEngine() {
+    function toggleEngineMenu(ev) {
+      ev.stopPropagation();
+      var m = document.getElementById('engineMenu');
+      if (!m) return;
+      if (m.style.display === 'block') { m.style.display = 'none'; return; }
+      renderEngineMenu(function () { m.style.display = 'block'; });
+    }
+    function renderEngineMenu(done) {
+      var m = document.getElementById('engineMenu');
+      if (!m) return;
+      function build() {
+        if (!ENGINES.length) { m.style.display = 'none'; return; }
+        m.textContent = '';
+        for (var i = 0; i < ENGINES.length; i++) {
+          (function (idx) {
+            var it = document.createElement('div');
+            it.className = 'engine-item' + (idx === engineIdx ? ' active' : '');
+            var name = document.createElement('span');
+            name.textContent = ENGINES[idx].name;
+            var mark = document.createElement('span');
+            mark.className = 'mark';
+            mark.textContent = idx === engineIdx ? '✓' : '';
+            it.appendChild(name);
+            it.appendChild(mark);
+            it.onclick = function (ev) { ev.stopPropagation(); selectEngine(idx); };
+            m.appendChild(it);
+          })(i);
+        }
+        if (done) done();
+      }
+      if (!ENGINES.length) {
+        // 引擎表未就绪时向宿主拉取（跨端：Windows csCall / Android JSON）
+        try {
+          Host.getEngine(function (data) {
+            if (data && data.engines && data.engines.length) {
+              ENGINES = data.engines;
+              engineIdx = 0;
+              for (var i = 0; i < ENGINES.length; i++) {
+                if (ENGINES[i].key === data.engine) { engineIdx = i; break; }
+              }
+              renderEngine();
+            }
+            build();
+          });
+        } catch (e) { build(); }
+      } else { build(); }
+    }
+    function selectEngine(idx) {
       if (!ENGINES.length) return;
-      engineIdx = (engineIdx + 1) % ENGINES.length;
+      engineIdx = idx;
       renderEngine();
       try { Host.setEngine(ENGINES[engineIdx].key); } catch (e) {}
+      var m = document.getElementById('engineMenu');
+      if (m) m.style.display = 'none';
     }
+    document.addEventListener('click', function () {
+      var m = document.getElementById('engineMenu');
+      if (m) m.style.display = 'none';
+    });
     // 读取当前搜索引擎（配置持久化）
     {
       try {
