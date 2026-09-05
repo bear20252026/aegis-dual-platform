@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed (Windows C# 正典栈——NTP 首页空白页，2026-09-05)
+- **虚拟主机映射与首次导航时序**：TabRuntime 构造时预置 `Source=https://ntp.aegis.local/start.html`，
+  但该 host 的 SetVirtualHostNameToFolderMapping 要到 CoreWebView2 初始化完成后才注册——
+  映射生效前发起的首次导航失败 → 首页空白。修复：虚拟主机地址（NTP/画板）不在构造时
+  预置 Source，改由 Chrome 在 CoreWebView2InitializationCompleted 里映射虚拟主机后再导航；
+  新增 NtpAssets.IsVirtualHostUrl 判定。实机验证：主页渲染出完整新标签页
+  （标题/搜索框/书签宫格空态/引擎胶囊均正常，WebMessage 桥可用）
+
 ### Fixed (Windows C# 正典栈——M4 全量审计 2026-09-05)
 - **[安全·发布阻断] WebMessage 受信通道绕过**：远程页内嵌 ntp.aegis.local 帧即可把
   core 级 IsWebMessageEnabled 打开并驱动本地桥——封死：① 移除
