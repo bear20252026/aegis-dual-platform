@@ -48,6 +48,18 @@ public sealed class HostWebView : IDisposable
         // 导航决策（NavigationStarting 可 disallow——Microsoft 官方——真实取消语义）
         webView.NavigationStarting += (_, e) =>
         {
+            // HTTPS-only：http 主动升级为 https（Edge 同款——加密优先）。
+            // 站点若无 https，升级后加载失败会走到错误页，绝不降级回明文。
+            if (Core.Privacy.PrivacySettings.HttpsOnly
+                && Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
+                && uri.Scheme == Uri.UriSchemeHttp)
+            {
+                e.Cancel = true;
+                var httpsUrl = "https://" + uri.GetComponents(
+                    UriComponents.HostAndPort | UriComponents.PathAndQuery, UriFormat.UriEscaped);
+                webView.Navigate(httpsUrl);
+                return;
+            }
             e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: true);
         };
         // 子框架导航同样经 broker（FrameNavigationStarting——iframe 策略）
@@ -127,12 +139,35 @@ public sealed class HostWebView : IDisposable
             try
             {
                 e.Request.Headers.SetHeader("DNT", "1");
-                if (Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
-                    && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
-                    && _broker.IsHostBlocked(uri.Host))
+                if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
+                    || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                    return;
+                // 威胁黑名单（既有——子资源真拦截）
+                if (_broker.IsHostBlocked(uri.Host))
                 {
                     Core.Security.SecurityLog.Write(
                         $"[threat] 子资源拦截（黑名单命中）: {e.Request.Uri}");
+                    e.Response = webView.Environment.CreateWebResourceResponse(
+                        null, 403, "Blocked", "Content-Type: text/plain");
+                    return;
+                }
+                // 跟踪防护分级（P1——对齐 Edge 基础/均衡/严格）
+                var level = Core.Privacy.PrivacySettings.ProtectionLevel;
+                if (level <= 0)
+                    return;
+                var pageHost = Uri.TryCreate(webView.Source, UriKind.Absolute, out var page)
+                    ? page.Host
+                    : string.Empty;
+                var isTracker = Core.Privacy.TrackerList.IsTracker(uri.Host);
+                var blockContext = e.ResourceContext is CoreWebView2WebResourceContext.Script
+                    or CoreWebView2WebResourceContext.Fetch
+                    or CoreWebView2WebResourceContext.Image;
+                if (isTracker
+                    || (level >= 2 && blockContext
+                        && !Core.Privacy.TrackerList.IsSameSite(uri.Host, pageHost)))
+                {
+                    Core.Security.SecurityLog.Write(
+                        $"[privacy] 跟踪防护（级别{level}）拦截: {e.Request.Uri} ctx={e.ResourceContext}");
                     e.Response = webView.Environment.CreateWebResourceResponse(
                         null, 403, "Blocked", "Content-Type: text/plain");
                 }

@@ -3,15 +3,20 @@ namespace Aegis.Windows.Core.Tabs;
 using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Windows.Media;
 
 /// <summary>标签模型（ADR-009 D2 领域层——纯数据，无 UI/WebView 依赖）。
-/// Title/Url 经 INotifyPropertyChanged 通知原生标签条刷新（修复 Python 栈
-/// 「标签标题永不更新」缺陷的架构性方案——原生绑定，非注入 JS）。
-/// TabId 同时作为 broker 会话的 tabId（ADR-002 唯一副作用点的账本键）。</summary>
+/// Title/Url 经 INotifyPropertyChanged 通知原生标签条刷新。
+/// 新增：IsPinned（固定标签前置且隐藏关闭钮）、IsSleeping（睡眠标签——
+/// WebView 已释放仅存状态，激活时复活）、Icon（站点 favicon，Tab 更换时通知）。</summary>
 public sealed class Tab : INotifyPropertyChanged
 {
     private string _title;
     private string _url;
+    private bool _isPinned;
+    private bool _isSleeping;
+    private ImageSource? _icon;
+    private DateTime _lastActivated = DateTime.Now;
 
     public Tab(string tabId, string url, string title = "新标签页")
     {
@@ -37,6 +42,34 @@ public sealed class Tab : INotifyPropertyChanged
     {
         get => _title;
         set => SetField(ref _title, value);
+    }
+
+    /// <summary>固定标签：置于标签条前端、隐藏关闭钮、不参与睡眠。</summary>
+    public bool IsPinned
+    {
+        get => _isPinned;
+        set => SetField(ref _isPinned, value);
+    }
+
+    /// <summary>睡眠标签：WebView 实例已释放，仅保留 Url/Title；激活时复活。</summary>
+    public bool IsSleeping
+    {
+        get => _isSleeping;
+        set => SetField(ref _isSleeping, value);
+    }
+
+    /// <summary>站点图标（favicon 缓存命中后回填；null → 占位圆点）。</summary>
+    public ImageSource? Icon
+    {
+        get => _icon;
+        set => SetField(ref _icon, value);
+    }
+
+    /// <summary>最近激活时刻（睡眠计时依据）。</summary>
+    public DateTime LastActivated
+    {
+        get => _lastActivated;
+        set => SetField(ref _lastActivated, value);
     }
 
     private void SetField<T>(ref T field, T value, [CallerMemberName] string? name = null)

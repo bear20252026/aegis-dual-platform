@@ -18,6 +18,24 @@
       <ComboBoxItem Content="浅色"/>
     </ComboBox>
 
+
+    <TextBlock Text="后台标签睡眠" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
+    <ComboBox x:Name="SleepCombo" Height="30" SelectionChanged="SleepCombo_Changed">
+      <ComboBoxItem Content="关闭"/><ComboBoxItem Content="15 分钟"/><ComboBoxItem Content="30 分钟"/><ComboBoxItem Content="60 分钟"/>
+    </ComboBox>
+
+    <TextBlock Text="跟踪防护" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
+    <ComboBox x:Name="ProtectionCombo" Height="30" SelectionChanged="ProtectionCombo_Changed">
+      <ComboBoxItem Content="基础（仅威胁黑名单）"/><ComboBoxItem Content="均衡（+已知跟踪器）"/><ComboBoxItem Content="严格（+拦截第三方脚本/图片）"/>
+    </ComboBox>
+    <TextBlock Foreground="#FF94A3B8" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
+               Text="严格模式可能影响部分站点加载——建议默认均衡。"/>
+
+    <TextBlock Text="加密与安全" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
+    <CheckBox x:Name="HttpsCheck" Content="HTTPS-only（http 自动升级 https）" Foreground="#FFB3FFFFFF"
+              Checked="Privacy_Changed" Unchecked="Privacy_Changed"/>
+    <CheckBox x:Name="DnsCheck" Content="安全 DNS（DoH，重启生效）" Foreground="#FFB3FFFFFF" Margin="0,6,0,0"
+              Checked="Privacy_Changed" Unchecked="Privacy_Changed"/>
     <TextBlock Text="威胁黑名单订阅源" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
     <TextBox x:Name="ThreatFeedBox" Height="30" VerticalContentAlignment="Center"
              LostFocus="ThreatFeedBox_LostFocus"

@@ -43,6 +43,8 @@ public partial class MainWindow : Window
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
     // M4 下载管理面板数据源（跨标签共享——DownloadItem 由 TabRuntime 下载事件注入）
     private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
+    private System.Windows.Threading.DispatcherTimer? _sleepTimer;
+    private System.Windows.Threading.DispatcherTimer? _suggestTimer;
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
@@ -57,6 +59,23 @@ public partial class MainWindow : Window
         RestoreSessionOrStart();
         StartThreatFeedRefresh();
         InitEngineCombo();
+        ZoomStore.Load(_settings.ZoomByHost);
+        ZoomStore.Changed += () => Dispatcher.Invoke(() => _settings.ZoomByHost = ZoomStore.Snapshot());
+        Core.Privacy.PrivacySettings.ProtectionLevel = _settings.ProtectionLevel;
+        Core.Privacy.PrivacySettings.HttpsOnly = _settings.HttpsOnly;
+        Core.Privacy.PrivacySettings.SecureDns = _settings.SecureDns;
+        RestoreWindowState();
+        StartSleepTimer();
+        // 建议定时器单例（Tick 由 ResetSuggestTimer 挂/摘）
+        _suggestTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _suggestTimer.Tick += (_, _) => RunSuggestions();
+    }
+
+    private void StartSleepTimer()
+    {
+        _sleepTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _sleepTimer.Tick += (_, _) => SleepCheck();
+        _sleepTimer.Start();
     }
 
     /// <summary>搜索引擎下拉项（key + 展示名）。</summary>
@@ -86,6 +105,7 @@ public partial class MainWindow : Window
         SetBrush("ButtonOverlayPressedBrush", light ? "#2E000000" : "#66FFFFFF");
         SetBrush("FieldBackgroundBrush", light ? "#FFFFFFFF" : "#1FFFFFFF");
         SetBrush("FieldBorderBrush", light ? "#FFDADCE0" : "#2EFFFFFF");
+        SetBrush("SurfaceBrush", light ? "#FFFFFFFF" : "#FF1B2537");
         SetBrush("FieldBorderFocusedBrush", light ? "#FF0B57D0" : "#66FFFFFF");
         SetBrush("TextPrimaryBrush", light ? "#FF1A1A1A" : "#FFFFFFFF");
         SetBrush("TextSecondaryBrush", light ? "#FF5F6368" : "#B3FFFFFF");
@@ -201,6 +221,16 @@ public partial class MainWindow : Window
                         runtime.Control.Source = new Uri(targetUrl);
                 });
             }
+            else if (!_restoring)
+            {
+                // 普通站点：初始化（含虚拟主机映射）就绪后立即导航
+                runtime.Control.Source = new Uri(tab.Url);
+            }
+            else
+            {
+                // 普通站点：初始化（含虚拟主机映射）完成后立即导航
+                runtime.Control.Source = new Uri(tab.Url);
+            }
             // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
             // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
             //（内嵌 iframe 伪装 ntp 来源的请求在顶层门禁处拒绝——ADR-003 无桥
@@ -279,6 +309,9 @@ public partial class MainWindow : Window
                 MessageBoxImage.Warning) == MessageBoxResult.Yes;
         };
         WebViewHost.Children.Add(runtime.Control);
+        // 以共享环境显式初始化（含安全 DNS 等参数——若不显式指定会落默认环境）。
+        // 完成后触发 CoreWebView2InitializationCompleted（上方处理器负责映射+导航）。
+        _ = runtime.InitAsync();
     }
 
     /// <summary>M3：虚拟主机资源映射（start.html 单源 + 可选 GeoGebra 随包）。
@@ -462,6 +495,9 @@ public partial class MainWindow : Window
     private void OnTabSwitched(Tab tab)
     {
         _activeTabId = tab.TabId;
+        tab.LastActivated = DateTime.Now;
+        if (tab.IsSleeping)
+            WakeTab(tab);  // 睡眠标签激活 → 复活（重建 WebView 实例）
         foreach (var pair in _runtimes)
         {
             var isActive = pair.Key == _activeTabId;
@@ -573,6 +609,261 @@ public partial class MainWindow : Window
         _tabs.SwitchTo(tab.TabId);
     }
 
+
+
+    private TabRuntime? ActiveRuntime() =>
+        _activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var r) ? r : null;
+
+    private void ZoomActive(double delta)
+    {
+        var rt = ActiveRuntime();
+        if (rt?.Control.CoreWebView2 is null)
+            return;
+        var host = Uri.TryCreate(rt.Control.CoreWebView2.Source, UriKind.Absolute, out var u)
+            ? u.Host : null;
+        var z = Math.Clamp(rt.Control.ZoomFactor + delta, 0.25, 3.0);
+        rt.Control.ZoomFactor = z;
+        if (host is not null)
+            Core.Tabs.ZoomStore.Set(host, z);
+    }
+
+    private void SleepCheck()
+    {
+        var minutes = _settings.SleepMinutes;
+        if (minutes <= 0 || _activeTabId is null)
+            return;
+        var now = DateTime.Now;
+        foreach (var tab in _tabs.Tabs.ToList())
+        {
+            if (tab.IsPinned || tab.IsSleeping || tab.TabId == _activeTabId)
+                continue;
+            if ((now - tab.LastActivated).TotalMinutes >= minutes
+                && _runtimes.TryGetValue(tab.TabId, out var runtime))
+            {
+                WebViewHost.Children.Remove(runtime.Control);
+                try { runtime.Dispose(); } catch (Exception) { }
+                _runtimes.Remove(tab.TabId);
+                tab.IsSleeping = true;
+            }
+        }
+    }
+
+    private void WakeTab(Tab tab)
+    {
+        if (_runtimes.ContainsKey(tab.TabId))
+            return;
+        tab.IsSleeping = false;
+        CreateRuntime(tab, tab.Url);
+    }
+
+    private Core.Tabs.Tab? TabItemAt(System.Windows.Point p)
+    {
+        var element = TabStrip.InputHitTest(p) as DependencyObject;
+        while (element is not null && element is not System.Windows.Controls.ListBoxItem)
+            element = System.Windows.Media.VisualTreeHelper.GetParent(element);
+        return (element as System.Windows.Controls.ListBoxItem)?.DataContext as Core.Tabs.Tab;
+    }
+
+    private void TabStrip_ContextMenuOpening(object sender, System.Windows.Controls.ContextMenuEventArgs e)
+    {
+        if (TabItemAt(Mouse.GetPosition(TabStrip)) is not Core.Tabs.Tab tab)
+            return;
+        TabStrip.ContextMenu ??= new System.Windows.Controls.ContextMenu();
+        var menu = TabStrip.ContextMenu;
+        menu.Items.Clear();
+        var close = new System.Windows.Controls.MenuItem { Header = "关闭标签" };
+        close.Click += (_, _) => _tabs.CloseTab(tab.TabId);
+        var closeOthers = new System.Windows.Controls.MenuItem { Header = "关闭其他标签" };
+        closeOthers.Click += (_, _) => _tabs.CloseOthers(tab.TabId);
+        var closeRight = new System.Windows.Controls.MenuItem { Header = "关闭右侧标签" };
+        closeRight.Click += (_, _) => _tabs.CloseRight(tab.TabId);
+        var pin = new System.Windows.Controls.MenuItem { Header = tab.IsPinned ? "取消固定标签" : "固定标签" };
+        pin.Click += (_, _) => _tabs.SetPinned(tab.TabId, !tab.IsPinned);
+        var dup = new System.Windows.Controls.MenuItem { Header = "复制标签" };
+        dup.Click += (_, _) => _tabs.Duplicate(tab.TabId);
+        var reopen = new System.Windows.Controls.MenuItem
+        {
+            Header = _tabs.ClosedCount > 0 ? "重新打开已关闭的标签" : "重新打开已关闭的标签（无）",
+            IsEnabled = _tabs.ClosedCount > 0,
+        };
+        reopen.Click += (_, _) => ReopenClosedTab();
+        menu.Items.Add(close);
+        menu.Items.Add(closeOthers);
+        menu.Items.Add(closeRight);
+        menu.Items.Add(new System.Windows.Controls.Separator());
+        menu.Items.Add(pin);
+        menu.Items.Add(dup);
+        menu.Items.Add(new System.Windows.Controls.Separator());
+        menu.Items.Add(reopen);
+    }
+
+    private void ReopenClosedTab()
+    {
+        var s = _tabs.PopClosed();
+        if (s is not null)
+            _tabs.NewTab(s.Url, s.Title);
+    }
+
+    private void TabStrip_PreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Middle || e.ButtonState != MouseButtonState.Pressed)
+            return;
+        if (TabItemAt(e.GetPosition(TabStrip)) is Core.Tabs.Tab tab)
+        {
+            _tabs.CloseTab(tab.TabId);
+            e.Handled = true;
+        }
+    }
+
+    // —— 页内查找 ——
+    private void OpenFind()
+    {
+        FindBar.Visibility = Visibility.Visible;
+        FindBox.Focus();
+        FindBox.SelectAll();
+    }
+    private void CloseFind()
+    {
+        FindBar.Visibility = Visibility.Collapsed;
+        FindCount.Text = string.Empty;
+        if (ActiveRuntime()?.Control.CoreWebView2 is { } cw)
+            _ = cw.ExecuteScriptAsync("window.find('', false, false, false);");
+    }
+    private async void Find_Executed(object sender, RoutedEventArgs e)
+    {
+        var query = FindBox.Text;
+        if (string.IsNullOrWhiteSpace(query) || ActiveRuntime()?.Control.CoreWebView2 is not { } cw)
+            return;
+        var backwards = (e.OriginalSource as System.Windows.Controls.Button)?.Tag as string == "b";
+        try
+        {
+            var count = await CountMatches(cw, query);
+            await cw.ExecuteScriptAsync(BuildFindJs(query, backwards));
+            FindCount.Text = count > 0 ? $"{count} 处" : "无结果";
+        }
+        catch (Exception) { }
+    }
+    private static async Task<int> CountMatches(CoreWebView2 cw, string query)
+    {
+        var q = System.Text.Json.JsonSerializer.Serialize(query);
+        var js = "new Promise(r=>{try{var m=(document.body&&document.body.innerText)||'';" +
+                 "var n=0,i=0,Q=" + q + ";while((i=m.indexOf(Q,i))!==-1){n++;i+=Q.length;}r(n);}catch(e){r(0);}});";
+        var res = await cw.ExecuteScriptAsync(js);
+        return int.TryParse(res, out var n) ? n : 0;
+    }
+    private static string BuildFindJs(string query, bool backwards) =>
+        "window.find(" + System.Text.Json.JsonSerializer.Serialize(query) +
+        ", false, " + (backwards ? "true" : "false") + ", true);";
+
+    // —— 地址栏自动补全 ——
+    private void RunSuggestions()
+    {
+        _suggestTimer?.Stop();
+        var query = AddressBar.Text.Trim();
+        if (string.IsNullOrEmpty(query))
+        {
+            SuggestionPopup.IsOpen = false;
+            return;
+        }
+        var rows = BuildSuggestions(query);
+        SuggestionList.ItemsSource = rows;
+        SuggestionPopup.IsOpen = rows.Count > 0;
+    }
+    private List<SuggestionRow> BuildSuggestions(string query)
+    {
+        var q = query.ToLowerInvariant();
+        var rows = new List<SuggestionRow>();
+        foreach (var b in _bookmarks.All())
+            if (b.Title.ToLowerInvariant().Contains(q) || b.Url.ToLowerInvariant().Contains(q))
+                rows.Add(new SuggestionRow(b.Url, string.IsNullOrWhiteSpace(b.Title) ? b.Url : b.Title, "书签"));
+        foreach (var h in _history.Search(q, null, 60))
+        {
+            if (h.Url.ToLowerInvariant().Contains(q)
+                && !rows.Any(r => string.Equals(r.Url, h.Url, StringComparison.Ordinal)))
+            {
+                rows.Add(new SuggestionRow(h.Url, string.IsNullOrWhiteSpace(h.Title) ? h.Url : h.Title, "历史"));
+                if (rows.Count >= 8) break;
+            }
+        }
+        return rows.Take(8).ToList();
+    }
+    public sealed record SuggestionRow(string Url, string Title, string Kind);
+
+    private void SuggestPick(SuggestionRow row)
+    {
+        SuggestionPopup.IsOpen = false;
+        AddressBar.Text = row.Url;
+        AddressBar.CaretIndex = row.Url.Length;
+        NavigateFromAddressBar();
+    }
+    private void SuggestionList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && SuggestionList.SelectedItem is SuggestionRow sel)
+        {
+            SuggestPick(sel);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            SuggestionPopup.IsOpen = false;
+            e.Handled = true;
+        }
+    }
+
+    private void FindBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        if (!string.IsNullOrWhiteSpace(FindBox.Text))
+            _ = Find_OnceAsync();
+    }
+
+    private async Task Find_OnceAsync()
+    {
+        if (ActiveRuntime()?.Control.CoreWebView2 is not { } cw || string.IsNullOrWhiteSpace(FindBox.Text))
+            return;
+        try
+        {
+            var count = await CountMatches(cw, FindBox.Text);
+            await cw.ExecuteScriptAsync(BuildFindJs(FindBox.Text, false));
+            FindCount.Text = count > 0 ? $"{count} 处" : "无结果";
+        }
+        catch (Exception) { }
+    }
+
+    private void CloseFind_Click(object sender, RoutedEventArgs e) => CloseFind();
+
+    // —— InPrivate ——
+    private void InPrivate_Click(object sender, RoutedEventArgs e) => OpenInPrivateNew();
+
+    private void OpenInPrivateNew() => new InPrivateWindow().Show();
+
+    // —— 窗口状态记忆 ——
+    private void SaveWindowState()
+    {
+        _settings.WindowMaximized = WindowState == WindowState.Maximized;
+        if (WindowState == WindowState.Normal)
+        {
+            _settings.WindowLeft = Left;
+            _settings.WindowTop = Top;
+            _settings.WindowWidth = Width;
+            _settings.WindowHeight = Height;
+        }
+    }
+    private void RestoreWindowState()
+    {
+        var sw = SystemParameters.VirtualScreenWidth;
+        var sh = SystemParameters.VirtualScreenHeight;
+        Width = _settings.WindowWidth > 400 ? _settings.WindowWidth : 1200;
+        Height = _settings.WindowHeight > 300 ? _settings.WindowHeight : 800;
+        if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop)
+            && _settings.WindowLeft < sw && _settings.WindowTop < sh)
+        {
+            Left = _settings.WindowLeft;
+            Top = _settings.WindowTop;
+        }
+        if (_settings.WindowMaximized)
+            WindowState = WindowState.Maximized;
+    }
+
     // ================= 会话持久化 =================
 
     private void RestoreSessionOrStart()
@@ -584,7 +875,7 @@ public partial class MainWindow : Window
             return;
         }
         _tabs.SeedSession(
-            tabs.Select(t => (t.TabId, t.Url, t.Title)),
+            tabs.Select(t => (t.TabId, t.Url, t.Title, t.IsPinned)),
             currentTabId);
         foreach (var tab in _tabs.Tabs)
         {
@@ -624,7 +915,7 @@ public partial class MainWindow : Window
             foreach (var tab in _tabs.Tabs.ToList())
                 _tabs.CloseTab(tab.TabId);
             _tabs.SeedSession(
-                saved.Select(t => (t.TabId, t.Url, t.Title)),
+                saved.Select(t => (t.TabId, t.Url, t.Title, t.IsPinned)),
                 currentTabId);
             foreach (var tab in _tabs.Tabs)
             {
@@ -645,8 +936,12 @@ public partial class MainWindow : Window
 
     // ================= 地址栏与导航 =================
 
-    private void AddressBar_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e) =>
+    private void AddressBar_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
         AddressHint.Visibility = AddressBar.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        _suggestTimer?.Stop();
+        _suggestTimer?.Start();
+    }
 
     /// <summary>M1：地址栏获得焦点即全选（Ctrl+L 与鼠标点击同语义——
     /// 对齐 Python shell_toolbar 聚焦选中契约）。</summary>
@@ -676,6 +971,29 @@ public partial class MainWindow : Window
 
     private void AddressBar_KeyDown(object sender, KeyEventArgs e)
     {
+        if (SuggestionPopup.IsOpen && SuggestionList.Items.Count > 0)
+        {
+            if (e.Key == Key.Down)
+            {
+                SuggestionList.SelectedIndex = (SuggestionList.SelectedIndex + 1) % SuggestionList.Items.Count;
+                e.Handled = true; return;
+            }
+            if (e.Key == Key.Up)
+            {
+                SuggestionList.SelectedIndex = (SuggestionList.SelectedIndex - 1 + SuggestionList.Items.Count) % SuggestionList.Items.Count;
+                e.Handled = true; return;
+            }
+            if (e.Key == Key.Enter && SuggestionList.SelectedItem is SuggestionRow sel)
+            {
+                SuggestPick(sel);
+                e.Handled = true; return;
+            }
+            if (e.Key == Key.Escape)
+            {
+                SuggestionPopup.IsOpen = false;
+                e.Handled = true; return;
+            }
+        }
         if (e.Key == Key.Enter)
             NavigateFromAddressBar();
     }
@@ -981,6 +1299,25 @@ public partial class MainWindow : Window
                     OpenSourceViewer();
                     e.Handled = true;
                     return;
+                case Key.F:
+                    OpenFind();
+                    e.Handled = true;
+                    return;
+                case Key.D0:
+                case Key.NumPad0:
+                    ActiveRuntime()?.ResetZoom();
+                    e.Handled = true;
+                    return;
+                case Key.OemPlus:
+                case Key.Add:
+                    ZoomActive(0.1);
+                    e.Handled = true;
+                    return;
+                case Key.OemMinus:
+                case Key.Subtract:
+                    ZoomActive(-0.1);
+                    e.Handled = true;
+                    return;
             }
         }
         if (ApprovalOverlay.Visibility != Visibility.Visible || e.Key != Key.Escape)
@@ -994,6 +1331,9 @@ public partial class MainWindow : Window
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
         SaveSession();
+        SaveWindowState();
+        _settings.ZoomByHost = ZoomStore.Snapshot();
+        _settings.Save(AppSettings.DefaultPath);
         foreach (var runtime in _runtimes.Values)
             runtime.Host.RejectPendingNavigation();
     }

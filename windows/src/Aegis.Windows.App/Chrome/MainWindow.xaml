@@ -13,6 +13,8 @@
     <SolidColorBrush x:Key="ButtonOverlayPressedBrush" Color="#66FFFFFF"/>
     <SolidColorBrush x:Key="FieldBackgroundBrush" Color="#1FFFFFFF"/>
     <SolidColorBrush x:Key="FieldBorderBrush" Color="#2EFFFFFF"/>
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FF1B2537"/>
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#223B82F6"/>
     <SolidColorBrush x:Key="FieldBorderFocusedBrush" Color="#66FFFFFF"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B3FFFFFF"/>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFFFF"/>
@@ -93,6 +95,7 @@
         <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
           <ListBox x:Name="TabStrip" SelectionMode="Single" Background="Transparent"
                    BorderThickness="0" SelectionChanged="TabStrip_SelectionChanged"
+                   ContextMenuOpening="TabStrip_ContextMenuOpening" PreviewMouseDown="TabStrip_PreviewMouseDown"
                    PreviewMouseLeftButtonDown="TabStrip_PreviewMouseLeftButtonDown"
                    AllowDrop="True" PreviewMouseMove="TabStrip_PreviewMouseMove"
                    Drop="TabStrip_Drop" DragOver="TabStrip_DragOver">
@@ -106,19 +109,17 @@
                 <Setter Property="Focusable" Value="False"/>
                 <Setter Property="Template">
                   <Setter.Value>
-                    <!-- Edge 风格标签：顶部圆角直角、激活与工具栏连成一体、
-                         前置站点圆点图标、标签间细分隔 -->
                     <ControlTemplate TargetType="ListBoxItem">
                       <Border x:Name="Chip" CornerRadius="8,8,0,0" Margin="0,0,0,0"
                               Padding="12,6" BorderThickness="1,1,1,0"
                               BorderBrush="Transparent"
                               Background="{DynamicResource ChromeBackgroundBrush}">
                         <DockPanel>
-                          <Button DockPanel.Dock="Right" Content="✕" Click="TabClose_Click"
+                          <Button x:Name="TabClose" DockPanel.Dock="Right" Content="✕" Click="TabClose_Click"
                                   Tag="{Binding TabId}" Focusable="False" Cursor="Hand"
                                   FontSize="10" Margin="10,0,0,0" Padding="2,0"
                                   Background="Transparent" BorderThickness="0"
-                                  ToolTip="关闭标签（Ctrl+W）">
+                                  ToolTip="关闭标签（Ctrl+W）" Visibility="Collapsed">
                             <Button.Style>
                               <Style TargetType="Button">
                                 <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
@@ -143,8 +144,24 @@
                               </Style>
                             </Button.Style>
                           </Button>
-                          <Ellipse DockPanel.Dock="Left" Width="14" Height="14" Margin="0,0,7,0"
-                                   VerticalAlignment="Center" Fill="#FF3B82F6"/>
+                          <Grid DockPanel.Dock="Left" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center">
+                            <Ellipse Fill="#FF3B82F6"/>
+                            <Image Source="{Binding Icon}" Width="16" Height="16"
+                                   RenderOptions.BitmapScalingMode="HighQuality">
+                              <Image.Style>
+                                <Style TargetType="Image">
+                                  <Setter Property="Visibility" Value="Visible"/>
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Icon}" Value="{x:Null}">
+                                      <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </Image.Style>
+                            </Image>
+                          </Grid>
+                          <TextBlock x:Name="SleepMark" DockPanel.Dock="Left" Text="💤" FontSize="10"
+                                     Margin="0,0,5,0" Visibility="Collapsed" VerticalAlignment="Center"/>
                           <TextBlock x:Name="TabTitle" Text="{Binding Title}" FontSize="12" MaxWidth="150"
                                      TextTrimming="CharacterEllipsis"
                                      Foreground="{DynamicResource TextSecondaryBrush}"/>
@@ -152,15 +169,22 @@
                       </Border>
                       <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
-                          <!-- 激活标签：与下方工具栏同底色连成一体，标题转白 -->
                           <Setter TargetName="Chip" Property="Background" Value="{DynamicResource ChromeBackgroundBrush}"/>
                           <Setter TargetName="Chip" Property="BorderBrush" Value="#22FFFFFF"/>
                           <Setter TargetName="TabTitle" Property="Foreground" Value="#FFFFFFFF"/>
+                          <Setter TargetName="TabClose" Property="Visibility" Value="Visible"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
                           <Setter TargetName="Chip" Property="Background" Value="{DynamicResource ButtonOverlayHoverBrush}"/>
                           <Setter TargetName="TabTitle" Property="Foreground" Value="#FFFFFFFF"/>
+                          <Setter TargetName="TabClose" Property="Visibility" Value="Visible"/>
                         </Trigger>
+                        <DataTrigger Binding="{Binding IsPinned}" Value="True">
+                          <Setter TargetName="TabClose" Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsSleeping}" Value="True">
+                          <Setter TargetName="SleepMark" Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
                       </ControlTemplate.Triggers>
                     </ControlTemplate>
                   </Setter.Value>
@@ -195,6 +219,8 @@
           <!-- Edge 风格个人资料圆钮（占位——无账号体系，点击聚焦地址栏） -->
           <Button x:Name="ProfileButton" Style="{StaticResource NavButton}" Content="◐"
                   Click="Profile_Click" Margin="6,0,0,0" ToolTip="个人资料"/>
+          <Button x:Name="InPrivateButton" Style="{StaticResource NavButton}" Content="🕶"
+                  Click="InPrivate_Click" Margin="6,0,0,0" ToolTip="InPrivate 无痕窗口"/>
         </StackPanel>
         <!-- 胶囊地址栏：深色玻璃 + 聚焦描边 + 占位符 + 内嵌「打开」 -->
         <Border x:Name="AddressPill" Margin="10,0,0,0" CornerRadius="18"
@@ -215,7 +241,34 @@
               <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <Grid Grid.Column="0" Margin="14,0,4,0">
-              <TextBlock x:Name="AddressHint" Text="搜索网页或输入网址" VerticalAlignment="Center"
+              <Popup x:Name="SuggestionPopup" PlacementTarget="{Binding ElementName=AddressPill}"
+                     Placement="Bottom" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade">
+                <Border CornerRadius="12" Background="{DynamicResource SurfaceBrush}"
+                        BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1"
+                        Padding="6" Margin="0,6,0,0" MinWidth="420" MaxWidth="560" MaxHeight="320">
+                  <Border.Effect>
+                    <DropShadowEffect BlurRadius="20" ShadowDepth="2" Opacity="0.35"/>
+                  </Border.Effect>
+                  <ListBox x:Name="SuggestionList" Background="Transparent" BorderThickness="0"
+                           PreviewKeyDown="SuggestionList_KeyDown">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate>
+                        <Grid Margin="4,3">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                          </Grid.ColumnDefinitions>
+                          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"
+                                     Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12"/>
+                          <TextBlock Grid.Column="1" Text="{Binding Kind}" Margin="10,0,0,0"
+                                     Foreground="{DynamicResource TextMutedBrush}" FontSize="11"/>
+                        </Grid>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </Border>
+              </Popup>
+              <TextBlock x:Name="AddressHint" Text="搜索网页或输入网址" VerticalAlignment="Center" 
                          Foreground="{DynamicResource TextSecondaryBrush}" IsHitTestVisible="False"/>
               <TextBox x:Name="AddressBar" BorderThickness="0" Background="Transparent"
                        Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="#FFFFFFFF"
@@ -249,6 +302,30 @@
       <!-- M1-T1：每标签一 WebView2 实例（TabRuntime 创建/挂接）——切换即可见性
            切换，页面状态/滚动/表单天然保留（ADR-009 D2） -->
       <Grid x:Name="WebViewHost"/>
+      <!-- P0 页内查找条 -->
+      <Border x:Name="FindBar" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,10,12,0"
+              CornerRadius="12" Background="{DynamicResource SurfaceBrush}"
+              BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1"
+              Padding="10,6" Visibility="Collapsed" Panel.ZIndex="8">
+        <Border.Effect><DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.35"/></Border.Effect>
+        <StackPanel Orientation="Horizontal">
+          <TextBox x:Name="FindBox" Width="200" Height="28" VerticalContentAlignment="Center"
+                   FontSize="12" BorderThickness="0"
+                   Background="{DynamicResource FieldBackgroundBrush}"
+                   Foreground="{DynamicResource TextPrimaryBrush}" TextChanged="FindBox_TextChanged"/>
+          <TextBlock x:Name="FindCount" VerticalAlignment="Center" Margin="8,0"
+                     Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
+          <Button Content="▲" Tag="b" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
+                  Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0"
+                  ToolTip="上一个"/>
+          <Button Content="▼" Tag="f" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
+                  Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0"
+                  ToolTip="下一个"/>
+          <Button Content="✕" Click="CloseFind_Click" Width="28" Height="28" Cursor="Hand"
+                  Background="Transparent" Foreground="{DynamicResource TextSecondaryBrush}" BorderThickness="0"
+                  ToolTip="关闭（Esc）"/>
+        </StackPanel>
+      </Border>
       <!-- 全窗口受信模态遮罩：拦截底层点击；只展示 Rust 核心给出的最小审批字段。 -->
       <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#99101827">
         <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"

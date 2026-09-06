@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Chrome;
 
 using System;
+using System.Threading.Tasks;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Core.Tabs;
 using Aegis.Windows.WebView;
@@ -16,21 +17,20 @@ public sealed class TabRuntime : IDisposable
 {
     private bool _disposed;
 
-    public TabRuntime(BrowserPolicyBroker broker, Tab tab, string initialUrl)
+    /// <summary>目标环境（正常=共享；InPrivate=独立用户目录）。Chrome 调用方
+    /// 在创建后以对应环境 EnsureCoreWebView2Async。</summary>
+    private Microsoft.Web.WebView2.Core.CoreWebView2Environment? _env;
+
+    public TabRuntime(BrowserPolicyBroker broker, Tab tab, string initialUrl, Microsoft.Web.WebView2.Core.CoreWebView2Environment? environment = null)
     {
         Tab = tab;
+        _env = environment;
         var sessionId = $"s-{tab.TabId}";
         Host = new HostWebView(broker, sessionId, tab.TabId);
-        // 虚拟主机地址（NTP/画板）先在构造期落在 about:blank——WebView2 控件需要
-        // **非 null 的 Source 才会 eager 初始化 CoreWebView2**；设 null 会让控件永不
-        // 初始化（首页空白、无安全日志——上线复现实证）。真实 NTP 目标在 Chrome 侧
-        // 映射虚拟主机后再导航（见 MainWindow.CreateRuntime）。
-        Control = new WebView2
-        {
-            Source = Chrome.Ntp.NtpAssets.IsVirtualHostUrl(initialUrl)
-                ? new Uri("about:blank")
-                : ResolveInitialUri(initialUrl),
-        };
+        // Source 不在构造期设置——改用显式 EnsureCoreWebView2Async(自定义环境) 初始化
+        //（这样才能注入安全 DNS 等环境参数）。真实目标地址由 Chrome 在
+        // CoreWebView2InitializationCompleted 里映射/就绪后导航（见 MainWindow.CreateRuntime）。
+        Control = new WebView2();
     }
 
     public Tab Tab { get; }
@@ -98,7 +98,51 @@ public sealed class TabRuntime : IDisposable
         {
             Tab.Url = coreWebView2.Source ?? Tab.Url;
             NavigationCompleted?.Invoke(args.IsSuccess, args.WebErrorStatus);
+            // 每站点缩放：导航离开前记住当前站点缩放（Ctrl+滚轮由 WebView2 原生调整）；
+            // 导航到新站点时应用其记忆值。
+            var host = Uri.TryCreate(coreWebView2.Source, UriKind.Absolute, out var hu)
+                ? hu.Host
+                : null;
+            if (host is not null)
+            {
+                if (_lastZoomHost is not null && _lastZoomHost != host)
+                    Core.Tabs.ZoomStore.Set(_lastZoomHost, Control.ZoomFactor);
+                _lastZoomHost = host;
+                var zoom = Core.Tabs.ZoomStore.Get(host);
+                if (Math.Abs(Control.ZoomFactor - zoom) > 0.001)
+                    Control.ZoomFactor = zoom;
+                // 站点图标（缓存命中即时；未命中异步抓取后回填）
+                var hostCapture = host;
+                _ = Core.Favicons.FaviconService.Get(hostCapture, icon =>
+                {
+                    if (icon is not null)
+                        Tab.Icon = icon;
+                });
+            }
         };
+    }
+
+    private string? _lastZoomHost;
+
+    /// <summary>以指定环境初始化（正常=共享；InPrivate=独立用户目录）。
+    /// 调用方 fire-and-forget；完成后触发 CoreWebView2InitializationCompleted。</summary>
+    public async Task InitAsync()
+    {
+        var env = _env ?? await WebView.WebViewEnvironment.SharedAsync();
+        await Control.EnsureCoreWebView2Async(env);
+    }
+
+    /// <summary>重置当前站点缩放到 100%（Ctrl+0）。</summary>
+    public void ResetZoom()
+    {
+        var host = Uri.TryCreate(Control.Source?.ToString(), UriKind.Absolute, out var u)
+            ? u.Host
+            : null;
+        if (host is not null)
+        {
+            Core.Tabs.ZoomStore.Set(host, 1.0);
+            Control.ZoomFactor = 1.0;
+        }
     }
 
     /// <summary>初始 URL 解析：空/非法一律回退 about:blank（恢复的 URL 若被篡改，

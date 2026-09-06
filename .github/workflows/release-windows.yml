@@ -56,6 +56,10 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist/native-policy/windows/win-x64
           Copy-Item core/rust-policy-core/target/x86_64-pc-windows-msvc/release/aegis_policy_core.dll `
             dist/native-policy/windows/win-x64/aegis_policy_core.dll
+      - name: Prepare offline GeoGebra bundle (云端打包——C# 安装包内置画板)
+        uses: ./.github/actions/prepare-geogebra
+        with:
+          dest-dir: legacy/windows-pywebview/geogebra
       - name: Verify native bridge and build current Windows application
         shell: pwsh
         run: |

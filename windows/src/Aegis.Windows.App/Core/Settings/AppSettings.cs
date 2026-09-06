@@ -13,6 +13,8 @@ public sealed class AppSettings
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
+        // 窗口位置默认 NaN（未保存过）需可往返——允许命名浮点字面量
+        NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals,
     };
 
     /// <summary>搜索引擎 key（消费者：MainWindow 地址栏归一）。非法值回退默认。</summary>
@@ -31,6 +33,29 @@ public sealed class AppSettings
     /// <summary>浏览器 chrome 主题（"dark"/"light"——消费者：MainWindow.ApplyTheme）。
     /// 默认深色（历史遗留美学）；切换经设置窗口。</summary>
     public string Theme { get; set; } = "dark";
+
+    // ── 窗口状态（消费者：MainWindow 启动恢复/关闭保存）──
+    public double WindowLeft { get; set; } = double.NaN;
+    public double WindowTop { get; set; } = double.NaN;
+    public double WindowWidth { get; set; } = 1200;
+    public double WindowHeight { get; set; } = 800;
+    public bool WindowMaximized { get; set; }
+
+    // ── 行为 / 隐私（消费者：MainWindow / HostWebView / WebViewEnvironment）──
+    /// <summary>后台标签睡眠分钟（0=关闭——释放 WebView 内存）。</summary>
+    public int SleepMinutes { get; set; } = 30;
+
+    /// <summary>跟踪防护级别：0 基础 / 1 均衡 / 2 严格。</summary>
+    public int ProtectionLevel { get; set; } = 1;
+
+    /// <summary>HTTPS-only：http 自动升级 https。</summary>
+    public bool HttpsOnly { get; set; } = true;
+
+    /// <summary>安全 DNS（DoH）——环境参数，重启生效。</summary>
+    public bool SecureDns { get; set; } = true;
+
+    /// <summary>每站点缩放因子（host → 1.0~3.0；消费者：TabRuntime 导航应用/保存）。</summary>
+    public Dictionary<string, double> ZoomByHost { get; set; } = new();
 
     public static string DefaultPath =>
         Path.Combine(AppPaths.DataDir, "settings.json");

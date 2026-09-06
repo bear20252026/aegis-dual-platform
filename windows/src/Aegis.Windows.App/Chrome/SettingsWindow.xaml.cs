@@ -32,6 +32,10 @@ public partial class SettingsWindow : Window
         HistoryToggle.IsChecked = _settings.HistoryEnabled;
         ThreatFeedBox.Text = _settings.ThreatFeedUrl;
         ThemeBox.SelectedIndex = string.Equals(_settings.Theme, "light", System.StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+        SleepCombo.SelectedIndex = SleepIndex(_settings.SleepMinutes);
+        ProtectionCombo.SelectedIndex = Clamp(_settings.ProtectionLevel);
+        HttpsCheck.IsChecked = _settings.HttpsOnly;
+        DnsCheck.IsChecked = _settings.SecureDns;
         if (_broker.KillSwitch.IsEngaged)
             KillSwitchButton.IsEnabled = false;
         _suppressEvents = false;
@@ -78,6 +82,34 @@ public partial class SettingsWindow : Window
         ThreatFeedHint.Text = "已保存；生效于下次启动（导航与子资源拦截）。";
         ThreatFeedHint.Foreground = new System.Windows.Media.SolidColorBrush(
             System.Windows.Media.Color.FromRgb(0x94, 0xA3, 0xB8));
+    }
+
+    private static int SleepIndex(int minutes) => minutes switch { 0 => 0, 15 => 1, 60 => 3, _ => 2 };
+    private static int Clamp(int v) => v < 0 ? 0 : v > 2 ? 2 : v;
+
+    private void SleepCombo_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        _settings.SleepMinutes = SleepCombo.SelectedIndex switch { 0 => 0, 1 => 15, 2 => 30, 3 => 60, _ => 30 };
+        Save();
+    }
+
+    private void ProtectionCombo_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        _settings.ProtectionLevel = Clamp(ProtectionCombo.SelectedIndex);
+        Core.Privacy.PrivacySettings.ProtectionLevel = _settings.ProtectionLevel;
+        Save();
+    }
+
+    private void Privacy_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_suppressEvents) return;
+        _settings.HttpsOnly = HttpsCheck.IsChecked == true;
+        _settings.SecureDns = DnsCheck.IsChecked == true;
+        Core.Privacy.PrivacySettings.HttpsOnly = _settings.HttpsOnly;
+        Core.Privacy.PrivacySettings.SecureDns = _settings.SecureDns;
+        Save();
     }
 
     private void KillSwitch_Click(object sender, RoutedEventArgs e)

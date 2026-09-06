@@ -115,8 +115,8 @@ public sealed class TabManagerTests
 
         var restored = manager.SeedSession(
         [
-            ("tab-a", "https://a.example", "A"),
-            ("tab-b", "https://b.example", "B"),
+            ("tab-a", "https://a.example", "A", false),
+            ("tab-b", "https://b.example", "B", false),
         ], "tab-b");
 
         Assert.Equal(2, manager.Tabs.Count);
@@ -131,8 +131,8 @@ public sealed class TabManagerTests
 
         var restored = manager.SeedSession(
         [
-            ("tab-a", "https://a.example", "A"),
-            ("tab-b", "https://b.example", "B"),
+            ("tab-a", "https://a.example", "A", false),
+            ("tab-b", "https://b.example", "B", false),
         ], "missing");
 
         Assert.Equal("tab-b", restored);
@@ -165,6 +165,67 @@ public sealed class TabManagerTests
 
         Assert.Equal(t3.TabId, manager.CurrentTabId);
         Assert.Equal([t3.TabId, t1.TabId, t2.TabId], manager.Tabs.Select(t => t.TabId));
+    }
+
+    [Fact]
+    public void PinnedTabMovesToFrontAndUnpinRestores()
+    {
+        var m = new TabManager();
+        var a = m.NewTab("https://a"); _ = m.NewTab("https://b"); var c = m.NewTab("https://c");
+        m.SetPinned(a.TabId, true);
+        Assert.True(m.Tabs[0].IsPinned);
+        m.SetPinned(a.TabId, false);
+        Assert.False(m.Tabs[0].IsPinned);
+        Assert.Equal(3, m.Tabs.Count);
+        Assert.Equal(c.TabId, m.CurrentTabId);  // 激活标签不变
+    }
+
+    [Fact]
+    public void NewTabInsertedAfterPinnedBlock()
+    {
+        var m = new TabManager();
+        var a = m.NewTab("https://a");
+        m.SetPinned(a.TabId, true);
+        var b = m.NewTab("https://b");
+        Assert.Equal(a.TabId, m.Tabs[0].TabId);  // 固定区首位
+        Assert.Equal(b.TabId, m.Tabs[1].TabId);  // 新标签排固定区后
+        Assert.True(m.Current!.TabId == b.TabId);
+    }
+
+    [Fact]
+    public void ClosedTabGoesToUndoStack()
+    {
+        var m = new TabManager();
+        var a = m.NewTab("https://a"); var b = m.NewTab("https://b");
+        m.CloseTab(a.TabId);
+        Assert.Equal(1, m.ClosedCount);
+        var popped = m.PopClosed();
+        Assert.NotNull(popped);
+        Assert.Equal("https://a", popped!.Url);
+        Assert.Equal(0, m.ClosedCount);
+    }
+
+    [Fact]
+    public void CloseOthersKeepsPinnedAndTarget()
+    {
+        var m = new TabManager();
+        var a = m.NewTab("https://a"); var b = m.NewTab("https://b"); var c = m.NewTab("https://c");
+        m.SetPinned(a.TabId, true);
+        var closed = m.CloseOthers(b.TabId);
+        Assert.True(closed);
+        Assert.Equal(2, m.Tabs.Count);
+        Assert.Contains(m.Tabs, x => x.TabId == a.TabId);
+        Assert.Contains(m.Tabs, x => x.TabId == b.TabId);
+        Assert.DoesNotContain(m.Tabs, x => x.TabId == c.TabId);
+    }
+
+    [Fact]
+    public void CloseRightClosesFollowingNonPinned()
+    {
+        var m = new TabManager();
+        _ = m.NewTab("https://a"); var b = m.NewTab("https://b"); _ = m.NewTab("https://c"); _ = m.NewTab("https://d");
+        m.CloseRight(b.TabId);
+        Assert.Equal(["https://a", "https://b"], m.Tabs.Select(x => x.Url).ToList());
     }
 
     [Fact]
