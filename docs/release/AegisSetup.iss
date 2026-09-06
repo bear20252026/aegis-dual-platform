@@ -3,7 +3,7 @@
 ; 编译命令：ISCC.exe AegisSetup.iss
 
 #define MyAppName "Aegis Browser"
-#define MyAppVersion "2.2.0-beta.9"
+#define MyAppVersion "2.2.0-beta.10"
 #define MyAppPublisher "Aegis Project"
 #define MyAppExeName "Aegis.exe"
 
