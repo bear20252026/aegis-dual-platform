@@ -18,8 +18,14 @@ public sealed class TabManager
     /// <summary>新标签打开（UI 创建 WebView 实例并挂接）。</summary>
     public event Action<Tab>? TabOpened;
 
-    /// <summary>标签关闭（UI 摘除并 dispose 对应 WebView 实例；参数=被关闭 tabId）。</summary>
-    public event Action<string>? TabClosed;
+    /// <summary>标签关闭（UI 摘除并 dispose 对应 WebView 实例；参数=被关闭 tabId）。
+    /// 显式访问器——规避 CS0067 字段式事件误报（本事件确实被主/无痕窗口订阅）。</summary>
+    private Action<string>? _tabClosed;
+    public event Action<string>? TabClosed
+    {
+        add => _tabClosed += value;
+        remove => _tabClosed -= value;
+    }
 
     /// <summary>当前标签切换（UI 切换可见性并同步地址栏）。</summary>
     public event Action<Tab>? TabSwitched;

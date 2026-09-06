@@ -3,6 +3,7 @@ namespace Aegis.Windows.Core.History;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 /// <summary>历史记录（ADR-009 D2：SQLite）。升级版支持：
@@ -120,7 +121,63 @@ public sealed class HistoryStore
         return ReadEntries(reader);
     }
 
+    /// <summary>游标分页（键集分页——比 OFFSET 稳，翻页期间新增不重不漏）。
+    /// 按 (visited_at, id) 倒序；after 为上一页末条游标。返回 HasMore 提示是否还有下一页。
+    /// 为空查询+空区间时回退 RecentPaged。</summary>
+    public PageResult SearchRangePaged(string query, string? from, string? to,
+        int pageSize = 100, PageCursor? after = null)
+    {
+        var hasText = !string.IsNullOrWhiteSpace(query);
+        var hasFrom = !string.IsNullOrEmpty(from);
+        var hasTo = !string.IsNullOrEmpty(to);
+        if (!hasText && !hasFrom && !hasTo)
+            return RecentPaged(pageSize, after);
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        var clauses = new List<string>();
+        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
+        if (hasFrom) clauses.Add("visited_date >= $from");
+        if (hasTo) clauses.Add("visited_date <= $to");
+        if (after is not null) clauses.Add("(visited_at, id) < ($ca, $cid)");
+        select.CommandText =
+            "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
+            string.Join(" AND ", clauses) +
+            " ORDER BY visited_at DESC, id DESC LIMIT $lim";
+        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasFrom) select.Parameters.AddWithValue("$from", from);
+        if (hasTo) select.Parameters.AddWithValue("$to", to);
+        if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
+        select.Parameters.AddWithValue("$lim", pageSize + 1);
+        return ReadPage(select, pageSize);
+    }
+
+    /// <summary>最近访问游标分页（记录倒序；after=翻页游标）。</summary>
+    public PageResult RecentPaged(int pageSize = 100, PageCursor? after = null)
+    {
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        select.CommandText = after is null
+            ? "SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC, id DESC LIMIT $lim"
+            : "SELECT id, url, title, visited_at, visited_date FROM visits WHERE (visited_at, id) < ($ca, $cid) ORDER BY visited_at DESC, id DESC LIMIT $lim";
+        if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
+        select.Parameters.AddWithValue("$lim", pageSize + 1);
+        return ReadPage(select, pageSize);
+    }
+
+    private static PageResult ReadPage(SqliteCommand select, int pageSize)
+    {
+        using var reader = select.ExecuteReader();
+        var entries = ReadEntries(reader);
+        var hasMore = entries.Count > pageSize;
+        var page = hasMore ? entries.Take(pageSize).ToList() : entries;
+        PageCursor? next = null;
+        if (hasMore && page.Count > 0)
+            next = new PageCursor(page[^1].VisitedAt, page[^1].Id);
+        return new PageResult(page, hasMore, next);
+    }
+
     /// <summary>删除单条历史（不可恢复——UI 层负责确认）。</summary>
+
     public bool Delete(long id)
     {
         using var connection = Open();
@@ -247,3 +304,9 @@ public sealed class HistoryStore
 
 /// <summary>历史条目（含本地日期 yyyy-MM-dd 与 ISO 时刻——UI 分组/按日查询用）。</summary>
 public sealed record HistoryEntry(long Id, string Url, string Title, string VisitedAt, string VisitedDate);
+/// <summary>分页游标（上一页末条的 (visited_at, id)——键集分页定位）。</summary>
+public sealed record PageCursor(string VisitedAt, long Id);
+
+/// <summary>一页结果：条目 + 是否还有下一页 + 下一页游标。</summary>
+public sealed record PageResult(
+    IReadOnlyList<HistoryEntry> Entries, bool HasMore, PageCursor? NextCursor);
