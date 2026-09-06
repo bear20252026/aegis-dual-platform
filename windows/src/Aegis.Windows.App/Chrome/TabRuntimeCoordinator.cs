@@ -4,7 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using Aegis.Windows.Broker;
+using Aegis.Windows.Chrome.Ntp;
 using Aegis.Windows.Core.Tabs;
 
 /// <summary>协调 MainWindow 中全部 TabRuntime 的初始化/关闭/延迟导航——
@@ -86,20 +88,89 @@ public sealed class TabRuntimeCoordinator : IDisposable
         if (lifetime.IsDisposed || lifetime.CancellationToken.IsCancellationRequested)
             return;
         var runtime = lifetime.Runtime;
-        Application.Current?.Dispatcher?.BeginInvoke(new Action(() =>
+        // ApplicationIdle：在所有启动/渲染工作安顿后再导航，确保
+        // SetVirtualHostNameToFolderMapping 已传播到渲染进程。单次 Normal
+        // 优先级 BeginInvoke 在启动争用下会早于映射传播 → ntp.aegis.local
+        // 解析失败 → WebView2 呈现纯文本错误文档（首页"文档样纯文字"根因）。
+        Application.Current?.Dispatcher?.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
         {
-            if (!windowIsAlive)
+            if (!ValidateNavigationTarget(tabId, runtime, lifetime, windowIsAlive))
                 return;
-            // 二次校验：快照引用仍是最新的、控件仍在本窗口视觉树中
-            if (!_runtimes.TryGetValue(tabId, out var current) || !ReferenceEquals(current, runtime))
+            if (!NtpAssets.IsVirtualHostUrl(url))
+            {
+                SafeNavigate(runtime, url);
                 return;
-            if (lifetime.IsDisposed || lifetime.CancellationToken.IsCancellationRequested)
-                return;
-            if (runtime.Control.CoreWebView2 is null || runtime.Control.Parent is null)
-                return;
-            try { runtime.Control.Source = new Uri(url); }
-            catch (Exception) { /* 竞态：安全丢弃 */ }
+            }
+            NavigateVirtualHostWithRetry(tabId, runtime, lifetime, url, windowIsAlive, remaining: 4);
         }));
+    }
+
+    /// <summary>虚拟主机导航 + 失败重试：首帧若因映射未传播而 ConnectionAborted
+    /// （IsSuccess=false），稍后重试——重试时映射必然已就绪。有界重试，绝不无限循环。</summary>
+    private void NavigateVirtualHostWithRetry(
+        string tabId, TabRuntime runtime, TabRuntimeLifetime lifetime,
+        string url, bool windowIsAlive, int remaining)
+    {
+        if (!ValidateNavigationTarget(tabId, runtime, lifetime, windowIsAlive))
+            return;
+        var core = runtime.Control.CoreWebView2;
+        if (core is null)
+            return;
+        EventHandler<Microsoft.Web.WebView2.Core.CoreWebView2NavigationCompletedEventArgs> handler = null!;
+        handler = (_, e) =>
+        {
+            core.NavigationCompleted -= handler;
+            if (e.IsSuccess)
+                return;
+            if (remaining <= 0)
+            {
+                Core.Security.SecurityLog.Write($"[ntp] 标签 {tabId} 虚拟主机导航失败且重试耗尽: {e.WebErrorStatus}");
+                return;
+            }
+            // 延迟后重试（映射传播通常在下一次导航前完成）
+            var timer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromMilliseconds(120),
+            };
+            var localTimer = timer;
+            timer.Tick += (_, _) =>
+            {
+                localTimer.Stop();
+                NavigateVirtualHostWithRetry(tabId, runtime, lifetime, url, windowIsAlive, remaining - 1);
+            };
+            timer.Start();
+        };
+        core.NavigationCompleted += handler;
+        try
+        {
+            runtime.Control.Source = new Uri(url);
+        }
+        catch (Exception)
+        {
+            core.NavigationCompleted -= handler;
+        }
+    }
+
+    /// <summary>导航前快照校验：窗口存活、runtime 仍是当前对象、未销毁、控件有效。</summary>
+    private bool ValidateNavigationTarget(
+        string tabId, TabRuntime runtime, TabRuntimeLifetime lifetime, bool windowIsAlive)
+    {
+        if (!windowIsAlive)
+            return false;
+        // 二次校验：快照引用仍是最新的、控件仍在本窗口视觉树中
+        if (!_runtimes.TryGetValue(tabId, out var current) || !ReferenceEquals(current, runtime))
+            return false;
+        if (lifetime.IsDisposed || lifetime.CancellationToken.IsCancellationRequested)
+            return false;
+        if (runtime.Control.CoreWebView2 is null || runtime.Control.Parent is null)
+            return false;
+        return true;
+    }
+
+    private static void SafeNavigate(TabRuntime runtime, string url)
+    {
+        try { runtime.Control.Source = new Uri(url); }
+        catch (Exception) { /* 竞态：安全丢弃 */ }
     }
 
     public void Dispose()

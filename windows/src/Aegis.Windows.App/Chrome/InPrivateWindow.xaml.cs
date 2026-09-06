@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Core.Tabs;
 using Microsoft.Web.WebView2.Core;
@@ -47,11 +48,13 @@ public partial class InPrivateWindow : Window
             if (Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
             {
                 var target = tab.Url;
-                Dispatcher.BeginInvoke(() =>
+                // ApplicationIdle + 失败重试：与主窗口一致，避免启动争用下
+                // 映射未传播 → ntp.aegis.local 解析失败 → 纯文本错误文档。
+                Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
                 {
                     if (_runtimes.ContainsKey(tab.TabId))
-                        runtime.Control.Source = new Uri(target);
-                });
+                        NavigateVirtualHostWithRetry(runtime, target);
+                }));
             }
             else
             {
@@ -63,8 +66,7 @@ public partial class InPrivateWindow : Window
         await runtime.InitAsync();
     }
 
-    private void BindVirtualHosts(CoreWebView2 core)
-    {
+    private void BindVirtualHosts(CoreWebView2 core)    {
         var ntp = Ntp.NtpAssets.ResolveContentRoot();
         if (ntp is not null)
             core.SetVirtualHostNameToFolderMapping(
@@ -75,6 +77,35 @@ public partial class InPrivateWindow : Window
             core.SetVirtualHostNameToFolderMapping(
                 Ntp.NtpAssets.GeoHostName, geo,
                 CoreWebView2HostResourceAccessKind.Allow);
+    }
+
+    /// <summary>虚拟主机导航 + 失败重试（与主窗口协调器同语义）：首帧若映射未
+    /// 传播而 ConnectionAborted，稍后重试——重试时映射必然已就绪。有界重试。</summary>
+    private void NavigateVirtualHostWithRetry(TabRuntime runtime, string url, int remaining = 4)
+    {
+        var core = runtime.Control.CoreWebView2;
+        if (core is null || !_runtimes.ContainsKey(runtime.Tab.TabId))
+            return;
+        EventHandler<CoreWebView2NavigationCompletedEventArgs> handler = null!;
+        handler = (_, e) =>
+        {
+            core.NavigationCompleted -= handler;
+            if (e.IsSuccess)
+                return;
+            if (remaining <= 0 || !_runtimes.ContainsKey(runtime.Tab.TabId))
+                return;
+            var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(120) };
+            var localTimer = timer;
+            timer.Tick += (_, _) =>
+            {
+                localTimer.Stop();
+                NavigateVirtualHostWithRetry(runtime, url, remaining - 1);
+            };
+            timer.Start();
+        };
+        core.NavigationCompleted += handler;
+        try { runtime.Control.Source = new Uri(url); }
+        catch (Exception) { core.NavigationCompleted -= handler; }
     }
 
     private void OnTabClosed(string tabId)

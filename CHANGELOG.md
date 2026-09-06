@@ -17,3 +17,11 @@
   `NativeAction` 往返不携带它 → 合法一次消费被误判 `action_not_issued`（native 严格模式必现；CI 因设置
   AEGIS_REQUIRE_NATIVE_POLICY_CORE=1 而暴露）。Rust 侧改为 `same_binding`（剔除 explanation）+ 新增 C-ABI 回归测试。
 - 新增 `scripts/verify_xaml_resources.py` 并接入云端 fail-closed 断言；原生桥测试关闭集合并行。
+
+## beta.20 (2026-09-07)
+### Fixed (首页首帧纯文字文档——虚拟主机映射启动竞态)
+- NTP 延迟导航由单次 Normal 优先级 BeginInvoke 改为 `DispatcherPriority.ApplicationIdle`，
+  确保 SetVirtualHostNameToFolderMapping 在启动争用下也已传播到渲染进程，避免
+  ntp.aegis.local 解析失败 → WebView2 呈现纯文本错误文档。
+- 新增 `NavigationCompleted` 有界失败重试（主窗口协调器 + InPrivate 一致）：首帧若
+  ConnectionAborted 稍后自动重试，重试时映射必然已就绪。
