@@ -80,6 +80,11 @@ public partial class MainWindow : Window
     /// <summary>刷新书签栏（书签变更时重载）。</summary>
     public void RefreshBookmarkBar()
     {
+        // 防御：样式资源缺失绝不能中断启动（history 回归 V3 教训——FindResource 抛
+        // ResourceReferenceKeyNotFoundException，只要有书签就崩）。查不到时跳过样式。
+        Style? chip = null;
+        try { chip = (Style)FindResource("BookmarkBarButton"); }
+        catch (Exception) { System.Diagnostics.Debug.WriteLine("BookmarkBarButton 资源缺失，使用默认按钮样式"); }
         BookmarkBarItems.Items.Clear();
         foreach (var b in _bookmarks.All())
         {
@@ -88,8 +93,8 @@ public partial class MainWindow : Window
                 Content = b.Title.Length > 14 ? b.Title[..14] + "…" : b.Title,
                 Tag = b.Url,
                 ToolTip = b.Url,
+                Style = chip,
             };
-            btn.Style = (Style)FindResource("BookmarkBarButton");
             btn.Click += (s, e) =>
             {
                 if (s is System.Windows.Controls.Button { Tag: string url } && _activeTabId is not null
@@ -100,8 +105,6 @@ public partial class MainWindow : Window
         }
         BookmarkBar.Visibility = BookmarkBarItems.Items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
-
-    /// <summary>刷新书签栏（书签变更时重载）。</summary>
 
     private void StartSleepTimer()
     {
@@ -213,22 +216,6 @@ public partial class MainWindow : Window
             var core = runtime.Control.CoreWebView2;
             BindVirtualHosts(core);
             runtime.OnCoreReady(core);
-            // 下载完成 → 持久化记录
-            runtime.DownloadOperationStarted += (op, dangerous) =>
-            {
-                Dispatcher.BeginInvoke(() =>
-                {
-                    try
-                    {
-                        var filePath = op?.ResultFilePath ?? "";
-                        var size = new System.IO.FileInfo(filePath).Length;
-                        _downloadRecords.Add(
-                            System.IO.Path.GetFileName(filePath), filePath,
-                            op?.Uri ?? "", size, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                    }
-                    catch (Exception) { }
-                });
-            };
             // 下载完成 → 持久化记录
             runtime.DownloadOperationStarted += (op, dangerous) =>
             {

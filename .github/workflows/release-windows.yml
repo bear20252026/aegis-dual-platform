@@ -109,6 +109,10 @@ jobs:
           $geo = "dist/aegis-windows/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html"
           $geoOk = Test-Path $geo
           if (-not $geoOk) { Write-Warning "GeoGebra 未随包（画板降级为未随包提示）——允许降级" }
+          # XAML 资源连通性：所有 FindResource(key) 必须有对应 x:Key
+          #（崩溃根源 V3——BookmarkBarButton 未定义，有书签即启动崩溃）
+          python scripts/verify_xaml_resources.py
+          if ($LASTEXITCODE -ne 0) { throw "XAML FindResource 引用了未定义资源键（可能有书签即启动崩溃）" }
           Write-Output "NTP 资源断言通过; GeoGebra=$geoOk"
 
       - name: Generate SHA-256 checksums

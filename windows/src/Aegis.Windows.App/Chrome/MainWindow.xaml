@@ -81,6 +81,38 @@
         </Setter.Value>
       </Setter>
     </Style>
+    <!-- 书签栏 chips（Apple 圆角）：SegmentedBrush 栏之上的悬浮式胶囊按钮 -->
+    <Style x:Key="BookmarkBarButton" TargetType="Button">
+      <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="Normal"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Padding" Value="6,3"/>
+      <Setter Property="Margin" Value="2,0"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome" CornerRadius="9" Background="Transparent"
+                    Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ButtonOverlayHoverBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{DynamicResource ButtonOverlayPressedBrush}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.4"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Window.Resources>
 
   <!-- 受信 chrome UI（本地固定 origin——远程页面无 native bridge——ADR-003） -->
