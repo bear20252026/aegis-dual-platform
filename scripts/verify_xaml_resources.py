@@ -29,6 +29,10 @@ def collect_keys() -> set[str]:
 
 
 def main() -> int:
+    # GitHub Actions Windows 控制台用非 UTF-8 代码页；强制 UTF-8 输出避免
+    # UnicodeEncodeError 导致脚本非零退出（误判断言失败）。
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     keys = collect_keys()
     missing: list[tuple[Path, str, int]] = []
     for cs in SRC.rglob("*.cs"):
@@ -39,12 +43,12 @@ def main() -> int:
                 line = txt.count("\n", 0, m.start()) + 1
                 missing.append((cs, key, line))
     if missing:
-        print(f"❌ 发现 {len(missing)} 个 FindResource 引用了未定义的 XAML 资源键：")
+        print(f"[FAIL] 发现 {len(missing)} 个 FindResource 引用了未定义的 XAML 资源键：")
         for path, key, line in missing:
             print(f"   {path.relative_to(ROOT)}:{line}  FindResource(\"{key}\") 无匹配 x:Key")
-        print("     ——这是启动/运行期 ResourceReferenceKeyNotFoundException 的常见根源。")
+        print("     -- 这是启动/运行期 ResourceReferenceKeyNotFoundException 的常见根源。")
         return 1
-    print(f"✅ XAML 资源连通性通过：{len(keys)} 个 x:Key 均被合理引用/定义。")
+    print(f"[OK] XAML 资源连通性通过：{len(keys)} 个 x:Key 均被合理引用/定义。")
     return 0
 
 
