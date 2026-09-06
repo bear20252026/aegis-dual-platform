@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Refactor (Windows C# 正典栈——四项架构加固，2026-09-06)
+- **拆解上帝对象**：新增 `TabRuntimeCoordinator`——接管标签运行时创建/初始化/延迟导航/关闭/休眠/统一 Dispose；MainWindow 收敛为 UI 编排，不再直接操作运行时生命周期。
+- **生命周期令牌**：新增 `TabRuntimeLifetime`（CancellationToken + Generation + IsDisposed），初始化与延迟导航统一观察异常并执行前校验 runtime 引用/令牌/控件有效/窗口状态；修复会话恢复时普通 URL 标签初始化后不导航的隐藏缺陷。
+- **设置单一事实源**：新增 `SettingsService`（不可变 `BrowserSettingsSnapshot` + 原子写 + 边界归一化）；AppSettings 仍为 UI 读写对象，但持久化与 PrivacySettings 运行时刷新统一收敛到 `SettingsService.Apply`，消除双事实源。
+- **发布 fail-closed 断言**：`release-windows.yml` 在 publish 后强制校验 NTP 四文件/壁纸非空存在（缺则终止构建）；GeoGebra 允许降级但告警。
+- **TabManager.SeedSession 修复**：输入先物化，`currentTabId` 缺失稳定回退末位。
+- 回归：SettingsService 5 个 + SeedSession 2 个新单测，Core 152 全绿。
+
+
 ### Fixed (Windows C# 正典栈——历史页内滚动与页码分页，2026-09-06)
 - **页内无法向下滚动**：原 DayGroup 把同一天全部记录包在一个 ListBox 项中，单日大量记录超出视口但组内无滚动。改为扁平虚拟化列表：日期变化处插入独立日期头行，每条记录单独成为虚拟化项，当前页全部内容可正常滚动。
 - **保留页码分页**：底部上一页/页码/下一页与每页 50/100/200/500 条设置保持不变；页跳转只加载当前页。

@@ -242,4 +242,31 @@ public sealed class TabManagerTests
         Assert.Equal(t1.TabId, manager.Tabs[0].TabId);
         Assert.Equal(t2.TabId, manager.CurrentTabId);
     }
+
+
+    [Fact]
+    public void SeedSessionFallsBackToLastWhenInsertingPinnedAndNoCurrent()
+    {
+        // 修复：SeedSession 物化输入，currentTabId 缺失时稳定回退到末位
+        var m = new TabManager();
+        var restored = m.SeedSession(
+            new[] { ("a", "https://a", "A", true), ("b", "https://b", "B", false) },
+            currentTabId: null);
+        Assert.Equal(2, m.Tabs.Count);
+        Assert.Equal("https://b", m.Current?.Url);  // 回退末位
+        Assert.Equal("b", restored);
+        Assert.True(m.Tabs[0].IsPinned);
+    }
+
+    [Fact]
+    public void SeedSessionUnknownCurrentFallsBackToLastAgain()
+    {
+        var m = new TabManager();
+        var restored = m.SeedSession(
+            new[] { ("x", "https://x", "X", false), ("y", "https://y", "Y", false) },
+            currentTabId: "missing");
+        Assert.Equal("y", restored);
+        Assert.Equal("https://y", m.Current?.Url);
+    }
+
 }

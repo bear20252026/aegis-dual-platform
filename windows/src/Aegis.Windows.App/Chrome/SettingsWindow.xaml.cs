@@ -14,14 +14,17 @@ public partial class SettingsWindow : Window
     private readonly AppSettings _settings;
     private readonly BrowserPolicyBroker _broker;
     private readonly MainWindow _owner;
+    private readonly Core.Settings.SettingsService _settingsService;
     private bool _suppressEvents;
 
-    public SettingsWindow(AppSettings settings, BrowserPolicyBroker broker, MainWindow owner)
+    public SettingsWindow(AppSettings settings, BrowserPolicyBroker broker, MainWindow owner,
+        Core.Settings.SettingsService settingsService)
     {
         InitializeComponent();
         _settings = settings;
         _broker = broker;
         _owner = owner;
+        _settingsService = settingsService;
         _suppressEvents = true;
         EngineBox.ItemsSource = UrlNormalizer.EngineOrder
             .Select(k => new { Key = k, Name = UrlNormalizer.EngineName(k) })
@@ -98,8 +101,7 @@ public partial class SettingsWindow : Window
     {
         if (_suppressEvents) return;
         _settings.ProtectionLevel = Clamp(ProtectionCombo.SelectedIndex);
-        Core.Privacy.PrivacySettings.ProtectionLevel = _settings.ProtectionLevel;
-        Save();
+        Save();  // Apply 统一刷新 PrivacySettings 并原子写盘
     }
 
     private void Privacy_Changed(object sender, RoutedEventArgs e)
@@ -107,9 +109,7 @@ public partial class SettingsWindow : Window
         if (_suppressEvents) return;
         _settings.HttpsOnly = HttpsCheck.IsChecked == true;
         _settings.SecureDns = DnsCheck.IsChecked == true;
-        Core.Privacy.PrivacySettings.HttpsOnly = _settings.HttpsOnly;
-        Core.Privacy.PrivacySettings.SecureDns = _settings.SecureDns;
-        Save();
+        Save();  // Apply 统一刷新 PrivacySettings 并原子写盘
     }
 
     private void KillSwitch_Click(object sender, RoutedEventArgs e)
@@ -130,5 +130,5 @@ public partial class SettingsWindow : Window
 
     private void Done_Click(object sender, RoutedEventArgs e) => Close();
 
-    private void Save() => _settings.Save(AppSettings.DefaultPath);
+    private void Save() => _settingsService.Apply(_settings);
 }

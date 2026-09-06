@@ -91,6 +91,26 @@ jobs:
           if (-not (Test-Path "dist/AegisBrowser-CSharp-Setup-$version.exe")) { throw "C# installer not generated" }
       - name: Write build metadata
         run: python release/build_metadata.py --platform windows --output dist/build-metadata.json
+      - name: Fail-closed Windows artifact integrity assertion
+        shell: pwsh
+        run: |
+          $required = @(
+            "dist/aegis-windows/Aegis.Windows.App.exe",
+            "dist/aegis-windows/ntp/start.html",
+            "dist/aegis-windows/ntp/start.css",
+            "dist/aegis-windows/ntp/start.snake.js",
+            "dist/aegis-windows/ntp/start.import.js",
+            "dist/aegis-windows/ntp/wallpapers/aurora-twilight.jpg"
+          )
+          foreach ($p in $required) {
+            if (-not (Test-Path $p)) { throw "发布产物缺少资源: $p" }
+            if ((Get-Item $p).Length -eq 0) { throw "发布产物为空文件: $p" }
+          }
+          $geo = "dist/aegis-windows/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html"
+          $geoOk = Test-Path $geo
+          if (-not $geoOk) { Write-Warning "GeoGebra 未随包（画板降级为未随包提示）——允许降级" }
+          Write-Output "NTP 资源断言通过; GeoGebra=$geoOk"
+
       - name: Generate SHA-256 checksums
         run: python release/write_checksum_json.py --root dist --output dist/SHA256SUMS.json
       - name: Publish GitHub Release (tag builds only — 云端构建产物分发)

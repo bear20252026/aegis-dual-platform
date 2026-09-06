@@ -206,19 +206,23 @@ public sealed class TabManager
     /// <summary>会话恢复：清空后按给定顺序重建标签集合（不触发 TabOpened/TabSwitched——
     /// UI 层在恢复流程中自行批量创建 WebView；本方法只负责领域状态）。
     /// 返回当前激活的 TabId。</summary>
+    /// <summary>会话恢复：先物化输入（避免重复消费 IEnumerable/依赖 ICollection 推断），
+    /// 清空重建标签集合（不触发 TabOpened/TabSwitched——UI 层批量创建 WebView）。
+    /// currentTabId 缺失时稳定回退到末位标签。</summary>
     public string? SeedSession(IEnumerable<(string TabId, string Url, string Title, bool IsPinned)> tabs, string? currentTabId)
     {
+        var materialized = tabs.ToList();
         _tabs.Clear();
         _closed.Clear();
-        foreach (var (tabId, url, title, isPinned) in tabs)
+        foreach (var (tabId, url, title, isPinned) in materialized)
         {
             var tab = new Tab(tabId, url, title) { IsPinned = isPinned };
             _tabs.Add(tab);
         }
-        _currentIndex = tabs is ICollection<(string, string, string, bool)> c ? c.Count - 1 : -1;
-        var current = _tabs.FirstOrDefault(t => t.TabId == currentTabId) ?? Current;
-        if (current is not null)
-            _currentIndex = _tabs.IndexOf(current);
+        _currentIndex = materialized.Count - 1;
+        var hit = materialized.FindIndex(t => t.TabId == currentTabId);
+        if (hit >= 0)
+            _currentIndex = hit;
         return CurrentTabId;
     }
 }

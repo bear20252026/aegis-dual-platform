@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     private readonly BrowserPolicyBroker _broker = new();
     private readonly TabManager _tabs = new();
     private readonly Dictionary<string, TabRuntime> _runtimes = new();
+    private TabRuntimeCoordinator _runtimeCoordinator = null!;
     private readonly TabSessionStore _sessionStore = new(AppPaths.SessionDbPath);
     private string? _activeTabId;
     private string? _pendingConfirmTabId;
@@ -37,6 +38,7 @@ public partial class MainWindow : Window
         new(Path.Combine(AppPaths.DataDir, "history.db"));
     private readonly AppSettings _settings =
         AppSettings.Load(AppSettings.DefaultPath);
+    private readonly Core.Settings.SettingsService _settingsService = new();
     private HistoryWindow? _historyWindow;
     private SettingsWindow? _settingsWindow;
     private DownloadsWindow? _downloadsWindow;
@@ -51,6 +53,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        _runtimeCoordinator = new TabRuntimeCoordinator(_runtimes, WebViewHost);
         ApplyTheme(_settings.Theme);
         _tabs.TabOpened += OnTabOpened;
         _tabs.TabClosed += OnTabClosed;
@@ -61,9 +64,8 @@ public partial class MainWindow : Window
         InitEngineCombo();
         ZoomStore.Load(_settings.ZoomByHost);
         ZoomStore.Changed += () => Dispatcher.Invoke(() => _settings.ZoomByHost = ZoomStore.Snapshot());
-        Core.Privacy.PrivacySettings.ProtectionLevel = _settings.ProtectionLevel;
-        Core.Privacy.PrivacySettings.HttpsOnly = _settings.HttpsOnly;
-        Core.Privacy.PrivacySettings.SecureDns = _settings.SecureDns;
+        // 设置单一事实源：统一持久化 + 刷新运行时 PrivacySettings
+        _settingsService.Apply(_settings);
         RestoreWindowState();
         StartSleepTimer();
         // 建议定时器单例（Tick 由 ResetSuggestTimer 挂/摘）
@@ -145,7 +147,7 @@ public partial class MainWindow : Window
         if (EngineCombo.SelectedValue is not string engine)
             return;
         _settings.SearchEngine = engine;
-        _settings.Save(AppSettings.DefaultPath);
+        _settingsService.Apply(_settings);
     }
 
     /// <summary>M1-T2：威胁黑名单启动快照 + 订阅源后台刷新（对齐 Python 批次 2-1）。
@@ -192,8 +194,7 @@ public partial class MainWindow : Window
     private void CreateRuntime(Tab tab, string initialUrl)
     {
         Core.Security.SecurityLog.Write($"[tab] 创建标签 {tab.TabId} url={initialUrl}");
-        var runtime = new TabRuntime(_broker, tab, initialUrl);
-        _runtimes[tab.TabId] = runtime;
+        var runtime = _runtimeCoordinator.Create(_broker, tab, initialUrl).Runtime;
         runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
         {
             if (!e.IsSuccess)
@@ -212,23 +213,15 @@ public partial class MainWindow : Window
             // 与「点主页成功」路径一致。
             if (Chrome.Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
             {
-                var targetUrl = tab.Url;
-                Dispatcher.BeginInvoke(() =>
-                {
-                    // 若该标签在延迟导航前已被关闭（销毁），直接跳过设置——否则
-                    // 在已释放控件上设 Source 会抛异常，导致「新建标签删不掉」。
-                    if (_runtimes.TryGetValue(tab.TabId, out var current) && ReferenceEquals(current, runtime))
-                        runtime.Control.Source = new Uri(targetUrl);
-                });
-            }
-            else if (!_restoring)
-            {
-                // 普通站点：初始化（含虚拟主机映射）就绪后立即导航
-                runtime.Control.Source = new Uri(tab.Url);
+                // 经协调器延迟导航：执行前重新校验 runtime 引用/令牌/窗口状态，
+                // 避免在已释放控件上设 Source 抛异常（「新建标签删不掉」防护）。
+                _runtimeCoordinator.PostDelayedNavigation(tab.TabId, tab.Url, IsLoaded);
             }
             else
             {
-                // 普通站点：初始化（含虚拟主机映射）完成后立即导航
+                // 普通站点：初始化（含虚拟主机映射）就绪后立即导航。
+                // 修复：此前用 else if (!_restoring) 导致会话恢复时普通标签
+                // 初始化后不导航（停留在空标签）——恢复与否都应导航。
                 runtime.Control.Source = new Uri(tab.Url);
             }
             // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
@@ -308,10 +301,9 @@ public partial class MainWindow : Window
                 MessageBoxButton.YesNo,
                 MessageBoxImage.Warning) == MessageBoxResult.Yes;
         };
-        WebViewHost.Children.Add(runtime.Control);
-        // 以共享环境显式初始化（含安全 DNS 等参数——若不显式指定会落默认环境）。
-        // 完成后触发 CoreWebView2InitializationCompleted（上方处理器负责映射+导航）。
-        _ = runtime.InitAsync();
+        // 视觉树挂载 + 初始化统一由协调器驱动（Create 已完成两者——
+        // 显式初始化含安全 DNS 等参数，完成后触发 CoreWebView2InitializationCompleted，
+        // 上方处理器负责映射+导航）。
     }
 
     /// <summary>M3：虚拟主机资源映射（start.html 单源 + 可选 GeoGebra 随包）。
@@ -357,7 +349,7 @@ public partial class MainWindow : Window
             SetSearchEngine: engine =>
             {
                 _settings.SearchEngine = engine;
-                _settings.Save(AppSettings.DefaultPath);
+                _settingsService.Apply(_settings);
                 EngineCombo.SelectedValue = engine;
             },
             Wallpaper: () => string.IsNullOrWhiteSpace(_settings.NtpWallpaper)
@@ -366,7 +358,7 @@ public partial class MainWindow : Window
             SetWallpaper: name =>
             {
                 _settings.NtpWallpaper = name;
-                _settings.Save(AppSettings.DefaultPath);
+                _settingsService.Apply(_settings);
             },
             Bookmarks: () => _bookmarks.All(),
             SavedSessionCount: () => _sessionStore.Load().Count,
@@ -474,21 +466,7 @@ public partial class MainWindow : Window
 
     private void OnTabClosed(string tabId)
     {
-        if (_runtimes.Remove(tabId, out var runtime))
-        {
-            // 安全顺序（Android P2-9 教训）：先摘视觉树再 dispose
-            WebViewHost.Children.Remove(runtime.Control);
-            try
-            {
-                runtime.Dispose();
-            }
-            catch (Exception ex)
-            {
-                // 个别 WebView 未完全初始化的 Dispose 可能抛——标签集合已移除、
-                // 视觉树已摘除，关闭成功；此处容错不阻断
-                Core.Security.SecurityLog.Write($"[tab] 标签 {tabId} 销毁容错: {ex.GetType().Name}: {ex.Message}");
-            }
-        }
+        _runtimeCoordinator.Close(tabId);
         SaveSession();
     }
 
@@ -638,11 +616,9 @@ public partial class MainWindow : Window
             if (tab.IsPinned || tab.IsSleeping || tab.TabId == _activeTabId)
                 continue;
             if ((now - tab.LastActivated).TotalMinutes >= minutes
-                && _runtimes.TryGetValue(tab.TabId, out var runtime))
+                && _runtimes.TryGetValue(tab.TabId, out _))
             {
-                WebViewHost.Children.Remove(runtime.Control);
-                try { runtime.Dispose(); } catch (Exception) { }
-                _runtimes.Remove(tab.TabId);
+                _runtimeCoordinator.Sleep(tab.TabId);
                 tab.IsSleeping = true;
             }
         }
@@ -1025,7 +1001,7 @@ public partial class MainWindow : Window
     {
         if (_settingsWindow is null || !_settingsWindow.IsLoaded)
         {
-            _settingsWindow = new SettingsWindow(_settings, _broker, this) { Owner = this };
+            _settingsWindow = new SettingsWindow(_settings, _broker, this, _settingsService) { Owner = this };
         }
         _settingsWindow.Show();
         _settingsWindow.Activate();
@@ -1333,7 +1309,7 @@ public partial class MainWindow : Window
         SaveSession();
         SaveWindowState();
         _settings.ZoomByHost = ZoomStore.Snapshot();
-        _settings.Save(AppSettings.DefaultPath);
+        _settingsService.Apply(_settings);
         foreach (var runtime in _runtimes.Values)
             runtime.Host.RejectPendingNavigation();
     }
@@ -1358,6 +1334,7 @@ public partial class MainWindow : Window
             runtime.Dispose();
         }
         _runtimes.Clear();
+        _runtimeCoordinator.Dispose();
         _broker.Dispose();
         base.OnClosed(e);
     }
