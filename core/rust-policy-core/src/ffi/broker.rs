@@ -389,6 +389,11 @@ impl FfiBroker {
     }
 
     /// 在导航副作用执行点校验当前 URL/scope 并消费授权，拒绝参数替换或 nonce 重放。
+    /// 绑定性比较：仅比较安全绑定属性，**不含 explanation**（人类可读审计
+    /// 文本，不参与权限判定）。此前用 `*issued == action`（含 explanation），
+    /// 而托管端序列化 NativeAction 不携带 explanation，导致合法一次消费被
+    /// 误判 action_not_issued（"安装版崩溃"排查中暴露的确定性缺陷）。
+
     pub fn consume_navigation(
         &self,
         action: FfiAuthorizedAction,
@@ -426,7 +431,7 @@ impl FfiBroker {
             }
         };
         match issued_action {
-            Some(IssuedAuthorization::Pending(issued)) if *issued == action => {}
+            Some(IssuedAuthorization::Pending(issued)) if same_binding(&issued, &action) => {}
             Some(IssuedAuthorization::Consumed { .. }) => {
                 return FfiDecision::Deny {
                     reason: FfiDenyReason {
@@ -478,6 +483,23 @@ impl FfiBroker {
         }
         FfiDecision::from(decision)
     }
+}
+
+/// 绑定性比较：仅比较安全绑定属性，**不含 explanation**（人类可读审计
+/// 文本，不参与权限判定）。此前 consume 用 `*issued == action`（含
+/// explanation），而托管端序列化 NativeAction 不携带 explanation，
+/// 导致合法一次消费被误判 action_not_issued（确定性缺陷）。
+fn same_binding(a: &AuthorizedAction, b: &AuthorizedAction) -> bool {
+    a.session_id == b.session_id
+        && a.tab_id == b.tab_id
+        && a.document_generation == b.document_generation
+        && a.origin == b.origin
+        && a.method == b.method
+        && a.canonical_parameters == b.canonical_parameters
+        && a.scope == b.scope
+        && a.expires_at == b.expires_at
+        && a.nonce == b.nonce
+        && a.policy_version == b.policy_version
 }
 
 /// M-15 修复（审计 2026-08-31）：授权账本容量门（fail-closed）。

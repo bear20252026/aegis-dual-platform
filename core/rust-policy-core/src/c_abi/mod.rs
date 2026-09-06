@@ -252,6 +252,49 @@ mod tests {
         unsafe { aegis_policy_core_broker_free(broker) };
     }
 
+    /// 回归防护（C# 往返缺陷）：托管端 NativeAction 序列化不携带 explanation，
+    /// consume 绑定比较必须忽略该审计字段——否则合法一次消费被误判
+    /// action_not_issued（安装版崩溃排查中暴露的确定性缺陷）。
+    #[test]
+    fn c_abi_consume_accepts_action_without_explanation_field() {
+        let version = c_string("1.0");
+        let broker = aegis_policy_core_broker_new(version.as_ptr());
+        assert!(!broker.is_null());
+        let session = c_string("session-1");
+        let tab = c_string("tab-1");
+        assert_eq!(
+            aegis_policy_core_broker_create_session(broker, session.as_ptr(), tab.as_ptr(), 0, 60),
+            1
+        );
+        let url = c_string("https://example.com/path?query=1");
+        let scope = c_string("navigation");
+        let decision = read_response(aegis_policy_core_broker_evaluate_navigation_json(
+            broker,
+            session.as_ptr(),
+            tab.as_ptr(),
+            0,
+            url.as_ptr(),
+            scope.as_ptr(),
+        ));
+        assert_eq!(decision["decision"], "allow");
+        // 模拟 C# NativeAction 往返：从评估响应剥离 explanation 审计字段。
+        let mut action_obj = decision["action"].clone();
+        assert!(action_obj.as_object_mut().unwrap().remove("explanation").is_some());
+        let action = c_string(&action_obj.to_string());
+        let first = read_response(aegis_policy_core_broker_consume_navigation_json(
+            broker,
+            action.as_ptr(),
+            url.as_ptr(),
+            scope.as_ptr(),
+        ));
+        assert_eq!(
+            first["decision"], "allow",
+            "省略 explanation 的 action 仍应可被消费（绑定比较忽略审计字段）"
+        );
+        // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
+        unsafe { aegis_policy_core_broker_free(broker) };
+    }
+
     #[test]
     fn c_abi_requires_explicit_approval_before_issuing_navigation_action() {
         let version = c_string("1.0");
