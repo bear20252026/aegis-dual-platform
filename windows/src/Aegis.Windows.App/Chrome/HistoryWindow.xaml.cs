@@ -15,12 +15,12 @@ using Aegis.Windows.Core.History;
 /// 分组按日期合并；搜索/日期/删除/清空重置游标重新拉首页。数据层全部参数绑定。</summary>
 public partial class HistoryWindow : Window
 {
-    private const int PageSize = 100;
+    private int _pageSize = 100;
+    private int _currentPage = 1;
+    private int _totalPages;
+    private long _totalCount;
     private readonly HistoryStore _history;
     private readonly ObservableCollection<DayGroup> _groups = new();
-    private PageCursor? _pageCursor;
-    private bool _hasMore = true;
-    private bool _loading;
     private bool _suppressFilter;
     private bool _initialized;
 
@@ -29,10 +29,6 @@ public partial class HistoryWindow : Window
         InitializeComponent();
         _history = history;
         HistoryList.ItemsSource = _groups;
-        // 滚动触底自动加载下一页（ListBox 内部 ScrollViewer 以路由事件冒泡）
-        HistoryList.AddHandler(
-            ScrollViewer.ScrollChangedEvent,
-            (ScrollChangedEventHandler)HistoryScroller_ScrollChanged);
         _initialized = true;  // 此后控件事件才处理（初始化期事件一律忽略——防 NRE）
         Loaded += (_, _) =>
         {
@@ -98,7 +94,7 @@ public partial class HistoryWindow : Window
         _suppressFilter = true;
         try { ComputeRange(out from, out to); }
         finally { _suppressFilter = false; }
-        ResetAndLoad(SearchBox.Text, from, to);
+        ResetAndLoad();
     }
 
     private void ComputeRange(out string? from, out string? to)
@@ -114,71 +110,73 @@ public partial class HistoryWindow : Window
         else if (CustomDate.SelectedDate is { } d) { from = to = d.ToString("yyyy-MM-dd"); }
     }
 
-    /// <summary>重置分页并加载第一页（筛选/删除/清空后调用）。</summary>
-    private void ResetAndLoad(string query, string? from, string? to)
+    /// <summary>按页加载：每次只查询当前页，页码跳转不累积内存。</summary>
+    private void LoadPage(int page)
     {
-        _groups.Clear();
-        _pageCursor = null;
-        _hasMore = true;
-        _loading = false;
-        LoadNextPage(query, from, to);
-    }
-
-    /// <summary>用游标拉取并追加下一页（滚动触底/加载更多）。</summary>
-    private void LoadNextPage(string query, string? from, string? to)
-    {
-        if (_loading || !_hasMore)
+        if (!_initialized || page < 1)
             return;
-        _loading = true;
-        try
-        {
-            var page = _history.SearchRangePaged(query, from, to, PageSize, _pageCursor);
-            MergeIntoGroups(page.Entries);
-            _pageCursor = page.NextCursor;
-            _hasMore = page.HasMore;
-            var total = _groups.Sum(g => g.Rows.Count);
-            SummaryText.Text = $"已加载 {total} 条";
-            EmptyHint.Visibility = total == 0 ? Visibility.Visible : Visibility.Collapsed;
-            EmptyHint.Text = "没有匹配的历史记录。";
-            LoadMoreButton.Visibility = _hasMore ? Visibility.Visible : Visibility.Collapsed;
-        }
-        catch (Exception ex)
-        {
-            Aegis.Windows.Core.Security.SecurityLog.Write(
-                $"[history] 分页加载异常（已兜底）: {ex.GetType().Name}: {ex.Message}");
-            EmptyHint.Text = "查询失败，请调整筛选条件后重试。";
-        }
-        finally
-        {
-            _loading = false;
-        }
+        string? from; string? to;
+        ComputeRange(out from, out to);
+        _totalCount = _history.Count(SearchBox.Text, from, to);
+        _totalPages = Math.Max(1, (int)Math.Ceiling(_totalCount / (double)_pageSize));
+        _currentPage = Math.Min(page, _totalPages);
+        var entries = _history.SearchRangePage(SearchBox.Text, from, to, _pageSize,
+            (_currentPage - 1) * _pageSize);
+        _groups.Clear();
+        foreach (var group in BuildGroups(entries))
+            _groups.Add(group);
+        SummaryText.Text = $"共 {_totalCount} 条 · 第 {_currentPage} / {_totalPages} 页";
+        EmptyHint.Visibility = _totalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+        EmptyHint.Text = "没有匹配的历史记录。";
+        RenderPagination();
     }
 
-    /// <summary>把新页条目合并进已有日期分组：同日期并入现有组，新日期新建组（按日期倒序）。
-    /// 页内按 (visited_at,id) 倒序、日期连续非增，故可顺序合并。</summary>
-    private void MergeIntoGroups(IReadOnlyList<HistoryEntry> entries)
+    private void ResetAndLoad() => LoadPage(1);
+
+    private static List<DayGroup> BuildGroups(IReadOnlyList<HistoryEntry> entries)
     {
-        var index = _groups.Count - 1;  // 从最后一组开始（新页日期不早于已加载）
-        foreach (var e in entries)
+        var result = new List<DayGroup>();
+        foreach (var group in entries.GroupBy(e => string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate))
         {
-            var day = string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate;
-            var row = new HistoryRow(
-                e.Id,
-                string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
-                TryHost(e.Url),
-                ParseLocalTime(e.VisitedAt));
-            if (index >= 0 && _groups[index].Date == day)
-            {
-                _groups[index].Rows.Add(row);
-            }
-            else
-            {
-                var group = new DayGroup(day, DateLabel(day));
-                group.Rows.Add(row);
-                index++;
-                _groups.Insert(index, group);
-            }
+            var day = new DayGroup(group.Key, DateLabel(group.Key));
+            foreach (var e in group)
+                day.Rows.Add(new HistoryRow(e.Id,
+                    string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
+                    TryHost(e.Url), ParseLocalTime(e.VisitedAt)));
+            result.Add(day);
         }
+        return result;
+    }
+
+    private void RenderPagination()
+    {
+        PageButtons.Items.Clear();
+        var first = Math.Max(1, _currentPage - 2);
+        var last = Math.Min(_totalPages, first + 4);
+        if (last - first < 4) first = Math.Max(1, last - 4);
+        for (var i = first; i <= last; i++)
+        {
+            var page = new Button { Content = i.ToString(), Tag = i, Style = (Style)FindResource("PageButton") };
+            page.Click += Page_Click;
+            PageButtons.Items.Add(page);
+        }
+        PrevPageButton.IsEnabled = _currentPage > 1;
+        NextPageButton.IsEnabled = _currentPage < _totalPages;
+        PageStatus.Text = $"第 {_currentPage} / {_totalPages} 页";
+    }
+
+    private void Page_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: int page }) LoadPage(page);
+    }
+
+    private void PrevPage_Click(object sender, RoutedEventArgs e) => LoadPage(_currentPage - 1);
+    private void NextPage_Click(object sender, RoutedEventArgs e) => LoadPage(_currentPage + 1);
+    private void PageSize_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_initialized || PageSizeBox.SelectedItem is not ComboBoxItem item || item.Tag is not string value || !int.TryParse(value, out var size)) return;
+        _pageSize = size;
+        LoadPage(1);
     }
 
     private static string DateLabel(string date)
@@ -261,19 +259,6 @@ public partial class HistoryWindow : Window
         ApplyFilter();
     }
 
-    private void LoadMore_Click(object sender, RoutedEventArgs e)
-    {
-        string? from; string? to;
-        ComputeRange(out from, out to);
-        LoadNextPage(SearchBox.Text, from, to);
-    }
-
-    /// <summary>滚动接近底部自动加载下一页。</summary>
-    private void HistoryScroller_ScrollChanged(object sender, ScrollChangedEventArgs e)
-    {
-        if (e.ExtentHeight - (e.VerticalOffset + e.ViewportHeight) < 120)
-            LoadMore_Click(sender, e);
-    }
 
     private void Delete_Click(object sender, RoutedEventArgs e)
     {

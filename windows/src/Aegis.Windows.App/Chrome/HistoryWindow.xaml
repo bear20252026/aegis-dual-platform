@@ -54,6 +54,19 @@
     </Style>
 
     <!-- ═══ 按钮 ═══ -->
+    <Style x:Key="PageButton" TargetType="Button">
+      <Setter Property="MinWidth" Value="32"/><Setter Property="Height" Value="28"/>
+      <Setter Property="Margin" Value="3,0"/><Setter Property="Padding" Value="6,0"/>
+      <Setter Property="Background" Value="{DynamicResource SegmentedBrush}"/>
+      <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+      <Setter Property="BorderThickness" Value="0"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+        <Border x:Name="Bd" CornerRadius="9" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+          <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger></ControlTemplate.Triggers>
+      </ControlTemplate></Setter.Value></Setter>
+    </Style>
+
     <Style x:Key="GhostButton" TargetType="Button">
       <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
@@ -169,6 +182,15 @@
                         Checked="ChipFilter_Changed" Margin="2,0" Padding="12,0"/>
         </StackPanel>
       </Border>
+      <TextBlock Text="每页" VerticalAlignment="Center" Margin="16,0,6,0"
+                 Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
+      <ComboBox x:Name="PageSizeBox" Width="82" Height="30" SelectedIndex="1"
+                SelectionChanged="PageSize_Changed" VerticalContentAlignment="Center">
+        <ComboBoxItem Content="50 条" Tag="50"/>
+        <ComboBoxItem Content="100 条" Tag="100"/>
+        <ComboBoxItem Content="200 条" Tag="200"/>
+        <ComboBoxItem Content="500 条" Tag="500"/>
+      </ComboBox>
       <TextBlock Text="自定义" VerticalAlignment="Center" Margin="16,0,8,0"
                  Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
       <chrome:DateField x:Name="CustomDate" Width="160" PlaceholderText="选择日期"
@@ -185,7 +207,7 @@
       </StackPanel>
     </WrapPanel>
 
-    <!-- ═══ 分组列表（虚拟化） ═══ -->
+    <!-- ═══ 分页列表 ═══ -->
     <TextBlock x:Name="EmptyHint" Grid.Row="3" Margin="0,24,0,0" FontSize="14"
                Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center"/>
     <ListBox x:Name="HistoryList" Grid.Row="3" Margin="0,16,0,0" Background="Transparent"
@@ -194,8 +216,21 @@
              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
              Focusable="False"/>
 
-    <!-- ═══ 加载更多 ═══ -->
-    <Button x:Name="LoadMoreButton" Grid.Row="4" Content="加载更多" Style="{StaticResource GhostButton}"
-            HorizontalAlignment="Center" Margin="0,10,0,0" Click="LoadMore_Click"/>
+    <!-- ═══ 页码导航（上一页/页码/下一页 + 当前页状态） ═══ -->
+    <DockPanel Grid.Row="4" Margin="0,10,0,0">
+      <TextBlock x:Name="PageStatus" DockPanel.Dock="Left" VerticalAlignment="Center"
+                 Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
+      <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+        <Button x:Name="PrevPageButton" Content="‹ 上一页" Style="{StaticResource PageButton}"
+                Click="PrevPage_Click"/>
+        <ItemsControl x:Name="PageButtons">
+          <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        </ItemsControl>
+        <Button x:Name="NextPageButton" Content="下一页 ›" Style="{StaticResource PageButton}"
+                Click="NextPage_Click"/>
+      </StackPanel>
+      <TextBlock Text="每页可在上方设置" DockPanel.Dock="Right" VerticalAlignment="Center"
+                 Foreground="{DynamicResource TextMutedBrush}" FontSize="11"/>
+    </DockPanel>
   </Grid>
 </Window>

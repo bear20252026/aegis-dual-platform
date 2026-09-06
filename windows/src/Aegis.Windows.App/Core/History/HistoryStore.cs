@@ -121,6 +121,66 @@ public sealed class HistoryStore
         return ReadEntries(reader);
     }
 
+    /// <summary>统计匹配筛选的访问总数（页码分页用——分页条显示总页数）。</summary>
+    public long Count(string? query, string? from, string? to)
+    {
+        var hasText = !string.IsNullOrWhiteSpace(query);
+        var hasFrom = !string.IsNullOrEmpty(from);
+        var hasTo = !string.IsNullOrEmpty(to);
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        var clauses = new List<string>();
+        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
+        if (hasFrom) clauses.Add("visited_date >= $from");
+        if (hasTo) clauses.Add("visited_date <= $to");
+        select.CommandText = "SELECT COUNT(*) FROM visits" +
+            (clauses.Count > 0 ? " WHERE " + string.Join(" AND ", clauses) : "");
+        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasFrom) select.Parameters.AddWithValue("$from", from);
+        if (hasTo) select.Parameters.AddWithValue("$to", to);
+        return Convert.ToInt64(select.ExecuteScalar());
+    }
+
+    /// <summary>按页查询（页码分页：OFFSET 跳页）。排序 (visited_at, id) 倒序。
+    /// 空筛选回退 Recent（同 offset 逻辑）。全部参数绑定。</summary>
+    public IReadOnlyList<HistoryEntry> SearchRangePage(string? query, string? from, string? to,
+        int pageSize, int offset)
+    {
+        var hasText = !string.IsNullOrWhiteSpace(query);
+        var hasFrom = !string.IsNullOrEmpty(from);
+        var hasTo = !string.IsNullOrEmpty(to);
+        if (!hasText && !hasFrom && !hasTo)
+            return RecentPage(pageSize, offset);
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        var clauses = new List<string>();
+        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
+        if (hasFrom) clauses.Add("visited_date >= $from");
+        if (hasTo) clauses.Add("visited_date <= $to");
+        select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
+            string.Join(" AND ", clauses) +
+            " ORDER BY visited_at DESC, id DESC LIMIT $ps OFFSET $off";
+        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasFrom) select.Parameters.AddWithValue("$from", from);
+        if (hasTo) select.Parameters.AddWithValue("$to", to);
+        select.Parameters.AddWithValue("$ps", Math.Max(1, pageSize));
+        select.Parameters.AddWithValue("$off", Math.Max(0, offset));
+        using var reader = select.ExecuteReader();
+        return ReadEntries(reader);
+    }
+
+    /// <summary>最近访问按页查询（页码分页空筛选路径）。</summary>
+    public IReadOnlyList<HistoryEntry> RecentPage(int pageSize, int offset)
+    {
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC, id DESC LIMIT $ps OFFSET $off";
+        select.Parameters.AddWithValue("$ps", Math.Max(1, pageSize));
+        select.Parameters.AddWithValue("$off", Math.Max(0, offset));
+        using var reader = select.ExecuteReader();
+        return ReadEntries(reader);
+    }
+
     /// <summary>游标分页（键集分页——比 OFFSET 稳，翻页期间新增不重不漏）。
     /// 按 (visited_at, id) 倒序；after 为上一页末条游标。返回 HasMore 提示是否还有下一页。
     /// 为空查询+空区间时回退 RecentPaged。</summary>
