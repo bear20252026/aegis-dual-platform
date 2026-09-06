@@ -15,6 +15,7 @@
       <Setter Property="Padding" Value="8,2"/>
       <Setter Property="FontSize" Value="12"/>
     </Style>
+      <BooleanToVisibilityConverter x:Key="BoolToVis"/>
   </Window.Resources>
   <Grid Margin="12">
     <Grid.RowDefinitions>
@@ -54,10 +55,12 @@
                 <TextBlock Text="{Binding Summary}" Foreground="{StaticResource TextSecondaryBrush}"
                            FontSize="11" TextTrimming="CharacterEllipsis"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
+                  <Button Style="{StaticResource LinkButton}" Content="📂 打开文件" Click="OpenFile_Click" Margin="4,0,0,0"
+                          ToolTip="用系统默认程序打开已下载的文件" Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVis}}"/>
                   <Button Style="{StaticResource LinkButton}" Content="暂停" Click="Pause_Click" Margin="4,0,0,0"/>
                   <Button Style="{StaticResource LinkButton}" Content="继续" Click="Resume_Click" Margin="4,0,0,0"/>
                   <Button Style="{StaticResource LinkButton}" Content="取消" Click="Cancel_Click" Margin="4,0,0,0"/>
-                  <Button Style="{StaticResource LinkButton}" Content="打开文件夹" Click="ShowInFolder_Click" Margin="4,0,0,0"/>
+                  <Button Style="{StaticResource LinkButton}" Content="📂 所在文件夹" Click="ShowInFolder_Click" Margin="4,0,0,0"/>
                 </StackPanel>
               </Grid>
             </Grid>

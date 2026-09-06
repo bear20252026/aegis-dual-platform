@@ -50,6 +50,32 @@ public partial class DownloadsWindow : Window
 
     /// <summary>打开下载所在文件夹（explorer /select——受信 chrome 本地能力，
     /// 仅打开系统文件管理器定位文件，不执行文件本身）。</summary>
+    private void OpenFile_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: DownloadItem item })
+        {
+            var path = item.FilePath;
+            if (string.IsNullOrEmpty(path) || !File.Exists(path))
+            {
+                MessageBox.Show(this, "文件尚未下载完成或已移动。", "打开文件",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+                {
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"无法打开文件: {ex.Message}", "错误",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
     private void ShowInFolder_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not DownloadItem item)

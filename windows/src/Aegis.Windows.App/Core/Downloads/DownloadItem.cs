@@ -15,6 +15,7 @@ public sealed class DownloadItem : INotifyPropertyChanged
     private string _state = "进行中";
     private long _receivedBytes;
     private long _totalBytes;
+    private DateTime? _completedAt;
 
     public DownloadItem(CoreWebView2DownloadOperation operation, string fileName, string url, bool dangerous)
     {
@@ -23,6 +24,17 @@ public sealed class DownloadItem : INotifyPropertyChanged
         Url = url;
         Dangerous = dangerous;
     }
+
+    /// <summary>已完成文件的完整路径（打开文件/打开文件夹用）。</summary>
+    public string FilePath => Operation?.ResultFilePath ?? string.Empty;
+
+    /// <summary>下载是否已完成（供 UI 显示"打开"按钮）。</summary>
+    public bool IsCompleted => State == "已完成";
+
+    /// <summary>完成时刻（用于持久化记录）。</summary>
+    public DateTime? CompletedAt => _completedAt;
+
+    public string FileSizeText => TotalBytes > 0 ? FormatBytes(TotalBytes) : "未知大小";
 
     public event PropertyChangedEventHandler? PropertyChanged;
 

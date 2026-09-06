@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——下载体验优化，2026-09-07)
+- **下载完成后直接打开文件**：每条下载新增「📂 打开文件」按钮（完成后才显示），点击用系统默认程序打开。
+- DownloadItem 新增 `FilePath`、`IsCompleted`、`FileSizeText`、`CompletedAt` 属性。
+
+
 ### Fixed (shared/shell——贪吃蛇回归防护，2026-09-07)
 - **修复贪吃蛇卡死**：`render()` 内 `fo.life -= dt` 引用了 `loop()` 局部变量 `dt`，每次 rAF 抛 ReferenceError → rAF 循环中断。修复为 `render(dt)` 参数传入。
 - **商业级回归防护**：新增 `snake.test.js`（Node.js 无头运行，Mock DOM 后加载贪吃蛇模块）——10 个用例覆盖生命周期/状态机/dt 作用域/压力测试，杜绝同类问题复发。
