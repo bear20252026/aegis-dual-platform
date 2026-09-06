@@ -57,13 +57,12 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _runtimeCoordinator = new TabRuntimeCoordinator(_runtimes, WebViewHost);
-        ApplyTheme(_settings.Theme);
+        try { ApplyTheme(_settings.Theme); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"ApplyTheme: {ex.Message}"); }
         _tabs.TabOpened += OnTabOpened;
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
         TabStrip.ItemsSource = _tabs.Tabs;
         RestoreSessionOrStart();
-        RefreshBookmarkBar();
         RefreshBookmarkBar();
         StartThreatFeedRefresh();
         InitEngineCombo();
