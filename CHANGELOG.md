@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Added (Windows C# 正典栈——书签管理器，2026-09-06)
+- **书签管理器窗口**：搜索/编辑标题/打开/删除/清空；每条含标题+域名，按空格分隔可点击导航。
+- BookmarkStore 新增 `Rename(id,title)`、`RemoveById(id)`、`ClearAll()`（参数绑定）。
+
+
 ### Refactor (Windows C# 正典栈——架构审计收尾，2026-09-06)
 - TabRuntime 移除死代码 `ResolveInitialUri` 与未消费参数 `initialUrl`
 - 提取共享 `ThemeColor.ParseBrush` 替代 MainWindow/HistoryWindow 各自的手动 ARGB 解析

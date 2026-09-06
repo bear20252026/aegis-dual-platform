@@ -1,0 +1,146 @@
+<Window x:Class="Aegis.Windows.Chrome.BookmarkManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="书签管理" Width="720" Height="560" MinWidth="560" MinHeight="420"
+        Background="{DynamicResource ChromeBackgroundBrush}"
+        FontFamily="Segoe UI Variable Display, Segoe UI, Microsoft YaHei UI"
+        WindowStartupLocation="CenterOwner" UseLayoutRounding="True">
+  <Window.Resources>
+    <SolidColorBrush x:Key="CardBrush" Color="#FF2C2C2E"/>
+    <SolidColorBrush x:Key="SeparatorBrush" Color="#FF38383A"/>
+    <SolidColorBrush x:Key="FieldBackgroundBrush" Color="#FF2C2C2E"/>
+    <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="TextSecondaryBrush" Color="#FF98989F"/>
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#FF6C6C70"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF0A84FF"/>
+    <SolidColorBrush x:Key="AccentSoftBrush" Color="#220A84FF"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#FFFF453A"/>
+
+    <Style x:Key="ToolButton" TargetType="Button">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Padding" Value="10,5"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource AccentSoftBrush}"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <Style x:Key="DangerButton" TargetType="Button">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="Foreground" Value="{DynamicResource DangerBrush}"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Padding" Value="10,5"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="10" Padding="{TemplateBinding Padding}">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#33FF453A"/></Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+  </Window.Resources>
+
+  <Grid Margin="20">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+
+    <!-- 标题 + 统计 -->
+    <DockPanel Grid.Row="0">
+      <Button DockPanel.Dock="Right" Content="清空全部" Style="{StaticResource DangerButton}" Click="ClearAll_Click"/>
+      <StackPanel>
+        <TextBlock Text="书签管理" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="22" FontWeight="Bold"/>
+        <TextBlock x:Name="SummaryText" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+      </StackPanel>
+    </DockPanel>
+
+    <!-- 搜索栏 -->
+    <Border Grid.Row="1" Height="36" CornerRadius="11" Margin="0,14,0,0"
+            Background="{DynamicResource FieldBackgroundBrush}">
+      <Grid>
+        <TextBlock x:Name="SearchHint" Text="🔍 搜索书签…" HorizontalAlignment="Center"
+                   VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" FontSize="13"/>
+        <TextBox x:Name="SearchBox" Margin="14,0" BorderThickness="0" Background="Transparent"
+                 Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="{DynamicResource AccentBrush}"
+                 VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged"/>
+      </Grid>
+    </Border>
+
+    <!-- 书签列表 -->
+    <ListBox x:Name="BookmarkList" Grid.Row="2" Margin="0,14,0,0" Background="Transparent"
+             BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+             AlternationCount="100000" Focusable="False">
+      <ListBox.ItemTemplate>
+        <DataTemplate>
+          <Border BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="0,1,0,0" Padding="2,10">
+            <Border.Style>
+              <Style TargetType="Border">
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding AlternationIndex, RelativeSource={RelativeSource AncestorType=ContentPresenter}}" Value="0">
+                    <Setter Property="BorderThickness" Value="0"/>
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Border.Style>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <StackPanel Grid.Column="0" Cursor="Hand" MouseLeftButtonUp="OpenBookmark_Click">
+                <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14"/>
+                <TextBlock Text="{Binding Url}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,3,0,0"/>
+              </StackPanel>
+              <Button Grid.Column="1" Content="编辑" Style="{StaticResource ToolButton}"
+                      Tag="{Binding Id}" Click="Edit_Click" ToolTip="重命名"/>
+              <Button Grid.Column="2" Content="✕" Style="{StaticResource GhostButton}" FontSize="11"
+                      Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除书签" Margin="4,0,0,0"/>
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </ListBox.ItemTemplate>
+    </ListBox>
+
+    <!-- 编辑弹层 -->
+    <Border x:Name="EditPanel" Grid.Row="2" Visibility="Collapsed" HorizontalAlignment="Center" VerticalAlignment="Center"
+            CornerRadius="16" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource SeparatorBrush}"
+            BorderThickness="1" Padding="20" MinWidth="360" Panel.ZIndex="10">
+      <StackPanel>
+        <TextBlock Text="编辑书签" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold"/>
+        <TextBlock Text="标题" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,12,0,4"/>
+        <TextBox x:Name="EditTitle" Height="30" FontSize="13" Background="Transparent"
+                 Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="{DynamicResource AccentBrush}"
+                 BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="0,0,0,1"/>
+        <TextBlock Text="地址" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,10,0,4"/>
+        <TextBox x:Name="EditUrl" Height="30" FontSize="13" IsReadOnly="True"
+                 Foreground="{DynamicResource TextSecondaryBrush}" Background="Transparent" BorderThickness="0"/>
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
+          <Button Content="取消" Style="{StaticResource ToolButton}" Click="EditCancel_Click"/>
+          <Button Content="保存" Style="{StaticResource PrimaryButton}" Click="EditSave_Click" Margin="8,0,0,0"/>
+        </StackPanel>
+      </StackPanel>
+    </Border>
+  </Grid>
+</Window>

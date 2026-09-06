@@ -40,6 +40,7 @@ public partial class MainWindow : Window
         AppSettings.Load(AppSettings.DefaultPath);
     private readonly Core.Settings.SettingsService _settingsService = new();
     private HistoryWindow? _historyWindow;
+    private BookmarkManagerWindow? _bookmarkManagerWindow;
     private SettingsWindow? _settingsWindow;
     private DownloadsWindow? _downloadsWindow;
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
@@ -982,6 +983,24 @@ public partial class MainWindow : Window
         }
         _settingsWindow.Show();
         _settingsWindow.Activate();
+    }
+
+    /// <summary>在当前激活标签导航到指定 URL（供书签管理器等调用）。</summary>
+    public void OpenInActiveTab(string url)
+    {
+        if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var runtime))
+            runtime.Control.Source = new Uri(url);
+    }
+
+    private void BookmarkManager_Click(object sender, RoutedEventArgs e)
+    {
+        if (_bookmarkManagerWindow is null || !_bookmarkManagerWindow.IsLoaded)
+        {
+            _bookmarkManagerWindow = new BookmarkManagerWindow(_bookmarks, this);
+            _bookmarkManagerWindow.Owner = this;
+        }
+        _bookmarkManagerWindow.Show();
+        _bookmarkManagerWindow.Activate();
     }
 
     private void History_Click(object sender, RoutedEventArgs e)

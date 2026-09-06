@@ -38,6 +38,38 @@ public sealed class BookmarkStore
         return delete.ExecuteNonQuery() > 0;
     }
 
+    /// <summary>按 ID 移除书签（书签管理器使用）。</summary>
+    public bool RemoveById(long id)
+    {
+        using var connection = Open();
+        using var delete = connection.CreateCommand();
+        delete.CommandText = "DELETE FROM bookmarks WHERE id = $id";
+        delete.Parameters.AddWithValue("$id", id);
+        return delete.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>重命名书签标题（书签管理器使用）。</summary>
+    public bool Rename(long id, string title)
+    {
+        if (string.IsNullOrWhiteSpace(title))
+            return false;
+        using var connection = Open();
+        using var update = connection.CreateCommand();
+        update.CommandText = "UPDATE bookmarks SET title = $t WHERE id = $id";
+        update.Parameters.AddWithValue("$t", title);
+        update.Parameters.AddWithValue("$id", id);
+        return update.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>清空全部书签（不可恢复——UI 层负责确认）。</summary>
+    public void ClearAll()
+    {
+        using var connection = Open();
+        using var delete = connection.CreateCommand();
+        delete.CommandText = "DELETE FROM bookmarks";
+        delete.ExecuteNonQuery();
+    }
+
     /// <summary>URL 是否已收藏（收藏按钮状态判定）。</summary>
     public bool Contains(string url)
     {
