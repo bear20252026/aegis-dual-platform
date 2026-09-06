@@ -43,4 +43,38 @@ public sealed class UrlSafetyTests
     [InlineData("http://192.168.001.001", false)]     // 规范化后仍是私有
     public void RejectsLoopbackAndPrivateAndReserved(string url, bool expected) =>
         Assert.Equal(expected, UrlSafety.IsPublicHttpUrl(url));
+
+    // ── 本地开发访问放开：CanOpenHttpUrl 允许公网 + 本机/回环/hosts 域名 ──
+    [Theory]
+    [InlineData("https://www.baidu.com/", true)]
+    [InlineData("https://example.com", true)]
+    [InlineData("http://localhost/", true)]            // 本机放行
+    [InlineData("http://localhost:8080", true)]
+    [InlineData("http://foo.localhost/x", true)]
+    [InlineData("http://127.0.0.1/x", true)]           // 回环放行
+    [InlineData("http://127.0.0.1:8080", true)]
+    [InlineData("http://[::1]/", true)]                // IPv6 回环放行
+    [InlineData("http://192.168.1.1", false)]          // 私有非本机仍拒
+    [InlineData("http://10.0.0.5", false)]
+    [InlineData("http://169.254.169.254/x", false)]    // 链路本地仍拒
+    [InlineData("javascript:void(0)", false)]
+    [InlineData("file:///C:/x.html", false)]
+    [InlineData("data:text/html,hi", false)]
+    [InlineData(null, false)]
+    [InlineData("not a url", false)]
+    public void CanOpenHttpUrlAllowsPublicAndLocalHosts(string? url, bool expected) =>
+        Assert.Equal(expected, UrlSafety.CanOpenHttpUrl(url));
+
+    [Theory]
+    [InlineData("localhost", true)]
+    [InlineData("foo.localhost", true)]
+    [InlineData("127.0.0.1", true)]                    // 回环
+    [InlineData("127.0.0.2", true)]                    // 整个 127/8 回环段
+    [InlineData("::1", true)]                          // IPv6 回环
+    [InlineData("192.168.1.1", false)]                 // 私有非回环
+    [InlineData("10.0.0.5", false)]
+    [InlineData("8.8.8.8", false)]                     // 公网
+    [InlineData("", false)]
+    public void IsLocalHostOrResolvesLocalHostFastPath(string host, bool expected) =>
+        Assert.Equal(expected, UrlSafety.IsLocalHostOrResolvesLocalHost(host));
 }

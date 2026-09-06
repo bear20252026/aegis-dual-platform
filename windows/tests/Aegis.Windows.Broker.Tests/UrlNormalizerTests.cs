@@ -80,7 +80,28 @@ public sealed class UrlNormalizerTests
     [Fact]
     public void 无点号输入视为搜索词()
     {
-        Assert.Equal("https://www.baidu.com/s?wd=localhost", UrlNormalizer.Normalize("localhost"));
+        Assert.Equal("https://www.baidu.com/s?wd=hello", UrlNormalizer.Normalize("hello"));
+    }
+
+    [Fact]
+    public void 本机域名导航到本机Http而非搜索()
+    {
+        // 放开本地开发访问：localhost/foo.localhost（可含端口）直接导航 http，
+        // 不再当搜索词处理（对标 Chrome 对 localhost 的行为）。
+        Assert.Equal("http://localhost", UrlNormalizer.Normalize("localhost"));
+        Assert.Equal("http://localhost:8080", UrlNormalizer.Normalize("localhost:8080"));
+        Assert.Equal("http://api.localhost/x", UrlNormalizer.Normalize("api.localhost/x"));
+    }
+
+    [Fact]
+    public void 回环与IP字面量补Http()
+    {
+        // 回环/任意 IP 字面量默认补 http（本地/内网服务通常只跑 http）。
+        Assert.Equal("http://127.0.0.1", UrlNormalizer.Normalize("127.0.0.1"));
+        Assert.Equal("http://127.0.0.1:8080", UrlNormalizer.Normalize("127.0.0.1:8080"));
+        // 公网域名仍补 https
+        Assert.Equal("https://example.com", UrlNormalizer.Normalize("example.com"));
+        Assert.Equal("https://example.com:8080", UrlNormalizer.Normalize("example.com:8080"));
     }
 
     [Fact]

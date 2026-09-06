@@ -25,3 +25,14 @@
   ntp.aegis.local 解析失败 → WebView2 呈现纯文本错误文档。
 - 新增 `NavigationCompleted` 有界失败重试（主窗口协调器 + InPrivate 一致）：首帧若
   ConnectionAborted 稍后自动重试，重试时映射必然已就绪。
+
+## 未发布 (2026-09-07)
+### 放开本机域名与 hosts 域名访问（本地开发场景）
+- 新增 `UrlSafety.CanOpenHttpUrl`（公网 或 本机/hosts）与 `IsLocalHostOrResolvesLocalHost`
+  （DNS 带缓存判定：localhost/.localhost/回环 IP 快路径，hosts 映射域名解析到回环即放行）。
+- 新窗口 target=_blank 入口改用 `CanOpenHttpUrl`，本机域名可打开（此前被拒）。
+- HTTPS-only 对本机域名不升级为 https——本地服务器通常只跑 http，升级必然失败
+  （"开屏纯文字加载画面"根因之一）。
+- 地址栏：localhost/foo.localhost（含端口）直接导航到 http:// 本机，不再当搜索词；
+  回环/IP 字面量补 http；修掉预存 bug——`example.com:8080` 被 SchemePrefix 误判为
+  非导航 scheme 而拒绝（host:port 冒号后是数字端口即非协议）。

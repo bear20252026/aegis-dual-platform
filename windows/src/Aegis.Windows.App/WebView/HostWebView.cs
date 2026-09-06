@@ -50,9 +50,12 @@ public sealed class HostWebView : IDisposable
         {
             // HTTPS-only：http 主动升级为 https（Edge 同款——加密优先）。
             // 站点若无 https，升级后加载失败会走到错误页，绝不降级回明文。
+            // 例外：本机/回环/hosts 映射到本机的域名**不升级**——本地开发
+            // 服务器通常只跑 http，升级到 https 必然失败（"开屏纯文字"根因）。
             if (Core.Privacy.PrivacySettings.HttpsOnly
                 && Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
-                && uri.Scheme == Uri.UriSchemeHttp)
+                && uri.Scheme == Uri.UriSchemeHttp
+                && !Core.UrlSafety.IsLocalHostOrResolvesLocalHost(uri.Host))
             {
                 e.Cancel = true;
                 var httpsUrl = "https://" + uri.GetComponents(

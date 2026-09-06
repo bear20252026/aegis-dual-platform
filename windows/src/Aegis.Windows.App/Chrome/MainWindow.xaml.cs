@@ -301,14 +301,15 @@ public partial class MainWindow : Window
             ShowConfirmation(e);
         };
         runtime.Host.NavigationConfirmationResolved += (_, _) => HideConfirmation();
-        // target=_blank / window.open 链接：不再静默丢弃，改为验证公网地址后
-        // 在当前窗口新建标签打开（对齐主流浏览器）。非法协议/内网/环回/保留
-        // 地址一律拒绝（安全约束）。
+        // target=_blank / window.open 链接：不再静默丢弃，改为验证地址后
+        // 在当前窗口新建标签打开（对齐主流浏览器）。公网地址或本机/hosts
+        // 映射到本机的域名放行（本地开发访问）；非法协议/内网/环回地址仍拒
+        //（安全约束——本机除外）。
         runtime.NewWindowRequested += targetUrl =>
         {
-            if (!Core.UrlSafety.IsPublicHttpUrl(targetUrl))
+            if (!Core.UrlSafety.CanOpenHttpUrl(targetUrl))
             {
-                ShowFeedback("已拒绝打开该链接（非公网地址）", isWarning: true);
+                ShowFeedback("已拒绝打开该链接（非公网/本机地址）", isWarning: true);
                 return;
             }
             _tabs.NewTab(targetUrl);

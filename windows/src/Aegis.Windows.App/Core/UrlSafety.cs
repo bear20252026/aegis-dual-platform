@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Core;
 
 using System;
+using System.Collections.Concurrent;
 using System.Net;
 
 /// <summary>外部导航 URL 安全判定（新窗口/新标签打开入口共用——ADR-002 默认拒绝）。
@@ -9,6 +10,24 @@ using System.Net;
 /// 通道（内网外部链接）。纯静态判定，全量可单测。</summary>
 public static class UrlSafety
 {
+    private static readonly ConcurrentDictionary<string, (bool IsLocal, long StampMs)> LocalHostCache = new();
+    private static readonly TimeSpan LocalHostCacheTtl = TimeSpan.FromSeconds(60);
+
+    /// <summary>是否为可安全打开的外部 http/https URL（公网 host，或本机/回环/
+    /// hosts 映射到本机的域名——后者为本地开发访问开放）。</summary>
+    public static bool CanOpenHttpUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+            return false;
+        if (string.IsNullOrEmpty(uri.Host))
+            return false;
+        return IsPublicHost(uri.Host) || IsLocalHostOrResolvesLocalHost(uri.Host);
+    }
+
     /// <summary>是否为可安全打开的外部 http/https URL（公网 host）。</summary>
     public static bool IsPublicHttpUrl(string? url)
     {
@@ -81,4 +100,46 @@ public static class UrlSafety
         }
         return false;
     }
+
+    /// <summary>host 是否为本机/回环/经 hosts 解析到本机的域名（放开本地开发访问）。
+    /// 快路径命中显式本机名（localhost/.localhost/回环 IP）；否则做一次带缓存的
+    /// DNS 解析——hosts 文件映射的本地域名将解析到回环地址而被判为本机。
+    /// 安全权衡：允许导航/打开本机地址（导航仍经 broker 授权、无远程代码执行），
+    /// 属用户明确要求的开发场景能力；DNS 结果按 host 缓存 60s 降低热路径开销。</summary>
+    public static bool IsLocalHostOrResolvesLocalHost(string host)
+    {
+        var normalized = host.TrimEnd('.').ToLowerInvariant();
+        if (normalized.Equals("localhost", StringComparison.Ordinal)
+            || normalized.EndsWith(".localhost", StringComparison.Ordinal))
+            return true;
+        if (IPAddress.TryParse(normalized, out var ip))
+            return IsLocalIp(ip);
+        var now = Environment.TickCount64;
+        if (LocalHostCache.TryGetValue(normalized, out var entry)
+            && now - entry.StampMs < (long)LocalHostCacheTtl.TotalMilliseconds)
+            return entry.IsLocal;
+        var isLocal = false;
+        try
+        {
+            foreach (var address in Dns.GetHostAddresses(normalized))
+            {
+                if (IsLocalIp(address))
+                {
+                    isLocal = true;
+                    break;
+                }
+            }
+        }
+        catch (Exception)
+        {
+            isLocal = false;  // 解析失败 → 非本机
+        }
+        LocalHostCache[normalized] = (isLocal, now);
+        return isLocal;
+    }
+
+    private static bool IsLocalIp(IPAddress address) =>
+        address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any)
+        || address.Equals(IPAddress.Loopback) || address.Equals(IPAddress.IPv6Loopback)
+        || IPAddress.IsLoopback(address);
 }
