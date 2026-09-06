@@ -65,17 +65,30 @@
   <div class="footer">Enter 打开 · Ctrl+L 聚焦地址栏</div>
 
   
-  <!-- 贪吃蛇覆盖层（键盘方向键/WASD + 滑动手势双控——双端一致） -->
+  <!-- 贪吃蛇（暖阳像素：金色时刻 · 温暖正面——双端统一单源） -->
   <div class="snake-overlay" id="snakeOverlay">
     <div class="snake-panel">
       <div class="snake-head">
-        <span class="title">贪吃蛇</span>
-        <span class="score" id="snakeScore">0</span>
-        <span class="best" id="snakeBest">最高 0</span>
+        <span class="title">🐍 贪吃蛇</span>
+        <div class="chips">
+          <span class="chip"><span class="k">得分</span><b id="snakeScore">0</b></span>
+          <span class="chip best"><span class="k">最高</span><b id="snakeBest">0</b></span>
+        </div>
+        <button class="snake-sound" id="snakeSound" title="音效开关">🔊</button>
         <button class="snake-close" id="snakeClose" title="退出" onclick="Snake.close()">&#10005;</button>
       </div>
-      <canvas id="snakeCanvas" width="360" height="360"></canvas>
-      <div class="snake-tip">方向键 / WASD 或滑动手势 · 空格暂停</div>
+      <div class="snake-stage">
+        <canvas id="snakeCanvas" width="480" height="480"></canvas>
+        <div class="snake-veil" id="snakeVeil">
+          <div class="veil-card">
+            <div class="veil-emoji" id="veilEmoji">🌞</div>
+            <div class="veil-title" id="veilTitle">准备好出发了吗？</div>
+            <div class="veil-sub" id="veilSub">方向键 / WASD / 滑动 · 一路收集阳光果</div>
+            <button class="veil-btn" id="veilBtn">出发</button>
+          </div>
+        </div>
+      </div>
+      <div class="snake-foot">↑ ↓ ← → 或 WASD 转向 · 空格 暂停 / 出发 · 触屏滑动</div>
     </div>
   </div>
 

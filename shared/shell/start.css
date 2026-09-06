@@ -220,35 +220,65 @@
   /* 返回由浏览器工具栏统一提供：首页不再额外悬浮按钮，保持视觉留白 */
   .back-fab { display:none; }
 
-  /* —— 贪吃蛇（双端统一：首页内置小游戏，键盘/滑动手势双控）—— */
-  /* 全屏页面化（BUG-014 版本替换）：与首页同一视觉语言 */
+  /* —— 贪吃蛇（暖阳像素：金色时刻 · 温暖正面）—— */
   .snake-overlay {
     position:fixed; inset:0; z-index:40; display:none;
     flex-direction:column; align-items:center; justify-content:center;
-    background:linear-gradient(180deg, rgba(10,15,40,0.55) 0%, rgba(8,12,32,0.88) 100%);
-    backdrop-filter:blur(10px);
+    background:radial-gradient(1100px 680px at 50% 40%, rgba(120,72,26,0.5), rgba(24,12,4,0.86));
+    backdrop-filter:blur(16px) saturate(1.2);
   }
   .snake-panel {
-    background:rgba(16,36,28,0.94); border-radius:22px;
-    border:1px solid rgba(255,255,255,0.16);
-    padding:18px 18px 12px; box-shadow:0 18px 48px rgba(0,0,0,0.5);
+    background:linear-gradient(165deg, #241A10 0%, #171009 100%);
+    border:1px solid rgba(255,214,150,0.16);
+    border-radius:26px; padding:18px 18px 12px;
+    box-shadow:0 30px 80px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,220,160,0.08);
     display:flex; flex-direction:column; align-items:center; gap:12px;
     width:min(92vw, 560px);
   }
-  .snake-head { display:flex; align-items:center; gap:12px; width:100%; }
-  .snake-head .title { color:#B9E4C7; font-size:16px; font-weight:700; }
-  .snake-head .score { color:#8BC34A; font-size:16px; font-weight:700; margin-left:auto; }
-  .snake-head .best {
-    color:#7FA98C; font-size:13px; font-weight:600;
-    background:rgba(139,195,74,0.12); border-radius:10px; padding:3px 8px;
+  .snake-head { display:flex; align-items:center; gap:10px; width:100%; }
+  .snake-head .title { color:#FFE9C4; font-size:16px; font-weight:700; letter-spacing:0.5px; }
+  .snake-head .chips { display:flex; gap:8px; margin-left:auto; }
+  .snake-head .chip {
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(255,214,150,0.10); border:1px solid rgba(255,214,150,0.18);
+    border-radius:999px; padding:4px 12px;
   }
-  .snake-close {
-    width:32px; height:32px; border-radius:50%; border:0; cursor:pointer;
-    background:rgba(255,255,255,0.14); color:#fff; font-size:15px;
+  .snake-head .chip .k { color:rgba(255,232,196,0.6); font-size:11px; }
+  .snake-head .chip b { color:#FFD447; font-size:14px; font-weight:700; display:inline-block; }
+  .snake-head .chip.best b { color:#FFAA33; }
+  .snake-head .chip b.pop { animation:snakePop 0.28s ease; }
+  @keyframes snakePop { 0% { transform:scale(1.45); } 100% { transform:scale(1); } }
+  .snake-sound, .snake-close {
+    width:30px; height:30px; border-radius:50%; border:0; cursor:pointer;
+    background:rgba(255,214,150,0.12); color:#FFE9C4; font-size:13px;
+    transition:background 0.15s;
   }
+  .snake-sound:hover { background:rgba(255,214,150,0.28); }
+  .snake-close:hover { background:rgba(232,93,74,0.55); }
+  .snake-stage { position:relative; width:100%; display:flex; justify-content:center; }
   #snakeCanvas {
-    border-radius:14px; touch-action:none; width:100%;
-    background:#0B1B14;
-    border:1px solid rgba(139,195,74,0.25);
+    border-radius:16px; touch-action:none; display:block;
+    border:1px solid rgba(255,200,120,0.30);
+    box-shadow:inset 0 0 44px rgba(120,70,20,0.30), 0 10px 30px rgba(0,0,0,0.35);
+    image-rendering:pixelated;
   }
-  .snake-tip { color:#7FA98C; font-size:12px; text-align:center; }
+  .snake-veil {
+    position:absolute; inset:0; border-radius:16px; display:flex;
+    align-items:center; justify-content:center;
+    background:rgba(40,22,8,0.45); backdrop-filter:blur(5px);
+  }
+  .veil-card { text-align:center; padding:10px 26px; }
+  .veil-emoji { font-size:46px; line-height:1; }
+  .veil-title { color:#FFF3DC; font-size:22px; font-weight:700; margin-top:10px; text-shadow:0 2px 0 rgba(120,70,20,0.35); }
+  .veil-sub { color:rgba(255,236,204,0.72); font-size:12.5px; margin-top:8px; }
+  .veil-btn {
+    margin-top:16px; border:0; cursor:pointer;
+    background:linear-gradient(180deg, #FFD9A0, #F0A840); color:#3A2410;
+    font-size:14px; font-weight:700; letter-spacing:1px;
+    height:40px; padding:0 28px; border-radius:20px;
+    box-shadow:0 10px 26px rgba(240,168,64,0.4), inset 0 1px 0 rgba(255,255,255,0.5);
+    transition:transform 0.12s, box-shadow 0.12s;
+  }
+  .veil-btn:hover { transform:translateY(-1px); box-shadow:0 14px 32px rgba(240,168,64,0.5); }
+  .veil-btn:active { transform:translateY(0); }
+  .snake-foot { color:rgba(255,232,200,0.5); font-size:11.5px; text-align:center; }
