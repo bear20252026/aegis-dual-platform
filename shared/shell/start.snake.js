@@ -168,7 +168,7 @@
             if (state !== 'play') { acc = 0; break; }
           }
         }
-        render();
+        render(dt);
       }
 
       function step() {
@@ -282,7 +282,7 @@
         [1,3,'#FFD447'],[2,3,'#FFD447'],[3,3,'#FFD447'],[2,4,'#FFD447']];
 
       // ═══ 渲染（暖阳像素：日落天空 / 蜜金蛇 / 萤火虫） ═══
-      function render() {
+      function render(dt) {
         var t = state === 'play' ? Math.min(acc / stepMs, 1) : 1;
         pctx.save();
         if (shake > 0) pctx.translate((Math.random() - 0.5) * shake * 0.6, (Math.random() - 0.5) * shake * 0.6);

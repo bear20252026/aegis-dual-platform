@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Fixed (shared/shell——贪吃蛇回归防护，2026-09-07)
+- **修复贪吃蛇卡死**：`render()` 内 `fo.life -= dt` 引用了 `loop()` 局部变量 `dt`，每次 rAF 抛 ReferenceError → rAF 循环中断。修复为 `render(dt)` 参数传入。
+- **商业级回归防护**：新增 `snake.test.js`（Node.js 无头运行，Mock DOM 后加载贪吃蛇模块）——10 个用例覆盖生命周期/状态机/dt 作用域/压力测试，杜绝同类问题复发。
+
+
 ### Added (Windows C# 正典栈——书签管理器，2026-09-06)
 - **书签管理器窗口**：搜索/编辑标题/打开/删除/清空；每条含标题+域名，按空格分隔可点击导航。
 - BookmarkStore 新增 `Rename(id,title)`、`RemoveById(id)`、`ClearAll()`（参数绑定）。
