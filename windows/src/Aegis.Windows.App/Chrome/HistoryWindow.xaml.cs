@@ -10,9 +10,9 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using Aegis.Windows.Core.History;
 
-/// <summary>历史记录窗口（Java 风格）：游标分页加载——首屏只拉一页，滚动触底/点
-/// 「加载更多」按游标追加下一页（不重建已有项），减轻长历史的加载与内存负担。
-/// 分组按日期合并；搜索/日期/删除/清空重置游标重新拉首页。数据层全部参数绑定。</summary>
+/// <summary>历史记录窗口（页码式分页）。列表为**扁平虚拟化列表**——日期变化处
+/// 内嵌一个「日期头」行（同日期多条也只是连续行，逐行虚拟化 → 单日再多也能
+/// 滚动，修复「组内不可滚动」）。底部页码条 + 每页条数设置。数据层参数绑定。</summary>
 public partial class HistoryWindow : Window
 {
     private int _pageSize = 100;
@@ -20,7 +20,8 @@ public partial class HistoryWindow : Window
     private int _totalPages;
     private long _totalCount;
     private readonly HistoryStore _history;
-    private readonly ObservableCollection<DayGroup> _groups = new();
+    private readonly ObservableCollection<object> _items = new();
+    private readonly HistoryItemSelector _selector;
     private bool _suppressFilter;
     private bool _initialized;
 
@@ -28,14 +29,15 @@ public partial class HistoryWindow : Window
     {
         InitializeComponent();
         _history = history;
-        HistoryList.ItemsSource = _groups;
+        _selector = new HistoryItemSelector(
+            (DataTemplate)Resources["DateHeaderTemplate"],
+            (DataTemplate)Resources["HistoryRowTemplate"]);
+        HistoryList.ItemsSource = _items;
+        HistoryList.ItemTemplateSelector = _selector;
         _initialized = true;  // 此后控件事件才处理（初始化期事件一律忽略——防 NRE）
         Loaded += (_, _) =>
         {
-            try
-            {
-                ApplyFilter();
-            }
+            try { ApplyFilter(); }
             catch (Exception ex)
             {
                 Aegis.Windows.Core.Security.SecurityLog.Write(
@@ -85,7 +87,7 @@ public partial class HistoryWindow : Window
         return brush;
     }
 
-    // ============ 筛选（重置游标 → 拉首页） ============
+    // ============ 筛选 ============
 
     private void ApplyFilter()
     {
@@ -94,7 +96,7 @@ public partial class HistoryWindow : Window
         _suppressFilter = true;
         try { ComputeRange(out from, out to); }
         finally { _suppressFilter = false; }
-        ResetAndLoad();
+        LoadPage(1);
     }
 
     private void ComputeRange(out string? from, out string? to)
@@ -110,7 +112,7 @@ public partial class HistoryWindow : Window
         else if (CustomDate.SelectedDate is { } d) { from = to = d.ToString("yyyy-MM-dd"); }
     }
 
-    /// <summary>按页加载：每次只查询当前页，页码跳转不累积内存。</summary>
+    /// <summary>按页加载：只查询当前页，页码跳转不累积内存。</summary>
     private void LoadPage(int page)
     {
         if (!_initialized || page < 1)
@@ -122,30 +124,25 @@ public partial class HistoryWindow : Window
         _currentPage = Math.Min(page, _totalPages);
         var entries = _history.SearchRangePage(SearchBox.Text, from, to, _pageSize,
             (_currentPage - 1) * _pageSize);
-        _groups.Clear();
-        foreach (var group in BuildGroups(entries))
-            _groups.Add(group);
+        _items.Clear();
+        string? lastDay = null;
+        foreach (var e in entries)
+        {
+            var day = string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate;
+            if (day != lastDay)
+            {
+                _items.Add(new DateHeader(day));
+                lastDay = day;
+            }
+            _items.Add(new HistoryRow(e.Id,
+                string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
+                TryHost(e.Url),
+                ParseLocalTime(e.VisitedAt)));
+        }
         SummaryText.Text = $"共 {_totalCount} 条 · 第 {_currentPage} / {_totalPages} 页";
         EmptyHint.Visibility = _totalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
         EmptyHint.Text = "没有匹配的历史记录。";
         RenderPagination();
-    }
-
-    private void ResetAndLoad() => LoadPage(1);
-
-    private static List<DayGroup> BuildGroups(IReadOnlyList<HistoryEntry> entries)
-    {
-        var result = new List<DayGroup>();
-        foreach (var group in entries.GroupBy(e => string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate))
-        {
-            var day = new DayGroup(group.Key, DateLabel(group.Key));
-            foreach (var e in group)
-                day.Rows.Add(new HistoryRow(e.Id,
-                    string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
-                    TryHost(e.Url), ParseLocalTime(e.VisitedAt)));
-            result.Add(day);
-        }
-        return result;
     }
 
     private void RenderPagination()
@@ -174,12 +171,16 @@ public partial class HistoryWindow : Window
     private void NextPage_Click(object sender, RoutedEventArgs e) => LoadPage(_currentPage + 1);
     private void PageSize_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (!_initialized || PageSizeBox.SelectedItem is not ComboBoxItem item || item.Tag is not string value || !int.TryParse(value, out var size)) return;
+        if (!_initialized || PageSizeBox.SelectedItem is not ComboBoxItem item
+            || item.Tag is not string value || !int.TryParse(value, out var size))
+            return;
         _pageSize = size;
         LoadPage(1);
     }
 
-    private static string DateLabel(string date)
+    // ============ 日期标签 ============
+
+    internal static string DateLabel(string date)
     {
         if (date == "未知日期")
             return date;
@@ -259,7 +260,6 @@ public partial class HistoryWindow : Window
         ApplyFilter();
     }
 
-
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
         if (!_initialized || sender is not FrameworkElement fe)
@@ -285,31 +285,36 @@ public partial class HistoryWindow : Window
         MessageBox.Show(this, "历史记录已清空。", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
-    // ============ 模型 ============
-
-    /// <summary>关闭时释放列表引用（内存卫生）。</summary>
     protected override void OnClosed(EventArgs e)
     {
-        _groups.Clear();
+        _items.Clear();
         HistoryList.ItemsSource = null;
         base.OnClosed(e);
     }
 
-    /// <summary>日期分组（可变——分页追加时并入 Rows）。</summary>
-    public sealed class DayGroup
+    /// <summary>内嵌日期头行（占一行——保证列表逐行虚拟化可滚动）。</summary>
+    public sealed class DateHeader
     {
-        public DayGroup(string date, string dateLabel)
-        {
-            Date = date;
-            DateLabel = dateLabel;
-        }
-
-        public string Date { get; }
-
-        public string DateLabel { get; }
-
-        public ObservableCollection<HistoryRow> Rows { get; } = new();
+        public DateHeader(string day) => Day = day;
+        public string Day { get; }
+        public string Label => DateLabel(Day);
     }
 
     public sealed record HistoryRow(long Id, string Title, string Host, string TimeText);
+
+    /// <summary>按项类型选模板：日期头 / 历史行。</summary>
+    public sealed class HistoryItemSelector : DataTemplateSelector
+    {
+        private readonly DataTemplate _header;
+        private readonly DataTemplate _row;
+
+        public HistoryItemSelector(DataTemplate header, DataTemplate row)
+        {
+            _header = header;
+            _row = row;
+        }
+
+        public override DataTemplate? SelectTemplate(object item, DependencyObject container) =>
+            item is DateHeader ? _header : _row;
+    }
 }

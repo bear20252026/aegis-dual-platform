@@ -86,48 +86,49 @@
       </Setter>
     </Style>
 
-    <!-- ═══ 日期分组（iOS 分组列表：小节头 + 圆角卡片 + 发丝分隔线） ═══ -->
-    <DataTemplate x:Key="DayGroupTemplate">
-      <StackPanel Margin="0,0,0,22">
-        <TextBlock Text="{Binding DateLabel}" Foreground="{DynamicResource TextSecondaryBrush}"
-                   FontSize="13" FontWeight="SemiBold" Margin="6,0,0,8"/>
-        <Border CornerRadius="14" Background="{DynamicResource CardBrush}">
-          <ItemsControl ItemsSource="{Binding Rows}" AlternationCount="100000">
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <Border BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="0,1,0,0" Margin="14,0,14,0">
-                  <Border.Style>
-                    <Style TargetType="Border">
-                      <Style.Triggers>
-                        <DataTrigger Binding="{Binding AlternationIndex, RelativeSource={RelativeSource AncestorType=ContentPresenter}}" Value="0">
-                          <Setter Property="BorderThickness" Value="0"/>
-                        </DataTrigger>
-                      </Style.Triggers>
-                    </Style>
-                  </Border.Style>
-                  <Grid Margin="2,10">
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="*"/>
-                      <ColumnDefinition Width="Auto"/>
-                      <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Grid.Column="0">
-                      <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimaryBrush}"
-                                 FontSize="14" TextTrimming="CharacterEllipsis"/>
-                      <TextBlock Text="{Binding Host}" Foreground="{DynamicResource TextSecondaryBrush}"
-                                 FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
-                    </StackPanel>
-                    <TextBlock Grid.Column="1" Text="{Binding TimeText}" VerticalAlignment="Top"
-                               Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="10,2,0,0"/>
-                    <Button Grid.Column="2" Content="✕" Style="{StaticResource GhostButton}" FontSize="11"
-                            Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除这条记录" Margin="6,0,0,0"/>
-                  </Grid>
-                </Border>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </Border>
-      </StackPanel>
+    <!-- ═══ 日期头行（内嵌进扁平列表——逐行虚拟化可滚动） ═══ -->
+    <DataTemplate x:Key="DateHeaderTemplate">
+      <TextBlock Text="{Binding Label}" Foreground="{DynamicResource TextSecondaryBrush}"
+                 FontSize="13" FontWeight="SemiBold" Margin="6,12,0,8"/>
+    </DataTemplate>
+
+    <!-- ═══ 扁平行（每行一条历史——逐行虚拟化，单日再多也可滚动） ═══ -->
+    <DataTemplate x:Key="HistoryRowTemplate">
+      <Border BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="0,1,0,0" Margin="0,0,0,0">
+        <Border.Style>
+          <Style TargetType="Border">
+            <Style.Triggers>
+              <DataTrigger Binding="{Binding AlternationIndex, RelativeSource={RelativeSource AncestorType=ContentPresenter}}" Value="0">
+                <Setter Property="BorderThickness" Value="0"/>
+              </DataTrigger>
+            </Style.Triggers>
+          </Style>
+        </Border.Style>
+        <Grid Margin="2,10">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="Auto"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Grid.Column="0">
+            <TextBlock Text="{Binding Title}" Foreground="{DynamicResource TextPrimaryBrush}"
+                       FontSize="14" TextTrimming="CharacterEllipsis"/>
+            <TextBlock Text="{Binding Host}" Foreground="{DynamicResource TextSecondaryBrush}"
+                       FontSize="12" TextTrimming="CharacterEllipsis" Margin="0,3,0,0"/>
+          </StackPanel>
+          <TextBlock Grid.Column="1" Text="{Binding TimeText}" VerticalAlignment="Top"
+                     Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="10,2,0,0"/>
+          <Button Grid.Column="2" Content="✕" Style="{StaticResource GhostButton}" FontSize="11"
+                  Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除这条记录" Margin="6,0,0,0"/>
+        </Grid>
+      </Border>
+    </DataTemplate>
+
+    <!-- 组头：日期键 → 友好标签（今天/昨天/9月6日 星期五） -->
+    <DataTemplate x:Key="DayHeaderTemplate">
+      <TextBlock Text="{Binding Name, Converter={StaticResource DateLabelConverter}}"
+                 Foreground="{DynamicResource TextSecondaryBrush}"
+                 FontSize="13" FontWeight="SemiBold" Margin="6,12,0,8"/>
     </DataTemplate>
   </Window.Resources>
 
@@ -211,8 +212,8 @@
     <TextBlock x:Name="EmptyHint" Grid.Row="3" Margin="0,24,0,0" FontSize="14"
                Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center"/>
     <ListBox x:Name="HistoryList" Grid.Row="3" Margin="0,16,0,0" Background="Transparent"
-             BorderThickness="0" ItemTemplate="{StaticResource DayGroupTemplate}"
-             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+             BorderThickness="0"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
              Focusable="False"/>
 
