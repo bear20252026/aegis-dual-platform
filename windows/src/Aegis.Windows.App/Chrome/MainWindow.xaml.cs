@@ -46,6 +46,8 @@ public partial class MainWindow : Window
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
     // M4 下载管理面板数据源（跨标签共享——DownloadItem 由 TabRuntime 下载事件注入）
     private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
+    private readonly Core.Downloads.DownloadRecordStore _downloadRecords =
+        new(System.IO.Path.Combine(AppPaths.DataDir, "downloads.db"));
     private System.Windows.Threading.DispatcherTimer? _sleepTimer;
     private System.Windows.Threading.DispatcherTimer? _suggestTimer;
 
@@ -61,6 +63,8 @@ public partial class MainWindow : Window
         _tabs.TabSwitched += OnTabSwitched;
         TabStrip.ItemsSource = _tabs.Tabs;
         RestoreSessionOrStart();
+        RefreshBookmarkBar();
+        RefreshBookmarkBar();
         StartThreatFeedRefresh();
         InitEngineCombo();
         ZoomStore.Load(_settings.ZoomByHost);
@@ -73,6 +77,32 @@ public partial class MainWindow : Window
         _suggestTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
         _suggestTimer.Tick += (_, _) => RunSuggestions();
     }
+
+    /// <summary>刷新书签栏（书签变更时重载）。</summary>
+    public void RefreshBookmarkBar()
+    {
+        BookmarkBarItems.Items.Clear();
+        foreach (var b in _bookmarks.All())
+        {
+            var btn = new System.Windows.Controls.Button
+            {
+                Content = b.Title.Length > 14 ? b.Title[..14] + "…" : b.Title,
+                Tag = b.Url,
+                ToolTip = b.Url,
+            };
+            btn.Style = (Style)FindResource("BookmarkBarButton");
+            btn.Click += (s, e) =>
+            {
+                if (s is System.Windows.Controls.Button { Tag: string url } && _activeTabId is not null
+                    && _runtimes.TryGetValue(_activeTabId, out var rt))
+                    rt.Control.Source = new Uri(url);
+            };
+            BookmarkBarItems.Items.Add(btn);
+        }
+        BookmarkBar.Visibility = BookmarkBarItems.Items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>刷新书签栏（书签变更时重载）。</summary>
 
     private void StartSleepTimer()
     {
@@ -184,6 +214,38 @@ public partial class MainWindow : Window
             var core = runtime.Control.CoreWebView2;
             BindVirtualHosts(core);
             runtime.OnCoreReady(core);
+            // 下载完成 → 持久化记录
+            runtime.DownloadOperationStarted += (op, dangerous) =>
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    try
+                    {
+                        var filePath = op?.ResultFilePath ?? "";
+                        var size = new System.IO.FileInfo(filePath).Length;
+                        _downloadRecords.Add(
+                            System.IO.Path.GetFileName(filePath), filePath,
+                            op?.Uri ?? "", size, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                    }
+                    catch (Exception) { }
+                });
+            };
+            // 下载完成 → 持久化记录
+            runtime.DownloadOperationStarted += (op, dangerous) =>
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    try
+                    {
+                        var filePath = op?.ResultFilePath ?? "";
+                        var size = new System.IO.FileInfo(filePath).Length;
+                        _downloadRecords.Add(
+                            System.IO.Path.GetFileName(filePath), filePath,
+                            op?.Uri ?? "", size, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                    }
+                    catch (Exception) { }
+                });
+            };
             // 虚拟主机地址（NTP/画板）：映射就绪后才导航，且**推迟到下一
             // Dispatcher 周期**——同一调用栈里 SetVirtualHostNameToFolderMapping
             // 后立即导航会因映射尚未传播到渲染进程而 ConnectionAborted
@@ -990,6 +1052,14 @@ public partial class MainWindow : Window
     {
         if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var runtime))
             runtime.Control.Source = new Uri(url);
+    }
+
+    private void BookmarkBarItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.Button { Tag: string url }
+            && _activeTabId is not null
+            && _runtimes.TryGetValue(_activeTabId, out var rt))
+            rt.Control.Source = new Uri(url);
     }
 
     private void BookmarkManager_Click(object sender, RoutedEventArgs e)

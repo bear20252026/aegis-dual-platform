@@ -303,6 +303,22 @@
     <Grid>
       <!-- M1-T1：每标签一 WebView2 实例（TabRuntime 创建/挂接）——切换即可见性
            切换，页面状态/滚动/表单天然保留（ADR-009 D2） -->
+      <!-- ═══ 书签栏 ═══ -->
+      <Border x:Name="BookmarkBar" Grid.Row="0" Grid.RowSpan="2" CornerRadius="10" Margin="0,4,0,0" Padding="6,4"
+              Background="{DynamicResource SegmentedBrush}" Visibility="Collapsed" VerticalAlignment="Top">
+        <ItemsControl x:Name="BookmarkBarItems">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Button Content="{Binding}" Click="BookmarkBarItem_Click" Margin="2,0"
+                      Background="Transparent" BorderThickness="0" Cursor="Hand"
+                      Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" Padding="6,3"/>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Border>
       <Grid x:Name="WebViewHost"/>
       <!-- P0 页内查找条 -->
       <Border x:Name="FindBar" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,10,12,0"
