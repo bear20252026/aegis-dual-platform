@@ -25,17 +25,17 @@ public partial class InPrivateWindow : Window
     public InPrivateWindow()
     {
         InitializeComponent();
-        _tabs.TabOpened += (t) => CreateRuntime(t, t.Url);
+        _tabs.TabOpened += CreateRuntime;
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
         TabStrip.ItemsSource = _tabs.Tabs;
         _tabs.NewTab(HomeUrl);
     }
 
-    private async void CreateRuntime(Tab tab, string initialUrl)
+    private async void CreateRuntime(Tab tab)
     {
         var env = await WebView.WebViewEnvironment.InPrivateAsync();
-        var runtime = new TabRuntime(_broker, tab, initialUrl, env);
+        var runtime = new TabRuntime(_broker, tab, env);
         _runtimes[tab.TabId] = runtime;
         runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
         {

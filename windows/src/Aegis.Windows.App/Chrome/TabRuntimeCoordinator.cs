@@ -25,9 +25,9 @@ public sealed class TabRuntimeCoordinator : IDisposable
     }
 
     /// <summary>创建运行时并加入视觉树（不导航——导航由初始化完成回调/调用方驱动）。</summary>
-    public TabRuntimeLifetime Create(BrowserPolicyBroker broker, Tab tab, string initialUrl)
+    public TabRuntimeLifetime Create(BrowserPolicyBroker broker, Tab tab)
     {
-        var runtime = new TabRuntime(broker, tab, initialUrl);
+        var runtime = new TabRuntime(broker, tab);
         var lifetime = new TabRuntimeLifetime(runtime);
         _runtimes[tab.TabId] = runtime;
         _lifetimes[tab.TabId] = lifetime;

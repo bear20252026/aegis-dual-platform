@@ -357,7 +357,7 @@
         // 浮动得分（像素数字）
         for (var i4 = floaters.length - 1; i4 >= 0; i4--) {
           var fo = floaters[i4];
-          fo.life -= 16; fo.y -= 0.25;
+          fo.life -= dt; fo.y -= dt * 0.016;
           if (fo.life <= 0) { floaters.splice(i4, 1); continue; }
           pctx.globalAlpha = Math.min(1, fo.life / 500);
           drawPixelText(fo.text, fo.x, fo.y | 0, '#FFF6E3');

@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Refactor (Windows C# 正典栈——架构审计收尾，2026-09-06)
+- TabRuntime 移除死代码 `ResolveInitialUri` 与未消费参数 `initialUrl`
+- 提取共享 `ThemeColor.ParseBrush` 替代 MainWindow/HistoryWindow 各自的手动 ARGB 解析
+- Snake JS 浮动得分改用 dt 而非固定 16ms（后台降帧不再失真）
+- 全部门禁绿：build 0/0，Core 152，Broker 27，validate 0，JS OK
+
+
 ### Refactor (Windows C# 正典栈——四项架构加固，2026-09-06)
 - **拆解上帝对象**：新增 `TabRuntimeCoordinator`——接管标签运行时创建/初始化/延迟导航/关闭/休眠/统一 Dispose；MainWindow 收敛为 UI 编排，不再直接操作运行时生命周期。
 - **生命周期令牌**：新增 `TabRuntimeLifetime`（CancellationToken + Generation + IsDisposed），初始化与延迟导航统一观察异常并执行前校验 runtime 引用/令牌/控件有效/窗口状态；修复会话恢复时普通 URL 标签初始化后不导航的隐藏缺陷。

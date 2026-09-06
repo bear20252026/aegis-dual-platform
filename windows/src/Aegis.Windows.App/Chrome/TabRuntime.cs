@@ -21,7 +21,7 @@ public sealed class TabRuntime : IDisposable
     /// 在创建后以对应环境 EnsureCoreWebView2Async。</summary>
     private Microsoft.Web.WebView2.Core.CoreWebView2Environment? _env;
 
-    public TabRuntime(BrowserPolicyBroker broker, Tab tab, string initialUrl, Microsoft.Web.WebView2.Core.CoreWebView2Environment? environment = null)
+    public TabRuntime(BrowserPolicyBroker broker, Tab tab, Microsoft.Web.WebView2.Core.CoreWebView2Environment? environment = null)
     {
         Tab = tab;
         _env = environment;
@@ -145,12 +145,6 @@ public sealed class TabRuntime : IDisposable
         }
     }
 
-    /// <summary>初始 URL 解析：空/非法一律回退 about:blank（恢复的 URL 若被篡改，
-    /// 导航仍会在 broker 层被拒绝——此处只保证控件初始化不抛异常）。</summary>
-    private static Uri ResolveInitialUri(string url) =>
-        !string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out var uri)
-            ? uri
-            : new Uri("about:blank");
 
     public void Dispose()
     {

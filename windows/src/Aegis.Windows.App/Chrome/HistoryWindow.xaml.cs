@@ -64,28 +64,8 @@ public partial class HistoryWindow : Window
         Resources["AccentSoftBrush"] = Brush(light ? "#1A007AFF" : "#220A84FF");
     }
 
-    private static System.Windows.Media.Brush Brush(string hex)
-    {
-        var h = hex.TrimStart('#');
-        byte a = 0xFF, r, g, b;
-        if (h.Length == 8)
-        {
-            a = Convert.ToByte(h.Substring(0, 2), 16);
-            r = Convert.ToByte(h.Substring(2, 2), 16);
-            g = Convert.ToByte(h.Substring(4, 2), 16);
-            b = Convert.ToByte(h.Substring(6, 2), 16);
-        }
-        else
-        {
-            r = Convert.ToByte(h.Substring(0, 2), 16);
-            g = Convert.ToByte(h.Substring(2, 2), 16);
-            b = Convert.ToByte(h.Substring(4, 2), 16);
-        }
-        var brush = new System.Windows.Media.SolidColorBrush(
-            System.Windows.Media.Color.FromArgb(a, r, g, b));
-        brush.Freeze();
-        return brush;
-    }
+    private static System.Windows.Media.Brush Brush(string hex) =>
+        Core.ThemeColor.ParseBrush(hex);
 
     // ============ 筛选 ============
 

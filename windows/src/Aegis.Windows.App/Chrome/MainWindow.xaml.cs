@@ -116,31 +116,8 @@ public partial class MainWindow : Window
             : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x10, 0x18, 0x27));
     }
 
-    private void SetBrush(string key, string hex)
-    {
-        // 手动解析 ARGB（与 HistoryWindow.Brush 同——规避 ColorConverter
-        // 对同一合法色值抛「Invalid token」的运行时异常）
-        var h = hex.TrimStart('#');
-        if (h.Length is 6 or 8)
-        {
-            byte a = 0xFF, r, g, b;
-            if (h.Length == 8)
-            {
-                a = Convert.ToByte(h.Substring(0, 2), 16);
-                r = Convert.ToByte(h.Substring(2, 2), 16);
-                g = Convert.ToByte(h.Substring(4, 2), 16);
-                b = Convert.ToByte(h.Substring(6, 2), 16);
-            }
-            else
-            {
-                r = Convert.ToByte(h.Substring(0, 2), 16);
-                g = Convert.ToByte(h.Substring(2, 2), 16);
-                b = Convert.ToByte(h.Substring(4, 2), 16);
-            }
-            Resources[key] = new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromArgb(a, r, g, b));
-        }
-    }
+    private void SetBrush(string key, string hex) =>
+        Resources[key] = Core.ThemeColor.ParseBrush(hex);
 
     private void Engine_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
@@ -194,7 +171,7 @@ public partial class MainWindow : Window
     private void CreateRuntime(Tab tab, string initialUrl)
     {
         Core.Security.SecurityLog.Write($"[tab] 创建标签 {tab.TabId} url={initialUrl}");
-        var runtime = _runtimeCoordinator.Create(_broker, tab, initialUrl).Runtime;
+        var runtime = _runtimeCoordinator.Create(_broker, tab).Runtime;
         runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
         {
             if (!e.IsSuccess)
