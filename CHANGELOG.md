@@ -36,3 +36,7 @@
 - 地址栏：localhost/foo.localhost（含端口）直接导航到 http:// 本机，不再当搜索词；
   回环/IP 字面量补 http；修掉预存 bug——`example.com:8080` 被 SchemePrefix 误判为
   非导航 scheme 而拒绝（host:port 冒号后是数字端口即非协议）。
+- **CI 门禁补齐**：Core.Tests（177 个）接入 contracts.yml 与 release-windows.yml（此前只跑 Broker）；release 链构建发布 DLL 前跑 `cargo test --locked`——随包原生策略核心必须是"测过"的产物。
+- **原生 nonce 账本自锁修复**（审计发现 F）：原生模式 consumed nonce 加 sessionId 前缀，DestroySession 可清理——此前裸 Rust nonce 永不清理，满 5 万后该 broker 全站导航永久锁死。
+- **下载授权失效修复**（审计发现 G, ADR-002）：AllowDownload 返回值接入实际门禁——会话失效/kill-switch 时拒绝下载（此前仅留痕放行）。
+- **跟踪过滤器豁免虚拟主机**（审计发现 A）：严格模式 + 跨站导航过渡期不再误判 NTP/GeoGebra 自带页 JS/WASM 为第三方而 403。

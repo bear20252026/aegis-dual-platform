@@ -2,6 +2,7 @@ namespace Aegis.Windows.WebView;
 
 using System;
 using System.IO;
+using Aegis.Windows.Chrome.Ntp;
 using Microsoft.Web.WebView2.Core;
 
 /// <summary>WebView2 封装（阶段 C——蓝图 windows/src/Aegis.Windows.WebView）。
@@ -113,7 +114,23 @@ public sealed class HostWebView : IDisposable
                 _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
                 return;
             }
-            _broker.AllowDownload(_sessionId, _tabId, downloadUrl, fileName, dangerous);
+            // 下载门禁真正生效：AllowDownload 校验会话/标签/kill-switch，
+            // 返回值接入实际放行——此前被忽略（ADR-002 审计发现 G）。
+            // 非危险下载或危险已确认，都必须过这道门。
+            var allowed = _broker.AllowDownload(_sessionId, _tabId, downloadUrl, fileName, dangerous);
+            if (!allowed)
+            {
+                e.Handled = true;
+                try
+                {
+                    e.DownloadOperation?.Cancel();
+                }
+                catch (Exception)
+                {
+                    // 操作可能尚未启动——拒绝语义已由 Handled 保证
+                }
+                _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
+            }
         };
         // 消息只接受受信 chrome UI origin（远程页面无 native bridge——WebMessage 忽略）
         webView.WebMessageReceived += (_, e) =>
@@ -161,12 +178,16 @@ public sealed class HostWebView : IDisposable
                 var pageHost = Uri.TryCreate(webView.Source, UriKind.Absolute, out var page)
                     ? page.Host
                     : string.Empty;
+                // 受信虚拟主机（NTP/GeoGebra）子资源：黑名单仍拦截（上文已处理），
+                // 但跳过第三方/跟踪判定——严格模式 + 跨站导航过渡期会把自带页的
+                // JS/WASM 误判为第三方而 403（pageHost 仍是旧的远程 host）。
+                var isVirtualHostAsset = NtpAssets.IsVirtualHostUrl(e.Request.Uri);
                 var isTracker = Core.Privacy.TrackerList.IsTracker(uri.Host);
                 var blockContext = e.ResourceContext is CoreWebView2WebResourceContext.Script
                     or CoreWebView2WebResourceContext.Fetch
                     or CoreWebView2WebResourceContext.Image;
                 if (isTracker
-                    || (level >= 2 && blockContext
+                    || (level >= 2 && blockContext && !isVirtualHostAsset
                         && !Core.Privacy.TrackerList.IsSameSite(uri.Host, pageHost)))
                 {
                     Core.Security.SecurityLog.Write(

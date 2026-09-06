@@ -52,6 +52,8 @@ jobs:
       - name: Build versioned Rust navigation decision DLL
         shell: pwsh
         run: |
+          # 随包发布的原生策略核心必须是"测过"的产物（159 个 Rust 测试全过）
+          cargo test --manifest-path core/rust-policy-core/Cargo.toml --locked
           cargo build --manifest-path core/rust-policy-core/Cargo.toml --release --target x86_64-pc-windows-msvc
           New-Item -ItemType Directory -Force -Path dist/native-policy/windows/win-x64
           Copy-Item core/rust-policy-core/target/x86_64-pc-windows-msvc/release/aegis_policy_core.dll `
@@ -68,6 +70,8 @@ jobs:
           $env:AEGIS_REQUIRE_NAVIGATION_CONFIRMATION = "1"
           $env:AEGIS_NATIVE_POLICY_CORE_PATH = $policyDll
           $env:AEGIS_NATIVE_POLICY_CORE_TEST_PATH = $policyDll
+          # 全量 C# 测试门禁（Core 领域层 + Broker 授权链——此前仅 Broker）
+          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release
           dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `

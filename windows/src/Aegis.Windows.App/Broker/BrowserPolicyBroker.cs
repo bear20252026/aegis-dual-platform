@@ -251,7 +251,11 @@ public sealed class BrowserPolicyBroker : IDisposable
                     return false;
                 if (!_nativePolicyCoreBridge.TryConsumeNavigation(action, rawUrl, scope))
                     return false;
-                return TryRecordConsumedNonce(action.Nonce);
+                // 原生 nonce 是裸的（无前缀），须加 sessionId 前缀与托管路径一致，
+                // 否则 DestroySession 的 RemoveWhere("sessionId:") 清不掉 →
+                // _consumedNonces 永不清理，满 MAX 后 TryRecordConsumedNonce 恒
+                // false → 该 broker 全站导航永久锁死（自 DoS，审计发现 F）。
+                return TryRecordConsumedNonce($"{sessionId}:{action.Nonce}");
             }
         }
         if (!OriginPolicy.TryParseExternal(rawUrl, out var uri))
