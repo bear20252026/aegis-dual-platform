@@ -8,21 +8,23 @@
 </head>
 <body>
   <div id="wallpaper"></div>
-  <button class="back-fab" id="backBtn" title="返回上一页" onclick="Host.goBack()">&#8592;</button>
 
   <div class="center">
     <div class="logo">A</div>
     <h1>Aegis 安全浏览器</h1>
     <div class="search">
       <div class="engine-wrap">
-        <div class="engine-pill" id="enginePill" title="切换搜索引擎" onclick="toggleEngineMenu(event)">
-          <span class="dot"></span><span id="engineName">百度</span><span class="caret">▾</span>
+        <div class="engine-pill" id="enginePill" title="切换搜索引擎" role="button" tabindex="0"
+             aria-haspopup="menu" aria-expanded="false"
+             onclick="toggleEngineMenu(event)"
+             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleEngineMenu(event);}">
+          <span class="dot"></span><span id="engineName">百度</span><span class="caret" aria-hidden="true">▾</span>
         </div>
         <div class="engine-menu" id="engineMenu"></div>
       </div>
       <!-- form+submit：兼容移动端 IME「搜索/前往」action（不走 keydown Enter） -->
       <form id="searchForm" onsubmit="event.preventDefault(); go();">
-      <input id="q" type="search" enterkeyhint="search" autocomplete="off"
+      <input id="q" type="search" enterkeyhint="search" autocomplete="off" aria-label="搜索网页或输入网址"
              placeholder="搜索网页或输入网址…" autofocus>
       <button type="button" id="searchBtn" onclick="go()">搜索</button>
       </form>
@@ -46,7 +48,7 @@
   </div>
 
   <!-- 导入向导弹层（步骤内容全部由 JS 以 textContent 构建——R-06） -->
-  <div id="importModal" style="display:none;">
+  <div id="importModal" style="display:none;" role="dialog" aria-modal="true" aria-label="从 Chrome 或 Edge 导入">
     <div class="im-card">
       <div class="im-title">从 Chrome / Edge 导入</div>
       <div id="imBody"></div>
@@ -74,11 +76,11 @@
           <span class="chip"><span class="k">得分</span><b id="snakeScore">0</b></span>
           <span class="chip best"><span class="k">最高</span><b id="snakeBest">0</b></span>
         </div>
-        <button class="snake-sound" id="snakeSound" title="音效开关">🔊</button>
-        <button class="snake-close" id="snakeClose" title="退出" onclick="Snake.close()">&#10005;</button>
+        <button class="snake-sound" id="snakeSound" title="音效开关" aria-label="音效开关">🔊</button>
+        <button class="snake-close" id="snakeClose" title="退出" aria-label="退出游戏" onclick="Snake.close()">&#10005;</button>
       </div>
       <div class="snake-stage">
-        <canvas id="snakeCanvas" width="480" height="480"></canvas>
+        <canvas id="snakeCanvas" width="480" height="480" role="img" aria-label="贪吃蛇游戏画布"></canvas>
         <div class="snake-veil" id="snakeVeil">
           <div class="veil-card">
             <div class="veil-emoji" id="veilEmoji">🌞</div>
@@ -107,10 +109,6 @@
       var csApi = function () {
         return (window.chrome && chrome.webview && chrome.webview.postMessage) ? chrome.webview : null;
       };
-      var sync = function (v) {
-        return { then: function (f) { try { f(v); } catch (e) {} return sync(v); },
-                 catch: function () { return sync(v); } };
-      };
       // C# 桥请求通道：postMessage 关联 id + 单一 message 监听分发响应
       var _csSeq = 0, _csPending = {}, _csListening = false;
       function csCall(op, args, cb) {
@@ -135,7 +133,7 @@
           var k = this.kind();
           if (!k) return false;
           if (k === 'win' || k === 'cs') return true;
-          var androidFeats = { error: 1, engine: 1, navigate: 1, wallpaper: 1, geo: 1, back: 1, snake: 1 };
+          var androidFeats = { engine: 1, navigate: 1, wallpaper: 1, geo: 1, snake: 1 };
           return !!androidFeats[feat];
         },
         jsError: function () {
@@ -271,9 +269,17 @@
     function toggleEngineMenu(ev) {
       ev.stopPropagation();
       var m = document.getElementById('engineMenu');
+      var pill = document.getElementById('enginePill');
       if (!m) return;
-      if (m.style.display === 'block') { m.style.display = 'none'; return; }
-      renderEngineMenu(function () { m.style.display = 'block'; });
+      if (m.style.display === 'block') {
+        m.style.display = 'none';
+        if (pill) pill.setAttribute('aria-expanded', 'false');
+        return;
+      }
+      renderEngineMenu(function () {
+        m.style.display = 'block';
+        if (pill) pill.setAttribute('aria-expanded', 'true');
+      });
     }
     function renderEngineMenu(done) {
       var m = document.getElementById('engineMenu');
@@ -285,14 +291,21 @@
           (function (idx) {
             var it = document.createElement('div');
             it.className = 'engine-item' + (idx === engineIdx ? ' active' : '');
+            it.setAttribute('role', 'menuitemradio');
+            it.setAttribute('aria-checked', idx === engineIdx ? 'true' : 'false');
+            it.tabIndex = 0;
             var name = document.createElement('span');
             name.textContent = ENGINES[idx].name;
             var mark = document.createElement('span');
             mark.className = 'mark';
+            mark.setAttribute('aria-hidden', 'true');
             mark.textContent = idx === engineIdx ? '✓' : '';
             it.appendChild(name);
             it.appendChild(mark);
             it.onclick = function (ev) { ev.stopPropagation(); selectEngine(idx); };
+            it.onkeydown = function (ev) {
+              if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); selectEngine(idx); }
+            };
             m.appendChild(it);
           })(i);
         }
@@ -357,9 +370,6 @@
     function openUrl(u) {
       if (Host.has('navigate')) Host.navigate(u);
     }
-    document.getElementById('q').addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') go();
-    });
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
         e.preventDefault(); document.getElementById('q').focus(); document.getElementById('q').select();
@@ -373,7 +383,7 @@
       }
       if (!hit) return;
       current = name;
-      document.getElementById('wallpaper').style.backgroundImage = "url('" + hit.url + "')";
+      document.getElementById('wallpaper').style.backgroundImage = "url('" + hit.url.replace(/'/g, '%27') + "')";
       var dots = document.getElementById('wpList').children;
       for (var j = 0; j < dots.length; j++) {
         dots[j].className = 'wp' + (WALLPAPERS[dots[j].dataset.i].name === name ? ' active' : '');
@@ -388,9 +398,16 @@
         var d = document.createElement('div');
         d.className = 'wp';
         d.dataset.i = idx;
-        d.style.backgroundImage = "url('" + WALLPAPERS[idx].url + "')";
+        d.style.backgroundImage = "url('" + WALLPAPERS[idx].url.replace(/'/g, '%27') + "')";
         d.title = WALLPAPERS[idx].name;
-        d.onclick = function () { setWallpaper(WALLPAPERS[idx].name); };
+        d.setAttribute('role', 'button');
+        d.setAttribute('aria-label', '壁纸 ' + WALLPAPERS[idx].name);
+        d.tabIndex = 0;
+        function pick() { setWallpaper(WALLPAPERS[idx].name); }
+        d.onclick = pick;
+        d.onkeydown = function (ev) {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); }
+        };
         wl.appendChild(d);
       })(i);
     }
@@ -472,8 +489,15 @@
             try { host = new URL(it.url).host; } catch (e) { host = it.url; }
             var card = document.createElement('div');
             card.className = 'bm';
+            card.setAttribute('role', 'link');
+            card.tabIndex = 0;
             card.addEventListener('click', (function (u) {
               return function () { openUrl(u); };
+            })(it.url));
+            card.addEventListener('keydown', (function (u) {
+              return function (ev) {
+                if (ev.key === 'Enter') { ev.preventDefault(); openUrl(u); }
+              };
             })(it.url));
             var ico = document.createElement('div');
             ico.className = 'bm-ico';
@@ -488,9 +512,16 @@
           // “添加常用站点”磁贴（对齐 Edge）：点击聚焦搜索框输入网址
           var addTile = document.createElement('div');
           addTile.className = 'bm bm-add';
-          addTile.addEventListener('click', function () {
+          addTile.setAttribute('role', 'button');
+          addTile.setAttribute('aria-label', '添加常用站点');
+          addTile.tabIndex = 0;
+          function focusSearch() {
             var q = document.getElementById('q');
             if (q) { q.focus(); q.select(); }
+          }
+          addTile.addEventListener('click', focusSearch);
+          addTile.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); focusSearch(); }
           });
           var addIco = document.createElement('div');
           addIco.className = 'bm-ico';
@@ -505,7 +536,13 @@
         });
       } catch (e) {}
     }
-    setTimeout(renderBookmarks, 200);
+    // 书签渲染：立即尝试 + 桥未就绪时有界重试（此前固定 200ms 魔法延时，
+    // 慢机上桥未就绪即空宫格）
+    (function renderBookmarksWithRetry(attempt) {
+      if (Host.kind()) { renderBookmarks(); return; }
+      if (attempt >= 10) { renderBookmarks(); return; }
+      setTimeout(function () { renderBookmarksWithRetry(attempt + 1); }, 200);
+    })(0);
   </script>
 </body>
 </html>

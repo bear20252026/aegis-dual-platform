@@ -60,7 +60,10 @@
       }
       function close() {
         if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
+        persistBest();
         el('snakeOverlay').style.display = 'none';
+        // 释放音频上下文（此前跨开关常驻）
+        if (actx) { try { actx.close(); } catch (e) { } actx = null; }
       }
       function reset() {
         var mid = (N / 2) | 0;
@@ -72,13 +75,14 @@
         placeFood(); updScore(false);
       }
       function freeCell() {
+        // 占用集合一次构建（此前每格 snake.some 线性扫描——O(N^2*蛇长)）
+        var taken = {};
+        for (var i = 0; i < snake.length; i++) taken[snake[i].x + ',' + snake[i].y] = 1;
+        taken[food.x + ',' + food.y] = 1;
+        if (bonus) taken[bonus.x + ',' + bonus.y] = 1;
         var free = [];
-        for (var x = 0; x < N; x++) for (var y = 0; y < N; y++) {
-          var taken = snake.some(function (c) { return c.x === x && c.y === y; });
-          if (!taken && food.x === x && food.y === y) taken = true;
-          if (bonus && bonus.x === x && bonus.y === y) taken = true;
-          if (!taken) free.push({ x: x, y: y });
-        }
+        for (var x = 0; x < N; x++) for (var y = 0; y < N; y++)
+          if (!taken[x + ',' + y]) free.push({ x: x, y: y });
         return free.length ? free[(Math.random() * free.length) | 0] : null;
       }
       function placeFood() { var c = freeCell(); if (c) food = c; }
@@ -89,11 +93,13 @@
           var b = el('snakeScore');
           b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop');
         }
-        if (score > best) {
-          best = score;
-          try { localStorage.setItem('snakeBest', String(best)); } catch (e) { }
-        }
+        // localStorage 不在此处写（此前领先期间每个 step 一次同步写盘）——
+        // 只更新内存/UI，持久化集中在 persistBest()
+        if (score > best) best = score;
         el('snakeBest').textContent = String(best);
+      }
+      function persistBest() {
+        try { localStorage.setItem('snakeBest', String(best)); } catch (e) { }
       }
       function loadBest() {
         try { best = parseInt(localStorage.getItem('snakeBest') || '0', 10) || 0; } catch (e) { best = 0; }
@@ -133,11 +139,6 @@
         }
       }
       function begin() { reset(); setState('play'); acc = 0; lastTs = 0; }
-      function togglePause() {
-        if (state === 'play') setState('pause');
-        else if (state === 'pause') setState('play');
-        else begin();
-      }
       function die() {
         state = 'dead'; shake = 9; flash = 6;
         for (var i = 0; i < snake.length; i++) {
@@ -147,7 +148,7 @@
             life: 500 + Math.random() * 300, max: 800,
             color: i === 0 ? '#FFF0C4' : '#FFCF6E', r: 2 });
         }
-        sfxDie(); updScore(false); setState('dead');
+        sfxDie(); updScore(false); persistBest(); setState('dead');
       }
 
       // ═══ 主循环 ═══
@@ -204,7 +205,7 @@
         }
         if (!grew) snake.pop();
         else prev.unshift(prev[0]);
-        updScore(false);
+        if (grew) updScore(false);  // 分数变化时才刷新 DOM（此前每步刷新）
       }
 
       // ═══ 氛围（云 / 萤火虫 / 阳光） ═══
@@ -282,14 +283,22 @@
         [1,3,'#FFD447'],[2,3,'#FFD447'],[3,3,'#FFD447'],[2,4,'#FFD447']];
 
       // ═══ 渲染（暖阳像素：日落天空 / 蜜金蛇 / 萤火虫） ═══
+      var SKY = null;                       // 天空渐变缓存
+      var FLY_COLORS = (function () {       // 萤火虫透明度色表（免每帧字符串拼接）
+        var a = [];
+        for (var i = 0; i <= 20; i++) a.push('rgba(255,233,168,' + (i / 20).toFixed(2) + ')');
+        return a;
+      })();
       function render(dt) {
         var t = state === 'play' ? Math.min(acc / stepMs, 1) : 1;
         pctx.save();
         if (shake > 0) pctx.translate((Math.random() - 0.5) * shake * 0.6, (Math.random() - 0.5) * shake * 0.6);
-        // 暖阳天空（杏 → 琥珀 → 玫瑰）
-        var sky = pctx.createLinearGradient(0, 0, 0, PXH);
-        sky.addColorStop(0, '#FFE9C4'); sky.addColorStop(0.55, '#FFCE8A'); sky.addColorStop(1, '#F5A983');
-        pctx.fillStyle = sky; pctx.fillRect(0, 0, PXW, PXH);
+        // 暖阳天空（杏 → 琥珀 → 玫瑰）——渐变对象缓存（此前每帧新建，60fps GC 压力）
+        if (!SKY) {
+          SKY = pctx.createLinearGradient(0, 0, 0, PXH);
+          SKY.addColorStop(0, '#FFE9C4'); SKY.addColorStop(0.55, '#FFCE8A'); SKY.addColorStop(1, '#F5A983');
+        }
+        pctx.fillStyle = SKY; pctx.fillRect(0, 0, PXW, PXH);
         // 太阳 + 光晕
         pctx.fillStyle = 'rgba(255,246,222,0.35)';
         pctx.beginPath(); pctx.arc(PXW * 0.78, PXH * 0.22, 16, 0, 7); pctx.fill();
@@ -316,7 +325,7 @@
         for (var fi = 0; fi < flies.length; fi++) {
           var fl = flies[fi];
           var a = 0.35 + 0.3 * Math.sin(pulse * 3 + fl.ph * 4);
-          pctx.fillStyle = 'rgba(255,233,168,' + a.toFixed(2) + ')';
+          pctx.fillStyle = FLY_COLORS[Math.max(0, Math.min(20, Math.round(a * 20)))];
           pctx.fillRect(fl.x | 0, fl.y | 0, 1, 1);
         }
         // 苹果 / 奖励星（像素精灵）
@@ -393,6 +402,8 @@
       document.addEventListener('keydown', function (e) {
         var ov = el('snakeOverlay');
         if (!ov || ov.style.display === 'none') return;
+        var tgt = e.target;
+        if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT')) return;
         var k = e.key;
         if (k === 'ArrowUp' || k === 'w' || k === 'W') { turn(0, -1); e.preventDefault(); }
         else if (k === 'ArrowDown' || k === 's' || k === 'S') { turn(0, 1); e.preventDefault(); }

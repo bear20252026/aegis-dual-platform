@@ -126,27 +126,39 @@
         var lim = parseInt(limitSel ? limitSel.value : '500', 10) || 500;
         agg = { imported: 0, total: 0, lines: [] };
         var chain = Promise.resolve();
+        var failures = 0;
         picked.forEach(function (src) {
           if (doBm) {
             chain = chain.then(function () { return a.importBookmarks(src); })
-              .then(function (r) { collect('书签', src, r); });
+              .then(function (r) { collect('书签', src, r); })
+              .catch(function () { failures++; });
           }
           if (doHi) {
             chain = chain.then(function () { return a.importHistory(lim, src, function () {}); })
-              .then(function (r) { collect('历史', src, r); });
+              .then(function (r) { collect('历史', src, r); })
+              .catch(function () { failures++; });
           }
         });
-        chain.then(renderDone).catch(renderDone);
+        chain.then(function () { renderDone(failures); })
+          .catch(function () { renderDone(failures + 1); });
       }
 
-      function renderDone() {
+      function renderDone(failedCount) {
         body.textContent = '';
         step = 'done';
         nextBtn.disabled = false;
         nextBtn.textContent = '完成';
         var sum = document.createElement('div');
         sum.className = 'im-result';
-        sum.textContent = '导入完成：共新增 ' + agg.imported + ' 条（解析 ' + agg.total + ' 条）。';
+        // 成功与失败不再渲染同一界面（此前 .then/.catch 同一 renderDone——
+        // 失败被伪装成"导入完成"）
+        if (failedCount > 0 && agg.imported === 0) {
+          sum.textContent = '导入失败：' + failedCount + ' 个来源未能读取（浏览器可能正在运行或数据不可用）。';
+        } else if (failedCount > 0) {
+          sum.textContent = '部分完成：新增 ' + agg.imported + ' 条（解析 ' + agg.total + ' 条），' + failedCount + ' 个来源失败。';
+        } else {
+          sum.textContent = '导入完成：共新增 ' + agg.imported + ' 条（解析 ' + agg.total + ' 条）。';
+        }
         body.appendChild(sum);
         agg.lines.forEach(function (line) {
           var d = document.createElement('div');
@@ -169,20 +181,30 @@
         nextBtn.textContent = '扫描中…';
         nextBtn.style.display = '';
         body.appendChild(hint('正在扫描本机 Chrome / Edge 数据…'));
-        try {
-          Host.importScan(function (list) {
-            sources = Array.isArray(list) ? list : [];
-            nextBtn.disabled = false;
-            renderPick();
-          }).catch(function () {
-            sources = [];
-            nextBtn.disabled = false;
-            renderPick();
-          });
-        } catch (e) {
+        // 扫描超时（15s）：宿主无响应（如桥未挂接的窗口）不再永久卡死向导
+        var scanSettled = false;
+        var scanTimer = setTimeout(function () {
+          if (scanSettled) return;
+          scanSettled = true;
           sources = [];
           nextBtn.disabled = false;
           renderPick();
+        }, 15000);
+        function scanDone(list) {
+          if (scanSettled) return;
+          scanSettled = true;
+          clearTimeout(scanTimer);
+          sources = Array.isArray(list) ? list : [];
+          nextBtn.disabled = false;
+          renderPick();
+        }
+        try {
+          // 三端返回形态不一（win=Promise / cs·android=同步回调 undefined）——
+          // 统一走回调，绝不对可能为 undefined 的返回值调 .catch
+          var ret = Host.importScan(scanDone);
+          if (ret && typeof ret.catch === 'function') ret.catch(function () { scanDone([]); });
+        } catch (e) {
+          scanDone([]);
         }
       }
 
