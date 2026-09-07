@@ -13,7 +13,9 @@ public sealed class BrowserPolicyBroker : IDisposable
     // 与 Rust 侧 broker.rs 的 MAX_CONSUMED_NONCES 保持对等：达到上限即 fail-closed 拒绝，
     // 绝不淘汰旧 nonce（以免削弱一次性/重放保护）。
     private const int MaxConsumedNonces = 50_000;
-    private readonly List<Audit.AuditEvent> _auditLog = new();
+    private const int MaxAuditEntries = 5000;  // 审计有界（此前无上限——高频 deny 即无界内存）
+    private readonly object _auditLock = new();
+    private readonly Queue<Audit.AuditEvent> _auditLog = new();
     private readonly HashSet<string> _consumedNonces = new(StringComparer.Ordinal);
     private readonly Dictionary<string, SessionContext> _sessions = new(StringComparer.Ordinal);
     private readonly object _nonceLock = new();
@@ -23,7 +25,8 @@ public sealed class BrowserPolicyBroker : IDisposable
     private readonly bool _nativePolicyCoreRequired;
     // M1-T2（ADR-009）：威胁黑名单（可变引用——订阅刷新后整体替换快照）。
     // 策略数据归 broker（ADR-002：broker 唯一策略裁决点），HostWebView 只消费。
-    private IBlockedHosts _blockedHosts;
+    // volatile：后台线程（订阅源刷新）整体替换与 UI 导航读取间保证可见性
+    private volatile IBlockedHosts _blockedHosts;
     private bool _disposed;
     // M4-a（ADR-009 审计遗留清零）：KillSwitch 此前全仓零调用点（审计实证）。
     // broker 持有单例，导航/下载/确认全链强制检查；Chrome 经属性暴露触发。
@@ -74,7 +77,7 @@ public sealed class BrowserPolicyBroker : IDisposable
         }
         RecordAudit("allow", "download", origin,
             userConfirmed ? "user_confirmed" : null);
-        SecurityLog.Write($"[download] 允许下载: {fileName}（来源 {origin}，"
+        SecurityLog.Write($"[download] 允许下载: {fileName}（来源 {RedactUrl(origin)}，"
                           + (userConfirmed ? "用户已确认危险扩展" : "常规下载") + "）");
         return true;
     }
@@ -87,6 +90,9 @@ public sealed class BrowserPolicyBroker : IDisposable
         lock (_sessionLock)
         {
             if (_sessions.ContainsKey(sessionId))
+                return false;
+            // 与 Rust MAX_SESSIONS=1024 对等（此前无上限——泄漏面）
+            if (_sessions.Count >= 1024)
                 return false;
             if (_nativePolicyCoreRequired && (_nativePolicyCoreBridge is null
                 || !_nativePolicyCoreBridge.CreateSession(sessionId, tabId, generation, 120)))
@@ -131,7 +137,7 @@ public sealed class BrowserPolicyBroker : IDisposable
     {
         if (KillSwitch.IsEngaged)
         {
-            RecordAudit("deny", scope, rawUrl, "kill_switch_engaged");
+            RecordAudit("deny", scope, RedactUrl(rawUrl), "kill_switch_engaged");
             return new Decision.Deny(new DenyReason("kill_switch_engaged", "紧急终止开关已触发——全部导航冻结"));
         }
         if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
@@ -140,25 +146,34 @@ public sealed class BrowserPolicyBroker : IDisposable
         {
             if (_nativePolicyCoreBridge is null)
                 return NativeBridgeDenied(scope, "native_policy_core_bridge_unavailable");
+            // 黑名单门禁对 native 模式同样强制（此前 native 路径直接返回，导航级
+            // 黑名单在启用原生核心时静默失效）
+            if (Uri.TryCreate(rawUrl, UriKind.Absolute, out var nativeUri)
+                && _blockedHosts.IsBlocked(nativeUri.Host))
+            {
+                RecordAudit("deny", scope, RedactUrl(rawUrl), "threat_blocklist");
+                SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {RedactUrl(rawUrl)}");
+                return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
+            }
             var nativeDecision = _nativePolicyCoreBridge.EvaluateNavigation(sessionId, tabId, generation, rawUrl, scope);
             RecordNativeDecision(scope, nativeDecision);
             return nativeDecision;
         }
         if (!HasCurrentSession(sessionId, tabId, generation))
         {
-            RecordAudit("deny", scope, rawUrl, "session_context");
+            RecordAudit("deny", scope, RedactUrl(rawUrl), "session_context");
             return new Decision.Deny(new DenyReason("session_context", "会话、标签或文档代际无效"));
         }
         if (!OriginPolicy.TryParseExternal(rawUrl, out var uri))
         {
-            RecordAudit("deny", scope, rawUrl, "url_policy");
-            return new Decision.Deny(new DenyReason("url_policy", $"拒绝 URL: {rawUrl}"));
+            RecordAudit("deny", scope, RedactUrl(rawUrl), "url_policy");
+            return new Decision.Deny(new DenyReason("url_policy", "拒绝 URL（非可导航地址）"));
         }
         // M1-T2：威胁黑名单门禁（host 精确+子域后缀匹配；命中 fail-closed 留痕）
         if (_blockedHosts.IsBlocked(uri.Host))
         {
-            RecordAudit("deny", scope, rawUrl, "threat_blocklist");
-            SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {rawUrl}");
+            RecordAudit("deny", scope, RedactUrl(rawUrl), "threat_blocklist");
+            SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {RedactUrl(rawUrl)}");
             return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
         }
         var origin = uri.GetLeftPart(UriPartial.Authority);
@@ -240,6 +255,13 @@ public sealed class BrowserPolicyBroker : IDisposable
             return false;
         if (action is null)
             return false;
+        // 消费点强制 KillSwitch（evaluate 与 consume 之间触发时撤销已签发授权——
+        // 与 KillSwitch "撤销已发出但未执行的授权" 语义对齐）
+        if (KillSwitch.IsEngaged)
+        {
+            RecordAudit("deny", scope, RedactUrl(rawUrl), "kill_switch_engaged");
+            return false;
+        }
         if (_nativePolicyCoreRequired)
         {
             if (_nativePolicyCoreBridge is null)
@@ -274,7 +296,10 @@ public sealed class BrowserPolicyBroker : IDisposable
 
     /// <summary>阶段 C：脱敏审计（记录决策——不含 token/网页内容/query secret——
     /// 与 contracts/schemas/audit-event.schema.json 对齐）。</summary>
-    public IReadOnlyList<Audit.AuditEvent> AuditLog => _auditLog;
+    public IReadOnlyList<Audit.AuditEvent> AuditLog
+    {
+        get { lock (_auditLock) return _auditLog.ToArray(); }
+    }
 
     public void Dispose()
     {
@@ -291,8 +316,24 @@ public sealed class BrowserPolicyBroker : IDisposable
 
     private void RecordAudit(string decision, string scope, string origin, string? reason)
     {
-        _auditLog.Add(new Audit.AuditEvent(
-            Guid.NewGuid().ToString("N"), DateTime.UtcNow, decision, scope, origin, reason));
+        lock (_auditLock)
+        {
+            if (_auditLog.Count >= MaxAuditEntries)
+                _auditLog.Dequeue();  // 有界环形——最旧条目淘汰（内存审计，非取证存储）
+            _auditLog.Enqueue(new Audit.AuditEvent(
+                Guid.NewGuid().ToString("N"), DateTime.UtcNow, decision, scope, RedactUrl(origin), reason));
+        }
+    }
+
+    /// <summary>审计/日志用 URL 脱敏：丢弃 query 与 fragment（token/搜索词等
+    /// 敏感串不落审计——与 AuditEvent schema "不含 query secret" 声明对齐）。</summary>
+    private static string RedactUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return string.Empty;
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
+            return uri.GetLeftPart(UriPartial.Authority) + uri.AbsolutePath;
+        return url.Length > 256 ? url[..256] + "…" : url;
     }
 
     /// <summary>记录已消费 nonce；达上限即 fail-closed 拒绝（与 Rust 侧 broker.rs 对等）。
