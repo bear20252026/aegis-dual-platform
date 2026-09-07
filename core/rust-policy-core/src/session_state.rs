@@ -70,21 +70,25 @@ impl SessionState {
     }
 
     /// 序列化为 JSON 字符串（照搬 Omni Browser toJson）。
+    /// 经 serde_json 构造——此前 format! 手拼零转义，页面标题（攻击者可控）
+    /// 含 `"`/`\`/控制字符即产生非法 JSON 或字段注入，破坏会话恢复链路。
     pub fn to_json(&self) -> String {
-        let b64 = hex_encode(&self.session_state_bytes);
-        format!(
-            r#"{{"schemaVersion":{},"tabId":"{}","sessionStateBytes":"{}","metadata":{{"title":"{}","url":"{}","isIncognito":{},"lastActiveTime":{},"canGoBack":{},"canGoForward":{}}},"timestamp":{}}}"#,
-            self.schema_version,
-            self.tab_id,
-            b64,
-            self.metadata.title,
-            self.metadata.url,
-            self.metadata.is_incognito,
-            self.metadata.last_active_time,
-            self.metadata.can_go_back,
-            self.metadata.can_go_forward,
-            self.timestamp,
-        )
+        let metadata = serde_json::json!({
+            "title": self.metadata.title,
+            "url": self.metadata.url,
+            "isIncognito": self.metadata.is_incognito,
+            "lastActiveTime": self.metadata.last_active_time,
+            "canGoBack": self.metadata.can_go_back,
+            "canGoForward": self.metadata.can_go_forward,
+        });
+        serde_json::json!({
+            "schemaVersion": self.schema_version,
+            "tabId": self.tab_id,
+            "sessionStateBytes": hex_encode(&self.session_state_bytes),
+            "metadata": metadata,
+            "timestamp": self.timestamp,
+        })
+        .to_string()
     }
 }
 

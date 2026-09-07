@@ -202,24 +202,26 @@ impl CommandBar {
     /// 设置 `__AEGIS_COMMAND_BAR` 全局对象，
     /// 提供 `search(query)` 和 `execute(entry)` 方法。
     pub fn inject_script(&self) -> String {
+        // serde_json 构造——此前 format! 只转义双引号：标题/子标题源自书签
+        // 历史（页面可控），含反斜杠/换行/控制字符即产生 JS 注入
         let entries_json: String = self
             .entries
             .iter()
             .map(|e| {
-                format!(
-                    r#"{{"type":"{}","title":"{}","subtitle":"{}","value":"{}","icon":"{}"}}"#,
-                    match e.command_type {
+                serde_json::json!({
+                    "type": match e.command_type {
                         CommandType::Navigate => "navigate",
                         CommandType::SwitchTab => "switch_tab",
                         CommandType::SearchHistory => "history",
                         CommandType::SearchBookmark => "bookmark",
                         CommandType::Action => "action",
                     },
-                    e.title.replace('"', "\\\""),
-                    e.subtitle.replace('"', "\\\""),
-                    e.value.replace('"', "\\\""),
-                    e.icon
-                )
+                    "title": e.title,
+                    "subtitle": e.subtitle,
+                    "value": e.value,
+                    "icon": e.icon,
+                })
+                .to_string()
             })
             .collect::<Vec<String>>()
             .join(",");
@@ -243,12 +245,14 @@ impl CommandBar {
 
   function execute(entry) {{
     if (entry.type === 'navigate') {{
+      // 仅允许 http/https 目标（value 可源自历史/书签——javascript: 等拒绝）
+      if (!/^https?:\/\//i.test(entry.value)) return;
       window.location.href = entry.value;
     }} else if (entry.type === 'switch_tab') {{
       // 通过 postMessage 通知 Android WebView 切换标签
-      window.postMessage({{ type: 'aegis:switch_tab', tabId: entry.value }}, '*');
+      window.postMessage({{ type: 'aegis:switch_tab', tabId: entry.value }}, window.location.origin);
     }} else if (entry.type === 'action') {{
-      window.postMessage({{ type: 'aegis:action', action: entry.value }}, '*');
+      window.postMessage({{ type: 'aegis:action', action: entry.value }}, window.location.origin);
     }}
   }}
 

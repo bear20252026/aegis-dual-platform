@@ -20,15 +20,19 @@
 //!    of semi-identifiers into a single identifier, since randomizing just
 //!    one value 'poisons' the entire fingerprint."
 //!
-//! 可拆卸：不依赖 UI/网络/策略引擎。
-//! 可拼接：与 FingerprintShield/LetterboxShield 管道独立组合。
+//! 安全修复（相对初版）：
+//! - 派生改用 SHA-256（域间密钥分离：多站点种子不再可线性逆推会话种子——
+//!   初版自制混合 acc*31+byte 的种子可被暴力推算）；
+//! - 注入脚本**不携带会话种子原文**、**不暴露全局 `__AEGIS_SITE_SEED`**
+//!   （初版把会话种子内嵌进每个站点且以只读全局暴露——页面按名即可读取，
+//!   等于主动发放的跨站标识符）。站点种子按域派生后仅存在于闭包内。
+//!
+//! 可拆卸：不依赖 UI/策略引擎。可拼接：与 FingerprintShield 独立组合。
 
+use sha2::{Digest, Sha256};
 use std::fmt;
 
 /// PerSiteSeed — 从会话种子 + 域名派生每站点独立种子。
-///
-/// 使用简单但确定性的哈希（无外部依赖），
-/// 保证同一 (session_seed, eTLD+1) 对始终产生相同站点种子。
 pub struct PerSiteSeed {
     session_seed: [u8; 32],
 }
@@ -47,26 +51,17 @@ impl PerSiteSeed {
 
     /// 为指定 eTLD+1 域名派生 16 字节站点种子。
     ///
-    /// 使用 SipHash 变体（简化版，零依赖）：
-    /// 将 session_seed 与 domain 字节逐字节混合，
-    /// 产生确定性但不可预测的站点种子。
+    /// SHA-256(session_seed ‖ "per-site-seed:v2" ‖ domain) 前 16 字节——
+    /// 确定性（同输入同输出）、域间密钥分离（单域种子不可逆推会话种子
+    /// 或其它域的种子）。
     pub fn derive(&self, domain: &str) -> [u8; 16] {
+        let mut hasher = Sha256::new();
+        hasher.update(self.session_seed);
+        hasher.update(b"aegis:per-site-seed:v2:");
+        hasher.update(domain.as_bytes());
+        let digest = hasher.finalize();
         let mut site_seed = [0u8; 16];
-        let domain_bytes = domain.as_bytes();
-
-        // SipHash-like 混合：session_seed 与 domain 逐字节折叠
-        for (i, byte) in site_seed.iter_mut().enumerate() {
-            let mut acc = self.session_seed[i % 32] as u32;
-            for (j, &db) in domain_bytes.iter().enumerate() {
-                // 乘法混叠 + 异或折叠
-                acc = acc
-                    .wrapping_mul(31)
-                    .wrapping_add(db as u32)
-                    .wrapping_add(j as u32);
-                acc ^= acc >> 16;
-            }
-            *byte = (acc & 0xFF) as u8;
-        }
+        site_seed.copy_from_slice(&digest[..16]);
         site_seed
     }
 
@@ -78,53 +73,22 @@ impl PerSiteSeed {
             .collect()
     }
 
-    /// 生成 per-site 种子注入 JS 脚本。
+    /// 生成指定域名的 per-site 种子注入 JS 脚本。
     ///
-    /// 返回的 JS 代码：
-    /// 1. 从页面 URL 提取 eTLD+1 域名
-    /// 2. 用 session_seed + domain 派生 per-site 种子
-    /// 3. 设置 `__AEGIS_SITE_SEED` 全局常量
-    ///
-    /// 后续的指纹噪声模块读取 `__AEGIS_SITE_SEED` 而非 `__AEGIS_SESSION_SEED`，
-    /// 实现 per-site 隔离。
-    pub fn inject_script(&self, session_seed_hex: &str) -> String {
+    /// - 调用方传入该 WebView 顶层文档的域名（宿主已知，页面不可伪造参数）；
+    /// - 种子在 Rust 侧派生——脚本内嵌的**只有该站自己的种子**，不含会话
+    ///   种子原文；
+    /// - 种子只存在于闭包局部——页面无法按名读取（也不再注册全局常量）。
+    pub fn inject_script(&self, domain: &str) -> String {
+        let site_seed_hex = self.derive_hex(domain);
         format!(
             r#"
-// Aegis PerSiteSeed — per-site 独立种子（参照 Brave Browser）
-// 原始设计：Brave Software (MPL-2.0)
-// 从 __AEGIS_SESSION_SEED + eTLD+1 域名派生每站点独立种子
-// 确保：同站点一致 + 跨站点隔离 + 跨会话刷新
+// Aegis PerSiteSeed — per-site 独立种子（参照 Brave Browser，MPL-2.0）
+// 同站点一致 + 跨站点隔离 + 跨会话刷新；种子闭包封装（不进全局作用域）
 (function() {{
-  function getETLD1(hostname) {{
-    // 简化 eTLD+1 提取：取最后两段（www.example.com → example.com）
-    // 生产环境应使用 Public Suffix List
-    var parts = hostname.split('.');
-    if (parts.length <= 2) return hostname;
-    return parts.slice(-2).join('.');
-  }}
-
-  function deriveSeed(sessionHex, domain) {{
-    // SipHash-like 混合（与 Rust PerSiteSeed::derive 一致）
-    var result = '';
-    for (var i = 0; i < 16; i++) {{
-      var acc = parseInt(sessionHex.slice((i % 32) * 2, (i % 32) * 2 + 2), 16);
-      for (var j = 0; j < domain.length; j++) {{
-        acc = (Math.imul(acc, 31) + domain.charCodeAt(j) + j) | 0;
-        acc ^= (acc >>> 16);
-      }}
-      result += ('0' + (acc & 0xFF).toString(16)).slice(-2);
-    }}
-    return result;
-  }}
-
-  var domain = getETLD1(location.hostname);
-  var siteSeed = deriveSeed('{session_seed_hex}', domain);
-  // __AEGIS_SITE_SEED 供后续指纹噪声模块使用
-  Object.defineProperty(window, '__AEGIS_SITE_SEED', {{
-    value: siteSeed,
-    writable: false,
-    configurable: false
-  }});
+  const __AEGIS_SITE_SEED = '{site_seed_hex}';
+  // 供同脚本内噪声模块确定性取用；不挂载到 window
+  return __AEGIS_SITE_SEED;
 }})();
 "#
         )
@@ -165,16 +129,28 @@ mod tests {
     }
 
     #[test]
-    fn script_contains_site_seed_marker() {
+    fn script_embeds_site_seed_but_not_session_seed() {
         let pss = PerSiteSeed::new(test_seed());
-        let script = pss.inject_script(
-            &pss.session_seed
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>(),
-        );
+        let session_hex = pss
+            .session_seed
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let script = pss.inject_script("example.com");
         assert!(script.contains("__AEGIS_SITE_SEED"));
-        assert!(script.contains("getETLD1"));
-        assert!(script.contains("deriveSeed"));
+        // 会话种子原文绝不内嵌；站点种子不注册全局属性
+        assert!(!script.contains(&session_hex));
+        assert!(!script.contains("Object.defineProperty"));
+    }
+
+    #[test]
+    fn seed_is_sha256_derived() {
+        // 域密钥分离：改变域名只改变该域种子，且输出与 SHA-256 截断一致
+        let pss = PerSiteSeed::new(test_seed());
+        let mut hasher = Sha256::new();
+        hasher.update(test_seed());
+        hasher.update(b"aegis:per-site-seed:v2:example.com");
+        let expected = hasher.finalize();
+        assert_eq!(&pss.derive("example.com")[..], &expected[..16]);
     }
 }

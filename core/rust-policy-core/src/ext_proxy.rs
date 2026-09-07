@@ -95,6 +95,10 @@ impl ExtProxy {
     /// 如果 proxy_endpoint 为空，脚本仅注册拦截逻辑但不转发（观察模式）。
     pub fn inject_script(&self) -> String {
         let endpoint = &self.config.proxy_endpoint;
+        // JS 单引号字符串转义（此前含 ' 即注入；端点为配置面输入）
+        let endpoint_escaped = endpoint
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'");
         let intercept_dl = self.config.intercept_downloads;
         let intercept_up = self.config.intercept_updates;
         format!(
@@ -103,7 +107,8 @@ impl ExtProxy {
 // 原始设计：imputnet/helium (GPL-3.0)
 // 拦截 Chrome Web Store 请求，通过匿名代理转发
 (function() {{
-  var PROXY_ENDPOINT = '{endpoint}';
+  // 端点经 JS 字符串转义（含单引号即注入）
+  var PROXY_ENDPOINT = '{endpoint_escaped}';
   var INTERCEPT_DOWNLOADS = {intercept_dl};
   var INTERCEPT_UPDATES = {intercept_up};
 

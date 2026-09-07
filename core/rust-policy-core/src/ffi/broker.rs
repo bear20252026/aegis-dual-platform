@@ -393,7 +393,6 @@ impl FfiBroker {
     /// 文本，不参与权限判定）。此前用 `*issued == action`（含 explanation），
     /// 而托管端序列化 NativeAction 不携带 explanation，导致合法一次消费被
     /// 误判 action_not_issued（"安装版崩溃"排查中暴露的确定性缺陷）。
-
     pub fn consume_navigation(
         &self,
         action: FfiAuthorizedAction,

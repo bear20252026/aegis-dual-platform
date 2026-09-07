@@ -63,7 +63,21 @@ impl Capability {
     }
 
     pub fn is_origin_allowed(&self, origin: &str) -> bool {
-        self.allowed_origins.is_empty() || self.allowed_origins.iter().any(|o| origin.contains(o))
+        // 白名单按 origin 前缀精确匹配（此前 contains 子串匹配：白名单
+        // "https://trusted.com" 放行 "https://evil-trusted.com/path"）。
+        // 空白名单不再默认放行——显式 "*" 才表示全放行（fail-closed）。
+        !self.allowed_origins.is_empty() && self.allowed_origins.iter().any(|o| {
+            if o == "*" {
+                return true;
+            }
+            if origin.eq_ignore_ascii_case(o) {
+                return true;
+            }
+            // 入参可为同源完整 URL：origin 白名单值 + 路径/查询/锚点起始
+            origin.len() > o.len()
+                && origin.starts_with(o.as_str())
+                && matches!(origin.as_bytes()[o.len()], b'/' | b'?' | b'#')
+        })
     }
 }
 
@@ -142,10 +156,40 @@ mod tests {
         Capability {
             name: name.into(),
             scope,
-            allowed_origins: vec![],
+            // 显式全放行（空白名单已改为 fail-closed 拒绝——见回归测试）
+            allowed_origins: vec!["*".into()],
             max_uses: max,
             uses_count: 0,
         }
+    }
+
+    #[test]
+    fn empty_origin_list_denies() {
+        // 回归：空白名单此前默认放行（fail-open）——现在 fail-closed
+        let cap = Capability {
+            name: "read".into(),
+            scope: CapabilityScope::Read,
+            allowed_origins: vec![],
+            max_uses: None,
+            uses_count: 0,
+        };
+        assert!(!cap.is_origin_allowed("https://example.com"));
+    }
+
+    #[test]
+    fn origin_prefix_not_substring() {
+        // 回归：此前 contains 子串匹配放行 evil-trusted.com
+        let cap = Capability {
+            name: "read".into(),
+            scope: CapabilityScope::Read,
+            allowed_origins: vec!["https://trusted.com".into()],
+            max_uses: None,
+            uses_count: 0,
+        };
+        assert!(!cap.is_origin_allowed("https://evil-trusted.com/path"));
+        assert!(!cap.is_origin_allowed("https://xnottrusted.com"));
+        assert!(cap.is_origin_allowed("https://trusted.com/path"));
+        assert!(cap.is_origin_allowed("https://trusted.com"));
     }
 
     #[test]

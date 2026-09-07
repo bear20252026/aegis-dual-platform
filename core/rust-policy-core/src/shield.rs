@@ -21,19 +21,27 @@ impl fmt::Debug for FingerprintShield {
 }
 
 impl FingerprintShield {
-    /// 用系统随机源创建新会话种子。
+    /// 用系统加密随机源创建新会话种子。
+    /// 此前用 SystemTime 纳秒 × PID 推导——完全可预测且 (i%16)*8 移位使
+    /// 字节 0-15 与 16-31 相同（有效熵 ≤128bit 且结构相关），指纹噪声
+    /// 可被外部推算复现。现在直接取 OS CSPRNG。
     pub fn new() -> Self {
         let mut seed = [0u8; 32];
-        // 用系统时间纳秒 + 进程 ID 生成确定性种子（零外部依赖）
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let pid = std::process::id() as u128;
-        // 逐字节填充（避免大位移溢出）
-        for (i, byte) in seed.iter_mut().enumerate() {
-            let val = nanos.wrapping_mul(pid.wrapping_add(i as u128 + 1));
-            *byte = ((val >> ((i % 16) * 8)) & 0xFF) as u8;
+        if getrandom::getrandom(&mut seed).is_err() {
+            // OS 随机源不可用（极端环境）——退化为时间+PID 混合（仍填充全部
+            // 32 字节，高低半区经旋转与异或折叠去相关）
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos();
+            let pid = std::process::id() as u128;
+            for (i, byte) in seed.iter_mut().enumerate() {
+                let mut val = nanos ^ (pid << 32) ^ ((i as u128) << 24);
+                val = val
+                    .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+                    .rotate_right(((i * 7) % 128) as u32);
+                *byte = (val as u8) ^ ((val >> 64) as u8) ^ (i as u8);
+            }
         }
         Self { seed }
     }
@@ -55,14 +63,16 @@ impl FingerprintShield {
 
     /// 生成 JS 注入脚本（注入 WebView——canvas/WebGL/Audio 噪声）。
     ///
-    /// 返回的脚本设置全局 `__AEGIS_SESSION_SEED` 常量，
-    /// 供前端指纹噪声生成器使用（每次访问 seed_hex 一致 → 噪声确定性）。
+    /// 种子以闭包内局部常量注入——**不再置于顶层全局词法环境**（此前顶层
+    /// `const __AEGIS_SESSION_SEED` 任意页面可按名读取，全会话跨站唯一
+    /// 标识符等于主动发放的超级 Cookie）。
     pub fn inject_script(&self) -> String {
         let hex = self.seed_hex();
         format!(
             r#"
-// Aegis FingerprintShield — 每会话确定性噪声种子
-const __AEGIS_SESSION_SEED = '{hex}';
+// Aegis FingerprintShield — 每会话确定性噪声种子（闭包封装——不进全局作用域）
+(function() {{
+  const __AEGIS_SESSION_SEED = '{hex}';
 
 // Canvas 噪声（每个像素 +1/-1 随机偏移——视觉不可察觉）
 (function() {{
@@ -99,6 +109,7 @@ const __AEGIS_SESSION_SEED = '{hex}';
   Object.defineProperty(navigator, 'hardwareConcurrency', {{
     get: () => 2 + (seed % 7)
   }});
+}})();
 }})();
 "#
         )

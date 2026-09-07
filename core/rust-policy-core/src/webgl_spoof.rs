@@ -115,7 +115,7 @@ impl WebGLSpoof {
         case MAX_TEXTURE_SIZE:
           return maxTexSize;
         case MAX_VIEWPORT_DIMS:
-          return new Float32Array([maxViewportW, maxViewportH]);
+          return new Int32Array([maxViewportW, maxViewportH]); // 规范要求 Int32——Float32 可被类型检测识破
         case MAX_RENDERBUFFER_SIZE:
           return maxRenderbuf;
         default:

@@ -64,7 +64,8 @@ impl HttpsOnlyState {
         // 提取域名（scheme 后到第一个 / 或 :port 之前——含端口也一并
         // 归一比较，端口差异不影响放行判定）
         let rest = &url[url.find("://").map(|i| i + 3).unwrap_or(0)..];
-        let host_end = rest.find(['/', ':']).unwrap_or(rest.len());
+        // 域名终止符含 ? / #（此前 `http://x.com?a` 把 query 当域名的一部分）
+        let host_end = rest.find(['/', ':', '?', '#']).unwrap_or(rest.len());
         let domain = rest[..host_end].to_ascii_lowercase();
         if self.is_http_allowed(&domain) {
             return None; // 用户已放行

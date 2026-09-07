@@ -96,15 +96,18 @@ impl SecurityPolicy {
             sanitized = format!("_{}", sanitized);
         }
 
-        // 长度限制（保留扩展名）
+        // 长度限制（保留扩展名）——全部经 floor_char_boundary 类似语义：
+        // 字节索引切片落在多字节 UTF-8 字符中间即 panic（文件名攻击者可控）
         if sanitized.len() > MAX_FILENAME_LENGTH {
             if let Some(dot_pos) = sanitized.rfind('.') {
                 let ext = &sanitized[dot_pos..];
                 let max_base = MAX_FILENAME_LENGTH.saturating_sub(ext.len());
                 let base_end = max_base.min(dot_pos);
+                let base_end = floor_boundary(&sanitized, base_end);
                 sanitized = format!("{}{}", &sanitized[..base_end], ext);
             } else {
-                sanitized.truncate(MAX_FILENAME_LENGTH);
+                let cut = floor_boundary(&sanitized, MAX_FILENAME_LENGTH);
+                sanitized.truncate(cut);
             }
         }
 
@@ -114,7 +117,22 @@ impl SecurityPolicy {
             sanitized
         }
     }
+}
 
+/// 向下取整到 UTF-8 字符边界（cut 处落在多字节字符中间时回退到字符起点）。
+/// 文件名截断用——字节切片落在多字节 UTF-8 字符中间会 panic。
+fn floor_boundary(s: &str, cut: usize) -> usize {
+    if cut >= s.len() {
+        return s.len();
+    }
+    let mut i = cut;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+impl SecurityPolicy {
     /// 手动 URL 解码（零依赖——处理 %XX 编码）。
     pub fn url_decode(input: &str) -> Option<String> {
         let bytes = input.as_bytes();

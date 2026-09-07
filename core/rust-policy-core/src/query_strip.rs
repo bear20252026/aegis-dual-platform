@@ -19,7 +19,8 @@ use std::fmt;
 /// 已知追踪查询参数列表（与 LibreWolf/Brave 一致）。
 ///
 /// 来源：LibreWolf `privacy.query_stripping.strip_list` + Brave 合并列表。
-/// 每个参数名都是精确匹配（区分大小写）。
+/// 参数名按 ASCII 不区分大小写匹配（追踪方用 `Gclid`/`gClId` 变体绕过
+/// 精确匹配——大小写折叠后命中）。
 const TRACKING_PARAMS: &[&str] = &[
     // Google Analytics / Ads
     "__hsfp",
@@ -112,7 +113,7 @@ impl QueryStripper {
             .split('&')
             .filter(|param| {
                 let key = param.split('=').next().unwrap_or("");
-                !self.params.iter().any(|tp| tp == key)
+                !self.params.iter().any(|tp| tp.eq_ignore_ascii_case(key))
             })
             .collect();
 

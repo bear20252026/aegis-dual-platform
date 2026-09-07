@@ -14,7 +14,9 @@
 //! assert!(glob_match("src/**", "src/main.rs", false));
 //! assert!(glob_match("*.json", "config.json", false));
 //! assert!(!glob_match("*.json", "config.yaml", false));
-//! assert!(glob_match("https://*.gov.cn", "https://a.gov.cn", true));
+//! // 注意：URL/host 匹配必须用 flat=false——flat=true 的 `*` 跨越 `/`，
+//! // `https://*.gov.cn` 会误命中 `https://evil.com/x.gov.cn`（后缀拼接绕过）。
+//! assert!(glob_match("https://*.gov.cn", "https://a.gov.cn", false));
 //! ```
 
 /// glob 匹配入口。
@@ -23,6 +25,12 @@
 /// `text`：待匹配文本。
 /// `flat`：`true` 时 `*` 跨越 `/`（命令模式），`false` 时 `*` 不跨越 `/`（路径模式）。
 pub fn glob_match(pattern: &str, text: &str, flat: bool) -> bool {
+    // 输入有界：DP 缓存为 (pat+1)*(txt+1) 平方级——超长模式/文本直接
+    // 拒绝匹配（此前可无界分配）
+    const MAX_GLOB_INPUT: usize = 16_384;
+    if pattern.len() > MAX_GLOB_INPUT || text.len() > MAX_GLOB_INPUT {
+        return false;
+    }
     let pat: Vec<char> = pattern.chars().collect();
     let txt: Vec<char> = text.chars().collect();
     let width = txt.len() + 1;

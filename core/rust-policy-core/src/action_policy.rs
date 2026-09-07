@@ -85,7 +85,7 @@ impl ActionPolicy {
                 glob_match(&r.action_pattern, action, false)
                     && r.condition
                         .as_ref()
-                        .is_none_or(|c| context.contains(c.as_str()))
+                        .is_none_or(|c| context_contains_token(context, c.as_str()))
             })
             .collect();
 
@@ -123,6 +123,34 @@ pub enum PolicyDecision {
     Allow(String),
     Deny(String),
     Ask(String),
+}
+
+
+/// 条件命中判定：条件串须出现在 token 边界（起点/`/`/`?`/`&`/`=`/`,`/空白之后）。
+/// 此前裸 contains——条件 "example.com" 被 "https://evil.com/?x=example.com" 命中。
+fn context_contains_token(context: &str, token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    let ctx = context.as_bytes();
+    let tok = token.as_bytes();
+    let mut from = 0;
+    while let Some(pos) = context[from..].find(token) {
+        let abs = from + pos;
+        let before_ok = abs == 0
+            || matches!(ctx[abs - 1], b'/' | b'?' | b'&' | b'=' | b',' | b' ' | b'\t' | b'\n' | b'\r');
+        let end = abs + tok.len();
+        let after_ok = end == ctx.len()
+            || matches!(ctx[end], b'/' | b'?' | b'&' | b'=' | b',' | b' ' | b'\t' | b'\n' | b'\r' | b':');
+        if before_ok && after_ok {
+            return true;
+        }
+        from = abs + 1;
+        if from >= context.len() {
+            break;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

@@ -39,8 +39,15 @@ pub fn extract_hostname(url: &str) -> &str {
     } else {
         url
     };
-    let host_end = without_scheme.find('/').unwrap_or(without_scheme.len());
-    &without_scheme[..host_end]
+    // 剥 userinfo（user@host——此前整段含凭证被当 host，污染匹配基座）
+    let no_userinfo = match without_scheme.find('@') {
+        Some(at) if at < without_scheme.find('/').unwrap_or(without_scheme.len()) => {
+            &without_scheme[at + 1..]
+        }
+        _ => without_scheme,
+    };
+    let host_end = no_userinfo.find('/').unwrap_or(no_userinfo.len());
+    &no_userinfo[..host_end]
 }
 
 /// 从 URL 提取小写主机名（不含端口号）。
@@ -48,8 +55,14 @@ pub fn extract_hostname(url: &str) -> &str {
 /// 用于广告拦截等需要大小写不敏感匹配的场景。
 pub fn extract_host(url: &str) -> Option<String> {
     let hostname = extract_hostname(url);
-    // 去掉端口号
-    let host = if let Some(pos) = hostname.rfind(':') {
+    // 去掉端口号——IPv6 字面量 [::1]:8080 先剥方括号段再判定（此前 rfind(':')
+    // 把 "[::1" 截断成非法形态）
+    let host = if hostname.starts_with('[') {
+        match hostname.find(']') {
+            Some(end) => &hostname[1..end],
+            None => hostname,
+        }
+    } else if let Some(pos) = hostname.find(':') {
         &hostname[..pos]
     } else {
         hostname

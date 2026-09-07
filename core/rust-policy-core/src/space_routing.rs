@@ -159,21 +159,22 @@ impl SpaceRouting {
     /// 设置 `__AEGIS_SPACE_ROUTING` 全局对象，
     /// 提供 `route(url)` 方法供前端使用。
     pub fn inject_script(&self) -> String {
+        // serde_json 构造——此前 name/workspace_id 完全未转义（JS 注入面）
         let rules_json: String = self
             .rules
             .iter()
             .map(|r| {
-                format!(
-                    r#"{{"name":"{}","type":"{}","pattern":"{}","workspace":"{}"}}"#,
-                    r.name,
-                    match r.match_type {
+                serde_json::json!({
+                    "name": r.name,
+                    "type": match r.match_type {
                         MatchType::Domain => "domain",
                         MatchType::PathPrefix => "path",
                         MatchType::Exact => "exact",
                     },
-                    r.pattern.replace('"', "\\\""),
-                    r.workspace_id
-                )
+                    "pattern": r.pattern,
+                    "workspace": r.workspace_id,
+                })
+                .to_string()
             })
             .collect::<Vec<String>>()
             .join(",");

@@ -72,8 +72,11 @@ impl Oracle {
         }
     }
 
-    /// 记录快照（副作用执行前/后状态）。
+    /// 记录快照（副作用执行前/后状态）。有界保留（接入生产路径不再无界增长）。
     pub fn snapshot(&mut self, snap: Snapshot) {
+        if self.snapshots.len() >= 1000 {
+            self.snapshots.remove(0);
+        }
         self.snapshots.push(snap);
     }
 
@@ -103,11 +106,10 @@ impl Oracle {
             }
         }
 
-        // 确定性结论
+        // 确定性结论——不匹配一律 Fail（此前 expected 值以 "safe_" 开头即降级
+        // Warning 放行：攻击者可控状态字段命名 = fail-open 后门）
         let verdict = if mismatches.is_empty() {
             VerifyVerdict::Pass
-        } else if mismatches.iter().all(|m| m.expected.starts_with("safe_")) {
-            VerifyVerdict::Warning(format!("{} 个字段变化（安全范围内）", mismatches.len()))
         } else {
             VerifyVerdict::Fail(format!("{} 个字段不匹配", mismatches.len()))
         };
@@ -117,6 +119,9 @@ impl Oracle {
             mismatches,
             verdict,
         };
+        if self.reports.len() >= 1000 {
+            self.reports.remove(0);
+        }
         self.reports.push(report.clone());
         report
     }
