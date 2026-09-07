@@ -54,12 +54,16 @@ public sealed class AppSettings
     /// <summary>安全 DNS（DoH）——环境参数，重启生效。</summary>
     public bool SecureDns { get; set; } = true;
 
-    /// <summary>每站点缩放因子（host → 1.0~3.0；消费者：TabRuntime 导航应用/保存）。</summary>
+    /// <summary>每站点缩放因子（host → 0.25~3.0；消费者：TabRuntime 导航应用/保存）。</summary>
     public Dictionary<string, double> ZoomByHost { get; set; } = new();
 
     public static string DefaultPath =>
         Path.Combine(AppPaths.DataDir, "settings.json");
 
+    /// <summary>读取设置。任何读取/解析失败都回退默认值且**不抛出**（此前
+    /// UnauthorizedAccessException 等直接上抛导致 MainWindow 构造失败、应用
+    /// 无法启动）；坏文件先备份为 .bak——启动链随即 Apply(默认值) 会覆盖原
+    /// 文件，无备份则用户设置永久丢失。</summary>
     public static AppSettings Load(string path)
     {
         try
@@ -69,21 +73,46 @@ public sealed class AppSettings
             var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions);
             return settings ?? new AppSettings();
         }
-        catch (IOException)
+        catch (Exception ex)
         {
-            return new AppSettings();  // 读取失败回退默认（fail-safe）
-        }
-        catch (JsonException)
-        {
-            return new AppSettings();
+            BackupCorruptFile(path);
+            Security.SecurityLog.Write(
+                $"[settings] 读取失败（回退默认，原文件已备份 .bak）: {ex.GetType().Name}: {ex.Message}");
+            return new AppSettings();  // fail-safe
         }
     }
 
+    /// <summary>把无法解析的设置文件改名备份（尽力而为——失败静默）。</summary>
+    private static void BackupCorruptFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Copy(path, path + ".bak", overwrite: true);
+        }
+        catch (Exception)
+        {
+            // 备份失败不阻断启动
+        }
+    }
+
+    /// <summary>保存设置（原子写：temp+Replace——此前直写，半写崩溃即损坏；
+    /// 仅测试使用，运行期唯一写入口是 SettingsService.Apply）。</summary>
     public void Save(string path)
     {
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
-        File.WriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
+        var temp = path + ".tmp." + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.WriteAllText(temp, JsonSerializer.Serialize(this, JsonOptions));
+            if (File.Exists(path)) File.Replace(temp, path, null);
+            else File.Move(temp, path);
+        }
+        finally
+        {
+            if (File.Exists(temp)) File.Delete(temp);
+        }
     }
 }

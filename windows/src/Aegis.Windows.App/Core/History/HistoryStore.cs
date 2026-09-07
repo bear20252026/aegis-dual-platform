@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Core.History;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,32 +10,73 @@ using Microsoft.Data.Sqlite;
 /// <summary>历史记录（ADR-009 D2：SQLite）。升级版支持：
 /// - 每次访问记录本地日期 + 时刻（visited_at ISO + visited_date yyyy-MM-dd，便于按日期查询）；
 /// - 按日期查询 / 文本+日期组合查询 / 单条删除 / 日期列表；
-/// - 全部外部输入走参数绑定（安全约束：不拼接 SQL）。
-/// 敏感口径：title/url 存储不含 query secret 的承诺由调用方保证。</summary>
+/// - 全部外部输入走参数绑定（安全约束：不拼接 SQL）；用户搜索词中的
+///   LIKE 通配符（%/_/\）转义为字面量——通配符注入不改变搜索语义。
+/// 敏感口径：title/url 存储不含 query secret 的承诺由调用方保证。
+/// 建表/迁移/索引只在该库的进程首次打开时执行一次（此前每次 Add/查询
+/// 都跑 5 条 DDL/DML——每次导航的纯开销）。</summary>
 public sealed class HistoryStore
 {
+    private const int MaxRows = 50000;
+    private const int PruneEveryAdds = 256;
+
+    private static readonly ConcurrentDictionary<string, byte> InitializedDbs = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _dbPath;
+    private int _addCounter;
 
     public HistoryStore(string dbPath) => _dbPath = dbPath;
 
-    /// <summary>记录一次访问（追加——历史按次数累积；本地时间+日期）。</summary>
-    public void Add(string url, string title)
+    /// <summary>记录一次访问（追加——历史按次数累积；本地时间+日期）。
+    /// 返回是否真实写入（导入计数用）。磁盘异常不向导航事件上抛（此前
+    /// SQLite 异常会沿 NavigationCompleted 触发全局未处理异常弹窗）——
+    /// 记录日志后丢弃本条。</summary>
+    public bool Add(string url, string title)
     {
         if (string.IsNullOrWhiteSpace(url))
-            return;
-        var now = DateTime.Now;
-        using var connection = Open();
-        using var insert = connection.CreateCommand();
-        insert.CommandText = """
-            INSERT INTO visits(url, title, visited_at, visited_date)
-            VALUES($u,$t,$v,$d)
-            """;
-        insert.Parameters.AddWithValue("$u", url);
-        insert.Parameters.AddWithValue("$t", title ?? string.Empty);
-        insert.Parameters.AddWithValue("$v", now.ToString("o"));
-        insert.Parameters.AddWithValue("$d", now.ToString("yyyy-MM-dd"));
-        insert.ExecuteNonQuery();
+            return false;
+        try
+        {
+            var now = DateTime.Now;
+            using var connection = Open();
+            using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO visits(url, title, visited_at, visited_date)
+                VALUES($u,$t,$v,$d)
+                """;
+            insert.Parameters.AddWithValue("$u", url);
+            insert.Parameters.AddWithValue("$t", title ?? string.Empty);
+            insert.Parameters.AddWithValue("$v", now.ToString("o"));
+            insert.Parameters.AddWithValue("$d", now.ToString("yyyy-MM-dd"));
+            insert.ExecuteNonQuery();
+            // 有界保留：定期修剪最旧记录（常年使用不无界增长）
+            if (InterlockedIncrement(ref _addCounter) % PruneEveryAdds == 0)
+            {
+                using var prune = connection.CreateCommand();
+                prune.CommandText = "DELETE FROM visits WHERE id NOT IN (SELECT id FROM visits ORDER BY id DESC LIMIT $max)";
+                prune.Parameters.AddWithValue("$max", MaxRows);
+                prune.ExecuteNonQuery();
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Security.SecurityLog.Write(
+                $"[history] 记录写入失败（丢弃本条）: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
     }
+
+    private static int InterlockedIncrement(ref int value) =>
+        System.Threading.Interlocked.Increment(ref value);
+
+    /// <summary>LIKE 绑定值转义：%/_/\ 作为字面量匹配（用户搜索 "%报告" 时
+    /// 此前 % 被当通配符，搜索语义被改变）。</summary>
+    private static string LikeEscape(string query) =>
+        query.Replace("\\", "\\\\", StringComparison.Ordinal)
+             .Replace("%", "\\%", StringComparison.Ordinal)
+             .Replace("_", "\\_", StringComparison.Ordinal);
+
+    private static string LikePattern(string? query) => $"%{LikeEscape(query ?? string.Empty)}%";
 
     /// <summary>最近访问（时间倒序）。</summary>
     public IReadOnlyList<HistoryEntry> Recent(int limit = 200) =>
@@ -49,9 +91,9 @@ public sealed class HistoryStore
         using var connection = Open();
         using var select = connection.CreateCommand();
         select.CommandText = string.IsNullOrEmpty(date)
-            ? "SELECT id, url, title, visited_at, visited_date FROM visits WHERE url LIKE $q OR title LIKE $q ORDER BY visited_at DESC LIMIT $lim"
-            : "SELECT id, url, title, visited_at, visited_date FROM visits WHERE (url LIKE $q OR title LIKE $q) AND visited_date = $d ORDER BY visited_at DESC LIMIT $lim";
-        select.Parameters.AddWithValue("$q", $"%{query}%");
+            ? "SELECT id, url, title, visited_at, visited_date FROM visits WHERE url LIKE $q ESCAPE '\\' OR title LIKE $q ESCAPE '\\' ORDER BY visited_at DESC LIMIT $lim"
+            : "SELECT id, url, title, visited_at, visited_date FROM visits WHERE (url LIKE $q ESCAPE '\\' OR title LIKE $q ESCAPE '\\') AND visited_date = $d ORDER BY visited_at DESC LIMIT $lim";
+        select.Parameters.AddWithValue("$q", LikePattern(query));
         select.Parameters.AddWithValue("$lim", limit);
         if (!string.IsNullOrEmpty(date))
             select.Parameters.AddWithValue("$d", date);
@@ -104,14 +146,14 @@ public sealed class HistoryStore
         using var select = connection.CreateCommand();
         var clauses = new List<string>();
         if (hasText)
-            clauses.Add("(url LIKE $q OR title LIKE $q)");
+            clauses.Add("(url LIKE $q ESCAPE '\\' OR title LIKE $q ESCAPE '\\')");
         if (hasFrom)
             clauses.Add("visited_date >= $from");
         if (hasTo)
             clauses.Add("visited_date <= $to");
         select.CommandText = $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {string.Join(" AND ", clauses)} ORDER BY visited_at DESC LIMIT $lim";
         if (hasText)
-            select.Parameters.AddWithValue("$q", $"%{query}%");
+            select.Parameters.AddWithValue("$q", LikePattern(query));
         if (hasFrom)
             select.Parameters.AddWithValue("$from", from);
         if (hasTo)
@@ -130,12 +172,12 @@ public sealed class HistoryStore
         using var connection = Open();
         using var select = connection.CreateCommand();
         var clauses = new List<string>();
-        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
+        if (hasText) clauses.Add("(url LIKE $q ESCAPE '\\' OR title LIKE $t ESCAPE '\\')");
         if (hasFrom) clauses.Add("visited_date >= $from");
         if (hasTo) clauses.Add("visited_date <= $to");
         select.CommandText = "SELECT COUNT(*) FROM visits" +
             (clauses.Count > 0 ? " WHERE " + string.Join(" AND ", clauses) : "");
-        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{query}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         return Convert.ToInt64(select.ExecuteScalar());
@@ -154,13 +196,13 @@ public sealed class HistoryStore
         using var connection = Open();
         using var select = connection.CreateCommand();
         var clauses = new List<string>();
-        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
+        if (hasText) clauses.Add("(url LIKE $q ESCAPE '\\' OR title LIKE $t ESCAPE '\\')");
         if (hasFrom) clauses.Add("visited_date >= $from");
         if (hasTo) clauses.Add("visited_date <= $to");
         select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
             string.Join(" AND ", clauses) +
             " ORDER BY visited_at DESC, id DESC LIMIT $ps OFFSET $off";
-        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{query}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         select.Parameters.AddWithValue("$ps", Math.Max(1, pageSize));
@@ -195,7 +237,7 @@ public sealed class HistoryStore
         using var connection = Open();
         using var select = connection.CreateCommand();
         var clauses = new List<string>();
-        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
+        if (hasText) clauses.Add("(url LIKE $q ESCAPE '\\' OR title LIKE $t ESCAPE '\\')");
         if (hasFrom) clauses.Add("visited_date >= $from");
         if (hasTo) clauses.Add("visited_date <= $to");
         if (after is not null) clauses.Add("(visited_at, id) < ($ca, $cid)");
@@ -203,7 +245,7 @@ public sealed class HistoryStore
             "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
             string.Join(" AND ", clauses) +
             " ORDER BY visited_at DESC, id DESC LIMIT $lim";
-        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{query}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
@@ -297,6 +339,26 @@ public sealed class HistoryStore
         try
         {
             connection.Open();
+            EnsureSchema(connection);
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>建表/迁移/索引/清洗——每库每进程仅执行一次（此前每次打开连接
+    /// 都执行 5 条 DDL/DML，每次导航完成的纯开销）。</summary>
+    private void EnsureSchema(SqliteConnection connection)
+    {
+        if (InitializedDbs.ContainsKey(_dbPath))
+            return;
+        lock (InitializedDbs)
+        {
+            if (InitializedDbs.ContainsKey(_dbPath))
+                return;
             using var ensure = connection.CreateCommand();
             ensure.CommandText = """
                 CREATE TABLE IF NOT EXISTS visits(
@@ -317,18 +379,23 @@ public sealed class HistoryStore
                     """;
                 index.ExecuteNonQuery();
             }
+            using (var timeIndex = connection.CreateCommand())
+            {
+                // 纯时间倒序查询（Recent/Search 默认排序）的配套索引——此前
+                // 仅有 (date,time) 复合索引，该路径走不上索引需额外排序
+                timeIndex.CommandText = """
+                    CREATE INDEX IF NOT EXISTS idx_visits_time_id
+                        ON visits(visited_at DESC, id DESC);
+                    """;
+                timeIndex.ExecuteNonQuery();
+            }
             // 失效空日期行归一（迁移回填遗漏的残留——归为「未知日期」以免分组遗漏）
             using (var sanitize = connection.CreateCommand())
             {
                 sanitize.CommandText = "UPDATE visits SET visited_date = '未知日期' WHERE visited_date = '' OR visited_date IS NULL";
                 sanitize.ExecuteNonQuery();
             }
-            return connection;
-        }
-        catch
-        {
-            connection.Dispose();
-            throw;
+            InitializedDbs[_dbPath] = 1;
         }
     }
 

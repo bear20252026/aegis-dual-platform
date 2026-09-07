@@ -19,34 +19,44 @@ public sealed class TabSessionStore
     /// <summary>会话行（含固定态）。</summary>
     public sealed record SessionTab(string TabId, string Url, string Title, bool IsPinned);
 
-    /// <summary>保存当前会话（先清后写——小表全量重写最简且无增量漂移）。</summary>
+    /// <summary>保存当前会话（先清后写——小表全量重写最简且无增量漂移）。
+    /// 磁盘异常不上抛（每次导航完成都会调用——此前磁盘满/库被锁时每次导航
+    /// 弹一次全局异常）——记录日志后放弃本次快照。</summary>
     public void Save(IReadOnlyList<Tab> tabs, string? currentTabId)
     {
-        using var connection = Open();
-        using var transaction = connection.BeginTransaction();
-        using (var clear = connection.CreateCommand())
+        try
         {
-            clear.Transaction = transaction;
-            clear.CommandText = "DELETE FROM tabs";
-            clear.ExecuteNonQuery();
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            using (var clear = connection.CreateCommand())
+            {
+                clear.Transaction = transaction;
+                clear.CommandText = "DELETE FROM tabs";
+                clear.ExecuteNonQuery();
+            }
+            for (var i = 0; i < tabs.Count; i++)
+            {
+                using var insert = connection.CreateCommand();
+                insert.Transaction = transaction;
+                insert.CommandText = """
+                    INSERT INTO tabs(position, tab_id, url, title, is_current, is_pinned)
+                    VALUES($p,$t,$u,$ti,$c,$pin)
+                    """;
+                insert.Parameters.AddWithValue("$p", i);
+                insert.Parameters.AddWithValue("$t", tabs[i].TabId);
+                insert.Parameters.AddWithValue("$u", tabs[i].Url);
+                insert.Parameters.AddWithValue("$ti", tabs[i].Title);
+                insert.Parameters.AddWithValue("$c", tabs[i].TabId == currentTabId ? 1 : 0);
+                insert.Parameters.AddWithValue("$pin", tabs[i].IsPinned ? 1 : 0);
+                insert.ExecuteNonQuery();
+            }
+            transaction.Commit();
         }
-        for (var i = 0; i < tabs.Count; i++)
+        catch (Exception ex)
         {
-            using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO tabs(position, tab_id, url, title, is_current, is_pinned)
-                VALUES($p,$t,$u,$ti,$c,$pin)
-                """;
-            insert.Parameters.AddWithValue("$p", i);
-            insert.Parameters.AddWithValue("$t", tabs[i].TabId);
-            insert.Parameters.AddWithValue("$u", tabs[i].Url);
-            insert.Parameters.AddWithValue("$ti", tabs[i].Title);
-            insert.Parameters.AddWithValue("$c", tabs[i].TabId == currentTabId ? 1 : 0);
-            insert.Parameters.AddWithValue("$pin", tabs[i].IsPinned ? 1 : 0);
-            insert.ExecuteNonQuery();
+            Security.SecurityLog.Write(
+                $"[session] 会话保存失败（放弃本次快照）: {ex.GetType().Name}: {ex.Message}");
         }
-        transaction.Commit();
     }
 
     /// <summary>加载上次会话；无记录/库损坏返回空（fail-safe——不阻断启动）。
@@ -79,8 +89,10 @@ public sealed class TabSessionStore
             currentTabId ??= tabs.LastOrDefault()?.TabId;
             return tabs;
         }
-        catch (SqliteException)
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
         {
+            Security.SecurityLog.Write(
+                $"[session] 会话读取失败（回退空会话）: {ex.GetType().Name}: {ex.Message}");
             return Array.Empty<SessionTab>();  // 库损坏 → 空会话（不阻断启动——fail-safe）
         }
     }

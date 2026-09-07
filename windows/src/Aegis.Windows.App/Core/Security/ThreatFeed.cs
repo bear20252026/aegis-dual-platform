@@ -73,7 +73,8 @@ public static class ThreatFeedUpdater
         return null;
     }
 
-    /// <summary>解析订阅源一行文本为域名；无效返回 null（Python parse_feed_line 同语义）。</summary>
+    /// <summary>解析订阅源一行文本为域名；无效返回 null（Python parse_feed_line
+    /// 同语义）。带端口/通配/非主机字符的条目拒绝（此前原样入表永不命中）。</summary>
     public static string? ParseFeedLine(string line)
     {
         var text = line.Trim();
@@ -91,21 +92,44 @@ public static class ThreatFeedUpdater
         if (slash >= 0)
             text = text[..slash];
         text = text.Trim().TrimEnd('^').ToLowerInvariant();
-        if (text.Length == 0 || (text.Length == 1 && text[0] == ':'))
+        // 剥端口（":80" 残留——黑名单匹配按裸域，带端口条目永不命中）
+        var colon = text.IndexOf(':');
+        if (colon >= 0)
+            text = text[..colon];
+        if (text.Length == 0)
             return null;
         if (!text.Contains('.') && text != "localhost")
             return null;
+        // 主机字符白名单（字母/数字/连字符/点）——通配残留等非法形态拒绝
+        foreach (var ch in text)
+        {
+            if (!(char.IsAsciiLetterOrDigit(ch) || ch == '-' || ch == '.') && text != "localhost")
+                return null;
+        }
         return text;
     }
 
-    /// <summary>拉取订阅源并写入缓存文件（原子替换）。失败抛异常由调用方留痕。</summary>
+    /// <summary>拉取订阅源并写入缓存文件（原子替换）。失败抛异常由调用方留痕。
+    /// 降级防护：最终响应 URL 必须仍为 https（重定向到 http 即拒绝——
+    /// 明文可投毒）；响应先查 Content-Length 再限量缓冲（超大响应不进内存）。</summary>
     public static IReadOnlyList<string> FetchAndStore(string feedUrl, string cachePath)
     {
-        using var handler = new HttpClientHandler();
+        using var handler = new HttpClientHandler
+        {
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 3,
+        };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+        // 调用方已在后台线程（Task.Run）——同步等待可接受
         using var response = http.GetAsync(feedUrl).GetAwaiter().GetResult();
         response.EnsureSuccessStatusCode();
-        var bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+        // 重定向降级检查：最终落在 http:// 上即拒绝（劫持/误配投毒面）
+        if (response.RequestMessage?.RequestUri is { } finalUri
+            && finalUri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException("订阅源重定向降级为非 https——拒绝");
+        if (response.Content.Headers.ContentLength is long declared && declared > MaxBytes)
+            throw new InvalidOperationException("订阅源过大（超过 5MB 上限）");
+        var bytes = ReadBounded(response, MaxBytes);
         if (bytes.Length > MaxBytes)
             throw new InvalidOperationException("订阅源过大（超过 5MB 上限）");
 
@@ -128,7 +152,24 @@ public static class ThreatFeedUpdater
         return domains;
     }
 
-    /// <summary>加载缓存黑名单快照（文件缺失/损坏返回空——fail-safe）。</summary>
+    /// <summary>限量缓冲读取：声明缺失时按上限截断（此前先全量读入内存再检查
+    /// ——被劫持源可触发无界内存分配）。</summary>
+    private static byte[] ReadBounded(HttpResponseMessage response, long max)
+    {
+        using var stream = response.Content.ReadAsStream();
+        using var buffer = new MemoryStream();
+        var chunk = new byte[64 * 1024];
+        while (buffer.Length <= max)
+        {
+            var read = stream.Read(chunk, 0, chunk.Length);
+            if (read <= 0)
+                break;
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.Length > max ? new byte[max + 1] : buffer.ToArray();
+    }
+
+    /// <summary>加载缓存黑名单快照（文件缺失/损坏/无权限返回空——fail-safe）。</summary>
     public static IReadOnlyList<string> LoadCached(string cachePath)
     {
         try
@@ -140,7 +181,7 @@ public static class ThreatFeedUpdater
                 .Where(l => l.Length > 0)
                 .ToList();
         }
-        catch (IOException)
+        catch (Exception)
         {
             return Array.Empty<string>();
         }

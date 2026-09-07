@@ -50,46 +50,43 @@ public sealed class SettingsService
     public BrowserSettingsSnapshot Snapshot => _snapshot;
     public event EventHandler? Changed;
 
-    public static SettingsService Load(string? path = null) => new(path);
-
-    public void Save() => Save(_snapshot);
-
     /// <summary>从 AppSettings 模型应用并持久化——设置变更的唯一写入口：
-    /// 归一化 → 刷新运行时 PrivacySettings → 原子写盘 → 通知。</summary>
+    /// 归一化 → 原子写盘（失败不阻断、不改动运行时——内存/磁盘不分叉）→
+    /// 刷新运行时 PrivacySettings → 通知。</summary>
     public void Apply(AppSettings model)
     {
         var snapshot = Normalize(ToSnapshot(model));
+        SaveCore(snapshot);
         _snapshot = snapshot;
         PrivacySettings.ProtectionLevel = snapshot.ProtectionLevel;
         PrivacySettings.HttpsOnly = snapshot.HttpsOnly;
         PrivacySettings.SecureDns = snapshot.SecureDns;
-        SaveCore(snapshot);
         Changed?.Invoke(this, EventArgs.Empty);
-    }
-
-    public void Save(BrowserSettingsSnapshot snapshot)
-    {
-        var normalized = Normalize(snapshot);
-        SaveCore(normalized);
-        ApplyRuntimeSnapshot(normalized);
     }
 
     private void SaveCore(BrowserSettingsSnapshot normalized)
     {
-        var dir = Path.GetDirectoryName(_path);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        var temp = _path + ".tmp." + Guid.NewGuid().ToString("N");
         try
         {
-            File.WriteAllText(temp, JsonSerializer.Serialize(ToAppSettings(normalized), JsonOptions));
-            if (File.Exists(_path)) File.Replace(temp, _path, null);
-            else File.Move(temp, _path);
+            var dir = Path.GetDirectoryName(_path);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            var temp = _path + ".tmp." + Guid.NewGuid().ToString("N");
+            try
+            {
+                File.WriteAllText(temp, JsonSerializer.Serialize(ToAppSettings(normalized), JsonOptions));
+                if (File.Exists(_path)) File.Replace(temp, _path, null);
+                else File.Move(temp, _path);
+            }
+            finally { if (File.Exists(temp)) File.Delete(temp); }
         }
-        finally { if (File.Exists(temp)) File.Delete(temp); }
+        catch (Exception ex)
+        {
+            // 写盘失败（磁盘满/被备份软件锁定）不再向 UI 事件上抛——每次导航/
+            // 缩放都会触发保存，上抛即重复全局异常弹窗
+            Security.SecurityLog.Write(
+                $"[settings] 保存失败（内存态保持，下次保存重试）: {ex.GetType().Name}: {ex.Message}");
+        }
     }
-
-    public void ApplyRuntimeSnapshot(BrowserSettingsSnapshot snapshot) =>
-        ApplyRuntimeSnapshot(Normalize(snapshot), raiseChanged: true);
 
     private void ApplyRuntimeSnapshot(BrowserSettingsSnapshot snapshot, bool raiseChanged)
     {
@@ -98,7 +95,7 @@ public sealed class SettingsService
         PrivacySettings.ProtectionLevel = snapshot.ProtectionLevel;
         PrivacySettings.HttpsOnly = snapshot.HttpsOnly;
         PrivacySettings.SecureDns = snapshot.SecureDns;
-        if (raiseChanged && !Equals(previous, snapshot)) Changed?.Invoke(this, EventArgs.Empty);
+        if (raiseChanged && !ReferenceEquals(previous, snapshot)) Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private static BrowserSettingsSnapshot ReadSnapshot(string path)
@@ -109,8 +106,12 @@ public sealed class SettingsService
             var model = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions);
             return ToSnapshot(model ?? new AppSettings());
         }
-        catch (IOException) { return new BrowserSettingsSnapshot(); }
-        catch (JsonException) { return new BrowserSettingsSnapshot(); }
+        catch (Exception ex)
+        {
+            Security.SecurityLog.Write(
+                $"[settings] 快照读取失败（回退默认）: {ex.GetType().Name}: {ex.Message}");
+            return new BrowserSettingsSnapshot();
+        }
     }
 
     private static AppSettings ToAppSettings(BrowserSettingsSnapshot s)
@@ -153,7 +154,10 @@ public sealed class SettingsService
         ProtectionLevel = m.ProtectionLevel,
         HttpsOnly = m.HttpsOnly,
         SecureDns = m.SecureDns,
-        ZoomByHost = new Dictionary<string, double>(m.ZoomByHost, StringComparer.OrdinalIgnoreCase),
+        // null 防护：settings.json 手编为 "ZoomByHost": null 时此前抛
+        // ArgumentNullException 且发生在启动链上（应用无法启动）
+        ZoomByHost = new Dictionary<string, double>(
+            m.ZoomByHost ?? new Dictionary<string, double>(), StringComparer.OrdinalIgnoreCase),
     };
 
     private static BrowserSettingsSnapshot Normalize(BrowserSettingsSnapshot s)
@@ -163,17 +167,21 @@ public sealed class SettingsService
         var theme = string.Equals(s.Theme, "light", StringComparison.OrdinalIgnoreCase) ? "light" : "dark";
         var sleep = s.SleepMinutes is 0 or 15 or 30 or 60 ? s.SleepMinutes : 30;
         var protection = Math.Clamp(s.ProtectionLevel, 0, 2);
-        var left = NormalizeWindow(s.WindowLeft, double.NaN);
-        var top = NormalizeWindow(s.WindowTop, double.NaN);
+        var left = NormalizeWindow(s.WindowLeft, double.NaN, -100000, 100000);
+        var top = NormalizeWindow(s.WindowTop, double.NaN, -100000, 100000);
         var width = NormalizeWindow(s.WindowWidth, 1200, 320, 10000);
         var height = NormalizeWindow(s.WindowHeight, 800, 240, 10000);
+        var feed = Security.ThreatFeedUpdater.ValidateFeedUrl(s.ThreatFeedUrl ?? "") is null
+            ? "" : (s.ThreatFeedUrl ?? "");
         var zoom = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in s.ZoomByHost ?? new Dictionary<string, double>())
             if (!string.IsNullOrWhiteSpace(p.Key) && double.IsFinite(p.Value))
-                zoom[p.Key] = Math.Clamp(p.Value, 1.0, 3.0);
+                // 与会话内缩放同口径 0.25–3.0（此前钳 1.0–3.0：用户缩到 75%
+                // 后任意设置变更即被静默重置为 100%）
+                zoom[p.Key] = Math.Clamp(p.Value, Chrome.TabRuntime.MinZoom, Chrome.TabRuntime.MaxZoom);
         return s with { SearchEngine = engine, Theme = theme, SleepMinutes = sleep,
             ProtectionLevel = protection, WindowLeft = left, WindowTop = top,
-            WindowWidth = width, WindowHeight = height, ZoomByHost = zoom };
+            WindowWidth = width, WindowHeight = height, ThreatFeedUrl = feed, ZoomByHost = zoom };
     }
 
     private static double NormalizeWindow(double value, double fallback, double min = 0, double max = 100000)

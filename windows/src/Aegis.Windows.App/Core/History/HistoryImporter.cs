@@ -14,7 +14,8 @@ using Microsoft.Data.Sqlite;
 /// - 历史是访问流水：入库无去重（HistoryStore.Add 追加语义——与 Python 一致）。</summary>
 public static class HistoryImporter
 {
-    /// <summary>探测本机 Chrome/Edge 历史库（仅存在性检查——不读取内容）。</summary>
+    /// <summary>探测本机 Chrome/Edge 历史库（仅存在性检查——不读取内容；
+    /// Default + Profile 1..9 多配置）。</summary>
     public static IReadOnlyList<ImportSource> DetectSources()
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -23,18 +24,32 @@ public static class HistoryImporter
             local, "Google", "Chrome", "User Data", "Default", "History"));
         AddIfExists(sources, "edge", Path.Combine(
             local, "Microsoft", "Edge", "User Data", "Default", "History"));
+        for (var i = 1; i <= 9; i++)
+        {
+            AddIfExists(sources, $"chrome(profile {i})", Path.Combine(
+                local, "Google", "Chrome", "User Data", $"Profile {i}", "History"));
+            AddIfExists(sources, $"edge(profile {i})", Path.Combine(
+                local, "Microsoft", "Edge", "User Data", $"Profile {i}", "History"));
+        }
         return sources;
     }
 
-    /// <summary>解析历史库（拷贝只读副本——锁定安全）。返回最近 limit 条
-    /// http/https 访问（时间倒序——Chrome urls.last_visit_time 为微秒级
-    /// WebKit 时间戳，仅作排序键，不做绝对时间换算）。</summary>
+    /// <summary>解析历史库（拷贝只读副本——锁定安全；-wal/-shm 边车一并拷贝，
+    /// 否则浏览器运行中未 checkpoint 的最近访问在副本上缺失）。返回最近
+    /// limit 条 http/https 访问（时间倒序——Chrome urls.last_visit_time 为
+    /// 微秒级 WebKit 时间戳，仅作排序键，不做绝对时间换算）。</summary>
     public static IReadOnlyList<HistoryCandidate> Parse(string historyDbPath, int limit)
     {
         var temporary = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         try
         {
             File.Copy(historyDbPath, temporary);
+            foreach (var suffix in new[] { "-wal", "-shm" })
+            {
+                var sidecar = historyDbPath + suffix;
+                if (File.Exists(sidecar))
+                    File.Copy(sidecar, temporary + suffix, overwrite: true);
+            }
             return ParseCopy(temporary, limit);
         }
         catch (Exception)
@@ -43,19 +58,23 @@ public static class HistoryImporter
         }
         finally
         {
-            try
+            foreach (var path in new[] { temporary, temporary + "-wal", temporary + "-shm" })
             {
-                File.Delete(temporary);
-            }
-            catch (IOException)
-            {
-                // 临时文件删除失败不影响导入结果
+                try
+                {
+                    if (File.Exists(path))
+                        File.Delete(path);
+                }
+                catch (IOException)
+                {
+                    // 临时文件删除失败不影响导入结果
+                }
             }
         }
     }
 
-    /// <summary>导入到历史库。返回（新增计数, 解析总数）——历史为访问流水，
-    /// 新增=解析条数（与 Python import_history 计数语义一致）。</summary>
+    /// <summary>导入到历史库。返回（成功写入数, 解析总数）——此前两者无条件
+    /// 同自增（返回值无信息量）；Add 现返回真实写入结果。</summary>
     public static (int Imported, int Total) ImportTo(
         HistoryStore store, IEnumerable<HistoryCandidate> candidates)
     {
@@ -64,8 +83,8 @@ public static class HistoryImporter
         foreach (var candidate in candidates)
         {
             total++;
-            store.Add(candidate.Url, candidate.Title);
-            imported++;
+            if (store.Add(candidate.Url, candidate.Title))
+                imported++;
         }
         return (imported, total);
     }

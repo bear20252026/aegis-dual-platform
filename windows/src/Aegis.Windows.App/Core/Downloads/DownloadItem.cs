@@ -76,14 +76,17 @@ public sealed class DownloadItem : INotifyPropertyChanged
 
     /// <summary>刷新原生进度（面板 DispatcherTimer 周期调用——属性直读，
     /// 兼容 SDK 1.0.2903.40 的扁平 Progress API）。状态映射：InProgress/
-    /// Completed/Interrupted（含 UserCanceled→已取消）——绝不静默。</summary>
+    /// Completed/Interrupted（含 UserCanceled→已取消）——绝不静默。
+    /// 派生属性（Percent/Summary）只在字节变化时通知——此前每 tick 无条件
+    /// 强发两个 PropertyChanged，挂窗期间持续触发绑定重算。</summary>
     public void Refresh()
     {
+        long beforeReceived = _receivedBytes, beforeTotal = _totalBytes;
         try
         {
             ReceivedBytes = (long)Operation.BytesReceived;
             TotalBytes = (long)(Operation.TotalBytesToReceive ?? 0UL);
-            State = Operation.State switch
+            var newState = Operation.State switch
             {
                 CoreWebView2DownloadState.InProgress => "进行中",
                 CoreWebView2DownloadState.Completed => "已完成",
@@ -92,17 +95,25 @@ public sealed class DownloadItem : INotifyPropertyChanged
                 CoreWebView2DownloadState.Interrupted => "已中断",
                 _ => Operation.State.ToString(),
             };
+            if (newState == "已完成" && _completedAt is null)
+                _completedAt = DateTime.Now;
+            State = newState;
         }
         catch (ObjectDisposedException)
         {
-            State = "已完成";  // 操作对象随浏览器会话结束——按完成处理
+            // 操作对象随浏览器会话结束——如实标记「已结束」（此前标「已完成」，
+            // IsCompleted=true 会给出"打开"按钮而文件可能并不存在）
+            State = "已结束";
         }
         catch (InvalidOperationException)
         {
             State = "已中断";
         }
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Percent)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Summary)));
+        if (beforeReceived != _receivedBytes || beforeTotal != _totalBytes)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Percent)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Summary)));
+        }
     }
 
     public void Pause()

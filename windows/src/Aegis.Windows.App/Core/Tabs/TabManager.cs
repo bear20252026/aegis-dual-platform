@@ -79,9 +79,9 @@ public sealed class TabManager
         var target = pinned ? PinnedCount - 1 : PinnedCount;
         if (target != from)
             _tabs.Move(from, target);
-        _currentIndex = currentId is null
-            ? -1
-            : _tabs.IndexOf(_tabs.First(t => t.TabId == currentId));
+        // id 失配防御：FirstOrDefault——First 在 currentId 不在集合时抛异常
+        var current = currentId is null ? null : _tabs.FirstOrDefault(t => t.TabId == currentId);
+        _currentIndex = current is null ? -1 : _tabs.IndexOf(current);
     }
 
     /// <summary>切换当前标签；未知 tabId 或已是当前为 no-op。</summary>
@@ -203,9 +203,6 @@ public sealed class TabManager
             tab.Url = url;
     }
 
-    /// <summary>会话恢复：清空后按给定顺序重建标签集合（不触发 TabOpened/TabSwitched——
-    /// UI 层在恢复流程中自行批量创建 WebView；本方法只负责领域状态）。
-    /// 返回当前激活的 TabId。</summary>
     /// <summary>会话恢复：先物化输入（避免重复消费 IEnumerable/依赖 ICollection 推断），
     /// 清空重建标签集合（不触发 TabOpened/TabSwitched——UI 层批量创建 WebView）。
     /// currentTabId 缺失时稳定回退到末位标签。</summary>

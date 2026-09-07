@@ -2,6 +2,7 @@ namespace Aegis.Windows.Core;
 
 using System;
 using System.Collections.Concurrent;
+using System.Linq;
 using System.Net;
 
 /// <summary>外部导航 URL 安全判定（新窗口/新标签打开入口共用——ADR-002 默认拒绝）。
@@ -42,7 +43,9 @@ public static class UrlSafety
         return IsPublicHost(uri.Host);
     }
 
-    /// <summary>host 是否属公网（非 localhost、回环、私有、链路本地、保留、组播）。</summary>
+    /// <summary>host 是否属公网（非 localhost、回环、私有、链路本地、保留、组播）。
+    /// 非点分十进制 IPv4 编码（整数 2130706433 / 十六进制 0x7f000001 / 简写 127.1）
+    /// 先规范化再判定——OS 解析器接受这些形态，本层此前判为"公网主机名"。</summary>
     public static bool IsPublicHost(string host)
     {
         var normalized = host.TrimEnd('.').ToLowerInvariant();
@@ -51,6 +54,8 @@ public static class UrlSafety
             return false;
         if (IPAddress.TryParse(normalized, out var address))
             return IsPublicIp(address);
+        if (TryParseAlternateIpv4(normalized, out var altAddress))
+            return IsPublicIp(altAddress);  // 整数/十六进制/简写编码的 IP 字面量
         // 以 localhost/内网域名后缀结尾的本地名（如 foo.localhost）
         if (normalized.EndsWith(".localhost", StringComparison.Ordinal))
             return false;
@@ -59,6 +64,47 @@ public static class UrlSafety
             || normalized.EndsWith(".internal", StringComparison.Ordinal))
             return false;
         return true;
+    }
+
+    /// <summary>解析非点分十进制 IPv4 编码（十进制整数 / 0x 十六进制 / 2-3 段
+    /// 简写如 127.1 = 127.0.0.1）。非该类形态返回 false。</summary>
+    private static bool TryParseAlternateIpv4(string host, out IPAddress address)
+    {
+        address = IPAddress.None;
+        // 纯十进制整数（2130706433 → 127.0.0.1）
+        if (host.Length > 0 && host.Length <= 10 && host.All(char.IsDigit))
+        {
+            return TryFromLong(long.Parse(host, System.Globalization.CultureInfo.InvariantCulture), out address);
+        }
+        // 0x 十六进制整数
+        if (host.StartsWith("0x", StringComparison.Ordinal) && host.Length <= 10
+            && host[2..].All(c => char.IsDigit(c) || (c >= 'a' && c <= 'f')))
+        {
+            return TryFromLong(Convert.ToInt64(host, 16), out address);
+        }
+        // 2/3 段简写（a.b / a.b.c → 缺省段补 0）
+        var parts = host.Split('.');
+        if (parts.Length is 2 or 3 && parts.All(p => p.Length > 0 && p.Length <= 3 && p.All(char.IsDigit)))
+        {
+            while (parts.Length < 4)
+                parts = parts.Append("0").ToArray();
+            if (IPAddress.TryParse(string.Join('.', parts), out var expanded))
+            {
+                address = expanded;
+                return true;
+            }
+            return false;
+        }
+        return false;
+
+        static bool TryFromLong(long value, out IPAddress addr)
+        {
+            addr = IPAddress.None;
+            if (value < 0 || value > 0xFFFFFFFF)
+                return false;
+            addr = new IPAddress((uint)value);
+            return true;
+        }
     }
 
     /// <summary>IP 地址是否公网（非回环/私有/链路本地/保留/组播/unspecified）。</summary>
@@ -71,6 +117,11 @@ public static class UrlSafety
             return false;
         if (address.IsIPv6LinkLocal || address.IsIPv6Multicast)
             return false;
+        var raw = address.GetAddressBytes();
+        // IPv4-mapped IPv6（::ffff:192.168.1.1）——按内嵌 IPv4 判定（此前
+        // bytes[0]==0x00 被判"公网"，私网/回环绕过）
+        if (raw.Length == 16 && raw[..10].All(b => b == 0) && raw[10] == 0xFF && raw[11] == 0xFF)
+            return IsPublicIp(new IPAddress(raw[12..]));
         var bytes = address.GetAddressBytes();
         if (bytes.Length == 4)
         {
@@ -85,6 +136,10 @@ public static class UrlSafety
                 return false;  // 192.168.0.0/16
             if (b0 == 100 && bytes[1] is >= 64 and <= 127)
                 return false;  // 100.64.0.0/10 CGNAT
+            if (b0 == 192 && bytes[1] == 0 && bytes[2] == 2)
+                return false;  // 192.0.2.0/24 TEST-NET（文档示例段）
+            if (b0 == 198 && (bytes[1] == 18 || bytes[1] == 19))
+                return false;  // 198.18.0.0/15 基准测试段
             if (b0 >= 224)
                 return false;  // 组播/保留 224.0.0.0/4
             if (b0 == 255)
@@ -93,9 +148,19 @@ public static class UrlSafety
         }
         if (bytes.Length == 16)
         {
-            // IPv6 ULA fc00::/7 与 site-local fec0::/10 视作私网
-            if (bytes[0] == 0xfc || bytes[0] == 0xfd || bytes[0] == 0xfe)
+            // IPv6 ULA fc00::/7（私网）
+            if ((bytes[0] & 0xFE) == 0xFC)
                 return false;
+            // site-local fec0::/10
+            if (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0xC0)
+                return false;
+            // 组播 ff00::/8（此前仅靠 IsIPv6Multicast 属性，首字节 0xfe 粗判
+            // 同时漏判 ff 段——显式拦）
+            if (bytes[0] == 0xFF)
+                return false;
+            // IPv4 兼容/映射残留 ::a.b.c.d（前置 96 位零 + 内嵌 IPv4）
+            if (bytes[..12].All(b => b == 0) && bytes[12] != 0)
+                return IsPublicIp(new IPAddress(bytes[12..]));
             return true;
         }
         return false;
@@ -135,6 +200,9 @@ public static class UrlSafety
             isLocal = false;  // 解析失败 → 非本机
         }
         LocalHostCache[normalized] = (isLocal, now);
+        // 缓存有界（此前只写入从不逐出——长期浏览大量 host 永久驻留）
+        if (LocalHostCache.Count > 2000)
+            LocalHostCache.Clear();
         return isLocal;
     }
 
