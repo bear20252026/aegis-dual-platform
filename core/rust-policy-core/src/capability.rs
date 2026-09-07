@@ -66,18 +66,19 @@ impl Capability {
         // 白名单按 origin 前缀精确匹配（此前 contains 子串匹配：白名单
         // "https://trusted.com" 放行 "https://evil-trusted.com/path"）。
         // 空白名单不再默认放行——显式 "*" 才表示全放行（fail-closed）。
-        !self.allowed_origins.is_empty() && self.allowed_origins.iter().any(|o| {
-            if o == "*" {
-                return true;
-            }
-            if origin.eq_ignore_ascii_case(o) {
-                return true;
-            }
-            // 入参可为同源完整 URL：origin 白名单值 + 路径/查询/锚点起始
-            origin.len() > o.len()
-                && origin.starts_with(o.as_str())
-                && matches!(origin.as_bytes()[o.len()], b'/' | b'?' | b'#')
-        })
+        !self.allowed_origins.is_empty()
+            && self.allowed_origins.iter().any(|o| {
+                if o == "*" {
+                    return true;
+                }
+                if origin.eq_ignore_ascii_case(o) {
+                    return true;
+                }
+                // 入参可为同源完整 URL：origin 白名单值 + 路径/查询/锚点起始
+                origin.len() > o.len()
+                    && origin.starts_with(o.as_str())
+                    && matches!(origin.as_bytes()[o.len()], b'/' | b'?' | b'#')
+            })
     }
 }
 

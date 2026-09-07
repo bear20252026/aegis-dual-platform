@@ -96,9 +96,7 @@ impl ExtProxy {
     pub fn inject_script(&self) -> String {
         let endpoint = &self.config.proxy_endpoint;
         // JS 单引号字符串转义（此前含 ' 即注入；端点为配置面输入）
-        let endpoint_escaped = endpoint
-            .replace('\\', "\\\\")
-            .replace('\'', "\\'");
+        let endpoint_escaped = endpoint.replace('\\', "\\\\").replace('\'', "\\'");
         let intercept_dl = self.config.intercept_downloads;
         let intercept_up = self.config.intercept_updates;
         format!(

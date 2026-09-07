@@ -125,7 +125,6 @@ pub enum PolicyDecision {
     Ask(String),
 }
 
-
 /// 条件命中判定：条件串须出现在 token 边界（起点/`/`/`?`/`&`/`=`/`,`/空白之后）。
 /// 此前裸 contains——条件 "example.com" 被 "https://evil.com/?x=example.com" 命中。
 fn context_contains_token(context: &str, token: &str) -> bool {
@@ -138,10 +137,16 @@ fn context_contains_token(context: &str, token: &str) -> bool {
     while let Some(pos) = context[from..].find(token) {
         let abs = from + pos;
         let before_ok = abs == 0
-            || matches!(ctx[abs - 1], b'/' | b'?' | b'&' | b'=' | b',' | b' ' | b'\t' | b'\n' | b'\r');
+            || matches!(
+                ctx[abs - 1],
+                b'/' | b'?' | b'&' | b'=' | b',' | b' ' | b'\t' | b'\n' | b'\r'
+            );
         let end = abs + tok.len();
         let after_ok = end == ctx.len()
-            || matches!(ctx[end], b'/' | b'?' | b'&' | b'=' | b',' | b' ' | b'\t' | b'\n' | b'\r' | b':');
+            || matches!(
+                ctx[end],
+                b'/' | b'?' | b'&' | b'=' | b',' | b' ' | b'\t' | b'\n' | b'\r' | b':'
+            );
         if before_ok && after_ok {
             return true;
         }

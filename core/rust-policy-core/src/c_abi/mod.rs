@@ -279,7 +279,11 @@ mod tests {
         assert_eq!(decision["decision"], "allow");
         // 模拟 C# NativeAction 往返：从评估响应剥离 explanation 审计字段。
         let mut action_obj = decision["action"].clone();
-        assert!(action_obj.as_object_mut().unwrap().remove("explanation").is_some());
+        assert!(action_obj
+            .as_object_mut()
+            .unwrap()
+            .remove("explanation")
+            .is_some());
         let action = c_string(&action_obj.to_string());
         let first = read_response(aegis_policy_core_broker_consume_navigation_json(
             broker,
