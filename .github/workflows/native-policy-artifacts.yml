@@ -11,13 +11,11 @@ on:
 permissions:
   contents: read
 
-# 审计修复：发布/CI 链一律有界——挂死的 runner 不再无限占用
-timeout-minutes: 40
-
 jobs:
   build-windows:
     name: Build Windows x64 policy DLL
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
@@ -66,6 +64,7 @@ jobs:
   build-android:
     name: Build Android policy libraries
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
@@ -144,6 +143,7 @@ jobs:
     name: Verify native policy artifact manifest
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317

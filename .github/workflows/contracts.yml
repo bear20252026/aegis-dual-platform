@@ -8,12 +8,10 @@ name: Contracts
 permissions:
   contents: read
 
-# 审计修复：发布/CI 链一律有界——挂死的 runner 不再无限占用
-timeout-minutes: 40
-
 jobs:
   contract-source-of-truth:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
@@ -90,6 +88,7 @@ jobs:
 
   rust-conformance:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: core/rust-policy-core
@@ -103,6 +102,7 @@ jobs:
 
   windows-contract-build:
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
@@ -117,6 +117,7 @@ jobs:
 
   android-contract-build:
     runs-on: windows-latest
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: android
