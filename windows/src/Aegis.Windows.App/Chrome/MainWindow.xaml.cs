@@ -605,6 +605,17 @@ public partial class MainWindow : Window
         if (tab is null)
             return;
         var isActive = tabId == _activeTabId;
+        // NTP 虚拟主机映射传播期间可能先收到 ConnectionAborted；协调器已
+        // 注册有界重试。不要把这个内部瞬态失败渲染成错误页，否则用户会先
+        // 看到乱码/错误文档，随后才跳回主页面。
+        if (isActive && !isSuccess
+            && Ntp.NtpAssets.IsVirtualHostUrl(tab.Url)
+            && status == CoreWebView2WebErrorStatus.ConnectionAborted)
+        {
+            LoadingBar.Visibility = Visibility.Visible;
+            ErrorPagePanel.Visibility = Visibility.Collapsed;
+            return;
+        }
         if (isActive && !isSuccess && status != CoreWebView2WebErrorStatus.OperationCanceled)
         {
             ErrorPage.Text = $"导航失败：{status}（已拒绝/无法加载）";

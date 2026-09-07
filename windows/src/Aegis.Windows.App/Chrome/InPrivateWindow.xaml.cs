@@ -29,7 +29,7 @@ public partial class InPrivateWindow : Window
 
     private const string HomeUrl = Ntp.NtpAssets.Url;
     private const int VirtualHostRetryLimit = 4;
-    private const int VirtualHostRetryDelayMs = 120;
+    private const int VirtualHostRetryDelayMs = 50;
 
     public InPrivateWindow()
     {

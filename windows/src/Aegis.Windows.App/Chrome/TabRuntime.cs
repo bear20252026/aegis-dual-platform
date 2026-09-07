@@ -32,9 +32,9 @@ public sealed class TabRuntime : IDisposable
         _env = environment;
         var sessionId = $"s-{tab.TabId}";
         Host = new HostWebView(broker, sessionId, tab.TabId);
-        // Source 不在构造期设置——改用显式 EnsureCoreWebView2Async(自定义环境) 初始化
-        //（这样才能注入安全 DNS 等环境参数）。真实目标地址由 Chrome 在
-        // CoreWebView2InitializationCompleted 里映射/就绪后导航（见 MainWindow.CreateRuntime）。
+        // Source 不在构造期设置：预置 Source 会触发 WebView2 默认环境，绕过
+        // 显式 EnsureCoreWebView2Async 的安全 DNS/用户目录配置。首帧占位由
+        // Chrome UI 提供，真实地址仅在自定义环境初始化和虚拟主机映射后导航。
         Control = new WebView2();
     }
 

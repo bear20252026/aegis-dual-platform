@@ -105,8 +105,11 @@ public sealed class TabRuntimeCoordinator : IDisposable
         }));
     }
 
+    private const int VirtualHostRetryDelayMs = 50;
+
     /// <summary>虚拟主机导航 + 失败重试：首帧若因映射未传播而 ConnectionAborted
-    /// （IsSuccess=false），稍后重试——重试时映射必然已就绪。有界重试，绝不无限循环。</summary>
+    ///（IsSuccess=false），稍后重试——重试时映射必然已就绪。有界重试，绝不无限循环。
+    /// 短间隔减少内部错误文档的驻留窗口。</summary>
     private void NavigateVirtualHostWithRetry(
         string tabId, TabRuntime runtime, TabRuntimeLifetime lifetime,
         string url, bool windowIsAlive, int remaining)
@@ -130,7 +133,7 @@ public sealed class TabRuntimeCoordinator : IDisposable
             // 延迟后重试（映射传播通常在下一次导航前完成）
             var timer = new DispatcherTimer(DispatcherPriority.Background)
             {
-                Interval = TimeSpan.FromMilliseconds(120),
+                Interval = TimeSpan.FromMilliseconds(VirtualHostRetryDelayMs),
             };
             var localTimer = timer;
             timer.Tick += (_, _) =>
