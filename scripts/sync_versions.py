@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -61,19 +62,14 @@ def main() -> None:
     replace_xml_value(windows_project, "PackageId", values["WINDOWS_PACKAGE_IDENTITY"])
     replace_xml_value(windows_project, "Product", values["DISPLAY_NAME"])
 
-    # Windows Inno Setup 安装包版本（v2.1.11 发布实测：iss 写死 2.1.7——
-    # CI 一直用旧版号打安装包。单源收口到 version.properties）
-    windows_installer = ROOT / "docs" / "release" / "AegisSetup.iss"
-    installer_text = windows_installer.read_text(encoding="utf-8")
-    installer_updated, iss_count = re.subn(
-        r'(?m)^#define MyAppVersion "[^"]*"$',
-        f'#define MyAppVersion "{values["VERSION_NAME"]}"',
-        installer_text,
-        count=1,
-    )
-    if iss_count != 1:
-        raise RuntimeError("expected #define MyAppVersion not found in AegisSetup.iss")
-    windows_installer.write_text(installer_updated, encoding="utf-8")
+    # 审计修复：不再同步已死的 Python 时代 AegisSetup.iss（C# 安装器版本由
+    # CI 运行时 /D 注入，无写死版本）——改为同步 shared/release.json
+    #（此前 sync 不覆盖该文件，漂移无门禁）
+    release_json_path = ROOT / "shared" / "release.json"
+    release_json = json.loads(release_json_path.read_text(encoding="utf-8"))
+    release_json["version"] = values["VERSION_NAME"]
+    release_json["versionCode"] = int(values["VERSION_CODE"])
+    release_json_path.write_text(json.dumps(release_json, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
     print("Version declarations synchronized from shared/version.properties")
 

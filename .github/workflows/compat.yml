@@ -15,6 +15,9 @@ name: WebView2-Compat
     - cron: "0 6 * * 1"          # 每周一 06:00 UTC
   workflow_dispatch: {}          # 手动触发（新 Runtime 版本发布后立即验证）
 
+permissions:
+  contents: read
+
 jobs:
   webview2-regression:
     name: WebView2 兼容性回归（自检 + 探测报告）

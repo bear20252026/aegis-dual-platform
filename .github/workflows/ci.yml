@@ -15,6 +15,9 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+
 jobs:
   python-checks:
     name: Python 质量检查（ruff / bandit / mypy / validate_release）
@@ -49,6 +52,10 @@ jobs:
       - name: 静态验证（AST / JSON / XML / 版本声明）
         run: python ../../validate_release.py
 
+      - name: ruff 检查（根仓库脚本——审计修复：scripts/release/contracts/agent
+          的 Python 此前从未被 lint，pyproject 却声称在门禁范围内）
+        working-directory: .
+        run: ruff check scripts release contracts agent --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001,INP001,S101,PLR2004
       - name: ruff 检查（Lint + 格式，0 错误）
         # 工作目录为 legacy/windows-pywebview，`--exclude legacy` 排除其下的旧 Qt 栈归档
         # legacy/windows-pywebview/legacy/**（61 个 Python 不参与运行面——全量扫描会误报

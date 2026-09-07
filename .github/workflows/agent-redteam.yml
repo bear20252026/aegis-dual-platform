@@ -4,6 +4,12 @@ name: Agent-Redteam
   pull_request: {}
   workflow_dispatch: {}
 
+# 审计修复：发布/CI 链一律有界——挂死的 runner 不再无限占用
+timeout-minutes: 15
+
+permissions:
+  contents: read
+
 jobs:
   redteam:
     runs-on: ubuntu-latest
@@ -16,6 +22,10 @@ jobs:
         run: |
           python -m pip install pyyaml -q
           python agent/tests/redteam_test.py
+      - name: Red team E2E tests (审计修复：此前未接入任何 workflow——README/runbook 声称 CI 跑二者)
+        run: |
+          python -m pip install pyyaml -q
+          python agent/tests/redteam_e2e_test.py
       - name: Action catalog validation (default_deny——首批只读——Agent 门禁)
         run: |
           python - <<'PYEOF'

@@ -130,6 +130,11 @@ android {
         // 与 Windows 端（PyInstaller datas）共用同一目录——一处修改两端生效
         getByName("main").assets.srcDir(rootProject.file("../shared/shell"))
     }
+    // 审计修复：测试文件不入 Android assets（打包体积与攻击面双收）。
+    // 保留 AGP 默认忽略集，仅追加 snake.test.js。
+    androidResources {
+        ignoreAssetsPattern("!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:snake.test.js")
+    }
     buildFeatures {
         buildConfig = true
     }

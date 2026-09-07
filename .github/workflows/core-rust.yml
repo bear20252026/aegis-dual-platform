@@ -4,6 +4,12 @@ name: Core-Rust
   pull_request: {}
   workflow_dispatch: {}
 
+# 审计修复：发布/CI 链一律有界——挂死的 runner 不再无限占用
+timeout-minutes: 30
+
+permissions:
+  contents: read
+
 jobs:
   cargo-gate:
     runs-on: ubuntu-latest

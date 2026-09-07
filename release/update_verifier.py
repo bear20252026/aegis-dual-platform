@@ -19,6 +19,7 @@ import json
 import re
 from datetime import UTC, datetime
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
@@ -35,7 +36,8 @@ def canonical_unsigned(manifest: dict) -> bytes:
 
 # P0-04 修复（专家审查）：SemVer 字符串版本解析（替代整数比较——
 # 与 Schema（SemVer 字符串 pattern）契约一致——TUF 阈值签名对齐）
-_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+# 审计修复：接受预发布后缀（实际版本 2.2.0-beta.21 此前被判"版本格式无效"）
+_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 
 
 def _version_tuple(value: object) -> tuple:
@@ -87,7 +89,9 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
                 sig = base64.b64decode(item["sig"], validate=True)
                 Ed25519PublicKey.from_public_bytes(key).verify(sig, payload)
                 valid_key_ids.add(key_id)  # 重复 key_id 只计一次
-            except (KeyError, TypeError, ValueError):
+            # 审计修复：补捕 InvalidSignature（坏签名此前以未捕获异常炸出，
+            # 违背"所有异常封装为 UpdateRejected"的声明）
+            except (KeyError, TypeError, ValueError, InvalidSignature):
                 continue
         if len(valid_key_ids) < threshold:
             raise UpdateRejected("签名阈值未满足")

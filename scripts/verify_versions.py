@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -29,8 +30,9 @@ def main() -> int:
     values = load_properties(ROOT / "shared" / "version.properties")
     android_text = (ROOT / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
     windows_text = (ROOT / "windows" / "src" / "Aegis.Windows.App" / "Aegis.Windows.App.csproj").read_text(encoding="utf-8")
-    iss_text = (ROOT / "docs" / "release" / "AegisSetup.iss").read_text(encoding="utf-8")
-    iss_version = re.search(r'(?m)^#define MyAppVersion "([^"]+)"', iss_text)
+    # 审计修复：不再校验已死的 Python 时代 AegisSetup.iss——改为校验
+    # shared/release.json（此前完全无门禁，漂移三个大版本未被发现）
+    release_json = json.loads((ROOT / "shared" / "release.json").read_text(encoding="utf-8"))
     expected = {
         "Android versionCode": (expected_assignment(android_text, "versionCode"), values["VERSION_CODE"]),
         "Android versionName": (expected_assignment(android_text, "versionName"), values["VERSION_NAME"]),
@@ -39,7 +41,8 @@ def main() -> int:
         "Windows FileVersion": (expected_xml_value(windows_text, "FileVersion"), values["WINDOWS_PACKAGE_VERSION"]),
         "Windows PackageId": (expected_xml_value(windows_text, "PackageId"), values["WINDOWS_PACKAGE_IDENTITY"]),
         "Windows Product": (expected_xml_value(windows_text, "Product"), values["DISPLAY_NAME"]),
-        "Windows Installer MyAppVersion": (iss_version.group(1) if iss_version else None, values["VERSION_NAME"]),
+        "release.json version": (release_json.get("version"), values["VERSION_NAME"]),
+        "release.json versionCode": (release_json.get("versionCode"), int(values["VERSION_CODE"])),
     }
     failures = [f"{label}: found {actual!r}, expected {wanted!r}" for label, (actual, wanted) in expected.items() if actual != wanted]
     if args.tag and args.tag != f"v{values['VERSION_NAME']}":

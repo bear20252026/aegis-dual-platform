@@ -14,6 +14,9 @@ name: Release-Windows
 permissions:
   contents: read
 
+# 审计修复：发布/CI 链一律有界——挂死的 runner 不再无限占用
+timeout-minutes: 60
+
 jobs:
   pin-check:
     runs-on: ubuntu-latest
@@ -129,8 +132,14 @@ jobs:
         run: |
           $version = ((Get-Content shared/version.properties) | Where-Object { $_ -match '^VERSION_NAME=' }) -replace '^VERSION_NAME=', ''
           $assets = @("dist/AegisBrowser-CSharp-Setup-$version.exe", "dist/SHA256SUMS.json", "dist/build-metadata.json")
-          gh release create "$env:GITHUB_REF_NAME" @assets --title "Aegis $env:GITHUB_REF_NAME" --generate-notes 2>$null
-          if ($LASTEXITCODE -ne 0) { gh release upload "$env:GITHUB_REF_NAME" $assets --clobber }
+          # 审计修复：不再吞 stderr——create 失败的真实原因可见；仅"已存在"
+          # 错误码回落 upload（此前任意失败都静默回落，掩盖配置类错误）
+          gh release create "$env:GITHUB_REF_NAME" @assets --title "Aegis $env:GITHUB_REF_NAME" --generate-notes
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "release create 失败（多为已存在）——回落 upload --clobber"
+            gh release upload "$env:GITHUB_REF_NAME" $assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw "release upload 也失败——发布中止" }
+          }
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:

@@ -19,6 +19,9 @@ on:
 permissions:
   contents: read
 
+# 审计修复：发布/CI 链一律有界——挂死的 runner 不再无限占用
+timeout-minutes: 45
+
 jobs:
   # ──────────────────────────────────────────────
   # Stage 1: SHA pin 检查（fail-closed）
@@ -38,7 +41,11 @@ jobs:
         # A-4（架构审计 2026-08-31）：评审包不再作为快照入库——改为
         # 发布时从规范源码自动生成（见 publish 的 review-package 步骤），
         # 杜绝快照随主仓库推进而漂移。此处仅验证生成器可运行。
-        run: python3 scripts/build_review_package.py --build --out /tmp/review-pkg-dryrun
+        run: |
+          python3 scripts/build_review_package.py --build --out /tmp/review-pkg-dryrun
+          # 审计修复：--check 此前无任何调用方（"保证与源码同步"的声明不成立）
+          # ——dry-run 产物立即做自校验，manifest 完整性随门禁验证
+          python3 scripts/build_review_package.py --check --out /tmp/review-pkg-dryrun
 
   # ──────────────────────────────────────────────
   # Stage 2: 三平台并行构建（可重用 workflow 调用）
@@ -123,25 +130,59 @@ jobs:
       # SHA-256 对账（字节一致不变量）
       - name: Checksum reconciliation (byte-identical invariant)
         run: |
+          # 审计修复：fail-closed——校验文件缺失/空清单/未列明文件均为门禁失败
           python - <<'PY'
           import json, hashlib, pathlib
-          for platform in ['windows', 'android', 'core']:
-              sha_file = pathlib.Path(f"dist/{platform}/SHA256SUMS.json")
+          failed = False
+          for platform in ["windows", "android", "core"]:
+              root = pathlib.Path(f"dist/{platform}")
+              sha_file = root / "SHA256SUMS.json"
               if not sha_file.exists():
-                  # Core 使用 SHA256SUMS.txt
-                  sha_txt = pathlib.Path(f"dist/{platform}/SHA256SUMS.txt")
-                  if sha_txt.exists():
-                      print(f"✅ {platform}: SHA256SUMS.txt 存在（跳过 JSON 对账）")
-                      continue
-                  print(f"⚠️ {platform}: 无校验文件（跳过）")
+                  # Core 平台允许 SHA256SUMS.txt（逐行 "<hash>  <name>"）——
+                  # 但必须同样真实对账，不再"存在即通过"
+                  sha_txt = root / "SHA256SUMS.txt"
+                  if not sha_txt.exists():
+                      print(f"❌ {platform}: 无任何校验文件（fail-closed）"); failed = True; continue
+                  entries = {}
+                  for line in sha_txt.read_text().splitlines():
+                      parts = line.split(None, 1)
+                      if len(parts) == 2:
+                          entries[parts[1].lstrip("*")] = parts[0].upper()
+                  if not entries:
+                      print(f"❌ {platform}: SHA256SUMS.txt 为空清单"); failed = True; continue
+                  for name, expected in entries.items():
+                      f = root / name
+                      if not f.exists():
+                          print(f"❌ {platform}: 清单文件缺失 {name}"); failed = True; continue
+                      actual = hashlib.sha256(f.read_bytes()).hexdigest().upper()
+                      if actual != expected:
+                          print(f"❌ {platform}: 校验失败 {name}"); failed = True
+                  print(f"✅ {platform}: SHA256SUMS.txt 对账一致（{len(entries)} 项）")
                   continue
               sums = json.loads(sha_file.read_text())
+              if not isinstance(sums, list) or not sums:
+                  print(f"❌ {platform}: SHA256SUMS.json 为空清单（fail-closed）"); failed = True; continue
+              listed = set()
               for entry in sums:
-                  p = pathlib.Path(f"dist/{platform}") / pathlib.Path(entry["Path"].replace("\\", "/"))
-                  h = hashlib.sha256(p.read_bytes()).hexdigest().upper()
-                  assert h == entry["Hash"], f"校验失败: {p}"
-              print(f"✅ {platform}: SHA-256 对账一致")
-          print("✅ 全平台 SHA-256 对账一致（字节一致）")
+                  rel = entry["Path"].replace("\\", "/")
+                  p_ = root / pathlib.Path(rel)
+                  h = hashlib.sha256(p_.read_bytes()).hexdigest().upper()
+                  assert h == entry["Hash"], f"校验失败: {p_}"
+                  listed.add(rel)
+              # 反向覆盖：目录内除清单/元数据外不得有未列明文件
+              for f in root.rglob("*"):
+                  if not f.is_file():
+                      continue
+                  rel = f.relative_to(root).as_posix()
+                  if rel in listed or rel == "SHA256SUMS.json" or rel.endswith("/SHA256SUMS.json"):
+                      continue
+                  if rel == "build-metadata.json":
+                      continue
+                  print(f"❌ {platform}: 未列明文件 {rel}"); failed = True
+              print(f"✅ {platform}: SHA-256 对账一致（{len(listed)} 项，全覆盖）")
+          if failed:
+              raise SystemExit(1)
+          print("✅ 全平台 SHA-256 对账一致（字节一致，fail-closed）")
           PY
 
       - name: Fail-closed gate
@@ -173,12 +214,6 @@ jobs:
         with:
           name: release-core
           path: dist/core
-      # Windows 安装包是独立 artifact（release-windows-installer），必须一并下载
-      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
-        with:
-          name: release-windows-installer
-          path: dist/windows
-
       - name: 从规范源码生成评审包（A-4：发布时生成，不再入库）
         run: python scripts/build_review_package.py --build --out dist/review-package
 
@@ -194,6 +229,17 @@ jobs:
       # softprops 对重复上传走 update-metadata 路径，GitHub API 404 竞态导致步骤失败（v2.1.11 实测）
       - name: 跨平台同名资产去重（加平台前缀）
         run: python scripts/dedup_release_assets.py dist/windows dist/android dist/core
+      # 审计修复：去重发生在各平台 checksum 生成之后——改名必须重生成清单，
+      # 否则 Release 资产名与 SHA256SUMS.json 条目不再对应
+      - name: 去重后重生成各平台 SHA-256 清单
+        run: |
+          for platform in windows android core; do
+            if [ -f "dist/$platform/SHA256SUMS.json" ]; then
+              python release/write_checksum_json.py --root "dist/$platform" --output "dist/$platform/SHA256SUMS.json"
+            elif [ -f "dist/$platform/SHA256SUMS.txt" ]; then
+              (cd "dist/$platform" && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+            fi
+          done
 
       - name: Create GitHub Release (all platforms)
         uses: softprops/action-gh-release@d1e66170d32c9ec7bbcb7fae044d3d686ce304d3

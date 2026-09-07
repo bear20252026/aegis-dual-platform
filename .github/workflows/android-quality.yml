@@ -9,6 +9,9 @@ name: Android-Quality
   pull_request: {}
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
 jobs:
   android-quality:
     name: ktlint + detekt 质量门禁

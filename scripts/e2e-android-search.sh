@@ -5,7 +5,13 @@
 # 环境要求：REQUIRES_DEVICE=1（无 adb 设备时跳过并返回 0——CI 无设备场景）
 set -uo pipefail
 
-APK="${1:-aegis-installers/Aegis-2.1.7-android-arm64.apk}"
+# 审计修复：默认 APK 不再指向不存在的 2.1.7 旧路径——自动取 dist/ 最新 arm64 APK
+if [ -n "${1:-}" ]; then
+  APK="$1"
+else
+  APK="$(ls -t dist/*android*arm64*.apk dist/aegis-android/*.apk 2>/dev/null | head -n 1 || true)"
+  if [ -z "$APK" ]; then echo "[e2e][SKIP] 未指定 APK 且 dist 无构建产物"; exit 0; fi
+fi
 PKG="com.aegis.browser"
 ACT="$PKG/.MainActivity"
 FAIL=0
@@ -38,7 +44,6 @@ step "断言：离开首页（导航已发生）"
 adb shell screencap -p /sdcard/e2e_after.png
 adb pull /sdcard/e2e_after.png /tmp/e2e_after.png >/dev/null || die "截屏拉取失败"
 # 启发式：截图字节数与首页（壁纸页）显著不同即认为发生导航
-HOME_HASH=$(adb shell "ls -l /sdcard/e2e_after.png" >/dev/null; echo skip)
 if adb shell dumpsys window 2>/dev/null | grep -q "mCurrentFocus.*$PKG"; then
   :  # 应用在前台（未被导航确认面板外的系统页抢焦点）
 else

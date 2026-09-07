@@ -22,7 +22,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-API_BRIDGE = ROOT / "windows" / "aegis_source" / "app" / "api_bridge.py"
+# 审计修复：路径随 ADR-009 迁移失效（windows/aegis_source → legacy/），
+# 生成链曾 100% 断裂——schema 冻结为陈旧快照
+API_BRIDGE = ROOT / "legacy" / "windows-pywebview" / "app" / "api_bridge.py"
 OUTPUT = ROOT / "shared" / "jsapi-schema.json"
 
 # 允许暴露的私有辅助方法（不对外，但文档标注 internal）

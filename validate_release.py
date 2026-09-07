@@ -42,6 +42,27 @@ if not lock_file.is_file():
     failures.append('缺 requirements-lock.txt（pip-compile --generate-hashes 生成）')
 elif '--hash=' not in lock_file.read_text(encoding='utf-8'):
     failures.append('requirements-lock.txt 无 hash（--generate-hashes 重新生成）')
+
+# 审计修复：正典 C# 栈存在性断言（此前脚本只看 legacy 栈——C# 代码不经
+# 任何检查；发布资源断言在 release-windows.yml，这里是仓库级快速门禁）
+csproj = root / 'windows' / 'src' / 'Aegis.Windows.App' / 'Aegis.Windows.App.csproj'
+if not csproj.is_file():
+    failures.append('缺正典 C# 工程 windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj')
+else:
+    cs_root = csproj.parent
+    required_cs = [
+        'App.xaml.cs',
+        'Chrome/MainWindow.xaml',
+        'Chrome/MainWindow.xaml.cs',
+        'Broker/BrowserPolicyBroker.cs',
+        'WebView/HostWebView.cs',
+    ]
+    for rel in required_cs:
+        if not (cs_root / rel).is_file():
+            failures.append(f'缺 C# 关键文件 windows/src/Aegis.Windows.App/{rel}')
+for shell_asset in ('start.html', 'start.css', 'start.snake.js', 'start.import.js'):
+    if not (root / 'shared' / 'shell' / shell_asset).is_file():
+        failures.append(f'缺跨端单源首页资产 shared/shell/{shell_asset}')
 print(f'python_files={len(python_files)}')
 print(f'failures={len(failures)}')
 for failure in failures:
