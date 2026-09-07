@@ -24,6 +24,7 @@ public partial class HistoryWindow : Window
     private readonly HistoryItemSelector _selector;
     private bool _suppressFilter;
     private bool _initialized;
+    private System.Windows.Threading.DispatcherTimer? _searchDebounce;
 
     public HistoryWindow(HistoryStore history)
     {
@@ -35,6 +36,16 @@ public partial class HistoryWindow : Window
         HistoryList.ItemsSource = _items;
         HistoryList.ItemTemplateSelector = _selector;
         _initialized = true;  // 此后控件事件才处理（初始化期事件一律忽略——防 NRE）
+        // 搜索防抖：此前每次键入同步跑 Count+SearchRangePage 两次 SQLite 查询
+        _searchDebounce = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(200),
+        };
+        _searchDebounce.Tick += (_, _) =>
+        {
+            _searchDebounce?.Stop();
+            ApplyFilter();
+        };
         Loaded += (_, _) =>
         {
             try { ApplyFilter(); }
@@ -47,25 +58,9 @@ public partial class HistoryWindow : Window
         };
     }
 
-    /// <summary>主窗口主题联动（iOS 深浅色板）。</summary>
-    public void ApplyTheme(string? theme)
-    {
-        var light = string.Equals(theme, "light", StringComparison.OrdinalIgnoreCase);
-        Resources["ChromeBackgroundBrush"] = Brush(light ? "#FFF2F2F7" : "#FF1C1C1E");
-        Resources["CardBrush"] = Brush(light ? "#FFFFFFFF" : "#FF2C2C2E");
-        Resources["SeparatorBrush"] = Brush(light ? "#FFE5E5EA" : "#FF38383A");
-        Resources["SegmentedBrush"] = Brush(light ? "#FFE9E9EB" : "#FF2C2C2E");
-        Resources["SegmentedSelectedBrush"] = Brush(light ? "#FFFFFFFF" : "#FF5A5A5E");
-        Resources["FieldBackgroundBrush"] = Brush(light ? "#FFE9E9EB" : "#FF2C2C2E");
-        Resources["TextPrimaryBrush"] = Brush(light ? "#FF1A1A1A" : "#FFFFFFFF");
-        Resources["TextSecondaryBrush"] = Brush(light ? "#FF8A8A8E" : "#FF98989F");
-        Resources["TextMutedBrush"] = Brush(light ? "#FFAEAEB2" : "#FF6C6C70");
-        Resources["AccentBrush"] = Brush(light ? "#FF007AFF" : "#FF0A84FF");
-        Resources["AccentSoftBrush"] = Brush(light ? "#1A007AFF" : "#220A84FF");
-    }
-
-    private static System.Windows.Media.Brush Brush(string hex) =>
-        Core.ThemeColor.ParseBrush(hex);
+    /// <summary>主窗口主题联动（色板单源：WindowTheme——与设置/下载/书签管理
+    /// 窗口同源，消除各窗口自拼色值的不一致）。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
 
     // ============ 筛选 ============
 
@@ -202,7 +197,10 @@ public partial class HistoryWindow : Window
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
-        ApplyFilter();
+        if (!_initialized)
+            return;
+        _searchDebounce?.Stop();
+        _searchDebounce?.Start();
     }
 
     private void ChipFilter_Changed(object sender, RoutedEventArgs e)
@@ -267,6 +265,7 @@ public partial class HistoryWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _searchDebounce?.Stop();
         _items.Clear();
         HistoryList.ItemsSource = null;
         base.OnClosed(e);

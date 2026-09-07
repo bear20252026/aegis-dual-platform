@@ -14,9 +14,4 @@ public partial class SourceViewerWindow : Window
         // 仅截断超大首屏（5MB 上限已在抓取层保证）
         SourceText.Text = source;
     }
-
-    private void SourceText_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
-    {
-        // 占位：行号/搜索随 M4 设置界面迭代
-    }
 }

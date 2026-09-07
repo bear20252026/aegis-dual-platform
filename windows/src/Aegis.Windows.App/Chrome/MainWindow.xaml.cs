@@ -32,10 +32,8 @@ public partial class MainWindow : Window
     private string? _activeTabId;
     private string? _pendingConfirmTabId;
     private bool _suppressTabSelection;
-    private readonly BookmarkStore _bookmarks =
-        new(Path.Combine(AppPaths.DataDir, "bookmarks.db"));
-    private readonly HistoryStore _history =
-        new(Path.Combine(AppPaths.DataDir, "history.db"));
+    private readonly BookmarkStore _bookmarks = new(AppPaths.BookmarksDbPath);
+    private readonly HistoryStore _history = new(AppPaths.HistoryDbPath);
     private readonly AppSettings _settings =
         AppSettings.Load(AppSettings.DefaultPath);
     private readonly Core.Settings.SettingsService _settingsService = new();
@@ -47,11 +45,23 @@ public partial class MainWindow : Window
     // M4 下载管理面板数据源（跨标签共享——DownloadItem 由 TabRuntime 下载事件注入）
     private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
     private readonly Core.Downloads.DownloadRecordStore _downloadRecords =
-        new(System.IO.Path.Combine(AppPaths.DataDir, "downloads.db"));
+        new(Core.AppPaths.DownloadsDbPath);
     private System.Windows.Threading.DispatcherTimer? _sleepTimer;
     private System.Windows.Threading.DispatcherTimer? _suggestTimer;
+    private Action? _zoomChangedHandler;
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
+
+    // —— 集中管理的 UI 时序/阈值常量（审计修复：此前 150ms/30s/2.5s 等魔法数
+    //    散落各处，调整需全文检索） ——
+    private const int SuggestDebounceMs = 150;        // 地址栏建议防抖
+    private const int SuggestMaxRows = 8;             // 建议列表上限
+    private const int SuggestHistoryScan = 60;        // 建议历史扫描行数
+    private const int SleepCheckIntervalSec = 30;     // 后台标签睡眠巡检周期
+    private const int FeedbackHideMs = 2500;          // 反馈条自动隐藏
+    private const int SourceFetchTimeoutSec = 15;     // 源码查看抓取超时
+    private const int SourceMaxBytes = 5 * 1024 * 1024; // 源码查看大小上限
+    private const int BookmarkChipMaxChars = 14;      // 书签栏标题截断
 
     public MainWindow()
     {
@@ -67,14 +77,44 @@ public partial class MainWindow : Window
         StartThreatFeedRefresh();
         InitEngineCombo();
         ZoomStore.Load(_settings.ZoomByHost);
-        ZoomStore.Changed += () => Dispatcher.Invoke(() => _settings.ZoomByHost = ZoomStore.Snapshot());
+        _zoomChangedHandler = () => Dispatcher.Invoke(() => _settings.ZoomByHost = ZoomStore.Snapshot());
+        ZoomStore.Changed += _zoomChangedHandler;
         // 设置单一事实源：统一持久化 + 刷新运行时 PrivacySettings
         _settingsService.Apply(_settings);
         RestoreWindowState();
         StartSleepTimer();
         // 建议定时器单例（Tick 由 ResetSuggestTimer 挂/摘）
-        _suggestTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(150) };
+        _suggestTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SuggestDebounceMs) };
         _suggestTimer.Tick += (_, _) => RunSuggestions();
+    }
+
+    /// <summary>设置导航地址的统一容错入口（地址非法/控件已释放时拒绝而不是
+    /// 抛异常——地址栏、书签、NTP 桥全部经此）。</summary>
+    private static bool SafeNavigate(TabRuntime runtime, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+        try
+        {
+            runtime.Control.Source = uri;
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;  // 控件已释放/竞态——安全丢弃
+        }
+    }
+
+    /// <summary>截断标题而不劈开代理对（emoji 等——此前 b.Title[..14] 可把
+    /// 双字符字形切成乱码）。</summary>
+    private static string TruncateTitle(string title, int maxChars)
+    {
+        if (title.Length <= maxChars)
+            return title;
+        var cut = maxChars;
+        if (cut > 0 && char.IsHighSurrogate(title[cut - 1]))
+            cut--;  // 高代理项必须与低代理项成对——退一位
+        return title[..cut] + "…";
     }
 
     /// <summary>刷新书签栏（书签变更时重载）。</summary>
@@ -90,7 +130,7 @@ public partial class MainWindow : Window
         {
             var btn = new System.Windows.Controls.Button
             {
-                Content = b.Title.Length > 14 ? b.Title[..14] + "…" : b.Title,
+                Content = TruncateTitle(b.Title, BookmarkChipMaxChars),
                 Tag = b.Url,
                 ToolTip = b.Url,
                 Style = chip,
@@ -99,7 +139,7 @@ public partial class MainWindow : Window
             {
                 if (s is System.Windows.Controls.Button { Tag: string url } && _activeTabId is not null
                     && _runtimes.TryGetValue(_activeTabId, out var rt))
-                    rt.Control.Source = new Uri(url);
+                    SafeNavigate(rt, url);
             };
             BookmarkBarItems.Items.Add(btn);
         }
@@ -108,7 +148,7 @@ public partial class MainWindow : Window
 
     private void StartSleepTimer()
     {
-        _sleepTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+        _sleepTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(SleepCheckIntervalSec) };
         _sleepTimer.Tick += (_, _) => SleepCheck();
         _sleepTimer.Start();
     }
@@ -129,8 +169,9 @@ public partial class MainWindow : Window
 
     // ================= 深/浅主题（对齐 Edge 明暗外观） =================
 
-    /// <summary>按设置应用浏览器 chrome 主题（dark/light——九块 DynamicResource
-    /// 色刷运行时替换，工具栏/标签/地址栏即时切换；其余独立窗口暂保持深色）。</summary>
+    /// <summary>按设置应用浏览器 chrome 主题（dark/light——DynamicResource 色
+    /// 刷运行时替换，工具栏/标签/地址栏即时切换；已打开的独立窗口（设置/历史/
+    /// 下载/书签管理）同步换肤——此前它们永远深色，浅色模式下割裂）。</summary>
     public void ApplyTheme(string? theme)
     {
         var light = string.Equals(theme, "light", StringComparison.OrdinalIgnoreCase);
@@ -144,9 +185,16 @@ public partial class MainWindow : Window
         SetBrush("FieldBorderFocusedBrush", light ? "#FF0B57D0" : "#66FFFFFF");
         SetBrush("TextPrimaryBrush", light ? "#FF1A1A1A" : "#FFFFFFFF");
         SetBrush("TextSecondaryBrush", light ? "#FF5F6368" : "#B3FFFFFF");
-        Background = light
-            ? new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0xF5, 0xF7))
-            : new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x10, 0x18, 0x27));
+        // 补齐子窗口依赖的画刷（默认深色值——各独立窗口资源键与主窗口统一）
+        SetBrush("TextMutedBrush", light ? "#FF8A8A8E" : "#6CFFFFFF");
+        SetBrush("SegmentedBrush", light ? "#14000000" : "#1FFFFFFF");
+        Background = Resources["ChromeBackgroundBrush"] as System.Windows.Media.Brush
+                    ?? Core.ThemeColor.ParseBrush(light ? "#FFF5F5F7" : "#FF101827");
+        // 传播到已打开的独立窗口
+        _historyWindow?.ApplyTheme(theme);
+        _bookmarkManagerWindow?.ApplyTheme(theme);
+        _downloadsWindow?.ApplyTheme(theme);
+        _settingsWindow?.ApplyTheme(theme);
     }
 
     private void SetBrush(string key, string hex) =>
@@ -164,7 +212,7 @@ public partial class MainWindow : Window
     /// 订阅源经环境变量 AEGIS_THREAT_FEED_URL 配置（M4 移入设置界面）。</summary>
     private void StartThreatFeedRefresh()
     {
-        var cachePath = Path.Combine(AppPaths.DataDir, "threat_feed.txt");
+        var cachePath = AppPaths.ThreatFeedCachePath;
         var snapshot = ThreatFeedUpdater.LoadCached(cachePath);
         _broker.UpdateBlockedHosts(new BlockedHosts(snapshot));
         SecurityLog.Write($"[threat] 黑名单快照 {snapshot.Count} 条");
@@ -203,7 +251,9 @@ public partial class MainWindow : Window
 
     private void CreateRuntime(Tab tab, string initialUrl)
     {
-        Core.Security.SecurityLog.Write($"[tab] 创建标签 {tab.TabId} url={initialUrl}");
+        // 日志脱敏：不落 query（token/搜索词）
+        Core.Security.SecurityLog.Write(
+            $"[tab] 创建标签 {tab.TabId} url={(Uri.TryCreate(initialUrl, UriKind.Absolute, out var u) ? u.GetLeftPart(UriPartial.Authority) + u.AbsolutePath : initialUrl)}");
         var runtime = _runtimeCoordinator.Create(_broker, tab).Runtime;
         runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
         {
@@ -216,7 +266,9 @@ public partial class MainWindow : Window
             var core = runtime.Control.CoreWebView2;
             BindVirtualHosts(core);
             runtime.OnCoreReady(core);
-            // 下载完成 → 持久化记录
+            // 下载完成 → 持久化记录（大小取自操作对象声明的总字节数——下载
+            // 刚启动时目标文件常未创建，此前 FileInfo.Length 直接抛异常被吞，
+            // 记录丢失）
             runtime.DownloadOperationStarted += (op, dangerous) =>
             {
                 Dispatcher.BeginInvoke(() =>
@@ -224,12 +276,16 @@ public partial class MainWindow : Window
                     try
                     {
                         var filePath = op?.ResultFilePath ?? "";
-                        var size = new System.IO.FileInfo(filePath).Length;
+                        var size = (long)(op?.TotalBytesToReceive ?? 0);
                         _downloadRecords.Add(
                             System.IO.Path.GetFileName(filePath), filePath,
                             op?.Uri ?? "", size, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                     }
-                    catch (Exception) { }
+                    catch (Exception ex)
+                    {
+                        Core.Security.SecurityLog.Write(
+                            $"[download] 记录持久化失败: {ex.GetType().Name}: {ex.Message}");
+                    }
                 });
             };
             // 虚拟主机地址（NTP/画板）：映射就绪后才导航，且**推迟到下一
@@ -248,7 +304,7 @@ public partial class MainWindow : Window
                 // 普通站点：初始化（含虚拟主机映射）就绪后立即导航。
                 // 修复：此前用 else if (!_restoring) 导致会话恢复时普通标签
                 // 初始化后不导航（停留在空标签）——恢复与否都应导航。
-                runtime.Control.Source = new Uri(tab.Url);
+                SafeNavigate(runtime, tab.Url);
             }
             // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
             // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
@@ -261,22 +317,32 @@ public partial class MainWindow : Window
                 // 由 NtpBridge 二次校验。二者任一不符即静默忽略——帧内嵌不可达。
                 if (!IsTopLevelNtpDocument(core))
                     return;
-                ntp.TryHandle(
-                    ev.Source, ev.WebMessageAsJson,
-                    result =>
-                    {
-                        // restoreSession 会同步拆除当前标签（含发送标签）——
-                        // core 可能已被释放；响应注入必须容错，绝不抛未处理异常
-                        try
+                try
+                {
+                    ntp.TryHandle(
+                        ev.Source, ev.WebMessageAsJson,
+                        result =>
                         {
-                            core.PostWebMessageAsJson(
-                                System.Text.Json.JsonSerializer.Serialize(result));
-                        }
-                        catch (Exception)
-                        {
-                            // 发送标签已随会话重建销毁——响应无处可达，静默丢弃
-                        }
-                    });
+                            // restoreSession 会同步拆除当前标签（含发送标签）——
+                            // core 可能已被释放；响应注入必须容错，绝不抛未处理异常
+                            try
+                            {
+                                core.PostWebMessageAsJson(
+                                    System.Text.Json.JsonSerializer.Serialize(result));
+                            }
+                            catch (Exception)
+                            {
+                                // 发送标签已随会话重建销毁——响应无处可达，静默丢弃
+                            }
+                        });
+                }
+                catch (Exception ex)
+                {
+                    // 桥内服务（书签/历史 SQLite、导入）异常不得沿 WebMessageReceived
+                    // 冒泡成全局未处理异常弹窗——记录后吞掉
+                    Core.Security.SecurityLog.Write(
+                        $"[ntp] 桥处理异常: {ex.GetType().Name}: {ex.Message}");
+                }
             };
         };
         runtime.NavigationCompleted += (ok, status) => OnTabNavigationCompleted(tab.TabId, ok, status);
@@ -297,6 +363,15 @@ public partial class MainWindow : Window
         };
         runtime.Host.NavigationConfirmationRequested += (_, e) =>
         {
+            // 单面板无队列：第二个确认请求到达时，先拒绝前一个标签的挂起
+            // 请求（此前直接覆盖 _pendingConfirmTabId——前一个标签永远卡在
+            // pending，fail-closed 但不可恢复）
+            if (_pendingConfirmTabId is { } previous
+                && previous != tab.TabId
+                && _runtimes.TryGetValue(previous, out var previousRuntime))
+            {
+                previousRuntime.Host.RejectPendingNavigation();
+            }
             _pendingConfirmTabId = tab.TabId;
             ShowConfirmation(e);
         };
@@ -394,7 +469,7 @@ public partial class MainWindow : Window
             {
                 // 桥已归一（非导航协议 fail-closed）——此处直接进入
                 // NavigationStarting→broker 唯一授权路径
-                runtime.Control.Source = new Uri(target!);
+                SafeNavigate(runtime, target);
             },
             GoBack: () =>
             {
@@ -409,9 +484,8 @@ public partial class MainWindow : Window
             {
                 if (Chrome.Ntp.NtpAssets.ResolveGeoRoot() is null)
                     return false;  // 资源未随包——fail-closed 降级（按钮置灰）
-                runtime.Control.Source = new Uri(
+                return SafeNavigate(runtime,
                     $"https://{Chrome.Ntp.NtpAssets.GeoHostName}/{Chrome.Ntp.NtpAssets.GeoEntryPath}");
-                return true;
             },
             ImportSources: () =>
             {
@@ -443,9 +517,11 @@ public partial class MainWindow : Window
                         imported += one;
                         total += all;
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
                         // 单来源失败不阻断其余来源（可选功能——对齐 Python 口径）
+                        Core.Security.SecurityLog.Write(
+                            $"[import] 书签来源 {source.Browser} 导入失败: {ex.GetType().Name}: {ex.Message}");
                     }
                 }
                 return (imported, total, results);
@@ -465,9 +541,11 @@ public partial class MainWindow : Window
                         imported += one;
                         total += all;
                     }
-                    catch (Exception)
+                    catch (Exception ex)
                     {
                         // 单来源失败不阻断其余来源（可选功能——对齐 Python 口径）
+                        Core.Security.SecurityLog.Write(
+                            $"[import] 历史来源 {source.Browser} 导入失败: {ex.GetType().Name}: {ex.Message}");
                     }
                 }
                 return (imported, total, results);
@@ -626,7 +704,9 @@ public partial class MainWindow : Window
             return;
         var host = Uri.TryCreate(rt.Control.CoreWebView2.Source, UriKind.Absolute, out var u)
             ? u.Host : null;
-        var z = Math.Clamp(rt.Control.ZoomFactor + delta, 0.25, 3.0);
+        // 与 ZoomStore/设置归一同口径（此前会话内允许 0.25、持久化钳 1.0——
+        // 缩小后的值重启即被静默重置）
+        var z = Math.Clamp(rt.Control.ZoomFactor + delta, TabRuntime.MinZoom, TabRuntime.MaxZoom);
         rt.Control.ZoomFactor = z;
         if (host is not null)
             Core.Tabs.ZoomStore.Set(host, z);
@@ -759,6 +839,8 @@ public partial class MainWindow : Window
         ", false, " + (backwards ? "true" : "false") + ", true);";
 
     // —— 地址栏自动补全 ——
+    private string? _lastSuggestQuery;
+
     private void RunSuggestions()
     {
         _suggestTimer?.Stop();
@@ -768,27 +850,41 @@ public partial class MainWindow : Window
             SuggestionPopup.IsOpen = false;
             return;
         }
-        var rows = BuildSuggestions(query);
-        SuggestionList.ItemsSource = rows;
-        SuggestionPopup.IsOpen = rows.Count > 0;
+        // 书签全表 + SQLite LIKE 移出 UI 线程（防抖后逐键查询曾直接卡 UI——
+        // 历史库大时每次键入同步两次查询）
+        var captured = query;
+        _ = Task.Run(() =>
+        {
+            var rows = BuildSuggestions(captured);
+            Dispatcher.BeginInvoke(() =>
+            {
+                // 迟到的旧查询结果不覆盖新输入（乱序防护）
+                if (!string.Equals(AddressBar.Text.Trim(), captured, StringComparison.Ordinal))
+                    return;
+                _lastSuggestQuery = captured;
+                SuggestionList.ItemsSource = rows;
+                SuggestionPopup.IsOpen = rows.Count > 0;
+            });
+        });
     }
     private List<SuggestionRow> BuildSuggestions(string query)
     {
         var q = query.ToLowerInvariant();
         var rows = new List<SuggestionRow>();
+        var seenUrls = new HashSet<string>(StringComparer.Ordinal);
         foreach (var b in _bookmarks.All())
-            if (b.Title.ToLowerInvariant().Contains(q) || b.Url.ToLowerInvariant().Contains(q))
+            if ((b.Title.ToLowerInvariant().Contains(q) || b.Url.ToLowerInvariant().Contains(q))
+                && seenUrls.Add(b.Url))
                 rows.Add(new SuggestionRow(b.Url, string.IsNullOrWhiteSpace(b.Title) ? b.Url : b.Title, "书签"));
-        foreach (var h in _history.Search(q, null, 60))
+        foreach (var h in _history.Search(q, null, SuggestHistoryScan))
         {
-            if (h.Url.ToLowerInvariant().Contains(q)
-                && !rows.Any(r => string.Equals(r.Url, h.Url, StringComparison.Ordinal)))
+            if (h.Url.ToLowerInvariant().Contains(q) && seenUrls.Add(h.Url))
             {
                 rows.Add(new SuggestionRow(h.Url, string.IsNullOrWhiteSpace(h.Title) ? h.Url : h.Title, "历史"));
-                if (rows.Count >= 8) break;
+                if (rows.Count >= SuggestMaxRows) break;
             }
         }
-        return rows.Take(8).ToList();
+        return rows.Take(SuggestMaxRows).ToList();
     }
     public sealed record SuggestionRow(string Url, string Title, string Kind);
 
@@ -809,6 +905,16 @@ public partial class MainWindow : Window
         else if (e.Key == Key.Escape)
         {
             SuggestionPopup.IsOpen = false;
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>鼠标点击建议项即导航（此前仅键盘可达——鼠标点击只关弹层）。</summary>
+    private void SuggestionList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (SuggestionList.SelectedItem is SuggestionRow sel)
+        {
+            SuggestPick(sel);
             e.Handled = true;
         }
     }
@@ -968,8 +1074,16 @@ public partial class MainWindow : Window
             ErrorPagePanel.Visibility = Visibility.Visible;
             return;
         }
+        // 归一器已保证产物可被 Uri 解析；此处兜底捕获非法输入（此前直接
+        // new Uri(target)，"http://" 类输入抛 UriFormatException）
         if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var runtime))
-            runtime.Control.Source = new Uri(target);
+        {
+            if (!SafeNavigate(runtime, target))
+            {
+                ErrorPage.Text = "无法导航：地址无效。";
+                ErrorPagePanel.Visibility = Visibility.Visible;
+            }
+        }
     }
 
     private void AddressBar_KeyDown(object sender, KeyEventArgs e)
@@ -1038,7 +1152,7 @@ public partial class MainWindow : Window
     public void OpenInActiveTab(string url)
     {
         if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var runtime))
-            runtime.Control.Source = new Uri(url);
+            SafeNavigate(runtime, url);
     }
 
     private void BookmarkBarItem_Click(object sender, RoutedEventArgs e)
@@ -1046,15 +1160,15 @@ public partial class MainWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: string url }
             && _activeTabId is not null
             && _runtimes.TryGetValue(_activeTabId, out var rt))
-            rt.Control.Source = new Uri(url);
+            SafeNavigate(rt, url);
     }
 
     private void BookmarkManager_Click(object sender, RoutedEventArgs e)
     {
         if (_bookmarkManagerWindow is null || !_bookmarkManagerWindow.IsLoaded)
         {
-            _bookmarkManagerWindow = new BookmarkManagerWindow(_bookmarks, this);
-            _bookmarkManagerWindow.Owner = this;
+            _bookmarkManagerWindow = new BookmarkManagerWindow(_bookmarks, this) { Owner = this };
+            _bookmarkManagerWindow.ApplyTheme(_settings.Theme);
         }
         _bookmarkManagerWindow.Show();
         _bookmarkManagerWindow.Activate();
@@ -1064,8 +1178,7 @@ public partial class MainWindow : Window
     {
         if (_historyWindow is null || !_historyWindow.IsLoaded)
         {
-            _historyWindow = new HistoryWindow(_history);
-            _historyWindow.Owner = this;
+            _historyWindow = new HistoryWindow(_history) { Owner = this };
             _historyWindow.ApplyTheme(_settings.Theme);
         }
         _historyWindow.Show();
@@ -1078,6 +1191,7 @@ public partial class MainWindow : Window
         if (_downloadsWindow is null || !_downloadsWindow.IsLoaded)
         {
             _downloadsWindow = new DownloadsWindow(_downloads) { Owner = this };
+            _downloadsWindow.ApplyTheme(_settings.Theme);
         }
         _downloadsWindow.Show();
         _downloadsWindow.Activate();
@@ -1097,7 +1211,7 @@ public partial class MainWindow : Window
         {
             _feedbackTimer = new System.Windows.Threading.DispatcherTimer
             {
-                Interval = TimeSpan.FromSeconds(2.5),
+                Interval = TimeSpan.FromMilliseconds(FeedbackHideMs),
             };
             _feedbackTimer.Tick += (_, _) =>
             {
@@ -1130,17 +1244,20 @@ public partial class MainWindow : Window
             {
                 using var http = new System.Net.Http.HttpClient
                 {
-                    Timeout = TimeSpan.FromSeconds(15),
+                    Timeout = TimeSpan.FromSeconds(SourceFetchTimeoutSec),
                 };
                 http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (AegisBrowser-SourceViewer)");
                 using var response = await http.GetAsync(url);
                 response.EnsureSuccessStatusCode();
                 var bytes = await response.Content.ReadAsByteArrayAsync();
-                if (bytes.Length > 5 * 1024 * 1024)
+                if (bytes.Length > SourceMaxBytes)
                     throw new InvalidOperationException("源码超过 5MB 上限");
                 var text = System.Text.Encoding.UTF8.GetString(bytes);
                 Dispatcher.Invoke(() =>
                 {
+                    // 抓取期间主窗口可能已关闭——Owner=已关闭窗口会抛异常
+                    if (!IsLoaded)
+                        return;
                     new SourceViewerWindow(url, text) { Owner = this }.Show();
                     ShowFeedback("源码已加载（全转义，零脚本执行）");
                 });
@@ -1160,8 +1277,8 @@ public partial class MainWindow : Window
     /// <summary>主页（Edge 对齐：回到新标签页，导航仍经 broker 决策）。</summary>
     private void Home_Click(object sender, RoutedEventArgs e)
     {
-        if (ActiveControl() is { } control)
-            control.Source = new Uri(HomeUrl);
+        if (ActiveRuntime() is { } runtime)
+            SafeNavigate(runtime, HomeUrl);
     }
 
     /// <summary>个人资料占位：无账号体系，点击聚焦地址栏（对齐 Edge 圆钮位置）。</summary>
@@ -1277,11 +1394,14 @@ public partial class MainWindow : Window
 
     private void ApprovalAllow_Click(object sender, RoutedEventArgs e)
     {
-        if (_pendingConfirmTabId is null || !_runtimes.TryGetValue(_pendingConfirmTabId, out var runtime)
+        // 审计修复：原实现的 orphan 恢复分支查找 _pendingConfirmTabId ?? ""——
+        // 字典永无 "" 键，恒为 null（死分支）；pending 丢失时唯一正确动作是
+        // 撤面板 + 告知（对应标签的 Host 在销毁时已自行 fail-closed）。
+        if (_pendingConfirmTabId is not { } pendingId
+            || !_runtimes.TryGetValue(pendingId, out var runtime)
             || runtime.Control.CoreWebView2 is null)
         {
-            _runtimes.TryGetValue(_pendingConfirmTabId ?? string.Empty, out var orphan);
-            orphan?.Host.RejectPendingNavigation();
+            HideConfirmation();
             ShowRejection("确认请求已失效、被拒绝或无法安全恢复导航。");
             return;
         }
@@ -1307,7 +1427,22 @@ public partial class MainWindow : Window
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
         // Ctrl+L 聚焦地址栏 / Ctrl+T 新建 / Ctrl+W 关闭当前（标签条 tooltip 契约）
-        if (Keyboard.Modifiers == ModifierKeys.Control)
+        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
+        {
+            if (e.Key == Key.Tab)
+            {
+                CycleTab(-1);
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.T)
+            {
+                ReopenClosedTab();
+                e.Handled = true;
+                return;
+            }
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Control)
         {
             switch (e.Key)
             {
@@ -1332,6 +1467,26 @@ public partial class MainWindow : Window
                     OpenFind();
                     e.Handled = true;
                     return;
+                case Key.H:
+                    History_Click(this, e);
+                    e.Handled = true;
+                    return;
+                case Key.J:
+                    Downloads_Click(this, e);
+                    e.Handled = true;
+                    return;
+                case Key.D:
+                    Star_Click(this, e);
+                    e.Handled = true;
+                    return;
+                case Key.R:
+                    ActiveControl()?.Reload();
+                    e.Handled = true;
+                    return;
+                case Key.Tab:
+                    CycleTab(1);
+                    e.Handled = true;
+                    return;
                 case Key.D0:
                 case Key.NumPad0:
                     ActiveRuntime()?.ResetZoom();
@@ -1347,6 +1502,48 @@ public partial class MainWindow : Window
                     ZoomActive(-0.1);
                     e.Handled = true;
                     return;
+                // Ctrl+1..8 直达标签 / Ctrl+9 末位标签（Edge 契约）
+                case Key.D1 or Key.D2 or Key.D3 or Key.D4 or Key.D5
+                     or Key.D6 or Key.D7 or Key.D8 or Key.D9
+                     or Key.NumPad1 or Key.NumPad2 or Key.NumPad3 or Key.NumPad4 or Key.NumPad5
+                     or Key.NumPad6 or Key.NumPad7 or Key.NumPad8 or Key.NumPad9:
+                    JumpToTabByKey(e.Key);
+                    e.Handled = true;
+                    return;
+            }
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.Alt)
+        {
+            // Alt+←/→ 历史
+            if (e.Key == Key.Left)
+            {
+                ActiveControl()?.GoBack();
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == Key.Right)
+            {
+                ActiveControl()?.GoForward();
+                e.Handled = true;
+                return;
+            }
+        }
+        else if (Keyboard.Modifiers == ModifierKeys.None)
+        {
+            switch (e.Key)
+            {
+                case Key.F5:
+                    ActiveControl()?.Reload();
+                    e.Handled = true;
+                    return;
+                case Key.F6:
+                    AddressBar.Focus();
+                    AddressBar.SelectAll();
+                    e.Handled = true;
+                    return;
+                case Key.Tab:
+                    // 无修饰 Tab 由 WPF 焦点遍历处理（地址栏/查找框间移动）
+                    break;
             }
         }
         if (ApprovalOverlay.Visibility != Visibility.Visible || e.Key != Key.Escape)
@@ -1355,6 +1552,36 @@ public partial class MainWindow : Window
             runtime.Host.RejectPendingNavigation();
         ShowRejection("已拒绝该导航请求。");
         e.Handled = true;
+    }
+
+    /// <summary>Ctrl+Tab / Ctrl+Shift+Tab 循环切换标签。</summary>
+    private void CycleTab(int direction)
+    {
+        var count = _tabs.Tabs.Count;
+        if (count == 0)
+            return;
+        var current = _tabs.CurrentTabId is { } id ? _tabs.Tabs.ToList().FindIndex(t => t.TabId == id) : 0;
+        var next = ((current < 0 ? 0 : current) + direction + count) % count;
+        _tabs.SwitchTo(_tabs.Tabs[next].TabId);
+    }
+
+    /// <summary>Ctrl+1..8 直达对应标签，Ctrl+9 末位标签。</summary>
+    private void JumpToTabByKey(Key key)
+    {
+        var digit = key switch
+        {
+            Key.D1 => 1, Key.D2 => 2, Key.D3 => 3, Key.D4 => 4, Key.D5 => 5,
+            Key.D6 => 6, Key.D7 => 7, Key.D8 => 8, Key.D9 => 9,
+            Key.NumPad1 => 1, Key.NumPad2 => 2, Key.NumPad3 => 3, Key.NumPad4 => 4,
+            Key.NumPad5 => 5, Key.NumPad6 => 6, Key.NumPad7 => 7, Key.NumPad8 => 8,
+            Key.NumPad9 => 9,
+            _ => 0,
+        };
+        if (digit == 0)
+            return;
+        var index = digit == 9 ? _tabs.Tabs.Count - 1 : digit - 1;
+        if (index >= 0 && index < _tabs.Tabs.Count)
+            _tabs.SwitchTo(_tabs.Tabs[index].TabId);
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -1381,6 +1608,17 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         SaveSession();
+        // 审计修复：停全部定时器 + 解绑事件——主窗口关闭但 InPrivate 存活时，
+        // 此前 30s 睡眠巡检/建议定时器继续空转、ZoomStore.Changed 永久持有
+        // 对已关窗口的引用（内存泄漏）
+        _sleepTimer?.Stop();
+        _suggestTimer?.Stop();
+        _feedbackTimer?.Stop();
+        if (_zoomChangedHandler is not null)
+            ZoomStore.Changed -= _zoomChangedHandler;
+        _tabs.TabOpened -= OnTabOpened;
+        _tabs.TabClosed -= OnTabClosed;
+        _tabs.TabSwitched -= OnTabSwitched;
         foreach (var runtime in _runtimes.Values)
         {
             WebViewHost.Children.Remove(runtime.Control);

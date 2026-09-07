@@ -40,9 +40,15 @@ public partial class SettingsWindow : Window
         HttpsCheck.IsChecked = _settings.HttpsOnly;
         DnsCheck.IsChecked = _settings.SecureDns;
         if (_broker.KillSwitch.IsEngaged)
+        {
             KillSwitchButton.IsEnabled = false;
+            KillSwitchState.Text = "已触发——全部导航与下载冻结中。";
+        }
         _suppressEvents = false;
     }
+
+    /// <summary>主窗口主题联动（浅色模式下不再永远深色）。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
 
     private void EngineBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {

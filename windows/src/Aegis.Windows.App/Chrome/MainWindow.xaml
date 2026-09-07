@@ -18,6 +18,10 @@
     <SolidColorBrush x:Key="FieldBorderFocusedBrush" Color="#66FFFFFF"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B3FFFFFF"/>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFFFF"/>
+    <!-- 审计修复：建议弹层 Kind 标签与书签栏底色此前引用未定义画刷，
+         DynamicResource 静默失败——补默认值（ApplyTheme 未覆盖时兜底） -->
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#6CFFFFFF"/>
+    <SolidColorBrush x:Key="SegmentedBrush" Color="#1FFFFFFF"/>
 
     <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton） -->
     <Style x:Key="NavButton" TargetType="Button">
@@ -123,7 +127,8 @@
     <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBackgroundBrush}" Padding="8,4">
       <DockPanel>
         <Button x:Name="NewTabButton" DockPanel.Dock="Right" Style="{StaticResource NavButton}"
-                Content="＋" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"/>
+                Content="＋" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"
+                AutomationProperties.Name="新建标签"/>
         <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
           <ListBox x:Name="TabStrip" SelectionMode="Single" Background="Transparent"
                    BorderThickness="0" SelectionChanged="TabStrip_SelectionChanged"
@@ -230,31 +235,38 @@
     <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBackgroundBrush}" Padding="8,6">
       <DockPanel>
         <StackPanel Orientation="Horizontal">
-          <Button x:Name="BackButton" Style="{StaticResource NavButton}" Content="←" Click="Back_Click" ToolTip="后退"/>
-          <Button x:Name="ForwardButton" Style="{StaticResource NavButton}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
-          <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
-          <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="■" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止"/>
-          <Button x:Name="HomeButton" Style="{StaticResource NavButton}" Content="⌂" Click="Home_Click" Margin="6,0,0,0" ToolTip="主页（新标签页）"/>
+          <Button x:Name="BackButton" Style="{StaticResource NavButton}" Content="←" Click="Back_Click" ToolTip="后退（Alt+←）" AutomationProperties.Name="后退"/>
+          <Button x:Name="ForwardButton" Style="{StaticResource NavButton}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进（Alt+→）" AutomationProperties.Name="前进"/>
+          <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新（F5/Ctrl+R）" AutomationProperties.Name="刷新"/>
+          <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="■" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止加载" AutomationProperties.Name="停止加载"/>
+          <Button x:Name="HomeButton" Style="{StaticResource NavButton}" Content="⌂" Click="Home_Click" Margin="6,0,0,0" ToolTip="主页（新标签页）" AutomationProperties.Name="主页"/>
         </StackPanel>
         <!-- M2 数据闭环工具组：搜索引擎切换 / 收藏☆ / 历史记录 -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
           <ComboBox x:Name="EngineCombo" Width="120" Height="32" VerticalAlignment="Center" FontSize="12"
                     SelectionChanged="Engine_SelectionChanged" ToolTip="搜索引擎"/>
           <Button x:Name="StarButton" Style="{StaticResource NavButton}" Content="☆"
-                  Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"/>
+                  Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"
+                  AutomationProperties.Name="收藏当前页"/>
           <Button x:Name="DownloadsButton" Style="{StaticResource NavButton}" Content="⤓"
-                  Click="Downloads_Click" Margin="6,0,0,0" ToolTip="下载管理"/>
-          <Button x:Name="BookmarkManagerButton" Style="{StaticResource NavButton}" Content="☆"
-                  Click="BookmarkManager_Click" Margin="6,0,0,0" ToolTip="书签管理"/>
-          <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="历"
-                  Click="History_Click" Margin="6,0,0,0" ToolTip="历史记录"/>
+                  Click="Downloads_Click" Margin="6,0,0,0" ToolTip="下载管理"
+                  AutomationProperties.Name="下载管理"/>
+          <Button x:Name="BookmarkManagerButton" Style="{StaticResource NavButton}" Content="☰"
+                  Click="BookmarkManager_Click" Margin="6,0,0,0" ToolTip="书签管理"
+                  AutomationProperties.Name="书签管理"/>
+          <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="🕘"
+                  Click="History_Click" Margin="6,0,0,0" ToolTip="历史记录"
+                  AutomationProperties.Name="历史记录"/>
           <Button x:Name="SettingsButton" Style="{StaticResource NavButton}" Content="⚙"
-                  Click="Settings_Click" Margin="6,0,0,0" ToolTip="设置"/>
+                  Click="Settings_Click" Margin="6,0,0,0" ToolTip="设置"
+                  AutomationProperties.Name="设置"/>
           <!-- Edge 风格个人资料圆钮（占位——无账号体系，点击聚焦地址栏） -->
           <Button x:Name="ProfileButton" Style="{StaticResource NavButton}" Content="◐"
-                  Click="Profile_Click" Margin="6,0,0,0" ToolTip="个人资料"/>
+                  Click="Profile_Click" Margin="6,0,0,0" ToolTip="个人资料"
+                  AutomationProperties.Name="个人资料"/>
           <Button x:Name="InPrivateButton" Style="{StaticResource NavButton}" Content="🕶"
-                  Click="InPrivate_Click" Margin="6,0,0,0" ToolTip="InPrivate 无痕窗口"/>
+                  Click="InPrivate_Click" Margin="6,0,0,0" ToolTip="InPrivate 无痕窗口"
+                  AutomationProperties.Name="打开 InPrivate 无痕窗口"/>
         </StackPanel>
         <!-- 胶囊地址栏：深色玻璃 + 聚焦描边 + 占位符 + 内嵌「打开」 -->
         <Border x:Name="AddressPill" Margin="10,0,0,0" CornerRadius="18"
@@ -284,7 +296,9 @@
                     <DropShadowEffect BlurRadius="20" ShadowDepth="2" Opacity="0.35"/>
                   </Border.Effect>
                   <ListBox x:Name="SuggestionList" Background="Transparent" BorderThickness="0"
-                           PreviewKeyDown="SuggestionList_KeyDown">
+                           PreviewKeyDown="SuggestionList_KeyDown"
+                           PreviewMouseLeftButtonUp="SuggestionList_PreviewMouseLeftButtonUp"
+                           AutomationProperties.Name="地址栏建议列表">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
                         <Grid Margin="4,3">

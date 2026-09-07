@@ -132,12 +132,8 @@ public sealed class HostWebView : IDisposable
                 _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
             }
         };
-        // 消息只接受受信 chrome UI origin（远程页面无 native bridge——WebMessage 忽略）
-        webView.WebMessageReceived += (_, e) =>
-        {
-            if (!IsTrustedChromeOrigin(e.Source))
-                return;  // 远程消息忽略——无本地能力（后续接 broker ProposedAction）
-        };
+        // 消息通道按来源开闭由 SetPerOrigin 完成（NavigationStarting 翻转——
+        // 远程页面 WebMessage 关闭；受信 NTP 由 MainWindow 挂接处理）。
         // 权限请求（PermissionRequested）默认拒绝——最小授权（中文零信任实践）
         webView.PermissionRequested += (_, e) =>
         {
@@ -166,7 +162,7 @@ public sealed class HostWebView : IDisposable
                 if (_broker.IsHostBlocked(uri.Host))
                 {
                     Core.Security.SecurityLog.Write(
-                        $"[threat] 子资源拦截（黑名单命中）: {e.Request.Uri}");
+                        $"[threat] 子资源拦截（黑名单命中）: {RedactUrl(e.Request.Uri)}");
                     e.Response = webView.Environment.CreateWebResourceResponse(
                         null, 403, "Blocked", "Content-Type: text/plain");
                     return;
@@ -191,7 +187,7 @@ public sealed class HostWebView : IDisposable
                         && !Core.Privacy.TrackerList.IsSameSite(uri.Host, pageHost)))
                 {
                     Core.Security.SecurityLog.Write(
-                        $"[privacy] 跟踪防护（级别{level}）拦截: {e.Request.Uri} ctx={e.ResourceContext}");
+                        $"[privacy] 跟踪防护（级别{level}）拦截: {RedactUrl(e.Request.Uri)} ctx={e.ResourceContext}");
                     e.Response = webView.Environment.CreateWebResourceResponse(
                         null, 403, "Blocked", "Content-Type: text/plain");
                 }
@@ -208,6 +204,17 @@ public sealed class HostWebView : IDisposable
         && uri.Scheme == Uri.UriSchemeHttps
         && uri.Host.Equals("chrome.aegis.local", StringComparison.OrdinalIgnoreCase)
         && uri.IsDefaultPort;
+
+    /// <summary>日志用 URL 脱敏：丢弃 query/fragment（token、搜索词等敏感串
+    /// 不写入 security.log——此前完整 URI 明文落盘）。</summary>
+    private static string RedactUrl(string? url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return string.Empty;
+        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
+            return uri.GetLeftPart(UriPartial.Authority) + uri.AbsolutePath;
+        return url.Length > 256 ? url[..256] + "…" : url;
+    }
 
     public void Dispose()
     {

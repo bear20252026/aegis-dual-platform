@@ -10,17 +10,21 @@ using System.Windows.Controls;
 public sealed class TabRuntimeLifetime : IDisposable
 {
     private readonly CancellationTokenSource _cancellation = new();
+    // 构造期缓存令牌：Close 后 CTS.Dispose，迟到的延迟导航回调仍可安全读
+    // CancellationToken（直接访问 _cancellation.Token 会抛 ObjectDisposedException）
+    private readonly CancellationToken _token;
     private bool _disposed;
 
     public TabRuntimeLifetime(TabRuntime runtime)
     {
         Runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         Generation = Guid.NewGuid();
+        _token = _cancellation.Token;
     }
 
     public TabRuntime Runtime { get; }
     public Guid Generation { get; }
-    public CancellationToken CancellationToken => _cancellation.Token;
+    public CancellationToken CancellationToken => _token;
     public bool IsDisposed => _disposed;
 
     /// <summary>内部观察 fire-and-forget 初始化异常，避免未观察任务异常。</summary>

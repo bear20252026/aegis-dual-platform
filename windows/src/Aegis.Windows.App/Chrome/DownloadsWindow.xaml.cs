@@ -31,6 +31,9 @@ public partial class DownloadsWindow : Window
         Closed += (_, _) => _timer.Stop();
     }
 
+    /// <summary>主窗口主题联动（浅色模式下不再永远深色）。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
+
     private void RefreshAll()
     {
         if (DownloadsList.ItemsSource is not ObservableCollection<DownloadItem> items)
@@ -95,6 +98,16 @@ public partial class DownloadsWindow : Window
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        Process.Start("explorer.exe", $"/select,\"{path}\"");
+        try
+        {
+            // /select 参数整体加引号；路径内引号以 Windows 常规转义（""）处理——
+            // 此前无 try/catch 且未转义，路径含引号即异常/参数注入
+            Process.Start("explorer.exe", "/select,\"" + path.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"无法打开文件夹: {ex.Message}", "错误",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 }

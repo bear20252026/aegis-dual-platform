@@ -8,9 +8,12 @@
       <TextBlock x:Name="SourceUrl" Foreground="#FF9CA3AF" FontSize="12"
                  TextTrimming="CharacterEllipsis"/>
     </Border>
+    <!-- 大文本性能：禁用撤销栈与自动换行（5MB 源码的排版/内存开销主要来源），
+         AcceptsTab 关闭以保留键盘导航 -->
     <TextBox x:Name="SourceText" IsReadOnly="True" VerticalScrollBarVisibility="Auto"
              HorizontalScrollBarVisibility="Auto" Background="Transparent"
-             Foreground="#FFD4D4D8" FontSize="12" TextChanged="SourceText_TextChanged"
+             Foreground="#FFD4D4D8" FontSize="12" IsUndoEnabled="False" UndoLimit="0"
+             TextWrapping="NoWrap" AcceptsTab="False"
              ToolTip="全转义纯文本——零脚本执行"/>
   </DockPanel>
 </Window>

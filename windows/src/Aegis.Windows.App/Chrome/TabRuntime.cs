@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Chrome;
 
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Core.Tabs;
@@ -16,6 +17,10 @@ using Microsoft.Web.WebView2.Wpf;
 public sealed class TabRuntime : IDisposable
 {
     private bool _disposed;
+    /// <summary>无痕标签的会话内缩放记忆（不落 ZoomStore——无痕浏览的已访
+    /// 站点不得写入磁盘）。</summary>
+    private readonly System.Collections.Generic.Dictionary<string, double> _privateZoom =
+        new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>目标环境（正常=共享；InPrivate=独立用户目录）。Chrome 调用方
     /// 在创建后以对应环境 EnsureCoreWebView2Async。</summary>
@@ -34,6 +39,10 @@ public sealed class TabRuntime : IDisposable
     }
 
     public Tab Tab { get; }
+
+    /// <summary>无痕标签（InPrivate 窗口内）：缩放/图标只存内存——不落盘、
+    /// 不进进程级 ZoomStore 快照（隐私：无痕浏览不留已访站点痕迹）。</summary>
+    public bool IsPrivate { get; init; }
 
     /// <summary>该标签的策略交互封装（确认审批/会话销毁——每标签独立 session）。</summary>
     public HostWebView Host { get; }
@@ -62,11 +71,8 @@ public sealed class TabRuntime : IDisposable
         remove => Host.NewWindowRequested -= value;
     }
 
-    /// <summary>M3 下载启动通知（反馈条显示）。</summary>
-    public event Action<string, bool>? DownloadStarted;
-
     /// <summary>M4 下载管理面板数据源：授权通过的 DownloadOperation 转交
-    /// （dangerous=经用户显式确认的危险扩展下载）。</summary>
+    ///（dangerous=经用户显式确认的危险扩展下载）。</summary>
     public event Action<CoreWebView2DownloadOperation, bool>? DownloadOperationStarted;
 
     /// <summary>CoreWebView2 就绪后挂接安全事件与页面事件（每标签一次）。</summary>
@@ -81,15 +87,14 @@ public sealed class TabRuntime : IDisposable
                 var dangerous = Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(
                     e.DownloadOperation?.Uri ?? string.Empty,
                     System.IO.Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty));
-                DownloadStarted?.Invoke(
-                    System.IO.Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty),
-                    dangerous);
                 if (e.DownloadOperation is { } operation)
                     DownloadOperationStarted?.Invoke(operation, dangerous);
             }
-            catch
+            catch (Exception ex)
             {
-                // 通知失败不影响下载
+                // 通知失败不影响下载——但不再完全静默（排障可查）
+                Core.Security.SecurityLog.Write(
+                    $"[tab] 下载启动通知异常（不影响下载）: {ex.GetType().Name}: {ex.Message}");
             }
         };
         coreWebView2.DocumentTitleChanged += (_, _) =>
@@ -99,30 +104,44 @@ public sealed class TabRuntime : IDisposable
             Tab.Url = coreWebView2.Source ?? Tab.Url;
             NavigationCompleted?.Invoke(args.IsSuccess, args.WebErrorStatus);
             // 每站点缩放：导航离开前记住当前站点缩放（Ctrl+滚轮由 WebView2 原生调整）；
-            // 导航到新站点时应用其记忆值。
+            // 导航到新站点时应用其记忆值。无痕标签用会话内私有字典——不落盘。
             var host = Uri.TryCreate(coreWebView2.Source, UriKind.Absolute, out var hu)
                 ? hu.Host
                 : null;
             if (host is not null)
             {
                 if (_lastZoomHost is not null && _lastZoomHost != host)
-                    Core.Tabs.ZoomStore.Set(_lastZoomHost, Control.ZoomFactor);
+                    RememberZoom(_lastZoomHost, Control.ZoomFactor);
                 _lastZoomHost = host;
-                var zoom = Core.Tabs.ZoomStore.Get(host);
+                var zoom = IsPrivate
+                    ? _privateZoom.GetValueOrDefault(host, 1.0)
+                    : Core.Tabs.ZoomStore.Get(host);
                 if (Math.Abs(Control.ZoomFactor - zoom) > 0.001)
                     Control.ZoomFactor = zoom;
-                // 站点图标（缓存命中即时；未命中异步抓取后回填）
+                // 站点图标（内存命中即时；未命中后台抓取后回填；无痕不落盘）
                 var hostCapture = host;
                 _ = Core.Favicons.FaviconService.Get(hostCapture, icon =>
                 {
                     if (icon is not null)
                         Tab.Icon = icon;
-                });
+                }, persistToDisk: !IsPrivate);
             }
         };
     }
 
     private string? _lastZoomHost;
+
+    private void RememberZoom(string host, double zoom)
+    {
+        if (IsPrivate)
+            _privateZoom[host] = Math.Clamp(zoom, MinZoom, MaxZoom);
+        else
+            Core.Tabs.ZoomStore.Set(host, zoom);
+    }
+
+    /// <summary>缩放统一边界（会话内/持久化/设置归一三处同口径 0.25–3.0）。</summary>
+    public const double MinZoom = 0.25;
+    public const double MaxZoom = 3.0;
 
     /// <summary>以指定环境初始化（正常=共享；InPrivate=独立用户目录）。
     /// 调用方 fire-and-forget；完成后触发 CoreWebView2InitializationCompleted。</summary>
@@ -140,7 +159,7 @@ public sealed class TabRuntime : IDisposable
             : null;
         if (host is not null)
         {
-            Core.Tabs.ZoomStore.Set(host, 1.0);
+            RememberZoom(host, 1.0);
             Control.ZoomFactor = 1.0;
         }
     }

@@ -41,8 +41,9 @@
   <ItemGroup>
     <!-- M3 新标签页：start.html 跨端单源（shared/shell——ADR-009 D2-3）经
          虚拟主机 ntp.aegis.local 加载；资源映射到输出 ntp/ 目录，
-         不暴露文件系统路径。壁纸同在单源 shell/wallpapers 内。 -->
-    <Content Include="..\..\..\shared\shell\**\*"
+         不暴露文件系统路径。壁纸同在单源 shell/wallpapers 内。
+         审计修复：排除 snake.test.js——测试文件不再随包发布到虚拟主机。 -->
+    <Content Include="..\..\..\shared\shell\**\*" Exclude="..\..\..\shared\shell\snake.test.js"
              Link="ntp\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />

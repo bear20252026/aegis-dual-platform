@@ -68,7 +68,7 @@ public static class UrlNormalizer
     /// <summary>统一输入归一。返回 null 表示拒绝导航（空输入 / 非导航 scheme）。</summary>
     public static string? Normalize(string? input, string engineKey = DefaultEngine)
     {
-        var trimmed = input?.Trim();
+        var trimmed = StripUnsafeCharacters(input);
         if (string.IsNullOrEmpty(trimmed))
             return null;
         if (trimmed.Equals("about:blank", StringComparison.OrdinalIgnoreCase))
@@ -85,10 +85,10 @@ public static class UrlNormalizer
             if (after.Length > 0 && char.IsDigit(after[0]))
             {
                 if (IsExplicitLocalHostName(trimmed))
-                    return SchemeForLocal(trimmed) + trimmed;
+                    return AsValidUriOrDefault(SchemeForLocal(trimmed) + trimmed, trimmed, engineKey);
                 if (!trimmed.Contains(' ') && trimmed.Contains('.')
                     && !trimmed.EndsWith(".", StringComparison.Ordinal))
-                    return SchemeForLocal(trimmed) + trimmed;
+                    return AsValidUriOrDefault(SchemeForLocal(trimmed) + trimmed, trimmed, engineKey);
             }
             else if (scheme is not ("http" or "https"))
             {
@@ -96,19 +96,49 @@ public static class UrlNormalizer
             }
             else
             {
-                return trimmed.Replace(" ", "%20");
+                return AsValidUriOrDefault(trimmed.Replace(" ", "%20"), trimmed, engineKey);
             }
         }
 
         // 显式本机名（localhost / foo.localhost，可含端口）直接导航到本机 http，
         // 不走搜索词——放开本地开发访问（对标 Chrome 对 localhost 的行为）。
         if (IsExplicitLocalHostName(trimmed))
-            return SchemeForLocal(trimmed) + trimmed;
+            return AsValidUriOrDefault(SchemeForLocal(trimmed) + trimmed, trimmed, engineKey);
 
         if (!trimmed.Contains(' ') && trimmed.Contains('.') && !trimmed.EndsWith(".", StringComparison.Ordinal))
-            return SchemeForLocal(trimmed) + trimmed;
+            return AsValidUriOrDefault(SchemeForLocal(trimmed) + trimmed, trimmed, engineKey);
 
         return EngineUrls.GetValueOrDefault(engineKey, EngineUrls[DefaultEngine]) + EscapeQuery(trimmed);
+    }
+
+    /// <summary>剥离控制字符与 WPF 地址栏不该出现的非法 URI 字符（&lt;&gt;"|^`{}
+    /// 等——此前原样放行，下游 new Uri 直接抛 UriFormatException）。</summary>
+    private static string? StripUnsafeCharacters(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input?.Trim()))
+            return null;
+        var trimmed = input!.Trim();
+        var builder = new System.Text.StringBuilder(trimmed.Length);
+        foreach (var ch in trimmed)
+        {
+            if (char.IsControl(ch))
+                continue;  // 控制字符一律剥离
+            if (ch is '<' or '>' or '"' or '|' or '^' or '`' or '{' or '}' or '\\' or '\'')
+                continue;  // RFC 3986 非法字符——丢弃（防 new Uri 抛异常）
+            builder.Append(ch);
+        }
+        return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    /// <summary>候选 URL 必须能被 Uri 成功解析——解析失败（如裸 "http://"）回退
+    /// 为搜索词，而不是把非法串递给调用方 new Uri 抛异常。</summary>
+    private static string AsValidUriOrDefault(string candidate, string originalQuery, string engineKey)
+    {
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
+            && !string.IsNullOrWhiteSpace(uri.Host)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            return candidate;
+        return EngineUrls.GetValueOrDefault(engineKey, EngineUrls[DefaultEngine]) + EscapeQuery(originalQuery);
     }
 
     /// <summary>输入是否为显式本机名（localhost / *.localhost，可含端口）。

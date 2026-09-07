@@ -10,6 +10,8 @@ using Aegis.Windows.Core.Bookmarks;
 /// <summary>书签管理器窗口：搜索/编辑标题/打开/删除/清空。数据层参数绑定。</summary>
 public partial class BookmarkManagerWindow : Window
 {
+    private const int TitleMaxLength = 256;
+
     private readonly BookmarkStore _bookmarks;
     private readonly MainWindow? _owner;
     private readonly ObservableCollection<BookmarkRow> _rows = new();
@@ -20,8 +22,12 @@ public partial class BookmarkManagerWindow : Window
         _bookmarks = bookmarks;
         _owner = owner;
         BookmarkList.ItemsSource = _rows;
+        BookmarkList.KeyDown += BookmarkList_KeyDown;
         Loaded += (_, _) => Reload("");
     }
+
+    /// <summary>主窗口主题联动（浅色模式下不再永远深色）。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
 
     private void Reload(string query)
     {
@@ -35,7 +41,6 @@ public partial class BookmarkManagerWindow : Window
                 continue;
             _rows.Add(new BookmarkRow(b.Id, b.Title, b.Url));
         }
-        BookmarkList.ItemsSource = _rows;
         SummaryText.Text = $"共 {_rows.Count} 个书签";
         SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -50,26 +55,48 @@ public partial class BookmarkManagerWindow : Window
     {
         if (sender is FrameworkElement { DataContext: BookmarkRow row })
         {
-            EditPanel.Visibility = Visibility.Visible;
-            EditTitle.Text = row.Title;
-            EditUrl.Text = row.Url;
-            _editingId = row.Id;
-            EditTitle.Focus();
-            EditTitle.SelectAll();
+            OpenEditor(row);
         }
     }
 
-    private void EditCancel_Click(object sender, RoutedEventArgs e) =>
+    /// <summary>打开编辑弹层：同时屏蔽背后列表交互（此前无遮罩——编辑期间仍可
+    /// 点列表换目标，_editingId 与面板内容错位）。</summary>
+    private void OpenEditor(BookmarkRow row)
+    {
+        EditPanel.Visibility = Visibility.Visible;
+        BookmarkList.IsHitTestVisible = false;
+        EditTitle.Text = row.Title;
+        EditUrl.Text = row.Url;
+        _editingId = row.Id;
+        EditTitle.Focus();
+        EditTitle.SelectAll();
+    }
+
+    private void CloseEditor()
+    {
         EditPanel.Visibility = Visibility.Collapsed;
+        BookmarkList.IsHitTestVisible = true;
+        _editingId = 0;
+    }
+
+    private void EditCancel_Click(object sender, RoutedEventArgs e) => CloseEditor();
 
     private void EditSave_Click(object sender, RoutedEventArgs e)
     {
         var title = EditTitle.Text.Trim();
-        if (string.IsNullOrEmpty(title) || _editingId <= 0)
+        if (string.IsNullOrEmpty(title))
+        {
+            // 空标题不再静默 return——给用户可见反馈
+            EditTitle.Focus();
             return;
-        _bookmarks.Rename(_editingId, title);
-        EditPanel.Visibility = Visibility.Collapsed;
+        }
+        if (title.Length > TitleMaxLength)
+            title = title[..TitleMaxLength];
+        if (_editingId > 0)
+            _bookmarks.Rename(_editingId, title);
+        CloseEditor();
         Reload(SearchBox.Text);
+        _owner?.RefreshBookmarkBar();
     }
 
     private void Delete_Click(object sender, RoutedEventArgs e)
@@ -78,6 +105,7 @@ public partial class BookmarkManagerWindow : Window
         {
             _bookmarks.RemoveById(row.Id);
             Reload(SearchBox.Text);
+            _owner?.RefreshBookmarkBar();
         }
     }
 
@@ -89,12 +117,32 @@ public partial class BookmarkManagerWindow : Window
             return;
         _bookmarks.ClearAll();
         Reload(SearchBox.Text);
+        _owner?.RefreshBookmarkBar();
     }
+
+    private void OpenBookmark(BookmarkRow row) => _owner?.OpenInActiveTab(row.Url);
 
     private void OpenBookmark_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: BookmarkRow row })
-            _owner?.OpenInActiveTab(row.Url);
+            OpenBookmark(row);
+    }
+
+    /// <summary>键盘可达：Enter 打开选中书签（此前仅鼠标点击可达）。</summary>
+    private void BookmarkList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && BookmarkList.SelectedItem is BookmarkRow row)
+        {
+            OpenBookmark(row);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Delete && BookmarkList.SelectedItem is BookmarkRow del)
+        {
+            _bookmarks.RemoveById(del.Id);
+            Reload(SearchBox.Text);
+            _owner?.RefreshBookmarkBar();
+            e.Handled = true;
+        }
     }
 
     private long _editingId;
