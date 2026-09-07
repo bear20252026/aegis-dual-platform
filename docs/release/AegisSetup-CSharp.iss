@@ -2,7 +2,7 @@
 ; 与 PyInstaller stable 安装包（AegisSetup.iss）并存：独立 AppId，互不覆盖。
 ; 版本号不写死——CI 以 /DMyAppVersionOverride=<VERSION_NAME> 运行时注入
 ; （单源 shared/version.properties，杜绝 iss 版本漂移重演 v2.1.11 事故）。
-; 本地编译：ISCC.exe /DMyAppVersionOverride=2.1.18 AegisSetup-CSharp.iss
+; 本地编译：ISCC.exe /DMyAppVersionOverride=<VERSION_NAME> AegisSetup-CSharp.iss
 
 #ifndef MyAppVersionOverride
 #error "必须以 /DMyAppVersionOverride=<version> 传入版本号（单源 shared/version.properties）"

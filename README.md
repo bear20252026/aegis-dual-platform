@@ -48,11 +48,11 @@ docs/       ADR/threat-model/runbooks/product（蓝图目标树）
   + `verify_bridge_guard.py`（守卫 JS 单一事实源校验——ADR-007）
 - **Agent 红队**（agent/tests）：`python redteam_test.py / redteam_e2e_test.py`
 
-## 蓝图状态（aegis_future_development_and_target_source_tree.md）
+## 蓝图状态（蓝图文档已并入 docs/architecture-overview.md——原外部蓝图文件不在仓库内）
 
 - 阶段 A（ADR 五个决策）✅ → B（contracts）✅ → C（Windows 壳）✅ → D（Android）✅ →
   E（发布链）✅ → F（Rust 核心）✅ → G（Agent 复开）✅
-- 发布门禁七门禁闭合 ✅（CI 分层 8 个，ADR-007 起全量常跑）｜ 文档树补全 ✅
+- 发布门禁七门禁闭合 ✅（CI 分层与发布链共 12 个 workflow，ADR-007 起全量常跑）｜ 文档树补全 ✅
 - ~~Android 质量门禁 远端 ktlint 定位~~ ✅（2026-08-30 修复：ktlint KDoc 解析 bug
   规避 + .kts 风格修复 + detekt 存量基线化——CI 首次全绿）
 - 剩余（需真实设备/用户操作）：真机验证（device-validation.md）｜

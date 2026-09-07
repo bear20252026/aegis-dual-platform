@@ -47,7 +47,7 @@
 
 ```bash
 # Python（Windows 端）
-python3 validate_release.py            # AST/JSON/XML/版本声明
+python3 validate_release.py            # AST/JSON/XML 静态验证（版本校验：python scripts/verify_versions.py）
 ruff check .                           # Lint + 格式（0 错误）
 bandit -r app/                         # 安全扫描（无 Medium/High）
 mypy main_webview.py app/              # 类型检查（0 错误）

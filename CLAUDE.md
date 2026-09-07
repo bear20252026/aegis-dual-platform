@@ -18,7 +18,7 @@ Aegis 双端安全浏览器：Windows（C#/.NET 10 + 原生 WebView2——唯一
 
 ```bash
 # Windows 端静态验证（改动 Python 代码后必跑）——与 CI 口径一致
-python validate_release.py            # AST/JSON/XML/版本声明（仓库根运行）
+python validate_release.py            # AST/JSON/XML 静态验证（版本校验在 scripts/verify_versions.py）
 cd legacy/windows-pywebview
 ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
 bandit -r app/ -q --skip B110,B404,B603,B607   # 安全扫描（无 Medium/High）
@@ -53,7 +53,7 @@ python contracts/codegen/verify_bridge_guard.py
 
 ## 代码检查清单（提交前自查）
 
-- [ ] validate_release / ruff / bandit / mypy 全过
+- [ ] validate_release / ruff / bandit / mypy 全过（mypy 口径与 ci.yml 一致：mypy main_webview.py app/）
 - [ ] 遵守单文件单职责与行数红线
 - [ ] 涉及 URL/密码/下载/权限时说明了安全考虑
 - [ ] 新增逻辑有对应自检（selftest_*.py）

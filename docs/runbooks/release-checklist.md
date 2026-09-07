@@ -32,7 +32,7 @@
 1. 质量门禁全绿 + 受保护环境配置完成
 2. `git tag -a v1.0.0 && git push origin v1.0.0`（显式推标签——git push 不推标签的坑）
 3. release.yml 触发（v* 标签——5 job——失败闭合——无 || true/截断验证）
-4. 发布产物（Nuitka/PyInstaller + SHA256SUMS.json + SBOM + provenance）
+4. 发布产物（Windows C#/Inno Setup 安装包 + Android APK + Rust policy DLL + SHA256SUMS.json + SBOM + provenance）
 5. 证据包归档（签名/哈希/SBOM 摘要——security-release runbook——张显达实践）
 6. 灰度（1% → 10% → 全量——停止条件：错误率超限即停）
 

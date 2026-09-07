@@ -13,7 +13,7 @@
 ### 1.1 Windows 端（Python，核心 27 文件 5078 行）
 
 ```
-windows/aegis_source/
+legacy/windows-pywebview/
 ├── main_webview.py            （567 行）入口层：薄壳启动组装
 ├── crash_reporter.py          （276 行）基础设施：崩溃报告 + 日志
 ├── selftest_s1_integration.py （114 行）测试：S1 集成自检

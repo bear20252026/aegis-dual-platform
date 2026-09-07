@@ -6,7 +6,7 @@
 line-length = 120
 # 旧壳（蓝图迁移表淘汰——api_bridge 删除/bridge_hooks 删除/shell_adapter 冻结）——
 # 配置级排除（比命令行可靠）——新架构代码（contracts/codegen/agent/release/scripts）继续门禁
-extend-exclude = ["legacy", "windows/aegis_source"]
+extend-exclude = ["legacy", "windows/aegis_source", "legacy/windows-pywebview/legacy"]
 
 [tool.ruff.lint]
 # 中文项目：全角标点（RUF001/RUF003）忽略（按历史 RUF002 先例）+ 中文长行（E501——

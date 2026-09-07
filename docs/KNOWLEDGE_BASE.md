@@ -7,7 +7,7 @@
 ### D1：Windows 只走 WebView2 路线（2026-08-14）
 - **决策**：Windows 仅面向 WebView2 Evergreen Runtime，不再维护 macOS 后端与 NSIS 安装脚本。
 - **理由**：内核安全更新由微软维护（借力），壳层聚焦差异化功能；MSIX + App Installer 承担更新。
-- **影响**：QtWebEngine 旧栈已归档至 `windows/aegis_source/legacy/`，活跃代码禁止引用。
+- **影响**：QtWebEngine 旧栈已归档至 `legacy/windows-pywebview/legacy/`，活跃代码禁止引用。
 
 ### D2：Android 首引擎为 System WebView（2026-08-14）
 - **决策**：Kotlin/Compose + Android System WebView；`BrowserEngine` 锁定安全边界。
