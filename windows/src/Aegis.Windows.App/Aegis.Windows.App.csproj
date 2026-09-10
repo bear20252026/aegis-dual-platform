@@ -8,9 +8,9 @@
     <AssemblyName>Aegis.Windows.App</AssemblyName>
     <RootNamespace>Aegis.Windows</RootNamespace>
     <StartupObject>Aegis.Windows.Program</StartupObject>
-    <Version>2.2.0-beta.27</Version>
-    <AssemblyVersion>2.2.0.27</AssemblyVersion>
-    <FileVersion>2.2.0.27</FileVersion>
+    <Version>2.2.0-beta.28</Version>
+    <AssemblyVersion>2.2.0.28</AssemblyVersion>
+    <FileVersion>2.2.0.28</FileVersion>
     <PackageId>Aegis.Project.AegisWebView</PackageId>
     <Product>Aegis WebView</Product>
     <RequireNativePolicyCore Condition="'$(RequireNativePolicyCore)' == ''">false</RequireNativePolicyCore>

@@ -50,6 +50,7 @@ public partial class MainWindow : Window
     private readonly Core.Downloads.DownloadRecordStore _downloadRecords =
         new(Core.AppPaths.DownloadsDbPath);
     private System.Windows.Threading.DispatcherTimer? _sleepTimer;
+    private System.Windows.Threading.DispatcherTimer? _sessionSaveTimer;
     private FindBarController _find = null!;
     private SuggestionController _suggest = null!;
     private Ntp.NtpBridgeFactory _ntpBridgeFactory = null!;
@@ -61,6 +62,7 @@ public partial class MainWindow : Window
     //    散落各处，调整需全文检索） ——
     private const int SleepCheckIntervalSec = 30;     // 后台标签睡眠巡检周期
     private const int FeedbackHideMs = 2500;          // 反馈条自动隐藏
+    private const int SessionSaveDebounceMs = 2000;   // 会话落盘防抖（写放大治理）
     private const int SourceFetchTimeoutSec = 15;     // 源码查看抓取超时
     private const int SourceMaxBytes = 5 * 1024 * 1024; // 源码查看大小上限
     private const int BookmarkChipMaxChars = 14;      // 书签栏标题截断
@@ -779,11 +781,36 @@ public partial class MainWindow : Window
             OnTabSwitched(active);
     }
 
+    /// <summary>会话落盘（防抖）：每次导航完成/开关标签都只是标脏 + 重启 2s
+    /// 计时——此前每次 NavigationCompleted 同步写 SQLite（每页加载两写：
+    /// 历史一条 + 会话全量重写，长会话写放大）。窗口关闭/休眠前由
+    /// FlushSession 强制刷盘兜底。</summary>
     private void SaveSession()
     {
         if (_restoring)
             return;  // 恢复流程中关闭旧标签不落盘——避免覆盖待恢复快照
-        _sessionStore.Save(_tabs.Tabs, _tabs.CurrentTabId);
+        if (_sessionSaveTimer is null)
+        {
+            _sessionSaveTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(SessionSaveDebounceMs),
+            };
+            _sessionSaveTimer.Tick += (_, _) =>
+            {
+                _sessionSaveTimer!.Stop();
+                _sessionStore.Save(_tabs.Tabs, _tabs.CurrentTabId);
+            };
+        }
+        _sessionSaveTimer.Stop();
+        _sessionSaveTimer.Start();
+    }
+
+    /// <summary>立即落盘（窗口关闭/正常退出路径——防抖未到期的脏数据不丢）。</summary>
+    private void FlushSession()
+    {
+        _sessionSaveTimer?.Stop();
+        if (!_restoring)
+            _sessionStore.Save(_tabs.Tabs, _tabs.CurrentTabId);
     }
 
     // ================= M3 会话恢复（新标签页手动入口） =================
@@ -1252,7 +1279,7 @@ public partial class MainWindow : Window
 
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        SaveSession();
+        FlushSession();
         SaveWindowState();
         _settings.ZoomByHost = ZoomStore.Snapshot();
         _settingsService.Apply(_settings);
@@ -1273,7 +1300,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
-        SaveSession();
+        FlushSession();
         // 审计修复：停全部定时器 + 解绑事件——主窗口关闭但 InPrivate 存活时，
         // 此前 30s 睡眠巡检/建议定时器继续空转、ZoomStore.Changed 永久持有
         // 对已关窗口的引用（内存泄漏）
