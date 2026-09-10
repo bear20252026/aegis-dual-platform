@@ -72,9 +72,13 @@ internal object WebViewHardening {
 
     /**
      * bridge 目标强制 HTTPS（与 Rust BridgeGuard.require_https 对应）。
-     * 生产接线尚未开启（两端一致）；配置化时须同步 BridgeGuard::new 调用点。
+     * 生产接线已开启（2026-09-10，两端一致）：受信内页对 bridge 目标
+     * （aegis.local/localhost/127.0.0.1）的 http: 调用一律拒绝——bridge 面
+     * 无明文需求（首页数据全走 AegisBridge 注入对象而非 HTTP bridge）。
+     * Rust 侧 BridgeGuard::new 无生产调用点（库能力 + 双值测试覆盖），
+     * 模板一致性由 verify_bridge_guard.py 门禁保证。
      */
-    private const val REQUIRE_HTTPS_BRIDGE = false
+    private const val REQUIRE_HTTPS_BRIDGE = true
 
     /**
      * Bridge 硬化 JS（fetch / XMLHttpRequest / sendBeacon / WebSocket 未授权调用拒绝）。

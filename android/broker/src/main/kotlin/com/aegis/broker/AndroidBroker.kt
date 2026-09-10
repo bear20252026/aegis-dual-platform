@@ -210,10 +210,13 @@ class AndroidBroker(
                         ?: deny("native_policy_core_protocol", "原生策略核心确认请求无效或不可读取")
                 }
             }
+
             // 默认构建无 native core：走托管 evaluate 的直接 Allow/Deny——
             // 此前无条件 Deny，导致默认产物每次导航都被拒绝（仅 CI 传
             // requireNativePolicyCore=true 掩盖了该问题）。
-            else -> evaluateNavigation(sessionId, tabId, generation, rawUrl, scope)
+            else -> {
+                evaluateNavigation(sessionId, tabId, generation, rawUrl, scope)
+            }
         }
     }
 
