@@ -8,7 +8,7 @@
 1. 壁纸清单 4 处：
    - shared/shell/wallpapers/ 实际文件
    - legacy/windows-pywebview/app/asset_scheme.py（Windows 资产服务白名单）
-   - shared/shell/start.html（UI 按钮列表——单源 UI）
+   - shared/shell/start.main.js（UI 按钮列表——单源 UI；I83 外置前在 start.html）
    - android/.../AegisHomeBridge.kt（Android 白名单）
 2. 搜索引擎清单 2 处：
    - legacy/windows-pywebview/app/url_utils.py（Windows 引擎表）
@@ -40,10 +40,12 @@ def wallpapers_from_asset_scheme() -> set[str]:
 
 
 def wallpapers_from_start_html() -> set[str]:
-    text = (ROOT / "shared/shell/start.html").read_text(encoding="utf-8")
+    # I83 外置（2026-09-10）：WALLPAPERS 数组随内联脚本外移 start.main.js
+    #（start.html 仅静态标记 + CSP——不再承载脚本数据）
+    text = (ROOT / "shared/shell/start.main.js").read_text(encoding="utf-8")
     block = re.search(r"var WALLPAPERS\s*=\s*\[(.*?)\];", text, re.S)
     if not block:
-        fail("start.html: 未找到 WALLPAPERS 按钮列表")
+        fail("start.main.js: 未找到 WALLPAPERS 按钮列表")
         return set()
     return set(re.findall(r"name:'([^']+)'", block.group(1)))
 
@@ -100,7 +102,7 @@ def main() -> int:
     html_wp = wallpapers_from_start_html()
     kt_wp = wallpapers_from_kotlin()
     diff("壁纸", disk, py_wp, "asset_scheme.py 相对磁盘文件")
-    diff("壁纸", disk, html_wp, "start.html 相对磁盘文件")
+    diff("壁纸", disk, html_wp, "start.main.js 相对磁盘文件")
     diff("壁纸", disk, kt_wp, "AegisHomeBridge.kt 相对磁盘文件")
 
     py_eng = engines_from_url_utils()
