@@ -2,6 +2,7 @@ namespace Aegis.Windows.Core.Tests;
 
 using System.Collections.Generic;
 using Aegis.Windows.Chrome;
+using Aegis.Windows.Chrome.Ntp;
 using Aegis.Windows.Core.Bookmarks;
 using Aegis.Windows.Core.History;
 using Xunit;
@@ -89,5 +90,22 @@ public sealed class ChromeControllersTests
         Assert.StartsWith("new Promise(r=>{try{var m=(document.body&&document.body.innerText)||'';", js);
         Assert.Contains("Q=\"q\\u0022q\";", js);
         Assert.EndsWith("r(n);}catch(e){r(0);}});", js);
+    }
+
+    [Fact]
+    public void FilterSources_NullOrAll_ReturnsAll()
+    {
+        var sources = new[] { ("chrome", 1), ("edge", 2) };
+        Assert.Equal(2, NtpBridgeFactory.FilterSources(sources, null, s => s.Item1).Count());
+        Assert.Equal(2, NtpBridgeFactory.FilterSources(sources, "all", s => s.Item1).Count());
+        Assert.Equal(2, NtpBridgeFactory.FilterSources(sources, "", s => s.Item1).Count());
+    }
+
+    [Fact]
+    public void FilterSources_NamedBrowser_ReturnsOnlyThatBrowser()
+    {
+        var sources = new[] { ("chrome", 1), ("edge", 2), ("chrome", 3) };
+        var filtered = NtpBridgeFactory.FilterSources(sources, "chrome", s => s.Item1).ToList();
+        Assert.Equal(new[] { 1, 3 }, filtered.Select(s => s.Item2));
     }
 }

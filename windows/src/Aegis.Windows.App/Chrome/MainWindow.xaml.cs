@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private System.Windows.Threading.DispatcherTimer? _sleepTimer;
     private FindBarController _find = null!;
     private SuggestionController _suggest = null!;
+    private Ntp.NtpBridgeFactory _ntpBridgeFactory = null!;
     private Action? _zoomChangedHandler;
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
@@ -80,6 +81,10 @@ public partial class MainWindow : Window
         _suggest = new SuggestionController(
             AddressBar, SuggestionPopup, SuggestionList,
             _bookmarks, _history, NavigateFromAddressBar);
+        // 第二批：NTP 宿主桥 15 项服务委托组装外移工厂（数据服务单源注入）
+        _ntpBridgeFactory = new Ntp.NtpBridgeFactory(
+            _settings, _settingsService, _bookmarks, _history, _sessionStore,
+            RestoreSavedSession, engine => EngineCombo.SelectedValue = engine);
         TabStrip.ItemsSource = _tabs.Tabs;
         RestoreSessionOrStart();
         RefreshBookmarkBar();
@@ -451,132 +456,10 @@ public partial class MainWindow : Window
         Uri.TryCreate(core.Source, UriKind.Absolute, out var uri)
         && uri.Host.Equals(Chrome.Ntp.NtpAssets.HostName, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>M3：新标签页宿主桥服务组装（每标签一份——navigate/goBack/openGeo
-    /// 作用于该标签自己的 WebView；数据服务共享单源）。</summary>
-    private Chrome.Ntp.NtpBridge CreateNtpBridge(TabRuntime runtime)
-    {
-        return new Chrome.Ntp.NtpBridge(new Chrome.Ntp.NtpBridge.Services(
-            SearchEngine: () => _settings.SearchEngine,
-            SetSearchEngine: engine =>
-            {
-                _settings.SearchEngine = engine;
-                _settingsService.Apply(_settings);
-                EngineCombo.SelectedValue = engine;
-            },
-            Wallpaper: () => string.IsNullOrWhiteSpace(_settings.NtpWallpaper)
-                ? Chrome.Ntp.NtpAssets.DefaultWallpaper
-                : _settings.NtpWallpaper,
-            SetWallpaper: name =>
-            {
-                _settings.NtpWallpaper = name;
-                _settingsService.Apply(_settings);
-            },
-            Bookmarks: () => _bookmarks.All(),
-            SavedSessionCount: () => _sessionStore.Load().Count,
-            RestoreSession: RestoreSavedSession,
-            Navigate: target =>
-            {
-                // 桥已归一（非导航协议 fail-closed）——此处直接进入
-                // NavigationStarting→broker 唯一授权路径
-                SafeNavigate(runtime, target);
-            },
-            GoBack: () =>
-            {
-                if (runtime.Control.CanGoBack)
-                {
-                    runtime.Control.GoBack();
-                    return true;
-                }
-                return false;
-            },
-            OpenGeo: () =>
-            {
-                if (Chrome.Ntp.NtpAssets.ResolveGeoRoot() is null)
-                    return false;  // 资源未随包——fail-closed 降级（按钮置灰）
-                return SafeNavigate(runtime,
-                    $"https://{Chrome.Ntp.NtpAssets.GeoHostName}/{Chrome.Ntp.NtpAssets.GeoEntryPath}");
-            },
-            ImportSources: () =>
-            {
-                // 探测 = 仅文件存在性检查（不读取内容）；书签/历史能力按来源汇总
-                var byBrowser = new Dictionary<string, (bool Bookmarks, bool History)>();
-                foreach (var source in BookmarkImporter.DetectSources())
-                    byBrowser[source.Browser] = (true, false);
-                foreach (var source in Core.History.HistoryImporter.DetectSources())
-                    byBrowser[source.Browser] = byBrowser.TryGetValue(source.Browser, out var known)
-                        ? (known.Bookmarks, true)
-                        : (false, true);
-                var sources = new List<Chrome.Ntp.NtpBridge.ImportSourceSnapshot>();
-                foreach (var pair in byBrowser)
-                    sources.Add(new(pair.Key, pair.Value.Bookmarks, pair.Value.History));
-                return sources;
-            },
-            ImportBookmarks: sourceFilter =>
-            {
-                var imported = 0;
-                var total = 0;
-                var results = new List<Chrome.Ntp.NtpBridge.ImportResult>();
-                foreach (var source in FilterSources(BookmarkImporter.DetectSources(), sourceFilter, s => s.Browser))
-                {
-                    try
-                    {
-                        var candidates = BookmarkImporter.Parse(source.Path);
-                        var (one, all) = BookmarkImporter.ImportTo(_bookmarks, candidates);
-                        results.Add(new(source.Browser, one, all));
-                        imported += one;
-                        total += all;
-                    }
-                    catch (Exception ex)
-                    {
-                        // 单来源失败不阻断其余来源（可选功能——对齐 Python 口径）
-                        Core.Security.SecurityLog.Write(
-                            $"[import] 书签来源 {source.Browser} 导入失败: {ex.GetType().Name}: {ex.Message}");
-                    }
-                }
-                return (imported, total, results);
-            },
-            ImportHistory: (limit, sourceFilter) =>
-            {
-                var imported = 0;
-                var total = 0;
-                var results = new List<Chrome.Ntp.NtpBridge.ImportResult>();
-                foreach (var source in FilterSources(Core.History.HistoryImporter.DetectSources(), sourceFilter, s => s.Browser))
-                {
-                    try
-                    {
-                        var candidates = Core.History.HistoryImporter.Parse(source.Path, limit);
-                        var (one, all) = Core.History.HistoryImporter.ImportTo(_history, candidates);
-                        results.Add(new(source.Browser, one, all));
-                        imported += one;
-                        total += all;
-                    }
-                    catch (Exception ex)
-                    {
-                        // 单来源失败不阻断其余来源（可选功能——对齐 Python 口径）
-                        Core.Security.SecurityLog.Write(
-                            $"[import] 历史来源 {source.Browser} 导入失败: {ex.GetType().Name}: {ex.Message}");
-                    }
-                }
-                return (imported, total, results);
-            }));
-    }
-
-    /// <summary>导入来源过滤（空/all = 全部来源；否则仅指定浏览器）。</summary>
-    private static IEnumerable<T> FilterSources<T>(
-        IReadOnlyList<T> sources, string? browserFilter, Func<T, string> browserOf)
-    {
-        if (string.IsNullOrEmpty(browserFilter) || browserFilter == "all")
-        {
-            foreach (var source in sources)
-                yield return source;
-            yield break;
-        }
-        foreach (var source in sources)
-        {
-            if (browserOf(source) == browserFilter)
-                yield return source;
-        }
-    }
+    /// <summary>M3：新标签页宿主桥组装（逻辑在 NtpBridgeFactory——上帝对象
+    /// 拆分第二批；保留薄转发以维持 CreateRuntime 内单一装配点）。</summary>
+    private Chrome.Ntp.NtpBridge CreateNtpBridge(TabRuntime runtime) =>
+        _ntpBridgeFactory.Create(runtime);
 
     private void OnTabClosed(string tabId)
     {
@@ -912,8 +795,15 @@ public partial class MainWindow : Window
             _tabs.NewTab(HomeUrl);
             return;
         }
+        RebuildTabsFromSnapshot(tabs, currentTabId);
+    }
+
+    /// <summary>会话快照 → 标签集合 + runtime 重建 + 激活（启动自动恢复与
+    /// NTP 手动恢复共用——此前两份逐行复制漂移）。</summary>
+    private void RebuildTabsFromSnapshot(IReadOnlyList<TabSessionStore.SessionTab> saved, string? currentTabId)
+    {
         _tabs.SeedSession(
-            tabs.Select(t => (t.TabId, t.Url, t.Title, t.IsPinned)),
+            saved.Select(t => (t.TabId, t.Url, t.Title, t.IsPinned)),
             currentTabId);
         foreach (var tab in _tabs.Tabs)
         {
@@ -952,17 +842,7 @@ public partial class MainWindow : Window
         {
             foreach (var tab in _tabs.Tabs.ToList())
                 _tabs.CloseTab(tab.TabId);
-            _tabs.SeedSession(
-                saved.Select(t => (t.TabId, t.Url, t.Title, t.IsPinned)),
-                currentTabId);
-            foreach (var tab in _tabs.Tabs)
-            {
-                CreateRuntime(tab, tab.Url);
-                _tabs.UpdateUrl(tab.TabId, tab.Url);
-            }
-            var active = _tabs.Current;
-            if (active is not null)
-                OnTabSwitched(active);
+            RebuildTabsFromSnapshot(saved, currentTabId);
         }
         finally
         {
