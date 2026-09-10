@@ -2,10 +2,8 @@ namespace Aegis.Windows.Chrome;
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Windows;
 using System.Windows.Input;
-using System.Windows.Threading;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Core.Tabs;
 using Microsoft.Web.WebView2.Core;
@@ -14,12 +12,15 @@ using Microsoft.Web.WebView2.Core;
 ///（隔离 cookie/缓存，多窗口互不共享），多标签；不写历史、不写会话、不落盘
 /// 任何数据；全部关闭后清理临时目录（引用计数）。导航仍全量经 Broker 决策
 ///（无桥架构不变）；NTP 宿主桥同样接入（引擎/壁纸可用——书签/历史/导入/会话
-/// 恢复以空数据 fail-closed，不读真实用户数据）。</summary>
+/// 恢复以空数据 fail-closed，不读真实用户数据）。
+/// runtime 生命周期（创建/关闭/延迟导航重试）复用 TabRuntimeCoordinator——
+/// 与主窗口同一套快照+令牌+视觉树校验（此前本窗口自维护一份漂移副本）。</summary>
 public partial class InPrivateWindow : Window
 {
     private readonly BrowserPolicyBroker _broker = new();
     private readonly TabManager _tabs = new();
     private readonly Dictionary<string, TabRuntime> _runtimes = new();
+    private TabRuntimeCoordinator _runtimeCoordinator = null!;
     private string? _activeTabId;
     private bool _suppressSelection;
     private bool _closed;
@@ -28,8 +29,6 @@ public partial class InPrivateWindow : Window
     private readonly string _engineKey;
 
     private const string HomeUrl = Ntp.NtpAssets.Url;
-    private const int VirtualHostRetryLimit = 4;
-    private const int VirtualHostRetryDelayMs = 50;
 
     public InPrivateWindow()
     {
@@ -43,6 +42,7 @@ public partial class InPrivateWindow : Window
         {
             _engineKey = UrlNormalizer.DefaultEngine;
         }
+        _runtimeCoordinator = new TabRuntimeCoordinator(_runtimes, WebViewHost);
         _tabs.TabOpened += CreateRuntime;
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
@@ -63,26 +63,24 @@ public partial class InPrivateWindow : Window
                 lease.Dispose();
                 return;
             }
-            var runtime = new TabRuntime(_broker, tab, lease.Environment) { IsPrivate = true };
-            _runtimes[tab.TabId] = runtime;
+            // 创建+挂载+初始化（异常观察）统一走协调器；无痕隔离环境经参数注入
+            var runtime = _runtimeCoordinator
+                .Create(_broker, tab, lease.Environment, isPrivate: true)
+                .Runtime;
             runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
             {
                 if (!e.IsSuccess || _closed || !_runtimes.ContainsKey(tab.TabId))
                     return;
                 var core = runtime.Control.CoreWebView2;
-                BindVirtualHosts(core);
+                Ntp.NtpAssets.BindVirtualHosts(core);
                 runtime.OnCoreReady(core);
                 WireNtpBridge(runtime, core);
                 if (Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
                 {
-                    var target = tab.Url;
-                    // ApplicationIdle + 失败重试：与主窗口一致，避免启动争用下
-                    // 映射未传播 → ntp.aegis.local 解析失败 → 纯文本错误文档。
-                    Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
-                    {
-                        if (!_closed && _runtimes.ContainsKey(tab.TabId))
-                            NavigateVirtualHostWithRetry(runtime, target);
-                    }));
+                    // 延迟导航（映射传播等待+失败重试）同样复用协调器——
+                    // 执行前重新校验 runtime 引用/令牌/窗口存活
+                    _runtimeCoordinator.PostDelayedNavigation(
+                        tab.TabId, tab.Url, () => !_closed && IsLoaded);
                 }
                 else
                 {
@@ -90,8 +88,6 @@ public partial class InPrivateWindow : Window
                 }
             };
             runtime.NavigationCompleted += (_, _) => Dispatcher.BeginInvoke(() => SyncAddressBar(tab));
-            WebViewHost.Children.Add(runtime.Control);
-            await runtime.InitAsync();
         }
         catch (Exception ex)
         {
@@ -141,7 +137,7 @@ public partial class InPrivateWindow : Window
         {
             try
             {
-                if (!IsTopLevelNtpDocument(core))
+                if (!Ntp.NtpAssets.IsTopLevelNtpDocument(core))
                     return;
                 ntp.TryHandle(
                     ev.Source, ev.WebMessageAsJson,
@@ -166,53 +162,6 @@ public partial class InPrivateWindow : Window
         };
     }
 
-    private static bool IsTopLevelNtpDocument(CoreWebView2 core) =>
-        Uri.TryCreate(core.Source, UriKind.Absolute, out var uri)
-        && uri.Host.Equals(Ntp.NtpAssets.HostName, StringComparison.OrdinalIgnoreCase);
-
-    private void BindVirtualHosts(CoreWebView2 core)
-    {
-        var ntp = Ntp.NtpAssets.ResolveContentRoot();
-        if (ntp is not null)
-            core.SetVirtualHostNameToFolderMapping(
-                Ntp.NtpAssets.HostName, ntp,
-                CoreWebView2HostResourceAccessKind.Allow);
-        var geo = Ntp.NtpAssets.ResolveGeoRoot();
-        if (geo is not null)
-            core.SetVirtualHostNameToFolderMapping(
-                Ntp.NtpAssets.GeoHostName, geo,
-                CoreWebView2HostResourceAccessKind.Allow);
-    }
-
-    /// <summary>虚拟主机导航 + 失败重试（与主窗口协调器同语义）：首帧若映射未
-    /// 传播而 ConnectionAborted，稍后重试——重试时映射必然已就绪。有界重试。</summary>
-    private void NavigateVirtualHostWithRetry(TabRuntime runtime, string url, int remaining = VirtualHostRetryLimit)
-    {
-        var core = runtime.Control.CoreWebView2;
-        if (core is null || _closed || !_runtimes.ContainsKey(runtime.Tab.TabId))
-            return;
-        EventHandler<CoreWebView2NavigationCompletedEventArgs> handler = null!;
-        handler = (_, e) =>
-        {
-            core.NavigationCompleted -= handler;
-            if (e.IsSuccess)
-                return;
-            if (remaining <= 0 || _closed || !_runtimes.ContainsKey(runtime.Tab.TabId))
-                return;
-            var timer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(VirtualHostRetryDelayMs) };
-            var localTimer = timer;
-            timer.Tick += (_, _) =>
-            {
-                localTimer.Stop();
-                NavigateVirtualHostWithRetry(runtime, url, remaining - 1);
-            };
-            timer.Start();
-        };
-        core.NavigationCompleted += handler;
-        if (!SafeNavigate(runtime, url))
-            core.NavigationCompleted -= handler;
-    }
-
     /// <summary>设置导航地址的统一容错入口（地址非法/控件已释放时拒绝而不是抛）。</summary>
     private static bool SafeNavigate(TabRuntime runtime, string? url)
     {
@@ -229,17 +178,7 @@ public partial class InPrivateWindow : Window
         }
     }
 
-    private void OnTabClosed(string tabId)
-    {
-        if (_runtimes.Remove(tabId, out var runtime))
-        {
-            WebViewHost.Children.Remove(runtime.Control);
-            try { runtime.Dispose(); } catch (Exception ex)
-            {
-                Core.Security.SecurityLog.Write($"[inprivate] 标签 {tabId} 销毁容错: {ex.Message}");
-            }
-        }
-    }
+    private void OnTabClosed(string tabId) => _runtimeCoordinator.Close(tabId);
 
     private void OnTabSwitched(Tab tab)
     {
@@ -329,11 +268,8 @@ public partial class InPrivateWindow : Window
     private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _closed = true;
-        foreach (var runtime in _runtimes.Values)
-        {
-            WebViewHost.Children.Remove(runtime.Control);
-            try { runtime.Dispose(); } catch (Exception) { }
-        }
+        // 全部 runtime 经协调器统一销毁（先摘视觉树再释放——与主窗口同序）
+        _runtimeCoordinator.Dispose();
         _runtimes.Clear();
         _broker.Dispose();
         _environmentLease?.Dispose();

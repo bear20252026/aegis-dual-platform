@@ -84,4 +84,36 @@ public static class NtpAssets
 
     private static bool IsGeoRoot(string dir) =>
         File.Exists(Path.Combine(dir, GeoEntryPath));
+
+    /// <summary>把 NTP/画板虚拟主机映射到发布输出资源根（主窗口与无痕窗口
+    /// 共用——此前两份逐行复制漂移）。资源缺失的映射跳过（上层 fail-closed）。</summary>
+    public static void BindVirtualHosts(Microsoft.Web.WebView2.Core.CoreWebView2 core)
+    {
+        var ntpRoot = ResolveContentRoot();
+        // 映射结果写入安全日志——NTP 加载失败时可据此区分「资源根缺失」与「映射未生效」
+        Core.Security.SecurityLog.Write(
+            $"[init] ntp 资源根 = {ntpRoot ?? "<null>"}（BaseDirectory={AppContext.BaseDirectory}）");
+        if (ntpRoot is not null)
+        {
+            core.SetVirtualHostNameToFolderMapping(
+                HostName, ntpRoot,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            Core.Security.SecurityLog.Write($"[init] {HostName} 已映射 -> {ntpRoot}");
+        }
+        var geoRoot = ResolveGeoRoot();
+        if (geoRoot is not null)
+        {
+            core.SetVirtualHostNameToFolderMapping(
+                GeoHostName, geoRoot,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            Core.Security.SecurityLog.Write($"[init] {GeoHostName} 已映射 -> {geoRoot}");
+        }
+    }
+
+    /// <summary>NTP 宿主桥的顶层文档门禁：core.Source 为当前顶层文档（非任一
+    /// iframe）。远程顶层页面即使内嵌 ntp.aegis.local 帧，顶层来源仍为远程
+    /// host → 拒绝；从根上封死「帧内嵌复用受信桥」的绕过面。</summary>
+    public static bool IsTopLevelNtpDocument(Microsoft.Web.WebView2.Core.CoreWebView2 core) =>
+        Uri.TryCreate(core.Source, UriKind.Absolute, out var uri)
+        && uri.Host.Equals(HostName, StringComparison.OrdinalIgnoreCase);
 }

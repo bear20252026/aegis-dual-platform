@@ -30,10 +30,16 @@ public sealed class TabRuntimeCoordinator : IDisposable
         _host = host ?? throw new ArgumentNullException(nameof(host));
     }
 
-    /// <summary>创建运行时并加入视觉树（不导航——导航由初始化完成回调/调用方驱动）。</summary>
-    public TabRuntimeLifetime Create(BrowserPolicyBroker broker, Tab tab)
+    /// <summary>创建运行时并加入视觉树（不导航——导航由初始化完成回调/调用方
+    /// 驱动）。environment 非空时用于无痕窗口的隔离环境租约（isPrivate 同时
+    /// 置位——缩放/数据不落盘）。</summary>
+    public TabRuntimeLifetime Create(
+        BrowserPolicyBroker broker,
+        Tab tab,
+        Microsoft.Web.WebView2.Core.CoreWebView2Environment? environment = null,
+        bool isPrivate = false)
     {
-        var runtime = new TabRuntime(broker, tab);
+        var runtime = new TabRuntime(broker, tab, environment) { IsPrivate = isPrivate };
         var lifetime = new TabRuntimeLifetime(runtime);
         _runtimes[tab.TabId] = runtime;
         _lifetimes[tab.TabId] = lifetime;
@@ -195,8 +201,10 @@ public sealed class TabRuntimeCoordinator : IDisposable
 
     public void Dispose()
     {
+        // 与 Close 同序：先从视觉树摘除再释放（WebView2 HWND 承载控件销毁次序）
         foreach (var lifetime in _lifetimes.Values)
         {
+            try { _host.Children.Remove(lifetime.Runtime.Control); } catch (Exception) { }
             try { lifetime.Dispose(); }
             catch (Exception) { }
         }

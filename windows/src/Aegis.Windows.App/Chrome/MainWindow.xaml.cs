@@ -286,7 +286,7 @@ public partial class MainWindow : Window
                 return;
             }
             var core = runtime.Control.CoreWebView2;
-            BindVirtualHosts(core);
+            Ntp.NtpAssets.BindVirtualHosts(core);
             runtime.OnCoreReady(core);
             // 下载完成 → 持久化记录（大小取自操作对象声明的总字节数——下载
             // 刚启动时目标文件常未创建，此前 FileInfo.Length 直接抛异常被吞，
@@ -337,7 +337,7 @@ public partial class MainWindow : Window
             {
                 // 顶层文档（core.Source）必须是 NTP 虚拟主机；发送来源（ev.Source）
                 // 由 NtpBridge 二次校验。二者任一不符即静默忽略——帧内嵌不可达。
-                if (!IsTopLevelNtpDocument(core))
+                if (!Ntp.NtpAssets.IsTopLevelNtpDocument(core))
                     return;
                 try
                 {
@@ -417,39 +417,8 @@ public partial class MainWindow : Window
         // 上方处理器负责映射+导航）。
     }
 
-    /// <summary>M3：虚拟主机资源映射（start.html 单源 + 可选 GeoGebra 随包）。
-    /// 只映射发布输出目录内容——不暴露任意文件系统路径。映射结果写入安全
-    /// 日志——NTP 加载失败时可据此区分「资源根缺失」与「映射未生效」。</summary>
-    private void BindVirtualHosts(CoreWebView2 core)
-    {
-        var ntpRoot = Chrome.Ntp.NtpAssets.ResolveContentRoot();
-        Core.Security.SecurityLog.Write(
-            $"[init] ntp 资源根 = {ntpRoot ?? "<null>"}（BaseDirectory={AppContext.BaseDirectory}）");
-        if (ntpRoot is not null)
-        {
-            core.SetVirtualHostNameToFolderMapping(
-                Chrome.Ntp.NtpAssets.HostName, ntpRoot,
-                CoreWebView2HostResourceAccessKind.Allow);
-            Core.Security.SecurityLog.Write(
-                $"[init] {Chrome.Ntp.NtpAssets.HostName} 已映射 -> {ntpRoot}");
-        }
-        var geoRoot = Chrome.Ntp.NtpAssets.ResolveGeoRoot();
-        if (geoRoot is not null)
-        {
-            core.SetVirtualHostNameToFolderMapping(
-                Chrome.Ntp.NtpAssets.GeoHostName, geoRoot,
-                CoreWebView2HostResourceAccessKind.Allow);
-            Core.Security.SecurityLog.Write(
-                $"[init] {Chrome.Ntp.NtpAssets.GeoHostName} 已映射 -> {geoRoot}");
-        }
-    }
-
-    /// <summary>M3：新标签页宿主桥的顶层文档门禁——core.Source 为当前顶层
-    /// 文档（非任一 iframe）。远程顶层页面即使内嵌 ntp.aegis.local 帧，顶层
-    /// 来源仍为远程 host → 拒绝；从根上封死「帧内嵌复用受信桥」的绕过面。</summary>
-    private static bool IsTopLevelNtpDocument(CoreWebView2 core) =>
-        Uri.TryCreate(core.Source, UriKind.Absolute, out var uri)
-        && uri.Host.Equals(Chrome.Ntp.NtpAssets.HostName, StringComparison.OrdinalIgnoreCase);
+    /// <summary>M3：虚拟主机资源映射与 NTP 顶层文档门禁统一在 NtpAssets
+    ///（主窗口与无痕窗口共用单源——此前两份逐行复制漂移）。</summary>
 
     /// <summary>M3：新标签页宿主桥组装（逻辑在 NtpBridgeFactory——上帝对象
     /// 拆分第二批；保留薄转发以维持 CreateRuntime 内单一装配点）。</summary>
@@ -1317,13 +1286,9 @@ public partial class MainWindow : Window
         _tabs.TabClosed -= OnTabClosed;
         _tabs.TabSwitched -= OnTabSwitched;
         _runtimeCoordinator.NtpNavigationFailed -= OnNtpNavigationFailed;
-        foreach (var runtime in _runtimes.Values)
-        {
-            WebViewHost.Children.Remove(runtime.Control);
-            runtime.Dispose();
-        }
-        _runtimes.Clear();
+        // 全部 runtime 经协调器统一销毁（先摘视觉树再释放，令牌一并取消）
         _runtimeCoordinator.Dispose();
+        _runtimes.Clear();
         _broker.Dispose();
         base.OnClosed(e);
     }
