@@ -49,16 +49,14 @@ public partial class MainWindow : Window
     private readonly Core.Downloads.DownloadRecordStore _downloadRecords =
         new(Core.AppPaths.DownloadsDbPath);
     private System.Windows.Threading.DispatcherTimer? _sleepTimer;
-    private System.Windows.Threading.DispatcherTimer? _suggestTimer;
+    private FindBarController _find = null!;
+    private SuggestionController _suggest = null!;
     private Action? _zoomChangedHandler;
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
     // —— 集中管理的 UI 时序/阈值常量（审计修复：此前 150ms/30s/2.5s 等魔法数
     //    散落各处，调整需全文检索） ——
-    private const int SuggestDebounceMs = 150;        // 地址栏建议防抖
-    private const int SuggestMaxRows = 8;             // 建议列表上限
-    private const int SuggestHistoryScan = 60;        // 建议历史扫描行数
     private const int SleepCheckIntervalSec = 30;     // 后台标签睡眠巡检周期
     private const int FeedbackHideMs = 2500;          // 反馈条自动隐藏
     private const int SourceFetchTimeoutSec = 15;     // 源码查看抓取超时
@@ -76,6 +74,12 @@ public partial class MainWindow : Window
         _tabs.TabOpened += OnTabOpened;
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
+        // 上帝对象拆分·第一批：查找条与地址栏建议逻辑外移独立控制器
+        //（防抖/后台查询/乱序防护在 SuggestionController，window.find 在 FindBarController）
+        _find = new FindBarController(FindBar, FindBox, FindCount, ActiveRuntime);
+        _suggest = new SuggestionController(
+            AddressBar, SuggestionPopup, SuggestionList,
+            _bookmarks, _history, NavigateFromAddressBar);
         TabStrip.ItemsSource = _tabs.Tabs;
         RestoreSessionOrStart();
         RefreshBookmarkBar();
@@ -88,9 +92,6 @@ public partial class MainWindow : Window
         _settingsService.Apply(_settings);
         RestoreWindowState();
         StartSleepTimer();
-        // 建议定时器单例（Tick 由 ResetSuggestTimer 挂/摘）
-        _suggestTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(SuggestDebounceMs) };
-        _suggestTimer.Tick += (_, _) => RunSuggestions();
     }
 
     /// <summary>设置导航地址的统一容错入口（地址非法/控件已释放时拒绝而不是
@@ -828,113 +829,32 @@ public partial class MainWindow : Window
         }
     }
 
-    // —— 页内查找 ——
-    private void OpenFind()
+    // —— 页内查找（逻辑在 FindBarController——上帝对象拆分第一批） ——
+    private void FindBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
-        FindBar.Visibility = Visibility.Visible;
-        FindBox.Focus();
-        FindBox.SelectAll();
+        if (!string.IsNullOrWhiteSpace(FindBox.Text))
+            _ = _find.SearchAsync(FindBox.Text, backwards: false);
     }
-    private void CloseFind()
-    {
-        FindBar.Visibility = Visibility.Collapsed;
-        FindCount.Text = string.Empty;
-        if (ActiveRuntime()?.Control.CoreWebView2 is { } cw)
-            _ = cw.ExecuteScriptAsync("window.find('', false, false, false);");
-    }
+
     private async void Find_Executed(object sender, RoutedEventArgs e)
     {
-        var query = FindBox.Text;
-        if (string.IsNullOrWhiteSpace(query) || ActiveRuntime()?.Control.CoreWebView2 is not { } cw)
-            return;
         var backwards = (e.OriginalSource as System.Windows.Controls.Button)?.Tag as string == "b";
-        try
-        {
-            var count = await CountMatches(cw, query);
-            await cw.ExecuteScriptAsync(BuildFindJs(query, backwards));
-            FindCount.Text = count > 0 ? $"{count} 处" : "无结果";
-        }
-        catch (Exception) { }
+        await _find.SearchAsync(FindBox.Text, backwards);
     }
-    private static async Task<int> CountMatches(CoreWebView2 cw, string query)
-    {
-        var q = System.Text.Json.JsonSerializer.Serialize(query);
-        var js = "new Promise(r=>{try{var m=(document.body&&document.body.innerText)||'';" +
-                 "var n=0,i=0,Q=" + q + ";while((i=m.indexOf(Q,i))!==-1){n++;i+=Q.length;}r(n);}catch(e){r(0);}});";
-        var res = await cw.ExecuteScriptAsync(js);
-        return int.TryParse(res, out var n) ? n : 0;
-    }
-    private static string BuildFindJs(string query, bool backwards) =>
-        "window.find(" + System.Text.Json.JsonSerializer.Serialize(query) +
-        ", false, " + (backwards ? "true" : "false") + ", true);";
 
-    // —— 地址栏自动补全 ——
-    private string? _lastSuggestQuery;
+    private void CloseFind_Click(object sender, RoutedEventArgs e) => _find.Close();
 
-    private void RunSuggestions()
-    {
-        _suggestTimer?.Stop();
-        var query = AddressBar.Text.Trim();
-        if (string.IsNullOrEmpty(query))
-        {
-            SuggestionPopup.IsOpen = false;
-            return;
-        }
-        // 书签全表 + SQLite LIKE 移出 UI 线程（防抖后逐键查询曾直接卡 UI——
-        // 历史库大时每次键入同步两次查询）
-        var captured = query;
-        _ = Task.Run(() =>
-        {
-            var rows = BuildSuggestions(captured);
-            Dispatcher.BeginInvoke(() =>
-            {
-                // 迟到的旧查询结果不覆盖新输入（乱序防护）
-                if (!string.Equals(AddressBar.Text.Trim(), captured, StringComparison.Ordinal))
-                    return;
-                _lastSuggestQuery = captured;
-                SuggestionList.ItemsSource = rows;
-                SuggestionPopup.IsOpen = rows.Count > 0;
-            });
-        });
-    }
-    private List<SuggestionRow> BuildSuggestions(string query)
-    {
-        var q = query.ToLowerInvariant();
-        var rows = new List<SuggestionRow>();
-        var seenUrls = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var b in _bookmarks.All())
-            if ((b.Title.ToLowerInvariant().Contains(q) || b.Url.ToLowerInvariant().Contains(q))
-                && seenUrls.Add(b.Url))
-                rows.Add(new SuggestionRow(b.Url, string.IsNullOrWhiteSpace(b.Title) ? b.Url : b.Title, "书签"));
-        foreach (var h in _history.Search(q, null, SuggestHistoryScan))
-        {
-            if (h.Url.ToLowerInvariant().Contains(q) && seenUrls.Add(h.Url))
-            {
-                rows.Add(new SuggestionRow(h.Url, string.IsNullOrWhiteSpace(h.Title) ? h.Url : h.Title, "历史"));
-                if (rows.Count >= SuggestMaxRows) break;
-            }
-        }
-        return rows.Take(SuggestMaxRows).ToList();
-    }
-    public sealed record SuggestionRow(string Url, string Title, string Kind);
-
-    private void SuggestPick(SuggestionRow row)
-    {
-        SuggestionPopup.IsOpen = false;
-        AddressBar.Text = row.Url;
-        AddressBar.CaretIndex = row.Url.Length;
-        NavigateFromAddressBar();
-    }
+    // —— 地址栏自动补全（逻辑在 SuggestionController） ——
     private void SuggestionList_KeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter && SuggestionList.SelectedItem is SuggestionRow sel)
+        if (e.Key == Key.Enter && _suggest.Selected() is { } sel)
         {
-            SuggestPick(sel);
+            _suggest.Pick(sel);
             e.Handled = true;
         }
         else if (e.Key == Key.Escape)
         {
-            SuggestionPopup.IsOpen = false;
+            _suggest.Close();
             e.Handled = true;
         }
     }
@@ -942,33 +862,12 @@ public partial class MainWindow : Window
     /// <summary>鼠标点击建议项即导航（此前仅键盘可达——鼠标点击只关弹层）。</summary>
     private void SuggestionList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        if (SuggestionList.SelectedItem is SuggestionRow sel)
+        if (_suggest.Selected() is { } sel)
         {
-            SuggestPick(sel);
+            _suggest.Pick(sel);
             e.Handled = true;
         }
     }
-
-    private void FindBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
-    {
-        if (!string.IsNullOrWhiteSpace(FindBox.Text))
-            _ = Find_OnceAsync();
-    }
-
-    private async Task Find_OnceAsync()
-    {
-        if (ActiveRuntime()?.Control.CoreWebView2 is not { } cw || string.IsNullOrWhiteSpace(FindBox.Text))
-            return;
-        try
-        {
-            var count = await CountMatches(cw, FindBox.Text);
-            await cw.ExecuteScriptAsync(BuildFindJs(FindBox.Text, false));
-            FindCount.Text = count > 0 ? $"{count} 处" : "无结果";
-        }
-        catch (Exception) { }
-    }
-
-    private void CloseFind_Click(object sender, RoutedEventArgs e) => CloseFind();
 
     // —— InPrivate ——
     private void InPrivate_Click(object sender, RoutedEventArgs e) => OpenInPrivateNew();
@@ -1078,8 +977,7 @@ public partial class MainWindow : Window
     private void AddressBar_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
     {
         AddressHint.Visibility = AddressBar.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        _suggestTimer?.Stop();
-        _suggestTimer?.Start();
+        _suggest.OnTextChanged();
     }
 
     /// <summary>M1：地址栏获得焦点即全选（Ctrl+L 与鼠标点击同语义——
@@ -1118,26 +1016,26 @@ public partial class MainWindow : Window
 
     private void AddressBar_KeyDown(object sender, KeyEventArgs e)
     {
-        if (SuggestionPopup.IsOpen && SuggestionList.Items.Count > 0)
+        if (_suggest.IsOpenWithItems)
         {
             if (e.Key == Key.Down)
             {
-                SuggestionList.SelectedIndex = (SuggestionList.SelectedIndex + 1) % SuggestionList.Items.Count;
+                _suggest.MoveSelection(1);
                 e.Handled = true; return;
             }
             if (e.Key == Key.Up)
             {
-                SuggestionList.SelectedIndex = (SuggestionList.SelectedIndex - 1 + SuggestionList.Items.Count) % SuggestionList.Items.Count;
+                _suggest.MoveSelection(-1);
                 e.Handled = true; return;
             }
-            if (e.Key == Key.Enter && SuggestionList.SelectedItem is SuggestionRow sel)
+            if (e.Key == Key.Enter && _suggest.Selected() is { } sel)
             {
-                SuggestPick(sel);
+                _suggest.Pick(sel);
                 e.Handled = true; return;
             }
             if (e.Key == Key.Escape)
             {
-                SuggestionPopup.IsOpen = false;
+                _suggest.Close();
                 e.Handled = true; return;
             }
         }
@@ -1501,7 +1399,7 @@ public partial class MainWindow : Window
                     e.Handled = true;
                     return;
                 case Key.F:
-                    OpenFind();
+                    _find.Open();
                     e.Handled = true;
                     return;
                 case Key.H:
@@ -1649,7 +1547,7 @@ public partial class MainWindow : Window
         // 此前 30s 睡眠巡检/建议定时器继续空转、ZoomStore.Changed 永久持有
         // 对已关窗口的引用（内存泄漏）
         _sleepTimer?.Stop();
-        _suggestTimer?.Stop();
+        _suggest.StopDebounce();
         _feedbackTimer?.Stop();
         if (_zoomChangedHandler is not null)
             ZoomStore.Changed -= _zoomChangedHandler;
