@@ -28,9 +28,10 @@ public partial class MainWindow : Window
     private readonly TabManager _tabs = new();
     private readonly Dictionary<string, TabRuntime> _runtimes = new();
     private TabRuntimeCoordinator _runtimeCoordinator = null!;
+    private TabStripDragController _tabDrag = null!;
+    private ApprovalPanelController _approval = null!;
     private readonly TabSessionStore _sessionStore = new(AppPaths.SessionDbPath);
     private string? _activeTabId;
-    private string? _pendingConfirmTabId;
     private bool _suppressTabSelection;
     private readonly BookmarkStore _bookmarks = new(AppPaths.BookmarksDbPath);
     private readonly HistoryStore _history = new(AppPaths.HistoryDbPath);
@@ -85,6 +86,13 @@ public partial class MainWindow : Window
         _ntpBridgeFactory = new Ntp.NtpBridgeFactory(
             _settings, _settingsService, _bookmarks, _history, _sessionStore,
             RestoreSavedSession, engine => EngineCombo.SelectedValue = engine);
+        // 第三批：标签条拖拽排序 + 导航确认面板外移控制器
+        _tabDrag = new TabStripDragController(TabStrip, _tabs);
+        _approval = new ApprovalPanelController(
+            ApprovalOverlay, ApprovalOrigin, ApprovalPath, ApprovalScope, ApprovalExpiry,
+            ApprovalDenyButton, SetNavigationControlsEnabled,
+            tabId => _runtimes.TryGetValue(tabId, out var runtime) ? runtime : null,
+            ShowRejection);
         TabStrip.ItemsSource = _tabs.Tabs;
         RestoreSessionOrStart();
         RefreshBookmarkBar();
@@ -375,21 +383,8 @@ public partial class MainWindow : Window
             if (tab.TabId == _activeTabId)
                 LoadingBar.Visibility = Visibility.Visible;
         };
-        runtime.Host.NavigationConfirmationRequested += (_, e) =>
-        {
-            // 单面板无队列：第二个确认请求到达时，先拒绝前一个标签的挂起
-            // 请求（此前直接覆盖 _pendingConfirmTabId——前一个标签永远卡在
-            // pending，fail-closed 但不可恢复）
-            if (_pendingConfirmTabId is { } previous
-                && previous != tab.TabId
-                && _runtimes.TryGetValue(previous, out var previousRuntime))
-            {
-                previousRuntime.Host.RejectPendingNavigation();
-            }
-            _pendingConfirmTabId = tab.TabId;
-            ShowConfirmation(e);
-        };
-        runtime.Host.NavigationConfirmationResolved += (_, _) => HideConfirmation();
+        runtime.Host.NavigationConfirmationRequested += (_, e) => _approval.Request(tab.TabId, e);
+        runtime.Host.NavigationConfirmationResolved += (_, _) => _approval.Resolved();
         // target=_blank / window.open 链接：不再静默丢弃，改为验证地址后
         // 在当前窗口新建标签打开（对齐主流浏览器）。公网地址或本机/hosts
         // 映射到本机的域名放行（本地开发访问）；非法协议/内网/环回地址仍拒
@@ -586,7 +581,7 @@ public partial class MainWindow : Window
     private void TabStrip_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
     {
         // 记录按下起点——拖拽需超过阈值移动才判定为拖拽（防误触发吞点击）
-        _tabDragStart = e.GetPosition(TabStrip);
+        _tabDrag.RecordDragStart(e.GetPosition(TabStrip));
         if (TabStrip.InputHitTest(e.GetPosition(TabStrip)) is not DependencyObject hit)
             return;
         var node = hit;
@@ -1103,133 +1098,22 @@ public partial class MainWindow : Window
         AddressBar.SelectAll();
     }
 
-    // ================= M1 标签条拖拽排序 =================
+    // ================= M1 标签条拖拽排序（逻辑在 TabStripDragController） =================
 
-    private System.Windows.Point _tabDragStart;
+    private void TabStrip_PreviewMouseMove(object sender, MouseEventArgs e) =>
+        _tabDrag.HandlePreviewMouseMove(e);
 
-    private void TabStrip_PreviewMouseMove(object sender, MouseEventArgs e)
-    {
-        if (e.LeftButton != MouseButtonState.Pressed)
-            return;
-        var pos = e.GetPosition(TabStrip);
-        // 真实移动超过系统最小拖拽阈值才进入拖拽——否则点按 ✕ 时的微小抖动
-        // 会误触发拖拽、吞掉关闭点击（「标签只能新增不能删除」的根因）
-        if (Math.Abs(pos.X - _tabDragStart.X) < SystemParameters.MinimumHorizontalDragDistance
-            && Math.Abs(pos.Y - _tabDragStart.Y) < SystemParameters.MinimumVerticalDragDistance)
-            return;
-        if (IsOverCloseButton(pos))
-            return;  // 关闭按钮区域不拖拽——交由其 Click 处理
-        if (TabItemIndexUnderMouse(pos) is not int fromIndex)
-            return;
-        _tabDragStart = pos;  // 抑制重复 DoDragDrop
-        // 容器级拖放（数据=来源索引）；DragOver/Drop 完成重排
-        DragDrop.DoDragDrop(TabStrip, fromIndex, DragDropEffects.Move);
-    }
+    private void TabStrip_DragOver(object sender, DragEventArgs e) =>
+        _tabDrag.HandleDragOver(e);
 
-    /// <summary>命中点是否落在某标签的关闭（✕）按钮上。</summary>
-    private bool IsOverCloseButton(System.Windows.Point position)
-    {
-        if (TabStrip.InputHitTest(position) is not DependencyObject hit)
-            return false;
-        var probe = hit;
-        while (probe is not null)
-        {
-            if (probe is System.Windows.Controls.Button button && button.Tag is string)
-                return true;
-            probe = System.Windows.Media.VisualTreeHelper.GetParent(probe);
-        }
-        return false;
-    }
+    private void TabStrip_Drop(object sender, DragEventArgs e) =>
+        _tabDrag.HandleDrop(e);
 
-    private void TabStrip_DragOver(object sender, DragEventArgs e)
-    {
-        e.Effects = TabItemIndexUnderMouse(e.GetPosition(TabStrip)) is int
-                    && e.Data.GetDataPresent(typeof(int))
-            ? DragDropEffects.Move
-            : DragDropEffects.None;
-        e.Handled = true;
-    }
+    // ================= 导航确认面板（逻辑在 ApprovalPanelController） =================
 
-    private void TabStrip_Drop(object sender, DragEventArgs e)
-    {
-        if (!e.Data.GetDataPresent(typeof(int))
-            || TabItemIndexUnderMouse(e.GetPosition(TabStrip)) is not int toIndex)
-            return;
-        var fromIndex = (int)e.Data.GetData(typeof(int));
-        // drop 落点为标签中心右侧时插入其后（末位拖动体验）
-        if (toIndex > fromIndex && TabItemCenterIsBefore(e.GetPosition(TabStrip), toIndex))
-            toIndex--;
-        _tabs.MoveTab(Math.Min(fromIndex, _tabs.Tabs.Count - 1), Math.Max(0, toIndex));
-        e.Handled = true;
-    }
+    private void ApprovalAllow_Click(object sender, RoutedEventArgs e) => _approval.Allow();
 
-    /// <summary>标签条坐标下的标签索引（ListBox 容器命中——非标签区域返回 null）。</summary>
-    private int? TabItemIndexUnderMouse(System.Windows.Point position)
-    {
-        var element = TabStrip.InputHitTest(position) as System.Windows.DependencyObject;
-        while (element is not null && element is not System.Windows.Controls.ListBoxItem)
-            element = System.Windows.Media.VisualTreeHelper.GetParent(element);
-        return element is System.Windows.Controls.ListBoxItem item
-            && TabStrip.ItemContainerGenerator.IndexFromContainer(item) is var idx && idx >= 0
-            ? idx
-            : null;
-    }
-
-    private bool TabItemCenterIsBefore(System.Windows.Point tabStripPosition, int index)
-    {
-        if (TabStrip.ItemContainerGenerator.ContainerFromIndex(index) is not System.Windows.Controls.ListBoxItem item)
-            return false;
-        var point = tabStripPosition - item.TranslatePoint(default, TabStrip);
-        return point.X > item.ActualWidth / 2;
-    }
-
-    // ================= 导航确认面板（转发到发起标签的 HostWebView） =================
-
-    private void ShowConfirmation(WebView.NavigationConfirmationRequestedEventArgs e)
-    {
-        ApprovalOrigin.Text = e.Request.Origin;
-        ApprovalPath.Text = e.Request.Path;
-        ApprovalScope.Text = e.Request.Scope;
-        ApprovalExpiry.Text = $"此请求将在 {e.Request.ExpiresAt.ToLocalTime():yyyy-MM-dd HH:mm:ss} 过期。";
-        SetNavigationControlsEnabled(false);
-        ApprovalOverlay.Visibility = Visibility.Visible;
-        Keyboard.Focus(ApprovalDenyButton);
-    }
-
-    private void HideConfirmation()
-    {
-        ApprovalOverlay.Visibility = Visibility.Collapsed;
-        SetNavigationControlsEnabled(true);
-        ApprovalOrigin.Text = string.Empty;
-        ApprovalPath.Text = string.Empty;
-        ApprovalScope.Text = string.Empty;
-        ApprovalExpiry.Text = string.Empty;
-        _pendingConfirmTabId = null;
-    }
-
-    private void ApprovalAllow_Click(object sender, RoutedEventArgs e)
-    {
-        // 审计修复：原实现的 orphan 恢复分支查找 _pendingConfirmTabId ?? ""——
-        // 字典永无 "" 键，恒为 null（死分支）；pending 丢失时唯一正确动作是
-        // 撤面板 + 告知（对应标签的 Host 在销毁时已自行 fail-closed）。
-        if (_pendingConfirmTabId is not { } pendingId
-            || !_runtimes.TryGetValue(pendingId, out var runtime)
-            || runtime.Control.CoreWebView2 is null)
-        {
-            HideConfirmation();
-            ShowRejection("确认请求已失效、被拒绝或无法安全恢复导航。");
-            return;
-        }
-        if (!runtime.Host.ApprovePendingNavigation(runtime.Control.CoreWebView2))
-            ShowRejection("确认请求已失效、被拒绝或无法安全恢复导航。");
-    }
-
-    private void ApprovalDeny_Click(object sender, RoutedEventArgs e)
-    {
-        if (_pendingConfirmTabId is not null && _runtimes.TryGetValue(_pendingConfirmTabId, out var runtime))
-            runtime.Host.RejectPendingNavigation();
-        ShowRejection("已拒绝该导航请求。");
-    }
+    private void ApprovalDeny_Click(object sender, RoutedEventArgs e) => _approval.Deny();
 
     private void ShowRejection(string message)
     {
@@ -1361,11 +1245,9 @@ public partial class MainWindow : Window
                     break;
             }
         }
-        if (ApprovalOverlay.Visibility != Visibility.Visible || e.Key != Key.Escape)
+        if (!_approval.IsVisible || e.Key != Key.Escape)
             return;
-        if (_pendingConfirmTabId is not null && _runtimes.TryGetValue(_pendingConfirmTabId, out var runtime))
-            runtime.Host.RejectPendingNavigation();
-        ShowRejection("已拒绝该导航请求。");
+        _approval.Deny();
         e.Handled = true;
     }
 
