@@ -180,8 +180,9 @@ class AndroidBroker(
     }
 
     /**
-     * 登记由 Rust 核心托管的待审批导航。默认托管路径不得自行重建确认授权，
-     * 因此非原生模式、门禁失败或桥接故障均返回拒绝。
+     * 登记待审批导航。原生核心模式由 Rust 维护 confirmation nonce；默认构建
+     * 使用同一托管策略的直接评估路径，避免没有 native core 时所有导航都被
+     * 误判为 native_confirmation_core_required。
      */
     fun requestNavigationConfirmation(
         sessionId: String,
@@ -191,22 +192,29 @@ class AndroidBroker(
         scope: String,
     ): Decision {
         val nativeGate = nativePolicyCoreGate.probe()
-        if (!nativeGate.allowsPlatformBroker) {
-            return deny(
-                nativeGate.denialCode ?: "native_policy_core_unavailable",
-                "已启用的原生策略核心不可用或不兼容",
-            )
+        return when {
+            // 原生核心模式下所有 confirmation 统一由 Rust 托管（禁止反向顺延）。
+            BuildConfig.REQUIRE_NATIVE_POLICY_CORE -> {
+                if (!nativeGate.allowsPlatformBroker) {
+                    deny(
+                        nativeGate.denialCode ?: "native_policy_core_unavailable",
+                        "已启用的原生策略核心不可用或不兼容",
+                    )
+                } else {
+                    val bridge =
+                        nativePolicyCoreBridge ?: return deny(
+                            "native_policy_core_bridge_unavailable",
+                            "原生策略核心桥接不可用",
+                        )
+                    bridge.requestNavigationConfirmation(sessionId, tabId, generation, rawUrl, scope)
+                        ?: deny("native_policy_core_protocol", "原生策略核心确认请求无效或不可读取")
+                }
+            }
+            // 默认构建无 native core：走托管 evaluate 的直接 Allow/Deny——
+            // 此前无条件 Deny，导致默认产物每次导航都被拒绝（仅 CI 传
+            // requireNativePolicyCore=true 掩盖了该问题）。
+            else -> evaluateNavigation(sessionId, tabId, generation, rawUrl, scope)
         }
-        if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
-            return deny("native_confirmation_core_required", "确认型导航必须由原生策略核心托管")
-        }
-        val bridge =
-            nativePolicyCoreBridge ?: return deny(
-                "native_policy_core_bridge_unavailable",
-                "原生策略核心桥接不可用",
-            )
-        return bridge.requestNavigationConfirmation(sessionId, tabId, generation, rawUrl, scope)
-            ?: deny("native_policy_core_protocol", "原生策略核心确认请求无效或不可读取")
     }
 
     /** 仅按 Rust 核心登记的 nonce 显式批准，并由核心返回原始绑定授权。 */

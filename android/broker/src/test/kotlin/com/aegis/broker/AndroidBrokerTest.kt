@@ -207,11 +207,14 @@ class AndroidBrokerTest {
     }
 
     @Test
-    fun confirmationCoordinationFailsClosedWithoutNativeCore() {
+    fun confirmationDelegatesToManagedEvaluateWhenNativeCoreNotRequired() {
         val broker = AndroidBroker()
         assertTrue(broker.registerSession("confirmation-session", "confirmation-tab"))
 
-        val pending =
+        // 默认构建（未启用原生策略核心）：requestNavigationConfirmation 应
+        // 委托托管 evaluateNavigation 做直接 Allow/Deny——此前无条件 Deny
+        // 导致默认产物每次导航都被拒绝（仅 CI/原生模式掩盖该问题）。
+        val allowed =
             broker.requestNavigationConfirmation(
                 "confirmation-session",
                 "confirmation-tab",
@@ -219,9 +222,41 @@ class AndroidBrokerTest {
                 "https://example.com/confirmation",
                 "navigation",
             )
+        val rejected =
+            broker.requestNavigationConfirmation(
+                "no-such-session",
+                "confirmation-tab",
+                0,
+                "https://example.com/confirmation",
+                "navigation",
+            )
 
-        assertTrue(pending is Decision.Deny)
-        assertEquals("native_confirmation_core_required", (pending as Decision.Deny).reason.code)
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            // 原生模式：确认型导航必须由 Rust core 托管（fail-closed）。
+            assertTrue(allowed is Decision.Deny)
+            assertTrue(rejected is Decision.Deny)
+        } else {
+            // 托管模式：合法会话+https Allow；非法会话 Deny。
+            assertTrue(allowed is Decision.Allow)
+            assertTrue(rejected is Decision.Deny)
+        }
+    }
+
+    @Test
+    fun managedEvaluateRejectsUnparseableUrlInConfirmation() {
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("s", "t"))
+        val denied =
+            broker.requestNavigationConfirmation(
+                "s",
+                "t",
+                0,
+                "javascript:alert(1)",
+                "navigation",
+            )
+        assertTrue(denied is Decision.Deny)
+        assertEquals("url_policy", (denied as Decision.Deny).reason.code)
     }
 
     @Test

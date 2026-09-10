@@ -95,6 +95,32 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersionOverride=$version docs\release\AegisSetup-CSharp.iss
           if ($LASTEXITCODE -ne 0) { throw "C# installer compilation failed" }
           if (-not (Test-Path "dist/AegisBrowser-CSharp-Setup-$version.exe")) { throw "C# installer not generated" }
+      - name: Authenticode sign installer (optional — requires code-signing cert)
+        # 审计整改：Windows 安装包此前未签名即发布。签名需要组织代码签名证书，
+        # CI 中无法凭空取得——仅当提供 AEGIS_CODE_SIGN_CERT（base64 PFX）与密码时
+        # 执行 signtool；未配置时保持现状并明确标注，不作为硬失败（与 Android
+        # keystore 的硬性 fail-closed 区分——证书缺失非代码缺陷）。
+        shell: pwsh
+        env:
+          AEGIS_CODE_SIGN_CERT_B64: ${{ secrets.AEGIS_CODE_SIGN_CERT }}
+          AEGIS_CODE_SIGN_PASSWORD: ${{ secrets.AEGIS_CODE_SIGN_PASSWORD }}
+        run: |
+          $version = ((Get-Content shared/version.properties) | Where-Object { $_ -match '^VERSION_NAME=' }) -replace '^VERSION_NAME=', ''
+          $exe = "dist/AegisBrowser-CSharp-Setup-$version.exe"
+          if (-not $env:AEGIS_CODE_SIGN_CERT_B64) {
+            Write-Warning "AEGIS_CODE_SIGN_CERT 未配置——安装包未做 Authenticode 签名（可选签名步骤已跳过）"
+            exit 0
+          }
+          $pfx = "$env:RUNNER_TEMP\aegis-codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:AEGIS_CODE_SIGN_CERT_B64))
+          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe"
+          $st = Get-ChildItem $signtool | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $st) { throw "未找到 signtool（Windows SDK）" }
+          & $st.FullName sign /fd SHA256 /f $pfx /p $env:AEGIS_CODE_SIGN_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $exe
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode 签名失败" }
+          & $st.FullName verify /pa $exe
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode 签名校验失败" }
+          Write-Output "✅ 安装包已 Authenticode 签名并校验通过"
       - name: Write build metadata
         run: python release/build_metadata.py --platform windows --output dist/build-metadata.json
       - name: Fail-closed Windows artifact integrity assertion

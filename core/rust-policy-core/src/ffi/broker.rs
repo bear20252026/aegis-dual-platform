@@ -35,7 +35,9 @@ const MAX_ISSUED_ACTIONS: usize = 50_000;
 /// 原 120 为硬编码字面量（无语义名、多处漂移风险）。注意与「会话 TTL」
 /// 是两个概念：这是签发授权的可消费窗口，超期后 consume 过期拒绝。
 const ACTION_EXPIRY_SECONDS: u64 = 120;
-
+/// 审计整改（2026-09-07）：待审批导航账本上限。此前无容量/清理——可被
+/// 待审批请求堆叠造成内存 DoS；满则 fail-closed 拒绝（镜像 MAX_ISSUED_ACTIONS）。
+const MAX_PENDING_APPROVALS: usize = 1024;
 /// P1-11 修复（全量复审 2026-09-01）：FFI create_session 的 TTL 下限（秒）。
 /// 宿主传 0 会得到"返回成功、即刻过期"的静默失效会话——钳到下限保底。
 /// 上限维持宿主自由（会话暴露面由 M-16 会话池 fail-closed 容量约束）。
@@ -212,6 +214,15 @@ impl FfiBroker {
         };
         match self.pending_navigation_approvals.lock() {
             Ok(mut pending_approvals) => {
+                // 审计整改：有界账本——满则 fail-closed 拒绝（此前无上限，
+                // 可被待审批请求堆叠造成内存 DoS）
+                if pending_approvals.len() >= MAX_PENDING_APPROVALS {
+                    return ffi_deny(
+                        "approval_ledger",
+                        "待审批账本已达上限（1024）",
+                        "denied — pending approval ledger at capacity",
+                    );
+                }
                 pending_approvals.insert(authorized.nonce.clone(), authorized);
                 FfiDecision::RequireConfirmation { request }
             }

@@ -18,6 +18,10 @@ public sealed class TabRuntimeCoordinator : IDisposable
     private readonly Dictionary<string, TabRuntime> _runtimes;
     private readonly Panel _host;
 
+    /// <summary>虚拟主机（NTP/Geo）首帧导航有界重试**耗尽**时触发——主窗口借此
+    /// 停止加载条并展示明确错误（否则瞬态抑制会让加载条永久旋转）。</summary>
+    public event Action<string, Microsoft.Web.WebView2.Core.CoreWebView2WebErrorStatus>? NtpNavigationFailed;
+
     public TabRuntimeCoordinator(
         Dictionary<string, TabRuntime> runtimes,
         Panel host)
@@ -128,6 +132,9 @@ public sealed class TabRuntimeCoordinator : IDisposable
             if (remaining <= 0)
             {
                 Core.Security.SecurityLog.Write($"[ntp] 标签 {tabId} 虚拟主机导航失败且重试耗尽: {e.WebErrorStatus}");
+                // 通知 UI：重试已放弃——由主窗口停止加载条并展示错误（否则
+                // 瞬态抑制会让加载条永久旋转、用户无从知晓页面失败）。
+                NtpNavigationFailed?.Invoke(tabId, e.WebErrorStatus);
                 return;
             }
             // 延迟后重试（映射传播通常在下一次导航前完成）

@@ -8,28 +8,48 @@
 use crate::ffi::{FfiApprovalRequest, FfiAuthorizedAction, FfiBroker, FfiDecision};
 use crate::POLICY_CORE_ABI_VERSION;
 use serde_json::{json, Value};
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::{c_char, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub struct CAbiBroker {
     inner: FfiBroker,
+    /// 进程级单例的"已退休"标志：free 只置位不释放——杜绝 use-after-free /
+    /// 重复释放的未定义行为（后续调用读此标志返回 deny）。
+    retired: AtomicBool,
 }
 
-fn read_utf8<'a>(value: *const c_char) -> Result<&'a str, &'static str> {
+/// C 输入指针的有界扫描上限。宿主按契约传 NUL 结尾缓冲区，此处仅防
+/// 异常宿主传入超长/无终止缓冲造成的无界越读。
+const FFI_INPUT_MAX_BYTES: usize = 64 * 1024;
+
+fn read_utf8(value: *const c_char) -> Result<&'static str, &'static str> {
     if value.is_null() {
         return Err("ffi_input_null");
     }
-    // SAFETY: 调用方契约要求以 NUL 结尾的有效指针；空指针在上方已拒绝。
-    unsafe { CStr::from_ptr(value) }
-        .to_str()
-        .map_err(|_| "ffi_input_utf8")
+    // SAFETY: 调用方契约要求指针指向可读内存；我们只读至多 FFI_INPUT_MAX_BYTES
+    // 并在首个 NUL 处停止——把潜在越读限制在有界窗口内。
+    let window = unsafe { std::slice::from_raw_parts(value as *const u8, FFI_INPUT_MAX_BYTES) };
+    match window.iter().position(|&b| b == 0) {
+        Some(nul) => std::str::from_utf8(&window[..nul]).map_err(|_| "ffi_input_utf8"),
+        // 无 NUL 终止——拒绝而非继续无界读取
+        None => Err("ffi_input_too_long"),
+    }
 }
 
+/// JSON 编码为 NUL 结尾的 C 字符串。serde_json 输出不含字面 NUL（转义为
+/// \u0000），因此正常情况下不会失败；为彻底兑现"绝不返回 null"，分配失败
+/// 时回退到固定的 ASCII deny 串（abi_version=0 标记异常响应，宿主可识别）。
 fn write_response(value: Value) -> *mut c_char {
-    CString::new(value.to_string())
-        .map(CString::into_raw)
-        .unwrap_or(ptr::null_mut())
+    match CString::new(value.to_string()) {
+        Ok(c) => CString::into_raw(c),
+        Err(_) => {
+            const FALLBACK: &[u8] =
+                b"{\"abi_version\":0,\"decision\":\"deny\",\"reason\":{\"code\":\"ffi_response_alloc\",\"detail\":\"response allocation failed\",\"explanation\":\"denied by aegis-policy-core native boundary\"}}";
+            CString::into_raw(CString::new(FALLBACK).expect("fallback is NUL-free ASCII"))
+        }
+    }
 }
 
 fn deny(code: &str, detail: &str) -> Value {
@@ -140,8 +160,13 @@ fn with_broker<T>(broker: *mut CAbiBroker, operation: impl FnOnce(&CAbiBroker) -
     if broker.is_null() {
         return None;
     }
-    // SAFETY: 指针只能由 `aegis_policy_core_broker_new` 创建，且调用方必须在 free 前保持有效。
-    Some(operation(unsafe { &*broker }))
+    // SAFETY: 指针只能由 `aegis_policy_core_broker_new` 创建；free 仅置退休
+    // 标志而不释放，因此这里解引用始终指向已分配的对象。
+    let b = unsafe { &*broker };
+    if b.retired.load(Ordering::SeqCst) {
+        return None; // 已退休——拒绝而非触碰已释放内存
+    }
+    Some(operation(b))
 }
 
 /// 创建独立的原生策略 Broker；`policy_version` 为空、无效 UTF-8 或 panic 时返回 null。
@@ -156,20 +181,25 @@ pub extern "C" fn aegis_policy_core_broker_new(policy_version: *const c_char) ->
         }
         Box::into_raw(Box::new(CAbiBroker {
             inner: FfiBroker::new(policy_version.to_owned()),
+            retired: AtomicBool::new(false),
         }))
     }))
     .unwrap_or(ptr::null_mut())
 }
 
-/// 释放由 `aegis_policy_core_broker_new` 创建的 Broker；null 是幂等安全操作。
+/// 退休（标记）由 `aegis_policy_core_broker_new` 创建的 Broker；null 是幂等安全操作。
+///
+/// Broker 为进程级单例——本函数**有意不释放**底层分配，仅置 retired 标志；
+/// 后续所有对该句柄的调用都会读到标志并返回 deny（而非 use-after-free）。
+/// 该单例分配的一次性泄漏可接受。
 ///
 /// # Safety
-/// `broker` 必须为本库创建、尚未释放且未被并发使用的句柄；传入任意地址或重复释放是未定义行为。
+/// `broker` 必须为本库创建（或 null）；指向任意地址是未定义行为。
 #[no_mangle]
 pub unsafe extern "C" fn aegis_policy_core_broker_free(broker: *mut CAbiBroker) {
     if !broker.is_null() {
-        // SAFETY: 指针所有权在此函数调用后归 Rust；调用方不得再次使用或重复释放。
-        unsafe { drop(Box::from_raw(broker)) };
+        // SAFETY: 指针只能由 `aegis_policy_core_broker_new` 创建；只置标志不释放。
+        unsafe { (*broker).retired.store(true, Ordering::SeqCst) };
     }
 }
 
@@ -191,6 +221,7 @@ pub use navigation::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::CStr;
 
     fn c_string(value: &str) -> CString {
         CString::new(value).expect("test input must not contain NUL")
@@ -712,5 +743,34 @@ mod tests {
             // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
             unsafe { aegis_policy_core_broker_free(broker) };
         }
+    }
+
+    #[test]
+    fn freed_broker_retires_cleanly_without_ub() {
+        // 审计整改：broker_free 置 retired 标志（不再释放底层分配）——
+        // 退休后调用返回 deny，而非 use-after-free；重复 free 幂等。
+        let version = c_string("1.0");
+        let broker = aegis_policy_core_broker_new(version.as_ptr());
+        assert!(!broker.is_null());
+        let sid = c_string("s");
+        let tid = c_string("t");
+        let url = c_string("https://example.com/");
+        let scope = c_string("navigation");
+        // SAFETY: broker 由本测试创建。
+        unsafe { aegis_policy_core_broker_free(broker) };
+        let res = aegis_policy_core_broker_evaluate_navigation_json(
+            broker,
+            sid.as_ptr(),
+            tid.as_ptr(),
+            0,
+            url.as_ptr(),
+            scope.as_ptr(),
+        );
+        assert!(!res.is_null());
+        let value = read_response(res);
+        assert_eq!(value["decision"], "deny");
+        // 重复 free：幂等（仅再次置位同一标志）
+        // SAFETY: broker 由本测试创建，free 幂等。
+        unsafe { aegis_policy_core_broker_free(broker) };
     }
 }

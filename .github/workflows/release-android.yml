@@ -58,7 +58,12 @@ jobs:
           AEGIS_KEYSTORE_FILE_B64: ${{ secrets.AEGIS_KEYSTORE_FILE }}
         run: |
           if [ -z "$AEGIS_KEYSTORE_FILE_B64" ]; then
-            echo "::warning::AEGIS_KEYSTORE_FILE 未配置——本构建产出未签名 APK"
+            # 审计整改：tag 构建必须带签名 keystore——未签名 APK 不得进入发布
+            if [ "${{ github.ref_type }}" = "tag" ]; then
+              echo "❌ AEGIS_KEYSTORE_FILE 未配置——tag 发布必须产出已签名 APK（fail-closed）"
+              exit 1
+            fi
+            echo "::warning::AEGIS_KEYSTORE_FILE 未配置——本构建产出未签名 APK（非 tag 调试）"
           else
             echo "$AEGIS_KEYSTORE_FILE_B64" | base64 -d > "$RUNNER_TEMP/aegis-release.jks"
             echo "AEGIS_KEYSTORE_FILE=$RUNNER_TEMP/aegis-release.jks" >> "$GITHUB_ENV"
@@ -145,6 +150,19 @@ jobs:
           if grep -Eq "^lib/(armeabi-v7a|x86|x86_64)/" <<< "$apk_entries"; then
             echo "FAIL: 发现非 arm64-v8a ABI 入包（违反单架构分发规则）"
             exit 1
+          fi
+      - name: Verify APK signature (fail-closed on tag)
+        shell: bash
+        run: |
+          BT=$(ls -d "$ANDROID_HOME/build-tools/"*/ | sort -V | tail -1)
+          APK_FILE=$(ls app/build/outputs/apk/release/*.apk)
+          if "$BT/apksigner" verify --print-certs "$APK_FILE" > /tmp/apksigner.out 2>&1; then
+            echo "[apksigner] 签名验证 OK"; cat /tmp/apksigner.out
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "❌ APK 未签名或签名损坏——tag 发布必须已签名（fail-closed）"
+            exit 1
+          else
+            echo "::warning::APK 未签名或签名校验未通过（非 tag 调试构建）"
           fi
       - name: Collect APK + generate SHA-256
         shell: bash

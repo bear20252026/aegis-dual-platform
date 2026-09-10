@@ -67,6 +67,9 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _runtimeCoordinator = new TabRuntimeCoordinator(_runtimes, WebViewHost);
+        // 虚拟主机首帧重试耗尽：停止加载条并展示明确错误——瞬态抑制不应让
+        // 加载条永久旋转，用户须能感知"虚拟主机资源无法加载"。
+        _runtimeCoordinator.NtpNavigationFailed += OnNtpNavigationFailed;
         try { ApplyTheme(_settings.Theme); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"ApplyTheme: {ex.Message}"); }
         _tabs.TabOpened += OnTabOpened;
         _tabs.TabClosed += OnTabClosed;
@@ -641,6 +644,17 @@ public partial class MainWindow : Window
         // 每次导航完成即落盘（对齐 Python 栈崩溃恢复能力——强杀/崩溃后
         // 重启仍可恢复到最后的页面集合，而非仅正常关闭时的快照）
         SaveSession();
+    }
+
+    /// <summary>虚拟主机首帧有界重试耗尽（协调器事件）：停止加载条并展示明确
+    /// 错误——瞬态抑制只针对映射传播期，重试放弃后必须让用户可见失败。</summary>
+    private void OnNtpNavigationFailed(string tabId, CoreWebView2WebErrorStatus status)
+    {
+        if (tabId != _activeTabId)
+            return;  // 仅对激活标签反映 UI 状态
+        LoadingBar.Visibility = Visibility.Collapsed;
+        ErrorPage.Text = $"首页资源加载失败：{status}（已重试，无法加载）";
+        ErrorPagePanel.Visibility = Visibility.Visible;
     }
 
     // ================= 标签条交互 =================
@@ -1630,6 +1644,7 @@ public partial class MainWindow : Window
         _tabs.TabOpened -= OnTabOpened;
         _tabs.TabClosed -= OnTabClosed;
         _tabs.TabSwitched -= OnTabSwitched;
+        _runtimeCoordinator.NtpNavigationFailed -= OnNtpNavigationFailed;
         foreach (var runtime in _runtimes.Values)
         {
             WebViewHost.Children.Remove(runtime.Control);

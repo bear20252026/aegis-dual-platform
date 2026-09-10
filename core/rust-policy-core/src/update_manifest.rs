@@ -164,22 +164,79 @@ pub fn verify_threshold(
 
 /// 基础 base64 解码（纯函数——无外部 crate 依赖的简版；生产用 base64 crate——
 /// 蓝图最小依赖取舍：此实现仅试点，后续迁移 base64 crate）。
+/// 审计整改（2026-09-07）：严格校验——padding 只能在末尾、`=` 之后不得再有
+/// 数据、数据长度模 4 不得为 1、尾部残留非零 bit 拒绝。
 fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = input.as_bytes();
     let mut out = Vec::new();
     let mut buf = 0u32;
     let mut bits = 0u32;
-    for &ch in input.as_bytes() {
-        if ch == b'=' {
-            break;
-        }
-        let val = TABLE.iter().position(|&t| t == ch).ok_or(())? as u32;
-        buf = (buf << 6) | val;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buf >> bits) as u8);
+    let mut index = 0usize; // 非 padding 字符数
+    let mut saw_padding = false;
+    for &ch in bytes {
+        match ch {
+            b'=' => {
+                // 首个 '=' 之前的数据量必须是 2/3（模 4）；重复 '=' 允许，
+                // 但总量由输入长度与末尾规则共同约束
+                if !saw_padding && index % 4 != 2 && index % 4 != 3 {
+                    return Err(());
+                }
+                saw_padding = true;
+            }
+            _ if saw_padding => return Err(()), // '=' 之后出现数据
+            _ => {
+                let val = TABLE.iter().position(|&t| t == ch).ok_or(())? as u32;
+                buf = (buf << 6) | val;
+                bits += 6;
+                index += 1;
+                if bits >= 8 {
+                    bits -= 8;
+                    out.push((buf >> bits) as u8);
+                }
+            }
         }
     }
+    // 数据长度模 4 == 1 是非法编码（单字符剩余 6bit 无意义）
+    if index % 4 == 1 {
+        return Err(());
+    }
+    // 剩余未消费 bits 必须为 0（拒绝尾部非零 bit 的非规范编码）
+    if bits > 0 && (buf & ((1u32 << bits) - 1)) != 0 {
+        return Err(());
+    }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn base64_decodes_canonical() {
+        assert_eq!(base64_decode("Zg==").unwrap(), vec![0x66]); // 'f'
+        assert_eq!(base64_decode("aGVsbG8=").unwrap(), b"hello".to_vec());
+        assert_eq!(base64_decode("YWI=").unwrap(), b"ab".to_vec());
+    }
+
+    #[test]
+    fn base64_rejects_noncanonical_trailing_bits() {
+        // "AB==" -> A=0,B=1 => 字节 0、尾部残留 0b0001 非零 → 拒绝
+        assert!(base64_decode("AB==").is_err());
+        // "AA==" -> 字节 0、尾部残留 0 → 接受
+        assert!(base64_decode("AA==").is_ok());
+    }
+
+    #[test]
+    fn base64_rejects_bad_padding_placement() {
+        assert!(base64_decode("A=AA").is_err()); // '=' 在中间
+        assert!(base64_decode("AA=A").is_err()); // '=' 后有数据
+        assert!(base64_decode("A====").is_err()); // 过多 '='
+    }
+
+    #[test]
+    fn base64_rejects_length_one_mod_four() {
+        assert!(base64_decode("A").is_err()); // index%4==1
+        assert!(base64_decode("Zg").is_ok()); // 2 数据字符合法
+    }
 }

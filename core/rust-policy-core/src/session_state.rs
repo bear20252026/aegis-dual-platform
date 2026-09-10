@@ -44,16 +44,38 @@ pub struct TabMetadata {
 
 impl SessionState {
     /// 从 JSON 字符串反序列化（照搬 Omni Browser fromJson）。
+    /// 审计整改（2026-09-07）：对字段长度做上限、拒绝未知 schema 版本——
+    /// 此前反序列化不校验字段长度/schema，超长输入可驱动无界分配（内存 DoS）。
     pub fn from_json(json: &str) -> Option<Self> {
+        const MAX_TAB_ID_LEN: usize = 256;
+        const MAX_TITLE_LEN: usize = 4096;
+        const MAX_URL_LEN: usize = 8192;
+        const MAX_STATE_BYTES: usize = 512 * 1024;
+
         let map: HashMap<String, serde_json::Value> = serde_json::from_str(json).ok()?;
         let schema_version = map.get("schemaVersion")?.as_u64()? as u32;
+        // 仅接受当前 schema（拒绝未来/未知版本，避免向后兼容盲区）
+        if schema_version != CURRENT_SCHEMA_VERSION {
+            return None;
+        }
         let tab_id = map.get("tabId")?.as_str()?.to_string();
+        if tab_id.len() > MAX_TAB_ID_LEN {
+            return None;
+        }
         let b64 = map.get("sessionStateBytes")?.as_str()?;
         let session_state_bytes = hex_decode(b64)?;
+        if session_state_bytes.len() > MAX_STATE_BYTES {
+            return None;
+        }
         let meta = map.get("metadata")?;
+        let title = meta.get("title")?.as_str()?;
+        let url = meta.get("url")?.as_str()?;
+        if title.len() > MAX_TITLE_LEN || url.len() > MAX_URL_LEN {
+            return None;
+        }
         let metadata = TabMetadata {
-            title: meta.get("title")?.as_str()?.to_string(),
-            url: meta.get("url")?.as_str()?.to_string(),
+            title: title.to_string(),
+            url: url.to_string(),
             is_incognito: meta.get("isIncognito")?.as_bool().unwrap_or(false),
             last_active_time: meta.get("lastActiveTime")?.as_u64().unwrap_or(0),
             can_go_back: meta.get("canGoBack")?.as_bool().unwrap_or(false),
@@ -166,5 +188,34 @@ mod tests {
             timestamp: 0,
         };
         assert_eq!(state.schema_version, 1);
+    }
+
+    fn state_json(tab_id: &str, title: &str, url: &str, hex_bytes: &str) -> String {
+        format!(
+            r#"{{"schemaVersion":{},"tabId":"{}","sessionStateBytes":"{}","metadata":{{"title":"{}","url":"{}","isIncognito":false,"lastActiveTime":0,"canGoBack":false,"canGoForward":false}},"timestamp":0}}"#,
+            CURRENT_SCHEMA_VERSION, tab_id, hex_bytes, title, url
+        )
+    }
+
+    #[test]
+    fn rejects_unknown_schema_version() {
+        let json = format!(
+            r#"{{"schemaVersion":999,"tabId":"t","sessionStateBytes":"00","metadata":{{"title":"","url":"","isIncognito":false,"lastActiveTime":0,"canGoBack":false,"canGoForward":false}},"timestamp":0}}"#
+        );
+        assert!(SessionState::from_json(&json).is_none());
+    }
+
+    #[test]
+    fn rejects_oversized_state_bytes() {
+        let big = "ff".repeat(600 * 1024); // > 512KB 上限
+        assert!(SessionState::from_json(&state_json("t", "t", "u", &big)).is_none());
+    }
+
+    #[test]
+    fn rejects_oversized_url_and_tab_id() {
+        let long_url = format!("https://x/{}", "a".repeat(9000)); // > 8192 上限
+        assert!(SessionState::from_json(&state_json("t", "t", &long_url, "00")).is_none());
+        let long_tab = "x".repeat(300); // > 256 上限
+        assert!(SessionState::from_json(&state_json(&long_tab, "t", "u", "00")).is_none());
     }
 }
