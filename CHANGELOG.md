@@ -1,5 +1,43 @@
 # Changelog
 
+## beta.22 – beta.31（2026-09-10 · 架构收敛十连发）
+### 安全（beta.22 / beta.29 / beta.30）
+- 发布链签名 fail-closed：tag 构建强制已签名 APK（apksigner verify 未过即失败）；
+  Windows 安装包接入可选 Authenticode 签名步骤（提供 PFX secret 时签名+校验）。
+- Rust FFI 边界加固：C 入入参有界扫描（64KB 窗口，无 NUL 拒绝）、broker_free 改退休
+  语义（杜绝 use-after-free/重复释放 UB）、响应分配失败回退固定 ASCII deny（绝不返回
+  null）、待审批导航账本 1024 上限（内存 DoS 防护）。
+- Rust 输入校验：`SessionState::from_json` 长度上限 + 拒绝未知 schema 版本；
+  自带 base64 解码改严格校验（padding 位置/长度模 4/尾部残留 bit 全部拒绝）。
+- Android 默认构建确认导航修复：`requestNavigationConfirmation` 此前无条件 Deny
+  （仅 CI 的 requireNativePolicyCore=true 掩盖该问题）——默认产物现走托管 evaluate。
+- NTP CSP 前置（审计 I83）：内联脚本全部外置（start.js 适配层 + start.main.js 主逻辑），
+  内联事件处理器与内联样式清零；CSP `script-src 'self' file:` + `connect-src 'none'`
+  （Android file: 资产显式放行——https 页面引用 file: 子资源本就被浏览器拦截）。
+- Android BridgeGuard `REQUIRE_HTTPS` 生产接线开启：受信内页对 bridge 目标
+  （aegis.local/localhost/127.0.0.1）的 http: 调用一律拒绝。
+### 架构（beta.23 – beta.28 · MainWindow 上帝对象拆分，1658 → 约 1280 行）
+- 第一批：查找条/地址栏建议外移 `FindBarController` + `SuggestionController`
+  （合并去重/window.find 转义补 9 项单测）。
+- 第二批：NTP 宿主桥 15 项服务委托组装外移 `NtpBridgeFactory`（FilterSources 可测）；
+  会话恢复双路径去重 `RebuildTabsFromSnapshot`。
+- 第三批：标签条拖拽外移 `TabStripDragController`、导航确认面板（含 pending 态唯一持有）
+  外移 `ApprovalPanelController`（STA 冒烟 4 项）。
+- InPrivate 复用 `TabRuntimeCoordinator`（创建/关闭/延迟导航重试单源化，删除窗口内
+  漂移副本）；`BindVirtualHosts`/`IsTopLevelNtpDocument` 上收 `NtpAssets` 双窗口共享。
+- `HostWebView` 匿名闭包改命名处理器 + 显式 `UnwireEvents` + 双接线防护。
+- `PostDelayedNavigation` 窗口存活校验改 `Func<bool>` 探针即时求值（布尔快照陈旧值消除）。
+### 稳定性 / 性能
+- 会话落盘防抖 2s（每导航同步写 SQLite 的写放大治理；关闭/退出 `FlushSession` 强制刷盘）。
+- 虚拟主机首帧重试耗尽：停止加载条并展示明确错误（瞬态抑制不再让加载条永久旋转）。
+- 主题传播收尾：SourceViewer 接入 WindowTheme、设置窗首开补换肤（浅色模式此前仍深色）、
+  无痕窗恒定深色注释化（对齐 Edge/Chrome 无痕视觉惯例）。
+### 门禁修复
+- UI 回归 BUG-011/012 自 95d9bac 起的既有失败修复（back-fab 随「三端返回形态统一」
+  移除后断言未同步）；断言目标随脚本外置迁移到 start.js/start.main.js。
+- beta.22 引入的 AndroidBroker when 块 ktlint 违规修复；双打包链资产断言补
+  start.js/start.main.js。
+
 ## 未发布（全仓 200 项审计整改 2026-09-07）
 ### 安全（P0/P1）
 - 书签管理窗口 P0 崩溃：补齐缺失的 `PrimaryButton`/`GhostButton` 样式（此前窗口必崩）。

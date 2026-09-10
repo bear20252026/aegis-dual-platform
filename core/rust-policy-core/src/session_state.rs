@@ -199,10 +199,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_schema_version() {
-        let json = format!(
-            r#"{{"schemaVersion":999,"tabId":"t","sessionStateBytes":"00","metadata":{{"title":"","url":"","isIncognito":false,"lastActiveTime":0,"canGoBack":false,"canGoForward":false}},"timestamp":0}}"#
-        );
-        assert!(SessionState::from_json(&json).is_none());
+        let json = r#"{"schemaVersion":999,"tabId":"t","sessionStateBytes":"00","metadata":{"title":"","url":"","isIncognito":false,"lastActiveTime":0,"canGoBack":false,"canGoForward":false},"timestamp":0}"#;
+        assert!(SessionState::from_json(json).is_none());
     }
 
     #[test]
