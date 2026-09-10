@@ -57,8 +57,8 @@ android {
         applicationId = "com.aegis.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20227
-        versionName = "2.2.0-beta.28"
+        versionCode = 20228
+        versionName = "2.2.0-beta.29"
         ndk {
             // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
             // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）

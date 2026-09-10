@@ -4,6 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Aegis 新标签页</title>
+<!-- CSP（审计 I83 收口）：此前内联脚本/内联事件处理器依赖「受信壳页」假设。
+     现全部脚本外置（start.js/start.snake.js/start.import.js/start.main.js），
+     事件绑定经 addEventListener——script-src 'self' 禁内联后仍有完整行为。
+     file: 许可：Android 以 file:///android_asset/ 加载本页，file: 文档对
+     'self' 的匹配依引擎而异——显式放行本地文件（https 页面引用 file:
+     子资源本就被浏览器拦截，此许可实际只作用于 Android 本地资产）。
+     connect-src 'none'：页面自身零网络请求（数据全走宿主桥）。 -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' file:; style-src 'self' file:; img-src 'self' file: data:; connect-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
     <link rel="stylesheet" href="start.css">
 </head>
 <body>
@@ -15,23 +24,22 @@
     <div class="search">
       <div class="engine-wrap">
         <div class="engine-pill" id="enginePill" title="切换搜索引擎" role="button" tabindex="0"
-             aria-haspopup="menu" aria-expanded="false"
-             onclick="toggleEngineMenu(event)"
-             onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleEngineMenu(event);}">
+             aria-haspopup="menu" aria-expanded="false">
           <span class="dot"></span><span id="engineName">百度</span><span class="caret" aria-hidden="true">▾</span>
         </div>
         <div class="engine-menu" id="engineMenu"></div>
       </div>
-      <!-- form+submit：兼容移动端 IME「搜索/前往」action（不走 keydown Enter） -->
-      <form id="searchForm" onsubmit="event.preventDefault(); go();">
+      <!-- form+submit：兼容移动端 IME「搜索/前往」action（不走 keydown Enter；
+           submit 与按钮点击双路径绑定在 start.main.js——BUG-009 保底） -->
+      <form id="searchForm">
       <input id="q" type="search" enterkeyhint="search" autocomplete="off" aria-label="搜索网页或输入网址"
              placeholder="搜索网页或输入网址…" autofocus>
-      <button type="button" id="searchBtn" onclick="go()">搜索</button>
+      <button type="button" id="searchBtn">搜索</button>
       </form>
     </div>
     <!-- 几何画板快捷入口（离线 GeoGebra——点击跳转内置画板页） -->
     <div class="quick-row">
-      <button id="snakeBtn" class="quick-btn" title="贪吃蛇小游戏 · 离线可玩" onclick="openSnake()">
+      <button id="snakeBtn" class="quick-btn" title="贪吃蛇小游戏 · 离线可玩">
         <span class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 5h-9a3 3 0 0 0 0 6h4a3 3 0 0 1 0 6H4"/><circle cx="20.2" cy="5" r="1.4" fill="currentColor" stroke="none"/></svg></span><span>贪吃蛇</span>
       </button>
       <button id="geoBtn" class="quick-btn" title="离线几何画板 · 无需网络">
@@ -39,16 +47,16 @@
       </button>
     </div>
     <div class="bookmarks" id="bm"></div>
-    <div id="restoreBox" style="display:none;margin-top:26px;">
+    <div id="restoreBox" class="restore-box" hidden>
       <button id="restoreBtn" class="restore-btn">恢复上次会话</button>
     </div>
-    <div style="margin-top:14px;">
+    <div class="import-entry-wrap">
       <button id="importEntry" class="link-btn">从 Chrome / Edge 导入书签与历史</button>
     </div>
   </div>
 
   <!-- 导入向导弹层（步骤内容全部由 JS 以 textContent 构建——R-06） -->
-  <div id="importModal" style="display:none;" role="dialog" aria-modal="true" aria-label="从 Chrome 或 Edge 导入">
+  <div id="importModal" role="dialog" aria-modal="true" aria-label="从 Chrome 或 Edge 导入" hidden>
     <div class="im-card">
       <div class="im-title">从 Chrome / Edge 导入</div>
       <div id="imBody"></div>
@@ -66,7 +74,7 @@
   </div>
   <div class="footer">Enter 打开 · Ctrl+L 聚焦地址栏</div>
 
-  
+
   <!-- 贪吃蛇（暖阳像素：金色时刻 · 温暖正面——双端统一单源） -->
   <div class="snake-overlay" id="snakeOverlay">
     <div class="snake-panel">
@@ -77,7 +85,7 @@
           <span class="chip best"><span class="k">最高</span><b id="snakeBest">0</b></span>
         </div>
         <button class="snake-sound" id="snakeSound" title="音效开关" aria-label="音效开关">🔊</button>
-        <button class="snake-close" id="snakeClose" title="退出" aria-label="退出游戏" onclick="Snake.close()">&#10005;</button>
+        <button class="snake-close" id="snakeClose" title="退出" aria-label="退出游戏">&#10005;</button>
       </div>
       <div class="snake-stage">
         <canvas id="snakeCanvas" width="480" height="480" role="img" aria-label="贪吃蛇游戏画布"></canvas>
@@ -94,455 +102,10 @@
     </div>
   </div>
 
-<script>
-    // JS 错误上报：页面任何异常 → Python 日志（后台静默）
-    // ================= 跨端宿主桥适配层（ADR-007 单源首页） =================
-    // Windows：pywebview.api（异步 Promise）；Android：AegisBridge
-    // （@JavascriptInterface，同步返回——由适配层统一包装成 thenable）；
-    // Windows C#（ADR-009 正典栈）：WebView2 postMessage 桥（ntp.aegis.local
-    // 受信虚拟主机——远程页面上 WebMessage 被宿主按来源关闭，本桥不可达）。
-    // 能力面差异：Android 首页当前能力 = 错误上报/引擎/导航/壁纸/画板；
-    // 书签宫格、导入向导、会话恢复为 Windows 能力（Android 上自动隐藏）。
-    var Host = (function () {
-      var winApi = function () { return (window.pywebview && pywebview.api) || null; };
-      var andApi = function () { return window.AegisBridge || null; };
-      var csApi = function () {
-        return (window.chrome && chrome.webview && chrome.webview.postMessage) ? chrome.webview : null;
-      };
-      // C# 桥请求通道：postMessage 关联 id + 单一 message 监听分发响应
-      var _csSeq = 0, _csPending = {}, _csListening = false;
-      function csCall(op, args, cb) {
-        var w = csApi(); if (!w) { if (cb) cb(null); return; }
-        if (!_csListening) {
-          _csListening = true;
-          w.addEventListener('message', function (e) {
-            var d = e.data;
-            if (d && d.__aegisRes && _csPending[d.id]) {
-              var f = _csPending[d.id]; delete _csPending[d.id];
-              try { f(d.result); } catch (err) { try { Host.jsError('ntp callback: ' + err); } catch (e2) {} }
-            }
-          });
-        }
-        var id = ++_csSeq;
-        _csPending[id] = cb || function () {};
-        w.postMessage({ __aegis: 1, id: id, op: op, args: args || [] });
-      }
-      return {
-        kind: function () { return winApi() ? 'win' : (andApi() ? 'android' : (csApi() ? 'cs' : null)); },
-        has: function (feat) {
-          var k = this.kind();
-          if (!k) return false;
-          if (k === 'win' || k === 'cs') return true;
-          var androidFeats = { engine: 1, navigate: 1, wallpaper: 1, geo: 1, snake: 1 };
-          return !!androidFeats[feat];
-        },
-        jsError: function () {
-          var w = winApi(); if (w) { w.js_error.apply(w, arguments); return; }
-          var a = andApi(); if (a) { a.logError([].slice.call(arguments).join(' | ')); return; }
-          var c = csApi(); if (c) csCall('jsError', [].slice.call(arguments));
-        },
-        setEngine: function (key) {
-          var w = winApi(); if (w) { w.set_search_engine(key); return; }
-          var a = andApi(); if (a) { a.setEngine(key); return; }
-          csCall('setEngine', [key]);
-        },
-        getEngine: function (cb) {
-          var w = winApi(); if (w) { w.get_search_engine().then(cb); return; }
-          // P1-2 修复（搜索审计 2026-09-01）：Android 桥返回 JSON 字符串
-          // （与 Windows get_search_engine 同构）——旧实现直接回传 key 字符串，
-          // data.engines 为 undefined → ENGINES=[] → 引擎 pill 点击无响应
-          var a = andApi(); if (a) {
-            // P2 修复（全量复审 2026-09-01）：解析失败/空结构不再静默 cb(null)
-            // （引擎胶囊无响应）——回退默认引擎集（与 Android
-            // SearchEngines.ENGINE_URLS 同构），胶囊保持可用
-            function engineFallback() {
-              return { engine: 'baidu', engines: [
-                { key: 'baidu', name: '百度' },
-                { key: 'bing', name: '必应' },
-                { key: 'google', name: '谷歌' },
-                { key: 'sogou', name: '搜狗' }
-              ]};
-            }
-            try {
-              var parsed = JSON.parse(a.getEngine());
-              cb(parsed && parsed.engines && parsed.engines.length ? parsed : engineFallback());
-            } catch (e) {
-              cb(engineFallback());
-            }
-            return;
-          }
-          csCall('getEngine', [], cb);
-        },
-        navigate: function (url) {
-          var w = winApi(); if (w) { w.navigate(url); return; }
-          var a = andApi(); if (a) { a.navigate(url); return; }
-          csCall('navigate', [url]);
-        },
-        goBack: function () {
-          var w = winApi(); if (w) { w.go_back(); return; }
-          var a = andApi(); if (a) { a.goBack(); return; }
-          csCall('goBack', []);
-        },
-        setWallpaper: function (name) {
-          var w = winApi(); if (w) { w.set_wallpaper(name); return; }
-          var a = andApi(); if (a) { a.setWallpaper(name); return; }
-          csCall('setWallpaper', [name]);
-        },
-        getWallpaper: function (cb) {
-          var w = winApi(); if (w) { w.get_wallpaper().then(cb); return; }
-          var a = andApi(); if (a) { cb(a.getWallpaper()); return; }
-          csCall('getWallpaper', [], cb);
-        },
-        openGeo: function (onFail) {
-          var w = winApi();
-          if (w) { w.open_geogebra().then(function (ok) { if (!ok) onFail(); }); return; }
-          var a = andApi(); if (a) { if (!a.openGeogebra()) onFail(); return; }
-          csCall('openGeo', [], function (ok) { if (!ok) onFail(); });
-        },
-        hasSaved: function (cb) {
-          var w = winApi(); if (w) { w.has_saved_session().then(cb); return; }
-          if (andApi()) { cb(0); return; }  // Android：会话恢复为 Windows 能力
-          csCall('hasSaved', [], cb);
-        },
-        restoreSession: function () {
-          var w = winApi(); if (w) { w.restore_session(); return; }
-          csCall('restoreSession', []);
-        },
-        bookmarks: function (cb) {
-          var w = winApi(); if (w) { w.get_bookmarks().then(cb); return; }
-          if (andApi()) { cb([]); return; }  // Android：书签宫格暂无数据源
-          csCall('bookmarks', [], cb);
-        },
-        importScan: function (cb) {
-          var w = winApi(); if (w) { w.scan_import_sources().then(cb); return; }
-          if (andApi()) { cb([]); return; }  // Android：导入向导为 Windows 能力
-          csCall('importScan', [], cb);
-        },
-        importBookmarks: function (src, cb) {
-          var w = winApi(); if (w) { w.import_bookmarks(src).then(cb); return; }
-          if (andApi()) { cb({ imported: 0, total: 0 }); return; }
-          csCall('importBookmarks', [src], cb);
-        },
-        importHistory: function (limit, src, cb) {
-          var w = winApi(); if (w) { w.import_history(limit, src).then(cb); return; }
-          if (andApi()) { cb({ imported: 0, total: 0 }); return; }
-          csCall('importHistory', [limit, src], cb);
-        },
-      };
-    })();
-
-    </script>
-    <script src="start.snake.js"></script>
-    <script src="start.import.js"></script>
-    <script>
-
-    window.addEventListener('error', function (e) {
-      try {
-        Host.jsError(
-          e.message || 'unknown', e.filename || '', e.lineno, e.colno,
-          (e.error && e.error.stack) || '');
-      } catch (err) {}
-    });
-    window.addEventListener('unhandledrejection', function (e) {
-      try {
-        Host.jsError(
-          'Promise rejection: ' + (e.reason || ''), '', 0, 0,
-          (e.reason && e.reason.stack) || '');
-      } catch (err) {}
-    });
-
-    var WALLPAPERS = [
-      {name:'aurora-magenta.jpg', url:'wallpapers/aurora-magenta.jpg'},
-      {name:'aurora-lime.jpg',    url:'wallpapers/aurora-lime.jpg'},
-      {name:'aurora-twilight.jpg',url:'wallpapers/aurora-twilight.jpg'},
-      {name:'aurora-violet.jpg',  url:'wallpapers/aurora-violet.jpg'}
-    ];
-    var current = 'aurora-twilight.jpg';
-    // 搜索引擎状态
-    var ENGINES = [];           // [{key,name}]
-    var engineIdx = 0;
-
-    function renderEngine() {
-      var el = document.getElementById('engineName');
-      if (el && ENGINES.length) el.textContent = ENGINES[engineIdx].name;
-    }
-    function toggleEngineMenu(ev) {
-      ev.stopPropagation();
-      var m = document.getElementById('engineMenu');
-      var pill = document.getElementById('enginePill');
-      if (!m) return;
-      if (m.style.display === 'block') {
-        m.style.display = 'none';
-        if (pill) pill.setAttribute('aria-expanded', 'false');
-        return;
-      }
-      renderEngineMenu(function () {
-        m.style.display = 'block';
-        if (pill) pill.setAttribute('aria-expanded', 'true');
-      });
-    }
-    function renderEngineMenu(done) {
-      var m = document.getElementById('engineMenu');
-      if (!m) return;
-      function build() {
-        if (!ENGINES.length) { m.style.display = 'none'; return; }
-        m.textContent = '';
-        for (var i = 0; i < ENGINES.length; i++) {
-          (function (idx) {
-            var it = document.createElement('div');
-            it.className = 'engine-item' + (idx === engineIdx ? ' active' : '');
-            it.setAttribute('role', 'menuitemradio');
-            it.setAttribute('aria-checked', idx === engineIdx ? 'true' : 'false');
-            it.tabIndex = 0;
-            var name = document.createElement('span');
-            name.textContent = ENGINES[idx].name;
-            var mark = document.createElement('span');
-            mark.className = 'mark';
-            mark.setAttribute('aria-hidden', 'true');
-            mark.textContent = idx === engineIdx ? '✓' : '';
-            it.appendChild(name);
-            it.appendChild(mark);
-            it.onclick = function (ev) { ev.stopPropagation(); selectEngine(idx); };
-            it.onkeydown = function (ev) {
-              if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); selectEngine(idx); }
-            };
-            m.appendChild(it);
-          })(i);
-        }
-        if (done) done();
-      }
-      if (!ENGINES.length) {
-        // 引擎表未就绪时向宿主拉取（跨端：Windows csCall / Android JSON）
-        try {
-          Host.getEngine(function (data) {
-            if (data && data.engines && data.engines.length) {
-              ENGINES = data.engines;
-              engineIdx = 0;
-              for (var i = 0; i < ENGINES.length; i++) {
-                if (ENGINES[i].key === data.engine) { engineIdx = i; break; }
-              }
-              renderEngine();
-            }
-            build();
-          });
-        } catch (e) { build(); }
-      } else { build(); }
-    }
-    function selectEngine(idx) {
-      if (!ENGINES.length) return;
-      engineIdx = idx;
-      renderEngine();
-      try { Host.setEngine(ENGINES[engineIdx].key); } catch (e) {}
-      var m = document.getElementById('engineMenu');
-      if (m) m.style.display = 'none';
-    }
-    document.addEventListener('click', function () {
-      var m = document.getElementById('engineMenu');
-      if (m) m.style.display = 'none';
-    });
-    // 读取当前搜索引擎（配置持久化）
-    {
-      try {
-        Host.getEngine(function (data) {
-          if (!data) return;
-          ENGINES = data.engines || [];
-          for (var i = 0; i < ENGINES.length; i++) {
-            if (ENGINES[i].key === data.engine) { engineIdx = i; break; }
-          }
-          renderEngine();
-        });
-      } catch (e) {}
-    }
-
-    var _searchBusy = false;
-    function go() {
-      if (_searchBusy) return;
-      var v = document.getElementById('q').value.trim();
-      if (!v || !Host.has('navigate')) return;
-      _searchBusy = true;
-      var btn = document.getElementById('searchBtn');
-      var orig = btn.textContent;
-      btn.textContent = '搜索中…';
-      try { Host.navigate(v); } catch (e) { Host.jsError('navigate failed: ' + e); }
-      // 导航被 Broker 确认面板挂起或失败时复原按钮（成功则页面随即卸载）
-      setTimeout(function () { btn.textContent = orig; _searchBusy = false; }, 1200);
-    }
-    function openUrl(u) {
-      if (Host.has('navigate')) Host.navigate(u);
-    }
-    document.addEventListener('keydown', function (e) {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
-        e.preventDefault(); document.getElementById('q').focus(); document.getElementById('q').select();
-      }
-    });
-
-    function setWallpaper(name) {
-      var hit = null;
-      for (var i = 0; i < WALLPAPERS.length; i++) {
-        if (WALLPAPERS[i].name === name) { hit = WALLPAPERS[i]; break; }
-      }
-      if (!hit) return;
-      current = name;
-      document.getElementById('wallpaper').style.backgroundImage = "url('" + hit.url.replace(/'/g, '%27') + "')";
-      var dots = document.getElementById('wpList').children;
-      for (var j = 0; j < dots.length; j++) {
-        dots[j].className = 'wp' + (WALLPAPERS[dots[j].dataset.i].name === name ? ' active' : '');
-      }
-      try { Host.setWallpaper(name); } catch (e) {}
-    }
-
-    // 渲染壁纸切换圆点
-    var wl = document.getElementById('wpList');
-    for (var i = 0; i < WALLPAPERS.length; i++) {
-      (function (idx) {
-        var d = document.createElement('div');
-        d.className = 'wp';
-        d.dataset.i = idx;
-        d.style.backgroundImage = "url('" + WALLPAPERS[idx].url.replace(/'/g, '%27') + "')";
-        d.title = WALLPAPERS[idx].name;
-        d.setAttribute('role', 'button');
-        d.setAttribute('aria-label', '壁纸 ' + WALLPAPERS[idx].name);
-        d.tabIndex = 0;
-        function pick() { setWallpaper(WALLPAPERS[idx].name); }
-        d.onclick = pick;
-        d.onkeydown = function (ev) {
-          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); }
-        };
-        wl.appendChild(d);
-      })(i);
-    }
-
-    // 读取当前壁纸（配置持久化）
-    {
-      try {
-        Host.getWallpaper(function (name) {
-          if (name) setWallpaper(name);
-        });
-      } catch (e) {}
-    }
-
-    // 几何画板快捷入口（离线 GeoGebra——后端加载内置资源页；
-    // 资源未随包时返回 false → 按钮置灰提示）
-    (function () {
-      var btn = document.getElementById('geoBtn');
-      if (!btn) return;
-      btn.addEventListener('click', function () {
-        try {
-          if (!Host.has('geo')) return;
-          // P1-12 修复（全量复审 2026-09-01）：openGeo 的回调即 onFail——
-          // 仅在打开失败时调用（此前回调里引用未定义变量 ok，
-          // ReferenceError 被 try 吞掉 → 置灰提示永不生效）
-          Host.openGeo(function () {
-            btn.classList.add('unavailable');
-            btn.title = '当前安装包未包含画板资源';
-          });
-        } catch (e) {}
-      });
-    })();
-
-    // 恢复上次会话入口（resume_session 自动恢复之外的手动入口；
-    // 仅当已保存会话 >1 个标签时显示——has_saved_session 只返回计数）
-    {
-      try {
-        Host.hasSaved(function (n) {
-          n = parseInt(n, 10) || 0;
-          if (n > 1) {
-            var box = document.getElementById('restoreBox');
-            var btn = document.getElementById('restoreBtn');
-            if (!box || !btn) return;
-            btn.textContent = '恢复上次会话（' + n + ' 个标签）';
-            box.style.display = 'block';
-            btn.onclick = function () {
-              try { Host.restoreSession(); } catch (e) {}
-            };
-          }
-        });
-      } catch (e) {}
-    }
-
-
-    // 渲染书签
-    function renderBookmarks() {
-      var box = document.getElementById('bm');
-      if (!box) return;
-      try {
-        if (!Host.has('bookmarks')) return;
-        Host.bookmarks(function (items) {
-          if (!items || !items.length) {
-            box.textContent = '';
-            var empty = document.createElement('div');
-            empty.className = 'bm-empty';
-            empty.textContent = '还没有书签 — 浏览网页时点击地址栏右侧的 ☆ 按钮即可收藏';
-            box.appendChild(empty);
-            return;
-          }
-          // R-06 整改（体验/功能审查）：禁止 innerHTML 字符串拼接——
-          // 标题/URL/图标文本全部经 textContent 写入 DOM（防特殊字符
-          // 破坏显示与注入——实施手册 R-06 bookmarkCard 示例）
-          var frag = document.createDocumentFragment();
-          // 首页只展示最近 8 个书签；完整数据仍保留在书签库中，避免
-          // 大量历史/书签标签铺满主屏（横条可水平滚动）。
-          var visibleItems = items.slice(0, 8);
-          for (var i = 0; i < visibleItems.length; i++) {
-            var it = visibleItems[i];
-            var host = '';
-            try { host = new URL(it.url).host; } catch (e) { host = it.url; }
-            var card = document.createElement('div');
-            card.className = 'bm';
-            card.setAttribute('role', 'link');
-            card.tabIndex = 0;
-            card.addEventListener('click', (function (u) {
-              return function () { openUrl(u); };
-            })(it.url));
-            card.addEventListener('keydown', (function (u) {
-              return function (ev) {
-                if (ev.key === 'Enter') { ev.preventDefault(); openUrl(u); }
-              };
-            })(it.url));
-            var ico = document.createElement('div');
-            ico.className = 'bm-ico';
-            ico.textContent = (host.charAt(0) || '?').toUpperCase();
-            var name = document.createElement('div');
-            name.className = 'bm-name';
-            name.textContent = (it.title || host);
-            card.appendChild(ico);
-            card.appendChild(name);
-            frag.appendChild(card);
-          }
-          // “添加常用站点”磁贴（对齐 Edge）：点击聚焦搜索框输入网址
-          var addTile = document.createElement('div');
-          addTile.className = 'bm bm-add';
-          addTile.setAttribute('role', 'button');
-          addTile.setAttribute('aria-label', '添加常用站点');
-          addTile.tabIndex = 0;
-          function focusSearch() {
-            var q = document.getElementById('q');
-            if (q) { q.focus(); q.select(); }
-          }
-          addTile.addEventListener('click', focusSearch);
-          addTile.addEventListener('keydown', function (ev) {
-            if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); focusSearch(); }
-          });
-          var addIco = document.createElement('div');
-          addIco.className = 'bm-ico';
-          addIco.textContent = '＋';
-          var addName = document.createElement('div');
-          addName.className = 'bm-name';
-          addName.textContent = '添加常用站点';
-          addTile.appendChild(addIco);
-          addTile.appendChild(addName);
-          frag.appendChild(addTile);
-          box.replaceChildren(frag);
-        });
-      } catch (e) {}
-    }
-    // 书签渲染：立即尝试 + 桥未就绪时有界重试（此前固定 200ms 魔法延时，
-    // 慢机上桥未就绪即空宫格）
-    (function renderBookmarksWithRetry(attempt) {
-      if (Host.kind()) { renderBookmarks(); return; }
-      if (attempt >= 10) { renderBookmarks(); return; }
-      setTimeout(function () { renderBookmarksWithRetry(attempt + 1); }, 200);
-    })(0);
-  </script>
+  <!-- 脚本（CSP：全部外部文件——顺序：Host 适配层 → 贪吃蛇 → 导入向导 → 主逻辑/静态绑定） -->
+  <script src="start.js"></script>
+  <script src="start.snake.js"></script>
+  <script src="start.import.js"></script>
+  <script src="start.main.js"></script>
 </body>
 </html>

@@ -3,6 +3,8 @@
 // 运行：node --test tests/ui-regression/
 // A8 拆分跟进（全面审计 2026-09-04）：start.html 已拆为 html + start.css +
 // start.snake.js + start.import.js——断言目标随内容迁移到对应单源文件。
+// I83 收口（2026-09-10）：内联脚本/内联事件处理器全部外置为 start.js
+//（Host 适配层）与 start.main.js（主逻辑+静态绑定），CSP script-src 'self'。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
@@ -13,11 +15,12 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SHELL = join(ROOT, 'shared', 'shell');
 const HTML = readFileSync(join(SHELL, 'start.html'), 'utf8');
 const CSS = readFileSync(join(SHELL, 'start.css'), 'utf8');
+const HOSTJS = readFileSync(join(SHELL, 'start.js'), 'utf8');
+const MAINJS = readFileSync(join(SHELL, 'start.main.js'), 'utf8');
 const SNAKE = readFileSync(join(SHELL, 'start.snake.js'), 'utf8');
 const IMPORT = readFileSync(join(SHELL, 'start.import.js'), 'utf8');
-// 抽取全部内联 <script> 体（非贪婪逐块——贪心跨块会把 src 标签吞进来）
-const scriptBody = [...HTML.matchAll(/<script>([\s\S]*?)<\/script>/g)]
-  .map(m => m[1]).join('\n');
+// 全部脚本源（内联块已外置——BUG-001/006/008 的"无残留"断言覆盖四个文件）
+const allScripts = HOSTJS + '\n' + MAINJS + '\n' + SNAKE + '\n' + IMPORT;
 
 function syntaxOk(body) {
   // 去宿主对象引用后应可解析（宿主对象运行时由两端注入）
@@ -27,26 +30,31 @@ function syntaxOk(body) {
 }
 
 test('BUG-001 启动闪退：不得用 generateViewId 作 setTag key（WeakHashMap 注册表）', () => {
-  assert.ok(!/setTag\(/.test(scriptBody), 'start.html 不应包含 setTag 调用');
+  assert.ok(!/setTag\(/.test(allScripts), 'shell 脚本不应包含 setTag 调用');
 });
 
 test('BUG-002 搜索 IME 失效：form submit + type=search + enterkeyhint 必须存在', () => {
   assert.match(HTML, /<form id="searchForm"/, '搜索框必须有 form 容器（IME action 触发路径）');
-  assert.match(HTML, /onsubmit="event\.preventDefault\(\); go\(\);"/, 'submit 必须走 go()');
-  // BUG-009：file:// 页面的 form submit 可能不触发 onsubmit——按钮必须
-  // 同时保留 onclick 直调路径（双保险，修后再次失效的教训）
-  assert.match(HTML, /id="searchBtn" onclick="go\(\)"/, '搜索按钮必须 onclick 直调 go()');
+  // I83 外置后：submit 与按钮双路径绑定在 start.main.js（addEventListener）
+  assert.match(MAINJS, /getElementById\('searchForm'\)[\s\S]{0,200}addEventListener\('submit'[\s\S]{0,120}go\(\)/,
+    'submit 必须走 go()');
+  // BUG-009：file:// 页面的 form submit 可能不触发——按钮必须
+  // 同时保留 click 直调路径（双保险，修后再次失效的教训）
+  assert.match(MAINJS, /getElementById\('searchBtn'\)[\s\S]{0,200}addEventListener\('click'[\s\S]{0,120}go\(\)/,
+    '搜索按钮必须 click 直调 go()');
   assert.match(HTML, /type="search"/, 'input 必须是 search 型（键盘出「搜索」键）');
   assert.match(HTML, /enterkeyhint="search"/, '必须声明 enterkeyhint');
 });
 
-test('BUG-011/012: 双端统一——首页返回按钮 + 贪吃蛇游戏（单源 start.html）', () => {
-  // BUG-012：Android 首页曾无返回入口（返回键只在 Win 原生工具栏）——
-  // start.html 必须自带返回按钮，经 Host.goBack 分发双端
-  assert.match(HTML, /back-fab[^>]*onclick="Host\.goBack\(\)"/, '首页必须有返回按钮并经 Host.goBack 分发');
-  assert.match(HTML, /goBack: function \(\)/, 'Host 适配层必须有 goBack（Win→go_back / Android→goBack）');
+test('BUG-011/012: 双端统一——返回形态统一 + 贪吃蛇游戏（单源首页）', () => {
+  // BUG-012 演进（三端返回形态统一 95d9bac）：首页不再自带悬浮返回按钮——
+  // 返回统一由平台 chrome 承担（Win 工具栏 / Android 系统返回键）。断言
+  // 残留已清（HTML/JS 均无 back-fab）且 Host.goBack 适配能力保留。
+  assert.ok(!/back-fab/.test(HTML + CSS), 'back-fab 悬浮按钮残留应已清理');
+  assert.match(HOSTJS, /goBack: function \(\)/, 'Host 适配层必须有 goBack（Win→go_back / Android→goBack）');
   // BUG-011：贪吃蛇曾为 Android 地址栏独占（Win 完全没有）——首页单源内置
-  assert.match(HTML, /id="snakeBtn"[^>]*onclick="openSnake\(\)"/, '首页必须有贪吃蛇入口按钮');
+  assert.match(HTML, /id="snakeBtn"/, '首页必须有贪吃蛇入口按钮');
+  assert.match(MAINJS, /getElementById\('snakeBtn'\)[\s\S]{0,200}addEventListener\('click'/, '入口按钮必须绑定（外置后无内联 onclick）');
   assert.match(HTML, /id="snakeCanvas"/, '必须有贪吃蛇画布');
   // A8 拆分后：画布行为/持久化/能力面调用在 start.snake.js，全屏样式在 start.css
   assert.match(SNAKE, /touchmove[\s\S]{0,80}preventDefault/, '画布必须拦截 touchmove（否则滑动触发页面滚动）');
@@ -73,13 +81,13 @@ test('BUG-004 首页壁纸 404：壁纸文件必须随单源目录存在且引�
   const files = readdirSync(wpDir);
   assert.ok(files.length >= 4, `壁纸至少 4 张，实际 ${files.length}`);
   for (const f of files) {
-    assert.match(HTML, new RegExp(`wallpapers/${f}`), `壁纸 ${f} 必须被 start.html 引用`);
+    assert.match(MAINJS, new RegExp(`wallpapers/${f}`), `壁纸 ${f} 必须被 start.main.js 引用`);
   }
 });
 
 test('BUG-005 离线画板：按钮 + 桥调用 + 双端打包配置必须齐备', () => {
   assert.match(HTML, /id="geoBtn"/, '画板按钮必须存在');
-  assert.match(HTML, /Host\.openGeo\(/, '按钮必须走 Host.openGeo 适配层');
+  assert.match(MAINJS, /Host\.openGeo\(/, '按钮必须走 Host.openGeo 适配层');
   assert.match(HTML, /id="geoBtn"[^>]*title="离线几何画板/, '按钮须标注离线语义');
   // Windows 打包链
   const spec = readFileSync(join(ROOT, 'legacy', 'windows-pywebview', 'aegis_webview.spec'), 'utf8');
@@ -96,7 +104,7 @@ test('BUG-005 离线画板：按钮 + 桥调用 + 双端打包配置必须齐备
 });
 
 test('BUG-006 allowedOriginRules 全域通配崩溃：不得出现 "https://*" 规则', () => {
-  assert.ok(!/setOf\("https:\/\/\*", "http:\/\/\*"\)/.test(scriptBody), '通配规则回归');
+  assert.ok(!/setOf\("https:\/\/\*", "http:\/\/\*"\)/.test(allScripts), '通配规则回归');
 });
 
 test('BUG-007 移动端布局：viewport meta 必须存在', () => {
@@ -104,17 +112,31 @@ test('BUG-007 移动端布局：viewport meta 必须存在', () => {
 });
 
 test('BUG-008 宿主桥单源：12+ 调用点必须收敛 Host 适配层，无 pywebview 直调', () => {
-  assert.ok(!/pywebview\.api\./.test(scriptBody), '发现 pywebview 直调残留');
-  assert.match(HTML, /var Host = /, 'Host 适配层必须存在');
-  assert.match(HTML, /window\.AegisBridge \|\| null/, 'Android 桥必须被适配层覆盖');
+  assert.ok(!/pywebview\.api\./.test(allScripts), '发现 pywebview 直调残留');
+  assert.match(HOSTJS, /var Host = /, 'Host 适配层必须存在');
+  assert.match(HOSTJS, /window\.AegisBridge \|\| null/, 'Android 桥必须被适配层覆盖');
   ['jsError', 'navigate', 'setWallpaper', 'getWallpaper', 'openGeo', 'has'].forEach(fn => {
-    assert.match(HTML, new RegExp(`Host\\.${fn}\\(`), `Host.${fn} 必须被使用`);
+    assert.match(allScripts, new RegExp(`Host\\.${fn}\\(`), `Host.${fn} 必须被使用`);
   });
 });
 
+test('I83 CSP 前置：脚本全外置 + 禁内联 + connect-src none', () => {
+  // 内联 <script>（无 src）不得存在——script-src 'self' 下不可执行
+  assert.ok(!/<script>/.test(HTML), '不得存在内联 <script> 块（CSP 下不执行——白屏回归）');
+  // 内联事件处理器属性不得存在（onclick/onsubmit/onkeydown= …）
+  assert.ok(!/\son(click|submit|keydown|load|error|input|change|mouseover)=/.test(HTML),
+    '不得存在内联事件处理器属性');
+  // CSP meta：script-src 'self'（禁内联）、connect-src 'none'（页面零网络请求）
+  assert.match(HTML, /http-equiv="Content-Security-Policy"[^>]*script-src 'self'/, '必须声明 script-src self');
+  assert.match(HTML, /http-equiv="Content-Security-Policy"[^>]*connect-src 'none'/, '必须声明 connect-src none');
+  // 内联 style 属性不得存在（style-src 'self' 同理）
+  assert.ok(!/\sstyle="/.test(HTML), '不得存在内联 style 属性');
+});
+
 test('语法完整性：全部脚本体必须可解析（防 UI 白屏）', () => {
-  // A8 拆分后：内联块 + snake + import 三个脚本体分别解析
-  assert.ok(syntaxOk(scriptBody), 'start.html 内联脚本体语法错误');
+  // I83 外置后：Host 适配层 + 主逻辑 + snake + import 四个文件分别解析
+  assert.ok(syntaxOk(HOSTJS), 'start.js 语法错误');
+  assert.ok(syntaxOk(MAINJS), 'start.main.js 语法错误');
   assert.ok(syntaxOk(SNAKE), 'start.snake.js 语法错误');
   assert.ok(syntaxOk(IMPORT), 'start.import.js 语法错误');
 });

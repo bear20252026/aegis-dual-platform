@@ -60,7 +60,7 @@ else:
     for rel in required_cs:
         if not (cs_root / rel).is_file():
             failures.append(f'缺 C# 关键文件 windows/src/Aegis.Windows.App/{rel}')
-for shell_asset in ('start.html', 'start.css', 'start.snake.js', 'start.import.js'):
+for shell_asset in ('start.html', 'start.css', 'start.js', 'start.main.js', 'start.snake.js', 'start.import.js'):
     if not (root / 'shared' / 'shell' / shell_asset).is_file():
         failures.append(f'缺跨端单源首页资产 shared/shell/{shell_asset}')
 print(f'python_files={len(python_files)}')

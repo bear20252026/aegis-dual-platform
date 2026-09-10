@@ -130,6 +130,8 @@ jobs:
             "dist/aegis-windows/Aegis.Windows.App.exe",
             "dist/aegis-windows/ntp/start.html",
             "dist/aegis-windows/ntp/start.css",
+            "dist/aegis-windows/ntp/start.js",
+            "dist/aegis-windows/ntp/start.main.js",
             "dist/aegis-windows/ntp/start.snake.js",
             "dist/aegis-windows/ntp/start.import.js",
             "dist/aegis-windows/ntp/wallpapers/aurora-twilight.jpg"

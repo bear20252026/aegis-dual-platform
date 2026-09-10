@@ -215,9 +215,16 @@
     .wp, .quick-btn, .search button, .engine-pill { min-height:40px; }
   }
 
-  /* —— 返回按钮（双端统一：Win 原生工具栏之外，首页自身的返回入口）—— */
-  /* 返回由浏览器工具栏统一提供：首页不再额外悬浮按钮，保持视觉留白 */
-  .back-fab { display:none; }
+  /* —— 返回按钮 —— */
+  /* 返回由浏览器工具栏统一提供：首页悬浮返回按钮已随「三端返回形态统一」
+     （95d9bac）移除，样式规则一并清理 */
+
+  /* —— 内联样式外置（CSP style-src 'self'——审计 I83）—— */
+  /* #importModal 的作者 display:flex 会压过 hidden 属性的 UA 规则——
+     显式补 [hidden] 高特异度规则，初始隐藏语义交给标记层 */
+  #importModal[hidden] { display: none; }
+  .restore-box { margin-top: 26px; }
+  .import-entry-wrap { margin-top: 14px; }
 
   /* —— 贪吃蛇（暖阳像素：金色时刻 · 温暖正面）—— */
   .snake-overlay {
