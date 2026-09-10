@@ -2,17 +2,17 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="源码视图" Width="860" Height="600"
-        Background="#FF161618" FontFamily="Consolas, Courier New">
+        Background="{DynamicResource ChromeBackgroundBrush}" FontFamily="Consolas, Courier New">
   <DockPanel>
-    <Border DockPanel.Dock="Top" Background="#FF1F1F23" Padding="10,6">
-      <TextBlock x:Name="SourceUrl" Foreground="#FF9CA3AF" FontSize="12"
+    <Border DockPanel.Dock="Top" Background="{DynamicResource CardBrush}" Padding="10,6">
+      <TextBlock x:Name="SourceUrl" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"
                  TextTrimming="CharacterEllipsis"/>
     </Border>
     <!-- 大文本性能：禁用撤销栈与自动换行（5MB 源码的排版/内存开销主要来源），
          AcceptsTab 关闭以保留键盘导航 -->
     <TextBox x:Name="SourceText" IsReadOnly="True" VerticalScrollBarVisibility="Auto"
              HorizontalScrollBarVisibility="Auto" Background="Transparent"
-             Foreground="#FFD4D4D8" FontSize="12" IsUndoEnabled="False" UndoLimit="0"
+             Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" IsUndoEnabled="False" UndoLimit="0"
              TextWrapping="NoWrap" AcceptsTab="False"
              ToolTip="全转义纯文本——零脚本执行"/>
   </DockPanel>

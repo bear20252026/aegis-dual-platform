@@ -14,4 +14,8 @@ public partial class SourceViewerWindow : Window
         // 仅截断超大首屏（5MB 上限已在抓取层保证）
         SourceText.Text = source;
     }
+
+    /// <summary>统一深浅主题接入（此前 XAML 硬编码深色——浅色模式下与主窗口割裂）。
+    /// 画刷键经 DynamicResource 引用，此处仅需写入窗口资源。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
 }

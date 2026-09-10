@@ -4,6 +4,8 @@
         Title="InPrivate 无痕浏览" Width="1000" Height="700"
         Background="#FF14141A" FontFamily="Segoe UI, Microsoft YaHei UI"
         Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
+  <!-- 设计意图：无痕窗口恒定深色（不随浅色主题切换）——对齐 Edge InPrivate /
+       Chrome Incognito 的视觉惯例，让无痕会话一眼可辨。非遗漏，勿接入 WindowTheme。 -->
   <Window.Resources>
     <SolidColorBrush x:Key="ChromeB" Color="#FF1A1A22"/>
     <SolidColorBrush x:Key="CardB" Color="#FF23232D"/>

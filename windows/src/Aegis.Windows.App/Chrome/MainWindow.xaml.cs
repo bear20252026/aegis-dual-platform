@@ -41,6 +41,8 @@ public partial class MainWindow : Window
     private BookmarkManagerWindow? _bookmarkManagerWindow;
     private SettingsWindow? _settingsWindow;
     private DownloadsWindow? _downloadsWindow;
+    // 源码查看器允许多实例并存——换肤时对仍存活者传播并清理已关闭项
+    private readonly List<SourceViewerWindow> _sourceViewerWindows = new();
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
     // M4 下载管理面板数据源（跨标签共享——DownloadItem 由 TabRuntime 下载事件注入）
     private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
@@ -198,6 +200,9 @@ public partial class MainWindow : Window
         _bookmarkManagerWindow?.ApplyTheme(theme);
         _downloadsWindow?.ApplyTheme(theme);
         _settingsWindow?.ApplyTheme(theme);
+        _sourceViewerWindows.RemoveAll(w => !w.IsLoaded);
+        foreach (var viewer in _sourceViewerWindows)
+            viewer.ApplyTheme(theme);
     }
 
     private void SetBrush(string key, string hex) =>
@@ -300,7 +305,7 @@ public partial class MainWindow : Window
             {
                 // 经协调器延迟导航：执行前重新校验 runtime 引用/令牌/窗口状态，
                 // 避免在已释放控件上设 Source 抛异常（「新建标签删不掉」防护）。
-                _runtimeCoordinator.PostDelayedNavigation(tab.TabId, tab.Url, IsLoaded);
+                _runtimeCoordinator.PostDelayedNavigation(tab.TabId, tab.Url, () => IsLoaded);
             }
             else
             {
@@ -1168,6 +1173,9 @@ public partial class MainWindow : Window
         if (_settingsWindow is null || !_settingsWindow.IsLoaded)
         {
             _settingsWindow = new SettingsWindow(_settings, _broker, this, _settingsService) { Owner = this };
+            // 创建即换肤——此前漏调：浅色模式下首次打开设置窗仍深色，直到下次
+            // 全局换肤才纠正（对比历史/书签/下载三处创建时都有）
+            _settingsWindow.ApplyTheme(_settings.Theme);
         }
         _settingsWindow.Show();
         _settingsWindow.Activate();
@@ -1283,7 +1291,11 @@ public partial class MainWindow : Window
                     // 抓取期间主窗口可能已关闭——Owner=已关闭窗口会抛异常
                     if (!IsLoaded)
                         return;
-                    new SourceViewerWindow(url, text) { Owner = this }.Show();
+                    var viewer = new SourceViewerWindow(url, text) { Owner = this };
+                    viewer.ApplyTheme(_settings.Theme);
+                    _sourceViewerWindows.RemoveAll(w => !w.IsLoaded);
+                    _sourceViewerWindows.Add(viewer);
+                    viewer.Show();
                     ShowFeedback("源码已加载（全转义，零脚本执行）");
                 });
             }

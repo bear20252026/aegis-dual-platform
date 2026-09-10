@@ -81,8 +81,10 @@ public sealed class TabRuntimeCoordinator : IDisposable
         }
     }
 
-    /// <summary>延迟导航：执行前重新校验快照中的 runtime 引用、令牌与窗口状态。</summary>
-    public void PostDelayedNavigation(string tabId, string url, bool windowIsAlive)
+    /// <summary>延迟导航：执行前重新校验快照中的 runtime 引用、令牌与窗口状态。
+    /// windowAlive 为调用时点的存活探针（而非布尔快照）——Dispatcher 回调执行时
+    /// 窗口可能已关闭，快照值会陈旧，探针在每次校验时即时求值。</summary>
+    public void PostDelayedNavigation(string tabId, string url, Func<bool> windowAlive)
     {
         if (!_lifetimes.TryGetValue(tabId, out var lifetime))
         {
@@ -98,14 +100,14 @@ public sealed class TabRuntimeCoordinator : IDisposable
         // 解析失败 → WebView2 呈现纯文本错误文档（首页"文档样纯文字"根因）。
         Application.Current?.Dispatcher?.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
         {
-            if (!ValidateNavigationTarget(tabId, runtime, lifetime, windowIsAlive))
+            if (!ValidateNavigationTarget(tabId, runtime, lifetime, windowAlive))
                 return;
             if (!NtpAssets.IsVirtualHostUrl(url))
             {
                 SafeNavigate(runtime, url);
                 return;
             }
-            NavigateVirtualHostWithRetry(tabId, runtime, lifetime, url, windowIsAlive, remaining: 4);
+            NavigateVirtualHostWithRetry(tabId, runtime, lifetime, url, windowAlive, remaining: 4);
         }));
     }
 
@@ -116,9 +118,9 @@ public sealed class TabRuntimeCoordinator : IDisposable
     /// 短间隔减少内部错误文档的驻留窗口。</summary>
     private void NavigateVirtualHostWithRetry(
         string tabId, TabRuntime runtime, TabRuntimeLifetime lifetime,
-        string url, bool windowIsAlive, int remaining)
+        string url, Func<bool> windowAlive, int remaining)
     {
-        if (!ValidateNavigationTarget(tabId, runtime, lifetime, windowIsAlive))
+        if (!ValidateNavigationTarget(tabId, runtime, lifetime, windowAlive))
             return;
         var core = runtime.Control.CoreWebView2;
         if (core is null)
@@ -146,7 +148,7 @@ public sealed class TabRuntimeCoordinator : IDisposable
             timer.Tick += (_, _) =>
             {
                 localTimer.Stop();
-                NavigateVirtualHostWithRetry(tabId, runtime, lifetime, url, windowIsAlive, remaining - 1);
+                NavigateVirtualHostWithRetry(tabId, runtime, lifetime, url, windowAlive, remaining - 1);
             };
             timer.Start();
         };
@@ -161,12 +163,20 @@ public sealed class TabRuntimeCoordinator : IDisposable
         }
     }
 
-    /// <summary>导航前快照校验：窗口存活、runtime 仍是当前对象、未销毁、控件有效。</summary>
+    /// <summary>导航前快照校验：窗口存活（探针即时求值——Dispatcher 回调执行时
+    /// 窗口可能已关闭）、runtime 仍是当前对象、未销毁、控件有效。</summary>
     private bool ValidateNavigationTarget(
-        string tabId, TabRuntime runtime, TabRuntimeLifetime lifetime, bool windowIsAlive)
+        string tabId, TabRuntime runtime, TabRuntimeLifetime lifetime, Func<bool> windowAlive)
     {
-        if (!windowIsAlive)
-            return false;
+        try
+        {
+            if (!windowAlive())
+                return false;
+        }
+        catch (Exception)
+        {
+            return false;  // 探针自身抛异常（窗口已进入关闭序列）——安全拒绝
+        }
         // 二次校验：快照引用仍是最新的、控件仍在本窗口视觉树中
         if (!_runtimes.TryGetValue(tabId, out var current) || !ReferenceEquals(current, runtime))
             return false;
