@@ -43,6 +43,30 @@ public sealed class NtpBridgeFactory
     /// <summary>为指定标签组装宿主桥（每标签一份委托；数据服务共享单源）。</summary>
     public NtpBridge Create(TabRuntime runtime) => new(BuildServices(runtime));
 
+    /// <summary>无痕变体（InPrivate 复用本工厂，替代此前窗口内手写 15 参数
+    /// Services——防 NtpBridge.Services 字段增长时两处漂移）：引擎/壁纸可用；
+    /// 书签/历史/导入/恢复返回空——绝不读取或回传真实用户数据。纯静态：不依赖
+    /// 工厂实例持有的数据服务。</summary>
+    public static NtpBridge CreatePrivate(TabRuntime runtime, string engineKey) =>
+        new(new NtpBridge.Services(
+            SearchEngine: () => engineKey,
+            SetSearchEngine: _ => { },  // 无痕窗口不回写用户设置
+            Wallpaper: () => string.Empty,
+            SetWallpaper: _ => { },
+            Bookmarks: () => Array.Empty<Core.Bookmarks.Bookmark>(),
+            SavedSessionCount: () => 0,
+            RestoreSession: () => { },
+            Navigate: target =>
+            {
+                if (target is not null)
+                    SafeNavigate(runtime, target);
+            },
+            GoBack: () => GoBackFor(runtime),
+            OpenGeo: () => OpenGeoFor(runtime),
+            ImportSources: () => Array.Empty<NtpBridge.ImportSourceSnapshot>(),
+            ImportBookmarks: _ => (0, 0, new List<NtpBridge.ImportResult>()),
+            ImportHistory: (_, _) => (0, 0, new List<NtpBridge.ImportResult>())));
+
     private NtpBridge.Services BuildServices(TabRuntime runtime) => new(
         SearchEngine: () => _settings.SearchEngine,
         SetSearchEngine: engine =>
@@ -68,22 +92,8 @@ public sealed class NtpBridgeFactory
             // NavigationStarting→broker 唯一授权路径
             SafeNavigate(runtime, target);
         },
-        GoBack: () =>
-        {
-            if (runtime.Control.CanGoBack)
-            {
-                runtime.Control.GoBack();
-                return true;
-            }
-            return false;
-        },
-        OpenGeo: () =>
-        {
-            if (NtpAssets.ResolveGeoRoot() is null)
-                return false;  // 资源未随包——fail-closed 降级（按钮置灰）
-            return SafeNavigate(runtime,
-                $"https://{NtpAssets.GeoHostName}/{NtpAssets.GeoEntryPath}");
-        },
+        GoBack: () => GoBackFor(runtime),
+        OpenGeo: () => OpenGeoFor(runtime),
         ImportSources: () =>
         {
             // 探测 = 仅文件存在性检查（不读取内容）；书签/历史能力按来源汇总
@@ -147,6 +157,26 @@ public sealed class NtpBridgeFactory
             }
             return (imported, total, results);
         });
+
+    /// <summary>上一页（桥通用：Win/无痕共用——作用于 runtime 自己的 WebView）。</summary>
+    private static bool GoBackFor(TabRuntime runtime)
+    {
+        if (runtime.Control.CanGoBack)
+        {
+            runtime.Control.GoBack();
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>离线画板（资源未随包 fail-closed 降级——桥通用）。</summary>
+    private static bool OpenGeoFor(TabRuntime runtime)
+    {
+        if (NtpAssets.ResolveGeoRoot() is null)
+            return false;  // 资源未随包——fail-closed 降级（按钮置灰）
+        return SafeNavigate(runtime,
+            $"https://{NtpAssets.GeoHostName}/{NtpAssets.GeoEntryPath}");
+    }
 
     /// <summary>导航的统一容错入口（地址非法/控件已释放时拒绝而不是抛异常）。</summary>
     private static bool SafeNavigate(TabRuntime runtime, string? url)

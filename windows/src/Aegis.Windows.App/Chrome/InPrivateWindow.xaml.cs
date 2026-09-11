@@ -96,43 +96,12 @@ public partial class InPrivateWindow : Window
         }
     }
 
-    /// <summary>NTP 宿主桥（与主窗口同顶层门禁）。无痕语义：引擎/壁纸可用；
-    /// 书签/历史/导入/恢复返回空——绝不读取或回传真实用户数据。</summary>
+    /// <summary>NTP 宿主桥（与主窗口同顶层门禁）。复用 NtpBridgeFactory.CreatePrivate——
+    /// 引擎/壁纸可用，书签/历史/导入/恢复空数据 fail-closed（不读真实用户数据）。
+    /// 此前在此手写 15 参数 Services——与工厂漂移，现已收敛。</summary>
     private void WireNtpBridge(TabRuntime runtime, CoreWebView2 core)
     {
-        var ntp = new Ntp.NtpBridge(new Ntp.NtpBridge.Services(
-            SearchEngine: () => _engineKey,
-            SetSearchEngine: _ => { },  // 无痕窗口不回写用户设置
-            Wallpaper: () => string.Empty,
-            SetWallpaper: _ => { },
-            Bookmarks: () => Array.Empty<Core.Bookmarks.Bookmark>(),
-            SavedSessionCount: () => 0,
-            RestoreSession: () => { },
-            Navigate: target =>
-            {
-                if (target is not null)
-                    SafeNavigate(runtime, target);
-            },
-            GoBack: () =>
-            {
-                if (runtime.Control.CanGoBack)
-                {
-                    runtime.Control.GoBack();
-                    return true;
-                }
-                return false;
-            },
-            OpenGeo: () =>
-            {
-                if (Ntp.NtpAssets.ResolveGeoRoot() is null)
-                    return false;
-                SafeNavigate(runtime,
-                    $"https://{Ntp.NtpAssets.GeoHostName}/{Ntp.NtpAssets.GeoEntryPath}");
-                return true;
-            },
-            ImportSources: () => Array.Empty<Ntp.NtpBridge.ImportSourceSnapshot>(),
-            ImportBookmarks: _ => (0, 0, new List<Ntp.NtpBridge.ImportResult>()),
-            ImportHistory: (_, _) => (0, 0, new List<Ntp.NtpBridge.ImportResult>())));
+        var ntp = Ntp.NtpBridgeFactory.CreatePrivate(runtime, _engineKey);
         core.WebMessageReceived += (_, ev) =>
         {
             try

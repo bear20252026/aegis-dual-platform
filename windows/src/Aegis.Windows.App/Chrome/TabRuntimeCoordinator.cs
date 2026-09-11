@@ -8,6 +8,7 @@ using System.Windows.Threading;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Chrome.Ntp;
 using Aegis.Windows.Core.Tabs;
+using Microsoft.Web.WebView2.Core;
 
 /// <summary>协调 MainWindow 中全部 TabRuntime 的初始化/关闭/延迟导航——
 /// 快照 + 令牌 + 视觉树校验的加固层。以适配器方式包住现有 CreateRuntime/
@@ -34,7 +35,7 @@ public sealed class TabRuntimeCoordinator : IDisposable
     /// 驱动）。environment 非空时用于无痕窗口的隔离环境租约（isPrivate 同时
     /// 置位——缩放/数据不落盘）。</summary>
     public TabRuntimeLifetime Create(
-        BrowserPolicyBroker broker,
+        IBroker broker,
         Tab tab,
         Microsoft.Web.WebView2.Core.CoreWebView2Environment? environment = null,
         bool isPrivate = false)
@@ -110,7 +111,7 @@ public sealed class TabRuntimeCoordinator : IDisposable
                 return;
             if (!NtpAssets.IsVirtualHostUrl(url))
             {
-                SafeNavigate(runtime, url);
+                runtime.Navigate(url);
                 return;
             }
             NavigateVirtualHostWithRetry(tabId, runtime, lifetime, url, windowAlive, remaining: 4);
@@ -121,28 +122,28 @@ public sealed class TabRuntimeCoordinator : IDisposable
 
     /// <summary>虚拟主机导航 + 失败重试：首帧若因映射未传播而 ConnectionAborted
     ///（IsSuccess=false），稍后重试——重试时映射必然已就绪。有界重试，绝不无限循环。
-    /// 短间隔减少内部错误文档的驻留窗口。</summary>
+    /// 短间隔减少内部错误文档的驻留窗口。经 TabRuntime.Navigate/NavigationCompleted
+    /// 驱动——协调器不直接触碰 Control。</summary>
     private void NavigateVirtualHostWithRetry(
         string tabId, TabRuntime runtime, TabRuntimeLifetime lifetime,
         string url, Func<bool> windowAlive, int remaining)
     {
         if (!ValidateNavigationTarget(tabId, runtime, lifetime, windowAlive))
             return;
-        var core = runtime.Control.CoreWebView2;
-        if (core is null)
+        if (!runtime.IsCoreReady)
             return;
-        EventHandler<Microsoft.Web.WebView2.Core.CoreWebView2NavigationCompletedEventArgs> handler = null!;
-        handler = (_, e) =>
+        Action<bool, CoreWebView2WebErrorStatus> handler = null!;
+        handler = (isSuccess, status) =>
         {
-            core.NavigationCompleted -= handler;
-            if (e.IsSuccess)
+            runtime.NavigationCompleted -= handler;
+            if (isSuccess)
                 return;
             if (remaining <= 0)
             {
-                Core.Security.SecurityLog.Write($"[ntp] 标签 {tabId} 虚拟主机导航失败且重试耗尽: {e.WebErrorStatus}");
+                Core.Security.SecurityLog.Write($"[ntp] 标签 {tabId} 虚拟主机导航失败且重试耗尽: {status}");
                 // 通知 UI：重试已放弃——由主窗口停止加载条并展示错误（否则
                 // 瞬态抑制会让加载条永久旋转、用户无从知晓页面失败）。
-                NtpNavigationFailed?.Invoke(tabId, e.WebErrorStatus);
+                NtpNavigationFailed?.Invoke(tabId, status);
                 return;
             }
             // 延迟后重试（映射传播通常在下一次导航前完成）
@@ -158,15 +159,9 @@ public sealed class TabRuntimeCoordinator : IDisposable
             };
             timer.Start();
         };
-        core.NavigationCompleted += handler;
-        try
-        {
-            runtime.Control.Source = new Uri(url);
-        }
-        catch (Exception)
-        {
-            core.NavigationCompleted -= handler;
-        }
+        runtime.NavigationCompleted += handler;
+        if (!runtime.Navigate(url))
+            runtime.NavigationCompleted -= handler;
     }
 
     /// <summary>导航前快照校验：窗口存活（探针即时求值——Dispatcher 回调执行时
@@ -183,20 +178,14 @@ public sealed class TabRuntimeCoordinator : IDisposable
         {
             return false;  // 探针自身抛异常（窗口已进入关闭序列）——安全拒绝
         }
-        // 二次校验：快照引用仍是最新的、控件仍在本窗口视觉树中
+        // 二次校验：快照引用仍是最新的、控件有效且已挂入视觉树
         if (!_runtimes.TryGetValue(tabId, out var current) || !ReferenceEquals(current, runtime))
             return false;
         if (lifetime.IsDisposed || lifetime.CancellationToken.IsCancellationRequested)
             return false;
-        if (runtime.Control.CoreWebView2 is null || runtime.Control.Parent is null)
+        if (!runtime.IsCoreReady || !runtime.IsAttached)
             return false;
         return true;
-    }
-
-    private static void SafeNavigate(TabRuntime runtime, string url)
-    {
-        try { runtime.Control.Source = new Uri(url); }
-        catch (Exception) { /* 竞态：安全丢弃 */ }
     }
 
     public void Dispose()

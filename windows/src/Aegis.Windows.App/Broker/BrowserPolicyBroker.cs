@@ -7,7 +7,7 @@ using Aegis.Windows.Core.Security;
 /// <summary>Capability Broker——唯一允许产生本地副作用的边界（ADR-002/蓝图阶段 C）。
 /// 验证来源/会话/标签代际/scope/参数/预算/批准/nonce——没有 AuthorizedAction
 /// 不能导航/下载/导出/改策略。默认拒绝（fail-closed）。</summary>
-public sealed class BrowserPolicyBroker : IDisposable
+public sealed class BrowserPolicyBroker : IBroker
 {
     public string PolicyVersion { get; } = "1.0";
     // 与 Rust 侧 broker.rs 的 MAX_CONSUMED_NONCES 保持对等：达到上限即 fail-closed 拒绝，

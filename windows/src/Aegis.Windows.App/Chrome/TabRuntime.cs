@@ -26,7 +26,7 @@ public sealed class TabRuntime : IDisposable
     /// 在创建后以对应环境 EnsureCoreWebView2Async。</summary>
     private Microsoft.Web.WebView2.Core.CoreWebView2Environment? _env;
 
-    public TabRuntime(BrowserPolicyBroker broker, Tab tab, Microsoft.Web.WebView2.Core.CoreWebView2Environment? environment = null)
+    public TabRuntime(IBroker broker, Tab tab, Microsoft.Web.WebView2.Core.CoreWebView2Environment? environment = null)
     {
         Tab = tab;
         _env = environment;
@@ -150,6 +150,29 @@ public sealed class TabRuntime : IDisposable
         var env = _env ?? await WebView.WebViewEnvironment.SharedAsync();
         await Control.EnsureCoreWebView2Async(env);
     }
+
+    /// <summary>统一导航入口（地址非法/控件已释放时拒绝而不抛——协调器与各控制器
+    /// 依赖此，不再直接触碰 Control）。</summary>
+    public bool Navigate(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+        try
+        {
+            Control.Source = uri;
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;  // 控件已释放/竞态——安全丢弃
+        }
+    }
+
+    /// <summary>核心已就绪（协调器延迟导航前置校验——封装 Control.CoreWebView2）。</summary>
+    public bool IsCoreReady => Control.CoreWebView2 is not null;
+
+    /// <summary>已挂入视觉树（协调器导航前置校验——封装 Control.Parent）。</summary>
+    public bool IsAttached => Control.Parent is not null;
 
     /// <summary>重置当前站点缩放到 100%（Ctrl+0）。</summary>
     public void ResetZoom()

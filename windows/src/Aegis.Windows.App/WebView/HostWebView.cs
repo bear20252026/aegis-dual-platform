@@ -2,7 +2,9 @@ namespace Aegis.Windows.WebView;
 
 using System;
 using System.IO;
+using Aegis.Windows.Broker;
 using Aegis.Windows.Chrome.Ntp;
+using Aegis.Windows.Core.Privacy;
 using Microsoft.Web.WebView2.Core;
 
 /// <summary>WebView2 封装（阶段 C——蓝图 windows/src/Aegis.Windows.WebView）。
@@ -10,7 +12,8 @@ using Microsoft.Web.WebView2.Core;
 /// 远程页面无 native bridge——不注入 host object（ADR-003）。</summary>
 public sealed class HostWebView : IDisposable
 {
-    private readonly Broker.BrowserPolicyBroker _broker;
+    private readonly IBroker _broker;
+    private readonly IPrivacySettings _privacy;
     private readonly string _sessionId;
     private readonly string _tabId;
     private ulong _documentGeneration;
@@ -44,9 +47,12 @@ public sealed class HostWebView : IDisposable
     /// Handled=true 静默丢弃 → 新闻/热搜等 target=_blank 链接点击无反应）。</summary>
     public event Action<string>? NewWindowRequested;
 
-    public HostWebView(Broker.BrowserPolicyBroker broker, string sessionId, string? tabId = null)
+    /// <summary>构造器注入授权边界与隐私策略读取面（默认 LivePrivacySettings——
+    /// 读进程级静态；测试可注入假实现）。</summary>
+    public HostWebView(IBroker broker, string sessionId, string? tabId = null, IPrivacySettings? privacy = null)
     {
-        _broker = broker;
+        _broker = broker ?? throw new ArgumentNullException(nameof(broker));
+        _privacy = privacy ?? LivePrivacySettings.Instance;
         _sessionId = sessionId;
         // M1-T1（ADR-009 多标签）：tabId 显式传入——每标签一个 HostWebView 实例
         //（每实例一个 broker session，账本键独立）。缺省保留旧单标签行为。
@@ -117,7 +123,7 @@ public sealed class HostWebView : IDisposable
         // 站点若无 https，升级后加载失败会走到错误页，绝不降级回明文。
         // 例外：本机/回环/hosts 映射到本机的域名**不升级**——本地开发
         // 服务器通常只跑 http，升级到 https 必然失败（"开屏纯文字"根因）。
-        if (Core.Privacy.PrivacySettings.HttpsOnly
+        if (_privacy.HttpsOnly
             && Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
             && uri.Scheme == Uri.UriSchemeHttp
             && !Core.UrlSafety.IsLocalHostOrResolvesLocalHost(uri.Host))
@@ -204,7 +210,7 @@ public sealed class HostWebView : IDisposable
                 return;
             }
             // 跟踪防护分级（P1——对齐 Edge 基础/均衡/严格）
-            var level = Core.Privacy.PrivacySettings.ProtectionLevel;
+            var level = _privacy.ProtectionLevel;
             if (level <= 0)
                 return;
             var pageHost = Uri.TryCreate(webView.Source, UriKind.Absolute, out var page)

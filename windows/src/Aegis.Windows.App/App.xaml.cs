@@ -5,7 +5,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using Aegis.Windows.Core.Security;
-
 public partial class App : Application
 {
     // 弹窗频控：持续性异常（如每帧渲染错误）此前会造成无限 MessageBox 循环，
@@ -72,5 +71,15 @@ public partial class App : Application
         {
             // 日志不可写时不阻断处理
         }
+    }
+
+    /// <summary>组合根：装配存储/策略/broker 后构造主窗口。MainWindow 不再自建
+    /// 依赖（此前的字段初始器）——依赖显式可注入、可换内存实现、可构造测。</summary>
+    protected override void OnStartup(StartupEventArgs e)
+    {
+        base.OnStartup(e);
+        var window = new Chrome.MainWindow(Chrome.MainWindowDependencies.Defaults());
+        MainWindow = window;
+        window.Show();
     }
 }

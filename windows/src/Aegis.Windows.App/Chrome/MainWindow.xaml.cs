@@ -24,20 +24,19 @@ using Microsoft.Web.WebView2.Core;
 /// 控件（与页面 DOM 隔离——注入式 UI 成为历史）。</summary>
 public partial class MainWindow : Window
 {
-    private readonly BrowserPolicyBroker _broker = new();
-    private readonly TabManager _tabs = new();
+    private readonly BrowserPolicyBroker _broker;
+    private readonly TabManager _tabs;
     private readonly Dictionary<string, TabRuntime> _runtimes = new();
     private TabRuntimeCoordinator _runtimeCoordinator = null!;
     private TabStripDragController _tabDrag = null!;
     private ApprovalPanelController _approval = null!;
-    private readonly TabSessionStore _sessionStore = new(AppPaths.SessionDbPath);
+    private readonly TabSessionStore _sessionStore;
     private string? _activeTabId;
     private bool _suppressTabSelection;
-    private readonly BookmarkStore _bookmarks = new(AppPaths.BookmarksDbPath);
-    private readonly HistoryStore _history = new(AppPaths.HistoryDbPath);
-    private readonly AppSettings _settings =
-        AppSettings.Load(AppSettings.DefaultPath);
-    private readonly Core.Settings.SettingsService _settingsService = new();
+    private readonly BookmarkStore _bookmarks;
+    private readonly HistoryStore _history;
+    private readonly AppSettings _settings;
+    private readonly Core.Settings.SettingsService _settingsService;
     private HistoryWindow? _historyWindow;
     private BookmarkManagerWindow? _bookmarkManagerWindow;
     private SettingsWindow? _settingsWindow;
@@ -47,8 +46,7 @@ public partial class MainWindow : Window
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
     // M4 下载管理面板数据源（跨标签共享——DownloadItem 由 TabRuntime 下载事件注入）
     private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
-    private readonly Core.Downloads.DownloadRecordStore _downloadRecords =
-        new(Core.AppPaths.DownloadsDbPath);
+    private readonly Core.Downloads.DownloadRecordStore _downloadRecords;
     private System.Windows.Threading.DispatcherTimer? _sleepTimer;
     private System.Windows.Threading.DispatcherTimer? _sessionSaveTimer;
     private FindBarController _find = null!;
@@ -67,8 +65,18 @@ public partial class MainWindow : Window
     private const int SourceMaxBytes = 5 * 1024 * 1024; // 源码查看大小上限
     private const int BookmarkChipMaxChars = 14;      // 书签栏标题截断
 
-    public MainWindow()
+    /// <summary>组合根注入构造：存储/策略/broker 由 App 装配传入（MainWindow 不再
+    /// 自建依赖——可注入内存存储、可构造测）。参数校验防误用。</summary>
+    public MainWindow(MainWindowDependencies deps)
     {
+        _broker = deps.Broker;
+        _tabs = deps.Tabs;
+        _sessionStore = deps.SessionStore;
+        _bookmarks = deps.Bookmarks;
+        _history = deps.History;
+        _settings = deps.Settings;
+        _settingsService = deps.SettingsService;
+        _downloadRecords = deps.DownloadRecords;
         InitializeComponent();
         _runtimeCoordinator = new TabRuntimeCoordinator(_runtimes, WebViewHost);
         // 虚拟主机首帧重试耗尽：停止加载条并展示明确错误——瞬态抑制不应让
