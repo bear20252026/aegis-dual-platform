@@ -610,17 +610,12 @@ public partial class MainWindow : Window
         var minutes = _settings.SleepMinutes;
         if (minutes <= 0 || _activeTabId is null)
             return;
-        var now = DateTime.Now;
-        foreach (var tab in _tabs.Tabs.ToList())
+        foreach (var tab in TabSleepPolicy.SelectTabsToSleep(
+                     _tabs.Tabs, _activeTabId, minutes, DateTime.Now,
+                     tabId => _runtimes.ContainsKey(tabId)))
         {
-            if (tab.IsPinned || tab.IsSleeping || tab.TabId == _activeTabId)
-                continue;
-            if ((now - tab.LastActivated).TotalMinutes >= minutes
-                && _runtimes.TryGetValue(tab.TabId, out _))
-            {
-                _runtimeCoordinator.Sleep(tab.TabId);
-                tab.IsSleeping = true;
-            }
+            _runtimeCoordinator.Sleep(tab.TabId);
+            tab.IsSleeping = true;
         }
     }
 
