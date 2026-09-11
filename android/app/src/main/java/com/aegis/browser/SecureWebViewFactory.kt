@@ -2,6 +2,7 @@ package com.aegis.browser
 
 import android.content.Context
 import android.webkit.WebView
+import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
 import com.aegis.webviewadapter.AegisWebViewClient
 import java.util.concurrent.ConcurrentHashMap
@@ -39,6 +40,7 @@ object SecureWebViewFactory {
      */
     @Suppress("LongParameterList")
     fun create(
+        broker: AndroidBroker,
         context: Context,
         onNavigationConfirmationRequested: (WebView, ApprovalRequest) -> Unit = { _, _ -> },
         onNavigationConfirmationResolved: (WebView) -> Unit = {},
@@ -48,9 +50,10 @@ object SecureWebViewFactory {
         onRendererGone: (WebView) -> Unit = {},
         onPageError: (WebView, String, Boolean, String) -> Unit = { _, _, _, _ -> },
     ): WebView {
-        // A-6 修复（架构审计 2026-08-31）：Broker 由 Application 持有——
-        // 工厂不再静态单例持有（可测试、可隔离、生命周期显式）
-        val broker = (context.applicationContext as AegisApplication).broker
+        // 架构解耦（第 5 项）：broker 由组合根（MainActivity 的 ViewModel
+        // 工厂对 Application 收敛注入）显式传入——工厂不再
+        // `(context.applicationContext as AegisApplication).broker` 强转定位
+        //（可隔离、可注入）。
         val webView = WebView(context)
         BrowserEngine(webView, onTitleObserved = { onTitleObserved(webView, it) }).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
