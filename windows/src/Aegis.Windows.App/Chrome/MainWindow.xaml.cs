@@ -48,7 +48,8 @@ public partial class MainWindow : Window
     private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
     private readonly Core.Downloads.DownloadRecordStore _downloadRecords;
     private System.Windows.Threading.DispatcherTimer? _sleepTimer;
-    private System.Windows.Threading.DispatcherTimer? _sessionSaveTimer;
+    // 会话落盘防抖（写放大治理）已外移 SessionSaveScheduler——可测的标脏/刷盘/恢复抑制
+    private readonly SessionSaveScheduler _sessionSaver;
     private FindBarController _find = null!;
     private SuggestionController _suggest = null!;
     private Ntp.NtpBridgeFactory _ntpBridgeFactory = null!;
@@ -113,6 +114,10 @@ public partial class MainWindow : Window
         ZoomStore.Changed += _zoomChangedHandler;
         // 设置单一事实源：统一持久化 + 刷新运行时 PrivacySettings
         _settingsService.Apply(_settings);
+        _sessionSaver = new SessionSaveScheduler(
+            new DispatcherDebounceTimer(),
+            () => _sessionStore.Save(_tabs.Tabs, _tabs.CurrentTabId),
+            TimeSpan.FromMilliseconds(SessionSaveDebounceMs));
         RestoreWindowState();
         StartSleepTimer();
     }
@@ -789,45 +794,19 @@ public partial class MainWindow : Window
             OnTabSwitched(active);
     }
 
-    /// <summary>会话落盘（防抖）：每次导航完成/开关标签都只是标脏 + 重启 2s
-    /// 计时——此前每次 NavigationCompleted 同步写 SQLite（每页加载两写：
-    /// 历史一条 + 会话全量重写，长会话写放大）。窗口关闭/休眠前由
-    /// FlushSession 强制刷盘兜底。</summary>
-    private void SaveSession()
-    {
-        if (_restoring)
-            return;  // 恢复流程中关闭旧标签不落盘——避免覆盖待恢复快照
-        if (_sessionSaveTimer is null)
-        {
-            _sessionSaveTimer = new System.Windows.Threading.DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(SessionSaveDebounceMs),
-            };
-            _sessionSaveTimer.Tick += (_, _) =>
-            {
-                _sessionSaveTimer!.Stop();
-                _sessionStore.Save(_tabs.Tabs, _tabs.CurrentTabId);
-            };
-        }
-        _sessionSaveTimer.Stop();
-        _sessionSaveTimer.Start();
-    }
+    /// <summary>会话标脏（防抖 2s）：每次导航完成/开关标签只是重启计时——此前
+    /// 每次导航完成同步写 SQLite（每页加载两写：历史一条 + 会话全量重写，长会话
+    /// 写放大）。恢复抑制与到期落盘在 SessionSaveScheduler。</summary>
+    private void SaveSession() => _sessionSaver.MarkDirty();
 
     /// <summary>立即落盘（窗口关闭/正常退出路径——防抖未到期的脏数据不丢）。</summary>
-    private void FlushSession()
-    {
-        _sessionSaveTimer?.Stop();
-        if (!_restoring)
-            _sessionStore.Save(_tabs.Tabs, _tabs.CurrentTabId);
-    }
+    private void FlushSession() => _sessionSaver.Flush();
 
     // ================= M3 会话恢复（新标签页手动入口） =================
 
-    private bool _restoring;
-
     /// <summary>M3：手动恢复上次会话（NTP「恢复上次会话」按钮——重启后
-    /// 重开上次页面集合；自动恢复仍由启动流程承担）。恢复期间抑制 SaveSession
-    /// （关闭现有标签会触发落盘，否则会覆盖即将恢复的快照）。</summary>
+    /// 重开上次页面集合；自动恢复仍由启动流程承担）。恢复期间抑制落盘
+    /// （关闭现有标签会触发标脏，否则会覆盖即将恢复的快照）。</summary>
     private void RestoreSavedSession()
     {
         var saved = _sessionStore.Load(out var currentTabId);
@@ -836,16 +815,11 @@ public partial class MainWindow : Window
             ShowFeedback("没有可恢复的已保存会话", isWarning: true);
             return;
         }
-        _restoring = true;
-        try
+        using (_sessionSaver.BeginRestore())
         {
             foreach (var tab in _tabs.Tabs.ToList())
                 _tabs.CloseTab(tab.TabId);
             RebuildTabsFromSnapshot(saved, currentTabId);
-        }
-        finally
-        {
-            _restoring = false;
         }
         SaveSession();
         ShowFeedback($"已恢复上次会话（{saved.Count} 个标签）");
