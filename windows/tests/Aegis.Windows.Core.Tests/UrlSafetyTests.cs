@@ -77,4 +77,24 @@ public sealed class UrlSafetyTests
     [InlineData("", false)]
     public void IsLocalHostOrResolvesLocalHostFastPath(string host, bool expected) =>
         Assert.Equal(expected, UrlSafety.IsLocalHostOrResolvesLocalHost(host));
+
+    // —— 边界补强批次：非点分十进制 IPv4 编码与 IPv6 特殊段 ——
+
+    [Theory]
+    [InlineData("http://127.1/x", false)]             // 简写 127.1 = 127.0.0.1
+    [InlineData("http://2130706433/x", false)]        // 十进制整数 = 127.0.0.1
+    [InlineData("http://0x7f000001/x", false)]        // 十六进制 = 127.0.0.1
+    [InlineData("http://127.0.1/x", false)]           // 三段简写
+    [InlineData("http://0.0.0.0", false)]             // 未指定
+    [InlineData("http://[::ffff:192.168.1.1]/x", false)] // IPv4-mapped IPv6 → 私网
+    [InlineData("http://[::ffff:127.0.0.1]/x", false)]   // IPv4-mapped IPv6 → 回环
+    [InlineData("http://[fc00::1]/x", false)]         // IPv6 ULA 私网
+    [InlineData("http://[fd00::1]/x", false)]         // IPv6 ULA 私网
+    [InlineData("http://[fec0::1]/x", false)]         // IPv6 site-local
+    [InlineData("http://[ff02::1]/x", false)]         // IPv6 组播
+    [InlineData("http://192.0.2.1/x", false)]         // TEST-NET 文档段
+    [InlineData("http://198.18.0.1/x", false)]        // 基准测试段
+    [InlineData("http://255.255.255.255", false)]     // 广播
+    public void RejectsIpv4AlternateEncodingsAndIpv6SpecialRanges(string url, bool expected) =>
+        Assert.Equal(expected, UrlSafety.IsPublicHttpUrl(url));
 }
