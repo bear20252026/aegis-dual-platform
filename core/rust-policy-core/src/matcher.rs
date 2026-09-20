@@ -149,14 +149,19 @@ fn tokenize(pattern: &str) -> Vec<Tok> {
 
 fn covers(a: &[Tok], b: &[Tok], ai: usize, bi: usize, flat: bool) -> bool {
     if bi == b.len() {
-        return true;
+        // b 已耗尽：a 的剩余片段必须整体可匹配空（全星号）——否则 b 的更短文本
+        // （如空串）不被 a 覆盖（`x*` 声称覆盖 `` 即误报 shadowed）。
+        return a[ai..].iter().all(|t| matches!(t, Tok::Star | Tok::DStar));
     }
     if ai == a.len() {
         return false;
     }
     match (&a[ai], &b[bi]) {
         (Tok::DStar, _) => covers(a, b, ai + 1, bi, flat) || covers(a, b, ai, bi + 1, flat),
-        (Tok::Star, Tok::Star) | (Tok::Star, Tok::DStar) => covers(a, b, ai + 1, bi + 1, flat),
+        // 非 flat 下单星不跨 `/` 而双星跨——单星不可能覆盖双星的语言；
+        // flat 下两者语义相同，锁步推进可靠（不完备但安全，宁漏勿误）。
+        (Tok::Star, Tok::DStar) => flat && covers(a, b, ai + 1, bi + 1, flat),
+        (Tok::Star, Tok::Star) => covers(a, b, ai + 1, bi + 1, flat),
         (Tok::Star, _) => {
             if flat || !matches!(b[bi], Tok::Lit('/')) {
                 covers(a, b, ai, bi + 1, flat)
@@ -232,5 +237,76 @@ mod tests {
     #[test]
     fn subsumes_catch_all() {
         assert!(glob_subsumes("**", "src/main.rs", false));
+    }
+
+    // —— 边界补强：输入边界与 subsumes 非平凡关系 ——
+
+    #[test]
+    fn empty_identity() {
+        assert!(glob_match("", "", false));
+        assert!(!glob_match("", "a", false));
+        assert!(!glob_match("a", "", false));
+        // 全捕获模式能覆盖空文本
+        assert!(glob_match("*", "", false));
+        assert!(glob_match("**", "", false));
+    }
+
+    #[test]
+    fn consecutive_stars_span_slashes() {
+        // `a**b` 与 `a*b` 不同：`**` 跨 `/`，单 `*` 不跨（非 flat）
+        assert!(glob_match("a**b", "a/x/b", false));
+        assert!(!glob_match("a*b", "a/x/b", false));
+        // 两个独立单星各自只在段内贪婪，都不跨 `/`
+        assert!(glob_match("a*b*c", "axbyc", false));
+        assert!(!glob_match("a*x*b", "a/x/y/b", false));
+    }
+
+    #[test]
+    fn suffix_glob() {
+        assert!(glob_match("*.gov.cn", "www.example.gov.cn", false));
+        assert!(!glob_match("*.gov.cn", "www.example.gov.cn.evil", false));
+        assert!(glob_match("*example.com", "https://sub.example.com", true));
+    }
+
+    #[test]
+    fn oversized_input_rejected() {
+        let long = "a".repeat(20_000);
+        assert!(!glob_match(&long, "x", false));
+        assert!(!glob_match("x", &long, false));
+    }
+
+    #[test]
+    fn question_mark_does_not_span_slash() {
+        assert!(!glob_match("a?b", "a/b", false));
+        assert!(glob_match("a?b", "a/b", true));
+    }
+
+    #[test]
+    fn subsumes_dstar_covers_star() {
+        // `**`（跨段）覆盖单 `*`（单段）与字面量
+        assert!(glob_subsumes("**", "*", false));
+        assert!(glob_subsumes("**.rs", "*.rs", false));
+        assert!(glob_subsumes("**.rs", "data/settings.rs", false));
+        // 反之不成立：单 `*` 不覆盖 `**`
+        assert!(!glob_subsumes("*.rs", "**.rs", false));
+    }
+
+    #[test]
+    fn subsumes_rejects_differing_literals() {
+        assert!(!glob_subsumes("*.rs", "*.py", false));
+        assert!(!glob_subsumes("src/**", "lib/**", false));
+        // 完全相等仍覆盖
+        assert!(glob_subsumes("a/b/*.rs", "a/b/*.rs", false));
+    }
+
+    #[test]
+    fn subsumes_b_exhausted_requires_empty_matchable_tail() {
+        // b 耗尽时 a 的剩余必须是可匹配空的全星尾——字面量尾巴覆盖不了更短文本
+        assert!(!glob_subsumes("x*", "", false));
+        assert!(!glob_subsumes("*x", "", false));
+        // `**x*` 含字面量 x——匹配不了空串，同样不覆盖空模式
+        assert!(!glob_subsumes("**x*", "", false));
+        assert!(glob_subsumes("**", "", false));
+        assert!(glob_subsumes("*", "", false));
     }
 }
