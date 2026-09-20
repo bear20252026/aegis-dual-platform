@@ -1,8 +1,8 @@
 {
   "product": "Aegis",
   "displayName": "Aegis WebView",
-  "version": "2.2.0-beta.39",
-  "versionCode": 20238,
+  "version": "2.2.0-beta.40",
+  "versionCode": 20239,
   "windows": {
     "packageIdentity": "Aegis.Project.AegisWebView",
     "executable": "Aegis.Windows.App.exe",

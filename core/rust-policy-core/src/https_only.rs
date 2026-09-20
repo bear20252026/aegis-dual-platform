@@ -154,4 +154,53 @@ mod tests {
             None
         );
     }
+
+    // —— 边界补强：host 提取与计数语义（此前 6 例未覆盖）——
+
+    #[test]
+    fn port_preserved_in_upgrade_and_same_allowed_match() {
+        // 带端口的 http URL 升级保留端口；放行判定忽略端口差异
+        let mut state = HttpsOnlyState::new();
+        assert_eq!(
+            state.upgrade("http://example.com:8080/a", "t1"),
+            Some("https://example.com:8080/a".to_string())
+        );
+        state.allow_http("example.com");
+        // 放行后，带端口请求不再升级
+        assert_eq!(state.upgrade("http://example.com:8080/a", "t1"), None);
+    }
+
+    #[test]
+    fn query_and_fragment_not_treated_as_host() {
+        // http://x.com?a=1 的域名必须是 x.com，query 不得混入 host
+        let mut state = HttpsOnlyState::new();
+        let upgraded = state.upgrade("http://example.com?a=1", "t1");
+        assert_eq!(upgraded, Some("https://example.com?a=1".to_string()));
+        let frag = state.upgrade("http://example.com#sec", "t2");
+        assert_eq!(frag, Some("https://example.com#sec".to_string()));
+    }
+
+    #[test]
+    fn upgrade_counts_are_per_tab_and_resetable() {
+        let mut state = HttpsOnlyState::new();
+        state.upgrade("http://a.com", "t1");
+        state.upgrade("http://a.com/2", "t1");
+        state.upgrade("http://b.com", "t2");
+        assert_eq!(state.get_upgrade_count("t1"), 2);
+        assert_eq!(state.get_upgrade_count("t2"), 1);
+        assert_eq!(state.get_upgrade_count("t-unknown"), 0);
+        state.reset_tab("t1");
+        assert_eq!(state.get_upgrade_count("t1"), 0);
+        // 全局计数保留
+        assert_eq!(state.get_total_upgrades(), 3);
+    }
+
+    #[test]
+    fn non_http_scheme_ignored() {
+        // 非 http 协议（ftp/blob 等）不走升级，也不计入放行判定
+        let mut state = HttpsOnlyState::new();
+        assert_eq!(state.upgrade("ftp://example.com/f", "t1"), None);
+        assert_eq!(state.upgrade("https://example.com", "t2"), None);
+        assert_eq!(state.get_total_upgrades(), 0);
+    }
 }
