@@ -59,7 +59,9 @@ import androidx.core.view.WindowCompat
  * 默认 top（与既有行为一致）；left 走 VerticalTabBar（按分组/工作区渲染）。
  */
 class MainActivity : ComponentActivity() {
-    private val viewModel: BrowserViewModel by viewModels()
+    // 架构解耦（第 5 项）：broker 经工厂注入 ViewModel——Application 强转取
+    // broker 收敛到这一个组合点（factory(application)），其余层不再强转。
+    private val viewModel: BrowserViewModel by viewModels { BrowserViewModel.factory(application) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

@@ -57,8 +57,8 @@ android {
         applicationId = "com.aegis.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20237
-        versionName = "2.2.0-beta.38"
+        versionCode = 20238
+        versionName = "2.2.0-beta.39"
         ndk {
             // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
             // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）
@@ -137,6 +137,11 @@ android {
     }
     buildFeatures {
         buildConfig = true
+    }
+    // 纯 JVM 单测可构造 android.webkit.WebView 等框架桩（方法返回默认值
+    // 而非抛 "not mocked"）——TabManager 等注入接缝类的离线单测前提
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 }
 

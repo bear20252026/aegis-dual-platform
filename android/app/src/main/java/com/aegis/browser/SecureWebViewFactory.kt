@@ -53,7 +53,7 @@ object SecureWebViewFactory {
         // 架构解耦（第 5 项）：broker 由组合根（MainActivity 的 ViewModel
         // 工厂对 Application 收敛注入）显式传入——工厂不再
         // `(context.applicationContext as AegisApplication).broker` 强转定位
-        //（可隔离、可注入）。
+        // （可隔离、可注入）。
         val webView = WebView(context)
         BrowserEngine(webView, onTitleObserved = { onTitleObserved(webView, it) }).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"

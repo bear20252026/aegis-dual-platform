@@ -2,6 +2,7 @@ package com.aegis.browser
 
 import android.webkit.WebView
 import androidx.lifecycle.ViewModel
+import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,13 +16,29 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * 替代 MainActivity 的 remember { mutableStateOf(...) }（违反 INV-04）。
  */
-class BrowserViewModel : ViewModel() {
+class BrowserViewModel(
+    private val broker: AndroidBroker,
+) : ViewModel() {
     companion object {
         /** 自定义首页（Android assets 本地加载）。 */
         const val HOME_URL = BrowserEngine.HOME_URL
 
         /** 「打开」按钮防抖间隔（毫秒）——P2 修复（全量复审 2026-09-01）。 */
         const val NAVIGATE_DEBOUNCE_MS = 500L
+
+        /**
+         * 架构解耦（第 5 项）：broker 由组合根注入 ViewModel（再透传 SecureWebViewFactory）
+         * ——Application 的强转定位收敛到这一个工厂点，其余层不再 `(context as
+         * AegisApplication)` 取 broker。
+         */
+        fun factory(application: android.app.Application): androidx.lifecycle.ViewModelProvider.Factory =
+            object : androidx.lifecycle.ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : androidx.lifecycle.ViewModel> create(modelClass: Class<T>): T {
+                    val app = application as AegisApplication
+                    return BrowserViewModel(app.broker) as T
+                }
+            }
     }
 
     private val _tabs = MutableStateFlow<List<Tab>>(emptyList<Tab>())
@@ -332,6 +349,7 @@ class BrowserViewModel : ViewModel() {
 
     private fun createSecureWebView(context: android.content.Context): WebView =
         SecureWebViewFactory.create(
+            broker = broker,
             context = context,
             onNavigationConfirmationRequested = { webView, request ->
                 _pendingNavigationConfirmation.value = PendingNavigationConfirmation(webView, request)
