@@ -575,9 +575,8 @@ public partial class MainWindow : Window
             return;
         var host = Uri.TryCreate(rt.Control.CoreWebView2.Source, UriKind.Absolute, out var u)
             ? u.Host : null;
-        // 与 ZoomStore/设置归一同口径（此前会话内允许 0.25、持久化钳 1.0——
-        // 缩小后的值重启即被静默重置）
-        var z = Math.Clamp(rt.Control.ZoomFactor + delta, TabRuntime.MinZoom, TabRuntime.MaxZoom);
+        // 与 ZoomStore/设置归一同口径（clamp 边界在 ZoomPolicy——上帝对象拆分·第七批）
+        var z = ZoomPolicy.ApplyStep(rt.Control.ZoomFactor, delta);
         rt.Control.ZoomFactor = z;
         if (host is not null)
             Core.Tabs.ZoomStore.Set(host, z);
