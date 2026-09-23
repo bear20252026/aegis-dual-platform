@@ -69,4 +69,34 @@ public sealed class FingerprintShieldTests
         Assert.Contains("origToDataURL.apply(tmp", canvasProxy);
         Assert.DoesNotContain("putImageData(imageData, 0, 0);\n                return origToDataURL.apply(this", canvasProxy);
     }
+
+    [Fact]
+    public void MaxViewportDimsReturnsInt32Array()
+    {
+        // CS-006 回归：MAX_VIEWPORT_DIMS(0x0D3A) 规范要求 Int32Array——
+        // Float32Array 可被类型检测识破（legacy 栈已修，C# 移植版漏改）
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.DoesNotContain("Float32Array", script);
+        Assert.Contains("new Int32Array([16384, 16384])", script);
+    }
+
+    [Fact]
+    public void WindowSizeOverrideCapturesOriginalGetter()
+    {
+        // RS-001 孪生回归：window 尺寸覆盖必须先捕获原 getter——getter 内
+        // 再读同名属性即无限自递归（页面首次读 innerWidth 即栈溢出）
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("origGetOPD.call(Object, window, 'innerWidth')", script);
+        Assert.DoesNotContain("return roundTo(window.innerWidth", script);
+        Assert.DoesNotContain("return roundTo(window.innerHeight", script);
+    }
+
+    [Fact]
+    public void TrackingParamStripIsCaseInsensitive()
+    {
+        // RS-010 孪生回归：注入 JS 的参数剥离大小写不敏感（Gclid 变体绕过）
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("lowerSet[k.toLowerCase()]", script);
+        Assert.DoesNotContain("searchParams.has(p)", script);
+    }
 }

@@ -59,8 +59,11 @@ public static class FaviconService
             onLoaded?.Invoke(null);
             return null;
         }
-        // 同 host 并发导航只发起一次抓取（in-flight 去重）
-        var task = InFlight.GetOrAdd(host, _ => Task.Run(async () =>
+        // 同 host 并发导航只发起一次抓取（in-flight 去重）。键含持久化语义——
+        // 此前仅按 host 去重：无痕与普通标签并发首取同 host 时先发起方的
+        // persistToDisk 生效，无痕站点的图标可被写盘（无痕不落盘承诺失效）。
+        var flightKey = persistToDisk ? host : "\0private:" + host;
+        var task = InFlight.GetOrAdd(flightKey, _ => Task.Run(async () =>
         {
             var icon = persistToDisk ? await LoadFromDiskAsync(host).ConfigureAwait(false) : null;
             icon ??= await FetchAsync(host).ConfigureAwait(false);
@@ -77,11 +80,11 @@ public static class FaviconService
             }
             return icon;
         }));
-        _ = DeliverAsync(host, task, onLoaded);
+        _ = DeliverAsync(flightKey, task, onLoaded);
         return null;
     }
 
-    private static async Task DeliverAsync(string host, Task<ImageSource?> task, Action<ImageSource?>? onLoaded)
+    private static async Task DeliverAsync(string flightKey, Task<ImageSource?> task, Action<ImageSource?>? onLoaded)
     {
         ImageSource? icon = null;
         try
@@ -94,7 +97,7 @@ public static class FaviconService
         }
         finally
         {
-            InFlight.TryRemove(host, out _);
+            InFlight.TryRemove(flightKey, out _);
         }
         if (onLoaded is not null)
         {

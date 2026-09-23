@@ -105,7 +105,7 @@ public static class FingerprintShield
             if (p === 37446 || p === 0x9246 || p === 0x1F01) return RENDERER;
             if (p === 37445 || p === 0x9245 || p === 0x1F00) return VENDOR;
             if (p === 0x0D33) return 16384;
-            if (p === 0x0D3A) return new Float32Array([16384, 16384]);
+            if (p === 0x0D3A) return new Int32Array([16384, 16384]); // 规范要求 Int32Array——Float32 可被类型检测识破
             if (p === 0x84E8) return 16384;
             return origGetParam.call(this, p);
           };
@@ -117,7 +117,7 @@ public static class FingerprintShield
               if (p === 37446 || p === 0x9246 || p === 0x1F01) return RENDERER;
               if (p === 37445 || p === 0x9245 || p === 0x1F00) return VENDOR;
               if (p === 0x0D33) return 16384;
-              if (p === 0x0D3A) return new Float32Array([16384, 16384]);
+              if (p === 0x0D3A) return new Int32Array([16384, 16384]);
               if (p === 0x84E8) return 16384;
               return origGetParam2.call(this, p);
             };
@@ -185,10 +185,15 @@ public static class FingerprintShield
             if (osAH) origDefineProp(screen, 'availHeight', { get: function() { return roundTo(osAH.get.call(this), HS); } });
           } catch(e) {}
           try {
-            origDefineProp(window, 'innerWidth', { get: function() { return roundTo(window.innerWidth, WS); } });
-            origDefineProp(window, 'innerHeight', { get: function() { return roundTo(window.innerHeight, HS); } });
-            origDefineProp(window, 'outerWidth', { get: function() { return roundTo(window.outerWidth, WS); } });
-            origDefineProp(window, 'outerHeight', { get: function() { return roundTo(window.outerHeight, HS); } });
+            var oIW = origGetOPD.call(Object, window, 'innerWidth');
+            var oIH = origGetOPD.call(Object, window, 'innerHeight');
+            var oOW = origGetOPD.call(Object, window, 'outerWidth');
+            var oOH = origGetOPD.call(Object, window, 'outerHeight');
+            // 先捕获原 getter 再覆盖——getter 内再读同名属性即无限自递归栈溢出
+            if (oIW && oIW.get) origDefineProp(window, 'innerWidth', { get: function() { return roundTo(oIW.get.call(this), WS); } });
+            if (oIH && oIH.get) origDefineProp(window, 'innerHeight', { get: function() { return roundTo(oIH.get.call(this), HS); } });
+            if (oOW && oOW.get) origDefineProp(window, 'outerWidth', { get: function() { return roundTo(oOW.get.call(this), WS); } });
+            if (oOH && oOH.get) origDefineProp(window, 'outerHeight', { get: function() { return roundTo(oOH.get.call(this), HS); } });
           } catch(e) {}
 
           // ====== Stage 5+9 合并: fetch/XHR 责任链 ======
@@ -198,7 +203,11 @@ public static class FingerprintShield
             'oly_enc_id','rb_clickid','s_cid','twclid','vero_conv','vero_id','wickedid','yclid','wbraid'];
           function stripTrackingParams(url) {
             try { var u = new URL(url); var c = false;
-              TRACKING_PARAMS.forEach(function(p) { if (u.searchParams.has(p)) { u.searchParams.delete(p); c = true; } });
+              var lowerSet = {};
+              TRACKING_PARAMS.forEach(function(p) { lowerSet[p.toLowerCase()] = true; });
+              var doomed = [];
+              u.searchParams.forEach(function(v, k) { if (lowerSet[k.toLowerCase()]) doomed.push(k); });
+              doomed.forEach(function(k) { u.searchParams.delete(k); c = true; });
               return c ? u.toString() : url;
             } catch(e) { return url; }
           }

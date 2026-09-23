@@ -120,11 +120,15 @@ public sealed class TabRuntime : IDisposable
                     Control.ZoomFactor = zoom;
                 // 站点图标（内存命中即时；未命中后台抓取后回填；无痕不落盘）
                 var hostCapture = host;
-                _ = Core.Favicons.FaviconService.Get(hostCapture, icon =>
+                var cachedIcon = Core.Favicons.FaviconService.Get(hostCapture, icon =>
                 {
                     if (icon is not null)
                         Tab.Icon = icon;
                 }, persistToDisk: !IsPrivate);
+                // 内存缓存命中时 Get 直接返回且跳过回调——调用方必须消费返回值，
+                // 否则同会话二次访问的站点图标永不显示
+                if (cachedIcon is not null)
+                    Tab.Icon = cachedIcon;
             }
         };
     }

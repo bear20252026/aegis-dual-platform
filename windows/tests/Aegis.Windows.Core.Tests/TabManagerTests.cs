@@ -269,4 +269,41 @@ public sealed class TabManagerTests
         Assert.Equal("https://y", m.Current?.Url);
     }
 
+
+    [Fact]
+    public void CloseTabInvokesTabClosedForSubscriberTeardown()
+    {
+        // CS-001 回归：TabClosed 此前从未触发——订阅方（主/无痕窗口）的
+        // WebView 摘除与 dispose 永不执行，每关一标签泄漏一个 WebView2 实例
+        var manager = new TabManager();
+        var t1 = manager.NewTab("about:blank");
+        var t2 = manager.NewTab("about:blank");
+        var closedIds = new List<string>();
+        manager.TabClosed += id => closedIds.Add(id);
+
+        manager.CloseTab(t1.TabId);
+        Assert.Equal([t1.TabId], closedIds);
+
+        manager.CloseTab(t2.TabId);
+        Assert.Equal([t1.TabId, t2.TabId], closedIds);
+    }
+
+    [Fact]
+    public void CloseOthersAndCloseRightInvokeTabClosedForEach()
+    {
+        var manager = new TabManager();
+        var t1 = manager.NewTab("about:blank");
+        var t2 = manager.NewTab("about:blank");
+        var t3 = manager.NewTab("about:blank");
+        var closedIds = new List<string>();
+        manager.TabClosed += id => closedIds.Add(id);
+
+        manager.CloseRight(t1.TabId);
+        Assert.Equal([t2.TabId, t3.TabId], closedIds);
+
+        closedIds.Clear();
+        var t4 = manager.NewTab("about:blank");
+        manager.CloseOthers(t4.TabId);
+        Assert.Equal([t1.TabId], closedIds);
+    }
 }

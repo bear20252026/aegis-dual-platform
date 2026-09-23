@@ -76,8 +76,9 @@ public static class UrlSafety
         {
             return TryFromLong(long.Parse(host, System.Globalization.CultureInfo.InvariantCulture), out address);
         }
-        // 0x 十六进制整数
-        if (host.StartsWith("0x", StringComparison.Ordinal) && host.Length <= 10
+        // 0x 十六进制整数（Length>2：至少一位 hex 数字——"0x" 裸前缀会使
+        // Convert.ToInt64 抛 FormatException，此前 host[2..] 空串 All() 恒真）
+        if (host.StartsWith("0x", StringComparison.Ordinal) && host.Length > 2 && host.Length <= 10
             && host[2..].All(c => char.IsDigit(c) || (c >= 'a' && c <= 'f')))
         {
             return TryFromLong(Convert.ToInt64(host, 16), out address);

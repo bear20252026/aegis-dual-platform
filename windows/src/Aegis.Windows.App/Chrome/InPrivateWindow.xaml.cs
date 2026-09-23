@@ -2,6 +2,7 @@ namespace Aegis.Windows.Chrome;
 
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using Aegis.Windows.Broker;
@@ -25,6 +26,8 @@ public partial class InPrivateWindow : Window
     private bool _suppressSelection;
     private bool _closed;
     private WebView.InPrivateEnvironmentLease? _environmentLease;
+    // 租约获取串行化门闩——??= 与 await 非原子（见 GetLeaseAsync）
+    private readonly System.Threading.SemaphoreSlim _leaseGate = new(1, 1);
     // 引擎偏好构造时取一次（此后不再读盘——地址栏每次回车同步 IO 已移除）
     private readonly string _engineKey;
 
@@ -54,7 +57,7 @@ public partial class InPrivateWindow : Window
     {
         try
         {
-            var lease = _environmentLease ??= await WebView.WebViewEnvironment.InPrivateAsync();
+            var lease = await GetLeaseAsync();
             if (_closed)
             {
                 // 等待环境期间窗口已关闭——立即归还租约，不再挂载控件
@@ -93,6 +96,23 @@ public partial class InPrivateWindow : Window
         {
             Core.Security.SecurityLog.Write(
                 $"[inprivate] 标签 {tab.TabId} 初始化失败: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>获取（或复用）无痕环境租约。`??=` 与 await 非原子——启动期
+    /// 快速二连开标签时两路 await 都创建环境，后完成者的租约被 `??=` 丢弃
+    /// 且永不 Dispose（临时目录永久残留），故以门闩串行化。</summary>
+    private async Task<WebView.InPrivateEnvironmentLease> GetLeaseAsync()
+    {
+        await _leaseGate.WaitAsync();
+        try
+        {
+            _environmentLease ??= await WebView.WebViewEnvironment.InPrivateAsync();
+            return _environmentLease;
+        }
+        finally
+        {
+            _leaseGate.Release();
         }
     }
 

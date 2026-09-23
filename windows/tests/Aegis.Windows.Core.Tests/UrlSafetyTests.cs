@@ -97,4 +97,17 @@ public sealed class UrlSafetyTests
     [InlineData("http://255.255.255.255", false)]     // 广播
     public void RejectsIpv4AlternateEncodingsAndIpv6SpecialRanges(string url, bool expected) =>
         Assert.Equal(expected, UrlSafety.IsPublicHttpUrl(url));
+
+    [Fact]
+    public void BareHexPrefixHostDoesNotThrow()
+    {
+        // CS-002 回归：host=="0x" 时此前 Convert.ToInt64 抛 FormatException
+        // （新窗口请求 http://0x/ 即崩）——守卫后按"非公网主机名"处理
+        var ex = Record.Exception(() => UrlSafety.IsPublicHttpUrl("http://0x/"));
+        Assert.Null(ex);
+        // "0x" 无有效 hex 位——按普通公网主机名放行（DNS 解析失败自然拦截），
+        // 不再落入十六进制转换分支
+        Assert.True(UrlSafety.IsPublicHttpUrl("http://0x/"));
+        Assert.False(UrlSafety.IsPublicHttpUrl("http://0x0/"));  // 0x0 = 0.0.0.0
+    }
 }

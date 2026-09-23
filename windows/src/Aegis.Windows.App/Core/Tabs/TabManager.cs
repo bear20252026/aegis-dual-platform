@@ -111,6 +111,9 @@ public sealed class TabManager
         var wasCurrent = index == _currentIndex;
         _tabs.RemoveAt(index);
         _closed.Push(target);
+        // 必须触发：订阅方（主/无痕窗口）在回调中摘树并 dispose 对应 WebView——
+        // 此前事件从未 Invoke，每关一标签即泄漏一个 WebView2 实例直到关窗
+        _tabClosed?.Invoke(target.TabId);
         while (_closed.Count > 20)
             _closed.Pop();
         if (_tabs.Count == 0)
