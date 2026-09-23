@@ -1280,13 +1280,12 @@
 | 批次 | 提交 | 范围 | 项数 | 验证 |
 |---|---|---|---|---|
 | 先导 | 82a04b2 (beta.44) | RS：matcher glob_subsumes 可靠性修复+边界测试 8 项 | 1 | cargo test 197 通过+clippy 0 |
-| R1 | 待执行 | RS-001..010 Rust P1 缺陷修复+回归 | 10 | cargo test |
-| R2 | 待执行 | RS-011..050 Rust P2 修复+测试 | 40 | cargo test |
+| R1 | 3d28097 (beta.45) | RS-001..010 Rust P1 缺陷修复（letterbox 自递归/per-site 域名错传/多字节 panic/FFI 越读/executor 桩/proxyMap 空/DP 256MiB/预解析上限/JS 大小写剥离）+回归测试 | 10 | cargo test 209 通过+clippy 0+fmt |
 | C1 | 待执行 | CS-001..006 C# P1 缺陷修复+回归 | 6 | dotnet test |
 | W1 | 待执行 | WB-001/002 Web 导入管道修复+测试 | 2+ | node test |
 | A1 | 待执行 | AD-001..006 Android P1 修复 | 6 | gradle |
 | P1 | 待执行 | PY-001..025 契约/CI P1 | 25 | py validate |
 | 后续 | 待执行 | 各区 P2/P3 分批 | … | 每批对应套件 |
 
-> 完成度：1 / 1021（先导批次）。后续批次逐批回填本表并在总清单标注 `[已完成]`。
+> 完成度：11 / 1115（先导 1 + R1 批次 10）。后续批次逐批回填本表并在总清单标注 `[已完成]`。
 
