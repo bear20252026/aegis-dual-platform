@@ -89,6 +89,7 @@ impl FingerprintShield {
     }}
     return origToDataURL.apply(this, arguments);
   }};
+  if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(HTMLCanvasElement.prototype.toDataURL, origToDataURL);
 }})();
 
 // WebGL 渲染器/供应商伪装
@@ -101,6 +102,7 @@ impl FingerprintShield {
     if (p === UNMASKED_VENDOR) return 'Aegis Privacy';
     return origGetParameter.call(this, p);
   }};
+  if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(WebGLRenderingContext.prototype.getParameter, origGetParameter);
 }})();
 
 // hardwareConcurrency 随机化（2-8 核）

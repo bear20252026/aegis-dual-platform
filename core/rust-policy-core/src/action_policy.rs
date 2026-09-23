@@ -150,7 +150,12 @@ fn context_contains_token(context: &str, token: &str) -> bool {
         if before_ok && after_ok {
             return true;
         }
+        // 推进到下一个 UTF-8 字符边界——abs+1 可落在多字节字符中间，
+        // 下轮 context[from..] 切片即 panic（byte index not on char boundary）
         from = abs + 1;
+        while from < context.len() && !context.is_char_boundary(from) {
+            from += 1;
+        }
         if from >= context.len() {
             break;
         }
@@ -201,5 +206,19 @@ mod tests {
             policy.evaluate("write_config", "ctx"),
             PolicyDecision::Ask(_)
         ));
+    }
+
+    #[test]
+    fn context_contains_token_multibyte_no_panic() {
+        // RS-004 回归：多字节 UTF-8 续扫不得 panic（byte index not on char
+        // boundary）。条件判定仅对带 condition 的规则触发。
+        let mut policy = ActionPolicy::new(RuleEffect::Deny);
+        let mut rule = make_rule("deny_you", "read*", RuleEffect::Deny);
+        rule.condition = Some("example.com".into());
+        policy.add_rule(rule);
+        // 多次出现多字节字符 + 伪边界场景——此前在此 panic
+        let _ = policy.evaluate("read", "x你你y你z你example.com你");
+        let _ = policy.evaluate("read", "你你你你你你你你");
+        let _ = policy.evaluate("read", "emoji😀😀x😀read😀example.com");
     }
 }

@@ -122,10 +122,16 @@ impl LetterboxShield {
 
   // 覆盖 window 尺寸属性
   try {{
-    Object.defineProperty(window, 'innerWidth', {{ get: function() {{ return roundTo(window.innerWidth, WS, MW); }} }});
-    Object.defineProperty(window, 'innerHeight', {{ get: function() {{ return roundTo(window.innerHeight, HS, MH); }} }});
-    Object.defineProperty(window, 'outerWidth', {{ get: function() {{ return roundTo(window.outerWidth, WS, MW); }} }});
-    Object.defineProperty(window, 'outerHeight', {{ get: function() {{ return roundTo(window.outerHeight, HS, MH); }} }});
+    // 先捕获原始 getter 再覆盖——若 getter 内再读 window.innerWidth，
+    // 读到的已是覆盖后的自身，形成无限自递归栈溢出（RangeError）
+    var oIW = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    var oIH = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    var oOW = Object.getOwnPropertyDescriptor(window, 'outerWidth');
+    var oOH = Object.getOwnPropertyDescriptor(window, 'outerHeight');
+    if (oIW && oIW.get) Object.defineProperty(window, 'innerWidth', {{ get: function() {{ return roundTo(oIW.get.call(this), WS, MW); }} }});
+    if (oIH && oIH.get) Object.defineProperty(window, 'innerHeight', {{ get: function() {{ return roundTo(oIH.get.call(this), HS, MH); }} }});
+    if (oOW && oOW.get) Object.defineProperty(window, 'outerWidth', {{ get: function() {{ return roundTo(oOW.get.call(this), WS, MW); }} }});
+    if (oOH && oOH.get) Object.defineProperty(window, 'outerHeight', {{ get: function() {{ return roundTo(oOH.get.call(this), HS, MH); }} }});
   }} catch(e) {{}}
 }})();
 "#
@@ -159,6 +165,18 @@ mod tests {
         assert!(script.contains("100"));
         assert!(script.contains("Screen.prototype"));
         assert!(script.contains("innerWidth"));
+    }
+
+    #[test]
+    fn window_override_captures_original_getter() {
+        // RS-001 回归：window 属性覆盖必须先捕获原 getter，
+        // 不得在 getter 内再读同名属性（无限自递归栈溢出）
+        let script = LetterboxShield::new().inject_script();
+        assert!(script.contains("getOwnPropertyDescriptor(window, 'innerWidth')"));
+        assert!(script.contains("getOwnPropertyDescriptor(window, 'outerHeight')"));
+        // 覆盖体内不允许出现"读覆盖目标自身"的递归形态
+        assert!(!script.contains("return roundTo(window.innerWidth"));
+        assert!(!script.contains("return roundTo(window.innerHeight"));
     }
 
     #[test]

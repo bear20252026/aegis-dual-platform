@@ -28,12 +28,18 @@ pub fn glob_match(pattern: &str, text: &str, flat: bool) -> bool {
     // 输入有界：DP 缓存为 (pat+1)*(txt+1) 平方级——超长模式/文本直接
     // 拒绝匹配（此前可无界分配）
     const MAX_GLOB_INPUT: usize = 16_384;
+    // 乘积上限：两侧同时接近 16K 时缓冲达 (16385)²≈256MiB——单条恶意规则
+    // +超长 URL 即可触发；4M 格（4MB）内完成匹配，超出直接拒绝
+    const MAX_GLOB_CELLS: usize = 4 * 1024 * 1024;
     if pattern.len() > MAX_GLOB_INPUT || text.len() > MAX_GLOB_INPUT {
         return false;
     }
     let pat: Vec<char> = pattern.chars().collect();
     let txt: Vec<char> = text.chars().collect();
     let width = txt.len() + 1;
+    if (pat.len() + 1).saturating_mul(width) > MAX_GLOB_CELLS {
+        return false;
+    }
     let mut cache = vec![0u8; (pat.len() + 1) * width];
     matches_impl(&pat, &txt, 0, 0, flat, &mut cache, width)
 }
@@ -273,6 +279,18 @@ mod tests {
         let long = "a".repeat(20_000);
         assert!(!glob_match(&long, "x", false));
         assert!(!glob_match("x", &long, false));
+    }
+
+    #[test]
+    fn product_overflow_rejected() {
+        // RS-008 回归：两侧均在 16K 上限内、但乘积超 4M 格时必须拒绝——
+        // 此前分配 (16385)²≈256MiB 缓冲，单条恶意规则即可触发
+        let pat = format!("*{}", "a".repeat(15_000));
+        let txt = format!("{}b", "b".repeat(15_000));
+        assert!(!glob_match(&pat, &txt, false));
+        // 乘积在限内的正常匹配不受影响（字面相等可命中）
+        let small = "a".repeat(90);
+        assert!(glob_match(&small, &small, false));
     }
 
     #[test]

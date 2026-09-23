@@ -17,7 +17,7 @@ use std::collections::HashMap;
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
 /// 单个标签页的可恢复状态（照搬 Omni Browser OmniSessionState）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SessionState {
     /// Schema 版本（向前/向后兼容）。
     pub schema_version: u32,
@@ -32,7 +32,7 @@ pub struct SessionState {
 }
 
 /// 标签页元数据（照搬 Omni Browser TabMetadata）。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TabMetadata {
     pub title: String,
     pub url: String,
@@ -51,6 +51,13 @@ impl SessionState {
         const MAX_TITLE_LEN: usize = 4096;
         const MAX_URL_LEN: usize = 8192;
         const MAX_STATE_BYTES: usize = 512 * 1024;
+        // 解析前总长上限——此前 serde_json 先全量解析任意大小输入再逐字段
+        // 限长，超长 JSON 可先驱动无界内存分配（内存 DoS）。字段上限之和
+        // 远小于 1MB，超限输入不可能合法。
+        const MAX_JSON_BYTES: usize = 1024 * 1024;
+        if json.len() > MAX_JSON_BYTES {
+            return None;
+        }
 
         let map: HashMap<String, serde_json::Value> = serde_json::from_str(json).ok()?;
         let schema_version = map.get("schemaVersion")?.as_u64()? as u32;
@@ -207,6 +214,34 @@ mod tests {
     fn rejects_oversized_state_bytes() {
         let big = "ff".repeat(600 * 1024); // > 512KB 上限
         assert!(SessionState::from_json(&state_json("t", "t", "u", &big)).is_none());
+    }
+
+    #[test]
+    fn rejects_oversized_json_before_parse() {
+        // RS-009 回归：解析前总长上限——1MB 垃圾输入直接拒绝（不进 serde）
+        let junk = "x".repeat(1024 * 1024 + 1);
+        assert!(SessionState::from_json(&junk).is_none());
+    }
+
+    #[test]
+    fn accepts_json_within_total_cap() {
+        // 正常尺寸输入不受上限影响（往返可用）
+        let state = SessionState {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            tab_id: "t".into(),
+            session_state_bytes: vec![0xAB; 4096],
+            metadata: TabMetadata {
+                title: "t".into(),
+                url: "https://e.com".into(),
+                is_incognito: false,
+                last_active_time: 0,
+                can_go_back: false,
+                can_go_forward: false,
+            },
+            timestamp: 1,
+        };
+        let json = state.to_json();
+        assert_eq!(SessionState::from_json(&json), Some(state));
     }
 
     #[test]

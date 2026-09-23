@@ -60,14 +60,17 @@ pub extern "C" fn aegis_policy_core_abi_version() -> u32 {
 /// 每个阶段独立、可拆卸、可组合——移除/新增阶段不影响其他阶段。
 /// 管线顺序：ToStringGuard → PerSiteSeed → FingerprintShield → LetterboxShield → QueryStripper → FontNormalizer → WebGLSpoof → TimerPrecision → ExtProxy
 ///
+/// `domain`：该 WebView 顶层文档的 eTLD+1 域名（宿主已知），供 PerSiteSeed
+/// 按域派生站点种子——此前管线把会话种子 hex 当域名传参，所有站点共用
+/// 同一种子，per-site 隔离完全失效。
+///
 /// # 用法
 /// ```rust
 /// use aegis_policy_core::fingerprint_pipeline;
 /// let shield = aegis_policy_core::shield::FingerprintShield::new();
-/// let script = fingerprint_pipeline(&shield);
+/// let script = fingerprint_pipeline(&shield, "example.com");
 /// ```
-pub fn fingerprint_pipeline(shield: &shield::FingerprintShield) -> String {
-    let session_hex = shield.seed_hex();
+pub fn fingerprint_pipeline(shield: &shield::FingerprintShield, domain: &str) -> String {
     let tostring_guard = tostring_guard::ToStringGuard::new();
     let per_site = per_site_seed::PerSiteSeed::new(shield.seed_bytes());
     let letterbox = letterbox::LetterboxShield::new();
@@ -79,7 +82,7 @@ pub fn fingerprint_pipeline(shield: &shield::FingerprintShield) -> String {
     format!(
         "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
         tostring_guard.inject_script(),
-        per_site.inject_script(&session_hex),
+        per_site.inject_script(domain),
         shield.inject_script(),
         letterbox.inject_script(),
         query_strip.inject_script(),
@@ -98,5 +101,43 @@ mod native_abi_tests {
     fn c_abi_version_is_stable() {
         assert_eq!(aegis_policy_core_abi_version(), POLICY_CORE_ABI_VERSION);
         assert_eq!(POLICY_CORE_ABI_VERSION, 3);
+    }
+
+    #[test]
+    fn pipeline_per_site_seed_varies_by_domain() {
+        // RS-002 回归：管线必须把真实域名传给 PerSiteSeed——
+        // 此前误传会话种子 hex 当域名，所有站点注入相同种子。
+        let shield = shield::FingerprintShield::new();
+        let a = fingerprint_pipeline(&shield, "example.com");
+        let b = fingerprint_pipeline(&shield, "tracker.example.net");
+        let seed_of = |s: &str| {
+            s.lines()
+                .find(|l| l.contains("__AEGIS_SITE_SEED"))
+                .unwrap()
+                .to_string()
+        };
+        assert_ne!(seed_of(&a), seed_of(&b));
+        // 同域确定性
+        assert_eq!(
+            seed_of(&a),
+            seed_of(&fingerprint_pipeline(&shield, "example.com"))
+        );
+        // 站点种子不得等于会话种子 hex（域名错传的特征）
+        assert!(!seed_of(&a).contains(&shield.seed_hex()));
+    }
+
+    #[test]
+    fn mode_pipeline_per_site_seed_varies_by_domain() {
+        use crate::protection_mode::{fingerprint_pipeline_with_mode, ProtectionMode};
+        let shield = shield::FingerprintShield::new();
+        let a = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
+        let b = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "b.com");
+        let seed_of = |s: &str| {
+            s.lines()
+                .find(|l| l.contains("__AEGIS_SITE_SEED"))
+                .unwrap()
+                .to_string()
+        };
+        assert_ne!(seed_of(&a), seed_of(&b));
     }
 }

@@ -103,17 +103,20 @@ impl TimerPrecision {
   // 覆盖 performance.now()
   try {{
     var origPerfNow = performance.now.bind(performance);
+    var wrappedPerfNow = function() {{ return reducePrecision(origPerfNow()); }};
     Object.defineProperty(performance, 'now', {{
-      value: function() {{ return reducePrecision(origPerfNow()); }},
+      value: wrappedPerfNow,
       writable: false,
       configurable: false
     }});
+    if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(wrappedPerfNow, origPerfNow);
   }} catch(e) {{}}
 
   // 覆盖 Date.now()
   try {{
     var origDateNow = Date.now;
     Date.now = function() {{ return reducePrecision(origDateNow()); }};
+    if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(Date.now, origDateNow);
   }} catch(e) {{}}
 }})();
 "#

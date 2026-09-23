@@ -146,15 +146,21 @@ impl QueryStripper {
 // 原始列表：LibreWolf (MPL-2.0) / Brave Software (MPL-2.0)
 (function() {{
   var TRACKING_PARAMS = {params_json};
+  var LOWER_SET = {{}};
+  TRACKING_PARAMS.forEach(function(p) {{ LOWER_SET[p.toLowerCase()] = true; }});
   function stripParams(url) {{
     try {{
       var u = new URL(url);
       var changed = false;
-      TRACKING_PARAMS.forEach(function(p) {{
-        if (u.searchParams.has(p)) {{
-          u.searchParams.delete(p);
-          changed = true;
-        }}
+      // 大小写不敏感剥离——searchParams.has 区分大小写，Gclid/gClId
+      // 变体此前在浏览器拦截路径完整绕过（Rust 侧已是 ignore_case）
+      var doomed = [];
+      u.searchParams.forEach(function(v, k) {{
+        if (LOWER_SET[k.toLowerCase()]) doomed.push(k);
+      }});
+      doomed.forEach(function(k) {{
+        u.searchParams.delete(k);
+        changed = true;
       }});
       return changed ? u.toString() : url;
     }} catch(e) {{ return url; }}
@@ -200,6 +206,16 @@ mod tests {
             qs.strip("https://example.com/?id=123&fbclid=abc"),
             "https://example.com/?id=123"
         );
+    }
+
+    #[test]
+    fn inject_script_strips_case_variants() {
+        // RS-010 回归：JS 侧剥离必须大小写不敏感——Gclid/gClId 变体此前
+        // 在浏览器拦截路径完整绕过（Rust 侧已 ignore_case，注入侧漏配）
+        let script = QueryStripper::new().inject_script();
+        assert!(script.contains("toLowerCase()"));
+        assert!(!script.contains("searchParams.has(p)"));
+        assert!(script.contains("LOWER_SET"));
     }
 
     #[test]

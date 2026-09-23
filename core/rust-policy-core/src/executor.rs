@@ -107,16 +107,52 @@ impl Executor {
     }
 
     /// 阶段 1：解析（JSON → 结构化命令）。
+    ///
+    /// 此前为占位桩：恒返回 `command_type="default"`，真实命令永远无法路由。
+    /// 现以 serde_json 解析 `{"command_type","target","parameters","origin"}`；
+    /// 非 JSON / 缺字段按类型化错误拒绝。输入上限对齐 C ABI 64KB。
     fn parse(&self, raw: &str) -> ParseResult {
-        // 简化解析（实际应用 json crate）
+        const MAX_INPUT_BYTES: usize = 64 * 1024;
         if raw.trim().is_empty() {
             return ParseResult::Error("空输入".into());
         }
+        if raw.len() > MAX_INPUT_BYTES {
+            return ParseResult::Error("输入超长".into());
+        }
+        let value: serde_json::Value = match serde_json::from_str(raw) {
+            Ok(v) => v,
+            Err(e) => return ParseResult::Error(format!("非法 JSON: {e}")),
+        };
+        let command_type = value
+            .get("command_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let target = value
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let origin = value
+            .get("origin")
+            .and_then(|v| v.as_str())
+            .unwrap_or("cli")
+            .to_string();
+        let mut parameters = HashMap::new();
+        if let Some(obj) = value.get("parameters").and_then(|v| v.as_object()) {
+            for (k, v) in obj {
+                let s = match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                parameters.insert(k.clone(), s);
+            }
+        }
         ParseResult::Ok(ParsedCommand {
-            command_type: "default".into(),
-            target: raw.to_string(),
-            parameters: HashMap::new(),
-            origin: "cli".into(),
+            command_type,
+            target,
+            parameters,
+            origin,
         })
     }
 
@@ -158,8 +194,9 @@ mod tests {
     #[test]
     fn unknown_command_denied() {
         let executor = Executor::new();
+        // 合法 JSON 但 command_type 未注册——路由阶段拒绝
         assert!(matches!(
-            executor.execute_pipeline("some input", false),
+            executor.execute_pipeline(r#"{"command_type":"nope","target":"x"}"#, false),
             ExecuteResult::Denied(_)
         ));
     }
@@ -168,8 +205,52 @@ mod tests {
     fn registered_handler_executes() {
         let mut executor = Executor::new();
         executor.register_handler(Box::new(MockHandler));
-        // 由于 parse() 返回 command_type="default"，需要手动调整
-        // 这里测试 handler 存在性
-        assert!(executor.handlers.contains_key("test"));
+        assert!(matches!(
+            executor.execute_pipeline(r#"{"command_type":"test","target":"page"}"#, false),
+            ExecuteResult::Success(_)
+        ));
+    }
+
+    #[test]
+    fn malformed_json_rejected() {
+        let executor = Executor::new();
+        assert!(matches!(
+            executor.execute_pipeline("some input", false),
+            ExecuteResult::Error(_)
+        ));
+        // 语法残缺的 JSON（截断对象）——serde 解析失败拒绝
+        assert!(matches!(
+            executor.execute_pipeline(r#"{"command_type":"x","target":"#, false),
+            ExecuteResult::Error(_)
+        ));
+    }
+
+    #[test]
+    fn parse_extracts_fields_and_parameters() {
+        let executor = Executor::new();
+        let raw = r##"{"command_type":"click","target":"#btn","origin":"web","parameters":{"wait_ms":"500","count":2}}"##;
+        match executor.execute_pipeline(raw, false) {
+            ExecuteResult::Denied(msg) => {
+                // 未注册 "click" handler——路由拒绝消息应携带真实类型（证明解析成功）
+                assert!(
+                    msg.contains("click"),
+                    "路由消息未携带解析出的命令类型: {msg}"
+                );
+            }
+            other => panic!("期望 Denied，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oversized_input_rejected() {
+        let executor = Executor::new();
+        let big = format!(
+            r#"{{"command_type":"x","target":"{}"}}"#,
+            "a".repeat(70 * 1024)
+        );
+        assert!(matches!(
+            executor.execute_pipeline(&big, false),
+            ExecuteResult::Error(_)
+        ));
     }
 }

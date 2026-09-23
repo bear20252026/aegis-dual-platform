@@ -28,14 +28,25 @@ fn read_utf8(value: *const c_char) -> Result<&'static str, &'static str> {
     if value.is_null() {
         return Err("ffi_input_null");
     }
-    // SAFETY: 调用方契约要求指针指向可读内存；我们只读至多 FFI_INPUT_MAX_BYTES
-    // 并在首个 NUL 处停止——把潜在越读限制在有界窗口内。
-    let window = unsafe { std::slice::from_raw_parts(value as *const u8, FFI_INPUT_MAX_BYTES) };
-    match window.iter().position(|&b| b == 0) {
-        Some(nul) => std::str::from_utf8(&window[..nul]).map_err(|_| "ffi_input_utf8"),
-        // 无 NUL 终止——拒绝而非继续无界读取
-        None => Err("ffi_input_too_long"),
+    // SAFETY: 契约要求指针指向 NUL 结尾的可读缓冲。此处逐字节有界扫描并在
+    // 首个 NUL 处停止——良构输入绝不触碰 NUL 之后的内存；此前
+    // from_raw_parts(value, 64KB) 一次性声明整个窗口可读，宿主缓冲小于
+    // 64KB 且 NUL 落在页尾时是真实越读（形式化 UB + 潜在页错误）。
+    let base = value as *const u8;
+    let mut len = 0usize;
+    loop {
+        let byte = unsafe { *base.add(len) };
+        if byte == 0 {
+            break;
+        }
+        len += 1;
+        if len >= FFI_INPUT_MAX_BYTES {
+            // 无 NUL 终止——拒绝而非继续无界读取
+            return Err("ffi_input_too_long");
+        }
     }
+    let bytes = unsafe { std::slice::from_raw_parts(base, len) };
+    std::str::from_utf8(bytes).map_err(|_| "ffi_input_utf8")
 }
 
 /// JSON 编码为 NUL 结尾的 C 字符串。serde_json 输出不含字面 NUL（转义为

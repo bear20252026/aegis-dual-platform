@@ -70,6 +70,12 @@ impl ToStringGuard {
     return origToLocale.call(this);
   };
 
+  // 自注册本模块覆盖的函数——toString 自身的 toString 亦返回原始实现，
+  // 否则"检测 toString 是否被覆盖"本身即可识破防护（此前 proxyMap 恒空，
+  // 注册接口无任何调用者，欺骗防护实际为零）
+  proxyMap.set(Function.prototype.toString, origToString);
+  proxyMap.set(Function.prototype.toLocaleString, origToLocale);
+
   // 暴露注册接口——其他模块注入代理时调用
   Object.defineProperty(window, '__AEGIS_REGISTER_PROXY', {
     value: function(proxy, original) {
@@ -108,5 +114,18 @@ mod tests {
         let guard = ToStringGuard::new();
         let script = guard.inject_script();
         assert!(script.contains("proxyMap.set(proxy, original)"));
+    }
+
+    #[test]
+    fn script_self_registers_own_overrides() {
+        // RS-007 回归：guard 覆盖的 toString/toLocaleString 必须自注册进
+        // proxyMap——否则映射恒空、欺骗防护为零
+        let script = guard_script();
+        assert!(script.contains("proxyMap.set(Function.prototype.toString, origToString)"));
+        assert!(script.contains("proxyMap.set(Function.prototype.toLocaleString, origToLocale)"));
+    }
+
+    fn guard_script() -> String {
+        ToStringGuard::new().inject_script()
     }
 }

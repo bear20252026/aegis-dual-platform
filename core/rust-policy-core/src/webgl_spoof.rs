@@ -122,6 +122,8 @@ impl WebGLSpoof {
           return origGetParam.call(this, param);
       }}
     }};
+    // 注册代理——toString 防护映射此包装，防"检测函数被覆盖"识破
+    if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(proto.getParameter, origGetParam);
   }}
 
   try {{ patchContext(WebGLRenderingContext.prototype); }} catch(e) {{}}

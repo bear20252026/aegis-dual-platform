@@ -135,9 +135,13 @@ impl fmt::Display for ProtectionMode {
 ///
 /// 根据 ProtectionMode 选择性激活管道阶段，
 /// 返回组合后的 JS 注入脚本。
+///
+/// `domain`：顶层文档 eTLD+1 域名（PerSiteSeed 按域派生站点种子——
+/// 此前误传会话种子 hex 当域名，per-site 隔离失效）。
 pub fn fingerprint_pipeline_with_mode(
     shield: &crate::shield::FingerprintShield,
     mode: ProtectionMode,
+    domain: &str,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -151,9 +155,8 @@ pub fn fingerprint_pipeline_with_mode(
 
     // Stage 2: PerSiteSeed
     if mode.enable_per_site_seed() {
-        let session_hex = shield.seed_hex();
         parts.push(
-            crate::per_site_seed::PerSiteSeed::new(shield.seed_bytes()).inject_script(&session_hex),
+            crate::per_site_seed::PerSiteSeed::new(shield.seed_bytes()).inject_script(domain),
         );
     }
 
