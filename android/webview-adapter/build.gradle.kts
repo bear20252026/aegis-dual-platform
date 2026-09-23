@@ -31,4 +31,6 @@ android {
 dependencies {
     implementation(project(":broker"))
     implementation(libs.androidx.webview)
+    // AD-004 配套：LogRedact 行为级单测（JVM 可跑——纯字符串）
+    testImplementation(libs.junit)
 }

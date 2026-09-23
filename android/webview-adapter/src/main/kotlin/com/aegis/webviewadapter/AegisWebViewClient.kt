@@ -217,7 +217,10 @@ class AegisWebViewClient(
         topLevel: Boolean,
         url: String,
     ): Boolean {
-        android.util.Log.w("AegisWebView", "导航被拒: code=${reason.code} detail=${reason.detail} url=$url")
+        android.util.Log.w(
+            "AegisWebView",
+            "导航被拒: code=${reason.code} detail=${reason.detail} url=${LogRedact.redact(url)}",
+        )
         if (topLevel) onNavigationDenied(reason.code, reason.detail)
         return false
     }
@@ -230,7 +233,7 @@ class AegisWebViewClient(
             // 大小写敏感——`HTTP://EXAMPLE.com` 原样放行明文（scheme 判定处
             // 已 lowercase 但升级未同步）。改忽略大小写替换前缀。
             val upgraded = url.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
-            android.util.Log.i("Aegis", "HTTPS-only: 升级 $url → $upgraded")
+            android.util.Log.i("Aegis", "HTTPS-only: 升级 ${LogRedact.redact(url)} → ${LogRedact.redact(upgraded)}")
             return upgraded
         }
         return url
@@ -277,7 +280,7 @@ class AegisWebViewClient(
         val url = error.url
         android.util.Log.w(
             "AegisWebView",
-            "SSL 证书校验失败已取消: url=$url primaryError=${error.primaryError}",
+            "SSL 证书校验失败已取消: url=${LogRedact.redact(url)} primaryError=${error.primaryError}",
         )
         onPageError("证书校验失败（${sslPrimaryErrorName(error.primaryError)}）", true, url)
     }
@@ -296,7 +299,7 @@ class AegisWebViewClient(
         val description = error.description?.toString().orEmpty()
         android.util.Log.w(
             "AegisWebView",
-            "主框架加载错误: code=${error.errorCode} desc=$description url=${request.url}",
+            "主框架加载错误: code=${error.errorCode} desc=$description url=${LogRedact.redact(request.url.toString())}",
         )
         val text = mainFrameErrorText(error.errorCode, description)
         onPageError(text, false, request.url.toString())
@@ -317,7 +320,7 @@ class AegisWebViewClient(
         if (errorResponse.statusCode < HTTP_ERROR_MIN) return
         android.util.Log.w(
             "AegisWebView",
-            "主框架 HTTP 错误: status=${errorResponse.statusCode} url=${request.url}",
+            "主框架 HTTP 错误: status=${errorResponse.statusCode} url=${LogRedact.redact(request.url.toString())}",
         )
         onPageError("服务器返回错误（HTTP ${errorResponse.statusCode}）", false, request.url.toString())
     }
@@ -376,6 +379,9 @@ class AegisWebViewClient(
         callback: SafeBrowsingResponse,
     ) {
         callback.backToSafety(true)
-        android.util.Log.w("Aegis", "SafeBrowsing 命中阻断: ${request.url} threatType=$threatType")
+        android.util.Log.w(
+            "Aegis",
+            "SafeBrowsing 命中阻断: ${LogRedact.redact(request.url.toString())} threatType=$threatType",
+        )
     }
 }

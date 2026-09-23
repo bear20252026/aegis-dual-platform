@@ -157,8 +157,39 @@ class TabManagerTest {
         tm.addTab(newWebView()) // 1
         tm.switchTo(0) // 0 最近使用 → 1 被挂起
         tm.addTab(newWebView()) // 2 激活——前激活 tab0 被换下挂起（LRU）
-        val suspended = tm.list().filter { it.suspended }.map { it.id }.toSet()
+        val suspended =
+            tm
+                .list()
+                .filter { it.suspended }
+                .map { it.id }
+                .toSet()
         assertEquals(setOf(0L, 1L), suspended)
         assertEquals(2L, tm.current()?.id) // 新增标签激活
+    }
+
+    @Test
+    fun pauseForBackground_suspendsAll_andResumeOnForeground_restoresOnlyCurrent() {
+        val rec = Recorder()
+        val tm = manager(rec)
+        val first = tm.addTab(newWebView(), url = "https://a.example")
+        val second = tm.addTab(newWebView(), url = "https://b.example")
+
+        tm.suspendAll()
+        // 全部挂起（含当前标签）
+        tm.list().forEach { assertTrue(it.suspended) }
+
+        tm.resumeOnForeground()
+        // 仅当前标签（second）恢复
+        assertTrue(second.suspended.not())
+        assertTrue(first.suspended)
+        assertSame(second, tm.current())
+    }
+
+    @Test
+    fun pauseAndResumeBackground_emptyTabs_noThrow() {
+        val rec = Recorder()
+        val tm = manager(rec)
+        tm.suspendAll()
+        tm.resumeOnForeground()
     }
 }

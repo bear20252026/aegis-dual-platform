@@ -129,7 +129,9 @@ class TabManager(
     /** 返回标签列表快照（防调用方改动内部结构）。 */
     fun list(): List<Tab> = tabs.toList()
 
-    /** 全部挂起（Activity 销毁兜底时调用——唯一调用点 MainActivity.onDestroy）。 */
+    /** 全部挂起（调用点：MainActivity.onDestroy 销毁兜底 + AD-006 起的
+     *  onPause 后台化——pauseTimers 全局停 JS 定时器+实例级挂起，隐私+电量
+     *  缺口修复；回前台经 [resumeOnForeground] 对称恢复）。 */
     fun suspendAll() {
         // TabManager 补审（Android 官方）：挂起全部标签——onPause 实例级
         // + pauseTimers 全局暂停 JS timers（后台标签不继续跑 JS——资源/隐私）
@@ -140,6 +142,19 @@ class TabManager(
             if (!it.suspended) {
                 pause(it.webView)
                 it.suspended = true
+            }
+        }
+    }
+
+    /** AD-006 回前台对称恢复：resumeTimers + 恢复当前标签；后台标签保持
+     *  挂起，切换时由 [switchTo] 既有路径恢复。后台化由 [suspendAll]
+     *  承担（onPause 生命周期复用，见该函数注记）。 */
+    fun resumeOnForeground() {
+        tabs.firstOrNull()?.webView?.resumeTimers()
+        current()?.let {
+            if (it.suspended) {
+                resume(it.webView)
+                it.suspended = false
             }
         }
     }

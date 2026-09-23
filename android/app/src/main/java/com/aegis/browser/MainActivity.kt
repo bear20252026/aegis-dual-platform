@@ -359,7 +359,16 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         // 应用转后台或进入系统遮罩时没有持续可见的明确同意；恢复后必须重新请求审批。
         viewModel.rejectPendingNavigationConfirmation()
+        // AD-006：后台即全局暂停页面 JS 定时器并挂起全部标签（隐私+电量）；
+        // 回前台由 onResume 对称恢复当前标签
+        viewModel.getTabManager()?.suspendAll()
         super.onPause()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // AD-006 对称恢复：resumeTimers + 恢复当前标签（后台标签保持挂起）
+        viewModel.getTabManager()?.resumeOnForeground()
     }
 }
 
