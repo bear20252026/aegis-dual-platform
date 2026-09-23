@@ -7,10 +7,7 @@
 name: Release-Android
 
 on:
-  push:
-    tags: ['v*']
-    paths:
-      - 'android/**'
+  # 编排器（release.yml workflow_call）独占触发——移除 tag 直推双触发面（PY-007）
   workflow_dispatch: {}
   workflow_call: {}
 

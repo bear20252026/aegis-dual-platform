@@ -30,8 +30,11 @@ jobs:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - name: Pin check (fail-closed)
         run: |
+          # PY-012：grep 目标此前含已删除的 docs/release/release.yml——
+          # 缺失文件使 grep 返回码 2 被 if/else 吞成"通过"。先断言现存目标。
+          test -d .github/workflows || { echo 'workflows 目录缺失'; exit 1; }
           if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' \
-              .github/workflows/ docs/release/release.yml; then
+              .github/workflows/; then
             echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
           fi
           echo "✅ 全部 action 固定完整 SHA"

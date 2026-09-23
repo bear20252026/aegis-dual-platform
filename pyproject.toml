@@ -13,3 +13,7 @@ extend-exclude = ["legacy", "windows/aegis_source", "legacy/windows-pywebview/le
 # line-length 120 已放宽）——风格类（TRY300/TRY003/TRY301/RUF021/E402/I001）无真 bug——
 # 按日志分析（86 个非全角全是风格/格式类——不阻塞发布）
 ignore = ["RUF001", "RUF003", "E501", "TRY300", "TRY003", "TRY301", "RUF021", "E402", "I001"]
+
+# PY-149：pytest 基建（tests/python/ ——发布链离线单测落位）
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]

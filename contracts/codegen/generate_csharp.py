@@ -56,14 +56,20 @@ def contract_name(schema_file: pathlib.Path) -> str:
 def main() -> int:
     out_dir = OUT
     out_dir.mkdir(parents=True, exist_ok=True)
-    for stale_file in out_dir.glob("*.schema.cs"):
-        stale_file.unlink()
+    generated: set[str] = set()
     for f in sorted(SCHEMAS.glob("*.json")):
         schema = json.loads(f.read_text(encoding="utf-8"))
         name = contract_name(f)
         (out_dir / f"{name}.cs").write_text(generate(schema, name) + "\n", encoding="utf-8")
+        generated.add(f"{name}.cs")
         print(f"  ✅ 生成 C# 模型: {name}.cs")
-    print(f"C# 模型生成完成（{len(list(out_dir.glob('*.cs')))} 个——contracts 事实来源）")
+    # 陈旧清理（差集删除）：此前 glob("*.schema.cs") 与生成名 {Name}Contract.cs
+    # 永不匹配——清理是 no-op，被删除 schema 的旧生成文件永久残留
+    for stale in out_dir.glob("*Contract.cs"):
+        if stale.name not in generated:
+            stale.unlink()
+            print(f"  🗑 移除陈旧生成文件: {stale.name}")
+    print(f"C# 模型生成完成（{len(generated)} 个——contracts 事实来源）")
     return 0
 
 

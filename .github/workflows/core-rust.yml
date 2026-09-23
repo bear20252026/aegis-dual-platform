@@ -38,5 +38,5 @@ jobs:
           nm -D target/release/libaegis_policy_core.so | grep -F ' T aegis_policy_core_abi_version'
       - name: cargo audit (Rust 依赖审计——供应链门禁)
         run: |
-          cargo install cargo-audit --locked
+          cargo install cargo-audit --version 0.22.2 --locked
           cargo audit

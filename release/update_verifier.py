@@ -37,17 +37,32 @@ def canonical_unsigned(manifest: dict) -> bytes:
 # P0-04 修复（专家审查）：SemVer 字符串版本解析（替代整数比较——
 # 与 Schema（SemVer 字符串 pattern）契约一致——TUF 阈值签名对齐）
 # 审计修复：接受预发布后缀（实际版本 2.2.0-beta.21 此前被判"版本格式无效"）
-_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
+_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$")
 
 
 def _version_tuple(value: object) -> tuple:
-    """解析 SemVer 字符串为元组（无效格式抛 UpdateRejected——稳定拒绝）。"""
+    """解析 SemVer 字符串为可比较元组（无效格式抛 UpdateRejected——稳定拒绝）。
+
+    PY-004：预发布段参与比较（SemVer precedence）——此前预发布段被丢弃，
+    2.2.0-beta.1 与 2.2.0 比较为相等，回滚到预发布清单可绕过防回滚检查。
+    语义：无预发布 > 有预发布（release 高于 beta）；预发布标识逐段比较
+    （数字段按数值、字面段按 ASCII，数字段 < 字面段——SemVer 规范）；
+    构建元数据（+build）不参与优先级。
+    """
     if not isinstance(value, str):
         raise UpdateRejected("版本格式无效")
     matched = _SEMVER.fullmatch(value)
     if not matched:
         raise UpdateRejected("版本格式无效")
-    return tuple(int(part) for part in matched.groups())
+    major, minor, patch, pre, _build = matched.groups()
+    core = (int(major), int(minor), int(patch))
+    if pre is None:
+        return (core, (1,), ())
+    ids = tuple(
+        (0, int(part), "") if part.isdigit() else (1, 0, part)
+        for part in pre.split(".")
+    )
+    return (core, (0,), ids)
 
 
 def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],

@@ -3,11 +3,8 @@
 name: Release-Windows
 
 "on":
-  push:
-    tags: ['v*']
-    paths:
-      - 'windows/src/Aegis.Windows.App/**'
-      - '.github/workflows/release-windows.yml'
+  # 编排器（release.yml workflow_call）独占触发——此前 tag 直推可叠加
+  # 触发一次：双路径重复构建与重复发布竞态（PY-006）；dispatch 供手动调试
   workflow_dispatch: {}
   workflow_call: {}
 
@@ -56,7 +53,7 @@ jobs:
         run: |
           # 随包发布的原生策略核心必须是"测过"的产物（159 个 Rust 测试全过）
           cargo test --manifest-path core/rust-policy-core/Cargo.toml --locked
-          cargo build --manifest-path core/rust-policy-core/Cargo.toml --release --target x86_64-pc-windows-msvc
+          cargo build --manifest-path core/rust-policy-core/Cargo.toml --release --locked --target x86_64-pc-windows-msvc
           New-Item -ItemType Directory -Force -Path dist/native-policy/windows/win-x64
           Copy-Item core/rust-policy-core/target/x86_64-pc-windows-msvc/release/aegis_policy_core.dll `
             dist/native-policy/windows/win-x64/aegis_policy_core.dll
@@ -87,7 +84,7 @@ jobs:
           }
           Compress-Archive -Path dist/aegis-windows/* -DestinationPath dist/Aegis.Windows.zip -Force
       - name: Install Inno Setup 6 (C# installer)
-        run: choco install innosetup -y --no-progress
+        run: choco install innosetup --version=6.4.3 --no-progress -y
       - name: Build C# installer (ADR-009 beta channel — version injected from single source)
         shell: pwsh
         run: |

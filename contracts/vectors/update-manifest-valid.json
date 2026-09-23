@@ -4,7 +4,7 @@
     {
       "manifest": {
         "schema": 1, "product": "Aegis", "version": "1.2.3", "channel": "stable",
-        "expires_at": "2026-09-01T00:00:00Z",
+        "expires_at": "2099-01-01T00:00:00Z",
         "artifacts": [{ "platform": "windows-x64", "format": "msix",
                        "url": "https://a.gov.cn/x.msix", "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "size": 10 }],
         "signatures": [{ "key_id": "k1", "sig": "AAAA" }, { "key_id": "k2", "sig": "BBBB" }]
