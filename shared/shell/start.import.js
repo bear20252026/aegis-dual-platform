@@ -134,7 +134,7 @@
               .catch(function () { failures++; });
           }
           if (doHi) {
-            chain = chain.then(function () { return a.importHistory(lim, src, function () {}); })
+            chain = chain.then(function () { return a.importHistory(lim, src); })
               .then(function (r) { collect('历史', src, r); })
               .catch(function () { failures++; });
           }

@@ -124,14 +124,16 @@ var Host = (function () {
       csCall('importScan', [], cb);
     },
     importBookmarks: function (src, cb) {
-      var w = winApi(); if (w) { w.import_bookmarks(src).then(cb); return; }
-      if (andApi()) { cb({ imported: 0, total: 0 }); return; }
-      csCall('importBookmarks', [src], cb);
+      // 返回 Promise——导入向导 runImport 以返回值收集统计（WB-001：此前
+      // 三端分支均返回 undefined，cs 端结果只进回调，导入统计恒 0/0）
+      var w = winApi(); if (w) { return w.import_bookmarks(src); }
+      if (andApi()) { return Promise.resolve({ imported: 0, total: 0 }); }
+      return new Promise(function (resolve) { csCall('importBookmarks', [src], resolve); });
     },
     importHistory: function (limit, src, cb) {
-      var w = winApi(); if (w) { w.import_history(limit, src).then(cb); return; }
-      if (andApi()) { cb({ imported: 0, total: 0 }); return; }
-      csCall('importHistory', [limit, src], cb);
+      var w = winApi(); if (w) { return w.import_history(limit, src); }
+      if (andApi()) { return Promise.resolve({ imported: 0, total: 0 }); }
+      return new Promise(function (resolve) { csCall('importHistory', [limit, src], resolve); });
     },
   };
 })();
