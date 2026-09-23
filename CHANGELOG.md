@@ -1,5 +1,40 @@
 # Changelog
 
+## beta.32 – beta.49（2026-09-20 – 2026-09-23 · 全仓审计 1115 项与 P1 批次落地）
+> 完整清单：docs/audit/full-audit-2026-09-23-1000-items.md（六路审计 CS290/AD210/RS205/PY172/WB100/SP138）。
+### 架构（beta.32 – beta.34，补账）
+- 依赖注入组合根（IBroker/MainWindowDependencies/IPrivacySettings）；会话落盘防抖
+  SessionSaveScheduler；后台标签睡眠决策纯函数化 TabSleepPolicy。
+### 上帝对象拆分（beta.34 – beta.43，补账）
+- FindBar/Suggestion → NtpBridgeFactory → 拖拽+审批面板 → TabRuntimeCoordinator
+  复用 → 命名处理器+防抖 → ThreatFeedCoordinator → ZoomPolicy，MainWindow 收敛为装配点。
+### 测试缺口批次（beta.35 – beta.41，补账）
+- 工具类/下载记录/威胁黑名单/origin 规范化/TabManager/http-only/IPv4 变体编码
+  共 60+ 项离线单测补齐。
+### 2026-09-23 审计批次（beta.44 – beta.49）
+- **beta.44**（rust）：glob_subsumes 可靠性修复——非 flat 单星不覆盖双星、b 耗尽
+  基线要求 a 全星尾；边界测试 8 项。
+- **beta.45**（R1，rust P1×10）：letterbox 自递归栈溢出、fingerprint_pipeline
+  域名错传（per-site 隔离自上线空转）、context_contains_token 多字节 panic、
+  c_abi read_utf8 越读 UB、executor 占位桩、proxyMap 恒空、glob DP 256MiB、
+  session_state 预解析上限、query_strip JS 大小写剥离。
+- **beta.46**（C1，windows-cs P1×6+2）：TabClosed 死事件（每关一标签泄漏一个
+  WebView2）、UrlSafety "0x" 崩溃、favicon 无痕落盘、缓存命中图标不显示、
+  无痕环境租约竞态、MAX_VIEWPORT_DIMS Int32Array；孪生修复 C# 管线 window
+  自递归与追踪参数大小写绕过。
+- **beta.47**（W1，web）：Host.import* 三端改返回 Promise——修复导入统计恒
+  0/0 且书签宫格不刷新的 P89/P90 回归；行为级桥测试 4 项。
+- **beta.48**（P1，contracts/release 13 项）：version schema 补预发布段
+  （2.2.0-beta.44 自身此前无法通过）、防回滚 SemVer precedence、生成器差集
+  清理、cargo build --locked、cargo-audit/innosetup 锁版、pin-check fail-open、
+  verify_artifact_set 跨平台同名消歧+递归、发布工作流去双触发、CI pip hash
+  安装、mypy 全量口径；pytest 基建+13 测试；过期向量刷新。
+- **beta.49**（A1，android 4 项）：MainActivity 补 launchMode=singleTask
+  （外链热启动此前叠加完整实例）、DownloadPolicy 查询参数危险扩展绕过、
+  AegisWebViewClient 6 处日志 URL 脱敏（LogRedact）、onPause 接入 suspendAll
+  +新增 resumeOnForeground（后台 JS 定时器此前继续跑）。
+
+
 ## beta.22 – beta.31（2026-09-10 · 架构收敛十连发）
 ### 安全（beta.22 / beta.29 / beta.30）
 - 发布链签名 fail-closed：tag 构建强制已签名 APK（apksigner verify 未过即失败）；

@@ -1279,13 +1279,14 @@
 
 | 批次 | 提交 | 范围 | 项数 | 验证 |
 |---|---|---|---|---|
-| 先导 | 82a04b2 (beta.44) | RS：matcher glob_subsumes 可靠性修复+边界测试 8 项 | 1 | cargo test 197 通过+clippy 0 |
-| R1 | 3d28097 (beta.45) | RS-001..010 Rust P1 缺陷修复（letterbox 自递归/per-site 域名错传/多字节 panic/FFI 越读/executor 桩/proxyMap 空/DP 256MiB/预解析上限/JS 大小写剥离）+回归测试 | 10 | cargo test 209 通过+clippy 0+fmt |
-| C1 | 待执行 | CS-001..006 C# P1 缺陷修复+回归 | 6 | dotnet test |
-| W1 | 待执行 | WB-001/002 Web 导入管道修复+测试 | 2+ | node test |
-| A1 | 待执行 | AD-001..006 Android P1 修复 | 6 | gradle |
-| P1 | 待执行 | PY-001..025 契约/CI P1 | 25 | py validate |
-| 后续 | 待执行 | 各区 P2/P3 分批 | … | 每批对应套件 |
+| 先导 | 82a04b2 (beta.44) | RS：matcher glob_subsumes 可靠性修复+边界测试 8 项 | 1 | cargo test 197+clippy 0 |
+| R1 | 3d28097 (beta.45) | RS-001..010 Rust P1 缺陷修复+回归测试 | 10 | cargo test 209+clippy 0+fmt |
+| C1 | 8af2d26 (beta.46) | CS-001..006 C# P1 缺陷修复 + RS-001/RS-010 孪生缺陷 + 回归 6 测 | 8 | dotnet 318+29 全绿 |
+| W1 | b4e26d0 (beta.47) | WB-001/002 导入统计管道 Promise 修复 + 行为级桥测试 4 项 | 2+4测 | node 15/15 |
+| P1 | 0e102af (beta.48) | PY-001..025 关键子集 13 项（schema 预发布段/防回滚 precedence/差集清理/锁版/双触发/pip hash/mypy 全量/工件集消歧）+ pytest 基建 13 测 + 过期向量 | 13 | pytest 13/13+validate+YAML 全解 |
+| A1 | 9859c18 (beta.49) | AD-001/002/004/006 + JVM 测试 14 项 | 4+14测 | gradle 单测+ktlint+detekt 全绿 |
+| W2 | 本次提交 | WB-003 CHANGELOG 补 beta.32–49、WB-004/005/034 CLAUDE.md 正典口径（红线/命令/文件地图） | 4 | 文档核对 |
+| 暂缓 | — | AD-003（R8 minify）、AD-005（per-site SHA-256）——需真机回归，按 device-validation runbook 单独批次 | 2 | 待设备 |
 
-> 完成度：11 / 1115（先导 1 + R1 批次 10）。后续批次逐批回填本表并在总清单标注 `[已完成]`。
+> 完成度：42 项修复落地 + 60 项新增回归/行为测试（跨 6 批、每批全量验证+版本递增+独立提交）；1115 项完整清单作为后续批次的工作池。
 

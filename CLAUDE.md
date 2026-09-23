@@ -17,33 +17,42 @@ Aegis 双端安全浏览器：Windows（C#/.NET 10 + 原生 WebView2——唯一
 ## 关键命令（必须先跑）
 
 ```bash
-# Windows 端静态验证（改动 Python 代码后必跑）——与 CI 口径一致
-python validate_release.py            # AST/JSON/XML 静态验证（版本校验在 scripts/verify_versions.py）
+# —— Windows 正典栈（C#/.NET 10，ADR-009）——
+cd windows
+dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj   # 0 警告 0 错误
+dotnet test tests/Aegis.Windows.Core.Tests                    # 核心套件全绿
+dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全绿
+
+# —— Rust 策略核心 ——
+cd core/rust-policy-core
+cargo test && cargo clippy --all-targets && cargo fmt --check  # 全绿+0 警告
+
+# —— 契约/版本门禁（仓库根）——
+python validate_release.py             # AST/JSON/XML 静态验证（版本校验在 scripts/verify_versions.py）
+python scripts/verify_versions.py      # 版本单源一致性
+python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
+python scripts/verify_cross_end_lists.py          # 跨端清单对账（引擎/壁纸）
+node --test tests/ui-regression/*.test.mjs        # 单源首页 UI 回归
+python -m pytest tests/python/ -q                 # 发布链离线单测
+
+# —— Android 端（需 Android SDK）——
+cd android
+./gradlew.bat :app:testDebugUnitTest :webview-adapter:testDebugUnitTest
+./gradlew.bat :app:ktlintCheck :app:detekt        # CI 以 ktlint/detekt 为准
+
+# —— legacy 归档栈（只读冻结；仅 P0 安全披露通道评估，见 ADR-009 D4）——
 cd legacy/windows-pywebview
 ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
-bandit -r app/ -q --skip B110,B404,B603,B607   # 安全扫描（无 Medium/High）
-mypy main_webview.py app/             # 类型检查（0 错误）
-
-# 自检（改动标签/桥/工具栏/会话/原生挂接后必跑——8 个均已入 CI）
-python selftest_session_store.py
-python selftest_api_bridge.py
-python selftest_s1_integration.py
-python selftest_shell_toolbar.py
-python selftest_tab_state.py
-python selftest_navigation_search.py
-python selftest_view_source.py
-python selftest_native_core.py
-
-# Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
-python contracts/codegen/verify_bridge_guard.py
-
-# Android 端（需 Android Studio 环境；CI 以 ktlint/detekt 为准）
-./gradlew.bat :app:lintDebug
+bandit -r app/ -q --skip B110,B404,B603,B607
+mypy main_webview.py app/                # 全量目录口径（42 源文件 0 错误）
 ```
 
 ## 架构红线（改动前必须确认）
 
-1. **Windows 正式入口是 `main_webview.py`**（薄壳；现役功能栈见 ADR-007 双栈口径）。`legacy/windows-pywebview/legacy/` 与 `legacy/ui/` 是已归档的 Qt 旧栈，**禁止**从活跃代码 import 它。
+1. **Windows 正典栈是 `windows/src/Aegis.Windows.App`（C#/.NET 10 + WPF + WebView2，
+   ADR-009 终局）**。`legacy/windows-pywebview/` 与 `legacy/ui/` 是只读归档：
+   功能与安全修复一律不在该栈进行，P0 安全缺陷仅经安全披露通道评估
+   （ADR-009 D4 冻结纪律），活跃代码**禁止** import 归档栈。
 2. **单文件单职责**：新文件 ≤ 300 行；改造后 ≤ 500 行。不为拆而拆，也不堆职责。
 3. **URL 安全关口**：所有导航入口（IPC/会话/书签/历史/拨号/命令行/地址栏）加载 URL 前必须经 `app/security.py` 的 `safe_url()`。
 4. **js_api 白名单**：暴露给 JS 的方法必须加入 `app/api_bridge.py` 的 `_JS_EXPOSED`（防 pywebview 递归注入死锁）。
@@ -64,14 +73,15 @@ python contracts/codegen/verify_bridge_guard.py
 
 | 路径 | 职责 |
 |---|---|
-| `legacy/windows-pywebview/main_webview.py` | 薄入口（建窗/绑定/看门狗） |
-| `legacy/windows-pywebview/app/api_bridge.py` | js_api 桥（标签/导航/书签/历史/导入） |
-| `legacy/windows-pywebview/app/nav_queue.py` | 导航线程队列（防死锁） |
-| `legacy/windows-pywebview/app/shell_toolbar.py` | 注入式工具栏（标签条/快捷键/毛玻璃） |
-| `legacy/windows-pywebview/app/security.py` | URL 白名单 / 权限收紧 |
-| `legacy/windows-pywebview/app/browser_import.py` | Chrome/Edge 书签与历史导入 |
-| `android/app/src/main/java/com/aegis/browser/` | Android 端（TabManager/TabBar/SecureWebViewFactory） |
-| `shared/version.properties` | 双端版本单一来源 |
+| `windows/src/Aegis.Windows.App/` | **Windows 正典栈**（Chrome UI / Core 数据层 / Broker 安全层 / WebView 封装） |
+| `windows/tests/` | C# 两测试套件（Core.Tests / Broker.Tests） |
+| `core/rust-policy-core/` | Rust 策略核心（唯一裁决源——ADR-008；FFI/C ABI/UniFFI） |
+| `android/app/src/main/java/com/aegis/browser/` | Android 端（TabManager/SecureWebViewFactory/BrowserEngine） |
+| `android/broker/` + `android/webview-adapter/` | Android 授权 Broker 与导航状态机 |
+| `contracts/` | 契约单源（schemas/vectors/policy + codegen 生成器） |
+| `shared/` | 双端单源（version.properties/release.json/shell 首页资产） |
+| `docs/audit/` | 全仓审计报告（2026-09-07 200 项、2026-09-23 1115 项） |
+| `legacy/windows-pywebview/` | 只读归档栈（ADR-009——禁止活跃改动，见红线 #1） |
 
 ## 常见陷阱
 
