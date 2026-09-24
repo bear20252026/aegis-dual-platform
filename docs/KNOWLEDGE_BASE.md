@@ -467,7 +467,9 @@
 ### 25.8 验证（全绿）
 validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed）｜ bandit --skip 同 CI（0 Medium/High）｜ mypy 32 文件 0 错误｜ selftest ×5 全过｜ node --check 注入 JS 语法。
 
-## ADR-008 Android 单架构分发（永久规则）
+## KB-DR-008 Android 单架构分发（永久规则）
+
+> 编号说明（SP-003 整改）：本节原编号 ADR-008 与 `docs/adr/ADR-008-rust-policy-core-as-single-adjudicator.md` 同号不同题——决策记录编号归 docs/adr/ 唯一所有，本库内嵌决策改用 KB-DR 序列（KB-DR-008/009），内容互引不冲突。
 
 **决策**（用户，2026-08-30）：APK 只含 `arm64-v8a`（99% 真机覆盖）。`armeabi-v7a`（32 位老架构）与 `x86`/`x86_64`（模拟器）**永久禁止**入包——它们只徒增体积，无真实用户。
 
@@ -479,7 +481,9 @@ validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed�
 
 **附带规则**：构建期临时文件（如 geogebra.zip）禁止残留在打包目录——曾致 +32MB 体积事故；打包体积突变 = 内容异常高保真信号，必须查因后再发版。
 
-## ADR-009 APK 解析兼容性最大化（分发增强）
+## KB-DR-009 APK 解析兼容性最大化（分发增强）
+
+> 编号说明（SP-003 整改）：本节原编号 ADR-009 与 `docs/adr/ADR-009-full-migration-to-csharp.md` 同号不同题——改用 KB-DR 序列（同 KB-DR-008 说明）。
 
 **背景**：APK 经微信/QQ 分发到任意手机，接收副本必须最大化「可解析」概率——历史坑（packageInfo null / Failed to extract native libraries res=-2 / 16KB 设备 INSTALL_FAILED_INVALID_APK）全部来自签名方案不全与未压缩 so 的对齐敏感。
 

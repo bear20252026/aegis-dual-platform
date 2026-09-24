@@ -43,21 +43,33 @@
 
 ## 质量门槛
 
-合并前必须全部通过：
+合并前必须全部通过（与 CLAUDE.md「关键命令」口径一致——WB-006 整改补全双栈）：
 
 ```bash
-# Python（Windows 端）
-python3 validate_release.py            # AST/JSON/XML 静态验证（版本校验：python scripts/verify_versions.py）
-ruff check .                           # Lint + 格式（0 错误）
-bandit -r app/                         # 安全扫描（无 Medium/High）
-mypy main_webview.py app/              # 类型检查（0 错误）
+# —— Windows 正典栈（C#/.NET 10，ADR-009 唯一发布制品）——
+dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj   # 0 警告 0 错误
+dotnet test tests/Aegis.Windows.Core.Tests                    # 核心套件全绿
+dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全绿
 
-# Android 端
-./gradlew.bat :app:lintDebug           # Android Lint（0 错误）
-./gradlew.bat :app:testDebugUnitTest   # 单元测试
+# —— Rust 策略核心 ——
+cargo test && cargo clippy --all-targets && cargo fmt --check  # 全绿 + 0 警告
+
+# —— 契约/版本/UI 回归门禁（仓库根）——
+python validate_release.py                        # AST/JSON/XML 静态验证
+python scripts/verify_versions.py                 # 版本单源一致性
+python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（ADR-007）
+node --test tests/ui-regression/*.test.mjs        # 单源首页 UI 回归
+python -m pytest tests/python/ -q                 # 发布链离线单测
+
+# —— Android 端 ——
+./gradlew.bat :app:lintDebug                      # Android Lint（0 错误）
+./gradlew.bat :app:testDebugUnitTest              # 单元测试（含 ktlint/detekt 门禁）
+
+# —— legacy 归档栈（只读——禁止在此修复，仅归档基线参考）——
+# python3 validate_release.py / ruff / bandit / mypy 仅在触及归档目录时运行
 ```
 
-新增代码必须通过 ruff/mypy/bandit；**不允许**为通过检查而删除、注释或弱化已有测试与断言（"修好"而非"藏好"）。
+改动所涉技术栈的检查必须全过；**不允许**为通过检查而删除、注释或弱化已有测试与断言（"修好"而非"藏好"）。
 
 ## 评审清单
 

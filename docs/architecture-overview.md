@@ -1,104 +1,116 @@
 # Aegis 架构全景文档（architecture-overview）
 
-> 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级
-> 目的：让人一眼读懂本项目整体逻辑框架——完整代码树 + 框架结构 +
-> 逻辑关联 + 模块化设计进程
-> 依据：实际代码树（glob 核实 27 Python 核心文件 + 10 Kotlin + 21 文档）
-> + import-linter 契约 + 多轮开发历程
+> **权威入口声明**（SP-004 整改）：本文件是项目架构蓝图与 agent/README 的
+> 权威汇入点。2026-09-24 全面审计 WB-009 整改重写——旧版仅描述 Python
+> 27 文件视图，已与「C# 唯一正典栈」终局（ADR-007/009）严重漂移。
+> 编制日期：2026-09-24 ｜ 终局口径：ADR-007（单一正典）+ ADR-008
+> （Rust 唯一裁决者）+ ADR-009（C# 全面迁移完成）
 
 ---
 
 ## 一、完整代码树（分类标注职责）
 
-### 1.1 Windows 端（Python，核心 27 文件 5078 行）
+### 1.1 Windows 正典栈（C#/.NET 10 + 原生 WebView2——唯一发布制品）
 
 ```
-legacy/windows-pywebview/
-├── main_webview.py            （567 行）入口层：薄壳启动组装
-├── crash_reporter.py          （276 行）基础设施：崩溃报告 + 日志
-├── selftest_s1_integration.py （114 行）测试：S1 集成自检
-├── selftest_api_bridge.py     （ 94 行）测试：桥自检
-├── selftest_shell_toolbar.py  （ 81 行）测试：工具栏自检
-├── app/
-│   ├── api_bridge.py          （568 行）桥层：js_api 白名单 27 方法
-│   ├── shell_toolbar.py       （447 行）业务-UI：注入工具栏/快捷键/hints
-│   ├── webview2_probe.py      （312 行）基础设施：性能基线监控
-│   ├── config.py              （255 行）业务-存储：类型化配置
-│   ├── shell_adapter.py       （244 行）壳抽象：Shell 协议 + 可插拔实现
-│   ├── mcp.py                 （227 行）业务-能力：Agent 白名单 7 工具
-│   ├── history_store.py       （217 行）业务-存储：历史持久化
-│   ├── nav_queue.py           （207 行）业务-导航：异步消息驱动
-│   ├── threat_feed.py         （183 行）业务-安全：威胁黑名单订阅
-│   ├── bookmark_store.py      （158 行）业务-存储：书签持久化
-│   ├── security.py            （154 行）业务-安全：safe_url 协议白名单
-│   ├── database.py            （148 行）业务-存储：数据库助手
-│   ├── reader.py              （135 行）业务-能力：阅读模式
-│   ├── browser_import.py      （135 行）业务-能力：浏览器数据导入
-│   ├── asset_scheme.py        （119 行）业务-安全：壁纸资源白名单
-│   ├── fingerprint.py         （104 行）业务-能力：指纹/UA 配置（默认关）
-│   ├── backdrop.py            （ 81 行）业务-能力：亚克力背景
-│   ├── paths.py               （ 71 行）业务-存储：数据目录解析
-│   ├── bridge_hooks.py        （ 59 行）业务-能力：桥钩子
-│   ├── url_utils.py           （ 53 行）业务-安全：URL 工具
-│   ├── credential_guard.py    （ 41 行）业务-安全：凭据脱敏
-│   ├── event_log.py           （ 27 行）基础设施：统一日志接口
-│   └── __init__.py            （  1 行）包标记
-└── legacy/                    （36 文件）Qt 旧栈（不参与运行，保留参考）
+windows/
+├── src/Aegis.Windows.App/
+│   ├── Program.cs / App.xaml*          入口层：薄壳启动组装
+│   ├── Broker/                         能力代理：导航决策/审批/审计
+│   ├── Chrome/                         浏览器壳：标签运行时/无痕窗口/地址栏
+│   ├── Core/
+│   │   ├── Tabs/                       多标签（TabManager 事件闭环）
+│   │   ├── Bookmarks/ Favicons/        书签 + 图标服务（无痕不落盘）
+│   │   ├── History/                    历史存储与搜索
+│   │   ├── Downloads/                  下载管理器（M3，经 broker 审计）
+│   │   ├── Privacy/ Security/          KillSwitch / UrlSafety / 无痕
+│   │   ├── Settings/                   设置窗口（威胁订阅源等）
+│   │   └── UrlSafety.cs                URL 安全关口
+│   ├── WebView/                        FingerprintShield / WebView 装配
+│   └── Contracts/                      契约生成代码（codegen 单源）
+├── tests/                              Core.Tests + Broker.Tests（dotnet test）
+└── docs/release/AegisSetup.iss         Inno Setup 发布（版本运行时注入）
 ```
 
-### 1.2 Android 端（Kotlin，10 文件）
+### 1.2 Rust 策略核心（唯一裁决者——ADR-008）
+
+```
+core/rust-policy-core/                c_abi FFI + matcher + action_policy +
+                                      session_state + fingerprint_pipeline +
+                                      protection_mode + letterbox + tostring_guard
+contracts/schemas/                    冻结 JSON Schema（action/update-manifest…）
+contracts/codegen/                    单源模板：bridge_guard（JS/C#/Kotlin 三端归一）
+```
+
+### 1.3 Android 端（Kotlin/Compose + System WebView）
 
 ```
 android/app/src/main/java/com/aegis/browser/
-├── MainActivity.kt        入口：Activity 组装
-├── BrowserEngine.kt       引擎：WebView 封装
-├── TabManager.kt          标签管理
-├── Tab.kt                 标签模型
-├── TabBar.kt / VerticalTabBar.kt  标签栏（横/竖）
-├── SecureWebViewFactory.kt 安全：WebView 工厂（同安全理念）
-├── DownloadPolicy.kt      下载策略
-├── AegisTheme.kt / UiColors.kt 主题/配色
+├── MainActivity.kt                    入口：组装 + 返回键（OnBackPressedCallback）
+├── webviewadapter/                    AegisWebViewClient（导航授权状态机 + 会话续期）
+├── broker/AndroidBroker.kt            会话/nonce/TTL 单源（SESSION_TTL_SECONDS）
+├── TabManager.kt / Tab.kt / UI 层     标签（StateListener——copy() 替换实例）
+├── SecureWebViewFactory.kt            WebView 安全工厂
+├── DownloadPolicy.kt / WebViewDownloadHandler.kt   下载策略（危险扩展拦截）
+└── reader/ translate/ 等              阅读模式 / 翻译入口
 ```
 
-### 1.3 文档（21 份 + KNOWLEDGE_BASE 15 节）
-
-审计类（audit-2026/audit-report/expert-audit-report/privacy-defaults）+ 调研类
-（open-source-browser-audit/source-study-report/browser-ecosystem/rust-desktop
-/tauri-migration×2/pytauri-technical）+ 计划类（optimization-plan/threat-context
-/tech-evolution）+ 架构类（pytauri-capabilities-mapping/code-quality-assessment）
-+ docs/KNOWLEDGE_BASE.md（15 节项目记忆）
-
-## 二、框架结构（六层架构）
+### 1.4 单源 UI（双端共享）
 
 ```
-入口层(main_webview) → 壳抽象层(shell_adapter) → 桥层(api_bridge)
-  → 业务层(导航/UI/安全/存储/能力) → 基础设施(crash_reporter/event_log/probe)
-  → 测试层(selftest×3)
+shared/shell/                         start.html（Host 适配层）+ start.css +
+                                      start.snake.js + start.import.js
+shared/release.json                   版本/分发单源（verify_versions 校验）
 ```
-混合原生壳 + 异步消息驱动（NavQueue）——2026 最佳实践落地。
 
-## 三、逻辑关联结构
+### 1.5 发布链（release/ + .github/workflows）
 
-### 依赖图（单向分层 + 星形收敛）
-- 星形枢纽：**api_bridge**（业务模块收敛）+ **event_log**（日志收敛）
-- 分层单向：main_webview → app/* → crash_reporter（import-linter 契约强制）
-- 独立性：nav_queue/threat_feed/credential_guard 互不依赖（契约验证 ✅）
+- 更新验证：update_verifier（SemVer precedence 防回滚）+ verify_manifest
+  （签名阈值单源读 signing-policy.yaml）
+- CI：Core-Rust / Android-Quality / Contracts / Supply-Chain / Agent-Redteam
+  五门禁常跑 + release-*（构建型）+ WebView2-Compat（每周定时探测）
 
-### 关键数据流（5 条）
-① 用户操作流（前端→js_api→api_bridge→NavQueue→窗口→回前端）
-② 导航拦截流（request_sent→管线 DNT/威胁标记→导航层 deny 优先）
-③ 威胁数据流（订阅→签名→缓存→双关口查询）
-④ 日志流（业务→event_log→crash_reporter（脱敏）→events.log）
-⑤ 崩溃流（线程异常→crash_reporter→crash_reports/）
+### 1.6 归档（只读——禁止修复）
 
-## 四、模块化设计进程（六阶段）
+```
+legacy/windows-pywebview/             原 PyWebview 栈（ADR-009 D4 冻结纪律；
+                                      WebView2-Compat 定时自检仍对其探测）
+legacy/（Qt、ui/）                    死代码
+```
 
-Qt 旧栈（36 文件，弃用）→ pywebview 分层重构（白名单双关口/NavQueue/
-统一管线）→ 安全纵深强化（凭据治理/ESM/deny 优先/credential_guard）→
-壳抽象（shell_adapter 可插拔，禁止被困）→ 契约治理（import-linter +
-event_log 统一）→ Android 双端扩展（Kotlin 10 文件）
+## 二、框架结构（裁决流水线）
+
+```
+用户/页面 → Host/地址栏 → C# Broker（Android 对应 AegisWebViewClient）
+  → Rust 策略核心（唯一裁决——safe_url/指纹/动作策略）
+  → 授权放行 → WebView2 / System WebView 加载
+  → 全程审计脱敏 + KillSwitch 强制检查
+```
+
+安全不变量：**Default Deny（fail-closed）**——任何导航/下载/桥调用未经
+裁决链放行即拒绝；拒绝必须用户可见（弹窗/Toast，禁止静默 return）。
+
+## 三、逻辑关联
+
+### 单源锚点（改动必经核对）
+- 版本：shared/version.properties 单源 → 4 文件同步（verify_versions 门禁）
+- 守卫 JS：contracts/schemas/bridge_guard.template.js → 三端编译期归一
+- 首页：shared/shell/ 四文件 → Android gradle assets 整目录打包
+- 引擎/壁纸清单：start.html 主文件 → verify_cross_end_lists.py 对账
+
+### 关键数据流（4 条）
+① 导航流：输入 → Broker 决策 → Rust 裁决 → WebView 加载 → 审计
+② 会话流（Android）：registerSession → 每次导航前 renewSession（TTL 单源）
+③ 发布流：tag → CI 构建 → 签名/校验（fail-closed）→ 安装包/ZIP 分发
+④ 回归流：selftest ×N + parity 勾验 + 真机走查 runbook
+
+## 四、演进史（六阶段，详见 docs/adr/）
+
+Qt 旧栈 → PyWebview 分层（白名单/NavQueue）→ 安全纵深 → 契约治理
+（import-linter/bridge_guard）→ Android 双端扩展 → **C# 全面迁移终局**
+（M1-M4 落地，Python 栈冻结归档，Rust 升格唯一裁决者）
 
 ## 五、结论
 
-**Aegis = 六层分层 + 星形收敛 + 壳可插拔 + 契约治理的双端浏览器**——
-代码树清晰、逻辑关联可推理、演进方向持续降耦（符合 2026 最佳实践）。
+**Aegis = C# 正典壳 + Rust 唯一裁决 + Kotlin 双端 + 单源 UI/契约 +
+五门禁 CI 的双端安全浏览器**——安全不变量跨端一致，演进以 ADR 治理。

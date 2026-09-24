@@ -7,8 +7,7 @@
     "packageIdentity": "Aegis.Project.AegisWebView",
     "executable": "Aegis.Windows.App.exe",
     "architecture": [
-      "x64",
-      "arm64"
+      "x64"
     ],
     "distribution": "inno-setup-exe",
     "runtime": "webview2-evergreen"

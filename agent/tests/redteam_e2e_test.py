@@ -94,6 +94,28 @@ def test_resource_budget():
     assert broker.evaluate(over) == "deny_budget"
 
 
+def test_scope_minimal_privilege():
+    """工具级 scope 最小权限（SP-008 整改——deny_scope 分支此前零触达）：
+    登记的 action 携带未授权 scope（写/导航/越权通配）——一律拒绝。"""
+    broker = E2EBroker()
+    # 写权限 scope——读 action 不应携带
+    assert broker.evaluate(ProposedAction(
+        intent="get_current_title", scope="tabs:write",
+        budget_used=1, nonce="s1", generation=0)) == "deny_scope"
+    # 完全不相关 scope——即使带 tab 前缀也不在白名单
+    assert broker.evaluate(ProposedAction(
+        intent="get_current_origin", scope="downloads:read",
+        budget_used=1, nonce="s2", generation=0)) == "deny_scope"
+    # 空字符串 scope（minLength 1 之下游兜底）——拒绝
+    assert broker.evaluate(ProposedAction(
+        intent="get_current_title", scope="",
+        budget_used=1, nonce="s3", generation=0)) == "deny_scope"
+    # 对照组合法 scope 正常放行（且不因前序拒绝被误伤）
+    assert broker.evaluate(ProposedAction(
+        intent="get_current_title", scope="navigation:read",
+        budget_used=1, nonce="s4", generation=0)) == "allow"
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):

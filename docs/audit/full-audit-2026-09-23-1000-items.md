@@ -1286,6 +1286,7 @@
 | P1 | 0e102af (beta.48) | PY-001..025 关键子集 13 项（schema 预发布段/防回滚 precedence/差集清理/锁版/双触发/pip hash/mypy 全量/工件集消歧）+ pytest 基建 13 测 + 过期向量 | 13 | pytest 13/13+validate+YAML 全解 |
 | A1 | 9859c18 (beta.49) | AD-001/002/004/006 + JVM 测试 14 项 | 4+14测 | gradle 单测+ktlint+detekt 全绿 |
 | W2 | 本次提交 | WB-003 CHANGELOG 补 beta.32–49、WB-004/005/034 CLAUDE.md 正典口径（红线/命令/文件地图） | 4 | 文档核对 |
+| W3+SP1 | 本次提交 | WB-006..009 文档口径四项（CONTRIBUTING 双栈门槛/supported-features 重写 ×2/架构全景重写）+ SP-001..008 八项（契约示例对齐/KNOWN_DEFECTS 表格并入×2/KB-DR 编号互引/release.json arm64 声明删除/threshold yaml 单源 fail-closed/deny_scope 测试） | 12 | 红队 e2e 5/5+validate_release 52 文件+threshold 正负例 |
 | 暂缓 | — | AD-003（R8 minify）、AD-005（per-site SHA-256）——需真机回归，按 device-validation runbook 单独批次 | 2 | 待设备 |
 
 > 完成度：42 项修复落地 + 60 项新增回归/行为测试（跨 6 批、每批全量验证+版本递增+独立提交）；1115 项完整清单作为后续批次的工作池。
