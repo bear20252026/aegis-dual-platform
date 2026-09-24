@@ -36,6 +36,10 @@ jobs:
           python-version: "3.14"
 
       - name: 运行自动化回归（validate_release + 3 selftest）
+        # shell: bash —— Windows runner 默认 pwsh，`2>/dev/null` 会被解析为
+        # 写入 D:\dev\null 文件（路径不存在直接报错），必须显式用 bash。
+        # 2026-09-14/21 两次定时运行 20s 即败即此因。
+        shell: bash
         run: |
           python -m app.webview2_probe 2>/dev/null || python -c "import sys; sys.path.insert(0, '.'); from app.webview2_probe import run_selftests; sys.exit(run_selftests())"
 
