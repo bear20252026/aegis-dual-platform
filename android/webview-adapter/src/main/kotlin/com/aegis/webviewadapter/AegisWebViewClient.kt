@@ -35,7 +35,10 @@ class AegisWebViewClient(
     private val onNavigationConfirmationResolved: () -> Unit = {},
     private val onNavigationDenied: (code: String, detail: String) -> Unit = { _, _ -> },
     private val onPageUrlObserved: (String) -> Unit = {},
-    private val onPageError: (description: String, isSsl: Boolean, url: String) -> Unit = { _, _, _ -> },
+    // AD-035（2026-09-24 审计）：库模块不持 UI 文案——错误以（错误码, 机器可读
+    // detail, isSsl, url）结构上抛，中文文案映射收敛在 app 层（BrowserViewModel）。
+    private val onPageError: (code: String, detail: String, isSsl: Boolean, url: String) -> Unit =
+        { _, _, _, _ -> },
     // AD-050（2026-09-24 审计）：自动批准分支的决策源可注入——生产默认委托
     // broker.approveNavigationConfirmation；单测注入假 Decision 后
     // RequireConfirmation+自动批准路径可离线断言（此前 broker 硬编码不可替）。
@@ -45,9 +48,21 @@ class AegisWebViewClient(
     private var documentGeneration = 0L
     private var pendingConfirmation: PendingConfirmedNavigation? = null
 
-    private companion object {
+    // AD-035：onPageError 错误码契约单源（app 层 BrowserViewModel 按此映射文案）。
+    // 注意：跨模块（app ↔ webview-adapter）契约必须 public——internal 是模块级
+    // 可见性，app 层引用不到。
+    companion object {
         /** P2-1 修复：HTTP 错误状态码阈值（>= 该值视为服务器端错误）。 */
         const val HTTP_ERROR_MIN = 400
+
+        /** SSL 证书错误（detail = SslError.primaryError 整数值）。 */
+        const val ERROR_SSL_CERTIFICATE = "ssl_certificate_error"
+
+        /** 主框架加载失败（detail = "errorCode:description"）。 */
+        const val ERROR_MAIN_FRAME = "main_frame_error"
+
+        /** 主框架 HTTP >= 400（detail = 状态码字符串）。 */
+        const val ERROR_HTTP = "http_error"
     }
 
     override fun shouldOverrideUrlLoading(
@@ -295,7 +310,8 @@ class AegisWebViewClient(
             "AegisWebView",
             "SSL 证书校验失败已取消: url=${LogRedact.redact(url)} primaryError=${error.primaryError}",
         )
-        onPageError("证书校验失败（${sslPrimaryErrorName(error.primaryError)}）", true, url)
+        // AD-035：detail = SslError.primaryError 整数值（app 层映射中文文案）
+        onPageError("ssl_certificate_error", error.primaryError.toString(), true, url)
     }
 
     /**
@@ -314,8 +330,8 @@ class AegisWebViewClient(
             "AegisWebView",
             "主框架加载错误: code=${error.errorCode} desc=$description url=${LogRedact.redact(request.url.toString())}",
         )
-        val text = mainFrameErrorText(error.errorCode, description)
-        onPageError(text, false, request.url.toString())
+        // AD-035：detail = "errorCode:description"（app 层按 errorCode 映射文案）
+        onPageError("main_frame_error", "${error.errorCode}:$description", false, request.url.toString())
     }
 
     /**
@@ -335,40 +351,8 @@ class AegisWebViewClient(
             "AegisWebView",
             "主框架 HTTP 错误: status=${errorResponse.statusCode} url=${LogRedact.redact(request.url.toString())}",
         )
-        onPageError("服务器返回错误（HTTP ${errorResponse.statusCode}）", false, request.url.toString())
-    }
-
-    /** P2-1 修复：SslError.primaryError → 简短中文说明（错误面板文案）。 */
-    private fun sslPrimaryErrorName(primaryError: Int): String =
-        when (primaryError) {
-            SslError.SSL_DATE_INVALID -> "证书日期无效"
-            SslError.SSL_EXPIRED -> "证书已过期"
-            SslError.SSL_IDMISMATCH -> "证书域名不匹配"
-            SslError.SSL_NOTYETVALID -> "证书尚未生效"
-            SslError.SSL_UNTRUSTED -> "证书颁发机构不受信任"
-            SslError.SSL_INVALID -> "证书无效"
-            else -> "未知证书错误"
-        }
-
-    /** P2-1 修复：主框架错误码/描述 → 中文文案（未识别错误码回退原始描述）。 */
-    private fun mainFrameErrorText(
-        errorCode: Int,
-        description: String,
-    ): String {
-        val reason =
-            when (errorCode) {
-                // ERROR_* 常量定义在 WebViewClient（非 WebResourceError）
-                WebViewClient.ERROR_HOST_LOOKUP -> "找不到服务器"
-
-                WebViewClient.ERROR_CONNECT -> "无法连接服务器"
-
-                WebViewClient.ERROR_TIMEOUT -> "连接超时"
-
-                WebViewClient.ERROR_UNSUPPORTED_SCHEME -> "不支持的地址类型"
-
-                else -> description.ifBlank { "加载失败" }
-            }
-        return "页面加载失败：$reason"
+        // AD-035：detail = HTTP 状态码字符串（app 层映射文案）
+        onPageError("http_error", errorResponse.statusCode.toString(), false, request.url.toString())
     }
 
     /** 标签关闭时显式释放 Broker 会话，禁止遗留 WebView 再消费旧授权。 */

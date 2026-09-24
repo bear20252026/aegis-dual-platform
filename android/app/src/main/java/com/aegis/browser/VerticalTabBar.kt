@@ -16,9 +16,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /**
@@ -71,7 +75,8 @@ fun VerticalTabBar(
                         modifier = Modifier.padding(start = 8.dp, top = 6.dp, bottom = 2.dp),
                     )
                 }
-                itemsIndexed(tabs) { index, tab ->
+                // AD-040：key=tab.id（与 TabBar 同口径——复用 item + 防索引位移）
+                itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
                     if (tab.group == group) {
                         TabChipCore(
                             tab = tab,
@@ -84,27 +89,40 @@ fun VerticalTabBar(
                 }
             }
         }
+        val newTabDescription = stringResource(R.string.cd_new_tab)
         Surface(
             onClick = onNewTab,
             shape = MaterialTheme.shapes.small,
             color = ButtonOverlay,
-            modifier = Modifier.fillMaxWidth().padding(6.dp).height(36.dp),
+            // AD-044 同口径：「+ 新建标签」补语义
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(6.dp)
+                    .height(36.dp)
+                    .semantics { contentDescription = newTabDescription },
         ) {
             Box(contentAlignment = Alignment.Center) {
-                Text(text = "+ 新建标签", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                val label = "+ ${stringResource(R.string.cd_new_tab)}"
+                Text(text = label, color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
 }
 
-/** 记住分组的有序列表（按标签首次出现顺序去重，纯逻辑无副作用）。 */
+/**
+ * 记住分组的有序列表（按标签首次出现顺序去重，纯逻辑无副作用）。
+ * AD-041（2026-09-24 审计）：原每次重组都重算——remember(tabs) 缓存，
+ * tabs 实例变化（copy 替换）时才重算。
+ */
 @Composable
-private fun rememberOrderedGroups(tabs: List<Tab>): List<String> {
-    val seen = mutableSetOf<String>()
-    val out = mutableListOf<String>()
-    for (t in tabs) {
-        val g = t.group.ifBlank { "默认" }
-        if (seen.add(g)) out.add(g)
+private fun rememberOrderedGroups(tabs: List<Tab>): List<String> =
+    remember(tabs) {
+        val seen = mutableSetOf<String>()
+        val out = mutableListOf<String>()
+        for (t in tabs) {
+            val g = t.group.ifBlank { "默认" }
+            if (seen.add(g)) out.add(g)
+        }
+        out
     }
-    return out
-}

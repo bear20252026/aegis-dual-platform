@@ -48,7 +48,8 @@ object SecureWebViewFactory {
         onPageUrlObserved: (WebView, String) -> Unit = { _, _ -> },
         onTitleObserved: (WebView, String) -> Unit = { _, _ -> },
         onRendererGone: (WebView) -> Unit = {},
-        onPageError: (WebView, String, Boolean, String) -> Unit = { _, _, _, _ -> },
+        onPageError: (WebView, code: String, detail: String, isSsl: Boolean, url: String) -> Unit =
+            { _, _, _, _, _ -> },
     ): WebView {
         // 架构解耦（第 5 项）：broker 由组合根（MainActivity 的 ViewModel
         // 工厂对 Application 收敛注入）显式传入——工厂不再
@@ -95,10 +96,10 @@ object SecureWebViewFactory {
                 onPageUrlObserved = { url ->
                     onPageUrlObserved(webView, url)
                 },
-                onPageError = { description, isSsl, url ->
+                onPageError = { code, detail, isSsl, url ->
                     // P2-1 修复（全面审计 2026-09-04）：SSL/加载错误上抛调用方
-                    // （ViewModel 错误面板——原静默白屏）。
-                    onPageError(webView, description, isSsl, url)
+                    // AD-035：错误码结构上抛——中文文案映射在 ViewModel 层。
+                    onPageError(webView, code, detail, isSsl, url)
                 },
             )
         webView.webViewClient = client

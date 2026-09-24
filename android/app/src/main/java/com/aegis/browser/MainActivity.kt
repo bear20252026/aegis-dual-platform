@@ -35,16 +35,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -116,14 +121,19 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             AegisTheme {
-                val tabs by viewModel.tabs.collectAsState()
-                val activeIndex by viewModel.activeIndex.collectAsState()
-                val address by viewModel.address.collectAsState()
-                val tabsPosition by viewModel.tabsPosition.collectAsState()
-                val webViewAlert by viewModel.webViewAlert.collectAsState()
-                val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsState()
-                val pageError by viewModel.pageError.collectAsState()
-                val readerContent by viewModel.reader.content.collectAsState()
+                // AD-038：collectAsState → collectAsStateWithLifecycle（后台不再
+                // 空转收集，回到前台自动恢复——省电且避免后台重组）
+                val tabs by viewModel.tabs.collectAsStateWithLifecycle()
+                val activeIndex by viewModel.activeIndex.collectAsStateWithLifecycle()
+                val address by viewModel.address.collectAsStateWithLifecycle()
+                val tabsPosition by viewModel.tabsPosition.collectAsStateWithLifecycle()
+                val webViewAlert by viewModel.webViewAlert.collectAsStateWithLifecycle()
+                val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsStateWithLifecycle()
+                val pageError by viewModel.pageError.collectAsStateWithLifecycle()
+                val readerContent by viewModel.reader.content.collectAsStateWithLifecycle()
+                // AD-064：前进/后退可用性
+                val canGoBack by viewModel.canGoBack.collectAsStateWithLifecycle()
+                val canGoForward by viewModel.canGoForward.collectAsStateWithLifecycle()
 
                 // 阅读模式：提取到的正文以对话框渲染（INV-04：状态来自 ViewModel）
                 readerContent?.let { content ->
@@ -143,7 +153,9 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         confirmButton = {
-                            TextButton(onClick = { viewModel.reader.dismissReader() }) { Text("关闭") }
+                            TextButton(onClick = { viewModel.reader.dismissReader() }) {
+                                Text(stringResource(R.string.dialog_close))
+                            }
                         },
                     )
                 }
@@ -152,7 +164,7 @@ class MainActivity : ComponentActivity() {
                 webViewAlert?.let { msg ->
                     AlertDialog(
                         onDismissRequest = { viewModel.setWebViewAlert(null) },
-                        title = { Text("安全提示") },
+                        title = { Text(stringResource(R.string.alert_title)) },
                         text = { Text(msg) },
                         confirmButton = {
                             TextButton(
@@ -160,10 +172,12 @@ class MainActivity : ComponentActivity() {
                                     viewModel.setWebViewAlert(null)
                                     WebViewVersionCheck.openUpdate(this@MainActivity)
                                 },
-                            ) { Text("去更新") }
+                            ) { Text(stringResource(R.string.alert_go_update)) }
                         },
                         dismissButton = {
-                            TextButton(onClick = { viewModel.setWebViewAlert(null) }) { Text("稍后") }
+                            TextButton(onClick = { viewModel.setWebViewAlert(null) }) {
+                                Text(stringResource(R.string.alert_later))
+                            }
                         },
                     )
                 }
@@ -172,23 +186,23 @@ class MainActivity : ComponentActivity() {
                 pendingConfirmation?.let { pending ->
                     AlertDialog(
                         onDismissRequest = { viewModel.rejectPendingNavigationConfirmation() },
-                        title = { Text("需要确认的导航") },
+                        title = { Text(stringResource(R.string.confirm_title)) },
                         text = {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("来源：${pending.request.origin}")
-                                Text("路径与查询：${pending.request.path}")
-                                Text("权限范围：${pending.request.scope}")
-                                Text("此请求将在 ${pending.request.expiresAt} 过期。")
+                                Text(stringResource(R.string.confirm_origin, pending.request.origin))
+                                Text(stringResource(R.string.confirm_path, pending.request.path))
+                                Text(stringResource(R.string.confirm_scope, pending.request.scope))
+                                Text(stringResource(R.string.confirm_expires, pending.request.expiresAt.toString()))
                             }
                         },
                         confirmButton = {
                             TextButton(onClick = { viewModel.approvePendingNavigationConfirmation() }) {
-                                Text("批准并继续")
+                                Text(stringResource(R.string.confirm_approve))
                             }
                         },
                         dismissButton = {
                             TextButton(onClick = { viewModel.rejectPendingNavigationConfirmation() }) {
-                                Text("拒绝")
+                                Text(stringResource(R.string.confirm_reject))
                             }
                         },
                     )
@@ -230,6 +244,8 @@ class MainActivity : ComponentActivity() {
                         )
                         AddressBarRow(
                             address = address,
+                            canGoBack = canGoBack,
+                            canGoForward = canGoForward,
                             onAddressChange = { viewModel.updateAddress(it) },
                             onOpen = { viewModel.navigateToAddress() },
                             onBack = { viewModel.navigateHistory(HistoryAction.BACK) },
@@ -257,10 +273,18 @@ class MainActivity : ComponentActivity() {
      * 2026-09-02 视觉重构：两行大按钮改为单行——玻璃圆钮（后退/前进/刷新/阅读/翻译）
      * + 深色玻璃胶囊地址栏；「打开」并入地址栏尾部按键与 IME「搜索」动作，
      * 不再占独立按钮位。贪吃蛇已迁移至首页 start.html（BUG-014——单源双端一致）。
+     *
+     * AD-064：后退/前进按历史可用性禁用（无历史时灰显且不可点）。
+     *
+     * Suppress 与 ChromeIconButton 同口径：Composable PascalCase 命名 +
+     * 回调装配点参数多（AD-064 新增 canGoBack/canGoForward 后触发阈值）。
      */
+    @Suppress("FunctionNaming", "LongParameterList")
     @Composable
     private fun AddressBarRow(
         address: String,
+        canGoBack: Boolean,
+        canGoForward: Boolean,
         onAddressChange: (String) -> Unit,
         onOpen: () -> Unit,
         onBack: () -> Unit,
@@ -274,15 +298,15 @@ class MainActivity : ComponentActivity() {
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            ChromeIconButton("←", onBack)
-            ChromeIconButton("→", onForward)
-            ChromeIconButton("⟳", onReload)
+            ChromeIconButton(stringResource(R.string.cd_back), "←", canGoBack, onBack)
+            ChromeIconButton(stringResource(R.string.cd_forward), "→", canGoForward, onForward)
+            ChromeIconButton(stringResource(R.string.cd_reload), "⟳", true, onReload)
             OutlinedTextField(
                 value = address,
                 onValueChange = onAddressChange,
                 modifier = Modifier.weight(1f),
                 singleLine = true,
-                placeholder = { Text("搜索或输入网址", color = TextSecondary) },
+                placeholder = { Text(stringResource(R.string.address_placeholder), color = TextSecondary) },
                 shape = CircleShape,
                 colors =
                     OutlinedTextFieldDefaults.colors(
@@ -298,7 +322,7 @@ class MainActivity : ComponentActivity() {
                 keyboardActions = KeyboardActions(onSearch = { onOpen() }),
                 trailingIcon = {
                     Text(
-                        text = "打开",
+                        text = stringResource(R.string.address_open),
                         color = TextSecondary,
                         style = MaterialTheme.typography.labelSmall,
                         modifier =
@@ -308,32 +332,53 @@ class MainActivity : ComponentActivity() {
                     )
                 },
             )
-            ChromeIconButton("阅", onReader)
-            ChromeIconButton("译", onTranslate)
+            ChromeIconButton(stringResource(R.string.cd_reader), "阅", true, onReader)
+            ChromeIconButton(stringResource(R.string.cd_translate), "译", true, onTranslate)
         }
     }
 
     /**
      * 玻璃圆钮：工具栏图标按钮（半透明白圆形 + 居中字符图标）。
      *
+     * AD-042（2026-09-24 审计）：补 [contentDescription] 语义（TalkBack 读出
+     * 按钮用途——原纯字形「←/→/⟳/阅/译」无障碍不可用）；[enabled] 为 false
+     * 时灰显且不可点（AD-064）。
+     *
      * Composable 命名按 UI 惯例 PascalCase（与 [TabChipCore] 同口径）。
      */
     @Suppress("FunctionNaming")
     @Composable
     private fun ChromeIconButton(
+        contentDescription: String,
         glyph: String,
+        enabled: Boolean,
         onClick: () -> Unit,
     ) {
+        val semanticsModifier =
+            if (enabled) {
+                Modifier.semantics { this.contentDescription = contentDescription }
+            } else {
+                Modifier
+            }
         Surface(
             onClick = onClick,
+            enabled = enabled,
             shape = CircleShape,
             color = ButtonOverlay,
-            modifier = Modifier.size(38.dp),
+            modifier =
+                semanticsModifier
+                    .alpha(if (enabled) 1f else DISABLED_BUTTON_ALPHA)
+                    .size(38.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Text(text = glyph, color = Color.White, style = MaterialTheme.typography.bodyMedium)
             }
         }
+    }
+
+    /** AD-064：禁用按钮灰显透明度（detekt MagicNumber 提取常量）。 */
+    private companion object {
+        const val DISABLED_BUTTON_ALPHA = 0.4f
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -446,7 +491,7 @@ private fun PageErrorPanel(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
-                text = if (error.isSsl) "安全连接失败" else "页面加载失败",
+                text = stringResource(if (error.isSsl) R.string.error_ssl_title else R.string.error_title),
                 color = Color.White,
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -466,7 +511,7 @@ private fun PageErrorPanel(
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 Surface(onClick = onRetry, shape = CircleShape, color = ButtonOverlay) {
                     Text(
-                        text = "重试",
+                        text = stringResource(R.string.error_retry),
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
@@ -474,7 +519,7 @@ private fun PageErrorPanel(
                 }
                 Surface(onClick = onBackToSafePage, shape = CircleShape, color = ButtonOverlay) {
                     Text(
-                        text = "返回安全页",
+                        text = stringResource(R.string.error_back_safe),
                         color = Color.White,
                         style = MaterialTheme.typography.bodyMedium,
                         modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),

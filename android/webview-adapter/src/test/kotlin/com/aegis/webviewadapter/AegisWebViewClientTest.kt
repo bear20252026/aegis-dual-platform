@@ -70,7 +70,7 @@ class AegisWebViewClientTest {
     private fun newClient(
         requireConfirmation: Boolean = false,
         onRendererGone: (WebView) -> Unit = {},
-        onPageError: (String, Boolean, String) -> Unit = { _, _, _ -> },
+        onPageError: (String, String, Boolean, String) -> Unit = { _, _, _, _ -> },
     ): AegisWebViewClient =
         AegisWebViewClient(
             broker = broker,
@@ -339,7 +339,7 @@ class AegisWebViewClientTest {
     @Test
     fun mainFrameHttpErrorIsReportedButSubFrameIsSilent() {
         val errors = mutableListOf<String>()
-        val client = newClient(onPageError = { description, _, url -> errors.add("$description|$url") })
+        val client = newClient(onPageError = { code, detail, _, url -> errors.add("$code:$detail|$url") })
         val response = mock(WebResourceResponse::class.java)
         whenever(response.statusCode).thenReturn(500)
 
@@ -347,15 +347,15 @@ class AegisWebViewClientTest {
         client.onReceivedHttpError(view, fakeRequest("https://ads.example/frame", isMainFrame = false), response)
         assertTrue(errors.isEmpty())
 
-        // 主框架 5xx：上报错误面板
+        // 主框架 5xx：上报错误面板（AD-035：错误码结构，文案映射在 app 层）
         client.onReceivedHttpError(view, fakeRequest("https://example.com/x", isMainFrame = true), response)
-        assertEquals(listOf("服务器返回错误（HTTP 500）|https://example.com/x"), errors)
+        assertEquals(listOf("http_error:500|https://example.com/x"), errors)
     }
 
     @Test
     fun httpErrorBelowThresholdIsNotReported() {
         val errors = mutableListOf<String>()
-        val client = newClient(onPageError = { description, _, _ -> errors.add(description) })
+        val client = newClient(onPageError = { code, _, _, _ -> errors.add(code) })
         val response = mock(WebResourceResponse::class.java)
         whenever(response.statusCode).thenReturn(200)
         client.onReceivedHttpError(view, fakeRequest("https://example.com/x", isMainFrame = true), response)

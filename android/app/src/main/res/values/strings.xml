@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AD-045/046（2026-09-24 审计）：UI 文案 strings.xml 单源——此前 MainActivity
+     约 30 条 + BrowserViewModel 5 条硬编码中文字符串（不可本地化、不可静态
+     审查）。app_name 与 shared/version.properties DISPLAY_NAME 保持一致。 -->
+<resources>
+    <string name="app_name">Aegis WebView</string>
+
+    <!-- 对话框/安全提示（MainActivity） -->
+    <string name="dialog_close">关闭</string>
+    <string name="alert_title">安全提示</string>
+    <string name="alert_go_update">去更新</string>
+    <string name="alert_later">稍后</string>
+    <string name="confirm_title">需要确认的导航</string>
+    <string name="confirm_origin">来源：%1$s</string>
+    <string name="confirm_path">路径与查询：%1$s</string>
+    <string name="confirm_scope">权限范围：%1$s</string>
+    <string name="confirm_expires">此请求将在 %1$s 过期。</string>
+    <string name="confirm_approve">批准并继续</string>
+    <string name="confirm_reject">拒绝</string>
+
+    <!-- 地址栏（MainActivity） -->
+    <string name="address_placeholder">搜索或输入网址</string>
+    <string name="address_open">打开</string>
+
+    <!-- 错误面板（MainActivity） -->
+    <string name="error_retry">重试</string>
+    <string name="error_back_safe">返回安全页</string>
+    <string name="error_ssl_title">安全连接失败</string>
+    <string name="error_title">页面加载失败</string>
+
+    <!-- 无障碍语义（ChromeIconButton/TabBar/TabChipCore） -->
+    <string name="cd_back">后退</string>
+    <string name="cd_forward">前进</string>
+    <string name="cd_reload">刷新</string>
+    <string name="cd_reader">阅读模式</string>
+    <string name="cd_translate">整页翻译</string>
+    <string name="cd_new_tab">新建标签页</string>
+    <string name="cd_tab_close">关闭标签页</string>
+
+    <!-- 安全提示文案（BrowserViewModel——经 appContext 取资源） -->
+    <string name="nav_rejected">该地址无法通过安全策略验证</string>
+    <string name="nav_rejected_code">该地址无法通过安全策略验证（%1$s）</string>
+    <string name="session_expired">浏览会话已过期，已自动续期失败——请重试或新建标签</string>
+    <string name="history_unavailable">当前标签没有可执行的历史导航操作</string>
+    <string name="confirm_switch_back">请先切换回发起确认请求的标签。</string>
+    <string name="confirm_invalid">确认请求已失效、被拒绝或无法安全恢复导航。</string>
+    <string name="renderer_restored">页面进程已恢复，正在重新加载</string>
+
+    <!-- 错误面板文案映射（AD-035：错误码→文案在 app 层单源） -->
+    <string name="page_error_ssl">证书校验失败（%1$s）</string>
+    <string name="page_error_http">服务器返回错误（HTTP %1$s）</string>
+    <string name="page_error_main_frame">页面加载失败：%1$s</string>
+    <string name="ssl_name_date_invalid">证书日期无效</string>
+    <string name="ssl_name_expired">证书已过期</string>
+    <string name="ssl_name_id_mismatch">证书域名不匹配</string>
+    <string name="ssl_name_not_yet_valid">证书尚未生效</string>
+    <string name="ssl_name_untrusted">证书颁发机构不受信任</string>
+    <string name="ssl_name_invalid">证书无效</string>
+    <string name="ssl_name_unknown">未知证书错误</string>
+    <string name="err_name_host_lookup">找不到服务器</string>
+    <string name="err_name_connect">无法连接服务器</string>
+    <string name="err_name_timeout">连接超时</string>
+    <string name="err_name_unsupported_scheme">不支持的地址类型</string>
+    <string name="err_name_fallback">加载失败</string>
+</resources>

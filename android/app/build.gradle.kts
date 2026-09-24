@@ -59,6 +59,8 @@ android {
         targetSdk = 36
         versionCode = 20248
         versionName = "2.2.0-beta.49"
+        // AD-067：androidTest 冒烟集运行器
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
             // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）
@@ -158,6 +160,9 @@ dependencies {
     implementation(project(":webview-adapter"))
     implementation(composeBom)
     androidTestImplementation(composeBom)
+    // AD-067：androidTest 冒烟集（真机/模拟器 instrumented 走查用）
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
     implementation(libs.androidx.activity.compose)
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

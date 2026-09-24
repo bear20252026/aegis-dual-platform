@@ -14,6 +14,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -70,12 +75,18 @@ internal fun TabChipCore(
                 // LazyItemScope，weight 会静默解析到外层 ColumnScope 变成 no-op。
                 modifier = Modifier.weight(1f, fill = false).then(titleModifier),
             )
+            // AD-043（2026-09-24 审计）：关闭钮补语义——contentDescription +
+            // Role.Button（原纯「×」字形对 TalkBack 不可用）
+            val closeDescription = stringResource(R.string.cd_tab_close)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier =
                     Modifier
                         .size(28.dp)
-                        .clickable(onClick = onClose),
+                        .semantics {
+                            contentDescription = closeDescription
+                            role = Role.Button
+                        }.clickable(onClick = onClose),
             ) {
                 Text(
                     text = "×",

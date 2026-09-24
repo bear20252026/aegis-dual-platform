@@ -18,6 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /**
@@ -60,7 +63,9 @@ fun TabBar(
         contentPadding = PaddingValues(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        itemsIndexed(tabs) { index, tab ->
+        // AD-039：key=tab.id——标题变化（copy 替换实例）时复用既有 item 而非
+        // 重建，且防关闭中间标签后索引位移引发的状态错位
+        itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
             TabChipCore(
                 tab = tab,
                 active = index == activeIndex,
@@ -73,11 +78,13 @@ fun TabBar(
             )
         }
         item {
+            val newTabDescription = stringResource(R.string.cd_new_tab)
             Surface(
                 onClick = onNewTab,
                 shape = CircleShape,
                 color = ButtonOverlay,
-                modifier = Modifier.size(32.dp),
+                // AD-044：「+」补语义（TalkBack 读「新建标签页」）
+                modifier = Modifier.size(32.dp).semantics { contentDescription = newTabDescription },
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(text = "+", color = Color.White, style = MaterialTheme.typography.bodyMedium)

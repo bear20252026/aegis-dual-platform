@@ -1,10 +1,13 @@
 package com.aegis.browser
 
+import android.net.http.SslError
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
+import com.aegis.webviewadapter.AegisWebViewClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -59,6 +62,16 @@ class BrowserViewModel(
 
     private val _activeIndex = MutableStateFlow(0)
     val activeIndex: StateFlow<Int> = _activeIndex.asStateFlow()
+
+    /**
+     * AD-064（2026-09-24 审计）：前进/后退可用性——UI 据此禁用按钮（原始终
+     * 可点，无可历史时点了静默无反馈）。经 [refresh] 随标签切换/页面事件刷新。
+     */
+    private val _canGoBack = MutableStateFlow(false)
+    val canGoBack: StateFlow<Boolean> = _canGoBack.asStateFlow()
+
+    private val _canGoForward = MutableStateFlow(false)
+    val canGoForward: StateFlow<Boolean> = _canGoForward.asStateFlow()
 
     private val _address = MutableStateFlow(HOME_URL)
     val address: StateFlow<String> = _address.asStateFlow()
@@ -168,6 +181,10 @@ class BrowserViewModel(
         if (!::tabManager.isInitialized) return
         _tabs.value = tabManager.list()
         _activeIndex.value = tabManager.activeIndex
+        // AD-064：前进/后退可用性随刷新点同步（WebView 回调/生命周期均在主线程）
+        val currentWebView = tabManager.current()?.webView
+        _canGoBack.value = currentWebView?.canGoBack() ?: false
+        _canGoForward.value = currentWebView?.canGoForward() ?: false
         if (!addressDraftActive) {
             _address.value =
                 tabManager
@@ -251,7 +268,7 @@ class BrowserViewModel(
         // 提交即清除草稿：后续 onPageStarted→onPageUrlObserved 正常同步地址栏
         addressDraftActive = false
         if (!SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(target).orFalse()) {
-            _webViewAlert.value = "该地址无法通过安全策略验证"
+            _webViewAlert.value = alertText(R.string.nav_rejected)
         }
     }
 
@@ -289,8 +306,11 @@ class BrowserViewModel(
     fun navigateHistory(action: HistoryAction) {
         val wv = tabManager.current()?.webView ?: return
         if (!SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(action).orFalse()) {
-            _webViewAlert.value = "当前标签没有可执行的历史导航操作"
+            _webViewAlert.value = alertText(R.string.history_unavailable)
         }
+        // AD-064：历史导航后立即同步前进/后退可用性（onPageStarted 亦会刷新，
+        // 此处保证缓存页导航等无网络事件的场景也准确）
+        refresh()
     }
 
     /** 设置/清除安全提示（null = 清除）。 */
@@ -327,7 +347,7 @@ class BrowserViewModel(
     fun approvePendingNavigationConfirmation(): Boolean {
         val pending = _pendingNavigationConfirmation.value ?: return false
         if (!::tabManager.isInitialized || tabManager.current()?.webView !== pending.webView) {
-            _webViewAlert.value = "请先切换回发起确认请求的标签。"
+            _webViewAlert.value = alertText(R.string.confirm_switch_back)
             return false
         }
         _pendingNavigationConfirmation.value = null
@@ -335,7 +355,7 @@ class BrowserViewModel(
             SecureWebViewFactory
                 .navigatorFor(pending.webView)
                 ?.approvePendingNavigation() == true
-        if (!approved) _webViewAlert.value = "确认请求已失效、被拒绝或无法安全恢复导航。"
+        if (!approved) _webViewAlert.value = alertText(R.string.confirm_invalid)
         return approved
     }
 
@@ -374,7 +394,7 @@ class BrowserViewModel(
                 navigator?.openTrustedHome()
             }
             refresh()
-            _webViewAlert.value = "页面进程已恢复，正在重新加载"
+            _webViewAlert.value = alertText(R.string.renderer_restored)
         }
     }
 
@@ -416,8 +436,8 @@ class BrowserViewModel(
                 // webViewAlert 上抛 UI（此前用户只看到白屏/无反应）。
                 _webViewAlert.value =
                     when (code) {
-                        "session_expired" -> "浏览会话已过期，已自动续期失败——请重试或新建标签"
-                        else -> "该地址无法通过安全策略验证（$code）"
+                        "session_expired" -> alertText(R.string.session_expired)
+                        else -> alertText(R.string.nav_rejected_code, code)
                     }
             },
             onPageUrlObserved = { webView, url ->
@@ -461,19 +481,77 @@ class BrowserViewModel(
                 // 的 WebView 并重载原 URL（原 no-op——标签永久白屏）。
                 rebuildAfterRendererGone(deadWebView)
             },
-            onPageError = { webView, description, isSsl, url ->
+            onPageError = { webView, code, detail, isSsl, url ->
                 // P2-1 修复（全面审计 2026-09-04）：仅当前活动标签的错误上屏
-                // （后台标签的加载失败不遮蔽当前页内容）。
+                // AD-035：错误码结构上抛——文案映射收敛在 app 层单源
                 if (tabManager.current()?.webView === webView) {
                     _pageError.value =
                         PageError(
-                            description = description,
+                            description = pageErrorText(code, detail),
                             isSsl = isSsl,
                             url = url,
                         )
                 }
             },
         )
+
+    /** AD-046：提示文案经资源单源（init 后 appContext 必然可用）。 */
+    private fun alertText(id: Int): String = appContext?.getString(id).orEmpty()
+
+    private fun alertText(
+        id: Int,
+        arg: String,
+    ): String = appContext?.getString(id, arg).orEmpty()
+
+    /** AD-035：webview-adapter 错误码 → 面板文案（未识别码回退原始 detail）。 */
+    private fun pageErrorText(
+        code: String,
+        detail: String,
+    ): String =
+        when (code) {
+            AegisWebViewClient.ERROR_SSL_CERTIFICATE -> {
+                alertText(R.string.page_error_ssl, alertText(sslNameRes(detail.toIntOrNull())))
+            }
+
+            AegisWebViewClient.ERROR_HTTP -> {
+                alertText(R.string.page_error_http, detail)
+            }
+
+            AegisWebViewClient.ERROR_MAIN_FRAME -> {
+                val errorCode = detail.substringBefore(':').toIntOrNull()
+                val rawDescription = detail.substringAfter(':', missingDelimiterValue = "")
+                alertText(R.string.page_error_main_frame, mainFrameErrorName(errorCode, rawDescription))
+            }
+
+            else -> {
+                detail
+            }
+        }
+
+    /** SslError.primaryError → 资源 id（未识别回退「未知证书错误」）。 */
+    private fun sslNameRes(primaryError: Int?): Int =
+        when (primaryError) {
+            SslError.SSL_DATE_INVALID -> R.string.ssl_name_date_invalid
+            SslError.SSL_EXPIRED -> R.string.ssl_name_expired
+            SslError.SSL_IDMISMATCH -> R.string.ssl_name_id_mismatch
+            SslError.SSL_NOTYETVALID -> R.string.ssl_name_not_yet_valid
+            SslError.SSL_UNTRUSTED -> R.string.ssl_name_untrusted
+            SslError.SSL_INVALID -> R.string.ssl_name_invalid
+            else -> R.string.ssl_name_unknown
+        }
+
+    /** 主框架错误码 → 文案（ERROR_* 常量定义在 WebViewClient；未识别回退原始描述）。 */
+    private fun mainFrameErrorName(
+        errorCode: Int?,
+        description: String,
+    ): String =
+        when (errorCode) {
+            WebViewClient.ERROR_HOST_LOOKUP -> alertText(R.string.err_name_host_lookup)
+            WebViewClient.ERROR_CONNECT -> alertText(R.string.err_name_connect)
+            WebViewClient.ERROR_TIMEOUT -> alertText(R.string.err_name_timeout)
+            WebViewClient.ERROR_UNSUPPORTED_SCHEME -> alertText(R.string.err_name_unsupported_scheme)
+            else -> description.ifBlank { alertText(R.string.err_name_fallback) }
+        }
 }
 
 /** 仅 ViewModel 保存发起 WebView 引用；Compose 仅显示 request 的最小绑定字段。 */
