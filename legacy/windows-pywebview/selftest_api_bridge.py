@@ -273,7 +273,16 @@ check("种子随 get_bookmarks 可读（受信）",
 
 # 14) 离线几何画板桥：open_geogebra（源码树已解压 bundle → True；
 #     monkeypatch frozen 基路径模拟未随包 → False）
-check("open_geogebra 源码树加载成功", api.open_geogebra() is True)
+# geogebra/ 被 .gitignore 排除（打包流程单独拉取）——CI checkout 无该
+# 目录属预期，此时应断言静默降级 False 而非硬性要求 True（2026-09-24）。
+from pathlib import Path as _P
+
+_gg_entry = (_P(__file__).resolve().parent / "geogebra" / "GeoGebra"
+             / "HTML5" / "5.0" / "GeoGebra.html")
+if _gg_entry.is_file():
+    check("open_geogebra 源码树加载成功", api.open_geogebra() is True)
+else:
+    check("无 bundle 环境 open_geogebra 降级 False", api.open_geogebra() is False)
 import sys as _sys
 
 _real_frozen = getattr(_sys, "frozen", None)
