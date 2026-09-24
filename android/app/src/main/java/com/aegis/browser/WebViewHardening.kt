@@ -87,8 +87,12 @@ internal object WebViewHardening {
      * `contracts/schemas/bridge_guard.template.js` 逐行一致（占位符归一化后），
      * 由 `contracts/codegen/verify_bridge_guard.py` 门禁校验——禁止手工改动
      * 本模板而不更新规范文件（fail-open 漂移即此模式的产物）。
+     *
+     * AD-069（2026-09-24 审计）：private → internal——JVM 单测断言关键防御
+     * 标记存在（fetch/XHR/beacon/WS 劫持点、白名单、REQUIRE_HTTPS），杜绝
+     * 「脚本内容被改而注入照常」的零回归盲区。
      */
-    private val BRIDGE_GUARD_JS: String
+    internal val BRIDGE_GUARD_JS: String
         get() =
             """
 // Aegis BridgeGuard — 受信调用方校验（fetch / XMLHttpRequest / sendBeacon / WebSocket）

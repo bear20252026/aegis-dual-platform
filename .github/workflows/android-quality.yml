@@ -53,8 +53,14 @@ jobs:
       - name: detekt 检查（基线门禁：仅新问题失败）
         run: ./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt --no-daemon
 
-      - name: 单元测试（broker 授权生命周期 + app 搜索归一）
-        run: ./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest --no-daemon
+      # AD-066（2026-09-24 审计）：Android Lint 门禁此前缺失——安全问题
+      # （明文/导出组件/备份等）零拦截。新引入错误失败；存量问题如有噪音
+      # 走 lint baseline（app/lint-baseline.xml）收敛。
+      - name: Android Lint 门禁（:app:lintDebug）
+        run: ./gradlew.bat :app:lintDebug --no-daemon
+
+      - name: 单元测试（broker 授权生命周期 + app 搜索归一 + webview-adapter 客户端状态机）
+        run: ./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest :webview-adapter:testDebugUnitTest --no-daemon
 
       - name: 上传 detekt 报告（排障用）
         if: always()

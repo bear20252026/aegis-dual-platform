@@ -17,6 +17,12 @@ internal object WebViewDownloadHandler {
     /** P2-5 修复（全面审计 2026-09-04）：净化失败的默认下载名（无扩展名）。 */
     private const val DEFAULT_DOWNLOAD_NAME = "aegis_download"
 
+    /**
+     * AD-032（2026-09-24 审计）：下载文件名长度上限。超长文件名（服务器可控）
+     * 会导致 DownloadManager 落盘失败/通知栏渲染异常——截断基本名、保留扩展名。
+     */
+    private const val MAX_DOWNLOAD_NAME_LENGTH = 200
+
     fun handleDownload(
         webView: WebView,
         url: String,
@@ -96,15 +102,39 @@ internal object WebViewDownloadHandler {
         // base 仍追加推断扩展名（report.pdf → report.pdf.pdf）。现仅在 base
         // 无扩展名时才从 mimetype/URL 推断追加；组合名兜底再净化一次。
         val hasExtension = base.substringAfterLast('.', missingDelimiterValue = "").isNotBlank()
-        return if (hasExtension) {
-            base
-        } else {
-            inferExtension(urlPathSegment, mimeType)
-                ?.let { "$base.$it" }
-                ?.let { sanitizeFileName(it) }
-                ?: base
-        }
+        val resolved =
+            if (hasExtension) {
+                base
+            } else {
+                inferExtension(urlPathSegment, mimeType)
+                    ?.let { "$base.$it" }
+                    ?.let { sanitizeFileName(it) }
+                    ?: base
+            }
+        return capLength(resolved)
     }
+
+    /**
+     * AD-032：超长文件名截断——基本名按上限截断、扩展名保留
+     * （`<200 字符基本名>.pdf` 而非把 `.pdf` 切掉变成无类型文件）。
+     * 截断后基本名可能以点结尾 → 再净化一次（trimEnd('.')）。
+     */
+    private fun capLength(name: String): String =
+        when {
+            name.length <= MAX_DOWNLOAD_NAME_LENGTH -> {
+                name
+            }
+
+            else -> {
+                val extension = name.substringAfterLast('.', missingDelimiterValue = "")
+                if (extension.isBlank() || extension.length >= MAX_DOWNLOAD_NAME_LENGTH) {
+                    name.take(MAX_DOWNLOAD_NAME_LENGTH).trimEnd('.')
+                } else {
+                    val baseBudget = MAX_DOWNLOAD_NAME_LENGTH - extension.length - 1
+                    name.dropLast(extension.length + 1).take(baseBudget).trimEnd('.') + "." + extension
+                }
+            }
+        }
 
     /**
      * P2-5 修复（全面审计 2026-09-04）：文件名净化——剥离路径分隔符（`/`

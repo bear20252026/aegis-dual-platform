@@ -2,6 +2,7 @@ package com.aegis.browser
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -99,6 +100,44 @@ class WebViewDownloadHandlerTest {
         assertEquals(
             "base.exe",
             WebViewDownloadHandler.resolveDownloadFileName("https://c.d/base", "application/x\\exe", ""),
+        )
+    }
+
+    // ------------------------------------------------ AD-032 长度上限
+    @Test
+    fun overLongFileNameIsCappedTo200KeepingExtension() {
+        val longName = "a".repeat(250) + ".pdf"
+        val resolved =
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename=\"$longName\"",
+            )
+        assertEquals(200, resolved.length)
+        assertTrue("扩展名必须保留（不得截成无类型文件）", resolved.endsWith(".pdf"))
+        assertTrue(resolved.startsWith("a"))
+    }
+
+    @Test
+    fun overLongExtensionlessNameIsCapped() {
+        val resolved =
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename=\"${"b".repeat(300)}\"",
+            )
+        assertEquals(200, resolved.length)
+    }
+
+    @Test
+    fun normalLengthNamesPassThroughUncapped() {
+        assertEquals(
+            "report.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename=\"report.pdf\"",
+            ),
         )
     }
 }

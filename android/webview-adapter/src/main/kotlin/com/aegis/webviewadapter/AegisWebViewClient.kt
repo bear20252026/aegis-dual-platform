@@ -36,6 +36,11 @@ class AegisWebViewClient(
     private val onNavigationDenied: (code: String, detail: String) -> Unit = { _, _ -> },
     private val onPageUrlObserved: (String) -> Unit = {},
     private val onPageError: (description: String, isSsl: Boolean, url: String) -> Unit = { _, _, _ -> },
+    // AD-050（2026-09-24 审计）：自动批准分支的决策源可注入——生产默认委托
+    // broker.approveNavigationConfirmation；单测注入假 Decision 后
+    // RequireConfirmation+自动批准路径可离线断言（此前 broker 硬编码不可替）。
+    private val autoApproveDecision: (request: ApprovalRequest, rawUrl: String, scope: String) -> Decision =
+        { request, rawUrl, scope -> broker.approveNavigationConfirmation(request, rawUrl, scope) },
 ) : WebViewClient() {
     private var documentGeneration = 0L
     private var pendingConfirmation: PendingConfirmedNavigation? = null
@@ -163,7 +168,8 @@ class AegisWebViewClient(
                     return false
                 }
                 // 自动批准：保留 Rust 核心 nonce 语义（等同用户批准后兑换）
-                val approved = broker.approveNavigationConfirmation(decision.request, url, "navigation")
+                // AD-050：决策经注入源（生产=broker 委托；测试=替身）。
+                val approved = autoApproveDecision(decision.request, url, "navigation")
                 val consumed =
                     approved is Decision.Allow &&
                         broker.consumeNavigation(

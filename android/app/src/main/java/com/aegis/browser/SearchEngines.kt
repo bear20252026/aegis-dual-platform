@@ -1,6 +1,5 @@
 package com.aegis.browser
 
-import android.net.Uri
 import com.aegis.broker.OriginPolicy
 
 /**
@@ -22,6 +21,7 @@ import com.aegis.broker.OriginPolicy
  * （AegisHomeBridge）共用 normalizeInput，消除双份拼接的语义漂移
  * （首页框旧实现会把 `https://www.baidu.com` 拼成 `https://https://...`）。
  */
+@Suppress("TooManyFunctions") // AD-057 新增 uriEncode 触发阈值（11）——职责仍单一（输入归一）
 object SearchEngines {
     val ENGINE_URLS: Map<String, String> =
         mapOf(
@@ -54,11 +54,40 @@ object SearchEngines {
             .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
             .getString(KEY_ENGINE, DEFAULT_ENGINE) ?: DEFAULT_ENGINE
 
-    /** 搜索词拼引擎 URL（Uri.encode 对齐 Windows urllib.parse.quote 语义——`/` 保留）。 */
+    /**
+     * 搜索词拼引擎 URL。
+     * AD-057（2026-09-24 审计）：编码抽为纯字符串 [uriEncode]（原
+     * Uri.encode 依赖阻断 JVM 单测）——语义与 `Uri.encode(text, "/")` 对齐
+     * （保留 RFC 3986 unreserved + `!'()*` 与 `/`，其余按 UTF-8 字节
+     * 大写 %XX——对齐 Windows urllib.parse.quote 的百分比编码习惯）。
+     */
     fun searchUrl(
         text: String,
         engineKey: String,
-    ): String = (ENGINE_URLS[engineKey] ?: ENGINE_URLS[DEFAULT_ENGINE]!!) + Uri.encode(text, "/")
+    ): String = (ENGINE_URLS[engineKey] ?: ENGINE_URLS[DEFAULT_ENGINE]!!) + uriEncode(text)
+
+    /**
+     * AD-057：Uri.encode(text, "/") 的纯 Kotlin 等价实现（JVM 可测）。
+     * 保留字符集与 android.net.Uri.encode 一致：字母数字 + `_-.~'()*` +
+     * allow 参数；非保留字节原样、其余逐 UTF-8 字节输出大写十六进制。
+     */
+    @Suppress("MagicNumber") // 位运算/ASCII 区间字面量为编码算法本体，非业务魔数
+    internal fun uriEncode(text: String): String {
+        // keep 集 = Uri.encode 缺省 unreserved + allow 参数 "/"（搜索路径分隔）
+        val keep = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.~'()*" + "/"
+        val upperHex = "0123456789ABCDEF"
+        val builder = StringBuilder(text.length)
+        for (byte in text.toByteArray(Charsets.UTF_8)) {
+            val value = byte.toInt() and 0xFF
+            val c = value.toChar()
+            if (value in 0x20..0x7E && keep.indexOf(c) >= 0) {
+                builder.append(c)
+            } else {
+                builder.append('%').append(upperHex[value shr 4]).append(upperHex[value and 0x0F])
+            }
+        }
+        return builder.toString()
+    }
 
     /**
      * 统一输入归一：地址栏/首页搜索框共用入口。

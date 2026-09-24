@@ -163,4 +163,42 @@ class SearchEnginesTest {
         assertNull(SearchEngines.normalizeInput("javascript:alert(1)", "baidu"))
         assertNull(SearchEngines.normalizeInput("file:///etc/passwd", "baidu"))
     }
+
+    // ---------- AD-057（2026-09-24 审计）：searchUrl/uriEncode 纯字符串化 ----------
+    @Test
+    fun `uriEncode keeps unreserved characters and slash`() {
+        assertEquals("helloworld", SearchEngines.uriEncode("helloworld"))
+        assertEquals("a/b", SearchEngines.uriEncode("a/b"))
+        // Uri.encode 保留集 = 字母数字 + _-.~'()* + allow("/"); '!' 不在其中（按 Android 实测语义）
+        assertEquals("a.b-c_d~e'f(g)h*i%21j", SearchEngines.uriEncode("a.b-c_d~e'f(g)h*i!j"))
+    }
+
+    @Test
+    fun `uriEncode percent-encodes space plus and cjk as uppercase utf8`() {
+        assertEquals("hello%20world", SearchEngines.uriEncode("hello world"))
+        // '+' 不是 unreserved（与 Uri.encode(text, "/") 语义一致）
+        assertEquals("rust%20%2B%20uniffi", SearchEngines.uriEncode("rust + uniffi"))
+        assertEquals("%E4%B8%AD%E6%96%87", SearchEngines.uriEncode("中文"))
+        assertEquals("100%25", SearchEngines.uriEncode("100%"))
+    }
+
+    @Test
+    fun `searchUrl appends encoded query on known and default engine`() {
+        assertEquals("https://www.baidu.com/s?wd=rust%20uniffi", SearchEngines.searchUrl("rust uniffi", "baidu"))
+        assertEquals("https://www.bing.com/search?q=%E4%B8%AD", SearchEngines.searchUrl("中", "bing"))
+        // 未知引擎 key 回退默认引擎
+        assertEquals(
+            "https://www.baidu.com/s?wd=x",
+            SearchEngines.searchUrl("x", "no-such-engine"),
+        )
+    }
+
+    @Test
+    fun `normalizeInput search path is now jvm-testable end to end`() {
+        // AD-057 前搜索链路在 JVM 只能测 classify——现在全链可断言
+        assertEquals(
+            "https://www.baidu.com/s?wd=today%20weather",
+            SearchEngines.normalizeInput("today weather", "baidu"),
+        )
+    }
 }

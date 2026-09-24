@@ -45,6 +45,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 主界面（薄壳，仅负责组装；多标签逻辑在 TabManager，标签栏在 TabBar/VerticalTabBar）。
@@ -74,7 +77,13 @@ class MainActivity : ComponentActivity() {
         insetsController.isAppearanceLightStatusBars = false
         // A1：System WebView 版本检查（CVE-2026-12438/11295 防御——
         // 过旧则提示更新，不阻塞浏览）
-        WebViewVersionCheck.checkAndPrompt(this) { viewModel.setWebViewAlert(it) }
+        // AD-058（2026-09-24 审计）：getPackageInfo 是 PackageManager 查询
+        // （可能触发 binder IPC）——移出主线程，协程内检查、结果回主线程提示。
+        lifecycleScope.launch(Dispatchers.Default) {
+            WebViewVersionCheck.checkAndPrompt(this@MainActivity) { message ->
+                lifecycleScope.launch(Dispatchers.Main) { viewModel.setWebViewAlert(message) }
+            }
+        }
         // 初始化 ViewModel（TabManager + 首个标签）
         viewModel.init(this)
         // P0-5 修复（全面审计 2026-09-04）：向 ViewModel 注入宿主引用（弱引用
@@ -204,7 +213,7 @@ class MainActivity : ComponentActivity() {
                                 onNewTab = { viewModel.newTab(this@MainActivity) },
                             )
                             WebContentArea(
-                                tabManager = viewModel.getTabManager()!!,
+                                tabManager = requireNotNull(viewModel.getTabManager()),
                                 pageError = pageError,
                                 onRetry = { viewModel.retryCurrentPage() },
                                 onBackToSafePage = { viewModel.returnToSafeHome() },
@@ -230,7 +239,7 @@ class MainActivity : ComponentActivity() {
                             onTranslate = { viewModel.reader.translateCurrentPage() },
                         )
                         WebContentArea(
-                            tabManager = viewModel.getTabManager()!!,
+                            tabManager = requireNotNull(viewModel.getTabManager()),
                             pageError = pageError,
                             onRetry = { viewModel.retryCurrentPage() },
                             onBackToSafePage = { viewModel.returnToSafeHome() },

@@ -69,11 +69,17 @@ object DownloadPolicy {
             .any { it in dangerousExtensions }
     }
 
-    /** 查询参数值百分号解码；非法编码原样返回（fail-closed——仍参与判定）。 */
+    /**
+     * 查询参数值百分号解码；非法编码原样返回（fail-closed——仍参与判定）。
+     * AD-066 lint 门禁修复：Charset 重载是 API 33+（minSdk 26 会 NewApi 崩溃）
+     * ——改用 API 1 就有的 String charset 名重载（语义一致）。
+     */
     private fun decodeQueryValue(raw: String): String =
         try {
-            URLDecoder.decode(raw, Charsets.UTF_8)
+            URLDecoder.decode(raw, "UTF-8")
         } catch (_: IllegalArgumentException) {
+            raw
+        } catch (_: java.io.UnsupportedEncodingException) {
             raw
         }
 

@@ -1,6 +1,7 @@
 package com.aegis.broker
 
 import kotlinx.datetime.Instant
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -201,6 +202,48 @@ class AndroidBrokerPolicyTtlTest {
         assertFalse(
             broker.consumeNavigation(action, "session-1", "tab-1", 0, "https://example.com", "navigation"),
         )
+    }
+
+    // ---------------------------------------------------------------- AD-051
+    @Test
+    fun aboutBlankEvaluatesToAllowWithLiteralOrigin() {
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("session-1", "tab-1"))
+        val decision =
+            broker.evaluateNavigation(
+                sessionId = "session-1",
+                tabId = "tab-1",
+                generation = 0,
+                rawUrl = "about:blank",
+                scope = "navigation",
+            )
+        // about:blank 是 opaque URI（host=null）——归一不得 NPE，origin 固定原字面量
+        assertTrue(decision is Decision.Allow)
+        val action = (decision as Decision.Allow).action
+        assertEquals("about:blank", action.origin)
+        // 全链路：opaque URI 的授权可正常消费
+        assertTrue(broker.consumeNavigation(action, "session-1", "tab-1", 0, "about:blank", "navigation"))
+    }
+
+    // ---------------------------------------------------------------- AD-052
+    @Test
+    fun destroySessionClearsNoncesAndInvalidatesIssuedActions() {
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("session-1", "tab-1"))
+        val action = issueAllowedAction(broker, 0)
+        assertTrue(broker.isValid(action, 0))
+
+        broker.destroySession("session-1")
+
+        // 会话销毁后：授权失效、不可消费
+        assertFalse(broker.isValid(action, 0))
+        assertFalse(
+            broker.consumeNavigation(action, "session-1", "tab-1", 0, "https://example.com/p0", "navigation"),
+        )
+        // 已销毁会话上的评估一律拒绝（session_not_found）
+        val afterDestroy =
+            broker.evaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation")
+        assertTrue(afterDestroy is Decision.Deny)
     }
 
     /** 可注入时钟（AD-020）——固定 instant 手动推进。 */

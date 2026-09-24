@@ -66,6 +66,10 @@ object SecureWebViewFactory {
                 "registerSession failed: session=$sessionId, " +
                     "REQUIRE_NATIVE_POLICY_CORE=${com.aegis.broker.BuildConfig.REQUIRE_NATIVE_POLICY_CORE}",
             )
+            // AD-034（2026-09-24 审计）：抛出前释放已配置的 WebView——原实现
+            // 直接 check 抛异常，已完成硬化配置的 WebView（含其 Chromium 资源）
+            // 泄漏（navigator 注册表尚无条目，后续 release() 无法回收它）。
+            SecureWebViewFactory.tearDown(webView)
             check(false) { "无法注册安全浏览会话（详见 logcat -s AegisBroker）" }
         }
         WebViewHardening.install(webView, WebViewHardening.newSessionSeed())

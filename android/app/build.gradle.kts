@@ -142,6 +142,9 @@ android {
     // 而非抛 "not mocked"）——TabManager 等注入接缝类的离线单测前提
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // AD-055：Robolectric 需要 includeAndroidResources（合并资源/manifest
+        // 供 Robolectric 运行时读取——缺省时 AppVariant 检测报错）
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -149,7 +152,8 @@ android {
 // （Kotlin 编译由 AGP 管理，使用运行 Gradle 的 JDK；已移除旧配置）
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
+    // AD-068：Compose BOM 经 version catalog 单源（版本登记于 libs.versions.toml）
+    val composeBom = platform(libs.compose.bom)
     implementation(project(":broker"))
     implementation(project(":webview-adapter"))
     implementation(composeBom)
@@ -168,6 +172,10 @@ dependencies {
     testImplementation(libs.mockito.core)
     // AD-028 配套：ReaderModeTest 需真 org.json（returnDefaultValues 下链式 put 返回 null 即 NPE）
     testImplementation(libs.org.json)
+    // AD-055 配套：BrowserEngine 12 项硬化标志 Robolectric 逐项断言
+    // （WebSettings 属性在 returnDefaultValues 桩下全为默认值，无法断言真值）
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }
 
 // detekt/Kotlin 编译目标显式 21（与 CI JDK 21 一致——detekt jvm-target 兼容——

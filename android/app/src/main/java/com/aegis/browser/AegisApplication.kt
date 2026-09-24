@@ -11,4 +11,20 @@ import com.aegis.broker.AndroidBroker
  */
 class AegisApplication : Application() {
     val broker: AndroidBroker = AndroidBroker()
+
+    override fun onCreate() {
+        super.onCreate()
+        // AD-065（2026-09-24 审计）：注册全局未捕获异常处理器——崩溃前留痕
+        // （logcat -s AegisCrash），随后委托系统默认处理器（崩溃语义不变：
+        // 该弹的弹、该杀的杀，只是多一条带堆栈的记录）。
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            android.util.Log.e(
+                "AegisCrash",
+                "未捕获异常 thread=${thread.name}: ${throwable.javaClass.name}",
+                throwable,
+            )
+            previous?.uncaughtException(thread, throwable)
+        }
+    }
 }

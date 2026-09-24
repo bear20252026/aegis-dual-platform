@@ -17,6 +17,7 @@ import android.webkit.WebView
  *
  * 本类不依赖任何 UI（Compose/Activity），可离线单测。
  */
+@Suppress("TooManyFunctions") // AD-036 新增 updateUrl 触发阈值（11）——多标签管理内聚职责
 class TabManager(
     private val maxActive: Int = 8,
     private val pause: (WebView) -> Unit = WebView::onPause,
@@ -106,8 +107,28 @@ class TabManager(
     ): WebView? {
         if (index !in tabs.indices) return null
         val old = tabs[index].webView
-        tabs[index] = tabs[index].copy(webView = newWebView)
+        // AD-060（2026-09-24 审计）：重置 suspended——替换进来的新 WebView 是
+        // 全新运行态（从未 pause），沿用旧标签的 suspended=true 会造成
+        // 「状态标记挂起 / 实际在前台跑」的失真（切回该标签时 switchTo 因
+        // suspended 已为 true 不会再 resume——语义一致但永不准确）。
+        tabs[index] =
+            tabs[index].copy(webView = newWebView, suspended = false)
         return old
+    }
+
+    /**
+     * AD-036（2026-09-24 审计）：页面 URL 回填的实例替换单写点。
+     * 原 BrowserViewModel.onPageUrlObserved 经 `tab.url = url` 原地改 var——
+     * list() 快照与 StateFlow 旧值持同一实例，data class self-equals 恒 true
+     * → StateFlow 不发射。与 [updateTitle] 同模式（copy 替换实例）。
+     * 越界/未知 id 静默忽略（对齐类内索引操作约定）。
+     */
+    fun updateUrl(
+        id: Long,
+        url: String,
+    ) {
+        val index = tabs.indexOfFirst { it.id == id }
+        if (index >= 0) tabs[index] = tabs[index].copy(url = url)
     }
 
     /**

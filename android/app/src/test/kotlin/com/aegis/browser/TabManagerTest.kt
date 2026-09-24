@@ -136,6 +136,48 @@ class TabManagerTest {
         tm.updateTitle(999L, "x")
     }
 
+    /** AD-036（2026-09-24 审计）：updateUrl 与 updateTitle 同模式——copy 替换实例。 */
+    @Test
+    fun updateUrl_replacesInstance_soStateFlowNotices() {
+        val rec = Recorder()
+        val tm = manager(rec)
+        val tab = tm.addTab(newWebView(), url = "https://a.example")
+        val before = tm.list().first { it.id == tab.id }
+        tm.updateUrl(tab.id, "https://b.example")
+        val after = tm.list().first { it.id == tab.id }
+        assertFalse(before === after)
+        assertEquals("https://b.example", after.url)
+        assertEquals("https://a.example", before.url) // 旧快照不受影响
+        // 未知 id 静默忽略
+        tm.updateUrl(999L, "https://ignored.example")
+    }
+
+    /** AD-060（2026-09-24 审计）：replaceWebView 重置 suspended——新 WebView 是运行态。 */
+    @Test
+    fun replaceWebView_resetsStaleSuspendedFlag() {
+        val rec = Recorder()
+        val tm = manager(rec, maxActive = 1)
+        tm.addTab(newWebView()) // tab0
+        tm.addTab(newWebView()) // tab1 激活——tab0 被 LRU 挂起
+        assertTrue(tm.list().first { it.id == 0L }.suspended)
+        tm.replaceWebView(0, newWebView())
+        // 替换进来的 WebView 从未 pause——沿用 suspended=true 属状态失真
+        assertFalse(tm.list().first { it.id == 0L }.suspended)
+    }
+
+    /** AD-056（2026-09-24 审计）：addTab 超上限即时挂起最旧标签（无需切换操作）。 */
+    @Test
+    fun addTabBeyondLimit_suspendsImmediatelyOnAdd() {
+        val rec = Recorder()
+        val tm = manager(rec, maxActive = 2)
+        tm.addTab(newWebView()) // 0
+        tm.addTab(newWebView()) // 1
+        val pausesBefore = rec.paused.size
+        tm.addTab(newWebView()) // 2——超出上限，tab0（最久未用）立即挂起
+        assertEquals(pausesBefore + 1, rec.paused.size)
+        assertTrue(tm.list().first { it.id == 0L }.suspended)
+    }
+
     @Test
     fun suspendAll_marksAllSuspended_andSafeOnEmpty() {
         val rec = Recorder()

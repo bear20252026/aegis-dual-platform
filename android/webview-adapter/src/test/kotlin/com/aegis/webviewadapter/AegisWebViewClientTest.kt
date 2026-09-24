@@ -3,6 +3,7 @@ package com.aegis.webviewadapter
 import android.net.Uri
 import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import com.aegis.broker.AndroidBroker
 import com.aegis.broker.AuthorizedAction
@@ -69,6 +70,7 @@ class AegisWebViewClientTest {
     private fun newClient(
         requireConfirmation: Boolean = false,
         onRendererGone: (WebView) -> Unit = {},
+        onPageError: (String, Boolean, String) -> Unit = { _, _, _ -> },
     ): AegisWebViewClient =
         AegisWebViewClient(
             broker = broker,
@@ -77,6 +79,7 @@ class AegisWebViewClientTest {
             onRendererGone = onRendererGone,
             requireNavigationConfirmation = requireConfirmation,
             onNavigationDenied = { code, _ -> deniedCodes.add(code) },
+            onPageError = onPageError,
         )
 
     private fun stubAllow() {
@@ -239,5 +242,123 @@ class AegisWebViewClientTest {
         whenever(request.url).thenReturn(uri)
         whenever(request.isForMainFrame).thenReturn(isMainFrame)
         return request
+    }
+
+    // ------------------------------------------------------------- AD-050
+    @Test
+    fun autoApproveBranchUsesInjectedDecisionSource() {
+        val confirmationRequest =
+            com.aegis.broker.ApprovalRequest(
+                origin = "https://example.com",
+                method = "GET",
+                path = "/",
+                scope = "navigation",
+                expiresAt = Clock.System.now().plus(kotlin.time.Duration.parse("60s")),
+                nonce = "pending-nonce",
+            )
+        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(Decision.RequireConfirmation(confirmationRequest))
+        whenever(broker.consumeNavigation(allowAction, SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(true)
+        var injectedFor: com.aegis.broker.ApprovalRequest? = null
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                requireNavigationConfirmation = false,
+                autoApproveDecision = { request, _, _ ->
+                    injectedFor = request
+                    Decision.Allow(allowAction)
+                },
+            )
+        assertTrue(client.navigate(view, "https://example.com/"))
+        // 决策来自注入源（收到的是核心登记的 request）且未硬编码触碰 broker 批准
+        assertEquals(confirmationRequest, injectedFor)
+        verify(broker, never()).approveNavigationConfirmation(confirmationRequest, "https://example.com/", "navigation")
+        verify(view).loadUrl("https://example.com/")
+    }
+
+    @Test
+    fun autoApproveBranchDeniedWhenInjectedDecisionDenies() {
+        val confirmationRequest =
+            com.aegis.broker.ApprovalRequest(
+                origin = "https://example.com",
+                method = "GET",
+                path = "/",
+                scope = "navigation",
+                expiresAt = Clock.System.now().plus(kotlin.time.Duration.parse("60s")),
+                nonce = "pending-nonce",
+            )
+        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(Decision.RequireConfirmation(confirmationRequest))
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                requireNavigationConfirmation = false,
+                autoApproveDecision = { _, _, _ -> Decision.Deny(DenyReason("url_policy", "detail")) },
+            )
+        assertFalse(client.navigate(view, "https://example.com/"))
+        verify(view, never()).loadUrl(anyString())
+    }
+
+    // ------------------------------------------------------------- AD-053
+    @Test
+    fun onPageStartedAdvancesGenerationAndObservesUrl() {
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(true)
+        var observed: String? = null
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                onPageUrlObserved = { observed = it },
+            )
+        client.onPageStarted(view, "https://example.com/", null)
+        // 代际单步推进同步 broker（旧代授权在后续消费时被代际门禁拒绝）
+        verify(broker).updateDocumentGeneration(SESSION, TAB, 1L)
+        assertEquals("https://example.com/", observed)
+        verify(view, never()).stopLoading()
+    }
+
+    @Test
+    fun onPageStartedStopsLoadingWhenSessionIsStale() {
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(false)
+        val client = newClient()
+        client.onPageStarted(view, "https://example.com/", null)
+        // 未注册/陈旧会话加载页面 → 立即停载（fail-closed）
+        verify(view).stopLoading()
+    }
+
+    // ------------------------------------------------------------- AD-054
+    @Test
+    fun mainFrameHttpErrorIsReportedButSubFrameIsSilent() {
+        val errors = mutableListOf<String>()
+        val client = newClient(onPageError = { description, _, url -> errors.add("$description|$url") })
+        val response = mock(WebResourceResponse::class.java)
+        whenever(response.statusCode).thenReturn(500)
+
+        // 子框架 5xx：不上报（不遮蔽整页内容）
+        client.onReceivedHttpError(view, fakeRequest("https://ads.example/frame", isMainFrame = false), response)
+        assertTrue(errors.isEmpty())
+
+        // 主框架 5xx：上报错误面板
+        client.onReceivedHttpError(view, fakeRequest("https://example.com/x", isMainFrame = true), response)
+        assertEquals(listOf("服务器返回错误（HTTP 500）|https://example.com/x"), errors)
+    }
+
+    @Test
+    fun httpErrorBelowThresholdIsNotReported() {
+        val errors = mutableListOf<String>()
+        val client = newClient(onPageError = { description, _, _ -> errors.add(description) })
+        val response = mock(WebResourceResponse::class.java)
+        whenever(response.statusCode).thenReturn(200)
+        client.onReceivedHttpError(view, fakeRequest("https://example.com/x", isMainFrame = true), response)
+        assertTrue(errors.isEmpty())
     }
 }

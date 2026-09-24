@@ -2,11 +2,14 @@ package com.aegis.browser
 
 import android.webkit.WebView
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 
 /**
  * 浏览器状态 ViewModel（INV-04：BrowserSessionState 是 UI 唯一事实来源）。
@@ -25,6 +28,16 @@ class BrowserViewModel(
 
         /** 「打开」按钮防抖间隔（毫秒）——P2 修复（全量复审 2026-09-01）。 */
         const val NAVIGATE_DEBOUNCE_MS = 500L
+
+        /**
+         * AD-063（2026-09-24 审计）：首页的地址栏展示形态。首页是本地资产
+         * `file:///android_asset/start.html`——原样显示 file:// 原始 URL
+         * （用户可编辑提交 → 必被策略拒绝，误导）且泄露内部路径结构。
+         */
+        const val HOME_DISPLAY_URL = "aegis://home"
+
+        /** AD-033：日志用标题截断上限（防日志洪泛）。 */
+        private const val TITLE_LOG_MAX_LENGTH = 120
 
         /**
          * 架构解耦（第 5 项）：broker 由组合根注入 ViewModel（再透传 SecureWebViewFactory）
@@ -156,9 +169,21 @@ class BrowserViewModel(
         _tabs.value = tabManager.list()
         _activeIndex.value = tabManager.activeIndex
         if (!addressDraftActive) {
-            _address.value = tabManager.current()?.url?.takeIf { it.isNotBlank() } ?: HOME_URL
+            _address.value =
+                tabManager
+                    .current()
+                    ?.url
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let(::displayAddress)
+                    ?: HOME_URL
         }
     }
+
+    /**
+     * AD-063：地址栏展示映射——首页 file:// 资产路径显示为 [HOME_DISPLAY_URL]
+     * 占位（可编辑性不受影响：用户改动即走 updateAddress 草稿路径）。
+     */
+    private fun displayAddress(url: String): String = if (url.startsWith("file://")) HOME_DISPLAY_URL else url
 
     /** 新建标签页。 */
     fun newTab(context: android.content.Context) {
@@ -193,7 +218,10 @@ class BrowserViewModel(
                 SecureWebViewFactory.navigatorFor(tab.webView)?.rejectPendingNavigation()
                 _pendingNavigationConfirmation.value = null
             }
-            SecureWebViewFactory.navigatorFor(tab.webView)?.close()
+            // AD-062（2026-09-24 审计）：删除此处显式 navigator.close()——
+            // tabManager.closeTab → tearDown → release → navigator.close()
+            // 已是单源销毁路径，此前 destroySession 被调用两次（幂等但语义
+            // 漂移：显式 close 之后 tearDown 的 release 已拿不到导航器）。
         }
         tabManager.closeTab(index)
         refresh()
@@ -207,8 +235,18 @@ class BrowserViewModel(
 
     /** 导航到地址栏 URL。 */
     fun navigateToAddress() {
+        navigateWithDebounce(bypassDebounce = false)
+    }
+
+    /**
+     * 导航共享实现。AD-048（2026-09-24 审计）：防抖仅保护地址栏「打开」按钮
+     * 连点；外链 intent（其他 App「用 Aegis 打开」）是用户明确的单次意图，
+     * 被防抖静默吞掉属缺陷——经 [bypassDebounce] 绕过，安全链路（broker
+     * 决策）不绕过。
+     */
+    private fun navigateWithDebounce(bypassDebounce: Boolean) {
         val wv = if (::tabManager.isInitialized) tabManager.current()?.webView else null
-        if (wv == null || !navigateDebounceOk()) return
+        if (wv == null || (!bypassDebounce && !navigateDebounceOk())) return
         val target = _address.value
         // 提交即清除草稿：后续 onPageStarted→onPageUrlObserved 正常同步地址栏
         addressDraftActive = false
@@ -221,13 +259,15 @@ class BrowserViewModel(
      * P1-4 修复（全面审计批次4）：外链 intent 消费——Manifest 声明了
      * http/https VIEW intent-filter，但此前无 intent?.data 读取、无
      * onNewIntent：其他 App「用 Aegis 打开」只落到首页，URL 静默丢失。
-     * 经 [navigateToAddress] 同一安全链路（归一 + OriginPolicy + broker），
+     * 经地址栏同一安全链路（归一 + OriginPolicy + broker），
      * 非法 scheme 走既有拒绝反馈（fail-closed），不新增特权入口。
+     *
+     * AD-048：外链绕过防抖——防抖防的是按钮连点，不是用户单次明确意图。
      */
     fun openExternalUrl(url: String?) {
         if (url.isNullOrBlank()) return
         _address.value = url
-        navigateToAddress()
+        navigateWithDebounce(bypassDebounce = true)
     }
 
     /**
@@ -315,13 +355,16 @@ class BrowserViewModel(
         // WebView——appContext（无主题）创建的 WebView 一弹原生对话框
         // （<select>/日期选择等）即崩（token null）。
         val context = resolveRebuildContext() ?: return
-        android.os.Handler(android.os.Looper.getMainLooper()).post {
-            if (!::tabManager.isInitialized) return@post
+        // AD-059（2026-09-24 审计）：裸 Handler → viewModelScope（生命周期感知
+        // ——ViewModel 清除后重建任务自动取消，不再有游离主线程回调）。
+        viewModelScope.launch(Dispatchers.Main) {
+            if (!::tabManager.isInitialized) return@launch
             val index = tabManager.list().indexOfFirst { it.webView === deadWebView }
-            if (index < 0) return@post
+            if (index < 0) return@launch
             val crashedUrl = tabManager.list()[index].url
-            SecureWebViewFactory.release(deadWebView)
-            deadWebView.destroy()
+            // AD-061（2026-09-24 审计）：手写 release+destroy 绕过统一销毁序列
+            // （缺 stopLoading/about:blank 置空步骤）——收敛到 tearDown 单源。
+            SecureWebViewFactory.tearDown(deadWebView)
             val fresh = createSecureWebView(context)
             tabManager.replaceWebView(index, fresh)
             val navigator = SecureWebViewFactory.navigatorFor(fresh)
@@ -346,6 +389,15 @@ class BrowserViewModel(
         android.util.Log.w("Aegis", "P0-6: 崩溃重建拿不到宿主 Activity，回退 appContext（原生对话框可能不可用）")
         return appContext
     }
+
+    /**
+     * AD-033：日志用标题净化——剥掉换行/回退（防 logcat 多行伪造）、压缩
+     * 空白、截断到 120 字符（防日志洪泛）。Tab.title 仍存原文（UI 显示语义）。
+     */
+    private fun sanitizeTitleForLog(title: String): String =
+        title
+            .replace(Regex("[\\r\\n\\t]+"), " ")
+            .take(TITLE_LOG_MAX_LENGTH)
 
     private fun createSecureWebView(context: android.content.Context): WebView =
         SecureWebViewFactory.create(
@@ -377,9 +429,14 @@ class BrowserViewModel(
                     _pageError.value = null
                 }
                 if (url.isNotBlank()) {
-                    tabManager.list().firstOrNull { it.webView === webView }?.url = url
+                    // AD-036（2026-09-24 审计）：原地改 var url 不触发 StateFlow
+                    // （self-equals）——收敛到 TabManager.updateUrl copy 单写点
+                    // （与 updateTitle 同模式）。
+                    tabManager.list().firstOrNull { it.webView === webView }?.let {
+                        tabManager.updateUrl(it.id, url)
+                    }
                     if (!addressDraftActive && tabManager.current()?.webView === webView) {
-                        _address.value = url
+                        _address.value = displayAddress(url)
                     }
                 }
             },
@@ -392,7 +449,9 @@ class BrowserViewModel(
                 // （copy 替换实例）单写点。
                 if (title.isNotBlank()) {
                     val target = tabManager.list().firstOrNull { it.webView === webView }
-                    android.util.Log.i("Aegis", "R12 titleHit tab=${target?.id} title=$title")
+                    // AD-033（2026-09-24 审计）：页面标题是远端可控输入——
+                    // 换行可伪造多行日志（logcat 注入），截断防日志洪泛。
+                    android.util.Log.i("Aegis", "R12 titleHit tab=${target?.id} title=${sanitizeTitleForLog(title)}")
                     target?.let { tabManager.updateTitle(it.id, title) }
                     refresh()
                 }
