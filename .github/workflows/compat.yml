@@ -23,6 +23,8 @@ jobs:
     name: WebView2 兼容性回归（自检 + 探测报告）
     runs-on: windows-latest      # GitHub 官方镜像自带 WebView2 Runtime
     timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"            # Windows runner 控制台默认 cp1252，probe 中文输出会 UnicodeEncodeError
     defaults:
       run:
         working-directory: legacy/windows-pywebview
