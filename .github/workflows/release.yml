@@ -130,62 +130,24 @@ jobs:
             --predicate-type https://cyclonedx.org/bom
 
       # SHA-256 对账（字节一致不变量）
+      # PY-025 整改（2026-09-24 审计）：内联 50 行复刻校验脚本（规则必漂移）——
+      # 直接调用 release/verify_checksum_json.py（含未列明/越界/缺失/空清单
+      # fail-closed，语义为原内联块超集）；txt 清单（core 平台）走 sha256sum -c。
       - name: Checksum reconciliation (byte-identical invariant)
         run: |
-          # 审计修复：fail-closed——校验文件缺失/空清单/未列明文件均为门禁失败
-          python - <<'PY'
-          import json, hashlib, pathlib
-          failed = False
-          for platform in ["windows", "android", "core"]:
-              root = pathlib.Path(f"dist/{platform}")
-              sha_file = root / "SHA256SUMS.json"
-              if not sha_file.exists():
-                  # Core 平台允许 SHA256SUMS.txt（逐行 "<hash>  <name>"）——
-                  # 但必须同样真实对账，不再"存在即通过"
-                  sha_txt = root / "SHA256SUMS.txt"
-                  if not sha_txt.exists():
-                      print(f"❌ {platform}: 无任何校验文件（fail-closed）"); failed = True; continue
-                  entries = {}
-                  for line in sha_txt.read_text().splitlines():
-                      parts = line.split(None, 1)
-                      if len(parts) == 2:
-                          entries[parts[1].lstrip("*")] = parts[0].upper()
-                  if not entries:
-                      print(f"❌ {platform}: SHA256SUMS.txt 为空清单"); failed = True; continue
-                  for name, expected in entries.items():
-                      f = root / name
-                      if not f.exists():
-                          print(f"❌ {platform}: 清单文件缺失 {name}"); failed = True; continue
-                      actual = hashlib.sha256(f.read_bytes()).hexdigest().upper()
-                      if actual != expected:
-                          print(f"❌ {platform}: 校验失败 {name}"); failed = True
-                  print(f"✅ {platform}: SHA256SUMS.txt 对账一致（{len(entries)} 项）")
-                  continue
-              sums = json.loads(sha_file.read_text())
-              if not isinstance(sums, list) or not sums:
-                  print(f"❌ {platform}: SHA256SUMS.json 为空清单（fail-closed）"); failed = True; continue
-              listed = set()
-              for entry in sums:
-                  rel = entry["Path"].replace("\\", "/")
-                  p_ = root / pathlib.Path(rel)
-                  h = hashlib.sha256(p_.read_bytes()).hexdigest().upper()
-                  assert h == entry["Hash"], f"校验失败: {p_}"
-                  listed.add(rel)
-              # 反向覆盖：目录内除清单/元数据外不得有未列明文件
-              for f in root.rglob("*"):
-                  if not f.is_file():
-                      continue
-                  rel = f.relative_to(root).as_posix()
-                  if rel in listed or rel == "SHA256SUMS.json" or rel.endswith("/SHA256SUMS.json"):
-                      continue
-                  if rel == "build-metadata.json":
-                      continue
-                  print(f"❌ {platform}: 未列明文件 {rel}"); failed = True
-              print(f"✅ {platform}: SHA-256 对账一致（{len(listed)} 项，全覆盖）")
-          if failed:
-              raise SystemExit(1)
-          print("✅ 全平台 SHA-256 对账一致（字节一致，fail-closed）")
-          PY
+          set -e
+          for platform in windows android core; do
+            root="dist/$platform"
+            test -d "$root" || { echo "❌ $platform: dist 目录缺失（fail-closed）"; exit 1; }
+            if [ -f "$root/SHA256SUMS.json" ]; then
+              python release/verify_checksum_json.py --root "$root" --manifest "$root/SHA256SUMS.json"
+            elif [ -f "$root/SHA256SUMS.txt" ]; then
+              (cd "$root" && sha256sum -c --strict SHA256SUMS.txt)
+            else
+              echo "❌ $platform: 无任何校验文件（fail-closed）"; exit 1
+            fi
+          done
+          echo "✅ 全平台 SHA-256 对账一致（字节一致，fail-closed）"
 
       - name: Fail-closed gate
         run: echo "✅ 三平台验证通过——允许发布（任一失败此处不会到达）"

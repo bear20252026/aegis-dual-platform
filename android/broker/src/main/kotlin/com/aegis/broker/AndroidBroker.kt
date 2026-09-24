@@ -9,6 +9,9 @@ package com.aegis.broker
 class AndroidBroker(
     private val policyVersion: String = "1.0",
     private val nativePolicyCoreGate: NativePolicyCoreGate = DefaultNativePolicyCoreGate,
+    // AD-020（2026-09-24 审计）：时钟可注入——SESSION_TTL 过期/滑动语义可 JVM
+    // 单测（此前 Clock.System 硬编码，过期行为不可测）。
+    private val clock: kotlinx.datetime.Clock = kotlinx.datetime.Clock.System,
 ) {
     private val consumedNonces =
         java.util.LinkedHashSet<String>()
@@ -169,7 +172,7 @@ class AndroidBroker(
                 canonicalParameters = canonicalPathAndQuery(uri),
                 scope = scope,
                 expiresAt =
-                    kotlinx.datetime.Clock.System
+                    clock
                         .now()
                         .plus(kotlin.time.Duration.parse("${SESSION_TTL_SECONDS}s")),
                 nonce = "$sessionId:${java.util.UUID.randomUUID().toString().replace("-", "")}",
@@ -268,8 +271,7 @@ class AndroidBroker(
                 presentAction.documentGeneration == currentGeneration &&
                 presentAction.documentGeneration == session.documentGeneration &&
                 presentAction.expiresAt >
-                kotlinx.datetime.Clock.System
-                    .now()
+                clock.now()
         }
     }
 

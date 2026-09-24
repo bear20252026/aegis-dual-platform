@@ -52,13 +52,10 @@ class AegisWebViewClient(
         val requestedUrl = request.url.toString()
         // http 请求必须由客户端经 authorizeNavigation 升级加载（loadWhenAllowed=true，
         // 阻断 WebView 原始 http load）；升级本身在 authorizeNavigation 内单次执行。
-        val isHttp =
-            android
-                .net.Uri
-                .parse(requestedUrl)
-                .scheme
-                .orEmpty()
-                .lowercase() == "http"
+        // AD-010/011（2026-09-24 审计）：scheme 判定纯字符串化（原 android.net.Uri
+        // 依赖阻断 JVM 单测；语义与 Uri.parse 的 scheme 一致——非法 scheme 字符集
+        // 返回空——只影响 http/https 判定，行为不变）。
+        val isHttp = schemePrefixOf(requestedUrl) == "http"
         // P1-2 修复（全面审计批次4）：仅**主框架** http 才走「阻断+升级+
         // loadUrl 升级版」。子框架（iframe）http 此前同样 loadWhenAllowed=true
         // ——authorizeNavigation 决策通过后 view.loadUrl 把 iframe 的 URL
@@ -225,10 +222,20 @@ class AegisWebViewClient(
         return false
     }
 
+    /**
+     * scheme 前缀识别（纯字符串——AD-010/011 JVM 可测化）。
+     * RFC 3986 scheme 字符集（字母数字 + + - .）之外的输入返回空串——
+     * 与 Uri.parse 对无 scheme/相对 URL 返回 null scheme 的判定语义一致。
+     */
+    internal fun schemePrefixOf(url: String): String =
+        url
+            .substringBefore(':', missingDelimiterValue = "")
+            .lowercase()
+            .takeIf { it.isNotEmpty() && it.all { c -> c.isLetterOrDigit() || c == '+' || c == '-' || c == '.' } }
+            .orEmpty()
+
     private fun upgradeToHttpsIfNeeded(url: String): String {
-        val uri = android.net.Uri.parse(url)
-        val scheme = uri.scheme.orEmpty().lowercase()
-        if (scheme == "http") {
+        if (schemePrefixOf(url) == "http") {
             // T3 修复（全面审计批次2 2026-09-04）：原 replaceFirst("http://")
             // 大小写敏感——`HTTP://EXAMPLE.com` 原样放行明文（scheme 判定处
             // 已 lowercase 但升级未同步）。改忽略大小写替换前缀。

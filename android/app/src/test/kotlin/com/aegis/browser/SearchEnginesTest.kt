@@ -2,6 +2,7 @@ package com.aegis.browser
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -121,5 +122,45 @@ class SearchEnginesTest {
     @Test
     fun `invalid domain rejected by origin policy`() {
         assertNull(SearchEngines.canonicalizeExternal("https://"))
+    }
+
+    // ------- AD-031（2026-09-24 审计）：normalizeInput DOMAIN 全链补强 -------
+    @Test
+    fun `normalizeInput domain full chain lowercases host`() {
+        assertEquals("https://example.com", SearchEngines.normalizeInput("EXAMPLE.COM", "baidu"))
+        assertEquals("https://example.com/path", SearchEngines.normalizeInput("ExAmPlE.CoM/path", "baidu"))
+    }
+
+    @Test
+    fun `normalizeInput domain full chain preserves path query fragment`() {
+        assertEquals(
+            "https://example.com/a/b?c=1#f",
+            SearchEngines.normalizeInput("example.com/a/b?c=1#f", "baidu"),
+        )
+    }
+
+    @Test
+    fun `normalizeInput domain full chain preserves explicit port`() {
+        assertEquals("https://example.com:8443/x", SearchEngines.normalizeInput("example.com:8443/x", "baidu"))
+    }
+
+    @Test
+    fun `normalizeInput domain with space becomes search`() {
+        // 含空格的「域名形态」输入必须降级为搜索词（不得当域名拼接）
+        val out = SearchEngines.normalizeInput("example com", "baidu")
+        assertTrue(out!!.startsWith("https://www.baidu.com/s?wd="))
+    }
+
+    @Test
+    fun `normalizeInput about blank passes through unchanged`() {
+        assertEquals("about:blank", SearchEngines.normalizeInput("ABOUT:BLANK", "baidu"))
+    }
+
+    @Test
+    fun `normalizeInput rejects empty and forbidden schemes`() {
+        assertNull(SearchEngines.normalizeInput("", "baidu"))
+        assertNull(SearchEngines.normalizeInput("   ", "baidu"))
+        assertNull(SearchEngines.normalizeInput("javascript:alert(1)", "baidu"))
+        assertNull(SearchEngines.normalizeInput("file:///etc/passwd", "baidu"))
     }
 }

@@ -73,28 +73,37 @@ internal object WebViewDownloadHandler {
      * 控制字符——原实现直接拼 setDestinationInExternalPublicDir 存在路径
      * 穿越/文件覆盖风险）；净化失败回退默认名。扩展名缺失时从 mimetype 或
      * URL 推断，推断不出不加。
+     *
+     * AD-027（2026-09-24 审计）：URL 路径段提取纯字符串化（fragment/query
+     * 剥离后取末段——与 Uri.getLastPathSegment 对 http(s) 直链语义一致），
+     * JVM 单测不再依赖 android.net.Uri。
      */
-    private fun resolveDownloadFileName(
+    internal fun resolveDownloadFileName(
         url: String,
         mimeType: String,
         contentDisposition: String,
     ): String {
-        val uri = android.net.Uri.parse(url)
+        val urlPathSegment = url.substringBefore('#').substringBefore('?').substringAfterLast('/')
         val fromDisposition =
             contentDisposition
                 .substringAfter("filename=", "")
                 .trim(' ', '"', ';')
         val base =
             sanitizeFileName(fromDisposition)
-                ?: sanitizeFileName(uri.lastPathSegment.orEmpty())
+                ?: sanitizeFileName(urlPathSegment)
                 ?: DEFAULT_DOWNLOAD_NAME
-        val extension =
+        // AD-027 配套缺陷修复（2026-09-24 写测试暴露）：原实现对已带扩展名的
+        // base 仍追加推断扩展名（report.pdf → report.pdf.pdf）。现仅在 base
+        // 无扩展名时才从 mimetype/URL 推断追加；组合名兜底再净化一次。
+        val hasExtension = base.substringAfterLast('.', missingDelimiterValue = "").isNotBlank()
+        return if (hasExtension) {
             base
-                .substringAfterLast('.', missingDelimiterValue = "")
-                .takeIf { it.isNotBlank() }
-                ?: inferExtension(uri, mimeType)
-        // 组合名兜底再净化一次（推断出的扩展名也可能携带分隔符）
-        return extension?.let { "$base.$it" }?.let { sanitizeFileName(it) } ?: base
+        } else {
+            inferExtension(urlPathSegment, mimeType)
+                ?.let { "$base.$it" }
+                ?.let { sanitizeFileName(it) }
+                ?: base
+        }
     }
 
     /**
@@ -102,7 +111,7 @@ internal object WebViewDownloadHandler {
      * 与 `\`，只取最后一段）、拒绝 `..` 段、去除控制字符与首尾空白及尾部
      * 空点（`x.exe.` → `x.exe`）；净化失败（空结果）返回 null。
      */
-    private fun sanitizeFileName(raw: String): String? =
+    internal fun sanitizeFileName(raw: String): String? =
         raw
             .substringAfterLast('/')
             .substringAfterLast('\\')
@@ -113,10 +122,10 @@ internal object WebViewDownloadHandler {
 
     /** P2-5 修复：扩展名推断——mimetype 子类型优先，URL 路径段次之；推断不出返回 null（不加扩展名）。 */
     private fun inferExtension(
-        uri: android.net.Uri,
+        urlPathSegment: String,
         mimeType: String,
     ): String? {
         sanitizeFileName(mimeType.substringAfter('/', ""))?.let { return it }
-        return sanitizeFileName(uri.lastPathSegment.orEmpty().substringAfterLast('.', ""))
+        return sanitizeFileName(urlPathSegment.substringAfterLast('.', ""))
     }
 }

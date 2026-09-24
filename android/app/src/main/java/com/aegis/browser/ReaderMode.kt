@@ -74,8 +74,9 @@ object ReaderMode {
         }
     }
 
-    /** 两段解析：先还原 JS 返回值（字符串），再解析内层 JSON 对象。 */
-    private fun parse(raw: String?): ReaderContent? {
+    /** 两段解析：先还原 JS 返回值（字符串），再解析内层 JSON 对象。
+     * AD-028（2026-09-24 审计）：internal 化供 JVM 单测（解析防御边界是安全面）。 */
+    internal fun parse(raw: String?): ReaderContent? {
         if (raw.isNullOrBlank()) return null
         return runCatching {
             val value = JSONTokener(raw).nextValue()

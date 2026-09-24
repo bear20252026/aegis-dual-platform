@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c
         with:
           python-version: '3.12'
+      - name: Install contracts toolchain (PY-013/015 配套——锁版)
+        run: python -m pip install "jsonschema==4.23.0" "pyyaml==6.0.2" -q
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify cross-end data lists (wallpapers/engines——A-7)
@@ -73,6 +75,10 @@ jobs:
                   validate_vector(vector, path)
           print('✅ contracts JSON 与向量期望有效')
           PYEOF
+      - name: Validate vectors against JSON Schema (PY-013——schema 不再纯装饰)
+        run: python contracts/codegen/validate_vector_schemas.py
+      - name: Analyze action catalog (PY-015——静态分析器接入门禁)
+        run: python contracts/codegen/analyze_action_catalog.py
       - name: Regenerate C# and Kotlin contracts
         run: |
           python contracts/codegen/generate_csharp.py
@@ -80,6 +86,10 @@ jobs:
           python contracts/codegen/verify_contract_compatibility.py
       - name: Verify bridge guard JS single source (Rust include_str + Kotlin parity)
         run: python contracts/codegen/verify_bridge_guard.py
+      - name: Regenerate jsapi schema and fail on drift (PY-014——生成器接入门禁)
+        run: |
+          python scripts/gen_jsapi_schema.py
+          git diff --exit-code -- shared/jsapi-schema.json
       - name: Fail if generated bindings are stale
         run: |
           git diff --exit-code -- \

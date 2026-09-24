@@ -164,6 +164,10 @@ dependencies {
     // JVM 单元测试（搜索归一 classifyInput/canonicalizeExternal——纯 Kotlin +
     // OriginPolicy(java.net.URI) 均不依赖 Android 框架类）
     testImplementation(libs.junit)
+    // AD-022 配套：navigatorFor 未注册路径需 WebView 键实例——mockito 5 inline mock
+    testImplementation(libs.mockito.core)
+    // AD-028 配套：ReaderModeTest 需真 org.json（returnDefaultValues 下链式 put 返回 null 即 NPE）
+    testImplementation(libs.org.json)
 }
 
 // detekt/Kotlin 编译目标显式 21（与 CI JDK 21 一致——detekt jvm-target 兼容——

@@ -39,16 +39,18 @@ def verify_bundle(bundle_dir: Path) -> None:
         sys.exit("缺 SHA256SUMS.json——摘要不完整（拒绝发布）")
     checksum_count = verify_manifest(dist, sums_path)
 
-    # 签名文件（.sigstore）与 SBOM（.cdx.json/spdx.json）齐全——缺一拒绝
-    sig = [p for p in files if p.suffix == ".sigstore"]
+    # 签名证据模型（PY-009 整改 2026-09-24）：本仓库发布链的签名 =
+    # GitHub artifact attestations（Sigstore 背书）——由 release.yml
+    # verify-gate 的 `gh attestation verify`（SLSA provenance + SBOM 双
+    # predicate）在 CI 内逐工件校验，不在 bundle 内产出 .sigstore 旁路文件
+    # （原断言要求 .sigstore——链路不产出、工具零调用，属死门禁）。
+    # bundle 级保留 SBOM 齐全断言（供应链透明）。
     sbom = [p for p in files if p.name.endswith((".cdx.json", ".spdx.json"))]
-    if not sig:
-        sys.exit("缺签名文件（.sigstore）——制品未签名（拒绝发布）")
     if not sbom:
         sys.exit("缺 SBOM——供应链不透明（拒绝发布）")
 
     print(f"✅ verify_release 通过：{metadata['platform']} v{metadata['version_name']} / {checksum_count} 个受摘要覆盖制品 / "
-          f"{len(sig)} 签名 / {len(sbom)} SBOM——SHA-256 对账一致")
+          f"签名经 gh attestation（release.yml verify-gate 校验）/ {len(sbom)} SBOM——SHA-256 对账一致")
 
 
 def main() -> int:
