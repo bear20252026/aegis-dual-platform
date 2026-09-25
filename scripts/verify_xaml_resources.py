@@ -49,7 +49,12 @@ def main() -> int:
     if missing:
         print(f"[FAIL] 发现 {len(missing)} 个资源引用指向未定义的 XAML 资源键：")
         for path, key, line, kind in missing:
-            print(f"   {path.relative_to(ROOT)}:{line}  {kind}(\"{key}\") 无匹配 x:Key")
+            # PY-117/118 配套：SRC 可被重定向（单测）——仓库外路径原样输出
+            try:
+                loc = path.relative_to(ROOT)
+            except ValueError:
+                loc = path
+            print(f"   {loc}:{line}  {kind}(\"{key}\") 无匹配 x:Key")
         print("     -- 这是启动/运行期 ResourceReferenceKeyNotFoundException 的常见根源。")
         return 1
     print(f"[OK] XAML 资源连通性通过：{len(keys)} 个 x:Key 均被合理引用/定义。")
