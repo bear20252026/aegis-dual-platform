@@ -83,7 +83,10 @@ impl SessionState {
         let metadata = TabMetadata {
             title: title.to_string(),
             url: url.to_string(),
-            is_incognito: meta.get("isIncognito")?.as_bool().unwrap_or(false),
+            // RS-110（审计 2026-09-25）：isIncognito 必填且必须为 bool——
+            // 此前缺失/类型损坏静默降级 false（普通标签），无痕标签恢复成
+            // 普通标签 = 隐私语义静默丢失。fail-closed：缺即拒恢复。
+            is_incognito: meta.get("isIncognito")?.as_bool()?,
             last_active_time: meta.get("lastActiveTime")?.as_u64().unwrap_or(0),
             can_go_back: meta.get("canGoBack")?.as_bool().unwrap_or(false),
             can_go_forward: meta.get("canGoForward")?.as_bool().unwrap_or(false),
@@ -122,8 +125,16 @@ impl SessionState {
 }
 
 /// hex 编码（零依赖——简单可靠——无 padding 问题——每个字节→2 字符）。
+///
+/// RS-111（审计 2026-09-25）：单缓冲 write! 写入——此前每字节 format!
+/// 各分配一次（512KB 状态块 = 26 万次分配）。
 fn hex_encode(data: &[u8]) -> String {
-    data.iter().map(|b| format!("{b:02x}")).collect()
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(data.len() * 2);
+    for b in data {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
 }
 
 /// hex 解码（零依赖——每 2 字符→1 字节）。
@@ -293,5 +304,83 @@ mod tests {
         assert!(SessionState::from_json(&state_json("t", "t", &long_url, "00")).is_none());
         let long_tab = "x".repeat(300); // > 256 上限
         assert!(SessionState::from_json(&state_json(&long_tab, "t", "u", "00")).is_none());
+    }
+
+    // —— RS-109/110 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn rejects_odd_length_and_non_hex_bytes() {
+        // RS-109：hex 解码畸形输入 fail-closed——奇数长度/非 hex 字符
+        assert!(SessionState::from_json(&state_json("t", "t", "u", "0")).is_none());
+        assert!(SessionState::from_json(&state_json("t", "t", "u", "0g")).is_none());
+        assert!(SessionState::from_json(&state_json("t", "t", "u", "zz")).is_none());
+        // 合法 hex 不受影响
+        assert!(SessionState::from_json(&state_json("t", "t", "u", "0a1f")).is_some());
+    }
+
+    #[test]
+    fn rejects_missing_required_fields() {
+        // RS-109：缺必填字段逐项拒绝——此前 unwrap_or 默认值可能掩盖损坏
+        let base = |body: &str| {
+            format!(
+                r#"{{"schemaVersion":{},"tabId":"t","sessionStateBytes":"00","metadata":{{{body}}},"timestamp":0}}"#,
+                CURRENT_SCHEMA_VERSION
+            )
+        };
+        // metadata 内缺 title / url
+        assert!(
+            SessionState::from_json(&base(r#""url":"https://e.com","isIncognito":false"#))
+                .is_none()
+        );
+        assert!(SessionState::from_json(&base(r#""title":"t","isIncognito":false"#)).is_none());
+        // 顶层缺 sessionStateBytes / tabId
+        let no_bytes = format!(
+            r#"{{"schemaVersion":{},"tabId":"t","metadata":{{"title":"t","url":"u","isIncognito":false}},"timestamp":0}}"#,
+            CURRENT_SCHEMA_VERSION
+        );
+        assert!(SessionState::from_json(&no_bytes).is_none());
+        let no_tab = format!(
+            r#"{{"schemaVersion":{},"sessionStateBytes":"00","metadata":{{"title":"t","url":"u","isIncognito":false}},"timestamp":0}}"#,
+            CURRENT_SCHEMA_VERSION
+        );
+        assert!(SessionState::from_json(&no_tab).is_none());
+    }
+
+    #[test]
+    fn incognito_flag_never_silently_degrades() {
+        // RS-110：isIncognito 缺失/类型损坏必须拒绝恢复（此前 unwrap_or(false)
+        // 把无痕标签静默降级为普通标签——隐私语义丢失）
+        let without_flag = format!(
+            r#"{{"schemaVersion":{},"tabId":"t","sessionStateBytes":"00","metadata":{{"title":"t","url":"u"}},"timestamp":0}}"#,
+            CURRENT_SCHEMA_VERSION
+        );
+        assert!(
+            SessionState::from_json(&without_flag).is_none(),
+            "缺 isIncognito 必须拒绝"
+        );
+        let wrong_type = format!(
+            r#"{{"schemaVersion":{},"tabId":"t","sessionStateBytes":"00","metadata":{{"title":"t","url":"u","isIncognito":"yes"}},"timestamp":0}}"#,
+            CURRENT_SCHEMA_VERSION
+        );
+        assert!(
+            SessionState::from_json(&wrong_type).is_none(),
+            "isIncognito 非 bool 必须拒绝"
+        );
+        // 显式 true 正常恢复
+        let explicit = format!(
+            r#"{{"schemaVersion":{},"tabId":"t","sessionStateBytes":"00","metadata":{{"title":"t","url":"u","isIncognito":true,"lastActiveTime":0,"canGoBack":false,"canGoForward":false}},"timestamp":0}}"#,
+            CURRENT_SCHEMA_VERSION
+        );
+        let state = SessionState::from_json(&explicit).expect("显式 true 必须恢复");
+        assert!(state.metadata.is_incognito);
+    }
+
+    #[test]
+    fn hex_encode_large_block_single_pass() {
+        // RS-111：write! 单缓冲语义回归——大块数据编码逐字节一致
+        let data: Vec<u8> = (0..=255u8).cycle().take(4096).collect();
+        let encoded = hex_encode(&data);
+        assert_eq!(encoded.len(), 8192);
+        assert_eq!(hex_decode(&encoded).unwrap(), data);
     }
 }

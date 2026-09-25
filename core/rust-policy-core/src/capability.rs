@@ -54,10 +54,33 @@ pub struct Capability {
     pub scope: CapabilityScope,
     pub allowed_origins: Vec<String>,
     pub max_uses: Option<u32>,
-    pub uses_count: u32,
+    /// RS-105（审计 2026-09-25）：私有——外部篡改 pub 计数即可无限续用
+    /// （耗尽语义失效）；推进唯一入口为 [`CapabilityRegistry::consume`]。
+    uses_count: u32,
 }
 
 impl Capability {
+    /// 构造 capability（uses_count 归零——模块外唯一构造入口）。
+    pub fn new(
+        name: impl Into<String>,
+        scope: CapabilityScope,
+        allowed_origins: Vec<String>,
+        max_uses: Option<u32>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            scope,
+            allowed_origins,
+            max_uses,
+            uses_count: 0,
+        }
+    }
+
+    /// 已使用次数（只读——推进走 consume）。
+    pub fn uses_count(&self) -> u32 {
+        self.uses_count
+    }
+
     pub fn is_exhausted(&self) -> bool {
         self.max_uses.is_some_and(|max| self.uses_count >= max)
     }
@@ -71,12 +94,17 @@ impl Capability {
                 if o == "*" {
                     return true;
                 }
+                // RS-104（审计 2026-09-25）：白名单条目尾斜杠归一——
+                // "https://trusted.com/" 此前对裸 origin
+                // "https://trusted.com" 静默失效（eq 不等 + starts_with
+                // 要求更长），条目形同虚设
+                let o = o.strip_suffix('/').unwrap_or(o);
                 if origin.eq_ignore_ascii_case(o) {
                     return true;
                 }
                 // 入参可为同源完整 URL：origin 白名单值 + 路径/查询/锚点起始
                 origin.len() > o.len()
-                    && origin.starts_with(o.as_str())
+                    && origin.starts_with(o)
                     && matches!(origin.as_bytes()[o.len()], b'/' | b'?' | b'#')
             })
     }
@@ -102,8 +130,12 @@ impl CapabilityRegistry {
     }
 
     /// 注册 capability。
-    pub fn register(&mut self, cap: Capability) {
-        self.capabilities.insert(cap.name.clone(), cap);
+    ///
+    /// RS-106（审计 2026-09-25）：返回被覆盖的旧 capability（None = 新增
+    /// 注册）——此前静默覆盖，同名重注册无任何审计痕迹；调用方可对
+    /// 非预期覆盖告警。
+    pub fn register(&mut self, cap: Capability) -> Option<Capability> {
+        self.capabilities.insert(cap.name.clone(), cap)
     }
 
     /// 验证 capability（fail-closed——未知拒绝）。
@@ -237,5 +269,122 @@ mod tests {
             registry.validate("restricted", "https://evil.com"),
             CapabilityResult::Denied(_)
         ));
+    }
+
+    // —— RS-103/104/105/106 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn scope_parse_full_vocabulary() {
+        // RS-103：parse 词表全覆盖 + 未知拒绝
+        for word in [
+            "navigation:read",
+            "tabs:read",
+            "history:read",
+            "download",
+            "export",
+            "file:write",
+            "navigate",
+            "update",
+            "permission:grant",
+            "policy:modify",
+            "system:config",
+        ] {
+            assert!(CapabilityScope::parse(word).is_some(), "{word} 应合法");
+        }
+        assert_eq!(
+            CapabilityScope::parse("navigation:read"),
+            Some(CapabilityScope::Read)
+        );
+        assert_eq!(
+            CapabilityScope::parse("download"),
+            Some(CapabilityScope::Write)
+        );
+        assert_eq!(
+            CapabilityScope::parse("navigate"),
+            Some(CapabilityScope::Execute)
+        );
+        assert_eq!(
+            CapabilityScope::parse("policy:modify"),
+            Some(CapabilityScope::Admin)
+        );
+        // 大小写敏感 + 未知拒绝
+        assert_eq!(CapabilityScope::parse("Download"), None);
+        assert_eq!(CapabilityScope::parse(""), None);
+        assert_eq!(CapabilityScope::parse("navigation:write"), None);
+    }
+
+    #[test]
+    fn risk_level_ordering_is_read_write_execute_admin() {
+        // RS-103：风险等级数值排序契约
+        assert_eq!(CapabilityScope::Read.risk_level(), 0);
+        assert_eq!(CapabilityScope::Write.risk_level(), 1);
+        assert_eq!(CapabilityScope::Execute.risk_level(), 2);
+        assert_eq!(CapabilityScope::Admin.risk_level(), 3);
+    }
+
+    #[test]
+    fn exhaustion_boundary_is_at_max() {
+        // RS-103：耗尽边界——uses == max 耗尽，max-1 未耗尽
+        let cap = Capability::new("cap", CapabilityScope::Write, vec!["*".into()], Some(2));
+        assert!(!cap.is_exhausted());
+        let mut registry = CapabilityRegistry::new();
+        registry.register(Capability::new(
+            "c2",
+            CapabilityScope::Write,
+            vec!["*".into()],
+            Some(2),
+        ));
+        assert!(registry.consume("c2"));
+        assert!(matches!(
+            registry.validate("c2", "https://e.com"),
+            CapabilityResult::Allowed(_)
+        ));
+        assert!(registry.consume("c2"));
+        assert!(matches!(
+            registry.validate("c2", "https://e.com"),
+            CapabilityResult::Denied(_)
+        ));
+        assert!(!registry.consume("c2"), "耗尽后 consume 拒绝");
+        // max_uses = None 不耗尽
+        registry.register(Capability::new(
+            "inf",
+            CapabilityScope::Read,
+            vec!["*".into()],
+            None,
+        ));
+        for _ in 0..10 {
+            assert!(registry.consume("inf"));
+        }
+    }
+
+    #[test]
+    fn whitelist_trailing_slash_normalized() {
+        // RS-104：白名单条目尾斜杠归一——"https://trusted.com/" 此前对
+        // 裸 origin 静默失效（条目形同虚设）
+        let cap = Capability {
+            name: "cap".into(),
+            scope: CapabilityScope::Read,
+            allowed_origins: vec!["https://trusted.com/".into()],
+            max_uses: None,
+            uses_count: 0,
+        };
+        assert!(
+            cap.is_origin_allowed("https://trusted.com"),
+            "裸 origin 必须命中带尾斜杠白名单"
+        );
+        assert!(cap.is_origin_allowed("https://trusted.com/path"));
+        assert!(!cap.is_origin_allowed("https://evil.com"));
+    }
+
+    #[test]
+    fn register_returns_overwritten_capability() {
+        // RS-106：重注册返回旧值（审计痕迹）——新增返回 None
+        let mut registry = CapabilityRegistry::new();
+        assert!(registry
+            .register(make_cap("dup", CapabilityScope::Read, None))
+            .is_none());
+        let old = registry.register(make_cap("dup", CapabilityScope::Write, None));
+        assert!(old.is_some(), "覆盖必须返回旧 capability");
+        assert_eq!(old.unwrap().scope, CapabilityScope::Read);
     }
 }

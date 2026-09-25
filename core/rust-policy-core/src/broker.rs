@@ -42,6 +42,12 @@ const MAX_NONCE_LENGTH: usize = 128;
 /// M-16 修复（审计 2026-08-31）：会话池软上限——宿主（含 C ABI 直暴露的
 /// create_session）无法再无限创建会话耗尽内存；达上限先 evict_expired，
 /// 仍满即拒绝新会话（fail-closed）。
+///
+/// RS-108（审计 2026-09-25）：逐出口径为**过期驱动**而非 LRU 触达——
+/// 长 TTL 会话在池满前不会被逐出（ttl 由宿主传入，核心不做时间注入即
+/// 无法定义「最久未用」的可靠度量）。宿主约定：对常驻 persona 会话应
+/// 使用合理 TTL 并在页面关闭时显式 destroy_session；池满 + 全部未过期
+/// 时新会话被拒（fail-closed），不会淘汰任何未过期会话。
 const MAX_SESSIONS: usize = 1024;
 
 /// 单个会话上下文（persona session——隔离绑定）。
@@ -410,13 +416,12 @@ mod tests {
 
     fn make_broker_with_policy_and_capability() -> ContextBroker {
         let mut registry = CapabilityRegistry::new();
-        registry.register(Capability {
-            name: "navigation:read".into(),
-            scope: CapabilityScope::Read,
-            allowed_origins: vec![],
-            max_uses: None,
-            uses_count: 0,
-        });
+        registry.register(Capability::new(
+            "navigation:read",
+            CapabilityScope::Read,
+            vec![],
+            None,
+        ));
         ContextBroker::new("1.0".into(), PolicyEngine::default(), registry)
     }
 
@@ -593,14 +598,13 @@ mod tests {
     #[test]
     fn evaluate_full_chain_allows_and_consumes_nonce_once() {
         let mut registry = CapabilityRegistry::new();
-        registry.register(Capability {
-            name: "navigation:read".into(),
-            scope: CapabilityScope::Read,
+        registry.register(Capability::new(
+            "navigation:read",
+            CapabilityScope::Read,
             // 空白名单 = fail-closed 拒绝——全放行必须显式 "*"（is_origin_allowed）
-            allowed_origins: vec!["*".into()],
-            max_uses: None,
-            uses_count: 0,
-        });
+            vec!["*".into()],
+            None,
+        ));
         let mut broker = ContextBroker::new(
             "1.0".into(),
             PolicyEngine::new(Box::new(AlwaysAllowLocalPolicy), None),
@@ -657,5 +661,85 @@ mod tests {
         assert!(broker
             .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
             .is_some());
+    }
+
+    // —— RS-107 回归（审计 2026-09-25）：过期/逐出/续期语义 ——
+
+    #[test]
+    fn zero_ttl_session_expires_and_evicts() {
+        // RS-107：过期判定 + evict_expired 真实逐出（ttl=0 即创建即过期）
+        let mut broker = make_broker_with_defaults();
+        broker.create_session("ephemeral".into(), "t".into(), 1, Duration::ZERO);
+        broker.create_session("durable".into(), "t".into(), 1, Duration::from_secs(3600));
+        // sleep 2ms 保证 elapsed > 0（纳秒时钟竞态防御）
+        std::thread::sleep(Duration::from_millis(2));
+        broker.evict_expired();
+        assert!(
+            !broker.sessions.contains_key("ephemeral"),
+            "ttl=0 会话必须被逐出"
+        );
+        assert!(broker.sessions.contains_key("durable"), "未过期会话保留");
+    }
+
+    #[test]
+    fn expired_sessions_evicted_before_deny_at_cap() {
+        // RS-107：池满时先清过期——有过期会话在池中则新会话不拒绝（M-16
+        // fail-closed 仅对「全满且全部未过期」生效）
+        let mut broker = ContextBroker::new(
+            "pv".into(),
+            PolicyEngine::default(),
+            CapabilityRegistry::new(),
+        );
+        broker.create_session("dead".into(), "t".into(), 1, Duration::ZERO);
+        // sleep 2ms 保证 dead 会话过期（纳秒时钟竞态防御）
+        std::thread::sleep(Duration::from_millis(2));
+        for i in 1..MAX_SESSIONS {
+            broker.create_session(format!("s{i}"), "t".into(), 1, Duration::from_secs(60));
+        }
+        assert_eq!(broker.active_session_count(), MAX_SESSIONS);
+        // 池满但含过期会话——新会话成功（evict_expired 腾位）
+        assert!(
+            broker
+                .create_session("fresh".into(), "t".into(), 1, Duration::from_secs(60))
+                .is_some(),
+            "池满但有过期会话时必须先逐出再接纳"
+        );
+    }
+
+    #[test]
+    fn same_id_create_is_renewal_not_reset() {
+        // RS-107/RS-033：同 id 重复创建 = 续期语义——nonce 账本记录保留
+        //（重放保护不回退），新会话可继续消费新 nonce
+        let mut broker = make_broker_with_defaults();
+        broker.create_session("s1".into(), "t".into(), 1, Duration::from_secs(60));
+        assert!(broker.consume_nonce("n1", "s1").is_ok());
+        // 续期（同 id 覆盖式重注册——renewSession 契约）
+        broker
+            .create_session("s1".into(), "t".into(), 1, Duration::from_secs(120))
+            .expect("同 id 续期必须成功");
+        // 旧 nonce 记录保留——重放依旧拒绝（重放保护不因续期回退）
+        assert!(
+            broker.consume_nonce("n1", "s1").is_err(),
+            "续期后旧 nonce 重放仍必须拒绝"
+        );
+        // 新 nonce 正常入账
+        assert!(broker.consume_nonce("n2", "s1").is_ok());
+    }
+
+    #[test]
+    fn nonce_length_bounds_enforced() {
+        // RS-107：nonce 长度边界——空与超 128 字节拒绝入账（RS-034 语义）
+        let mut broker = make_broker_with_defaults();
+        assert!(broker.consume_nonce("", "s1").is_err(), "空 nonce 拒绝");
+        let long = "a".repeat(MAX_NONCE_LENGTH + 1);
+        assert!(
+            broker.consume_nonce(&long, "s1").is_err(),
+            "超长 nonce 拒绝"
+        );
+        let max_ok = "a".repeat(MAX_NONCE_LENGTH);
+        assert!(
+            broker.consume_nonce(&max_ok, "s1").is_ok(),
+            "恰 128 字节放行"
+        );
     }
 }
