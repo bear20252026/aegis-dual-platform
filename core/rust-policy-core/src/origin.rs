@@ -74,6 +74,27 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
     {
         return None;
     }
+    // PY-071/072（审计 2026-09-25）：非点分十进制 IPv4 编码拒绝——整数
+    //（2130706433）/0x 十六进制（0x7f000001）/简写（127.1）形态 OS 解析器
+    // 均接受，同一 URL 双重解释是混淆面——对齐 C# UrlSafety/OriginPolicy
+    // 口径（contracts/vectors/url-origin-invalid PY-071/072 向量）。
+    // 全数字段且段数 ≠ 4 一律拒绝（4 段 = 合法点分 IPv4 字面量，保留）；
+    // 0x 十六进制 host 单独拒绝
+    let segments: Vec<&str> = host.split('.').collect();
+    if segments.len() != 4
+        && segments
+            .iter()
+            .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    if host.starts_with("0x")
+        && host[2..]
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return None; // 0x 十六进制 host
+    }
     let host = host.to_string();
     let canonical_authority = match port {
         Some(value)

@@ -2,6 +2,7 @@ namespace Aegis.Windows.Broker;
 
 using System;
 using System.Globalization;
+using System.Linq;
 
 /// <summary>Origin/URL 策略（阶段 C——Broker 导航决策核心——与 contracts/vectors 对齐）。
 /// 外部导航仅 http/https；拒绝 data:/blob:/javascript:/userinfo/控制字符/空白/
@@ -24,6 +25,16 @@ public static class OriginPolicy
         if (!Uri.TryCreate(raw, UriKind.Absolute, out var u))
             return false;
         if (u.Scheme != Uri.UriSchemeHttp && u.Scheme != Uri.UriSchemeHttps)
+            return false;
+        // PY-076：authority 含 '@'（含空密码形态 "https://@host/"——.NET
+        // 解析后 UserInfo 为空串，u.UserInfo 检查不可见）一律拒绝——与 Rust
+        // origin.rs / Kotlin rawUserInfo 口径一致
+        var schemeEnd = raw.IndexOf("://", StringComparison.Ordinal);
+        var authority = raw[(schemeEnd + 3)..];
+        var authorityEnd = authority.IndexOfAny(new[] { '/', '?', '#' });
+        if (authorityEnd >= 0)
+            authority = authority[..authorityEnd];
+        if (authority.Contains('@', StringComparison.Ordinal))
             return false;
         if (!string.IsNullOrEmpty(u.UserInfo))
             return false;
@@ -72,6 +83,16 @@ public static class OriginPolicy
             if (label.StartsWith('-') || label.EndsWith('-'))
                 return false;
         }
+        // PY-071/072（审计 2026-09-25）：非点分十进制 IPv4 编码拒绝——整数
+        //（2130706433）/0x 十六进制/简写（127.1）OS 解析器均接受，双重解释
+        // 混淆面。全数字段且段数 ≠ 4 拒（4 段 = 合法点分 IPv4，保留）；
+        // 与 Rust origin.rs / Kotlin OriginPolicy 口径一致
+        var segments = host.Split('.');
+        var lower = host.ToLowerInvariant();
+        if (segments.Length != 4 && segments.All(s => s.Length > 0 && s.All(char.IsAsciiDigit)))
+            return false;
+        if (lower.StartsWith("0x") && lower[2..].All(c => char.IsAsciiDigit(c) || (c >= 'a' && c <= 'f')))
+            return false;
         return true;
     }
 }

@@ -27,6 +27,30 @@ MULTI_STEP_ACCEPTED = {'allow', 'deny', 'require_confirmation'}
 MULTI_STEP_PREFIXES = ('expected_request', 'expected_approve',
                        'expected_consume', 'expected_evaluate')
 
+# PY-078：超长 URL 占位向量锚点——url-origin-invalid.json 必须恰好含一处，
+# 且锚点向量自身必须保持短（占位语义）；真实超长样本由消费端 vectors.rs 物化
+# （https://example.org/ + 'a'×9000）。锚点丢失会导致 Rust 差分静默跳过该用例。
+OVERSIZE_ANCHOR = 'oversize-url-limit-test'
+OVERSIZE_VECTOR_FILE = 'url-origin-invalid.json'
+
+
+def check_oversize_anchor(data: dict, path: Path, failures: list[str]) -> None:
+    """url-origin-invalid.json 的物化锚点守卫（fail-closed）。"""
+    if path.name != OVERSIZE_VECTOR_FILE:
+        return
+    hits = [v for v in data.get('vectors', [])
+            if OVERSIZE_ANCHOR in str(v.get('url', ''))]
+    if len(hits) != 1:
+        failures.append(
+            f'{path.name}: 超长 URL 物化锚点 {OVERSIZE_ANCHOR!r} '
+            f'应恰好出现 1 次，实际 {len(hits)} 次（锚点丢失 = vectors.rs '
+            f'物化分支静默失效）')
+        return
+    if len(hits[0].get('url', '')) > 256:
+        failures.append(
+            f'{path.name}: 锚点向量应为短占位 URL（真实样本由消费端物化），'
+            f'当前长度 {len(hits[0]["url"])}')
+
 
 def validate_vector(vector: dict, path: str) -> None:
     """根据协议类型验证向量断言（单步 expected / 多步 expected_*）。"""
@@ -64,6 +88,10 @@ def main() -> int:
                     validate_vector(vector, str(path.relative_to(ROOT)))
                 except AssertionError as exc:
                     failures.append(str(exc))
+            try:
+                check_oversize_anchor(data, path, failures)
+            except OSError as exc:
+                failures.append(f'{path.name}: 锚点检查失败（{exc}）')
     if failures:
         print('❌ contracts 向量断言无效：')
         for failure in failures:

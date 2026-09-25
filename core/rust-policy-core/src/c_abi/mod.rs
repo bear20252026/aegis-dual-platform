@@ -606,6 +606,51 @@ mod tests {
                     "{name}: replay denial"
                 );
             }
+            // PY-091/092（审计 2026-09-25）：向量协议扩展——销毁会话/推进代际
+            // 后再次消费同一 action，断言 fail-closed 拒绝码
+            if vector
+                .get("destroy_session")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                assert_eq!(
+                    aegis_policy_core_broker_destroy_session(broker, session.as_ptr()),
+                    1,
+                    "{name}: destroy session"
+                );
+            }
+            if vector
+                .get("advance_generation")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                assert_eq!(
+                    aegis_policy_core_broker_advance_document_generation(
+                        broker,
+                        session.as_ptr(),
+                        tab.as_ptr(),
+                        generation + 1,
+                    ),
+                    1,
+                    "{name}: advance generation"
+                );
+            }
+            if let Some(expected_reconsume_code) = vector.get("expected_reconsume_code") {
+                let reconsume = read_response(aegis_policy_core_broker_consume_navigation_json(
+                    broker,
+                    action.as_ptr(),
+                    consume_url.as_ptr(),
+                    consume_scope.as_ptr(),
+                ));
+                assert_eq!(
+                    reconsume["decision"], "deny",
+                    "{name}: reconsume must deny"
+                );
+                assert_eq!(
+                    reconsume["reason"]["code"], *expected_reconsume_code,
+                    "{name}: reconsume denial code"
+                );
+            }
             // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
             unsafe { aegis_policy_core_broker_free(broker) };
         }

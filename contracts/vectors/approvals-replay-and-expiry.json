@@ -1,8 +1,44 @@
 {
   "description": "蓝图阶段 B（contracts/vectors）：审批重放与过期测试向量（approval 绑定 nonce/过期——重放/过期拒绝）",
   "vectors": [
-    { "nonce": "n1", "expires_at": "2099-01-01T00:00:00Z", "replayed": false, "expected": "valid" },
-    { "nonce": "n1", "expires_at": "2026-08-16T00:00:00Z", "replayed": true, "expected": "deny_replay" },
-    { "nonce": "n2", "expires_at": "2020-01-01T00:00:00Z", "replayed": false, "expected": "deny_expired" }
+    {
+      "nonce": "n1",
+      "expires_at": "2099-01-01T00:00:00Z",
+      "replayed": false,
+      "expected": "valid"
+    },
+    {
+      "nonce": "n1",
+      "expires_at": "2026-08-16T00:00:00Z",
+      "replayed": true,
+      "expected": "deny_replay"
+    },
+    {
+      "nonce": "n2",
+      "expires_at": "2020-01-01T00:00:00Z",
+      "replayed": false,
+      "expected": "deny_expired"
+    },
+    {
+      "nonce": "n3",
+      "expires_at": "2099-01-01T00:00:00Z",
+      "replayed": false,
+      "scope": "navigation",
+      "replay_scope": "download",
+      "expected": "deny_replay",
+      "note": "PY-089 换 scope 重放（scope 参与授权绑定）"
+    },
+    {
+      "nonce": "n4",
+      "expires_at": "2026-09-25T00:00:00Z",
+      "replayed": false,
+      "expected": "deny_expired",
+      "note": "PY-090 expires_at 到点即拒（==now 边界按 <=now 拒）"
+    },
+    {
+      "expires_at": "2099-01-01T00:00:00Z",
+      "expected": "deny_schema",
+      "note": "PY-090 缺 nonce——schema 级拒绝"
+    }
   ]
 }

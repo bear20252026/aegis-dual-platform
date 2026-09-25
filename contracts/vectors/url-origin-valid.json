@@ -1,8 +1,42 @@
 {
   "description": "蓝图阶段 B（contracts/vectors）：合法 URL/Origin 测试向量（与 OriginPolicy/safe_url 对齐——http/https 放行）",
   "vectors": [
-    { "url": "https://a.gov.cn/page", "expected": "allow" },
-    { "url": "https://sub.a.gov.cn/path?q=1", "expected": "allow" },
-    { "url": "http://example.org/", "expected": "allow" }
+    {
+      "url": "https://a.gov.cn/page",
+      "expected": "allow"
+    },
+    {
+      "url": "https://sub.a.gov.cn/path?q=1",
+      "expected": "allow"
+    },
+    {
+      "url": "http://example.org/",
+      "expected": "allow"
+    },
+    {
+      "url": "HTTPS://EXAMPLE.ORG/PATH",
+      "expected": "allow",
+      "note": "PY-079 scheme/host 大写归一化"
+    },
+    {
+      "url": "https://example.org:443/",
+      "expected": "allow",
+      "note": "PY-080 显式默认端口（origin 归一与省略等价）"
+    },
+    {
+      "url": "http://example.org:80/",
+      "expected": "allow",
+      "note": "PY-080 显式默认端口 http"
+    },
+    {
+      "url": "https://xn--e1afmkfd.xn--p1ai/",
+      "expected": "allow",
+      "note": "PY-081 punycode（xn-- 在字符白名单内）"
+    },
+    {
+      "url": "http://93.184.216.34/",
+      "expected": "allow",
+      "note": "PY-081 点分十进制 IP 字面量（合法 host 形态）"
+    }
   ]
 }

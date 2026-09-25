@@ -1,14 +1,112 @@
 {
   "description": "蓝图阶段 B（contracts/vectors）：非法 URL/Origin 测试向量（与 OriginPolicy/safe_url P0-01 对齐——全部拒绝）",
   "vectors": [
-    { "url": "data:text/html,<script>alert(1)</script>", "expected": "deny" },
-    { "url": "blob:https://a.gov.cn/x", "expected": "deny" },
-    { "url": "javascript:alert(1)", "expected": "deny" },
-    { "url": "file:///C:/sensitive.txt", "expected": "deny" },
-    { "url": "https://user:pass@example.org/", "expected": "deny" },
-    { "url": "https://example.org/\nX-Test: x", "expected": "deny" },
-    { "url": "https:///nohost", "expected": "deny" },
-    { "url": "https://example.org:99999/", "expected": "deny" },
-    { "url": "https://example.org/oversize-url-limit-test", "expected": "deny", "note": "超长 URL（>8192 字符）由 contracts/codegen 生成实际样本——此处保留语义向量" }
+    {
+      "url": "data:text/html,<script>alert(1)</script>",
+      "expected": "deny"
+    },
+    {
+      "url": "blob:https://a.gov.cn/x",
+      "expected": "deny"
+    },
+    {
+      "url": "javascript:alert(1)",
+      "expected": "deny"
+    },
+    {
+      "url": "file:///C:/sensitive.txt",
+      "expected": "deny"
+    },
+    {
+      "url": "https://user:pass@example.org/",
+      "expected": "deny"
+    },
+    {
+      "url": "https://example.org/\nX-Test: x",
+      "expected": "deny"
+    },
+    {
+      "url": "https:///nohost",
+      "expected": "deny"
+    },
+    {
+      "url": "https://example.org:99999/",
+      "expected": "deny"
+    },
+    {
+      "url": "https://example.org/oversize-url-limit-test",
+      "expected": "deny",
+      "note": "超长 URL 占位向量（PY-078）：本向量是语义锚点而非真实样本——消费端 vectors.rs 检测到锚点 token 后物化为 https://example.org/ + 'a'×9000（>8192 上限）；Kotlin OriginPolicyTest 与 C# 测试用各自的 9000 字符字面样本同口径覆盖"
+    },
+    {
+      "url": "http://[::1]/",
+      "expected": "deny",
+      "note": "PY-069 IPv6 环回（authority 方括号形态一律拒绝）"
+    },
+    {
+      "url": "http://[::ffff:192.168.1.1]/",
+      "expected": "deny",
+      "note": "PY-070 IPv4-mapped IPv6（内嵌私网）"
+    },
+    {
+      "url": "http://[::ffff:127.0.0.1]/",
+      "expected": "deny",
+      "note": "PY-070 IPv4-mapped IPv6（内嵌回环）"
+    },
+    {
+      "url": "http://2130706433/",
+      "expected": "deny",
+      "note": "PY-071 十进制整数 = 127.0.0.1（OS 解析器接受——双重解释混淆面）"
+    },
+    {
+      "url": "http://0x7f000001/",
+      "expected": "deny",
+      "note": "PY-072 十六进制 = 127.0.0.1"
+    },
+    {
+      "url": "http://127.1/",
+      "expected": "deny",
+      "note": "PY-072 简写 = 127.0.0.1"
+    },
+    {
+      "url": "https://a..example.org/",
+      "expected": "deny",
+      "note": "PY-073 连续点段（空标签——RS-012 点段拒绝）"
+    },
+    {
+      "url": "https://exa_mple.org/",
+      "expected": "deny",
+      "note": "PY-074 下划线不在 DNS 安全字符集"
+    },
+    {
+      "url": "https://exa\"mple.org/",
+      "expected": "deny",
+      "note": "PY-074 引号拒绝"
+    },
+    {
+      "url": "https://example.org:0/",
+      "expected": "deny",
+      "note": "PY-075 端口 0"
+    },
+    {
+      "url": "https://example.org:65536/",
+      "expected": "deny",
+      "note": "PY-075 端口越界（u16 上限外）"
+    },
+    {
+      "url": "https://@example.org/",
+      "expected": "deny",
+      "note": "PY-076 空 userinfo（@ 残留——前向凭证混淆）"
+    },
+    {
+      "url": "https://exa\tmple.org/",
+      "expected": "deny",
+      "note": "PY-077 Tab 控制字符"
+    },
+    {
+      "url": "https://exa\rmple.org/",
+      "expected": "deny",
+      "note": "PY-077 CR 控制字符"
+    }
   ]
 }
