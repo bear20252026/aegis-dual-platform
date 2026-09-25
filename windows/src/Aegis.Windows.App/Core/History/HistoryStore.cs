@@ -181,7 +181,7 @@ public sealed class HistoryStore
         if (hasTo) clauses.Add("visited_date <= $to");
         select.CommandText = "SELECT COUNT(*) FROM visits" +
             (clauses.Count > 0 ? " WHERE " + string.Join(" AND ", clauses) : "");
-        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query)}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query ?? string.Empty)}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         return Convert.ToInt64(select.ExecuteScalar());
@@ -206,7 +206,7 @@ public sealed class HistoryStore
         select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
             string.Join(" AND ", clauses) +
             " ORDER BY visited_at DESC, id DESC LIMIT $ps OFFSET $off";
-        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query)}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query ?? string.Empty)}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         select.Parameters.AddWithValue("$ps", Math.Max(1, pageSize));
@@ -249,7 +249,7 @@ public sealed class HistoryStore
             "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
             string.Join(" AND ", clauses) +
             " ORDER BY visited_at DESC, id DESC LIMIT $lim";
-        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query)}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query ?? string.Empty)}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }

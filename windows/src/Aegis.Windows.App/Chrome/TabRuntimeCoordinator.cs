@@ -51,26 +51,14 @@ public sealed class TabRuntimeCoordinator : IDisposable
     }
 
     /// <summary>关闭标签：先从视觉树摘除，再释放运行时。</summary>
-    public void Close(string tabId)
-    {
-        if (!_runtimes.TryGetValue(tabId, out var runtime))
-            return;
-        _host.Children.Remove(runtime.Control);
-        _runtimes.Remove(tabId);
-        if (_lifetimes.Remove(tabId, out var lifetime))
-        {
-            try { lifetime.Close(); }
-            catch (Exception ex) { Core.Security.SecurityLog.Write($"[tab] 标签 {tabId} 销毁容错: {ex.GetType().Name}: {ex.Message}"); }
-        }
-        else
-        {
-            try { runtime.Dispose(); }
-            catch (Exception ex) { Core.Security.SecurityLog.Write($"[tab] 标签 {tabId} 销毁容错: {ex.GetType().Name}: {ex.Message}"); }
-        }
-    }
+    public void Close(string tabId) => Teardown(tabId, "销毁容错");
 
     /// <summary>休眠：从视觉树摘除并按快照释放（复用关闭生命周期）。</summary>
-    public void Sleep(string tabId)
+    public void Sleep(string tabId) => Teardown(tabId, "休眠销毁容错");
+
+    /// <summary>CS-071：Close/Sleep 收敛的单源拆除路径——摘视觉树 → 移除映射 →
+    /// 生命周期或运行时释放（容错日志按调用语境区分文案）。</summary>
+    private void Teardown(string tabId, string logContext)
     {
         if (!_runtimes.TryGetValue(tabId, out var runtime))
             return;
@@ -79,12 +67,12 @@ public sealed class TabRuntimeCoordinator : IDisposable
         if (_lifetimes.Remove(tabId, out var lifetime))
         {
             try { lifetime.Close(); }
-            catch (Exception ex) { Core.Security.SecurityLog.Write($"[tab] 标签 {tabId} 休眠销毁容错: {ex.GetType().Name}: {ex.Message}"); }
+            catch (Exception ex) { Core.Security.SecurityLog.Write($"[tab] 标签 {tabId} {logContext}: {ex.GetType().Name}: {ex.Message}"); }
         }
         else
         {
             try { runtime.Dispose(); }
-            catch (Exception ex) { Core.Security.SecurityLog.Write($"[tab] 标签 {tabId} 休眠销毁容错: {ex.GetType().Name}: {ex.Message}"); }
+            catch (Exception ex) { Core.Security.SecurityLog.Write($"[tab] 标签 {tabId} {logContext}: {ex.GetType().Name}: {ex.Message}"); }
         }
     }
 

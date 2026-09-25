@@ -6,6 +6,8 @@ using System.Threading;
 using Aegis.Windows.Chrome;
 using Aegis.Windows.Core.Downloads;
 using Aegis.Windows.Core.History;
+using Aegis.Windows.Core.Settings;
+using Aegis.Windows.Core.Bookmarks;
 using Xunit;
 
 /// <summary>WPF 窗口构造冒烟测试（回归防护）：在 STA 线程实例化窗口，
@@ -84,6 +86,47 @@ public sealed class WindowSmokeTests
         Assert.Equal("08:30", HistoryWindow.ParseLocalTime("9999-99-99T08:30:99"));
         // 过短 → 空串
         Assert.Equal(string.Empty, HistoryWindow.ParseLocalTime("short"));
+    }
+
+    // ===== CS-059..061（审计 2026-09-25）：三个窗口 STA 构造冒烟补齐 =====
+
+    [Fact]
+    public void SettingsWindowConstructsAndAppliesBothThemesWithoutThrowing()
+    {
+        RunSta(() =>
+        {
+            var settings = AppSettings.Load(Path.Combine(Path.GetTempPath(), $"no_such_{Guid.NewGuid():N}.json"));
+            var broker = new Aegis.Windows.Broker.BrowserPolicyBroker();
+            var settingsService = new SettingsService(
+                Path.Combine(Path.GetTempPath(), $"aegis_set_{Guid.NewGuid():N}.json"));
+            // owner 仅保存时回调使用——构造期传 null 不触发解引用
+            var w = new SettingsWindow(settings, broker, null!, settingsService);
+            w.ApplyTheme("dark");
+            w.ApplyTheme("light");
+        });
+    }
+
+    [Fact]
+    public void BookmarkManagerWindowConstructsAndAppliesBothThemesWithoutThrowing()
+    {
+        RunSta(() =>
+        {
+            var store = new BookmarkStore(Path.Combine(Path.GetTempPath(), $"aegis_bms_{Guid.NewGuid():N}.db"));
+            var w = new BookmarkManagerWindow(store, owner: null);
+            w.ApplyTheme("dark");
+            w.ApplyTheme("light");
+        });
+    }
+
+    [Fact]
+    public void SourceViewerWindowConstructsAndAppliesBothThemesWithoutThrowing()
+    {
+        RunSta(() =>
+        {
+            var w = new SourceViewerWindow("https://example.com", "<html><body>ok</body></html>");
+            w.ApplyTheme("dark");
+            w.ApplyTheme("light");
+        });
     }
 
     private static void RunSta(Action action)

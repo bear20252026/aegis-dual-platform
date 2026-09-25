@@ -18,27 +18,39 @@ public interface IBlockedHosts
 public sealed class BlockedHosts : IBlockedHosts
 {
     private readonly HashSet<string> _hosts;
+    private readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> _lookup;
 
-    public BlockedHosts(IEnumerable<string> hosts) =>
-        _hosts = new HashSet<string>(
-            hosts.Select(h => h.Trim().ToLowerInvariant().TrimEnd('.')),
-            StringComparer.Ordinal);
+    public BlockedHosts(IEnumerable<string> hosts)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var raw in hosts)
+        {
+            var h = raw.Trim().ToLowerInvariant().TrimEnd('.');
+            if (h.Length > 0)
+                set.Add(h);
+        }
+        _hosts = set;
+        _lookup = set.GetAlternateLookup<ReadOnlySpan<char>>();
+    }
 
+    // CS-068（审计 2026-09-25）：热路径零分配——查询 host 的每个祖先域后缀
+    // 用 span 备用查找裁决（不再 string.Join 切片分配）。注意：预展开只能做在
+    // 查询侧；若把清单条目的祖先域展开入表，"evil.example.com" 会连带封禁
+    // "example.com"/"com"，构成过度封锁（首版实现即此缺陷，单测拦截后改此版）。
     public bool IsBlocked(string host)
     {
         if (string.IsNullOrWhiteSpace(host))
             return false;
         var normalized = host.Trim().ToLowerInvariant().TrimEnd('.');
-        if (normalized.Length == 0)
-            return false;
-        if (_hosts.Contains(normalized))
-            return true;
-        // 子域后缀匹配：evil.example.com 命中 blocked 的 example.com
-        var parts = normalized.Split('.');
-        for (var i = 1; i < parts.Length; i++)
+        var start = 0;
+        while (start < normalized.Length)
         {
-            if (_hosts.Contains(string.Join('.', parts[i..])))
+            if (_lookup.Contains(normalized.AsSpan(start)))
                 return true;
+            var dot = normalized.IndexOf('.', start);
+            if (dot < 0)
+                return false;
+            start = dot + 1;
         }
         return false;
     }

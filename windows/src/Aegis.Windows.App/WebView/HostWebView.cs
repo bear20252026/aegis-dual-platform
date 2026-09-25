@@ -5,6 +5,7 @@ using System.IO;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Chrome.Ntp;
 using Aegis.Windows.Core.Privacy;
+using Aegis.Windows.Core.Security;
 using Microsoft.Web.WebView2.Core;
 
 /// <summary>WebView2 封装（阶段 C——蓝图 windows/src/Aegis.Windows.WebView）。
@@ -240,22 +241,10 @@ public sealed class HostWebView : IDisposable
         }
     }
 
-    private static bool IsTrustedChromeOrigin(string source) =>
-        Uri.TryCreate(source, UriKind.Absolute, out var uri)
-        && uri.Scheme == Uri.UriSchemeHttps
-        && uri.Host.Equals("chrome.aegis.local", StringComparison.OrdinalIgnoreCase)
-        && uri.IsDefaultPort;
+    // CS-070（审计 2026-09-25）：脱敏单源——与 Broker 各持一份相同实现已收敛
+    // 到 UrlRedactor.Redact（丢弃 query/fragment，超长截断）。
+    private static string RedactUrl(string? url) => UrlRedactor.Redact(url);
 
-    /// <summary>日志用 URL 脱敏：丢弃 query/fragment（token、搜索词等敏感串
-    /// 不写入 security.log——此前完整 URI 明文落盘）。</summary>
-    private static string RedactUrl(string? url)
-    {
-        if (string.IsNullOrEmpty(url))
-            return string.Empty;
-        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
-            return uri.GetLeftPart(UriPartial.Authority) + uri.AbsolutePath;
-        return url.Length > 256 ? url[..256] + "…" : url;
-    }
 
     public void Dispose()
     {

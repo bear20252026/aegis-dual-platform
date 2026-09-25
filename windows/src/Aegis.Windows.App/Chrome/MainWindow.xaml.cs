@@ -62,6 +62,20 @@ public partial class MainWindow : Window
     private const int SleepCheckIntervalSec = 30;     // 后台标签睡眠巡检周期
     private const int FeedbackHideMs = 2500;          // 反馈条自动隐藏
     private const int SessionSaveDebounceMs = 2000;   // 会话落盘防抖（写放大治理）
+    // CS-064：源码抓取共享客户端（连接池 5 分钟回收——DNS 变更可感知）
+    private static readonly System.Net.Http.HttpClient SourceFetchClient = CreateSourceFetchClient();
+
+    private static System.Net.Http.HttpClient CreateSourceFetchClient()
+    {
+        var client = new System.Net.Http.HttpClient(
+            new System.Net.Http.SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
+        {
+            Timeout = TimeSpan.FromSeconds(SourceFetchTimeoutSec),
+        };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (AegisBrowser-SourceViewer)");
+        return client;
+    }
+
     private const int SourceFetchTimeoutSec = 15;     // 源码查看抓取超时
     private const int SourceMaxBytes = 5 * 1024 * 1024; // 源码查看大小上限
     private const int BookmarkChipMaxChars = 14;      // 书签栏标题截断
@@ -711,8 +725,10 @@ public partial class MainWindow : Window
     {
         var sw = SystemParameters.VirtualScreenWidth;
         var sh = SystemParameters.VirtualScreenHeight;
-        Width = _settings.WindowWidth > 400 ? _settings.WindowWidth : 1200;
-        Height = _settings.WindowHeight > 300 ? _settings.WindowHeight : 800;
+        // CS-067：下界防残窗（>400/>300），上界钳到虚拟屏幕——持久化值被外部
+        // 篡改成超大数（如 int.MaxValue）时不再撑出不可操作的巨型窗口
+        Width = _settings.WindowWidth > 400 ? Math.Min(_settings.WindowWidth, sw) : 1200;
+        Height = _settings.WindowHeight > 300 ? Math.Min(_settings.WindowHeight, sh) : 800;
         if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop)
             && _settings.WindowLeft < sw && _settings.WindowTop < sh)
         {
@@ -898,14 +914,6 @@ public partial class MainWindow : Window
             TabRuntime.Navigate(runtime, url);
     }
 
-    private void BookmarkBarItem_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is System.Windows.Controls.Button { Tag: string url }
-            && _activeTabId is not null
-            && _runtimes.TryGetValue(_activeTabId, out var rt))
-            TabRuntime.Navigate(rt, url);
-    }
-
     private void BookmarkManager_Click(object sender, RoutedEventArgs e)
     {
         if (_bookmarkManagerWindow is null || !_bookmarkManagerWindow.IsLoaded)
@@ -985,12 +993,9 @@ public partial class MainWindow : Window
         {
             try
             {
-                using var http = new System.Net.Http.HttpClient
-                {
-                    Timeout = TimeSpan.FromSeconds(SourceFetchTimeoutSec),
-                };
-                http.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (AegisBrowser-SourceViewer)");
-                using var response = await http.GetAsync(url);
+                // CS-064（审计 2026-09-25）：静态共享客户端——此前每次查看源码
+                // new HttpClient（SocketException 端口耗尽经典面）
+                using var response = await SourceFetchClient.GetAsync(url);
                 response.EnsureSuccessStatusCode();
                 var bytes = await response.Content.ReadAsByteArrayAsync();
                 if (bytes.Length > SourceMaxBytes)

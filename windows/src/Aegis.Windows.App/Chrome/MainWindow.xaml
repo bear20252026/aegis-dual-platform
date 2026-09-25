@@ -356,13 +356,8 @@
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Button Content="{Binding}" Click="BookmarkBarItem_Click" Margin="2,0"
-                      Background="Transparent" BorderThickness="0" Cursor="Hand"
-                      Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" Padding="6,3"/>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
+          <!-- CS-063（审计 2026-09-25）：ItemTemplate 已删——code-behind 直接
+               Items.Add(Button)（lambda 点击），DataTemplate 路径永不生效 -->
         </ItemsControl>
       </Border>
       <Grid x:Name="WebViewHost"/>

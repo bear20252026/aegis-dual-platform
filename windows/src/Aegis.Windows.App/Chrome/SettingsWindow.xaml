@@ -32,9 +32,9 @@
                Text="严格模式可能影响部分站点加载——建议默认均衡。"/>
 
     <TextBlock Text="加密与安全" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <CheckBox x:Name="HttpsCheck" Content="HTTPS-only（http 自动升级 https）" Foreground="#FFB3FFFFFF"
+    <CheckBox x:Name="HttpsCheck" Content="HTTPS-only（http 自动升级 https）" Foreground="#B3FFFFFF"
               Checked="Privacy_Changed" Unchecked="Privacy_Changed"/>
-    <CheckBox x:Name="DnsCheck" Content="安全 DNS（DoH，重启生效）" Foreground="#FFB3FFFFFF" Margin="0,6,0,0"
+    <CheckBox x:Name="DnsCheck" Content="安全 DNS（DoH，重启生效）" Foreground="#B3FFFFFF" Margin="0,6,0,0"
               Checked="Privacy_Changed" Unchecked="Privacy_Changed"/>
     <TextBlock Text="威胁黑名单订阅源" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
     <TextBox x:Name="ThreatFeedBox" Height="30" VerticalContentAlignment="Center"
