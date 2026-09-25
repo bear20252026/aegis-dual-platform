@@ -126,7 +126,12 @@ def main() -> int:
             print("  -", f)
         return 1
     print("OK — bridge_guard 三端单一事实源校验通过")
-    print(f"  规范模板: {CANONICAL.relative_to(ROOT)}（{len(canonical.splitlines())} 行）")
+    # PY-134 配套：CANONICAL 可被重定向（单测）——仓库外路径原样输出
+    try:
+        canon_display = CANONICAL.relative_to(ROOT)
+    except ValueError:
+        canon_display = CANONICAL
+    print(f"  规范模板: {canon_display}（{len(canonical.splitlines())} 行）")
     print("  Rust: include_str! 消费 ✓ ｜ Kotlin: 归一化逐行一致 ✓")
     return 0
 
