@@ -22,6 +22,7 @@ pub struct AdBlockProvider {
 }
 
 /// 广告/追踪拦截管理器（照搬 Omni Browser AdBlockManager）。
+#[derive(Debug)]
 pub struct AdBlockManager {
     providers: Vec<AdBlockProvider>,
     blocked_domains: HashSet<String>,
@@ -87,6 +88,8 @@ impl AdBlockManager {
         ]
     }
 
+    /// 创建管理器：装载预设拦截列表提供者，黑名单为空、计数清零、
+    /// 默认启用（RS-067：补文档）。
     pub fn new() -> Self {
         Self {
             providers: Self::preset_providers(),
@@ -102,27 +105,46 @@ impl AdBlockManager {
     }
 
     /// 检查 URL 是否应被拦截。
+    ///
+    /// RS-066（审计 2026-09-25）：父域链迭代包含 TLD 本身（example.com
+    /// → com）——黑名单登记 TLD（如 "com"）即拦截该 TLD 下全部站点。
+    /// 这是有意保留的语义（hosts 形 filter list 允许登记 TLD 做整域
+    /// 拦截），不是缺陷；调用方若需防误配，应在加载黑名单时校验条目。
+    ///
+    /// RS-069：本方法每次调用经 extract_host 分配归一化 String。
+    /// 高频调用方 / 已持有归一化 host 的调用方应改用
+    /// [`AdBlockManager::should_block_host`]（预归一 API，零分配）。
     pub fn should_block(&mut self, url: &str) -> bool {
+        match Self::extract_host(url) {
+            Some(host) => self.should_block_host(&host),
+            None => false,
+        }
+    }
+
+    /// 检查已归一化（小写、无端口、无 userinfo）的主机名是否应被拦截。
+    ///
+    /// RS-069（审计 2026-09-25）预归一 API：调用方绕过 URL 解析与
+    /// to_lowercase 分配；语义与 [`AdBlockManager::should_block`]
+    /// 完全一致（含父域链迭代与命中计数）。
+    pub fn should_block_host(&mut self, host: &str) -> bool {
         if !self.is_enabled {
             return false;
         }
-        if let Some(host) = Self::extract_host(url) {
-            if self.blocked_domains.contains(&host) {
+        if self.blocked_domains.contains(host) {
+            self.total_blocked += 1;
+            return true;
+        }
+        // H-8 修复（审计 2026-08-31）：父域链迭代匹配——原实现是
+        // host.split('.') 逐「单段」精确比对（ads.example.com 会拿
+        // ads/example/com 三个单词查表），黑名单含常见单词域即大面积
+        // 误拦、两段父域（ads.com）永远无法命中。改为逐级剥去最左
+        // 标签：a.ads.com → ads.com → com（真正的父域链检查）。
+        let mut h = host;
+        while let Some((_, rest)) = h.split_once('.') {
+            h = rest;
+            if self.blocked_domains.contains(h) {
                 self.total_blocked += 1;
                 return true;
-            }
-            // H-8 修复（审计 2026-08-31）：父域迭代匹配——原实现是
-            // host.split('.') 逐「单段」精确比对（ads.example.com 会拿
-            // ads/example/com 三个单词查表），黑名单含常见单词域即大面积
-            // 误拦、两段父域（ads.com）永远无法命中。改为逐级剥去最左
-            // 标签：a.ads.com → ads.com → com（真正的父域链检查）。
-            let mut host = host.as_str();
-            while let Some((_, rest)) = host.split_once('.') {
-                host = rest;
-                if self.blocked_domains.contains(host) {
-                    self.total_blocked += 1;
-                    return true;
-                }
             }
         }
         false
@@ -205,5 +227,55 @@ mod tests {
         mgr.load_blocked_domains(vec!["tracker.app".into()]);
         assert!(!mgr.should_block("https://my.app.example.com/x"));
         assert!(mgr.should_block("https://tracker.app/x"));
+    }
+
+    // —— RS-065/069 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn block_rules_survive_port_case_and_bare_host() {
+        // RS-065：URL 形态变体——端口剥离/大小写归一/裸 host 全部命中
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(vec!["ads.example.com".into()]);
+        assert!(
+            mgr.should_block("https://ads.example.com:8080/banner"),
+            "带端口命中"
+        );
+        assert!(
+            mgr.should_block("HTTPS://ADS.EXAMPLE.COM/x"),
+            "大写 URL 归一命中"
+        );
+        assert!(mgr.should_block("ads.example.com"), "裸 host 命中");
+    }
+
+    #[test]
+    fn malformed_urls_never_panic_and_never_block() {
+        // RS-065：畸形 URL fail-closed——不拦截、不 panic
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(vec!["ads.example.com".into()]);
+        assert!(!mgr.should_block(""));
+        assert!(!mgr.should_block("https://"));
+        assert!(!mgr.should_block("2001:db8::1"));
+        assert!(!mgr.should_block("https://[unclosed/x"));
+    }
+
+    #[test]
+    fn should_block_host_matches_url_semantics() {
+        // RS-069：预归一 API 与 should_block 语义一致（含父域命中计数）
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(vec!["ads.com".into()]);
+        assert!(mgr.should_block_host("a.ads.com"));
+        assert_eq!(mgr.total_blocked(), 1);
+        mgr.set_enabled(false);
+        assert!(!mgr.should_block_host("b.ads.com"), "禁用时不拦截");
+        assert_eq!(mgr.total_blocked(), 1, "禁用路径不计数");
+    }
+
+    #[test]
+    fn manager_implements_debug() {
+        // RS-068：AdBlockManager 可 Debug 格式化（诊断/日志面）
+        let mgr = AdBlockManager::new();
+        let rendered = format!("{mgr:?}");
+        assert!(rendered.contains("AdBlockManager"));
+        assert!(rendered.contains("total_blocked"));
     }
 }

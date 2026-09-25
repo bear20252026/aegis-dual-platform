@@ -72,6 +72,10 @@ impl JsPipeline {
     }
 
     /// 构建完整的注入脚本（所有启用模块的 JS 按顺序拼接）。
+    ///
+    /// RS-053（审计 2026-09-25）：拼接统一走 Vec collect + join——O(n)
+    /// 单次分配，禁止回退为 format! 链式拼接（9 阶段嵌套 format! 每次
+    /// 重新分配且参数顺序易错）。
     pub fn build(&self) -> String {
         let parts: Vec<String> = self
             .stages
@@ -208,5 +212,13 @@ mod tests {
         assert!(script.contains("(function() {"));
         assert!(script.contains("var x = 42;"));
         assert!(script.contains("})();"));
+    }
+
+    #[test]
+    fn empty_pipeline_builds_empty_script() {
+        // RS-053：build 统一 Vec collect + join（O(n) 单次分配）——
+        // 禁止回退为 format! 链式拼接；空管线必须得到空串
+        let pipeline = JsPipeline::new();
+        assert_eq!(pipeline.build(), "");
     }
 }

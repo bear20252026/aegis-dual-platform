@@ -31,6 +31,10 @@ pub fn hex_digit(b: u8) -> Option<u8> {
 /// 此前 `https://example.com?u=a@b` 的 query 内 `@` 被当 userinfo，
 /// 主机名错提为 `b`。
 ///
+/// RS-054（审计 2026-09-25）：协议相对 URL（`//host/path`）——此前落入
+/// 裸主机名分支，authority 首字符即 `/`，返回空串；剥前导 `//` 后按
+/// authority 解析（WHATWG「scheme-relative」同语义）。
+///
 /// # 示例
 /// ```
 /// use aegis_policy_core::util::extract_hostname;
@@ -40,6 +44,8 @@ pub fn hex_digit(b: u8) -> Option<u8> {
 pub fn extract_hostname(url: &str) -> &str {
     let without_scheme = if let Some(pos) = url.find("://") {
         &url[pos + 3..]
+    } else if let Some(rest) = url.strip_prefix("//") {
+        rest
     } else {
         url
     };
@@ -58,15 +64,20 @@ pub fn extract_hostname(url: &str) -> &str {
 /// 从 URL 提取小写主机名（不含端口号）。
 ///
 /// 用于广告拦截等需要大小写不敏感匹配的场景。
+/// RS-056（审计 2026-09-25）：`Option<String>` 签名被 uniffi FFI checksum
+///（func_extract_host = 5061）锁定——Cow 借用方案在 FFI 层不可行（改签名
+/// 即破坏绑定契约）。分配消除走调用侧：高频调用方 adblock::AdBlockManager
+/// 经 `should_block_host` 预归一 API（RS-069）绕过本函数的字符串分配。
 pub fn extract_host(url: &str) -> Option<String> {
     let hostname = extract_hostname(url);
     // 去掉端口号——IPv6 字面量 [::1]:8080 先剥方括号段再判定（此前 rfind(':')
     // 把 "[::1" 截断成非法形态）
     let host = if hostname.starts_with('[') {
-        match hostname.find(']') {
-            Some(end) => &hostname[1..end],
-            None => hostname,
-        }
+        // RS-055（审计 2026-09-25）：未闭合方括号——非法 IPv6 字面量
+        // 形态，fail-closed 返回 None（此前原样返回带 `[` 的伪主机名
+        // 污染匹配基座）
+        let end = hostname.find(']')?;
+        &hostname[1..end]
     } else if let Some(pos) = hostname.find(':') {
         // RS-014（审计 2026-09-24）：裸 IPv6（≥2 个冒号）无法区分 host:port
         // 语义——fail-closed 返回 None，绝不按首个 ':' 截断出伪主机名
@@ -195,5 +206,50 @@ mod tests {
             "反斜杠先转义（防把转义引号的反斜杠吃掉）"
         );
         assert_eq!(js_escape_single_quoted("a\nb"), "a\\nb");
+    }
+
+    // —— RS-054/055/056 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn extract_hostname_userinfo_and_uppercase_scheme() {
+        // RS-054：userinfo 变体——user:pass@ 形态剥至最后一段 @ 之后
+        assert_eq!(
+            extract_hostname("https://user:pass@example.com/x"),
+            "example.com"
+        );
+        // 大写 scheme 不影响 :// 定位（子串查找与大小写无关）
+        assert_eq!(extract_hostname("HTTPS://EXAMPLE.COM/Path"), "EXAMPLE.COM");
+    }
+
+    #[test]
+    fn extract_hostname_protocol_relative_url() {
+        // RS-054：协议相对 URL 此前返回空串（authority 首字符 '/'）
+        assert_eq!(extract_hostname("//example.com/path"), "example.com");
+        assert_eq!(
+            extract_host("//Ads.Example.COM:8080/x"),
+            Some("ads.example.com".into())
+        );
+    }
+
+    #[test]
+    fn extract_host_ipv6_bracket_forms() {
+        // RS-055：方括号 IPv6 各形态
+        assert_eq!(
+            extract_host("https://[2001:db8::1]:443/x"),
+            Some("2001:db8::1".into())
+        );
+        assert_eq!(extract_host("[::1]"), Some("::1".into()));
+        // 未闭合方括号 fail-closed（此前原样返回带 [ 的伪主机名）
+        assert_eq!(extract_host("https://[2001:db8::1/x"), None);
+        assert_eq!(extract_host("[::1"), None);
+    }
+
+    #[test]
+    fn extract_host_port_only_no_host() {
+        // RS-055：纯端口（无 host）——空 host fail-closed 返回 None
+        assert_eq!(extract_host(":8080"), None);
+        assert_eq!(extract_host("https://:8080/x"), None);
+        // host:port（authority 即全部）保留端口语义
+        assert_eq!(extract_hostname("host:8080"), "host:8080");
     }
 }

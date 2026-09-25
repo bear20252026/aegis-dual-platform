@@ -102,19 +102,24 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
         {
             format!("{host}:{value}")
         }
-        _ => host.clone(),
+        _ => host,
     };
     let suffix = &rest[authority.len()..];
-    let without_fragment = suffix.split('#').next().unwrap_or_default();
+    // RS-059（审计 2026-09-25）：split 恒产生首元素——unwrap_or_default
+    // 属冗余解包，改 split_once 显式表达「无 # 即整段」语义
+    let without_fragment = suffix.split_once('#').map_or(suffix, |(before, _)| before);
     let canonical_parameters = match without_fragment {
         "" => "/".to_string(),
         query if query.starts_with('?') => format!("/{query}"),
         path => path.to_string(),
     };
+    // RS-060（审计 2026-09-25）：origin 单次 format 构造后整体 move——
+    // 此前 scheme.clone() + canonical_authority.clone() 双 clone
+    let origin = format!("{scheme}://{canonical_authority}");
     Some(CanonicalExternalUrl {
-        scheme: scheme.clone(),
-        host: canonical_authority.clone(),
-        origin: format!("{scheme}://{canonical_authority}"),
+        scheme,
+        host: canonical_authority,
+        origin,
         canonical_parameters,
     })
 }
@@ -270,6 +275,63 @@ mod tests {
             try_parse_external("https://.example.org/"),
             None,
             "裸点拒绝"
+        );
+    }
+
+    // —— RS-057/058 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn alternate_ipv4_encodings_rejected() {
+        // RS-057/PY-071：非点分十进制 IPv4 编码拒绝（OS 解析器双重解释混淆面）
+        assert_eq!(
+            try_parse_external("https://2130706433/"),
+            None,
+            "整数形 IPv4 拒绝"
+        );
+        assert_eq!(
+            try_parse_external("https://0x7f000001/"),
+            None,
+            "0x 十六进制形拒绝"
+        );
+        assert_eq!(
+            try_parse_external("https://127.1/"),
+            None,
+            "简写形（2 段全数字）拒绝"
+        );
+        // 4 段点分十进制字面量保留（合法 IPv4）
+        assert!(
+            try_parse_external("https://127.0.0.1/").is_some(),
+            "4 段点分 IPv4 保留"
+        );
+    }
+
+    #[test]
+    fn max_url_length_exact_boundary() {
+        // RS-057：8192 恰好边界——== 上限放行，+1 拒绝
+        let prefix = "https://example.org/";
+        let exact = format!("{prefix}{}", "a".repeat(8192 - prefix.len()));
+        assert_eq!(exact.len(), 8192);
+        assert!(canonicalize_external(&exact).is_some(), "恰 8192 字节放行");
+        let over = format!("{exact}a");
+        assert_eq!(over.len(), 8193);
+        assert_eq!(canonicalize_external(&over), None, "8193 字节拒绝");
+    }
+
+    #[test]
+    fn port_u16_boundary_values() {
+        // RS-058：u16 端口边界——1/65535 合法，65536 溢出拒绝
+        assert!(
+            try_parse_external("https://example.org:1/").is_some(),
+            "端口 1 合法"
+        );
+        assert!(
+            try_parse_external("https://example.org:65535/").is_some(),
+            "端口 65535 合法"
+        );
+        assert_eq!(
+            try_parse_external("https://example.org:65536/"),
+            None,
+            "端口 65536 溢出 u16 拒绝"
         );
     }
 }

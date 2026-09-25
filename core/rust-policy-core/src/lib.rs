@@ -193,4 +193,60 @@ mod native_abi_tests {
             "shield 不得再覆盖 WebGL getParameter（口径矛盾）"
         );
     }
+
+    // —— RS-051/052 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn pipeline_output_fully_deterministic() {
+        // RS-051：同一 (shield, domain) 两次构建必须逐字节一致——蓝图
+        // core 确定性约束约束的是整脚本（全部阶段与常量），不只 seed 行
+        let shield = shield::FingerprintShield::new();
+        let a = fingerprint_pipeline(&shield, "example.com");
+        let b = fingerprint_pipeline(&shield, "example.com");
+        assert_eq!(a, b);
+        assert_eq!(
+            fingerprint_pipeline(&shield, "other.net"),
+            fingerprint_pipeline(&shield, "other.net")
+        );
+    }
+
+    #[test]
+    fn pipeline_stages_appear_in_declared_order() {
+        // RS-051：九阶段在脚本中按声明顺序出现——顺序错位会改变注入
+        // 优先级（如 QueryStripper 必须先于其消费方阶段执行）
+        let shield = shield::FingerprintShield::new();
+        let script = fingerprint_pipeline(&shield, "example.com");
+        let names = [
+            "ToStringGuard",
+            "PerSiteSeed",
+            "FingerprintShield",
+            "LetterboxShield",
+            "QueryStripper",
+            "FontNormalizer",
+            "WebGLSpoof",
+            "TimerPrecision",
+            "ExtProxy",
+        ];
+        let mut cursor = 0;
+        for name in names {
+            let pos = script[cursor..]
+                .find(name)
+                .unwrap_or_else(|| panic!("阶段 {name} 缺失或顺序错位"));
+            cursor += pos + name.len();
+        }
+    }
+
+    #[test]
+    fn abi_version_probe_idempotent_failclosed_contract() {
+        // RS-052：ABI 探测入口幂等无副作用——宿主加载期可重复探测；
+        // 门禁契约：POLICY_CORE_ABI_VERSION 变更即破坏性事件，旧宿主
+        // 比对不一致时必须拒绝加载（fail-closed）。本测试锁定版本常量
+        // 与入口返回严格相等，任何漂移在测试期即失败。
+        assert_eq!(aegis_policy_core_abi_version(), POLICY_CORE_ABI_VERSION);
+        assert_eq!(
+            aegis_policy_core_abi_version(),
+            aegis_policy_core_abi_version(),
+            "探测入口幂等（重复调用同值）"
+        );
+    }
 }
