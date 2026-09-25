@@ -44,11 +44,15 @@ pub struct RoutingRule {
 
 impl RoutingRule {
     /// 创建域名匹配规则。
+    ///
+    /// RS-120（审计 2026-09-25）：域名大小写不敏感——构造时小写归一
+    /// （hostname 侧由 extract_host 归一；路径/精确匹配保持原文——
+    /// URL 路径按 RFC 3986 大小写敏感）。
     pub fn domain(name: &str, domain: &str, workspace_id: &str) -> Self {
         Self {
             name: name.to_string(),
             match_type: MatchType::Domain,
-            pattern: domain.to_string(),
+            pattern: domain.to_ascii_lowercase(),
             workspace_id: workspace_id.to_string(),
             enabled: true,
         }
@@ -83,9 +87,22 @@ impl RoutingRule {
         }
         match self.match_type {
             MatchType::Domain => {
-                // 提取 URL 的域名部分
+                // RS-121（审计 2026-09-25）：strip_suffix 前缀 '.' 语义检查
+                // 替代 ends_with(format!(".{}", pattern))——消除每次匹配的
+                // 堆分配。pattern 已构造时归一，但字段为 pub（直接构造
+                // 绕过构造器），此处防御性再归一。
+                let pattern = self.pattern.to_ascii_lowercase();
+                // RS-119：空 pattern 不得命中——extract_host 失败返回 ""，
+                // 空域匹配会把无 host 的 URL（about:blank 等）路由到该规则
+                if pattern.is_empty() {
+                    return false;
+                }
                 let hostname = extract_hostname(url);
-                hostname == self.pattern || hostname.ends_with(&format!(".{}", self.pattern))
+                match hostname.strip_suffix(&pattern) {
+                    // prefix 空 = 精确等值；否则必须是「.」边界（子域名）
+                    Some(prefix) => prefix.is_empty() || prefix.ends_with('.'),
+                    None => false,
+                }
             }
             MatchType::PathPrefix => url.starts_with(&self.pattern),
             MatchType::Exact => url == self.pattern,
@@ -380,5 +397,64 @@ mod tests {
             .expect("RULES 段必须是合法 JSON（恶意 name 不破坏语法）");
         assert_eq!(parsed[0]["name"], r#"x"); alert(1); ([\"\n" injection"#);
         assert_eq!(parsed[0]["workspace"], r##"ws\"" + window.ev1l + \""##);
+    }
+
+    // —— RS-119/120/121（审计 2026-09-25）——
+
+    #[test]
+    fn domain_pattern_normalized_at_construction() {
+        // RS-120：构造时小写归一——大写 pattern 必须命中小写 hostname
+        let rule = RoutingRule::domain("Corp", "GitHub.COM", "work");
+        assert!(rule.matches("https://github.com/repo"));
+        assert!(rule.matches("https://API.GitHub.com/repos"));
+        // 归一后存储（审计可观测）
+        assert_eq!(rule.pattern, "github.com");
+    }
+
+    #[test]
+    fn empty_domain_pattern_never_matches() {
+        // RS-119：空 pattern 此前命中 extract_host 失败的 ""
+        // （about:blank 等无 host URL 会被路由到该规则）——必须拒绝
+        let mut rule = RoutingRule::domain("Empty", "", "work");
+        assert!(!rule.matches("about:blank"));
+        assert!(!rule.matches("https://github.com/repo"));
+        assert!(!rule.matches("data:text/html,x"));
+        // RS-038 语义保持：禁用规则同样不命中
+        rule.enabled = false;
+        assert!(!rule.matches("https://anything.com"));
+    }
+
+    #[test]
+    fn empty_pattern_rule_falls_back_to_default_workspace() {
+        // RS-119：路由引擎层面——空 pattern 规则不得吞掉无 host URL
+        let mut sr = SpaceRouting::new("fallback");
+        sr.add_rule(RoutingRule::domain("Empty", "", "trapped"));
+        assert_eq!(sr.route("about:blank"), "fallback");
+        assert_eq!(sr.route("https://github.com"), "fallback");
+    }
+
+    #[test]
+    fn path_and_exact_prefixes_remain_case_sensitive() {
+        // RS-119：路径/精确匹配保持原文大小写敏感（RFC 3986）——
+        // 与域名归一语义形成对照（不得连带归一路径）
+        let path_rule = RoutingRule::path_prefix("Docs", "https://docs.example.com/EN", "docs-en");
+        assert!(path_rule.matches("https://docs.example.com/EN/api"));
+        assert!(
+            !path_rule.matches("https://docs.example.com/en/api"),
+            "路径大小写敏感：小写 /en 不得命中 /EN 前缀"
+        );
+        let exact_rule = RoutingRule::exact("Report", "https://example.com/Report", "work");
+        assert!(exact_rule.matches("https://example.com/Report"));
+        assert!(!exact_rule.matches("https://example.com/report"));
+    }
+
+    #[test]
+    fn suffix_match_requires_dot_boundary_no_allocation() {
+        // RS-121 回归：strip_suffix + '.' 边界——"badcom" 不得命中 "com"，
+        // "api.github.com" 命中 "github.com"，等值命中走 prefix.is_empty()
+        let rule = RoutingRule::domain("Com", "com", "tld-ws");
+        assert!(!rule.matches("https://badcom/"), "非 '.' 边界后缀不得命中");
+        assert!(rule.matches("https://www.example.com/"));
+        assert!(rule.matches("https://com/"));
     }
 }

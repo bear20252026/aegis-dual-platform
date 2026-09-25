@@ -27,18 +27,32 @@ pub struct BridgeGuard {
 impl BridgeGuard {
     pub fn new(allowed_hosts: Vec<String>, require_https: bool) -> Self {
         Self {
-            allowed_hosts: allowed_hosts.into_iter().collect(),
+            // RS-129（审计 2026-09-25）：构造时小写归一——host 语义
+            // 大小写不敏感（RFC 4343），字面差异不得造成误杀
+            allowed_hosts: allowed_hosts
+                .into_iter()
+                .map(|h| h.to_ascii_lowercase())
+                .collect(),
             require_https,
         }
     }
 
     /// 验证 bridge 调用是否允许（对 bridge **目标**做校验）。
     /// 返回 Ok(()) 允许，Err(reason) 拒绝。
+    ///
+    /// RS-129（审计 2026-09-25）：scheme/host 比较大小写不敏感——
+    /// 此前 `scheme != "https"` 字面比较：`HTTPS://` 目标被误杀；
+    /// host 白名单 `contains` 字面比较：`Example.COM` 目标被误杀。
+    /// RS-130（审计 2026-09-25）：host 含端口时按**字面**匹配
+    /// （"example.com:8080" ≠ "example.com"）——端口归一由调用方
+    /// extract_host 层负责，此处不剥离（fail-closed：归一缺失只会
+    /// 拒绝，不会放行）。
     pub fn validate(&self, scheme: &str, host: &str) -> Result<(), String> {
-        if self.require_https && scheme != "https" {
+        if self.require_https && !scheme.eq_ignore_ascii_case("https") {
             return Err(format!("bridge 调用拒绝：非 HTTPS（scheme={scheme}）"));
         }
-        if !self.allowed_hosts.is_empty() && !self.allowed_hosts.contains(host) {
+        let host_lc = host.to_ascii_lowercase();
+        if !self.allowed_hosts.is_empty() && !self.allowed_hosts.contains(&host_lc) {
             return Err(format!("bridge 调用拒绝：host {host} 不在白名单中"));
         }
         Ok(())
@@ -93,6 +107,55 @@ mod tests {
     fn empty_allowlist_permits_all() {
         let guard = BridgeGuard::new(vec![], false);
         assert!(guard.validate("http", "any.com").is_ok());
+    }
+
+    // —— RS-129/130（审计 2026-09-25）——
+
+    #[test]
+    fn scheme_and_host_case_insensitive() {
+        // RS-129：HTTPS:// 目标与 Example.COM 白名单/请求大小写变体
+        // 不得被字面比较误杀
+        let guard = BridgeGuard::new(vec!["Example.COM".into()], true);
+        assert!(guard.validate("HTTPS", "example.com").is_ok());
+        assert!(guard.validate("https", "EXAMPLE.com").is_ok());
+        assert!(guard.validate("HttpS", "Example.Com").is_ok());
+        // 大小写不敏感 ≠ 全放行：scheme 非 https 仍拒绝
+        assert!(guard.validate("HTTPS-KEEP-ALIVE", "example.com").is_err());
+        assert!(guard.validate("http", "EXAMPLE.COM").is_err());
+    }
+
+    #[test]
+    fn host_with_port_is_literal_fail_closed() {
+        // RS-130：host 含端口按字面匹配——白名单 "example.com:8080"
+        // 不放行裸 "example.com"，反之亦然（端口归一属调用方职责；
+        // 字面差异只会拒绝不会放行 = fail-closed）
+        let guard = BridgeGuard::new(vec!["example.com:8080".into()], false);
+        assert!(guard.validate("https", "example.com:8080").is_ok());
+        assert!(
+            guard.validate("https", "example.com").is_err(),
+            "裸 host 不得命中带端口白名单条目"
+        );
+        let guard_bare = BridgeGuard::new(vec!["example.com".into()], false);
+        assert!(guard_bare.validate("https", "example.com").is_ok());
+        assert!(
+            guard_bare.validate("https", "example.com:8080").is_err(),
+            "带端口 host 不得命中裸白名单条目"
+        );
+    }
+
+    #[test]
+    fn require_https_gates_even_with_empty_allowlist() {
+        // RS-130：组合语义——HTTPS 门禁独立于白名单：
+        // 空白名单 + require_https 时 http 目标必须拒绝（此前仅测
+        // 「空白名单+非 https」与「非空白名单+https」两半边）
+        let guard = BridgeGuard::new(vec![], true);
+        assert!(guard.validate("http", "any.com").is_err());
+        assert!(guard.validate("https", "any.com").is_ok());
+        // 组合面：白名单命中 + scheme 违规 → 仍拒绝（scheme 先判）
+        let strict = BridgeGuard::new(vec!["example.com".into()], true);
+        assert!(strict.validate("http", "example.com").is_err());
+        assert!(strict.validate("https", "not-allowed.com").is_err());
+        assert!(strict.validate("https", "example.com").is_ok());
     }
 
     // —— 注入脚本质量断言（防回归：注释与实现保持一致，且覆盖所有网络出口）——

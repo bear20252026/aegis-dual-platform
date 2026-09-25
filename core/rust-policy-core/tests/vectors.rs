@@ -83,7 +83,7 @@ fn update_manifest_duplicate_key_counts_once() {
         json!({"key_id": "k1", "sig": "AAAA"}),
         json!({"key_id": "k1", "sig": "BBBB"}),
     ];
-    let payload = canonical_unsigned(&json!({"version": "1.2.3"}));
+    let payload = canonical_unsigned(&json!({"version": "1.2.3"})).unwrap();
     // 重复 key 只计一次（不足 threshold 2——即使同 key 两条签名）
     assert!(!verify_threshold(&keys, &sigs, &payload, 2));
 }
@@ -91,8 +91,8 @@ fn update_manifest_duplicate_key_counts_once() {
 #[test]
 fn canonical_json_deterministic() {
     // TUF canonical JSON：键排序 + 紧凑——确定性（签名验证前提）
-    let a = canonical_unsigned(&json!({"b": 2, "a": 1}));
-    let b = canonical_unsigned(&json!({"a": 1, "b": 2}));
+    let a = canonical_unsigned(&json!({"b": 2, "a": 1})).unwrap();
+    let b = canonical_unsigned(&json!({"a": 1, "b": 2})).unwrap();
     assert_eq!(a, b, "canonicalization 必须确定（与键顺序无关）");
 }
 
@@ -114,7 +114,9 @@ fn canonical_json_matches_python_golden_vectors() {
         let expected_hex = v["expected_canonical_hex"].as_str().unwrap_or_else(|| {
             panic!("向量 {name} 缺少 expected_canonical_hex");
         });
-        let actual = canonical_unsigned(&v["manifest"]);
+        let actual = canonical_unsigned(&v["manifest"]).unwrap_or_else(|_| {
+            panic!("golden 向量 {name} canonical 失败（含浮点？RS-127 fail-closed）");
+        });
         let actual_hex: String = actual.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
             actual_hex, expected_hex,

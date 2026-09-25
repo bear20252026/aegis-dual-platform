@@ -18,48 +18,86 @@ use ed25519_dalek::{Signature, VerifyingKey};
 ///    产生非法或歧义 canonical 字节，签名两端校验不一致 = 验证旁路面）。
 /// 字节级一致性由 `contracts/vectors/update-manifest-canonical.json`
 /// golden 向量锁定（Python 侧生成、Rust 断言——tests/vectors.rs 消费）。
-pub fn canonical_unsigned(manifest: &serde_json::Value) -> Vec<u8> {
+///
+/// RS-127（审计 2026-09-25）：返回 `Result`——manifest 含**非整型数值**
+/// （浮点）时 fail-closed 拒绝：`f64::to_string` 与 Python `json.dumps`
+/// 存在字节级漂移（如 serde `1e30` vs Python `1e+30`），漂移即签名两端
+/// canonical 字节不一致 = 验证失败面。manifest schema（version.schema.json）
+/// 不含浮点字段——含浮点即非法载荷，拒绝而非静默产出漂移字节。
+/// RS-127（审计 2026-09-25）：canonical 失败（manifest 含非整型数值）的
+/// 错误标记类型——fail-closed 拒绝不可确定性序列化的载荷。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CanonicalError;
+
+pub fn canonical_unsigned(manifest: &serde_json::Value) -> Result<Vec<u8>, CanonicalError> {
     let mut bytes = Vec::new();
     match manifest.as_object() {
-        // 仅剔除顶层 signatures（Python 字典推导同语义——嵌套对象不动）
-        Some(map) => {
-            let mut filtered = map.clone();
-            filtered.remove("signatures");
-            canonical_write(&serde_json::Value::Object(filtered), &mut bytes);
-        }
-        None => canonical_write(manifest, &mut bytes),
+        // 仅剔除顶层 signatures（Python 字典推导同语义——嵌套对象不动）。
+        // RS-126（审计 2026-09-25）：键过滤遍历替代整 map clone——
+        // 此前 clone 整个顶层对象再 remove，O(map) 堆分配纯属浪费
+        Some(map) => canonical_write_object(map, &mut bytes, Some("signatures"))?,
+        None => canonical_write(manifest, &mut bytes)?,
     }
-    bytes
+    Ok(bytes)
 }
 
-fn canonical_write(value: &serde_json::Value, out: &mut Vec<u8>) {
-    match value {
-        serde_json::Value::Object(map) => {
-            out.push(b'{');
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            for (i, key) in keys.iter().enumerate() {
-                if i > 0 {
-                    out.push(b',');
-                }
-                write_json_string(key, out);
-                out.push(b':');
-                canonical_write(&map[*key], out);
-            }
-            out.push(b'}');
+/// 顶层对象写入（RS-126：skip_key 过滤替代 clone+remove）。
+fn canonical_write_object(
+    map: &serde_json::Map<String, serde_json::Value>,
+    out: &mut Vec<u8>,
+    skip_key: Option<&str>,
+) -> Result<(), CanonicalError> {
+    out.push(b'{');
+    let mut keys: Vec<&String> = map
+        .keys()
+        .filter(|k| Some(k.as_str()) != skip_key)
+        .collect();
+    keys.sort();
+    for (i, key) in keys.iter().enumerate() {
+        if i > 0 {
+            out.push(b',');
         }
+        write_json_string(key, out);
+        out.push(b':');
+        canonical_write(&map[*key], out)?;
+    }
+    out.push(b'}');
+    Ok(())
+}
+
+fn canonical_write(value: &serde_json::Value, out: &mut Vec<u8>) -> Result<(), CanonicalError> {
+    match value {
+        serde_json::Value::Object(map) => canonical_write_object(map, out, None),
         serde_json::Value::Array(arr) => {
             out.push(b'[');
             for (i, item) in arr.iter().enumerate() {
                 if i > 0 {
                     out.push(b',');
                 }
-                canonical_write(item, out);
+                canonical_write(item, out)?;
             }
             out.push(b']');
+            Ok(())
         }
-        serde_json::Value::String(s) => write_json_string(s, out),
-        other => out.extend_from_slice(other.to_string().as_bytes()),
+        serde_json::Value::String(s) => {
+            write_json_string(s, out);
+            Ok(())
+        }
+        serde_json::Value::Number(n) => {
+            // RS-127：仅整型（i64/u64）可确定性序列化——浮点 to_string
+            // 与 Python json.dumps 字节级漂移（1e30 vs 1e+30 等）即
+            // 签名验证失败面——fail-closed 拒绝
+            if n.is_i64() || n.is_u64() {
+                out.extend_from_slice(n.to_string().as_bytes());
+                Ok(())
+            } else {
+                Err(CanonicalError)
+            }
+        }
+        other => {
+            out.extend_from_slice(other.to_string().as_bytes());
+            Ok(())
+        }
     }
 }
 
@@ -238,5 +276,239 @@ mod tests {
     fn base64_rejects_length_one_mod_four() {
         assert!(base64_decode("A").is_err()); // index%4==1
         assert!(base64_decode("Zg").is_ok()); // 2 数据字符合法
+    }
+
+    // —— RS-125（审计 2026-09-25）：version_tuple 预发布/溢出——
+
+    #[test]
+    fn version_tuple_rejects_prerelease_suffix() {
+        // 预发布段参与 patch 解析即失败（fail-closed 拒绝）——
+        // 回滚到预发布清单不得通过 (major,minor,patch) 数值比较
+        assert_eq!(version_tuple("1.2.3-rc.1"), None);
+        assert_eq!(version_tuple("1.2.3-beta"), None);
+        assert_eq!(version_tuple("1.2.3+build.5"), None); // 构建元数据同样拒绝
+    }
+
+    #[test]
+    fn version_tuple_rejects_u64_overflow() {
+        // u64 溢出（> 18446744073709551615）必须拒绝——不得饱和或截断
+        assert_eq!(version_tuple("99999999999999999999.0.0"), None);
+        assert_eq!(version_tuple("1.99999999999999999999.0"), None);
+        assert_eq!(version_tuple("1.2.99999999999999999999"), None);
+    }
+
+    #[test]
+    fn version_tuple_rejects_extra_and_missing_segments() {
+        assert_eq!(version_tuple("1.2.3.4"), None); // 四段
+        assert_eq!(version_tuple("1.2"), None); // 两段
+        assert_eq!(version_tuple("1"), None); // 单段
+        assert_eq!(version_tuple(""), None); // 空串
+        assert_eq!(version_tuple("a.b.c"), None); // 非数字
+    }
+
+    #[test]
+    fn version_tuple_accepts_canonical_forms() {
+        assert_eq!(version_tuple("0.0.0"), Some((0, 0, 0)));
+        assert_eq!(version_tuple("1.2.3"), Some((1, 2, 3)));
+        // u64 上边界（不溢出）
+        assert_eq!(
+            version_tuple("18446744073709551615.0.0"),
+            Some((u64::MAX, 0, 0))
+        );
+    }
+
+    // —— RS-128（审计 2026-09-25）：base64 空串/URL-safe/空白——
+
+    #[test]
+    fn base64_empty_string_is_empty_output() {
+        // 空串合法输出空 Vec——verify_threshold 侧由 [u8;64] 长度检查兜底
+        assert_eq!(base64_decode("").unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn base64_rejects_urlsafe_alphabet() {
+        // 标准 base64 表（+ /）——URL-safe 变体字符（- _）不在表内，
+        // 必须拒绝（签名仅接受发布链标准编码）
+        assert!(base64_decode("a-G_").is_err());
+        assert!(base64_decode("-abc").is_err());
+    }
+
+    #[test]
+    fn base64_rejects_whitespace_contamination() {
+        // 空白字符（空格/换行/制表）不得容忍——防止签名载荷被注入截断
+        assert!(base64_decode("Zg==\n").is_err());
+        assert!(base64_decode(" Zg==").is_err());
+        assert!(base64_decode("Zg ==").is_err());
+    }
+
+    // —— RS-124（审计 2026-09-25）：verify_threshold 白盒分支——
+
+    use ed25519_dalek::{Signer, SigningKey};
+
+    /// 测试辅助：base64 标准编码（与 base64_decode 对偶）。
+    fn b64_encode(data: &[u8]) -> String {
+        const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::new();
+        for chunk in data.chunks(3) {
+            let b = [
+                chunk[0],
+                chunk.get(1).copied().unwrap_or(0),
+                chunk.get(2).copied().unwrap_or(0),
+            ];
+            let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+            out.push(TABLE[(n >> 18) as usize & 63] as char);
+            out.push(TABLE[(n >> 12) as usize & 63] as char);
+            out.push(if chunk.len() > 1 {
+                TABLE[(n >> 6) as usize & 63] as char
+            } else {
+                '='
+            });
+            out.push(if chunk.len() > 2 {
+                TABLE[n as usize & 63] as char
+            } else {
+                '='
+            });
+        }
+        out
+    }
+
+    /// 测试辅助：用固定种子密钥签名 canonical payload，返回
+    /// (key_id, 公钥字节, 签名条目)。
+    fn make_signature(
+        seed: [u8; 32],
+        key_id: &str,
+        payload: &[u8],
+    ) -> (String, Vec<u8>, serde_json::Value) {
+        let sk = SigningKey::from_bytes(&seed);
+        let vk = sk.verifying_key();
+        let sig = sk.sign(payload);
+        (
+            key_id.to_string(),
+            vk.as_bytes().to_vec(),
+            serde_json::json!({
+                "key_id": key_id,
+                "sig": b64_encode(&sig.to_bytes()),
+            }),
+        )
+    }
+
+    #[test]
+    fn threshold_zero_or_huge_always_rejected() {
+        // 白盒分支 1：threshold < 1 直接 false（空签名集也不可能通过）
+        let keys: std::collections::HashMap<String, Vec<u8>> = Default::default();
+        let payload = canonical_unsigned(&serde_json::json!({"version": "1.0.0"})).unwrap();
+        assert!(!verify_threshold(&keys, &[], &payload, 0));
+        // usize::MAX：永远达不到的阈值 = fail-closed（哪怕签名全有效）
+        let (kid, pubkey, sig) = make_signature([7u8; 32], "k1", &payload);
+        let mut keys = keys;
+        keys.insert(kid.clone(), pubkey);
+        assert!(!verify_threshold(&keys, &[sig], &payload, usize::MAX));
+    }
+
+    #[test]
+    fn duplicate_keyid_counts_once() {
+        // 白盒分支 2：重复 keyid 只计一次（TUF THRESHOLD counting）——
+        // 同一密钥签两次不得凑满 threshold=2
+        let payload = canonical_unsigned(&serde_json::json!({"version": "1.0.0"})).unwrap();
+        let (kid, pubkey, sig1) = make_signature([7u8; 32], "k1", &payload);
+        let (_, _, sig2) = make_signature([7u8; 32], "k1", &payload);
+        let mut keys = std::collections::HashMap::new();
+        keys.insert(kid, pubkey);
+        let sigs = vec![sig1, sig2];
+        assert!(verify_threshold(&keys, &sigs, &payload, 1));
+        assert!(
+            !verify_threshold(&keys, &sigs, &payload, 2),
+            "同一 keyid 的重复签名不得凑满阈值（防密钥复用凑数）"
+        );
+    }
+
+    #[test]
+    fn malformed_signature_entries_are_skipped() {
+        // 白盒分支 3：非对象 / 缺 key_id / 未知 key_id / 缺 sig /
+        // 非法 base64 / 签名长度错 / 公钥长度错——七类全部跳过，
+        // 仅有效签名计入（fail-closed：全部畸形时 threshold 1 也不通过）
+        let payload = canonical_unsigned(&serde_json::json!({"version": "1.0.0"})).unwrap();
+        let (kid, pubkey, good_sig) = make_signature([7u8; 32], "k1", &payload);
+        let mut keys = std::collections::HashMap::new();
+        keys.insert(kid.clone(), pubkey);
+        keys.insert("short-key".to_string(), vec![0u8; 10]); // 公钥长度错
+        let sigs = vec![
+            serde_json::json!(1),                                              // 非对象
+            serde_json::json!({"sig": "AA=="}),                                // 缺 key_id
+            serde_json::json!({"key_id": "ghost", "sig": "AA=="}),             // 未知 key_id
+            serde_json::json!({"key_id": kid}),                                // 缺 sig
+            serde_json::json!({"key_id": kid, "sig": "!!!"}),                  // 非法 base64
+            serde_json::json!({"key_id": kid, "sig": b64_encode(&[0u8; 10])}), // 签名长度错
+            serde_json::json!({"key_id": "short-key", "sig": b64_encode(&[0u8; 64])}), // 公钥长度错
+        ];
+        assert!(!verify_threshold(&keys, &sigs, &payload, 1));
+        // 混入一条有效签名后通过——畸形条目只跳过不拖累
+        let mut sigs = sigs;
+        sigs.push(good_sig);
+        assert!(verify_threshold(&keys, &sigs, &payload, 1));
+    }
+
+    #[test]
+    fn two_distinct_keys_meet_threshold_and_tamper_breaks() {
+        // 白盒分支 4：两个不同密钥各自有效签名凑满 threshold=2；
+        // 载荷被篡改后验证必须失败（verify_strict）
+        let payload = canonical_unsigned(&serde_json::json!({"version": "1.0.0"})).unwrap();
+        let (kid1, pub1, sig1) = make_signature([7u8; 32], "k1", &payload);
+        let (kid2, pub2, sig2) = make_signature([9u8; 32], "k2", &payload);
+        let mut keys = std::collections::HashMap::new();
+        keys.insert(kid1, pub1);
+        keys.insert(kid2, pub2);
+        let sigs = vec![sig1, sig2];
+        assert!(verify_threshold(&keys, &sigs, &payload, 2));
+        // 篡改载荷（多一个字段）→ canonical 字节变化 → 全部签名失效
+        let tampered =
+            canonical_unsigned(&serde_json::json!({"version": "1.0.0", "extra": 1})).unwrap();
+        assert!(!verify_threshold(&keys, &sigs, &tampered, 2));
+    }
+
+    // —— RS-126/127（审计 2026-09-25）：canonical 遍历跳过 + 浮点拒绝——
+
+    #[test]
+    fn canonical_skips_only_top_level_signatures() {
+        // RS-126 回归：顶层 signatures 剔除；嵌套同名键保留（Python 对齐）
+        let manifest = serde_json::json!({
+            "version": "1.0.0",
+            "signatures": [{"key_id": "k1"}],
+            "meta": {"signatures": "kept", "nested": true}
+        });
+        let bytes = canonical_unsigned(&manifest).unwrap();
+        let text = String::from_utf8(bytes).unwrap();
+        assert!(
+            !text.contains(r#""signatures":[{"#),
+            "顶层 signatures 必须剔除"
+        );
+        assert!(
+            text.contains(r#""signatures":"kept""#),
+            "嵌套 signatures 必须保留"
+        );
+        assert!(text.contains(r#""meta":{"#), "嵌套对象完整输出");
+    }
+
+    #[test]
+    fn canonical_rejects_float_numbers_failclosed() {
+        // RS-127：浮点 to_string 与 Python json.dumps 字节级漂移
+        // （1e30 vs 1e+30）——非整型数值 fail-closed 拒绝
+        assert!(
+            canonical_unsigned(&serde_json::json!({"version": "1.0.0", "score": 1.5})).is_err()
+        );
+        // 整数值的 f64 形态（JSON 里 2.0）同样拒绝——Python 侧输出 "2.0"
+        // 与整型 "2" 漂移，无法确定性对齐
+        assert!(canonical_unsigned(&serde_json::json!({"version": "1.0.0", "n": 2.0})).is_err());
+        assert!(canonical_unsigned(&serde_json::json!({"version": "1.0.0", "n": 1e30})).is_err());
+        // 嵌套浮点同样拒绝
+        assert!(
+            canonical_unsigned(&serde_json::json!({"a": {"b": [1, 2.5]}})).is_err(),
+            "嵌套数组内的浮点也必须拒绝"
+        );
+        // 整型照常通过
+        assert!(canonical_unsigned(
+            &serde_json::json!({"a": 1, "b": -5, "c": 18446744073709551615u64})
+        )
+        .is_ok());
     }
 }

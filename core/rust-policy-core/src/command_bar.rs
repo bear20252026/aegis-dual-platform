@@ -243,8 +243,12 @@ impl CommandBar {
     var q = (query || '').toLowerCase();
     if (!q) return ENTRIES.slice(0, MAX_RESULTS);
     return ENTRIES.filter(function(e) {{
+      // RS-123（审计 2026-09-25）：与 Rust CommandEntry::matches 口径对齐——
+      // Rust 侧含 value 通道（keywords+title+subtitle+value），此前 JS 漏
+      // value（URL/action name 搜索结果两端不一致）
       return e.title.toLowerCase().indexOf(q) >= 0 ||
-             e.subtitle.toLowerCase().indexOf(q) >= 0;
+             e.subtitle.toLowerCase().indexOf(q) >= 0 ||
+             e.value.toLowerCase().indexOf(q) >= 0;
     }}).slice(0, MAX_RESULTS);
   }}
 
@@ -391,6 +395,79 @@ mod tests {
         assert!(
             script.contains("/^https?:\\/\\//i.test(entry.value)"),
             "execute 必须保留 http/https scheme 门禁"
+        );
+    }
+
+    // —— RS-122/123（审计 2026-09-25）——
+
+    #[test]
+    fn empty_entries_search_returns_empty() {
+        // RS-122：空集搜索——空查询与非空查询均不得 panic / 返回幻影条目
+        let cb = CommandBar::new();
+        assert!(cb.search("").is_empty());
+        assert!(cb.search("anything").is_empty());
+    }
+
+    #[test]
+    fn zero_max_results_yields_empty_even_for_empty_query() {
+        // RS-122：max_results=0 是合法配置（用户可设置为不展示）——
+        // 空查询也必须返回空集，不得绕过上限
+        let mut cb = CommandBar::new().with_max_results(0);
+        cb.add_entry(CommandEntry::navigate("GitHub", "https://github.com"));
+        assert!(cb.search("").is_empty());
+        assert!(cb.search("git").is_empty());
+    }
+
+    #[test]
+    fn unicode_case_folding_matches() {
+        // RS-122：to_lowercase 全 Unicode 折叠——带音标/非 ASCII 标题
+        // 与查询的大小写变体必须互相命中
+        let mut cb = CommandBar::new();
+        cb.add_entry(CommandEntry::navigate("Über Straße Café", "https://e.com"));
+        assert!(cb.search("über").len() == 1, "查询小写 ü 必须命中");
+        assert!(cb.search("ÜBER").len() == 1, "大写查询折叠后必须命中");
+        assert!(cb.search("CAFÉ").len() == 1);
+        // 土耳其语式 İ 折叠：İ 小写化 = "i" + U+0307（两码元）——
+        // 同形查询折叠后一致命中；裸 "i" 与 "i̇" 非子串关系（口径锁定：
+        // 仅 to_lowercase，不做 NFKC 归一）
+        let mut cb2 = CommandBar::new();
+        cb2.add_entry(CommandEntry::navigate("İstanbul Guide", "https://e.com"));
+        assert!(cb2.search("İstanbul").len() == 1, "同形查询折叠后必须命中");
+        assert!(
+            cb2.search("istanbul").is_empty(),
+            "裸 i 与 i+U+0307 非子串关系——口径仅 to_lowercase（锁定防止误判为 bug）"
+        );
+    }
+
+    #[test]
+    fn search_covers_value_channel() {
+        // RS-123：Rust matches() 覆盖 value 通道——按 URL 尾段/action name
+        // 搜索必须命中（与 JS 注入脚本口径一致，断言见下一测试）
+        let mut cb = CommandBar::new();
+        cb.add_entry(CommandEntry::action("刷新", "刷新当前页面", "reload"));
+        assert!(
+            cb.search("reload").len() == 1,
+            "value（action name）通道必须参与匹配"
+        );
+        cb.add_entry(CommandEntry::navigate(
+            "X",
+            "https://deep.example.com/secret/page",
+        ));
+        assert!(
+            cb.search("secret/page").len() == 1,
+            "value（URL）通道必须参与匹配"
+        );
+    }
+
+    #[test]
+    fn script_search_aligns_with_rust_value_channel() {
+        // RS-123 回归：JS search 必须检查 value 通道（此前漏掉——
+        // 与 Rust matches() 口径漂移）
+        let cb = CommandBar::new();
+        let script = cb.inject_script();
+        assert!(
+            script.contains("e.value.toLowerCase().indexOf(q) >= 0"),
+            "JS search 必须覆盖 value 通道（与 Rust 口径对齐）"
         );
     }
 }
