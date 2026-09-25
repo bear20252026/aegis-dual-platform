@@ -15,6 +15,7 @@ public partial class BookmarkManagerWindow : Window
     private readonly BookmarkStore _bookmarks;
     private readonly MainWindow? _owner;
     private readonly ObservableCollection<BookmarkRow> _rows = new();
+    private System.Windows.Threading.DispatcherTimer? _searchDebounce;
 
     public BookmarkManagerWindow(BookmarkStore bookmarks, MainWindow? owner = null)
     {
@@ -28,6 +29,13 @@ public partial class BookmarkManagerWindow : Window
 
     /// <summary>主窗口主题联动（浅色模式下不再永远深色）。</summary>
     public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
+
+    protected override void OnClosed(EventArgs e)
+    {
+        // CS-032：关闭时停防抖定时器（避免 timer 持窗口引用延迟回收）
+        _searchDebounce?.Stop();
+        base.OnClosed(e);
+    }
 
     private void Reload(string query)
     {
@@ -48,7 +56,22 @@ public partial class BookmarkManagerWindow : Window
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
-        Reload(SearchBox.Text);
+        // CS-032（审计 2026-09-25）：200ms 防抖——此前每键入一字符即全表加载
+        //（All() 每次全量 SELECT + 过滤），长书签列表输入卡顿
+        if (_searchDebounce is null)
+        {
+            _searchDebounce = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(200)
+            };
+            _searchDebounce.Tick += (_, _) =>
+            {
+                _searchDebounce?.Stop();
+                Reload(SearchBox.Text);
+            };
+        }
+        _searchDebounce.Stop();
+        _searchDebounce.Start();
     }
 
     private void Edit_Click(object sender, RoutedEventArgs e)

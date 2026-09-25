@@ -1,5 +1,6 @@
 namespace Aegis.Windows.Core.Tests;
 
+using System;
 using System.Collections.ObjectModel;
 using System.Threading;
 using Aegis.Windows.Chrome;
@@ -49,6 +50,40 @@ public sealed class WindowSmokeTests
             Assert.Equal(new DateTime(2026, 9, 6), field.SelectedDate);
             Assert.Equal("2026-09-06", field.FieldText);
         });
+    }
+
+    // ===== CS-040/041（审计 2026-09-25）：HistoryWindow 静态分支直测 =====
+
+    [Theory]
+    [InlineData("未知日期", "未知日期")]       // 分支 1：哨兵串原样透传
+    [InlineData("not-a-date", "not-a-date")]   // 分支 2：非法格式原样透传
+    public void HistoryWindow_DateLabel_PassthroughBranches(string input, string expected)
+    {
+        Assert.Equal(expected, HistoryWindow.DateLabel(input));
+    }
+
+    [Fact]
+    public void HistoryWindow_DateLabel_TodayYesterdayAndWeekdayBranches()
+    {
+        var today = DateTime.Today;
+        var yest = today.AddDays(-1);
+        // 分支 3/4/5：今天 / 昨天 / 其他（星期标注）
+        Assert.Multiple(
+            () => Assert.Contains("今天", HistoryWindow.DateLabel(today.ToString("yyyy-MM-dd"))),
+            () => Assert.Contains("昨天", HistoryWindow.DateLabel(yest.ToString("yyyy-MM-dd"))),
+            () => Assert.Contains("月", HistoryWindow.DateLabel(today.AddDays(-2).ToString("yyyy-MM-dd"))));
+    }
+
+    [Fact]
+    public void HistoryWindow_ParseLocalTime_CoversAllBranches()
+    {
+        // 合法 ISO → HH:mm 本地时刻
+        var parsed = HistoryWindow.ParseLocalTime("2026-09-25T08:30:00Z");
+        Assert.Matches(@"^\d{2}:\d{2}$", parsed);
+        // 非法但长度足够 → 截取 11..16 的 HH:mm 片段（99 月使 TryParse 失败）
+        Assert.Equal("08:30", HistoryWindow.ParseLocalTime("9999-99-99T08:30:99"));
+        // 过短 → 空串
+        Assert.Equal(string.Empty, HistoryWindow.ParseLocalTime("short"));
     }
 
     private static void RunSta(Action action)

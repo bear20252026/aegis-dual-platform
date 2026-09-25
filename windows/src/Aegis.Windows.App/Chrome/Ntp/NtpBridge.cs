@@ -46,8 +46,12 @@ public sealed class NtpBridge
         && uri.IsDefaultPort;
 
     /// <summary>分发一条 WebMessage（JSON）。非受信来源/格式非法 → 静默忽略。
-    /// respond 注入由调用方提供（PostWebMessageAsJson）——本类不持有 WebView。</summary>
-    public void TryHandle(string? source, string messageJson, Action<object?> respond)
+    /// respond 注入由调用方提供（PostWebMessageAsJson）——本类不持有 WebView。
+    /// CS-031（审计 2026-09-25）：importScan/importBookmarks/importHistory 为
+    /// 文件 I/O 密集操作——宿主传入 marshalToCaller（Dispatcher.BeginInvoke）时
+    /// 自动 Task.Run 移出 UI 线程、完成后回投；不传则保持同步（测试直调路径）。</summary>
+    public void TryHandle(string? source, string messageJson, Action<object?> respond,
+        Action<Action>? marshalToCaller = null)
     {
         if (!IsTrustedSource(source))
             return;
@@ -72,6 +76,30 @@ public sealed class NtpBridge
         catch (JsonException)
         {
             return;  // 非协议消息忽略
+        }
+        // CS-031：导入三操作 = 浏览器配置文件/历史库文件 I/O——UI 线程同步跑
+        // 会卡住整个窗口。宿主提供调度器时：Task.Run 执行 I/O，完成后经
+        // marshalToCaller 回投 UI 线程调 respond（PostWebMessageAsJson 的
+        // 线程要求）。args 为独立 Clone（父 document 已释放仍可跨线程读）。
+        if (marshalToCaller is not null
+            && op is "importScan" or "importBookmarks" or "importHistory")
+        {
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                object? result;
+                try
+                {
+                    result = Dispatch(op, args);
+                }
+                catch (Exception ex)
+                {
+                    // 单次导入失败不抛——fail-closed 返回 null，前端导入态复位
+                    Core.Security.SecurityLog.Write($"[ntp] import failed: {ex.Message}");
+                    result = null;
+                }
+                marshalToCaller(() => respond(new { __aegisRes = 1, id, result }));
+            });
+            return;
         }
         respond(new { __aegisRes = 1, id, result = Dispatch(op, args) });
     }

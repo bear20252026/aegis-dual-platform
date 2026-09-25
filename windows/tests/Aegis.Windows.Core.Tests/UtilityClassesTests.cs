@@ -123,4 +123,20 @@ public class UtilityClassesTests
     {
         Assert.False(TrackerList.IsTracker(host!));
     }
+
+    // ===== CS-039（审计 2026-09-25）：IsSameSite 严格同站判定零覆盖补齐 =====
+
+    [Theory]
+    [InlineData("example.com", "example.com", true)]      // 精确相等
+    [InlineData("www.example.com", "example.com", true)]  // 子域后缀命中
+    [InlineData("WWW.Example.COM", "example.com", true)]  // 大小写不敏感
+    [InlineData("example.com.", "example.com", true)]     // 尾点归一
+    [InlineData("evilexample.com", "example.com", false)] // 前缀伪装不误判
+    [InlineData("example.com.evil.io", "example.com", false)] // 清单域作前缀不误判
+    [InlineData("other.org", "example.com", false)]       // 完全不同域
+    public void TrackerList_IsSameSite_CoversBoundaryCases(
+        string host, string pageHost, bool expected)
+    {
+        Assert.Equal(expected, TrackerList.IsSameSite(host, pageHost));
+    }
 }

@@ -29,8 +29,10 @@ public static class ZoomStore
     {
         lock (Gate)
         {
+            // CS-036（审计 2026-09-25）：上下界同时钳制——此前只校验下界，
+            // 持久层脏值（z=99）会原样返回驱动 WebView2 非法缩放
             return host is not null && _map.TryGetValue(host, out var z)
-                && z >= MinZoom - 0.001 ? z : 1.0;
+                && z >= MinZoom - 0.001 ? Math.Clamp(z, MinZoom, MaxZoom) : 1.0;
         }
     }
 

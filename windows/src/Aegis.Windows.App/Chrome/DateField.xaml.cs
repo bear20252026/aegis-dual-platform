@@ -143,6 +143,10 @@ public partial class DateField : UserControl
                 button.BorderThickness = new Thickness(0);
             }
         }
+
+        // CS-035：边界月份禁用导航按钮（与点击钳制双保险——禁用态对用户可见）
+        PrevMonthButton.IsEnabled = !(_year <= MinYear && _month == 1);
+        NextMonthButton.IsEnabled = !(_year >= MaxYear && _month == 12);
     }
 
     private void FieldButton_Click(object sender, RoutedEventArgs e)
@@ -159,14 +163,23 @@ public partial class DateField : UserControl
         }
     }
 
+    // CS-035（审计 2026-09-25）：年份边界钳制——DateTime 支持 1..9999 年，
+    // 此前连点 ‹/› 到边界即 new DateTime(0/10000,…) 抛 ArgumentOutOfRangeException
+    private const int MinYear = 1;
+    private const int MaxYear = 9999;
+
     private void PrevMonth_Click(object sender, RoutedEventArgs e)
     {
+        if (_year <= MinYear)
+            return;
         (_year, _month) = _month == 1 ? (_year - 1, 12) : (_year, _month - 1);
         RenderMonth();
     }
 
     private void NextMonth_Click(object sender, RoutedEventArgs e)
     {
+        if (_year >= MaxYear)
+            return;
         (_year, _month) = _month == 12 ? (_year + 1, 1) : (_year, _month + 1);
         RenderMonth();
     }

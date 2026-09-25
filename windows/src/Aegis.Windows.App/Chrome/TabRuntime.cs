@@ -202,4 +202,22 @@ public sealed class TabRuntime : IDisposable
         Host.Dispose();
         Control.Dispose();
     }
+
+    /// <summary>CS-038（审计 2026-09-25）：设置导航地址的统一容错入口
+    /// （单源——此前 MainWindow/InPrivateWindow 各持一份相同实现，存在漂移面）。
+    /// 地址非法/控件已释放时拒绝返回 false 而非抛异常。</summary>
+    public static bool Navigate(TabRuntime runtime, string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            return false;
+        try
+        {
+            runtime.Control.Source = uri;
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;  // 控件已释放/竞态——安全丢弃
+        }
+    }
 }

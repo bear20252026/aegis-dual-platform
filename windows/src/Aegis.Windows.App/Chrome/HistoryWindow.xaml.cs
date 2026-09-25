@@ -79,12 +79,14 @@ public partial class HistoryWindow : Window
         var today = DateTime.Today;
         from = null;
         to = null;
-        if (ChipToday.IsChecked == true) { from = to = today.ToString("yyyy-MM-dd"); }
-        else if (ChipYesterday.IsChecked == true) { var y = today.AddDays(-1); from = to = y.ToString("yyyy-MM-dd"); }
-        else if (ChipWeek.IsChecked == true) { from = today.AddDays(-6).ToString("yyyy-MM-dd"); to = today.ToString("yyyy-MM-dd"); }
-        else if (ChipMonth.IsChecked == true) { from = new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd"); to = today.ToString("yyyy-MM-dd"); }
-        else if (ChipRange.IsChecked == true) { RangePanel.Visibility = Visibility.Visible; from = RangeFrom.SelectedDate?.ToString("yyyy-MM-dd"); to = RangeTo.SelectedDate?.ToString("yyyy-MM-dd"); }
-        else if (CustomDate.SelectedDate is { } d) { from = to = d.ToString("yyyy-MM-dd"); }
+        // CS-034（审计 2026-09-25）：ToString 统一 InvariantCulture——日期串
+        // 进 SQLite 比较，本土化数字文化（如本土数字位）下会破坏比较语义
+        if (ChipToday.IsChecked == true) { from = to = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (ChipYesterday.IsChecked == true) { var y = today.AddDays(-1); from = to = y.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (ChipWeek.IsChecked == true) { from = today.AddDays(-6).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); to = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (ChipMonth.IsChecked == true) { from = new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); to = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (ChipRange.IsChecked == true) { RangePanel.Visibility = Visibility.Visible; from = RangeFrom.SelectedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); to = RangeTo.SelectedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (CustomDate.SelectedDate is { } d) { from = to = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
     }
 
     /// <summary>按页加载：只查询当前页，页码跳转不累积内存。</summary>
@@ -179,7 +181,7 @@ public partial class HistoryWindow : Window
         _ => "星期日",
     };
 
-    private static string ParseLocalTime(string iso)
+    internal static string ParseLocalTime(string iso)
     {
         if (DateTimeOffset.TryParse(iso, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeLocal, out var dto))
@@ -246,7 +248,19 @@ public partial class HistoryWindow : Window
         if (fe.Tag is long tag) id = tag;
         else if (fe.DataContext is HistoryRow row) id = row.Id;
         if (id <= 0) return;
-        _history.Delete(id);
+        try
+        {
+            _history.Delete(id);
+        }
+        catch (Exception ex)
+        {
+            // CS-033（审计 2026-09-25）：删除失败（库锁/磁盘）不再炸 UI——
+            // 复用 EmptyHint 反馈错误，列表保持现状
+            EmptyHint.Visibility = Visibility.Visible;
+            EmptyHint.Text = $"删除失败：{ex.Message}";
+            Aegis.Windows.Core.Security.SecurityLog.Write($"[history] delete failed id={id}: {ex.Message}");
+            return;
+        }
         ApplyFilter();
     }
 
@@ -258,7 +272,18 @@ public partial class HistoryWindow : Window
             "清除历史", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (confirmed != MessageBoxResult.Yes)
             return;
-        _history.Clear();
+        try
+        {
+            _history.Clear();
+        }
+        catch (Exception ex)
+        {
+            // CS-033：清除失败提示后返回（不误报"已清空"）
+            EmptyHint.Visibility = Visibility.Visible;
+            EmptyHint.Text = $"清除失败：{ex.Message}";
+            Aegis.Windows.Core.Security.SecurityLog.Write($"[history] clear failed: {ex.Message}");
+            return;
+        }
         ApplyFilter();
         MessageBox.Show(this, "历史记录已清空。", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
     }

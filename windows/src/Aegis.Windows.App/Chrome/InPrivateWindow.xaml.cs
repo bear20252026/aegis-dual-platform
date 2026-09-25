@@ -87,7 +87,7 @@ public partial class InPrivateWindow : Window
                 }
                 else
                 {
-                    SafeNavigate(runtime, tab.Url);
+                    TabRuntime.Navigate(runtime, tab.Url);
                 }
             };
             runtime.NavigationCompleted += (_, _) => Dispatcher.BeginInvoke(() => SyncAddressBar(tab));
@@ -141,7 +141,9 @@ public partial class InPrivateWindow : Window
                         {
                             // 发送方已销毁——响应无处可达，静默丢弃
                         }
-                    });
+                    },
+                    // CS-031：导入 I/O 移出 UI 线程，完成后回投 UI 线程注入响应
+                    action => Dispatcher.BeginInvoke(action));
             }
             catch (Exception ex)
             {
@@ -149,22 +151,6 @@ public partial class InPrivateWindow : Window
                     $"[inprivate][ntp] 消息处理异常: {ex.GetType().Name}: {ex.Message}");
             }
         };
-    }
-
-    /// <summary>设置导航地址的统一容错入口（地址非法/控件已释放时拒绝而不是抛）。</summary>
-    private static bool SafeNavigate(TabRuntime runtime, string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return false;
-        try
-        {
-            runtime.Control.Source = uri;
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;  // 控件已释放/竞态——安全丢弃
-        }
     }
 
     private void OnTabClosed(string tabId) => _runtimeCoordinator.Close(tabId);
@@ -212,7 +198,7 @@ public partial class InPrivateWindow : Window
         var target = UrlNormalizer.Normalize(AddressBar.Text, _engineKey);
         if (target is null || _activeTabId is null || !_runtimes.TryGetValue(_activeTabId, out var rt))
             return;
-        SafeNavigate(rt, target);
+        TabRuntime.Navigate(rt, target);
     }
 
     private void AddressBar_KeyDown(object sender, KeyEventArgs e)

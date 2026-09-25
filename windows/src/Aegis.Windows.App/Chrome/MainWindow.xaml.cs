@@ -124,21 +124,6 @@ public partial class MainWindow : Window
 
     /// <summary>设置导航地址的统一容错入口（地址非法/控件已释放时拒绝而不是
     /// 抛异常——地址栏、书签、NTP 桥全部经此）。</summary>
-    private static bool SafeNavigate(TabRuntime runtime, string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return false;
-        try
-        {
-            runtime.Control.Source = uri;
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;  // 控件已释放/竞态——安全丢弃
-        }
-    }
-
     /// <summary>截断标题而不劈开代理对（emoji 等——此前 b.Title[..14] 可把
     /// 双字符字形切成乱码）。</summary>
     private static string TruncateTitle(string title, int maxChars)
@@ -173,7 +158,7 @@ public partial class MainWindow : Window
             {
                 if (s is System.Windows.Controls.Button { Tag: string url } && _activeTabId is not null
                     && _runtimes.TryGetValue(_activeTabId, out var rt))
-                    SafeNavigate(rt, url);
+                    TabRuntime.Navigate(rt, url);
             };
             BookmarkBarItems.Items.Add(btn);
         }
@@ -319,7 +304,7 @@ public partial class MainWindow : Window
                 // 普通站点：初始化（含虚拟主机映射）就绪后立即导航。
                 // 修复：此前用 else if (!_restoring) 导致会话恢复时普通标签
                 // 初始化后不导航（停留在空标签）——恢复与否都应导航。
-                SafeNavigate(runtime, tab.Url);
+                TabRuntime.Navigate(runtime, tab.Url);
             }
             // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
             // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
@@ -349,7 +334,9 @@ public partial class MainWindow : Window
                             {
                                 // 发送标签已随会话重建销毁——响应无处可达，静默丢弃
                             }
-                        });
+                        },
+                        // CS-031：导入 I/O 移出 UI 线程，完成后回投 UI 线程注入响应
+                        action => Dispatcher.BeginInvoke(action));
                 }
                 catch (Exception ex)
                 {
@@ -831,7 +818,7 @@ public partial class MainWindow : Window
         // new Uri(target)，"http://" 类输入抛 UriFormatException）
         if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var runtime))
         {
-            if (!SafeNavigate(runtime, target))
+            if (!TabRuntime.Navigate(runtime, target))
             {
                 ErrorPage.Text = "无法导航：地址无效。";
                 ErrorPagePanel.Visibility = Visibility.Visible;
@@ -908,7 +895,7 @@ public partial class MainWindow : Window
     public void OpenInActiveTab(string url)
     {
         if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var runtime))
-            SafeNavigate(runtime, url);
+            TabRuntime.Navigate(runtime, url);
     }
 
     private void BookmarkBarItem_Click(object sender, RoutedEventArgs e)
@@ -916,7 +903,7 @@ public partial class MainWindow : Window
         if (sender is System.Windows.Controls.Button { Tag: string url }
             && _activeTabId is not null
             && _runtimes.TryGetValue(_activeTabId, out var rt))
-            SafeNavigate(rt, url);
+            TabRuntime.Navigate(rt, url);
     }
 
     private void BookmarkManager_Click(object sender, RoutedEventArgs e)
@@ -1038,7 +1025,7 @@ public partial class MainWindow : Window
     private void Home_Click(object sender, RoutedEventArgs e)
     {
         if (ActiveRuntime() is { } runtime)
-            SafeNavigate(runtime, HomeUrl);
+            TabRuntime.Navigate(runtime, HomeUrl);
     }
 
     /// <summary>个人资料占位：无账号体系，点击聚焦地址栏（对齐 Edge 圆钮位置）。</summary>
