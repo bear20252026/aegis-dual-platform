@@ -148,7 +148,7 @@ public class UtilityClassesTests
     [InlineData(null!, "example.com", false)]             // CS-137：null 不抛
     [InlineData("example.com", "", false)]                // CS-137：空 pageHost 不同站
     public void TrackerList_IsSameSite_CoversBoundaryCases(
-        string host, string pageHost, bool expected)
+        string? host, string? pageHost, bool expected)
     {
         Assert.Equal(expected, TrackerList.IsSameSite(host, pageHost));
     }

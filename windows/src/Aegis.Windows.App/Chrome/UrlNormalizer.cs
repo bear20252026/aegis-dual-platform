@@ -74,6 +74,13 @@ public static class UrlNormalizer
         if (trimmed.Equals("about:blank", StringComparison.OrdinalIgnoreCase))
             return "about:blank";
 
+        // CS-140：裸 IPv6 字面量（"[::1]"/"::1"，可含端口/路径）——此前因不含
+        // 点号被当搜索词。URI 正典形态要求方括号，裸冒号形态归一为 [..] 补 http。
+        // 仅接手 '[' 或 ':' 起始的输入——字母起始（"fe80::1" 形如 scheme）维持
+        // 既有 fail-closed 拒绝路径。
+        if (trimmed[0] is '[' or ':' && IsIpv6Literal(trimmed))
+            return AsValidUriOrDefault("http://" + BracketIpv6(trimmed), trimmed, engineKey);
+
         var schemeMatch = SchemePrefix.Match(trimmed);
         if (schemeMatch is { Success: true } match)
         {
@@ -139,6 +146,32 @@ public static class UrlNormalizer
             && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
             return candidate;
         return EngineUrls.GetValueOrDefault(engineKey, EngineUrls[DefaultEngine]) + EscapeQuery(originalQuery);
+    }
+
+    /// <summary>CS-140：输入是否为 IPv6 字面量主机（方括号或裸冒号形态，可含端口/路径）。</summary>
+    private static bool IsIpv6Literal(string input)
+    {
+        var host = input;
+        var slash = host.IndexOf('/');
+        if (slash >= 0)
+            host = host[..slash];
+        if (host.StartsWith('['))
+        {
+            var close = host.IndexOf(']');
+            return close > 1 && System.Net.IPAddress.TryParse(host[1..close], out _);
+        }
+        return host.IndexOf(':') >= 0 && System.Net.IPAddress.TryParse(host, out _);
+    }
+
+    /// <summary>CS-140：裸 IPv6 主机补方括号（"::1" → "[::1]"，路径保留其后）。</summary>
+    private static string BracketIpv6(string input)
+    {
+        if (input.StartsWith('['))
+            return input;
+        var slash = input.IndexOf('/');
+        var host = slash >= 0 ? input[..slash] : input;
+        var rest = slash >= 0 ? input[slash..] : string.Empty;
+        return "[" + host + "]" + rest;
     }
 
     /// <summary>输入是否为显式本机名（localhost / *.localhost，可含端口）。

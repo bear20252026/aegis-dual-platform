@@ -108,4 +108,29 @@ public sealed class ChromeControllersTests
         var filtered = NtpBridgeFactory.FilterSources(sources, "chrome", s => s.Item1).ToList();
         Assert.Equal(new[] { 1, 3 }, filtered.Select(s => s.Item2));
     }
+
+    // ===== CS-145（审计 2026-09-26）：URL 去重忽略大小写（host 大小写变体） =====
+
+    [Fact]
+    public void MergeRows_DedupsUrlCaseInsensitively()
+    {
+        var rows = SuggestionController.MergeRows(
+            "same.test", new[] { Bm("甲", "https://same.test/x") },
+            new[] { He("乙", "https://SAME.TEST/x") }, 8);
+
+        var row = Assert.Single(rows);
+        Assert.Equal("书签", row.Kind);
+    }
+
+    // ===== CS-146（审计 2026-09-26）：建议弹层循环索引提纯直测 =====
+
+    [Theory]
+    [InlineData(0, 1, 8, 1)]    // 常规前进
+    [InlineData(7, 1, 8, 0)]    // 尾部环绕到首
+    [InlineData(0, -1, 8, 7)]   // 首部反向环绕到尾
+    [InlineData(3, 0, 8, 3)]    // 零步不动
+    [InlineData(0, -9, 8, 7)]   // 多步反向环绕
+    [InlineData(2, 16, 8, 2)]   // 整圈回原位
+    public void WrapIndex_CyclesWithinBounds(int index, int delta, int count, int expected) =>
+        Assert.Equal(expected, SuggestionController.WrapIndex(index, delta, count));
 }

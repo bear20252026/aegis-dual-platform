@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Chrome;
 
 using System;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -67,7 +68,9 @@ public sealed class ApprovalPanelController
         _origin.Text = e.Request.Origin;
         _path.Text = e.Request.Path;
         _scope.Text = e.Request.Scope;
-        _expiry.Text = $"此请求将在 {e.Request.ExpiresAt.ToLocalTime():yyyy-MM-dd HH:mm:ss} 过期。";
+        // CS-149：InvariantCulture——自定义格式串中 ":" 是时间分隔符占位符，
+        // 逗号/点分隔文化下过期时间显示漂移
+        _expiry.Text = $"此请求将在 {e.Request.ExpiresAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)} 过期。";
         _setNavigationEnabled(false);
         _overlay.Visibility = Visibility.Visible;
         Keyboard.Focus(_denyButton);

@@ -95,29 +95,35 @@ public sealed class SuggestionController
     }
 
     /// <summary>纯合并（可单测）：书签全表 + 历史命中 → 不区分大小写包含匹配、
-    /// URL 去重（书签优先）、上限截断。空标题回退显示 URL。</summary>
+    /// URL 去重（书签优先）、上限截断。空标题回退显示 URL。
+    /// CS-143：OrdinalIgnoreCase 直判——此前每行两串 ToLowerInvariant 堆分配；
+    /// CS-144：书签侧同样到量早退——此前仅历史侧 break、书签侧仍全表遍历；
+    /// CS-145：URL 去重忽略大小写（host 大小写变体不再重复占行）。</summary>
     public static List<SuggestionRow> MergeRows(
         string query,
         IEnumerable<Bookmark> bookmarks,
         IEnumerable<HistoryEntry> historyHits,
         int maxRows)
     {
-        var q = query.ToLowerInvariant();
         var rows = new List<SuggestionRow>();
-        var seenUrls = new HashSet<string>(StringComparer.Ordinal);
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var b in bookmarks)
-            if ((b.Title.ToLowerInvariant().Contains(q) || b.Url.ToLowerInvariant().Contains(q))
+        {
+            if (rows.Count >= maxRows)
+                break;
+            if ((b.Title.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || b.Url.Contains(query, StringComparison.OrdinalIgnoreCase))
                 && seenUrls.Add(b.Url))
                 rows.Add(new SuggestionRow(b.Url, string.IsNullOrWhiteSpace(b.Title) ? b.Url : b.Title, "书签"));
+        }
         foreach (var h in historyHits)
         {
-            if (h.Url.ToLowerInvariant().Contains(q) && seenUrls.Add(h.Url))
-            {
+            if (rows.Count >= maxRows)
+                break;
+            if (h.Url.Contains(query, StringComparison.OrdinalIgnoreCase) && seenUrls.Add(h.Url))
                 rows.Add(new SuggestionRow(h.Url, string.IsNullOrWhiteSpace(h.Title) ? h.Url : h.Title, "历史"));
-                if (rows.Count >= maxRows) break;
-            }
         }
-        return rows.Take(maxRows).ToList();
+        return rows;
     }
 
     /// <summary>选中建议项：关弹层、地址栏回填 URL 并导航。</summary>
@@ -137,9 +143,14 @@ public sealed class SuggestionController
     {
         if (_list.Items.Count == 0)
             return false;
-        _list.SelectedIndex = ((_list.SelectedIndex + delta) % _list.Items.Count + _list.Items.Count) % _list.Items.Count;
+        _list.SelectedIndex = WrapIndex(_list.SelectedIndex, delta, _list.Items.Count);
         return true;
     }
+
+    /// <summary>CS-146：循环索引换算提纯——环绕取模此前内联在
+    /// MoveSelection 中不可直测。</summary>
+    internal static int WrapIndex(int index, int delta, int count) =>
+        ((index + delta) % count + count) % count;
 
     /// <summary>取当前选中项（无选中返回 null）。</summary>
     public SuggestionRow? Selected() => _list.SelectedItem as SuggestionRow;

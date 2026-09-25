@@ -113,6 +113,40 @@ public sealed class ApprovalPanelControllerTests
     }
 
     [Fact]
+    public void Request_SameTabSecondRequest_KeepsPendingAndRefreshesPanel()
+    {
+        // CS-148：同标签二次 Request——不触发对自身的拒绝路径（resolve 仅对
+        // 不同标签调用），pending 保持、面板内容刷新
+        RunSta(() =>
+        {
+            var overlay = new StackPanel();
+            var (origin, path, scope, expiry) = (new TextBlock(), new TextBlock(), new TextBlock(), new TextBlock());
+            var deny = new Button();
+            var resolved = new System.Collections.Generic.List<string>();
+            var rejections = new System.Collections.Generic.List<string>();
+            var controller = new ApprovalPanelController(
+                overlay, origin, path, scope, expiry, deny,
+                _ => { },
+                id => { resolved.Add(id); return null; },
+                rejections.Add);
+            Aegis.Windows.WebView.NavigationConfirmationRequestedEventArgs Make(string nonce, string reqPath) =>
+                new(new ApprovalRequest(
+                    "https://example.com", "GET", reqPath, "navigation",
+                    DateTime.UtcNow.AddMinutes(2), nonce));
+
+
+            controller.Request("tab-a", Make("n-1", "/first"));
+            controller.Request("tab-a", Make("n-2", "/second"));
+
+            Assert.Equal("tab-a", controller.PendingTabId);
+            Assert.True(controller.IsVisible);
+            Assert.Equal("/second", path.Text);   // 面板内容已刷新
+            Assert.Empty(resolved);               // 同标签未尝试拒绝
+            Assert.Empty(rejections);
+        });
+    }
+
+    [Fact]
     public void TabStripDragControllerConstructs()
     {
         RunSta(() =>

@@ -59,8 +59,8 @@ public sealed class DownloadRecordStoreTests : IDisposable
         // CS-116：负/零 limit 此前按 SQLite 语义"无上限"全表返回——钳为 1
         for (var i = 0; i < 3; i++)
             _store.Add($"f{i}.bin", $"C:\\f{i}.bin", $"https://example.com/{i}", i, "t");
-        Assert.Equal(1, _store.All(limit: -1).Count);
-        Assert.Equal(1, _store.All(limit: 0).Count);
+        Assert.Single(_store.All(limit: -1));
+        Assert.Single(_store.All(limit: 0));
     }
 
     [Fact]

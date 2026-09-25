@@ -4,6 +4,7 @@ using System;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using Aegis.Windows.Core.Security;
 using Microsoft.Web.WebView2.Core;
 
 /// <summary>页内查找控制器（MainWindow 上帝对象拆分·第一批）：查找条开关、
@@ -59,7 +60,12 @@ public sealed class FindBarController
             await cw.ExecuteScriptAsync(BuildFindJs(query, backwards));
             _count.Text = count > 0 ? $"{count} 处" : "无结果";
         }
-        catch (Exception) { }
+        catch (Exception ex)
+        {
+            // CS-147：不再全吞——WebView 已释放/脚本竞态留痕安全日志（失败
+            // 本身不影响浏览，但零痕迹使「查找无响应」不可诊断）
+            SecurityLog.Write($"[findbar] 查找脚本执行失败: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     private static async Task<int> CountMatchesAsync(CoreWebView2 cw, string query)

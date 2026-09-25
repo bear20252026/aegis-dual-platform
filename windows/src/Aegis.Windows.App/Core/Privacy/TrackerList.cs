@@ -73,8 +73,9 @@ public static class TrackerList
     }
 
     /// <summary>是否同站（host 相等或为其子域——严格模式第三方判定）。
-    /// CS-137：尾字符+EndsWith(span 语义) 判定——此前 "." + p 每调用拼接分配。</summary>
-    public static bool IsSameSite(string host, string pageHost)
+    /// CS-137：尾字符+EndsWith(span 语义) 判定——此前 "." + p 每调用拼接分配。
+    /// 入参显式可空：null/空 host 一律不同站（不抛）。</summary>
+    public static bool IsSameSite(string? host, string? pageHost)
     {
         var h = (host ?? string.Empty).TrimEnd('.').ToLowerInvariant();
         var p = (pageHost ?? string.Empty).TrimEnd('.').ToLowerInvariant();
