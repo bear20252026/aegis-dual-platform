@@ -100,6 +100,24 @@ public sealed class HistoryStorePagingTests
             viaRecent.Entries.Select(e => e.Id));
     }
 
+    [Fact]
+    public void SingleEndedRangeCombinationsFilterCorrectly()
+    {
+        // CS-027：单端区间组合（仅 from / 仅 to）各自独立生效
+        var store = NewStore();
+        store.Add("https://a.example", "A");
+        var today = DateTime.Now.ToString("yyyy-MM-dd");
+
+        // 仅 from：未来下界 → 空；今天下界 → 命中
+        Assert.Empty(store.SearchRangePaged("", "2099-01-01", null).Entries);
+        Assert.Single(store.SearchRangePaged("", today, null).Entries);
+        // 仅 to：过去上界 → 空；今天上界 → 命中
+        Assert.Empty(store.SearchRangePaged("", null, "1999-01-01").Entries);
+        Assert.Single(store.SearchRangePaged("", null, today).Entries);
+        // 双端夹today → 命中
+        Assert.Single(store.SearchRangePaged("", "1999-01-01", "2099-01-01").Entries);
+    }
+
     private static HistoryStore NewStore() =>
         new(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
 }

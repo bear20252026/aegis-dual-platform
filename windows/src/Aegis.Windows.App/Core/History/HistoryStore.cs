@@ -78,6 +78,10 @@ public sealed class HistoryStore
 
     private static string LikePattern(string? query) => $"%{LikeEscape(query ?? string.Empty)}%";
 
+    /// <summary>CS-028（审计 2026-09-25）：LIMIT 绑定值统一下界钳制——SQLite
+    /// LIMIT 负值语义为"无上限"，此前 limit<=0 直接进 SQL（无界返回/无界内存）。</summary>
+    private static int ClampLimit(int limit) => Math.Max(1, limit);
+
     /// <summary>最近访问（时间倒序）。</summary>
     public IReadOnlyList<HistoryEntry> Recent(int limit = 200) =>
         Read("SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC LIMIT $lim", limit);
@@ -94,7 +98,7 @@ public sealed class HistoryStore
             ? "SELECT id, url, title, visited_at, visited_date FROM visits WHERE url LIKE $q ESCAPE '\\' OR title LIKE $q ESCAPE '\\' ORDER BY visited_at DESC LIMIT $lim"
             : "SELECT id, url, title, visited_at, visited_date FROM visits WHERE (url LIKE $q ESCAPE '\\' OR title LIKE $q ESCAPE '\\') AND visited_date = $d ORDER BY visited_at DESC LIMIT $lim";
         select.Parameters.AddWithValue("$q", LikePattern(query));
-        select.Parameters.AddWithValue("$lim", limit);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         if (!string.IsNullOrEmpty(date))
             select.Parameters.AddWithValue("$d", date);
         using var reader = select.ExecuteReader();
@@ -111,7 +115,7 @@ public sealed class HistoryStore
             FROM visits WHERE visited_date = $d ORDER BY visited_at DESC LIMIT $lim
             """;
         select.Parameters.AddWithValue("$d", date);
-        select.Parameters.AddWithValue("$lim", limit);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
     }
@@ -122,7 +126,7 @@ public sealed class HistoryStore
         using var connection = Open();
         using var select = connection.CreateCommand();
         select.CommandText = "SELECT DISTINCT visited_date FROM visits ORDER BY visited_date DESC LIMIT $lim";
-        select.Parameters.AddWithValue("$lim", limit);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();
         var list = new List<string>();
         while (reader.Read())
@@ -158,7 +162,7 @@ public sealed class HistoryStore
             select.Parameters.AddWithValue("$from", from);
         if (hasTo)
             select.Parameters.AddWithValue("$to", to);
-        select.Parameters.AddWithValue("$lim", limit);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
     }
@@ -177,7 +181,7 @@ public sealed class HistoryStore
         if (hasTo) clauses.Add("visited_date <= $to");
         select.CommandText = "SELECT COUNT(*) FROM visits" +
             (clauses.Count > 0 ? " WHERE " + string.Join(" AND ", clauses) : "");
-        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query)}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         return Convert.ToInt64(select.ExecuteScalar());
@@ -202,7 +206,7 @@ public sealed class HistoryStore
         select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
             string.Join(" AND ", clauses) +
             " ORDER BY visited_at DESC, id DESC LIMIT $ps OFFSET $off";
-        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query)}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         select.Parameters.AddWithValue("$ps", Math.Max(1, pageSize));
@@ -245,11 +249,11 @@ public sealed class HistoryStore
             "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
             string.Join(" AND ", clauses) +
             " ORDER BY visited_at DESC, id DESC LIMIT $lim";
-        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{query}%"); }
+        if (hasText) { select.Parameters.AddWithValue("$q", LikePattern(query)); select.Parameters.AddWithValue("$t", $"%{LikeEscape(query)}%"); }
         if (hasFrom) select.Parameters.AddWithValue("$from", from);
         if (hasTo) select.Parameters.AddWithValue("$to", to);
         if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
-        select.Parameters.AddWithValue("$lim", pageSize + 1);
+        select.Parameters.AddWithValue("$lim", ClampLimit(pageSize) + 1);
         return ReadPage(select, pageSize);
     }
 
@@ -262,7 +266,7 @@ public sealed class HistoryStore
             ? "SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC, id DESC LIMIT $lim"
             : "SELECT id, url, title, visited_at, visited_date FROM visits WHERE (visited_at, id) < ($ca, $cid) ORDER BY visited_at DESC, id DESC LIMIT $lim";
         if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
-        select.Parameters.AddWithValue("$lim", pageSize + 1);
+        select.Parameters.AddWithValue("$lim", ClampLimit(pageSize) + 1);
         return ReadPage(select, pageSize);
     }
 
@@ -303,7 +307,7 @@ public sealed class HistoryStore
         using var connection = Open();
         using var select = connection.CreateCommand();
         select.CommandText = sql;
-        select.Parameters.AddWithValue("$lim", limit);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
     }

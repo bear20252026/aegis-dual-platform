@@ -191,6 +191,14 @@ public sealed class BrowserPolicyBroker : IBroker
     public Decision RequestNavigationConfirmation(string sessionId, string tabId, ulong generation,
         string rawUrl, string scope)
     {
+        // CS-007（审计 2026-09-25）：KillSwitch 前置检查——确认请求同样属于
+        // 导航链入口，此前唯一未接 KillSwitch 的入口（AllowDownload/Evaluate/
+        // Approve/TryConsume 均已检查），紧急终止期间不得再登记新确认请求
+        if (KillSwitch.IsEngaged)
+        {
+            RecordAudit("deny", scope, RedactUrl(rawUrl), "kill_switch_engaged");
+            return new Decision.Deny(new DenyReason("kill_switch_engaged", "紧急终止开关已触发——全部导航冻结"));
+        }
         if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
             return nativeDenied;
         if (!_nativePolicyCoreRequired || _nativePolicyCoreBridge is null)

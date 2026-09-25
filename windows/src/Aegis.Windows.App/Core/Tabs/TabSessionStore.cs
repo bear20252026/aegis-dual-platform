@@ -13,6 +13,10 @@ using Microsoft.Data.Sqlite;
 public sealed class TabSessionStore
 {
     private readonly string _dbPath;
+    // CS-030（审计 2026-09-25）：DDL+迁移 once——此前每次 Open 都跑
+    // CREATE TABLE + PRAGMA table_info 迁移探测（低频库的纯开销）。
+    // 失败不置位——下次重试。
+    private volatile bool _schemaReady;
 
     public TabSessionStore(string dbPath) => _dbPath = dbPath;
 
@@ -113,32 +117,36 @@ public sealed class TabSessionStore
         try
         {
             connection.Open();
-            using var ensure = connection.CreateCommand();
-            ensure.CommandText = """
-                CREATE TABLE IF NOT EXISTS tabs(
-                    position INTEGER NOT NULL,
-                    tab_id TEXT NOT NULL,
-                    url TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    is_current INTEGER NOT NULL DEFAULT 0,
-                    is_pinned INTEGER NOT NULL DEFAULT 0)
-                """;
-            ensure.ExecuteNonQuery();
-            // 旧库迁移：补 is_pinned 列
-            var hasPinned = false;
-            using (var pragma = connection.CreateCommand())
+            if (!_schemaReady)
             {
-                pragma.CommandText = "PRAGMA table_info(tabs)";
-                using var reader = pragma.ExecuteReader();
-                while (reader.Read())
-                    if (string.Equals(reader.GetString(1), "is_pinned", StringComparison.OrdinalIgnoreCase))
-                        hasPinned = true;
-            }
-            if (!hasPinned)
-            {
-                using var alter = connection.CreateCommand();
-                alter.CommandText = "ALTER TABLE tabs ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0";
-                alter.ExecuteNonQuery();
+                using var ensure = connection.CreateCommand();
+                ensure.CommandText = """
+                    CREATE TABLE IF NOT EXISTS tabs(
+                        position INTEGER NOT NULL,
+                        tab_id TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        is_current INTEGER NOT NULL DEFAULT 0,
+                        is_pinned INTEGER NOT NULL DEFAULT 0)
+                    """;
+                ensure.ExecuteNonQuery();
+                // 旧库迁移：补 is_pinned 列
+                var hasPinned = false;
+                using (var pragma = connection.CreateCommand())
+                {
+                    pragma.CommandText = "PRAGMA table_info(tabs)";
+                    using var reader = pragma.ExecuteReader();
+                    while (reader.Read())
+                        if (string.Equals(reader.GetString(1), "is_pinned", StringComparison.OrdinalIgnoreCase))
+                            hasPinned = true;
+                }
+                if (!hasPinned)
+                {
+                    using var alter = connection.CreateCommand();
+                    alter.CommandText = "ALTER TABLE tabs ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0";
+                    alter.ExecuteNonQuery();
+                }
+                _schemaReady = true;
             }
             return connection;
         }

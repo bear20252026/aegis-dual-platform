@@ -1,4 +1,5 @@
 using Aegis.Windows.Broker;
+using Aegis.Windows.Core.Security;
 using Xunit;
 
 namespace Aegis.Windows.Broker.Tests;
@@ -247,5 +248,146 @@ public sealed class BrowserPolicyBrokerTests
         var broker = new BrowserPolicyBroker();
         Assert.True(broker.RegisterSession("session-1", "tab-1"));
         return broker;
+    }
+
+    // ===== CS-008..017（审计 2026-09-25）：KillSwitch 门禁 + Register/Consume/黑名单边界 =====
+
+    [Fact]
+    public void AllowDownload_KillSwitch_DeniesAndAudits()
+    {
+        // CS-008：紧急终止期间下载必须拒绝，且审计含 kill_switch_engaged
+        var broker = CreateRegisteredBroker();
+        broker.KillSwitch.Engage();
+
+        Assert.False(broker.AllowDownload("session-1", "tab-1", "https://example.com", "file.zip", userConfirmed: true));
+        Assert.Contains(broker.AuditLog, e =>
+            e.Decision == "deny" && e.Scope == "download" && e.Reason == "kill_switch_engaged");
+    }
+
+    [Fact]
+    public void EvaluateNavigation_KillSwitch_Denies()
+    {
+        // CS-009：紧急终止期间全部导航冻结（含已注册会话）
+        var broker = CreateRegisteredBroker();
+        broker.KillSwitch.Engage();
+
+        var decision = broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation");
+        var deny = Assert.IsType<Decision.Deny>(decision);
+        Assert.Equal("kill_switch_engaged", deny.Reason.Code);
+    }
+
+    [Fact]
+    public void RequestNavigationConfirmation_KillSwitch_Denies()
+    {
+        // CS-007 回归：确认请求入口同样接 KillSwitch（此前唯一未接的入口）
+        var broker = CreateRegisteredBroker();
+        broker.KillSwitch.Engage();
+
+        var decision = broker.RequestNavigationConfirmation(
+            "session-1", "tab-1", 0, "https://example.com/pay", "navigation");
+        var deny = Assert.IsType<Decision.Deny>(decision);
+        Assert.Equal("kill_switch_engaged", deny.Reason.Code);
+    }
+
+    [Fact]
+    public void RegisterSession_DuplicateSessionId_ReturnsFalse()
+    {
+        // CS-010：重复 sessionId 拒绝（会话池幂等保护）
+        var broker = new BrowserPolicyBroker();
+        Assert.True(broker.RegisterSession("session-1", "tab-1"));
+        Assert.False(broker.RegisterSession("session-1", "tab-2"));
+    }
+
+    [Fact]
+    public void RegisterSession_AbovePoolCap_ReturnsFalse()
+    {
+        // CS-011：会话池 1024 上限（与 Rust MAX_SESSIONS 对等）——超限 fail-closed
+        var broker = new BrowserPolicyBroker();
+        for (var i = 0; i < 1024; i++)
+            Assert.True(broker.RegisterSession($"session-{i}", $"tab-{i}"));
+        Assert.False(broker.RegisterSession("session-overflow", "tab-overflow"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void RegisterSession_NullOrBlank_ReturnsFalse(string? sessionId)
+    {
+        // CS-012：null/空白 sessionId 拒绝
+        var broker = new BrowserPolicyBroker();
+        Assert.False(broker.RegisterSession(sessionId!, "tab-1"));
+    }
+
+    [Fact]
+    public void UpdateDocumentGeneration_RejectsJumpBackwardAndWrongTab()
+    {
+        // CS-013：严格单步推进——拒绝跳跃（+2）、回退、错标签
+        var broker = CreateRegisteredBroker();
+
+        Assert.False(broker.UpdateDocumentGeneration("session-1", "tab-1", 2), "跳跃 +2 拒绝");
+        Assert.False(broker.UpdateDocumentGeneration("session-1", "tab-1", 0), "回退拒绝");
+        Assert.False(broker.UpdateDocumentGeneration("session-1", "other-tab", 1), "错标签拒绝");
+        Assert.True(broker.UpdateDocumentGeneration("session-1", "tab-1", 1), "严格 +1 放行");
+    }
+
+    [Fact]
+    public void IsValid_ExpiredAuthorization_ReturnsFalse()
+    {
+        // CS-014：过期授权 fail-closed
+        var broker = CreateRegisteredBroker();
+        const string url = "https://example.com";
+        var action = Assert.IsType<Decision.Allow>(
+            broker.EvaluateNavigation("session-1", "tab-1", 0, url, "navigation")).Action;
+
+        Assert.True(broker.IsValid(action, 0));
+        var expired = action with { ExpiresAt = DateTime.UtcNow.AddMinutes(-1) };
+        Assert.False(broker.IsValid(expired, 0));
+    }
+
+    [Fact]
+    public void TryConsumeNavigation_SameNonceReplay_Denied()
+    {
+        // CS-015：同 nonce 二次消费拒绝（一次性语义——即使授权其余字段合法）
+        var broker = CreateRegisteredBroker();
+        const string url = "https://example.com/path";
+        var first = Assert.IsType<Decision.Allow>(
+            broker.EvaluateNavigation("session-1", "tab-1", 0, url, "navigation")).Action;
+
+        Assert.True(broker.TryConsumeNavigation(first, "session-1", "tab-1", 0, url, "navigation"));
+
+        // 重放：同 nonce 换全新 action 实例（模拟攻击者复用截获的 nonce）
+        var replay = first with { Nonce = first.Nonce };
+        Assert.False(broker.TryConsumeNavigation(replay, "session-1", "tab-1", 0, url, "navigation"));
+    }
+
+    private sealed class StubBlockedHosts(params string[] hosts) : IBlockedHosts
+    {
+        private readonly HashSet<string> _hosts = new(hosts, StringComparer.OrdinalIgnoreCase);
+
+        public bool IsBlocked(string host) => _hosts.Contains(host);
+    }
+
+    [Fact]
+    public void IsHostBlocked_DelegatesToInjectedSnapshot()
+    {
+        // CS-016：注入 blockedHosts 快照——子资源层查询必须走注入实例
+        var broker = new BrowserPolicyBroker(blockedHosts: new StubBlockedHosts("evil.example"));
+
+        Assert.True(broker.IsHostBlocked("evil.example"));
+        Assert.False(broker.IsHostBlocked("good.example"));
+    }
+
+    [Fact]
+    public void UpdateBlockedHosts_NullFallsBackToAllowAll()
+    {
+        // CS-017：UpdateBlockedHosts(null) 回退 NoBlockedHosts——导航不再被拦
+        var broker = new BrowserPolicyBroker(blockedHosts: new StubBlockedHosts("evil.example"));
+        broker.UpdateBlockedHosts(null);
+
+        Assert.False(broker.IsHostBlocked("evil.example"));
+        Assert.True(broker.RegisterSession("session-1", "tab-1"));
+        Assert.IsType<Decision.Allow>(
+            broker.EvaluateNavigation("session-1", "tab-1", 0, "https://evil.example", "navigation"));
     }
 }

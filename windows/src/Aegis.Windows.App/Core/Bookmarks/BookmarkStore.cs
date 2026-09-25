@@ -11,6 +11,9 @@ using Microsoft.Data.Sqlite;
 public sealed class BookmarkStore
 {
     private readonly string _dbPath;
+    // CS-029（审计 2026-09-25）：DDL once——此前每次 Open 都跑 CREATE TABLE
+    // IF NOT EXISTS（All() 每 ~150ms 被调用，DDL 纯开销）。失败不置位——下次重试。
+    private volatile bool _schemaReady;
 
     public BookmarkStore(string dbPath) => _dbPath = dbPath;
 
@@ -144,15 +147,19 @@ public sealed class BookmarkStore
                 busy.CommandText = "PRAGMA busy_timeout=5000";
                 busy.ExecuteNonQuery();
             }
-            using var ensure = connection.CreateCommand();
-            ensure.CommandText = """
-                CREATE TABLE IF NOT EXISTS bookmarks(
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    url TEXT NOT NULL UNIQUE,
-                    created_at TEXT NOT NULL)
-                """;
-            ensure.ExecuteNonQuery();
+            if (!_schemaReady)
+            {
+                using var ensure = connection.CreateCommand();
+                ensure.CommandText = """
+                    CREATE TABLE IF NOT EXISTS bookmarks(
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        url TEXT NOT NULL UNIQUE,
+                        created_at TEXT NOT NULL)
+                    """;
+                ensure.ExecuteNonQuery();
+                _schemaReady = true;
+            }
             return connection;
         }
         catch
