@@ -117,6 +117,12 @@ public sealed class TabSessionStore
         try
         {
             connection.Open();
+            // CS-099：busy_timeout 与其余三库统一——并发写时快速忙等重试
+            using (var busy = connection.CreateCommand())
+            {
+                busy.CommandText = "PRAGMA busy_timeout=5000";
+                busy.ExecuteNonQuery();
+            }
             if (!_schemaReady)
             {
                 using var ensure = connection.CreateCommand();

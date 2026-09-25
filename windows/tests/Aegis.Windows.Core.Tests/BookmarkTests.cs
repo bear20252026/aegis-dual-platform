@@ -1,5 +1,6 @@
 namespace Aegis.Windows.Core.Tests;
 
+using System.Text;
 using Aegis.Windows.Core.Bookmarks;
 using Xunit;
 
@@ -118,6 +119,34 @@ public sealed class BookmarkStoreTests : IDisposable
         Assert.Equal(2, _store.All().Count);
     }
 
+    // ===== CS-097/098（审计 2026-09-26）：空白候选与空白标题边界 =====
+
+    [Fact]
+    public void AddWithBlankTitleReturnsFalse()
+    {
+        // CS-098：空白标题拒绝且不落库
+        Assert.False(_store.Add("", "https://example.com"));
+        Assert.False(_store.Add("   ", "https://example.com"));
+        Assert.False(_store.Add(null!, "https://example.com"));
+        Assert.Empty(_store.All());
+    }
+
+    [Fact]
+    public void ImportSkipsBlankCandidatesFromTotal()
+    {
+        // CS-097：空白候选在导入层被跳过且不计入 total（区别于重复——重复计 total）
+        var (imported, total) = BookmarkImporter.ImportTo(_store,
+        [
+            new BookmarkCandidate("正常", "https://ok.example"),
+            new BookmarkCandidate("空URL", "   "),
+            new BookmarkCandidate("", "https://blank-title.example"),
+        ]);
+
+        Assert.Equal(1, imported);
+        Assert.Equal(1, total);
+        Assert.Single(_store.All());
+    }
+
     public void Dispose()
     {
         if (File.Exists(_dbPath))
@@ -171,6 +200,96 @@ public sealed class BookmarkImporterTests : IDisposable
         Assert.True(store.Contains("https://jia.cn"));
         store.Remove("https://jia.cn");
         File.Delete(store.ToString());  // no-op 清理（db 路径独立）
+    }
+
+    // ===== CS-100..105（审计 2026-09-26）：解析容错与边界 =====
+
+    [Fact]
+    public void MalformedJsonOrMissingFileReturnsEmpty()
+    {
+        // CS-100：损坏 JSON/缺失文件不再上抛——可选功能 fail-safe 返回空
+        File.WriteAllText(_jsonPath, "{not json at all");
+        Assert.Empty(BookmarkImporter.Parse(_jsonPath));
+        Assert.Empty(BookmarkImporter.Parse(
+            Path.Combine(Path.GetTempPath(), "missing_bookmarks.json")));
+    }
+
+    [Fact]
+    public void TrimTitleNeverSplitsSurrogatePair()
+    {
+        // CS-101：截断边界恰落在代理对上时回退一位，不产生孤立代理
+        var emoji = "\U0001F600";  // 😀——UTF-16 代理对（2 char）
+        Assert.Equal(new string('a', 255), BookmarkImporter.TrimTitle(new string('a', 255) + emoji));
+        Assert.Equal(new string('b', 256), BookmarkImporter.TrimTitle(new string('b', 256) + emoji));
+        Assert.Equal("短标题", BookmarkImporter.TrimTitle("短标题"));
+    }
+
+    [Fact]
+    public void DeepNestingBeyondBoundIsBounded()
+    {
+        // CS-102：200 层嵌套文件夹——深度有界（Walk 64 层 + JsonDocument 解析
+        // 上限双保险），返回空而非栈溢出/无限递归
+        var builder = new StringBuilder();
+        builder.Append("{\"roots\":{\"bookmark_bar\":");
+        for (var i = 0; i < 200; i++)
+            builder.Append("{\"type\":\"folder\",\"children\":[");
+        builder.Append("{\"type\":\"url\",\"name\":\"深巢\",\"url\":\"https://deep.example\"}");
+        for (var i = 0; i < 200; i++)
+            builder.Append("]}");
+        builder.Append("}}");  // 仅剩 roots 与根两对象待闭（bookmark_bar 值即首层 folder）
+        File.WriteAllText(_jsonPath, builder.ToString());
+
+        Assert.Empty(BookmarkImporter.Parse(_jsonPath));
+    }
+
+    [Fact]
+    public void NestingWithinBoundStillImports()
+    {
+        // CS-102 正路径：界内嵌套正常导入
+        var builder = new StringBuilder();
+        builder.Append("{\"roots\":{\"bookmark_bar\":");
+        for (var i = 0; i < 10; i++)
+            builder.Append("{\"type\":\"folder\",\"children\":[");
+        builder.Append("{\"type\":\"url\",\"name\":\"十层\",\"url\":\"https://ok.example\"}");
+        for (var i = 0; i < 10; i++)
+            builder.Append("]}");
+        builder.Append("}}");  // 仅剩 roots 与根两对象待闭
+        File.WriteAllText(_jsonPath, builder.ToString());
+
+        Assert.Single(BookmarkImporter.Parse(_jsonPath));
+    }
+
+    [Fact]
+    public void MissingRootsKeyReturnsEmpty()
+    {
+        // CS-103：无 roots 键返回空列表
+        File.WriteAllText(_jsonPath, "{\"bookmark_bar\":{\"type\":\"folder\"}}");
+        Assert.Empty(BookmarkImporter.Parse(_jsonPath));
+    }
+
+    [Fact]
+    public void OversizedUrlRejected()
+    {
+        // CS-104：URL 超 2048 拒收
+        var payload = "{\"roots\":{\"bookmark_bar\":{\"type\":\"url\",\"name\":\"超长\"," +
+                      "\"url\":\"https://example.com/" + new string('a', 2100) + "\"}}}";
+        File.WriteAllText(_jsonPath, payload);
+
+        Assert.Empty(BookmarkImporter.Parse(_jsonPath));
+    }
+
+    [Fact]
+    public void MissingNameFallsBackToHost()
+    {
+        // CS-105：name 缺省回退 host（对齐 Python `name or host`——此前整条丢弃）
+        var payload = "{\"roots\":{\"bookmark_bar\":{\"type\":\"url\"," +
+                      "\"url\":\"https://fallback.example/x\"}}}";
+        File.WriteAllText(_jsonPath, payload);
+
+        var candidates = BookmarkImporter.Parse(_jsonPath);
+        Assert.Single(candidates);
+        Assert.Equal("fallback.example", candidates[0].Title);
+        Assert.Equal("https://fallback.example/x", candidates[0].Url);
     }
 
     public void Dispose()

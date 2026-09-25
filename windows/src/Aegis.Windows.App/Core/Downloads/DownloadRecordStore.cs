@@ -70,6 +70,12 @@ public sealed class DownloadRecordStore
         if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         var conn = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _dbPath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
         conn.Open();
+        // CS-099：busy_timeout 与其余三库统一——并发写时快速忙等重试
+        using (var busy = conn.CreateCommand())
+        {
+            busy.CommandText = "PRAGMA busy_timeout=5000";
+            busy.ExecuteNonQuery();
+        }
         using var ensure = conn.CreateCommand();
         ensure.CommandText = "CREATE TABLE IF NOT EXISTS downloads(id INTEGER PRIMARY KEY AUTOINCREMENT, file_name TEXT NOT NULL DEFAULT '', file_path TEXT NOT NULL DEFAULT '', url TEXT NOT NULL DEFAULT '', size_bytes INTEGER NOT NULL DEFAULT 0, completed_at TEXT NOT NULL DEFAULT '')";
         ensure.ExecuteNonQuery();

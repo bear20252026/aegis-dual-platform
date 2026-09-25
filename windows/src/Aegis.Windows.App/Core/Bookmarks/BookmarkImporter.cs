@@ -36,19 +36,28 @@ public static class BookmarkImporter
         return sources;
     }
 
-    /// <summary>解析书签文件为候选列表（http/https 过滤在解析时完成）。</summary>
+    /// <summary>解析书签文件为候选列表（http/https 过滤在解析时完成）。
+    /// CS-100：损坏 JSON/不可读文件此前直接上抛到导入向导——导入是可选功能，
+    /// 与 HistoryImporter 同口径：任何解析失败返回空，绝不影响浏览。</summary>
     public static IReadOnlyList<BookmarkCandidate> Parse(string bookmarksJsonPath)
     {
-        using var document = JsonDocument.Parse(File.ReadAllText(bookmarksJsonPath));
-        var candidates = new List<BookmarkCandidate>();
-        if (!document.RootElement.TryGetProperty("roots", out var roots))
-            return candidates;
-        foreach (var root in roots.EnumerateObject())
+        try
         {
-            if (root.Value.ValueKind == JsonValueKind.Object)
-                Walk(root.Value, candidates, depth: 0);
+            using var document = JsonDocument.Parse(File.ReadAllText(bookmarksJsonPath));
+            var candidates = new List<BookmarkCandidate>();
+            if (!document.RootElement.TryGetProperty("roots", out var roots))
+                return candidates;
+            foreach (var root in roots.EnumerateObject())
+            {
+                if (root.Value.ValueKind == JsonValueKind.Object)
+                    Walk(root.Value, candidates, depth: 0);
+            }
+            return candidates;
         }
-        return candidates;
+        catch (Exception)
+        {
+            return [];  // 损坏/缺失/不可读 → 空结果（fail-safe）
+        }
     }
 
     /// <summary>导入到书签库（幂等——重复 URL 计入 total 不计入 imported；
@@ -57,8 +66,17 @@ public static class BookmarkImporter
         BookmarkStore store, IEnumerable<BookmarkCandidate> candidates) =>
         store.Import(candidates.Select(c => (TrimTitle(c.Title), c.Url)));
 
-    private static string TrimTitle(string title) =>
-        title.Length > MaxTitleChars ? title[..MaxTitleChars] : title;
+    /// <summary>CS-101：标题截断代理对安全——硬切 [..256] 可把 UTF-16 代理对
+    /// 劈成孤立代理（emoji 标题截断即乱码落库）；边界落在高代理上时回退一位。</summary>
+    internal static string TrimTitle(string title)
+    {
+        if (title.Length <= MaxTitleChars)
+            return title;
+        var cut = MaxTitleChars;
+        if (char.IsHighSurrogate(title[cut - 1]))
+            cut--;
+        return title[..cut];
+    }
 
     private static void Walk(JsonElement node, List<BookmarkCandidate> into, int depth)
     {
@@ -68,13 +86,19 @@ public static class BookmarkImporter
             && type.ValueKind == JsonValueKind.String
             && type.GetString() == "url"
             && node.TryGetProperty("url", out var urlElement)
-            && node.TryGetProperty("name", out var nameElement)
             && Uri.TryCreate(urlElement.GetString(), UriKind.Absolute, out var uri)
             && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
             && uri.ToString().Length <= MaxUrlChars)
         {
-            var title = nameElement.GetString() ?? uri.Host;
-            into.Add(new BookmarkCandidate(TrimTitle(title), uri.ToString()));
+            // CS-105：name 缺省/非字符串回退 host（对齐 Python `name or host`
+            // 口径——此前整个条目因缺 name 被丢弃）
+            var title = node.TryGetProperty("name", out var nameElement)
+                    && nameElement.ValueKind == JsonValueKind.String
+                ? nameElement.GetString()
+                : null;
+            if (string.IsNullOrWhiteSpace(title))
+                title = uri.Host;
+            into.Add(new BookmarkCandidate(TrimTitle(title!), uri.ToString()));
         }
         if (node.TryGetProperty("children", out var children)
             && children.ValueKind == JsonValueKind.Array)

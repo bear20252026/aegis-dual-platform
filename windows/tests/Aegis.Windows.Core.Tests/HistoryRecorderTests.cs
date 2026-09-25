@@ -12,6 +12,9 @@ public sealed class HistoryRecorderTests
     [InlineData("http://example.com/", true)]
     [InlineData("https://ntp.aegis.local/start.html", false)]
     [InlineData("https://geo.aegis.local/GeoGebra/HTML5/5.0/GeoGebra.html", false)]
+    [InlineData("https://NTP.AEGIS.LOCAL/start.html", false)]   // CS-093：host 大小写不误记
+    [InlineData("https://Geo.Aegis.Local/GeoGebra/HTML5/5.0/GeoGebra.html", false)]
+    [InlineData("https://sub.ntp.aegis.local/", true)]           // 子域不算内部页
     [InlineData("about:blank", false)]
     [InlineData("javascript:void(0)", false)]
     [InlineData("file:///C:/x.html", false)]

@@ -58,6 +58,8 @@ public static class HistoryImporter
         }
         finally
         {
+            // CS-094：清理失败兜底捕 Exception——File.Delete 除 IOException 外
+            // 还可抛 UnauthorizedAccess 等，临时文件残留不影响导入结果
             foreach (var path in new[] { temporary, temporary + "-wal", temporary + "-shm" })
             {
                 try
@@ -65,7 +67,7 @@ public static class HistoryImporter
                     if (File.Exists(path))
                         File.Delete(path);
                 }
-                catch (IOException)
+                catch (Exception)
                 {
                     // 临时文件删除失败不影响导入结果
                 }
@@ -89,6 +91,10 @@ public static class HistoryImporter
         return (imported, total);
     }
 
+    /// <summary>CS-096：解析条数上限钳制（1..2000）——此前内联在 SQL 绑定处
+    /// 不可直测，提取为 internal 供边界用例覆盖。</summary>
+    internal static int ClampLimit(int limit) => Math.Clamp(limit, 1, 2000);
+
     private static List<HistoryCandidate> ParseCopy(string copyPath, int limit)
     {
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder
@@ -102,7 +108,7 @@ public static class HistoryImporter
             connection.Open();
             using var select = connection.CreateCommand();
             select.CommandText = "SELECT url, title FROM urls ORDER BY last_visit_time DESC LIMIT $lim";
-            select.Parameters.AddWithValue("$lim", Math.Clamp(limit, 1, 2000));
+            select.Parameters.AddWithValue("$lim", ClampLimit(limit));
             var candidates = new List<HistoryCandidate>();
             using var reader = select.ExecuteReader();
             while (reader.Read())
