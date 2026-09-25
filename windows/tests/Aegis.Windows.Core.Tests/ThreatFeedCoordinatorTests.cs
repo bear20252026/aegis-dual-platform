@@ -107,6 +107,29 @@ public sealed class ThreatFeedCoordinatorTests
         Assert.Single(h.Applied);
     }
 
+    [Fact]
+    public async System.Threading.Tasks.Task Refresh_AppliesFetchedList_Directly()
+    {
+        // CS-134：刷新后直接用 fetchAndStore 返回值——此前写盘后再重读磁盘，
+        // 缓存文件若此刻被第三方改写会应用非拉取内容（且多一次全量 IO）
+        var h = new Harness();
+        var c = new ThreatFeedCoordinator(
+            applyHosts: applied => h.Applied.Add(applied),
+            _cachePath,
+            () => h.FeedUrl,
+            message => h.Logs.Add(message),
+            fetchAndStore: (_, cache) =>
+            {
+                File.WriteAllLines(cache, new[] { "stale-from-disk.example" });
+                return new[] { "fresh-from-fetch.example" };
+            });
+        Assert.True(c.Start());
+        await SpinUntil(() => h.Applied.Count >= 2);
+        var final = h.Applied[^1];
+        Assert.True(final.IsBlocked("fresh-from-fetch.example"));
+        Assert.False(final.IsBlocked("stale-from-disk.example"));
+    }
+
     private static async System.Threading.Tasks.Task SpinUntil(Func<bool> condition, int timeoutMs = 3000)
     {
         var deadline = Environment.TickCount64 + timeoutMs;

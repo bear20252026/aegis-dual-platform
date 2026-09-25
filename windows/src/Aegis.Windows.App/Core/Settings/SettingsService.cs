@@ -11,6 +11,14 @@ using Aegis.Windows.Core.Privacy;
 /// <summary>不可变的浏览器设置快照。快照是设置持久层与运行期策略的唯一事实源。</summary>
 public sealed record BrowserSettingsSnapshot
 {
+    // CS-123：窗口宽高默认/边界单源——此前快照默认值与归一化回退值两套并存
+    //（一处改动漏一处即宽高归一口径漂移），归一化与快照初始值都引用这里。
+    public const double DefaultWindowWidth = 1200;
+    public const double DefaultWindowHeight = 800;
+    public const double MinWindowWidth = 320;
+    public const double MinWindowHeight = 240;
+    public const double MaxWindowDimension = 10000;
+
     public string SearchEngine { get; init; } = Chrome.UrlNormalizer.DefaultEngine;
     public bool HistoryEnabled { get; init; } = true;
     public string ThreatFeedUrl { get; init; } = "";
@@ -18,8 +26,8 @@ public sealed record BrowserSettingsSnapshot
     public string Theme { get; init; } = "dark";
     public double WindowLeft { get; init; } = double.NaN;
     public double WindowTop { get; init; } = double.NaN;
-    public double WindowWidth { get; init; } = 1200;
-    public double WindowHeight { get; init; } = 800;
+    public double WindowWidth { get; init; } = DefaultWindowWidth;
+    public double WindowHeight { get; init; } = DefaultWindowHeight;
     public bool WindowMaximized { get; init; }
     public int SleepMinutes { get; init; } = 30;
     public int ProtectionLevel { get; init; } = 1;
@@ -32,6 +40,10 @@ public sealed record BrowserSettingsSnapshot
 /// <summary>统一 AppSettings 与 PrivacySettings 的设置服务。</summary>
 public sealed class SettingsService
 {
+    /// <summary>CS-122：睡眠阈值白名单（设置下拉可选项集——此前内联字面量
+    /// 散在归一化表达式里，下拉项与归一口径无单一事实源）。</summary>
+    private static readonly int[] AllowedSleepMinutes = [0, 15, 30, 60];
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
@@ -46,6 +58,18 @@ public sealed class SettingsService
         _snapshot = Normalize(ReadSnapshot(_path));
         ApplyRuntimeSnapshot(_snapshot, raiseChanged: false);
     }
+
+    private SettingsService(string? path, AppSettings preloaded)
+    {
+        _path = path ?? AppSettings.DefaultPath;
+        _snapshot = Normalize(ToSnapshot(preloaded));
+        ApplyRuntimeSnapshot(_snapshot, raiseChanged: false);
+    }
+
+    /// <summary>CS-127：从已加载模型构造——组合根（AppSettings.Load）与本服务
+    /// 此前各读一次同一 settings.json（启动链双读）；现在单读双用。</summary>
+    public static SettingsService FromPreloaded(AppSettings preloaded, string? path = null) =>
+        new(path, preloaded);
 
     public BrowserSettingsSnapshot Snapshot => _snapshot;
     public event EventHandler? Changed;
@@ -165,12 +189,14 @@ public sealed class SettingsService
         var engine = Chrome.UrlNormalizer.EngineOrder.Contains(s.SearchEngine, StringComparer.OrdinalIgnoreCase)
             ? s.SearchEngine.ToLowerInvariant() : Chrome.UrlNormalizer.DefaultEngine;
         var theme = string.Equals(s.Theme, "light", StringComparison.OrdinalIgnoreCase) ? "light" : "dark";
-        var sleep = s.SleepMinutes is 0 or 15 or 30 or 60 ? s.SleepMinutes : 30;
+        var sleep = Array.IndexOf(AllowedSleepMinutes, s.SleepMinutes) >= 0 ? s.SleepMinutes : 30;
         var protection = Math.Clamp(s.ProtectionLevel, 0, 2);
         var left = NormalizeWindow(s.WindowLeft, double.NaN, -100000, 100000);
         var top = NormalizeWindow(s.WindowTop, double.NaN, -100000, 100000);
-        var width = NormalizeWindow(s.WindowWidth, 1200, 320, 10000);
-        var height = NormalizeWindow(s.WindowHeight, 800, 240, 10000);
+        var width = NormalizeWindow(s.WindowWidth, BrowserSettingsSnapshot.DefaultWindowWidth,
+            BrowserSettingsSnapshot.MinWindowWidth, BrowserSettingsSnapshot.MaxWindowDimension);
+        var height = NormalizeWindow(s.WindowHeight, BrowserSettingsSnapshot.DefaultWindowHeight,
+            BrowserSettingsSnapshot.MinWindowHeight, BrowserSettingsSnapshot.MaxWindowDimension);
         var feed = Security.ThreatFeedUpdater.ValidateFeedUrl(s.ThreatFeedUrl ?? "") is null
             ? "" : (s.ThreatFeedUrl ?? "");
         var zoom = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);

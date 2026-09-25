@@ -101,6 +101,15 @@ public class UtilityClassesTests
         Assert.Equal(1.75, ZoomStore.Get("example.com"));
     }
 
+    [Fact]
+    public void ZoomStore_Load_NullMap_DoesNotThrow()
+    {
+        // CS-130：null map 守卫——语义等价空表（此前 ArgumentNullException）
+        ZoomStore.Load(null);
+        Assert.Equal(1.0, ZoomStore.Get("any.example"));
+        Assert.Empty(ZoomStore.Snapshot());
+    }
+
     // ============ TrackerList ============
 
     [Theory]
@@ -119,6 +128,7 @@ public class UtilityClassesTests
     [InlineData("example.com")]
     [InlineData("notdoubleclick.net")]        // 前缀伪装不误报（非后缀域）
     [InlineData("doubleclick.net.evil.io")]   // 清单域作子串前缀不误报
+    [InlineData("a.b.doubleclick.net.evil.io")]  // CS-136：深链+清单域居中不误报
     public void TrackerList_NonTrackerHosts_Pass(string? host)
     {
         Assert.False(TrackerList.IsTracker(host!));
@@ -134,6 +144,9 @@ public class UtilityClassesTests
     [InlineData("evilexample.com", "example.com", false)] // 前缀伪装不误判
     [InlineData("example.com.evil.io", "example.com", false)] // 清单域作前缀不误判
     [InlineData("other.org", "example.com", false)]       // 完全不同域
+    [InlineData("", "", true)]                            // CS-137：空 host 两态（退化等值）
+    [InlineData(null!, "example.com", false)]             // CS-137：null 不抛
+    [InlineData("example.com", "", false)]                // CS-137：空 pageHost 不同站
     public void TrackerList_IsSameSite_CoversBoundaryCases(
         string host, string pageHost, bool expected)
     {

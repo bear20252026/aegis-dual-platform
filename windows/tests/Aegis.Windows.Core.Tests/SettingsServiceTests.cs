@@ -1,5 +1,6 @@
 namespace Aegis.Windows.Core.Tests;
 
+using System.Collections.Generic;
 using System.IO;
 using Aegis.Windows.Core.Privacy;
 using Aegis.Windows.Core.Settings;
@@ -98,6 +99,74 @@ public sealed class SettingsServiceTests : IDisposable
         {
             try { Directory.Delete(dirPath); } catch (IOException) { }
         }
+    }
+
+    // ===== C10 批（审计 2026-09-26）：CS-124/125/126/127/128 =====
+
+    [Fact]
+    public void Apply_ClampsZoomToSessionBounds()
+    {
+        // CS-124：缩放超上界钳制（与会话内 0.25–3.0 同口径，双向）
+        var svc = new SettingsService(_path);
+        svc.Apply(new AppSettings
+        {
+            ZoomByHost = new Dictionary<string, double>
+            {
+                ["big.example"] = 9.9,
+                ["small.example"] = 0.01,
+            },
+        });
+
+        Assert.Equal(Chrome.TabRuntime.MaxZoom, svc.Snapshot.ZoomByHost["big.example"]);
+        Assert.Equal(Chrome.TabRuntime.MinZoom, svc.Snapshot.ZoomByHost["small.example"]);
+    }
+
+    [Fact]
+    public void ConstructorWithBadPathFallsBackToDefaults()
+    {
+        // CS-125：坏文件路径（不存在目录/非法字符）构造不抛——回退默认快照
+        var missing = Path.Combine(Path.GetTempPath(), "no_such_dir_aegis", "settings.json");
+        Assert.Null(Record.Exception(() => new SettingsService(missing)));
+        Assert.Null(Record.Exception(() => new SettingsService(
+            Path.Combine(Path.GetTempPath(), "bad|char_name.json"))));
+    }
+
+    [Fact]
+    public void Apply_RaisesChangedExactlyOnce()
+    {
+        // CS-126：Apply 唯一写入口恰通知一次（归一化内部路径不再重复触发）
+        var svc = new SettingsService(_path);
+        var fired = 0;
+        svc.Changed += (_, _) => fired++;
+
+        svc.Apply(new AppSettings { SearchEngine = "bing" });
+
+        Assert.Equal(1, fired);
+    }
+
+    [Fact]
+    public void FromPreloadedMatchesLoadedContent()
+    {
+        // CS-127：单读双用——组合根加载的模型构造服务，语义与构造器自读一致
+        File.WriteAllText(_path, "{\"SearchEngine\":\"bing\"}");
+        var settings = AppSettings.Load(_path);
+
+        var svc = SettingsService.FromPreloaded(settings, _path);
+
+        Assert.Equal("bing", svc.Snapshot.SearchEngine);
+    }
+
+    [Fact]
+    public void NaNWindowPositionRoundTrips()
+    {
+        // CS-128：NaN 窗口位置持久化往返（AllowNamedFloatingPointLiterals）
+        var svc = new SettingsService(_path);
+        svc.Apply(new AppSettings { WindowLeft = double.NaN, WindowTop = double.NaN });
+
+        var reloaded = new SettingsService(_path);
+
+        Assert.True(double.IsNaN(reloaded.Snapshot.WindowLeft));
+        Assert.True(double.IsNaN(reloaded.Snapshot.WindowTop));
     }
 
     public void Dispose()

@@ -61,8 +61,10 @@ public sealed class ThreatFeedCoordinator
     {
         try
         {
+            // CS-134：直接用拉取返回值——此前写盘后再全量重读缓存文件（多一次
+            // IO，且第三方进程若此刻改写缓存会应用非拉取内容）
             var fetched = _fetchAndStore(validated, _cachePath);
-            _applyHosts(new BlockedHosts(ThreatFeedUpdater.LoadCached(_cachePath)));
+            _applyHosts(new BlockedHosts(fetched));
             _log($"[threat] 订阅源刷新完成：{fetched.Count} 条域名入黑名单");
         }
         catch (Exception ex)

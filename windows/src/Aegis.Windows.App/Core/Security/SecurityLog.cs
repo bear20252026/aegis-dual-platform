@@ -12,6 +12,11 @@ public static class SecurityLog
     private const long MaxBytes = 1024 * 1024;      // 1MB 触发轮转
     private const int MaxMessageChars = 4000;       // 单条上限
 
+    // CS-135：体量计数器——此前每次写都 File.Exists + FileInfo.Length 两次系统
+    // 调用。进程首写校准一次现值，其后增量累计（消息为 ASCII 为主的安全事件行，
+    // 按 char 数近似字节量——1MB 轮转阈值不需要字节级精确）。
+    private static long _approxBytes = -1;  // -1 = 未校准
+
     public static void Write(string message)
     {
         try
@@ -21,7 +26,9 @@ public static class SecurityLog
                 var dir = AppPaths.DataDir;
                 Directory.CreateDirectory(dir);
                 var path = AppPaths.SecurityLogPath;
-                if (File.Exists(path) && new FileInfo(path).Length > MaxBytes)
+                if (_approxBytes < 0)
+                    _approxBytes = File.Exists(path) ? new FileInfo(path).Length : 0;
+                if (_approxBytes > MaxBytes)
                 {
                     // 轮转而非整删：满 1MB 改名保留一份 .1——刷量攻击不能
                     // 再抹除全部取证痕迹（此前 File.Delete 直接清空）
@@ -37,6 +44,7 @@ public static class SecurityLog
                         // 轮转失败则截断重写（保底有界）
                         File.Delete(path);
                     }
+                    _approxBytes = 0;
                 }
                 var sanitized = (message ?? string.Empty)
                     .Replace("\r", "\\r", StringComparison.Ordinal)
@@ -46,6 +54,7 @@ public static class SecurityLog
                 File.AppendAllText(
                     path,
                     $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss zzz}] {sanitized}{Environment.NewLine}");
+                _approxBytes += sanitized.Length + 32;
             }
         }
         catch

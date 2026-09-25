@@ -142,7 +142,7 @@ public static class ThreatFeedUpdater
         if (response.Content.Headers.ContentLength is long declared && declared > MaxBytes)
             throw new InvalidOperationException("订阅源过大（超过 5MB 上限）");
         var bytes = ReadBounded(response, MaxBytes);
-        if (bytes.Length > MaxBytes)
+        if (bytes is null)
             throw new InvalidOperationException("订阅源过大（超过 5MB 上限）");
 
         var domains = new List<string>();
@@ -165,8 +165,9 @@ public static class ThreatFeedUpdater
     }
 
     /// <summary>限量缓冲读取：声明缺失时按上限截断（此前先全量读入内存再检查
-    /// ——被劫持源可触发无界内存分配）。</summary>
-    private static byte[] ReadBounded(HttpResponseMessage response, long max)
+    /// ——被劫持源可触发无界内存分配）。CS-132：超限返回 null 哨兵——此前
+    /// new byte[max+1] 分配 5MB 只为表达"超限"这一比特信息。</summary>
+    private static byte[]? ReadBounded(HttpResponseMessage response, long max)
     {
         using var stream = response.Content.ReadAsStream();
         using var buffer = new MemoryStream();
@@ -178,10 +179,12 @@ public static class ThreatFeedUpdater
                 break;
             buffer.Write(chunk, 0, read);
         }
-        return buffer.Length > max ? new byte[max + 1] : buffer.ToArray();
+        return buffer.Length > max ? null : buffer.ToArray();
     }
 
-    /// <summary>加载缓存黑名单快照（文件缺失/损坏/无权限返回空——fail-safe）。</summary>
+    /// <summary>加载缓存黑名单快照（文件缺失/损坏/无权限返回空——fail-safe）。
+    /// CS-131：回放与拉取同口径——逐行套 ParseFeedLine（缓存文件被篡改或由
+    /// 旧版本写入的脏条目不再绕过过滤直接入表）。</summary>
     public static IReadOnlyList<string> LoadCached(string cachePath)
     {
         try
@@ -189,8 +192,10 @@ public static class ThreatFeedUpdater
             if (!File.Exists(cachePath))
                 return Array.Empty<string>();
             return File.ReadAllLines(cachePath)
-                .Select(l => l.Trim())
-                .Where(l => l.Length > 0)
+                .Select(ParseFeedLine)
+                .Where(d => d is not null)
+                .Select(d => d!)
+                .Distinct(StringComparer.Ordinal)
                 .ToList();
         }
         catch (Exception)

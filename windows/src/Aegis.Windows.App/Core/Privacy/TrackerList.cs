@@ -2,6 +2,7 @@ namespace Aegis.Windows.Core.Privacy;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 /// <summary>跟踪防护分级（对齐 Edge：基础/均衡/严格）。
 /// - 基础(0)：仅威胁黑名单（既有）；
@@ -34,31 +35,53 @@ public static class TrackerList
         "umeng.com",
     ];
 
-    private static readonly HashSet<string> Set = new(Domains, StringComparer.OrdinalIgnoreCase);
+    // CS-136：清单预展开为倒序单集——host 的每个祖先域后缀不再逐点段切片
+    // 分配（每请求多次堆分配），倒序前缀经 span 备用查找零分配探测
+    //（"a.doubleclick.net" 的后缀命中 ⇔ "ten.kcilcbuod.a" 以 "ten.kcilcbuod" 为标签边界前缀）。
+    private static readonly HashSet<string> ReversedDomains = new(
+        Domains.Select(ReverseDomain), StringComparer.Ordinal);
+
+    private static readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> ReversedLookup =
+        ReversedDomains.GetAlternateLookup<ReadOnlySpan<char>>();
+
+    private static string ReverseDomain(string domain)
+    {
+        var chars = domain.ToCharArray();
+        Array.Reverse(chars);
+        return new string(chars);
+    }
 
     public static bool IsTracker(string host)
     {
         if (string.IsNullOrEmpty(host))
             return false;
         var h = host.TrimEnd('.').ToLowerInvariant();
-        if (Set.Contains(h))
-            return true;
-        // 后缀匹配（子域）：a.doubleclick.net → doubleclick.net
-        var idx = h.IndexOf('.', 1);
-        while (idx > 0 && idx < h.Length - 1)
+        if (h.Length == 0 || h.Length > 253)
+            return false;
+        // 倒序渐进构造：每遇 '.' 即得到一个完整的"倒序祖先域"候选——
+        // 整个匹配过程零切片分配
+        Span<char> buffer = stackalloc char[254];
+        var len = 0;
+        for (var i = h.Length - 1; i >= 0; i--)
         {
-            if (Set.Contains(h[(idx + 1)..]))
+            var c = h[i];
+            if (c == '.' && ReversedLookup.Contains(buffer.Slice(0, len)))
                 return true;
-            idx = h.IndexOf('.', idx + 1);
+            buffer[len++] = c;
         }
-        return false;
+        return ReversedLookup.Contains(buffer.Slice(0, len));
     }
 
-    /// <summary>是否同站（host 相等或为其子域——严格模式第三方判定）。</summary>
+    /// <summary>是否同站（host 相等或为其子域——严格模式第三方判定）。
+    /// CS-137：尾字符+EndsWith(span 语义) 判定——此前 "." + p 每调用拼接分配。</summary>
     public static bool IsSameSite(string host, string pageHost)
     {
         var h = (host ?? string.Empty).TrimEnd('.').ToLowerInvariant();
         var p = (pageHost ?? string.Empty).TrimEnd('.').ToLowerInvariant();
-        return h == p || h.EndsWith("." + p, StringComparison.OrdinalIgnoreCase);
+        if (h.Length == p.Length)
+            return string.Equals(h, p, StringComparison.Ordinal);
+        return h.Length > p.Length
+            && h[h.Length - p.Length - 1] == '.'
+            && h.EndsWith(p, StringComparison.Ordinal);
     }
 }

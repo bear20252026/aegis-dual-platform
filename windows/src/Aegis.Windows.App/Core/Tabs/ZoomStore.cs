@@ -17,11 +17,13 @@ public static class ZoomStore
     public const double MinZoom = 0.25;
     public const double MaxZoom = 3.0;
 
-    public static void Load(IEnumerable<KeyValuePair<string, double>> map)
+    /// <summary>CS-130：null/缺失 map 守卫——此前 Load(null) 直接 ArgumentNullException
+    /// （快照为 null 的脏路径启动即崩）。语义等价空表。</summary>
+    public static void Load(IEnumerable<KeyValuePair<string, double>>? map)
     {
         lock (Gate)
         {
-            _map = new Dictionary<string, double>(map, StringComparer.OrdinalIgnoreCase);
+            _map = new Dictionary<string, double>(map ?? [], StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -38,17 +40,24 @@ public static class ZoomStore
 
     public static void Set(string host, double zoom)
     {
+        var changed = false;
         lock (Gate)
         {
             if (string.IsNullOrEmpty(host) || Math.Abs(zoom - 1.0) < 0.001)
             {
-                if (host is not null && _map.Remove(host))
-                    Changed?.Invoke();
-                return;
+                changed = host is not null && _map.Remove(host);
             }
-            _map[host] = Math.Clamp(zoom, MinZoom, MaxZoom);
+            else
+            {
+                _map[host] = Math.Clamp(zoom, MinZoom, MaxZoom);
+                changed = true;
+            }
         }
-        Changed?.Invoke();
+        // CS-129：Changed 统一锁外触发——此前归一移除分支持锁回调、写分支锁外
+        // 回调，两态并存；订阅者回调可重入 ZoomStore（Get/Snapshot）构成
+        // 自锁死锁面，统一移到锁外
+        if (changed)
+            Changed?.Invoke();
     }
 
     public static Dictionary<string, double> Snapshot()

@@ -21,14 +21,20 @@ public sealed record MainWindowDependencies(
     TabSessionStore SessionStore,
     DownloadRecordStore DownloadRecords)
 {
-    /// <summary>对齐旧行为的分发（SessionDbPath 等 AppPaths 默认路径）。</summary>
-    public static MainWindowDependencies Defaults() => new(
-        Tabs: new TabManager(),
-        Broker: new BrowserPolicyBroker(),
-        Settings: AppSettings.Load(AppSettings.DefaultPath),
-        SettingsService: new SettingsService(),
-        Bookmarks: new BookmarkStore(AppPaths.BookmarksDbPath),
-        History: new HistoryStore(AppPaths.HistoryDbPath),
-        SessionStore: new TabSessionStore(AppPaths.SessionDbPath),
-        DownloadRecords: new DownloadRecordStore(AppPaths.DownloadsDbPath));
+    /// <summary>对齐旧行为的分发（SessionDbPath 等 AppPaths 默认路径）。
+    /// CS-127：settings.json 单读双用——AppSettings.Load 读到的模型经
+    /// SettingsService.FromPreloaded 复用，不再由服务构造器二次读盘。</summary>
+    public static MainWindowDependencies Defaults()
+    {
+        var settings = AppSettings.Load(AppSettings.DefaultPath);
+        return new MainWindowDependencies(
+            Tabs: new TabManager(),
+            Broker: new BrowserPolicyBroker(),
+            Settings: settings,
+            SettingsService: SettingsService.FromPreloaded(settings),
+            Bookmarks: new BookmarkStore(AppPaths.BookmarksDbPath),
+            History: new HistoryStore(AppPaths.HistoryDbPath),
+            SessionStore: new TabSessionStore(AppPaths.SessionDbPath),
+            DownloadRecords: new DownloadRecordStore(AppPaths.DownloadsDbPath));
+    }
 }
