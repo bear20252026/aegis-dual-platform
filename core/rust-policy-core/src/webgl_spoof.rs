@@ -74,8 +74,10 @@ impl WebGLSpoof {
     /// - `WebGL2RenderingContext.getParameter()` — 同上
     /// - `WEBGL_debug_renderer_info` 扩展参数
     pub fn inject_script(&self) -> String {
-        let vendor = &self.config.vendor;
-        let renderer = &self.config.renderer;
+        // RS-024（审计 2026-09-24）：vendor/renderer 含 `'`/`\` 此前直拼进
+        // `'{}'` 字面量——逃逸字符串注入任意 JS
+        let vendor = crate::util::js_escape_single_quoted(&self.config.vendor);
+        let renderer = crate::util::js_escape_single_quoted(&self.config.renderer);
         let max_tex = self.config.max_texture_size;
         let max_vp_w = self.config.max_viewport_dims[0];
         let max_vp_h = self.config.max_viewport_dims[1];
@@ -123,7 +125,7 @@ impl WebGLSpoof {
       }}
     }};
     // 注册代理——toString 防护映射此包装，防"检测函数被覆盖"识破
-    if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(proto.getParameter, origGetParam);
+    var reg3 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg3) reg3(proto.getParameter, origGetParam);
   }}
 
   try {{ patchContext(WebGLRenderingContext.prototype); }} catch(e) {{}}

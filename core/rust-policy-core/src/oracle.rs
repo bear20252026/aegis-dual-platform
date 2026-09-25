@@ -106,6 +106,18 @@ impl Oracle {
             }
         }
 
+        // RS-032（审计 2026-09-24）：after 新增键此前不可检测——副作用若
+        // 注入新状态字段（如自增计数器/新窗口句柄）即静默通过
+        for key in snap.state_after.keys() {
+            if !snap.state_before.contains_key(key) {
+                mismatches.push(Mismatch {
+                    field: key.clone(),
+                    expected: "<absent>".into(),
+                    actual: snap.state_after[key].clone(),
+                });
+            }
+        }
+
         // 确定性结论——不匹配一律 Fail（此前 expected 值以 "safe_" 开头即降级
         // Warning 放行：攻击者可控状态字段命名 = fail-open 后门）
         let verdict = if mismatches.is_empty() {
@@ -190,6 +202,24 @@ mod tests {
         let report = oracle.verify(&snap);
         assert!(matches!(report.verdict, VerifyVerdict::Fail(_)));
         assert_eq!(report.mismatches[0].actual, "<missing>");
+    }
+
+    #[test]
+    fn after_added_key_detected() {
+        // RS-032 回归：after 新增键必须产出 Mismatch——此前只遍历 before，
+        // 副作用注入新状态字段（新计数器/句柄）静默通过
+        let mut oracle = Oracle::new();
+        let snap = make_snapshot(
+            "a4",
+            vec![("status", "ok")],
+            vec![("status", "ok"), ("injected_counter", "1")],
+        );
+        let report = oracle.verify(&snap);
+        assert!(matches!(report.verdict, VerifyVerdict::Fail(_)));
+        assert_eq!(report.mismatches.len(), 1);
+        assert_eq!(report.mismatches[0].field, "injected_counter");
+        assert_eq!(report.mismatches[0].expected, "<absent>");
+        assert_eq!(report.mismatches[0].actual, "1");
     }
 
     #[test]

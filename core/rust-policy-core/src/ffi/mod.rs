@@ -170,32 +170,80 @@ pub fn extract_host(url: String) -> Option<String> {
 }
 
 /// 生成指纹防护管道 JS（委托 fingerprint_pipeline 逻辑——跨端统一）。
+///
+/// RS-036：非法种子（长度≠64 或含非 hex 字符）返回**空脚本**——
+/// 此前畸形种子静默退化为全零种子（全体用户同噪声可被指纹聚类）。
+/// 宿主应在调用前校验种子；空脚本注入无效果（fail-closed——绝不以
+/// 固定种子注入）。
 #[uniffi::export]
 pub fn build_fingerprint_pipeline(session_seed: String) -> String {
     // 注：fingerprint_pipeline 的 JS 生成在 Python 侧（legacy），
     // Rust 侧提供 seed 派生；此处导出便于后续迁移。
-    crate::shield::FingerprintShield::from_seed(hex_seed_to_bytes(&session_seed)).inject_script()
+    match hex_seed_to_bytes(&session_seed) {
+        Some(seed) => crate::shield::FingerprintShield::from_seed(seed).inject_script(),
+        None => String::new(),
+    }
 }
 
-/// 十六进制种子转字节数组（内部辅助）。非法/不足长度的 hex 全零回退——
-/// 此前 unwrap_or(0) 逐字节静默置零（畸形种子退化为全零指纹种子，全体
-/// 用户同噪声可被指纹聚类）；仍回退但记录明确语义（会话种子仅内部派生用）。
-fn hex_seed_to_bytes(hex: &str) -> [u8; 32] {
-    let mut out = [0u8; 32];
+/// 十六进制种子转字节数组（RS-036 收紧——整体拒绝）。
+///
+/// 此前逐字节 `unwrap_or(0)` 静默置零 + 长串截断：畸形种子退化为全零
+/// 指纹种子（全体用户同噪声可被指纹聚类），非法 hex 位也按 0 混入。
+/// 现在要求**恰好 64 个合法 hex 字符**，任何畸形（长度≠64 / 非法字符）
+/// 返回 None——调用方不得回退到固定种子。
+pub fn hex_seed_to_bytes(hex: &str) -> Option<[u8; 32]> {
     let bytes = hex.as_bytes();
-    if bytes.len() < 64 {
-        return out;
+    if bytes.len() != 64 {
+        return None;
     }
+    let mut out = [0u8; 32];
     for i in 0..32 {
-        let hi = crate::util::hex_digit(bytes[i * 2]).unwrap_or(0);
-        let lo = crate::util::hex_digit(bytes[i * 2 + 1]).unwrap_or(0);
+        let hi = crate::util::hex_digit(bytes[i * 2])?;
+        let lo = crate::util::hex_digit(bytes[i * 2 + 1])?;
         out[i] = (hi << 4) | lo;
     }
-    out
+    Some(out)
 }
 
 mod broker;
 pub use broker::*;
+
+#[cfg(test)]
+mod hex_seed_tests {
+    use super::*;
+
+    #[test]
+    fn valid_hex_seed_parses() {
+        let hex = "ab".repeat(32);
+        let out = hex_seed_to_bytes(&hex).unwrap();
+        assert_eq!(out[0], 0xab);
+        assert_eq!(out[31], 0xab);
+    }
+
+    #[test]
+    fn malformed_seeds_rejected_entirely() {
+        // RS-036 回归：长度≠64 / 非法字符一律整体拒绝——此前逐位置置零、
+        // 长串截断（畸形种子静默退化为全零聚类种子）
+        assert!(hex_seed_to_bytes("").is_none(), "空串拒绝");
+        assert!(hex_seed_to_bytes("ab").is_none(), "短串拒绝");
+        assert!(
+            hex_seed_to_bytes(&"ab".repeat(33)).is_none(),
+            "长串拒绝（不截断）"
+        );
+        assert!(
+            hex_seed_to_bytes(&format!("{}zz", "ab".repeat(31))).is_none(),
+            "非法 hex 字符拒绝（不按 0 混入）"
+        );
+    }
+
+    #[test]
+    fn build_pipeline_rejects_malformed_seed_with_empty_script() {
+        assert_eq!(build_fingerprint_pipeline("not-hex".into()), "");
+        assert_eq!(build_fingerprint_pipeline(String::new()), "");
+        // 合法种子仍产出脚本
+        assert!(!build_fingerprint_pipeline("ab".repeat(32)).is_empty());
+    }
+}
 
 #[cfg(test)]
 mod tests {

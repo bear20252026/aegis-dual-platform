@@ -71,26 +71,41 @@ pub extern "C" fn aegis_policy_core_abi_version() -> u32 {
 /// let script = fingerprint_pipeline(&shield, "example.com");
 /// ```
 pub fn fingerprint_pipeline(shield: &shield::FingerprintShield, domain: &str) -> String {
-    let tostring_guard = tostring_guard::ToStringGuard::new();
+    // RS-040（审计 2026-09-24）：管线改用 JsPipeline trait 对象组装——
+    // 此前 JsInjectable 抽象与实现脱节（9 模块零实现，直调 inherent 方法）。
+    // 顺序保持不变：ToStringGuard → PerSiteSeed → FingerprintShield →
+    // LetterboxShield → QueryStripper → FontNormalizer → WebGLSpoof →
+    // TimerPrecision → ExtProxy
+    // PerSiteStage 持有种子与域名的所有权（JsPipeline 要求 'static）
+    struct PerSiteStage {
+        seed: per_site_seed::PerSiteSeed,
+        domain: String,
+    }
+    impl js_inject::JsInjectable for PerSiteStage {
+        fn name(&self) -> &str {
+            "PerSiteSeed"
+        }
+        fn inject_script(&self) -> String {
+            self.seed.inject_script(&self.domain)
+        }
+    }
+
     let per_site = per_site_seed::PerSiteSeed::new(shield.seed_bytes());
-    let letterbox = letterbox::LetterboxShield::new();
-    let query_strip = query_strip::QueryStripper::new();
-    let font_norm = font_norm::FontNormalizer::new();
-    let webgl_spoof = webgl_spoof::WebGLSpoof::new();
-    let timer_prec = timer_prec::TimerPrecision::new();
-    let ext_proxy = ext_proxy::ExtProxy::new();
-    format!(
-        "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}",
-        tostring_guard.inject_script(),
-        per_site.inject_script(domain),
-        shield.inject_script(),
-        letterbox.inject_script(),
-        query_strip.inject_script(),
-        font_norm.inject_script(),
-        webgl_spoof.inject_script(),
-        timer_prec.inject_script(),
-        ext_proxy.inject_script()
-    )
+    let mut pipeline = js_inject::JsPipeline::new();
+    pipeline.add(Box::new(tostring_guard::ToStringGuard::new()));
+    pipeline.add(Box::new(PerSiteStage {
+        seed: per_site,
+        domain: domain.to_string(),
+    }));
+    // shield 借用不适配 'static 管线——Clone（32 字节种子拷贝，代价可忽略）
+    pipeline.add(Box::new(shield.clone()));
+    pipeline.add(Box::new(letterbox::LetterboxShield::new()));
+    pipeline.add(Box::new(query_strip::QueryStripper::new()));
+    pipeline.add(Box::new(font_norm::FontNormalizer::new()));
+    pipeline.add(Box::new(webgl_spoof::WebGLSpoof::new()));
+    pipeline.add(Box::new(timer_prec::TimerPrecision::new()));
+    pipeline.add(Box::new(ext_proxy::ExtProxy::new()));
+    pipeline.build()
 }
 
 #[cfg(test)]
@@ -139,5 +154,43 @@ mod native_abi_tests {
                 .to_string()
         };
         assert_ne!(seed_of(&a), seed_of(&b));
+    }
+
+    #[test]
+    fn pipeline_stage_names_trace_all_nine_modules() {
+        // RS-040 回归：管线必须经 JsInjectable trait 对象组装，且阶段名
+        // 覆盖全部 9 模块（含 PerSiteStage 适配器）
+        let shield = shield::FingerprintShield::new();
+        let script = fingerprint_pipeline(&shield, "example.com");
+        for name in [
+            "ToStringGuard",
+            "PerSiteSeed",
+            "FingerprintShield",
+            "LetterboxShield",
+            "QueryStripper",
+            "FontNormalizer",
+            "WebGLSpoof",
+            "TimerPrecision",
+            "ExtProxy",
+        ] {
+            // 阶段名以模块头注释形态出现于脚本
+            assert!(script.contains(name), "管线缺少阶段 {name}");
+        }
+    }
+
+    #[test]
+    fn pipeline_webgl_spoofed_once_single_owner() {
+        // RS-026 回归：WebGL vendor/renderer 伪装单一负责——shield 的矛盾
+        // 块已移除，getParameter 覆盖仅存在于 webgl_spoof 阶段
+        let shield = shield::FingerprintShield::new();
+        let script = fingerprint_pipeline(&shield, "example.com");
+        assert!(
+            script.contains("UNMASKED_VENDOR_WEBGL"),
+            "webgl_spoof 覆盖保留"
+        );
+        assert!(
+            !shield.inject_script().contains("getParameter"),
+            "shield 不得再覆盖 WebGL getParameter（口径矛盾）"
+        );
     }
 }

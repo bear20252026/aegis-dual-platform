@@ -34,6 +34,11 @@ use crate::policy::PolicyEngine;
 /// fail-closed：达到上限后拒绝新的消费，绝不淘汰旧 nonce（以免削弱一次性/重放保护）。
 const MAX_CONSUMED_NONCES: usize = 50_000;
 
+/// RS-034（审计 2026-09-24）：nonce 合法长度上限（字节）——生成端为
+/// 32 字节 hex（64 字符）；上限留足余量。空 nonce 与超长 nonce 一律拒绝，
+/// 防止攻击者用超长 nonce 撑爆消费账本（键无界驻留内存）。
+const MAX_NONCE_LENGTH: usize = 128;
+
 /// M-16 修复（审计 2026-08-31）：会话池软上限——宿主（含 C ABI 直暴露的
 /// create_session）无法再无限创建会话耗尽内存；达上限先 evict_expired，
 /// 仍满即拒绝新会话（fail-closed）。
@@ -95,6 +100,12 @@ impl ContextBroker {
     /// 会话（evict_expired 首次接入生产路径），仍满则拒绝（fail-closed），
     /// 堵住宿主无限 create_session 的内存耗尽 DoS 面。原实现同时存在
     /// `insert 后 get 的 unwrap()`（逻辑上不可达的 panic 路径），一并消除。
+    ///
+    /// RS-033（审计 2026-09-24）：同 id 重复创建为**显式 replace（续期）
+    /// 语义**——Android 会话续期契约（renewSession）依赖同 id 覆盖式
+    /// 重注册（generation 传当前值，created_at/TTL 重置）。覆盖时旧 nonce
+    /// 账本记录保留（重放保护不回退）。此语义由本注释显式声明，勿改回
+    /// "静默覆盖"或"拒绝重复 id"（会破坏续期契约）。
     pub fn create_session(
         &mut self,
         session_id: String,
@@ -305,6 +316,21 @@ impl ContextBroker {
 
     /// 原子消费 nonce（一次性——重放拒绝）。
     pub fn consume_nonce(&mut self, nonce: &str, session_id: &str) -> Result<(), DenyReason> {
+        // RS-034（审计 2026-09-24）：空 nonce 与超长 nonce 拒绝入账——
+        // 此前无界接受（超长 nonce 直接作为账本键驻留内存）
+        if nonce.is_empty() || nonce.len() > MAX_NONCE_LENGTH {
+            return Err(DenyReason {
+                code: "nonce_invalid".into(),
+                detail: format!(
+                    "nonce 长度非法（{} 字节，允许 1..={MAX_NONCE_LENGTH}）",
+                    nonce.len()
+                ),
+                explanation: format!(
+                    "denied — nonce length {} out of range 1..={MAX_NONCE_LENGTH}",
+                    nonce.len()
+                ),
+            });
+        }
         if self.consumed_nonces.contains_key(nonce) {
             let record = &self.consumed_nonces[nonce];
             return Err(DenyReason {
@@ -442,6 +468,23 @@ mod tests {
         broker.consume_nonce("n1", "s1").unwrap();
         let result = broker.consume_nonce("n1", "s2");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn nonce_empty_and_oversized_rejected() {
+        // RS-034 回归：空 nonce 与超长 nonce 一律拒绝入账
+        let mut broker = make_broker_with_defaults();
+        assert!(broker.consume_nonce("", "s1").is_err(), "空 nonce 拒绝");
+        assert_eq!(broker.consumed_nonce_count(), 0);
+        let oversized = "x".repeat(129);
+        assert!(
+            broker.consume_nonce(&oversized, "s1").is_err(),
+            "超长 nonce 拒绝"
+        );
+        assert_eq!(broker.consumed_nonce_count(), 0);
+        // 边界内（128 字节）放行
+        let at_cap = "x".repeat(128);
+        assert!(broker.consume_nonce(&at_cap, "s1").is_ok());
     }
 
     #[test]

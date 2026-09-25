@@ -40,79 +40,54 @@ pub fn glob_match(pattern: &str, text: &str, flat: bool) -> bool {
     if (pat.len() + 1).saturating_mul(width) > MAX_GLOB_CELLS {
         return false;
     }
-    let mut cache = vec![0u8; (pat.len() + 1) * width];
-    matches_impl(&pat, &txt, 0, 0, flat, &mut cache, width)
-}
-
-fn matches_impl(
-    pat: &[char],
-    txt: &[char],
-    pi: usize,
-    ti: usize,
-    flat: bool,
-    cache: &mut [u8],
-    width: usize,
-) -> bool {
-    let idx = pi * width + ti;
-    match cache[idx] {
-        1 => return true,
-        2 => return false,
-        _ => {}
-    }
-    let result = compute(pat, txt, pi, ti, flat, cache, width);
-    cache[idx] = if result { 1 } else { 2 };
-    result
-}
-
-fn compute(
-    pat: &[char],
-    txt: &[char],
-    pi: usize,
-    ti: usize,
-    flat: bool,
-    cache: &mut [u8],
-    width: usize,
-) -> bool {
-    if pi == pat.len() {
-        return ti == txt.len();
-    }
-    match pat[pi] {
-        '*' => {
-            // 连续星号折叠：两个及以上 = `**`（跨越 `/`），单个 `*` 保持段内——
-            // 除非 flat=true（命令模式，每个 `*` 都跨越 `/`）。
-            let mut end = pi;
-            while end < pat.len() && pat[end] == '*' {
-                end += 1;
+    // RS-015（审计 2026-09-24）：自底向上迭代 DP——此前 memo 化递归深度
+    // 可达 pat.len()+txt.len()≈32K 帧，嵌入式栈上有溢出风险。
+    // 全表分配（字节数 ≤ MAX_GLOB_CELLS，与旧 cache 同量级）。
+    let rows = pat.len() + 1;
+    let mut dp = vec![false; rows * width];
+    dp[pat.len() * width + txt.len()] = true; // pi == pat.len()：仅 ti == txt.len()
+    for pi in (0..pat.len()).rev() {
+        // 连续星号折叠：end 指向星号段之后（非星号时 end == pi）
+        let end = if pat[pi] == '*' {
+            let mut e = pi;
+            while e < pat.len() && pat[e] == '*' {
+                e += 1;
             }
-            let spans_slash = flat || end - pi >= 2;
-            // 星号匹配空：跳过星号继续
-            if matches_impl(pat, txt, end, ti, flat, cache, width) {
-                return true;
-            }
-            // 星号匹配一个字符：跨越 `/` 或不跨越（取决于 spans_slash）
-            ti < txt.len()
-                && (spans_slash || txt[ti] != '/')
-                && matches_impl(pat, txt, pi, ti + 1, flat, cache, width)
-        }
-        '?' => {
-            ti < txt.len()
-                && (flat || txt[ti] != '/')
-                && matches_impl(pat, txt, pi + 1, ti + 1, flat, cache, width)
-        }
-        literal => {
-            ti < txt.len()
-                && txt[ti] == literal
-                && matches_impl(pat, txt, pi + 1, ti + 1, flat, cache, width)
+            e
+        } else {
+            pi
+        };
+        let spans_slash = flat || end - pi >= 2;
+        // ti 降序：星号「吃一个字符」转移依赖同行星号行的 ti+1
+        for ti in (0..width).rev() {
+            let ok = match pat[pi] {
+                '*' => {
+                    dp[end * width + ti]
+                        || (ti < txt.len()
+                            && (spans_slash || txt[ti] != '/')
+                            && dp[pi * width + ti + 1])
+                }
+                '?' => ti < txt.len() && (flat || txt[ti] != '/') && dp[(pi + 1) * width + ti + 1],
+                literal => ti < txt.len() && txt[ti] == literal && dp[(pi + 1) * width + ti + 1],
+            };
+            dp[pi * width + ti] = ok;
         }
     }
+    dp[0]
 }
 
 /// 判断模式 `a` 是否**包含**模式 `b`（即 `a` 匹配的文本集合 ⊇ `b` 匹配的集合）。
 /// 用于静态分析（shadowed/redundant 规则检测）。
 pub fn glob_subsumes(a: &str, b: &str, flat: bool) -> bool {
+    // RS-016（审计 2026-09-24）：输入上限——与 glob_match 同口径（16K）。
+    // 此前无上限：超长模式直接进 tokenize+covers，DP 表无界分配
+    const MAX_GLOB_INPUT: usize = 16_384;
+    if a.len() > MAX_GLOB_INPUT || b.len() > MAX_GLOB_INPUT {
+        return false;
+    }
     let a_tok = tokenize(a);
     let b_tok = tokenize(b);
-    covers(&a_tok, &b_tok, 0, 0, flat)
+    covers(&a_tok, &b_tok, flat)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -153,46 +128,51 @@ fn tokenize(pattern: &str) -> Vec<Tok> {
     toks
 }
 
-fn covers(a: &[Tok], b: &[Tok], ai: usize, bi: usize, flat: bool) -> bool {
-    if bi == b.len() {
-        // b 已耗尽：a 的剩余片段必须整体可匹配空（全星号）——否则 b 的更短文本
-        // （如空串）不被 a 覆盖（`x*` 声称覆盖 `` 即误报 shadowed）。
-        return a[ai..].iter().all(|t| matches!(t, Tok::Star | Tok::DStar));
+/// covers 的迭代 DP（RS-015：此前裸递归无记忆化——对抗性模式呈指数
+/// 展开，且递归深度可达 a.len()+b.len()）。
+///
+/// 转移与旧递归逐 case 对照（语义不变）：
+/// - b 耗尽：a 的剩余片段必须整体可匹配空（全星号）——边界列
+/// - a 耗尽：false（边界默认值）
+/// - (DStar, _)：cov[ai+1][bi] ∨ cov[ai][bi+1]
+/// - (Star, DStar)：仅 flat（单星不覆盖双星语言——宁漏勿误）
+/// - (Star, Star)：锁步推进
+/// - (Star, 其他)：非 flat 遇字面 `/` 不可覆盖；否则 cov[ai][bi+1]
+/// - (_, Star|DStar)：false
+/// - (Any1, Any1)：锁步；(Any1, Lit)：非 flat 遇 `/` 拒绝，否则锁步
+/// - (Lit, Any1)：false；(Lit, Lit)：相等锁步
+fn covers(a: &[Tok], b: &[Tok], flat: bool) -> bool {
+    if b.is_empty() {
+        // b 为空模式：a 的全部片段必须可匹配空
+        return a.iter().all(|t| matches!(t, Tok::Star | Tok::DStar));
     }
-    if ai == a.len() {
-        return false;
+    let width = b.len() + 1;
+    let mut cov = vec![false; (a.len() + 1) * width];
+    // 边界列 bi == b.len()：a[ai..] 必须全为星号（可匹配空）
+    for ai in 0..=a.len() {
+        cov[ai * width + b.len()] = a[ai..].iter().all(|t| matches!(t, Tok::Star | Tok::DStar));
     }
-    match (&a[ai], &b[bi]) {
-        (Tok::DStar, _) => covers(a, b, ai + 1, bi, flat) || covers(a, b, ai, bi + 1, flat),
-        // 非 flat 下单星不跨 `/` 而双星跨——单星不可能覆盖双星的语言；
-        // flat 下两者语义相同，锁步推进可靠（不完备但安全，宁漏勿误）。
-        (Tok::Star, Tok::DStar) => flat && covers(a, b, ai + 1, bi + 1, flat),
-        (Tok::Star, Tok::Star) => covers(a, b, ai + 1, bi + 1, flat),
-        (Tok::Star, _) => {
-            if flat || !matches!(b[bi], Tok::Lit('/')) {
-                covers(a, b, ai, bi + 1, flat)
-            } else {
-                false
-            }
-        }
-        (_, Tok::Star | Tok::DStar) => false,
-        (Tok::Any1, Tok::Any1) => covers(a, b, ai + 1, bi + 1, flat),
-        (Tok::Any1, Tok::Lit(_)) => {
-            if flat || !matches!(b[bi], Tok::Lit('/')) {
-                covers(a, b, ai + 1, bi + 1, flat)
-            } else {
-                false
-            }
-        }
-        (Tok::Lit(_), Tok::Any1) => false,
-        (Tok::Lit(ca), Tok::Lit(cb)) => {
-            if ca == cb {
-                covers(a, b, ai + 1, bi + 1, flat)
-            } else {
-                false
-            }
+    // bi 降序（依赖 bi+1 列），ai 降序（DStar 依赖同列 ai+1）
+    for bi in (0..b.len()).rev() {
+        for ai in (0..a.len()).rev() {
+            let at = |i: usize, j: usize| cov[i * width + j];
+            let ok = match (&a[ai], &b[bi]) {
+                (Tok::DStar, _) => at(ai + 1, bi) || at(ai, bi + 1),
+                (Tok::Star, Tok::DStar) => flat && at(ai + 1, bi + 1),
+                (Tok::Star, Tok::Star) => at(ai + 1, bi + 1),
+                (Tok::Star, _) => (flat || !matches!(b[bi], Tok::Lit('/'))) && at(ai, bi + 1),
+                (_, Tok::Star | Tok::DStar) => false,
+                (Tok::Any1, Tok::Any1) => at(ai + 1, bi + 1),
+                (Tok::Any1, Tok::Lit(_)) => {
+                    (flat || !matches!(b[bi], Tok::Lit('/'))) && at(ai + 1, bi + 1)
+                }
+                (Tok::Lit(_), Tok::Any1) => false,
+                (Tok::Lit(ca), Tok::Lit(cb)) => ca == cb && at(ai + 1, bi + 1),
+            };
+            cov[ai * width + bi] = ok;
         }
     }
+    cov[0]
 }
 
 #[cfg(test)]
@@ -326,5 +306,24 @@ mod tests {
         assert!(!glob_subsumes("**x*", "", false));
         assert!(glob_subsumes("**", "", false));
         assert!(glob_subsumes("*", "", false));
+    }
+
+    // —— RS-015/016 回归（审计 2026-09-24） ——
+
+    #[test]
+    fn subsumes_oversized_input_rejected() {
+        // RS-016：glob_subsumes 输入上限——此前无界进 tokenize+covers
+        let long = "a".repeat(20_000);
+        assert!(!glob_subsumes(&long, "x", false));
+        assert!(!glob_subsumes("x", &long, false));
+    }
+
+    #[test]
+    fn subsumes_adversarial_double_stars_terminates() {
+        // RS-015：迭代 DP 下对抗性双星串即时完成（此前裸递归指数展开）
+        let a = "**a".repeat(300);
+        let b = "**b".repeat(300);
+        assert!(!glob_subsumes(&a, &b, false));
+        assert!(glob_subsumes(&a, &a, false));
     }
 }

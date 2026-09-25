@@ -173,19 +173,24 @@ impl SpaceRouting {
                     },
                     "pattern": r.pattern,
                     "workspace": r.workspace_id,
+                    // RS-038（审计 2026-09-24）：enabled 字段此前未进 JS——
+                    // Rust 侧 matches() 检查 enabled，注入 JS 不检查（口径漂移）
+                    "enabled": r.enabled,
                 })
                 .to_string()
             })
             .collect::<Vec<String>>()
             .join(",");
-        let default_ws = &self.default_workspace;
+        // RS-037（审计 2026-09-24）：default_workspace 经 serde 转义——
+        // 此前裸 format! 直拼单引号字面量（含 ' 即注入）
+        let default_ws_json = serde_json::json!(self.default_workspace).to_string();
         format!(
             r#"
 // Aegis SpaceRouting — URL 到工作区路由（参照 Zen Browser / Arc）
 // 原始设计：Zen Browser (MPL-2.0) / Arc Browser (The Browser Company)
 (function() {{
   var RULES = [{rules_json}];
-  var DEFAULT_WS = '{default_ws}';
+  var DEFAULT_WS = {default_ws_json};
 
   function getHostname(url) {{
     try {{
@@ -197,6 +202,8 @@ impl SpaceRouting {
   function route(url) {{
     for (var i = 0; i < RULES.length; i++) {{
       var r = RULES[i];
+      // RS-038：禁用规则必须跳过（与 Rust matches() 口径一致）
+      if (!r.enabled) continue;
       var matched = false;
       if (r.type === 'domain') {{
         var h = getHostname(url);
@@ -297,5 +304,40 @@ mod tests {
         assert!(script.contains("__AEGIS_SPACE_ROUTING"));
         assert!(script.contains("github.com"));
         assert!(script.contains("route"));
+    }
+
+    // —— RS-037/038 回归（审计 2026-09-24） ——
+
+    #[test]
+    fn default_workspace_escaped_in_script() {
+        // RS-037：default_workspace 含单引号此前直拼 `'{}'`——注入任意 JS
+        let sr = SpaceRouting::new("ws'); alert(1); ('");
+        let script = sr.inject_script();
+        assert!(
+            !script.contains("var DEFAULT_WS = 'ws');"),
+            "default_workspace 必须经 serde 转义（不得逃逸字符串字面量）"
+        );
+        assert!(
+            script.contains(r#""ws'); alert(1); ('""#),
+            "serde JSON 字面量形态"
+        );
+    }
+
+    #[test]
+    fn script_carries_enabled_flag_and_short_circuits() {
+        // RS-038：注入 JS 必须携带 enabled 字段并在 route 中跳过禁用规则
+        let mut sr = SpaceRouting::new("default");
+        let mut rule = RoutingRule::domain("GitHub", "github.com", "work");
+        rule.enabled = false;
+        sr.add_rule(rule);
+        let script = sr.inject_script();
+        assert!(
+            script.contains(r#""enabled":false"#),
+            "规则必须携带 enabled 字段"
+        );
+        assert!(
+            script.contains("if (!r.enabled) continue;"),
+            "route 必须短路禁用规则"
+        );
     }
 }

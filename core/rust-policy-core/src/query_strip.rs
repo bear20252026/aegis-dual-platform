@@ -137,7 +137,13 @@ impl QueryStripper {
     /// 生成 JS 注入脚本（在浏览器端拦截 fetch/XHR 请求时剥离参数）。
     pub fn inject_script(&self) -> String {
         let params_json: String = {
-            let items: Vec<String> = self.params.iter().map(|p| format!("'{}'", p)).collect();
+            // RS-022（审计 2026-09-24）：自定义参数含单引号/反斜杠此前直拼
+            // 进 `'{}'` 字面量——逃逸字符串注入任意 JS
+            let items: Vec<String> = self
+                .params
+                .iter()
+                .map(|p| format!("'{}'", crate::util::js_escape_single_quoted(p)))
+                .collect();
             format!("[{}]", items.join(","))
         };
         format!(

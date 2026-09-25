@@ -79,6 +79,11 @@ impl PerSiteSeed {
     /// - 种子在 Rust 侧派生——脚本内嵌的**只有该站自己的种子**，不含会话
     ///   种子原文；
     /// - 种子只存在于闭包局部——页面无法按名读取（也不再注册全局常量）。
+    ///
+    /// RS-028（审计 2026-09-24）：站点种子由**闭包内 AudioBuffer 通道噪声
+    /// 消费**——此前脚本仅 `return` 种子死值（无人消费、无任何防护效果）。
+    /// 现在种子驱动 AudioBuffer.getChannelData 的 per-site 确定性微扰：
+    /// 音频指纹按站点隔离（Brave 模型），同站点会话内稳定、跨站点/跨会话不同。
     pub fn inject_script(&self, domain: &str) -> String {
         let site_seed_hex = self.derive_hex(domain);
         format!(
@@ -87,8 +92,25 @@ impl PerSiteSeed {
 // 同站点一致 + 跨站点隔离 + 跨会话刷新；种子闭包封装（不进全局作用域）
 (function() {{
   const __AEGIS_SITE_SEED = '{site_seed_hex}';
-  // 供同脚本内噪声模块确定性取用；不挂载到 window
-  return __AEGIS_SITE_SEED;
+
+  // RS-028：种子闭包内闭环驱动——AudioBuffer 通道数据 per-site 确定性微扰
+  //（LCG 由站点种子播种：同站确定性，跨站/跨会话去相关）
+  try {{
+    const origGetChannelData = AudioBuffer.prototype.getChannelData;
+    AudioBuffer.prototype.getChannelData = function(channel) {{
+      const data = origGetChannelData.call(this, channel);
+      try {{
+        let s = parseInt(__AEGIS_SITE_SEED.slice(0, 8), 16) || 1;
+        for (let i = 0; i < data.length; i += 512) {{
+          s = (s * 1664525 + 1013904223) >>> 0;
+          data[i] = data[i] + (((s >>> 8) % 3) - 1) * 1e-7;
+        }}
+      }} catch (e) {{}}
+      return data;
+    }};
+    var __aegisReg = window[Symbol.for('aegis.proxy.register.v1')];
+    if (__aegisReg) __aegisReg(AudioBuffer.prototype.getChannelData, origGetChannelData);
+  }} catch (e) {{}}
 }})();
 "#
         )
@@ -152,5 +174,25 @@ mod tests {
         hasher.update(b"aegis:per-site-seed:v2:example.com");
         let expected = hasher.finalize();
         assert_eq!(&pss.derive("example.com")[..], &expected[..16]);
+    }
+
+    #[test]
+    fn script_seed_is_consumed_in_closure() {
+        // RS-028 回归：站点种子必须被闭包内机制实际消费——此前仅 return
+        // 死值（无任何防护效果）
+        let pss = PerSiteSeed::new(test_seed());
+        let script = pss.inject_script("example.com");
+        assert!(
+            script.contains("AudioBuffer.prototype.getChannelData"),
+            "种子必须驱动 AudioBuffer 通道噪声"
+        );
+        assert!(
+            script.contains("origGetChannelData.call(this, channel)"),
+            "噪声必须作用在原始数据上"
+        );
+        assert!(
+            !script.contains("return __AEGIS_SITE_SEED"),
+            "死值 return 必须移除"
+        );
     }
 }

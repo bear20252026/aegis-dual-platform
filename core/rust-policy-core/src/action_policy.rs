@@ -93,11 +93,18 @@ impl ActionPolicy {
             return None;
         }
 
-        // DenyOverrides：deny > ask > allow
+        // DenyOverrides：deny > ask > allow；同效果内按 priority 降序裁决
+        //（RS-030——审计 2026-09-24：priority 字段此前从未参与评估）。
+        // 同优先级保持首个匹配（与旧行为一致——确定性）
         let top = matches.iter().map(|r| r.effect.restrictiveness()).max()?;
         let rule = matches
             .iter()
-            .find(|r| r.effect.restrictiveness() == top)
+            .filter(|r| r.effect.restrictiveness() == top)
+            .fold(None::<&PolicyRule>, |acc, r| match acc {
+                None => Some(r),
+                Some(cur) if r.priority > cur.priority => Some(r),
+                _ => acc,
+            })
             .unwrap();
 
         Some(match &rule.effect {
@@ -220,5 +227,30 @@ mod tests {
         let _ = policy.evaluate("read", "x你你y你z你example.com你");
         let _ = policy.evaluate("read", "你你你你你你你你");
         let _ = policy.evaluate("read", "emoji😀😀x😀read😀example.com");
+    }
+
+    #[test]
+    fn priority_breaks_ties_within_same_effect() {
+        // RS-030 回归：同效果（restrictiveness 相同）时高 priority 胜出，
+        // 同 priority 保持首个匹配（确定性）
+        let mut policy = ActionPolicy::new(RuleEffect::Allow);
+        let mut low = make_rule("low", "read*", RuleEffect::Allow);
+        low.priority = 1;
+        let mut high = make_rule("high", "read*", RuleEffect::Allow);
+        high.priority = 9;
+        policy.add_rule(low);
+        policy.add_rule(high);
+        match policy.evaluate("read_file", "ctx") {
+            PolicyDecision::Allow(msg) => assert!(msg.contains("high"), "高优先级须胜出：{msg}"),
+            other => panic!("期望 Allow，实际 {other:?}"),
+        }
+        // 同 priority → 首个匹配
+        let mut policy2 = ActionPolicy::new(RuleEffect::Allow);
+        policy2.add_rule(make_rule("first", "read*", RuleEffect::Allow));
+        policy2.add_rule(make_rule("second", "read*", RuleEffect::Allow));
+        match policy2.evaluate("read_file", "ctx") {
+            PolicyDecision::Allow(msg) => assert!(msg.contains("first")),
+            other => panic!("期望 Allow，实际 {other:?}"),
+        }
     }
 }

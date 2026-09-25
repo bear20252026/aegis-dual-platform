@@ -61,11 +61,15 @@ impl FingerprintShield {
         self.seed
     }
 
-    /// 生成 JS 注入脚本（注入 WebView——canvas/WebGL/Audio 噪声）。
+    /// 生成 JS 注入脚本（注入 WebView——canvas/Audio 噪声）。
     ///
     /// 种子以闭包内局部常量注入——**不再置于顶层全局词法环境**（此前顶层
     /// `const __AEGIS_SESSION_SEED` 任意页面可按名读取，全会话跨站唯一
     /// 标识符等于主动发放的超级 Cookie）。
+    ///
+    /// RS-026（审计 2026-09-24）：WebGL vendor/renderer 伪装已移出本模块——
+    /// webgl_spoof 是该能力的单一负责方（此前两处覆盖同两个常量但取值
+    /// 口径矛盾，后者静默遮蔽前者）。Canvas 噪声为本模块职责保留。
     pub fn inject_script(&self) -> String {
         let hex = self.seed_hex();
         format!(
@@ -75,34 +79,32 @@ impl FingerprintShield {
   const __AEGIS_SESSION_SEED = '{hex}';
 
 // Canvas 噪声（每个像素 +1/-1 随机偏移——视觉不可察觉）
+// RS-025（审计 2026-09-24）：噪声施加在**离屏副本**上——此前就地
+// putImageData 把噪声写回原画布，页面双读（toDataURL 前后各 getImageData
+// 一次）即可检测像素漂移
 (function() {{
   const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
   HTMLCanvasElement.prototype.toDataURL = function(type) {{
-    const ctx = this.getContext('2d');
-    if (ctx) {{
-      const imageData = ctx.getImageData(0, 0, this.width, this.height);
-      const seed = parseInt(__AEGIS_SESSION_SEED.slice(0, 8), 16);
-      for (let i = 0; i < imageData.data.length; i += 4) {{
-        imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1;
+    try {{
+      const ctx = this.getContext('2d');
+      if (ctx) {{
+        const off = document.createElement('canvas');
+        off.width = this.width;
+        off.height = this.height;
+        const octx = off.getContext('2d');
+        octx.drawImage(this, 0, 0);
+        const imageData = octx.getImageData(0, 0, off.width, off.height);
+        const seed = parseInt(__AEGIS_SESSION_SEED.slice(0, 8), 16);
+        for (let i = 0; i < imageData.data.length; i += 4) {{
+          imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1;
+        }}
+        octx.putImageData(imageData, 0, 0);
+        return origToDataURL.apply(off, arguments);
       }}
-      ctx.putImageData(imageData, 0, 0);
-    }}
+    }} catch (e) {{}}
     return origToDataURL.apply(this, arguments);
   }};
-  if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(HTMLCanvasElement.prototype.toDataURL, origToDataURL);
-}})();
-
-// WebGL 渲染器/供应商伪装
-(function() {{
-  const origGetParameter = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function(p) {{
-    const UNMASKED_RENDERER = 37446;
-    const UNMASKED_VENDOR = 37445;
-    if (p === UNMASKED_RENDERER) return 'ANGLE (Aegis)';
-    if (p === UNMASKED_VENDOR) return 'Aegis Privacy';
-    return origGetParameter.call(this, p);
-  }};
-  if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(WebGLRenderingContext.prototype.getParameter, origGetParameter);
+  if (window[Symbol.for('aegis.proxy.register.v1')]) window[Symbol.for('aegis.proxy.register.v1')](HTMLCanvasElement.prototype.toDataURL, origToDataURL);
 }})();
 
 // hardwareConcurrency 随机化（2-8 核）

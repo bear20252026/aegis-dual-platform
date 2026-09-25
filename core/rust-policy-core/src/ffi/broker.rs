@@ -217,11 +217,20 @@ impl FfiBroker {
                 // 审计整改：有界账本——满则 fail-closed 拒绝（此前无上限，
                 // 可被待审批请求堆叠造成内存 DoS）
                 if pending_approvals.len() >= MAX_PENDING_APPROVALS {
-                    return ffi_deny(
-                        "approval_ledger",
-                        "待审批账本已达上限（1024）",
-                        "denied — pending approval ledger at capacity",
-                    );
+                    // RS-035（审计 2026-09-24）：满时先清理已过期待审批——
+                    // 此前过期请求永久驻留，1024 满后新请求被自拒绝服务
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|duration| duration.as_secs())
+                        .unwrap_or(u64::MAX);
+                    pending_approvals.retain(|_, action| action.expires_at >= now);
+                    if pending_approvals.len() >= MAX_PENDING_APPROVALS {
+                        return ffi_deny(
+                            "approval_ledger",
+                            "待审批账本已达上限（1024）",
+                            "denied — pending approval ledger at capacity",
+                        );
+                    }
                 }
                 pending_approvals.insert(authorized.nonce.clone(), authorized);
                 FfiDecision::RequireConfirmation { request }

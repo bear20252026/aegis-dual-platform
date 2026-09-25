@@ -99,6 +99,51 @@ impl Default for JsPipeline {
     }
 }
 
+// RS-040（审计 2026-09-24）：抽象与实现接线——此前 JsInjectable 定义了
+// 接口但 9 个防护模块零实现（管线直接调 inherent inject_script，trait
+// 形同虚设）。现统一为各模块实现 trait；引用类型经_blanket impl 适配，
+// 管线（lib.rs fingerprint_pipeline）改用 JsPipeline trait 对象组装。
+macro_rules! impl_js_injectable {
+    ($($t:ty => $name:literal),* $(,)?) => {
+        $(
+            impl JsInjectable for $t {
+                fn name(&self) -> &str {
+                    $name
+                }
+                fn inject_script(&self) -> String {
+                    // 同名 inherent 方法优先于 trait 方法——委托实现体
+                    <$t>::inject_script(self)
+                }
+            }
+        )*
+    };
+}
+
+impl_js_injectable!(
+    crate::tostring_guard::ToStringGuard => "ToStringGuard",
+    crate::shield::FingerprintShield => "FingerprintShield",
+    crate::letterbox::LetterboxShield => "LetterboxShield",
+    crate::query_strip::QueryStripper => "QueryStripper",
+    crate::font_norm::FontNormalizer => "FontNormalizer",
+    crate::webgl_spoof::WebGLSpoof => "WebGLSpoof",
+    crate::timer_prec::TimerPrecision => "TimerPrecision",
+    crate::ext_proxy::ExtProxy => "ExtProxy",
+);
+
+/// 引用适配：`&T`（T: JsInjectable）同样可实现 trait——管线组装时
+/// 允许借用外部构造的阶段（如 fingerprint_pipeline 的 &FingerprintShield）。
+impl<T: JsInjectable + ?Sized> JsInjectable for &T {
+    fn name(&self) -> &str {
+        T::name(*self)
+    }
+    fn inject_script(&self) -> String {
+        T::inject_script(*self)
+    }
+    fn enabled(&self) -> bool {
+        T::enabled(*self)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -77,8 +77,17 @@ impl LetterboxShield {
     }
 
     /// 用自定义配置创建。
+    ///
+    /// RS-021（审计 2026-09-24）：步长钳到 ≥1——0 会让注入 JS 的
+    /// `Math.round(v / step)` 除零得 Infinity（圆整完全失效）。
     pub fn with_config(config: LetterboxConfig) -> Self {
-        Self { config }
+        Self {
+            config: LetterboxConfig {
+                width_step: config.width_step.max(1),
+                height_step: config.height_step.max(1),
+                ..config
+            },
+        }
     }
 
     /// 生成 Letterboxing JS 注入脚本。

@@ -82,7 +82,13 @@ impl FontNormalizer {
     /// - CSS `font-family` 解析 — 仅匹配安全字体
     pub fn inject_script(&self) -> String {
         let fonts_json: String = {
-            let items: Vec<String> = self.safe_fonts.iter().map(|f| format!("'{}'", f)).collect();
+            // RS-023（审计 2026-09-24）：自定义字体名含 `'`/`\` 此前直拼
+            // 进 `'{}'` 字面量——逃逸字符串注入任意 JS
+            let items: Vec<String> = self
+                .safe_fonts
+                .iter()
+                .map(|f| format!("'{}'", crate::util::js_escape_single_quoted(f)))
+                .collect();
             format!("[{}]", items.join(","))
         };
         format!(
@@ -100,6 +106,12 @@ impl FontNormalizer {
     FontFaceSet.prototype.check = function(font) {{
       // 提取字体族名（忽略大小写和引号）
       var family = font.replace(/['"]/g, '').split(',')[0].trim().toLowerCase();
+      // RS-019（审计 2026-09-24）：剥除尺寸/样式前缀——canvas check 传参
+      // 形如 "12px Arial" / "italic bold 12px 'Times New Roman'"，此前带
+      // 尺寸前缀的 family 永不在 SAFE_SET 内 → check 对安全字体也返回
+      // false（防护反向失效：安全字体被伪装成不可用）
+      family = family.replace(
+        /^(?:normal|italic|oblique|bold|[1-9]00\b)*\s*\d+(?:\.\d+)?[a-z%]*\s+/, '').trim();
       // 去掉样式后缀
       family = family.replace(/\s+(regular|bold|italic|light|medium|heavy)$/i, '').trim();
       if (SAFE_SET.has(family)) {{
@@ -130,7 +142,11 @@ impl FontNormalizer {
       // 强制使用安全字体族
       var currentFont = this.font || '';
       var safeFont = SAFE_FONTS.slice(0, 6).join(', ') + ', sans-serif';
-      this.font = currentFont.replace(/font-family:[^;]+/g, 'font-family: ' + safeFont);
+      // RS-018（审计 2026-09-24）：canvas font 是 CSS 简写（"16px Arial"），
+      // 不含 "font-family:" 前缀——旧 replace 永不命中（整体 no-op）。
+      // 现解析简写尾部的 family 段并整段替换；解析失败则落到保守默认值
+      var m = /^((?:normal|italic|oblique|bold|small-caps|[1-9]00)\s+)*(\d+(?:\.\d+)?(?:px|pt|pc|in|cm|mm|q|em|rem|ex|ch))(?:\s*\/\s*[\d.]+\S*)?\s+([\s\S]+)$/i.exec(currentFont);
+      this.font = m ? (m[2] + ' ' + safeFont) : ('10px ' + safeFont);
       return origMeasure.apply(this, arguments);
     }};
   }} catch(e) {{}}
@@ -172,5 +188,49 @@ mod tests {
         let fn_ = FontNormalizer::with_fonts(vec!["MyFont".to_string()]);
         assert_eq!(fn_.safe_fonts.len(), 1);
         assert!(fn_.safe_fonts.contains(&"MyFont".to_string()));
+    }
+
+    // —— RS-018/019/023 回归（审计 2026-09-24） ——
+
+    #[test]
+    fn check_strips_size_style_prefix() {
+        // RS-019：check() 提取的 family 必须剥除尺寸/样式前缀——否则
+        // "12px arial" 永不在 SAFE_SET 内，check 对安全字体也返回 false
+        let script = FontNormalizer::new().inject_script();
+        assert!(
+            script.contains(r"\d+(?:\.\d+)?[a-z%]*"),
+            "check() 必须包含尺寸前缀剥除正则"
+        );
+        assert!(
+            !script.contains("currentFont.replace(/font-family:"),
+            "旧 measureText 的 font-family 前缀替换必须已移除（永不含该前缀 = 死代码）"
+        );
+    }
+
+    #[test]
+    fn measure_text_parses_shorthand_family() {
+        // RS-018：measureText 改为解析 CSS 简写尾部 family 段
+        let script = FontNormalizer::new().inject_script();
+        assert!(
+            script.contains(r"(?:px|pt|pc|in|cm|mm|q|em|rem|ex|ch)"),
+            "measureText 必须按 CSS 简写尺寸单位解析"
+        );
+        assert!(
+            script.contains("m[2] + ' ' + safeFont"),
+            "解析成功时保留原尺寸段、替换 family 段"
+        );
+        assert!(
+            script.contains("'10px ' + safeFont"),
+            "解析失败时落到保守默认尺寸"
+        );
+    }
+
+    #[test]
+    fn custom_font_name_escaped() {
+        // RS-023：字体名单引号注入——直拼逃逸字符串字面量
+        let fn_ = FontNormalizer::with_fonts(vec!["Foo'bar".to_string()]);
+        let script = fn_.inject_script();
+        assert!(script.contains("Foo\\'bar"), "单引号必须已转义");
+        assert!(!script.contains("'Foo'bar'"), "不得残留未转义直拼");
     }
 }

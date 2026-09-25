@@ -48,79 +48,84 @@ pub struct CommandEntry {
     pub icon: String,
     /// 匹配关键词（用于搜索）。
     pub keywords: Vec<String>,
+    /// RS-039（审计 2026-09-24）：小写缓存——matches 此前每查询对
+    /// title/subtitle/value 各做一次 to_lowercase（O(条目×查询) 分配）。
+    title_lc: String,
+    subtitle_lc: String,
+    value_lc: String,
 }
 
 impl CommandEntry {
+    /// 内部统一构造器（keywords 与小写缓存单源派生）。
+    fn new_entry(
+        command_type: CommandType,
+        title: &str,
+        subtitle: &str,
+        value: &str,
+        icon: &str,
+    ) -> Self {
+        let title = title.to_string();
+        let subtitle = subtitle.to_string();
+        let value = value.to_string();
+        let title_lc = title.to_lowercase();
+        let subtitle_lc = subtitle.to_lowercase();
+        let value_lc = value.to_lowercase();
+        Self {
+            command_type,
+            title,
+            subtitle,
+            value,
+            icon: icon.to_string(),
+            keywords: vec![title_lc.clone(), subtitle_lc.clone()],
+            title_lc,
+            subtitle_lc,
+            value_lc,
+        }
+    }
+
     /// 创建导航命令。
     pub fn navigate(title: &str, url: &str) -> Self {
-        Self {
-            command_type: CommandType::Navigate,
-            title: title.to_string(),
-            subtitle: url.to_string(),
-            value: url.to_string(),
-            icon: "globe".to_string(),
-            keywords: vec![title.to_lowercase(), url.to_lowercase()],
-        }
+        Self::new_entry(CommandType::Navigate, title, url, url, "globe")
     }
 
     /// 创建切换标签命令。
     pub fn switch_tab(title: &str, tab_id: &str, url: &str) -> Self {
-        Self {
-            command_type: CommandType::SwitchTab,
-            title: title.to_string(),
-            subtitle: url.to_string(),
-            value: tab_id.to_string(),
-            icon: "tab".to_string(),
-            keywords: vec![title.to_lowercase(), url.to_lowercase()],
-        }
+        Self::new_entry(CommandType::SwitchTab, title, url, tab_id, "tab")
     }
 
     /// 创建搜索历史命令。
     pub fn search_history(title: &str, url: &str) -> Self {
-        Self {
-            command_type: CommandType::SearchHistory,
-            title: title.to_string(),
-            subtitle: url.to_string(),
-            value: url.to_string(),
-            icon: "clock".to_string(),
-            keywords: vec![title.to_lowercase(), url.to_lowercase()],
-        }
+        Self::new_entry(CommandType::SearchHistory, title, url, url, "clock")
     }
 
     /// 创建书签命令。
     pub fn bookmark(title: &str, url: &str) -> Self {
-        Self {
-            command_type: CommandType::SearchBookmark,
-            title: title.to_string(),
-            subtitle: url.to_string(),
-            value: url.to_string(),
-            icon: "star".to_string(),
-            keywords: vec![title.to_lowercase(), url.to_lowercase()],
-        }
+        Self::new_entry(CommandType::SearchBookmark, title, url, url, "star")
     }
 
     /// 创建操作命令。
     pub fn action(title: &str, description: &str, action_name: &str) -> Self {
-        Self {
-            command_type: CommandType::Action,
-            title: title.to_string(),
-            subtitle: description.to_string(),
-            value: action_name.to_string(),
-            icon: "command".to_string(),
-            keywords: vec![title.to_lowercase(), description.to_lowercase()],
-        }
+        Self::new_entry(
+            CommandType::Action,
+            title,
+            description,
+            action_name,
+            "command",
+        )
     }
 
     /// 检查是否匹配查询。
     pub fn matches(&self, query: &str) -> bool {
-        let q = query.to_lowercase();
-        if q.is_empty() {
+        if query.is_empty() {
             return true;
         }
+        // RS-039：title/subtitle/value 小写已预计算——此处仅查询侧一次
+        // to_lowercase
+        let q = query.to_lowercase();
         self.keywords.iter().any(|k| k.contains(&q))
-            || self.title.to_lowercase().contains(&q)
-            || self.subtitle.to_lowercase().contains(&q)
-            || self.value.to_lowercase().contains(&q)
+            || self.title_lc.contains(&q)
+            || self.subtitle_lc.contains(&q)
+            || self.value_lc.contains(&q)
     }
 }
 

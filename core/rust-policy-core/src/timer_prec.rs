@@ -77,7 +77,9 @@ impl TimerPrecision {
     /// 不覆盖 `new Date()`（构造函数无法安全覆盖），
     /// 但 `Date.now()` 是主要的高精度计时来源。
     pub fn inject_script(&self) -> String {
-        let us = self.config.microseconds;
+        // RS-020（审计 2026-09-24）：microseconds=0 饱和到 1——0 会让注入
+        // JS 的 PRECISION_MS=0，`value / 0` 得 Infinity（精度降低完全失效）
+        let us = self.config.microseconds.max(1);
         let jitter = self.config.jitter;
         format!(
             r#"
@@ -109,14 +111,14 @@ impl TimerPrecision {
       writable: false,
       configurable: false
     }});
-    if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(wrappedPerfNow, origPerfNow);
+    var reg1 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg1) reg1(wrappedPerfNow, origPerfNow);
   }} catch(e) {{}}
 
   // 覆盖 Date.now()
   try {{
     var origDateNow = Date.now;
     Date.now = function() {{ return reducePrecision(origDateNow()); }};
-    if (window.__AEGIS_REGISTER_PROXY) window.__AEGIS_REGISTER_PROXY(Date.now, origDateNow);
+    var reg2 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg2) reg2(Date.now, origDateNow);
   }} catch(e) {{}}
 }})();
 "#

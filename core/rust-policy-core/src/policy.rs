@@ -12,7 +12,7 @@
 //! 可拼接：通过 `Decision` trait 与 broker 层对接。
 
 use crate::action_policy::{ActionPolicy, PolicyDecision, RuleEffect};
-use crate::decision::{AuthorizedAction, Decision, DenyReason};
+use crate::decision::{Decision, DenyReason};
 
 /// 策略评估结果（本地 or 远程）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -126,19 +126,21 @@ impl LocalPolicy for DefaultLocalPolicy {
         // 仅当显式规则匹配时返回 Some；无匹配返回 None → 上层走 FailSafe
         let decision = self.inner.evaluate_opt(action, context)?;
         Some(match decision {
-            PolicyDecision::Allow(explanation) => Decision::Allow(AuthorizedAction {
-                session_id: String::new(),
-                tab_id: String::new(),
-                document_generation: 0,
-                origin: context.to_string(),
-                method: String::new(),
-                canonical_parameters: String::new(),
-                scope: action.to_string(),
-                expires_at: 0,
-                nonce: String::new(),
-                policy_version: String::new(),
-                explanation,
-            }),
+            PolicyDecision::Allow(_explanation) => {
+                // RS-029（审计 2026-09-24）：本地规则 Allow 映射出的
+                // AuthorizedAction 带空凭据（session/nonce 空、expires_at=0）
+                // ——下游 validate_action 必以 action_expired/session_not_found
+                // 拒绝，Allow 永远是死路。升级为 RequireConfirmation：由宿主
+                // 走交互审批铸造真实 nonce（fail-closed，绝不放行空凭据授权）
+                Decision::RequireConfirmation(crate::decision::ApprovalRequest {
+                    origin: context.to_string(),
+                    method: String::new(),
+                    path: String::new(),
+                    scope: action.to_string(),
+                    expires_at: 0,
+                    nonce: String::new(),
+                })
+            }
             PolicyDecision::Deny(explanation) => Decision::Deny(DenyReason {
                 code: "policy_denied".into(),
                 detail: explanation.clone(),
@@ -244,5 +246,26 @@ mod tests {
         });
         let result = policy.evaluate("navigation:read", "https://example.com");
         assert!(matches!(result, Some(Decision::Deny(_))));
+    }
+
+    #[test]
+    fn local_allow_rule_upgrades_to_confirmation_not_empty_credentials() {
+        // RS-029 回归：本地 Allow 规则不得映射空凭据 AuthorizedAction
+        //（session/nonce 空 + expires_at=0 → 下游必拒的死路授权）——
+        // 必须升级为 RequireConfirmation 交宿主铸造真实 nonce
+        use crate::action_policy::{PolicyRule, RuleEffect};
+        let mut policy = DefaultLocalPolicy::new();
+        policy.inner.add_rule(PolicyRule {
+            name: "allow_read".into(),
+            action_pattern: "navigation:*".into(),
+            condition: None,
+            effect: RuleEffect::Allow,
+            priority: 0,
+        });
+        let result = policy.evaluate("navigation:read", "https://example.com");
+        match result {
+            Some(Decision::RequireConfirmation(_)) => {}
+            other => panic!("Allow 规则必须升级为 RequireConfirmation，实际 {other:?}"),
+        }
     }
 }

@@ -38,6 +38,12 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
         if host.is_empty() {
             return None;
         }
+        // RS-011（审计 2026-09-24）：host 段拒内嵌冒号——此前 rsplit_once
+        // 取最后一段当端口，"host:8080:1234" 以 host="host:8080" 被接受
+        //（合法端口掩盖非法 authority）
+        if host.contains(':') {
+            return None;
+        }
         // 非法端口拒绝（contracts/vectors/url-origin-invalid——https://host:99999
         // ——u16 范围校验——WHATWG 同语义——P0-01）
         let Ok(port_num) = port.parse::<u16>() else {
@@ -54,6 +60,21 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
     if host.is_empty() {
         return None;
     }
+    // RS-012（审计 2026-09-24）：host 字符白名单 + 尾点剥离——与 C# 口径
+    // 一致。尾点为合法 FQDN 根表示（example.org.）——剥离后归一；剥离后
+    // 仅允许 [a-z0-9.-]（xn-- punycode 亦在集内），其余字符（下划线/空格/
+    // 控制符等）一律拒绝
+    let host = host.strip_suffix('.').unwrap_or(&host);
+    if host.is_empty()
+        || host.starts_with('.')
+        || host.contains("..")
+        || !host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+    {
+        return None;
+    }
+    let host = host.to_string();
     let canonical_authority = match port {
         Some(value)
             if !((scheme == "https" && value == 443) || (scheme == "http" && value == 80)) =>
@@ -185,5 +206,49 @@ mod tests {
         assert_eq!(root.canonical_parameters, "/");
         let query_only = canonicalize_external("https://example.org?a=1").unwrap();
         assert_eq!(query_only.canonical_parameters, "/?a=1");
+    }
+
+    // —— RS-011/012 回归（审计 2026-09-24） ——
+
+    #[test]
+    fn host_with_embedded_colon_rejected() {
+        // RS-011：host 段内嵌冒号此前借合法端口段被接受
+        assert_eq!(try_parse_external("https://evil:8080:1234/"), None);
+        assert_eq!(try_parse_external("https://a:b:99/"), None);
+    }
+
+    #[test]
+    fn host_character_whitelist_and_trailing_dot() {
+        // RS-012：字符白名单 + 尾点剥离
+        assert!(
+            try_parse_external("https://example.org./x").is_some(),
+            "尾点 FQDN 剥离后放行"
+        );
+        let stripped = canonicalize_external("https://example.org./x").unwrap();
+        assert_eq!(stripped.host, "example.org", "尾点剥离后 origin 归一");
+        assert_eq!(
+            try_parse_external("https://exa mple.org/"),
+            None,
+            "空格拒绝"
+        );
+        assert_eq!(
+            try_parse_external("https://exa_mple.org/"),
+            None,
+            "下划线拒绝"
+        );
+        assert_eq!(
+            try_parse_external("https://exa\"mple.org/"),
+            None,
+            "引号拒绝"
+        );
+        assert!(
+            try_parse_external("https://xn--e1afmkfd.xn--p1ai/").is_some(),
+            "punycode 字母数字在白名单内"
+        );
+        assert_eq!(
+            try_parse_external("https://.example.org/"),
+            None,
+            "裸点拒绝"
+        );
     }
 }

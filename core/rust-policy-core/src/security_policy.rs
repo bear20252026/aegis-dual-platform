@@ -75,8 +75,12 @@ impl SecurityPolicy {
             sanitized = sanitized.replace(sep, "");
         }
 
-        // 折叠剩余双点
-        sanitized = sanitized.replace("..", ".");
+        // 折叠剩余双点——RS-017（审计 2026-09-24）：单趟 replace 不闭合
+        //（"...." 单趟后仍剩 ".."，嵌套遍历序列逃逸），fixpoint 循环到
+        // 不再含 ".."。每趟 replace 严格缩短串长——必然终止
+        while sanitized.contains("..") {
+            sanitized = sanitized.replace("..", ".");
+        }
 
         // 去首尾点/空格（Windows 兼容）
         sanitized = sanitized.trim_start_matches(['.', ' ']).to_string();
@@ -186,5 +190,15 @@ mod tests {
     fn sanitize_empty_returns_download() {
         assert_eq!(SecurityPolicy::sanitize_filename(None), "download");
         assert_eq!(SecurityPolicy::sanitize_filename(Some("")), "download");
+    }
+
+    #[test]
+    fn sanitize_dot_folding_is_fixpoint() {
+        // RS-017 回归：单趟 ".."→"." 折叠不闭合（"...." 单趟后仍剩 ".."）——
+        // fixpoint 后任何输入不得残留路径遍历序列
+        for input in ["....", "..%2F..", "a....b", "../../../../etc/passwd"] {
+            let out = SecurityPolicy::sanitize_filename(Some(input));
+            assert!(!out.contains(".."), "输入 {input} 折叠后残留 ..：{out}");
+        }
     }
 }
