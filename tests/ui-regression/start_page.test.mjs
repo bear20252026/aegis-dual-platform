@@ -140,3 +140,23 @@ test('语法完整性：全部脚本体必须可解析（防 UI 白屏）', () =
   assert.ok(syntaxOk(SNAKE), 'start.snake.js 语法错误');
   assert.ok(syntaxOk(IMPORT), 'start.import.js 语法错误');
 });
+
+test('WB-028 引擎菜单 ARIA：role=menu 与触发器 aria-controls 配对', () => {
+  // 菜单项为 menuitemradio（renderEngineMenu 动态构建）——容器必须声明
+  // role=menu 才构成完整 menu/menuitemradio ARIA 模式
+  assert.match(HTML, /id="engineMenu"[^>]*role="menu"/, 'engineMenu 必须声明 role=menu');
+  assert.match(HTML, /aria-haspopup="menu"[^>]*aria-controls="engineMenu"/,
+    'enginePill 必须以 aria-controls 指向菜单容器');
+});
+
+test('WB-029 键盘焦点可见性：:focus-visible 规则必须存在', () => {
+  assert.match(CSS, /:focus-visible/, 'start.css 必须有键盘焦点样式（此前全文件 0 处 focus）');
+});
+
+test('WB-027 导入向导焦点管理：初始聚焦 + Tab 陷阱 + 关闭归还', () => {
+  assert.match(IMPORT, /closeBtn\.focus\(\)/, '打开向导必须把初始焦点移入弹层');
+  assert.match(IMPORT, /modal\.addEventListener\('keydown'/, '弹层必须接管按键');
+  assert.match(IMPORT, /'Tab'/, '必须处理 Tab（焦点陷阱）');
+  assert.match(IMPORT, /lastFocus/, '必须记录触发元素');
+  assert.match(IMPORT, /lastFocus\.focus\(\)/, '关闭必须归还焦点');
+});
