@@ -23,7 +23,10 @@ public static class FaviconService
     private const int MaxFaviconBytes = 200 * 1024;
     private const int MaxMemoryEntries = 500;
 
+    // CS-121：内存缓存按持久化语义分面——无痕抓取不再写入普通窗口共享缓存
+    // （图标元数据不跨信任语境混合；磁盘面此前已隔离，此处补内存面）。
     private static readonly ConcurrentDictionary<string, ImageSource?> Mem = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, ImageSource?> PrivateMem = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, byte> Miss = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, Task<ImageSource?>> InFlight = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient Http = CreateHttp();
@@ -51,7 +54,8 @@ public static class FaviconService
     {
         if (string.IsNullOrWhiteSpace(host))
             return null;
-        if (Mem.TryGetValue(host, out var cached))
+        var memory = persistToDisk ? Mem : PrivateMem;
+        if (memory.TryGetValue(host, out var cached))
             return cached;
         if (Miss.ContainsKey(host))
         {
@@ -74,7 +78,10 @@ public static class FaviconService
             }
             else
             {
-                Mem[host] = icon;
+                memory[host] = icon;
+                // CS-119：命中写入后同样修剪——全命中长会话内存不无界增长
+                // （此前仅 miss 路径 Trim，正常命中路径只进不出）
+                TrimCaches();
                 if (persistToDisk)
                     await Task.Run(() => SaveToDisk(host, icon)).ConfigureAwait(false);
             }
@@ -106,13 +113,15 @@ public static class FaviconService
         }
     }
 
-    /// <summary>内存/负缓存上限——长会话不无界增长。</summary>
+    /// <summary>内存/负缓存上限——长会话不无界增长（CS-121：双内存面一并修剪）。</summary>
     private static void TrimCaches()
     {
         if (Miss.Count > MaxMemoryEntries)
             Miss.Clear();
         if (Mem.Count > MaxMemoryEntries)
             Mem.Clear();
+        if (PrivateMem.Count > MaxMemoryEntries)
+            PrivateMem.Clear();
     }
 
     private static async Task<ImageSource?> LoadFromDiskAsync(string host)
@@ -196,7 +205,8 @@ public static class FaviconService
         }
     }
 
-    private static string CachePath(string host)
+    /// <summary>CS-120：提 internal 直测——host 归一化（小写）与哈希文件名形态。</summary>
+    internal static string CachePath(string host)
     {
         var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(host.ToLowerInvariant())));
         return Path.Combine(CacheDir, hash + ".png");

@@ -54,6 +54,26 @@ public sealed class DownloadRecordStoreTests : IDisposable
     }
 
     [Fact]
+    public void All_NonPositiveLimitClampedNotUnbounded()
+    {
+        // CS-116：负/零 limit 此前按 SQLite 语义"无上限"全表返回——钳为 1
+        for (var i = 0; i < 3; i++)
+            _store.Add($"f{i}.bin", $"C:\\f{i}.bin", $"https://example.com/{i}", i, "t");
+        Assert.Equal(1, _store.All(limit: -1).Count);
+        Assert.Equal(1, _store.All(limit: 0).Count);
+    }
+
+    [Fact]
+    public void All_DefaultLimitIs200()
+    {
+        // CS-117：默认 limit=200 语义锁定
+        for (var i = 0; i < 205; i++)
+            _store.Add($"f{i}.bin", $"C:\\f{i}.bin", $"https://example.com/{i}", i, "t");
+        Assert.Equal(200, _store.All().Count);
+        Assert.Equal("f204.bin", _store.All()[0].FileName);
+    }
+
+    [Fact]
     public void Add_PrunesOldestBeyond500()
     {
         // 505 条：超出有界保留上限后最旧的 5 条被修剪

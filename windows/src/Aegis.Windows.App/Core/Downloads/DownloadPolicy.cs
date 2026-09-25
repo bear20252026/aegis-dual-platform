@@ -37,11 +37,13 @@ public static class DownloadPolicy
 
     /// <summary>该下载是否需要用户显式确认（危险扩展命中）。
     /// 候选集：净化文件名 ∪ URL 路径末段 ∪ 查询串各参数值（`/download?file=x.exe`
-    /// 类直链在无 Content-Disposition 时同样命中——单测锁定的强判定）。</summary>
+    /// 类直链在无 Content-Disposition 时同样命中——单测锁定的强判定）。
+    /// CS-106：URL 只解析一次（此前路径段与查询串各 TryCreate 一遍）。</summary>
     public static bool RequiresExplicitConfirmation(string url, string suggestedFileName) =>
         DangerousExtensions.Contains(ExtractExtension(suggestedFileName))
-        || DangerousExtensions.Contains(ExtractExtension(UrlPathLastSegment(url)))
-        || QueryContainsDangerousExtension(UriQuery(url));
+        || (Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && (DangerousExtensions.Contains(ExtractExtension(UrlPathLastSegment(uri)))
+                || QueryContainsDangerousExtension(uri.Query)));
 
     /// <summary>查询串按参数值判定（`f=x.exe&sig=abc` 命中；此前整串取尾点
     /// 只在查询恰好以扩展结尾时才命中）。</summary>
@@ -99,13 +101,8 @@ public static class DownloadPolicy
     }
 
     /// <summary>URL 去查询串后的最后路径段（Content-Disposition 缺失时的判定候选）。</summary>
-    private static string UrlPathLastSegment(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri)
-            ? Uri.UnescapeDataString(uri.AbsolutePath.Split('/').LastOrDefault() ?? string.Empty)
-            : string.Empty;
-
-    private static string UriQuery(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Query : string.Empty;
+    private static string UrlPathLastSegment(Uri uri) =>
+        Uri.UnescapeDataString(uri.AbsolutePath.Split('/').LastOrDefault() ?? string.Empty);
 
     private static string ExtractExtension(string fileName)
     {

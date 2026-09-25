@@ -14,9 +14,20 @@ public sealed class DownloadPolicyTests
     [InlineData("https://x.example/download?file=x.exe", "", true)]
     [InlineData("https://x.example/p/a/evil.msi", "evil.msi", true)]
     [InlineData("https://x.example/script.ps1", "script.ps1", true)]
+    [InlineData("https://x.example/bundle.tar.exe", "bundle.tar.exe", true)]   // CS-108：多级扩展取末段
+    [InlineData("https://x.example/archive.tar", "archive.tar", false)]        // tar 本身不危险
+    [InlineData("https://x.example/download?f=x%2Fy.exe", "", true)]           // CS-109：编码路径段解到参数值
     public void DangerousExtensionMatrix(string url, string fileName, bool expected)
     {
         Assert.Equal(expected, DownloadPolicy.RequiresExplicitConfirmation(url, fileName));
+    }
+
+    [Fact]
+    public void EmptyUrlAndFileNameNotDangerous()
+    {
+        // CS-107：空 url+空文件名不命中（解析失败候选均为空串→无扩展）
+        Assert.False(DownloadPolicy.RequiresExplicitConfirmation("", ""));
+        Assert.False(DownloadPolicy.RequiresExplicitConfirmation("not a url", ""));
     }
 
     [Fact]
