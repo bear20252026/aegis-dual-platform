@@ -33,12 +33,20 @@ pub struct PolicyVerdict {
 }
 
 /// 本地策略接口（纯函数——无 I/O）。
+///
+/// RS-092：返回 `None` 表示「本地无匹配」——上层引擎据此走远程降级
+/// 或 fail-safe 默认拒绝；`Some` 表示显式裁决（Allow/Deny/确认）。
 pub trait LocalPolicy: Send + Sync {
+    /// 评估动作；无匹配返回 None（不等于 Deny）。
     fn evaluate(&self, action: &str, context: &str) -> Option<Decision>;
 }
 
 /// 远程策略客户端接口（可选——网络调用）。
+///
+/// RS-092：与 LocalPolicy 同形但语义不同——实现方负责网络 I/O 与
+/// 超时；返回 None 时引擎降级到 fail-safe（绝不本地兜底放行）。
 pub trait RemotePolicy: Send + Sync {
+    /// 远程评估动作；不可用/超时返回 None。
     fn evaluate(&self, action: &str, context: &str) -> Option<Decision>;
 }
 
@@ -49,6 +57,10 @@ pub struct PolicyEngine {
 }
 
 impl PolicyEngine {
+    /// 创建引擎：`local` 必选（纯函数基座），`remote` 可选（降级通道）。
+    ///
+    /// RS-091：评估序为 local → remote → fail-safe 默认拒绝，
+    /// 任一环节命中即短路。
     pub fn new(local: Box<dyn LocalPolicy>, remote: Option<Box<dyn RemotePolicy>>) -> Self {
         Self { local, remote }
     }
@@ -100,6 +112,10 @@ pub struct DefaultLocalPolicy {
 }
 
 impl DefaultLocalPolicy {
+    /// 创建默认本地策略：包装 fail-closed 的 ActionPolicy（默认拒绝）。
+    ///
+    /// RS-091：无规则时 evaluate 返回 None（上层走 fail-safe），
+    /// 显式 Deny 规则命中时返回 Deny。
     pub fn new() -> Self {
         Self {
             inner: ActionPolicy::new(RuleEffect::Deny),
@@ -366,5 +382,32 @@ mod tests {
             Some(Decision::RequireConfirmation(_)) => {}
             other => panic!("Allow 规则必须升级为 RequireConfirmation，实际 {other:?}"),
         }
+    }
+
+    #[test]
+    fn local_ask_rule_maps_to_confirmation() {
+        // RS-093：Ask 规则映射 RequireConfirmation——高风险动作交宿主
+        // 交互审批（origin/scope 透传，nonce/expires 留空由宿主铸造）
+        use crate::action_policy::{PolicyRule, RuleEffect};
+        let mut policy = DefaultLocalPolicy::new();
+        policy.inner.add_rule(PolicyRule {
+            name: "ask_write".into(),
+            action_pattern: "clipboard:write".into(),
+            condition: None,
+            effect: RuleEffect::Ask,
+            priority: 0,
+        });
+        let result = policy.evaluate("clipboard:write", "https://example.com");
+        match result {
+            Some(Decision::RequireConfirmation(req)) => {
+                assert_eq!(req.origin, "https://example.com", "origin 透传");
+                assert_eq!(req.scope, "clipboard:write", "scope 透传");
+            }
+            other => panic!("Ask 规则必须映射 RequireConfirmation，实际 {other:?}"),
+        }
+        // 对照：同策略下未匹配动作仍走 None（上层 fail-safe）
+        assert!(policy
+            .evaluate("navigation:read", "https://example.com")
+            .is_none());
     }
 }

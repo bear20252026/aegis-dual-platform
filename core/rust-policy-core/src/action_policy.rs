@@ -77,35 +77,37 @@ impl ActionPolicy {
 
     /// 评估动作（仅当有规则匹配时返回 Some，否则 None）。
     /// 用于让上层策略引擎区分「显式匹配」与「无匹配走 fail-safe」。
+    ///
+    /// RS-095/096（审计 2026-09-25）：单趟裁决——此前先 collect 匹配
+    /// Vec（每次评估分配）再 map+max+fold+unwrap 三趟选取；现一次遍历
+    /// 以 (restrictiveness, priority) 字典序选优，无 unwrap、无中间分配。
+    /// 同分保持先注册者（首胜——确定性）。
     pub fn evaluate_opt(&self, action: &str, context: &str) -> Option<PolicyDecision> {
-        let matches: Vec<&PolicyRule> = self
-            .rules
-            .iter()
-            .filter(|r| {
-                glob_match(&r.action_pattern, action, false)
-                    && r.condition
-                        .as_ref()
-                        .is_none_or(|c| context_contains_token(context, c.as_str()))
-            })
-            .collect();
-
-        if matches.is_empty() {
-            return None;
+        let mut best: Option<&PolicyRule> = None;
+        for r in &self.rules {
+            if !(glob_match(&r.action_pattern, action, false)
+                && r.condition
+                    .as_ref()
+                    .is_none_or(|c| context_contains_token(context, c.as_str())))
+            {
+                continue;
+            }
+            best = Some(match best {
+                None => r,
+                Some(cur) => {
+                    // DenyOverrides：deny > ask > allow；同效果内 priority
+                    // 降序；字典序严格更大才替换——同分保首（RS-030）
+                    if (r.effect.restrictiveness(), r.priority)
+                        > (cur.effect.restrictiveness(), cur.priority)
+                    {
+                        r
+                    } else {
+                        cur
+                    }
+                }
+            });
         }
-
-        // DenyOverrides：deny > ask > allow；同效果内按 priority 降序裁决
-        //（RS-030——审计 2026-09-24：priority 字段此前从未参与评估）。
-        // 同优先级保持首个匹配（与旧行为一致——确定性）
-        let top = matches.iter().map(|r| r.effect.restrictiveness()).max()?;
-        let rule = matches
-            .iter()
-            .filter(|r| r.effect.restrictiveness() == top)
-            .fold(None::<&PolicyRule>, |acc, r| match acc {
-                None => Some(r),
-                Some(cur) if r.priority > cur.priority => Some(r),
-                _ => acc,
-            })
-            .unwrap();
+        let rule = best?;
 
         Some(match &rule.effect {
             RuleEffect::Deny => PolicyDecision::Deny(format!(
@@ -342,5 +344,75 @@ mod tests {
             PolicyDecision::Allow(msg) => assert!(msg.contains("first")),
             other => panic!("期望 Allow，实际 {other:?}"),
         }
+    }
+
+    // ===== RS-094 回归（审计 2026-09-25）：默认值/首胜/限制性 =====
+
+    #[test]
+    fn default_effect_all_three_variants() {
+        // RS-094：default_effect 三态全部生效（此前仅测 Deny 路径）
+        let allow = ActionPolicy::new(RuleEffect::Allow);
+        assert!(matches!(
+            allow.evaluate("anything", "ctx"),
+            PolicyDecision::Allow(_)
+        ));
+        let ask = ActionPolicy::new(RuleEffect::Ask);
+        assert!(matches!(
+            ask.evaluate("anything", "ctx"),
+            PolicyDecision::Ask(_)
+        ));
+        let deny = ActionPolicy::new(RuleEffect::Deny);
+        assert!(matches!(
+            deny.evaluate("anything", "ctx"),
+            PolicyDecision::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn first_match_wins_when_fully_tied() {
+        // RS-094：restrictiveness 与 priority 全同分时首胜（单趟重构后
+        // 语义必须与旧 fold 一致——确定性契约）
+        let mut policy = ActionPolicy::new(RuleEffect::Deny);
+        let mut a = make_rule("alpha", "act*", RuleEffect::Allow);
+        a.priority = 5;
+        let mut b = make_rule("beta", "act*", RuleEffect::Allow);
+        b.priority = 5;
+        policy.add_rule(a);
+        policy.add_rule(b);
+        match policy.evaluate("act", "ctx") {
+            PolicyDecision::Allow(msg) => assert!(msg.contains("alpha"), "先注册者胜：{msg}"),
+            other => panic!("期望 Allow，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn restrictiveness_ordering_is_deny_ask_allow() {
+        // RS-094：限制性排序数值契约——Deny(2) > Ask(1) > Allow(0)
+        assert_eq!(RuleEffect::Deny.restrictiveness(), 2);
+        assert_eq!(RuleEffect::Ask.restrictiveness(), 1);
+        assert_eq!(RuleEffect::Allow.restrictiveness(), 0);
+        // deny > ask：deny 规则命中时 ask 不遮蔽
+        let mut policy = ActionPolicy::new(RuleEffect::Allow);
+        policy.add_rule(make_rule("ask_all", "*", RuleEffect::Ask));
+        policy.add_rule(make_rule("deny_evil", "*evil*", RuleEffect::Deny));
+        assert!(matches!(
+            policy.evaluate("run_evil", "ctx"),
+            PolicyDecision::Deny(_)
+        ));
+    }
+
+    #[test]
+    fn single_pass_no_intermediate_allocation_semantics_preserved() {
+        // RS-095/096：单趟重构后 restrictiveness 跨档优先 + priority 同档
+        // 降序的组合裁决保持（低优先级高 restriction 仍胜）
+        let mut policy = ActionPolicy::new(RuleEffect::Allow);
+        let mut high_pri_allow = make_rule("pri_allow", "act*", RuleEffect::Allow);
+        high_pri_allow.priority = 255;
+        policy.add_rule(high_pri_allow);
+        policy.add_rule(make_rule("any_deny", "act*", RuleEffect::Deny));
+        assert!(
+            matches!(policy.evaluate("act", "ctx"), PolicyDecision::Deny(_)),
+            "restrictiveness 跨档优先于 priority"
+        );
     }
 }

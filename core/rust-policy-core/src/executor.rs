@@ -32,9 +32,12 @@ pub enum ParseResult {
 }
 
 /// Schema 验证结果。
+///
+/// RS-099（审计 2026-09-25）：`Valid` 不再携带 clone 的 ParsedCommand——
+/// 验证仅做断言，管线继续使用阶段 1 的原实例（此前每次验证白拷一份）。
 #[derive(Debug)]
 pub enum SchemaResult {
-    Valid(ParsedCommand),
+    Valid,
     Invalid(String),
 }
 
@@ -55,6 +58,7 @@ pub trait CommandHandler: Send + Sync {
 /// Executor——5阶段命令流（照搬 agent-browser 管线）。
 pub struct Executor {
     handlers: HashMap<String, Box<dyn CommandHandler>>,
+    policy: Option<crate::action_policy::ActionPolicy>,
 }
 
 impl Default for Executor {
@@ -67,7 +71,15 @@ impl Executor {
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
+            policy: None,
         }
+    }
+
+    /// 挂载内置策略检查器（RS-098：阶段 4 真正生效——此前 policy_check
+    /// 参数是空操作，策略强制从未接入管线）。
+    pub fn with_policy(mut self, policy: crate::action_policy::ActionPolicy) -> Self {
+        self.policy = Some(policy);
+        self
     }
 
     /// 注册命令处理器。
@@ -77,6 +89,9 @@ impl Executor {
     }
 
     /// 5阶段执行管线：解析 → 验证 → 路由 → 策略强制 → 执行。
+    ///
+    /// `policy_check`：true 时对已挂载的内置策略执行阶段 4 检查
+    ///（Deny/Ask → Denied；Allow → 继续）；未挂载策略则该阶段直通。
     pub fn execute_pipeline(&self, raw_input: &str, policy_check: bool) -> ExecuteResult {
         // 阶段 1：解析（JSON → 结构化命令）
         let cmd = match self.parse(raw_input) {
@@ -84,10 +99,10 @@ impl Executor {
             ParseResult::Error(e) => return ExecuteResult::Error(format!("解析失败: {e}")),
         };
 
-        // 阶段 2：Schema 验证
+        // 阶段 2：Schema 验证（RS-099：零 clone 断言）
         match self.validate_schema(&cmd) {
             SchemaResult::Invalid(e) => return ExecuteResult::Error(format!("验证失败: {e}")),
-            SchemaResult::Valid(_) => {}
+            SchemaResult::Valid => {}
         }
 
         // 阶段 3：命令路由
@@ -96,10 +111,19 @@ impl Executor {
             None => return ExecuteResult::Denied(format!("未知命令类型: {}", cmd.command_type)),
         };
 
-        // 阶段 4：策略强制（通过 ActionPolicy 外部检查）
+        // 阶段 4：策略强制（RS-098：接入 ActionPolicy——此前空操作）
         if policy_check {
-            // 策略检查由调用方通过 ActionPolicy 执行
-            // 此处仅标记需要检查
+            if let Some(policy) = &self.policy {
+                match policy.evaluate(&cmd.command_type, &cmd.origin) {
+                    crate::action_policy::PolicyDecision::Deny(e) => {
+                        return ExecuteResult::Denied(format!("策略拒绝: {e}"));
+                    }
+                    crate::action_policy::PolicyDecision::Ask(e) => {
+                        return ExecuteResult::Denied(format!("需要确认: {e}"));
+                    }
+                    crate::action_policy::PolicyDecision::Allow(_) => {}
+                }
+            }
         }
 
         // 阶段 5：执行
@@ -164,7 +188,7 @@ impl Executor {
         if cmd.target.is_empty() {
             return SchemaResult::Invalid("target 不能为空".into());
         }
-        SchemaResult::Valid(cmd.clone())
+        SchemaResult::Valid
     }
 }
 
@@ -252,5 +276,123 @@ mod tests {
             executor.execute_pipeline(&big, false),
             ExecuteResult::Error(_)
         ));
+    }
+
+    // —— RS-097/098 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn whitespace_only_input_rejected() {
+        // RS-097：纯空白输入 fail-closed（trim 语义）
+        let executor = Executor::new();
+        assert!(matches!(
+            executor.execute_pipeline("   ", false),
+            ExecuteResult::Error(_)
+        ));
+        assert!(matches!(
+            executor.execute_pipeline(" \t\r\n ", false),
+            ExecuteResult::Error(_)
+        ));
+    }
+
+    #[test]
+    fn full_pipeline_delivers_parsed_fields_to_handler() {
+        // RS-097：全链路——注册 handler 收到解析出的完整字段
+        struct RecordingHandler;
+        use std::sync::Mutex;
+        static RECORDED: Mutex<Option<ParsedCommand>> = Mutex::new(None);
+        impl CommandHandler for RecordingHandler {
+            fn command_type(&self) -> &str {
+                "record"
+            }
+            fn execute(&self, cmd: &ParsedCommand) -> ExecuteResult {
+                *RECORDED.lock().unwrap() = Some(cmd.clone());
+                ExecuteResult::Success("recorded".into())
+            }
+        }
+        let mut executor = Executor::new();
+        executor.register_handler(Box::new(RecordingHandler));
+        let raw = r##"{"command_type":"record","target":"#ok","origin":"https://example.com","parameters":{"path":"/a","n":3}}"##;
+        assert!(matches!(
+            executor.execute_pipeline(raw, false),
+            ExecuteResult::Success(_)
+        ));
+        let recorded = RECORDED.lock().unwrap().clone().expect("handler 未被调用");
+        assert_eq!(recorded.command_type, "record");
+        assert_eq!(recorded.target, "#ok");
+        assert_eq!(recorded.origin, "https://example.com");
+        assert_eq!(
+            recorded.parameters.get("path").map(String::as_str),
+            Some("/a")
+        );
+        assert_eq!(
+            recorded.parameters.get("n").map(String::as_str),
+            Some("3"),
+            "非字符串参数 JSON 序列化透传"
+        );
+    }
+
+    #[test]
+    fn re_register_same_type_overwrites_handler() {
+        // RS-097：同类型重复注册 = 覆盖（HashMap 语义锁定——后注册者生效）
+        struct FirstHandler;
+        struct SecondHandler;
+        impl CommandHandler for FirstHandler {
+            fn command_type(&self) -> &str {
+                "dup"
+            }
+            fn execute(&self, _cmd: &ParsedCommand) -> ExecuteResult {
+                ExecuteResult::Success("first".into())
+            }
+        }
+        impl CommandHandler for SecondHandler {
+            fn command_type(&self) -> &str {
+                "dup"
+            }
+            fn execute(&self, _cmd: &ParsedCommand) -> ExecuteResult {
+                ExecuteResult::Success("second".into())
+            }
+        }
+        let mut executor = Executor::new();
+        executor.register_handler(Box::new(FirstHandler));
+        executor.register_handler(Box::new(SecondHandler));
+        match executor.execute_pipeline(r#"{"command_type":"dup","target":"x"}"#, false) {
+            ExecuteResult::Success(msg) => assert_eq!(msg, "second", "后注册者覆盖前者"),
+            other => panic!("期望 Success，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn policy_check_enforces_mounted_action_policy() {
+        // RS-098：阶段 4 真正接入——Deny/Ask 规则在 handler 执行前拦截
+        use crate::action_policy::{PolicyDecision, PolicyRule, RuleEffect};
+        let mut policy = crate::action_policy::ActionPolicy::new(RuleEffect::Allow);
+        policy.add_rule(PolicyRule {
+            name: "deny_evil_origin".into(),
+            action_pattern: "test".into(),
+            condition: Some("evil.com".into()),
+            effect: RuleEffect::Deny,
+            priority: 0,
+        });
+        let mut executor = Executor::new().with_policy(policy);
+        executor.register_handler(Box::new(MockHandler));
+
+        // 条件命中 → Denied（handler 不执行）
+        let raw_evil = r#"{"command_type":"test","target":"x","origin":"https://evil.com/p"}"#;
+        match executor.execute_pipeline(raw_evil, true) {
+            ExecuteResult::Denied(msg) => assert!(msg.contains("策略拒绝"), "{msg}"),
+            other => panic!("期望 Denied，实际 {other:?}"),
+        }
+        // 条件未命中 → 放行执行
+        let raw_ok = r#"{"command_type":"test","target":"x","origin":"https://example.com"}"#;
+        assert!(matches!(
+            executor.execute_pipeline(raw_ok, true),
+            ExecuteResult::Success(_)
+        ));
+        // policy_check=false → 阶段 4 直通（条件命中的恶源也执行）
+        assert!(matches!(
+            executor.execute_pipeline(raw_evil, false),
+            ExecuteResult::Success(_)
+        ));
+        let _ = PolicyDecision::Allow(String::new()); // keep import used
     }
 }

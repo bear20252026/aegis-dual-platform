@@ -216,9 +216,57 @@ mod tests {
 
     #[test]
     fn empty_pipeline_builds_empty_script() {
-        // RS-053：build 统一 Vec collect + join（O(n) 单次分配）——
+        // RS-053/RS-088：build 统一 Vec collect + join（O(n) 单次分配）——
         // 禁止回退为 format! 链式拼接；空管线必须得到空串
         let pipeline = JsPipeline::new();
         assert_eq!(pipeline.build(), "");
+    }
+
+    #[test]
+    fn multi_stage_script_joined_in_order() {
+        // RS-088：多阶段脚本按注册顺序以换行连接（顺序错位 = 防护语义
+        // 错位——前置阶段输出是后置阶段的消费契约）
+        let mut pipeline = JsPipeline::new();
+        pipeline.add(Box::new(MockStage {
+            name: "A",
+            js: "var first = 1;",
+            active: true,
+        }));
+        pipeline.add(Box::new(MockStage {
+            name: "B",
+            js: "var second = 2;",
+            active: true,
+        }));
+        let script = pipeline.build();
+        let pos_first = script.find("var first = 1;").expect("first 阶段缺失");
+        let pos_second = script.find("var second = 2;").expect("second 阶段缺失");
+        assert!(pos_first < pos_second, "阶段顺序必须保持注册序");
+        assert!(script.contains('\n'), "阶段间以换行连接");
+    }
+
+    #[test]
+    fn disabled_stage_removed_relative_order_kept() {
+        // RS-088：禁用阶段被整体剔除，其余阶段相对顺序保持
+        let mut pipeline = JsPipeline::new();
+        pipeline.add(Box::new(MockStage {
+            name: "A",
+            js: "A_MARKER;",
+            active: true,
+        }));
+        pipeline.add(Box::new(MockStage {
+            name: "B",
+            js: "B_MARKER;",
+            active: false,
+        }));
+        pipeline.add(Box::new(MockStage {
+            name: "C",
+            js: "C_MARKER;",
+            active: true,
+        }));
+        let script = pipeline.build();
+        assert!(!script.contains("B_MARKER"), "禁用阶段不得出现在脚本");
+        let pos_a = script.find("A_MARKER;").expect("A 缺失");
+        let pos_c = script.find("C_MARKER;").expect("C 缺失");
+        assert!(pos_a < pos_c, "剩余阶段相对顺序保持");
     }
 }

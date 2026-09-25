@@ -72,10 +72,19 @@ impl ExtProxy {
     }
 
     /// 用自定义代理端点创建。
+    ///
+    /// RS-086（审计 2026-09-25）：端点必须为 http(s) URL——此前任意串
+    /// 直通注入 JS（`javascript:`/相对路径端点会把扩展流量导向攻击者
+    /// 控制的上下文）。非法 scheme fail-closed 退化为空端点（观察模式）。
     pub fn with_endpoint(endpoint: &str) -> Self {
+        let normalized = if endpoint.starts_with("https://") || endpoint.starts_with("http://") {
+            endpoint.to_string()
+        } else {
+            String::new()
+        };
         Self {
             config: ExtProxyConfig {
-                proxy_endpoint: endpoint.to_string(),
+                proxy_endpoint: normalized,
                 ..ExtProxyConfig::default()
             },
         }
@@ -111,12 +120,16 @@ impl ExtProxy {
   var INTERCEPT_UPDATES = {intercept_up};
 
   // Chrome Web Store 匹配模式
+  // RS-087（审计 2026-09-25）：拦截面此前仅 clients2.google.com 一个域名
+  // ——扩展下载/更新同样走 googleusercontent 媒体通道与商店站内请求
   var CWS_DOWNLOAD_PATTERN = /^https?:\/\/clients2\.google\.com\/service\/update2\/crx/i;
   var CWS_UPDATE_PATTERN = /^https?:\/\/clients2\.google\.com\/service\/update2\/json/i;
+  var CWS_MEDIA_PATTERN = /^https?:\/\/clients2\.googleusercontent\.com\/crx\//i;
+  var CWS_STORE_PATTERN = /^https?:\/\/chromewebstore\.google\.com\//i;
 
   function shouldIntercept(url) {{
-    if (INTERCEPT_DOWNLOADS && CWS_DOWNLOAD_PATTERN.test(url)) return true;
-    if (INTERCEPT_UPDATES && CWS_UPDATE_PATTERN.test(url)) return true;
+    if (INTERCEPT_DOWNLOADS && (CWS_DOWNLOAD_PATTERN.test(url) || CWS_MEDIA_PATTERN.test(url))) return true;
+    if (INTERCEPT_UPDATES && (CWS_UPDATE_PATTERN.test(url) || CWS_STORE_PATTERN.test(url))) return true;
     return false;
   }}
 
@@ -206,5 +219,54 @@ mod tests {
         let ep = ExtProxy::new();
         let debug = format!("{:?}", ep);
         assert!(debug.contains("disabled"));
+    }
+
+    // —— RS-085/086/087 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn endpoint_escaping_regression() {
+        // RS-085/P29：端点含单引号/反斜杠必须转义——否则逃逸 JS 字符串
+        // 字面量注入任意脚本（配置面输入）
+        let ep = ExtProxy::with_endpoint("https://proxy.example.com/a'b\\c");
+        let script = ep.inject_script();
+        assert!(script.contains("a\\'b\\\\c"), "单引号与反斜杠已转义");
+        assert!(
+            !script.contains("PROXY_ENDPOINT = 'https://proxy.example.com/a'b"),
+            "不得残留未转义直拼"
+        );
+    }
+
+    #[test]
+    fn endpoint_scheme_validated() {
+        // RS-086：非 http(s) scheme fail-closed 退化禁用（观察模式）
+        let bad = ExtProxy::with_endpoint("javascript:alert(1)");
+        assert!(
+            bad.config.proxy_endpoint.is_empty(),
+            "javascript: scheme 拒绝"
+        );
+        assert!(bad.inject_script().contains("return originalUrl"));
+        let relative = ExtProxy::with_endpoint("//evil.com/proxy");
+        assert!(
+            relative.config.proxy_endpoint.is_empty(),
+            "相对路径端点拒绝"
+        );
+        // 合法 scheme 不受影响
+        let ok = ExtProxy::with_endpoint("https://proxy.example.com/anon");
+        assert!(!ok.config.proxy_endpoint.is_empty());
+    }
+
+    #[test]
+    fn interception_surface_covers_all_cws_hosts() {
+        // RS-087：拦截面覆盖 google 域 + googleusercontent 媒体通道 + 商店站
+        let script = ExtProxy::new().inject_script();
+        assert!(script.contains("clients2\\.google\\.com"));
+        assert!(
+            script.contains("clients2\\.googleusercontent\\.com"),
+            "媒体通道"
+        );
+        assert!(
+            script.contains("chromewebstore\\.google\\.com"),
+            "商店站内请求"
+        );
     }
 }
