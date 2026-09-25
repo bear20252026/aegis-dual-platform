@@ -79,6 +79,10 @@ public partial class MainWindow : Window
     private const int SourceFetchTimeoutSec = 15;     // 源码查看抓取超时
     private const int SourceMaxBytes = 5 * 1024 * 1024; // 源码查看大小上限
     private const int BookmarkChipMaxChars = 14;      // 书签栏标题截断
+    private const int BookmarkBarMaxChips = 20;       // CS-153：书签栏直显上限（其余收进溢出项）
+    // CS-150：窗口状态恢复阈值（此前 400/300/1200/800 四个魔法数内联）
+    private const double MinRestoredWidth = 400;
+    private const double MinRestoredHeight = 300;
 
     /// <summary>组合根注入构造：存储/策略/broker 由 App 装配传入（MainWindow 不再
     /// 自建依赖——可注入内存存储、可构造测）。参数校验防误用。</summary>
@@ -139,8 +143,8 @@ public partial class MainWindow : Window
     /// <summary>设置导航地址的统一容错入口（地址非法/控件已释放时拒绝而不是
     /// 抛异常——地址栏、书签、NTP 桥全部经此）。</summary>
     /// <summary>截断标题而不劈开代理对（emoji 等——此前 b.Title[..14] 可把
-    /// 双字符字形切成乱码）。</summary>
-    private static string TruncateTitle(string title, int maxChars)
+    /// 双字符字形切成乱码）。CS-155：提 internal 直测。</summary>
+    internal static string TruncateTitle(string title, int maxChars)
     {
         if (title.Length <= maxChars)
             return title;
@@ -159,7 +163,10 @@ public partial class MainWindow : Window
         try { chip = (Style)FindResource("BookmarkBarButton"); }
         catch (Exception) { System.Diagnostics.Debug.WriteLine("BookmarkBarButton 资源缺失，使用默认按钮样式"); }
         BookmarkBarItems.Items.Clear();
-        foreach (var b in _bookmarks.All())
+        var all = _bookmarks.All();
+        // CS-153：直显上限+溢出项——此前全部书签无上限重建（数百书签时
+        // 栏内 chip 无限堆积挤压布局），超限部分收进「还有 N 条」溢出项
+        foreach (var b in all.Take(BookmarkBarMaxChips))
         {
             var btn = new System.Windows.Controls.Button
             {
@@ -175,6 +182,18 @@ public partial class MainWindow : Window
                     TabRuntime.Navigate(rt, url);
             };
             BookmarkBarItems.Items.Add(btn);
+        }
+        var overflow = all.Count - BookmarkBarMaxChips;
+        if (overflow > 0)
+        {
+            var more = new System.Windows.Controls.Button
+            {
+                Content = $"…还有 {overflow} 条",
+                ToolTip = "在书签管理器中查看全部书签",
+                Style = chip,
+            };
+            more.Click += (_, _) => BookmarkManager_Click(this, new RoutedEventArgs());
+            BookmarkBarItems.Items.Add(more);
         }
         BookmarkBar.Visibility = BookmarkBarItems.Items.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -725,10 +744,15 @@ public partial class MainWindow : Window
     {
         var sw = SystemParameters.VirtualScreenWidth;
         var sh = SystemParameters.VirtualScreenHeight;
-        // CS-067：下界防残窗（>400/>300），上界钳到虚拟屏幕——持久化值被外部
+        // CS-067：下界防残窗，上界钳到虚拟屏幕——持久化值被外部
         // 篡改成超大数（如 int.MaxValue）时不再撑出不可操作的巨型窗口
-        Width = _settings.WindowWidth > 400 ? Math.Min(_settings.WindowWidth, sw) : 1200;
-        Height = _settings.WindowHeight > 300 ? Math.Min(_settings.WindowHeight, sh) : 800;
+        // CS-150：回退宽高引用快照级单源常量（CS-123），下界为窗口级命名常量
+        Width = _settings.WindowWidth > MinRestoredWidth
+            ? Math.Min(_settings.WindowWidth, sw)
+            : Core.Settings.BrowserSettingsSnapshot.DefaultWindowWidth;
+        Height = _settings.WindowHeight > MinRestoredHeight
+            ? Math.Min(_settings.WindowHeight, sh)
+            : Core.Settings.BrowserSettingsSnapshot.DefaultWindowHeight;
         if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop)
             && _settings.WindowLeft < sw && _settings.WindowTop < sh)
         {
@@ -948,13 +972,24 @@ public partial class MainWindow : Window
         _downloadsWindow.Activate();
     }
 
+    // CS-152：反馈条背景刷预建冻结——此前每次显示 new 两把刷子（频繁提示时
+    // 重复分配，冻结刷可跨调用安全共享）
+    private static readonly System.Windows.Media.Brush FeedbackInfoBackground = FrozenBrush(0x0F, 0x2A, 0x1B);
+    private static readonly System.Windows.Media.Brush FeedbackWarningBackground = FrozenBrush(0x2A, 0x12, 0x15);
+
+    private static System.Windows.Media.SolidColorBrush FrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(
+            System.Windows.Media.Color.FromArgb(0xFF, r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
     /// <summary>反馈条显示（2.5s 自动隐藏——不静默原则的轻量实现）。</summary>
     private void ShowFeedback(string message, bool isWarning = false)
     {
         FeedbackText.Text = message;
-        FeedbackBar.Background = new System.Windows.Media.SolidColorBrush(
-            isWarning ? System.Windows.Media.Color.FromArgb(0xFF, 0x2A, 0x12, 0x15)
-                      : System.Windows.Media.Color.FromArgb(0xFF, 0x0F, 0x2A, 0x1B));
+        FeedbackBar.Background = isWarning ? FeedbackWarningBackground : FeedbackInfoBackground;
         FeedbackBar.Visibility = Visibility.Visible;
         // Tick 处理器只在首次创建时订阅一次（审计 M4：#Bug5 此前每次调用都
         // 追加一个新闭包且不摘除——长会话内事件累积成为驻留对象泄漏）
@@ -1016,8 +1051,14 @@ public partial class MainWindow : Window
             }
             catch (Exception ex)
             {
+                // CS-154：失败分支同样守卫 IsLoaded——抓取期间窗口关闭时
+                // ShowFeedback 触碰已卸载控件会抛（成功分支已有守卫）
                 Dispatcher.Invoke(() =>
-                    ShowFeedback($"获取源码失败：{ex.Message}", isWarning: true));
+                {
+                    if (!IsLoaded)
+                        return;
+                    ShowFeedback($"获取源码失败：{ex.Message}", isWarning: true);
+                });
             }
         });
     }
@@ -1199,23 +1240,33 @@ public partial class MainWindow : Window
         var count = _tabs.Tabs.Count;
         if (count == 0)
             return;
-        var current = _tabs.CurrentTabId is { } id ? _tabs.Tabs.ToList().FindIndex(t => t.TabId == id) : 0;
-        var next = ((current < 0 ? 0 : current) + direction + count) % count;
-        _tabs.SwitchTo(_tabs.Tabs[next].TabId);
+        // CS-151：就地循环定位——此前 ToList() 全表复制只为找当前索引
+        var current = -1;
+        if (_tabs.CurrentTabId is { } id)
+        {
+            for (var i = 0; i < count; i++)
+            {
+                if (_tabs.Tabs[i].TabId == id)
+                {
+                    current = i;
+                    break;
+                }
+            }
+        }
+        _tabs.SwitchTo(_tabs.Tabs[NextIndex(current, direction, count)].TabId);
+    }
+
+    /// <summary>CS-158：循环切换的目标索引提纯直测（未找到/负索引钳 0 起算）。</summary>
+    internal static int NextIndex(int currentIndex, int direction, int count)
+    {
+        var current = currentIndex < 0 ? 0 : currentIndex;
+        return ((current + direction) % count + count) % count;
     }
 
     /// <summary>Ctrl+1..8 直达对应标签，Ctrl+9 末位标签。</summary>
     private void JumpToTabByKey(Key key)
     {
-        var digit = key switch
-        {
-            Key.D1 => 1, Key.D2 => 2, Key.D3 => 3, Key.D4 => 4, Key.D5 => 5,
-            Key.D6 => 6, Key.D7 => 7, Key.D8 => 8, Key.D9 => 9,
-            Key.NumPad1 => 1, Key.NumPad2 => 2, Key.NumPad3 => 3, Key.NumPad4 => 4,
-            Key.NumPad5 => 5, Key.NumPad6 => 6, Key.NumPad7 => 7, Key.NumPad8 => 8,
-            Key.NumPad9 => 9,
-            _ => 0,
-        };
+        var digit = ToDigit(key);
         if (digit == 0)
             return;
         var index = digit == 9 ? _tabs.Tabs.Count - 1 : digit - 1;
@@ -1223,9 +1274,21 @@ public partial class MainWindow : Window
             _tabs.SwitchTo(_tabs.Tabs[index].TabId);
     }
 
+    /// <summary>CS-157：数字键 → 序号（1..9，非数字键 0）提纯直测。</summary>
+    internal static int ToDigit(Key key) => key switch
+    {
+        Key.D1 => 1, Key.D2 => 2, Key.D3 => 3, Key.D4 => 4, Key.D5 => 5,
+        Key.D6 => 6, Key.D7 => 7, Key.D8 => 8, Key.D9 => 9,
+        Key.NumPad1 => 1, Key.NumPad2 => 2, Key.NumPad3 => 3, Key.NumPad4 => 4,
+        Key.NumPad5 => 5, Key.NumPad6 => 6, Key.NumPad7 => 7, Key.NumPad8 => 8,
+        Key.NumPad9 => 9,
+        _ => 0,
+    };
+
     private void Window_Closing(object? sender, CancelEventArgs e)
     {
-        FlushSession();
+        // CS-156：FlushSession 保留 OnClosed 单点——Closing 在未取消时必达
+        // Closed，此前两处各落盘一次（每次关闭双份 SQLite 写）
         SaveWindowState();
         _settings.ZoomByHost = ZoomStore.Snapshot();
         _settingsService.Apply(_settings);
