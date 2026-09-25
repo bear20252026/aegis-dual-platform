@@ -152,4 +152,37 @@ mod tests {
     fn guard_script() -> String {
         ToStringGuard::new().inject_script()
     }
+
+    // —— RS-080 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn to_locale_string_coverage_independent() {
+        // RS-080：toLocaleString 与 toString 是两条独立欺骗通道——检测
+        // 方可走任一路径，二者必须都进 proxyMap
+        let script = guard_script();
+        assert!(
+            script.contains("Function.prototype.toLocaleString = function()"),
+            "toLocaleString 独立覆盖"
+        );
+        assert!(
+            script.contains("origToLocale.call(proxyMap.get(this))"),
+            "toLocaleString 代理欺骗路径"
+        );
+        assert!(script.contains("proxyMap.set(Function.prototype.toLocaleString, origToLocale)"));
+    }
+
+    #[test]
+    fn register_interface_tamper_proofed() {
+        // RS-080：注册接口防篡改——writable/configurable 双 false，页面
+        // 无法把注册函数偷换为收集代理的陷阱
+        let script = guard_script();
+        assert!(
+            script.contains("writable: false,\n    configurable: false"),
+            "注册接口只读不可重配"
+        );
+        assert!(
+            !script.contains("enumerable: true"),
+            "注册接口不得可枚举（泄漏进 Object.keys）"
+        );
+    }
 }

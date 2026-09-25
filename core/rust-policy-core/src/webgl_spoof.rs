@@ -105,6 +105,24 @@ impl WebGLSpoof {
   var maxRenderbuf = {max_rb};
 
   function patchContext(proto) {{
+    // RS-076（审计 2026-09-25）：viewport 数组缓存单实例——此前每次
+    // getParameter(MAX_VIEWPORT_DIMS) 都 new Int32Array，页面连续两次
+    // 调用做 Object.is 恒为 false（对象身份漂移可被检测；真实 GL 实现
+    // 的该参数返回值引用稳定）
+    var viewportDims = new Int32Array([maxViewportW, maxViewportH]);
+    // RS-077（审计 2026-09-25）：扩展列表泄露 GPU 型号特征（特定 GPU
+    // 独有扩展组合）——debug_renderer_info 由 getParameter 伪装通道
+    // 单一负责，扩展查询面直接摘除
+    var origGetSupported = proto.getSupportedExtensions;
+    proto.getSupportedExtensions = function() {{
+      var exts = origGetSupported.call(this) || [];
+      return exts.filter(function(e) {{ return e !== 'WEBGL_debug_renderer_info'; }});
+    }};
+    var origGetExtension = proto.getExtension;
+    proto.getExtension = function(name) {{
+      if (name === 'WEBGL_debug_renderer_info') return null;
+      return origGetExtension.call(this, name);
+    }};
     var origGetParam = proto.getParameter;
     proto.getParameter = function(param) {{
       switch(param) {{
@@ -117,7 +135,7 @@ impl WebGLSpoof {
         case MAX_TEXTURE_SIZE:
           return maxTexSize;
         case MAX_VIEWPORT_DIMS:
-          return new Int32Array([maxViewportW, maxViewportH]); // 规范要求 Int32——Float32 可被类型检测识破
+          return viewportDims; // RS-076：单实例，对象身份稳定
         case MAX_RENDERBUFFER_SIZE:
           return maxRenderbuf;
         default:
@@ -126,6 +144,8 @@ impl WebGLSpoof {
     }};
     // 注册代理——toString 防护映射此包装，防"检测函数被覆盖"识破
     var reg3 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg3) reg3(proto.getParameter, origGetParam);
+    var reg4 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg4) reg4(proto.getSupportedExtensions, origGetSupported);
+    var reg5 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg5) reg5(proto.getExtension, origGetExtension);
   }}
 
   try {{ patchContext(WebGLRenderingContext.prototype); }} catch(e) {{}}
@@ -174,5 +194,54 @@ mod tests {
         let script = spoof.inject_script();
         assert!(script.contains("NVIDIA"));
         assert!(script.contains("RTX 3080"));
+    }
+
+    // —— RS-075 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn custom_viewport_dims_rendered() {
+        // RS-075：自定义视口值透传（含非常规值）+ Int32Array 类型契约
+        let config = WebGLSpoofConfig {
+            max_viewport_dims: [4096, 8192],
+            ..Default::default()
+        };
+        let script = WebGLSpoof::with_config(config).inject_script();
+        // 值经 maxViewportW/H 变量行透传，viewportDims 缓存引用变量
+        assert!(script.contains("var maxViewportW = 4096;"), "宽值透传");
+        assert!(script.contains("var maxViewportH = 8192;"), "高值透传");
+        assert!(
+            script.contains("var viewportDims = new Int32Array"),
+            "类型契约"
+        );
+    }
+
+    #[test]
+    fn viewport_array_identity_stable() {
+        // RS-076：viewport 数组必须缓存单实例——每次 new 的对象身份漂移
+        //（Object.is 恒 false）可被页面检测
+        let script = WebGLSpoof::new().inject_script();
+        // 单实例缓存：构造一次，case 分支只返回变量
+        assert!(script.contains("var viewportDims = new Int32Array"));
+        assert!(
+            !script.contains("return new Int32Array"),
+            "getParameter 体内不得每次分配新数组"
+        );
+        assert!(script.contains("return viewportDims;"));
+    }
+
+    #[test]
+    fn extension_enumeration_surface_removed() {
+        // RS-077：扩展枚举面摘除 debug_renderer_info——vendor/renderer
+        // 仅经 getParameter 伪装通道暴露
+        let script = WebGLSpoof::new().inject_script();
+        assert!(script.contains("getSupportedExtensions"), "扩展列表覆盖");
+        assert!(
+            script.contains("e !== 'WEBGL_debug_renderer_info'"),
+            "扩展列表过滤 debug_renderer_info"
+        );
+        assert!(
+            script.contains("if (name === 'WEBGL_debug_renderer_info') return null;"),
+            "getExtension 对 debug_renderer_info 返回 null"
+        );
     }
 }

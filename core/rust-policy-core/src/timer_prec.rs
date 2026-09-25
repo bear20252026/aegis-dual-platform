@@ -120,6 +120,43 @@ impl TimerPrecision {
     Date.now = function() {{ return reducePrecision(origDateNow()); }};
     var reg2 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg2) reg2(Date.now, origDateNow);
   }} catch(e) {{}}
+
+  // RS-074（审计 2026-09-25）：mark/measure/timeStamp 的 startTime 与
+  // duration 不经 JS 可见的 performance.now——宿主内部时钟直取，仅覆盖
+  // now 属性拦不住这条路径，必须独立圆整
+  try {{
+    var origMark = performance.mark;
+    performance.mark = function(name, options) {{
+      if (options && typeof options.startTime === 'number') {{
+        options = Object.assign({{}}, options, {{ startTime: reducePrecision(options.startTime) }});
+      }}
+      return origMark.call(this, name, options);
+    }};
+    var reg3 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg3) reg3(performance.mark, origMark);
+  }} catch(e) {{}}
+
+  try {{
+    var origMeasure = performance.measure;
+    performance.measure = function(name, start, end) {{
+      var entry = origMeasure.call(this, name, start, end);
+      try {{
+        // entry 的 duration/timeStamp 是原型 getter——实例属性遮蔽圆整
+        Object.defineProperty(entry, 'duration', {{ value: reducePrecision(entry.duration) }});
+        Object.defineProperty(entry, 'startTime', {{ value: reducePrecision(entry.startTime) }});
+      }} catch (e2) {{}}
+      return entry;
+    }};
+    var reg4 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg4) reg4(performance.measure, origMeasure);
+  }} catch(e) {{}}
+
+  try {{
+    var origRAF = window.requestAnimationFrame;
+    window.requestAnimationFrame = function(cb) {{
+      if (typeof cb !== 'function') return origRAF.call(window, cb);
+      return origRAF.call(window, function(ts) {{ cb(reducePrecision(ts)); }});
+    }};
+    var reg5 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg5) reg5(window.requestAnimationFrame, origRAF);
+  }} catch(e) {{}}
 }})();
 "#
         )
@@ -171,5 +208,60 @@ mod tests {
         let debug = format!("{:?}", tp);
         assert!(debug.contains("1000"));
         assert!(debug.contains("jitter=true"));
+    }
+
+    // —— RS-073 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn zero_microseconds_saturates_to_one() {
+        // RS-073/RS-020：microseconds=0 饱和到 1——PRECISION_MS=0 会让
+        // value/0 得 Infinity（精度降低完全失效）
+        let tp = TimerPrecision::with_config(TimerPrecisionConfig {
+            microseconds: 0,
+            jitter: false,
+        });
+        let script = tp.inject_script();
+        assert!(script.contains("PRECISION_US = 1;"), "0 必须饱和到 1");
+        assert!(!script.contains("PRECISION_US = 0;"));
+    }
+
+    #[test]
+    fn jitter_toggle_reflected() {
+        // RS-073：jitter 开关透传进脚本（统计检测面语义）
+        let on = TimerPrecision::new().inject_script();
+        assert!(on.contains("JITTER_ENABLED = true"));
+        let off = TimerPrecision::with_config(TimerPrecisionConfig {
+            microseconds: 1000,
+            jitter: false,
+        })
+        .inject_script();
+        assert!(off.contains("JITTER_ENABLED = false"));
+    }
+
+    // —— RS-074 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn high_resolution_channels_covered() {
+        // RS-074：mark/measure/rAF 的计时面必须独立圆整——它们直取宿主
+        // 内部时钟，不经 JS 可见的 performance.now
+        let script = TimerPrecision::new().inject_script();
+        assert!(script.contains("performance.mark"), "mark 覆盖");
+        assert!(
+            script.contains("startTime: reducePrecision(options.startTime)"),
+            "mark 的显式 startTime 圆整"
+        );
+        assert!(script.contains("performance.measure"), "measure 覆盖");
+        assert!(
+            script.contains("'duration', { value: reducePrecision(entry.duration) }"),
+            "measure 返回的 duration 圆整"
+        );
+        assert!(
+            script.contains("requestAnimationFrame"),
+            "rAF timestamp 圆整"
+        );
+        assert!(
+            script.contains("cb(reducePrecision(ts))"),
+            "rAF 回调时间戳经 reducePrecision"
+        );
     }
 }

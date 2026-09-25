@@ -66,11 +66,16 @@ impl PerSiteSeed {
     }
 
     /// 为指定域名生成 per-site 种子的十六进制表示。
+    ///
+    /// RS-084（审计 2026-09-25）：单缓冲 write! 写入——此前 16 次
+    /// format! 各自分配（每次派生 17 次堆分配）。
     pub fn derive_hex(&self, domain: &str) -> String {
-        self.derive(domain)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
+        use std::fmt::Write as _;
+        let mut out = String::with_capacity(32);
+        for b in self.derive(domain) {
+            let _ = write!(out, "{b:02x}");
+        }
+        out
     }
 
     /// 生成指定域名的 per-site 种子注入 JS 脚本。
@@ -194,5 +199,47 @@ mod tests {
             !script.contains("return __AEGIS_SITE_SEED"),
             "死值 return 必须移除"
         );
+    }
+
+    // —— RS-083 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn empty_and_unusual_domains_are_total() {
+        // RS-083：空域名/特殊字符域名必须 total（不 panic、确定性输出）——
+        // 派生是 SHA-256，任意字节串输入皆合法；域名校验是调用方职责
+        let pss = PerSiteSeed::new(test_seed());
+        let empty_a = pss.derive("");
+        let empty_b = pss.derive("");
+        assert_eq!(empty_a, empty_b, "空域名确定性");
+        assert_eq!(empty_a.len(), 16);
+        // 域分隔前缀保证空域名与其他域名不碰撞
+        assert_ne!(pss.derive(""), pss.derive("a"));
+        // 特殊字符（Unicode/冒号/换行）不 panic 且彼此不同
+        assert_ne!(pss.derive("例え.jp"), pss.derive("xn--wgv71a.jp"));
+        assert_ne!(pss.derive("host:8080"), pss.derive("host"));
+    }
+
+    #[test]
+    fn domain_case_preserved_as_is() {
+        // RS-083：域名按调用方原文派生（大小写敏感）——归一是宿主职责
+        //（lib.rs fingerprint_pipeline 契约：传入宿主已归一的 eTLD+1）。
+        // 大小写变体种子不同 = 文档化行为，非缺陷
+        let pss = PerSiteSeed::new(test_seed());
+        assert_ne!(pss.derive("EXAMPLE.com"), pss.derive("example.com"));
+        // 原文语义锁定：与 SHA-256 直算一致
+        let mut hasher = Sha256::new();
+        hasher.update(test_seed());
+        hasher.update(b"aegis:per-site-seed:v2:EXAMPLE.com");
+        assert_eq!(&pss.derive("EXAMPLE.com")[..], &hasher.finalize()[..16]);
+    }
+
+    #[test]
+    fn derive_hex_write_single_buffer() {
+        // RS-084：derive_hex 与 derive 字节序一致（write! 单缓冲语义回归）
+        let pss = PerSiteSeed::new(test_seed());
+        let seed = pss.derive("example.com");
+        let expected: String = seed.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(pss.derive_hex("example.com"), expected);
+        assert_eq!(pss.derive_hex("example.com").len(), 32);
     }
 }

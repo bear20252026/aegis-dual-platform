@@ -107,6 +107,60 @@ impl FingerprintShield {
   if (window[Symbol.for('aegis.proxy.register.v1')]) window[Symbol.for('aegis.proxy.register.v1')](HTMLCanvasElement.prototype.toDataURL, origToDataURL);
 }})();
 
+// RS-082（审计 2026-09-25）：toBlob 是 canvas 读取的第二通道——仅覆盖
+// toDataURL 时页面走 toBlob 拿到无噪声原图。同型离屏副本 + 噪声
+(function() {{
+  const origToBlob = HTMLCanvasElement.prototype.toBlob;
+  HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {{
+    try {{
+      const ctx = this.getContext('2d');
+      if (ctx) {{
+        const off = document.createElement('canvas');
+        off.width = this.width;
+        off.height = this.height;
+        const octx = off.getContext('2d');
+        octx.drawImage(this, 0, 0);
+        const imageData = octx.getImageData(0, 0, off.width, off.height);
+        const seed = parseInt(__AEGIS_SESSION_SEED.slice(0, 8), 16);
+        for (let i = 0; i < imageData.data.length; i += 4) {{
+          imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1;
+        }}
+        octx.putImageData(imageData, 0, 0);
+        return origToBlob.call(off, callback, type, quality);
+      }}
+    }} catch (e) {{}}
+    return origToBlob.call(this, callback, type, quality);
+  }};
+  if (window[Symbol.for('aegis.proxy.register.v1')]) window[Symbol.for('aegis.proxy.register.v1')](HTMLCanvasElement.prototype.toBlob, origToBlob);
+}})();
+
+// RS-082：OffscreenCanvas.convertToBlob 是 worker 侧第三通道——同型防护
+(function() {{
+  if (typeof OffscreenCanvas === 'undefined') return;
+  const origConvert = OffscreenCanvas.prototype.convertToBlob;
+  OffscreenCanvas.prototype.convertToBlob = function(options) {{
+    try {{
+      const ctx = this.getContext('2d');
+      if (ctx) {{
+        const off = new OffscreenCanvas(this.width, this.height);
+        const octx = off.getContext('2d');
+        octx.drawImage(this, 0, 0);
+        const imageData = octx.getImageData(0, 0, off.width, off.height);
+        const seed = parseInt(__AEGIS_SESSION_SEED.slice(0, 8), 16);
+        for (let i = 0; i < imageData.data.length; i += 4) {{
+          imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1;
+        }}
+        octx.putImageData(imageData, 0, 0);
+        return origConvert.call(off, options);
+      }}
+    }} catch (e) {{}}
+    return origConvert.call(this, options);
+  }};
+  if (window[Symbol.for('aegis.proxy.register.v1')]) window[Symbol.for('aegis.proxy.register.v1')](OffscreenCanvas.prototype.convertToBlob, origConvert);
+}})();
+
+// 音频指纹噪声由 PerSiteSeed（RS-028）负责——按站点隔离，不在此模块重复
+
 // hardwareConcurrency 随机化（2-8 核）
 (function() {{
   const seed = parseInt(__AEGIS_SESSION_SEED.slice(8, 16), 16);
@@ -158,5 +212,51 @@ mod tests {
         let a = FingerprintShield::from_seed(seed);
         let b = FingerprintShield::from_seed(seed);
         assert_eq!(a.seed_hex(), b.seed_hex());
+    }
+
+    // —— RS-081 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn debug_does_not_leak_seed() {
+        // RS-081：Debug 输出绝不泄种子（日志/崩溃报告面泄漏 = 会话级
+        // 指纹标识符外泄）
+        let s = FingerprintShield::from_seed([0xabu8; 32]);
+        let debug = format!("{s:?}");
+        assert!(debug.contains("***hidden***"), "Debug 遮蔽语义");
+        assert!(!debug.contains("ababab"), "Debug 不得含种子 hex 片段");
+        // inject_script 确定性：同种子两次生成逐字节一致
+        assert_eq!(s.inject_script(), s.inject_script());
+    }
+
+    #[test]
+    fn seed_bytes_roundtrip_matches_hex() {
+        // RS-081：seed_bytes 与 seed_hex 同源一致（管线阶段消费契约）
+        let seed = [7u8; 32];
+        let s = FingerprintShield::from_seed(seed);
+        assert_eq!(s.seed_bytes(), seed);
+        let hex_from_bytes: String = s.seed_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex_from_bytes, s.seed_hex());
+    }
+
+    // —— RS-082 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn canvas_read_channels_all_covered() {
+        // RS-082：canvas 读取三通道全覆盖——toDataURL/toBlob/
+        // OffscreenCanvas.convertToBlob（漏任一通道 = 噪声绕过）
+        let script = FingerprintShield::from_seed([9u8; 32]).inject_script();
+        assert!(script.contains("HTMLCanvasElement.prototype.toDataURL"));
+        assert!(
+            script.contains("HTMLCanvasElement.prototype.toBlob"),
+            "toBlob 第二通道必须覆盖"
+        );
+        assert!(
+            script.contains("OffscreenCanvas.prototype.convertToBlob"),
+            "convertToBlob 第三通道必须覆盖"
+        );
+        assert!(
+            script.contains("音频指纹噪声由 PerSiteSeed"),
+            "Audio 归属文档化（PerSiteSeed 单一负责）"
+        );
     }
 }

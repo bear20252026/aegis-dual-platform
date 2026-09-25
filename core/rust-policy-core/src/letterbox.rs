@@ -142,6 +142,21 @@ impl LetterboxShield {
     if (oOW && oOW.get) Object.defineProperty(window, 'outerWidth', {{ get: function() {{ return roundTo(oOW.get.call(this), WS, MW); }} }});
     if (oOH && oOH.get) Object.defineProperty(window, 'outerHeight', {{ get: function() {{ return roundTo(oOH.get.call(this), HS, MH); }} }});
   }} catch(e) {{}}
+
+  // RS-079（审计 2026-09-25）：色深与 DPR 同属屏幕指纹面——colorDepth/
+  // pixelDepth 固定 24（Tor 标准口径），DPR 圆整到 0.25 步长
+  try {{
+    var oCD = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'colorDepth');
+    if (oCD) Object.defineProperty(screen, 'colorDepth', {{ get: function() {{ return 24; }} }});
+    var oPD = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'pixelDepth');
+    if (oPD) Object.defineProperty(screen, 'pixelDepth', {{ get: function() {{ return 24; }} }});
+  }} catch(e) {{}}
+  try {{
+    var oDPR = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    if (oDPR && oDPR.get) Object.defineProperty(window, 'devicePixelRatio', {{
+      get: function() {{ return Math.round(oDPR.get.call(this) * 4) / 4; }}
+    }});
+  }} catch(e) {{}}
 }})();
 "#
         )
@@ -208,5 +223,50 @@ mod tests {
         let debug = format!("{:?}", shield);
         assert!(debug.contains("200"));
         assert!(debug.contains("100"));
+    }
+
+    // —— RS-078 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn zero_step_saturates_to_one() {
+        // RS-078/RS-021：步长 0 钳到 1——否则 JS 侧 v/0 = Infinity 圆整失效
+        let config = LetterboxConfig {
+            width_step: 0,
+            height_step: 0,
+            min_width: 1,
+            min_height: 1,
+        };
+        let script = LetterboxShield::with_config(config).inject_script();
+        assert!(script.contains("var WS = 1,"), "宽步长钳到 1");
+        assert!(script.contains("HS = 1,"), "高步长钳到 1");
+    }
+
+    #[test]
+    fn round_to_clamps_to_minimum() {
+        // RS-078：roundTo 必须带 minV 下限钳制（小窗口不得圆整到 0）
+        let script = LetterboxShield::new().inject_script();
+        assert!(
+            script.contains("Math.max(minV, Math.round(v / step) * step)"),
+            "roundTo 钳制语义"
+        );
+    }
+
+    // —— RS-079 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn color_depth_and_dpr_covered() {
+        // RS-079：色深固定 24 + DPR 0.25 步长圆整
+        let script = LetterboxShield::new().inject_script();
+        assert!(script.contains("'colorDepth'"), "colorDepth 覆盖");
+        assert!(script.contains("'pixelDepth'"), "pixelDepth 覆盖");
+        assert!(script.contains("return 24;"), "色深固定 24（Tor 口径）");
+        assert!(
+            script.contains("'devicePixelRatio'"),
+            "devicePixelRatio 覆盖"
+        );
+        assert!(
+            script.contains("Math.round(oDPR.get.call(this) * 4) / 4"),
+            "DPR 圆整到 0.25 步长"
+        );
     }
 }

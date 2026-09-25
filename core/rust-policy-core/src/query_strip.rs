@@ -68,8 +68,11 @@ const TRACKING_PARAMS: &[&str] = &[
 ///
 /// 从 URL 的查询字符串中移除已知追踪参数，
 /// 保留非追踪参数（不影响网站功能）。
+///
+/// RS-071（审计 2026-09-25）：参数表用 `Cow<'static, str>`——默认列表
+/// 零分配借用静态切片，自定义扩展项才持有 String。
 pub struct QueryStripper {
-    params: Vec<String>,
+    params: Vec<std::borrow::Cow<'static, str>>,
 }
 
 impl fmt::Debug for QueryStripper {
@@ -79,57 +82,61 @@ impl fmt::Debug for QueryStripper {
 }
 
 impl QueryStripper {
-    /// 用默认追踪参数列表创建。
+    /// 用默认追踪参数列表创建（RS-071：静态切片借用，零分配）。
     pub fn new() -> Self {
         Self {
-            params: TRACKING_PARAMS.iter().map(|s| s.to_string()).collect(),
+            params: TRACKING_PARAMS.iter().map(|s| (*s).into()).collect(),
         }
     }
 
     /// 用自定义参数列表创建（可扩展）。
     pub fn with_params(params: Vec<String>) -> Self {
-        Self { params }
+        Self {
+            params: params.into_iter().map(std::borrow::Cow::Owned).collect(),
+        }
     }
 
     /// 从 URL 中剥离追踪参数，返回清理后的 URL。
     ///
-    /// 如果 URL 没有查询参数或所有参数都是追踪参数，返回原始 URL。
-    /// 保留非追踪参数（如 `?id=123&fbclid=xxx` → `?id=123`）。
+    /// 如果 URL 没有查询参数或所有参数都是追踪参数，返回不含 query 的
+    /// 原始 URL（fragment 原样保留）。保留非追踪参数
+    /// （如 `?id=123&fbclid=xxx` → `?id=123`）。
+    ///
+    /// RS-070（审计 2026-09-25）：先分离 fragment 再定位 query——
+    /// 此前直接找首个 `?`，fragment 内的 `?`（`path#a?fbclid=x`）被误当
+    /// query 分隔符，fragment 内容遭错误改写（query 在 fragment 之前是
+    /// URL 语义，二者不可混淆）。
     pub fn strip(&self, url: &str) -> String {
-        // 分离 scheme://host/path 和 query
-        let (base, query_part) = match url.find('?') {
-            Some(pos) => (&url[..pos + 1], &url[pos + 1..]),
+        // 先分离 fragment（# 之后整段原样保留）
+        let (no_fragment, fragment) = match url.find('#') {
+            Some(pos) => (&url[..pos], Some(&url[pos..])),
+            None => (url, None),
+        };
+        // 再在 fragment 前缀中定位 query
+        let (base, query) = match no_fragment.find('?') {
+            Some(pos) => (&no_fragment[..pos], &no_fragment[pos + 1..]),
+            // 无 query——fragment 原样返回，不触碰 URL
             None => return url.to_string(),
         };
-
-        // 分离 query 和 fragment
-        let (query, fragment) = match query_part.find('#') {
-            Some(pos) => (&query_part[..pos], Some(&query_part[pos..])),
-            None => (query_part, None),
-        };
-
-        // 过滤追踪参数
+        // 过滤追踪参数（RS-070：空段——裸 ?/&/&& 产生的空串——不保留）
         let kept: Vec<&str> = query
             .split('&')
             .filter(|param| {
+                if param.is_empty() {
+                    return false;
+                }
                 let key = param.split('=').next().unwrap_or("");
                 !self.params.iter().any(|tp| tp.eq_ignore_ascii_case(key))
             })
             .collect();
-
-        // 重建 URL
-        let mut result = base.to_string();
+        // 重建 URL：base[?kept][fragment]
+        let mut result = String::from(base);
         if !kept.is_empty() {
+            result.push('?');
             result.push_str(&kept.join("&"));
         }
         if let Some(frag) = fragment {
-            // 如果没有保留参数，去掉末尾的 '?'
-            if kept.is_empty() {
-                result.pop(); // 移除 '?'
-            }
             result.push_str(frag);
-        } else if kept.is_empty() {
-            result.pop(); // 移除 '?'
         }
         result
     }
@@ -276,5 +283,71 @@ mod tests {
             qs.strip("https://example.com/?id=1&custom_track=abc"),
             "https://example.com/?id=1"
         );
+    }
+
+    // —— RS-070 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn fragment_question_mark_not_query() {
+        // RS-070：fragment 内的 '?' 不是 query 分隔符——fragment 内容
+        // 不得被改写（此前 `path#a?fbclid=x` 的 fragment 遭错误剥离）
+        let qs = QueryStripper::new();
+        assert_eq!(
+            qs.strip("https://example.com/path#a?fbclid=x"),
+            "https://example.com/path#a?fbclid=x",
+            "fragment 内 '?' 与追踪参数名不构成 query"
+        );
+        // fragment 内 '?' + 前方真 query 并存——各自独立处理
+        assert_eq!(
+            qs.strip("https://example.com/?fbclid=y#s?a?b"),
+            "https://example.com/#s?a?b",
+            "真 query 剥离 + fragment 原样"
+        );
+    }
+
+    #[test]
+    fn empty_query_param_edge_cases() {
+        // RS-070：空 query——裸 '?' 结尾归一到无 query 形态
+        let qs = QueryStripper::new();
+        assert_eq!(qs.strip("https://example.com/?"), "https://example.com/");
+        assert_eq!(qs.strip("https://example.com/?&"), "https://example.com/");
+        // 空 query + fragment
+        assert_eq!(
+            qs.strip("https://example.com/?#top"),
+            "https://example.com/#top"
+        );
+    }
+
+    #[test]
+    fn param_without_value_handled() {
+        // RS-070：无 '=' 的参数（flag 形态）——key 取整段；追踪名单的
+        // flag 参数照样剥离，普通 flag 保留
+        let qs = QueryStripper::new();
+        assert_eq!(
+            qs.strip("https://example.com/?flag&fbclid=x&id=3"),
+            "https://example.com/?flag&id=3"
+        );
+        // flag 形态的追踪参数（无 '='）同样命中
+        assert_eq!(
+            qs.strip("https://example.com/?fbclid"),
+            "https://example.com/"
+        );
+        // '=' 后为空的追踪参数同样命中
+        assert_eq!(
+            qs.strip("https://example.com/?fbclid=&id=1"),
+            "https://example.com/?id=1"
+        );
+    }
+
+    #[test]
+    fn default_params_are_borrowed_not_owned() {
+        // RS-071：默认构造零分配借用静态切片——Debug/结构语义不变
+        let qs = QueryStripper::new();
+        assert_eq!(qs.params.len(), 34);
+        let debug = format!("{qs:?}");
+        assert!(debug.contains("34 params"));
+        // 自定义路径仍可扩展（Owned）
+        let custom = QueryStripper::with_params(vec!["x".into()]);
+        assert_eq!(custom.params.len(), 1);
     }
 }
