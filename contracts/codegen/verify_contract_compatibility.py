@@ -13,6 +13,12 @@ import json
 import pathlib
 import sys
 
+# PY-042：需要重生成内容做 diff——平铺导入同目录生成器模块
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+from generate_csharp import generate as generate_cs_model  # noqa: E402
+from generate_kotlin import generate as generate_kt_model  # noqa: E402
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "schemas"
 VECTORS = ROOT / "vectors"
@@ -45,7 +51,11 @@ def check_vectors() -> list[str]:
 
 
 def check_generated_models() -> list[str]:
-    """生成的 C#/Kotlin 模型与 schema properties 一致（不平行 Schema——蓝图）。"""
+    """生成的 C#/Kotlin 模型与 schema 一致（不平行 Schema——蓝图）。
+
+    PY-042：此前只查文件存在——手改生成文件/schema 变更后不重跑生成器
+    均静默通过。现按 schema 重生成内容与磁盘 diff（行为等价 `--check`）。
+    """
     failures = []
     generated_cs = (ROOT / ".." / "windows" / "src" / "Aegis.Windows.App"
                     / "Contracts" / "Generated")
@@ -53,10 +63,23 @@ def check_generated_models() -> list[str]:
                     / "com" / "aegis" / "contracts" / "generated")
     for f in sorted(SCHEMAS.glob("*.json")):
         name = contract_name(f)
-        if not (generated_cs / f"{name}.cs").is_file():
+        schema = json.loads(f.read_text(encoding="utf-8"))
+        expected_cs = generate_cs_model(schema, name) + "\n"
+        expected_kt = generate_kt_model(schema, name) + "\n"
+        cs_path = generated_cs / f"{name}.cs"
+        kt_path = generated_kt / f"{name}.kt"
+        if not cs_path.is_file():
             failures.append(f"C# 模型缺失: {name}.cs（运行 generate_csharp.py）")
-        if not (generated_kt / f"{name}.kt").is_file():
+        else:
+            actual = cs_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+            if actual != expected_cs:
+                failures.append(f"C# 模型与 schema 漂移: {name}.cs（重新运行 generate_csharp.py）")
+        if not kt_path.is_file():
             failures.append(f"Kotlin 模型缺失: {name}.kt（运行 generate_kotlin.py）")
+        else:
+            actual = kt_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+            if actual != expected_kt:
+                failures.append(f"Kotlin 模型与 schema 漂移: {name}.kt（重新运行 generate_kotlin.py）")
     return failures
 
 

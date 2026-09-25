@@ -16,7 +16,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "windows" / "src" / "Aegis.Windows.App"
 
-_CS_FIND = re.compile(r'FindResource\(\s*"([^"]+)"\s*\)')
+# PY-036：只匹配 FindResource 字面量——TryFindResource 与 Resources["key"]
+# 索引器引用同一批资源键，抛的异常同源（TryFindResource 返回 null 崩溃 /
+# 索引器 KeyNotFound），一并纳入扫描
+_CS_FIND = re.compile(r'(?:FindResource|TryFindResource)\(\s*"([^"]+)"\s*\)|Resources\s*\[\s*"([^"]+)"\s*\]')
 _XAML_KEY = re.compile(r'x:Key="([^"]+)"')
 
 
@@ -34,18 +37,19 @@ def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     keys = collect_keys()
-    missing: list[tuple[Path, str, int]] = []
+    missing: list[tuple[Path, str, int, str]] = []
     for cs in SRC.rglob("*.cs"):
         txt = cs.read_text(encoding="utf-8")
         for m in _CS_FIND.finditer(txt):
-            key = m.group(1)
+            key = m.group(1) or m.group(2)
             if key not in keys:
                 line = txt.count("\n", 0, m.start()) + 1
-                missing.append((cs, key, line))
+                kind = "索引器" if m.group(2) else "FindResource"
+                missing.append((cs, key, line, kind))
     if missing:
-        print(f"[FAIL] 发现 {len(missing)} 个 FindResource 引用了未定义的 XAML 资源键：")
-        for path, key, line in missing:
-            print(f"   {path.relative_to(ROOT)}:{line}  FindResource(\"{key}\") 无匹配 x:Key")
+        print(f"[FAIL] 发现 {len(missing)} 个资源引用指向未定义的 XAML 资源键：")
+        for path, key, line, kind in missing:
+            print(f"   {path.relative_to(ROOT)}:{line}  {kind}(\"{key}\") 无匹配 x:Key")
         print("     -- 这是启动/运行期 ResourceReferenceKeyNotFoundException 的常见根源。")
         return 1
     print(f"[OK] XAML 资源连通性通过：{len(keys)} 个 x:Key 均被合理引用/定义。")

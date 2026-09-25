@@ -28,6 +28,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 # 审计修复：路径随 ADR-009 迁移失效（windows/aegis_source → legacy/），
 # 生成链曾 100% 断裂——schema 冻结为陈旧快照
+# PY-041 标注：APP_DIR 指向 legacy 归档栈（ADR-009 read-only archive）——
+# api_bridge.py 不再参与运行时（正典 Windows 栈为 C# WebView2），本 schema
+# 仅为历史接口文档快照；正典桥接口以后续 C# 桥 schema 为准（待建）。
 APP_DIR = ROOT / "legacy" / "windows-pywebview" / "app"
 API_BRIDGE = APP_DIR / "api_bridge.py"
 OUTPUT = ROOT / "shared" / "jsapi-schema.json"
@@ -95,12 +98,14 @@ def _extract_methods(cls: ast.ClassDef, exposed: set[str]) -> dict[str, dict]:
         if name.startswith("_") and name not in _ALLOWED_UNDERSCORE:
             continue
         params = []
-        for a in item.args.args:
-            if a.arg in ("self",):
-                continue
-            params.append({"name": a.arg, "required": True})
-        for d in item.args.defaults:
-            pass  # 默认值解析留简化：记录参数个数
+        pos_args = [a.arg for a in item.args.args if a.arg != "self"]
+        # PY-040：defaults 对齐 pos_args 尾部 N 个——此前空遍历 pass，
+        # 全部参数误标 required=True（带默认值参数必填性失真）
+        # 注意循环变量用 pname——不得遮蔽外层方法名 name（曾致方法键污染）
+        defaults = item.args.defaults
+        n_no_default = len(pos_args) - len(defaults)
+        for i, pname in enumerate(pos_args):
+            params.append({"name": pname, "required": i < n_no_default})
         methods[name] = {
             "name": name,
             "description": _doc_first_line(ast.get_docstring(item)),
@@ -110,7 +115,7 @@ def _extract_methods(cls: ast.ClassDef, exposed: set[str]) -> dict[str, dict]:
             # 溯源（PY-005）：方法实际定义所在类（mixin 方法不再误标 Api）
             "defined_in": cls.name,
         }
-        methods[name]["n_required_params"] = len(params)
+        methods[name]["n_required_params"] = sum(1 for p in params if p["required"])
     return methods
 
 

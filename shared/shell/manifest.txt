@@ -1,0 +1,10 @@
+# 首页单源资产清单（PY-038 共享单源）：validate_release.py 仓库级门禁与
+# release-windows.yml 发布期 fail-closed 断言共同消费——两处平行维护必漂移。
+# 每行一个相对 shared/shell/ 的路径；# 开头为注释。
+start.html
+start.css
+start.js
+start.main.js
+start.snake.js
+start.import.js
+wallpapers/aurora-twilight.jpg

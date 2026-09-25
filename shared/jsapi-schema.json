@@ -158,21 +158,21 @@
         "params": [
           {
             "name": "limit",
-            "required": true
+            "required": false
           },
           {
             "name": "cursor_id",
-            "required": true
+            "required": false
           },
           {
             "name": "cursor_time",
-            "required": true
+            "required": false
           }
         ],
         "returns": "list",
         "exposed_to_js": false,
         "defined_in": "HistoryMixin",
-        "n_required_params": 3
+        "n_required_params": 0
       },
       "get_most_visited": {
         "name": "get_most_visited",
@@ -180,13 +180,13 @@
         "params": [
           {
             "name": "limit",
-            "required": true
+            "required": false
           }
         ],
         "returns": "list",
         "exposed_to_js": false,
         "defined_in": "HistoryMixin",
-        "n_required_params": 1
+        "n_required_params": 0
       },
       "get_search_engine": {
         "name": "get_search_engine",
@@ -266,13 +266,13 @@
         "params": [
           {
             "name": "source",
-            "required": true
+            "required": false
           }
         ],
         "returns": "dict",
         "exposed_to_js": true,
         "defined_in": "ImportMixin",
-        "n_required_params": 1
+        "n_required_params": 0
       },
       "import_history": {
         "name": "import_history",
@@ -280,17 +280,17 @@
         "params": [
           {
             "name": "limit",
-            "required": true
+            "required": false
           },
           {
             "name": "source",
-            "required": true
+            "required": false
           }
         ],
         "returns": "dict",
         "exposed_to_js": true,
         "defined_in": "ImportMixin",
-        "n_required_params": 2
+        "n_required_params": 0
       },
       "js_error": {
         "name": "js_error",
@@ -302,25 +302,25 @@
           },
           {
             "name": "source",
-            "required": true
+            "required": false
           },
           {
             "name": "line",
-            "required": true
+            "required": false
           },
           {
             "name": "col",
-            "required": true
+            "required": false
           },
           {
             "name": "stack",
-            "required": true
+            "required": false
           }
         ],
         "returns": "None",
         "exposed_to_js": true,
         "defined_in": "NavigationMixin",
-        "n_required_params": 5
+        "n_required_params": 1
       },
       "move_tab": {
         "name": "move_tab",
@@ -360,13 +360,13 @@
         "params": [
           {
             "name": "url",
-            "required": true
+            "required": false
           }
         ],
         "returns": "None",
         "exposed_to_js": true,
         "defined_in": "TabOpsMixin",
-        "n_required_params": 1
+        "n_required_params": 0
       },
       "open_geogebra": {
         "name": "open_geogebra",
@@ -442,21 +442,21 @@
           },
           {
             "name": "limit",
-            "required": true
+            "required": false
           },
           {
             "name": "cursor_id",
-            "required": true
+            "required": false
           },
           {
             "name": "cursor_time",
-            "required": true
+            "required": false
           }
         ],
         "returns": "list",
         "exposed_to_js": false,
         "defined_in": "HistoryMixin",
-        "n_required_params": 4
+        "n_required_params": 1
       },
       "seed_session": {
         "name": "seed_session",
@@ -468,13 +468,13 @@
           },
           {
             "name": "current",
-            "required": true
+            "required": false
           }
         ],
         "returns": "str",
         "exposed_to_js": false,
         "defined_in": "TabOpsMixin",
-        "n_required_params": 2
+        "n_required_params": 1
       },
       "set_search_engine": {
         "name": "set_search_engine",

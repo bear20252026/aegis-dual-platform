@@ -18,6 +18,10 @@ root = Path(__file__).resolve().parent
 windows = root / 'legacy' / 'windows-pywebview'
 failures: list[str] = []
 python_files = list(windows.rglob('*.py'))
+# PY-037：AST 语法检查仅覆盖 legacy 子树——scripts/contracts/release 三个
+# 活跃 Python 目录（CI 门禁与发布链路的实际执行方）此前零语法检查
+for scan_dir in ('scripts', 'contracts', 'release'):
+    python_files.extend((root / scan_dir).rglob('*.py'))
 for path in python_files:
     try:
         ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
@@ -60,9 +64,20 @@ else:
     for rel in required_cs:
         if not (cs_root / rel).is_file():
             failures.append(f'缺 C# 关键文件 windows/src/Aegis.Windows.App/{rel}')
-for shell_asset in ('start.html', 'start.css', 'start.js', 'start.main.js', 'start.snake.js', 'start.import.js'):
-    if not (root / 'shared' / 'shell' / shell_asset).is_file():
-        failures.append(f'缺跨端单源首页资产 shared/shell/{shell_asset}')
+# PY-038：资产清单与 release-windows.yml 平行维护（改一处漏一处）——
+# 抽 shared/shell/manifest.txt 共享单源，两处共同消费
+shell_manifest = root / 'shared' / 'shell' / 'manifest.txt'
+if not shell_manifest.is_file():
+    failures.append('缺跨端资产清单 shared/shell/manifest.txt')
+else:
+    shell_assets = [
+        line.strip()
+        for line in shell_manifest.read_text(encoding='utf-8').splitlines()
+        if line.strip() and not line.strip().startswith('#')
+    ]
+    for shell_asset in shell_assets:
+        if not (root / 'shared' / 'shell' / shell_asset).is_file():
+            failures.append(f'缺跨端单源首页资产 shared/shell/{shell_asset}')
 print(f'python_files={len(python_files)}')
 print(f'failures={len(failures)}')
 for failure in failures:

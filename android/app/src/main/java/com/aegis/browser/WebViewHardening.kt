@@ -96,6 +96,9 @@ internal object WebViewHardening {
         get() =
             """
 // Aegis BridgeGuard — 受信调用方校验（fetch / XMLHttpRequest / sendBeacon / WebSocket）
+// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open|navigator.sendBeacon = function|window.WebSocket = function|trustedCaller|location.hostname
+// ↑ PY-043 单源：verify_bridge_guard.py 的 REQUIRED_SINKS 自此行解析
+//   （此前 Python 手工副本——Rust include_str! 编译期消费本文件，清单随模板演进自动同步）
 (function() {
   const ALLOWED_HOSTS = [$allowedHostsJson];
   const REQUIRE_HTTPS = $requireHttpsJson;

@@ -14,17 +14,20 @@ GitHub Release 不允许同名资产：softprops 上传第二个同名文件时
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
 
 def main() -> int:
-    args = sys.argv[1:]
-    dry_run = "--dry-run" in args
-    dirs = [Path(arg) for arg in args if arg != "--dry-run"]
-    if not dirs:
-        print("usage: dedup_release_assets.py [--dry-run] <dir1> <dir2> ...", file=sys.stderr)
-        return 2
+    # PY-029：手工 argv 解析无 -h/--help——argparse 标准化（usage/自动报错）
+    parser = argparse.ArgumentParser(
+        description="跨平台同名发布资产去重（后出现的目录同名文件加平台前缀改名）")
+    parser.add_argument("--dry-run", action="store_true", help="只打印将执行的改名，不落盘")
+    parser.add_argument("dirs", nargs="+", metavar="DIR", help="各平台 dist 目录（顺序即优先级，先 windows）")
+    args = parser.parse_args()
+    dirs = [Path(d) for d in args.dirs]
+    dry_run = args.dry_run
     for d in dirs:
         if not d.is_dir():
             print(f"ERROR: not a directory: {d}", file=sys.stderr)

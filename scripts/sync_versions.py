@@ -10,10 +10,13 @@ PROPS = ROOT / "shared" / "version.properties"
 
 def load_properties(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
+        # PY-026：无 "=" 的非法行此前直接 ValueError 原始栈——给出文件与行号
+        if "=" not in line:
+            raise RuntimeError(f"{path}:{lineno}: invalid properties line (missing '='): {line!r}")
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip()
     return values

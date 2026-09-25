@@ -34,19 +34,29 @@ def fail(msg: str) -> None:
     failures.append(msg)
 
 
+def _read(rel: str) -> str:
+    # PY-034：7 处 read_text 无守卫——单文件缺失时此前 FileNotFoundError 原始栈
+    #（CI 日志只剩一行堆栈，无定位）。统一 fail-closed 进 failures。
+    path = ROOT / rel
+    if not path.is_file():
+        fail(f"文件缺失: {rel}")
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
 def wallpapers_from_asset_scheme() -> set[str]:
-    text = (ROOT / "legacy/windows-pywebview/app/asset_scheme.py").read_text(encoding="utf-8")
+    text = _read("legacy/windows-pywebview/app/asset_scheme.py")
     block = re.search(r"WALLPAPERS\s*=\s*\(([^)]*)\)", text, re.S)
     if not block:
         fail("asset_scheme.py: 未找到 WALLPAPERS 白名单")
         return set()
-    return set(re.findall(r'"([^"]+\.jpg)"', block.group(1)))
+    return set(re.findall(r'"([^"]+\.(?:jpg|jpeg|png|webp))"', block.group(1)))
 
 
 def wallpapers_from_start_html() -> set[str]:
     # I83 外置（2026-09-10）：WALLPAPERS 数组随内联脚本外移 start.main.js
     #（start.html 仅静态标记 + CSP——不再承载脚本数据）
-    text = (ROOT / "shared/shell/start.main.js").read_text(encoding="utf-8")
+    text = _read("shared/shell/start.main.js")
     block = re.search(r"var WALLPAPERS\s*=\s*\[(.*?)\];", text, re.S)
     if not block:
         fail("start.main.js: 未找到 WALLPAPERS 按钮列表")
@@ -55,9 +65,7 @@ def wallpapers_from_start_html() -> set[str]:
 
 
 def wallpapers_from_kotlin() -> set[str]:
-    text = (ROOT / "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt").read_text(
-        encoding="utf-8"
-    )
+    text = _read("android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt")
     block = re.search(r"WALLPAPERS\s*=\s*setOf\((.*?)\)", text, re.S)
     if not block:
         fail("AegisHomeBridge.kt: 未找到 WALLPAPERS 白名单")
@@ -67,23 +75,23 @@ def wallpapers_from_kotlin() -> set[str]:
 
 def wallpapers_from_csharp() -> set[str]:
     # WB-011（2026-09-24）：C# 正典栈 NtpAssets.Wallpapers 第 5 份壁纸清单
-    text = (ROOT / "windows/src/Aegis.Windows.App/Chrome/Ntp/NtpAssets.cs").read_text(
-        encoding="utf-8"
-    )
+    text = _read("windows/src/Aegis.Windows.App/Chrome/Ntp/NtpAssets.cs")
     block = re.search(r"Wallpapers\s*=\s*new\[\]\s*\{(.*?)\}", text, re.S)
     if not block:
         fail("NtpAssets.cs: 未找到 Wallpapers 白名单")
         return set()
-    return set(re.findall(r'"([^"]+\.jpg)"', block.group(1)))
+    return set(re.findall(r'"([^"]+\.(?:jpg|jpeg|png|webp))"', block.group(1)))
 
 
 def wallpapers_on_disk() -> set[str]:
     d = ROOT / "shared/shell/wallpapers"
-    return {p.name for p in d.glob("*.jpg")}
+    # PY-035：仅 glob *.jpg——新增 png/webp 壁纸会被判"多出"（反向误报）；
+    # 多后缀取并集，提取器正则同步扩展
+    return {p.name for suffix in ("*.jpg", "*.jpeg", "*.png", "*.webp") for p in d.glob(suffix)}
 
 
 def engines_from_url_utils() -> set[str]:
-    text = (ROOT / "legacy/windows-pywebview/app/url_utils.py").read_text(encoding="utf-8")
+    text = _read("legacy/windows-pywebview/app/url_utils.py")
     block = re.search(r"SEARCH_ENGINES[^=]*=\s*\{(.*?)\n\}", text, re.S)
     if not block:
         fail("url_utils.py: 未找到 SEARCH_ENGINES 表")
@@ -94,9 +102,7 @@ def engines_from_url_utils() -> set[str]:
 def engines_from_kotlin() -> set[str]:
     # 搜索审计 2026-09-01：ENGINE_URLS 迁至 SearchEngines.kt 单源
     # （AegisHomeBridge 改为引用该单源）——锚点同步更新
-    text = (ROOT / "android/app/src/main/java/com/aegis/browser/SearchEngines.kt").read_text(
-        encoding="utf-8"
-    )
+    text = _read("android/app/src/main/java/com/aegis/browser/SearchEngines.kt")
     block = re.search(r"ENGINE_URLS[^=]*=\s*mapOf\(\s*(.*?)\)", text, re.S)
     if not block:
         fail("SearchEngines.kt: 未找到 ENGINE_URLS 表")
@@ -114,9 +120,7 @@ CS_ENGINE_EXTENSIONS = frozenset({
 
 
 def engines_from_csharp() -> set[str]:
-    text = (ROOT / "windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs").read_text(
-        encoding="utf-8"
-    )
+    text = _read("windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs")
     block = re.search(r"EngineUrls\s*=\s*new Dictionary[^{]*\{(.*?)\n\s*\};", text, re.S)
     if not block:
         fail("UrlNormalizer.cs: 未找到 EngineUrls 表")

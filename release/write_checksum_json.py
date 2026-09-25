@@ -13,9 +13,15 @@ def build_manifest(root: Path, output: Path) -> list[dict[str, str]]:
         relative = path.relative_to(root)
         if relative == output_relative:
             continue
+        # PY-039：整文件 read_bytes 进内存——发布目录可含大体积制品
+        #（安装包/库），改 1MiB 分块流式摘要
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
         entries.append(
             {
-                "Hash": hashlib.sha256(path.read_bytes()).hexdigest().upper(),
+                "Hash": digest.hexdigest().upper(),
                 "Path": relative.as_posix(),
             }
         )

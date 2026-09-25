@@ -123,16 +123,11 @@ jobs:
       - name: Fail-closed Windows artifact integrity assertion
         shell: pwsh
         run: |
-          $required = @(
-            "dist/aegis-windows/Aegis.Windows.App.exe",
-            "dist/aegis-windows/ntp/start.html",
-            "dist/aegis-windows/ntp/start.css",
-            "dist/aegis-windows/ntp/start.js",
-            "dist/aegis-windows/ntp/start.main.js",
-            "dist/aegis-windows/ntp/start.snake.js",
-            "dist/aegis-windows/ntp/start.import.js",
-            "dist/aegis-windows/ntp/wallpapers/aurora-twilight.jpg"
-          )
+          # PY-038：资产清单改读 shared/shell/manifest.txt 共享单源（此前与
+          # validate_release.py 平行维护——改一处漏一处必漂移）
+          $required = @("dist/aegis-windows/Aegis.Windows.App.exe") +
+            (Get-Content shared/shell/manifest.txt | Where-Object { $_ -and -not $_.StartsWith('#') } |
+              ForEach-Object { "dist/aegis-windows/ntp/$_" })
           foreach ($p in $required) {
             if (-not (Test-Path $p)) { throw "发布产物缺少资源: $p" }
             if ((Get-Item $p).Length -eq 0) { throw "发布产物为空文件: $p" }

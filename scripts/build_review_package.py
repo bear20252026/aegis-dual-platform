@@ -109,14 +109,14 @@ def git_commit_and_head() -> tuple[str, str]:
     try:
         sha = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, timeout=30,  # PY-032
         ).stdout.strip()
         subject = subprocess.run(
             ["git", "log", "-1", "--pretty=%s"], cwd=ROOT,
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, timeout=30,  # PY-032
         ).stdout.strip()
         return sha, subject
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return "unknown", "unknown"
 
 
