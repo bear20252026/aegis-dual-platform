@@ -92,6 +92,12 @@ jobs:
         shell: bash
         run: mypy main_webview.py app/ crash_reporter.py --exclude "System Volume Information"
 
+      - name: Python 单元测试（tests/python——PY-103..148 工具链单测 + PY-149 发布链基建）
+        # P5（审计 2026-09-25）：tests/python/ 此前从未入 CI——release_chain_test.py
+        # 是死测试基建。pytest 经 requirements-dev.txt 锁版安装，与本地口径一致。
+        working-directory: .
+        run: python -m pytest tests/python -q
+
       - name: 自检脚本（session_store / api_bridge / s1 集成 / shell_toolbar / tab_state / navigation_search / view_source / native_core）
         # 门禁全量常跑（ADR-007）：CLAUDE.md 要求改动后必跑的离线自检
         # 全部入 CI——自检与实现不一致（master 曾双 FAIL）在合入前即暴露
