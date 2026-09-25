@@ -269,6 +269,43 @@ mod tests {
         assert_eq!(ProtectionMode::Maximum.to_string(), "maximum");
     }
 
+    // —— RS-145（审计 2026-09-25）：数字别名 / 空串 ——
+    // （Display 已由 mode_display 锁定；本组覆盖 parse 的别名面）
+
+    #[test]
+    fn parse_numeric_aliases_and_short_names() {
+        // 数字别名（0/1/2）与短名（compat/balance/max）必须可解析
+        assert_eq!(ProtectionMode::parse("0"), Some(ProtectionMode::Compatible));
+        assert_eq!(ProtectionMode::parse("1"), Some(ProtectionMode::Balanced));
+        assert_eq!(ProtectionMode::parse("2"), Some(ProtectionMode::Maximum));
+        assert_eq!(
+            ProtectionMode::parse("compat"),
+            Some(ProtectionMode::Compatible)
+        );
+        assert_eq!(
+            ProtectionMode::parse("balance"),
+            Some(ProtectionMode::Balanced)
+        );
+        // 数字别名同样大小写不敏感口径（to_lowercase 前后无影响），
+        // 越界数字（3）不是合法别名
+        assert_eq!(ProtectionMode::parse("3"), None);
+        assert_eq!(ProtectionMode::parse("00"), None, "仅单字符 0/1/2 是别名");
+    }
+
+    #[test]
+    fn parse_rejects_empty_and_whitespace() {
+        // 空串 / 空白 / 大小写混合无效名——fail-closed 返回 None（不得
+        // 静默落默认模式——模式选择是用户安全决策）
+        assert_eq!(ProtectionMode::parse(""), None);
+        assert_eq!(ProtectionMode::parse("   "), None);
+        assert_eq!(ProtectionMode::parse("Balanced "), None, "尾随空格不宽容");
+        assert_eq!(ProtectionMode::parse(" balanced"), None);
+        assert_eq!(
+            ProtectionMode::parse("Balanced"),
+            Some(ProtectionMode::Balanced)
+        );
+    }
+
     // ===== RS-046：fingerprint_pipeline_with_mode 输出内容逐模式锁定 =====
     // （此前仅测 enable_* 开关布尔值，管线组装后的实际脚本内容零覆盖）
 

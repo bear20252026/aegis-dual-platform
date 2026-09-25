@@ -67,6 +67,15 @@ pub extern "C" fn aegis_policy_core_broker_advance_document_generation(
     .unwrap_or(0)
 }
 
+/// RS-141（审计 2026-09-25）：read_utf8 细分错误码透传辅助——此前四个
+/// 参数的错误统一折叠为 "ffi_input_invalid"，宿主无法区分 null 指针 /
+/// 超长 / 非 UTF-8（可观测性缺失面）。取首个 Err 原样透传。
+fn unwrap_input_or_deny(
+    result: Result<&'static str, &'static str>,
+) -> Result<&'static str, *mut c_char> {
+    result.map_err(input_deny)
+}
+
 /// 评估导航并返回调用方拥有的 JSON 决策；非法输入、空句柄或 panic 均返回 deny JSON。
 #[no_mangle]
 pub extern "C" fn aegis_policy_core_broker_evaluate_navigation_json(
@@ -78,13 +87,21 @@ pub extern "C" fn aegis_policy_core_broker_evaluate_navigation_json(
     scope: *const c_char,
 ) -> *mut c_char {
     catch_unwind(AssertUnwindSafe(|| {
-        let (Ok(session_id), Ok(tab_id), Ok(raw_url), Ok(scope)) = (
-            read_utf8(session_id),
-            read_utf8(tab_id),
-            read_utf8(raw_url),
-            read_utf8(scope),
-        ) else {
-            return input_deny("ffi_input_invalid");
+        let session_id = match unwrap_input_or_deny(read_utf8(session_id)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let tab_id = match unwrap_input_or_deny(read_utf8(tab_id)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let raw_url = match unwrap_input_or_deny(read_utf8(raw_url)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let scope = match unwrap_input_or_deny(read_utf8(scope)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
         };
         let Some(decision) = with_broker(broker, |value| {
             value.inner.evaluate_navigation(
@@ -102,8 +119,12 @@ pub extern "C" fn aegis_policy_core_broker_evaluate_navigation_json(
     .unwrap_or_else(|_| write_response(deny("native_panic", "native policy core panicked")))
 }
 
-/// 在副作用执行点重新校验 URL/scope，并一次性消费 action nonce。
-/// 登记待审批导航并返回调用方拥有的 JSON 确认请求；不返回可消费授权。
+/// 登记待审批导航并返回调用方拥有的 JSON 确认请求；不发放可消费授权——
+/// 仅同一 Broker 的显式批准（approve）可兑换原始动作。
+///
+/// RS-142（审计 2026-09-25）：修正文档错位——此前头两行复制自 consume
+/// 入口（"在副作用执行点重新校验 URL/scope，并一次性消费 action nonce"），
+/// 与本入口实际语义（登记待审批、不消费、不签发）不符。
 #[no_mangle]
 pub extern "C" fn aegis_policy_core_broker_request_navigation_confirmation_json(
     broker: *mut CAbiBroker,
@@ -114,13 +135,21 @@ pub extern "C" fn aegis_policy_core_broker_request_navigation_confirmation_json(
     scope: *const c_char,
 ) -> *mut c_char {
     catch_unwind(AssertUnwindSafe(|| {
-        let (Ok(session_id), Ok(tab_id), Ok(raw_url), Ok(scope)) = (
-            read_utf8(session_id),
-            read_utf8(tab_id),
-            read_utf8(raw_url),
-            read_utf8(scope),
-        ) else {
-            return input_deny("ffi_input_invalid");
+        let session_id = match unwrap_input_or_deny(read_utf8(session_id)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let tab_id = match unwrap_input_or_deny(read_utf8(tab_id)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let raw_url = match unwrap_input_or_deny(read_utf8(raw_url)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let scope = match unwrap_input_or_deny(read_utf8(scope)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
         };
         let Some(decision) = with_broker(broker, |value| {
             value.inner.request_navigation_confirmation(
@@ -147,10 +176,17 @@ pub extern "C" fn aegis_policy_core_broker_approve_navigation_confirmation_json(
     scope: *const c_char,
 ) -> *mut c_char {
     catch_unwind(AssertUnwindSafe(|| {
-        let (Ok(nonce), Ok(raw_url), Ok(scope)) =
-            (read_utf8(nonce), read_utf8(raw_url), read_utf8(scope))
-        else {
-            return input_deny("ffi_input_invalid");
+        let nonce = match unwrap_input_or_deny(read_utf8(nonce)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let raw_url = match unwrap_input_or_deny(read_utf8(raw_url)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let scope = match unwrap_input_or_deny(read_utf8(scope)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
         };
         let Some(decision) = with_broker(broker, |value| {
             value.inner.approve_navigation_confirmation(
@@ -193,10 +229,17 @@ pub extern "C" fn aegis_policy_core_broker_consume_navigation_json(
     scope: *const c_char,
 ) -> *mut c_char {
     catch_unwind(AssertUnwindSafe(|| {
-        let (Ok(action_json), Ok(raw_url), Ok(scope)) =
-            (read_utf8(action_json), read_utf8(raw_url), read_utf8(scope))
-        else {
-            return input_deny("ffi_input_invalid");
+        let action_json = match unwrap_input_or_deny(read_utf8(action_json)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let raw_url = match unwrap_input_or_deny(read_utf8(raw_url)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
+        };
+        let scope = match unwrap_input_or_deny(read_utf8(scope)) {
+            Ok(v) => v,
+            Err(deny) => return deny,
         };
         let action = match parse_action(action_json) {
             Ok(action) => action,

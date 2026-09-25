@@ -57,10 +57,15 @@ const MAX_SESSIONS: usize = 1024;
 /// `policy_version`，避免"会话级"与"broker 级"版本语义混淆。
 #[derive(Debug, Clone)]
 pub struct SessionContext {
+    /// 会话全局唯一标识（宿主生成——persona 维度隔离键）。
     pub session_id: String,
+    /// 会话绑定的标签页 ID——跨标签使用该会话的动作验证将拒绝。
     pub tab_id: String,
+    /// 顶层文档代际（页面切换递增）——旧代际签发的授权在推进后即撤销。
     pub generation: u64,
+    /// 创建时刻（`Instant::is_expired` 的单调时钟基准，不受系统时间回拨影响）。
     pub created_at: Instant,
+    /// 会话存活时长——过期后 `validate_action` 拒绝（原生活动判定过期驱动）。
     pub ttl: Duration,
 }
 

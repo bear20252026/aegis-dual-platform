@@ -19,7 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // ===== UniFFI 类型包装（Record/Enum）=====
 
 /// FFI 版授权行动（与 decision::AuthorizedAction 字段一致）。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiAuthorizedAction {
     pub session_id: String,
     pub tab_id: String,
@@ -73,7 +73,7 @@ impl From<FfiAuthorizedAction> for AuthorizedAction {
 }
 
 /// FFI 版拒绝原因。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiDenyReason {
     pub code: String,
     pub detail: String,
@@ -81,7 +81,7 @@ pub struct FfiDenyReason {
 }
 
 /// FFI 版审批请求；确认 UI 必须展示并绑定其完整语义，不能仅信任 origin/method。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiApprovalRequest {
     pub origin: String,
     pub method: String,
@@ -92,7 +92,7 @@ pub struct FfiApprovalRequest {
 }
 
 /// FFI 版安全决策（枚举——Allow/Deny/RequireConfirmation）。
-#[derive(uniffi::Enum)]
+#[derive(Debug, uniffi::Enum)]
 pub enum FfiDecision {
     Allow { action: FfiAuthorizedAction },
     RequireConfirmation { request: FfiApprovalRequest },
@@ -129,14 +129,14 @@ impl From<Decision> for FfiDecision {
 // ===== FFI 导出函数（#[uniffi::export]）=====
 
 /// FFI 版 URL 解析结果（UniFFI 不支持元组返回——用 Record）。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiOrigin {
     pub scheme: String,
     pub host: String,
 }
 
 /// FFI 版规范化 URL 授权绑定：fragment 不参与副作用授权。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiCanonicalUrl {
     pub scheme: String,
     pub host: String,
@@ -169,16 +169,18 @@ pub fn extract_host(url: String) -> Option<String> {
     crate::util::extract_host(&url)
 }
 
-/// 生成指纹防护管道 JS（委托 fingerprint_pipeline 逻辑——跨端统一）。
+/// 生成指纹防护管道 JS（委托 shield::FingerprintShield——跨端统一）。
 ///
 /// RS-036：非法种子（长度≠64 或含非 hex 字符）返回**空脚本**——
 /// 此前畸形种子静默退化为全零种子（全体用户同噪声可被指纹聚类）。
 /// 宿主应在调用前校验种子；空脚本注入无效果（fail-closed——绝不以
 /// 固定种子注入）。
+///
+/// RS-133（审计 2026-09-25）：修正过期注释——JS 生成**就在 Rust 侧**
+/// （FingerprintShield::from_seed(seed).inject_script()），并非
+/// "Python 侧 legacy、Rust 仅提供 seed 派生"；文档与实现此前不符。
 #[uniffi::export]
 pub fn build_fingerprint_pipeline(session_seed: String) -> String {
-    // 注：fingerprint_pipeline 的 JS 生成在 Python 侧（legacy），
-    // Rust 侧提供 seed 派生；此处导出便于后续迁移。
     match hex_seed_to_bytes(&session_seed) {
         Some(seed) => crate::shield::FingerprintShield::from_seed(seed).inject_script(),
         None => String::new(),
@@ -242,6 +244,34 @@ mod hex_seed_tests {
         assert_eq!(build_fingerprint_pipeline(String::new()), "");
         // 合法种子仍产出脚本
         assert!(!build_fingerprint_pipeline("ab".repeat(32)).is_empty());
+    }
+
+    // —— RS-134（审计 2026-09-25）：hex 回归补强 ——
+
+    #[test]
+    fn hex_seed_accepts_uppercase() {
+        // 大写 hex 是合法表示——必须与小写产出相同字节
+        let lower = hex_seed_to_bytes(&"ab".repeat(32)).unwrap();
+        let upper = hex_seed_to_bytes(&"AB".repeat(32)).unwrap();
+        assert_eq!(lower, upper);
+    }
+
+    #[test]
+    fn hex_seed_nibble_order_is_hi_then_lo() {
+        // 高位在前（hi<<4 | lo）——回归锁定字节序（此前若颠倒会静默换种子）
+        let mut hex = "0ff00000".to_string();
+        hex.push_str(&"ab".repeat(28)); // 补齐 64 字符
+        let out = hex_seed_to_bytes(&hex).unwrap();
+        assert_eq!(&out[..4], &[0x0f, 0xf0, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn hex_seed_boundary_values_roundtrip() {
+        // 00 / ff / 0f / f0 四种 nibble 边界全遍历
+        let mut hex = "00ff0ff0".to_string();
+        hex.push_str(&"ab".repeat(28)); // 补齐 64 字符
+        let out = hex_seed_to_bytes(&hex).unwrap();
+        assert_eq!(&out[..4], &[0x00, 0xff, 0x0f, 0xf0]);
     }
 }
 
@@ -509,5 +539,48 @@ mod tests {
             FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
             _ => panic!("generation advance must revoke pending confirmation"),
         }
+    }
+
+    // —— RS-132（审计 2026-09-25）：FFI 导出函数层回归（此前零覆盖） ——
+
+    #[test]
+    fn try_parse_external_wrapper_valid_and_invalid() {
+        // 合法 URL：scheme 归一小写 + host 归一
+        let parsed = try_parse_external("HTTPS://Example.COM:443/path".into())
+            .expect("合法 https URL 必须解析");
+        assert_eq!(parsed.scheme, "https");
+        assert_eq!(parsed.host, "example.com");
+        // 非法 URL：None（fail-closed），不 panic
+        assert!(try_parse_external("javascript:alert(1)".into()).is_none());
+        assert!(try_parse_external("not a url".into()).is_none());
+        assert!(try_parse_external(String::new()).is_none());
+    }
+
+    #[test]
+    fn extract_host_wrapper_various_shapes() {
+        assert_eq!(
+            extract_host("https://sub.example.com:8080/p".into()),
+            Some("sub.example.com".into())
+        );
+        assert_eq!(
+            extract_host("http://User:Pw@EXAMPLE.com/".into()),
+            Some("example.com".into()),
+            "userinfo 剥离 + 大小写归一"
+        );
+        // util::extract_host 只做 host 提取（不做 scheme 门禁——后者在
+        // origin::try_parse_external 层）；锁定现状防止语义漂移
+        assert_eq!(extract_host("ftp://x.com/".into()), Some("x.com".into()));
+    }
+
+    #[test]
+    fn canonicalize_external_wrapper_strips_fragment_and_normalizes() {
+        let canonical =
+            canonicalize_external("http://example.com/a?b=1#frag".into()).expect("canonical");
+        assert_eq!(canonical.origin, "http://example.com");
+        assert_eq!(canonical.canonical_parameters, "/a?b=1");
+        assert!(
+            !canonical.canonical_parameters.contains('#'),
+            "fragment 不参与授权绑定"
+        );
     }
 }

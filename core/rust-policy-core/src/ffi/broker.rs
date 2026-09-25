@@ -524,6 +524,13 @@ fn same_binding(a: &AuthorizedAction, b: &AuthorizedAction) -> bool {
 /// M-15 修复（审计 2026-08-31）：授权账本容量门（fail-closed）。
 /// 未达上限直接放行；达上限先惰性清理已过期的 Pending 记录
 /// （Consumed 记录保留到会话撤销，不参与清理），仍满则拒绝登记。
+///
+/// RS-136（审计 2026-09-25）：原子性契约——本函数与随后的
+/// `issued_actions.insert(...)` **必须处在同一次
+/// `issued_actions.lock()` 持有窗口内**（检查-插入不可跨锁拆分）。
+/// 拆分即 TOCTOU：两个并发 evaluate 在各自持锁窗口内检查通过、
+/// 交错插入，账本容量被突破（M-15 fail-closed 语义失效）。现有
+/// 三处调用点（evaluate / approve / consume）均满足单锁窗口。
 fn ledger_can_admit(issued: &mut HashMap<String, IssuedAuthorization>) -> bool {
     if issued.len() < MAX_ISSUED_ACTIONS {
         return true;
@@ -560,13 +567,21 @@ fn ffi_deny(code: &str, detail: &str, explanation: &str) -> FfiDecision {
 }
 
 fn generate_nonce() -> Result<String, FfiDenyReason> {
+    const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
     let mut bytes = [0u8; 32];
     getrandom::getrandom(&mut bytes).map_err(|error| FfiDenyReason {
         code: "entropy_unavailable".into(),
         detail: "无法生成安全随机 nonce".into(),
         explanation: format!("denied — operating-system entropy unavailable: {error}"),
     })?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    // RS-137（审计 2026-09-25）：查表拼接替代 32 次 format! 堆分配
+    // （每次导航 32 个临时 String → 预分配单缓冲零临时分配）
+    let mut out = String::with_capacity(64);
+    for byte in bytes {
+        out.push(HEX_TABLE[(byte >> 4) as usize] as char);
+        out.push(HEX_TABLE[(byte & 0x0f) as usize] as char);
+    }
+    Ok(out)
 }
 
 // ============================ H-7 审计回归测试 ============================ //
@@ -654,5 +669,239 @@ mod ffi_navigation_tests {
             ),
             "ttl=0 钳到 MIN_SESSION_TTL_SECONDS 后会话应在窗口内有效"
         );
+    }
+
+    // —— RS-135（审计 2026-09-25）：容量/清理/覆盖语义 ——
+
+    #[test]
+    fn destroy_session_clears_issued_and_pending_ledgers() {
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        let FfiDecision::Allow { action } = broker.evaluate_navigation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/a".into(),
+            "navigation".into(),
+        ) else {
+            panic!("expected allow");
+        };
+        let FfiDecision::RequireConfirmation { request } = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/b".into(),
+            "navigation".into(),
+        ) else {
+            panic!("expected pending");
+        };
+        assert!(broker.destroy_session("s1".into()));
+        // 已签发授权随销毁清理（不退化为 nonce_replay——是撤销）
+        match broker.consume_navigation(action, "https://example.com/a".into(), "navigation".into())
+        {
+            FfiDecision::Deny { reason } => {
+                assert_ne!(reason.code, "nonce_replay", "销毁清理 ≠ 已消费重放");
+            }
+            _ => panic!("destroyed session must not consume"),
+        }
+        // 待审批请求随销毁清理
+        match broker.approve_navigation_confirmation(
+            request.nonce,
+            "https://example.com/b".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
+            _ => panic!("pending approval must be revoked on session destroy"),
+        }
+    }
+
+    #[test]
+    fn reject_and_empty_nonce_are_fail_closed() {
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        // 未知 nonce / 空 nonce / 已拒绝后的二次拒绝——一律 false
+        assert!(!broker.reject_navigation_confirmation("no-such".into()));
+        assert!(!broker.reject_navigation_confirmation(String::new()));
+        let FfiDecision::RequireConfirmation { request } = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/c".into(),
+            "navigation".into(),
+        ) else {
+            panic!("expected pending");
+        };
+        assert!(broker.reject_navigation_confirmation(request.nonce.clone()));
+        assert!(
+            !broker.reject_navigation_confirmation(request.nonce),
+            "二次拒绝 false"
+        );
+        // 空 nonce 的审批入口同样 fail-closed
+        match broker.approve_navigation_confirmation(
+            String::new(),
+            "https://example.com/c".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
+            _ => panic!("empty nonce must not approve"),
+        }
+    }
+
+    #[test]
+    fn pending_approval_capacity_is_fail_closed() {
+        // MAX_PENDING_APPROVALS=1024：填满后第 1025 个请求 fail-closed
+        // 拒绝（此前无上限可堆叠内存 DoS）；全部未过期，惰性清理不腾位
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        for i in 0..MAX_PENDING_APPROVALS {
+            let url = format!("https://example.com/pending/{i}");
+            let decision = broker.request_navigation_confirmation(
+                "s1".into(),
+                "t1".into(),
+                0,
+                url.clone(),
+                "navigation".into(),
+            );
+            assert!(
+                matches!(decision, FfiDecision::RequireConfirmation { .. }),
+                "第 {i} 个待审批请求必须登记成功"
+            );
+        }
+        let overflow = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/overflow".into(),
+            "navigation".into(),
+        );
+        match overflow {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_ledger"),
+            FfiDecision::Allow { .. } | FfiDecision::RequireConfirmation { .. } => {
+                panic!("capacity overflow must deny")
+            }
+        }
+    }
+
+    #[test]
+    fn create_session_same_id_replaces_prior_generation() {
+        // RS-033 契约在 FFI 层的镜像：同 id create_session = 显式 replace——
+        // 旧代际授权/验证立即失效，新代际生效
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 1, 60));
+        assert!(broker.create_session("s1".into(), "t1".into(), 2, 60));
+        assert!(
+            matches!(
+                broker.evaluate_navigation(
+                    "s1".into(),
+                    "t1".into(),
+                    1,
+                    "https://example.com/".into(),
+                    "navigation".into(),
+                ),
+                FfiDecision::Deny { .. }
+            ),
+            "replace 后旧代际必须失效"
+        );
+        assert!(matches!(
+            broker.evaluate_navigation(
+                "s1".into(),
+                "t1".into(),
+                2,
+                "https://example.com/".into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Allow { .. } | FfiDecision::RequireConfirmation { .. }
+        ));
+    }
+
+    // —— RS-136（审计 2026-09-25）：ledger_can_admit 白盒直测 ——
+
+    fn craft_action(expires_in: i64) -> AuthorizedAction {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        AuthorizedAction {
+            session_id: "s".into(),
+            tab_id: "t".into(),
+            document_generation: 0,
+            origin: "https://example.com".into(),
+            method: "GET".into(),
+            canonical_parameters: "/".into(),
+            scope: "navigation".into(),
+            expires_at: (now as i64 + expires_in) as u64,
+            nonce: format!("nonce-{expires_in}-{}", std::process::id()),
+            policy_version: "test".into(),
+            explanation: String::new(),
+        }
+    }
+
+    #[test]
+    fn ledger_can_admit_direct_capacity_semantics() {
+        let mut ledger: HashMap<String, IssuedAuthorization> = HashMap::new();
+        // 未满：直接放行
+        ledger.insert(
+            "n1".into(),
+            IssuedAuthorization::Pending(Box::new(craft_action(3600))),
+        );
+        assert!(ledger_can_admit(&mut ledger));
+        // 满 + 全部未过期 Pending：拒绝（fail-closed，不淘汰）
+        let mut full: HashMap<String, IssuedAuthorization> = HashMap::new();
+        for i in 0..MAX_ISSUED_ACTIONS {
+            full.insert(
+                format!("k{i}"),
+                IssuedAuthorization::Pending(Box::new(craft_action(3600))),
+            );
+        }
+        assert!(!ledger_can_admit(&mut full));
+        // 满 + 存在过期 Pending：惰性清理后放行（清理不触及 Consumed）
+        let key0 = "k0".to_string();
+        full.insert(
+            key0.clone(),
+            IssuedAuthorization::Pending(Box::new(craft_action(-1))),
+        );
+        assert!(ledger_can_admit(&mut full));
+        assert!(!full.contains_key(&key0), "过期 Pending 被清理");
+        assert_eq!(
+            full.len(),
+            MAX_ISSUED_ACTIONS - 1,
+            "清理仅腾位不扩容（insert 由调用方随后完成）"
+        );
+        // 拒绝路径：已满且全部为 Consumed（清理不触及）→ 拒绝
+        let mut consumed_full: HashMap<String, IssuedAuthorization> = HashMap::new();
+        for i in 0..MAX_ISSUED_ACTIONS {
+            consumed_full.insert(
+                format!("c{i}"),
+                IssuedAuthorization::Consumed {
+                    session_id: "s".into(),
+                },
+            );
+        }
+        assert!(!ledger_can_admit(&mut consumed_full));
+    }
+}
+
+// —— RS-137（审计 2026-09-25）：nonce 查表实现回归 ——
+
+#[cfg(test)]
+mod nonce_tests {
+    use super::*;
+
+    #[test]
+    fn generate_nonce_is_64_lowercase_hex_chars() {
+        for _ in 0..8 {
+            let nonce = generate_nonce().expect("OS entropy available in tests");
+            assert_eq!(nonce.len(), 64, "32 字节 hex 编码必须 64 字符");
+            assert!(
+                nonce
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+                "nonce 必须全小写 hex（与 MAX_NONCE_LENGTH 校验、账本键序一致）"
+            );
+        }
+        // 两次生成不重复（随机性抽查）
+        let a = generate_nonce().unwrap();
+        let b = generate_nonce().unwrap();
+        assert_ne!(a, b);
     }
 }

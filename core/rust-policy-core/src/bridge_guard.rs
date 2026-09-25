@@ -25,6 +25,11 @@ pub struct BridgeGuard {
 }
 
 impl BridgeGuard {
+    /// 创建 JS 桥安全门配置。
+    ///
+    /// - `allowed_hosts`：允许调用 bridge 的域名白名单（RS-129：构造时
+    ///   小写归一；空集 = 不做 host 门禁）。
+    /// - `require_https`：true 时仅 HTTPS 目标放行（scheme 大小写不敏感）。
     pub fn new(allowed_hosts: Vec<String>, require_https: bool) -> Self {
         Self {
             // RS-129（审计 2026-09-25）：构造时小写归一——host 语义
