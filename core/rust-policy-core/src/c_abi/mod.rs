@@ -642,10 +642,7 @@ mod tests {
                     consume_url.as_ptr(),
                     consume_scope.as_ptr(),
                 ));
-                assert_eq!(
-                    reconsume["decision"], "deny",
-                    "{name}: reconsume must deny"
-                );
+                assert_eq!(reconsume["decision"], "deny", "{name}: reconsume must deny");
                 assert_eq!(
                     reconsume["reason"]["code"], *expected_reconsume_code,
                     "{name}: reconsume denial code"

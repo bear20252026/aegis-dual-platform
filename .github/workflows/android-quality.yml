@@ -17,6 +17,7 @@ permissions:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
 jobs:
   android-quality:
     name: ktlint + detekt 质量门禁
@@ -83,4 +84,3 @@ jobs:
             android/webview-adapter/build/reports/detekt/
             android/contracts/build/reports/detekt/
           if-no-files-found: warn
-          if-no-files-found: ignore
