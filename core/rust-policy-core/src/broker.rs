@@ -558,15 +558,84 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_allows_when_capability_registered() {
-        // 注册了 navigation:read capability，但 PolicyEngine 默认 deny-all
-        // 所以策略层会先拒绝
+    fn evaluate_denies_under_default_deny_policy_even_with_capability() {
+        // RS-042 更名：原名 evaluate_allows_when_capability_registered 与断言
+        // 相反（实际期望 Deny）——默认 PolicyEngine 为 deny-all，策略层先拒绝
         let mut broker = make_broker_with_policy_and_capability();
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let action = make_action("s1", 1, "n1");
         let result = broker.evaluate(&action);
-        // PolicyEngine::default() 使用 deny-all，所以策略层拒绝
         assert!(matches!(result, Decision::Deny(_)));
+    }
+
+    /// RS-042：本地策略显式 Allow 的正向用例——策略层放行 + 能力层放行 +
+    /// 会话/nonce 校验通过 → evaluate 全链路 Allow；同 nonce 二次评估被重放拒绝。
+    struct AlwaysAllowLocalPolicy;
+
+    impl crate::policy::LocalPolicy for AlwaysAllowLocalPolicy {
+        fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+            Some(Decision::Allow(AuthorizedAction {
+                session_id: String::new(),
+                tab_id: String::new(),
+                document_generation: 0,
+                origin: String::new(),
+                method: String::new(),
+                canonical_parameters: String::new(),
+                scope: String::new(),
+                expires_at: 0,
+                nonce: String::new(),
+                policy_version: String::new(),
+                explanation: "always allow (test mock)".into(),
+            }))
+        }
+    }
+
+    #[test]
+    fn evaluate_full_chain_allows_and_consumes_nonce_once() {
+        let mut registry = CapabilityRegistry::new();
+        registry.register(Capability {
+            name: "navigation:read".into(),
+            scope: CapabilityScope::Read,
+            // 空白名单 = fail-closed 拒绝——全放行必须显式 "*"（is_origin_allowed）
+            allowed_origins: vec!["*".into()],
+            max_uses: None,
+            uses_count: 0,
+        });
+        let mut broker = ContextBroker::new(
+            "1.0".into(),
+            PolicyEngine::new(Box::new(AlwaysAllowLocalPolicy), None),
+            registry,
+        );
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        let action = make_action("s1", 1, "n1");
+        let first = broker.evaluate(&action);
+        assert!(
+            matches!(first, Decision::Allow(_)),
+            "策略+能力+会话三层全过必须 Allow，实际 {first:?}"
+        );
+        assert_eq!(broker.consumed_nonce_count(), 1, "nonce 必须入账");
+        // evaluate 内部走 validate_and_consume——同 nonce 第二次评估重放拒绝
+        let replay = broker.evaluate(&action);
+        match replay {
+            Decision::Deny(reason) => assert_eq!(reason.code, "nonce_replay"),
+            other => panic!("同 nonce 重放必须拒绝，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn destroy_session_clears_consumed_nonces() {
+        // RS-043 回归：destroy_session 必须同步清理该会话的 nonce 账本记录；
+        // 其他会话的记录不受影响（retain 精确过滤）
+        let mut broker = make_broker_with_defaults();
+        broker.consume_nonce("n1", "s1").unwrap();
+        broker.consume_nonce("n2", "s2").unwrap();
+        assert_eq!(broker.consumed_nonce_count(), 2);
+        broker.destroy_session("s1");
+        assert_eq!(broker.consumed_nonce_count(), 1, "s1 的 nonce 记录应被清除");
+        // n1 记录已清——换个会话重新消费可入账（账本不再含旧记录）
+        assert!(broker.consume_nonce("n1", "s3").is_ok());
+        // s2 的 nonce 记录不受影响——重放依旧拒绝
+        assert!(broker.consume_nonce("n2", "s2").is_err());
     }
     #[test]
     fn session_pool_cap_fails_closed() {

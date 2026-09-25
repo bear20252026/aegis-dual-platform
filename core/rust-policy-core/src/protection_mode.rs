@@ -268,4 +268,102 @@ mod tests {
         assert_eq!(ProtectionMode::Compatible.to_string(), "compatible");
         assert_eq!(ProtectionMode::Maximum.to_string(), "maximum");
     }
+
+    // ===== RS-046：fingerprint_pipeline_with_mode 输出内容逐模式锁定 =====
+    // （此前仅测 enable_* 开关布尔值，管线组装后的实际脚本内容零覆盖）
+
+    fn marker_present(script: &str, marker: &str) -> bool {
+        script.contains(marker)
+    }
+
+    #[test]
+    fn pipeline_compatible_only_canvas_shield() {
+        // 兼容模式：仅模式声明 + Canvas/Audio 噪声（Shield），其余 8 阶段缺席
+        let shield = crate::shield::FingerprintShield::new();
+        let script = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Compatible, "a.com");
+        assert!(script.contains("'compatible'"), "模式声明必须存在");
+        assert!(
+            marker_present(&script, "__AEGIS_SESSION_SEED"),
+            "Shield 始终启用"
+        );
+        for absent in [
+            "__AEGIS_SITE_SEED",
+            "proxyMap", // ToStringGuard 独有（Shield 也走注册符号，不可作判别）
+            "var WS =",
+            "TRACKING_PARAMS",
+            "SAFE_FONTS",
+            "UNMASKED_VENDOR_WEBGL",
+            "PRECISION_US",
+            "PROXY_ENDPOINT",
+        ] {
+            assert!(
+                !marker_present(&script, absent),
+                "Compatible 模式不得含 {absent}"
+            );
+        }
+    }
+
+    #[test]
+    fn pipeline_balanced_core_stages_no_aggressive() {
+        // 平衡模式：Seed/Guard/Shield/QueryStrip/WebGL 启用；Letterbox/Font/Timer/ExtProxy 缺席
+        let shield = crate::shield::FingerprintShield::new();
+        let script = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
+        assert!(script.contains("'balanced'"));
+        for present in [
+            "__AEGIS_SITE_SEED",
+            "proxyMap",
+            "__AEGIS_SESSION_SEED",
+            "TRACKING_PARAMS",
+            "UNMASKED_VENDOR_WEBGL",
+        ] {
+            assert!(
+                marker_present(&script, present),
+                "Balanced 模式必须含 {present}"
+            );
+        }
+        for absent in ["var WS =", "SAFE_FONTS", "PRECISION_US", "PROXY_ENDPOINT"] {
+            assert!(
+                !marker_present(&script, absent),
+                "Balanced 模式不得含 {absent}"
+            );
+        }
+    }
+
+    #[test]
+    fn pipeline_maximum_all_nine_stages() {
+        // 最大隐私：全部 9 阶段脚本齐备
+        let shield = crate::shield::FingerprintShield::new();
+        let script = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Maximum, "a.com");
+        assert!(script.contains("'maximum'"));
+        for present in [
+            "__AEGIS_SITE_SEED",
+            "proxyMap",
+            "__AEGIS_SESSION_SEED",
+            "var WS =",
+            "TRACKING_PARAMS",
+            "SAFE_FONTS",
+            "UNMASKED_VENDOR_WEBGL",
+            "PRECISION_US",
+            "PROXY_ENDPOINT",
+        ] {
+            assert!(
+                marker_present(&script, present),
+                "Maximum 模式必须含 {present}"
+            );
+        }
+    }
+
+    #[test]
+    fn pipeline_per_site_seed_derives_from_domain_not_session_hex() {
+        // 同域名脚本确定性；不同域名脚本不同——锁定 domain 参数语义
+        //（此前误传会话种子 hex）。域名在 PerSiteSeed 中哈希为站点种子
+        //（不进脚本明文），故以种子赋值行差异判定。
+        let shield = crate::shield::FingerprintShield::new();
+        let a1 = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
+        let a2 = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
+        let b = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "b.com");
+        assert_eq!(a1, a2, "同域输出必须确定");
+        assert_ne!(a1, b, "不同域必须派生不同站点种子");
+        assert!(a1.contains("__AEGIS_SITE_SEED = '"), "站点种子赋值行存在");
+    }
 }

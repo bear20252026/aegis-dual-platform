@@ -22,4 +22,41 @@ test = false
 doc = false
 bench = false
 
+# RS-050（审计 2026-09-25）：新增 5 个 target——canonical 路径 / glob DP /
+# session_state 往返 / security_policy 面 / util 主机提取与 JS 转义
+[[bin]]
+name = "fuzz_origin_canonical"
+path = "fuzz_targets/fuzz_origin_canonical.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_glob"
+path = "fuzz_targets/fuzz_glob.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_session_state"
+path = "fuzz_targets/fuzz_session_state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_security_policy"
+path = "fuzz_targets/fuzz_security_policy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_util_hostname"
+path = "fuzz_targets/fuzz_util_hostname.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

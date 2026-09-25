@@ -340,4 +340,45 @@ mod tests {
             "route 必须短路禁用规则"
         );
     }
+
+    #[test]
+    fn script_escaping_malicious_rule_name_and_workspace() {
+        // RS-047 回归（P28 修复面）：规则 name/workspace_id 源自用户配置，
+        // 含双引号/反斜杠/换行/方括号/退出载荷——serde_json 构造保证其
+        // 只作为 JSON 字符串字面量出现，不得逃逸出 RULES 数组产生 JS 注入
+        let mut sr = SpaceRouting::new("default");
+        let rule = RoutingRule::domain(
+            r#"x"); alert(1); ([\"\n" injection"#,
+            "github.com",
+            r#"ws\"" + window.ev1l + \""#,
+        );
+        sr.add_rule(rule);
+        let script = sr.inject_script();
+        // name：输入 `x"); alert(1); ([\"\n" injection`——serde 逐字符转义
+        // （\ → \\，" → \"）后作为 JSON 字符串内容出现
+        assert!(
+            script.contains(r#""name":"x\"); alert(1); ([\\\"\\n\" injection""#),
+            "name 中的反斜杠/引号必须被 serde 转义为 JSON 字符串内容"
+        );
+        // name 载荷不得未转义逃逸出 JSON 字符串（裸 `");` 直连 RULES 即注入）
+        assert!(
+            !script.contains("RULES = [x\")"),
+            "name 载荷不得逃逸 RULES 数组"
+        );
+        // workspace：输入 `ws\"" + window.ev1l + \"`——双引号与反斜杠均转义
+        assert!(
+            script.contains(r#""workspace":"ws\\\"\" + window.ev1l + \\\"""#),
+            "workspace_id 中的双引号必须转义"
+        );
+        // 整体脚本可被 JSON 上下文解析（RULES 段不破坏语法）——直接验证
+        // 提取 RULES 数组段为合法 JSON
+        let start = script.find("var RULES = [").expect("RULES 段存在");
+        let json_start = start + "var RULES = ".len();
+        let json_end = script[json_start..].find("];").expect("RULES 数组闭合") + json_start;
+        let rules_json = &script[json_start..=json_end];
+        let parsed: serde_json::Value = serde_json::from_str(rules_json)
+            .expect("RULES 段必须是合法 JSON（恶意 name 不破坏语法）");
+        assert_eq!(parsed[0]["name"], r#"x"); alert(1); ([\"\n" injection"#);
+        assert_eq!(parsed[0]["workspace"], r##"ws\"" + window.ev1l + \""##);
+    }
 }

@@ -229,6 +229,96 @@ mod tests {
         let _ = policy.evaluate("read", "emoji😀😀x😀read😀example.com");
     }
 
+    // ===== RS-045：context_contains_token 直接单测（此前仅经规则间接覆盖）=====
+
+    #[test]
+    fn token_at_start_matches() {
+        assert!(context_contains_token("example.com/page", "example.com"));
+    }
+
+    #[test]
+    fn empty_token_never_matches() {
+        assert!(!context_contains_token("anything", ""));
+        assert!(!context_contains_token("", ""));
+    }
+
+    #[test]
+    fn embedded_substring_without_boundary_rejected() {
+        // 修复目标：裸 contains 时代 "example.com" 命中 "notexample.com"
+        assert!(!context_contains_token(
+            "https://notexample.com/",
+            "example.com"
+        ));
+        // 中缀伪边界（参数值尾接）也不命中——前面是字母
+        assert!(!context_contains_token(
+            "https://evil.com/?x=notexample.com",
+            "example.com"
+        ));
+    }
+
+    #[test]
+    fn token_after_separator_matches() {
+        // ? & = / , 空白均为合法前置边界
+        assert!(context_contains_token(
+            "https://evil.com/?x=example.com",
+            "example.com"
+        ));
+        assert!(context_contains_token(
+            "https://evil.com/?a=1&example.com",
+            "example.com"
+        ));
+        assert!(context_contains_token(
+            "https://a.com/redirect/example.com",
+            "example.com"
+        ));
+        assert!(context_contains_token(
+            "allow example.com please",
+            "example.com"
+        ));
+        assert!(context_contains_token("a,b,example.com", "example.com"));
+    }
+
+    #[test]
+    fn token_before_port_separator_matches() {
+        // after 边界允许 ':'——host:port 形态命中
+        assert!(context_contains_token(
+            "https://example.com:8443/x",
+            "example.com"
+        ));
+    }
+
+    #[test]
+    fn token_followed_by_letter_rejected() {
+        // 后接字母（非边界）不得命中
+        assert!(!context_contains_token(
+            "example.com.evil.net",
+            "example.com"
+        ));
+    }
+
+    #[test]
+    fn multibyte_scan_finds_token_after_cjk_without_panic() {
+        // RS-004 联动：多字节字符夹持下逐字符推进不 panic（byte index
+        // not on char boundary）。CJK 字符本身不是边界——紧邻 CJK 的
+        // token 不命中（边界语义锁定）；纯多字节输入同样安全返回 false。
+        assert!(!context_contains_token("你example.com我", "example.com"));
+        assert!(!context_contains_token(
+            "x你你y你z你example.com你",
+            "example.com"
+        ));
+        // 纯多字节无 token → false 且不 panic
+        assert!(!context_contains_token("你你你你你", "example.com"));
+        // CJK 之后经合法边界（/）仍能命中——多字节推进不破坏后续扫描
+        assert!(context_contains_token("你/example.com", "example.com"));
+    }
+
+    #[test]
+    fn crlf_tab_are_boundaries() {
+        assert!(context_contains_token("line1\nexample.com", "example.com"));
+        assert!(context_contains_token("col1\texample.com", "example.com"));
+        assert!(context_contains_token("cr\rexample.com", "example.com"));
+    }
+
     #[test]
     fn priority_breaks_ties_within_same_effect() {
         // RS-030 回归：同效果（restrictiveness 相同）时高 priority 胜出，

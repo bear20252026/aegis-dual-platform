@@ -197,6 +197,49 @@ mod tests {
         assert_eq!(state.schema_version, 1);
     }
 
+    #[test]
+    fn malicious_title_round_trips_without_injection() {
+        // RS-044 回归：页面标题（攻击者可控）含引号/反斜杠/换行/控制字符/
+        // 字段注入载荷——serde_json 构造保证逐字节往返，不产生非法 JSON
+        // 或额外字段；format! 手拼时代这些输入会破坏会话恢复链路
+        let payload = r#"He said "hi" \ </script>{"admin":true}"#;
+        let with_control = format!("{payload}\u{0007}\u{001B}[31m\n\t");
+        let state = SessionState {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            tab_id: "t".into(),
+            session_state_bytes: vec![0xDE, 0xAD],
+            metadata: TabMetadata {
+                title: with_control,
+                url: "https://evil.example/\"?x=1".into(),
+                is_incognito: false,
+                last_active_time: 0,
+                can_go_back: false,
+                can_go_forward: false,
+            },
+            timestamp: 42,
+        };
+        let json = state.to_json();
+        // 输出必须是合法 JSON——手拼零转义时代这里直接解析失败
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json).expect("恶意标题经 serde_json 构造后必须是合法 JSON");
+        // 注入载荷不得逃出 title 字段成为顶层字段
+        assert!(parsed.get("admin").is_none(), "字段注入不得产生顶层字段");
+        // 逐字段往返一致
+        assert_eq!(SessionState::from_json(&json), Some(state));
+    }
+
+    #[test]
+    fn malicious_title_json_with_escaped_quotes_rejects_injected_fields() {
+        // RS-044 补充：构造已含 \" 转义的 JSON 输入（模拟攻击者直接喂历史
+        // 恢复文件）——转义后的引号只作用于 title 字符串内部，不得拆包
+        let json = r#"{"schemaVersion":1,"tabId":"t","sessionStateBytes":"00","metadata":{"title":"a\",\"admin\":true,\"b":"url":"","isIncognito":false},"timestamp":0}"#;
+        if let Some(state) = SessionState::from_json(json) {
+            // 即便解析成功，title 也只能是原始字符串字面量——不得变成新字段
+            assert!(state.metadata.title.contains("admin"));
+            assert!(!state.metadata.title.is_empty());
+        }
+    }
+
     fn state_json(tab_id: &str, title: &str, url: &str, hex_bytes: &str) -> String {
         format!(
             r#"{{"schemaVersion":{},"tabId":"{}","sessionStateBytes":"{}","metadata":{{"title":"{}","url":"{}","isIncognito":false,"lastActiveTime":0,"canGoBack":false,"canGoForward":false}},"timestamp":0}}"#,

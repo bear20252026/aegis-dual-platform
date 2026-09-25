@@ -346,4 +346,51 @@ mod tests {
         assert!(script.contains("search"));
         assert!(script.contains("execute"));
     }
+
+    #[test]
+    fn script_escaping_malicious_title_and_value() {
+        // RS-048 回归（P27 修复面）：标题/子标题源自书签历史（页面可控），
+        // 含双引号/反斜杠/换行/控制字符——serde_json 构造保证只作为 JSON
+        // 字符串内容出现，不得逃逸 ENTRIES 数组产生 JS 注入
+        let mut cb = CommandBar::new();
+        cb.add_entry(CommandEntry::navigate(
+            r#"x"); alert(1); (\" <script>"#,
+            "https://e.com/a?b=\"quoted\"&c=1",
+        ));
+        let script = cb.inject_script();
+        // title：输入 `x"); alert(1); (\" <script>`——serde 转义（\ → \\，" → \"）
+        assert!(
+            script.contains(r#""title":"x\"); alert(1); (\\\" <script>""#),
+            "title 中的引号/反斜杠必须被 serde 转义"
+        );
+        // value：URL 内嵌引号同样转义
+        assert!(
+            script.contains(r#""value":"https://e.com/a?b=\"quoted\"&c=1""#),
+            "value 中的双引号必须转义"
+        );
+        // 载荷不得未转义逃逸 ENTRIES 数组
+        assert!(
+            !script.contains("ENTRIES = [x\")"),
+            "title 载荷不得逃逸 ENTRIES 数组"
+        );
+        // 整体脚本中 ENTRIES 段必须可被 JSON 解析（恶意 title 不破坏语法）
+        let start = script.find("var ENTRIES = [").expect("ENTRIES 段存在");
+        let json_start = start + "var ENTRIES = ".len();
+        let json_end = script[json_start..].find("];").expect("ENTRIES 数组闭合") + json_start;
+        let parsed: serde_json::Value = serde_json::from_str(&script[json_start..=json_end])
+            .expect("ENTRIES 段必须是合法 JSON");
+        assert_eq!(parsed[0]["title"], r#"x"); alert(1); (\" <script>"#);
+    }
+
+    #[test]
+    fn script_execute_rejects_non_http_schemes() {
+        // RS-048 联动：value 源自历史/书签（页面可控）——javascript: 等
+        // scheme 必须被 execute 的 http/https 前缀门禁拒绝
+        let cb = CommandBar::new();
+        let script = cb.inject_script();
+        assert!(
+            script.contains("/^https?:\\/\\//i.test(entry.value)"),
+            "execute 必须保留 http/https scheme 门禁"
+        );
+    }
 }

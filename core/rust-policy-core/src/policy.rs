@@ -217,6 +217,105 @@ mod tests {
         assert!(matches!(result.decision, Decision::Deny(_)));
     }
 
+    struct MockRemotePolicy {
+        decision: Option<Decision>,
+    }
+
+    impl RemotePolicy for MockRemotePolicy {
+        fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+            self.decision.clone()
+        }
+    }
+
+    #[test]
+    fn remote_downgrade_allows_when_local_no_match() {
+        // RS-041 用例 1：本地无匹配 → 远程 Allow 决策被采纳，来源标记 Remote
+        let engine = PolicyEngine::new(
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
+            Some(Box::new(MockRemotePolicy {
+                decision: Some(Decision::Allow(AuthorizedAction {
+                    session_id: "remote".into(),
+                    tab_id: "remote".into(),
+                    document_generation: 0,
+                    origin: "https://remote.com".into(),
+                    method: "GET".into(),
+                    canonical_parameters: "/".into(),
+                    scope: "write".into(),
+                    expires_at: 9999999999,
+                    nonce: "remote-nonce".into(),
+                    policy_version: "1.0".into(),
+                    explanation: "remote allow".into(),
+                })),
+            })),
+        );
+        let result = engine.evaluate("write", "ctx");
+        assert_eq!(result.source, PolicySource::Remote);
+        assert!(matches!(result.decision, Decision::Allow(_)));
+    }
+
+    #[test]
+    fn remote_downgrade_denies_propagates_deny() {
+        // RS-041 用例 2：远程 Deny 决策原样传播（不得降级为 FailSafe 或放宽）
+        let engine = PolicyEngine::new(
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
+            Some(Box::new(MockRemotePolicy {
+                decision: Some(Decision::Deny(DenyReason {
+                    code: "remote_denied".into(),
+                    detail: "远程策略拒绝".into(),
+                    explanation: "denied — remote policy".into(),
+                })),
+            })),
+        );
+        let result = engine.evaluate("write", "ctx");
+        assert_eq!(result.source, PolicySource::Remote);
+        match result.decision {
+            Decision::Deny(reason) => assert_eq!(reason.code, "remote_denied"),
+            other => panic!("期望远程 Deny，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remote_unavailable_falls_through_to_fail_safe() {
+        // RS-041 用例 3：远程客户端存在但返回 None（不可用）→ fail-safe 默认拒绝
+        let engine = PolicyEngine::new(
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
+            Some(Box::new(MockRemotePolicy { decision: None })),
+        );
+        let result = engine.evaluate("write", "ctx");
+        assert_eq!(result.source, PolicySource::FailSafe);
+        assert!(matches!(result.decision, Decision::Deny(_)));
+        match result.decision {
+            Decision::Deny(reason) => assert_eq!(reason.code, "fail_safe"),
+            other => panic!("期望 fail_safe 拒绝，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_priority_over_remote() {
+        // RS-041 补充：本地命中时远程不得被咨询（本地优先序锁定）
+        let engine = PolicyEngine::new(
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
+            Some(Box::new(MockRemotePolicy {
+                decision: Some(Decision::Deny(DenyReason {
+                    code: "remote_denied".into(),
+                    detail: String::new(),
+                    explanation: String::new(),
+                })),
+            })),
+        );
+        let result = engine.evaluate("read", "ctx");
+        assert_eq!(result.source, PolicySource::Local);
+        assert!(matches!(result.decision, Decision::Allow(_)));
+    }
+
     #[test]
     fn default_policy_engine_uses_default_local_policy() {
         let engine = PolicyEngine::default();
