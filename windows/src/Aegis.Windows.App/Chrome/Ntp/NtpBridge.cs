@@ -63,8 +63,13 @@ public sealed class NtpBridge
             using var document = JsonDocument.Parse(messageJson);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object
-                || !root.TryGetProperty("__aegis", out var marker) || marker.GetInt64() != 1
+                || !root.TryGetProperty("__aegis", out var marker)
+                // CS-053（审计 2026-09-25）：ValueKind 前置——marker/id 非数字时
+                // GetInt64() 抛 FormatException，此前 catch(JsonException) 接不住
+                || marker.ValueKind != JsonValueKind.Number
+                || marker.GetInt64() != 1
                 || !root.TryGetProperty("id", out var idElement)
+                || idElement.ValueKind != JsonValueKind.Number
                 || !root.TryGetProperty("op", out var opElement) || opElement.ValueKind != JsonValueKind.String)
                 return;
             id = idElement.GetInt64();

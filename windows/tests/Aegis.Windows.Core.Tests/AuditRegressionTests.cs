@@ -62,6 +62,66 @@ public sealed class AuditRegressionTests : IDisposable
         Assert.Equal(expected, ok);
     }
 
+    // ═══ CS-042..045（审计 2026-09-25）：OriginPolicy 边界零覆盖补齐 ═══
+
+    [Theory]
+    [InlineData(8192, true)]   // 恰好等于上限：放行
+    [InlineData(8193, false)]  // 超上限 1 字节：拒绝（此前无边界测试）
+    public void OriginPolicy_MaxUrlLength_Boundary(int totalLength, bool expected)
+    {
+        // 前缀 https://example.com/ 共 20 字符，余量用 path 填充
+        var url = "https://example.com/" + new string('a', totalLength - 20);
+        Assert.Equal(totalLength, url.Length);
+        Assert.Equal(expected, OriginPolicy.TryParseExternal(url, out _));
+    }
+
+    [Fact]
+    public void OriginPolicy_MaxHostLength_Boundary()
+    {
+        // host 253（上限内）放行；254 拒绝（MaxHostLength 边界）
+        // 126 个单字符标签 + 末标签：总长 253/254，同时满足单标签 <=63
+        var okHost = string.Concat(Enumerable.Repeat("a.", 126)) + "a";   // 253
+        var badHost = string.Concat(Enumerable.Repeat("a.", 126)) + "aa"; // 254
+        Assert.Equal(253, okHost.Length);
+        Assert.Equal(254, badHost.Length);
+        var ok253 = OriginPolicy.TryParseExternal("https://" + okHost + "/", out _);
+        Assert.True(ok253, "host=253 应在上限内放行");
+        Assert.False(OriginPolicy.TryParseExternal("https://" + badHost + "/", out _),
+            "host=254 必须拒绝");
+    }
+
+    [Theory]
+    [InlineData("https://a..b.com/", false)]          // 空标签
+    [InlineData("https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com/", false)] // 单标签 80 超限(>63)
+    [InlineData("https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com/", true)]  // 单标签恰 63 放行
+    [InlineData("https://-bad.com/", false)]          // 标签连字符开头
+    [InlineData("https://bad-.com/", false)]          // 标签连字符结尾
+    public void OriginPolicy_HostLabel_Boundaries(string url, bool expected)
+    {
+        Assert.Equal(expected, OriginPolicy.TryParseExternal(url, out _));
+    }
+
+    [Theory]
+    [InlineData("https://user@example.com/")]      // 仅用户名
+    [InlineData("https://user:pass@example.com/")] // 用户名+密码
+    [InlineData("https://:@example.com/")]         // 空凭据 userinfo
+    public void OriginPolicy_RejectsUserinfo(string url)
+    {
+        // userinfo 混淆面（https://a@evil.com 视觉伪装）——此前零测试
+        Assert.False(OriginPolicy.TryParseExternal(url, out _));
+    }
+
+    [Theory]
+    [InlineData("https://example.com/")]     // 0x01 控制字符
+    [InlineData("https://example.com/")]     // DEL 0x7F
+    [InlineData("https://example.com/")]     // ESC
+    [InlineData("https://exa	ample.com/")]        // 制表符（IsWhiteSpace 分支）
+    public void OriginPolicy_RejectsControlCharacters(string url)
+    {
+        // InlineData 内嵌真实控制字符（0x01/0x7F/0x1B/\t）——此前零测试
+        Assert.False(OriginPolicy.TryParseExternal(url, out _));
+    }
+
     // ═══ DownloadPolicy：查询串按参数值判定 + 保留名净化 ═══
 
     [Theory]

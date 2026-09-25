@@ -66,4 +66,27 @@ public sealed class ThreatFeedTests
         var missing = Path.Combine(Path.GetTempPath(), $"no_such_{Guid.NewGuid():N}.txt");
         Assert.Empty(ThreatFeedUpdater.LoadCached(missing));
     }
+
+    // ===== CS-057/058（审计 2026-09-25）：边界条目零覆盖补齐 =====
+
+    [Theory]
+    [InlineData("||localhost^", "localhost")]           // localhost 白名单（无点仍放行）
+    [InlineData("||evil.example:8080^", "evil.example")] // 端口剥离——裸域入表可命中
+    [InlineData("||[::1]^", null)]                       // IPv6 字面量含冒号+非法字符 → 拒绝
+    [InlineData("https://tracker.example/payload", "tracker.example")]  // 协议+路径残留
+    public void ParseFeedLine_BoundaryEntries(string line, string? expected)
+    {
+        // 此前带端口条目原样入表永不命中（黑名单静默失效面）
+        Assert.Equal(expected, ThreatFeedUpdater.ParseFeedLine(line));
+    }
+
+    [Theory]
+    [InlineData("  https://feeds.example/list.txt  ")]  // 首尾空白裁剪后放行
+    [InlineData("\thttps://feeds.example/list.txt\n")]
+    public void ValidateFeedUrl_TrimsSurroundingWhitespace(string feedUrl)
+    {
+        // 此前未 Trim 时带空白的 https 地址被拒（订阅源配置带尾随空格即失效）
+        Assert.NotNull(ThreatFeedUpdater.ValidateFeedUrl(feedUrl));
+        Assert.Equal("https://feeds.example/list.txt", ThreatFeedUpdater.ValidateFeedUrl(feedUrl));
+    }
 }

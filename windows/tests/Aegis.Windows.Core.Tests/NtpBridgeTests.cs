@@ -151,6 +151,68 @@ public sealed class NtpBridgeTests
         Assert.Contains("title", json);
     }
 
+    // ===== CS-053..056（审计 2026-09-25）：桥解析/日志/limit 钳制/goBack 透传 =====
+
+    [Theory]
+    [InlineData("{\"__aegis\":\"one\",\"id\":1,\"op\":\"getEngine\"}")]   // marker 非数字
+    [InlineData("{\"__aegis\":1,\"id\":\"abc\",\"op\":\"getEngine\"}")]   // id 非数字
+    [InlineData("{\"__aegis\":1,\"op\":\"getEngine\"}")]                      // 缺 id
+    public void TryHandle_MalformedMarkerOrId_DoesNotThrow(string messageJson)
+    {
+        // CS-053：非数字 marker/id 不得抛 FormatException 逃逸（此前
+        // GetInt64() 直抛、catch(JsonException) 接不住）
+        var services = FakeServices();
+        var bridge = new NtpBridge(services);
+        object? response = null;
+        var ex = Record.Exception(() =>
+            bridge.TryHandle("https://ntp.aegis.local/start.html", messageJson, r => response = r));
+        Assert.Null(ex);
+        Assert.Null(response);  // 非协议消息静默忽略（无响应）
+    }
+
+    [Fact]
+    public void Dispatch_JsError_WritesSecurityLogWithoutThrowing()
+    {
+        // CS-054：jsError 落日志且不抛（返回 null——前端不等待结果）
+        var services = FakeServices();
+        var bridge = new NtpBridge(services);
+        var ex = Record.Exception(() =>
+            bridge.Dispatch("jsError", System.Text.Json.JsonSerializer.SerializeToElement(
+                new object?[] { "TypeError: x is undefined" })));
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void Dispatch_ImportHistory_ClampsLimitTo1Through2000()
+    {
+        // CS-055：limit 钳 1..2000（此前 0/负值直接进 SQL LIMIT）
+        int? captured = null;
+        var services = FakeServices();
+        var bridge = new NtpBridge(services with
+        {
+            ImportHistory = (limit, _) => { captured = limit; return (0, 0, new List<NtpBridge.ImportResult>()); },
+        });
+        bridge.Dispatch("importHistory", System.Text.Json.JsonSerializer.SerializeToElement(new object?[] { 0 }));
+        Assert.Equal(1, captured);
+        bridge.Dispatch("importHistory", System.Text.Json.JsonSerializer.SerializeToElement(new object?[] { -5 }));
+        Assert.Equal(1, captured);
+        bridge.Dispatch("importHistory", System.Text.Json.JsonSerializer.SerializeToElement(new object?[] { 999_999 }));
+        Assert.Equal(2000, captured);
+        bridge.Dispatch("importHistory", System.Text.Json.JsonSerializer.SerializeToElement(Array.Empty<object?>()));
+        Assert.Equal(500, captured);  // 缺省 500
+    }
+
+    [Fact]
+    public void Dispatch_GoBack_PassesFalseThrough()
+    {
+        // CS-056：GoBack false 必须透传给前端（不能在桥内吞掉转 true）
+        Func<bool> denied = () => false;
+        var services = FakeServices();
+        var bridge = new NtpBridge(services with { GoBack = denied });
+        var result = bridge.Dispatch("goBack", System.Text.Json.JsonSerializer.SerializeToElement(Array.Empty<object?>()));
+        Assert.Equal(false, result);
+    }
+
     [Fact]
     public void UnknownOperationIsIgnored() =>
         Assert.Null(new NtpBridge(FakeServices()).Dispatch("evilOp", EmptyArgs()));

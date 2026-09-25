@@ -53,6 +53,71 @@ public sealed class BookmarkStoreTests : IDisposable
         Assert.False(_store.Remove("https://nothing.example"));
     }
 
+    // ===== CS-046..050（审计 2026-09-25）：书签管理路径零覆盖补齐 =====
+
+    [Fact]
+    public void RenameExistingBookmarkUpdatesTitle()
+    {
+        // CS-046：Rename 正路径
+        _store.Add("旧标题", "https://example.com");
+        var id = _store.All()[0].Id;
+
+        Assert.True(_store.Rename(id, "新标题"));
+        Assert.Equal("新标题", _store.All()[0].Title);
+    }
+
+    [Fact]
+    public void RenameWithBlankTitleReturnsFalse()
+    {
+        // CS-047：空白标题拒绝（不做无意义 UPDATE）
+        _store.Add("标题", "https://example.com");
+        var id = _store.All()[0].Id;
+
+        Assert.False(_store.Rename(id, ""));
+        Assert.False(_store.Rename(id, "   "));
+        Assert.False(_store.Rename(id, null!));
+        Assert.Equal("标题", _store.All()[0].Title);
+    }
+
+    [Fact]
+    public void RemoveByIdUnknownReturnsFalse()
+    {
+        // CS-048：不存在的 id 返回 false
+        _store.Add("标题", "https://example.com");
+        Assert.False(_store.RemoveById(999_999));
+        Assert.True(_store.RemoveById(_store.All()[0].Id));
+    }
+
+    [Fact]
+    public void ClearAllRemovesEverything()
+    {
+        // CS-049：ClearAll 后全空
+        _store.Add("甲", "https://jia.cn");
+        _store.Add("乙", "https://yi.cn");
+
+        _store.ClearAll();
+
+        Assert.Empty(_store.All());
+    }
+
+    [Fact]
+    public void ImportCountsTotalIncludingDuplicates()
+    {
+        // CS-050：重复 URL 计入 total 但不计入 imported（INSERT OR IGNORE 语义）
+        _store.Add("已存在", "https://example.com");
+
+        var (imported, total) = _store.Import(new[]
+        {
+            ("新站一", "https://one.example"),
+            ("重复", "https://example.com"),   // 重复——total 计、imported 不计
+            ("空白", "   "),                    // 非法——两者都不计
+        });
+
+        Assert.Equal(2, total);
+        Assert.Equal(1, imported);
+        Assert.Equal(2, _store.All().Count);
+    }
+
     public void Dispose()
     {
         if (File.Exists(_dbPath))
