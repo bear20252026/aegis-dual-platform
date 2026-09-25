@@ -16,7 +16,7 @@ import sys
 # PY-042：需要重生成内容做 diff——平铺导入同目录生成器模块
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from generate_csharp import generate as generate_cs_model  # noqa: E402
+from generate_csharp import SKIP_SCHEMAS, generate as generate_cs_model  # noqa: E402
 from generate_kotlin import generate as generate_kt_model  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -62,6 +62,8 @@ def check_generated_models() -> list[str]:
     generated_kt = (ROOT / ".." / "android" / "contracts" / "src" / "main" / "kotlin"
                     / "com" / "aegis" / "contracts" / "generated")
     for f in sorted(SCHEMAS.glob("*.json")):
+        if f.name in SKIP_SCHEMAS:
+            continue  # PY-102：发布事实声明不生成模型（与生成器跳过集单源）
         name = contract_name(f)
         schema = json.loads(f.read_text(encoding="utf-8"))
         expected_cs = generate_cs_model(schema, name) + "\n"

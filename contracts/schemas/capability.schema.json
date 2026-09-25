@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Aegis Capability（能力声明——最小权限）",
-  "description": "蓝图阶段 B（contracts 冻结）：能力声明——scope 到资源/动作的映射。默认拒绝（default-deny）——未声明的能力不可用。",
+  "description": "蓝图阶段 B（contracts 冻结）：能力声明——scope 到资源/动作的映射。默认拒绝（default-deny）——未声明的能力不可用。PY-098 澄清：预算/配额（rate-limit、下载预算等）由 Broker 运行时执行，不属于能力声明契约面（全仓 grep 实证无 capability 预算字段实现）——schema 保持最小权限声明面，不预置未实现字段。",
   "type": "object",
   "required": ["scope", "actions", "resources"],
   "properties": {
     "scope": { "type": "string", "minLength": 1 },
-    "actions": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-    "resources": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "actions": { "type": "array", "items": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "NAVIGATE", "DOWNLOAD"] }, "uniqueItems": true, "minItems": 1, "description": "PY-097 同口径：能力只可授予 Action 词表内动作；空能力声明在 default-deny 语义下无意义" },
+    "resources": { "type": "array", "items": { "type": "string" }, "uniqueItems": true, "minItems": 1 },
     "requires_confirmation": { "type": "boolean", "default": false }
   },
   "additionalProperties": false

@@ -7,6 +7,6 @@ data class AuditEventContract(
     val decision: String,
     val scope: String,
     val origin: String,
-    val reason: String,
-    val tab_id: String,
+    val reason: String? = null,
+    val tab_id: String? = null,
 )

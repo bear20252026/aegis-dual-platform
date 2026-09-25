@@ -8,6 +8,6 @@ public sealed record AuditEventContract(
     string decision,
     string scope,
     string origin,
-    string reason,
-    string tab_id
+    string? reason = null,
+    string? tab_id = null
 );

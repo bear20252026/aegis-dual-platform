@@ -12,26 +12,53 @@ import pathlib
 import sys
 
 SCHEMAS = pathlib.Path(__file__).resolve().parents[1] / "schemas"
+# PY-102：发布事实声明（release.schema.json 校验 shared/release.json 用）
+# 不是跨语言消息契约——不参与模型生成
+SKIP_SCHEMAS = {"release.schema.json"}
 OUT = (pathlib.Path(__file__).resolve().parents[1] / ".." / "windows" / "src"
        / "Aegis.Windows.App" / "Contracts" / "Generated")
 
 
+# PY-099：C# 类型映射——number 不再降级 object；未知类型 fail-closed
+CS_TYPE_MAP = {
+    "string": "string",
+    "integer": "long",
+    "number": "decimal",
+    "boolean": "bool",
+    "object": "object",
+}
+
+
 def cs_type(prop: dict) -> str:
     t = prop.get("type", "string")
-    if t == "string":
-        return "string"
-    if t == "integer":
-        return "long"
-    if t == "boolean":
-        return "bool"
     if t == "array":
         items = prop.get("items", {}).get("type", "string")
-        return f"List<{cs_type({'type': items})}>"
-    return "object"
+        if items not in CS_TYPE_MAP:
+            raise ValueError(f"数组 items 类型不支持: {items!r}（fail-closed——禁止静默降级）")
+        return f"List<{CS_TYPE_MAP[items]}>"
+    if t not in CS_TYPE_MAP:
+        raise ValueError(f"schema 类型不支持: {t!r}（fail-closed——禁止静默降级 object）")
+    return CS_TYPE_MAP[t]
+
+
+# 值类型可空标记（引用类型 string?/List<T>? 由统一后缀处理）
+CS_VALUE_TYPES = {"long", "decimal", "bool"}
+
+
+def cs_nullable(t: str) -> str:
+    if t in CS_VALUE_TYPES:
+        return f"{t}?"
+    if t == "object":
+        return t  # object 本即可空
+    return f"{t}?"
 
 
 def generate(schema: dict, name: str) -> str:
     props = schema.get("properties", {})
+    required = set(schema.get("required", []))
+    # PY-099：required 区分——必选在前（C# record 可选参数必须位于必选参数
+    # 之后），组内保持 schema 声明序；非必选生成可空类型 + 默认 null
+    ordered = [k for k in props if k in required] + [k for k in props if k not in required]
     lines = [
         "// 由 contracts/codegen/generate_csharp.py 生成（蓝图阶段 B——契约事实来源——请勿手工编辑）",
         "using System.Collections.Generic;",
@@ -39,10 +66,14 @@ def generate(schema: dict, name: str) -> str:
         "",
         f"public sealed record {name}(",
     ]
-    properties = list(props.items())
-    for index, (pname, p) in enumerate(properties):
-        suffix = "," if index < len(properties) - 1 else ""
-        lines.append(f"    {cs_type(p)} {pname}{suffix}")
+    for index, pname in enumerate(ordered):
+        p = props[pname]
+        t = cs_type(p)
+        suffix = "," if index < len(ordered) - 1 else ""
+        if pname in required:
+            lines.append(f"    {t} {pname}{suffix}")
+        else:
+            lines.append(f"    {cs_nullable(t)} {pname} = null{suffix}")
     lines.append(");")
     return "\n".join(lines)
 
@@ -58,6 +89,8 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     generated: set[str] = set()
     for f in sorted(SCHEMAS.glob("*.json")):
+        if f.name in SKIP_SCHEMAS:
+            continue
         schema = json.loads(f.read_text(encoding="utf-8"))
         name = contract_name(f)
         (out_dir / f"{name}.cs").write_text(generate(schema, name) + "\n", encoding="utf-8")

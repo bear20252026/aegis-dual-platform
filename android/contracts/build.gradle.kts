@@ -33,3 +33,12 @@ detekt {
     allRules = false
     config.setFrom(rootProject.files("detekt.yml"))
 }
+
+// PY-100（审计 2026-09-25）：本模块 src 全部为 generate_kotlin.py 机器产物
+// ——detekt 基线按「参数签名」记录，生成物任何字段变化（如 optional 加
+// 默认值）都会导致基线失配复现旧违规。生成代码从 detekt 中整体排除
+// （契约一致性由 verify_contract_compatibility.py 重生成 diff 门禁保证）。
+tasks.withType<io.gitlab.arturbosch.detekt.Detekt>().configureEach {
+    include("**/*.kt")
+    exclude("**/generated/**")
+}

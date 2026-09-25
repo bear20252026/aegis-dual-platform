@@ -1,0 +1,53 @@
+{
+  "description": "PY-094（审计 2026-09-25）：Action 契约合法向量——ProposedAction/AuthorizedAction 数据面（10 必填 + method 词表 + origin http/https）。消费方：validate_vector_schemas.py（Contracts 门禁 jsonschema 校验）",
+  "vectors": [
+    {
+      "note": "POST 下载代理动作全字段",
+      "expected": "valid",
+      "action": {
+        "session_id": "s-20250925-0001",
+        "tab_id": "tab-1",
+        "document_generation": 3,
+        "origin": "https://example.org",
+        "method": "POST",
+        "canonical_parameters": "{\"url\":\"https://example.org/api\",\"body\":\"a=1\"}",
+        "scope": "net.post.example.org",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "nonce": "nonce-3f9a2c",
+        "policy_version": "1"
+      }
+    },
+    {
+      "note": "NAVIGATE 最小字段面",
+      "expected": "valid",
+      "action": {
+        "session_id": "s-20250925-0002",
+        "tab_id": "tab-2",
+        "document_generation": 0,
+        "origin": "http://localhost:8080",
+        "method": "NAVIGATE",
+        "canonical_parameters": "{\"target\":\"https://example.com/\"}",
+        "scope": "nav.example.com",
+        "expires_at": "2099-06-30T23:59:59Z",
+        "nonce": "nonce-77b1e0",
+        "policy_version": "2"
+      }
+    },
+    {
+      "note": "DOWNLOAD（http origin 合法——归一层放行 http/https）",
+      "expected": "valid",
+      "action": {
+        "session_id": "s-20250925-0003",
+        "tab_id": "tab-3",
+        "document_generation": 12,
+        "origin": "http://files.example.net",
+        "method": "DOWNLOAD",
+        "canonical_parameters": "{\"resource\":\"/pkg/a.zip\"}",
+        "scope": "download.files.example.net",
+        "expires_at": "2099-12-31T00:00:00Z",
+        "nonce": "nonce-00aa11",
+        "policy_version": "1"
+      }
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aegis Release Manifest（shared/release.json——发布事实声明）",
+  "description": "PY-102（审计 2026-09-25）：此前 verify_versions.py 仅对账 version/versionCode 两字段，其余 14 字段（displayName/architecture/distribution/runtime/applicationId/updateManifest 等）无任何 schema 校验——漂移无门禁。本 schema 补全发布声明面：additionalProperties false + 枚举/模式收敛。arm64 声明仍遵循 PY-101 整改口径（有构建产物才可声明）。",
+  "type": "object",
+  "required": ["product", "displayName", "version", "versionCode", "windows", "android", "updateManifest"],
+  "properties": {
+    "product": { "const": "Aegis" },
+    "displayName": { "type": "string", "minLength": 1 },
+    "version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+    },
+    "versionCode": { "type": "integer", "minimum": 1 },
+    "windows": {
+      "type": "object",
+      "required": ["packageIdentity", "executable", "architecture", "distribution", "runtime"],
+      "additionalProperties": false,
+      "properties": {
+        "packageIdentity": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z][A-Za-z0-9]*)+$" },
+        "executable": { "type": "string", "pattern": "^[A-Za-z0-9._-]+\\.exe$" },
+        "architecture": {
+          "type": "array",
+          "items": { "enum": ["x64"] },
+          "uniqueItems": true,
+          "minItems": 1,
+          "description": "PY-101 口径：仅允许有构建产物的架构——引入 arm64 构建时同步扩此枚举"
+        },
+        "distribution": { "enum": ["inno-setup-exe", "msix", "appinstaller", "zip"] },
+        "runtime": { "const": "webview2-evergreen" }
+      }
+    },
+    "android": {
+      "type": "object",
+      "required": ["applicationId", "distribution", "engine"],
+      "additionalProperties": false,
+      "properties": {
+        "applicationId": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$" },
+        "distribution": {
+          "type": "array",
+          "items": { "enum": ["play-aab", "direct-apk"] },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "engine": { "const": "android-webview-adapter" }
+      }
+    },
+    "updateManifest": {
+      "type": "object",
+      "required": ["schema", "signature", "hash"],
+      "additionalProperties": false,
+      "properties": {
+        "schema": { "const": 1 },
+        "signature": { "const": "ed25519" },
+        "hash": { "const": "sha256" }
+      }
+    }
+  },
+  "additionalProperties": false
+}
