@@ -115,12 +115,16 @@ var Host = (function () {
     },
     bookmarks: function (cb) {
       var w = winApi(); if (w) { w.get_bookmarks().then(cb); return; }
-      if (andApi()) { cb([]); return; }  // Android：书签宫格暂无数据源
+      // Android：书签宫格为 Windows 能力（has('bookmarks')=false 时调用方
+      // 已提前返回）——本分支是纵深防御：调用方漏检能力面时返回空集
+      // 而不是把 undefined 传进渲染器（WB-014：保留并注明，勿删）
+      if (andApi()) { cb([]); return; }
       csCall('bookmarks', [], cb);
     },
     importScan: function (cb) {
       var w = winApi(); if (w) { w.scan_import_sources().then(cb); return; }
-      if (andApi()) { cb([]); return; }  // Android：导入向导为 Windows 能力
+      // Android：导入向导为 Windows 能力（同 bookmarks——纵深防御分支）
+      if (andApi()) { cb([]); return; }
       csCall('importScan', [], cb);
     },
     importBookmarks: function (src, cb) {

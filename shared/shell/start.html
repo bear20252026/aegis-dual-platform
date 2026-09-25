@@ -24,10 +24,12 @@
     <div class="search">
       <div class="engine-wrap">
         <div class="engine-pill" id="enginePill" title="切换搜索引擎" role="button" tabindex="0"
-             aria-haspopup="menu" aria-expanded="false">
+             aria-haspopup="menu" aria-expanded="false" aria-controls="engineMenu">
           <span class="dot"></span><span id="engineName">百度</span><span class="caret" aria-hidden="true">▾</span>
         </div>
-        <div class="engine-menu" id="engineMenu"></div>
+        <!-- WB-028：role=menu 与触发器的 aria-controls 配对（菜单项为
+             menuitemradio——renderEngineMenu 动态构建） -->
+        <div class="engine-menu" id="engineMenu" role="menu"></div>
       </div>
       <!-- form+submit：兼容移动端 IME「搜索/前往」action（不走 keydown Enter；
            submit 与按钮点击双路径绑定在 start.main.js——BUG-009 保底） -->

@@ -30,6 +30,13 @@ var current = 'aurora-twilight.jpg';
 var ENGINES = [];           // [{key,name}]
 var engineIdx = 0;
 
+// WB-013：桥调用失败的统一留痕点（此前 7 处空 catch 全吞——桥未挂接/
+// 序列化失败无任何痕迹，排查只能靠盲猜）。jsError 自身再失败则放弃
+//（防上报通道异常递归）。
+function bridgeError(where, e) {
+  try { Host.jsError('ntp main: ' + where + ': ' + e); } catch (e2) {}
+}
+
 function renderEngine() {
   var el = document.getElementById('engineName');
   if (el && ENGINES.length) el.textContent = ENGINES[engineIdx].name;
@@ -93,14 +100,14 @@ function renderEngineMenu(done) {
         }
         build();
       });
-    } catch (e) { build(); }
+    } catch (e) { bridgeError('getEngine:menu', e); build(); }
   } else { build(); }
 }
 function selectEngine(idx) {
   if (!ENGINES.length) return;
   engineIdx = idx;
   renderEngine();
-  try { Host.setEngine(ENGINES[engineIdx].key); } catch (e) {}
+  try { Host.setEngine(ENGINES[engineIdx].key); } catch (e) { bridgeError('setEngine', e); }
   var m = document.getElementById('engineMenu');
   if (m) m.style.display = 'none';
 }
@@ -119,7 +126,7 @@ document.addEventListener('click', function () {
       }
       renderEngine();
     });
-  } catch (e) {}
+  } catch (e) { bridgeError('getEngine:init', e); }
 }
 
 // —— 搜索（form submit + 按钮双路径——BUG-002/009 教训：IME action 与
@@ -159,7 +166,7 @@ function setWallpaper(name) {
   for (var j = 0; j < dots.length; j++) {
     dots[j].className = 'wp' + (WALLPAPERS[dots[j].dataset.i].name === name ? ' active' : '');
   }
-  try { Host.setWallpaper(name); } catch (e) {}
+  try { Host.setWallpaper(name); } catch (e) { bridgeError('setWallpaper', e); }
 }
 
 // 渲染壁纸切换圆点
@@ -191,7 +198,7 @@ function setWallpaper(name) {
     Host.getWallpaper(function (name) {
       if (name) setWallpaper(name);
     });
-  } catch (e) {}
+  } catch (e) { bridgeError('getWallpaper:init', e); }
 }
 
 // —— 几何画板快捷入口（离线 GeoGebra——后端加载内置资源页；
@@ -209,7 +216,7 @@ function setWallpaper(name) {
         btn.classList.add('unavailable');
         btn.title = '当前安装包未包含画板资源';
       });
-    } catch (e) {}
+    } catch (e) { bridgeError('openGeo', e); }
   });
 })();
 
@@ -226,11 +233,11 @@ function setWallpaper(name) {
         btn.textContent = '恢复上次会话（' + n + ' 个标签）';
         box.style.display = 'block';
         btn.onclick = function () {
-          try { Host.restoreSession(); } catch (e) {}
+          try { Host.restoreSession(); } catch (e) { bridgeError('restoreSession', e); }
         };
       }
     });
-  } catch (e) {}
+  } catch (e) { bridgeError('hasSaved', e); }
 })();
 
 // —— 渲染书签 ——
@@ -304,9 +311,10 @@ function renderBookmarks() {
       addTile.appendChild(addIco);
       addTile.appendChild(addName);
       frag.appendChild(addTile);
+      // 书签桥 replaceChildren 前的整段构建——任何一步抛错都不应静默丢书签
       box.replaceChildren(frag);
     });
-  } catch (e) {}
+  } catch (e) { bridgeError('bookmarks', e); }
 }
 // 书签渲染：立即尝试 + 桥未就绪时有界重试（此前固定 200ms 魔法延时，
 // 慢机上桥未就绪即空宫格）

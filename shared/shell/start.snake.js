@@ -443,7 +443,23 @@
         });
       });
 
-      return { open: open, close: close };
+      // 测试钩子（WB-016..019：Node 无头回归用——只读状态 + 受控写入，
+      // 不改变任何运行时行为；生产代码不得引用 __test）
+      return {
+        open: open, close: close,
+        __test: {
+          turn: turn, step: step, freeCell: freeCell,
+          state: function () { return state; },
+          score: function () { return score; },
+          body: function () { return snake; },
+          dir: function () { return dir; },
+          queue: function () { return queue; },
+          food: function () { return food; },
+          bonus: function () { return bonus; },
+          setFood: function (x, y) { food = { x: x, y: y }; },
+          setBonus: function (x, y) { bonus = { x: x, y: y, ttl: 40 }; },
+        },
+      };
     })();
 
     function openSnake() { if (Host.has('snake')) Snake.open(); }

@@ -108,7 +108,13 @@ jobs:
         with:
           node-version: '22'
       - name: 运行 UI 回归测试
-        run: node --test tests/ui-regression/start_page.test.mjs
+        # WB-012（2026-09-24）：显式列出全部测试文件（目录展开在 Windows
+        # 本地 node 22 上不可用；host_bridge.test.mjs 此前未接入门禁）。
+        # start_host/start_import/start_main 为 WB-015/019..026 新增。
+        run: node --test tests/ui-regression/start_page.test.mjs tests/ui-regression/host_bridge.test.mjs tests/ui-regression/start_host.test.mjs tests/ui-regression/start_import.test.mjs tests/ui-regression/start_main.test.mjs
+      - name: 运行贪吃蛇回归测试
+        # WB-012：snake.test.js 此前不在任何 CI（独立 assert 风格，非 node:test）
+        run: node shared/shell/snake.test.js
       - name: 测试报告
         if: always()
         run: echo "UI 回归结果见上方 TAP 输出（pass/fail 计数）；失败即门禁阻断"

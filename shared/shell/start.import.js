@@ -15,6 +15,7 @@
       var step = 'pick';     // pick | running | done
       var pickedChecks = []; // 来源复选框（.browser）
       var bmCheck = null, hiCheck = null, limitSel = null;
+      var lastFocus = null;  // 打开向导前的焦点元素（关闭时归还——WB-027）
 
       function api() { return Host; }
       function label(b) { return b === 'chrome' ? 'Chrome' : 'Edge'; }
@@ -24,6 +25,10 @@
         body.textContent = '';
         step = 'pick';
         nextBtn.disabled = false;
+        // WB-027：焦点归还触发元素——键盘/读屏用户关闭弹层后回到原位，
+        // 不再「焦点失踪」落到 body（Tab 从页首重来）
+        try { if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus(); } catch (e) {}
+        lastFocus = null;
       }
 
       function checkboxRow(text, checked) {
@@ -174,6 +179,8 @@
       function openWizard() {
         var a = api();
         if (!a) return;
+        // WB-027：记录触发元素（关闭时归还焦点）——必须在显示弹层前取
+        try { lastFocus = document.activeElement || entry; } catch (e) { lastFocus = entry; }
         modal.style.display = 'flex';
         body.textContent = '';
         step = 'pick';
@@ -181,6 +188,9 @@
         nextBtn.textContent = '扫描中…';
         nextBtn.style.display = '';
         body.appendChild(hint('正在扫描本机 Chrome / Edge 数据…'));
+        // WB-027：初始焦点进弹层（aria-modal 弹层不接收焦点是读屏重大缺陷）——
+        // closeBtn 常驻且无副作用，安全兜底
+        try { closeBtn.focus(); } catch (e) {}
         // 扫描超时（15s）：宿主无响应（如桥未挂接的窗口）不再永久卡死向导
         var scanSettled = false;
         var scanTimer = setTimeout(function () {
@@ -216,5 +226,33 @@
       });
       document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && modal.style.display !== 'none') close();
+      });
+      // WB-027：焦点陷阱——Tab/Shift+Tab 在弹层内循环，禁止逃逸到被
+      // aria-modal 遮蔽的背景页（聚焦集合每次按键时实时收集，覆盖
+      // 各步骤动态重建的复选框/下拉）
+      modal.addEventListener('keydown', function (e) {
+        if (e.key !== 'Tab' || modal.style.display === 'none') return;
+        var items = [];
+        try {
+          var all = modal.querySelectorAll('button, input, select, [tabindex]');
+          for (var i = 0; i < all.length; i++) {
+            var it = all[i];
+            if (it.disabled) continue;
+            var st = null;
+            try { st = it.style ? it.style.display : ''; } catch (e2) {}
+            if (st === 'none') continue;
+            items.push(it);
+          }
+        } catch (e3) { return; }
+        if (!items.length) return;
+        var first = items[0], last = items[items.length - 1];
+        var active = document.activeElement;
+        var inside = false;
+        try { inside = !!active && modal.contains(active); } catch (e4) { inside = false; }
+        if (e.shiftKey && (active === first || !inside)) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && (active === last || !inside)) {
+          e.preventDefault(); first.focus();
+        }
       });
     })();

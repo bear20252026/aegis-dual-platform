@@ -222,5 +222,118 @@ test("共享 JS 语法: 无 dt 泄漏到 render 闭包外", () => {
   );
 });
 
+// ═══ WB-016..019：核心逻辑行为级测试（经 Snake.__test 钩子——
+// 钩子只读状态 + 受控写入，不改变运行时行为） ═══
+const T = Snake.__test;
+
+test("__test 钩子完整", () => {
+  assert.ok(T, "__test 钩子存在");
+  ["turn", "step", "freeCell", "state", "score", "body", "dir", "queue",
+   "food", "bonus", "setFood", "setBonus"].forEach((k) =>
+    assert.ok(T[k] !== undefined, "钩子缺少 " + k));
+});
+
+test("WB-016 turn() 拒绝反向与同向", () => {
+  Snake.open();
+  assert.strictEqual(T.queue().length, 0, "初始队列为空");
+  T.turn(-1, 0);  // dir={1,0}（向右）→ 反向
+  assert.strictEqual(T.queue().length, 0, "反向入队被拒绝");
+  T.turn(1, 0);   // 同向
+  assert.strictEqual(T.queue().length, 0, "同向入队被拒绝");
+  T.turn(0, -1);  // 垂直 → 接受
+  assert.strictEqual(T.queue().length, 1, "垂直转向入队");
+  Snake.close();
+});
+
+test("WB-016 turn() 队列上限 3", () => {
+  Snake.open();
+  T.turn(0, -1);  // up
+  T.turn(-1, 0);  // left（相对 up 合法）
+  T.turn(0, 1);   // down（相对 left 合法）
+  assert.strictEqual(T.queue().length, 3);
+  T.turn(1, 0);   // 第 4 个 → 丢弃
+  assert.strictEqual(T.queue().length, 3, "超限输入被丢弃");
+  Snake.close();
+});
+
+test("WB-017 freeCell() 不落在任何占用格", () => {
+  Snake.open();
+  const body = T.body();
+  for (let i = 0; i < 200; i++) {
+    const c = T.freeCell();
+    assert.ok(c, "棋盘未满时必须返回空格");
+    assert.ok(!body.some((s) => s.x === c.x && s.y === c.y), "不得落在蛇身");
+    const f = T.food();
+    assert.ok(!(c.x === f.x && c.y === f.y), "不得落在食物");
+    const bo = T.bonus();
+    if (bo) assert.ok(!(c.x === bo.x && c.y === bo.y), "不得落在奖励果");
+  }
+  Snake.close();
+});
+
+test("WB-018 step() 撞墙死亡且蛇头不出界", () => {
+  Snake.open();
+  T.setFood(2, 12);  // 食物放路径后方——不会误吃
+  // open() 后 state='start'——step() 无状态门禁（loop 才检查），直接驱动
+  let guard = 0;
+  while (T.state() !== "dead" && guard++ < 30) T.step();
+  assert.strictEqual(T.state(), "dead", "撞右墙后死亡");
+  assert.ok(T.body()[0].x < 24, "死亡后蛇头不出界");
+  Snake.close();
+});
+
+test("WB-018 step() 撞自身死亡", () => {
+  Snake.open();
+  T.setFood(20, 20);
+  // 构造 U 形蛇：头 (5,5) 向右 → 前方 (6,5) 是自身第 4 节
+  const b = T.body();
+  b.length = 0;
+  b.push({ x: 5, y: 5 }, { x: 5, y: 6 }, { x: 6, y: 6 }, { x: 6, y: 5 }, { x: 7, y: 5 });
+  T.step();
+  assert.strictEqual(T.state(), "dead", "头撞自身第 4 节后死亡");
+  assert.strictEqual(T.body()[0].x, 5, "死亡步不前移");
+  Snake.close();
+});
+
+test("WB-019 吃食 +10 且蛇身增长", () => {
+  Snake.open();
+  const b = T.body();  // (7,12),(6,12),(5,12) 向右
+  T.setFood(8, 12);    // 头前方一格
+  const before = b.length;
+  T.step();
+  assert.strictEqual(T.score(), 10, "吃食 +10");
+  assert.strictEqual(b.length, before + 1, "吃食后蛇身 +1");
+  const f = T.food();
+  assert.ok(!(f.x === 8 && f.y === 12), "食物被吃后重新放置");
+  Snake.close();
+});
+
+test("WB-019 吃奖励 +50 且奖励消失", () => {
+  Snake.open();
+  T.setFood(20, 20);
+  T.setBonus(8, 12);  // 头前方一格放奖励果
+  T.step();
+  assert.strictEqual(T.score(), 50, "奖励 +50");
+  assert.strictEqual(T.bonus(), null, "奖励被吃后消失");
+  Snake.close();
+});
+
+test("WB-019 奖果 TTL 耗尽自动消失（中心绕圈 40 步不死）", () => {
+  Snake.open();
+  T.setFood(20, 20);
+  T.setBonus(9, 9);   // 远离路径
+  // 5×5 方形绕圈：右5 上5 左5 下5 …… 8 腿 = 40 步；区域 x:7..12 y:7..12，
+  // 蛇长 3 无自撞，不触墙（open() 后 state='start'——step 无状态门禁）
+  const legs = [[0, -1], [-1, 0], [0, 1], [1, 0]];
+  for (let leg = 0; leg < 8 && T.bonus(); leg++) {
+    T.turn(legs[leg % 4][0], legs[leg % 4][1]);
+    for (let s = 0; s < 5 && T.bonus(); s++) T.step();
+  }
+  assert.notStrictEqual(T.state(), "dead", "40 步绕圈期间存活");
+  assert.strictEqual(T.bonus(), null, "TTL 耗尽奖励消失");
+  assert.strictEqual(T.score(), 0, "绕圈未吃食");
+  Snake.close();
+});
+
 console.log(`\n=== 结果: ${passed} 通过, ${failed} 失败 ===\n`);
 if (failed > 0) process.exit(1);
