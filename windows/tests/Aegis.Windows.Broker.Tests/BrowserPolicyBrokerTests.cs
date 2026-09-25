@@ -100,6 +100,20 @@ public sealed class BrowserPolicyBrokerTests
         Assert.Null(result.DenialCode);
     }
 
+    // ===== CS-073（审计 2026-09-25）：TryCreate(null) 空参拒绝 =====
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void NativePolicyCoreBridgeTryCreateRejectsInvalidPolicyVersion(string? policyVersion)
+    {
+        // policyVersion 缺失（版本号是 ABI 契约的一部分）→ fail-closed false，
+        // 且 out bridge 保持 null（不产生半初始化桥对象）
+        Assert.False(NativePolicyCoreBridge.TryCreate(policyVersion!, null, out var bridge));
+        Assert.Null(bridge);
+    }
+
     [Fact]
     public void NativePolicyCoreBridgeMapsDecisionAndRejectsReplayWhenEnabled()
     {

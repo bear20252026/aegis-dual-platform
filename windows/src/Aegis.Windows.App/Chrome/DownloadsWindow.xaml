@@ -24,7 +24,7 @@
     </Grid.RowDefinitions>
     <TextBlock Grid.Row="0" Text="下载（原生 DownloadStarting——进度/暂停/取消）"
                Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,8"/>
-    <ListBox Grid.Row="1" x:Name="DownloadsList" Background="Transparent" BorderThickness="0"
+    <ListBox Grid.Row="1" x:Name="DownloadsList" AutomationProperties.Name="下载任务列表" Background="Transparent" BorderThickness="0"
              HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
       <ListBox.ItemTemplate>
         <DataTemplate>
@@ -55,12 +55,12 @@
                 <TextBlock Text="{Binding Summary}" Foreground="{StaticResource TextSecondaryBrush}"
                            FontSize="11" TextTrimming="CharacterEllipsis"/>
                 <StackPanel Grid.Column="1" Orientation="Horizontal">
-                  <Button Style="{StaticResource LinkButton}" Content="📂 打开文件" Click="OpenFile_Click" Margin="4,0,0,0"
+                  <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="打开下载的文件" Content="📂 打开文件" Click="OpenFile_Click" Margin="4,0,0,0"
                           ToolTip="用系统默认程序打开已下载的文件" Visibility="{Binding IsCompleted, Converter={StaticResource BoolToVis}}"/>
-                  <Button Style="{StaticResource LinkButton}" Content="暂停" Click="Pause_Click" Margin="4,0,0,0"/>
-                  <Button Style="{StaticResource LinkButton}" Content="继续" Click="Resume_Click" Margin="4,0,0,0"/>
-                  <Button Style="{StaticResource LinkButton}" Content="取消" Click="Cancel_Click" Margin="4,0,0,0"/>
-                  <Button Style="{StaticResource LinkButton}" Content="📂 所在文件夹" Click="ShowInFolder_Click" Margin="4,0,0,0"/>
+                  <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="暂停下载" Content="暂停" Click="Pause_Click" Margin="4,0,0,0"/>
+                  <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="继续下载" Content="继续" Click="Resume_Click" Margin="4,0,0,0"/>
+                  <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="取消下载" Content="取消" Click="Cancel_Click" Margin="4,0,0,0"/>
+                  <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="打开下载所在文件夹" Content="📂 所在文件夹" Click="ShowInFolder_Click" Margin="4,0,0,0"/>
                 </StackPanel>
               </Grid>
             </Grid>

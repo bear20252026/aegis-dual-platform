@@ -81,6 +81,37 @@ public sealed class DecouplingTests
         Assert.Null(caught);
     }
 
+    // ===== CS-072（审计 2026-09-25）：NativePolicyCoreGate 空路径/未启用分支 =====
+
+    [Fact]
+    public void NativePolicyCoreGate_EmptyOrWhitespaceLibraryPathIsBlocked()
+    {
+        // 空路径/纯空白 → 显式 Block（fail-closed，绝不尝试加载默认库名）
+        Assert.False(NativePolicyCoreGate.ProbeLibrary("").AllowsPlatformBroker);
+        Assert.Equal("native_policy_core_path_invalid", NativePolicyCoreGate.ProbeLibrary("").DenialCode);
+        Assert.False(NativePolicyCoreGate.ProbeLibrary("   ").AllowsPlatformBroker);
+        Assert.Equal("native_policy_core_path_invalid", NativePolicyCoreGate.ProbeLibrary("   ").DenialCode);
+    }
+
+    [Fact]
+    public void NativePolicyCoreGate_NotRequiredIsDisabledAndAllowsPlatformBroker()
+    {
+        // 未启用强制原生核心（env 非 "1"）→ Disabled 放行（走经验证的 C# Broker）
+        var previous = Environment.GetEnvironmentVariable(NativePolicyCoreGate.EnableEnvironmentVariable);
+        try
+        {
+            Environment.SetEnvironmentVariable(NativePolicyCoreGate.EnableEnvironmentVariable, null);
+            var result = NativePolicyCoreGate.ProbeFromEnvironment();
+            Assert.True(result.AllowsPlatformBroker);
+            Assert.Null(result.DenialCode);
+            Assert.False(NativePolicyCoreGate.IsRequired);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(NativePolicyCoreGate.EnableEnvironmentVariable, previous);
+        }
+    }
+
     [Fact]
     public void CreatePrivate_BridgeReturnsEmptyDataAndEchoesEngine()
     {

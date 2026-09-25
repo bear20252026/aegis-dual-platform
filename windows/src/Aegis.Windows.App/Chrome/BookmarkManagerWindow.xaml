@@ -114,7 +114,7 @@
 
     <!-- 标题 + 统计 -->
     <DockPanel Grid.Row="0">
-      <Button DockPanel.Dock="Right" Content="清空全部" Style="{StaticResource DangerButton}" Click="ClearAll_Click"/>
+      <Button DockPanel.Dock="Right" AutomationProperties.Name="清空全部书签" Content="清空全部" Style="{StaticResource DangerButton}" Click="ClearAll_Click"/>
       <StackPanel>
         <TextBlock Text="书签管理" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="22" FontWeight="Bold"/>
         <TextBlock x:Name="SummaryText" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
@@ -127,14 +127,14 @@
       <Grid>
         <TextBlock x:Name="SearchHint" Text="🔍 搜索书签…" HorizontalAlignment="Center"
                    VerticalAlignment="Center" Foreground="{DynamicResource TextMutedBrush}" FontSize="13"/>
-        <TextBox x:Name="SearchBox" Margin="14,0" BorderThickness="0" Background="Transparent"
+        <TextBox x:Name="SearchBox" AutomationProperties.Name="搜索书签输入框" Margin="14,0" BorderThickness="0" Background="Transparent"
                  Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="{DynamicResource AccentBrush}"
                  VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged"/>
       </Grid>
     </Border>
 
     <!-- 书签列表 -->
-    <ListBox x:Name="BookmarkList" Grid.Row="2" Margin="0,14,0,0" Background="Transparent"
+    <ListBox x:Name="BookmarkList" AutomationProperties.Name="书签列表" Grid.Row="2" Margin="0,14,0,0" Background="Transparent"
              BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
              AlternationCount="100000" Focusable="False">
@@ -161,9 +161,9 @@
                 <TextBlock Text="{Binding Url}" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="0,3,0,0"/>
               </StackPanel>
               <Button Grid.Column="1" Content="编辑" Style="{StaticResource ToolButton}"
-                      Tag="{Binding Id}" Click="Edit_Click" ToolTip="重命名"/>
+                      AutomationProperties.Name="编辑这个书签" Tag="{Binding Id}" Click="Edit_Click" ToolTip="重命名"/>
               <Button Grid.Column="2" Content="✕" Style="{StaticResource GhostButton}" FontSize="11"
-                      Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除书签" Margin="4,0,0,0"/>
+                      AutomationProperties.Name="删除这个书签" Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除书签" Margin="4,0,0,0"/>
             </Grid>
           </Border>
         </DataTemplate>
@@ -177,15 +177,15 @@
       <StackPanel>
         <TextBlock Text="编辑书签" Foreground="{DynamicResource TextPrimaryBrush}" FontSize="15" FontWeight="SemiBold"/>
         <TextBlock Text="标题" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,12,0,4"/>
-        <TextBox x:Name="EditTitle" Height="30" FontSize="13" Background="Transparent"
+        <TextBox x:Name="EditTitle" AutomationProperties.Name="书签标题编辑框" Height="30" FontSize="13" Background="Transparent"
                  Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="{DynamicResource AccentBrush}"
                  BorderBrush="{DynamicResource SeparatorBrush}" BorderThickness="0,0,0,1"/>
         <TextBlock Text="地址" Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11" Margin="0,10,0,4"/>
-        <TextBox x:Name="EditUrl" Height="30" FontSize="13" IsReadOnly="True"
+        <TextBox x:Name="EditUrl" AutomationProperties.Name="书签地址只读框" Height="30" FontSize="13" IsReadOnly="True"
                  Foreground="{DynamicResource TextSecondaryBrush}" Background="Transparent" BorderThickness="0"/>
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-          <Button Content="取消" Style="{StaticResource ToolButton}" Click="EditCancel_Click"/>
-          <Button Content="保存" Style="{StaticResource PrimaryButton}" Click="EditSave_Click" Margin="8,0,0,0"/>
+          <Button AutomationProperties.Name="取消编辑书签" Content="取消" Style="{StaticResource ToolButton}" Click="EditCancel_Click"/>
+          <Button AutomationProperties.Name="保存书签编辑" Content="保存" Style="{StaticResource PrimaryButton}" Click="EditSave_Click" Margin="8,0,0,0"/>
         </StackPanel>
       </StackPanel>
     </Border>

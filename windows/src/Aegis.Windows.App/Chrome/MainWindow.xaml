@@ -152,7 +152,7 @@
                               BorderBrush="Transparent"
                               Background="{DynamicResource ChromeBackgroundBrush}">
                         <DockPanel>
-                          <Button x:Name="TabClose" DockPanel.Dock="Right" Content="✕" Click="TabClose_Click"
+                          <Button x:Name="TabClose" DockPanel.Dock="Right" AutomationProperties.Name="关闭这个标签" Content="✕" Click="TabClose_Click"
                                   Tag="{Binding TabId}" Focusable="False" Cursor="Hand"
                                   FontSize="10" Margin="10,0,0,0" Padding="2,0"
                                   Background="Transparent" BorderThickness="0"
@@ -198,7 +198,7 @@
                             </Image>
                           </Grid>
                           <TextBlock x:Name="SleepMark" DockPanel.Dock="Left" Text="💤" FontSize="10"
-                                     Margin="0,0,5,0" Visibility="Collapsed" VerticalAlignment="Center"/>
+                                     AutomationProperties.Name="标签已休眠" Margin="0,0,5,0" Visibility="Collapsed" VerticalAlignment="Center"/>
                           <TextBlock x:Name="TabTitle" Text="{Binding Title}" FontSize="12" MaxWidth="150"
                                      TextTrimming="CharacterEllipsis"
                                      Foreground="{DynamicResource TextSecondaryBrush}"/>
@@ -374,13 +374,13 @@
                    Foreground="{DynamicResource TextPrimaryBrush}" TextChanged="FindBox_TextChanged"/>
           <TextBlock x:Name="FindCount" VerticalAlignment="Center" Margin="8,0"
                      Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-          <Button Content="▲" Tag="b" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
+          <Button AutomationProperties.Name="查找上一个" Content="▲" Tag="b" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
                   Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0"
                   ToolTip="上一个"/>
-          <Button Content="▼" Tag="f" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
+          <Button AutomationProperties.Name="查找下一个" Content="▼" Tag="f" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
                   Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0"
                   ToolTip="下一个"/>
-          <Button Content="✕" Click="CloseFind_Click" Width="28" Height="28" Cursor="Hand"
+          <Button AutomationProperties.Name="关闭查找条" Content="✕" Click="CloseFind_Click" Width="28" Height="28" Cursor="Hand"
                   Background="Transparent" Foreground="{DynamicResource TextSecondaryBrush}" BorderThickness="0"
                   ToolTip="关闭（Esc）"/>
         </StackPanel>

@@ -72,6 +72,34 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.True(double.IsNaN(s.WindowTop));
     }
 
+    // ===== CS-075（审计 2026-09-25）：写盘失败不抛且内存快照已更新 =====
+
+    [Fact]
+    public void ApplyWithUnwritablePathDoesNotThrowAndUpdatesSnapshot()
+    {
+        // _path 指向一个已存在的目录——File.Move 必然失败（磁盘满/文件被锁的
+        // 等价模拟）。契约：异常被吞（每次导航/缩放都触发保存，上抛即重复弹窗）、
+        // 内存快照仍然更新（内存/磁盘不分叉——下次保存重试）、Changed 仍通知。
+        var dirPath = Path.Combine(Path.GetTempPath(), $"settings_dir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dirPath);
+        try
+        {
+            var svc = new SettingsService(dirPath);
+            var changed = 0;
+            svc.Changed += (_, _) => changed++;
+
+            var ex = Record.Exception(() => svc.Apply(new AppSettings { SearchEngine = "bing" }));
+
+            Assert.Null(ex);
+            Assert.Equal("bing", svc.Snapshot.SearchEngine);
+            Assert.Equal(1, changed);
+        }
+        finally
+        {
+            try { Directory.Delete(dirPath); } catch (IOException) { }
+        }
+    }
+
     public void Dispose()
     {
         try { File.Delete(_path); } catch (IOException) { }

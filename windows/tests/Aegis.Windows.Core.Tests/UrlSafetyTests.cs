@@ -110,4 +110,29 @@ public sealed class UrlSafetyTests
         Assert.True(UrlSafety.IsPublicHttpUrl("http://0x/"));
         Assert.False(UrlSafety.IsPublicHttpUrl("http://0x0/"));  // 0x0 = 0.0.0.0
     }
+
+    // ===== CS-076（审计 2026-09-25）：.local/.internal/.localhost 内网保留后缀 =====
+
+    [Theory]
+    [InlineData("printer.local")]
+    [InlineData("NAS.INTERNAL")]
+    [InlineData("myhost.localhost")]
+    [InlineData("printer.local.")]      // 尾点归一化后仍命中
+    [InlineData("a.b.internal")]
+    public void IsPublicHostRejectsIntranetReservedSuffixes(string host)
+    {
+        // mDNS/内网 DNS 后缀按保留域名拒绝——不作为公网主机暴露给外部导航
+        Assert.False(UrlSafety.IsPublicHost(host));
+    }
+
+    [Theory]
+    [InlineData("printer.local")]
+    [InlineData("myhost.localhost")]
+    [InlineData("nas.internal")]
+    public void IsPublicHttpUrlRejectsIntranetSuffixHosts(string host)
+    {
+        // 外部打开通道（IsPublicHttpUrl）对内网保留后缀一律拒绝——
+        // 本机放开只走 CanOpenHttpUrl 的本地开发分支
+        Assert.False(UrlSafety.IsPublicHttpUrl($"https://{host}/"));
+    }
 }

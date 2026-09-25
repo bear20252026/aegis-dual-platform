@@ -6,38 +6,38 @@
         ResizeMode="NoResize">
   <StackPanel Margin="20">
     <TextBlock Text="搜索引擎" Foreground="White" FontWeight="SemiBold" Margin="0,0,0,6"/>
-    <ComboBox x:Name="EngineBox" Height="30" SelectionChanged="EngineBox_SelectionChanged"/>
+    <ComboBox x:Name="EngineBox" Height="30" AutomationProperties.Name="搜索引擎选择" SelectionChanged="EngineBox_SelectionChanged"/>
 
     <TextBlock Text="历史记录" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <CheckBox x:Name="HistoryToggle" Content="记录浏览历史" Foreground="#B3FFFFFF"
+    <CheckBox x:Name="HistoryToggle" AutomationProperties.Name="记录浏览历史开关" Content="记录浏览历史" Foreground="#B3FFFFFF"
               Checked="HistoryToggle_Changed" Unchecked="HistoryToggle_Changed"/>
 
     <TextBlock Text="外观主题" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <ComboBox x:Name="ThemeBox" Height="30" SelectionChanged="ThemeBox_SelectionChanged">
+    <ComboBox x:Name="ThemeBox" Height="30" AutomationProperties.Name="外观主题选择" SelectionChanged="ThemeBox_SelectionChanged">
       <ComboBoxItem Content="深色"/>
       <ComboBoxItem Content="浅色"/>
     </ComboBox>
 
 
     <TextBlock Text="后台标签睡眠" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <ComboBox x:Name="SleepCombo" Height="30" SelectionChanged="SleepCombo_Changed">
+    <ComboBox x:Name="SleepCombo" Height="30" AutomationProperties.Name="后台标签睡眠时长选择" SelectionChanged="SleepCombo_Changed">
       <ComboBoxItem Content="关闭"/><ComboBoxItem Content="15 分钟"/><ComboBoxItem Content="30 分钟"/><ComboBoxItem Content="60 分钟"/>
     </ComboBox>
 
     <TextBlock Text="跟踪防护" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <ComboBox x:Name="ProtectionCombo" Height="30" SelectionChanged="ProtectionCombo_Changed">
+    <ComboBox x:Name="ProtectionCombo" Height="30" AutomationProperties.Name="跟踪防护级别选择" SelectionChanged="ProtectionCombo_Changed">
       <ComboBoxItem Content="基础（仅威胁黑名单）"/><ComboBoxItem Content="均衡（+已知跟踪器）"/><ComboBoxItem Content="严格（+拦截第三方脚本/图片）"/>
     </ComboBox>
     <TextBlock Foreground="#FF94A3B8" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"
                Text="严格模式可能影响部分站点加载——建议默认均衡。"/>
 
     <TextBlock Text="加密与安全" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <CheckBox x:Name="HttpsCheck" Content="HTTPS-only（http 自动升级 https）" Foreground="#B3FFFFFF"
+    <CheckBox x:Name="HttpsCheck" AutomationProperties.Name="HTTPS-only 开关" Content="HTTPS-only（http 自动升级 https）" Foreground="#B3FFFFFF"
               Checked="Privacy_Changed" Unchecked="Privacy_Changed"/>
-    <CheckBox x:Name="DnsCheck" Content="安全 DNS（DoH，重启生效）" Foreground="#B3FFFFFF" Margin="0,6,0,0"
+    <CheckBox x:Name="DnsCheck" AutomationProperties.Name="安全 DNS 开关" Content="安全 DNS（DoH，重启生效）" Foreground="#B3FFFFFF" Margin="0,6,0,0"
               Checked="Privacy_Changed" Unchecked="Privacy_Changed"/>
     <TextBlock Text="威胁黑名单订阅源" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <TextBox x:Name="ThreatFeedBox" Height="30" VerticalContentAlignment="Center"
+    <TextBox x:Name="ThreatFeedBox" Height="30" AutomationProperties.Name="威胁黑名单订阅源地址输入" VerticalContentAlignment="Center"
              LostFocus="ThreatFeedBox_LostFocus"
              ToolTip="仅支持 https://（明文源可被投毒——拒绝）"/>
     <TextBlock x:Name="ThreatFeedHint" Foreground="#FF94A3B8" FontSize="11" Margin="0,4,0,0"
@@ -45,13 +45,13 @@
                Text="每行一个域名的纯文本黑名单；生效于下次启动（导航与子资源拦截）。"/>
 
     <TextBlock Text="紧急终止开关" Foreground="White" FontWeight="SemiBold" Margin="0,14,0,6"/>
-    <Button x:Name="KillSwitchButton" Content="触发紧急终止（冻结全部导航与下载）"
+    <Button x:Name="KillSwitchButton" AutomationProperties.Name="触发紧急终止按钮" Content="触发紧急终止（冻结全部导航与下载）"
             Height="32" Background="#FF7F1D1D" Foreground="White" BorderThickness="0"
             Cursor="Hand" Click="KillSwitch_Click"/>
     <TextBlock x:Name="KillSwitchState" Foreground="#FFFCA5A5" FontSize="11" Margin="0,4,0,0"
                Text="触发后需重启应用恢复浏览。"/>
 
-    <Button Content="完成" Height="32" Margin="0,16,0,0" Background="#FF1F2937"
+    <Button AutomationProperties.Name="完成设置" Content="完成" Height="32" Margin="0,16,0,0" Background="#FF1F2937"
             Foreground="White" BorderThickness="0" Cursor="Hand" Click="Done_Click"/>
   </StackPanel>
 </Window>

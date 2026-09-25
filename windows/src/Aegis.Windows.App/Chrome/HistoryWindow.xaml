@@ -119,7 +119,7 @@
           <TextBlock Grid.Column="1" Text="{Binding TimeText}" VerticalAlignment="Top"
                      Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12" Margin="10,2,0,0"/>
           <Button Grid.Column="2" Content="✕" Style="{StaticResource GhostButton}" FontSize="11"
-                  Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除这条记录" Margin="6,0,0,0"/>
+                  AutomationProperties.Name="删除这条历史记录" Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除这条记录" Margin="6,0,0,0"/>
         </Grid>
       </Border>
     </DataTemplate>
@@ -143,7 +143,7 @@
 
     <!-- ═══ 大标题行 ═══ -->
     <DockPanel Grid.Row="0">
-      <Button DockPanel.Dock="Right" Content="清除全部" Style="{StaticResource GhostButton}"
+      <Button DockPanel.Dock="Right" AutomationProperties.Name="清除全部历史记录" Content="清除全部" Style="{StaticResource GhostButton}"
               Foreground="{DynamicResource DangerBrush}" Click="Clear_Click" ToolTip="清空全部历史（不可恢复）"/>
       <StackPanel>
         <TextBlock Text="历史记录" Style="{StaticResource LargeTitle}"/>
@@ -161,7 +161,7 @@
           <TextBlock Text="搜索历史（地址 / 标题）" Foreground="{DynamicResource TextMutedBrush}"
                      FontSize="13" VerticalAlignment="Center" Margin="6,0,0,0"/>
         </StackPanel>
-        <TextBox x:Name="SearchBox" Margin="14,0" BorderThickness="0" Background="Transparent"
+        <TextBox x:Name="SearchBox" AutomationProperties.Name="搜索历史输入框" Margin="14,0" BorderThickness="0" Background="Transparent"
                  Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="{DynamicResource AccentBrush}"
                  VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged"/>
       </Grid>
@@ -171,21 +171,21 @@
     <WrapPanel Grid.Row="2" Margin="0,14,0,0" VerticalAlignment="Center">
       <Border CornerRadius="10" Background="{DynamicResource SegmentedBrush}" Padding="3">
         <StackPanel Orientation="Horizontal">
-          <ToggleButton x:Name="ChipAll" Style="{StaticResource Segment}" Content="全部" IsChecked="True"
+          <ToggleButton x:Name="ChipAll" AutomationProperties.Name="筛选全部历史" Style="{StaticResource Segment}" Content="全部" IsChecked="True"
                         Checked="ChipFilter_Changed" Padding="12,0"/>
-          <ToggleButton x:Name="ChipToday" Style="{StaticResource Segment}" Content="今天"
+          <ToggleButton x:Name="ChipToday" AutomationProperties.Name="筛选今天历史" Style="{StaticResource Segment}" Content="今天"
                         Checked="ChipFilter_Changed" Margin="2,0" Padding="12,0"/>
-          <ToggleButton x:Name="ChipYesterday" Style="{StaticResource Segment}" Content="昨天"
+          <ToggleButton x:Name="ChipYesterday" AutomationProperties.Name="筛选昨天历史" Style="{StaticResource Segment}" Content="昨天"
                         Checked="ChipFilter_Changed" Padding="12,0"/>
-          <ToggleButton x:Name="ChipWeek" Style="{StaticResource Segment}" Content="近7天"
+          <ToggleButton x:Name="ChipWeek" AutomationProperties.Name="筛选近7天历史" Style="{StaticResource Segment}" Content="近7天"
                         Checked="ChipFilter_Changed" Margin="2,0" Padding="12,0"/>
-          <ToggleButton x:Name="ChipMonth" Style="{StaticResource Segment}" Content="本月"
+          <ToggleButton x:Name="ChipMonth" AutomationProperties.Name="筛选本月历史" Style="{StaticResource Segment}" Content="本月"
                         Checked="ChipFilter_Changed" Margin="2,0" Padding="12,0"/>
         </StackPanel>
       </Border>
       <TextBlock Text="每页" VerticalAlignment="Center" Margin="16,0,6,0"
                  Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
-      <ComboBox x:Name="PageSizeBox" Width="82" Height="30" SelectedIndex="1"
+      <ComboBox x:Name="PageSizeBox" AutomationProperties.Name="每页条数选择" Width="82" Height="30" SelectedIndex="1"
                 SelectionChanged="PageSize_Changed" VerticalContentAlignment="Center">
         <ComboBoxItem Content="50 条" Tag="50"/>
         <ComboBoxItem Content="100 条" Tag="100"/>
@@ -194,16 +194,16 @@
       </ComboBox>
       <TextBlock Text="自定义" VerticalAlignment="Center" Margin="16,0,8,0"
                  Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
-      <chrome:DateField x:Name="CustomDate" Width="160" PlaceholderText="选择日期"
+      <chrome:DateField x:Name="CustomDate" AutomationProperties.Name="自定义日期选择" Width="160" PlaceholderText="选择日期"
                         SelectedDateChanged="CustomDate_SelectedDateChanged" ToolTip="展开日历，选择某一天"/>
-      <ToggleButton x:Name="ChipRange" Style="{StaticResource Segment}" Content="范围"
+      <ToggleButton x:Name="ChipRange" AutomationProperties.Name="按日期范围筛选开关" Style="{StaticResource Segment}" Content="范围"
                     Checked="ChipFilter_Changed" Unchecked="ChipFilter_Changed" Margin="12,0,0,0" Padding="12,0"
                     ToolTip="按起止日期范围查询"/>
       <StackPanel x:Name="RangePanel" Orientation="Horizontal" Visibility="Collapsed" Margin="10,0,0,0">
-        <chrome:DateField x:Name="RangeFrom" Width="140" PlaceholderText="开始日期"
+        <chrome:DateField x:Name="RangeFrom" AutomationProperties.Name="范围开始日期选择" Width="140" PlaceholderText="开始日期"
                           SelectedDateChanged="RangeDate_Changed" ToolTip="开始日期"/>
         <TextBlock Text="—" VerticalAlignment="Center" Margin="6,0" Foreground="{DynamicResource TextSecondaryBrush}"/>
-        <chrome:DateField x:Name="RangeTo" Width="140" PlaceholderText="结束日期"
+        <chrome:DateField x:Name="RangeTo" AutomationProperties.Name="范围结束日期选择" Width="140" PlaceholderText="结束日期"
                           SelectedDateChanged="RangeDate_Changed" ToolTip="结束日期"/>
       </StackPanel>
     </WrapPanel>
@@ -211,7 +211,7 @@
     <!-- ═══ 分页列表 ═══ -->
     <TextBlock x:Name="EmptyHint" Grid.Row="3" Margin="0,24,0,0" FontSize="14"
                Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center"/>
-    <ListBox x:Name="HistoryList" Grid.Row="3" Margin="0,16,0,0" Background="Transparent"
+    <ListBox x:Name="HistoryList" AutomationProperties.Name="历史记录列表" Grid.Row="3" Margin="0,16,0,0" Background="Transparent"
              BorderThickness="0"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
@@ -222,12 +222,12 @@
       <TextBlock x:Name="PageStatus" DockPanel.Dock="Left" VerticalAlignment="Center"
                  Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
       <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-        <Button x:Name="PrevPageButton" Content="‹ 上一页" Style="{StaticResource PageButton}"
+        <Button x:Name="PrevPageButton" AutomationProperties.Name="上一页" Content="‹ 上一页" Style="{StaticResource PageButton}"
                 Click="PrevPage_Click"/>
         <ItemsControl x:Name="PageButtons">
           <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         </ItemsControl>
-        <Button x:Name="NextPageButton" Content="下一页 ›" Style="{StaticResource PageButton}"
+        <Button x:Name="NextPageButton" AutomationProperties.Name="下一页" Content="下一页 ›" Style="{StaticResource PageButton}"
                 Click="NextPage_Click"/>
       </StackPanel>
       <TextBlock Text="每页可在上方设置" DockPanel.Dock="Right" VerticalAlignment="Center"
