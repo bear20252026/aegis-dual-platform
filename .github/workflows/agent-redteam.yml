@@ -7,6 +7,11 @@ name: Agent-Redteam
 permissions:
   contents: read
 
+
+# PY-044..051：同分支重复 push/PR 取消旧运行（节省 runner 与排队）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   redteam:
     runs-on: ubuntu-latest

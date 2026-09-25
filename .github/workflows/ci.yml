@@ -18,6 +18,11 @@ on:
 permissions:
   contents: read
 
+
+# PY-044..051：同分支重复 push/PR 取消旧运行（节省 runner 与排队）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   python-checks:
     name: Python 质量检查（ruff / bandit / mypy / validate_release）
@@ -40,7 +45,13 @@ jobs:
       - name: 安装 Python 3.14
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0 (node24)
         with:
-          python-version: "3.14"
+          # PY-063：与 contracts.yml 统一 3.12（3.14 过新——PySide6 类型桩兼容风险）
+          python-version: "3.12"
+          # PY-060：pip 缓存（依赖锁文件驱动 key）
+          cache: pip
+          cache-dependency-path: |
+            legacy/windows-pywebview/requirements.txt
+            legacy/windows-pywebview/requirements-dev.txt
 
       - name: 安装检查工具
         # 全量安装：requirements.txt（运行依赖，含 PySide6——asset_scheme

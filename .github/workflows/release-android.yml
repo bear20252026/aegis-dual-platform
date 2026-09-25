@@ -45,6 +45,9 @@ jobs:
         with:
           toolchain: stable
           targets: aarch64-linux-android  # 单架构：arm64-v8a（99% 真机）
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-056)
+        with:
+          workspaces: core/rust-policy-core
       - name: Install JDK 21
         uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
         with:

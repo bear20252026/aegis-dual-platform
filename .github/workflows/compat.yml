@@ -18,6 +18,11 @@ name: WebView2-Compat
 permissions:
   contents: read
 
+
+# PY-044..051：同分支重复 push/PR 取消旧运行（节省 runner 与排队）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   webview2-regression:
     name: WebView2 兼容性回归（自检 + 探测报告）
@@ -35,30 +40,36 @@ jobs:
       - name: 安装 Python 3.14
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0 (node24)
         with:
-          python-version: "3.14"
+          # PY-063：与 ci.yml/contracts.yml 统一 3.12
+          python-version: "3.12"
 
       - name: 运行自动化回归（validate_release + 3 selftest）
         # shell: bash —— Windows runner 默认 pwsh，`2>/dev/null` 会被解析为
         # 写入 D:\dev\null 文件（路径不存在直接报错），必须显式用 bash。
         # 2026-09-14/21 两次定时运行 20s 即败即此因。
+        # PY-067：stderr 不再全吞——tee 落盘排障（GitHub bash 默认
+        # -eo pipefail，探测失败仍正确走 fallback 断言）。
         shell: bash
         run: |
-          python -m app.webview2_probe 2>/dev/null || python -c "import sys; sys.path.insert(0, '.'); from app.webview2_probe import run_selftests; sys.exit(run_selftests())"
+          python -m app.webview2_probe 2>&1 | tee probe-stderr.log || python -c "import sys; sys.path.insert(0, '.'); from app.webview2_probe import run_selftests; sys.exit(run_selftests())"
 
       - name: 生成 WebView2 兼容性探测报告
         run: |
           python -c "import sys, json; sys.path.insert(0, '.'); from app.webview2_probe import build_probe_report; print(json.dumps(build_probe_report(), ensure_ascii=False, indent=2))" | Out-File -Encoding utf8 ../../docs/compat-baselines/probe-latest.json
           echo "probe 报告已生成"
 
-      - name: 归档基线报告（按日期，保留历史）
+      - name: 生成按日期快照（PY-068 注释改实：本工作流无回仓写权限——
+              快照与基线均不回写仓库，仅随下方 artifact 上传留存）
         run: |
           $stamp = Get-Date -Format "yyyyMMdd"
           Copy-Item ../../docs/compat-baselines/probe-latest.json "../../docs/compat-baselines/probe-$stamp.json" -Force
-          echo "基线已归档: probe-$stamp.json"
+          echo "快照已生成: probe-$stamp.json（仅 CI artifact，不回仓）"
 
-      - name: 上传报告为 CI 制品（便于下载核对）
+      - name: 上传报告为 CI 制品（便于下载核对——含 PY-067 stderr 排障日志）
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: webview2-probe-report
-          path: docs/compat-baselines/probe-latest.json
-          if-no-files-found: error
+          path: |
+            docs/compat-baselines/probe-latest.json
+            legacy/windows-pywebview/probe-stderr.log
+          if-no-files-found: warn

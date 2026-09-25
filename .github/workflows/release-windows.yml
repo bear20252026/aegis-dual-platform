@@ -37,9 +37,17 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 (PY-059)
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/**/packages.lock.json') }}
+          restore-keys: nuget-${{ runner.os }}-
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-055)
+        with:
+          workspaces: core/rust-policy-core
       - name: Verify shared version and release tag
         shell: pwsh
         run: |

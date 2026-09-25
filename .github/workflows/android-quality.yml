@@ -12,6 +12,11 @@ name: Android-Quality
 permissions:
   contents: read
 
+
+# PY-044..051：同分支重复 push/PR 取消旧运行（节省 runner 与排队）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   android-quality:
     name: ktlint + detekt 质量门禁
@@ -47,6 +52,11 @@ jobs:
       - name: ktlint 检查（0 错误门禁）
         run: ./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck --no-daemon
 
+      # PY-065：verify_versions 依赖 runner 预装 Python（镜像变更即碎）——显式固化
+      - name: 安装 Python（verify_versions 依赖——不再依赖 runner 预装）
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
       - name: Verify shared product version declarations
         run: python ../scripts/verify_versions.py
 
@@ -62,10 +72,15 @@ jobs:
       - name: 单元测试（broker 授权生命周期 + app 搜索归一 + webview-adapter 客户端状态机）
         run: ./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest :webview-adapter:testDebugUnitTest --no-daemon
 
-      - name: 上传 detekt 报告（排障用）
+      - name: 上传 detekt 报告（排障用——PY-066 四模块聚合）
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: detekt-report
-          path: android/app/build/reports/detekt/
+          path: |
+            android/app/build/reports/detekt/
+            android/broker/build/reports/detekt/
+            android/webview-adapter/build/reports/detekt/
+            android/contracts/build/reports/detekt/
+          if-no-files-found: warn
           if-no-files-found: ignore
