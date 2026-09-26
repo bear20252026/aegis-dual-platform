@@ -17,24 +17,12 @@ public static class BookmarkImporter
     private const int MaxTitleChars = 256;
     private const int MaxUrlChars = 2048;
 
-    /// <summary>标准安装位置探测（Chrome/Edge 的 Default + Profile 1..9）。</summary>
-    public static IReadOnlyList<ImportSource> DetectSources()
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var sources = new List<ImportSource>();
-        AddIfExists(sources, "chrome", Path.Combine(
-            local, "Google", "Chrome", "User Data", "Default", "Bookmarks"));
-        AddIfExists(sources, "edge", Path.Combine(
-            local, "Microsoft", "Edge", "User Data", "Default", "Bookmarks"));
-        for (var i = 1; i <= 9; i++)
-        {
-            AddIfExists(sources, $"chrome(profile {i})", Path.Combine(
-                local, "Google", "Chrome", "User Data", $"Profile {i}", "Bookmarks"));
-            AddIfExists(sources, $"edge(profile {i})", Path.Combine(
-                local, "Microsoft", "Edge", "User Data", $"Profile {i}", "Bookmarks"));
-        }
-        return sources;
-    }
+    /// <summary>标准安装位置探测（Chrome/Edge 的 Default + Profile 1..9）。
+    /// CS-231：探测路径共享单源。</summary>
+    public static IReadOnlyList<ImportSource> DetectSources() =>
+        Core.Import.ImportProbe.Probe("Bookmarks")
+            .Select(p => new ImportSource(p.Browser, p.Path))
+            .ToList();
 
     /// <summary>解析书签文件为候选列表（http/https 过滤在解析时完成）。
     /// CS-100：损坏 JSON/不可读文件此前直接上抛到导入向导——导入是可选功能，
@@ -108,11 +96,6 @@ public static class BookmarkImporter
         }
     }
 
-    private static void AddIfExists(List<ImportSource> into, string browser, string path)
-    {
-        if (File.Exists(path))
-            into.Add(new ImportSource(browser, path));
-    }
 }
 
 /// <summary>导入来源（浏览器名 + Bookmarks 文件路径）。</summary>

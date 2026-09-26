@@ -12,7 +12,9 @@ using System.IO;
 /// 挂在当前盘根的 \Aegis\AegisCSharp）。</summary>
 public static class AppPaths
 {
-    private static readonly string DataDirValue = ResolveDataDir();
+    // CS-248：可重置（internal 测试面）——生产路径类型初始化后不变；
+    // 测试设置 AEGIS_DATA_DIR 后调 ResetForTest 即可隔离到临时目录
+    private static string _dataDir = ResolveDataDir();
 
     private static string ResolveDataDir()
     {
@@ -25,7 +27,10 @@ public static class AppPaths
         return Path.Combine(baseDir, "Aegis", "AegisCSharp");
     }
 
-    public static string DataDir => DataDirValue;
+    public static string DataDir => _dataDir;
+
+    /// <summary>CS-248：测试专用重置——按当前环境变量重新解析数据目录。</summary>
+    internal static void ResetForTest() => _dataDir = ResolveDataDir();
 
     public static string SessionDbPath => Path.Combine(DataDir, "tabs.db");
     public static string BookmarksDbPath => Path.Combine(DataDir, "bookmarks.db");

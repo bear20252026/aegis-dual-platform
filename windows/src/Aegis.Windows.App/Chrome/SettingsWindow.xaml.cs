@@ -46,11 +46,12 @@ public partial class SettingsWindow : Window
         _owner = owner;
         _settingsService = settingsService;
         _suppressEvents = true;
+        // CS-235：复用 MainWindow.EngineOption——此前同形匿名类型双定义
         EngineBox.ItemsSource = UrlNormalizer.EngineOrder
-            .Select(k => new { Key = k, Name = UrlNormalizer.EngineName(k) })
+            .Select(k => new MainWindow.EngineOption(k, UrlNormalizer.EngineName(k)))
             .ToList();
-        EngineBox.DisplayMemberPath = "Name";
-        EngineBox.SelectedValuePath = "Key";
+        EngineBox.DisplayMemberPath = nameof(MainWindow.EngineOption.Name);
+        EngineBox.SelectedValuePath = nameof(MainWindow.EngineOption.Key);
         EngineBox.SelectedValue = _settings.SearchEngine;
         HistoryToggle.IsChecked = _settings.HistoryEnabled;
         ThreatFeedBox.Text = _settings.ThreatFeedUrl;

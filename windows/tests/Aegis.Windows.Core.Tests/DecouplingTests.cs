@@ -44,6 +44,18 @@ public sealed class DecouplingTests
     }
 
     [Fact]
+    public void ControllerCtors_RejectNullDependencies()
+    {
+        // CS-239：控制器构造器 ArgumentNullException 守卫（fail-fast 装配错误）
+        Assert.Throws<ArgumentNullException>(() =>
+            new FindBarController(null!, null!, null!, null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new SuggestionController(null!, null!, null!, null!, null!, null!));
+        Assert.Throws<ArgumentNullException>(() =>
+            new ApprovalPanelController(null!, null!, null!, null!, null!, null!, null!, null!, null!));
+    }
+
+    [Fact]
     public void HostWebView_AcceptsFakeBrokerAndInjectedPrivacy()
     {
         // 无需真实 WebView 核心——只验证构造接缝成立（第 4/2 项：依赖接口而非具体类）

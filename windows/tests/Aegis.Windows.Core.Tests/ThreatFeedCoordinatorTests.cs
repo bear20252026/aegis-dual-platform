@@ -108,6 +108,16 @@ public sealed class ThreatFeedCoordinatorTests
     }
 
     [Fact]
+    public void Start_WhitespaceFeedUrl_TreatedAsMissing()
+    {
+        // CS-245：空白订阅源地址裁剪后视为未配置——不启动刷新
+        var h = new Harness { FeedUrl = "   " };
+        var c = h.Build(_cachePath);
+        Assert.False(c.Start());
+        Assert.Single(h.Applied);
+    }
+
+    [Fact]
     public async System.Threading.Tasks.Task Refresh_AppliesFetchedList_Directly()
     {
         // CS-134：刷新后直接用 fetchAndStore 返回值——此前写盘后再重读磁盘，

@@ -101,7 +101,7 @@ public partial class MainWindow : Window
         // 虚拟主机首帧重试耗尽：停止加载条并展示明确错误——瞬态抑制不应让
         // 加载条永久旋转，用户须能感知"虚拟主机资源无法加载"。
         _runtimeCoordinator.NtpNavigationFailed += OnNtpNavigationFailed;
-        try { ApplyTheme(_settings.Theme); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"ApplyTheme: {ex.Message}"); }
+        try { ApplyTheme(_settings.Theme); } catch (Exception ex) { Core.Security.SecurityLog.Write($"[theme] 应用主题失败（启动继续）: {ex.GetType().Name}: {ex.Message}"); }  // CS-234
         _tabs.TabOpened += OnTabOpened;
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
@@ -1336,6 +1336,7 @@ public partial class MainWindow : Window
         _tabs.TabClosed -= OnTabClosed;
         _tabs.TabSwitched -= OnTabSwitched;
         _runtimeCoordinator.NtpNavigationFailed -= OnNtpNavigationFailed;
+        _sourceViewerWindows.Clear();  // CS-233：源码查看窗引用驻留清理（Owner=本窗）
         // 全部 runtime 经协调器统一销毁（先摘视觉树再释放，令牌一并取消）
         _runtimeCoordinator.Dispose();
         _runtimes.Clear();

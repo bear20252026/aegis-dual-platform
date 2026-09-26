@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Core.Tests;
 
 using System.Windows;
+using Aegis.Windows.Core;
 using Xunit;
 
 /// <summary>C13 批（审计 2026-09-26）：独立窗口纯函数面直测——历史 host 提取
@@ -53,4 +54,77 @@ public sealed class WindowLogicTests
     [InlineData(DayOfWeek.Wednesday, 2)]
     public void MondayOffset_WeekStartsMonday(DayOfWeek day, int expected) =>
         Assert.Equal(expected, Aegis.Windows.Chrome.DateField.MondayOffset(day));
+}
+
+/// <summary>C18 批（审计 2026-09-26）：SecurityLog 行为直测（CS-246/247——
+/// 目录注入面 + 转义/截断契约）与 AppPaths 测试重置（CS-248）。</summary>
+public sealed class SecurityLogTests : IDisposable
+{
+    private readonly string _dir =
+        Path.Combine(Path.GetTempPath(), $"aegis_seclog_{Guid.NewGuid():N}");
+
+    public SecurityLogTests()
+    {
+        Directory.CreateDirectory(_dir);
+        Aegis.Windows.Core.Security.SecurityLog.SecurityLogDirOverride = _dir;
+    }
+
+    [Fact]
+    public void Write_EscapesNewlines_PreventingInjection()
+    {
+        // CS-247：换行转义——页面可控字符串不能再注入伪造日志行
+        Aegis.Windows.Core.Security.SecurityLog.Write("第一行\r\n第二行\\结束");
+
+        var text = ReadLog();
+        Assert.Single(text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.Contains("第一行")));
+        Assert.DoesNotContain(text, "第一行" + Environment.NewLine);
+    }
+
+    [Fact]
+    public void Write_TruncatesOversizedMessages()
+    {
+        // CS-247：超长消息截断至 4000 + 省略标记
+        Aegis.Windows.Core.Security.SecurityLog.Write(new string('x', 5000));
+
+        var text = ReadLog();
+        var line = Assert.Single(text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Where(l => l.Contains("xxxx")));
+        Assert.True(line.Length < 4100);
+        Assert.EndsWith("…(截断)", line);
+    }
+
+    private string ReadLog() =>
+        File.ReadAllText(Path.Combine(_dir, "security.log"));
+
+    public void Dispose()
+    {
+        Aegis.Windows.Core.Security.SecurityLog.SecurityLogDirOverride = null;
+        try { Directory.Delete(_dir, true); } catch (IOException) { }
+    }
+}
+
+public sealed class AppPathsTests
+{
+    [Fact]
+    public void ResetForTest_HonorsEnvironmentOverride()
+    {
+        // CS-248：静态冻结路径经 ResetForTest 可在测试中重定向并还原
+        var original = AppPaths.DataDir;
+        var temp = Path.Combine(Path.GetTempPath(), $"aegis_paths_{Guid.NewGuid():N}");
+        try
+        {
+            Environment.SetEnvironmentVariable("AEGIS_DATA_DIR", temp);
+            AppPaths.ResetForTest();
+            Assert.Equal(temp, AppPaths.DataDir);
+            Assert.EndsWith("tabs.db", AppPaths.SessionDbPath, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("AEGIS_DATA_DIR", null);
+            AppPaths.ResetForTest();
+            Directory.CreateDirectory(original);  // 确保还原后目录存在性语义不变
+            Assert.Equal(original, AppPaths.DataDir);
+        }
+    }
 }

@@ -17,15 +17,19 @@ public static class SecurityLog
     // 按 char 数近似字节量——1MB 轮转阈值不需要字节级精确）。
     private static long _approxBytes = -1;  // -1 = 未校准
 
+    /// <summary>CS-246：目录注入面（默认绑定 AppPaths.DataDir）——转义/截断/
+    /// 轮转行为此前写死真实用户目录不可直测；测试注入临时目录，生产恒为 null。</summary>
+    internal static string? SecurityLogDirOverride;
+
     public static void Write(string message)
     {
         try
         {
             lock (Lock)
             {
-                var dir = AppPaths.DataDir;
+                var dir = SecurityLogDirOverride ?? AppPaths.DataDir;
                 Directory.CreateDirectory(dir);
-                var path = AppPaths.SecurityLogPath;
+                var path = Path.Combine(dir, Path.GetFileName(AppPaths.SecurityLogPath));
                 if (_approxBytes < 0)
                     _approxBytes = File.Exists(path) ? new FileInfo(path).Length : 0;
                 if (_approxBytes > MaxBytes)

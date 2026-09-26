@@ -159,8 +159,17 @@ public static class ThreatFeedUpdater
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
         var tmp = cachePath + ".tmp";
-        File.WriteAllLines(tmp, domains);
-        File.Move(tmp, cachePath, overwrite: true);
+        try
+        {
+            File.WriteAllLines(tmp, domains);
+            File.Move(tmp, cachePath, overwrite: true);
+        }
+        finally
+        {
+            // CS-232：Move 抛出时 tmp 残留——清理（成功后 tmp 已不存在，Delete 跳过）
+            if (File.Exists(tmp))
+                File.Delete(tmp);
+        }
         return domains;
     }
 

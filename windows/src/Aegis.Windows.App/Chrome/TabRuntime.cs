@@ -75,11 +75,16 @@ public sealed class TabRuntime : IDisposable
     ///（dangerous=经用户显式确认的危险扩展下载）。</summary>
     public event Action<CoreWebView2DownloadOperation, bool>? DownloadOperationStarted;
 
+    /// <summary>CS-236：缩放应用阈值——|差|>ε 才写回（浮点抖动面）。</summary>
+    internal const double ZoomEpsilon = 0.001;
+
+    private void OnCoreNavigationStarted(object? sender, Microsoft.Web.WebView2.Core.CoreWebView2NavigationStartingEventArgs args) => NavigationStarted?.Invoke();
+
     /// <summary>CoreWebView2 就绪后挂接安全事件与页面事件（每标签一次）。</summary>
     public void OnCoreReady(CoreWebView2 coreWebView2)
     {
         Host.WireEvents(coreWebView2);
-        coreWebView2.NavigationStarting += (_, _) => NavigationStarted?.Invoke();
+        coreWebView2.NavigationStarting += OnCoreNavigationStarted;  // CS-237：命名化（匿名闭包无法退订）
         coreWebView2.DownloadStarting += (_, e) =>
         {
             try
@@ -116,7 +121,7 @@ public sealed class TabRuntime : IDisposable
                 var zoom = IsPrivate
                     ? _privateZoom.GetValueOrDefault(host, 1.0)
                     : Core.Tabs.ZoomStore.Get(host);
-                if (Math.Abs(Control.ZoomFactor - zoom) > 0.001)
+                if (Math.Abs(Control.ZoomFactor - zoom) > ZoomEpsilon)
                     Control.ZoomFactor = zoom;
                 // 站点图标（内存命中即时；未命中后台抓取后回填；无痕不落盘）
                 var hostCapture = host;

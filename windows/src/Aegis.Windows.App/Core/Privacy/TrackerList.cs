@@ -10,8 +10,9 @@ using System.Linq;
 /// - 严格(2)：+ 拦截全部第三方请求（非当前站点域的子资源——可能偶有站点受影响，用户显式选择）。</summary>
 public static class TrackerList
 {
-    /// <summary>已知跟踪/广告域（后缀匹配；适度规模的可信清单）。</summary>
-    private static readonly string[] Domains =
+    /// <summary>已知跟踪/广告域（后缀匹配；适度规模的可信清单）。
+    /// CS-243：提 internal 供清单元测试（归一/唯一/自命中契约）。</summary>
+    internal static readonly string[] Domains =
     [
         // 广告网络
         "doubleclick.net", "googlesyndication.com", "googletagservices.com",

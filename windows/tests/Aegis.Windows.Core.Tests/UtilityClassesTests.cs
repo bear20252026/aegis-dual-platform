@@ -153,3 +153,24 @@ public class UtilityClassesTests
         Assert.Equal(expected, TrackerList.IsSameSite(host, pageHost));
     }
 }
+
+/// <summary>C18 批（审计 2026-09-26）：跟踪器清单元测试（CS-243）——
+/// 清单自身的归一/唯一/自命中契约（防清单腐化：大小写漂移、重复项、坏条目）。</summary>
+public sealed class TrackerListMetaTests
+{
+    [Fact]
+    public void Domains_AllLowercaseUniqueNonEmpty()
+    {
+        var domains = TrackerList.Domains;
+        Assert.NotEmpty(domains);
+        Assert.All(domains, d => Assert.Equal(d, d.ToLowerInvariant()));
+        Assert.Equal(domains.Length, domains.Distinct().Count());
+    }
+
+    [Fact]
+    public void Domains_EveryEntrySelfMatches()
+    {
+        // 元一致性：清单中每个条目都应被 IsTracker 命中（条目形态腐化即此处报警）
+        Assert.All(TrackerList.Domains, d => Assert.True(TrackerList.IsTracker(d)));
+    }
+}

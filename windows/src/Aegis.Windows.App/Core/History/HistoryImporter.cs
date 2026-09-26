@@ -3,6 +3,7 @@ namespace Aegis.Windows.Core.History;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 /// <summary>Chrome/Edge 历史导入（M3 导入向导——Python browser_import.py
@@ -16,23 +17,10 @@ public static class HistoryImporter
 {
     /// <summary>探测本机 Chrome/Edge 历史库（仅存在性检查——不读取内容；
     /// Default + Profile 1..9 多配置）。</summary>
-    public static IReadOnlyList<ImportSource> DetectSources()
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var sources = new List<ImportSource>();
-        AddIfExists(sources, "chrome", Path.Combine(
-            local, "Google", "Chrome", "User Data", "Default", "History"));
-        AddIfExists(sources, "edge", Path.Combine(
-            local, "Microsoft", "Edge", "User Data", "Default", "History"));
-        for (var i = 1; i <= 9; i++)
-        {
-            AddIfExists(sources, $"chrome(profile {i})", Path.Combine(
-                local, "Google", "Chrome", "User Data", $"Profile {i}", "History"));
-            AddIfExists(sources, $"edge(profile {i})", Path.Combine(
-                local, "Microsoft", "Edge", "User Data", $"Profile {i}", "History"));
-        }
-        return sources;
-    }
+    public static IReadOnlyList<ImportSource> DetectSources() =>
+        Core.Import.ImportProbe.Probe("History")  // CS-231：探测路径共享单源
+            .Select(p => new ImportSource(p.Browser, p.Path))
+            .ToList();
 
     /// <summary>解析历史库（拷贝只读副本——锁定安全；-wal/-shm 边车一并拷贝，
     /// 否则浏览器运行中未 checkpoint 的最近访问在副本上缺失）。返回最近
@@ -133,11 +121,6 @@ public static class HistoryImporter
         }
     }
 
-    private static void AddIfExists(List<ImportSource> into, string browser, string path)
-    {
-        if (File.Exists(path))
-            into.Add(new ImportSource(browser, path));
-    }
 }
 
 /// <summary>历史导入来源（浏览器名 + History 库路径）。</summary>

@@ -62,4 +62,15 @@ public class TabSleepPolicyTests
             new[] { exactly, almost }, "other", 10, now, _ => true);
         Assert.Equal("exactly", Assert.Single(result).TabId);
     }
+    [Fact]
+    public void SelectTabsToSleep_EmptyCollection_ReturnsEmpty()
+    {
+        // CS-240：空集合入口返回空（不抛、不调 hasRuntime）
+        var called = false;
+        var result = TabSleepPolicy.SelectTabsToSleep(
+            [], "active", 30, DateTime.Now, _ => { called = true; return true; });
+        Assert.Empty(result);
+        Assert.False(called);
+    }
+
 }

@@ -40,6 +40,10 @@ public sealed class TabRuntimeCoordinator : IDisposable
         Microsoft.Web.WebView2.Core.CoreWebView2Environment? environment = null,
         bool isPrivate = false)
     {
+        // CS-238：同 id 重复创建先拆旧实例——此前直接覆盖映射，旧 runtime
+        // （WebView 控件+生命周期资源）泄漏
+        if (_runtimes.ContainsKey(tab.TabId))
+            Close(tab.TabId);
         var runtime = new TabRuntime(broker, tab, environment) { IsPrivate = isPrivate };
         var lifetime = new TabRuntimeLifetime(runtime);
         _runtimes[tab.TabId] = runtime;

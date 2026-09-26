@@ -1,6 +1,7 @@
 namespace Aegis.Windows;
 
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
@@ -36,6 +37,9 @@ public partial class App : Application
     // 应用既无法操作也无法退出——30 秒窗口内最多弹 3 次，超出只记日志
     private static readonly PopupRateLimiter PopupLimiter = new(3);
     private const long PopupWindowMs = 30_000;
+    // CS-230：单实例互斥——双开会割裂会话/书签库（SQLite busy 与配置互相覆盖）
+    private const string SingleInstanceMutexName = "Local\\Aegis.WebView.SingleInstance";
+    private static Mutex? _singleInstanceMutex;
 
     public App()
     {
@@ -90,6 +94,14 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        _singleInstanceMutex = new Mutex(true, SingleInstanceMutexName, out var createdNew);
+        if (!createdNew)
+        {
+            MessageBox.Show("Aegis 已在运行（二次启动已退出）。", "Aegis",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
         try
         {
             var window = new Chrome.MainWindow(Chrome.MainWindowDependencies.Defaults());
