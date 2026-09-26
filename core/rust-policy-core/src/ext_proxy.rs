@@ -104,8 +104,10 @@ impl ExtProxy {
     /// 如果 proxy_endpoint 为空，脚本仅注册拦截逻辑但不转发（观察模式）。
     pub fn inject_script(&self) -> String {
         let endpoint = &self.config.proxy_endpoint;
-        // JS 单引号字符串转义（此前含 ' 即注入；端点为配置面输入）
-        let endpoint_escaped = endpoint.replace('\\', "\\\\").replace('\'', "\\'");
+        // RS-225（2026-09-26 审计）：端点转义改走 util::js_escape_single_quoted
+        // 单源——此前内联 replace 链漏 \n/\r 转义，端点含换行即产出
+        // 语法错误脚本
+        let endpoint_escaped = crate::util::js_escape_single_quoted(endpoint);
         let intercept_dl = self.config.intercept_downloads;
         let intercept_up = self.config.intercept_updates;
         format!(
@@ -135,8 +137,11 @@ impl ExtProxy {
 
   function proxyUrl(originalUrl) {{
     if (!PROXY_ENDPOINT) return originalUrl; // 无代理端点，直连
-    // 将原始 URL 作为参数传递给代理端点
-    return PROXY_ENDPOINT + '?url=' + encodeURIComponent(originalUrl);
+    // 将原始 URL 作为参数传递给代理端点。
+    // RS-226（2026-09-26 审计）：端点自带 query 时用 '&' 拼接——固定
+    // 拼 '?url=' 会产出双问号畸形地址（https://p/e?k=1?url=...）
+    var joiner = PROXY_ENDPOINT.indexOf('?') >= 0 ? '&' : '?';
+    return PROXY_ENDPOINT + joiner + 'url=' + encodeURIComponent(originalUrl);
   }}
 
   // 拦截 fetch 请求
@@ -157,13 +162,16 @@ impl ExtProxy {
   }} catch(e) {{}}
 
   // 拦截 XMLHttpRequest.open
+  // RS-232（2026-09-26 审计）：显式参数转发——arguments[1] 写回赋值
+  // 仅非严格模式合法（严格模式下不生效），改显式收集转发
   try {{
     var origOpen = XMLHttpRequest.prototype.open;
     XMLHttpRequest.prototype.open = function(method, url) {{
+      var rest = Array.prototype.slice.call(arguments, 2);
       if (shouldIntercept(url)) {{
-        arguments[1] = proxyUrl(url);
+        url = proxyUrl(url);
       }}
-      return origOpen.apply(this, arguments);
+      return origOpen.apply(this, [method, url].concat(rest));
     }};
   }} catch(e) {{}}
 }})();
@@ -267,6 +275,54 @@ mod tests {
         assert!(
             script.contains("chromewebstore\\.google\\.com"),
             "商店站内请求"
+        );
+    }
+
+    // —— RS-225/226/232 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn endpoint_escaping_reuses_single_source_with_newlines() {
+        // RS-225：端点转义必须走 util::js_escape_single_quoted 单源——
+        // 内联 replace 链漏 \n/\r，端点含换行即产出语法错误脚本
+        let ep = ExtProxy::with_endpoint("https://proxy.example.com/a'b\nc\\d\re");
+        let script = ep.inject_script();
+        assert!(
+            script.contains("a\\'b\\nc\\\\d\\re"),
+            "单引号/换行/回车/反斜杠必须全部转义（单源转义器口径）"
+        );
+        // 注：scheme 校验（RS-086）放行含换行的 https 端点串——转义器
+        // 负责其 JS 字面量安全
+    }
+
+    #[test]
+    fn proxy_url_joins_query_aware() {
+        // RS-226：端点自带 query 时用 '&' 拼接——固定 '?url=' 会产出
+        // 双问号畸形地址
+        let script =
+            ExtProxy::with_endpoint("https://proxy.example.com/anon?key=1").inject_script();
+        assert!(
+            script.contains("PROXY_ENDPOINT.indexOf('?') >= 0 ? '&' : '?'"),
+            "拼接分隔符必须按端点是否含 query 分支"
+        );
+        assert!(!script.contains("+ '?url=' +"), "固定问号拼接必须移除");
+    }
+
+    #[test]
+    fn xhr_open_forwards_arguments_explicitly() {
+        // RS-232：XHR 拦截不得依赖 `arguments[1] = ...` 写回（仅非严格
+        // 模式合法）——必须显式参数转发
+        let script = ExtProxy::new().inject_script();
+        assert!(
+            script.contains("Array.prototype.slice.call(arguments, 2)"),
+            "可选参（async/user/password）显式收集"
+        );
+        assert!(
+            script.contains("origOpen.apply(this, [method, url].concat(rest))"),
+            "显式转发改写后的 url 与剩余参数"
+        );
+        assert!(
+            !script.contains("arguments[1] ="),
+            "arguments 写回形态必须移除（严格模式失效）"
         );
     }
 }

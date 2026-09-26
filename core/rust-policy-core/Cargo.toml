@@ -41,8 +41,8 @@ serde_json = "1"
 # 不含 cli feature（避免拉入重型 uniffi_bindgen）；bin 需要时单独启用
 uniffi = "0.32"
 
-[dev-dependencies]
-hex = "0.4"
+# RS-235（2026-09-26 审计）：删除 [dev-dependencies] hex = "0.4"——全 crate
+# 零使用（死依赖；hex 编解码已单源于 util::hex_encode/hex_decode，RS-186）。
 
 # RS-150（审计 2026-09-25）：lint 门禁——把原本隐性的 clippy 默认档变显性，
 # 防回退。选用与现有代码兼容的最小集（宽松项后续批次逐档收紧）：

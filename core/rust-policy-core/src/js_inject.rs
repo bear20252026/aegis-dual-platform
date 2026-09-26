@@ -114,8 +114,11 @@ impl Default for JsPipeline {
 
 // RS-040（审计 2026-09-24）：抽象与实现接线——此前 JsInjectable 定义了
 // 接口但 9 个防护模块零实现（管线直接调 inherent inject_script，trait
-// 形同虚设）。现统一为各模块实现 trait；引用类型经_blanket impl 适配，
-// 管线（lib.rs fingerprint_pipeline）改用 JsPipeline trait 对象组装。
+// 形同虚设）。现统一为各模块实现 trait；引用类型经 blanket impl 适配。
+// RS-233（2026-09-26 审计）：九阶段管线组装已单源到
+// protection_mode::fingerprint_pipeline_with_mode（此前 lib.rs 用
+// JsPipeline trait 对象另写一份清单，两处维护漂移）；JsPipeline 保留为
+// 通用组合工具（宿主/测试自定义管线仍可用）。
 macro_rules! impl_js_injectable {
     ($($t:ty => $name:literal),* $(,)?) => {
         $(
@@ -143,8 +146,8 @@ impl_js_injectable!(
     crate::ext_proxy::ExtProxy => "ExtProxy",
 );
 
-/// 引用适配：`&T`（T: JsInjectable）同样可实现 trait——管线组装时
-/// 允许借用外部构造的阶段（如 fingerprint_pipeline 的 &FingerprintShield）。
+/// 引用适配：`&T`（T: JsInjectable）同样可实现 trait——自定义管线组装时
+/// 允许借用外部构造的阶段（如 &FingerprintShield）。
 impl<T: JsInjectable + ?Sized> JsInjectable for &T {
     fn name(&self) -> &str {
         T::name(*self)

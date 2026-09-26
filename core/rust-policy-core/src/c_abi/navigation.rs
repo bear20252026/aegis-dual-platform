@@ -70,9 +70,9 @@ pub extern "C" fn aegis_policy_core_broker_advance_document_generation(
 /// RS-141（审计 2026-09-25）：read_utf8 细分错误码透传辅助——此前四个
 /// 参数的错误统一折叠为 "ffi_input_invalid"，宿主无法区分 null 指针 /
 /// 超长 / 非 UTF-8（可观测性缺失面）。取首个 Err 原样透传。
-fn unwrap_input_or_deny(
-    result: Result<&'static str, &'static str>,
-) -> Result<&'static str, *mut c_char> {
+/// RS-211（审计 2026-09-26）：Ok 侧生命周期随 read_utf8 参数化（借用
+/// 宿主缓冲，非 'static）。
+fn unwrap_input_or_deny<'a>(result: Result<&'a str, &'static str>) -> Result<&'a str, *mut c_char> {
     result.map_err(input_deny)
 }
 

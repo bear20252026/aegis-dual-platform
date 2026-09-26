@@ -61,7 +61,9 @@ const MAX_SESSIONS: usize = 1024;
 /// `SystemTime::now()` 读取点（此前散在 validate_action 内联）。生产路径
 /// 经 validate_action 调用；测试经 validate_action_at 注入固定时刻，
 /// 不动系统时钟。
-fn now_unix_secs() -> Option<u64> {
+/// RS-220（审计 2026-09-26）：pub(crate) 化——ffi/broker.rs 的 3 处内联
+/// SystemTime::now 收敛复用此单源（时钟不可用语义一处定义）。
+pub(crate) fn now_unix_secs() -> Option<u64> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .ok()
@@ -230,7 +232,7 @@ impl ContextBroker {
 
         // ===== 第 2 层：能力验证 =====
         match self.capabilities.validate(&action.scope, &action.origin) {
-            CapabilityResult::Allowed(_) => {} // 能力允许，继续下一层
+            CapabilityResult::Allowed => {} // 能力允许，继续下一层（RS-222：无载荷）
             CapabilityResult::Denied(reason) => {
                 return Decision::Deny(DenyReason {
                     code: "capability_denied".into(),
@@ -241,12 +243,24 @@ impl ContextBroker {
         }
 
         // ===== 第 3 层：会话 + nonce 验证 =====
-        self.validate_and_consume(action)
+        // RS-221（2026-09-26 审计）：validate_and_consume 成功路径不再克隆
+        // 整个 AuthorizedAction——三层管线只消费判别；Decision::Allow 的
+        // 载荷在本层（evaluate 出口）按需构造一次
+        match self.validate_and_consume(action) {
+            Ok(()) => Decision::Allow(action.clone()),
+            Err(reason) => Decision::Deny(reason),
+        }
     }
 
     /// 验证 AuthorizedAction 上下文（fail-closed）。
     /// 保留用于向后兼容和测试，新代码应使用 evaluate()。
-    pub fn validate_action(&self, action: &AuthorizedAction) -> Decision {
+    ///
+    /// RS-221（2026-09-26 审计）：成功路径返回 `Ok(())`——此前
+    /// `Decision::Allow(action.clone())` 在每导航热路径克隆整个结构
+    /// （12 个 String）；三层管线（evaluate/FFI 消费方）仅消费判别即
+    /// 丢弃载荷。需要 Decision 形态的出口（如 evaluate）自行在边界
+    /// 构造一次 Allow 载荷。
+    pub fn validate_action(&self, action: &AuthorizedAction) -> Result<(), DenyReason> {
         // RS-155（审计 2026-09-25）：UNIX 秒单一时间源 now_unix_secs——
         // 授权过期判定的时刻由此注入，边界语义（RS-156）经
         // validate_action_at 固定时刻锁定，测试不动系统时钟。
@@ -254,7 +268,7 @@ impl ContextBroker {
         // Deny，顺序仅影响错误码归因，不改变拒绝语义）。
         match now_unix_secs() {
             Some(now) => self.validate_action_at(action, now),
-            None => Decision::Deny(DenyReason {
+            None => Err(DenyReason {
                 code: "system_clock".into(),
                 detail: "系统时间不可用".into(),
                 explanation: "denied — system clock is before UNIX epoch".into(),
@@ -266,12 +280,13 @@ impl ContextBroker {
     ///
     /// 检查顺序：会话存在 → 会话过期（单调时钟 Instant）→ 授权过期
     /// （UNIX 秒）→ 策略版本 → 代际绑定 → 标签绑定。
-    fn validate_action_at(&self, action: &AuthorizedAction, now: u64) -> Decision {
+    /// RS-221：成功路径 `Ok(())` 零克隆（调用方已持有 action）。
+    fn validate_action_at(&self, action: &AuthorizedAction, now: u64) -> Result<(), DenyReason> {
         // 检查会话存在
         let session = match self.sessions.get(&action.session_id) {
             Some(s) => s,
             None => {
-                return Decision::Deny(DenyReason {
+                return Err(DenyReason {
                     code: "session_not_found".into(),
                     detail: format!("会话 {} 不存在或已过期", action.session_id),
                     explanation: format!(
@@ -284,7 +299,7 @@ impl ContextBroker {
 
         // 检查会话过期
         if session.is_expired() {
-            return Decision::Deny(DenyReason {
+            return Err(DenyReason {
                 code: "session_expired".into(),
                 detail: format!("会话 {} 已过期", action.session_id),
                 explanation: format!(
@@ -298,7 +313,7 @@ impl ContextBroker {
         // 是「失效时刻」而非「最后有效时刻」，等于当前时刻的授权已到界。
         // 由 action_expires_at_boundary_* 测试锁定（注入固定 now）。
         if action.expires_at <= now {
-            return Decision::Deny(DenyReason {
+            return Err(DenyReason {
                 code: "action_expired".into(),
                 detail: "授权动作已过期".into(),
                 explanation: format!(
@@ -310,7 +325,7 @@ impl ContextBroker {
 
         // 检查策略版本
         if action.policy_version != self.policy_version {
-            return Decision::Deny(DenyReason {
+            return Err(DenyReason {
                 code: "policy_version_mismatch".into(),
                 detail: format!(
                     "策略版本不匹配：期望 {}，实际 {}",
@@ -325,7 +340,7 @@ impl ContextBroker {
 
         // 检查代际绑定
         if action.document_generation != session.generation {
-            return Decision::Deny(DenyReason {
+            return Err(DenyReason {
                 code: "generation_mismatch".into(),
                 detail: format!(
                     "代际不匹配：会话代际 {}，操作代际 {}",
@@ -339,7 +354,7 @@ impl ContextBroker {
         }
 
         if action.tab_id != session.tab_id {
-            return Decision::Deny(DenyReason {
+            return Err(DenyReason {
                 code: "tab_mismatch".into(),
                 detail: format!(
                     "标签不匹配：期望 {}，实际 {}",
@@ -352,22 +367,17 @@ impl ContextBroker {
             });
         }
 
-        Decision::Allow(action.clone())
+        Ok(())
     }
 
     /// 校验并消费授权动作。调用方应只在即将执行本地副作用时调用，
     /// 以确保通过校验的 nonce 不能被重放。
-    pub fn validate_and_consume(&mut self, action: &AuthorizedAction) -> Decision {
-        match self.validate_action(action) {
-            Decision::Allow(authorized) => {
-                match self.consume_nonce(&authorized.nonce, &authorized.session_id) {
-                    Ok(()) => Decision::Allow(authorized),
-                    Err(reason) => Decision::Deny(reason),
-                }
-            }
-            Decision::RequireConfirmation(request) => Decision::RequireConfirmation(request),
-            Decision::Deny(reason) => Decision::Deny(reason),
-        }
+    ///
+    /// RS-221：成功路径 `Ok(())` 零克隆（FFI consume 侧仅消费判别，
+    /// Allow 载荷由调用方按持有的 action 构造）。
+    pub fn validate_and_consume(&mut self, action: &AuthorizedAction) -> Result<(), DenyReason> {
+        self.validate_action(action)?;
+        self.consume_nonce(&action.nonce, &action.session_id)
     }
 
     /// 原子消费 nonce（一次性——重放拒绝）。
@@ -387,8 +397,9 @@ impl ContextBroker {
                 ),
             });
         }
-        if self.consumed_nonces.contains_key(nonce) {
-            let record = &self.consumed_nonces[nonce];
+        // RS-221（2026-09-26 审计）：contains_key 后再索引的同键双哈希查找
+        // 改 if let 单次查找（热路径——每消费一次省一轮哈希）
+        if let Some(record) = self.consumed_nonces.get(nonce) {
             return Err(DenyReason {
                 code: "nonce_replay".into(),
                 detail: format!(
@@ -481,16 +492,15 @@ mod tests {
         let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let action = make_action("s1", 1, "n1");
-        let result = broker.validate_action(&action);
-        assert!(matches!(result, Decision::Allow(_)));
+        // RS-221：成功路径 Ok(())（零克隆——不再回传 Allow 载荷）
+        assert!(broker.validate_action(&action).is_ok());
     }
 
     #[test]
     fn session_not_found_is_deny() {
         let broker = make_broker_with_defaults();
         let action = make_action("missing", 1, "n1");
-        let result = broker.validate_action(&action);
-        assert!(matches!(result, Decision::Deny(_)));
+        assert!(broker.validate_action(&action).is_err());
     }
 
     #[test]
@@ -499,8 +509,7 @@ mod tests {
         broker.create_session("s1".into(), "t1".into(), 1, Duration::from_secs(3600));
         let mut action = make_action("s1", 1, "n1");
         action.policy_version = "2.0".into();
-        let result = broker.validate_action(&action);
-        assert!(matches!(result, Decision::Deny(_)));
+        assert!(broker.validate_action(&action).is_err());
     }
 
     #[test]
@@ -508,8 +517,7 @@ mod tests {
         let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "t1".into(), 1, Duration::from_secs(3600));
         let action = make_action("s1", 999, "n1");
-        let result = broker.validate_action(&action);
-        assert!(matches!(result, Decision::Deny(_)));
+        assert!(broker.validate_action(&action).is_err());
     }
 
     #[test]
@@ -549,7 +557,7 @@ mod tests {
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let mut action = make_action("s1", 1, "n1");
         action.expires_at = 0;
-        assert!(matches!(broker.validate_action(&action), Decision::Deny(_)));
+        assert!(broker.validate_action(&action).is_err());
     }
 
     #[test]
@@ -558,7 +566,7 @@ mod tests {
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let mut action = make_action("s1", 1, "n1");
         action.tab_id = "other-tab".into();
-        assert!(matches!(broker.validate_action(&action), Decision::Deny(_)));
+        assert!(broker.validate_action(&action).is_err());
     }
 
     #[test]
@@ -566,14 +574,8 @@ mod tests {
         let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
         let action = make_action("s1", 1, "n1");
-        assert!(matches!(
-            broker.validate_and_consume(&action),
-            Decision::Allow(_)
-        ));
-        assert!(matches!(
-            broker.validate_and_consume(&action),
-            Decision::Deny(_)
-        ));
+        assert!(broker.validate_and_consume(&action).is_ok());
+        assert!(broker.validate_and_consume(&action).is_err());
     }
 
     #[test]
@@ -585,10 +587,7 @@ mod tests {
         assert!(!broker.advance_document_generation("s1", "tab-0", 6));
         assert!(!broker.advance_document_generation("s1", "tab-0", 4));
         assert!(broker.advance_document_generation("s1", "tab-0", 5));
-        assert!(matches!(
-            broker.validate_action(&make_action("s1", 5, "n2")),
-            Decision::Allow(_)
-        ));
+        assert!(broker.validate_action(&make_action("s1", 5, "n2")).is_ok());
     }
 
     #[test]
@@ -812,8 +811,8 @@ mod tests {
         let mut action = make_action("s1", 1, "n1");
         action.expires_at = 1_000_000_000;
         match broker.validate_action_at(&action, 1_000_000_000) {
-            Decision::Deny(reason) => assert_eq!(reason.code, "action_expired"),
-            other => panic!("expires_at == now 必须拒绝，实际 {other:?}"),
+            Err(reason) => assert_eq!(reason.code, "action_expired"),
+            Ok(()) => panic!("expires_at == now 必须拒绝（实际 Ok）"),
         }
     }
 
@@ -824,10 +823,7 @@ mod tests {
         let broker = broker_for_expiry_tests();
         let mut action = make_action("s1", 1, "n1");
         action.expires_at = 1_000_000_001;
-        assert!(matches!(
-            broker.validate_action_at(&action, 1_000_000_000),
-            Decision::Allow(_)
-        ));
+        assert!(broker.validate_action_at(&action, 1_000_000_000).is_ok());
     }
 
     #[test]
@@ -836,8 +832,8 @@ mod tests {
         let mut action = make_action("s1", 1, "n1");
         action.expires_at = 999_999_999;
         match broker.validate_action_at(&action, 1_000_000_000) {
-            Decision::Deny(reason) => assert_eq!(reason.code, "action_expired"),
-            other => panic!("expires_at < now 必须拒绝，实际 {other:?}"),
+            Err(reason) => assert_eq!(reason.code, "action_expired"),
+            Ok(()) => panic!("expires_at < now 必须拒绝（实际 Ok）"),
         }
     }
 
@@ -847,10 +843,7 @@ mod tests {
         // 生产入口与注入内核语义一致（同 action 同判定，取 now 自然推进）
         let broker = broker_for_expiry_tests();
         let action = make_action("s1", 1, "n1"); // expires_at 9999999999（2286 年）
-        assert!(matches!(
-            broker.validate_action(&action),
-            Decision::Allow(_)
-        ));
+        assert!(broker.validate_action(&action).is_ok());
         assert!(now_unix_secs().is_some(), "生产时间源必须可用");
     }
 
@@ -921,10 +914,7 @@ mod tests {
         );
         // 会话代际保持 MAX（未推进）
         let action = make_action("s-max", u64::MAX, "nonce-overflow");
-        assert!(matches!(
-            broker.validate_action(&action),
-            Decision::Allow(_)
-        ));
+        assert!(broker.validate_action(&action).is_ok());
     }
 
     #[test]

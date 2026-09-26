@@ -161,7 +161,11 @@ impl CapabilityRegistry {
                         "origin {origin} 不在 capability {name} 的允许列表中"
                     ));
                 }
-                CapabilityResult::Allowed(cap.clone())
+                // RS-222（2026-09-26 审计）：成功路径无载荷——此前
+                // Allowed(cap.clone()) 克隆整个 Capability（name/scope/
+                // allowed_origins Vec 全拷）；三层管线（broker::evaluate）
+                // 仅消费判别即丢弃，纯热路径白付分配
+                CapabilityResult::Allowed
             }
         }
     }
@@ -181,9 +185,12 @@ impl CapabilityRegistry {
 }
 
 /// capability 验证结果（fail-closed）。
+///
+/// RS-222（2026-09-26 审计）：`Allowed` 无载荷——此前携带整个 Capability
+/// 克隆，三层管线仅消费判别即丢弃（纯热路径分配）。
 #[derive(Debug)]
 pub enum CapabilityResult {
-    Allowed(Capability),
+    Allowed,
     Denied(String),
 }
 
@@ -246,7 +253,7 @@ mod tests {
         registry.register(make_cap("read", CapabilityScope::Read, None));
         assert!(matches!(
             registry.validate("read", "https://example.com"),
-            CapabilityResult::Allowed(_)
+            CapabilityResult::Allowed
         ));
     }
 
@@ -269,7 +276,7 @@ mod tests {
         registry.register(cap);
         assert!(matches!(
             registry.validate("restricted", "https://trusted.com/path"),
-            CapabilityResult::Allowed(_)
+            CapabilityResult::Allowed
         ));
         assert!(matches!(
             registry.validate("restricted", "https://evil.com"),
@@ -343,7 +350,7 @@ mod tests {
         assert!(registry.consume("c2"));
         assert!(matches!(
             registry.validate("c2", "https://e.com"),
-            CapabilityResult::Allowed(_)
+            CapabilityResult::Allowed
         ));
         assert!(registry.consume("c2"));
         assert!(matches!(

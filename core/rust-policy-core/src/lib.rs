@@ -58,11 +58,20 @@ pub extern "C" fn aegis_policy_core_abi_version() -> u32 {
 /// 指纹防护注入管线（管道化组合所有防护阶段）。
 ///
 /// 每个阶段独立、可拆卸、可组合——移除/新增阶段不影响其他阶段。
-/// 管线顺序：ToStringGuard → PerSiteSeed → FingerprintShield → LetterboxShield → QueryStripper → FontNormalizer → WebGLSpoof → TimerPrecision → ExtProxy
+/// 管线顺序：ProtectionMode 声明头 → ToStringGuard → PerSiteSeed →
+/// FingerprintShield → LetterboxShield → QueryStripper → FontNormalizer →
+/// WebGLSpoof → TimerPrecision → ExtProxy
 ///
 /// `domain`：该 WebView 顶层文档的 eTLD+1 域名（宿主已知），供 PerSiteSeed
 /// 按域派生站点种子——此前管线把会话种子 hex 当域名传参，所有站点共用
 /// 同一种子，per-site 隔离完全失效。
+///
+/// RS-233（2026-09-26 审计）：单源组装——此前本入口用 JsPipeline trait
+/// 对象手写九阶段清单，protection_mode::fingerprint_pipeline_with_mode
+/// 用 parts Vec + enable_* 分支另写一份，阶段清单/顺序两处维护（增删
+/// 阶段漏改一侧即两端口径分裂）。现委托
+/// `fingerprint_pipeline_with_mode(Maximum, domain)`（Maximum = 全九阶段
+/// 启用；输出额外携带模式声明头——Maximum 模式声明，语义等价）。
 ///
 /// # 用法
 /// ```rust
@@ -71,41 +80,11 @@ pub extern "C" fn aegis_policy_core_abi_version() -> u32 {
 /// let script = fingerprint_pipeline(&shield, "example.com");
 /// ```
 pub fn fingerprint_pipeline(shield: &shield::FingerprintShield, domain: &str) -> String {
-    // RS-040（审计 2026-09-24）：管线改用 JsPipeline trait 对象组装——
-    // 此前 JsInjectable 抽象与实现脱节（9 模块零实现，直调 inherent 方法）。
-    // 顺序保持不变：ToStringGuard → PerSiteSeed → FingerprintShield →
-    // LetterboxShield → QueryStripper → FontNormalizer → WebGLSpoof →
-    // TimerPrecision → ExtProxy
-    // PerSiteStage 持有种子与域名的所有权（JsPipeline 要求 'static）
-    struct PerSiteStage {
-        seed: per_site_seed::PerSiteSeed,
-        domain: String,
-    }
-    impl js_inject::JsInjectable for PerSiteStage {
-        fn name(&self) -> &str {
-            "PerSiteSeed"
-        }
-        fn inject_script(&self) -> String {
-            self.seed.inject_script(&self.domain)
-        }
-    }
-
-    let per_site = per_site_seed::PerSiteSeed::new(shield.seed_bytes());
-    let mut pipeline = js_inject::JsPipeline::new();
-    pipeline.add(Box::new(tostring_guard::ToStringGuard::new()));
-    pipeline.add(Box::new(PerSiteStage {
-        seed: per_site,
-        domain: domain.to_string(),
-    }));
-    // shield 借用不适配 'static 管线——Clone（32 字节种子拷贝，代价可忽略）
-    pipeline.add(Box::new(shield.clone()));
-    pipeline.add(Box::new(letterbox::LetterboxShield::new()));
-    pipeline.add(Box::new(query_strip::QueryStripper::new()));
-    pipeline.add(Box::new(font_norm::FontNormalizer::new()));
-    pipeline.add(Box::new(webgl_spoof::WebGLSpoof::new()));
-    pipeline.add(Box::new(timer_prec::TimerPrecision::new()));
-    pipeline.add(Box::new(ext_proxy::ExtProxy::new()));
-    pipeline.build()
+    protection_mode::fingerprint_pipeline_with_mode(
+        shield,
+        protection_mode::ProtectionMode::Maximum,
+        domain,
+    )
 }
 
 #[cfg(test)]
@@ -158,8 +137,11 @@ mod native_abi_tests {
 
     #[test]
     fn pipeline_stage_names_trace_all_nine_modules() {
-        // RS-040 回归：管线必须经 JsInjectable trait 对象组装，且阶段名
-        // 覆盖全部 9 模块（含 PerSiteStage 适配器）
+        // RS-040 回归（阶段覆盖面）：管线输出必须覆盖全部 9 阶段。
+        // RS-233（2026-09-26 审计）：组装已单源化——本入口委托
+        // fingerprint_pipeline_with_mode(Maximum)（此前 JsPipeline 与
+        // parts Vec 两套手写清单），阶段清单漂移在 protection_mode 侧
+        // 的逐模式测试与本测试双重锁定
         let shield = shield::FingerprintShield::new();
         let script = fingerprint_pipeline(&shield, "example.com");
         for name in [
@@ -248,5 +230,24 @@ mod native_abi_tests {
             aegis_policy_core_abi_version(),
             "探测入口幂等（重复调用同值）"
         );
+    }
+
+    // —— RS-233 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn fingerprint_pipeline_delegates_to_maximum_mode_single_source() {
+        // RS-233：九阶段管线单源组装——本入口必须逐字节等于
+        // fingerprint_pipeline_with_mode(Maximum, domain)。此前两套手写
+        // 清单（JsPipeline trait 对象 vs parts Vec），阶段增删漏改一侧
+        // 即两端口径分裂；本断言让任何一侧私改立刻红灯
+        use crate::protection_mode::{fingerprint_pipeline_with_mode, ProtectionMode};
+        let shield = shield::FingerprintShield::new();
+        for domain in ["example.com", "other.net"] {
+            assert_eq!(
+                fingerprint_pipeline(&shield, domain),
+                fingerprint_pipeline_with_mode(&shield, ProtectionMode::Maximum, domain),
+                "fingerprint_pipeline 必须委托 Maximum 模式单源组装（{domain}）"
+            );
+        }
     }
 }

@@ -82,6 +82,9 @@ impl WebGLSpoof {
         let max_vp_w = self.config.max_viewport_dims[0];
         let max_vp_h = self.config.max_viewport_dims[1];
         let max_rb = self.config.max_renderbuffer_size;
+        // RS-218（2026-09-26 审计）：代理注册接口 Symbol 键单源引用
+        //（描述串去品牌化——详见 ToStringGuard::REGISTER_SYMBOL）
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
         format!(
             r#"
 // Aegis WebGLSpoof — WebGL 参数伪装（参照 playwright-afp）
@@ -143,9 +146,9 @@ impl WebGLSpoof {
       }}
     }};
     // 注册代理——toString 防护映射此包装，防"检测函数被覆盖"识破
-    var reg3 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg3) reg3(proto.getParameter, origGetParam);
-    var reg4 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg4) reg4(proto.getSupportedExtensions, origGetSupported);
-    var reg5 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg5) reg5(proto.getExtension, origGetExtension);
+    var reg3 = window[Symbol.for('{reg_sym}')]; if (reg3) reg3(proto.getParameter, origGetParam);
+    var reg4 = window[Symbol.for('{reg_sym}')]; if (reg4) reg4(proto.getSupportedExtensions, origGetSupported);
+    var reg5 = window[Symbol.for('{reg_sym}')]; if (reg5) reg5(proto.getExtension, origGetExtension);
   }}
 
   try {{ patchContext(WebGLRenderingContext.prototype); }} catch(e) {{}}

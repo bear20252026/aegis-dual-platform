@@ -118,15 +118,19 @@ impl LetterboxShield {
   }}
 
   // 覆盖 screen 属性
+  // RS-237（2026-09-26 审计）：screen 四属性补 .get 判定——此前仅判
+  // descriptor 存在（if (osW)）即调用 osW.get.call(this)，数据属性形态
+  // （get 为 undefined）下页面首读 screen.width 即抛 TypeError；
+  // window 组已是双守卫（if (oX && oX.get)），两组对齐
   try {{
     var osW = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'width');
     var osH = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'height');
     var osAW = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'availWidth');
     var osAH = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'availHeight');
-    if (osW) Object.defineProperty(screen, 'width', {{ get: function() {{ return roundTo(osW.get.call(this), WS, MW); }} }});
-    if (osH) Object.defineProperty(screen, 'height', {{ get: function() {{ return roundTo(osH.get.call(this), HS, MH); }} }});
-    if (osAW) Object.defineProperty(screen, 'availWidth', {{ get: function() {{ return roundTo(osAW.get.call(this), WS, MW); }} }});
-    if (osAH) Object.defineProperty(screen, 'availHeight', {{ get: function() {{ return roundTo(osAH.get.call(this), HS, MH); }} }});
+    if (osW && osW.get) Object.defineProperty(screen, 'width', {{ get: function() {{ return roundTo(osW.get.call(this), WS, MW); }} }});
+    if (osH && osH.get) Object.defineProperty(screen, 'height', {{ get: function() {{ return roundTo(osH.get.call(this), HS, MH); }} }});
+    if (osAW && osAW.get) Object.defineProperty(screen, 'availWidth', {{ get: function() {{ return roundTo(osAW.get.call(this), WS, MW); }} }});
+    if (osAH && osAH.get) Object.defineProperty(screen, 'availHeight', {{ get: function() {{ return roundTo(osAH.get.call(this), HS, MH); }} }});
   }} catch(e) {{}}
 
   // 覆盖 window 尺寸属性
@@ -208,10 +212,17 @@ mod tests {
         // RS-163（审计 2026-09-25）：descriptor 缺失时必须跳过对应覆盖——
         // 无守卫的 defineProperty 会以 undefined 原值覆盖（roundTo(undefined)
         // 产出 NaN，或用空覆盖反成指纹异常信号）。逐属性断言守卫形态：
-        // screen 组 existence-only，window 组 existence + getter 双守卫。
+        // RS-237（2026-09-26）：screen 组与 window 组统一双守卫
+        //（descriptor 存在且 .get 可读——数据属性形态首读即 TypeError）。
         let script = LetterboxShield::new().inject_script();
-        // screen 四属性：if (osX) 守卫
-        for guard in ["if (osW)", "if (osH)", "if (osAW)", "if (osAH)"] {
+        // RS-237：screen 四属性升级为双守卫（descriptor 存在且可读——
+        // 数据属性形态下 .get 为 undefined，首读即 TypeError）
+        for guard in [
+            "if (osW && osW.get)",
+            "if (osH && osH.get)",
+            "if (osAW && osAW.get)",
+            "if (osAH && osAH.get)",
+        ] {
             assert!(
                 script.contains(guard),
                 "screen override missing guard {guard}"

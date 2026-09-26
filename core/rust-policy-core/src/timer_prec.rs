@@ -72,7 +72,8 @@ impl TimerPrecision {
     /// 覆盖：
     /// - `performance.now()` — 圆整到 microseconds
     /// - `performance.now()` 的 jitter（如果启用）
-    /// - `Date.now()` — 圆整到 microseconds
+    /// - `Date.now()` — 圆整到 microseconds（RS-208：恒取整——原生值无小数）
+    /// - mark/measure/rAF/getEntries* 家族（RS-074/RS-217）
     ///
     /// 不覆盖 `new Date()`（构造函数无法安全覆盖），
     /// 但 `Date.now()` 是主要的高精度计时来源。
@@ -81,6 +82,9 @@ impl TimerPrecision {
         // JS 的 PRECISION_MS=0，`value / 0` 得 Infinity（精度降低完全失效）
         let us = self.config.microseconds.max(1);
         let jitter = self.config.jitter;
+        // RS-218（2026-09-26 审计）：代理注册接口 Symbol 键单源引用
+        //（描述串去品牌化——详见 ToStringGuard::REGISTER_SYMBOL）
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
         format!(
             r#"
 // Aegis TimerPrecision — 定时器精度降低（参照 Mullvad Browser）
@@ -106,19 +110,26 @@ impl TimerPrecision {
   try {{
     var origPerfNow = performance.now.bind(performance);
     var wrappedPerfNow = function() {{ return reducePrecision(origPerfNow()); }};
+    // RS-216（2026-09-26 审计）：属性描述符对齐原生——原生 performance.now
+    // 的 writable/configurable 均为 true，双 false 形态可被
+    // getOwnPropertyDescriptor(performance, 'now') 一查即破
     Object.defineProperty(performance, 'now', {{
       value: wrappedPerfNow,
-      writable: false,
-      configurable: false
+      writable: true,
+      configurable: true
     }});
-    var reg1 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg1) reg1(wrappedPerfNow, origPerfNow);
+    var reg1 = window[Symbol.for('{reg_sym}')]; if (reg1) reg1(wrappedPerfNow, origPerfNow);
   }} catch(e) {{}}
 
   // 覆盖 Date.now()
+  // RS-208（2026-09-26 审计）：Math.round 取整——jitter 开启时
+  // reducePrecision 返回带小数（±50% 精度随机偏移），原生 Date.now 恒为
+  // 整数毫秒，Number.isInteger(Date.now()) 一行即识破防护。jitter 仅保留
+  // 给 performance.now（Android 孪生 AD-108 同口径）
   try {{
     var origDateNow = Date.now;
-    Date.now = function() {{ return reducePrecision(origDateNow()); }};
-    var reg2 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg2) reg2(Date.now, origDateNow);
+    Date.now = function() {{ return Math.round(reducePrecision(origDateNow())); }};
+    var reg2 = window[Symbol.for('{reg_sym}')]; if (reg2) reg2(Date.now, origDateNow);
   }} catch(e) {{}}
 
   // RS-074（审计 2026-09-25）：mark/measure/timeStamp 的 startTime 与
@@ -132,7 +143,7 @@ impl TimerPrecision {
       }}
       return origMark.call(this, name, options);
     }};
-    var reg3 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg3) reg3(performance.mark, origMark);
+    var reg3 = window[Symbol.for('{reg_sym}')]; if (reg3) reg3(performance.mark, origMark);
   }} catch(e) {{}}
 
   try {{
@@ -146,8 +157,33 @@ impl TimerPrecision {
       }} catch (e2) {{}}
       return entry;
     }};
-    var reg4 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg4) reg4(performance.measure, origMeasure);
+    var reg4 = window[Symbol.for('{reg_sym}')]; if (reg4) reg4(performance.measure, origMeasure);
   }} catch(e) {{}}
+
+  // RS-217（2026-09-26 审计）：getEntries* 家族——缓冲区读取通道直取宿主
+  // 内部时钟，此前仅圆整 measure() 直接返回的 entry 与 mark 的显式
+  // startTime，getEntries/getEntriesByName/getEntriesByType 返回的条目
+  // 仍是原值。统一经实例属性遮蔽圆整 startTime/duration（与 measure 同型）
+  function aegisRoundEntry(entry) {{
+    try {{
+      Object.defineProperty(entry, 'startTime', {{ value: reducePrecision(entry.startTime) }});
+      Object.defineProperty(entry, 'duration', {{ value: reducePrecision(entry.duration) }});
+    }} catch (e2) {{}}
+    return entry;
+  }}
+
+  ['getEntries', 'getEntriesByName', 'getEntriesByType'].forEach(function(name) {{
+    try {{
+      var origGet = performance[name];
+      var wrappedGet = function() {{
+        var list = origGet.apply(this, arguments);
+        try {{ for (var i = 0; i < list.length; i++) aegisRoundEntry(list[i]); }} catch (e2) {{}}
+        return list;
+      }};
+      performance[name] = wrappedGet;
+      var reg = window[Symbol.for('{reg_sym}')]; if (reg) reg(wrappedGet, origGet);
+    }} catch(e) {{}}
+  }});
 
   try {{
     var origRAF = window.requestAnimationFrame;
@@ -155,7 +191,7 @@ impl TimerPrecision {
       if (typeof cb !== 'function') return origRAF.call(window, cb);
       return origRAF.call(window, function(ts) {{ cb(reducePrecision(ts)); }});
     }};
-    var reg5 = window[Symbol.for('aegis.proxy.register.v1')]; if (reg5) reg5(window.requestAnimationFrame, origRAF);
+    var reg5 = window[Symbol.for('{reg_sym}')]; if (reg5) reg5(window.requestAnimationFrame, origRAF);
   }} catch(e) {{}}
 }})();
 "#
@@ -262,6 +298,53 @@ mod tests {
         assert!(
             script.contains("cb(reducePrecision(ts))"),
             "rAF 回调时间戳经 reducePrecision"
+        );
+    }
+
+    // —— RS-208/216/217 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn date_now_returns_integer_milliseconds() {
+        // RS-208：Date.now 必须 Math.round 取整——jitter 开启时
+        // reducePrecision 产出带小数，Number.isInteger(Date.now()) 一行
+        // 即识破防护（Android 孪生 AD-108 同口径）
+        let script = TimerPrecision::new().inject_script();
+        assert!(
+            script.contains("Math.round(reducePrecision(origDateNow()))"),
+            "Date.now 通道必须取整（jitter 仅保留给 performance.now）"
+        );
+    }
+
+    #[test]
+    fn performance_now_descriptor_matches_native() {
+        // RS-216：performance.now 覆盖的属性描述符必须对齐原生——
+        // 原生 writable/configurable 均为 true，双 false 形态被
+        // getOwnPropertyDescriptor 一查即破
+        let script = TimerPrecision::new().inject_script();
+        assert!(
+            script.contains(
+                "value: wrappedPerfNow,\n      writable: true,\n      configurable: true"
+            ),
+            "performance.now 描述符必须 writable/configurable 双 true"
+        );
+        assert!(
+            !script.contains("writable: false"),
+            "脚本内不得残留 writable: false 描述符形态"
+        );
+    }
+
+    #[test]
+    fn get_entries_family_rounded() {
+        // RS-217：getEntries/getEntriesByName/getEntriesByType 返回的条目
+        // 直取宿主内部时钟——必须经实例属性遮蔽圆整 startTime/duration
+        let script = TimerPrecision::new().inject_script();
+        assert!(
+            script.contains("'getEntries', 'getEntriesByName', 'getEntriesByType'"),
+            "getEntries* 三入口必须全部覆盖"
+        );
+        assert!(
+            script.contains("aegisRoundEntry(list[i])"),
+            "缓冲区条目必须逐个圆整"
         );
     }
 }

@@ -136,6 +136,16 @@ impl fmt::Debug for SpaceRouting {
 }
 
 impl SpaceRouting {
+    /// 前端路由接口的 Symbol 键（RS-219 单源——与
+    /// ProtectionMode::MODE_SYMBOL / ToStringGuard::REGISTER_SYMBOL 同款收敛）。
+    ///
+    /// RS-219（审计 2026-09-26）：路由对象从具名 window 属性
+    /// `__AEGIS_SPACE_ROUTING` 收敛到 Symbol 键——具名全局是通用指纹脚本
+    /// 的免费探测点（防护存在性本身泄漏）。Symbol 属性不出现在
+    /// Object.keys / for-in / getOwnPropertyNames / JSON.stringify，
+    /// 前端经 `Symbol.for` 共享键取用。
+    pub const ROUTING_SYMBOL: &'static str = "space.routing.v1";
+
     /// 创建新的路由引擎。
     pub fn new(default_workspace: &str) -> Self {
         Self {
@@ -173,8 +183,8 @@ impl SpaceRouting {
 
     /// 生成 SpaceRouting JS 注入脚本。
     ///
-    /// 设置 `__AEGIS_SPACE_ROUTING` 全局对象，
-    /// 提供 `route(url)` 方法供前端使用。
+    /// RS-219：路由对象挂在 Symbol 键上（非具名 window 属性），
+    /// 提供 `route(url)` 方法供前端经 `Symbol.for` 共享键使用。
     pub fn inject_script(&self) -> String {
         // serde_json 构造——此前 name/workspace_id 完全未转义（JS 注入面）
         let rules_json: String = self
@@ -223,6 +233,10 @@ impl SpaceRouting {
       if (!r.enabled) continue;
       var matched = false;
       if (r.type === 'domain') {{
+        // RS-209（2026-09-26 审计）：空 pattern 防御——Rust 侧 RS-119 已拒
+        // 空 pattern（'' === '' 空串等值命中会把无 host URL 路由到该规则），
+        // JS 孪生此前未同步（双端口径漂移）
+        if (!r.pattern) continue;
         var h = getHostname(url);
         matched = (h === r.pattern) || h.endsWith('.' + r.pattern);
       }} else if (r.type === 'path') {{
@@ -235,13 +249,18 @@ impl SpaceRouting {
     return DEFAULT_WS;
   }}
 
-  Object.defineProperty(window, '__AEGIS_SPACE_ROUTING', {{
+  // RS-219（2026-09-26 审计）：收敛到 Symbol 键——具名 window 属性是
+  // 免费探测点（读到即知页面有防护注入）。
+  // Symbol 属性不出现在 Object.keys/for-in/getOwnPropertyNames；
+  // 前端经 Symbol.for('{routing_sym}') 共享键取用
+  Object.defineProperty(window, Symbol.for('{routing_sym}'), {{
     value: {{ route: route, rules: RULES, defaultWorkspace: DEFAULT_WS }},
     writable: false,
     configurable: false
   }});
 }})();
-"#
+"#,
+            routing_sym = Self::ROUTING_SYMBOL
         )
     }
 }
@@ -359,9 +378,38 @@ mod tests {
         let mut sr = SpaceRouting::new("default");
         sr.add_rule(RoutingRule::domain("GitHub", "github.com", "work"));
         let script = sr.inject_script();
-        assert!(script.contains("__AEGIS_SPACE_ROUTING"));
+        assert!(script.contains(&format!("Symbol.for('{}')", SpaceRouting::ROUTING_SYMBOL)));
         assert!(script.contains("github.com"));
         assert!(script.contains("route"));
+    }
+
+    // —— RS-209/219 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn script_domain_match_skips_empty_pattern() {
+        // RS-209：注入 JS 的 route() 必须与 Rust matches() 同步拒空 pattern——
+        // 此前 pattern="" 的 Domain 规则对无 host URL（getHostname 得 ''）
+        // 空串等值命中（'' === ''），无 host URL 被错误路由
+        let script = SpaceRouting::new("default").inject_script();
+        assert!(
+            script.contains("if (!r.pattern) continue;"),
+            "JS route() 必须短路空 pattern 域规则（与 RS-119 双端口径一致）"
+        );
+    }
+
+    #[test]
+    fn script_mounts_on_symbol_key_not_named_global() {
+        // RS-219：__AEGIS_SPACE_ROUTING 具名 window 属性是免费探测点——
+        // 必须收敛到 Symbol.for 键
+        let script = SpaceRouting::new("default").inject_script();
+        assert!(
+            !script.contains("__AEGIS_SPACE_ROUTING"),
+            "具名全局路由对象必须移除"
+        );
+        assert!(script.contains(&format!(
+            "Object.defineProperty(window, Symbol.for('{}')",
+            SpaceRouting::ROUTING_SYMBOL
+        )));
     }
 
     // —— RS-037/038 回归（审计 2026-09-24） ——

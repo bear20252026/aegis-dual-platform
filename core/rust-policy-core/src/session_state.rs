@@ -87,11 +87,14 @@ impl SessionState {
             // 此前缺失/类型损坏静默降级 false（普通标签），无痕标签恢复成
             // 普通标签 = 隐私语义静默丢失。fail-closed：缺即拒恢复。
             is_incognito: meta.get("isIncognito")?.as_bool()?,
-            last_active_time: meta.get("lastActiveTime")?.as_u64().unwrap_or(0),
+            // RS-230（2026-09-26 审计）：lastActiveTime/timestamp 同步收紧为
+            // 缺即拒——此前 unwrap_or(0) 静默默认，损坏会话的时间戳=0 会让
+            // 宿主把该标签排为最旧（LRU 淘汰/最近使用排序全部失真）
+            last_active_time: meta.get("lastActiveTime")?.as_u64()?,
             can_go_back: meta.get("canGoBack")?.as_bool().unwrap_or(false),
             can_go_forward: meta.get("canGoForward")?.as_bool().unwrap_or(false),
         };
-        let timestamp = map.get("timestamp")?.as_u64().unwrap_or(0);
+        let timestamp = map.get("timestamp")?.as_u64()?;
         Some(Self {
             schema_version,
             tab_id,
@@ -381,5 +384,42 @@ mod tests {
         let encoded = hex_encode(&data);
         assert_eq!(encoded.len(), 8192);
         assert_eq!(hex_decode(&encoded).unwrap(), data);
+    }
+
+    // —— RS-230 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn corrupted_timestamps_reject_restore() {
+        // RS-230：timestamp/lastActiveTime 缺失或类型损坏必须拒恢复——
+        // 此前 unwrap_or(0) 静默默认，损坏会话的 timestamp=0 会让宿主把
+        // 该标签排为最旧（LRU/最近使用排序失真）
+        let base = |metadata: &str, timestamp: &str| {
+            format!(
+                r#"{{"schemaVersion":{},"tabId":"t","sessionStateBytes":"00","metadata":{{{metadata}}},"timestamp":{timestamp}}}"#,
+                CURRENT_SCHEMA_VERSION
+            )
+        };
+        let full_meta = r#""title":"t","url":"u","isIncognito":false,"lastActiveTime":7,"canGoBack":false,"canGoForward":false"#;
+        // 缺 lastActiveTime / timestamp → 拒绝
+        assert!(SessionState::from_json(&base(
+            r#""title":"t","url":"u","isIncognito":false"#,
+            "0"
+        ))
+        .is_none());
+        assert!(SessionState::from_json(&base(full_meta, r#""missing""#)).is_none());
+        // 类型损坏（字符串时间戳）→ 拒绝
+        assert!(SessionState::from_json(&base(
+            r#""title":"t","url":"u","isIncognito":false,"lastActiveTime":"soon""#,
+            "0"
+        ))
+        .is_none());
+        assert!(SessionState::from_json(&base(full_meta, r#""1700000000000""#)).is_none());
+        // 负数时间戳 → u64 反序列化拒绝
+        assert!(SessionState::from_json(&base(full_meta, "-1")).is_none());
+        // 完整良构 → 正常恢复且字段值保留
+        let state =
+            SessionState::from_json(&base(full_meta, "1700000000000")).expect("完整时间戳必须恢复");
+        assert_eq!(state.metadata.last_active_time, 7);
+        assert_eq!(state.timestamp, 1_700_000_000_000);
     }
 }

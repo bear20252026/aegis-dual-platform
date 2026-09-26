@@ -40,8 +40,15 @@ impl ToStringGuard {
     /// RS-027（审计 2026-09-24）：注册接口从具名全局常量
     /// `window.__AEGIS_REGISTER_PROXY` 收敛到 Symbol 键——
     /// `Object.keys`/`for-in`/`getOwnPropertyNames` 均不可见，通用指纹
-    /// 脚本按名探测落空（须先猜测 Symbol 描述串才可能触达）。
-    pub const REGISTER_SYMBOL: &'static str = "aegis.proxy.register.v1";
+    /// 脚本按名探测落空。
+    ///
+    /// RS-218（2026-09-26 审计）：口径修正 + 去品牌化——Symbol 键**并非
+    /// 不可枚举**：`Object.getOwnPropertySymbols(window)` 无需猜测描述串
+    /// 即可列出全部 Symbol 属性，再按 `Symbol.for(desc)` 取用注册接口。
+    /// Symbol 收敛的真实收益是「按**具名字符串**探测落空 + 不出现在
+    /// 字符串枚举通道」，而非不可发现。描述串去品牌化（移除 "aegis."
+    /// 前缀）——Symbol 描述本身即探测信号，品牌名直指防护存在。
+    pub const REGISTER_SYMBOL: &'static str = "proxy.register.v1";
 
     /// 生成 toString 欺骗 JS 注入脚本。
     ///
@@ -85,9 +92,10 @@ impl ToStringGuard {
   proxyMap.set(Function.prototype.toString, origToString);
   proxyMap.set(Function.prototype.toLocaleString, origToLocale);
 
-  // RS-027：注册接口收敛到 Symbol 键——Symbol 属性不出现在任何
-  // 枚举通道（Object.keys / for-in / getOwnPropertyNames / JSON.stringify），
-  // 通用指纹脚本按名探测落空
+  // RS-027：注册接口收敛到 Symbol 键——不出现在字符串枚举通道
+  //（Object.keys / for-in / getOwnPropertyNames / JSON.stringify）。
+  // RS-218（2026-09-26 审计）：Symbol 键仍可被 getOwnPropertySymbols 列出
+  //（非不可发现）——收益是具名字符串探测落空；描述串已去品牌化
   var KEY = Symbol.for('{sym}');
   Object.defineProperty(window, KEY, {{
     value: function(proxy, original) {{

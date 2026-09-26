@@ -146,8 +146,18 @@ impl FontNormalizer {
       // 不含 "font-family:" 前缀——旧 replace 永不命中（整体 no-op）。
       // 现解析简写尾部的 family 段并整段替换；解析失败则落到保守默认值
       var m = /^((?:normal|italic|oblique|bold|small-caps|[1-9]00)\s+)*(\d+(?:\.\d+)?(?:px|pt|pc|in|cm|mm|q|em|rem|ex|ch))(?:\s*\/\s*[\d.]+\S*)?\s+([\s\S]+)$/i.exec(currentFont);
-      this.font = m ? (m[2] + ' ' + safeFont) : ('10px ' + safeFont);
-      return origMeasure.apply(this, arguments);
+      var target = m ? (m[2] + ' ' + safeFont) : ('10px ' + safeFont);
+      // RS-210（2026-09-26 审计）：prevFont 保存 + finally 恢复——此前直接
+      // `this.font = ...` 改写且不还原，页面后续所有绘制都被换成安全字体串，
+      // 且回读 ctx.font 即检测到防护。JS 单线程保证测量调用外不可观测中间态
+      if (target === currentFont) return origMeasure.apply(this, arguments);
+      var prevFont = currentFont;
+      this.font = target;
+      try {{
+        return origMeasure.apply(this, arguments);
+      }} finally {{
+        this.font = prevFont;
+      }}
     }};
   }} catch(e) {{}}
 }})();
@@ -232,5 +242,27 @@ mod tests {
         let script = fn_.inject_script();
         assert!(script.contains("Foo\\'bar"), "单引号必须已转义");
         assert!(!script.contains("'Foo'bar'"), "不得残留未转义直拼");
+    }
+
+    // —— RS-210 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn measure_text_restores_context_font() {
+        // RS-210：measureText 包装必须保存/恢复 ctx.font——此前直接改写
+        // 且不还原，页面后续绘制全被换成安全字体串，回读 ctx.font 即检测
+        // 到防护
+        let script = FontNormalizer::new().inject_script();
+        assert!(
+            script.contains("var prevFont = currentFont;"),
+            "改写前必须保存原字体"
+        );
+        assert!(
+            script.contains("this.font = prevFont;"),
+            "finally 块必须恢复原字体（状态零残留）"
+        );
+        assert!(
+            script.contains("} finally {"),
+            "恢复必须走 finally（异常路径同样还原）"
+        );
     }
 }

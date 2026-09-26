@@ -30,7 +30,11 @@ pub struct CAbiBroker {
 /// 异常宿主传入超长/无终止缓冲造成的无界越读。
 const FFI_INPUT_MAX_BYTES: usize = 64 * 1024;
 
-fn read_utf8(value: *const c_char) -> Result<&'static str, &'static str> {
+/// RS-211（2026-09-26 审计）：借用生命周期参数化——此前返回
+/// `Result<&'static str, &'static str>` 把宿主 C 缓冲的切片声明为
+/// 'static，签名层面 unsound：任何调用方把返回引用存入全局/缓存即悬垂。
+/// 现返回引用的生命周期由调用方栈帧约束（错误侧仍为 'static 字面量）。
+fn read_utf8<'a>(value: *const c_char) -> Result<&'a str, &'static str> {
     if value.is_null() {
         return Err("ffi_input_null");
     }
@@ -257,8 +261,14 @@ pub extern "C" fn aegis_policy_core_broker_new(policy_version: *const c_char) ->
 ///
 /// Broker 为进程级单例——本函数**有意不释放**底层分配，仅置 retired 标志；
 /// 后续所有对该句柄的调用都会读到标志并返回 deny（而非 use-after-free）。
-/// 退休分配的一次性泄漏可接受；RS-140 单例互斥保证同一时刻至多一份
-/// 活跃分配 + 一份退休遗留，泄漏总量有界（不再随 broker_new 调用次数放大）。
+///
+/// RS-236（2026-09-26 审计）：泄漏口径修正——此前注释宣称「RS-140 单例
+/// 互斥保证泄漏总量有界」，该说法**仅对单轮生命周期成立**。多轮
+/// new→free→new 循环下，LIVE_BROKER 直接覆盖旧退休地址且 Box 永不
+/// drop：每轮退休一份不可释放的 CAbiBroker 分配，退休分配随生命周期
+/// 轮数**线性累积**（1 轮 = 1 份遗留）。单例互斥约束的是「同一时刻至多
+/// 一份活跃分配」，不是全进程总量。宿主约定：按进程边界创建/退休
+/// （而非页面级高频循环）时累积轮数有限，单份遗留尺寸为常数级。
 ///
 /// # Safety
 /// `broker` 必须为本库创建（或 null）；指向任意地址是未定义行为。
@@ -1143,7 +1153,9 @@ mod tests {
     #[test]
     fn broker_new_enforces_single_live_instance() {
         // RS-140：活跃单例存在时二次创建返回 null（防泄漏放大）；
-        // 退休后允许重建——泄漏总量有界（1 活跃 + 1 遗留）
+        // 退休后允许重建。RS-236 口径：退休分配不回收，多轮生命周期
+        // 循环下线性累积（单轮 = 单份遗留）；单例互斥约束的是「同一
+        // 时刻至多一份活跃」，非全进程总量
         let _serial = broker_test_guard();
         let v1 = c_string("1.0");
         let b1 = aegis_policy_core_broker_new(v1.as_ptr());

@@ -201,13 +201,16 @@ impl QueryStripper {
   }};
 
   // 拦截 XMLHttpRequest.open
+  // RS-232（2026-09-26 审计）：显式参数转发——arguments[1] 写回赋值
+  // 仅非严格模式合法（严格模式下不生效），改显式收集转发
   var origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url) {{
-    arguments[1] = stripParams(url);
-    return origOpen.apply(this, arguments);
+    var rest = Array.prototype.slice.call(arguments, 2);
+    return origOpen.apply(this, [method, stripParams(url)].concat(rest));
   }};
 }})();
-"#
+"#,
+            params_json = params_json
         )
     }
 }
@@ -296,6 +299,27 @@ mod tests {
     }
 
     // —— RS-070 回归（审计 2026-09-25） ——
+
+    // —— RS-232 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn xhr_open_forwards_arguments_explicitly() {
+        // RS-232：XHR 拦截不得依赖 `arguments[1] = ...` 写回（仅非严格
+        // 模式合法）——必须显式参数转发（method + 剥离后 url + rest）
+        let script = QueryStripper::new().inject_script();
+        assert!(
+            script.contains("Array.prototype.slice.call(arguments, 2)"),
+            "可选参（async/user/password）显式收集"
+        );
+        assert!(
+            script.contains("origOpen.apply(this, [method, stripParams(url)].concat(rest))"),
+            "显式转发剥离后的 url 与剩余参数"
+        );
+        assert!(
+            !script.contains("arguments[1] ="),
+            "arguments 写回形态必须移除（严格模式失效）"
+        );
+    }
 
     #[test]
     fn fragment_question_mark_not_query() {

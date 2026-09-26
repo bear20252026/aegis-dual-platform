@@ -227,9 +227,17 @@ fn try_verify_signature(
 /// 蓝图最小依赖取舍：此实现仅试点，后续迁移 base64 crate）。
 /// 审计整改（2026-09-07）：严格校验——padding 只能在末尾、`=` 之后不得再有
 /// 数据、数据长度模 4 不得为 1、尾部残留非零 bit 拒绝。
+/// RS-224（2026-09-26 审计）：规范长度对齐 Python b64decode——
+/// len % 4 != 0 一律拒绝（"Zg" 无 padding 与 "Zg=" len 3 此前均放行，
+/// 签名编码严格性两端不一致 = 跨语言漂移面）；padding 仅允许尾部
+/// "=" / "=="（由首个 '=' 的 index%4 ∈ {2,3} 前置约束共同保证）。
 fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
     const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let bytes = input.as_bytes();
+    // RS-224：非规范长度（无 padding 短串 / 残缺 padding）整体拒绝
+    if !bytes.len().is_multiple_of(4) {
+        return Err(());
+    }
     let mut out = Vec::new();
     let mut buf = 0u32;
     let mut bits = 0u32;
@@ -298,7 +306,11 @@ mod tests {
     #[test]
     fn base64_rejects_length_one_mod_four() {
         assert!(base64_decode("A").is_err()); // index%4==1
-        assert!(base64_decode("Zg").is_ok()); // 2 数据字符合法
+                                              // RS-224：规范长度——"Zg"（无 padding）此前放行，现对齐 Python
+                                              // b64decode 一律拒绝（签名仅接受规范编码）
+        assert!(base64_decode("Zg").is_err());
+        assert!(base64_decode("Zg=").is_err()); // 残缺 padding（len 3）
+        assert!(base64_decode("Zg==").is_ok()); // 规范形态
     }
 
     // —— RS-125（审计 2026-09-25）：version_tuple 预发布/溢出——

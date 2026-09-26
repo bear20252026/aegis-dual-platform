@@ -46,10 +46,11 @@ pub struct CommandEntry {
     pub value: String,
     /// 图标标识。
     pub icon: String,
-    /// 匹配关键词（用于搜索）。
-    pub keywords: Vec<String>,
     /// RS-039（审计 2026-09-24）：小写缓存——matches 此前每查询对
     /// title/subtitle/value 各做一次 to_lowercase（O(条目×查询) 分配）。
+    /// RS-231（审计 2026-09-26 审计）：keywords 字段已删除——它只是
+    /// title_lc/subtitle_lc 的克隆集合，matches 的 keywords 遍历与后两行
+    /// contains 完全重复（每条目白付两个 String 分配）
     title_lc: String,
     subtitle_lc: String,
     value_lc: String,
@@ -61,7 +62,7 @@ impl CommandEntry {
     /// 渲染面 + 内存放大）。截断按字符计（UTF-8 安全，不产生半字符）。
     const MAX_FIELD_CHARS: usize = 512;
 
-    /// 内部统一构造器（keywords 与小写缓存单源派生；RS-193：字段截断）。
+    /// 内部统一构造器（小写缓存单源派生；RS-193：字段截断）。
     fn new_entry(
         command_type: CommandType,
         title: &str,
@@ -82,7 +83,6 @@ impl CommandEntry {
             subtitle,
             value,
             icon: icon.to_string(),
-            keywords: vec![title_lc.clone(), subtitle_lc.clone()],
             title_lc,
             subtitle_lc,
             value_lc,
@@ -126,12 +126,10 @@ impl CommandEntry {
             return true;
         }
         // RS-039：title/subtitle/value 小写已预计算——此处仅查询侧一次
-        // to_lowercase
+        // to_lowercase。RS-231（2026-09-26 审计）：keywords 通道遍历已删——
+        // 其内容只是 title_lc/subtitle_lc 的克隆，与后两个 contains 完全重复
         let q = query.to_lowercase();
-        self.keywords.iter().any(|k| k.contains(&q))
-            || self.title_lc.contains(&q)
-            || self.subtitle_lc.contains(&q)
-            || self.value_lc.contains(&q)
+        self.title_lc.contains(&q) || self.subtitle_lc.contains(&q) || self.value_lc.contains(&q)
     }
 }
 
@@ -151,6 +149,14 @@ impl fmt::Debug for CommandBar {
 }
 
 impl CommandBar {
+    /// 前端命令面板接口的 Symbol 键（RS-219 单源——与
+    /// SpaceRouting::ROUTING_SYMBOL / ProtectionMode::MODE_SYMBOL 同款收敛）。
+    ///
+    /// RS-219（审计 2026-09-26）：命令面板对象从具名 window 属性
+    /// `__AEGIS_COMMAND_BAR` 收敛到 Symbol 键——具名全局是通用指纹脚本
+    /// 的免费探测点（防护存在性本身泄漏）。前端经 `Symbol.for` 共享键取用。
+    pub const COMMAND_SYMBOL: &'static str = "command.bar.v1";
+
     /// 创建新的命令面板。
     pub fn new() -> Self {
         Self {
@@ -226,8 +232,9 @@ impl CommandBar {
 
     /// 生成 CommandBar JS 注入脚本。
     ///
-    /// 设置 `__AEGIS_COMMAND_BAR` 全局对象，
-    /// 提供 `search(query)` 和 `execute(entry)` 方法。
+    /// RS-219：命令面板对象挂在 Symbol 键上（非具名 window 属性），
+    /// 提供 `search(query)` 和 `execute(entry)` 方法供前端经
+    /// `Symbol.for` 共享键使用。
     pub fn inject_script(&self) -> String {
         // serde_json 构造——此前 format! 只转义双引号：标题/子标题源自书签
         // 历史（页面可控），含反斜杠/换行/控制字符即产生 JS 注入
@@ -266,7 +273,7 @@ impl CommandBar {
     if (!q) return ENTRIES.slice(0, MAX_RESULTS);
     return ENTRIES.filter(function(e) {{
       // RS-123（审计 2026-09-25）：与 Rust CommandEntry::matches 口径对齐——
-      // Rust 侧含 value 通道（keywords+title+subtitle+value），此前 JS 漏
+      // Rust 侧含 value 通道（title+subtitle+value），此前 JS 漏
       // value（URL/action name 搜索结果两端不一致）
       return e.title.toLowerCase().indexOf(q) >= 0 ||
              e.subtitle.toLowerCase().indexOf(q) >= 0 ||
@@ -287,13 +294,17 @@ impl CommandBar {
     }}
   }}
 
-  Object.defineProperty(window, '__AEGIS_COMMAND_BAR', {{
+  // RS-219（2026-09-26 审计）：收敛到 Symbol 键——具名 window 属性是
+  // 免费探测点（读到即知页面有防护注入）；
+  // 前端经 Symbol.for('{command_sym}') 共享键取用
+  Object.defineProperty(window, Symbol.for('{command_sym}'), {{
     value: {{ search: search, execute: execute, entries: ENTRIES }},
     writable: false,
     configurable: false
   }});
 }})();
-"#
+"#,
+            command_sym = Self::COMMAND_SYMBOL
         )
     }
 }
@@ -368,9 +379,26 @@ mod tests {
     fn script_contains_command_bar() {
         let cb = CommandBar::new();
         let script = cb.inject_script();
-        assert!(script.contains("__AEGIS_COMMAND_BAR"));
+        assert!(script.contains(&format!("Symbol.for('{}')", CommandBar::COMMAND_SYMBOL)));
         assert!(script.contains("search"));
         assert!(script.contains("execute"));
+    }
+
+    // —— RS-219/231 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn script_mounts_on_symbol_key_not_named_global() {
+        // RS-219：__AEGIS_COMMAND_BAR 具名 window 属性是免费探测点——
+        // 必须收敛到 Symbol.for 键
+        let script = CommandBar::new().inject_script();
+        assert!(
+            !script.contains("__AEGIS_COMMAND_BAR"),
+            "具名全局命令面板对象必须移除"
+        );
+        assert!(script.contains(&format!(
+            "Object.defineProperty(window, Symbol.for('{}')",
+            CommandBar::COMMAND_SYMBOL
+        )));
     }
 
     #[test]
@@ -513,8 +541,6 @@ mod tests {
         );
         // 截断不破坏 UTF-8（title 仍是合法字符串——chars 计数即证明）
         assert!(entry.title.ends_with('汉'));
-        // keywords 派生缓存同步截断
-        assert_eq!(entry.keywords[0], entry.title.to_lowercase());
     }
 
     #[test]

@@ -12,6 +12,7 @@ use aegis_policy_core::decision::AuthorizedAction;
 use aegis_policy_core::matcher::{glob_match, glob_subsumes};
 use aegis_policy_core::origin::try_parse_external;
 use aegis_policy_core::update_manifest::{canonical_unsigned, verify_threshold, version_tuple};
+use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
 
 /// contracts/vectors 目录（仓库布局：core/rust-policy-core → ../../contracts/vectors）。
@@ -68,11 +69,207 @@ fn url_origin_vectors_match_contracts() {
 
 #[test]
 fn update_manifest_valid_vectors() {
-    // SemVer 解析语义抽查（解析器单元语义；清单级向量见 c_abi 集成测试
-    // 对 update-manifest-valid.json 的完整消费）
+    // SemVer 解析语义抽查（解析器单元语义）
     assert_eq!(version_tuple("1.2.3"), Some((1, 2, 3)));
     assert_eq!(version_tuple("0.9.0"), Some((0, 9, 0)));
     assert_eq!(version_tuple("1.0"), None); // 无效 SemVer
+}
+
+// ===== RS-212（审计 2026-09-26）：update-manifest-valid/invalid 向量消费者 =====
+// 此前注释声称「清单级向量见 c_abi 集成测试对 update-manifest-valid.json 的
+// 完整消费」——全 crate 无任何测试消费这两份向量，Ed25519 阈值验证从未对
+// 跨语言契约向量跑过。现按 Rust 侧能力面消费：
+// - valid：canonical_unsigned 吃进向量清单 + 真实 Ed25519 密钥对 canonical
+//   字节重签（向量自带 sig 为占位串），verify_threshold 达阈值放行/差一拒绝；
+// - invalid：语义级规则（rollback/threshold/duplicate_key/untrusted_key_id/
+//   invalid_base64）逐条对齐 Rust 侧机制；纯 schema 规则（const/字段形态）
+//   属 Python/schema 层职责，显式登记不在此断言。
+
+/// 测试辅助：标准 base64 编码（与 update_manifest::base64_decode 对偶）。
+fn b64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+#[test]
+fn update_manifest_valid_vectors_reach_threshold_verification() {
+    // RS-212：valid 向量逐条进入 Rust 招牌能力——canonical 字节化 +
+    // Ed25519 阈值验证（向量自带 sig 是占位串 "AAAA"，真实签名由测试
+    // 密钥对 canonical 字节重签，阈值取自向量的 threshold 字段）
+    for v in load_vectors("update-manifest-valid.json") {
+        let manifest = &v["manifest"];
+        let threshold = v["threshold"].as_u64().expect("缺 threshold") as usize;
+        let min_version = v["min_version"].as_str().expect("缺 min_version");
+        // 清单可 canonical 化（整型字段/合法结构——RS-127 fail-closed 面）
+        let payload =
+            canonical_unsigned(manifest).unwrap_or_else(|_| panic!("valid 向量 canonical 失败"));
+        // 回滚闸门：清单版本必须 ≥ min_version（ prerelease 版本按向量
+        // 语义视为有效升级目标，数值比较不适用于 RS-125 严格核心版）
+        if let (Some(cur), Some(min)) = (
+            version_tuple(manifest["version"].as_str().unwrap_or("")),
+            version_tuple(min_version),
+        ) {
+            assert!(cur >= min, "valid 向量不得回滚（{cur:?} < {min:?}）");
+        }
+        // 阈值验证：取向量签名清单的前 threshold 个 key_id 生成真实密钥
+        //（种子由序号 + key_id 字节混合派生——不同 key_id 必得不同密钥）
+        let key_ids: Vec<&str> = manifest["signatures"]
+            .as_array()
+            .expect("valid 向量缺 signatures")
+            .iter()
+            .map(|s| s["key_id"].as_str().expect("缺 key_id"))
+            .collect();
+        let mut trusted = std::collections::HashMap::<String, Vec<u8>>::new();
+        let mut signed = Vec::new();
+        for (i, key_id) in key_ids.iter().take(threshold).enumerate() {
+            let mut seed = [0u8; 32];
+            seed[0] = i as u8;
+            for (j, b) in key_id.as_bytes().iter().enumerate() {
+                seed[(j % 31) + 1] ^= b;
+            }
+            let sk = SigningKey::from_bytes(&seed);
+            trusted.insert(
+                (*key_id).to_string(),
+                sk.verifying_key().as_bytes().to_vec(),
+            );
+            signed.push(json!({
+                "key_id": key_id,
+                "sig": b64_encode(&sk.sign(&payload).to_bytes()),
+            }));
+        }
+        assert!(
+            verify_threshold(&trusted, &signed, &payload, threshold),
+            "达阈值（{threshold} 个不重复真实签名）必须放行"
+        );
+        // 差一拒绝：threshold 条签名对 threshold+1 阈值
+        if threshold >= 1 {
+            assert!(
+                !verify_threshold(&trusted, &signed, &payload, threshold + 1),
+                "差一阈值必须拒绝"
+            );
+        }
+    }
+}
+
+#[test]
+fn update_manifest_invalid_vectors_semantic_rules() {
+    // RS-212：invalid 向量的语义级规则与 Rust 侧机制逐条对齐；
+    // deny_schema 类（const/字段形态）为 Python/schema 层职责，跳过并计数
+    let mut semantic = 0usize;
+    for v in load_vectors("update-manifest-invalid.json") {
+        let case = v["case"].as_str().unwrap_or("unnamed");
+        match case {
+            "rollback" => {
+                // 回滚：version < min_version 数值比较即拒
+                let cur = version_tuple(v["version"].as_str().expect("缺 version"))
+                    .expect("回滚向量版本必须可解析");
+                let min = version_tuple(v["min_version"].as_str().expect("缺 min_version"))
+                    .expect("回滚向量下限必须可解析");
+                assert!(cur < min, "向量 {case}: 回滚形态必须 version < min_version");
+                semantic += 1;
+            }
+            "threshold_insufficient" => {
+                // 阈值不足：1 条有效签名对 threshold=2
+                let threshold = v["threshold"].as_u64().expect("缺 threshold") as usize;
+                let sk = SigningKey::from_bytes(&[1u8; 32]);
+                let payload = canonical_unsigned(&json!({"version": "1.2.3"})).unwrap();
+                let mut trusted = std::collections::HashMap::new();
+                trusted.insert("k1".to_string(), sk.verifying_key().as_bytes().to_vec());
+                let sigs = vec![json!({
+                    "key_id": "k1",
+                    "sig": b64_encode(&sk.sign(&payload).to_bytes()),
+                })];
+                assert!(
+                    !verify_threshold(&trusted, &sigs, &payload, threshold),
+                    "向量 {case}: 签名数不足阈值必须拒绝"
+                );
+                assert_eq!(v["signatures_count"].as_u64(), Some(1));
+                semantic += 1;
+            }
+            "duplicate_key" => {
+                // 重复 keyid 只计一次（TUF THRESHOLD counting）
+                let threshold = v["threshold"].as_u64().expect("缺 threshold") as usize;
+                let sk = SigningKey::from_bytes(&[2u8; 32]);
+                let payload = canonical_unsigned(&json!({"version": "1.2.3"})).unwrap();
+                let mut trusted = std::collections::HashMap::new();
+                trusted.insert("k1".to_string(), sk.verifying_key().as_bytes().to_vec());
+                let sig = b64_encode(&sk.sign(&payload).to_bytes());
+                let sigs = vec![
+                    json!({"key_id": "k1", "sig": sig}),
+                    json!({"key_id": "k1", "sig": sig}),
+                ];
+                assert!(
+                    !verify_threshold(&trusted, &sigs, &payload, threshold),
+                    "向量 {case}: 重复 keyid 只计一次（2 条同 key 签名不满足阈值 2）"
+                );
+                semantic += 1;
+            }
+            "untrusted_key_id" => {
+                // 未受信 key_id：受信集不含向量任何签名的 key——阈值不足拒绝
+                let manifest = &v["manifest"];
+                let payload = canonical_unsigned(manifest)
+                    .unwrap_or_else(|_| panic!("向量 {case} canonical 失败"));
+                let trusted: std::collections::HashMap<String, Vec<u8>> =
+                    std::collections::HashMap::new(); // 受信集为空（全 rogue）
+                let sigs = manifest["signatures"]
+                    .as_array()
+                    .expect("缺 signatures")
+                    .clone();
+                assert!(
+                    !verify_threshold(&trusted, &sigs, &payload, 1),
+                    "向量 {case}: 全未受信 key 对阈值 1 必须拒绝"
+                );
+                semantic += 1;
+            }
+            "invalid_base64_signature" => {
+                // 签名非合法 base64（"AA-AA" 含表外字符 '-'）——签名解码
+                // 失败即不计入阈值
+                let manifest = &v["manifest"];
+                let payload = canonical_unsigned(manifest)
+                    .unwrap_or_else(|_| panic!("向量 {case} canonical 失败"));
+                let sk = SigningKey::from_bytes(&[3u8; 32]);
+                let mut trusted = std::collections::HashMap::new();
+                trusted.insert("k1".to_string(), sk.verifying_key().as_bytes().to_vec());
+                // 混入向量的坏签名（key k1、sig "AA-AA"）——单签名阈值 1
+                // 因 base64 非法而失败
+                let sigs = manifest["signatures"]
+                    .as_array()
+                    .expect("缺 signatures")
+                    .clone();
+                assert!(
+                    !verify_threshold(&trusted, &sigs, &payload, 1),
+                    "向量 {case}: 非法 base64 签名不得计入阈值"
+                );
+                semantic += 1;
+            }
+            // 纯 schema 规则（singular 字段/naive 时间戳/artifact 字段/const
+            // 破坏）——Python validate_vector_schemas.py 与 version.schema.json
+            // 层职责，Rust 核心不含 schema 校验器（透传，不在此断言）
+            _ => {}
+        }
+    }
+    assert!(semantic >= 5, "语义级向量覆盖面收缩（semantic={semantic}）");
 }
 
 // ===== RS-147（审计 2026-09-25）：action / glob 跨语言向量接入 =====

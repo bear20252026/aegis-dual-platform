@@ -14,7 +14,6 @@ use crate::capability::CapabilityRegistry;
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
 use crate::policy::PolicyEngine;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // ===== UniFFI 类型包装（Record/Enum）=====
 
@@ -199,10 +198,66 @@ pub fn extract_host(url: String) -> Option<String> {
 /// RS-133（审计 2026-09-25）：修正过期注释——JS 生成**就在 Rust 侧**
 /// （FingerprintShield::from_seed(seed).inject_script()），并非
 /// "Python 侧 legacy、Rust 仅提供 seed 派生"；文档与实现此前不符。
+///
+/// RS-214（2026-09-26 审计）：名实澄清——本函数名为 pipeline 实则只生成
+/// **单阶段** FingerprintShield 脚本（canvas 噪声 + hardwareConcurrency），
+/// **不是**九阶段管线（孪生对账口径：Android WebViewHardening
+/// fingerprintShieldScript / Windows FingerprintShield.cs 同为单阶段
+/// shield 脚本）。per-site 隔离的完整九阶段管线经
+/// [`build_fingerprint_pipeline_with_mode`]（domain + mode 参数）获取——
+/// 此前宿主经 FFI 永远拿不到带 domain 的真正管线。
 #[uniffi::export]
 pub fn build_fingerprint_pipeline(session_seed: String) -> String {
     match hex_seed_to_bytes(&session_seed) {
         Some(seed) => crate::shield::FingerprintShield::from_seed(seed).inject_script(),
+        None => String::new(),
+    }
+}
+
+/// FFI 版保护模式（镜像 protection_mode::ProtectionMode——core 类型不做
+/// uniffi 派生，遵循本模块「仅包装」原则，与 FfiBroker/ FfiDecision 同款）。
+#[derive(Debug, uniffi::Enum)]
+pub enum FfiProtectionMode {
+    /// 兼容模式——仅 Canvas 噪声（网站兼容性最好）。
+    Compatible,
+    /// 平衡模式——大部分防护启用（默认）。
+    Balanced,
+    /// 最大隐私模式——全部 9 阶段启用。
+    Maximum,
+}
+
+impl From<FfiProtectionMode> for crate::protection_mode::ProtectionMode {
+    fn from(mode: FfiProtectionMode) -> Self {
+        match mode {
+            FfiProtectionMode::Compatible => Self::Compatible,
+            FfiProtectionMode::Balanced => Self::Balanced,
+            FfiProtectionMode::Maximum => Self::Maximum,
+        }
+    }
+}
+
+/// 生成模式感知 + per-site 隔离的完整指纹防护管线 JS（RS-214 新增导出）。
+///
+/// 此前宿主经 FFI 只能拿到 [`build_fingerprint_pipeline`] 的单阶段脚本，
+/// 带 domain 的九阶段管线（protection_mode::fingerprint_pipeline_with_mode）
+/// 未做 `#[uniffi::export]`——per-site 隔离管线对宿主不可达。
+///
+/// - `session_seed`：64 字符 hex（非法返回空脚本——RS-036 fail-closed）；
+/// - `mode`：保护模式（决定启用的阶段集）；
+/// - `domain`：顶层文档 eTLD+1 域名（PerSiteSeed 按域派生站点种子——
+///   站点间噪声去相关，防跨站 canvas 哈希关联）。
+#[uniffi::export]
+pub fn build_fingerprint_pipeline_with_mode(
+    session_seed: String,
+    mode: FfiProtectionMode,
+    domain: String,
+) -> String {
+    match hex_seed_to_bytes(&session_seed) {
+        Some(seed) => crate::protection_mode::fingerprint_pipeline_with_mode(
+            &crate::shield::FingerprintShield::from_seed(seed),
+            mode.into(),
+            &domain,
+        ),
         None => String::new(),
     }
 }
@@ -264,6 +319,67 @@ mod hex_seed_tests {
         assert_eq!(build_fingerprint_pipeline(String::new()), "");
         // 合法种子仍产出脚本
         assert!(!build_fingerprint_pipeline("ab".repeat(32)).is_empty());
+    }
+
+    // —— RS-214（审计 2026-09-26）：domain+mode 管线 FFI 导出 ——
+
+    #[test]
+    fn build_pipeline_with_mode_exports_per_site_pipeline() {
+        // 此前带 domain 的九阶段管线未做 #[uniffi::export]——宿主经 FFI
+        // 永远拿不到 per-site 隔离管线。导出后：合法种子产出多阶段脚本，
+        // 不同 domain 派生不同站点种子；畸形种子 fail-closed 空脚本
+        let seed = "ab".repeat(32);
+        let a = build_fingerprint_pipeline_with_mode(
+            seed.clone(),
+            FfiProtectionMode::Maximum,
+            "a.com".into(),
+        );
+        let b =
+            build_fingerprint_pipeline_with_mode(seed, FfiProtectionMode::Maximum, "b.com".into());
+        // 模式声明 + 多阶段标记（PerSiteSeed/TimerPrecision 等 Maximum 阶段）
+        assert!(a.contains("'maximum'"), "模式声明阶段");
+        assert!(a.contains("__AEGIS_SITE_SEED"), "per-site 种子阶段");
+        assert!(a.contains("PRECISION_US"), "TimerPrecision 阶段");
+        // per-site 隔离：不同 domain 站点种子不同
+        let seed_of = |s: &str| {
+            s.lines()
+                .find(|l| l.contains("__AEGIS_SITE_SEED"))
+                .unwrap()
+                .to_string()
+        };
+        assert_ne!(seed_of(&a), seed_of(&b));
+        // Balanced 模式阶段集不同（模式参数真实生效）
+        let balanced = build_fingerprint_pipeline_with_mode(
+            "ab".repeat(32),
+            FfiProtectionMode::Balanced,
+            "a.com".into(),
+        );
+        assert!(balanced.contains("'balanced'"));
+        assert!(
+            !balanced.contains("PRECISION_US"),
+            "Balanced 不含 TimerPrecision"
+        );
+        // 畸形种子 fail-closed
+        assert_eq!(
+            build_fingerprint_pipeline_with_mode(
+                "zz".into(),
+                FfiProtectionMode::Maximum,
+                "a.com".into()
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn build_pipeline_single_stage_contract_documented() {
+        // RS-214：名实澄清——旧入口只产出单阶段 shield 脚本（非九阶段
+        // 管线），孪生对账口径锁定：包含 canvas 噪声与 hardwareConcurrency，
+        // 不含管线阶段（PerSiteSeed/TimerPrecision 等）
+        let script = build_fingerprint_pipeline("ab".repeat(32));
+        assert!(script.contains("toDataURL"), "canvas 噪声（单阶段主体）");
+        assert!(script.contains("hardwareConcurrency"));
+        assert!(!script.contains("__AEGIS_SITE_SEED"), "不含 per-site 阶段");
+        assert!(!script.contains("PRECISION_US"), "不含 TimerPrecision 阶段");
     }
 
     // —— RS-134（审计 2026-09-25）：hex 回归补强 ——

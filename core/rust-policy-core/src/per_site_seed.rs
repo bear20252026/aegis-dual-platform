@@ -91,6 +91,9 @@ impl PerSiteSeed {
     /// 音频指纹按站点隔离（Brave 模型），同站点会话内稳定、跨站点/跨会话不同。
     pub fn inject_script(&self, domain: &str) -> String {
         let site_seed_hex = self.derive_hex(domain);
+        // RS-218（2026-09-26 审计）：代理注册接口 Symbol 键单源引用
+        //（描述串去品牌化——详见 ToStringGuard::REGISTER_SYMBOL）
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
         format!(
             r#"
 // Aegis PerSiteSeed — per-site 独立种子（参照 Brave Browser，MPL-2.0）
@@ -113,7 +116,7 @@ impl PerSiteSeed {
       }} catch (e) {{}}
       return data;
     }};
-    var __aegisReg = window[Symbol.for('aegis.proxy.register.v1')];
+    var __aegisReg = window[Symbol.for('{reg_sym}')];
     if (__aegisReg) __aegisReg(AudioBuffer.prototype.getChannelData, origGetChannelData);
   }} catch (e) {{}}
 }})();

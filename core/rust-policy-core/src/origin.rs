@@ -12,8 +12,11 @@
 pub struct CanonicalExternalUrl {
     /// 小写 scheme——仅 "http" / "https"（其余在 canonicalize_external 拒绝）。
     pub scheme: String,
-    /// 小写 host（已剥尾点、已拒非法字符）；默认端口（80/443）不出现在
-    /// origin——host 字段不含端口，端口归一语义见 origin 字段。
+    /// 规范化 authority（小写 host + 非默认端口）——RS-227（2026-09-26
+    /// 审计）口径修正：默认端口（80/443）不出现在 host；**非默认端口保留
+    /// 在 host 内**（host: canonical_authority，此前文档误称「不含端口」——
+    /// 实现与测试均证明 :8080 形态保留）。纯 host（无端口）由 origin
+    /// 去掉 scheme:// 前缀自行截取，或经 host.split(':') 取首段。
     pub host: String,
     /// 授权绑定 origin（`scheme://host[:port]`）——默认端口省略，非默认
     /// 端口保留。授权相等性以此字段为准。
@@ -91,10 +94,20 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
     // 全数字段且段数 ≠ 4 一律拒绝（4 段 = 合法点分 IPv4 字面量，保留）；
     // 0x 十六进制 host 单独拒绝
     let segments: Vec<&str> = host.split('.').collect();
-    if segments.len() != 4
+    let all_digit_segments = segments
+        .iter()
+        .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()));
+    if segments.len() != 4 && all_digit_segments {
+        return None;
+    }
+    // RS-228（2026-09-26 审计）：4 段全数字时逐段 ≤255（WHATWG IPv4 解析
+    // 器口径）——此前只看「4 段全数字」即放行，999.1.1.1/256.0.0.1 等
+    // 八位组越界形态混过（跨端向量同步见 contracts 侧登记，Rust 先行收紧）
+    if segments.len() == 4
+        && all_digit_segments
         && segments
             .iter()
-            .all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+            .any(|s| !s.parse::<u16>().is_ok_and(|v| v <= 255))
     {
         return None;
     }
@@ -313,6 +326,34 @@ mod tests {
             try_parse_external("https://127.0.0.1/").is_some(),
             "4 段点分 IPv4 保留"
         );
+    }
+
+    // —— RS-227/228 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn host_field_carries_non_default_port() {
+        // RS-227：字段文档口径修正锁定——host 是规范化 authority：
+        // 默认端口折叠（443/80 不出现），非默认端口保留在 host 内
+        //（此前文档误称「host 不含端口」）
+        let url = canonicalize_external("http://example.org:8080/p").unwrap();
+        assert_eq!(url.host, "example.org:8080", "非默认端口保留在 host");
+        assert_eq!(url.origin, "http://example.org:8080");
+        let folded = canonicalize_external("https://example.org:443/p").unwrap();
+        assert_eq!(folded.host, "example.org", "默认端口折叠出 host");
+    }
+
+    #[test]
+    fn ipv4_octets_out_of_range_rejected() {
+        // RS-228：4 段全数字逐段 ≤255（WHATWG 口径）——八位组越界形态
+        // 此前放行（「4 段全数字」只查了段数与数字性）
+        assert_eq!(try_parse_external("https://999.1.1.1/"), None);
+        assert_eq!(try_parse_external("https://256.0.0.1/"), None);
+        assert_eq!(try_parse_external("https://1.2.3.999/"), None);
+        assert_eq!(try_parse_external("https://300.300.300.300/"), None);
+        // 合法边界（0 与 255）保留
+        assert!(try_parse_external("https://0.0.0.0/").is_some());
+        assert!(try_parse_external("https://255.255.255.255/").is_some());
+        assert!(try_parse_external("https://192.168.1.1/").is_some());
     }
 
     #[test]

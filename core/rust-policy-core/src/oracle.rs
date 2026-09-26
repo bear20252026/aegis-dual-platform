@@ -91,6 +91,21 @@ impl Oracle {
         self.verify_with_warn_fields(snap, &[])
     }
 
+    /// RS-234（2026-09-26 审计）：回放验证账本的真实消费入口——按
+    /// action_id 查找**已记录**的快照并验证。此前 snapshot() 记入有界
+    /// 账本但 verify() 只接收外部传入的快照、从不消费已记录快照，
+    /// 「回放验证」语义名存实亡（账本沦为只写不读的死数据面）。
+    /// 查找自最新向最旧（同 id 多次记录时验证最近一次）；未记录返回 None。
+    pub fn verify_recorded(&mut self, action_id: &str) -> Option<DiffReport> {
+        let snapshot = self
+            .snapshots
+            .iter()
+            .rev()
+            .find(|snap| snap.action_id == action_id)?
+            .clone();
+        Some(self.verify(&snapshot))
+    }
+
     /// RS-101（审计 2026-09-25）：`Warning` 变体的唯一合法构造点——
     /// 调用方显式声明「允许漂移」的字段（如天然不稳定的 timestamp 类），
     /// 不匹配全部落在白名单内 → Warning（可接受差异，仍留 mismatch 记录）；
@@ -294,6 +309,41 @@ mod tests {
         let mut oracle = Oracle::new();
         let report = oracle.verify(&make_snapshot("empty", vec![], vec![]));
         assert_eq!(report.verdict, VerifyVerdict::Pass);
+    }
+
+    // —— RS-234 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn verify_recorded_consumes_ledger_snapshots() {
+        // RS-234：账本快照可回放验证——verify_recorded 按 action_id 消费
+        // 已记录快照（此前 verify 只收外部快照，账本只写不读）
+        let mut oracle = Oracle::new();
+        let snap = make_snapshot(
+            "replay-1",
+            vec![("status", "ok")],
+            vec![("status", "ok"), ("extra", "1")],
+        );
+        oracle.snapshot(snap);
+        let report = oracle
+            .verify_recorded("replay-1")
+            .expect("已记录快照必须可回放验证");
+        assert_eq!(report.action_id, "replay-1");
+        assert!(
+            matches!(report.verdict, VerifyVerdict::Fail(_)),
+            "新增键可检出"
+        );
+        // 同 id 多次记录 → 验证最近一次（FIFO 账本内最新）
+        oracle.snapshot(make_snapshot("replay-1", vec![], vec![]));
+        let latest = oracle.verify_recorded("replay-1").expect("最近记录可验证");
+        assert_eq!(
+            latest.verdict,
+            VerifyVerdict::Pass,
+            "最新一次记录为一致快照"
+        );
+        // 未记录 id → None（fail-closed，不伪造报告）
+        assert!(oracle.verify_recorded("never-recorded").is_none());
+        // 回放验证同样入 reports 账本（审计轨迹）
+        assert!(oracle.reports().iter().any(|r| r.action_id == "replay-1"));
     }
 
     #[test]
