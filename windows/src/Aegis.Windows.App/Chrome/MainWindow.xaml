@@ -14,7 +14,6 @@
     <SolidColorBrush x:Key="FieldBackgroundBrush" Color="#1FFFFFFF"/>
     <SolidColorBrush x:Key="FieldBorderBrush" Color="#2EFFFFFF"/>
     <SolidColorBrush x:Key="SurfaceBrush" Color="#FF1B2537"/>
-    <SolidColorBrush x:Key="AccentSoftBrush" Color="#223B82F6"/>
     <SolidColorBrush x:Key="FieldBorderFocusedBrush" Color="#66FFFFFF"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B3FFFFFF"/>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFFFF"/>
@@ -23,7 +22,10 @@
     <SolidColorBrush x:Key="TextMutedBrush" Color="#6CFFFFFF"/>
     <SolidColorBrush x:Key="SegmentedBrush" Color="#1FFFFFFF"/>
 
-    <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton） -->
+    <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton）。
+         CS-218：Focusable=False 为既定视觉取舍（键盘聚焦虚线框在圆形玻璃钮上
+         常驻显示）；键盘路径由快捷键覆盖——Ctrl+L/Alt+D 地址栏、Ctrl+R/F5 刷新、
+         Esc 停止、Ctrl+T/W/Tab 标签（见 Window_PreviewKeyDown）。 -->
     <Style x:Key="NavButton" TargetType="Button">
       <Setter Property="Width" Value="36"/>
       <Setter Property="Height" Value="36"/>
@@ -344,7 +346,8 @@
     <!-- M2 操作反馈条（收藏等——用户可见，2.5s 自动隐藏，不静默） -->
     <Border x:Name="FeedbackBar" DockPanel.Dock="Top" Background="#FF0F2A1B" Padding="12,8"
             Visibility="Collapsed">
-      <TextBlock x:Name="FeedbackText" Foreground="#FF86EFAC" TextWrapping="Wrap"/>
+      <TextBlock x:Name="FeedbackText" Foreground="#FF86EFAC" TextWrapping="Wrap"
+                 AutomationProperties.LiveSetting="Polite"/>
     </Border>
     <Grid>
       <!-- M1-T1：每标签一 WebView2 实例（TabRuntime 创建/挂接）——切换即可见性

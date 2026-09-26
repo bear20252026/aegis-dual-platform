@@ -33,17 +33,25 @@ public partial class InPrivateWindow : Window
 
     private const string HomeUrl = Ntp.NtpAssets.Url;
 
-    public InPrivateWindow()
+    /// <summary>CS-224：引擎由打开方传入（主窗已持有 settings 快照）——
+    /// 无痕窗口不再每窗同步读一次 settings.json；直接启动等无参路径保留
+    /// 读盘兜底。</summary>
+    public InPrivateWindow(string? searchEngine = null)
     {
         InitializeComponent();
-        try
+        if (searchEngine is not null && UrlNormalizer.EngineUrls.ContainsKey(searchEngine))
+            _engineKey = searchEngine;
+        else
         {
-            _engineKey = Core.Settings.AppSettings.Load(
-                Core.Settings.AppSettings.DefaultPath).SearchEngine;
-        }
-        catch (Exception)
-        {
-            _engineKey = UrlNormalizer.DefaultEngine;
+            try
+            {
+                _engineKey = Core.Settings.AppSettings.Load(
+                    Core.Settings.AppSettings.DefaultPath).SearchEngine;
+            }
+            catch (Exception)
+            {
+                _engineKey = UrlNormalizer.DefaultEngine;
+            }
         }
         _runtimeCoordinator = new TabRuntimeCoordinator(_runtimes, WebViewHost);
         _tabs.TabOpened += CreateRuntime;
@@ -238,6 +246,25 @@ public partial class InPrivateWindow : Window
             if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var r))
                 r.Control.Stop();
             e.Handled = true;
+            return;
+        }
+        // CS-223：与主窗常用快捷键对齐——此前无痕窗口无键盘操作路径
+        switch (e.Key)
+        {
+            case Key.L when e.KeyboardDevice.Modifiers == System.Windows.Input.ModifierKeys.Control:
+                AddressBar.Focus();
+                AddressBar.SelectAll();
+                e.Handled = true;
+                return;
+            case Key.T when e.KeyboardDevice.Modifiers == System.Windows.Input.ModifierKeys.Control:
+                _tabs.NewTab(HomeUrl);
+                e.Handled = true;
+                return;
+            case Key.W when e.KeyboardDevice.Modifiers == System.Windows.Input.ModifierKeys.Control:
+                if (_activeTabId is not null)
+                    _tabs.CloseTab(_activeTabId);
+                e.Handled = true;
+                return;
         }
     }
 

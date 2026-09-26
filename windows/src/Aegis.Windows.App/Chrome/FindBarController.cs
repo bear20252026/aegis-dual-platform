@@ -44,8 +44,14 @@ public sealed class FindBarController
     {
         _bar.Visibility = Visibility.Collapsed;
         _count.Text = string.Empty;
-        if (_activeRuntime()?.Control.CoreWebView2 is { } cw)
-            _ = cw.ExecuteScriptAsync(ClearJs);
+        if (_activeRuntime()?.Control is { } control)
+        {
+            // CS-227：显式把焦点还给页面 WebView——此前收起后焦点悬空在
+            // 已隐藏的查找条上，需再点一次页面才能继续滚动/输入
+            control.Focus();
+            if (control.CoreWebView2 is { } cw)
+                _ = cw.ExecuteScriptAsync(ClearJs);
+        }
     }
 
     /// <summary>执行一次查找：计数 + window.find（页面侧高亮/跳转）。

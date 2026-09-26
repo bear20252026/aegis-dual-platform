@@ -726,7 +726,7 @@ public partial class MainWindow : Window
     // —— InPrivate ——
     private void InPrivate_Click(object sender, RoutedEventArgs e) => OpenInPrivateNew();
 
-    private void OpenInPrivateNew() => new InPrivateWindow().Show();
+    private void OpenInPrivateNew() => new InPrivateWindow(_settings.SearchEngine).Show();  // CS-224
 
     // —— 窗口状态记忆 ——
     private void SaveWindowState()
@@ -911,6 +911,13 @@ public partial class MainWindow : Window
             ShowFeedback("当前页面不支持收藏", isWarning: true);
             return;
         }
+        // CS-228：内部虚拟主机页（NTP/画板）排除——地址仅本进程 WebView 可解析，
+        // 落书签后任何语境都无法打开
+        if (Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
+        {
+            ShowFeedback("内部页面不支持收藏", isWarning: true);
+            return;
+        }
         var wasStarred = _bookmarks.Contains(tab.Url);
         var ok = wasStarred
             ? _bookmarks.Remove(tab.Url)
@@ -1020,6 +1027,13 @@ public partial class MainWindow : Window
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
             ShowFeedback("当前页面不支持查看源代码（仅限 http/https）", isWarning: true);
+            return;
+        }
+        // CS-229：虚拟主机 URL 在 WebView 外不可解析——后台抓源必失败，
+        // 前置拦截并提示（不再让用户等 15s 超时后看失败反馈）
+        if (Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
+        {
+            ShowFeedback("内部页面不支持查看源代码", isWarning: true);
             return;
         }
         var url = tab.Url;

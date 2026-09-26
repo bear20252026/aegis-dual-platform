@@ -35,6 +35,12 @@ public partial class SettingsWindow : Window
         Core.Settings.SettingsService settingsService)
     {
         InitializeComponent();
+        // CS-226：Esc 关闭设置窗（对话框惯例——此前无键盘关闭路径）
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == System.Windows.Input.Key.Escape)
+                Close();
+        };
         _settings = settings;
         _broker = broker;
         _owner = owner;

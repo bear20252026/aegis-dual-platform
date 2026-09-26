@@ -24,6 +24,9 @@ public partial class BookmarkManagerWindow : Window
         _owner = owner;
         BookmarkList.ItemsSource = _rows;
         BookmarkList.KeyDown += BookmarkList_KeyDown;
+        // CS-225：编辑弹层键盘路径——Enter 保存、Esc 取消（此前仅鼠标可达）
+        EditTitle.KeyDown += EditorField_KeyDown;
+        EditUrl.KeyDown += EditorField_KeyDown;
         Loaded += (_, _) => Reload("");
     }
 
@@ -114,6 +117,21 @@ public partial class BookmarkManagerWindow : Window
     }
 
     private void EditCancel_Click(object sender, RoutedEventArgs e) => CloseEditor();
+
+    private void EditorField_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Enter:
+                EditSave_Click(sender, new RoutedEventArgs());
+                e.Handled = true;
+                break;
+            case Key.Escape:
+                CloseEditor();
+                e.Handled = true;
+                break;
+        }
+    }
 
     private void EditSave_Click(object sender, RoutedEventArgs e)
     {
