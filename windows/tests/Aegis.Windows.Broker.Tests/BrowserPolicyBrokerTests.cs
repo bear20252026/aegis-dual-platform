@@ -404,4 +404,45 @@ public sealed class BrowserPolicyBrokerTests
         Assert.IsType<Decision.Allow>(
             broker.EvaluateNavigation("session-1", "tab-1", 0, "https://evil.example", "navigation"));
     }
+    // ===== C16 批（审计 2026-09-26）：CS-213/214/215 + CS-208 补强 =====
+
+    [Fact]
+    public void AuditLog_IsBoundedRingBuffer()
+    {
+        // CS-213：审计环形上限——5001 次拒绝事件后保持 5000 条（最旧淘汰）
+        var broker = CreateRegisteredBroker();
+        for (var i = 0; i < 5001; i++)
+            _ = broker.EvaluateNavigation("no-such-session", "tab-1", 0, "https://example.com/", "navigation");
+        Assert.Equal(5000, broker.AuditLog.Count);
+    }
+
+    [Fact]
+    public void TryConsumeNavigation_NullAction_ReturnsFalseWithoutThrow()
+    {
+        // CS-214：null 授权直接拒绝（fail-closed 且不抛）
+        using var broker = CreateRegisteredBroker();
+        Assert.False(broker.TryConsumeNavigation(
+            null!, "session-1", "tab-1", 0, "https://example.com/", "navigation"));
+    }
+
+    [Fact]
+    public void EvaluateNavigation_UnparseableUrl_DeniesWithUrlPolicy()
+    {
+        // CS-215：不可解析 URL → url_policy 拒绝分支
+        var broker = CreateRegisteredBroker();
+        var decision = broker.EvaluateNavigation("session-1", "tab-1", 0, "not a url", "navigation");
+        var deny = Assert.IsType<Decision.Deny>(decision);
+        Assert.Equal("url_policy", deny.Reason.Code);
+    }
+
+    [Fact]
+    public void ParseDecisionPayload_UnknownDecisionFailsClosed()
+    {
+        // CS-208：未知决策保留为拒绝（协议升级时不意外放行）
+        var decision = NativePolicyCoreBridge.ParseDecisionPayload(
+            "{\"abi_version\":3,\"decision\":\"teleport\"}");
+        var deny = Assert.IsType<Decision.Deny>(decision);
+        Assert.Equal("native_policy_core_decision_invalid", deny.Reason.Code);
+    }
+
 }

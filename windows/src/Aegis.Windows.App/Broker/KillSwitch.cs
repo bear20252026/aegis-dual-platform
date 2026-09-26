@@ -20,11 +20,4 @@ public sealed class KillSwitch
         _engaged = true;
         Core.Security.SecurityLog.Write("[security] KillSwitch 已触发——导航/下载/批准链全部冻结（重启恢复）");
     }
-
-    /// <summary>任何副作用服务执行前检查（Broker 唯一副作用点——ADR-002）。</summary>
-    public void EnsureNotEngaged()
-    {
-        if (_engaged)
-            throw new InvalidOperationException("紧急终止开关已触发——拒绝副作用");
-    }
 }

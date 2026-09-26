@@ -14,6 +14,10 @@ public sealed class BrowserPolicyBroker : IBroker
     // 绝不淘汰旧 nonce（以免削弱一次性/重放保护）。
     private const int MaxConsumedNonces = 50_000;
     private const int MaxAuditEntries = 5000;  // 审计有界（此前无上限——高频 deny 即无界内存）
+    // CS-209/210/211：此前内联的魔法数单源
+    private const int MaxSessions = 1024;             // 与 Rust MAX_SESSIONS 对等
+    private const int NativeSessionTtlSeconds = 120;  // 原生会话 TTL（秒）
+    private static readonly TimeSpan ActionLifetime = TimeSpan.FromMinutes(2);  // 授权时效
     private readonly object _auditLock = new();
     private readonly Queue<Audit.AuditEvent> _auditLog = new();
     private readonly HashSet<string> _consumedNonces = new(StringComparer.Ordinal);
@@ -91,11 +95,11 @@ public sealed class BrowserPolicyBroker : IBroker
         {
             if (_sessions.ContainsKey(sessionId))
                 return false;
-            // 与 Rust MAX_SESSIONS=1024 对等（此前无上限——泄漏面）
-            if (_sessions.Count >= 1024)
+            // 与 Rust MAX_SESSIONS 对等（此前无上限——泄漏面）
+            if (_sessions.Count >= MaxSessions)
                 return false;
             if (_nativePolicyCoreRequired && (_nativePolicyCoreBridge is null
-                || !_nativePolicyCoreBridge.CreateSession(sessionId, tabId, generation, 120)))
+                || !_nativePolicyCoreBridge.CreateSession(sessionId, tabId, generation, NativeSessionTtlSeconds)))
                 return false;
             _sessions.Add(sessionId, new SessionContext(tabId, generation));
             return true;
@@ -178,7 +182,7 @@ public sealed class BrowserPolicyBroker : IBroker
         }
         var origin = uri.GetLeftPart(UriPartial.Authority);
         var action = new AuthorizedAction(sessionId, tabId, generation, origin, "GET",
-            uri.GetComponents(UriComponents.PathAndQuery, UriFormat.UriEscaped), scope, DateTime.UtcNow.AddMinutes(2),
+            uri.GetComponents(UriComponents.PathAndQuery, UriFormat.UriEscaped), scope, DateTime.UtcNow.Add(ActionLifetime),
             $"{sessionId}:{Guid.NewGuid():N}", PolicyVersion);
         RecordAudit("allow", scope, origin, null);
         return new Decision.Allow(action);
@@ -341,7 +345,13 @@ public sealed class BrowserPolicyBroker : IBroker
             return string.Empty;
         if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
             return uri.GetLeftPart(UriPartial.Authority) + uri.AbsolutePath;
-        return url.Length > 256 ? url[..256] + "…" : url;
+        if (url.Length <= 256)
+            return url;
+        // CS-212：代理对安全截断（URL 含 emoji 时硬切产生孤立代理落审计）
+        var cut = 256;
+        if (char.IsHighSurrogate(url[cut - 1]))
+            cut--;
+        return url[..cut] + "…";
     }
 
     /// <summary>记录已消费 nonce；达上限即 fail-closed 拒绝（与 Rust 侧 broker.rs 对等）。

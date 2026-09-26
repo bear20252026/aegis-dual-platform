@@ -5,8 +5,9 @@ using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 
-/// <summary>标签模型（ADR-009 D2 领域层——纯数据，无 UI/WebView 依赖）。
-/// Title/Url 经 INotifyPropertyChanged 通知原生标签条刷新。
+/// <summary>标签模型（ADR-009 D2 领域层）。Title/Url 经
+/// INotifyPropertyChanged 通知原生标签条刷新。除 Icon（WPF 展示资源抽象——
+/// FaviconService 注入的冻结位图，非控件引用）外无 UI/WebView 依赖。
 /// 新增：IsPinned（固定标签前置且隐藏关闭钮）、IsSleeping（睡眠标签——
 /// WebView 已释放仅存状态，激活时复活）、Icon（站点 favicon，Tab 更换时通知）。</summary>
 public sealed class Tab : INotifyPropertyChanged
