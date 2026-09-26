@@ -61,8 +61,12 @@ correctness = "deny"
 suspicious = "deny"
 
 # RS-151（审计 2026-09-25）：release 产物强化——fat LTO（跨 crate 内联，
-# 增大逆向成本）+ 符号剥离（发布物不留调试符号表）。本 crate 非 workspace
-# 成员（独立构建），profile 可安全置于本文件
+# 增大逆向成本）+ 调试信息剥离（发布物不留 debuginfo）。本 crate 非
+# workspace 成员（独立构建），profile 可安全置于本文件。
+# strip 口径：debuginfo 而非 symbols——uniffi metadata 经符号表嵌入
+# dylib（UNIFFI_META 符号），strip symbols 后 uniffi-bindgen 报
+# "No UniFFI metadata found"（CI Core-Rust 实测）；符号表保留不影响
+# 逆向防护主体（函数体仍 LTO 内联优化）
 [profile.release]
 lto = true
-strip = "symbols"
+strip = "debuginfo"

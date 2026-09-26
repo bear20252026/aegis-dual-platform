@@ -1,38 +1,236 @@
 {
   "description": "RS-147（审计 2026-09-25）：glob 匹配跨语言测试向量——matcher::glob_match / glob_subsumes 语义锁定（* 单段 / ** 跨段 / ? 单字符 / flat 门控 / 字面量 / Unicode）。消费方：core/rust-policy-core/tests/vectors.rs（Rust 侧）；C#/Kotlin reference 侧后续批次接入同文件。向量期望值与 Rust 单元测试（matcher.rs tests 模块）同源校准",
   "vectors": [
-    { "note": "字面量精确匹配", "pattern": "hello", "text": "hello", "flat": false, "expected_match": true },
-    { "note": "字面量不等", "pattern": "hello", "text": "world", "flat": false, "expected_match": false },
-    { "note": "* 段内匹配", "pattern": "*.rs", "text": "main.rs", "flat": false, "expected_match": true },
-    { "note": "* 不跨 /（非 flat）", "pattern": "*.rs", "text": "src/main.rs", "flat": false, "expected_match": false },
-    { "note": "* 跨 /（flat 命令模式）", "pattern": "*.rs", "text": "src/main.rs", "flat": true, "expected_match": true },
-    { "note": "** 跨段", "pattern": "src/**", "text": "src/main.rs", "flat": false, "expected_match": true },
-    { "note": "** 深层跨段", "pattern": "**/*.rs", "text": "src/lib/main.rs", "flat": false, "expected_match": true },
-    { "note": "? 单字符", "pattern": "f?o", "text": "foo", "flat": false, "expected_match": true },
-    { "note": "? 不匹配多字符", "pattern": "f?o", "text": "fooo", "flat": false, "expected_match": false },
-    { "note": "? 不跨 /（非 flat）", "pattern": "a?b", "text": "a/b", "flat": false, "expected_match": false },
-    { "note": "? 跨 /（flat）", "pattern": "a?b", "text": "a/b", "flat": true, "expected_match": true },
-    { "note": "URL host 模式命中", "pattern": "https://*.gov.cn", "text": "https://a.gov.cn", "flat": false, "expected_match": true },
-    { "note": "URL 后缀拼接绕过拒绝（H 系口径：host 模式必须非 flat）", "pattern": "https://*.gov.cn", "text": "https://evil.com/x.gov.cn", "flat": false, "expected_match": false },
-    { "note": "空模式匹配空文本", "pattern": "", "text": "", "flat": false, "expected_match": true },
-    { "note": "空模式不匹配非空", "pattern": "", "text": "a", "flat": false, "expected_match": false },
-    { "note": "全星匹配空文本", "pattern": "*", "text": "", "flat": false, "expected_match": true },
-    { "note": "连续星各自段内（非 flat）", "pattern": "a*b*c", "text": "axbyc", "flat": false, "expected_match": true },
-    { "note": "单星串不跨 /（非 flat）", "pattern": "a*x*b", "text": "a/x/y/b", "flat": false, "expected_match": false },
-    { "note": "** 与单星差异", "pattern": "a**b", "text": "a/x/b", "flat": false, "expected_match": true },
-    { "note": "后缀 glob 命中", "pattern": "*.gov.cn", "text": "www.example.gov.cn", "flat": false, "expected_match": true },
-    { "note": "后缀 glob 拒绝尾缀拼接", "pattern": "*.gov.cn", "text": "www.example.gov.cn.evil", "flat": false, "expected_match": false },
-    { "note": "Unicode 字面量命中", "pattern": "café*", "text": "café au lait", "flat": false, "expected_match": true },
-    { "note": "Unicode 变音符不等价 ASCII", "pattern": "café", "text": "cafe", "flat": false, "expected_match": false },
-    { "note": "混合 ASCII 模式 + 非 ASCII 文本", "pattern": "a*b", "text": "aαβb", "flat": false, "expected_match": true },
-    { "note": "subsume 自反", "a": "src/**", "b": "src/**", "flat": false, "expected_subsumes": true },
-    { "note": "subsume 全捕获覆盖", "a": "**", "b": "src/main.rs", "flat": false, "expected_subsumes": true },
-    { "note": "subsume ** 覆盖单 *", "a": "**", "b": "*", "flat": false, "expected_subsumes": true },
-    { "note": "subsume 单 * 不覆盖 **（宁漏勿误）", "a": "*.rs", "b": "**.rs", "flat": false, "expected_subsumes": false },
-    { "note": "subsume 字面不同不覆盖", "a": "*.rs", "b": "*.py", "flat": false, "expected_subsumes": false },
-    { "note": "subsume 非 flat ? 不覆盖 /", "a": "a?c", "b": "a/c", "flat": false, "expected_subsumes": false },
-    { "note": "subsume flat ? 覆盖 /", "a": "a?c", "b": "a/c", "flat": true, "expected_subsumes": true },
-    { "note": "subsume 空模式被全星覆盖", "a": "**", "b": "", "flat": false, "expected_subsumes": true },
-    { "note": "subsume 字面尾不覆盖空模式", "a": "*x", "b": "", "flat": false, "expected_subsumes": false }
+    {
+      "note": "字面量精确匹配",
+      "pattern": "hello",
+      "text": "hello",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "字面量不等",
+      "pattern": "hello",
+      "text": "world",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "* 段内匹配",
+      "pattern": "*.rs",
+      "text": "main.rs",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "* 不跨 /（非 flat）",
+      "pattern": "*.rs",
+      "text": "src/main.rs",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "* 跨 /（flat 命令模式）",
+      "pattern": "*.rs",
+      "text": "src/main.rs",
+      "flat": true,
+      "expected": "allow"
+    },
+    {
+      "note": "** 跨段",
+      "pattern": "src/**",
+      "text": "src/main.rs",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "** 深层跨段",
+      "pattern": "**/*.rs",
+      "text": "src/lib/main.rs",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "? 单字符",
+      "pattern": "f?o",
+      "text": "foo",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "? 不匹配多字符",
+      "pattern": "f?o",
+      "text": "fooo",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "? 不跨 /（非 flat）",
+      "pattern": "a?b",
+      "text": "a/b",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "? 跨 /（flat）",
+      "pattern": "a?b",
+      "text": "a/b",
+      "flat": true,
+      "expected": "allow"
+    },
+    {
+      "note": "URL host 模式命中",
+      "pattern": "https://*.gov.cn",
+      "text": "https://a.gov.cn",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "URL 后缀拼接绕过拒绝（H 系口径：host 模式必须非 flat）",
+      "pattern": "https://*.gov.cn",
+      "text": "https://evil.com/x.gov.cn",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "空模式匹配空文本",
+      "pattern": "",
+      "text": "",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "空模式不匹配非空",
+      "pattern": "",
+      "text": "a",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "全星匹配空文本",
+      "pattern": "*",
+      "text": "",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "连续星各自段内（非 flat）",
+      "pattern": "a*b*c",
+      "text": "axbyc",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "单星串不跨 /（非 flat）",
+      "pattern": "a*x*b",
+      "text": "a/x/y/b",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "** 与单星差异",
+      "pattern": "a**b",
+      "text": "a/x/b",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "后缀 glob 命中",
+      "pattern": "*.gov.cn",
+      "text": "www.example.gov.cn",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "后缀 glob 拒绝尾缀拼接",
+      "pattern": "*.gov.cn",
+      "text": "www.example.gov.cn.evil",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "Unicode 字面量命中",
+      "pattern": "café*",
+      "text": "café au lait",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "Unicode 变音符不等价 ASCII",
+      "pattern": "café",
+      "text": "cafe",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "混合 ASCII 模式 + 非 ASCII 文本",
+      "pattern": "a*b",
+      "text": "aαβb",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "subsume 自反",
+      "a": "src/**",
+      "b": "src/**",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "subsume 全捕获覆盖",
+      "a": "**",
+      "b": "src/main.rs",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "subsume ** 覆盖单 *",
+      "a": "**",
+      "b": "*",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "subsume 单 * 不覆盖 **（宁漏勿误）",
+      "a": "*.rs",
+      "b": "**.rs",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "subsume 字面不同不覆盖",
+      "a": "*.rs",
+      "b": "*.py",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "subsume 非 flat ? 不覆盖 /",
+      "a": "a?c",
+      "b": "a/c",
+      "flat": false,
+      "expected": "deny"
+    },
+    {
+      "note": "subsume flat ? 覆盖 /",
+      "a": "a?c",
+      "b": "a/c",
+      "flat": true,
+      "expected": "allow"
+    },
+    {
+      "note": "subsume 空模式被全星覆盖",
+      "a": "**",
+      "b": "",
+      "flat": false,
+      "expected": "allow"
+    },
+    {
+      "note": "subsume 字面尾不覆盖空模式",
+      "a": "*x",
+      "b": "",
+      "flat": false,
+      "expected": "deny"
+    }
   ]
 }

@@ -196,19 +196,23 @@ fn action_invalid_vectors_match_rust_side_rules() {
 #[test]
 fn glob_vectors_match_contracts() {
     // RS-147：glob-match.json——glob_match / glob_subsumes 跨语言向量。
-    // 匹配向量（pattern/text/expected_match）与覆盖向量（a/b/expected_subsumes）
-    // 共用 vectors 数组，按字段形态分派
+    // 断言字段遵循 contracts 向量协议（verify_vectors.py PY-064）：顶层
+    // expected ∈ {allow, deny}——allow = 期望匹配/覆盖成立，deny = 不成立。
+    // 匹配向量（pattern/text）与覆盖向量（a/b）共用 vectors 数组，按字段
+    // 形态分派
     let vectors = load_vectors("glob-match.json");
     assert!(!vectors.is_empty(), "glob 向量不得为空");
     let mut matched_count = 0usize;
     let mut subsumed_count = 0usize;
     for v in &vectors {
         let note = v["note"].as_str().unwrap_or("unnamed");
+        let expected = match v["expected"].as_str() {
+            Some("allow") => true,
+            Some("deny") => false,
+            other => panic!("向量 {note}: expected 非法（{other:?}）——协议值域 allow/deny"),
+        };
         if let (Some(pattern), Some(text)) = (v["pattern"].as_str(), v["text"].as_str()) {
             let flat = v["flat"].as_bool().unwrap_or(false);
-            let expected = v["expected_match"]
-                .as_bool()
-                .unwrap_or_else(|| panic!("向量 {note}: 缺 expected_match"));
             assert_eq!(
                 glob_match(pattern, text, flat),
                 expected,
@@ -218,9 +222,6 @@ fn glob_vectors_match_contracts() {
         }
         if let (Some(a), Some(b)) = (v["a"].as_str(), v["b"].as_str()) {
             let flat = v["flat"].as_bool().unwrap_or(false);
-            let expected = v["expected_subsumes"]
-                .as_bool()
-                .unwrap_or_else(|| panic!("向量 {note}: 缺 expected_subsumes"));
             assert_eq!(
                 glob_subsumes(a, b, flat),
                 expected,
