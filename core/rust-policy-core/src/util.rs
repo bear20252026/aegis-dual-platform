@@ -108,6 +108,36 @@ pub fn js_escape_single_quoted(s: &str) -> String {
         .replace('\r', "\\r")
 }
 
+/// hex 编码（每字节 → 2 个小写字符；RS-111 单缓冲 write!）。
+///
+/// RS-186（审计 2026-09-25）：自 session_state.rs 收敛至 util——hex 编解码
+/// 此前 session_state 一份、ffi/broker 查表一份（后者为 [u8;32] 热路径
+/// 内联特化，RS-137，保留）、hex_digit 一份；编解码主实现单源到本模块，
+/// 消除"同一会话序列化格式两处实现"的口径漂移面。
+pub(crate) fn hex_encode(data: &[u8]) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(data.len() * 2);
+    for b in data {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// hex 解码（每 2 字符 → 1 字节；奇数长度/非法字符返回 None）。
+pub(crate) fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    let bytes = s.as_bytes();
+    if !bytes.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for pair in bytes.chunks(2) {
+        let hi = hex_digit(pair[0])?;
+        let lo = hex_digit(pair[1])?;
+        out.push((hi << 4) | lo);
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,6 +157,36 @@ mod tests {
         assert_eq!(hex_digit(b'g'), None);
         assert_eq!(hex_digit(b'x'), None);
         assert_eq!(hex_digit(b' '), None);
+    }
+
+    #[test]
+    fn hex_digit_non_ascii_bytes_rejected() {
+        // RS-178：非 ASCII 字节此前零用例——UTF-8 多字节序列的高位字节
+        // （0x80..=0xFF）与 NUL 必须一律拒绝，不得误判为 hex 位
+        assert_eq!(hex_digit(0x80), None, "UTF-8 续字节");
+        assert_eq!(hex_digit(0xFF), None, "非法 UTF-8 首字节");
+        assert_eq!(hex_digit(0x00), None, "NUL");
+        assert_eq!(hex_digit(b'\n'), None);
+        // 'é'（U+00E9）的 UTF-8 编码 = C3 A9——两个字节都非 hex
+        assert_eq!(hex_digit(0xC3), None);
+        assert_eq!(hex_digit(0xA9), None);
+        // '0'..'9' 'a'..'f' 'A'..'F' 的 ASCII 邻位仍正常（回归锚点）
+        assert_eq!(hex_digit(b'f'), Some(15));
+    }
+
+    #[test]
+    fn hex_codec_round_trip_and_rejects() {
+        // RS-186：编解码主实现自 session_state 收敛——往返 + 拒绝形态
+        // 在单源处锁定
+        let data: Vec<u8> = (0..=255u8).collect();
+        assert_eq!(hex_decode(&hex_encode(&data)).as_deref(), Some(&data[..]));
+        assert_eq!(hex_encode(&[]), "");
+        assert_eq!(hex_encode(&[0xDE, 0xAD, 0xBE, 0xEF]), "deadbeef");
+        assert!(hex_encode(&data).chars().all(|c| c.is_ascii_hexdigit()));
+        // 拒绝形态：奇数长度 / 非法字符 / 空
+        assert_eq!(hex_decode("abc"), None, "奇数长度拒绝");
+        assert_eq!(hex_decode("zz"), None, "非法字符拒绝");
+        assert_eq!(hex_decode(""), Some(Vec::new()), "空串 = 空字节（合法）");
     }
 
     #[test]

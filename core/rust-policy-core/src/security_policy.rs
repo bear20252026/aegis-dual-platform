@@ -68,8 +68,12 @@ impl SecurityPolicy {
         // 去空字节
         sanitized = sanitized.replace('\u{0000}', "");
 
-        // 去控制字符（保留换行/回车/制表）
-        sanitized.retain(|c| c as u32 >= 32 || c == '\n' || c == '\r' || c == '\t');
+        // RS-188（审计 2026-09-25）：控制字符与控制空白（\n \r \t）全部
+        // 剥离——此前保留 \n\r\t 是"日志可读性"未论证的宽松口径：文件名
+        // 内嵌换行在资源管理器/下载面板可做视觉伪装（名称截断伪造扩展名），
+        // 且跨平台同步时行为不一致。剥离 = 空白类控制符与 >=0x20 可打印
+        // 字符的两分口径，单一且可解释。
+        sanitized.retain(|c| c as u32 >= 32);
 
         // RS-113（审计 2026-09-25）：剥 RTL 双向控制符——U+202E（RLO）等
         // 可把 "exe.jpg" 视觉伪装成 "gjp.exe"（扩展名伪装/钓鱼面）
@@ -268,10 +272,32 @@ mod tests {
             Some("../")
         );
         assert_eq!(SecurityPolicy::url_decode("a%20b").as_deref(), Some("a b"));
-        // 非 UTF-8 字节序列 → None（fail-closed）
+        // 非 UTF-8 字节序列 → None（fail-closed）——RS-187 口径："%FF" 用例
+        // 已在此锁定（%ff%fe 与 %FF 单独形态）
         assert_eq!(SecurityPolicy::url_decode("%ff%fe"), None);
-        // 截断的 % 编码（尾部无两个 hex 位）按字面保留
         assert_eq!(SecurityPolicy::url_decode("100%").as_deref(), Some("100%"));
+
+        // —— RS-188（审计 2026-09-25）：控制空白剥离 ——
+
+        // \n\r\t 此前被保留（未论证的宽松口径）——现与全部控制符一并剥离：
+        // 文件名内嵌换行可做视觉伪装（名称截断伪造扩展名）
+        for control in ["a\nb", "a\rb", "a\tb"] {
+            let out = SecurityPolicy::sanitize_filename(Some(control));
+            assert!(
+                !out.contains(['\n', '\r', '\t']),
+                "控制空白 {control:?} 必须剥离，实际 {out:?}"
+            );
+        }
+        // 剥离后为空 → 回落 "download"
+        assert_eq!(
+            SecurityPolicy::sanitize_filename(Some("\n\r\t")),
+            "download"
+        );
+        // 可打印空白（空格）不受影响（仅首尾 trim）
+        assert_eq!(
+            SecurityPolicy::sanitize_filename(Some("a b.txt")),
+            "a b.txt"
+        );
     }
 
     // —— RS-113 回归（审计 2026-09-25） ——

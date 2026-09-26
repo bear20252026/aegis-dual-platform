@@ -21,6 +21,11 @@ pub struct CAbiBroker {
     retired: AtomicBool,
 }
 
+// RS-200（审计 2026-09-25）：`pub` 可达性说明——CAbiBroker 必须 pub 仅因
+// C ABI 导出函数签名（aegis_policy_core_broker_new/free/... 返回/接收
+// `*mut CAbiBroker`）要求类型跨 crate 可达；字段全部私有，宿主不得解引用
+// 或推演内部布局——唯一合法交互是通过本模块导出的 C 函数句柄。
+
 /// C 输入指针的有界扫描上限。宿主按契约传 NUL 结尾缓冲区，此处仅防
 /// 异常宿主传入超长/无终止缓冲造成的无界越读。
 const FFI_INPUT_MAX_BYTES: usize = 64 * 1024;
@@ -62,16 +67,29 @@ static FALLBACK_RESPONSE: LazyLock<CString> = LazyLock::new(|| {
     unsafe { CString::from_vec_unchecked(FALLBACK_JSON.to_vec()) }
 });
 
+/// RS-176（审计 2026-09-25）：边界拒绝 explanation 单源——deny() 与
+/// FALLBACK_JSON 此前各持一份相同文案（改一处漏一处即口径分裂）。
+/// FALLBACK_JSON 为静态可证无 NUL 的字节字面量（RS-139 契约），无法引用
+/// 运行时常量——同步性由 c_abi_json_contract 测试锁定（字节包含断言）。
+const NATIVE_BOUNDARY_EXPLANATION: &str = "denied by aegis-policy-core native boundary";
+
 const FALLBACK_JSON: &[u8] = b"{\"abi_version\":0,\"decision\":\"deny\",\"reason\":{\"code\":\"ffi_response_alloc\",\"detail\":\"response allocation failed\",\"explanation\":\"denied by aegis-policy-core native boundary\"}}";
 
 /// JSON 编码为 NUL 结尾的 C 字符串。serde_json 输出不含字面 NUL（转义为
 /// \u0000），因此正常情况下不会失败；为彻底兑现"绝不返回 null"，分配失败
 /// 时回退到预构造的固定 ASCII deny 串（abi_version=0 标记异常响应，宿主
 /// 可识别）。RS-139：回退串来自预构造 static 的克隆——无 panic 路径。
+/// RS-175（审计 2026-09-25）：`to_writer` 直接序列化进单缓冲——此前
+/// `value.to_string()` 走 Display 层再转 CString（额外一层 String 中转），
+/// writer 直写 Vec 省一次中转分配。
 fn write_response(value: Value) -> *mut c_char {
-    match CString::new(value.to_string()) {
-        Ok(c) => CString::into_raw(c),
-        Err(_) => CString::into_raw(FALLBACK_RESPONSE.clone()),
+    let mut buf = Vec::new();
+    match serde_json::to_writer(&mut buf, &value)
+        .ok()
+        .and_then(|()| CString::new(buf).ok())
+    {
+        Some(c) => CString::into_raw(c),
+        None => CString::into_raw(FALLBACK_RESPONSE.clone()),
     }
 }
 
@@ -82,7 +100,7 @@ fn deny(code: &str, detail: &str) -> Value {
         "reason": {
             "code": code,
             "detail": detail,
-            "explanation": "denied by aegis-policy-core native boundary"
+            "explanation": NATIVE_BOUNDARY_EXPLANATION,
         }
     })
 }
@@ -565,6 +583,52 @@ mod tests {
         assert_eq!(decision["request"]["scope"], "payment:create");
         assert_eq!(decision["request"]["expires_at"], 1_700_000_000);
         assert_eq!(decision["request"]["nonce"], "approval-nonce");
+    }
+
+    /// RS-176（审计 2026-09-25）：deny explanation 同步性锁定——
+    /// FALLBACK_JSON 是静态字节字面量（RS-139 可证无 NUL），无法引用运行时
+    /// 常量 NATIVE_BOUNDARY_EXPLANATION；此处双断言：字节串直接包含常量
+    /// 文案 + 解析后 reason.explanation 与 deny() 产出逐字相等。任一侧
+    /// 单独改文案都会在此测试红灯，杜绝口径分裂。
+    #[test]
+    fn fallback_json_explanation_matches_native_boundary_constant() {
+        // 字节包含断言：FALLBACK_JSON 内嵌同一文案（含 JSON 转义后的引号）。
+        let bytes = std::str::from_utf8(FALLBACK_JSON).expect("fallback must be UTF-8");
+        assert!(
+            bytes.contains(NATIVE_BOUNDARY_EXPLANATION),
+            "FALLBACK_JSON must embed NATIVE_BOUNDARY_EXPLANATION verbatim"
+        );
+
+        // 解析级断言：fallback explanation 与 deny() 运行时产出一致。
+        let fallback: Value = serde_json::from_str(bytes).expect("fallback must be valid JSON");
+        let deny = deny("ffi_response_alloc", "response allocation failed");
+        assert_eq!(
+            fallback["reason"]["explanation"], deny["reason"]["explanation"],
+            "fallback and deny() must share one explanation"
+        );
+        assert_eq!(
+            fallback["reason"]["explanation"], NATIVE_BOUNDARY_EXPLANATION,
+            "explanation must equal the single-source constant"
+        );
+    }
+
+    /// RS-175（审计 2026-09-25）：write_response 走 to_writer 单缓冲路径的
+    /// 回归——正常 Value 编码后经 read_response 往返必须逐字段还原（证明
+    /// to_writer 产出合法 JSON 且 CString NUL 终止契约未破坏）。
+    #[test]
+    fn write_response_round_trips_value_through_single_buffer() {
+        let value = json!({
+            "abi_version": POLICY_CORE_ABI_VERSION,
+            "decision": "deny",
+            "reason": {
+                "code": "probe_code",
+                "detail": "probe detail",
+                "explanation": NATIVE_BOUNDARY_EXPLANATION,
+            },
+        });
+        let parsed = read_response(write_response(value.clone()));
+        assert_eq!(parsed, value);
+        assert_eq!(parsed["reason"]["explanation"], NATIVE_BOUNDARY_EXPLANATION);
     }
 
     #[test]

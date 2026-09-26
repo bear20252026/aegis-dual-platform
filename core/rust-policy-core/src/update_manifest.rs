@@ -178,51 +178,49 @@ pub fn verify_threshold(
     }
     let mut valid_key_ids: std::collections::HashSet<String> = Default::default();
     for sig in signatures {
-        let obj = match sig.as_object() {
-            Some(o) => o,
-            None => continue,
-        };
-        let key_id = match obj.get("key_id").and_then(|v| v.as_str()) {
-            Some(k) => k.to_string(),
-            None => continue,
-        };
-        if valid_key_ids.contains(&key_id) {
-            continue; // 重复 keyid 只计一次（TUF THRESHOLD counting——与 P0-04 一致）
-        }
-        let key_bytes = match trusted_keys.get(&key_id) {
-            Some(k) => k,
-            None => continue,
-        };
-        let sig_bytes = match obj.get("sig").and_then(|v| v.as_str()) {
-            Some(s) => s,
-            None => continue,
-        };
-        let Ok(sig_bytes) = base64_decode(sig_bytes) else {
-            continue;
-        };
-        // ed25519-dalek 2.x：from_bytes 期望固定长度数组（[u8; 32]/[u8; 64]——
-        // E0308 修复——公钥/签名长度校验——try_into）
-        let Ok(key_arr) = <[u8; 32]>::try_from(key_bytes.as_slice()) else {
-            continue;
-        };
-        let Ok(sig_arr) = <[u8; 64]>::try_from(sig_bytes.as_slice()) else {
-            continue;
-        };
-        // ed25519-dalek 2.x：VerifyingKey::from_bytes 返回 Result（let-else 处理
-        // Err）；Signature::from_bytes 直接返回 Signature（非 Result——2.x API）
-        let Ok(verifying_key) = VerifyingKey::from_bytes(&key_arr) else {
-            continue;
-        };
-        let signature = Signature::from_bytes(&sig_arr);
-        // verify_strict：严格验证——防 malleability（Houseme 生产实践）
-        if verifying_key
-            .verify_strict(canonical_payload, &signature)
-            .is_ok()
+        // RS-197（审计 2026-09-25）：逐签名验证链抽辅助——此前 8 层
+        // continue 嵌套内联在循环体（结构/去重/密钥/形态/严格验证逐层
+        // 跳过），控制流与验证序不可读。提取后主循环单一职责：
+        // 验证成功 → 计入，失败 → 跳过
+        if let Some(key_id) =
+            try_verify_signature(sig, trusted_keys, canonical_payload, &valid_key_ids)
         {
             valid_key_ids.insert(key_id);
         }
     }
     valid_key_ids.len() >= threshold
+}
+
+/// RS-197：单签名验证链——结构 → 重复 keyid → 密钥存在 → 签名字段 →
+/// base64 → 密钥/签名长度 → 公钥解析 → 严格验证；任一环节失败返回 None。
+/// 重复 keyid 提前短路（TUF THRESHOLD counting——与 P0-04 一致，只计一次）。
+fn try_verify_signature(
+    sig: &serde_json::Value,
+    trusted_keys: &std::collections::HashMap<String, Vec<u8>>,
+    canonical_payload: &[u8],
+    already_valid: &std::collections::HashSet<String>,
+) -> Option<String> {
+    let obj = sig.as_object()?;
+    let key_id = obj.get("key_id").and_then(|v| v.as_str())?.to_string();
+    if already_valid.contains(&key_id) {
+        return None; // 重复 keyid 只计一次（TUF THRESHOLD counting——与 P0-04 一致）
+    }
+    let key_bytes = trusted_keys.get(&key_id)?;
+    let sig_str = obj.get("sig").and_then(|v| v.as_str())?;
+    let sig_bytes = base64_decode(sig_str).ok()?;
+    // ed25519-dalek 2.x：from_bytes 期望固定长度数组（[u8; 32]/[u8; 64]——
+    // E0308 修复——公钥/签名长度校验——try_into）
+    let key_arr = <[u8; 32]>::try_from(key_bytes.as_slice()).ok()?;
+    let sig_arr = <[u8; 64]>::try_from(sig_bytes.as_slice()).ok()?;
+    // ed25519-dalek 2.x：VerifyingKey::from_bytes 返回 Result；Signature::
+    // from_bytes 直接返回 Signature（非 Result——2.x API）
+    let verifying_key = VerifyingKey::from_bytes(&key_arr).ok()?;
+    let signature = Signature::from_bytes(&sig_arr);
+    // verify_strict：严格验证——防 malleability（Houseme 生产实践）
+    verifying_key
+        .verify_strict(canonical_payload, &signature)
+        .ok()?;
+    Some(key_id)
 }
 
 /// 基础 base64 解码（纯函数——无外部 crate 依赖的简版；生产用 base64 crate——

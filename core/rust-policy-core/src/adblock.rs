@@ -100,8 +100,23 @@ impl AdBlockManager {
     }
 
     /// 加载域名黑名单（从 filter list 解析的 host 格式）。
+    ///
+    /// RS-179（审计 2026-09-25）：入库归一——黑名单条目与查询侧
+    /// （should_block_host）的归一口径对齐（ASCII 小写、剥尾点）。此前
+    /// 按字面入库，`Ads.Example.COM` 之类条目永远无法命中（查询侧已
+    /// 归一）——**fail-open 方向**：看起来已拦截实际放行。RS-180：空串
+    /// 与归一后为空的条目不入库（空键会被无 host 形态意外命中）。
     pub fn load_blocked_domains(&mut self, domains: impl IntoIterator<Item = String>) {
-        self.blocked_domains.extend(domains);
+        let normalized = domains.into_iter().filter_map(|d| {
+            let lowered = d.trim().to_lowercase();
+            let stripped = lowered.strip_suffix('.').unwrap_or(&lowered);
+            if stripped.is_empty() {
+                None // 空串/纯尾点条目拒绝入库
+            } else {
+                Some(stripped.to_string())
+            }
+        });
+        self.blocked_domains.extend(normalized);
     }
 
     /// 检查 URL 是否应被拦截。
@@ -277,5 +292,54 @@ mod tests {
         let rendered = format!("{mgr:?}");
         assert!(rendered.contains("AdBlockManager"));
         assert!(rendered.contains("total_blocked"));
+    }
+
+    // —— RS-179/180（审计 2026-09-25）：入库归一与条目卫生 ——
+
+    #[test]
+    fn loaded_domains_normalized_case_and_trailing_dot() {
+        // RS-179：黑名单条目此前按字面入库——大小写变体/尾点形式与查询侧
+        // （已归一）永不相等，条目形同虚设（fail-open）。入库归一后命中
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(["Ads.Example.COM".to_string(), "tracker.org.".to_string()]);
+        assert!(
+            mgr.should_block("https://ads.example.com/x"),
+            "大小写变体入库后必须命中"
+        );
+        assert!(
+            mgr.should_block("https://tracker.org/ad.js"),
+            "尾点条目归一后必须命中"
+        );
+        assert!(
+            mgr.should_block("https://ADS.EXAMPLE.COM/"),
+            "查询侧大写变体命中"
+        );
+        assert!(!mgr.should_block("https://clean.example.org/"));
+    }
+
+    #[test]
+    fn empty_and_blank_entries_rejected_at_load() {
+        // RS-180：空串/纯空白/纯尾点条目不入库——空键会被无 host 形态
+        // 意外命中（若入库则 should_block("") 形态语义被污染）
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains([
+            String::new(),
+            "   ".to_string(),
+            ".".to_string(),
+            "real.example".to_string(),
+        ]);
+        assert!(!mgr.should_block_host(""), "空键不得入库");
+        assert_eq!(mgr.total_blocked, 0, "无条目应被命中");
+        assert!(mgr.should_block("https://real.example/"));
+    }
+
+    #[test]
+    fn duplicate_entries_are_idempotent() {
+        // RS-180：重复条目幂等（HashSet 语义）——计数不受重复加载影响
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(["dup.com".to_string(), "dup.com".to_string()]);
+        mgr.load_blocked_domains(["dup.com".to_string()]);
+        assert!(mgr.should_block("https://dup.com/"));
+        assert_eq!(mgr.total_blocked, 1, "重复入库不放大命中计数");
     }
 }

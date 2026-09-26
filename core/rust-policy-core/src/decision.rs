@@ -14,18 +14,33 @@ pub enum Decision {
 /// AuthorizedAction——唯一允许进入副作用服务的凭据（ADR-002）。
 /// 绑定字段任一变化使批准失效。
 /// explanation：人类可读的审计说明（照搬 warden Verdict.explanation 模式）。
+///
+/// RS-191（审计 2026-09-25）：字段级文档——绑定字段（参与批准失效判定）
+/// 与描述字段（仅审计）的边界由此锁定。**explanation 不参与绑定比较**
+/// （ffi/broker.rs consume 的 M-15 修正口径：托管端序列化不携带该字段）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct AuthorizedAction {
+    /// 会话标识——broker 会话池寻址键（不存在即 session_not_found）。
     pub session_id: String,
+    /// 绑定标签页——跨标签使用该凭据被拒（tab_mismatch）。
     pub tab_id: String,
+    /// 绑定顶层文档代际——页面切换推进后旧代际凭据失效（generation_mismatch）。
     pub document_generation: u64,
+    /// 绑定 origin（scheme://host[:port]）——授权与来源强绑定。
     pub origin: String,
+    /// 绑定 HTTP 方法（当前导航通路恒为 "GET"——其余方法走副作用审批）。
     pub method: String,
+    /// 绑定规范化 path+query（fragment 不参与绑定）。
     pub canonical_parameters: String,
+    /// 动作 scope（策略/能力层评估键，如 "navigation"）。
     pub scope: String,
+    /// 授权失效时刻（UNIX 秒）——`<= now` 即过期（RS-156 边界口径）。
     pub expires_at: u64,
+    /// 一次性 nonce——消费即失效（重放拒绝），由 broker 账本原子推进。
     pub nonce: String,
+    /// 签发时策略版本——与 broker 当前版本不一致即拒（policy_version_mismatch）。
     pub policy_version: String,
+    /// 人类可读审计说明——**不参与绑定比较**（M-15：托管端序列化不携带）。
     pub explanation: String,
 }
 

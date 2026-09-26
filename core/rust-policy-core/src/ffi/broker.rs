@@ -284,11 +284,7 @@ impl FfiBroker {
         let Some(canonical_url) = crate::origin::canonicalize_external(&raw_url) else {
             return deny_url(raw_url);
         };
-        if authorized.method != "GET"
-            || authorized.scope != scope
-            || authorized.origin != canonical_url.origin
-            || authorized.canonical_parameters != canonical_url.canonical_parameters
-        {
+        if !matches_navigation_binding(&authorized, &scope, &canonical_url) {
             return ffi_deny(
                 "approval_binding_mismatch",
                 "审批请求与当前导航参数不匹配",
@@ -438,11 +434,7 @@ impl FfiBroker {
             return deny_url(raw_url);
         };
         let action = AuthorizedAction::from(action);
-        if action.method != "GET"
-            || action.scope != scope
-            || action.origin != canonical_url.origin
-            || action.canonical_parameters != canonical_url.canonical_parameters
-        {
+        if !matches_navigation_binding(&action, &scope, &canonical_url) {
             return FfiDecision::Deny {
                 reason: FfiDenyReason {
                     code: "action_binding_mismatch".into(),
@@ -536,6 +528,21 @@ fn same_binding(a: &AuthorizedAction, b: &AuthorizedAction) -> bool {
         && a.policy_version == b.policy_version
 }
 
+/// RS-184（审计 2026-09-25）：导航绑定比较单源——approve 与 consume 的
+/// 四属性清单此前重复内联两处（287/441 行形态一致），新增绑定属性时
+/// 漏改一处即两端口径分裂（binding_mismatch 与放行互斥失败）。与
+/// [`same_binding`] 同口径：explanation 不参与比较（M-15）。
+fn matches_navigation_binding(
+    action: &AuthorizedAction,
+    scope: &str,
+    canonical_url: &crate::origin::CanonicalExternalUrl,
+) -> bool {
+    action.method == "GET"
+        && action.scope == scope
+        && action.origin == canonical_url.origin
+        && action.canonical_parameters == canonical_url.canonical_parameters
+}
+
 /// M-15 修复（审计 2026-08-31）：授权账本容量门（fail-closed）。
 /// 未达上限直接放行；达上限先惰性清理已过期的 Pending 记录
 /// （Consumed 记录保留到会话撤销，不参与清理），仍满则拒绝登记。
@@ -582,22 +589,33 @@ fn ffi_deny(code: &str, detail: &str, explanation: &str) -> FfiDecision {
 }
 
 fn generate_nonce() -> Result<String, FfiDenyReason> {
-    const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
     let mut bytes = [0u8; 32];
     // RS-153：getrandom 0.3 API——getrandom() 更名 fill()
-    getrandom::fill(&mut bytes).map_err(|error| FfiDenyReason {
+    // RS-199（审计 2026-09-25）：熵不足路径参数化——填充与错误映射/
+    // 编码拆分后，失败分支（此前完全不可注入、零测试）可单测：
+    // entropy_error 的拒绝码与 nonce_from_entropy 的编码契约独立锁定
+    getrandom::fill(&mut bytes).map_err(entropy_error)?;
+    Ok(nonce_from_entropy(&bytes))
+}
+
+/// RS-199：熵获取失败的类型化拒绝构造（code/explanation 单源）。
+fn entropy_error(error: getrandom::Error) -> FfiDenyReason {
+    FfiDenyReason {
         code: "entropy_unavailable".into(),
         detail: "无法生成安全随机 nonce".into(),
         explanation: format!("denied — operating-system entropy unavailable: {error}"),
-    })?;
-    // RS-137（审计 2026-09-25）：查表拼接替代 32 次 format! 堆分配
-    // （每次导航 32 个临时 String → 预分配单缓冲零临时分配）
+    }
+}
+
+/// RS-199：熵字节 → 64 字符小写 hex nonce（RS-137 查表单缓冲——零临时分配）。
+fn nonce_from_entropy(bytes: &[u8; 32]) -> String {
+    const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
     let mut out = String::with_capacity(64);
     for byte in bytes {
         out.push(HEX_TABLE[(byte >> 4) as usize] as char);
         out.push(HEX_TABLE[(byte & 0x0f) as usize] as char);
     }
-    Ok(out)
+    out
 }
 
 // ============================ H-7 审计回归测试 ============================ //
@@ -992,5 +1010,66 @@ mod nonce_tests {
         let a = generate_nonce().unwrap();
         let b = generate_nonce().unwrap();
         assert_ne!(a, b);
+    }
+
+    // —— RS-185/199（审计 2026-09-25）——
+
+    #[test]
+    fn entropy_error_maps_to_typed_deny() {
+        // RS-199：熵不足路径参数化后可测——映射构造的拒绝码/文案单源锁定
+        //（真实 getrandom 失败在测试进程不可注入，映射函数即为注入面）
+        let reason = entropy_error(getrandom::Error::UNSUPPORTED);
+        assert_eq!(reason.code, "entropy_unavailable");
+        assert!(reason.explanation.contains("entropy unavailable"));
+        // 编码契约：确定性输入 → 确定性输出（64 字符小写 hex）
+        let nonce = nonce_from_entropy(&[0u8; 32]);
+        assert_eq!(nonce, "0".repeat(64));
+        let nonce = nonce_from_entropy(&[0xff; 32]);
+        assert_eq!(nonce, "f".repeat(64));
+        assert_eq!(nonce_from_entropy(&[0xab; 32]).len(), 64);
+    }
+
+    #[test]
+    fn approve_navigation_rejects_unparseable_url() {
+        // RS-185：approve 的 URL 解析失败分支此前零测试——pending 审批
+        // 对畸形 URL 必须拒绝（url_policy），且不消费 pending 记录？
+        // 口径核实：canonicalize 在 remove(&nonce) 之后执行——失败时
+        // nonce 已被移除（一次性语义：畸形重试后 approval_not_pending）
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s".into(), "t".into(), 1, 120));
+        let decision = broker.request_navigation_confirmation(
+            "s".into(),
+            "t".into(),
+            1,
+            "https://example.com/confirm".into(),
+            "navigation".into(),
+        );
+        let FfiDecision::RequireConfirmation { request } = decision else {
+            panic!("active session should produce confirmation request");
+        };
+        // 畸形 URL approve → deny（url_policy）
+        let denied = broker.approve_navigation_confirmation(
+            request.nonce.clone(),
+            "https://[::1]/bad".into(),
+            "navigation".into(),
+        );
+        match denied {
+            FfiDecision::Deny { reason } => {
+                assert_eq!(reason.code, "url_policy", "畸形 URL 必须走 url_policy 拒绝");
+            }
+            other => panic!("期望 Deny，实际 {other:?}"),
+        }
+        // pending 已被移除（一次性语义）：同 nonce 重试 → approval_not_pending
+        let retry = broker.approve_navigation_confirmation(
+            request.nonce,
+            "https://example.com/confirm".into(),
+            "navigation".into(),
+        );
+        match retry {
+            FfiDecision::Deny { reason } => {
+                assert_eq!(reason.code, "approval_not_pending");
+            }
+            other => panic!("期望 approval_not_pending，实际 {other:?}"),
+        }
     }
 }

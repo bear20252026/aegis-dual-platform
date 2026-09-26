@@ -124,35 +124,9 @@ impl SessionState {
     }
 }
 
-/// hex 编码（零依赖——简单可靠——无 padding 问题——每个字节→2 字符）。
-///
-/// RS-111（审计 2026-09-25）：单缓冲 write! 写入——此前每字节 format!
-/// 各分配一次（512KB 状态块 = 26 万次分配）。
-fn hex_encode(data: &[u8]) -> String {
-    use std::fmt::Write as _;
-    let mut out = String::with_capacity(data.len() * 2);
-    for b in data {
-        let _ = write!(out, "{b:02x}");
-    }
-    out
-}
-
-/// hex 解码（零依赖——每 2 字符→1 字节）。
-fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    let bytes = s.as_bytes();
-    if !bytes.len().is_multiple_of(2) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(bytes.len() / 2);
-    for pair in bytes.chunks(2) {
-        let hi = hex_digit(pair[0])?;
-        let lo = hex_digit(pair[1])?;
-        out.push((hi << 4) | lo);
-    }
-    Some(out)
-}
-
-use crate::util::hex_digit;
+/// hex 编解码（RS-186：收敛至 util 单源——此前本文件私有一份，与
+/// util::hex_digit 形成"同格式多实现"漂移面）。
+use crate::util::{hex_decode, hex_encode};
 
 #[cfg(test)]
 mod tests {
@@ -262,6 +236,31 @@ mod tests {
     fn rejects_unknown_schema_version() {
         let json = r#"{"schemaVersion":999,"tabId":"t","sessionStateBytes":"00","metadata":{"title":"","url":"","isIncognito":false,"lastActiveTime":0,"canGoBack":false,"canGoForward":false},"timestamp":0}"#;
         assert!(SessionState::from_json(json).is_none());
+    }
+
+    #[test]
+    fn schema_version_zero_and_two_rejected() {
+        // RS-172：前向兼容策略此前只有 999 一个用例——版本边界 0（历史
+        // 过去版本）与 2（紧邻未来版本）必须同样拒绝。策略口径：仅接受
+        // CURRENT_SCHEMA_VERSION=1，未来版本在实现其迁移语义前一律
+        // fail-closed（盲区恢复比静默丢字段安全）
+        let base = |version: u32| {
+            format!(
+                r#"{{"schemaVersion":{version},"tabId":"t","sessionStateBytes":"00","metadata":{{"title":"","url":"","isIncognito":false,"lastActiveTime":0,"canGoBack":false,"canGoForward":false}},"timestamp":0}}"#
+            )
+        };
+        assert!(
+            SessionState::from_json(&base(0)).is_none(),
+            "schemaVersion=0（过去版本）必须拒绝"
+        );
+        assert!(
+            SessionState::from_json(&base(2)).is_none(),
+            "schemaVersion=2（未来版本）必须拒绝"
+        );
+        assert!(
+            SessionState::from_json(&base(1)).is_some(),
+            "当前版本 1 必须接受"
+        );
     }
 
     #[test]

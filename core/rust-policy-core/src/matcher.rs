@@ -368,6 +368,53 @@ mod tests {
         assert!(glob_subsumes(&a, &a, false));
     }
 
+    // —— RS-168/192（审计 2026-09-25）——
+
+    #[test]
+    fn triple_star_and_star_question_combos() {
+        // RS-192：连写通配组合（"***"/"**?"/"*?"）此前零用例——
+        // tokenize 分词（"***" = ** + *）与 DP 组合行为锁定
+        // "***" = DStar + Star：跨段星 + 段内星（Star 允许空匹配段），
+        // 语义与 "**" 等价
+        assert!(glob_match("***", "a/b/c", false));
+        assert!(glob_match("***", "", false));
+        assert!(glob_match("***", "x", false));
+        // "**?" = DStar + Any1：至少 1 字符；? 在非 flat 下不跨段
+        assert!(glob_match("**?", "ab", false));
+        assert!(
+            glob_match("**?", "a/b", false),
+            "** 吃跨段前缀后 ? 匹配段内尾字符"
+        );
+        assert!(!glob_match("**?", "", false), "空串无字符可消耗 ?");
+        // "*?"：单段内两 token 协作——Star 允许空匹配（上文 "***" 匹配
+        // 空串已证），故最少消耗 1 字符（Star 空 + ? 吃 1）而非 2
+        assert!(glob_match("*?", "ab", false));
+        assert!(
+            glob_match("*?", "a", false),
+            "Star 空匹配 + ? 恰好吃掉单字符"
+        );
+        assert!(!glob_match("*?", "", false), "空串无字符可消耗 ?");
+        // flat 下 "**?" 语义不变（? 可跨段）
+        assert!(glob_match("**?", "ab", true));
+    }
+
+    #[test]
+    fn flat_lockstep_star_vs_dstar_subsume() {
+        // RS-168：subsume 的 flat 锁步分支（Star, DStar) => flat && 双推进
+        // 此前零用例——flat=true 下两模式必须同步推进（锁步），flat=false
+        // 下单星对双星永不覆盖
+        assert!(
+            glob_subsumes("a*", "a**", true),
+            "flat 下 Star↔DStar 锁步等价面"
+        );
+        assert!(
+            !glob_subsumes("a*", "a**", false),
+            "非 flat 下单星不得覆盖双星（既有 subsumes_dstar_covers_star 口径）"
+        );
+        // 锁步的字面量不匹配面：字面量不同即失败
+        assert!(!glob_subsumes("a*", "b**", true));
+    }
+
     // —— RS-061/062 回归（审计 2026-09-25） ——
 
     #[test]

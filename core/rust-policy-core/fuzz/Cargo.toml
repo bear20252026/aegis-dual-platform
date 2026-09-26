@@ -10,7 +10,10 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
+# RS-205（审计 2026-09-25）：锁精确版本——"0.4" 允许 minor 内漂移（0.4.x 的
+# 构建脚本/链接器行为变化会无声影响 fuzz 构建）；与 Cargo.lock 实际解析
+# （0.4.13）一致，升级须显式改此处并重新验证 5 target 编译。
+libfuzzer-sys = "0.4.13"
 
 [dependencies.aegis-policy-core]
 path = ".."

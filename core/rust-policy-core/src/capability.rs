@@ -27,6 +27,7 @@ pub enum CapabilityScope {
 }
 
 impl CapabilityScope {
+    /// 从动作名解析 scope（未知动作返回 None——调用方 fail-closed 处理）。
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "navigation:read" | "tabs:read" | "history:read" => Some(Self::Read),
@@ -37,6 +38,7 @@ impl CapabilityScope {
         }
     }
 
+    /// 风险等级（0..3 单调递增）——宿主 UI 据此分级展示确认强度。
     pub fn risk_level(&self) -> u8 {
         match self {
             Self::Read => 0,
@@ -81,10 +83,13 @@ impl Capability {
         self.uses_count
     }
 
+    /// 是否已达使用上限（无上限的 capability 永不耗尽）。
     pub fn is_exhausted(&self) -> bool {
         self.max_uses.is_some_and(|max| self.uses_count >= max)
     }
 
+    /// origin 是否在该 capability 的允许列表内（fail-closed：空白名单拒绝，
+    /// 显式 "*" 才全放行——语义细节见实现内 RS-104 注记）。
     pub fn is_origin_allowed(&self, origin: &str) -> bool {
         // 白名单按 origin 前缀精确匹配（此前 contains 子串匹配：白名单
         // "https://trusted.com" 放行 "https://evil-trusted.com/path"）。
@@ -123,6 +128,7 @@ impl Default for CapabilityRegistry {
 }
 
 impl CapabilityRegistry {
+    /// 创建空注册表（fail-closed——未注册的 capability 一律拒绝）。
     pub fn new() -> Self {
         Self {
             capabilities: HashMap::new(),
@@ -160,7 +166,7 @@ impl CapabilityRegistry {
         }
     }
 
-    /// 消费 capability（增加使用计数）。
+    /// 消费 capability（使用计数 +1；已耗尽或未注册返回 false）。
     pub fn consume(&mut self, name: &str) -> bool {
         if let Some(cap) = self.capabilities.get_mut(name) {
             if cap.is_exhausted() {

@@ -32,7 +32,14 @@ use crate::policy::PolicyEngine;
 
 /// 已消费 nonce 账本上限——防止长期会话下无界内存增长。
 /// fail-closed：达到上限后拒绝新的消费，绝不淘汰旧 nonce（以免削弱一次性/重放保护）。
+///
+/// RS-171（审计 2026-09-25）：可测试注入——生产 50K 无法在单测内填满
+/// （5 万次 consume 的用例是负担）；test profile 下缩小为 256，账本满
+/// 的 fail-closed 分支得以真实触达（语义与生产常量无关——分支代码同一份）。
+#[cfg(not(test))]
 const MAX_CONSUMED_NONCES: usize = 50_000;
+#[cfg(test)]
+const MAX_CONSUMED_NONCES: usize = 256;
 
 /// RS-034（审计 2026-09-24）：nonce 合法长度上限（字节）——生成端为
 /// 32 字节 hex（64 字符）；上限留足余量。空 nonce 与超长 nonce 一律拒绝，
@@ -80,8 +87,17 @@ pub struct SessionContext {
 }
 
 impl SessionContext {
+    /// RS-203（审计 2026-09-25）：过期判定的可注入内核——`now` 由调用方
+    /// 传入（测试用 `Instant::now() - Duration` 构造虚拟时刻，不动真实
+    /// 时钟，无需 sleep）。口径：`> ttl` 严格大于才过期，== ttl 未过期
+    /// （与 RS-156 授权过期 `<= now` 的方向一致：边界属于「仍有效」一侧
+    /// 语义由各调用点口径锁定，此处严格大于即「到界即拒」由验证方解释）。
+    pub fn is_expired_at(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.created_at) > self.ttl
+    }
+
     pub fn is_expired(&self) -> bool {
-        self.created_at.elapsed() > self.ttl
+        self.is_expired_at(Instant::now())
     }
 }
 
@@ -849,5 +865,92 @@ mod tests {
         assert_eq!(broker.session_ttl("missing"), None);
         broker.destroy_session("s1");
         assert_eq!(broker.session_ttl("s1"), None, "销毁后查询为 None");
+    }
+
+    // —— RS-171/183/203（审计 2026-09-25）——
+
+    #[test]
+    fn nonce_ledger_full_fails_closed_at_injected_cap() {
+        // RS-171：test profile 下 MAX_CONSUMED_NONCES=256——账本满后新
+        // nonce 消费拒绝（fail-closed，绝不淘汰旧记录），分支此前因生产
+        // 常量 50K 无法在单测内触达
+        let mut broker = make_broker_with_defaults();
+        for i in 0..MAX_CONSUMED_NONCES {
+            broker
+                .consume_nonce(&format!("nonce-{i:016x}"), "s-ledger")
+                .unwrap_or_else(|e| panic!("第 {i} 条必须入账: {e:?}"));
+        }
+        assert_eq!(broker.consumed_nonce_count(), MAX_CONSUMED_NONCES);
+        // 满后新 nonce：nonce_ledger_full 拒绝
+        let err = broker
+            .consume_nonce("nonce-after-full", "s-ledger")
+            .expect_err("账本满必须拒绝");
+        assert_eq!(err.code, "nonce_ledger_full");
+        assert_eq!(
+            broker.consumed_nonce_count(),
+            MAX_CONSUMED_NONCES,
+            "拒绝路径不得改变账本规模（无淘汰）"
+        );
+        // 既有 nonce 重放语义不受账本满影响（重放检查先于上限检查）
+        let replay = broker
+            .consume_nonce("nonce-0000000000000000", "s-ledger")
+            .expect_err("已入账 nonce 重放必须拒绝");
+        assert_eq!(replay.code, "nonce_replay");
+    }
+
+    #[test]
+    fn generation_advance_at_u64_max_rejects_overflow() {
+        // RS-183：checked_add 溢出分支——generation == u64::MAX 时再推进
+        // 必须拒绝（此前分支不可达未测：正常会话代际永远到不了 MAX）
+        let mut broker = make_broker_with_defaults();
+        broker.create_session(
+            "s-max".into(),
+            "tab-0".into(),
+            u64::MAX - 1,
+            Duration::from_secs(120),
+        );
+        // 最后一步正常推进到 u64::MAX
+        assert!(
+            broker.advance_document_generation("s-max", "tab-0", u64::MAX),
+            "u64::MAX-1 → u64::MAX 必须成功"
+        );
+        // 溢出分支：MAX + 1 无可表示值 → false（fail-closed）
+        assert!(
+            !broker.advance_document_generation("s-max", "tab-0", u64::MAX),
+            "自 MAX 再推进应拒绝"
+        );
+        // 会话代际保持 MAX（未推进）
+        let action = make_action("s-max", u64::MAX, "nonce-overflow");
+        assert!(matches!(
+            broker.validate_action(&action),
+            Decision::Allow(_)
+        ));
+    }
+
+    #[test]
+    fn session_expiry_injected_clock_boundaries() {
+        // RS-203：is_expired_at 注入内核——虚拟时刻构造（Instant 回拨
+        // 减法），边界口径锁定：== ttl 未过期（严格大于才过期），
+        // 无需真实 sleep
+        let ttl = Duration::from_secs(60);
+        let ctx = SessionContext {
+            session_id: "s".into(),
+            tab_id: "t".into(),
+            generation: 1,
+            created_at: Instant::now(),
+            ttl,
+        };
+        // 刚创建：远未过期
+        assert!(!ctx.is_expired_at(Instant::now()));
+        // == ttl：未过期（> 严格大于口径）
+        let at_boundary = ctx.created_at + ttl;
+        assert!(
+            !ctx.is_expired_at(at_boundary),
+            "== ttl 未过期（严格大于口径锁定）"
+        );
+        // ttl + 1ns：过期
+        assert!(ctx.is_expired_at(at_boundary + Duration::from_nanos(1)));
+        // 早于 created_at 的时刻（时钟回拨形态）：差值为 0 方向饱和，未过期
+        assert!(!ctx.is_expired_at(ctx.created_at - Duration::from_secs(1)));
     }
 }

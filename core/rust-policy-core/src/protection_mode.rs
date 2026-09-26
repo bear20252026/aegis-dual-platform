@@ -326,6 +326,50 @@ mod tests {
         }
     }
 
+    // —— RS-189（审计 2026-09-25）：name/description 全模式断言 ——
+
+    #[test]
+    fn name_and_description_cover_all_modes() {
+        // RS-189：name()/description() 此前零全模式断言——宿主设置面板
+        // 直接渲染这两通道，返回空串/串位（match 臂错位）会静默劣化 UI。
+        // 全 3 模式 × 双通道锁定：name 非空且与 parse 互为往返，description
+        // 非空且各模式互异
+        let mut descriptions = Vec::new();
+        for mode in [
+            ProtectionMode::Compatible,
+            ProtectionMode::Balanced,
+            ProtectionMode::Maximum,
+        ] {
+            let name = mode.name();
+            let desc = mode.description();
+            assert!(!name.is_empty(), "{mode:?} name 不得为空");
+            assert!(!desc.is_empty(), "{mode:?} description 不得为空");
+            // name 与 parse 往返一致（设置面板存 name → 读回同模式）
+            assert_eq!(
+                ProtectionMode::parse(name),
+                Some(mode),
+                "name {name:?} 必须经 parse 往返"
+            );
+            // name 必须是小写 ASCII（JS 侧直接内插进脚本）
+            assert!(
+                name.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()),
+                "name {name:?} 必须是小写 ASCII"
+            );
+            descriptions.push(desc);
+        }
+        // description 各模式互异（串位可被检出）
+        let len = descriptions.len();
+        for i in 0..len {
+            for j in (i + 1)..len {
+                assert_ne!(
+                    descriptions[i], descriptions[j],
+                    "模式 {i} 与 {j} 的 description 串位"
+                );
+            }
+        }
+    }
+
     fn guard_script() -> String {
         ProtectionMode::Balanced.inject_script()
     }

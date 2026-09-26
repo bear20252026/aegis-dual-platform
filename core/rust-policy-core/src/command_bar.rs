@@ -56,7 +56,12 @@ pub struct CommandEntry {
 }
 
 impl CommandEntry {
-    /// 内部统一构造器（keywords 与小写缓存单源派生）。
+    /// RS-193（审计 2026-09-25）：单字段字符数上限——标题/子标题/值源自
+    /// 书签/历史（页面可控），无上限时单条目可注入超大字符串（列表页
+    /// 渲染面 + 内存放大）。截断按字符计（UTF-8 安全，不产生半字符）。
+    const MAX_FIELD_CHARS: usize = 512;
+
+    /// 内部统一构造器（keywords 与小写缓存单源派生；RS-193：字段截断）。
     fn new_entry(
         command_type: CommandType,
         title: &str,
@@ -64,9 +69,10 @@ impl CommandEntry {
         value: &str,
         icon: &str,
     ) -> Self {
-        let title = title.to_string();
-        let subtitle = subtitle.to_string();
-        let value = value.to_string();
+        let truncate = |s: &str| s.chars().take(Self::MAX_FIELD_CHARS).collect::<String>();
+        let title = truncate(title);
+        let subtitle = truncate(subtitle);
+        let value = truncate(value);
         let title_lc = title.to_lowercase();
         let subtitle_lc = subtitle.to_lowercase();
         let value_lc = value.to_lowercase();
@@ -169,13 +175,29 @@ impl CommandBar {
         self.entries.extend(entries);
     }
 
-    /// 搜索匹配的命令。
+    /// 搜索匹配的命令（最多返回 max_results 条）。
+    ///
+    /// RS-165（审计 2026-09-25）：显式短路循环替代 `filter().take()` 链——
+    /// 语义上惰性 take 已短路，但显式 `break` 让「命中满额即停」的意图
+    /// 可读可审计，且杜绝未来有人改为 `.filter().collect()` 全量收集
+    /// 再截断的回归形态。
     pub fn search(&self, query: &str) -> Vec<&CommandEntry> {
-        self.entries
-            .iter()
-            .filter(|e| e.matches(query))
-            .take(self.max_results)
-            .collect()
+        // RS-122（审计 2026-09-25）：max_results=0 是合法配置（不展示）——
+        // 此前 push 后判 `== max_results` 对 0 永假，上限静默失效、
+        // 空查询也吐全量条目。提前返回空集兑现上限语义。
+        if self.max_results == 0 {
+            return Vec::new();
+        }
+        let mut results = Vec::new();
+        for entry in &self.entries {
+            if entry.matches(query) {
+                results.push(entry);
+                if results.len() == self.max_results {
+                    break;
+                }
+            }
+        }
+        results
     }
 
     /// 添加内置操作命令（新建标签/关闭标签/刷新/设置等）。
@@ -469,5 +491,59 @@ mod tests {
             script.contains("e.value.toLowerCase().indexOf(q) >= 0"),
             "JS search 必须覆盖 value 通道（与 Rust 口径对齐）"
         );
+    }
+
+    // —— RS-165/193/194（审计 2026-09-25）——
+
+    #[test]
+    fn oversized_fields_truncated_in_constructor() {
+        // RS-193：构造器字段截断——页面可控的超长标题/子标题/值被钳制
+        // 到 MAX_FIELD_CHARS 字符（按字符计，多字节 UTF-8 不产生半字符）
+        let long = "汉".repeat(2_000); // 2000 chars（6000 bytes）
+        let entry = CommandEntry::navigate(&long, &format!("https://e.com/{long}"));
+        assert_eq!(
+            entry.title.chars().count(),
+            CommandEntry::MAX_FIELD_CHARS,
+            "标题按字符数截断"
+        );
+        assert_eq!(
+            entry.value.chars().count(),
+            CommandEntry::MAX_FIELD_CHARS,
+            "value 按字符数截断"
+        );
+        // 截断不破坏 UTF-8（title 仍是合法字符串——chars 计数即证明）
+        assert!(entry.title.ends_with('汉'));
+        // keywords 派生缓存同步截断
+        assert_eq!(entry.keywords[0], entry.title.to_lowercase());
+    }
+
+    #[test]
+    fn builtin_actions_all_eight_present() {
+        // RS-194：8 个内置操作此前只测了「新建」——全量断言每条目的
+        // title/value/类型，防止增删内置操作时测试静默漏护
+        let mut cb = CommandBar::new();
+        cb.add_builtin_actions();
+        let expected = [
+            ("新建标签", "new_tab"),
+            ("关闭标签", "close_tab"),
+            ("刷新", "reload"),
+            ("后退", "go_back"),
+            ("前进", "go_forward"),
+            ("隐私模式", "toggle_private"),
+            ("设置", "settings"),
+            ("清除数据", "clear_data"),
+        ];
+        for (title, value) in expected {
+            let hits: Vec<_> = cb.search(title);
+            assert_eq!(hits.len(), 1, "标题「{title}」必须恰好命中一条");
+            assert_eq!(hits[0].title, title);
+            assert_eq!(hits[0].value, value, "「{title}」的 action name");
+            assert!(matches!(hits[0].command_type, CommandType::Action));
+        }
+        // 英文 action name 通道（value）同样可搜
+        assert_eq!(cb.search("toggle_private").len(), 1);
+        assert_eq!(cb.search("clear_data").len(), 1);
+        // 总数锁定（防止内置操作数量漂移）
+        assert_eq!(cb.search("").len(), 8);
     }
 }

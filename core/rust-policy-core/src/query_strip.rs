@@ -96,6 +96,25 @@ impl QueryStripper {
         }
     }
 
+    /// RS-164（审计 2026-09-25）：query 串过滤——追踪参数剔除与空段
+    /// 弃置，从 strip 的内联逻辑提取为独立步骤。
+    ///
+    /// 此前「取 `=` 首段为 key」（`split('=').next()`）是内联的隐式约定，
+    /// 无法独立观测；提取后本函数可单独单测，语义显式化：参数 key 是
+    /// 首个 `=` 之前的部分（flag 形态整段即 key），空段一律丢弃。
+    fn filter_query<'a>(&self, query: &'a str) -> Vec<&'a str> {
+        query
+            .split('&')
+            .filter(|param| {
+                if param.is_empty() {
+                    return false;
+                }
+                let key = param.split('=').next().unwrap_or("");
+                !self.params.iter().any(|tp| tp.eq_ignore_ascii_case(key))
+            })
+            .collect()
+    }
+
     /// 从 URL 中剥离追踪参数，返回清理后的 URL。
     ///
     /// 如果 URL 没有查询参数或所有参数都是追踪参数，返回不含 query 的
@@ -118,17 +137,8 @@ impl QueryStripper {
             // 无 query——fragment 原样返回，不触碰 URL
             None => return url.to_string(),
         };
-        // 过滤追踪参数（RS-070：空段——裸 ?/&/&& 产生的空串——不保留）
-        let kept: Vec<&str> = query
-            .split('&')
-            .filter(|param| {
-                if param.is_empty() {
-                    return false;
-                }
-                let key = param.split('=').next().unwrap_or("");
-                !self.params.iter().any(|tp| tp.eq_ignore_ascii_case(key))
-            })
-            .collect();
+        // 过滤追踪参数（RS-164：提取的独立步骤）
+        let kept = self.filter_query(query);
         // 重建 URL：base[?kept][fragment]
         let mut result = String::from(base);
         if !kept.is_empty() {
@@ -349,5 +359,45 @@ mod tests {
         // 自定义路径仍可扩展（Owned）
         let custom = QueryStripper::with_params(vec!["x".into()]);
         assert_eq!(custom.params.len(), 1);
+    }
+
+    // —— RS-164（审计 2026-09-25）：filter_query 独立步骤单测 ——
+
+    #[test]
+    fn filter_query_key_is_segment_before_first_equals() {
+        // key 语义显式锁定：首个 '=' 之前的部分；值内含 '=' 不影响判定
+        let qs = QueryStripper::new();
+        assert_eq!(
+            qs.filter_query("fbclid=x=y"),
+            Vec::<&str>::new(),
+            "追踪参数连同值剔除"
+        );
+        assert_eq!(
+            qs.filter_query("a=b=c"),
+            vec!["a=b=c"],
+            "普通参数 key=a 保留"
+        );
+    }
+
+    #[test]
+    fn filter_query_drops_empty_segments_and_flags() {
+        // 空段（裸 &/&&）丢弃；flag 形态追踪参数（无 '='）命中剔除
+        let qs = QueryStripper::new();
+        assert_eq!(qs.filter_query(""), Vec::<&str>::new());
+        assert_eq!(qs.filter_query("&&"), Vec::<&str>::new());
+        assert_eq!(
+            qs.filter_query("fbclid"),
+            Vec::<&str>::new(),
+            "flag 形态追踪参数剔除"
+        );
+        assert_eq!(qs.filter_query("keep&fbclid&&tail"), vec!["keep", "tail"]);
+    }
+
+    #[test]
+    fn filter_query_case_insensitive_keys() {
+        // 与 strip 口径一致：key 按ASCII 不区分大小写命中
+        let qs = QueryStripper::new();
+        assert_eq!(qs.filter_query("GCLID=x"), Vec::<&str>::new());
+        assert_eq!(qs.filter_query("FbClId"), Vec::<&str>::new());
     }
 }

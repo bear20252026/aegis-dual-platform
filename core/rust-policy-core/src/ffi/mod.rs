@@ -144,17 +144,34 @@ pub struct FfiCanonicalUrl {
     pub canonical_parameters: String,
 }
 
+/// FFI 入口统一输入上限（RS-173）——与 C ABI read_utf8 的
+/// FFI_INPUT_MAX_BYTES 同值（64KB）。uniffi 导出函数收到的是宿主传来的
+/// String（无 C 层有界扫描兜底），解析器自身的前置上限是唯一防线：
+/// 超长输入直接拒绝，不做任何 O(n) 之后的深解析。
+const MAX_FFI_URL_BYTES: usize = 64 * 1024;
+
+/// FFI URL 入口的 RS-173 前置长度检查（超长返回 None——fail-closed）。
+fn ffi_url_length_ok(raw: &str) -> bool {
+    !raw.is_empty() && raw.len() <= MAX_FFI_URL_BYTES
+}
+
 /// URL 校验（委托 origin 模块——消除 C#/Kotlin/Python 重复实现）。
 ///
 /// 返回 `FfiOrigin { scheme, host }` 或 None（URL 非法）。
 #[uniffi::export]
 pub fn try_parse_external(raw_url: String) -> Option<FfiOrigin> {
+    if !ffi_url_length_ok(&raw_url) {
+        return None;
+    }
     crate::origin::try_parse_external(&raw_url).map(|(scheme, host)| FfiOrigin { scheme, host })
 }
 
 /// 跨端导航使用的规范化入口，确保授权绑定到一致的 origin 与 path/query。
 #[uniffi::export]
 pub fn canonicalize_external(raw_url: String) -> Option<FfiCanonicalUrl> {
+    if !ffi_url_length_ok(&raw_url) {
+        return None;
+    }
     crate::origin::canonicalize_external(&raw_url).map(|url| FfiCanonicalUrl {
         scheme: url.scheme,
         host: url.host,
@@ -166,6 +183,9 @@ pub fn canonicalize_external(raw_url: String) -> Option<FfiCanonicalUrl> {
 /// URL 主机名提取（委托 util 模块）。
 #[uniffi::export]
 pub fn extract_host(url: String) -> Option<String> {
+    if !ffi_url_length_ok(&url) {
+        return None;
+    }
     crate::util::extract_host(&url)
 }
 
@@ -272,6 +292,31 @@ mod hex_seed_tests {
         hex.push_str(&"ab".repeat(28)); // 补齐 64 字符
         let out = hex_seed_to_bytes(&hex).unwrap();
         assert_eq!(&out[..4], &[0x00, 0xff, 0x0f, 0xf0]);
+    }
+
+    // —— RS-173（审计 2026-09-25）：FFI 入口 64KB 前置长度检查 ——
+
+    #[test]
+    fn ffi_url_entries_reject_oversized_input() {
+        // 三个 URL 入口此前直通解析器（origin 侧 8KB 上限是第二道防线）——
+        // FFI 边界自身的前置检查锁定 64KB 统一口径（与 C ABI read_utf8
+        // 同值）。extract_host 的实现侧无长度上限（裸主机名提取），FFI
+        // 前置检查是它唯一的防线
+        let oversized = format!("https://example.com/{}", "a".repeat(70 * 1024));
+        assert!(try_parse_external(oversized.clone()).is_none());
+        assert!(canonicalize_external(oversized.clone()).is_none());
+        assert!(extract_host(oversized).is_none());
+        // 正常长度输入不受影响
+        assert!(try_parse_external("https://example.com".into()).is_some());
+        assert!(canonicalize_external("https://example.com/x".into()).is_some());
+        assert_eq!(
+            extract_host("https://Example.COM/path".into()),
+            Some("example.com".into())
+        );
+        // 空输入 fail-closed（与解析器语义一致）
+        assert!(try_parse_external(String::new()).is_none());
+        assert!(canonicalize_external(String::new()).is_none());
+        assert!(extract_host(String::new()).is_none());
     }
 }
 

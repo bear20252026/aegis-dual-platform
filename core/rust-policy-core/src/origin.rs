@@ -5,11 +5,21 @@
 //! 纯函数——无 I/O。
 
 /// 已规范化的外部 URL；fragment 不参与副作用授权绑定。
+///
+/// RS-190（审计 2026-09-25）：字段级文档——本结构是授权绑定的载体，
+/// 各字段语义由注释锁定，跨端（C#/Kotlin/Python）消费方据此对齐。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CanonicalExternalUrl {
+    /// 小写 scheme——仅 "http" / "https"（其余在 canonicalize_external 拒绝）。
     pub scheme: String,
+    /// 小写 host（已剥尾点、已拒非法字符）；默认端口（80/443）不出现在
+    /// origin——host 字段不含端口，端口归一语义见 origin 字段。
     pub host: String,
+    /// 授权绑定 origin（`scheme://host[:port]`）——默认端口省略，非默认
+    /// 端口保留。授权相等性以此字段为准。
     pub origin: String,
+    /// 规范化 path + query（fragment 已剥离——fragment 不参与副作用授权，
+    /// `#` 之后内容不进入绑定比较）。
     pub canonical_parameters: String,
 }
 
@@ -333,5 +343,19 @@ mod tests {
             None,
             "端口 65536 溢出 u16 拒绝"
         );
+    }
+
+    #[test]
+    fn bracketed_ipv6_authority_rejected() {
+        // RS-177：'[' 开头 authority 此前拒码路径零用例——IPv6 字面量
+        // authority 在 host 白名单化管线（[a-z0-9.-]）必然无法表达，
+        // fail-closed 拒绝并锁定（含带端口/裸字面量/方括号内嵌冒号形态）
+        assert_eq!(try_parse_external("https://[2001:db8::1]/"), None);
+        assert_eq!(try_parse_external("https://[::1]:8080/x"), None);
+        assert_eq!(try_parse_external("http://[::1]/"), None);
+        // 未闭合方括号同样拒绝（同分支前置 starts_with('[')）
+        assert_eq!(try_parse_external("https://[2001:db8::1/x"), None);
+        // 正常 host 不受影响（回归锚点）
+        assert!(try_parse_external("https://example.org/").is_some());
     }
 }

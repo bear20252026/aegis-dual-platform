@@ -26,9 +26,16 @@ pub enum PolicySource {
 }
 
 /// 策略决策（来源 + 决策）。
+///
+/// RS-167（审计 2026-09-25）：字段级文档——`source` 标记裁决出自哪条
+/// 评估通道（审计/诊断通道直接消费，调用方不得用它放宽 fail-safe）；
+/// `decision` 是通道产出的类型化裁决（Allow/RequireConfirmation/Deny）。
 #[derive(Debug, Clone)]
 pub struct PolicyVerdict {
+    /// 裁决来源通道：Local（本地纯函数）/ Remote（远程降级）/ FailSafe
+    /// （本地无匹配且远程不可用时的默认拒绝）。
     pub source: PolicySource,
+    /// 该通道产出的类型化决策（FailSafe 通道恒为 Deny）。
     pub decision: Decision,
 }
 
@@ -231,6 +238,28 @@ mod tests {
         let result = engine.evaluate("write", "ctx");
         assert_eq!(result.source, PolicySource::FailSafe);
         assert!(matches!(result.decision, Decision::Deny(_)));
+        // RS-182：fail-safe explanation 可审计性锁定——explanation 必须
+        // 携带被拒动作名（审计通道依赖它回答"为什么拒绝"），不得退化为
+        // 空串或丢失 action 上下文
+        match result.decision {
+            Decision::Deny(reason) => {
+                assert_eq!(reason.code, "fail_safe");
+                assert!(
+                    reason
+                        .explanation
+                        .contains("no local or remote policy matched"),
+                    "fail-safe explanation 必须声明双通道未命中: {}",
+                    reason.explanation
+                );
+                assert!(
+                    reason.explanation.contains("write"),
+                    "explanation 必须携带被拒动作名: {}",
+                    reason.explanation
+                );
+                assert!(reason.explanation.contains("default deny"));
+            }
+            other => panic!("期望 fail-safe Deny，实际 {other:?}"),
+        }
     }
 
     struct MockRemotePolicy {
@@ -511,5 +540,33 @@ mod tests {
             vec!["local"],
             "本地命中后远程必须零咨询（短路）"
         );
+    }
+
+    // —— RS-201（审计 2026-09-25）：action_policy() 可变访问器 ——
+
+    #[test]
+    fn action_policy_accessor_mutates_inner_policy() {
+        // RS-201：DefaultLocalPolicy::action_policy() 可变访问器此前零测试——
+        // 经访问器注入规则后 evaluate 必须按新规则裁决（内层策略生效）
+        let mut policy = DefaultLocalPolicy::new();
+        // 注入前：无规则 → None（上层走 fail-safe）
+        assert!(policy.evaluate("files:write", "https://e.com").is_none());
+        // 经访问器注入 Allow 规则
+        policy
+            .action_policy()
+            .add_rule(crate::action_policy::PolicyRule {
+                name: "allow_files".into(),
+                action_pattern: "files:*".into(),
+                condition: None,
+                effect: RuleEffect::Allow,
+                priority: 0,
+            });
+        // 注入后命中（Allow → RequireConfirmation 升级，RS-029 口径）
+        match policy.evaluate("files:write", "https://e.com") {
+            Some(Decision::RequireConfirmation(_)) => {}
+            other => panic!("访问器注入的规则必须生效，实际 {other:?}"),
+        }
+        // 未匹配动作仍 None
+        assert!(policy.evaluate("other:action", "https://e.com").is_none());
     }
 }

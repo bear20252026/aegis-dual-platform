@@ -314,6 +314,47 @@ mod tests {
     }
 
     #[test]
+    fn empty_and_hostless_urls_route_to_default() {
+        // RS-196：空 URL / 无 host URL 此前零用例——extract_host 返回 None
+        // → unwrap_or_default() 得空串；Domain 规则对空 hostname 不得命中
+        // （RS-119 空 pattern 不命中的对偶面），整体回落默认工作区
+        assert_eq!(extract_hostname(""), "", "空 URL → 空串");
+        // "about:blank" 无 "://"——util::extract_hostname 既有解析口径将
+        // 整串视为 authority、剥端口后得伪主机名 "about"（uniffi FFI 契约
+        // 锁定 RS-056，不在 RS-196 范围内变更）。安全语义不受影响：
+        // Domain 规则（github.com）与 "about" 无边界匹配 → 路由回落默认。
+        assert_eq!(
+            extract_hostname("about:blank"),
+            "about",
+            "scheme 形 URL 既有解析口径（伪主机名，锁定防漂移）"
+        );
+        // 纯空白：util::extract_hostname 既有口径原样透传（无 trim 语义，
+        // uniffi FFI 契约锁定 RS-056）——extract_host 返回 Some("   ")。
+        // 安全语义不受影响：Domain 规则与 "   " 无边界匹配 → 回落默认。
+        assert_eq!(
+            extract_hostname("   "),
+            "   ",
+            "纯空白既有口径（原样透传，无 trim）"
+        );
+        let mut sr = SpaceRouting::new("ws-default");
+        sr.add_rule(RoutingRule::domain("GitHub", "github.com", "work"));
+        // Domain 规则在无 host 输入上不命中——空 hostname 与 pattern
+        // strip_suffix 后无法构成边界匹配
+        assert!(!sr.rules()[0].matches("about:blank"));
+        assert!(!sr.rules()[0].matches(""));
+        assert_eq!(
+            sr.route("about:blank"),
+            "ws-default",
+            "无 host 回落默认工作区"
+        );
+        assert_eq!(sr.route(""), "ws-default");
+        assert_eq!(sr.route("   "), "ws-default", "纯空白无规则命中 → 回落默认");
+        // PathPrefix / Exact 规则不受影响（字符串前缀/等值语义照常）
+        sr.add_rule(RoutingRule::path_prefix("Docs", "about:", "docs"));
+        assert_eq!(sr.route("about:blank"), "docs", "PathPrefix 照常命中");
+    }
+
+    #[test]
     fn script_contains_routing_logic() {
         let mut sr = SpaceRouting::new("default");
         sr.add_rule(RoutingRule::domain("GitHub", "github.com", "work"));

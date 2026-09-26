@@ -47,9 +47,21 @@ impl HttpsOnlyState {
     }
 
     /// 用户手动放行 HTTP 域名（M-13：统一小写归一存储）。
+    ///
+    /// RS-162（审计 2026-09-25）：放行域名尾点归一——`example.com.`（DNS
+    /// 根表示）与 `example.com` 是同一主机，此前按字面存储会导致先放行
+    /// `example.com.` 再请求 `example.com` 时放行失效。仅归一**存储侧**：
+    /// 请求侧提取（upgrade）保持现状（尾点形式不命中放行 → fail-closed
+    /// 走强制升级，RS-117 口径不变——两侧同时归一会放宽该 fail-closed 面）。
     pub fn allow_http(&mut self, domain: &str) {
-        self.allowed_http_domains
-            .insert(domain.to_ascii_lowercase());
+        let lowered = domain.to_ascii_lowercase();
+        let normalized = lowered.trim_end_matches('.');
+        // 归一后为空（如 ".."）不入池——空串放行键无意义且可被
+        // 无 host 请求意外命中
+        if normalized.is_empty() {
+            return;
+        }
+        self.allowed_http_domains.insert(normalized.to_string());
     }
 
     /// 尝试将 HTTP URL 升级为 HTTPS。
@@ -289,5 +301,55 @@ mod tests {
         state.upgrade_counts.insert(tab.to_string(), u64::MAX);
         state.upgrade("http://a.com", tab);
         assert_eq!(state.get_upgrade_count(tab), u64::MAX);
+    }
+
+    // —— RS-161/162（审计 2026-09-25）——
+
+    #[test]
+    fn allow_then_is_allowed_roundtrip_direct() {
+        // RS-161：放行往返此前只能经 upgrade 间接观测——直接断言
+        // allow_http → is_http_allowed 的存取往返（正反两面）
+        let mut state = HttpsOnlyState::new();
+        assert!(!state.is_http_allowed("example.com"), "未放行的域不得命中");
+        state.allow_http("example.com");
+        assert!(state.is_http_allowed("example.com"), "放行后必须命中");
+        // 大小写归一往返（M-13 口径经直接断言锁定）
+        assert!(state.is_http_allowed("EXAMPLE.com"), "查询侧归一命中");
+        state.allow_http("Mixed.Case.ORG");
+        assert!(state.is_http_allowed("mixed.case.org"), "存储侧归一命中");
+        // 不同域不串扰
+        assert!(!state.is_http_allowed("other.com"));
+    }
+
+    #[test]
+    fn allow_http_normalizes_trailing_dot_in_storage() {
+        // RS-162：放行域名尾点归一——"example.com." 与 "example.com"
+        // 是同一主机，存储侧归一后两侧形态互相命中
+        let mut state = HttpsOnlyState::new();
+        state.allow_http("example.com.");
+        assert!(
+            state.is_http_allowed("example.com"),
+            "尾点放行须命中裸域查询"
+        );
+        // 归一只在存储侧：is_http_allowed 查询侧不归一尾点——它同时是
+        // upgrade 的放行判据，查询侧归一会让尾点形式请求命中放行、
+        // 放宽 RS-117 fail-closed 口径（两侧同归一 = 行为变更）。
+        // 与下方请求侧断言方向一致，非矛盾。
+        assert!(
+            !state.is_http_allowed("example.com."),
+            "查询侧尾点不命中（fail-closed 口径与请求侧一致，RS-117）"
+        );
+        // 请求侧保持 RS-117 fail-closed 口径不变：尾点形式请求仍走升级
+        let mut state2 = HttpsOnlyState::new();
+        state2.allow_http("example.com");
+        assert_eq!(
+            state2.upgrade("http://example.com./path", "t1"),
+            Some("https://example.com./path".to_string()),
+            "请求侧尾点不命中放行（fail-closed 口径锁定，RS-117）"
+        );
+        // 纯尾点输入归一后为空——不入池（空串放行键无意义）
+        let mut state3 = HttpsOnlyState::new();
+        state3.allow_http("..");
+        assert!(!state3.is_http_allowed(""), "空串不得入池");
     }
 }

@@ -204,6 +204,55 @@ mod tests {
     }
 
     #[test]
+    fn every_override_guarded_by_descriptor_existence() {
+        // RS-163（审计 2026-09-25）：descriptor 缺失时必须跳过对应覆盖——
+        // 无守卫的 defineProperty 会以 undefined 原值覆盖（roundTo(undefined)
+        // 产出 NaN，或用空覆盖反成指纹异常信号）。逐属性断言守卫形态：
+        // screen 组 existence-only，window 组 existence + getter 双守卫。
+        let script = LetterboxShield::new().inject_script();
+        // screen 四属性：if (osX) 守卫
+        for guard in ["if (osW)", "if (osH)", "if (osAW)", "if (osAH)"] {
+            assert!(
+                script.contains(guard),
+                "screen override missing guard {guard}"
+            );
+        }
+        // window 四属性：if (oX && oX.get) 双守卫（descriptor 存在且可读）
+        for guard in [
+            "if (oIW && oIW.get)",
+            "if (oIH && oIH.get)",
+            "if (oOW && oOW.get)",
+            "if (oOH && oOH.get)",
+        ] {
+            assert!(
+                script.contains(guard),
+                "window override missing guard {guard}"
+            );
+        }
+        // 色深与 DPR 组：同样不得裸 defineProperty
+        assert!(
+            script.contains("if (oCD)"),
+            "colorDepth override missing guard"
+        );
+        assert!(
+            script.contains("if (oPD)"),
+            "pixelDepth override missing guard"
+        );
+        assert!(
+            script.contains("if (oDPR && oDPR.get)"),
+            "DPR override missing guard"
+        );
+        // 守卫与 defineProperty 一一配对：每个守卫行之后紧跟 defineProperty，
+        // 不存在无守卫的裸覆盖（形态锁定，防未来新增属性漏写守卫）。
+        for line in script.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("Object.defineProperty") {
+                panic!("unguarded defineProperty found: {trimmed}");
+            }
+        }
+    }
+
+    #[test]
     fn custom_config_reflected_in_script() {
         let config = LetterboxConfig {
             width_step: 100,

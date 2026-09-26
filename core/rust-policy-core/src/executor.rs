@@ -395,4 +395,47 @@ mod tests {
         ));
         let _ = PolicyDecision::Allow(String::new()); // keep import used
     }
+
+    // —— RS-166（审计 2026-09-25）：三枚举基础用例 ——
+
+    #[test]
+    fn pipeline_enums_basic_contract() {
+        // RS-166：ParseResult / SchemaResult / ExecuteResult 三枚举此前
+        // 只有管线间接路径，变体构造与 Debug 格式零直接覆盖——管线层
+        // match 重构（如增删变体）不会惊动任何现有测试。基础契约锁定：
+        // 变体存在、Debug 携带载荷、结构可判别
+        // ParseResult：Ok / Error 两变体
+        let ok = ParseResult::Ok(ParsedCommand {
+            command_type: "test".into(),
+            target: "t".into(),
+            parameters: HashMap::new(),
+            origin: "cli".into(),
+        });
+        assert!(matches!(ok, ParseResult::Ok(_)));
+        assert!(format!("{ok:?}").contains("\"test\""), "Debug 携带载荷");
+        let err = ParseResult::Error("bad".into());
+        assert!(matches!(err, ParseResult::Error(_)));
+        assert!(format!("{err:?}").contains("bad"));
+
+        // SchemaResult：Valid / Invalid 两变体（Valid 无载荷——RS-099）
+        assert!(matches!(SchemaResult::Valid, SchemaResult::Valid));
+        let invalid = SchemaResult::Invalid("empty".into());
+        assert!(format!("{invalid:?}").contains("empty"));
+
+        // ExecuteResult：三变体 + Debug 携带消息
+        let variants = [
+            ExecuteResult::Success("ok".into()),
+            ExecuteResult::Denied("no".into()),
+            ExecuteResult::Error("err".into()),
+        ];
+        let labels = ["ok", "no", "err"];
+        for (variant, label) in variants.iter().zip(labels) {
+            let debug = format!("{variant:?}");
+            assert!(debug.contains(label), "Debug 必须携带 {label}: {debug}");
+        }
+        // 类型化判别（matches! 主通道）
+        assert!(matches!(variants[0], ExecuteResult::Success(_)));
+        assert!(matches!(variants[1], ExecuteResult::Denied(_)));
+        assert!(matches!(variants[2], ExecuteResult::Error(_)));
+    }
 }
