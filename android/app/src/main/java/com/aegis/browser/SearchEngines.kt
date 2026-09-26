@@ -48,11 +48,40 @@ object SearchEngines {
     /** host:port 形态的端口段长度上限（TCP 端口 ≤5 位数字——T1）。 */
     private const val MAX_PORT_SEGMENT_LENGTH = 5
 
-    /** 读取当前搜索引擎 key（与 AegisHomeBridge 同一偏好文件/键——单源）。 */
+    /**
+     * AD-229（2026-09-26 审计）：当前引擎进程内缓存——currentEngine 此前每次
+     * 导航都同步读 SharedPreferences（首次磁盘 IO 在主线程；SecureNavigator
+     * 每次导航调用）。首读注册 OnSharedPreferenceChangeListener（持强引用防
+     * 回收），setEngine 写入后缓存失效，下次读取重载。
+     */
+    @Volatile
+    private var cachedEngineKey: String? = null
+
+    @Volatile
+    private var preferenceChangeListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
+
+    /** 读取当前搜索引擎 key（与 AegisHomeBridge 同一偏好文件/键——单源）。
+     *  双检锁 + @Volatile：缓存命中零锁直读；未命中持锁读偏好并注册失效监听。 */
     fun currentEngine(context: android.content.Context): String =
-        context
-            .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-            .getString(KEY_ENGINE, DEFAULT_ENGINE) ?: DEFAULT_ENGINE
+        cachedEngineKey
+            ?: synchronized(this) {
+                cachedEngineKey
+                    ?: readEngineWithPreferenceListener(context).also { cachedEngineKey = it }
+            }
+
+    /** AD-229 配套：读偏好 + 首读注册失效监听（强引用持有防 GC 回收）。 */
+    private fun readEngineWithPreferenceListener(context: android.content.Context): String {
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        if (preferenceChangeListener == null) {
+            val listener =
+                android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                    if (key == KEY_ENGINE) cachedEngineKey = null
+                }
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+            preferenceChangeListener = listener
+        }
+        return prefs.getString(KEY_ENGINE, DEFAULT_ENGINE) ?: DEFAULT_ENGINE
+    }
 
     /**
      * 搜索词拼引擎 URL。
@@ -73,8 +102,11 @@ object SearchEngines {
      */
     @Suppress("MagicNumber") // 位运算/ASCII 区间字面量为编码算法本体，非业务魔数
     internal fun uriEncode(text: String): String {
-        // keep 集 = Uri.encode 缺省 unreserved + allow 参数 "/"（搜索路径分隔）
-        val keep = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-.~'()*" + "/"
+        // keep 集 = Uri.encode 缺省 unreserved + allow 参数 "/"（搜索路径分隔）。
+        // AD-248（2026-09-26 审计）：AOSP Uri.encode 的固有放行集是
+        // "_-!.~'()*"（含 `!`）——原 keep 集漏 `!`，与声称的语义一致性不符
+        // （完整对照矩阵见 androidTest/SearchEnginesUriEncodeInstrumentedTest）。
+        val keep = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-!.~'()*" + "/"
         val upperHex = "0123456789ABCDEF"
         val builder = StringBuilder(text.length)
         for (byte in text.toByteArray(Charsets.UTF_8)) {

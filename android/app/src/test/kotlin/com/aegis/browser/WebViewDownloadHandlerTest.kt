@@ -140,4 +140,57 @@ class WebViewDownloadHandlerTest {
             ),
         )
     }
+
+    // ---------------- AD-230（2026-09-26 审计）：RFC 5987 filename* 与大小写变体 ----------------
+
+    @Test
+    fun rfc5987StarFilenameTakesPriorityAndDecodes() {
+        // filename*=UTF-8''…（非 ASCII 文件名的标准形态）此前完全不解析
+        assertEquals(
+            "报告.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename=\"fallback.bin\"; filename*=UTF-8''%E6%8A%A5%E5%91%8A.pdf",
+            ),
+        )
+        assertEquals(
+            "my file.txt",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename*=UTF-8''my%20file.txt",
+            ),
+        )
+    }
+
+    @Test
+    fun dispositionFilenameMatchingIsCaseInsensitive() {
+        // FileName=/FILENAME= 变体此前漏解析（只认小写字面 filename=）
+        assertEquals(
+            "report.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; FileName=\"report.pdf\"",
+            ),
+        )
+        assertEquals(
+            "report.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; FILENAME=\"report.pdf\"",
+            ),
+        )
+    }
+
+    @Test
+    fun percentEncodedPathSegmentDecodesToFileName() {
+        // AD-217 配套：URL 路径段此前不解码——malware%2Eexe 拿不到扩展名
+        assertEquals(
+            "malware.exe",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/dl/malware%2Eexe", "", ""),
+        )
+    }
 }

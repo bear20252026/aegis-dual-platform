@@ -24,6 +24,10 @@ object ReaderMode {
     /** 正文长度上限（200K 字符——超出截断，防渲染层过载）。 */
     private const val MAX_TEXT = 200_000
 
+    /** AD-227（2026-09-26 审计）：标题截断上限（256——与正文截断同口径，
+     *  超长标题此前直进 AlertDialog 标题渲染）。 */
+    private const val MAX_TITLE = 256
+
     /** 认定为「有正文」的最小长度（首页/空白页不进阅读模式）。 */
     private const val MIN_TEXT = 200
 
@@ -90,7 +94,8 @@ object ReaderMode {
             val text = (payload.optString("text", "")).take(MAX_TEXT)
             if (text.isBlank()) return@runCatching null
             ReaderContent(
-                title = payload.optString("title", "").ifBlank { "阅读模式" },
+                // AD-227：title 与 text 同走上限截断（超长标题不进对话框标题）
+                title = payload.optString("title", "").take(MAX_TITLE).ifBlank { "阅读模式" },
                 text = text,
             )
         }.getOrNull()

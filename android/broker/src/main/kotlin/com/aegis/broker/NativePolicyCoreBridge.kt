@@ -115,11 +115,31 @@ class NativePolicyCoreBridge private constructor(
                 .put("policy_version", action.policyVersion)
                 .put("explanation", action.explanation)
                 .toString()
-        return invokeDecision {
-            native.aegis_policy_core_broker_consume_navigation_json(broker, actionJson, rawUrl, scope)
-        } is Decision.Allow
+        val decision =
+            invokeDecision {
+                native.aegis_policy_core_broker_consume_navigation_json(broker, actionJson, rawUrl, scope)
+            }
+        // AD-237（2026-09-26 审计）：deny 折叠为 false 时原因不静默——code/
+        // detail 留痕（原生核心拒绝此前零痕迹，排障与审计面缺失）。
+        if (decision is Decision.Deny) {
+            android.util.Log.w(
+                "AegisBroker",
+                "native consumeNavigation 拒绝: code=${decision.reason.code} " +
+                    "detail=${decision.reason.detail}",
+            )
+        }
+        return decision is Decision.Allow
     }
 
+    /**
+     * 释放 Rust broker 指针。
+     *
+     * AD-236（2026-09-26 审计）：生产接线中本桥随 AndroidBroker 存活至进程
+     * 退出——会话级资源已由 destroySession 逐会话释放，broker 指针为进程级
+     * 生命周期（显式 close 调用点全工程为零，不为对齐 AutoCloseable 惯例而
+     * 虚构中途释放——进程退出由 OS 回收）。保留实现为未来多 broker 生命周期
+     * （如配置热重载）预留确定性释放面。
+     */
     override fun close() {
         native.aegis_policy_core_broker_free(broker)
     }

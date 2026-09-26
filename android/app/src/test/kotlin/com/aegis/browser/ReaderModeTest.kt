@@ -74,4 +74,11 @@ class ReaderModeTest {
         val longText = "a".repeat(300_000)
         assertEquals(200_000, ReaderMode.parse(payload(ok = true, text = longText))!!.text.length)
     }
+
+    // AD-227（2026-09-26 审计）：超长标题此前无上限直进 AlertDialog 标题
+    @Test
+    fun oversizedTitleIsTruncated() {
+        val longTitle = "标".repeat(1_000)
+        assertEquals(256, ReaderMode.parse(payload(ok = true, title = longTitle, text = "正文"))!!.title.length)
+    }
 }

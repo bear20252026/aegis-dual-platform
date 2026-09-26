@@ -169,8 +169,10 @@ class SearchEnginesTest {
     fun `uriEncode keeps unreserved characters and slash`() {
         assertEquals("helloworld", SearchEngines.uriEncode("helloworld"))
         assertEquals("a/b", SearchEngines.uriEncode("a/b"))
-        // Uri.encode 保留集 = 字母数字 + _-.~'()* + allow("/"); '!' 不在其中（按 Android 实测语义）
-        assertEquals("a.b-c_d~e'f(g)h*i%21j", SearchEngines.uriEncode("a.b-c_d~e'f(g)h*i!j"))
+        // AD-248（2026-09-26 审计）：AOSP Uri.encode 固有放行集是 "_-!.~'()*"
+        // （含 '!'——isAllowed 源码实证）；旧断言把 '!' 编码为 %21 与平台语义
+        // 不一致（完整对照矩阵见 androidTest/SearchEnginesUriEncodeInstrumentedTest）
+        assertEquals("a.b-c_d~e'f(g)h*i!j", SearchEngines.uriEncode("a.b-c_d~e'f(g)h*i!j"))
     }
 
     @Test

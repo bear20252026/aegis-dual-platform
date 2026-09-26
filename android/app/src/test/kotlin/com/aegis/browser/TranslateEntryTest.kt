@@ -32,4 +32,13 @@ class TranslateEntryTest {
         assertTrue(TranslateEntry.buildUrl("https://a.gov.cn/page?x=1")!!.startsWith(prefix))
         assertTrue(TranslateEntry.buildUrl("http://intranet.example/")!!.startsWith(prefix))
     }
+
+    // AD-231（2026-09-26 审计）：scheme 判定大小写不敏感——决策层
+    // （OriginPolicy/schemePrefixOf）均忽略大小写，HTTP:// 此前被拒
+    @Test
+    fun uppercaseSchemePagesAreAccepted() {
+        val prefix = "https://www.translatetheweb.com/?from=auto&to=zh-Hans&a="
+        assertTrue(TranslateEntry.buildUrl("HTTP://a.gov.cn/page")!!.startsWith(prefix))
+        assertTrue(TranslateEntry.buildUrl("Https://a.gov.cn/page")!!.startsWith(prefix))
+    }
 }

@@ -334,4 +334,39 @@ class AndroidBrokerTest {
         assertTrue(action.origin == "https://example.org")
         assertTrue(action.canonicalParameters == "/a?b=1")
     }
+
+    // ---------------- AD-249（2026-09-26 审计）：canonicalOrigin 直接断言 ----------------
+
+    @Test
+    fun canonicalOriginKeepsIpv6HostBrackets() {
+        val broker = AndroidBroker()
+        // java.net.URI 对 IPv6 host 保留方括号——归一不得剥除（剥除后非合法 origin）
+        assertEquals("https://[::1]", broker.canonicalOrigin(java.net.URI("https://[::1]/x")))
+        assertEquals(
+            "https://[2001:db8::1]:8443",
+            broker.canonicalOrigin(java.net.URI("https://[2001:db8::1]:8443/x")),
+        )
+    }
+
+    @Test
+    fun canonicalOriginAppendsNonDefaultPort() {
+        val broker = AndroidBroker()
+        assertEquals(
+            "https://example.com:8443",
+            broker.canonicalOrigin(java.net.URI("https://example.com:8443/x")),
+        )
+        assertEquals(
+            "http://example.com:8080",
+            broker.canonicalOrigin(java.net.URI("http://example.com:8080/x")),
+        )
+    }
+
+    @Test
+    fun canonicalOriginFoldsDefaultPortAndOmittedPort() {
+        val broker = AndroidBroker()
+        // 默认端口（https:443/http:80）与未写端口折叠为同一 canonical origin
+        assertEquals("https://example.com", broker.canonicalOrigin(java.net.URI("https://example.com:443/x")))
+        assertEquals("http://example.com", broker.canonicalOrigin(java.net.URI("http://example.com:80/x")))
+        assertEquals("https://example.com", broker.canonicalOrigin(java.net.URI("https://example.com/x")))
+    }
 }

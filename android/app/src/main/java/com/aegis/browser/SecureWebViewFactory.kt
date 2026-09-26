@@ -1,6 +1,7 @@
 package com.aegis.browser
 
 import android.content.Context
+import android.view.ViewGroup
 import android.webkit.WebView
 import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
@@ -137,11 +138,17 @@ object SecureWebViewFactory {
     }
 
     /**
-     * WebView 销毁统一序列（单源）：停载 → 摘除页面 → 注销导航器/Broker 会话 → destroy。
-     * 标签关闭（TabManager.closeTab）与 Activity 销毁（MainActivity.onDestroy）共用，
-     * 此前两处各自手写一半序列（审计 2026-09-02 收敛）。
+     * WebView 销毁统一序列（单源）：detach → 停载 → 摘除页面 → 注销导航器/Broker
+     * 会话 → destroy。标签关闭（TabManager.closeTab）与 Activity 销毁
+     * （MainActivity.onDestroy）共用，此前两处各自手写一半序列（审计
+     * 2026-09-02 收敛）。
      */
     fun tearDown(webView: WebView) {
+        // AD-214（2026-09-26 审计）：destroy 前先从父容器 detach——关闭激活
+        // 标签与 onDestroy 全量销毁此前对仍挂在 FrameLayout 上的 WebView 直接
+        // destroy（attached destroy），Chromium 资源泄漏（官方生命周期要求
+        // destroy 前从视图树摘除）。
+        (webView.parent as? ViewGroup)?.removeView(webView)
         webView.stopLoading()
         webView.loadUrl("about:blank")
         release(webView)

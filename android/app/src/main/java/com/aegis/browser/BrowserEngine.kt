@@ -83,7 +83,13 @@ class BrowserEngine(
                     view: WebView,
                     newProgress: Int,
                 ) {
-                    android.util.Log.i("Aegis", "R12 progress: ${newProgress.coerceIn(0, MAX_PROGRESS)}")
+                    // AD-232（2026-09-26 审计）：进度日志降级——原实现每次进度
+                    // 变化都 Log.i（每页 5-10 条永久 info 噪声）；仅完成留痕，
+                    // 中间进度仅 debug 构建可见。
+                    val progress = newProgress.coerceIn(0, MAX_PROGRESS)
+                    if (BuildConfig.DEBUG || progress >= MAX_PROGRESS) {
+                        android.util.Log.i("Aegis", "R12 progress: $progress")
+                    }
                 }
 
                 override fun onReceivedTitle(

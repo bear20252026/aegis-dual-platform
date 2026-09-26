@@ -22,11 +22,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -38,6 +38,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -87,7 +88,9 @@ class MainActivity : ComponentActivity() {
         // AD-058（2026-09-24 审计）：getPackageInfo 是 PackageManager 查询
         // （可能触发 binder IPC）——移出主线程，协程内检查、结果回主线程提示。
         lifecycleScope.launch(Dispatchers.Default) {
-            WebViewVersionCheck.checkAndPrompt(this@MainActivity) { message ->
+            // AD-239（2026-09-26 审计）：检查经 ViewModel 存续层去重——未声明
+            // configChanges 的变更触发 Activity 重建后不得再次弹提示。
+            viewModel.checkWebViewVersionOnce { message ->
                 lifecycleScope.launch(Dispatchers.Main) { viewModel.setWebViewAlert(message) }
             }
         }
@@ -143,15 +146,21 @@ class MainActivity : ComponentActivity() {
                         onDismissRequest = { viewModel.reader.dismissReader() },
                         title = { Text(content.title) },
                         text = {
-                            Column {
-                                Text(
-                                    text = content.text,
-                                    modifier =
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(max = UiDimens.READER_DIALOG_MAX_HEIGHT.dp)
-                                            .verticalScroll(rememberScrollState()),
-                                )
+                            // AD-226（2026-09-26 审计）：正文分段渲染——原单个
+                            // Text 一次性测量至 200K 字符（ReaderMode.MAX_TEXT
+                            // 上限），低端机测量/重组卡顿（ANR 面）。按 2K 字符
+                            // 分段 LazyColumn 只测量可视段（滚动语义不变，
+                            // 对话框高度上限依旧）。
+                            val chunks = remember(content.text) { content.text.chunked(READER_TEXT_CHUNK_SIZE) }
+                            LazyColumn(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(max = UiDimens.READER_DIALOG_MAX_HEIGHT.dp),
+                            ) {
+                                items(chunks) { chunk ->
+                                    Text(text = chunk, modifier = Modifier.fillMaxWidth())
+                                }
                             }
                         },
                         confirmButton = {
@@ -228,14 +237,32 @@ class MainActivity : ComponentActivity() {
                                 onClose = { viewModel.closeTab(it) },
                                 onNewTab = { viewModel.newTab(this@MainActivity) },
                             )
-                            WebContentArea(
-                                tabManager = requireNotNull(viewModel.getTabManager()),
-                                activeIndex = activeIndex,
-                                pageError = pageError,
-                                onRetry = { viewModel.retryCurrentPage() },
-                                onBackToSafePage = { viewModel.returnToSafeHome() },
-                                modifier = Modifier.weight(1f),
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                // AD-251（2026-09-26 审计）：left 分支补齐地址栏
+                                // ——此前该分支无 AddressBarRow（布局一旦接线
+                                // 用户将失去地址栏）；经 toggleTabsPosition 接线。
+                                AddressBarRow(
+                                    address = address,
+                                    canGoBack = canGoBack,
+                                    canGoForward = canGoForward,
+                                    onAddressChange = { viewModel.updateAddress(it) },
+                                    onOpen = { viewModel.navigateToAddress() },
+                                    onBack = { viewModel.navigateHistory(HistoryAction.BACK) },
+                                    onForward = { viewModel.navigateHistory(HistoryAction.FORWARD) },
+                                    onReload = { viewModel.navigateHistory(HistoryAction.RELOAD) },
+                                    onReader = { viewModel.reader.toggleReaderMode() },
+                                    onTranslate = { viewModel.reader.translateCurrentPage() },
+                                    onToggleLayout = { viewModel.toggleTabsPosition() },
+                                )
+                                WebContentArea(
+                                    tabManager = requireNotNull(viewModel.getTabManager()),
+                                    activeIndex = activeIndex,
+                                    pageError = pageError,
+                                    onRetry = { viewModel.retryCurrentPage() },
+                                    onBackToSafePage = { viewModel.returnToSafeHome() },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
                     } else {
                         TabBar(
@@ -256,6 +283,7 @@ class MainActivity : ComponentActivity() {
                             onReload = { viewModel.navigateHistory(HistoryAction.RELOAD) },
                             onReader = { viewModel.reader.toggleReaderMode() },
                             onTranslate = { viewModel.reader.translateCurrentPage() },
+                            onToggleLayout = { viewModel.toggleTabsPosition() },
                         )
                         WebContentArea(
                             tabManager = requireNotNull(viewModel.getTabManager()),
@@ -296,6 +324,7 @@ class MainActivity : ComponentActivity() {
         onReload: () -> Unit,
         onReader: () -> Unit,
         onTranslate: () -> Unit,
+        onToggleLayout: () -> Unit,
     ) {
         Row(
             modifier =
@@ -308,6 +337,8 @@ class MainActivity : ComponentActivity() {
             ChromeIconButton(stringResource(R.string.cd_back), "←", canGoBack, onBack)
             ChromeIconButton(stringResource(R.string.cd_forward), "→", canGoForward, onForward)
             ChromeIconButton(stringResource(R.string.cd_reload), "⟳", true, onReload)
+            // AD-251：标签栏布局切换（top 横排 ↔ left 垂直）
+            ChromeIconButton(stringResource(R.string.cd_toggle_layout), "⇅", true, onToggleLayout)
             OutlinedTextField(
                 value = address,
                 onValueChange = onAddressChange,
@@ -359,6 +390,10 @@ class MainActivity : ComponentActivity() {
      * 按钮用途——原纯字形「←/→/⟳/阅/译」无障碍不可用）；[enabled] 为 false
      * 时灰显且不可点（AD-064）。
      *
+     * AD-222（2026-09-26 审计）：语义无条件挂载——原实现仅在 enabled=true
+     * 分支挂 contentDescription，禁用的后退/前进按钮对 TalkBack 完全静默
+     * （禁用控件的用途语义不应随之消失）。
+     *
      * Composable 命名按 UI 惯例 PascalCase（与 [TabChipCore] 同口径）。
      */
     @Suppress("FunctionNaming")
@@ -369,19 +404,14 @@ class MainActivity : ComponentActivity() {
         enabled: Boolean,
         onClick: () -> Unit,
     ) {
-        val semanticsModifier =
-            if (enabled) {
-                Modifier.semantics { this.contentDescription = contentDescription }
-            } else {
-                Modifier
-            }
         Surface(
             onClick = onClick,
             enabled = enabled,
             shape = CircleShape,
             color = ButtonOverlay,
             modifier =
-                semanticsModifier
+                Modifier
+                    .semantics { this.contentDescription = contentDescription }
                     .alpha(if (enabled) 1f else DISABLED_BUTTON_ALPHA)
                     .size(UiDimens.ICON_BUTTON_SIZE.dp),
         ) {
@@ -391,13 +421,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** AD-064：禁用按钮灰显透明度（detekt MagicNumber 提取常量）。 */
+    /** AD-064：禁用按钮灰显透明度（detekt MagicNumber 提取常量）；
+     *  AD-226：阅读对话框正文分段长度。 */
     private companion object {
         const val DISABLED_BUTTON_ALPHA = 0.4f
+        const val READER_TEXT_CHUNK_SIZE = 2000
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // AD-240（2026-09-26 审计）：更新宿主 Intent——不 setIntent 则后续
+        // getIntent() 仍指旧 Intent（launchMode 复用路径的 intent 消费语义）。
+        setIntent(intent)
         // P1-4 修复（全面审计批次4）：热启动外链消费——launchMode 调整或
         // singleTop 复用时 VIEW intent 经此分发；与 onCreate 冷启动路径
         // 同走 openExternalUrl 安全链路。

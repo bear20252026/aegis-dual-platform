@@ -72,4 +72,33 @@ class OriginPolicyTest {
         assertNull(OriginPolicy.tryParseExternal("about:config"))
         assertNull(OriginPolicy.tryParseExternal("about:blank/extra"))
     }
+
+    // ---------------- AD-213（2026-09-26 审计）：IPv4 备用编码两类漏判 ----------------
+
+    @Test
+    fun `leading zero octal ipv4 is rejected`() {
+        // 四段全数字 + 前导零：inet_aton 系解析栈按八进制解释（0177.0.0.1 =
+        // 127.0.0.1）——此前「4 段全数字即放行」漏判
+        assertNull(OriginPolicy.tryParseExternal("https://0177.0.0.1/"))
+        assertNull(OriginPolicy.tryParseExternal("https://010.0.0.138/"))
+        assertNull(OriginPolicy.tryParseExternal("https://example.01.com/"))
+    }
+
+    @Test
+    fun `hex segment ipv4 variants are rejected`() {
+        // 0x 逐段判定：`0x7f.1`（整串 startsWith("0x") 因含 `.` 漏判）与
+        // 混合形态统一拒绝；整串 0x 形态保持拒绝（回归）
+        assertNull(OriginPolicy.tryParseExternal("https://0x7f.1/"))
+        assertNull(OriginPolicy.tryParseExternal("https://0x7f.0.0.1/"))
+        assertNull(OriginPolicy.tryParseExternal("https://0x7f000001/"))
+        assertNull(OriginPolicy.tryParseExternal("https://1.0x7f.0.1/"))
+    }
+
+    @Test
+    fun `dotted decimal ipv4 loopback stays accepted`() {
+        // 点分十进制 127.0.0.1 必须保持放行（bridge_guard 白名单依赖——
+        // 「0」单字符段非前导零形态）
+        assertNotNull(OriginPolicy.tryParseExternal("https://127.0.0.1/"))
+        assertNotNull(OriginPolicy.tryParseExternal("https://192.168.0.10/"))
+    }
 }

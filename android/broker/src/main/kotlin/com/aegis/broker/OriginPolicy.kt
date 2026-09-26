@@ -51,12 +51,27 @@ object OriginPolicy {
      * PY-071/072（审计 2026-09-25）：非点分十进制 IPv4 编码检测——整数/
      * 0x 十六进制/简写（127.1）OS 解析器均接受，双重解释混淆面统一拒绝；
      * 点分四段（合法 IPv4）保留。与 Rust origin.rs / C# OriginPolicy 口径一致。
+     *
+     * AD-213（2026-09-26 审计）：补两类漏判——①前导零八进制：`0177.0.0.1`
+     * 四段全数字即放行，但 inet_aton 按八进制解释 = 127.0.0.1；②`0x` 逐段
+     * 判定：`0x7f.1` 整串 startsWith("0x") 因含 `.` 判 false。Chromium 解析
+     * 归一后 location.hostname 可命中 bridge_guard 白名单 127.0.0.1。
      */
     private fun isAlternateIpv4Encoding(host: String): Boolean {
         val segments = host.split('.')
-        val allNumeric = segments.all { it.isNotEmpty() && it.all { c -> c.isDigit() } }
-        if (allNumeric && segments.size != IPV4_SEGMENT_COUNT) return true
-        return host.startsWith("0x") && host.drop(2).all { it.isDigit() || it in 'a'..'f' }
+        // 0x 逐段：任一段为十六进制编码（0x 前缀 + 至少一位十六进制字符）
+        val hasHexSegment =
+            segments.any { seg ->
+                seg.length > 2 && seg.startsWith("0x") && seg.drop(2).any { it.isDigit() || it in 'a'..'f' }
+            }
+        // 前导零八进制：纯数字段长度>1 且以 0 开头（如 0177——十进制视角无害
+        // 但 inet_aton 系解析栈按八进制解释）
+        val hasLeadingZeroSegment =
+            segments.any { seg -> seg.length > 1 && seg.startsWith('0') && seg.all { it.isDigit() } }
+        // 简写/整数形态：全数字但非四段（127.1、2130706433）
+        val isShorthand = segments.all { it.isNotEmpty() && it.all { c -> c.isDigit() } }
+        return hasHexSegment || hasLeadingZeroSegment ||
+            (isShorthand && segments.size != IPV4_SEGMENT_COUNT)
     }
 
     /** 控制字符 / 空白判定（userinfo 注入与拆分混淆面——fail-closed）。 */

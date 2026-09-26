@@ -4,7 +4,10 @@ import android.webkit.WebView
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.mockito.Mockito.inOrder
 import org.mockito.Mockito.mock
+import org.mockito.Mockito.verify
+import org.mockito.Mockito.`when` as whenever
 
 /**
  * SecureWebViewFactory 导航器注册表 JVM 单测（2026-09-24 审计——AD-022）。
@@ -35,5 +38,29 @@ class SecureWebViewFactoryTest {
         assertFalse(a === b)
         assertNull(SecureWebViewFactory.navigatorFor(a))
         assertNull(SecureWebViewFactory.navigatorFor(b))
+    }
+
+    // ---------------- AD-214（2026-09-26 审计）：attached destroy 泄漏回归 ----------------
+
+    @Test
+    fun tearDownDetachesWebViewFromParentBeforeDestroy() {
+        // destroy 前必须先从父容器摘除——仍挂在视图树上的 destroy 是
+        // Chromium 资源泄漏（官方生命周期要求；mockito 5 inline 可 stub
+        // View.getParent）
+        val wv = mock(WebView::class.java)
+        val parent = mock(android.view.ViewGroup::class.java)
+        whenever(wv.parent).thenReturn(parent)
+        SecureWebViewFactory.tearDown(wv)
+        val order = inOrder(parent, wv)
+        order.verify(parent).removeView(wv)
+        order.verify(wv).destroy()
+    }
+
+    @Test
+    fun tearDownWithoutParentStillDestroys() {
+        // 无父容器（未挂载/已摘除）路径不受 detach 步骤影响
+        val wv = mock(WebView::class.java)
+        SecureWebViewFactory.tearDown(wv)
+        verify(wv).destroy()
     }
 }

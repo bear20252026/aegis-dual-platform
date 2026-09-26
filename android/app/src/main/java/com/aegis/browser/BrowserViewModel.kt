@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 浏览器状态 ViewModel（INV-04：BrowserSessionState 是 UI 唯一事实来源）。
@@ -91,6 +92,16 @@ class BrowserViewModel(
     private val _tabsPosition = MutableStateFlow("top")
     val tabsPosition: StateFlow<String> = _tabsPosition.asStateFlow()
 
+    /**
+     * AD-251（2026-09-26 审计）：布局切换入口——_tabsPosition 此前全工程零
+     * 写入点（left 分支 UI 不可达的「假落地」，且该分支无地址栏）。经 chrome
+     * 布局按钮切换 top/left；MainActivity 两种布局均含地址栏（接线见
+     * AddressBarRow 的 onToggleLayout）。
+     */
+    fun toggleTabsPosition() {
+        _tabsPosition.value = if (_tabsPosition.value == "top") "left" else "top"
+    }
+
     private val _webViewAlert = MutableStateFlow<String?>(null)
     val webViewAlert: StateFlow<String?> = _webViewAlert.asStateFlow()
 
@@ -129,7 +140,10 @@ class BrowserViewModel(
                     false
                 }
             },
-            alert = { message -> _webViewAlert.value = message },
+            // AD-228（2026-09-26 审计）：两条页面功能提示（无正文/无法翻译）
+            // 此前硬编码中文（AD-045/046 迁移漏网）——经资源 id 上抛，文案
+            // 收敛 strings.xml 单源。
+            alertRes = { res -> _webViewAlert.value = alertText(res) },
         )
     }
 
@@ -137,6 +151,21 @@ class BrowserViewModel(
 
     /** P1-3 修复：渲染进程崩溃重建 WebView 需要 Context（init 时存应用级引用）。 */
     private var appContext: android.content.Context? = null
+
+    /**
+     * AD-239（2026-09-26 审计）：WebView 版本检查进程级去重标记——MainActivity
+     * 未声明 configChanges 的变更（density/字号/locale 等）触发重建后 onCreate
+     * 再次触发检查，提示对话框重复弹出。ViewModel 存续（重建存活），检查
+     * 标记上移至此（AtomicBoolean：重建间隙的并发触发只放行首个）。
+     */
+    private val webviewVersionCheckStarted = AtomicBoolean(false)
+
+    /** AD-239：版本检查单次触发（结果与提示跨 Activity 重建不重复）。 */
+    fun checkWebViewVersionOnce(onOutdated: (String) -> Unit) {
+        val context = appContext ?: return
+        if (!webviewVersionCheckStarted.compareAndSet(false, true)) return
+        WebViewVersionCheck.checkAndPrompt(context, onOutdated)
+    }
 
     /**
      * 宿主 Activity 弱引用（P0-5 修复（全面审计 2026-09-04）——P0-6 崩溃
@@ -229,6 +258,9 @@ class BrowserViewModel(
             addressDraftActive = false
         }
         if (tabManager.switchTo(index)) refresh()
+        // AD-215（2026-09-26 审计）：页面错误单槽与当前标签对账——标签 A 的
+        // 错误不得遮罩切换后的标签 B 内容（原全局单槽仅 URL 变化与手动清除）。
+        reconcilePageError()
     }
 
     /** 关闭指定标签。 */
@@ -245,7 +277,20 @@ class BrowserViewModel(
             // 漂移：显式 close 之后 tearDown 的 release 已拿不到导航器）。
         }
         tabManager.closeTab(index)
+        // AD-224（2026-09-26 审计）：关闭标签致 activeIndex 变更时清除地址栏
+        // 草稿——与 switchTo 同口径（此前关闭路径漏清，草稿盖在新当前标签上）。
+        addressDraftActive = false
+        // AD-215：关闭标签后对账页面错误单槽（同 switchTo）。
+        reconcilePageError()
         refresh()
+    }
+
+    /** AD-215：错误遮罩归属标签与当前标签不一致时清除（切换/关闭路径共用）。 */
+    private fun reconcilePageError() {
+        if (!::tabManager.isInitialized) return
+        if (_pageError.value?.webView !== tabManager.current()?.webView) {
+            _pageError.value = null
+        }
     }
 
     /** 更新地址栏内容（编辑草稿——未提交前不受标签切换/页面事件覆盖）。 */
@@ -268,10 +313,19 @@ class BrowserViewModel(
     private fun navigateWithDebounce(bypassDebounce: Boolean) {
         val wv = if (::tabManager.isInitialized) tabManager.current()?.webView else null
         if (wv == null || (!bypassDebounce && !navigateDebounceOk())) return
-        val target = _address.value
+        // AD-238（2026-09-26 审计）：地址栏停留首页占位（用户未编辑）时点
+        // 「打开」——占位 aegis://home 不可导航（必被策略拒绝并弹恐吓提示），
+        // 映射回 HOME_URL（回到首页，等价刷新）。
+        val target = if (_address.value == HOME_DISPLAY_URL) HOME_URL else _address.value
         // 提交即清除草稿：后续 onPageStarted→onPageUrlObserved 正常同步地址栏
         addressDraftActive = false
-        if (!SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(target).orFalse()) {
+        val navigated = SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(target).orFalse()
+        if (!navigated &&
+            // AD-216（2026-09-26 审计）：RequireConfirmation「待确认」与 Deny
+            // 「被拒」共用 false 返回——确认对话框已挂起时不得再弹「无法通过
+            // 安全策略验证」恐吓提示（二者同时弹出且语义误导）。
+            _pendingNavigationConfirmation.value == null
+        ) {
             _webViewAlert.value = alertText(R.string.nav_rejected)
         }
     }
@@ -483,6 +537,10 @@ class BrowserViewModel(
                 _address.value = displayAddress(url)
             }
         }
+        // AD-225（2026-09-26 审计）：URL 回调尾部刷新——TabManager.updateUrl 后
+        // _tabs StateFlow 与 canGoBack/canGoForward 此前不刷新（无标题变化的
+        // 页面前进/后退按钮状态滞后；与 onTitleObserved 同口径补齐）。
+        refresh()
     }
 
     /**
@@ -525,6 +583,8 @@ class BrowserViewModel(
                 description = pageErrorText(code, detail),
                 isSsl = isSsl,
                 url = url,
+                // AD-215：绑定归属标签的 WebView 引用（切换/关闭时对账清除）
+                webView = webView,
             )
     }
 
@@ -599,11 +659,15 @@ data class PendingNavigationConfirmation internal constructor(
  * @param description 简短中文错误说明（错误面板主文案）
  * @param isSsl       是否为 SSL 证书错误（面板标题区分「安全连接失败」）
  * @param url         出错页面的 URL（面板展示定位）
+ * @param webView     AD-215（2026-09-26 审计）：错误归属标签的 WebView 引用
+ *                    ——切换/关闭标签时按当前标签对账清除（错误遮罩不得
+ *                    跨标签残留）。
  */
 data class PageError(
     val description: String,
     val isSsl: Boolean,
     val url: String,
+    internal val webView: WebView,
 )
 
 private fun Boolean?.orFalse(): Boolean = this ?: false

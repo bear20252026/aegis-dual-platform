@@ -28,12 +28,19 @@ class SecureNavigator internal constructor(
      * 常量白名单校验——仅放行编译期固定的第一方 assets 资源（与
      * openTrustedHome 同信任级：file:// 不经 Broker，但路径不可被调用方
      * 控制）；白名单外一律拒绝。桥接层不得直接持有 webView.loadUrl。
+     *
+     * WB-106（2026-09-26 审计）：[isTrustedAsset] 抽出白名单谓词——桥接层
+     * 在 JS 后台线程先行同步判定加载受理结果（loadUrl 主线程投递照旧），
+     * openGeogebra 透传受理结果而非恒返回 webView 非空。
      */
     fun openTrustedAsset(assetPath: String): Boolean {
-        if (assetPath !in TRUSTED_ASSET_PATHS) return false
+        if (!isTrustedAsset(assetPath)) return false
         webView.loadUrl("file:///android_asset/$assetPath")
         return true
     }
+
+    /** WB-106：受信资产白名单判定（与 [openTrustedAsset] 同一谓词——线程安全）。 */
+    internal fun isTrustedAsset(assetPath: String): Boolean = assetPath in TRUSTED_ASSET_PATHS
 
     fun navigateExternal(input: String): Boolean {
         // P0-2 修复（搜索审计 2026-09-01）：归一走 SearchEngines 单源并传

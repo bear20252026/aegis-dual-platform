@@ -4,6 +4,7 @@ import android.app.DownloadManager
 import android.os.Environment
 import android.webkit.CookieManager
 import android.webkit.WebView
+import com.aegis.webviewadapter.LogRedact
 
 /**
  * WebView 下载统一处理（单文件单职责：从 SecureWebViewFactory 拆出——H-6）。
@@ -46,7 +47,10 @@ internal object WebViewDownloadHandler {
         // 类直链的文件名在 Content-Disposition，判定需要拿到净化后文件名。
         val fileName = resolveDownloadFileName(url, mimeType, contentDisposition)
         if (DownloadPolicy.requiresExplicitConfirmation(url, fileName)) {
-            android.util.Log.w("AegisDownload", "拦截危险扩展下载: $url")
+            // AD-220（2026-09-26 审计）：下载日志统一接入脱敏单源——此前两处
+            // Log.w 明文记录完整 URL（含 query 的 token），LogRedact 为
+            // webview-adapter internal 无法跨模块复用，现已 public 化。
+            android.util.Log.w("AegisDownload", "拦截危险扩展下载: ${LogRedact.redact(url)}")
             android.widget.Toast
                 .makeText(context, "已拦截危险文件类型的下载", android.widget.Toast.LENGTH_LONG)
                 .show()
@@ -89,11 +93,12 @@ internal object WebViewDownloadHandler {
         mimeType: String,
         contentDisposition: String,
     ): String {
-        val urlPathSegment = url.substringBefore('#').substringBefore('?').substringAfterLast('/')
-        val fromDisposition =
-            contentDisposition
-                .substringAfter("filename=", "")
-                .trim(' ', '"', ';')
+        // AD-217（2026-09-26 审计）：URL 路径段先百分号解码再取尾段（与
+        // DownloadPolicy 判定口径一致——`/dl/malware%2Eexe` 此前不解码）。
+        val urlPathSegment =
+            decodePercent(url.substringBefore('#').substringBefore('?'))
+                .substringAfterLast('/')
+        val fromDisposition = resolveDispositionFileName(contentDisposition)
         val base =
             sanitizeFileName(fromDisposition)
                 ?: sanitizeFileName(urlPathSegment)
@@ -134,6 +139,44 @@ internal object WebViewDownloadHandler {
                     name.dropLast(extension.length + 1).take(baseBudget).trimEnd('.') + "." + extension
                 }
             }
+        }
+
+    /**
+     * AD-230（2026-09-26 审计）：Content-Disposition 文件名解析——此前只认
+     * 小写字面 `filename=`：RFC 5987 `filename*=UTF-8''…`（非 ASCII 文件名的
+     * 标准形态）与大小写变体（`FileName=`）全部漏解析。优先 filename*
+     * （剥 charset 前缀后百分号解码），回退 filename（大小写不敏感）；
+     * 均未命中返回空串（交由后续 URL/默认名兜底）。
+     */
+    internal fun resolveDispositionFileName(contentDisposition: String): String {
+        val starred =
+            Regex("filename\\*=([^;]+)", RegexOption.IGNORE_CASE)
+                .find(contentDisposition)
+                ?.groupValues
+                ?.get(1)
+                ?.trim()
+        if (!starred.isNullOrBlank()) {
+            // RFC 5987 形如 `UTF-8''%E6%8A%A5.pdf`——剥 charset'' 前缀后解码；
+            // 无前缀（裸百分号编码）按原串处理
+            val encoded = starred.substringAfter("''", missingDelimiterValue = starred)
+            return decodePercent(encoded)
+        }
+        return Regex("filename=([^;]+)", RegexOption.IGNORE_CASE)
+            .find(contentDisposition)
+            ?.groupValues
+            ?.get(1)
+            ?.trim(' ', '"', ';')
+            .orEmpty()
+    }
+
+    /** AD-230/AD-217 配套：百分号解码；非法编码原样返回（fail-closed）。 */
+    private fun decodePercent(raw: String): String =
+        try {
+            java.net.URLDecoder.decode(raw, "UTF-8")
+        } catch (_: IllegalArgumentException) {
+            raw
+        } catch (_: java.io.UnsupportedEncodingException) {
+            raw
         }
 
     /**

@@ -7,13 +7,14 @@ import androidx.webkit.WebViewFeature
 /**
  * WebView 硬化脚本注入（单文件单职责：从 SecureWebViewFactory 拆出）。
  *
- * 包含两类 document-start 注入（行为与拆分前逐字节一致）：
+ * 包含两类 document-start 注入：
  * 1. bridge-guard：Bridge 硬化 JS（fetch/XHR/sendBeacon/WebSocket 未授权调用拒绝）
  *    ——单一事实源（ADR-007）：模板与 `contracts/schemas/bridge_guard.template.js`
  *    逐行一致，由 `contracts/codegen/verify_bridge_guard.py` 门禁校验。
  * 2. fingerprint-shield：9 阶段指纹防护 JS（canvas/WebGL/Audio 噪声 +
  *    hardwareConcurrency 伪装），每会话随机种子确定性——同一会话内指纹
- *    一致但跨会话不同。
+ *    一致但跨会话不同。canvas 噪声自 AD-212（2026-09-26 审计）起施加在
+ *    离屏副本（与 Rust 侧 RS-025 修复模式对齐）。
  */
 internal object WebViewHardening {
     /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
@@ -146,9 +147,15 @@ internal object WebViewHardening {
 })();
             """.trimIndent()
 
-    /** 指纹防护 JS（管道化组合——参照 Rust fingerprint_pipeline）。 */
+    /**
+     * 指纹防护 JS（管道化组合——参照 Rust fingerprint_pipeline）。
+     *
+     * AD-247（2026-09-26 审计）：private → internal——9 阶段脚本此前无任何
+     * JVM 断言，「脚本被改而注入照常」是零回归盲区（BRIDGE_GUARD_JS 已有
+     * AD-069 同口径标记回归，本脚本对齐补齐）。
+     */
     @Suppress("LongMethod") // 该方法仅承载版本化脚本文本，不包含 Android 业务控制流。
-    private fun fingerprintShieldScript(sessionSeed: String): String =
+    internal fun fingerprintShieldScript(sessionSeed: String): String =
         """
 window.__AEGIS_PROTECTION_VERSION = '1';
 // === Stage 1: ToStringGuard（参照 playwright-afp MIT）===
@@ -182,17 +189,28 @@ window.__AEGIS_PROTECTION_VERSION = '1';
 })();
 
 // === Stage 3: Canvas/WebGL/Audio 噪声 ===
+// AD-212（2026-09-26 审计）：噪声施加在**离屏副本**上（参照 Rust 侧 RS-025
+// 修复模式）——原实现 getImageData/putImageData 破坏性写回活画布：①二次读
+// 同一画布结果不同（噪声注入自身可检测）；②页面后续渲染被永久污染。副本
+// 仅用于返回值，原 ctx 不动；且不调用源画布 getContext（drawImage 对任意
+// 上下文类型的源画布均可用，也避免把尚无上下文的画布永久锁定为 2d）。
 (function() {
   const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
   HTMLCanvasElement.prototype.toDataURL = function(type) {
-    const ctx = this.getContext('2d');
-    if (ctx) {
-      const imageData = ctx.getImageData(0, 0, this.width, this.height);
+    try {
+      const off = document.createElement('canvas');
+      off.width = this.width;
+      off.height = this.height;
+      const octx = off.getContext('2d');
+      octx.drawImage(this, 0, 0);
+      const imageData = octx.getImageData(0, 0, off.width, off.height);
       const seed = parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16);
       for (let i = 0; i < imageData.data.length; i += 4) { imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1; }
-      ctx.putImageData(imageData, 0, 0);
+      octx.putImageData(imageData, 0, 0);
+      return origToDataURL.apply(off, arguments);
+    } catch (e) {
+      return origToDataURL.apply(this, arguments);
     }
-    return origToDataURL.apply(this, arguments);
   };
 })();
 (function() {

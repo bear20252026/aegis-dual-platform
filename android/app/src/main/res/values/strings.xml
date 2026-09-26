@@ -36,6 +36,12 @@
     <string name="cd_translate">整页翻译</string>
     <string name="cd_new_tab">新建标签页</string>
     <string name="cd_tab_close">关闭标签页</string>
+    <!-- AD-251（2026-09-26 审计）：标签栏布局切换入口（top 横排 ↔ left 垂直） -->
+    <string name="cd_toggle_layout">切换标签栏布局</string>
+
+    <!-- 页面功能提示（ReaderController——AD-228 迁入资源单源） -->
+    <string name="reader_no_content">当前页面没有可提取的正文</string>
+    <string name="translate_unavailable">当前页面无法翻译或未通过安全策略验证</string>
 
     <!-- 安全提示文案（BrowserViewModel——经 appContext 取资源） -->
     <string name="nav_rejected">该地址无法通过安全策略验证</string>

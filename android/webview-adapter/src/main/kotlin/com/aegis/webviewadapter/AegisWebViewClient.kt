@@ -63,6 +63,20 @@ class AegisWebViewClient(
 
         /** 主框架 HTTP >= 400（detail = 状态码字符串）。 */
         const val ERROR_HTTP = "http_error"
+
+        /**
+         * AD-211（2026-09-26 审计）：拒绝日志整行组装单源——detail 与 url
+         * 一并脱敏。原实现只对 url 参数走 LogRedact，但 AndroidBroker/Rust
+         * 核心的 deny detail 内嵌完整明文 URL（`拒绝 URL: $rawUrl` 直接拼
+         * 原文），query 中的 token/搜索词经 detail 绕过 AD-004 脱敏入
+         * logcat。internal 供 JVM 单测断言「日志行不含明文 query」。
+         */
+        internal fun denialLogLine(
+            reason: com.aegis.broker.DenyReason,
+            url: String,
+        ): String =
+            "导航被拒: code=${reason.code} detail=${LogRedact.redact(reason.detail)} " +
+                "url=${LogRedact.redact(url)}"
     }
 
     override fun shouldOverrideUrlLoading(
@@ -93,12 +107,34 @@ class AegisWebViewClient(
             )
             return true
         }
-        return !authorizeNavigation(
-            view,
-            requestedUrl,
-            loadWhenAllowed = false,
-            mayRequireConfirmation = request.isForMainFrame,
-        )
+        // AD-246（2026-09-26 审计）：子框架走轻量判定——单次 evaluateNavigation。
+        // 此前子框架与主框架同走「确认登记+自动批准+consumeNavigation」全链
+        // （native 模式下每次子框架导航三次 JNI→Rust 持锁跨界调用，iframe
+        // 密集页开销显著）。Deny → 阻断留痕；Allow → 放行原始加载（不消费
+        // 顶层授权对象）；RequireConfirmation 无子框架确认 UI 面——fail-closed
+        // 阻断。
+        val subFrameUrl = upgradeToHttpsIfNeeded(requestedUrl)
+        return when (
+            val decision =
+                broker.evaluateNavigation(sessionId, tabId, documentGeneration, subFrameUrl, "navigation")
+        ) {
+            is Decision.Allow -> {
+                false
+            }
+
+            is Decision.RequireConfirmation -> {
+                android.util.Log.w(
+                    "AegisWebView",
+                    "子框架确认型导航被阻断（无子框架确认 UI 面）: ${LogRedact.redact(subFrameUrl)}",
+                )
+                true
+            }
+
+            is Decision.Deny -> {
+                denied(decision.reason, topLevel = false, url = subFrameUrl)
+                true
+            }
+        }
     }
 
     /** 地址栏和首次外部导航必须调用此入口，不能直接调用 WebView.loadUrl。 */
@@ -235,10 +271,9 @@ class AegisWebViewClient(
         topLevel: Boolean,
         url: String,
     ): Boolean {
-        android.util.Log.w(
-            "AegisWebView",
-            "导航被拒: code=${reason.code} detail=${reason.detail} url=${LogRedact.redact(url)}",
-        )
+        // AD-211（2026-09-26 审计）：日志行经 denialLogLine 单源组装——detail
+        // 内嵌的明文 URL/query 一并脱敏（此前 detail 直拼原文入 logcat）。
+        android.util.Log.w("AegisWebView", denialLogLine(reason, url))
         if (topLevel) onNavigationDenied(reason.code, reason.detail)
         return false
     }
@@ -261,7 +296,12 @@ class AegisWebViewClient(
             // 大小写敏感——`HTTP://EXAMPLE.com` 原样放行明文（scheme 判定处
             // 已 lowercase 但升级未同步）。改忽略大小写替换前缀。
             val upgraded = url.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
-            android.util.Log.i("Aegis", "HTTPS-only: 升级 ${LogRedact.redact(url)} → ${LogRedact.redact(upgraded)}")
+            // AD-233（2026-09-26 审计）：升级日志对每条 http 资源（含全部子
+            // 框架）各打一条——降为 isLoggable(DEBUG) 门控（开发期 setprop
+            // 可开启，release 默认静默）。
+            if (android.util.Log.isLoggable("Aegis", android.util.Log.DEBUG)) {
+                android.util.Log.d("Aegis", "HTTPS-only: 升级 ${LogRedact.redact(url)} → ${LogRedact.redact(upgraded)}")
+            }
             return upgraded
         }
         return url

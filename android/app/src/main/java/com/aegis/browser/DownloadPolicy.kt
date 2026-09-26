@@ -51,7 +51,12 @@ object DownloadPolicy {
         fileName: String = "",
     ): Boolean {
         val withoutFragment = url.substringBefore('#')
-        val pathSegment = withoutFragment.substringBefore('?').substringAfterLast('/')
+        // AD-217（2026-09-26 审计）：路径段先百分号解码再取尾段——AD-002 只给
+        // 查询值补了解码，`/dl/malware%2Eexe` 路径段归一后无字面 `.`，危险
+        // 扩展漏判（与 Windows 侧 Unescape 口径对齐）。
+        val pathSegment =
+            decodeQueryValue(withoutFragment.substringBefore('?'))
+                .substringAfterLast('/')
         val queryValues =
             withoutFragment
                 .substringAfter('?', missingDelimiterValue = "")

@@ -66,6 +66,16 @@ class DownloadPolicyTest {
         assertTrue(DownloadPolicy.requiresExplicitConfirmation("https://c.d/dl?f=x%2Fy.exe"))
     }
 
+    // AD-217（2026-09-26 审计）：URL 路径段此前不参与百分号解码——
+    // `/dl/malware%2Eexe` 归一后无字面 `.`，危险扩展漏判
+    @Test
+    fun percentEncodedPathSegment_detected() {
+        assertTrue(DownloadPolicy.requiresExplicitConfirmation("https://evil.com/dl/malware%2Eexe"))
+        assertTrue(DownloadPolicy.requiresExplicitConfirmation("https://evil.com/dl/malware%2eexe"))
+        // 编码分隔符形态：dl%2Fmalware.exe 解码后取尾段
+        assertTrue(DownloadPolicy.requiresExplicitConfirmation("https://evil.com/dl%2Fmalware.exe"))
+    }
+
     @Test
     fun malformedPercentEncoding_fallsBackToRaw() {
         // 非法编码（孤立 %）不抛——原样参与判定仍命中

@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -62,7 +64,15 @@ fun VerticalTabBar(
                 .fillMaxHeight()
                 .background(ToolbarBackground),
     ) {
+        val listState = rememberLazyListState()
+        // AD-223（2026-09-26 审计）：激活标签滚动对齐——AD-086 只给横向
+        // TabBar 补了 animateScrollToItem；本栏 LazyColumn 超长标签列表切到
+        // 屏幕外标签同样无视觉反馈，同口径补齐。
+        LaunchedEffect(activeIndex, tabs.size) {
+            if (activeIndex in tabs.indices) listState.animateScrollToItem(activeIndex)
+        }
         LazyColumn(
+            state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
             contentPadding = PaddingValues(6.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp),

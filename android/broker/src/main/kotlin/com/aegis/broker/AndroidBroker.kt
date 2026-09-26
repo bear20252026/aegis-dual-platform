@@ -334,7 +334,11 @@ class AndroidBroker(
             ),
         )
 
-    private fun canonicalOrigin(uri: java.net.URI): String {
+    /**
+     * AD-249（2026-09-26 审计）：internal 化供 JVM 单测直接断言——IPv6 host、
+     * 非默认端口拼接与默认端口折叠此前仅经 evaluateNavigation 间接覆盖。
+     */
+    internal fun canonicalOrigin(uri: java.net.URI): String {
         // T2 配套（全面审计批次2 2026-09-04）：about:blank 为 opaque URI
         // （host=null）——直接归一会 NPE；固定返回原字面量。
         if (uri.scheme.equals("about", ignoreCase = true)) return "about:blank"

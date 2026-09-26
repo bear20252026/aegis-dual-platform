@@ -13,6 +13,10 @@
 -dontwarn com.sun.jna.**
 -keep interface com.aegis.broker.NativePolicyCoreBridge$NativePolicyCoreAbi { *; }
 -keep class com.aegis.broker.NativePolicyCoreBridge { *; }
+# AD-219（2026-09-26 审计）：probe 门禁的 JNA 接口（NativePolicyCoreGate 持有）
+# 与 Bridge 的 Abi 同为按名映射接口——漏 keep 时方法名被混淆，
+# Native.load 符号查找失败 → 门禁 block → 全部导航 fail-closed 拒绝。
+-keep interface com.aegis.broker.NativePolicyCoreGate$NativePolicyCoreAbi { *; }
 -keep class com.sun.jna.internal.** { *; }
 
 # ---- androidx.webkit：document-start 注入用 View.setTag(key=R$id) ——

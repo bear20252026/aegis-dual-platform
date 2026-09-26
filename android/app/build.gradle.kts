@@ -82,6 +82,16 @@ android {
                 keyAlias = envAlias ?: "aegis-release"
                 keyPassword = envKeyPass ?: envStorePass
             } else if (signingPropertiesFile.exists()) {
+                // AD-241（2026-09-26 审计）：逐键校验——缺任一键时原实现
+                // file(getProperty(...))（null）在配置期抛无指引异常；现给出
+                // 「缺 xxx 键」明确报错（参照 signing.properties.example 补全）。
+                val requiredSigningKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+                val missingSigningKeys =
+                    requiredSigningKeys.filter { signingProperties.getProperty(it).isNullOrBlank() }
+                check(missingSigningKeys.isEmpty()) {
+                    "signing.properties 缺少键: ${missingSigningKeys.joinToString(", ")}" +
+                        "（参照 signing.properties.example 补全或改用 AEGIS_* 环境变量）"
+                }
                 storeFile = file(signingProperties.getProperty("storeFile"))
                 storePassword = signingProperties.getProperty("storePassword")
                 keyAlias = signingProperties.getProperty("keyAlias")
@@ -133,9 +143,13 @@ android {
         getByName("main").assets.srcDir(rootProject.file("../shared/shell"))
     }
     // 审计修复：测试文件不入 Android assets（打包体积与攻击面双收）。
-    // 保留 AGP 默认忽略集，仅追加 snake.test.js。
+    // WB-115（2026-09-26 审计）：shared/shell 整目录入包的排除面补齐——
+    // snake.test.js（约 465 行测试代码）与 manifest.txt（发布门禁的源清单，
+    // Android 运行期零消费）不入正式 APK（Windows csproj 同口径排除
+    // snake.test.js）。保留 AGP 默认忽略集，仅追加两文件。
     androidResources {
-        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:snake.test.js"
+        ignoreAssetsPattern =
+            "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:snake.test.js:manifest.txt"
     }
     buildFeatures {
         buildConfig = true

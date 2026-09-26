@@ -46,6 +46,37 @@ class AegisHomeBridge(
 
         /** P1-1 修复：受信壳页 URL 前缀（本地 assets 内置资源——首页/画板等）。 */
         private const val TRUSTED_SHELL_PREFIX = "file:///android_asset/"
+
+        /** 画板受信资产路径（与 SecureNavigator.TRUSTED_ASSET_PATHS 单一登记项一致）。 */
+        private const val GEOGEBRA_ASSET_PATH = "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html"
+
+        /** AD-235：日志净化截断上限（与 BrowserViewModel 标题净化同口径 120）。 */
+        private const val LOG_MESSAGE_MAX_LENGTH = 120
+
+        /**
+         * AD-250（2026-09-26 审计）：引擎 JSON 组装 internal 化——
+         * @JavascriptInterface 方法必须 public（JS 反射仅暴露 public 注解
+         * 方法，无法直接 internal 化），抽取纯函数供 JVM 单测断言与
+         * start.html 的消费契约：`{"engine":<key>,"engines":[{"key","name"}]}`。
+         */
+        internal fun buildEngineJson(currentEngine: String): String {
+            val engines =
+                org.json.JSONArray().apply {
+                    SearchEngines.ENGINE_URLS.keys.forEach { key ->
+                        put(
+                            org.json.JSONObject().apply {
+                                put("key", key)
+                                put("name", ENGINE_NAMES[key] ?: key)
+                            },
+                        )
+                    }
+                }
+            return org.json
+                .JSONObject()
+                .put("engine", currentEngine)
+                .put("engines", engines)
+                .toString()
+        }
     }
 
     /**
@@ -69,8 +100,17 @@ class AegisHomeBridge(
     @JavascriptInterface
     fun logError(message: String) {
         if (!isTrustedShellPage()) return
-        android.util.Log.e("AegisHome", message ?: "")
+        // AD-235（2026-09-26 审计）：message 为非空 String——原 `?: ""` 是对
+        // 非空类型的冗余判空（已删）；页面可控文本先净化再入日志——换行可
+        // 伪造多行 logcat 记录（与 BrowserViewModel 标题净化同口径）。
+        android.util.Log.e("AegisHome", sanitizeForLog(message))
     }
+
+    /** AD-235：日志净化——换行/回退/制表压平 + 截断防洪泛。 */
+    private fun sanitizeForLog(message: String): String =
+        message
+            .replace(Regex("[\\r\\n\\t]+"), " ")
+            .take(LOG_MESSAGE_MAX_LENGTH)
 
     @JavascriptInterface
     fun setEngine(key: String) {
@@ -90,22 +130,7 @@ class AegisHomeBridge(
     fun getEngine(): String {
         if (!isTrustedShellPage()) return ""
         val current = prefs.getString(SearchEngines.KEY_ENGINE, null) ?: SearchEngines.DEFAULT_ENGINE
-        val engines =
-            org.json.JSONArray().apply {
-                SearchEngines.ENGINE_URLS.keys.forEach { key ->
-                    put(
-                        org.json.JSONObject().apply {
-                            put("key", key)
-                            put("name", ENGINE_NAMES[key] ?: key)
-                        },
-                    )
-                }
-            }
-        return org.json
-            .JSONObject()
-            .put("engine", current)
-            .put("engines", engines)
-            .toString()
+        return buildEngineJson(current)
     }
 
     @JavascriptInterface
@@ -157,12 +182,15 @@ class AegisHomeBridge(
     fun openGeogebra(): Boolean {
         // P1-1 修复（全面审计 2026-09-04）：受信壳页校验合并进 provider 判定（detekt ReturnCount ≤ 2）
         val wv = if (isTrustedShellPage()) webViewProvider() else null
-        wv?.post {
-            SecureWebViewFactory.navigatorFor(wv)?.openTrustedAsset(
-                "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
-            )
-        }
-        return wv != null
+        val navigator = wv?.let(SecureWebViewFactory::navigatorFor)
+        if (wv == null || navigator == null) return false
+        // WB-106（2026-09-26 审计）：透传 openTrustedAsset 的加载受理结果——
+        // 原实现返回 wv != null，导航器缺失/白名单拒绝时仍返回 true，start.js
+        // 据此跳过 onFail，「资源未随包 → 按钮置灰」降级在 Android 永不触发
+        // （C# 侧正确反映资源可用性）。加载在主线程投递；受理结果经同一
+        // 白名单谓词同步判定（与 openTrustedAsset 内部判定单源）。
+        wv.post { navigator.openTrustedAsset(GEOGEBRA_ASSET_PATH) }
+        return navigator.isTrustedAsset(GEOGEBRA_ASSET_PATH)
     }
 
     /**

@@ -1,6 +1,7 @@
 package com.aegis.browser
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -58,5 +59,48 @@ class WebViewHardeningTest {
         assertTrue(js.contains("127.0.0.1"))
         // bridge 目标强制 HTTPS（生产接线已开启）
         assertTrue("REQUIRE_HTTPS 必须保持 true", js.contains("REQUIRE_HTTPS = true"))
+    }
+
+    // ---------------- AD-247（2026-09-26 审计）：fingerprintShieldScript 9 阶段标记回归 ----------------
+
+    /** 测试种子（64 位 hex——与 newSessionSeed 同形态，确定性注入）。 */
+    private val testSeed = "00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff"
+
+    @Test
+    fun fingerprintShieldScriptContainsAllStageMarkers() {
+        val js = WebViewHardening.fingerprintShieldScript(testSeed)
+        val markers =
+            listOf(
+                "window.__AEGIS_PROTECTION_VERSION", // 阶段标记：版本
+                "Function.prototype.toString", // Stage 1：ToStringGuard
+                "__AEGIS_SITE_SEED", // Stage 2：PerSiteSeed
+                "HTMLCanvasElement.prototype.toDataURL", // Stage 3：Canvas 噪声
+                "WebGLRenderingContext.prototype.getParameter", // Stage 3b：WebGL 参数
+                "hardwareConcurrency", // Stage 3c：硬件并发伪装
+                "Screen.prototype", // Stage 4：LetterboxShield
+                "'__hsfp'", // Stage 5：QueryStripper
+                "FontFaceSet.prototype.check", // Stage 6：FontNormalizer
+                "0x9245", // Stage 7：WebGLSpoof
+                "performance.now", // Stage 8：TimerPrecision
+                "clients2\\.google\\.com", // Stage 9：ExtProxy
+            )
+        for (marker in markers) {
+            assertTrue("fingerprintShieldScript 缺少阶段标记: $marker", js.contains(marker))
+        }
+        // 会话种子必须注入脚本（Stage 2 派生 per-site seed 的熵源）
+        assertTrue(js.contains(testSeed))
+    }
+
+    @Test
+    fun canvasNoiseUsesOffscreenCopyNotLiveCanvas() {
+        // AD-212（2026-09-26 审计）回归：噪声必须施加在离屏副本——活画布上的
+        // 破坏性读改写使二次读取可检测且页面后续渲染被永久污染
+        val js = WebViewHardening.fingerprintShieldScript(testSeed)
+        assertTrue("必须创建离屏副本", js.contains("document.createElement('canvas')"))
+        assertTrue("副本必须经 drawImage 取源", js.contains("drawImage(this, 0, 0)"))
+        assertTrue("噪声写回副本上下文", js.contains("octx.putImageData(imageData, 0, 0)"))
+        assertTrue("返回值取自副本", js.contains("origToDataURL.apply(off, arguments)"))
+        assertFalse("不得直读源画布像素尺寸（破坏性读改写检测面）", js.contains("this.width, this.height"))
+        assertFalse("不得取源画布 2d 上下文（无上下文画布被永久锁定 2d）", js.contains("this.getContext"))
     }
 }

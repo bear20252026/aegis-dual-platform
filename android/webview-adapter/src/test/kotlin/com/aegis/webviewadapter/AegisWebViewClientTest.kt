@@ -157,27 +157,104 @@ class AegisWebViewClientTest {
         verify(view).loadUrl("https://example.com/x")
     }
 
-    // ------------------------------------------------------------- AD-011
+    // ------------------------------------------------------------- AD-011 / AD-246
     @Test
     fun subFrameHttpNeverHijacksTopLevel() {
+        // AD-246（2026-09-26 审计）：子框架走轻量判定——单次 evaluateNavigation
+        // （不走确认登记+自动批准+consumeNavigation 全链），Allow 放行原始
+        // 加载（不消费顶层授权）、Deny 阻断留痕
         val client = newClient()
-        // 子框架 Allow：消费成功但 loadWhenAllowed=false → 绝不 loadUrl 到顶层
-        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
+        // 子框架 Allow：直接放行（不 loadUrl、不 consume）
+        whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
             .thenReturn(Decision.Allow(allowAction))
-        whenever(
-            broker.consumeNavigation(allowAction, SESSION, TAB, 0L, "https://ads.example/frame", "navigation"),
-        ).thenReturn(true)
         val allowed =
             client.shouldOverrideUrlLoading(view, fakeRequest("http://ads.example/frame", isMainFrame = false))
         // Allow → return false（放行原始子框架加载——明文由 cleartext 禁用兜底）
         assertFalse(allowed)
         verify(view, never()).loadUrl(anyString())
+        verify(
+            broker,
+            never(),
+        ).consumeNavigation(allowAction, SESSION, TAB, 0L, "https://ads.example/frame", "navigation")
 
         // 子框架 Deny：return true（阻断留痕）
-        stubDeny("url_policy")
+        whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
+            .thenReturn(
+                Decision.Deny(
+                    DenyReason("url_policy", "拒绝 URL: https://ads.example/frame?token=secret"),
+                ),
+            )
         val denied = client.shouldOverrideUrlLoading(view, fakeRequest("http://ads.example/frame", isMainFrame = false))
         assertTrue(denied)
         verify(view, never()).loadUrl(anyString())
+    }
+
+    // ------------------------------------------------------------- AD-216
+    @Test
+    fun pendingConfirmationIsNotSurfacedAsDenial() {
+        // 「待确认」与「被拒」共用 false 返回——确认挂起路径只弹确认对话框，
+        // 不得触发 onNavigationDenied（app 层据 pending 非空抑制错误提示）
+        val confirmationRequest = approvalRequest()
+        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(Decision.RequireConfirmation(confirmationRequest))
+        var requested = false
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                requireNavigationConfirmation = true,
+                onNavigationConfirmationRequested = { requested = true },
+                onNavigationDenied = { code, _ -> deniedCodes.add(code) },
+            )
+        assertFalse(client.navigate(view, "https://example.com/"))
+        assertTrue("确认请求必须上抛 UI", requested)
+        assertTrue("pending 不得触发 onNavigationDenied", deniedCodes.isEmpty())
+        verify(view, never()).loadUrl(anyString())
+    }
+
+    // ------------------------------------------------------------- AD-221
+    @Test
+    fun sessionRenewalIsSuppressedWhileConfirmationIsPending() {
+        // 待审批确认期间不得续期——覆盖式重注册会孤儿化 Rust 核心的 pending
+        // nonce（renewSessionBeforeDecision 门控的关键时序此前零测试）。
+        // 注意：同一请求实例贯穿登记/批准（data class equals 含时间戳——
+        // 每次新建实例会使 stub 匹配失效）
+        val pendingRequest = approvalRequest()
+        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(Decision.RequireConfirmation(pendingRequest))
+        val client = newClient(requireConfirmation = true)
+        assertFalse(client.navigate(view, "https://example.com/"))
+        verify(broker, times(1)).renewSession(SESSION, TAB)
+
+        // pending 期间的子框架导航：轻量路径不续期（防孤儿化 pending nonce）
+        whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
+            .thenReturn(Decision.Allow(allowAction))
+        client.shouldOverrideUrlLoading(view, fakeRequest("https://ads.example/frame", isMainFrame = false))
+        verify(broker, times(1)).renewSession(SESSION, TAB)
+
+        // 批准消费后恢复续期
+        whenever(broker.approveNavigationConfirmation(pendingRequest, "https://example.com/", "navigation"))
+            .thenReturn(Decision.Allow(allowAction))
+        whenever(broker.consumeNavigation(allowAction, SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(true)
+        assertTrue(client.approvePendingNavigation(view))
+        client.navigate(view, "https://example.com/")
+        verify(broker, times(2)).renewSession(SESSION, TAB)
+    }
+
+    // ------------------------------------------------------------- AD-211
+    @Test
+    fun denialLogLineRedactsUrlsEmbeddedInDetailAndUrl() {
+        // detail 内嵌完整明文 URL（AndroidBroker deny("url_policy", "拒绝 URL: $rawUrl")
+        // 直接拼原文）——日志面必须一并脱敏（query 中 token/搜索词不入 logcat）
+        val reason = DenyReason("url_policy", "拒绝 URL: https://evil.com/dl?token=secret&q=1")
+        val line = AegisWebViewClient.denialLogLine(reason, "https://evil.com/dl?token=secret")
+        assertFalse("日志行不得含明文 query", line.contains("token=secret"))
+        assertFalse(line.contains("q=1"))
+        assertTrue(line.contains("code=url_policy"))
+        assertTrue("脱敏后保留 scheme+host+path", line.contains("https://evil.com/dl…"))
     }
 
     // ------------------------------------------------------------- AD-012
@@ -230,6 +307,17 @@ class AegisWebViewClientTest {
     }
 
     // ------------------------------------------------------------- 辅助
+
+    /** AD-216/AD-221：待审批请求构造器（多断言共用；data class equals 匹配 stub）。 */
+    private fun approvalRequest(): com.aegis.broker.ApprovalRequest =
+        com.aegis.broker.ApprovalRequest(
+            origin = "https://example.com",
+            method = "GET",
+            path = "/",
+            scope = "navigation",
+            expiresAt = Clock.System.now().plus(kotlin.time.Duration.parse("60s")),
+            nonce = "pending-nonce",
+        )
 
     /** WebResourceRequest 是接口——fake 实现免 mockito（url 走 mock Uri）。 */
     private fun fakeRequest(
