@@ -554,9 +554,9 @@ mod tests {
             "嵌套数组内的浮点也必须拒绝"
         );
         // 整型照常通过
-        assert!(
-            canonical_unsigned(&serde_json::json!({"a": 1, "b": -5, "c": 18446744073709551615u64}))
-                .is_ok()
-        );
+        assert!(canonical_unsigned(
+            &serde_json::json!({"a": 1, "b": -5, "c": 18446744073709551615u64})
+        )
+        .is_ok());
     }
 }

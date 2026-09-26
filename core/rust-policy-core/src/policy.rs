@@ -406,11 +406,9 @@ mod tests {
             other => panic!("Ask 规则必须映射 RequireConfirmation，实际 {other:?}"),
         }
         // 对照：同策略下未匹配动作仍走 None（上层 fail-safe）
-        assert!(
-            policy
-                .evaluate("navigation:read", "https://example.com")
-                .is_none()
-        );
+        assert!(policy
+            .evaluate("navigation:read", "https://example.com")
+            .is_none());
     }
 
     // —— RS-154（审计 2026-09-25）：短路顺序计数 mock ——

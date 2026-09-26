@@ -12,7 +12,7 @@ use aegis_policy_core::decision::AuthorizedAction;
 use aegis_policy_core::matcher::{glob_match, glob_subsumes};
 use aegis_policy_core::origin::try_parse_external;
 use aegis_policy_core::update_manifest::{canonical_unsigned, verify_threshold, version_tuple};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// contracts/vectors 目录（仓库布局：core/rust-policy-core → ../../contracts/vectors）。
 fn vectors_dir() -> std::path::PathBuf {

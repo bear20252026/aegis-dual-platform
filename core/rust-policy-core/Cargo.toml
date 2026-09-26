@@ -1,9 +1,12 @@
 [package]
 name = "aegis-policy-core"
 version = "0.1.0"
-# RS-149（审计 2026-09-25）：edition 2021 → 2024（rustc 1.85+）——
-# unsafe_op_in_unsafe_fn 等新 lint 面 + 静态可变性收紧随版本落位
-edition = "2024"
+# RS-149（审计 2026-09-25）：edition 2024 评估结论——**暂缓**。uniffi 0.32
+# 宏的 metadata 注册在 edition 2024 下静默失效（CI Core-Rust 实测：本地
+# cargo test 全绿，uniffi-bindgen 扫描 release .so 报 "No UniFFI metadata
+# found"——宏展开正常但链接段注册丢失）。uniffi 0.33+ 官方支持 edition
+# 2024，升级 uniffi 后重启本项（届时 #[unsafe(no_mangle)] 已就位零迁移）。
+edition = "2021"
 # RS-152（审计 2026-09-25）：MSRV 下限——edition 2024 线（1.85）与代码中
 # 已使用的 u64::is_multiple_of（1.87 稳定）取最大值；依赖实际 MSRV 由
 # cargo 在 check 阶段校验（低于要求即构建失败）。clippy incompatible_msrv

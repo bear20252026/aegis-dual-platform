@@ -685,23 +685,17 @@ mod tests {
             CapabilityRegistry::new(),
         );
         for i in 0..MAX_SESSIONS {
-            assert!(
-                broker
-                    .create_session(format!("s{i}"), "t".into(), 1, Duration::from_secs(60))
-                    .is_some()
-            );
+            assert!(broker
+                .create_session(format!("s{i}"), "t".into(), 1, Duration::from_secs(60))
+                .is_some());
         }
-        assert!(
-            broker
-                .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
-                .is_none()
-        );
+        assert!(broker
+            .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
+            .is_none());
         broker.destroy_session("s0");
-        assert!(
-            broker
-                .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
-                .is_some()
-        );
+        assert!(broker
+            .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
+            .is_some());
     }
 
     // —— RS-107 回归（审计 2026-09-25）：过期/逐出/续期语义 ——

@@ -143,7 +143,7 @@ mod native_abi_tests {
 
     #[test]
     fn mode_pipeline_per_site_seed_varies_by_domain() {
-        use crate::protection_mode::{ProtectionMode, fingerprint_pipeline_with_mode};
+        use crate::protection_mode::{fingerprint_pipeline_with_mode, ProtectionMode};
         let shield = shield::FingerprintShield::new();
         let a = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
         let b = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "b.com");

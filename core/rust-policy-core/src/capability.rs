@@ -380,11 +380,9 @@ mod tests {
     fn register_returns_overwritten_capability() {
         // RS-106：重注册返回旧值（审计痕迹）——新增返回 None
         let mut registry = CapabilityRegistry::new();
-        assert!(
-            registry
-                .register(make_cap("dup", CapabilityScope::Read, None))
-                .is_none()
-        );
+        assert!(registry
+            .register(make_cap("dup", CapabilityScope::Read, None))
+            .is_none());
         let old = registry.register(make_cap("dup", CapabilityScope::Write, None));
         assert!(old.is_some(), "覆盖必须返回旧 capability");
         assert_eq!(old.unwrap().scope, CapabilityScope::Read);

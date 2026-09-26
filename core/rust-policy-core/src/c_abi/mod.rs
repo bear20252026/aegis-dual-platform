@@ -5,11 +5,11 @@
 //! `aegis_policy_core_string_free` 释放；未知会话、无效输入和内部错误一律返回
 //! 类型化的 deny JSON，而非允许宿主改用不一致的策略路径。
 
-use crate::POLICY_CORE_ABI_VERSION;
 use crate::ffi::{FfiApprovalRequest, FfiAuthorizedAction, FfiBroker, FfiDecision};
-use serde_json::{Value, json};
-use std::ffi::{CString, c_char};
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use crate::POLICY_CORE_ABI_VERSION;
+use serde_json::{json, Value};
+use std::ffi::{c_char, CString};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -370,13 +370,11 @@ mod tests {
         assert_eq!(decision["decision"], "allow");
         // 模拟 C# NativeAction 往返：从评估响应剥离 explanation 审计字段。
         let mut action_obj = decision["action"].clone();
-        assert!(
-            action_obj
-                .as_object_mut()
-                .unwrap()
-                .remove("explanation")
-                .is_some()
-        );
+        assert!(action_obj
+            .as_object_mut()
+            .unwrap()
+            .remove("explanation")
+            .is_some());
         let action = c_string(&action_obj.to_string());
         let first = read_response(aegis_policy_core_broker_consume_navigation_json(
             broker,
