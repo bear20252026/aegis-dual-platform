@@ -37,19 +37,30 @@ public partial class BookmarkManagerWindow : Window
         base.OnClosed(e);
     }
 
+    /// <summary>CS-165：过滤谓词提纯直测；CS-162：OrdinalIgnoreCase 直判
+    /// ——此前每行两串 ToLowerInvariant 堆分配。</summary>
+    internal static bool MatchesQuery(string title, string url, string? query)
+    {
+        if (string.IsNullOrEmpty(query))
+            return true;
+        return title.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || url.Contains(query, StringComparison.OrdinalIgnoreCase);
+    }
+
     private void Reload(string query)
     {
         _rows.Clear();
-        var q = query.Trim().ToLowerInvariant();
-        foreach (var b in _bookmarks.All())
+        var q = query.Trim();
+        var all = _bookmarks.All();
+        foreach (var b in all)
         {
-            if (!string.IsNullOrEmpty(q)
-                && !b.Title.ToLowerInvariant().Contains(q)
-                && !b.Url.ToLowerInvariant().Contains(q))
-                continue;
-            _rows.Add(new BookmarkRow(b.Id, b.Title, b.Url));
+            if (MatchesQuery(b.Title, b.Url, q))
+                _rows.Add(new BookmarkRow(b.Id, b.Title, b.Url));
         }
-        SummaryText.Text = $"共 {_rows.Count} 个书签";
+        // CS-166：筛选态下「共 N」语义误导 → 明示 匹配 N / 共 M
+        SummaryText.Text = string.IsNullOrEmpty(q)
+            ? $"共 {_rows.Count} 个书签"
+            : $"匹配 {_rows.Count} / 共 {all.Count} 个书签";
         SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -114,9 +125,24 @@ public partial class BookmarkManagerWindow : Window
             return;
         }
         if (title.Length > TitleMaxLength)
-            title = title[..TitleMaxLength];
+        {
+            // CS-163：代理对安全截断——emoji 标题不再劈成乱码半字
+            var cut = TitleMaxLength;
+            if (char.IsHighSurrogate(title[cut - 1]))
+                cut--;
+            title = title[..cut];
+        }
         if (_editingId > 0)
-            _bookmarks.Rename(_editingId, title);
+        {
+            // CS-164：库层异常（锁/磁盘）不再裸上抛炸窗口——可见反馈
+            try { _ = _bookmarks.Rename(_editingId, title); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"重命名失败：{ex.Message}", "错误",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+        }
         CloseEditor();
         Reload(SearchBox.Text);
         _owner?.RefreshBookmarkBar();
@@ -126,7 +152,14 @@ public partial class BookmarkManagerWindow : Window
     {
         if (sender is FrameworkElement { DataContext: BookmarkRow row })
         {
-            _bookmarks.RemoveById(row.Id);
+            // CS-164：删除失败可见反馈
+            try { _ = _bookmarks.RemoveById(row.Id); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"删除失败：{ex.Message}", "错误",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
             Reload(SearchBox.Text);
             _owner?.RefreshBookmarkBar();
         }
@@ -138,7 +171,14 @@ public partial class BookmarkManagerWindow : Window
             "清空书签", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (confirmed != MessageBoxResult.Yes)
             return;
-        _bookmarks.ClearAll();
+        // CS-164：清空失败可见反馈
+        try { _bookmarks.ClearAll(); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"清空失败：{ex.Message}", "错误",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
         Reload(SearchBox.Text);
         _owner?.RefreshBookmarkBar();
     }
@@ -161,7 +201,14 @@ public partial class BookmarkManagerWindow : Window
         }
         else if (e.Key == Key.Delete && BookmarkList.SelectedItem is BookmarkRow del)
         {
-            _bookmarks.RemoveById(del.Id);
+            // CS-164：键盘删除路径同样捕获反馈
+            try { _ = _bookmarks.RemoveById(del.Id); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"删除失败：{ex.Message}", "错误",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
             Reload(SearchBox.Text);
             _owner?.RefreshBookmarkBar();
             e.Handled = true;

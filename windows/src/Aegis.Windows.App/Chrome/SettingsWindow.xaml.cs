@@ -11,6 +11,20 @@ using Aegis.Windows.Core.Settings;
 /// 紧急终止开关（M4-a）：触发即冻结全部导航/下载/批准（重启恢复）。</summary>
 public partial class SettingsWindow : Window
 {
+    // CS-168：KillSwitch 已触发文案单源（构造器与触发后回显两处共用）
+    private const string KillSwitchEngagedText = "已触发——全部导航与下载冻结中。";
+
+    // CS-167：提示前景刷预建冻结——此前每次校验输入 new 两把刷子
+    private static readonly System.Windows.Media.Brush HintErrorBrush = FrozenHintBrush(0xFC, 0xA5, 0xA5);
+    private static readonly System.Windows.Media.Brush HintMutedBrush = FrozenHintBrush(0x94, 0xA3, 0xB8);
+
+    private static System.Windows.Media.SolidColorBrush FrozenHintBrush(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
     private readonly AppSettings _settings;
     private readonly BrowserPolicyBroker _broker;
     private readonly MainWindow _owner;
@@ -42,7 +56,7 @@ public partial class SettingsWindow : Window
         if (_broker.KillSwitch.IsEngaged)
         {
             KillSwitchButton.IsEnabled = false;
-            KillSwitchState.Text = "已触发——全部导航与下载冻结中。";
+            KillSwitchState.Text = KillSwitchEngagedText;
         }
         _suppressEvents = false;
     }
@@ -82,18 +96,17 @@ public partial class SettingsWindow : Window
         if (raw.Length > 0 && ThreatFeedUpdater.ValidateFeedUrl(raw) is null)
         {
             ThreatFeedHint.Text = "地址无效（仅支持 https://）——未保存。";
-            ThreatFeedHint.Foreground = new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromRgb(0xFC, 0xA5, 0xA5));
+            ThreatFeedHint.Foreground = HintErrorBrush;
             return;
         }
         _settings.ThreatFeedUrl = raw;
         Save();
         ThreatFeedHint.Text = "已保存；生效于下次启动（导航与子资源拦截）。";
-        ThreatFeedHint.Foreground = new System.Windows.Media.SolidColorBrush(
-            System.Windows.Media.Color.FromRgb(0x94, 0xA3, 0xB8));
+        ThreatFeedHint.Foreground = HintMutedBrush;
     }
 
-    private static int SleepIndex(int minutes) => minutes switch { 0 => 0, 15 => 1, 60 => 3, _ => 2 };
+    /// <summary>CS-169：提 internal 直测（分钟值 → 下拉索引，非法回退 30 分钟档）。</summary>
+    internal static int SleepIndex(int minutes) => minutes switch { 0 => 0, 15 => 1, 60 => 3, _ => 2 };
     private static int Clamp(int v) => v < 0 ? 0 : v > 2 ? 2 : v;
 
     private void SleepCombo_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -130,7 +143,7 @@ public partial class SettingsWindow : Window
             return;
         _broker.KillSwitch.Engage();
         KillSwitchButton.IsEnabled = false;
-        KillSwitchState.Text = "已触发——全部导航与下载冻结中。";
+        KillSwitchState.Text = KillSwitchEngagedText;
         SecurityLog.Write("[security] 紧急终止开关已触发（设置窗口）");
     }
 

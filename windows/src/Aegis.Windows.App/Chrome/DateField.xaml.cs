@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Chrome;
 
 using System;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -95,7 +96,10 @@ public partial class DateField : UserControl
     {
         if (!_initialized)
             return;
-        FieldLabel.Text = _selectedDate is { } d ? d.ToString("yyyy-MM-dd") : PlaceholderText;
+        // CS-175：InvariantCulture——部分文化默认日历会把 yyyy 格式化为非公历年
+        FieldLabel.Text = _selectedDate is { } d
+            ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : PlaceholderText;
         // TryFindResource（不抛）——控件在宿主窗口资源树就绪前构造时也能安全初始化
         FieldLabel.Foreground = Res(_selectedDate is null ? "TextSecondaryBrush" : "TextPrimaryBrush");
     }
@@ -108,7 +112,7 @@ public partial class DateField : UserControl
     {
         MonthTitle.Text = $"{_year}年{_month}月";
         var first = new DateTime(_year, _month, 1);
-        var offset = ((int)first.DayOfWeek + 6) % 7;  // 周一为首列
+        var offset = MondayOffset(first.DayOfWeek);  // CS-176：提纯直测
         var start = first.AddDays(-offset);
         var today = DateTime.Today;
         var accent = Res("AccentBrush") ?? Brushes.DodgerBlue;
@@ -162,6 +166,9 @@ public partial class DateField : UserControl
             RenderMonth();
         }
     }
+
+    /// <summary>CS-176：周一为首列的网格偏移提纯直测。</summary>
+    internal static int MondayOffset(DayOfWeek day) => ((int)day + 6) % 7;
 
     // CS-035（审计 2026-09-25）：年份边界钳制——DateTime 支持 1..9999 年，
     // 此前连点 ‹/› 到边界即 new DateTime(0/10000,…) 抛 ArgumentOutOfRangeException

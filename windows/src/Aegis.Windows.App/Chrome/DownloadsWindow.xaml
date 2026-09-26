@@ -22,8 +22,13 @@
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
     </Grid.RowDefinitions>
-    <TextBlock Grid.Row="0" Text="下载（原生 DownloadStarting——进度/暂停/取消）"
-               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,0,0,8"/>
+    <DockPanel Grid.Row="0" Margin="0,0,0,8">
+      <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Content="清空列表"
+              AutomationProperties.Name="清空已完成的下载条目" Click="ClearList_Click"
+              ToolTip="移除已完成/已取消/已中断的条目（不删除文件）"/>
+      <TextBlock Text="下载（原生 DownloadStarting——进度/暂停/取消）"
+                 Foreground="{StaticResource TextSecondaryBrush}" FontSize="12"/>
+    </DockPanel>
     <ListBox Grid.Row="1" x:Name="DownloadsList" AutomationProperties.Name="下载任务列表" Background="Transparent" BorderThickness="0"
              HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
       <ListBox.ItemTemplate>

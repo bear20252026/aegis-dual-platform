@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -89,37 +90,55 @@ public partial class HistoryWindow : Window
         else if (CustomDate.SelectedDate is { } d) { from = to = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
     }
 
-    /// <summary>按页加载：只查询当前页，页码跳转不累积内存。</summary>
+    private int _loadGeneration;
+
+    /// <summary>按页加载：只查询当前页，页码跳转不累积内存。CS-159：SQLite
+    /// 查询移后台线程——此前 Count+页查询在 UI 线程同步执行（大表/慢盘翻页
+    /// 即冻结）；迟到结果以代际丢弃（快速连点页码不回显旧页）。</summary>
     private void LoadPage(int page)
     {
         if (!_initialized || page < 1)
             return;
-        string? from; string? to;
-        ComputeRange(out from, out to);
-        _totalCount = _history.Count(SearchBox.Text, from, to);
-        _totalPages = Math.Max(1, (int)Math.Ceiling(_totalCount / (double)_pageSize));
-        _currentPage = Math.Min(page, _totalPages);
-        var entries = _history.SearchRangePage(SearchBox.Text, from, to, _pageSize,
-            (_currentPage - 1) * _pageSize);
-        _items.Clear();
-        string? lastDay = null;
-        foreach (var e in entries)
+        var generation = System.Threading.Interlocked.Increment(ref _loadGeneration);
+        var query = SearchBox.Text;
+        ComputeRange(out var from, out var to);
+        var pageSize = _pageSize;
+        var history = _history;
+        Task.Run(() =>
         {
-            var day = string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate;
-            if (day != lastDay)
+            var total = history.Count(query, from, to);
+            var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+            var currentPage = Math.Min(page, totalPages);
+            var entries = history.SearchRangePage(query, from, to, pageSize,
+                (currentPage - 1) * pageSize);
+            Dispatcher.Invoke(() =>
             {
-                _items.Add(new DateHeader(day));
-                lastDay = day;
-            }
-            _items.Add(new HistoryRow(e.Id,
-                string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
-                TryHost(e.Url),
-                ParseLocalTime(e.VisitedAt)));
-        }
-        SummaryText.Text = $"共 {_totalCount} 条 · 第 {_currentPage} / {_totalPages} 页";
-        EmptyHint.Visibility = _totalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
-        EmptyHint.Text = "没有匹配的历史记录。";
-        RenderPagination();
+                if (generation != _loadGeneration || !IsLoaded)
+                    return;
+                _totalCount = total;
+                _totalPages = totalPages;
+                _currentPage = currentPage;
+                _items.Clear();
+                string? lastDay = null;
+                foreach (var e in entries)
+                {
+                    var day = string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate;
+                    if (day != lastDay)
+                    {
+                        _items.Add(new DateHeader(day));
+                        lastDay = day;
+                    }
+                    _items.Add(new HistoryRow(e.Id,
+                        string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
+                        TryHost(e.Url),
+                        ParseLocalTime(e.VisitedAt)));
+                }
+                SummaryText.Text = $"共 {_totalCount} 条 · 第 {_currentPage} / {_totalPages} 页";
+                EmptyHint.Visibility = _totalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+                EmptyHint.Text = "没有匹配的历史记录。";
+                RenderPagination();
+            });
+        });
     }
 
     private void RenderPagination()
@@ -128,9 +147,12 @@ public partial class HistoryWindow : Window
         var first = Math.Max(1, _currentPage - 2);
         var last = Math.Min(_totalPages, first + 4);
         if (last - first < 4) first = Math.Max(1, last - 4);
+        // CS-160：TryFindResource（不抛）——样式资源缺失降级为默认样式，
+        // 不再 ResourceReferenceKeyNotFoundException
+        var pageStyle = TryFindResource("PageButton") as Style;
         for (var i = first; i <= last; i++)
         {
-            var page = new Button { Content = i.ToString(), Tag = i, Style = (Style)FindResource("PageButton") };
+            var page = new Button { Content = i.ToString(), Tag = i, Style = pageStyle };
             page.Click += Page_Click;
             PageButtons.Items.Add(page);
         }
@@ -189,7 +211,8 @@ public partial class HistoryWindow : Window
         return iso.Length >= 16 ? iso.Substring(11, 5) : string.Empty;
     }
 
-    private static string TryHost(string url) =>
+    /// <summary>CS-161：提 internal 直测。</summary>
+    internal static string TryHost(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host)
             ? uri.Host
             : url;
