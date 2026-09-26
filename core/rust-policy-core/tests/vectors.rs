@@ -8,9 +8,11 @@
 //! `contracts/vectors/*.json`（单一事实源，schema 变更时测试自动跟随；
 //! c_abi 集成测试此前已按此口径消费 JSON）。
 
+use aegis_policy_core::decision::AuthorizedAction;
+use aegis_policy_core::matcher::{glob_match, glob_subsumes};
 use aegis_policy_core::origin::try_parse_external;
 use aegis_policy_core::update_manifest::{canonical_unsigned, verify_threshold, version_tuple};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// contracts/vectors 目录（仓库布局：core/rust-policy-core → ../../contracts/vectors）。
 fn vectors_dir() -> std::path::PathBuf {
@@ -71,6 +73,166 @@ fn update_manifest_valid_vectors() {
     assert_eq!(version_tuple("1.2.3"), Some((1, 2, 3)));
     assert_eq!(version_tuple("0.9.0"), Some((0, 9, 0)));
     assert_eq!(version_tuple("1.0"), None); // 无效 SemVer
+}
+
+// ===== RS-147（审计 2026-09-25）：action / glob 跨语言向量接入 =====
+// （此前 action-valid/invalid.json 仅由 Python validate_vector_schemas.py
+// 消费，Rust 侧零覆盖——契约数据面与 Rust 结构面之间的字段映射无锁定）
+
+/// Action schema 词表（contracts/schemas/action.schema.json enum——Rust
+/// 侧同款词表锁定；漂移即本测试失败）。
+const ACTION_METHODS: &[&str] = &["GET", "POST", "PUT", "DELETE", "NAVIGATE", "DOWNLOAD"];
+
+#[test]
+fn action_valid_vectors_map_to_authorized_action_fields() {
+    // valid 向量：10 必填字段与 AuthorizedAction 字段面一一对应——
+    // 字段名/词表/origin 口径漂移即失败。expires_at 表示差异（向量
+    // ISO8601 ↔ Rust u64 epoch）由 schema 锁定格式、此处锁定字段存在性，
+    // 映射构造取固定远期值
+    for v in load_vectors("action-valid.json") {
+        let a = &v["action"];
+        let note = v["note"].as_str().unwrap_or("unnamed");
+        let session_id = a["session_id"].as_str().expect("缺 session_id");
+        let tab_id = a["tab_id"].as_str().expect("缺 tab_id");
+        let document_generation = a["document_generation"].as_u64().expect("缺代际");
+        let origin = a["origin"].as_str().expect("缺 origin");
+        let method = a["method"].as_str().expect("缺 method");
+        let canonical_parameters = a["canonical_parameters"].as_str().expect("缺参数");
+        let scope = a["scope"].as_str().expect("缺 scope");
+        assert!(a.get("expires_at").is_some(), "向量 {note}: 缺 expires_at");
+        let nonce = a["nonce"].as_str().expect("缺 nonce");
+        let policy_version = a["policy_version"].as_str().expect("缺版本");
+
+        // method 词表（schema enum 同款）
+        assert!(
+            ACTION_METHODS.contains(&method),
+            "向量 {note}: method {method} 不在 Action 词表"
+        );
+        // origin 归一层放行（schema pattern ^https?:// 对应 Rust 归一口径）
+        assert!(
+            try_parse_external(origin).is_some(),
+            "向量 {note}: origin {origin} 必须过归一层"
+        );
+        // 字段面映射：构造 AuthorizedAction 成功且逐字段一致
+        let action = AuthorizedAction {
+            session_id: session_id.into(),
+            tab_id: tab_id.into(),
+            document_generation,
+            origin: origin.into(),
+            method: method.into(),
+            canonical_parameters: canonical_parameters.into(),
+            scope: scope.into(),
+            expires_at: 4_102_444_800, // 2100-01-01T00:00:00Z（远期占位）
+            nonce: nonce.into(),
+            policy_version: policy_version.into(),
+            explanation: String::new(), // 审计扩展字段——schema 数据面不含
+        };
+        assert_eq!(action.session_id, session_id);
+        assert_eq!(action.tab_id, tab_id);
+        assert_eq!(action.document_generation, document_generation);
+        assert_eq!(action.origin, origin);
+        assert_eq!(action.method, method);
+        assert_eq!(action.nonce, nonce);
+    }
+}
+
+#[test]
+fn action_invalid_vectors_match_rust_side_rules() {
+    // invalid 向量：schema 拒绝的形态中，Rust 侧存在同款机制的条目逐一
+    // 对齐；纯 schema 专属规则（additionalProperties / minLength）显式
+    // 登记为「Rust 侧透传」——数据结构无构造校验，拒绝发生在消费层
+    // （空 nonce → consume_nonce RS-034；空 session_id → FFI create_session
+    // RS-159），此处锁定机制性规则不回退
+    for v in load_vectors("action-invalid.json") {
+        let a = &v["action"];
+        let note = v["note"].as_str().unwrap_or("unnamed");
+        // 1) origin 非 http(s)（file: 注入）——origin 归一层同款拒绝
+        if let Some(origin) = a["origin"].as_str() {
+            if !origin.starts_with("http://") && !origin.starts_with("https://") {
+                assert!(
+                    try_parse_external(origin).is_none(),
+                    "向量 {note}: origin 归一层必须拒绝 {origin}"
+                );
+            }
+        }
+        // 2) document_generation 负数——Rust u64 同样不可表示（serde 面
+        //    对齐：u64 反序列化拒绝负值）。仅对负值形态断言（合法 0 值
+        //    反序列化应成功——不误伤）；edition 2024 下 gen 是保留字，
+        //    绑定名取 generation
+        if let Some(generation) = a["document_generation"].as_i64() {
+            if generation < 0 {
+                assert!(
+                    serde_json::from_value::<u64>(json!(generation)).is_err(),
+                    "向量 {note}: 负代际必须被 u64 反序列化拒绝"
+                );
+            }
+        }
+        // 3) method 词表越界/小写——按向量形态分派：越界方法不在词表；
+        //    小写变体不等于词表项（大小写敏感）但可 ASCII 归一匹配
+        if let Some(method) = a["method"].as_str() {
+            let in_list = ACTION_METHODS.contains(&method);
+            match method {
+                "PATCH" => assert!(!in_list, "向量 {note}: PATCH 必须在词表外"),
+                "get" => {
+                    assert!(!in_list, "向量 {note}: 词表大小写敏感");
+                    assert!(
+                        ACTION_METHODS
+                            .iter()
+                            .any(|m| m.eq_ignore_ascii_case(method)),
+                        "get 应是词表项的大小写变体"
+                    );
+                }
+                _ => {} // 其余向量因非 method 规则失效——method 本身在词表内
+            }
+        }
+        // 4) 缺 nonce / 空 session_id / 额外字段——纯 schema 规则
+        //    （required / minLength / additionalProperties），Rust 数据结构
+        //   无构造校验（透传），拒绝发生在消费层：空 nonce →
+        //    consume_nonce 拒绝（RS-034，broker 单元测试锁定）；空
+        //    session_id → FFI create_session 拒绝（RS-159，ffi 测试锁定）
+    }
+}
+
+#[test]
+fn glob_vectors_match_contracts() {
+    // RS-147：glob-match.json——glob_match / glob_subsumes 跨语言向量。
+    // 匹配向量（pattern/text/expected_match）与覆盖向量（a/b/expected_subsumes）
+    // 共用 vectors 数组，按字段形态分派
+    let vectors = load_vectors("glob-match.json");
+    assert!(!vectors.is_empty(), "glob 向量不得为空");
+    let mut matched_count = 0usize;
+    let mut subsumed_count = 0usize;
+    for v in &vectors {
+        let note = v["note"].as_str().unwrap_or("unnamed");
+        if let (Some(pattern), Some(text)) = (v["pattern"].as_str(), v["text"].as_str()) {
+            let flat = v["flat"].as_bool().unwrap_or(false);
+            let expected = v["expected_match"]
+                .as_bool()
+                .unwrap_or_else(|| panic!("向量 {note}: 缺 expected_match"));
+            assert_eq!(
+                glob_match(pattern, text, flat),
+                expected,
+                "glob_match 向量不符: {note} ({pattern:?} vs {text:?}, flat={flat})"
+            );
+            matched_count += 1;
+        }
+        if let (Some(a), Some(b)) = (v["a"].as_str(), v["b"].as_str()) {
+            let flat = v["flat"].as_bool().unwrap_or(false);
+            let expected = v["expected_subsumes"]
+                .as_bool()
+                .unwrap_or_else(|| panic!("向量 {note}: 缺 expected_subsumes"));
+            assert_eq!(
+                glob_subsumes(a, b, flat),
+                expected,
+                "glob_subsumes 向量不符: {note} ({a:?} ⊇ {b:?}, flat={flat})"
+            );
+            subsumed_count += 1;
+        }
+    }
+    assert!(
+        matched_count >= 20 && subsumed_count >= 7,
+        "向量覆盖面收缩（match={matched_count}, subsume={subsumed_count}）"
+    );
 }
 
 #[test]

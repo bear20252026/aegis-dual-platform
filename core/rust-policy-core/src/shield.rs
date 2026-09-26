@@ -27,7 +27,8 @@ impl FingerprintShield {
     /// 可被外部推算复现。现在直接取 OS CSPRNG。
     pub fn new() -> Self {
         let mut seed = [0u8; 32];
-        if getrandom::getrandom(&mut seed).is_err() {
+        // RS-153：getrandom 0.3 API——getrandom() 更名 fill()
+        if getrandom::fill(&mut seed).is_err() {
             // OS 随机源不可用（极端环境）——退化为时间+PID 混合（仍填充全部
             // 32 字节，高低半区经旋转与异或折叠去相关）
             let nanos = std::time::SystemTime::now()

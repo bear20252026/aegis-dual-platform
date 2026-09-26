@@ -50,7 +50,7 @@ pub const POLICY_CORE_ABI_VERSION: u32 = 3;
 /// 供受管理平台探测动态库兼容性的无状态、无分配 C ABI 入口。
 ///
 /// 此入口不处理策略决策；它仅用于在加载期将库名和 ABI 版本绑定到宿主预期值。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_abi_version() -> u32 {
     POLICY_CORE_ABI_VERSION
 }
@@ -143,7 +143,7 @@ mod native_abi_tests {
 
     #[test]
     fn mode_pipeline_per_site_seed_varies_by_domain() {
-        use crate::protection_mode::{fingerprint_pipeline_with_mode, ProtectionMode};
+        use crate::protection_mode::{ProtectionMode, fingerprint_pipeline_with_mode};
         let shield = shield::FingerprintShield::new();
         let a = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
         let b = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "b.com");

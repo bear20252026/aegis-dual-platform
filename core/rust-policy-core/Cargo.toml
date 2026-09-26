@@ -1,7 +1,14 @@
 [package]
 name = "aegis-policy-core"
 version = "0.1.0"
-edition = "2021"
+# RS-149（审计 2026-09-25）：edition 2021 → 2024（rustc 1.85+）——
+# unsafe_op_in_unsafe_fn 等新 lint 面 + 静态可变性收紧随版本落位
+edition = "2024"
+# RS-152（审计 2026-09-25）：MSRV 下限——edition 2024 线（1.85）与代码中
+# 已使用的 u64::is_multiple_of（1.87 稳定）取最大值；依赖实际 MSRV 由
+# cargo 在 check 阶段校验（低于要求即构建失败）。clippy incompatible_msrv
+# 门禁（RS-150 lints）会持续锁定本声明与实际 API 用量一致
+rust-version = "1.87"
 description = "Aegis 纯策略核心（蓝图阶段 F——Rust 试点——无 UI/网络/文件——纯函数依赖注入）"
 license = "MIT"
 
@@ -21,7 +28,10 @@ required-features = ["uniffi-bindgen"]
 [dependencies]
 # 最小 crate 依赖（蓝图：最小依赖 + 固定 toolchain + cargo audit/deny——CI 门禁）
 ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
-getrandom = "0.2"
+# RS-153（审计 2026-09-25）：getrandom 0.2 → 0.3——0.2 线已进入维护模式，
+# 0.3 为当前主线（API：getrandom() 更名 fill()，错误类型重构）。ed25519-dalek
+# 经 rand_core 0.6 仍消费 getrandom 0.2——cargo 语义化版本共存，无冲突
+getrandom = "0.3"
 sha2 = "0.10"
 serde_json = "1"
 # UniFFI（官方最新 0.32——跨语言绑定生成；proc-macro 模式）
@@ -30,3 +40,26 @@ uniffi = "0.32"
 
 [dev-dependencies]
 hex = "0.4"
+
+# RS-150（审计 2026-09-25）：lint 门禁——把原本隐性的 clippy 默认档变显性，
+# 防回退。选用与现有代码兼容的最小集（宽松项后续批次逐档收紧）：
+# - non_ascii_idents：供应链混淆防护（同形异码标识符注入）
+# - unsafe_op_in_unsafe_fn：unsafe fn 内的裸 unsafe 操作必须显式 unsafe 块
+# - correctness/suspicious：clippy 正确性两档升 deny（默认 warn/catch-all）
+[lints.rust]
+non_ascii_idents = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+# MSVC link.exe 输出本地化消息（「正在创建库…」）触发 linker_messages
+# 警告——环境噪音而非代码问题，显式放行以维持 0 警告门禁
+linker_messages = "allow"
+
+[lints.clippy]
+correctness = "deny"
+suspicious = "deny"
+
+# RS-151（审计 2026-09-25）：release 产物强化——fat LTO（跨 crate 内联，
+# 增大逆向成本）+ 符号剥离（发布物不留调试符号表）。本 crate 非 workspace
+# 成员（独立构建），profile 可安全置于本文件
+[profile.release]
+lto = true
+strip = "symbols"

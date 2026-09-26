@@ -40,8 +40,13 @@ const ACTION_EXPIRY_SECONDS: u64 = 120;
 const MAX_PENDING_APPROVALS: usize = 1024;
 /// P1-11 修复（全量复审 2026-09-01）：FFI create_session 的 TTL 下限（秒）。
 /// 宿主传 0 会得到"返回成功、即刻过期"的静默失效会话——钳到下限保底。
-/// 上限维持宿主自由（会话暴露面由 M-16 会话池 fail-closed 容量约束）。
 const MIN_SESSION_TTL_SECONDS: u64 = 30;
+/// RS-158（审计 2026-09-25）：FFI create_session 的 TTL 上限（秒，24h）——
+/// 与下限对称的钳制口径。此前上限自由：宿主可传 u64::MAX 使会话近乎永生，
+/// 会话与 nonce/授权账本的驻留暴露面随之无界。超过钳到上限；常驻 persona
+/// 会话按宿主约定应显式续期（RS-033 replace 语义）而非一次签发永生会话。
+/// 会话总量的内存上限另由 M-16 会话池 fail-closed 容量约束（两个正交维度）。
+const MAX_SESSION_TTL_SECONDS: u64 = 86_400;
 
 impl IssuedAuthorization {
     fn session_id(&self) -> &str {
@@ -71,10 +76,9 @@ impl FfiBroker {
 
     /// 评估导航意图（URL 解析 + 会话验证 → FfiDecision——fail-closed）。
     ///
-    /// ⚠️ H-7 审计注记（2026-08-31）：本通路执行会话/代际/nonce 验证，
-    /// 不含 policy.evaluate / capability.validate（后者默认 deny-all，
-    /// 接线属产品级变更——见 broker.rs 模块文档 H-7 注记）。FFI 语义由
-    /// 本文件 ffi_navigation_tests 回归测试锁定。
+    /// 职责边界（H-7）：本通路仅执行会话/代际/nonce 验证，policy.evaluate /
+    /// capability.validate 未接入 FFI 通路——单一事实源见 broker.rs 模块文档
+    /// H-7 审计注记，FFI 语义由本文件 ffi_navigation_tests 回归测试锁定。
     pub fn evaluate_navigation(
         &self,
         session_id: String,
@@ -112,14 +116,16 @@ impl FfiBroker {
                 };
             }
         };
+        // RS-160（审计 2026-09-25）：参数在此处 move 进 action——三者在
+        // 本函数后续不再使用，此前多余的 .clone() 每导航三次堆分配
         let action = AuthorizedAction {
-            session_id: session_id.clone(),
-            tab_id: tab_id.clone(),
+            session_id,
+            tab_id,
             document_generation: generation,
             origin: canonical_url.origin.clone(),
             method: "GET".into(),
             canonical_parameters: canonical_url.canonical_parameters,
-            scope: scope.clone(),
+            scope,
             expires_at,
             nonce,
             policy_version: self.policy_version.clone(),
@@ -342,7 +348,13 @@ impl FfiBroker {
     ///
     /// P1-11 修复（全量复审 2026-09-01）：TTL 下限钳制——宿主传 0 会
     /// 得到"签发成功、即刻过期"的静默失效会话（fail-open 陷阱面）。
-    /// 钳到 MIN_SESSION_TTL_SECONDS 保底；上限维持宿主自由。
+    /// 钳到 MIN_SESSION_TTL_SECONDS 保底；RS-158：上限同样钳制到
+    /// MAX_SESSION_TTL_SECONDS（24h）——超长 TTL 会话近乎永生，扩大
+    /// 授权/nonce 账本驻留暴露面。
+    ///
+    /// RS-159：空 session_id 拒绝（fail-closed，与 contracts Action schema
+    /// 的 minLength 1 对齐）——空 id 会话即匿名共享会话，任何传空 id 的
+    /// 调用方都会落到同一会话，破坏 persona 隔离语义。
     pub fn create_session(
         &self,
         session_id: String,
@@ -350,7 +362,10 @@ impl FfiBroker {
         generation: u64,
         ttl_seconds: u64,
     ) -> bool {
-        let effective_ttl = ttl_seconds.max(MIN_SESSION_TTL_SECONDS);
+        if session_id.is_empty() {
+            return false;
+        }
+        let effective_ttl = ttl_seconds.clamp(MIN_SESSION_TTL_SECONDS, MAX_SESSION_TTL_SECONDS);
         match self.inner.lock() {
             // M-16 修复（审计 2026-08-31）：会话池满（fail-closed）时
             // 返回 false——原实现无条件 true，掩盖了容量拒绝
@@ -569,7 +584,8 @@ fn ffi_deny(code: &str, detail: &str, explanation: &str) -> FfiDecision {
 fn generate_nonce() -> Result<String, FfiDenyReason> {
     const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
     let mut bytes = [0u8; 32];
-    getrandom::getrandom(&mut bytes).map_err(|error| FfiDenyReason {
+    // RS-153：getrandom 0.3 API——getrandom() 更名 fill()
+    getrandom::fill(&mut bytes).map_err(|error| FfiDenyReason {
         code: "entropy_unavailable".into(),
         detail: "无法生成安全随机 nonce".into(),
         explanation: format!("denied — operating-system entropy unavailable: {error}"),
@@ -585,10 +601,9 @@ fn generate_nonce() -> Result<String, FfiDenyReason> {
 }
 
 // ============================ H-7 审计回归测试 ============================ //
-// 审计 2026-08-31：FfiBroker 导航通路执行的是「会话/代际/nonce」验证，
-// 策略层（PolicyEngine）与能力层（CapabilityRegistry）仅在嵌入式宿主直接
-// 使用 ContextBroker::evaluate 时生效（见 broker.rs 模块文档）。以下测试
-// 锁定 FFI 通路的 fail-closed 语义，防止该口径被无声变更。
+// 锁定 FFI 导航通路的 fail-closed 语义（仅会话/代际/nonce 验证，policy/
+// capability 层未接线）——职责边界的完整背景与决策记录以 broker.rs 模块文档
+// H-7 注记为单一事实源，此处不再重复展开。
 
 #[cfg(test)]
 mod ffi_navigation_tests {
@@ -669,6 +684,80 @@ mod ffi_navigation_tests {
             ),
             "ttl=0 钳到 MIN_SESSION_TTL_SECONDS 后会话应在窗口内有效"
         );
+    }
+
+    // —— RS-158（审计 2026-09-25）：TTL 上限钳制 ——
+
+    #[test]
+    fn create_session_clamps_huge_ttl_to_maximum() {
+        // u64::MAX 会话近乎永生——必须钳到 MAX_SESSION_TTL_SECONDS（24h）。
+        // 实际生效 TTL 经 core session_ttl 可观测性 API 读取（测试不可
+        // 反射宿主传参，只认签发结果）。
+        // 注意：锁作用域最小化——持有 inner 锁期间不得再调
+        // broker.create_session（内部二次 lock 同一 Mutex = 自死锁）
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s-max".into(), "tab-1".into(), 1, u64::MAX));
+        {
+            let inner = broker.inner.lock().expect("broker 锁必须可用");
+            assert_eq!(
+                inner.session_ttl("s-max"),
+                Some(std::time::Duration::from_secs(MAX_SESSION_TTL_SECONDS)),
+                "超长 TTL 必须钳到 24h 上限"
+            );
+        }
+        // 边界内侧：86400 恰好等于上限——原样接受（锁已释放，安全再入）
+        assert!(broker.create_session("s-cap".into(), "tab-1".into(), 1, 86_400));
+        let inner = broker.inner.lock().expect("broker 锁必须可用");
+        assert_eq!(
+            inner.session_ttl("s-cap"),
+            Some(std::time::Duration::from_secs(86_400)),
+            "恰等于上限的 TTL 原样生效"
+        );
+    }
+
+    // —— RS-159（审计 2026-09-25）：session_id 直测 ——
+
+    #[test]
+    fn create_session_rejects_empty_session_id() {
+        // 空 session_id 拒绝（fail-closed，对齐 Action schema minLength 1）——
+        // 空 id 会话即匿名共享会话，破坏 persona 隔离语义
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(!broker.create_session(String::new(), "tab-1".into(), 1, 60));
+        // 创建失败即无会话——后续导航必须拒绝（fail-closed 闭环）
+        let decision = broker.evaluate_navigation(
+            String::new(),
+            "tab-1".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        );
+        assert!(
+            matches!(decision, FfiDecision::Deny { .. }),
+            "空 id 会话不存在——导航必须拒绝"
+        );
+    }
+
+    #[test]
+    fn create_session_session_id_uniqueness_and_isolation() {
+        // session_id 隔离语义直测：同 id replace（RS-033 续期契约）+
+        // 异 id 各自独立（不同 id 不串会话）
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("sa".into(), "tab-a".into(), 1, 60));
+        assert!(broker.create_session("sb".into(), "tab-b".into(), 1, 60));
+        // sa 的会话不能在 tab-b 上用（会话 ↔ 标签绑定）
+        let cross = broker.evaluate_navigation(
+            "sa".into(),
+            "tab-b".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        );
+        assert!(
+            matches!(cross, FfiDecision::Deny { .. }),
+            "跨标签复用会话必须拒绝"
+        );
+        // 同 id replace 语义（续期）——与 RS-033 契约一致
+        assert!(broker.create_session("sa".into(), "tab-a".into(), 1, 120));
     }
 
     // —— RS-135（审计 2026-09-25）：容量/清理/覆盖语义 ——

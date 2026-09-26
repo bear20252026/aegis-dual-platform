@@ -5,11 +5,11 @@
 //! `aegis_policy_core_string_free` 释放；未知会话、无效输入和内部错误一律返回
 //! 类型化的 deny JSON，而非允许宿主改用不一致的策略路径。
 
-use crate::ffi::{FfiApprovalRequest, FfiAuthorizedAction, FfiBroker, FfiDecision};
 use crate::POLICY_CORE_ABI_VERSION;
-use serde_json::{json, Value};
-use std::ffi::{c_char, CString};
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use crate::ffi::{FfiApprovalRequest, FfiAuthorizedAction, FfiBroker, FfiDecision};
+use serde_json::{Value, json};
+use std::ffi::{CString, c_char};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{LazyLock, Mutex};
@@ -201,7 +201,7 @@ static LIVE_BROKER: Mutex<Option<usize>> = Mutex::new(None);
 
 /// 创建独立的原生策略 Broker；`policy_version` 为空、无效 UTF-8、panic、
 /// 活跃单例已存在或锁中毒时返回 null（RS-140 单例互斥）。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_new(policy_version: *const c_char) -> *mut CAbiBroker {
     catch_unwind(AssertUnwindSafe(|| {
         let Ok(policy_version) = read_utf8(policy_version) else {
@@ -244,7 +244,7 @@ pub extern "C" fn aegis_policy_core_broker_new(policy_version: *const c_char) ->
 ///
 /// # Safety
 /// `broker` 必须为本库创建（或 null）；指向任意地址是未定义行为。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn aegis_policy_core_broker_free(broker: *mut CAbiBroker) {
     if !broker.is_null() {
         // SAFETY: 指针只能由 `aegis_policy_core_broker_new` 创建；只置标志不释放。
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn aegis_policy_core_broker_free(broker: *mut CAbiBroker) 
 ///
 /// # Safety
 /// `response` 必须为本库 evaluate/consume 调用所返回、尚未释放的字符串指针；传入任意地址或重复释放是未定义行为。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn aegis_policy_core_string_free(response: *mut c_char) {
     if !response.is_null() {
         // SAFETY: 仅接受由 `CString::into_raw` 返回的指针。
@@ -370,11 +370,13 @@ mod tests {
         assert_eq!(decision["decision"], "allow");
         // 模拟 C# NativeAction 往返：从评估响应剥离 explanation 审计字段。
         let mut action_obj = decision["action"].clone();
-        assert!(action_obj
-            .as_object_mut()
-            .unwrap()
-            .remove("explanation")
-            .is_some());
+        assert!(
+            action_obj
+                .as_object_mut()
+                .unwrap()
+                .remove("explanation")
+                .is_some()
+        );
         let action = c_string(&action_obj.to_string());
         let first = read_response(aegis_policy_core_broker_consume_navigation_json(
             broker,

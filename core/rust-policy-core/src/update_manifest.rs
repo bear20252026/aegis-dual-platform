@@ -127,12 +127,37 @@ fn write_json_string(s: &str, out: &mut Vec<u8>) {
     out.push(b'"');
 }
 
-/// 解析 SemVer 字符串（与 contracts/version.schema.json 一致——拒绝无效格式）。
+/// 解析 SemVer 严格核心版字符串（与 contracts/version.schema.json 的
+/// `(0|[1-9][0-9]*)` 数字段口径一致——拒绝无效格式）。
+///
+/// RS-148（审计 2026-09-25）：数字段收紧——此前直接 `u64::parse`，会
+/// 接受 `"+1.2.3"`（Rust parse 接受前导 `+`）与 `"01.2.3"`（前导零），
+/// 而 schema pattern 拒绝两者——跨语言漂移面：`"+1.2.3"` 与 `"1.2.3"`
+/// 解析出同一元组，污染版本比较语义（回滚判定可被 `+` 前缀混淆）。
+/// 收紧后：每段必须为 `0` 或无前导零的 ASCII 数字串。
+///
+/// 预发布（`-rc.1`）与构建元数据（`+build.5`）后缀仍拒绝（RS-125 口径
+/// 不变——本函数是版本比较键，只认严格核心版）。
 pub fn version_tuple(value: &str) -> Option<(u64, u64, u64)> {
+    fn strict_segment(seg: &str) -> Option<u64> {
+        let bytes = seg.as_bytes();
+        match bytes.first()? {
+            // "0" 单独合法；前导零（"01"）拒绝——与 schema (0|[1-9][0-9]*) 一致
+            b'0' if bytes.len() == 1 => return Some(0),
+            b'0' => return None,
+            b'1'..=b'9' => {}
+            // "+"/"-"前缀、空白、Unicode 数字（多字节首字节不在 ASCII 区）等
+            _ => return None,
+        }
+        if !bytes.iter().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        seg.parse().ok()
+    }
     let mut parts = value.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next()?.parse().ok()?;
-    let patch = parts.next()?.parse().ok()?;
+    let major = strict_segment(parts.next()?)?;
+    let minor = strict_segment(parts.next()?)?;
+    let patch = strict_segment(parts.next()?)?;
     if parts.next().is_some() {
         return None;
     }
@@ -304,6 +329,29 @@ mod tests {
         assert_eq!(version_tuple("1"), None); // 单段
         assert_eq!(version_tuple(""), None); // 空串
         assert_eq!(version_tuple("a.b.c"), None); // 非数字
+    }
+
+    #[test]
+    fn version_tuple_rejects_leading_plus_and_leading_zeros() {
+        // RS-148：数字段口径与 schema (0|[1-9][0-9]*) 对齐——Rust
+        // u64::parse 会接受前导 "+" 与前导零，此前 version_tuple 同样
+        // 放行 → "+1.2.3" 与 "1.2.3" 解析出同一元组（版本比较可被
+        // 混淆），"01.2.3" 跨语言漂移。收紧后一律拒绝
+        assert_eq!(version_tuple("+1.2.3"), None, "前导 + 拒绝");
+        assert_eq!(version_tuple("1.+2.3"), None, "段内 + 拒绝");
+        assert_eq!(version_tuple("01.2.3"), None, "前导零拒绝");
+        assert_eq!(version_tuple("1.02.3"), None);
+        assert_eq!(version_tuple("1.2.03"), None);
+        assert_eq!(version_tuple("00.0.0"), None);
+        // 空白与负数（parse 本就拒绝——锁定不回退）
+        assert_eq!(version_tuple(" 1.2.3"), None);
+        assert_eq!(version_tuple("1.2.3 "), None);
+        assert_eq!(version_tuple("-1.2.3"), None);
+        // 全角数字（Unicode 多字节——非 ASCII 数字段）
+        assert_eq!(version_tuple("１.2.3"), None);
+        // 对照：单个 "0" 段合法，多位无前导零合法
+        assert_eq!(version_tuple("0.0.0"), Some((0, 0, 0)));
+        assert_eq!(version_tuple("10.20.30"), Some((10, 20, 30)));
     }
 
     #[test]
@@ -506,9 +554,9 @@ mod tests {
             "嵌套数组内的浮点也必须拒绝"
         );
         // 整型照常通过
-        assert!(canonical_unsigned(
-            &serde_json::json!({"a": 1, "b": -5, "c": 18446744073709551615u64})
-        )
-        .is_ok());
+        assert!(
+            canonical_unsigned(&serde_json::json!({"a": 1, "b": -5, "c": 18446744073709551615u64}))
+                .is_ok()
+        );
     }
 }

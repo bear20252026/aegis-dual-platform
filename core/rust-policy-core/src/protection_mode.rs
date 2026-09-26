@@ -30,6 +30,18 @@ pub enum ProtectionMode {
 }
 
 impl ProtectionMode {
+    /// 模式查询接口的 Symbol 键（RS-146 单源——与 ToStringGuard::REGISTER_SYMBOL
+    /// 同款收敛模式）。
+    ///
+    /// RS-146（审计 2026-09-25）：模式声明从具名全局常量
+    /// `window.__AEGIS_PROTECTION_MODE` 收敛到 Symbol 键——具名全局是
+    /// 通用指纹脚本的免费探测点（读到一个属性就知道该页面有 Aegis 注入，
+    /// 防护存在性本身泄漏）。Symbol 属性不出现在任何枚举通道
+    /// （Object.keys / for-in / getOwnPropertyNames / JSON.stringify），
+    /// 按名探测落空（须先猜测描述串才可能触达）。经
+    /// `Symbol.for("aegis.protection.mode.v1")` 跨模块共享读取。
+    pub const MODE_SYMBOL: &'static str = "aegis.protection.mode.v1";
+
     /// 从字符串解析保护模式。
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -106,21 +118,25 @@ impl ProtectionMode {
 
     /// 生成模式切换 JS 注入脚本。
     ///
-    /// 设置 `__AEGIS_PROTECTION_MODE` 全局常量，
-    /// 供其他模块查询当前模式。
+    /// RS-146：模式值挂在 Symbol 键上（防篡改：writable/configurable 双
+    /// false、不可枚举），供其他模块经 `Symbol.for` 共享键查询当前模式。
     pub fn inject_script(&self) -> String {
         let mode = self.name();
         let desc = self.description();
         format!(
             r#"
-// Aegis ProtectionMode — 防护模式切换
+// Aegis ProtectionMode — 防护模式切换（RS-146：Symbol 键，不落具名全局）
 // 模式：{mode} — {desc}
-Object.defineProperty(window, '__AEGIS_PROTECTION_MODE', {{
-  value: '{mode}',
-  writable: false,
-  configurable: false
-}});
-"#
+(function() {{
+  var KEY = Symbol.for('{sym}');
+  Object.defineProperty(window, KEY, {{
+    value: '{mode}',
+    writable: false,
+    configurable: false
+  }});
+}})();
+"#,
+            sym = Self::MODE_SYMBOL
         )
     }
 }
@@ -260,7 +276,58 @@ mod tests {
         let m = ProtectionMode::Balanced;
         let script = m.inject_script();
         assert!(script.contains("balanced"));
-        assert!(script.contains("__AEGIS_PROTECTION_MODE"));
+        assert!(script.contains("Symbol.for"), "RS-146：模式值挂 Symbol 键");
+    }
+
+    // —— RS-146（审计 2026-09-25）：模式声明收敛 Symbol 键 ——
+
+    #[test]
+    fn mode_declaration_symbol_keyed_not_named_global() {
+        // RS-146 回归：不再有具名全局 `__AEGIS_PROTECTION_MODE`——具名全局
+        // 是指纹脚本的免费探测点（泄漏防护存在性本身）
+        let script = guard_script();
+        assert!(
+            !script.contains("__AEGIS_PROTECTION_MODE"),
+            "具名全局模式常量必须移除"
+        );
+        assert!(script.contains(&format!("Symbol.for('{}')", ProtectionMode::MODE_SYMBOL)));
+    }
+
+    #[test]
+    fn mode_declaration_tamper_proofed_and_shadowed() {
+        // IIFE 包裹（不引入顶层词法声明——防 var KEY 泄漏 + 与页面脚本
+        // 作用域隔离）；模式值防篡改（writable/configurable 双 false）
+        let script = guard_script();
+        assert!(script.contains("(function() {"), "IIFE 包裹");
+        assert!(
+            script.contains("writable: false,\n    configurable: false"),
+            "模式值只读不可重配"
+        );
+        assert!(
+            !script.contains("enumerable: true"),
+            "模式值不得可枚举（泄漏进 Object.keys）"
+        );
+    }
+
+    #[test]
+    fn mode_symbol_constant_matches_script_key() {
+        // MODE_SYMBOL 常量与脚本内键一致——跨模块消费方（Symbol.for 共享键）
+        // 与注入脚本必须同一描述串
+        for mode in [
+            ProtectionMode::Compatible,
+            ProtectionMode::Balanced,
+            ProtectionMode::Maximum,
+        ] {
+            assert!(
+                mode.inject_script()
+                    .contains(&format!("Symbol.for('{}')", ProtectionMode::MODE_SYMBOL)),
+                "模式 {mode} 脚本键与 MODE_SYMBOL 不一致"
+            );
+        }
+    }
+
+    fn guard_script() -> String {
+        ProtectionMode::Balanced.inject_script()
     }
 
     #[test]

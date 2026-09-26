@@ -50,8 +50,18 @@ const MAX_NONCE_LENGTH: usize = 128;
 /// 时新会话被拒（fail-closed），不会淘汰任何未过期会话。
 const MAX_SESSIONS: usize = 1024;
 
+/// RS-155（审计 2026-09-25）：UNIX 秒单一时间源——本文件内唯一的
+/// `SystemTime::now()` 读取点（此前散在 validate_action 内联）。生产路径
+/// 经 validate_action 调用；测试经 validate_action_at 注入固定时刻，
+/// 不动系统时钟。
+fn now_unix_secs() -> Option<u64> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs())
+}
+
 /// 单个会话上下文（persona session——隔离绑定）。
-///
 /// 注意：策略版本校验在 `validate_action` 中直接与 broker 的 `policy_version`
 /// 比对（fail-closed），而不是挂在会话上，因此会话不再保存一份冗余的
 /// `policy_version`，避免"会话级"与"broker 级"版本语义混淆。
@@ -148,6 +158,12 @@ impl ContextBroker {
             .retain(|_, r| r.session_id != session_id);
     }
 
+    /// RS-158（审计 2026-09-25）：会话 TTL 查询——可观测性 API（宿主
+    /// 诊断会话状态）；FFI TTL 钳制测试经此读取实际生效的 TTL。
+    pub fn session_ttl(&self, session_id: &str) -> Option<Duration> {
+        self.sessions.get(session_id).map(|ctx| ctx.ttl)
+    }
+
     /// 推进会话的顶层文档代际；只允许同一标签严格单步推进，拒绝回退和跳跃。
     pub fn advance_document_generation(
         &mut self,
@@ -192,7 +208,7 @@ impl ContextBroker {
             Decision::Allow(_) => {} // 策略允许，继续下一层
             Decision::Deny(reason) => return Decision::Deny(reason),
             Decision::RequireConfirmation(request) => {
-                return Decision::RequireConfirmation(request)
+                return Decision::RequireConfirmation(request);
             }
         }
 
@@ -215,6 +231,26 @@ impl ContextBroker {
     /// 验证 AuthorizedAction 上下文（fail-closed）。
     /// 保留用于向后兼容和测试，新代码应使用 evaluate()。
     pub fn validate_action(&self, action: &AuthorizedAction) -> Decision {
+        // RS-155（审计 2026-09-25）：UNIX 秒单一时间源 now_unix_secs——
+        // 授权过期判定的时刻由此注入，边界语义（RS-156）经
+        // validate_action_at 固定时刻锁定，测试不动系统时钟。
+        // 口径说明：时钟不可用优先于会话查找返回（两个结果均为 fail-closed
+        // Deny，顺序仅影响错误码归因，不改变拒绝语义）。
+        match now_unix_secs() {
+            Some(now) => self.validate_action_at(action, now),
+            None => Decision::Deny(DenyReason {
+                code: "system_clock".into(),
+                detail: "系统时间不可用".into(),
+                explanation: "denied — system clock is before UNIX epoch".into(),
+            }),
+        }
+    }
+
+    /// validate_action 的可测内核——`now` 由调用方注入（RS-155）。
+    ///
+    /// 检查顺序：会话存在 → 会话过期（单调时钟 Instant）→ 授权过期
+    /// （UNIX 秒）→ 策略版本 → 代际绑定 → 标签绑定。
+    fn validate_action_at(&self, action: &AuthorizedAction, now: u64) -> Decision {
         // 检查会话存在
         let session = match self.sessions.get(&action.session_id) {
             Some(s) => s,
@@ -242,16 +278,9 @@ impl ContextBroker {
             });
         }
 
-        let now = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(duration) => duration.as_secs(),
-            Err(_) => {
-                return Decision::Deny(DenyReason {
-                    code: "system_clock".into(),
-                    detail: "系统时间不可用".into(),
-                    explanation: "denied — system clock is before UNIX epoch".into(),
-                });
-            }
-        };
+        // RS-156（审计 2026-09-25）：边界口径 == now 即过期——expires_at
+        // 是「失效时刻」而非「最后有效时刻」，等于当前时刻的授权已到界。
+        // 由 action_expires_at_boundary_* 测试锁定（注入固定 now）。
         if action.expires_at <= now {
             return Decision::Deny(DenyReason {
                 code: "action_expired".into(),
@@ -395,11 +424,12 @@ mod tests {
     use crate::decision::AuthorizedAction;
     use crate::policy::PolicyEngine;
 
-    fn make_action(session: &str, gen: u64, nonce: &str) -> AuthorizedAction {
+    // edition 2024：`gen` 成为保留关键字——参数更名 generation
+    fn make_action(session: &str, generation: u64, nonce: &str) -> AuthorizedAction {
         AuthorizedAction {
             session_id: session.into(),
             tab_id: "tab-0".into(),
-            document_generation: gen,
+            document_generation: generation,
             origin: "https://example.com".into(),
             method: "GET".into(),
             canonical_parameters: "/".into(),
@@ -655,17 +685,23 @@ mod tests {
             CapabilityRegistry::new(),
         );
         for i in 0..MAX_SESSIONS {
-            assert!(broker
-                .create_session(format!("s{i}"), "t".into(), 1, Duration::from_secs(60))
-                .is_some());
+            assert!(
+                broker
+                    .create_session(format!("s{i}"), "t".into(), 1, Duration::from_secs(60))
+                    .is_some()
+            );
         }
-        assert!(broker
-            .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
-            .is_none());
+        assert!(
+            broker
+                .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
+                .is_none()
+        );
         broker.destroy_session("s0");
-        assert!(broker
-            .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
-            .is_some());
+        assert!(
+            broker
+                .create_session("overflow".into(), "t".into(), 1, Duration::from_secs(60))
+                .is_some()
+        );
     }
 
     // —— RS-107 回归（审计 2026-09-25）：过期/逐出/续期语义 ——
@@ -746,5 +782,78 @@ mod tests {
             broker.consume_nonce(&max_ok, "s1").is_ok(),
             "恰 128 字节放行"
         );
+    }
+
+    // —— RS-155/156（审计 2026-09-25）：时钟注入 + expires_at 边界 ——
+
+    /// 注入式边界测试通用会话：默认 make_broker_with_defaults 均可，
+    /// 会话 ttl 取 3600s 保证测试期间不因会话过期干扰归因。
+    fn broker_for_expiry_tests() -> ContextBroker {
+        let mut broker = make_broker_with_defaults();
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        broker
+    }
+
+    #[test]
+    fn action_expires_at_equal_to_now_is_denied() {
+        // RS-156：expires_at == now 即过期——expires_at 是「失效时刻」
+        // 而非「最后有效时刻」，等于当前时刻的授权已到界（`<=` 口径锁定）
+        let broker = broker_for_expiry_tests();
+        let mut action = make_action("s1", 1, "n1");
+        action.expires_at = 1_000_000_000;
+        match broker.validate_action_at(&action, 1_000_000_000) {
+            Decision::Deny(reason) => assert_eq!(reason.code, "action_expired"),
+            other => panic!("expires_at == now 必须拒绝，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn action_expires_at_one_second_after_now_is_allowed() {
+        // RS-156：边界内侧——now+1 仍在窗口内（授权语义：签发即含
+        // ACTION_EXPIRY_SECONDS 窗口，到期前一秒必须可用）
+        let broker = broker_for_expiry_tests();
+        let mut action = make_action("s1", 1, "n1");
+        action.expires_at = 1_000_000_001;
+        assert!(matches!(
+            broker.validate_action_at(&action, 1_000_000_000),
+            Decision::Allow(_)
+        ));
+    }
+
+    #[test]
+    fn action_expires_at_past_is_denied() {
+        let broker = broker_for_expiry_tests();
+        let mut action = make_action("s1", 1, "n1");
+        action.expires_at = 999_999_999;
+        match broker.validate_action_at(&action, 1_000_000_000) {
+            Decision::Deny(reason) => assert_eq!(reason.code, "action_expired"),
+            other => panic!("expires_at < now 必须拒绝，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_action_time_source_is_single_point() {
+        // RS-155：validate_action 生产路径自身取时——此处验证拆分后
+        // 生产入口与注入内核语义一致（同 action 同判定，取 now 自然推进）
+        let broker = broker_for_expiry_tests();
+        let action = make_action("s1", 1, "n1"); // expires_at 9999999999（2286 年）
+        assert!(matches!(
+            broker.validate_action(&action),
+            Decision::Allow(_)
+        ));
+        assert!(now_unix_secs().is_some(), "生产时间源必须可用");
+    }
+
+    #[test]
+    fn session_ttl_query_reports_effective_ttl() {
+        // RS-158 配套：session_ttl 可观测性 API
+        let mut broker = make_broker_with_defaults();
+        broker.create_session("s1".into(), "t".into(), 1, Duration::from_secs(120));
+        broker.create_session("s2".into(), "t".into(), 1, Duration::ZERO);
+        assert_eq!(broker.session_ttl("s1"), Some(Duration::from_secs(120)));
+        assert_eq!(broker.session_ttl("s2"), Some(Duration::ZERO));
+        assert_eq!(broker.session_ttl("missing"), None);
+        broker.destroy_session("s1");
+        assert_eq!(broker.session_ttl("s1"), None, "销毁后查询为 None");
     }
 }

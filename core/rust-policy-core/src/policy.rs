@@ -406,8 +406,112 @@ mod tests {
             other => panic!("Ask 规则必须映射 RequireConfirmation，实际 {other:?}"),
         }
         // 对照：同策略下未匹配动作仍走 None（上层 fail-safe）
-        assert!(policy
-            .evaluate("navigation:read", "https://example.com")
-            .is_none());
+        assert!(
+            policy
+                .evaluate("navigation:read", "https://example.com")
+                .is_none()
+        );
+    }
+
+    // —— RS-154（审计 2026-09-25）：短路顺序计数 mock ——
+
+    use std::sync::{Arc, Mutex};
+
+    /// 计数本地策略：记录 evaluate 调用序，恒返回 None（走降级）。
+    struct CountingLocalPolicy {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl LocalPolicy for CountingLocalPolicy {
+        fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+            self.calls.lock().expect("计数锁").push("local");
+            None
+        }
+    }
+
+    /// 计数远程策略：记录 evaluate 调用序，按注入决策返回。
+    struct CountingRemotePolicy {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        decision: Option<Decision>,
+    }
+
+    impl RemotePolicy for CountingRemotePolicy {
+        fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+            self.calls.lock().expect("计数锁").push("remote");
+            self.decision.clone()
+        }
+    }
+
+    #[test]
+    fn evaluation_order_local_then_remote_then_failsafe() {
+        // RS-154：评估序锁定——本地先于远程被咨询，两者都未命中才落
+        // fail-safe（RS-091 口径）。此前只有来源断言，调用顺序零覆盖：
+        // 若实现交换 local/remote 次序，现有测试不会失败
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let engine = PolicyEngine::new(
+            Box::new(CountingLocalPolicy {
+                calls: Arc::clone(&calls),
+            }),
+            Some(Box::new(CountingRemotePolicy {
+                calls: Arc::clone(&calls),
+                decision: None,
+            })),
+        );
+        let result = engine.evaluate("anything", "ctx");
+        assert_eq!(result.source, PolicySource::FailSafe);
+        assert_eq!(
+            *calls.lock().expect("计数锁"),
+            vec!["local", "remote"],
+            "评估序必须 local → remote（fail-safe 由两者未命中触发）"
+        );
+    }
+
+    #[test]
+    fn local_hit_short_circuits_remote_consultation() {
+        // RS-154：本地显式裁决即短路——远程不得被咨询（少一次降级
+        // 探测 = 少一次网络面暴露）。计数 mock 让「未咨询」可观测
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        struct AllowAllLocal {
+            calls: Arc<Mutex<Vec<&'static str>>>,
+        }
+        impl LocalPolicy for AllowAllLocal {
+            fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+                self.calls.lock().expect("计数锁").push("local");
+                Some(Decision::Allow(AuthorizedAction {
+                    session_id: "test".into(),
+                    tab_id: "test".into(),
+                    document_generation: 0,
+                    origin: "https://test.com".into(),
+                    method: "GET".into(),
+                    canonical_parameters: "/".into(),
+                    scope: "test".into(),
+                    expires_at: 9999999999,
+                    nonce: "test".into(),
+                    policy_version: "1.0".into(),
+                    explanation: "short-circuit mock".into(),
+                }))
+            }
+        }
+        let engine = PolicyEngine::new(
+            Box::new(AllowAllLocal {
+                calls: Arc::clone(&calls),
+            }),
+            Some(Box::new(CountingRemotePolicy {
+                calls: Arc::clone(&calls),
+                decision: Some(Decision::Deny(DenyReason {
+                    code: "remote_denied".into(),
+                    detail: String::new(),
+                    explanation: String::new(),
+                })),
+            })),
+        );
+        let result = engine.evaluate("read", "ctx");
+        assert_eq!(result.source, PolicySource::Local);
+        assert!(matches!(result.decision, Decision::Allow(_)));
+        assert_eq!(
+            *calls.lock().expect("计数锁"),
+            vec!["local"],
+            "本地命中后远程必须零咨询（短路）"
+        );
     }
 }

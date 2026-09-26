@@ -2,7 +2,7 @@
 
 use super::*;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_create_session(
     broker: *mut CAbiBroker,
     session_id: *const c_char,
@@ -27,7 +27,7 @@ pub extern "C" fn aegis_policy_core_broker_create_session(
     .unwrap_or(0)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_destroy_session(
     broker: *mut CAbiBroker,
     session_id: *const c_char,
@@ -44,7 +44,7 @@ pub extern "C" fn aegis_policy_core_broker_destroy_session(
     .unwrap_or(0)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_advance_document_generation(
     broker: *mut CAbiBroker,
     session_id: *const c_char,
@@ -77,7 +77,7 @@ fn unwrap_input_or_deny(
 }
 
 /// 评估导航并返回调用方拥有的 JSON 决策；非法输入、空句柄或 panic 均返回 deny JSON。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_evaluate_navigation_json(
     broker: *mut CAbiBroker,
     session_id: *const c_char,
@@ -125,7 +125,7 @@ pub extern "C" fn aegis_policy_core_broker_evaluate_navigation_json(
 /// RS-142（审计 2026-09-25）：修正文档错位——此前头两行复制自 consume
 /// 入口（"在副作用执行点重新校验 URL/scope，并一次性消费 action nonce"），
 /// 与本入口实际语义（登记待审批、不消费、不签发）不符。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_request_navigation_confirmation_json(
     broker: *mut CAbiBroker,
     session_id: *const c_char,
@@ -168,7 +168,7 @@ pub extern "C" fn aegis_policy_core_broker_request_navigation_confirmation_json(
 }
 
 /// 显式批准待审批导航并返回可消费的 JSON 授权；nonce、URL 或 scope 不匹配一律拒绝。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_approve_navigation_confirmation_json(
     broker: *mut CAbiBroker,
     nonce: *const c_char,
@@ -203,7 +203,7 @@ pub extern "C" fn aegis_policy_core_broker_approve_navigation_confirmation_json(
 }
 
 /// 显式拒绝待审批导航；未知、已兑换或已撤销 nonce 返回 0。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_reject_navigation_confirmation(
     broker: *mut CAbiBroker,
     nonce: *const c_char,
@@ -221,7 +221,7 @@ pub extern "C" fn aegis_policy_core_broker_reject_navigation_confirmation(
 }
 
 /// 在副作用执行点重新校验 URL/scope，并一次性消费 action nonce。
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_consume_navigation_json(
     broker: *mut CAbiBroker,
     action_json: *const c_char,
