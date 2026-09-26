@@ -67,6 +67,23 @@ public sealed class TabSessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void IsPinnedRoundTrips()
+    {
+        // CS-250：固定态跨会话往返
+        var store = new TabSessionStore(_dbPath);
+        store.Save(
+        [
+            new("tab-a", "https://a.example", "A") { IsPinned = true },
+            new("tab-b", "https://b.example", "B"),
+        ], "tab-b");
+
+        var loaded = store.Load(out _);
+
+        Assert.True(loaded[0].IsPinned);
+        Assert.False(loaded[1].IsPinned);
+    }
+
+    [Fact]
     public void SaveEmptyListClearsPreviousSession()
     {
         // CS-187：空列表保存=清空会话（重启后不复活已关闭的旧标签）

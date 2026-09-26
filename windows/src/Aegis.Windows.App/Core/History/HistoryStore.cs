@@ -104,7 +104,10 @@ public sealed class HistoryStore
     }
 
     /// <summary>按文本搜索（url/title 子串），可限定某日（date=yyyy-MM-dd 或 null 不限）。
-    /// 全部参数绑定——LIKE 通配在绑定值中，不参与 SQL 拼接。</summary>
+    /// 全部参数绑定——LIKE 通配在绑定值中，不参与 SQL 拼接。
+    /// 大小写口径（CS-259）：SQLite LIKE 仅对 ASCII 不区分大小写；非 ASCII
+    /// （中文/带变音符拉丁文）为精确匹配——与多数 SQLite 应用一致的既定行为，
+    /// 此处显式文档化（冗余小写列方案收益不抵写入开销）。</summary>
     public IReadOnlyList<HistoryEntry> Search(string query, string? date = null, int limit = 200)
     {
         if (string.IsNullOrWhiteSpace(query))

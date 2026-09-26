@@ -39,6 +39,14 @@ public sealed class UrlNormalizerTests
         Assert.StartsWith(UrlNormalizer.EngineUrls[UrlNormalizer.DefaultEngine], normalized);
     }
 
+    [Fact]
+    public void NullInputReturnsNull()
+    {
+        // CS-254：null 入参拒绝（不抛）
+        Assert.Null(UrlNormalizer.Normalize(null));
+        Assert.Null(UrlNormalizer.Normalize(null, "bing"));
+    }
+
     // ===== CS-141：about:blank 大小写不敏感 =====
 
     [Theory]

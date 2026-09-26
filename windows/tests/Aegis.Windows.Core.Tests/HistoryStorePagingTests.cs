@@ -118,6 +118,25 @@ public sealed class HistoryStorePagingTests
         Assert.Single(store.SearchRangePaged("", "1999-01-01", "2099-01-01").Entries);
     }
 
+    [Fact]
+    public void LastPageHasMoreIsFalse()
+    {
+        // CS-255：恰在末页（剩余数 ≤ pageSize）HasMore=false 且无下一页游标
+        var store = NewStore();
+        for (var i = 0; i < 7; i++)
+            store.Add($"https://e.example/{i}", $"E{i}");
+
+        var page = store.SearchRangePaged("", null, null, 5, null);
+        Assert.Equal(5, page.Entries.Count);
+        Assert.True(page.HasMore);
+        Assert.NotNull(page.NextCursor);
+
+        var lastPage = store.SearchRangePaged("", null, null, 5, page.NextCursor);
+        Assert.Equal(2, lastPage.Entries.Count);
+        Assert.False(lastPage.HasMore);
+        Assert.Null(lastPage.NextCursor);
+    }
+
     private static HistoryStore NewStore() =>
         new(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
 }

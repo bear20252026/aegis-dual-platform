@@ -63,6 +63,17 @@ public sealed class DownloadPolicyTests
     }
 
     [Fact]
+    public void SanitizeTruncationKeepsExtension()
+    {
+        // CS-252：超长截断保留扩展名——危险扩展不因截断而漏判
+        var longName = new string('a', 250) + ".exe";
+        var sanitized = DownloadPolicy.SanitizeFileName(longName);
+        Assert.True(sanitized.Length <= 201, $"截断后长度 {sanitized.Length}");
+        Assert.EndsWith(".exe", sanitized);
+        Assert.True(DownloadPolicy.RequiresExplicitConfirmation("https://x.example/d", sanitized));
+    }
+
+    [Fact]
     public void SanitizeRemovesControlChars()
     {
         Assert.Equal("badname.zip", DownloadPolicy.SanitizeFileName("bad\x01name.zip"));

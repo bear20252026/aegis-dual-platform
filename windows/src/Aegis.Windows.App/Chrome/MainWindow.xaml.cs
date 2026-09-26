@@ -128,7 +128,9 @@ public partial class MainWindow : Window
         StartThreatFeedRefresh();
         InitEngineCombo();
         ZoomStore.Load(_settings.ZoomByHost);
-        _zoomChangedHandler = () => Dispatcher.Invoke(() => _settings.ZoomByHost = ZoomStore.Snapshot());
+        // CS-261：BeginInvoke 非阻塞——ZoomStore.Changed 可能在非 UI 线程
+        // 触发，Invoke 同步等待会造成跨线程阻塞面
+        _zoomChangedHandler = () => Dispatcher.BeginInvoke(() => _settings.ZoomByHost = ZoomStore.Snapshot());
         ZoomStore.Changed += _zoomChangedHandler;
         // 设置单一事实源：统一持久化 + 刷新运行时 PrivacySettings
         _settingsService.Apply(_settings);
@@ -382,7 +384,9 @@ public partial class MainWindow : Window
         };
         runtime.NavigationCompleted += (ok, status) => OnTabNavigationCompleted(tab.TabId, ok, status);
         // M4 下载管理面板：授权通过的 DownloadOperation 注入共享数据源
-        runtime.DownloadOperationStarted += (operation, dangerous) => Dispatcher.Invoke(() =>
+        // CS-260：与初始化/导入路径统一为 BeginInvoke——WebView2 事件线程
+        // 不应被 UI 线程任务同步阻塞
+        runtime.DownloadOperationStarted += (operation, dangerous) => Dispatcher.BeginInvoke(() =>
         {
             _downloads.Insert(0, new Core.Downloads.DownloadItem(
                 operation,
@@ -446,26 +450,37 @@ public partial class MainWindow : Window
 
     private void OnTabSwitched(Tab tab)
     {
+        var previousId = _activeTabId;
         _activeTabId = tab.TabId;
         tab.LastActivated = DateTime.Now;
         if (tab.IsSleeping)
             WakeTab(tab);  // 睡眠标签激活 → 复活（重建 WebView 实例）
-        foreach (var pair in _runtimes)
+        // CS-257：仅翻转旧/新两个 runtime——此前每次切换遍历全部 runtime
+        // 重设四属性（10+ 标签时纯开销）。WebView2 是 HWND 承载控件：仅切
+        // Visibility 在部分 WPF 版本中不足以刷新层级，显式控制 Z 序、命中
+        // 测试和可见性（ApprovalOverlay 的 Z=10 仍保持最顶层）。
+        foreach (var id in new[] { previousId, tab.TabId })
         {
-            var isActive = pair.Key == _activeTabId;
-            // WebView2 是 HWND 承载控件：仅切 Visibility 在部分 WPF 版本中
-            // 不足以刷新层级。显式控制 Z 序、命中测试和可见性，保证激活
-            // 标签永远位于其它标签之上（ApprovalOverlay 的 Z=10 仍保持最顶层）。
-            System.Windows.Controls.Panel.SetZIndex(pair.Value.Control, isActive ? 5 : 0);
-            pair.Value.Control.Visibility = isActive ? Visibility.Visible : Visibility.Collapsed;
-            pair.Value.Control.IsHitTestVisible = isActive;
-            pair.Value.Control.IsEnabled = isActive;
+            if (id is null || !_runtimes.TryGetValue(id, out var runtime))
+                continue;
+            var isActive = id == _activeTabId;
+            System.Windows.Controls.Panel.SetZIndex(runtime.Control, isActive ? 5 : 0);
+            runtime.Control.Visibility = isActive ? Visibility.Visible : Visibility.Collapsed;
+            runtime.Control.IsHitTestVisible = isActive;
+            runtime.Control.IsEnabled = isActive;
         }
         WebViewHost.UpdateLayout();
         SyncAddressBar(tab.Url);
+        // CS-283：SelectionChanged 回调同步抛出时抑制标志必须复位——finally 包裹
         _suppressTabSelection = true;
-        TabStrip.SelectedItem = tab;
-        _suppressTabSelection = false;
+        try
+        {
+            TabStrip.SelectedItem = tab;
+        }
+        finally
+        {
+            _suppressTabSelection = false;
+        }
     }
 
     private void OnTabNavigationCompleted(string tabId, bool isSuccess, CoreWebView2WebErrorStatus status)
@@ -639,7 +654,8 @@ public partial class MainWindow : Window
         TabStrip.ContextMenu ??= new System.Windows.Controls.ContextMenu();
         var menu = TabStrip.ContextMenu;
         menu.Items.Clear();
-        var close = new System.Windows.Controls.MenuItem { Header = "关闭标签" };
+        // CS-258：绑定快捷键的菜单项补 InputGestureText（未绑定项不虚标）
+        var close = new System.Windows.Controls.MenuItem { Header = "关闭标签", InputGestureText = "Ctrl+W" };
         close.Click += (_, _) => _tabs.CloseTab(tab.TabId);
         var closeOthers = new System.Windows.Controls.MenuItem { Header = "关闭其他标签" };
         closeOthers.Click += (_, _) => _tabs.CloseOthers(tab.TabId);
@@ -850,6 +866,8 @@ public partial class MainWindow : Window
         var target = UrlNormalizer.Normalize(AddressBar.Text, _settings.SearchEngine);
         if (target is null)
         {
+            // CS-288：fail-closed 拒绝留审计——非导航协议尝试是安全相关事件
+            Core.Security.SecurityLog.Write("[nav] 地址栏归一拒绝（空输入或非导航协议）");
             ErrorPage.Text = "无法导航：输入为空，或属于非导航协议（file:/javascript:/data: 等已被拒绝）。";
             ErrorPagePanel.Visibility = Visibility.Visible;
             return;

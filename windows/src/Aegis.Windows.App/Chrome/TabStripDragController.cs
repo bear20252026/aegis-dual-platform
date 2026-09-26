@@ -62,11 +62,16 @@ public sealed class TabStripDragController
             || TabItemIndexUnderMouse(e.GetPosition(_tabStrip)) is not int toIndex)
             return;
         var fromIndex = (int)e.Data.GetData(typeof(int));
-        if (toIndex > fromIndex && TabItemCenterIsBefore(e.GetPosition(_tabStrip), toIndex))
-            toIndex--;
+        toIndex = ResolveDropIndex(fromIndex, toIndex,
+            TabItemCenterIsBefore(e.GetPosition(_tabStrip), toIndex));  // CS-272
         _tabs.MoveTab(Math.Min(fromIndex, _tabs.Tabs.Count - 1), Math.Max(0, toIndex));
         e.Handled = true;
     }
+
+    /// <summary>CS-272：Drop 半侧判定提纯——向后拖且落点在目标中心之前时
+    /// 插入位减一（末位拖动体验）。</summary>
+    internal static int ResolveDropIndex(int fromIndex, int toIndex, bool centerIsBefore) =>
+        toIndex > fromIndex && centerIsBefore ? toIndex - 1 : toIndex;
 
     /// <summary>命中点是否落在某标签的关闭（✕）按钮上。</summary>
     private bool IsOverCloseButton(Point position)

@@ -85,6 +85,19 @@ public class SessionSaveSchedulerTests
     }
 
     [Fact]
+    public void FlushWithoutDirtyData_StillSaves()
+    {
+        // CS-251：无标脏数据 Flush 仍执行保存（窗口关闭兜底落盘契约——
+        // 恢复后的干净会话也需在关闭时重写，防外部篡改残留）
+        var saves = 0;
+        var scheduler = new SessionSaveScheduler(
+            new ManualTimer(), () => saves++, TimeSpan.FromSeconds(2));
+
+        scheduler.Flush();
+
+        Assert.Equal(1, saves);
+    }
+
     public void RestoreScope_SuppressesBothMarkDirtyAndFlush()
     {
         var h = new Harness();

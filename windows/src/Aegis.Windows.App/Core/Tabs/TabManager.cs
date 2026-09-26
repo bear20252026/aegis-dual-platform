@@ -15,6 +15,9 @@ public sealed class TabManager
     private int _currentIndex;
     private readonly Stack<Tab> _closed = new();
 
+    /// <summary>CS-263：撤销栈容量（此前内联魔法数 20）。</summary>
+    private const int UndoStackCapacity = 20;
+
     /// <summary>新标签打开（UI 创建 WebView 实例并挂接）。</summary>
     public event Action<Tab>? TabOpened;
 
@@ -53,7 +56,7 @@ public sealed class TabManager
         var tab = new Tab(Guid.NewGuid().ToString("N"), url, title);
         var insertAt = _tabs.Count;  // 新标签追加到末尾（固定区始终在前）
         _tabs.Insert(insertAt, tab);
-        _currentIndex = _tabs.IndexOf(tab);
+        _currentIndex = insertAt;  // CS-262：追加位置即索引（IndexOf O(n) 冗余）
         TabOpened?.Invoke(tab);
         TabSwitched?.Invoke(tab);
         return tab;
@@ -114,7 +117,7 @@ public sealed class TabManager
         // 必须触发：订阅方（主/无痕窗口）在回调中摘树并 dispose 对应 WebView——
         // 此前事件从未 Invoke，每关一标签即泄漏一个 WebView2 实例直到关窗
         _tabClosed?.Invoke(target.TabId);
-        while (_closed.Count > 20)
+        while (_closed.Count > UndoStackCapacity)
             _closed.Pop();
         if (_tabs.Count == 0)
         {
