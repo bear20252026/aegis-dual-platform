@@ -142,4 +142,14 @@ public sealed class ChromeControllersTests
     [InlineData(2, 16, 8, 2)]   // 整圈回原位
     public void WrapIndex_CyclesWithinBounds(int index, int delta, int count, int expected) =>
         Assert.Equal(expected, SuggestionController.WrapIndex(index, delta, count));
+
+    // ===== CS-273（审计 2026-09-26）：TabStripDragController 落点半侧判定直测 =====
+
+    [Theory]
+    [InlineData(0, 3, true, 2)]    // 向后拖 + 落点在目标中心前 → 插入位减一
+    [InlineData(0, 3, false, 3)]   // 落点在中心后 → 目标位不变
+    [InlineData(0, 0, true, 0)]    // 同向同索引——不减
+    [InlineData(0, 2, false, 2)]
+    public void ResolveDropIndex_HalfSideDecision(int from, int to, bool centerIsBefore, int expected) =>
+        Assert.Equal(expected, TabStripDragController.ResolveDropIndex(from, to, centerIsBefore));
 }

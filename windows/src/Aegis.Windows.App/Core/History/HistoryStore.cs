@@ -115,12 +115,13 @@ public sealed class HistoryStore
         using var connection = Open();
         using var select = connection.CreateCommand();
         var filter = HistoryFilter.Build(query, null, null);
-        select.CommandText = string.IsNullOrEmpty(date)
-            ? $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC LIMIT $lim"
-            : $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} AND visited_date = $d ORDER BY visited_at DESC LIMIT $lim";
+        var hasDate = !string.IsNullOrEmpty(date);  // CS-282：判一次复用
+        select.CommandText = hasDate
+            ? $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} AND visited_date = $d ORDER BY visited_at DESC LIMIT $lim"
+            : $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC LIMIT $lim";
         filter.Bind(select, query, null, null);
         select.Parameters.AddWithValue("$lim", ClampLimit(limit));
-        if (!string.IsNullOrEmpty(date))
+        if (hasDate)
             select.Parameters.AddWithValue("$d", date);
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);

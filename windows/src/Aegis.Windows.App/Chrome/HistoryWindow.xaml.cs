@@ -118,6 +118,9 @@ public partial class HistoryWindow : Window
                 _totalCount = total;
                 _totalPages = totalPages;
                 _currentPage = currentPage;
+                // CS-287：批量替换——暂摘 ItemsSource 一次性重建（避免逐条
+                // Add 触发每行 CollectionView 重模板——大页卡顿）
+                HistoryList.ItemsSource = null;
                 _items.Clear();
                 string? lastDay = null;
                 foreach (var e in entries)
@@ -136,6 +139,7 @@ public partial class HistoryWindow : Window
                 SummaryText.Text = $"共 {_totalCount} 条 · 第 {_currentPage} / {_totalPages} 页";
                 EmptyHint.Visibility = _totalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
                 EmptyHint.Text = "没有匹配的历史记录。";
+                HistoryList.ItemsSource = _items;  // 重建完成后恢复绑定
                 RenderPagination();
             });
         });
@@ -173,7 +177,7 @@ public partial class HistoryWindow : Window
         if (!_initialized || PageSizeBox.SelectedItem is not ComboBoxItem item
             || item.Tag is not string value || !int.TryParse(value, out var size))
             return;
-        _pageSize = size;
+        _pageSize = Math.Clamp(size, 1, 2000);  // CS-279：页大小范围钳制
         LoadPage(1);
     }
 

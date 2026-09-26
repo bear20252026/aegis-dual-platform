@@ -132,6 +132,10 @@ public sealed class BrowserPolicyBroker : IBroker
         lock (_sessionLock)
             _sessions.Remove(sessionId);
         lock (_nonceLock)
+            // CS-285：O(全部 nonce) 的 RemoveWhere——清理为低频销毁操作、nonce 集
+            // 有界（MAX_CONSUMED_NONCES=50k），整集扫描比引入 per-session 分桶
+            // 索引的复杂度/内存代价划算（分桶在高速导航热路径上是每 nonce 一次
+            // 额外字典操作的固定开销）；保持整集扫描为既定取舍
             _consumedNonces.RemoveWhere(nonce => nonce.StartsWith($"{sessionId}:", StringComparison.Ordinal));
     }
 

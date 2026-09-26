@@ -85,6 +85,8 @@ public partial class InPrivateWindow : Window
                 var core = runtime.Control.CoreWebView2;
                 Ntp.NtpAssets.BindVirtualHosts(core);
                 runtime.OnCoreReady(core);
+                // CS-281：此订阅为每标签一次性初始化回调，生命周期与 runtime
+                // 对象一致（随 runtime 释放整体回收）——无需显式退订
                 WireNtpBridge(runtime, core);
                 if (Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
                 {
@@ -175,9 +177,16 @@ public partial class InPrivateWindow : Window
         }
         WebViewHost.UpdateLayout();
         SyncAddressBar(tab);
+        // CS-284：SelectionChanged 回调同步抛出时抑制标志必须复位
         _suppressSelection = true;
-        TabStrip.SelectedItem = tab;
-        _suppressSelection = false;
+        try
+        {
+            TabStrip.SelectedItem = tab;
+        }
+        finally
+        {
+            _suppressSelection = false;
+        }
     }
 
     private void SyncAddressBar(Tab tab)

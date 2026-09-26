@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using Aegis.Windows.Core.Bookmarks;
+using Aegis.Windows.Core.Security;
 
 /// <summary>书签管理器窗口：搜索/编辑标题/打开/删除/清空。数据层参数绑定。</summary>
 public partial class BookmarkManagerWindow : Window
@@ -178,6 +179,7 @@ public partial class BookmarkManagerWindow : Window
                     MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
+            Core.Security.SecurityLog.Write($"[bookmark] 已删除书签 id={row.Id}");  // CS-290
             Reload(SearchBox.Text);
             _owner?.RefreshBookmarkBar();
         }
@@ -197,6 +199,7 @@ public partial class BookmarkManagerWindow : Window
                 MessageBoxButton.OK, MessageBoxImage.Error);
             return;
         }
+        Core.Security.SecurityLog.Write("[bookmark] 已清空全部书签");  // CS-290
         Reload(SearchBox.Text);
         _owner?.RefreshBookmarkBar();
     }

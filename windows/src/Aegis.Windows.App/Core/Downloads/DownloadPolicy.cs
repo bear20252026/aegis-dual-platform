@@ -56,7 +56,9 @@ public static class DownloadPolicy
             var value = pair.Contains('=', StringComparison.Ordinal)
                 ? pair[(pair.IndexOf('=', StringComparison.Ordinal) + 1)..]
                 : pair;
-            var segment = Uri.UnescapeDataString(value.Split('/').LastOrDefault() ?? string.Empty);
+            // CS-275：LastIndexOf 取末段——Split('/').Last 每参数一次数组分配
+            var lastSlash = value.LastIndexOf('/');
+            var segment = Uri.UnescapeDataString(lastSlash >= 0 ? value[(lastSlash + 1)..] : value);
             if (DangerousExtensions.Contains(ExtractExtension(segment)))
                 return true;
         }

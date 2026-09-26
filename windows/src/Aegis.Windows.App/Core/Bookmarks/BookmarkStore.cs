@@ -27,6 +27,8 @@ public sealed class BookmarkStore
         insert.CommandText = "INSERT OR IGNORE INTO bookmarks(title, url, created_at) VALUES($t,$u,$c)";
         insert.Parameters.AddWithValue("$t", title);
         insert.Parameters.AddWithValue("$u", url);
+        // CS-286：UTC round-trip 口径——与 HistoryStore.visited_at 一致（C8 已统一）；
+        // 两库时间戳同源，跨库排序/对账不再有本地时偏移错位
         insert.Parameters.AddWithValue("$c", DateTime.UtcNow.ToString("o"));
         return insert.ExecuteNonQuery() > 0;
     }

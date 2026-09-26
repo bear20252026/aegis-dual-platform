@@ -184,6 +184,9 @@ public sealed class SettingsService
             m.ZoomByHost ?? new Dictionary<string, double>(), StringComparer.OrdinalIgnoreCase),
     };
 
+    // CS-280：入参为不可变快照（Normalize 输入/输出同为 BrowserSettingsSnapshot）
+    // ——与 ToSnapshot(model)（AppSettings JSON 模型→快照）是两条不同入参路径；
+    // 此处归一既作用于磁盘读取也作用于 Apply 写入前的持久化值，保持单入口
     private static BrowserSettingsSnapshot Normalize(BrowserSettingsSnapshot s)
     {
         var engine = Chrome.UrlNormalizer.EngineOrder.Contains(s.SearchEngine, StringComparer.OrdinalIgnoreCase)

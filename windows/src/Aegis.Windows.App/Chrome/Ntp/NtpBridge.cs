@@ -36,6 +36,9 @@ public sealed class NtpBridge
 
     public sealed record ImportResult(string Browser, int Imported, int Total);
 
+    /// <summary>CS-276：历史导入默认上限（此前 500 字面量多地重复）。</summary>
+    private const int DefaultImportHistoryLimit = 500;
+
     public NtpBridge(Services services) => _services = services;
 
     /// <summary>来源校验：仅 NTP 虚拟主机（https + 固定 host + 默认端口）。</summary>
@@ -108,7 +111,19 @@ public sealed class NtpBridge
             });
             return;
         }
-        respond(new { __aegisRes = 1, id, result = Dispatch(op, args) });
+        // CS-277：Dispatch 异常面兜底——此前上抛则 respond 永不回调，页面
+        // Promise 永挂（前端导入态卡死）；包 try 固定回错误而非失败不响应
+        object? result;
+        try
+        {
+            result = Dispatch(op, args);
+        }
+        catch (Exception ex)
+        {
+            Core.Security.SecurityLog.Write($"[ntp] 操作分发异常（已回错误）: {op}: {ex.GetType().Name}: {ex.Message}");
+            result = new { error = "dispatch_failed" };
+        }
+        respond(new { __aegisRes = 1, id, result });
     }
 
     /// <summary>操作分发（纯函数——依赖经 Services 注入，全量可单测）。</summary>
@@ -173,7 +188,9 @@ public sealed class NtpBridge
                 return ImportOutcome(_services.ImportBookmarks(ArgString(args, 0)));
             case "importHistory":
                 return ImportOutcome(_services.ImportHistory(
-                    ArgInt(args, 0, 500) is { } limit ? Math.Clamp(limit, 1, 2000) : 500,
+                    ArgInt(args, 0, DefaultImportHistoryLimit) is { } limit
+                        ? Math.Clamp(limit, 1, 2000)
+                        : DefaultImportHistoryLimit,
                     ArgString(args, 1)));
             case "jsError":
                 Core.Security.SecurityLog.Write($"[ntp] 页面异常: {ArgString(args, 0) ?? "unknown"}");

@@ -157,13 +157,20 @@ public partial class MainWindow : Window
     }
 
     /// <summary>刷新书签栏（书签变更时重载）。</summary>
+    // CS-278：书签 chip 样式实例字段缓存——资源键查询只做一次（此前每次
+    // 全量重建书签栏都 FindResource）；主题由 DynamicResource 独立驱动不受影响
+    private Style? _bookmarkChipStyle;
+
     public void RefreshBookmarkBar()
     {
         // 防御：样式资源缺失绝不能中断启动（history 回归 V3 教训——FindResource 抛
         // ResourceReferenceKeyNotFoundException，只要有书签就崩）。查不到时跳过样式。
-        Style? chip = null;
-        try { chip = (Style)FindResource("BookmarkBarButton"); }
-        catch (Exception) { System.Diagnostics.Debug.WriteLine("BookmarkBarButton 资源缺失，使用默认按钮样式"); }
+        if (_bookmarkChipStyle is null)
+        {
+            try { _bookmarkChipStyle = (Style)FindResource("BookmarkBarButton"); }
+            catch (Exception) { System.Diagnostics.Debug.WriteLine("BookmarkBarButton 资源缺失，使用默认按钮样式"); }
+        }
+        var chip = _bookmarkChipStyle;
         BookmarkBarItems.Items.Clear();
         var all = _bookmarks.All();
         // CS-153：直显上限+溢出项——此前全部书签无上限重建（数百书签时
