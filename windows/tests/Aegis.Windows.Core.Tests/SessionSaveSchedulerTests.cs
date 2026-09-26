@@ -98,6 +98,7 @@ public class SessionSaveSchedulerTests
         Assert.Equal(1, saves);
     }
 
+    [Fact]
     public void RestoreScope_SuppressesBothMarkDirtyAndFlush()
     {
         var h = new Harness();
@@ -120,6 +121,38 @@ public class SessionSaveSchedulerTests
         var scope = h.Scheduler.BeginRestore();
         scope.Dispose();
         scope.Dispose();
+        h.Scheduler.Flush();
+        Assert.Equal(1, h.Saves);
+    }
+
+    // ===== C19b 批（审计 2026-09-26）：CS-304 嵌套抑制 =====
+
+    [Fact]
+    public void RestoreScope_Nested_InnerExitKeepsOuterSuppression()
+    {
+        // CS-304：嵌套恢复——内层 Dispose 只剥掉一层，外层仍在恢复期
+        //（此前布尔置位：内层退出直接放行 MarkDirty/Flush，与"可重入安全"
+        // 注释相悖）。关闭旧标签触发标脏会覆盖即将恢复的快照。
+        var h = new Harness();
+        using (h.Scheduler.BeginRestore())
+        {
+            Assert.Equal(1, h.Scheduler.RestoreDepthForTests);
+            using (h.Scheduler.BeginRestore())
+            {
+                Assert.Equal(2, h.Scheduler.RestoreDepthForTests);
+                h.Scheduler.MarkDirty();
+                h.Scheduler.Flush();
+                Assert.Equal(0, h.Saves);
+            }
+            // 内层已退出——外层抑制仍生效
+            Assert.Equal(1, h.Scheduler.RestoreDepthForTests);
+            h.Scheduler.MarkDirty();
+            h.Scheduler.Flush();
+            Assert.Equal(0, h.Saves);
+            Assert.False(h.Timer.IsRunning);
+        }
+        // 全部退出后恢复落盘
+        Assert.Equal(0, h.Scheduler.RestoreDepthForTests);
         h.Scheduler.Flush();
         Assert.Equal(1, h.Saves);
     }

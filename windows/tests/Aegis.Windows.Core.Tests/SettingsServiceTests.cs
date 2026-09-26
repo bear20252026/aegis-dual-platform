@@ -169,8 +169,28 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.True(double.IsNaN(reloaded.Snapshot.WindowTop));
     }
 
+    // ===== C19b 批（审计 2026-09-26）：CS-302 坏档备份双口径收敛 =====
+
+    [Fact]
+    public void CorruptSettingsFile_IsBackedUpBeforeFallingBackToDefaults()
+    {
+        // CS-302：ReadSnapshot 的坏文件分支此前直接回退默认不备份——坏档随即
+        // 被覆盖，用户设置永久丢失；现复用 AppSettings.BackupCorruptFile
+        File.WriteAllText(_path, "{ this is not json ]]");
+        var corrupt = File.ReadAllText(_path);
+
+        var svc = new SettingsService(_path);
+
+        // 回退默认（启动不因坏档失败）
+        Assert.Equal(Chrome.UrlNormalizer.DefaultEngine, svc.Snapshot.SearchEngine);
+        // 原文件已备份 .bak（内容逐字保留）
+        Assert.True(File.Exists(_path + ".bak"), "坏档应先备份为 .bak");
+        Assert.Equal(corrupt, File.ReadAllText(_path + ".bak"));
+    }
+
     public void Dispose()
     {
         try { File.Delete(_path); } catch (IOException) { }
+        try { File.Delete(_path + ".bak"); } catch (IOException) { }
     }
 }

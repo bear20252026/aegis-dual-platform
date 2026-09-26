@@ -46,7 +46,10 @@ public sealed class SessionSaveScheduler
     private readonly IDebounceTimer _timer;
     private readonly Action _save;
     private readonly TimeSpan _debounce;
-    private bool _restoring;
+    // CS-304（2026-09-26 审计）：恢复抑制改 int 计数器（Enter/Leave 配对）——
+    // 此前布尔置位，嵌套恢复时内层 Dispose 直接 _restoring=false，外层仍在
+    // 恢复期却提前放行 MarkDirty/Flush（注释宣称"可重入安全"与实现不符）
+    private int _restoreDepth;
 
     public SessionSaveScheduler(IDebounceTimer timer, Action save, TimeSpan debounce)
     {
@@ -64,7 +67,7 @@ public sealed class SessionSaveScheduler
     /// SQLite 的写放大治理入口）。恢复抑制域内忽略。</summary>
     public void MarkDirty()
     {
-        if (_restoring)
+        if (_restoreDepth > 0)
             return;
         _timer.Restart(_debounce);
     }
@@ -74,17 +77,20 @@ public sealed class SessionSaveScheduler
     public void Flush()
     {
         _timer.Stop();
-        if (!_restoring)
+        if (_restoreDepth == 0)
             _save();
     }
 
     /// <summary>进入恢复抑制域：域内 MarkDirty/Flush 均不落盘；Dispose 恢复。
-    /// 可重入安全（内层先退出不清除外层抑制）。</summary>
+    /// 可重入安全（计数配对——内层先退出不清除外层抑制）。</summary>
     public IDisposable BeginRestore()
     {
-        _restoring = true;
+        _restoreDepth++;
         return new RestoreScope(this);
     }
+
+    /// <summary>CS-304：抑制深度供直测（0=未抑制）。</summary>
+    internal int RestoreDepthForTests => _restoreDepth;
 
     private sealed class RestoreScope(SessionSaveScheduler owner) : IDisposable
     {
@@ -95,7 +101,9 @@ public sealed class SessionSaveScheduler
             if (_disposed)
                 return;
             _disposed = true;
-            owner._restoring = false;
+            // 内层退出只剥掉一层——外层抑制保持
+            if (owner._restoreDepth > 0)
+                owner._restoreDepth--;
         }
     }
 }

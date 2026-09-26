@@ -68,7 +68,11 @@ jobs:
       - name: Prepare offline GeoGebra bundle (云端打包——C# 安装包内置画板)
         uses: ./.github/actions/prepare-geogebra
         with:
-          dest-dir: legacy/windows-pywebview/geogebra
+          # SP-145（2026-09-26 审计）：暂存目录从归档栈 legacy/windows-pywebview/
+          # geogebra 改为 dist/geogebra-cache/——活跃构建不再向"只读归档"写入；
+          # 与 windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj 的
+          # Content Include 路径同步修改
+          dest-dir: dist/geogebra-cache
       - name: Verify native bridge and build current Windows application
         shell: pwsh
         run: |

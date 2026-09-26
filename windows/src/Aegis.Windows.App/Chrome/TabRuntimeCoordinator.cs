@@ -132,10 +132,7 @@ public sealed class TabRuntimeCoordinator : IDisposable
                 return;
             if (remaining <= 0)
             {
-                Core.Security.SecurityLog.Write($"[ntp] 标签 {tabId} 虚拟主机导航失败且重试耗尽: {status}");
-                // 通知 UI：重试已放弃——由主窗口停止加载条并展示错误（否则
-                // 瞬态抑制会让加载条永久旋转、用户无从知晓页面失败）。
-                NtpNavigationFailed?.Invoke(tabId, status);
+                OnVirtualHostRetryExhausted(tabId, status);
                 return;
             }
             // 延迟后重试（映射传播通常在下一次导航前完成）
@@ -156,9 +153,21 @@ public sealed class TabRuntimeCoordinator : IDisposable
             runtime.NavigationCompleted -= handler;
     }
 
+    /// <summary>CS-330（2026-09-26 审计）：重试耗尽分支提纯 internal 直测——
+    /// 留痕并触发 NtpNavigationFailed（主窗口据此停加载条/展示错误；此前
+    /// 该路径零测试覆盖）。</summary>
+    internal void OnVirtualHostRetryExhausted(string tabId, CoreWebView2WebErrorStatus status)
+    {
+        Core.Security.SecurityLog.Write($"[ntp] 标签 {tabId} 虚拟主机导航失败且重试耗尽: {status}");
+        // 通知 UI：重试已放弃——由主窗口停止加载条并展示错误（否则
+        // 瞬态抑制会让加载条永久旋转、用户无从知晓页面失败）。
+        NtpNavigationFailed?.Invoke(tabId, status);
+    }
+
     /// <summary>导航前快照校验：窗口存活（探针即时求值——Dispatcher 回调执行时
-    /// 窗口可能已关闭）、runtime 仍是当前对象、未销毁、控件有效。</summary>
-    private bool ValidateNavigationTarget(
+    /// 窗口可能已关闭）、runtime 仍是当前对象、未销毁、控件有效。
+    /// CS-330：提 internal 供探针分支直测（探针异常→安全拒绝）。</summary>
+    internal bool ValidateNavigationTarget(
         string tabId, TabRuntime runtime, TabRuntimeLifetime lifetime, Func<bool> windowAlive)
     {
         try

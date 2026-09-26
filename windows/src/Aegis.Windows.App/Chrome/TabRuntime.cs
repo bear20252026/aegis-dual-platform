@@ -161,21 +161,10 @@ public sealed class TabRuntime : IDisposable
     }
 
     /// <summary>统一导航入口（地址非法/控件已释放时拒绝而不抛——协调器与各控制器
-    /// 依赖此，不再直接触碰 Control）。</summary>
-    public bool Navigate(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return false;
-        try
-        {
-            Control.Source = uri;
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;  // 控件已释放/竞态——安全丢弃
-        }
-    }
+    /// 依赖此，不再直接触碰 Control）。
+    /// CS-311（2026-09-26 审计）：实例版改调静态单源——同形实现此前存三副本
+    ///（TabRuntime 实例/静态、NtpBridgeFactory.SafeNavigate）。</summary>
+    public bool Navigate(string? url) => Navigate(this, url);
 
     /// <summary>核心已就绪（协调器延迟导航前置校验——封装 Control.CoreWebView2）。</summary>
     public bool IsCoreReady => Control.CoreWebView2 is not null;

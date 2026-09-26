@@ -1,6 +1,7 @@
 namespace Aegis.Windows.WebView;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Chrome.Ntp;
@@ -71,7 +72,22 @@ public sealed class HostWebView : IDisposable
         _wired = webView;
 
         _onNavigationStarting = (sender, e) => OnNavigationStarting(webView, e);
-        _onFrameNavigationStarting = (sender, e) => e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: false);
+        // CS-317（2026-09-26 审计）：HTTPS-only 对 iframe 子文档同判——顶层
+        // http 会升级 https 而 http frame 保持明文是策略缺口。帧无法重定向
+        // 顶层导航，只能取消并留审计（本机/回环例外口径与顶层一致）。
+        _onFrameNavigationStarting = (sender, e) =>
+        {
+            if (_privacy.HttpsOnly
+                && Uri.TryCreate(e.Uri, UriKind.Absolute, out var frameUri)
+                && frameUri.Scheme == Uri.UriSchemeHttp
+                && !Core.UrlSafety.IsLocalHostOrResolvesLocalHost(frameUri.Host))
+            {
+                e.Cancel = true;
+                SecurityLog.Write($"[https] 明文 iframe 导航已取消: {RedactUrl(e.Uri)}");
+                return;
+            }
+            e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: false);
+        };
         _onNewWindowRequested = (sender, e) =>
         {
             e.Handled = true;  // 一律不弹独立窗口
@@ -227,16 +243,59 @@ public sealed class HostWebView : IDisposable
                 || (level >= 2 && blockContext && !isVirtualHostAsset
                     && !Core.Privacy.TrackerList.IsSameSite(uri.Host, pageHost)))
             {
-                Core.Security.SecurityLog.Write(
-                    $"[privacy] 跟踪防护（级别{level}）拦截: {RedactUrl(e.Request.Uri)} ctx={e.ResourceContext}");
+                RecordTrackerBlock(uri, level, e.ResourceContext);
                 e.Response = webView.Environment.CreateWebResourceResponse(
                     null, 403, "Blocked", "Content-Type: text/plain");
             }
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // 单请求处理失败不影响其他请求（保持原始响应路径）
+            // CS-310（2026-09-26 审计）：兜底不再完全静默——策略管线异常留痕
+            //（含 ResourceContext 与脱敏 URL），维持不 rethrow（单请求处理
+            // 失败不影响其他请求，保持原始响应路径）
+            try
+            {
+                SecurityLog.Write(
+                    $"[webresource] 处理异常: {ex.GetType().Name}: {ex.Message} ctx={e.ResourceContext} url={RedactUrl(e.Request.Uri)}");
+            }
+            catch (Exception)
+            {
+                // 异常参数本身不可读——尽力留痕即止
+            }
         }
+    }
+
+    // —— CS-308（2026-09-26 审计）：拦截类事件聚合落盘 ——
+
+    // 跟踪器密集页此前每个被拦截子请求同步 SecurityLog.Write（每条
+    // File.AppendAllText）——IO 放大且 1MB 取证日志被冲掉。按 host 聚合计数，
+    // 周期性（累计 BlockAggregateFlushThreshold 次）落一行；Dispose 兜底清空。
+    // WebResourceRequested 在创建控件的 UI 线程触发——单线程访问，无需加锁。
+    private const int BlockAggregateFlushThreshold = 50;
+    private readonly Dictionary<string, (int Count, string Detail)> _trackerBlockAggregates =
+        new(StringComparer.OrdinalIgnoreCase);
+    private int _trackerBlocksSinceFlush;
+
+    private void RecordTrackerBlock(Uri uri, int level, CoreWebView2WebResourceContext context)
+    {
+        var detail = $"级别{level} ctx={context}";
+        if (_trackerBlockAggregates.TryGetValue(uri.Host, out var existing))
+            _trackerBlockAggregates[uri.Host] = (existing.Count + 1, existing.Detail);
+        else
+            _trackerBlockAggregates[uri.Host] = (1, detail);
+        if (++_trackerBlocksSinceFlush >= BlockAggregateFlushThreshold)
+            FlushTrackerBlocks();
+    }
+
+    private void FlushTrackerBlocks()
+    {
+        foreach (var pair in _trackerBlockAggregates)
+        {
+            SecurityLog.Write(
+                $"[privacy] 跟踪防护拦截聚合: {pair.Key} ×{pair.Value.Count}（{pair.Value.Detail}）");
+        }
+        _trackerBlockAggregates.Clear();
+        _trackerBlocksSinceFlush = 0;
     }
 
     // CS-070（审计 2026-09-25）：脱敏单源——与 Broker 各持一份相同实现已收敛
@@ -250,6 +309,9 @@ public sealed class HostWebView : IDisposable
             return;
         UnwireEvents();
         RejectPendingNavigation();
+        // CS-308：会话结束时落最后一批未满阈值的拦截聚合（取证不留尾巴）
+        if (_trackerBlocksSinceFlush > 0)
+            FlushTrackerBlocks();
         _broker.DestroySession(_sessionId);
         _disposed = true;
     }

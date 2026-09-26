@@ -57,7 +57,10 @@ public static class SecurityLog
                     sanitized = sanitized[..MaxMessageChars] + "…(截断)";
                 File.AppendAllText(
                     path,
-                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss zzz}] {sanitized}{Environment.NewLine}");
+                    // CS-324（2026-09-26 审计）：UTC + InvariantCulture——与历史库
+                    // UTC round-trip 口径一致（此前 DateTime.Now 未指定文化，
+                    // 自定义格式串中 ":" 是文化时间分隔符占位）
+                    $"[{DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss zzz", System.Globalization.CultureInfo.InvariantCulture)}] {sanitized}{Environment.NewLine}");
                 _approxBytes += sanitized.Length + 32;
             }
         }

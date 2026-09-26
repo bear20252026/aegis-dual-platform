@@ -22,6 +22,11 @@ public sealed class HistoryStore
 {
     private const int MaxRows = 50000;
     private const int PruneEveryAdds = 256;
+    // CS-319（2026-09-26 审计）：库层统一长度上限——BookmarkImporter 有
+    // 2048/256 上限而手写路径（Star_Click 直 Add）无上限可写入任意长串；
+    // 与导入口径锁定（代理对安全截断）
+    internal const int MaxUrlChars = 2048;
+    internal const int MaxTitleChars = 256;
 
     private static readonly ConcurrentDictionary<string, byte> InitializedDbs = new(StringComparer.OrdinalIgnoreCase);
     // CS-091：双检锁宿主换成独立锁对象——锁 ConcurrentDictionary 实例与其
@@ -63,8 +68,8 @@ public sealed class HistoryStore
                 INSERT INTO visits(url, title, visited_at, visited_date)
                 VALUES($u,$t,$v,$d)
                 """;
-            insert.Parameters.AddWithValue("$u", url);
-            insert.Parameters.AddWithValue("$t", title ?? string.Empty);
+            insert.Parameters.AddWithValue("$u", ClampText(url, MaxUrlChars));
+            insert.Parameters.AddWithValue("$t", ClampText(title ?? string.Empty, MaxTitleChars));
             insert.Parameters.AddWithValue("$v", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
             // CS-089：InvariantCulture——部分文化默认日历（佛历/回历等）会把
             // "yyyy" 格式化为非公历年，按日分组随之整体漂移
@@ -92,12 +97,26 @@ public sealed class HistoryStore
     /// LIMIT 负值语义为"无上限"，此前 limit<=0 直接进 SQL（无界返回/无界内存）。</summary>
     private static int ClampLimit(int limit) => Math.Max(1, limit);
 
-    /// <summary>最近访问（时间倒序）。</summary>
+    /// <summary>CS-319：代理对安全截断（emoji 等增补平面字符不劈成孤立代理）。
+    /// 提 internal 供直测。</summary>
+    internal static string ClampText(string text, int maxChars)
+    {
+        if (text.Length <= maxChars)
+            return text;
+        var cut = maxChars;
+        if (char.IsHighSurrogate(text[cut - 1]))
+            cut--;
+        return text[..cut];
+    }
+
+    /// <summary>最近访问（时间倒序）。
+    /// CS-301（2026-09-26 审计）：补 id 决胜列——分页查询均有 ", id DESC" 而
+    /// 此处没有：同一秒多条记录时列表与分页顺序不一致（可能重复跳行）。</summary>
     public IReadOnlyList<HistoryEntry> Recent(int limit = 200)
     {
         using var connection = Open();
         using var select = connection.CreateCommand();
-        select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC LIMIT $lim";
+        select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC, id DESC LIMIT $lim";
         select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
@@ -116,9 +135,10 @@ public sealed class HistoryStore
         using var select = connection.CreateCommand();
         var filter = HistoryFilter.Build(query, null, null);
         var hasDate = !string.IsNullOrEmpty(date);  // CS-282：判一次复用
+        // CS-301：id 决胜列（与分页口径一致——同秒多条顺序锁定）
         select.CommandText = hasDate
-            ? $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} AND visited_date = $d ORDER BY visited_at DESC LIMIT $lim"
-            : $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC LIMIT $lim";
+            ? $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} AND visited_date = $d ORDER BY visited_at DESC, id DESC LIMIT $lim"
+            : $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC, id DESC LIMIT $lim";
         filter.Bind(select, query, null, null);
         select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         if (hasDate)
@@ -134,7 +154,7 @@ public sealed class HistoryStore
         using var select = connection.CreateCommand();
         select.CommandText = """
             SELECT id, url, title, visited_at, visited_date
-            FROM visits WHERE visited_date = $d ORDER BY visited_at DESC LIMIT $lim
+            FROM visits WHERE visited_date = $d ORDER BY visited_at DESC, id DESC LIMIT $lim
             """;
         select.Parameters.AddWithValue("$d", date);
         select.Parameters.AddWithValue("$lim", ClampLimit(limit));
@@ -168,7 +188,9 @@ public sealed class HistoryStore
             return Recent(limit);
         using var connection = Open();
         using var select = connection.CreateCommand();
-        select.CommandText = $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC LIMIT $lim";
+        // CS-301（2026-09-26 审计）：补 id 决胜列——同一秒多条记录时与分页
+        // 查询（均有 , id DESC）顺序一致，防列表/翻页重复或跳行。
+        select.CommandText = $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC, id DESC LIMIT $lim";
         filter.Bind(select, query, from, to);
         select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();

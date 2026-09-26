@@ -3,6 +3,7 @@ namespace Aegis.Windows.Chrome;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -54,6 +55,8 @@ public partial class MainWindow : Window
     private SuggestionController _suggest = null!;
     private Ntp.NtpBridgeFactory _ntpBridgeFactory = null!;
     private Action? _zoomChangedHandler;
+    // CS-299：后台历史写入链尾——串行化保证先后序（详见 OnTabNavigationCompleted）
+    private Task _historyWriteTail = Task.CompletedTask;
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
@@ -83,6 +86,9 @@ public partial class MainWindow : Window
     // CS-150：窗口状态恢复阈值（此前 400/300/1200/800 四个魔法数内联）
     private const double MinRestoredWidth = 400;
     private const double MinRestoredHeight = 300;
+    // CS-333（2026-09-26 审计）：下载面板驻留上限——每个 DownloadItem 持有
+    // 原生操作对象，集合只增不减时长会话无上限常驻；超限移除最早非进行中条目
+    private const int MaxDownloadItems = 100;
 
     /// <summary>组合根注入构造：存储/策略/broker 由 App 装配传入（MainWindow 不再
     /// 自建依赖——可注入内存存储、可构造测）。参数校验防误用。</summary>
@@ -249,6 +255,13 @@ public partial class MainWindow : Window
         // 补齐子窗口依赖的画刷（默认深色值——各独立窗口资源键与主窗口统一）
         SetBrush("TextMutedBrush", light ? "#FF8A8A8E" : "#6CFFFFFF");
         SetBrush("SegmentedBrush", light ? "#14000000" : "#1FFFFFFF");
+        // CS-318（2026-09-26 审计）：错误页/反馈条浅色值——此前硬编码深色，
+        // 浅色主题下割裂（DynamicResource 运行时刷）
+        SetBrush("ErrorPanelBackgroundBrush", light ? "#FFFDECEC" : "#FF2A1215");
+        SetBrush("ErrorPanelTextBrush", light ? "#FFB3261E" : "#FFFCA5A5");
+        SetBrush("FeedbackInfoBackgroundBrush", light ? "#FFE7F6EC" : "#FF0F2A1B");
+        SetBrush("FeedbackWarningBackgroundBrush", light ? "#FFFDECEC" : "#FF2A1215");
+        SetBrush("FeedbackTextBrush", light ? "#FF1B7F3B" : "#FF86EFAC");
         Background = Resources["ChromeBackgroundBrush"] as System.Windows.Media.Brush
                     ?? Core.ThemeColor.ParseBrush(light ? "#FFF5F5F7" : "#FF101827");
         // 传播到已打开的独立窗口
@@ -293,9 +306,11 @@ public partial class MainWindow : Window
 
     private void CreateRuntime(Tab tab, string initialUrl)
     {
-        // 日志脱敏：不落 query（token/搜索词）
+        // 日志脱敏：不落 query（token/搜索词）。
+        // CS-325（2026-09-26 审计）：改调 UrlRedactor.Redact 单源——此前内联
+        // 手写同形逻辑且回退分支缺 256 截断（双源漂移面）
         Core.Security.SecurityLog.Write(
-            $"[tab] 创建标签 {tab.TabId} url={(Uri.TryCreate(initialUrl, UriKind.Absolute, out var u) ? u.GetLeftPart(UriPartial.Authority) + u.AbsolutePath : initialUrl)}");
+            $"[tab] 创建标签 {tab.TabId} url={Core.Security.UrlRedactor.Redact(initialUrl)}");
         var runtime = _runtimeCoordinator.Create(_broker, tab).Runtime;
         runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
         {
@@ -308,28 +323,6 @@ public partial class MainWindow : Window
             var core = runtime.Control.CoreWebView2;
             Ntp.NtpAssets.BindVirtualHosts(core);
             runtime.OnCoreReady(core);
-            // 下载完成 → 持久化记录（大小取自操作对象声明的总字节数——下载
-            // 刚启动时目标文件常未创建，此前 FileInfo.Length 直接抛异常被吞，
-            // 记录丢失）
-            runtime.DownloadOperationStarted += (op, dangerous) =>
-            {
-                Dispatcher.BeginInvoke(() =>
-                {
-                    try
-                    {
-                        var filePath = op?.ResultFilePath ?? "";
-                        var size = (long)(op?.TotalBytesToReceive ?? 0);
-                        _downloadRecords.Add(
-                            System.IO.Path.GetFileName(filePath), filePath,
-                            op?.Uri ?? "", size, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                    }
-                    catch (Exception ex)
-                    {
-                        Core.Security.SecurityLog.Write(
-                            $"[download] 记录持久化失败: {ex.GetType().Name}: {ex.Message}");
-                    }
-                });
-            };
             // 虚拟主机地址（NTP/画板）：映射就绪后才导航，且**推迟到下一
             // Dispatcher 周期**——同一调用栈里 SetVirtualHostNameToFolderMapping
             // 后立即导航会因映射尚未传播到渲染进程而 ConnectionAborted
@@ -395,11 +388,32 @@ public partial class MainWindow : Window
         // 不应被 UI 线程任务同步阻塞
         runtime.DownloadOperationStarted += (operation, dangerous) => Dispatcher.BeginInvoke(() =>
         {
-            _downloads.Insert(0, new Core.Downloads.DownloadItem(
+            var item = new Core.Downloads.DownloadItem(
                 operation,
                 System.IO.Path.GetFileName(operation.ResultFilePath ?? string.Empty),
                 operation.Uri ?? string.Empty,
-                dangerous));
+                dangerous);
+            _downloads.Insert(0, item);
+            TrimDownloadItems();
+            // CS-320（2026-09-26 审计）：记录持久化移到**完成态**——此前启动即
+            // 写档（completed_at 实为开始时刻，取消/进行中也留痕，与
+            // DownloadRecordStore "保存已完成/失败下载" 注释相悖）。终态经
+            // StateChanged 回投 UI 线程落库；对象已销毁（浏览器会话结束）无
+            // 终态可记则跳过。
+            try
+            {
+                var persisted = false;
+                operation.StateChanged += (_, _) => Dispatcher.BeginInvoke(() =>
+                {
+                    if (!persisted)
+                        persisted = PersistCompletedDownload(item, operation);
+                });
+            }
+            catch (Exception ex)
+            {
+                Core.Security.SecurityLog.Write(
+                    $"[download] 终态订阅失败（记录将缺失）: {ex.GetType().Name}: {ex.Message}");
+            }
         });
         // M1 加载指示接线：导航开始显示不定态条，完成/失败隐藏
         runtime.NavigationStarted += () =>
@@ -448,6 +462,64 @@ public partial class MainWindow : Window
     /// 拆分第二批；保留薄转发以维持 CreateRuntime 内单一装配点）。</summary>
     private Chrome.Ntp.NtpBridge CreateNtpBridge(TabRuntime runtime) =>
         _ntpBridgeFactory.Create(runtime);
+
+    /// <summary>CS-320：下载到达终态时的持久化（Completed/Interrupted 落库、
+    /// UserCanceled 不留档）——completed_at 为真实完成时刻。返回 true=终态
+    /// 已处理（含"取消不留档"/对象销毁），监听方停止再投。</summary>
+    private bool PersistCompletedDownload(
+        Core.Downloads.DownloadItem item,
+        CoreWebView2DownloadOperation operation)
+    {
+        try
+        {
+            if (operation.State is not (CoreWebView2DownloadState.Completed
+                or CoreWebView2DownloadState.Interrupted))
+                return false;  // 非终态——继续等下一次状态变化
+        }
+        catch (Exception)
+        {
+            return true;  // 原生对象已销毁（会话结束）——无终态可记
+        }
+        try
+        {
+            item.Refresh();  // 同步条目状态（面板未打开时无人轮询）
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+        if (item.StateKind != Core.Downloads.DownloadItemState.Interrupted
+            && item.StateKind != Core.Downloads.DownloadItemState.Completed)
+            return true;  // UserCanceled 已取消——不留档（对齐"保存已完成/失败下载"）
+        try
+        {
+            var filePath = operation.ResultFilePath ?? "";
+            var size = (long)(operation.TotalBytesToReceive ?? 0UL);
+            // CS-297（2026-09-26 审计）：InvariantCulture——自定义格式串中 ":"
+            // 是文化时间分隔符占位（CS-034/149/175 同类已修，此处随补）
+            _downloadRecords.Add(
+                System.IO.Path.GetFileName(filePath), filePath,
+                operation.Uri ?? "", size,
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+        }
+        catch (Exception ex)
+        {
+            Core.Security.SecurityLog.Write(
+                $"[download] 记录持久化失败: {ex.GetType().Name}: {ex.Message}");
+        }
+        return true;
+    }
+
+    /// <summary>CS-333：下载集合有界——超阈值自尾部移除最早的非进行中条目
+    ///（进行中保留；条目持有的原生操作对象随之释放）。</summary>
+    private void TrimDownloadItems()
+    {
+        for (var i = _downloads.Count - 1; i >= 0 && _downloads.Count > MaxDownloadItems; i--)
+        {
+            if (_downloads[i].StateKind != Core.Downloads.DownloadItemState.InProgress)
+                _downloads.RemoveAt(i);
+        }
+    }
 
     private void OnTabClosed(string tabId)
     {
@@ -527,7 +599,15 @@ public partial class MainWindow : Window
         if (isSuccess && _settings.HistoryEnabled
             && Core.History.HistoryRecorder.IsRecordableUrl(tab.Url))
         {
-            _history.Add(tab.Url, tab.Title);
+            // CS-299（2026-09-26 审计）：历史写入移出 UI 线程——_history.Add
+            // 每次新建 SQLite 连接+INSERT+周期修剪，此前在导航完成的 UI 线程
+            // 同步执行（与 CS-031/159 "IO 移出 UI 线程" 口径相悖）。链式追加
+            // 保证写入顺序（同标签快速连续导航时 visited_at 不逆序）；异常在
+            // HistoryStore.Add 内部已吞（不向 ContinueWith 链传播）
+            var url = tab.Url;
+            var title = tab.Title;
+            _historyWriteTail = _historyWriteTail.ContinueWith(
+                _ => _history.Add(url, title));
         }
         // 每次导航完成即落盘（对齐 Python 栈崩溃恢复能力——强杀/崩溃后
         // 重启仍可恢复到最后的页面集合，而非仅正常关闭时的快照）
@@ -767,6 +847,8 @@ public partial class MainWindow : Window
     {
         var sw = SystemParameters.VirtualScreenWidth;
         var sh = SystemParameters.VirtualScreenHeight;
+        var vsl = SystemParameters.VirtualScreenLeft;
+        var vst = SystemParameters.VirtualScreenTop;
         // CS-067：下界防残窗，上界钳到虚拟屏幕——持久化值被外部
         // 篡改成超大数（如 int.MaxValue）时不再撑出不可操作的巨型窗口
         // CS-150：回退宽高引用快照级单源常量（CS-123），下界为窗口级命名常量
@@ -776,11 +858,24 @@ public partial class MainWindow : Window
         Height = _settings.WindowHeight > MinRestoredHeight
             ? Math.Min(_settings.WindowHeight, sh)
             : Core.Settings.BrowserSettingsSnapshot.DefaultWindowHeight;
+        // CS-298（2026-09-26 审计）：Left/Top 此前只校验上界（<sw/<sh，且比
+        // 的是尺寸而非坐标原点）——负值（NormalizeWindow 允许持久化到
+        // -100000）可把窗口恢复到虚拟屏幕外不可见。改为完整区间校验
+        // [VirtualScreenLeft, VirtualScreenLeft+ScreenWidth-Width]（Top 同理），
+        // 越界回退虚拟屏幕居中
+        var maxLeft = vsl + sw - Width;
+        var maxTop = vst + sh - Height;
         if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop)
-            && _settings.WindowLeft < sw && _settings.WindowTop < sh)
+            && _settings.WindowLeft >= vsl && _settings.WindowLeft <= maxLeft
+            && _settings.WindowTop >= vst && _settings.WindowTop <= maxTop)
         {
             Left = _settings.WindowLeft;
             Top = _settings.WindowTop;
+        }
+        else
+        {
+            Left = vsl + (sw - Width) / 2;
+            Top = vst + (sh - Height) / 2;
         }
         if (_settings.WindowMaximized)
             WindowState = WindowState.Maximized;
@@ -1004,24 +1099,15 @@ public partial class MainWindow : Window
         _downloadsWindow.Activate();
     }
 
-    // CS-152：反馈条背景刷预建冻结——此前每次显示 new 两把刷子（频繁提示时
-    // 重复分配，冻结刷可跨调用安全共享）
-    private static readonly System.Windows.Media.Brush FeedbackInfoBackground = FrozenBrush(0x0F, 0x2A, 0x1B);
-    private static readonly System.Windows.Media.Brush FeedbackWarningBackground = FrozenBrush(0x2A, 0x12, 0x15);
-
-    private static System.Windows.Media.SolidColorBrush FrozenBrush(byte r, byte g, byte b)
-    {
-        var brush = new System.Windows.Media.SolidColorBrush(
-            System.Windows.Media.Color.FromArgb(0xFF, r, g, b));
-        brush.Freeze();
-        return brush;
-    }
-
+    // CS-152：反馈条背景经主题资源键取用——ApplyTheme 已按主题写入
+    // FeedbackInfo/WarningBackgroundBrush（CS-318 前为代码侧冻结刷，浅色主题
+    // 下不随主题切换）；字典命中返回同一冻结实例，无每次调用分配
     /// <summary>反馈条显示（2.5s 自动隐藏——不静默原则的轻量实现）。</summary>
     private void ShowFeedback(string message, bool isWarning = false)
     {
         FeedbackText.Text = message;
-        FeedbackBar.Background = isWarning ? FeedbackWarningBackground : FeedbackInfoBackground;
+        FeedbackBar.Background = (System.Windows.Media.Brush)Resources[
+            isWarning ? "FeedbackWarningBackgroundBrush" : "FeedbackInfoBackgroundBrush"];
         FeedbackBar.Visibility = Visibility.Visible;
         // Tick 处理器只在首次创建时订阅一次（审计 M4：#Bug5 此前每次调用都
         // 追加一个新闭包且不摘除——长会话内事件累积成为驻留对象泄漏）

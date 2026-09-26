@@ -109,9 +109,41 @@ public sealed class FingerprintShieldTests
     public void TrackingParamStripIsCaseInsensitive()
     {
         // RS-010 孪生回归：注入 JS 的参数剥离大小写不敏感（Gclid 变体绕过）
+        // CS-331：lowerSet 提升为 IIFE 顶层 TRACKING_LOWER 冻结集（每次
+        // fetch/XHR 不再重建 ~40 键对象——请求热路径重复分配）
         var script = FingerprintShield.BuildScript(SeedA);
-        Assert.Contains("lowerSet[k.toLowerCase()]", script);
+        Assert.Contains("TRACKING_LOWER[k.toLowerCase()]", script);
         Assert.DoesNotContain("searchParams.has(p)", script);
+        // 冻结集只构建一次（顶层），函数体内不再逐次 forEach 构建
+        var buildOnce = "TRACKING_PARAMS.forEach(function(p) { TRACKING_LOWER[p.toLowerCase()] = true; });";
+        Assert.Contains(buildOnce, script);
+    }
+
+    // ===== C19b 批（审计 2026-09-26）：CS-300 时间戳自曝面 =====
+
+    [Fact]
+    public void DateNowOverride_StaysIntegerMilliseconds()
+    {
+        // CS-300：Date.now 分支不得套随机抖动——非整数（Number.isInteger
+        // (Date.now())===false）一行即识破防护存在
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("function reducePrecisionInteger(v) { return Math.round(reducePrecision(v)); }", script);
+        var dateBranch = script[script.IndexOf("var origDateNow = Date.now", StringComparison.Ordinal)..];
+        dateBranch = dateBranch[..dateBranch.IndexOf("} catch(e) {}", StringComparison.Ordinal)];
+        Assert.Contains("return reducePrecisionInteger(origDateNow())", dateBranch);
+        Assert.DoesNotContain("return reducePrecision(origDateNow())", script);
+    }
+
+    [Fact]
+    public void PerformanceNowOverride_IsMonotonicNonDecreasing()
+    {
+        // CS-300：performance.now 钳单调非递减——随机抖动产生时间回退
+        //（t2 < t1）本身就是检测信号
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("if (v < lastPerf) v = lastPerf;", script);
+        Assert.Contains("var lastPerf = -Infinity;", script);
+        // 旧实现（无钳制）不得残留
+        Assert.DoesNotContain("return reducePrecision(origPerfNow());", script);
     }
 }
 

@@ -57,23 +57,26 @@ public static class FaviconService
         var memory = persistToDisk ? Mem : PrivateMem;
         if (memory.TryGetValue(host, out var cached))
             return cached;
-        if (Miss.ContainsKey(host))
+        // 同 host 并发导航只发起一次抓取（in-flight 去重）。键含持久化语义——
+        // 此前仅按 host 去重：无痕与普通标签并发首取同 host 时先发起方的
+        // persistToDisk 生效，无痕站点的图标可被写盘（无痕不落盘承诺失效）。
+        var flightKey = persistToDisk ? host : "\0private:" + host;
+        // CS-309（2026-09-26 审计）：负缓存 Miss 同样按持久化语义分面——
+        // 此前无痕标签抓取失败把 host 写入进程级共享 Miss，普通窗口随后
+        // 首访直接命中负缓存不抓取（隐私语境泄漏到持久化语境）
+        if (Miss.ContainsKey(flightKey))
         {
             // 负缓存：此前已确认该 host 无可用图标——不再重复抓取
             onLoaded?.Invoke(null);
             return null;
         }
-        // 同 host 并发导航只发起一次抓取（in-flight 去重）。键含持久化语义——
-        // 此前仅按 host 去重：无痕与普通标签并发首取同 host 时先发起方的
-        // persistToDisk 生效，无痕站点的图标可被写盘（无痕不落盘承诺失效）。
-        var flightKey = persistToDisk ? host : "\0private:" + host;
         var task = InFlight.GetOrAdd(flightKey, _ => Task.Run(async () =>
         {
             var icon = persistToDisk ? await LoadFromDiskAsync(host).ConfigureAwait(false) : null;
-            icon ??= await FetchAsync(host).ConfigureAwait(false);
+            icon ??= await (FetchHookForTests is { } hook ? hook(host) : FetchAsync(host)).ConfigureAwait(false);
             if (icon is null)
             {
-                Miss[host] = 1;
+                Miss[flightKey] = 1;
                 TrimCaches();
             }
             else
@@ -210,5 +213,38 @@ public static class FaviconService
     {
         var hash = Convert.ToHexString(SHA1.HashData(Encoding.UTF8.GetBytes(host.ToLowerInvariant())));
         return Path.Combine(CacheDir, hash + ".png");
+    }
+
+    // ═══ CS-328（2026-09-26 审计）：可测缝——进程级静态缓存面（负缓存命中
+    // 短路/InFlight 去重/TrimCaches 上限）此前零覆盖，注入抓取桩与状态访问器
+    // 供单测（生产 FetchHookForTests 恒 null 走真实 FetchAsync） ═══
+
+    /// <summary>测试注入的抓取桩（TaskCompletionSource 可控完成——确定性
+    /// 驱动 in-flight/负缓存路径；生产恒 null）。</summary>
+    internal static Func<string, Task<ImageSource?>>? FetchHookForTests;
+
+    /// <summary>host 是否已在该持久化语境的负缓存中。</summary>
+    internal static bool IsMissCached(string host, bool persistToDisk) =>
+        Miss.ContainsKey(persistToDisk ? host : "\0private:" + host);
+
+    /// <summary>该 host 在该持久化语境是否有进行中的抓取。</summary>
+    internal static bool IsInFlight(string host, bool persistToDisk) =>
+        InFlight.ContainsKey(persistToDisk ? host : "\0private:" + host);
+
+    /// <summary>负缓存条目数（TrimCaches 上限断言用）。</summary>
+    internal static int MissCount => Miss.Count;
+
+    /// <summary>测试预置负缓存条目（等价"该语境已确认无图标"状态——
+    /// TrimCaches 上限用例需要大批量预置，经真实抓取路径成本不可行）。</summary>
+    internal static void SeedMissForTests(string host, bool persistToDisk) =>
+        Miss[persistToDisk ? host : "\0private:" + host] = 1;
+
+    /// <summary>清空进程级缓存（测试隔离）。</summary>
+    internal static void ClearCachesForTests()
+    {
+        Miss.Clear();
+        InFlight.Clear();
+        Mem.Clear();
+        PrivateMem.Clear();
     }
 }

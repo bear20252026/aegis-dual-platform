@@ -21,6 +21,13 @@
          DynamicResource 静默失败——补默认值（ApplyTheme 未覆盖时兜底） -->
     <SolidColorBrush x:Key="TextMutedBrush" Color="#6CFFFFFF"/>
     <SolidColorBrush x:Key="SegmentedBrush" Color="#1FFFFFFF"/>
+    <!-- CS-318（2026-09-26 审计）：错误页/反馈条提为资源键——此前硬编码深色，
+         浅色主题下割裂；ApplyTheme 一并写入浅色值（DynamicResource 运行时刷） -->
+    <SolidColorBrush x:Key="ErrorPanelBackgroundBrush" Color="#FF2A1215"/>
+    <SolidColorBrush x:Key="ErrorPanelTextBrush" Color="#FFFCA5A5"/>
+    <SolidColorBrush x:Key="FeedbackInfoBackgroundBrush" Color="#FF0F2A1B"/>
+    <SolidColorBrush x:Key="FeedbackWarningBackgroundBrush" Color="#FF2A1215"/>
+    <SolidColorBrush x:Key="FeedbackTextBrush" Color="#FF86EFAC"/>
 
     <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton）。
          CS-218：Focusable=False 为既定视觉取舍（键盘聚焦虚线框在圆形玻璃钮上
@@ -183,8 +190,21 @@
                               </Style>
                             </Button.Style>
                           </Button>
+                          <!-- CS-321（2026-09-26 审计）：占位蓝点只在无 favicon 时
+                               显示——此前常显，PNG 透明区透出底色蓝点 -->
                           <Grid DockPanel.Dock="Left" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center">
-                            <Ellipse Fill="#FF3B82F6"/>
+                            <Ellipse Fill="#FF3B82F6">
+                              <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                  <Setter Property="Visibility" Value="Collapsed"/>
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Icon}" Value="{x:Null}">
+                                      <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </Ellipse.Style>
+                            </Ellipse>
                             <Image Source="{Binding Icon}" Width="16" Height="16"
                                    RenderOptions.BitmapScalingMode="HighQuality">
                               <Image.Style>
@@ -334,9 +354,9 @@
       </DockPanel>
     </Border>
     <!-- 阶段 C 错误页（导航失败——NavigationCompleted WebErrorStatus——安全错误可见） -->
-    <Border x:Name="ErrorPagePanel" DockPanel.Dock="Top" Background="#FF2A1215" Padding="12,8"
+    <Border x:Name="ErrorPagePanel" DockPanel.Dock="Top" Background="{DynamicResource ErrorPanelBackgroundBrush}" Padding="12,8"
             Visibility="Collapsed">
-      <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
+      <TextBlock x:Name="ErrorPage" Foreground="{DynamicResource ErrorPanelTextBrush}" TextWrapping="Wrap"/>
     </Border>
     <!-- M1-T2 加载指示（WebView2 不暴露页面加载进度——不定态细条，修复
          Python/Android「无加载反馈」审计缺陷的可观测部分） -->
@@ -344,9 +364,9 @@
                  Background="Transparent" Foreground="#FF3B82F6" BorderThickness="0"
                  Visibility="Collapsed"/>
     <!-- M2 操作反馈条（收藏等——用户可见，2.5s 自动隐藏，不静默） -->
-    <Border x:Name="FeedbackBar" DockPanel.Dock="Top" Background="#FF0F2A1B" Padding="12,8"
+    <Border x:Name="FeedbackBar" DockPanel.Dock="Top" Background="{DynamicResource FeedbackInfoBackgroundBrush}" Padding="12,8"
             Visibility="Collapsed">
-      <TextBlock x:Name="FeedbackText" Foreground="#FF86EFAC" TextWrapping="Wrap"
+      <TextBlock x:Name="FeedbackText" Foreground="{DynamicResource FeedbackTextBrush}" TextWrapping="Wrap"
                  AutomationProperties.LiveSetting="Polite"/>
     </Border>
     <Grid>

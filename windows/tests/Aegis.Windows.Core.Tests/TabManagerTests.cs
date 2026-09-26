@@ -351,23 +351,28 @@ public sealed class TabManagerTests
     [Fact]
     public void UndoStack_EvictsOldestBeyondCapacity()
     {
-        // CS-266：21 次关闭后栈保持 20——最早关闭的标签被淘汰
+        // CS-293（2026-09-26 审计）：容量淘汰方向——**最旧**关闭项被淘汰、
+        // **最新**关闭项必须立即可恢复（撤销语义）。此前 Stack 从栈顶弹出
+        // 刚压入的第 21 项——关掉即不可恢复，本测试的旧断言恰锁定该错误行为。
         var manager = new TabManager();
-        var first = manager.NewTab("https://first.example");
-        for (var i = 0; i < 20; i++)
+        var closedInOrder = new List<Tab>();
+        for (var i = 0; i < 21; i++)
         {
             var t = manager.NewTab($"https://x{i}.example");
             manager.CloseTab(t.TabId);
+            closedInOrder.Add(t);
         }
-        Assert.Equal(20, manager.ClosedCount);
-
-        manager.CloseTab(first.TabId);
         Assert.Equal(20, manager.ClosedCount);  // 容量恒定
+
+        // 最新关闭（第 21 个）必须第一个可恢复
+        Assert.Equal(closedInOrder[20].TabId, manager.PopClosed()!.TabId);
+        // 最旧关闭（第 1 个）已被淘汰；其余 19 个（x1..x19）仍可恢复
         var seen = new List<string>();
         while (manager.PopClosed() is { } tab)
             seen.Add(tab.TabId);
-        Assert.DoesNotContain(first.TabId, seen);
-        Assert.Equal(20, seen.Count);
+        Assert.DoesNotContain(closedInOrder[0].TabId, seen);
+        Assert.Contains(closedInOrder[19].TabId, seen);
+        Assert.Equal(19, seen.Count);
     }
 
     [Fact]

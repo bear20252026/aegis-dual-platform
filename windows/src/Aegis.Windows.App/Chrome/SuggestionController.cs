@@ -73,7 +73,20 @@ public sealed class SuggestionController
         var captured = query;
         _ = Task.Run(() =>
         {
-            var rows = BuildSuggestions(captured);
+            List<SuggestionRow> rows;
+            try
+            {
+                rows = BuildSuggestions(captured);
+            }
+            catch (Exception ex)
+            {
+                // CS-322（2026-09-26 审计）：坏库/锁时不再产生未观察任务异常
+                //（弹层无声不出现）——留痕并关闭弹层，用户可感知查询失败
+                Core.Security.SecurityLog.Write(
+                    $"[suggest] 建议查询失败（弹层已关闭）: {ex.GetType().Name}: {ex.Message}");
+                _addressBar.Dispatcher.BeginInvoke(() => _popup.IsOpen = false);
+                return;
+            }
             _addressBar.Dispatcher.BeginInvoke(() =>
             {
                 if (!string.Equals(_addressBar.Text.Trim(), captured, StringComparison.Ordinal))

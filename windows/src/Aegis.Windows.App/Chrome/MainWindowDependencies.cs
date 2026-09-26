@@ -29,7 +29,9 @@ public sealed record MainWindowDependencies(
         var settings = AppSettings.Load(AppSettings.DefaultPath);
         return new MainWindowDependencies(
             Tabs: new TabManager(),
-            Broker: new BrowserPolicyBroker(),
+            // CS-291（2026-09-26 审计）：主窗 broker 注入进程级共享 KillSwitch——
+            // 无痕窗口 broker 复用同一实例，设置窗触发的紧急终止冻结全进程
+            Broker: new BrowserPolicyBroker(killSwitch: KillSwitch.Shared),
             Settings: settings,
             SettingsService: SettingsService.FromPreloaded(settings),
             Bookmarks: new BookmarkStore(AppPaths.BookmarksDbPath),

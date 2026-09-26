@@ -445,4 +445,74 @@ public sealed class BrowserPolicyBrokerTests
         Assert.Equal("native_policy_core_decision_invalid", deny.Reason.Code);
     }
 
+    // ===== C19b 批（审计 2026-09-26）：CS-291/332/307 =====
+
+    [Fact]
+    public void KillSwitch_SharedInstance_FreezesAllBrokersInjectedWithIt()
+    {
+        // CS-291（P1）：跨窗口联动——设置窗触发主窗 broker 的开关，无痕窗口
+        // broker（注入同一共享实例）的导航/下载/确认链必须同样冻结
+        var shared = new KillSwitch();
+        var mainBroker = new BrowserPolicyBroker(killSwitch: shared);
+        var inPrivateBroker = new BrowserPolicyBroker(killSwitch: shared);
+        Assert.True(mainBroker.RegisterSession("main-s", "main-t"));
+        Assert.True(inPrivateBroker.RegisterSession("inprivate-s", "inprivate-t"));
+
+        mainBroker.KillSwitch.Engage();  // 仅在主窗 broker 上触发（设置窗路径）
+
+        Assert.True(inPrivateBroker.KillSwitch.IsEngaged);  // 共享实例联动
+        Assert.IsType<Decision.Deny>(inPrivateBroker.EvaluateNavigation(
+            "inprivate-s", "inprivate-t", 0, "https://example.com", "navigation"));
+        Assert.False(inPrivateBroker.AllowDownload(
+            "inprivate-s", "inprivate-t", "https://example.com", "x.exe", userConfirmed: true));
+        Assert.IsType<Decision.Deny>(inPrivateBroker.RequestNavigationConfirmation(
+            "inprivate-s", "inprivate-t", 0, "https://example.com/pay", "navigation"));
+    }
+
+    [Fact]
+    public void KillSwitch_DefaultBrokersAreIsolated()
+    {
+        // CS-291 反向锁定：缺省构造（测试语境）各自独立——一个 broker 触发
+        // 不影响另一个（生产组合根统一注入 KillSwitch.Shared）
+        var first = new BrowserPolicyBroker();
+        var second = new BrowserPolicyBroker();
+        first.KillSwitch.Engage();
+        Assert.False(second.KillSwitch.IsEngaged);
+    }
+
+    [Fact]
+    public void KillSwitch_Shared_IsProcessWideSingleton()
+    {
+        // CS-291：Shared 稳定单例（组合根与无痕窗注入的是同一对象）
+        Assert.Same(KillSwitch.Shared, KillSwitch.Shared);
+    }
+
+    [Fact]
+    public void RegisterSession_AfterDispose_ReturnsFalse()
+    {
+        // CS-332：Dispose 后不得注册新会话（清空后复活面——与 AllowDownload
+        // 的锁内 _disposed 检查对齐）
+        var broker = CreateRegisteredBroker();
+        broker.Dispose();
+        Assert.False(broker.RegisterSession("session-2", "tab-2"));
+    }
+
+    [Theory]
+    [InlineData("http://0177.0.0.1/x")]     // 八进制 127.0.0.1（OS 语义）
+    [InlineData("https://010.1.2.3/")]      // 八进制 8.1.2.3——同样按变体拒
+    [InlineData("http://192.168.001.001/")] // 前导零（.NET 十进制 192.168.1.1）
+    public void TryParseExternal_LeadingZeroIpv4Variants_Rejected(string rawUrl)
+    {
+        // CS-307：4 段全数字且任一段前导零——OS 解析栈按八进制解释（双重
+        // 解释混淆面），OriginPolicy 按 IPv4 变体一并拒绝
+        Assert.False(OriginPolicy.TryParseExternal(rawUrl, out _));
+    }
+
+    [Fact]
+    public void TryParseExternal_PlainDottedQuadIpv4_StillAccepted()
+    {
+        // CS-307 反向锁定：无前导零的合法点分 IPv4 保留放行
+        Assert.True(OriginPolicy.TryParseExternal("http://8.8.8.8/dns", out _));
+    }
+
 }

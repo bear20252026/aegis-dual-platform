@@ -122,15 +122,8 @@
                   AutomationProperties.Name="删除这条历史记录" Tag="{Binding Id}" Click="Delete_Click" ToolTip="删除这条记录" Margin="6,0,0,0"/>
         </Grid>
       </Border>
-    </DataTemplate>
-
-    <!-- 组头：日期键 → 友好标签（今天/昨天/9月6日 星期五） -->
-    <DataTemplate x:Key="DayHeaderTemplate">
-      <TextBlock Text="{Binding Name, Converter={StaticResource DateLabelConverter}}"
-                 Foreground="{DynamicResource TextSecondaryBrush}"
-                 FontSize="13" FontWeight="SemiBold" Margin="6,12,0,8"/>
-    </DataTemplate>
-  </Window.Resources>
+        </DataTemplate>
+    </Window.Resources>
 
   <Grid Margin="24,20">
     <Grid.RowDefinitions>

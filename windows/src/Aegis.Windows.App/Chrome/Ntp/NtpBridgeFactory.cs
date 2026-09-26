@@ -178,21 +178,11 @@ public sealed class NtpBridgeFactory
             $"https://{NtpAssets.GeoHostName}/{NtpAssets.GeoEntryPath}");
     }
 
-    /// <summary>导航的统一容错入口（地址非法/控件已释放时拒绝而不是抛异常）。</summary>
-    private static bool SafeNavigate(TabRuntime runtime, string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return false;
-        try
-        {
-            runtime.Control.Source = uri;
-            return true;
-        }
-        catch (Exception)
-        {
-            return false;  // 控件已释放/竞态——安全丢弃
-        }
-    }
+    /// <summary>导航的统一容错入口（地址非法/控件已释放时拒绝而不是抛异常）。
+    /// CS-311（2026-09-26 审计）：副本删除——改调 TabRuntime.Navigate 单源
+    /// （同形实现此前存三副本，漂移面）。</summary>
+    private static bool SafeNavigate(TabRuntime runtime, string? url) =>
+        TabRuntime.Navigate(runtime, url);
 
     /// <summary>导入来源过滤（纯函数——空/all = 全部来源；否则仅指定浏览器）。</summary>
     public static IEnumerable<T> FilterSources<T>(

@@ -47,4 +47,23 @@ public sealed class MainWindowLogicTests
     [InlineData(4, 1, 3, 2)]    // 越界索引按取模环绕
     public void NextIndex_CyclesAndClamps(int current, int direction, int count, int expected) =>
         Assert.Equal(expected, Aegis.Windows.Chrome.MainWindow.NextIndex(current, direction, count));
+
+    // ===== C19b 批（审计 2026-09-26）：CS-292 无痕窗口新窗口链接判定 =====
+
+    [Theory]
+    [InlineData("https://example.com/page", true)]     // 公网放行
+    [InlineData("http://127.0.0.1:8080/dev", true)]    // 本机放行（本地开发）
+    [InlineData("http://localhost/x", true)]           // 本机域名放行
+    [InlineData("file:///C:/Windows/system32", false)] // 非导航协议拒绝
+    [InlineData("javascript:alert(1)", false)]        // 脚本协议拒绝
+    [InlineData("http://192.168.1.1/admin", false)]    // 内网拒绝
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("not a url", false)]
+    public void InPrivateCanOpenNewWindowLink_MatchesMainWindowPolicy(string? url, bool expected)
+    {
+        // CS-292：无痕窗口 target=_blank 订阅此前缺失（点击无反应）——放行
+        // 判定与主窗口 NewWindowRequested 同口径（UrlSafety.CanOpenHttpUrl）
+        Assert.Equal(expected, Aegis.Windows.Chrome.InPrivateWindow.CanOpenNewWindowLink(url));
+    }
 }

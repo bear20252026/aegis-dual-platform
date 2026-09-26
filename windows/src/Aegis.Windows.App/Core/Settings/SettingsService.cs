@@ -92,16 +92,10 @@ public sealed class SettingsService
     {
         try
         {
-            var dir = Path.GetDirectoryName(_path);
-            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-            var temp = _path + ".tmp." + Guid.NewGuid().ToString("N");
-            try
-            {
-                File.WriteAllText(temp, JsonSerializer.Serialize(ToAppSettings(normalized), JsonOptions));
-                if (File.Exists(_path)) File.Replace(temp, _path, null);
-                else File.Move(temp, _path);
-            }
-            finally { if (File.Exists(temp)) File.Delete(temp); }
+            // CS-326（2026-09-26 审计）：原子写共享单源——与 AppSettings.Save
+            // 此前两份同形实现（temp+Replace/Move+finally Delete）
+            AppSettings.AtomicWriteAllText(
+                _path, JsonSerializer.Serialize(ToAppSettings(normalized), JsonOptions));
         }
         catch (Exception ex)
         {
@@ -132,8 +126,12 @@ public sealed class SettingsService
         }
         catch (Exception ex)
         {
+            // CS-302（2026-09-26 审计）：坏 settings.json 双口径收敛——复用
+            // AppSettings.BackupCorruptFile 先备份 .bak 再回退默认（此前直接
+            // 回退不备份，坏档随即被覆盖，用户设置永久丢失）
+            AppSettings.BackupCorruptFile(path);
             Security.SecurityLog.Write(
-                $"[settings] 快照读取失败（回退默认）: {ex.GetType().Name}: {ex.Message}");
+                $"[settings] 快照读取失败（回退默认，原文件已备份 .bak）: {ex.GetType().Name}: {ex.Message}");
             return new BrowserSettingsSnapshot();
         }
     }

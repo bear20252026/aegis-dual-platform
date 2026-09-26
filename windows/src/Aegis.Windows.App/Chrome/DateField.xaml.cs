@@ -37,7 +37,10 @@ public partial class DateField : UserControl
     /// <summary>占位文本（未选择时显示）。</summary>
     public string PlaceholderText { get; set; } = "选择日期";
 
-    /// <summary>字段文本（已选择时显示 yyyy-MM-dd）。</summary>
+    /// <summary>字段文本（已选择时显示 yyyy-MM-dd）。
+    /// CS-314（2026-09-26 审计）：生产零调用——保留原因是 WindowSmokeTests
+    /// 经此断言渲染文本（控件内部 Label 无 x:Name，本属性是唯一可读缝）。
+    /// 标注保留，避免无痕误删回归覆盖。</summary>
     public string FieldText
     {
         get => FieldLabel.Text;

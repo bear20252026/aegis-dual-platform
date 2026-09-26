@@ -170,19 +170,24 @@ public partial class BookmarkManagerWindow : Window
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: BookmarkRow row })
+            DeleteBookmark(row);
+    }
+
+    /// <summary>CS-305（2026-09-26 审计）：删除书签单源——鼠标与键盘 Delete
+    /// 两路共用（含 SecurityLog 留痕 + 异常反馈 + Reload；此前键盘路径零
+    /// 留痕——CS-290 只补了鼠标路径一半）。</summary>
+    private void DeleteBookmark(BookmarkRow row)
+    {
+        try { _ = _bookmarks.RemoveById(row.Id); }
+        catch (Exception ex)
         {
-            // CS-164：删除失败可见反馈
-            try { _ = _bookmarks.RemoveById(row.Id); }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, $"删除失败：{ex.Message}", "错误",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-            Core.Security.SecurityLog.Write($"[bookmark] 已删除书签 id={row.Id}");  // CS-290
-            Reload(SearchBox.Text);
-            _owner?.RefreshBookmarkBar();
+            MessageBox.Show(this, $"删除失败：{ex.Message}", "错误",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
         }
+        Core.Security.SecurityLog.Write($"[bookmark] 已删除书签 id={row.Id}");  // CS-290/305
+        Reload(SearchBox.Text);
+        _owner?.RefreshBookmarkBar();
     }
 
     private void ClearAll_Click(object sender, RoutedEventArgs e)
@@ -222,16 +227,8 @@ public partial class BookmarkManagerWindow : Window
         }
         else if (e.Key == Key.Delete && BookmarkList.SelectedItem is BookmarkRow del)
         {
-            // CS-164：键盘删除路径同样捕获反馈
-            try { _ = _bookmarks.RemoveById(del.Id); }
-            catch (Exception ex)
-            {
-                MessageBox.Show(this, $"删除失败：{ex.Message}", "错误",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-                return;
-            }
-            Reload(SearchBox.Text);
-            _owner?.RefreshBookmarkBar();
+            // CS-305：键盘删除路径共用单源（留痕/反馈/Reload 与鼠标一致）
+            DeleteBookmark(del);
             e.Handled = true;
         }
     }

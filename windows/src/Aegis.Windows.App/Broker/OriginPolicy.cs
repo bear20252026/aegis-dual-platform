@@ -36,6 +36,15 @@ public static class OriginPolicy
             authority = authority[..authorityEnd];
         if (authority.Contains('@', StringComparison.Ordinal))
             return false;
+        // CS-307（2026-09-26 审计）：前导零八进制 IPv4（"0177.0.0.1"）——
+        // .NET Uri.TryCreate 阶段已按 OS inet_aton 语义把 host 归一化
+        //（"0177.0.0.1"→"127.0.0.1"、"192.168.001.001"→"192.168.1.1"），
+        // 下方 IsValidHost 只见归一化结果，前导零形态漏检。必须对未经
+        // 归一化的 raw authority 判定：4 段全数字且任一段前导零（含
+        // host:port 形态）按 IPv4 变体拒绝——与 Rust origin.rs「4 段全
+        // 数字逐段前导零拒绝」口径一致（双重解释混淆面）
+        if (IsLeadingZeroIpv4(authority))
+            return false;
         if (!string.IsNullOrEmpty(u.UserInfo))
             return false;
         if (string.IsNullOrEmpty(u.Host))
@@ -76,7 +85,10 @@ public static class OriginPolicy
             if (!(char.IsAsciiLetterOrDigit(ch) || ch == '-' || ch == '.'))
                 return false;
         }
-        foreach (var label in host.Split('.'))
+        // CS-316（2026-09-26 审计）：一次 Split 复用——标签校验与段数判定
+        // 此前对同一 host Split('.') 两次
+        var segments = host.Split('.');
+        foreach (var label in segments)
         {
             if (label.Length == 0 || label.Length > 63)
                 return false;
@@ -87,12 +99,43 @@ public static class OriginPolicy
         //（2130706433）/0x 十六进制/简写（127.1）OS 解析器均接受，双重解释
         // 混淆面。全数字段且段数 ≠ 4 拒（4 段 = 合法点分 IPv4，保留）；
         // 与 Rust origin.rs / Kotlin OriginPolicy 口径一致
-        var segments = host.Split('.');
         var lower = host.ToLowerInvariant();
         if (segments.Length != 4 && segments.All(s => s.Length > 0 && s.All(char.IsAsciiDigit)))
+            return false;
+        // CS-307（2026-09-26 审计）：前导零八进制 IPv4（"0177.0.0.1"）——
+        // 4 段全数字即放行的既有分支漏掉此形态：OS 解析栈按八进制解释为
+        // 127.0.0.1（双重解释混淆面）。按 IPv4 变体一并拒绝
+        if (segments.Length == 4
+            && segments.All(s => s.Length > 0 && s.All(char.IsAsciiDigit))
+            && segments.Any(s => s.Length > 1 && s[0] == '0'))
             return false;
         if (lower.StartsWith("0x") && lower[2..].All(c => char.IsAsciiDigit(c) || (c >= 'a' && c <= 'f')))
             return false;
         return true;
+    }
+
+    /// <summary>CS-307：raw authority 是否为「4 段全数字且任一段前导零」的
+    /// IPv4 变体（host:port 先剥端口段再判定）。OS 解析栈（inet_aton 语义）
+    /// 对前导零段按八进制解释（"0177.0.0.1" = 127.0.0.1），与归一化/显示值
+    /// 构成双重解释混淆面。IPv6 字面量（'[' 开头）不属点分形态。</summary>
+    private static bool IsLeadingZeroIpv4(string authority)
+    {
+        if (authority.Length == 0 || authority[0] == '[')
+            return false;  // IPv6 字面量或空 authority——非点分 IPv4 形态
+        var host = authority;
+        var colon = host.LastIndexOf(':');
+        if (colon >= 0)
+        {
+            // host:port——端口段为全数字时按 host:port 剥离；其余畸形形态
+            // 不属本判定面（交由 Uri 解析/后续校验拒绝）
+            var port = host[(colon + 1)..];
+            if (port.Length == 0 || !port.All(char.IsAsciiDigit))
+                return false;
+            host = host[..colon];
+        }
+        var segments = host.Split('.');
+        return segments.Length == 4
+            && segments.All(s => s.Length > 0 && s.All(char.IsAsciiDigit))
+            && segments.Any(s => s.Length > 1 && s[0] == '0');
     }
 }

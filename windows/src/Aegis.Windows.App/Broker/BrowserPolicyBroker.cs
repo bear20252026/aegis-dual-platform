@@ -34,12 +34,24 @@ public sealed class BrowserPolicyBroker : IBroker
     private bool _disposed;
     // M4-a（ADR-009 审计遗留清零）：KillSwitch 此前全仓零调用点（审计实证）。
     // broker 持有单例，导航/下载/确认全链强制检查；Chrome 经属性暴露触发。
-    public KillSwitch KillSwitch { get; } = new();
+    // CS-291（2026-09-26 审计）：killSwitch 参数注入进程级共享实例
+    //（KillSwitch.Shared）——主窗与各无痕窗口的 broker 复用同一开关；缺省
+    // 独立实例保持单测隔离（无跨 broker 联动诉求）。
+    public KillSwitch KillSwitch { get; }
+
+    // CS-323（2026-09-26 审计）：原生探测结果缓存——此前每次导航决策都
+    // ProbeFromEnvironment（原生模式下一轮 NativeLibrary.TryLoad+GetExport+Free）；
+    // 成功结果进程内不变即恒缓存，失败按短 TTL 重试（库文件可能随后就位）
+    private readonly object _gateLock = new();
+    private NativePolicyCoreGateResult? _cachedGateResult;
+    private long _cachedGateStampTicks;
+    private static readonly TimeSpan GateFailureRetryTtl = TimeSpan.FromSeconds(30);
 
     public BrowserPolicyBroker(
         Func<NativePolicyCoreGateResult>? nativePolicyCoreGate = null,
         NativePolicyCoreBridge? nativePolicyCoreBridge = null,
-        IBlockedHosts? blockedHosts = null)
+        IBlockedHosts? blockedHosts = null,
+        KillSwitch? killSwitch = null)
     {
         _nativePolicyCoreGate = nativePolicyCoreGate ?? NativePolicyCoreGate.ProbeFromEnvironment;
         _nativePolicyCoreRequired = NativePolicyCoreGate.IsRequired;
@@ -48,6 +60,7 @@ public sealed class BrowserPolicyBroker : IBroker
         else
             _nativePolicyCoreBridge = nativePolicyCoreBridge;
         _blockedHosts = blockedHosts ?? NoBlockedHosts.Instance;
+        KillSwitch = killSwitch ?? new KillSwitch();
     }
 
     /// <summary>替换黑名单快照（订阅源后台刷新完成时调用——原子换引用）。</summary>
@@ -81,7 +94,7 @@ public sealed class BrowserPolicyBroker : IBroker
         }
         RecordAudit("allow", "download", origin,
             userConfirmed ? "user_confirmed" : null);
-        SecurityLog.Write($"[download] 允许下载: {fileName}（来源 {RedactUrl(origin)}，"
+        SecurityLog.Write($"[download] 允许下载: {fileName}（来源 {UrlRedactor.Redact(origin)}，"
                           + (userConfirmed ? "用户已确认危险扩展" : "常规下载") + "）");
         return true;
     }
@@ -93,6 +106,10 @@ public sealed class BrowserPolicyBroker : IBroker
             return false;
         lock (_sessionLock)
         {
+            // CS-332（2026-09-26 审计）：Dispose 后拒绝注册新会话——此前仅
+            // AllowDownload 在锁内检查 _disposed，注册路径放行（清空后复活）
+            if (_disposed)
+                return false;
             if (_sessions.ContainsKey(sessionId))
                 return false;
             // 与 Rust MAX_SESSIONS 对等（此前无上限——泄漏面）
@@ -145,7 +162,7 @@ public sealed class BrowserPolicyBroker : IBroker
     {
         if (KillSwitch.IsEngaged)
         {
-            RecordAudit("deny", scope, RedactUrl(rawUrl), "kill_switch_engaged");
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "kill_switch_engaged");
             return new Decision.Deny(new DenyReason("kill_switch_engaged", "紧急终止开关已触发——全部导航冻结"));
         }
         if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
@@ -159,8 +176,8 @@ public sealed class BrowserPolicyBroker : IBroker
             if (Uri.TryCreate(rawUrl, UriKind.Absolute, out var nativeUri)
                 && _blockedHosts.IsBlocked(nativeUri.Host))
             {
-                RecordAudit("deny", scope, RedactUrl(rawUrl), "threat_blocklist");
-                SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {RedactUrl(rawUrl)}");
+                RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "threat_blocklist");
+                SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {UrlRedactor.Redact(rawUrl)}");
                 return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
             }
             var nativeDecision = _nativePolicyCoreBridge.EvaluateNavigation(sessionId, tabId, generation, rawUrl, scope);
@@ -169,19 +186,19 @@ public sealed class BrowserPolicyBroker : IBroker
         }
         if (!HasCurrentSession(sessionId, tabId, generation))
         {
-            RecordAudit("deny", scope, RedactUrl(rawUrl), "session_context");
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "session_context");
             return new Decision.Deny(new DenyReason("session_context", "会话、标签或文档代际无效"));
         }
         if (!OriginPolicy.TryParseExternal(rawUrl, out var uri))
         {
-            RecordAudit("deny", scope, RedactUrl(rawUrl), "url_policy");
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "url_policy");
             return new Decision.Deny(new DenyReason("url_policy", "拒绝 URL（非可导航地址）"));
         }
         // M1-T2：威胁黑名单门禁（host 精确+子域后缀匹配；命中 fail-closed 留痕）
         if (_blockedHosts.IsBlocked(uri.Host))
         {
-            RecordAudit("deny", scope, RedactUrl(rawUrl), "threat_blocklist");
-            SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {RedactUrl(rawUrl)}");
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "threat_blocklist");
+            SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {UrlRedactor.Redact(rawUrl)}");
             return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
         }
         var origin = uri.GetLeftPart(UriPartial.Authority);
@@ -204,7 +221,7 @@ public sealed class BrowserPolicyBroker : IBroker
         // Approve/TryConsume 均已检查），紧急终止期间不得再登记新确认请求
         if (KillSwitch.IsEngaged)
         {
-            RecordAudit("deny", scope, RedactUrl(rawUrl), "kill_switch_engaged");
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "kill_switch_engaged");
             return new Decision.Deny(new DenyReason("kill_switch_engaged", "紧急终止开关已触发——全部导航冻结"));
         }
         if (!AllowsNavigationUnderNativePolicyRequirement(scope, rawUrl, out var nativeDenied))
@@ -236,7 +253,7 @@ public sealed class BrowserPolicyBroker : IBroker
     /// <summary>显式拒绝确认请求；未知 nonce、桥接故障或非原生模式均失败闭合。</summary>
     public bool RejectNavigationConfirmation(ApprovalRequest request)
     {
-        if (!_nativePolicyCoreGate().AllowsPlatformBroker
+        if (!ProbeGate().AllowsPlatformBroker
             || !_nativePolicyCoreRequired
             || _nativePolicyCoreBridge is null
             || !_nativePolicyCoreBridge.RejectNavigationConfirmation(request))
@@ -267,7 +284,7 @@ public sealed class BrowserPolicyBroker : IBroker
     public bool TryConsumeNavigation(AuthorizedAction? action, string sessionId, string tabId,
         ulong currentGeneration, string rawUrl, string scope)
     {
-        if (!_nativePolicyCoreGate().AllowsPlatformBroker)
+        if (!ProbeGate().AllowsPlatformBroker)
             return false;
         if (action is null)
             return false;
@@ -275,7 +292,7 @@ public sealed class BrowserPolicyBroker : IBroker
         // 与 KillSwitch "撤销已发出但未执行的授权" 语义对齐）
         if (KillSwitch.IsEngaged)
         {
-            RecordAudit("deny", scope, RedactUrl(rawUrl), "kill_switch_engaged");
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "kill_switch_engaged");
             return false;
         }
         if (_nativePolicyCoreRequired)
@@ -337,26 +354,12 @@ public sealed class BrowserPolicyBroker : IBroker
             if (_auditLog.Count >= MaxAuditEntries)
                 _auditLog.Dequeue();  // 有界环形——最旧条目淘汰（内存审计，非取证存储）
             _auditLog.Enqueue(new Audit.AuditEvent(
-                Guid.NewGuid().ToString("N"), DateTime.UtcNow, decision, scope, RedactUrl(origin), reason));
+                Guid.NewGuid().ToString("N"), DateTime.UtcNow, decision, scope, UrlRedactor.Redact(origin), reason));
         }
     }
 
-    /// <summary>审计/日志用 URL 脱敏：丢弃 query 与 fragment（token/搜索词等
-    /// 敏感串不落审计——与 AuditEvent schema "不含 query secret" 声明对齐）。</summary>
-    private static string RedactUrl(string? url)
-    {
-        if (string.IsNullOrEmpty(url))
-            return string.Empty;
-        if (Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host))
-            return uri.GetLeftPart(UriPartial.Authority) + uri.AbsolutePath;
-        if (url.Length <= 256)
-            return url;
-        // CS-212：代理对安全截断（URL 含 emoji 时硬切产生孤立代理落审计）
-        var cut = 256;
-        if (char.IsHighSurrogate(url[cut - 1]))
-            cut--;
-        return url[..cut] + "…";
-    }
+    // CS-296（2026-09-26 审计）：审计/日志 URL 脱敏私有副本删除——代理对安全
+    // 截断回退分支已吸收进共享 UrlRedactor.Redact 单源，本类全部调用点改走单源。
 
     /// <summary>记录已消费 nonce；达上限即 fail-closed 拒绝（与 Rust 侧 broker.rs 对等）。
     /// 不淘汰旧 nonce，避免削弱一次性/重放保护。</summary>
@@ -375,7 +378,7 @@ public sealed class BrowserPolicyBroker : IBroker
         string rawUrl,
         out Decision.Deny nativeDenied)
     {
-        var result = _nativePolicyCoreGate();
+        var result = ProbeGate();
         if (result.AllowsPlatformBroker)
         {
             nativeDenied = null!;
@@ -385,6 +388,26 @@ public sealed class BrowserPolicyBroker : IBroker
         RecordAudit("deny", scope, "native-policy-core", code);
         nativeDenied = new Decision.Deny(new DenyReason(code, "已启用的原生策略核心不可用或不兼容"));
         return false;
+    }
+
+    /// <summary>CS-323（2026-09-26 审计）：门禁探测带缓存——成功结果进程内
+    /// 不变（环境变量/库文件不热换）恒缓存；失败结果 30s 内不重试，避免每次
+    /// 导航决策都跑一轮 NativeLibrary.TryLoad+GetExport+Free（原生模式下的
+    /// 每导航固定开销）。锁内短临界区，相对原生探测开销可忽略。</summary>
+    private NativePolicyCoreGateResult ProbeGate()
+    {
+        lock (_gateLock)
+        {
+            var now = Environment.TickCount64;
+            if (_cachedGateResult is { } cached
+                && (cached.AllowsPlatformBroker
+                    || now - _cachedGateStampTicks < (long)GateFailureRetryTtl.TotalMilliseconds))
+                return cached;
+            var result = _nativePolicyCoreGate();
+            _cachedGateResult = result;
+            _cachedGateStampTicks = now;
+            return result;
+        }
     }
 
     private Decision.Deny NativeBridgeDenied(string scope, string code)

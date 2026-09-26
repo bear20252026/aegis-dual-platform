@@ -90,16 +90,30 @@ public static class DownloadPolicy
         }
         if (name.Length > MaxFileNameChars)
         {
-            // 超长截断保留扩展名（与 Rust sanitize_filename 同语义）
+            // 超长截断保留扩展名（与 Rust sanitize_filename 同语义）。
+            // CS-303（2026-09-26 审计）：截断处代理对安全——emoji 文件名硬切
+            // 产生孤立代理（CS-101/155/163/212 已修同类四处，此处漏网）
             var ext = Path.GetExtension(name);
             var stemLen = name.Length - ext.Length;
             var keep = Math.Max(1, MaxFileNameChars - ext.Length);
             if (stemLen > keep)
-                name = name[..keep].TrimEnd('.') + ext;
+                name = TruncateSurrogateSafe(name, keep).TrimEnd('.') + ext;
             else
-                name = name[..MaxFileNameChars].TrimEnd('.');
+                name = TruncateSurrogateSafe(name, MaxFileNameChars).TrimEnd('.');
         }
         return name.Length > 0 ? name : "aegis_download";
+    }
+
+    /// <summary>CS-303：代理对安全截断——截断点落在高代理项上回退一位，
+    /// 不产生孤立代理。提 internal 直测。</summary>
+    internal static string TruncateSurrogateSafe(string text, int maxChars)
+    {
+        if (text.Length <= maxChars)
+            return text;
+        var cut = maxChars;
+        if (cut > 0 && char.IsHighSurrogate(text[cut - 1]))
+            cut--;
+        return text[..cut];
     }
 
     /// <summary>URL 去查询串后的最后路径段（Content-Disposition 缺失时的判定候选）。</summary>

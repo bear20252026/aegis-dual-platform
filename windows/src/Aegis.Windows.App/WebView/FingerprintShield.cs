@@ -222,12 +222,15 @@ public static class FingerprintShield
             'gclid','hsCtaTracking','igshid','mc_eid','ml_subscriber','ml_subscriber_hash','msclkid',
             'oft_c','oft_ck','oft_d','oft_id','oft_ids','oft_k','oft_lk','oft_sk','oly_anon_id',
             'oly_enc_id','rb_clickid','s_cid','twclid','vero_conv','vero_id','wickedid','yclid','wbraid'];
+          // CS-331（2026-09-26 审计）：小写冻结集 IIFE 顶层构建一次——此前
+          // stripTrackingParams 每次 fetch/XHR 调用都重建 ~40 键对象（请求热
+          // 路径重复分配）
+          var TRACKING_LOWER = {};
+          TRACKING_PARAMS.forEach(function(p) { TRACKING_LOWER[p.toLowerCase()] = true; });
           function stripTrackingParams(url) {
             try { var u = new URL(url); var c = false;
-              var lowerSet = {};
-              TRACKING_PARAMS.forEach(function(p) { lowerSet[p.toLowerCase()] = true; });
               var doomed = [];
-              u.searchParams.forEach(function(v, k) { if (lowerSet[k.toLowerCase()]) doomed.push(k); });
+              u.searchParams.forEach(function(v, k) { if (TRACKING_LOWER[k.toLowerCase()]) doomed.push(k); });
               doomed.forEach(function(k) { u.searchParams.delete(k); c = true; });
               return c ? u.toString() : url;
             } catch(e) { return url; }
@@ -264,15 +267,27 @@ public static class FingerprintShield
           // ====== Stage 8: TimerPrecision ======
           var TP = 1;
           function reducePrecision(v) { return Math.round(v / TP) * TP + (Math.random() - 0.5) * TP / 2; }
+          // CS-300（2026-09-26 审计）：Date.now 分支——随机抖动直接套在墙上时钟
+          // 上会返回非整数（Number.isInteger(Date.now())===false 一行即识破），
+          // 且 epoch 量级抖动毫无隐私收益；四舍五入保持整数毫秒
+          function reducePrecisionInteger(v) { return Math.round(reducePrecision(v)); }
           try {
+            // performance.now：钳单调非递减——随机抖动可产生时间回退
+            //（t2 < t1），单调性破坏本身是指纹探针/行为检测信号
+            var lastPerf = -Infinity;
             var origPerfNow = performance.now.bind(performance);
-            var perfProxy = function() { return reducePrecision(origPerfNow()); };
+            var perfProxy = function() {
+              var v = reducePrecision(origPerfNow());
+              if (v < lastPerf) v = lastPerf;
+              lastPerf = v;
+              return v;
+            };
             origDefineProp(performance, 'now', { value: perfProxy, writable: false, configurable: false });
             registerProxy(perfProxy, origPerfNow);
           } catch(e) {}
           try {
             var origDateNow = Date.now;
-            var dateProxy = function() { return reducePrecision(origDateNow()); };
+            var dateProxy = function() { return reducePrecisionInteger(origDateNow()); };
             Date.now = dateProxy;
             registerProxy(dateProxy, origDateNow);
           } catch(e) {}

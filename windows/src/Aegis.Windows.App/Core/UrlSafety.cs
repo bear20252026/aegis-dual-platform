@@ -29,7 +29,11 @@ public static class UrlSafety
         return IsPublicHost(uri.Host) || IsLocalHostOrResolvesLocalHost(uri.Host);
     }
 
-    /// <summary>是否为可安全打开的外部 http/https URL（公网 host）。</summary>
+    /// <summary>是否为可安全打开的外部 http/https URL（公网 host）。
+    /// CS-313（2026-09-26 审计）：生产零调用（生产路径统一走 CanOpenHttpUrl
+    /// ——本机开发访问同样放行）。保留原因：UrlSafetyTests/AuditRegressionTests
+    /// 以本方法锁定"公网判定不含本机豁免"的纯公网口径（CanOpenHttpUrl 的
+    /// 本机放行使其无法断言该分支）——注明保留，避免误删回归覆盖。</summary>
     public static bool IsPublicHttpUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -60,6 +64,13 @@ public static class UrlSafety
         // TryParse 失败时绝不可落到"公网主机名"兜底放行（链路本地逃逸面）
         if (normalized.Contains('%') || normalized.Contains('[') || normalized.Contains(']'))
             return false;
+        // CS-307（2026-09-26 审计）：前导零八进制 IPv4（"0177.0.0.1"）——
+        // .NET TryParse 按十进制解释为 177.0.0.1（判公网放行），而 OS 解析
+        // 栈按八进制解释为 127.0.0.1（回环）——双重解释逃逸面。必须在
+        // TryParse 之前拦截，按八进制语义解析后再走 IP 判定；不可解析的
+        // 畸形数字段按非公网 fail-closed
+        if (TryParseOctalIpv4(normalized, out var octalAddress))
+            return IsPublicIp(octalAddress);
         if (IPAddress.TryParse(normalized, out var address))
             return IsPublicIp(address);
         if (TryParseAlternateIpv4(normalized, out var altAddress))
@@ -116,6 +127,37 @@ public static class UrlSafety
         }
     }
 
+    /// <summary>CS-307：4 段全数字且任一段含前导零的 IPv4 变体——OS 解析栈
+    ///（inet_aton 语义）对前导零段按八进制解释（"0177.0.0.1" = 127.0.0.1）。
+    /// 仅识别该形态；逐段八进制/十进制混合解析，畸形（非八进制数字/越界）
+    /// 返回 false 由调用方 fail-closed 判非公网。</summary>
+    private static bool TryParseOctalIpv4(string host, out IPAddress address)
+    {
+        address = IPAddress.None;
+        var parts = host.Split('.');
+        if (parts.Length != 4
+            || !parts.All(p => p.Length > 0 && p.Length <= 4 && p.All(char.IsAsciiDigit))
+            || !parts.Any(p => p.Length > 1 && p[0] == '0'))
+            return false;  // 非本形态（普通点分十进制/域名走各自路径）
+        var bytes = new byte[4];
+        for (var i = 0; i < 4; i++)
+        {
+            var part = parts[i];
+            // 前导零段按八进制（与 OS 语义一致）；无前导零段按十进制
+            var isOctal = part.Length > 1 && part[0] == '0';
+            if (isOctal && !part.All(c => c is >= '0' and <= '7'))
+                return false;  // "0999" 类非法八进制——不可安全解释，拒绝
+            var value = isOctal
+                ? Convert.ToInt32(part, 8)
+                : int.Parse(part, System.Globalization.CultureInfo.InvariantCulture);
+            if (value is < 0 or > 255)
+                return false;
+            bytes[i] = (byte)value;
+        }
+        address = new IPAddress(bytes);
+        return true;
+    }
+
     /// <summary>IP 地址是否公网（非回环/私有/链路本地/保留/组播/unspecified）。</summary>
     public static bool IsPublicIp(IPAddress address)
     {
@@ -131,7 +173,9 @@ public static class UrlSafety
         // bytes[0]==0x00 被判"公网"，私网/回环绕过）
         if (raw.Length == 16 && raw[..10].All(b => b == 0) && raw[10] == 0xFF && raw[11] == 0xFF)
             return IsPublicIp(new IPAddress(raw[12..]));
-        var bytes = address.GetAddressBytes();
+        // CS-315（2026-09-26 审计）：bytes 复用 raw——此前同一地址两次
+        // GetAddressBytes（第二次分配纯冗余）
+        var bytes = raw;
         if (bytes.Length == 4)
         {
             var b0 = bytes[0];

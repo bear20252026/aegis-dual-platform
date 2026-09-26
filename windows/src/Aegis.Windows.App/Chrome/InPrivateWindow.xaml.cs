@@ -18,10 +18,15 @@ using Microsoft.Web.WebView2.Core;
 /// 与主窗口同一套快照+令牌+视觉树校验（此前本窗口自维护一份漂移副本）。</summary>
 public partial class InPrivateWindow : Window
 {
-    private readonly BrowserPolicyBroker _broker = new();
+    // CS-291（2026-09-26 审计）：无痕窗 broker 复用进程级共享 KillSwitch——
+    // 此前每窗独立开关，设置窗触发的紧急终止对无痕窗口完全失效（fail-open）
+    private readonly BrowserPolicyBroker _broker = new(killSwitch: KillSwitch.Shared);
     private readonly TabManager _tabs = new();
     private readonly Dictionary<string, TabRuntime> _runtimes = new();
     private TabRuntimeCoordinator _runtimeCoordinator = null!;
+    // CS-295（2026-09-26 审计）：导航确认面板控制器（与主窗同款——确认门下
+    // 此前本窗口零订阅 NavigationConfirmationRequested，导航被静默取消）
+    private ApprovalPanelController _approval = null!;
     private string? _activeTabId;
     private bool _suppressSelection;
     private bool _closed;
@@ -54,6 +59,13 @@ public partial class InPrivateWindow : Window
             }
         }
         _runtimeCoordinator = new TabRuntimeCoordinator(_runtimes, WebViewHost);
+        // CS-295：确认面板装配（与主窗同构——XAML 已补 ApprovalOverlay）
+        _approval = new ApprovalPanelController(
+            ApprovalOverlay, ApprovalOrigin, ApprovalPath, ApprovalScope, ApprovalExpiry,
+            ApprovalDenyButton,
+            SetNavigationControlsEnabled,
+            tabId => _runtimes.TryGetValue(tabId, out var runtime) ? runtime : null,
+            ShowRejection);
         _tabs.TabOpened += CreateRuntime;
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
@@ -101,6 +113,36 @@ public partial class InPrivateWindow : Window
                 }
             };
             runtime.NavigationCompleted += (_, _) => Dispatcher.BeginInvoke(() => SyncAddressBar(tab));
+            // CS-295：确认门事件接线（与主窗同口径——面板状态由控制器唯一持有）
+            runtime.Host.NavigationConfirmationRequested += (_, e) => _approval.Request(tab.TabId, e);
+            runtime.Host.NavigationConfirmationResolved += (_, _) => _approval.Resolved();
+            // CS-292（2026-09-26 审计）：target=_blank/window.open 链接——主窗有
+            // 订阅而无痕窗此前零订阅（HostWebView 一律 Handled 后转发，无人接
+            // 收即点击无任何反应）；与主窗同口径：公网/本机地址放行新建标签
+            runtime.NewWindowRequested += targetUrl =>
+            {
+                if (!CanOpenNewWindowLink(targetUrl))
+                {
+                    Core.Security.SecurityLog.Write(
+                        $"[inprivate] 已拒绝打开新窗口链接（非公网/本机地址）: {Core.Security.UrlRedactor.Redact(targetUrl)}");
+                    return;
+                }
+                _tabs.NewTab(targetUrl);
+            };
+            // CS-294（2026-09-26 审计）：危险扩展下载确认——此前零订阅者走
+            // fail-closed 分支被静默取消，用户看不到任何提示；提供与主窗同款
+            // 确认对话框（窗口已关闭仍 fail-closed 拒绝）
+            runtime.DownloadConfirmationRequested += (downloadUrl, fileName) =>
+            {
+                if (!IsLoaded)
+                    return false;
+                return MessageBox.Show(
+                    this,
+                    $"此文件的类型可能存在风险，是否允许下载？\n\n文件：{fileName}\n来源：{downloadUrl}",
+                    "下载确认",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning) == MessageBoxResult.Yes;
+            };
         }
         catch (Exception ex)
         {
@@ -174,6 +216,7 @@ public partial class InPrivateWindow : Window
             System.Windows.Controls.Panel.SetZIndex(pair.Value.Control, on ? 5 : 0);
             pair.Value.Control.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
             pair.Value.Control.IsHitTestVisible = on;  // CS-177：对齐 MainWindow 切换口径
+            pair.Value.Control.IsEnabled = on;         // CS-327（2026-09-26 审计）：对齐主窗四属性口径
         }
         WebViewHost.UpdateLayout();
         SyncAddressBar(tab);
@@ -246,8 +289,41 @@ public partial class InPrivateWindow : Window
 
     private void CloseWindow_Click(object sender, RoutedEventArgs e) => Close();
 
+    /// <summary>CS-292：新窗口链接放行判定（与主窗 NewWindowRequested 同口径）。
+    /// 提纯 internal 直测——公网 host 或本机/hosts 映射到本机的域名放行，
+    /// 非法协议/内网/环回拒绝（安全约束——本机除外）。</summary>
+    internal static bool CanOpenNewWindowLink(string? url) =>
+        Core.UrlSafety.CanOpenHttpUrl(url);
+
+    // —— CS-295：导航确认面板（控制器逻辑与主窗共用单源） ——
+
+    private void ApprovalAllow_Click(object sender, RoutedEventArgs e) => _approval.Allow();
+
+    private void ApprovalDeny_Click(object sender, RoutedEventArgs e) => _approval.Deny();
+
+    private void SetNavigationControlsEnabled(bool isEnabled)
+    {
+        AddressBar.IsEnabled = isEnabled;
+        BackButton.IsEnabled = isEnabled;
+        ForwardButton.IsEnabled = isEnabled;
+        RefreshButton.IsEnabled = isEnabled;
+    }
+
+    private void ShowRejection(string message)
+    {
+        ErrorPage.Text = message;
+        ErrorPagePanel.Visibility = Visibility.Visible;
+    }
+
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
+        // CS-295：确认面板打开时 Esc = 拒绝（与主窗同语义——优先于停止加载）
+        if (_approval.IsVisible && e.Key == Key.Escape)
+        {
+            _approval.Deny();
+            e.Handled = true;
+            return;
+        }
         // Esc = 停止加载（浏览器惯例）——不再直接关闭整个无痕窗口
         //（误按丢全部标签）；窗口关闭走 ✕。
         if (e.Key == Key.Escape)

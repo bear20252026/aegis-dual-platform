@@ -98,7 +98,10 @@ public sealed class DownloadItem : INotifyPropertyChanged
     /// 兼容 SDK 1.0.2903.40 的扁平 Progress API）。状态映射：InProgress/
     /// Completed/Interrupted（含 UserCanceled→已取消）——绝不静默。
     /// 派生属性（Percent/Summary）只在字节变化时通知——此前每 tick 无条件
-    /// 强发两个 PropertyChanged，挂窗期间持续触发绑定重算。</summary>
+    /// 强发两个 PropertyChanged，挂窗期间持续触发绑定重算。
+    /// CS-329（2026-09-26 审计）：状态映射与异常映射提纯 internal static——
+    /// CoreWebView2DownloadOperation 无法在单测构造（internal ctor），状态机
+    /// 分支经纯函数直测。</summary>
     public void Refresh()
     {
         long beforeReceived = _receivedBytes, beforeTotal = _totalBytes;
@@ -106,34 +109,17 @@ public sealed class DownloadItem : INotifyPropertyChanged
         {
             ReceivedBytes = (long)Operation.BytesReceived;
             TotalBytes = (long)(Operation.TotalBytesToReceive ?? 0UL);
-            var kind = Operation.State switch
-            {
-                CoreWebView2DownloadState.InProgress => DownloadItemState.InProgress,
-                CoreWebView2DownloadState.Completed => DownloadItemState.Completed,
-                CoreWebView2DownloadState.Interrupted when Operation.InterruptReason
-                    == CoreWebView2DownloadInterruptReason.UserCanceled => DownloadItemState.Canceled,
-                CoreWebView2DownloadState.Interrupted => DownloadItemState.Interrupted,
-                _ => DownloadItemState.Interrupted,  // 未知原生状态按中断呈现（不静默）
-            };
+            var kind = MapNativeState(Operation.State, Operation.InterruptReason);
             if (kind == DownloadItemState.Completed && _completedAt is null)
                 _completedAt = DateTime.Now;
             SetState(kind);
         }
-        catch (ObjectDisposedException)
+        catch (Exception ex)
         {
-            // 操作对象随浏览器会话结束——如实标记「已结束」（此前标「已完成」，
-            // IsCompleted=true 会给出"打开"按钮而文件可能并不存在）
-            SetState(DownloadItemState.Ended);
-        }
-        catch (InvalidOperationException)
-        {
-            SetState(DownloadItemState.Interrupted);
-        }
-        catch (Exception)
-        {
-            // CS-111：其余异常面兜底（SDK 回调竞态等）——轮询路径绝不向
-            // UI 定时器上抛
-            SetState(DownloadItemState.Interrupted);
+            // 操作对象随浏览器会话结束→如实标记「已结束」（此前标「已完成」，
+            // IsCompleted=true 会给出"打开"按钮而文件可能并不存在）；其余
+            // 异常面（SDK 回调竞态等）按中断呈现——轮询路径绝不向 UI 上抛
+            SetState(MapRefreshException(ex));
         }
         if (beforeReceived != _receivedBytes || beforeTotal != _totalBytes)
         {
@@ -141,6 +127,28 @@ public sealed class DownloadItem : INotifyPropertyChanged
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Summary)));
         }
     }
+
+    /// <summary>CS-329：原生状态 → 状态机映射（UserCanceled→已取消；
+    /// 未知原生状态按中断呈现——不静默）。</summary>
+    internal static DownloadItemState MapNativeState(
+        CoreWebView2DownloadState state,
+        CoreWebView2DownloadInterruptReason interruptReason) => state switch
+    {
+        CoreWebView2DownloadState.InProgress => DownloadItemState.InProgress,
+        CoreWebView2DownloadState.Completed => DownloadItemState.Completed,
+        CoreWebView2DownloadState.Interrupted when interruptReason
+            == CoreWebView2DownloadInterruptReason.UserCanceled => DownloadItemState.Canceled,
+        CoreWebView2DownloadState.Interrupted => DownloadItemState.Interrupted,
+        _ => DownloadItemState.Interrupted,  // 未知原生状态按中断呈现（不静默）
+    };
+
+    /// <summary>CS-329：刷新异常 → 状态机映射（ObjectDisposedException=会话
+    /// 结束→已结束；其余→已中断——CS-111 兜底口径）。</summary>
+    internal static DownloadItemState MapRefreshException(Exception ex) => ex switch
+    {
+        ObjectDisposedException => DownloadItemState.Ended,
+        _ => DownloadItemState.Interrupted,
+    };
 
     private void SetState(DownloadItemState kind)
     {

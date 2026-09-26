@@ -63,9 +63,9 @@
     <Border DockPanel.Dock="Top" Background="#FF14141A" Padding="8,6">
       <DockPanel>
         <StackPanel Orientation="Horizontal">
-          <Button AutomationProperties.Name="后退" Style="{StaticResource NavBtn}" Content="←" Click="Back_Click" ToolTip="后退"/>
-          <Button AutomationProperties.Name="前进" Style="{StaticResource NavBtn}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
-          <Button AutomationProperties.Name="刷新页面" Style="{StaticResource NavBtn}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
+          <Button x:Name="BackButton" AutomationProperties.Name="后退" Style="{StaticResource NavBtn}" Content="←" Click="Back_Click" ToolTip="后退"/>
+          <Button x:Name="ForwardButton" AutomationProperties.Name="前进" Style="{StaticResource NavBtn}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
+          <Button x:Name="RefreshButton" AutomationProperties.Name="刷新页面" Style="{StaticResource NavBtn}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
         </StackPanel>
         <Button DockPanel.Dock="Right" AutomationProperties.Name="关闭无痕窗口" Content="关闭" Click="CloseWindow_Click" Height="34" Margin="8,0,0,0"
                 Background="#FF7F1D1D" Foreground="White" BorderThickness="0" Cursor="Hand" Padding="12,0"/>
@@ -80,6 +80,38 @@
         </Border>
       </DockPanel>
     </Border>
-    <Grid x:Name="WebViewHost"/>
+    <!-- CS-294（2026-09-26 审计）：导航失败/确认拒绝错误条（与主窗 ErrorPagePanel
+         同结构——此前无痕窗口无任何可见错误反馈面） -->
+    <Border x:Name="ErrorPagePanel" DockPanel.Dock="Top" Background="#FF2A1420" Padding="12,8"
+            Visibility="Collapsed">
+      <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
+    </Border>
+    <!-- CS-295（2026-09-26 审计）：导航确认面板遮罩（与主窗 ApprovalOverlay 同结构——
+         复用 ApprovalPanelController；此前确认门下无痕窗口零订阅，导航被静默取消） -->
+    <Grid>
+      <Grid x:Name="WebViewHost"/>
+      <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#9914141A">
+        <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"
+                Padding="20" Background="#FF23232D" BorderBrush="#66FFFFFF" BorderThickness="1"
+                CornerRadius="12">
+          <StackPanel>
+            <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource T1}" Margin="0,0,0,12"/>
+            <TextBlock Text="来源" FontWeight="SemiBold" Foreground="{StaticResource T1}"/>
+            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Foreground="{StaticResource T2}" Margin="0,0,0,8"/>
+            <TextBlock Text="路径与查询" FontWeight="SemiBold" Foreground="{StaticResource T1}"/>
+            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Foreground="{StaticResource T2}" Margin="0,0,0,8"/>
+            <TextBlock Text="权限范围" FontWeight="SemiBold" Foreground="{StaticResource T1}"/>
+            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Foreground="{StaticResource T2}" Margin="0,0,0,8"/>
+            <TextBlock x:Name="ApprovalExpiry" Foreground="#80FFFFFF" TextWrapping="Wrap" Margin="0,0,0,16"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88"
+                      Margin="0,0,8,0" Style="{StaticResource NavBtn}" Width="Auto" Height="32" FontSize="13"/>
+              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112" Height="32"
+                      Background="#FF3B82F6" Foreground="White" BorderThickness="0" Cursor="Hand" Padding="12,0"/>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Grid>
   </DockPanel>
 </Window>

@@ -4,8 +4,10 @@ using Aegis.Windows.Core.Favicons;
 using Xunit;
 
 /// <summary>C9 批（审计 2026-09-26）：favicon 磁盘缓存路径形态直测（CS-120）。
-/// 仅路径计算无 IO——AppPaths 指向真实用户目录也不落盘。</summary>
-public sealed class FaviconServiceTests
+/// 仅路径计算无 IO——AppPaths 指向真实用户目录也不落盘。
+/// C19b 批（审计 2026-09-26）：CS-328 进程级缓存面（负缓存命中短路按
+/// 持久化语境分面/InFlight 去重/TrimCaches 上限）经 internal 可测缝 + 抓取桩覆盖。</summary>
+public sealed class FaviconServiceTests : IDisposable
 {
     [Fact]
     public void CachePathNormalizesHostCase()
@@ -25,5 +27,91 @@ public sealed class FaviconServiceTests
         var name = Path.GetFileNameWithoutExtension(path);
         Assert.Equal(40, name.Length);
         Assert.Matches("^[0-9A-F]{40}$", name);
+    }
+
+    // ===== C19b 批：CS-328（桩注入——确定性驱动异步路径） =====
+
+    public FaviconServiceTests()
+    {
+        FaviconService.ClearCachesForTests();
+    }
+
+    public void Dispose()
+    {
+        FaviconService.FetchHookForTests = null;
+        FaviconService.ClearCachesForTests();
+    }
+
+    /// <summary>等待 in-flight 抓取结束（桩完成 + 移除）——确定性收敛。</summary>
+    private static async Task WaitForFlightSettleAsync(string host, bool persistToDisk)
+    {
+        for (var i = 0; i < 200; i++)
+        {
+            if (!FaviconService.IsInFlight(host, persistToDisk))
+                return;
+            await Task.Delay(10);
+        }
+    }
+
+    [Fact]
+    public async Task NegativeCache_IsScopedByPersistenceContext()
+    {
+        // CS-309/328：无痕语境抓取失败的负缓存不得短路普通语境——此前 Miss
+        // 只按 host（进程级共享），普通窗口首访直接命中负缓存不抓取
+        var host = $"miss-scope-{Guid.NewGuid():N}.invalid";
+        var gate = new TaskCompletionSource<System.Windows.Media.ImageSource?>();
+        FaviconService.FetchHookForTests = _ => gate.Task;
+
+        _ = FaviconService.Get(host, onLoaded: null, persistToDisk: false);
+        gate.SetResult(null);  // 抓取失败
+        await WaitForFlightSettleAsync(host, persistToDisk: false);
+
+        Assert.True(FaviconService.IsMissCached(host, persistToDisk: false));
+        Assert.False(FaviconService.IsMissCached(host, persistToDisk: true),
+            "无痕语境的负缓存不得泄漏到普通语境");
+    }
+
+    [Fact]
+    public async Task InFlight_SameHostConcurrentGets_AreDeduplicated()
+    {
+        // CS-328：同 host 并发首取只发起一次抓取（in-flight 去重）——
+        // 抓取桩计数锁定 GetOrAdd 工厂只执行一次
+        var host = $"dedupe-{Guid.NewGuid():N}.invalid";
+        var gate = new TaskCompletionSource<System.Windows.Media.ImageSource?>();
+        var fetchCount = 0;
+        FaviconService.FetchHookForTests = _ =>
+        {
+            fetchCount++;
+            return gate.Task;
+        };
+
+        _ = FaviconService.Get(host, onLoaded: null, persistToDisk: true);
+        _ = FaviconService.Get(host, onLoaded: null, persistToDisk: true);
+        _ = FaviconService.Get(host, onLoaded: null, persistToDisk: true);
+        Assert.True(FaviconService.IsInFlight(host, persistToDisk: true));
+
+        gate.SetResult(null);
+        await WaitForFlightSettleAsync(host, persistToDisk: true);
+        Assert.False(FaviconService.IsInFlight(host, persistToDisk: true));
+        Assert.Equal(1, fetchCount);  // 三次并发首取 → 一次真实抓取
+    }
+
+    [Fact]
+    public async Task TrimCaches_BoundsMissCache()
+    {
+        // CS-328：负缓存上限——超 MaxMemoryEntries 触发清空（Miss.Clear）
+        var host = $"trim-{Guid.NewGuid():N}.invalid";
+        var gate = new TaskCompletionSource<System.Windows.Media.ImageSource?>();
+        FaviconService.FetchHookForTests = _ => gate.Task;
+        // 预置 501 条负缓存（超过 500 上限——批量预置经测试缝）
+        for (var i = 0; i < 501; i++)
+            FaviconService.SeedMissForTests($"pre-{i}.example", persistToDisk: true);
+
+        _ = FaviconService.Get(host, onLoaded: null, persistToDisk: false);
+        gate.SetResult(null);  // miss → TrimCaches → Miss.Clear()
+        await WaitForFlightSettleAsync(host, persistToDisk: false);
+
+        Assert.True(FaviconService.MissCount <= 1,
+            $"超限后负缓存应被清空（实际 {FaviconService.MissCount}）");
     }
 }

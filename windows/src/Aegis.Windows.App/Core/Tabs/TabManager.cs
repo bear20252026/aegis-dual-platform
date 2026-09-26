@@ -13,7 +13,11 @@ public sealed class TabManager
 {
     private readonly ObservableCollection<Tab> _tabs = new();
     private int _currentIndex;
-    private readonly Stack<Tab> _closed = new();
+    // CS-293（2026-09-26 审计）：撤销栈改双端结构（LinkedList）——Stack 时代
+    // 的容量淘汰 `while (Count>20) Pop()` 从栈顶弹出的是**刚压入的最新关闭项**
+    // （关闭第 21 个标签时该标签立即不可恢复，与"撤销最近关闭"语义相反）；
+    // 现在淘汰 RemoveFirst（最旧），PopClosed 取 Last（最新——LIFO 语义不变）
+    private readonly LinkedList<Tab> _closed = new();
 
     /// <summary>CS-263：撤销栈容量（此前内联魔法数 20）。</summary>
     private const int UndoStackCapacity = 20;
@@ -113,12 +117,12 @@ public sealed class TabManager
             return CurrentTabId;
         var wasCurrent = index == _currentIndex;
         _tabs.RemoveAt(index);
-        _closed.Push(target);
+        _closed.AddLast(target);
         // 必须触发：订阅方（主/无痕窗口）在回调中摘树并 dispose 对应 WebView——
         // 此前事件从未 Invoke，每关一标签即泄漏一个 WebView2 实例直到关窗
         _tabClosed?.Invoke(target.TabId);
         while (_closed.Count > UndoStackCapacity)
-            _closed.Pop();
+            _closed.RemoveFirst();  // CS-293：淘汰最旧——最新关闭项必须可恢复
         if (_tabs.Count == 0)
         {
             _currentIndex = -1;
@@ -191,7 +195,13 @@ public sealed class TabManager
     }
 
     /// <summary>弹出最近关闭的标签快照（null=栈空）。恢复用 NewTab(url,title)。</summary>
-    public Tab? PopClosed() => _closed.Count > 0 ? _closed.Pop() : null;
+    public Tab? PopClosed()
+    {
+        if (_closed.Last is not { } last)
+            return null;
+        _closed.RemoveLast();
+        return last.Value;
+    }
 
     /// <summary>更新标签标题（页面 DocumentTitle 回填——原生绑定刷新标签条）。</summary>
     public void UpdateTitle(string tabId, string title)

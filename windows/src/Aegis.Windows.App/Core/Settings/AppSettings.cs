@@ -82,8 +82,11 @@ public sealed class AppSettings
         }
     }
 
-    /// <summary>把无法解析的设置文件改名备份（尽力而为——失败静默）。</summary>
-    private static void BackupCorruptFile(string path)
+    /// <summary>把无法解析的设置文件改名备份（尽力而为——失败静默）。
+    /// CS-302（2026-09-26 审计）：提 internal 共享——SettingsService.ReadSnapshot
+    /// 的坏文件分支复用同一备份口径（此前只回退默认不备份，用户坏档被
+    /// Apply(默认值) 覆盖后不可找回，与 AppSettings.Load 双口径）。</summary>
+    internal static void BackupCorruptFile(string path)
     {
         try
         {
@@ -96,9 +99,10 @@ public sealed class AppSettings
         }
     }
 
-    /// <summary>保存设置（原子写：temp+Replace——此前直写，半写崩溃即损坏；
-    /// 仅测试使用，运行期唯一写入口是 SettingsService.Apply）。</summary>
-    public void Save(string path)
+    /// <summary>CS-326（2026-09-26 审计）：原子写单源（temp+Replace/Move+
+    /// finally Delete）——AppSettings.Save 与 SettingsService.SaveCore 此前
+    /// 两份同形实现（漂移面）。半写崩溃不留损坏档。</summary>
+    internal static void AtomicWriteAllText(string path, string contents)
     {
         var dir = Path.GetDirectoryName(path);
         if (!string.IsNullOrEmpty(dir))
@@ -106,7 +110,7 @@ public sealed class AppSettings
         var temp = path + ".tmp." + Guid.NewGuid().ToString("N");
         try
         {
-            File.WriteAllText(temp, JsonSerializer.Serialize(this, JsonOptions));
+            File.WriteAllText(temp, contents);
             if (File.Exists(path)) File.Replace(temp, path, null);
             else File.Move(temp, path);
         }
@@ -115,4 +119,10 @@ public sealed class AppSettings
             if (File.Exists(temp)) File.Delete(temp);
         }
     }
+
+    /// <summary>保存设置（原子写：temp+Replace——此前直写，半写崩溃即损坏；
+    /// 仅测试使用，运行期唯一写入口是 SettingsService.Apply）。
+    /// CS-326：原子写经共享单源 AtomicWriteAllText。</summary>
+    public void Save(string path) =>
+        AtomicWriteAllText(path, JsonSerializer.Serialize(this, JsonOptions));
 }
