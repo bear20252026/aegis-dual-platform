@@ -10,11 +10,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -38,6 +40,9 @@ import androidx.compose.ui.unit.dp
  *
  * 标签胶囊骨架由 [TabChipCore] 单源提供（与 VerticalTabBar 共用）。
  *
+ * AD-086（2026-09-26 审计）：激活标签变化时滚动到可视区——超宽横向
+ * 标签栏此前溢出部分不可见（切到屏幕外标签无任何视觉反馈）。
+ *
  * @param tabs       标签列表（含标题/URL）
  * @param activeIndex 当前激活标签索引
  * @param onSelect   点击标签切换（参数为索引）
@@ -53,7 +58,12 @@ fun TabBar(
     onNewTab: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(activeIndex, tabs.size) {
+        if (activeIndex in tabs.indices) listState.animateScrollToItem(activeIndex)
+    }
     LazyRow(
+        state = listState,
         modifier =
             modifier
                 .fillMaxWidth()

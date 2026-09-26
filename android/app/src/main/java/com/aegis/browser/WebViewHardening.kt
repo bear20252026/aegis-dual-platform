@@ -55,7 +55,9 @@ internal object WebViewHardening {
         }
     }
 
-    /** 允许的 bridge 域名白名单（可动态扩展）。 */
+    /** 允许的 bridge 域名白名单（编译期固定单源——经占位符注入 bridge_guard
+     *  模板，与 Rust BridgeGuard 白名单同源；AD-076：原注「可动态扩展」与
+     *  实现不符——本表无任何运行期写入路径）。 */
     private val ALLOWED_BRIDGE_HOSTS =
         listOf(
             "aegis.local",

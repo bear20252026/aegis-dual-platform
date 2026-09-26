@@ -177,7 +177,8 @@ class AndroidBroker(
                         .plus(kotlin.time.Duration.parse("${SESSION_TTL_SECONDS}s")),
                 nonce = "$sessionId:${java.util.UUID.randomUUID().toString().replace("-", "")}",
                 policyVersion = policyVersion,
-                explanation = "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion",
+                explanation =
+                    "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion",
             )
         return Decision.Allow(action)
     }

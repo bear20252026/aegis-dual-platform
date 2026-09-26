@@ -217,14 +217,18 @@ class TabManagerTest {
         val second = tm.addTab(newWebView(), url = "https://b.example")
 
         tm.suspendAll()
-        // 全部挂起（含当前标签）
+        // 全部挂起（含当前标签）。AD-084：Tab 全 val——状态断言一律经 list()
+        // 快照按 id 取最新实例（挂起即 copy 替换，先前持有的引用是旧快照）。
         tm.list().forEach { assertTrue(it.suspended) }
 
         tm.resumeOnForeground()
+        val firstAfter = tm.list().first { it.id == first.id }
+        val secondAfter = tm.list().first { it.id == second.id }
         // 仅当前标签（second）恢复
-        assertTrue(second.suspended.not())
-        assertTrue(first.suspended)
-        assertSame(second, tm.current())
+        assertTrue(secondAfter.suspended.not())
+        assertTrue(firstAfter.suspended)
+        // current() 与 list() 快照持同一规范实例（copy 替换后的列表内对象）
+        assertSame(secondAfter, tm.current())
     }
 
     @Test

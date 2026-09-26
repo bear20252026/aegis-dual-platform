@@ -34,8 +34,10 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -147,7 +149,7 @@ class MainActivity : ComponentActivity() {
                                     modifier =
                                         Modifier
                                             .fillMaxWidth()
-                                            .heightIn(max = 420.dp)
+                                            .heightIn(max = UiDimens.READER_DIALOG_MAX_HEIGHT.dp)
                                             .verticalScroll(rememberScrollState()),
                                 )
                             }
@@ -188,7 +190,7 @@ class MainActivity : ComponentActivity() {
                         onDismissRequest = { viewModel.rejectPendingNavigationConfirmation() },
                         title = { Text(stringResource(R.string.confirm_title)) },
                         text = {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(UiDimens.SPACING_SMALL.dp)) {
                                 Text(stringResource(R.string.confirm_origin, pending.request.origin))
                                 Text(stringResource(R.string.confirm_path, pending.request.path))
                                 Text(stringResource(R.string.confirm_scope, pending.request.scope))
@@ -228,6 +230,7 @@ class MainActivity : ComponentActivity() {
                             )
                             WebContentArea(
                                 tabManager = requireNotNull(viewModel.getTabManager()),
+                                activeIndex = activeIndex,
                                 pageError = pageError,
                                 onRetry = { viewModel.retryCurrentPage() },
                                 onBackToSafePage = { viewModel.returnToSafeHome() },
@@ -256,6 +259,7 @@ class MainActivity : ComponentActivity() {
                         )
                         WebContentArea(
                             tabManager = requireNotNull(viewModel.getTabManager()),
+                            activeIndex = activeIndex,
                             pageError = pageError,
                             onRetry = { viewModel.retryCurrentPage() },
                             onBackToSafePage = { viewModel.returnToSafeHome() },
@@ -294,8 +298,11 @@ class MainActivity : ComponentActivity() {
         onTranslate: () -> Unit,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = UiDimens.SPACING_MEDIUM.dp, vertical = UiDimens.SPACING_SMALL.dp),
+            horizontalArrangement = Arrangement.spacedBy(UiDimens.SPACING_SMALL.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ChromeIconButton(stringResource(R.string.cd_back), "←", canGoBack, onBack)
@@ -321,15 +328,23 @@ class MainActivity : ComponentActivity() {
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { onOpen() }),
                 trailingIcon = {
-                    Text(
-                        text = stringResource(R.string.address_open),
-                        color = TextSecondary,
-                        style = MaterialTheme.typography.labelSmall,
+                    // AD-091（2026-09-26 审计）：「打开」补 Role.Button 语义且
+                    // 命中区扩到 48dp 最小交互尺寸（原裸 Text+clickable 目标
+                    // 过小，TalkBack 也不报按钮角色）
+                    Box(
+                        contentAlignment = Alignment.Center,
                         modifier =
                             Modifier
-                                .padding(end = 6.dp)
-                                .clickable(onClick = onOpen),
-                    )
+                                .clickable(onClick = onOpen, role = Role.Button)
+                                .minimumInteractiveComponentSize(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.address_open),
+                            color = TextSecondary,
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(end = UiDimens.SPACING_SMALL.dp),
+                        )
+                    }
                 },
             )
             ChromeIconButton(stringResource(R.string.cd_reader), "阅", true, onReader)
@@ -368,7 +383,7 @@ class MainActivity : ComponentActivity() {
             modifier =
                 semanticsModifier
                     .alpha(if (enabled) 1f else DISABLED_BUTTON_ALPHA)
-                    .size(38.dp),
+                    .size(UiDimens.ICON_BUTTON_SIZE.dp),
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Text(text = glyph, color = Color.White, style = MaterialTheme.typography.bodyMedium)
@@ -399,9 +414,11 @@ class MainActivity : ComponentActivity() {
         if (isFinishing) {
             // Activity 真正退出是确认 UI 的退出边界；任何待审批导航均须先撤销，不留可恢复能力。
             viewModel.rejectPendingNavigationConfirmation()
-            // 释放全部 WebView 持有的 Chromium 资源（统一销毁序列单源）
+            // 释放全部 WebView 持有的 Chromium 资源（统一销毁序列单源）。
+            // AD-072（2026-09-26 审计）：不再先 suspendAll——它只 pause 实例，
+            // 紧随的 tearDown 全量 destroy 使 pause 全部冗余（后台化挂起由
+            // onPause 的 suspendAll 承担，销毁路径不重复）。
             viewModel.getTabManager()?.let { tm ->
-                tm.suspendAll()
                 tm.list().forEach { tab -> SecureWebViewFactory.tearDown(tab.webView) }
             }
             // P0-5 修复：解除宿主引用（弱引用，不阻止 Activity 回收）。
@@ -431,31 +448,48 @@ class MainActivity : ComponentActivity() {
  *
  * P2-1 修复（全面审计 2026-09-04）：错误状态非空时在内容区上方渲染
  * [PageErrorPanel]（原实现 SSL/加载错误静默白屏，无任何反馈）。
+ *
+ * AD-088/089（2026-09-26 审计）：AndroidView 以 [activeIndex] 为 key 显式
+ * 重建并补 onRelease——原 update 读 tabManager.current()（非 Compose 状态），
+ * 换挂依赖「恰好有其他重组发生」，无重组时新标签 WebView 永不上屏；
+ * key 化后切换即重建容器，离屏时 onRelease 摘除旧 WebView 引用（容器
+ * 交还组合，WebView 生命周期仍归 TabManager/tearDown 所有）。
+ *
+ * @Suppress 与 AddressBarRow 同口径：回调装配点参数多系设计使然
+ * （AD-089 新增 activeIndex 键后触发阈值）。
  */
-@Suppress("FunctionNaming")
+@Suppress("FunctionNaming", "LongParameterList")
 @Composable
 private fun WebContentArea(
     tabManager: TabManager,
+    activeIndex: Int,
     pageError: PageError?,
     onRetry: () -> Unit,
     onBackToSafePage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Box(modifier = modifier) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { FrameLayout(it) },
-            update = { container ->
-                val current = tabManager.current()
-                if (current == null) return@AndroidView
-                val wv = current.webView
-                if (container.indexOfChild(wv) < 0) {
+        key(activeIndex) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { FrameLayout(it) },
+                update = { container ->
+                    val current = tabManager.current()
+                    if (current == null) return@AndroidView
+                    val wv = current.webView
+                    if (container.indexOfChild(wv) < 0) {
+                        container.removeAllViews()
+                        (wv.parent as? ViewGroup)?.removeView(wv)
+                        container.addView(wv)
+                    }
+                },
+                onRelease = { container ->
+                    // AD-088：容器随组合释放，摘除 WebView 引用（防容器持有
+                    // 已切走的标签 WebView——泄漏/双父挂载面）
                     container.removeAllViews()
-                    (wv.parent as? ViewGroup)?.removeView(wv)
-                    container.addView(wv)
-                }
-            },
-        )
+                },
+            )
+        }
         pageError?.let { error ->
             PageErrorPanel(
                 error = error,
@@ -482,12 +516,12 @@ private fun PageErrorPanel(
             Modifier
                 .fillMaxSize()
                 .background(ErrorOverlayBackground)
-                .padding(24.dp),
+                .padding(UiDimens.ERROR_PANEL_PADDING.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(UiDimens.SPACING_MEDIUM.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(
@@ -508,24 +542,34 @@ private fun PageErrorPanel(
                 textAlign = TextAlign.Center,
                 maxLines = 2,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Surface(onClick = onRetry, shape = CircleShape, color = ButtonOverlay) {
-                    Text(
-                        text = stringResource(R.string.error_retry),
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
-                    )
-                }
-                Surface(onClick = onBackToSafePage, shape = CircleShape, color = ButtonOverlay) {
-                    Text(
-                        text = stringResource(R.string.error_back_safe),
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
-                    )
-                }
+            Row(horizontalArrangement = Arrangement.spacedBy(UiDimens.SPACING_LARGE.dp)) {
+                ErrorActionButton(textRes = R.string.error_retry, onClick = onRetry)
+                ErrorActionButton(textRes = R.string.error_back_safe, onClick = onBackToSafePage)
             }
         }
+    }
+}
+
+/**
+ * 错误面板玻璃圆钮（重试/返回安全页共用骨架——同形 Surface+Text 消除重复，
+ * AD-078 起尺寸常量单源）。
+ */
+@Suppress("FunctionNaming")
+@Composable
+private fun ErrorActionButton(
+    textRes: Int,
+    onClick: () -> Unit,
+) {
+    Surface(onClick = onClick, shape = CircleShape, color = ButtonOverlay) {
+        Text(
+            text = stringResource(textRes),
+            color = Color.White,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier =
+                Modifier.padding(
+                    horizontal = UiDimens.ERROR_ACTION_PADDING_X.dp,
+                    vertical = UiDimens.SPACING_MEDIUM.dp,
+                ),
+        )
     }
 }

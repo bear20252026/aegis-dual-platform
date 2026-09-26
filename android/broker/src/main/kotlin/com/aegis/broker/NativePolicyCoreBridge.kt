@@ -21,9 +21,15 @@ class NativePolicyCoreBridge private constructor(
         tabId: String,
         generation: Long,
         ttlSeconds: Long,
-    ): Boolean = invokeBoolean { native.aegis_policy_core_broker_create_session(broker, sessionId, tabId, generation, ttlSeconds) }
+    ): Boolean =
+        invokeBoolean {
+            native.aegis_policy_core_broker_create_session(broker, sessionId, tabId, generation, ttlSeconds)
+        }
 
-    fun destroySession(sessionId: String): Boolean = invokeBoolean { native.aegis_policy_core_broker_destroy_session(broker, sessionId) }
+    fun destroySession(sessionId: String): Boolean =
+        invokeBoolean {
+            native.aegis_policy_core_broker_destroy_session(broker, sessionId)
+        }
 
     fun advanceDocumentGeneration(
         sessionId: String,

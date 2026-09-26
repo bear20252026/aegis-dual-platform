@@ -84,6 +84,10 @@ class BrowserViewModel(
      */
     private var addressDraftActive = false
 
+    /** AD-071（2026-09-26 审计）：导航防抖锚点上移至字段区（原散落在
+     *  navigateDebounceOk 之后，实例状态声明位置割裂）。 */
+    private var lastNavigateAttemptAt = 0L
+
     private val _tabsPosition = MutableStateFlow("top")
     val tabsPosition: StateFlow<String> = _tabsPosition.asStateFlow()
 
@@ -300,10 +304,12 @@ class BrowserViewModel(
         return allowed
     }
 
-    private var lastNavigateAttemptAt = 0L
-
-    /** 历史导航（后退/前进/刷新——合并减少函数数——detekt TooManyFunctions）。 */
+    /** 历史导航（后退/前进/刷新——合并减少函数数——detekt TooManyFunctions）。
+     *  AD-081（2026-09-26 审计）：补 lateinit 守卫——其余入口均有
+     *  isInitialized 检查，唯此函数裸访问 tabManager（init 前调用即抛
+     *  UninitializedPropertyAccessException）。 */
     fun navigateHistory(action: HistoryAction) {
+        if (!::tabManager.isInitialized) return
         val wv = tabManager.current()?.webView ?: return
         if (!SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(action).orFalse()) {
             _webViewAlert.value = alertText(R.string.history_unavailable)
@@ -440,60 +446,87 @@ class BrowserViewModel(
                         else -> alertText(R.string.nav_rejected_code, code)
                     }
             },
-            onPageUrlObserved = { webView, url ->
-                // P1-6 修复（全量复审 2026-09-01）：地址栏随实际页面同步。
-                // P2 修复：用户编辑草稿期间不覆盖输入（提交后恢复正常同步）。
-                // P2-1 修复（全面审计 2026-09-04）：onPageStarted → URL 变化即
-                // 清除错误面板（重试/新导航开始后旧错误不残留）。
-                if (tabManager.current()?.webView === webView) {
-                    _pageError.value = null
-                }
-                if (url.isNotBlank()) {
-                    // AD-036（2026-09-24 审计）：原地改 var url 不触发 StateFlow
-                    // （self-equals）——收敛到 TabManager.updateUrl copy 单写点
-                    // （与 updateTitle 同模式）。
-                    tabManager.list().firstOrNull { it.webView === webView }?.let {
-                        tabManager.updateUrl(it.id, url)
-                    }
-                    if (!addressDraftActive && tabManager.current()?.webView === webView) {
-                        _address.value = displayAddress(url)
-                    }
-                }
-            },
-            onTitleObserved = { webView, title ->
-                // P0 修复（全库审计 2026-09-02）：页面标题回填 Tab.title——
-                // 此前 onReceivedTitle 仅打日志，标签栏永远显示「新标签页」。
-                // P0 修复2（真机复测 2026-09-02）：原地改 var title 后 refresh()
-                // 不触发发射——list() 快照与 StateFlow 旧值持同一 Tab 实例，
-                // data class self-equals 恒 true。收敛到 TabManager.updateTitle
-                // （copy 替换实例）单写点。
-                if (title.isNotBlank()) {
-                    val target = tabManager.list().firstOrNull { it.webView === webView }
-                    // AD-033（2026-09-24 审计）：页面标题是远端可控输入——
-                    // 换行可伪造多行日志（logcat 注入），截断防日志洪泛。
-                    android.util.Log.i("Aegis", "R12 titleHit tab=${target?.id} title=${sanitizeTitleForLog(title)}")
-                    target?.let { tabManager.updateTitle(it.id, title) }
-                    refresh()
-                }
-            },
+            onPageUrlObserved = ::handlePageUrlObserved,
+            onTitleObserved = ::handleTitleObserved,
             onRendererGone = { deadWebView ->
                 // P1-3 修复（全量复审 2026-09-01）：渲染进程崩溃后重建当前标签
                 // 的 WebView 并重载原 URL（原 no-op——标签永久白屏）。
                 rebuildAfterRendererGone(deadWebView)
             },
-            onPageError = { webView, code, detail, isSsl, url ->
-                // P2-1 修复（全面审计 2026-09-04）：仅当前活动标签的错误上屏
-                // AD-035：错误码结构上抛——文案映射收敛在 app 层单源
-                if (tabManager.current()?.webView === webView) {
-                    _pageError.value =
-                        PageError(
-                            description = pageErrorText(code, detail),
-                            isSsl = isSsl,
-                            url = url,
-                        )
-                }
-            },
+            onPageError = ::handlePageError,
         )
+
+    /**
+     * AD-081：页面 URL 回调处理体（从 createSecureWebView 抽出——AD-081 补
+     * 的 lateinit 守卫使装配函数圈复杂度触顶，回调处理收敛为独立单职责函数）。
+     * P1-6 修复（全量复审 2026-09-01）：地址栏随实际页面同步。
+     * P2 修复：用户编辑草稿期间不覆盖输入（提交后恢复正常同步）。
+     * P2-1 修复（全面审计 2026-09-04）：onPageStarted → URL 变化即
+     * 清除错误面板（重试/新导航开始后旧错误不残留）。
+     */
+    private fun handlePageUrlObserved(
+        webView: WebView,
+        url: String,
+    ) {
+        if (!::tabManager.isInitialized) return
+        if (tabManager.current()?.webView === webView) {
+            _pageError.value = null
+        }
+        if (url.isNotBlank()) {
+            // AD-036（2026-09-24 审计）：原地改 var url 不触发 StateFlow
+            // （self-equals）——收敛到 TabManager.updateUrl copy 单写点
+            // （与 updateTitle 同模式）。
+            tabManager.list().firstOrNull { it.webView === webView }?.let {
+                tabManager.updateUrl(it.id, url)
+            }
+            if (!addressDraftActive && tabManager.current()?.webView === webView) {
+                _address.value = displayAddress(url)
+            }
+        }
+    }
+
+    /**
+     * AD-081：标题回调处理体（抽取动机同 [handlePageUrlObserved]）。
+     * P0 修复（全库审计 2026-09-02）：页面标题回填 Tab.title——
+     * 此前 onReceivedTitle 仅打日志，标签栏永远显示「新标签页」。
+     * P0 修复2（真机复测 2026-09-02）：原地改 var title 后 refresh()
+     * 不触发发射——list() 快照与 StateFlow 旧值持同一 Tab 实例，
+     * data class self-equals 恒 true。收敛到 TabManager.updateTitle
+     * （copy 替换实例）单写点。
+     */
+    private fun handleTitleObserved(
+        webView: WebView,
+        title: String,
+    ) {
+        if (!::tabManager.isInitialized || title.isBlank()) return
+        val target = tabManager.list().firstOrNull { it.webView === webView }
+        // AD-033（2026-09-24 审计）：页面标题是远端可控输入——
+        // 换行可伪造多行日志（logcat 注入），截断防日志洪泛。
+        android.util.Log.i("Aegis", "R12 titleHit tab=${target?.id} title=${sanitizeTitleForLog(title)}")
+        target?.let { tabManager.updateTitle(it.id, title) }
+        refresh()
+    }
+
+    /**
+     * AD-081：页面错误回调处理体（抽取动机同 [handlePageUrlObserved]）。
+     * P2-1 修复（全面审计 2026-09-04）：仅当前活动标签的错误上屏。
+     * AD-035：错误码结构上抛——文案映射收敛在 app 层单源。
+     */
+    private fun handlePageError(
+        webView: WebView,
+        code: String,
+        detail: String,
+        isSsl: Boolean,
+        url: String,
+    ) {
+        if (!::tabManager.isInitialized || tabManager.current()?.webView !== webView) return
+        _pageError.value =
+            PageError(
+                description = pageErrorText(code, detail),
+                isSsl = isSsl,
+                url = url,
+            )
+    }
 
     /** AD-046：提示文案经资源单源（init 后 appContext 必然可用）。 */
     private fun alertText(id: Int): String = appContext?.getString(id).orEmpty()

@@ -21,9 +21,6 @@ val TabActiveHighlight = Color(0x3DFFFFFF)
 /** 非激活标签底（较暗的半透明白） */
 val TabInactiveHighlight = Color(0x1AFFFFFF)
 
-/** 分组标题文字（次级白色） */
-val GroupLabelColor = Color(0x99FFFFFF)
-
 /** 窗口实底（edge-to-edge 下状态栏/导航栏挖空区的衬底——与工具栏同色系不透明版） */
 val ChromeBackground = Color(0xFF101827)
 

@@ -3,14 +3,10 @@ package com.aegis.browser
 import android.annotation.SuppressLint
 import android.net.Uri
 import android.webkit.PermissionRequest
-import android.webkit.RenderProcessGoneDetail
-import android.webkit.SafeBrowsingResponse
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
-import android.webkit.WebViewClient
 
 class BrowserEngine(
     private val webView: WebView,

@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -31,9 +29,14 @@ import androidx.compose.ui.unit.dp
  *
  * 2026-09-02 视觉重构：标题超出省略（防长标题把关闭钮挤出可视区）；
  * 关闭钮由 TextButton（最小触摸目标扩展会把「×」画出 32dp 槽位）改为
- * 28dp 紧凑圆钮，与外层胶囊边界对齐。
+ * 紧凑圆钮，与外层胶囊边界对齐。
  *
- * @param tab           标签数据（标题/固定标记）
+ * AD-092（2026-09-26 审计）：关闭钮命中区扩到 32dp（胶囊内可用的最大尺寸，
+ * 28→32 命中面积 +31%）——48dp 无障碍基线在 32/34dp 高的胶囊内放不下，且
+ * Surface 按形状裁剪命中测试，超出胶囊边界的点击区无意义；字形仍居中 28dp
+ * 视觉不变。
+ *
+ * @param tab           标签数据（标题）
  * @param active        激活态（更亮的半透明白高亮）
  * @param modifier      应用在 Surface 上的尺寸修饰（各标签栏自行定义）
  * @param titleModifier 应用在标题 Text 上的修饰（纵向栏传 weight(1f)）
@@ -62,9 +65,7 @@ internal fun TabChipCore(
             modifier = Modifier.padding(start = 12.dp, end = 2.dp),
         ) {
             Text(
-                text =
-                    (if (tab.pinned) "\uD83D\uDCCC " else "") +
-                        tab.title.ifBlank { "新标签页" },
+                text = tab.title.ifBlank { TabManager.DEFAULT_TAB_TITLE },
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -82,7 +83,7 @@ internal fun TabChipCore(
                 contentAlignment = Alignment.Center,
                 modifier =
                     Modifier
-                        .size(28.dp)
+                        .size(32.dp)
                         .semantics {
                             contentDescription = closeDescription
                             role = Role.Button
@@ -93,7 +94,6 @@ internal fun TabChipCore(
                     color = Color.White,
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.width(28.dp),
                 )
             }
         }

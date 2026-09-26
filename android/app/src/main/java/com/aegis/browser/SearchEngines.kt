@@ -99,9 +99,15 @@ object SearchEngines {
     ): String? =
         when (classifyInput(input)) {
             InputKind.EMPTY, InputKind.FORBIDDEN_SCHEME -> null
+
             InputKind.ABOUT_BLANK -> "about:blank"
-            InputKind.ABSOLUTE_URL -> canonicalizeExternal(input.trim().replace(" ", "%20"))
+
+            // AD-077（2026-09-26 审计）：不再在调用点预替换空格——
+            // canonicalizeExternal 内部已做 %20 编码（此前双处连续 replace）
+            InputKind.ABSOLUTE_URL -> canonicalizeExternal(input.trim())
+
             InputKind.DOMAIN -> canonicalizeExternal("https://" + input.trim())
+
             InputKind.SEARCH -> searchUrl(input.trim(), engineKey)
         }
 
