@@ -9,6 +9,20 @@ public sealed class FingerprintShieldTests
 {
     private const string SeedA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+    // ===== CS-185（审计 2026-09-26）：非法种子入口拒绝 =====
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0123456789abcdef")]                                        // 过短
+    [InlineData("0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF12")]  // 大写（契约小写）
+    [InlineData("g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]    // 非 hex
+    [InlineData("'; evil(); '0123456789abcdef0123456789abcdef0123456789abc")]           // 注入形态
+    public void BuildScript_RejectsInvalidSeeds(string? seed)
+    {
+        Assert.Throws<ArgumentException>(() => FingerprintShield.BuildScript(seed!));
+    }
+
     [Fact]
     public void NewSessionSeedIs64HexCharsAndUnique()
     {
@@ -99,4 +113,19 @@ public sealed class FingerprintShieldTests
         Assert.Contains("lowerSet[k.toLowerCase()]", script);
         Assert.DoesNotContain("searchParams.has(p)", script);
     }
+}
+
+/// <summary>C14 批（审计 2026-09-26）：WebView2 加收紧面直测（CS-183——
+/// 受信本地虚拟主机白名单零覆盖补齐）。</summary>
+public sealed class WebView2HardeningTests
+{
+    [Theory]
+    [InlineData("ntp.aegis.local", true)]
+    [InlineData("NTP.AEGIS.LOCAL", true)]     // 大小写不敏感
+    [InlineData("chrome.aegis.local", true)]  // 预留宿主在白名单
+    [InlineData("evil.example", false)]
+    [InlineData("sub.ntp.aegis.local", false)] // 子域不匹配（精确白名单）
+    [InlineData("", false)]
+    public void IsTrustedLocalHost_ExactWhitelistOnly(string host, bool expected) =>
+        Assert.Equal(expected, WebView2Hardening.IsTrustedLocalHost(host));
 }

@@ -1,6 +1,7 @@
 namespace Aegis.Windows.WebView;
 
 using System;
+using System.Threading.Tasks;
 using Aegis.Windows.Core.Security;
 using Microsoft.Web.WebView2.Core;
 
@@ -62,8 +63,15 @@ public static class WebView2Hardening
 
         // 指纹防护前置注入（文档创建前执行——页面脚本无法绕过；M3 全量
         // 红蓝对抗管道——每标签会话独立 32 字节加密随机种子）
-        core.AddScriptToExecuteOnDocumentCreatedAsync(
-            FingerprintShield.BuildScript(FingerprintShield.NewSessionSeed()));
+        // CS-182：注入不再 fire-and-forget——失败留痕（注入静默失败=指纹
+        // 防护整段失效且不可观测）
+        _ = core.AddScriptToExecuteOnDocumentCreatedAsync(
+                FingerprintShield.BuildScript(FingerprintShield.NewSessionSeed()))
+            .ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                    SecurityLog.Write($"[security] 标签 {tabId}: 指纹防护注入失败: {t.Exception?.GetBaseException().Message}");
+            }, TaskScheduler.Default);
         SecurityLog.Write($"[security] 标签 {tabId}: 指纹防护全量管道已注入（页面脚本前生效）");
         applied++;
         return applied;

@@ -6,6 +6,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Aegis.Windows.Core.Privacy;
+using Aegis.Windows.Core.Security;
 using Microsoft.Web.WebView2.Core;
 
 /// <summary>共享 WebView2 环境（全局单例——所有标签共用，避免多环境开销）。
@@ -16,16 +17,20 @@ using Microsoft.Web.WebView2.Core;
 ///   存活窗口仍在使用的数据目录）。</summary>
 public static class WebViewEnvironment
 {
-    private static Task<CoreWebView2Environment>? _shared;
+    // CS-178：Lazy（ExecutionAndPublication）——`??=` 赋值非原子，两个标签
+    // 并发首开可各建一个环境（其中一个连同其浏览器进程泄漏）
+    private static readonly Lazy<Task<CoreWebView2Environment>> Shared =
+        new(() => CreateAsync(null));
+
     private static readonly object _inPrivateLock = new();
     private static readonly List<string> _inPrivateDirs = new();
 
+    // CS-181：临时目录清理重试参数（WebView2 子进程退出有延迟——锁定窗口内删除必然失败）
+    private const int DeleteRetryCount = 5;
+    private const int DeleteRetryDelayMs = 800;
+
     /// <summary>共享环境（惰性创建——参数依 PrivacySettings.SecureDns）。</summary>
-    public static Task<CoreWebView2Environment> SharedAsync()
-    {
-        _shared ??= CreateAsync(null);
-        return _shared;
-    }
+    public static Task<CoreWebView2Environment> SharedAsync() => Shared.Value;
 
     /// <summary>InPrivate 环境（每个无痕窗口独立用户目录）。返回租约——窗口
     /// 关闭时 Dispose，最后一个租约释放后异步清理全部临时目录。</summary>
@@ -66,7 +71,7 @@ public static class WebViewEnvironment
 
     private static void DeleteWithRetry(string dir)
     {
-        for (var i = 0; i < 5; i++)
+        for (var i = 0; i < DeleteRetryCount; i++)
         {
             try
             {
@@ -76,14 +81,19 @@ public static class WebViewEnvironment
             }
             catch (Exception)
             {
-                System.Threading.Thread.Sleep(800);  // WebView2 可能仍持有锁——重试
+                System.Threading.Thread.Sleep(DeleteRetryDelayMs);  // WebView2 可能仍持有锁——重试
             }
         }
+        // CS-180：重试全败不再静默——临时目录残留可观测（磁盘占用/隐私审计）
+        SecurityLog.Write($"[inprivate] 无痕临时目录清理失败（保留待下次清理）: {dir}");
     }
 
     private static async Task<CoreWebView2Environment> CreateAsync(string? userDataFolder)
     {
         var options = new CoreWebView2EnvironmentOptions();
+        // CS-179：DoH 仅注入默认环境为既定口径——无痕隔离承诺由独立临时数据
+        // 目录兑现；DoH 为进程级浏览器参数且依赖设置快照时点（无痕窗口随开
+        // 随关）。如需为无痕单独启用，按 device-validation runbook 真机评估后放开。
         if (PrivacySettings.SecureDns && userDataFolder is null)
         {
             options.AdditionalBrowserArguments =

@@ -17,8 +17,29 @@ public static class FingerprintShield
         RandomNumberGenerator.GetHexString(64).ToLowerInvariant();
 
     /// <summary>构建管道注入脚本（种子参数化——同一种子输出逐字节一致，
-    /// 便于单测锁定；种子只进 JS 常量，不落盘不外传）。</summary>
-    public static string BuildScript(string sessionSeed) =>
+    /// 便于单测锁定；种子只进 JS 常量，不落盘不外传）。
+    /// CS-184：入口校验 fail-closed——种子必须为 64 位小写十六进制
+    /// （NewSessionSeed 契约），非法输入抛出而非直插 JS 单引号常量
+    /// （注入面：恶意种子可破坏脚本闭包逃逸执行）。</summary>
+    public static string BuildScript(string sessionSeed)
+    {
+        if (sessionSeed is null || sessionSeed.Length != 64 || !IsLowerHex(sessionSeed))
+            throw new ArgumentException("会话种子必须为 64 位小写十六进制字符", nameof(sessionSeed));
+        return BuildScriptCore(sessionSeed);
+    }
+
+    private static bool IsLowerHex(string value)
+    {
+        foreach (var ch in value)
+        {
+            var isHex = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+            if (!isHex)
+                return false;
+        }
+        return true;
+    }
+
+    private static string BuildScriptCore(string sessionSeed) =>
         $$"""
         // Aegis Fingerprint Pipeline v3 (Red/Blue Hardened) — C# native port
         (function() {

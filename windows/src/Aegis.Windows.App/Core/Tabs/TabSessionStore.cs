@@ -76,18 +76,19 @@ public sealed class TabSessionStore
         {
             using var connection = Open();
             using var select = connection.CreateCommand();
-            select.CommandText = "SELECT position, tab_id, url, title, is_current, is_pinned FROM tabs ORDER BY position";
+            // CS-186：position 不再 SELECT（仅作排序键）——读取列数减一
+            select.CommandText = "SELECT tab_id, url, title, is_current, is_pinned FROM tabs ORDER BY position";
             using var reader = select.ExecuteReader();
             var tabs = new List<SessionTab>();
             while (reader.Read())
             {
                 var tab = new SessionTab(
-                    reader.GetString(1),
-                    reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
-                    reader.IsDBNull(3) ? "新标签页" : reader.GetString(3),
-                    !reader.IsDBNull(5) && reader.GetInt64(5) == 1);
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    reader.IsDBNull(2) ? "新标签页" : reader.GetString(2),
+                    !reader.IsDBNull(4) && reader.GetInt64(4) == 1);
                 tabs.Add(tab);
-                if (!reader.IsDBNull(4) && reader.GetInt64(4) == 1)
+                if (!reader.IsDBNull(3) && reader.GetInt64(3) == 1)
                     currentTabId = tab.TabId;
             }
             currentTabId ??= tabs.LastOrDefault()?.TabId;

@@ -67,6 +67,55 @@ public sealed class TabSessionStoreTests : IDisposable
     }
 
     [Fact]
+    public void SaveEmptyListClearsPreviousSession()
+    {
+        // CS-187：空列表保存=清空会话（重启后不复活已关闭的旧标签）
+        var store = new TabSessionStore(_dbPath);
+        store.Save(
+        [
+            new("tab-a", "https://a.example", "A"),
+            new("tab-b", "https://b.example", "B"),
+        ], "tab-a");
+
+        store.Save([], null);
+        var loaded = store.Load(out var currentTabId);
+
+        Assert.Empty(loaded);
+        Assert.Null(currentTabId);
+    }
+
+    [Fact]
+    public void CorruptedCurrentMarkerFallsBackToLastRow()
+    {
+        // CS-188：is_current 标记被损坏清零（部分写/外部篡改）→ 末位标签生效，
+        // 不抛异常也不产生 null current
+        var store = new TabSessionStore(_dbPath);
+        store.Save(
+        [
+            new("tab-a", "https://a.example", "A"),
+            new("tab-b", "https://b.example", "B"),
+            new("tab-c", "https://c.example", "C"),
+        ], "tab-a");
+
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+            new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+            {
+                DataSource = _dbPath,
+                Pooling = false,  // 不入池——否则连接句柄长持文件，Dispose 删库失败
+            }.ToString()))
+        {
+            connection.Open();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "UPDATE tabs SET is_current = 0";
+            cmd.ExecuteNonQuery();
+        }
+
+        var loaded = store.Load(out var currentTabId);
+        Assert.Equal(3, loaded.Count);
+        Assert.Equal("tab-c", currentTabId);  // 末行兜底
+    }
+
+    [Fact]
     public void CorruptedDatabaseLoadsEmptyFailSafe()
     {
         // fail-safe 契约：库损坏 → 空会话（不阻断启动——绝不因恢复失败崩浏览器）

@@ -163,6 +163,7 @@ public partial class InPrivateWindow : Window
             var on = pair.Key == _activeTabId;
             System.Windows.Controls.Panel.SetZIndex(pair.Value.Control, on ? 5 : 0);
             pair.Value.Control.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+            pair.Value.Control.IsHitTestVisible = on;  // CS-177：对齐 MainWindow 切换口径
         }
         WebViewHost.UpdateLayout();
         SyncAddressBar(tab);
