@@ -15,7 +15,8 @@ public sealed class NtpBridgeTests
         string? wallpaper = null,
         Action<string>? onSetWallpaper = null,
         Action<string>? onNavigate = null,
-        Action? onRestore = null) => new(
+        Action? onRestore = null,
+        Func<int, string?, (int, int, System.Collections.Generic.IReadOnlyList<NtpBridge.ImportResult>)>? onImportHistory = null) => new(
         SearchEngine: () => engine ?? "baidu",
         SetSearchEngine: onSetEngine ?? (_ => { }),
         Wallpaper: () => wallpaper ?? NtpAssets.DefaultWallpaper,
@@ -31,7 +32,7 @@ public sealed class NtpBridgeTests
             new("chrome", true, true),
         },
         ImportBookmarks: _ => (0, 0, new List<NtpBridge.ImportResult>()),
-        ImportHistory: (_, _) => (0, 0, new List<NtpBridge.ImportResult>()));
+        ImportHistory: onImportHistory ?? ((_, _) => (0, 0, new List<NtpBridge.ImportResult>())));
 
     [Theory]
     [InlineData("https://ntp.aegis.local/start.html", true)]
@@ -258,6 +259,22 @@ public sealed class NtpBridgeTests
         Assert.False(NtpAssets.IsWallpaperAllowed(null));
     }
 
+    [Fact]
+    public void ImportHistory_AcceptsStringNumberArg()
+    {
+        // CS-190：args 数字以字符串形态传入（"100"）——此前仅 Number 分支可解析
+        int? captured = null;
+        var bridge = new NtpBridge(FakeServices(onImportHistory: (limit, _) =>
+        {
+            captured = limit;
+            return (0, 0, new List<NtpBridge.ImportResult>());
+        }));
+
+        bridge.Dispatch("importHistory", Args("100"));
+
+        Assert.Equal(100, captured);
+    }
+
     private static JsonElement EmptyArgs() => Args();
 
     private static JsonElement Args(params string[] values)
@@ -267,4 +284,30 @@ public sealed class NtpBridgeTests
             : "[" + string.Join(",", values.Select(v => JsonSerializer.Serialize(v))) + "]";
         return JsonSerializer.Deserialize<JsonElement>(raw);
     }
+}
+
+/// <summary>C15 批（审计 2026-09-26）：NtpAssets 纯判定直测——虚拟主机地址
+/// 与壁纸白名单（CS-194/195）。</summary>
+public sealed class NtpAssetsTests
+{
+    [Theory]
+    [InlineData("https://ntp.aegis.local/start.html", true)]
+    [InlineData("https://NTP.AEGIS.LOCAL/start.html", true)]   // host 大小写不敏感
+    [InlineData("https://geo.aegis.local/GeoGebra/HTML5/5.0/GeoGebra.html", true)]
+    [InlineData("https://evil.example/start.html", false)]
+    [InlineData("https://sub.ntp.aegis.local/x", false)]       // 子域不算虚拟主机
+    [InlineData("about:blank", false)]
+    [InlineData(null, false)]
+    public void IsVirtualHostUrl_AcceptsOnlyTrustedHosts(string? url, bool expected) =>
+        Assert.Equal(expected, NtpAssets.IsVirtualHostUrl(url));
+
+    [Theory]
+    [InlineData("aurora-magenta.jpg", true)]
+    [InlineData("aurora-violet.jpg", true)]
+    [InlineData("../../etc/passwd", false)]   // 路径形态拒绝
+    [InlineData("aurora-unknown.jpg", false)] // 未登记拒绝
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsWallpaperAllowed_WhitelistOnly(string? name, bool expected) =>
+        Assert.Equal(expected, NtpAssets.IsWallpaperAllowed(name));
 }

@@ -109,6 +109,15 @@ public sealed class ChromeControllersTests
         Assert.Equal(new[] { 1, 3 }, filtered.Select(s => s.Item2));
     }
 
+    [Fact]
+    public void FilterSources_BrowserNameIsCaseSensitive()
+    {
+        // CS-192：大小写语义锁定——过滤词与来源名精确匹配（"CHROME" 不命中）
+        var sources = new[] { ("chrome", 1), ("edge", 2) };
+        Assert.Empty(NtpBridgeFactory.FilterSources(sources, "CHROME", s => s.Item1));
+        Assert.Single(NtpBridgeFactory.FilterSources(sources, "chrome", s => s.Item1));
+    }
+
     // ===== CS-145（审计 2026-09-26）：URL 去重忽略大小写（host 大小写变体） =====
 
     [Fact]

@@ -50,6 +50,25 @@ public sealed class AuditRegressionTests : IDisposable
     public void AcceptsNormalPublicHost() =>
         Assert.True(UrlSafety.IsPublicHost("example.com"));
 
+    [Fact]
+    public void AcceptsLegalPublicIpv6HostLiteral()
+    {
+        // CS-200：合法公网 IPv6 字面量作 host 放行
+        Assert.True(UrlSafety.IsPublicHost("2606:4700::1111"));
+        Assert.True(UrlSafety.IsPublicHttpUrl("https://[2606:4700::1111]/x"));
+    }
+
+    [Theory]
+    [InlineData("fe80::1%25eth0")]   // zone-id（URL 编码 %25 → %eth0 接口名）
+    [InlineData("fe80::1%4")]        // 数字 zone-id（TryParse 可达但非公网）
+    [InlineData("[fe80::1]")]        // 方括号残留——此前兜底判"公网主机名"放行
+    [InlineData("fe80::1%eth0")]     // 接口名 zone（部分平台 TryParse 失败形态）
+    public void RejectsIpv6ZoneForms(string host)
+    {
+        // CS-201：zone-id 形态一律拒绝——解析失败不得落到公网主机名兜底
+        Assert.False(UrlSafety.IsPublicHost(host));
+    }
+
     // ═══ OriginPolicy：host 白名单校验 ═══
 
     [Theory]

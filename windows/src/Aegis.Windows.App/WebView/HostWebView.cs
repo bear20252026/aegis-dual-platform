@@ -214,9 +214,7 @@ public sealed class HostWebView : IDisposable
             var level = _privacy.ProtectionLevel;
             if (level <= 0)
                 return;
-            var pageHost = Uri.TryCreate(webView.Source, UriKind.Absolute, out var page)
-                ? page.Host
-                : string.Empty;
+            var pageHost = ResolvePageHost(webView.Source);
             // 受信虚拟主机（NTP/GeoGebra）子资源：黑名单仍拦截（上文已处理），
             // 但跳过第三方/跟踪判定——严格模式 + 跨站导航过渡期会把自带页的
             // JS/WASM 误判为第三方而 403（pageHost 仍是旧的远程 host）。
@@ -350,8 +348,30 @@ public sealed class HostWebView : IDisposable
             pending.Scope);
     }
 
+    // CS-198：pageHost 解析缓存——每个子资源请求都重 Parse webView.Source
+    // （同页上百子资源重复解析）；来源串不变即复用，导航换页即失效
+    private string? _pageHostCacheSource;
+    private string _pageHostCacheValue = string.Empty;
+
+    private string ResolvePageHost(string? source)
+    {
+        if (!string.Equals(_pageHostCacheSource, source, StringComparison.Ordinal))
+        {
+            _pageHostCacheSource = source;
+            _pageHostCacheValue = Uri.TryCreate(source, UriKind.Absolute, out var page)
+                ? page.Host
+                : string.Empty;
+        }
+        return _pageHostCacheValue;
+    }
+
     private bool AdvanceDocumentGenerationIfNeeded()
     {
+        // CS-199：代际饱和前置守卫——checked 溢出异常发生在导航事件链上
+        // 即崩溃面；int 代际实际不可达，守卫为契约兜底（饱和按推进失败
+        // fail-closed 拒绝）
+        if (_documentGeneration == int.MaxValue)
+            return false;
         var nextGeneration = checked(_documentGeneration + 1);
         if (!_broker.UpdateDocumentGeneration(_sessionId, _tabId, nextGeneration))
             return false;

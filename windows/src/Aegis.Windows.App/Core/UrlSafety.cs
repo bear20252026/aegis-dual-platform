@@ -52,6 +52,14 @@ public static class UrlSafety
         // 主机名形式的本地/保留名
         if (normalized.Equals("localhost", StringComparison.Ordinal))
             return false;
+        // Uri.Host 对 IPv6 字面量保留方括号——剥离包裹后按 IP 字面量判定
+        // （此前方括号形态整体落到"公网主机名"兜底：连链路本地/私网都放行）
+        if (normalized.Length > 2 && normalized.StartsWith('[') && normalized.EndsWith(']'))
+            normalized = normalized[1..^1];
+        // CS-201：IPv6 zone-id 形态（fe80::1%25eth0）与未闭合方括号残留——
+        // TryParse 失败时绝不可落到"公网主机名"兜底放行（链路本地逃逸面）
+        if (normalized.Contains('%') || normalized.Contains('[') || normalized.Contains(']'))
+            return false;
         if (IPAddress.TryParse(normalized, out var address))
             return IsPublicIp(address);
         if (TryParseAlternateIpv4(normalized, out var altAddress))

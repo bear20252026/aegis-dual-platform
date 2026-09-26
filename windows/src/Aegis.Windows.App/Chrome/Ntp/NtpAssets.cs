@@ -60,14 +60,23 @@ public static class NtpAssets
         && (uri.Host.Equals(HostName, StringComparison.OrdinalIgnoreCase)
             || uri.Host.Equals(GeoHostName, StringComparison.OrdinalIgnoreCase));
 
+    // CS-193：进程级缓存——exe 旁资源布局进程内不变，此前每标签创建都
+    // File.Exists 打一次盘（缺失结果同样缓存：发布物缺失是稳定态）
+    private static string? _contentRoot;
+    private static bool _contentRootResolved;
+
     /// <summary>定位发布输出的 ntp/ 资源根（exe 旁——csproj 单源拷贝）。
     /// 缺失返回 null（虚拟主机不映射——NTP 显示宿主错误页，绝不回退 file://）。</summary>
     public static string? ResolveContentRoot()
     {
+        if (_contentRootResolved)
+            return _contentRoot;
         var candidate = Path.Combine(AppContext.BaseDirectory, "ntp", "start.html");
-        return File.Exists(candidate)
+        _contentRoot = File.Exists(candidate)
             ? Path.GetDirectoryName(candidate)!
             : null;
+        _contentRootResolved = true;
+        return _contentRoot;
     }
 
     /// <summary>定位离线几何画板资源根（含 GeoEntryPath 的目录）。查找顺序：

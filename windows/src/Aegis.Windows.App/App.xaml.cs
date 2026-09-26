@@ -5,11 +5,37 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Threading;
 using Aegis.Windows.Core.Security;
+/// <summary>CS-196：弹窗频控器提纯——窗口内前 N 次放行、此后静默
+///（此前逻辑内联在 App 静态数组上不可直测）。</summary>
+internal sealed class PopupRateLimiter(int slots)
+{
+    private readonly long[] _ticks = new long[slots];
+    private readonly object _lock = new();
+
+    /// <summary>到期槽位被当前时刻占用并放行；全部槽位都在窗口期内则拒绝。</summary>
+    public bool ShouldShow(long nowTicks, long windowMs)
+    {
+        lock (_lock)
+        {
+            for (var i = 0; i < _ticks.Length; i++)
+            {
+                if (nowTicks - _ticks[i] >= windowMs)
+                {
+                    _ticks[i] = nowTicks;
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+}
+
 public partial class App : Application
 {
     // 弹窗频控：持续性异常（如每帧渲染错误）此前会造成无限 MessageBox 循环，
     // 应用既无法操作也无法退出——30 秒窗口内最多弹 3 次，超出只记日志
-    private static readonly long[] PopupTicks = new long[3];
+    private static readonly PopupRateLimiter PopupLimiter = new(3);
+    private const long PopupWindowMs = 30_000;
 
     public App()
     {
@@ -44,22 +70,8 @@ public partial class App : Application
         e.Handled = true;  // 已处理——应用不退出（频控超限时静默吞掉并持续记日志）
     }
 
-    private static bool ShouldShowPopup()
-    {
-        var now = Environment.TickCount64;
-        lock (PopupTicks)
-        {
-            foreach (var tick in PopupTicks)
-            {
-                if (now - tick >= 30_000)
-                {
-                    PopupTicks[Array.IndexOf(PopupTicks, tick)] = now;
-                    return true;
-                }
-            }
-            return false;  // 30s 内已弹 3 次——静默
-        }
-    }
+    private static bool ShouldShowPopup() =>
+        PopupLimiter.ShouldShow(Environment.TickCount64, PopupWindowMs);
 
     private static void TryLog(string message)
     {
@@ -78,8 +90,17 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        var window = new Chrome.MainWindow(Chrome.MainWindowDependencies.Defaults());
-        MainWindow = window;
-        window.Show();
+        try
+        {
+            var window = new Chrome.MainWindow(Chrome.MainWindowDependencies.Defaults());
+            MainWindow = window;
+            window.Show();
+        }
+        catch (Exception ex)
+        {
+            // CS-197：组合根/主窗构造失败留痕——此前直接进程退出且零痕迹
+            TryLog($"[fatal] 主窗口构造失败: {ex.GetType().Name}: {ex.Message}{Environment.NewLine}{ex}");
+            throw;
+        }
     }
 }

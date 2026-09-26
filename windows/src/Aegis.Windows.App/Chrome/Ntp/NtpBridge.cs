@@ -78,9 +78,11 @@ public sealed class NtpBridge
                 ? argsElement.Clone()
                 : JsonSerializer.SerializeToElement(Array.Empty<object>());
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or FormatException or InvalidOperationException)
         {
-            return;  // 非协议消息忽略
+            // CS-189：仅捕 JsonException 不够——超大数字 id 的 GetInt64 抛
+            // FormatException，ValueKind 组合异常面由此统一接住（非协议消息忽略）
+            return;
         }
         // CS-031：导入三操作 = 浏览器配置文件/历史库文件 I/O——UI 线程同步跑
         // 会卡住整个窗口。宿主提供调度器时：Task.Run 执行 I/O，完成后经

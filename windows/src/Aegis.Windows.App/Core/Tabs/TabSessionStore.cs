@@ -63,6 +63,25 @@ public sealed class TabSessionStore
         }
     }
 
+    /// <summary>CS-191：已存会话条数——COUNT 聚合直达（此前 NtpBridge hasSaved
+    /// 走全量 Load 只为数数）。库缺失/损坏返回 0（fail-safe）。</summary>
+    public int CountSaved()
+    {
+        if (!File.Exists(_dbPath))
+            return 0;
+        try
+        {
+            using var connection = Open();
+            using var select = connection.CreateCommand();
+            select.CommandText = "SELECT COUNT(*) FROM tabs";
+            return Convert.ToInt32(select.ExecuteScalar());
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
+        {
+            return 0;
+        }
+    }
+
     /// <summary>加载上次会话；无记录/库损坏返回空（fail-safe——不阻断启动）。
     /// is_current 丢失（旧库/异常）时回退末位标签。</summary>
     public IReadOnlyList<SessionTab> Load() => Load(out _);

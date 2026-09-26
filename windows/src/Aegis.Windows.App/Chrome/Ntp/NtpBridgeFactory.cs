@@ -84,7 +84,7 @@ public sealed class NtpBridgeFactory
             _settingsService.Apply(_settings);
         },
         Bookmarks: () => _bookmarks.All(),
-        SavedSessionCount: () => _sessionStore.Load().Count,
+        SavedSessionCount: () => _sessionStore.CountSaved(),  // CS-191：COUNT 聚合替代全量 Load
         RestoreSession: _restoreSession,
         Navigate: target =>
         {
