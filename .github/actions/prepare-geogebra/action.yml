@@ -2,7 +2,10 @@ name: 'Prepare offline GeoGebra pad'
 description: >
   从仓库 Release 资产拉取 GeoGebra Math Apps Bundle 并解压到目标目录，
   断言入口文件存在（fail-closed）。供 release-android（APK assets）与
-  release-windows（PyInstaller datas）复用——单一修改点，杜绝步骤漂移。
+  release-windows（C# 安装包内置画板——SP-145 后暂存 dist/geogebra-cache）
+  复用——单一修改点，杜绝步骤漂移。
+  SP-169（2026-09-26 审计）：原描述仍提 release-windows 的 PyInstaller datas
+  用途——单轨 C# 后该用途已不存在，已更正。
 inputs:
   dest-dir:
     description: '解压目标目录（相对仓库根）'
@@ -37,7 +40,7 @@ runs:
           exit 1
         }
         python -c "import zipfile; zipfile.ZipFile('geogebra.zip').extractall('.')"
-        # zip 本身必须删除——残留会被 AGP/PyInstaller 打进安装包（+32MB）
+        # zip 本身必须删除——残留会被 AGP 打包链/C# 安装包 Content 收进制品（+32MB）
         rm geogebra.zip
         python -c "import os; p='GeoGebra/HTML5/5.0/GeoGebra.html'; assert os.path.isfile(p), 'entry missing: '+p"
         echo "[geogebra] assets ready at $GEOGEBRA_DEST_DIR"

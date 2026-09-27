@@ -47,11 +47,14 @@ jobs:
         # shell: bash —— Windows runner 默认 pwsh，`2>/dev/null` 会被解析为
         # 写入 D:\dev\null 文件（路径不存在直接报错），必须显式用 bash。
         # 2026-09-14/21 两次定时运行 20s 即败即此因。
-        # PY-067：stderr 不再全吞——tee 落盘排障（GitHub bash 默认
-        # -eo pipefail，探测失败仍正确走 fallback 断言）。
+        # PY-067：stderr 不再全吞——tee 落盘排障。
+        # PY-182（2026-09-26 审计）：删除"探测失败回退纯 selftest"路径——
+        # 探测失败恰是 WebView2 回归场景，静默回退可使整条定时门禁对真实
+        # 回归保持绿色。现在探测失败（GitHub bash 默认 -eo pipefail，经 tee
+        # 管道后退出码正确传递）直接 fail。
         shell: bash
         run: |
-          python -m app.webview2_probe 2>&1 | tee probe-stderr.log || python -c "import sys; sys.path.insert(0, '.'); from app.webview2_probe import run_selftests; sys.exit(run_selftests())"
+          python -m app.webview2_probe 2>&1 | tee probe-stderr.log
 
       - name: 生成 WebView2 兼容性探测报告
         run: |

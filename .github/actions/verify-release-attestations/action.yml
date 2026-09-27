@@ -1,0 +1,45 @@
+# verify-release-attestations —— SP-153（2026-09-26 审计）：发布链 provenance/
+# SBOM 的 gh attestation verify 此前在编排器（release.yml verify-gate）与三平台
+# 子流（release-windows/android/core.yml verify job）共 4 处内联重复，且 xargs
+# 并行度已漂移（编排器 -P 8 vs 子流 -P 4）——收敛为本 composite action（单一
+# 修改点）。校验和 / verify_release 等其余验证环节各平台差异较大，暂保持各自
+# 内联（SP-153 残留：后续可继续抽脚本单源）。
+name: 'Verify release attestations'
+description: >
+  对指定发布目录逐工件执行 gh attestation verify（SLSA provenance +
+  CycloneDX SBOM 双 predicate——任一工件缺失对应 attestation 即失败，
+  fail-closed）。PY-176/SP-143（2026-09-26 审计）：必须固定 --signer-workflow
+  ——sigstore 证书 SAN（job_workflow_ref）编码"被调 workflow 文件@全量 ref"，
+  此前仅 --owner + --predicate-type 时，仓库内任何持 id-token 的 workflow
+  产生的 attestation 均能满足校验。
+inputs:
+  dist-path:
+    description: '待验证发布目录（相对仓库根，逐文件验证）'
+    required: true
+  signer-workflow:
+    description: 'signer 固定值：{owner}/{repo}/.github/workflows/<file>.yml@{全量 ref，如 refs/tags/v1.2.3}'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        VERIFY_DIST_PATH: ${{ inputs.dist-path }}
+        VERIFY_SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+      run: |
+        set -euo pipefail
+        # SP-153：并行度统一 -P 8（此前编排器 8、三子流 4 漂移）
+        # PY-176/SP-143：--signer-workflow 固定 signer 身份——非"该 workflow
+        # 文件@本次 run ref"签署的 attestation 一律拒绝（fail-closed）
+        find "$VERIFY_DIST_PATH" -type f -print0 | xargs -0 -P 8 -I{} timeout 60 \
+          gh attestation verify "{}" \
+          --owner "$GITHUB_REPOSITORY_OWNER" \
+          --signer-workflow "$VERIFY_SIGNER_WORKFLOW" \
+          --predicate-type https://slsa.dev/provenance/v1
+        find "$VERIFY_DIST_PATH" -type f -print0 | xargs -0 -P 8 -I{} timeout 60 \
+          gh attestation verify "{}" \
+          --owner "$GITHUB_REPOSITORY_OWNER" \
+          --signer-workflow "$VERIFY_SIGNER_WORKFLOW" \
+          --predicate-type https://cyclonedx.org/bom
+        echo "✅ 双 predicate attestation 验证通过（固定 signer——fail-closed）"

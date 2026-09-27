@@ -33,9 +33,17 @@ jobs:
           # PY-012：grep 目标此前含已删除的 docs/release/release.yml——
           # 缺失文件使 grep 返回码 2 被 if/else 吞成"通过"。先断言现存目标。
           test -d .github/workflows || { echo 'workflows 目录缺失'; exit 1; }
-          if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' \
-              .github/workflows/; then
-            echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
+          test -d .github/actions || { echo 'actions 目录缺失'; exit 1; }
+          # PY-177/SP-152（2026-09-26 审计）：pin 检查改白名单式——`uses:` 引用
+          # 的 @ 后必须恰为 40 位十六进制（完整 SHA）才放行；本地相对路径引用
+          # （无 @，随 checkout 固定）豁免。旧黑名单正则要求 SHA 后跟非 hex 字符
+          # ——行尾短 SHA（@ 后跟 7 位短哈希且到行尾）不匹配（实测验证），
+          # @latest/@develop 等命名 ref 也漏检；且 .github/actions/**/action.yml
+          # 此前不在扫描面。首个 grep 不自匹配（模式文本前导为 ']' 非空白）；
+          # 注释行不得书写"uses: 名字@短哈希"字面示例——会被本检查命中。
+          if grep -rnE '(^|[[:space:]])uses: [^#@]*@' .github/workflows/ .github/actions/ \
+              | grep -vE '@[0-9a-fA-F]{40}([[:space:]]|$|#)'; then
+            echo "❌ 存在未固定完整 40 位十六进制 SHA 的 action 引用" && exit 1
           fi
           echo "✅ 全部 action 固定完整 SHA"
       - name: 评审包生成器自检（dry-run 到临时目录）
@@ -109,25 +117,27 @@ jobs:
           name: release-core
           path: dist/core
 
-      # 验证所有产物的 SLSA provenance
-      - name: Verify SLSA provenance (all platforms)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          find dist -type f -print0 | xargs -0 -P 8 -I{} timeout 60 \
-            gh attestation verify "{}" \
-            --owner "$GITHUB_REPOSITORY_OWNER" \
-            --predicate-type https://slsa.dev/provenance/v1
-
-      # 验证所有产物的 SBOM attestation
-      - name: Verify SBOM attestation (all platforms)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          find dist -type f -print0 | xargs -0 -P 8 -I{} timeout 60 \
-            gh attestation verify "{}" \
-            --owner "$GITHUB_REPOSITORY_OWNER" \
-            --predicate-type https://cyclonedx.org/bom
+      # PY-176/SP-143（2026-09-26 审计）：attestation 验证补 --signer-workflow
+      # 固定 signer 身份；SP-153（2026-09-26 审计）：验证逻辑收敛为 composite
+      # action（并行度统一 -P 8，消除与三平台子流的 -P 8/-P 4 漂移）。
+      # signer 逐平台固定为"被调子流 workflow 文件@本次 run ref"——
+      # job_workflow_ref（sigstore 证书 SAN）在 workflow_call 下记录被调
+      # workflow 文件而非编排器，故三平台各传各自子流的引用。
+      - name: Verify attestations — Windows (SLSA + SBOM)
+        uses: ./.github/actions/verify-release-attestations
+        with:
+          dist-path: dist/windows
+          signer-workflow: ${{ github.repository }}/.github/workflows/release-windows.yml@${{ github.ref }}
+      - name: Verify attestations — Android (SLSA + SBOM)
+        uses: ./.github/actions/verify-release-attestations
+        with:
+          dist-path: dist/android
+          signer-workflow: ${{ github.repository }}/.github/workflows/release-android.yml@${{ github.ref }}
+      - name: Verify attestations — Rust Core (SLSA + SBOM)
+        uses: ./.github/actions/verify-release-attestations
+        with:
+          dist-path: dist/core
+          signer-workflow: ${{ github.repository }}/.github/workflows/release-core.yml@${{ github.ref }}
 
       # SHA-256 对账（字节一致不变量）
       # PY-025 整改（2026-09-24 审计）：内联 50 行复刻校验脚本（规则必漂移）——
@@ -149,6 +159,23 @@ jobs:
           done
           echo "✅ 全平台 SHA-256 对账一致（字节一致，fail-closed）"
 
+      # PY-189/PY-175 接线（2026-09-26 审计）：bundle 级发布验证脚本此前全仓
+      # 零调用（死门禁）——verify-gate 对三平台各调一次。注意：脚本侧遗留
+      # （bundle 布局期望 bundle/dist 子目录、from verify_checksum_json 平铺
+      # 导入、core 平台仅 SHA256SUMS.txt）由 PY-175/PY-208 脚本批次负责修正
+      # ——本批次仅接线。
+      - name: Bundle release verification (verify_release per platform)
+        run: |
+          set -e
+          for platform in windows android core; do
+            python release/verify_release.py --bundle "dist/$platform"
+          done
+
+      # PY-189（2026-09-26 审计）：release/tools/verify_artifact_set（dist↔manifest
+      # 双向闭合验证）依赖发布 manifest（含 url/sha256 的 artifacts 数组）——该
+      # manifest 在 Release 发布后由部署侧核对产出，CI verify-gate 阶段（发布前）
+      # 不存在可校验的输入，故明确标注为【部署侧手动步骤】：
+      #   python release/tools/verify_artifact_set/verify_artifact_set.py <本地 dist 目录> <release-manifest.json>
       - name: Fail-closed gate
         run: echo "✅ 三平台验证通过——允许发布（任一失败此处不会到达）"
 
@@ -163,6 +190,10 @@ jobs:
     environment: release
     permissions:
       contents: write
+      # PY-179（2026-09-26 审计）：去重改名后需对最终 dist 重新 attest——
+      # publish job 追加 attestation 所需权限
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
 
@@ -196,15 +227,38 @@ jobs:
         run: python scripts/dedup_release_assets.py dist/windows dist/android dist/core
       # 审计修复：去重发生在各平台 checksum 生成之后——改名必须重生成清单，
       # 否则 Release 资产名与 SHA256SUMS.json 条目不再对应
+      # PY-173（2026-09-26 审计）：重生成循环改探测改名后命名——dedup 把
+      # 后位平台的 SHA256SUMS.json 改名为 <platform>-SHA256SUMS.json（android
+      # 命中）、SHA256SUMS.txt 无撞名保持原名（core 命中），旧循环只探测改名
+      # 前文件名 → android 清单永不重生成、发布物引用旧名必致消费校验失败
       - name: 去重后重生成各平台 SHA-256 清单
         run: |
+          set -e
           for platform in windows android core; do
             if [ -f "dist/$platform/SHA256SUMS.json" ]; then
               python release/write_checksum_json.py --root "dist/$platform" --output "dist/$platform/SHA256SUMS.json"
+            elif [ -f "dist/$platform/$platform-SHA256SUMS.json" ]; then
+              python release/write_checksum_json.py --root "dist/$platform" --output "dist/$platform/$platform-SHA256SUMS.json"
             elif [ -f "dist/$platform/SHA256SUMS.txt" ]; then
               (cd "dist/$platform" && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt)
+            elif [ -f "dist/$platform/$platform-SHA256SUMS.txt" ]; then
+              (cd "dist/$platform" && find . -type f ! -name "$platform-SHA256SUMS.txt" -print0 | sort -z | xargs -0 sha256sum > "$platform-SHA256SUMS.txt")
+            else
+              echo "❌ $platform: 未发现任何校验清单（去重后命名异常——fail-closed）"; exit 1
             fi
           done
+
+      # PY-179（2026-09-26 审计）：去重改名后原 attestation 的 subject 名仍是
+      # 改名前名字（attest 发生在各平台 build job 内、改名之前）——发布后消费
+      # 方对改名资产执行 attestation verify 找不到对应证据，SLSA 证据链断裂。
+      # 取舍：对最终 dist 全量重新 attest（attest-build-provenance 按路径批量、
+      # 幂等）而非仅改名文件——同时覆盖重生成后的 SHA256SUMS 清单。发布后
+      # 消费方以 --signer-workflow {owner}/{repo}/.github/workflows/release.yml@{tag}
+      # 校验（publish 是编排器自身 job——SAN 记录 release.yml 而非平台子流）。
+      - name: Re-attest final dist after dedup (SLSA)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: dist/**
 
       - name: Create GitHub Release (all platforms)
         uses: softprops/action-gh-release@d1e66170d32c9ec7bbcb7fae044d3d686ce304d3

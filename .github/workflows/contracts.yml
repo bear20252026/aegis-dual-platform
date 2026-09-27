@@ -1,7 +1,15 @@
 name: Contracts
 
 "on":
-  push: {}
+  push:
+    # PY-206（2026-09-26 审计）：push 触发补 paths 过滤——此前 push: {} 全
+    # 分支全路径触发，docs 改动也全量跑契约/Gradle/cargo 门禁（PR 触发面
+    # 保持不过滤：PR 需要完整反馈）
+    paths:
+      - 'contracts/**'
+      - 'scripts/**'
+      - 'shared/**'
+      - '.github/workflows/contracts.yml'
   pull_request: {}
   workflow_dispatch: {}
 

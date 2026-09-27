@@ -1,0 +1,119 @@
+# legacy-python-guard.yml —— SP-151（2026-09-26 审计）：归档栈低频守护
+# 背景：原 ci.yml python-quality job（ruff/bandit/mypy/8 个 selftest）跑在
+#       legacy/windows-pywebview 只读归档栈上，且注释误称其为"活跃新栈"——
+#       常跑 push/PR 门禁对归档栈全量执行属"死门禁"。现整体迁出为本
+#       workflow：weekly cron + workflow_dispatch（手动按需触发）。
+# 取舍：拆独立 workflow 而非在 ci.yml 内加 schedule——①定时触发不连带跑
+#       ci.yml 的 ui-regression；②ci.yml 常跑门禁从此对准现役栈；③归档
+#       守护可独立手动触发。活跃树 ruff（scripts/release/contracts/agent）
+#       随本守护低频执行——如需常跑 push/PR 门禁属后续批次。
+# 注意：本 workflow 检查对象是"只读归档"——仅守护其基线不腐化（漂移
+#       检测），不作为功能变更门禁。
+
+name: Legacy-Python-Guard
+
+"on":
+  schedule:
+    - cron: "0 3 * * 6"            # 每周六 03:00 UTC 低频守护
+  workflow_dispatch: {}            # 手动触发（归档栈改动或基线核对时）
+
+permissions:
+  contents: read
+
+
+# PY-044..051：同分支重复 push/PR 取消旧运行（节省 runner 与排队）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  python-archive-guard:
+    name: Python 归档栈守护（ruff / bandit / mypy / validate_release / selftest）
+    # 必须 windows-latest：Aegis 是 Windows 应用，mypy 检查的 winreg/
+    # ctypes.windll 仅在 Windows 有类型桩；Linux 上会误报（P6 教训延伸：
+    # CI 平台须与目标/本地环境一致）
+    runs-on: windows-latest
+    timeout-minutes: 45
+    # PYTHONUTF8=1：Windows 默认 charmap 编码无法编码中文输出（如 validate_release.py
+    # 的「缺」字）——强制 Python 用 UTF-8，避免 UnicodeEncodeError
+    env:
+      PYTHONUTF8: "1"
+    defaults:
+      run:
+        working-directory: legacy/windows-pywebview
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+
+      - name: 安装 Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0 (node24)
+        with:
+          # PY-063：与 contracts.yml 统一 3.12（3.14 过新——PySide6 类型桩兼容风险）
+          python-version: "3.12"
+          # PY-060：pip 缓存（依赖锁文件驱动 key）
+          cache: pip
+          cache-dependency-path: |
+            legacy/windows-pywebview/requirements.txt
+            legacy/windows-pywebview/requirements-dev.txt
+
+      - name: 安装检查工具
+        # 全量安装：requirements.txt（运行依赖，含 PySide6——asset_scheme
+        # 的 mypy 检查需要其类型桩）+ requirements-dev.txt（== 锁定版本，
+        # P6 教训：CI 与本地口径一致）+ types-pywin32（security.py 桩）
+        run: |
+          python -m pip install --upgrade pip
+          # PY-010：运行依赖走 hash 锁文件（此前装无 hash 的 requirements.txt，
+          # 绕过 validate_release 专门门禁的 requirements-lock.txt）
+          pip install --require-hashes -r requirements-lock.txt
+          pip install -r requirements-dev.txt types-pywin32
+
+      - name: 静态验证（AST / JSON / XML / 版本声明）
+        run: python ../../validate_release.py
+
+      - name: ruff 检查（根仓库脚本——审计修复：scripts/release/contracts/agent
+          的 Python 此前从未被 lint，pyproject 却声称在门禁范围内）
+        working-directory: .
+        run: ruff check scripts release contracts agent --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001,INP001,S101,PLR2004
+      - name: ruff 检查（Lint + 格式，0 错误）
+        # 工作目录为 legacy/windows-pywebview，`--exclude legacy` 排除其下的旧 Qt 栈归档
+        # legacy/windows-pywebview/legacy/**（61 个 Python 不参与运行面——全量扫描会误报
+        # 11 处存量风格问题）。
+        # SP-151（2026-09-26 审计）：原注释称其余部分为"活跃新栈（app/ +
+        # main_webview.py + selftest）"已失实——该栈整体为只读归档，措辞随
+        # 迁移一并更正。
+        run: ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
+
+      - name: bandit 安全扫描（无 Medium/High）
+        # 设计豁免规则（见 docs/KNOWLEDGE_BASE.md「P6 bandit 豁免」）：
+        # - B110 try_except_pass：静默降级是安全设计
+        # - B404/B603/B607 subprocess：均为参数列表 + shell=False 的受控
+        #   调用（security.py icacls / webview2_probe.py tasklist），无注入面
+        # 其余规则 Medium/High 触发失败（bandit 退出码即门禁）。
+        run: bandit -r app/ -q --skip B110,B404,B603,B607
+
+      - name: mypy 类型检查（归档栈 0 错误——全量目录口径）
+        # SP-151（2026-09-26 审计）：原注释"新栈 0 错误"失实——检查对象是
+        # 只读归档栈。PY-011：手工文件清单仅 17/33 个 app 模块——15 个静默
+        # 免检；已本地实测 app/ 全量口径 0 错误（42 源文件），CI 与本地同
+        # 口径全量覆盖。
+        shell: bash
+        run: mypy main_webview.py app/ crash_reporter.py --exclude "System Volume Information"
+
+      - name: Python 单元测试（tests/python——PY-103..148 工具链单测 + PY-149 发布链基建）
+        # P5（审计 2026-09-25）：tests/python/ 此前从未入 CI——release_chain_test.py
+        # 是死测试基建。pytest 经 requirements-dev.txt 锁版安装，与本地口径一致。
+        working-directory: .
+        run: python -m pytest tests/python -q
+
+      - name: 自检脚本（session_store / api_bridge / s1 集成 / shell_toolbar / tab_state / navigation_search / view_source / native_core）
+        # SP-151（2026-09-26 审计）：随 job 迁移改为低频归档守护——原 ci.yml
+        # 注释"门禁全量常跑（ADR-007）"已随迁移失效，现语义为守护归档栈
+        # 自检基线不腐化
+        run: |
+          python selftest_session_store.py
+          python selftest_api_bridge.py
+          python selftest_s1_integration.py
+          python selftest_shell_toolbar.py
+          python selftest_tab_state.py
+          python selftest_navigation_search.py
+          python selftest_view_source.py
+          python selftest_native_core.py

@@ -5,7 +5,12 @@
 name: Android-Quality
 
 "on":
-  push: {}
+  push:
+    # PY-206（2026-09-26 审计）：push 触发补 paths 过滤——docs 改动不再
+    # 全量跑 Gradle 门禁（PR 触发面保持不过滤）
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-quality.yml'
   pull_request: {}
   workflow_dispatch: {}
 
@@ -47,7 +52,9 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**', 'android/gradle/libs.versions.toml') }}
+          # AD-243（2026-09-26 审计）：hashFiles 追加版本目录 gradle/libs.versions.toml
+          # ——版本目录变更此前不失效缓存，升级依赖后仍复用旧包
           restore-keys: gradle-${{ runner.os }}-
 
       - name: ktlint 检查（0 错误门禁）

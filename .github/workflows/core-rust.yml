@@ -1,6 +1,11 @@
 name: Core-Rust
 "on":
-  push: {}
+  push:
+    # PY-206（2026-09-26 审计）：push 触发补 paths 过滤——docs 改动不再
+    # 全量跑 cargo 门禁（PR 触发面保持不过滤）
+    paths:
+      - 'core/**'
+      - '.github/workflows/core-rust.yml'
   pull_request: {}
   workflow_dispatch: {}
 
