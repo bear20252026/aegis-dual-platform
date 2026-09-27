@@ -29,7 +29,9 @@ def main() -> int:
         except subprocess.TimeoutExpired:
             print(f"❌ {rel} 超时（180s）——安全 e2e 未通过")
             return 1
-        print(r.stdout.strip().splitlines()[-1] if r.stdout else "")
+        # PY-200（2026-09-26 审计）：此前只打印 stdout 最后一行——完整测试
+        # 输出被截断（失败归因困难）。改完整透传（对齐 codegen-contracts/run.py）。
+        print(r.stdout.strip())
         if r.stderr.strip():
             print(r.stderr.strip(), file=sys.stderr)
         if r.returncode != 0:

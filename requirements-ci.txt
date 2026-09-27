@@ -1,0 +1,23 @@
+# requirements-ci.txt —— PY-178（2026-09-26 审计）：仓库级 Python 工具链锁文件。
+# 此前仅 legacy/windows-pywebview/requirements-lock.txt 有 hash 锁定，活动
+# Python 工具链（contracts/agent-redteam/supply-chain 等工作流安装面）只有
+# 明文版本 pin、无仓库根锁文件。
+#
+# hash 锁定生成命令：pip-compile --generate-hashes（TODO 无网环境未生成——
+# 本文件暂为精确 == pin；有网环境执行：
+#   pip-compile --generate-hashes requirements-ci.txt -o requirements-ci.lock
+# 并让 CI 改用 --require-hashes -r requirements-ci.lock）。
+#
+# 版本来源：本机 `py -m pip show` 实测（2026-09-27）。
+# 未在本机安装的两个包（rfc3339-validator / pip-audit）取 CI workflow 既有
+# 声明版本（contracts.yml: rfc3339-validator==0.1.4；supply-chain.yml:
+# pip-audit==2.7.0）——待环境补装后以 pip show 实测复核（TODO）。
+
+ruff==0.16.3
+bandit==1.9.4
+mypy==2.3.0
+pytest==9.1.1
+pyyaml==6.0.3
+jsonschema==4.26.0
+rfc3339-validator==0.1.4   # 本机未安装（未实测）——取 contracts.yml 声明版本
+pip-audit==2.7.0           # 本机未安装（未实测）——取 supply-chain.yml 声明版本

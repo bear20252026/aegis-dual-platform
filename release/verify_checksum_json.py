@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 from pathlib import Path
+
+# PY-212（2026-09-26 审计）：待摘要文件集合（排除清单自身）此前在本文件
+# 与 write_checksum_json.build_manifest 各自推导一份——规则演化必漂移。
+# 锚定同目录后复用写侧的共享 iter_release_files（单源）。
+from write_checksum_json import iter_release_files, sha256_file
 
 SHA256_HEX = re.compile(r"^[0-9A-F]{64}$")
 
@@ -29,8 +33,8 @@ def verify_manifest(root: Path, manifest_path: Path) -> int:
 
     expected = {
         path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path.resolve() != manifest_path
+        # PY-212：文件集合与写侧单源（排除清单自身的规则只此一份）
+        for path in iter_release_files(root, manifest_path)
     }
     observed: set[str] = set()
     for entry in entries:
@@ -51,7 +55,10 @@ def verify_manifest(root: Path, manifest_path: Path) -> int:
             raise SystemExit(f"摘要路径越出发布根目录: {relative}")
         if not candidate.is_file():
             raise SystemExit(f"摘要清单指向缺失文件: {relative}")
-        actual_hash = hashlib.sha256(candidate.read_bytes()).hexdigest().upper()
+        # PY-191（2026-09-26 审计）：candidate.read_bytes() 整文件进内存——
+        # 写入侧已 1MiB 分块流式，校验侧对大安装包同样整读。现对齐共享
+        # sha256_file（1MiB 分块摘要——PY-212 一并单源）。
+        actual_hash = sha256_file(candidate)
         if actual_hash != expected_hash:
             raise SystemExit(f"SHA-256 不匹配: {relative}")
 

@@ -42,14 +42,10 @@ def _required_sinks_from_canonical(canonical_text: str) -> list[str]:
     return []
 
 
-REQUIRED_SINKS_FALLBACK = [
-    "window.fetch = function",
-    "XMLHttpRequest.prototype.open",
-    "navigator.sendBeacon = function",
-    "window.WebSocket = function",
-    "trustedCaller",
-    "location.hostname",
-]
+# PY-215（2026-09-26 审计）：删除 REQUIRED_SINKS_FALLBACK——内置清单与
+# "PY-043 锚点单源"声明并存，构成失效的第二事实源（模板锚点丢失后校验
+# 仍对内置清单跑，漂移无人更新）。现锚点缺失直接计入 failures（main 返回
+# 1——严格单源，无任何回退）。
 
 failures: list[str] = []
 
@@ -77,11 +73,12 @@ def main() -> int:
     # 1) 规范模板自检：占位符与安全属性齐备
     check("规范模板含 HOSTS 占位符", "__AEGIS_HOSTS__" in canonical)
     check("规范模板含 HTTPS 占位符", "__AEGIS_REQUIRE_HTTPS__" in canonical)
-    # PY-043：REQUIRED_SINKS 自模板锚点行解析——锚点缺失视为模板漂移 fail-closed
+    # PY-043：REQUIRED_SINKS 自模板锚点行解析
+    # PY-215：锚点缺失不再回退内置清单——直接计入 failures（main 返回 1，
+    # 严格单源；模板演进必须经模板文件本身，无第二事实源）
     required_sinks = _required_sinks_from_canonical(canonical)
-    if not required_sinks:
-        check("规范模板含 REQUIRED_SINKS 锚点行", False, "锚点缺失——回退内置清单")
-        required_sinks = REQUIRED_SINKS_FALLBACK
+    check("规范模板含 REQUIRED_SINKS 锚点行", bool(required_sinks),
+          "锚点缺失——无回退清单（PY-215 严格单源）")
     for sink in required_sinks:
         check(f"规范模板含拦截点/属性: {sink}", sink in canonical)
 

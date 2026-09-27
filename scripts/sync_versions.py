@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from xml.sax.saxutils import escape  # PY-186：XML 文本转义单源（& < >）
 
 ROOT = Path(__file__).resolve().parents[1]
 PROPS = ROOT / "shared" / "version.properties"
@@ -35,7 +36,13 @@ def replace_assignment(path: Path, name: str, value: str, quoted: bool) -> None:
 def replace_xml_value(path: Path, element: str, value: str) -> None:
     text = path.read_text(encoding="utf-8")
     pattern = rf"(?m)(<\s*{re.escape(element)}\s*>)[^<]*(</\s*{re.escape(element)}\s*>)"
-    updated, count = re.subn(pattern, rf"\g<1>{value}\g<2>", text, count=1)
+    # PY-186（2026-09-26 审计）：属性/文本值此前经 rf"\g<1>{value}\g<2>" 原样
+    # 拼接——DISPLAY_NAME 含 &/< 会生成非法 csproj；含 \1 会被当正则反向引用
+    # 解析（re.error 或静默错位）。改为：① escape() 做 XML 文本转义；
+    # ② 函数式替换（lambda）——替换串不再经过 backslash 模板解析。
+    escaped = escape(value)
+    updated, count = re.subn(
+        pattern, lambda m: m.group(1) + escaped + m.group(2), text, count=1)
     if count != 1:
         raise RuntimeError(f"expected <{element}> element not found in {path}")
     path.write_text(updated, encoding="utf-8")
@@ -53,6 +60,16 @@ def main() -> None:
     missing = [key for key in required if not values.get(key)]
     if missing:
         raise RuntimeError(f"missing version properties: {', '.join(missing)}")
+
+    # PY-198（2026-09-26 审计）：VERSION_CODE 此前在下方 int() 处才炸——
+    # 非数字值给原始 ValueError 栈。载入后即校验 isdigit，失败汇总报错
+    #（当前数值型键仅 VERSION_CODE；将来扩展逐键加入即可）。
+    non_numeric = [key for key in ("VERSION_CODE",)
+                   if not str(values.get(key, "")).isdigit()]
+    if non_numeric:
+        raise RuntimeError(
+            "version properties must be numeric: "
+            + ", ".join(f"{key}={values.get(key)!r}" for key in non_numeric))
 
     android_gradle = ROOT / "android" / "app" / "build.gradle.kts"
     replace_assignment(android_gradle, "versionCode", values["VERSION_CODE"], quoted=False)

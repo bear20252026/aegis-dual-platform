@@ -9,7 +9,6 @@ from __future__ import annotations
 import ast
 import json
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
 # S1-6 修复（H1）：此前硬编码打包机路径 /home/ubuntu/aegis_dual_platform，
@@ -53,6 +52,39 @@ def check_required_cs_files(csproj: Path) -> list[str]:
     return problems
 
 
+# SP-166（2026-09-26 审计）：shared/shell 单源清单与实际文件对账。
+# WB-103（2026-09-26 审计）：已接线到 main()——manifest.txt 四张壁纸补齐后
+# 差集为空，门禁生效（此前仅登记 1 张壁纸时接线即红，故 PY 批暂缓）。
+def check_shell_manifest_consistency(root: Path) -> list[str]:
+    """shared/shell/manifest.txt 与 shared/shell 实际文件差集非空即 fail。
+
+    排除 manifest.txt 自身（清单本体）与 snake.test.js（测试桩，非发布资产）。
+    """
+    problems: list[str] = []
+    shell_dir = root / 'shared' / 'shell'
+    manifest_path = shell_dir / 'manifest.txt'
+    if not manifest_path.is_file():
+        problems.append('缺跨端资产清单 shared/shell/manifest.txt')
+        return problems
+    listed = {
+        line.strip()
+        for line in manifest_path.read_text(encoding='utf-8').splitlines()
+        if line.strip() and not line.strip().startswith('#')
+    }
+    actual = {
+        p.relative_to(shell_dir).as_posix()
+        for p in shell_dir.rglob('*')
+        if p.is_file()
+        and p.name != 'manifest.txt'
+        and p.name != 'snake.test.js'
+    }
+    for missing in sorted(actual - listed):
+        problems.append(f'shared/shell 实际文件未登记 manifest.txt: {missing}')
+    for ghost in sorted(listed - actual):
+        problems.append(f'manifest.txt 登记的文件不存在: shared/shell/{ghost}')
+    return problems
+
+
 # PY-123/124 配套（审计 2026-09-25）：主流程包进 main()——原模块级
 # raise SystemExit 在 pytest 收集 import 时直接退出（INTERNALERROR），
 # 单测无法导入本模块
@@ -63,7 +95,9 @@ def main() -> int:
     python_files = list(windows.rglob('*.py'))
     # PY-037：AST 语法检查仅覆盖 legacy 子树——scripts/contracts/release 三个
     # 活跃 Python 目录（CI 门禁与发布链路的实际执行方）此前零语法检查
-    for scan_dir in ('scripts', 'contracts', 'release'):
+    # SP-165（2026-09-26 审计）：元组补 'agent'——ruff 门禁面含 agent，两门
+    # 禁口径此前不一（agent/ 零 AST 语法检查）
+    for scan_dir in ('scripts', 'contracts', 'release', 'agent'):
         python_files.extend((root / scan_dir).rglob('*.py'))
     for path in python_files:
         try:
@@ -74,11 +108,10 @@ def main() -> int:
         json.loads((root / 'shared' / 'release.json').read_text(encoding='utf-8'))
     except Exception as exc:  # noqa: BLE001（验证脚本盲捕是设计）
         failures.append(f'JSON shared/release.json: {exc}')
-    for path in (root / 'windows' / 'packaging').glob('*.template'):
-        try:
-            ET.parse(path)
-        except Exception as exc:  # noqa: BLE001（验证脚本盲捕是设计）
-            failures.append(f'XML {path.relative_to(root)}: {exc}')
+    # SP-166（2026-09-26 审计）：MSIX/appinstaller 路线模板（*.template）已
+    # 确认死资产后删除（全仓仅退役 PyInstaller 管线 build-windows.ps1 引用
+    # ——该脚本本身引用的 windows/aegis_source 目录已不存在），对应校验
+    # 分支一并移除；模板校验不再有任何可校验对象。
     if (windows / 'aegis_webview.nsi').exists():
         failures.append('Deprecated NSIS script still exists in the Windows working copy')
     failures.extend(check_lock_file(windows))
@@ -101,6 +134,9 @@ def main() -> int:
         for shell_asset in shell_assets:
             if not (root / 'shared' / 'shell' / shell_asset).is_file():
                 failures.append(f'缺跨端单源首页资产 shared/shell/{shell_asset}')
+    # SP-166 + WB-103（2026-09-26 审计）：清单差集对账接线——manifest.txt
+    # 漏登记（如壁纸只列 1/4）或登记幽灵文件均 fail-closed
+    failures.extend(check_shell_manifest_consistency(root))
     print(f'python_files={len(python_files)}')
     print(f'failures={len(failures)}')
     for failure in failures:

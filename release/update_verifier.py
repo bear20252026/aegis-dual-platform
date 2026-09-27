@@ -39,6 +39,12 @@ def canonical_unsigned(manifest: dict) -> bytes:
 # 审计修复：接受预发布后缀（实际版本 2.2.0-beta.21 此前被判"版本格式无效"）
 _SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$")
 
+# PY-184（2026-09-26 审计）：预发布段中的数字标识符必须无前导零——SemVer 规范
+#（§10："Numeric identifiers MUST NOT include leading zeroes"）："2.2.0-01" 是
+# 非法 SemVer；若放行，int("01")==1 会与 "2.2.0-1" 比较相等——防回滚比较存在
+# 别名。此前 _SEMVER 的预发布段是宽松的 [0-9A-Za-z.-]+，前导零数字段漏过。
+_NUMERIC_ID = re.compile(r"0|[1-9][0-9]*")
+
 
 def _version_tuple(value: object) -> tuple:
     """解析 SemVer 字符串为可比较元组（无效格式抛 UpdateRejected——稳定拒绝）。
@@ -58,11 +64,17 @@ def _version_tuple(value: object) -> tuple:
     core = (int(major), int(minor), int(patch))
     if pre is None:
         return (core, (1,), ())
-    ids = tuple(
-        (0, int(part), "") if part.isdigit() else (1, 0, part)
-        for part in pre.split(".")
-    )
-    return (core, (0,), ids)
+    ids = []
+    for part in pre.split("."):
+        if part.isdigit():
+            # PY-184：纯数字段必须通过无前导零校验（"01"/"00" 违规抛
+            # UpdateRejected——失败闭合），否则 int() 归一化引入比较别名
+            if not _NUMERIC_ID.fullmatch(part):
+                raise UpdateRejected("版本格式无效")
+            ids.append((0, int(part), ""))
+        else:
+            ids.append((1, 0, part))
+    return (core, (0,), tuple(ids))
 
 
 def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],

@@ -106,6 +106,15 @@ def _extract_methods(cls: ast.ClassDef, exposed: set[str]) -> dict[str, dict]:
         n_no_default = len(pos_args) - len(defaults)
         for i, pname in enumerate(pos_args):
             params.append({"name": pname, "required": i < n_no_default})
+        # PY-207（2026-09-26 审计）：参数提取此前只处理 item.args.args——
+        # kwonlyargs 完全不进 schema（required 统计失真），*args/**kwargs
+        # 形态信息丢失。现补齐：
+        # - kwonlyargs：与 kw_defaults 逐位对齐，位上无默认（None）即必填；
+        # - vararg/kwarg：仅在存在时输出字段——对现网 Api 链（无 kwonly/
+        #   vararg/kwarg）输出字节不变，shared/jsapi-schema.json 零漂移
+        #  （CI 对该生成物有 git diff --exit-code 门禁，勿无条件改形状）。
+        for kwarg_ast, kw_default in zip(item.args.kwonlyargs, item.args.kw_defaults):
+            params.append({"name": kwarg_ast.arg, "required": kw_default is None})
         methods[name] = {
             "name": name,
             "description": _doc_first_line(ast.get_docstring(item)),
@@ -115,7 +124,12 @@ def _extract_methods(cls: ast.ClassDef, exposed: set[str]) -> dict[str, dict]:
             # 溯源（PY-005）：方法实际定义所在类（mixin 方法不再误标 Api）
             "defined_in": cls.name,
         }
+        if item.args.vararg is not None:
+            methods[name]["vararg"] = item.args.vararg.arg
+        if item.args.kwarg is not None:
+            methods[name]["kwarg"] = item.args.kwarg.arg
         methods[name]["n_required_params"] = sum(1 for p in params if p["required"])
+        # PY-207：kwonly 必填参数计入 required 统计（上一行已按合并后 params 求和）
     return methods
 
 

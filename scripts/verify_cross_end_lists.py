@@ -18,6 +18,11 @@
    - windows/.../Chrome/UrlNormalizer.cs EngineUrls（C# 正典栈——
      契约口径：三端核心引擎完全一致；C# 扩展引擎须在
      CS_ENGINE_EXTENSIONS 白名单显式登记，防双向静默漂移）
+
+SP-154（2026-09-26 审计）：legacy 归档栈对账端（asset_scheme.py /
+url_utils.py）降级为可选——文件缺失仅告警并跳过该端对账（归档栈被
+删除/移动时现役门禁不得断链）；现役 C#/Android/start.main.js 端缺失
+仍 fail-closed。
 """
 from __future__ import annotations
 
@@ -28,6 +33,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 failures: list[str] = []
+# SP-154（2026-09-26 审计）：legacy 归档栈可选对账端的缺失告警（不计失败）
+warnings: list[str] = []
 
 
 def fail(msg: str) -> None:
@@ -44,7 +51,19 @@ def _read(rel: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def wallpapers_from_asset_scheme() -> set[str]:
+# SP-154：legacy 归档栈端点（asset_scheme.py / url_utils.py）此前是强制
+# 对账端——归档栈文件被删除/移动时现役门禁断链。降级为可选：文件缺失
+# 仅记告警（返回 None，跳过该端对账），现役 C#/Android 端缺失仍 fail。
+# （两处提取器内联实现"缺失→告警"分支。）
+
+
+def wallpapers_from_asset_scheme() -> set[str] | None:
+    # SP-154：legacy 归档栈端点——缺失仅告警（None），存在但白名单缺失仍 fail。
+    # 存在时仍经 _read 读取（单测以合成 _read 注入内容）。
+    if not (ROOT / "legacy/windows-pywebview/app/asset_scheme.py").is_file():
+        warnings.append("可选对账端缺失（legacy 归档栈）: "
+                        "legacy/windows-pywebview/app/asset_scheme.py——跳过该端对账")
+        return None
     text = _read("legacy/windows-pywebview/app/asset_scheme.py")
     block = re.search(r"WALLPAPERS\s*=\s*\(([^)]*)\)", text, re.S)
     if not block:
@@ -90,7 +109,13 @@ def wallpapers_on_disk() -> set[str]:
     return {p.name for suffix in ("*.jpg", "*.jpeg", "*.png", "*.webp") for p in d.glob(suffix)}
 
 
-def engines_from_url_utils() -> set[str]:
+def engines_from_url_utils() -> set[str] | None:
+    # SP-154：legacy 归档栈端点——缺失仅告警（None），存在但引擎表缺失仍 fail。
+    # 存在时仍经 _read 读取（单测以合成 _read 注入内容）。
+    if not (ROOT / "legacy/windows-pywebview/app/url_utils.py").is_file():
+        warnings.append("可选对账端缺失（legacy 归档栈）: "
+                        "legacy/windows-pywebview/app/url_utils.py——跳过该端对账")
+        return None
     text = _read("legacy/windows-pywebview/app/url_utils.py")
     block = re.search(r"SEARCH_ENGINES[^=]*=\s*\{(.*?)\n\}", text, re.S)
     if not block:
@@ -142,7 +167,12 @@ def main() -> int:
     html_wp = wallpapers_from_start_html()
     kt_wp = wallpapers_from_kotlin()
     cs_wp = wallpapers_from_csharp()
-    diff("壁纸", disk, py_wp, "asset_scheme.py 相对磁盘文件")
+    wallpaper_ends = 3  # 现役对账端：start.main.js + Kotlin + C#（SP-154）
+    if py_wp is not None:
+        diff("壁纸", disk, py_wp, "asset_scheme.py 相对磁盘文件")
+        wallpaper_ends += 1
+    else:
+        print("⚠️ legacy 归档端 asset_scheme.py 缺失——壁纸对账降级为 3 端（SP-154）")
     diff("壁纸", disk, html_wp, "start.main.js 相对磁盘文件")
     diff("壁纸", disk, kt_wp, "AegisHomeBridge.kt 相对磁盘文件")
     diff("壁纸", disk, cs_wp, "NtpAssets.cs 相对磁盘文件")
@@ -150,10 +180,17 @@ def main() -> int:
     py_eng = engines_from_url_utils()
     kt_eng = engines_from_kotlin()
     cs_eng = engines_from_csharp()
-    diff("搜索引擎", py_eng, kt_eng, "SearchEngines.kt 相对 url_utils.py")
+    if py_eng is not None:
+        diff("搜索引擎", py_eng, kt_eng, "SearchEngines.kt 相对 url_utils.py")
+        core = py_eng | kt_eng
+        engine_ends = 3
+    else:
+        # SP-154：legacy 引擎表缺失时核心集降级为现役 Kotlin 单端 + C# 覆盖校验
+        print("⚠️ legacy 归档端 url_utils.py 缺失——引擎对账降级为现役端（SP-154）")
+        core = kt_eng
+        engine_ends = 2
     # WB-010：三端核心引擎 = url_utils ∩ SearchEngines（py/kt 相等时即并集）；
     # C# 端必须完整覆盖核心，扩展部分仅允许 CS_ENGINE_EXTENSIONS 白名单
-    core = py_eng | kt_eng
     if cs_eng < core:
         for missing in sorted(core - cs_eng):
             fail(f"搜索引擎: UrlNormalizer.cs 缺少核心引擎 {missing}")
@@ -168,9 +205,11 @@ def main() -> int:
         for f in failures:
             print("  -", f)
         return 1
+    for w in warnings:
+        print("⚠️", w)
     print(
-        f"✅ 跨端清单一致（壁纸 {len(disk)} 文件 ×4 端；搜索引擎核心 {len(core)} ×3 端"
-        f" + C# 扩展 {len(extras)}）"
+        f"✅ 跨端清单一致（壁纸 {len(disk)} 文件 ×{wallpaper_ends} 端；搜索引擎核心 {len(core)}"
+        f" ×{engine_ends} 端 + C# 扩展 {len(extras)}）"
     )
     return 0
 

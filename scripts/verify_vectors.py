@@ -52,11 +52,17 @@ def check_oversize_anchor(data: dict, path: Path, failures: list[str]) -> None:
             f'当前长度 {len(hits[0]["url"])}')
 
 
-def validate_vector(vector: dict, path: str) -> None:
-    """根据协议类型验证向量断言（单步 expected / 多步 expected_*）。"""
+def validate_vector(vector: dict, path: str, failures: list[str]) -> None:
+    """根据协议类型验证向量断言（单步 expected / 多步 expected_*）。
+
+    PY-187（2026-09-26 审计）：校验逻辑此前用裸 assert 实现——`python -O`
+    运行时断言全部被剥离，脚本对任意非法向量静默返回 0（fail-open，门禁
+    可剥离）。现改为显式 failures.append 收集——与优化器无关，-O 下仍 fail。
+    """
     if 'expected' in vector:
-        assert vector['expected'] in SINGLE_STEP_ACCEPTED, \
-            f'单步协议 expected 值非法: {path} → {vector["expected"]!r}'
+        if vector['expected'] not in SINGLE_STEP_ACCEPTED:
+            failures.append(
+                f'单步协议 expected 值非法: {path} → {vector["expected"]!r}')
         return
 
     multi_step_fields = [
@@ -64,13 +70,15 @@ def validate_vector(vector: dict, path: str) -> None:
         if k.startswith(MULTI_STEP_PREFIXES)
         and not k.endswith('_code')  # _code 字段是错误码，不是决策
     ]
-    assert multi_step_fields, \
-        f'向量缺少断言字段（既无 expected 也无 expected_*）: {path}'
+    if not multi_step_fields:
+        failures.append(
+            f'向量缺少断言字段（既无 expected 也无 expected_*）: {path}')
+        return
 
     for field in multi_step_fields:
         value = vector[field]
-        assert value in MULTI_STEP_ACCEPTED, \
-            f'多步流 {field} 值非法: {path} → {value!r}'
+        if value not in MULTI_STEP_ACCEPTED:
+            failures.append(f'多步流 {field} 值非法: {path} → {value!r}')
 
 
 def main() -> int:
@@ -84,10 +92,9 @@ def main() -> int:
                 failures.append(f'{path.name}: JSON 无效（{exc}）')
                 continue
             for vector in data.get('vectors', []):
-                try:
-                    validate_vector(vector, str(path.relative_to(ROOT)))
-                except AssertionError as exc:
-                    failures.append(str(exc))
+                # PY-187：显式收集（不再依赖 AssertionError 捕获——-O 下
+                # assert 被剥离会导致校验整体失效）
+                validate_vector(vector, str(path.relative_to(ROOT)), failures)
             try:
                 check_oversize_anchor(data, path, failures)
             except OSError as exc:

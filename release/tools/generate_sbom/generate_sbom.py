@@ -40,7 +40,14 @@ def main() -> int:
     if len(sys.argv) < 3:
         print("用法: generate_sbom.py <manifest.json> <output.cdx.json>")
         return 2
-    manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+    manifest_path = Path(sys.argv[1])
+    # SP-155（2026-09-26 审计）：main() 对 manifest JSON json.loads 无异常
+    # 处理——坏 JSON 直接 traceback。包 try/except：exit 2 + 文件名上下文。
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"❌ manifest 读取/解析失败: {manifest_path.name}（{exc}）")
+        return 2
     sbom = generate_sbom(manifest)
     Path(sys.argv[2]).write_text(
         json.dumps(sbom, indent=2, ensure_ascii=False), encoding="utf-8")

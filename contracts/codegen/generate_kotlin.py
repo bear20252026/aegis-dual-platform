@@ -42,9 +42,31 @@ def kt_type(prop: dict) -> str:
     return KT_TYPE_MAP[t]
 
 
+# PY-188（2026-09-26 审计）：enum/const 值域元数据（与 generate_csharp 对偶）
+# ——降级取舍的完整说明见 generate_csharp.describe_value_domain：首选
+# enum/常量类生成需同步重生成 windows/src 与 android/ 落盘产物（本批次
+# 范围外），退化为「值域元数据 + 单测锁定」。
+def describe_value_domain(prop: dict) -> str:
+    """提取属性的 enum/const 值域描述（enum → "enum: A | B"；const → "const: X"）。"""
+    if "enum" in prop:
+        values = prop["enum"]
+        rendered = " | ".join(str(v) for v in values)
+        return f"enum: {rendered}"
+    if "const" in prop:
+        return f"const: {prop['const']}"
+    return ""
+
+
 def generate(schema: dict, name: str) -> str:
     props = schema.get("properties", {})
     required = set(schema.get("required", []))
+    # PY-197（2026-09-26 审计）：required 引用未定义属性此前被静默丢弃——
+    # 必填约束无声丢失（fail-open）。先算 unknown 集合，非空抛 ValueError
+    #（fail-closed——与 generate_csharp 同口径）。
+    unknown = required - set(props)
+    if unknown:
+        raise ValueError(
+            f"required 引用未定义属性: {sorted(unknown)}（schema={name}——fail-closed）")
     # PY-100：required 区分——必选在前（与 C# 对偶，构造可读性），组内保持
     # schema 声明序；非必选生成可空类型 + 默认 null
     ordered = [k for k in props if k in required] + [k for k in props if k not in required]
@@ -73,6 +95,11 @@ def contract_name(schema_file: pathlib.Path) -> str:
 
 
 def main() -> int:
+    # AD-244（2026-09-26 审计）：Approval/AuditEvent/Capability/UpdateManifest/
+    # Version 五份 Kotlin 生成物在 Android 代码中当前零消费——保留生成的原因
+    # 是「跨语言契约镜像完整性」（与 C# 镜像同构对账，schema 漂移即门禁红）；
+    # 收窄生成范围会让镜像失去对账意义，故保留（取舍说明同步
+    # verify_contract_compatibility.check_generated_models）。
     out_dir = OUT
     out_dir.mkdir(parents=True, exist_ok=True)
     generated: set[str] = set()

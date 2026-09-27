@@ -50,6 +50,15 @@ def main() -> int:
         print("Version verification failed: missing version properties:", *missing, sep="\n- ")
         return 1
 
+    # PY-198（2026-09-26 审计）：VERSION_CODE 非数字时此前在下方 int() 处
+    # 原始 ValueError 栈——载入后即校验 isdigit，纳入汇总报错（与
+    # sync_versions 同口径）。
+    if not str(values["VERSION_CODE"]).isdigit():
+        print("Version verification failed:",
+              f"VERSION_CODE must be numeric, found {values['VERSION_CODE']!r}",
+              sep="\n- ")
+        return 1
+
     android_text = inputs["android/app/build.gradle.kts"].read_text(encoding="utf-8")
     windows_text = inputs["windows .../Aegis.Windows.App.csproj"].read_text(encoding="utf-8")
     # 审计修复：不再校验已死的 Python 时代 AegisSetup.iss——改为校验

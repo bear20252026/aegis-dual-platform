@@ -4,12 +4,15 @@
 #   PY-140 verify_checksum_json.verify_manifest 用例
 #   PY-141 篡改/越界/重复三拒绝
 #   PY-142 update_verifier.canonical_unsigned 字节精确断言
-#   PY-143 _version_tuple 四用例（含预发布序）
 #   PY-144 verify_manifest 四用例（Ed25519 阈值签名）
 #   PY-145 回滚拒绝单测
 #   PY-146 native_artifact_manifest 三类 ValueError
 #   PY-147 --verify 拒绝单测
 #   PY-148 build_metadata 缺属性 SystemExit
+#   PY-185 build_metadata 复用共享 load_properties（行号报错）
+# SP-160（2026-09-26 审计）：_version_tuple 重复用例类已删除——全部并入
+# release_chain_test.py（本文件只留 canonical_unsigned 字节断言）。
+# SP-161：sys.path 注入统一走 conftest.py（本文件不再自带 ROOT/样板）。
 from __future__ import annotations
 
 import base64
@@ -20,14 +23,10 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "release"))
-
 from write_checksum_json import build_manifest  # noqa: E402
 from verify_checksum_json import verify_manifest  # noqa: E402
 from update_verifier import (  # noqa: E402
     UpdateRejected,
-    _version_tuple,
     canonical_unsigned,
 )
 from update_verifier import verify_manifest as verify_update_manifest  # noqa: E402
@@ -116,32 +115,14 @@ class TestVerifyChecksumManifest:
             verify_manifest(root, manifest)
 
 
-# ---------------------------------------------------------------- PY-142/143
-class TestCanonicalAndVersions:
+# ---------------------------------------------------------------- PY-142
+# SP-160：原 TestCanonicalAndVersions 中的 _version_tuple 用例（PY-143）与
+# release_chain_test.py 重复——已并入该文件，本类只保留 canonical 断言。
+class TestCanonicalBytes:
     def test_canonical_bytes_exact(self):
         # PY-142：排序键 + 紧凑分隔 + 剔除 signatures——字节级精确断言
         manifest = {"version": "1.0.0", "signatures": [{"sig": "x"}], "channel": "stable"}
         assert canonical_unsigned(manifest) == b'{"channel":"stable","version":"1.0.0"}'
-
-    def test_version_release_beats_prerelease(self):
-        assert _version_tuple("1.2.3") > _version_tuple("1.2.3-beta.1")
-
-    def test_version_numeric_segments_order(self):
-        assert _version_tuple("1.0.0-beta.2") > _version_tuple("1.0.0-beta.1")
-        assert _version_tuple("1.0.0-beta.10") > _version_tuple("1.0.0-beta.9")
-
-    def test_version_numeric_below_literal(self):
-        # SemVer：数字标识 < 字面标识
-        assert _version_tuple("1.0.0-1") < _version_tuple("1.0.0-alpha")
-
-    def test_version_build_metadata_ignored(self):
-        # PY-143：构建元数据不参与优先级
-        assert _version_tuple("1.0.0+build.5") == _version_tuple("1.0.0")
-
-    def test_version_invalid_rejected(self):
-        for bad in (None, 123, "", "1.2", "01.2.3"):
-            with pytest.raises(UpdateRejected, match="版本格式无效"):
-                _version_tuple(bad)
 
 
 # ---------------------------------------------------------------- PY-144/145
@@ -320,4 +301,73 @@ class TestBuildMetadata:
         build_metadata.main()
         doc = json.loads(out.read_text(encoding="utf-8"))
         assert doc["version_name"] == "2.2.0-beta.49"
-        assert doc["source_revision"] == "local-unverified"  # 无 GITHUB_SHA 降级
+        # PY-199 写侧对照：无 GITHUB_SHA 时降级写哨兵——校验侧 verify_release
+        # 显式拒绝该哨兵（用例见 release_chain_test.TestVerifyReleaseSentinel）
+        assert doc["source_revision"] == "local-unverified"
+
+
+# ---------------------------------------------------------------- PY-185
+class TestBuildMetadataSharedLoader:
+    def test_load_properties_reused_from_sync_versions(self, tmp_path):
+        # PY-185：build_metadata 不再自带 load_properties 副本——复用
+        # scripts/sync_versions.load_properties（保留行号报错：无 "=" 行
+        # 抛 RuntimeError 带 文件:行号，而非裸 ValueError）
+        p = tmp_path / "version.properties"
+        p.write_text("GOOD=1\nBROKEN\n", encoding="utf-8")
+        with pytest.raises(RuntimeError) as excinfo:
+            build_metadata.load_properties(p)
+        msg = str(excinfo.value)
+        assert "version.properties" in msg and ":2:" in msg and "BROKEN" in msg
+
+    def test_load_properties_shared_object_identity(self):
+        # 双源消除的结构性锁定：build_metadata.load_properties 与
+        # scripts/sync_versions.load_properties 是同一个函数对象
+        import sync_versions
+        assert build_metadata.load_properties is sync_versions.load_properties
+
+
+# ---------------------------------------------------------------- PY-214/SP-175
+class TestLoadThresholdStructuredYaml:
+    def _policy(self, tmp_path: Path, text: str) -> Path:
+        p = tmp_path / "signing-policy.yaml"
+        p.write_text(text, encoding="utf-8")
+        return p
+
+    def test_valid_policy_threshold_read(self, tmp_path):
+        # PY-214：yaml.safe_load 结构化读取——合法策略读出 threshold
+        from verify_manifest import _load_threshold
+        p = self._policy(tmp_path, 'policy:\n  version: "1.1"\n  threshold: 2\n')
+        assert _load_threshold(p) == 2
+
+    def test_missing_threshold_exit_2(self, tmp_path):
+        # 负例①：threshold 缺失 → SystemExit(2)（fail-closed，不回退默认值）
+        from verify_manifest import _load_threshold
+        p = self._policy(tmp_path, "policy:\n  version: \"1.1\"\n")
+        with pytest.raises(SystemExit) as excinfo:
+            _load_threshold(p)
+        assert excinfo.value.code == 2
+
+    def test_cross_block_binding_eliminated(self, tmp_path):
+        # 负例②：threshold 只出现在嵌套子块（rollback.threshold）→ 拒绝——
+        # 手写 MULTILINE+DOTALL 正则时代会跨块误绑该键
+        from verify_manifest import _load_threshold
+        p = self._policy(tmp_path, "policy:\n  rollback:\n    threshold: 5\n")
+        with pytest.raises(SystemExit) as excinfo:
+            _load_threshold(p)
+        assert excinfo.value.code == 2
+
+    def test_non_integer_threshold_exit_2(self, tmp_path):
+        # 负例③：非整数/越界 threshold → SystemExit(2)
+        from verify_manifest import _load_threshold
+        for text in ("policy:\n  threshold: two\n",
+                     "policy:\n  threshold: 0\n",
+                     "policy:\n  threshold: -1\n"):
+            p = self._policy(tmp_path, text)
+            with pytest.raises(SystemExit) as excinfo:
+                _load_threshold(p)
+            assert excinfo.value.code == 2
+
+    def test_real_policy_threshold_is_two(self):
+        # SP-006 单源回归：仓库真实 signing-policy.yaml 读出阈值 2
+        from verify_manifest import _load_threshold
+        assert _load_threshold() == 2

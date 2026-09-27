@@ -8,6 +8,10 @@
 #   PY-114 git_commit_and_head 降级
 #   PY-115 stamp_readme 两用例
 #   PY-116 check_reviewed 三类报告
+#   PY-204 FILE_COPY 死条目删除 / PY-205 os.walk 剪枝 / PY-207 kwonly 参数
+#   PY-209 check_reviewed 坏 manifest 守卫（本批次新增）
+# SP-161（2026-09-26 审计）：sys.path 注入统一走 conftest.py
+#（保留 ROOT——dedup/脚本路径仍需它）。
 from __future__ import annotations
 
 import json
@@ -18,7 +22,6 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_review_package as brp  # noqa: E402
 from gen_jsapi_schema import _doc_first_line, build_schema  # noqa: E402
@@ -87,6 +90,40 @@ class TestBuildSchema:
         assert methods["ping"]["defined_in"] == "TabMixin"
         assert methods["echo"]["defined_in"] == "Api"
 
+    # ------------------------------------------------------- PY-207
+    def test_kwonly_vararg_kwarg_extracted(self):
+        # PY-207：kwonlyargs/kw_defaults/vararg/kwarg 此前完全不进 schema
+        src = '''
+class Api:
+    def op(self, a, b=1, *, flag, opt=2, **rest):
+        """doc."""
+        return a
+
+    def collect(self, *parts):
+        """doc."""
+        return parts
+'''
+        methods = build_schema(src)["properties"]["methods"]
+        op = methods["op"]
+        assert op["params"] == [
+            {"name": "a", "required": True},
+            {"name": "b", "required": False},
+            {"name": "flag", "required": True},   # kw_defaults 该位为 None → 必填
+            {"name": "opt", "required": False},
+        ]
+        assert op["n_required_params"] == 2  # 位置必填 a + kwonly 必填 flag
+        assert op["kwarg"] == "rest"
+        assert "vararg" not in op
+        assert methods["collect"]["vararg"] == "parts"
+        assert "kwarg" not in methods["collect"]
+
+    def test_plain_params_shape_unchanged(self):
+        # PY-207 回归锁：现网 Api 链（无 kwonly/vararg/kwarg）输出形状不变
+        #（shared/jsapi-schema.json 有 CI git-diff 门禁——生成器不得无条件变形）
+        methods = build_schema(API_SRC)["properties"]["methods"]
+        assert methods["echo"]["params"] == [{"name": "msg", "required": False}]
+        assert "vararg" not in methods["echo"] and "kwarg" not in methods["echo"]
+
     def test_derived_class_shadows_base(self):
         # 同名方法以更派生类（Api 本体）为准
         override_src = '''
@@ -139,6 +176,31 @@ class TestCollectSources:
         # 关键单源资产必须在清单内
         assert "shared/shell/start.html" in keys
         assert "README.md" in keys
+
+    def test_file_copy_dead_doc_entries_removed(self):
+        # PY-204：docs/DESIGN.md 与 docs/KNOWLEDGE_BASE.md 是 FILE_COPY 死条目
+        #（TREE_COPY ("docs","docs") 已整树覆盖）——FILE_COPY 不得再登记 docs/
+        assert not any(f.startswith("docs/") for f in brp.FILE_COPY)
+        # 且两文件仍经树复制进入评审包（覆盖关系而非丢失）
+        keys = {p.as_posix() for p in brp.collect_sources()}
+        assert "docs/DESIGN.md" in keys
+        assert "docs/KNOWLEDGE_BASE.md" in keys
+
+    def test_walk_prunes_excluded_dirs_at_dir_level(self, tmp_path, monkeypatch):
+        # PY-205：os.walk(topdown=True) 在 dirs 层剪枝——EXCLUDE_DIRS 子树
+        # 不进入遍历（合成树：排除目录内文件即使非产物后缀也不得收集）
+        src = tmp_path / "src"
+        (src / "keep").mkdir(parents=True)
+        (src / "keep" / "ok.py").write_text("x = 1", encoding="utf-8")
+        (src / "build").mkdir()
+        (src / "build" / "middle.py").write_text("y = 2", encoding="utf-8")
+        (src / "target" / "deep").mkdir(parents=True)
+        (src / "target" / "deep" / "z.py").write_text("z = 3", encoding="utf-8")
+        monkeypatch.setattr(brp, "ROOT", tmp_path)
+        monkeypatch.setattr(brp, "TREE_COPY", [("src", "src")])
+        monkeypatch.setattr(brp, "FILE_COPY", [])
+        keys = {p.as_posix() for p in brp.collect_sources()}
+        assert keys == {"src/keep/ok.py"}
 
 
 # ---------------------------------------------------------------- PY-114
@@ -198,7 +260,7 @@ class TestCheckReviewed:
     def test_content_drift_reported(self, tmp_path, tiny_source):
         pkg = tmp_path / "pkg"
         pkg.mkdir()
-        brp.build(pkg, apply_edit=False)
+        brp.build(pkg)  # PY-203：apply_edit 死参数已删除——调用点同步
         committed = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
         committed["files"][0]["sha256"] = "0" * 64  # 模拟内容漂移
         (pkg / "manifest.json").write_text(
@@ -210,7 +272,7 @@ class TestCheckReviewed:
     def test_committed_extra_file_reported(self, tmp_path, tiny_source):
         pkg = tmp_path / "pkg"
         pkg.mkdir()
-        brp.build(pkg, apply_edit=False)
+        brp.build(pkg)  # PY-203：调用点同步
         committed = json.loads((pkg / "manifest.json").read_text(encoding="utf-8"))
         committed["files"].append(
             {"path": "ghost/removed-from-source.txt", "sha256": "a" * 64, "bytes": 1})
@@ -224,11 +286,27 @@ class TestCheckReviewed:
     def test_in_sync_package_passes(self, tmp_path, tiny_source):
         pkg = tmp_path / "pkg"
         pkg.mkdir()
-        brp.build(pkg, apply_edit=False)
-        # apply_edit=False 时 build 仍写 manifest.json 但不写 README 戳记——
-        # check 只比对 manifest 内文件集，需剔除 README 期望差（KEEP_FILES 语义）
+        brp.build(pkg)  # PY-203：调用点同步
+        # build 始终写 manifest.json；README 戳记由 KEEP_FILES 语义保留——
+        # check 只比对 manifest 内文件集，需剔除 README 期望差
         ok, problems = brp.check_reviewed(pkg)
         assert ok, problems
+
+    def test_corrupt_manifest_reported_not_raised(self, tmp_path, tiny_source):
+        # PY-209：已提交 manifest.json 损坏（非法 JSON）→ 计入 problems 的
+        # 干净报告（此前原始 json.JSONDecodeError 栈替代报告）
+        pkg = tmp_path / "pkg"
+        pkg.mkdir()
+        (pkg / "manifest.json").write_text("{ broken json!!", encoding="utf-8")
+        ok, problems = brp.check_reviewed(pkg)
+        assert not ok
+        assert any("无法解析" in p for p in problems)
+
+    def test_function_has_no_dead_apply_edit_param(self):
+        # PY-203：build 签名不再携带 apply_edit 死参数
+        import inspect
+        sig = inspect.signature(brp.build)
+        assert "apply_edit" not in sig.parameters
 
 
 # 脚本可独立运行（无 pytest 环境时的最低验证）

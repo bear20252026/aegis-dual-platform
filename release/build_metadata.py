@@ -9,19 +9,18 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-
-def load_properties(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if line and not line.startswith("#"):
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip()
-    return values
+# PY-185（2026-09-26 审计）：本文件与 scripts/sync_versions.py 各有一份
+# load_properties（双源）——本副本 `line.split("=", 1)` 对无 "=" 行直接
+# ValueError 原始栈，而 sync_versions 副本已修为带 文件:行号 的 RuntimeError。
+# 现删除本副本、锚定 sys.path 复用 scripts/sync_versions.load_properties
+#（保留行号报错语义——properties 解析规则单源，两处不再漂移）。
+sys.path.insert(0, str(ROOT / "scripts"))
+from sync_versions import load_properties
 
 
 def main() -> None:

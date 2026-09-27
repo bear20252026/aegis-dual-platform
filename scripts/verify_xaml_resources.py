@@ -44,7 +44,10 @@ def main() -> int:
             key = m.group(1) or m.group(2)
             if key not in keys:
                 line = txt.count("\n", 0, m.start()) + 1
-                kind = "索引器" if m.group(2) else "FindResource"
+                # PY-213（2026-09-26 审计）：kind 此前把 TryFindResource 命中
+                # 也标成 "FindResource"——排障提示失真（TryFindResource 不抛
+                # 异常而是返回 null，崩溃形态不同）。改记录匹配前缀原文。
+                kind = "索引器" if m.group(2) else m.group(0).split("(")[0]
                 missing.append((cs, key, line, kind))
     if missing:
         print(f"[FAIL] 发现 {len(missing)} 个资源引用指向未定义的 XAML 资源键：")

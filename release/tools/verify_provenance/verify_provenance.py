@@ -19,9 +19,16 @@ PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 def verify_provenance(dist_dir: Path, owner: str, signer_workflow: str) -> list[str]:
     """逐工件 gh attestation verify（官方——固定 signer 身份——fail-closed）。"""
     failures: list[str] = []
-    for p in sorted(dist_dir.iterdir()):
-        if not p.is_file():
-            continue
+    targets = [p for p in sorted(dist_dir.iterdir()) if p.is_file()]
+    # SP-144（2026-09-26 审计）：空集恒真退化——dist 目录缺失/为空时此前
+    # 循环零次、failures=[] 直接打印"全部通过"。空集即失败（没有工件等于
+    # 没有任何 provenance 证据——fail-closed）。
+    if not targets:
+        failures.append(
+            f"dist 未枚举任何工件（目录缺失或为空: {dist_dir}）"
+            "——无 provenance 可验证即失败（SP-144 空集恒真修复）")
+        return failures
+    for p in targets:
         cmd = [
             "gh", "attestation", "verify", str(p),
             "--owner", owner,

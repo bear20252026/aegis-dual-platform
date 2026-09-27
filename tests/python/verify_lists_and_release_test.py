@@ -8,19 +8,21 @@
 #   PY-122 引擎表解析三端
 #   PY-123 validate_release.check_lock_file（抽函数后单测）
 #   PY-124 validate_release.check_required_cs_files
+#   PY-213 kind 记录匹配前缀原文 / SP-154 legacy 端可选 / SP-166 shell 清单对账
+# SP-161（2026-09-26 审计）：sys.path 注入统一走 conftest.py。
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
-
 import verify_cross_end_lists as vcel  # noqa: E402
 import verify_xaml_resources as vxr  # noqa: E402
-from validate_release import check_lock_file, check_required_cs_files  # noqa: E402
+from validate_release import (  # noqa: E402
+    check_lock_file,
+    check_required_cs_files,
+    check_shell_manifest_consistency,
+)
 
 
 # ---------------------------------------------------------------- PY-117/118
@@ -61,6 +63,22 @@ class TestXamlResources:
         (tmp_path / "x" / "code.xaml.cs").write_text('var a = FindResource("Only");\n', encoding="utf-8")
         monkeypatch.setattr(vxr, "SRC", tmp_path / "x")
         assert vxr.main() == 0
+
+    def test_kind_records_matched_prefix_verbatim(self, tmp_path, monkeypatch, capsys):
+        # PY-213：TryFindResource 命中必须以原文 TryFindResource 标注——
+        # 此前统一标 "FindResource"（排障提示失真）
+        (tmp_path / "x").mkdir()
+        (tmp_path / "x" / "res.xaml").write_text(
+            '<ResourceDictionary><Brush x:Key="Known"/></ResourceDictionary>', encoding="utf-8")
+        (tmp_path / "x" / "code.xaml.cs").write_text(
+            'var a = FindResource("GhostA");\n'
+            'var b = TryFindResource("GhostB");\n',
+            encoding="utf-8")
+        monkeypatch.setattr(vxr, "SRC", tmp_path / "x")
+        assert vxr.main() == 1
+        out = capsys.readouterr().out
+        assert 'FindResource("GhostA")' in out
+        assert 'TryFindResource("GhostB")' in out
 
 
 # ---------------------------------------------------------------- PY-119..122
@@ -165,3 +183,125 @@ class TestValidateReleaseGates:
             f.parent.mkdir(parents=True, exist_ok=True)
             f.write_text("//", encoding="utf-8")
         assert check_required_cs_files(csproj) == []
+
+
+# ---------------------------------------------------------------- SP-166
+class TestShellManifestConsistency:
+    def _tree(self, tmp_path: Path, listed: list[str], actual: list[str]) -> Path:
+        shell = tmp_path / "shared" / "shell"
+        shell.mkdir(parents=True, exist_ok=True)
+        manifest = shell / "manifest.txt"
+        manifest.write_text("\n".join(listed) + "\n", encoding="utf-8")
+        for rel in actual:
+            f = shell / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("asset", encoding="utf-8")
+        return tmp_path
+
+    def test_diff_between_manifest_and_disk_reported(self, tmp_path):
+        # SP-166：清单与实际文件差集非空即 fail（双向：未登记 + 幽灵条目）
+        root = self._tree(
+            tmp_path,
+            listed=["start.html", "ghost.css"],
+            actual=["start.html", "start.js"],
+        )
+        problems = check_shell_manifest_consistency(root)
+        assert any("未登记 manifest.txt: start.js" in p for p in problems)
+        assert any("manifest.txt 登记的文件不存在: shared/shell/ghost.css" in p for p in problems)
+
+    def test_manifest_itself_and_snake_test_excluded(self, tmp_path):
+        # SP-166：manifest.txt 自身与 snake.test.js 不参与对账
+        root = self._tree(
+            tmp_path,
+            listed=["start.html"],
+            actual=["start.html", "snake.test.js"],
+        )
+        assert check_shell_manifest_consistency(root) == []
+
+    def test_in_sync_passes(self, tmp_path):
+        root = self._tree(
+            tmp_path,
+            listed=["start.html", "start.css", "wallpapers/a.jpg"],
+            actual=["start.html", "start.css", "wallpapers/a.jpg"],
+        )
+        assert check_shell_manifest_consistency(root) == []
+
+
+# ---------------------------------------------------------------- SP-154
+class TestLegacyEndpointsOptional:
+    def test_legacy_wallpaper_endpoint_missing_only_warns(self, tmp_path, monkeypatch):
+        # SP-154：legacy 归档端 asset_scheme.py 缺失 → 返回 None + 告警（不计失败）
+        monkeypatch.setattr(vcel, "failures", [])
+        monkeypatch.setattr(vcel, "warnings", [])
+        monkeypatch.setattr(vcel, "ROOT", tmp_path)  # 空 tmp 树——无任何文件
+        assert vcel.wallpapers_from_asset_scheme() is None
+        assert vcel.failures == []
+        assert vcel.warnings and "asset_scheme.py" in vcel.warnings[0]
+
+    def test_legacy_engine_endpoint_missing_only_warns(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(vcel, "failures", [])
+        monkeypatch.setattr(vcel, "warnings", [])
+        monkeypatch.setattr(vcel, "ROOT", tmp_path)
+        assert vcel.engines_from_url_utils() is None
+        assert vcel.failures == []
+        assert vcel.warnings and "url_utils.py" in vcel.warnings[0]
+
+    def test_legacy_present_but_anchor_missing_still_fails(self, tmp_path, monkeypatch):
+        # 归档端存在但白名单锚点丢失 → 仍 fail（降级只针对"文件缺失"）
+        monkeypatch.setattr(vcel, "failures", [])
+        monkeypatch.setattr(vcel, "warnings", [])
+        legacy = tmp_path / "legacy" / "windows-pywebview" / "app"
+        legacy.mkdir(parents=True)
+        (legacy / "asset_scheme.py").write_text("# no WALLPAPERS here\n", encoding="utf-8")
+        monkeypatch.setattr(vcel, "ROOT", tmp_path)
+        assert vcel.wallpapers_from_asset_scheme() == set()
+        assert vcel.failures and "未找到 WALLPAPERS" in vcel.failures[0]
+
+    def test_main_degrades_when_legacy_missing(self, tmp_path, monkeypatch, capsys):
+        # SP-154 端到端：legacy 两端缺失时现役端齐全 → 退出 0 + 告警输出
+        monkeypatch.setattr(vcel, "failures", [])
+        monkeypatch.setattr(vcel, "warnings", [])
+        shell = tmp_path / "shared" / "shell"
+        (shell / "wallpapers").mkdir(parents=True)
+        (shell / "start.main.js").write_text("var WALLPAPERS = [];", encoding="utf-8")
+        kt_dir = tmp_path / "android" / "app" / "src" / "main" / "java" / "com" / "aegis" / "browser"
+        kt_dir.mkdir(parents=True)
+        (kt_dir / "AegisHomeBridge.kt").write_text(
+            "val WALLPAPERS = setOf()", encoding="utf-8")
+        (kt_dir / "SearchEngines.kt").write_text(
+            "val ENGINE_URLS = mapOf()", encoding="utf-8")
+        cs_dir = tmp_path / "windows" / "src" / "Aegis.Windows.App"
+        (cs_dir / "Chrome").mkdir(parents=True)
+        # C# 引擎表含全部已登记扩展（core 为空时 extras 必须全在白名单内）
+        engines = ", ".join(f'["{e}"] = "https://{e}"' for e in sorted(vcel.CS_ENGINE_EXTENSIONS))
+        (cs_dir / "Chrome" / "UrlNormalizer.cs").write_text(
+            "EngineUrls = new Dictionary<string, string>\n{\n" + engines + "\n};",
+            encoding="utf-8")
+        ntp_dir = cs_dir / "Chrome" / "Ntp"
+        ntp_dir.mkdir(parents=True)
+        (ntp_dir / "NtpAssets.cs").write_text(
+            "Wallpapers = new[] { };", encoding="utf-8")
+        monkeypatch.setattr(vcel, "ROOT", tmp_path)
+        assert vcel.main() == 0
+        out = capsys.readouterr().out
+        assert "SP-154" in out and "⚠️" in out
+
+    def test_active_endpoint_missing_still_fails(self, tmp_path, monkeypatch):
+        # SP-154：现役端（C# NtpAssets.cs）缺失 → 仍 fail-closed
+        monkeypatch.setattr(vcel, "failures", [])
+        monkeypatch.setattr(vcel, "warnings", [])
+        shell = tmp_path / "shared" / "shell"
+        (shell / "wallpapers").mkdir(parents=True)
+        (shell / "start.main.js").write_text("var WALLPAPERS = [];", encoding="utf-8")
+        kt_dir = tmp_path / "android" / "app" / "src" / "main" / "java" / "com" / "aegis" / "browser"
+        kt_dir.mkdir(parents=True)
+        (kt_dir / "AegisHomeBridge.kt").write_text(
+            "val WALLPAPERS = setOf()", encoding="utf-8")
+        (kt_dir / "SearchEngines.kt").write_text(
+            "val ENGINE_URLS = mapOf()", encoding="utf-8")
+        cs_dir = tmp_path / "windows" / "src" / "Aegis.Windows.App" / "Chrome"
+        cs_dir.mkdir(parents=True)
+        # 故意不写 NtpAssets.cs——现役端缺失必须 fail
+        monkeypatch.setattr(vcel, "ROOT", tmp_path)
+        assert vcel.main() == 1
+        assert vcel.failures and "NtpAssets.cs" in vcel.failures[0]

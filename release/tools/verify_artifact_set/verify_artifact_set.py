@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import urllib.parse
 from pathlib import Path
 
 
@@ -46,7 +47,11 @@ def verify_artifact_set(dist_dir: Path, manifest: dict) -> list[str]:
             failures.append("manifest.artifacts 含非对象条目")
             continue
         url = art.get("url") if isinstance(art.get("url"), str) else ""
-        rel = url.split("/")[-1] if url else ""
+        # PY-210（2026-09-26 审计）：url.split("/")[-1] 不做百分号解码——
+        # Release browser_url 对含空格/中文等字符的资产名是 percent-encoded
+        #（如 a%20b.zip），与本地文件名 a b.zip 不匹配 → 恒报"缺失工件"。
+        # 取尾段后再 unquote 对齐本地名。
+        rel = urllib.parse.unquote(url.split("/")[-1]) if url else ""
         platform = art.get("platform", "") if isinstance(art.get("platform"), str) else ""
         sha = art.get("sha256", "")
         if rel and platform and isinstance(sha, str) and len(sha) == 64:
@@ -59,6 +64,15 @@ def verify_artifact_set(dist_dir: Path, manifest: dict) -> list[str]:
         for p in sorted(dist_dir.rglob("*")):
             if p.is_file():
                 actual.setdefault(p.name, []).append(p)
+
+    # SP-144（2026-09-26 审计）：空集恒真退化——manifest 未枚举任何工件或
+    # dist 未枚举任何文件时，此前 failures=[] 会打印"全部通过"（门禁恒真）。
+    # "逐工件闭合 fail-closed"要求：任一侧空集即判定失败（不提前返回——
+    # 继续走下方逐项对账，保留缺失/多余明细）。
+    if not expected:
+        failures.append("manifest 未枚举任何工件（空集——fail-closed，SP-144）")
+    if not actual:
+        failures.append(f"dist 未枚举任何工件（目录缺失或为空: {dist_dir}——fail-closed，SP-144）")
 
     consumed: set[Path] = set()
     # 1) manifest 枚举必须全部存在且相符
@@ -96,7 +110,15 @@ def main() -> int:
         print("用法: verify_artifact_set.py <dist_dir> <manifest.json>")
         return 2
     dist_dir = Path(sys.argv[1])
-    manifest = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+    manifest_path = Path(sys.argv[2])
+    # SP-155（2026-09-26 审计）：main() 对 manifest JSON json.loads 无异常
+    # 处理——坏 JSON 直接 traceback 替代干净报告。包 try/except：exit 2 +
+    # 文件名上下文（与环境错误同一退出码语义）。
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"❌ manifest 读取/解析失败: {manifest_path.name}（{exc}）")
+        return 2
     failures = verify_artifact_set(dist_dir, manifest)
     if failures:
         for f in failures:

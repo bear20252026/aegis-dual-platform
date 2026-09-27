@@ -14,15 +14,14 @@
 #   PY-136 scope 冲突检测
 #   PY-137 audit/redteam_fixtures 缺失检测
 #   PY-138 坏 yaml 解析路径
+#   PY-188 enum/const 值域元数据 + PY-195 行号定位 + PY-197 required 未知属性
+#   PY-215 锚点缺失严格单源（本批次新增）
+# SP-161（2026-09-26 审计）：sys.path 注入统一走 conftest.py。
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pytest
-
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "contracts" / "codegen"))
 
 import analyze_action_catalog as aac  # noqa: E402
 import generate_csharp as gcs  # noqa: E402
@@ -116,6 +115,57 @@ class TestStaleCleanup:
         # 真实 schema 生成物在位
         assert (out / "ActionContract.cs").is_file()
         assert (tmp_path / "generated_kt" / "ActionContract.kt").is_file()
+
+
+# ---------------------------------------------------------------- PY-197
+class TestRequiredUnknownPropertyFailClosed:
+    def test_csharp_unknown_required_raises(self):
+        # PY-197：required 引用未定义属性 → ValueError（此前静默丢弃必选约束）
+        schema = {"required": ["id", "ghost"], "properties": {"id": {"type": "string"}}}
+        with pytest.raises(ValueError, match="ghost"):
+            gcs.generate(schema, "Demo")
+
+    def test_kotlin_unknown_required_raises(self):
+        schema = {"required": ["ghost"], "properties": {"id": {"type": "string"}}}
+        with pytest.raises(ValueError, match="ghost"):
+            gkt.generate(schema, "Demo")
+
+    def test_known_required_still_passes(self):
+        schema = {"required": ["id"], "properties": {"id": {"type": "string"}}}
+        assert "string id" in gcs.generate(schema, "Demo")
+        assert "val id: String" in gkt.generate(schema, "Demo")
+
+
+# ---------------------------------------------------------------- PY-188
+class TestEnumValueDomainDegraded:
+    def test_csharp_and_kotlin_value_domain_metadata(self):
+        # PY-188（降级）：enum/const 值域以元数据 API 暴露——不产出 enum
+        # 类型（取舍说明见 generate_csharp.describe_value_domain 文档注释）
+        prop = {"type": "string", "enum": ["GET", "POST", "DELETE"]}
+        assert gcs.describe_value_domain(prop) == "enum: GET | POST | DELETE"
+        assert gkt.describe_value_domain(prop) == "enum: GET | POST | DELETE"
+        assert gcs.describe_value_domain({"const": "Aegis"}) == "const: Aegis"
+        assert gkt.describe_value_domain({"const": 1}) == "const: 1"
+        assert gcs.describe_value_domain({"type": "string"}) == ""
+
+    def test_real_schema_enum_domains_locked(self):
+        # PY-188 单测锁定：真实 schema 的 enum 值域（防止 schema 静默改动值域）
+        import json
+        schemas = Path(__file__).resolve().parents[2] / "contracts" / "schemas"
+        action = json.loads((schemas / "action.schema.json").read_text(encoding="utf-8"))
+        assert gcs.describe_value_domain(action["properties"]["method"]) == (
+            "enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD")
+        update = json.loads((schemas / "update-manifest.schema.json").read_text(encoding="utf-8"))
+        assert gkt.describe_value_domain(update["properties"]["channel"]) == (
+            "enum: stable | beta | nightly")
+
+    def test_degraded_output_stays_plain_string(self):
+        # PY-188 降级契约锁定：含 enum 属性生成物仍是裸映射类型（不产 enum
+        # 类型）——升级为 enum 生成必须显式更新本用例（有意识变更）
+        schema = {"properties": {"method": {"type": "string",
+                                            "enum": ["GET", "POST"]}}}
+        assert "string? method = null" in gcs.generate(schema, "Demo")
+        assert "val method: String? = null" in gkt.generate(schema, "Demo")
 
 
 # ---------------------------------------------------------------- PY-129/130
@@ -262,3 +312,60 @@ class TestAnalyzeActionCatalog:
     def test_clean_catalog_passes(self):
         src = "actions:\n" + _action("ok1", "s1") + _action("ok2", "s2")
         assert aac.analyze(src) == []
+
+    def test_duplicate_reports_real_yaml_line(self):
+        # PY-195：重复报告的"首次出现行"必须是真实 YAML 行号（start_mark.line+1），
+        # 不再是列表下标。第一个 action 在源文本第 2 行（actions: 占第 1 行）。
+        src = "actions:\n" + _action("op", "s1") + _action("op", "s2")
+        first_line = next(
+            i for i, ln in enumerate(src.splitlines(), start=1) if "name: op" in ln)
+        errors = aac.analyze(src)
+        dup = next(e for e in errors if "重复 action name 'op'" in e)
+        assert f"首次出现行 {first_line}" in dup, dup
+        assert "列表下标 0" not in dup
+
+    def test_line_mark_fallback_labels_index(self):
+        # PY-195：行号不可得时文案必须标注"列表下标"——不让定位信息撒谎
+        from unittest import mock
+        src = "actions:\n" + _action("op", "s1") + _action("op", "s2")
+        with mock.patch.object(aac, "_action_start_lines",
+                               return_value=[(None, False), (None, False)]):
+            errors = aac.analyze(src)
+        dup = next(e for e in errors if "重复 action name 'op'" in e)
+        assert "首次出现列表下标 0" in dup, dup
+
+
+# ---------------------------------------------------------------- PY-215
+class TestBridgeGuardNoFallback:
+    def test_missing_anchor_is_failure_not_fallback(self, tmp_path, monkeypatch):
+        # PY-215：REQUIRED_SINKS_FALLBACK 已删除——模板锚点缺失直接计
+        # failures（main 返回 1），不再回退内置清单（严格单源）
+        monkeypatch.setattr(vbg, "failures", [])
+        template = tmp_path / "bridge_guard.template.js"
+        # 合法模板但缺 REQUIRED_SINKS 锚点行
+        template.write_text(
+            "const HOSTS = __AEGIS_HOSTS__;\n"
+            "const REQUIRE_HTTPS = __AEGIS_REQUIRE_HTTPS__;\n",
+            encoding="utf-8")
+        rust = tmp_path / "bridge_guard.rs"
+        rust.write_text('static SCRIPT: &str = include_str!("bridge_guard.template.js");\n',
+                        encoding="utf-8")
+        kt = tmp_path / "WebViewHardening.kt"
+        kt.write_text(
+            "object H {\n"
+            '    val BRIDGE_GUARD_JS: String\n'
+            '        get() = """\n'
+            "const HOSTS = [$allowedHostsJson];\n"
+            "const REQUIRE_HTTPS = $requireHttpsJson;\n"
+            '""".trimIndent()\n'
+            "}\n",
+            encoding="utf-8")
+        monkeypatch.setattr(vbg, "CANONICAL", template)
+        monkeypatch.setattr(vbg, "RUST", rust)
+        monkeypatch.setattr(vbg, "KOTLIN", kt)
+        assert vbg.main() == 1
+        assert any("REQUIRED_SINKS 锚点行" in f for f in vbg.failures)
+
+    def test_no_fallback_constant_left(self):
+        # PY-215：第二事实源已物理移除
+        assert not hasattr(vbg, "REQUIRED_SINKS_FALLBACK")

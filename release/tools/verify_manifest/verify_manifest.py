@@ -19,29 +19,40 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from release.update_verifier import UpdateRejected, verify_manifest
 
 
-def _load_threshold() -> int:
+def _load_threshold(policy_path: Path | None = None) -> int:
     """签名阈值单源：release/manifests/signing-policy.yaml（SP-006 整改）。
 
     此前脚本硬编码 threshold=2，策略 yaml 可漂移而不被发现。现强制读
     策略文件——文件缺失/解析失败/threshold 非法一律 exit 2（fail-closed，
-    不回退到任何默认值）。仅解析受控清单中的扁平标量，不引入 pyyaml 依赖。
-    """
-    import re
+    不回退到任何默认值）。
 
-    policy_path = (Path(__file__).resolve().parents[2]
-                   / "manifests" / "signing-policy.yaml")
+    PY-214/SP-175（2026-09-26 审计）：阈值此前以 MULTILINE+DOTALL 手写正则
+    抽取——``.*?`` 可跨块误绑（如 rollback 段或后续新增块中先出现的
+    threshold 键会被错误采信）。CI 已锁 pyyaml 依赖，改 yaml.safe_load
+    结构化读取 policy.threshold（保留 fail-closed 退出码语义）。
+    policy_path 参数仅供单测注入合成策略文件。
+    """
+    import yaml
+
+    if policy_path is None:
+        policy_path = (Path(__file__).resolve().parents[2]
+                       / "manifests" / "signing-policy.yaml")
     if not policy_path.is_file():
         print(f"❌ 签名策略缺失: {policy_path}（终止发布——fail-closed）")
         raise SystemExit(2)
-    match = re.search(
-        r"^policy:.*?^\s+threshold:\s*(\d+)(?:\s*#.*)?$",
-        policy_path.read_text(encoding="utf-8"),
-        re.MULTILINE | re.DOTALL,
-    )
-    if not match or int(match.group(1)) < 1:
+    # 结构化读取：policy 块下的 threshold 标量——非整数/缺失/越界一律拒绝
+    try:
+        doc = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        print(f"❌ 签名策略 YAML 解析失败: {policy_path.name}（{exc}）"
+              "（终止发布——fail-closed）")
+        raise SystemExit(2) from exc
+    policy = doc.get("policy") if isinstance(doc, dict) else None
+    threshold = policy.get("threshold") if isinstance(policy, dict) else None
+    if not isinstance(threshold, int) or isinstance(threshold, bool) or threshold < 1:
         print("❌ 签名策略 threshold 缺失或非法（终止发布——fail-closed）")
         raise SystemExit(2)
-    return int(match.group(1))
+    return threshold
 
 
 def main() -> int:

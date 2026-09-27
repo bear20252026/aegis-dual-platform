@@ -45,6 +45,32 @@ def cs_type(prop: dict) -> str:
 CS_VALUE_TYPES = {"long", "decimal", "bool"}
 
 
+# PY-188（2026-09-26 审计）——enum/const 支持的降级取舍：
+# 6 份 schema 含 enum/const，此前类型映射完全忽略（C#/Kotlin 模型全部降级
+# 为裸 string）。首选方案是生成 C# enum/Kotlin 常量类，但生成物落盘于
+# windows/src/Aegis.Windows.App/Contracts/Generated 与 android/contracts/.../
+# generated——PY-N1 批次文件范围不含 windows/src 与 android/，无条件改生成
+# 输出会使本仓库生成物与生成器漂移（verify_contract_compatibility 的
+# 重生成 diff 门禁必红）。经 grep 确认生成物当前零消费方（C#/Kotlin 应用
+# 代码均未引用 Generated 命名空间——见 AD-244），升级 enum 生成不会破坏
+# 消费方，但需要同步重生成落盘产物（越范围）。故本批次退化为：
+# 「值域注释（本注释 + describe_value_domain 元数据 API）+ 单测锁定」——
+# 单测锁定 schema enum/const 值域与生成器降级行为，待后续批次连同落盘
+# 产物一并升级为 enum 类型生成。
+def describe_value_domain(prop: dict) -> str:
+    """提取属性的 enum/const 值域描述（PY-188 降级版——仅元数据不改进模型）。
+
+    enum → "enum: A | B | C"；const → "const: X"；两者皆无 → ""。
+    """
+    if "enum" in prop:
+        values = prop["enum"]
+        rendered = " | ".join(str(v) for v in values)
+        return f"enum: {rendered}"
+    if "const" in prop:
+        return f"const: {prop['const']}"
+    return ""
+
+
 def cs_nullable(t: str) -> str:
     if t in CS_VALUE_TYPES:
         return f"{t}?"
@@ -56,6 +82,13 @@ def cs_nullable(t: str) -> str:
 def generate(schema: dict, name: str) -> str:
     props = schema.get("properties", {})
     required = set(schema.get("required", []))
+    # PY-197（2026-09-26 审计）：required 引用不存在的属性时此前被静默丢弃
+    #（ordered 推导只看 props 键）——必填约束无声丢失（fail-open）。先算
+    # unknown 集合，非空即抛 ValueError（fail-closed——schema 自身损坏必须显式暴露）。
+    unknown = required - set(props)
+    if unknown:
+        raise ValueError(
+            f"required 引用未定义属性: {sorted(unknown)}（schema={name}——fail-closed）")
     # PY-099：required 区分——必选在前（C# record 可选参数必须位于必选参数
     # 之后），组内保持 schema 声明序；非必选生成可空类型 + 默认 null
     ordered = [k for k in props if k in required] + [k for k in props if k not in required]
@@ -85,6 +118,12 @@ def contract_name(schema_file: pathlib.Path) -> str:
 
 
 def main() -> int:
+    # AD-244（2026-09-26 审计）：生成的模型（含 Approval/AuditEvent/Capability/
+    # UpdateManifest/Version 等）在 C# 应用代码中当前零消费方——保留生成的
+    # 原因是「跨语言契约镜像完整性」：contracts/schemas 是冻结契约的事实
+    # 来源，C#/Kotlin 生成物作为镜像由 verify_contract_compatibility 逐字节
+    # 对账（schema 漂移/手改生成物即门禁红）。不得因暂时无消费方而收窄
+    # 生成范围——那会让镜像失去对账意义。
     out_dir = OUT
     out_dir.mkdir(parents=True, exist_ok=True)
     generated: set[str] = set()
