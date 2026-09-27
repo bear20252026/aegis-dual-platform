@@ -107,6 +107,31 @@
       "url": "https://exa\rmple.org/",
       "expected": "deny",
       "note": "PY-077 CR 控制字符"
+    },
+    {
+      "url": "https://999.1.1.1/",
+      "expected": "deny",
+      "note": "RS-228 IPv4 八位组越界（首段 999>255——WHATWG IPv4 解析器拒绝；与 Rust origin.rs 逐段 ≤255 校验实测对齐）"
+    },
+    {
+      "url": "https://256.0.0.1/",
+      "expected": "deny",
+      "note": "RS-228 IPv4 八位组越界（段值恰 256>255——越界边界）"
+    },
+    {
+      "url": "https://300.300.300.300/",
+      "expected": "deny",
+      "note": "RS-228 IPv4 八位组越界（全段越界形态）"
+    },
+    {
+      "url": "https://0177.0.0.1/",
+      "expected": "deny",
+      "note": "RS-238 前导零八进制 IPv4（inet_aton 系按八进制解释=127.0.0.1，Chromium WHATWG 归一可命中本地白名单——与 Kotlin AD-213/C# CS-307/Rust 逐段前导零拒绝跨端对齐）"
+    },
+    {
+      "url": "https://0x7f.1/",
+      "expected": "deny",
+      "note": "RS-238 混合 0x 段（整串 startsWith('0x') 因含 '.' 不命中——逐段判定拒绝，跨端对齐 AD-213）"
     }
   ]
 }

@@ -111,6 +111,23 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
     {
         return None;
     }
+    // RS-238（2026-09-26 审计）：逐段前导零/0x 判定——对齐 Kotlin AD-213/
+    // C# CS-307 口径。此前整串 startsWith("0x") 对 "0x7f.1" 混合段判 false、
+    // "0177.0.0.1" 四段全数字即放行（inet_aton 系按八进制解释 = 127.0.0.1，
+    // Chromium WHATWG 归一后可命中本地白名单——双重解释混淆面）。
+    let has_hex_segment = segments.iter().any(|s| {
+        s.len() > 2
+            && s.starts_with("0x")
+            && s[2..]
+                .bytes()
+                .any(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    });
+    let has_leading_zero_segment = segments
+        .iter()
+        .any(|s| s.len() > 1 && s.starts_with('0') && s.bytes().all(|b| b.is_ascii_digit()));
+    if has_hex_segment || has_leading_zero_segment {
+        return None;
+    }
     if host.starts_with("0x")
         && host[2..]
             .bytes()
@@ -354,6 +371,20 @@ mod tests {
         assert!(try_parse_external("https://0.0.0.0/").is_some());
         assert!(try_parse_external("https://255.255.255.255/").is_some());
         assert!(try_parse_external("https://192.168.1.1/").is_some());
+    }
+
+    #[test]
+    fn ipv4_leading_zero_and_mixed_hex_rejected() {
+        // RS-238（2026-09-26 审计）：逐段前导零/0x——对齐 Kotlin AD-213 /
+        // C# CS-307。前导零（inet_aton 八进制 = 127.0.0.1）与混合 0x 段
+        //（0x7f.1 整串 startsWith 不命中）均为双重解释混淆面
+        assert_eq!(try_parse_external("https://0177.0.0.1/"), None);
+        assert_eq!(try_parse_external("https://192.168.001.001/"), None);
+        assert_eq!(try_parse_external("https://010.1.2.3/"), None);
+        assert_eq!(try_parse_external("https://0x7f.1/"), None);
+        assert_eq!(try_parse_external("https://127.0.0x1/"), None);
+        // 十进制合法形态不受影响（不含前导零/0x 段）
+        assert!(try_parse_external("https://127.0.0.1/").is_some());
     }
 
     #[test]
