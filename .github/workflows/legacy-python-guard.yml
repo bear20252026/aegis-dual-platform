@@ -71,8 +71,10 @@ jobs:
 
       - name: ruff 检查（根仓库脚本——审计修复：scripts/release/contracts/agent
           的 Python 此前从未被 lint，pyproject 却声称在门禁范围内）
+        # SP-164（2026-09-26 审计）：ignore/测试豁免清单收敛 pyproject 单源
+        #（[tool.ruff.lint] + per-file-ignores）——行内 --ignore 双源删除
         working-directory: .
-        run: ruff check scripts release contracts agent --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001,INP001,S101,PLR2004
+        run: ruff check scripts release contracts agent
       - name: ruff 检查（Lint + 格式，0 错误）
         # 工作目录为 legacy/windows-pywebview，`--exclude legacy` 排除其下的旧 Qt 栈归档
         # legacy/windows-pywebview/legacy/**（61 个 Python 不参与运行面——全量扫描会误报
@@ -80,7 +82,8 @@ jobs:
         # SP-151（2026-09-26 审计）：原注释称其余部分为"活跃新栈（app/ +
         # main_webview.py + selftest）"已失实——该栈整体为只读归档，措辞随
         # 迁移一并更正。
-        run: ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
+        # SP-164：ignore 清单随 ruff 向上发现根 pyproject.toml 单源，行内删除
+        run: ruff check . --exclude legacy
 
       - name: bandit 安全扫描（无 Medium/High）
         # 设计豁免规则（见 docs/KNOWLEDGE_BASE.md「P6 bandit 豁免」）：

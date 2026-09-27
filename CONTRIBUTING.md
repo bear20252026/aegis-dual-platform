@@ -54,12 +54,12 @@ dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全
 # —— Rust 策略核心 ——
 cargo test && cargo clippy --all-targets && cargo fmt --check  # 全绿 + 0 警告
 
-# —— 契约/版本/UI 回归门禁（仓库根；WB-117：通配在 Windows 不展开——
-#    显式文件清单与 ci.yml 一致）——
+# —— 契约/版本/UI 回归门禁（仓库根；SP-163：node 21+ glob 展开——
+#    新测试文件入目录即入门禁，Windows 本地与 ci.yml 一致）——
 python validate_release.py                        # AST/JSON/XML 静态验证
 python scripts/verify_versions.py                 # 版本单源一致性
 python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（ADR-007）
-node --test tests/ui-regression/start_page.test.mjs tests/ui-regression/host_bridge.test.mjs tests/ui-regression/start_host.test.mjs tests/ui-regression/start_import.test.mjs tests/ui-regression/start_main.test.mjs
+node --test "tests/ui-regression/*.test.mjs"    # UI 回归
 node shared/shell/snake.test.js                   # 贪吃蛇逻辑回归
 python -m pytest tests/python/ -q                 # 发布链离线单测
 

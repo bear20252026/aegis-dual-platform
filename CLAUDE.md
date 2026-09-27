@@ -32,9 +32,9 @@ python validate_release.py             # AST/JSON/XML 静态验证（版本校�
 python scripts/verify_versions.py      # 版本单源一致性
 python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
 python scripts/verify_cross_end_lists.py          # 跨端清单对账（引擎/壁纸）
-# WB-117（2026-09-26 审计）：通配 *.test.mjs 在 Windows 不展开（ci.yml 为此
-# 显式列文件）——本地必须同样显式列出；贪吃蛇回归另跑 snake.test.js
-node --test tests/ui-regression/start_page.test.mjs tests/ui-regression/host_bridge.test.mjs tests/ui-regression/start_host.test.mjs tests/ui-regression/start_import.test.mjs tests/ui-regression/start_main.test.mjs
+# SP-163（2026-09-26 审计）：node 21+ glob 展开（引号防 shell 抢先展开，
+# Windows 本地与 CI 一致）——新增测试文件入目录即入门禁
+node --test "tests/ui-regression/*.test.mjs"      # UI 回归
 node shared/shell/snake.test.js                   # 贪吃蛇逻辑回归
 python -m pytest tests/python/ -q                 # 发布链离线单测
 
@@ -49,7 +49,7 @@ cd android
 # —— legacy 归档栈（只读冻结；仅 P0 安全披露通道评估，见 ADR-009 D4）——
 # selftest_*.py 仅属该归档栈 P0 通道（WB-118）——正典栈不使用
 cd legacy/windows-pywebview
-ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
+ruff check . --exclude legacy           # SP-164：豁免清单已入本目录 ruff.toml 单源
 bandit -r app/ -q --skip B110,B404,B603,B607
 mypy main_webview.py app/                # 全量目录口径（42 源文件 0 错误）
 ```

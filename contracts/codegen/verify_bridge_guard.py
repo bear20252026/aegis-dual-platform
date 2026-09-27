@@ -97,7 +97,7 @@ def main() -> int:
     kt = KOTLIN.read_text(encoding="utf-8")
     m = re.search(
         r'BRIDGE_GUARD_JS: String\s*\n\s*get\(\)\s*=\s*"""(.*?)"""\s*\.trimIndent\(\)',
-        kt, re.S)
+        kt, re.DOTALL)
     check("Kotlin 可定位 BRIDGE_GUARD_JS 模板", m is not None)
     if m:
         kt_tpl = norm(m.group(1))

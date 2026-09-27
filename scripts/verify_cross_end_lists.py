@@ -65,7 +65,7 @@ def wallpapers_from_asset_scheme() -> set[str] | None:
                         "legacy/windows-pywebview/app/asset_scheme.py——跳过该端对账")
         return None
     text = _read("legacy/windows-pywebview/app/asset_scheme.py")
-    block = re.search(r"WALLPAPERS\s*=\s*\(([^)]*)\)", text, re.S)
+    block = re.search(r"WALLPAPERS\s*=\s*\(([^)]*)\)", text, re.DOTALL)
     if not block:
         fail("asset_scheme.py: 未找到 WALLPAPERS 白名单")
         return set()
@@ -76,7 +76,7 @@ def wallpapers_from_start_html() -> set[str]:
     # I83 外置（2026-09-10）：WALLPAPERS 数组随内联脚本外移 start.main.js
     #（start.html 仅静态标记 + CSP——不再承载脚本数据）
     text = _read("shared/shell/start.main.js")
-    block = re.search(r"var WALLPAPERS\s*=\s*\[(.*?)\];", text, re.S)
+    block = re.search(r"var WALLPAPERS\s*=\s*\[(.*?)\];", text, re.DOTALL)
     if not block:
         fail("start.main.js: 未找到 WALLPAPERS 按钮列表")
         return set()
@@ -85,7 +85,7 @@ def wallpapers_from_start_html() -> set[str]:
 
 def wallpapers_from_kotlin() -> set[str]:
     text = _read("android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt")
-    block = re.search(r"WALLPAPERS\s*=\s*setOf\((.*?)\)", text, re.S)
+    block = re.search(r"WALLPAPERS\s*=\s*setOf\((.*?)\)", text, re.DOTALL)
     if not block:
         fail("AegisHomeBridge.kt: 未找到 WALLPAPERS 白名单")
         return set()
@@ -95,7 +95,7 @@ def wallpapers_from_kotlin() -> set[str]:
 def wallpapers_from_csharp() -> set[str]:
     # WB-011（2026-09-24）：C# 正典栈 NtpAssets.Wallpapers 第 5 份壁纸清单
     text = _read("windows/src/Aegis.Windows.App/Chrome/Ntp/NtpAssets.cs")
-    block = re.search(r"Wallpapers\s*=\s*new\[\]\s*\{(.*?)\}", text, re.S)
+    block = re.search(r"Wallpapers\s*=\s*new\[\]\s*\{(.*?)\}", text, re.DOTALL)
     if not block:
         fail("NtpAssets.cs: 未找到 Wallpapers 白名单")
         return set()
@@ -117,18 +117,18 @@ def engines_from_url_utils() -> set[str] | None:
                         "legacy/windows-pywebview/app/url_utils.py——跳过该端对账")
         return None
     text = _read("legacy/windows-pywebview/app/url_utils.py")
-    block = re.search(r"SEARCH_ENGINES[^=]*=\s*\{(.*?)\n\}", text, re.S)
+    block = re.search(r"SEARCH_ENGINES[^=]*=\s*\{(.*?)\n\}", text, re.DOTALL)
     if not block:
         fail("url_utils.py: 未找到 SEARCH_ENGINES 表")
         return set()
-    return set(re.findall(r'^\s*"([^"]+)"\s*:', block.group(1), re.M))
+    return set(re.findall(r'^\s*"([^"]+)"\s*:', block.group(1), re.MULTILINE))
 
 
 def engines_from_kotlin() -> set[str]:
     # 搜索审计 2026-09-01：ENGINE_URLS 迁至 SearchEngines.kt 单源
     # （AegisHomeBridge 改为引用该单源）——锚点同步更新
     text = _read("android/app/src/main/java/com/aegis/browser/SearchEngines.kt")
-    block = re.search(r"ENGINE_URLS[^=]*=\s*mapOf\(\s*(.*?)\)", text, re.S)
+    block = re.search(r"ENGINE_URLS[^=]*=\s*mapOf\(\s*(.*?)\)", text, re.DOTALL)
     if not block:
         fail("SearchEngines.kt: 未找到 ENGINE_URLS 表")
         return set()
@@ -146,7 +146,7 @@ CS_ENGINE_EXTENSIONS = frozenset({
 
 def engines_from_csharp() -> set[str]:
     text = _read("windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs")
-    block = re.search(r"EngineUrls\s*=\s*new Dictionary[^{]*\{(.*?)\n\s*\};", text, re.S)
+    block = re.search(r"EngineUrls\s*=\s*new Dictionary[^{]*\{(.*?)\n\s*\};", text, re.DOTALL)
     if not block:
         fail("UrlNormalizer.cs: 未找到 EngineUrls 表")
         return set()

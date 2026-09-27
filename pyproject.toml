@@ -14,6 +14,15 @@ extend-exclude = ["legacy", "windows/aegis_source", "legacy/windows-pywebview/le
 # 按日志分析（86 个非全角全是风格/格式类——不阻塞发布）
 ignore = ["RUF001", "RUF003", "E501", "TRY300", "TRY003", "TRY301", "RUF021", "E402", "I001"]
 
+# SP-164（2026-09-26 审计）：测试豁免单源——此前 INP001/S101/PLR2004 在
+# workflow ruff 行内 --ignore 重复维护（与全局 ignore 清单双源漂移面）。
+# INP001 隐式命名空间包（测试目录无需 __init__.py）、S101 assert（测试语义）、
+# PLR2004 魔法值（断言可读性优先）。
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["INP001", "S101", "PLR2004"]
+"agent/tests/**" = ["INP001", "S101", "PLR2004"]
+"**/selftest_*.py" = ["INP001", "S101", "PLR2004"]
+
 # PY-149：pytest 基建（tests/python/ ——发布链离线单测落位）
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]

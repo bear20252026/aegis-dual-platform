@@ -42,10 +42,10 @@ jobs:
         with:
           node-version: '22'
       - name: 运行 UI 回归测试
-        # WB-012（2026-09-24）：显式列出全部测试文件（目录展开在 Windows
-        # 本地 node 22 上不可用；host_bridge.test.mjs 此前未接入门禁）。
-        # start_host/start_import/start_main 为 WB-015/019..026 新增。
-        run: node --test tests/ui-regression/start_page.test.mjs tests/ui-regression/host_bridge.test.mjs tests/ui-regression/start_host.test.mjs tests/ui-regression/start_import.test.mjs tests/ui-regression/start_main.test.mjs
+        # SP-163（2026-09-26 审计）：显式文件清单使新增测试文件静默不跑——
+        # 改 node 侧 glob 展开（引号防 shell 抢先展开；node 21+ 原生支持，
+        # Windows 本地与 Linux CI 均验证），新文件入目录即入门禁。
+        run: node --test "tests/ui-regression/*.test.mjs"
       - name: 运行贪吃蛇回归测试
         # WB-012：snake.test.js 此前不在任何 CI（独立 assert 风格，非 node:test）
         run: node shared/shell/snake.test.js

@@ -43,7 +43,7 @@ def analyze(src: str) -> list[str]:
     errors: list[str] = []
     try:
         doc = yaml.safe_load(src)
-    except Exception as e:
+    except yaml.YAMLError as e:
         return [f"YAML 解析错误: {e}"]
 
     if not doc or "actions" not in doc:

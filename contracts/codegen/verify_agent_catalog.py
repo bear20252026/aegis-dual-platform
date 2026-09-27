@@ -41,7 +41,7 @@ def main() -> int:
 
     try:
         doc = yaml.safe_load(CATALOG.read_text(encoding="utf-8"))
-    except Exception as e:
+    except yaml.YAMLError as e:
         print(f"❌ YAML 解析错误: {e}")
         return 2
 

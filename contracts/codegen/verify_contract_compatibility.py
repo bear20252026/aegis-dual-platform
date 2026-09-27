@@ -16,8 +16,8 @@ import sys
 # PY-042：需要重生成内容做 diff——平铺导入同目录生成器模块
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
-from generate_csharp import SKIP_SCHEMAS, generate as generate_cs_model  # noqa: E402
-from generate_kotlin import generate as generate_kt_model  # noqa: E402
+from generate_csharp import SKIP_SCHEMAS, generate as generate_cs_model
+from generate_kotlin import generate as generate_kt_model
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "schemas"
