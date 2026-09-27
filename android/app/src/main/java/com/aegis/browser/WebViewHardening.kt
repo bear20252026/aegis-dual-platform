@@ -144,6 +144,10 @@ internal object WebViewHardening {
   window.WebSocket.OPEN = WS.OPEN;
   window.WebSocket.CLOSING = WS.CLOSING;
   window.WebSocket.CLOSED = WS.CLOSED;
+  // AD-105（审计 2026-09-23 清单·A6 批）：原型链对齐——包装函数默认
+  // prototype 与真 WebSocket 实例无关，new WebSocket(...) instanceof
+  // WebSocket 恒 false（页面一行即可探测防护存在性）。
+  window.WebSocket.prototype = WS.prototype;
 })();
             """.trimIndent()
 

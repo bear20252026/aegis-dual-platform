@@ -61,6 +61,22 @@ class WebViewHardeningTest {
         assertTrue("REQUIRE_HTTPS 必须保持 true", js.contains("REQUIRE_HTTPS = true"))
     }
 
+    @Test
+    fun bridgeGuardScriptKeepsWebSocketPrototypeAlignment() {
+        // AD-105（审计 2026-09-23 清单·A6 批）：WebSocket 包装必须对齐真实现
+        // 原型——否则 new WebSocket(...) instanceof WebSocket 恒 false（页面
+        // 一行即可探测防护存在性）。
+        val js = WebViewHardening.BRIDGE_GUARD_JS
+        assertTrue(
+            "WebSocket 包装必须对齐 WS.prototype（instanceof 语义保持）",
+            js.contains("window.WebSocket.prototype = WS.prototype"),
+        )
+        // 静态常量四态必须随包装保留
+        listOf("CONNECTING", "OPEN", "CLOSING", "CLOSED").forEach { state ->
+            assertTrue("WebSocket.$state 常量缺失", js.contains("window.WebSocket.$state"))
+        }
+    }
+
     // ---------------- AD-247（2026-09-26 审计）：fingerprintShieldScript 9 阶段标记回归 ----------------
 
     /** 测试种子（64 位 hex——与 newSessionSeed 同形态，确定性注入）。 */
