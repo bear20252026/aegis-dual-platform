@@ -5,6 +5,9 @@
 revocation）。红队 fixtures（agent/redteam/——4 类——prompt-injection/
 tool-result-poisoning/replay-race/resource-budget）全部声明 expected deny——
 测试验证拒绝语义与覆盖。
+
+SP-170（2026-09-26 审计）：__main__ 运行器对齐 e2e 收集-汇总模式——逐用例
+异常捕获+汇总（首个失败不再中断后续用例）。
 """
 
 from __future__ import annotations
@@ -66,8 +69,17 @@ def test_kill_switch_revocation_documented():
 
 
 if __name__ == "__main__":
+    # SP-170（2026-09-26 审计）：对齐 e2e 运行器——逐用例异常捕获+汇总
+    #（首个失败不再中断后续用例——失败一次看全）。
+    failures = []
     for name, fn in sorted(globals().items()):
         if name.startswith("test_") and callable(fn):
-            fn()
-            print(f"  ✅ {name}")
+            try:
+                fn()
+                print(f"  ✅ {name}")
+            except Exception as ex:  # noqa: BLE001
+                failures.append((name, ex))
+                print(f"  ❌ {name}: {ex}")
+    if failures:
+        raise SystemExit(f"{len(failures)} 失败")
     print("ALL OK — 阶段 G 红队测试通过（注入/投毒/重放/预算全部拒绝——无未批准副作用）")
