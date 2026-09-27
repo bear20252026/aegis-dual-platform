@@ -101,23 +101,9 @@ class NativePolicyCoreBridge private constructor(
         rawUrl: String,
         scope: String,
     ): Boolean {
-        val actionJson =
-            JSONObject()
-                .put("session_id", action.sessionId)
-                .put("tab_id", action.tabId)
-                .put("document_generation", action.documentGeneration)
-                .put("origin", action.origin)
-                .put("method", action.method)
-                .put("canonical_parameters", action.canonicalParameters)
-                .put("scope", action.scope)
-                .put("expires_at", action.expiresAt.epochSeconds)
-                .put("nonce", action.nonce)
-                .put("policy_version", action.policyVersion)
-                .put("explanation", action.explanation)
-                .toString()
         val decision =
             invokeDecision {
-                native.aegis_policy_core_broker_consume_navigation_json(broker, actionJson, rawUrl, scope)
+                native.aegis_policy_core_broker_consume_navigation_json(broker, actionToJson(action), rawUrl, scope)
             }
         // AD-237（2026-09-26 审计）：deny 折叠为 false 时原因不静默——code/
         // detail 留痕（原生核心拒绝此前零痕迹，排障与审计面缺失）。
@@ -130,6 +116,27 @@ class NativePolicyCoreBridge private constructor(
         }
         return decision is Decision.Allow
     }
+
+    /**
+     * AD-144（审计 2026-09-23 清单·A6 批）：AuthorizedAction → 协议 JSON
+     * 映射抽具名函数——原手工 JSONObject 链内联在 consumeNavigation 调用点，
+     * 字段面与 parseDecisionJson 的 allow.action 解析面靠人工对齐；抽函数后
+     * 映射点单一可读，字段增减只改此一处。
+     */
+    private fun actionToJson(action: AuthorizedAction): String =
+        JSONObject()
+            .put("session_id", action.sessionId)
+            .put("tab_id", action.tabId)
+            .put("document_generation", action.documentGeneration)
+            .put("origin", action.origin)
+            .put("method", action.method)
+            .put("canonical_parameters", action.canonicalParameters)
+            .put("scope", action.scope)
+            .put("expires_at", action.expiresAt.epochSeconds)
+            .put("nonce", action.nonce)
+            .put("policy_version", action.policyVersion)
+            .put("explanation", action.explanation)
+            .toString()
 
     /**
      * 释放 Rust broker 指针。

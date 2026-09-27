@@ -2,55 +2,30 @@ package com.aegis.browser
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.ViewGroup
-import android.webkit.WebView
-import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
@@ -68,6 +43,10 @@ import kotlinx.coroutines.launch
  *
  * 落地 B：支持标签栏布局切换（tabsPosition = "top" 顶部横排 | "left" 左侧垂直），
  * 默认 top（与既有行为一致）；left 走 VerticalTabBar（按分组/工作区渲染）。
+ *
+ * AD-101（审计 2026-09-23 清单·A6 批）：地址栏（AddressBarUi.kt）与页面内容区
+ * （WebContentAreaUi.kt）组件抽出——本文件只保留 Activity 生命周期、回调装配
+ * 与三个状态对话框，回到改造红线行数内。
  */
 class MainActivity : ComponentActivity() {
     // 架构解耦（第 5 项）：broker 经工厂注入 ViewModel——Application 强转取
@@ -106,23 +85,9 @@ class MainActivity : ComponentActivity() {
 
         // 返回事件统一接管（BUG-013）：targetSdk 36 起系统默认经
         // OnBackInvokedCallback 分发返回（手势导航的边缘滑动与
-        // KEYCODE_BACK 都不再经过 onKeyDown——此前 onKeyDown 实现
-        // 在手势导航设备上从未生效，边缘滑动直接退出应用）。
-        // OnBackPressedCallback 由 androidx 桥接两种分发路径；
-        // 无历史时保留原退出语义。
-        onBackPressedDispatcher.addCallback(
-            this,
-            object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    val wv = viewModel.currentWebViewOrNull()
-                    if (wv != null && wv.canGoBack()) {
-                        SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK)
-                    } else {
-                        finish()
-                    }
-                }
-            },
-        )
+        // KEYCODE_BACK 都不再经过 onKeyDown）。OnBackPressedCallback 由
+        // androidx 桥接两种分发路径；无历史时保留原退出语义。
+        onBackPressedDispatcher.addCallback(this, BackPressHandler())
 
         setContent {
             AegisTheme {
@@ -142,32 +107,9 @@ class MainActivity : ComponentActivity() {
 
                 // 阅读模式：提取到的正文以对话框渲染（INV-04：状态来自 ViewModel）
                 readerContent?.let { content ->
-                    AlertDialog(
-                        onDismissRequest = { viewModel.reader.dismissReader() },
-                        title = { Text(content.title) },
-                        text = {
-                            // AD-226（2026-09-26 审计）：正文分段渲染——原单个
-                            // Text 一次性测量至 200K 字符（ReaderMode.MAX_TEXT
-                            // 上限），低端机测量/重组卡顿（ANR 面）。按 2K 字符
-                            // 分段 LazyColumn 只测量可视段（滚动语义不变，
-                            // 对话框高度上限依旧）。
-                            val chunks = remember(content.text) { content.text.chunked(READER_TEXT_CHUNK_SIZE) }
-                            LazyColumn(
-                                modifier =
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .heightIn(max = UiDimens.READER_DIALOG_MAX_HEIGHT.dp),
-                            ) {
-                                items(chunks) { chunk ->
-                                    Text(text = chunk, modifier = Modifier.fillMaxWidth())
-                                }
-                            }
-                        },
-                        confirmButton = {
-                            TextButton(onClick = { viewModel.reader.dismissReader() }) {
-                                Text(stringResource(R.string.dialog_close))
-                            }
-                        },
+                    ReaderDialog(
+                        content = content,
+                        onDismiss = { viewModel.reader.dismissReader() },
                     )
                 }
 
@@ -203,7 +145,15 @@ class MainActivity : ComponentActivity() {
                                 Text(stringResource(R.string.confirm_origin, pending.request.origin))
                                 Text(stringResource(R.string.confirm_path, pending.request.path))
                                 Text(stringResource(R.string.confirm_scope, pending.request.scope))
-                                Text(stringResource(R.string.confirm_expires, pending.request.expiresAt.toString()))
+                                // AD-110（审计 2026-09-23 清单·A6 批）：过期时刻
+                                // 用户可读格式化——Instant.toString() 输出
+                                // ISO-8601（2026-09-27T04:30:00Z），普通用户不可读。
+                                Text(
+                                    stringResource(
+                                        R.string.confirm_expires,
+                                        ExpiryFormat.format(pending.request.expiresAt),
+                                    ),
+                                )
                             }
                         },
                         confirmButton = {
@@ -300,131 +250,62 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * 地址栏 + 导航按钮（纯浏览态）。
-     *
-     * 2026-09-02 视觉重构：两行大按钮改为单行——玻璃圆钮（后退/前进/刷新/阅读/翻译）
-     * + 深色玻璃胶囊地址栏；「打开」并入地址栏尾部按键与 IME「搜索」动作，
-     * 不再占独立按钮位。贪吃蛇已迁移至首页 start.html（BUG-014——单源双端一致）。
-     *
-     * AD-064：后退/前进按历史可用性禁用（无历史时灰显且不可点）。
-     *
-     * Suppress 与 ChromeIconButton 同口径：Composable PascalCase 命名 +
-     * 回调装配点参数多（AD-064 新增 canGoBack/canGoForward 后触发阈值）。
-     */
-    @Suppress("FunctionNaming", "LongParameterList")
-    @Composable
-    private fun AddressBarRow(
-        address: String,
-        canGoBack: Boolean,
-        canGoForward: Boolean,
-        onAddressChange: (String) -> Unit,
-        onOpen: () -> Unit,
-        onBack: () -> Unit,
-        onForward: () -> Unit,
-        onReload: () -> Unit,
-        onReader: () -> Unit,
-        onTranslate: () -> Unit,
-        onToggleLayout: () -> Unit,
-    ) {
-        Row(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = UiDimens.SPACING_MEDIUM.dp, vertical = UiDimens.SPACING_SMALL.dp),
-            horizontalArrangement = Arrangement.spacedBy(UiDimens.SPACING_SMALL.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ChromeIconButton(stringResource(R.string.cd_back), "←", canGoBack, onBack)
-            ChromeIconButton(stringResource(R.string.cd_forward), "→", canGoForward, onForward)
-            ChromeIconButton(stringResource(R.string.cd_reload), "⟳", true, onReload)
-            // AD-251：标签栏布局切换（top 横排 ↔ left 垂直）
-            ChromeIconButton(stringResource(R.string.cd_toggle_layout), "⇅", true, onToggleLayout)
-            OutlinedTextField(
-                value = address,
-                onValueChange = onAddressChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text(stringResource(R.string.address_placeholder), color = TextSecondary) },
-                shape = CircleShape,
-                colors =
-                    OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = FieldBorderFocused,
-                        unfocusedBorderColor = FieldBorderIdle,
-                        focusedContainerColor = FieldBackground,
-                        unfocusedContainerColor = FieldBackground,
-                        cursorColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                    ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { onOpen() }),
-                trailingIcon = {
-                    // AD-091（2026-09-26 审计）：「打开」补 Role.Button 语义且
-                    // 命中区扩到 48dp 最小交互尺寸（原裸 Text+clickable 目标
-                    // 过小，TalkBack 也不报按钮角色）
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier =
-                            Modifier
-                                .clickable(onClick = onOpen, role = Role.Button)
-                                .minimumInteractiveComponentSize(),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.address_open),
-                            color = TextSecondary,
-                            style = MaterialTheme.typography.labelSmall,
-                            modifier = Modifier.padding(end = UiDimens.SPACING_SMALL.dp),
-                        )
-                    }
-                },
-            )
-            ChromeIconButton(stringResource(R.string.cd_reader), "阅", true, onReader)
-            ChromeIconButton(stringResource(R.string.cd_translate), "译", true, onTranslate)
-        }
-    }
-
-    /**
-     * 玻璃圆钮：工具栏图标按钮（半透明白圆形 + 居中字符图标）。
-     *
-     * AD-042（2026-09-24 审计）：补 [contentDescription] 语义（TalkBack 读出
-     * 按钮用途——原纯字形「←/→/⟳/阅/译」无障碍不可用）；[enabled] 为 false
-     * 时灰显且不可点（AD-064）。
-     *
-     * AD-222（2026-09-26 审计）：语义无条件挂载——原实现仅在 enabled=true
-     * 分支挂 contentDescription，禁用的后退/前进按钮对 TalkBack 完全静默
-     * （禁用控件的用途语义不应随之消失）。
-     *
-     * Composable 命名按 UI 惯例 PascalCase（与 [TabChipCore] 同口径）。
+     * AD-110：阅读模式对话框独立组件（正文分段渲染——AD-226）。
      */
     @Suppress("FunctionNaming")
     @Composable
-    private fun ChromeIconButton(
-        contentDescription: String,
-        glyph: String,
-        enabled: Boolean,
-        onClick: () -> Unit,
+    private fun ReaderDialog(
+        content: ReaderContent,
+        onDismiss: () -> Unit,
     ) {
-        Surface(
-            onClick = onClick,
-            enabled = enabled,
-            shape = CircleShape,
-            color = ButtonOverlay,
-            modifier =
-                Modifier
-                    .semantics { this.contentDescription = contentDescription }
-                    .alpha(if (enabled) 1f else DISABLED_BUTTON_ALPHA)
-                    .size(UiDimens.ICON_BUTTON_SIZE.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(text = glyph, color = Color.White, style = MaterialTheme.typography.bodyMedium)
-            }
+        AlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(content.title) },
+            text = {
+                // AD-226（2026-09-26 审计）：正文分段渲染——原单个 Text 一次性
+                // 测量至 200K 字符（ReaderMode.MAX_TEXT 上限），低端机测量/重组
+                // 卡顿（ANR 面）。按 2K 字符分段 LazyColumn 只测量可视段。
+                val chunks = remember(content.text) { content.text.chunked(READER_TEXT_CHUNK_SIZE) }
+                LazyColumn(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = UiDimens.READER_DIALOG_MAX_HEIGHT.dp),
+                ) {
+                    items(chunks) { chunk ->
+                        Text(text = chunk, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.dialog_close))
+                }
+            },
+        )
+    }
+
+    /**
+     * 返回键处理器（BUG-013）。
+     *
+     * AD-140（审计 2026-09-23 清单·A6 批）：降级 finish——原实现 wv==null 时
+     * 走 else-finish，但 navigatorFor(wv) 缺失（WebView 已注销的边界）时
+     * `?.navigateHistory` 静默 no-op：用户按返回毫无反馈。收敛为「消费历史
+     * 成功才留驻，否则一律降级 finish」，返回键语义全路径闭合。
+     */
+    private inner class BackPressHandler : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            val wv = viewModel.currentWebViewOrNull()
+            val consumed =
+                wv != null &&
+                    wv.canGoBack() &&
+                    SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK) == true
+            if (!consumed) finish()
         }
     }
 
-    /** AD-064：禁用按钮灰显透明度（detekt MagicNumber 提取常量）；
-     *  AD-226：阅读对话框正文分段长度。 */
+    /** AD-226：阅读对话框正文分段长度。 */
     private companion object {
-        const val DISABLED_BUTTON_ALPHA = 0.4f
         const val READER_TEXT_CHUNK_SIZE = 2000
     }
 
@@ -475,136 +356,5 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // AD-006 对称恢复：resumeTimers + 恢复当前标签（后台标签保持挂起）
         viewModel.getTabManager()?.resumeOnForeground()
-    }
-}
-
-/**
- * 页面容器：显示当前标签的 WebView（两种布局共用）。
- *
- * P2-1 修复（全面审计 2026-09-04）：错误状态非空时在内容区上方渲染
- * [PageErrorPanel]（原实现 SSL/加载错误静默白屏，无任何反馈）。
- *
- * AD-088/089（2026-09-26 审计）：AndroidView 以 [activeIndex] 为 key 显式
- * 重建并补 onRelease——原 update 读 tabManager.current()（非 Compose 状态），
- * 换挂依赖「恰好有其他重组发生」，无重组时新标签 WebView 永不上屏；
- * key 化后切换即重建容器，离屏时 onRelease 摘除旧 WebView 引用（容器
- * 交还组合，WebView 生命周期仍归 TabManager/tearDown 所有）。
- *
- * @Suppress 与 AddressBarRow 同口径：回调装配点参数多系设计使然
- * （AD-089 新增 activeIndex 键后触发阈值）。
- */
-@Suppress("FunctionNaming", "LongParameterList")
-@Composable
-private fun WebContentArea(
-    tabManager: TabManager,
-    activeIndex: Int,
-    pageError: PageError?,
-    onRetry: () -> Unit,
-    onBackToSafePage: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Box(modifier = modifier) {
-        key(activeIndex) {
-            AndroidView(
-                modifier = Modifier.fillMaxSize(),
-                factory = { FrameLayout(it) },
-                update = { container ->
-                    val current = tabManager.current()
-                    if (current == null) return@AndroidView
-                    val wv = current.webView
-                    if (container.indexOfChild(wv) < 0) {
-                        container.removeAllViews()
-                        (wv.parent as? ViewGroup)?.removeView(wv)
-                        container.addView(wv)
-                    }
-                },
-                onRelease = { container ->
-                    // AD-088：容器随组合释放，摘除 WebView 引用（防容器持有
-                    // 已切走的标签 WebView——泄漏/双父挂载面）
-                    container.removeAllViews()
-                },
-            )
-        }
-        pageError?.let { error ->
-            PageErrorPanel(
-                error = error,
-                onRetry = onRetry,
-                onBackToSafePage = onBackToSafePage,
-            )
-        }
-    }
-}
-
-/**
- * P2-1 修复（全面审计 2026-09-04）：页面错误面板——半透明遮罩盖住 WebView
- * 内容区。「重试」reload 当前标签；「返回安全页」回到受信首页。
- */
-@Suppress("FunctionNaming")
-@Composable
-private fun PageErrorPanel(
-    error: PageError,
-    onRetry: () -> Unit,
-    onBackToSafePage: () -> Unit,
-) {
-    Box(
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .background(ErrorOverlayBackground)
-                .padding(UiDimens.ERROR_PANEL_PADDING.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(UiDimens.SPACING_MEDIUM.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                text = stringResource(if (error.isSsl) R.string.error_ssl_title else R.string.error_title),
-                color = Color.White,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = error.description,
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = error.url,
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(UiDimens.SPACING_LARGE.dp)) {
-                ErrorActionButton(textRes = R.string.error_retry, onClick = onRetry)
-                ErrorActionButton(textRes = R.string.error_back_safe, onClick = onBackToSafePage)
-            }
-        }
-    }
-}
-
-/**
- * 错误面板玻璃圆钮（重试/返回安全页共用骨架——同形 Surface+Text 消除重复，
- * AD-078 起尺寸常量单源）。
- */
-@Suppress("FunctionNaming")
-@Composable
-private fun ErrorActionButton(
-    textRes: Int,
-    onClick: () -> Unit,
-) {
-    Surface(onClick = onClick, shape = CircleShape, color = ButtonOverlay) {
-        Text(
-            text = stringResource(textRes),
-            color = Color.White,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier =
-                Modifier.padding(
-                    horizontal = UiDimens.ERROR_ACTION_PADDING_X.dp,
-                    vertical = UiDimens.SPACING_MEDIUM.dp,
-                ),
-        )
     }
 }

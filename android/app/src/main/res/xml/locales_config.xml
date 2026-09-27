@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AD-096（审计 2026-09-23 清单·A6 批）：localeConfig 单源——Android 13+
+     的按应用语言设置（Per-app language）依赖本清单；缺省时系统语言设置页
+     不展示本应用。当前 UI 文案仅简体中文（strings.xml 默认语言），随本地化
+     扩展在此登记新 <locale>。 -->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="zh-CN" />
+</locale-config>

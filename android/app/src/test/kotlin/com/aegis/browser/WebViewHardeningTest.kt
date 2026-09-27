@@ -103,4 +103,29 @@ class WebViewHardeningTest {
         assertFalse("不得直读源画布像素尺寸（破坏性读改写检测面）", js.contains("this.width, this.height"))
         assertFalse("不得取源画布 2d 上下文（无上下文画布被永久锁定 2d）", js.contains("this.getContext"))
     }
+
+    // ---------------- AD-107/108（审计 2026-09-23 清单·A6 批） ----------------
+
+    @Test
+    fun etld1DerivationUsesMiniPublicSuffixList() {
+        // AD-107：getETLD1 一律取最后两段对共享公共后缀（co.uk 等）推导出
+        // 错误的 per-site seed——必须内嵌迷你 PSL 并对命中后缀取三段
+        val js = WebViewHardening.fingerprintShieldScript(testSeed)
+        assertTrue("必须内嵌迷你公共后缀表", js.contains("PUBLIC_SUFFIXES"))
+        assertTrue("须覆盖最高频共享后缀 co.uk", js.contains("'co.uk'"))
+        assertTrue("须覆盖 com.cn", js.contains("'com.cn'"))
+        assertTrue("公共后缀命中须取三段推导 eTLD+1", js.contains("p.slice(-3).join('.')"))
+    }
+
+    @Test
+    fun dateNowJitterIsIntegralOnly() {
+        // AD-108：随机抖动只进 performance.now——Date.now 返回非整数毫秒
+        // 本身是高置信检测信号，且破坏页内整毫秒假设
+        val js = WebViewHardening.fingerprintShieldScript(testSeed)
+        assertTrue(
+            "Date.now 必须走整数取整路径（无随机分量）",
+            js.contains("Date.now = function() { return reduceIntegral(d()); }"),
+        )
+        assertFalse("Date.now 不得叠加随机抖动", js.contains("return reduce(d());"))
+    }
 }

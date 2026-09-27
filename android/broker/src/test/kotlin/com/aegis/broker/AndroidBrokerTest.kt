@@ -2,6 +2,7 @@ package com.aegis.broker
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -368,5 +369,54 @@ class AndroidBrokerTest {
         assertEquals("https://example.com", broker.canonicalOrigin(java.net.URI("https://example.com:443/x")))
         assertEquals("http://example.com", broker.canonicalOrigin(java.net.URI("http://example.com:80/x")))
         assertEquals("https://example.com", broker.canonicalOrigin(java.net.URI("https://example.com/x")))
+    }
+
+    // ---------------- AD-121/122/142（审计 2026-09-23 清单·A6 批） ----------------
+
+    @Test
+    fun directEvaluateNavigationDeniesJavascriptScheme() {
+        // AD-121：直调 javascript: 必须在 evaluateNavigation 层 fail-closed
+        // 拒绝（url_policy——不再补 https 拼接、不产生授权对象）
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("session-js", "tab-js"))
+        val denied =
+            broker.evaluateNavigation("session-js", "tab-js", 0, "javascript:alert(1)", "navigation")
+        assertTrue(denied is Decision.Deny)
+        assertEquals("url_policy", (denied as Decision.Deny).reason.code)
+    }
+
+    @Test
+    fun aboutBlankFullChainIssuesAndConsumesAuthorization() {
+        // AD-122：about:blank 全链（evaluate Allow → consume 成功 → 重放拒绝）
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return
+        val broker = AndroidBroker()
+        assertTrue(broker.registerSession("session-blank", "tab-blank"))
+
+        val decision =
+            broker.evaluateNavigation("session-blank", "tab-blank", 0, "about:blank", "navigation")
+        assertTrue(decision is Decision.Allow)
+        val action = (decision as Decision.Allow).action
+        assertEquals("about:blank", action.origin)
+
+        assertTrue(
+            broker.consumeNavigation(action, "session-blank", "tab-blank", 0, "about:blank", "navigation"),
+        )
+        // nonce 单次消费——重放必须拒绝
+        assertFalse(
+            broker.consumeNavigation(action, "session-blank", "tab-blank", 0, "about:blank", "navigation"),
+        )
+    }
+
+    @Test
+    fun newNonceIsSessionPrefixedHexWithoutDashes() {
+        // AD-142：nonce 组装抽函数后的形态守护——会话前缀 + 32 位去连字符 hex
+        val nonce = AndroidBroker.newNonce("session-n")
+        assertTrue(nonce.startsWith("session-n:"))
+        val randomPart = nonce.removePrefix("session-n:")
+        assertEquals(32, randomPart.length)
+        assertTrue(randomPart.all { it.isDigit() || it in 'a'..'f' })
+        // 随机性：同会话两次生成不得相同
+        assertNotEquals(AndroidBroker.newNonce("session-n"), nonce)
     }
 }

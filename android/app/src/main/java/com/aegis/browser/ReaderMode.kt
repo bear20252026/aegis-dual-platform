@@ -34,8 +34,10 @@ object ReaderMode {
     /**
      * 正文提取脚本：优先 article/main/[role=main]，否则取文本量最大
      * 的块级元素，兜底 body。只读，不触碰页面状态。
+     * AD-125（审计 2026-09-23 清单·A6 批）：internal 化——MIN_TEXT 门槛在
+     * 页内脚本生效，JVM 单测锁定门槛存在性与取值，防误删/漂移。
      */
-    private val EXTRACT_JS =
+    internal val EXTRACT_JS =
         """
         (function() {
           try {
@@ -91,13 +93,29 @@ object ReaderMode {
                     else -> null
                 } ?: return@runCatching null
             if (!payload.optBoolean("ok", false)) return@runCatching null
-            val text = (payload.optString("text", "")).take(MAX_TEXT)
+            // AD-109（审计 2026-09-23 清单·A6 批）：截断改代理对安全形式——
+            // String.take 按UTF-16 char 劈切，切点落在增补字符（emoji 等）
+            // 中间会产生孤立代理对（渲染为 � 且 length 语义失真）。
+            val text = takeAtCharBoundary(payload.optString("text", ""), MAX_TEXT)
             if (text.isBlank()) return@runCatching null
             ReaderContent(
                 // AD-227：title 与 text 同走上限截断（超长标题不进对话框标题）
-                title = payload.optString("title", "").take(MAX_TITLE).ifBlank { "阅读模式" },
+                title = takeAtCharBoundary(payload.optString("title", ""), MAX_TITLE).ifBlank { "阅读模式" },
                 text = text,
             )
         }.getOrNull()
+    }
+
+    /**
+     * AD-109：代理对边界回退截断——切点尾部为高代理（其低代理被切掉）时
+     * 回退一个 char，不产生孤立代理对。ASCII 文本行为与 String.take 一致。
+     */
+    internal fun takeAtCharBoundary(
+        value: String,
+        max: Int,
+    ): String {
+        if (value.length <= max) return value
+        val cut = value.substring(0, max)
+        return if (Character.isHighSurrogate(cut.last())) cut.dropLast(1) else cut
     }
 }

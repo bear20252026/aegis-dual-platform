@@ -48,37 +48,9 @@ class AegisWebViewClient(
     private var documentGeneration = 0L
     private var pendingConfirmation: PendingConfirmedNavigation? = null
 
-    // AD-035：onPageError 错误码契约单源（app 层 BrowserViewModel 按此映射文案）。
-    // 注意：跨模块（app ↔ webview-adapter）契约必须 public——internal 是模块级
-    // 可见性，app 层引用不到。
-    companion object {
-        /** P2-1 修复：HTTP 错误状态码阈值（>= 该值视为服务器端错误）。 */
-        const val HTTP_ERROR_MIN = 400
-
-        /** SSL 证书错误（detail = SslError.primaryError 整数值）。 */
-        const val ERROR_SSL_CERTIFICATE = "ssl_certificate_error"
-
-        /** 主框架加载失败（detail = "errorCode:description"）。 */
-        const val ERROR_MAIN_FRAME = "main_frame_error"
-
-        /** 主框架 HTTP >= 400（detail = 状态码字符串）。 */
-        const val ERROR_HTTP = "http_error"
-
-        /**
-         * AD-211（2026-09-26 审计）：拒绝日志整行组装单源——detail 与 url
-         * 一并脱敏。原实现只对 url 参数走 LogRedact，但 AndroidBroker/Rust
-         * 核心的 deny detail 内嵌完整明文 URL（`拒绝 URL: $rawUrl` 直接拼
-         * 原文），query 中的 token/搜索词经 detail 绕过 AD-004 脱敏入
-         * logcat。internal 供 JVM 单测断言「日志行不含明文 query」。
-         */
-        internal fun denialLogLine(
-            reason: com.aegis.broker.DenyReason,
-            url: String,
-        ): String =
-            "导航被拒: code=${reason.code} detail=${LogRedact.redact(reason.detail)} " +
-                "url=${LogRedact.redact(url)}"
-    }
-
+    // AD-035：onPageError 错误码契约单源已收敛 WebViewErrorCodes.kt
+    // （AD-102 抽出——app 层按同一对象映射文案；本文件调用点 AD-136 起一律
+    // 引常量而非字面量）。
     override fun shouldOverrideUrlLoading(
         view: WebView,
         request: WebResourceRequest,
@@ -273,7 +245,7 @@ class AegisWebViewClient(
     ): Boolean {
         // AD-211（2026-09-26 审计）：日志行经 denialLogLine 单源组装——detail
         // 内嵌的明文 URL/query 一并脱敏（此前 detail 直拼原文入 logcat）。
-        android.util.Log.w("AegisWebView", denialLogLine(reason, url))
+        android.util.Log.w("AegisWebView", WebViewErrorCodes.denialLogLine(reason, url))
         if (topLevel) onNavigationDenied(reason.code, reason.detail)
         return false
     }
@@ -351,7 +323,8 @@ class AegisWebViewClient(
             "SSL 证书校验失败已取消: url=${LogRedact.redact(url)} primaryError=${error.primaryError}",
         )
         // AD-035：detail = SslError.primaryError 整数值（app 层映射中文文案）
-        onPageError("ssl_certificate_error", error.primaryError.toString(), true, url)
+        // AD-136（审计 2026-09-23 清单·A6 批）：错误码字面量 → 常量单源
+        onPageError(WebViewErrorCodes.ERROR_SSL_CERTIFICATE, error.primaryError.toString(), true, url)
     }
 
     /**
@@ -371,7 +344,7 @@ class AegisWebViewClient(
             "主框架加载错误: code=${error.errorCode} desc=$description url=${LogRedact.redact(request.url.toString())}",
         )
         // AD-035：detail = "errorCode:description"（app 层按 errorCode 映射文案）
-        onPageError("main_frame_error", "${error.errorCode}:$description", false, request.url.toString())
+        onPageError(WebViewErrorCodes.ERROR_MAIN_FRAME, "${error.errorCode}:$description", false, request.url.toString())
     }
 
     /**
@@ -386,13 +359,13 @@ class AegisWebViewClient(
     ) {
         super.onReceivedHttpError(view, request, errorResponse)
         if (!request.isForMainFrame) return
-        if (errorResponse.statusCode < HTTP_ERROR_MIN) return
+        if (errorResponse.statusCode < WebViewErrorCodes.HTTP_ERROR_MIN) return
         android.util.Log.w(
             "AegisWebView",
             "主框架 HTTP 错误: status=${errorResponse.statusCode} url=${LogRedact.redact(request.url.toString())}",
         )
-        // AD-035：detail = HTTP 状态码字符串（app 层映射文案）
-        onPageError("http_error", errorResponse.statusCode.toString(), false, request.url.toString())
+        // AD-035：detail = HTTP 状态码字符串（app 层映射文案）；AD-136 常量化
+        onPageError(WebViewErrorCodes.ERROR_HTTP, errorResponse.statusCode.toString(), false, request.url.toString())
     }
 
     /** 标签关闭时显式释放 Broker 会话，禁止遗留 WebView 再消费旧授权。 */

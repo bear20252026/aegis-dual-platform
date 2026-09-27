@@ -10,7 +10,12 @@ import com.aegis.broker.AndroidBroker
  * 生命周期与进程一致且显式可寻。
  */
 class AegisApplication : Application() {
-    val broker: AndroidBroker = AndroidBroker()
+    // AD-139（审计 2026-09-23 清单·A6 批）：broker 主线程即时初始化改 lazy——
+    // 原字段初始化在 Application 构造期同步执行（requireNativePolicyCore=true
+    // 时含 JNA Native.load 跨 JNI 探测），拖慢冷启动首帧且把原生加载失败的
+    // 影响提前到进程启动。lazy 后首次消费点 = BrowserViewModel.factory 取
+    // broker（首个 Activity 组合期），惰性且线程安全（synchronized 默认模式）。
+    val broker: AndroidBroker by lazy { AndroidBroker() }
 
     override fun onCreate() {
         super.onCreate()

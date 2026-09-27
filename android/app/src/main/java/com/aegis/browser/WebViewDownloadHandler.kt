@@ -4,6 +4,7 @@ import android.app.DownloadManager
 import android.os.Environment
 import android.webkit.CookieManager
 import android.webkit.WebView
+import android.widget.Toast
 import com.aegis.webviewadapter.LogRedact
 
 /**
@@ -24,6 +25,42 @@ internal object WebViewDownloadHandler {
      */
     private const val MAX_DOWNLOAD_NAME_LENGTH = 200
 
+    /**
+     * AD-138（审计 2026-09-23 清单·A6 批）：mimetype → 扩展名白名单映射——
+     * 原实现把 mime 子类型直接当扩展名（application/x-msdownload →
+     * "x-msdownload"、text/plain → "plain"、application/octet-stream →
+     * "octet-stream"），产出无意义/错误后缀文件。仅登记常见 mime 的正确
+     * 映射，未命中回落 URL 路径段、再推不出不加后缀。
+     */
+    private val MIME_EXTENSIONS =
+        mapOf(
+            "application/pdf" to "pdf",
+            "application/zip" to "zip",
+            "application/x-zip-compressed" to "zip",
+            "application/gzip" to "gz",
+            "application/x-tar" to "tar",
+            "application/vnd.android.package-archive" to "apk",
+            "application/msword" to "doc",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" to "docx",
+            "application/vnd.ms-excel" to "xls",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" to "xlsx",
+            "application/vnd.ms-powerpoint" to "ppt",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" to "pptx",
+            "text/plain" to "txt",
+            "text/csv" to "csv",
+            "text/html" to "html",
+            "image/png" to "png",
+            "image/jpeg" to "jpg",
+            "image/gif" to "gif",
+            "image/webp" to "webp",
+            "audio/mpeg" to "mp3",
+            "audio/mp4" to "m4a",
+            "audio/ogg" to "ogg",
+            "audio/wav" to "wav",
+            "video/mp4" to "mp4",
+            "video/webm" to "webm",
+        )
+
     fun handleDownload(
         webView: WebView,
         url: String,
@@ -39,7 +76,7 @@ internal object WebViewDownloadHandler {
         if (scheme != "http" && scheme != "https") {
             android.util.Log.w("AegisDownload", "拦截非 http(s) 下载: $scheme")
             android.widget.Toast
-                .makeText(context, "已拦截不支持的下载类型", android.widget.Toast.LENGTH_SHORT)
+                .makeText(context, context.getString(R.string.download_blocked_type), android.widget.Toast.LENGTH_SHORT)
                 .show()
             return
         }
@@ -47,12 +84,10 @@ internal object WebViewDownloadHandler {
         // 类直链的文件名在 Content-Disposition，判定需要拿到净化后文件名。
         val fileName = resolveDownloadFileName(url, mimeType, contentDisposition)
         if (DownloadPolicy.requiresExplicitConfirmation(url, fileName)) {
-            // AD-220（2026-09-26 审计）：下载日志统一接入脱敏单源——此前两处
-            // Log.w 明文记录完整 URL（含 query 的 token），LogRedact 为
-            // webview-adapter internal 无法跨模块复用，现已 public 化。
+            // AD-220（2026-09-26 审计）：下载日志统一接入脱敏单源。
             android.util.Log.w("AegisDownload", "拦截危险扩展下载: ${LogRedact.redact(url)}")
-            android.widget.Toast
-                .makeText(context, "已拦截危险文件类型的下载", android.widget.Toast.LENGTH_LONG)
+            Toast
+                .makeText(context, context.getString(R.string.download_blocked_dangerous), Toast.LENGTH_LONG)
                 .show()
             return
         }
@@ -63,15 +98,19 @@ internal object WebViewDownloadHandler {
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
                 .setMimeType(mimeType)
         CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
+        // AD-137（审计 2026-09-23 清单·A6 批）：成功 Toast 与受守护调用分离——
+        // 原实现成功 Toast 在 runCatching 块内，Toast 抛出会被误判为入队失败
+        // （双 Toast 叠加且误导日志）；onSuccess/onFailure 分离后各归其位。
         runCatching {
             context.getSystemService(DownloadManager::class.java).enqueue(request)
-            android.widget.Toast
-                .makeText(context, "开始下载：$fileName", android.widget.Toast.LENGTH_SHORT)
+        }.onSuccess {
+            Toast
+                .makeText(context, context.getString(R.string.download_started, fileName), Toast.LENGTH_SHORT)
                 .show()
         }.onFailure {
             android.util.Log.e("AegisDownload", "下载入队失败: ${it.message}")
-            android.widget.Toast
-                .makeText(context, "下载失败，无法入队下载管理器", android.widget.Toast.LENGTH_SHORT)
+            Toast
+                .makeText(context, context.getString(R.string.download_enqueue_failed), Toast.LENGTH_SHORT)
                 .show()
         }
     }
@@ -193,12 +232,15 @@ internal object WebViewDownloadHandler {
             .trimEnd('.')
             .takeIf { it.isNotBlank() }
 
-    /** P2-5 修复：扩展名推断——mimetype 子类型优先，URL 路径段次之；推断不出返回 null（不加扩展名）。 */
+    /**
+     * 扩展名推断（P2-5 修复引入；AD-138 改白名单映射）：mime 精确白名单
+     * 优先，URL 路径段次之；推断不出返回 null（不加扩展名）。
+     */
     private fun inferExtension(
         urlPathSegment: String,
         mimeType: String,
     ): String? {
-        sanitizeFileName(mimeType.substringAfter('/', ""))?.let { return it }
+        MIME_EXTENSIONS[mimeType.trim().lowercase()]?.let { return it }
         return sanitizeFileName(urlPathSegment.substringAfterLast('.', ""))
     }
 }

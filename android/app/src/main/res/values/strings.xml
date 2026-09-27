@@ -68,4 +68,16 @@
     <string name="err_name_timeout">连接超时</string>
     <string name="err_name_unsupported_scheme">不支持的地址类型</string>
     <string name="err_name_fallback">加载失败</string>
+
+    <!-- AD-134（2026-09-23 清单·A6 批）：首页桥导航拒绝 Toast（AegisHomeBridge） -->
+    <string name="bridge_open_rejected">无法打开：未通过安全策略验证</string>
+
+    <!-- AD-135（2026-09-23 清单·A6 批）：WebView 版本过旧提示（WebViewVersionCheck） -->
+    <string name="webview_outdated">Android System WebView 版本过旧（%1$s），建议更新以修复已知安全漏洞（CVE-2026-12438/11295）。</string>
+
+    <!-- AD-133（2026-09-23 清单·A6 批）：下载处理 Toast 四条（WebViewDownloadHandler） -->
+    <string name="download_blocked_type">已拦截不支持的下载类型</string>
+    <string name="download_blocked_dangerous">已拦截危险文件类型的下载</string>
+    <string name="download_started">开始下载：%1$s</string>
+    <string name="download_enqueue_failed">下载失败，无法入队下载管理器</string>
 </resources>

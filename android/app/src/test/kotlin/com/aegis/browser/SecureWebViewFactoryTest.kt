@@ -63,4 +63,21 @@ class SecureWebViewFactoryTest {
         SecureWebViewFactory.tearDown(wv)
         verify(wv).destroy()
     }
+
+    // ---------------- AD-129（审计 2026-09-23 清单·A6 批）：tearDown 次序固化 ----------------
+
+    @Test
+    fun tearDownFollowsUnifiedSequenceOrder() {
+        // 统一销毁序列全序固化：detach → stopLoading → about:blank 置空 →
+        // （release 注销，未注册即 no-op）→ destroy
+        val wv = mock(WebView::class.java)
+        val parent = mock(android.view.ViewGroup::class.java)
+        whenever(wv.parent).thenReturn(parent)
+        SecureWebViewFactory.tearDown(wv)
+        val order = inOrder(parent, wv)
+        order.verify(parent).removeView(wv)
+        order.verify(wv).stopLoading()
+        order.verify(wv).loadUrl("about:blank")
+        order.verify(wv).destroy()
+    }
 }

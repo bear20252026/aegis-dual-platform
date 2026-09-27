@@ -250,7 +250,7 @@ class AegisWebViewClientTest {
         // detail 内嵌完整明文 URL（AndroidBroker deny("url_policy", "拒绝 URL: $rawUrl")
         // 直接拼原文）——日志面必须一并脱敏（query 中 token/搜索词不入 logcat）
         val reason = DenyReason("url_policy", "拒绝 URL: https://evil.com/dl?token=secret&q=1")
-        val line = AegisWebViewClient.denialLogLine(reason, "https://evil.com/dl?token=secret")
+        val line = WebViewErrorCodes.denialLogLine(reason, "https://evil.com/dl?token=secret")
         assertFalse("日志行不得含明文 query", line.contains("token=secret"))
         assertFalse(line.contains("q=1"))
         assertTrue(line.contains("code=url_policy"))

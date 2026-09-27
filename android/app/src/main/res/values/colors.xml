@@ -1,4 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- AD-094（审计 2026-09-23 清单·A6 批）：styles.xml 的颜色字面量迁入本单源
+     ——主题色集中登记，与 UiColors.kt 的 Compose 侧色表分工（XML 主题 vs
+     Compose 组件）。取值与既有字面量逐一对应，不改变任何视觉。 -->
 <resources>
     <color name="ic_launcher_background">#000000</color>
+    <!-- 强调色（原 styles.xml 内联 #4255D4） -->
+    <color name="theme_accent">#4255D4</color>
+    <!-- 状态栏/导航栏深色 chrome（原 styles.xml 内联 #101827，与
+         UiColors.ChromeBackground 同色系） -->
+    <color name="chrome_status_bar">#101827</color>
 </resources>

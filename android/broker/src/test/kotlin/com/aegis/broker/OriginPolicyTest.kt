@@ -101,4 +101,29 @@ class OriginPolicyTest {
         assertNotNull(OriginPolicy.tryParseExternal("https://127.0.0.1/"))
         assertNotNull(OriginPolicy.tryParseExternal("https://192.168.0.10/"))
     }
+
+    // ---------- AD-120（审计 2026-09-23 清单·A6 批）：大写解析 ----------
+
+    @Test
+    fun `uppercase schemes parse case-insensitively`() {
+        // scheme 大小写不敏感（java.net.URI 归一小写）——大写 https 必须放行
+        assertNotNull(OriginPolicy.tryParseExternal("HTTPS://Example.COM/x"))
+        assertNotNull(OriginPolicy.tryParseExternal("Http://example.com"))
+    }
+
+    @Test
+    fun `uppercase about blank is allowed`() {
+        // about:blank 精确匹配（大小写不敏感）；其他 about 变体仍拒绝
+        assertNotNull(OriginPolicy.tryParseExternal("ABOUT:BLANK"))
+        assertNotNull(OriginPolicy.tryParseExternal("About:Blank"))
+        assertNull(OriginPolicy.tryParseExternal("ABOUT:EVIL"))
+    }
+
+    @Test
+    fun `uppercase host is preserved for later canonicalization`() {
+        // 解析层不吞大写 host（host 小写化是 canonicalize 的职责——分层不变）
+        val uri = OriginPolicy.tryParseExternal("https://EXAMPLE.COM/x")
+        assertNotNull(uri)
+        assertEquals("EXAMPLE.COM", uri!!.host)
+    }
 }

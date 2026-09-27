@@ -34,6 +34,15 @@ object SearchEngines {
     const val DEFAULT_ENGINE: String = "baidu"
 
     /**
+     * AD-146（审计 2026-09-23 清单·A6 批）：引擎显示名单源——原 ENGINE_NAMES
+     * 内嵌 AegisHomeBridge，与 ENGINE_URLS 键集靠人工同步（新引擎只进 URL 表
+     * 时显示名静默回退 key）。收敛到本对象单源：键集必须与 ENGINE_URLS 一致
+     * （SearchEnginesTest 锁定），AegisHomeBridge.buildEngineJson 消费本表。
+     */
+    internal val ENGINE_NAMES: Map<String, String> =
+        mapOf("baidu" to "百度", "bing" to "必应", "google" to "谷歌", "sogou" to "搜狗")
+
+    /**
      * 首页偏好文件/键单源（全库审计 2026-09-02 收敛）：AegisHomeBridge 与
      * 本对象共用同一 SharedPreferences 文件与引擎键——此前字面量双处硬编码。
      */
@@ -203,16 +212,22 @@ object SearchEngines {
     /**
      * A-3 归一（迁移自 BrowserEngine）：https 补前缀 + host 小写化，
      * 对齐 Rust canonicalize_external。完整 URI 重建（path/query/fragment 保留）。
+     * AD-119 校验暴露：java.net.URI 保留 scheme 原始大小写（HTTP://）——
+     * WHATWG/Rust url crate 的 scheme 归一恒为小写，此处对齐补 scheme 小写
+     * （OriginPolicy 已限定 http/https，lowercase 语义安全）。
      */
     private fun canonicalize(uri: java.net.URI): String? {
-        val host = uri.host?.lowercase() ?: return null
+        // A6 批（detekt ReturnCount）：scheme/host 归一合并取值，单一出口
+        val scheme = uri.scheme?.lowercase()
+        val host = uri.host?.lowercase()
+        if (scheme == null || host == null) return null
         val port =
             uri.port
                 .takeIf { it != -1 }
                 ?.let { ":$it" }
                 .orEmpty()
         return buildString {
-            append(uri.scheme).append("://").append(host).append(port)
+            append(scheme).append("://").append(host).append(port)
             uri.rawPath?.let { append(it) }
             uri.rawQuery?.let { append('?').append(it) }
             uri.rawFragment?.let { append('#').append(it) }

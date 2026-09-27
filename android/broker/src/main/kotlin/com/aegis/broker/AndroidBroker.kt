@@ -1,5 +1,7 @@
 package com.aegis.broker
 
+import kotlin.time.Duration.Companion.seconds
+
 /**
  * 阶段 D（蓝图 android/broker）：Android 侧 capability broker adapter——唯一允许
  * 产生本地副作用的边界（ADR-002）。验证来源/会话/标签代际/scope/参数/预算/批准/
@@ -38,6 +40,20 @@ class AndroidBroker(
          * 校验 expiresAt），重放窗口远小于逐出周期——有界性不以安全性换取。
          */
         const val MAX_CONSUMED_NONCES = 50_000
+
+        /**
+         * AD-142（审计 2026-09-23 清单·A6 批）：nonce 组装抽函数——原内联于
+         * evaluateNavigation 的 AuthorizedAction 构造（UUID 去连字符 + 会话
+         * 前缀拼接单行表达式），抽具名函数后 nonce 语义可测试可追读。
+         */
+        internal fun newNonce(sessionId: String): String {
+            val token =
+                java.util.UUID
+                    .randomUUID()
+                    .toString()
+                    .replace("-", "")
+            return "$sessionId:$token"
+        }
     }
 
     /** 注册由受控 WebView 创建的会话；未知会话上的所有副作用均应被拒绝。 */
@@ -171,11 +187,11 @@ class AndroidBroker(
                 method = "GET",
                 canonicalParameters = canonicalPathAndQuery(uri),
                 scope = scope,
-                expiresAt =
-                    clock
-                        .now()
-                        .plus(kotlin.time.Duration.parse("${SESSION_TTL_SECONDS}s")),
-                nonce = "$sessionId:${java.util.UUID.randomUUID().toString().replace("-", "")}",
+                // AD-143（审计 2026-09-23 清单·A6 批）：Duration.parse("${N}s")
+                // 字符串拼接换 Duration.seconds(N)——类型化构造免解析，
+                // 值域由类型保证（parse 对异常输入的失败面不存在）。
+                expiresAt = clock.now().plus(SESSION_TTL_SECONDS.seconds),
+                nonce = newNonce(sessionId),
                 policyVersion = policyVersion,
                 explanation =
                     "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion",

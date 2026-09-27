@@ -174,7 +174,27 @@ window.__AEGIS_PROTECTION_VERSION = '1';
 
 // === Stage 2: PerSiteSeed（参照 Brave Browser MPL-2.0）===
 (function() {
-  function getETLD1(h) { var p = h.split('.'); return p.length <= 2 ? h : p.slice(-2).join('.'); }
+  // AD-107（审计 2026-09-23 清单·A6 批）：getETLD1 迷你公共后缀表——原实现
+  // 一律取最后两段，对共享公共后缀（co.uk/com.cn/com.hk/com.au/co.jp/…）
+  // 会把 a.co.uk 与 b.co.uk 推导出不同的 site seed（eTLD+1 应同为 co.uk 域，
+  // 同站不同源实体却各持指纹种子，既不隐私正确也不一致）。无网络依赖的
+  // 内嵌迷你 PSL（覆盖最高频多段公共后缀；未命中回落两段式保守行为）。
+  var PUBLIC_SUFFIXES = ['co.uk','org.uk','ac.uk','gov.uk','co.jp','ne.jp','or.jp',
+    'co.kr','or.kr','com.cn','net.cn','org.cn','gov.cn','edu.cn','com.tw','org.tw',
+    'com.hk','org.hk','edu.hk','com.au','net.au','org.au','edu.au','gov.au','co.nz',
+    'net.nz','org.nz','com.sg','com.my','co.in','net.in','org.in','com.br','com.mx',
+    'com.ar','co.za','com.tr','com.ru','co.th','com.vn','com.ph','co.id'];
+  function isPublicSuffix(tail) { return PUBLIC_SUFFIXES.indexOf(tail) >= 0; }
+  function getETLD1(h) {
+    var p = h.split('.');
+    if (p.length <= 2) return h;
+    var tail2 = p.slice(-2).join('.');
+    if (isPublicSuffix(tail2)) {
+      // 公共后缀占两段 → eTLD+1 取三段；三段仍不足以构成注册域时退回原 host
+      return p.length >= 3 ? p.slice(-3).join('.') : h;
+    }
+    return tail2;
+  }
   function deriveSeed(hex, domain) {
     var r = '';
     for (var i = 0; i < 16; i++) {
@@ -308,9 +328,15 @@ window.__AEGIS_PROTECTION_VERSION = '1';
 // === Stage 8: TimerPrecision（参照 Mullvad Browser MPL-2.0）===
 (function() {
   var P = 1; // 1ms precision
+  // AD-108（审计 2026-09-23 清单·A6 批）：抖动只进 performance.now——原
+  // reduce 同用于 Date.now，返回非整数毫秒：Date.now() 按规范是整数毫秒
+  // （Number），页面普遍假设其可取模/可整除；非整数返回值本身就是高置信
+  // 检测信号（Date.now() % 1 !== 0），且破坏依赖整毫秒的页内逻辑。
+  // Date.now 只做 1ms 网格取整（无随机分量）。
   function reduce(v) { return Math.round(v / P) * P + (Math.random() - 0.5) * P / 2; }
+  function reduceIntegral(v) { return Math.round(v / P) * P; }
   try { var o = performance.now.bind(performance); Object.defineProperty(performance, 'now', { value: function() { return reduce(o()); }, writable: false, configurable: false }); } catch(e) {}
-  try { var d = Date.now; Date.now = function() { return reduce(d()); }; } catch(e) {}
+  try { var d = Date.now; Date.now = function() { return reduceIntegral(d()); }; } catch(e) {}
 })();
 
 // === Stage 9: ExtProxy 匿名扩展代理（参照 Helium GPL-3.0）===

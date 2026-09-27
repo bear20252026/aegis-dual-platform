@@ -8,6 +8,9 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.mockito.Mockito.inOrder
+import org.mockito.Mockito.mock
+import org.mockito.Mockito.times
 
 /**
  * TabManager 离线单测（测试缺口批次·Android）：LRU 挂起上限、切换挂起/恢复
@@ -237,5 +240,58 @@ class TabManagerTest {
         val tm = manager(rec)
         tm.suspendAll()
         tm.resumeOnForeground()
+    }
+
+    // ---------------- AD-116（审计 2026-09-23 清单·A6 批）：同索引切换 no-op ----------------
+
+    @Test
+    fun switchToSameIndexDoesNotPauseOrResumeAnything() {
+        val rec = Recorder()
+        val tm = manager(rec, maxActive = 1)
+        tm.addTab(newWebView()) // tab0
+        tm.addTab(newWebView()) // tab1 激活，tab0 已挂起
+        val pausesBefore = rec.paused.size
+        val resumesBefore = rec.resumed.size
+        assertTrue(tm.switchTo(1))
+        assertEquals("同索引切换不得重复 pause 旧标签", pausesBefore, rec.paused.size)
+        assertEquals("同索引切换不得重复 resume 当前标签", resumesBefore, rec.resumed.size)
+        assertEquals(1, tm.activeIndex)
+    }
+
+    // ---------------- AD-117（审计 2026-09-23 清单·A6 批）：closeTab 先 pause 后 destroy ----------------
+
+    @Test
+    fun closeTabPausesWebViewBeforeTearDownDestroy() {
+        // 默认 pause=WebView::onPause——用 mockito 顺序校验「释放绘制资源
+        // （pause）先于统一销毁序列（destroy）」的既定次序
+        val wv = mock(WebView::class.java)
+        val tm = TabManager()
+        tm.addTab(wv)
+        tm.addTab(mock(WebView::class.java)) // 至少保留一个标签的约定：需两个才能关闭
+        assertTrue(tm.closeTab(0))
+        // wv 被切走（addTab 第二标签）与关闭各 pause 一次——全部先于 destroy
+        val order = inOrder(wv)
+        order.verify(wv, times(2)).onPause()
+        order.verify(wv).destroy()
+    }
+
+    // ---------------- AD-118（审计 2026-09-23 清单·A6 批）：list() 浅拷贝语义固化 ----------------
+
+    @Test
+    fun listReturnsStructuralSnapshotWithSharedInstances() {
+        val rec = Recorder()
+        val tm = manager(rec)
+        val tab = tm.addTab(newWebView(), url = "https://a.example")
+        val first = tm.list()
+        val second = tm.list()
+        assertFalse("两次 list() 必须是新列表实例（结构防篡改）", first === second)
+        assertEquals(first, second)
+        // 浅拷贝：列表内为规范 Tab 实例（copy 替换后的列表内对象）——
+        // StateFlow 的 equals 发射依赖实例共享语义
+        assertSame(tab, first[0])
+        // 快照结构不随后续管理器变更增长（新增标签不影响既有快照）
+        tm.addTab(newWebView(), url = "https://b.example")
+        assertEquals(1, first.size)
+        assertEquals(2, tm.list().size)
     }
 }

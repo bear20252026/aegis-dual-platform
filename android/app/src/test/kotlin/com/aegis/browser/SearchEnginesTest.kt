@@ -62,6 +62,32 @@ class SearchEnginesTest {
         assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("vbscript:msgbox(1)"))
     }
 
+    // ---------- AD-119（审计 2026-09-23 清单·A6 批）：大写 scheme 分类 ----------
+
+    @Test
+    fun `uppercase http https classify as absolute urls`() {
+        // scheme 判定大小写不敏感（与 OriginPolicy/https 升级层同口径）
+        assertEquals(SearchEngines.InputKind.ABSOLUTE_URL, SearchEngines.classifyInput("HTTPS://WWW.BAIDU.COM"))
+        assertEquals(SearchEngines.InputKind.ABSOLUTE_URL, SearchEngines.classifyInput("Http://Example.COM/a"))
+    }
+
+    @Test
+    fun `uppercase forbidden schemes stay FORBIDDEN`() {
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("JAVASCRIPT:alert(1)"))
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("File:///C:/win.ini"))
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("DATA:text/html,x"))
+    }
+
+    @Test
+    fun `uppercase absolute url canonicalizes with lowercase host`() {
+        // 大写 scheme + 大写 host → 归一后 scheme 保留、host 小写
+        assertEquals("http://example.com", SearchEngines.normalizeInput("HTTP://EXAMPLE.COM", "baidu"))
+        assertEquals(
+            "https://example.com/a?b=1",
+            SearchEngines.normalizeInput("HTTPS://EXAMPLE.COM/a?b=1", "baidu"),
+        )
+    }
+
     @Test
     fun `host with port classifies as DOMAIN (T1 regression)`() {
         // T1 修复（全面审计批次2）：字母开头的 host:port（localhost:8000）
@@ -202,5 +228,17 @@ class SearchEnginesTest {
             "https://www.baidu.com/s?wd=today%20weather",
             SearchEngines.normalizeInput("today weather", "baidu"),
         )
+    }
+
+    // ---------- AD-146（审计 2026-09-23 清单·A6 批）：ENGINE_NAMES 单源守护 ----------
+
+    @Test
+    fun `engine names keys exactly match engine urls`() {
+        // 显示名表收敛 SearchEngines 单源（AegisHomeBridge 消费）——键集与
+        // ENGINE_URLS 漂移（加引擎漏登记名）在此失败
+        assertEquals(SearchEngines.ENGINE_URLS.keys, SearchEngines.ENGINE_NAMES.keys)
+        SearchEngines.ENGINE_NAMES.forEach { (key, name) ->
+            assertTrue("显示名不得为空: $key", name.isNotBlank())
+        }
     }
 }

@@ -3,6 +3,7 @@ package com.aegis.browser
 import android.content.Context
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.widget.Toast
 
 /**
  * 首页宿主桥（shared/shell/start.html 的 Android 侧能力面——ADR-007 单源首页）。
@@ -32,11 +33,11 @@ class AegisHomeBridge(
     private val prefs = context.getSharedPreferences(SearchEngines.PREFS_NAME, Context.MODE_PRIVATE)
 
     companion object {
-        /** 引擎显示名（P1-2：与 Windows SEARCH_ENGINES 中文名对齐）。 */
-        private val ENGINE_NAMES = mapOf("baidu" to "百度", "bing" to "必应", "google" to "谷歌", "sogou" to "搜狗")
-
-        /** 首页壁纸白名单（与 shared/shell/wallpapers 文件一一对应）。 */
-        private val WALLPAPERS =
+        /** 首页壁纸白名单（与 shared/shell/wallpapers 文件一一对应）。
+         *  AD-147（审计 2026-09-23 清单·A6 批）：internal 化供打包校验单测——
+         *  WallpaperPackagingTest 断言本表与 shared/shell/wallpapers 目录
+         *  内容双向一致（人工同步的漂移在打包门禁暴露）。 */
+        internal val WALLPAPERS =
             setOf(
                 "aurora-magenta.jpg",
                 "aurora-lime.jpg",
@@ -47,9 +48,6 @@ class AegisHomeBridge(
         /** P1-1 修复：受信壳页 URL 前缀（本地 assets 内置资源——首页/画板等）。 */
         private const val TRUSTED_SHELL_PREFIX = "file:///android_asset/"
 
-        /** 画板受信资产路径（与 SecureNavigator.TRUSTED_ASSET_PATHS 单一登记项一致）。 */
-        private const val GEOGEBRA_ASSET_PATH = "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html"
-
         /** AD-235：日志净化截断上限（与 BrowserViewModel 标题净化同口径 120）。 */
         private const val LOG_MESSAGE_MAX_LENGTH = 120
 
@@ -58,6 +56,8 @@ class AegisHomeBridge(
          * @JavascriptInterface 方法必须 public（JS 反射仅暴露 public 注解
          * 方法，无法直接 internal 化），抽取纯函数供 JVM 单测断言与
          * start.html 的消费契约：`{"engine":<key>,"engines":[{"key","name"}]}`。
+         * AD-146（审计 2026-09-23 清单·A6 批）：显示名消费 SearchEngines
+         * 单源（键集一致性由 SearchEnginesTest 锁定）。
          */
         internal fun buildEngineJson(currentEngine: String): String {
             val engines =
@@ -66,7 +66,7 @@ class AegisHomeBridge(
                         put(
                             org.json.JSONObject().apply {
                                 put("key", key)
-                                put("name", ENGINE_NAMES[key] ?: key)
+                                put("name", SearchEngines.ENGINE_NAMES[key] ?: key)
                             },
                         )
                     }
@@ -77,11 +77,23 @@ class AegisHomeBridge(
                 .put("engines", engines)
                 .toString()
         }
+
+        /**
+         * AD-112（审计 2026-09-23 清单·A6 批）：受信壳页 URL 判定抽纯函数——
+         * 原判定内嵌在 isTrustedShellPage（依赖 WebView getUrl，不可 JVM 单测）。
+         * 纯字符串判定 single 判定点：about:blank 精确匹配或本地 assets 前缀。
+         */
+        internal fun isTrustedShellUrl(url: String?): Boolean {
+            val exact = url == "about:blank"
+            val prefixed = url?.startsWith(TRUSTED_SHELL_PREFIX) == true
+            return exact || prefixed
+        }
     }
 
     /**
      * P1-1 修复（全面审计 2026-09-04）：受信壳页校验（单一判定点）。宿主
-     * WebView 当前 URL 仅允许本地壳页前缀或 about:blank。@JavascriptInterface
+     * WebView 当前 URL 仅允许本地壳页前缀或 about:blank（判定逻辑单源在
+     * [Companion.isTrustedShellUrl]，AD-112）。@JavascriptInterface
      * 运行在 JS 后台线程，getUrl 以 runCatching 包裹——异常按拒绝处理
      * （fail-closed），不因跨线程读取崩溃放行。
      */
@@ -89,10 +101,9 @@ class AegisHomeBridge(
         val url =
             webViewProvider()
                 ?.let { wv -> runCatching { wv.url }.getOrNull() }
-                .orEmpty()
-        val trusted = url == "about:blank" || url.startsWith(TRUSTED_SHELL_PREFIX)
+        val trusted = isTrustedShellUrl(url)
         if (!trusted) {
-            android.util.Log.w("AegisHome", "[security] AegisBridge 拒绝非壳页调用: $url")
+            android.util.Log.w("AegisHome", "[security] AegisBridge 拒绝非壳页调用: ${url.orEmpty()}")
         }
         return trusted
     }
@@ -106,11 +117,8 @@ class AegisHomeBridge(
         android.util.Log.e("AegisHome", sanitizeForLog(message))
     }
 
-    /** AD-235：日志净化——换行/回退/制表压平 + 截断防洪泛。 */
-    private fun sanitizeForLog(message: String): String =
-        message
-            .replace(Regex("[\\r\\n\\t]+"), " ")
-            .take(LOG_MESSAGE_MAX_LENGTH)
+    /** AD-235：日志净化（AD-103：收敛 LogSanitize 单源——与标题净化同口径）。 */
+    private fun sanitizeForLog(message: String): String = LogSanitize.flatten(message, LOG_MESSAGE_MAX_LENGTH)
 
     @JavascriptInterface
     fun setEngine(key: String) {
@@ -165,8 +173,10 @@ class AegisHomeBridge(
         wv.post {
             val ok = SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url) == true
             if (!ok) {
-                android.widget.Toast
-                    .makeText(context, "无法打开：未通过安全策略验证", android.widget.Toast.LENGTH_SHORT)
+                // AD-134（审计 2026-09-23 清单·A6 批）：Toast 文案迁 strings.xml
+                // 单源（原硬编码中文——不可本地化、不可静态审查）。
+                Toast
+                    .makeText(context, context.getString(R.string.bridge_open_rejected), Toast.LENGTH_SHORT)
                     .show()
             }
         }
@@ -189,8 +199,8 @@ class AegisHomeBridge(
         // 据此跳过 onFail，「资源未随包 → 按钮置灰」降级在 Android 永不触发
         // （C# 侧正确反映资源可用性）。加载在主线程投递；受理结果经同一
         // 白名单谓词同步判定（与 openTrustedAsset 内部判定单源）。
-        wv.post { navigator.openTrustedAsset(GEOGEBRA_ASSET_PATH) }
-        return navigator.isTrustedAsset(GEOGEBRA_ASSET_PATH)
+        wv.post { navigator.openTrustedAsset(SecureNavigator.GEOGEBRA_ASSET_PATH) }
+        return navigator.isTrustedAsset(SecureNavigator.GEOGEBRA_ASSET_PATH)
     }
 
     /**

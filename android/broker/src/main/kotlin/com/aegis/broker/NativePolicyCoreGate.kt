@@ -18,9 +18,13 @@ data class NativePolicyCoreGateResult(
     val denialCode: String? = null,
 ) {
     companion object {
-        fun disabled() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
-
-        fun enabled() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
+        /**
+         * AD-145（审计 2026-09-23 清单·A6 批）：双工厂合并——原 disabled()/
+         * enabled() 二者产出完全相同的放行结果（差异只在调用点的语义注释），
+         * 属无差别重复工厂。合并为单一 [allowed]；Disabled（构建未要求原生
+         * 核心）与 Enabled（原生核心探测通过）两种语境共用同一放行值。
+         */
+        fun allowed() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
 
         fun block(denialCode: String) =
             NativePolicyCoreGateResult(
@@ -46,7 +50,9 @@ object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
     private fun probeOnce(): NativePolicyCoreGateResult =
         when (val probe = probeAbiVersion()) {
             is AbiProbe.Disabled -> {
-                NativePolicyCoreGateResult.disabled()
+                // Disabled = 构建未要求原生核心（放行）；Enabled = 探测通过（放行）
+                // ——二者共用 allowed() 单一工厂（AD-145）。
+                NativePolicyCoreGateResult.allowed()
             }
 
             is AbiProbe.Unavailable -> {
@@ -59,7 +65,7 @@ object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
 
             is AbiProbe.Version -> {
                 if (probe.value == EXPECTED_C_ABI_VERSION) {
-                    NativePolicyCoreGateResult.enabled()
+                    NativePolicyCoreGateResult.allowed()
                 } else {
                     NativePolicyCoreGateResult.block("native_policy_core_abi_mismatch")
                 }

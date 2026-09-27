@@ -2,7 +2,9 @@ package com.aegis.browser
 
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -80,5 +82,35 @@ class ReaderModeTest {
     fun oversizedTitleIsTruncated() {
         val longTitle = "标".repeat(1_000)
         assertEquals(256, ReaderMode.parse(payload(ok = true, title = longTitle, text = "正文"))!!.title.length)
+    }
+
+    // ---------------- AD-109/125（审计 2026-09-23 清单·A6 批） ----------------
+
+    @Test
+    fun truncationNeverSplitsSurrogatePairs() {
+        // AD-109：String.take 按 UTF-16 char 劈切——切点落在增补字符中间
+        // 会产生孤立代理对（渲染为替换符且 length 语义失真）。构造 emoji
+        // 落在 200_000 切点上的正文（=MAX_TEXT-1 个 'a' + 2 char emoji）。
+        val emoji = "\uD83D\uDE00"
+        val text = "a".repeat(199_999) + emoji + "b"
+        val content = ReaderMode.parse(payload(ok = true, text = text))!!
+        assertEquals(199_999, content.text.length)
+        assertFalse("截断结果不得以孤立高代理结尾", Character.isHighSurrogate(content.text.last()))
+    }
+
+    @Test
+    fun takeAtCharBoundaryFallsBackBeforeDanglingSurrogate() {
+        // 高代理落在切点尾 → 回退一个 char；ASCII 行为与 String.take 一致
+        assertEquals(1, ReaderMode.takeAtCharBoundary("a\uD83D\uDE00", 2).length)
+        assertEquals("", ReaderMode.takeAtCharBoundary("\uD83D\uDE00", 1))
+        assertEquals("abc", ReaderMode.takeAtCharBoundary("abcdef", 3))
+        assertEquals("abcdef", ReaderMode.takeAtCharBoundary("abcdef", 6))
+    }
+
+    @Test
+    fun extractScriptKeepsMinTextThreshold() {
+        // AD-125：MIN_TEXT 门槛在页内脚本生效（parse 只看 ok 标记）——
+        // 锁定脚本内嵌阈值 200，防误删/漂移
+        assertTrue("提取脚本必须内嵌 MIN_TEXT=200 门槛", ReaderMode.EXTRACT_JS.contains("length >= 200"))
     }
 }

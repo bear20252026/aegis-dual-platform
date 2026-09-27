@@ -61,17 +61,16 @@ object WebViewVersionCheck {
     /** 版本是否过旧（低于最低安全阈值）。 */
     fun isOutdated(versionCode: Long): Boolean = versionCode < MIN_SAFE_VERSION_CODE
 
-    /** 检查并触发提示（版本过旧时回调提示文案；由调用方呈现 UI）。 */
+    /** 检查并触发提示（版本过旧时回调提示文案；由调用方呈现 UI）。
+     *  AD-135（审计 2026-09-23 清单·A6 批）：提示文案迁 strings.xml 单源
+     *  （原硬编码中文——不可本地化、不可静态审查）。 */
     fun checkAndPrompt(
         context: Context,
         onOutdated: (String) -> Unit,
     ) {
         val v = getWebViewVersion(context) ?: return
         if (isOutdated(v.code)) {
-            onOutdated(
-                "Android System WebView 版本过旧（${v.name}），建议更新以修复已知安全漏洞" +
-                    "（CVE-2026-12438/11295）。",
-            )
+            onOutdated(context.getString(R.string.webview_outdated, v.name))
         }
     }
 

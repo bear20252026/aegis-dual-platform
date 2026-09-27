@@ -12,10 +12,17 @@ class SecureNavigator internal constructor(
     private val client: AegisWebViewClient,
 ) {
     companion object {
+        /**
+         * 画板受信资产路径（AD-148，审计 2026-09-23 清单·A6 批：单源常量
+         * ——AegisHomeBridge.openGeogebra 此前双处硬编码同一路径字面量，
+         * 白名单改路径时漏改即静默拒绝，现引用本常量）。
+         */
+        internal const val GEOGEBRA_ASSET_PATH = "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html"
+
         /** 内置受信资产白名单（H-5：第一方资源，路径编译期固定）。 */
         private val TRUSTED_ASSET_PATHS =
             setOf(
-                "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
+                GEOGEBRA_ASSET_PATH,
             )
     }
 

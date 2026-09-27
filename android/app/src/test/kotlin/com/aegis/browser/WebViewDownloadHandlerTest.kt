@@ -96,10 +96,68 @@ class WebViewDownloadHandlerTest {
 
     @Test
     fun combinedNameIsSanitizedAgainAfterInference() {
-        // 推断出的扩展名可能携带分隔符——组合名兜底再净化
+        // 推断出的扩展名组合进 base 后再净化一次（净化兜底不随白名单化失效）
         assertEquals(
-            "base.exe",
-            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/base", "application/x\\exe", ""),
+            "base.txt",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/base", "text/plain", ""),
+        )
+    }
+
+    // ---------------- AD-131/138（审计 2026-09-23 清单·A6 批） ----------------
+
+    @Test
+    fun mimeExtensionUsesWhitelistMapping() {
+        // AD-138：mimetype → 扩展名走精确白名单（大小写/空白归一）
+        assertEquals(
+            "aegis_download.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/", "application/pdf", ""),
+        )
+        assertEquals(
+            "aegis_download.txt",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/", "TEXT/PLAIN ", ""),
+        )
+        assertEquals(
+            "base.xlsx",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/base",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "",
+            ),
+        )
+    }
+
+    @Test
+    fun unknownMimeSubtypeIsNoLongerUsedAsExtension() {
+        // AD-138：原实现把 mime 子类型直接当扩展名（x-msdownload /
+        // octet-stream 等无意义后缀）——白名单化后未命中回落 URL 段，
+        // 再推不出不加后缀
+        assertEquals(
+            "aegis_download",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/", "application/x-msdownload", ""),
+        )
+        assertEquals(
+            "getfile",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/getfile", "application/octet-stream", ""),
+        )
+        // base 已带扩展名时不触发 mime 推断
+        assertEquals(
+            "setup.bin",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/setup.bin", "application/octet-stream", ""),
+        )
+    }
+
+    @Test
+    fun urlPathSegmentExtensionWinsWhenMimeUnknown() {
+        // AD-131：inferExtension 独立路径——mime 推不出时回落 URL 路径段扩展
+        assertEquals(
+            "report.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/files/report.pdf", "", ""),
+        )
+        // URL 段也无扩展、无 mime → URL 路径段兜底名（非默认名——路径段在
+        // 文件名解析链中先于 DEFAULT_DOWNLOAD_NAME）
+        assertEquals(
+            "getfile",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/getfile?token=x", "", ""),
         )
     }
 

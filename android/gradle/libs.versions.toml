@@ -20,7 +20,8 @@ ktlint = "1.8.0"
 # 第三方
 kotlinxDatetime = "0.6.2"
 # jna：登记为文档单源（broker 的 @aar 分类器依赖无法走 catalog，字面量需与此同步）
-jna = "5.12.0"
+# AD-099（审计 2026-09-23 清单·A6 批）：5.12.0 → 5.19.1 升级回归（broker 单测门禁）
+jna = "5.19.1"
 orgJson = "20230227"
 junit = "4.13.2"
 # mockito 5 默认 inline mock maker——可 mock Kotlin final 类（WebView 等）

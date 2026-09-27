@@ -34,6 +34,27 @@ val signingPropertiesFile = rootProject.file("signing.properties")
 if (signingPropertiesFile.exists()) {
     signingPropertiesFile.inputStream().use(signingProperties::load)
 }
+// AD-100（审计 2026-09-23 清单·A6 批）：versionCode/versionName 单源迁移——
+// 此前 defaultConfig 手写 20248/"2.2.0-beta.49"，与 shared/version.properties
+// （发版链的真正单源：Android/Windows/发布清单三端共用）双源漂移面。改为
+// 构建期读取 ../shared/version.properties；文件缺失/键缺失直接 fail 构建降级
+// 为静默默认值（版本错包比构建失败更危险）。
+val versionProperties =
+    Properties().apply {
+        val versionPropertiesFile = rootProject.file("../shared/version.properties")
+        check(versionPropertiesFile.exists()) {
+            "缺少版本单源文件: ${versionPropertiesFile.path}（发版链依赖，不得删除）"
+        }
+        versionPropertiesFile.inputStream().use(::load)
+    }
+val versionCodeFromProperties =
+    checkNotNull(versionProperties.getProperty("VERSION_CODE")) {
+        "shared/version.properties 缺少 VERSION_CODE 键"
+    }.toInt()
+val versionNameFromProperties =
+    checkNotNull(versionProperties.getProperty("VERSION_NAME")) {
+        "shared/version.properties 缺少 VERSION_NAME 键"
+    }
 val requireNativePolicyCore =
     providers
         .gradleProperty("requireNativePolicyCore")
@@ -57,8 +78,9 @@ android {
         applicationId = "com.aegis.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20248
-        versionName = "2.2.0-beta.49"
+        // AD-100：单源读取 shared/version.properties（见文件头 val 声明处）
+        versionCode = versionCodeFromProperties
+        versionName = versionNameFromProperties
         // AD-067：androidTest 冒烟集运行器
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
