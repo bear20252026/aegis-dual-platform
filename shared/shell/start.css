@@ -298,10 +298,31 @@
     outline-offset: 2px;
     border-radius: 6px;
   }
-  .search input:focus-visible { outline: none; }
+  /* WB-109（2026-09-26 审计）：删除 .search input:focus-visible { outline:none }
+     ——此前主搜索输入框是全页唯一零焦点指示的可交互控件（全局 :focus-visible
+     被该规则覆盖）。输入框现继承全局键盘焦点描边，胶囊容器另加 focus-within
+     描边作为组级指示 */
+  .search:focus-within {
+    border-color:#7DD3FC;
+    box-shadow:0 12px 36px rgba(0,0,0,0.22), 0 0 0 2px rgba(125,211,252,0.55);
+  }
   .engine-item:focus-visible,
   .wp:focus-visible,
   .bm:focus-visible {
     outline: 2px solid #7DD3FC;
     outline-offset: 1px;
+  }
+
+  /* ═══ WB-111（2026-09-26 审计）：prefers-reduced-motion——前庭敏感用户
+     的减动效开关（此前全文件 0 处）。DOM 侧：关闭 hover 位移、分数弹跳
+     （snakePop）与全部过渡动画；canvas 内的屏震（shake）/死亡红闪（flash）
+     由 start.snake.js 渲染侧按同一媒体查询关闭。 ═══ */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+    .wp:hover, .bm:hover, .veil-btn:hover, .veil-btn:active, .quick-btn:active { transform: none; }
+    .snake-head .chip b.pop { animation: none; }
   }

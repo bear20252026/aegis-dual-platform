@@ -37,11 +37,9 @@ aegis-专家评审包/
 # 构建产物（dist/——不入库，由 release.yml 构建）
 dist/
 
-# 生成的 MD 单文件（aegis-source-all.md——不入库）
-aegis-source-all.md
-
 # 生成的归档 zip / MD 产物（不入库；通配规则，不再逐个登记文件名）
-aegis-source-*.zip
+# SP-168（2026-09-26 审计）：删除死规则 aegis-source-all.md（被下方
+# aegis-source-*.md 覆盖）与 aegis-source-*.zip（被 aegis-*.zip 覆盖）
 aegis-source-*.md
 aegis-review-*.md
 
@@ -82,4 +80,4 @@ android/app/src/main/assets/geogebra/
 
 # Mimosa 扫描器本地会话状态（hook 运行时产物——不得入库）
 .mimosa/
-/.zcode/
+**/.zcode/

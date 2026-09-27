@@ -166,7 +166,7 @@ test('WB-020 及时回包：兜底定时器必须被清除（无泄漏）并进�
     'Chrome（书签 + 历史）', '来源行文案必须含浏览器名与数据类型');
 });
 
-test('WB-020 扫描 Promise 拒绝（win 形态）→ 空结果兜底不挂死', async () => {
+test('WB-020 扫描 Promise 拒绝（宿主返回 thenable 形态）→ 空结果兜底不挂死', async () => {
   const host = {
     has: () => true,
     importScan: () => Promise.reject(new Error('bridge gone')),

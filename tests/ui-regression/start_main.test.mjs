@@ -25,6 +25,8 @@ function el(tag) {
     _handlers: {},
     _textContent: '',
     appendChild(c) { node.children.push(c); return c; },
+    // WB-107：书签宫格经 replaceChildren 整段替换（frag 进容器）
+    replaceChildren(...cs) { node.children.length = 0; cs.forEach((c) => node.children.push(c)); },
     addEventListener(type, fn) { (node._handlers[type] = node._handlers[type] || []).push(fn); },
     focus() {},
     setAttribute() {},
@@ -39,13 +41,14 @@ function el(tag) {
 }
 
 function makeHost() {
-  const state = { setCalls: [], errors: [], getWallpaperCb: null };
+  const state = { setCalls: [], errors: [], getWallpaperCb: null, hasSavedN: 0, restoreCalls: 0 };
   const host = {
     kind: () => 'cs',
     has: (f) => f === 'navigate' || f === 'geo',   // bookmarks=false → 书签宫格早退
     getEngine: (cb) => cb({ engine: 'baidu', engines: [{ key: 'baidu', name: '百度' }] }),
     getWallpaper: (cb) => { state.getWallpaperCb = cb; },
-    hasSaved: (cb) => cb(0),
+    hasSaved: (cb) => cb(state.hasSavedN),
+    restoreSession: () => { state.restoreCalls += 1; },
     setWallpaper: (name) => state.setCalls.push(name),
     jsError: (...a) => state.errors.push(a.join(' ')),
     navigate: () => {},
@@ -60,10 +63,14 @@ function loadMain(host) {
     wallpaper: el('div'),
     wpList: el('div'),
     bm: el('div'),
+    restoreBox: el('div'),
+    restoreBtn: el('button'),
   };
   const document = {
     getElementById: (id) => elements[id] || null,
     createElement: (tag) => el(tag),
+    // WB-107：书签整段构建走 DocumentFragment
+    createDocumentFragment: () => ({ children: [], appendChild(c) { this.children.push(c); } }),
     addEventListener() {},
     activeElement: null,
   };
@@ -98,7 +105,12 @@ test('WB-025 对照组：合法壁纸正常应用 + 桥下发 + 圆点高亮迁�
   const active = elements.wpList.children
     .filter((d) => d.className === 'wp active')
     .map((d) => d.title);
-  assert.deepEqual(active, ['aurora-lime.jpg'], '高亮必须迁移到目标圆点');
+  // WB-132（2026-09-26 审计）：tooltip/aria-label 改用中文名（label 字段），
+  // 不再暴露内部资产文件名
+  assert.deepEqual(active, ['晨曦青'], '高亮必须迁移到目标圆点');
+  const titles = elements.wpList.children.map((d) => d.title);
+  assert.deepEqual(titles, ['暖洋红', '晨曦青', '暮蓝', '星紫'],
+    '壁纸圆点 tooltip 必须为中文名（label 字段）');
 });
 
 test('WB-025 持久化恢复路径同样受未知名守卫', () => {
@@ -131,4 +143,48 @@ test('WB-013 桥调用失败：jsError 留痕且不阻断首屏装配', () => {
     'init 拉取失败必须经 bridgeError 留痕');
   assert.equal(elements.wpList.children.length, 4,
     '引擎拉取失败后壁纸圆点装配必须照常完成（白屏防护）');
+});
+
+// WB-129（2026-09-26 审计）：restoreBox 渲染与按钮接线此前零测试
+test('WB-129 restoreBox 三态渲染：n=0/1 不显示，n=5 显示并接线', () => {
+  for (const n of [0, 1]) {
+    const { host, state } = makeHost();
+    state.hasSavedN = n;
+    const { elements } = loadMain(host);
+    assert.equal(elements.restoreBox.style.display, undefined,
+      `n=${n}（仅 >1 显示）不得显示恢复入口`);
+    assert.equal(typeof elements.restoreBtn.onclick, 'undefined',
+      `n=${n} 不得给按钮接线`);
+  }
+  const { host, state } = makeHost();
+  state.hasSavedN = 5;
+  const { elements } = loadMain(host);
+  assert.equal(elements.restoreBox.style.display, 'block', 'n=5 必须显示恢复入口');
+  assert.match(elements.restoreBtn.textContent, /恢复上次会话（5 个标签）/,
+    '按钮文案必须携带标签计数');
+  elements.restoreBtn.onclick({});
+  assert.equal(state.restoreCalls, 1, '点击必须调用 restoreSession');
+});
+
+// WB-107（2026-09-26 审计）：书签 it.url 为 null/非字符串此前抛 TypeError
+// 逃逸回调——整格后续书签全部不渲染
+test('WB-107 书签 URL 畸形容错：单条跳过不中断整批渲染', () => {
+  const { host, state } = makeHost();
+  host.has = (f) => f === 'navigate' || f === 'geo' || f === 'bookmarks';
+  host.bookmarks = (cb) => cb([
+    { title: '正常站', url: 'https://example.com/x' },
+    { title: '空URL', url: null },          // 此前整批渲染在此崩掉
+    { title: '数字URL', url: 42 },           // 非字符串——String() 归一后可渲染
+    { title: '坏协议', url: 'not a url' },   // URL 解析失败——回退原文
+  ]);
+  const { elements } = loadMain(host);   // kind()='cs' → 装配即同步渲染
+  assert.ok(!state.errors.some((e) => e.includes('bookmarks')),
+    '畸形书签不得以 jsError 逃逸');
+  const frag = elements.bm.children[0];
+  assert.ok(frag, '宫格必须被整体替换渲染');
+  const names = frag.children
+    .filter((c) => c.className === 'bm' || c.className === 'bm bm-add')
+    .map((c) => c.children[1].textContent);
+  assert.deepEqual(names, ['正常站', '数字URL', '坏协议', '添加常用站点'],
+    '空 URL 单条必须跳过，其余（含畸形解析回退）照常渲染');
 });

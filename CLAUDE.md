@@ -32,15 +32,22 @@ python validate_release.py             # AST/JSON/XML 静态验证（版本校�
 python scripts/verify_versions.py      # 版本单源一致性
 python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
 python scripts/verify_cross_end_lists.py          # 跨端清单对账（引擎/壁纸）
-node --test tests/ui-regression/*.test.mjs        # 单源首页 UI 回归
+# WB-117（2026-09-26 审计）：通配 *.test.mjs 在 Windows 不展开（ci.yml 为此
+# 显式列文件）——本地必须同样显式列出；贪吃蛇回归另跑 snake.test.js
+node --test tests/ui-regression/start_page.test.mjs tests/ui-regression/host_bridge.test.mjs tests/ui-regression/start_host.test.mjs tests/ui-regression/start_import.test.mjs tests/ui-regression/start_main.test.mjs
+node shared/shell/snake.test.js                   # 贪吃蛇逻辑回归
 python -m pytest tests/python/ -q                 # 发布链离线单测
 
-# —— Android 端（需 Android SDK）——
+# —— Android 端（需 Android SDK；四模块命令与 android-quality.yml 一致
+#    ——WB-116 对齐 CI：app/broker/webview-adapter/contracts）——
 cd android
-./gradlew.bat :app:testDebugUnitTest :webview-adapter:testDebugUnitTest
-./gradlew.bat :app:ktlintCheck :app:detekt        # CI 以 ktlint/detekt 为准
+./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck
+./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt
+./gradlew.bat :app:lintDebug
+./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest :webview-adapter:testDebugUnitTest
 
 # —— legacy 归档栈（只读冻结；仅 P0 安全披露通道评估，见 ADR-009 D4）——
+# selftest_*.py 仅属该归档栈 P0 通道（WB-118）——正典栈不使用
 cd legacy/windows-pywebview
 ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
 bandit -r app/ -q --skip B110,B404,B603,B607
@@ -54,18 +61,36 @@ mypy main_webview.py app/                # 全量目录口径（42 源文件 0 �
    功能与安全修复一律不在该栈进行，P0 安全缺陷仅经安全披露通道评估
    （ADR-009 D4 冻结纪律），活跃代码**禁止** import 归档栈。
 2. **单文件单职责**：新文件 ≤ 300 行；改造后 ≤ 500 行。不为拆而拆，也不堆职责。
-3. **URL 安全关口**：所有导航入口（IPC/会话/书签/历史/拨号/命令行/地址栏）加载 URL 前必须经 `app/security.py` 的 `safe_url()`。
-4. **js_api 白名单**：暴露给 JS 的方法必须加入 `app/api_bridge.py` 的 `_JS_EXPOSED`（防 pywebview 递归注入死锁）。
-5. **窗口操作走 NavQueue**：js_api 回调线程**绝不**同步调用 load_url/evaluate_js，必须投递到 `app/nav_queue.py`。
+3. **URL 安全关口**：所有导航入口（地址栏/会话恢复/书签/历史/NTP 快捷入口/命令行）
+   加载前必须经 `windows/src/Aegis.Windows.App/Core/UrlSafety.cs` 校验，并经
+   `Broker/BrowserPolicyBroker.cs` 的 `EvaluateNavigation` → Rust 策略核心裁决
+   （fail-closed——ADR-008）；Android 端对应 AegisWebViewClient → Broker 状态机。
+   （WB-101，2026-09-26 审计——原归档栈 safe_url 表述废止）
+4. **JS 暴露面收敛**：暴露给页面 JS 的桥能力仅限受信虚拟主机——`NtpAssets.IsTopLevelNtpDocument`
+   顶层文档门禁（帧内嵌复用即拒）+ `Chrome/Ntp/NtpBridgeFactory.cs` 白名单服务登记；
+   远程页面上 WebMessage 被宿主按来源关闭。新增桥方法必须经 Factory 显式登记，
+   禁止动态反射暴露。（WB-101，2026-09-26 审计——原归档栈 _JS_EXPOSED 表述废止）
+5. **导航/窗口操作走 WebView2 原生事件模型**：一切导航取消/放行必须挂在
+   NavigationStarting / FrameNavigationStarting / NewWindowRequested 事件经
+   Broker 真实取消（`WebView/HostWebView.cs` + `WebView/NavigationConfirmationGate.cs`），
+   UI 线程（Dispatcher）串行——禁止绕过事件模型的跨线程 load/executeScript。
+   （WB-101，2026-09-26 审计——原归档栈 NavQueue 表述废止）
 6. **Android 安全配置**：每个 WebView 必须经 `SecureWebViewFactory` 创建（复用 BrowserEngine 安全边界）。
 7. **凭据红线**：绝不把 token/密钥/证书/key.properties/.jks 写进代码或提交；安全敏感信息仅私密渠道传递。
 
 ## 代码检查清单（提交前自查）
 
-- [ ] validate_release / ruff / bandit / mypy 全过（mypy 口径与 ci.yml 一致：mypy main_webview.py app/）
+- [ ] 改动所涉技术栈的正典门禁全过（WB-118，2026-09-26 审计——按端选择）：
+  - C#：`dotnet build`（0 警告）+ `dotnet test` 两套件全绿
+  - Rust：`cargo test && cargo clippy --all-targets && cargo fmt --check` 全绿
+  - Android：四模块 ktlint + detekt + 单测 + `:app:lintDebug`（与 android-quality.yml 一致）
+  - shared/shell：`node --test`（显式文件清单）+ `node shared/shell/snake.test.js` 全绿
+  - scripts/contracts/release：`python validate_release.py` + `python scripts/verify_versions.py`
+    + `python -m pytest tests/python/ -q`
+- [ ] `selftest_*.py` 仅适用 legacy 归档栈 P0 评估通道（正典栈新增逻辑写对应端的
+  C#/Kotlin/Node/pytest 测试——WB-118）
 - [ ] 遵守单文件单职责与行数红线
 - [ ] 涉及 URL/密码/下载/权限时说明了安全考虑
-- [ ] 新增逻辑有对应自检（selftest_*.py）
 - [ ] 更新了 CHANGELOG.md
 - [ ] 遵循 Conventional Commits（feat/fix/refactor/docs/chore/security）
 
@@ -88,4 +113,6 @@ mypy main_webview.py app/                # 全量目录口径（42 源文件 0 �
 - `validate_release.py` 用相对路径定位项目根，**不要**改回硬编码绝对路径。
 - `python` 命令在本机可能被 Store 别名拦截：用 `py` 或显式 Python 路径。
 - Windows 上 Git Bash 的 `/tmp` 与 Python 路径不一致：别让 Python 读 Git Bash 的 /tmp 文件。
-- 快捷键/JS 注入改动后必须跑 `selftest_shell_toolbar.py`（校验占位符替换与 JSON 转义）。
+- 快捷键/JS 注入改动后必须跑 `selftest_shell_toolbar.py`——**仅限 legacy 归档栈
+  P0 评估通道**（WB-118，2026-09-26 审计）；正典栈等价改动跑 C# 两套件 +
+  `node --test` UI 回归。

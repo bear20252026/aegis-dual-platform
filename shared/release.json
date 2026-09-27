@@ -15,7 +15,6 @@
   "android": {
     "applicationId": "com.aegis.browser",
     "distribution": [
-      "play-aab",
       "direct-apk"
     ],
     "engine": "android-webview-adapter"

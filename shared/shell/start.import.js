@@ -209,8 +209,9 @@
           renderPick();
         }
         try {
-          // 三端返回形态不一（win=Promise / cs·android=同步回调 undefined）——
-          // 统一走回调，绝不对可能为 undefined 的返回值调 .catch
+          // 宿主返回形态不一（cs·android=同步回调 undefined；桥层若包装成
+          // Promise 则可能拒绝）——统一走回调，绝不对可能为 undefined 的
+          // 返回值调 .catch（WB-114：win 归档桥分支已删）
           var ret = Host.importScan(scanDone);
           if (ret && typeof ret.catch === 'function') ret.catch(function () { scanDone([]); });
         } catch (e) {

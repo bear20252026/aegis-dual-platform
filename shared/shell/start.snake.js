@@ -10,6 +10,15 @@
       var pulse = 0, particles = [], floaters = [], shake = 0, flash = 0;
       var clouds = [], flies = [], apples = 0;
       var muted = false, actx = null;
+      // WB-111（2026-09-26 审计）：prefers-reduced-motion——前庭敏感用户的
+      // 减动效偏好。canvas 内渲染的屏震（shake）与死亡红闪（flash）CSS 管
+      // 不到，须在渲染侧关闭；过渡/弹跳等 DOM 动画由 start.css 媒体查询承担。
+      var reduceMotion = false;
+      try {
+        reduceMotion = !!(window.matchMedia &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+      } catch (e) { }
+      var lastFocus = null;  // WB-112：打开浮层前的焦点元素（关闭时归还）
 
       function el(id) { return document.getElementById(id); }
 
@@ -39,6 +48,9 @@
       function open() {
         canvas = el('snakeCanvas');
         ctx = canvas.getContext('2d');
+        // WB-112（2026-09-26 审计）：aria-modal 浮层焦点管理——打开前记录
+        // 触发元素，初始焦点移入常驻无副作用的关闭钮（对齐 start.import.js）
+        try { lastFocus = document.activeElement || null; } catch (e) { lastFocus = null; }
         el('snakeOverlay').style.display = 'flex';
         var stage = canvas.parentElement;
         shown = Math.min(stage.clientWidth || 480, 500) || 480;
@@ -57,11 +69,21 @@
         loadBest(); reset(); setState('start');
         lastTs = 0; acc = 0;
         if (!rafId) rafId = requestAnimationFrame(loop);
+        try {
+          var closeBtn = el('snakeClose');
+          if (closeBtn && typeof closeBtn.focus === 'function') closeBtn.focus();
+        } catch (e) { }
       }
       function close() {
         if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
         persistBest();
         el('snakeOverlay').style.display = 'none';
+        // WB-112：焦点归还触发元素——键盘/读屏用户关闭浮层后回到原位，
+        // 不再「焦点失踪」落到 body（对齐 start.import.js close()）
+        try {
+          if (lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
+        } catch (e) { }
+        lastFocus = null;
         // 释放音频上下文（此前跨开关常驻）
         if (actx) { try { actx.close(); } catch (e) { } actx = null; }
       }
@@ -205,7 +227,10 @@
         }
         if (!grew) snake.pop();
         else prev.unshift(prev[0]);
-        if (grew) updScore(false);  // 分数变化时才刷新 DOM（此前每步刷新）
+        // WB-110（2026-09-26 审计）：吃食分支必须传 true——加分时 .pop 缩放
+        // 动画才触发（此前恒传 false，snakePop 成死样式；die()/reset() 的
+        // updScore(false) 保持不变——无加分即无视觉脉冲）
+        if (grew) updScore(true);
       }
 
       // ═══ 氛围（云 / 萤火虫 / 阳光） ═══
@@ -292,7 +317,8 @@
       function render(dt) {
         var t = state === 'play' ? Math.min(acc / stepMs, 1) : 1;
         pctx.save();
-        if (shake > 0) pctx.translate((Math.random() - 0.5) * shake * 0.6, (Math.random() - 0.5) * shake * 0.6);
+        // WB-111：prefers-reduced-motion 时关闭屏震（canvas 平移抖动）
+        if (!reduceMotion && shake > 0) pctx.translate((Math.random() - 0.5) * shake * 0.6, (Math.random() - 0.5) * shake * 0.6);
         // 暖阳天空（杏 → 琥珀 → 玫瑰）——渐变对象缓存（此前每帧新建，60fps GC 压力）
         if (!SKY) {
           SKY = pctx.createLinearGradient(0, 0, 0, PXH);
@@ -373,7 +399,8 @@
         }
         pctx.globalAlpha = 1;
         // 死亡暖红闪
-        if (flash > 0) { pctx.fillStyle = 'rgba(255,120,80,' + (flash / 40).toFixed(2) + ')'; pctx.fillRect(0, 0, PXW, PXH); }
+        // WB-111：prefers-reduced-motion 时关闭死亡红闪
+        if (!reduceMotion && flash > 0) { pctx.fillStyle = 'rgba(255,120,80,' + (flash / 40).toFixed(2) + ')'; pctx.fillRect(0, 0, PXW, PXH); }
         pctx.restore();
         // 放大到显示画布（关平滑——真·像素）
         ctx.imageSmoothingEnabled = false;
@@ -441,6 +468,38 @@
           try { localStorage.setItem('snakeMuted', muted ? '1' : '0'); } catch (e) { }
           el('snakeSound').textContent = muted ? '🔇' : '🔊';
         });
+        // WB-112（2026-09-26 审计）：焦点陷阱——Tab/Shift+Tab 在浮层内循环，
+        // 禁止逃逸到被 aria-modal 遮蔽的背景页（对齐 start.import.js 的
+        // modal 陷阱；聚焦集合每次按键实时收集，覆盖 veil 显/隐两种态下
+        // 的可聚焦按钮集）
+        var ov = el('snakeOverlay');
+        if (ov && ov.addEventListener) {
+          ov.addEventListener('keydown', function (e) {
+            if (e.key !== 'Tab') return;
+            var items = [];
+            try {
+              var all = ov.querySelectorAll('button, input, select, [tabindex]');
+              for (var i = 0; i < all.length; i++) {
+                var it = all[i];
+                if (it.disabled) continue;
+                var st = null;
+                try { st = it.style ? it.style.display : ''; } catch (e2) { }
+                if (st === 'none') continue;
+                items.push(it);
+              }
+            } catch (e3) { return; }
+            if (!items.length) return;
+            var first = items[0], last = items[items.length - 1];
+            var active = document.activeElement;
+            var inside = false;
+            try { inside = !!active && ov.contains(active); } catch (e4) { inside = false; }
+            if (e.shiftKey && (active === first || !inside)) {
+              e.preventDefault(); last.focus();
+            } else if (!e.shiftKey && (active === last || !inside)) {
+              e.preventDefault(); first.focus();
+            }
+          });
+        }
       });
 
       // 测试钩子（WB-016..019：Node 无头回归用——只读状态 + 受控写入，

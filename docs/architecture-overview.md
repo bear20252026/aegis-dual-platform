@@ -29,8 +29,9 @@ windows/
 │   ├── WebView/                        FingerprintShield / WebView 装配
 │   └── Contracts/                      契约生成代码（codegen 单源）
 ├── tests/                              Core.Tests + Broker.Tests（dotnet test）
-└── docs/release/AegisSetup.iss         Inno Setup 发布（版本运行时注入）
 ```
+> Inno Setup 发布脚本实际位于仓库根 `docs/release/`（AegisSetup-CSharp.iss，
+> 版本运行时注入；WB-120，2026-09-26 审计——原树形图误挂 windows/ 下）
 
 ### 1.2 Rust 策略核心（唯一裁决者——ADR-008）
 
@@ -58,8 +59,12 @@ android/app/src/main/java/com/aegis/browser/
 ### 1.4 单源 UI（双端共享）
 
 ```
-shared/shell/                         start.html（Host 适配层）+ start.css +
-                                      start.snake.js + start.import.js
+shared/shell/                         start.html + start.css + start.js
+                                      （Host 适配层）+ start.main.js（主逻辑）
+                                      + start.snake.js + start.import.js
+                                      ——六文件（WB-120，2026-09-26 审计：
+                                      此前漏计 start.js/start.main.js）+
+                                      manifest.txt（资产清单）+ wallpapers/
 shared/release.json                   版本/分发单源（verify_versions 校验）
 ```
 
@@ -95,8 +100,9 @@ legacy/（Qt、ui/）                    死代码
 ### 单源锚点（改动必经核对）
 - 版本：shared/version.properties 单源 → 4 文件同步（verify_versions 门禁）
 - 守卫 JS：contracts/schemas/bridge_guard.template.js → 三端编译期归一
-- 首页：shared/shell/ 四文件 → Android gradle assets 整目录打包
-- 引擎/壁纸清单：start.html 主文件 → verify_cross_end_lists.py 对账
+- 首页：shared/shell/ 六文件（start.html/css/js/main/snake/import——
+  WB-120，2026-09-26 审计改计）+ manifest.txt 资产清单 → Android gradle
+  assets 整目录打包；引擎/壁纸清单 → verify_cross_end_lists.py 对账
 
 ### 关键数据流（4 条）
 ① 导航流：输入 → Broker 决策 → Rust 裁决 → WebView 加载 → 审计

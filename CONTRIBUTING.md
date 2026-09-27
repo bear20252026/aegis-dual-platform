@@ -54,16 +54,20 @@ dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全
 # —— Rust 策略核心 ——
 cargo test && cargo clippy --all-targets && cargo fmt --check  # 全绿 + 0 警告
 
-# —— 契约/版本/UI 回归门禁（仓库根）——
+# —— 契约/版本/UI 回归门禁（仓库根；WB-117：通配在 Windows 不展开——
+#    显式文件清单与 ci.yml 一致）——
 python validate_release.py                        # AST/JSON/XML 静态验证
 python scripts/verify_versions.py                 # 版本单源一致性
 python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（ADR-007）
-node --test tests/ui-regression/*.test.mjs        # 单源首页 UI 回归
+node --test tests/ui-regression/start_page.test.mjs tests/ui-regression/host_bridge.test.mjs tests/ui-regression/start_host.test.mjs tests/ui-regression/start_import.test.mjs tests/ui-regression/start_main.test.mjs
+node shared/shell/snake.test.js                   # 贪吃蛇逻辑回归
 python -m pytest tests/python/ -q                 # 发布链离线单测
 
-# —— Android 端 ——
+# —— Android 端（四模块与 android-quality.yml 一致——WB-116 对齐 CI）——
+./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck
+./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt
 ./gradlew.bat :app:lintDebug                      # Android Lint（0 错误）
-./gradlew.bat :app:testDebugUnitTest              # 单元测试（含 ktlint/detekt 门禁）
+./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest :webview-adapter:testDebugUnitTest
 
 # —— legacy 归档栈（只读——禁止在此修复，仅归档基线参考）——
 # python3 validate_release.py / ruff / bandit / mypy 仅在触及归档目录时运行

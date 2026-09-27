@@ -11,8 +11,18 @@
      'self' 的匹配依引擎而异——显式放行本地文件（https 页面引用 file:
      子资源本就被浏览器拦截，此许可实际只作用于 Android 本地资产）。
      connect-src 'none'：页面自身零网络请求（数据全走宿主桥）。 -->
+<!-- WB-105（2026-09-26 审计）：frame-ancestors 指令从 meta CSP 移除——规范
+     明文规定该指令（连同 report-uri）在 <meta> 中被忽略，保留即为「安全声明
+     失真」（防嵌套保护实际不存在）。防嵌套由 WebView 容器承担：C# 栈页面仅
+     经 ntp.aegis.local 受信虚拟主机加载，宿主桥按顶层文档门禁
+     （NtpAssets.IsTopLevelNtpDocument）拒绝帧内嵌复用；Android 为本地
+     asset 页，无第三方嵌入面。 -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' file:; style-src 'self' file:; img-src 'self' file: data:; connect-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+      content="default-src 'self'; script-src 'self' file:; style-src 'self' file:; img-src 'self' file: data:; connect-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <!-- WB-131（2026-09-26 审计）：data: URI favicon——此前 head 无任何 icon
+         声明且虚拟主机根无 favicon.ico，每开新标签产生一次 404 子资源请求
+         （img-src 已放行 data:，meta CSP 下可加载） -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23152038'/%3E%3Ctext x='16' y='23' font-family='system-ui,sans-serif' font-size='19' font-weight='700' fill='%23ffffff' text-anchor='middle'%3EA%3C/text%3E%3C/svg%3E">
     <link rel="stylesheet" href="start.css">
 </head>
 <body>
@@ -61,7 +71,10 @@
   <div id="importModal" role="dialog" aria-modal="true" aria-label="从 Chrome 或 Edge 导入" hidden>
     <div class="im-card">
       <div class="im-title">从 Chrome / Edge 导入</div>
-      <div id="imBody"></div>
+      <!-- WB-113（2026-09-26 审计）：向导步骤文案（扫描中→导入中→完成/失败）
+           此前仅视觉呈现——role=status + aria-live=polite 让读屏播报步骤变化
+           （polite：不打断用户当前朗读） -->
+      <div id="imBody" role="status" aria-live="polite"></div>
       <div class="im-actions">
         <button id="imClose">关闭</button>
         <button id="imNext">下一步</button>
@@ -78,7 +91,10 @@
 
 
   <!-- 贪吃蛇（暖阳像素：金色时刻 · 温暖正面——双端统一单源） -->
-  <div class="snake-overlay" id="snakeOverlay">
+  <!-- WB-112（2026-09-26 审计）：全屏浮层补 dialog 语义——role=dialog +
+       aria-modal + aria-label（对齐导入向导）；初始隐藏由 CSS display:none
+       承担，焦点管理（打开聚焦关闭钮/Tab 陷阱/关闭归还）在 start.snake.js -->
+  <div class="snake-overlay" id="snakeOverlay" role="dialog" aria-modal="true" aria-label="贪吃蛇游戏">
     <div class="snake-panel">
       <div class="snake-head">
         <span class="title">🐍 贪吃蛇</span>

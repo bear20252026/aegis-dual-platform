@@ -1,10 +1,17 @@
 # 首页单源资产清单（PY-038 共享单源）：validate_release.py 仓库级门禁与
 # release-windows.yml 发布期 fail-closed 断言共同消费——两处平行维护必漂移。
 # 每行一个相对 shared/shell/ 的路径；# 开头为注释。
+# WB-103（2026-09-26 审计）：补齐 4 张壁纸（此前仅登记 twilight 一张——
+# magenta/lime/violet 丢失/损坏将静默过门禁，成品 NTP 三张壁纸 404）。
+# 文件名与 NtpAssets.cs / start.main.js / AegisHomeBridge.kt 白名单对齐；
+# 仓库级差集对账由 validate_release.py check_shell_manifest_consistency 执行。
 start.html
 start.css
 start.js
 start.main.js
 start.snake.js
 start.import.js
+wallpapers/aurora-magenta.jpg
+wallpapers/aurora-lime.jpg
 wallpapers/aurora-twilight.jpg
+wallpapers/aurora-violet.jpg

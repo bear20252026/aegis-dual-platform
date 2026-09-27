@@ -160,3 +160,110 @@ test('WB-027 导入向导焦点管理：初始聚焦 + Tab 陷阱 + 关闭归还
   assert.match(IMPORT, /lastFocus/, '必须记录触发元素');
   assert.match(IMPORT, /lastFocus\.focus\(\)/, '关闭必须归还焦点');
 });
+
+// WB-114（2026-09-26 审计）：归档 pywebview 栈的 win 桥分支已删——
+// 适配层不得再出现 pywebview/win 端引用（纯死代码面回归锁）。
+// 断言剥掉注释只看代码（注释中的历史提及不算回归）。
+test('WB-114 Host 适配层收敛双端：win 归档桥分支不得回归', () => {
+  const code = HOSTJS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/pywebview/.test(code), 'start.js 代码不得再引用 pywebview 归档桥');
+  assert.ok(!/winApi/.test(code), 'start.js 代码不得残留 winApi 桥');
+  assert.ok(!/\? 'win'/.test(code) && !/=== 'win'/.test(code),
+    "start.js 代码不得再出现 'win' 端判定");
+  assert.match(code, /kind: function \(\) \{ return andApi\(\) \? 'android' : \(csApi\(\) \? 'cs' : null\); \}/,
+    'kind() 必须收敛 android/cs 双端判定');
+});
+
+// WB-125（2026-09-26 审计）：四个脚本的加载顺序是硬契约——任何重排即
+// ReferenceError 白屏（start.main.js 依赖前三个文件的全局；本断言按序
+// 提取 script src 锁定顺序）
+test('WB-125 脚本加载顺序硬契约：Host → snake → import → main', () => {
+  const srcs = [...HTML.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
+  assert.deepEqual(srcs, ['start.js', 'start.snake.js', 'start.import.js', 'start.main.js'],
+    '脚本加载顺序不得重排（重排即白屏）');
+});
+
+// WB-126（2026-09-26 审计）：导入弹层初始隐藏依赖 hidden 属性与高特异度
+// CSS 规则配对——此前零回归测试，拆掉任一半即静默失效
+test('WB-126 导入弹层初始隐藏：hidden 属性 + [hidden] CSS 规则双断言', () => {
+  assert.match(HTML, /id="importModal"[^>]*\shidden>/,
+    '标记层必须带 hidden 属性（初始隐藏语义）');
+  assert.match(CSS, /#importModal\[hidden\]\s*\{\s*display:\s*none;\s*\}/,
+    '作者 display:flex 会压过 hidden 的 UA 规则——[hidden] 高特异度配对规则必须存在');
+});
+
+// WB-105（2026-09-26 审计）：meta CSP 不得再含 frame-ancestors——规范明文
+// 该指令在 meta 中被忽略，保留即「安全声明失真」
+test('WB-105 meta CSP 无效指令：frame-ancestors/report-uri 不得回归', () => {
+  const csp = HTML.match(/http-equiv="Content-Security-Policy"\s*\n?\s*content="([^"]*)"/);
+  assert.ok(csp, 'CSP meta 必须存在');
+  assert.ok(!/frame-ancestors/.test(csp[1]), 'meta CSP 不得含 frame-ancestors（meta 中被忽略）');
+  assert.ok(!/report-uri/.test(csp[1]), 'meta CSP 不得含 report-uri（meta 中被忽略）');
+});
+
+// WB-131（2026-09-26 审计）：无 icon 声明时每开新标签产生 favicon 404 请求
+test('WB-131 favicon：data: URI icon 声明必须存在', () => {
+  assert.match(HTML, /<link rel="icon" href="data:image\/svg\+xml,/, '必须以 data: URI 声明 icon');
+});
+
+// WB-113（2026-09-26 审计）：向导步骤变化读屏可感知
+test('WB-113 导入向导步骤区 aria-live：role=status + polite', () => {
+  assert.match(HTML, /id="imBody"[^>]*role="status"[^>]*aria-live="polite"/,
+    'imBody 必须声明 role=status aria-live=polite');
+});
+
+// WB-112（2026-09-26 审计）：贪吃蛇全屏浮层 dialog 语义与焦点管理（对齐
+// 导入向导模式）
+test('WB-112 贪吃蛇浮层：role=dialog/aria-modal + 焦点管理 + Tab 陷阱', () => {
+  assert.match(HTML, /id="snakeOverlay"[^>]*role="dialog"[^>]*aria-modal="true"/,
+    '浮层必须声明 role=dialog aria-modal=true');
+  assert.match(SNAKE, /lastFocus = document\.activeElement/, '打开前必须记录触发元素');
+  assert.match(SNAKE, /closeBtn && typeof closeBtn\.focus === 'function'[\s\S]{0,60}closeBtn\.focus\(\)/,
+    '打开必须把初始焦点移入浮层（关闭钮）');
+  assert.match(SNAKE, /lastFocus && typeof lastFocus\.focus === 'function'[\s\S]{0,60}lastFocus\.focus\(\)/,
+    '关闭必须归还焦点');
+  assert.match(SNAKE, /ov\.addEventListener\('keydown'[\s\S]{0,200}e\.key !== 'Tab'/,
+    '浮层必须接管 Tab（焦点陷阱）');
+});
+
+// WB-110（2026-09-26 审计）：吃食分支 updScore(true)——.pop 动画触发条件
+test('WB-110 加分视觉反馈：step 吃食分支必须 updScore(true)', () => {
+  assert.match(SNAKE, /if \(grew\) updScore\(true\);/, '吃食加分必须触发 .pop 缩放动画');
+  assert.ok(!/updScore\(false\)[\s\S]{0,80}\/\/ 分数变化时才刷新/.test(SNAKE),
+    '旧的恒 false 调用不得回归');
+});
+
+// WB-111（2026-09-26 审计）：prefers-reduced-motion 双侧关闭（CSS 动画 +
+// canvas 屏震/红闪）
+test('WB-111 减动效偏好：CSS 媒体查询 + canvas shake/flash 渲染门控', () => {
+  assert.match(CSS, /@media \(prefers-reduced-motion: reduce\)/, 'start.css 必须有减动效媒体查询');
+  assert.match(SNAKE, /prefers-reduced-motion/, 'start.snake.js 必须探测减动效偏好');
+  assert.match(SNAKE, /!reduceMotion && shake > 0/, '屏震必须被 reduceMotion 门控');
+  assert.match(SNAKE, /!reduceMotion && flash > 0/, '死亡红闪必须被 reduceMotion 门控');
+});
+
+// WB-109（2026-09-26 审计）：主搜索框不得成为零焦点指示控件
+//（断言剥掉 CSS 注释——注释中的历史描述不算回归）
+test('WB-109 搜索框焦点指示：outline:none 规则不得回归', () => {
+  const cssCode = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/\.search input:focus-visible\s*\{[^}]*outline:\s*none/.test(cssCode),
+    '.search input:focus-visible outline:none 不得回归');
+  assert.match(cssCode, /\.search:focus-within/, '胶囊容器必须有 focus-within 组级描边');
+});
+
+// WB-132（2026-09-26 审计）：壁纸控件面向用户显示中文名
+test('WB-132 壁纸 tooltip：WALLPAPERS 表必须有中文 label 字段', () => {
+  assert.match(MAINJS, /label:'暖洋红'/, 'magenta 必须有中文名');
+  assert.match(MAINJS, /label:'晨曦青'/, 'lime 必须有中文名');
+  assert.match(MAINJS, /label:'暮蓝'/, 'twilight 必须有中文名');
+  assert.match(MAINJS, /label:'星紫'/, 'violet 必须有中文名');
+  assert.match(MAINJS, /d\.title = WALLPAPERS\[idx\]\.label;/, 'tooltip 必须用 label');
+  assert.ok(!/d\.title = WALLPAPERS\[idx\]\.name;/.test(MAINJS), 'tooltip 不得回退到内部文件名');
+});
+
+// WB-108（2026-09-26 审计）：引擎菜单两条关闭路径都必须复位 aria-expanded
+test('WB-108 引擎菜单关闭路径：aria-expanded 双路径复位', () => {
+  const resets = [...MAINJS.matchAll(/setAttribute\('aria-expanded', 'false'\)/g)].length;
+  assert.ok(resets >= 3,
+    'aria-expanded=false 复位须覆盖 toggleEngineMenu/selectEngine/document 点击三条路径');
+});

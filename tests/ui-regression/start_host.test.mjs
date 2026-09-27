@@ -1,62 +1,31 @@
 // start_host.test.mjs —— start.js Host 适配层行为回归（node --test）
-// WB-021..024（审计批次W4）：适配层是三端唯一桥入口，kind()/has()/
-// Android 引擎回退/csCall 响应关联此前零测试——语义漂移即三端同坏。
+// WB-021..024（审计批次W4）：适配层是双端唯一桥入口，kind()/has()/
+// Android 引擎回退/csCall 响应关联此前零测试——语义漂移即双端同坏。
+// WB-114（2026-09-26 审计）：归档 pywebview 栈的 'win' 桥分支已删除——
+// 三端判定收敛为 cs/android 双端，win 相关断言一并移除。
+// WB-127（2026-09-26 审计）：chrome 桩抽至 helpers.mjs 共享（与
+// host_bridge.test.mjs 单一事实源）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { loadHost, makeCsBridge } from './helpers.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const HOSTJS = readFileSync(join(ROOT, 'shared', 'shell', 'start.js'), 'utf8');
-
-// 裸标识符 pywebview/chrome 以形参遮蔽（缺席即 undefined，不抛 ReferenceError；
-// winApi/andApi 的 window.xxx && 短路保证 undefined 桥不会被解引用）
-function loadHost({ pywebview, AegisBridge, chrome } = {}) {
-  const win = {};
-  if (pywebview !== undefined) win.pywebview = pywebview;
-  if (AegisBridge !== undefined) win.AegisBridge = AegisBridge;
-  if (chrome !== undefined) win.chrome = chrome;
-  const fn = new Function('window', 'pywebview', 'chrome', 'AegisBridge',
-    HOSTJS + '\nreturn Host;');
-  return fn(win, pywebview, chrome, AegisBridge);
-}
-
-// cs 桥桩：捕获 postMessage 与 message 监听，可模拟宿主按 id 回包
-function csBridge() {
-  const listeners = [];
-  const posted = [];
-  return {
-    bridge: {
-      webview: {
-        postMessage(msg) { posted.push(msg); },
-        addEventListener(_type, fn) { listeners.push(fn); },
-      },
-    },
-    posted,
-    respond(id, result) {
-      listeners.forEach((fn) => fn({ data: { __aegisRes: 1, id, result } }));
-    },
-  };
-}
-
-test('WB-021 kind() 三端判定与共存优先级', () => {
-  assert.equal(loadHost({}).kind(), null, '三桥全无 → null（bookmarks 重试依赖该语义）');
-  assert.equal(loadHost({ pywebview: { api: {} } }).kind(), 'win');
+test('WB-021 kind() 双端判定与共存优先级（win 归档桥已删）', () => {
+  assert.equal(loadHost({}).kind(), null, '双桥全无 → null（bookmarks 重试依赖该语义）');
   assert.equal(loadHost({ AegisBridge: {} }).kind(), 'android');
   assert.equal(loadHost({ chrome: { webview: { postMessage() {} } } }).kind(), 'cs');
-  // 迁移期多桥共存时判定必须确定：win > android > cs
-  const all = { pywebview: { api: {} }, AegisBridge: {}, chrome: { webview: { postMessage() {} } } };
-  assert.equal(loadHost(all).kind(), 'win', 'win 桥优先级最高');
+  // 迁移期多桥共存时判定必须确定：android > cs
   assert.equal(loadHost({ AegisBridge: {}, chrome: { webview: { postMessage() {} } } }).kind(),
     'android', 'android 桥优先级高于 cs');
+  // win 桥（pywebview）已随归档删除——注入也不再识别为宿主
+  assert.equal(loadHost({ pywebview: { api: {} } }).kind(), null,
+    'pywebview 归档桥不得再被识别（WB-114）');
 });
 
 test('WB-022 has() 能力面白名单语义', () => {
   assert.equal(loadHost({}).has('navigate'), false, '无宿主 → 一律 false');
   const cs = loadHost({ chrome: { webview: { postMessage() {} } } });
   assert.equal(cs.has('bookmarks'), true, 'cs（正典栈）全能力');
-  assert.equal(cs.has('any-unknown-feat'), true, 'win/cs 端白名单不设限');
+  assert.equal(cs.has('any-unknown-feat'), true, 'cs 端白名单不设限');
   const and = loadHost({ AegisBridge: {} });
   ['engine', 'navigate', 'wallpaper', 'geo', 'snake'].forEach((f) =>
     assert.equal(and.has(f), true, 'android 必须声明 ' + f));
@@ -96,7 +65,7 @@ test('WB-023 Android getEngine 合法 JSON 原样透传', () => {
 });
 
 test('WB-024 csCall 响应按 id 关联：乱序/迟到/重复/未知 id 各归其主', () => {
-  const { bridge, posted, respond } = csBridge();
+  const { bridge, posted, respond } = makeCsBridge();
   const Host = loadHost({ chrome: bridge });
   const seen = [];
   Host.getEngine((r) => seen.push(['engine', r]));
@@ -117,7 +86,7 @@ test('WB-024 csCall 响应按 id 关联：乱序/迟到/重复/未知 id 各归�
 });
 
 test('WB-024 回调异常隔离：抛错不阻断后续分发且经 jsError 留痕', () => {
-  const { bridge, posted, respond } = csBridge();
+  const { bridge, posted, respond } = makeCsBridge();
   const Host = loadHost({ chrome: bridge });
   let rendered = 0;
   const seen = [];
