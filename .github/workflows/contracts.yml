@@ -33,9 +33,12 @@ jobs:
       - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 (PY-061)
         with:
           path: ~/.cache/pip
-          key: pip-contracts-${{ runner.os }}-jsonschema423-rfc3339v014-pyyaml602
-      - name: Install contracts toolchain (PY-013/015 配套——锁版)
-        run: python -m pip install "jsonschema==4.23.0" "rfc3339-validator==0.1.4" "pyyaml==6.0.2" -q
+          key: pip-contracts-${{ runner.os }}-reqci-hashlock-v1
+      - name: Install contracts toolchain (PY-178 完整化——hash 锁定单源)
+        # PY-178（2026-09-26 审计收尾批）：此前行内 == pin（且 jsonschema/pyyaml
+        # 与 requirements-ci 漂移 4.23/6.0.2 vs 4.26/6.0.3）——统一根
+        # requirements-ci.txt --require-hashes（传递依赖全 hash 锁定）
+        run: python -m pip install --require-hashes -r requirements-ci.txt -q
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)

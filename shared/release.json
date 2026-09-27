@@ -22,6 +22,7 @@
   "updateManifest": {
     "schema": 1,
     "signature": "ed25519",
-    "hash": "sha256"
+    "hash": "sha256",
+    "status": "planned"
   }
 }

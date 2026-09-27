@@ -159,13 +159,33 @@ class TestEnumValueDomainDegraded:
         assert gkt.describe_value_domain(update["properties"]["channel"]) == (
             "enum: stable | beta | nightly")
 
-    def test_degraded_output_stays_plain_string(self):
-        # PY-188 降级契约锁定：含 enum 属性生成物仍是裸映射类型（不产 enum
-        # 类型）——升级为 enum 生成必须显式更新本用例（有意识变更）
+    def test_constants_class_generated_alongside_plain_string(self):
+        # PY-188 完整化（收尾批）：属性保持基础类型（不破坏镜像消费方），
+        # 另生成 {Name}Values 常量类/常量 object——值域编译期锚点，schema 单源
         schema = {"properties": {"method": {"type": "string",
                                             "enum": ["GET", "POST"]}}}
-        assert "string? method = null" in gcs.generate(schema, "Demo")
-        assert "val method: String? = null" in gkt.generate(schema, "Demo")
+        cs = gcs.generate(schema, "Demo")
+        assert "string? method = null" in cs  # 属性类型不升级（消费方兼容）
+        assert 'public const string MethodGET = "GET"' in cs
+        assert 'public const string MethodPOST = "POST"' in cs
+        kt = gkt.generate(schema, "Demo")
+        assert "val method: String? = null" in kt
+        assert 'const val METHOD_GET: String = "GET"' in kt
+        assert 'const val METHOD_POST: String = "POST"' in kt
+
+    def test_const_literal_and_non_string_types(self):
+        # const（含非字符串字面量）→ 单常量；integer const → long/Long
+        schema = {"properties": {"schema_version": {"const": 1}}}
+        cs = gcs.generate(schema, "Demo")
+        assert "public const long SchemaVersion = 1;" in cs
+        kt = gkt.generate(schema, "Demo")
+        assert "const val SCHEMA_VERSION: Long = 1" in kt
+
+    def test_no_enum_no_values_class(self):
+        # 无 enum/const 的 schema 不产出 Values 类（镜像形状不变）
+        schema = {"properties": {"url": {"type": "string"}}}
+        assert "Values" not in gcs.generate(schema, "Demo")
+        assert "Values" not in gkt.generate(schema, "Demo")
 
 
 # ---------------------------------------------------------------- PY-129/130

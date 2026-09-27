@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 
 SCHEMAS = pathlib.Path(__file__).resolve().parents[1] / "schemas"
@@ -42,10 +43,11 @@ def kt_type(prop: dict) -> str:
     return KT_TYPE_MAP[t]
 
 
-# PY-188（2026-09-26 审计）：enum/const 值域元数据（与 generate_csharp 对偶）
-# ——降级取舍的完整说明见 generate_csharp.describe_value_domain：首选
-# enum/常量类生成需同步重生成 windows/src 与 android/ 落盘产物（本批次
-# 范围外），退化为「值域元数据 + 单测锁定」。
+# PY-188（2026-09-26 审计，收尾批完整化）：enum/const 生成「基础类型属性 +
+# 常量 object」——与 generate_csharp.enum_constant_lines 对偶：属性保持
+# String/基础类型（不破坏镜像消费方），另生成 {Name}Values object 提供编译期
+# 拼写锚点（值域以 schema 为单源）。describe_value_domain 保留：元数据 API
+# 供测试与文档锁定值域。
 def describe_value_domain(prop: dict) -> str:
     """提取属性的 enum/const 值域描述（enum → "enum: A | B"；const → "const: X"）。"""
     if "enum" in prop:
@@ -55,6 +57,60 @@ def describe_value_domain(prop: dict) -> str:
     if "const" in prop:
         return f"const: {prop['const']}"
     return ""
+
+
+def _upper_snake(value: str) -> str:
+    """schema 值 → UPPER_SNAKE 标识符段：require_confirmation→REQUIRE_CONFIRMATION。"""
+    tokens = [t for t in re.split(r"[^A-Za-z0-9]+", value) if t]
+    out = "_".join(t.upper() for t in tokens)
+    return out or "VALUE"
+
+
+def _kt_literal_type(value) -> str:
+    if isinstance(value, bool):
+        return "Boolean"
+    if isinstance(value, int):
+        return "Long"
+    if isinstance(value, float):
+        return "Double"
+    return "String"
+
+
+def _kt_literal(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    if isinstance(value, float):
+        return repr(value)
+    return str(value)
+
+
+def enum_constant_lines(schema: dict, name: str) -> list[str]:
+    """生成 {Name}Values 常量 object（PY-188）——无 enum/const 属性时返回空。"""
+    props = schema.get("properties", {})
+    entries: list[tuple[str, object, str]] = []  # (常量名, 字面值, 属性值域描述)
+    for pname, p in props.items():
+        if "enum" in p:
+            domain = describe_value_domain(p)
+            entries.extend((f"{_upper_snake(pname)}_{_upper_snake(str(v))}", v, domain)
+                           for v in p["enum"])
+        elif "const" in p:
+            entries.append((f"{_upper_snake(pname)}", p["const"], describe_value_domain(p)))
+    if not entries:
+        return []
+    lines = [
+        "",
+        f"/** PY-188（2026-09-26 审计）：{name} 值域常量——schema enum/const 单源，"
+        "属性保持基础类型以兼容既有消费方。 */",
+        f"object {name}Values {{",
+    ]
+    for const_name, value, domain in entries:
+        suffix = f" // {domain}" if domain else ""
+        lines.append(
+            f"    const val {const_name}: {_kt_literal_type(value)} = {_kt_literal(value)}{suffix}")
+    lines.append("}")
+    return lines
 
 
 def generate(schema: dict, name: str) -> str:
@@ -85,6 +141,7 @@ def generate(schema: dict, name: str) -> str:
         else:
             lines.append(f"    val {pname}: {t}? = null,")
     lines.append(")")
+    lines.extend(enum_constant_lines(schema, name))
     return "\n".join(lines)
 
 

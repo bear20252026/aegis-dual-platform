@@ -14,3 +14,14 @@ public sealed record ActionContract(
     string nonce,
     string policy_version
 );
+
+/// <summary>PY-188（2026-09-26 审计）：ActionContract 值域常量——schema enum/const 单源，属性保持基础类型以兼容既有消费方。</summary>
+public static class ActionContractValues
+{
+    public const string MethodGET = "GET";  // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    public const string MethodPOST = "POST";  // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    public const string MethodPUT = "PUT";  // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    public const string MethodDELETE = "DELETE";  // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    public const string MethodNAVIGATE = "NAVIGATE";  // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    public const string MethodDOWNLOAD = "DOWNLOAD";  // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+}

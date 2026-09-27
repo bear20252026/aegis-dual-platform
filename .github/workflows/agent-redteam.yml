@@ -21,9 +21,11 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0 (node24)
         with:
           python-version: '3.12'
-      - name: Install test deps (PY-020 锁版+单次安装——此前重复裸装)
-        # SP-171（2026-09-26 审计）：测试执行改单跑 pytest——pytest 一并锁版安装
-        run: python -m pip install "pyyaml==6.0.2" "pytest==8.3.4" -q
+      - name: Install test deps (PY-178 完整化——hash 锁定单源)
+        # SP-171（2026-09-26 审计）：测试执行改单跑 pytest——pytest 一并锁版安装。
+        # PY-178 收尾批：行内 == pin 改根 requirements-ci.txt --require-hashes
+        #（此前 pytest 8.3.4 与本地/其他 workflow 9.1.1 漂移，一并对齐）
+        run: python -m pip install --require-hashes -r requirements-ci.txt -q
       # SP-171（2026-09-26 审计）：删除此前两条直跑脚本步骤与内联 yaml 断言块
       # （内联块是 redteam_test.py catalog 校验的弱化复刻——校验双源），改为
       # 单跑 pytest：自动收集 redteam_test.py / redteam_e2e_test.py 全部用例

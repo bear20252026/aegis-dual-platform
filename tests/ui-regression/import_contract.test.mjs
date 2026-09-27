@@ -1,5 +1,6 @@
-// host_bridge.test.mjs —— start.js Host 适配层「导入契约」回归（node --test）
-// 命名口径（WB-127，2026-09-26 审计）：本文件锁定导入统计管道的桥契约
+// import_contract.test.mjs —— start.js Host 适配层「导入契约」回归（node --test）
+// 命名口径（WB-127，2026-09-26 审计；SP-163 glob 化后改名零门禁成本）：
+// 本文件锁定导入统计管道的桥契约
 //（importBookmarks/importHistory/importScan），适配层通用语义（kind()/has()/
 // 引擎回退/csCall 响应关联）在 start_host.test.mjs——两文件共用 helpers.mjs 桩。
 // WB-001/002/WB-015：导入统计管道此前在 cs 端返回 undefined（结果只进

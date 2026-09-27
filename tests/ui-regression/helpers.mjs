@@ -1,5 +1,5 @@
 // helpers.mjs —— tests/ui-regression 共享桩（WB-127，2026-09-26 审计）
-// 此前 host_bridge.test.mjs 与 start_host.test.mjs 各自维护一套
+// 此前 host_bridge（现 import_contract）.test.mjs 与 start_host.test.mjs 各自维护一套
 // chrome.webview 桩（两份重复、语义易漂移）——抽单一事实源：
 // - loadHost：以形参遮蔽裸标识符加载 shared/shell/start.js（无桥即 undefined，
 //   不抛 ReferenceError；winApi/andApi 的 window.xxx && 短路同理）

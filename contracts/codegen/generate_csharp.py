@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 
 SCHEMAS = pathlib.Path(__file__).resolve().parents[1] / "schemas"
@@ -45,23 +46,12 @@ def cs_type(prop: dict) -> str:
 CS_VALUE_TYPES = {"long", "decimal", "bool"}
 
 
-# PY-188（2026-09-26 审计）——enum/const 支持的降级取舍：
-# 6 份 schema 含 enum/const，此前类型映射完全忽略（C#/Kotlin 模型全部降级
-# 为裸 string）。首选方案是生成 C# enum/Kotlin 常量类，但生成物落盘于
-# windows/src/Aegis.Windows.App/Contracts/Generated 与 android/contracts/.../
-# generated——PY-N1 批次文件范围不含 windows/src 与 android/，无条件改生成
-# 输出会使本仓库生成物与生成器漂移（verify_contract_compatibility 的
-# 重生成 diff 门禁必红）。经 grep 确认生成物当前零消费方（C#/Kotlin 应用
-# 代码均未引用 Generated 命名空间——见 AD-244），升级 enum 生成不会破坏
-# 消费方，但需要同步重生成落盘产物（越范围）。故本批次退化为：
-# 「值域注释（本注释 + describe_value_domain 元数据 API）+ 单测锁定」——
-# 单测锁定 schema enum/const 值域与生成器降级行为，待后续批次连同落盘
-# 产物一并升级为 enum 类型生成。
+# PY-188（2026-09-26 审计，收尾批完整化）：enum/const 生成「string 属性 +
+# 常量类」——属性保持 string 类型（不破坏镜像消费方），另生成
+# {Name}Values 静态常量类提供编译期拼写锚点（值域以 schema 为单源）。
+# describe_value_domain 保留：元数据 API 供测试与文档锁定值域。
 def describe_value_domain(prop: dict) -> str:
-    """提取属性的 enum/const 值域描述（PY-188 降级版——仅元数据不改进模型）。
-
-    enum → "enum: A | B | C"；const → "const: X"；两者皆无 → ""。
-    """
+    """提取属性的 enum/const 值域描述（enum → "enum: A | B | C"；const → "const: X"）。"""
     if "enum" in prop:
         values = prop["enum"]
         rendered = " | ".join(str(v) for v in values)
@@ -69,6 +59,59 @@ def describe_value_domain(prop: dict) -> str:
     if "const" in prop:
         return f"const: {prop['const']}"
     return ""
+
+
+def _pascal(value: str) -> str:
+    """schema 值 → PascalCase 标识符段：require_confirmation→RequireConfirmation，
+    GET→GET（全大写词保留），非字母数字作分隔。"""
+    tokens = [t for t in re.split(r"[^A-Za-z0-9]+", value) if t]
+    out = "".join(t if t.isupper() else t[:1].upper() + t[1:] for t in tokens)
+    return out or "Value"
+
+
+def _cs_literal_type(value) -> str:
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "long"
+    if isinstance(value, float):
+        return "decimal"
+    return "string"
+
+
+def _cs_literal(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, str):
+        return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return str(value)
+
+
+def enum_constant_lines(schema: dict, name: str) -> list[str]:
+    """生成 {Name}Values 常量类（PY-188）——无 enum/const 属性时返回空。"""
+    props = schema.get("properties", {})
+    entries: list[tuple[str, object, str]] = []  # (常量名, 字面值, 属性值域描述)
+    for pname, p in props.items():
+        if "enum" in p:
+            domain = describe_value_domain(p)
+            entries.extend((f"{_pascal(pname)}{_pascal(str(v))}", v, domain) for v in p["enum"])
+        elif "const" in p:
+            entries.append((f"{_pascal(pname)}", p["const"], describe_value_domain(p)))
+    if not entries:
+        return []
+    lines = [
+        "",
+        f"/// <summary>PY-188（2026-09-26 审计）：{name} 值域常量——schema enum/const 单源，"
+        "属性保持基础类型以兼容既有消费方。</summary>",
+        f"public static class {name}Values",
+        "{",
+    ]
+    for const_name, value, domain in entries:
+        suffix = f"  // {domain}" if domain else ""
+        lines.append(
+            f"    public const {_cs_literal_type(value)} {const_name} = {_cs_literal(value)};{suffix}")
+    lines.append("}")
+    return lines
 
 
 def cs_nullable(t: str) -> str:
@@ -108,6 +151,7 @@ def generate(schema: dict, name: str) -> str:
         else:
             lines.append(f"    {cs_nullable(t)} {pname} = null{suffix}")
     lines.append(");")
+    lines.extend(enum_constant_lines(schema, name))
     return "\n".join(lines)
 
 

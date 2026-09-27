@@ -52,7 +52,11 @@
       "properties": {
         "schema": { "const": 1 },
         "signature": { "const": "ed25519" },
-        "hash": { "const": "sha256" }
+        "hash": { "const": "sha256" },
+        "status": {
+          "enum": ["planned", "active"],
+          "description": "SP-146（审计 2026-09-26）：签名更新清单生产者（发布链生成+双 key 签名步骤）建成前为 planned——消除『有验证器无生产者』的假声明；生产者落地后改 active。"
+        }
       }
     }
   },

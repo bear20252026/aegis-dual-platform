@@ -3,7 +3,7 @@
 > 每次修复一个缺陷，必须：①在本表登记；②按缺陷归属在 `tests/ui-regression/`
 > 对应文件增加断言（WB-124，2026-09-26 审计——断言面已由单文件拆为多文件：
 > 页面结构/资源 → `start_page.test.mjs`；Host 适配层通用语义 →
-> `start_host.test.mjs`；导入桥契约 → `host_bridge.test.mjs`；主逻辑
+> `start_host.test.mjs`；导入桥契约 → `import_contract.test.mjs`；主逻辑
 > （壁纸/书签/恢复）→ `start_main.test.mjs`；导入向导 → `start_import.test.mjs`；
 > 贪吃蛇逻辑 → `shared/shell/snake.test.js`）；③CI `ui-regression` job
 > 自动纳入回归范围。

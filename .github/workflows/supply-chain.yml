@@ -27,7 +27,8 @@ jobs:
         # （contracts/agent-redteam/supply-chain 工具链，PY-178 建）全在
         # 依赖审计面之外。三份一并对账。
         run: |
-          python -m pip install "pip-audit==2.7.0"  # 审计工具自身锁版（供应链约束）
+          # PY-178 完整化：审计工具自身经 requirements-ci.txt hash 锁定安装
+          python -m pip install --require-hashes -r requirements-ci.txt -q
           pip-audit -r legacy/windows-pywebview/requirements-lock.txt
           pip-audit -r legacy/windows-pywebview/requirements-dev.txt || true  # dev 工具链漏洞仅告警——归档栈工具不随制品发布
           pip-audit -r requirements-ci.txt

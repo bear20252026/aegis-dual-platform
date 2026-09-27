@@ -4,7 +4,7 @@
 // WB-114（2026-09-26 审计）：归档 pywebview 栈的 'win' 桥分支已删除——
 // 三端判定收敛为 cs/android 双端，win 相关断言一并移除。
 // WB-127（2026-09-26 审计）：chrome 桩抽至 helpers.mjs 共享（与
-// host_bridge.test.mjs 单一事实源）。
+// import_contract.test.mjs 单一事实源）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadHost, makeCsBridge } from './helpers.mjs';
