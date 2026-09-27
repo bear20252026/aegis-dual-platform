@@ -26,6 +26,5 @@
 
 - `action-planner-contract.md`：ProposedAction 契约（planner 输出——经 broker）
 - `local-ipc/`：本地 IPC 身份/会话/撤销设计（identity.md/session.md/revocation.md）
-- `prompts/`：仅开发测试（不作为安全边界——蓝图）
 - `redteam/`：红队 fixtures（提示注入/工具投毒/重放竞态/资源预算——蓝图）
 - `tests/`：红队测试（断言拒绝——无未批准副作用——蓝图完成标准）

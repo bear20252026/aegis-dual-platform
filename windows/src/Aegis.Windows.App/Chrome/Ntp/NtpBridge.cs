@@ -2,6 +2,7 @@ namespace Aegis.Windows.Chrome.Ntp;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 
 /// <summary>新标签页宿主桥（M3——start.html Host 适配层的 C# 端实现）。
@@ -188,12 +189,16 @@ public sealed class NtpBridge
                 return ImportOutcome(_services.ImportBookmarks(ArgString(args, 0)));
             case "importHistory":
                 return ImportOutcome(_services.ImportHistory(
-                    ArgInt(args, 0, DefaultImportHistoryLimit) is { } limit
+                    ArgInt(args, 0) is { } limit
                         ? Math.Clamp(limit, 1, 2000)
                         : DefaultImportHistoryLimit,
                     ArgString(args, 1)));
             case "jsError":
-                Core.Security.SecurityLog.Write($"[ntp] 页面异常: {ArgString(args, 0) ?? "unknown"}");
+                // WB-038（审计 2026-09-23 清单·W5 批）：拼接全部字符串参数——
+                // 此前仅取 args[0]（message），堆栈（args[1..]）丢失不可追查
+                Core.Security.SecurityLog.Write(
+                    "[ntp] 页面异常: "
+                    + string.Join(" | ", ArgStrings(args).DefaultIfEmpty("unknown")));
                 return null;
             default:
                 return null;  // 未知操作 fail-closed 忽略
@@ -209,6 +214,16 @@ public sealed class NtpBridge
         return new { imported = outcome.Imported, total = outcome.Total, results };
     }
 
+    /// <summary>WB-038：按序提取全部字符串参数（message/堆栈等多段日志载荷）。</summary>
+    private static IEnumerable<string> ArgStrings(JsonElement args)
+    {
+        if (args.ValueKind != JsonValueKind.Array)
+            yield break;
+        foreach (var item in args.EnumerateArray())
+            if (item.ValueKind == JsonValueKind.String)
+                yield return item.GetString() ?? string.Empty;
+    }
+
     private static string? ArgString(JsonElement args, int index) =>
         args.ValueKind == JsonValueKind.Array
         && args.GetArrayLength() > index
@@ -216,13 +231,16 @@ public sealed class NtpBridge
             ? args[index].GetString()
             : null;
 
-    private static int? ArgInt(JsonElement args, int index, int fallback)
+    private static int? ArgInt(JsonElement args, int index)
     {
         if (args.ValueKind != JsonValueKind.Array || args.GetArrayLength() <= index)
             return null;
+        // WB-039（审计 2026-09-23 清单·W5 批）：失败语义统一 null——Number
+        // 溢出/NaN 此前回落 fallback 而 String 解析失败返回 null，两分支不一致；
+        // fallback 参数删除，由调用方统一施加（语义单点）。
         return args[index].ValueKind switch
         {
-            JsonValueKind.Number => args[index].TryGetInt32(out var value) ? value : fallback,
+            JsonValueKind.Number => args[index].TryGetInt32(out var value) ? value : null,
             JsonValueKind.String when int.TryParse(args[index].GetString(), out var parsed) => parsed,
             _ => null,
         };

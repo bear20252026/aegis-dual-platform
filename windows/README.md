@@ -8,8 +8,8 @@
 cd windows/src/Aegis.Windows.App
 dotnet build            # 调试构建
 dotnet run              # 本机运行
-dotnet test ../../tests/Aegis.Windows.Core.Tests      # 177 个核心测试
-dotnet test ../../tests/Aegis.Windows.Broker.Tests    # 29 个 broker 测试
+dotnet test ../../tests/Aegis.Windows.Core.Tests      # 核心测试套件全绿
+dotnet test ../../tests/Aegis.Windows.Broker.Tests    # broker 测试套件全绿
 ```
 
 ## 发布制品
