@@ -120,6 +120,30 @@ class WebViewHardeningTest {
         assertFalse("不得取源画布 2d 上下文（无上下文画布被永久锁定 2d）", js.contains("this.getContext"))
     }
 
+    // ---------------- AD-175/176（审计 2026-09-23 清单·A7 批） ----------------
+
+    @Test
+    fun canvasNoisePerturbsAllRgbChannels() {
+        // AD-175：原噪声只扰动 R 通道——G/B 逐像素原样返回，2/3 的读回信息
+        // 未覆盖（通道差分即可高置信还原）。三通道必须各有独立抖动写入。
+        val js = WebViewHardening.fingerprintShieldScript(testSeed)
+        assertTrue("R 通道抖动缺失", js.contains("imageData.data[i] +="))
+        assertTrue("G 通道抖动缺失（仅 R 通道混淆不充分）", js.contains("imageData.data[i + 1] +="))
+        assertTrue("B 通道抖动缺失（仅 R 通道混淆不充分）", js.contains("imageData.data[i + 2] +="))
+    }
+
+    @Test
+    fun letterboxGridConstantsStayDocumented() {
+        // AD-176：尺寸量化网格常量（WS/HS）必须保持注释固化的设计约束
+        // （跨属性/跨站点一致网格——变更为逐会话随机即引入可探测的分叉）
+        val js = WebViewHardening.fingerprintShieldScript(testSeed)
+        assertTrue("Letterbox 网格常量缺失", js.contains("var WS = 200, HS = 100;"))
+        assertTrue(
+            "网格步长必须保持设计约束注释（AD-176 固化理由）",
+            js.contains("尺寸量化网格步长"),
+        )
+    }
+
     // ---------------- AD-107/108（审计 2026-09-23 清单·A6 批） ----------------
 
     @Test

@@ -59,6 +59,11 @@ object SecureWebViewFactory {
         val webView = WebView(context)
         BrowserEngine(webView, onTitleObserved = { onTitleObserved(webView, it) }).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
+        // AD-181（审计 2026-09-23 清单·A7 批）：tabId 派生关系注释固化——
+        // tabId 由 sessionId 透传加固定前缀派生（session↔tab 为 1:1 绑定，
+        // 会话计数器是唯一编号源）。前缀的存在让两条标识在 Rust 核心
+        // 日志/存储中可按类型目视区分（tab-session-N 自带来源标记）；
+        // 不引入独立状态、不参与策略判定（对核心而言二者皆不透明）。
         val tabId = "tab-$sessionId"
         if (!broker.registerSession(sessionId, tabId)) {
             // fail-closed 前留根因线索（logcat -s AegisBroker；典型：

@@ -68,11 +68,10 @@ internal class WebViewEventAssembly(
             onNavigationDenied = { _, code, _ ->
                 // P0 修复（全量复审 2026-09-01）：顶层导航被拒不再静默——经
                 // webViewAlert 上抛 UI（此前用户只看到白屏/无反应）。
+                // AD-203（审计 2026-09-23 清单·A7 批）：deny code → 文案资源
+                // 映射抽 PageErrorTexts.denyAlertTextRes 单源（映射矩阵可 JVM 直测）。
                 host.submitWebViewAlert(
-                    when (code) {
-                        SESSION_EXPIRED_CODE -> host.errorStrings().text(R.string.session_expired)
-                        else -> host.errorStrings().text(R.string.nav_rejected_code, code)
-                    },
+                    host.errorStrings().text(PageErrorTexts.denyAlertTextRes(code)),
                 )
             },
             onPageUrlObserved = ::onPageUrlObserved,
@@ -112,6 +111,11 @@ internal class WebViewEventAssembly(
     /**
      * 标题回调处理体。P0 修复（全库审计 2026-09-02）：页面标题回填 Tab.title
      * ——经 TabManager.updateTitle（copy 替换实例）单写点。
+     *
+     * AD-172（审计 2026-09-23 清单·A7 批）：调试日志 DEBUG 门控——titleHit
+     * 留痕是排障用途（每页一条、含远端可控标题），release 下逐页打永久 info
+     * 属调试日志泄漏；经 BuildConfig.DEBUG 门控（release 编译期常量折叠，
+     * 日志语句整体消除）。
      */
     private fun onTitleObserved(
         webView: WebView,
@@ -120,12 +124,14 @@ internal class WebViewEventAssembly(
         val tm = host.activeTabManager ?: return
         if (title.isBlank()) return
         val target = tm.list().firstOrNull { it.webView === webView }
-        // AD-033（2026-09-24 审计）：页面标题是远端可控输入——换行可伪造多行
-        // 日志（logcat 注入），截断防日志洪泛（AD-103：净化收敛 LogSanitize 单源）。
-        android.util.Log.i(
-            "Aegis",
-            "R12 titleHit tab=${target?.id} title=${LogSanitize.flatten(title, TITLE_LOG_MAX_LENGTH)}",
-        )
+        if (BuildConfig.DEBUG) {
+            // AD-033（2026-09-24 审计）：页面标题是远端可控输入——换行可伪造多行
+            // 日志（logcat 注入），截断防日志洪泛（AD-103：净化收敛 LogSanitize 单源）。
+            android.util.Log.d(
+                "Aegis",
+                "R12 titleHit tab=${target?.id} title=${LogSanitize.flatten(title, TITLE_LOG_MAX_LENGTH)}",
+            )
+        }
         target?.let { tm.updateTitle(it.id, title) }
         host.refreshTabs()
     }
@@ -155,9 +161,6 @@ internal class WebViewEventAssembly(
     }
 
     private companion object {
-        /** broker deny code：原生会话过期（导航拒绝提示的分型文案）。 */
-        const val SESSION_EXPIRED_CODE = "session_expired"
-
         /** AD-033：日志用标题截断上限（防日志洪泛）。 */
         const val TITLE_LOG_MAX_LENGTH = 120
     }

@@ -39,6 +39,14 @@ data class PageError(
 /** 历史导航动作。 */
 enum class HistoryAction { BACK, FORWARD, RELOAD }
 
+/**
+ * AD-152（审计 2026-09-23 清单·A7 批）：标签栏布局位置枚举——ViewModel 与
+ * MainActivity 此前以魔法字符串 "top"/"left" 传递/比较布局态（typo 即静默
+ * 走默认分支，编译器无感知）。收敛为类型安全的枚举单源；视觉文案与
+ * 持久化（如未来落地）不再依赖裸字符串。
+ */
+enum class TabsPosition { TOP, LEFT }
+
 /** 装配点对「可空布尔」统一折叠为 false 的惯用收口（原 BrowserViewModel 文件私有）。 */
 internal fun Boolean?.orFalse(): Boolean = this ?: false
 

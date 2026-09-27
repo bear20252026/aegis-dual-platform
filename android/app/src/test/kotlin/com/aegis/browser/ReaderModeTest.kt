@@ -113,4 +113,29 @@ class ReaderModeTest {
         // 锁定脚本内嵌阈值 200，防误删/漂移
         assertTrue("提取脚本必须内嵌 MIN_TEXT=200 门槛", ReaderMode.EXTRACT_JS.contains("length >= 200"))
     }
+
+    // ---------------- AD-206（审计 2026-09-23 清单·A7 批）：候选扫描设限 ----------------
+
+    @Test
+    fun extractScriptCapsCandidateScan() {
+        // 候选块全量遍历（数千 div 逐个 innerText）会强制布局抖动——脚本必须
+        // 内嵌候选上限，超限节点不参与正文评选
+        assertTrue(
+            "提取脚本必须内嵌候选上限 MAX_CANDIDATES",
+            ReaderMode.EXTRACT_JS.contains("MAX_CANDIDATES = 400"),
+        )
+        assertTrue(
+            "扫描必须按上限截断（n = min(cand.length, MAX_CANDIDATES)）",
+            ReaderMode.EXTRACT_JS.contains("var n = cand.length < MAX_CANDIDATES"),
+        )
+    }
+
+    @Test
+    fun extractScriptExitsEarlyOnSufficientBody() {
+        // 提前退出：正文量已达 MAX_TEXT 的候选即最优，后续候选不得再扫描
+        assertTrue(
+            "必须内嵌「正文达标即停止扫描」的 break",
+            ReaderMode.EXTRACT_JS.contains("if (bestLen >= 200000) { break; }"),
+        )
+    }
 }

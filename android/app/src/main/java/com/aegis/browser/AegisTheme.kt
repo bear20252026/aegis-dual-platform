@@ -3,6 +3,7 @@ package com.aegis.browser
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -32,29 +33,35 @@ val aegisFontFamily: FontFamily =
  * title/bodyLarge/labelLarge 等）回落 Material3 默认 FontFamily（系统字体），
  * 使用这些档位的组件（如 titleMedium 的错误面板标题）字体族不统一。
  * 以默认 Typography 为基底逐档 copy 换字体——字号/字重沿用 M3 默认不变形。
+ *
+ * AD-153（审计 2026-09-23 清单·A7 批）：chrome 语义色板经
+ * [LocalAegisChromeColors] 在此统一装配（原始色值来自 colors.xml 单源，
+ * 见 [aegisChromeColors]）——全部 UI 组件经主题取色，不再各自持裸色值。
  */
 @Composable
 fun AegisTheme(content: @Composable () -> Unit) {
     val base = Typography()
-    MaterialTheme(
-        typography =
-            Typography(
-                displayLarge = base.displayLarge.copy(fontFamily = aegisFontFamily),
-                displayMedium = base.displayMedium.copy(fontFamily = aegisFontFamily),
-                displaySmall = base.displaySmall.copy(fontFamily = aegisFontFamily),
-                headlineLarge = base.headlineLarge.copy(fontFamily = aegisFontFamily),
-                headlineMedium = base.headlineMedium.copy(fontFamily = aegisFontFamily),
-                headlineSmall = base.headlineSmall.copy(fontFamily = aegisFontFamily),
-                titleLarge = base.titleLarge.copy(fontFamily = aegisFontFamily),
-                titleMedium = base.titleMedium.copy(fontFamily = aegisFontFamily),
-                titleSmall = base.titleSmall.copy(fontFamily = aegisFontFamily),
-                bodyLarge = base.bodyLarge.copy(fontFamily = aegisFontFamily),
-                bodyMedium = base.bodyMedium.copy(fontFamily = aegisFontFamily),
-                bodySmall = base.bodySmall.copy(fontFamily = aegisFontFamily),
-                labelLarge = base.labelLarge.copy(fontFamily = aegisFontFamily),
-                labelMedium = base.labelMedium.copy(fontFamily = aegisFontFamily),
-                labelSmall = base.labelSmall.copy(fontFamily = aegisFontFamily),
-            ),
-        content = content,
-    )
+    CompositionLocalProvider(LocalAegisChromeColors provides aegisChromeColors()) {
+        MaterialTheme(
+            typography =
+                Typography(
+                    displayLarge = base.displayLarge.copy(fontFamily = aegisFontFamily),
+                    displayMedium = base.displayMedium.copy(fontFamily = aegisFontFamily),
+                    displaySmall = base.displaySmall.copy(fontFamily = aegisFontFamily),
+                    headlineLarge = base.headlineLarge.copy(fontFamily = aegisFontFamily),
+                    headlineMedium = base.headlineMedium.copy(fontFamily = aegisFontFamily),
+                    headlineSmall = base.headlineSmall.copy(fontFamily = aegisFontFamily),
+                    titleLarge = base.titleLarge.copy(fontFamily = aegisFontFamily),
+                    titleMedium = base.titleMedium.copy(fontFamily = aegisFontFamily),
+                    titleSmall = base.titleSmall.copy(fontFamily = aegisFontFamily),
+                    bodyLarge = base.bodyLarge.copy(fontFamily = aegisFontFamily),
+                    bodyMedium = base.bodyMedium.copy(fontFamily = aegisFontFamily),
+                    bodySmall = base.bodySmall.copy(fontFamily = aegisFontFamily),
+                    labelLarge = base.labelLarge.copy(fontFamily = aegisFontFamily),
+                    labelMedium = base.labelMedium.copy(fontFamily = aegisFontFamily),
+                    labelSmall = base.labelSmall.copy(fontFamily = aegisFontFamily),
+                ),
+            content = content,
+        )
+    }
 }

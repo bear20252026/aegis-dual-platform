@@ -97,6 +97,12 @@ dependencies {
     // com.sun.jna.internal.** keep 规则已在位（5.13+ 内部包路径）。
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     // A-2 接线：契约对齐守卫测试需要对照生成物 ActionContract 的字段面
+    // AD-186（审计 2026-09-23 清单·A7 批）：test 接线评估收口——
+    // ① :contracts 测试接线已在位（本行，ContractAlignmentTest 消费）；
+    // ② :webview-adapter 的 broker→adapter 测试接线不可行：webview-adapter
+    //    主源集依赖 :broker，broker 测试源集再依赖回 :webview-adapter 即
+    //    构成项目依赖环（Gradle 直接拒绝解析）——保留现状（adapter 侧行为
+    //    的回归由 webview-adapter 自身测试面对 broker 类型 mock 覆盖）。
     testImplementation(project(":contracts"))
     testImplementation(libs.junit)
     testImplementation(libs.org.json)

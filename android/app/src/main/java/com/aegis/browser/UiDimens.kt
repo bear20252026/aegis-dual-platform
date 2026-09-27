@@ -1,7 +1,7 @@
 package com.aegis.browser
 
 /**
- * 布局尺寸常量表（单文件单职责，与 [UiColors] 同口径）。
+ * 布局尺寸常量表（单文件单职责，与 [AegisChromeColors] 同口径）。
  *
  * AD-078/090（2026-09-26 审计）：MainActivity 散落的 dp 魔法数收敛为命名
  * 常量——数值含义见名即知，统一调整时不必逐处追字面量。取值均为既有

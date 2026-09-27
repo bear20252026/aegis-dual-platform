@@ -1,5 +1,9 @@
 import java.util.Properties
 
+// ============================================================================
+// 分区 1：插件与工具链（AD-208：构建脚本分区显式化）
+// ============================================================================
+
 plugins {
     id("com.android.application")
     // AGP 9.0+ 内置 Kotlin 支持：org.jetbrains.kotlin.android 不再需要（官方迁移指引）
@@ -28,6 +32,10 @@ detekt {
     // （JvmTarget/String 均脚本编译错误）——已移除——Kotlin 编译目标 21 由
     // compileOptions + compilerOptions 设置（detekt 跟随——远端 JDK 21 一致）
 }
+
+// ============================================================================
+// 分区 2：版本与签名单源（shared/version.properties / signing.properties / 环境变量）
+// ============================================================================
 
 val signingProperties = Properties()
 val signingPropertiesFile = rootProject.file("signing.properties")
@@ -61,9 +69,27 @@ val requireNativePolicyCore =
         .map { it == "true" }
         .getOrElse(false)
 
+// ============================================================================
+// 分区 3：Android 模块配置（defaultConfig → 签名 → buildTypes → 打包/资源/测试）
+// ============================================================================
+
 android {
     namespace = "com.aegis.browser"
     compileSdk = 36
+
+    // AD-156（审计 2026-09-23 清单·A7 批）：lint 配置显式化——此前本脚本无
+    // lint 块，行为完全依赖默认值（关键开关对读者不可见，门禁语义隐式）。
+    // 现显式声明与门禁一致的行为（当前均为 AGP 默认值，落地后默认值漂移
+    // 会被此处捕获——显式即契约）。
+    lint {
+        // 门禁 fail-closed：lintDebug 报告 error 即构建失败（CI 门禁任务依赖此语义）
+        abortOnError = true
+        // 文本报告：门禁日志直接可读（xml 报告保留默认，供工具消费）
+        textReport = true
+        // release 构建同步跑 lint（防绕过：单独 release 流水线不得跳过检查）
+        checkReleaseBuilds = true
+    }
+
     // detekt 兼容修复（ktlint/detekt 门禁）：显式 jvmTarget 21——本地/CI
     // JDK 25 运行时 detekt 的 --jvm-target 25 无效（detekt 仅支持 ≤22）——
     // 锁定 21 与远端 android-quality（JDK 21）一致
@@ -78,7 +104,7 @@ android {
         applicationId = "com.aegis.browser"
         minSdk = 26
         targetSdk = 36
-        // AD-100：单源读取 shared/version.properties（见文件头 val 声明处）
+        // AD-100：单源读取 shared/version.properties（见分区 2）
         versionCode = versionCodeFromProperties
         versionName = versionNameFromProperties
         // AD-067：androidTest 冒烟集运行器
@@ -158,7 +184,6 @@ android {
         }
     }
 
-    // AGP 9 默认关闭 BuildConfig 生成；BrowserEngine 依赖 BuildConfig.DEBUG
     sourceSets {
         // 首页资源单一事实源（ADR-007）：shared/shell（start.html + wallpapers）
         // 与 Windows 端（PyInstaller datas）共用同一目录——一处修改两端生效
@@ -186,8 +211,9 @@ android {
     }
 }
 
-// AGP 9.0+ 内置 Kotlin：不再需要 kotlin { jvmToolchain() } 块
-// （Kotlin 编译由 AGP 管理，使用运行 Gradle 的 JDK；已移除旧配置）
+// ============================================================================
+// 分区 4：依赖（AD-208：坐标一律经 catalog 单源；字面量仅存Gradle 限制豁免）
+// ============================================================================
 
 dependencies {
     // AD-068：Compose BOM 经 version catalog 单源（版本登记于 libs.versions.toml）
@@ -200,14 +226,20 @@ dependencies {
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.ext.junit)
     implementation(libs.androidx.activity.compose)
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    // AD-154（审计 2026-09-23 清单·A7 批）：Compose 制品坐标入 catalog
+    // （版本由上方 compose-bom 单源裁决，catalog 条目不带版本）
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.webview)
-    debugImplementation("androidx.compose.ui:ui-tooling")
-    // JVM 单元测试（搜索归一 classifyInput/canonicalizeExternal——纯 Kotlin +
-    // OriginPolicy(java.net.URI) 均不依赖 Android 框架类）
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    // —— 测试栈（AD-185，审计 2026-09-23 清单·A7 批：评估记录）——
+    // 「仅 junit」在 A2/A5 批已扩为：junit + mockito 5（final 类 inline mock）
+    // + robolectric + androidx.test.core；共享桩/夹具收敛在测试源集
+    // （WebViewEventAssembly 宿主桩、BrokerStub 等，随各测试文件共用）。
+    // 未再引入第三方断言库（Truth/assertj）：存量 21 个测试文件统一
+    // org.junit.Assert 口径，混入第二套断言 API 属碎片化而非补强。
     testImplementation(libs.junit)
     // AD-022 配套：navigatorFor 未注册路径需 WebView 键实例——mockito 5 inline mock
     testImplementation(libs.mockito.core)
@@ -218,6 +250,10 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
 }
+
+// ============================================================================
+// 分区 5：编译目标（JDK 21 锁定——detekt/CI 对齐）
+// ============================================================================
 
 // detekt/Kotlin 编译目标显式 21（与 CI JDK 21 一致——detekt jvm-target 兼容——
 // AGP 9 内置 Kotlin 不支持 android 块内 kotlinOptions（脚本编译失败）——

@@ -69,6 +69,8 @@ internal fun AddressBarRow(
         horizontalArrangement = Arrangement.spacedBy(UiDimens.SPACING_SMALL.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        // AD-153（审计 2026-09-23 清单·A7 批）：语义色板经主题取色
+        val chrome = LocalAegisChromeColors.current
         ChromeIconButton(stringResource(R.string.cd_back), "←", canGoBack, onBack)
         ChromeIconButton(stringResource(R.string.cd_forward), "→", canGoForward, onForward)
         ChromeIconButton(stringResource(R.string.cd_reload), "⟳", true, onReload)
@@ -79,14 +81,14 @@ internal fun AddressBarRow(
             onValueChange = onAddressChange,
             modifier = Modifier.weight(1f),
             singleLine = true,
-            placeholder = { Text(stringResource(R.string.address_placeholder), color = TextSecondary) },
+            placeholder = { Text(stringResource(R.string.address_placeholder), color = chrome.textSecondary) },
             shape = CircleShape,
             colors =
                 OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = FieldBorderFocused,
-                    unfocusedBorderColor = FieldBorderIdle,
-                    focusedContainerColor = FieldBackground,
-                    unfocusedContainerColor = FieldBackground,
+                    focusedBorderColor = chrome.fieldBorderFocused,
+                    unfocusedBorderColor = chrome.fieldBorderIdle,
+                    focusedContainerColor = chrome.fieldBackground,
+                    unfocusedContainerColor = chrome.fieldBackground,
                     cursorColor = Color.White,
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White,
@@ -106,7 +108,7 @@ internal fun AddressBarRow(
                 ) {
                     Text(
                         text = stringResource(R.string.address_open),
-                        color = TextSecondary,
+                        color = chrome.textSecondary,
                         style = MaterialTheme.typography.labelSmall,
                         modifier = Modifier.padding(end = UiDimens.SPACING_SMALL.dp),
                     )
@@ -126,6 +128,8 @@ internal fun AddressBarRow(
  *
  * AD-222（2026-09-26 审计）：语义无条件挂载——禁用控件对 TalkBack 不再静默。
  *
+ * AD-153：底色经语义色板（buttonOverlay）取色。
+ *
  * Composable 命名按 UI 惯例 PascalCase（与 [TabChipCore] 同口径）。
  */
 @Suppress("FunctionNaming")
@@ -140,7 +144,7 @@ internal fun ChromeIconButton(
         onClick = onClick,
         enabled = enabled,
         shape = CircleShape,
-        color = ButtonOverlay,
+        color = LocalAegisChromeColors.current.buttonOverlay,
         modifier =
             Modifier
                 .semantics { this.contentDescription = contentDescription }

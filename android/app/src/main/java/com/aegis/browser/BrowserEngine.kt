@@ -19,6 +19,17 @@ class BrowserEngine(
         private const val TEXT_ZOOM_DEFAULT = 100
 
         /**
+         * AD-195（审计 2026-09-23 清单·A7 批）：CookieManager 单例持有一次
+         * ——configure() 每建一个标签都 `CookieManager.getInstance()` 重复
+         * 取单例（每次调用经框架的进程级查找）。lazy 驻留后整个进程只解析
+         * 一次；lazy（而非 companion 静态字段直初始化）保证 JVM 单测不触发
+         * Android 框架类加载（仅 configure() 真正调用时才解析）。
+         */
+        private val cookieManager: android.webkit.CookieManager by lazy {
+            android.webkit.CookieManager.getInstance()
+        }
+
+        /**
          * 只规范化远程 URL；实际外部导航必须由 SecureNavigator 经 Broker 执行。
          *
          * A-3 修复（架构审计 2026-08-31）：原自带的 isAllowed 是全项目最弱的
@@ -99,15 +110,18 @@ class BrowserEngine(
                     // P0 修复（全库审计 2026-09-02）：标题此前仅打日志——Tab.title
                     // 全工程无回填点，标签栏永远显示「新标签页」。经工厂回调单路径
                     // 上抛 ViewModel（对齐 onPageUrlObserved 同一接线模式）。
+                    // AD-171（审计 2026-09-23 清单·A7 批）：本处原还有一条
+                    // `Log.i("R12 title: …")`——远端可控标题逐页打永久 info
+                    // （死回调噪声），且 WebViewEventAssembly.onTitleObserved
+                    // 已有净化截断的 titleHit 日志（DEBUG 门控，AD-172）——
+                    // 本行纯属重复留痕，随批移除。
                     val safeTitle = title?.take(MAX_TITLE_LENGTH).orEmpty()
-                    android.util.Log.i("Aegis", "R12 title: $safeTitle")
                     onTitleObserved(safeTitle)
                 }
             }
         // A-03 整改（国防级审查）：默认限制第三方 Cookie（WebView 默认
-        // 接受——审查要求显式限制，防跨站追踪）
-        android.webkit.CookieManager
-            .getInstance()
-            .setAcceptThirdPartyCookies(webView, false)
+        // 接受——审查要求显式限制，防跨站追踪）。
+        // AD-195：单例经 companion 持有（进程内一次解析）。
+        cookieManager.setAcceptThirdPartyCookies(webView, false)
     }
 }

@@ -229,7 +229,16 @@ window.__AEGIS_PROTECTION_VERSION = '1';
       octx.drawImage(this, 0, 0);
       const imageData = octx.getImageData(0, 0, off.width, off.height);
       const seed = parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16);
-      for (let i = 0; i < imageData.data.length; i += 4) { imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1; }
+      // AD-175（审计 2026-09-23 清单·A7 批）：多通道混淆——原噪声只扰动
+      // R 通道（stride 4 的第 0 字节），G/B 通道逐像素原样返回：canvas
+      // 读回值 2/3 的信息量未被覆盖，页面按通道差分即可高置信还原原图/
+      // 检测防护存在性。现 R/G/B 三通道以不同相位（+i/seed、+i/seed+1、
+      // +i/seed+2）各自 ±1 抖动（alpha 不动——不破坏合成透明度）。
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        imageData.data[i] += ((seed + i) % 2 === 0 ? 1 : -1);
+        imageData.data[i + 1] += ((seed + i + 1) % 2 === 0 ? 1 : -1);
+        imageData.data[i + 2] += ((seed + i + 2) % 2 === 0 ? 1 : -1);
+      }
       octx.putImageData(imageData, 0, 0);
       return origToDataURL.apply(off, arguments);
     } catch (e) {
@@ -252,6 +261,13 @@ window.__AEGIS_PROTECTION_VERSION = '1';
 
 // === Stage 4: LetterboxShield（参照 Mullvad/Tor Browser MPL-2.0）===
 (function() {
+  // AD-176（审计 2026-09-23 清单·A7 批）：尺寸冻结网格常量注释固化——
+  // WS/HS 是「尺寸量化网格步长」（屏幕/窗口尺寸向下取整到 200×100 的
+  // 网格点）：常量而非逐会话随机，是因为同一页面内 screen.width 与
+  // innerWidth 必须落在同一网格（跨属性不一致本身就是高置信探测信号）；
+  // 固定步长还保证多标签/多站点同尺寸设备呈现一致的量化结果
+  // （Brave/Tor 同款取值——200 为移动端屏宽最小区分粒度，100 匹配
+  // 竖屏窗口高度惯用间隔）。变更需同步评估上述一致性约束。
   var WS = 200, HS = 100;
   function roundTo(v, s) { return Math.max(s, Math.round(v / s) * s); }
   try {

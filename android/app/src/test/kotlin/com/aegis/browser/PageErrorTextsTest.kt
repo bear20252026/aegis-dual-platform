@@ -83,4 +83,18 @@ class PageErrorTextsTest {
         val rendered = PageErrorTexts.textFor("future_code", "原样透传", fake)
         assertEquals("原样透传", rendered)
     }
+
+    // ---------------- AD-203（审计 2026-09-23 清单·A7 批）：deny code 映射表 ----------------
+
+    @Test
+    fun sessionExpiredDenyCodeMapsToDedicatedResource() {
+        assertEquals(R.string.session_expired, PageErrorTexts.denyAlertTextRes("session_expired"))
+    }
+
+    @Test
+    fun unknownDenyCodesFallBackToPolicyRejectedResource() {
+        assertEquals(R.string.nav_rejected_code, PageErrorTexts.denyAlertTextRes("url_policy"))
+        assertEquals(R.string.nav_rejected_code, PageErrorTexts.denyAlertTextRes("tab_mismatch"))
+        assertEquals(R.string.nav_rejected_code, PageErrorTexts.denyAlertTextRes("future_native_code"))
+    }
 }

@@ -2,7 +2,6 @@ package com.aegis.browser
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -14,16 +13,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /**
@@ -62,7 +55,7 @@ fun VerticalTabBar(
             modifier
                 .width(180.dp)
                 .fillMaxHeight()
-                .background(ToolbarBackground),
+                .background(LocalAegisChromeColors.current.toolbarBackground),
     ) {
         val listState = rememberLazyListState()
         // AD-223（2026-09-26 审计）：激活标签滚动对齐——AD-086 只给横向
@@ -88,23 +81,17 @@ fun VerticalTabBar(
                 )
             }
         }
-        val newTabDescription = stringResource(R.string.cd_new_tab)
-        Surface(
-            onClick = onNewTab,
+        // AD-174（审计 2026-09-23 清单·A7 批）：新建控件单源 NewTabButton
+        // （骨架/底色/语义与 TabBar 共用，差异仅形状/尺寸/文案）
+        NewTabButton(
+            label = "+ ${stringResource(R.string.cd_new_tab)}",
             shape = MaterialTheme.shapes.small,
-            color = ButtonOverlay,
-            // AD-044 同口径：「+ 新建标签」补语义
             modifier =
                 Modifier
                     .fillMaxWidth()
                     .padding(6.dp)
-                    .height(36.dp)
-                    .semantics { contentDescription = newTabDescription },
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                val label = "+ ${stringResource(R.string.cd_new_tab)}"
-                Text(text = label, color = Color.White, style = MaterialTheme.typography.bodyMedium)
-            }
-        }
+                    .height(36.dp),
+            onNewTab = onNewTab,
+        )
     }
 }

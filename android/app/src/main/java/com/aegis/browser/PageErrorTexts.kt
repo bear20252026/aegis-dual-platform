@@ -75,4 +75,20 @@ internal object PageErrorTexts {
             WebViewClient.ERROR_UNSUPPORTED_SCHEME -> strings.text(R.string.err_name_unsupported_scheme)
             else -> description.ifBlank { strings.text(R.string.err_name_fallback) }
         }
+
+    /** broker deny code：原生会话过期（导航拒绝提示的分型文案）。 */
+    private const val DENY_CODE_SESSION_EXPIRED = "session_expired"
+
+    /**
+     * AD-203（审计 2026-09-23 清单·A7 批）：broker deny code → 安全提示
+     * 文案资源映射单源——原映射 when 内嵌在 WebViewEventAssembly 装配点
+     * （文案映射与事件装配耦合，矩阵漂移无测试锚点）。收敛到本对象后
+     * 与 [textFor]（页面错误码映射）同文件同风格，未识别 deny code
+     * 统一回落「策略拒绝（code）」文案。
+     */
+    fun denyAlertTextRes(code: String): Int =
+        when (code) {
+            DENY_CODE_SESSION_EXPIRED -> R.string.session_expired
+            else -> R.string.nav_rejected_code
+        }
 }

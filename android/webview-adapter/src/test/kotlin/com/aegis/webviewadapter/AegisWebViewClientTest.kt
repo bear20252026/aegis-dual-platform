@@ -449,4 +449,71 @@ class AegisWebViewClientTest {
         client.onReceivedHttpError(view, fakeRequest("https://example.com/x", isMainFrame = true), response)
         assertTrue(errors.isEmpty())
     }
+
+    // ------------------------------------------------------------- AD-177
+    @Test
+    fun newTopNavigationWhilePendingRejectsOldNonce() {
+        // 待审批确认框打开期间的新顶层导航：必须先显式撤销旧 nonce（核心侧
+        // 的 pending 不得孤儿化），再对新 URL 重新走确认流程——旧实现直接
+        // return false（新导航被静默吞掉）。锁定「撤销旧 → 登记新」两步。
+        val oldRequest = approvalRequest()
+        val newRequest =
+            com.aegis.broker.ApprovalRequest(
+                origin = "https://other.example",
+                method = "GET",
+                path = "/new",
+                scope = "navigation",
+                expiresAt = Clock.System.now().plus(kotlin.time.Duration.parse("60s")),
+                nonce = "new-nonce",
+            )
+        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(Decision.RequireConfirmation(oldRequest))
+        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://other.example/new", "navigation"))
+            .thenReturn(Decision.RequireConfirmation(newRequest))
+        val requestedOrigins = mutableListOf<String>()
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                requireNavigationConfirmation = true,
+                onNavigationConfirmationRequested = { requestedOrigins.add(it.origin) },
+                onNavigationDenied = { code, _ -> deniedCodes.add(code) },
+            )
+        // 第一次导航：登记 pending #1
+        assertFalse(client.navigate(view, "https://example.com/"))
+        // 第二次导航：旧 nonce 被显式撤销 + 新请求登记
+        assertFalse(client.navigate(view, "https://other.example/new"))
+        verify(broker, times(1)).rejectNavigationConfirmation(oldRequest)
+        assertEquals(listOf("https://example.com", "https://other.example"), requestedOrigins)
+        // 旧请求被撤销后不得再被批准兑换
+        verify(broker, never()).approveNavigationConfirmation(oldRequest, "https://example.com/", "navigation")
+    }
+
+    // ------------------------------------------------------------- AD-201
+    @Test
+    fun generationAdvanceFailureRollsBackLocalCounter() {
+        // 核心拒绝代际推进（未注册/陈旧会话）时本地自增必须回滚——否则本地
+        // 代际与核心永久分叉，此后每次单步推进都被拒。锁定：两次页面启动
+        // 各自都以「同一目标代际」尝试（本地从未超前）。
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(false)
+        val client = newClient()
+        client.onPageStarted(view, "https://example.com/first", null)
+        client.onPageStarted(view, "https://example.com/second", null)
+        // 两次尝试都是 +1（第二次若未回滚会尝试 +2 并被单步门禁拒绝）
+        verify(broker, times(2)).updateDocumentGeneration(SESSION, TAB, 1L)
+    }
+
+    @Test
+    fun renderProcessGoneFailureAlsoRollsBackLocalCounter() {
+        val client = newClient(onRendererGone = {})
+        val detail = mock(RenderProcessGoneDetail::class.java)
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(false)
+        assertTrue(client.onRenderProcessGone(view, detail))
+        // 回滚后重复的崩溃路径仍以 +1 重试（不得分叉）
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(true)
+        assertTrue(client.onRenderProcessGone(view, detail))
+        verify(broker, times(2)).updateDocumentGeneration(SESSION, TAB, 1L)
+    }
 }

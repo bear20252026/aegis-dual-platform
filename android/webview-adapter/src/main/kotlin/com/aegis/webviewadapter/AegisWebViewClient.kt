@@ -85,6 +85,11 @@ class AegisWebViewClient(
         // 密集页开销显著）。Deny → 阻断留痕；Allow → 放行原始加载（不消费
         // 顶层授权对象）；RequireConfirmation 无子框架确认 UI 面——fail-closed
         // 阻断。
+        // AD-178（审计 2026-09-23 清单·A7 批）：会话续期仅主框架——本分支
+        // 有意不调 renewSessionBeforeDecision：①iframe 密集页逐导航续期会把
+        // 「滑动 TTL」放大成常态性 JNI 重注册；②子框架导航不表达「用户仍在
+        // 活跃浏览」的顶层语义（无主框架事件的页面不该被子框架保活）。
+        // 主框架路径的续期见 authorizeNavigation。
         val subFrameUrl = upgradeToHttpsIfNeeded(requestedUrl)
         return when (
             val decision =
@@ -284,8 +289,15 @@ class AegisWebViewClient(
         detail: android.webkit.RenderProcessGoneDetail,
     ): Boolean {
         rejectPendingNavigation()
+        // AD-201（审计 2026-09-23 清单·A7 批）：代际推进失败回滚自增——
+        // 原实现本地自增先行、核心同步失败不回滚，本地代际与核心永久分叉
+        // （此后每次推进都差一步、全部被单步门禁拒绝）。失败即回滚，
+        // 保持「本地代际 == 核心已确认代际」不变式（重试可从原值再推进）。
         documentGeneration += 1
-        broker.updateDocumentGeneration(sessionId, tabId, documentGeneration)
+        if (!broker.updateDocumentGeneration(sessionId, tabId, documentGeneration)) {
+            documentGeneration -= 1
+            android.util.Log.e("AegisWebView", "渲染进程崩溃后代际推进被拒（会话未注册/陈旧）")
+        }
         onRendererGone(view)
         return true
     }
@@ -295,8 +307,10 @@ class AegisWebViewClient(
         url: String?,
         favicon: android.graphics.Bitmap?,
     ) {
+        // AD-201：同 onRenderProcessGone——同步失败回滚本地自增，消除分叉。
         documentGeneration += 1
         if (!broker.updateDocumentGeneration(sessionId, tabId, documentGeneration)) {
+            documentGeneration -= 1
             android.util.Log.e("Aegis", "未注册或陈旧会话尝试加载页面；已停止加载")
             view.stopLoading()
         }

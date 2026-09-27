@@ -61,4 +61,55 @@ class ContractAlignmentTest {
                 .startsWith("com.aegis.contracts.generated"),
         )
     }
+
+    // ---------------- AD-210（审计 2026-09-23 清单·A7 批）：双形态转换单源 ----------------
+
+    /** 样本契约生成物（字段面取 ActionContract 生成器现状）。 */
+    private fun originalSampleContract(): com.aegis.contracts.generated.ActionContract =
+        com.aegis.contracts.generated.ActionContract(
+            session_id = "s",
+            tab_id = "t",
+            document_generation = 0L,
+            origin = "https://example.com",
+            method = "GET",
+            canonical_parameters = "/",
+            scope = "navigation",
+            expires_at = "2026-09-27T00:00:00Z",
+            nonce = "n",
+            policy_version = "1.0",
+        )
+
+    @Test
+    fun `authorized action converts to contract and back losslessly`() {
+        // 转换扩展（ActionContractConversions.kt 单源）必须无损往返：
+        // expires_at 经 ISO-8601 字符串对偶（Instant.toString/parse），
+        // explanation 为契约外扩展字段——正向丢弃、反向以参数补回
+        val original =
+            AuthorizedAction(
+                sessionId = "session-x",
+                tabId = "tab-x",
+                documentGeneration = 7L,
+                origin = "https://example.com",
+                method = "GET",
+                canonicalParameters = "/p?x=1",
+                scope = "navigation",
+                expiresAt = kotlinx.datetime.Instant.fromEpochSeconds(1_700_000_123),
+                nonce = "session-x:abc123",
+                policyVersion = "1.0",
+                explanation = "audit trail",
+            )
+        val contract = original.toActionContract()
+        assertEquals(original.expiresAt.toString(), contract.expires_at)
+        val roundTrip = contract.toAuthorizedAction(explanation = original.explanation)
+        assertEquals(original, roundTrip)
+    }
+
+    @Test
+    fun `contract to authorized action rejects non iso instant strings`() {
+        // 转换单源承担编码契约守护：非 ISO-8601 的 expires_at 必须显式失败
+        // （fail-fast 优于静默产生畸形 Instant 的下游语义漂移）
+        val broken = originalSampleContract().copy(expires_at = "not-a-timestamp")
+        val exception = runCatching { broken.toAuthorizedAction() }.exceptionOrNull()
+        assertTrue(exception is IllegalArgumentException)
+    }
 }

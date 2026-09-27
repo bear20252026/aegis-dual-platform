@@ -7,8 +7,10 @@
     <style name="Theme.Aegis" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
         <item name="android:colorAccent">@color/theme_accent</item>
-        <item name="android:navigationBarColor">@color/chrome_status_bar</item>
-        <item name="android:statusBarColor">@color/chrome_status_bar</item>
+        <!-- AD-187（审计 2026-09-23 清单·A7 批）：引 chrome_background 单源
+             （原 chrome_status_bar 为同值重复定义，已并入色板单源表） -->
+        <item name="android:navigationBarColor">@color/chrome_background</item>
+        <item name="android:statusBarColor">@color/chrome_background</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

@@ -38,4 +38,23 @@ class AegisHomeBridgeTest {
         val payload = JSONObject(AegisHomeBridge.buildEngineJson("sogou"))
         assertEquals("sogou", payload.getString("engine"))
     }
+
+    // ---------------- AD-191（审计 2026-09-23 清单·A7 批）：引擎数组静态缓存 ----------------
+
+    @Test
+    fun engineJsonIsDeterministicAcrossCalls() {
+        // 缓存实现不得引入输出漂移：同一 current 多次调用逐字节一致
+        val first = AegisHomeBridge.buildEngineJson("bing")
+        val second = AegisHomeBridge.buildEngineJson("bing")
+        assertEquals(first, second)
+    }
+
+    @Test
+    fun engineJsonEscapesAbnormalCurrentEngineValue() {
+        // 缓存拼接路径的注入守护：engine 键经 JSON 字符串转义（quote）——
+        // 即便偏好文件被写入异常值，产出也必须是合法 JSON
+        val payload = JSONObject(AegisHomeBridge.buildEngineJson("bad\"key\\value"))
+        assertEquals("bad\"key\\value", payload.getString("engine"))
+        assertEquals(SearchEngines.ENGINE_URLS.size, payload.getJSONArray("engines").length())
+    }
 }

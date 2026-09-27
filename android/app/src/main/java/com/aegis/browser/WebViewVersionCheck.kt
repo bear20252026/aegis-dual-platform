@@ -74,20 +74,51 @@ object WebViewVersionCheck {
         }
     }
 
-    /** 跳转 WebView 更新入口（Play Store 详情页；失败静默）。 */
-    fun openUpdate(context: Context) {
-        try {
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$WEBVIEW_PKG")),
-            )
-        } catch (_: Exception) {
+    /**
+     * AD-205（审计 2026-09-23 清单·A7 批）：更新入口双跳转链路抽纯函数单源
+     * ——候选 Intent 列表显式化：①Play Store 详情页（market://，安装了
+     * 商店的设备首选）；②Web 兜底（https://play.google.com/…，无商店/
+     * 商店解析失败时经浏览器打开）。链路次序即契约，openUpdate 按序尝试。
+     * （Robolectric 下断言两个候选的 action/uri 与次序——原双跳转零测试。）
+     */
+    internal fun updateIntents(): List<Intent> =
+        listOf(
+            Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$WEBVIEW_PKG")),
+            Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$WEBVIEW_PKG")),
+        )
+
+    /**
+     * 跳转 WebView 更新入口（Play Store 详情页 → Web 兜底）。
+     *
+     * AD-204（审计 2026-09-23 清单·A7 批）：返回受理结果供失败降级——原实现
+     * 两级 try/catch 全部静默吞掉（无商店且无浏览器的设备上点「去更新」
+     * 毫无反馈，用户无从得知降级链路已走到尽头）。现逐候选尝试并返回
+     * 是否成功发起跳转；调用方（MainActivity）失败时回填提示文案。
+     *
+     * [startActivity] 参数为跳转动作的注入接缝（默认 Context.startActivity）
+     * ——失败/成功路径均可离线单测（WebViewVersionCheckTest），无需真机
+     * 构造「双候选皆不可解析」的环境。
+     */
+    fun openUpdate(
+        context: Context,
+        startActivity: (Intent) -> Unit = context::startActivity,
+    ): Boolean {
+        // 可预见的跳转失败集：无候选解析（ActivityNotFoundException——无商店/
+        // 无浏览器）与系统拒绝（SecurityException）。不吞一切异常：其它异常
+        // 类型属非预期状态，应当面暴露而非折叠成「无法更新」。
+        var lastError: Exception? = null
+        for (intent in updateIntents()) {
             try {
-                context.startActivity(
-                    Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$WEBVIEW_PKG")),
-                )
-            } catch (_: Exception) {
-                // 静默：无法打开更新入口不影响浏览
+                startActivity(intent)
+                return true
+            } catch (e: android.content.ActivityNotFoundException) {
+                lastError = e
+            } catch (e: SecurityException) {
+                lastError = e
             }
         }
+        // 全部候选失败：留痕后交由调用方降级（不再静默——AD-204）
+        android.util.Log.w("Aegis", "WebView 更新入口全部跳转失败: ${lastError?.javaClass?.simpleName}")
+        return false
     }
 }

@@ -241,4 +241,63 @@ class SearchEnginesTest {
             assertTrue("显示名不得为空: $key", name.isNotBlank())
         }
     }
+
+    // ---------- AD-166（审计 2026-09-23 清单·A7 批）：scheme 字符集边界 ----------
+
+    @Test
+    fun `scheme charset sub-delims classify as forbidden`() {
+        // RFC 3986 scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+        // 含 + - 的合法 scheme 形态可被识别；非 http/https 一律 fail-closed
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("my+app://x"))
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("my-app://x"))
+        // 含点的 prefix 必为 host（T1：真 scheme 永不含点）→ 域名裁决
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("my.app://x"))
+    }
+
+    @Test
+    fun `digit leading pseudo scheme is not a scheme`() {
+        // scheme 必须字母开头——"1http:" 不满足 ALPHA 开头，regex 不匹配 →
+        // 走无 scheme 分支（按 looksLikeUrl/搜索词裁决，绝不进 FORBIDDEN 误报）
+        assertEquals(SearchEngines.InputKind.SEARCH, SearchEngines.classifyInput("1http://x"))
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("1http://x.y"))
+    }
+
+    @Test
+    fun `scheme with dot falls back to url heuristics`() {
+        // 真 scheme 永不含点；prefix 含点必为 host（T1 语义）——
+        // `a.b:...` 按域名/搜索词裁决而非 scheme 判定
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("a.b:path"))
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("a.b"))
+    }
+
+    @Test
+    fun `scheme charset rejects illegal chars by not matching`() {
+        // 下划线不在 scheme 字符集——"my_app:x" 的 prefix 匹配中断于 '_' 且
+        // 不足到冒号 → 无 scheme 匹配 → 走 looksLikeUrl（无点）→ 搜索词
+        assertEquals(SearchEngines.InputKind.SEARCH, SearchEngines.classifyInput("my_app:x"))
+        // 含点形态转域名裁决（T1 语义）
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("my_app:x.y"))
+    }
+
+    // ---------- AD-167（审计 2026-09-23 清单·A7 批）：isPortSegment 边界 ----------
+
+    @Test
+    fun `host with port segment boundaries classify as domain`() {
+        // 端口段语义：首个 '/' 前 1-5 位纯数字（TCP 端口上限 5 位）即 host:port
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("localhost:1"))
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("localhost:0"))
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("localhost:65535"))
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("localhost:65536"))
+        assertEquals(SearchEngines.InputKind.DOMAIN, SearchEngines.classifyInput("localhost:12345/path"))
+    }
+
+    @Test
+    fun `host with overlong or non numeric port is not host port form`() {
+        // 6 位数字超端口段上限 → 非 host:port 形态（真 scheme 判定继续：
+        // "localhost" 非 http/https scheme → FORBIDDEN fail-closed）
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("localhost:123456"))
+        // 空端口段（"localhost:"）与字母端口段同判
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("localhost:"))
+        assertEquals(SearchEngines.InputKind.FORBIDDEN_SCHEME, SearchEngines.classifyInput("localhost:80a"))
+    }
 }

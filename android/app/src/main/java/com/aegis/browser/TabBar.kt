@@ -2,7 +2,6 @@ package com.aegis.browser
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -12,17 +11,10 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /**
@@ -62,13 +54,15 @@ fun TabBar(
     LaunchedEffect(activeIndex, tabs.size) {
         if (activeIndex in tabs.indices) listState.animateScrollToItem(activeIndex)
     }
+    // AD-153（审计 2026-09-23 清单·A7 批）：语义色板经主题取色
+    val chrome = LocalAegisChromeColors.current
     LazyRow(
         state = listState,
         modifier =
             modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .background(ToolbarBackground),
+                .background(chrome.toolbarBackground),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         contentPadding = PaddingValues(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -88,18 +82,14 @@ fun TabBar(
             )
         }
         item {
-            val newTabDescription = stringResource(R.string.cd_new_tab)
-            Surface(
-                onClick = onNewTab,
+            // AD-174（审计 2026-09-23 清单·A7 批）：新建控件单源 NewTabButton
+            // （骨架/底色/语义与 VerticalTabBar 共用，差异仅形状/尺寸/文案）
+            NewTabButton(
+                label = "+",
                 shape = CircleShape,
-                color = ButtonOverlay,
-                // AD-044：「+」补语义（TalkBack 读「新建标签页」）
-                modifier = Modifier.size(32.dp).semantics { contentDescription = newTabDescription },
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(text = "+", color = Color.White, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
+                modifier = Modifier.size(32.dp),
+                onNewTab = onNewTab,
+            )
         }
     }
 }

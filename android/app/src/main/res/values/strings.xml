@@ -80,4 +80,9 @@
     <string name="download_blocked_dangerous">已拦截危险文件类型的下载</string>
     <string name="download_started">开始下载：%1$s</string>
     <string name="download_enqueue_failed">下载失败，无法入队下载管理器</string>
+    <!-- AD-193（审计 2026-09-23 清单·A7 批）：下载通知描述（DownloadManager setDescription） -->
+    <string name="download_notification_description">通过 Aegis 安全下载管理器保存</string>
+
+    <!-- AD-204（审计 2026-09-23 清单·A7 批）：「去更新」跳转失败降级提示 -->
+    <string name="update_open_failed">无法打开应用商店，请手动更新 Android System WebView 后重试。</string>
 </resources>

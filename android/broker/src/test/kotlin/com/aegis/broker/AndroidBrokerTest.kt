@@ -3,6 +3,7 @@ package com.aegis.broker
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -418,5 +419,62 @@ class AndroidBrokerTest {
         assertTrue(randomPart.all { it.isDigit() || it in 'a'..'f' })
         // 随机性：同会话两次生成不得相同
         assertNotEquals(AndroidBroker.newNonce("session-n"), nonce)
+    }
+
+    // ---------------- AD-162/163/164（审计 2026-09-23 清单·A7 批） ----------------
+
+    @Test
+    fun nativeDecisionJsonAllowsMissingExplanationField() {
+        // AD-162：缺省 explanation 容错——Rust 核心的 allow/deny 响应中
+        // explanation 是可选字段（optString 缺省 ""）；字段缺失绝不能让
+        // 解析抛异常转 null（那会折叠成 native_policy_core_protocol 拒绝）
+        val allow =
+            NativePolicyCoreBridge.parseDecisionJson(
+                """{"abi_version":3,"decision":"allow","action":{
+                "session_id":"s","tab_id":"t","document_generation":0,
+                "origin":"https://example.com","method":"GET","canonical_parameters":"/",
+                "scope":"navigation","expires_at":1700000000,"nonce":"n","policy_version":"1.0"}}""",
+            ) as Decision.Allow
+        assertEquals("", allow.action.explanation)
+
+        val deny =
+            NativePolicyCoreBridge.parseDecisionJson(
+                """{"abi_version":3,"decision":"deny","reason":{
+                "code":"url_policy","detail":"denied"}}""",
+            ) as Decision.Deny
+        assertEquals("", deny.reason.explanation)
+    }
+
+    @Test
+    fun nativeDecisionJsonUnknownDecisionThrowsForFailClosedBridge() {
+        // AD-163：unknown decision 形态 → parseDecisionJson 抛 IllegalArgumentException
+        // → invokeDecision 捕获转 null → Broker 折叠为 native_policy_core_protocol
+        // 拒绝（JNI 边界异常吞噬契约的解析半环——native 调用半环需真机）。
+        val exception =
+            runCatching {
+                NativePolicyCoreBridge.parseDecisionJson(
+                    """{"abi_version":3,"decision":"quantum_redirect","reason":{
+                    "code":"x","detail":"y"}}""",
+                )
+            }.exceptionOrNull()
+        assertTrue(exception is IllegalArgumentException)
+    }
+
+    @Test
+    fun gateResultStructureAllowsAndBlocks() {
+        // AD-164：gate 三态结构断言——allowed()（平台 broker 放行）与
+        // block(code)（携带拒绝码的 fail-closed）两种产出形态的字段面锁定
+        val allowed = NativePolicyCoreGateResult.allowed()
+        assertTrue(allowed.allowsPlatformBroker)
+        assertNull(allowed.denialCode)
+
+        val blocked = NativePolicyCoreGateResult.block("native_policy_core_unavailable")
+        assertFalse(blocked.allowsPlatformBroker)
+        assertEquals("native_policy_core_unavailable", blocked.denialCode)
+
+        // DefaultNativePolicyCoreGate 在未启用原生核心的构建下放行（Disabled 态）
+        if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            assertTrue(DefaultNativePolicyCoreGate.probe().allowsPlatformBroker)
+        }
     }
 }

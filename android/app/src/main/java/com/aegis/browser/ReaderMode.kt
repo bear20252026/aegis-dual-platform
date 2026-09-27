@@ -36,6 +36,14 @@ object ReaderMode {
      * 的块级元素，兜底 body。只读，不触碰页面状态。
      * AD-125（审计 2026-09-23 清单·A6 批）：internal 化——MIN_TEXT 门槛在
      * 页内脚本生效，JVM 单测锁定门槛存在性与取值，防误删/漂移。
+     *
+     * AD-206（审计 2026-09-23 清单·A7 批）：候选块扫描设限提前退出——
+     * 原实现对 document.querySelectorAll('div, section') 全量遍历
+     * （超长页面数千节点逐个读 innerText——强制布局抖动，主线程可卡
+     * 数百 ms）。现设两项限制：①候选上限 MAX_CANDIDATES（400——覆盖
+     * 常规文章页全部候选，超出部分不参与正文评选）；②提前退出——
+     * 一旦某候选块文本量已达 MAX_TEXT（正文上限），后续候选不可能
+     * 更优，立即停止扫描。
      */
     internal val EXTRACT_JS =
         """
@@ -47,9 +55,12 @@ object ReaderMode {
             if (!node) {
               var best = null, bestLen = 0;
               var cand = document.querySelectorAll('div, section');
-              for (var i = 0; i < cand.length; i++) {
+              var MAX_CANDIDATES = 400;
+              var n = cand.length < MAX_CANDIDATES ? cand.length : MAX_CANDIDATES;
+              for (var i = 0; i < n; i++) {
                 var t = (cand[i].innerText || '').trim();
                 if (t.length > bestLen) { bestLen = t.length; best = cand[i]; }
+                if (bestLen >= $MAX_TEXT) { break; }
               }
               node = best || document.body;
             }

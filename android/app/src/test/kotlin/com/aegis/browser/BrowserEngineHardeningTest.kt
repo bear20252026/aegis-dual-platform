@@ -58,4 +58,39 @@ class BrowserEngineHardeningTest {
         // A-03：默认限制第三方 Cookie（防跨站追踪）
         assertFalse(CookieManager.getInstance().acceptThirdPartyCookies(webView))
     }
+
+    // ---------------- AD-165（审计 2026-09-23 清单·A7 批）：标题 256 截断 ----------------
+
+    /** 经 ArgumentCaptor 捕获 configure() 注入的 WebChromeClient（spy 真实
+     *  WebView——configure 的 settings 链需要真实 shadow 实现）。 */
+    private fun chromeClientOf(engineWebView: WebView): android.webkit.WebChromeClient {
+        val captor = org.mockito.ArgumentCaptor.forClass(android.webkit.WebChromeClient::class.java)
+        org.mockito.Mockito
+            .verify(engineWebView)
+            .webChromeClient = captor.capture()
+        return captor.value
+    }
+
+    @Test
+    fun receivedTitleIsTruncatedTo256Chars() {
+        // 标题是远端可控输入：Tab.title 进 StateFlow → 标签栏渲染，超长标题
+        // 此前无截断守护。锁定 onReceivedTitle 经 MAX_TITLE_LENGTH（256）截断。
+        val spyView = org.mockito.Mockito.spy(webView)
+        var observed: String? = null
+        BrowserEngine(spyView, onTitleObserved = { observed = it }).configure()
+        val chromeClient = chromeClientOf(spyView)
+        val longTitle = "阿".repeat(1000)
+        chromeClient.onReceivedTitle(spyView, longTitle)
+        assertEquals("标题必须截断到 256 字符（UTF-16 char 计）", 256, observed!!.length)
+    }
+
+    @Test
+    fun receivedNullTitleYieldsEmptyString() {
+        val spyView = org.mockito.Mockito.spy(webView)
+        var observed: String? = null
+        BrowserEngine(spyView, onTitleObserved = { observed = it }).configure()
+        val chromeClient = chromeClientOf(spyView)
+        chromeClient.onReceivedTitle(spyView, null)
+        assertEquals("", observed)
+    }
 }

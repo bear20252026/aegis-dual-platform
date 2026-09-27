@@ -78,21 +78,32 @@ class BrowserViewModel(
      * 标签切换 / 后台页面事件不得覆盖输入内容（原先 _address 全局单字段被
      * refresh()/onPageUrlObserved 直接覆盖，多标签下互相踩踏）。
      * 提交（navigateToAddress）或切换标签即清除草稿，恢复派生自 Tab.url。
+     *
+     * AD-209（审计 2026-09-23 清单·A7 批）：单线程意图显式声明——本标记
+     * 与各 StateFlow 同属「仅主线程读写」约束（写入点全部在 Activity
+     * 生命周期/主线程回调链与 viewModelScope(Main) 协程；StateFlow 写入
+     * 本身可见，无需 AtomicBoolean 加重语义）。若未来引入后台写路径，
+     * 必须先迁移到原子类型或收敛到单写点协程。
      */
     private var addressDraftActive = false
 
     /** AD-103 配套：导航防抖独立小类（NavigateDebounce——锚点状态内聚）。 */
     private val navigateDebounce = NavigateDebounce(NAVIGATE_DEBOUNCE_MS)
 
-    private val _tabsPosition = MutableStateFlow("top")
-    val tabsPosition: StateFlow<String> = _tabsPosition.asStateFlow()
+    /**
+     * AD-152（审计 2026-09-23 清单·A7 批）：布局态走 [TabsPosition] 枚举
+     * （原魔法字符串 "top"/"left"——typo 静默走默认分支，编译期无守护）。
+     */
+    private val _tabsPosition = MutableStateFlow(TabsPosition.TOP)
+    val tabsPosition: StateFlow<TabsPosition> = _tabsPosition.asStateFlow()
 
     /**
      * AD-251（2026-09-26 审计）：布局切换入口——chrome 布局按钮切换
      * top/left；MainActivity 两种布局均含地址栏（接线见 onToggleLayout）。
      */
     fun toggleTabsPosition() {
-        _tabsPosition.value = if (_tabsPosition.value == "top") "left" else "top"
+        _tabsPosition.value =
+            if (_tabsPosition.value == TabsPosition.TOP) TabsPosition.LEFT else TabsPosition.TOP
     }
 
     private val _webViewAlert = MutableStateFlow<String?>(null)
@@ -112,9 +123,12 @@ class BrowserViewModel(
 
     /**
      * 阅读模式 + 整页翻译（ReaderController——单文件单职责；INV-04）。
-     * lazy：首次访问需 init() 已建 tabManager。
+     * AD-196（审计 2026-09-23 清单·A7 批）：显式构造取代 lazy——控制器构造
+     * 仅捕获回调 lambda（回调执行时才经 [getTabManager] 取当前 WebView），
+     * 构造期初始化后时序不再依赖「首次访问在 init 之后」的隐性契约
+     * （UI 早触发安全降级为 null 当前 WebView）。
      */
-    val reader: ReaderController by lazy {
+    val reader: ReaderController =
         ReaderController(
             currentWebView = { getTabManager()?.current()?.webView },
             currentUrl = { getTabManager()?.current()?.url },
@@ -126,7 +140,6 @@ class BrowserViewModel(
             // 收敛 strings.xml 单源。
             alertRes = { res -> _webViewAlert.value = alertText(res) },
         )
-    }
 
     private lateinit var tabManager: TabManager
 
@@ -431,56 +444,28 @@ class BrowserViewModel(
 
     private fun createSecureWebView(context: android.content.Context): WebView = webViewEvents.create(context)
 
-    // ---------------- WebViewEventAssembly.Host 接缝实现（AD-103） ----------------
-    // 以私有 object 实现（而非类直接实现 internal 接口）：保持 BrowserViewModel
-    // 公开父类签名不变（detekt 基线签名稳定）且接缝成员不外泄公开 API。
+    // ---------------- WebViewEventAssembly.Host 接缝（AD-103；实现在
+    // BrowserViewModelHost.kt——A7 批抽出使本文件回到改造红线 500 行内） ----------------
 
     private val hostImpl =
-        object : WebViewEventAssembly.Host {
-            override val activeTabManager: TabManager?
-                get() = getTabManager()
+        BrowserViewModelHost(
+            tabManagerOrNull = ::getTabManager,
+            addressDraftActive = { addressDraftActive },
+            mapDisplayAddress = ::displayAddress,
+            submitPageAddress = { _address.value = it },
+            submitPageError = { _pageError.value = it },
+            clearPageError = { this@BrowserViewModel.clearPageError() },
+            submitWebViewAlert = { _webViewAlert.value = it },
+            refreshTabs = ::refresh,
+            errorStrings = { pageErrorStringsOf(::alertText, ::alertText) },
+        )
 
-            override val isAddressDraftActive: Boolean
-                get() = addressDraftActive
-
-            override fun displayAddress(url: String): String = this@BrowserViewModel.displayAddress(url)
-
-            override fun submitPageAddress(url: String) {
-                _address.value = url
-            }
-
-            override fun submitPageError(error: PageError) {
-                _pageError.value = error
-            }
-
-            override fun clearPageError() {
-                this@BrowserViewModel.clearPageError()
-            }
-
-            override fun submitWebViewAlert(text: String) {
-                _webViewAlert.value = text
-            }
-
-            override fun refreshTabs() {
-                refresh()
-            }
-
-            override fun errorStrings(): PageErrorTexts.Strings = pageErrorStrings
-        }
-
-    /** AD-103：错误文案解析接缝（appContext getString 函数化——AD-046 单源）。 */
-    private val pageErrorStrings =
-        object : PageErrorTexts.Strings {
-            override fun text(id: Int): String = alertText(id)
-
-            override fun text(
-                id: Int,
-                arg: String,
-            ): String = alertText(id, arg)
-        }
-
-    /** 装配对象（AD-103）：lazy——首次 create 时宿主已完整构造。 */
-    private val webViewEvents: WebViewEventAssembly by lazy {
+    /**
+     * 装配对象（AD-103）。AD-196（审计 2026-09-23 清单·A7 批）：显式构造
+     * 取代 lazy——装配点仅捕获回调，构造期初始化消除注释级时序约束
+     * （create() 仍只在 init() 中被调用，时序语义不变）。
+     */
+    private val webViewEvents: WebViewEventAssembly =
         WebViewEventAssembly(
             broker = broker,
             host = hostImpl,
@@ -488,10 +473,10 @@ class BrowserViewModel(
             onConfirmationRequested = ::registerPendingConfirmation,
             onConfirmationResolved = ::resolvePendingConfirmation,
         )
-    }
 
-    /** 仅 ViewModel 保存发起 WebView 引用（PendingNavigationConfirmation 单写点）。 */
-    private fun registerPendingConfirmation(
+    /** 仅 ViewModel 保存发起 WebView 引用（PendingNavigationConfirmation 单写点）。
+     *  AD-158 配套：internal 化供 JVM/Robolectric 单测注入待审批状态。 */
+    internal fun registerPendingConfirmation(
         webView: WebView,
         request: ApprovalRequest,
     ) {

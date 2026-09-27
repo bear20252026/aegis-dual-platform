@@ -126,4 +126,75 @@ class OriginPolicyTest {
         assertNotNull(uri)
         assertEquals("EXAMPLE.COM", uri!!.host)
     }
+
+    // ---------- AD-168（审计 2026-09-23 清单·A7 批）：控制字符/空白全集逐项 ----------
+
+    @Test
+    fun `every c0 control char and del is rejected item by item`() {
+        // isControlChar 全集逐项：C0（0x00..0x1F）+ DEL（0x7F）——任一出现即拒绝
+        // （userinfo 注入与 URL 拆分混淆面 fail-closed）
+        for (code in 0x00..0x1F) {
+            val ch = code.toChar()
+            assertNull(
+                "C0 控制字符 0x%02X 必须拒绝".format(code),
+                OriginPolicy.tryParseExternal("https://example.com/${ch}x"),
+            )
+        }
+        assertNull(
+            "DEL 0x7F 必须拒绝",
+            OriginPolicy.tryParseExternal("https://example.com/\u007Fx"),
+        )
+    }
+
+    @Test
+    fun `every kotlin whitespace char is rejected item by item`() {
+        // Char.isWhitespace 全集逐项采样：含 C0 空白、unicode 空白分隔符
+        // （全角空格/表意空格/NER/LS/PS 等）。NBSP(0x00A0) 不在
+        // Character.isWhitespace 集——其拒绝路径由 URI 语法层兜底，不在
+        // 本断言范围（isControlChar 的契约面只覆盖 isWhitespace 真值）。
+        val samples =
+            listOf(
+                '\u0009', // HORIZONTAL TABULATION
+                '\u000A', // LINE FEED
+                '\u000B', // VERTICAL TABULATION
+                '\u000C', // FORM FEED
+                '\u000D', // CARRIAGE RETURN
+                '\u001C', // FILE SEPARATOR
+                '\u001D', // GROUP SEPARATOR
+                '\u001E', // RECORD SEPARATOR
+                '\u001F', // UNIT SEPARATOR
+                ' ', // SPACE
+                '\u0085', // NEXT LINE
+                '\u1680', // OGHAM SPACE MARK
+                '\u2000', // EN QUAD
+                '\u2028', // LINE SEPARATOR
+                '\u2029', // PARAGRAPH SEPARATOR
+                '\u202F', // NARROW NO-BREAK SPACE（isWhitespace=true）
+                '\u3000', // IDEOGRAPHIC SPACE
+            )
+        samples.forEach { ch ->
+            assertNull(
+                "空白字符 U+%04X 必须拒绝".format(ch.code),
+                OriginPolicy.tryParseExternal("https://evil.com/${ch}x"),
+            )
+        }
+        // 空白注入在 authority 段同样 fail-closed（拆分混淆主战场）
+        assertNull(OriginPolicy.tryParseExternal("https://evil.com\u2028/"))
+    }
+
+    // ---------- AD-169（审计 2026-09-23 清单·A7 批）：端口 65535/65536 边界 ----------
+
+    @Test
+    fun `port 65535 boundary is accepted`() {
+        // TCP 端口上限（RFC 6335）恰好等于上限 → 放行
+        val uri = OriginPolicy.tryParseExternal("https://example.com:65535/")
+        assertNotNull(uri)
+        assertEquals(65535, uri!!.port)
+    }
+
+    @Test
+    fun `port 65536 boundary is rejected`() {
+        // 上限 + 1 → fail-closed（此前只测了 99999，65536 精确边界缺失）
+        assertNull(OriginPolicy.tryParseExternal("https://example.com:65536/"))
+    }
 }

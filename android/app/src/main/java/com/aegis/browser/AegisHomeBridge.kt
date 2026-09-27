@@ -58,25 +58,28 @@ class AegisHomeBridge(
          * start.html 的消费契约：`{"engine":<key>,"engines":[{"key","name"}]}`。
          * AD-146（审计 2026-09-23 清单·A6 批）：显示名消费 SearchEngines
          * 单源（键集一致性由 SearchEnginesTest 锁定）。
+         *
+         * AD-191（审计 2026-09-23 清单·A7 批）：引擎数组静态缓存——引擎键集
+         * 编译期固定（ENGINE_URLS 为常量表），原实现每次 getEngine 都重建
+         * JSONArray（@JavascriptInterface 每次面板渲染都跨 JNI 调用）。
+         * 现数组序列化结果 lazy 驻留单份，每次调用只拼当前 engine 键。
          */
-        internal fun buildEngineJson(currentEngine: String): String {
-            val engines =
-                org.json.JSONArray().apply {
-                    SearchEngines.ENGINE_URLS.keys.forEach { key ->
-                        put(
-                            org.json.JSONObject().apply {
-                                put("key", key)
-                                put("name", SearchEngines.ENGINE_NAMES[key] ?: key)
-                            },
-                        )
-                    }
-                }
-            return org.json
-                .JSONObject()
-                .put("engine", currentEngine)
-                .put("engines", engines)
-                .toString()
+        private val cachedEnginesArrayJson: String by lazy {
+            val engines = org.json.JSONArray()
+            SearchEngines.ENGINE_URLS.keys.forEach { key ->
+                val entry = org.json.JSONObject()
+                entry.put("key", key)
+                entry.put("name", SearchEngines.ENGINE_NAMES[key] ?: key)
+                engines.put(entry)
+            }
+            engines.toString()
         }
+
+        internal fun buildEngineJson(currentEngine: String): String =
+            // engine 键经 JSONObject.quote（JSON 字符串字面量转义）——prefs 值
+            // 即便被写入异常字符也不会产出非法 JSON；engines 部分为静态缓存
+            // 逐字节复用。
+            "{\"engine\":${org.json.JSONObject.quote(currentEngine)},\"engines\":$cachedEnginesArrayJson}"
 
         /**
          * AD-112（审计 2026-09-23 清单·A6 批）：受信壳页 URL 判定抽纯函数——
@@ -175,6 +178,14 @@ class AegisHomeBridge(
             if (!ok) {
                 // AD-134（审计 2026-09-23 清单·A6 批）：Toast 文案迁 strings.xml
                 // 单源（原硬编码中文——不可本地化、不可静态审查）。
+                //
+                // AD-192（审计 2026-09-23 清单·A7 批）：applicationContext Toast
+                // 保留理由（注释固化）——桥接层按设计不持 Activity 引用
+                // （JS 后台线程 + 面向任意远端页面的注入对象，持有宿主即泄漏/
+                // 提权面）；Toast 用 app context 构造无 UI 崩溃风险（仅无
+                // fly-in 动画差异）；「回调上抛 ViewModel」需从 JS 线程再跨
+                // 一次线程边界接线，收益（Snackbar 级提示）不成比例。真机
+                // 回归 2026-09-04 起该 Toast 工作正常，维持现状。
                 Toast
                     .makeText(context, context.getString(R.string.bridge_open_rejected), Toast.LENGTH_SHORT)
                     .show()

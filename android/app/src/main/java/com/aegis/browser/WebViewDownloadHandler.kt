@@ -95,8 +95,21 @@ internal object WebViewDownloadHandler {
             DownloadManager
                 .Request(android.net.Uri.parse(url))
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                // AD-193（审计 2026-09-23 清单·A7 批）：通知标题/描述补齐——
+                // 原请求未 setTitle/setDescription，通知栏回落为裸 URL（可读
+                // 性差且泄露完整 query）。标题用净化后的文件名，描述用资源
+                // 文案（strings.xml 单源）。
+                .setTitle(fileName)
+                .setDescription(context.getString(R.string.download_notification_description))
                 .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
                 .setMimeType(mimeType)
+        // AD-194（审计 2026-09-23 清单·A7 批）：Cookie 过滤语义注释固化——
+        // getCookie(url) 返回 CookieManager 为该 URL 维护的整套 cookie jar
+        // 视图（与页面自身发起同源请求将携带的集合一致；WebView 层已按
+        // A-03 拒绝第三方 cookie，此处不做二次过滤是有意为之：过滤集合
+        // 反而会造成「页面可见资源可下载、带 Cookie 下载却缺凭证」的
+        // 语义分叉）。DownloadManager 落盘期间经系统 download provider
+        // 发起请求，Cookie 头以单次请求头形式随行，不写入持久存储。
         CookieManager.getInstance().getCookie(url)?.let { request.addRequestHeader("Cookie", it) }
         // AD-137（审计 2026-09-23 清单·A6 批）：成功 Toast 与受守护调用分离——
         // 原实现成功 Toast 在 runCatching 块内，Toast 抛出会被误判为入队失败

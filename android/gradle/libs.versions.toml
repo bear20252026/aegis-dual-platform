@@ -39,6 +39,12 @@ androidx-activity-compose = { module = "androidx.activity:activity-compose", ver
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "androidx-lifecycleRuntimeCompose" }
 # AD-068（2026-09-24 审计）：Compose BOM 入 catalog（app 模块此前字面量硬编码）
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
+# AD-154（审计 2026-09-23 清单·A7 批）：Compose BOM 管辖的制品坐标入 catalog
+# （app 模块此前以坐标字面量引用；无版本号——版本由上方 compose-bom 单源裁决）
+androidx-compose-ui = { module = "androidx.compose.ui:ui" }
+androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
 kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinxDatetime" }
 org-json = { module = "org.json:json", version.ref = "orgJson" }
 junit = { module = "junit:junit", version.ref = "junit" }

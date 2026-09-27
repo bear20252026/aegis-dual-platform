@@ -6,13 +6,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
@@ -85,6 +87,8 @@ internal fun WebContentArea(
 /**
  * P2-1 修复（全面审计 2026-09-04）：页面错误面板——半透明遮罩盖住 WebView
  * 内容区。「重试」reload 当前标签；「返回安全页」回到受信首页。
+ *
+ * AD-153（审计 2026-09-23 清单·A7 批）：遮罩/文字色经语义色板取色。
  */
 @Suppress("FunctionNaming")
 @Composable
@@ -93,11 +97,12 @@ private fun PageErrorPanel(
     onRetry: () -> Unit,
     onBackToSafePage: () -> Unit,
 ) {
+    val chrome = LocalAegisChromeColors.current
     Box(
         modifier =
             Modifier
                 .fillMaxSize()
-                .background(ErrorOverlayBackground)
+                .background(chrome.errorOverlayBackground)
                 .padding(UiDimens.ERROR_PANEL_PADDING.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -113,13 +118,13 @@ private fun PageErrorPanel(
             )
             Text(
                 text = error.description,
-                color = TextSecondary,
+                color = chrome.textSecondary,
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
             )
             Text(
                 text = error.url,
-                color = TextSecondary,
+                color = chrome.textSecondary,
                 style = MaterialTheme.typography.bodySmall,
                 textAlign = TextAlign.Center,
                 maxLines = 2,
@@ -133,8 +138,12 @@ private fun PageErrorPanel(
 }
 
 /**
- * 错误面板玻璃圆钮（重试/返回安全页共用骨架——同形 Surface+Text 消除重复，
- * AD-078 起尺寸常量单源）。
+ * 错误面板操作按钮（重试/返回安全页共用）。
+ *
+ * AD-173（审计 2026-09-23 清单·A7 批）：Surface+Text 冒充按钮 → Material3
+ * Button——原自绘骨架没有 Material 按钮的禁用态/最小触摸目标/高度语义，
+ * 与主题控件脱节。改用 M3 [Button]：容器色经语义色板（buttonOverlay，
+ * 视觉与抽取前一致），圆角沿用圆形（CircleShape）不改变视觉。
  */
 @Suppress("FunctionNaming")
 @Composable
@@ -142,16 +151,23 @@ private fun ErrorActionButton(
     textRes: Int,
     onClick: () -> Unit,
 ) {
-    Surface(onClick = onClick, shape = CircleShape, color = ButtonOverlay) {
+    Button(
+        onClick = onClick,
+        shape = CircleShape,
+        colors =
+            ButtonDefaults.buttonColors(
+                containerColor = LocalAegisChromeColors.current.buttonOverlay,
+                contentColor = Color.White,
+            ),
+        contentPadding =
+            PaddingValues(
+                horizontal = UiDimens.ERROR_ACTION_PADDING_X.dp,
+                vertical = UiDimens.SPACING_MEDIUM.dp,
+            ),
+    ) {
         Text(
             text = stringResource(textRes),
-            color = Color.White,
             style = MaterialTheme.typography.bodyMedium,
-            modifier =
-                Modifier.padding(
-                    horizontal = UiDimens.ERROR_ACTION_PADDING_X.dp,
-                    vertical = UiDimens.SPACING_MEDIUM.dp,
-                ),
         )
     }
 }
