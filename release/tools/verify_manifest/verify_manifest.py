@@ -59,8 +59,17 @@ def main() -> int:
     if len(sys.argv) < 4:
         print("用法: verify_manifest.py <manifest.json> <trusted_keys.json> <min_version>")
         return 2
-    manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    trusted = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+    # SP-024（审计 2026-09-23 清单·SP1 批）：manifest/trusted_keys 坏 JSON 直接
+    # traceback 替代干净报告——包 try/except：exit 2 + 文件名上下文（与
+    # SP-155 verify_artifact_set/generate_sbom 同一退出码语义——环境错误一律
+    # exit 2，验证结论失败才是 exit 1）。
+    try:
+        manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+        trusted = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        src = getattr(exc, "filename", None) or Path(sys.argv[1]).name
+        print(f"❌ 输入文件读取/解析失败: {src}（{exc}）（终止发布——fail-closed）")
+        return 2
     try:
         verify_manifest(manifest, trusted, sys.argv[3], datetime.now(UTC),
                         threshold=_load_threshold())
