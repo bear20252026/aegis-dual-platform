@@ -38,4 +38,8 @@
 
 - 每项验证记录（通过/失败 + 证据）——**失败项需修复后重验**（运行门禁 fail-closed）
 - 全部通过后运行门禁闭合（蓝图七门禁全闭合——正式发布前提）
-- 与 runbooks（security-release/incident-response）联动：验证失败按事故响应处理
+- 与 runbooks 联动（WB-069，审计 2026-09-23 清单·W5 批）：security-release
+  runbook 在 `release/runbooks/security-release.md`（已落地）；蓝图所列
+  **incident-response runbook 尚未落地**——验证失败需升级为安全事件时，
+  按 SECURITY.md 报告流程 + security-release runbook 处置，不以不存在的
+  文档为依赖

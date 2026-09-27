@@ -11,6 +11,18 @@
 //（kind() 判定优先级 android > cs，全无则 null）。
 // 能力面差异：Android 首页当前能力 = 错误上报/引擎/导航/壁纸/画板；
 // 书签宫格、导入向导、会话恢复为 Windows 能力（Android 上自动隐藏）。
+// WB-057（审计 2026-09-23 清单·W5 批）：首页跨文件时序常量单源——此前
+// 200ms/1200ms/15000ms 魔法延时散落 start.main.js 与 start.import.js。
+// 消费方统一读 window.AegisTiming（本文件最先加载——WB-125 顺序契约），
+// 读取端保留字面量兜底以兼容无头测试的分文件加载形态。
+var AegisTiming = {
+  BOOKMARK_RETRY_MS: 200,          // 书签渲染：桥未就绪重试间隔
+  BOOKMARK_RETRY_MAX: 10,          // 书签渲染：有界重试次数上限
+  SEARCH_BUSY_RESET_MS: 1200,      // 搜索按钮「搜索中…」防重放锁复位延时
+  IMPORT_SCAN_TIMEOUT_MS: 15000    // 导入向导：扫描超时兜底
+};
+if (typeof window !== 'undefined') { window.AegisTiming = AegisTiming; }
+
 var Host = (function () {
   var andApi = function () { return window.AegisBridge || null; };
   var csApi = function () {
@@ -18,6 +30,20 @@ var Host = (function () {
   };
   // C# 桥请求通道：postMessage 关联 id + 单一 message 监听分发响应
   var _csSeq = 0, _csPending = {}, _csListening = false;
+  // WB-037（审计 2026-09-23 清单·W5 批）：pending 此前无 TTL 上限——宿主
+  // 永不回包时回调条目泄漏（页面生命周期内只增不减）。惰性清扫实现 TTL：
+  // 每次新请求前清理超龄条目（以 cb(null) 兜底完成），不引入定时器——
+  // 保持「零定时器零 IO、未决回调不持有事件循环」的既有设计性质
+  //（WB-128 回归锁），并避免 setTimeout TTL 在无头测试中拖住进程退出。
+  var CS_CALL_TTL_MS = 30000;
+  function sweepStalePending(now) {
+    for (var k in _csPending) {
+      if (now - _csPending[k].ts > CS_CALL_TTL_MS) {
+        var f = _csPending[k].cb; delete _csPending[k];
+        try { f(null); } catch (err) { try { Host.jsError('ntp callback: ' + err); } catch (e2) {} }
+      }
+    }
+  }
   function csCall(op, args, cb) {
     var w = csApi(); if (!w) { if (cb) cb(null); return; }
     if (!_csListening) {
@@ -25,13 +51,14 @@ var Host = (function () {
       w.addEventListener('message', function (e) {
         var d = e.data;
         if (d && d.__aegisRes && _csPending[d.id]) {
-          var f = _csPending[d.id]; delete _csPending[d.id];
+          var f = _csPending[d.id].cb; delete _csPending[d.id];
           try { f(d.result); } catch (err) { try { Host.jsError('ntp callback: ' + err); } catch (e2) {} }
         }
       });
     }
+    sweepStalePending(Date.now());
     var id = ++_csSeq;
-    _csPending[id] = cb || function () {};
+    _csPending[id] = { cb: cb || function () {}, ts: Date.now() };
     w.postMessage({ __aegis: 1, id: id, op: op, args: args || [] });
   }
   return {

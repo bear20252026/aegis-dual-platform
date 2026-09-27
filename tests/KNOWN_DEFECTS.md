@@ -19,6 +19,7 @@
 | BUG-006 | 启动闪退（allowedOriginRules） | AndroidX 不接受 `https://*` 通配 | 不得出现该规则写法 | `623c8bc` |
 | BUG-007 | 移动端按桌面宽度渲染 | 缺 viewport meta | viewport 断言 | `6e9b2f7` |
 | BUG-008 | 宿主桥调用漂移（多副本直调） | 两份 start.html 并行 + pywebview 直调散落 | 无 pywebview 直调；Host 层存在且被使用 | `6e9b2f7` |
+| BUG-009 | 部分设备/文件协议下搜索回车仍无响应（submit 不触发） | file:// 页面 form submit 事件可能不派发（仅依赖 submit 单路径——WB-064/SP-039 补登记：此前被 start.html/start.main.js 注释引用却未在本库登记行） | BUG-002 断言含双路径锁定：form submit + 按钮 click 都必须直调 go()（start_page.test.mjs「搜索按钮必须 click 直调」） | start.main.js wireStaticHandlers（submit+click 双保底） |
 | BUG-011 | Android 地址栏贪吃蛇完全不动（滑动无效） | `tick` 状态只在循环自增、从未在组合中读取——Canvas 读的 `game` 引用不变，Compose 永不重绘，蛇视觉冻结 | 贪吃蛇渲染循环节拍断言（单源 `shared/shell/start.snake.js`） | 已修——载体由已删除的 AddressBarSnake.kt 迁至 start.snake.js（SP-007 纠正） |
 | BUG-012 | 首页返回按钮双端缺失/贪吃蛇 Win 缺失 | 返回键只存在于 Win 原生工具栏；贪吃蛇为 Android 独占 | start.html 单源内置返回按钮（Host.goBack 分发）+ 贪吃蛇双控断言 | `shared/shell/start.html` |
 | BUG-013 | 手势导航设备上边缘滑动/返回键直接退出应用（回退从未生效） | targetSdk 36 起系统默认经 OnBackInvokedCallback 分发返回事件——onKeyDown(KEYCODE_BACK) 在手势导航设备上永远收不到；此前"验证通过"实为误读（进程存活 ≠ Activity 存活，截图实为桌面） | OnBackPressedCallback 接管断言（手势/按键双路径） | `MainActivity.kt` |

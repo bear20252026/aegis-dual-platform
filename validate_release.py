@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -85,6 +86,29 @@ def check_shell_manifest_consistency(root: Path) -> list[str]:
     return problems
 
 
+# WB-054（审计 2026-09-23 清单·W5 批）：csproj 的 shared/shell Content 打包
+# 必须显式排除 snake.test.js——排除声明被拆掉时测试桩（约 470 行 JS）会随
+# MSIX/发布产物进入 ntp 虚拟主机（Android 侧对应排除由 build.gradle.kts
+# 锁定，WB-115）。此处按「shell 通配 Include 行须携带 snake.test.js 排除」
+# 断言，排除声明缺失/改形即 fail-closed。
+def check_csproj_shell_test_excluded(csproj: Path) -> list[str]:
+    problems: list[str] = []
+    if not csproj.is_file():
+        return problems  # csproj 缺失已由 check_required_cs_files 报告
+    text = csproj.read_text(encoding='utf-8')
+    shell_includes = re.findall(
+        r'<Content\s+Include="[^"]*shared\\shell\\[^"]*"[^>]*>', text)
+    if not shell_includes:
+        problems.append('csproj 缺 shared\\shell 单源资产 Content 打包声明')
+        return problems
+    for inc in shell_includes:
+        if not re.search(r'Exclude="[^"]*snake\.test\.js[^"]*"', inc):
+            problems.append(
+                'csproj 的 shared\\shell Content 打包必须排除 snake.test.js'
+                '（测试桩不得随包进入 ntp 虚拟主机）——WB-054')
+    return problems
+
+
 # PY-123/124 配套（审计 2026-09-25）：主流程包进 main()——原模块级
 # raise SystemExit 在 pytest 收集 import 时直接退出（INTERNALERROR），
 # 单测无法导入本模块
@@ -118,8 +142,10 @@ def main() -> int:
 
     # 审计修复：正典 C# 栈存在性断言（此前脚本只看 legacy 栈——C# 代码不经
     # 任何检查；发布资源断言在 release-windows.yml，这里是仓库级快速门禁）
-    failures.extend(check_required_cs_files(
-        root / 'windows' / 'src' / 'Aegis.Windows.App' / 'Aegis.Windows.App.csproj'))
+    csproj = root / 'windows' / 'src' / 'Aegis.Windows.App' / 'Aegis.Windows.App.csproj'
+    failures.extend(check_required_cs_files(csproj))
+    # WB-054（审计 2026-09-23 清单·W5 批）：csproj 排除 snake.test.js 断言
+    failures.extend(check_csproj_shell_test_excluded(csproj))
     # PY-038：资产清单与 release-windows.yml 平行维护（改一处漏一处）——
     # 抽 shared/shell/manifest.txt 共享单源，两处共同消费
     shell_manifest = root / 'shared' / 'shell' / 'manifest.txt'

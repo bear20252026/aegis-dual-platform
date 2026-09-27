@@ -50,8 +50,10 @@ function click(node) {
     fn({ stopPropagation() {}, preventDefault() {} }));
 }
 
-// 定时器桩：只记录不调度——15s 兜底不必真等，也不会拖住测试进程
-function loadImport(host) {
+// 定时器桩：只记录不调度——15s 兜底不必真等，也不会拖住测试进程。
+// W5 批（WB-057）：window 形参注入——start.import.js 的扫描超时时长收敛到
+// window.AegisTiming.IMPORT_SCAN_TIMEOUT_MS 单源，桩默认空 window（兜底 15000）
+function loadImport(host, winExtras) {
   const elements = {
     importModal: el('div'),
     imBody: el('div'),
@@ -72,8 +74,9 @@ function loadImport(host) {
     addEventListener(type, fn) { (docHandlers[type] = docHandlers[type] || []).push(fn); },
     activeElement: null,
   };
-  new Function('document', 'Host', 'setTimeout', 'clearTimeout', IMPORT)(
-    document, host, timers.setTimeout, timers.clearTimeout);
+  const win = Object.assign({}, winExtras);
+  new Function('document', 'window', 'Host', 'setTimeout', 'clearTimeout', IMPORT)(
+    document, win, host, timers.setTimeout, timers.clearTimeout);
   return { elements, docHandlers, timers };
 }
 
@@ -188,4 +191,110 @@ test('WB-027 焦点管理：打开初始聚焦弹层，关闭归还触发元素'
   (docHandlers.keydown || []).forEach((fn) => fn({ key: 'Escape' }));   // 关闭
   assert.equal(elements.importModal.style.display, 'none');
   assert.equal(elements.importEntry._focused, true, '焦点必须归还触发元素');
+});
+
+// WB-055（审计 2026-09-23 清单·W5 批）：未选来源/内容静默关闭 → 留在
+// 选择页并给出明确提示（不丢弹层、不丢已勾选状态）
+test('WB-055 未选来源点「开始导入」：弹层不关闭并提示先选择', () => {
+  const host = { has: () => true, importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true }]), jsError: () => {} };
+  const { elements } = loadImport(host);
+  click(elements.importEntry);
+  const rows = elements.imBody.children.filter((c) => c._cb);
+  rows.forEach((r) => { r._cb.checked = false; });   // 全部取消勾选
+  click(elements.imNext);
+  assert.equal(elements.importModal.style.display, 'flex', '弹层必须保持打开（此前静默关闭）');
+  const texts = elements.imBody.children.map((c) => c.textContent).join('\n');
+  assert.match(texts, /请先选择至少一个导入来源与内容类型/,
+    '必须给出明确提示（此前无任何反馈）');
+  // 内容类型未勾选同样触发提示
+  rows[0]._cb.checked = true;
+  const contentRows = elements.imBody.children.filter((c) => c._cb);
+  contentRows.slice(1).forEach((r) => { r._cb.checked = false; });  // 取消 书签/历史
+  click(elements.imNext);
+  const texts2 = elements.imBody.children.map((c) => c.textContent).join('\n');
+  assert.match(texts2, /请先选择至少一个导入来源与内容类型/, '仅选来源不选内容也必须提示');
+});
+
+// WB-056（审计 2026-09-23 清单·W5 批）：running 态 Escape 不再静默中断向导
+test('WB-056 running 态 Escape 忽略：导入进行中不得关闭，完成后恢复可关', async () => {
+  let resolveBm = null;
+  const host = {
+    has: () => true,
+    importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true }]),
+    importBookmarks: () => new Promise((r) => { resolveBm = r; }),   // 悬挂——running 态
+    importHistory: () => Promise.resolve({ imported: 0, total: 0 }),
+    jsError: () => {},
+  };
+  const { elements, docHandlers } = loadImport(host);
+  click(elements.importEntry);
+  click(elements.imNext);                          // → running（链首环在微任务执行）
+  await flush();                                   // 驱动 importBookmarks 被调用
+  assert.ok(resolveBm, '导入任务必须已发起（Promise 悬挂中）');
+  assert.equal(elements.imNext.disabled, true, 'running 态下一步必须禁用');
+  (docHandlers.keydown || []).forEach((fn) => fn({ key: 'Escape' }));
+  assert.equal(elements.importModal.style.display, 'flex',
+    'running 态 Escape 必须被忽略（此前静默中断、结果丢弃）');
+  resolveBm({ imported: 1, total: 1 });            // 导入完成
+  await flush(); await flush();
+  assert.match(elements.imBody.children[0].textContent, /导入完成/, '完成页照常渲染');
+  (docHandlers.keydown || []).forEach((fn) => fn({ key: 'Escape' }));
+  assert.equal(elements.importModal.style.display, 'none', 'done 态 Escape 恢复关闭');
+});
+
+// WB-090（审计 2026-09-23 清单·W5 批）：renderDone 三态文案——「导入失败」
+// 态此前零断言（WB-015 仅锁成功/部分完成两态）
+test('WB-090 renderDone 失败态：全部来源失败且零导入时必须呈现失败文案', async () => {
+  const host = {
+    has: () => true,
+    importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true, history: true }]),
+    importBookmarks: () => Promise.reject(new Error('db locked')),
+    importHistory: () => Promise.resolve({ imported: 0, total: 0 }),
+    jsError: () => {},
+  };
+  const { elements } = loadImport(host);
+  click(elements.importEntry);
+  click(elements.imNext);
+  await flush(); await flush();
+  const texts = elements.imBody.children.map((c) => c.textContent).join('\n');
+  assert.match(texts, /导入失败：1 个来源未能读取（浏览器可能正在运行或数据不可用）。/,
+    '失败态不得伪装成「导入完成/部分完成」');
+  assert.equal(elements.imNext.textContent, '完成');
+  assert.doesNotMatch(texts, /导入完成：共新增/, '失败态不得复用成功句式');
+});
+
+// WB-092（审计 2026-09-23 清单·W5 批）：历史条数默认 500——选项默认选中
+// 与 parseInt 兜底双路径此前零断言
+test('WB-092 历史条数默认 500：500 选项默认选中，运行期 parseInt 兜底 500', async () => {
+  let seenLimit = null;
+  const host = {
+    has: () => true,
+    importScan: (cb) => cb([{ browser: 'chrome', bookmarks: false, history: true }]),
+    importHistory: (limit) => { seenLimit = limit; return Promise.resolve({ imported: 1, total: 1 }); },
+    jsError: () => {},
+  };
+  const { elements } = loadImport(host);
+  click(elements.importEntry);
+  // 选项层：500 必须是 selected 默认项
+  const select = elements.imBody.children.map((c) => c.children && c.children[1])
+    .find((c) => c && c.tagName === 'select');
+  assert.ok(select, '必须渲染历史条数下拉');
+  const options = select.children;
+  assert.deepEqual(options.map((o) => o.value), ['100', '500', '1000', '2000'],
+    '条数档位固定 100/500/1000/2000');
+  assert.equal(options.filter((o) => o.selected).map((o) => o.value).join(','), '500',
+    '默认选中 500（此前零断言）');
+  // 运行层：桩 select.value 为空串 → parseInt NaN → ||500 兜底
+  click(elements.imNext);
+  await flush(); await flush();
+  assert.equal(seenLimit, 500, '兜底路径必须落到 500');
+});
+
+// WB-057（审计 2026-09-23 清单·W5 批）：扫描超时时长消费
+// window.AegisTiming.IMPORT_SCAN_TIMEOUT_MS 单源（不再硬编码 15000）
+test('WB-057 扫描超时时长单源注入：window.AegisTiming 生效', () => {
+  const host = { has: () => true, importScan: () => {}, jsError: () => {} };
+  const { elements, timers } = loadImport(host, { AegisTiming: { IMPORT_SCAN_TIMEOUT_MS: 999 } });
+  click(elements.importEntry);
+  assert.equal(timers.fired.length, 1, '打开向导必须布扫描兜底定时器');
+  assert.equal(timers.fired[0].ms, 999, '注入的 IMPORT_SCAN_TIMEOUT_MS 必须生效（默认 15000 由 WB-020 锁定）');
 });

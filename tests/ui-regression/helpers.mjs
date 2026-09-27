@@ -15,15 +15,17 @@ export const HOSTJS = readFileSync(join(ROOT, 'shared', 'shell', 'start.js'), 'u
 /**
  * 以可控的全局桥注入执行 start.js，返回 Host 适配层。
  * pywebview/AegisBridge/chrome 缺席即 undefined（桥不存在语义）。
+ * Date（WB-037，2026-09-23 审计·W5 批）：可选注入假时钟构造器——
+ * csCall 的惰性 TTL 清扫以 Date.now() 取时，测试用假时钟驱动超龄。
  */
-export function loadHost({ pywebview, AegisBridge, chrome } = {}) {
+export function loadHost({ pywebview, AegisBridge, chrome, Date: DateCtor } = {}) {
   const win = {};
   if (pywebview !== undefined) win.pywebview = pywebview;
   if (AegisBridge !== undefined) win.AegisBridge = AegisBridge;
   if (chrome !== undefined) win.chrome = chrome;
-  const fn = new Function('window', 'pywebview', 'chrome', 'AegisBridge',
+  const fn = new Function('window', 'pywebview', 'chrome', 'AegisBridge', 'Date',
     HOSTJS + '\nreturn Host;');
-  return fn(win, pywebview, chrome, AegisBridge);
+  return fn(win, pywebview, chrome, AegisBridge, DateCtor || Date);
 }
 
 /**

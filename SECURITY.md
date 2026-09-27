@@ -28,6 +28,8 @@
 | Python | pickle/yaml.load | 禁止 yaml.load（用 safe_load）——pickle 仅受信数据 |
 | C# | 反射（Activator/GetMethod 动态调用） | 禁止自动暴露命令（ADR-001——无动态反射命令面） |
 | C# | dynamic/动态绑定 | 受限（强类型 IPC——Chrome → Broker） |
+| C# | Process.Start（WB-070，审计 2026-09-23 清单·W5 批补行） | 受限（现役仅 DownloadsWindow 以系统默认程序打开用户显式下载完成的文件——无任意命令/参数注入面；新增调用点须评审目标来源） |
+| C# | 原生 FFI（NativeLibrary C-ABI——Rust 策略核心，同批补行） | 受限（仅固定导出集委托绑定 + UTF-8 JSON 协议；解析/ABI 异常一律 fail-closed 拒绝——绝不回退第二套策略实现；NativePolicyCoreBridge SafeHandle 生命周期管理） |
 | Kotlin | 反射（KClass 动态调用） | 受限（webview-adapter 只事件转换——无动态命令） |
 
 ## 依赖与发布安全

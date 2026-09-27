@@ -15,9 +15,18 @@
 
 1. **单文件单职责**：每个文件只做一件事；不为了拆而拆，也不把无关逻辑堆进一个文件。
 2. **行数红线**：新文件 ≤ 300 行（目标 100-200）；改造后文件 ≤ 500 行。任何文件触碰 500 行即应拆分。
-3. **命名**：Python 用 `snake_case`，Kotlin 用 `camelCase`；新代码用英文标识符，保留既有中文注释。
+3. **命名**（WB-071，审计 2026-09-23 清单·W5 批补 C# 口径）：Python 用 `snake_case`；Kotlin 用
+   `camelCase`（类型 PascalCase）；C# 遵循 .NET 惯例——类型/方法/属性/常量 `PascalCase`，
+   局部变量/参数 `camelCase`，私有字段 `_camelCase`（与 windows/ 现有代码一致）；新代码用英文
+   标识符，保留既有中文注释。
 4. **注释**：解释"为什么"，不解释"是什么"；重要设计决策在文件头 docstring 记录背景与理由。
-5. **不引入不必要依赖**：优先标准库；新增依赖必须在 `requirements.txt` 锁版本并注明理由。
+5. **不引入不必要依赖**（WB-072，审计 2026-09-23 清单·W5 批补双栈口径——与 SECURITY.md
+   「依赖与发布安全」一致）：优先标准库/平台内置。新增依赖必须：
+   - Python：`requirements.txt` 声明 + `requirements-ci.txt`（pip-compile --generate-hashes
+     生成的 hash 锁）随批更新并注明理由；
+   - C#/NuGet：`packages.lock.json` 锁定（CI 缓存键消费），PR 说明新增理由；
+   - Android/Gradle：无 lock 文件——PR 必须说明新增/升级理由并过 android-quality 门禁；
+   - Rust：`Cargo.lock` 随改随更，`cargo build --locked`/`cargo audit` 门禁通过。
 
 ## 提交规范
 
@@ -84,7 +93,10 @@ python -m pytest tests/python/ -q                 # 发布链离线单测
 - [ ] 是否更新了 [CHANGELOG.md](CHANGELOG.md)
 - [ ] 是否涉及安全敏感路径（URL 过滤/密码/下载/权限）并补充了安全考虑
 - [ ] 是否补充/更新了自检脚本（`selftest_*.py`）
-- [ ] 是否保持 Windows/Android 双端决策一致（见 README「当前决策记录」）
+- [ ] 是否保持 Windows/Android 双端决策一致（WB-033，审计 2026-09-23 清单·W5 批：
+  架构决策口径以 **ADR 索引 `docs/adr/`**（ADR-001..009）为单源——正典栈/能力
+  broker/无远程 native bridge/Rust 单一裁决等；此前指向的 README「当前决策记录」
+  节已不存在）
 
 ## 问题与讨论
 

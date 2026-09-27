@@ -1,6 +1,9 @@
 // 导入向导（Chrome/Edge 书签与历史；ADR-007 单源）
     // 受信壳页专用——桥方法内再做来源校验（远程页不可达）。
     // R-06：全部 DOM 以 textContent/replaceChildren 构建（无 innerHTML）。
+    // WB-041（审计 2026-09-23 清单·W5 批）：补 'use strict'（此前与
+    // start.snake.js 同为脚本外置时未声明严格模式的两个文件）
+    'use strict';
     (function () {
       var modal = document.getElementById('importModal');
       var body = document.getElementById('imBody');
@@ -121,7 +124,13 @@
         });
         var doBm = !!(bmCheck && bmCheck.checked);
         var doHi = !!(hiCheck && hiCheck.checked);
-        if (!picked.length || (!doBm && !doHi)) { close(); return; }
+        // WB-055（审计 2026-09-23 清单·W5 批）：未选来源/内容此前静默
+        // close()——用户以为点击失效或导入完成。改为留在选择页并给出
+        // 明确提示（不重建页面、不丢已勾选状态）
+        if (!picked.length || (!doBm && !doHi)) {
+          body.appendChild(hint('请先选择至少一个导入来源与内容类型（书签/历史）。'));
+          return;
+        }
         var a = api();
         if (!a) { close(); return; }
         step = 'running';
@@ -192,14 +201,18 @@
         // closeBtn 常驻且无副作用，安全兜底
         try { closeBtn.focus(); } catch (e) {}
         // 扫描超时（15s）：宿主无响应（如桥未挂接的窗口）不再永久卡死向导
+        // WB-057（审计 2026-09-23 清单·W5 批）：超时时长收敛到 start.js 的
+        // window.AegisTiming.IMPORT_SCAN_TIMEOUT_MS 单源（字面量兜底一致）
         var scanSettled = false;
+        var scanTimeoutMs = (typeof window !== 'undefined' &&
+          window.AegisTiming && window.AegisTiming.IMPORT_SCAN_TIMEOUT_MS) || 15000;
         var scanTimer = setTimeout(function () {
           if (scanSettled) return;
           scanSettled = true;
           sources = [];
           nextBtn.disabled = false;
           renderPick();
-        }, 15000);
+        }, scanTimeoutMs);
         function scanDone(list) {
           if (scanSettled) return;
           scanSettled = true;
@@ -226,7 +239,13 @@
         else if (step === 'done') close();
       });
       document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && modal.style.display !== 'none') close();
+        // WB-056（审计 2026-09-23 清单·W5 批）：running 态 Escape 不再关闭——
+        // 此前导入进行中按 Esc 静默中断向导（桥任务照跑、结果丢弃且无提示）。
+        // running 期间忽略 Escape；pick/done 态维持即关
+        if (e.key === 'Escape' && modal.style.display !== 'none') {
+          if (step === 'running') return;
+          close();
+        }
       });
       // WB-027：焦点陷阱——Tab/Shift+Tab 在弹层内循环，禁止逃逸到被
       // aria-modal 遮蔽的背景页（聚焦集合每次按键时实时收集，覆盖

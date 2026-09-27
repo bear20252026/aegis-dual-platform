@@ -7,7 +7,12 @@
 // import_contract.test.mjs 单一事实源）。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadHost, makeCsBridge } from './helpers.mjs';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { loadHost, makeCsBridge, HOSTJS } from './helpers.mjs';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 test('WB-021 kind() 双端判定与共存优先级（win 归档桥已删）', () => {
   assert.equal(loadHost({}).kind(), null, '双桥全无 → null（bookmarks 重试依赖该语义）');
@@ -107,4 +112,83 @@ test('WB-024 无 cs 桥时同步降级 cb(null)（不挂死）', () => {
   Host.getWallpaper((r) => { got = r; });
   assert.equal(got, null, '无桥 csCall 必须同步 cb(null)');
   assert.doesNotThrow(() => Host.setEngine('baidu'), '无 cb 调用不得抛错');
+});
+
+// WB-037（审计 2026-09-23 清单·W5 批）：csCall pending 此前无 TTL——宿主
+// 永不回包时回调条目泄漏。惰性清扫实现：每次新请求前清理超龄条目并以
+// cb(null) 兜底；不引入定时器（保持「零定时器零 IO」性质——WB-128 回归锁）
+test('WB-037 pending TTL：超龄条目在新请求时被清扫并 cb(null)，未超龄不受影响', () => {
+  let now = 1000;
+  class FakeDate extends Date {
+    static now() { return now; }
+  }
+  const { bridge, posted, respond } = makeCsBridge();
+  const Host = loadHost({ chrome: bridge, Date: FakeDate });
+  const seen = [];
+  Host.getWallpaper((r) => seen.push(['wp-stale', r]));     // 请求 A（永不回包）
+  now += 31000;                                              // A 超过 30s TTL
+  Host.getEngine((r) => seen.push(['engine-fresh', r]));     // 请求 B——触发清扫
+  assert.deepEqual(seen, [['wp-stale', null]],
+    '超龄 pending 必须在下一请求时以 cb(null) 兜底完成（不悬挂不泄漏）');
+  assert.equal(posted.length, 2, '清扫不影响新请求照常发出');
+  // 迟到回包：A 已被清扫 → 静默忽略；B 正常送达
+  respond(posted[0].id, 'late-a');
+  respond(posted[1].id, 'engine-ok');
+  assert.deepEqual(seen, [['wp-stale', null], ['engine-fresh', 'engine-ok']],
+    '已清扫条目的迟到回包必须被忽略，未超龄条目正常分发');
+  // 未超龄条目（30s 内）不得被误清
+  now += 20000;
+  Host.getWallpaper((r) => seen.push(['wp-young', r]));
+  now += 25000;   // 距上一请求 25s < TTL
+  const before = seen.length;
+  Host.getEngine(() => {});
+  assert.equal(seen.length, before, 'TTL 内的 pending 不得被误清扫');
+});
+
+// WB-095（审计 2026-09-23 清单·W5 批）：start.js 的 Android 引擎回退表是
+// 引擎名单第三份副本（C# UrlNormalizer / Android SearchEngines 之外）——
+// 此前无跨端断言，名单漂移即 Android 断桥时静默回退到错误引擎集。
+// 对账口径与 scripts/verify_cross_end_lists.py 一致：baidu/bing/google/sogou
+// 四引擎三端完全一致；C# 扩展引擎（so360 等）须在 CS_ENGINE_EXTENSIONS
+// 白名单显式登记——本断言锁定「回退表 ⊆ 三端正典名单且与 Android 全等」。
+test('WB-095 Android 引擎回退表跨端一致：与 SearchEngines.kt 全等、为 UrlNormalizer.cs 子集', () => {
+  const readRepo = (p) => readFileSync(join(ROOT, ...p.split('/')), 'utf8');
+  const startJs = readRepo('shared/shell/start.js');
+  const fbBlock = startJs.match(/function engineFallback\(\) \{[\s\S]*?\n        \}/);
+  assert.ok(fbBlock, 'start.js 必须存在 engineFallback 回退表');
+  const fbKeys = [...fbBlock[0].matchAll(/key: '([a-z0-9]+)'/g)].map((m) => m[1]);
+  assert.deepEqual(fbKeys, ['baidu', 'bing', 'google', 'sogou'],
+    '回退表必须恰好是四正典引擎（有缺或多出即 Android 断桥回退失真）');
+  // Android 端 SearchEngines.kt ENGINE_URLS
+  const kt = readRepo('android/app/src/main/java/com/aegis/browser/SearchEngines.kt');
+  const ktBlock = kt.match(/ENGINE_URLS[\s\S]*?mapOf\(([\s\S]*?)\)/);
+  assert.ok(ktBlock, 'SearchEngines.kt 必须有 ENGINE_URLS 表');
+  const ktKeys = [...ktBlock[1].matchAll(/"([a-z0-9]+)" to "/g)].map((m) => m[1]);
+  assert.deepEqual(ktKeys, fbKeys, 'Android ENGINE_URLS 必须与 JS 回退表完全一致');
+  // C# 端 UrlNormalizer.cs EngineUrls（允许白名单扩展引擎，核心四引擎必须齐）
+  const cs = readRepo('windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs');
+  const csFrom = cs.indexOf('EngineUrls');
+  const csTo = cs.indexOf('EngineNames');
+  assert.ok(csFrom > 0 && csTo > csFrom, 'UrlNormalizer.cs 必须有 EngineUrls 表');
+  const csKeys = [...cs.slice(csFrom, csTo).matchAll(/\["([a-z0-9]+)"\] = "http/g)].map((m) => m[1]);
+  for (const k of fbKeys) {
+    assert.ok(csKeys.includes(k), `C# 引擎表必须包含正典引擎 ${k}`);
+  }
+});
+
+// WB-053（审计 2026-09-23 清单·W5 批）：C# NtpBridge 协议 schema 对账——
+// shared/jsapi-schema.ntp-bridge.cs.json（手工维护——jsapi-schema.json 由
+// 生成器产出有 CI diff 门禁）的 operations 必须与 start.js 适配层的
+// csCall 调用点一一对应（桥方法增删两侧同步，防协议漂移）
+test('WB-053 C# 桥协议 schema：operations 与 start.js csCall 调用点一致', () => {
+  const schema = JSON.parse(readFileSync(
+    join(ROOT, 'shared', 'jsapi-schema.ntp-bridge.cs.json'), 'utf8'));
+  const schemaOps = Object.keys(schema.operations).sort();
+  const codeOps = [...HOSTJS.matchAll(/csCall\('([a-zA-Z]+)'/g)].map((m) => m[1]);
+  assert.deepEqual([...new Set(codeOps)].sort(), schemaOps,
+    'start.js 的 csCall op 集合必须与 schema operations 完全一致');
+  assert.ok(schemaOps.length >= 14, '正典桥 14 个操作必须全部登记');
+  // 请求/响应信封字段与实现一致（csCall 发 __aegis、监听 __aegisRes）
+  assert.equal(schema.transport.request.shape.__aegis, 1);
+  assert.equal(schema.transport.response.shape.__aegisRes, 1);
 });

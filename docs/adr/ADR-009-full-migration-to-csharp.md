@@ -58,6 +58,25 @@ windows/src/Aegis.Windows.App/
 └── Diagnostics/               # 审计落盘（有界）/性能基线
 ```
 
+> **WB-060（审计 2026-09-23 清单·W5 批）落地差异注记**（M1-M4 已落地——
+> 目标树为 2026-09-04 决策时快照，与最终落地存在以下经评审的差异，不构成
+> 回归）：
+> 1. `Broker/` 的"待办：KillSwitch/ApprovalManager 接线"已结案——`KillSwitch.cs`
+>    落地接线；**ApprovalManager 已删除**，导航确认流由
+>    `BrowserPolicyBroker` + `WebView/NavigationConfirmationGate.cs`（pending 态
+>    唯一持有）+ Rust 策略核心承担（WB-122，2026-09-26 审计）；
+> 2. `Core/SearchEngines.cs` 未单设——引擎表/命名/顺序单源落在
+>    `Chrome/UrlNormalizer.cs`（EngineUrls/EngineNames/EngineOrder，跨端对账
+>    由 scripts/verify_cross_end_lists.py 锁定）；
+> 3. `Chrome/NewTabPage/` 实际命名为 `Chrome/Ntp/`（NtpAssets/NtpBridge/
+>    NtpBridgeFactory——宿主桥组装工厂化）；
+> 4. `Chrome/ImportWizard/`（原生对话框）未落地为独立目录——导入向导随 NTP
+>    单源页（start.import.js）迁移至新标签页，Chrome 侧仅保留数据导入器
+>    （Core/Import/）；
+> 5. `Chrome/ErrorPage/ DownloadUI/ SettingsUI/` 以独立窗口文件形态落地
+>    （SettingsWindow/DownloadsWindow/HistoryWindow/BookmarkManagerWindow 等
+>    ——beta.22-31 拆分批产物），而非树中子目录形态。
+
 **关键架构决策**：
 1. **每标签一 WebView 实例**（对齐 Android 模型）——替代 Python 单 WebView +
    JS 标签条注入，天然解决切标签丢状态/标签标题不更新两类审计缺陷；

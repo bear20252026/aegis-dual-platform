@@ -80,7 +80,12 @@
 ## 5. 版本与发布
 
 - `shared/version.properties` 是双端版本**单一来源**；`scripts/sync_versions.py` 同步声明。
-- 当前基线：v0.3.0（标签增强 + Chrome/Edge 导入向导）；发布流程：提交 → 打标签 → `gh release create`。
+- WB-058（审计 2026-09-23 清单·W5 批）：基线口径更新——当前基线
+  **2.2.0-beta.49**（C#/.NET 10 正典栈 ADR-009 M1-M4 落地 + 全仓审计批次；
+  此前记录的 v0.3.0 为 2026-08-14 时代口径，严重过期——发布制品为
+  Windows C# 安装包 + Android APK，PyInstaller 包已移除）。
+- 发布流程：提交 → 打 `v*` 标签 → **release.yml 自动触发**（6 job fail-closed：
+  构建/签名/逐工件闭合验证——不再是早期"提交 → 打标签 → gh release create"手工流）。
 - GitHub 仓库：`bear20252026/aegis-dual-platform`（私有）；CI 已在 `.github/workflows/ci.yml` 配置。
 
 ## 6. 待办与方向（源自壳浏览器研读，2026-08-15）

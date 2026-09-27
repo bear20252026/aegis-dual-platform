@@ -83,7 +83,33 @@ function renderEngineMenu(done) {
         it.appendChild(mark);
         it.onclick = function (ev) { ev.stopPropagation(); selectEngine(idx); };
         it.onkeydown = function (ev) {
-          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); selectEngine(idx); }
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); ev.stopPropagation(); selectEngine(idx); return; }
+          // WB-044（审计 2026-09-23 清单·W5 批）：菜单项此前仅 tabIndex=0、
+          // 无方向键导航——menu 模式要求 ↑/↓ 在菜单项间移动焦点（触顶/触底
+          // 环绕）。菜单项动态重建，聚焦集合每次按键从容器实时取。
+          if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+            ev.preventDefault(); ev.stopPropagation();
+            var items = m.querySelectorAll('[role="menuitemradio"]');
+            if (!items.length) return;
+            var at = -1;
+            for (var k = 0; k < items.length; k++) { if (items[k] === it) { at = k; break; } }
+            var next = ev.key === 'ArrowDown'
+              ? items[(at + 1) % items.length]
+              : items[(at - 1 + items.length) % items.length];
+            try { next.focus(); } catch (e2) { bridgeError('engineMenu:focus', e2); }
+            return;
+          }
+          // WB-045（审计 2026-09-23 清单·W5 批）：Escape 关闭菜单并归还焦点
+          //（menu 模式要求——读屏用户此前只能再按 Tab/点击才能离开菜单）
+          if (ev.key === 'Escape') {
+            ev.preventDefault(); ev.stopPropagation();
+            m.style.display = 'none';
+            var pillEl = document.getElementById('enginePill');
+            if (pillEl) {
+              pillEl.setAttribute('aria-expanded', 'false');
+              try { pillEl.focus(); } catch (e3) {}
+            }
+          }
         };
         m.appendChild(it);
       })(i);
@@ -144,6 +170,11 @@ document.addEventListener('click', function () {
 // —— 搜索（form submit + 按钮双路径——BUG-002/009 教训：IME action 与
 //    file:// 下的 submit 兼容都需要保底） ——
 var _searchBusy = false;
+// WB-057（审计 2026-09-23 清单·W5 批）：时序常量收敛到 start.js 的
+// window.AegisTiming 单源（本文件加载于其后——WB-125 顺序契约）；
+// 无头测试分文件加载时无该注入，字面量兜底与单源值保持一致。
+var TIMING = (typeof window !== 'undefined' && window.AegisTiming) ||
+  { BOOKMARK_RETRY_MS: 200, BOOKMARK_RETRY_MAX: 10, SEARCH_BUSY_RESET_MS: 1200 };
 function go() {
   if (_searchBusy) return;
   var v = document.getElementById('q').value.trim();
@@ -154,7 +185,7 @@ function go() {
   btn.textContent = '搜索中…';
   try { Host.navigate(v); } catch (e) { Host.jsError('navigate failed: ' + e); }
   // 导航被 Broker 确认面板挂起或失败时复原按钮（成功则页面随即卸载）
-  setTimeout(function () { btn.textContent = orig; _searchBusy = false; }, 1200);
+  setTimeout(function () { btn.textContent = orig; _searchBusy = false; }, TIMING.SEARCH_BUSY_RESET_MS);
 }
 function openUrl(u) {
   if (Host.has('navigate')) Host.navigate(u);
@@ -162,6 +193,16 @@ function openUrl(u) {
 document.addEventListener('keydown', function (e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
     e.preventDefault(); document.getElementById('q').focus(); document.getElementById('q').select();
+  }
+  // WB-045（审计 2026-09-23 清单·W5 批）：菜单展开时按 Escape 收起并复位
+  // aria-expanded（焦点不在菜单项上——如在胶囊/搜索框——时的第二条关闭路径）
+  if (e.key === 'Escape') {
+    var menu = document.getElementById('engineMenu');
+    var pill = document.getElementById('enginePill');
+    if (menu && menu.style.display === 'block') {
+      menu.style.display = 'none';
+      if (pill) pill.setAttribute('aria-expanded', 'false');
+    }
   }
 });
 
@@ -186,21 +227,20 @@ function setWallpaper(name) {
   var wl = document.getElementById('wpList');
   for (var i = 0; i < WALLPAPERS.length; i++) {
     (function (idx) {
-      var d = document.createElement('div');
+      // WB-051（审计 2026-09-23 清单·W5 批）：圆点由 div+手写 role/button
+      // 语义改为原生 button——键盘可达（Enter/Space 原生触发）与读屏按钮
+      // 角色由元素本体承担，不再依赖 tabindex+keydown 模拟
+      var d = document.createElement('button');
+      d.type = 'button';
       d.className = 'wp';
       d.dataset.i = idx;
       d.style.backgroundImage = "url('" + WALLPAPERS[idx].url.replace(/'/g, '%27') + "')";
       // WB-132（2026-09-26 审计）：tooltip/aria-label 用中文名——不向用户
       // 暴露内部资产文件名（此前 title 直接显示 "aurora-magenta.jpg"）
       d.title = WALLPAPERS[idx].label;
-      d.setAttribute('role', 'button');
       d.setAttribute('aria-label', '壁纸 ' + WALLPAPERS[idx].label);
-      d.tabIndex = 0;
       function pick() { setWallpaper(WALLPAPERS[idx].name); }
       d.onclick = pick;
-      d.onkeydown = function (ev) {
-        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); }
-      };
       wl.appendChild(d);
     })(i);
   }
@@ -265,7 +305,13 @@ function renderBookmarks() {
         box.textContent = '';
         var empty = document.createElement('div');
         empty.className = 'bm-empty';
-        empty.textContent = '还没有书签 — 浏览网页时点击地址栏右侧的 ☆ 按钮即可收藏';
+        // WB-048（审计 2026-09-23 清单·W5 批）：☆ 收藏按钮是 Windows 地址栏
+        // 专属 chrome——文案按平台差异化（Android 无地址栏 ☆，误导用户找
+        // 不存在的控件；当前能力面 Android 不进本分支——纵深防御，防后续
+        // 能力面扩展时文案失真）
+        empty.textContent = Host.kind() === 'android'
+          ? '还没有书签'
+          : '还没有书签 — 浏览网页时点击地址栏右侧的 ☆ 按钮即可收藏';
         box.appendChild(empty);
         return;
       }
@@ -337,12 +383,14 @@ function renderBookmarks() {
   } catch (e) { bridgeError('bookmarks', e); }
 }
 // 书签渲染：立即尝试 + 桥未就绪时有界重试（此前固定 200ms 魔法延时，
-// 慢机上桥未就绪即空宫格）
-(function renderBookmarksWithRetry(attempt) {
+// 慢机上桥未就绪即空宫格）。WB-057（审计 2026-09-23 清单·W5 批）：
+// 重试间隔/上限收敛到 TIMING 单源；具名函数化以便回归测试驱动。
+function renderBookmarksWithRetry(attempt) {
   if (Host.kind()) { renderBookmarks(); return; }
-  if (attempt >= 10) { renderBookmarks(); return; }
-  setTimeout(function () { renderBookmarksWithRetry(attempt + 1); }, 200);
-})(0);
+  if (attempt >= TIMING.BOOKMARK_RETRY_MAX) { renderBookmarks(); return; }
+  setTimeout(function () { renderBookmarksWithRetry(attempt + 1); }, TIMING.BOOKMARK_RETRY_MS);
+}
+renderBookmarksWithRetry(0);
 
 // ================= 内联事件处理器外置（CSP——审计 I83） =================
 // 此前 onclick/onsubmit 内联属性依赖"受信壳页"假设；CSP script-src 'self'
@@ -381,4 +429,16 @@ function renderBookmarks() {
       if (window.Snake && typeof Snake.close === 'function') Snake.close();
     });
   }
+})();
+
+// WB-050（审计 2026-09-23 清单·W5 批）：autofocus 属性移除（触屏设备页面
+// 加载即弹软键盘遮挡搜索区）——改由 JS 按 pointer:fine（鼠标/触控板精指针）
+// 条件聚焦；触屏用户保持无焦点初始态，桌面键盘用户习惯不变。
+(function focusSearchOnFinePointer() {
+  try {
+    if (window.matchMedia && window.matchMedia('(pointer: fine)').matches) {
+      var q = document.getElementById('q');
+      if (q && typeof q.focus === 'function') q.focus();
+    }
+  } catch (e) { bridgeError('autofocus:pointer-fine', e); }
 })();

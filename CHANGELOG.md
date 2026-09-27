@@ -145,6 +145,11 @@
 - 原生策略桥测试关闭集合并行——消除云 runner 原生 DLL 加载并发抖动。
 
 ## beta.16 (2026-09-07)
+> WB-099（审计 2026-09-23 清单·W5 批）起点注记：本文件最早条目为 beta.16——
+> **beta.1 – beta.15 无逐版条目**（仓库变更记录纪律自 2026-09-07 起建立，
+> 此前仅散见 git 提交历史，无发布级摘要可补）；beta.32–49 为 2026-09-23
+> 审计后按批补账（见文件头记账规则）。
+
 ### Fixed (崩溃 V3：安装版打不开——书签栏资源未定义)
 - **根因**：`RefreshBookmarkBar()` 调 `FindResource("BookmarkBarButton")`，但该资源在仓库从未定义。本机/无书签机器循环为空侥幸通过；**只要收藏过书签，启动即抛
   `ResourceReferenceKeyNotFoundException` → MainWindow 构造失败 → 安装版无法打开**。

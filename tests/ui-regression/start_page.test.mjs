@@ -267,3 +267,65 @@ test('WB-108 引擎菜单关闭路径：aria-expanded 双路径复位', () => {
   assert.ok(resets >= 3,
     'aria-expanded=false 复位须覆盖 toggleEngineMenu/selectEngine/document 点击三条路径');
 });
+
+// ═══ WB-031..100 W5 批（审计 2026-09-23 清单）补充断言 ═══
+
+// WB-043（审计 2026-09-23 清单·W5 批）：background-image 不可插值——无效
+// transition 不得回归（如需过渡须双层蒙版交叉淡入方案；剥注释只看代码）
+test('WB-043 壁纸层无效过渡：background-image transition 不得回归', () => {
+  const cssCode = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/transition\s*:[^;}]*background-image/.test(cssCode),
+    'background-image 不可插值动画——transition 声明无效且具误导性');
+});
+
+// WB-046（审计 2026-09-23 清单·W5 批）：音效开关切换态读屏可感知
+test('WB-046 音效开关 aria-pressed：标记声明 + JS 打开/切换双点同步', () => {
+  assert.match(HTML, /id="snakeSound"[^>]*aria-pressed="false"/,
+    '音效开关必须声明 aria-pressed 初始态');
+  assert.match(SNAKE, /setAttribute\('aria-pressed', muted \? 'true' : 'false'\)/g,
+    'JS 必须在静音态变化时同步 aria-pressed');
+  const syncs = [...SNAKE.matchAll(/setAttribute\('aria-pressed'/g)].length;
+  assert.ok(syncs >= 2, '打开复位与点击切换两个路径都必须同步');
+});
+
+// WB-049（审计 2026-09-23 清单·W5 批）：页脚提示与实际行为一致——
+// Ctrl+L 聚焦的是本页搜索框（地址栏属浏览器 chrome，不在 NTP）
+test('WB-049 页脚提示文案：Ctrl+L 指向搜索框而非不存在的地址栏', () => {
+  assert.match(HTML, /Ctrl\+L 聚焦搜索框/, '文案必须对齐实际行为');
+  assert.ok(!/Ctrl\+L 聚焦地址栏/.test(HTML), '「聚焦地址栏」旧文案不得回归');
+  assert.match(MAINJS, /e\.key\.toLowerCase\(\) === 'l'/, 'Ctrl+L 行为保持存在');
+});
+
+// WB-050（审计 2026-09-23 清单·W5 批）：autofocus 触屏弹软键盘——
+// 标记层移除 autofocus，改由 JS 按 pointer:fine 条件聚焦
+test('WB-050 autofocus 条件化：标记层无 autofocus，JS 按 pointer:fine 聚焦', () => {
+  assert.ok(!/\sautofocus/.test(HTML), '标记层不得保留 autofocus（触屏加载即弹软键盘）');
+  assert.match(MAINJS, /matchMedia\('\(pointer: fine\)'\)/,
+    '必须按精指针媒体条件聚焦');
+  assert.match(MAINJS, /focusSearchOnFinePointer|getElementById\('q'\)[\s\S]{0,40}focus\(\)/,
+    '聚焦目标必须是搜索框');
+});
+
+// WB-098（审计 2026-09-23 清单·W5 批）：默认壁纸三处硬编码一致性——
+// start.css / start.main.js / C# NtpAssets / Android AegisHomeBridge 单值
+test('WB-098 默认壁纸跨端一致：aurora-twilight.jpg 四处名单单值', () => {
+  const DEFAULT = 'aurora-twilight.jpg';
+  assert.match(CSS, new RegExp(`wallpapers/${DEFAULT}`),
+    'start.css 初始背景必须用默认壁纸');
+  assert.match(MAINJS, new RegExp(`current = '${DEFAULT}'`),
+    'start.main.js current 初始值必须与 CSS 一致');
+  const cs = readFileSync(join(ROOT, 'windows', 'src', 'Aegis.Windows.App', 'Chrome', 'Ntp', 'NtpAssets.cs'), 'utf8');
+  assert.match(cs, new RegExp(`DefaultWallpaper = "${DEFAULT}"`),
+    'C# NtpAssets.DefaultWallpaper 必须一致');
+  const kt = readFileSync(join(ROOT, 'android', 'app', 'src', 'main', 'java', 'com', 'aegis', 'browser', 'AegisHomeBridge.kt'), 'utf8');
+  assert.ok(kt.includes(`"${DEFAULT}"`), 'Android AegisHomeBridge 默认壁纸必须一致');
+});
+
+// WB-100（审计 2026-09-23 清单·W5 批）：得分变化读屏可感知
+test('WB-100 得分 chip aria-live：polite 播报且仅作用于得分', () => {
+  assert.match(HTML, /class="chip" aria-live="polite"><span class="k">得分</,
+    '得分 chip 必须声明 aria-live=polite');
+  const bestChip = HTML.match(/class="chip best"([^>]*)>/);
+  assert.ok(bestChip && !/aria-live/.test(bestChip[1]),
+    '「最高」chip 静态不播报（避免重复播报）');
+});

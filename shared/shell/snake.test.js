@@ -7,9 +7,12 @@ const path = require("path");
 const fs = require("fs");
 
 // ═══ Mock DOM 环境 ═══
+// WB-081（审计 2026-09-23 清单·W5 批）：全部 mock 2D 上下文共享 fillRect
+// 记录器——drawPixelText/DIG 位图覆盖测试按增量计数断言绘制行为
+const fillCalls = [];
 function createMockContext2D() {
   return {
-    fillRect: () => {}, clearRect: () => {},
+    fillRect: (...args) => { fillCalls.push(args); }, clearRect: () => {},
     beginPath: () => {}, moveTo: () => {}, lineTo: () => {}, stroke: () => {},
     arc: () => {}, fill: () => {}, closePath: () => {},
     save: () => {}, restore: () => {}, translate: () => {},
@@ -45,6 +48,11 @@ function mockEl(id, overrides) {
       style: { display: "", width: "", height: "" },
       classList: { add: () => {}, remove: () => {} },
       addEventListener: () => {},
+      // WB-046（审计 2026-09-23 清单·W5 批）：mock 补 setAttribute 记录——
+      // 音效开关 aria-pressed 同步断言需要读取属性写入
+      _attrs: {},
+      setAttribute(n, v) { this._attrs[n] = String(v); },
+      getAttribute(n) { return n in this._attrs ? this._attrs[n] : null; },
       focus: () => {}, selectAll: () => {},
       offsetWidth: 0,
       isSelected: false,
@@ -229,7 +237,9 @@ const T = Snake.__test;
 test("__test 钩子完整", () => {
   assert.ok(T, "__test 钩子存在");
   ["turn", "step", "freeCell", "state", "score", "body", "dir", "queue",
-   "food", "bonus", "setFood", "setBonus"].forEach((k) =>
+   "food", "bonus", "setFood", "setBonus",
+   // WB-076..081（审计 2026-09-23 清单·W5 批）：新增只读/受控钩子
+   "stepMs", "particles", "best", "primaryAction", "drawPixelText"].forEach((k) =>
     assert.ok(T[k] !== undefined, "钩子缺少 " + k));
 });
 
@@ -332,6 +342,143 @@ test("WB-019 奖果 TTL 耗尽自动消失（中心绕圈 40 步不死）", () =
   assert.notStrictEqual(T.state(), "dead", "40 步绕圈期间存活");
   assert.strictEqual(T.bonus(), null, "TTL 耗尽奖励消失");
   assert.strictEqual(T.score(), 0, "绕圈未吃食");
+  Snake.close();
+});
+
+// ═══ WB-076..081（审计 2026-09-23 清单·W5 批）：提速下限/最高分即时更新/
+// localStorage 往返/四态文案/die 粒子/DIG 位图覆盖——此前零测试面 ═══
+
+test("WB-076 提速曲线下限：连续吃食 stepMs 单调下降并在 ~70 处触底稳定", () => {
+  Snake.open();
+  assert.strictEqual(T.stepMs(), 150, "初始步进间隔 150ms");
+  // 触底需 ~27 次吃食（蛇长随之 +27）——直线吃必撞墙，改走简单蛇形路径
+  //（各步互不重复、不出界），食物每步放在头前方一格 → 每步都吃
+  const legs = [
+    [1, 0, 13],   // → x:7..20（y=12）
+    [0, 1, 1],
+    [-1, 0, 15],  // ← x:20..5（y=13）
+    [0, 1, 1],
+    [1, 0, 15],   // → （y=14）
+    [0, 1, 1],
+    [-1, 0, 15],  // ← （y=15）
+  ];
+  outer:
+  for (const [dx, dy, n] of legs) {
+    T.turn(dx, dy);
+    for (let s = 0; s < n; s++) {
+      const head = T.body()[0];
+      T.setFood(head.x + dx, head.y + dy);   // 路径正前方
+      T.step();
+      if (T.state() === "dead") break outer;
+      if (T.stepMs() <= 70) break outer;     // 触底即止
+    }
+  }
+  // open() 后 state='start'（step 无状态门禁——对齐 WB-018/019 驱动方式）
+  assert.notStrictEqual(T.state(), "dead", "蛇形路径上吃食不应死亡");
+  // 下限性质：stepMs > 70 才再降 3ms——触底值必然 ≤70 且 > 60
+  //（计划口径「提速曲线下限 70」）
+  assert.ok(T.stepMs() <= 70 && T.stepMs() > 60, `触底值落在下限区（实际 ${T.stepMs()}）`);
+  const floor = T.stepMs();
+  const head = T.body()[0];
+  T.setFood(head.x + 1, head.y);
+  T.step();
+  assert.strictEqual(T.stepMs(), floor, "触底后继续吃食不再提速");
+  Snake.close();
+});
+
+test("WB-077 最高分即时更新：吃食后内存与 UI 同步，localStorage 延迟持久化", () => {
+  delete mockStorage["snakeBest"];
+  Snake.open();
+  assert.strictEqual(T.best(), 0, "初始内存最高分 0");
+  const head = T.body()[0];
+  T.setFood(head.x + 1, head.y);
+  T.step();
+  assert.strictEqual(T.score(), 10, "吃食 +10");
+  assert.strictEqual(T.best(), 10, "最高分内存即时更新（updScore 内随分数提升）");
+  assert.strictEqual(elements["snakeBest"].textContent, "10", "最高分 chip 同步刷新");
+  assert.strictEqual(mockStorage["snakeBest"], undefined,
+    "localStorage 不在吃食路径写盘（写放大治理——持久化集中在 persistBest）");
+  Snake.close();
+  assert.strictEqual(mockStorage["snakeBest"], "10", "close() 触发 persistBest 落盘");
+});
+
+test("WB-078 localStorage 往返：落盘 → 重开加载 → 死亡再落盘", () => {
+  delete mockStorage["snakeBest"];
+  mockStorage["snakeBest"] = "7";
+  Snake.open();
+  assert.strictEqual(T.best(), 7, "重开必须从 localStorage 加载既有最高分");
+  assert.strictEqual(elements["snakeBest"].textContent, "7");
+  const head = T.body()[0];
+  T.setFood(head.x + 1, head.y);
+  T.step();                                        // 吃到 10 分 → best 即时 10
+  T.setFood(20, 2);                                // 食物移开——撞墙死
+  let g = 0;
+  while (T.state() !== "dead" && g++ < 30) T.step();
+  assert.strictEqual(T.state(), "dead");
+  assert.strictEqual(mockStorage["snakeBest"], "10", "die() 必须 persistBest 落盘");
+  Snake.close();
+  Snake.open();
+  assert.strictEqual(T.best(), 10, "往返：再次打开读到落盘的最高分");
+  Snake.close();
+  delete mockStorage["snakeBest"];
+});
+
+test("WB-079 setState 四态文案：start/play/pause/dead 全覆盖", () => {
+  Snake.open();
+  // start
+  assert.strictEqual(elements["veilTitle"].textContent, "准备好出发了吗？");
+  assert.strictEqual(elements["veilBtn"].textContent, "出发");
+  // play（遮罩收起）
+  T.primaryAction();
+  assert.strictEqual(T.state(), "play");
+  assert.strictEqual(elements["snakeVeil"].style.display, "none");
+  // pause
+  T.primaryAction();
+  assert.strictEqual(T.state(), "pause");
+  assert.strictEqual(elements["veilTitle"].textContent, "歇一会儿");
+  assert.strictEqual(elements["veilBtn"].textContent, "继续");
+  assert.strictEqual(elements["snakeVeil"].style.display, "flex");
+  // 回到 play 再撞墙 → dead（0 分非纪录分支）
+  T.primaryAction();
+  assert.strictEqual(T.state(), "play");
+  T.setFood(20, 2);
+  let g = 0;
+  while (T.state() !== "dead" && g++ < 30) T.step();
+  assert.strictEqual(T.state(), "dead");
+  assert.strictEqual(elements["veilTitle"].textContent, "这段旅程 · 0 分");
+  assert.strictEqual(elements["veilSub"].textContent, "最高 0 分 · 再来一次，你可以的！");
+  assert.strictEqual(elements["veilBtn"].textContent, "再来一次");
+  Snake.close();
+});
+
+test("WB-080 die() 粒子：每蛇身节点生成一枚暖色粒子", () => {
+  Snake.open();
+  T.setFood(20, 2);
+  let g = 0;
+  while (T.state() !== "dead" && g++ < 30) T.step();
+  assert.strictEqual(T.state(), "dead");
+  const ps = T.particles();
+  assert.strictEqual(ps.length, 3, "初始蛇长 3——每节点一枚粒子");
+  for (const p of ps) {
+    assert.ok(p.life > 0, "粒子必须带存活期");
+    assert.ok(["#FFF0C4", "#FFCF6E"].includes(p.color), "粒子限定暖色板");
+  }
+  assert.strictEqual(ps[0].color, "#FFF0C4", "蛇头粒子亮蜜色");
+  Snake.close();
+});
+
+test("WB-081 DIG 位图覆盖：+ 与 0-9 全部字形可绘制，未知字形静默跳过", () => {
+  Snake.open();  // 确保 px/pctx 就绪
+  const glyphs = ["+", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+  for (const ch of glyphs) {
+    const before = fillCalls.length;
+    T.drawPixelText(ch, 10, 10, "#FFF6E3");
+    assert.ok(fillCalls.length > before, `字形 ${ch} 必须产生 fillRect 绘制`);
+  }
+  // 未知字形：不绘制、不崩溃（drawPixelText 对缺字形 continue）
+  const before2 = fillCalls.length;
+  assert.doesNotThrow(() => T.drawPixelText("Z", 10, 10, "#FFF6E3"));
+  assert.strictEqual(fillCalls.length, before2, "未知字形不得产生绘制");
   Snake.close();
 });
 

@@ -45,7 +45,10 @@
            submit 与按钮点击双路径绑定在 start.main.js——BUG-009 保底） -->
       <form id="searchForm">
       <input id="q" type="search" enterkeyhint="search" autocomplete="off" aria-label="搜索网页或输入网址"
-             placeholder="搜索网页或输入网址…" autofocus>
+             placeholder="搜索网页或输入网址…">
+      <!-- WB-050（审计 2026-09-23 清单·W5 批）：autofocus 属性移除——触屏
+           设备加载即弹软键盘遮挡搜索区；聚焦改由 start.main.js 按
+           pointer:fine 条件执行（桌面键盘用户习惯不变） -->
       <button type="button" id="searchBtn">搜索</button>
       </form>
     </div>
@@ -87,7 +90,9 @@
     <span class="wp-label">壁纸</span>
     <div id="wpList"></div>
   </div>
-  <div class="footer">Enter 打开 · Ctrl+L 聚焦地址栏</div>
+  <!-- WB-049（审计 2026-09-23 清单·W5 批）：提示文案对齐实际行为——
+       Ctrl+L 聚焦的是本页搜索框（首页无地址栏；地址栏属浏览器 chrome） -->
+  <div class="footer">Enter 打开 · Ctrl+L 聚焦搜索框</div>
 
 
   <!-- 贪吃蛇（暖阳像素：金色时刻 · 温暖正面——双端统一单源） -->
@@ -99,10 +104,15 @@
       <div class="snake-head">
         <span class="title">🐍 贪吃蛇</span>
         <div class="chips">
-          <span class="chip"><span class="k">得分</span><b id="snakeScore">0</b></span>
+          <!-- WB-100（审计 2026-09-23 清单·W5 批）：得分 chip 补 aria-live=polite——
+               得分变化此前纯视觉，读屏不可感知（对齐 imBody 的 polite 口径；
+               仅「得分」播报，「最高」静态不播） -->
+          <span class="chip" aria-live="polite"><span class="k">得分</span><b id="snakeScore">0</b></span>
           <span class="chip best"><span class="k">最高</span><b id="snakeBest">0</b></span>
         </div>
-        <button class="snake-sound" id="snakeSound" title="音效开关" aria-label="音效开关">🔊</button>
+        <!-- WB-046（审计 2026-09-23 清单·W5 批）：音效开关为切换按钮——
+             aria-pressed 声明初始态，JS 切换时同步（start.snake.js） -->
+        <button class="snake-sound" id="snakeSound" title="音效开关" aria-label="音效开关" aria-pressed="false">🔊</button>
         <button class="snake-close" id="snakeClose" title="退出" aria-label="退出游戏">&#10005;</button>
       </div>
       <div class="snake-stage">
