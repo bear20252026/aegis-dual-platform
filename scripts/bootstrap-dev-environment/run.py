@@ -50,19 +50,40 @@ def main() -> int:
     checks = [
         ("dotnet", ["dotnet", "--version"], ".NET 10（Windows 壳——dotnet build）"),
         ("cargo", ["cargo", "--version"], "Rust（core/rust-policy-core——cargo test）"),
+        # SP-036（审计 2026-09-23 清单·SP1 批）：补 Node.js 检查——
+        # node --test UI 回归门禁此前不在引导面（漏检）
+        ("node", ["node", "--version"], "Node.js >= 21（tests/ui-regression——node --test glob）"),
+    ]
+    # SP-082（审计 2026-09-23 清单·SP1 批）：可选工具检查（缺失不阻断——
+    # 仅发布打包需要；ISCC = Inno Setup 编译器，release-windows 云端打包用）
+    optional_checks = [
+        ("ISCC", ["ISCC", "/?"], "Inno Setup（仅本地出包需要——CI 云端已内置）"),
     ]
     ok = True
     for tool, cmd, note in checks:
         passed, detail = _check(tool, cmd)
         print(f"  {'✅' if passed else '❌'} {tool}: {detail}（{note}）")
         ok = ok and passed
+    for tool, cmd, note in optional_checks:
+        passed, detail = _check(tool, cmd)
+        print(f"  {'✅' if passed else '⚪ 可选'} {tool}: {detail}（{note}）")
     # PY-201：Python 行不再复用 _check("python", ...)——统一走 _check_python
     passed, detail = _check_python()
     print(f"  {'✅' if passed else '❌'} python: {detail}"
           f"（Python >= {MIN_PYTHON[0]}.{MIN_PYTHON[1]}——contracts/codegen + agent 测试）")
     ok = ok and passed
-    print("环境检查完成——全部就绪" if ok else "环境不完整——按提示安装缺失工具")
-    return 0 if ok else 1
+    # SP-081（审计 2026-09-23 清单·SP1 批）：失败附安装入口指引——此前仅
+    # 一句"按提示安装"无落点
+    if not ok:
+        print(
+            "环境不完整——安装指引：\n"
+            "  · dotnet  → https://dotnet.microsoft.com/download（.NET 10 SDK）\n"
+            "  · cargo   → https://rustup.rs\n"
+            "  · node    → https://nodejs.org（LTS >= 21，启用 node --test glob）\n"
+            "  · python  → https://www.python.org/downloads/（>= 3.12）")
+        return 1
+    print("环境检查完成——全部就绪")
+    return 0
 
 
 if __name__ == "__main__":

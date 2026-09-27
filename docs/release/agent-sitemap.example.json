@@ -1,4 +1,5 @@
 {
+  "_comment": "SP-109（审计 2026-09-23 清单·SP1 批）：本示例为 legacy pywebview 时代 sitemap 语义——现役 Agent/MCP 面（agent/，action-catalog）未消费该文件；保留作规划参考，字段演进随 ADR-004 复开。",
   "version": 1,
   "domain": "intra.gov.cn",
   "_comment": "Aegis 内网 Agent sitemap 示例（C2B 阶段——ceLLMate 语义动作映射 + ADL 治理 + 动词驱动）。由内网运维定义（类似 API 文档）；实际执行经 MCP/请求管线。risk=low/high；confirm=required/optional（高风险动作需确认）。",

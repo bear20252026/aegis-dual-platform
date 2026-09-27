@@ -1,4 +1,5 @@
 {
+  "$comment": "栈归属：legacy/windows-pywebview js_api（归档只读——ADR-009）；由 scripts/gen_jsapi_schema.py 生成，请勿手改（CI diff 门禁）。",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Aegis js_api Bridge Schema",
   "description": "Aegis 浏览器暴露给注入式 UI 的 Python 桥接口规范。由 scripts/gen_jsapi_schema.py 自动生成，勿手改。",

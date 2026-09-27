@@ -1,3 +1,5 @@
+> **历史文档（SP-123c，审计 2026-09-23 清单·SP1 批）时代横幅**：蓝图期开发清单——条目完成状态以 docs/product/feature-parity-checklist.md 与审计台账为准。
+
 # Aegis 最终版开发项目清单（final-development-checklist）
 
 > 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级

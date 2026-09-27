@@ -1,3 +1,5 @@
+> **历史文档（SP-121，审计 2026-09-23 清单·SP1 批）时代横幅**：pytauri 路线已随 ADR-009（C# 单轨）失效；能力映射保留作调研溯源。
+
 # pytauri capabilities 映射方案（pytauri-capabilities-mapping）
 
 > 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级

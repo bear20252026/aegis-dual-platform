@@ -23,9 +23,12 @@ const IMPORT = readFileSync(join(SHELL, 'start.import.js'), 'utf8');
 const allScripts = HOSTJS + '\n' + MAINJS + '\n' + SNAKE + '\n' + IMPORT;
 
 function syntaxOk(body) {
-  // 去宿主对象引用后应可解析（宿主对象运行时由两端注入）
+  // 去宿主对象引用后应可解析（宿主对象运行时由两端注入）。
+  // SP-135（审计 2026-09-23 清单·SP1 批）：C# 单轨后 chrome.webview 是正典
+  // 宿主引用——语法消毒面必须覆盖三宿主（pywebview 归档/AegisBridge/chrome.webview）。
   new Function(body.replace(/window\.pywebview/g, 'window.__h1__')
-                   .replace(/window\.AegisBridge/g, 'window.__h2__'));
+                   .replace(/window\.AegisBridge/g, 'window.__h2__')
+                   .replace(/chrome\.webview/g, 'window.__h3__'));
   return true;
 }
 
@@ -69,6 +72,21 @@ test('BUG-011/012: 双端统一——返回形态统一 + 贪吃蛇游戏（单�
   assert.ok(!/AddressBarWithSnake/.test(mainKt), 'MainActivity 不得残留旧版调用');
 });
 
+// SP-043（审计 2026-09-23 清单·SP1 批）：BUG-013 此前零静态回归——targetSdk 36
+// 起返回事件经 OnBackInvokedCallback 分发（手势导航 onKeyDown(KEYCODE_BACK)
+// 永远收不到，返回直接退出应用）。Manifest 声明 + OnBackPressedCallback 接管
+// 双断言锁定，拆掉任一半即回归。
+test('BUG-013 返回接管：Manifest 预测性返回声明 + OnBackPressedCallback 接管', () => {
+  const manifest = readFileSync(join(ROOT, 'android', 'app', 'src', 'main', 'AndroidManifest.xml'), 'utf8');
+  assert.match(manifest, /android:enableOnBackInvokedCallback="true"/,
+    'Manifest 必须启用 OnBackInvokedCallback 返回分发（targetSdk 36 手势导航语义）');
+  const mainKt = readFileSync(join(ROOT, 'android', 'app', 'src', 'main', 'java', 'com', 'aegis', 'browser', 'MainActivity.kt'), 'utf8');
+  assert.match(mainKt, /import androidx\.activity\.OnBackPressedCallback/,
+    '必须引入 OnBackPressedCallback（返回接管的唯一正典路径）');
+  assert.match(mainKt, /class BackPressHandler\s*:\s*OnBackPressedCallback/,
+    'BackPressHandler 必须继承 OnBackPressedCallback（手势/按键双路径统一接管）');
+});
+
 test('BUG-003 搜索框 UI 错乱：#searchForm 必须承担 flex 行布局', () => {
   // A8 拆分后：布局样式单源在 start.css
   assert.match(CSS, /#searchForm\s*\{[^}]*display:flex/, 'form 打断外层 flex 的回归');
@@ -92,6 +110,12 @@ test('BUG-005 离线画板：按钮 + 桥调用 + 双端打包配置必须齐备
   // Windows 打包链
   const spec = readFileSync(join(ROOT, 'legacy', 'windows-pywebview', 'aegis_webview.spec'), 'utf8');
   assert.match(spec, /geogebra/, 'Windows spec 必须条件打包 geogebra');
+  // SP-042（审计 2026-09-23 清单·SP1 批）：C# 单轨正典打包链——csproj 才是
+  // 现役打包事实来源（上一行 legacy spec 仅归档守护）；SP-145 后画板资源
+  // 暂存已迁 dist/geogebra-cache/，csproj 条件打包断言必须同步锁定
+  const csproj = readFileSync(join(ROOT, 'windows', 'src', 'Aegis.Windows.App', 'Aegis.Windows.App.csproj'), 'utf8');
+  assert.match(csproj, /dist\\geogebra-cache/, 'C# csproj 必须从 dist/geogebra-cache 条件打包画板资源（单轨事实来源）');
+  assert.match(csproj, /GeoGebra\.html/, 'C# csproj 必须以 GeoGebra.html 入口存在为打包条件（fail-closed）');
   // Android 打包链（M-4 后经复合 action——单源无漂移）
   const wf = readFileSync(join(ROOT, '.github', 'workflows', 'release-android.yml'), 'utf8');
   assert.match(wf, /uses: \.\/\.github\/actions\/prepare-geogebra/,

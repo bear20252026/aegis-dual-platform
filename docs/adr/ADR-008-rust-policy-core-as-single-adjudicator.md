@@ -2,7 +2,7 @@
 
 - 状态：已接受
 - 日期：2026-09-02
-- 关联：ADR-002（capability broker）、ADR-005/006（Rust 策略核心）、ADR-007（单源守卫）；Windows 双栈现役口径另见 CLAUDE.md 与 KNOWLEDGE_BASE.md ADR-009
+- 关联：ADR-002（capability broker）、ADR-005/006（Rust 策略核心）、ADR-007（单源守卫）；Windows 正典口径另见 CLAUDE.md 与 ADR-009（单轨——双栈语义已收敛）
 
 ## 背景
 
@@ -15,7 +15,7 @@
 | `core/rust-policy-core/src/origin.rs` | 权威实现（含 contracts url-origin-* 向量对拍） |
 | `android/broker/.../OriginPolicy.kt` | Android 宿主侧副本 |
 | `windows/src/.../Broker/OriginPolicy.cs` | C# 宿主侧副本 |
-| `legacy/windows-pywebview/app/security.py` | Python 现役栈副本 |
+| `legacy/windows-pywebview/app/security.py` | Python 归档栈副本（只读冻结——ADR-009 D4；仅 P0 披露通道评估） |
 
 四处长期各自演进必然漂移：同一 URL 展示层与裁决层可得出不同判定
 （BrowserEngine A-3 修复即是此类漂移的实例）。且 `AndroidBroker` 部分路径

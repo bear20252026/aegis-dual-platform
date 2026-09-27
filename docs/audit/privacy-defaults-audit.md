@@ -1,3 +1,5 @@
+> **时代横幅（审计 2026-09-23 清单·SP1 批）**：本文对照对象（legacy pywebview 隐私默认）已归档——隐私默认的现行事实面见 windows/ 正典栈与 C# 审计批次（SP-112）。
+
 # 隐私默认配置对照审计：LibreWolf vs Aegis（落地建议②）
 
 > 审计日期：2026-08-15 ｜ 对照源：LibreWolf `librewolf.cfg`（gitlab.com/librewolf-community/settings）

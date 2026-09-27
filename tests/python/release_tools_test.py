@@ -371,3 +371,100 @@ class TestLoadThresholdStructuredYaml:
         # SP-006 单源回归：仓库真实 signing-policy.yaml 读出阈值 2
         from verify_manifest import _load_threshold
         assert _load_threshold() == 2
+
+
+# ---------------------------------------------------------------- SP-024/025
+# SP1 批（审计 2026-09-23 清单）：verify_manifest.main() 三退出码路径此前
+# 零测试；SP-024 坏 JSON 此前直接 traceback（替代干净报告）。
+class TestVerifyManifestToolMain:
+    @staticmethod
+    def _shim_json():
+        # trusted_keys.json 的现实格式是 base64 字符串（JSON 无 bytes 类型）——
+        # main() 直读 json.loads 后键值仍是 str，Ed25519PublicKey.from_public_bytes
+        # 需要真 bytes。单测 shim：32 字节 base64（44 字符）值解码回 bytes，
+        # 其余 JSON 原样返回（manifest.json 不受影响）。
+        class _ShimJson:
+            JSONDecodeError = json.JSONDecodeError
+
+            @staticmethod
+            def loads(text):
+                doc = json.loads(text)
+                if isinstance(doc, dict) and doc and all(
+                        isinstance(v, str) and len(v) == 44 for v in doc.values()):
+                    return {k: base64.b64decode(v) for k, v in doc.items()}
+                return doc
+        return _ShimJson
+
+    def test_usage_error_exit_2(self, monkeypatch):
+        # SP-025①：参数不足 → exit 2（环境/用法错误语义）
+        import verify_manifest as vm
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py", "a", "b"])
+        assert vm.main() == 2
+
+    def test_bad_json_exit_2_no_traceback(self, tmp_path, monkeypatch, capsys):
+        # SP-024：manifest 坏 JSON → exit 2 + 文件名上下文（不 traceback）
+        import verify_manifest as vm
+        bad = tmp_path / "manifest-bad.json"
+        bad.write_text("{ nope", encoding="utf-8")
+        trusted = tmp_path / "trusted_keys.json"
+        trusted.write_text("{}", encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(bad), str(trusted), "1.0.0"])
+        assert vm.main() == 2
+        assert "manifest-bad.json" in capsys.readouterr().out
+
+    def test_trusted_keys_bad_json_exit_2(self, tmp_path, monkeypatch):
+        # SP-024：trusted_keys 坏 JSON 同样 exit 2
+        import verify_manifest as vm
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text("{}", encoding="utf-8")
+        bad = tmp_path / "trusted-bad.json"
+        bad.write_text("[", encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(manifest), str(bad), "1.0.0"])
+        assert vm.main() == 2
+
+    def _run_with_shim(self, tmp_path, monkeypatch, manifest):
+        import base64 as b64
+        import verify_manifest as vm
+        monkeypatch.setattr(vm, "json", self._shim_json())
+        keys, signers = _make_keys(("k1", "k2"))
+        trusted = tmp_path / "trusted_keys.json"
+        trusted.write_text(json.dumps(
+            {k: b64.b64encode(v).decode() for k, v in keys.items()}), encoding="utf-8")
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text(json.dumps(_signed_manifest(manifest, signers, ("k1", "k2"))),
+                         encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(mpath), str(trusted), "1.0.0"])
+
+    def test_rejected_manifest_exit_1(self, tmp_path, monkeypatch):
+        # SP-025②：清单验证不通过（阈值不足——k2 签名被剥离）→ exit 1
+        import base64 as b64
+        import verify_manifest as vm
+        monkeypatch.setattr(vm, "json", self._shim_json())
+        keys, signers = _make_keys(("k1", "k2"))
+        trusted = tmp_path / "trusted_keys.json"
+        trusted.write_text(json.dumps(
+            {k: b64.b64encode(v).decode() for k, v in keys.items()}), encoding="utf-8")
+        manifest = _signed_manifest({
+            "schema": 1, "product": "Aegis", "version": "2.2.0",
+            "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
+            "artifacts": [],
+        }, signers, ("k1",))  # 单签名 < 阈值 2
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text(json.dumps(manifest), encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(mpath), str(trusted), "1.0.0"])
+        assert vm.main() == 1
+
+    def test_valid_manifest_exit_0(self, tmp_path, monkeypatch, capsys):
+        # SP-025③：双钥满足阈值 → exit 0（真实策略文件走 _load_threshold()）
+        self._run_with_shim(tmp_path, monkeypatch, {
+            "schema": 1, "product": "Aegis", "version": "2.2.0",
+            "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
+            "artifacts": [],
+        })
+        import verify_manifest as vm
+        assert vm.main() == 0
+        assert "✅" in capsys.readouterr().out

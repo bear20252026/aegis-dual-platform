@@ -1,5 +1,6 @@
 ; Aegis Browser（C# 正典栈）Windows 安装包脚本（Inno Setup 6）——ADR-009
-; 与 PyInstaller stable 安装包（AegisSetup.iss）并存：独立 AppId，互不覆盖。
+; SP-055（审计 2026-09-23 清单·SP1 批）：单轨正典——唯一 Windows 安装包脚本
+;（Python 时代 AegisSetup.iss 已删除，verify_versions/sync_versions 不再同步）。
 ; 版本号不写死——CI 以 /DMyAppVersionOverride=<VERSION_NAME> 运行时注入
 ; （单源 shared/version.properties，杜绝 iss 版本漂移重演 v2.1.11 事故）。
 ; 本地编译：ISCC.exe /DMyAppVersionOverride=<VERSION_NAME> AegisSetup-CSharp.iss

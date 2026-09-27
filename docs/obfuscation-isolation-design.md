@@ -1,3 +1,5 @@
+> **历史文档（SP-111，审计 2026-09-23 清单·SP1 批）时代横幅**：本文设计的混淆链针对 PyInstaller 交付——该交付形态已随 ADR-009（单轨 Inno Setup）**失去对象**；现役发布保护见 release/（SLSA attestation/SBOM/签名策略）。
+
 # B1 混淆隔离架构设计（obfuscation-isolation-design）
 
 > 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级

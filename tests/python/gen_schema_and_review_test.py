@@ -178,12 +178,12 @@ class TestCollectSources:
         assert "README.md" in keys
 
     def test_file_copy_dead_doc_entries_removed(self):
-        # PY-204：docs/DESIGN.md 与 docs/KNOWLEDGE_BASE.md 是 FILE_COPY 死条目
+        # PY-204：docs/DESIGN.md（现 docs/audit/apple-design-analysis.md——SP-049 迁移）与 docs/KNOWLEDGE_BASE.md 是 FILE_COPY 死条目
         #（TREE_COPY ("docs","docs") 已整树覆盖）——FILE_COPY 不得再登记 docs/
         assert not any(f.startswith("docs/") for f in brp.FILE_COPY)
         # 且两文件仍经树复制进入评审包（覆盖关系而非丢失）
         keys = {p.as_posix() for p in brp.collect_sources()}
-        assert "docs/DESIGN.md" in keys
+        assert "docs/audit/apple-design-analysis.md" in keys  # SP-049：DESIGN.md 移入 docs/audit/（树复制覆盖验证随迁）
         assert "docs/KNOWLEDGE_BASE.md" in keys
 
     def test_walk_prunes_excluded_dirs_at_dir_level(self, tmp_path, monkeypatch):

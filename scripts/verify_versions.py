@@ -64,9 +64,34 @@ def main() -> int:
     # 审计修复：不再校验已死的 Python 时代 AegisSetup.iss——改为校验
     # shared/release.json（此前完全无门禁，漂移三个大版本未被发现）
     release_json = json.loads(inputs["shared/release.json"].read_text(encoding="utf-8"))
+    # SP1 批跟进（审计 2026-09-23 清单；A6 批 AD-100 配套）：Android 版本
+    # 已单源迁移——build.gradle.kts 构建期读取 shared/version.properties
+    #（versionNameFromProperties/versionCodeFromProperties），字面量断言失效。
+    # 改校验单源接线本身：①defaultConfig 必须消费 properties 派生值；
+    # ②不得残留硬编码字面量（防双源回潮）；③本文件已在读取同一
+    # version.properties（values 即单源值），接线正确则三端必然一致。
+    def android_version_wired(name: str) -> bool:
+        return bool(re.search(
+            rf"(?m)^\s*{re.escape(name)}\s*=\s*{re.escape(name)}FromProperties\s*$",
+            android_text))
+
+    def android_version_hardcoded(name: str) -> bool:
+        return expected_assignment(android_text, name) is not None
+
+    android_version_checks = [
+        ("Android versionName wiring",
+         android_version_wired("versionName") and not android_version_hardcoded("versionName"),
+         True),
+        ("Android versionCode wiring",
+         android_version_wired("versionCode") and not android_version_hardcoded("versionCode"),
+         True),
+    ]
+
     expected = {
-        "Android versionCode": (expected_assignment(android_text, "versionCode"), values["VERSION_CODE"]),
-        "Android versionName": (expected_assignment(android_text, "versionName"), values["VERSION_NAME"]),
+        "Android versionName": (
+            android_version_checks[0][1], android_version_checks[0][2]),
+        "Android versionCode": (
+            android_version_checks[1][1], android_version_checks[1][2]),
         "Windows Version": (expected_xml_value(windows_text, "Version"), values["VERSION_NAME"]),
         "Windows AssemblyVersion": (expected_xml_value(windows_text, "AssemblyVersion"), values["WINDOWS_PACKAGE_VERSION"]),
         "Windows FileVersion": (expected_xml_value(windows_text, "FileVersion"), values["WINDOWS_PACKAGE_VERSION"]),

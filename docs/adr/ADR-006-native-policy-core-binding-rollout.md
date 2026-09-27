@@ -24,6 +24,9 @@ Windows 不接入未审计的第三方 UniFFI C# 生成器。Windows 后续仅�
 
 ## 参考
 
+> SP-077（审计 2026-09-23 清单·SP1 批）：外链核验日期 2026-09-27（全部可达；
+> uniffi-rs 站点随版本演进，内容以 0.32 冻结版为准）。
+
 [1] [UniFFI 0.32 用户指南：受支持语言](https://mozilla.github.io/uniffi-rs/)
 
 [2] [UniFFI README：官方与第三方语言绑定范围](https://github.com/mozilla/uniffi-rs/blob/main/README.md)

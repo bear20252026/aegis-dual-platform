@@ -1,3 +1,5 @@
+> **时代横幅（审计 2026-09-23 清单·SP1 批）**：本文评分为外部工具产出（pyscn/skylos/valknut——获取与复跑方式见 docs/quality-reports/ 各报告头与 .github/workflows），分数不代表正典栈现状（SP-129）。
+
 # Aegis 项目专家级审计报告（expert-audit）
 
 > 审计日期：2026-08-15 ｜ 级别：国家项目 / 专家级

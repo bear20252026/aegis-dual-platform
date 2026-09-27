@@ -14,7 +14,9 @@
 ## 设计要点
 
 - 传输层验证 token 后构造 `AgentAuthContext`（principal/scopes/expires_at/
-  nonce——mcp.py P0-02 已实现）——网页内容不得直接构造
+  nonce——mcp.py P0-02 时代已实现）——网页内容不得直接构造。
+  > SP-064（审计 2026-09-23 清单·SP1 批）：mcp.py 已随 pywebview 栈归档
+  >（legacy 只读冻结）——现役等价实现为 agent/（E2EBroker——SP-A1 起）
 - 令牌不落地日志（脱敏——audit-event schema）
 - 命名空间隔离（CSA 官方——多服务器独立凭证——防"上帝令牌"——每 IPC
   连接独立会话）

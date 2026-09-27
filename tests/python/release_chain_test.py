@@ -4,13 +4,21 @@
 # SP-160（2026-09-26 审计）：_version_tuple 用例单源化——原
 # release_tools_test.py 的重复用例类已删，全部并入本文件。
 # PY-184/199/210/212 + SP-144：本批次新增发布链用例。
+# SP1 批（审计 2026-09-23 清单）：SP-030 verify_provenance mock subprocess
+# 单测；SP-031 release-verify.json 测试向量元一致性门禁。
 from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
 
 from update_verifier import UpdateRejected, _version_tuple
 from verify_artifact_set import verify_artifact_set
+from verify_provenance import verify_provenance as run_provenance
 
 
 class TestVersionPrereleaseOrdering:
@@ -286,3 +294,124 @@ class TestIterReleaseFilesSingleSource:
         (tmp_path / "a.bin").write_bytes(b"x")
         assert [p.relative_to(tmp_path).as_posix()
                 for p in iter_release_files(tmp_path, manifest)] == ["a.bin"]
+
+
+# ---------------------------------------------------------------- SP-030
+# SP1 批（审计 2026-09-23 清单）：verify_provenance 此前零单测——mock
+# subprocess 覆盖全部分支（SP-026 目录缺失/SP-144 空集/SP-027 超时/
+# SP-028 stderr 摘要/SP-029 递归枚举/成功路径）。
+class TestVerifyProvenanceTool:
+    OWNER = "acme"
+    WORKFLOW = "acme/repo/.github/workflows/release.yml@refs/tags/v1"
+
+    @staticmethod
+    def _fake_run(returncode: int = 0, stderr: str = "", stdout: str = ""):
+        def _run(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, returncode, stdout, stderr)
+        return _run
+
+    def test_missing_dist_dir_fails_clean(self, tmp_path):
+        # SP-026：目录不存在此前 iterdir() FileNotFoundError traceback——
+        # 改 is_dir 检查后必须返回失败明细（fail-closed，不抛异常）
+        failures = run_provenance(tmp_path / "ghost-dist", self.OWNER, self.WORKFLOW)
+        assert failures and any("dist 目录不存在" in f for f in failures)
+
+    def test_empty_dist_dir_fails(self, tmp_path):
+        # SP-144：空目录零循环恒真退化——空集即失败
+        failures = run_provenance(tmp_path, self.OWNER, self.WORKFLOW)
+        assert failures and any("dist 未枚举任何工件" in f for f in failures)
+
+    def test_recursive_discovery_covers_subdirs(self, tmp_path, monkeypatch):
+        # SP-029：子目录工件（latest-release/）此前被顶层 iterdir 静默跳过——
+        # 递归枚举后每个文件都必须被验证（subprocess 收到对应路径）
+        seen: list[str] = []
+
+        def _run(cmd, **kwargs):
+            seen.append(cmd[3])
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        (tmp_path / "latest-release").mkdir()
+        (tmp_path / "latest-release" / "setup.exe").write_bytes(b"pkg")
+        failures = run_provenance(tmp_path, self.OWNER, self.WORKFLOW)
+        assert failures == []
+        assert seen == [str(tmp_path / "latest-release" / "setup.exe")]
+
+    def test_nonzero_returncode_attaches_stderr_summary(self, tmp_path, monkeypatch):
+        # SP-028：失败明细此前不含 stderr——排障需重跑；现在附首行摘要
+        monkeypatch.setattr(subprocess, "run", self._fake_run(1, stderr="boom: no attestation\n"))
+        (tmp_path / "a.exe").write_bytes(b"x")
+        failures = run_provenance(tmp_path, self.OWNER, self.WORKFLOW)
+        assert failures and any("no attestation" in f for f in failures)
+
+    def test_timeout_counts_as_failure(self, tmp_path, monkeypatch):
+        # SP-027：subprocess 无 timeout 此前可无限挂起——超时按失败计
+        def _hang(cmd, **kwargs):
+            raise subprocess.TimeoutExpired(cmd, 120)
+
+        monkeypatch.setattr(subprocess, "run", _hang)
+        (tmp_path / "a.exe").write_bytes(b"x")
+        failures = run_provenance(tmp_path, self.OWNER, self.WORKFLOW)
+        assert failures and any("超时" in f for f in failures)
+
+    def test_all_verified_passes(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(subprocess, "run", self._fake_run(0))
+        (tmp_path / "a.exe").write_bytes(b"x")
+        (tmp_path / "b.msi").write_bytes(b"y")
+        assert run_provenance(tmp_path, self.OWNER, self.WORKFLOW) == []
+
+    def test_main_exit_codes(self, tmp_path, monkeypatch, capsys):
+        # 三退出码语义：用法 2 / 失败 1 / 通过 0
+        import verify_provenance as vp
+        monkeypatch.setattr(sys, "argv", ["verify_provenance.py", "dist", "owner"])
+        assert vp.main() == 2  # 参数不足
+        monkeypatch.setattr(sys, "argv", ["verify_provenance.py",
+                                          str(tmp_path / "ghost"), self.OWNER, self.WORKFLOW])
+        assert vp.main() == 1  # dist 缺失 → 失败
+        monkeypatch.setattr(subprocess, "run", self._fake_run(0))
+        (tmp_path / "a.exe").write_bytes(b"x")
+        monkeypatch.setattr(sys, "argv", ["verify_provenance.py",
+                                          str(tmp_path), self.OWNER, self.WORKFLOW])
+        assert vp.main() == 0  # 全部通过
+        assert "✅" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- SP-031
+# SP1 批（审计 2026-09-23 清单）：release/test-vectors/release-verify.json 的
+# 8 条发布验证向量此前零执行消费者——落为元一致性门禁：向量集与实现面的
+# 映射锁定，任何新增/删除向量都必须同步接线实现，否则本门禁红。
+class TestReleaseVerifyVectorsMetaGate:
+    VECTORS = Path(__file__).resolve().parents[2] / "release" / "test-vectors" / "release-verify.json"
+
+    # 向量 case → 实现载体（工具分支/单测类）——映射本身即"执行消费者"
+    IMPLEMENTED = {
+        "missing_artifact": "verify_artifact_set 缺失工件分支（release_chain_test.TestVerifyArtifactSet.test_missing_detected）",
+        "hash_mismatch": "verify_artifact_set 哈希不符分支（release_chain_test.TestVerifyArtifactSet.test_hash_mismatch_detected）",
+        "unlisted_artifact": "verify_artifact_set 双向集合相等分支（release_chain_test.TestVerifyArtifactSet.test_unlisted_artifact_rejected）",
+        "rollback_version": "update_verifier 防回滚分支（release_tools_test.TestVerifyUpdateManifest.test_rollback_rejected）",
+        "threshold_insufficient": "update_verifier 阈值分支（release_tools_test.TestVerifyUpdateManifest.test_threshold_unmet_rejected）",
+        "sbom_missing": "发布门禁 SBOM 分支（verify_release.verify_bundle——SHA256SUMS/SBOM 缺失拒绝）",
+        "provenance_missing": "verify_provenance 失败分支（release_chain_test.TestVerifyProvenanceTool.test_nonzero_returncode_attaches_stderr_summary）",
+        "signer_identity_mismatch": "verify_provenance --signer-workflow 固定身份分支（SP-143 接线面）",
+    }
+
+    def test_vector_file_shape(self):
+        doc = json.loads(self.VECTORS.read_text(encoding="utf-8"))
+        assert doc["description"], "向量文件必须带说明"
+        vectors = doc["vectors"]
+        assert len(vectors) == 8, "发布验证向量必须 8 条（增删须同步本门禁映射）"
+        for v in vectors:
+            assert v["expected"] == "deny", f"发布验证向量恒 deny: {v['case']}"
+            assert v.get("note"), f"向量须带语义说明: {v['case']}"
+
+    def test_every_vector_has_implemented_consumer(self):
+        doc = json.loads(self.VECTORS.read_text(encoding="utf-8"))
+        for v in doc["vectors"]:
+            assert v["case"] in self.IMPLEMENTED, \
+                f"向量 {v['case']} 无实现映射——先接线实现再登记向量（fail-closed）"
+
+    def test_no_orphan_implementations(self):
+        # 反向：映射里的实现载体不得指向已删除的向量（防实现漂移出向量面）
+        doc = json.loads(self.VECTORS.read_text(encoding="utf-8"))
+        vector_cases = {v["case"] for v in doc["vectors"]}
+        assert set(self.IMPLEMENTED) == vector_cases

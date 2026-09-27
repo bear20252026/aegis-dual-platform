@@ -1,3 +1,5 @@
+> **时代横幅（审计 2026-09-23 清单·SP1 批）**：依赖审计归档（双栈期）——现行供应链门禁见 supply-chain.yml 与 SECURITY.md。
+
 # Aegis 依赖审计 + SBOM 报告（dependency-audit-2026）
 
 > 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级

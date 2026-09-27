@@ -1,3 +1,7 @@
+> SP-128（审计 2026-09-23 清单·SP1 批）：本 txt 与 valknut-report/ 目录内
+> html 为**同源双载体**（同次扫描）——txt 为注记正文（首选阅读），
+> html 为工具原始输出（留档）；不重复扫描即不各自演化。
+
 # valknut 质量分析报告（Aegis，2026-08-15）
 
 > valknut 1.5.1（sibyllinesoft，Rust，npm 安装，CLI 无需认证；Gemini --oracle 可选）

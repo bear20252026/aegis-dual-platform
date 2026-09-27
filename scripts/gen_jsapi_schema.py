@@ -198,6 +198,12 @@ def main() -> int:
         except (OSError, UnicodeDecodeError):
             continue
     schema = build_schema(src, extra)
+    # SP-102（审计 2026-09-23 清单·SP1 批）：栈归属头注——本 schema 由
+    # legacy pywebview 时代 js_api 面生成，仅描述归档栈的桥接口（ADR-009
+    # 单轨后该栈只读冻结）；$comment 为 JSON Schema 2020-12 合法注解关键字。
+    schema = {"$comment": "栈归属：legacy/windows-pywebview js_api（归档只读——ADR-009）；"
+                          "由 scripts/gen_jsapi_schema.py 生成，请勿手改（CI diff 门禁）。",
+              **schema}
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     OUTPUT.write_text(
         json.dumps(schema, ensure_ascii=False, indent=2), encoding="utf-8")

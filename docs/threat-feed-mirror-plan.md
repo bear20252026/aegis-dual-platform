@@ -1,3 +1,5 @@
+> **历史文档（SP-110，审计 2026-09-23 清单·SP1 批）时代横幅**：本文「依据」引用的归档栈文件（legacy/windows-pywebview）仅为当时现状——威胁订阅现役实现见 windows/src（ThreatFeed）与 C15 批。
+
 # threat_feed 内网镜像部署方案（threat-feed-mirror-plan）
 
 > 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级

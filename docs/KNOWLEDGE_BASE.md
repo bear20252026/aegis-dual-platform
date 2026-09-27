@@ -93,15 +93,19 @@
 | 编号 | 方向 | 借鉴来源 | 状态 |
 |---|---|---|---|
 | R1 | 快捷键默认表独立 + 用户可配置 | min `defaultKeybindings` | 待实施 |
-| R2 | js_api 生成 OpenAPI/JSON Schema | steel/ShardBrowser | 待实施 |
+| R2 | js_api 生成 OpenAPI/JSON Schema | steel/ShardBrowser | ✅（SP-101：`scripts/gen_jsapi_schema.py` 单源生成 `shared/jsapi-schema.json`——CI 重生成 diff 门禁；PY-014 接线） |
 | R3 | computer_use 接入 MCP | ShardBrowser `mcp_setup.rs` | 待评估 |
 | R4 | 标签状态分层（tab/task/windowSync） | min `tabState/` | 待实施 |
-| R5 | WebView2 WebExtension 生态调研 | electron-browser-shell | 待调研 |
+| R5 | WebView2 WebExtension 生态调研 | electron-browser-shell | ✅（SP-103：[docs/webview2-extensions-research.md](webview2-extensions-research.md)） |
 | R6 | 本文档体系 | FreeDom | ✅ 本次 |
 | R7 | 可选指纹/隐身（默认关） | ShardBrowser/Cloak | 待评估 |
-| R8 | 阅读模式（视图/决策分离） | min `readerView` | 待实施 |
+| R8 | 阅读模式（视图/决策分离） | min `readerView` | ✅（SP-063：Android ReaderMode.kt/ReaderController.kt 已落地——见 25.5 节；Windows 侧 Chrome 内建） |
 
-## 7. 开源浏览器审计结论（2026-08-15，详见 docs/open-source-browser-audit.md）
+> **SP-104 时代横幅（审计 2026-09-23 清单·SP1 批）**：本节至第 13 节为
+> **2026-08-15 pywebview 双栈时代**的调研记录——栈归属/体量/迁移结论的
+> 现行口径以 ADR-009（C# 单轨终局）为准；本区仅作决策溯源保留。
+
+## 7. 开源浏览器审计结论（2026-08-15，详见 docs/audit/open-source-browser-audit.md）
 
 ### 7.1 六项目审计要点（精简）
 - **FreeDom**（C11 纯 C）：可信父进程+每标签 re-exec worker；**四层沙箱**（seccomp-bpf 白名单/W^X/Landlock/每 tab 命名空间）；worker 无 socket 全部请求父进程代理**重放完整策略**；策略为**纯函数 fail-closed**（17 个 libFuzzer harness 直接测试）；TLS1.3+后量子、JS 默认关按域 allowlist。
@@ -152,7 +156,7 @@
 - 🟡 **评估**：混合原生壳进一步分离（地址栏/书签原生化，受 pywebview 约束）；Helium 7.6MB 信息已纠正。
 - 🔵 **新方向**：Agent 友好 API 标准化（mcp.py 雏形扩展 js_api schema）；Agent 安全防护（MCP 接入注意通道隔离+工具最小权限，OWASP Agent Cheat Sheet）；Wasm 插件沙箱（远期，北大 WAB 思路）。
 
-## 9. Tauri 迁移调研结论（2026-08-15，详见 docs/tauri-migration-report.md）
+## 9. Tauri 迁移调研结论（2026-08-15，详见 docs/tauri-migration-report.md（SP-120 归档标注））
 
 ### 9.1 核实事实
 - **Tauri 2.0 实测**（johal.in 2026-04）：安装包 ~5MB（vs pywebview PyInstaller 实测 200MB）、空闲内存 42MB、冷启动 320ms、输入延迟 12ms；ACL 权限模型默认拒绝 + scope deny 优先（官方中文文档）；Tauri 官方已不再做与 Electron 的官方对比。
@@ -176,7 +180,7 @@
 - **结论**：**整体迁移（Rust 全量重写）风险 > 收益**（渲染一致性 + 安全纵深重建回归）；**部分重构（pytauri/Sidecar 保留 Python 业务）收益 > 风险**（pytauri 免 Rust + 无 IPC 开销 + Aegis 壳 UI 简单渲染风险可控）。
 - **分步走路径**：① ACL deny 复核（零风险本周）→ ② pytauri 演示预研 → ③ pytauri-wheel PoC 三关实测 → ④ 按层分模块迁移（smoodit 经验：Aegis 分层清晰已具备）→ ⑤ 三关达标才迁移，否则季度复核维持。
 
-## 10. 2026 Rust 桌面架构全景（2026-08-15，详见 docs/rust-desktop-landscape-2026.md）
+## 10. 2026 Rust 桌面架构全景（2026-08-15，详见 docs/rust-desktop-landscape-2026.md（SP-122 归档标注））
 
 ### 10.1 Rust 是否 2026 新选（权威信源）
 - **是"新选之一"但非唯一**：Rust GUI 已从"早期"进入"可用"阶段（Wren 2026-03：egui 即时模式最火/Dioxus React 风格/Iced Elm 架构/Xilem 未就绪）；**Tauri 2 成 Web 栈跨平台新默认**（Vanja 2026-05，106k★）；egui 1300万+ 下载（技术栈 2026-04 流行度：egui > Tauri > Dioxus 2.5w★ > Iced 1.9w★）；中文支持 Tauri 第一（码客说 2026-04 五维度）。
@@ -186,7 +190,7 @@
 - **非 Rust 壳**：Wails 3（Go，12.3MB/70MB/0.5s，v3 内置 WebEngine Core Blink，无移动端）；NeutralinoJS（2-5MB 极轻但能力/生态受限）；Electron 34（渲染一致但 150MB+ 重量级）；**pywebview（Aegis 现状）= Python 壳浏览器最优**。
 - **结论**：Tauri（或 pytauri）仍是 Rust 生态中壳浏览器最匹配；Aegis 现状（pywebview）已处"Python 生态+壳浏览器"最优位置，无需为换而换；若求 Rust 收益走 pytauri 部分重构（分步走见 9.4）。
 
-## 11. pytauri 部分重构技术路线（2026-08-15，详见 docs/pytauri-migration-technical-plan.md）
+## 11. pytauri 部分重构技术路线（2026-08-15，详见 docs/pytauri-migration-technical-plan.md（SP-121 归档标注））
 
 ### 11.1 三条路线选型（官方文档+examples 源码+Tune 源码核实）
 - **B. pytauri-wheel（全 Python）= 主路线**：免 Rust 编译器（`pip install "pytauri-wheel == 0.8.*"` 预编译 wheel）、Pyo3 直连（无 IPC 开销）、**Windows Tier 1**（作者主环境 Win10=Aegis 目标）、wheel+sdist 分发、Cython 源码保护、examples/tauri-app-wheel 完整。
@@ -223,7 +227,7 @@
 - **pywebview（Aegis 现状库）**：★5950/v6.2.1（2026-04-15）/月下载 158 万（PyRank 确认 Actively Maintained）——**Aegis 现状库非常健康**（比 pytauri 活跃得多），退路坚实。
 - **cefpython（★3234/更新 2026-08-10）**：捆绑 Chromium（Electron 式）；**社区确认已弃维护**（issue #673：仅支持到 Python 3.11，"pywebview 是最好的替代"；PR #691 加 CEF147/Python 3.10-3.14 未合并）——不选。
 
-## 12. 2026 全面审计结论（2026-08-15，详见 docs/audit-2026.md）
+## 12. 2026 全面审计结论（2026-08-15，详见 docs/audit/audit-2026.md）
 
 ### 12.1 综合评级 A（架构合规/安全/代码/功能边界四维）
 - **架构合规（2026 最推荐）**：混合原生壳 + 异步消息驱动（NavQueue）+ 壳抽象可插拔 + ESM per-origin + PQC 底层继承 + Agent 白名单（mcp 7 工具）——**高度合规，无重大偏离**。
@@ -245,7 +249,7 @@
 - **键盘驱动深度**（vim-like + hints 模式）——Aegis 已有快捷键（R1 借鉴 min）；qutebrowser 11k★ 验证"Python 浏览器+键盘驱动"大规模可行——**hints 模式可作未来增强评估**（不改变功能，先记录）。
 - **结论**：Tune/qutebrowser 核心经验 Aegis 多数已对应落地（NavQueue/log_event/Evergreen）——印证 Aegis 架构选择正确；新增借鉴点已记录（CREATE_NO_WINDOW + hints 模式，均零风险待评估）。
 
-## 14. FreeDom 四层沙箱精读（2026-08-15，src/os_sandbox.c 14933 字节）
+## 14. FreeDom 四层沙箱精读（2026-08-15，src/os_sandbox.c——SP-105：字节数略，随上游版本演进）
 
 ### 14.1 四层实现（Linux 原生机制，逐层精读）
 - **第一层 seccomp-bpf**：`os_allowed` 白名单 30 个 syscall（read/write/mmap/mprotect/futex/clock_gettime 等）；**io_uring/process_vm_readv/bpf/userfaultfd 等旁路原语按构造拒绝**（注释："denylist could forget them"——白名单优于黑名单）。
@@ -451,7 +455,7 @@
 - **存量修复**：`import_history` imported 恒 0（HistoryStore.add 为 visit 追加无返回值）。
 - **UI**：start.html 向导（扫描 → 选择来源/内容/上限 → 执行 → 分来源结果），textContent 构建（R-06），Escape 关闭，导入后刷新宫格。
 
-### 25.5 Android 阅读模式与翻译入口（Planned 第三项，2026-08-30）
+### 25.5 Android 阅读模式与翻译入口（✅ 已落地——SP-063 同步，原 Planned 2026-08-30）
 - **ReaderMode.kt**：正文提取只读 JS（无宿主注入）；两段 JSON 解析防畸形返回；200K 截断/200 字下限。
 - **TranslateEntry.kt**：translatetheweb（微软 Edge 同款、国内可达）；URL 外发翻译服务 = 用户显式触发（隐私原则：默认不外发）；导航仍走 navigateExternal 安全策略。
 - **INV-04**：阅读内容经 BrowserViewModel `_readerContent` StateFlow 流转，Compose 无局部 remember 浏览器状态；detekt baseline 同步 AddressBarAndNav 新签名。

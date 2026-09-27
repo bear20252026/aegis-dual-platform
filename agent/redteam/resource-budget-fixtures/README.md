@@ -9,7 +9,7 @@
 {
   "vector": "2MB 导航文本（P0-02 模拟场景——MAX_TEXT_BYTES 8KB）",
   "expected": "deny",
-  "note": "MAX_TEXT_BYTES/MAX_ARGUMENT_BYTES/MAX_RAW_REQUEST_BYTES——mcp.py P0-02 已实现"
+  "note": "MAX_TEXT_BYTES/MAX_ARGUMENT_BYTES/MAX_RAW_REQUEST_BYTES——mcp.py P0-02 时代已实现；SP-065（审计 2026-09-23 清单·SP1 批）：常量归属 legacy 归档栈，现役预算面见 agent/tests/redteam_e2e_test.py（ACTION_BUDGETS——SP-148）"
 }
 ```
 
