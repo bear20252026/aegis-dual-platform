@@ -29,17 +29,34 @@ runs:
         VERIFY_SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
       run: |
         set -euo pipefail
-        # SP-153：并行度统一 -P 8（此前编排器 8、三子流 4 漂移）
+        # SP-153：并行度收敛 -P 2（v2.2.0-beta.50 实测：-P 8 下 8 个 gh 进程
+        # 同时初始化 sigstore public good verifier，TUF 信任根拉取竞态导致
+        # "public good verifier is not available" 间歇性失败——同 run 内三平台
+        # 子流 verify 全绿、verify-gate Windows 段即失败，属瞬态而非确定性）
         # PY-176/SP-143：--signer-workflow 固定 signer 身份——非"该 workflow
         # 文件@本次 run ref"签署的 attestation 一律拒绝（fail-closed）
-        find "$VERIFY_DIST_PATH" -type f -print0 | xargs -0 -P 8 -I{} timeout 60 \
-          gh attestation verify "{}" \
-          --owner "$GITHUB_REPOSITORY_OWNER" \
-          --signer-workflow "$VERIFY_SIGNER_WORKFLOW" \
-          --predicate-type https://slsa.dev/provenance/v1
-        find "$VERIFY_DIST_PATH" -type f -print0 | xargs -0 -P 8 -I{} timeout 60 \
-          gh attestation verify "{}" \
-          --owner "$GITHUB_REPOSITORY_OWNER" \
-          --signer-workflow "$VERIFY_SIGNER_WORKFLOW" \
-          --predicate-type https://cyclonedx.org/bom
+        # 重试 3 次（退避 5/10s）消化 sigstore 初始化瞬时故障；timeout 120
+        # 覆盖大安装包（66MB+）的 API 取证。
+        verify_att() {
+          local artifact="$1" predicate="$2" attempt
+          for attempt in 1 2 3; do
+            if timeout 120 gh attestation verify "$artifact" \
+                --owner "$GITHUB_REPOSITORY_OWNER" \
+                --signer-workflow "$VERIFY_SIGNER_WORKFLOW" \
+                --predicate-type "$predicate"; then
+              return 0
+            fi
+            echo "⚠️ verify 失败（第 $attempt 次）: $artifact [$predicate]" >&2
+            sleep $((attempt * 5))
+          done
+          return 1
+        }
+        export -f verify_att
+        export VERIFY_SIGNER_WORKFLOW
+        for predicate in \
+          "https://slsa.dev/provenance/v1" \
+          "https://cyclonedx.org/bom"; do
+          find "$VERIFY_DIST_PATH" -type f -print0 | xargs -0 -P 2 -I{} \
+            bash -c 'verify_att "$1" "$0"' "$predicate" {}
+        done
         echo "✅ 双 predicate attestation 验证通过（固定 signer——fail-closed）"
