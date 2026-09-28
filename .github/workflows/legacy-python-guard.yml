@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
 
       - name: 安装 Python
-        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0 (node24)
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0 (node24)
         with:
           # PY-063：与 contracts.yml 统一 3.12（3.14 过新——PySide6 类型桩兼容风险）
           python-version: "3.12"
