@@ -106,8 +106,18 @@ jobs:
             throw "Windows 发布目录缺少 Rust 原生策略核心 DLL"
           }
           Compress-Archive -Path dist/aegis-windows/* -DestinationPath dist/Aegis.Windows.zip -Force
-      - name: Install Inno Setup 6 (C# installer)
-        run: choco install innosetup --version=6.4.3 --no-progress -y
+      - name: Ensure Inno Setup 6 (C# installer)
+        # v2.2.0-beta.50 实测：runner 镜像现已预装 Inno Setup 6.7.1，固定
+        # --version=6.4.3 的 choco install 会因"已存在更新版本"直接失败。
+        # 改为仅在 ISCC 缺失时安装（不锁小版本；ISCC 调用路径 6.x 通用）。
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $iscc) {
+            Write-Output "Inno Setup 已预装，跳过安装"
+          } else {
+            choco install innosetup --no-progress -y
+          }
       - name: Build C# installer (ADR-009 beta channel — version injected from single source)
         shell: pwsh
         run: |
