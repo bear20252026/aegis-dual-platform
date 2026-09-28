@@ -30,7 +30,7 @@ mockito = "5.14.2"
 robolectric = "4.17"
 androidxTestCore = "1.6.1"
 # AD-067（2026-09-24 审计）：androidTest 冒烟集运行依赖
-androidxTestRunner = "1.6.2"
+androidxTestRunner = "1.7.0"
 androidxTestExtJunit = "1.2.1"
 
 [libraries]
