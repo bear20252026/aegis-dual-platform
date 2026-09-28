@@ -27,7 +27,7 @@ junit = "4.13.2"
 # mockito 5 默认 inline mock maker——可 mock Kotlin final 类（WebView 等）
 mockito = "5.14.2"
 # AD-055（2026-09-24 审计）：BrowserEngine 硬化标志 Robolectric 逐项回归
-robolectric = "4.14.1"
+robolectric = "4.17"
 androidxTestCore = "1.6.1"
 # AD-067（2026-09-24 审计）：androidTest 冒烟集运行依赖
 androidxTestRunner = "1.6.2"
