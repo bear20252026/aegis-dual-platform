@@ -188,7 +188,11 @@ jobs:
     permissions:
       id-token: write
       attestations: write
-      contents: write
+      # PY-174（2026-09-26 审计）：直发步骤已删——本 job 仅 SBOM 生成/attest/
+      # artifact 上传，无需写权限；编排器（release.yml）对 workflow_call 调用
+      # 只授 contents: read，此处残留 write 会令整条发布链 startup_failure
+      # （GitHub 拒绝嵌套 job 的权限放大——v2.2.0-beta.50 实测）
+      contents: read
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
