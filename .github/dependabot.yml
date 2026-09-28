@@ -4,6 +4,13 @@
 # hash 锁定工具链）、gradle（android/ 四模块）。
 # 约束：open-pull-requests-limit=5 防洪；pip 更新须重算 --hash（dependabot
 # 对 hash 锁定文件会连带更新 hash 条目，不合的 PR 直接关）。
+# ⚠️ 已知限制（2026-09-28 实证，#27/#35/#39 三连坏 PR 后）：requirements-ci.txt
+# 为 pip-compile --generate-hashes 产物——Dependabot 只更新被 bump 包自身的
+# hash，不重算传递依赖树。凡 bump 引入新增/变化传递依赖（如 pip-audit
+# 2.7→2.10 新增 tomli），--require-hashes 安装即失败（supply-chain/
+# agent-redteam/contracts 三 workflow 红灯）。此类 PR 关闭后走本地
+# pip-compile 重生成锁文件单提；patch/minor 且依赖树不变的 bump（mypy
+# 2.3.0→2.3.1、ruff 0.16.3→0.16.9）PR 会全绿可直合。
 version: 2
 updates:
   - package-ecosystem: "github-actions"
