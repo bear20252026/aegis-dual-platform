@@ -229,7 +229,7 @@ jobs:
       #    SBOM 生成器，仅由 supply-chain.yml 以测试向量冒烟（独立证据链
       #    工具），不参与发布 SBOM 产出——二者口径不同、不互换。
       - name: Generate CycloneDX SBOM for current C# application
-        uses: anchore/sbom-action@52542941bb775adef77f7a51ff5ea984e600fab8
+        uses: anchore/sbom-action@6b31fa7e2d592e47d95d2a5e0520a7352d47ead5
         with:
           path: windows/src/Aegis.Windows.App
           format: cyclonedx-json

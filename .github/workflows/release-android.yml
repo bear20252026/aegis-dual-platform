@@ -210,7 +210,7 @@ jobs:
           name: release-android
           path: dist
       - name: Generate CycloneDX SBOM (gradle deps)
-        uses: anchore/sbom-action@52542941bb775adef77f7a51ff5ea984e600fab8
+        uses: anchore/sbom-action@6b31fa7e2d592e47d95d2a5e0520a7352d47ead5
         with:
           path: android
           format: cyclonedx-json
