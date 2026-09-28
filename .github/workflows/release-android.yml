@@ -51,7 +51,7 @@ jobs:
         with:
           workspaces: core/rust-policy-core
       - name: Install JDK 21
-        uses: actions/setup-java@3487f54461fe81d2d61c9e3b374b8504291689fa
+        uses: actions/setup-java@97c5a5e13aa773f277f72c1287dda3c789f1366c
         with:
           distribution: temurin
           java-version: "21"
