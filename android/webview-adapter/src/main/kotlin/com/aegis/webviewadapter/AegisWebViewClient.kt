@@ -358,7 +358,12 @@ class AegisWebViewClient(
             "主框架加载错误: code=${error.errorCode} desc=$description url=${LogRedact.redact(request.url.toString())}",
         )
         // AD-035：detail = "errorCode:description"（app 层按 errorCode 映射文案）
-        onPageError(WebViewErrorCodes.ERROR_MAIN_FRAME, "${error.errorCode}:$description", false, request.url.toString())
+        onPageError(
+            WebViewErrorCodes.ERROR_MAIN_FRAME,
+            "${error.errorCode}:$description",
+            false,
+            request.url.toString(),
+        )
     }
 
     /**
