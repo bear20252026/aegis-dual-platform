@@ -1,5 +1,13 @@
 <Application x:Class="Aegis.Windows.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-  <Application.Resources/>
+  <!-- UI 现代化批：Chrome 共享样式全局合并（图标字体/深色 ComboBox/细滚动条）。
+       独立窗口的深浅色板仍由 WindowTheme.Apply 逐窗注入（单源） -->
+  <Application.Resources>
+    <ResourceDictionary>
+      <ResourceDictionary.MergedDictionaries>
+        <ResourceDictionary Source="Chrome/ChromeStyles.xaml"/>
+      </ResourceDictionary.MergedDictionaries>
+    </ResourceDictionary>
+  </Application.Resources>
 </Application>

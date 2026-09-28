@@ -15,7 +15,8 @@
       <Setter Property="Width" Value="34"/>
       <Setter Property="Height" Value="34"/>
       <Setter Property="Foreground" Value="{StaticResource T1}"/>
-      <Setter Property="FontSize" Value="15"/>
+      <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+      <Setter Property="FontSize" Value="14"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
@@ -35,7 +36,7 @@
     <!-- 标签条 -->
     <Border DockPanel.Dock="Top" Background="{StaticResource ChromeB}" Padding="8,4">
       <DockPanel>
-        <Button x:Name="NewTabBtn" DockPanel.Dock="Right" AutomationProperties.Name="新建无痕标签" Style="{StaticResource NavBtn}" Content="＋" Click="NewTab_Click" ToolTip="新建标签"/>
+        <Button x:Name="NewTabBtn" DockPanel.Dock="Right" AutomationProperties.Name="新建无痕标签" Style="{StaticResource NavBtn}" Content="&#xE710;" Click="NewTab_Click" ToolTip="新建标签"/>
         <TextBlock DockPanel.Dock="Left" Text="🕶 InPrivate" Foreground="#FF9AA0FF" Margin="4,0,12,0"
                    VerticalAlignment="Center" FontWeight="SemiBold"/>
         <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
@@ -46,7 +47,7 @@
               <DataTemplate>
                 <Border CornerRadius="8,8,0,0" Padding="12,6" Margin="0,0,2,0" Background="{StaticResource CardB}">
                   <DockPanel>
-                    <Button DockPanel.Dock="Right" AutomationProperties.Name="关闭这个无痕标签" Content="✕" Click="TabClose_Click" Tag="{Binding TabId}"
+                    <Button DockPanel.Dock="Right" AutomationProperties.Name="关闭这个无痕标签" Content="&#xE894;" Click="TabClose_Click" Tag="{Binding TabId}" FontFamily="{StaticResource IconFont}"
                             FontSize="9" Margin="8,0,0,0" Background="Transparent" BorderThickness="0"
                             Foreground="{StaticResource T2}" Cursor="Hand"/>
                     <TextBlock Text="{Binding Title}" FontSize="12" MaxWidth="160" TextTrimming="CharacterEllipsis"
@@ -63,9 +64,9 @@
     <Border DockPanel.Dock="Top" Background="#FF14141A" Padding="8,6">
       <DockPanel>
         <StackPanel Orientation="Horizontal">
-          <Button x:Name="BackButton" AutomationProperties.Name="后退" Style="{StaticResource NavBtn}" Content="←" Click="Back_Click" ToolTip="后退"/>
-          <Button x:Name="ForwardButton" AutomationProperties.Name="前进" Style="{StaticResource NavBtn}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
-          <Button x:Name="RefreshButton" AutomationProperties.Name="刷新页面" Style="{StaticResource NavBtn}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
+          <Button x:Name="BackButton" AutomationProperties.Name="后退" Style="{StaticResource NavBtn}" Content="&#xE72B;" Click="Back_Click" ToolTip="后退"/>
+          <Button x:Name="ForwardButton" AutomationProperties.Name="前进" Style="{StaticResource NavBtn}" Content="&#xE72A;" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
+          <Button x:Name="RefreshButton" AutomationProperties.Name="刷新页面" Style="{StaticResource NavBtn}" Content="&#xE72C;" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
         </StackPanel>
         <Button DockPanel.Dock="Right" AutomationProperties.Name="关闭无痕窗口" Content="关闭" Click="CloseWindow_Click" Height="34" Margin="8,0,0,0"
                 Background="#FF7F1D1D" Foreground="White" BorderThickness="0" Cursor="Hand" Padding="12,0"/>

@@ -150,7 +150,8 @@
             Background="{DynamicResource FieldBackgroundBrush}">
       <Grid>
         <StackPanel x:Name="SearchHint" Orientation="Horizontal" HorizontalAlignment="Center">
-          <TextBlock Text="🔍" Foreground="{DynamicResource TextMutedBrush}" FontSize="12" VerticalAlignment="Center"/>
+          <TextBlock Text="&#xE721;" FontFamily="{DynamicResource IconFont}"
+                     Foreground="{DynamicResource TextMutedBrush}" FontSize="12" VerticalAlignment="Center"/>
           <TextBlock Text="搜索历史（地址 / 标题）" Foreground="{DynamicResource TextMutedBrush}"
                      FontSize="13" VerticalAlignment="Center" Margin="6,0,0,0"/>
         </StackPanel>
@@ -178,8 +179,9 @@
       </Border>
       <TextBlock Text="每页" VerticalAlignment="Center" Margin="16,0,6,0"
                  Foreground="{DynamicResource TextSecondaryBrush}" FontSize="12"/>
-      <ComboBox x:Name="PageSizeBox" AutomationProperties.Name="每页条数选择" Width="82" Height="30" SelectedIndex="1"
-                SelectionChanged="PageSize_Changed" VerticalContentAlignment="Center">
+      <ComboBox x:Name="PageSizeBox" AutomationProperties.Name="每页条数选择" Width="82" Height="30"
+                Style="{DynamicResource ChromeComboBox}" SelectedIndex="1"
+                SelectionChanged="PageSize_Changed">
         <ComboBoxItem Content="50 条" Tag="50"/>
         <ComboBoxItem Content="100 条" Tag="100"/>
         <ComboBoxItem Content="200 条" Tag="200"/>

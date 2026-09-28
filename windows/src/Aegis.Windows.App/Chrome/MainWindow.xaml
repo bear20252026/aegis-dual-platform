@@ -32,11 +32,14 @@
     <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton）。
          CS-218：Focusable=False 为既定视觉取舍（键盘聚焦虚线框在圆形玻璃钮上
          常驻显示）；键盘路径由快捷键覆盖——Ctrl+L/Alt+D 地址栏、Ctrl+R/F5 刷新、
-         Esc 停止、Ctrl+T/W/Tab 标签（见 Window_PreviewKeyDown）。 -->
+         Esc 停止、Ctrl+T/W/Tab 标签（见 Window_PreviewKeyDown）。
+         UI 现代化批：图标统一 Segoe Fluent/MDL2 字体 glyph（替代 Unicode 字符
+         与彩色 emoji——深色玻璃主题下参差违和） -->
     <Style x:Key="NavButton" TargetType="Button">
       <Setter Property="Width" Value="36"/>
       <Setter Property="Height" Value="36"/>
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+      <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
       <Setter Property="FontSize" Value="15"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Focusable" Value="False"/>
@@ -136,7 +139,7 @@
     <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBackgroundBrush}" Padding="8,4">
       <DockPanel>
         <Button x:Name="NewTabButton" DockPanel.Dock="Right" Style="{StaticResource NavButton}"
-                Content="＋" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"
+                Content="&#xE710;" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"
                 AutomationProperties.Name="新建标签"/>
         <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
           <ListBox x:Name="TabStrip" SelectionMode="Single" Background="Transparent"
@@ -161,9 +164,10 @@
                               BorderBrush="Transparent"
                               Background="{DynamicResource ChromeBackgroundBrush}">
                         <DockPanel>
-                          <Button x:Name="TabClose" DockPanel.Dock="Right" AutomationProperties.Name="关闭这个标签" Content="✕" Click="TabClose_Click"
+                          <Button x:Name="TabClose" DockPanel.Dock="Right" AutomationProperties.Name="关闭这个标签" Content="&#xE894;" Click="TabClose_Click"
                                   Tag="{Binding TabId}" Focusable="False" Cursor="Hand"
-                                  FontSize="10" Margin="10,0,0,0" Padding="2,0"
+                                  FontFamily="{StaticResource IconFont}"
+                                  FontSize="8" Margin="10,0,0,0" Padding="2,0"
                                   Background="Transparent" BorderThickness="0"
                                   ToolTip="关闭标签（Ctrl+W）" Visibility="Collapsed">
                             <Button.Style>
@@ -171,7 +175,8 @@
                                 <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
                                 <Setter Property="Background" Value="Transparent"/>
                                 <Setter Property="BorderThickness" Value="0"/>
-                                <Setter Property="FontSize" Value="10"/>
+                                <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+                                <Setter Property="FontSize" Value="8"/>
                                 <Setter Property="Cursor" Value="Hand"/>
                                 <Setter Property="Template">
                                   <Setter.Value>
@@ -257,36 +262,36 @@
     <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBackgroundBrush}" Padding="8,6">
       <DockPanel>
         <StackPanel Orientation="Horizontal">
-          <Button x:Name="BackButton" Style="{StaticResource NavButton}" Content="←" Click="Back_Click" ToolTip="后退（Alt+←）" AutomationProperties.Name="后退"/>
-          <Button x:Name="ForwardButton" Style="{StaticResource NavButton}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进（Alt+→）" AutomationProperties.Name="前进"/>
-          <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新（F5/Ctrl+R）" AutomationProperties.Name="刷新"/>
-          <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="■" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止加载" AutomationProperties.Name="停止加载"/>
-          <Button x:Name="HomeButton" Style="{StaticResource NavButton}" Content="⌂" Click="Home_Click" Margin="6,0,0,0" ToolTip="主页（新标签页）" AutomationProperties.Name="主页"/>
+          <Button x:Name="BackButton" Style="{StaticResource NavButton}" Content="&#xE72B;" Click="Back_Click" ToolTip="后退（Alt+←）" AutomationProperties.Name="后退"/>
+          <Button x:Name="ForwardButton" Style="{StaticResource NavButton}" Content="&#xE72A;" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进（Alt+→）" AutomationProperties.Name="前进"/>
+          <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="&#xE72C;" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新（F5/Ctrl+R）" AutomationProperties.Name="刷新"/>
+          <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="&#xE711;" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止加载" AutomationProperties.Name="停止加载"/>
+          <Button x:Name="HomeButton" Style="{StaticResource NavButton}" Content="&#xE80F;" Click="Home_Click" Margin="6,0,0,0" ToolTip="主页（新标签页）" AutomationProperties.Name="主页"/>
         </StackPanel>
         <!-- M2 数据闭环工具组：搜索引擎切换 / 收藏☆ / 历史记录 -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
-          <ComboBox x:Name="EngineCombo" Width="120" Height="32" VerticalAlignment="Center" FontSize="12"
+          <ComboBox x:Name="EngineCombo" Width="124" Height="32" Style="{StaticResource ChromeComboBox}"
                     SelectionChanged="Engine_SelectionChanged" ToolTip="搜索引擎"/>
-          <Button x:Name="StarButton" Style="{StaticResource NavButton}" Content="☆"
+          <Button x:Name="StarButton" Style="{StaticResource NavButton}" Content="&#xE734;"
                   Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"
                   AutomationProperties.Name="收藏当前页"/>
-          <Button x:Name="DownloadsButton" Style="{StaticResource NavButton}" Content="⤓"
+          <Button x:Name="DownloadsButton" Style="{StaticResource NavButton}" Content="&#xE896;"
                   Click="Downloads_Click" Margin="6,0,0,0" ToolTip="下载管理"
                   AutomationProperties.Name="下载管理"/>
-          <Button x:Name="BookmarkManagerButton" Style="{StaticResource NavButton}" Content="☰"
+          <Button x:Name="BookmarkManagerButton" Style="{StaticResource NavButton}" Content="&#xE700;"
                   Click="BookmarkManager_Click" Margin="6,0,0,0" ToolTip="书签管理"
                   AutomationProperties.Name="书签管理"/>
-          <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="🕘"
+          <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="&#xE81C;"
                   Click="History_Click" Margin="6,0,0,0" ToolTip="历史记录"
                   AutomationProperties.Name="历史记录"/>
-          <Button x:Name="SettingsButton" Style="{StaticResource NavButton}" Content="⚙"
+          <Button x:Name="SettingsButton" Style="{StaticResource NavButton}" Content="&#xE713;"
                   Click="Settings_Click" Margin="6,0,0,0" ToolTip="设置"
                   AutomationProperties.Name="设置"/>
           <!-- Edge 风格个人资料圆钮（占位——无账号体系，点击聚焦地址栏） -->
-          <Button x:Name="ProfileButton" Style="{StaticResource NavButton}" Content="◐"
+          <Button x:Name="ProfileButton" Style="{StaticResource NavButton}" Content="&#xE77B;"
                   Click="Profile_Click" Margin="6,0,0,0" ToolTip="个人资料"
                   AutomationProperties.Name="个人资料"/>
-          <Button x:Name="InPrivateButton" Style="{StaticResource NavButton}" Content="🕶"
+          <Button x:Name="InPrivateButton" Style="{StaticResource NavButton}" Content="&#xE72E;"
                   Click="InPrivate_Click" Margin="6,0,0,0" ToolTip="InPrivate 无痕窗口"
                   AutomationProperties.Name="打开 InPrivate 无痕窗口"/>
         </StackPanel>
@@ -423,8 +428,10 @@
             <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
             <TextBlock x:Name="ApprovalExpiry" Foreground="#80FFFFFF" TextWrapping="Wrap" Margin="0,0,0,16"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <!-- NavButton 已切图标字体——文本按钮本地覆盖回 UI 字体（否则中文缺字形） -->
               <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88"
-                      Margin="0,0,8,0" Style="{StaticResource NavButton}" Width="Auto" Height="32" FontSize="13"/>
+                      Margin="0,0,8,0" Style="{StaticResource NavButton}" Width="Auto" Height="32" FontSize="13"
+                      FontFamily="Segoe UI, Microsoft YaHei UI"/>
               <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112" Style="{StaticResource OpenButton}"/>
             </StackPanel>
           </StackPanel>
