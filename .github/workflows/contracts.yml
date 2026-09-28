@@ -118,7 +118,7 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: gradle  # PY-062
-      - uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
+      - uses: android-actions/setup-android@035682743ab223ec9c6169af09811dff8247e520
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
       - name: Compile Android modules that consume generated contracts

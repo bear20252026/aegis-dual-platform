@@ -96,7 +96,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-057)
         with:
           workspaces: core/rust-policy-core
-      - uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
+      - uses: android-actions/setup-android@035682743ab223ec9c6169af09811dff8247e520
         with:
           packages: 'ndk;28.0.12433566'
       - uses: actions/setup-java@97c5a5e13aa773f277f72c1287dda3c789f1366c
