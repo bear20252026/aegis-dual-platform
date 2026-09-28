@@ -159,10 +159,12 @@
                 <Setter Property="Template">
                   <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                      <Border x:Name="Chip" CornerRadius="8,8,0,0" Margin="0,0,0,0"
-                              Padding="12,6" BorderThickness="1,1,1,0"
+                      <!-- UI 现代化批②：Edge 式标签激活态——未选透明、悬停微亮、
+                           选中玻璃 pill（此前选中/未选同底色，激活标签不可辨） -->
+                      <Border x:Name="Chip" CornerRadius="8" Margin="0,0,2,0"
+                              Padding="12,6" BorderThickness="0"
                               BorderBrush="Transparent"
-                              Background="{DynamicResource ChromeBackgroundBrush}">
+                              Background="Transparent">
                         <DockPanel>
                           <Button x:Name="TabClose" DockPanel.Dock="Right" AutomationProperties.Name="关闭这个标签" Content="&#xE894;" Click="TabClose_Click"
                                   Tag="{Binding TabId}" Focusable="False" Cursor="Hand"
@@ -233,13 +235,12 @@
                       </Border>
                       <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
-                          <Setter TargetName="Chip" Property="Background" Value="{DynamicResource ChromeBackgroundBrush}"/>
-                          <Setter TargetName="Chip" Property="BorderBrush" Value="#22FFFFFF"/>
+                          <Setter TargetName="Chip" Property="Background" Value="#2EFFFFFF"/>
                           <Setter TargetName="TabTitle" Property="Foreground" Value="#FFFFFFFF"/>
                           <Setter TargetName="TabClose" Property="Visibility" Value="Visible"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                          <Setter TargetName="Chip" Property="Background" Value="{DynamicResource ButtonOverlayHoverBrush}"/>
+                          <Setter TargetName="Chip" Property="Background" Value="#1FFFFFFF"/>
                           <Setter TargetName="TabTitle" Property="Foreground" Value="#FFFFFFFF"/>
                           <Setter TargetName="TabClose" Property="Visibility" Value="Visible"/>
                         </Trigger>

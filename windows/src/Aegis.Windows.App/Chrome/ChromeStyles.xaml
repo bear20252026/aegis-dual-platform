@@ -102,6 +102,109 @@
     </Setter>
   </Style>
 
+  <!-- ═══ 深色 CheckBox（设置窗——替换原生白色方块勾选框）═══
+       AccentBrush 消费 DynamicResource——WindowTheme 注入，浅色主题即时换色 -->
+  <Style x:Key="DarkCheck" TargetType="CheckBox">
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
+    <Setter Property="FontSize" Value="13"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="CheckBox">
+          <StackPanel Orientation="Horizontal" Background="Transparent">
+            <Border x:Name="Box" Width="20" Height="20" CornerRadius="6"
+                    Background="{DynamicResource FieldBackgroundBrush}"
+                    BorderBrush="{DynamicResource FieldBorderBrush}" BorderThickness="1"
+                    VerticalAlignment="Center">
+              <TextBlock x:Name="Mark" Text="&#xE73E;" FontFamily="{StaticResource IconFont}" FontSize="11"
+                         Foreground="#FF0B1220" HorizontalAlignment="Center" VerticalAlignment="Center"
+                         Visibility="Collapsed"/>
+            </Border>
+            <ContentPresenter Margin="9,0,0,0" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+          </StackPanel>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsChecked" Value="True">
+              <Setter TargetName="Box" Property="Background" Value="{DynamicResource AccentBrush}"/>
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+              <Setter TargetName="Mark" Property="Visibility" Value="Visible"/>
+              <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+            </Trigger>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource FieldBorderFocusedBrush}"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- ═══ 圆角实心按钮（设置/下载窗通用——替换原生方形按钮）═══ -->
+  <Style x:Key="SolidButton" TargetType="Button">
+    <Setter Property="Background" Value="{DynamicResource SegmentedBrush}"/>
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Setter Property="FontSize" Value="13"/>
+    <Setter Property="Height" Value="32"/>
+    <Setter Property="Padding" Value="14,0"/>
+    <Setter Property="BorderThickness" Value="0"/>
+    <Setter Property="Cursor" Value="Hand"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="Button">
+          <Border x:Name="Bd" CornerRadius="9" Background="{TemplateBinding Background}"
+                  Padding="{TemplateBinding Padding}">
+            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.85"/>
+            </Trigger>
+            <Trigger Property="IsPressed" Value="True">
+              <Setter TargetName="Bd" Property="Opacity" Value="0.7"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+              <Setter Property="Opacity" Value="0.4"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <!-- 危险操作实心钮（KillSwitch 等——红色玻璃） -->
+  <Style x:Key="DangerSolidButton" TargetType="Button" BasedOn="{StaticResource SolidButton}">
+    <Setter Property="Background" Value="#CC7F1D1D"/>
+    <Setter Property="Foreground" Value="#FFFFD9D6"/>
+  </Style>
+
+  <!-- 深色单行输入（订阅源地址等——替换原生白底 TextBox） -->
+  <Style x:Key="DarkInput" TargetType="TextBox">
+    <Setter Property="Height" Value="32"/>
+    <Setter Property="FontSize" Value="13"/>
+    <Setter Property="CaretBrush" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Setter Property="VerticalContentAlignment" Value="Center"/>
+    <Setter Property="Background" Value="{DynamicResource FieldBackgroundBrush}"/>
+    <Setter Property="BorderBrush" Value="{DynamicResource FieldBorderBrush}"/>
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+    <Setter Property="Padding" Value="10,0"/>
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="TextBox">
+          <Border x:Name="Bd" CornerRadius="9" Background="{TemplateBinding Background}"
+                  BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                  Padding="{TemplateBinding Padding}">
+            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center"/>
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsKeyboardFocusWithin" Value="True">
+              <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource FieldBorderFocusedBrush}"/>
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
   <!-- ═══ 深色细滚动条（隐式样式——所有 ScrollViewer 内生效）═══
        替换原生白色大方块滚动条（历史/下载/设置/书签窗口通用） -->
   <Style TargetType="ScrollBar">
