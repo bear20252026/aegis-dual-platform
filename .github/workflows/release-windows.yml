@@ -173,6 +173,17 @@ jobs:
           python scripts/verify_xaml_resources.py
           if ($LASTEXITCODE -ne 0) { throw "XAML FindResource 引用了未定义资源键（可能有书签即启动崩溃）" }
           Write-Output "NTP 资源断言通过; GeoGebra=$geoOk"
+      - name: Prune dist to deliverables (payload → zip)
+        # v2.2.0-beta.50 实测：dist/aegis-windows/（自包含 publish + GeoGebra
+        # 数千文件）留在 dist 会导致下游 attest-build-provenance 超 subject
+        # 上限（>1024 直接失败），且 publish 的 files: dist/** 会把整个
+        # publish 目录逐文件发布成 Release 垃圾资产（v2.1.10 同型事故）。
+        # 完整载荷已压缩进 Aegis.Windows.zip（Compress-Archive dist/*），
+        # 此处仅保留顶层交付物；SHA-256 清单在删除后生成，自动一致。
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force dist/aegis-windows
+          Get-ChildItem dist | ForEach-Object { Write-Output "dist/$($_.Name)" }
 
       - name: Generate SHA-256 checksums
         run: python release/write_checksum_json.py --root dist --output dist/SHA256SUMS.json
