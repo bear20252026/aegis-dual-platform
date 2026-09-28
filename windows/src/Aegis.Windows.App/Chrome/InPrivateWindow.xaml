@@ -45,7 +45,18 @@
             <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <Border CornerRadius="8,8,0,0" Padding="12,6" Margin="0,0,2,0" Background="{StaticResource CardB}">
+                <Border CornerRadius="8" Padding="12,6" Margin="0,0,2,0">
+                  <Border.Style>
+                    <Style TargetType="Border">
+                      <!-- 批③：与主窗一致的选中区分（此前全部标签同色 CardB） -->
+                      <Setter Property="Background" Value="Transparent"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                          <Setter Property="Background" Value="#2EFFFFFF"/>
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
                   <DockPanel>
                     <Button DockPanel.Dock="Right" AutomationProperties.Name="关闭这个无痕标签" Content="&#xE894;" Click="TabClose_Click" Tag="{Binding TabId}" FontFamily="{StaticResource IconFont}"
                             FontSize="9" Margin="8,0,0,0" Background="Transparent" BorderThickness="0"

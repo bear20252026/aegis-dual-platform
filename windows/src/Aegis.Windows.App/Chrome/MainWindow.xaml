@@ -329,16 +329,27 @@
                            AutomationProperties.Name="地址栏建议列表">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
-                        <Grid Margin="4,3">
+                        <!-- UI 现代化批③：两行建议（标题 + 弱化 URL）+ 类型图标
+                             （书签星/历史钟——DataTrigger 按 Kind 切换） -->
+                        <Grid Margin="4,5">
                           <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
                           </Grid.ColumnDefinitions>
-                          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"
-                                     Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12"/>
-                          <TextBlock Grid.Column="1" Text="{Binding Kind}" Margin="10,0,0,0"
-                                     Foreground="{DynamicResource TextMutedBrush}" FontSize="11"/>
+                          <TextBlock x:Name="KindIcon" Text="&#xE81C;" FontFamily="{StaticResource IconFont}"
+                                     FontSize="13" VerticalAlignment="Top" Margin="0,1,10,0"
+                                     Foreground="{DynamicResource TextMutedBrush}"/>
+                          <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis"
+                                     Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13"/>
+                          <TextBlock Grid.Column="1" Text="{Binding Url}" TextTrimming="CharacterEllipsis"
+                                     Foreground="{DynamicResource TextMutedBrush}" FontSize="11"
+                                     Margin="0,16,0,0"/>
                         </Grid>
+                        <DataTemplate.Triggers>
+                          <DataTrigger Binding="{Binding Kind}" Value="书签">
+                            <Setter TargetName="KindIcon" Property="Text" Value="&#xE734;"/>
+                          </DataTrigger>
+                        </DataTemplate.Triggers>
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                   </ListBox>
@@ -416,24 +427,32 @@
       </Border>
       <!-- 全窗口受信模态遮罩：拦截底层点击；只展示 Rust 核心给出的最小审批字段。 -->
       <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#99101827">
-        <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"
-                Padding="20" Background="#FF1B2537" BorderBrush="#66FFFFFF" BorderThickness="1"
-                CornerRadius="12">
+        <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="460"
+                Padding="24,22" Background="#FF1B2537" BorderBrush="#66FFFFFF" BorderThickness="1"
+                CornerRadius="16">
+          <Border.Effect>
+            <DropShadowEffect BlurRadius="30" ShadowDepth="4" Opacity="0.5"/>
+          </Border.Effect>
           <StackPanel>
-            <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Foreground="#FFFFFFFF" Margin="0,0,0,12"/>
-            <TextBlock Text="来源" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
-            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
-            <TextBlock Text="路径与查询" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
-            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
-            <TextBlock Text="权限范围" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
-            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
-            <TextBlock x:Name="ApprovalExpiry" Foreground="#80FFFFFF" TextWrapping="Wrap" Margin="0,0,0,16"/>
+            <!-- UI 现代化批③：标题行加图标 + 字段标签降级为 muted 小字（值为主角） -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+              <TextBlock Text="&#xE72E;" FontFamily="{StaticResource IconFont}" FontSize="18"
+                         Foreground="#FFFFC24B" VerticalAlignment="Center"/>
+              <TextBlock Text="需要确认的导航" FontSize="17" FontWeight="SemiBold" Foreground="#FFFFFFFF"
+                         Margin="10,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock Text="来源" FontSize="11" Foreground="#80FFFFFF" Margin="0,0,0,3"/>
+            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Foreground="#FFFFFFFF" FontSize="13" Margin="0,0,0,12"/>
+            <TextBlock Text="路径与查询" FontSize="11" Foreground="#80FFFFFF" Margin="0,0,0,3"/>
+            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Foreground="#B3FFFFFF" FontSize="13" Margin="0,0,0,12"/>
+            <TextBlock Text="权限范围" FontSize="11" Foreground="#80FFFFFF" Margin="0,0,0,3"/>
+            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Foreground="#B3FFFFFF" FontSize="13" Margin="0,0,0,12"/>
+            <TextBlock x:Name="ApprovalExpiry" Foreground="#80FFFFFF" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,18"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-              <!-- NavButton 已切图标字体——文本按钮本地覆盖回 UI 字体（否则中文缺字形） -->
-              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88"
-                      Margin="0,0,8,0" Style="{StaticResource NavButton}" Width="Auto" Height="32" FontSize="13"
+              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="92"
+                      Margin="0,0,10,0" Style="{StaticResource NavButton}" Width="Auto" Height="34" FontSize="13"
                       FontFamily="Segoe UI, Microsoft YaHei UI"/>
-              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112" Style="{StaticResource OpenButton}"/>
+              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="118" Height="34" Style="{StaticResource OpenButton}"/>
             </StackPanel>
           </StackPanel>
         </Border>
