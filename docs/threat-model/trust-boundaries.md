@@ -8,7 +8,7 @@
 | 信任域 | 内容 | 能力边界 |
 |---|---|---|
 | 远程网页域 | 不可信 renderer（互联网内容——脚本/iframe/重定向/下载） | 仅渲染——无 native bridge/无 MCP token/无本地命令/无标签全量读取（ADR-003） |
-| 本地 chrome UI 域 | 固定 bundled origin（file://）——展示/意图发起/确认 | 仅显示/提交意图——不持有全局后台权限（经 Broker 请求 action） |
+| 本地 chrome UI 域 | 按端分列（WB-121，2026-09-26 审计）：Windows C# 正典栈 = `https://ntp.aegis.local` 受信虚拟主机（WebView2 SetVirtualHostNameToFolderMapping——非 file://）；Android = `file:///android_asset/` 本地资产页——展示/意图发起/确认 | 仅显示/提交意图——不持有全局后台权限（经 Broker 请求 action） |
 | Capability broker 域 | 唯一产生本地副作用的边界（Windows/Android Broker） | 验证来源/会话/代际/scope/参数/预算/批准/nonce——没有 AuthorizedAction 不能产生副作用（ADR-002——default_deny） |
 
 ## 关键威胁与缓解

@@ -1,8 +1,12 @@
 namespace Aegis.Windows.WebView;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
+using Aegis.Windows.Broker;
 using Aegis.Windows.Chrome.Ntp;
+using Aegis.Windows.Core.Privacy;
+using Aegis.Windows.Core.Security;
 using Microsoft.Web.WebView2.Core;
 
 /// <summary>WebView2 封装（阶段 C——蓝图 windows/src/Aegis.Windows.WebView）。
@@ -10,13 +14,25 @@ using Microsoft.Web.WebView2.Core;
 /// 远程页面无 native bridge——不注入 host object（ADR-003）。</summary>
 public sealed class HostWebView : IDisposable
 {
-    private readonly Broker.BrowserPolicyBroker _broker;
+    private readonly IBroker _broker;
+    private readonly IPrivacySettings _privacy;
     private readonly string _sessionId;
     private readonly string _tabId;
     private ulong _documentGeneration;
     private PendingNavigationConfirmation? _pendingConfirmation;
     private PendingNavigationResumption? _pendingResumption;
     private bool _disposed;
+
+    // —— 命名处理器（审计遗留项：此前匿名闭包订阅不可退订，且重复 Wire 会
+    //    双重订阅导致每导航双重决策/双重消费）——
+    private CoreWebView2? _wired;
+    private EventHandler<CoreWebView2NavigationStartingEventArgs>? _onNavigationStarting;
+    private EventHandler<CoreWebView2NavigationStartingEventArgs>? _onNavigationOriginFlip;
+    private EventHandler<CoreWebView2NavigationStartingEventArgs>? _onFrameNavigationStarting;
+    private EventHandler<CoreWebView2NewWindowRequestedEventArgs>? _onNewWindowRequested;
+    private EventHandler<CoreWebView2DownloadStartingEventArgs>? _onDownloadStarting;
+    private EventHandler<CoreWebView2PermissionRequestedEventArgs>? _onPermissionRequested;
+    private EventHandler<CoreWebView2WebResourceRequestedEventArgs>? _onWebResourceRequested;
 
     /// <summary>仅受信 WPF chrome 订阅；远程页面无法调用此事件或取得授权动作。</summary>
     public event EventHandler<NavigationConfirmationRequestedEventArgs>? NavigationConfirmationRequested;
@@ -33,187 +49,269 @@ public sealed class HostWebView : IDisposable
     /// Handled=true 静默丢弃 → 新闻/热搜等 target=_blank 链接点击无反应）。</summary>
     public event Action<string>? NewWindowRequested;
 
-    public HostWebView(Broker.BrowserPolicyBroker broker, string sessionId, string? tabId = null)
+    /// <summary>构造器注入授权边界与隐私策略读取面（默认 LivePrivacySettings——
+    /// 读进程级静态；测试可注入假实现）。</summary>
+    public HostWebView(IBroker broker, string sessionId, string? tabId = null, IPrivacySettings? privacy = null)
     {
-        _broker = broker;
+        _broker = broker ?? throw new ArgumentNullException(nameof(broker));
+        _privacy = privacy ?? LivePrivacySettings.Instance;
         _sessionId = sessionId;
         // M1-T1（ADR-009 多标签）：tabId 显式传入——每标签一个 HostWebView 实例
         //（每实例一个 broker session，账本键独立）。缺省保留旧单标签行为。
         _tabId = tabId ?? $"tab-{sessionId}";
     }
 
+    /// <summary>接线（幂等防护：同一 WebView 只允许接线一次——重复接线会双重
+    /// 订阅导致每导航双重决策/双重消费，直接拒绝）。</summary>
     public void WireEvents(CoreWebView2 webView)
     {
+        if (_wired is not null)
+            throw new InvalidOperationException("HostWebView 已接线（重复 Wire 禁止）。");
         if (!_broker.RegisterSession(_sessionId, _tabId, _documentGeneration))
             throw new InvalidOperationException("无法注册安全浏览会话。");
-        // 导航决策（NavigationStarting 可 disallow——Microsoft 官方——真实取消语义）
-        webView.NavigationStarting += (_, e) =>
+        _wired = webView;
+
+        _onNavigationStarting = (sender, e) => OnNavigationStarting(webView, e);
+        // CS-317（2026-09-26 审计）：HTTPS-only 对 iframe 子文档同判——顶层
+        // http 会升级 https 而 http frame 保持明文是策略缺口。帧无法重定向
+        // 顶层导航，只能取消并留审计（本机/回环例外口径与顶层一致）。
+        _onFrameNavigationStarting = (sender, e) =>
         {
-            // HTTPS-only：http 主动升级为 https（Edge 同款——加密优先）。
-            // 站点若无 https，升级后加载失败会走到错误页，绝不降级回明文。
-            // 例外：本机/回环/hosts 映射到本机的域名**不升级**——本地开发
-            // 服务器通常只跑 http，升级到 https 必然失败（"开屏纯文字"根因）。
-            if (Core.Privacy.PrivacySettings.HttpsOnly
-                && Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
-                && uri.Scheme == Uri.UriSchemeHttp
-                && !Core.UrlSafety.IsLocalHostOrResolvesLocalHost(uri.Host))
+            if (_privacy.HttpsOnly
+                && Uri.TryCreate(e.Uri, UriKind.Absolute, out var frameUri)
+                && frameUri.Scheme == Uri.UriSchemeHttp
+                && !Core.UrlSafety.IsLocalHostOrResolvesLocalHost(frameUri.Host))
             {
                 e.Cancel = true;
-                var httpsUrl = "https://" + uri.GetComponents(
-                    UriComponents.HostAndPort | UriComponents.PathAndQuery, UriFormat.UriEscaped);
-                webView.Navigate(httpsUrl);
+                SecurityLog.Write($"[https] 明文 iframe 导航已取消: {RedactUrl(e.Uri)}");
                 return;
             }
-            e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: true);
-        };
-        // 子框架导航同样经 broker（FrameNavigationStarting——iframe 策略）
-        webView.FrameNavigationStarting += (_, e) =>
-        {
             e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: false);
         };
-        // 新窗口请求（target=_blank / window.open）：拦截原生弹窗（避免策略被
-        // 绕过），但把 URL 交给受信 chrome 决定是否在新标签打开——链接点击可跳转
-        webView.NewWindowRequested += (_, e) =>
+        _onNewWindowRequested = (sender, e) =>
         {
             e.Handled = true;  // 一律不弹独立窗口
             if (!string.IsNullOrWhiteSpace(e.Uri))
                 NewWindowRequested?.Invoke(e.Uri);
         };
-        // M3 下载管理（ADR-009：pywebview 硬编码禁用下载的天花板在原生栈
-        // 不复存在）。全量经 broker 审计；危险扩展（对齐 Android DownloadPolicy）
-        // 需用户显式确认——无确认订阅者时 fail-closed 拒绝。
-        webView.DownloadStarting += (_, e) =>
-        {
-            var downloadUrl = string.Empty;
-            var suggested = string.Empty;
-            try
-            {
-                downloadUrl = e.DownloadOperation?.Uri ?? string.Empty;
-                // SDK 1.0.2903.40 无 SuggestedFileName——从结果路径提取
-                suggested = Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty);
-            }
-            catch (Exception)
-            {
-                // 元数据读取失败不影响策略判定
-            }
-            var fileName = Core.Downloads.DownloadPolicy.SanitizeFileName(suggested);
-            var dangerous = Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(downloadUrl, fileName);
-            if (dangerous
-                && (DownloadConfirmationRequested is null
-                    || !DownloadConfirmationRequested.Invoke(downloadUrl, fileName)))
-            {
-                e.Handled = true;
-                try
-                {
-                    e.DownloadOperation?.Cancel();
-                }
-                catch (Exception)
-                {
-                    // 操作可能尚未启动——拒绝语义已由 Handled 保证
-                }
-                _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
-                return;
-            }
-            // 下载门禁真正生效：AllowDownload 校验会话/标签/kill-switch，
-            // 返回值接入实际放行——此前被忽略（ADR-002 审计发现 G）。
-            // 非危险下载或危险已确认，都必须过这道门。
-            var allowed = _broker.AllowDownload(_sessionId, _tabId, downloadUrl, fileName, dangerous);
-            if (!allowed)
-            {
-                e.Handled = true;
-                try
-                {
-                    e.DownloadOperation?.Cancel();
-                }
-                catch (Exception)
-                {
-                    // 操作可能尚未启动——拒绝语义已由 Handled 保证
-                }
-                _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
-            }
-        };
-        // 消息只接受受信 chrome UI origin（远程页面无 native bridge——WebMessage 忽略）
-        webView.WebMessageReceived += (_, e) =>
-        {
-            if (!IsTrustedChromeOrigin(e.Source))
-                return;  // 远程消息忽略——无本地能力（后续接 broker ProposedAction）
-        };
-        // 权限请求（PermissionRequested）默认拒绝——最小授权（中文零信任实践）
-        webView.PermissionRequested += (_, e) =>
-        {
+        _onDownloadStarting = (sender, e) => OnDownloadStarting(e);
+        _onPermissionRequested = (sender, e) =>
             e.State = CoreWebView2PermissionState.Deny;  // 远程页面无摄像头/麦克风/定位
-        };
-        // M1-T2（ADR-009）：加固束 + 原生红利接线
-        WebView2Hardening.Apply(webView, _tabId);
         // 顶层导航时按来源翻转 WebMessage（远程页面禁用——fail-closed）。
         // 注意：只按顶层 NavigationStarting 翻转，**绝不因内嵌 iframe 的
         // 来源启用**（IsWebMessageEnabled 是 core 级全局开关——若子框架为
         // ntp.aegis.local 就把全局打开，远程页可内嵌该帧驱动受信桥——
         // 审计 M4 发现并封死）。
-        webView.NavigationStarting += (_, e) => WebView2Hardening.SetPerOrigin(webView, e.Uri);
-        // DNT 注入 + 黑名单子资源真拦截（WebResourceRequested 原生返回 403——
-        // pywebview 时代只能标记不能拦截的缺口，原生 API 直接闭合）
+        _onNavigationOriginFlip = (sender, e) => WebView2Hardening.SetPerOrigin(webView, e.Uri);
+        _onWebResourceRequested = (sender, e) => OnWebResourceRequested(webView, e);
+
+        webView.NavigationStarting += _onNavigationStarting;
+        webView.FrameNavigationStarting += _onFrameNavigationStarting;
+        webView.NewWindowRequested += _onNewWindowRequested;
+        webView.DownloadStarting += _onDownloadStarting;
+        webView.PermissionRequested += _onPermissionRequested;
+        webView.NavigationStarting += _onNavigationOriginFlip;
         webView.AddWebResourceRequestedFilter("*", CoreWebView2WebResourceContext.All);
-        webView.WebResourceRequested += (_, e) =>
+        webView.WebResourceRequested += _onWebResourceRequested;
+        // M1-T2（ADR-009）：加固束 + 原生红利接线
+        WebView2Hardening.Apply(webView, _tabId);
+    }
+
+    /// <summary>显式解绑全部订阅（Dispose 调用；也可供宿主在复用 WebView 时手动
+    /// 退订——此前匿名闭包不可退订，阻止单测复用同一 WebView 实例）。</summary>
+    public void UnwireEvents()
+    {
+        if (_wired is not { } webView)
+            return;
+        webView.NavigationStarting -= _onNavigationStarting;
+        webView.NavigationStarting -= _onNavigationOriginFlip;
+        webView.FrameNavigationStarting -= _onFrameNavigationStarting;
+        webView.NewWindowRequested -= _onNewWindowRequested;
+        webView.DownloadStarting -= _onDownloadStarting;
+        webView.PermissionRequested -= _onPermissionRequested;
+        webView.WebResourceRequested -= _onWebResourceRequested;
+        _wired = null;
+    }
+
+    /// <summary>导航决策（NavigationStarting 可 disallow——Microsoft 官方——真实取消语义）。</summary>
+    private void OnNavigationStarting(CoreWebView2 webView, CoreWebView2NavigationStartingEventArgs e)
+    {
+        // HTTPS-only：http 主动升级为 https（Edge 同款——加密优先）。
+        // 站点若无 https，升级后加载失败会走到错误页，绝不降级回明文。
+        // 例外：本机/回环/hosts 映射到本机的域名**不升级**——本地开发
+        // 服务器通常只跑 http，升级到 https 必然失败（"开屏纯文字"根因）。
+        if (_privacy.HttpsOnly
+            && Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttp
+            && !Core.UrlSafety.IsLocalHostOrResolvesLocalHost(uri.Host))
         {
+            e.Cancel = true;
+            var httpsUrl = "https://" + uri.GetComponents(
+                UriComponents.HostAndPort | UriComponents.PathAndQuery, UriFormat.UriEscaped);
+            webView.Navigate(httpsUrl);
+            return;
+        }
+        e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: true);
+    }
+
+    /// <summary>M3 下载管理（ADR-009）：全量经 broker 审计；危险扩展（对齐
+    /// Android DownloadPolicy）需用户显式确认——无确认订阅者时 fail-closed 拒绝。</summary>
+    private void OnDownloadStarting(CoreWebView2DownloadStartingEventArgs e)
+    {
+        var downloadUrl = string.Empty;
+        var suggested = string.Empty;
+        try
+        {
+            downloadUrl = e.DownloadOperation?.Uri ?? string.Empty;
+            // SDK 1.0.2903.40 无 SuggestedFileName——从结果路径提取
+            suggested = Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty);
+        }
+        catch (Exception)
+        {
+            // 元数据读取失败不影响策略判定
+        }
+        var fileName = Core.Downloads.DownloadPolicy.SanitizeFileName(suggested);
+        var dangerous = Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(downloadUrl, fileName);
+        if (dangerous
+            && (DownloadConfirmationRequested is null
+                || !DownloadConfirmationRequested.Invoke(downloadUrl, fileName)))
+        {
+            e.Handled = true;
             try
             {
-                e.Request.Headers.SetHeader("DNT", "1");
-                if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
-                    || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-                    return;
-                // 威胁黑名单（既有——子资源真拦截）
-                if (_broker.IsHostBlocked(uri.Host))
-                {
-                    Core.Security.SecurityLog.Write(
-                        $"[threat] 子资源拦截（黑名单命中）: {e.Request.Uri}");
-                    e.Response = webView.Environment.CreateWebResourceResponse(
-                        null, 403, "Blocked", "Content-Type: text/plain");
-                    return;
-                }
-                // 跟踪防护分级（P1——对齐 Edge 基础/均衡/严格）
-                var level = Core.Privacy.PrivacySettings.ProtectionLevel;
-                if (level <= 0)
-                    return;
-                var pageHost = Uri.TryCreate(webView.Source, UriKind.Absolute, out var page)
-                    ? page.Host
-                    : string.Empty;
-                // 受信虚拟主机（NTP/GeoGebra）子资源：黑名单仍拦截（上文已处理），
-                // 但跳过第三方/跟踪判定——严格模式 + 跨站导航过渡期会把自带页的
-                // JS/WASM 误判为第三方而 403（pageHost 仍是旧的远程 host）。
-                var isVirtualHostAsset = NtpAssets.IsVirtualHostUrl(e.Request.Uri);
-                var isTracker = Core.Privacy.TrackerList.IsTracker(uri.Host);
-                var blockContext = e.ResourceContext is CoreWebView2WebResourceContext.Script
-                    or CoreWebView2WebResourceContext.Fetch
-                    or CoreWebView2WebResourceContext.Image;
-                if (isTracker
-                    || (level >= 2 && blockContext && !isVirtualHostAsset
-                        && !Core.Privacy.TrackerList.IsSameSite(uri.Host, pageHost)))
-                {
-                    Core.Security.SecurityLog.Write(
-                        $"[privacy] 跟踪防护（级别{level}）拦截: {e.Request.Uri} ctx={e.ResourceContext}");
-                    e.Response = webView.Environment.CreateWebResourceResponse(
-                        null, 403, "Blocked", "Content-Type: text/plain");
-                }
+                e.DownloadOperation?.Cancel();
             }
             catch (Exception)
             {
-                // 单请求处理失败不影响其他请求（保持原始响应路径）
+                // 操作可能尚未启动——拒绝语义已由 Handled 保证
             }
-        };
+            _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
+            return;
+        }
+        // 下载门禁真正生效：AllowDownload 校验会话/标签/kill-switch，
+        // 返回值接入实际放行——此前被忽略（ADR-002 审计发现 G）。
+        // 非危险下载或危险已确认，都必须过这道门。
+        var allowed = _broker.AllowDownload(_sessionId, _tabId, downloadUrl, fileName, dangerous);
+        if (!allowed)
+        {
+            e.Handled = true;
+            try
+            {
+                e.DownloadOperation?.Cancel();
+            }
+            catch (Exception)
+            {
+                // 操作可能尚未启动——拒绝语义已由 Handled 保证
+            }
+            _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
+        }
     }
 
-    private static bool IsTrustedChromeOrigin(string source) =>
-        Uri.TryCreate(source, UriKind.Absolute, out var uri)
-        && uri.Scheme == Uri.UriSchemeHttps
-        && uri.Host.Equals("chrome.aegis.local", StringComparison.OrdinalIgnoreCase)
-        && uri.IsDefaultPort;
+    /// <summary>DNT 注入 + 黑名单子资源真拦截（WebResourceRequested 原生返回
+    /// 403——pywebview 时代只能标记不能拦截的缺口，原生 API 直接闭合）。</summary>
+    private void OnWebResourceRequested(CoreWebView2 webView, CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        try
+        {
+            e.Request.Headers.SetHeader("DNT", "1");
+            if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
+                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                return;
+            // 威胁黑名单（既有——子资源真拦截）
+            if (_broker.IsHostBlocked(uri.Host))
+            {
+                Core.Security.SecurityLog.Write(
+                    $"[threat] 子资源拦截（黑名单命中）: {RedactUrl(e.Request.Uri)}");
+                e.Response = webView.Environment.CreateWebResourceResponse(
+                    null, 403, "Blocked", "Content-Type: text/plain");
+                return;
+            }
+            // 跟踪防护分级（P1——对齐 Edge 基础/均衡/严格）
+            var level = _privacy.ProtectionLevel;
+            if (level <= 0)
+                return;
+            var pageHost = ResolvePageHost(webView.Source);
+            // 受信虚拟主机（NTP/GeoGebra）子资源：黑名单仍拦截（上文已处理），
+            // 但跳过第三方/跟踪判定——严格模式 + 跨站导航过渡期会把自带页的
+            // JS/WASM 误判为第三方而 403（pageHost 仍是旧的远程 host）。
+            var isVirtualHostAsset = NtpAssets.IsVirtualHostUrl(e.Request.Uri);
+            var isTracker = Core.Privacy.TrackerList.IsTracker(uri.Host);
+            var blockContext = e.ResourceContext is CoreWebView2WebResourceContext.Script
+                or CoreWebView2WebResourceContext.Fetch
+                or CoreWebView2WebResourceContext.Image;
+            if (isTracker
+                || (level >= 2 && blockContext && !isVirtualHostAsset
+                    && !Core.Privacy.TrackerList.IsSameSite(uri.Host, pageHost)))
+            {
+                RecordTrackerBlock(uri, level, e.ResourceContext);
+                e.Response = webView.Environment.CreateWebResourceResponse(
+                    null, 403, "Blocked", "Content-Type: text/plain");
+            }
+        }
+        catch (Exception ex)
+        {
+            // CS-310（2026-09-26 审计）：兜底不再完全静默——策略管线异常留痕
+            //（含 ResourceContext 与脱敏 URL），维持不 rethrow（单请求处理
+            // 失败不影响其他请求，保持原始响应路径）
+            try
+            {
+                SecurityLog.Write(
+                    $"[webresource] 处理异常: {ex.GetType().Name}: {ex.Message} ctx={e.ResourceContext} url={RedactUrl(e.Request.Uri)}");
+            }
+            catch (Exception)
+            {
+                // 异常参数本身不可读——尽力留痕即止
+            }
+        }
+    }
+
+    // —— CS-308（2026-09-26 审计）：拦截类事件聚合落盘 ——
+
+    // 跟踪器密集页此前每个被拦截子请求同步 SecurityLog.Write（每条
+    // File.AppendAllText）——IO 放大且 1MB 取证日志被冲掉。按 host 聚合计数，
+    // 周期性（累计 BlockAggregateFlushThreshold 次）落一行；Dispose 兜底清空。
+    // WebResourceRequested 在创建控件的 UI 线程触发——单线程访问，无需加锁。
+    private const int BlockAggregateFlushThreshold = 50;
+    private readonly Dictionary<string, (int Count, string Detail)> _trackerBlockAggregates =
+        new(StringComparer.OrdinalIgnoreCase);
+    private int _trackerBlocksSinceFlush;
+
+    private void RecordTrackerBlock(Uri uri, int level, CoreWebView2WebResourceContext context)
+    {
+        var detail = $"级别{level} ctx={context}";
+        if (_trackerBlockAggregates.TryGetValue(uri.Host, out var existing))
+            _trackerBlockAggregates[uri.Host] = (existing.Count + 1, existing.Detail);
+        else
+            _trackerBlockAggregates[uri.Host] = (1, detail);
+        if (++_trackerBlocksSinceFlush >= BlockAggregateFlushThreshold)
+            FlushTrackerBlocks();
+    }
+
+    private void FlushTrackerBlocks()
+    {
+        foreach (var pair in _trackerBlockAggregates)
+        {
+            SecurityLog.Write(
+                $"[privacy] 跟踪防护拦截聚合: {pair.Key} ×{pair.Value.Count}（{pair.Value.Detail}）");
+        }
+        _trackerBlockAggregates.Clear();
+        _trackerBlocksSinceFlush = 0;
+    }
+
+    // CS-070（审计 2026-09-25）：脱敏单源——与 Broker 各持一份相同实现已收敛
+    // 到 UrlRedactor.Redact（丢弃 query/fragment，超长截断）。
+    private static string RedactUrl(string? url) => UrlRedactor.Redact(url);
+
 
     public void Dispose()
     {
         if (_disposed)
             return;
+        UnwireEvents();
         RejectPendingNavigation();
+        // CS-308：会话结束时落最后一批未满阈值的拦截聚合（取证不留尾巴）
+        if (_trackerBlocksSinceFlush > 0)
+            FlushTrackerBlocks();
         _broker.DestroySession(_sessionId);
         _disposed = true;
     }
@@ -312,8 +410,30 @@ public sealed class HostWebView : IDisposable
             pending.Scope);
     }
 
+    // CS-198：pageHost 解析缓存——每个子资源请求都重 Parse webView.Source
+    // （同页上百子资源重复解析）；来源串不变即复用，导航换页即失效
+    private string? _pageHostCacheSource;
+    private string _pageHostCacheValue = string.Empty;
+
+    private string ResolvePageHost(string? source)
+    {
+        if (!string.Equals(_pageHostCacheSource, source, StringComparison.Ordinal))
+        {
+            _pageHostCacheSource = source;
+            _pageHostCacheValue = Uri.TryCreate(source, UriKind.Absolute, out var page)
+                ? page.Host
+                : string.Empty;
+        }
+        return _pageHostCacheValue;
+    }
+
     private bool AdvanceDocumentGenerationIfNeeded()
     {
+        // CS-199：代际饱和前置守卫——checked 溢出异常发生在导航事件链上
+        // 即崩溃面；int 代际实际不可达，守卫为契约兜底（饱和按推进失败
+        // fail-closed 拒绝）
+        if (_documentGeneration == int.MaxValue)
+            return false;
         var nextGeneration = checked(_documentGeneration + 1);
         if (!_broker.UpdateDocumentGeneration(_sessionId, _tabId, nextGeneration))
             return false;

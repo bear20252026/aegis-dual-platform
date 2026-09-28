@@ -2,7 +2,6 @@ package com.aegis.browser
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -10,14 +9,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
@@ -35,6 +32,9 @@ import androidx.compose.ui.unit.dp
  *
  * 标签胶囊骨架由 [TabChipCore] 单源提供（与 VerticalTabBar 共用）。
  *
+ * AD-086（2026-09-26 审计）：激活标签变化时滚动到可视区——超宽横向
+ * 标签栏此前溢出部分不可见（切到屏幕外标签无任何视觉反馈）。
+ *
  * @param tabs       标签列表（含标题/URL）
  * @param activeIndex 当前激活标签索引
  * @param onSelect   点击标签切换（参数为索引）
@@ -50,17 +50,26 @@ fun TabBar(
     onNewTab: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(activeIndex, tabs.size) {
+        if (activeIndex in tabs.indices) listState.animateScrollToItem(activeIndex)
+    }
+    // AD-153（审计 2026-09-23 清单·A7 批）：语义色板经主题取色
+    val chrome = LocalAegisChromeColors.current
     LazyRow(
+        state = listState,
         modifier =
             modifier
                 .fillMaxWidth()
                 .height(44.dp)
-                .background(ToolbarBackground),
+                .background(chrome.toolbarBackground),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         contentPadding = PaddingValues(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        itemsIndexed(tabs) { index, tab ->
+        // AD-039：key=tab.id——标题变化（copy 替换实例）时复用既有 item 而非
+        // 重建，且防关闭中间标签后索引位移引发的状态错位
+        itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
             TabChipCore(
                 tab = tab,
                 active = index == activeIndex,
@@ -73,16 +82,14 @@ fun TabBar(
             )
         }
         item {
-            Surface(
-                onClick = onNewTab,
+            // AD-174（审计 2026-09-23 清单·A7 批）：新建控件单源 NewTabButton
+            // （骨架/底色/语义与 VerticalTabBar 共用，差异仅形状/尺寸/文案）
+            NewTabButton(
+                label = "+",
                 shape = CircleShape,
-                color = ButtonOverlay,
                 modifier = Modifier.size(32.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(text = "+", color = Color.White, style = MaterialTheme.typography.bodyMedium)
-                }
-            }
+                onNewTab = onNewTab,
+            )
         }
     }
 }

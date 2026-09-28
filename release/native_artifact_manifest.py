@@ -13,7 +13,6 @@ import json
 import sys
 from pathlib import Path
 
-
 SCHEMA_VERSION = 1
 LIBRARY = "aegis_policy_core"
 EXPECTED_ARTIFACTS = {
@@ -77,7 +76,9 @@ def read_manifest(path: Path) -> dict[str, object]:
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"无法读取清单: {path}: {error}") from error
     if not isinstance(value, dict):
-        raise ValueError("清单根节点必须是对象")
+        # TRY004 豁免：ValueError 是本模块清单校验的既定契约
+        #（PY-146 用例与调用方均按 ValueError 处理），不改抛 TypeError
+        raise ValueError("清单根节点必须是对象")  # noqa: TRY004
     return value
 
 

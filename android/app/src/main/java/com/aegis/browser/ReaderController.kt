@@ -22,7 +22,10 @@ class ReaderController internal constructor(
     private val currentWebView: () -> WebView?,
     private val currentUrl: () -> String?,
     private val navigateExternal: (String) -> Boolean,
-    private val alert: (String) -> Unit,
+    // AD-228（2026-09-26 审计）：两条提示此前硬编码中文（AD-045/046 迁移
+    // 漏网）——经资源 id 回调上抛，文案收敛 strings.xml 单源（原裸字符串
+    // alert 回调随最后两个调用点一并移除）。
+    private val alertRes: (Int) -> Unit = {},
 ) {
     private val _content = MutableStateFlow<ReaderContent?>(null)
     val content: StateFlow<ReaderContent?> = _content.asStateFlow()
@@ -31,7 +34,7 @@ class ReaderController internal constructor(
     fun toggleReaderMode() {
         ReaderMode.extract(currentWebView()) { extracted ->
             if (extracted == null) {
-                alert("当前页面没有可提取的正文")
+                alertRes(R.string.reader_no_content)
             } else {
                 _content.value = extracted
             }
@@ -48,7 +51,7 @@ class ReaderController internal constructor(
         val target = TranslateEntry.buildUrl(currentUrl())
         val navigated = target != null && navigateExternal(target)
         if (!navigated) {
-            alert("当前页面无法翻译或未通过安全策略验证")
+            alertRes(R.string.translate_unavailable)
         }
     }
 }

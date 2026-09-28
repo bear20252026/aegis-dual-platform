@@ -13,40 +13,73 @@ using Microsoft.Data.Sqlite;
 public sealed class TabSessionStore
 {
     private readonly string _dbPath;
+    // CS-030（审计 2026-09-25）：DDL+迁移 once——此前每次 Open 都跑
+    // CREATE TABLE + PRAGMA table_info 迁移探测（低频库的纯开销）。
+    // 失败不置位——下次重试。
+    private volatile bool _schemaReady;
 
     public TabSessionStore(string dbPath) => _dbPath = dbPath;
 
     /// <summary>会话行（含固定态）。</summary>
     public sealed record SessionTab(string TabId, string Url, string Title, bool IsPinned);
 
-    /// <summary>保存当前会话（先清后写——小表全量重写最简且无增量漂移）。</summary>
+    /// <summary>保存当前会话（先清后写——小表全量重写最简且无增量漂移）。
+    /// 磁盘异常不上抛（每次导航完成都会调用——此前磁盘满/库被锁时每次导航
+    /// 弹一次全局异常）——记录日志后放弃本次快照。</summary>
     public void Save(IReadOnlyList<Tab> tabs, string? currentTabId)
     {
-        using var connection = Open();
-        using var transaction = connection.BeginTransaction();
-        using (var clear = connection.CreateCommand())
+        try
         {
-            clear.Transaction = transaction;
-            clear.CommandText = "DELETE FROM tabs";
-            clear.ExecuteNonQuery();
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            using (var clear = connection.CreateCommand())
+            {
+                clear.Transaction = transaction;
+                clear.CommandText = "DELETE FROM tabs";
+                clear.ExecuteNonQuery();
+            }
+            for (var i = 0; i < tabs.Count; i++)
+            {
+                using var insert = connection.CreateCommand();
+                insert.Transaction = transaction;
+                insert.CommandText = """
+                    INSERT INTO tabs(position, tab_id, url, title, is_current, is_pinned)
+                    VALUES($p,$t,$u,$ti,$c,$pin)
+                    """;
+                insert.Parameters.AddWithValue("$p", i);
+                insert.Parameters.AddWithValue("$t", tabs[i].TabId);
+                insert.Parameters.AddWithValue("$u", tabs[i].Url);
+                insert.Parameters.AddWithValue("$ti", tabs[i].Title);
+                insert.Parameters.AddWithValue("$c", tabs[i].TabId == currentTabId ? 1 : 0);
+                insert.Parameters.AddWithValue("$pin", tabs[i].IsPinned ? 1 : 0);
+                insert.ExecuteNonQuery();
+            }
+            transaction.Commit();
         }
-        for (var i = 0; i < tabs.Count; i++)
+        catch (Exception ex)
         {
-            using var insert = connection.CreateCommand();
-            insert.Transaction = transaction;
-            insert.CommandText = """
-                INSERT INTO tabs(position, tab_id, url, title, is_current, is_pinned)
-                VALUES($p,$t,$u,$ti,$c,$pin)
-                """;
-            insert.Parameters.AddWithValue("$p", i);
-            insert.Parameters.AddWithValue("$t", tabs[i].TabId);
-            insert.Parameters.AddWithValue("$u", tabs[i].Url);
-            insert.Parameters.AddWithValue("$ti", tabs[i].Title);
-            insert.Parameters.AddWithValue("$c", tabs[i].TabId == currentTabId ? 1 : 0);
-            insert.Parameters.AddWithValue("$pin", tabs[i].IsPinned ? 1 : 0);
-            insert.ExecuteNonQuery();
+            Security.SecurityLog.Write(
+                $"[session] 会话保存失败（放弃本次快照）: {ex.GetType().Name}: {ex.Message}");
         }
-        transaction.Commit();
+    }
+
+    /// <summary>CS-191：已存会话条数——COUNT 聚合直达（此前 NtpBridge hasSaved
+    /// 走全量 Load 只为数数）。库缺失/损坏返回 0（fail-safe）。</summary>
+    public int CountSaved()
+    {
+        if (!File.Exists(_dbPath))
+            return 0;
+        try
+        {
+            using var connection = Open();
+            using var select = connection.CreateCommand();
+            select.CommandText = "SELECT COUNT(*) FROM tabs";
+            return Convert.ToInt32(select.ExecuteScalar());
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
+        {
+            return 0;
+        }
     }
 
     /// <summary>加载上次会话；无记录/库损坏返回空（fail-safe——不阻断启动）。
@@ -62,25 +95,28 @@ public sealed class TabSessionStore
         {
             using var connection = Open();
             using var select = connection.CreateCommand();
-            select.CommandText = "SELECT position, tab_id, url, title, is_current, is_pinned FROM tabs ORDER BY position";
+            // CS-186：position 不再 SELECT（仅作排序键）——读取列数减一
+            select.CommandText = "SELECT tab_id, url, title, is_current, is_pinned FROM tabs ORDER BY position";
             using var reader = select.ExecuteReader();
             var tabs = new List<SessionTab>();
             while (reader.Read())
             {
                 var tab = new SessionTab(
-                    reader.GetString(1),
-                    reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
-                    reader.IsDBNull(3) ? "新标签页" : reader.GetString(3),
-                    !reader.IsDBNull(5) && reader.GetInt64(5) == 1);
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
+                    reader.IsDBNull(2) ? "新标签页" : reader.GetString(2),
+                    !reader.IsDBNull(4) && reader.GetInt64(4) == 1);
                 tabs.Add(tab);
-                if (!reader.IsDBNull(4) && reader.GetInt64(4) == 1)
+                if (!reader.IsDBNull(3) && reader.GetInt64(3) == 1)
                     currentTabId = tab.TabId;
             }
             currentTabId ??= tabs.LastOrDefault()?.TabId;
             return tabs;
         }
-        catch (SqliteException)
+        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
         {
+            Security.SecurityLog.Write(
+                $"[session] 会话读取失败（回退空会话）: {ex.GetType().Name}: {ex.Message}");
             return Array.Empty<SessionTab>();  // 库损坏 → 空会话（不阻断启动——fail-safe）
         }
     }
@@ -101,32 +137,42 @@ public sealed class TabSessionStore
         try
         {
             connection.Open();
-            using var ensure = connection.CreateCommand();
-            ensure.CommandText = """
-                CREATE TABLE IF NOT EXISTS tabs(
-                    position INTEGER NOT NULL,
-                    tab_id TEXT NOT NULL,
-                    url TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    is_current INTEGER NOT NULL DEFAULT 0,
-                    is_pinned INTEGER NOT NULL DEFAULT 0)
-                """;
-            ensure.ExecuteNonQuery();
-            // 旧库迁移：补 is_pinned 列
-            var hasPinned = false;
-            using (var pragma = connection.CreateCommand())
+            // CS-099：busy_timeout 与其余三库统一——并发写时快速忙等重试
+            using (var busy = connection.CreateCommand())
             {
-                pragma.CommandText = "PRAGMA table_info(tabs)";
-                using var reader = pragma.ExecuteReader();
-                while (reader.Read())
-                    if (string.Equals(reader.GetString(1), "is_pinned", StringComparison.OrdinalIgnoreCase))
-                        hasPinned = true;
+                busy.CommandText = "PRAGMA busy_timeout=5000";
+                busy.ExecuteNonQuery();
             }
-            if (!hasPinned)
+            if (!_schemaReady)
             {
-                using var alter = connection.CreateCommand();
-                alter.CommandText = "ALTER TABLE tabs ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0";
-                alter.ExecuteNonQuery();
+                using var ensure = connection.CreateCommand();
+                ensure.CommandText = """
+                    CREATE TABLE IF NOT EXISTS tabs(
+                        position INTEGER NOT NULL,
+                        tab_id TEXT NOT NULL,
+                        url TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        is_current INTEGER NOT NULL DEFAULT 0,
+                        is_pinned INTEGER NOT NULL DEFAULT 0)
+                    """;
+                ensure.ExecuteNonQuery();
+                // 旧库迁移：补 is_pinned 列
+                var hasPinned = false;
+                using (var pragma = connection.CreateCommand())
+                {
+                    pragma.CommandText = "PRAGMA table_info(tabs)";
+                    using var reader = pragma.ExecuteReader();
+                    while (reader.Read())
+                        if (string.Equals(reader.GetString(1), "is_pinned", StringComparison.OrdinalIgnoreCase))
+                            hasPinned = true;
+                }
+                if (!hasPinned)
+                {
+                    using var alter = connection.CreateCommand();
+                    alter.CommandText = "ALTER TABLE tabs ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0";
+                    alter.ExecuteNonQuery();
+                }
+                _schemaReady = true;
             }
             return connection;
         }

@@ -3,11 +3,8 @@
 name: Release-Windows
 
 "on":
-  push:
-    tags: ['v*']
-    paths:
-      - 'windows/src/Aegis.Windows.App/**'
-      - '.github/workflows/release-windows.yml'
+  # 编排器（release.yml workflow_call）独占触发——此前 tag 直推可叠加
+  # 触发一次：双路径重复构建与重复发布竞态（PY-006）；dispatch 供手动调试
   workflow_dispatch: {}
   workflow_call: {}
 
@@ -17,35 +14,56 @@ permissions:
 jobs:
   pin-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - name: Pin check (fail-closed)
         run: |
-          if grep -rnE 'uses: [^#]+@[0-9a-f]{1,39}[^0-9a-f#]|uses: [^#]+@(main|master|v[0-9])' .github/workflows/release-windows.yml; then
-            echo "❌ 存在未固定 SHA 的 action 引用" && exit 1
+          # PY-177/SP-152（2026-09-26 审计）：pin 检查改白名单式并纳入
+          # .github/actions/**/action.yml 扫描面（详见 release.yml 同名步骤）
+          if grep -rnE '(^|[[:space:]])uses: [^#@]*@' .github/workflows/ .github/actions/ \
+              | grep -vE '@[0-9a-fA-F]{40}([[:space:]]|$|#)'; then
+            echo "❌ 存在未固定完整 40 位十六进制 SHA 的 action 引用" && exit 1
           fi
           echo "✅ 全部 action 固定完整 SHA"
 
   build:
     needs: pin-check
     runs-on: windows-latest
+    timeout-minutes: 60
     permissions:
       id-token: write
       attestations: write
-      contents: write
+      # PY-174（2026-09-26 审计）：平台级直发步骤删除，build job 不再需要
+      # contents: write——workflow_dispatch 选 v* tag 时 job 级写权限可绕过
+      # 编排器 verify-gate 与 release environment 审批，一并收回
+      contents: read
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: '10.0.x'
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 (PY-059)
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/**/packages.lock.json') }}
+          restore-keys: nuget-${{ runner.os }}-
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-055)
+        with:
+          workspaces: core/rust-policy-core
       - name: Verify shared version and release tag
         shell: pwsh
+        env:
+          # PY-181（2026-09-26 审计）：tag 名是外部可控输入，直接内插 pwsh
+          # 脚本可注入任意命令——env 中转后脚本内仅引用环境变量
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          if ("${{ github.ref_type }}" -eq "tag") {
-            python scripts/verify_versions.py --tag "${{ github.ref_name }}"
+          if ($env:REF_TYPE -eq "tag") {
+            python scripts/verify_versions.py --tag $env:REF_NAME
           } else {
             python scripts/verify_versions.py
           }
@@ -54,14 +72,18 @@ jobs:
         run: |
           # 随包发布的原生策略核心必须是"测过"的产物（159 个 Rust 测试全过）
           cargo test --manifest-path core/rust-policy-core/Cargo.toml --locked
-          cargo build --manifest-path core/rust-policy-core/Cargo.toml --release --target x86_64-pc-windows-msvc
+          cargo build --manifest-path core/rust-policy-core/Cargo.toml --release --locked --target x86_64-pc-windows-msvc
           New-Item -ItemType Directory -Force -Path dist/native-policy/windows/win-x64
           Copy-Item core/rust-policy-core/target/x86_64-pc-windows-msvc/release/aegis_policy_core.dll `
             dist/native-policy/windows/win-x64/aegis_policy_core.dll
       - name: Prepare offline GeoGebra bundle (云端打包——C# 安装包内置画板)
         uses: ./.github/actions/prepare-geogebra
         with:
-          dest-dir: legacy/windows-pywebview/geogebra
+          # SP-145（2026-09-26 审计）：暂存目录从归档栈 legacy/windows-pywebview/
+          # geogebra 改为 dist/geogebra-cache/——活跃构建不再向"只读归档"写入；
+          # 与 windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj 的
+          # Content Include 路径同步修改
+          dest-dir: dist/geogebra-cache
       - name: Verify native bridge and build current Windows application
         shell: pwsh
         run: |
@@ -84,8 +106,18 @@ jobs:
             throw "Windows 发布目录缺少 Rust 原生策略核心 DLL"
           }
           Compress-Archive -Path dist/aegis-windows/* -DestinationPath dist/Aegis.Windows.zip -Force
-      - name: Install Inno Setup 6 (C# installer)
-        run: choco install innosetup -y --no-progress
+      - name: Ensure Inno Setup 6 (C# installer)
+        # v2.2.0-beta.50 实测：runner 镜像现已预装 Inno Setup 6.7.1，固定
+        # --version=6.4.3 的 choco install 会因"已存在更新版本"直接失败。
+        # 改为仅在 ISCC 缺失时安装（不锁小版本；ISCC 调用路径 6.x 通用）。
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $iscc) {
+            Write-Output "Inno Setup 已预装，跳过安装"
+          } else {
+            choco install innosetup --no-progress -y
+          }
       - name: Build C# installer (ADR-009 beta channel — version injected from single source)
         shell: pwsh
         run: |
@@ -93,19 +125,42 @@ jobs:
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersionOverride=$version docs\release\AegisSetup-CSharp.iss
           if ($LASTEXITCODE -ne 0) { throw "C# installer compilation failed" }
           if (-not (Test-Path "dist/AegisBrowser-CSharp-Setup-$version.exe")) { throw "C# installer not generated" }
+      - name: Authenticode sign installer (optional — requires code-signing cert)
+        # 审计整改：Windows 安装包此前未签名即发布。签名需要组织代码签名证书，
+        # CI 中无法凭空取得——仅当提供 AEGIS_CODE_SIGN_CERT（base64 PFX）与密码时
+        # 执行 signtool；未配置时保持现状并明确标注，不作为硬失败（与 Android
+        # keystore 的硬性 fail-closed 区分——证书缺失非代码缺陷）。
+        shell: pwsh
+        env:
+          AEGIS_CODE_SIGN_CERT_B64: ${{ secrets.AEGIS_CODE_SIGN_CERT }}
+          AEGIS_CODE_SIGN_PASSWORD: ${{ secrets.AEGIS_CODE_SIGN_PASSWORD }}
+        run: |
+          $version = ((Get-Content shared/version.properties) | Where-Object { $_ -match '^VERSION_NAME=' }) -replace '^VERSION_NAME=', ''
+          $exe = "dist/AegisBrowser-CSharp-Setup-$version.exe"
+          if (-not $env:AEGIS_CODE_SIGN_CERT_B64) {
+            Write-Warning "AEGIS_CODE_SIGN_CERT 未配置——安装包未做 Authenticode 签名（可选签名步骤已跳过）"
+            exit 0
+          }
+          $pfx = "$env:RUNNER_TEMP\aegis-codesign.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:AEGIS_CODE_SIGN_CERT_B64))
+          $signtool = "C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe"
+          $st = Get-ChildItem $signtool | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $st) { throw "未找到 signtool（Windows SDK）" }
+          & $st.FullName sign /fd SHA256 /f $pfx /p $env:AEGIS_CODE_SIGN_PASSWORD /tr http://timestamp.digicert.com /td SHA256 $exe
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode 签名失败" }
+          & $st.FullName verify /pa $exe
+          if ($LASTEXITCODE -ne 0) { throw "Authenticode 签名校验失败" }
+          Write-Output "✅ 安装包已 Authenticode 签名并校验通过"
       - name: Write build metadata
         run: python release/build_metadata.py --platform windows --output dist/build-metadata.json
       - name: Fail-closed Windows artifact integrity assertion
         shell: pwsh
         run: |
-          $required = @(
-            "dist/aegis-windows/Aegis.Windows.App.exe",
-            "dist/aegis-windows/ntp/start.html",
-            "dist/aegis-windows/ntp/start.css",
-            "dist/aegis-windows/ntp/start.snake.js",
-            "dist/aegis-windows/ntp/start.import.js",
-            "dist/aegis-windows/ntp/wallpapers/aurora-twilight.jpg"
-          )
+          # PY-038：资产清单改读 shared/shell/manifest.txt 共享单源（此前与
+          # validate_release.py 平行维护——改一处漏一处必漂移）
+          $required = @("dist/aegis-windows/Aegis.Windows.App.exe") +
+            (Get-Content shared/shell/manifest.txt | Where-Object { $_ -and -not $_.StartsWith('#') } |
+              ForEach-Object { "dist/aegis-windows/ntp/$_" })
           foreach ($p in $required) {
             if (-not (Test-Path $p)) { throw "发布产物缺少资源: $p" }
             if ((Get-Item $p).Length -eq 0) { throw "发布产物为空文件: $p" }
@@ -118,19 +173,26 @@ jobs:
           python scripts/verify_xaml_resources.py
           if ($LASTEXITCODE -ne 0) { throw "XAML FindResource 引用了未定义资源键（可能有书签即启动崩溃）" }
           Write-Output "NTP 资源断言通过; GeoGebra=$geoOk"
+      - name: Prune dist to deliverables (payload → zip)
+        # v2.2.0-beta.50 实测：dist 下两个非交付物目录必须移除——
+        # ① dist/aegis-windows/（自包含 publish + GeoGebra 数千文件）致
+        #    attest-build-provenance 超 subject 上限（>1024 直接失败）；
+        # ② dist/geogebra-cache/（prepare action 暂存目录，csproj 打包输入，
+        #    内容已随 publish 进入 Aegis.Windows.zip）——残留在 dist 会被
+        #    publish 的 files: dist/** 逐文件发布成 377 个 Release 垃圾资产
+        #    （v2.1.10 同型事故）。
+        # SHA-256 清单在删除后生成，自动一致。
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force dist/aegis-windows, dist/geogebra-cache
+          Get-ChildItem dist | ForEach-Object { Write-Output "dist/$($_.Name)" }
 
       - name: Generate SHA-256 checksums
         run: python release/write_checksum_json.py --root dist --output dist/SHA256SUMS.json
-      - name: Publish GitHub Release (tag builds only — 云端构建产物分发)
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $version = ((Get-Content shared/version.properties) | Where-Object { $_ -match '^VERSION_NAME=' }) -replace '^VERSION_NAME=', ''
-          $assets = @("dist/AegisBrowser-CSharp-Setup-$version.exe", "dist/SHA256SUMS.json", "dist/build-metadata.json")
-          gh release create "$env:GITHUB_REF_NAME" @assets --title "Aegis $env:GITHUB_REF_NAME" --generate-notes 2>$null
-          if ($LASTEXITCODE -ne 0) { gh release upload "$env:GITHUB_REF_NAME" $assets --clobber }
+      # PY-174（2026-09-26 审计）：删除平台级 `gh release create` 直发步骤——
+      # workflow_call 路径调用方只授 contents: read，直发必 403 使整链死亡；
+      # workflow_dispatch 选 v* tag 时 job 级写权限又可绕过编排器 verify-gate
+      # 与 release environment 审批。发布统一收口 release.yml publish。
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
         with:
@@ -145,36 +207,74 @@ jobs:
   sbom:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       id-token: write
       attestations: write
-      contents: write
+      # PY-174（2026-09-26 审计）：直发步骤已删——本 job 仅 SBOM 生成/attest/
+      # artifact 上传，无需写权限；编排器（release.yml）对 workflow_call 调用
+      # 只授 contents: read，此处残留 write 会令整条发布链 startup_failure
+      # （GitHub 拒绝嵌套 job 的权限放大——v2.2.0-beta.50 实测）
+      contents: read
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
         with:
           name: release-windows
           path: dist
+      # SP-174（2026-09-26 审计）：SBOM 双生成器分工——
+      # ① anchore/sbom-action（本步骤）：扫 windows/ 源码目录，产出依赖级
+      #    CycloneDX SBOM，作为发布 SBOM 单源（attest 后随 dist 分发）；
+      # ② release/tools/generate_sbom/generate_sbom.py：清单驱动、制品级
+      #    SBOM 生成器，仅由 supply-chain.yml 以测试向量冒烟（独立证据链
+      #    工具），不参与发布 SBOM 产出——二者口径不同、不互换。
       - name: Generate CycloneDX SBOM for current C# application
         uses: anchore/sbom-action@52542941bb775adef77f7a51ff5ea984e600fab8
         with:
           path: windows/src/Aegis.Windows.App
           format: cyclonedx-json
           output-file: sbom-windows.cdx.json
+      # PY-180（2026-09-26 审计）：SBOM 此前仅随 workflow artifact 留存（90 天
+      # 过期），files: dist/** 不含 SBOM——Release 页面无任何 SBOM 资产。
+      # 复制进 dist 后重传 build artifact（见下方 overwrite 重传），使其随
+      # Release 发布；并重生成 SHA256SUMS 纳入 SBOM（否则 verify_checksum_json
+      # 对"未覆盖文件"fail-closed 失败）。
+      - name: Copy SBOM into dist + regenerate SHA256SUMS (PY-180)
+        run: |
+          set -e
+          cp sbom-windows.cdx.json dist/sbom-windows.cdx.json
+          python release/write_checksum_json.py --root dist --output dist/SHA256SUMS.json
       - name: Attest SBOM (bind every artifact)
         uses: actions/attest-sbom@5729fe4dc697fb7538e4e94fd44d040aac1367b2
         with:
           subject-path: dist/**
           sbom-path: sbom-windows.cdx.json
+      # PY-180/PY-179 配套（2026-09-26 审计）：SHA256SUMS.json 重生成后摘要
+      # 已变、SBOM 文件为新增——对最终 dist 重新 attest SLSA provenance，
+      # 使 verify 段逐工件 attestation 校验对现摘要成立（同 run signer 一致）
+      - name: Re-attest build provenance for final dist (SLSA)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        with:
+          subject-path: dist/**
       - name: Upload SBOM
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: sbom-windows
           path: sbom-windows.cdx.json
+      - name: Upload current Windows artifacts (PY-180：重传含 SBOM 的 dist)
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: release-windows
+          path: dist/
+          if-no-files-found: error
+          # PY-180：同名 artifact 覆盖重传（v4 支持）——publish 与 verify-gate
+          # 下载到的 release-windows 由此包含 SBOM 与重生成后的清单
+          overwrite: true
 
   verify:
     needs: [build, sbom]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       attestations: read
       contents: read
@@ -184,15 +284,14 @@ jobs:
         with:
           name: release-windows
           path: dist
-      - name: Verify SLSA provenance
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 gh attestation verify "{}" --owner "$GITHUB_REPOSITORY_OWNER" --predicate-type https://slsa.dev/provenance/v1
-      - name: Verify SBOM attestation
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          find dist -type f -print0 | xargs -0 -P 4 -I{} timeout 60 gh attestation verify "{}" --owner "$GITHUB_REPOSITORY_OWNER" --predicate-type https://cyclonedx.org/bom
+      # PY-176/SP-143（2026-09-26 审计）：补 --signer-workflow 固定 signer；
+      # SP-153（2026-09-26 审计）：与编排器收敛为同一 composite action（并行度
+      # 统一 -P 8）。signer 固定为"本子流 workflow 文件@本次 run ref"——
+      # job_workflow_ref（SAN）在 workflow_call 与 dispatch 下均记录本文件
+      - name: Verify attestations (SLSA + SBOM)
+        uses: ./.github/actions/verify-release-attestations
+        with:
+          dist-path: dist
+          signer-workflow: ${{ github.repository }}/.github/workflows/release-windows.yml@${{ github.ref }}
       - name: Checksum reconciliation
         run: python release/verify_checksum_json.py --root dist --manifest dist/SHA256SUMS.json

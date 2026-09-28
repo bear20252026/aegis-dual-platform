@@ -11,21 +11,56 @@ using Microsoft.Data.Sqlite;
 public sealed class BookmarkStore
 {
     private readonly string _dbPath;
+    // CS-029（审计 2026-09-25）：DDL once——此前每次 Open 都跑 CREATE TABLE
+    // IF NOT EXISTS（All() 每 ~150ms 被调用，DDL 纯开销）。失败不置位——下次重试。
+    private volatile bool _schemaReady;
 
     public BookmarkStore(string dbPath) => _dbPath = dbPath;
 
     /// <summary>添加书签；URL 重复为 no-op 并返回 false（幂等）。</summary>
     public bool Add(string title, string url)
     {
-        if (string.IsNullOrWhiteSpace(url))
+        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(title))
             return false;
         using var connection = Open();
         using var insert = connection.CreateCommand();
         insert.CommandText = "INSERT OR IGNORE INTO bookmarks(title, url, created_at) VALUES($t,$u,$c)";
         insert.Parameters.AddWithValue("$t", title);
         insert.Parameters.AddWithValue("$u", url);
+        // CS-286：UTC round-trip 口径——与 HistoryStore.visited_at 一致（C8 已统一）；
+        // 两库时间戳同源，跨库排序/对账不再有本地时偏移错位
         insert.Parameters.AddWithValue("$c", DateTime.UtcNow.ToString("o"));
         return insert.ExecuteNonQuery() > 0;
+    }
+
+    /// <summary>批量导入（单连接单事务——此前逐条 Add 每条一个连接生命周期 +
+    /// 建表 DDL，导入 1000 条即 1000 次连接往返）。返回（新增数, 总数）。</summary>
+    public (int Imported, int Total) Import(
+        IEnumerable<(string Title, string Url)> candidates)
+    {
+        var imported = 0;
+        var total = 0;
+        using var connection = Open();
+        using var transaction = connection.BeginTransaction();
+        using var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = "INSERT OR IGNORE INTO bookmarks(title, url, created_at) VALUES($t,$u,$c)";
+        var title = insert.Parameters.Add("$t", SqliteType.Text);
+        var url = insert.Parameters.Add("$u", SqliteType.Text);
+        var createdAt = insert.Parameters.Add("$c", SqliteType.Text);
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate.Url) || string.IsNullOrWhiteSpace(candidate.Title))
+                continue;
+            total++;
+            title.Value = candidate.Title;
+            url.Value = candidate.Url;
+            createdAt.Value = DateTime.UtcNow.ToString("o");
+            if (insert.ExecuteNonQuery() > 0)
+                imported++;
+        }
+        transaction.Commit();
+        return (imported, total);
     }
 
     /// <summary>按 URL 移除书签。</summary>
@@ -107,15 +142,26 @@ public sealed class BookmarkStore
         try
         {
             connection.Open();
-            using var ensure = connection.CreateCommand();
-            ensure.CommandText = """
-                CREATE TABLE IF NOT EXISTS bookmarks(
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    title TEXT NOT NULL,
-                    url TEXT NOT NULL UNIQUE,
-                    created_at TEXT NOT NULL)
-                """;
-            ensure.ExecuteNonQuery();
+            // busy_timeout：与书签管理器窗口并发写（改名/删除/导入）时不再
+            // 依赖默认 30s 忙等后抛 "database is locked"
+            using (var busy = connection.CreateCommand())
+            {
+                busy.CommandText = "PRAGMA busy_timeout=5000";
+                busy.ExecuteNonQuery();
+            }
+            if (!_schemaReady)
+            {
+                using var ensure = connection.CreateCommand();
+                ensure.CommandText = """
+                    CREATE TABLE IF NOT EXISTS bookmarks(
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT NOT NULL,
+                        url TEXT NOT NULL UNIQUE,
+                        created_at TEXT NOT NULL)
+                    """;
+                ensure.ExecuteNonQuery();
+                _schemaReady = true;
+            }
             return connection;
         }
         catch

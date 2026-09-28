@@ -29,15 +29,23 @@ KOTLIN_PLACEHOLDERS = {
     "$requireHttpsJson": "__AEGIS_REQUIRE_HTTPS__",
 }
 
-# 安全属性断言（与 Rust inject_script_covers_all_sinks 同口径）
-REQUIRED_SINKS = [
-    "window.fetch = function",
-    "XMLHttpRequest.prototype.open",
-    "navigator.sendBeacon = function",
-    "window.WebSocket = function",
-    "trustedCaller",
-    "location.hostname",
-]
+# PY-043：REQUIRED_SINKS 不再手工副本——自规范模板头部的机器可读注释解析
+#（REQUIRED_SINKS: a|b|c 行）。模板是 Rust include_str! 编译期单源，
+# 清单随模板演进自动同步；解析失败 fail-closed。
+def _required_sinks_from_canonical(canonical_text: str) -> list[str]:
+    for line in canonical_text.splitlines():
+        if line.startswith("// REQUIRED_SINKS:"):
+            payload = line[len("// REQUIRED_SINKS:"):].strip()
+            sinks = [s.strip() for s in payload.split("|") if s.strip()]
+            if sinks:
+                return sinks
+    return []
+
+
+# PY-215（2026-09-26 审计）：删除 REQUIRED_SINKS_FALLBACK——内置清单与
+# "PY-043 锚点单源"声明并存，构成失效的第二事实源（模板锚点丢失后校验
+# 仍对内置清单跑，漂移无人更新）。现锚点缺失直接计入 failures（main 返回
+# 1——严格单源，无任何回退）。
 
 failures: list[str] = []
 
@@ -55,12 +63,23 @@ def main() -> int:
     if not CANONICAL.is_file():
         print(f"FAIL: 规范模板缺失: {CANONICAL}")
         return 1
+    # PY-033：Rust/Kotlin 源缺失时此前 read_text 原始栈——与规范模板同口径显式拒绝
+    for label, path in (("Rust 源", RUST), ("Kotlin 源", KOTLIN)):
+        if not path.is_file():
+            print(f"FAIL: {label}缺失: {path}")
+            return 1
     canonical = norm(CANONICAL.read_text(encoding="utf-8"))
 
     # 1) 规范模板自检：占位符与安全属性齐备
     check("规范模板含 HOSTS 占位符", "__AEGIS_HOSTS__" in canonical)
     check("规范模板含 HTTPS 占位符", "__AEGIS_REQUIRE_HTTPS__" in canonical)
-    for sink in REQUIRED_SINKS:
+    # PY-043：REQUIRED_SINKS 自模板锚点行解析
+    # PY-215：锚点缺失不再回退内置清单——直接计入 failures（main 返回 1，
+    # 严格单源；模板演进必须经模板文件本身，无第二事实源）
+    required_sinks = _required_sinks_from_canonical(canonical)
+    check("规范模板含 REQUIRED_SINKS 锚点行", bool(required_sinks),
+          "锚点缺失——无回退清单（PY-215 严格单源）")
+    for sink in required_sinks:
         check(f"规范模板含拦截点/属性: {sink}", sink in canonical)
 
     # 2) Rust：必须 include_str! 规范文件（编译期单源），禁止再内嵌 r#" 副本
@@ -78,7 +97,7 @@ def main() -> int:
     kt = KOTLIN.read_text(encoding="utf-8")
     m = re.search(
         r'BRIDGE_GUARD_JS: String\s*\n\s*get\(\)\s*=\s*"""(.*?)"""\s*\.trimIndent\(\)',
-        kt, re.S)
+        kt, re.DOTALL)
     check("Kotlin 可定位 BRIDGE_GUARD_JS 模板", m is not None)
     if m:
         kt_tpl = norm(m.group(1))
@@ -104,7 +123,12 @@ def main() -> int:
             print("  -", f)
         return 1
     print("OK — bridge_guard 三端单一事实源校验通过")
-    print(f"  规范模板: {CANONICAL.relative_to(ROOT)}（{len(canonical.splitlines())} 行）")
+    # PY-134 配套：CANONICAL 可被重定向（单测）——仓库外路径原样输出
+    try:
+        canon_display = CANONICAL.relative_to(ROOT)
+    except ValueError:
+        canon_display = CANONICAL
+    print(f"  规范模板: {canon_display}（{len(canonical.splitlines())} 行）")
     print("  Rust: include_str! 消费 ✓ ｜ Kotlin: 归一化逐行一致 ✓")
     return 0
 

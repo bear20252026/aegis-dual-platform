@@ -32,6 +32,15 @@ pub trait JsInjectable {
 /// 输入：JS 代码体（不含 `(function(){` 和 `})();` 包装）
 /// 输出：完整的 IIFE 脚本
 ///
+/// # 类型约束（RS-181，审计 2026-09-25）
+///
+/// `$body` 必须是**字符串字面量**（`&'static str` 形态）——宏体走
+/// `concat!`，而 `concat!` 只接受字面量拼接：传入运行时 `String`、
+/// `format!` 表达式或非字符串表达式都是**编译错误**（E0308/E0425 形态），
+/// 不会静默产生错误脚本。动态内容（含运行时值的脚本体）不要用本宏——
+/// 直接手写 `format!("(function() {{\n{body}}})();")` 并自行负责转义
+/// （或走 serde_json 构造载荷）。
+///
 /// # 示例
 /// ```
 /// use aegis_policy_core::js_iife;
@@ -72,6 +81,10 @@ impl JsPipeline {
     }
 
     /// 构建完整的注入脚本（所有启用模块的 JS 按顺序拼接）。
+    ///
+    /// RS-053（审计 2026-09-25）：拼接统一走 Vec collect + join——O(n)
+    /// 单次分配，禁止回退为 format! 链式拼接（9 阶段嵌套 format! 每次
+    /// 重新分配且参数顺序易错）。
     pub fn build(&self) -> String {
         let parts: Vec<String> = self
             .stages
@@ -96,6 +109,54 @@ impl JsPipeline {
 impl Default for JsPipeline {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// RS-040（审计 2026-09-24）：抽象与实现接线——此前 JsInjectable 定义了
+// 接口但 9 个防护模块零实现（管线直接调 inherent inject_script，trait
+// 形同虚设）。现统一为各模块实现 trait；引用类型经 blanket impl 适配。
+// RS-233（2026-09-26 审计）：九阶段管线组装已单源到
+// protection_mode::fingerprint_pipeline_with_mode（此前 lib.rs 用
+// JsPipeline trait 对象另写一份清单，两处维护漂移）；JsPipeline 保留为
+// 通用组合工具（宿主/测试自定义管线仍可用）。
+macro_rules! impl_js_injectable {
+    ($($t:ty => $name:literal),* $(,)?) => {
+        $(
+            impl JsInjectable for $t {
+                fn name(&self) -> &str {
+                    $name
+                }
+                fn inject_script(&self) -> String {
+                    // 同名 inherent 方法优先于 trait 方法——委托实现体
+                    <$t>::inject_script(self)
+                }
+            }
+        )*
+    };
+}
+
+impl_js_injectable!(
+    crate::tostring_guard::ToStringGuard => "ToStringGuard",
+    crate::shield::FingerprintShield => "FingerprintShield",
+    crate::letterbox::LetterboxShield => "LetterboxShield",
+    crate::query_strip::QueryStripper => "QueryStripper",
+    crate::font_norm::FontNormalizer => "FontNormalizer",
+    crate::webgl_spoof::WebGLSpoof => "WebGLSpoof",
+    crate::timer_prec::TimerPrecision => "TimerPrecision",
+    crate::ext_proxy::ExtProxy => "ExtProxy",
+);
+
+/// 引用适配：`&T`（T: JsInjectable）同样可实现 trait——自定义管线组装时
+/// 允许借用外部构造的阶段（如 &FingerprintShield）。
+impl<T: JsInjectable + ?Sized> JsInjectable for &T {
+    fn name(&self) -> &str {
+        T::name(*self)
+    }
+    fn inject_script(&self) -> String {
+        T::inject_script(*self)
+    }
+    fn enabled(&self) -> bool {
+        T::enabled(*self)
     }
 }
 
@@ -163,5 +224,61 @@ mod tests {
         assert!(script.contains("(function() {"));
         assert!(script.contains("var x = 42;"));
         assert!(script.contains("})();"));
+    }
+
+    #[test]
+    fn empty_pipeline_builds_empty_script() {
+        // RS-053/RS-088：build 统一 Vec collect + join（O(n) 单次分配）——
+        // 禁止回退为 format! 链式拼接；空管线必须得到空串
+        let pipeline = JsPipeline::new();
+        assert_eq!(pipeline.build(), "");
+    }
+
+    #[test]
+    fn multi_stage_script_joined_in_order() {
+        // RS-088：多阶段脚本按注册顺序以换行连接（顺序错位 = 防护语义
+        // 错位——前置阶段输出是后置阶段的消费契约）
+        let mut pipeline = JsPipeline::new();
+        pipeline.add(Box::new(MockStage {
+            name: "A",
+            js: "var first = 1;",
+            active: true,
+        }));
+        pipeline.add(Box::new(MockStage {
+            name: "B",
+            js: "var second = 2;",
+            active: true,
+        }));
+        let script = pipeline.build();
+        let pos_first = script.find("var first = 1;").expect("first 阶段缺失");
+        let pos_second = script.find("var second = 2;").expect("second 阶段缺失");
+        assert!(pos_first < pos_second, "阶段顺序必须保持注册序");
+        assert!(script.contains('\n'), "阶段间以换行连接");
+    }
+
+    #[test]
+    fn disabled_stage_removed_relative_order_kept() {
+        // RS-088：禁用阶段被整体剔除，其余阶段相对顺序保持
+        let mut pipeline = JsPipeline::new();
+        pipeline.add(Box::new(MockStage {
+            name: "A",
+            js: "A_MARKER;",
+            active: true,
+        }));
+        pipeline.add(Box::new(MockStage {
+            name: "B",
+            js: "B_MARKER;",
+            active: false,
+        }));
+        pipeline.add(Box::new(MockStage {
+            name: "C",
+            js: "C_MARKER;",
+            active: true,
+        }));
+        let script = pipeline.build();
+        assert!(!script.contains("B_MARKER"), "禁用阶段不得出现在脚本");
+        let pos_a = script.find("A_MARKER;").expect("A 缺失");
+        let pos_c = script.find("C_MARKER;").expect("C 缺失");
+        assert!(pos_a < pos_c, "剩余阶段相对顺序保持");
     }
 }

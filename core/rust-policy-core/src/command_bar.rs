@@ -46,81 +46,90 @@ pub struct CommandEntry {
     pub value: String,
     /// 图标标识。
     pub icon: String,
-    /// 匹配关键词（用于搜索）。
-    pub keywords: Vec<String>,
+    /// RS-039（审计 2026-09-24）：小写缓存——matches 此前每查询对
+    /// title/subtitle/value 各做一次 to_lowercase（O(条目×查询) 分配）。
+    /// RS-231（审计 2026-09-26 审计）：keywords 字段已删除——它只是
+    /// title_lc/subtitle_lc 的克隆集合，matches 的 keywords 遍历与后两行
+    /// contains 完全重复（每条目白付两个 String 分配）
+    title_lc: String,
+    subtitle_lc: String,
+    value_lc: String,
 }
 
 impl CommandEntry {
+    /// RS-193（审计 2026-09-25）：单字段字符数上限——标题/子标题/值源自
+    /// 书签/历史（页面可控），无上限时单条目可注入超大字符串（列表页
+    /// 渲染面 + 内存放大）。截断按字符计（UTF-8 安全，不产生半字符）。
+    const MAX_FIELD_CHARS: usize = 512;
+
+    /// 内部统一构造器（小写缓存单源派生；RS-193：字段截断）。
+    fn new_entry(
+        command_type: CommandType,
+        title: &str,
+        subtitle: &str,
+        value: &str,
+        icon: &str,
+    ) -> Self {
+        let truncate = |s: &str| s.chars().take(Self::MAX_FIELD_CHARS).collect::<String>();
+        let title = truncate(title);
+        let subtitle = truncate(subtitle);
+        let value = truncate(value);
+        let title_lc = title.to_lowercase();
+        let subtitle_lc = subtitle.to_lowercase();
+        let value_lc = value.to_lowercase();
+        Self {
+            command_type,
+            title,
+            subtitle,
+            value,
+            icon: icon.to_string(),
+            title_lc,
+            subtitle_lc,
+            value_lc,
+        }
+    }
+
     /// 创建导航命令。
     pub fn navigate(title: &str, url: &str) -> Self {
-        Self {
-            command_type: CommandType::Navigate,
-            title: title.to_string(),
-            subtitle: url.to_string(),
-            value: url.to_string(),
-            icon: "globe".to_string(),
-            keywords: vec![title.to_lowercase(), url.to_lowercase()],
-        }
+        Self::new_entry(CommandType::Navigate, title, url, url, "globe")
     }
 
     /// 创建切换标签命令。
     pub fn switch_tab(title: &str, tab_id: &str, url: &str) -> Self {
-        Self {
-            command_type: CommandType::SwitchTab,
-            title: title.to_string(),
-            subtitle: url.to_string(),
-            value: tab_id.to_string(),
-            icon: "tab".to_string(),
-            keywords: vec![title.to_lowercase(), url.to_lowercase()],
-        }
+        Self::new_entry(CommandType::SwitchTab, title, url, tab_id, "tab")
     }
 
     /// 创建搜索历史命令。
     pub fn search_history(title: &str, url: &str) -> Self {
-        Self {
-            command_type: CommandType::SearchHistory,
-            title: title.to_string(),
-            subtitle: url.to_string(),
-            value: url.to_string(),
-            icon: "clock".to_string(),
-            keywords: vec![title.to_lowercase(), url.to_lowercase()],
-        }
+        Self::new_entry(CommandType::SearchHistory, title, url, url, "clock")
     }
 
     /// 创建书签命令。
     pub fn bookmark(title: &str, url: &str) -> Self {
-        Self {
-            command_type: CommandType::SearchBookmark,
-            title: title.to_string(),
-            subtitle: url.to_string(),
-            value: url.to_string(),
-            icon: "star".to_string(),
-            keywords: vec![title.to_lowercase(), url.to_lowercase()],
-        }
+        Self::new_entry(CommandType::SearchBookmark, title, url, url, "star")
     }
 
     /// 创建操作命令。
     pub fn action(title: &str, description: &str, action_name: &str) -> Self {
-        Self {
-            command_type: CommandType::Action,
-            title: title.to_string(),
-            subtitle: description.to_string(),
-            value: action_name.to_string(),
-            icon: "command".to_string(),
-            keywords: vec![title.to_lowercase(), description.to_lowercase()],
-        }
+        Self::new_entry(
+            CommandType::Action,
+            title,
+            description,
+            action_name,
+            "command",
+        )
     }
 
     /// 检查是否匹配查询。
     pub fn matches(&self, query: &str) -> bool {
-        let q = query.to_lowercase();
-        if q.is_empty() {
+        if query.is_empty() {
             return true;
         }
-        self.keywords.iter().any(|k| k.contains(&q))
-            || self.title.to_lowercase().contains(&q)
-            || self.subtitle.to_lowercase().contains(&q)
-            || self.value.to_lowercase().contains(&q)
+        // RS-039：title/subtitle/value 小写已预计算——此处仅查询侧一次
+        // to_lowercase。RS-231（2026-09-26 审计）：keywords 通道遍历已删——
+        // 其内容只是 title_lc/subtitle_lc 的克隆，与后两个 contains 完全重复
+        let q = query.to_lowercase();
+        self.title_lc.contains(&q) || self.subtitle_lc.contains(&q) || self.value_lc.contains(&q)
     }
 }
 
@@ -140,6 +149,14 @@ impl fmt::Debug for CommandBar {
 }
 
 impl CommandBar {
+    /// 前端命令面板接口的 Symbol 键（RS-219 单源——与
+    /// SpaceRouting::ROUTING_SYMBOL / ProtectionMode::MODE_SYMBOL 同款收敛）。
+    ///
+    /// RS-219（审计 2026-09-26）：命令面板对象从具名 window 属性
+    /// `__AEGIS_COMMAND_BAR` 收敛到 Symbol 键——具名全局是通用指纹脚本
+    /// 的免费探测点（防护存在性本身泄漏）。前端经 `Symbol.for` 共享键取用。
+    pub const COMMAND_SYMBOL: &'static str = "command.bar.v1";
+
     /// 创建新的命令面板。
     pub fn new() -> Self {
         Self {
@@ -164,13 +181,29 @@ impl CommandBar {
         self.entries.extend(entries);
     }
 
-    /// 搜索匹配的命令。
+    /// 搜索匹配的命令（最多返回 max_results 条）。
+    ///
+    /// RS-165（审计 2026-09-25）：显式短路循环替代 `filter().take()` 链——
+    /// 语义上惰性 take 已短路，但显式 `break` 让「命中满额即停」的意图
+    /// 可读可审计，且杜绝未来有人改为 `.filter().collect()` 全量收集
+    /// 再截断的回归形态。
     pub fn search(&self, query: &str) -> Vec<&CommandEntry> {
-        self.entries
-            .iter()
-            .filter(|e| e.matches(query))
-            .take(self.max_results)
-            .collect()
+        // RS-122（审计 2026-09-25）：max_results=0 是合法配置（不展示）——
+        // 此前 push 后判 `== max_results` 对 0 永假，上限静默失效、
+        // 空查询也吐全量条目。提前返回空集兑现上限语义。
+        if self.max_results == 0 {
+            return Vec::new();
+        }
+        let mut results = Vec::new();
+        for entry in &self.entries {
+            if entry.matches(query) {
+                results.push(entry);
+                if results.len() == self.max_results {
+                    break;
+                }
+            }
+        }
+        results
     }
 
     /// 添加内置操作命令（新建标签/关闭标签/刷新/设置等）。
@@ -199,27 +232,30 @@ impl CommandBar {
 
     /// 生成 CommandBar JS 注入脚本。
     ///
-    /// 设置 `__AEGIS_COMMAND_BAR` 全局对象，
-    /// 提供 `search(query)` 和 `execute(entry)` 方法。
+    /// RS-219：命令面板对象挂在 Symbol 键上（非具名 window 属性），
+    /// 提供 `search(query)` 和 `execute(entry)` 方法供前端经
+    /// `Symbol.for` 共享键使用。
     pub fn inject_script(&self) -> String {
+        // serde_json 构造——此前 format! 只转义双引号：标题/子标题源自书签
+        // 历史（页面可控），含反斜杠/换行/控制字符即产生 JS 注入
         let entries_json: String = self
             .entries
             .iter()
             .map(|e| {
-                format!(
-                    r#"{{"type":"{}","title":"{}","subtitle":"{}","value":"{}","icon":"{}"}}"#,
-                    match e.command_type {
+                serde_json::json!({
+                    "type": match e.command_type {
                         CommandType::Navigate => "navigate",
                         CommandType::SwitchTab => "switch_tab",
                         CommandType::SearchHistory => "history",
                         CommandType::SearchBookmark => "bookmark",
                         CommandType::Action => "action",
                     },
-                    e.title.replace('"', "\\\""),
-                    e.subtitle.replace('"', "\\\""),
-                    e.value.replace('"', "\\\""),
-                    e.icon
-                )
+                    "title": e.title,
+                    "subtitle": e.subtitle,
+                    "value": e.value,
+                    "icon": e.icon,
+                })
+                .to_string()
             })
             .collect::<Vec<String>>()
             .join(",");
@@ -236,29 +272,39 @@ impl CommandBar {
     var q = (query || '').toLowerCase();
     if (!q) return ENTRIES.slice(0, MAX_RESULTS);
     return ENTRIES.filter(function(e) {{
+      // RS-123（审计 2026-09-25）：与 Rust CommandEntry::matches 口径对齐——
+      // Rust 侧含 value 通道（title+subtitle+value），此前 JS 漏
+      // value（URL/action name 搜索结果两端不一致）
       return e.title.toLowerCase().indexOf(q) >= 0 ||
-             e.subtitle.toLowerCase().indexOf(q) >= 0;
+             e.subtitle.toLowerCase().indexOf(q) >= 0 ||
+             e.value.toLowerCase().indexOf(q) >= 0;
     }}).slice(0, MAX_RESULTS);
   }}
 
   function execute(entry) {{
     if (entry.type === 'navigate') {{
+      // 仅允许 http/https 目标（value 可源自历史/书签——javascript: 等拒绝）
+      if (!/^https?:\/\//i.test(entry.value)) return;
       window.location.href = entry.value;
     }} else if (entry.type === 'switch_tab') {{
       // 通过 postMessage 通知 Android WebView 切换标签
-      window.postMessage({{ type: 'aegis:switch_tab', tabId: entry.value }}, '*');
+      window.postMessage({{ type: 'aegis:switch_tab', tabId: entry.value }}, window.location.origin);
     }} else if (entry.type === 'action') {{
-      window.postMessage({{ type: 'aegis:action', action: entry.value }}, '*');
+      window.postMessage({{ type: 'aegis:action', action: entry.value }}, window.location.origin);
     }}
   }}
 
-  Object.defineProperty(window, '__AEGIS_COMMAND_BAR', {{
+  // RS-219（2026-09-26 审计）：收敛到 Symbol 键——具名 window 属性是
+  // 免费探测点（读到即知页面有防护注入）；
+  // 前端经 Symbol.for('{command_sym}') 共享键取用
+  Object.defineProperty(window, Symbol.for('{command_sym}'), {{
     value: {{ search: search, execute: execute, entries: ENTRIES }},
     writable: false,
     configurable: false
   }});
 }})();
-"#
+"#,
+            command_sym = Self::COMMAND_SYMBOL
         )
     }
 }
@@ -333,8 +379,197 @@ mod tests {
     fn script_contains_command_bar() {
         let cb = CommandBar::new();
         let script = cb.inject_script();
-        assert!(script.contains("__AEGIS_COMMAND_BAR"));
+        assert!(script.contains(&format!("Symbol.for('{}')", CommandBar::COMMAND_SYMBOL)));
         assert!(script.contains("search"));
         assert!(script.contains("execute"));
+    }
+
+    // —— RS-219/231 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn script_mounts_on_symbol_key_not_named_global() {
+        // RS-219：__AEGIS_COMMAND_BAR 具名 window 属性是免费探测点——
+        // 必须收敛到 Symbol.for 键
+        let script = CommandBar::new().inject_script();
+        assert!(
+            !script.contains("__AEGIS_COMMAND_BAR"),
+            "具名全局命令面板对象必须移除"
+        );
+        assert!(script.contains(&format!(
+            "Object.defineProperty(window, Symbol.for('{}')",
+            CommandBar::COMMAND_SYMBOL
+        )));
+    }
+
+    #[test]
+    fn script_escaping_malicious_title_and_value() {
+        // RS-048 回归（P27 修复面）：标题/子标题源自书签历史（页面可控），
+        // 含双引号/反斜杠/换行/控制字符——serde_json 构造保证只作为 JSON
+        // 字符串内容出现，不得逃逸 ENTRIES 数组产生 JS 注入
+        let mut cb = CommandBar::new();
+        cb.add_entry(CommandEntry::navigate(
+            r#"x"); alert(1); (\" <script>"#,
+            "https://e.com/a?b=\"quoted\"&c=1",
+        ));
+        let script = cb.inject_script();
+        // title：输入 `x"); alert(1); (\" <script>`——serde 转义（\ → \\，" → \"）
+        assert!(
+            script.contains(r#""title":"x\"); alert(1); (\\\" <script>""#),
+            "title 中的引号/反斜杠必须被 serde 转义"
+        );
+        // value：URL 内嵌引号同样转义
+        assert!(
+            script.contains(r#""value":"https://e.com/a?b=\"quoted\"&c=1""#),
+            "value 中的双引号必须转义"
+        );
+        // 载荷不得未转义逃逸 ENTRIES 数组
+        assert!(
+            !script.contains("ENTRIES = [x\")"),
+            "title 载荷不得逃逸 ENTRIES 数组"
+        );
+        // 整体脚本中 ENTRIES 段必须可被 JSON 解析（恶意 title 不破坏语法）
+        let start = script.find("var ENTRIES = [").expect("ENTRIES 段存在");
+        let json_start = start + "var ENTRIES = ".len();
+        let json_end = script[json_start..].find("];").expect("ENTRIES 数组闭合") + json_start;
+        let parsed: serde_json::Value = serde_json::from_str(&script[json_start..=json_end])
+            .expect("ENTRIES 段必须是合法 JSON");
+        assert_eq!(parsed[0]["title"], r#"x"); alert(1); (\" <script>"#);
+    }
+
+    #[test]
+    fn script_execute_rejects_non_http_schemes() {
+        // RS-048 联动：value 源自历史/书签（页面可控）——javascript: 等
+        // scheme 必须被 execute 的 http/https 前缀门禁拒绝
+        let cb = CommandBar::new();
+        let script = cb.inject_script();
+        assert!(
+            script.contains("/^https?:\\/\\//i.test(entry.value)"),
+            "execute 必须保留 http/https scheme 门禁"
+        );
+    }
+
+    // —— RS-122/123（审计 2026-09-25）——
+
+    #[test]
+    fn empty_entries_search_returns_empty() {
+        // RS-122：空集搜索——空查询与非空查询均不得 panic / 返回幻影条目
+        let cb = CommandBar::new();
+        assert!(cb.search("").is_empty());
+        assert!(cb.search("anything").is_empty());
+    }
+
+    #[test]
+    fn zero_max_results_yields_empty_even_for_empty_query() {
+        // RS-122：max_results=0 是合法配置（用户可设置为不展示）——
+        // 空查询也必须返回空集，不得绕过上限
+        let mut cb = CommandBar::new().with_max_results(0);
+        cb.add_entry(CommandEntry::navigate("GitHub", "https://github.com"));
+        assert!(cb.search("").is_empty());
+        assert!(cb.search("git").is_empty());
+    }
+
+    #[test]
+    fn unicode_case_folding_matches() {
+        // RS-122：to_lowercase 全 Unicode 折叠——带音标/非 ASCII 标题
+        // 与查询的大小写变体必须互相命中
+        let mut cb = CommandBar::new();
+        cb.add_entry(CommandEntry::navigate("Über Straße Café", "https://e.com"));
+        assert!(cb.search("über").len() == 1, "查询小写 ü 必须命中");
+        assert!(cb.search("ÜBER").len() == 1, "大写查询折叠后必须命中");
+        assert!(cb.search("CAFÉ").len() == 1);
+        // 土耳其语式 İ 折叠：İ 小写化 = "i" + U+0307（两码元）——
+        // 同形查询折叠后一致命中；裸 "i" 与 "i̇" 非子串关系（口径锁定：
+        // 仅 to_lowercase，不做 NFKC 归一）
+        let mut cb2 = CommandBar::new();
+        cb2.add_entry(CommandEntry::navigate("İstanbul Guide", "https://e.com"));
+        assert!(cb2.search("İstanbul").len() == 1, "同形查询折叠后必须命中");
+        assert!(
+            cb2.search("istanbul").is_empty(),
+            "裸 i 与 i+U+0307 非子串关系——口径仅 to_lowercase（锁定防止误判为 bug）"
+        );
+    }
+
+    #[test]
+    fn search_covers_value_channel() {
+        // RS-123：Rust matches() 覆盖 value 通道——按 URL 尾段/action name
+        // 搜索必须命中（与 JS 注入脚本口径一致，断言见下一测试）
+        let mut cb = CommandBar::new();
+        cb.add_entry(CommandEntry::action("刷新", "刷新当前页面", "reload"));
+        assert!(
+            cb.search("reload").len() == 1,
+            "value（action name）通道必须参与匹配"
+        );
+        cb.add_entry(CommandEntry::navigate(
+            "X",
+            "https://deep.example.com/secret/page",
+        ));
+        assert!(
+            cb.search("secret/page").len() == 1,
+            "value（URL）通道必须参与匹配"
+        );
+    }
+
+    #[test]
+    fn script_search_aligns_with_rust_value_channel() {
+        // RS-123 回归：JS search 必须检查 value 通道（此前漏掉——
+        // 与 Rust matches() 口径漂移）
+        let cb = CommandBar::new();
+        let script = cb.inject_script();
+        assert!(
+            script.contains("e.value.toLowerCase().indexOf(q) >= 0"),
+            "JS search 必须覆盖 value 通道（与 Rust 口径对齐）"
+        );
+    }
+
+    // —— RS-165/193/194（审计 2026-09-25）——
+
+    #[test]
+    fn oversized_fields_truncated_in_constructor() {
+        // RS-193：构造器字段截断——页面可控的超长标题/子标题/值被钳制
+        // 到 MAX_FIELD_CHARS 字符（按字符计，多字节 UTF-8 不产生半字符）
+        let long = "汉".repeat(2_000); // 2000 chars（6000 bytes）
+        let entry = CommandEntry::navigate(&long, &format!("https://e.com/{long}"));
+        assert_eq!(
+            entry.title.chars().count(),
+            CommandEntry::MAX_FIELD_CHARS,
+            "标题按字符数截断"
+        );
+        assert_eq!(
+            entry.value.chars().count(),
+            CommandEntry::MAX_FIELD_CHARS,
+            "value 按字符数截断"
+        );
+        // 截断不破坏 UTF-8（title 仍是合法字符串——chars 计数即证明）
+        assert!(entry.title.ends_with('汉'));
+    }
+
+    #[test]
+    fn builtin_actions_all_eight_present() {
+        // RS-194：8 个内置操作此前只测了「新建」——全量断言每条目的
+        // title/value/类型，防止增删内置操作时测试静默漏护
+        let mut cb = CommandBar::new();
+        cb.add_builtin_actions();
+        let expected = [
+            ("新建标签", "new_tab"),
+            ("关闭标签", "close_tab"),
+            ("刷新", "reload"),
+            ("后退", "go_back"),
+            ("前进", "go_forward"),
+            ("隐私模式", "toggle_private"),
+            ("设置", "settings"),
+            ("清除数据", "clear_data"),
+        ];
+        for (title, value) in expected {
+            let hits: Vec<_> = cb.search(title);
+            assert_eq!(hits.len(), 1, "标题「{title}」必须恰好命中一条");
+            assert_eq!(hits[0].title, title);
+            assert_eq!(hits[0].value, value, "「{title}」的 action name");
+            assert!(matches!(hits[0].command_type, CommandType::Action));
+        }
+        // 英文 action name 通道（value）同样可搜
+        assert_eq!(cb.search("toggle_private").len(), 1);
+        assert_eq!(cb.search("clear_data").len(), 1);
+        // 总数锁定（防止内置操作数量漂移）
+        assert_eq!(cb.search("").len(), 8);
     }
 }

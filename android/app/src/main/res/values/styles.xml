@@ -1,10 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- AD-095（审计 2026-09-23 清单·A6 批）：parent 换深色基底——原
+     Theme.Material.Light 与深色 chrome（状态栏/导航栏 #101827、Compose
+     深色玻璃 UI）相悖：Light 基底下窗口背景/对话框/Toast 呈亮色，
+     与整体深色视觉割裂。AD-094：颜色字面量迁入 colors.xml 单源。 -->
 <resources>
-    <style name="Theme.Aegis" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.Aegis" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#4255D4</item>
-        <item name="android:navigationBarColor">#101827</item>
-        <item name="android:statusBarColor">#101827</item>
+        <item name="android:colorAccent">@color/theme_accent</item>
+        <!-- AD-187（审计 2026-09-23 清单·A7 批）：引 chrome_background 单源
+             （原 chrome_status_bar 为同值重复定义，已并入色板单源表） -->
+        <item name="android:navigationBarColor">@color/chrome_background</item>
+        <item name="android:statusBarColor">@color/chrome_background</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

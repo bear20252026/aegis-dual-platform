@@ -28,15 +28,51 @@ public partial class DownloadsWindow : Window
         };
         _timer.Tick += (_, _) => RefreshAll();
         _timer.Start();
+        // CS-171：隐藏时暂停轮询、显示时恢复——此前窗口隐藏后仍每 500ms 空转
+        IsVisibleChanged += (_, e) =>
+        {
+            if ((bool)e.NewValue)
+                _timer.Start();
+            else
+                _timer.Stop();
+        };
         Closed += (_, _) => _timer.Stop();
     }
+
+    /// <summary>主窗口主题联动（浅色模式下不再永远深色）。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
 
     private void RefreshAll()
     {
         if (DownloadsList.ItemsSource is not ObservableCollection<DownloadItem> items)
             return;
-        foreach (var item in items.ToList())
-            item.Refresh();
+        // CS-170：索引 for 迭代——此前 ToList() 每 500ms 全表复制
+        var inProgress = 0;
+        for (var i = 0; i < items.Count; i++)
+        {
+            items[i].Refresh();
+            if (items[i].StateKind == DownloadItemState.InProgress)
+                inProgress++;
+        }
+        // CS-274：提示与状态联动——摘要计数随轮询刷新（此前表头为静态文案）
+        CountText.Text = $"下载（{inProgress} 进行中 / {items.Count} 总计）";
+    }
+
+    /// <summary>CS-174：清空列表——只移除已完成/已取消/已中断条目（进行中
+    /// 保留；不删除已落盘文件）。</summary>
+    private void ClearList_Click(object sender, RoutedEventArgs e)
+    {
+        if (DownloadsList.ItemsSource is not ObservableCollection<DownloadItem> items || items.Count == 0)
+            return;
+        var confirmed = MessageBox.Show(this, "从列表移除已完成/已取消/已中断的条目（不删除已下载文件）？",
+            "清空列表", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (confirmed != MessageBoxResult.Yes)
+            return;
+        for (var i = items.Count - 1; i >= 0; i--)
+        {
+            if (items[i].StateKind != DownloadItemState.InProgress)
+                items.RemoveAt(i);
+        }
     }
 
     private static DownloadItem? ItemOf(object sender) =>
@@ -54,6 +90,11 @@ public partial class DownloadsWindow : Window
     {
         if (sender is FrameworkElement { DataContext: DownloadItem item })
         {
+            // CS-172：危险扩展条目打开前二次确认（此前经确认下载后可直接执行）
+            if (item.Dangerous
+                && MessageBox.Show(this, $"「{item.FileName}」为危险扩展文件，打开可能运行程序。确定打开？",
+                    "危险文件", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+                return;
             var path = item.FilePath;
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
             {
@@ -95,6 +136,21 @@ public partial class DownloadsWindow : Window
                 MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
-        Process.Start("explorer.exe", $"/select,\"{path}\"");
+        try
+        {
+            // CS-173：ArgumentList 传参——此前手工拼引号转义串（引号注入面）；
+            // 参数边界由进程 API 负责
+            var psi = new System.Diagnostics.ProcessStartInfo("explorer.exe")
+            {
+                UseShellExecute = false,
+            };
+            psi.ArgumentList.Add("/select," + path);
+            Process.Start(psi);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"无法打开文件夹: {ex.Message}", "错误",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 }

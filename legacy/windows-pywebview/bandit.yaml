@@ -1,0 +1,9 @@
+# PY-156（2026-09-23 审计·V1 核验批）：bandit 豁免配置文件单源——skip 清单
+# 此前仅存于 legacy-python-guard.yml 行内 --skip（无配置可复用，改清单须改 CI）。
+# 消费方式：bandit -c bandit.yaml -r app/ -q（CI 与本地同口径）。
+# 设计豁免规则（docs/KNOWLEDGE_BASE.md「P6 bandit 豁免」）：
+# - B110 try_except_pass：静默降级是安全设计
+# - B404/B603/B607 subprocess：均为参数列表 + shell=False 的受控调用
+#   （security.py icacls / webview2_probe.py tasklist），无注入面
+# 其余规则 Medium/High 触发失败（bandit 退出码即门禁）。
+skips: ["B110", "B404", "B603", "B607"]

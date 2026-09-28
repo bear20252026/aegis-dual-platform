@@ -1,10 +1,303 @@
 {
   "description": "蓝图阶段 B（contracts/vectors）：非法更新清单测试向量（回滚/签名不足/重复 key/过期/单数 signature——全部拒绝）",
   "vectors": [
-    { "case": "rollback", "version": "0.9.0", "min_version": "1.0.0", "expected": "deny_rollback" },
-    { "case": "threshold_insufficient", "signatures_count": 1, "threshold": 2, "expected": "deny_threshold" },
-    { "case": "duplicate_key", "signatures": ["k1", "k1"], "threshold": 2, "expected": "deny_threshold" },
-    { "case": "expired", "expires_at": "2020-01-01T00:00:00Z", "expected": "deny_expired" },
-    { "case": "singular_signature_field", "uses_singular_signature": true, "expected": "deny_schema" }
+    {
+      "case": "rollback",
+      "version": "0.9.0",
+      "min_version": "1.0.0",
+      "expected": "deny_rollback"
+    },
+    {
+      "case": "threshold_insufficient",
+      "signatures_count": 1,
+      "threshold": 2,
+      "expected": "deny_threshold"
+    },
+    {
+      "case": "duplicate_key",
+      "signatures": [
+        "k1",
+        "k1"
+      ],
+      "threshold": 2,
+      "expected": "deny_threshold"
+    },
+    {
+      "case": "expired",
+      "expires_at": "2020-01-01T00:00:00Z",
+      "expected": "deny_expired"
+    },
+    {
+      "case": "singular_signature_field",
+      "uses_singular_signature": true,
+      "expected": "deny_schema"
+    },
+    {
+      "case": "invalid_base64_signature",
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AA-AA"
+          }
+        ]
+      }
+    },
+    {
+      "case": "untrusted_key_id",
+      "expected": "deny_threshold",
+      "semantic_level": true,
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "rogue-key",
+            "sig": "AAAA"
+          },
+          {
+            "key_id": "another-rogue",
+            "sig": "BBBB"
+          }
+        ]
+      }
+    },
+    {
+      "case": "expires_at_naive_no_timezone",
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AAAA"
+          },
+          {
+            "key_id": "k2",
+            "sig": "BBBB"
+          }
+        ]
+      }
+    },
+    {
+      "case": "artifact_bad_sha256",
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "zz",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AAAA"
+          },
+          {
+            "key_id": "k2",
+            "sig": "BBBB"
+          }
+        ]
+      }
+    },
+    {
+      "case": "artifact_unknown_platform",
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x86",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AAAA"
+          },
+          {
+            "key_id": "k2",
+            "sig": "BBBB"
+          }
+        ]
+      }
+    },
+    {
+      "case": "artifact_zero_size",
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 0
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AAAA"
+          },
+          {
+            "key_id": "k2",
+            "sig": "BBBB"
+          }
+        ]
+      }
+    },
+    {
+      "case": "artifact_insecure_url",
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "http://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AAAA"
+          },
+          {
+            "key_id": "k2",
+            "sig": "BBBB"
+          }
+        ]
+      }
+    },
+    {
+      "case": "top_level_schema_const_break",
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 2,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AAAA"
+          },
+          {
+            "key_id": "k2",
+            "sig": "BBBB"
+          }
+        ]
+      }
+    },
+    {
+      "case": "top_level_product_const_break",
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 1,
+        "product": "AegisX",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signatures": [
+          {
+            "key_id": "k1",
+            "sig": "AAAA"
+          },
+          {
+            "key_id": "k2",
+            "sig": "BBBB"
+          }
+        ]
+      }
+    }
   ]
 }

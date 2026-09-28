@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- AD-245（2026-09-26 审计）：Normal 权重回退链——Inter（拉丁优先）在前、
+     Source Han Sans SC（CJK）在后。Compose FontFamily 多 Font 同权重并列时
+     按首个命中取用（无逐字形回退），中文字形实际走系统默认字体；XML 家族
+     同权重多条目在平台解析层（API 26+ FontFamily.Builder）构建回退链。 -->
+<font-family xmlns:app="http://schemas.android.com/apk/res-auto">
+    <font
+        app:font="@font/inter_regular"
+        app:fontStyle="normal"
+        app:fontWeight="400" />
+    <font
+        app:font="@font/source_han_sans_sc_regular"
+        app:fontStyle="normal"
+        app:fontWeight="400" />
+</font-family>

@@ -47,6 +47,38 @@
       "consume_scope": "download",
       "expected_consume": "deny",
       "expected_consume_code": "action_binding_mismatch"
+    },
+    {
+      "name": "generation_advance_invalidates_pending_action",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://example.com/gen-bound",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://example.com",
+      "expected_parameters": "/gen-bound",
+      "consume_url": "https://example.com/gen-bound",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "advance_generation": true,
+      "expected_reconsume_code": "action_not_issued",
+      "note": "PY-092 代际推进后旧 action 消费拒绝（action_not_issued——上下文按代际寻址，旧代际 action 不再可达）"
+    },
+    {
+      "name": "session_destroyed_fails_closed_at_consume",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://example.com/destroyed",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://example.com",
+      "expected_parameters": "/destroyed",
+      "consume_url": "https://example.com/destroyed",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "destroy_session": true,
+      "expected_reconsume_code": "action_not_issued",
+      "note": "PY-091 KillSwitch 等价语义：会话销毁后消费点 fail-closed（action_not_issued——上下文已销毁，action 不可达；native core 无 KillSwitch 注入口——C# broker 层能力）"
     }
   ]
 }

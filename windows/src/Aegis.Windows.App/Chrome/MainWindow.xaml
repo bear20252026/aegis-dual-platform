@@ -14,16 +14,32 @@
     <SolidColorBrush x:Key="FieldBackgroundBrush" Color="#1FFFFFFF"/>
     <SolidColorBrush x:Key="FieldBorderBrush" Color="#2EFFFFFF"/>
     <SolidColorBrush x:Key="SurfaceBrush" Color="#FF1B2537"/>
-    <SolidColorBrush x:Key="AccentSoftBrush" Color="#223B82F6"/>
     <SolidColorBrush x:Key="FieldBorderFocusedBrush" Color="#66FFFFFF"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="#B3FFFFFF"/>
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="#FFFFFFFF"/>
+    <!-- 审计修复：建议弹层 Kind 标签与书签栏底色此前引用未定义画刷，
+         DynamicResource 静默失败——补默认值（ApplyTheme 未覆盖时兜底） -->
+    <SolidColorBrush x:Key="TextMutedBrush" Color="#6CFFFFFF"/>
+    <SolidColorBrush x:Key="SegmentedBrush" Color="#1FFFFFFF"/>
+    <!-- CS-318（2026-09-26 审计）：错误页/反馈条提为资源键——此前硬编码深色，
+         浅色主题下割裂；ApplyTheme 一并写入浅色值（DynamicResource 运行时刷） -->
+    <SolidColorBrush x:Key="ErrorPanelBackgroundBrush" Color="#FF2A1215"/>
+    <SolidColorBrush x:Key="ErrorPanelTextBrush" Color="#FFFCA5A5"/>
+    <SolidColorBrush x:Key="FeedbackInfoBackgroundBrush" Color="#FF0F2A1B"/>
+    <SolidColorBrush x:Key="FeedbackWarningBackgroundBrush" Color="#FF2A1215"/>
+    <SolidColorBrush x:Key="FeedbackTextBrush" Color="#FF86EFAC"/>
 
-    <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton） -->
+    <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton）。
+         CS-218：Focusable=False 为既定视觉取舍（键盘聚焦虚线框在圆形玻璃钮上
+         常驻显示）；键盘路径由快捷键覆盖——Ctrl+L/Alt+D 地址栏、Ctrl+R/F5 刷新、
+         Esc 停止、Ctrl+T/W/Tab 标签（见 Window_PreviewKeyDown）。
+         UI 现代化批：图标统一 Segoe Fluent/MDL2 字体 glyph（替代 Unicode 字符
+         与彩色 emoji——深色玻璃主题下参差违和） -->
     <Style x:Key="NavButton" TargetType="Button">
       <Setter Property="Width" Value="36"/>
       <Setter Property="Height" Value="36"/>
       <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}"/>
+      <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
       <Setter Property="FontSize" Value="15"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Focusable" Value="False"/>
@@ -123,7 +139,8 @@
     <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBackgroundBrush}" Padding="8,4">
       <DockPanel>
         <Button x:Name="NewTabButton" DockPanel.Dock="Right" Style="{StaticResource NavButton}"
-                Content="＋" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"/>
+                Content="&#xE710;" Click="NewTab_Click" ToolTip="新建标签（Ctrl+T）"
+                AutomationProperties.Name="新建标签"/>
         <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
           <ListBox x:Name="TabStrip" SelectionMode="Single" Background="Transparent"
                    BorderThickness="0" SelectionChanged="TabStrip_SelectionChanged"
@@ -142,14 +159,17 @@
                 <Setter Property="Template">
                   <Setter.Value>
                     <ControlTemplate TargetType="ListBoxItem">
-                      <Border x:Name="Chip" CornerRadius="8,8,0,0" Margin="0,0,0,0"
-                              Padding="12,6" BorderThickness="1,1,1,0"
+                      <!-- UI 现代化批②：Edge 式标签激活态——未选透明、悬停微亮、
+                           选中玻璃 pill（此前选中/未选同底色，激活标签不可辨） -->
+                      <Border x:Name="Chip" CornerRadius="8" Margin="0,0,2,0"
+                              Padding="12,6" BorderThickness="0"
                               BorderBrush="Transparent"
-                              Background="{DynamicResource ChromeBackgroundBrush}">
+                              Background="Transparent">
                         <DockPanel>
-                          <Button x:Name="TabClose" DockPanel.Dock="Right" Content="✕" Click="TabClose_Click"
+                          <Button x:Name="TabClose" DockPanel.Dock="Right" AutomationProperties.Name="关闭这个标签" Content="&#xE894;" Click="TabClose_Click"
                                   Tag="{Binding TabId}" Focusable="False" Cursor="Hand"
-                                  FontSize="10" Margin="10,0,0,0" Padding="2,0"
+                                  FontFamily="{StaticResource IconFont}"
+                                  FontSize="8" Margin="10,0,0,0" Padding="2,0"
                                   Background="Transparent" BorderThickness="0"
                                   ToolTip="关闭标签（Ctrl+W）" Visibility="Collapsed">
                             <Button.Style>
@@ -157,7 +177,8 @@
                                 <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}"/>
                                 <Setter Property="Background" Value="Transparent"/>
                                 <Setter Property="BorderThickness" Value="0"/>
-                                <Setter Property="FontSize" Value="10"/>
+                                <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+                                <Setter Property="FontSize" Value="8"/>
                                 <Setter Property="Cursor" Value="Hand"/>
                                 <Setter Property="Template">
                                   <Setter.Value>
@@ -176,8 +197,21 @@
                               </Style>
                             </Button.Style>
                           </Button>
+                          <!-- CS-321（2026-09-26 审计）：占位蓝点只在无 favicon 时
+                               显示——此前常显，PNG 透明区透出底色蓝点 -->
                           <Grid DockPanel.Dock="Left" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center">
-                            <Ellipse Fill="#FF3B82F6"/>
+                            <Ellipse Fill="#FF3B82F6">
+                              <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                  <Setter Property="Visibility" Value="Collapsed"/>
+                                  <Style.Triggers>
+                                    <DataTrigger Binding="{Binding Icon}" Value="{x:Null}">
+                                      <Setter Property="Visibility" Value="Visible"/>
+                                    </DataTrigger>
+                                  </Style.Triggers>
+                                </Style>
+                              </Ellipse.Style>
+                            </Ellipse>
                             <Image Source="{Binding Icon}" Width="16" Height="16"
                                    RenderOptions.BitmapScalingMode="HighQuality">
                               <Image.Style>
@@ -193,7 +227,7 @@
                             </Image>
                           </Grid>
                           <TextBlock x:Name="SleepMark" DockPanel.Dock="Left" Text="💤" FontSize="10"
-                                     Margin="0,0,5,0" Visibility="Collapsed" VerticalAlignment="Center"/>
+                                     AutomationProperties.Name="标签已休眠" Margin="0,0,5,0" Visibility="Collapsed" VerticalAlignment="Center"/>
                           <TextBlock x:Name="TabTitle" Text="{Binding Title}" FontSize="12" MaxWidth="150"
                                      TextTrimming="CharacterEllipsis"
                                      Foreground="{DynamicResource TextSecondaryBrush}"/>
@@ -201,13 +235,12 @@
                       </Border>
                       <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
-                          <Setter TargetName="Chip" Property="Background" Value="{DynamicResource ChromeBackgroundBrush}"/>
-                          <Setter TargetName="Chip" Property="BorderBrush" Value="#22FFFFFF"/>
+                          <Setter TargetName="Chip" Property="Background" Value="#2EFFFFFF"/>
                           <Setter TargetName="TabTitle" Property="Foreground" Value="#FFFFFFFF"/>
                           <Setter TargetName="TabClose" Property="Visibility" Value="Visible"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                          <Setter TargetName="Chip" Property="Background" Value="{DynamicResource ButtonOverlayHoverBrush}"/>
+                          <Setter TargetName="Chip" Property="Background" Value="#1FFFFFFF"/>
                           <Setter TargetName="TabTitle" Property="Foreground" Value="#FFFFFFFF"/>
                           <Setter TargetName="TabClose" Property="Visibility" Value="Visible"/>
                         </Trigger>
@@ -230,31 +263,38 @@
     <Border DockPanel.Dock="Top" Background="{DynamicResource ChromeBackgroundBrush}" Padding="8,6">
       <DockPanel>
         <StackPanel Orientation="Horizontal">
-          <Button x:Name="BackButton" Style="{StaticResource NavButton}" Content="←" Click="Back_Click" ToolTip="后退"/>
-          <Button x:Name="ForwardButton" Style="{StaticResource NavButton}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
-          <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
-          <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="■" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止"/>
-          <Button x:Name="HomeButton" Style="{StaticResource NavButton}" Content="⌂" Click="Home_Click" Margin="6,0,0,0" ToolTip="主页（新标签页）"/>
+          <Button x:Name="BackButton" Style="{StaticResource NavButton}" Content="&#xE72B;" Click="Back_Click" ToolTip="后退（Alt+←）" AutomationProperties.Name="后退"/>
+          <Button x:Name="ForwardButton" Style="{StaticResource NavButton}" Content="&#xE72A;" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进（Alt+→）" AutomationProperties.Name="前进"/>
+          <Button x:Name="RefreshButton" Style="{StaticResource NavButton}" Content="&#xE72C;" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新（F5/Ctrl+R）" AutomationProperties.Name="刷新"/>
+          <Button x:Name="StopButton" Style="{StaticResource NavButton}" Content="&#xE711;" Click="Stop_Click" Margin="6,0,0,0" ToolTip="停止加载" AutomationProperties.Name="停止加载"/>
+          <Button x:Name="HomeButton" Style="{StaticResource NavButton}" Content="&#xE80F;" Click="Home_Click" Margin="6,0,0,0" ToolTip="主页（新标签页）" AutomationProperties.Name="主页"/>
         </StackPanel>
         <!-- M2 数据闭环工具组：搜索引擎切换 / 收藏☆ / 历史记录 -->
         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0">
-          <ComboBox x:Name="EngineCombo" Width="120" Height="32" VerticalAlignment="Center" FontSize="12"
+          <ComboBox x:Name="EngineCombo" Width="124" Height="32" Style="{StaticResource ChromeComboBox}"
                     SelectionChanged="Engine_SelectionChanged" ToolTip="搜索引擎"/>
-          <Button x:Name="StarButton" Style="{StaticResource NavButton}" Content="☆"
-                  Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"/>
-          <Button x:Name="DownloadsButton" Style="{StaticResource NavButton}" Content="⤓"
-                  Click="Downloads_Click" Margin="6,0,0,0" ToolTip="下载管理"/>
-          <Button x:Name="BookmarkManagerButton" Style="{StaticResource NavButton}" Content="☆"
-                  Click="BookmarkManager_Click" Margin="6,0,0,0" ToolTip="书签管理"/>
-          <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="历"
-                  Click="History_Click" Margin="6,0,0,0" ToolTip="历史记录"/>
-          <Button x:Name="SettingsButton" Style="{StaticResource NavButton}" Content="⚙"
-                  Click="Settings_Click" Margin="6,0,0,0" ToolTip="设置"/>
+          <Button x:Name="StarButton" Style="{StaticResource NavButton}" Content="&#xE734;"
+                  Click="Star_Click" Margin="6,0,0,0" ToolTip="收藏当前页"
+                  AutomationProperties.Name="收藏当前页"/>
+          <Button x:Name="DownloadsButton" Style="{StaticResource NavButton}" Content="&#xE896;"
+                  Click="Downloads_Click" Margin="6,0,0,0" ToolTip="下载管理"
+                  AutomationProperties.Name="下载管理"/>
+          <Button x:Name="BookmarkManagerButton" Style="{StaticResource NavButton}" Content="&#xE700;"
+                  Click="BookmarkManager_Click" Margin="6,0,0,0" ToolTip="书签管理"
+                  AutomationProperties.Name="书签管理"/>
+          <Button x:Name="HistoryButton" Style="{StaticResource NavButton}" Content="&#xE81C;"
+                  Click="History_Click" Margin="6,0,0,0" ToolTip="历史记录"
+                  AutomationProperties.Name="历史记录"/>
+          <Button x:Name="SettingsButton" Style="{StaticResource NavButton}" Content="&#xE713;"
+                  Click="Settings_Click" Margin="6,0,0,0" ToolTip="设置"
+                  AutomationProperties.Name="设置"/>
           <!-- Edge 风格个人资料圆钮（占位——无账号体系，点击聚焦地址栏） -->
-          <Button x:Name="ProfileButton" Style="{StaticResource NavButton}" Content="◐"
-                  Click="Profile_Click" Margin="6,0,0,0" ToolTip="个人资料"/>
-          <Button x:Name="InPrivateButton" Style="{StaticResource NavButton}" Content="🕶"
-                  Click="InPrivate_Click" Margin="6,0,0,0" ToolTip="InPrivate 无痕窗口"/>
+          <Button x:Name="ProfileButton" Style="{StaticResource NavButton}" Content="&#xE77B;"
+                  Click="Profile_Click" Margin="6,0,0,0" ToolTip="个人资料"
+                  AutomationProperties.Name="个人资料"/>
+          <Button x:Name="InPrivateButton" Style="{StaticResource NavButton}" Content="&#xE72E;"
+                  Click="InPrivate_Click" Margin="6,0,0,0" ToolTip="InPrivate 无痕窗口"
+                  AutomationProperties.Name="打开 InPrivate 无痕窗口"/>
         </StackPanel>
         <!-- 胶囊地址栏：深色玻璃 + 聚焦描边 + 占位符 + 内嵌「打开」 -->
         <Border x:Name="AddressPill" Margin="10,0,0,0" CornerRadius="18"
@@ -284,19 +324,32 @@
                     <DropShadowEffect BlurRadius="20" ShadowDepth="2" Opacity="0.35"/>
                   </Border.Effect>
                   <ListBox x:Name="SuggestionList" Background="Transparent" BorderThickness="0"
-                           PreviewKeyDown="SuggestionList_KeyDown">
+                           PreviewKeyDown="SuggestionList_KeyDown"
+                           PreviewMouseLeftButtonUp="SuggestionList_PreviewMouseLeftButtonUp"
+                           AutomationProperties.Name="地址栏建议列表">
                     <ListBox.ItemTemplate>
                       <DataTemplate>
-                        <Grid Margin="4,3">
+                        <!-- UI 现代化批③：两行建议（标题 + 弱化 URL）+ 类型图标
+                             （书签星/历史钟——DataTrigger 按 Kind 切换） -->
+                        <Grid Margin="4,5">
                           <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
                           </Grid.ColumnDefinitions>
-                          <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"
-                                     Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12"/>
-                          <TextBlock Grid.Column="1" Text="{Binding Kind}" Margin="10,0,0,0"
-                                     Foreground="{DynamicResource TextMutedBrush}" FontSize="11"/>
+                          <TextBlock x:Name="KindIcon" Text="&#xE81C;" FontFamily="{StaticResource IconFont}"
+                                     FontSize="13" VerticalAlignment="Top" Margin="0,1,10,0"
+                                     Foreground="{DynamicResource TextMutedBrush}"/>
+                          <TextBlock Grid.Column="1" Text="{Binding Title}" TextTrimming="CharacterEllipsis"
+                                     Foreground="{DynamicResource TextPrimaryBrush}" FontSize="13"/>
+                          <TextBlock Grid.Column="1" Text="{Binding Url}" TextTrimming="CharacterEllipsis"
+                                     Foreground="{DynamicResource TextMutedBrush}" FontSize="11"
+                                     Margin="0,16,0,0"/>
                         </Grid>
+                        <DataTemplate.Triggers>
+                          <DataTrigger Binding="{Binding Kind}" Value="书签">
+                            <Setter TargetName="KindIcon" Property="Text" Value="&#xE734;"/>
+                          </DataTrigger>
+                        </DataTemplate.Triggers>
                       </DataTemplate>
                     </ListBox.ItemTemplate>
                   </ListBox>
@@ -318,9 +371,9 @@
       </DockPanel>
     </Border>
     <!-- 阶段 C 错误页（导航失败——NavigationCompleted WebErrorStatus——安全错误可见） -->
-    <Border x:Name="ErrorPagePanel" DockPanel.Dock="Top" Background="#FF2A1215" Padding="12,8"
+    <Border x:Name="ErrorPagePanel" DockPanel.Dock="Top" Background="{DynamicResource ErrorPanelBackgroundBrush}" Padding="12,8"
             Visibility="Collapsed">
-      <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
+      <TextBlock x:Name="ErrorPage" Foreground="{DynamicResource ErrorPanelTextBrush}" TextWrapping="Wrap"/>
     </Border>
     <!-- M1-T2 加载指示（WebView2 不暴露页面加载进度——不定态细条，修复
          Python/Android「无加载反馈」审计缺陷的可观测部分） -->
@@ -328,9 +381,10 @@
                  Background="Transparent" Foreground="#FF3B82F6" BorderThickness="0"
                  Visibility="Collapsed"/>
     <!-- M2 操作反馈条（收藏等——用户可见，2.5s 自动隐藏，不静默） -->
-    <Border x:Name="FeedbackBar" DockPanel.Dock="Top" Background="#FF0F2A1B" Padding="12,8"
+    <Border x:Name="FeedbackBar" DockPanel.Dock="Top" Background="{DynamicResource FeedbackInfoBackgroundBrush}" Padding="12,8"
             Visibility="Collapsed">
-      <TextBlock x:Name="FeedbackText" Foreground="#FF86EFAC" TextWrapping="Wrap"/>
+      <TextBlock x:Name="FeedbackText" Foreground="{DynamicResource FeedbackTextBrush}" TextWrapping="Wrap"
+                 AutomationProperties.LiveSetting="Polite"/>
     </Border>
     <Grid>
       <!-- M1-T1：每标签一 WebView2 实例（TabRuntime 创建/挂接）——切换即可见性
@@ -342,13 +396,8 @@
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><WrapPanel Orientation="Horizontal"/></ItemsPanelTemplate>
           </ItemsControl.ItemsPanel>
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Button Content="{Binding}" Click="BookmarkBarItem_Click" Margin="2,0"
-                      Background="Transparent" BorderThickness="0" Cursor="Hand"
-                      Foreground="{DynamicResource TextPrimaryBrush}" FontSize="12" Padding="6,3"/>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
+          <!-- CS-063（审计 2026-09-25）：ItemTemplate 已删——code-behind 直接
+               Items.Add(Button)（lambda 点击），DataTemplate 路径永不生效 -->
         </ItemsControl>
       </Border>
       <Grid x:Name="WebViewHost"/>
@@ -365,35 +414,45 @@
                    Foreground="{DynamicResource TextPrimaryBrush}" TextChanged="FindBox_TextChanged"/>
           <TextBlock x:Name="FindCount" VerticalAlignment="Center" Margin="8,0"
                      Foreground="{DynamicResource TextSecondaryBrush}" FontSize="11"/>
-          <Button Content="▲" Tag="b" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
+          <Button AutomationProperties.Name="查找上一个" Content="▲" Tag="b" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
                   Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0"
                   ToolTip="上一个"/>
-          <Button Content="▼" Tag="f" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
+          <Button AutomationProperties.Name="查找下一个" Content="▼" Tag="f" Click="Find_Executed" Width="28" Height="28" Cursor="Hand"
                   Background="Transparent" Foreground="{DynamicResource TextPrimaryBrush}" BorderThickness="0"
                   ToolTip="下一个"/>
-          <Button Content="✕" Click="CloseFind_Click" Width="28" Height="28" Cursor="Hand"
+          <Button AutomationProperties.Name="关闭查找条" Content="✕" Click="CloseFind_Click" Width="28" Height="28" Cursor="Hand"
                   Background="Transparent" Foreground="{DynamicResource TextSecondaryBrush}" BorderThickness="0"
                   ToolTip="关闭（Esc）"/>
         </StackPanel>
       </Border>
       <!-- 全窗口受信模态遮罩：拦截底层点击；只展示 Rust 核心给出的最小审批字段。 -->
       <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#99101827">
-        <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"
-                Padding="20" Background="#FF1B2537" BorderBrush="#66FFFFFF" BorderThickness="1"
-                CornerRadius="12">
+        <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="460"
+                Padding="24,22" Background="#FF1B2537" BorderBrush="#66FFFFFF" BorderThickness="1"
+                CornerRadius="16">
+          <Border.Effect>
+            <DropShadowEffect BlurRadius="30" ShadowDepth="4" Opacity="0.5"/>
+          </Border.Effect>
           <StackPanel>
-            <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Foreground="#FFFFFFFF" Margin="0,0,0,12"/>
-            <TextBlock Text="来源" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
-            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
-            <TextBlock Text="路径与查询" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
-            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
-            <TextBlock Text="权限范围" FontWeight="SemiBold" Foreground="#FFFFFFFF"/>
-            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Foreground="#B3FFFFFF" Margin="0,0,0,8"/>
-            <TextBlock x:Name="ApprovalExpiry" Foreground="#80FFFFFF" TextWrapping="Wrap" Margin="0,0,0,16"/>
+            <!-- UI 现代化批③：标题行加图标 + 字段标签降级为 muted 小字（值为主角） -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+              <TextBlock Text="&#xE72E;" FontFamily="{StaticResource IconFont}" FontSize="18"
+                         Foreground="#FFFFC24B" VerticalAlignment="Center"/>
+              <TextBlock Text="需要确认的导航" FontSize="17" FontWeight="SemiBold" Foreground="#FFFFFFFF"
+                         Margin="10,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+            <TextBlock Text="来源" FontSize="11" Foreground="#80FFFFFF" Margin="0,0,0,3"/>
+            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Foreground="#FFFFFFFF" FontSize="13" Margin="0,0,0,12"/>
+            <TextBlock Text="路径与查询" FontSize="11" Foreground="#80FFFFFF" Margin="0,0,0,3"/>
+            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Foreground="#B3FFFFFF" FontSize="13" Margin="0,0,0,12"/>
+            <TextBlock Text="权限范围" FontSize="11" Foreground="#80FFFFFF" Margin="0,0,0,3"/>
+            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Foreground="#B3FFFFFF" FontSize="13" Margin="0,0,0,12"/>
+            <TextBlock x:Name="ApprovalExpiry" Foreground="#80FFFFFF" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,18"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88"
-                      Margin="0,0,8,0" Style="{StaticResource NavButton}" Width="Auto" Height="32" FontSize="13"/>
-              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112" Style="{StaticResource OpenButton}"/>
+              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="92"
+                      Margin="0,0,10,0" Style="{StaticResource NavButton}" Width="Auto" Height="34" FontSize="13"
+                      FontFamily="Segoe UI, Microsoft YaHei UI"/>
+              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="118" Height="34" Style="{StaticResource OpenButton}"/>
             </StackPanel>
           </StackPanel>
         </Border>

@@ -25,10 +25,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,14 +49,16 @@ TREE_COPY: list[tuple[str, str]] = [
     (".github/workflows", ".github/workflows"),
 ]
 
-# 复制到评审包根目录的单个规范文件（全部为评审相关文档/配置）
+# 复制到评审包根目录的单个规范文件（全部为评审相关文档/配置）。
+# PY-204（2026-09-26 审计）：原 FILE_COPY 中的 docs/DESIGN.md 与
+# docs/KNOWLEDGE_BASE.md 是死条目——TREE_COPY 的 ("docs", "docs") 已整树
+# 复制 docs/，两文件经树复制进入评审包；单文件条目属重复登记（同名去重
+# 掩盖了冗余），删除并在此注释留痕。
 FILE_COPY: list[str] = [
     "README.md",
-    "docs/DESIGN.md",       # UI 设计语言事实来源（代码/README 均有引用）
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "CLAUDE.md",
-    "docs/KNOWLEDGE_BASE.md",  # 架构决策与工程知识（ADR/踩坑记录）
     "LICENSE",
     "pyproject.toml",       # 根 Python（ruff）配置
     "SECURITY.md",
@@ -109,14 +112,14 @@ def git_commit_and_head() -> tuple[str, str]:
     try:
         sha = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, timeout=30,  # PY-032
         ).stdout.strip()
         subject = subprocess.run(
             ["git", "log", "-1", "--pretty=%s"], cwd=ROOT,
-            capture_output=True, text=True, check=True,
+            capture_output=True, text=True, check=True, timeout=30,  # PY-032
         ).stdout.strip()
         return sha, subject
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
         return "unknown", "unknown"
 
 
@@ -149,17 +152,28 @@ def collect_sources() -> list[Path]:
         src = ROOT / canonical
         if not src.exists():
             continue
-        # 遍历目录，跳过 build 产物
-        for p in src.rglob("*"):
-            if not p.is_file() or p.is_symlink():
-                continue
-            rel = p.relative_to(src)
-            if _match_excluded(rel):
-                continue
-            if (canonical, rel.parts[0]) in EXCLUDE_SUBTREES:
-                continue
-            # 整个包路径
-            out.append(Path(pkg) / rel)
+        # PY-205（2026-09-26 审计）：src.rglob("*") 全遍历后再逐文件过滤——
+        # android/build、target 等目录数千中间产物全走一遍 IO。改
+        # os.walk(topdown=True) 在 dirs 层剪枝（EXCLUDE_DIRS / EXCLUDE_SUBTREES
+        # 命中的子树根本不进入），文件级规则（名字/后缀/符号链接）仍逐文件判。
+        for dirpath, dirnames, filenames in os.walk(src, topdown=True):
+            rel_dir = Path(dirpath).relative_to(src)
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in EXCLUDE_DIRS
+                and (canonical, (rel_dir / d).parts[0]) not in EXCLUDE_SUBTREES
+            ]
+            for fname in filenames:
+                rel = rel_dir / fname
+                # 与原 _match_excluded 全路径段判定对齐：文件名自身命中
+                # EXCLUDE_DIRS（无后缀名恰与排除目录同名的极端情况）同样剔除
+                if rel.name in EXCLUDE_DIRS or rel.name in EXCLUDE_NAMES or rel.suffix in EXCLUDE_SUFFIXES:
+                    continue
+                p = src / rel
+                # 与原实现一致：跳过非普通文件（坏符号链接等）
+                if not p.is_file() or p.is_symlink():
+                    continue
+                out.append(Path(pkg) / rel)
     for f in FILE_COPY:
         fp = ROOT / f
         if fp.exists() and not _match_excluded(Path(f)):
@@ -175,8 +189,13 @@ def collect_sources() -> list[Path]:
     return sorted(unique, key=lambda p: p.as_posix())
 
 
-def build(out_dir: Path, apply_edit: bool = True) -> list[dict[str, str]]:
-    """组装评审包到 out_dir。返回 manifest 条目列表。"""
+def build(out_dir: Path) -> list[dict[str, str]]:
+    """组装评审包到 out_dir。返回 manifest 条目列表。
+
+    PY-203（2026-09-26 审计）：删除死参数 apply_edit——函数体内零引用，
+    --check 路径传入 False 并不改变任何行为（README 戳记始终由
+    stamp_readme 按保留编辑语义处理）。调用点已同步。
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     manifest: list[dict[str, str]] = []
     sources = collect_sources()
@@ -198,7 +217,7 @@ def build(out_dir: Path, apply_edit: bool = True) -> list[dict[str, str]]:
     props = version_props()
     version = props.get("VERSION_NAME", "unknown")
     short, subject = git_commit_and_head()
-    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    generated_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     manifest_doc = {
         "generated_at": generated_at,
         "version": version,
@@ -294,15 +313,22 @@ def check_reviewed(out_dir: Path) -> tuple[bool, list[str]]:
     problems: list[str] = []
     tmp = out_dir.parent / (out_dir.name + ".check")
     try:
-        manifest = build(tmp, apply_edit=False)  # 生成到临时目录
+        manifest = build(tmp)  # 生成到临时目录（PY-203：apply_edit 死参数已删）
         expected = {m["path"]: m["sha256"] for m in manifest}
         # 已提交的包
         actual = out_dir / "manifest.json"
         if not actual.exists():
             problems.append("评审包缺少 manifest.json（未由生成器产出）")
             return False, problems
-        committed = json.loads(actual.read_text(encoding="utf-8"))
-        committed_files = {f["path"]: f["sha256"] for f in committed.get("files", [])}
+        # PY-209（2026-09-26 审计）：json.loads 无 try——已提交 manifest 损坏
+        # （半截写入/手工编辑出错）时原始栈替代干净报告。包 try/except 计入
+        # problems（fail-closed——损坏即判定不同步）。
+        try:
+            committed = json.loads(actual.read_text(encoding="utf-8"))
+            committed_files = {f["path"]: f["sha256"] for f in committed.get("files", [])}
+        except (json.JSONDecodeError, OSError, AttributeError, TypeError) as exc:
+            problems.append(f"已提交 manifest.json 无法解析: {exc}")
+            return False, problems
         # 集合对称差 + 哈希不一致
         for path in expected:
             if path not in committed_files:

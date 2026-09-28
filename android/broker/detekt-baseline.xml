@@ -25,14 +25,10 @@
     <ID>MagicNumber:AndroidBroker.kt$AndroidBroker$80</ID>
     <ID>MagicNumber:OriginPolicy.kt$OriginPolicy$0x20</ID>
     <ID>MagicNumber:OriginPolicy.kt$OriginPolicy$0x7f</ID>
-    <ID>MaxLineLength:AndroidBroker.kt$AndroidBroker$explanation = "allowed origin $origin — scheme ${uri.scheme}, host ${uri.host} — policy version $policyVersion"</ID>
-    <ID>MaxLineLength:NativePolicyCoreBridge.kt$NativePolicyCoreBridge$)</ID>
-    <ID>MaxLineLength:NativePolicyCoreBridge.kt$NativePolicyCoreBridge$fun destroySession(sessionId: String): Boolean</ID>
     <ID>ReturnCount:AndroidBroker.kt$AndroidBroker$fun approveNavigationConfirmation( request: ApprovalRequest, rawUrl: String, scope: String, ): Decision</ID>
     <ID>ReturnCount:AndroidBroker.kt$AndroidBroker$fun consumeNavigation( action: AuthorizedAction?, sessionId: String, tabId: String, currentGeneration: Long, rawUrl: String, scope: String, ): Boolean</ID>
     <ID>ReturnCount:AndroidBroker.kt$AndroidBroker$fun evaluateNavigation( sessionId: String, tabId: String, generation: Long, rawUrl: String, scope: String, ): Decision</ID>
     <ID>ReturnCount:AndroidBroker.kt$AndroidBroker$fun requestNavigationConfirmation( sessionId: String, tabId: String, generation: Long, rawUrl: String, scope: String, ): Decision</ID>
-    <ID>ReturnCount:NativePolicyCoreGate.kt$DefaultNativePolicyCoreGate$override fun probe(): NativePolicyCoreGateResult</ID>
     <ID>ReturnCount:OriginPolicy.kt$OriginPolicy$fun tryParseExternal(raw: String?): java.net.URI?</ID>
     <ID>SwallowedException:OriginPolicy.kt$OriginPolicy$e: Exception</ID>
     <ID>TooGenericExceptionCaught:NativePolicyCoreBridge.kt$NativePolicyCoreBridge.Companion$e: Exception</ID>
@@ -40,6 +36,5 @@
     <ID>TooManyFunctions:AndroidBroker.kt$AndroidBroker</ID>
     <ID>TooManyFunctions:NativePolicyCoreBridge.kt$NativePolicyCoreBridge : AutoCloseable</ID>
     <ID>TooManyFunctions:NativePolicyCoreBridge.kt$NativePolicyCoreBridge$NativePolicyCoreAbi : Library</ID>
-    <ID>UnusedPrivateProperty:AndroidBroker.kt$AndroidBroker$private val mode: BrokerMode = BrokerMode.FirstMatch</ID>
   </CurrentIssues>
 </SmellBaseline>

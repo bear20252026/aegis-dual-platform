@@ -1,6 +1,10 @@
 # ADR-007：单一正典栈 + 守卫脚本单一事实源 + 门禁全量常跑
 
 > 状态：已接受（2026-08-30）｜ 关联：ADR-001（Windows 宿主）、ADR-002（capability broker）、ADR-003（无远程 native bridge）
+> **WB-059（审计 2026-09-23 清单·W5 批）头部注记：本 ADR 的 D1（「现役功能栈 =
+> pywebview，向 C# 迁移中」的悬置态）已被 ADR-009 D1（2026-09-04 owner 拍板）
+> 取代——C#/.NET 10 为唯一 Windows 正典栈，pywebview 栈（legacy/windows-pywebview）
+> 已归档只读（D4 冻结纪律）。D2/D3（守卫单源 + 门禁全量常跑）继续有效。**
 > 背景审查：2026-08-30 全库架构复审（PR #7 期间发现的三处系统性风险）
 
 ## 背景

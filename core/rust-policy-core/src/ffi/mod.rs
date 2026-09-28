@@ -14,12 +14,11 @@ use crate::capability::CapabilityRegistry;
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
 use crate::policy::PolicyEngine;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 // ===== UniFFI 类型包装（Record/Enum）=====
 
 /// FFI 版授权行动（与 decision::AuthorizedAction 字段一致）。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiAuthorizedAction {
     pub session_id: String,
     pub tab_id: String,
@@ -73,7 +72,7 @@ impl From<FfiAuthorizedAction> for AuthorizedAction {
 }
 
 /// FFI 版拒绝原因。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiDenyReason {
     pub code: String,
     pub detail: String,
@@ -81,7 +80,7 @@ pub struct FfiDenyReason {
 }
 
 /// FFI 版审批请求；确认 UI 必须展示并绑定其完整语义，不能仅信任 origin/method。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiApprovalRequest {
     pub origin: String,
     pub method: String,
@@ -92,7 +91,7 @@ pub struct FfiApprovalRequest {
 }
 
 /// FFI 版安全决策（枚举——Allow/Deny/RequireConfirmation）。
-#[derive(uniffi::Enum)]
+#[derive(Debug, uniffi::Enum)]
 pub enum FfiDecision {
     Allow { action: FfiAuthorizedAction },
     RequireConfirmation { request: FfiApprovalRequest },
@@ -129,14 +128,14 @@ impl From<Decision> for FfiDecision {
 // ===== FFI 导出函数（#[uniffi::export]）=====
 
 /// FFI 版 URL 解析结果（UniFFI 不支持元组返回——用 Record）。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiOrigin {
     pub scheme: String,
     pub host: String,
 }
 
 /// FFI 版规范化 URL 授权绑定：fragment 不参与副作用授权。
-#[derive(uniffi::Record)]
+#[derive(Debug, uniffi::Record)]
 pub struct FfiCanonicalUrl {
     pub scheme: String,
     pub host: String,
@@ -144,17 +143,34 @@ pub struct FfiCanonicalUrl {
     pub canonical_parameters: String,
 }
 
+/// FFI 入口统一输入上限（RS-173）——与 C ABI read_utf8 的
+/// FFI_INPUT_MAX_BYTES 同值（64KB）。uniffi 导出函数收到的是宿主传来的
+/// String（无 C 层有界扫描兜底），解析器自身的前置上限是唯一防线：
+/// 超长输入直接拒绝，不做任何 O(n) 之后的深解析。
+const MAX_FFI_URL_BYTES: usize = 64 * 1024;
+
+/// FFI URL 入口的 RS-173 前置长度检查（超长返回 None——fail-closed）。
+fn ffi_url_length_ok(raw: &str) -> bool {
+    !raw.is_empty() && raw.len() <= MAX_FFI_URL_BYTES
+}
+
 /// URL 校验（委托 origin 模块——消除 C#/Kotlin/Python 重复实现）。
 ///
 /// 返回 `FfiOrigin { scheme, host }` 或 None（URL 非法）。
 #[uniffi::export]
 pub fn try_parse_external(raw_url: String) -> Option<FfiOrigin> {
+    if !ffi_url_length_ok(&raw_url) {
+        return None;
+    }
     crate::origin::try_parse_external(&raw_url).map(|(scheme, host)| FfiOrigin { scheme, host })
 }
 
 /// 跨端导航使用的规范化入口，确保授权绑定到一致的 origin 与 path/query。
 #[uniffi::export]
 pub fn canonicalize_external(raw_url: String) -> Option<FfiCanonicalUrl> {
+    if !ffi_url_length_ok(&raw_url) {
+        return None;
+    }
     crate::origin::canonicalize_external(&raw_url).map(|url| FfiCanonicalUrl {
         scheme: url.scheme,
         host: url.host,
@@ -166,33 +182,259 @@ pub fn canonicalize_external(raw_url: String) -> Option<FfiCanonicalUrl> {
 /// URL 主机名提取（委托 util 模块）。
 #[uniffi::export]
 pub fn extract_host(url: String) -> Option<String> {
+    if !ffi_url_length_ok(&url) {
+        return None;
+    }
     crate::util::extract_host(&url)
 }
 
-/// 生成指纹防护管道 JS（委托 fingerprint_pipeline 逻辑——跨端统一）。
+/// 生成指纹防护管道 JS（委托 shield::FingerprintShield——跨端统一）。
+///
+/// RS-036：非法种子（长度≠64 或含非 hex 字符）返回**空脚本**——
+/// 此前畸形种子静默退化为全零种子（全体用户同噪声可被指纹聚类）。
+/// 宿主应在调用前校验种子；空脚本注入无效果（fail-closed——绝不以
+/// 固定种子注入）。
+///
+/// RS-133（审计 2026-09-25）：修正过期注释——JS 生成**就在 Rust 侧**
+/// （FingerprintShield::from_seed(seed).inject_script()），并非
+/// "Python 侧 legacy、Rust 仅提供 seed 派生"；文档与实现此前不符。
+///
+/// RS-214（2026-09-26 审计）：名实澄清——本函数名为 pipeline 实则只生成
+/// **单阶段** FingerprintShield 脚本（canvas 噪声 + hardwareConcurrency），
+/// **不是**九阶段管线（孪生对账口径：Android WebViewHardening
+/// fingerprintShieldScript / Windows FingerprintShield.cs 同为单阶段
+/// shield 脚本）。per-site 隔离的完整九阶段管线经
+/// [`build_fingerprint_pipeline_with_mode`]（domain + mode 参数）获取——
+/// 此前宿主经 FFI 永远拿不到带 domain 的真正管线。
 #[uniffi::export]
 pub fn build_fingerprint_pipeline(session_seed: String) -> String {
-    // 注：fingerprint_pipeline 的 JS 生成在 Python 侧（legacy），
-    // Rust 侧提供 seed 派生；此处导出便于后续迁移。
-    crate::shield::FingerprintShield::from_seed(hex_seed_to_bytes(&session_seed)).inject_script()
+    match hex_seed_to_bytes(&session_seed) {
+        Some(seed) => crate::shield::FingerprintShield::from_seed(seed).inject_script(),
+        None => String::new(),
+    }
 }
 
-/// 十六进制种子转字节数组（内部辅助）。
-fn hex_seed_to_bytes(hex: &str) -> [u8; 32] {
-    let mut out = [0u8; 32];
-    let bytes = hex.as_bytes();
-    for i in 0..32 {
-        if i * 2 + 1 < bytes.len() {
-            let hi = crate::util::hex_digit(bytes[i * 2]).unwrap_or(0);
-            let lo = crate::util::hex_digit(bytes[i * 2 + 1]).unwrap_or(0);
-            out[i] = (hi << 4) | lo;
+/// FFI 版保护模式（镜像 protection_mode::ProtectionMode——core 类型不做
+/// uniffi 派生，遵循本模块「仅包装」原则，与 FfiBroker/ FfiDecision 同款）。
+#[derive(Debug, uniffi::Enum)]
+pub enum FfiProtectionMode {
+    /// 兼容模式——仅 Canvas 噪声（网站兼容性最好）。
+    Compatible,
+    /// 平衡模式——大部分防护启用（默认）。
+    Balanced,
+    /// 最大隐私模式——全部 9 阶段启用。
+    Maximum,
+}
+
+impl From<FfiProtectionMode> for crate::protection_mode::ProtectionMode {
+    fn from(mode: FfiProtectionMode) -> Self {
+        match mode {
+            FfiProtectionMode::Compatible => Self::Compatible,
+            FfiProtectionMode::Balanced => Self::Balanced,
+            FfiProtectionMode::Maximum => Self::Maximum,
         }
     }
-    out
+}
+
+/// 生成模式感知 + per-site 隔离的完整指纹防护管线 JS（RS-214 新增导出）。
+///
+/// 此前宿主经 FFI 只能拿到 [`build_fingerprint_pipeline`] 的单阶段脚本，
+/// 带 domain 的九阶段管线（protection_mode::fingerprint_pipeline_with_mode）
+/// 未做 `#[uniffi::export]`——per-site 隔离管线对宿主不可达。
+///
+/// - `session_seed`：64 字符 hex（非法返回空脚本——RS-036 fail-closed）；
+/// - `mode`：保护模式（决定启用的阶段集）；
+/// - `domain`：顶层文档 eTLD+1 域名（PerSiteSeed 按域派生站点种子——
+///   站点间噪声去相关，防跨站 canvas 哈希关联）。
+#[uniffi::export]
+pub fn build_fingerprint_pipeline_with_mode(
+    session_seed: String,
+    mode: FfiProtectionMode,
+    domain: String,
+) -> String {
+    match hex_seed_to_bytes(&session_seed) {
+        Some(seed) => crate::protection_mode::fingerprint_pipeline_with_mode(
+            &crate::shield::FingerprintShield::from_seed(seed),
+            mode.into(),
+            &domain,
+        ),
+        None => String::new(),
+    }
+}
+
+/// 十六进制种子转字节数组（RS-036 收紧——整体拒绝）。
+///
+/// 此前逐字节 `unwrap_or(0)` 静默置零 + 长串截断：畸形种子退化为全零
+/// 指纹种子（全体用户同噪声可被指纹聚类），非法 hex 位也按 0 混入。
+/// 现在要求**恰好 64 个合法 hex 字符**，任何畸形（长度≠64 / 非法字符）
+/// 返回 None——调用方不得回退到固定种子。
+pub fn hex_seed_to_bytes(hex: &str) -> Option<[u8; 32]> {
+    let bytes = hex.as_bytes();
+    if bytes.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for i in 0..32 {
+        let hi = crate::util::hex_digit(bytes[i * 2])?;
+        let lo = crate::util::hex_digit(bytes[i * 2 + 1])?;
+        out[i] = (hi << 4) | lo;
+    }
+    Some(out)
 }
 
 mod broker;
 pub use broker::*;
+
+#[cfg(test)]
+mod hex_seed_tests {
+    use super::*;
+
+    #[test]
+    fn valid_hex_seed_parses() {
+        let hex = "ab".repeat(32);
+        let out = hex_seed_to_bytes(&hex).unwrap();
+        assert_eq!(out[0], 0xab);
+        assert_eq!(out[31], 0xab);
+    }
+
+    #[test]
+    fn malformed_seeds_rejected_entirely() {
+        // RS-036 回归：长度≠64 / 非法字符一律整体拒绝——此前逐位置置零、
+        // 长串截断（畸形种子静默退化为全零聚类种子）
+        assert!(hex_seed_to_bytes("").is_none(), "空串拒绝");
+        assert!(hex_seed_to_bytes("ab").is_none(), "短串拒绝");
+        assert!(
+            hex_seed_to_bytes(&"ab".repeat(33)).is_none(),
+            "长串拒绝（不截断）"
+        );
+        assert!(
+            hex_seed_to_bytes(&format!("{}zz", "ab".repeat(31))).is_none(),
+            "非法 hex 字符拒绝（不按 0 混入）"
+        );
+    }
+
+    #[test]
+    fn build_pipeline_rejects_malformed_seed_with_empty_script() {
+        assert_eq!(build_fingerprint_pipeline("not-hex".into()), "");
+        assert_eq!(build_fingerprint_pipeline(String::new()), "");
+        // 合法种子仍产出脚本
+        assert!(!build_fingerprint_pipeline("ab".repeat(32)).is_empty());
+    }
+
+    // —— RS-214（审计 2026-09-26）：domain+mode 管线 FFI 导出 ——
+
+    #[test]
+    fn build_pipeline_with_mode_exports_per_site_pipeline() {
+        // 此前带 domain 的九阶段管线未做 #[uniffi::export]——宿主经 FFI
+        // 永远拿不到 per-site 隔离管线。导出后：合法种子产出多阶段脚本，
+        // 不同 domain 派生不同站点种子；畸形种子 fail-closed 空脚本
+        let seed = "ab".repeat(32);
+        let a = build_fingerprint_pipeline_with_mode(
+            seed.clone(),
+            FfiProtectionMode::Maximum,
+            "a.com".into(),
+        );
+        let b =
+            build_fingerprint_pipeline_with_mode(seed, FfiProtectionMode::Maximum, "b.com".into());
+        // 模式声明 + 多阶段标记（PerSiteSeed/TimerPrecision 等 Maximum 阶段）
+        assert!(a.contains("'maximum'"), "模式声明阶段");
+        assert!(a.contains("__AEGIS_SITE_SEED"), "per-site 种子阶段");
+        assert!(a.contains("PRECISION_US"), "TimerPrecision 阶段");
+        // per-site 隔离：不同 domain 站点种子不同
+        let seed_of = |s: &str| {
+            s.lines()
+                .find(|l| l.contains("__AEGIS_SITE_SEED"))
+                .unwrap()
+                .to_string()
+        };
+        assert_ne!(seed_of(&a), seed_of(&b));
+        // Balanced 模式阶段集不同（模式参数真实生效）
+        let balanced = build_fingerprint_pipeline_with_mode(
+            "ab".repeat(32),
+            FfiProtectionMode::Balanced,
+            "a.com".into(),
+        );
+        assert!(balanced.contains("'balanced'"));
+        assert!(
+            !balanced.contains("PRECISION_US"),
+            "Balanced 不含 TimerPrecision"
+        );
+        // 畸形种子 fail-closed
+        assert_eq!(
+            build_fingerprint_pipeline_with_mode(
+                "zz".into(),
+                FfiProtectionMode::Maximum,
+                "a.com".into()
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn build_pipeline_single_stage_contract_documented() {
+        // RS-214：名实澄清——旧入口只产出单阶段 shield 脚本（非九阶段
+        // 管线），孪生对账口径锁定：包含 canvas 噪声与 hardwareConcurrency，
+        // 不含管线阶段（PerSiteSeed/TimerPrecision 等）
+        let script = build_fingerprint_pipeline("ab".repeat(32));
+        assert!(script.contains("toDataURL"), "canvas 噪声（单阶段主体）");
+        assert!(script.contains("hardwareConcurrency"));
+        assert!(!script.contains("__AEGIS_SITE_SEED"), "不含 per-site 阶段");
+        assert!(!script.contains("PRECISION_US"), "不含 TimerPrecision 阶段");
+    }
+
+    // —— RS-134（审计 2026-09-25）：hex 回归补强 ——
+
+    #[test]
+    fn hex_seed_accepts_uppercase() {
+        // 大写 hex 是合法表示——必须与小写产出相同字节
+        let lower = hex_seed_to_bytes(&"ab".repeat(32)).unwrap();
+        let upper = hex_seed_to_bytes(&"AB".repeat(32)).unwrap();
+        assert_eq!(lower, upper);
+    }
+
+    #[test]
+    fn hex_seed_nibble_order_is_hi_then_lo() {
+        // 高位在前（hi<<4 | lo）——回归锁定字节序（此前若颠倒会静默换种子）
+        let mut hex = "0ff00000".to_string();
+        hex.push_str(&"ab".repeat(28)); // 补齐 64 字符
+        let out = hex_seed_to_bytes(&hex).unwrap();
+        assert_eq!(&out[..4], &[0x0f, 0xf0, 0x00, 0x00]);
+    }
+
+    #[test]
+    fn hex_seed_boundary_values_roundtrip() {
+        // 00 / ff / 0f / f0 四种 nibble 边界全遍历
+        let mut hex = "00ff0ff0".to_string();
+        hex.push_str(&"ab".repeat(28)); // 补齐 64 字符
+        let out = hex_seed_to_bytes(&hex).unwrap();
+        assert_eq!(&out[..4], &[0x00, 0xff, 0x0f, 0xf0]);
+    }
+
+    // —— RS-173（审计 2026-09-25）：FFI 入口 64KB 前置长度检查 ——
+
+    #[test]
+    fn ffi_url_entries_reject_oversized_input() {
+        // 三个 URL 入口此前直通解析器（origin 侧 8KB 上限是第二道防线）——
+        // FFI 边界自身的前置检查锁定 64KB 统一口径（与 C ABI read_utf8
+        // 同值）。extract_host 的实现侧无长度上限（裸主机名提取），FFI
+        // 前置检查是它唯一的防线
+        let oversized = format!("https://example.com/{}", "a".repeat(70 * 1024));
+        assert!(try_parse_external(oversized.clone()).is_none());
+        assert!(canonicalize_external(oversized.clone()).is_none());
+        assert!(extract_host(oversized).is_none());
+        // 正常长度输入不受影响
+        assert!(try_parse_external("https://example.com".into()).is_some());
+        assert!(canonicalize_external("https://example.com/x".into()).is_some());
+        assert_eq!(
+            extract_host("https://Example.COM/path".into()),
+            Some("example.com".into())
+        );
+        // 空输入 fail-closed（与解析器语义一致）
+        assert!(try_parse_external(String::new()).is_none());
+        assert!(canonicalize_external(String::new()).is_none());
+        assert!(extract_host(String::new()).is_none());
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -458,5 +700,48 @@ mod tests {
             FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
             _ => panic!("generation advance must revoke pending confirmation"),
         }
+    }
+
+    // —— RS-132（审计 2026-09-25）：FFI 导出函数层回归（此前零覆盖） ——
+
+    #[test]
+    fn try_parse_external_wrapper_valid_and_invalid() {
+        // 合法 URL：scheme 归一小写 + host 归一
+        let parsed = try_parse_external("HTTPS://Example.COM:443/path".into())
+            .expect("合法 https URL 必须解析");
+        assert_eq!(parsed.scheme, "https");
+        assert_eq!(parsed.host, "example.com");
+        // 非法 URL：None（fail-closed），不 panic
+        assert!(try_parse_external("javascript:alert(1)".into()).is_none());
+        assert!(try_parse_external("not a url".into()).is_none());
+        assert!(try_parse_external(String::new()).is_none());
+    }
+
+    #[test]
+    fn extract_host_wrapper_various_shapes() {
+        assert_eq!(
+            extract_host("https://sub.example.com:8080/p".into()),
+            Some("sub.example.com".into())
+        );
+        assert_eq!(
+            extract_host("http://User:Pw@EXAMPLE.com/".into()),
+            Some("example.com".into()),
+            "userinfo 剥离 + 大小写归一"
+        );
+        // util::extract_host 只做 host 提取（不做 scheme 门禁——后者在
+        // origin::try_parse_external 层）；锁定现状防止语义漂移
+        assert_eq!(extract_host("ftp://x.com/".into()), Some("x.com".into()));
+    }
+
+    #[test]
+    fn canonicalize_external_wrapper_strips_fragment_and_normalizes() {
+        let canonical =
+            canonicalize_external("http://example.com/a?b=1#frag".into()).expect("canonical");
+        assert_eq!(canonical.origin, "http://example.com");
+        assert_eq!(canonical.canonical_parameters, "/a?b=1");
+        assert!(
+            !canonical.canonical_parameters.contains('#'),
+            "fragment 不参与授权绑定"
+        );
     }
 }

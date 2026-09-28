@@ -68,11 +68,18 @@ public static class UrlNormalizer
     /// <summary>统一输入归一。返回 null 表示拒绝导航（空输入 / 非导航 scheme）。</summary>
     public static string? Normalize(string? input, string engineKey = DefaultEngine)
     {
-        var trimmed = input?.Trim();
+        var trimmed = StripUnsafeCharacters(input);
         if (string.IsNullOrEmpty(trimmed))
             return null;
         if (trimmed.Equals("about:blank", StringComparison.OrdinalIgnoreCase))
             return "about:blank";
+
+        // CS-140：裸 IPv6 字面量（"[::1]"/"::1"，可含端口/路径）——此前因不含
+        // 点号被当搜索词。URI 正典形态要求方括号，裸冒号形态归一为 [..] 补 http。
+        // 仅接手 '[' 或 ':' 起始的输入——字母起始（"fe80::1" 形如 scheme）维持
+        // 既有 fail-closed 拒绝路径。
+        if (trimmed[0] is '[' or ':' && IsIpv6Literal(trimmed))
+            return AsValidUriOrDefault("http://" + BracketIpv6(trimmed), trimmed, engineKey);
 
         var schemeMatch = SchemePrefix.Match(trimmed);
         if (schemeMatch is { Success: true } match)
@@ -85,10 +92,10 @@ public static class UrlNormalizer
             if (after.Length > 0 && char.IsDigit(after[0]))
             {
                 if (IsExplicitLocalHostName(trimmed))
-                    return SchemeForLocal(trimmed) + trimmed;
+                    return AsValidUriOrDefault(SchemeForLocal(trimmed) + trimmed, trimmed, engineKey);
                 if (!trimmed.Contains(' ') && trimmed.Contains('.')
                     && !trimmed.EndsWith(".", StringComparison.Ordinal))
-                    return SchemeForLocal(trimmed) + trimmed;
+                    return AsValidUriOrDefault(SchemeForLocal(trimmed) + trimmed, trimmed, engineKey);
             }
             else if (scheme is not ("http" or "https"))
             {
@@ -96,19 +103,75 @@ public static class UrlNormalizer
             }
             else
             {
-                return trimmed.Replace(" ", "%20");
+                return AsValidUriOrDefault(trimmed.Replace(" ", "%20"), trimmed, engineKey);
             }
         }
 
         // 显式本机名（localhost / foo.localhost，可含端口）直接导航到本机 http，
         // 不走搜索词——放开本地开发访问（对标 Chrome 对 localhost 的行为）。
         if (IsExplicitLocalHostName(trimmed))
-            return SchemeForLocal(trimmed) + trimmed;
+            return AsValidUriOrDefault(SchemeForLocal(trimmed) + trimmed, trimmed, engineKey);
 
         if (!trimmed.Contains(' ') && trimmed.Contains('.') && !trimmed.EndsWith(".", StringComparison.Ordinal))
-            return SchemeForLocal(trimmed) + trimmed;
+            return AsValidUriOrDefault(SchemeForLocal(trimmed) + trimmed, trimmed, engineKey);
 
         return EngineUrls.GetValueOrDefault(engineKey, EngineUrls[DefaultEngine]) + EscapeQuery(trimmed);
+    }
+
+    /// <summary>剥离控制字符与 WPF 地址栏不该出现的非法 URI 字符（&lt;&gt;"|^`{}
+    /// 等——此前原样放行，下游 new Uri 直接抛 UriFormatException）。</summary>
+    private static string? StripUnsafeCharacters(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input?.Trim()))
+            return null;
+        var trimmed = input!.Trim();
+        var builder = new System.Text.StringBuilder(trimmed.Length);
+        foreach (var ch in trimmed)
+        {
+            if (char.IsControl(ch))
+                continue;  // 控制字符一律剥离
+            if (ch is '<' or '>' or '"' or '|' or '^' or '`' or '{' or '}' or '\\' or '\'')
+                continue;  // RFC 3986 非法字符——丢弃（防 new Uri 抛异常）
+            builder.Append(ch);
+        }
+        return builder.Length == 0 ? null : builder.ToString();
+    }
+
+    /// <summary>候选 URL 必须能被 Uri 成功解析——解析失败（如裸 "http://"）回退
+    /// 为搜索词，而不是把非法串递给调用方 new Uri 抛异常。</summary>
+    private static string AsValidUriOrDefault(string candidate, string originalQuery, string engineKey)
+    {
+        if (Uri.TryCreate(candidate, UriKind.Absolute, out var uri)
+            && !string.IsNullOrWhiteSpace(uri.Host)
+            && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+            return candidate;
+        return EngineUrls.GetValueOrDefault(engineKey, EngineUrls[DefaultEngine]) + EscapeQuery(originalQuery);
+    }
+
+    /// <summary>CS-140：输入是否为 IPv6 字面量主机（方括号或裸冒号形态，可含端口/路径）。</summary>
+    private static bool IsIpv6Literal(string input)
+    {
+        var host = input;
+        var slash = host.IndexOf('/');
+        if (slash >= 0)
+            host = host[..slash];
+        if (host.StartsWith('['))
+        {
+            var close = host.IndexOf(']');
+            return close > 1 && System.Net.IPAddress.TryParse(host[1..close], out _);
+        }
+        return host.IndexOf(':') >= 0 && System.Net.IPAddress.TryParse(host, out _);
+    }
+
+    /// <summary>CS-140：裸 IPv6 主机补方括号（"::1" → "[::1]"，路径保留其后）。</summary>
+    private static string BracketIpv6(string input)
+    {
+        if (input.StartsWith('['))
+            return input;
+        var slash = input.IndexOf('/');
+        var host = slash >= 0 ? input[..slash] : input;
+        var rest = slash >= 0 ? input[slash..] : string.Empty;
+        return "[" + host + "]" + rest;
     }
 
     /// <summary>输入是否为显式本机名（localhost / *.localhost，可含端口）。

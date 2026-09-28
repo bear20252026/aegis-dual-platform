@@ -32,9 +32,12 @@ pub enum ParseResult {
 }
 
 /// Schema 验证结果。
+///
+/// RS-099（审计 2026-09-25）：`Valid` 不再携带 clone 的 ParsedCommand——
+/// 验证仅做断言，管线继续使用阶段 1 的原实例（此前每次验证白拷一份）。
 #[derive(Debug)]
 pub enum SchemaResult {
-    Valid(ParsedCommand),
+    Valid,
     Invalid(String),
 }
 
@@ -55,6 +58,7 @@ pub trait CommandHandler: Send + Sync {
 /// Executor——5阶段命令流（照搬 agent-browser 管线）。
 pub struct Executor {
     handlers: HashMap<String, Box<dyn CommandHandler>>,
+    policy: Option<crate::action_policy::ActionPolicy>,
 }
 
 impl Default for Executor {
@@ -67,7 +71,15 @@ impl Executor {
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
+            policy: None,
         }
+    }
+
+    /// 挂载内置策略检查器（RS-098：阶段 4 真正生效——此前策略强制从未
+    /// 接入管线；RS-213：挂载即强制，无 per-call 旁路开关）。
+    pub fn with_policy(mut self, policy: crate::action_policy::ActionPolicy) -> Self {
+        self.policy = Some(policy);
+        self
     }
 
     /// 注册命令处理器。
@@ -77,17 +89,24 @@ impl Executor {
     }
 
     /// 5阶段执行管线：解析 → 验证 → 路由 → 策略强制 → 执行。
-    pub fn execute_pipeline(&self, raw_input: &str, policy_check: bool) -> ExecuteResult {
+    ///
+    /// RS-213（2026-09-26 审计）：`policy_check: bool` 逐调用旁路参数已移除
+    /// ——安全裁决核内不应存在 per-call 关闭开关（已挂载 ActionPolicy 的
+    /// 调用方传 false 即静默跳过阶段 4）。现行口径：**挂载即强制**——
+    /// `with_policy` 挂载的策略无条件执行阶段 4 检查；需要旁路的调用方
+    /// 构造不挂策略的 `Executor::new()`（显式不挂载 = 显式选择，调用点
+    /// 可审计）。未挂载策略则该阶段直通。
+    pub fn execute_pipeline(&self, raw_input: &str) -> ExecuteResult {
         // 阶段 1：解析（JSON → 结构化命令）
         let cmd = match self.parse(raw_input) {
             ParseResult::Ok(cmd) => cmd,
             ParseResult::Error(e) => return ExecuteResult::Error(format!("解析失败: {e}")),
         };
 
-        // 阶段 2：Schema 验证
+        // 阶段 2：Schema 验证（RS-099：零 clone 断言）
         match self.validate_schema(&cmd) {
             SchemaResult::Invalid(e) => return ExecuteResult::Error(format!("验证失败: {e}")),
-            SchemaResult::Valid(_) => {}
+            SchemaResult::Valid => {}
         }
 
         // 阶段 3：命令路由
@@ -96,10 +115,18 @@ impl Executor {
             None => return ExecuteResult::Denied(format!("未知命令类型: {}", cmd.command_type)),
         };
 
-        // 阶段 4：策略强制（通过 ActionPolicy 外部检查）
-        if policy_check {
-            // 策略检查由调用方通过 ActionPolicy 执行
-            // 此处仅标记需要检查
+        // 阶段 4：策略强制（RS-098 接入 ActionPolicy；RS-213 挂载即强制——
+        // 无 per-call 旁路开关）
+        if let Some(policy) = &self.policy {
+            match policy.evaluate(&cmd.command_type, &cmd.origin) {
+                crate::action_policy::PolicyDecision::Deny(e) => {
+                    return ExecuteResult::Denied(format!("策略拒绝: {e}"));
+                }
+                crate::action_policy::PolicyDecision::Ask(e) => {
+                    return ExecuteResult::Denied(format!("需要确认: {e}"));
+                }
+                crate::action_policy::PolicyDecision::Allow(_) => {}
+            }
         }
 
         // 阶段 5：执行
@@ -107,16 +134,55 @@ impl Executor {
     }
 
     /// 阶段 1：解析（JSON → 结构化命令）。
+    ///
+    /// 此前为占位桩：恒返回 `command_type="default"`，真实命令永远无法路由。
+    /// 现以 serde_json 解析 `{"command_type","target","parameters","origin"}`；
+    /// 非 JSON / 缺字段按类型化错误拒绝。输入上限对齐 C ABI 64KB。
     fn parse(&self, raw: &str) -> ParseResult {
-        // 简化解析（实际应用 json crate）
+        const MAX_INPUT_BYTES: usize = 64 * 1024;
         if raw.trim().is_empty() {
             return ParseResult::Error("空输入".into());
         }
+        if raw.len() > MAX_INPUT_BYTES {
+            return ParseResult::Error("输入超长".into());
+        }
+        let value: serde_json::Value = match serde_json::from_str(raw) {
+            Ok(v) => v,
+            Err(e) => return ParseResult::Error(format!("非法 JSON: {e}")),
+        };
+        let command_type = value
+            .get("command_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let target = value
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let origin = match value.get("origin") {
+            None => "cli".to_string(),
+            // RS-229（2026-09-26 审计）：origin 存在但非字符串——类型损坏走
+            // 类型化错误（unwrap_or("cli") 的缺省语义仅适用于字段**缺失**，
+            // 此前 `"origin": 123` 被同路径静默吞成默认值）
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(_) => return ParseResult::Error("origin 字段类型非法（必须为字符串）".into()),
+        };
+        let mut parameters = HashMap::new();
+        if let Some(obj) = value.get("parameters").and_then(|v| v.as_object()) {
+            for (k, v) in obj {
+                let s = match v {
+                    serde_json::Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                };
+                parameters.insert(k.clone(), s);
+            }
+        }
         ParseResult::Ok(ParsedCommand {
-            command_type: "default".into(),
-            target: raw.to_string(),
-            parameters: HashMap::new(),
-            origin: "cli".into(),
+            command_type,
+            target,
+            parameters,
+            origin,
         })
     }
 
@@ -128,7 +194,7 @@ impl Executor {
         if cmd.target.is_empty() {
             return SchemaResult::Invalid("target 不能为空".into());
         }
-        SchemaResult::Valid(cmd.clone())
+        SchemaResult::Valid
     }
 }
 
@@ -150,7 +216,7 @@ mod tests {
     fn empty_input_rejected() {
         let executor = Executor::new();
         assert!(matches!(
-            executor.execute_pipeline("", false),
+            executor.execute_pipeline(""),
             ExecuteResult::Error(_)
         ));
     }
@@ -158,8 +224,9 @@ mod tests {
     #[test]
     fn unknown_command_denied() {
         let executor = Executor::new();
+        // 合法 JSON 但 command_type 未注册——路由阶段拒绝
         assert!(matches!(
-            executor.execute_pipeline("some input", false),
+            executor.execute_pipeline(r#"{"command_type":"nope","target":"x"}"#),
             ExecuteResult::Denied(_)
         ));
     }
@@ -168,8 +235,241 @@ mod tests {
     fn registered_handler_executes() {
         let mut executor = Executor::new();
         executor.register_handler(Box::new(MockHandler));
-        // 由于 parse() 返回 command_type="default"，需要手动调整
-        // 这里测试 handler 存在性
-        assert!(executor.handlers.contains_key("test"));
+        assert!(matches!(
+            executor.execute_pipeline(r#"{"command_type":"test","target":"page"}"#),
+            ExecuteResult::Success(_)
+        ));
+    }
+
+    #[test]
+    fn malformed_json_rejected() {
+        let executor = Executor::new();
+        assert!(matches!(
+            executor.execute_pipeline("some input"),
+            ExecuteResult::Error(_)
+        ));
+        // 语法残缺的 JSON（截断对象）——serde 解析失败拒绝
+        assert!(matches!(
+            executor.execute_pipeline(r#"{"command_type":"x","target":"#),
+            ExecuteResult::Error(_)
+        ));
+    }
+
+    #[test]
+    fn parse_extracts_fields_and_parameters() {
+        let executor = Executor::new();
+        let raw = r##"{"command_type":"click","target":"#btn","origin":"web","parameters":{"wait_ms":"500","count":2}}"##;
+        match executor.execute_pipeline(raw) {
+            ExecuteResult::Denied(msg) => {
+                // 未注册 "click" handler——路由拒绝消息应携带真实类型（证明解析成功）
+                assert!(
+                    msg.contains("click"),
+                    "路由消息未携带解析出的命令类型: {msg}"
+                );
+            }
+            other => panic!("期望 Denied，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn oversized_input_rejected() {
+        let executor = Executor::new();
+        let big = format!(
+            r#"{{"command_type":"x","target":"{}"}}"#,
+            "a".repeat(70 * 1024)
+        );
+        assert!(matches!(
+            executor.execute_pipeline(&big),
+            ExecuteResult::Error(_)
+        ));
+    }
+
+    // —— RS-097/098 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn whitespace_only_input_rejected() {
+        // RS-097：纯空白输入 fail-closed（trim 语义）
+        let executor = Executor::new();
+        assert!(matches!(
+            executor.execute_pipeline("   "),
+            ExecuteResult::Error(_)
+        ));
+        assert!(matches!(
+            executor.execute_pipeline(" \t\r\n "),
+            ExecuteResult::Error(_)
+        ));
+    }
+
+    #[test]
+    fn full_pipeline_delivers_parsed_fields_to_handler() {
+        // RS-097：全链路——注册 handler 收到解析出的完整字段
+        struct RecordingHandler;
+        use std::sync::Mutex;
+        static RECORDED: Mutex<Option<ParsedCommand>> = Mutex::new(None);
+        impl CommandHandler for RecordingHandler {
+            fn command_type(&self) -> &str {
+                "record"
+            }
+            fn execute(&self, cmd: &ParsedCommand) -> ExecuteResult {
+                *RECORDED.lock().unwrap() = Some(cmd.clone());
+                ExecuteResult::Success("recorded".into())
+            }
+        }
+        let mut executor = Executor::new();
+        executor.register_handler(Box::new(RecordingHandler));
+        let raw = r##"{"command_type":"record","target":"#ok","origin":"https://example.com","parameters":{"path":"/a","n":3}}"##;
+        assert!(matches!(
+            executor.execute_pipeline(raw),
+            ExecuteResult::Success(_)
+        ));
+        let recorded = RECORDED.lock().unwrap().clone().expect("handler 未被调用");
+        assert_eq!(recorded.command_type, "record");
+        assert_eq!(recorded.target, "#ok");
+        assert_eq!(recorded.origin, "https://example.com");
+        assert_eq!(
+            recorded.parameters.get("path").map(String::as_str),
+            Some("/a")
+        );
+        assert_eq!(
+            recorded.parameters.get("n").map(String::as_str),
+            Some("3"),
+            "非字符串参数 JSON 序列化透传"
+        );
+    }
+
+    #[test]
+    fn re_register_same_type_overwrites_handler() {
+        // RS-097：同类型重复注册 = 覆盖（HashMap 语义锁定——后注册者生效）
+        struct FirstHandler;
+        struct SecondHandler;
+        impl CommandHandler for FirstHandler {
+            fn command_type(&self) -> &str {
+                "dup"
+            }
+            fn execute(&self, _cmd: &ParsedCommand) -> ExecuteResult {
+                ExecuteResult::Success("first".into())
+            }
+        }
+        impl CommandHandler for SecondHandler {
+            fn command_type(&self) -> &str {
+                "dup"
+            }
+            fn execute(&self, _cmd: &ParsedCommand) -> ExecuteResult {
+                ExecuteResult::Success("second".into())
+            }
+        }
+        let mut executor = Executor::new();
+        executor.register_handler(Box::new(FirstHandler));
+        executor.register_handler(Box::new(SecondHandler));
+        match executor.execute_pipeline(r#"{"command_type":"dup","target":"x"}"#) {
+            ExecuteResult::Success(msg) => assert_eq!(msg, "second", "后注册者覆盖前者"),
+            other => panic!("期望 Success，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn policy_check_enforces_mounted_action_policy() {
+        // RS-098：阶段 4 真正接入——Deny/Ask 规则在 handler 执行前拦截。
+        // RS-213：policy_check 旁路参数已移除——挂载即强制；旁路语义改为
+        // 「构造不挂策略的 Executor」（显式不挂载 = 显式选择，可审计）
+        use crate::action_policy::{PolicyDecision, PolicyRule, RuleEffect};
+        let mut policy = crate::action_policy::ActionPolicy::new(RuleEffect::Allow);
+        policy.add_rule(PolicyRule {
+            name: "deny_evil_origin".into(),
+            action_pattern: "test".into(),
+            condition: Some("evil.com".into()),
+            effect: RuleEffect::Deny,
+            priority: 0,
+        });
+        let mut executor = Executor::new().with_policy(policy);
+        executor.register_handler(Box::new(MockHandler));
+
+        // 条件命中 → Denied（handler 不执行）——挂载即强制，无旁路参数
+        let raw_evil = r#"{"command_type":"test","target":"x","origin":"https://evil.com/p"}"#;
+        match executor.execute_pipeline(raw_evil) {
+            ExecuteResult::Denied(msg) => assert!(msg.contains("策略拒绝"), "{msg}"),
+            other => panic!("期望 Denied，实际 {other:?}"),
+        }
+        // 条件未命中 → 放行执行
+        let raw_ok = r#"{"command_type":"test","target":"x","origin":"https://example.com"}"#;
+        assert!(matches!(
+            executor.execute_pipeline(raw_ok),
+            ExecuteResult::Success(_)
+        ));
+        // 旁路 = 显式不挂策略的 Executor（RS-213：不挂载即直通——调用点
+        // 构造形态可审计，非 per-call 开关）
+        let mut unmounted = Executor::new();
+        unmounted.register_handler(Box::new(MockHandler));
+        assert!(matches!(
+            unmounted.execute_pipeline(raw_evil),
+            ExecuteResult::Success(_)
+        ));
+        let _ = PolicyDecision::Allow(String::new()); // keep import used
+    }
+
+    // —— RS-229 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn non_string_origin_is_typed_error() {
+        // RS-229：`"origin": 123`（类型损坏）不得静默落默认 "cli"——
+        // unwrap_or 的缺省语义仅适用于字段缺失
+        let executor = Executor::new();
+        assert!(
+            matches!(
+                executor.execute_pipeline(r#"{"command_type":"test","target":"x","origin":123}"#),
+                ExecuteResult::Error(_)
+            ),
+            "非字符串 origin 必须走类型化错误"
+        );
+        // 字段缺失仍落默认 "cli"（缺省语义保留）
+        let mut with_handler = Executor::new();
+        with_handler.register_handler(Box::new(MockHandler));
+        assert!(matches!(
+            with_handler.execute_pipeline(r#"{"command_type":"test","target":"x"}"#),
+            ExecuteResult::Success(_)
+        ));
+    }
+
+    // —— RS-166（审计 2026-09-25）：三枚举基础用例 ——
+
+    #[test]
+    fn pipeline_enums_basic_contract() {
+        // RS-166：ParseResult / SchemaResult / ExecuteResult 三枚举此前
+        // 只有管线间接路径，变体构造与 Debug 格式零直接覆盖——管线层
+        // match 重构（如增删变体）不会惊动任何现有测试。基础契约锁定：
+        // 变体存在、Debug 携带载荷、结构可判别
+        // ParseResult：Ok / Error 两变体
+        let ok = ParseResult::Ok(ParsedCommand {
+            command_type: "test".into(),
+            target: "t".into(),
+            parameters: HashMap::new(),
+            origin: "cli".into(),
+        });
+        assert!(matches!(ok, ParseResult::Ok(_)));
+        assert!(format!("{ok:?}").contains("\"test\""), "Debug 携带载荷");
+        let err = ParseResult::Error("bad".into());
+        assert!(matches!(err, ParseResult::Error(_)));
+        assert!(format!("{err:?}").contains("bad"));
+
+        // SchemaResult：Valid / Invalid 两变体（Valid 无载荷——RS-099）
+        assert!(matches!(SchemaResult::Valid, SchemaResult::Valid));
+        let invalid = SchemaResult::Invalid("empty".into());
+        assert!(format!("{invalid:?}").contains("empty"));
+
+        // ExecuteResult：三变体 + Debug 携带消息
+        let variants = [
+            ExecuteResult::Success("ok".into()),
+            ExecuteResult::Denied("no".into()),
+            ExecuteResult::Error("err".into()),
+        ];
+        let labels = ["ok", "no", "err"];
+        for (variant, label) in variants.iter().zip(labels) {
+            let debug = format!("{variant:?}");
+            assert!(debug.contains(label), "Debug 必须携带 {label}: {debug}");
+        }
+        // 类型化判别（matches! 主通道）
+        assert!(matches!(variants[0], ExecuteResult::Success(_)));
+        assert!(matches!(variants[1], ExecuteResult::Denied(_)));
+        assert!(matches!(variants[2], ExecuteResult::Error(_)));
     }
 }

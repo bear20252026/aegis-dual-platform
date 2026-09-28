@@ -3,6 +3,7 @@ namespace Aegis.Windows.Core.History;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Microsoft.Data.Sqlite;
 
 /// <summary>Chrome/Edge 历史导入（M3 导入向导——Python browser_import.py
@@ -14,27 +15,29 @@ using Microsoft.Data.Sqlite;
 /// - 历史是访问流水：入库无去重（HistoryStore.Add 追加语义——与 Python 一致）。</summary>
 public static class HistoryImporter
 {
-    /// <summary>探测本机 Chrome/Edge 历史库（仅存在性检查——不读取内容）。</summary>
-    public static IReadOnlyList<ImportSource> DetectSources()
-    {
-        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var sources = new List<ImportSource>();
-        AddIfExists(sources, "chrome", Path.Combine(
-            local, "Google", "Chrome", "User Data", "Default", "History"));
-        AddIfExists(sources, "edge", Path.Combine(
-            local, "Microsoft", "Edge", "User Data", "Default", "History"));
-        return sources;
-    }
+    /// <summary>探测本机 Chrome/Edge 历史库（仅存在性检查——不读取内容；
+    /// Default + Profile 1..9 多配置）。</summary>
+    public static IReadOnlyList<ImportSource> DetectSources() =>
+        Core.Import.ImportProbe.Probe("History")  // CS-231：探测路径共享单源
+            .Select(p => new ImportSource(p.Browser, p.Path))
+            .ToList();
 
-    /// <summary>解析历史库（拷贝只读副本——锁定安全）。返回最近 limit 条
-    /// http/https 访问（时间倒序——Chrome urls.last_visit_time 为微秒级
-    /// WebKit 时间戳，仅作排序键，不做绝对时间换算）。</summary>
+    /// <summary>解析历史库（拷贝只读副本——锁定安全；-wal/-shm 边车一并拷贝，
+    /// 否则浏览器运行中未 checkpoint 的最近访问在副本上缺失）。返回最近
+    /// limit 条 http/https 访问（时间倒序——Chrome urls.last_visit_time 为
+    /// 微秒级 WebKit 时间戳，仅作排序键，不做绝对时间换算）。</summary>
     public static IReadOnlyList<HistoryCandidate> Parse(string historyDbPath, int limit)
     {
         var temporary = Path.Combine(Path.GetTempPath(), Path.GetRandomFileName());
         try
         {
             File.Copy(historyDbPath, temporary);
+            foreach (var suffix in new[] { "-wal", "-shm" })
+            {
+                var sidecar = historyDbPath + suffix;
+                if (File.Exists(sidecar))
+                    File.Copy(sidecar, temporary + suffix, overwrite: true);
+            }
             return ParseCopy(temporary, limit);
         }
         catch (Exception)
@@ -43,19 +46,25 @@ public static class HistoryImporter
         }
         finally
         {
-            try
+            // CS-094：清理失败兜底捕 Exception——File.Delete 除 IOException 外
+            // 还可抛 UnauthorizedAccess 等，临时文件残留不影响导入结果
+            foreach (var path in new[] { temporary, temporary + "-wal", temporary + "-shm" })
             {
-                File.Delete(temporary);
-            }
-            catch (IOException)
-            {
-                // 临时文件删除失败不影响导入结果
+                try
+                {
+                    if (File.Exists(path))
+                        File.Delete(path);
+                }
+                catch (Exception)
+                {
+                    // 临时文件删除失败不影响导入结果
+                }
             }
         }
     }
 
-    /// <summary>导入到历史库。返回（新增计数, 解析总数）——历史为访问流水，
-    /// 新增=解析条数（与 Python import_history 计数语义一致）。</summary>
+    /// <summary>导入到历史库。返回（成功写入数, 解析总数）——此前两者无条件
+    /// 同自增（返回值无信息量）；Add 现返回真实写入结果。</summary>
     public static (int Imported, int Total) ImportTo(
         HistoryStore store, IEnumerable<HistoryCandidate> candidates)
     {
@@ -64,11 +73,15 @@ public static class HistoryImporter
         foreach (var candidate in candidates)
         {
             total++;
-            store.Add(candidate.Url, candidate.Title);
-            imported++;
+            if (store.Add(candidate.Url, candidate.Title))
+                imported++;
         }
         return (imported, total);
     }
+
+    /// <summary>CS-096：解析条数上限钳制（1..2000）——此前内联在 SQL 绑定处
+    /// 不可直测，提取为 internal 供边界用例覆盖。</summary>
+    internal static int ClampLimit(int limit) => Math.Clamp(limit, 1, 2000);
 
     private static List<HistoryCandidate> ParseCopy(string copyPath, int limit)
     {
@@ -83,7 +96,7 @@ public static class HistoryImporter
             connection.Open();
             using var select = connection.CreateCommand();
             select.CommandText = "SELECT url, title FROM urls ORDER BY last_visit_time DESC LIMIT $lim";
-            select.Parameters.AddWithValue("$lim", Math.Clamp(limit, 1, 2000));
+            select.Parameters.AddWithValue("$lim", ClampLimit(limit));
             var candidates = new List<HistoryCandidate>();
             using var reader = select.ExecuteReader();
             while (reader.Read())
@@ -108,11 +121,6 @@ public static class HistoryImporter
         }
     }
 
-    private static void AddIfExists(List<ImportSource> into, string browser, string path)
-    {
-        if (File.Exists(path))
-            into.Add(new ImportSource(browser, path));
-    }
 }
 
 /// <summary>历史导入来源（浏览器名 + History 库路径）。</summary>

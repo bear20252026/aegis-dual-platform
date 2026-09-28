@@ -1,0 +1,117 @@
+{
+  "description": "PY-094（审计 2026-09-25）：Action 契约非法向量——全部为 schema 级失效（additionalProperties false / 词表越界 / 必填缺失 / 模式不符）。消费方：validate_vector_schemas.py（schema 必须拒绝）",
+  "vectors": [
+    {
+      "note": "method 词表越界（PATCH 不在 Action 词表）",
+      "expected": "deny_schema",
+      "action": {
+        "session_id": "s1",
+        "tab_id": "tab-1",
+        "document_generation": 0,
+        "origin": "https://example.org",
+        "method": "PATCH",
+        "canonical_parameters": "{}",
+        "scope": "net.example.org",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "nonce": "n1",
+        "policy_version": "1"
+      }
+    },
+    {
+      "note": "method 小写（词表大小写敏感——与 Authorization 语义一致）",
+      "expected": "deny_schema",
+      "action": {
+        "session_id": "s1",
+        "tab_id": "tab-1",
+        "document_generation": 0,
+        "origin": "https://example.org",
+        "method": "get",
+        "canonical_parameters": "{}",
+        "scope": "net.example.org",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "nonce": "n1",
+        "policy_version": "1"
+      }
+    },
+    {
+      "note": "origin 非 http/https（file: scheme 注入）",
+      "expected": "deny_schema",
+      "action": {
+        "session_id": "s1",
+        "tab_id": "tab-1",
+        "document_generation": 0,
+        "origin": "file:///etc/passwd",
+        "method": "GET",
+        "canonical_parameters": "{}",
+        "scope": "fs.local",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "nonce": "n1",
+        "policy_version": "1"
+      }
+    },
+    {
+      "note": "document_generation 负数（代际不可回退）",
+      "expected": "deny_schema",
+      "action": {
+        "session_id": "s1",
+        "tab_id": "tab-1",
+        "document_generation": -1,
+        "origin": "https://example.org",
+        "method": "GET",
+        "canonical_parameters": "{}",
+        "scope": "net.example.org",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "nonce": "n1",
+        "policy_version": "1"
+      }
+    },
+    {
+      "note": "缺 nonce（重放防线字段不可缺）",
+      "expected": "deny_schema",
+      "action": {
+        "session_id": "s1",
+        "tab_id": "tab-1",
+        "document_generation": 0,
+        "origin": "https://example.org",
+        "method": "GET",
+        "canonical_parameters": "{}",
+        "scope": "net.example.org",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "policy_version": "1"
+      }
+    },
+    {
+      "note": "额外字段 explanation（additionalProperties false——审计扩展仅存在于手写模型）",
+      "expected": "deny_schema",
+      "action": {
+        "session_id": "s1",
+        "tab_id": "tab-1",
+        "document_generation": 0,
+        "origin": "https://example.org",
+        "method": "GET",
+        "canonical_parameters": "{}",
+        "scope": "net.example.org",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "nonce": "n1",
+        "policy_version": "1",
+        "explanation": "user approved"
+      }
+    },
+    {
+      "note": "空 session_id（minLength 1）",
+      "expected": "deny_schema",
+      "action": {
+        "session_id": "",
+        "tab_id": "tab-1",
+        "document_generation": 0,
+        "origin": "https://example.org",
+        "method": "GET",
+        "canonical_parameters": "{}",
+        "scope": "net.example.org",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "nonce": "n1",
+        "policy_version": "1"
+      }
+    }
+  ]
+}

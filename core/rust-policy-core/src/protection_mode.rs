@@ -30,6 +30,18 @@ pub enum ProtectionMode {
 }
 
 impl ProtectionMode {
+    /// 模式查询接口的 Symbol 键（RS-146 单源——与 ToStringGuard::REGISTER_SYMBOL
+    /// 同款收敛模式）。
+    ///
+    /// RS-146（审计 2026-09-25）：模式声明从具名全局常量
+    /// `window.__AEGIS_PROTECTION_MODE` 收敛到 Symbol 键——具名全局是
+    /// 通用指纹脚本的免费探测点（读到一个属性就知道该页面有 Aegis 注入，
+    /// 防护存在性本身泄漏）。Symbol 属性不出现在任何枚举通道
+    /// （Object.keys / for-in / getOwnPropertyNames / JSON.stringify），
+    /// 按名探测落空（须先猜测描述串才可能触达）。经
+    /// `Symbol.for("aegis.protection.mode.v1")` 跨模块共享读取。
+    pub const MODE_SYMBOL: &'static str = "aegis.protection.mode.v1";
+
     /// 从字符串解析保护模式。
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -106,21 +118,25 @@ impl ProtectionMode {
 
     /// 生成模式切换 JS 注入脚本。
     ///
-    /// 设置 `__AEGIS_PROTECTION_MODE` 全局常量，
-    /// 供其他模块查询当前模式。
+    /// RS-146：模式值挂在 Symbol 键上（防篡改：writable/configurable 双
+    /// false、不可枚举），供其他模块经 `Symbol.for` 共享键查询当前模式。
     pub fn inject_script(&self) -> String {
         let mode = self.name();
         let desc = self.description();
         format!(
             r#"
-// Aegis ProtectionMode — 防护模式切换
+// Aegis ProtectionMode — 防护模式切换（RS-146：Symbol 键，不落具名全局）
 // 模式：{mode} — {desc}
-Object.defineProperty(window, '__AEGIS_PROTECTION_MODE', {{
-  value: '{mode}',
-  writable: false,
-  configurable: false
-}});
-"#
+(function() {{
+  var KEY = Symbol.for('{sym}');
+  Object.defineProperty(window, KEY, {{
+    value: '{mode}',
+    writable: false,
+    configurable: false
+  }});
+}})();
+"#,
+            sym = Self::MODE_SYMBOL
         )
     }
 }
@@ -135,9 +151,13 @@ impl fmt::Display for ProtectionMode {
 ///
 /// 根据 ProtectionMode 选择性激活管道阶段，
 /// 返回组合后的 JS 注入脚本。
+///
+/// `domain`：顶层文档 eTLD+1 域名（PerSiteSeed 按域派生站点种子——
+/// 此前误传会话种子 hex 当域名，per-site 隔离失效）。
 pub fn fingerprint_pipeline_with_mode(
     shield: &crate::shield::FingerprintShield,
     mode: ProtectionMode,
+    domain: &str,
 ) -> String {
     let mut parts: Vec<String> = Vec::new();
 
@@ -151,9 +171,8 @@ pub fn fingerprint_pipeline_with_mode(
 
     // Stage 2: PerSiteSeed
     if mode.enable_per_site_seed() {
-        let session_hex = shield.seed_hex();
         parts.push(
-            crate::per_site_seed::PerSiteSeed::new(shield.seed_bytes()).inject_script(&session_hex),
+            crate::per_site_seed::PerSiteSeed::new(shield.seed_bytes()).inject_script(domain),
         );
     }
 
@@ -257,12 +276,242 @@ mod tests {
         let m = ProtectionMode::Balanced;
         let script = m.inject_script();
         assert!(script.contains("balanced"));
-        assert!(script.contains("__AEGIS_PROTECTION_MODE"));
+        assert!(script.contains("Symbol.for"), "RS-146：模式值挂 Symbol 键");
+    }
+
+    // —— RS-146（审计 2026-09-25）：模式声明收敛 Symbol 键 ——
+
+    #[test]
+    fn mode_declaration_symbol_keyed_not_named_global() {
+        // RS-146 回归：不再有具名全局 `__AEGIS_PROTECTION_MODE`——具名全局
+        // 是指纹脚本的免费探测点（泄漏防护存在性本身）
+        let script = guard_script();
+        assert!(
+            !script.contains("__AEGIS_PROTECTION_MODE"),
+            "具名全局模式常量必须移除"
+        );
+        assert!(script.contains(&format!("Symbol.for('{}')", ProtectionMode::MODE_SYMBOL)));
+    }
+
+    #[test]
+    fn mode_declaration_tamper_proofed_and_shadowed() {
+        // IIFE 包裹（不引入顶层词法声明——防 var KEY 泄漏 + 与页面脚本
+        // 作用域隔离）；模式值防篡改（writable/configurable 双 false）
+        let script = guard_script();
+        assert!(script.contains("(function() {"), "IIFE 包裹");
+        assert!(
+            script.contains("writable: false,\n    configurable: false"),
+            "模式值只读不可重配"
+        );
+        assert!(
+            !script.contains("enumerable: true"),
+            "模式值不得可枚举（泄漏进 Object.keys）"
+        );
+    }
+
+    #[test]
+    fn mode_symbol_constant_matches_script_key() {
+        // MODE_SYMBOL 常量与脚本内键一致——跨模块消费方（Symbol.for 共享键）
+        // 与注入脚本必须同一描述串
+        for mode in [
+            ProtectionMode::Compatible,
+            ProtectionMode::Balanced,
+            ProtectionMode::Maximum,
+        ] {
+            assert!(
+                mode.inject_script()
+                    .contains(&format!("Symbol.for('{}')", ProtectionMode::MODE_SYMBOL)),
+                "模式 {mode} 脚本键与 MODE_SYMBOL 不一致"
+            );
+        }
+    }
+
+    // —— RS-189（审计 2026-09-25）：name/description 全模式断言 ——
+
+    #[test]
+    fn name_and_description_cover_all_modes() {
+        // RS-189：name()/description() 此前零全模式断言——宿主设置面板
+        // 直接渲染这两通道，返回空串/串位（match 臂错位）会静默劣化 UI。
+        // 全 3 模式 × 双通道锁定：name 非空且与 parse 互为往返，description
+        // 非空且各模式互异
+        let mut descriptions = Vec::new();
+        for mode in [
+            ProtectionMode::Compatible,
+            ProtectionMode::Balanced,
+            ProtectionMode::Maximum,
+        ] {
+            let name = mode.name();
+            let desc = mode.description();
+            assert!(!name.is_empty(), "{mode:?} name 不得为空");
+            assert!(!desc.is_empty(), "{mode:?} description 不得为空");
+            // name 与 parse 往返一致（设置面板存 name → 读回同模式）
+            assert_eq!(
+                ProtectionMode::parse(name),
+                Some(mode),
+                "name {name:?} 必须经 parse 往返"
+            );
+            // name 必须是小写 ASCII（JS 侧直接内插进脚本）
+            assert!(
+                name.bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()),
+                "name {name:?} 必须是小写 ASCII"
+            );
+            descriptions.push(desc);
+        }
+        // description 各模式互异（串位可被检出）
+        let len = descriptions.len();
+        for i in 0..len {
+            for j in (i + 1)..len {
+                assert_ne!(
+                    descriptions[i], descriptions[j],
+                    "模式 {i} 与 {j} 的 description 串位"
+                );
+            }
+        }
+    }
+
+    fn guard_script() -> String {
+        ProtectionMode::Balanced.inject_script()
     }
 
     #[test]
     fn mode_display() {
         assert_eq!(ProtectionMode::Compatible.to_string(), "compatible");
         assert_eq!(ProtectionMode::Maximum.to_string(), "maximum");
+    }
+
+    // —— RS-145（审计 2026-09-25）：数字别名 / 空串 ——
+    // （Display 已由 mode_display 锁定；本组覆盖 parse 的别名面）
+
+    #[test]
+    fn parse_numeric_aliases_and_short_names() {
+        // 数字别名（0/1/2）与短名（compat/balance/max）必须可解析
+        assert_eq!(ProtectionMode::parse("0"), Some(ProtectionMode::Compatible));
+        assert_eq!(ProtectionMode::parse("1"), Some(ProtectionMode::Balanced));
+        assert_eq!(ProtectionMode::parse("2"), Some(ProtectionMode::Maximum));
+        assert_eq!(
+            ProtectionMode::parse("compat"),
+            Some(ProtectionMode::Compatible)
+        );
+        assert_eq!(
+            ProtectionMode::parse("balance"),
+            Some(ProtectionMode::Balanced)
+        );
+        // 数字别名同样大小写不敏感口径（to_lowercase 前后无影响），
+        // 越界数字（3）不是合法别名
+        assert_eq!(ProtectionMode::parse("3"), None);
+        assert_eq!(ProtectionMode::parse("00"), None, "仅单字符 0/1/2 是别名");
+    }
+
+    #[test]
+    fn parse_rejects_empty_and_whitespace() {
+        // 空串 / 空白 / 大小写混合无效名——fail-closed 返回 None（不得
+        // 静默落默认模式——模式选择是用户安全决策）
+        assert_eq!(ProtectionMode::parse(""), None);
+        assert_eq!(ProtectionMode::parse("   "), None);
+        assert_eq!(ProtectionMode::parse("Balanced "), None, "尾随空格不宽容");
+        assert_eq!(ProtectionMode::parse(" balanced"), None);
+        assert_eq!(
+            ProtectionMode::parse("Balanced"),
+            Some(ProtectionMode::Balanced)
+        );
+    }
+
+    // ===== RS-046：fingerprint_pipeline_with_mode 输出内容逐模式锁定 =====
+    // （此前仅测 enable_* 开关布尔值，管线组装后的实际脚本内容零覆盖）
+
+    fn marker_present(script: &str, marker: &str) -> bool {
+        script.contains(marker)
+    }
+
+    #[test]
+    fn pipeline_compatible_only_canvas_shield() {
+        // 兼容模式：仅模式声明 + Canvas/Audio 噪声（Shield），其余 8 阶段缺席
+        let shield = crate::shield::FingerprintShield::new();
+        let script = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Compatible, "a.com");
+        assert!(script.contains("'compatible'"), "模式声明必须存在");
+        assert!(
+            marker_present(&script, "__AEGIS_SESSION_SEED"),
+            "Shield 始终启用"
+        );
+        for absent in [
+            "__AEGIS_SITE_SEED",
+            "proxyMap", // ToStringGuard 独有（Shield 也走注册符号，不可作判别）
+            "var WS =",
+            "TRACKING_PARAMS",
+            "SAFE_FONTS",
+            "UNMASKED_VENDOR_WEBGL",
+            "PRECISION_US",
+            "PROXY_ENDPOINT",
+        ] {
+            assert!(
+                !marker_present(&script, absent),
+                "Compatible 模式不得含 {absent}"
+            );
+        }
+    }
+
+    #[test]
+    fn pipeline_balanced_core_stages_no_aggressive() {
+        // 平衡模式：Seed/Guard/Shield/QueryStrip/WebGL 启用；Letterbox/Font/Timer/ExtProxy 缺席
+        let shield = crate::shield::FingerprintShield::new();
+        let script = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
+        assert!(script.contains("'balanced'"));
+        for present in [
+            "__AEGIS_SITE_SEED",
+            "proxyMap",
+            "__AEGIS_SESSION_SEED",
+            "TRACKING_PARAMS",
+            "UNMASKED_VENDOR_WEBGL",
+        ] {
+            assert!(
+                marker_present(&script, present),
+                "Balanced 模式必须含 {present}"
+            );
+        }
+        for absent in ["var WS =", "SAFE_FONTS", "PRECISION_US", "PROXY_ENDPOINT"] {
+            assert!(
+                !marker_present(&script, absent),
+                "Balanced 模式不得含 {absent}"
+            );
+        }
+    }
+
+    #[test]
+    fn pipeline_maximum_all_nine_stages() {
+        // 最大隐私：全部 9 阶段脚本齐备
+        let shield = crate::shield::FingerprintShield::new();
+        let script = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Maximum, "a.com");
+        assert!(script.contains("'maximum'"));
+        for present in [
+            "__AEGIS_SITE_SEED",
+            "proxyMap",
+            "__AEGIS_SESSION_SEED",
+            "var WS =",
+            "TRACKING_PARAMS",
+            "SAFE_FONTS",
+            "UNMASKED_VENDOR_WEBGL",
+            "PRECISION_US",
+            "PROXY_ENDPOINT",
+        ] {
+            assert!(
+                marker_present(&script, present),
+                "Maximum 模式必须含 {present}"
+            );
+        }
+    }
+
+    #[test]
+    fn pipeline_per_site_seed_derives_from_domain_not_session_hex() {
+        // 同域名脚本确定性；不同域名脚本不同——锁定 domain 参数语义
+        //（此前误传会话种子 hex）。域名在 PerSiteSeed 中哈希为站点种子
+        //（不进脚本明文），故以种子赋值行差异判定。
+        let shield = crate::shield::FingerprintShield::new();
+        let a1 = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
+        let a2 = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "a.com");
+        let b = fingerprint_pipeline_with_mode(&shield, ProtectionMode::Balanced, "b.com");
+        assert_eq!(a1, a2, "同域输出必须确定");
+        assert_ne!(a1, b, "不同域必须派生不同站点种子");
+        assert!(a1.contains("__AEGIS_SITE_SEED = '"), "站点种子赋值行存在");
     }
 }

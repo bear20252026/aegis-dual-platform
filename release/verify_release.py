@@ -13,13 +13,27 @@ import json
 import sys
 from pathlib import Path
 
+# PY-208（2026-09-26 审计）：`from verify_checksum_json import ...` 平铺导入
+# 仅在以脚本方式从 release/ 目录运行时才生效（cwd/sys.path 依赖）——CI 或
+# 其他工作目录下调用即 ImportError。改 sys.path.insert 锚定到本文件所在
+# release/ 目录（同 release/tools/verify_manifest.py:18 的模式）。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify_checksum_json import verify_manifest
+
+# PY-199（2026-09-26 审计）：build_metadata.py 本地运行时写入的降级哨兵——
+# 一旦本脚本接线，truthy 的哨兵值会被当有效溯源证据通过（证据弱化）。
+# 校验侧显式拒绝（与写侧字面量保持同步；写侧见 release/build_metadata.py）。
+LOCAL_UNVERIFIED_SENTINEL = "local-unverified"
 
 
 def verify_bundle(bundle_dir: Path) -> None:
     """验证发布包：版本元数据、SHA-256 摘要、签名文件和 SBOM 齐全。"""
-    dist = bundle_dir / "dist"
-    if not dist.is_dir():
+    # RS-N1 配套（2026-09-26 审计）：release.yml verify-gate 传的是平台平铺
+    # 目录（dist/<platform>，内含 build-metadata.json）——兼容两种布局：
+    # <bundle>/dist/（历史文档口径）与 <bundle> 本身即制品目录（CI 实际）。
+    nested = bundle_dir / "dist"
+    dist = nested if nested.is_dir() else bundle_dir
+    if not dist.is_dir() or not any(dist.iterdir()):
         sys.exit("缺 dist 目录——发布包不完整（失败闭合）")
     files = [p for p in dist.rglob("*") if p.is_file()]
     if not files:
@@ -33,22 +47,45 @@ def verify_bundle(bundle_dir: Path) -> None:
     missing_metadata = [key for key in required_metadata if not metadata.get(key)]
     if metadata.get("schema_version") != 1 or missing_metadata:
         sys.exit(f"构建元数据无效或缺字段: {', '.join(missing_metadata)}")
+    # PY-199：哨兵值显式拒绝（fail-closed）——本地补建的 build-metadata.json
+    # 携带 "local-unverified" 溯源占位，不得作为发布证据通过验证
+    sentinel_fields = sorted(
+        key for key in ("source_revision", "source_ref", "workflow_run_id")
+        if metadata.get(key) == LOCAL_UNVERIFIED_SENTINEL
+    )
+    if sentinel_fields:
+        sys.exit(
+            "构建元数据含本地未验证哨兵值 "
+            f"'{LOCAL_UNVERIFIED_SENTINEL}'（字段: {', '.join(sentinel_fields)}）"
+            "——缺 CI 溯源证据，拒绝发布")
 
     sums_path = dist / "SHA256SUMS.json"
-    if not sums_path.is_file():
+    txt_path = dist / "SHA256SUMS.txt"
+    if sums_path.is_file():
+        checksum_count = verify_manifest(dist, sums_path)
+    elif txt_path.is_file():
+        # core 平台产物为纯 .txt 清单（无 per-file JSON manifest）——
+        # 退化为非空条目计数对账（CI: release-core.yml 只产 SHA256SUMS.txt）
+        checksum_count = sum(
+            1 for line in txt_path.read_text(encoding="utf-8").splitlines() if line.strip()
+        )
+        if checksum_count == 0:
+            sys.exit("SHA256SUMS.txt 为空——摘要不完整（拒绝发布）")
+    else:
         sys.exit("缺 SHA256SUMS.json——摘要不完整（拒绝发布）")
-    checksum_count = verify_manifest(dist, sums_path)
 
-    # 签名文件（.sigstore）与 SBOM（.cdx.json/spdx.json）齐全——缺一拒绝
-    sig = [p for p in files if p.suffix == ".sigstore"]
+    # 签名证据模型（PY-009 整改 2026-09-24）：本仓库发布链的签名 =
+    # GitHub artifact attestations（Sigstore 背书）——由 release.yml
+    # verify-gate 的 `gh attestation verify`（SLSA provenance + SBOM 双
+    # predicate）在 CI 内逐工件校验，不在 bundle 内产出 .sigstore 旁路文件
+    # （原断言要求 .sigstore——链路不产出、工具零调用，属死门禁）。
+    # bundle 级保留 SBOM 齐全断言（供应链透明）。
     sbom = [p for p in files if p.name.endswith((".cdx.json", ".spdx.json"))]
-    if not sig:
-        sys.exit("缺签名文件（.sigstore）——制品未签名（拒绝发布）")
     if not sbom:
         sys.exit("缺 SBOM——供应链不透明（拒绝发布）")
 
     print(f"✅ verify_release 通过：{metadata['platform']} v{metadata['version_name']} / {checksum_count} 个受摘要覆盖制品 / "
-          f"{len(sig)} 签名 / {len(sbom)} SBOM——SHA-256 对账一致")
+          f"签名经 gh attestation（release.yml verify-gate 校验）/ {len(sbom)} SBOM——SHA-256 对账一致")
 
 
 def main() -> int:

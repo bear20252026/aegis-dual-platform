@@ -44,11 +44,15 @@ pub struct RoutingRule {
 
 impl RoutingRule {
     /// 创建域名匹配规则。
+    ///
+    /// RS-120（审计 2026-09-25）：域名大小写不敏感——构造时小写归一
+    /// （hostname 侧由 extract_host 归一；路径/精确匹配保持原文——
+    /// URL 路径按 RFC 3986 大小写敏感）。
     pub fn domain(name: &str, domain: &str, workspace_id: &str) -> Self {
         Self {
             name: name.to_string(),
             match_type: MatchType::Domain,
-            pattern: domain.to_string(),
+            pattern: domain.to_ascii_lowercase(),
             workspace_id: workspace_id.to_string(),
             enabled: true,
         }
@@ -83,9 +87,22 @@ impl RoutingRule {
         }
         match self.match_type {
             MatchType::Domain => {
-                // 提取 URL 的域名部分
+                // RS-121（审计 2026-09-25）：strip_suffix 前缀 '.' 语义检查
+                // 替代 ends_with(format!(".{}", pattern))——消除每次匹配的
+                // 堆分配。pattern 已构造时归一，但字段为 pub（直接构造
+                // 绕过构造器），此处防御性再归一。
+                let pattern = self.pattern.to_ascii_lowercase();
+                // RS-119：空 pattern 不得命中——extract_host 失败返回 ""，
+                // 空域匹配会把无 host 的 URL（about:blank 等）路由到该规则
+                if pattern.is_empty() {
+                    return false;
+                }
                 let hostname = extract_hostname(url);
-                hostname == self.pattern || hostname.ends_with(&format!(".{}", self.pattern))
+                match hostname.strip_suffix(&pattern) {
+                    // prefix 空 = 精确等值；否则必须是「.」边界（子域名）
+                    Some(prefix) => prefix.is_empty() || prefix.ends_with('.'),
+                    None => false,
+                }
             }
             MatchType::PathPrefix => url.starts_with(&self.pattern),
             MatchType::Exact => url == self.pattern,
@@ -119,6 +136,16 @@ impl fmt::Debug for SpaceRouting {
 }
 
 impl SpaceRouting {
+    /// 前端路由接口的 Symbol 键（RS-219 单源——与
+    /// ProtectionMode::MODE_SYMBOL / ToStringGuard::REGISTER_SYMBOL 同款收敛）。
+    ///
+    /// RS-219（审计 2026-09-26）：路由对象从具名 window 属性
+    /// `__AEGIS_SPACE_ROUTING` 收敛到 Symbol 键——具名全局是通用指纹脚本
+    /// 的免费探测点（防护存在性本身泄漏）。Symbol 属性不出现在
+    /// Object.keys / for-in / getOwnPropertyNames / JSON.stringify，
+    /// 前端经 `Symbol.for` 共享键取用。
+    pub const ROUTING_SYMBOL: &'static str = "space.routing.v1";
+
     /// 创建新的路由引擎。
     pub fn new(default_workspace: &str) -> Self {
         Self {
@@ -156,35 +183,41 @@ impl SpaceRouting {
 
     /// 生成 SpaceRouting JS 注入脚本。
     ///
-    /// 设置 `__AEGIS_SPACE_ROUTING` 全局对象，
-    /// 提供 `route(url)` 方法供前端使用。
+    /// RS-219：路由对象挂在 Symbol 键上（非具名 window 属性），
+    /// 提供 `route(url)` 方法供前端经 `Symbol.for` 共享键使用。
     pub fn inject_script(&self) -> String {
+        // serde_json 构造——此前 name/workspace_id 完全未转义（JS 注入面）
         let rules_json: String = self
             .rules
             .iter()
             .map(|r| {
-                format!(
-                    r#"{{"name":"{}","type":"{}","pattern":"{}","workspace":"{}"}}"#,
-                    r.name,
-                    match r.match_type {
+                serde_json::json!({
+                    "name": r.name,
+                    "type": match r.match_type {
                         MatchType::Domain => "domain",
                         MatchType::PathPrefix => "path",
                         MatchType::Exact => "exact",
                     },
-                    r.pattern.replace('"', "\\\""),
-                    r.workspace_id
-                )
+                    "pattern": r.pattern,
+                    "workspace": r.workspace_id,
+                    // RS-038（审计 2026-09-24）：enabled 字段此前未进 JS——
+                    // Rust 侧 matches() 检查 enabled，注入 JS 不检查（口径漂移）
+                    "enabled": r.enabled,
+                })
+                .to_string()
             })
             .collect::<Vec<String>>()
             .join(",");
-        let default_ws = &self.default_workspace;
+        // RS-037（审计 2026-09-24）：default_workspace 经 serde 转义——
+        // 此前裸 format! 直拼单引号字面量（含 ' 即注入）
+        let default_ws_json = serde_json::json!(self.default_workspace).to_string();
         format!(
             r#"
 // Aegis SpaceRouting — URL 到工作区路由（参照 Zen Browser / Arc）
 // 原始设计：Zen Browser (MPL-2.0) / Arc Browser (The Browser Company)
 (function() {{
   var RULES = [{rules_json}];
-  var DEFAULT_WS = '{default_ws}';
+  var DEFAULT_WS = {default_ws_json};
 
   function getHostname(url) {{
     try {{
@@ -196,8 +229,14 @@ impl SpaceRouting {
   function route(url) {{
     for (var i = 0; i < RULES.length; i++) {{
       var r = RULES[i];
+      // RS-038：禁用规则必须跳过（与 Rust matches() 口径一致）
+      if (!r.enabled) continue;
       var matched = false;
       if (r.type === 'domain') {{
+        // RS-209（2026-09-26 审计）：空 pattern 防御——Rust 侧 RS-119 已拒
+        // 空 pattern（'' === '' 空串等值命中会把无 host URL 路由到该规则），
+        // JS 孪生此前未同步（双端口径漂移）
+        if (!r.pattern) continue;
         var h = getHostname(url);
         matched = (h === r.pattern) || h.endsWith('.' + r.pattern);
       }} else if (r.type === 'path') {{
@@ -210,13 +249,18 @@ impl SpaceRouting {
     return DEFAULT_WS;
   }}
 
-  Object.defineProperty(window, '__AEGIS_SPACE_ROUTING', {{
+  // RS-219（2026-09-26 审计）：收敛到 Symbol 键——具名 window 属性是
+  // 免费探测点（读到即知页面有防护注入）。
+  // Symbol 属性不出现在 Object.keys/for-in/getOwnPropertyNames；
+  // 前端经 Symbol.for('{routing_sym}') 共享键取用
+  Object.defineProperty(window, Symbol.for('{routing_sym}'), {{
     value: {{ route: route, rules: RULES, defaultWorkspace: DEFAULT_WS }},
     writable: false,
     configurable: false
   }});
 }})();
-"#
+"#,
+            routing_sym = Self::ROUTING_SYMBOL
         )
     }
 }
@@ -289,12 +333,217 @@ mod tests {
     }
 
     #[test]
+    fn empty_and_hostless_urls_route_to_default() {
+        // RS-196：空 URL / 无 host URL 此前零用例——extract_host 返回 None
+        // → unwrap_or_default() 得空串；Domain 规则对空 hostname 不得命中
+        // （RS-119 空 pattern 不命中的对偶面），整体回落默认工作区
+        assert_eq!(extract_hostname(""), "", "空 URL → 空串");
+        // "about:blank" 无 "://"——util::extract_hostname 既有解析口径将
+        // 整串视为 authority、剥端口后得伪主机名 "about"（uniffi FFI 契约
+        // 锁定 RS-056，不在 RS-196 范围内变更）。安全语义不受影响：
+        // Domain 规则（github.com）与 "about" 无边界匹配 → 路由回落默认。
+        assert_eq!(
+            extract_hostname("about:blank"),
+            "about",
+            "scheme 形 URL 既有解析口径（伪主机名，锁定防漂移）"
+        );
+        // 纯空白：util::extract_hostname 既有口径原样透传（无 trim 语义，
+        // uniffi FFI 契约锁定 RS-056）——extract_host 返回 Some("   ")。
+        // 安全语义不受影响：Domain 规则与 "   " 无边界匹配 → 回落默认。
+        assert_eq!(
+            extract_hostname("   "),
+            "   ",
+            "纯空白既有口径（原样透传，无 trim）"
+        );
+        let mut sr = SpaceRouting::new("ws-default");
+        sr.add_rule(RoutingRule::domain("GitHub", "github.com", "work"));
+        // Domain 规则在无 host 输入上不命中——空 hostname 与 pattern
+        // strip_suffix 后无法构成边界匹配
+        assert!(!sr.rules()[0].matches("about:blank"));
+        assert!(!sr.rules()[0].matches(""));
+        assert_eq!(
+            sr.route("about:blank"),
+            "ws-default",
+            "无 host 回落默认工作区"
+        );
+        assert_eq!(sr.route(""), "ws-default");
+        assert_eq!(sr.route("   "), "ws-default", "纯空白无规则命中 → 回落默认");
+        // PathPrefix / Exact 规则不受影响（字符串前缀/等值语义照常）
+        sr.add_rule(RoutingRule::path_prefix("Docs", "about:", "docs"));
+        assert_eq!(sr.route("about:blank"), "docs", "PathPrefix 照常命中");
+    }
+
+    #[test]
     fn script_contains_routing_logic() {
         let mut sr = SpaceRouting::new("default");
         sr.add_rule(RoutingRule::domain("GitHub", "github.com", "work"));
         let script = sr.inject_script();
-        assert!(script.contains("__AEGIS_SPACE_ROUTING"));
+        assert!(script.contains(&format!("Symbol.for('{}')", SpaceRouting::ROUTING_SYMBOL)));
         assert!(script.contains("github.com"));
         assert!(script.contains("route"));
+    }
+
+    // —— RS-209/219 回归（审计 2026-09-26） ——
+
+    #[test]
+    fn script_domain_match_skips_empty_pattern() {
+        // RS-209：注入 JS 的 route() 必须与 Rust matches() 同步拒空 pattern——
+        // 此前 pattern="" 的 Domain 规则对无 host URL（getHostname 得 ''）
+        // 空串等值命中（'' === ''），无 host URL 被错误路由
+        let script = SpaceRouting::new("default").inject_script();
+        assert!(
+            script.contains("if (!r.pattern) continue;"),
+            "JS route() 必须短路空 pattern 域规则（与 RS-119 双端口径一致）"
+        );
+    }
+
+    #[test]
+    fn script_mounts_on_symbol_key_not_named_global() {
+        // RS-219：__AEGIS_SPACE_ROUTING 具名 window 属性是免费探测点——
+        // 必须收敛到 Symbol.for 键
+        let script = SpaceRouting::new("default").inject_script();
+        assert!(
+            !script.contains("__AEGIS_SPACE_ROUTING"),
+            "具名全局路由对象必须移除"
+        );
+        assert!(script.contains(&format!(
+            "Object.defineProperty(window, Symbol.for('{}')",
+            SpaceRouting::ROUTING_SYMBOL
+        )));
+    }
+
+    // —— RS-037/038 回归（审计 2026-09-24） ——
+
+    #[test]
+    fn default_workspace_escaped_in_script() {
+        // RS-037：default_workspace 含单引号此前直拼 `'{}'`——注入任意 JS
+        let sr = SpaceRouting::new("ws'); alert(1); ('");
+        let script = sr.inject_script();
+        assert!(
+            !script.contains("var DEFAULT_WS = 'ws');"),
+            "default_workspace 必须经 serde 转义（不得逃逸字符串字面量）"
+        );
+        assert!(
+            script.contains(r#""ws'); alert(1); ('""#),
+            "serde JSON 字面量形态"
+        );
+    }
+
+    #[test]
+    fn script_carries_enabled_flag_and_short_circuits() {
+        // RS-038：注入 JS 必须携带 enabled 字段并在 route 中跳过禁用规则
+        let mut sr = SpaceRouting::new("default");
+        let mut rule = RoutingRule::domain("GitHub", "github.com", "work");
+        rule.enabled = false;
+        sr.add_rule(rule);
+        let script = sr.inject_script();
+        assert!(
+            script.contains(r#""enabled":false"#),
+            "规则必须携带 enabled 字段"
+        );
+        assert!(
+            script.contains("if (!r.enabled) continue;"),
+            "route 必须短路禁用规则"
+        );
+    }
+
+    #[test]
+    fn script_escaping_malicious_rule_name_and_workspace() {
+        // RS-047 回归（P28 修复面）：规则 name/workspace_id 源自用户配置，
+        // 含双引号/反斜杠/换行/方括号/退出载荷——serde_json 构造保证其
+        // 只作为 JSON 字符串字面量出现，不得逃逸出 RULES 数组产生 JS 注入
+        let mut sr = SpaceRouting::new("default");
+        let rule = RoutingRule::domain(
+            r#"x"); alert(1); ([\"\n" injection"#,
+            "github.com",
+            r#"ws\"" + window.ev1l + \""#,
+        );
+        sr.add_rule(rule);
+        let script = sr.inject_script();
+        // name：输入 `x"); alert(1); ([\"\n" injection`——serde 逐字符转义
+        // （\ → \\，" → \"）后作为 JSON 字符串内容出现
+        assert!(
+            script.contains(r#""name":"x\"); alert(1); ([\\\"\\n\" injection""#),
+            "name 中的反斜杠/引号必须被 serde 转义为 JSON 字符串内容"
+        );
+        // name 载荷不得未转义逃逸出 JSON 字符串（裸 `");` 直连 RULES 即注入）
+        assert!(
+            !script.contains("RULES = [x\")"),
+            "name 载荷不得逃逸 RULES 数组"
+        );
+        // workspace：输入 `ws\"" + window.ev1l + \"`——双引号与反斜杠均转义
+        assert!(
+            script.contains(r#""workspace":"ws\\\"\" + window.ev1l + \\\"""#),
+            "workspace_id 中的双引号必须转义"
+        );
+        // 整体脚本可被 JSON 上下文解析（RULES 段不破坏语法）——直接验证
+        // 提取 RULES 数组段为合法 JSON
+        let start = script.find("var RULES = [").expect("RULES 段存在");
+        let json_start = start + "var RULES = ".len();
+        let json_end = script[json_start..].find("];").expect("RULES 数组闭合") + json_start;
+        let rules_json = &script[json_start..=json_end];
+        let parsed: serde_json::Value = serde_json::from_str(rules_json)
+            .expect("RULES 段必须是合法 JSON（恶意 name 不破坏语法）");
+        assert_eq!(parsed[0]["name"], r#"x"); alert(1); ([\"\n" injection"#);
+        assert_eq!(parsed[0]["workspace"], r##"ws\"" + window.ev1l + \""##);
+    }
+
+    // —— RS-119/120/121（审计 2026-09-25）——
+
+    #[test]
+    fn domain_pattern_normalized_at_construction() {
+        // RS-120：构造时小写归一——大写 pattern 必须命中小写 hostname
+        let rule = RoutingRule::domain("Corp", "GitHub.COM", "work");
+        assert!(rule.matches("https://github.com/repo"));
+        assert!(rule.matches("https://API.GitHub.com/repos"));
+        // 归一后存储（审计可观测）
+        assert_eq!(rule.pattern, "github.com");
+    }
+
+    #[test]
+    fn empty_domain_pattern_never_matches() {
+        // RS-119：空 pattern 此前命中 extract_host 失败的 ""
+        // （about:blank 等无 host URL 会被路由到该规则）——必须拒绝
+        let mut rule = RoutingRule::domain("Empty", "", "work");
+        assert!(!rule.matches("about:blank"));
+        assert!(!rule.matches("https://github.com/repo"));
+        assert!(!rule.matches("data:text/html,x"));
+        // RS-038 语义保持：禁用规则同样不命中
+        rule.enabled = false;
+        assert!(!rule.matches("https://anything.com"));
+    }
+
+    #[test]
+    fn empty_pattern_rule_falls_back_to_default_workspace() {
+        // RS-119：路由引擎层面——空 pattern 规则不得吞掉无 host URL
+        let mut sr = SpaceRouting::new("fallback");
+        sr.add_rule(RoutingRule::domain("Empty", "", "trapped"));
+        assert_eq!(sr.route("about:blank"), "fallback");
+        assert_eq!(sr.route("https://github.com"), "fallback");
+    }
+
+    #[test]
+    fn path_and_exact_prefixes_remain_case_sensitive() {
+        // RS-119：路径/精确匹配保持原文大小写敏感（RFC 3986）——
+        // 与域名归一语义形成对照（不得连带归一路径）
+        let path_rule = RoutingRule::path_prefix("Docs", "https://docs.example.com/EN", "docs-en");
+        assert!(path_rule.matches("https://docs.example.com/EN/api"));
+        assert!(
+            !path_rule.matches("https://docs.example.com/en/api"),
+            "路径大小写敏感：小写 /en 不得命中 /EN 前缀"
+        );
+        let exact_rule = RoutingRule::exact("Report", "https://example.com/Report", "work");
+        assert!(exact_rule.matches("https://example.com/Report"));
+        assert!(!exact_rule.matches("https://example.com/report"));
+    }
+
+    #[test]
+    fn suffix_match_requires_dot_boundary_no_allocation() {
+        // RS-121 回归：strip_suffix + '.' 边界——"badcom" 不得命中 "com"，
+        // "api.github.com" 命中 "github.com"，等值命中走 prefix.is_empty()
+        let rule = RoutingRule::domain("Com", "com", "tld-ws");
+        assert!(!rule.matches("https://badcom/"), "非 '.' 边界后缀不得命中");
+        assert!(rule.matches("https://www.example.com/"));
+        assert!(rule.matches("https://com/"));
     }
 }

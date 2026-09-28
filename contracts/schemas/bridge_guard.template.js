@@ -1,4 +1,7 @@
 // Aegis BridgeGuard — 受信调用方校验（fetch / XMLHttpRequest / sendBeacon / WebSocket）
+// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open|navigator.sendBeacon = function|window.WebSocket = function|trustedCaller|location.hostname
+// ↑ PY-043 单源：verify_bridge_guard.py 的 REQUIRED_SINKS 自此行解析
+//   （此前 Python 手工副本——Rust include_str! 编译期消费本文件，清单随模板演进自动同步）
 (function() {
   const ALLOWED_HOSTS = __AEGIS_HOSTS__;
   const REQUIRE_HTTPS = __AEGIS_REQUIRE_HTTPS__;
@@ -41,4 +44,8 @@
   window.WebSocket.OPEN = WS.OPEN;
   window.WebSocket.CLOSING = WS.CLOSING;
   window.WebSocket.CLOSED = WS.CLOSED;
+  // AD-105（审计 2026-09-23 清单·A6 批）：原型链对齐——包装函数默认
+  // prototype 与真 WebSocket 实例无关，new WebSocket(...) instanceof
+  // WebSocket 恒 false（页面一行即可探测防护存在性）。
+  window.WebSocket.prototype = WS.prototype;
 })();

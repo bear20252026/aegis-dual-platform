@@ -8,9 +8,9 @@
     <AssemblyName>Aegis.Windows.App</AssemblyName>
     <RootNamespace>Aegis.Windows</RootNamespace>
     <StartupObject>Aegis.Windows.Program</StartupObject>
-    <Version>2.2.0-beta.21</Version>
-    <AssemblyVersion>2.2.0.21</AssemblyVersion>
-    <FileVersion>2.2.0.21</FileVersion>
+    <Version>2.2.0-beta.50</Version>
+    <AssemblyVersion>2.2.0.50</AssemblyVersion>
+    <FileVersion>2.2.0.50</FileVersion>
     <PackageId>Aegis.Project.AegisWebView</PackageId>
     <Product>Aegis WebView</Product>
     <RequireNativePolicyCore Condition="'$(RequireNativePolicyCore)' == ''">false</RequireNativePolicyCore>
@@ -39,19 +39,33 @@
           CopyToPublishDirectory="Always" />
   </ItemGroup>
   <ItemGroup>
+    <!-- CS-312（2026-09-26 审计）：Contracts/Generated 六个生成契约类生产与
+         测试零引用（运行时契约面是 AuthorizedAction/AuditEvent 等手写模型，
+         JSON 由 NativePolicyCoreBridge 直接解析）——从编译移除消除死代码/
+         崩溃面。文件保留在磁盘：contracts/codegen/generate_csharp.py 再生成
+         与 verify_contract_compatibility.py 的文件级校验不受影响；接入真实
+         JSON 反序列化面时移除本条即可。 -->
+    <Compile Remove="Contracts\Generated\*.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <!-- M3 新标签页：start.html 跨端单源（shared/shell——ADR-009 D2-3）经
          虚拟主机 ntp.aegis.local 加载；资源映射到输出 ntp/ 目录，
-         不暴露文件系统路径。壁纸同在单源 shell/wallpapers 内。 -->
-    <Content Include="..\..\..\shared\shell\**\*"
+         不暴露文件系统路径。壁纸同在单源 shell/wallpapers 内。
+         审计修复：排除 snake.test.js——测试文件不再随包发布到虚拟主机。 -->
+    <Content Include="..\..\..\shared\shell\**\*" Exclude="..\..\..\shared\shell\snake.test.js"
              Link="ntp\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
     <!-- M3 离线几何画板（GeoGebra Math Apps Bundle——117MB 随包；entry 存在时
-         才打包，否则几何画板按钮 fail-closed 置灰）。历史栈同目录只读引用。 -->
-    <Content Include="..\..\..\legacy\windows-pywebview\geogebra\**\*"
+         才打包，否则几何画板按钮 fail-closed 置灰）。
+         SP-145（2026-09-26 审计）：暂存目录从归档栈 legacy/windows-pywebview/
+         geogebra 改为 dist/geogebra-cache/——活跃构建不再向"只读归档"写入并
+         依赖其路径（与 .github/workflows/release-windows.yml 的 dest-dir 同步）。
+         本地开发：把画板包解压到仓库根 dist/geogebra-cache/ 即可参与打包。 -->
+    <Content Include="..\..\..\dist\geogebra-cache\**\*"
              Link="geogebra\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="Always"
-             Condition="Exists('..\..\..\legacy\windows-pywebview\geogebra\GeoGebra\HTML5\5.0\GeoGebra.html')" />
+             Condition="Exists('..\..\..\dist\geogebra-cache\GeoGebra\HTML5\5.0\GeoGebra.html')" />
   </ItemGroup>
 </Project>

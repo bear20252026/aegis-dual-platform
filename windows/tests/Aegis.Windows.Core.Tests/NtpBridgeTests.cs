@@ -15,7 +15,8 @@ public sealed class NtpBridgeTests
         string? wallpaper = null,
         Action<string>? onSetWallpaper = null,
         Action<string>? onNavigate = null,
-        Action? onRestore = null) => new(
+        Action? onRestore = null,
+        Func<int, string?, (int, int, System.Collections.Generic.IReadOnlyList<NtpBridge.ImportResult>)>? onImportHistory = null) => new(
         SearchEngine: () => engine ?? "baidu",
         SetSearchEngine: onSetEngine ?? (_ => { }),
         Wallpaper: () => wallpaper ?? NtpAssets.DefaultWallpaper,
@@ -31,7 +32,7 @@ public sealed class NtpBridgeTests
             new("chrome", true, true),
         },
         ImportBookmarks: _ => (0, 0, new List<NtpBridge.ImportResult>()),
-        ImportHistory: (_, _) => (0, 0, new List<NtpBridge.ImportResult>()));
+        ImportHistory: onImportHistory ?? ((_, _) => (0, 0, new List<NtpBridge.ImportResult>())));
 
     [Theory]
     [InlineData("https://ntp.aegis.local/start.html", true)]
@@ -151,6 +152,68 @@ public sealed class NtpBridgeTests
         Assert.Contains("title", json);
     }
 
+    // ===== CS-053..056（审计 2026-09-25）：桥解析/日志/limit 钳制/goBack 透传 =====
+
+    [Theory]
+    [InlineData("{\"__aegis\":\"one\",\"id\":1,\"op\":\"getEngine\"}")]   // marker 非数字
+    [InlineData("{\"__aegis\":1,\"id\":\"abc\",\"op\":\"getEngine\"}")]   // id 非数字
+    [InlineData("{\"__aegis\":1,\"op\":\"getEngine\"}")]                      // 缺 id
+    public void TryHandle_MalformedMarkerOrId_DoesNotThrow(string messageJson)
+    {
+        // CS-053：非数字 marker/id 不得抛 FormatException 逃逸（此前
+        // GetInt64() 直抛、catch(JsonException) 接不住）
+        var services = FakeServices();
+        var bridge = new NtpBridge(services);
+        object? response = null;
+        var ex = Record.Exception(() =>
+            bridge.TryHandle("https://ntp.aegis.local/start.html", messageJson, r => response = r));
+        Assert.Null(ex);
+        Assert.Null(response);  // 非协议消息静默忽略（无响应）
+    }
+
+    [Fact]
+    public void Dispatch_JsError_WritesSecurityLogWithoutThrowing()
+    {
+        // CS-054：jsError 落日志且不抛（返回 null——前端不等待结果）
+        var services = FakeServices();
+        var bridge = new NtpBridge(services);
+        var ex = Record.Exception(() =>
+            bridge.Dispatch("jsError", System.Text.Json.JsonSerializer.SerializeToElement(
+                new object?[] { "TypeError: x is undefined" })));
+        Assert.Null(ex);
+    }
+
+    [Fact]
+    public void Dispatch_ImportHistory_ClampsLimitTo1Through2000()
+    {
+        // CS-055：limit 钳 1..2000（此前 0/负值直接进 SQL LIMIT）
+        int? captured = null;
+        var services = FakeServices();
+        var bridge = new NtpBridge(services with
+        {
+            ImportHistory = (limit, _) => { captured = limit; return (0, 0, new List<NtpBridge.ImportResult>()); },
+        });
+        bridge.Dispatch("importHistory", System.Text.Json.JsonSerializer.SerializeToElement(new object?[] { 0 }));
+        Assert.Equal(1, captured);
+        bridge.Dispatch("importHistory", System.Text.Json.JsonSerializer.SerializeToElement(new object?[] { -5 }));
+        Assert.Equal(1, captured);
+        bridge.Dispatch("importHistory", System.Text.Json.JsonSerializer.SerializeToElement(new object?[] { 999_999 }));
+        Assert.Equal(2000, captured);
+        bridge.Dispatch("importHistory", System.Text.Json.JsonSerializer.SerializeToElement(Array.Empty<object?>()));
+        Assert.Equal(500, captured);  // 缺省 500
+    }
+
+    [Fact]
+    public void Dispatch_GoBack_PassesFalseThrough()
+    {
+        // CS-056：GoBack false 必须透传给前端（不能在桥内吞掉转 true）
+        Func<bool> denied = () => false;
+        var services = FakeServices();
+        var bridge = new NtpBridge(services with { GoBack = denied });
+        var result = bridge.Dispatch("goBack", System.Text.Json.JsonSerializer.SerializeToElement(Array.Empty<object?>()));
+        Assert.Equal(false, result);
+    }
+
     [Fact]
     public void UnknownOperationIsIgnored() =>
         Assert.Null(new NtpBridge(FakeServices()).Dispatch("evilOp", EmptyArgs()));
@@ -196,6 +259,22 @@ public sealed class NtpBridgeTests
         Assert.False(NtpAssets.IsWallpaperAllowed(null));
     }
 
+    [Fact]
+    public void ImportHistory_AcceptsStringNumberArg()
+    {
+        // CS-190：args 数字以字符串形态传入（"100"）——此前仅 Number 分支可解析
+        int? captured = null;
+        var bridge = new NtpBridge(FakeServices(onImportHistory: (limit, _) =>
+        {
+            captured = limit;
+            return (0, 0, new List<NtpBridge.ImportResult>());
+        }));
+
+        bridge.Dispatch("importHistory", Args("100"));
+
+        Assert.Equal(100, captured);
+    }
+
     private static JsonElement EmptyArgs() => Args();
 
     private static JsonElement Args(params string[] values)
@@ -205,4 +284,30 @@ public sealed class NtpBridgeTests
             : "[" + string.Join(",", values.Select(v => JsonSerializer.Serialize(v))) + "]";
         return JsonSerializer.Deserialize<JsonElement>(raw);
     }
+}
+
+/// <summary>C15 批（审计 2026-09-26）：NtpAssets 纯判定直测——虚拟主机地址
+/// 与壁纸白名单（CS-194/195）。</summary>
+public sealed class NtpAssetsTests
+{
+    [Theory]
+    [InlineData("https://ntp.aegis.local/start.html", true)]
+    [InlineData("https://NTP.AEGIS.LOCAL/start.html", true)]   // host 大小写不敏感
+    [InlineData("https://geo.aegis.local/GeoGebra/HTML5/5.0/GeoGebra.html", true)]
+    [InlineData("https://evil.example/start.html", false)]
+    [InlineData("https://sub.ntp.aegis.local/x", false)]       // 子域不算虚拟主机
+    [InlineData("about:blank", false)]
+    [InlineData(null, false)]
+    public void IsVirtualHostUrl_AcceptsOnlyTrustedHosts(string? url, bool expected) =>
+        Assert.Equal(expected, NtpAssets.IsVirtualHostUrl(url));
+
+    [Theory]
+    [InlineData("aurora-magenta.jpg", true)]
+    [InlineData("aurora-violet.jpg", true)]
+    [InlineData("../../etc/passwd", false)]   // 路径形态拒绝
+    [InlineData("aurora-unknown.jpg", false)] // 未登记拒绝
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsWallpaperAllowed_WhitelistOnly(string? name, bool expected) =>
+        Assert.Equal(expected, NtpAssets.IsWallpaperAllowed(name));
 }

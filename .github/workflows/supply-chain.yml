@@ -4,27 +4,46 @@ name: Supply-Chain
   pull_request: {}
   workflow_dispatch: {}
 
+permissions:
+  contents: read
+
+
+# PY-044..051：同分支重复 push/PR 取消旧运行（节省 runner 与排队）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0 (node24)
         with:
           python-version: '3.12'
-      - name: pip-audit (Python 依赖——requirements-lock——依赖门禁——失败即阻断)
+      - name: pip-audit (Python 依赖——依赖门禁——失败即阻断)
+        # PY-183（2026-09-26 审计）：扫描面此前仅归档栈 requirements-lock——
+        # requirements-dev（ruff/bandit/mypy/pytest）与根 requirements-ci
+        # （contracts/agent-redteam/supply-chain 工具链，PY-178 建）全在
+        # 依赖审计面之外。三份一并对账。
         run: |
-          python -m pip install pip-audit
+          # PY-178 完整化：审计工具自身经 requirements-ci.txt hash 锁定安装
+          python -m pip install --require-hashes -r requirements-ci.txt -q
           pip-audit -r legacy/windows-pywebview/requirements-lock.txt
+          pip-audit -r legacy/windows-pywebview/requirements-dev.txt || true  # dev 工具链漏洞仅告警——归档栈工具不随制品发布
+          pip-audit -r requirements-ci.txt
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
-      - name: cargo audit (Rust 依赖——core——依赖门禁——失败即阻断)
-        working-directory: core/rust-policy-core
-        run: |
-          cargo install cargo-audit --locked
-          cargo audit
+      # PY-171（2026-09-23 审计·V1 核验批）：安装+执行块收敛为 composite action 单源
+      - uses: ./.github/actions/cargo-audit
       - name: SBOM generation (CycloneDX——随制品存档——依赖门禁证据)
+        # PY-166（2026-09-23 审计·V1 核验批）：本步输入是契约测试向量
+        # update-manifest-valid.json——验证的是 generate_sbom「清单→CycloneDX」
+        # 形态转换器本身，不是生产依赖 SBOM（故组件无 purl/version 依赖字段，
+        # 仅承载 artifact 级 name/sha256/platform）。生产依赖 SBOM 由各平台
+        # 发布链的 anchore/sbom-action 从真实锁文件生成（见 release-core.yml
+        # sbom job 等处）——两回事勿混。
         run: |
           python release/tools/generate_sbom/generate_sbom.py \
             contracts/vectors/update-manifest-valid.json /tmp/sbom.cdx.json

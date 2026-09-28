@@ -7,13 +7,14 @@ import androidx.webkit.WebViewFeature
 /**
  * WebView 硬化脚本注入（单文件单职责：从 SecureWebViewFactory 拆出）。
  *
- * 包含两类 document-start 注入（行为与拆分前逐字节一致）：
+ * 包含两类 document-start 注入：
  * 1. bridge-guard：Bridge 硬化 JS（fetch/XHR/sendBeacon/WebSocket 未授权调用拒绝）
  *    ——单一事实源（ADR-007）：模板与 `contracts/schemas/bridge_guard.template.js`
  *    逐行一致，由 `contracts/codegen/verify_bridge_guard.py` 门禁校验。
  * 2. fingerprint-shield：9 阶段指纹防护 JS（canvas/WebGL/Audio 噪声 +
  *    hardwareConcurrency 伪装），每会话随机种子确定性——同一会话内指纹
- *    一致但跨会话不同。
+ *    一致但跨会话不同。canvas 噪声自 AD-212（2026-09-26 审计）起施加在
+ *    离屏副本（与 Rust 侧 RS-025 修复模式对齐）。
  */
 internal object WebViewHardening {
     /** 会话随机种子字节数（hex 输出——注入 JS 噪声用）。 */
@@ -55,7 +56,9 @@ internal object WebViewHardening {
         }
     }
 
-    /** 允许的 bridge 域名白名单（可动态扩展）。 */
+    /** 允许的 bridge 域名白名单（编译期固定单源——经占位符注入 bridge_guard
+     *  模板，与 Rust BridgeGuard 白名单同源；AD-076：原注「可动态扩展」与
+     *  实现不符——本表无任何运行期写入路径）。 */
     private val ALLOWED_BRIDGE_HOSTS =
         listOf(
             "aegis.local",
@@ -72,9 +75,13 @@ internal object WebViewHardening {
 
     /**
      * bridge 目标强制 HTTPS（与 Rust BridgeGuard.require_https 对应）。
-     * 生产接线尚未开启（两端一致）；配置化时须同步 BridgeGuard::new 调用点。
+     * 生产接线已开启（2026-09-10，两端一致）：受信内页对 bridge 目标
+     * （aegis.local/localhost/127.0.0.1）的 http: 调用一律拒绝——bridge 面
+     * 无明文需求（首页数据全走 AegisBridge 注入对象而非 HTTP bridge）。
+     * Rust 侧 BridgeGuard::new 无生产调用点（库能力 + 双值测试覆盖），
+     * 模板一致性由 verify_bridge_guard.py 门禁保证。
      */
-    private const val REQUIRE_HTTPS_BRIDGE = false
+    private const val REQUIRE_HTTPS_BRIDGE = true
 
     /**
      * Bridge 硬化 JS（fetch / XMLHttpRequest / sendBeacon / WebSocket 未授权调用拒绝）。
@@ -83,11 +90,18 @@ internal object WebViewHardening {
      * `contracts/schemas/bridge_guard.template.js` 逐行一致（占位符归一化后），
      * 由 `contracts/codegen/verify_bridge_guard.py` 门禁校验——禁止手工改动
      * 本模板而不更新规范文件（fail-open 漂移即此模式的产物）。
+     *
+     * AD-069（2026-09-24 审计）：private → internal——JVM 单测断言关键防御
+     * 标记存在（fetch/XHR/beacon/WS 劫持点、白名单、REQUIRE_HTTPS），杜绝
+     * 「脚本内容被改而注入照常」的零回归盲区。
      */
-    private val BRIDGE_GUARD_JS: String
+    internal val BRIDGE_GUARD_JS: String
         get() =
             """
 // Aegis BridgeGuard — 受信调用方校验（fetch / XMLHttpRequest / sendBeacon / WebSocket）
+// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open|navigator.sendBeacon = function|window.WebSocket = function|trustedCaller|location.hostname
+// ↑ PY-043 单源：verify_bridge_guard.py 的 REQUIRED_SINKS 自此行解析
+//   （此前 Python 手工副本——Rust include_str! 编译期消费本文件，清单随模板演进自动同步）
 (function() {
   const ALLOWED_HOSTS = [$allowedHostsJson];
   const REQUIRE_HTTPS = $requireHttpsJson;
@@ -130,12 +144,22 @@ internal object WebViewHardening {
   window.WebSocket.OPEN = WS.OPEN;
   window.WebSocket.CLOSING = WS.CLOSING;
   window.WebSocket.CLOSED = WS.CLOSED;
+  // AD-105（审计 2026-09-23 清单·A6 批）：原型链对齐——包装函数默认
+  // prototype 与真 WebSocket 实例无关，new WebSocket(...) instanceof
+  // WebSocket 恒 false（页面一行即可探测防护存在性）。
+  window.WebSocket.prototype = WS.prototype;
 })();
             """.trimIndent()
 
-    /** 指纹防护 JS（管道化组合——参照 Rust fingerprint_pipeline）。 */
+    /**
+     * 指纹防护 JS（管道化组合——参照 Rust fingerprint_pipeline）。
+     *
+     * AD-247（2026-09-26 审计）：private → internal——9 阶段脚本此前无任何
+     * JVM 断言，「脚本被改而注入照常」是零回归盲区（BRIDGE_GUARD_JS 已有
+     * AD-069 同口径标记回归，本脚本对齐补齐）。
+     */
     @Suppress("LongMethod") // 该方法仅承载版本化脚本文本，不包含 Android 业务控制流。
-    private fun fingerprintShieldScript(sessionSeed: String): String =
+    internal fun fingerprintShieldScript(sessionSeed: String): String =
         """
 window.__AEGIS_PROTECTION_VERSION = '1';
 // === Stage 1: ToStringGuard（参照 playwright-afp MIT）===
@@ -154,7 +178,27 @@ window.__AEGIS_PROTECTION_VERSION = '1';
 
 // === Stage 2: PerSiteSeed（参照 Brave Browser MPL-2.0）===
 (function() {
-  function getETLD1(h) { var p = h.split('.'); return p.length <= 2 ? h : p.slice(-2).join('.'); }
+  // AD-107（审计 2026-09-23 清单·A6 批）：getETLD1 迷你公共后缀表——原实现
+  // 一律取最后两段，对共享公共后缀（co.uk/com.cn/com.hk/com.au/co.jp/…）
+  // 会把 a.co.uk 与 b.co.uk 推导出不同的 site seed（eTLD+1 应同为 co.uk 域，
+  // 同站不同源实体却各持指纹种子，既不隐私正确也不一致）。无网络依赖的
+  // 内嵌迷你 PSL（覆盖最高频多段公共后缀；未命中回落两段式保守行为）。
+  var PUBLIC_SUFFIXES = ['co.uk','org.uk','ac.uk','gov.uk','co.jp','ne.jp','or.jp',
+    'co.kr','or.kr','com.cn','net.cn','org.cn','gov.cn','edu.cn','com.tw','org.tw',
+    'com.hk','org.hk','edu.hk','com.au','net.au','org.au','edu.au','gov.au','co.nz',
+    'net.nz','org.nz','com.sg','com.my','co.in','net.in','org.in','com.br','com.mx',
+    'com.ar','co.za','com.tr','com.ru','co.th','com.vn','com.ph','co.id'];
+  function isPublicSuffix(tail) { return PUBLIC_SUFFIXES.indexOf(tail) >= 0; }
+  function getETLD1(h) {
+    var p = h.split('.');
+    if (p.length <= 2) return h;
+    var tail2 = p.slice(-2).join('.');
+    if (isPublicSuffix(tail2)) {
+      // 公共后缀占两段 → eTLD+1 取三段；三段仍不足以构成注册域时退回原 host
+      return p.length >= 3 ? p.slice(-3).join('.') : h;
+    }
+    return tail2;
+  }
   function deriveSeed(hex, domain) {
     var r = '';
     for (var i = 0; i < 16; i++) {
@@ -169,17 +213,37 @@ window.__AEGIS_PROTECTION_VERSION = '1';
 })();
 
 // === Stage 3: Canvas/WebGL/Audio 噪声 ===
+// AD-212（2026-09-26 审计）：噪声施加在**离屏副本**上（参照 Rust 侧 RS-025
+// 修复模式）——原实现 getImageData/putImageData 破坏性写回活画布：①二次读
+// 同一画布结果不同（噪声注入自身可检测）；②页面后续渲染被永久污染。副本
+// 仅用于返回值，原 ctx 不动；且不调用源画布 getContext（drawImage 对任意
+// 上下文类型的源画布均可用，也避免把尚无上下文的画布永久锁定为 2d）。
 (function() {
   const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
   HTMLCanvasElement.prototype.toDataURL = function(type) {
-    const ctx = this.getContext('2d');
-    if (ctx) {
-      const imageData = ctx.getImageData(0, 0, this.width, this.height);
+    try {
+      const off = document.createElement('canvas');
+      off.width = this.width;
+      off.height = this.height;
+      const octx = off.getContext('2d');
+      octx.drawImage(this, 0, 0);
+      const imageData = octx.getImageData(0, 0, off.width, off.height);
       const seed = parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16);
-      for (let i = 0; i < imageData.data.length; i += 4) { imageData.data[i] += (seed + i) % 2 === 0 ? 1 : -1; }
-      ctx.putImageData(imageData, 0, 0);
+      // AD-175（审计 2026-09-23 清单·A7 批）：多通道混淆——原噪声只扰动
+      // R 通道（stride 4 的第 0 字节），G/B 通道逐像素原样返回：canvas
+      // 读回值 2/3 的信息量未被覆盖，页面按通道差分即可高置信还原原图/
+      // 检测防护存在性。现 R/G/B 三通道以不同相位（+i/seed、+i/seed+1、
+      // +i/seed+2）各自 ±1 抖动（alpha 不动——不破坏合成透明度）。
+      for (let i = 0; i < imageData.data.length; i += 4) {
+        imageData.data[i] += ((seed + i) % 2 === 0 ? 1 : -1);
+        imageData.data[i + 1] += ((seed + i + 1) % 2 === 0 ? 1 : -1);
+        imageData.data[i + 2] += ((seed + i + 2) % 2 === 0 ? 1 : -1);
+      }
+      octx.putImageData(imageData, 0, 0);
+      return origToDataURL.apply(off, arguments);
+    } catch (e) {
+      return origToDataURL.apply(this, arguments);
     }
-    return origToDataURL.apply(this, arguments);
   };
 })();
 (function() {
@@ -197,6 +261,13 @@ window.__AEGIS_PROTECTION_VERSION = '1';
 
 // === Stage 4: LetterboxShield（参照 Mullvad/Tor Browser MPL-2.0）===
 (function() {
+  // AD-176（审计 2026-09-23 清单·A7 批）：尺寸冻结网格常量注释固化——
+  // WS/HS 是「尺寸量化网格步长」（屏幕/窗口尺寸向下取整到 200×100 的
+  // 网格点）：常量而非逐会话随机，是因为同一页面内 screen.width 与
+  // innerWidth 必须落在同一网格（跨属性不一致本身就是高置信探测信号）；
+  // 固定步长还保证多标签/多站点同尺寸设备呈现一致的量化结果
+  // （Brave/Tor 同款取值——200 为移动端屏宽最小区分粒度，100 匹配
+  // 竖屏窗口高度惯用间隔）。变更需同步评估上述一致性约束。
   var WS = 200, HS = 100;
   function roundTo(v, s) { return Math.max(s, Math.round(v / s) * s); }
   try {
@@ -277,9 +348,15 @@ window.__AEGIS_PROTECTION_VERSION = '1';
 // === Stage 8: TimerPrecision（参照 Mullvad Browser MPL-2.0）===
 (function() {
   var P = 1; // 1ms precision
+  // AD-108（审计 2026-09-23 清单·A6 批）：抖动只进 performance.now——原
+  // reduce 同用于 Date.now，返回非整数毫秒：Date.now() 按规范是整数毫秒
+  // （Number），页面普遍假设其可取模/可整除；非整数返回值本身就是高置信
+  // 检测信号（Date.now() % 1 !== 0），且破坏依赖整毫秒的页内逻辑。
+  // Date.now 只做 1ms 网格取整（无随机分量）。
   function reduce(v) { return Math.round(v / P) * P + (Math.random() - 0.5) * P / 2; }
+  function reduceIntegral(v) { return Math.round(v / P) * P; }
   try { var o = performance.now.bind(performance); Object.defineProperty(performance, 'now', { value: function() { return reduce(o()); }, writable: false, configurable: false }); } catch(e) {}
-  try { var d = Date.now; Date.now = function() { return reduce(d()); }; } catch(e) {}
+  try { var d = Date.now; Date.now = function() { return reduceIntegral(d()); }; } catch(e) {}
 })();
 
 // === Stage 9: ExtProxy 匿名扩展代理（参照 Helium GPL-3.0）===

@@ -11,8 +11,10 @@ using System.Text.Json;
 public sealed class NativePolicyCoreBridge : IDisposable
 {
     private const uint ExpectedAbiVersion = NativePolicyCoreGate.ExpectedAbiVersion;
-    private readonly IntPtr _library;
-    private readonly IntPtr _broker;
+    // CS-207：裸 IntPtr 换 SafeHandle——关键终结兜底释放（Dispose 遗漏时
+    // 原生库句柄/broker 仍由临界终结器回收）
+    private readonly NativeLibraryHandle _library;
+    private readonly NativeBrokerHandle _brokerHandle;
     private readonly BrokerFreeDelegate _brokerFree;
     private readonly StringFreeDelegate _stringFree;
     private readonly CreateSessionDelegate _createSession;
@@ -24,6 +26,9 @@ public sealed class NativePolicyCoreBridge : IDisposable
     private readonly RejectNavigationConfirmationDelegate _rejectNavigationConfirmation;
     private readonly ConsumeNavigationDelegate _consumeNavigation;
     private bool _disposed;
+
+    /// <summary>broker 指针透传（各委托调用点取用——句柄存活期内有效）。</summary>
+    private IntPtr Broker => _brokerHandle.DangerousGetHandle();
 
     private NativePolicyCoreBridge(
         IntPtr library,
@@ -39,8 +44,8 @@ public sealed class NativePolicyCoreBridge : IDisposable
         RejectNavigationConfirmationDelegate rejectNavigationConfirmation,
         ConsumeNavigationDelegate consumeNavigation)
     {
-        _library = library;
-        _broker = broker;
+        _library = new NativeLibraryHandle(library);
+        _brokerHandle = new NativeBrokerHandle(broker, brokerFree);
         _brokerFree = brokerFree;
         _stringFree = stringFree;
         _createSession = createSession;
@@ -57,40 +62,35 @@ public sealed class NativePolicyCoreBridge : IDisposable
     {
         bridge = null;
         if (string.IsNullOrWhiteSpace(policyVersion)
-            || !NativeLibrary.TryLoad(libraryPath ?? "aegis_policy_core", out var library))
+            || !NativeLibrary.TryLoad(libraryPath ?? "aegis_policy_core", out var libraryPointer))
             return false;
 
+        var library = new NativeLibraryHandle(libraryPointer);
         try
         {
-            var abiVersion = GetDelegate<AbiVersionDelegate>(library, "aegis_policy_core_abi_version")();
+            var abiVersion = GetDelegate<AbiVersionDelegate>(library.DangerousGetHandle(), "aegis_policy_core_abi_version")();
             if (abiVersion != ExpectedAbiVersion)
-            {
-                NativeLibrary.Free(library);
-                return false;
-            }
+                return false;  // 失败路径由 finally 统一释放
 
-            var brokerNew = GetDelegate<BrokerNewDelegate>(library, "aegis_policy_core_broker_new");
-            var brokerFree = GetDelegate<BrokerFreeDelegate>(library, "aegis_policy_core_broker_free");
-            var stringFree = GetDelegate<StringFreeDelegate>(library, "aegis_policy_core_string_free");
-            var createSession = GetDelegate<CreateSessionDelegate>(library, "aegis_policy_core_broker_create_session");
-            var destroySession = GetDelegate<DestroySessionDelegate>(library, "aegis_policy_core_broker_destroy_session");
-            var advanceGeneration = GetDelegate<AdvanceGenerationDelegate>(library, "aegis_policy_core_broker_advance_document_generation");
-            var evaluateNavigation = GetDelegate<EvaluateNavigationDelegate>(library, "aegis_policy_core_broker_evaluate_navigation_json");
-            var requestNavigationConfirmation = GetDelegate<RequestNavigationConfirmationDelegate>(library, "aegis_policy_core_broker_request_navigation_confirmation_json");
-            var approveNavigationConfirmation = GetDelegate<ApproveNavigationConfirmationDelegate>(library, "aegis_policy_core_broker_approve_navigation_confirmation_json");
-            var rejectNavigationConfirmation = GetDelegate<RejectNavigationConfirmationDelegate>(library, "aegis_policy_core_broker_reject_navigation_confirmation");
-            var consumeNavigation = GetDelegate<ConsumeNavigationDelegate>(library, "aegis_policy_core_broker_consume_navigation_json");
+            var brokerNew = GetDelegate<BrokerNewDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_new");
+            var brokerFree = GetDelegate<BrokerFreeDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_free");
+            var stringFree = GetDelegate<StringFreeDelegate>(library.DangerousGetHandle(), "aegis_policy_core_string_free");
+            var createSession = GetDelegate<CreateSessionDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_create_session");
+            var destroySession = GetDelegate<DestroySessionDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_destroy_session");
+            var advanceGeneration = GetDelegate<AdvanceGenerationDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_advance_document_generation");
+            var evaluateNavigation = GetDelegate<EvaluateNavigationDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_evaluate_navigation_json");
+            var requestNavigationConfirmation = GetDelegate<RequestNavigationConfirmationDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_request_navigation_confirmation_json");
+            var approveNavigationConfirmation = GetDelegate<ApproveNavigationConfirmationDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_approve_navigation_confirmation_json");
+            var rejectNavigationConfirmation = GetDelegate<RejectNavigationConfirmationDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_reject_navigation_confirmation");
+            var consumeNavigation = GetDelegate<ConsumeNavigationDelegate>(library.DangerousGetHandle(), "aegis_policy_core_broker_consume_navigation_json");
             var versionPointer = Utf8(policyVersion);
             try
             {
                 var broker = brokerNew(versionPointer);
                 if (broker == IntPtr.Zero)
-                {
-                    NativeLibrary.Free(library);
-                    return false;
-                }
+                    return false;  // 失败路径由 finally 统一释放
                 bridge = new NativePolicyCoreBridge(
-                    library,
+                    libraryPointer,
                     broker,
                     brokerFree,
                     stringFree,
@@ -111,28 +111,33 @@ public sealed class NativePolicyCoreBridge : IDisposable
         }
         catch (Exception)
         {
-            NativeLibrary.Free(library);
-            return false;
+            return false;  // 失败路径由 finally 统一释放
+        }
+        finally
+        {
+            // 成功时句柄所有权已移交 bridge 实例——仅失败路径在此释放
+            if (bridge is null)
+                library.Dispose();
         }
     }
 
     public bool CreateSession(string sessionId, string tabId, ulong generation, ulong ttlSeconds) =>
         InvokeTwoStrings(sessionId, tabId, (session, tab) =>
-            _createSession(_broker, session, tab, generation, ttlSeconds) == 1);
+            _createSession(Broker, session, tab, generation, ttlSeconds) == 1);
 
     public bool DestroySession(string sessionId) =>
-        InvokeOneString(sessionId, session => _destroySession(_broker, session) == 1);
+        InvokeOneString(sessionId, session => _destroySession(Broker, session) == 1);
 
     public bool AdvanceDocumentGeneration(string sessionId, string tabId, ulong nextGeneration) =>
         InvokeTwoStrings(sessionId, tabId, (session, tab) =>
-            _advanceGeneration(_broker, session, tab, nextGeneration) == 1);
+            _advanceGeneration(Broker, session, tab, nextGeneration) == 1);
 
     public Decision EvaluateNavigation(string sessionId, string tabId, ulong generation, string rawUrl, string scope)
     {
         try
         {
             return InvokeFourStrings(sessionId, tabId, rawUrl, scope, (session, tab, url, requestedScope) =>
-                ParseDecision(_evaluateNavigation(_broker, session, tab, generation, url, requestedScope)));
+                ParseDecision(_evaluateNavigation(Broker, session, tab, generation, url, requestedScope)));
         }
         catch (Exception)
         {
@@ -146,7 +151,7 @@ public sealed class NativePolicyCoreBridge : IDisposable
         try
         {
             return InvokeFourStrings(sessionId, tabId, rawUrl, scope, (session, tab, url, requestedScope) =>
-                ParseDecision(_requestNavigationConfirmation(_broker, session, tab, generation, url, requestedScope)));
+                ParseDecision(_requestNavigationConfirmation(Broker, session, tab, generation, url, requestedScope)));
         }
         catch (Exception)
         {
@@ -160,7 +165,7 @@ public sealed class NativePolicyCoreBridge : IDisposable
         try
         {
             return InvokeThreeStrings(request.Nonce, rawUrl, scope, (nonce, url, requestedScope) =>
-                ParseDecision(_approveNavigationConfirmation(_broker, nonce, url, requestedScope)));
+                ParseDecision(_approveNavigationConfirmation(Broker, nonce, url, requestedScope)));
         }
         catch (Exception)
         {
@@ -173,7 +178,7 @@ public sealed class NativePolicyCoreBridge : IDisposable
     {
         try
         {
-            return InvokeOneString(request.Nonce, nonce => _rejectNavigationConfirmation(_broker, nonce) == 1);
+            return InvokeOneString(request.Nonce, nonce => _rejectNavigationConfirmation(Broker, nonce) == 1);
         }
         catch (Exception)
         {
@@ -197,7 +202,7 @@ public sealed class NativePolicyCoreBridge : IDisposable
                 action.Nonce,
                 action.PolicyVersion));
             return InvokeThreeStrings(actionJson, rawUrl, scope, (serializedAction, url, requestedScope) =>
-                ParseDecision(_consumeNavigation(_broker, serializedAction, url, requestedScope)) is Decision.Allow);
+                ParseDecision(_consumeNavigation(Broker, serializedAction, url, requestedScope)) is Decision.Allow);
         }
         catch (Exception)
         {
@@ -210,8 +215,8 @@ public sealed class NativePolicyCoreBridge : IDisposable
         if (_disposed)
             return;
         _disposed = true;
-        _brokerFree(_broker);
-        NativeLibrary.Free(_library);
+        _brokerHandle.Dispose();
+        _library.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -293,30 +298,35 @@ public sealed class NativePolicyCoreBridge : IDisposable
         finally { Marshal.FreeCoTaskMem(firstPointer); }
     }
 
+    // CS-206：逐个分配嵌套 try/finally——第二个及后续 Utf8 分配若抛
+    // （OOM），此前已分配的指针泄漏
     private static bool InvokeTwoStrings(string first, string second, Func<IntPtr, IntPtr, bool> operation)
     {
         var firstPointer = Utf8(first);
-        var secondPointer = Utf8(second);
-        try { return operation(firstPointer, secondPointer); }
-        finally
+        try
         {
-            Marshal.FreeCoTaskMem(firstPointer);
-            Marshal.FreeCoTaskMem(secondPointer);
+            var secondPointer = Utf8(second);
+            try { return operation(firstPointer, secondPointer); }
+            finally { Marshal.FreeCoTaskMem(secondPointer); }
         }
+        finally { Marshal.FreeCoTaskMem(firstPointer); }
     }
 
     private static T InvokeThreeStrings<T>(string first, string second, string third, Func<IntPtr, IntPtr, IntPtr, T> operation)
     {
         var firstPointer = Utf8(first);
-        var secondPointer = Utf8(second);
-        var thirdPointer = Utf8(third);
-        try { return operation(firstPointer, secondPointer, thirdPointer); }
-        finally
+        try
         {
-            Marshal.FreeCoTaskMem(firstPointer);
-            Marshal.FreeCoTaskMem(secondPointer);
-            Marshal.FreeCoTaskMem(thirdPointer);
+            var secondPointer = Utf8(second);
+            try
+            {
+                var thirdPointer = Utf8(third);
+                try { return operation(firstPointer, secondPointer, thirdPointer); }
+                finally { Marshal.FreeCoTaskMem(thirdPointer); }
+            }
+            finally { Marshal.FreeCoTaskMem(secondPointer); }
         }
+        finally { Marshal.FreeCoTaskMem(firstPointer); }
     }
 
     private static T InvokeFourStrings<T>(
@@ -327,17 +337,23 @@ public sealed class NativePolicyCoreBridge : IDisposable
         Func<IntPtr, IntPtr, IntPtr, IntPtr, T> operation)
     {
         var firstPointer = Utf8(first);
-        var secondPointer = Utf8(second);
-        var thirdPointer = Utf8(third);
-        var fourthPointer = Utf8(fourth);
-        try { return operation(firstPointer, secondPointer, thirdPointer, fourthPointer); }
-        finally
+        try
         {
-            Marshal.FreeCoTaskMem(firstPointer);
-            Marshal.FreeCoTaskMem(secondPointer);
-            Marshal.FreeCoTaskMem(thirdPointer);
-            Marshal.FreeCoTaskMem(fourthPointer);
+            var secondPointer = Utf8(second);
+            try
+            {
+                var thirdPointer = Utf8(third);
+                try
+                {
+                    var fourthPointer = Utf8(fourth);
+                    try { return operation(firstPointer, secondPointer, thirdPointer, fourthPointer); }
+                    finally { Marshal.FreeCoTaskMem(fourthPointer); }
+                }
+                finally { Marshal.FreeCoTaskMem(thirdPointer); }
+            }
+            finally { Marshal.FreeCoTaskMem(secondPointer); }
         }
+        finally { Marshal.FreeCoTaskMem(firstPointer); }
     }
 
     private sealed record NativeAction(
@@ -351,6 +367,40 @@ public sealed class NativePolicyCoreBridge : IDisposable
         [property: System.Text.Json.Serialization.JsonPropertyName("expires_at")] long ExpiresAt,
         [property: System.Text.Json.Serialization.JsonPropertyName("nonce")] string Nonce,
         [property: System.Text.Json.Serialization.JsonPropertyName("policy_version")] string PolicyVersion);
+
+    /// <summary>CS-207：原生库句柄 SafeHandle——关键终结兜底 NativeLibrary.Free。</summary>
+    private sealed class NativeLibraryHandle : System.Runtime.InteropServices.SafeHandle
+    {
+        internal NativeLibraryHandle(IntPtr pointer) : base(IntPtr.Zero, true) => SetHandle(pointer);
+
+        public override bool IsInvalid => handle == IntPtr.Zero;
+
+        protected override bool ReleaseHandle()
+        {
+            NativeLibrary.Free(handle);
+            return true;
+        }
+    }
+
+    /// <summary>CS-207：原生 broker 句柄 SafeHandle——关键终结兜底 brokerFree。</summary>
+    private sealed class NativeBrokerHandle : System.Runtime.InteropServices.SafeHandle
+    {
+        private readonly BrokerFreeDelegate _free;
+
+        internal NativeBrokerHandle(IntPtr pointer, BrokerFreeDelegate free) : base(IntPtr.Zero, true)
+        {
+            SetHandle(pointer);
+            _free = free;
+        }
+
+        public override bool IsInvalid => handle == IntPtr.Zero;
+
+        protected override bool ReleaseHandle()
+        {
+            _free(handle);
+            return true;
+        }
+    }
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate uint AbiVersionDelegate();

@@ -18,9 +18,13 @@ data class NativePolicyCoreGateResult(
     val denialCode: String? = null,
 ) {
     companion object {
-        fun disabled() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
-
-        fun enabled() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
+        /**
+         * AD-145（审计 2026-09-23 清单·A6 批）：双工厂合并——原 disabled()/
+         * enabled() 二者产出完全相同的放行结果（差异只在调用点的语义注释），
+         * 属无差别重复工厂。合并为单一 [allowed]；Disabled（构建未要求原生
+         * 核心）与 Enabled（原生核心探测通过）两种语境共用同一放行值。
+         */
+        fun allowed() = NativePolicyCoreGateResult(allowsPlatformBroker = true)
 
         fun block(denialCode: String) =
             NativePolicyCoreGateResult(
@@ -31,22 +35,72 @@ data class NativePolicyCoreGateResult(
 }
 
 object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
-    override fun probe(): NativePolicyCoreGateResult {
-        if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) return NativePolicyCoreGateResult.disabled()
-        val abiVersion =
-            try {
-                Native
-                    .load("aegis_policy_core", NativePolicyCoreAbi::class.java)
-                    .aegis_policy_core_abi_version()
-            } catch (_: LinkageError) {
-                return NativePolicyCoreGateResult.block("native_policy_core_unavailable")
-            } catch (_: Exception) {
-                return NativePolicyCoreGateResult.block("native_policy_core_probe_failed")
+    /**
+     * AD-080（2026-09-26 审计）：探测结果进程级缓存。probe 位于 Broker 每次
+     * 导航/审批评估的热路径（evaluateNavigation/approve/consume 等多处调用），
+     * 原实现每次都 Native.load 新建 JNA 代理并跨 JNI 探测；而探测结果由
+     * 编译期开关 + 库存在性/ABI 常量决定，进程内不变。缓存 block 结果与
+     * 门禁 fail-closed 语义一致（库缺失/ABI 失配是确定性状态，非瞬时故障）。
+     */
+    @Volatile
+    private var cachedResult: NativePolicyCoreGateResult? = null
+
+    override fun probe(): NativePolicyCoreGateResult = cachedResult ?: probeOnce().also { cachedResult = it }
+
+    private fun probeOnce(): NativePolicyCoreGateResult =
+        when (val probe = probeAbiVersion()) {
+            is AbiProbe.Disabled -> {
+                // Disabled = 构建未要求原生核心（放行）；Enabled = 探测通过（放行）
+                // ——二者共用 allowed() 单一工厂（AD-145）。
+                NativePolicyCoreGateResult.allowed()
             }
-        if (abiVersion != EXPECTED_C_ABI_VERSION) {
-            return NativePolicyCoreGateResult.block("native_policy_core_abi_mismatch")
+
+            is AbiProbe.Unavailable -> {
+                NativePolicyCoreGateResult.block("native_policy_core_unavailable")
+            }
+
+            is AbiProbe.Failed -> {
+                NativePolicyCoreGateResult.block("native_policy_core_probe_failed")
+            }
+
+            is AbiProbe.Version -> {
+                if (probe.value == EXPECTED_C_ABI_VERSION) {
+                    NativePolicyCoreGateResult.allowed()
+                } else {
+                    NativePolicyCoreGateResult.block("native_policy_core_abi_mismatch")
+                }
+            }
         }
-        return NativePolicyCoreGateResult.enabled()
+
+    /** ABI 探测单出口（try/catch 表达式）——错误码分类保留原三态语义。 */
+    private fun probeAbiVersion(): AbiProbe =
+        if (!BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            AbiProbe.Disabled
+        } else {
+            try {
+                AbiProbe.Version(
+                    Native
+                        .load("aegis_policy_core", NativePolicyCoreAbi::class.java)
+                        .aegis_policy_core_abi_version(),
+                )
+            } catch (_: LinkageError) {
+                AbiProbe.Unavailable
+            } catch (_: Exception) {
+                AbiProbe.Failed
+            }
+        }
+
+    /** 探测结果分类（Disabled = 构建未要求原生核心，直通 Kotlin Broker）。 */
+    private sealed interface AbiProbe {
+        data object Disabled : AbiProbe
+
+        data object Unavailable : AbiProbe
+
+        data object Failed : AbiProbe
+
+        data class Version(
+            val value: Int,
+        ) : AbiProbe
     }
 }
 

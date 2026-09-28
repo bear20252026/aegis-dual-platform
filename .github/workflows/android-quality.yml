@@ -5,9 +5,23 @@
 name: Android-Quality
 
 "on":
-  push: {}
+  push:
+    # PY-206（2026-09-26 审计）：push 触发补 paths 过滤——docs 改动不再
+    # 全量跑 Gradle 门禁（PR 触发面保持不过滤）
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-quality.yml'
   pull_request: {}
   workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+
+# PY-044..051：同分支重复 push/PR 取消旧运行（节省 runner 与排队）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   android-quality:
@@ -38,25 +52,42 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**', 'android/gradle/libs.versions.toml') }}
+          # AD-243（2026-09-26 审计）：hashFiles 追加版本目录 gradle/libs.versions.toml
+          # ——版本目录变更此前不失效缓存，升级依赖后仍复用旧包
           restore-keys: gradle-${{ runner.os }}-
 
       - name: ktlint 检查（0 错误门禁）
         run: ./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck --no-daemon
 
+      # PY-065：verify_versions 依赖 runner 预装 Python（镜像变更即碎）——显式固化
+      - name: 安装 Python（verify_versions 依赖——不再依赖 runner 预装）
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
       - name: Verify shared product version declarations
         run: python ../scripts/verify_versions.py
 
       - name: detekt 检查（基线门禁：仅新问题失败）
         run: ./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt --no-daemon
 
-      - name: 单元测试（broker 授权生命周期 + app 搜索归一）
-        run: ./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest --no-daemon
+      # AD-066（2026-09-24 审计）：Android Lint 门禁此前缺失——安全问题
+      # （明文/导出组件/备份等）零拦截。新引入错误失败；存量问题如有噪音
+      # 走 lint baseline（app/lint-baseline.xml）收敛。
+      - name: Android Lint 门禁（:app:lintDebug）
+        run: ./gradlew.bat :app:lintDebug --no-daemon
 
-      - name: 上传 detekt 报告（排障用）
+      - name: 单元测试（broker 授权生命周期 + app 搜索归一 + webview-adapter 客户端状态机）
+        run: ./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest :webview-adapter:testDebugUnitTest --no-daemon
+
+      - name: 上传 detekt 报告（排障用——PY-066 四模块聚合）
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: detekt-report
-          path: android/app/build/reports/detekt/
-          if-no-files-found: ignore
+          path: |
+            android/app/build/reports/detekt/
+            android/broker/build/reports/detekt/
+            android/webview-adapter/build/reports/detekt/
+            android/contracts/build/reports/detekt/
+          if-no-files-found: warn

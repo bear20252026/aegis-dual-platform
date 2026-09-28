@@ -86,8 +86,8 @@
         </Border.Effect>
         <StackPanel>
           <DockPanel>
-            <Button Style="{StaticResource NavButton}" Content="‹" DockPanel.Dock="Left" Click="PrevMonth_Click" ToolTip="上个月"/>
-            <Button Style="{StaticResource NavButton}" Content="›" DockPanel.Dock="Right" Click="NextMonth_Click" ToolTip="下个月"/>
+            <Button x:Name="PrevMonthButton" Style="{StaticResource NavButton}" Content="‹" DockPanel.Dock="Left" Click="PrevMonth_Click" ToolTip="上个月"/>
+            <Button x:Name="NextMonthButton" Style="{StaticResource NavButton}" Content="›" DockPanel.Dock="Right" Click="NextMonth_Click" ToolTip="下个月"/>
             <TextBlock x:Name="MonthTitle" HorizontalAlignment="Center" VerticalAlignment="Center"
                        Foreground="{DynamicResource TextPrimaryBrush}" FontSize="14" FontWeight="SemiBold"/>
           </DockPanel>

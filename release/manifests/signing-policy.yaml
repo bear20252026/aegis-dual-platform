@@ -1,17 +1,33 @@
 # 阶段 E（蓝图 release/manifests/signing-policy.yaml）：签名策略
-# 依据：BAUER GROUP CRA 规范（cosign sign-blob/verify-blob——keyless 公开项目
-# OIDC——certificate-identity 校验）+ 张显达（部署侧强制校验签名与哈希——
-# 失败即阻断——证据包）
+# 依据：BAUER GROUP CRA 规范（发布制品逐件签名验证——失败即阻断——证据包）
+# + 张显达（部署侧强制校验签名与哈希——失败即阻断——证据包）
 #
 # 所有发布制品（二进制/SBOM/清单）必须签名；验证失败终止发布（fail-closed）。
+#
+# SP-147（2026-09-26 审计）：本策略此前声明 signing_tool: cosign +
+# keyless_oidc_issuer + certificate_identity，而实现（release.yml verify-gate
+# 的 `gh attestation verify`）全走 GitHub artifact attestations——策略文件
+# 与实现工具/身份字段零一致性检查（口径漂移）。现统一口径：现役签名工具
+# 改述为 gh-attestation，身份字段对齐 --signer-workflow 承诺约束；cosign
+# 路线降级为 planned_* 字段（未接线——消除"声明 cosign、执行 gh"的假承诺）。
+# 取舍：不改实现去凑旧策略（cosign 接线无排期），而让策略描述现实。
 
 policy:
-  version: "1.0"
-  signing_tool: cosign            # Sigstore（keyless 或密钥——按项目公开性）
-  keyless_oidc_issuer: "https://token.actions.githubusercontent.com"
-  # 验证绑定的关键字符串（cosign 2.x——certificate-identity 必须固定——不扩大信任集）
-  certificate_identity: "https://github.com/bear20252026/aegis-dual-platform/.github/workflows/release.yml@refs/tags/v*"
-  threshold: 2                    # 阈值签名（多 key——与 update_verifier 一致）
+  version: "1.1"
+  # 现役签名工具：GitHub artifact attestations（Sigstore 背书——keyless OIDC
+  # 链与 cosign keyless 同源）。由 release.yml verify-gate 逐工件
+  # `gh attestation verify --owner <owner>` 校验（--predicate-type/
+  # --signer-workflow 固定接入见 SP-143/PY-176，CI 批次落地）。
+  signing_tool: gh-attestation
+  # SP-147：签名身份承诺约束（gh attestation 口径）——attestation 的 signer
+  # workflow 必须锁定本仓库发布编排流（tags 触发）；部署侧
+  # release/tools/verify_provenance.py 的 --signer-workflow 参数取同一值。
+  signer_workflow: "https://github.com/bear20252026/aegis-dual-platform/.github/workflows/release.yml@refs/tags/v*"
+  # 规划中（planned，未接线）——启用前不得声称已执行
+  planned_signing_tool: cosign
+  planned_keyless_oidc_issuer: "https://token.actions.githubusercontent.com"
+  # 阈值签名（多 key——与 update_verifier 一致；verify_manifest.py 由此单源读取）
+  threshold: 2
   rollback:
     protection: required          # 防回滚（版本单调——SemVer 字符串——P0-04）
     keep_previous_artifacts: true # 回滚保留上一版制品与签名（张显达——证据包）

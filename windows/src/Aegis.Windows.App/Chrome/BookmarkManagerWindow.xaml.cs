@@ -6,13 +6,17 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using Aegis.Windows.Core.Bookmarks;
+using Aegis.Windows.Core.Security;
 
 /// <summary>书签管理器窗口：搜索/编辑标题/打开/删除/清空。数据层参数绑定。</summary>
 public partial class BookmarkManagerWindow : Window
 {
+    private const int TitleMaxLength = 256;
+
     private readonly BookmarkStore _bookmarks;
     private readonly MainWindow? _owner;
     private readonly ObservableCollection<BookmarkRow> _rows = new();
+    private System.Windows.Threading.DispatcherTimer? _searchDebounce;
 
     public BookmarkManagerWindow(BookmarkStore bookmarks, MainWindow? owner = null)
     {
@@ -20,65 +24,170 @@ public partial class BookmarkManagerWindow : Window
         _bookmarks = bookmarks;
         _owner = owner;
         BookmarkList.ItemsSource = _rows;
+        BookmarkList.KeyDown += BookmarkList_KeyDown;
+        // CS-225：编辑弹层键盘路径——Enter 保存、Esc 取消（此前仅鼠标可达）
+        EditTitle.KeyDown += EditorField_KeyDown;
+        EditUrl.KeyDown += EditorField_KeyDown;
         Loaded += (_, _) => Reload("");
+    }
+
+    /// <summary>主窗口主题联动（浅色模式下不再永远深色）。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
+
+    protected override void OnClosed(EventArgs e)
+    {
+        // CS-032：关闭时停防抖定时器（避免 timer 持窗口引用延迟回收）
+        _searchDebounce?.Stop();
+        base.OnClosed(e);
+    }
+
+    /// <summary>CS-165：过滤谓词提纯直测；CS-162：OrdinalIgnoreCase 直判
+    /// ——此前每行两串 ToLowerInvariant 堆分配。</summary>
+    internal static bool MatchesQuery(string title, string url, string? query)
+    {
+        if (string.IsNullOrEmpty(query))
+            return true;
+        return title.Contains(query, StringComparison.OrdinalIgnoreCase)
+            || url.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
     private void Reload(string query)
     {
         _rows.Clear();
-        var q = query.Trim().ToLowerInvariant();
-        foreach (var b in _bookmarks.All())
+        var q = query.Trim();
+        var all = _bookmarks.All();
+        foreach (var b in all)
         {
-            if (!string.IsNullOrEmpty(q)
-                && !b.Title.ToLowerInvariant().Contains(q)
-                && !b.Url.ToLowerInvariant().Contains(q))
-                continue;
-            _rows.Add(new BookmarkRow(b.Id, b.Title, b.Url));
+            if (MatchesQuery(b.Title, b.Url, q))
+                _rows.Add(new BookmarkRow(b.Id, b.Title, b.Url));
         }
-        BookmarkList.ItemsSource = _rows;
-        SummaryText.Text = $"共 {_rows.Count} 个书签";
+        // CS-166：筛选态下「共 N」语义误导 → 明示 匹配 N / 共 M
+        SummaryText.Text = string.IsNullOrEmpty(q)
+            ? $"共 {_rows.Count} 个书签"
+            : $"匹配 {_rows.Count} / 共 {all.Count} 个书签";
         SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
-        Reload(SearchBox.Text);
+        // CS-032（审计 2026-09-25）：200ms 防抖——此前每键入一字符即全表加载
+        //（All() 每次全量 SELECT + 过滤），长书签列表输入卡顿
+        if (_searchDebounce is null)
+        {
+            _searchDebounce = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(200)
+            };
+            _searchDebounce.Tick += (_, _) =>
+            {
+                _searchDebounce?.Stop();
+                Reload(SearchBox.Text);
+            };
+        }
+        _searchDebounce.Stop();
+        _searchDebounce.Start();
     }
 
     private void Edit_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: BookmarkRow row })
         {
-            EditPanel.Visibility = Visibility.Visible;
-            EditTitle.Text = row.Title;
-            EditUrl.Text = row.Url;
-            _editingId = row.Id;
-            EditTitle.Focus();
-            EditTitle.SelectAll();
+            OpenEditor(row);
         }
     }
 
-    private void EditCancel_Click(object sender, RoutedEventArgs e) =>
+    /// <summary>打开编辑弹层：同时屏蔽背后列表交互（此前无遮罩——编辑期间仍可
+    /// 点列表换目标，_editingId 与面板内容错位）。</summary>
+    private void OpenEditor(BookmarkRow row)
+    {
+        EditPanel.Visibility = Visibility.Visible;
+        BookmarkList.IsHitTestVisible = false;
+        EditTitle.Text = row.Title;
+        EditUrl.Text = row.Url;
+        _editingId = row.Id;
+        EditTitle.Focus();
+        EditTitle.SelectAll();
+    }
+
+    private void CloseEditor()
+    {
         EditPanel.Visibility = Visibility.Collapsed;
+        BookmarkList.IsHitTestVisible = true;
+        _editingId = 0;
+    }
+
+    private void EditCancel_Click(object sender, RoutedEventArgs e) => CloseEditor();
+
+    private void EditorField_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case Key.Enter:
+                EditSave_Click(sender, new RoutedEventArgs());
+                e.Handled = true;
+                break;
+            case Key.Escape:
+                CloseEditor();
+                e.Handled = true;
+                break;
+        }
+    }
 
     private void EditSave_Click(object sender, RoutedEventArgs e)
     {
         var title = EditTitle.Text.Trim();
-        if (string.IsNullOrEmpty(title) || _editingId <= 0)
+        if (string.IsNullOrEmpty(title))
+        {
+            // 空标题不再静默 return——给用户可见反馈
+            EditTitle.Focus();
             return;
-        _bookmarks.Rename(_editingId, title);
-        EditPanel.Visibility = Visibility.Collapsed;
+        }
+        if (title.Length > TitleMaxLength)
+        {
+            // CS-163：代理对安全截断——emoji 标题不再劈成乱码半字
+            var cut = TitleMaxLength;
+            if (char.IsHighSurrogate(title[cut - 1]))
+                cut--;
+            title = title[..cut];
+        }
+        if (_editingId > 0)
+        {
+            // CS-164：库层异常（锁/磁盘）不再裸上抛炸窗口——可见反馈
+            try { _ = _bookmarks.Rename(_editingId, title); }
+            catch (Exception ex)
+            {
+                MessageBox.Show(this, $"重命名失败：{ex.Message}", "错误",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+        }
+        CloseEditor();
         Reload(SearchBox.Text);
+        _owner?.RefreshBookmarkBar();
     }
 
     private void Delete_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: BookmarkRow row })
+            DeleteBookmark(row);
+    }
+
+    /// <summary>CS-305（2026-09-26 审计）：删除书签单源——鼠标与键盘 Delete
+    /// 两路共用（含 SecurityLog 留痕 + 异常反馈 + Reload；此前键盘路径零
+    /// 留痕——CS-290 只补了鼠标路径一半）。</summary>
+    private void DeleteBookmark(BookmarkRow row)
+    {
+        try { _ = _bookmarks.RemoveById(row.Id); }
+        catch (Exception ex)
         {
-            _bookmarks.RemoveById(row.Id);
-            Reload(SearchBox.Text);
+            MessageBox.Show(this, $"删除失败：{ex.Message}", "错误",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
         }
+        Core.Security.SecurityLog.Write($"[bookmark] 已删除书签 id={row.Id}");  // CS-290/305
+        Reload(SearchBox.Text);
+        _owner?.RefreshBookmarkBar();
     }
 
     private void ClearAll_Click(object sender, RoutedEventArgs e)
@@ -87,14 +196,41 @@ public partial class BookmarkManagerWindow : Window
             "清空书签", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (confirmed != MessageBoxResult.Yes)
             return;
-        _bookmarks.ClearAll();
+        // CS-164：清空失败可见反馈
+        try { _bookmarks.ClearAll(); }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, $"清空失败：{ex.Message}", "错误",
+                MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+        Core.Security.SecurityLog.Write("[bookmark] 已清空全部书签");  // CS-290
         Reload(SearchBox.Text);
+        _owner?.RefreshBookmarkBar();
     }
+
+    private void OpenBookmark(BookmarkRow row) => _owner?.OpenInActiveTab(row.Url);
 
     private void OpenBookmark_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
     {
         if (sender is FrameworkElement { DataContext: BookmarkRow row })
-            _owner?.OpenInActiveTab(row.Url);
+            OpenBookmark(row);
+    }
+
+    /// <summary>键盘可达：Enter 打开选中书签（此前仅鼠标点击可达）。</summary>
+    private void BookmarkList_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter && BookmarkList.SelectedItem is BookmarkRow row)
+        {
+            OpenBookmark(row);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Delete && BookmarkList.SelectedItem is BookmarkRow del)
+        {
+            // CS-305：键盘删除路径共用单源（留痕/反馈/Reload 与鼠标一致）
+            DeleteBookmark(del);
+            e.Handled = true;
+        }
     }
 
     private long _editingId;

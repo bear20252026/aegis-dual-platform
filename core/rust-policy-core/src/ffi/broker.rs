@@ -35,11 +35,23 @@ const MAX_ISSUED_ACTIONS: usize = 50_000;
 /// 原 120 为硬编码字面量（无语义名、多处漂移风险）。注意与「会话 TTL」
 /// 是两个概念：这是签发授权的可消费窗口，超期后 consume 过期拒绝。
 const ACTION_EXPIRY_SECONDS: u64 = 120;
-
+/// 审计整改（2026-09-07）：待审批导航账本上限。此前无容量/清理——可被
+/// 待审批请求堆叠造成内存 DoS；满则 fail-closed 拒绝（镜像 MAX_ISSUED_ACTIONS）。
+const MAX_PENDING_APPROVALS: usize = 1024;
 /// P1-11 修复（全量复审 2026-09-01）：FFI create_session 的 TTL 下限（秒）。
 /// 宿主传 0 会得到"返回成功、即刻过期"的静默失效会话——钳到下限保底。
-/// 上限维持宿主自由（会话暴露面由 M-16 会话池 fail-closed 容量约束）。
 const MIN_SESSION_TTL_SECONDS: u64 = 30;
+/// RS-158（审计 2026-09-25）：FFI create_session 的 TTL 上限（秒，24h）——
+/// 与下限对称的钳制口径。此前上限自由：宿主可传 u64::MAX 使会话近乎永生，
+/// 会话与 nonce/授权账本的驻留暴露面随之无界。超过钳到上限；常驻 persona
+/// 会话按宿主约定应显式续期（RS-033 replace 语义）而非一次签发永生会话。
+/// 会话总量的内存上限另由 M-16 会话池 fail-closed 容量约束（两个正交维度）。
+const MAX_SESSION_TTL_SECONDS: u64 = 86_400;
+/// RS-223（2026-09-26 审计）：FFI create_session 的键长度上限（字节）——
+/// 与 core 层 session_state::from_json 的 MAX_TAB_ID_LEN=256 对齐。此前仅
+/// 查空串：会话池 1024 × 64KB 双键 ≈128MB 键驻留面（宿主 FFI 边界是
+/// 键长度的第一道防线，core 层上限管不到本入口）。
+const MAX_SESSION_KEY_BYTES: usize = 256;
 
 impl IssuedAuthorization {
     fn session_id(&self) -> &str {
@@ -69,10 +81,9 @@ impl FfiBroker {
 
     /// 评估导航意图（URL 解析 + 会话验证 → FfiDecision——fail-closed）。
     ///
-    /// ⚠️ H-7 审计注记（2026-08-31）：本通路执行会话/代际/nonce 验证，
-    /// 不含 policy.evaluate / capability.validate（后者默认 deny-all，
-    /// 接线属产品级变更——见 broker.rs 模块文档 H-7 注记）。FFI 语义由
-    /// 本文件 ffi_navigation_tests 回归测试锁定。
+    /// 职责边界（H-7）：本通路仅执行会话/代际/nonce 验证，policy.evaluate /
+    /// capability.validate 未接入 FFI 通路——单一事实源见 broker.rs 模块文档
+    /// H-7 审计注记，FFI 语义由本文件 ffi_navigation_tests 回归测试锁定。
     pub fn evaluate_navigation(
         &self,
         session_id: String,
@@ -98,9 +109,11 @@ impl FfiBroker {
             Ok(value) => value,
             Err(reason) => return FfiDecision::Deny { reason },
         };
-        let expires_at = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(duration) => duration.as_secs().saturating_add(ACTION_EXPIRY_SECONDS),
-            Err(_) => {
+        // RS-220（2026-09-26 审计）：UNIX 秒经 broker::now_unix_secs 单源
+        // （此前本文件 3 处内联 SystemTime::now——时钟不可用语义各自维护）
+        let expires_at = match crate::broker::now_unix_secs() {
+            Some(secs) => secs.saturating_add(ACTION_EXPIRY_SECONDS),
+            None => {
                 return FfiDecision::Deny {
                     reason: FfiDenyReason {
                         code: "system_clock".into(),
@@ -110,14 +123,16 @@ impl FfiBroker {
                 };
             }
         };
+        // RS-160（审计 2026-09-25）：参数在此处 move 进 action——三者在
+        // 本函数后续不再使用，此前多余的 .clone() 每导航三次堆分配
         let action = AuthorizedAction {
-            session_id: session_id.clone(),
-            tab_id: tab_id.clone(),
+            session_id,
+            tab_id,
             document_generation: generation,
             origin: canonical_url.origin.clone(),
             method: "GET".into(),
             canonical_parameters: canonical_url.canonical_parameters,
-            scope: scope.clone(),
+            scope,
             expires_at,
             nonce,
             policy_version: self.policy_version.clone(),
@@ -127,17 +142,20 @@ impl FfiBroker {
             ),
         };
         // 会话验证（fail-closed）
+        // RS-221（2026-09-26 审计）：validate_action 成功路径 Ok(())——
+        // 此前 Decision::Allow(action.clone()) 每导航克隆整个授权结构
+        //（12 个 String）；此处直接继续消费已持有的 action
         let guard = self.inner.lock().map_err(|_| ()).ok();
-        let decision = match guard {
+        let verdict = match guard {
             Some(g) => g.validate_action(&action),
-            None => Decision::Deny(DenyReason {
+            None => Err(DenyReason {
                 code: "broker_lock".into(),
                 detail: "Broker 锁获取失败".into(),
                 explanation: "denied — broker lock poisoned".into(),
             }),
         };
-        match decision {
-            Decision::Allow(authorized) => match self.issued_actions.lock() {
+        match verdict {
+            Ok(()) => match self.issued_actions.lock() {
                 Ok(mut issued_actions) => {
                     // M-15 修复（审计 2026-08-31）：账本容量 fail-closed
                     if !ledger_can_admit(&mut issued_actions) {
@@ -148,11 +166,11 @@ impl FfiBroker {
                         );
                     }
                     issued_actions.insert(
-                        authorized.nonce.clone(),
-                        IssuedAuthorization::Pending(Box::new(authorized.clone())),
+                        action.nonce.clone(),
+                        IssuedAuthorization::Pending(Box::new(action.clone())),
                     );
                     FfiDecision::Allow {
-                        action: FfiAuthorizedAction::from(authorized),
+                        action: FfiAuthorizedAction::from(action),
                     }
                 }
                 Err(_) => FfiDecision::Deny {
@@ -163,7 +181,13 @@ impl FfiBroker {
                     },
                 },
             },
-            other => FfiDecision::from(other),
+            Err(reason) => FfiDecision::Deny {
+                reason: FfiDenyReason {
+                    code: reason.code,
+                    detail: reason.detail,
+                    explanation: reason.explanation,
+                },
+            },
         }
     }
 
@@ -212,6 +236,22 @@ impl FfiBroker {
         };
         match self.pending_navigation_approvals.lock() {
             Ok(mut pending_approvals) => {
+                // 审计整改：有界账本——满则 fail-closed 拒绝（此前无上限，
+                // 可被待审批请求堆叠造成内存 DoS）
+                if pending_approvals.len() >= MAX_PENDING_APPROVALS {
+                    // RS-035（审计 2026-09-24）：满时先清理已过期待审批——
+                    // 此前过期请求永久驻留，1024 满后新请求被自拒绝服务
+                    // RS-220：时刻经 broker::now_unix_secs 单源
+                    let now = crate::broker::now_unix_secs().unwrap_or(u64::MAX);
+                    pending_approvals.retain(|_, action| action.expires_at >= now);
+                    if pending_approvals.len() >= MAX_PENDING_APPROVALS {
+                        return ffi_deny(
+                            "approval_ledger",
+                            "待审批账本已达上限（1024）",
+                            "denied — pending approval ledger at capacity",
+                        );
+                    }
+                }
                 pending_approvals.insert(authorized.nonce.clone(), authorized);
                 FfiDecision::RequireConfirmation { request }
             }
@@ -258,28 +298,32 @@ impl FfiBroker {
         let Some(canonical_url) = crate::origin::canonicalize_external(&raw_url) else {
             return deny_url(raw_url);
         };
-        if authorized.method != "GET"
-            || authorized.scope != scope
-            || authorized.origin != canonical_url.origin
-            || authorized.canonical_parameters != canonical_url.canonical_parameters
-        {
+        if !matches_navigation_binding(&authorized, &scope, &canonical_url) {
             return ffi_deny(
                 "approval_binding_mismatch",
                 "审批请求与当前导航参数不匹配",
                 "denied — approval URL or scope no longer matches the pending request",
             );
         }
-        let decision = match self.inner.lock() {
+        // RS-221：validate_action 成功路径 Ok(())——继续消费已持有的
+        // authorized（此前 Allow 载荷是整结构克隆）
+        let verdict = match self.inner.lock() {
             Ok(broker) => broker.validate_action(&authorized),
-            Err(_) => Decision::Deny(DenyReason {
+            Err(_) => Err(DenyReason {
                 code: "broker_lock".into(),
                 detail: "Broker 锁获取失败".into(),
                 explanation: "denied — broker lock poisoned".into(),
             }),
         };
-        let Decision::Allow(authorized) = decision else {
-            return FfiDecision::from(decision);
-        };
+        if let Err(reason) = verdict {
+            return FfiDecision::Deny {
+                reason: FfiDenyReason {
+                    code: reason.code,
+                    detail: reason.detail,
+                    explanation: reason.explanation,
+                },
+            };
+        }
         match self.issued_actions.lock() {
             Ok(mut issued_actions) => {
                 // M-15 修复（审计 2026-08-31）：账本容量 fail-closed——
@@ -322,7 +366,15 @@ impl FfiBroker {
     ///
     /// P1-11 修复（全量复审 2026-09-01）：TTL 下限钳制——宿主传 0 会
     /// 得到"签发成功、即刻过期"的静默失效会话（fail-open 陷阱面）。
-    /// 钳到 MIN_SESSION_TTL_SECONDS 保底；上限维持宿主自由。
+    /// 钳到 MIN_SESSION_TTL_SECONDS 保底；RS-158：上限同样钳制到
+    /// MAX_SESSION_TTL_SECONDS（24h）——超长 TTL 会话近乎永生，扩大
+    /// 授权/nonce 账本驻留暴露面。
+    ///
+    /// RS-159：空 session_id 拒绝（fail-closed，与 contracts Action schema
+    /// 的 minLength 1 对齐）——空 id 会话即匿名共享会话，任何传空 id 的
+    /// 调用方都会落到同一会话，破坏 persona 隔离语义。
+    /// RS-223：session_id/tab_id 键长度上限 256 字节（与 core 层
+    /// MAX_TAB_ID_LEN 对齐）——超长键拒绝，封堵会话池键驻留内存放大面。
     pub fn create_session(
         &self,
         session_id: String,
@@ -330,7 +382,13 @@ impl FfiBroker {
         generation: u64,
         ttl_seconds: u64,
     ) -> bool {
-        let effective_ttl = ttl_seconds.max(MIN_SESSION_TTL_SECONDS);
+        if session_id.is_empty() {
+            return false;
+        }
+        if session_id.len() > MAX_SESSION_KEY_BYTES || tab_id.len() > MAX_SESSION_KEY_BYTES {
+            return false;
+        }
+        let effective_ttl = ttl_seconds.clamp(MIN_SESSION_TTL_SECONDS, MAX_SESSION_TTL_SECONDS);
         match self.inner.lock() {
             // M-16 修复（审计 2026-08-31）：会话池满（fail-closed）时
             // 返回 false——原实现无条件 true，掩盖了容量拒绝
@@ -393,7 +451,6 @@ impl FfiBroker {
     /// 文本，不参与权限判定）。此前用 `*issued == action`（含 explanation），
     /// 而托管端序列化 NativeAction 不携带 explanation，导致合法一次消费被
     /// 误判 action_not_issued（"安装版崩溃"排查中暴露的确定性缺陷）。
-
     pub fn consume_navigation(
         &self,
         action: FfiAuthorizedAction,
@@ -404,11 +461,7 @@ impl FfiBroker {
             return deny_url(raw_url);
         };
         let action = AuthorizedAction::from(action);
-        if action.method != "GET"
-            || action.scope != scope
-            || action.origin != canonical_url.origin
-            || action.canonical_parameters != canonical_url.canonical_parameters
-        {
+        if !matches_navigation_binding(&action, &scope, &canonical_url) {
             return FfiDecision::Deny {
                 reason: FfiDenyReason {
                     code: "action_binding_mismatch".into(),
@@ -452,36 +505,49 @@ impl FfiBroker {
                 };
             }
         }
-        let decision = match self.inner.lock() {
+        // RS-221：validate_and_consume 成功路径 Ok(())——仅消费判别，
+        // Allow 载荷由已持有的 action 构造（此前 Decision::Allow 整结构克隆）
+        let verdict = match self.inner.lock() {
             Ok(mut broker) => broker.validate_and_consume(&action),
-            Err(_) => Decision::Deny(DenyReason {
+            Err(_) => Err(DenyReason {
                 code: "broker_lock".into(),
                 detail: "Broker 锁获取失败".into(),
                 explanation: "denied — broker lock poisoned".into(),
             }),
         };
-        if matches!(decision, Decision::Allow(_)) {
-            if let Ok(mut issued_actions) = self.issued_actions.lock() {
-                // M-15 修复（审计 2026-08-31）：Consumed 记录同样受账本
-                // 上限约束（惰性清理过期 Pending 后仍满 → 本次导航转为
-                // Deny——nonce 已被 validate_and_consume 消费，重放天然
-                // 失败，fail-closed 语义保持闭合）
-                if !ledger_can_admit(&mut issued_actions) {
-                    return ffi_deny(
-                        "authorization_ledger_full",
-                        "授权账本已达上限（惰性清理后仍满）",
-                        "denied — authorization ledger exhausted its fail-closed capacity",
+        match verdict {
+            Ok(()) => {
+                if let Ok(mut issued_actions) = self.issued_actions.lock() {
+                    // M-15 修复（审计 2026-08-31）：Consumed 记录同样受账本
+                    // 上限约束（惰性清理过期 Pending 后仍满 → 本次导航转为
+                    // Deny——nonce 已被 validate_and_consume 消费，重放天然
+                    // 失败，fail-closed 语义保持闭合）
+                    if !ledger_can_admit(&mut issued_actions) {
+                        return ffi_deny(
+                            "authorization_ledger_full",
+                            "授权账本已达上限（惰性清理后仍满）",
+                            "denied — authorization ledger exhausted its fail-closed capacity",
+                        );
+                    }
+                    issued_actions.insert(
+                        action.nonce.clone(),
+                        IssuedAuthorization::Consumed {
+                            session_id: action.session_id.clone(),
+                        },
                     );
                 }
-                issued_actions.insert(
-                    action.nonce.clone(),
-                    IssuedAuthorization::Consumed {
-                        session_id: action.session_id.clone(),
-                    },
-                );
+                FfiDecision::Allow {
+                    action: FfiAuthorizedAction::from(action),
+                }
             }
+            Err(reason) => FfiDecision::Deny {
+                reason: FfiDenyReason {
+                    code: reason.code,
+                    detail: reason.detail,
+                    explanation: reason.explanation,
+                },
+            },
         }
-        FfiDecision::from(decision)
     }
 }
 
@@ -502,17 +568,38 @@ fn same_binding(a: &AuthorizedAction, b: &AuthorizedAction) -> bool {
         && a.policy_version == b.policy_version
 }
 
+/// RS-184（审计 2026-09-25）：导航绑定比较单源——approve 与 consume 的
+/// 四属性清单此前重复内联两处（287/441 行形态一致），新增绑定属性时
+/// 漏改一处即两端口径分裂（binding_mismatch 与放行互斥失败）。与
+/// [`same_binding`] 同口径：explanation 不参与比较（M-15）。
+fn matches_navigation_binding(
+    action: &AuthorizedAction,
+    scope: &str,
+    canonical_url: &crate::origin::CanonicalExternalUrl,
+) -> bool {
+    action.method == "GET"
+        && action.scope == scope
+        && action.origin == canonical_url.origin
+        && action.canonical_parameters == canonical_url.canonical_parameters
+}
+
 /// M-15 修复（审计 2026-08-31）：授权账本容量门（fail-closed）。
 /// 未达上限直接放行；达上限先惰性清理已过期的 Pending 记录
 /// （Consumed 记录保留到会话撤销，不参与清理），仍满则拒绝登记。
+///
+/// RS-136（审计 2026-09-25）：原子性契约——本函数与随后的
+/// `issued_actions.insert(...)` **必须处在同一次
+/// `issued_actions.lock()` 持有窗口内**（检查-插入不可跨锁拆分）。
+/// 拆分即 TOCTOU：两个并发 evaluate 在各自持锁窗口内检查通过、
+/// 交错插入，账本容量被突破（M-15 fail-closed 语义失效）。现有
+/// 三处调用点（evaluate / approve / consume）均满足单锁窗口。
 fn ledger_can_admit(issued: &mut HashMap<String, IssuedAuthorization>) -> bool {
     if issued.len() < MAX_ISSUED_ACTIONS {
         return true;
     }
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(u64::MAX);
+    // RS-220：时刻经 broker::now_unix_secs 单源（时钟不可用 → u64::MAX
+    // 即「全部 Pending 视为已过期」——fail-closed 方向与原内联一致）
+    let now = crate::broker::now_unix_secs().unwrap_or(u64::MAX);
     issued.retain(|_, authorization| match authorization {
         IssuedAuthorization::Pending(action) => action.expires_at >= now,
         IssuedAuthorization::Consumed { .. } => true,
@@ -542,19 +629,38 @@ fn ffi_deny(code: &str, detail: &str, explanation: &str) -> FfiDecision {
 
 fn generate_nonce() -> Result<String, FfiDenyReason> {
     let mut bytes = [0u8; 32];
-    getrandom::getrandom(&mut bytes).map_err(|error| FfiDenyReason {
+    // RS-153：getrandom 0.3 API——getrandom() 更名 fill()
+    // RS-199（审计 2026-09-25）：熵不足路径参数化——填充与错误映射/
+    // 编码拆分后，失败分支（此前完全不可注入、零测试）可单测：
+    // entropy_error 的拒绝码与 nonce_from_entropy 的编码契约独立锁定
+    getrandom::fill(&mut bytes).map_err(entropy_error)?;
+    Ok(nonce_from_entropy(&bytes))
+}
+
+/// RS-199：熵获取失败的类型化拒绝构造（code/explanation 单源）。
+fn entropy_error(error: getrandom::Error) -> FfiDenyReason {
+    FfiDenyReason {
         code: "entropy_unavailable".into(),
         detail: "无法生成安全随机 nonce".into(),
         explanation: format!("denied — operating-system entropy unavailable: {error}"),
-    })?;
-    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+    }
+}
+
+/// RS-199：熵字节 → 64 字符小写 hex nonce（RS-137 查表单缓冲——零临时分配）。
+fn nonce_from_entropy(bytes: &[u8; 32]) -> String {
+    const HEX_TABLE: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(64);
+    for byte in bytes {
+        out.push(HEX_TABLE[(byte >> 4) as usize] as char);
+        out.push(HEX_TABLE[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 // ============================ H-7 审计回归测试 ============================ //
-// 审计 2026-08-31：FfiBroker 导航通路执行的是「会话/代际/nonce」验证，
-// 策略层（PolicyEngine）与能力层（CapabilityRegistry）仅在嵌入式宿主直接
-// 使用 ContextBroker::evaluate 时生效（见 broker.rs 模块文档）。以下测试
-// 锁定 FFI 通路的 fail-closed 语义，防止该口径被无声变更。
+// 锁定 FFI 导航通路的 fail-closed 语义（仅会话/代际/nonce 验证，policy/
+// capability 层未接线）——职责边界的完整背景与决策记录以 broker.rs 模块文档
+// H-7 注记为单一事实源，此处不再重复展开。
 
 #[cfg(test)]
 mod ffi_navigation_tests {
@@ -635,5 +741,404 @@ mod ffi_navigation_tests {
             ),
             "ttl=0 钳到 MIN_SESSION_TTL_SECONDS 后会话应在窗口内有效"
         );
+    }
+
+    // —— RS-158（审计 2026-09-25）：TTL 上限钳制 ——
+
+    #[test]
+    fn create_session_clamps_huge_ttl_to_maximum() {
+        // u64::MAX 会话近乎永生——必须钳到 MAX_SESSION_TTL_SECONDS（24h）。
+        // 实际生效 TTL 经 core session_ttl 可观测性 API 读取（测试不可
+        // 反射宿主传参，只认签发结果）。
+        // 注意：锁作用域最小化——持有 inner 锁期间不得再调
+        // broker.create_session（内部二次 lock 同一 Mutex = 自死锁）
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s-max".into(), "tab-1".into(), 1, u64::MAX));
+        {
+            let inner = broker.inner.lock().expect("broker 锁必须可用");
+            assert_eq!(
+                inner.session_ttl("s-max"),
+                Some(std::time::Duration::from_secs(MAX_SESSION_TTL_SECONDS)),
+                "超长 TTL 必须钳到 24h 上限"
+            );
+        }
+        // 边界内侧：86400 恰好等于上限——原样接受（锁已释放，安全再入）
+        assert!(broker.create_session("s-cap".into(), "tab-1".into(), 1, 86_400));
+        let inner = broker.inner.lock().expect("broker 锁必须可用");
+        assert_eq!(
+            inner.session_ttl("s-cap"),
+            Some(std::time::Duration::from_secs(86_400)),
+            "恰等于上限的 TTL 原样生效"
+        );
+    }
+
+    // —— RS-159（审计 2026-09-25）：session_id 直测 ——
+
+    #[test]
+    fn create_session_rejects_empty_session_id() {
+        // 空 session_id 拒绝（fail-closed，对齐 Action schema minLength 1）——
+        // 空 id 会话即匿名共享会话，破坏 persona 隔离语义
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(!broker.create_session(String::new(), "tab-1".into(), 1, 60));
+        // 创建失败即无会话——后续导航必须拒绝（fail-closed 闭环）
+        let decision = broker.evaluate_navigation(
+            String::new(),
+            "tab-1".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        );
+        assert!(
+            matches!(decision, FfiDecision::Deny { .. }),
+            "空 id 会话不存在——导航必须拒绝"
+        );
+    }
+
+    // —— RS-223（审计 2026-09-26）：会话键长度上限 ——
+
+    #[test]
+    fn create_session_rejects_oversized_keys() {
+        // 键长度上限 256 字节（与 core 层 MAX_TAB_ID_LEN 对齐）——此前仅查
+        // 空串，1024 会话 × 64KB 双键 ≈128MB 键驻留面
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        let oversized = "x".repeat(MAX_SESSION_KEY_BYTES + 1);
+        assert!(
+            !broker.create_session(oversized.clone(), "t".into(), 1, 60),
+            "超长 session_id 拒绝"
+        );
+        assert!(
+            !broker.create_session("s".into(), oversized.clone(), 1, 60),
+            "超长 tab_id 拒绝"
+        );
+        // 边界内（256 字节）放行
+        let at_cap = "y".repeat(MAX_SESSION_KEY_BYTES);
+        assert!(broker.create_session(at_cap.clone(), "t".into(), 1, 60));
+        // 创建失败即无会话——超长 id 导航必须拒绝（fail-closed 闭环）
+        assert!(matches!(
+            broker.evaluate_navigation(
+                oversized,
+                "t".into(),
+                1,
+                "https://example.com/".into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Deny { .. }
+        ));
+    }
+
+    #[test]
+    fn create_session_session_id_uniqueness_and_isolation() {
+        // session_id 隔离语义直测：同 id replace（RS-033 续期契约）+
+        // 异 id 各自独立（不同 id 不串会话）
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("sa".into(), "tab-a".into(), 1, 60));
+        assert!(broker.create_session("sb".into(), "tab-b".into(), 1, 60));
+        // sa 的会话不能在 tab-b 上用（会话 ↔ 标签绑定）
+        let cross = broker.evaluate_navigation(
+            "sa".into(),
+            "tab-b".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        );
+        assert!(
+            matches!(cross, FfiDecision::Deny { .. }),
+            "跨标签复用会话必须拒绝"
+        );
+        // 同 id replace 语义（续期）——与 RS-033 契约一致
+        assert!(broker.create_session("sa".into(), "tab-a".into(), 1, 120));
+    }
+
+    // —— RS-135（审计 2026-09-25）：容量/清理/覆盖语义 ——
+
+    #[test]
+    fn destroy_session_clears_issued_and_pending_ledgers() {
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        let FfiDecision::Allow { action } = broker.evaluate_navigation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/a".into(),
+            "navigation".into(),
+        ) else {
+            panic!("expected allow");
+        };
+        let FfiDecision::RequireConfirmation { request } = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/b".into(),
+            "navigation".into(),
+        ) else {
+            panic!("expected pending");
+        };
+        assert!(broker.destroy_session("s1".into()));
+        // 已签发授权随销毁清理（不退化为 nonce_replay——是撤销）
+        match broker.consume_navigation(action, "https://example.com/a".into(), "navigation".into())
+        {
+            FfiDecision::Deny { reason } => {
+                assert_ne!(reason.code, "nonce_replay", "销毁清理 ≠ 已消费重放");
+            }
+            _ => panic!("destroyed session must not consume"),
+        }
+        // 待审批请求随销毁清理
+        match broker.approve_navigation_confirmation(
+            request.nonce,
+            "https://example.com/b".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
+            _ => panic!("pending approval must be revoked on session destroy"),
+        }
+    }
+
+    #[test]
+    fn reject_and_empty_nonce_are_fail_closed() {
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        // 未知 nonce / 空 nonce / 已拒绝后的二次拒绝——一律 false
+        assert!(!broker.reject_navigation_confirmation("no-such".into()));
+        assert!(!broker.reject_navigation_confirmation(String::new()));
+        let FfiDecision::RequireConfirmation { request } = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/c".into(),
+            "navigation".into(),
+        ) else {
+            panic!("expected pending");
+        };
+        assert!(broker.reject_navigation_confirmation(request.nonce.clone()));
+        assert!(
+            !broker.reject_navigation_confirmation(request.nonce),
+            "二次拒绝 false"
+        );
+        // 空 nonce 的审批入口同样 fail-closed
+        match broker.approve_navigation_confirmation(
+            String::new(),
+            "https://example.com/c".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
+            _ => panic!("empty nonce must not approve"),
+        }
+    }
+
+    #[test]
+    fn pending_approval_capacity_is_fail_closed() {
+        // MAX_PENDING_APPROVALS=1024：填满后第 1025 个请求 fail-closed
+        // 拒绝（此前无上限可堆叠内存 DoS）；全部未过期，惰性清理不腾位
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
+        for i in 0..MAX_PENDING_APPROVALS {
+            let url = format!("https://example.com/pending/{i}");
+            let decision = broker.request_navigation_confirmation(
+                "s1".into(),
+                "t1".into(),
+                0,
+                url.clone(),
+                "navigation".into(),
+            );
+            assert!(
+                matches!(decision, FfiDecision::RequireConfirmation { .. }),
+                "第 {i} 个待审批请求必须登记成功"
+            );
+        }
+        let overflow = broker.request_navigation_confirmation(
+            "s1".into(),
+            "t1".into(),
+            0,
+            "https://example.com/overflow".into(),
+            "navigation".into(),
+        );
+        match overflow {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_ledger"),
+            FfiDecision::Allow { .. } | FfiDecision::RequireConfirmation { .. } => {
+                panic!("capacity overflow must deny")
+            }
+        }
+    }
+
+    #[test]
+    fn create_session_same_id_replaces_prior_generation() {
+        // RS-033 契约在 FFI 层的镜像：同 id create_session = 显式 replace——
+        // 旧代际授权/验证立即失效，新代际生效
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s1".into(), "t1".into(), 1, 60));
+        assert!(broker.create_session("s1".into(), "t1".into(), 2, 60));
+        assert!(
+            matches!(
+                broker.evaluate_navigation(
+                    "s1".into(),
+                    "t1".into(),
+                    1,
+                    "https://example.com/".into(),
+                    "navigation".into(),
+                ),
+                FfiDecision::Deny { .. }
+            ),
+            "replace 后旧代际必须失效"
+        );
+        assert!(matches!(
+            broker.evaluate_navigation(
+                "s1".into(),
+                "t1".into(),
+                2,
+                "https://example.com/".into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Allow { .. } | FfiDecision::RequireConfirmation { .. }
+        ));
+    }
+
+    // —— RS-136（审计 2026-09-25）：ledger_can_admit 白盒直测 ——
+
+    fn craft_action(expires_in: i64) -> AuthorizedAction {
+        // RS-220：测试辅助同样经 broker::now_unix_secs 单源取时
+        let now = crate::broker::now_unix_secs().unwrap_or(0);
+        AuthorizedAction {
+            session_id: "s".into(),
+            tab_id: "t".into(),
+            document_generation: 0,
+            origin: "https://example.com".into(),
+            method: "GET".into(),
+            canonical_parameters: "/".into(),
+            scope: "navigation".into(),
+            expires_at: (now as i64 + expires_in) as u64,
+            nonce: format!("nonce-{expires_in}-{}", std::process::id()),
+            policy_version: "test".into(),
+            explanation: String::new(),
+        }
+    }
+
+    #[test]
+    fn ledger_can_admit_direct_capacity_semantics() {
+        let mut ledger: HashMap<String, IssuedAuthorization> = HashMap::new();
+        // 未满：直接放行
+        ledger.insert(
+            "n1".into(),
+            IssuedAuthorization::Pending(Box::new(craft_action(3600))),
+        );
+        assert!(ledger_can_admit(&mut ledger));
+        // 满 + 全部未过期 Pending：拒绝（fail-closed，不淘汰）
+        let mut full: HashMap<String, IssuedAuthorization> = HashMap::new();
+        for i in 0..MAX_ISSUED_ACTIONS {
+            full.insert(
+                format!("k{i}"),
+                IssuedAuthorization::Pending(Box::new(craft_action(3600))),
+            );
+        }
+        assert!(!ledger_can_admit(&mut full));
+        // 满 + 存在过期 Pending：惰性清理后放行（清理不触及 Consumed）
+        let key0 = "k0".to_string();
+        full.insert(
+            key0.clone(),
+            IssuedAuthorization::Pending(Box::new(craft_action(-1))),
+        );
+        assert!(ledger_can_admit(&mut full));
+        assert!(!full.contains_key(&key0), "过期 Pending 被清理");
+        assert_eq!(
+            full.len(),
+            MAX_ISSUED_ACTIONS - 1,
+            "清理仅腾位不扩容（insert 由调用方随后完成）"
+        );
+        // 拒绝路径：已满且全部为 Consumed（清理不触及）→ 拒绝
+        let mut consumed_full: HashMap<String, IssuedAuthorization> = HashMap::new();
+        for i in 0..MAX_ISSUED_ACTIONS {
+            consumed_full.insert(
+                format!("c{i}"),
+                IssuedAuthorization::Consumed {
+                    session_id: "s".into(),
+                },
+            );
+        }
+        assert!(!ledger_can_admit(&mut consumed_full));
+    }
+}
+
+// —— RS-137（审计 2026-09-25）：nonce 查表实现回归 ——
+
+#[cfg(test)]
+mod nonce_tests {
+    use super::*;
+
+    #[test]
+    fn generate_nonce_is_64_lowercase_hex_chars() {
+        for _ in 0..8 {
+            let nonce = generate_nonce().expect("OS entropy available in tests");
+            assert_eq!(nonce.len(), 64, "32 字节 hex 编码必须 64 字符");
+            assert!(
+                nonce
+                    .bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+                "nonce 必须全小写 hex（与 MAX_NONCE_LENGTH 校验、账本键序一致）"
+            );
+        }
+        // 两次生成不重复（随机性抽查）
+        let a = generate_nonce().unwrap();
+        let b = generate_nonce().unwrap();
+        assert_ne!(a, b);
+    }
+
+    // —— RS-185/199（审计 2026-09-25）——
+
+    #[test]
+    fn entropy_error_maps_to_typed_deny() {
+        // RS-199：熵不足路径参数化后可测——映射构造的拒绝码/文案单源锁定
+        //（真实 getrandom 失败在测试进程不可注入，映射函数即为注入面）
+        let reason = entropy_error(getrandom::Error::UNSUPPORTED);
+        assert_eq!(reason.code, "entropy_unavailable");
+        assert!(reason.explanation.contains("entropy unavailable"));
+        // 编码契约：确定性输入 → 确定性输出（64 字符小写 hex）
+        let nonce = nonce_from_entropy(&[0u8; 32]);
+        assert_eq!(nonce, "0".repeat(64));
+        let nonce = nonce_from_entropy(&[0xff; 32]);
+        assert_eq!(nonce, "f".repeat(64));
+        assert_eq!(nonce_from_entropy(&[0xab; 32]).len(), 64);
+    }
+
+    #[test]
+    fn approve_navigation_rejects_unparseable_url() {
+        // RS-185：approve 的 URL 解析失败分支此前零测试——pending 审批
+        // 对畸形 URL 必须拒绝（url_policy），且不消费 pending 记录？
+        // 口径核实：canonicalize 在 remove(&nonce) 之后执行——失败时
+        // nonce 已被移除（一次性语义：畸形重试后 approval_not_pending）
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s".into(), "t".into(), 1, 120));
+        let decision = broker.request_navigation_confirmation(
+            "s".into(),
+            "t".into(),
+            1,
+            "https://example.com/confirm".into(),
+            "navigation".into(),
+        );
+        let FfiDecision::RequireConfirmation { request } = decision else {
+            panic!("active session should produce confirmation request");
+        };
+        // 畸形 URL approve → deny（url_policy）
+        let denied = broker.approve_navigation_confirmation(
+            request.nonce.clone(),
+            "https://[::1]/bad".into(),
+            "navigation".into(),
+        );
+        match denied {
+            FfiDecision::Deny { reason } => {
+                assert_eq!(reason.code, "url_policy", "畸形 URL 必须走 url_policy 拒绝");
+            }
+            other => panic!("期望 Deny，实际 {other:?}"),
+        }
+        // pending 已被移除（一次性语义）：同 nonce 重试 → approval_not_pending
+        let retry = broker.approve_navigation_confirmation(
+            request.nonce,
+            "https://example.com/confirm".into(),
+            "navigation".into(),
+        );
+        match retry {
+            FfiDecision::Deny { reason } => {
+                assert_eq!(reason.code, "approval_not_pending");
+            }
+            other => panic!("期望 approval_not_pending，实际 {other:?}"),
+        }
     }
 }

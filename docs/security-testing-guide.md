@@ -1,3 +1,9 @@
+> **历史文档（SP-061，审计 2026-09-23 清单·SP1 批）时代横幅**：本文编制于
+> 2026-08-22（pywebview 双栈期 v2.1.6）——版本/制品表（2.1.6/18MB/SHA）
+> 与「28 个 Python 文件」源码表均为**历史快照**（SP-061/052）；现行测试面：
+> pytest tests/python + agent/tests、五门禁、agent/ 红队、node ui-regression
+>（SP-051：`docs/release/AegisSetup.iss` 已删除）。栈归属以 ADR-009 为准。
+
 # Aegis Browser 安全测试资料
 
 > 生成时间：2026-08-22
@@ -178,14 +184,14 @@ sha256sum app-debug.apk
 
 | 资源 | 路径 |
 |------|------|
-| 项目根目录 | `D:/abrowser/review/aegis_dual_platform/` |
-| Rust 核心 | `D:/abrowser/review/aegis_dual_platform/core/rust-policy-core/src/` |
-| Android 源码 | `D:/abrowser/review/aegis_dual_platform/android/` |
-| Windows 源码 | `D:/abrowser/review/aegis_dual_platform/legacy/windows-pywebview/` |
-| C# 源码 | `D:/abrowser/review/aegis_dual_platform/windows/src/` |
-| CI/CD | `D:/abrowser/review/aegis_dual_platform/.github/workflows/` |
-| 文档 | `D:/abrowser/review/aegis_dual_platform/docs/` |
-| 合约/向量 | `D:/abrowser/review/aegis_dual_platform/contracts/` |
+| 项目根目录 | `<repo-root>/` |
+| Rust 核心 | `<repo-root>/core/rust-policy-core/src/` |
+| Android 源码 | `<repo-root>/android/` |
+| Windows 源码 | `<repo-root>/legacy/windows-pywebview/` |
+| C# 源码 | `<repo-root>/windows/src/` |
+| CI/CD | `<repo-root>/.github/workflows/` |
+| 文档 | `<repo-root>/docs/` |
+| 合约/向量 | `<repo-root>/contracts/` |
 
 ### 4.2 GitHub 远端
 
@@ -199,9 +205,9 @@ sha256sum app-debug.apk
 
 | 文件 | 获取方式 |
 |------|---------|
-| Windows 安装包 | `D:/abrowser/review/aegis_dual_platform/docs/release/installer_output/AegisBrowser-Setup-2.1.6.exe` |
-| Android APK | `D:/abrowser/review/aegis_dual_platform/android/app/build/outputs/apk/debug/app-debug.apk` |
-| 源码包 | `D:/abrowser/review/aegis_dual_platform/aegis-源码+资料包.zip` |
+| Windows 安装包 | `<repo-root>/docs/release/installer_output/AegisBrowser-Setup-2.1.6.exe` |
+| Android APK | `<repo-root>/android/app/build/outputs/apk/debug/app-debug.apk` |
+| 源码包 | `<repo-root>/aegis-源码+资料包.zip` |
 
 ---
 

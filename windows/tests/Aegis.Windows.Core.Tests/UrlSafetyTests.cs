@@ -77,4 +77,62 @@ public sealed class UrlSafetyTests
     [InlineData("", false)]
     public void IsLocalHostOrResolvesLocalHostFastPath(string host, bool expected) =>
         Assert.Equal(expected, UrlSafety.IsLocalHostOrResolvesLocalHost(host));
+
+    // —— 边界补强批次：非点分十进制 IPv4 编码与 IPv6 特殊段 ——
+
+    [Theory]
+    [InlineData("http://127.1/x", false)]             // 简写 127.1 = 127.0.0.1
+    [InlineData("http://2130706433/x", false)]        // 十进制整数 = 127.0.0.1
+    [InlineData("http://0x7f000001/x", false)]        // 十六进制 = 127.0.0.1
+    [InlineData("http://127.0.1/x", false)]           // 三段简写
+    [InlineData("http://0.0.0.0", false)]             // 未指定
+    [InlineData("http://[::ffff:192.168.1.1]/x", false)] // IPv4-mapped IPv6 → 私网
+    [InlineData("http://[::ffff:127.0.0.1]/x", false)]   // IPv4-mapped IPv6 → 回环
+    [InlineData("http://[fc00::1]/x", false)]         // IPv6 ULA 私网
+    [InlineData("http://[fd00::1]/x", false)]         // IPv6 ULA 私网
+    [InlineData("http://[fec0::1]/x", false)]         // IPv6 site-local
+    [InlineData("http://[ff02::1]/x", false)]         // IPv6 组播
+    [InlineData("http://192.0.2.1/x", false)]         // TEST-NET 文档段
+    [InlineData("http://198.18.0.1/x", false)]        // 基准测试段
+    [InlineData("http://255.255.255.255", false)]     // 广播
+    public void RejectsIpv4AlternateEncodingsAndIpv6SpecialRanges(string url, bool expected) =>
+        Assert.Equal(expected, UrlSafety.IsPublicHttpUrl(url));
+
+    [Fact]
+    public void BareHexPrefixHostDoesNotThrow()
+    {
+        // CS-002 回归：host=="0x" 时此前 Convert.ToInt64 抛 FormatException
+        // （新窗口请求 http://0x/ 即崩）——守卫后按"非公网主机名"处理
+        var ex = Record.Exception(() => UrlSafety.IsPublicHttpUrl("http://0x/"));
+        Assert.Null(ex);
+        // "0x" 无有效 hex 位——按普通公网主机名放行（DNS 解析失败自然拦截），
+        // 不再落入十六进制转换分支
+        Assert.True(UrlSafety.IsPublicHttpUrl("http://0x/"));
+        Assert.False(UrlSafety.IsPublicHttpUrl("http://0x0/"));  // 0x0 = 0.0.0.0
+    }
+
+    // ===== CS-076（审计 2026-09-25）：.local/.internal/.localhost 内网保留后缀 =====
+
+    [Theory]
+    [InlineData("printer.local")]
+    [InlineData("NAS.INTERNAL")]
+    [InlineData("myhost.localhost")]
+    [InlineData("printer.local.")]      // 尾点归一化后仍命中
+    [InlineData("a.b.internal")]
+    public void IsPublicHostRejectsIntranetReservedSuffixes(string host)
+    {
+        // mDNS/内网 DNS 后缀按保留域名拒绝——不作为公网主机暴露给外部导航
+        Assert.False(UrlSafety.IsPublicHost(host));
+    }
+
+    [Theory]
+    [InlineData("printer.local")]
+    [InlineData("myhost.localhost")]
+    [InlineData("nas.internal")]
+    public void IsPublicHttpUrlRejectsIntranetSuffixHosts(string host)
+    {
+        // 外部打开通道（IsPublicHttpUrl）对内网保留后缀一律拒绝——
+        // 本机放开只走 CanOpenHttpUrl 的本地开发分支
+        Assert.False(UrlSafety.IsPublicHttpUrl($"https://{host}/"));
+    }
 }

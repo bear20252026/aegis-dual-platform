@@ -1,0 +1,176 @@
+namespace Aegis.Windows.Core.Tests;
+
+using System.Collections.Generic;
+using Aegis.Windows.Core;
+using Aegis.Windows.Core.Privacy;
+using Aegis.Windows.Core.Tabs;
+using Xunit;
+
+/// <summary>基础工具类单测（测试缺口批次 1）：ThemeColor 全格式解析回退契约
+///（含 10 位 hex 历史事故形态回归——#FFB3FFFFFF 曾两处崩溃）、ZoomStore
+/// 边界钳制与归一移除、TrackerList 精确/后缀/大小写语义。</summary>
+public class UtilityClassesTests
+{
+    // ============ ThemeColor ============
+
+    [Theory]
+    [InlineData("#FF102030", 0xFF, 0x10, 0x20, 0x30)]   // 8 位 AARRGGBB
+    [InlineData("102030", 0xFF, 0x10, 0x20, 0x30)]      // 6 位 RRGGBB（无 #）
+    [InlineData("#ABC", 0xFF, 0xAA, 0xBB, 0xCC)]        // 3 位短格式
+    [InlineData("#9ABC", 0x99, 0xAA, 0xBB, 0xCC)]       // 4 位 ARGB 短格式
+    public void ThemeColor_Parses_AllLegalFormats(string hex, byte a, byte r, byte g, byte b)
+    {
+        var brush = ThemeColor.ParseBrush(hex);
+        Assert.Equal(a, brush.Color.A);
+        Assert.Equal(r, brush.Color.R);
+        Assert.Equal(g, brush.Color.G);
+        Assert.Equal(b, brush.Color.B);
+        Assert.True(brush.IsFrozen);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("#FFB3FFFFFF")]  // 10 位——历史崩溃形态（合法长度仅 3/4/6/8）
+    [InlineData("#GGHHII")]      // 非十六进制
+    [InlineData("#12345")]       // 5 位
+    [InlineData("#1234567890")]  // 10 位数字
+    public void ThemeColor_IllegalInput_FallsBackToWhite_NeverThrows(string? hex)
+    {
+        var brush = ThemeColor.ParseBrush(hex);
+        Assert.Equal(0xFF, brush.Color.A);
+        Assert.Equal(0xFF, brush.Color.R);
+        Assert.Equal(0xFF, brush.Color.G);
+        Assert.Equal(0xFF, brush.Color.B);
+    }
+
+    // ============ ZoomStore ============
+
+    [Fact]
+    public void ZoomStore_Get_MissingOrOutOfRange_FallsBackToOne()
+    {
+        ZoomStore.Load(new Dictionary<string, double>());
+        Assert.Equal(1.0, ZoomStore.Get("unknown.example"));
+        // 低于最小值的历史遗留数据回退 1.0（脏数据防御）
+        ZoomStore.Load(new Dictionary<string, double> { ["a.example"] = 0.05 });
+        Assert.Equal(1.0, ZoomStore.Get("a.example"));
+    }
+
+    [Fact]
+    public void ZoomStore_Set_ClampsToUnifiedBounds_AndNormalizesOne()
+    {
+        ZoomStore.Load(new Dictionary<string, double>());
+        ZoomStore.Set("b.example", 9.9);
+        Assert.Equal(ZoomStore.MaxZoom, ZoomStore.Get("b.example"));
+        ZoomStore.Set("b.example", 0.01);
+        Assert.Equal(ZoomStore.MinZoom, ZoomStore.Get("b.example"));
+        // 1.0 归一移除（不存冗余项）
+        ZoomStore.Set("b.example", 1.0);
+        Assert.Empty(ZoomStore.Snapshot());
+        // null/空 host 不抛
+        ZoomStore.Set(null!, 1.5);
+        ZoomStore.Set("", 1.5);
+    }
+
+    [Fact]
+    public void ZoomStore_Set_FiresChangedOnce()
+    {
+        ZoomStore.Load(new Dictionary<string, double>());
+        var fired = 0;
+        ZoomStore.Changed += OnChanged;
+        try
+        {
+            ZoomStore.Set("c.example", 1.5);
+            ZoomStore.Set("c.example", 1.25);
+            ZoomStore.Set("c.example", 1.25);  // 同值重复写仍通知（幂等但语义不丢）
+            Assert.Equal(3, fired);
+        }
+        finally
+        {
+            ZoomStore.Changed -= OnChanged;
+        }
+        return;
+        void OnChanged() => fired++;
+    }
+
+    [Fact]
+    public void ZoomStore_Get_HostCaseInsensitive()
+    {
+        ZoomStore.Load(new Dictionary<string, double> { ["Example.COM"] = 1.75 });
+        Assert.Equal(1.75, ZoomStore.Get("example.com"));
+    }
+
+    [Fact]
+    public void ZoomStore_Load_NullMap_DoesNotThrow()
+    {
+        // CS-130：null map 守卫——语义等价空表（此前 ArgumentNullException）
+        ZoomStore.Load(null);
+        Assert.Equal(1.0, ZoomStore.Get("any.example"));
+        Assert.Empty(ZoomStore.Snapshot());
+    }
+
+    // ============ TrackerList ============
+
+    [Theory]
+    [InlineData("doubleclick.net")]           // 精确命中
+    [InlineData("a.doubleclick.net")]         // 子域后缀命中
+    [InlineData("AD.DoubleClick.Net")]        // 大小写不敏感
+    [InlineData("stats.g.doubleclick.net.")]  // 多级子域 + 尾点
+    public void TrackerList_MatchesTrackerHosts(string host)
+    {
+        Assert.True(TrackerList.IsTracker(host));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("example.com")]
+    [InlineData("notdoubleclick.net")]        // 前缀伪装不误报（非后缀域）
+    [InlineData("doubleclick.net.evil.io")]   // 清单域作子串前缀不误报
+    [InlineData("a.b.doubleclick.net.evil.io")]  // CS-136：深链+清单域居中不误报
+    public void TrackerList_NonTrackerHosts_Pass(string? host)
+    {
+        Assert.False(TrackerList.IsTracker(host!));
+    }
+
+    // ===== CS-039（审计 2026-09-25）：IsSameSite 严格同站判定零覆盖补齐 =====
+
+    [Theory]
+    [InlineData("example.com", "example.com", true)]      // 精确相等
+    [InlineData("www.example.com", "example.com", true)]  // 子域后缀命中
+    [InlineData("WWW.Example.COM", "example.com", true)]  // 大小写不敏感
+    [InlineData("example.com.", "example.com", true)]     // 尾点归一
+    [InlineData("evilexample.com", "example.com", false)] // 前缀伪装不误判
+    [InlineData("example.com.evil.io", "example.com", false)] // 清单域作前缀不误判
+    [InlineData("other.org", "example.com", false)]       // 完全不同域
+    [InlineData("", "", true)]                            // CS-137：空 host 两态（退化等值）
+    [InlineData(null!, "example.com", false)]             // CS-137：null 不抛
+    [InlineData("example.com", "", false)]                // CS-137：空 pageHost 不同站
+    public void TrackerList_IsSameSite_CoversBoundaryCases(
+        string? host, string? pageHost, bool expected)
+    {
+        Assert.Equal(expected, TrackerList.IsSameSite(host, pageHost));
+    }
+}
+
+/// <summary>C18 批（审计 2026-09-26）：跟踪器清单元测试（CS-243）——
+/// 清单自身的归一/唯一/自命中契约（防清单腐化：大小写漂移、重复项、坏条目）。</summary>
+public sealed class TrackerListMetaTests
+{
+    [Fact]
+    public void Domains_AllLowercaseUniqueNonEmpty()
+    {
+        var domains = TrackerList.Domains;
+        Assert.NotEmpty(domains);
+        Assert.All(domains, d => Assert.Equal(d, d.ToLowerInvariant()));
+        Assert.Equal(domains.Length, domains.Distinct().Count());
+    }
+
+    [Fact]
+    public void Domains_EveryEntrySelfMatches()
+    {
+        // 元一致性：清单中每个条目都应被 IsTracker 命中（条目形态腐化即此处报警）
+        Assert.All(TrackerList.Domains, d => Assert.True(TrackerList.IsTracker(d)));
+    }
+}

@@ -1,11 +1,4 @@
 
-# 字体下载 zip 中间产物（不入库；本地保留于 D:/software 与 assets/fonts）
-assets/fonts/inter.zip
-assets/fonts/source-han-sans-sc.zip
-assets/fonts/**/*.otf
-assets/fonts/inter/
-assets/fonts/source-han-sans-sc/
-
 # pyscn 工具输出目录（报告归档于 docs/quality-reports/，此处不重复入库）
 .pyscn/
 
@@ -21,9 +14,6 @@ signing.properties
 # hotspottriage 工具输出目录（报告归档于 docs/quality-reports/，此处不重复入库）
 .hotspottriage/
 
-# 运行时日志目录（events.log 等，不入库）
-windows/crash_reports/
-
 # Python 缓存（不入库）
 __pycache__/
 *.pyc
@@ -37,21 +27,14 @@ aegis-专家评审包/
 # 构建产物（dist/——不入库，由 release.yml 构建）
 dist/
 
-# 生成的 MD 单文件（aegis-source-all.md——不入库）
-aegis-source-all.md
-
 # 生成的归档 zip / MD 产物（不入库；通配规则，不再逐个登记文件名）
-aegis-source-*.zip
+# SP-168（2026-09-26 审计）：删除死规则 aegis-source-all.md（被下方
+# aegis-source-*.md 覆盖）与 aegis-source-*.zip（被 aegis-*.zip 覆盖）
 aegis-source-*.md
 aegis-review-*.md
 
-# windows_host 构建产物（.NET——不入库）
-windows_host/bin/
-windows_host/obj/
-
 # windows/src 构建产物（.NET——不入库）
 windows/src/**/bin/
-windows/src/**/obj/
 
 # Rust 构建产物（cargo target——不入库）
 core/rust-policy-core/target/
@@ -60,26 +43,44 @@ core/rust-policy-core/target/
 core/rust-policy-core/fuzz/target/
 
 # Legacy Python (只读归档——不参与现役构建)
+# SP-095/096（审计 2026-09-23 清单·SP1 批）：legacy/windows-pywebview/build/
+# 被 **/build/ 覆盖、legacy/windows-pywebview/__pycache__/ 被 __pycache__/
+# 覆盖——两条子集冗余规则删除（dist/ 无全局规则，保留）。
+# SP-133（审计 2026-09-23 清单·SP1 批）核实修正：崩溃报告仅由 legacy 归档栈
+# 的 crash_reporter.py 产出（实际落盘 legacy/crash_reports/，已在本组）——
+# 原指向不存在写入方的 windows/crash_reports/ 死规则删除。
 legacy/crash_reports/
 legacy/windows-pywebview/dist/
-legacy/windows-pywebview/build/
-legacy/windows-pywebview/__pycache__/
 
 # ── 仓库卫生修正（新增：此前未覆盖、已随历史提交入库的构建/交付产物）──
 # .NET 生成产物（obj/bin——覆盖 windows 与评审包镜像；Rust 的 src/bin 为真实源码，不受影响）
+# SP-095（审计 2026-09-23 清单·SP1 批）：windows/src/**/obj/ 与
+# aegis-专家评审包/windows/**/bin/ 为本组/第 35 行的子集冗余——删除
 **/obj/
 **/tests/**/bin/
-aegis-专家评审包/windows/**/bin/
 
 # Android 构建产物（含评审包镜像）
 **/build/
 
-# 交付物（安装包 / 字体 bundle / 源码打包 zip）
+# 交付物（安装包 / 源码打包 zip）
+# SP-093（审计 2026-09-23 清单·SP1 批）：assets/ 目录全树不存在——
+# assets/fonts/*（5 条）与 assets/fonts/fonts-bundle.zip 死规则删除；
+# android assets/geogebra 规则亦死（SP-145 后画板暂存迁 dist/geogebra-cache/，
+# APK assets 不落盘）
 **/docs/release/installer_output/
-assets/fonts/fonts-bundle.zip
 aegis-*.zip
-android/app/src/main/assets/geogebra/
+
+# 现代工具缓存（SP-097，审计 2026-09-23 清单·SP1 批：此前缺 .mypy_cache/
+# .pytest_cache/.venv 等条目——SP-167 曾在评审包镜像发现整份 mypy 缓存）
+.mypy_cache/
+.pytest_cache/
+.tox/
+.venv/
+.coverage
+.coverage.*
+htmlcov/
 
 # Mimosa 扫描器本地会话状态（hook 运行时产物——不得入库）
 .mimosa/
-/.zcode/
+**/.zcode/
+.audit-tmp/

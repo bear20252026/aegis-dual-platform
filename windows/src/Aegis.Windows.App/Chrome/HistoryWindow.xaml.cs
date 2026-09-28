@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -24,6 +25,7 @@ public partial class HistoryWindow : Window
     private readonly HistoryItemSelector _selector;
     private bool _suppressFilter;
     private bool _initialized;
+    private System.Windows.Threading.DispatcherTimer? _searchDebounce;
 
     public HistoryWindow(HistoryStore history)
     {
@@ -35,6 +37,16 @@ public partial class HistoryWindow : Window
         HistoryList.ItemsSource = _items;
         HistoryList.ItemTemplateSelector = _selector;
         _initialized = true;  // 此后控件事件才处理（初始化期事件一律忽略——防 NRE）
+        // 搜索防抖：此前每次键入同步跑 Count+SearchRangePage 两次 SQLite 查询
+        _searchDebounce = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(200),
+        };
+        _searchDebounce.Tick += (_, _) =>
+        {
+            _searchDebounce?.Stop();
+            ApplyFilter();
+        };
         Loaded += (_, _) =>
         {
             try { ApplyFilter(); }
@@ -47,25 +59,9 @@ public partial class HistoryWindow : Window
         };
     }
 
-    /// <summary>主窗口主题联动（iOS 深浅色板）。</summary>
-    public void ApplyTheme(string? theme)
-    {
-        var light = string.Equals(theme, "light", StringComparison.OrdinalIgnoreCase);
-        Resources["ChromeBackgroundBrush"] = Brush(light ? "#FFF2F2F7" : "#FF1C1C1E");
-        Resources["CardBrush"] = Brush(light ? "#FFFFFFFF" : "#FF2C2C2E");
-        Resources["SeparatorBrush"] = Brush(light ? "#FFE5E5EA" : "#FF38383A");
-        Resources["SegmentedBrush"] = Brush(light ? "#FFE9E9EB" : "#FF2C2C2E");
-        Resources["SegmentedSelectedBrush"] = Brush(light ? "#FFFFFFFF" : "#FF5A5A5E");
-        Resources["FieldBackgroundBrush"] = Brush(light ? "#FFE9E9EB" : "#FF2C2C2E");
-        Resources["TextPrimaryBrush"] = Brush(light ? "#FF1A1A1A" : "#FFFFFFFF");
-        Resources["TextSecondaryBrush"] = Brush(light ? "#FF8A8A8E" : "#FF98989F");
-        Resources["TextMutedBrush"] = Brush(light ? "#FFAEAEB2" : "#FF6C6C70");
-        Resources["AccentBrush"] = Brush(light ? "#FF007AFF" : "#FF0A84FF");
-        Resources["AccentSoftBrush"] = Brush(light ? "#1A007AFF" : "#220A84FF");
-    }
-
-    private static System.Windows.Media.Brush Brush(string hex) =>
-        Core.ThemeColor.ParseBrush(hex);
+    /// <summary>主窗口主题联动（色板单源：WindowTheme——与设置/下载/书签管理
+    /// 窗口同源，消除各窗口自拼色值的不一致）。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
 
     // ============ 筛选 ============
 
@@ -84,45 +80,69 @@ public partial class HistoryWindow : Window
         var today = DateTime.Today;
         from = null;
         to = null;
-        if (ChipToday.IsChecked == true) { from = to = today.ToString("yyyy-MM-dd"); }
-        else if (ChipYesterday.IsChecked == true) { var y = today.AddDays(-1); from = to = y.ToString("yyyy-MM-dd"); }
-        else if (ChipWeek.IsChecked == true) { from = today.AddDays(-6).ToString("yyyy-MM-dd"); to = today.ToString("yyyy-MM-dd"); }
-        else if (ChipMonth.IsChecked == true) { from = new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd"); to = today.ToString("yyyy-MM-dd"); }
-        else if (ChipRange.IsChecked == true) { RangePanel.Visibility = Visibility.Visible; from = RangeFrom.SelectedDate?.ToString("yyyy-MM-dd"); to = RangeTo.SelectedDate?.ToString("yyyy-MM-dd"); }
-        else if (CustomDate.SelectedDate is { } d) { from = to = d.ToString("yyyy-MM-dd"); }
+        // CS-034（审计 2026-09-25）：ToString 统一 InvariantCulture——日期串
+        // 进 SQLite 比较，本土化数字文化（如本土数字位）下会破坏比较语义
+        if (ChipToday.IsChecked == true) { from = to = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (ChipYesterday.IsChecked == true) { var y = today.AddDays(-1); from = to = y.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (ChipWeek.IsChecked == true) { from = today.AddDays(-6).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); to = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (ChipMonth.IsChecked == true) { from = new DateTime(today.Year, today.Month, 1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); to = today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (ChipRange.IsChecked == true) { RangePanel.Visibility = Visibility.Visible; from = RangeFrom.SelectedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); to = RangeTo.SelectedDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+        else if (CustomDate.SelectedDate is { } d) { from = to = d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
     }
 
-    /// <summary>按页加载：只查询当前页，页码跳转不累积内存。</summary>
+    private int _loadGeneration;
+
+    /// <summary>按页加载：只查询当前页，页码跳转不累积内存。CS-159：SQLite
+    /// 查询移后台线程——此前 Count+页查询在 UI 线程同步执行（大表/慢盘翻页
+    /// 即冻结）；迟到结果以代际丢弃（快速连点页码不回显旧页）。</summary>
     private void LoadPage(int page)
     {
         if (!_initialized || page < 1)
             return;
-        string? from; string? to;
-        ComputeRange(out from, out to);
-        _totalCount = _history.Count(SearchBox.Text, from, to);
-        _totalPages = Math.Max(1, (int)Math.Ceiling(_totalCount / (double)_pageSize));
-        _currentPage = Math.Min(page, _totalPages);
-        var entries = _history.SearchRangePage(SearchBox.Text, from, to, _pageSize,
-            (_currentPage - 1) * _pageSize);
-        _items.Clear();
-        string? lastDay = null;
-        foreach (var e in entries)
+        var generation = System.Threading.Interlocked.Increment(ref _loadGeneration);
+        var query = SearchBox.Text;
+        ComputeRange(out var from, out var to);
+        var pageSize = _pageSize;
+        var history = _history;
+        Task.Run(() =>
         {
-            var day = string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate;
-            if (day != lastDay)
+            var total = history.Count(query, from, to);
+            var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+            var currentPage = Math.Min(page, totalPages);
+            var entries = history.SearchRangePage(query, from, to, pageSize,
+                (currentPage - 1) * pageSize);
+            Dispatcher.Invoke(() =>
             {
-                _items.Add(new DateHeader(day));
-                lastDay = day;
-            }
-            _items.Add(new HistoryRow(e.Id,
-                string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
-                TryHost(e.Url),
-                ParseLocalTime(e.VisitedAt)));
-        }
-        SummaryText.Text = $"共 {_totalCount} 条 · 第 {_currentPage} / {_totalPages} 页";
-        EmptyHint.Visibility = _totalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
-        EmptyHint.Text = "没有匹配的历史记录。";
-        RenderPagination();
+                if (generation != _loadGeneration || !IsLoaded)
+                    return;
+                _totalCount = total;
+                _totalPages = totalPages;
+                _currentPage = currentPage;
+                // CS-287：批量替换——暂摘 ItemsSource 一次性重建（避免逐条
+                // Add 触发每行 CollectionView 重模板——大页卡顿）
+                HistoryList.ItemsSource = null;
+                _items.Clear();
+                string? lastDay = null;
+                foreach (var e in entries)
+                {
+                    var day = string.IsNullOrEmpty(e.VisitedDate) ? "未知日期" : e.VisitedDate;
+                    if (day != lastDay)
+                    {
+                        _items.Add(new DateHeader(day));
+                        lastDay = day;
+                    }
+                    _items.Add(new HistoryRow(e.Id,
+                        string.IsNullOrWhiteSpace(e.Title) ? e.Url : e.Title,
+                        TryHost(e.Url),
+                        ParseLocalTime(e.VisitedAt)));
+                }
+                SummaryText.Text = $"共 {_totalCount} 条 · 第 {_currentPage} / {_totalPages} 页";
+                EmptyHint.Visibility = _totalCount == 0 ? Visibility.Visible : Visibility.Collapsed;
+                EmptyHint.Text = "没有匹配的历史记录。";
+                HistoryList.ItemsSource = _items;  // 重建完成后恢复绑定
+                RenderPagination();
+            });
+        });
     }
 
     private void RenderPagination()
@@ -131,9 +151,12 @@ public partial class HistoryWindow : Window
         var first = Math.Max(1, _currentPage - 2);
         var last = Math.Min(_totalPages, first + 4);
         if (last - first < 4) first = Math.Max(1, last - 4);
+        // CS-160：TryFindResource（不抛）——样式资源缺失降级为默认样式，
+        // 不再 ResourceReferenceKeyNotFoundException
+        var pageStyle = TryFindResource("PageButton") as Style;
         for (var i = first; i <= last; i++)
         {
-            var page = new Button { Content = i.ToString(), Tag = i, Style = (Style)FindResource("PageButton") };
+            var page = new Button { Content = i.ToString(), Tag = i, Style = pageStyle };
             page.Click += Page_Click;
             PageButtons.Items.Add(page);
         }
@@ -154,7 +177,7 @@ public partial class HistoryWindow : Window
         if (!_initialized || PageSizeBox.SelectedItem is not ComboBoxItem item
             || item.Tag is not string value || !int.TryParse(value, out var size))
             return;
-        _pageSize = size;
+        _pageSize = Math.Clamp(size, 1, 2000);  // CS-279：页大小范围钳制
         LoadPage(1);
     }
 
@@ -184,7 +207,7 @@ public partial class HistoryWindow : Window
         _ => "星期日",
     };
 
-    private static string ParseLocalTime(string iso)
+    internal static string ParseLocalTime(string iso)
     {
         if (DateTimeOffset.TryParse(iso, CultureInfo.InvariantCulture,
                 DateTimeStyles.AssumeLocal, out var dto))
@@ -192,7 +215,8 @@ public partial class HistoryWindow : Window
         return iso.Length >= 16 ? iso.Substring(11, 5) : string.Empty;
     }
 
-    private static string TryHost(string url) =>
+    /// <summary>CS-161：提 internal 直测。</summary>
+    internal static string TryHost(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.Host)
             ? uri.Host
             : url;
@@ -202,7 +226,10 @@ public partial class HistoryWindow : Window
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
     {
         SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
-        ApplyFilter();
+        if (!_initialized)
+            return;
+        _searchDebounce?.Stop();
+        _searchDebounce?.Start();
     }
 
     private void ChipFilter_Changed(object sender, RoutedEventArgs e)
@@ -248,7 +275,19 @@ public partial class HistoryWindow : Window
         if (fe.Tag is long tag) id = tag;
         else if (fe.DataContext is HistoryRow row) id = row.Id;
         if (id <= 0) return;
-        _history.Delete(id);
+        try
+        {
+            _history.Delete(id);
+        }
+        catch (Exception ex)
+        {
+            // CS-033（审计 2026-09-25）：删除失败（库锁/磁盘）不再炸 UI——
+            // 复用 EmptyHint 反馈错误，列表保持现状
+            EmptyHint.Visibility = Visibility.Visible;
+            EmptyHint.Text = $"删除失败：{ex.Message}";
+            Aegis.Windows.Core.Security.SecurityLog.Write($"[history] delete failed id={id}: {ex.Message}");
+            return;
+        }
         ApplyFilter();
     }
 
@@ -260,13 +299,25 @@ public partial class HistoryWindow : Window
             "清除历史", MessageBoxButton.YesNo, MessageBoxImage.Warning);
         if (confirmed != MessageBoxResult.Yes)
             return;
-        _history.Clear();
+        try
+        {
+            _history.Clear();
+        }
+        catch (Exception ex)
+        {
+            // CS-033：清除失败提示后返回（不误报"已清空"）
+            EmptyHint.Visibility = Visibility.Visible;
+            EmptyHint.Text = $"清除失败：{ex.Message}";
+            Aegis.Windows.Core.Security.SecurityLog.Write($"[history] clear failed: {ex.Message}");
+            return;
+        }
         ApplyFilter();
         MessageBox.Show(this, "历史记录已清空。", "完成", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     protected override void OnClosed(EventArgs e)
     {
+        _searchDebounce?.Stop();
         _items.Clear();
         HistoryList.ItemsSource = null;
         base.OnClosed(e);

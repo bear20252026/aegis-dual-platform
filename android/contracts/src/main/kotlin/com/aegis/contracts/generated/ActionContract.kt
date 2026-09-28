@@ -13,3 +13,13 @@ data class ActionContract(
     val nonce: String,
     val policy_version: String,
 )
+
+/** PY-188（2026-09-26 审计）：ActionContract 值域常量——schema enum/const 单源，属性保持基础类型以兼容既有消费方。 */
+object ActionContractValues {
+    const val METHOD_GET: String = "GET" // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    const val METHOD_POST: String = "POST" // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    const val METHOD_PUT: String = "PUT" // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    const val METHOD_DELETE: String = "DELETE" // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    const val METHOD_NAVIGATE: String = "NAVIGATE" // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+    const val METHOD_DOWNLOAD: String = "DOWNLOAD" // enum: GET | POST | PUT | DELETE | NAVIGATE | DOWNLOAD
+}

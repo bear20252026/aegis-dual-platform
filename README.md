@@ -1,63 +1,93 @@
 # Aegis 双端安全浏览器
 
-Aegis 是一款**双平台安全浏览器**：Windows 端基于 C#/.NET 10 LTS + 原生 WebView2
-（阶段 C——最小安全壳），Android 端基于 Kotlin + Jetpack Compose + AndroidX WebKit
-（阶段 D）。以**边界驱动架构**为核心设计目标：共享安全契约（contracts）+ capability
-broker（唯一副作用点）——从"补丁驱动开发"走向"边界驱动架构"（蓝图最终路线）。
+Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"替代传统"补丁式加固"：
+所有高危副作用（导航/下载/命令）必经**唯一能力代理（Capability Broker）**裁决，
+裁决逻辑收敛在**无 I/O 的 Rust 策略核心**（单一裁决源），跨端行为由**冻结契约
+（contracts）**驱动并以跨语言向量逐条锁定。
 
-> 许可证：MIT（详见 [LICENSE](LICENSE)）｜ 安全边界见 [SECURITY.md](SECURITY.md)
+| 端 | 技术栈 | 状态 |
+|---|---|---|
+| Windows | C#/.NET 10 + WPF + 原生 WebView2 | **唯一正典栈与唯一发布制品**（Inno Setup 安装包 + SBOM + SLSA attestation；ADR-009） |
+| Android | Kotlin + Jetpack Compose + System WebView | 直装 APK（`com.aegis.browser`） |
+| 策略核心 | Rust（FFI/C ABI + UniFFI） | 无 I/O 纯函数裁决——canonicalization / Ed25519 阈值验证 / 指纹防护管线 |
 
-> **Windows 终局（ADR-009，2026-09-04 owner 拍板；M1-M4 已全部落地）**：
-> C#/.NET 10（`windows/`）为唯一 Windows 正典栈与**唯一发布制品**（C# 安装包
-> ——发布链单轨）。全功能迁移已完成（parity 清单 100% 代码项勾验：
-> [feature-parity-checklist](docs/product/feature-parity-checklist.md)）；
-> `legacy/windows-pywebview/` 的 Python 功能栈已**归档（只读）**——仅 P0
-> 安全缺陷经安全通道评估修复，功能 PR 一律拒绝。
+> 许可证：MIT（[LICENSE](LICENSE)）｜ 漏洞报告：[SECURITY.md](SECURITY.md)
 
-## 架构（蓝图目标树——阶段 A-G 落地后）
+## 核心安全能力
+
+- **导航裁决链**：每次导航经 Broker → Rust 核心 evaluate（fail-closed）；高危目标
+  （跨标签劫持/非常规 scheme）触发用户确认流（nonce 一次性，防重放）
+- **指纹防护**：Canvas/WebGL/AudioBuffer/字体/计时器/屏幕多维欺骗，噪声按
+  **per-site 种子**隔离（跨站不可关联），注入脚本经三端守卫单源（bridge_guard）对账
+- **HTTPS-only 升级** + **威胁黑名单**（订阅制刷新 + 导航门禁）+ **DNT** + **追踪参数剥离**
+- **KillSwitch**：进程级紧急终止——触发后全部导航/下载/审批链即刻冻结
+- **无痕窗口**：独立 WebView 环境 + 临时目录，favicon/缓存/历史按持久化语义分面隔离
+- **下载防护**：危险扩展多级判定（含 URL 编码/路径段混淆形态）+ 二次确认
+- **Agent/MCP 复开面**：action-catalog 单源 + 红队 fixtures——提示注入/重放/预算
+  超限逐项测试（deny by default）
+
+> **Windows 终局（ADR-009，M1-M4 全部落地）**：全功能迁移完成（parity 清单 100%
+> 代码项勾验：[feature-parity-checklist](docs/product/feature-parity-checklist.md)）；
+> `legacy/windows-pywebview/` 为**只读冻结归档**——仅 P0 安全缺陷经安全通道评估，
+> 功能 PR 一律拒绝。
+
+## 架构
 
 ```
 contracts/  唯一安全协议事实来源（schemas/vectors/codegen——六类对象冻结；
             bridge_guard.template.js 为三端守卫 JS 单一事实源——ADR-007）
 core/       Rust 纯策略核心（canonicalization + Ed25519 阈值验证——无 I/O）
 windows/    C#/.NET 10 + 原生 WebView2（App/Chrome/WebView/Broker——能力代理）
-android/    Kotlin/Compose（app/broker/webview-adapter——分层单源）
+android/    Kotlin/Compose（app/broker/webview-adapter/contracts——分层单源）
 agent/      Agent/MCP 逐项复开（action-catalog——红队 fixtures——测试优先）
 release/    发布链独立验证产品（逐工件闭合——fail-closed）
-docs/       ADR/threat-model/runbooks/product（蓝图目标树）
-.github/    CI 分层门禁（12 个 workflow——contracts/windows/android/core-rust/
+docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审计台账）
+.github/    CI 分层门禁（13 个 workflow——contracts/windows/android/core-rust/
             agent-redteam/supply-chain/release 编排 + release-{windows,android,core}
-            平台链 + compat/native-policy-artifacts；ADR-007 起门禁全量常跑）
+            平台链 + compat/native-policy-artifacts/legacy-python-guard）
 ```
 
 **三个信任域**（ADR-002/003）：远程网页域（无 native bridge）/本地 chrome UI 域
-（固定 origin）/Capability broker 域（唯一副作用点——Default Deny）。
+（虚拟主机白名单 origin）/Capability broker 域（唯一副作用点——Default Deny）。
 
-## 构建方法
+## 构建
 
-- **Windows 目标栈**（windows/src/Aegis.Windows.App）：`dotnet build`（.NET 10.0.302——0 警告）。
-  **唯一发布制品 = C# 安装包**（release-windows.yml 单轨——Inno Setup + SBOM + SLSA attestation）
-- **Windows 归档功能栈**（legacy/windows-pywebview——**只读归档**）：
-  `python main_webview.py`（运行）；门禁：`python ../../validate_release.py` +
-  `ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001` +
-  `bandit -r app/ -q --skip B110,B404,B603,B607` + `mypy main_webview.py app/` +
-  8 个自检（`selftest_*.py`——已入 CI）
-- **Rust 核心**（core/rust-policy-core）：`cargo test`（vectors 差分全绿）
-- **契约代码生成**（contracts/codegen）：`python generate_csharp.py / generate_kotlin.py`
-  （从 schemas 生成 C#/Kotlin 模型——不平行 Schema）+ `verify_contract_compatibility.py`
-  + `verify_bridge_guard.py`（守卫 JS 单一事实源校验——ADR-007）
-- **Agent 红队**（agent/tests）：`python redteam_test.py / redteam_e2e_test.py`
+- **Windows**（windows/src/Aegis.Windows.App）：`dotnet build`（.NET 10.0.x——0 警告）；
+  `dotnet test tests/Aegis.Windows.Core.Tests` / `Aegis.Windows.Broker.Tests`
+- **Rust 核心**（core/rust-policy-core）：`cargo test && cargo clippy --all-targets
+  && cargo fmt --check`（全绿 + 0 警告）
+- **Android**（四模块，与 CI 一致）：`./gradlew.bat :app:testDebugUnitTest
+  :broker:testDebugUnitTest :webview-adapter:testDebugUnitTest` +
+  `ktlintCheck/detekt` + `:app:lintDebug`
+- **契约门禁**（仓库根）：`python validate_release.py` +
+  `python contracts/codegen/verify_bridge_guard.py`（守卫 JS 单源——ADR-007）+
+  `python scripts/verify_versions.py`
+- **Web 资产回归**：`node --test "tests/ui-regression/*.test.mjs"` +
+  `node shared/shell/snake.test.js`
+- **Agent 红队**：`python -m pytest agent/tests -q`
+- 完整命令与提交自查清单见 [CLAUDE.md](CLAUDE.md)
 
-## 蓝图状态（aegis_future_development_and_target_source_tree.md）
+## 质量与审计状态
 
-- 阶段 A（ADR 五个决策）✅ → B（contracts）✅ → C（Windows 壳）✅ → D（Android）✅ →
-  E（发布链）✅ → F（Rust 核心）✅ → G（Agent 复开）✅
-- 发布门禁七门禁闭合 ✅（CI 分层 8 个，ADR-007 起全量常跑）｜ 文档树补全 ✅
-- ~~Android 质量门禁 远端 ktlint 定位~~ ✅（2026-08-30 修复：ktlint KDoc 解析 bug
-  规避 + .kts 风格修复 + detekt 存量基线化——CI 首次全绿）
-- 剩余（需真实设备/用户操作）：真机验证（device-validation.md）｜
-  正式发布（release-checklist.md——受保护环境 + 门禁全绿后 tag）
+- **两轮全仓审计 + 一轮逐项核验，全量闭环**：
+  - 2026-09-23 轮（1115 项，[台账](docs/audit/full-audit-2026-09-23-1000-items.md)）
+    **1115/1115 全量闭环**——并经 V1 核验批对 RS/PY 两区 377 项逐项代码级复核，
+    19 项虚闭环补落地、2 项如实登记（RS-149 uniffi 上游阻塞暂缓 / PY-021 接受风险）
+  - 2026-09-26 轮全仓复扫（229 项新发现，
+    [报告](docs/audit/full-audit-2026-09-26-229-items.md)）**229/229 全部闭环**
+- 测试规模：cargo 450+ / dotnet 650+ / gradle JVM 280+ / pytest 230+ / node 80+ 用例，
+  五门禁（validate_release / verify_versions / bridge_guard / contract_compatibility /
+  cross_end_lists）常绿
+- 当前版本：`2.2.0-beta.50`（[shared/version.properties](shared/version.properties) 单源；
+  发布记录见 [CHANGELOG.md](CHANGELOG.md)，记账规则见文件头）
+
+## 蓝图状态（蓝图文档已并入 docs/architecture-overview.md）
+
+- 阶段 A（ADR 决策）→ G（Agent 复开）**全部完成** ✅；发布门禁 13 workflow 分层常跑 ✅
+- 剩余（需真实设备/用户操作）：真机验证（[device-validation.md](docs/runbooks/device-validation.md)）｜
+  正式发布（[release-checklist.md](docs/runbooks/release-checklist.md)——受保护环境 + 门禁全绿后 tag）
 
 ## 安全
 
-见 [SECURITY.md](SECURITY.md)（三信任域边界/漏洞报告/危险 API 审查清单/依赖发布安全）。
+见 [SECURITY.md](SECURITY.md)（三信任域边界/漏洞报告/危险 API 审查清单/依赖发布
+安全——CI 工具链 hash 锁定、pip-audit/cargo-audit 门禁）。

@@ -20,15 +20,19 @@
 //!    of semi-identifiers into a single identifier, since randomizing just
 //!    one value 'poisons' the entire fingerprint."
 //!
-//! 可拆卸：不依赖 UI/网络/策略引擎。
-//! 可拼接：与 FingerprintShield/LetterboxShield 管道独立组合。
+//! 安全修复（相对初版）：
+//! - 派生改用 SHA-256（域间密钥分离：多站点种子不再可线性逆推会话种子——
+//!   初版自制混合 acc*31+byte 的种子可被暴力推算）；
+//! - 注入脚本**不携带会话种子原文**、**不暴露全局 `__AEGIS_SITE_SEED`**
+//!   （初版把会话种子内嵌进每个站点且以只读全局暴露——页面按名即可读取，
+//!   等于主动发放的跨站标识符）。站点种子按域派生后仅存在于闭包内。
+//!
+//! 可拆卸：不依赖 UI/策略引擎。可拼接：与 FingerprintShield 独立组合。
 
+use sha2::{Digest, Sha256};
 use std::fmt;
 
 /// PerSiteSeed — 从会话种子 + 域名派生每站点独立种子。
-///
-/// 使用简单但确定性的哈希（无外部依赖），
-/// 保证同一 (session_seed, eTLD+1) 对始终产生相同站点种子。
 pub struct PerSiteSeed {
     session_seed: [u8; 32],
 }
@@ -47,84 +51,74 @@ impl PerSiteSeed {
 
     /// 为指定 eTLD+1 域名派生 16 字节站点种子。
     ///
-    /// 使用 SipHash 变体（简化版，零依赖）：
-    /// 将 session_seed 与 domain 字节逐字节混合，
-    /// 产生确定性但不可预测的站点种子。
+    /// SHA-256(session_seed ‖ "per-site-seed:v2" ‖ domain) 前 16 字节——
+    /// 确定性（同输入同输出）、域间密钥分离（单域种子不可逆推会话种子
+    /// 或其它域的种子）。
     pub fn derive(&self, domain: &str) -> [u8; 16] {
+        let mut hasher = Sha256::new();
+        hasher.update(self.session_seed);
+        hasher.update(b"aegis:per-site-seed:v2:");
+        hasher.update(domain.as_bytes());
+        let digest = hasher.finalize();
         let mut site_seed = [0u8; 16];
-        let domain_bytes = domain.as_bytes();
-
-        // SipHash-like 混合：session_seed 与 domain 逐字节折叠
-        for (i, byte) in site_seed.iter_mut().enumerate() {
-            let mut acc = self.session_seed[i % 32] as u32;
-            for (j, &db) in domain_bytes.iter().enumerate() {
-                // 乘法混叠 + 异或折叠
-                acc = acc
-                    .wrapping_mul(31)
-                    .wrapping_add(db as u32)
-                    .wrapping_add(j as u32);
-                acc ^= acc >> 16;
-            }
-            *byte = (acc & 0xFF) as u8;
-        }
+        site_seed.copy_from_slice(&digest[..16]);
         site_seed
     }
 
     /// 为指定域名生成 per-site 种子的十六进制表示。
+    ///
+    /// RS-084（审计 2026-09-25）：单缓冲 write! 写入——此前 16 次
+    /// format! 各自分配（每次派生 17 次堆分配）。
     pub fn derive_hex(&self, domain: &str) -> String {
-        self.derive(domain)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
+        use std::fmt::Write as _;
+        let mut out = String::with_capacity(32);
+        for b in self.derive(domain) {
+            let _ = write!(out, "{b:02x}");
+        }
+        out
     }
 
-    /// 生成 per-site 种子注入 JS 脚本。
+    /// 生成指定域名的 per-site 种子注入 JS 脚本。
     ///
-    /// 返回的 JS 代码：
-    /// 1. 从页面 URL 提取 eTLD+1 域名
-    /// 2. 用 session_seed + domain 派生 per-site 种子
-    /// 3. 设置 `__AEGIS_SITE_SEED` 全局常量
+    /// - 调用方传入该 WebView 顶层文档的域名（宿主已知，页面不可伪造参数）；
+    /// - 种子在 Rust 侧派生——脚本内嵌的**只有该站自己的种子**，不含会话
+    ///   种子原文；
+    /// - 种子只存在于闭包局部——页面无法按名读取（也不再注册全局常量）。
     ///
-    /// 后续的指纹噪声模块读取 `__AEGIS_SITE_SEED` 而非 `__AEGIS_SESSION_SEED`，
-    /// 实现 per-site 隔离。
-    pub fn inject_script(&self, session_seed_hex: &str) -> String {
+    /// RS-028（审计 2026-09-24）：站点种子由**闭包内 AudioBuffer 通道噪声
+    /// 消费**——此前脚本仅 `return` 种子死值（无人消费、无任何防护效果）。
+    /// 现在种子驱动 AudioBuffer.getChannelData 的 per-site 确定性微扰：
+    /// 音频指纹按站点隔离（Brave 模型），同站点会话内稳定、跨站点/跨会话不同。
+    pub fn inject_script(&self, domain: &str) -> String {
+        let site_seed_hex = self.derive_hex(domain);
+        // RS-218（2026-09-26 审计）：代理注册接口 Symbol 键单源引用
+        //（描述串去品牌化——详见 ToStringGuard::REGISTER_SYMBOL）
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
         format!(
             r#"
-// Aegis PerSiteSeed — per-site 独立种子（参照 Brave Browser）
-// 原始设计：Brave Software (MPL-2.0)
-// 从 __AEGIS_SESSION_SEED + eTLD+1 域名派生每站点独立种子
-// 确保：同站点一致 + 跨站点隔离 + 跨会话刷新
+// Aegis PerSiteSeed — per-site 独立种子（参照 Brave Browser，MPL-2.0）
+// 同站点一致 + 跨站点隔离 + 跨会话刷新；种子闭包封装（不进全局作用域）
 (function() {{
-  function getETLD1(hostname) {{
-    // 简化 eTLD+1 提取：取最后两段（www.example.com → example.com）
-    // 生产环境应使用 Public Suffix List
-    var parts = hostname.split('.');
-    if (parts.length <= 2) return hostname;
-    return parts.slice(-2).join('.');
-  }}
+  const __AEGIS_SITE_SEED = '{site_seed_hex}';
 
-  function deriveSeed(sessionHex, domain) {{
-    // SipHash-like 混合（与 Rust PerSiteSeed::derive 一致）
-    var result = '';
-    for (var i = 0; i < 16; i++) {{
-      var acc = parseInt(sessionHex.slice((i % 32) * 2, (i % 32) * 2 + 2), 16);
-      for (var j = 0; j < domain.length; j++) {{
-        acc = (Math.imul(acc, 31) + domain.charCodeAt(j) + j) | 0;
-        acc ^= (acc >>> 16);
-      }}
-      result += ('0' + (acc & 0xFF).toString(16)).slice(-2);
-    }}
-    return result;
-  }}
-
-  var domain = getETLD1(location.hostname);
-  var siteSeed = deriveSeed('{session_seed_hex}', domain);
-  // __AEGIS_SITE_SEED 供后续指纹噪声模块使用
-  Object.defineProperty(window, '__AEGIS_SITE_SEED', {{
-    value: siteSeed,
-    writable: false,
-    configurable: false
-  }});
+  // RS-028：种子闭包内闭环驱动——AudioBuffer 通道数据 per-site 确定性微扰
+  //（LCG 由站点种子播种：同站确定性，跨站/跨会话去相关）
+  try {{
+    const origGetChannelData = AudioBuffer.prototype.getChannelData;
+    AudioBuffer.prototype.getChannelData = function(channel) {{
+      const data = origGetChannelData.call(this, channel);
+      try {{
+        let s = parseInt(__AEGIS_SITE_SEED.slice(0, 8), 16) || 1;
+        for (let i = 0; i < data.length; i += 512) {{
+          s = (s * 1664525 + 1013904223) >>> 0;
+          data[i] = data[i] + (((s >>> 8) % 3) - 1) * 1e-7;
+        }}
+      }} catch (e) {{}}
+      return data;
+    }};
+    var __aegisReg = window[Symbol.for('{reg_sym}')];
+    if (__aegisReg) __aegisReg(AudioBuffer.prototype.getChannelData, origGetChannelData);
+  }} catch (e) {{}}
 }})();
 "#
         )
@@ -165,16 +159,90 @@ mod tests {
     }
 
     #[test]
-    fn script_contains_site_seed_marker() {
+    fn script_embeds_site_seed_but_not_session_seed() {
         let pss = PerSiteSeed::new(test_seed());
-        let script = pss.inject_script(
-            &pss.session_seed
-                .iter()
-                .map(|b| format!("{b:02x}"))
-                .collect::<String>(),
-        );
+        let session_hex = pss
+            .session_seed
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let script = pss.inject_script("example.com");
         assert!(script.contains("__AEGIS_SITE_SEED"));
-        assert!(script.contains("getETLD1"));
-        assert!(script.contains("deriveSeed"));
+        // 会话种子原文绝不内嵌；站点种子不注册全局属性
+        assert!(!script.contains(&session_hex));
+        assert!(!script.contains("Object.defineProperty"));
+    }
+
+    #[test]
+    fn seed_is_sha256_derived() {
+        // 域密钥分离：改变域名只改变该域种子，且输出与 SHA-256 截断一致
+        let pss = PerSiteSeed::new(test_seed());
+        let mut hasher = Sha256::new();
+        hasher.update(test_seed());
+        hasher.update(b"aegis:per-site-seed:v2:example.com");
+        let expected = hasher.finalize();
+        assert_eq!(&pss.derive("example.com")[..], &expected[..16]);
+    }
+
+    #[test]
+    fn script_seed_is_consumed_in_closure() {
+        // RS-028 回归：站点种子必须被闭包内机制实际消费——此前仅 return
+        // 死值（无任何防护效果）
+        let pss = PerSiteSeed::new(test_seed());
+        let script = pss.inject_script("example.com");
+        assert!(
+            script.contains("AudioBuffer.prototype.getChannelData"),
+            "种子必须驱动 AudioBuffer 通道噪声"
+        );
+        assert!(
+            script.contains("origGetChannelData.call(this, channel)"),
+            "噪声必须作用在原始数据上"
+        );
+        assert!(
+            !script.contains("return __AEGIS_SITE_SEED"),
+            "死值 return 必须移除"
+        );
+    }
+
+    // —— RS-083 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn empty_and_unusual_domains_are_total() {
+        // RS-083：空域名/特殊字符域名必须 total（不 panic、确定性输出）——
+        // 派生是 SHA-256，任意字节串输入皆合法；域名校验是调用方职责
+        let pss = PerSiteSeed::new(test_seed());
+        let empty_a = pss.derive("");
+        let empty_b = pss.derive("");
+        assert_eq!(empty_a, empty_b, "空域名确定性");
+        assert_eq!(empty_a.len(), 16);
+        // 域分隔前缀保证空域名与其他域名不碰撞
+        assert_ne!(pss.derive(""), pss.derive("a"));
+        // 特殊字符（Unicode/冒号/换行）不 panic 且彼此不同
+        assert_ne!(pss.derive("例え.jp"), pss.derive("xn--wgv71a.jp"));
+        assert_ne!(pss.derive("host:8080"), pss.derive("host"));
+    }
+
+    #[test]
+    fn domain_case_preserved_as_is() {
+        // RS-083：域名按调用方原文派生（大小写敏感）——归一是宿主职责
+        //（lib.rs fingerprint_pipeline 契约：传入宿主已归一的 eTLD+1）。
+        // 大小写变体种子不同 = 文档化行为，非缺陷
+        let pss = PerSiteSeed::new(test_seed());
+        assert_ne!(pss.derive("EXAMPLE.com"), pss.derive("example.com"));
+        // 原文语义锁定：与 SHA-256 直算一致
+        let mut hasher = Sha256::new();
+        hasher.update(test_seed());
+        hasher.update(b"aegis:per-site-seed:v2:EXAMPLE.com");
+        assert_eq!(&pss.derive("EXAMPLE.com")[..], &hasher.finalize()[..16]);
+    }
+
+    #[test]
+    fn derive_hex_write_single_buffer() {
+        // RS-084：derive_hex 与 derive 字节序一致（write! 单缓冲语义回归）
+        let pss = PerSiteSeed::new(test_seed());
+        let seed = pss.derive("example.com");
+        let expected: String = seed.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(pss.derive_hex("example.com"), expected);
+        assert_eq!(pss.derive_hex("example.com").len(), 32);
     }
 }

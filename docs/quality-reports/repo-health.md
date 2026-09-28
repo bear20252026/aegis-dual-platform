@@ -1,5 +1,15 @@
 # Mobile Repo Doctor — AI report
 
+> **WB-061（审计 2026-09-23 清单·W5 批）历史标注**：本文件是 2026-08-14 的
+> 一次性工具扫描快照（Mobile Repo Doctor v1.0.20，仅覆盖 android/ 子树），
+> **不代表当前仓库状态**——报告内路径为当时扫描机的绝对路径
+> （`D:\abrowser\review\...`，已失效），模块计数等口径也已过期（现 android
+> 为 app/broker/webview-adapter/contracts 四模块）。Top findings 中的签名
+> 凭据硬编码（`android-hardcoded-signing`）**已修复**（现经
+> `AEGIS_KEYSTORE_*` 环境变量 / keystore.properties 注入，android/app/
+> build.gradle.kts）；字体体积等资产结论保留作历史参考。保留本文件仅为
+> 审计溯源，勿据其做当前决策。
+
 > Machine-readable repository health report. Each finding has a stable `id`, a `severity` (critical > high > medium > low > info), why it matters, and a concrete `fix`. Use it to prioritize and apply fixes; lower `score` is worse (0–100 per axis).
 
 - **repository:** android (`D:\abrowser\review\aegis_dual_platform\android`)

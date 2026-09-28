@@ -60,14 +60,23 @@ public static class NtpAssets
         && (uri.Host.Equals(HostName, StringComparison.OrdinalIgnoreCase)
             || uri.Host.Equals(GeoHostName, StringComparison.OrdinalIgnoreCase));
 
+    // CS-193：进程级缓存——exe 旁资源布局进程内不变，此前每标签创建都
+    // File.Exists 打一次盘（缺失结果同样缓存：发布物缺失是稳定态）
+    private static string? _contentRoot;
+    private static bool _contentRootResolved;
+
     /// <summary>定位发布输出的 ntp/ 资源根（exe 旁——csproj 单源拷贝）。
     /// 缺失返回 null（虚拟主机不映射——NTP 显示宿主错误页，绝不回退 file://）。</summary>
     public static string? ResolveContentRoot()
     {
+        if (_contentRootResolved)
+            return _contentRoot;
         var candidate = Path.Combine(AppContext.BaseDirectory, "ntp", "start.html");
-        return File.Exists(candidate)
+        _contentRoot = File.Exists(candidate)
             ? Path.GetDirectoryName(candidate)!
             : null;
+        _contentRootResolved = true;
+        return _contentRoot;
     }
 
     /// <summary>定位离线几何画板资源根（含 GeoEntryPath 的目录）。查找顺序：
@@ -84,4 +93,36 @@ public static class NtpAssets
 
     private static bool IsGeoRoot(string dir) =>
         File.Exists(Path.Combine(dir, GeoEntryPath));
+
+    /// <summary>把 NTP/画板虚拟主机映射到发布输出资源根（主窗口与无痕窗口
+    /// 共用——此前两份逐行复制漂移）。资源缺失的映射跳过（上层 fail-closed）。</summary>
+    public static void BindVirtualHosts(Microsoft.Web.WebView2.Core.CoreWebView2 core)
+    {
+        var ntpRoot = ResolveContentRoot();
+        // 映射结果写入安全日志——NTP 加载失败时可据此区分「资源根缺失」与「映射未生效」
+        Core.Security.SecurityLog.Write(
+            $"[init] ntp 资源根 = {ntpRoot ?? "<null>"}（BaseDirectory={AppContext.BaseDirectory}）");
+        if (ntpRoot is not null)
+        {
+            core.SetVirtualHostNameToFolderMapping(
+                HostName, ntpRoot,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            Core.Security.SecurityLog.Write($"[init] {HostName} 已映射 -> {ntpRoot}");
+        }
+        var geoRoot = ResolveGeoRoot();
+        if (geoRoot is not null)
+        {
+            core.SetVirtualHostNameToFolderMapping(
+                GeoHostName, geoRoot,
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
+            Core.Security.SecurityLog.Write($"[init] {GeoHostName} 已映射 -> {geoRoot}");
+        }
+    }
+
+    /// <summary>NTP 宿主桥的顶层文档门禁：core.Source 为当前顶层文档（非任一
+    /// iframe）。远程顶层页面即使内嵌 ntp.aegis.local 帧，顶层来源仍为远程
+    /// host → 拒绝；从根上封死「帧内嵌复用受信桥」的绕过面。</summary>
+    public static bool IsTopLevelNtpDocument(Microsoft.Web.WebView2.Core.CoreWebView2 core) =>
+        Uri.TryCreate(core.Source, UriKind.Absolute, out var uri)
+        && uri.Host.Equals(HostName, StringComparison.OrdinalIgnoreCase);
 }

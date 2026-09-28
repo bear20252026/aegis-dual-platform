@@ -25,7 +25,12 @@ object TranslateEntry {
      */
     fun buildUrl(pageUrl: String?): String? {
         val url = pageUrl?.trim().orEmpty()
-        if (!url.startsWith("http://") && !url.startsWith("https://")) return null
+        // AD-231（2026-09-26 审计）：scheme 判定大小写不敏感——决策层
+        // （OriginPolicy/schemePrefixOf）均忽略大小写，HTTP:// 页面翻译
+        // 此前被拒（口径不一致）。
+        if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
+            return null
+        }
         val encoded = Uri.encode(url)
         return "$SERVICE?from=auto&to=$TARGET_LANG&a=$encoded"
     }

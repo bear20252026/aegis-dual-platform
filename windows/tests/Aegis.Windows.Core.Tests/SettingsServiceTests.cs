@@ -1,5 +1,6 @@
 namespace Aegis.Windows.Core.Tests;
 
+using System.Collections.Generic;
 using System.IO;
 using Aegis.Windows.Core.Privacy;
 using Aegis.Windows.Core.Settings;
@@ -72,8 +73,124 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.True(double.IsNaN(s.WindowTop));
     }
 
+    // ===== CS-075（审计 2026-09-25）：写盘失败不抛且内存快照已更新 =====
+
+    [Fact]
+    public void ApplyWithUnwritablePathDoesNotThrowAndUpdatesSnapshot()
+    {
+        // _path 指向一个已存在的目录——File.Move 必然失败（磁盘满/文件被锁的
+        // 等价模拟）。契约：异常被吞（每次导航/缩放都触发保存，上抛即重复弹窗）、
+        // 内存快照仍然更新（内存/磁盘不分叉——下次保存重试）、Changed 仍通知。
+        var dirPath = Path.Combine(Path.GetTempPath(), $"settings_dir_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dirPath);
+        try
+        {
+            var svc = new SettingsService(dirPath);
+            var changed = 0;
+            svc.Changed += (_, _) => changed++;
+
+            var ex = Record.Exception(() => svc.Apply(new AppSettings { SearchEngine = "bing" }));
+
+            Assert.Null(ex);
+            Assert.Equal("bing", svc.Snapshot.SearchEngine);
+            Assert.Equal(1, changed);
+        }
+        finally
+        {
+            try { Directory.Delete(dirPath); } catch (IOException) { }
+        }
+    }
+
+    // ===== C10 批（审计 2026-09-26）：CS-124/125/126/127/128 =====
+
+    [Fact]
+    public void Apply_ClampsZoomToSessionBounds()
+    {
+        // CS-124：缩放超上界钳制（与会话内 0.25–3.0 同口径，双向）
+        var svc = new SettingsService(_path);
+        svc.Apply(new AppSettings
+        {
+            ZoomByHost = new Dictionary<string, double>
+            {
+                ["big.example"] = 9.9,
+                ["small.example"] = 0.01,
+            },
+        });
+
+        Assert.Equal(Chrome.TabRuntime.MaxZoom, svc.Snapshot.ZoomByHost["big.example"]);
+        Assert.Equal(Chrome.TabRuntime.MinZoom, svc.Snapshot.ZoomByHost["small.example"]);
+    }
+
+    [Fact]
+    public void ConstructorWithBadPathFallsBackToDefaults()
+    {
+        // CS-125：坏文件路径（不存在目录/非法字符）构造不抛——回退默认快照
+        var missing = Path.Combine(Path.GetTempPath(), "no_such_dir_aegis", "settings.json");
+        Assert.Null(Record.Exception(() => new SettingsService(missing)));
+        Assert.Null(Record.Exception(() => new SettingsService(
+            Path.Combine(Path.GetTempPath(), "bad|char_name.json"))));
+    }
+
+    [Fact]
+    public void Apply_RaisesChangedExactlyOnce()
+    {
+        // CS-126：Apply 唯一写入口恰通知一次（归一化内部路径不再重复触发）
+        var svc = new SettingsService(_path);
+        var fired = 0;
+        svc.Changed += (_, _) => fired++;
+
+        svc.Apply(new AppSettings { SearchEngine = "bing" });
+
+        Assert.Equal(1, fired);
+    }
+
+    [Fact]
+    public void FromPreloadedMatchesLoadedContent()
+    {
+        // CS-127：单读双用——组合根加载的模型构造服务，语义与构造器自读一致
+        File.WriteAllText(_path, "{\"SearchEngine\":\"bing\"}");
+        var settings = AppSettings.Load(_path);
+
+        var svc = SettingsService.FromPreloaded(settings, _path);
+
+        Assert.Equal("bing", svc.Snapshot.SearchEngine);
+    }
+
+    [Fact]
+    public void NaNWindowPositionRoundTrips()
+    {
+        // CS-128：NaN 窗口位置持久化往返（AllowNamedFloatingPointLiterals）
+        var svc = new SettingsService(_path);
+        svc.Apply(new AppSettings { WindowLeft = double.NaN, WindowTop = double.NaN });
+
+        var reloaded = new SettingsService(_path);
+
+        Assert.True(double.IsNaN(reloaded.Snapshot.WindowLeft));
+        Assert.True(double.IsNaN(reloaded.Snapshot.WindowTop));
+    }
+
+    // ===== C19b 批（审计 2026-09-26）：CS-302 坏档备份双口径收敛 =====
+
+    [Fact]
+    public void CorruptSettingsFile_IsBackedUpBeforeFallingBackToDefaults()
+    {
+        // CS-302：ReadSnapshot 的坏文件分支此前直接回退默认不备份——坏档随即
+        // 被覆盖，用户设置永久丢失；现复用 AppSettings.BackupCorruptFile
+        File.WriteAllText(_path, "{ this is not json ]]");
+        var corrupt = File.ReadAllText(_path);
+
+        var svc = new SettingsService(_path);
+
+        // 回退默认（启动不因坏档失败）
+        Assert.Equal(Chrome.UrlNormalizer.DefaultEngine, svc.Snapshot.SearchEngine);
+        // 原文件已备份 .bak（内容逐字保留）
+        Assert.True(File.Exists(_path + ".bak"), "坏档应先备份为 .bak");
+        Assert.Equal(corrupt, File.ReadAllText(_path + ".bak"));
+    }
+
     public void Dispose()
     {
         try { File.Delete(_path); } catch (IOException) { }
+        try { File.Delete(_path + ".bak"); } catch (IOException) { }
     }
 }

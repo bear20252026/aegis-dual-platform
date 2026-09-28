@@ -269,4 +269,181 @@ public sealed class TabManagerTests
         Assert.Equal("https://y", m.Current?.Url);
     }
 
+
+    [Fact]
+    public void CloseTabInvokesTabClosedForSubscriberTeardown()
+    {
+        // CS-001 回归：TabClosed 此前从未触发——订阅方（主/无痕窗口）的
+        // WebView 摘除与 dispose 永不执行，每关一标签泄漏一个 WebView2 实例
+        var manager = new TabManager();
+        var t1 = manager.NewTab("about:blank");
+        var t2 = manager.NewTab("about:blank");
+        var closedIds = new List<string>();
+        manager.TabClosed += id => closedIds.Add(id);
+
+        manager.CloseTab(t1.TabId);
+        Assert.Equal([t1.TabId], closedIds);
+
+        manager.CloseTab(t2.TabId);
+        Assert.Equal([t1.TabId, t2.TabId], closedIds);
+    }
+
+    [Fact]
+    public void CloseOthersAndCloseRightInvokeTabClosedForEach()
+    {
+        var manager = new TabManager();
+        var t1 = manager.NewTab("about:blank");
+        var t2 = manager.NewTab("about:blank");
+        var t3 = manager.NewTab("about:blank");
+        var closedIds = new List<string>();
+        manager.TabClosed += id => closedIds.Add(id);
+
+        manager.CloseRight(t1.TabId);
+        Assert.Equal([t2.TabId, t3.TabId], closedIds);
+
+        closedIds.Clear();
+        var t4 = manager.NewTab("about:blank");
+        manager.CloseOthers(t4.TabId);
+        Assert.Equal([t1.TabId], closedIds);
+    }
+
+    // ===== C19a 批（审计 2026-09-26）：CS-264..271 补测 =====
+
+    [Fact]
+    public void Duplicate_CreatesNewTabWithSameUrlAndActivates()
+    {
+        // CS-264：复制标签——新 id/同 URL/激活新标签
+        var manager = new TabManager();
+        var source = manager.NewTab("https://example.com", "示例");
+
+        var copy = manager.Duplicate(source.TabId);
+
+        Assert.NotNull(copy);
+        Assert.NotEqual(source.TabId, copy!.TabId);
+        Assert.Equal("https://example.com", copy.Url);
+        Assert.Equal("示例", copy.Title);
+        Assert.Equal(copy.TabId, manager.CurrentTabId);
+    }
+
+    [Fact]
+    public void Duplicate_UnknownIdReturnsNull()
+    {
+        Assert.Null(new TabManager().Duplicate("no-such-tab"));
+    }
+
+    [Fact]
+    public void PopClosed_EmptyStackReturnsNull_AndLifoOrder()
+    {
+        // CS-265：空栈 null；多入栈后 LIFO 弹出
+        var manager = new TabManager();
+        Assert.Null(manager.PopClosed());
+
+        var t1 = manager.NewTab("https://one.example");
+        var t2 = manager.NewTab("https://two.example");
+        manager.CloseTab(t1.TabId);
+        manager.CloseTab(t2.TabId);
+
+        Assert.Equal(t2.TabId, manager.PopClosed()!.TabId);  // 后关先弹
+        Assert.Equal(t1.TabId, manager.PopClosed()!.TabId);
+        Assert.Null(manager.PopClosed());
+    }
+
+    [Fact]
+    public void UndoStack_EvictsOldestBeyondCapacity()
+    {
+        // CS-293（2026-09-26 审计）：容量淘汰方向——**最旧**关闭项被淘汰、
+        // **最新**关闭项必须立即可恢复（撤销语义）。此前 Stack 从栈顶弹出
+        // 刚压入的第 21 项——关掉即不可恢复，本测试的旧断言恰锁定该错误行为。
+        var manager = new TabManager();
+        var closedInOrder = new List<Tab>();
+        for (var i = 0; i < 21; i++)
+        {
+            var t = manager.NewTab($"https://x{i}.example");
+            manager.CloseTab(t.TabId);
+            closedInOrder.Add(t);
+        }
+        Assert.Equal(20, manager.ClosedCount);  // 容量恒定
+
+        // 最新关闭（第 21 个）必须第一个可恢复
+        Assert.Equal(closedInOrder[20].TabId, manager.PopClosed()!.TabId);
+        // 最旧关闭（第 1 个）已被淘汰；其余 19 个（x1..x19）仍可恢复
+        var seen = new List<string>();
+        while (manager.PopClosed() is { } tab)
+            seen.Add(tab.TabId);
+        Assert.DoesNotContain(closedInOrder[0].TabId, seen);
+        Assert.Contains(closedInOrder[19].TabId, seen);
+        Assert.Equal(19, seen.Count);
+    }
+
+    [Fact]
+    public void SetPinned_UnknownIdIsNoOp()
+    {
+        // CS-267：未知 id 固定请求不影响集合
+        var manager = new TabManager();
+        manager.NewTab("https://a.example");
+        manager.SetPinned("no-such-tab", true);
+        Assert.Equal(0, manager.PinnedCount);
+    }
+
+    [Fact]
+    public void UpdateTitle_BlankOrWhitespaceIgnored()
+    {
+        // CS-268：空白标题不覆盖既有标题
+        var manager = new TabManager();
+        var tab = manager.NewTab("https://a.example", "原标题");
+        manager.UpdateTitle(tab.TabId, "  ");
+        Assert.Equal("原标题", tab.Title);
+        manager.UpdateTitle("no-such", "任意");
+        Assert.Equal("原标题", tab.Title);
+    }
+
+    [Fact]
+    public void SeedSession_ClearsUndoStack()
+    {
+        // CS-269：会话重建清空撤销栈——旧会话关闭历史不可跨会话复活
+        var manager = new TabManager();
+        var t = manager.NewTab("https://a.example");
+        manager.CloseTab(t.TabId);
+        Assert.Equal(1, manager.ClosedCount);
+
+        manager.SeedSession([("s1", "https://s.example", "S", false)], "s1");
+
+        Assert.Equal(0, manager.ClosedCount);
+        Assert.Null(manager.PopClosed());
+    }
+
+    [Fact]
+    public void NewTab_FiresOpenedThenSwitched_InOrder()
+    {
+        // CS-270：NewTab 先 Opened 后 Switched；SwitchTo 已当前 no-op 不触发
+        var manager = new TabManager();
+        var events = new List<string>();
+        manager.TabOpened += t => events.Add("opened");
+        manager.TabSwitched += t => events.Add("switched");
+
+        var tab = manager.NewTab("https://a.example");
+
+        Assert.Equal(["opened", "switched"], events);
+
+        events.Clear();
+        manager.SwitchTo(tab.TabId);
+        Assert.Empty(events);
+    }
+
+    [Fact]
+    public void CloseTab_EventSequence_ClosedThenSwitched()
+    {
+        // CS-271：关闭当前标签先 Closed 后 Switched（摘 WebView 先于激活后继）
+        var manager = new TabManager();
+        var t1 = manager.NewTab("https://a.example");
+        var t2 = manager.NewTab("https://b.example");
+        manager.SwitchTo(t1.TabId);
+        var events = new List<string>();
+        manager.TabClosed += id => events.Add($"closed:{id}");
+        manager.TabSwitched += t => events.Add($"switched:{t.TabId}");
+
+        manager.CloseTab(t1.TabId);
+
+        Assert.Equal([$"closed:{t1.TabId}", $"switched:{t2.TabId}"], events);
+    }
 }

@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aegis NTP Host Bridge Schema (Windows C# — WebView2 postMessage)",
+  "description": "WB-053（审计 2026-09-23 清单·W5 批）：C# NtpBridge 宿主桥协议规范。shared/jsapi-schema.json 由 scripts/gen_jsapi_schema.py 从归档栈自动生成（勿手改、有 CI git-diff 门禁），正典 C# 桥此前无任何 schema——本文件为手工维护的协议单源：正典实现 windows/src/Aegis.Windows.App/Chrome/Ntp/NtpBridge.cs（分发）+ NtpBridgeFactory.cs（服务装配），页面侧唯一消费者 shared/shell/start.js（Host 适配层）。改动桥方法必须同步：NtpBridge.cs 分发、NtpBridgeFactory 装配、start.js 适配层、本 schema。对账回归：tests/ui-regression/start_host.test.mjs（WB-053 op 集与 start.js csCall 调用点一致）。",
+  "version": "1.0.0",
+  "transport": {
+    "channel": "window.chrome.webview.postMessage（WebView2 WebMessage——JSON 序列化）",
+    "request": {
+      "shape": { "__aegis": 1, "id": "number（单调递增——响应关联键）", "op": "string（见 operations）", "args": "array（按 operations[].args 顺序）" },
+      "notes": "页面侧单监听器分发：宿主回包按 id 关联各回调；无桥（非 cs 宿主）时适配层同步 cb(null) 降级。pending 表带 30s 惰性 TTL 清扫（WB-037——零定时器设计，超龄条目在下一请求时以 null 兜底完成）。"
+    },
+    "response": {
+      "shape": { "__aegisRes": 1, "id": "number（回显请求 id）", "result": "按 operations[].result" },
+      "notes": "未知/已消费 id 的回包静默忽略；同一 id 只分发一次。"
+    }
+  },
+  "security": {
+    "source_gate": "仅 https://ntp.aegis.local（固定 host + 默认端口）来源的 WebMessage 被处理（NtpBridge.IsTrustedSource）；远程页面 WebMessage 被宿主按来源关闭 + 本桥双重校验",
+    "document_gate": "仅顶层 NTP 文档可挂接（NtpAssets.IsTopLevelNtpDocument——帧内嵌复用即拒）",
+    "fail_closed": "壁纸/引擎/导入来源白名单校验，非法参数 fail-closed；导航意图不直接产生副作用——归一后交 WebView NavigationStarting → Broker 唯一授权路径"
+  },
+  "operations": {
+    "getEngine": { "args": [], "result": "{ engine: string, engines: [{ key: string, name: string }] }", "description": "当前搜索引擎与可选引擎表（白名单内）。" },
+    "setEngine": { "args": ["key: string"], "result": "null", "description": "切换搜索引擎并持久化（白名单校验——非法 key fail-closed）。" },
+    "getWallpaper": { "args": [], "result": "string（壁纸文件名——白名单内）", "description": "当前 NTP 壁纸。" },
+    "setWallpaper": { "args": ["name: string"], "result": "null", "description": "切换壁纸并持久化（白名单校验）。" },
+    "navigate": { "args": ["url: string（已归一的导航目标）"], "result": "null", "description": "导航意图——经 NavigationStarting → BrowserPolicyBroker → Rust 策略核心裁决（ADR-008 fail-closed），与地址栏同一条唯一授权路径。" },
+    "goBack": { "args": [], "result": "boolean（是否执行了后退）", "description": "上一页。" },
+    "openGeo": { "args": [], "result": "boolean（资源未随包 false——页面按钮 fail-closed 置灰）", "description": "打开离线几何画板（受信虚拟主机加载内置资源）。" },
+    "hasSaved": { "args": [], "result": "number（已保存会话标签计数，0=无；仅计数无 URL/标题）", "description": "会话恢复入口可用性探测（>1 时页面显示手动恢复按钮）。" },
+    "restoreSession": { "args": [], "result": "null", "description": "恢复上次会话（经 Broker 策略重验，不自动放行）。" },
+    "bookmarks": { "args": [], "result": "[{ title: string, url: string }]", "description": "书签列表（渲染数据经桥注入——页面不自行读取存储）。" },
+    "importScan": { "args": [], "result": "[{ browser: 'chrome'|'edge', bookmarks: boolean, history: boolean }]", "description": "探测本机可导入来源（仅文件存在性检查——不读取任何内容）。文件 I/O 密集——宿主可 marshal 至工作线程（CS-031）。" },
+    "importBookmarks": { "args": ["source: string（'chrome'|'edge'|'all'|空=全部）"], "result": "{ imported: number, total: number, results: [{ browser: string, imported: number, total: number }] }", "description": "从来源浏览器导入书签（单来源失败不阻断其余来源——页面侧经 Promise 聚合统计）。" },
+    "importHistory": { "args": ["limit: number（缺省 500——NtpBridge.DefaultImportHistoryLimit）", "source: string"], "result": "{ imported: number, total: number, results: [{ browser: string, imported: number, total: number }] }", "description": "从来源浏览器导入最近历史（上限档位 100/500/1000/2000——页面默认 500）。" },
+    "jsError": { "args": ["message: string", "source?: string", "line?: number", "col?: number", "stack?: string"], "result": "null", "description": "页面 JS 错误上报（写入诊断日志——脱敏、有界）。" }
+  },
+  "android_deltas": {
+    "note": "Android 端不走本协议：AegisBridge @JavascriptInterface 同步方法直调（适配层包装成 thenable），能力面收敛 engine/navigate/wallpaper/geo/snake；书签/导入/恢复在 Android 返回空集（Host.has 能力面声明）。引擎 JSON 回退表对账见 tests/ui-regression/start_host.test.mjs（WB-095）。",
+    "bridge": "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt"
+  }
+}

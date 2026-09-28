@@ -10,7 +10,10 @@ edition = "2021"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
+# RS-205（审计 2026-09-25）：锁精确版本——"0.4" 允许 minor 内漂移（0.4.x 的
+# 构建脚本/链接器行为变化会无声影响 fuzz 构建）；与 Cargo.lock 实际解析
+# （0.4.13）一致，升级须显式改此处并重新验证 5 target 编译。
+libfuzzer-sys = "0.4.13"
 
 [dependencies.aegis-policy-core]
 path = ".."
@@ -18,6 +21,43 @@ path = ".."
 [[bin]]
 name = "fuzz_origin"
 path = "fuzz_targets/fuzz_origin.rs"
+test = false
+doc = false
+bench = false
+
+# RS-050（审计 2026-09-25）：新增 5 个 target——canonical 路径 / glob DP /
+# session_state 往返 / security_policy 面 / util 主机提取与 JS 转义
+[[bin]]
+name = "fuzz_origin_canonical"
+path = "fuzz_targets/fuzz_origin_canonical.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_glob"
+path = "fuzz_targets/fuzz_glob.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_session_state"
+path = "fuzz_targets/fuzz_session_state.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_security_policy"
+path = "fuzz_targets/fuzz_security_policy.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_util_hostname"
+path = "fuzz_targets/fuzz_util_hostname.rs"
 test = false
 doc = false
 bench = false

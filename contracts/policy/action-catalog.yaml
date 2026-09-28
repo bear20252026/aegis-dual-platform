@@ -16,6 +16,9 @@ actions:
     read_only: true
     confirmation: none
     audit: true
+    budget:
+      max_actions: 5
+      max_bytes: 65536
     redteam_fixtures: [prompt-injection, tool-result-poisoning]
 
   - name: get_current_origin
@@ -24,6 +27,9 @@ actions:
     read_only: true
     confirmation: none
     audit: true
+    budget:
+      max_actions: 5
+      max_bytes: 65536
     redteam_fixtures: [prompt-injection, tool-result-poisoning]
 
   # 待评估（逐步复开——每项需 scope/预算/确认/红队/e2e 完备——蓝图）

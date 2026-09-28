@@ -17,7 +17,7 @@
 | 4 | javascript:/data:/file: | 地址栏/页面尝试这些协议 | OriginPolicy 拒绝（url-origin-invalid 向量） |
 | 5 | 自定义协议 | aegis:/reader: 等内部协议 | 仅受信 chrome UI（INTERNAL_SCHEMES——P0-01） |
 | 6 | 下载 MIME 混淆 | 下载 content-disposition/类型混淆 | 下载经 broker 判定（MIME/最终 URL/size） |
-| 7 | 重复确认 | 高风险动作重复确认 | ApprovalManager nonce 一次性——重放拒绝 |
+| 7 | 重复确认 | 高风险动作重复确认 | 确认流经 C# Broker（BrowserPolicyBroker）→ Rust 策略核心裁决，确认面板 pending 态唯一持有（NavigationConfirmationGate）——重复/重放请求按代际与 pending 唯一性拒绝（WB-122，2026-09-26 审计——ApprovalManager 已删除） |
 | 8 | 标签代际竞态 | 快速切标签后旧导航尝试执行 | AuthorizedAction 代际变化失效 |
 | 9 | renderer crash | WebView 渲染进程崩溃 | 错误页可见（WebErrorStatus）——恢复不自动放行 |
 | 10 | Runtime 更新重启 | NewBrowserVersionAvailable | 保存状态/通知/受控重启（runtime-update-restart） |
@@ -38,4 +38,8 @@
 
 - 每项验证记录（通过/失败 + 证据）——**失败项需修复后重验**（运行门禁 fail-closed）
 - 全部通过后运行门禁闭合（蓝图七门禁全闭合——正式发布前提）
-- 与 runbooks（security-release/incident-response）联动：验证失败按事故响应处理
+- 与 runbooks 联动（WB-069，审计 2026-09-23 清单·W5 批）：security-release
+  runbook 在 `release/runbooks/security-release.md`（已落地）；蓝图所列
+  **incident-response runbook 尚未落地**——验证失败需升级为安全事件时，
+  按 SECURITY.md 报告流程 + security-release runbook 处置，不以不存在的
+  文档为依赖

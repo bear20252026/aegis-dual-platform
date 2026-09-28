@@ -1,0 +1,61 @@
+{
+  "description": "PY-096（审计 2026-09-25）：AuditEvent 契约非法向量——全部为 schema 级失效（decision 词表越界 / 必填缺失 / 额外字段）。消费方：validate_vector_schemas.py（schema 必须拒绝）",
+  "vectors": [
+    {
+      "note": "decision 词表越界（pending 不是决策终态）",
+      "expected": "deny_schema",
+      "audit_event": {
+        "event_id": "evt-1",
+        "timestamp": "2025-09-25T08:00:00Z",
+        "decision": "pending",
+        "scope": "net.example.org",
+        "origin": "https://example.org"
+      }
+    },
+    {
+      "note": "缺 origin（审计必须可归因到源）",
+      "expected": "deny_schema",
+      "audit_event": {
+        "event_id": "evt-1",
+        "timestamp": "2025-09-25T08:00:00Z",
+        "decision": "allow",
+        "scope": "net.example.org"
+      }
+    },
+    {
+      "note": "额外字段 page_content（脱敏红线——网页内容禁止入审计事件）",
+      "expected": "deny_schema",
+      "audit_event": {
+        "event_id": "evt-1",
+        "timestamp": "2025-09-25T08:00:00Z",
+        "decision": "deny",
+        "scope": "net.example.org",
+        "origin": "https://evil.example",
+        "page_content": "<html>secret</html>"
+      }
+    },
+    {
+      "note": "额外字段 auth_token（脱敏红线——凭据禁止入审计事件）",
+      "expected": "deny_schema",
+      "audit_event": {
+        "event_id": "evt-1",
+        "timestamp": "2025-09-25T08:00:00Z",
+        "decision": "deny",
+        "scope": "net.example.org",
+        "origin": "https://evil.example",
+        "auth_token": "Bearer abc123"
+      }
+    },
+    {
+      "note": "timestamp 缺时区（format date-time 拒绝本地时间串）",
+      "expected": "deny_schema",
+      "audit_event": {
+        "event_id": "evt-1",
+        "timestamp": "2025-09-25T08:00:00",
+        "decision": "allow",
+        "scope": "net.example.org",
+        "origin": "https://example.org"
+      }
+    }
+  ]
+}

@@ -1,6 +1,15 @@
 name: Native-Policy-Artifacts
 
 on:
+  # PY-172（2026-09-23 审计·V1 核验批）：补 push 触发（仅 master + 同 paths——
+  # 原先仅 PR 触发，直推 master 的 core 变更不经本链）
+  push:
+    branches:
+      - master
+    paths:
+      - 'core/rust-policy-core/**'
+      - 'release/native_artifact_manifest.py'
+      - '.github/workflows/native-policy-artifacts.yml'
   pull_request:
     paths:
       - 'core/rust-policy-core/**'
@@ -11,16 +20,27 @@ on:
 permissions:
   contents: read
 
+
+# PY-044..051：同分支重复 push/PR 取消旧运行（节省 runner 与排队）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-windows:
     name: Build Windows x64 policy DLL
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-057)
+        with:
+          workspaces: core/rust-policy-core
+      # PY-193（2026-09-26 审计）：此处重复的第二个 Swatinem/rust-cache 步骤
+      # 已删除——同一步骤连写两遍导致重复 restore/save
       - name: Build versioned Windows policy DLL
         shell: pwsh
         run: |
@@ -63,12 +83,19 @@ jobs:
   build-android:
     name: Build Android policy libraries
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
           targets: aarch64-linux-android  # 单架构：arm64-v8a
+      # PY-057（2026-09-23 审计·V1 核验批）：原批把缓存写进了 build-windows
+      # （且重复两份，后被 PY-193 去重）——build-android 从未补上，cargo-ndk
+      # 交叉编译每次冷跑。此处补齐。
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-057)
+        with:
+          workspaces: core/rust-policy-core
       - uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
         with:
           packages: 'ndk;28.0.12433566'
@@ -78,7 +105,9 @@ jobs:
           java-version: '21'
       - name: Install locked Android Rust build tool
         run: cargo install cargo-ndk --version 4.1.2 --locked
-      - name: Build four Android ABI policy libraries
+      - name: Build arm64-v8a policy library
+        # PY-194（2026-09-26 审计）：原名"Build four Android ABI policy libraries"
+        # 与实现不符——实际单架构 arm64-v8a（单架构分发规则见 release-android.yml）
         working-directory: core/rust-policy-core
         run: |
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.0.12433566"
@@ -141,6 +170,7 @@ jobs:
     name: Verify native policy artifact manifest
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
       - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317

@@ -3,6 +3,7 @@ package com.aegis.browser
 import android.content.Context
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import android.widget.Toast
 
 /**
  * 首页宿主桥（shared/shell/start.html 的 Android 侧能力面——ADR-007 单源首页）。
@@ -32,11 +33,11 @@ class AegisHomeBridge(
     private val prefs = context.getSharedPreferences(SearchEngines.PREFS_NAME, Context.MODE_PRIVATE)
 
     companion object {
-        /** 引擎显示名（P1-2：与 Windows SEARCH_ENGINES 中文名对齐）。 */
-        private val ENGINE_NAMES = mapOf("baidu" to "百度", "bing" to "必应", "google" to "谷歌", "sogou" to "搜狗")
-
-        /** 首页壁纸白名单（与 shared/shell/wallpapers 文件一一对应）。 */
-        private val WALLPAPERS =
+        /** 首页壁纸白名单（与 shared/shell/wallpapers 文件一一对应）。
+         *  AD-147（审计 2026-09-23 清单·A6 批）：internal 化供打包校验单测——
+         *  WallpaperPackagingTest 断言本表与 shared/shell/wallpapers 目录
+         *  内容双向一致（人工同步的漂移在打包门禁暴露）。 */
+        internal val WALLPAPERS =
             setOf(
                 "aurora-magenta.jpg",
                 "aurora-lime.jpg",
@@ -46,11 +47,56 @@ class AegisHomeBridge(
 
         /** P1-1 修复：受信壳页 URL 前缀（本地 assets 内置资源——首页/画板等）。 */
         private const val TRUSTED_SHELL_PREFIX = "file:///android_asset/"
+
+        /** AD-235：日志净化截断上限（与 BrowserViewModel 标题净化同口径 120）。 */
+        private const val LOG_MESSAGE_MAX_LENGTH = 120
+
+        /**
+         * AD-250（2026-09-26 审计）：引擎 JSON 组装 internal 化——
+         * @JavascriptInterface 方法必须 public（JS 反射仅暴露 public 注解
+         * 方法，无法直接 internal 化），抽取纯函数供 JVM 单测断言与
+         * start.html 的消费契约：`{"engine":<key>,"engines":[{"key","name"}]}`。
+         * AD-146（审计 2026-09-23 清单·A6 批）：显示名消费 SearchEngines
+         * 单源（键集一致性由 SearchEnginesTest 锁定）。
+         *
+         * AD-191（审计 2026-09-23 清单·A7 批）：引擎数组静态缓存——引擎键集
+         * 编译期固定（ENGINE_URLS 为常量表），原实现每次 getEngine 都重建
+         * JSONArray（@JavascriptInterface 每次面板渲染都跨 JNI 调用）。
+         * 现数组序列化结果 lazy 驻留单份，每次调用只拼当前 engine 键。
+         */
+        private val cachedEnginesArrayJson: String by lazy {
+            val engines = org.json.JSONArray()
+            SearchEngines.ENGINE_URLS.keys.forEach { key ->
+                val entry = org.json.JSONObject()
+                entry.put("key", key)
+                entry.put("name", SearchEngines.ENGINE_NAMES[key] ?: key)
+                engines.put(entry)
+            }
+            engines.toString()
+        }
+
+        internal fun buildEngineJson(currentEngine: String): String =
+            // engine 键经 JSONObject.quote（JSON 字符串字面量转义）——prefs 值
+            // 即便被写入异常字符也不会产出非法 JSON；engines 部分为静态缓存
+            // 逐字节复用。
+            "{\"engine\":${org.json.JSONObject.quote(currentEngine)},\"engines\":$cachedEnginesArrayJson}"
+
+        /**
+         * AD-112（审计 2026-09-23 清单·A6 批）：受信壳页 URL 判定抽纯函数——
+         * 原判定内嵌在 isTrustedShellPage（依赖 WebView getUrl，不可 JVM 单测）。
+         * 纯字符串判定 single 判定点：about:blank 精确匹配或本地 assets 前缀。
+         */
+        internal fun isTrustedShellUrl(url: String?): Boolean {
+            val exact = url == "about:blank"
+            val prefixed = url?.startsWith(TRUSTED_SHELL_PREFIX) == true
+            return exact || prefixed
+        }
     }
 
     /**
      * P1-1 修复（全面审计 2026-09-04）：受信壳页校验（单一判定点）。宿主
-     * WebView 当前 URL 仅允许本地壳页前缀或 about:blank。@JavascriptInterface
+     * WebView 当前 URL 仅允许本地壳页前缀或 about:blank（判定逻辑单源在
+     * [Companion.isTrustedShellUrl]，AD-112）。@JavascriptInterface
      * 运行在 JS 后台线程，getUrl 以 runCatching 包裹——异常按拒绝处理
      * （fail-closed），不因跨线程读取崩溃放行。
      */
@@ -58,10 +104,9 @@ class AegisHomeBridge(
         val url =
             webViewProvider()
                 ?.let { wv -> runCatching { wv.url }.getOrNull() }
-                .orEmpty()
-        val trusted = url == "about:blank" || url.startsWith(TRUSTED_SHELL_PREFIX)
+        val trusted = isTrustedShellUrl(url)
         if (!trusted) {
-            android.util.Log.w("AegisHome", "[security] AegisBridge 拒绝非壳页调用: $url")
+            android.util.Log.w("AegisHome", "[security] AegisBridge 拒绝非壳页调用: ${url.orEmpty()}")
         }
         return trusted
     }
@@ -69,8 +114,14 @@ class AegisHomeBridge(
     @JavascriptInterface
     fun logError(message: String) {
         if (!isTrustedShellPage()) return
-        android.util.Log.e("AegisHome", message ?: "")
+        // AD-235（2026-09-26 审计）：message 为非空 String——原 `?: ""` 是对
+        // 非空类型的冗余判空（已删）；页面可控文本先净化再入日志——换行可
+        // 伪造多行 logcat 记录（与 BrowserViewModel 标题净化同口径）。
+        android.util.Log.e("AegisHome", sanitizeForLog(message))
     }
+
+    /** AD-235：日志净化（AD-103：收敛 LogSanitize 单源——与标题净化同口径）。 */
+    private fun sanitizeForLog(message: String): String = LogSanitize.flatten(message, LOG_MESSAGE_MAX_LENGTH)
 
     @JavascriptInterface
     fun setEngine(key: String) {
@@ -90,22 +141,7 @@ class AegisHomeBridge(
     fun getEngine(): String {
         if (!isTrustedShellPage()) return ""
         val current = prefs.getString(SearchEngines.KEY_ENGINE, null) ?: SearchEngines.DEFAULT_ENGINE
-        val engines =
-            org.json.JSONArray().apply {
-                SearchEngines.ENGINE_URLS.keys.forEach { key ->
-                    put(
-                        org.json.JSONObject().apply {
-                            put("key", key)
-                            put("name", ENGINE_NAMES[key] ?: key)
-                        },
-                    )
-                }
-            }
-        return org.json
-            .JSONObject()
-            .put("engine", current)
-            .put("engines", engines)
-            .toString()
+        return buildEngineJson(current)
     }
 
     @JavascriptInterface
@@ -140,8 +176,18 @@ class AegisHomeBridge(
         wv.post {
             val ok = SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url) == true
             if (!ok) {
-                android.widget.Toast
-                    .makeText(context, "无法打开：未通过安全策略验证", android.widget.Toast.LENGTH_SHORT)
+                // AD-134（审计 2026-09-23 清单·A6 批）：Toast 文案迁 strings.xml
+                // 单源（原硬编码中文——不可本地化、不可静态审查）。
+                //
+                // AD-192（审计 2026-09-23 清单·A7 批）：applicationContext Toast
+                // 保留理由（注释固化）——桥接层按设计不持 Activity 引用
+                // （JS 后台线程 + 面向任意远端页面的注入对象，持有宿主即泄漏/
+                // 提权面）；Toast 用 app context 构造无 UI 崩溃风险（仅无
+                // fly-in 动画差异）；「回调上抛 ViewModel」需从 JS 线程再跨
+                // 一次线程边界接线，收益（Snackbar 级提示）不成比例。真机
+                // 回归 2026-09-04 起该 Toast 工作正常，维持现状。
+                Toast
+                    .makeText(context, context.getString(R.string.bridge_open_rejected), Toast.LENGTH_SHORT)
                     .show()
             }
         }
@@ -157,12 +203,15 @@ class AegisHomeBridge(
     fun openGeogebra(): Boolean {
         // P1-1 修复（全面审计 2026-09-04）：受信壳页校验合并进 provider 判定（detekt ReturnCount ≤ 2）
         val wv = if (isTrustedShellPage()) webViewProvider() else null
-        wv?.post {
-            SecureWebViewFactory.navigatorFor(wv)?.openTrustedAsset(
-                "geogebra/GeoGebra/HTML5/5.0/GeoGebra.html",
-            )
-        }
-        return wv != null
+        val navigator = wv?.let(SecureWebViewFactory::navigatorFor)
+        if (wv == null || navigator == null) return false
+        // WB-106（2026-09-26 审计）：透传 openTrustedAsset 的加载受理结果——
+        // 原实现返回 wv != null，导航器缺失/白名单拒绝时仍返回 true，start.js
+        // 据此跳过 onFail，「资源未随包 → 按钮置灰」降级在 Android 永不触发
+        // （C# 侧正确反映资源可用性）。加载在主线程投递；受理结果经同一
+        // 白名单谓词同步判定（与 openTrustedAsset 内部判定单源）。
+        wv.post { navigator.openTrustedAsset(SecureNavigator.GEOGEBRA_ASSET_PATH) }
+        return navigator.isTrustedAsset(SecureNavigator.GEOGEBRA_ASSET_PATH)
     }
 
     /**

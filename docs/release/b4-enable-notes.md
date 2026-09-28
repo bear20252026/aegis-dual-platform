@@ -1,3 +1,8 @@
+> **历史文档（SP-107，审计 2026-09-23 清单·SP1 批）时代横幅**：本文编制于
+> 2026-08-15（release.yml 初版期）——现发布链已演进为 13 workflow 分层
+>（release.yml 编排 + 三平台子流 + verify-gate/publish——见 WB-123 核对），
+> 本文保留作发布门禁选型溯源。
+
 # B4 Release Workflow 实际启用说明（b4-enable-notes）
 
 > 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级
@@ -6,7 +11,7 @@
 
 ## 一、已落位状态
 
-- `.github/workflows/release.yml`（6143 字节——与 docs/release 版一致——GitHub Actions 识别）
+- `.github/workflows/release.yml`（约 50 行规格——SP-108：以仓库现文件为准，与 docs/release 版一致——GitHub Actions 识别）
 - 触发器：`push tags: v*`（唯一发布触发器——避免手动操作/版本混乱——中文实践）
 - 结构：pin-check → build（B1 混淆 + SHA-256）→ sbom（B3）→ verify（fail-closed）→ publish（tag-gated）
 - 全部 action 已固定完整 40 字符 SHA（gh api 查证——S-04）

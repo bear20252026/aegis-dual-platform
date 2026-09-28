@@ -11,6 +11,20 @@ using Aegis.Windows.Core.Settings;
 /// 紧急终止开关（M4-a）：触发即冻结全部导航/下载/批准（重启恢复）。</summary>
 public partial class SettingsWindow : Window
 {
+    // CS-168：KillSwitch 已触发文案单源（构造器与触发后回显两处共用）
+    private const string KillSwitchEngagedText = "已触发——全部导航与下载冻结中。";
+
+    // CS-167：提示前景刷预建冻结——此前每次校验输入 new 两把刷子
+    private static readonly System.Windows.Media.Brush HintErrorBrush = FrozenHintBrush(0xFC, 0xA5, 0xA5);
+    private static readonly System.Windows.Media.Brush HintMutedBrush = FrozenHintBrush(0x94, 0xA3, 0xB8);
+
+    private static System.Windows.Media.SolidColorBrush FrozenHintBrush(byte r, byte g, byte b)
+    {
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
     private readonly AppSettings _settings;
     private readonly BrowserPolicyBroker _broker;
     private readonly MainWindow _owner;
@@ -21,16 +35,23 @@ public partial class SettingsWindow : Window
         Core.Settings.SettingsService settingsService)
     {
         InitializeComponent();
+        // CS-226：Esc 关闭设置窗（对话框惯例——此前无键盘关闭路径）
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == System.Windows.Input.Key.Escape)
+                Close();
+        };
         _settings = settings;
         _broker = broker;
         _owner = owner;
         _settingsService = settingsService;
         _suppressEvents = true;
+        // CS-235：复用 MainWindow.EngineOption——此前同形匿名类型双定义
         EngineBox.ItemsSource = UrlNormalizer.EngineOrder
-            .Select(k => new { Key = k, Name = UrlNormalizer.EngineName(k) })
+            .Select(k => new MainWindow.EngineOption(k, UrlNormalizer.EngineName(k)))
             .ToList();
-        EngineBox.DisplayMemberPath = "Name";
-        EngineBox.SelectedValuePath = "Key";
+        EngineBox.DisplayMemberPath = nameof(MainWindow.EngineOption.Name);
+        EngineBox.SelectedValuePath = nameof(MainWindow.EngineOption.Key);
         EngineBox.SelectedValue = _settings.SearchEngine;
         HistoryToggle.IsChecked = _settings.HistoryEnabled;
         ThreatFeedBox.Text = _settings.ThreatFeedUrl;
@@ -40,9 +61,15 @@ public partial class SettingsWindow : Window
         HttpsCheck.IsChecked = _settings.HttpsOnly;
         DnsCheck.IsChecked = _settings.SecureDns;
         if (_broker.KillSwitch.IsEngaged)
+        {
             KillSwitchButton.IsEnabled = false;
+            KillSwitchState.Text = KillSwitchEngagedText;
+        }
         _suppressEvents = false;
     }
+
+    /// <summary>主窗口主题联动（浅色模式下不再永远深色）。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
 
     private void EngineBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
     {
@@ -76,18 +103,17 @@ public partial class SettingsWindow : Window
         if (raw.Length > 0 && ThreatFeedUpdater.ValidateFeedUrl(raw) is null)
         {
             ThreatFeedHint.Text = "地址无效（仅支持 https://）——未保存。";
-            ThreatFeedHint.Foreground = new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromRgb(0xFC, 0xA5, 0xA5));
+            ThreatFeedHint.Foreground = HintErrorBrush;
             return;
         }
         _settings.ThreatFeedUrl = raw;
         Save();
         ThreatFeedHint.Text = "已保存；生效于下次启动（导航与子资源拦截）。";
-        ThreatFeedHint.Foreground = new System.Windows.Media.SolidColorBrush(
-            System.Windows.Media.Color.FromRgb(0x94, 0xA3, 0xB8));
+        ThreatFeedHint.Foreground = HintMutedBrush;
     }
 
-    private static int SleepIndex(int minutes) => minutes switch { 0 => 0, 15 => 1, 60 => 3, _ => 2 };
+    /// <summary>CS-169：提 internal 直测（分钟值 → 下拉索引，非法回退 30 分钟档）。</summary>
+    internal static int SleepIndex(int minutes) => minutes switch { 0 => 0, 15 => 1, 60 => 3, _ => 2 };
     private static int Clamp(int v) => v < 0 ? 0 : v > 2 ? 2 : v;
 
     private void SleepCombo_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -124,7 +150,7 @@ public partial class SettingsWindow : Window
             return;
         _broker.KillSwitch.Engage();
         KillSwitchButton.IsEnabled = false;
-        KillSwitchState.Text = "已触发——全部导航与下载冻结中。";
+        KillSwitchState.Text = KillSwitchEngagedText;
         SecurityLog.Write("[security] 紧急终止开关已触发（设置窗口）");
     }
 

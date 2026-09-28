@@ -8,7 +8,7 @@
 > （ADR-009 D4 冻结纪律的归档终态）。
 
 > **R-20 整改（体验/功能审查）**：本文档描述的是已归档的 QtWebEngine
-> 旧栈（legacy——`windows/aegis_source/legacy/`，不再维护——仅供历史
+> 旧栈（legacy——`legacy/windows-pywebview/legacy/`，不再维护——仅供历史
 > 参照）。**当前 Windows 新栈以 `main_webview.py`（pywebview + WebView2）
 > 为唯一正式入口**——产品能力以功能注册表（app/features.py）为准，
 > 不再宣称两套产品功能（双栈收敛——实施手册 R-20）。

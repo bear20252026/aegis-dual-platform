@@ -42,6 +42,25 @@ public sealed class HistoryStorePageNumberTests
         Assert.Empty(store.SearchRangePage("命中", "1999-01-01", "1999-01-01", 5, 0));
     }
 
+    [Fact]
+    public void TitleOnlyHitCountsAndWildcardEscapeHolds()
+    {
+        // CS-026 + CS-018 回归：仅标题命中的行计入 Count；标题中的 %/_
+        // 作为字面量匹配（不再当通配符改变搜索语义）
+        var store = NewStore();
+        store.Add("https://plain.example", "普通页");
+        store.Add("https://pct.example", "a_b 百分之百%折扣");
+
+        // 仅标题命中
+        Assert.Equal(1, store.Count("普通页", null, null));
+        // %/_ 字面量：精确命中原文
+        Assert.Equal(1, store.Count("a_b", null, null));
+        Assert.Equal(1, store.Count("百%折扣", null, null));
+        // 若 %/_ 仍当通配，这些"不可能串"会误命中——锁定为 0
+        Assert.Equal(0, store.Count("aXb", null, null));
+        Assert.Equal(0, store.Count("百分之X百%折扣", null, null));
+    }
+
     private static HistoryStore NewStore() =>
         new(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
 }

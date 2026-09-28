@@ -8,8 +8,11 @@
 //! `contracts/vectors/*.json`（单一事实源，schema 变更时测试自动跟随；
 //! c_abi 集成测试此前已按此口径消费 JSON）。
 
+use aegis_policy_core::decision::AuthorizedAction;
+use aegis_policy_core::matcher::{glob_match, glob_subsumes};
 use aegis_policy_core::origin::try_parse_external;
 use aegis_policy_core::update_manifest::{canonical_unsigned, verify_threshold, version_tuple};
+use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
 
 /// contracts/vectors 目录（仓库布局：core/rust-policy-core → ../../contracts/vectors）。
@@ -66,11 +69,368 @@ fn url_origin_vectors_match_contracts() {
 
 #[test]
 fn update_manifest_valid_vectors() {
-    // SemVer 解析语义抽查（解析器单元语义；清单级向量见 c_abi 集成测试
-    // 对 update-manifest-valid.json 的完整消费）
+    // SemVer 解析语义抽查（解析器单元语义）
     assert_eq!(version_tuple("1.2.3"), Some((1, 2, 3)));
     assert_eq!(version_tuple("0.9.0"), Some((0, 9, 0)));
     assert_eq!(version_tuple("1.0"), None); // 无效 SemVer
+}
+
+// ===== RS-212（审计 2026-09-26）：update-manifest-valid/invalid 向量消费者 =====
+// 此前注释声称「清单级向量见 c_abi 集成测试对 update-manifest-valid.json 的
+// 完整消费」——全 crate 无任何测试消费这两份向量，Ed25519 阈值验证从未对
+// 跨语言契约向量跑过。现按 Rust 侧能力面消费：
+// - valid：canonical_unsigned 吃进向量清单 + 真实 Ed25519 密钥对 canonical
+//   字节重签（向量自带 sig 为占位串），verify_threshold 达阈值放行/差一拒绝；
+// - invalid：语义级规则（rollback/threshold/duplicate_key/untrusted_key_id/
+//   invalid_base64）逐条对齐 Rust 侧机制；纯 schema 规则（const/字段形态）
+//   属 Python/schema 层职责，显式登记不在此断言。
+
+/// 测试辅助：标准 base64 编码（与 update_manifest::base64_decode 对偶）。
+fn b64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+#[test]
+fn update_manifest_valid_vectors_reach_threshold_verification() {
+    // RS-212：valid 向量逐条进入 Rust 招牌能力——canonical 字节化 +
+    // Ed25519 阈值验证（向量自带 sig 是占位串 "AAAA"，真实签名由测试
+    // 密钥对 canonical 字节重签，阈值取自向量的 threshold 字段）
+    for v in load_vectors("update-manifest-valid.json") {
+        let manifest = &v["manifest"];
+        let threshold = v["threshold"].as_u64().expect("缺 threshold") as usize;
+        let min_version = v["min_version"].as_str().expect("缺 min_version");
+        // 清单可 canonical 化（整型字段/合法结构——RS-127 fail-closed 面）
+        let payload =
+            canonical_unsigned(manifest).unwrap_or_else(|_| panic!("valid 向量 canonical 失败"));
+        // 回滚闸门：清单版本必须 ≥ min_version（ prerelease 版本按向量
+        // 语义视为有效升级目标，数值比较不适用于 RS-125 严格核心版）
+        if let (Some(cur), Some(min)) = (
+            version_tuple(manifest["version"].as_str().unwrap_or("")),
+            version_tuple(min_version),
+        ) {
+            assert!(cur >= min, "valid 向量不得回滚（{cur:?} < {min:?}）");
+        }
+        // 阈值验证：取向量签名清单的前 threshold 个 key_id 生成真实密钥
+        //（种子由序号 + key_id 字节混合派生——不同 key_id 必得不同密钥）
+        let key_ids: Vec<&str> = manifest["signatures"]
+            .as_array()
+            .expect("valid 向量缺 signatures")
+            .iter()
+            .map(|s| s["key_id"].as_str().expect("缺 key_id"))
+            .collect();
+        let mut trusted = std::collections::HashMap::<String, Vec<u8>>::new();
+        let mut signed = Vec::new();
+        for (i, key_id) in key_ids.iter().take(threshold).enumerate() {
+            let mut seed = [0u8; 32];
+            seed[0] = i as u8;
+            for (j, b) in key_id.as_bytes().iter().enumerate() {
+                seed[(j % 31) + 1] ^= b;
+            }
+            let sk = SigningKey::from_bytes(&seed);
+            trusted.insert(
+                (*key_id).to_string(),
+                sk.verifying_key().as_bytes().to_vec(),
+            );
+            signed.push(json!({
+                "key_id": key_id,
+                "sig": b64_encode(&sk.sign(&payload).to_bytes()),
+            }));
+        }
+        assert!(
+            verify_threshold(&trusted, &signed, &payload, threshold),
+            "达阈值（{threshold} 个不重复真实签名）必须放行"
+        );
+        // 差一拒绝：threshold 条签名对 threshold+1 阈值
+        if threshold >= 1 {
+            assert!(
+                !verify_threshold(&trusted, &signed, &payload, threshold + 1),
+                "差一阈值必须拒绝"
+            );
+        }
+    }
+}
+
+#[test]
+fn update_manifest_invalid_vectors_semantic_rules() {
+    // RS-212：invalid 向量的语义级规则与 Rust 侧机制逐条对齐；
+    // deny_schema 类（const/字段形态）为 Python/schema 层职责，跳过并计数
+    let mut semantic = 0usize;
+    for v in load_vectors("update-manifest-invalid.json") {
+        let case = v["case"].as_str().unwrap_or("unnamed");
+        match case {
+            "rollback" => {
+                // 回滚：version < min_version 数值比较即拒
+                let cur = version_tuple(v["version"].as_str().expect("缺 version"))
+                    .expect("回滚向量版本必须可解析");
+                let min = version_tuple(v["min_version"].as_str().expect("缺 min_version"))
+                    .expect("回滚向量下限必须可解析");
+                assert!(cur < min, "向量 {case}: 回滚形态必须 version < min_version");
+                semantic += 1;
+            }
+            "threshold_insufficient" => {
+                // 阈值不足：1 条有效签名对 threshold=2
+                let threshold = v["threshold"].as_u64().expect("缺 threshold") as usize;
+                let sk = SigningKey::from_bytes(&[1u8; 32]);
+                let payload = canonical_unsigned(&json!({"version": "1.2.3"})).unwrap();
+                let mut trusted = std::collections::HashMap::new();
+                trusted.insert("k1".to_string(), sk.verifying_key().as_bytes().to_vec());
+                let sigs = vec![json!({
+                    "key_id": "k1",
+                    "sig": b64_encode(&sk.sign(&payload).to_bytes()),
+                })];
+                assert!(
+                    !verify_threshold(&trusted, &sigs, &payload, threshold),
+                    "向量 {case}: 签名数不足阈值必须拒绝"
+                );
+                assert_eq!(v["signatures_count"].as_u64(), Some(1));
+                semantic += 1;
+            }
+            "duplicate_key" => {
+                // 重复 keyid 只计一次（TUF THRESHOLD counting）
+                let threshold = v["threshold"].as_u64().expect("缺 threshold") as usize;
+                let sk = SigningKey::from_bytes(&[2u8; 32]);
+                let payload = canonical_unsigned(&json!({"version": "1.2.3"})).unwrap();
+                let mut trusted = std::collections::HashMap::new();
+                trusted.insert("k1".to_string(), sk.verifying_key().as_bytes().to_vec());
+                let sig = b64_encode(&sk.sign(&payload).to_bytes());
+                let sigs = vec![
+                    json!({"key_id": "k1", "sig": sig}),
+                    json!({"key_id": "k1", "sig": sig}),
+                ];
+                assert!(
+                    !verify_threshold(&trusted, &sigs, &payload, threshold),
+                    "向量 {case}: 重复 keyid 只计一次（2 条同 key 签名不满足阈值 2）"
+                );
+                semantic += 1;
+            }
+            "untrusted_key_id" => {
+                // 未受信 key_id：受信集不含向量任何签名的 key——阈值不足拒绝
+                let manifest = &v["manifest"];
+                let payload = canonical_unsigned(manifest)
+                    .unwrap_or_else(|_| panic!("向量 {case} canonical 失败"));
+                let trusted: std::collections::HashMap<String, Vec<u8>> =
+                    std::collections::HashMap::new(); // 受信集为空（全 rogue）
+                let sigs = manifest["signatures"]
+                    .as_array()
+                    .expect("缺 signatures")
+                    .clone();
+                assert!(
+                    !verify_threshold(&trusted, &sigs, &payload, 1),
+                    "向量 {case}: 全未受信 key 对阈值 1 必须拒绝"
+                );
+                semantic += 1;
+            }
+            "invalid_base64_signature" => {
+                // 签名非合法 base64（"AA-AA" 含表外字符 '-'）——签名解码
+                // 失败即不计入阈值
+                let manifest = &v["manifest"];
+                let payload = canonical_unsigned(manifest)
+                    .unwrap_or_else(|_| panic!("向量 {case} canonical 失败"));
+                let sk = SigningKey::from_bytes(&[3u8; 32]);
+                let mut trusted = std::collections::HashMap::new();
+                trusted.insert("k1".to_string(), sk.verifying_key().as_bytes().to_vec());
+                // 混入向量的坏签名（key k1、sig "AA-AA"）——单签名阈值 1
+                // 因 base64 非法而失败
+                let sigs = manifest["signatures"]
+                    .as_array()
+                    .expect("缺 signatures")
+                    .clone();
+                assert!(
+                    !verify_threshold(&trusted, &sigs, &payload, 1),
+                    "向量 {case}: 非法 base64 签名不得计入阈值"
+                );
+                semantic += 1;
+            }
+            // 纯 schema 规则（singular 字段/naive 时间戳/artifact 字段/const
+            // 破坏）——Python validate_vector_schemas.py 与 version.schema.json
+            // 层职责，Rust 核心不含 schema 校验器（透传，不在此断言）
+            _ => {}
+        }
+    }
+    assert!(semantic >= 5, "语义级向量覆盖面收缩（semantic={semantic}）");
+}
+
+// ===== RS-147（审计 2026-09-25）：action / glob 跨语言向量接入 =====
+// （此前 action-valid/invalid.json 仅由 Python validate_vector_schemas.py
+// 消费，Rust 侧零覆盖——契约数据面与 Rust 结构面之间的字段映射无锁定）
+
+/// Action schema 词表（contracts/schemas/action.schema.json enum——Rust
+/// 侧同款词表锁定；漂移即本测试失败）。
+const ACTION_METHODS: &[&str] = &["GET", "POST", "PUT", "DELETE", "NAVIGATE", "DOWNLOAD"];
+
+#[test]
+fn action_valid_vectors_map_to_authorized_action_fields() {
+    // valid 向量：10 必填字段与 AuthorizedAction 字段面一一对应——
+    // 字段名/词表/origin 口径漂移即失败。expires_at 表示差异（向量
+    // ISO8601 ↔ Rust u64 epoch）由 schema 锁定格式、此处锁定字段存在性，
+    // 映射构造取固定远期值
+    for v in load_vectors("action-valid.json") {
+        let a = &v["action"];
+        let note = v["note"].as_str().unwrap_or("unnamed");
+        let session_id = a["session_id"].as_str().expect("缺 session_id");
+        let tab_id = a["tab_id"].as_str().expect("缺 tab_id");
+        let document_generation = a["document_generation"].as_u64().expect("缺代际");
+        let origin = a["origin"].as_str().expect("缺 origin");
+        let method = a["method"].as_str().expect("缺 method");
+        let canonical_parameters = a["canonical_parameters"].as_str().expect("缺参数");
+        let scope = a["scope"].as_str().expect("缺 scope");
+        assert!(a.get("expires_at").is_some(), "向量 {note}: 缺 expires_at");
+        let nonce = a["nonce"].as_str().expect("缺 nonce");
+        let policy_version = a["policy_version"].as_str().expect("缺版本");
+
+        // method 词表（schema enum 同款）
+        assert!(
+            ACTION_METHODS.contains(&method),
+            "向量 {note}: method {method} 不在 Action 词表"
+        );
+        // origin 归一层放行（schema pattern ^https?:// 对应 Rust 归一口径）
+        assert!(
+            try_parse_external(origin).is_some(),
+            "向量 {note}: origin {origin} 必须过归一层"
+        );
+        // 字段面映射：构造 AuthorizedAction 成功且逐字段一致
+        let action = AuthorizedAction {
+            session_id: session_id.into(),
+            tab_id: tab_id.into(),
+            document_generation,
+            origin: origin.into(),
+            method: method.into(),
+            canonical_parameters: canonical_parameters.into(),
+            scope: scope.into(),
+            expires_at: 4_102_444_800, // 2100-01-01T00:00:00Z（远期占位）
+            nonce: nonce.into(),
+            policy_version: policy_version.into(),
+            explanation: String::new(), // 审计扩展字段——schema 数据面不含
+        };
+        assert_eq!(action.session_id, session_id);
+        assert_eq!(action.tab_id, tab_id);
+        assert_eq!(action.document_generation, document_generation);
+        assert_eq!(action.origin, origin);
+        assert_eq!(action.method, method);
+        assert_eq!(action.nonce, nonce);
+    }
+}
+
+#[test]
+fn action_invalid_vectors_match_rust_side_rules() {
+    // invalid 向量：schema 拒绝的形态中，Rust 侧存在同款机制的条目逐一
+    // 对齐；纯 schema 专属规则（additionalProperties / minLength）显式
+    // 登记为「Rust 侧透传」——数据结构无构造校验，拒绝发生在消费层
+    // （空 nonce → consume_nonce RS-034；空 session_id → FFI create_session
+    // RS-159），此处锁定机制性规则不回退
+    for v in load_vectors("action-invalid.json") {
+        let a = &v["action"];
+        let note = v["note"].as_str().unwrap_or("unnamed");
+        // 1) origin 非 http(s)（file: 注入）——origin 归一层同款拒绝
+        if let Some(origin) = a["origin"].as_str() {
+            if !origin.starts_with("http://") && !origin.starts_with("https://") {
+                assert!(
+                    try_parse_external(origin).is_none(),
+                    "向量 {note}: origin 归一层必须拒绝 {origin}"
+                );
+            }
+        }
+        // 2) document_generation 负数——Rust u64 同样不可表示（serde 面
+        //    对齐：u64 反序列化拒绝负值）。仅对负值形态断言（合法 0 值
+        //    反序列化应成功——不误伤）；edition 2024 下 gen 是保留字，
+        //    绑定名取 generation
+        if let Some(generation) = a["document_generation"].as_i64() {
+            if generation < 0 {
+                assert!(
+                    serde_json::from_value::<u64>(json!(generation)).is_err(),
+                    "向量 {note}: 负代际必须被 u64 反序列化拒绝"
+                );
+            }
+        }
+        // 3) method 词表越界/小写——按向量形态分派：越界方法不在词表；
+        //    小写变体不等于词表项（大小写敏感）但可 ASCII 归一匹配
+        if let Some(method) = a["method"].as_str() {
+            let in_list = ACTION_METHODS.contains(&method);
+            match method {
+                "PATCH" => assert!(!in_list, "向量 {note}: PATCH 必须在词表外"),
+                "get" => {
+                    assert!(!in_list, "向量 {note}: 词表大小写敏感");
+                    assert!(
+                        ACTION_METHODS
+                            .iter()
+                            .any(|m| m.eq_ignore_ascii_case(method)),
+                        "get 应是词表项的大小写变体"
+                    );
+                }
+                _ => {} // 其余向量因非 method 规则失效——method 本身在词表内
+            }
+        }
+        // 4) 缺 nonce / 空 session_id / 额外字段——纯 schema 规则
+        //    （required / minLength / additionalProperties），Rust 数据结构
+        //   无构造校验（透传），拒绝发生在消费层：空 nonce →
+        //    consume_nonce 拒绝（RS-034，broker 单元测试锁定）；空
+        //    session_id → FFI create_session 拒绝（RS-159，ffi 测试锁定）
+    }
+}
+
+#[test]
+fn glob_vectors_match_contracts() {
+    // RS-147：glob-match.json——glob_match / glob_subsumes 跨语言向量。
+    // 断言字段遵循 contracts 向量协议（verify_vectors.py PY-064）：顶层
+    // expected ∈ {allow, deny}——allow = 期望匹配/覆盖成立，deny = 不成立。
+    // 匹配向量（pattern/text）与覆盖向量（a/b）共用 vectors 数组，按字段
+    // 形态分派
+    let vectors = load_vectors("glob-match.json");
+    assert!(!vectors.is_empty(), "glob 向量不得为空");
+    let mut matched_count = 0usize;
+    let mut subsumed_count = 0usize;
+    for v in &vectors {
+        let note = v["note"].as_str().unwrap_or("unnamed");
+        let expected = match v["expected"].as_str() {
+            Some("allow") => true,
+            Some("deny") => false,
+            other => panic!("向量 {note}: expected 非法（{other:?}）——协议值域 allow/deny"),
+        };
+        if let (Some(pattern), Some(text)) = (v["pattern"].as_str(), v["text"].as_str()) {
+            let flat = v["flat"].as_bool().unwrap_or(false);
+            assert_eq!(
+                glob_match(pattern, text, flat),
+                expected,
+                "glob_match 向量不符: {note} ({pattern:?} vs {text:?}, flat={flat})"
+            );
+            matched_count += 1;
+        }
+        if let (Some(a), Some(b)) = (v["a"].as_str(), v["b"].as_str()) {
+            let flat = v["flat"].as_bool().unwrap_or(false);
+            assert_eq!(
+                glob_subsumes(a, b, flat),
+                expected,
+                "glob_subsumes 向量不符: {note} ({a:?} ⊇ {b:?}, flat={flat})"
+            );
+            subsumed_count += 1;
+        }
+    }
+    assert!(
+        matched_count >= 20 && subsumed_count >= 7,
+        "向量覆盖面收缩（match={matched_count}, subsume={subsumed_count}）"
+    );
 }
 
 #[test]
@@ -83,7 +443,7 @@ fn update_manifest_duplicate_key_counts_once() {
         json!({"key_id": "k1", "sig": "AAAA"}),
         json!({"key_id": "k1", "sig": "BBBB"}),
     ];
-    let payload = canonical_unsigned(&json!({"version": "1.2.3"}));
+    let payload = canonical_unsigned(&json!({"version": "1.2.3"})).unwrap();
     // 重复 key 只计一次（不足 threshold 2——即使同 key 两条签名）
     assert!(!verify_threshold(&keys, &sigs, &payload, 2));
 }
@@ -91,8 +451,8 @@ fn update_manifest_duplicate_key_counts_once() {
 #[test]
 fn canonical_json_deterministic() {
     // TUF canonical JSON：键排序 + 紧凑——确定性（签名验证前提）
-    let a = canonical_unsigned(&json!({"b": 2, "a": 1}));
-    let b = canonical_unsigned(&json!({"a": 1, "b": 2}));
+    let a = canonical_unsigned(&json!({"b": 2, "a": 1})).unwrap();
+    let b = canonical_unsigned(&json!({"a": 1, "b": 2})).unwrap();
     assert_eq!(a, b, "canonicalization 必须确定（与键顺序无关）");
 }
 
@@ -114,7 +474,9 @@ fn canonical_json_matches_python_golden_vectors() {
         let expected_hex = v["expected_canonical_hex"].as_str().unwrap_or_else(|| {
             panic!("向量 {name} 缺少 expected_canonical_hex");
         });
-        let actual = canonical_unsigned(&v["manifest"]);
+        let actual = canonical_unsigned(&v["manifest"]).unwrap_or_else(|_| {
+            panic!("golden 向量 {name} canonical 失败（含浮点？RS-127 fail-closed）");
+        });
         let actual_hex: String = actual.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(
             actual_hex, expected_hex,

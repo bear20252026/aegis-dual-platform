@@ -77,8 +77,17 @@ impl LetterboxShield {
     }
 
     /// 用自定义配置创建。
+    ///
+    /// RS-021（审计 2026-09-24）：步长钳到 ≥1——0 会让注入 JS 的
+    /// `Math.round(v / step)` 除零得 Infinity（圆整完全失效）。
     pub fn with_config(config: LetterboxConfig) -> Self {
-        Self { config }
+        Self {
+            config: LetterboxConfig {
+                width_step: config.width_step.max(1),
+                height_step: config.height_step.max(1),
+                ..config
+            },
+        }
     }
 
     /// 生成 Letterboxing JS 注入脚本。
@@ -109,23 +118,48 @@ impl LetterboxShield {
   }}
 
   // 覆盖 screen 属性
+  // RS-237（2026-09-26 审计）：screen 四属性补 .get 判定——此前仅判
+  // descriptor 存在（if (osW)）即调用 osW.get.call(this)，数据属性形态
+  // （get 为 undefined）下页面首读 screen.width 即抛 TypeError；
+  // window 组已是双守卫（if (oX && oX.get)），两组对齐
   try {{
     var osW = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'width');
     var osH = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'height');
     var osAW = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'availWidth');
     var osAH = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'availHeight');
-    if (osW) Object.defineProperty(screen, 'width', {{ get: function() {{ return roundTo(osW.get.call(this), WS, MW); }} }});
-    if (osH) Object.defineProperty(screen, 'height', {{ get: function() {{ return roundTo(osH.get.call(this), HS, MH); }} }});
-    if (osAW) Object.defineProperty(screen, 'availWidth', {{ get: function() {{ return roundTo(osAW.get.call(this), WS, MW); }} }});
-    if (osAH) Object.defineProperty(screen, 'availHeight', {{ get: function() {{ return roundTo(osAH.get.call(this), HS, MH); }} }});
+    if (osW && osW.get) Object.defineProperty(screen, 'width', {{ get: function() {{ return roundTo(osW.get.call(this), WS, MW); }} }});
+    if (osH && osH.get) Object.defineProperty(screen, 'height', {{ get: function() {{ return roundTo(osH.get.call(this), HS, MH); }} }});
+    if (osAW && osAW.get) Object.defineProperty(screen, 'availWidth', {{ get: function() {{ return roundTo(osAW.get.call(this), WS, MW); }} }});
+    if (osAH && osAH.get) Object.defineProperty(screen, 'availHeight', {{ get: function() {{ return roundTo(osAH.get.call(this), HS, MH); }} }});
   }} catch(e) {{}}
 
   // 覆盖 window 尺寸属性
   try {{
-    Object.defineProperty(window, 'innerWidth', {{ get: function() {{ return roundTo(window.innerWidth, WS, MW); }} }});
-    Object.defineProperty(window, 'innerHeight', {{ get: function() {{ return roundTo(window.innerHeight, HS, MH); }} }});
-    Object.defineProperty(window, 'outerWidth', {{ get: function() {{ return roundTo(window.outerWidth, WS, MW); }} }});
-    Object.defineProperty(window, 'outerHeight', {{ get: function() {{ return roundTo(window.outerHeight, HS, MH); }} }});
+    // 先捕获原始 getter 再覆盖——若 getter 内再读 window.innerWidth，
+    // 读到的已是覆盖后的自身，形成无限自递归栈溢出（RangeError）
+    var oIW = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    var oIH = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    var oOW = Object.getOwnPropertyDescriptor(window, 'outerWidth');
+    var oOH = Object.getOwnPropertyDescriptor(window, 'outerHeight');
+    if (oIW && oIW.get) Object.defineProperty(window, 'innerWidth', {{ get: function() {{ return roundTo(oIW.get.call(this), WS, MW); }} }});
+    if (oIH && oIH.get) Object.defineProperty(window, 'innerHeight', {{ get: function() {{ return roundTo(oIH.get.call(this), HS, MH); }} }});
+    if (oOW && oOW.get) Object.defineProperty(window, 'outerWidth', {{ get: function() {{ return roundTo(oOW.get.call(this), WS, MW); }} }});
+    if (oOH && oOH.get) Object.defineProperty(window, 'outerHeight', {{ get: function() {{ return roundTo(oOH.get.call(this), HS, MH); }} }});
+  }} catch(e) {{}}
+
+  // RS-079（审计 2026-09-25）：色深与 DPR 同属屏幕指纹面——colorDepth/
+  // pixelDepth 固定 24（Tor 标准口径），DPR 圆整到 0.25 步长
+  try {{
+    var oCD = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'colorDepth');
+    if (oCD) Object.defineProperty(screen, 'colorDepth', {{ get: function() {{ return 24; }} }});
+    var oPD = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'pixelDepth');
+    if (oPD) Object.defineProperty(screen, 'pixelDepth', {{ get: function() {{ return 24; }} }});
+  }} catch(e) {{}}
+  try {{
+    var oDPR = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
+    if (oDPR && oDPR.get) Object.defineProperty(window, 'devicePixelRatio', {{
+      get: function() {{ return Math.round(oDPR.get.call(this) * 4) / 4; }}
+    }});
   }} catch(e) {{}}
 }})();
 "#
@@ -162,6 +196,74 @@ mod tests {
     }
 
     #[test]
+    fn window_override_captures_original_getter() {
+        // RS-001 回归：window 属性覆盖必须先捕获原 getter，
+        // 不得在 getter 内再读同名属性（无限自递归栈溢出）
+        let script = LetterboxShield::new().inject_script();
+        assert!(script.contains("getOwnPropertyDescriptor(window, 'innerWidth')"));
+        assert!(script.contains("getOwnPropertyDescriptor(window, 'outerHeight')"));
+        // 覆盖体内不允许出现"读覆盖目标自身"的递归形态
+        assert!(!script.contains("return roundTo(window.innerWidth"));
+        assert!(!script.contains("return roundTo(window.innerHeight"));
+    }
+
+    #[test]
+    fn every_override_guarded_by_descriptor_existence() {
+        // RS-163（审计 2026-09-25）：descriptor 缺失时必须跳过对应覆盖——
+        // 无守卫的 defineProperty 会以 undefined 原值覆盖（roundTo(undefined)
+        // 产出 NaN，或用空覆盖反成指纹异常信号）。逐属性断言守卫形态：
+        // RS-237（2026-09-26）：screen 组与 window 组统一双守卫
+        //（descriptor 存在且 .get 可读——数据属性形态首读即 TypeError）。
+        let script = LetterboxShield::new().inject_script();
+        // RS-237：screen 四属性升级为双守卫（descriptor 存在且可读——
+        // 数据属性形态下 .get 为 undefined，首读即 TypeError）
+        for guard in [
+            "if (osW && osW.get)",
+            "if (osH && osH.get)",
+            "if (osAW && osAW.get)",
+            "if (osAH && osAH.get)",
+        ] {
+            assert!(
+                script.contains(guard),
+                "screen override missing guard {guard}"
+            );
+        }
+        // window 四属性：if (oX && oX.get) 双守卫（descriptor 存在且可读）
+        for guard in [
+            "if (oIW && oIW.get)",
+            "if (oIH && oIH.get)",
+            "if (oOW && oOW.get)",
+            "if (oOH && oOH.get)",
+        ] {
+            assert!(
+                script.contains(guard),
+                "window override missing guard {guard}"
+            );
+        }
+        // 色深与 DPR 组：同样不得裸 defineProperty
+        assert!(
+            script.contains("if (oCD)"),
+            "colorDepth override missing guard"
+        );
+        assert!(
+            script.contains("if (oPD)"),
+            "pixelDepth override missing guard"
+        );
+        assert!(
+            script.contains("if (oDPR && oDPR.get)"),
+            "DPR override missing guard"
+        );
+        // 守卫与 defineProperty 一一配对：每个守卫行之后紧跟 defineProperty，
+        // 不存在无守卫的裸覆盖（形态锁定，防未来新增属性漏写守卫）。
+        for line in script.lines() {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with("Object.defineProperty") {
+                panic!("unguarded defineProperty found: {trimmed}");
+            }
+        }
+    }
+
+    #[test]
     fn custom_config_reflected_in_script() {
         let config = LetterboxConfig {
             width_step: 100,
@@ -181,5 +283,50 @@ mod tests {
         let debug = format!("{:?}", shield);
         assert!(debug.contains("200"));
         assert!(debug.contains("100"));
+    }
+
+    // —— RS-078 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn zero_step_saturates_to_one() {
+        // RS-078/RS-021：步长 0 钳到 1——否则 JS 侧 v/0 = Infinity 圆整失效
+        let config = LetterboxConfig {
+            width_step: 0,
+            height_step: 0,
+            min_width: 1,
+            min_height: 1,
+        };
+        let script = LetterboxShield::with_config(config).inject_script();
+        assert!(script.contains("var WS = 1,"), "宽步长钳到 1");
+        assert!(script.contains("HS = 1,"), "高步长钳到 1");
+    }
+
+    #[test]
+    fn round_to_clamps_to_minimum() {
+        // RS-078：roundTo 必须带 minV 下限钳制（小窗口不得圆整到 0）
+        let script = LetterboxShield::new().inject_script();
+        assert!(
+            script.contains("Math.max(minV, Math.round(v / step) * step)"),
+            "roundTo 钳制语义"
+        );
+    }
+
+    // —— RS-079 回归（审计 2026-09-25） ——
+
+    #[test]
+    fn color_depth_and_dpr_covered() {
+        // RS-079：色深固定 24 + DPR 0.25 步长圆整
+        let script = LetterboxShield::new().inject_script();
+        assert!(script.contains("'colorDepth'"), "colorDepth 覆盖");
+        assert!(script.contains("'pixelDepth'"), "pixelDepth 覆盖");
+        assert!(script.contains("return 24;"), "色深固定 24（Tor 口径）");
+        assert!(
+            script.contains("'devicePixelRatio'"),
+            "devicePixelRatio 覆盖"
+        );
+        assert!(
+            script.contains("Math.round(oDPR.get.call(this) * 4) / 4"),
+            "DPR 圆整到 0.25 步长"
+        );
     }
 }

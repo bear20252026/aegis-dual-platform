@@ -60,6 +60,29 @@ public sealed class HistoryImporterTests : IDisposable
         Assert.Equal(2, store.Recent(10).Count);
     }
 
+    [Fact]
+    public void ImportToEmptyCandidatesReturnsZeroZero()
+    {
+        // CS-095：空候选导入返回 (0,0) 且不建脏数据
+        var store = new HistoryStore(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+
+        var (imported, total) = HistoryImporter.ImportTo(store, []);
+
+        Assert.Equal(0, imported);
+        Assert.Equal(0, total);
+        Assert.Empty(store.Recent(10));
+    }
+
+    [Theory]
+    [InlineData(0, 1)]       // CS-096：下界钳 1
+    [InlineData(-5, 1)]
+    [InlineData(1, 1)]
+    [InlineData(1500, 1500)]
+    [InlineData(2000, 2000)] // 上界恰值
+    [InlineData(5000, 2000)] // 上界钳 2000
+    public void ClampLimitBoundsParseLimit(int input, int expected) =>
+        Assert.Equal(expected, HistoryImporter.ClampLimit(input));
+
     private void CreateFixtureDb(params (string Url, string Title, long LastVisit)[] rows)
     {
         using var connection = new SqliteConnection(new SqliteConnectionStringBuilder

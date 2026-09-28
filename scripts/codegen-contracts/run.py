@@ -23,8 +23,17 @@ def main() -> int:
     ]
     for script, note in steps:
         print(f"--- {note} ---")
-        r = subprocess.run([sys.executable, str(CODEGEN / script)], capture_output=True, text=True, check=False)
+        # PY-030：补 timeout（生成器死循环/挂起时 CI 不会被无限占用）+
+        # stderr 透传（此前失败只有一行 ❌，诊断信息全丢）
+        try:
+            r = subprocess.run([sys.executable, str(CODEGEN / script)],
+                               capture_output=True, text=True, check=False, timeout=120)
+        except subprocess.TimeoutExpired:
+            print(f"❌ {script} 超时（120s）")
+            return 1
         print(r.stdout.strip())
+        if r.stderr.strip():
+            print(r.stderr.strip(), file=sys.stderr)
         if r.returncode != 0:
             print(f"❌ {script} 失败")
             return 1

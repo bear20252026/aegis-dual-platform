@@ -1,21 +1,52 @@
 """以稳定 JSON 结构生成发布目录的 SHA-256 清单。"""
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
+from collections.abc import Iterator
 from pathlib import Path
+
+# 1MiB 分块（PY-039：发布目录可含大体积制品——安装包/库——流式摘要）
+_CHUNK = 1 << 20
+
+
+def iter_release_files(root: Path, manifest_path: Path) -> Iterator[Path]:
+    """枚举发布根下参与摘要对账的全部普通文件，排除清单自身。
+
+    PY-212（2026-09-26 审计）：「排除清单自身」的文件集合推导此前在
+    write_checksum_json.build_manifest 与 verify_checksum_json.verify_manifest
+    各自实现一份——规则演化时两处必漂移（写侧漏一个文件、读侧多验一个
+    文件，互相对不上）。现抽共享单源：两侧都经由本函数得到同一文件集合。
+    """
+    manifest_resolved = manifest_path.resolve()
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and path.resolve() != manifest_resolved:
+            yield path
+
+
+def sha256_file(path: Path) -> str:
+    """1MiB 分块流式 SHA-256（写/读两侧共用——PY-191 对齐）。"""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(_CHUNK), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
 
 
 def build_manifest(root: Path, output: Path) -> list[dict[str, str]]:
-    output_relative = output.relative_to(root)
+    # relative_to 同时承担"输出必须在发布根内"的守卫（越界即 ValueError）
+    output.relative_to(root)
     entries = []
-    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+    # PY-212：文件集合来自共享 iter_release_files（清单自排除单源）
+    for path in iter_release_files(root, output):
         relative = path.relative_to(root)
-        if relative == output_relative:
-            continue
+        # PY-039：整文件 read_bytes 进内存——发布目录可含大体积制品
+        #（安装包/库），改 1MiB 分块流式摘要
         entries.append(
             {
-                "Hash": hashlib.sha256(path.read_bytes()).hexdigest().upper(),
+                "Hash": sha256_file(path),
                 "Path": relative.as_posix(),
             }
         )

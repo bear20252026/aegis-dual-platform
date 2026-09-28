@@ -7,6 +7,13 @@ data class AuditEventContract(
     val decision: String,
     val scope: String,
     val origin: String,
-    val reason: String,
-    val tab_id: String,
+    val reason: String? = null,
+    val tab_id: String? = null,
 )
+
+/** PY-188（2026-09-26 审计）：AuditEventContract 值域常量——schema enum/const 单源，属性保持基础类型以兼容既有消费方。 */
+object AuditEventContractValues {
+    const val DECISION_ALLOW: String = "allow" // enum: allow | deny | require_confirmation
+    const val DECISION_DENY: String = "deny" // enum: allow | deny | require_confirmation
+    const val DECISION_REQUIRE_CONFIRMATION: String = "require_confirmation" // enum: allow | deny | require_confirmation
+}

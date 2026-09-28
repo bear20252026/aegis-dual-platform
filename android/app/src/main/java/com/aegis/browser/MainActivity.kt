@@ -2,49 +2,25 @@ package com.aegis.browser
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.ViewGroup
-import android.webkit.WebView
-import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 主界面（薄壳，仅负责组装；多标签逻辑在 TabManager，标签栏在 TabBar/VerticalTabBar）。
@@ -55,11 +31,17 @@ import androidx.core.view.WindowCompat
  * - 所有 WebView 经 SecureWebViewFactory 创建（安全配置统一）；
  * - onDestroy 统一释放全部 WebView。
  *
- * 落地 B：支持标签栏布局切换（tabsPosition = "top" 顶部横排 | "left" 左侧垂直），
- * 默认 top（与既有行为一致）；left 走 VerticalTabBar（按分组/工作区渲染）。
+ * 落地 B：支持标签栏布局切换（[TabsPosition].TOP 顶部横排 | LEFT 左侧垂直），
+ * 默认 TOP（与既有行为一致）；LEFT 走 VerticalTabBar。
+ *
+ * AD-101（审计 2026-09-23 清单·A6 批）：地址栏（AddressBarUi.kt）、页面内容区
+ * （WebContentAreaUi.kt）与对话框（MainDialogs.kt——AD-183，本批）组件抽出
+ * ——本文件只保留 Activity 生命周期、回调装配与布局编排。
  */
 class MainActivity : ComponentActivity() {
-    private val viewModel: BrowserViewModel by viewModels()
+    // 架构解耦（第 5 项）：broker 经工厂注入 ViewModel——Application 强转取
+    // broker 收敛到这一个组合点（factory(application)），其余层不再强转。
+    private val viewModel: BrowserViewModel by viewModels { BrowserViewModel.factory(application) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -69,268 +51,237 @@ class MainActivity : ComponentActivity() {
         // 不适配 + 深色 chrome → 状态栏图标转浅色，根布局用 insets padding 让位。
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-        insetsController.isAppearanceLightStatusBars = false
+        // AD-190（审计 2026-09-23 清单·A7 批）：图标明暗由 chrome 底色单源派生
+        // ——原 `isAppearanceLightStatusBars = false` 硬编码「永远浅色图标」，
+        // 与底色无派生关系（底色改浅色系时图标不可见）。底色取 colors.xml
+        // 单源（chrome_background，与 Compose 页面区背景同一资源）。
+        insetsController.isAppearanceLightStatusBars =
+            !statusBarUsesLightIcons(ContextCompat.getColor(this, R.color.chrome_background))
         // A1：System WebView 版本检查（CVE-2026-12438/11295 防御——
         // 过旧则提示更新，不阻塞浏览）
-        WebViewVersionCheck.checkAndPrompt(this) { viewModel.setWebViewAlert(it) }
-        // 初始化 ViewModel（TabManager + 首个标签）
+        // AD-058（2026-09-24 审计）：getPackageInfo 是 PackageManager 查询
+        // （可能触发 binder IPC）——移出主线程，协程内检查、结果回主线程提示。
+        lifecycleScope.launch(Dispatchers.Default) {
+            // AD-239（2026-09-26 审计）：检查经 ViewModel 存续层去重——未声明
+            // configChanges 的变更触发 Activity 重建后不得再次弹提示。
+            viewModel.checkWebViewVersionOnce { message ->
+                lifecycleScope.launch(Dispatchers.Main) { viewModel.setWebViewAlert(message) }
+            }
+        }
+        // AD-197（审计 2026-09-23 清单·A7 批）：冷启动装配时序固化（次序即
+        // 契约，不得重排）——
+        //   ① init：TabManager 必须先就位（openExternalUrl 的导航链路依赖
+        //      当前标签 WebView；init 内 `if (::tabManager.isInitialized) return`
+        //      幂等，配置变更重建时安全直通）；
+        //   ② attachActivity：宿主弱引用随后注入（P0-6 崩溃重建需要主题化
+        //      Activity context，晚于 init 只损失「init 当刻即崩溃」的极端窗口）；
+        //   ③ openExternalUrl：最后消费冷启动外链——此时安全导航链路（策略
+        //      决策 + 防抖 + 错误上抛）才具备完整前提，外链不会被静默丢弃。
         viewModel.init(this)
-        // P0-5 修复（全面审计 2026-09-04）：向 ViewModel 注入宿主引用（弱引用
-        // 持有）——P0-6 崩溃重建需用 Activity context 创建 WebView；onDestroy
-        // 且 isFinishing 时 detach。
         viewModel.attachActivity(this)
-        // P1-4 修复（全面审计批次4）：冷启动外链消费——VIEW intent 的 URL
-        // 经安全导航链路加载（此前声明了 intent-filter 却静默丢弃 URL）
         viewModel.openExternalUrl(intent?.data?.toString())
 
         // 返回事件统一接管（BUG-013）：targetSdk 36 起系统默认经
         // OnBackInvokedCallback 分发返回（手势导航的边缘滑动与
-        // KEYCODE_BACK 都不再经过 onKeyDown——此前 onKeyDown 实现
-        // 在手势导航设备上从未生效，边缘滑动直接退出应用）。
-        // OnBackPressedCallback 由 androidx 桥接两种分发路径；
-        // 无历史时保留原退出语义。
-        onBackPressedDispatcher.addCallback(
-            this,
-            object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    val wv = viewModel.currentWebViewOrNull()
-                    if (wv != null && wv.canGoBack()) {
-                        SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK)
-                    } else {
-                        finish()
-                    }
-                }
-            },
-        )
+        // KEYCODE_BACK 都不再经过 onKeyDown）。OnBackPressedCallback 由
+        // androidx 桥接两种分发路径；无历史时保留原退出语义。
+        onBackPressedDispatcher.addCallback(this, BackPressHandler())
 
         setContent {
             AegisTheme {
-                val tabs by viewModel.tabs.collectAsState()
-                val activeIndex by viewModel.activeIndex.collectAsState()
-                val address by viewModel.address.collectAsState()
-                val tabsPosition by viewModel.tabsPosition.collectAsState()
-                val webViewAlert by viewModel.webViewAlert.collectAsState()
-                val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsState()
-                val pageError by viewModel.pageError.collectAsState()
-                val readerContent by viewModel.reader.content.collectAsState()
+                MainBrowserContent()
+            }
+        }
+    }
 
-                // 阅读模式：提取到的正文以对话框渲染（INV-04：状态来自 ViewModel）
-                readerContent?.let { content ->
-                    AlertDialog(
-                        onDismissRequest = { viewModel.reader.dismissReader() },
-                        title = { Text(content.title) },
-                        text = {
-                            Column {
-                                Text(
-                                    text = content.text,
-                                    modifier =
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .heightIn(max = 420.dp)
-                                            .verticalScroll(rememberScrollState()),
-                                )
-                            }
-                        },
-                        confirmButton = {
-                            TextButton(onClick = { viewModel.reader.dismissReader() }) { Text("关闭") }
-                        },
-                    )
+    /**
+     * AD-183（审计 2026-09-23 清单·A7 批）：主内容装配抽组合函数——onCreate
+     * 只负责生命周期与 setContent 入口；状态收集、对话框状态机（AD-151）与
+     * 双布局编排收敛在此（Compose 上下文，可读性优先）。
+     */
+    @Suppress("FunctionNaming")
+    @Composable
+    private fun MainBrowserContent() {
+        // AD-038：collectAsState → collectAsStateWithLifecycle（后台不再
+        // 空转收集，回到前台自动恢复——省电且避免后台重组）
+        val tabs by viewModel.tabs.collectAsStateWithLifecycle()
+        val activeIndex by viewModel.activeIndex.collectAsStateWithLifecycle()
+        val address by viewModel.address.collectAsStateWithLifecycle()
+        val tabsPosition by viewModel.tabsPosition.collectAsStateWithLifecycle()
+        val webViewAlert by viewModel.webViewAlert.collectAsStateWithLifecycle()
+        val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsStateWithLifecycle()
+        val pageError by viewModel.pageError.collectAsStateWithLifecycle()
+        val readerContent by viewModel.reader.content.collectAsStateWithLifecycle()
+        // AD-064：前进/后退可用性
+        val canGoBack by viewModel.canGoBack.collectAsStateWithLifecycle()
+        val canGoForward by viewModel.canGoForward.collectAsStateWithLifecycle()
+
+        // AD-151（审计 2026-09-23 清单·A7 批）：对话框单槽状态机——同一时刻
+        // 至多呈现一个对话框（优先级见 MainDialogs.resolveActiveDialog）。
+        MainDialogHost(
+            pendingConfirmation = pendingConfirmation,
+            webViewAlert = webViewAlert,
+            readerContent = readerContent,
+            onApprove = { viewModel.approvePendingNavigationConfirmation() },
+            onReject = { viewModel.rejectPendingNavigationConfirmation() },
+            onDismissAlert = { viewModel.setWebViewAlert(null) },
+            onGoUpdate = {
+                viewModel.setWebViewAlert(null)
+                // AD-204（审计 2026-09-23 清单·A7 批）：去更新失败降级
+                // ——无 Play Store/无浏览器时跳转静默失败，回填提示。
+                if (!WebViewVersionCheck.openUpdate(this@MainActivity)) {
+                    viewModel.setWebViewAlert(getString(R.string.update_open_failed))
                 }
+            },
+            onDismissReader = { viewModel.reader.dismissReader() },
+        )
 
-                // A1：版本过旧 → 安全提示对话框（CVE-2026-12438/11295 防御）
-                webViewAlert?.let { msg ->
-                    AlertDialog(
-                        onDismissRequest = { viewModel.setWebViewAlert(null) },
-                        title = { Text("安全提示") },
-                        text = { Text(msg) },
-                        confirmButton = {
-                            TextButton(
-                                onClick = {
-                                    viewModel.setWebViewAlert(null)
-                                    WebViewVersionCheck.openUpdate(this@MainActivity)
-                                },
-                            ) { Text("去更新") }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { viewModel.setWebViewAlert(null) }) { Text("稍后") }
-                        },
+        MainBrowserChromeLayout(
+            tabs = tabs,
+            activeIndex = activeIndex,
+            address = address,
+            tabsPosition = tabsPosition,
+            pageError = pageError,
+            canGoBack = canGoBack,
+            canGoForward = canGoForward,
+        )
+    }
+
+    /**
+     * AD-183：chrome 双布局编排组合函数（top 横排 / left 垂直）——状态由
+     * [MainBrowserContent] 收集后传入；交互经 ViewModel 意图入口上抛。
+     */
+    @Suppress("FunctionNaming", "LongParameterList")
+    @Composable
+    private fun MainBrowserChromeLayout(
+        tabs: List<Tab>,
+        activeIndex: Int,
+        address: String,
+        tabsPosition: TabsPosition,
+        pageError: PageError?,
+        canGoBack: Boolean,
+        canGoForward: Boolean,
+    ) {
+        // AD-153（审计 2026-09-23 清单·A7 批）：根布局衬底经语义色板取色
+        val chrome = LocalAegisChromeColors.current
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .background(chrome.chromeBackground)
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+        ) {
+            // —— 标签栏（top 横排 / left 垂直，按布局切换）——
+            if (tabsPosition == TabsPosition.LEFT) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    VerticalTabBar(
+                        tabs = tabs,
+                        activeIndex = activeIndex,
+                        onSelect = { viewModel.switchTo(it) },
+                        onClose = { viewModel.closeTab(it) },
+                        onNewTab = { viewModel.newTab(this@MainActivity) },
                     )
-                }
-
-                // 受信 Compose chrome 审批层：远程页面没有该回调或授权对象；默认关闭即拒绝。
-                pendingConfirmation?.let { pending ->
-                    AlertDialog(
-                        onDismissRequest = { viewModel.rejectPendingNavigationConfirmation() },
-                        title = { Text("需要确认的导航") },
-                        text = {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("来源：${pending.request.origin}")
-                                Text("路径与查询：${pending.request.path}")
-                                Text("权限范围：${pending.request.scope}")
-                                Text("此请求将在 ${pending.request.expiresAt} 过期。")
-                            }
-                        },
-                        confirmButton = {
-                            TextButton(onClick = { viewModel.approvePendingNavigationConfirmation() }) {
-                                Text("批准并继续")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = { viewModel.rejectPendingNavigationConfirmation() }) {
-                                Text("拒绝")
-                            }
-                        },
-                    )
-                }
-
-                Column(
-                    modifier =
-                        Modifier
-                            .fillMaxSize()
-                            .background(ChromeBackground)
-                            .statusBarsPadding()
-                            .navigationBarsPadding(),
-                ) {
-                    // —— 标签栏（top 横排 / left 垂直，按布局切换）——
-                    if (tabsPosition == "left") {
-                        Row(modifier = Modifier.fillMaxSize()) {
-                            VerticalTabBar(
-                                tabs = tabs,
-                                activeIndex = activeIndex,
-                                onSelect = { viewModel.switchTo(it) },
-                                onClose = { viewModel.closeTab(it) },
-                                onNewTab = { viewModel.newTab(this@MainActivity) },
-                            )
-                            WebContentArea(
-                                tabManager = viewModel.getTabManager()!!,
-                                pageError = pageError,
-                                onRetry = { viewModel.retryCurrentPage() },
-                                onBackToSafePage = { viewModel.returnToSafeHome() },
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                    } else {
-                        TabBar(
-                            tabs = tabs,
-                            activeIndex = activeIndex,
-                            onSelect = { viewModel.switchTo(it) },
-                            onClose = { viewModel.closeTab(it) },
-                            onNewTab = { viewModel.newTab(this@MainActivity) },
-                        )
-                        AddressBarRow(
+                    // AD-251（2026-09-26 审计）：left 分支同样含地址栏（布局
+                    // 切换后用户不失去地址栏）；内容区占剩余宽度。
+                    Column(modifier = Modifier.weight(1f)) {
+                        AddressAndContent(
                             address = address,
-                            onAddressChange = { viewModel.updateAddress(it) },
-                            onOpen = { viewModel.navigateToAddress() },
-                            onBack = { viewModel.navigateHistory(HistoryAction.BACK) },
-                            onForward = { viewModel.navigateHistory(HistoryAction.FORWARD) },
-                            onReload = { viewModel.navigateHistory(HistoryAction.RELOAD) },
-                            onReader = { viewModel.reader.toggleReaderMode() },
-                            onTranslate = { viewModel.reader.translateCurrentPage() },
-                        )
-                        WebContentArea(
-                            tabManager = viewModel.getTabManager()!!,
+                            activeIndex = activeIndex,
+                            canGoBack = canGoBack,
+                            canGoForward = canGoForward,
                             pageError = pageError,
-                            onRetry = { viewModel.retryCurrentPage() },
-                            onBackToSafePage = { viewModel.returnToSafeHome() },
                             modifier = Modifier.weight(1f),
                         )
                     }
                 }
+            } else {
+                TabBar(
+                    tabs = tabs,
+                    activeIndex = activeIndex,
+                    onSelect = { viewModel.switchTo(it) },
+                    onClose = { viewModel.closeTab(it) },
+                    onNewTab = { viewModel.newTab(this@MainActivity) },
+                )
+                AddressAndContent(
+                    address = address,
+                    activeIndex = activeIndex,
+                    canGoBack = canGoBack,
+                    canGoForward = canGoForward,
+                    pageError = pageError,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
     }
 
     /**
-     * 地址栏 + 导航按钮（纯浏览态）。
+     * AD-183：地址栏 + 页面内容区装配（两种布局共用同一组装——此前在
+     * top/left 分支各写一份）。
      *
-     * 2026-09-02 视觉重构：两行大按钮改为单行——玻璃圆钮（后退/前进/刷新/阅读/翻译）
-     * + 深色玻璃胶囊地址栏；「打开」并入地址栏尾部按键与 IME「搜索」动作，
-     * 不再占独立按钮位。贪吃蛇已迁移至首页 start.html（BUG-014——单源双端一致）。
+     * @Suppress 与 AddressBarRow 同口径：状态/回调装配点参数多系设计使然。
      */
+    @Suppress("FunctionNaming", "LongParameterList")
     @Composable
-    private fun AddressBarRow(
+    private fun AddressAndContent(
         address: String,
-        onAddressChange: (String) -> Unit,
-        onOpen: () -> Unit,
-        onBack: () -> Unit,
-        onForward: () -> Unit,
-        onReload: () -> Unit,
-        onReader: () -> Unit,
-        onTranslate: () -> Unit,
+        activeIndex: Int,
+        canGoBack: Boolean,
+        canGoForward: Boolean,
+        pageError: PageError?,
+        modifier: Modifier,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ChromeIconButton("←", onBack)
-            ChromeIconButton("→", onForward)
-            ChromeIconButton("⟳", onReload)
-            OutlinedTextField(
-                value = address,
-                onValueChange = onAddressChange,
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                placeholder = { Text("搜索或输入网址", color = TextSecondary) },
-                shape = CircleShape,
-                colors =
-                    OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = FieldBorderFocused,
-                        unfocusedBorderColor = FieldBorderIdle,
-                        focusedContainerColor = FieldBackground,
-                        unfocusedContainerColor = FieldBackground,
-                        cursorColor = Color.White,
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                    ),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                keyboardActions = KeyboardActions(onSearch = { onOpen() }),
-                trailingIcon = {
-                    Text(
-                        text = "打开",
-                        color = TextSecondary,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier =
-                            Modifier
-                                .padding(end = 6.dp)
-                                .clickable(onClick = onOpen),
-                    )
-                },
-            )
-            ChromeIconButton("阅", onReader)
-            ChromeIconButton("译", onTranslate)
-        }
+        AddressBarRow(
+            address = address,
+            canGoBack = canGoBack,
+            canGoForward = canGoForward,
+            onAddressChange = { viewModel.updateAddress(it) },
+            onOpen = { viewModel.navigateToAddress() },
+            onBack = { viewModel.navigateHistory(HistoryAction.BACK) },
+            onForward = { viewModel.navigateHistory(HistoryAction.FORWARD) },
+            onReload = { viewModel.navigateHistory(HistoryAction.RELOAD) },
+            onReader = { viewModel.reader.toggleReaderMode() },
+            onTranslate = { viewModel.reader.translateCurrentPage() },
+            onToggleLayout = { viewModel.toggleTabsPosition() },
+        )
+        WebContentArea(
+            tabManager = requireNotNull(viewModel.getTabManager()),
+            activeIndex = activeIndex,
+            pageError = pageError,
+            onRetry = { viewModel.retryCurrentPage() },
+            onBackToSafePage = { viewModel.returnToSafeHome() },
+            modifier = modifier,
+        )
     }
 
     /**
-     * 玻璃圆钮：工具栏图标按钮（半透明白圆形 + 居中字符图标）。
+     * 返回键处理器（BUG-013）。
      *
-     * Composable 命名按 UI 惯例 PascalCase（与 [TabChipCore] 同口径）。
+     * AD-140（审计 2026-09-23 清单·A6 批）：降级 finish——原实现 wv==null 时
+     * 走 else-finish，但 navigatorFor(wv) 缺失（WebView 已注销的边界）时
+     * `?.navigateHistory` 静默 no-op：用户按返回毫无反馈。收敛为「消费历史
+     * 成功才留驻，否则一律降级 finish」，返回键语义全路径闭合。
      */
-    @Suppress("FunctionNaming")
-    @Composable
-    private fun ChromeIconButton(
-        glyph: String,
-        onClick: () -> Unit,
-    ) {
-        Surface(
-            onClick = onClick,
-            shape = CircleShape,
-            color = ButtonOverlay,
-            modifier = Modifier.size(38.dp),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Text(text = glyph, color = Color.White, style = MaterialTheme.typography.bodyMedium)
-            }
+    private inner class BackPressHandler : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            val wv = viewModel.currentWebViewOrNull()
+            val consumed =
+                wv != null &&
+                    wv.canGoBack() &&
+                    SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(HistoryAction.BACK) == true
+            if (!consumed) finish()
         }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // AD-240（2026-09-26 审计）：更新宿主 Intent——不 setIntent 则后续
+        // getIntent() 仍指旧 Intent（launchMode 复用路径的 intent 消费语义）。
+        setIntent(intent)
         // P1-4 修复（全面审计批次4）：热启动外链消费——launchMode 调整或
         // singleTop 复用时 VIEW intent 经此分发；与 onCreate 冷启动路径
         // 同走 openExternalUrl 安全链路。
-        viewModel.openExternalUrl(intent?.data?.toString())
+        viewModel.openExternalUrl(intent.data?.toString())
     }
 
     override fun onDestroy() {
@@ -343,9 +294,11 @@ class MainActivity : ComponentActivity() {
         if (isFinishing) {
             // Activity 真正退出是确认 UI 的退出边界；任何待审批导航均须先撤销，不留可恢复能力。
             viewModel.rejectPendingNavigationConfirmation()
-            // 释放全部 WebView 持有的 Chromium 资源（统一销毁序列单源）
+            // 释放全部 WebView 持有的 Chromium 资源（统一销毁序列单源）。
+            // AD-072（2026-09-26 审计）：不再先 suspendAll——它只 pause 实例，
+            // 紧随的 tearDown 全量 destroy 使 pause 全部冗余（后台化挂起由
+            // onPause 的 suspendAll 承担，销毁路径不重复）。
             viewModel.getTabManager()?.let { tm ->
-                tm.suspendAll()
                 tm.list().forEach { tab -> SecureWebViewFactory.tearDown(tab.webView) }
             }
             // P0-5 修复：解除宿主引用（弱引用，不阻止 Activity 回收）。
@@ -357,110 +310,15 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         // 应用转后台或进入系统遮罩时没有持续可见的明确同意；恢复后必须重新请求审批。
         viewModel.rejectPendingNavigationConfirmation()
+        // AD-006：后台即全局暂停页面 JS 定时器并挂起全部标签（隐私+电量）；
+        // 回前台由 onResume 对称恢复当前标签
+        viewModel.getTabManager()?.suspendAll()
         super.onPause()
     }
-}
 
-/**
- * 页面容器：显示当前标签的 WebView（两种布局共用）。
- *
- * P2-1 修复（全面审计 2026-09-04）：错误状态非空时在内容区上方渲染
- * [PageErrorPanel]（原实现 SSL/加载错误静默白屏，无任何反馈）。
- */
-@Suppress("FunctionNaming")
-@Composable
-private fun WebContentArea(
-    tabManager: TabManager,
-    pageError: PageError?,
-    onRetry: () -> Unit,
-    onBackToSafePage: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Box(modifier = modifier) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { FrameLayout(it) },
-            update = { container ->
-                val current = tabManager.current()
-                if (current == null) return@AndroidView
-                val wv = current.webView
-                if (container.indexOfChild(wv) < 0) {
-                    container.removeAllViews()
-                    (wv.parent as? ViewGroup)?.removeView(wv)
-                    container.addView(wv)
-                }
-            },
-        )
-        pageError?.let { error ->
-            PageErrorPanel(
-                error = error,
-                onRetry = onRetry,
-                onBackToSafePage = onBackToSafePage,
-            )
-        }
-    }
-}
-
-/**
- * P2-1 修复（全面审计 2026-09-04）：页面错误面板——半透明遮罩盖住 WebView
- * 内容区。「重试」reload 当前标签；「返回安全页」回到受信首页。
- */
-@Suppress("FunctionNaming")
-@Composable
-private fun PageErrorPanel(
-    error: PageError,
-    onRetry: () -> Unit,
-    onBackToSafePage: () -> Unit,
-) {
-    Box(
-        modifier =
-            Modifier
-                .fillMaxSize()
-                .background(ErrorOverlayBackground)
-                .padding(24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                text = if (error.isSsl) "安全连接失败" else "页面加载失败",
-                color = Color.White,
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Text(
-                text = error.description,
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center,
-            )
-            Text(
-                text = error.url,
-                color = TextSecondary,
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                maxLines = 2,
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Surface(onClick = onRetry, shape = CircleShape, color = ButtonOverlay) {
-                    Text(
-                        text = "重试",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
-                    )
-                }
-                Surface(onClick = onBackToSafePage, shape = CircleShape, color = ButtonOverlay) {
-                    Text(
-                        text = "返回安全页",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 10.dp),
-                    )
-                }
-            }
-        }
+    override fun onResume() {
+        super.onResume()
+        // AD-006 对称恢复：resumeTimers + 恢复当前标签（后台标签保持挂起）
+        viewModel.getTabManager()?.resumeOnForeground()
     }
 }

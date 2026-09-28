@@ -1,38 +1,42 @@
 {
+  "$comment": "栈归属：legacy/windows-pywebview js_api（归档只读——ADR-009）；由 scripts/gen_jsapi_schema.py 生成，请勿手改（CI diff 门禁）。",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Aegis js_api Bridge Schema",
   "description": "Aegis 浏览器暴露给注入式 UI 的 Python 桥接口规范。由 scripts/gen_jsapi_schema.py 自动生成，勿手改。",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "object",
   "properties": {
     "js_exposed_methods": [
       "add_bookmark",
+      "close_current_tab",
+      "close_source_view",
       "close_tab",
-      "current_url",
       "get_bookmarks",
-      "get_history",
-      "get_most_visited",
       "get_search_engine",
-      "get_tab_groups",
-      "get_tabs",
       "get_wallpaper",
       "go_back",
       "go_forward",
       "go_home",
+      "has_saved_session",
       "import_bookmarks",
       "import_history",
       "js_error",
+      "move_tab",
       "navigate",
       "new_tab",
+      "open_geogebra",
       "pin_tab",
       "reload_page",
       "remove_bookmark",
-      "search_history_fulltext",
+      "restore_session",
+      "scan_import_sources",
       "set_search_engine",
       "set_tab_group",
       "set_wallpaper",
       "switch_tab",
-      "unpin_tab"
+      "toggle_bookmark",
+      "unpin_tab",
+      "view_source"
     ],
     "methods": {
       "_eval": {
@@ -46,6 +50,7 @@
         ],
         "returns": "bool",
         "exposed_to_js": false,
+        "defined_in": "Api",
         "n_required_params": 1
       },
       "_load": {
@@ -59,6 +64,7 @@
         ],
         "returns": "bool",
         "exposed_to_js": false,
+        "defined_in": "Api",
         "n_required_params": 1
       },
       "_nav_healthy": {
@@ -67,6 +73,7 @@
         "params": [],
         "returns": "bool",
         "exposed_to_js": false,
+        "defined_in": "Api",
         "n_required_params": 0
       },
       "_recover_nav": {
@@ -75,6 +82,7 @@
         "params": [],
         "returns": "None",
         "exposed_to_js": false,
+        "defined_in": "Api",
         "n_required_params": 0
       },
       "add_bookmark": {
@@ -92,7 +100,26 @@
         ],
         "returns": "bool",
         "exposed_to_js": true,
+        "defined_in": "BookmarksMixin",
         "n_required_params": 2
+      },
+      "close_current_tab": {
+        "name": "close_current_tab",
+        "description": "关闭当前标签（Ctrl/W 路径——后端实时取 _current，防冻结索引关错）。",
+        "params": [],
+        "returns": "None",
+        "exposed_to_js": true,
+        "defined_in": "TabOpsMixin",
+        "n_required_params": 0
+      },
+      "close_source_view": {
+        "name": "close_source_view",
+        "description": "从源码视图返回原页面（查看器页内按钮调用）。",
+        "params": [],
+        "returns": "None",
+        "exposed_to_js": true,
+        "defined_in": "Api",
+        "n_required_params": 0
       },
       "close_tab": {
         "name": "close_tab",
@@ -105,6 +132,7 @@
         ],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "TabOpsMixin",
         "n_required_params": 1
       },
       "current_url": {
@@ -112,29 +140,40 @@
         "description": "",
         "params": [],
         "returns": "str",
-        "exposed_to_js": true,
+        "exposed_to_js": false,
+        "defined_in": "NavigationMixin",
         "n_required_params": 0
       },
       "get_bookmarks": {
         "name": "get_bookmarks",
-        "description": "返回书签列表 [{id,title,url}]。",
+        "description": "返回书签列表 [{id,title,url}]（B0-W-01 复审：受信来源校验）。",
         "params": [],
         "returns": "list",
         "exposed_to_js": true,
+        "defined_in": "BookmarksMixin",
         "n_required_params": 0
       },
       "get_history": {
         "name": "get_history",
-        "description": "返回历史 [{id,url,title,time}]。",
+        "description": "返回历史 [{id,url,title,time}]（支持游标分页，方向②-P2）。",
         "params": [
           {
             "name": "limit",
-            "required": true
+            "required": false
+          },
+          {
+            "name": "cursor_id",
+            "required": false
+          },
+          {
+            "name": "cursor_time",
+            "required": false
           }
         ],
         "returns": "list",
-        "exposed_to_js": true,
-        "n_required_params": 1
+        "exposed_to_js": false,
+        "defined_in": "HistoryMixin",
+        "n_required_params": 0
       },
       "get_most_visited": {
         "name": "get_most_visited",
@@ -142,12 +181,13 @@
         "params": [
           {
             "name": "limit",
-            "required": true
+            "required": false
           }
         ],
         "returns": "list",
-        "exposed_to_js": true,
-        "n_required_params": 1
+        "exposed_to_js": false,
+        "defined_in": "HistoryMixin",
+        "n_required_params": 0
       },
       "get_search_engine": {
         "name": "get_search_engine",
@@ -155,6 +195,7 @@
         "params": [],
         "returns": "dict",
         "exposed_to_js": true,
+        "defined_in": "SearchEngineMixin",
         "n_required_params": 0
       },
       "get_tab_groups": {
@@ -162,7 +203,8 @@
         "description": "返回全部分组名（有序去重，供分组栏/标签着色使用）。",
         "params": [],
         "returns": "list",
-        "exposed_to_js": true,
+        "exposed_to_js": false,
+        "defined_in": "TabOpsMixin",
         "n_required_params": 0
       },
       "get_tabs": {
@@ -170,7 +212,8 @@
         "description": "返回 {tabs:[{title,url}], current:int}（快照）。",
         "params": [],
         "returns": "dict",
-        "exposed_to_js": true,
+        "exposed_to_js": false,
+        "defined_in": "TabOpsMixin",
         "n_required_params": 0
       },
       "get_wallpaper": {
@@ -179,6 +222,7 @@
         "params": [],
         "returns": "str",
         "exposed_to_js": true,
+        "defined_in": "WallpaperMixin",
         "n_required_params": 0
       },
       "go_back": {
@@ -187,6 +231,7 @@
         "params": [],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "NavigationMixin",
         "n_required_params": 0
       },
       "go_forward": {
@@ -195,6 +240,7 @@
         "params": [],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "NavigationMixin",
         "n_required_params": 0
       },
       "go_home": {
@@ -203,28 +249,49 @@
         "params": [],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "NavigationMixin",
+        "n_required_params": 0
+      },
+      "has_saved_session": {
+        "name": "has_saved_session",
+        "description": "返回已保存会话的标签数（0=无）。仅计数，无 URL/标题。",
+        "params": [],
+        "returns": "int",
+        "exposed_to_js": true,
+        "defined_in": "TabOpsMixin",
         "n_required_params": 0
       },
       "import_bookmarks": {
         "name": "import_bookmarks",
-        "description": "从 Chrome/Edge 导入书签（自动探测本机文件）。",
-        "params": [],
-        "returns": "dict",
-        "exposed_to_js": true,
-        "n_required_params": 0
-      },
-      "import_history": {
-        "name": "import_history",
-        "description": "从 Chrome/Edge 导入最近历史（自动探测本机文件）。",
+        "description": "从 Chrome/Edge 导入书签（导入向导执行步）。",
         "params": [
           {
-            "name": "limit",
-            "required": true
+            "name": "source",
+            "required": false
           }
         ],
         "returns": "dict",
         "exposed_to_js": true,
-        "n_required_params": 1
+        "defined_in": "ImportMixin",
+        "n_required_params": 0
+      },
+      "import_history": {
+        "name": "import_history",
+        "description": "从 Chrome/Edge 导入最近历史（导入向导执行步）。",
+        "params": [
+          {
+            "name": "limit",
+            "required": false
+          },
+          {
+            "name": "source",
+            "required": false
+          }
+        ],
+        "returns": "dict",
+        "exposed_to_js": true,
+        "defined_in": "ImportMixin",
+        "n_required_params": 0
       },
       "js_error": {
         "name": "js_error",
@@ -236,28 +303,47 @@
           },
           {
             "name": "source",
-            "required": true
+            "required": false
           },
           {
             "name": "line",
-            "required": true
+            "required": false
           },
           {
             "name": "col",
-            "required": true
+            "required": false
           },
           {
             "name": "stack",
+            "required": false
+          }
+        ],
+        "returns": "None",
+        "exposed_to_js": true,
+        "defined_in": "NavigationMixin",
+        "n_required_params": 1
+      },
+      "move_tab": {
+        "name": "move_tab",
+        "description": "拖拽排序：把 from 位置标签移动到 to（pinned 区边界钳制）。",
+        "params": [
+          {
+            "name": "from_idx",
+            "required": true
+          },
+          {
+            "name": "to_idx",
             "required": true
           }
         ],
         "returns": "None",
         "exposed_to_js": true,
-        "n_required_params": 5
+        "defined_in": "TabOpsMixin",
+        "n_required_params": 2
       },
       "navigate": {
         "name": "navigate",
-        "description": "",
+        "description": "导航到用户输入——地址栏 / 首页搜索框 / 右键\"搜索选中文本\"共用入口。",
         "params": [
           {
             "name": "text",
@@ -266,6 +352,7 @@
         ],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "NavigationMixin",
         "n_required_params": 1
       },
       "new_tab": {
@@ -274,12 +361,22 @@
         "params": [
           {
             "name": "url",
-            "required": true
+            "required": false
           }
         ],
         "returns": "None",
         "exposed_to_js": true,
-        "n_required_params": 1
+        "defined_in": "TabOpsMixin",
+        "n_required_params": 0
+      },
+      "open_geogebra": {
+        "name": "open_geogebra",
+        "description": "打开离线几何画板（安装包内置资源——file:// 内部受信加载）。",
+        "params": [],
+        "returns": "bool",
+        "exposed_to_js": true,
+        "defined_in": "GeoMixin",
+        "n_required_params": 0
       },
       "pin_tab": {
         "name": "pin_tab",
@@ -292,6 +389,7 @@
         ],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "TabOpsMixin",
         "n_required_params": 1
       },
       "reload_page": {
@@ -300,6 +398,7 @@
         "params": [],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "NavigationMixin",
         "n_required_params": 0
       },
       "remove_bookmark": {
@@ -313,7 +412,26 @@
         ],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "BookmarksMixin",
         "n_required_params": 1
+      },
+      "restore_session": {
+        "name": "restore_session",
+        "description": "从会话文件恢复标签并加载当前标签（受信来源校验）。",
+        "params": [],
+        "returns": "bool",
+        "exposed_to_js": true,
+        "defined_in": "TabOpsMixin",
+        "n_required_params": 0
+      },
+      "scan_import_sources": {
+        "name": "scan_import_sources",
+        "description": "探测本机可导入来源（仅探测文件存在——不读取任何内容）。",
+        "params": [],
+        "returns": "list",
+        "exposed_to_js": true,
+        "defined_in": "ImportMixin",
+        "n_required_params": 0
       },
       "search_history_fulltext": {
         "name": "search_history_fulltext",
@@ -325,12 +443,39 @@
           },
           {
             "name": "limit",
-            "required": true
+            "required": false
+          },
+          {
+            "name": "cursor_id",
+            "required": false
+          },
+          {
+            "name": "cursor_time",
+            "required": false
           }
         ],
         "returns": "list",
-        "exposed_to_js": true,
-        "n_required_params": 2
+        "exposed_to_js": false,
+        "defined_in": "HistoryMixin",
+        "n_required_params": 1
+      },
+      "seed_session": {
+        "name": "seed_session",
+        "description": "装载标签会话（启动恢复/用户恢复共用）。返回当前标签 URL。",
+        "params": [
+          {
+            "name": "tabs",
+            "required": true
+          },
+          {
+            "name": "current",
+            "required": false
+          }
+        ],
+        "returns": "str",
+        "exposed_to_js": false,
+        "defined_in": "TabOpsMixin",
+        "n_required_params": 1
       },
       "set_search_engine": {
         "name": "set_search_engine",
@@ -343,6 +488,7 @@
         ],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "SearchEngineMixin",
         "n_required_params": 1
       },
       "set_tab_group": {
@@ -360,6 +506,7 @@
         ],
         "returns": "bool",
         "exposed_to_js": true,
+        "defined_in": "TabOpsMixin",
         "n_required_params": 2
       },
       "set_wallpaper": {
@@ -373,6 +520,7 @@
         ],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "WallpaperMixin",
         "n_required_params": 1
       },
       "switch_tab": {
@@ -386,7 +534,17 @@
         ],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "TabOpsMixin",
         "n_required_params": 1
+      },
+      "toggle_bookmark": {
+        "name": "toggle_bookmark",
+        "description": "收藏/取消收藏当前页（P1-6 修复，全面审计批次3-8：书签无添加入口）。",
+        "params": [],
+        "returns": "str",
+        "exposed_to_js": true,
+        "defined_in": "BookmarksMixin",
+        "n_required_params": 0
       },
       "unpin_tab": {
         "name": "unpin_tab",
@@ -399,7 +557,17 @@
         ],
         "returns": "None",
         "exposed_to_js": true,
+        "defined_in": "TabOpsMixin",
         "n_required_params": 1
+      },
+      "view_source": {
+        "name": "view_source",
+        "description": "查看当前页面源代码（js_api 入口，立即返回）。",
+        "params": [],
+        "returns": "None",
+        "exposed_to_js": true,
+        "defined_in": "Api",
+        "n_required_params": 0
       },
       "window": {
         "name": "window",
@@ -412,6 +580,7 @@
         ],
         "returns": "None",
         "exposed_to_js": false,
+        "defined_in": "Api",
         "n_required_params": 1
       }
     }

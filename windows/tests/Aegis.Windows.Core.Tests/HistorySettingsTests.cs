@@ -64,6 +64,46 @@ public sealed class HistoryStoreTests : IDisposable
         Assert.Empty(_store.Recent(10));
     }
 
+    [Fact]
+    public void SearchMultiWordQueryTreatedAsLiteralSubstring()
+    {
+        // CS-019：多词查询按整串子串语义（空格不切词）——锁定 LIKE 回退路径的口径
+        _store.Add("https://zoo.example", "国家动物博物馆");
+
+        Assert.Single(_store.Search("国家动物"));
+        Assert.Empty(_store.Search("国家 动物"));  // 带空格整串不命中
+    }
+
+    [Fact]
+    public void SearchCaseInsensitiveForAscii()
+    {
+        // CS-020：ASCII 大小写不敏感（SQLite LIKE 默认语义锁定）
+        _store.Add("https://GitHub.Example/Repo", "MyPage");
+        Assert.Single(_store.Search("github"));
+        Assert.Single(_store.Search("mypage"));
+    }
+
+    [Fact]
+    public void ClearResetsCountToZero()
+    {
+        // CS-024：Clear 后 Count 必须归零（组合断言——分页条总页数不残留）
+        _store.Add("https://a.example", "A");
+        _store.Add("https://b.example", "B");
+        Assert.Equal(2, _store.Count(null, null, null));
+
+        _store.Clear();
+        Assert.Equal(0, _store.Count(null, null, null));
+        Assert.Empty(_store.Recent(100));
+    }
+
+    [Fact]
+    public void AddReturnsFalseWithoutThrowWhenDiskFails()
+    {
+        // CS-025：dbPath 指向目录（SQLite 无法建库）——Add 返回 false 不抛
+        var store = new HistoryStore(Path.GetTempPath());
+        Assert.False(store.Add("https://x.example", "x"));
+    }
+
     public void Dispose()
     {
         if (File.Exists(_dbPath))

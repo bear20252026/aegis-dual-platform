@@ -2,6 +2,7 @@ namespace Aegis.Windows.Chrome.Ntp;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 
 /// <summary>新标签页宿主桥（M3——start.html Host 适配层的 C# 端实现）。
@@ -36,6 +37,9 @@ public sealed class NtpBridge
 
     public sealed record ImportResult(string Browser, int Imported, int Total);
 
+    /// <summary>CS-276：历史导入默认上限（此前 500 字面量多地重复）。</summary>
+    private const int DefaultImportHistoryLimit = 500;
+
     public NtpBridge(Services services) => _services = services;
 
     /// <summary>来源校验：仅 NTP 虚拟主机（https + 固定 host + 默认端口）。</summary>
@@ -46,8 +50,12 @@ public sealed class NtpBridge
         && uri.IsDefaultPort;
 
     /// <summary>分发一条 WebMessage（JSON）。非受信来源/格式非法 → 静默忽略。
-    /// respond 注入由调用方提供（PostWebMessageAsJson）——本类不持有 WebView。</summary>
-    public void TryHandle(string? source, string messageJson, Action<object?> respond)
+    /// respond 注入由调用方提供（PostWebMessageAsJson）——本类不持有 WebView。
+    /// CS-031（审计 2026-09-25）：importScan/importBookmarks/importHistory 为
+    /// 文件 I/O 密集操作——宿主传入 marshalToCaller（Dispatcher.BeginInvoke）时
+    /// 自动 Task.Run 移出 UI 线程、完成后回投；不传则保持同步（测试直调路径）。</summary>
+    public void TryHandle(string? source, string messageJson, Action<object?> respond,
+        Action<Action>? marshalToCaller = null)
     {
         if (!IsTrustedSource(source))
             return;
@@ -59,8 +67,13 @@ public sealed class NtpBridge
             using var document = JsonDocument.Parse(messageJson);
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object
-                || !root.TryGetProperty("__aegis", out var marker) || marker.GetInt64() != 1
+                || !root.TryGetProperty("__aegis", out var marker)
+                // CS-053（审计 2026-09-25）：ValueKind 前置——marker/id 非数字时
+                // GetInt64() 抛 FormatException，此前 catch(JsonException) 接不住
+                || marker.ValueKind != JsonValueKind.Number
+                || marker.GetInt64() != 1
                 || !root.TryGetProperty("id", out var idElement)
+                || idElement.ValueKind != JsonValueKind.Number
                 || !root.TryGetProperty("op", out var opElement) || opElement.ValueKind != JsonValueKind.String)
                 return;
             id = idElement.GetInt64();
@@ -69,11 +82,49 @@ public sealed class NtpBridge
                 ? argsElement.Clone()
                 : JsonSerializer.SerializeToElement(Array.Empty<object>());
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or FormatException or InvalidOperationException)
         {
-            return;  // 非协议消息忽略
+            // CS-189：仅捕 JsonException 不够——超大数字 id 的 GetInt64 抛
+            // FormatException，ValueKind 组合异常面由此统一接住（非协议消息忽略）
+            return;
         }
-        respond(new { __aegisRes = 1, id, result = Dispatch(op, args) });
+        // CS-031：导入三操作 = 浏览器配置文件/历史库文件 I/O——UI 线程同步跑
+        // 会卡住整个窗口。宿主提供调度器时：Task.Run 执行 I/O，完成后经
+        // marshalToCaller 回投 UI 线程调 respond（PostWebMessageAsJson 的
+        // 线程要求）。args 为独立 Clone（父 document 已释放仍可跨线程读）。
+        if (marshalToCaller is not null
+            && op is "importScan" or "importBookmarks" or "importHistory")
+        {
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                object? result;
+                try
+                {
+                    result = Dispatch(op, args);
+                }
+                catch (Exception ex)
+                {
+                    // 单次导入失败不抛——fail-closed 返回 null，前端导入态复位
+                    Core.Security.SecurityLog.Write($"[ntp] import failed: {ex.Message}");
+                    result = null;
+                }
+                marshalToCaller(() => respond(new { __aegisRes = 1, id, result }));
+            });
+            return;
+        }
+        // CS-277：Dispatch 异常面兜底——此前上抛则 respond 永不回调，页面
+        // Promise 永挂（前端导入态卡死）；包 try 固定回错误而非失败不响应
+        object? result;
+        try
+        {
+            result = Dispatch(op, args);
+        }
+        catch (Exception ex)
+        {
+            Core.Security.SecurityLog.Write($"[ntp] 操作分发异常（已回错误）: {op}: {ex.GetType().Name}: {ex.Message}");
+            result = new { error = "dispatch_failed" };
+        }
+        respond(new { __aegisRes = 1, id, result });
     }
 
     /// <summary>操作分发（纯函数——依赖经 Services 注入，全量可单测）。</summary>
@@ -138,10 +189,16 @@ public sealed class NtpBridge
                 return ImportOutcome(_services.ImportBookmarks(ArgString(args, 0)));
             case "importHistory":
                 return ImportOutcome(_services.ImportHistory(
-                    ArgInt(args, 0, 500) is { } limit ? Math.Clamp(limit, 1, 2000) : 500,
+                    ArgInt(args, 0) is { } limit
+                        ? Math.Clamp(limit, 1, 2000)
+                        : DefaultImportHistoryLimit,
                     ArgString(args, 1)));
             case "jsError":
-                Core.Security.SecurityLog.Write($"[ntp] 页面异常: {ArgString(args, 0) ?? "unknown"}");
+                // WB-038（审计 2026-09-23 清单·W5 批）：拼接全部字符串参数——
+                // 此前仅取 args[0]（message），堆栈（args[1..]）丢失不可追查
+                Core.Security.SecurityLog.Write(
+                    "[ntp] 页面异常: "
+                    + string.Join(" | ", ArgStrings(args).DefaultIfEmpty("unknown")));
                 return null;
             default:
                 return null;  // 未知操作 fail-closed 忽略
@@ -157,6 +214,16 @@ public sealed class NtpBridge
         return new { imported = outcome.Imported, total = outcome.Total, results };
     }
 
+    /// <summary>WB-038：按序提取全部字符串参数（message/堆栈等多段日志载荷）。</summary>
+    private static IEnumerable<string> ArgStrings(JsonElement args)
+    {
+        if (args.ValueKind != JsonValueKind.Array)
+            yield break;
+        foreach (var item in args.EnumerateArray())
+            if (item.ValueKind == JsonValueKind.String)
+                yield return item.GetString() ?? string.Empty;
+    }
+
     private static string? ArgString(JsonElement args, int index) =>
         args.ValueKind == JsonValueKind.Array
         && args.GetArrayLength() > index
@@ -164,13 +231,16 @@ public sealed class NtpBridge
             ? args[index].GetString()
             : null;
 
-    private static int? ArgInt(JsonElement args, int index, int fallback)
+    private static int? ArgInt(JsonElement args, int index)
     {
         if (args.ValueKind != JsonValueKind.Array || args.GetArrayLength() <= index)
             return null;
+        // WB-039（审计 2026-09-23 清单·W5 批）：失败语义统一 null——Number
+        // 溢出/NaN 此前回落 fallback 而 String 解析失败返回 null，两分支不一致；
+        // fallback 参数删除，由调用方统一施加（语义单点）。
         return args[index].ValueKind switch
         {
-            JsonValueKind.Number => args[index].TryGetInt32(out var value) ? value : fallback,
+            JsonValueKind.Number => args[index].TryGetInt32(out var value) ? value : null,
             JsonValueKind.String when int.TryParse(args[index].GetString(), out var parsed) => parsed,
             _ => null,
         };

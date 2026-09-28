@@ -12,7 +12,7 @@
 //! 可拼接：通过 `Decision` trait 与 broker 层对接。
 
 use crate::action_policy::{ActionPolicy, PolicyDecision, RuleEffect};
-use crate::decision::{AuthorizedAction, Decision, DenyReason};
+use crate::decision::{Decision, DenyReason};
 
 /// 策略评估结果（本地 or 远程）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,19 +26,34 @@ pub enum PolicySource {
 }
 
 /// 策略决策（来源 + 决策）。
+///
+/// RS-167（审计 2026-09-25）：字段级文档——`source` 标记裁决出自哪条
+/// 评估通道（审计/诊断通道直接消费，调用方不得用它放宽 fail-safe）；
+/// `decision` 是通道产出的类型化裁决（Allow/RequireConfirmation/Deny）。
 #[derive(Debug, Clone)]
 pub struct PolicyVerdict {
+    /// 裁决来源通道：Local（本地纯函数）/ Remote（远程降级）/ FailSafe
+    /// （本地无匹配且远程不可用时的默认拒绝）。
     pub source: PolicySource,
+    /// 该通道产出的类型化决策（FailSafe 通道恒为 Deny）。
     pub decision: Decision,
 }
 
 /// 本地策略接口（纯函数——无 I/O）。
+///
+/// RS-092：返回 `None` 表示「本地无匹配」——上层引擎据此走远程降级
+/// 或 fail-safe 默认拒绝；`Some` 表示显式裁决（Allow/Deny/确认）。
 pub trait LocalPolicy: Send + Sync {
+    /// 评估动作；无匹配返回 None（不等于 Deny）。
     fn evaluate(&self, action: &str, context: &str) -> Option<Decision>;
 }
 
 /// 远程策略客户端接口（可选——网络调用）。
+///
+/// RS-092：与 LocalPolicy 同形但语义不同——实现方负责网络 I/O 与
+/// 超时；返回 None 时引擎降级到 fail-safe（绝不本地兜底放行）。
 pub trait RemotePolicy: Send + Sync {
+    /// 远程评估动作；不可用/超时返回 None。
     fn evaluate(&self, action: &str, context: &str) -> Option<Decision>;
 }
 
@@ -49,6 +64,10 @@ pub struct PolicyEngine {
 }
 
 impl PolicyEngine {
+    /// 创建引擎：`local` 必选（纯函数基座），`remote` 可选（降级通道）。
+    ///
+    /// RS-091：评估序为 local → remote → fail-safe 默认拒绝，
+    /// 任一环节命中即短路。
     pub fn new(local: Box<dyn LocalPolicy>, remote: Option<Box<dyn RemotePolicy>>) -> Self {
         Self { local, remote }
     }
@@ -100,6 +119,10 @@ pub struct DefaultLocalPolicy {
 }
 
 impl DefaultLocalPolicy {
+    /// 创建默认本地策略：包装 fail-closed 的 ActionPolicy（默认拒绝）。
+    ///
+    /// RS-091：无规则时 evaluate 返回 None（上层走 fail-safe），
+    /// 显式 Deny 规则命中时返回 Deny。
     pub fn new() -> Self {
         Self {
             inner: ActionPolicy::new(RuleEffect::Deny),
@@ -126,19 +149,21 @@ impl LocalPolicy for DefaultLocalPolicy {
         // 仅当显式规则匹配时返回 Some；无匹配返回 None → 上层走 FailSafe
         let decision = self.inner.evaluate_opt(action, context)?;
         Some(match decision {
-            PolicyDecision::Allow(explanation) => Decision::Allow(AuthorizedAction {
-                session_id: String::new(),
-                tab_id: String::new(),
-                document_generation: 0,
-                origin: context.to_string(),
-                method: String::new(),
-                canonical_parameters: String::new(),
-                scope: action.to_string(),
-                expires_at: 0,
-                nonce: String::new(),
-                policy_version: String::new(),
-                explanation,
-            }),
+            PolicyDecision::Allow(_explanation) => {
+                // RS-029（审计 2026-09-24）：本地规则 Allow 映射出的
+                // AuthorizedAction 带空凭据（session/nonce 空、expires_at=0）
+                // ——下游 validate_action 必以 action_expired/session_not_found
+                // 拒绝，Allow 永远是死路。升级为 RequireConfirmation：由宿主
+                // 走交互审批铸造真实 nonce（fail-closed，绝不放行空凭据授权）
+                Decision::RequireConfirmation(crate::decision::ApprovalRequest {
+                    origin: context.to_string(),
+                    method: String::new(),
+                    path: String::new(),
+                    scope: action.to_string(),
+                    expires_at: 0,
+                    nonce: String::new(),
+                })
+            }
             PolicyDecision::Deny(explanation) => Decision::Deny(DenyReason {
                 code: "policy_denied".into(),
                 detail: explanation.clone(),
@@ -213,6 +238,127 @@ mod tests {
         let result = engine.evaluate("write", "ctx");
         assert_eq!(result.source, PolicySource::FailSafe);
         assert!(matches!(result.decision, Decision::Deny(_)));
+        // RS-182：fail-safe explanation 可审计性锁定——explanation 必须
+        // 携带被拒动作名（审计通道依赖它回答"为什么拒绝"），不得退化为
+        // 空串或丢失 action 上下文
+        match result.decision {
+            Decision::Deny(reason) => {
+                assert_eq!(reason.code, "fail_safe");
+                assert!(
+                    reason
+                        .explanation
+                        .contains("no local or remote policy matched"),
+                    "fail-safe explanation 必须声明双通道未命中: {}",
+                    reason.explanation
+                );
+                assert!(
+                    reason.explanation.contains("write"),
+                    "explanation 必须携带被拒动作名: {}",
+                    reason.explanation
+                );
+                assert!(reason.explanation.contains("default deny"));
+            }
+            other => panic!("期望 fail-safe Deny，实际 {other:?}"),
+        }
+    }
+
+    struct MockRemotePolicy {
+        decision: Option<Decision>,
+    }
+
+    impl RemotePolicy for MockRemotePolicy {
+        fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+            self.decision.clone()
+        }
+    }
+
+    #[test]
+    fn remote_downgrade_allows_when_local_no_match() {
+        // RS-041 用例 1：本地无匹配 → 远程 Allow 决策被采纳，来源标记 Remote
+        let engine = PolicyEngine::new(
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
+            Some(Box::new(MockRemotePolicy {
+                decision: Some(Decision::Allow(AuthorizedAction {
+                    session_id: "remote".into(),
+                    tab_id: "remote".into(),
+                    document_generation: 0,
+                    origin: "https://remote.com".into(),
+                    method: "GET".into(),
+                    canonical_parameters: "/".into(),
+                    scope: "write".into(),
+                    expires_at: 9999999999,
+                    nonce: "remote-nonce".into(),
+                    policy_version: "1.0".into(),
+                    explanation: "remote allow".into(),
+                })),
+            })),
+        );
+        let result = engine.evaluate("write", "ctx");
+        assert_eq!(result.source, PolicySource::Remote);
+        assert!(matches!(result.decision, Decision::Allow(_)));
+    }
+
+    #[test]
+    fn remote_downgrade_denies_propagates_deny() {
+        // RS-041 用例 2：远程 Deny 决策原样传播（不得降级为 FailSafe 或放宽）
+        let engine = PolicyEngine::new(
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
+            Some(Box::new(MockRemotePolicy {
+                decision: Some(Decision::Deny(DenyReason {
+                    code: "remote_denied".into(),
+                    detail: "远程策略拒绝".into(),
+                    explanation: "denied — remote policy".into(),
+                })),
+            })),
+        );
+        let result = engine.evaluate("write", "ctx");
+        assert_eq!(result.source, PolicySource::Remote);
+        match result.decision {
+            Decision::Deny(reason) => assert_eq!(reason.code, "remote_denied"),
+            other => panic!("期望远程 Deny，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn remote_unavailable_falls_through_to_fail_safe() {
+        // RS-041 用例 3：远程客户端存在但返回 None（不可用）→ fail-safe 默认拒绝
+        let engine = PolicyEngine::new(
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
+            Some(Box::new(MockRemotePolicy { decision: None })),
+        );
+        let result = engine.evaluate("write", "ctx");
+        assert_eq!(result.source, PolicySource::FailSafe);
+        assert!(matches!(result.decision, Decision::Deny(_)));
+        match result.decision {
+            Decision::Deny(reason) => assert_eq!(reason.code, "fail_safe"),
+            other => panic!("期望 fail_safe 拒绝，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_priority_over_remote() {
+        // RS-041 补充：本地命中时远程不得被咨询（本地优先序锁定）
+        let engine = PolicyEngine::new(
+            Box::new(MockLocalPolicy {
+                allow_action: "read".into(),
+            }),
+            Some(Box::new(MockRemotePolicy {
+                decision: Some(Decision::Deny(DenyReason {
+                    code: "remote_denied".into(),
+                    detail: String::new(),
+                    explanation: String::new(),
+                })),
+            })),
+        );
+        let result = engine.evaluate("read", "ctx");
+        assert_eq!(result.source, PolicySource::Local);
+        assert!(matches!(result.decision, Decision::Allow(_)));
     }
 
     #[test]
@@ -244,5 +390,183 @@ mod tests {
         });
         let result = policy.evaluate("navigation:read", "https://example.com");
         assert!(matches!(result, Some(Decision::Deny(_))));
+    }
+
+    #[test]
+    fn local_allow_rule_upgrades_to_confirmation_not_empty_credentials() {
+        // RS-029 回归：本地 Allow 规则不得映射空凭据 AuthorizedAction
+        //（session/nonce 空 + expires_at=0 → 下游必拒的死路授权）——
+        // 必须升级为 RequireConfirmation 交宿主铸造真实 nonce
+        use crate::action_policy::{PolicyRule, RuleEffect};
+        let mut policy = DefaultLocalPolicy::new();
+        policy.inner.add_rule(PolicyRule {
+            name: "allow_read".into(),
+            action_pattern: "navigation:*".into(),
+            condition: None,
+            effect: RuleEffect::Allow,
+            priority: 0,
+        });
+        let result = policy.evaluate("navigation:read", "https://example.com");
+        match result {
+            Some(Decision::RequireConfirmation(_)) => {}
+            other => panic!("Allow 规则必须升级为 RequireConfirmation，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_ask_rule_maps_to_confirmation() {
+        // RS-093：Ask 规则映射 RequireConfirmation——高风险动作交宿主
+        // 交互审批（origin/scope 透传，nonce/expires 留空由宿主铸造）
+        use crate::action_policy::{PolicyRule, RuleEffect};
+        let mut policy = DefaultLocalPolicy::new();
+        policy.inner.add_rule(PolicyRule {
+            name: "ask_write".into(),
+            action_pattern: "clipboard:write".into(),
+            condition: None,
+            effect: RuleEffect::Ask,
+            priority: 0,
+        });
+        let result = policy.evaluate("clipboard:write", "https://example.com");
+        match result {
+            Some(Decision::RequireConfirmation(req)) => {
+                assert_eq!(req.origin, "https://example.com", "origin 透传");
+                assert_eq!(req.scope, "clipboard:write", "scope 透传");
+            }
+            other => panic!("Ask 规则必须映射 RequireConfirmation，实际 {other:?}"),
+        }
+        // 对照：同策略下未匹配动作仍走 None（上层 fail-safe）
+        assert!(policy
+            .evaluate("navigation:read", "https://example.com")
+            .is_none());
+    }
+
+    // —— RS-154（审计 2026-09-25）：短路顺序计数 mock ——
+
+    use std::sync::{Arc, Mutex};
+
+    /// 计数本地策略：记录 evaluate 调用序，恒返回 None（走降级）。
+    struct CountingLocalPolicy {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl LocalPolicy for CountingLocalPolicy {
+        fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+            self.calls.lock().expect("计数锁").push("local");
+            None
+        }
+    }
+
+    /// 计数远程策略：记录 evaluate 调用序，按注入决策返回。
+    struct CountingRemotePolicy {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        decision: Option<Decision>,
+    }
+
+    impl RemotePolicy for CountingRemotePolicy {
+        fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+            self.calls.lock().expect("计数锁").push("remote");
+            self.decision.clone()
+        }
+    }
+
+    #[test]
+    fn evaluation_order_local_then_remote_then_failsafe() {
+        // RS-154：评估序锁定——本地先于远程被咨询，两者都未命中才落
+        // fail-safe（RS-091 口径）。此前只有来源断言，调用顺序零覆盖：
+        // 若实现交换 local/remote 次序，现有测试不会失败
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let engine = PolicyEngine::new(
+            Box::new(CountingLocalPolicy {
+                calls: Arc::clone(&calls),
+            }),
+            Some(Box::new(CountingRemotePolicy {
+                calls: Arc::clone(&calls),
+                decision: None,
+            })),
+        );
+        let result = engine.evaluate("anything", "ctx");
+        assert_eq!(result.source, PolicySource::FailSafe);
+        assert_eq!(
+            *calls.lock().expect("计数锁"),
+            vec!["local", "remote"],
+            "评估序必须 local → remote（fail-safe 由两者未命中触发）"
+        );
+    }
+
+    #[test]
+    fn local_hit_short_circuits_remote_consultation() {
+        // RS-154：本地显式裁决即短路——远程不得被咨询（少一次降级
+        // 探测 = 少一次网络面暴露）。计数 mock 让「未咨询」可观测
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        struct AllowAllLocal {
+            calls: Arc<Mutex<Vec<&'static str>>>,
+        }
+        impl LocalPolicy for AllowAllLocal {
+            fn evaluate(&self, _action: &str, _context: &str) -> Option<Decision> {
+                self.calls.lock().expect("计数锁").push("local");
+                Some(Decision::Allow(AuthorizedAction {
+                    session_id: "test".into(),
+                    tab_id: "test".into(),
+                    document_generation: 0,
+                    origin: "https://test.com".into(),
+                    method: "GET".into(),
+                    canonical_parameters: "/".into(),
+                    scope: "test".into(),
+                    expires_at: 9999999999,
+                    nonce: "test".into(),
+                    policy_version: "1.0".into(),
+                    explanation: "short-circuit mock".into(),
+                }))
+            }
+        }
+        let engine = PolicyEngine::new(
+            Box::new(AllowAllLocal {
+                calls: Arc::clone(&calls),
+            }),
+            Some(Box::new(CountingRemotePolicy {
+                calls: Arc::clone(&calls),
+                decision: Some(Decision::Deny(DenyReason {
+                    code: "remote_denied".into(),
+                    detail: String::new(),
+                    explanation: String::new(),
+                })),
+            })),
+        );
+        let result = engine.evaluate("read", "ctx");
+        assert_eq!(result.source, PolicySource::Local);
+        assert!(matches!(result.decision, Decision::Allow(_)));
+        assert_eq!(
+            *calls.lock().expect("计数锁"),
+            vec!["local"],
+            "本地命中后远程必须零咨询（短路）"
+        );
+    }
+
+    // —— RS-201（审计 2026-09-25）：action_policy() 可变访问器 ——
+
+    #[test]
+    fn action_policy_accessor_mutates_inner_policy() {
+        // RS-201：DefaultLocalPolicy::action_policy() 可变访问器此前零测试——
+        // 经访问器注入规则后 evaluate 必须按新规则裁决（内层策略生效）
+        let mut policy = DefaultLocalPolicy::new();
+        // 注入前：无规则 → None（上层走 fail-safe）
+        assert!(policy.evaluate("files:write", "https://e.com").is_none());
+        // 经访问器注入 Allow 规则
+        policy
+            .action_policy()
+            .add_rule(crate::action_policy::PolicyRule {
+                name: "allow_files".into(),
+                action_pattern: "files:*".into(),
+                condition: None,
+                effect: RuleEffect::Allow,
+                priority: 0,
+            });
+        // 注入后命中（Allow → RequireConfirmation 升级，RS-029 口径）
+        match policy.evaluate("files:write", "https://e.com") {
+            Some(Decision::RequireConfirmation(_)) => {}
+            other => panic!("访问器注入的规则必须生效，实际 {other:?}"),
+        }
+        // 未匹配动作仍 None
+        assert!(policy.evaluate("other:action", "https://e.com").is_none());
     }
 }

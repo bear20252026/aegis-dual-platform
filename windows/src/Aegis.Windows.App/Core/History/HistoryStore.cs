@@ -1,59 +1,147 @@
 namespace Aegis.Windows.Core.History;
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using Microsoft.Data.Sqlite;
 
 /// <summary>历史记录（ADR-009 D2：SQLite）。升级版支持：
-/// - 每次访问记录本地日期 + 时刻（visited_at ISO + visited_date yyyy-MM-dd，便于按日期查询）；
+/// - 每次访问记录 UTC 时刻 + 本地日期（visited_at 为 UTC round-trip ISO——
+///   CS-090：本地时字符串在 DST 回拨时段按字典序排序错位；visited_date 仍为
+///   本地 yyyy-MM-dd——按日分组口径不变）；
 /// - 按日期查询 / 文本+日期组合查询 / 单条删除 / 日期列表；
-/// - 全部外部输入走参数绑定（安全约束：不拼接 SQL）。
-/// 敏感口径：title/url 存储不含 query secret 的承诺由调用方保证。</summary>
+/// - 全部外部输入走参数绑定（安全约束：不拼接 SQL）；用户搜索词中的
+///   LIKE 通配符（%/_/\）转义为字面量——通配符注入不改变搜索语义。
+/// 敏感口径：title/url 存储不含 query secret 的承诺由调用方保证。
+/// 建表/迁移/索引只在该库的进程首次打开时执行一次（此前每次 Add/查询
+/// 都跑 5 条 DDL/DML——每次导航的纯开销）。</summary>
 public sealed class HistoryStore
 {
+    private const int MaxRows = 50000;
+    private const int PruneEveryAdds = 256;
+    // CS-319（2026-09-26 审计）：库层统一长度上限——BookmarkImporter 有
+    // 2048/256 上限而手写路径（Star_Click 直 Add）无上限可写入任意长串；
+    // 与导入口径锁定（代理对安全截断）
+    internal const int MaxUrlChars = 2048;
+    internal const int MaxTitleChars = 256;
+
+    private static readonly ConcurrentDictionary<string, byte> InitializedDbs = new(StringComparer.OrdinalIgnoreCase);
+    // CS-091：双检锁宿主换成独立锁对象——锁 ConcurrentDictionary 实例与其
+    // 自身内部锁语义混淆，且锁粒度无理由绑定集合身份
+    private static readonly object InitLock = new();
+    // CS-085：目录只建一次（静态记录）——此前每次 Open 都 Directory.CreateDirectory
+    private static readonly ConcurrentDictionary<string, byte> CreatedDirectories = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _dbPath;
+    private readonly int _maxRows;
+    private readonly int _pruneEveryAdds;
+    private int _addCounter;
 
-    public HistoryStore(string dbPath) => _dbPath = dbPath;
+    public HistoryStore(string dbPath)
+        : this(dbPath, MaxRows, PruneEveryAdds) { }
 
-    /// <summary>记录一次访问（追加——历史按次数累积；本地时间+日期）。</summary>
-    public void Add(string url, string title)
+    /// <summary>CS-084：修剪阈值注入——常态 50k 行/256 次触发离线不可测，
+    /// 测试以小阈值直测修剪行为（不改变生产路径）。</summary>
+    internal HistoryStore(string dbPath, int maxRows, int pruneEveryAdds)
     {
-        if (string.IsNullOrWhiteSpace(url))
-            return;
-        var now = DateTime.Now;
-        using var connection = Open();
-        using var insert = connection.CreateCommand();
-        insert.CommandText = """
-            INSERT INTO visits(url, title, visited_at, visited_date)
-            VALUES($u,$t,$v,$d)
-            """;
-        insert.Parameters.AddWithValue("$u", url);
-        insert.Parameters.AddWithValue("$t", title ?? string.Empty);
-        insert.Parameters.AddWithValue("$v", now.ToString("o"));
-        insert.Parameters.AddWithValue("$d", now.ToString("yyyy-MM-dd"));
-        insert.ExecuteNonQuery();
+        _dbPath = dbPath;
+        _maxRows = Math.Max(1, maxRows);
+        _pruneEveryAdds = Math.Max(1, pruneEveryAdds);
     }
 
-    /// <summary>最近访问（时间倒序）。</summary>
-    public IReadOnlyList<HistoryEntry> Recent(int limit = 200) =>
-        Read("SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC LIMIT $lim", limit);
+    /// <summary>记录一次访问（追加——历史按次数累积；UTC 时刻+本地日期）。
+    /// 返回是否真实写入（导入计数用）。磁盘异常不向导航事件上抛（此前
+    /// SQLite 异常会沿 NavigationCompleted 触发全局未处理异常弹窗）——
+    /// 记录日志后丢弃本条。</summary>
+    public bool Add(string url, string title)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return false;
+        try
+        {
+            var now = DateTime.Now;
+            using var connection = Open();
+            using var insert = connection.CreateCommand();
+            insert.CommandText = """
+                INSERT INTO visits(url, title, visited_at, visited_date)
+                VALUES($u,$t,$v,$d)
+                """;
+            insert.Parameters.AddWithValue("$u", ClampText(url, MaxUrlChars));
+            insert.Parameters.AddWithValue("$t", ClampText(title ?? string.Empty, MaxTitleChars));
+            insert.Parameters.AddWithValue("$v", DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture));
+            // CS-089：InvariantCulture——部分文化默认日历（佛历/回历等）会把
+            // "yyyy" 格式化为非公历年，按日分组随之整体漂移
+            insert.Parameters.AddWithValue("$d", now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            insert.ExecuteNonQuery();
+            // 有界保留：定期修剪最旧记录（常年使用不无界增长）
+            if (System.Threading.Interlocked.Increment(ref _addCounter) % _pruneEveryAdds == 0)
+            {
+                using var prune = connection.CreateCommand();
+                prune.CommandText = "DELETE FROM visits WHERE id NOT IN (SELECT id FROM visits ORDER BY id DESC LIMIT $max)";
+                prune.Parameters.AddWithValue("$max", _maxRows);
+                prune.ExecuteNonQuery();
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Security.SecurityLog.Write(
+                $"[history] 记录写入失败（丢弃本条）: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>CS-028（审计 2026-09-25）：LIMIT 绑定值统一下界钳制——SQLite
+    /// LIMIT 负值语义为"无上限"，此前 limit<=0 直接进 SQL（无界返回/无界内存）。</summary>
+    private static int ClampLimit(int limit) => Math.Max(1, limit);
+
+    /// <summary>CS-319：代理对安全截断（emoji 等增补平面字符不劈成孤立代理）。
+    /// 提 internal 供直测。</summary>
+    internal static string ClampText(string text, int maxChars)
+    {
+        if (text.Length <= maxChars)
+            return text;
+        var cut = maxChars;
+        if (char.IsHighSurrogate(text[cut - 1]))
+            cut--;
+        return text[..cut];
+    }
+
+    /// <summary>最近访问（时间倒序）。
+    /// CS-301（2026-09-26 审计）：补 id 决胜列——分页查询均有 ", id DESC" 而
+    /// 此处没有：同一秒多条记录时列表与分页顺序不一致（可能重复跳行）。</summary>
+    public IReadOnlyList<HistoryEntry> Recent(int limit = 200)
+    {
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC, id DESC LIMIT $lim";
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
+        using var reader = select.ExecuteReader();
+        return ReadEntries(reader);
+    }
 
     /// <summary>按文本搜索（url/title 子串），可限定某日（date=yyyy-MM-dd 或 null 不限）。
-    /// 全部参数绑定——LIKE 通配在绑定值中，不参与 SQL 拼接。</summary>
+    /// 全部参数绑定——LIKE 通配在绑定值中，不参与 SQL 拼接。
+    /// 大小写口径（CS-259）：SQLite LIKE 仅对 ASCII 不区分大小写；非 ASCII
+    /// （中文/带变音符拉丁文）为精确匹配——与多数 SQLite 应用一致的既定行为，
+    /// 此处显式文档化（冗余小写列方案收益不抵写入开销）。</summary>
     public IReadOnlyList<HistoryEntry> Search(string query, string? date = null, int limit = 200)
     {
         if (string.IsNullOrWhiteSpace(query))
             return date is null ? Recent(limit) : ByDate(date, limit);
         using var connection = Open();
         using var select = connection.CreateCommand();
-        select.CommandText = string.IsNullOrEmpty(date)
-            ? "SELECT id, url, title, visited_at, visited_date FROM visits WHERE url LIKE $q OR title LIKE $q ORDER BY visited_at DESC LIMIT $lim"
-            : "SELECT id, url, title, visited_at, visited_date FROM visits WHERE (url LIKE $q OR title LIKE $q) AND visited_date = $d ORDER BY visited_at DESC LIMIT $lim";
-        select.Parameters.AddWithValue("$q", $"%{query}%");
-        select.Parameters.AddWithValue("$lim", limit);
-        if (!string.IsNullOrEmpty(date))
+        var filter = HistoryFilter.Build(query, null, null);
+        var hasDate = !string.IsNullOrEmpty(date);  // CS-282：判一次复用
+        // CS-301：id 决胜列（与分页口径一致——同秒多条顺序锁定）
+        select.CommandText = hasDate
+            ? $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} AND visited_date = $d ORDER BY visited_at DESC, id DESC LIMIT $lim"
+            : $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC, id DESC LIMIT $lim";
+        filter.Bind(select, query, null, null);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
+        if (hasDate)
             select.Parameters.AddWithValue("$d", date);
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
@@ -66,10 +154,10 @@ public sealed class HistoryStore
         using var select = connection.CreateCommand();
         select.CommandText = """
             SELECT id, url, title, visited_at, visited_date
-            FROM visits WHERE visited_date = $d ORDER BY visited_at DESC LIMIT $lim
+            FROM visits WHERE visited_date = $d ORDER BY visited_at DESC, id DESC LIMIT $lim
             """;
         select.Parameters.AddWithValue("$d", date);
-        select.Parameters.AddWithValue("$lim", limit);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
     }
@@ -80,7 +168,7 @@ public sealed class HistoryStore
         using var connection = Open();
         using var select = connection.CreateCommand();
         select.CommandText = "SELECT DISTINCT visited_date FROM visits ORDER BY visited_date DESC LIMIT $lim";
-        select.Parameters.AddWithValue("$lim", limit);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();
         var list = new List<string>();
         while (reader.Read())
@@ -95,28 +183,16 @@ public sealed class HistoryStore
     /// 全部参数绑定。空文本+空区间回退 Recent。</summary>
     public IReadOnlyList<HistoryEntry> SearchRange(string query, string? from, string? to, int limit = 1000)
     {
-        var hasText = !string.IsNullOrWhiteSpace(query);
-        var hasFrom = !string.IsNullOrEmpty(from);
-        var hasTo = !string.IsNullOrEmpty(to);
-        if (!hasText && !hasFrom && !hasTo)
+        var filter = HistoryFilter.Build(query, from, to);
+        if (filter.IsEmpty)
             return Recent(limit);
         using var connection = Open();
         using var select = connection.CreateCommand();
-        var clauses = new List<string>();
-        if (hasText)
-            clauses.Add("(url LIKE $q OR title LIKE $q)");
-        if (hasFrom)
-            clauses.Add("visited_date >= $from");
-        if (hasTo)
-            clauses.Add("visited_date <= $to");
-        select.CommandText = $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {string.Join(" AND ", clauses)} ORDER BY visited_at DESC LIMIT $lim";
-        if (hasText)
-            select.Parameters.AddWithValue("$q", $"%{query}%");
-        if (hasFrom)
-            select.Parameters.AddWithValue("$from", from);
-        if (hasTo)
-            select.Parameters.AddWithValue("$to", to);
-        select.Parameters.AddWithValue("$lim", limit);
+        // CS-301（2026-09-26 审计）：补 id 决胜列——同一秒多条记录时与分页
+        // 查询（均有 , id DESC）顺序一致，防列表/翻页重复或跳行。
+        select.CommandText = $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC, id DESC LIMIT $lim";
+        filter.Bind(select, query, from, to);
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
     }
@@ -124,20 +200,12 @@ public sealed class HistoryStore
     /// <summary>统计匹配筛选的访问总数（页码分页用——分页条显示总页数）。</summary>
     public long Count(string? query, string? from, string? to)
     {
-        var hasText = !string.IsNullOrWhiteSpace(query);
-        var hasFrom = !string.IsNullOrEmpty(from);
-        var hasTo = !string.IsNullOrEmpty(to);
+        var filter = HistoryFilter.Build(query, from, to);
         using var connection = Open();
         using var select = connection.CreateCommand();
-        var clauses = new List<string>();
-        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
-        if (hasFrom) clauses.Add("visited_date >= $from");
-        if (hasTo) clauses.Add("visited_date <= $to");
         select.CommandText = "SELECT COUNT(*) FROM visits" +
-            (clauses.Count > 0 ? " WHERE " + string.Join(" AND ", clauses) : "");
-        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
-        if (hasFrom) select.Parameters.AddWithValue("$from", from);
-        if (hasTo) select.Parameters.AddWithValue("$to", to);
+            (filter.IsEmpty ? "" : " WHERE " + filter.WhereSql);
+        filter.Bind(select, query, from, to);
         return Convert.ToInt64(select.ExecuteScalar());
     }
 
@@ -146,23 +214,15 @@ public sealed class HistoryStore
     public IReadOnlyList<HistoryEntry> SearchRangePage(string? query, string? from, string? to,
         int pageSize, int offset)
     {
-        var hasText = !string.IsNullOrWhiteSpace(query);
-        var hasFrom = !string.IsNullOrEmpty(from);
-        var hasTo = !string.IsNullOrEmpty(to);
-        if (!hasText && !hasFrom && !hasTo)
+        var filter = HistoryFilter.Build(query, from, to);
+        if (filter.IsEmpty)
             return RecentPage(pageSize, offset);
         using var connection = Open();
         using var select = connection.CreateCommand();
-        var clauses = new List<string>();
-        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
-        if (hasFrom) clauses.Add("visited_date >= $from");
-        if (hasTo) clauses.Add("visited_date <= $to");
         select.CommandText = "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
-            string.Join(" AND ", clauses) +
+            filter.WhereSql +
             " ORDER BY visited_at DESC, id DESC LIMIT $ps OFFSET $off";
-        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
-        if (hasFrom) select.Parameters.AddWithValue("$from", from);
-        if (hasTo) select.Parameters.AddWithValue("$to", to);
+        filter.Bind(select, query, from, to);
         select.Parameters.AddWithValue("$ps", Math.Max(1, pageSize));
         select.Parameters.AddWithValue("$off", Math.Max(0, offset));
         using var reader = select.ExecuteReader();
@@ -187,27 +247,19 @@ public sealed class HistoryStore
     public PageResult SearchRangePaged(string query, string? from, string? to,
         int pageSize = 100, PageCursor? after = null)
     {
-        var hasText = !string.IsNullOrWhiteSpace(query);
-        var hasFrom = !string.IsNullOrEmpty(from);
-        var hasTo = !string.IsNullOrEmpty(to);
-        if (!hasText && !hasFrom && !hasTo)
+        var filter = HistoryFilter.Build(query, from, to);
+        if (filter.IsEmpty)
             return RecentPaged(pageSize, after);
         using var connection = Open();
         using var select = connection.CreateCommand();
-        var clauses = new List<string>();
-        if (hasText) clauses.Add("(url LIKE $q OR title LIKE $t)");
-        if (hasFrom) clauses.Add("visited_date >= $from");
-        if (hasTo) clauses.Add("visited_date <= $to");
-        if (after is not null) clauses.Add("(visited_at, id) < ($ca, $cid)");
+        var cursorClause = after is not null ? " AND (visited_at, id) < ($ca, $cid)" : "";
         select.CommandText =
             "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
-            string.Join(" AND ", clauses) +
+            filter.WhereSql + cursorClause +
             " ORDER BY visited_at DESC, id DESC LIMIT $lim";
-        if (hasText) { select.Parameters.AddWithValue("$q", $"%{query}%"); select.Parameters.AddWithValue("$t", $"%{query}%"); }
-        if (hasFrom) select.Parameters.AddWithValue("$from", from);
-        if (hasTo) select.Parameters.AddWithValue("$to", to);
+        filter.Bind(select, query, from, to);
         if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
-        select.Parameters.AddWithValue("$lim", pageSize + 1);
+        select.Parameters.AddWithValue("$lim", ClampLimit(pageSize) + 1);
         return ReadPage(select, pageSize);
     }
 
@@ -220,7 +272,7 @@ public sealed class HistoryStore
             ? "SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC, id DESC LIMIT $lim"
             : "SELECT id, url, title, visited_at, visited_date FROM visits WHERE (visited_at, id) < ($ca, $cid) ORDER BY visited_at DESC, id DESC LIMIT $lim";
         if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
-        select.Parameters.AddWithValue("$lim", pageSize + 1);
+        select.Parameters.AddWithValue("$lim", ClampLimit(pageSize) + 1);
         return ReadPage(select, pageSize);
     }
 
@@ -256,16 +308,6 @@ public sealed class HistoryStore
         delete.ExecuteNonQuery();
     }
 
-    private IReadOnlyList<HistoryEntry> Read(string sql, int limit)
-    {
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        select.CommandText = sql;
-        select.Parameters.AddWithValue("$lim", limit);
-        using var reader = select.ExecuteReader();
-        return ReadEntries(reader);
-    }
-
     private static List<HistoryEntry> ReadEntries(SqliteDataReader reader)
     {
         var list = new List<HistoryEntry>();
@@ -285,18 +327,49 @@ public sealed class HistoryStore
 
     private SqliteConnection Open()
     {
+        // CS-085：目录只建一次（静态记录命中后跳过系统调用；CreateDirectory 幂等）
         var directory = Path.GetDirectoryName(_dbPath);
-        if (!string.IsNullOrEmpty(directory))
+        if (!string.IsNullOrEmpty(directory) && CreatedDirectories.TryAdd(directory, 1))
             Directory.CreateDirectory(directory);
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
             DataSource = _dbPath,
             Mode = SqliteOpenMode.ReadWriteCreate,
+            // Pooling=false 的权衡（CS-086）：连接不进池——db 文件不被进程长期
+            // 锁定（妨碍备份/删除/单测直接删库）；代价是每次开连接约几十微秒，
+            // 导航频率下可忽略。与其余三库同口径。
             Pooling = false,
         }.ToString());
         try
         {
             connection.Open();
+            // CS-099：busy_timeout 与其余三库统一——历史窗口查询与导航写入
+            // 并发时快速忙等重试，而非默认即抛 "database is locked"
+            using (var busy = connection.CreateCommand())
+            {
+                busy.CommandText = "PRAGMA busy_timeout=5000";
+                busy.ExecuteNonQuery();
+            }
+            EnsureSchema(connection);
+            return connection;
+        }
+        catch
+        {
+            connection.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>建表/迁移/索引/清洗——每库每进程仅执行一次（此前每次打开连接
+    /// 都执行 5 条 DDL/DML，每次导航完成的纯开销）。</summary>
+    private void EnsureSchema(SqliteConnection connection)
+    {
+        if (InitializedDbs.ContainsKey(_dbPath))
+            return;
+        lock (InitLock)
+        {
+            if (InitializedDbs.ContainsKey(_dbPath))
+                return;
             using var ensure = connection.CreateCommand();
             ensure.CommandText = """
                 CREATE TABLE IF NOT EXISTS visits(
@@ -317,18 +390,23 @@ public sealed class HistoryStore
                     """;
                 index.ExecuteNonQuery();
             }
+            using (var timeIndex = connection.CreateCommand())
+            {
+                // 纯时间倒序查询（Recent/Search 默认排序）的配套索引——此前
+                // 仅有 (date,time) 复合索引，该路径走不上索引需额外排序
+                timeIndex.CommandText = """
+                    CREATE INDEX IF NOT EXISTS idx_visits_time_id
+                        ON visits(visited_at DESC, id DESC);
+                    """;
+                timeIndex.ExecuteNonQuery();
+            }
             // 失效空日期行归一（迁移回填遗漏的残留——归为「未知日期」以免分组遗漏）
             using (var sanitize = connection.CreateCommand())
             {
                 sanitize.CommandText = "UPDATE visits SET visited_date = '未知日期' WHERE visited_date = '' OR visited_date IS NULL";
                 sanitize.ExecuteNonQuery();
             }
-            return connection;
-        }
-        catch
-        {
-            connection.Dispose();
-            throw;
+            InitializedDbs[_dbPath] = 1;
         }
     }
 

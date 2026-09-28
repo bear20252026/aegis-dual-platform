@@ -3,13 +3,36 @@
 # 用全角标点（（） ， ：）是规范——误报——忽略）+ 蓝图迁移表（旧壳 windows/aegis_source
 # 淘汰——extend-exclude——不参与质量门禁——新架构代码继续）
 [tool.ruff]
-line-length = 120
+# PY-151（2026-09-23 审计·V1 核验批）：target-version 与 CI/工具链 Python 3.12 对齐
+target-version = "py312"
+# PY-150（2026-09-23 审计·V1 核验批）：删除 line-length=120——E501 全局忽略且
+# 仓库无 ruff format 消费，该值是死配置，徒然暗示存在并未执行的行宽策略；
+# 归档栈实测 106 处长行，行宽门禁整体不设（若日后启用 E501 再显式定宽）。
 # 旧壳（蓝图迁移表淘汰——api_bridge 删除/bridge_hooks 删除/shell_adapter 冻结）——
 # 配置级排除（比命令行可靠）——新架构代码（contracts/codegen/agent/release/scripts）继续门禁
-extend-exclude = ["legacy", "windows/aegis_source"]
+# SP-098（审计 2026-09-23 清单·SP1 批，同 PY-152）：死排除项删除——
+# "windows/aegis_source" 目录已不存在；"legacy/windows-pywebview/legacy"
+# 被 "legacy" 整树排除覆盖（子集冗余）
+extend-exclude = ["legacy"]
 
 [tool.ruff.lint]
 # 中文项目：全角标点（RUF001/RUF003）忽略（按历史 RUF002 先例）+ 中文长行（E501——
-# line-length 120 已放宽）——风格类（TRY300/TRY003/TRY301/RUF021/E402/I001）无真 bug——
-# 按日志分析（86 个非全角全是风格/格式类——不阻塞发布）
-ignore = ["RUF001", "RUF003", "E501", "TRY300", "TRY003", "TRY301", "RUF021", "E402", "I001"]
+# 中文注释/文档串行宽不可控，PY-150 收口后行宽策略整体退场）——风格类
+# （TRY300/TRY003/TRY301/RUF021/E402）无真 bug——按日志分析（86 个非全角全是
+# 风格/格式类——不阻塞发布）
+# PY-154（2026-09-23 审计·V1 核验批）：I001 移出全局忽略——实测活跃四目录与
+# 归档栈（legacy guard 口径）import 排序违规均为 0，重启零成本
+ignore = ["RUF001", "RUF003", "E501", "TRY300", "TRY003", "TRY301", "RUF021", "E402"]
+
+# SP-164（2026-09-26 审计）：测试豁免单源——此前 INP001/S101/PLR2004 在
+# workflow ruff 行内 --ignore 重复维护（与全局 ignore 清单双源漂移面）。
+# INP001 隐式命名空间包（测试目录无需 __init__.py）、S101 assert（测试语义）、
+# PLR2004 魔法值（断言可读性优先）。
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["INP001", "S101", "PLR2004"]
+"agent/tests/**" = ["INP001", "S101", "PLR2004"]
+"**/selftest_*.py" = ["INP001", "S101", "PLR2004"]
+
+# PY-149：pytest 基建（tests/python/ ——发布链离线单测落位）
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]

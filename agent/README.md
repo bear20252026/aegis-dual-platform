@@ -1,6 +1,6 @@
 # Agent（阶段 G——蓝图 agent/）
 
-> 依据：aegis_future_development_and_target_source_tree.md 蓝图 agent/ 目录
+> 依据：蓝图 agent/ 目录（蓝图文档内容已并入 docs/architecture-overview.md）
 > （测试优先、权限后置——重构完成前不包含对外网络 MCP server）+ 全球调研
 > （CSA Agentic MCP 安全最佳实践 v1——OAuth 2.1/PKCE/工具级 scope/每调用验证/
 > 令牌交换/工具哈希绑定 + 中文掘金 MCP RCE 拆解——工具投毒/STDIO 注入/
@@ -26,6 +26,5 @@
 
 - `action-planner-contract.md`：ProposedAction 契约（planner 输出——经 broker）
 - `local-ipc/`：本地 IPC 身份/会话/撤销设计（identity.md/session.md/revocation.md）
-- `prompts/`：仅开发测试（不作为安全边界——蓝图）
 - `redteam/`：红队 fixtures（提示注入/工具投毒/重放竞态/资源预算——蓝图）
 - `tests/`：红队测试（断言拒绝——无未批准副作用——蓝图完成标准）

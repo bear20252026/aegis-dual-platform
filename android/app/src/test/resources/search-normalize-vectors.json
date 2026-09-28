@@ -1,0 +1,26 @@
+{
+  "description": "AD-207（审计 2026-09-23 清单·A7 批）：搜索归一「搜索词 vs 网址」判定跨端共享向量——与 Windows 端 url_utils.normalize_url 的跨端契约（SearchEngines.classifyInput/normalizeInput 语义：空输入拒绝、about:blank 直通、非导航 scheme fail-closed、host:port 域名、含空格/无点号转搜索词、绝对 URL 归一）。文件随 Android 测试资源分发；Windows 测试面可直接引用同一 JSON（跨端单源——字段仅 input/expected_kind/expected_url/note，无平台耦合）。",
+  "vectors": [
+    { "input": "", "expected_kind": "EMPTY", "expected_url": null },
+    { "input": "   ", "expected_kind": "EMPTY", "expected_url": null },
+    { "input": "about:blank", "expected_kind": "ABOUT_BLANK", "expected_url": "about:blank" },
+    { "input": "ABOUT:BLANK", "expected_kind": "ABOUT_BLANK", "expected_url": "about:blank", "note": "大小写不敏感直通" },
+    { "input": "javascript:alert(1)", "expected_kind": "FORBIDDEN_SCHEME", "expected_url": null },
+    { "input": "file:///etc/passwd", "expected_kind": "FORBIDDEN_SCHEME", "expected_url": null },
+    { "input": "data:text/html,<b>x</b>", "expected_kind": "FORBIDDEN_SCHEME", "expected_url": null },
+    { "input": "vbscript:msgbox(1)", "expected_kind": "FORBIDDEN_SCHEME", "expected_url": null },
+    { "input": "https://www.example.com", "expected_kind": "ABSOLUTE_URL", "expected_url": "https://www.example.com" },
+    { "input": "HTTP://EXAMPLE.COM/a?b=1", "expected_kind": "ABSOLUTE_URL", "expected_url": "http://example.com/a?b=1", "note": "scheme/host 小写归一" },
+    { "input": "https://example.com:8443/x", "expected_kind": "ABSOLUTE_URL", "expected_url": "https://example.com:8443/x", "note": "显式端口保留" },
+    { "input": "example.com", "expected_kind": "DOMAIN", "expected_url": "https://example.com" },
+    { "input": "EXAMPLE.COM/path?q=1", "expected_kind": "DOMAIN", "expected_url": "https://example.com/path?q=1" },
+    { "input": "weather.", "expected_kind": "SEARCH", "expected_url": null, "note": "尾点降级为搜索词（URL 值按引擎拼接，跨端不锁具体引擎）" },
+    { "input": "rust uniffi", "expected_kind": "SEARCH", "expected_url": null, "note": "含空格 → 搜索词" },
+    { "input": "今天天气", "expected_kind": "SEARCH", "expected_url": null, "note": "无点号非 ASCII → 搜索词" },
+    { "input": "localhost:8000", "expected_kind": "DOMAIN", "expected_url": "https://localhost:8000", "note": "T1：host:port 不误判 scheme" },
+    { "input": "192.168.1.1:8080", "expected_kind": "DOMAIN", "expected_url": "https://192.168.1.1:8080" },
+    { "input": "example.com:8080/path", "expected_kind": "DOMAIN", "expected_url": "https://example.com:8080/path" },
+    { "input": "localhost:abc", "expected_kind": "FORBIDDEN_SCHEME", "expected_url": null, "note": "字母端口段非 host:port 形态" },
+    { "input": "example com", "expected_kind": "SEARCH", "expected_url": null, "note": "空格优先于点号判定" }
+  ]
+}

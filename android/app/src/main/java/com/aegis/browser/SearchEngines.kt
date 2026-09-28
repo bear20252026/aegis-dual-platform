@@ -1,6 +1,5 @@
 package com.aegis.browser
 
-import android.net.Uri
 import com.aegis.broker.OriginPolicy
 
 /**
@@ -22,6 +21,7 @@ import com.aegis.broker.OriginPolicy
  * （AegisHomeBridge）共用 normalizeInput，消除双份拼接的语义漂移
  * （首页框旧实现会把 `https://www.baidu.com` 拼成 `https://https://...`）。
  */
+@Suppress("TooManyFunctions") // AD-057 新增 uriEncode 触发阈值（11）——职责仍单一（输入归一）
 object SearchEngines {
     val ENGINE_URLS: Map<String, String> =
         mapOf(
@@ -32,6 +32,15 @@ object SearchEngines {
         )
 
     const val DEFAULT_ENGINE: String = "baidu"
+
+    /**
+     * AD-146（审计 2026-09-23 清单·A6 批）：引擎显示名单源——原 ENGINE_NAMES
+     * 内嵌 AegisHomeBridge，与 ENGINE_URLS 键集靠人工同步（新引擎只进 URL 表
+     * 时显示名静默回退 key）。收敛到本对象单源：键集必须与 ENGINE_URLS 一致
+     * （SearchEnginesTest 锁定），AegisHomeBridge.buildEngineJson 消费本表。
+     */
+    internal val ENGINE_NAMES: Map<String, String> =
+        mapOf("baidu" to "百度", "bing" to "必应", "google" to "谷歌", "sogou" to "搜狗")
 
     /**
      * 首页偏好文件/键单源（全库审计 2026-09-02 收敛）：AegisHomeBridge 与
@@ -48,17 +57,78 @@ object SearchEngines {
     /** host:port 形态的端口段长度上限（TCP 端口 ≤5 位数字——T1）。 */
     private const val MAX_PORT_SEGMENT_LENGTH = 5
 
-    /** 读取当前搜索引擎 key（与 AegisHomeBridge 同一偏好文件/键——单源）。 */
-    fun currentEngine(context: android.content.Context): String =
-        context
-            .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-            .getString(KEY_ENGINE, DEFAULT_ENGINE) ?: DEFAULT_ENGINE
+    /**
+     * AD-229（2026-09-26 审计）：当前引擎进程内缓存——currentEngine 此前每次
+     * 导航都同步读 SharedPreferences（首次磁盘 IO 在主线程；SecureNavigator
+     * 每次导航调用）。首读注册 OnSharedPreferenceChangeListener（持强引用防
+     * 回收），setEngine 写入后缓存失效，下次读取重载。
+     */
+    @Volatile
+    private var cachedEngineKey: String? = null
 
-    /** 搜索词拼引擎 URL（Uri.encode 对齐 Windows urllib.parse.quote 语义——`/` 保留）。 */
+    @Volatile
+    private var preferenceChangeListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
+
+    /** 读取当前搜索引擎 key（与 AegisHomeBridge 同一偏好文件/键——单源）。
+     *  双检锁 + @Volatile：缓存命中零锁直读；未命中持锁读偏好并注册失效监听。 */
+    fun currentEngine(context: android.content.Context): String =
+        cachedEngineKey
+            ?: synchronized(this) {
+                cachedEngineKey
+                    ?: readEngineWithPreferenceListener(context).also { cachedEngineKey = it }
+            }
+
+    /** AD-229 配套：读偏好 + 首读注册失效监听（强引用持有防 GC 回收）。 */
+    private fun readEngineWithPreferenceListener(context: android.content.Context): String {
+        val prefs = context.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+        if (preferenceChangeListener == null) {
+            val listener =
+                android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                    if (key == KEY_ENGINE) cachedEngineKey = null
+                }
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+            preferenceChangeListener = listener
+        }
+        return prefs.getString(KEY_ENGINE, DEFAULT_ENGINE) ?: DEFAULT_ENGINE
+    }
+
+    /**
+     * 搜索词拼引擎 URL。
+     * AD-057（2026-09-24 审计）：编码抽为纯字符串 [uriEncode]（原
+     * Uri.encode 依赖阻断 JVM 单测）——语义与 `Uri.encode(text, "/")` 对齐
+     * （保留 RFC 3986 unreserved + `!'()*` 与 `/`，其余按 UTF-8 字节
+     * 大写 %XX——对齐 Windows urllib.parse.quote 的百分比编码习惯）。
+     */
     fun searchUrl(
         text: String,
         engineKey: String,
-    ): String = (ENGINE_URLS[engineKey] ?: ENGINE_URLS[DEFAULT_ENGINE]!!) + Uri.encode(text, "/")
+    ): String = (ENGINE_URLS[engineKey] ?: ENGINE_URLS[DEFAULT_ENGINE]!!) + uriEncode(text)
+
+    /**
+     * AD-057：Uri.encode(text, "/") 的纯 Kotlin 等价实现（JVM 可测）。
+     * 保留字符集与 android.net.Uri.encode 一致：字母数字 + `_-.~'()*` +
+     * allow 参数；非保留字节原样、其余逐 UTF-8 字节输出大写十六进制。
+     */
+    @Suppress("MagicNumber") // 位运算/ASCII 区间字面量为编码算法本体，非业务魔数
+    internal fun uriEncode(text: String): String {
+        // keep 集 = Uri.encode 缺省 unreserved + allow 参数 "/"（搜索路径分隔）。
+        // AD-248（2026-09-26 审计）：AOSP Uri.encode 的固有放行集是
+        // "_-!.~'()*"（含 `!`）——原 keep 集漏 `!`，与声称的语义一致性不符
+        // （完整对照矩阵见 androidTest/SearchEnginesUriEncodeInstrumentedTest）。
+        val keep = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-!.~'()*" + "/"
+        val upperHex = "0123456789ABCDEF"
+        val builder = StringBuilder(text.length)
+        for (byte in text.toByteArray(Charsets.UTF_8)) {
+            val value = byte.toInt() and 0xFF
+            val c = value.toChar()
+            if (value in 0x20..0x7E && keep.indexOf(c) >= 0) {
+                builder.append(c)
+            } else {
+                builder.append('%').append(upperHex[value shr 4]).append(upperHex[value and 0x0F])
+            }
+        }
+        return builder.toString()
+    }
 
     /**
      * 统一输入归一：地址栏/首页搜索框共用入口。
@@ -70,9 +140,15 @@ object SearchEngines {
     ): String? =
         when (classifyInput(input)) {
             InputKind.EMPTY, InputKind.FORBIDDEN_SCHEME -> null
+
             InputKind.ABOUT_BLANK -> "about:blank"
-            InputKind.ABSOLUTE_URL -> canonicalizeExternal(input.trim().replace(" ", "%20"))
+
+            // AD-077（2026-09-26 审计）：不再在调用点预替换空格——
+            // canonicalizeExternal 内部已做 %20 编码（此前双处连续 replace）
+            InputKind.ABSOLUTE_URL -> canonicalizeExternal(input.trim())
+
             InputKind.DOMAIN -> canonicalizeExternal("https://" + input.trim())
+
             InputKind.SEARCH -> searchUrl(input.trim(), engineKey)
         }
 
@@ -136,16 +212,22 @@ object SearchEngines {
     /**
      * A-3 归一（迁移自 BrowserEngine）：https 补前缀 + host 小写化，
      * 对齐 Rust canonicalize_external。完整 URI 重建（path/query/fragment 保留）。
+     * AD-119 校验暴露：java.net.URI 保留 scheme 原始大小写（HTTP://）——
+     * WHATWG/Rust url crate 的 scheme 归一恒为小写，此处对齐补 scheme 小写
+     * （OriginPolicy 已限定 http/https，lowercase 语义安全）。
      */
     private fun canonicalize(uri: java.net.URI): String? {
-        val host = uri.host?.lowercase() ?: return null
+        // A6 批（detekt ReturnCount）：scheme/host 归一合并取值，单一出口
+        val scheme = uri.scheme?.lowercase()
+        val host = uri.host?.lowercase()
+        if (scheme == null || host == null) return null
         val port =
             uri.port
                 .takeIf { it != -1 }
                 ?.let { ":$it" }
                 .orEmpty()
         return buildString {
-            append(uri.scheme).append("://").append(host).append(port)
+            append(scheme).append("://").append(host).append(port)
             uri.rawPath?.let { append(it) }
             uri.rawQuery?.let { append('?').append(it) }
             uri.rawFragment?.let { append('#').append(it) }

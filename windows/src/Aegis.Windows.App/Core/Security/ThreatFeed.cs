@@ -18,27 +18,39 @@ public interface IBlockedHosts
 public sealed class BlockedHosts : IBlockedHosts
 {
     private readonly HashSet<string> _hosts;
+    private readonly HashSet<string>.AlternateLookup<ReadOnlySpan<char>> _lookup;
 
-    public BlockedHosts(IEnumerable<string> hosts) =>
-        _hosts = new HashSet<string>(
-            hosts.Select(h => h.Trim().ToLowerInvariant().TrimEnd('.')),
-            StringComparer.Ordinal);
+    public BlockedHosts(IEnumerable<string> hosts)
+    {
+        var set = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var raw in hosts)
+        {
+            var h = raw.Trim().ToLowerInvariant().TrimEnd('.');
+            if (h.Length > 0)
+                set.Add(h);
+        }
+        _hosts = set;
+        _lookup = set.GetAlternateLookup<ReadOnlySpan<char>>();
+    }
 
+    // CS-068（审计 2026-09-25）：热路径零分配——查询 host 的每个祖先域后缀
+    // 用 span 备用查找裁决（不再 string.Join 切片分配）。注意：预展开只能做在
+    // 查询侧；若把清单条目的祖先域展开入表，"evil.example.com" 会连带封禁
+    // "example.com"/"com"，构成过度封锁（首版实现即此缺陷，单测拦截后改此版）。
     public bool IsBlocked(string host)
     {
         if (string.IsNullOrWhiteSpace(host))
             return false;
         var normalized = host.Trim().ToLowerInvariant().TrimEnd('.');
-        if (normalized.Length == 0)
-            return false;
-        if (_hosts.Contains(normalized))
-            return true;
-        // 子域后缀匹配：evil.example.com 命中 blocked 的 example.com
-        var parts = normalized.Split('.');
-        for (var i = 1; i < parts.Length; i++)
+        var start = 0;
+        while (start < normalized.Length)
         {
-            if (_hosts.Contains(string.Join('.', parts[i..])))
+            if (_lookup.Contains(normalized.AsSpan(start)))
                 return true;
+            var dot = normalized.IndexOf('.', start);
+            if (dot < 0)
+                return false;
+            start = dot + 1;
         }
         return false;
     }
@@ -73,7 +85,8 @@ public static class ThreatFeedUpdater
         return null;
     }
 
-    /// <summary>解析订阅源一行文本为域名；无效返回 null（Python parse_feed_line 同语义）。</summary>
+    /// <summary>解析订阅源一行文本为域名；无效返回 null（Python parse_feed_line
+    /// 同语义）。带端口/通配/非主机字符的条目拒绝（此前原样入表永不命中）。</summary>
     public static string? ParseFeedLine(string line)
     {
         var text = line.Trim();
@@ -91,22 +104,45 @@ public static class ThreatFeedUpdater
         if (slash >= 0)
             text = text[..slash];
         text = text.Trim().TrimEnd('^').ToLowerInvariant();
-        if (text.Length == 0 || (text.Length == 1 && text[0] == ':'))
+        // 剥端口（":80" 残留——黑名单匹配按裸域，带端口条目永不命中）
+        var colon = text.IndexOf(':');
+        if (colon >= 0)
+            text = text[..colon];
+        if (text.Length == 0)
             return null;
         if (!text.Contains('.') && text != "localhost")
             return null;
+        // 主机字符白名单（字母/数字/连字符/点）——通配残留等非法形态拒绝
+        foreach (var ch in text)
+        {
+            if (!(char.IsAsciiLetterOrDigit(ch) || ch == '-' || ch == '.') && text != "localhost")
+                return null;
+        }
         return text;
     }
 
-    /// <summary>拉取订阅源并写入缓存文件（原子替换）。失败抛异常由调用方留痕。</summary>
+    /// <summary>拉取订阅源并写入缓存文件（原子替换）。失败抛异常由调用方留痕。
+    /// 降级防护：最终响应 URL 必须仍为 https（重定向到 http 即拒绝——
+    /// 明文可投毒）；响应先查 Content-Length 再限量缓冲（超大响应不进内存）。</summary>
     public static IReadOnlyList<string> FetchAndStore(string feedUrl, string cachePath)
     {
-        using var handler = new HttpClientHandler();
+        using var handler = new HttpClientHandler
+        {
+            AllowAutoRedirect = true,
+            MaxAutomaticRedirections = 3,
+        };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
+        // 调用方已在后台线程（Task.Run）——同步等待可接受
         using var response = http.GetAsync(feedUrl).GetAwaiter().GetResult();
         response.EnsureSuccessStatusCode();
-        var bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
-        if (bytes.Length > MaxBytes)
+        // 重定向降级检查：最终落在 http:// 上即拒绝（劫持/误配投毒面）
+        if (response.RequestMessage?.RequestUri is { } finalUri
+            && finalUri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException("订阅源重定向降级为非 https——拒绝");
+        if (response.Content.Headers.ContentLength is long declared && declared > MaxBytes)
+            throw new InvalidOperationException("订阅源过大（超过 5MB 上限）");
+        var bytes = ReadBounded(response, MaxBytes);
+        if (bytes is null)
             throw new InvalidOperationException("订阅源过大（超过 5MB 上限）");
 
         var domains = new List<string>();
@@ -123,12 +159,41 @@ public static class ThreatFeedUpdater
         if (!string.IsNullOrEmpty(dir))
             Directory.CreateDirectory(dir);
         var tmp = cachePath + ".tmp";
-        File.WriteAllLines(tmp, domains);
-        File.Move(tmp, cachePath, overwrite: true);
+        try
+        {
+            File.WriteAllLines(tmp, domains);
+            File.Move(tmp, cachePath, overwrite: true);
+        }
+        finally
+        {
+            // CS-232：Move 抛出时 tmp 残留——清理（成功后 tmp 已不存在，Delete 跳过）
+            if (File.Exists(tmp))
+                File.Delete(tmp);
+        }
         return domains;
     }
 
-    /// <summary>加载缓存黑名单快照（文件缺失/损坏返回空——fail-safe）。</summary>
+    /// <summary>限量缓冲读取：声明缺失时按上限截断（此前先全量读入内存再检查
+    /// ——被劫持源可触发无界内存分配）。CS-132：超限返回 null 哨兵——此前
+    /// new byte[max+1] 分配 5MB 只为表达"超限"这一比特信息。</summary>
+    private static byte[]? ReadBounded(HttpResponseMessage response, long max)
+    {
+        using var stream = response.Content.ReadAsStream();
+        using var buffer = new MemoryStream();
+        var chunk = new byte[64 * 1024];
+        while (buffer.Length <= max)
+        {
+            var read = stream.Read(chunk, 0, chunk.Length);
+            if (read <= 0)
+                break;
+            buffer.Write(chunk, 0, read);
+        }
+        return buffer.Length > max ? null : buffer.ToArray();
+    }
+
+    /// <summary>加载缓存黑名单快照（文件缺失/损坏/无权限返回空——fail-safe）。
+    /// CS-131：回放与拉取同口径——逐行套 ParseFeedLine（缓存文件被篡改或由
+    /// 旧版本写入的脏条目不再绕过过滤直接入表）。</summary>
     public static IReadOnlyList<string> LoadCached(string cachePath)
     {
         try
@@ -136,11 +201,13 @@ public static class ThreatFeedUpdater
             if (!File.Exists(cachePath))
                 return Array.Empty<string>();
             return File.ReadAllLines(cachePath)
-                .Select(l => l.Trim())
-                .Where(l => l.Length > 0)
+                .Select(ParseFeedLine)
+                .Where(d => d is not null)
+                .Select(d => d!)
+                .Distinct(StringComparer.Ordinal)
                 .ToList();
         }
-        catch (IOException)
+        catch (Exception)
         {
             return Array.Empty<string>();
         }

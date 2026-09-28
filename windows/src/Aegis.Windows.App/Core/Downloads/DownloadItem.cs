@@ -2,6 +2,7 @@ namespace Aegis.Windows.Core.Downloads;
 
 using System;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using Microsoft.Web.WebView2.Core;
 
@@ -12,7 +13,9 @@ using Microsoft.Web.WebView2.Core;
 /// ——不经任何远程页面可触达的通道。</summary>
 public sealed class DownloadItem : INotifyPropertyChanged
 {
-    private string _state = "进行中";
+    // CS-112：状态机枚举单源——此前中文串既当存储又当显示，IsCompleted 等
+    // 比较依赖字面量，切换点拼写漂移即静默失配；显示文案经 StateText 单点映射。
+    private DownloadItemState _stateKind = DownloadItemState.InProgress;
     private long _receivedBytes;
     private long _totalBytes;
     private DateTime? _completedAt;
@@ -29,7 +32,7 @@ public sealed class DownloadItem : INotifyPropertyChanged
     public string FilePath => Operation?.ResultFilePath ?? string.Empty;
 
     /// <summary>下载是否已完成（供 UI 显示"打开"按钮）。</summary>
-    public bool IsCompleted => State == "已完成";
+    public bool IsCompleted => _stateKind == DownloadItemState.Completed;
 
     /// <summary>完成时刻（用于持久化记录）。</summary>
     public DateTime? CompletedAt => _completedAt;
@@ -47,7 +50,11 @@ public sealed class DownloadItem : INotifyPropertyChanged
     /// <summary>危险扩展下载（经用户显式确认后放行——审计链保留）。</summary>
     public bool Dangerous { get; }
 
-    public string State { get => _state; private set => SetField(ref _state, value); }
+    /// <summary>状态显示文案（绑定点——由 StateKind 单点派生）。</summary>
+    public string State => StateText(_stateKind);
+
+    /// <summary>类型化状态（CS-112——测试与内部比较不再解析中文字面量）。</summary>
+    internal DownloadItemState StateKind => _stateKind;
 
     public long ReceivedBytes { get => _receivedBytes; private set => SetField(ref _receivedBytes, value); }
 
@@ -66,43 +73,90 @@ public sealed class DownloadItem : INotifyPropertyChanged
         }
     }
 
-    private static string FormatBytes(long bytes) =>
+    /// <summary>CS-113：字节量格式化提 internal 直测；CS-110：InvariantCulture
+    /// ——默认文化小数点/分组符漂移（逗号文化显示 "1,5 MB"）。</summary>
+    internal static string FormatBytes(long bytes) =>
         bytes < 0
             ? "未知大小"
-            : bytes < 1024 ? $"{bytes} B"
-            : bytes < 1024 * 1024 ? $"{bytes / 1024.0:F1} KB"
-            : bytes < 1024L * 1024 * 1024 ? $"{bytes / (1024.0 * 1024):F1} MB"
-            : $"{bytes / (1024.0 * 1024 * 1024):F2} GB";
+            : bytes < 1024 ? $"{bytes.ToString(CultureInfo.InvariantCulture)} B"
+            : bytes < 1024 * 1024 ? $"{(bytes / 1024.0).ToString("F1", CultureInfo.InvariantCulture)} KB"
+            : bytes < 1024L * 1024 * 1024 ? $"{(bytes / (1024.0 * 1024)).ToString("F1", CultureInfo.InvariantCulture)} MB"
+            : $"{(bytes / (1024.0 * 1024 * 1024)).ToString("F2", CultureInfo.InvariantCulture)} GB";
+
+    /// <summary>状态机 → 显示文案单一映射（CS-112）。</summary>
+    internal static string StateText(DownloadItemState kind) => kind switch
+    {
+        DownloadItemState.InProgress => "进行中",
+        DownloadItemState.Completed => "已完成",
+        DownloadItemState.Canceled => "已取消",
+        DownloadItemState.Interrupted => "已中断",
+        DownloadItemState.Ended => "已结束",
+        _ => kind.ToString(),
+    };
 
     /// <summary>刷新原生进度（面板 DispatcherTimer 周期调用——属性直读，
     /// 兼容 SDK 1.0.2903.40 的扁平 Progress API）。状态映射：InProgress/
-    /// Completed/Interrupted（含 UserCanceled→已取消）——绝不静默。</summary>
+    /// Completed/Interrupted（含 UserCanceled→已取消）——绝不静默。
+    /// 派生属性（Percent/Summary）只在字节变化时通知——此前每 tick 无条件
+    /// 强发两个 PropertyChanged，挂窗期间持续触发绑定重算。
+    /// CS-329（2026-09-26 审计）：状态映射与异常映射提纯 internal static——
+    /// CoreWebView2DownloadOperation 无法在单测构造（internal ctor），状态机
+    /// 分支经纯函数直测。</summary>
     public void Refresh()
     {
+        long beforeReceived = _receivedBytes, beforeTotal = _totalBytes;
         try
         {
             ReceivedBytes = (long)Operation.BytesReceived;
             TotalBytes = (long)(Operation.TotalBytesToReceive ?? 0UL);
-            State = Operation.State switch
-            {
-                CoreWebView2DownloadState.InProgress => "进行中",
-                CoreWebView2DownloadState.Completed => "已完成",
-                CoreWebView2DownloadState.Interrupted when Operation.InterruptReason
-                    == CoreWebView2DownloadInterruptReason.UserCanceled => "已取消",
-                CoreWebView2DownloadState.Interrupted => "已中断",
-                _ => Operation.State.ToString(),
-            };
+            var kind = MapNativeState(Operation.State, Operation.InterruptReason);
+            if (kind == DownloadItemState.Completed && _completedAt is null)
+                _completedAt = DateTime.Now;
+            SetState(kind);
         }
-        catch (ObjectDisposedException)
+        catch (Exception ex)
         {
-            State = "已完成";  // 操作对象随浏览器会话结束——按完成处理
+            // 操作对象随浏览器会话结束→如实标记「已结束」（此前标「已完成」，
+            // IsCompleted=true 会给出"打开"按钮而文件可能并不存在）；其余
+            // 异常面（SDK 回调竞态等）按中断呈现——轮询路径绝不向 UI 上抛
+            SetState(MapRefreshException(ex));
         }
-        catch (InvalidOperationException)
+        if (beforeReceived != _receivedBytes || beforeTotal != _totalBytes)
         {
-            State = "已中断";
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Percent)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Summary)));
         }
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Percent)));
-        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Summary)));
+    }
+
+    /// <summary>CS-329：原生状态 → 状态机映射（UserCanceled→已取消；
+    /// 未知原生状态按中断呈现——不静默）。</summary>
+    internal static DownloadItemState MapNativeState(
+        CoreWebView2DownloadState state,
+        CoreWebView2DownloadInterruptReason interruptReason) => state switch
+    {
+        CoreWebView2DownloadState.InProgress => DownloadItemState.InProgress,
+        CoreWebView2DownloadState.Completed => DownloadItemState.Completed,
+        CoreWebView2DownloadState.Interrupted when interruptReason
+            == CoreWebView2DownloadInterruptReason.UserCanceled => DownloadItemState.Canceled,
+        CoreWebView2DownloadState.Interrupted => DownloadItemState.Interrupted,
+        _ => DownloadItemState.Interrupted,  // 未知原生状态按中断呈现（不静默）
+    };
+
+    /// <summary>CS-329：刷新异常 → 状态机映射（ObjectDisposedException=会话
+    /// 结束→已结束；其余→已中断——CS-111 兜底口径）。</summary>
+    internal static DownloadItemState MapRefreshException(Exception ex) => ex switch
+    {
+        ObjectDisposedException => DownloadItemState.Ended,
+        _ => DownloadItemState.Interrupted,
+    };
+
+    private void SetState(DownloadItemState kind)
+    {
+        if (_stateKind == kind)
+            return;
+        _stateKind = kind;
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(State)));
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCompleted)));
     }
 
     public void Pause()
@@ -152,4 +206,15 @@ public sealed class DownloadItem : INotifyPropertyChanged
         field = value;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
+}
+
+/// <summary>下载条目状态机（CS-112）——存储/比较用类型化枚举，显示经
+/// DownloadItem.StateText 单点映射。</summary>
+public enum DownloadItemState
+{
+    InProgress,
+    Completed,
+    Canceled,
+    Interrupted,
+    Ended,
 }

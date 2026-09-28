@@ -1,0 +1,96 @@
+{
+  "description": "PY-095（审计 2026-09-25）：Capability 契约非法向量——全部为 schema 级失效（未声明能力 / 词表越界 / 重复项 / 类型错误）。消费方：validate_vector_schemas.py（schema 必须拒绝）",
+  "vectors": [
+    {
+      "note": "actions 含未知动词 PATCH（Action 词表外——能力不可授予未定义动作）",
+      "expected": "deny_schema",
+      "capability": {
+        "scope": "net.example.org",
+        "actions": [
+          "GET",
+          "PATCH"
+        ],
+        "resources": [
+          "https://example.org/*"
+        ]
+      }
+    },
+    {
+      "note": "actions 空数组（空能力声明 = 无能力，且 schema minItems 未设——本向量按用户语义拒绝：无动作声明应整条删除而非空挂）",
+      "expected": "deny_schema",
+      "capability": {
+        "scope": "net.example.org",
+        "actions": [],
+        "resources": [
+          "https://example.org/*"
+        ]
+      }
+    },
+    {
+      "note": "actions 重复项（uniqueItems true）",
+      "expected": "deny_schema",
+      "capability": {
+        "scope": "net.example.org",
+        "actions": [
+          "GET",
+          "GET"
+        ],
+        "resources": [
+          "https://example.org/*"
+        ]
+      }
+    },
+    {
+      "note": "resources 重复项（uniqueItems true）",
+      "expected": "deny_schema",
+      "capability": {
+        "scope": "net.example.org",
+        "actions": [
+          "GET"
+        ],
+        "resources": [
+          "https://example.org/*",
+          "https://example.org/*"
+        ]
+      }
+    },
+    {
+      "note": "额外字段 daily_budget（PY-098 澄清——预算属 Broker 运行时，契约面 additionalProperties false）",
+      "expected": "deny_schema",
+      "capability": {
+        "scope": "download.example.net",
+        "actions": [
+          "DOWNLOAD"
+        ],
+        "resources": [
+          "https://files.example.net/*"
+        ],
+        "daily_budget": 100
+      }
+    },
+    {
+      "note": "requires_confirmation 类型错误（boolean ←→ string）",
+      "expected": "deny_schema",
+      "capability": {
+        "scope": "net.example.org",
+        "actions": [
+          "GET"
+        ],
+        "resources": [
+          "https://example.org/*"
+        ],
+        "requires_confirmation": "yes"
+      }
+    },
+    {
+      "note": "缺 resources（必填缺失）",
+      "expected": "deny_schema",
+      "capability": {
+        "scope": "net.example.org",
+        "actions": [
+          "GET"
+        ]
+      }
+    }
+  ]
+}

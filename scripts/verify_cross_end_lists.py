@@ -5,15 +5,24 @@
 本脚本 fail-closed：任一端缺失/多出条目即退出码 1。
 
 覆盖面：
-1. 壁纸清单 4 处：
+1. 壁纸清单 5 处（WB-011：C# NtpAssets 增列）：
    - shared/shell/wallpapers/ 实际文件
    - legacy/windows-pywebview/app/asset_scheme.py（Windows 资产服务白名单）
-   - shared/shell/start.html（UI 按钮列表——单源 UI）
+   - shared/shell/start.main.js（UI 按钮列表——单源 UI；I83 外置前在 start.html）
    - android/.../AegisHomeBridge.kt（Android 白名单）
-2. 搜索引擎清单 2 处：
+   - windows/.../Chrome/Ntp/NtpAssets.cs（C# 正典栈白名单）
+2. 搜索引擎清单 3 处（WB-010：C# UrlNormalizer 增列）：
    - legacy/windows-pywebview/app/url_utils.py（Windows 引擎表）
    - android/.../SearchEngines.kt ENGINE_URLS（搜索审计 2026-09-01：
      引擎表自 AegisHomeBridge 迁至 SearchEngines 单源，锚点同步）
+   - windows/.../Chrome/UrlNormalizer.cs EngineUrls（C# 正典栈——
+     契约口径：三端核心引擎完全一致；C# 扩展引擎须在
+     CS_ENGINE_EXTENSIONS 白名单显式登记，防双向静默漂移）
+
+SP-154（2026-09-26 审计）：legacy 归档栈对账端（asset_scheme.py /
+url_utils.py）降级为可选——文件缺失仅告警并跳过该端对账（归档栈被
+删除/移动时现役门禁不得断链）；现役 C#/Android/start.main.js 端缺失
+仍 fail-closed。
 """
 from __future__ import annotations
 
@@ -24,66 +33,124 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 failures: list[str] = []
+# SP-154（2026-09-26 审计）：legacy 归档栈可选对账端的缺失告警（不计失败）
+warnings: list[str] = []
 
 
 def fail(msg: str) -> None:
     failures.append(msg)
 
 
-def wallpapers_from_asset_scheme() -> set[str]:
-    text = (ROOT / "legacy/windows-pywebview/app/asset_scheme.py").read_text(encoding="utf-8")
-    block = re.search(r"WALLPAPERS\s*=\s*\(([^)]*)\)", text, re.S)
+def _read(rel: str) -> str:
+    # PY-034：7 处 read_text 无守卫——单文件缺失时此前 FileNotFoundError 原始栈
+    #（CI 日志只剩一行堆栈，无定位）。统一 fail-closed 进 failures。
+    path = ROOT / rel
+    if not path.is_file():
+        fail(f"文件缺失: {rel}")
+        return ""
+    return path.read_text(encoding="utf-8")
+
+
+# SP-154：legacy 归档栈端点（asset_scheme.py / url_utils.py）此前是强制
+# 对账端——归档栈文件被删除/移动时现役门禁断链。降级为可选：文件缺失
+# 仅记告警（返回 None，跳过该端对账），现役 C#/Android 端缺失仍 fail。
+# （两处提取器内联实现"缺失→告警"分支。）
+
+
+def wallpapers_from_asset_scheme() -> set[str] | None:
+    # SP-154：legacy 归档栈端点——缺失仅告警（None），存在但白名单缺失仍 fail。
+    # 存在时仍经 _read 读取（单测以合成 _read 注入内容）。
+    if not (ROOT / "legacy/windows-pywebview/app/asset_scheme.py").is_file():
+        warnings.append("可选对账端缺失（legacy 归档栈）: "
+                        "legacy/windows-pywebview/app/asset_scheme.py——跳过该端对账")
+        return None
+    text = _read("legacy/windows-pywebview/app/asset_scheme.py")
+    block = re.search(r"WALLPAPERS\s*=\s*\(([^)]*)\)", text, re.DOTALL)
     if not block:
         fail("asset_scheme.py: 未找到 WALLPAPERS 白名单")
         return set()
-    return set(re.findall(r'"([^"]+\.jpg)"', block.group(1)))
+    return set(re.findall(r'"([^"]+\.(?:jpg|jpeg|png|webp))"', block.group(1)))
 
 
 def wallpapers_from_start_html() -> set[str]:
-    text = (ROOT / "shared/shell/start.html").read_text(encoding="utf-8")
-    block = re.search(r"var WALLPAPERS\s*=\s*\[(.*?)\];", text, re.S)
+    # I83 外置（2026-09-10）：WALLPAPERS 数组随内联脚本外移 start.main.js
+    #（start.html 仅静态标记 + CSP——不再承载脚本数据）
+    text = _read("shared/shell/start.main.js")
+    block = re.search(r"var WALLPAPERS\s*=\s*\[(.*?)\];", text, re.DOTALL)
     if not block:
-        fail("start.html: 未找到 WALLPAPERS 按钮列表")
+        fail("start.main.js: 未找到 WALLPAPERS 按钮列表")
         return set()
     return set(re.findall(r"name:'([^']+)'", block.group(1)))
 
 
 def wallpapers_from_kotlin() -> set[str]:
-    text = (ROOT / "android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt").read_text(
-        encoding="utf-8"
-    )
-    block = re.search(r"WALLPAPERS\s*=\s*setOf\((.*?)\)", text, re.S)
+    text = _read("android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt")
+    block = re.search(r"WALLPAPERS\s*=\s*setOf\((.*?)\)", text, re.DOTALL)
     if not block:
         fail("AegisHomeBridge.kt: 未找到 WALLPAPERS 白名单")
         return set()
     return set(re.findall(r'"([^"]+)"', block.group(1)))
 
 
+def wallpapers_from_csharp() -> set[str]:
+    # WB-011（2026-09-24）：C# 正典栈 NtpAssets.Wallpapers 第 5 份壁纸清单
+    text = _read("windows/src/Aegis.Windows.App/Chrome/Ntp/NtpAssets.cs")
+    block = re.search(r"Wallpapers\s*=\s*new\[\]\s*\{(.*?)\}", text, re.DOTALL)
+    if not block:
+        fail("NtpAssets.cs: 未找到 Wallpapers 白名单")
+        return set()
+    return set(re.findall(r'"([^"]+\.(?:jpg|jpeg|png|webp))"', block.group(1)))
+
+
 def wallpapers_on_disk() -> set[str]:
     d = ROOT / "shared/shell/wallpapers"
-    return {p.name for p in d.glob("*.jpg")}
+    # PY-035：仅 glob *.jpg——新增 png/webp 壁纸会被判"多出"（反向误报）；
+    # 多后缀取并集，提取器正则同步扩展
+    return {p.name for suffix in ("*.jpg", "*.jpeg", "*.png", "*.webp") for p in d.glob(suffix)}
 
 
-def engines_from_url_utils() -> set[str]:
-    text = (ROOT / "legacy/windows-pywebview/app/url_utils.py").read_text(encoding="utf-8")
-    block = re.search(r"SEARCH_ENGINES[^=]*=\s*\{(.*?)\n\}", text, re.S)
+def engines_from_url_utils() -> set[str] | None:
+    # SP-154：legacy 归档栈端点——缺失仅告警（None），存在但引擎表缺失仍 fail。
+    # 存在时仍经 _read 读取（单测以合成 _read 注入内容）。
+    if not (ROOT / "legacy/windows-pywebview/app/url_utils.py").is_file():
+        warnings.append("可选对账端缺失（legacy 归档栈）: "
+                        "legacy/windows-pywebview/app/url_utils.py——跳过该端对账")
+        return None
+    text = _read("legacy/windows-pywebview/app/url_utils.py")
+    block = re.search(r"SEARCH_ENGINES[^=]*=\s*\{(.*?)\n\}", text, re.DOTALL)
     if not block:
         fail("url_utils.py: 未找到 SEARCH_ENGINES 表")
         return set()
-    return set(re.findall(r'^\s*"([^"]+)"\s*:', block.group(1), re.M))
+    return set(re.findall(r'^\s*"([^"]+)"\s*:', block.group(1), re.MULTILINE))
 
 
 def engines_from_kotlin() -> set[str]:
     # 搜索审计 2026-09-01：ENGINE_URLS 迁至 SearchEngines.kt 单源
     # （AegisHomeBridge 改为引用该单源）——锚点同步更新
-    text = (ROOT / "android/app/src/main/java/com/aegis/browser/SearchEngines.kt").read_text(
-        encoding="utf-8"
-    )
-    block = re.search(r"ENGINE_URLS[^=]*=\s*mapOf\(\s*(.*?)\)", text, re.S)
+    text = _read("android/app/src/main/java/com/aegis/browser/SearchEngines.kt")
+    block = re.search(r"ENGINE_URLS[^=]*=\s*mapOf\(\s*(.*?)\)", text, re.DOTALL)
     if not block:
         fail("SearchEngines.kt: 未找到 ENGINE_URLS 表")
         return set()
     return set(re.findall(r'"([^"]+)"\s+to\s+"', block.group(1)))
+
+
+# WB-010（2026-09-24）：C# 正典栈允许在核心引擎之外扩展（正则锚点 =
+# UrlNormalizer.EngineUrls 初始化块的 ["key"] = "url" 条目）。
+# 扩展引擎在此显式登记——不在名单内的新增/缺失一律 fail-closed，
+# 杜绝 C# 端引擎表双向静默漂移。
+CS_ENGINE_EXTENSIONS = frozenset({
+    "so360", "duckduckgo", "brave", "startpage", "ecosia", "yandex",
+})
+
+
+def engines_from_csharp() -> set[str]:
+    text = _read("windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs")
+    block = re.search(r"EngineUrls\s*=\s*new Dictionary[^{]*\{(.*?)\n\s*\};", text, re.DOTALL)
+    if not block:
+        fail("UrlNormalizer.cs: 未找到 EngineUrls 表")
+        return set()
+    return set(re.findall(r'\["([^"]+)"\]\s*=', block.group(1)))
 
 
 def diff(label: str, a: set[str], b: set[str], hint: str) -> None:
@@ -99,21 +166,50 @@ def main() -> int:
     py_wp = wallpapers_from_asset_scheme()
     html_wp = wallpapers_from_start_html()
     kt_wp = wallpapers_from_kotlin()
-    diff("壁纸", disk, py_wp, "asset_scheme.py 相对磁盘文件")
-    diff("壁纸", disk, html_wp, "start.html 相对磁盘文件")
+    cs_wp = wallpapers_from_csharp()
+    wallpaper_ends = 3  # 现役对账端：start.main.js + Kotlin + C#（SP-154）
+    if py_wp is not None:
+        diff("壁纸", disk, py_wp, "asset_scheme.py 相对磁盘文件")
+        wallpaper_ends += 1
+    else:
+        print("⚠️ legacy 归档端 asset_scheme.py 缺失——壁纸对账降级为 3 端（SP-154）")
+    diff("壁纸", disk, html_wp, "start.main.js 相对磁盘文件")
     diff("壁纸", disk, kt_wp, "AegisHomeBridge.kt 相对磁盘文件")
+    diff("壁纸", disk, cs_wp, "NtpAssets.cs 相对磁盘文件")
 
     py_eng = engines_from_url_utils()
     kt_eng = engines_from_kotlin()
-    diff("搜索引擎", py_eng, kt_eng, "SearchEngines.kt 相对 url_utils.py")
+    cs_eng = engines_from_csharp()
+    if py_eng is not None:
+        diff("搜索引擎", py_eng, kt_eng, "SearchEngines.kt 相对 url_utils.py")
+        core = py_eng | kt_eng
+        engine_ends = 3
+    else:
+        # SP-154：legacy 引擎表缺失时核心集降级为现役 Kotlin 单端 + C# 覆盖校验
+        print("⚠️ legacy 归档端 url_utils.py 缺失——引擎对账降级为现役端（SP-154）")
+        core = kt_eng
+        engine_ends = 2
+    # WB-010：三端核心引擎 = url_utils ∩ SearchEngines（py/kt 相等时即并集）；
+    # C# 端必须完整覆盖核心，扩展部分仅允许 CS_ENGINE_EXTENSIONS 白名单
+    if cs_eng < core:
+        for missing in sorted(core - cs_eng):
+            fail(f"搜索引擎: UrlNormalizer.cs 缺少核心引擎 {missing}")
+    extras = cs_eng - core
+    for extra in sorted(extras - CS_ENGINE_EXTENSIONS):
+        fail(f"搜索引擎: UrlNormalizer.cs 扩展引擎 {extra} 未在 CS_ENGINE_EXTENSIONS 登记（防漂移白名单）")
+    for ghost in sorted(CS_ENGINE_EXTENSIONS - cs_eng):
+        fail(f"搜索引擎: UrlNormalizer.cs 缺少已登记扩展引擎 {ghost}")
 
     if failures:
         print("❌ 跨端清单不一致：")
         for f in failures:
             print("  -", f)
         return 1
+    for w in warnings:
+        print("⚠️", w)
     print(
-        f"✅ 跨端清单一致（壁纸 {len(disk)} 文件 ×3 端；搜索引擎 {len(py_eng)} ×2 端）"
+        f"✅ 跨端清单一致（壁纸 {len(disk)} 文件 ×{wallpaper_ends} 端；搜索引擎核心 {len(core)}"
+        f" ×{engine_ends} 端 + C# 扩展 {len(extras)}）"
     )
     return 0
 

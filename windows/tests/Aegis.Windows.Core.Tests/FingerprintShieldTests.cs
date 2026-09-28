@@ -9,6 +9,20 @@ public sealed class FingerprintShieldTests
 {
     private const string SeedA = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+    // ===== CS-185（审计 2026-09-26）：非法种子入口拒绝 =====
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("0123456789abcdef")]                                        // 过短
+    [InlineData("0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF12")]  // 大写（契约小写）
+    [InlineData("g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")]    // 非 hex
+    [InlineData("'; evil(); '0123456789abcdef0123456789abcdef0123456789abc")]           // 注入形态
+    public void BuildScript_RejectsInvalidSeeds(string? seed)
+    {
+        Assert.Throws<ArgumentException>(() => FingerprintShield.BuildScript(seed!));
+    }
+
     [Fact]
     public void NewSessionSeedIs64HexCharsAndUnique()
     {
@@ -69,4 +83,81 @@ public sealed class FingerprintShieldTests
         Assert.Contains("origToDataURL.apply(tmp", canvasProxy);
         Assert.DoesNotContain("putImageData(imageData, 0, 0);\n                return origToDataURL.apply(this", canvasProxy);
     }
+
+    [Fact]
+    public void MaxViewportDimsReturnsInt32Array()
+    {
+        // CS-006 回归：MAX_VIEWPORT_DIMS(0x0D3A) 规范要求 Int32Array——
+        // Float32Array 可被类型检测识破（legacy 栈已修，C# 移植版漏改）
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.DoesNotContain("Float32Array", script);
+        Assert.Contains("new Int32Array([16384, 16384])", script);
+    }
+
+    [Fact]
+    public void WindowSizeOverrideCapturesOriginalGetter()
+    {
+        // RS-001 孪生回归：window 尺寸覆盖必须先捕获原 getter——getter 内
+        // 再读同名属性即无限自递归（页面首次读 innerWidth 即栈溢出）
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("origGetOPD.call(Object, window, 'innerWidth')", script);
+        Assert.DoesNotContain("return roundTo(window.innerWidth", script);
+        Assert.DoesNotContain("return roundTo(window.innerHeight", script);
+    }
+
+    [Fact]
+    public void TrackingParamStripIsCaseInsensitive()
+    {
+        // RS-010 孪生回归：注入 JS 的参数剥离大小写不敏感（Gclid 变体绕过）
+        // CS-331：lowerSet 提升为 IIFE 顶层 TRACKING_LOWER 冻结集（每次
+        // fetch/XHR 不再重建 ~40 键对象——请求热路径重复分配）
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("TRACKING_LOWER[k.toLowerCase()]", script);
+        Assert.DoesNotContain("searchParams.has(p)", script);
+        // 冻结集只构建一次（顶层），函数体内不再逐次 forEach 构建
+        var buildOnce = "TRACKING_PARAMS.forEach(function(p) { TRACKING_LOWER[p.toLowerCase()] = true; });";
+        Assert.Contains(buildOnce, script);
+    }
+
+    // ===== C19b 批（审计 2026-09-26）：CS-300 时间戳自曝面 =====
+
+    [Fact]
+    public void DateNowOverride_StaysIntegerMilliseconds()
+    {
+        // CS-300：Date.now 分支不得套随机抖动——非整数（Number.isInteger
+        // (Date.now())===false）一行即识破防护存在
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("function reducePrecisionInteger(v) { return Math.round(reducePrecision(v)); }", script);
+        var dateBranch = script[script.IndexOf("var origDateNow = Date.now", StringComparison.Ordinal)..];
+        dateBranch = dateBranch[..dateBranch.IndexOf("} catch(e) {}", StringComparison.Ordinal)];
+        Assert.Contains("return reducePrecisionInteger(origDateNow())", dateBranch);
+        Assert.DoesNotContain("return reducePrecision(origDateNow())", script);
+    }
+
+    [Fact]
+    public void PerformanceNowOverride_IsMonotonicNonDecreasing()
+    {
+        // CS-300：performance.now 钳单调非递减——随机抖动产生时间回退
+        //（t2 < t1）本身就是检测信号
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("if (v < lastPerf) v = lastPerf;", script);
+        Assert.Contains("var lastPerf = -Infinity;", script);
+        // 旧实现（无钳制）不得残留
+        Assert.DoesNotContain("return reducePrecision(origPerfNow());", script);
+    }
+}
+
+/// <summary>C14 批（审计 2026-09-26）：WebView2 加收紧面直测（CS-183——
+/// 受信本地虚拟主机白名单零覆盖补齐）。</summary>
+public sealed class WebView2HardeningTests
+{
+    [Theory]
+    [InlineData("ntp.aegis.local", true)]
+    [InlineData("NTP.AEGIS.LOCAL", true)]     // 大小写不敏感
+    [InlineData("chrome.aegis.local", true)]  // 预留宿主在白名单
+    [InlineData("evil.example", false)]
+    [InlineData("sub.ntp.aegis.local", false)] // 子域不匹配（精确白名单）
+    [InlineData("", false)]
+    public void IsTrustedLocalHost_ExactWhitelistOnly(string host, bool expected) =>
+        Assert.Equal(expected, WebView2Hardening.IsTrustedLocalHost(host));
 }

@@ -1,0 +1,48 @@
+{
+  "description": "PY-095（审计 2026-09-25）：Capability 契约合法向量——最小权限声明面（scope/actions/resources 必填 + requires_confirmation 可选）。消费方：validate_vector_schemas.py（Contracts 门禁 jsonschema 校验）",
+  "vectors": [
+    {
+      "note": "常规只读能力",
+      "expected": "valid",
+      "capability": {
+        "scope": "net.get.example.org",
+        "actions": [
+          "GET",
+          "NAVIGATE"
+        ],
+        "resources": [
+          "https://example.org/api/*"
+        ],
+        "requires_confirmation": false
+      }
+    },
+    {
+      "note": "requires_confirmation 省略（可选字段——default false）",
+      "expected": "valid",
+      "capability": {
+        "scope": "download.files.example.net",
+        "actions": [
+          "DOWNLOAD"
+        ],
+        "resources": [
+          "https://files.example.net/pkg/*"
+        ]
+      }
+    },
+    {
+      "note": "高危副作用能力（确认门禁开启）",
+      "expected": "valid",
+      "capability": {
+        "scope": "net.post.example.org",
+        "actions": [
+          "POST",
+          "PUT"
+        ],
+        "resources": [
+          "https://example.org/api/v1/*"
+        ],
+        "requires_confirmation": true
+      }
+    }
+  ]
+}

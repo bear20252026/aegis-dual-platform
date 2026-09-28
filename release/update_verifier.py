@@ -19,6 +19,7 @@ import json
 import re
 from datetime import UTC, datetime
 
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
@@ -35,17 +36,45 @@ def canonical_unsigned(manifest: dict) -> bytes:
 
 # P0-04 修复（专家审查）：SemVer 字符串版本解析（替代整数比较——
 # 与 Schema（SemVer 字符串 pattern）契约一致——TUF 阈值签名对齐）
-_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
+# 审计修复：接受预发布后缀（实际版本 2.2.0-beta.21 此前被判"版本格式无效"）
+_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$")
+
+# PY-184（2026-09-26 审计）：预发布段中的数字标识符必须无前导零——SemVer 规范
+#（§10："Numeric identifiers MUST NOT include leading zeroes"）："2.2.0-01" 是
+# 非法 SemVer；若放行，int("01")==1 会与 "2.2.0-1" 比较相等——防回滚比较存在
+# 别名。此前 _SEMVER 的预发布段是宽松的 [0-9A-Za-z.-]+，前导零数字段漏过。
+_NUMERIC_ID = re.compile(r"0|[1-9][0-9]*")
 
 
 def _version_tuple(value: object) -> tuple:
-    """解析 SemVer 字符串为元组（无效格式抛 UpdateRejected——稳定拒绝）。"""
+    """解析 SemVer 字符串为可比较元组（无效格式抛 UpdateRejected——稳定拒绝）。
+
+    PY-004：预发布段参与比较（SemVer precedence）——此前预发布段被丢弃，
+    2.2.0-beta.1 与 2.2.0 比较为相等，回滚到预发布清单可绕过防回滚检查。
+    语义：无预发布 > 有预发布（release 高于 beta）；预发布标识逐段比较
+    （数字段按数值、字面段按 ASCII，数字段 < 字面段——SemVer 规范）；
+    构建元数据（+build）不参与优先级。
+    """
     if not isinstance(value, str):
         raise UpdateRejected("版本格式无效")
     matched = _SEMVER.fullmatch(value)
     if not matched:
         raise UpdateRejected("版本格式无效")
-    return tuple(int(part) for part in matched.groups())
+    major, minor, patch, pre, _build = matched.groups()
+    core = (int(major), int(minor), int(patch))
+    if pre is None:
+        return (core, (1,), ())
+    ids = []
+    for part in pre.split("."):
+        if part.isdigit():
+            # PY-184：纯数字段必须通过无前导零校验（"01"/"00" 违规抛
+            # UpdateRejected——失败闭合），否则 int() 归一化引入比较别名
+            if not _NUMERIC_ID.fullmatch(part):
+                raise UpdateRejected("版本格式无效")
+            ids.append((0, int(part), ""))
+        else:
+            ids.append((1, 0, part))
+    return (core, (0,), tuple(ids))
 
 
 def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
@@ -65,7 +94,7 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
         expires_raw = manifest.get("expires_at")
         if not isinstance(expires_raw, str):
             raise UpdateRejected("缺少过期时间")
-        expires = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(expires_raw)
         if expires.tzinfo is None or expires <= now.astimezone(UTC):
             raise UpdateRejected("更新清单已过期或缺少时区")
 
@@ -87,7 +116,9 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
                 sig = base64.b64decode(item["sig"], validate=True)
                 Ed25519PublicKey.from_public_bytes(key).verify(sig, payload)
                 valid_key_ids.add(key_id)  # 重复 key_id 只计一次
-            except (KeyError, TypeError, ValueError):
+            # 审计修复：补捕 InvalidSignature（坏签名此前以未捕获异常炸出，
+            # 违背"所有异常封装为 UpdateRejected"的声明）
+            except (KeyError, TypeError, ValueError, InvalidSignature):
                 continue
         if len(valid_key_ids) < threshold:
             raise UpdateRejected("签名阈值未满足")

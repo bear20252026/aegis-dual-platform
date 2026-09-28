@@ -2,6 +2,15 @@
 <!-- B0-A-01 整改（国防级审查）：Android 网络安全配置——全局禁用明文流量。
      依据 Android 官方（Network security configuration）：cleartextTrafficPermitted=false
      保护应用免遭意外明文流量；debug-overrides 允许调试期用户证书而不影响 release。 -->
+<!-- AD-182（审计 2026-09-23 清单·A7 批）：守护契约注释固化——本文件的
+     安全不变式由三层联防，任何一层缺失/放宽必须在 NetworkSecurityConfigGuardTest
+     （JVM 打包守护测试）暴露：
+     ① AndroidManifest.xml 必须显式声明 android:networkSecurityConfig="@xml/network_security_config"
+        （移除该属性即回落平台默认——明文流量被放行）；
+     ② AndroidManifest.xml 必须保持 android:usesCleartextTraffic="false"
+        （双重保险：API<24 设备与部分 WebView 路径不读 network_security_config）；
+     ③ 本文件 base-config 必须保持 cleartextTrafficPermitted="false"（明文主闸）。
+     修改本文件或 manifest 任一处前，先同步更新守护测试的断言矩阵并说明理由。 -->
 <network-security-config>
     <!-- 默认全部域禁用明文（HTTP）——仅 HTTPS 允许 -->
     <base-config cleartextTrafficPermitted="false">

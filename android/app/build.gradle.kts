@@ -1,5 +1,9 @@
 import java.util.Properties
 
+// ============================================================================
+// 分区 1：插件与工具链（AD-208：构建脚本分区显式化）
+// ============================================================================
+
 plugins {
     id("com.android.application")
     // AGP 9.0+ 内置 Kotlin 支持：org.jetbrains.kotlin.android 不再需要（官方迁移指引）
@@ -29,20 +33,63 @@ detekt {
     // compileOptions + compilerOptions 设置（detekt 跟随——远端 JDK 21 一致）
 }
 
+// ============================================================================
+// 分区 2：版本与签名单源（shared/version.properties / signing.properties / 环境变量）
+// ============================================================================
+
 val signingProperties = Properties()
 val signingPropertiesFile = rootProject.file("signing.properties")
 if (signingPropertiesFile.exists()) {
     signingPropertiesFile.inputStream().use(signingProperties::load)
 }
+// AD-100（审计 2026-09-23 清单·A6 批）：versionCode/versionName 单源迁移——
+// 此前 defaultConfig 手写 20248/"2.2.0-beta.49"，与 shared/version.properties
+// （发版链的真正单源：Android/Windows/发布清单三端共用）双源漂移面。改为
+// 构建期读取 ../shared/version.properties；文件缺失/键缺失直接 fail 构建降级
+// 为静默默认值（版本错包比构建失败更危险）。
+val versionProperties =
+    Properties().apply {
+        val versionPropertiesFile = rootProject.file("../shared/version.properties")
+        check(versionPropertiesFile.exists()) {
+            "缺少版本单源文件: ${versionPropertiesFile.path}（发版链依赖，不得删除）"
+        }
+        versionPropertiesFile.inputStream().use(::load)
+    }
+val versionCodeFromProperties =
+    checkNotNull(versionProperties.getProperty("VERSION_CODE")) {
+        "shared/version.properties 缺少 VERSION_CODE 键"
+    }.toInt()
+val versionNameFromProperties =
+    checkNotNull(versionProperties.getProperty("VERSION_NAME")) {
+        "shared/version.properties 缺少 VERSION_NAME 键"
+    }
 val requireNativePolicyCore =
     providers
         .gradleProperty("requireNativePolicyCore")
         .map { it == "true" }
         .getOrElse(false)
 
+// ============================================================================
+// 分区 3：Android 模块配置（defaultConfig → 签名 → buildTypes → 打包/资源/测试）
+// ============================================================================
+
 android {
     namespace = "com.aegis.browser"
     compileSdk = 36
+
+    // AD-156（审计 2026-09-23 清单·A7 批）：lint 配置显式化——此前本脚本无
+    // lint 块，行为完全依赖默认值（关键开关对读者不可见，门禁语义隐式）。
+    // 现显式声明与门禁一致的行为（当前均为 AGP 默认值，落地后默认值漂移
+    // 会被此处捕获——显式即契约）。
+    lint {
+        // 门禁 fail-closed：lintDebug 报告 error 即构建失败（CI 门禁任务依赖此语义）
+        abortOnError = true
+        // 文本报告：门禁日志直接可读（xml 报告保留默认，供工具消费）
+        textReport = true
+        // release 构建同步跑 lint（防绕过：单独 release 流水线不得跳过检查）
+        checkReleaseBuilds = true
+    }
+
     // detekt 兼容修复（ktlint/detekt 门禁）：显式 jvmTarget 21——本地/CI
     // JDK 25 运行时 detekt 的 --jvm-target 25 无效（detekt 仅支持 ≤22）——
     // 锁定 21 与远端 android-quality（JDK 21）一致
@@ -57,8 +104,11 @@ android {
         applicationId = "com.aegis.browser"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20220
-        versionName = "2.2.0-beta.21"
+        // AD-100：单源读取 shared/version.properties（见分区 2）
+        versionCode = versionCodeFromProperties
+        versionName = versionNameFromProperties
+        // AD-067：androidTest 冒烟集运行器
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
             // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）
@@ -80,6 +130,16 @@ android {
                 keyAlias = envAlias ?: "aegis-release"
                 keyPassword = envKeyPass ?: envStorePass
             } else if (signingPropertiesFile.exists()) {
+                // AD-241（2026-09-26 审计）：逐键校验——缺任一键时原实现
+                // file(getProperty(...))（null）在配置期抛无指引异常；现给出
+                // 「缺 xxx 键」明确报错（参照 signing.properties.example 补全）。
+                val requiredSigningKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+                val missingSigningKeys =
+                    requiredSigningKeys.filter { signingProperties.getProperty(it).isNullOrBlank() }
+                check(missingSigningKeys.isEmpty()) {
+                    "signing.properties 缺少键: ${missingSigningKeys.joinToString(", ")}" +
+                        "（参照 signing.properties.example 补全或改用 AEGIS_* 环境变量）"
+                }
                 storeFile = file(signingProperties.getProperty("storeFile"))
                 storePassword = signingProperties.getProperty("storePassword")
                 keyAlias = signingProperties.getProperty("keyAlias")
@@ -124,37 +184,76 @@ android {
         }
     }
 
-    // AGP 9 默认关闭 BuildConfig 生成；BrowserEngine 依赖 BuildConfig.DEBUG
     sourceSets {
         // 首页资源单一事实源（ADR-007）：shared/shell（start.html + wallpapers）
         // 与 Windows 端（PyInstaller datas）共用同一目录——一处修改两端生效
         getByName("main").assets.srcDir(rootProject.file("../shared/shell"))
     }
+    // 审计修复：测试文件不入 Android assets（打包体积与攻击面双收）。
+    // WB-115（2026-09-26 审计）：shared/shell 整目录入包的排除面补齐——
+    // snake.test.js（约 465 行测试代码）与 manifest.txt（发布门禁的源清单，
+    // Android 运行期零消费）不入正式 APK（Windows csproj 同口径排除
+    // snake.test.js）。保留 AGP 默认忽略集，仅追加两文件。
+    androidResources {
+        ignoreAssetsPattern =
+            "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:snake.test.js:manifest.txt"
+    }
     buildFeatures {
         buildConfig = true
     }
+    // 纯 JVM 单测可构造 android.webkit.WebView 等框架桩（方法返回默认值
+    // 而非抛 "not mocked"）——TabManager 等注入接缝类的离线单测前提
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        // AD-055：Robolectric 需要 includeAndroidResources（合并资源/manifest
+        // 供 Robolectric 运行时读取——缺省时 AppVariant 检测报错）
+        unitTests.isIncludeAndroidResources = true
+    }
 }
 
-// AGP 9.0+ 内置 Kotlin：不再需要 kotlin { jvmToolchain() } 块
-// （Kotlin 编译由 AGP 管理，使用运行 Gradle 的 JDK；已移除旧配置）
+// ============================================================================
+// 分区 4：依赖（AD-208：坐标一律经 catalog 单源；字面量仅存Gradle 限制豁免）
+// ============================================================================
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
+    // AD-068：Compose BOM 经 version catalog 单源（版本登记于 libs.versions.toml）
+    val composeBom = platform(libs.compose.bom)
     implementation(project(":broker"))
     implementation(project(":webview-adapter"))
     implementation(composeBom)
     androidTestImplementation(composeBom)
+    // AD-067：androidTest 冒烟集（真机/模拟器 instrumented 走查用）
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
     implementation(libs.androidx.activity.compose)
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
+    // AD-154（审计 2026-09-23 清单·A7 批）：Compose 制品坐标入 catalog
+    // （版本由上方 compose-bom 单源裁决，catalog 条目不带版本）
+    implementation(libs.androidx.compose.ui)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.compose.material3)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.webview)
-    debugImplementation("androidx.compose.ui:ui-tooling")
-    // JVM 单元测试（搜索归一 classifyInput/canonicalizeExternal——纯 Kotlin +
-    // OriginPolicy(java.net.URI) 均不依赖 Android 框架类）
+    debugImplementation(libs.androidx.compose.ui.tooling)
+    // —— 测试栈（AD-185，审计 2026-09-23 清单·A7 批：评估记录）——
+    // 「仅 junit」在 A2/A5 批已扩为：junit + mockito 5（final 类 inline mock）
+    // + robolectric + androidx.test.core；共享桩/夹具收敛在测试源集
+    // （WebViewEventAssembly 宿主桩、BrokerStub 等，随各测试文件共用）。
+    // 未再引入第三方断言库（Truth/assertj）：存量 21 个测试文件统一
+    // org.junit.Assert 口径，混入第二套断言 API 属碎片化而非补强。
     testImplementation(libs.junit)
+    // AD-022 配套：navigatorFor 未注册路径需 WebView 键实例——mockito 5 inline mock
+    testImplementation(libs.mockito.core)
+    // AD-028 配套：ReaderModeTest 需真 org.json（returnDefaultValues 下链式 put 返回 null 即 NPE）
+    testImplementation(libs.org.json)
+    // AD-055 配套：BrowserEngine 12 项硬化标志 Robolectric 逐项断言
+    // （WebSettings 属性在 returnDefaultValues 桩下全为默认值，无法断言真值）
+    testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.test.core)
 }
+
+// ============================================================================
+// 分区 5：编译目标（JDK 21 锁定——detekt/CI 对齐）
+// ============================================================================
 
 // detekt/Kotlin 编译目标显式 21（与 CI JDK 21 一致——detekt jvm-target 兼容——
 // AGP 9 内置 Kotlin 不支持 android 块内 kotlinOptions（脚本编译失败）——

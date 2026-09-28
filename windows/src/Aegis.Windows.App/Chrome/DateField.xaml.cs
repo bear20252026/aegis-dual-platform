@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Chrome;
 
 using System;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -36,7 +37,10 @@ public partial class DateField : UserControl
     /// <summary>占位文本（未选择时显示）。</summary>
     public string PlaceholderText { get; set; } = "选择日期";
 
-    /// <summary>字段文本（已选择时显示 yyyy-MM-dd）。</summary>
+    /// <summary>字段文本（已选择时显示 yyyy-MM-dd）。
+    /// CS-314（2026-09-26 审计）：生产零调用——保留原因是 WindowSmokeTests
+    /// 经此断言渲染文本（控件内部 Label 无 x:Name，本属性是唯一可读缝）。
+    /// 标注保留，避免无痕误删回归覆盖。</summary>
     public string FieldText
     {
         get => FieldLabel.Text;
@@ -95,7 +99,10 @@ public partial class DateField : UserControl
     {
         if (!_initialized)
             return;
-        FieldLabel.Text = _selectedDate is { } d ? d.ToString("yyyy-MM-dd") : PlaceholderText;
+        // CS-175：InvariantCulture——部分文化默认日历会把 yyyy 格式化为非公历年
+        FieldLabel.Text = _selectedDate is { } d
+            ? d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : PlaceholderText;
         // TryFindResource（不抛）——控件在宿主窗口资源树就绪前构造时也能安全初始化
         FieldLabel.Foreground = Res(_selectedDate is null ? "TextSecondaryBrush" : "TextPrimaryBrush");
     }
@@ -108,7 +115,7 @@ public partial class DateField : UserControl
     {
         MonthTitle.Text = $"{_year}年{_month}月";
         var first = new DateTime(_year, _month, 1);
-        var offset = ((int)first.DayOfWeek + 6) % 7;  // 周一为首列
+        var offset = MondayOffset(first.DayOfWeek);  // CS-176：提纯直测
         var start = first.AddDays(-offset);
         var today = DateTime.Today;
         var accent = Res("AccentBrush") ?? Brushes.DodgerBlue;
@@ -143,6 +150,10 @@ public partial class DateField : UserControl
                 button.BorderThickness = new Thickness(0);
             }
         }
+
+        // CS-035：边界月份禁用导航按钮（与点击钳制双保险——禁用态对用户可见）
+        PrevMonthButton.IsEnabled = !(_year <= MinYear && _month == 1);
+        NextMonthButton.IsEnabled = !(_year >= MaxYear && _month == 12);
     }
 
     private void FieldButton_Click(object sender, RoutedEventArgs e)
@@ -159,14 +170,26 @@ public partial class DateField : UserControl
         }
     }
 
+    /// <summary>CS-176：周一为首列的网格偏移提纯直测。</summary>
+    internal static int MondayOffset(DayOfWeek day) => ((int)day + 6) % 7;
+
+    // CS-035（审计 2026-09-25）：年份边界钳制——DateTime 支持 1..9999 年，
+    // 此前连点 ‹/› 到边界即 new DateTime(0/10000,…) 抛 ArgumentOutOfRangeException
+    private const int MinYear = 1;
+    private const int MaxYear = 9999;
+
     private void PrevMonth_Click(object sender, RoutedEventArgs e)
     {
+        if (_year <= MinYear)
+            return;
         (_year, _month) = _month == 1 ? (_year - 1, 12) : (_year, _month - 1);
         RenderMonth();
     }
 
     private void NextMonth_Click(object sender, RoutedEventArgs e)
     {
+        if (_year >= MaxYear)
+            return;
         (_year, _month) = _month == 12 ? (_year + 1, 1) : (_year, _month + 1);
         RenderMonth();
     }

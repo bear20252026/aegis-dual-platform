@@ -1,33 +1,116 @@
+# Changelog
 
-## beta.16 (2026-09-07)
-### Fixed (崩溃 V3：安装版打不开——书签栏资源未定义)
-- **根因**：`RefreshBookmarkBar()` 调 `FindResource("BookmarkBarButton")`，但该资源在仓库从未定义。本机/无书签机器循环为空侥幸通过；**只要收藏过书签，启动即抛
-  `ResourceReferenceKeyNotFoundException` → MainWindow 构造失败 → 安装版无法打开**。
-- 在 MainWindow.xaml 定义 `BookmarkBarButton` 样式（Apple 圆角胶囊）。
-- `RefreshBookmarkBar()` 防御化：样式资源缺失不再中断启动。
-- 清理 beta.14 遗留：删除重复的 `DownloadOperationStarted` 持久化订阅（双写下载记录）。
-- 新增 `scripts/verify_xaml_resources.py` 并接入云端 fail-closed 断言：发布前强制校验
-  每个 `FindResource(key)` 都有对应 `x:Key`，杜绝同类崩溃回归。
+> **记账规则**（WB-102，2026-09-26 审计确立）：beta.49 之后的独立修复批次
+> （R/C/W/P/A/SP 等各审计批次）**不再逐批补写版本号条目**——变更事实源为
+> `docs/audit/` 各批次审计与修复日志；相关修复随**下一个正式版本发布时合并
+> 记账**进本文件（保持版本条目与发布制品一一对应，避免无发布实体的空转条目）。
 
-## beta.18 (2026-09-07)
-### Fixed (安装版崩溃 V3 真因 + native 策略桥缺陷)
-- **安装版崩溃根因**：`RefreshBookmarkBar()` 调 `FindResource("BookmarkBarButton")`，该资源从未定义。收藏过书签即启动抛
-  `ResourceReferenceKeyNotFoundException` → 打不开。定义样式 + FindResource 防御化。
-- **原生策略桥确定性缺陷**：`consume_navigation` 绑定比较 `*issued == action` 含 `explanation` 审计字段，而托管端
-  `NativeAction` 往返不携带它 → 合法一次消费被误判 `action_not_issued`（native 严格模式必现；CI 因设置
-  AEGIS_REQUIRE_NATIVE_POLICY_CORE=1 而暴露）。Rust 侧改为 `same_binding`（剔除 explanation）+ 新增 C-ABI 回归测试。
-- 新增 `scripts/verify_xaml_resources.py` 并接入云端 fail-closed 断言；原生桥测试关闭集合并行。
+## beta.50（2026-09-28 · UI 现代化三批 + 启动崩溃修复）
+- **修复（fatal）**：Program.Main 跳过 App.InitializeComponent 的旧注解失实——App.xaml 携带全局合并资源字典后，Application.Resources 从未加载，主窗口 StaticResource（ChromeComboBox/IconFont）每次启动 XamlParseException（security.log 三次 [fatal] 实证）；现显式调用 InitializeComponent。
+- **UI 批①（33edbaa）**：工具栏/标签条 Unicode 字符与彩色 emoji → Segoe Fluent/MDL2 字体 glyph 单源；搜索引擎/每页条数原生白底下拉 → 深色模板化 ChromeComboBox；全窗深色细滚动条；独立窗口深/浅色原生标题栏（DWMWA_USE_IMMERSIVE_DARK_MODE）。
+- **UI 批②（38310f1）**：设置窗 iOS 卡片分组 + DarkCheck/DarkInput/SolidButton 全套深色控件；下载窗圆角卡片 + 📂→MDL2 glyph；标签条 Edge 式三态激活 pill。
+- **UI 批③（2c59a25）**：地址栏建议两行化（标题+URL+类型图标）；导航审批弹窗精修；无痕窗口标签选中态。
+- 壁纸系统（4 张 aurora + 右下切换圆点）全程零触碰。回归：dotnet 593+57 / node 82 / pytest 30 / validate_release 85 文件全绿。
 
-## beta.20 (2026-09-07)
-### Fixed (首页首帧纯文字文档——虚拟主机映射启动竞态)
-- NTP 延迟导航由单次 Normal 优先级 BeginInvoke 改为 `DispatcherPriority.ApplicationIdle`，
-  确保 SetVirtualHostNameToFolderMapping 在启动争用下也已传播到渲染进程，避免
-  ntp.aegis.local 解析失败 → WebView2 呈现纯文本错误文档。
-- 新增 `NavigationCompleted` 有界失败重试（主窗口协调器 + InPrivate 一致）：首帧若
-  ConnectionAborted 稍后自动重试，重试时映射必然已就绪。
+## beta.32 – beta.49（2026-09-20 – 2026-09-23 · 全仓审计 1115 项与 P1 批次落地）
+> 完整清单：docs/audit/full-audit-2026-09-23-1000-items.md（六路审计 CS290/AD210/RS205/PY172/WB100/SP138）。
+### 架构（beta.32 – beta.34，补账）
+- 依赖注入组合根（IBroker/MainWindowDependencies/IPrivacySettings）；会话落盘防抖
+  SessionSaveScheduler；后台标签睡眠决策纯函数化 TabSleepPolicy。
+### 上帝对象拆分（beta.34 – beta.43，补账）
+- FindBar/Suggestion → NtpBridgeFactory → 拖拽+审批面板 → TabRuntimeCoordinator
+  复用 → 命名处理器+防抖 → ThreatFeedCoordinator → ZoomPolicy，MainWindow 收敛为装配点。
+### 测试缺口批次（beta.35 – beta.41，补账）
+- 工具类/下载记录/威胁黑名单/origin 规范化/TabManager/http-only/IPv4 变体编码
+  共 60+ 项离线单测补齐。
+### 2026-09-23 审计批次（beta.44 – beta.49）
+- **beta.44**（rust）：glob_subsumes 可靠性修复——非 flat 单星不覆盖双星、b 耗尽
+  基线要求 a 全星尾；边界测试 8 项。
+- **beta.45**（R1，rust P1×10）：letterbox 自递归栈溢出、fingerprint_pipeline
+  域名错传（per-site 隔离自上线空转）、context_contains_token 多字节 panic、
+  c_abi read_utf8 越读 UB、executor 占位桩、proxyMap 恒空、glob DP 256MiB、
+  session_state 预解析上限、query_strip JS 大小写剥离。
+- **beta.46**（C1，windows-cs P1×6+2）：TabClosed 死事件（每关一标签泄漏一个
+  WebView2）、UrlSafety "0x" 崩溃、favicon 无痕落盘、缓存命中图标不显示、
+  无痕环境租约竞态、MAX_VIEWPORT_DIMS Int32Array；孪生修复 C# 管线 window
+  自递归与追踪参数大小写绕过。
+- **beta.47**（W1，web）：Host.import* 三端改返回 Promise——修复导入统计恒
+  0/0 且书签宫格不刷新的 P89/P90 回归；行为级桥测试 4 项。
+- **beta.48**（P1，contracts/release 13 项）：version schema 补预发布段
+  （2.2.0-beta.44 自身此前无法通过）、防回滚 SemVer precedence、生成器差集
+  清理、cargo build --locked、cargo-audit/innosetup 锁版、pin-check fail-open、
+  verify_artifact_set 跨平台同名消歧+递归、发布工作流去双触发、CI pip hash
+  安装、mypy 全量口径；pytest 基建+13 测试；过期向量刷新。
+- **beta.49**（A1，android 4 项）：MainActivity 补 launchMode=singleTask
+  （外链热启动此前叠加完整实例）、DownloadPolicy 查询参数危险扩展绕过、
+  AegisWebViewClient 6 处日志 URL 脱敏（LogRedact）、onPause 接入 suspendAll
+  +新增 resumeOnForeground（后台 JS 定时器此前继续跑）。
 
-## 未发布 (2026-09-07)
-### 放开本机域名与 hosts 域名访问（本地开发场景）
+
+## beta.22 – beta.31（2026-09-10 · 架构收敛十连发）
+### 安全（beta.22 / beta.29 / beta.30）
+- 发布链签名 fail-closed：tag 构建强制已签名 APK（apksigner verify 未过即失败）；
+  Windows 安装包接入可选 Authenticode 签名步骤（提供 PFX secret 时签名+校验）。
+- Rust FFI 边界加固：C 入入参有界扫描（64KB 窗口，无 NUL 拒绝）、broker_free 改退休
+  语义（杜绝 use-after-free/重复释放 UB）、响应分配失败回退固定 ASCII deny（绝不返回
+  null）、待审批导航账本 1024 上限（内存 DoS 防护）。
+- Rust 输入校验：`SessionState::from_json` 长度上限 + 拒绝未知 schema 版本；
+  自带 base64 解码改严格校验（padding 位置/长度模 4/尾部残留 bit 全部拒绝）。
+- Android 默认构建确认导航修复：`requestNavigationConfirmation` 此前无条件 Deny
+  （仅 CI 的 requireNativePolicyCore=true 掩盖该问题）——默认产物现走托管 evaluate。
+- NTP CSP 前置（审计 I83）：内联脚本全部外置（start.js 适配层 + start.main.js 主逻辑），
+  内联事件处理器与内联样式清零；CSP `script-src 'self' file:` + `connect-src 'none'`
+  （Android file: 资产显式放行——https 页面引用 file: 子资源本就被浏览器拦截）。
+- Android BridgeGuard `REQUIRE_HTTPS` 生产接线开启：受信内页对 bridge 目标
+  （aegis.local/localhost/127.0.0.1）的 http: 调用一律拒绝。
+### 架构（beta.23 – beta.28 · MainWindow 上帝对象拆分，1658 → 约 1280 行）
+- 第一批：查找条/地址栏建议外移 `FindBarController` + `SuggestionController`
+  （合并去重/window.find 转义补 9 项单测）。
+- 第二批：NTP 宿主桥 15 项服务委托组装外移 `NtpBridgeFactory`（FilterSources 可测）；
+  会话恢复双路径去重 `RebuildTabsFromSnapshot`。
+- 第三批：标签条拖拽外移 `TabStripDragController`、导航确认面板（含 pending 态唯一持有）
+  外移 `ApprovalPanelController`（STA 冒烟 4 项）。
+- InPrivate 复用 `TabRuntimeCoordinator`（创建/关闭/延迟导航重试单源化，删除窗口内
+  漂移副本）；`BindVirtualHosts`/`IsTopLevelNtpDocument` 上收 `NtpAssets` 双窗口共享。
+- `HostWebView` 匿名闭包改命名处理器 + 显式 `UnwireEvents` + 双接线防护。
+- `PostDelayedNavigation` 窗口存活校验改 `Func<bool>` 探针即时求值（布尔快照陈旧值消除）。
+### 稳定性 / 性能
+- 会话落盘防抖 2s（每导航同步写 SQLite 的写放大治理；关闭/退出 `FlushSession` 强制刷盘）。
+- 虚拟主机首帧重试耗尽：停止加载条并展示明确错误（瞬态抑制不再让加载条永久旋转）。
+- 主题传播收尾：SourceViewer 接入 WindowTheme、设置窗首开补换肤（浅色模式此前仍深色）、
+  无痕窗恒定深色注释化（对齐 Edge/Chrome 无痕视觉惯例）。
+### 门禁修复
+- UI 回归 BUG-011/012 自 95d9bac 起的既有失败修复（back-fab 随「三端返回形态统一」
+  移除后断言未同步）；断言目标随脚本外置迁移到 start.js/start.main.js。
+- beta.22 引入的 AndroidBroker when 块 ktlint 违规修复；双打包链资产断言补
+  start.js/start.main.js。
+
+## beta.22 前置整改补账（2026-09-07 · 全仓 200 项审计，已随 beta.22–beta.31 发布）
+> WB-030（2026-09-24）：原题「未发布」——该批整改实际已包含在 beta.22–beta.31
+> 产物中，标题未随发布更新导致时间线错位（排在更新节之后仍称「未发布」）。
+> 现补正标题、保留历史内容原位（按日期升序读：本节 → beta.22–31 → beta.32–49）。
+### 安全（P0/P1）
+- 书签管理窗口 P0 崩溃：补齐缺失的 `PrimaryButton`/`GhostButton` 样式（此前窗口必崩）。
+- InPrivate 环境隔离：每无痕窗口独立临时用户数据目录 + 引用计数清理（此前多窗口共享环境且抢先删目录）；
+  InPrivate 补齐 NTP 宿主桥（此前无痕窗口搜索/壁纸全部静默失效）。
+- 无痕隐私：favicon/缩放不落盘（会话内存态）；`UrlSafety` 补 IPv4-mapped IPv6/组播/非点分 IP 编码绕过；
+  `OriginPolicy` 拒绝尾点 host/IDN 残留；Broker 消费点强制 KillSwitch、native 路径补黑名单门禁、审计 URL 脱敏。
+- Rust 核心：指纹种子改用 OS CSPRNG 且不再全局暴露；per-site 种子 SHA-256 域密钥分离；
+  会话 JSON 序列化转义；capability origin 白名单 fail-closed；oracle 移除 `safe_` 前缀 fail-open 后门。
+### 稳定性
+- 设置读取失败先备份 `.bak` 再回退默认（防启动即覆盖用户设置）；`ZoomByHost:null` 启动崩溃修复；
+  历史/会话/书签存储全部容错化（磁盘异常不再向导航事件上抛）；全局异常兜底频控 + 后台线程留痕。
+### 体验/性能
+- 全部独立窗口接入深浅主题（WindowTheme 单源）；快捷键补 Ctrl+Tab/1-9/H/J/D/F5/Alt+←→；
+  地址栏建议/历史搜索防抖 + 后台线程化；建议列表鼠标可点；贪吃蛇渲染缓存与 localStorage 写放大修复；
+  NTP 首页键盘可达性（引擎/壁纸/书签）与导入向导超时兜底。
+### 工程
+- 发布链修复：verify-gate fail-closed（缺校验文件/空清单/未列明文件即失败）、去重后重生成 SHA 清单、
+  12 个 workflow 补 timeout/permissions；`gen_jsapi_schema.py` 路径修复（生成链复活）；`shared/release.json`
+  版本对齐 + 纳入 verify/sync 门禁；CI ruff 扩展至 scripts/release/contracts/agent；红队 e2e 接入 CI。
+
+## beta.21 (2026-09-07)
+### 放开本机域名与 hosts 域名访问 + P0 安全/CI 加固
 - 新增 `UrlSafety.CanOpenHttpUrl`（公网 或 本机/hosts）与 `IsLocalHostOrResolvesLocalHost`
   （DNS 带缓存判定：localhost/.localhost/回环 IP 快路径，hosts 映射域名解析到回环即放行）。
 - 新窗口 target=_blank 入口改用 `CanOpenHttpUrl`，本机域名可打开（此前被拒）。
@@ -40,3 +123,45 @@
 - **原生 nonce 账本自锁修复**（审计发现 F）：原生模式 consumed nonce 加 sessionId 前缀，DestroySession 可清理——此前裸 Rust nonce 永不清理，满 5 万后该 broker 全站导航永久锁死。
 - **下载授权失效修复**（审计发现 G, ADR-002）：AllowDownload 返回值接入实际门禁——会话失效/kill-switch 时拒绝下载（此前仅留痕放行）。
 - **跟踪过滤器豁免虚拟主机**（审计发现 A）：严格模式 + 跨站导航过渡期不再误判 NTP/GeoGebra 自带页 JS/WASM 为第三方而 403。
+
+## beta.20 (2026-09-07)
+### Fixed (首页首帧纯文字文档——虚拟主机映射启动竞态)
+- NTP 延迟导航由单次 Normal 优先级 BeginInvoke 改为 `DispatcherPriority.ApplicationIdle`，
+  确保 SetVirtualHostNameToFolderMapping 在启动争用下也已传播到渲染进程，避免
+  ntp.aegis.local 解析失败 → WebView2 呈现纯文本错误文档。
+- 新增 `NavigationCompleted` 有界失败重试（主窗口协调器 + InPrivate 一致）：首帧若
+  ConnectionAborted 稍后自动重试，重试时映射必然已就绪。
+
+## beta.19 (2026-09-07)
+### Fixed (CI 稳定性)
+- `verify_xaml_resources.py` 强制 UTF-8 输出——修复 Windows 控制台编码（GBK）导致的断言误失败。
+
+## beta.18 (2026-09-07)
+### Fixed (安装版崩溃 V3 真因 + native 策略桥缺陷)
+- **安装版崩溃根因**：`RefreshBookmarkBar()` 调 `FindResource("BookmarkBarButton")`，该资源从未定义。收藏过书签即启动抛
+  `ResourceReferenceKeyNotFoundException` → 打不开。定义样式 + FindResource 防御化。
+- **原生策略桥确定性缺陷**：`consume_navigation` 绑定比较 `*issued == action` 含 `explanation` 审计字段，而托管端
+  `NativeAction` 往返不携带它 → 合法一次消费被误判 `action_not_issued`（native 严格模式必现；CI 因设置
+  AEGIS_REQUIRE_NATIVE_POLICY_CORE=1 而暴露）。Rust 侧改为 `same_binding`（剔除 explanation）+ 新增 C-ABI 回归测试。
+- 新增 `scripts/verify_xaml_resources.py` 并接入云端 fail-closed 断言；原生桥测试关闭集合并行。
+
+## beta.17 (2026-09-07)
+### Fixed (原生策略核心确定性 + 测试稳定)
+- Rust `consume_navigation` 绑定比较改用 `same_binding`（剔除 explanation 审计字段）——修复
+  C# `NativeAction` 往返不携带该字段导致的 `action_not_issued` 误判（native 严格模式必现）+ C-ABI 回归测试。
+- 原生策略桥测试关闭集合并行——消除云 runner 原生 DLL 加载并发抖动。
+
+## beta.16 (2026-09-07)
+> WB-099（审计 2026-09-23 清单·W5 批）起点注记：本文件最早条目为 beta.16——
+> **beta.1 – beta.15 无逐版条目**（仓库变更记录纪律自 2026-09-07 起建立，
+> 此前仅散见 git 提交历史，无发布级摘要可补）；beta.32–49 为 2026-09-23
+> 审计后按批补账（见文件头记账规则）。
+
+### Fixed (崩溃 V3：安装版打不开——书签栏资源未定义)
+- **根因**：`RefreshBookmarkBar()` 调 `FindResource("BookmarkBarButton")`，但该资源在仓库从未定义。本机/无书签机器循环为空侥幸通过；**只要收藏过书签，启动即抛
+  `ResourceReferenceKeyNotFoundException` → MainWindow 构造失败 → 安装版无法打开**。
+- 在 MainWindow.xaml 定义 `BookmarkBarButton` 样式（Apple 圆角胶囊）。
+- `RefreshBookmarkBar()` 防御化：样式资源缺失不再中断启动。
+- 清理 beta.14 遗留：删除重复的 `DownloadOperationStarted` 持久化订阅（双写下载记录）。
+- 新增 `scripts/verify_xaml_resources.py` 并接入云端 fail-closed 断言：发布前强制校验
+  每个 `FindResource(key)` 都有对应 `x:Key`，杜绝同类崩溃回归。

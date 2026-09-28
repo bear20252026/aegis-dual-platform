@@ -17,46 +17,80 @@ Aegis 双端安全浏览器：Windows（C#/.NET 10 + 原生 WebView2——唯一
 ## 关键命令（必须先跑）
 
 ```bash
-# Windows 端静态验证（改动 Python 代码后必跑）——与 CI 口径一致
-python validate_release.py            # AST/JSON/XML/版本声明（仓库根运行）
-cd legacy/windows-pywebview
-ruff check . --exclude legacy --ignore RUF001,RUF003,E501,TRY300,TRY003,TRY301,RUF021,E402,I001
-bandit -r app/ -q --skip B110,B404,B603,B607   # 安全扫描（无 Medium/High）
-mypy main_webview.py app/             # 类型检查（0 错误）
+# —— Windows 正典栈（C#/.NET 10，ADR-009）——
+cd windows
+dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj   # 0 警告 0 错误
+dotnet test tests/Aegis.Windows.Core.Tests                    # 核心套件全绿
+dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全绿
 
-# 自检（改动标签/桥/工具栏/会话/原生挂接后必跑——8 个均已入 CI）
-python selftest_session_store.py
-python selftest_api_bridge.py
-python selftest_s1_integration.py
-python selftest_shell_toolbar.py
-python selftest_tab_state.py
-python selftest_navigation_search.py
-python selftest_view_source.py
-python selftest_native_core.py
+# —— Rust 策略核心 ——
+cd core/rust-policy-core
+cargo test && cargo clippy --all-targets && cargo fmt --check  # 全绿+0 警告
 
-# Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
-python contracts/codegen/verify_bridge_guard.py
+# —— 契约/版本门禁（仓库根）——
+python validate_release.py             # AST/JSON/XML 静态验证（版本校验在 scripts/verify_versions.py）
+python scripts/verify_versions.py      # 版本单源一致性
+python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
+python scripts/verify_cross_end_lists.py          # 跨端清单对账（引擎/壁纸）
+# SP-163（2026-09-26 审计）：node 21+ glob 展开（引号防 shell 抢先展开，
+# Windows 本地与 CI 一致）——新增测试文件入目录即入门禁
+node --test "tests/ui-regression/*.test.mjs"      # UI 回归
+node shared/shell/snake.test.js                   # 贪吃蛇逻辑回归
+python -m pytest tests/python/ -q                 # 发布链离线单测
 
-# Android 端（需 Android Studio 环境；CI 以 ktlint/detekt 为准）
+# —— Android 端（需 Android SDK；四模块命令与 android-quality.yml 一致
+#    ——WB-116 对齐 CI：app/broker/webview-adapter/contracts）——
+cd android
+./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck
+./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt
 ./gradlew.bat :app:lintDebug
+./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest :webview-adapter:testDebugUnitTest
+
+# —— legacy 归档栈（只读冻结；仅 P0 安全披露通道评估，见 ADR-009 D4）——
+# selftest_*.py 仅属该归档栈 P0 通道（WB-118）——正典栈不使用
+cd legacy/windows-pywebview
+ruff check . --exclude legacy           # SP-164：豁免清单已入本目录 ruff.toml 单源
+bandit -r app/ -q --skip B110,B404,B603,B607
+mypy main_webview.py app/                # 全量目录口径（42 源文件 0 错误）
 ```
 
 ## 架构红线（改动前必须确认）
 
-1. **Windows 正式入口是 `main_webview.py`**（薄壳；现役功能栈见 ADR-007 双栈口径）。`legacy/windows-pywebview/legacy/` 与 `legacy/ui/` 是已归档的 Qt 旧栈，**禁止**从活跃代码 import 它。
+1. **Windows 正典栈是 `windows/src/Aegis.Windows.App`（C#/.NET 10 + WPF + WebView2，
+   ADR-009 终局）**。`legacy/windows-pywebview/` 与 `legacy/ui/` 是只读归档：
+   功能与安全修复一律不在该栈进行，P0 安全缺陷仅经安全披露通道评估
+   （ADR-009 D4 冻结纪律），活跃代码**禁止** import 归档栈。
 2. **单文件单职责**：新文件 ≤ 300 行；改造后 ≤ 500 行。不为拆而拆，也不堆职责。
-3. **URL 安全关口**：所有导航入口（IPC/会话/书签/历史/拨号/命令行/地址栏）加载 URL 前必须经 `app/security.py` 的 `safe_url()`。
-4. **js_api 白名单**：暴露给 JS 的方法必须加入 `app/api_bridge.py` 的 `_JS_EXPOSED`（防 pywebview 递归注入死锁）。
-5. **窗口操作走 NavQueue**：js_api 回调线程**绝不**同步调用 load_url/evaluate_js，必须投递到 `app/nav_queue.py`。
+3. **URL 安全关口**：所有导航入口（地址栏/会话恢复/书签/历史/NTP 快捷入口/命令行）
+   加载前必须经 `windows/src/Aegis.Windows.App/Core/UrlSafety.cs` 校验，并经
+   `Broker/BrowserPolicyBroker.cs` 的 `EvaluateNavigation` → Rust 策略核心裁决
+   （fail-closed——ADR-008）；Android 端对应 AegisWebViewClient → Broker 状态机。
+   （WB-101，2026-09-26 审计——原归档栈 safe_url 表述废止）
+4. **JS 暴露面收敛**：暴露给页面 JS 的桥能力仅限受信虚拟主机——`NtpAssets.IsTopLevelNtpDocument`
+   顶层文档门禁（帧内嵌复用即拒）+ `Chrome/Ntp/NtpBridgeFactory.cs` 白名单服务登记；
+   远程页面上 WebMessage 被宿主按来源关闭。新增桥方法必须经 Factory 显式登记，
+   禁止动态反射暴露。（WB-101，2026-09-26 审计——原归档栈 _JS_EXPOSED 表述废止）
+5. **导航/窗口操作走 WebView2 原生事件模型**：一切导航取消/放行必须挂在
+   NavigationStarting / FrameNavigationStarting / NewWindowRequested 事件经
+   Broker 真实取消（`WebView/HostWebView.cs` + `WebView/NavigationConfirmationGate.cs`），
+   UI 线程（Dispatcher）串行——禁止绕过事件模型的跨线程 load/executeScript。
+   （WB-101，2026-09-26 审计——原归档栈 NavQueue 表述废止）
 6. **Android 安全配置**：每个 WebView 必须经 `SecureWebViewFactory` 创建（复用 BrowserEngine 安全边界）。
 7. **凭据红线**：绝不把 token/密钥/证书/key.properties/.jks 写进代码或提交；安全敏感信息仅私密渠道传递。
 
 ## 代码检查清单（提交前自查）
 
-- [ ] validate_release / ruff / bandit / mypy 全过
+- [ ] 改动所涉技术栈的正典门禁全过（WB-118，2026-09-26 审计——按端选择）：
+  - C#：`dotnet build`（0 警告）+ `dotnet test` 两套件全绿
+  - Rust：`cargo test && cargo clippy --all-targets && cargo fmt --check` 全绿
+  - Android：四模块 ktlint + detekt + 单测 + `:app:lintDebug`（与 android-quality.yml 一致）
+  - shared/shell：`node --test`（显式文件清单）+ `node shared/shell/snake.test.js` 全绿
+  - scripts/contracts/release：`python validate_release.py` + `python scripts/verify_versions.py`
+    + `python -m pytest tests/python/ -q`
+- [ ] `selftest_*.py` 仅适用 legacy 归档栈 P0 评估通道（正典栈新增逻辑写对应端的
+  C#/Kotlin/Node/pytest 测试——WB-118）
 - [ ] 遵守单文件单职责与行数红线
 - [ ] 涉及 URL/密码/下载/权限时说明了安全考虑
-- [ ] 新增逻辑有对应自检（selftest_*.py）
 - [ ] 更新了 CHANGELOG.md
 - [ ] 遵循 Conventional Commits（feat/fix/refactor/docs/chore/security）
 
@@ -64,18 +98,21 @@ python contracts/codegen/verify_bridge_guard.py
 
 | 路径 | 职责 |
 |---|---|
-| `legacy/windows-pywebview/main_webview.py` | 薄入口（建窗/绑定/看门狗） |
-| `legacy/windows-pywebview/app/api_bridge.py` | js_api 桥（标签/导航/书签/历史/导入） |
-| `legacy/windows-pywebview/app/nav_queue.py` | 导航线程队列（防死锁） |
-| `legacy/windows-pywebview/app/shell_toolbar.py` | 注入式工具栏（标签条/快捷键/毛玻璃） |
-| `legacy/windows-pywebview/app/security.py` | URL 白名单 / 权限收紧 |
-| `legacy/windows-pywebview/app/browser_import.py` | Chrome/Edge 书签与历史导入 |
-| `android/app/src/main/java/com/aegis/browser/` | Android 端（TabManager/TabBar/SecureWebViewFactory） |
-| `shared/version.properties` | 双端版本单一来源 |
+| `windows/src/Aegis.Windows.App/` | **Windows 正典栈**（Chrome UI / Core 数据层 / Broker 安全层 / WebView 封装） |
+| `windows/tests/` | C# 两测试套件（Core.Tests / Broker.Tests） |
+| `core/rust-policy-core/` | Rust 策略核心（唯一裁决源——ADR-008；FFI/C ABI/UniFFI） |
+| `android/app/src/main/java/com/aegis/browser/` | Android 端（TabManager/SecureWebViewFactory/BrowserEngine） |
+| `android/broker/` + `android/webview-adapter/` | Android 授权 Broker 与导航状态机 |
+| `contracts/` | 契约单源（schemas/vectors/policy + codegen 生成器） |
+| `shared/` | 双端单源（version.properties/release.json/shell 首页资产） |
+| `docs/audit/` | 全仓审计报告（2026-09-07 200 项、2026-09-23 1115 项） |
+| `legacy/windows-pywebview/` | 只读归档栈（ADR-009——禁止活跃改动，见红线 #1） |
 
 ## 常见陷阱
 
 - `validate_release.py` 用相对路径定位项目根，**不要**改回硬编码绝对路径。
 - `python` 命令在本机可能被 Store 别名拦截：用 `py` 或显式 Python 路径。
 - Windows 上 Git Bash 的 `/tmp` 与 Python 路径不一致：别让 Python 读 Git Bash 的 /tmp 文件。
-- 快捷键/JS 注入改动后必须跑 `selftest_shell_toolbar.py`（校验占位符替换与 JSON 转义）。
+- 快捷键/JS 注入改动后必须跑 `selftest_shell_toolbar.py`——**仅限 legacy 归档栈
+  P0 评估通道**（WB-118，2026-09-26 审计）；正典栈等价改动跑 C# 两套件 +
+  `node --test` UI 回归。

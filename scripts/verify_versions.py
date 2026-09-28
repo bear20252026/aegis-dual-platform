@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -26,20 +27,78 @@ def main() -> int:
     parser.add_argument("--tag", help="Release tag that must equal vVERSION_NAME")
     args = parser.parse_args()
 
-    values = load_properties(ROOT / "shared" / "version.properties")
-    android_text = (ROOT / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
-    windows_text = (ROOT / "windows" / "src" / "Aegis.Windows.App" / "Aegis.Windows.App.csproj").read_text(encoding="utf-8")
-    iss_text = (ROOT / "docs" / "release" / "AegisSetup.iss").read_text(encoding="utf-8")
-    iss_version = re.search(r'(?m)^#define MyAppVersion "([^"]+)"', iss_text)
+    # PY-028：缺文件给明确报错（此前 FileNotFoundError 原始栈——版本.properties
+    # 缺失是常见的新人克隆后未初始化场景）
+    inputs = {
+        "shared/version.properties": ROOT / "shared" / "version.properties",
+        "android/app/build.gradle.kts": ROOT / "android" / "app" / "build.gradle.kts",
+        "windows .../Aegis.Windows.App.csproj": ROOT / "windows" / "src" / "Aegis.Windows.App" / "Aegis.Windows.App.csproj",
+        "shared/release.json": ROOT / "shared" / "release.json",
+    }
+    for label, path in inputs.items():
+        if not path.is_file():
+            print(f"Version verification failed: required file missing: {label} ({path})")
+            return 1
+
+    values = load_properties(inputs["shared/version.properties"])
+    # PY-027：必需键缺失给 required/missing 汇总（此前 8 处 values["..."] 下标
+    # KeyError 原始栈，一次只暴露一个键且无上下文）
+    required = ("VERSION_NAME", "VERSION_CODE", "WINDOWS_PACKAGE_VERSION",
+                "WINDOWS_PACKAGE_IDENTITY", "DISPLAY_NAME")
+    missing = [key for key in required if not values.get(key)]
+    if missing:
+        print("Version verification failed: missing version properties:", *missing, sep="\n- ")
+        return 1
+
+    # PY-198（2026-09-26 审计）：VERSION_CODE 非数字时此前在下方 int() 处
+    # 原始 ValueError 栈——载入后即校验 isdigit，纳入汇总报错（与
+    # sync_versions 同口径）。
+    if not str(values["VERSION_CODE"]).isdigit():
+        print("Version verification failed:",
+              f"VERSION_CODE must be numeric, found {values['VERSION_CODE']!r}",
+              sep="\n- ")
+        return 1
+
+    android_text = inputs["android/app/build.gradle.kts"].read_text(encoding="utf-8")
+    windows_text = inputs["windows .../Aegis.Windows.App.csproj"].read_text(encoding="utf-8")
+    # 审计修复：不再校验已死的 Python 时代 AegisSetup.iss——改为校验
+    # shared/release.json（此前完全无门禁，漂移三个大版本未被发现）
+    release_json = json.loads(inputs["shared/release.json"].read_text(encoding="utf-8"))
+    # SP1 批跟进（审计 2026-09-23 清单；A6 批 AD-100 配套）：Android 版本
+    # 已单源迁移——build.gradle.kts 构建期读取 shared/version.properties
+    #（versionNameFromProperties/versionCodeFromProperties），字面量断言失效。
+    # 改校验单源接线本身：①defaultConfig 必须消费 properties 派生值；
+    # ②不得残留硬编码字面量（防双源回潮）；③本文件已在读取同一
+    # version.properties（values 即单源值），接线正确则三端必然一致。
+    def android_version_wired(name: str) -> bool:
+        return bool(re.search(
+            rf"(?m)^\s*{re.escape(name)}\s*=\s*{re.escape(name)}FromProperties\s*$",
+            android_text))
+
+    def android_version_hardcoded(name: str) -> bool:
+        return expected_assignment(android_text, name) is not None
+
+    android_version_checks = [
+        ("Android versionName wiring",
+         android_version_wired("versionName") and not android_version_hardcoded("versionName"),
+         True),
+        ("Android versionCode wiring",
+         android_version_wired("versionCode") and not android_version_hardcoded("versionCode"),
+         True),
+    ]
+
     expected = {
-        "Android versionCode": (expected_assignment(android_text, "versionCode"), values["VERSION_CODE"]),
-        "Android versionName": (expected_assignment(android_text, "versionName"), values["VERSION_NAME"]),
+        "Android versionName": (
+            android_version_checks[0][1], android_version_checks[0][2]),
+        "Android versionCode": (
+            android_version_checks[1][1], android_version_checks[1][2]),
         "Windows Version": (expected_xml_value(windows_text, "Version"), values["VERSION_NAME"]),
         "Windows AssemblyVersion": (expected_xml_value(windows_text, "AssemblyVersion"), values["WINDOWS_PACKAGE_VERSION"]),
         "Windows FileVersion": (expected_xml_value(windows_text, "FileVersion"), values["WINDOWS_PACKAGE_VERSION"]),
         "Windows PackageId": (expected_xml_value(windows_text, "PackageId"), values["WINDOWS_PACKAGE_IDENTITY"]),
         "Windows Product": (expected_xml_value(windows_text, "Product"), values["DISPLAY_NAME"]),
-        "Windows Installer MyAppVersion": (iss_version.group(1) if iss_version else None, values["VERSION_NAME"]),
+        "release.json version": (release_json.get("version"), values["VERSION_NAME"]),
+        "release.json versionCode": (release_json.get("versionCode"), int(values["VERSION_CODE"])),
     }
     failures = [f"{label}: found {actual!r}, expected {wanted!r}" for label, (actual, wanted) in expected.items() if actual != wanted]
     if args.tag and args.tag != f"v{values['VERSION_NAME']}":

@@ -4,6 +4,8 @@
         Title="InPrivate 无痕浏览" Width="1000" Height="700"
         Background="#FF14141A" FontFamily="Segoe UI, Microsoft YaHei UI"
         Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
+  <!-- 设计意图：无痕窗口恒定深色（不随浅色主题切换）——对齐 Edge InPrivate /
+       Chrome Incognito 的视觉惯例，让无痕会话一眼可辨。非遗漏，勿接入 WindowTheme。 -->
   <Window.Resources>
     <SolidColorBrush x:Key="ChromeB" Color="#FF1A1A22"/>
     <SolidColorBrush x:Key="CardB" Color="#FF23232D"/>
@@ -13,7 +15,8 @@
       <Setter Property="Width" Value="34"/>
       <Setter Property="Height" Value="34"/>
       <Setter Property="Foreground" Value="{StaticResource T1}"/>
-      <Setter Property="FontSize" Value="15"/>
+      <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+      <Setter Property="FontSize" Value="14"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Template">
         <Setter.Value>
@@ -33,18 +36,29 @@
     <!-- 标签条 -->
     <Border DockPanel.Dock="Top" Background="{StaticResource ChromeB}" Padding="8,4">
       <DockPanel>
-        <Button x:Name="NewTabBtn" DockPanel.Dock="Right" Style="{StaticResource NavBtn}" Content="＋" Click="NewTab_Click" ToolTip="新建标签"/>
+        <Button x:Name="NewTabBtn" DockPanel.Dock="Right" AutomationProperties.Name="新建无痕标签" Style="{StaticResource NavBtn}" Content="&#xE710;" Click="NewTab_Click" ToolTip="新建标签"/>
         <TextBlock DockPanel.Dock="Left" Text="🕶 InPrivate" Foreground="#FF9AA0FF" Margin="4,0,12,0"
                    VerticalAlignment="Center" FontWeight="SemiBold"/>
         <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled">
-          <ListBox x:Name="TabStrip" SelectionMode="Single" Background="Transparent" BorderThickness="0"
+          <ListBox x:Name="TabStrip" AutomationProperties.Name="无痕标签条" SelectionMode="Single" Background="Transparent" BorderThickness="0"
                    SelectionChanged="TabStrip_SelectionChanged">
             <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal"/></ItemsPanelTemplate></ListBox.ItemsPanel>
             <ListBox.ItemTemplate>
               <DataTemplate>
-                <Border CornerRadius="8,8,0,0" Padding="12,6" Margin="0,0,2,0" Background="{StaticResource CardB}">
+                <Border CornerRadius="8" Padding="12,6" Margin="0,0,2,0">
+                  <Border.Style>
+                    <Style TargetType="Border">
+                      <!-- 批③：与主窗一致的选中区分（此前全部标签同色 CardB） -->
+                      <Setter Property="Background" Value="Transparent"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                          <Setter Property="Background" Value="#2EFFFFFF"/>
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </Border.Style>
                   <DockPanel>
-                    <Button DockPanel.Dock="Right" Content="✕" Click="TabClose_Click" Tag="{Binding TabId}"
+                    <Button DockPanel.Dock="Right" AutomationProperties.Name="关闭这个无痕标签" Content="&#xE894;" Click="TabClose_Click" Tag="{Binding TabId}" FontFamily="{StaticResource IconFont}"
                             FontSize="9" Margin="8,0,0,0" Background="Transparent" BorderThickness="0"
                             Foreground="{StaticResource T2}" Cursor="Hand"/>
                     <TextBlock Text="{Binding Title}" FontSize="12" MaxWidth="160" TextTrimming="CharacterEllipsis"
@@ -61,23 +75,55 @@
     <Border DockPanel.Dock="Top" Background="#FF14141A" Padding="8,6">
       <DockPanel>
         <StackPanel Orientation="Horizontal">
-          <Button Style="{StaticResource NavBtn}" Content="←" Click="Back_Click" ToolTip="后退"/>
-          <Button Style="{StaticResource NavBtn}" Content="→" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
-          <Button Style="{StaticResource NavBtn}" Content="⟳" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
+          <Button x:Name="BackButton" AutomationProperties.Name="后退" Style="{StaticResource NavBtn}" Content="&#xE72B;" Click="Back_Click" ToolTip="后退"/>
+          <Button x:Name="ForwardButton" AutomationProperties.Name="前进" Style="{StaticResource NavBtn}" Content="&#xE72A;" Click="Forward_Click" Margin="6,0,0,0" ToolTip="前进"/>
+          <Button x:Name="RefreshButton" AutomationProperties.Name="刷新页面" Style="{StaticResource NavBtn}" Content="&#xE72C;" Click="Refresh_Click" Margin="6,0,0,0" ToolTip="刷新"/>
         </StackPanel>
-        <Button DockPanel.Dock="Right" Content="关闭" Click="CloseWindow_Click" Height="34" Margin="8,0,0,0"
+        <Button DockPanel.Dock="Right" AutomationProperties.Name="关闭无痕窗口" Content="关闭" Click="CloseWindow_Click" Height="34" Margin="8,0,0,0"
                 Background="#FF7F1D1D" Foreground="White" BorderThickness="0" Cursor="Hand" Padding="12,0"/>
         <Border Margin="10,0,0,0" CornerRadius="17" Background="#FF23232D" Height="34">
           <Grid>
             <TextBlock x:Name="AddressHint" Text="在无痕窗口中搜索或输入网址…" Margin="16,0,0,0"
                        VerticalAlignment="Center" Foreground="{StaticResource T2}" IsHitTestVisible="False"/>
-            <TextBox x:Name="AddressBar" BorderThickness="0" Background="Transparent" Margin="14,0"
+            <TextBox x:Name="AddressBar" AutomationProperties.Name="无痕窗口地址栏" BorderThickness="0" Background="Transparent" Margin="14,0"
                      Foreground="{StaticResource T1}" CaretBrush="#FFFFFFFF" VerticalContentAlignment="Center"
                      TextChanged="AddressBar_TextChanged" KeyDown="AddressBar_KeyDown"/>
           </Grid>
         </Border>
       </DockPanel>
     </Border>
-    <Grid x:Name="WebViewHost"/>
+    <!-- CS-294（2026-09-26 审计）：导航失败/确认拒绝错误条（与主窗 ErrorPagePanel
+         同结构——此前无痕窗口无任何可见错误反馈面） -->
+    <Border x:Name="ErrorPagePanel" DockPanel.Dock="Top" Background="#FF2A1420" Padding="12,8"
+            Visibility="Collapsed">
+      <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
+    </Border>
+    <!-- CS-295（2026-09-26 审计）：导航确认面板遮罩（与主窗 ApprovalOverlay 同结构——
+         复用 ApprovalPanelController；此前确认门下无痕窗口零订阅，导航被静默取消） -->
+    <Grid>
+      <Grid x:Name="WebViewHost"/>
+      <Grid x:Name="ApprovalOverlay" Visibility="Collapsed" Panel.ZIndex="10" Background="#9914141A">
+        <Border x:Name="ApprovalPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Width="440"
+                Padding="20" Background="#FF23232D" BorderBrush="#66FFFFFF" BorderThickness="1"
+                CornerRadius="12">
+          <StackPanel>
+            <TextBlock Text="需要确认的导航" FontSize="18" FontWeight="SemiBold" Foreground="{StaticResource T1}" Margin="0,0,0,12"/>
+            <TextBlock Text="来源" FontWeight="SemiBold" Foreground="{StaticResource T1}"/>
+            <TextBlock x:Name="ApprovalOrigin" TextWrapping="Wrap" Foreground="{StaticResource T2}" Margin="0,0,0,8"/>
+            <TextBlock Text="路径与查询" FontWeight="SemiBold" Foreground="{StaticResource T1}"/>
+            <TextBlock x:Name="ApprovalPath" TextWrapping="Wrap" Foreground="{StaticResource T2}" Margin="0,0,0,8"/>
+            <TextBlock Text="权限范围" FontWeight="SemiBold" Foreground="{StaticResource T1}"/>
+            <TextBlock x:Name="ApprovalScope" TextWrapping="Wrap" Foreground="{StaticResource T2}" Margin="0,0,0,8"/>
+            <TextBlock x:Name="ApprovalExpiry" Foreground="#80FFFFFF" TextWrapping="Wrap" Margin="0,0,0,16"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+              <Button x:Name="ApprovalDenyButton" Content="拒绝" Click="ApprovalDeny_Click" MinWidth="88"
+                      Margin="0,0,8,0" Style="{StaticResource NavBtn}" Width="Auto" Height="32" FontSize="13"/>
+              <Button Content="批准并继续" Click="ApprovalAllow_Click" MinWidth="112" Height="32"
+                      Background="#FF3B82F6" Foreground="White" BorderThickness="0" Cursor="Hand" Padding="12,0"/>
+            </StackPanel>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Grid>
   </DockPanel>
 </Window>

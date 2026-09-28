@@ -6,7 +6,7 @@
   "required": ["origin", "method", "path", "scope", "expires_at", "nonce"],
   "properties": {
     "origin": { "type": "string", "pattern": "^https?://" },
-    "method": { "type": "string", "minLength": 1 },
+    "method": { "type": "string", "enum": ["GET", "POST", "PUT", "DELETE", "NAVIGATE", "DOWNLOAD"], "description": "PY-097：词表与 action.schema.json 收敛——批准只授予 Action 词表内的方法" },
     "path": { "type": "string", "minLength": 1 },
     "scope": { "type": "string", "minLength": 1 },
     "expires_at": { "type": "string", "format": "date-time" },

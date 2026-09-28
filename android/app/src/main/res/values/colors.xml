@@ -1,4 +1,36 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- AD-094（审计 2026-09-23 清单·A6 批）：styles.xml 的颜色字面量迁入本单源
+     ——主题色集中登记。取值与既有字面量逐一对应，不改变任何视觉。 -->
+<!-- AD-187（审计 2026-09-23 清单·A7 批）：chrome 色板全量入本文件单源
+     ——此前 Compose 侧 UiColors.kt 与本文件双源（同值 hex 各写一份，
+     调色漏改任一处即漂移）。现 Kotlin 侧经 colorResource 消费本表
+     （AegisChromeColors.kt 只持语义槽位定义，不再持原始色值）；styles.xml 的
+     状态栏/导航栏同引 chrome_background（原 chrome_status_bar 为同值
+     重复项，随之移除）。修改任何色值只允许改本文件。 -->
 <resources>
     <color name="ic_launcher_background">#000000</color>
+    <!-- 强调色（原 styles.xml 内联 #4255D4） -->
+    <color name="theme_accent">#4255D4</color>
+
+    <!-- —— chrome 色板（单源；与 AegisChromeColors 语义槽位一一对应）—— -->
+    <!-- 窗口实底（edge-to-edge 下状态栏/导航栏挖空区衬底 + 页面区背景，
+         不透明深蓝紫；styles.xml 状态栏/导航栏同引本项） -->
+    <color name="chrome_background">#FF101827</color>
+    <!-- 工具栏/标签栏背景（半透明深蓝紫——玻璃风格） -->
+    <color name="toolbar_background">#CC101827</color>
+    <!-- 按钮半透明白叠加（新建标签/玻璃圆钮底色） -->
+    <color name="button_overlay">#33FFFFFF</color>
+    <!-- 激活标签高亮（较亮的半透明白） -->
+    <color name="tab_active_highlight">#3DFFFFFF</color>
+    <!-- 非激活标签底（较暗的半透明白） -->
+    <color name="tab_inactive_highlight">#1AFFFFFF</color>
+    <!-- 地址栏胶囊底色（深色玻璃） -->
+    <color name="field_background">#1FFFFFFF</color>
+    <!-- 地址栏胶囊描边（聚焦/默认两档） -->
+    <color name="field_border_focused">#66FFFFFF</color>
+    <color name="field_border_idle">#2EFFFFFF</color>
+    <!-- 次级文字（地址栏占位符/错误面板辅助文案） -->
+    <color name="text_secondary">#B3FFFFFF</color>
+    <!-- 页面错误面板遮罩（深蓝紫近实底半透明） -->
+    <color name="error_overlay_background">#E6101827</color>
 </resources>

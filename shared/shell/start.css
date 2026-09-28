@@ -8,11 +8,19 @@
   #wallpaper {
     position:fixed; inset:0; z-index:0;
     background:url('wallpapers/aurora-twilight.jpg') center/cover no-repeat;
-    transition:background-image .5s ease;
+    /* WB-043（审计 2026-09-23 清单·W5 批）：删除无效的
+       transition:background-image——background-image 不可插值动画，
+       切换时该声明不产生任何过渡（浏览器直接跳变）；如需交叉淡入
+       须双层蒙版方案，当前单层结构不做 */
   }
   #wallpaper::after {
     content:''; position:absolute; inset:0;
-    background:linear-gradient(180deg, rgba(8,12,28,0.30) 0%, rgba(8,12,28,0.18) 45%, rgba(8,12,28,0.52) 100%);
+    /* WB-047（审计 2026-09-23 清单·W5 批）：底部遮罩 0.52 → 0.62 加深——
+       页脚文字对比度实测（WCAG 相对亮度公式，壁纸亮部最坏情形
+       rgb(252,250,246)）：旧组合 rgba(255,255,255,0.7)×遮罩0.52 = 2.84:1
+       （低于 AA 4.5:1）；新组合 文字0.92×遮罩0.62 = 5.11:1（AA 通过；
+       壁纸暗部 16.1:1）。两项参数与 .footer 颜色联动修改 */
+    background:linear-gradient(180deg, rgba(8,12,28,0.30) 0%, rgba(8,12,28,0.18) 45%, rgba(8,12,28,0.62) 100%);
   }
   .center {
     position:relative; z-index:1; height:100%;
@@ -69,7 +77,11 @@
     background:rgba(15,20,32,0.42); border:1px solid rgba(255,255,255,0.18);
     backdrop-filter:blur(12px); border-radius:999px; padding:8px 14px;
   }
+  /* WB-051（审计 2026-09-23 清单·W5 批）：圆点由 div[role=button] 改为
+     原生 button——外观回归图形控件（去 UA 边框内距与字体），键盘可达性
+     （Enter/Space 触发）由元素本体承担；:focus-visible 描边沿用全局规则 */
   .wp {
+    appearance:none; -webkit-appearance:none; padding:0; margin:0; font:inherit;
     width:34px; height:34px; border-radius:50%; cursor:pointer; border:2px solid transparent;
     background-size:cover; background-position:center; transition:transform .15s, border-color .15s;
   }
@@ -101,7 +113,9 @@
   .bm-add .bm-ico { background:rgba(255,255,255,0.05); border:1px dashed rgba(255,255,255,0.34); color:#fff; font-size:24px; }
   .bm-add .bm-name { color:rgba(255,255,255,0.66); }
   .bm-empty { font-size:12px; color:rgba(255,255,255,0.72); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
-  .footer { position:fixed; left:0; right:0; bottom:10px; z-index:4; text-align:center; font-size:12px; color:rgba(255,255,255,0.7); text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  /* WB-047（审计 2026-09-23 清单·W5 批）：0.7 → 0.92——见 #wallpaper::after
+     处实测注记（亮部最坏情形 2.84:1 → 5.11:1，AA 通过） */
+  .footer { position:fixed; left:0; right:0; bottom:10px; z-index:4; text-align:center; font-size:12px; color:rgba(255,255,255,0.92); text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   /* 搜索引擎胶囊（白底上的中性深色，与主按钮同语言） */
   .engine-pill {
     display:inline-flex; align-items:center; gap:6px; height:30px;
@@ -201,11 +215,10 @@
     .search { width:100%; height:52px; border-radius:26px; padding:0 5px 0 6px; }
     .search input { font-size:15px; }
     .search button { height:42px; padding:0 18px; font-size:13px; flex:0 0 auto; letter-spacing:1px; }
-    .quick-row { width:100%; }
+    .quick-row { width:100%; margin-top:12px; }
     .quick-btn { width:auto; justify-content:center; height:30px; font-size:12px; padding:0 10px; }
     .bookmarks { margin-top:20px; gap:7px; width:88vw; }
     .bm { width:auto; max-width:135px; }
-    .quick-row { margin-top:12px; }
     .wallpapers { right:12px; bottom:14px; padding:6px 10px; gap:8px; }
     .wp { width:28px; height:28px; }
     .footer { font-size:10px; bottom:6px; }
@@ -216,9 +229,16 @@
     .wp, .quick-btn, .search button, .engine-pill { min-height:40px; }
   }
 
-  /* —— 返回按钮（双端统一：Win 原生工具栏之外，首页自身的返回入口）—— */
-  /* 返回由浏览器工具栏统一提供：首页不再额外悬浮按钮，保持视觉留白 */
-  .back-fab { display:none; }
+  /* —— 返回按钮 —— */
+  /* 返回由浏览器工具栏统一提供：首页悬浮返回按钮已随「三端返回形态统一」
+     （95d9bac）移除，样式规则一并清理 */
+
+  /* —— 内联样式外置（CSP style-src 'self'——审计 I83）—— */
+  /* #importModal 的作者 display:flex 会压过 hidden 属性的 UA 规则——
+     显式补 [hidden] 高特异度规则，初始隐藏语义交给标记层 */
+  #importModal[hidden] { display: none; }
+  .restore-box { margin-top: 26px; }
+  .import-entry-wrap { margin-top: 14px; }
 
   /* —— 贪吃蛇（暖阳像素：金色时刻 · 温暖正面）—— */
   .snake-overlay {
@@ -282,3 +302,41 @@
   .veil-btn:hover { transform:translateY(-1px); box-shadow:0 14px 32px rgba(240,168,64,0.5); }
   .veil-btn:active { transform:translateY(0); }
   .snake-foot { color:rgba(255,232,200,0.5); font-size:11.5px; text-align:center; }
+
+  /* ═══ 键盘焦点可见性（WB-029：全文件此前 0 处 focus 样式——
+     键盘用户无法辨别当前位置。:focus-visible 仅键盘导航触发，
+     鼠标点击不受影响；暗色玻璃背景上用亮青色 + 双层描边保证对比度） ═══ */
+  :focus { outline: none; }
+  :focus-visible {
+    outline: 2px solid #7DD3FC;
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  /* WB-109（2026-09-26 审计）：删除 .search input:focus-visible { outline:none }
+     ——此前主搜索输入框是全页唯一零焦点指示的可交互控件（全局 :focus-visible
+     被该规则覆盖）。输入框现继承全局键盘焦点描边，胶囊容器另加 focus-within
+     描边作为组级指示 */
+  .search:focus-within {
+    border-color:#7DD3FC;
+    box-shadow:0 12px 36px rgba(0,0,0,0.22), 0 0 0 2px rgba(125,211,252,0.55);
+  }
+  .engine-item:focus-visible,
+  .wp:focus-visible,
+  .bm:focus-visible {
+    outline: 2px solid #7DD3FC;
+    outline-offset: 1px;
+  }
+
+  /* ═══ WB-111（2026-09-26 审计）：prefers-reduced-motion——前庭敏感用户
+     的减动效开关（此前全文件 0 处）。DOM 侧：关闭 hover 位移、分数弹跳
+     （snakePop）与全部过渡动画；canvas 内的屏震（shake）/死亡红闪（flash）
+     由 start.snake.js 渲染侧按同一媒体查询关闭。 ═══ */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
+    .wp:hover, .bm:hover, .veil-btn:hover, .veil-btn:active, .quick-btn:active { transform: none; }
+    .snake-head .chip b.pop { animation: none; }
+  }

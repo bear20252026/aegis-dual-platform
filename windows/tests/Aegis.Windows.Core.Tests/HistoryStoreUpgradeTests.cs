@@ -125,6 +125,37 @@ public sealed class HistoryStoreUpgradeTests
         }
     }
 
+    [Fact]
+    public void ByDateUnknownDateReturnsEmpty()
+    {
+        // CS-021：未知日期空结果，不抛
+        var store = NewStore();
+        store.Add("https://a.example", "A");
+        Assert.Empty(store.ByDate("1999-01-01", 50));
+    }
+
+    [Fact]
+    public void DatesLimitClampsAndBounds()
+    {
+        // CS-022：Dates limit 边界——0/负值不再触发 SQLite 负 LIMIT=无上限语义
+        //（CS-028 钳制后 limit<=0 等价 1）
+        var store = NewStore();
+        store.Add("https://a.example", "A");
+        Assert.Single(store.Dates(0));
+        Assert.Single(store.Dates(-5));
+        Assert.Single(store.Dates(90));
+    }
+
+    [Fact]
+    public void DeleteUnknownIdReturnsFalse()
+    {
+        // CS-023：删除不存在的 id 返回 false
+        var store = NewStore();
+        store.Add("https://a.example", "A");
+        Assert.False(store.Delete(999_999));
+        Assert.True(store.Delete(store.Recent(10)[0].Id));
+    }
+
     private static HistoryStore NewStore() =>
         new(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
 }

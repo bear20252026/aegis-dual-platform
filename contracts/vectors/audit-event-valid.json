@@ -1,0 +1,41 @@
+{
+  "description": "PY-096（审计 2026-09-25）：AuditEvent 契约合法向量——脱敏审计事件（event_id/timestamp/decision/scope/origin 必填；reason/tab_id 可选）。消费方：validate_vector_schemas.py（Contracts 门禁 jsonschema 校验）",
+  "vectors": [
+    {
+      "note": "deny 决策带 reason 与 tab_id",
+      "expected": "valid",
+      "audit_event": {
+        "event_id": "evt-20250925-0001",
+        "timestamp": "2025-09-25T08:00:00Z",
+        "decision": "deny",
+        "scope": "net.post.example.org",
+        "origin": "https://evil.example",
+        "reason": "origin_not_allowed",
+        "tab_id": "tab-1"
+      }
+    },
+    {
+      "note": "allow 决策最小字段面（reason/tab_id 省略）",
+      "expected": "valid",
+      "audit_event": {
+        "event_id": "evt-20250925-0002",
+        "timestamp": "2025-09-25T08:01:30Z",
+        "decision": "allow",
+        "scope": "net.get.example.org",
+        "origin": "https://example.org"
+      }
+    },
+    {
+      "note": "require_confirmation 决策",
+      "expected": "valid",
+      "audit_event": {
+        "event_id": "evt-20250925-0003",
+        "timestamp": "2025-09-25T08:02:00Z",
+        "decision": "require_confirmation",
+        "scope": "download.files.example.net",
+        "origin": "http://files.example.net",
+        "reason": "download_requires_native_confirm"
+      }
+    }
+  ]
+}

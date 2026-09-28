@@ -1,5 +1,6 @@
 package com.aegis.browser
 
+import android.os.SystemClock
 import android.webkit.WebView
 
 /**
@@ -14,14 +15,22 @@ import android.webkit.WebView
  *    自带 onPause()/onResume()，便于单测时注入假实现。
  * 3. 索引操作全部做边界校验：越界静默拒绝（返回 null / false），
  *    绝不让 UI 层因索引越界崩溃。
+ * 4. AD-084（2026-09-26 审计）：[Tab] 字段全部 val——本类是唯一写路径，
+ *    所有状态变更经 copy 替换列表内实例（StateFlow 依赖 equals 感知变化）。
  *
  * 本类不依赖任何 UI（Compose/Activity），可离线单测。
  */
+@Suppress("TooManyFunctions") // AD-036 新增 updateUrl 触发阈值（11）——多标签管理内聚职责
 class TabManager(
     private val maxActive: Int = 8,
     private val pause: (WebView) -> Unit = WebView::onPause,
     private val resume: (WebView) -> Unit = WebView::onResume,
 ) {
+    companion object {
+        /** AD-085（2026-09-26 审计）：默认标题单源（TabChipCore 空标题兜底共用）。 */
+        const val DEFAULT_TAB_TITLE = "新标签页"
+    }
+
     private val tabs = mutableListOf<Tab>()
     private var nextId = 0L
 
@@ -37,39 +46,42 @@ class TabManager(
     fun addTab(
         webView: WebView,
         url: String = "",
-        title: String = "新标签页",
+        title: String = DEFAULT_TAB_TITLE,
     ): Tab {
-        val tab =
+        tabs +=
             Tab(
                 id = nextId++,
                 title = title,
                 url = url,
                 webView = webView,
-                lastUsed = System.currentTimeMillis(),
+                lastUsed = SystemClock.elapsedRealtime(),
             )
-        tabs.add(tab)
         // 挂起旧标签，保证活跃标签数不超过上限（LRU：优先最久未用）
         suspendOldestBeyondLimit()
         switchTo(tabs.size - 1)
-        return tab
+        // AD-084：switchTo 经 copy 替换实例——返回列表内规范实例（而非构造
+        // 瞬间快照），保证调用方持有引用与后续 list()/current() 一致。
+        return tabs.last()
     }
 
     /** 切换到指定标签并恢复其 WebView；越界返回 false。 */
     fun switchTo(index: Int): Boolean {
         if (index !in tabs.indices) return false
         // 挂起上一个激活标签（若不同且尚未挂起）
-        val prev = current()
-        if (prev != null && prev.id != tabs[index].id && !prev.suspended) {
-            pause(prev.webView)
-            prev.suspended = true
+        val prevIndex = activeIndex
+        if (prevIndex >= 0 && prevIndex != index) {
+            val prev = tabs[prevIndex]
+            if (!prev.suspended) {
+                pause(prev.webView)
+                tabs[prevIndex] = prev.copy(suspended = true)
+            }
         }
         // 恢复目标标签并更新 LRU 时间戳（落地③：多标签性能优化）
         val target = tabs[index]
         if (target.suspended) {
             resume(target.webView)
-            target.suspended = false
         }
-        target.lastUsed = System.currentTimeMillis()
+        tabs[index] = target.copy(suspended = false, lastUsed = SystemClock.elapsedRealtime())
         activeIndex = index
         return true
     }
@@ -83,10 +95,10 @@ class TabManager(
         // H-4 修复（审计 2026-08-31）：统一销毁序列（停载/摘除/注销/destroy 单源）
         SecureWebViewFactory.tearDown(removed.webView)
         activeIndex = if (index < tabs.size) index else tabs.size - 1
-        current()?.let {
-            if (it.suspended) {
-                resume(it.webView)
-                it.suspended = false
+        current()?.let { current ->
+            if (current.suspended) {
+                resume(current.webView)
+                tabs[activeIndex] = current.copy(suspended = false)
             }
         }
         return true
@@ -106,8 +118,27 @@ class TabManager(
     ): WebView? {
         if (index !in tabs.indices) return null
         val old = tabs[index].webView
-        tabs[index] = tabs[index].copy(webView = newWebView)
+        // AD-060（2026-09-24 审计）：重置 suspended——替换进来的新 WebView 是
+        // 全新运行态（从未 pause），沿用旧标签的 suspended=true 会造成
+        // 「状态标记挂起 / 实际在前台跑」的失真（切回该标签时 switchTo 因
+        // suspended 已为 true 不会再 resume——语义一致但永不准确）。
+        tabs[index] = tabs[index].copy(webView = newWebView, suspended = false)
         return old
+    }
+
+    /**
+     * AD-036（2026-09-24 审计）：页面 URL 回填的实例替换单写点。
+     * 原 BrowserViewModel.onPageUrlObserved 经 `tab.url = url` 原地改 var——
+     * list() 快照与 StateFlow 旧值持同一实例，data class self-equals 恒 true
+     * → StateFlow 不发射。与 [updateTitle] 同模式（copy 替换实例）。
+     * 越界/未知 id 静默忽略（对齐类内索引操作约定）。
+     */
+    fun updateUrl(
+        id: Long,
+        url: String,
+    ) {
+        val index = tabs.indexOfFirst { it.id == id }
+        if (index >= 0) tabs[index] = tabs[index].copy(url = url)
     }
 
     /**
@@ -129,24 +160,41 @@ class TabManager(
     /** 返回标签列表快照（防调用方改动内部结构）。 */
     fun list(): List<Tab> = tabs.toList()
 
-    /** 全部挂起（Activity 销毁兜底时调用——唯一调用点 MainActivity.onDestroy）。 */
+    /** 全部挂起（调用点：MainActivity.onPause 后台化——AD-006 起的
+     *  pauseTimers 全局停 JS 定时器+实例级挂起，隐私+电量缺口修复；
+     *  回前台经 [resumeOnForeground] 对称恢复；onDestroy 销毁兜底不再
+     *  走本函数——AD-072：suspendAll 只 pause，紧随的 tearDown 全量
+     *  destroy 使 pause 全部冗余）。 */
     fun suspendAll() {
         // TabManager 补审（Android 官方）：挂起全部标签——onPause 实例级
         // + pauseTimers 全局暂停 JS timers（后台标签不继续跑 JS——资源/隐私）
         // P2 修复（全量复审 2026-09-01）：firstOrNull 防空列表崩溃
         // （原先 tabs.first() 在无标签时抛 NoSuchElementException）
         tabs.firstOrNull()?.webView?.pauseTimers()
-        tabs.forEach {
-            if (!it.suspended) {
-                pause(it.webView)
-                it.suspended = true
+        for ((i, tab) in tabs.withIndex()) {
+            if (!tab.suspended) {
+                pause(tab.webView)
+                tabs[i] = tab.copy(suspended = true)
+            }
+        }
+    }
+
+    /** AD-006 回前台对称恢复：resumeTimers + 恢复当前标签；后台标签保持
+     *  挂起，切换时由 [switchTo] 既有路径恢复。后台化由 [suspendAll]
+     *  承担（onPause 生命周期复用，见该函数注记）。 */
+    fun resumeOnForeground() {
+        tabs.firstOrNull()?.webView?.resumeTimers()
+        current()?.let { current ->
+            if (current.suspended) {
+                resume(current.webView)
+                tabs[activeIndex] = current.copy(suspended = false)
             }
         }
     }
 
     // 2026-09-01 死代码清理（用户确认）：删除 findById / resumeCurrent。
-    // 二者全工程 0 调用——suspendAll 仅在 onDestroy 兜底场景存在，无恢复
-    // 路径亦无需求（销毁即终止）；未来若引入多标签挂起/恢复机制再按需重建。
+    // 二者全工程 0 调用——suspendAll 仅在 onPause 后台化场景存在；
+    // 未来若引入多标签挂起/恢复机制再按需重建。
 
     // ------------------------------------------------------------------ //
     // 私有：活跃上限策略
@@ -157,10 +205,11 @@ class TabManager(
      LRU 策略（落地③：多标签性能优化，借鉴微软内存管理最佳实践）：
      优先挂起 lastUsed 最小的后台标签（而非按列表顺序），更贴近
      "最近最少使用"语义，减少用户近期将访问标签被挂起的概率。
+     AD-079：时刻取 SystemClock.elapsedRealtime（单调时钟）——
+     System.currentTimeMillis 是墙钟，用户改时间/NTP 回拨会打乱挂起次序。
      */
     private fun suspendOldestBeyondLimit() {
-        val active = tabs.filter { !it.suspended }
-        val excess = active.size - maxActive
+        val excess = tabs.count { !it.suspended } - maxActive
         if (excess <= 0) return
         // 按 lastUsed 升序（最久未用在前）取待挂起标签，排除当前标签
         val candidates =
@@ -170,7 +219,8 @@ class TabManager(
                 .take(excess)
         for (tab in candidates) {
             pause(tab.webView)
-            tab.suspended = true
+            val index = tabs.indexOfFirst { it.id == tab.id }
+            if (index >= 0) tabs[index] = tabs[index].copy(suspended = true)
         }
     }
 }

@@ -1,7 +1,9 @@
 package com.aegis.browser
 
 import android.content.Context
+import android.view.ViewGroup
 import android.webkit.WebView
+import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
 import com.aegis.webviewadapter.AegisWebViewClient
 import java.util.concurrent.ConcurrentHashMap
@@ -39,6 +41,7 @@ object SecureWebViewFactory {
      */
     @Suppress("LongParameterList")
     fun create(
+        broker: AndroidBroker,
         context: Context,
         onNavigationConfirmationRequested: (WebView, ApprovalRequest) -> Unit = { _, _ -> },
         onNavigationConfirmationResolved: (WebView) -> Unit = {},
@@ -46,14 +49,21 @@ object SecureWebViewFactory {
         onPageUrlObserved: (WebView, String) -> Unit = { _, _ -> },
         onTitleObserved: (WebView, String) -> Unit = { _, _ -> },
         onRendererGone: (WebView) -> Unit = {},
-        onPageError: (WebView, String, Boolean, String) -> Unit = { _, _, _, _ -> },
+        onPageError: (WebView, code: String, detail: String, isSsl: Boolean, url: String) -> Unit =
+            { _, _, _, _, _ -> },
     ): WebView {
-        // A-6 修复（架构审计 2026-08-31）：Broker 由 Application 持有——
-        // 工厂不再静态单例持有（可测试、可隔离、生命周期显式）
-        val broker = (context.applicationContext as AegisApplication).broker
+        // 架构解耦（第 5 项）：broker 由组合根（MainActivity 的 ViewModel
+        // 工厂对 Application 收敛注入）显式传入——工厂不再
+        // `(context.applicationContext as AegisApplication).broker` 强转定位
+        // （可隔离、可注入）。
         val webView = WebView(context)
         BrowserEngine(webView, onTitleObserved = { onTitleObserved(webView, it) }).configure()
         val sessionId = "session-${sessionCounter.incrementAndGet()}"
+        // AD-181（审计 2026-09-23 清单·A7 批）：tabId 派生关系注释固化——
+        // tabId 由 sessionId 透传加固定前缀派生（session↔tab 为 1:1 绑定，
+        // 会话计数器是唯一编号源）。前缀的存在让两条标识在 Rust 核心
+        // 日志/存储中可按类型目视区分（tab-session-N 自带来源标记）；
+        // 不引入独立状态、不参与策略判定（对核心而言二者皆不透明）。
         val tabId = "tab-$sessionId"
         if (!broker.registerSession(sessionId, tabId)) {
             // fail-closed 前留根因线索（logcat -s AegisBroker；典型：
@@ -63,6 +73,10 @@ object SecureWebViewFactory {
                 "registerSession failed: session=$sessionId, " +
                     "REQUIRE_NATIVE_POLICY_CORE=${com.aegis.broker.BuildConfig.REQUIRE_NATIVE_POLICY_CORE}",
             )
+            // AD-034（2026-09-24 审计）：抛出前释放已配置的 WebView——原实现
+            // 直接 check 抛异常，已完成硬化配置的 WebView（含其 Chromium 资源）
+            // 泄漏（navigator 注册表尚无条目，后续 release() 无法回收它）。
+            SecureWebViewFactory.tearDown(webView)
             check(false) { "无法注册安全浏览会话（详见 logcat -s AegisBroker）" }
         }
         WebViewHardening.install(webView, WebViewHardening.newSessionSeed())
@@ -88,10 +102,10 @@ object SecureWebViewFactory {
                 onPageUrlObserved = { url ->
                     onPageUrlObserved(webView, url)
                 },
-                onPageError = { description, isSsl, url ->
+                onPageError = { code, detail, isSsl, url ->
                     // P2-1 修复（全面审计 2026-09-04）：SSL/加载错误上抛调用方
-                    // （ViewModel 错误面板——原静默白屏）。
-                    onPageError(webView, description, isSsl, url)
+                    // AD-035：错误码结构上抛——中文文案映射在 ViewModel 层。
+                    onPageError(webView, code, detail, isSsl, url)
                 },
             )
         webView.webViewClient = client
@@ -129,11 +143,17 @@ object SecureWebViewFactory {
     }
 
     /**
-     * WebView 销毁统一序列（单源）：停载 → 摘除页面 → 注销导航器/Broker 会话 → destroy。
-     * 标签关闭（TabManager.closeTab）与 Activity 销毁（MainActivity.onDestroy）共用，
-     * 此前两处各自手写一半序列（审计 2026-09-02 收敛）。
+     * WebView 销毁统一序列（单源）：detach → 停载 → 摘除页面 → 注销导航器/Broker
+     * 会话 → destroy。标签关闭（TabManager.closeTab）与 Activity 销毁
+     * （MainActivity.onDestroy）共用，此前两处各自手写一半序列（审计
+     * 2026-09-02 收敛）。
      */
     fun tearDown(webView: WebView) {
+        // AD-214（2026-09-26 审计）：destroy 前先从父容器 detach——关闭激活
+        // 标签与 onDestroy 全量销毁此前对仍挂在 FrameLayout 上的 WebView 直接
+        // destroy（attached destroy），Chromium 资源泄漏（官方生命周期要求
+        // destroy 前从视图树摘除）。
+        (webView.parent as? ViewGroup)?.removeView(webView)
         webView.stopLoading()
         webView.loadUrl("about:blank")
         release(webView)

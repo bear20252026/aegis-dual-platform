@@ -5,16 +5,22 @@
 
 ## ProposedAction（结构化意图——经 broker 授权）
 
+> 以下示例严格符合冻结契约 `contracts/schemas/action.schema.json`
+> （required 十字段、additionalProperties: false——SP-001 整改：
+> 此前示例含 schema 外字段 intent/target_origin/budget，与之冲突）。
+
 ```json
 {
-  "intent": "navigate",
-  "target_origin": "https://a.gov.cn",
-  "method": "GET",
+  "session_id": "<local-ipc session>",
+  "tab_id": "tab-1",
+  "document_generation": 0,
+  "origin": "https://a.gov.cn",
+  "method": "NAVIGATE",
   "canonical_parameters": "/page",
   "scope": "navigation:read",
-  "budget": { "max_bytes": 8192, "max_actions": 5 },
-  "session_id": "<local-ipc session>",
-  "nonce": "<一次性 nonce>"
+  "expires_at": "2027-12-31T00:00:00Z",
+  "nonce": "<一次性 nonce>",
+  "policy_version": "1.0"
 }
 ```
 

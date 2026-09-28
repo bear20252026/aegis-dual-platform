@@ -15,8 +15,7 @@ public partial class SourceViewerWindow : Window
         SourceText.Text = source;
     }
 
-    private void SourceText_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
-    {
-        // 占位：行号/搜索随 M4 设置界面迭代
-    }
+    /// <summary>统一深浅主题接入（此前 XAML 硬编码深色——浅色模式下与主窗口割裂）。
+    /// 画刷键经 DynamicResource 引用，此处仅需写入窗口资源。</summary>
+    public void ApplyTheme(string? theme) => WindowTheme.Apply(this, theme);
 }

@@ -24,14 +24,28 @@ object ReaderMode {
     /** 正文长度上限（200K 字符——超出截断，防渲染层过载）。 */
     private const val MAX_TEXT = 200_000
 
+    /** AD-227（2026-09-26 审计）：标题截断上限（256——与正文截断同口径，
+     *  超长标题此前直进 AlertDialog 标题渲染）。 */
+    private const val MAX_TITLE = 256
+
     /** 认定为「有正文」的最小长度（首页/空白页不进阅读模式）。 */
     private const val MIN_TEXT = 200
 
     /**
      * 正文提取脚本：优先 article/main/[role=main]，否则取文本量最大
      * 的块级元素，兜底 body。只读，不触碰页面状态。
+     * AD-125（审计 2026-09-23 清单·A6 批）：internal 化——MIN_TEXT 门槛在
+     * 页内脚本生效，JVM 单测锁定门槛存在性与取值，防误删/漂移。
+     *
+     * AD-206（审计 2026-09-23 清单·A7 批）：候选块扫描设限提前退出——
+     * 原实现对 document.querySelectorAll('div, section') 全量遍历
+     * （超长页面数千节点逐个读 innerText——强制布局抖动，主线程可卡
+     * 数百 ms）。现设两项限制：①候选上限 MAX_CANDIDATES（400——覆盖
+     * 常规文章页全部候选，超出部分不参与正文评选）；②提前退出——
+     * 一旦某候选块文本量已达 MAX_TEXT（正文上限），后续候选不可能
+     * 更优，立即停止扫描。
      */
-    private val EXTRACT_JS =
+    internal val EXTRACT_JS =
         """
         (function() {
           try {
@@ -41,9 +55,12 @@ object ReaderMode {
             if (!node) {
               var best = null, bestLen = 0;
               var cand = document.querySelectorAll('div, section');
-              for (var i = 0; i < cand.length; i++) {
+              var MAX_CANDIDATES = 400;
+              var n = cand.length < MAX_CANDIDATES ? cand.length : MAX_CANDIDATES;
+              for (var i = 0; i < n; i++) {
                 var t = (cand[i].innerText || '').trim();
                 if (t.length > bestLen) { bestLen = t.length; best = cand[i]; }
+                if (bestLen >= $MAX_TEXT) { break; }
               }
               node = best || document.body;
             }
@@ -74,8 +91,9 @@ object ReaderMode {
         }
     }
 
-    /** 两段解析：先还原 JS 返回值（字符串），再解析内层 JSON 对象。 */
-    private fun parse(raw: String?): ReaderContent? {
+    /** 两段解析：先还原 JS 返回值（字符串），再解析内层 JSON 对象。
+     * AD-028（2026-09-24 审计）：internal 化供 JVM 单测（解析防御边界是安全面）。 */
+    internal fun parse(raw: String?): ReaderContent? {
         if (raw.isNullOrBlank()) return null
         return runCatching {
             val value = JSONTokener(raw).nextValue()
@@ -86,12 +104,29 @@ object ReaderMode {
                     else -> null
                 } ?: return@runCatching null
             if (!payload.optBoolean("ok", false)) return@runCatching null
-            val text = (payload.optString("text", "")).take(MAX_TEXT)
+            // AD-109（审计 2026-09-23 清单·A6 批）：截断改代理对安全形式——
+            // String.take 按UTF-16 char 劈切，切点落在增补字符（emoji 等）
+            // 中间会产生孤立代理对（渲染为 � 且 length 语义失真）。
+            val text = takeAtCharBoundary(payload.optString("text", ""), MAX_TEXT)
             if (text.isBlank()) return@runCatching null
             ReaderContent(
-                title = payload.optString("title", "").ifBlank { "阅读模式" },
+                // AD-227：title 与 text 同走上限截断（超长标题不进对话框标题）
+                title = takeAtCharBoundary(payload.optString("title", ""), MAX_TITLE).ifBlank { "阅读模式" },
                 text = text,
             )
         }.getOrNull()
+    }
+
+    /**
+     * AD-109：代理对边界回退截断——切点尾部为高代理（其低代理被切掉）时
+     * 回退一个 char，不产生孤立代理对。ASCII 文本行为与 String.take 一致。
+     */
+    internal fun takeAtCharBoundary(
+        value: String,
+        max: Int,
+    ): String {
+        if (value.length <= max) return value
+        val cut = value.substring(0, max)
+        return if (Character.isHighSurrogate(cut.last())) cut.dropLast(1) else cut
     }
 }

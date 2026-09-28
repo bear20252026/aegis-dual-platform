@@ -17,8 +17,29 @@ public static class FingerprintShield
         RandomNumberGenerator.GetHexString(64).ToLowerInvariant();
 
     /// <summary>构建管道注入脚本（种子参数化——同一种子输出逐字节一致，
-    /// 便于单测锁定；种子只进 JS 常量，不落盘不外传）。</summary>
-    public static string BuildScript(string sessionSeed) =>
+    /// 便于单测锁定；种子只进 JS 常量，不落盘不外传）。
+    /// CS-184：入口校验 fail-closed——种子必须为 64 位小写十六进制
+    /// （NewSessionSeed 契约），非法输入抛出而非直插 JS 单引号常量
+    /// （注入面：恶意种子可破坏脚本闭包逃逸执行）。</summary>
+    public static string BuildScript(string sessionSeed)
+    {
+        if (sessionSeed is null || sessionSeed.Length != 64 || !IsLowerHex(sessionSeed))
+            throw new ArgumentException("会话种子必须为 64 位小写十六进制字符", nameof(sessionSeed));
+        return BuildScriptCore(sessionSeed);
+    }
+
+    private static bool IsLowerHex(string value)
+    {
+        foreach (var ch in value)
+        {
+            var isHex = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f');
+            if (!isHex)
+                return false;
+        }
+        return true;
+    }
+
+    private static string BuildScriptCore(string sessionSeed) =>
         $$"""
         // Aegis Fingerprint Pipeline v3 (Red/Blue Hardened) — C# native port
         (function() {
@@ -105,7 +126,7 @@ public static class FingerprintShield
             if (p === 37446 || p === 0x9246 || p === 0x1F01) return RENDERER;
             if (p === 37445 || p === 0x9245 || p === 0x1F00) return VENDOR;
             if (p === 0x0D33) return 16384;
-            if (p === 0x0D3A) return new Float32Array([16384, 16384]);
+            if (p === 0x0D3A) return new Int32Array([16384, 16384]); // 规范要求 Int32Array——Float32 可被类型检测识破
             if (p === 0x84E8) return 16384;
             return origGetParam.call(this, p);
           };
@@ -117,7 +138,7 @@ public static class FingerprintShield
               if (p === 37446 || p === 0x9246 || p === 0x1F01) return RENDERER;
               if (p === 37445 || p === 0x9245 || p === 0x1F00) return VENDOR;
               if (p === 0x0D33) return 16384;
-              if (p === 0x0D3A) return new Float32Array([16384, 16384]);
+              if (p === 0x0D3A) return new Int32Array([16384, 16384]);
               if (p === 0x84E8) return 16384;
               return origGetParam2.call(this, p);
             };
@@ -185,10 +206,15 @@ public static class FingerprintShield
             if (osAH) origDefineProp(screen, 'availHeight', { get: function() { return roundTo(osAH.get.call(this), HS); } });
           } catch(e) {}
           try {
-            origDefineProp(window, 'innerWidth', { get: function() { return roundTo(window.innerWidth, WS); } });
-            origDefineProp(window, 'innerHeight', { get: function() { return roundTo(window.innerHeight, HS); } });
-            origDefineProp(window, 'outerWidth', { get: function() { return roundTo(window.outerWidth, WS); } });
-            origDefineProp(window, 'outerHeight', { get: function() { return roundTo(window.outerHeight, HS); } });
+            var oIW = origGetOPD.call(Object, window, 'innerWidth');
+            var oIH = origGetOPD.call(Object, window, 'innerHeight');
+            var oOW = origGetOPD.call(Object, window, 'outerWidth');
+            var oOH = origGetOPD.call(Object, window, 'outerHeight');
+            // 先捕获原 getter 再覆盖——getter 内再读同名属性即无限自递归栈溢出
+            if (oIW && oIW.get) origDefineProp(window, 'innerWidth', { get: function() { return roundTo(oIW.get.call(this), WS); } });
+            if (oIH && oIH.get) origDefineProp(window, 'innerHeight', { get: function() { return roundTo(oIH.get.call(this), HS); } });
+            if (oOW && oOW.get) origDefineProp(window, 'outerWidth', { get: function() { return roundTo(oOW.get.call(this), WS); } });
+            if (oOH && oOH.get) origDefineProp(window, 'outerHeight', { get: function() { return roundTo(oOH.get.call(this), HS); } });
           } catch(e) {}
 
           // ====== Stage 5+9 合并: fetch/XHR 责任链 ======
@@ -196,9 +222,16 @@ public static class FingerprintShield
             'gclid','hsCtaTracking','igshid','mc_eid','ml_subscriber','ml_subscriber_hash','msclkid',
             'oft_c','oft_ck','oft_d','oft_id','oft_ids','oft_k','oft_lk','oft_sk','oly_anon_id',
             'oly_enc_id','rb_clickid','s_cid','twclid','vero_conv','vero_id','wickedid','yclid','wbraid'];
+          // CS-331（2026-09-26 审计）：小写冻结集 IIFE 顶层构建一次——此前
+          // stripTrackingParams 每次 fetch/XHR 调用都重建 ~40 键对象（请求热
+          // 路径重复分配）
+          var TRACKING_LOWER = {};
+          TRACKING_PARAMS.forEach(function(p) { TRACKING_LOWER[p.toLowerCase()] = true; });
           function stripTrackingParams(url) {
             try { var u = new URL(url); var c = false;
-              TRACKING_PARAMS.forEach(function(p) { if (u.searchParams.has(p)) { u.searchParams.delete(p); c = true; } });
+              var doomed = [];
+              u.searchParams.forEach(function(v, k) { if (TRACKING_LOWER[k.toLowerCase()]) doomed.push(k); });
+              doomed.forEach(function(k) { u.searchParams.delete(k); c = true; });
               return c ? u.toString() : url;
             } catch(e) { return url; }
           }
@@ -234,15 +267,27 @@ public static class FingerprintShield
           // ====== Stage 8: TimerPrecision ======
           var TP = 1;
           function reducePrecision(v) { return Math.round(v / TP) * TP + (Math.random() - 0.5) * TP / 2; }
+          // CS-300（2026-09-26 审计）：Date.now 分支——随机抖动直接套在墙上时钟
+          // 上会返回非整数（Number.isInteger(Date.now())===false 一行即识破），
+          // 且 epoch 量级抖动毫无隐私收益；四舍五入保持整数毫秒
+          function reducePrecisionInteger(v) { return Math.round(reducePrecision(v)); }
           try {
+            // performance.now：钳单调非递减——随机抖动可产生时间回退
+            //（t2 < t1），单调性破坏本身是指纹探针/行为检测信号
+            var lastPerf = -Infinity;
             var origPerfNow = performance.now.bind(performance);
-            var perfProxy = function() { return reducePrecision(origPerfNow()); };
+            var perfProxy = function() {
+              var v = reducePrecision(origPerfNow());
+              if (v < lastPerf) v = lastPerf;
+              lastPerf = v;
+              return v;
+            };
             origDefineProp(performance, 'now', { value: perfProxy, writable: false, configurable: false });
             registerProxy(perfProxy, origPerfNow);
           } catch(e) {}
           try {
             var origDateNow = Date.now;
-            var dateProxy = function() { return reducePrecision(origDateNow()); };
+            var dateProxy = function() { return reducePrecisionInteger(origDateNow()); };
             Date.now = dateProxy;
             registerProxy(dateProxy, origDateNow);
           } catch(e) {}
