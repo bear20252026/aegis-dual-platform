@@ -1,0 +1,221 @@
+PY-173 | .github/workflows/release.yml:199-207
+PY-174 | .github/workflows/release-windows.yml:154-169
+PY-175 | release/verify_release.py
+PY-176 | .github/workflows/release.yml:113-130
+PY-177 | .github/workflows/release.yml:36 等 4 处
+PY-178 | contracts.yml:30；agent-redteam.yml:25；supply-chain.yml:26
+PY-173 | .github/workflows/release.yml:199-207
+PY-174 | .github/workflows/release-windows.yml:154-169
+PY-175 | release/verify_release.py:7-8,28-35,48-50
+PY-176 | .github/workflows/release.yml:113-130
+PY-177 | .github/workflows/release.yml:36；release-windows.yml:22；release-android.yml:25；release-core.yml:25
+PY-178 | contracts.yml:30；agent-redteam.yml:25；supply-chain.yml:26
+PY-179 | .github/workflows/release.yml:196 + 209-213
+PY-180 | .github/workflows/release-windows.yml:206-210；release.yml:212-213
+PY-181 | release-windows.yml:54-55；release-android.yml:75-76
+PY-182 | .github/workflows/compat.yml:54
+PY-183 | .github/workflows/supply-chain.yml:27
+PY-184 | release/update_verifier.py:61-65
+PY-185 | release/build_metadata.py:22
+PY-186 | scripts/sync_versions.py:37-38
+PY-187 | scripts/verify_vectors.py:58,67,72
+PY-188 | contracts/codegen/generate_csharp.py:32-41；generate_kotlin.py:33-42
+PY-189 | release/tools/verify_manifest/verify_manifest.py:47-60；verify_artifact_set/verify_artifact_set.py:94
+PY-190 | tests/python/
+PY-191 | release/verify_checksum_json.py:54
+PY-192 | .github/workflows/release-core.yml:76-78
+PY-193 | .github/workflows/native-policy-artifacts.yml:30-35
+PY-194 | .github/workflows/native-policy-artifacts.yml:94
+PY-195 | contracts/codegen/analyze_action_catalog.py:40-41
+PY-196 | contracts/codegen/verify_contract_compatibility.py:68-70
+PY-197 | contracts/codegen/generate_csharp.py:61；generate_kotlin.py:50
+PY-198 | scripts/sync_versions.py:74；verify_versions.py:67
+PY-199 | release/build_metadata.py:47-49
+PY-200 | scripts/run-security-e2e/run.py:32
+PY-201 | scripts/bootstrap-dev-environment/run.py:16-21,31
+PY-202 | .github/workflows/agent-redteam.yml:32-38
+PY-203 | scripts/build_review_package.py:178,297
+PY-204 | scripts/build_review_package.py:44-47
+PY-205 | scripts/build_review_package.py:153
+PY-206 | contracts.yml:3-5；android-quality.yml:7-9；core-rust.yml:2-4
+PY-207 | scripts/gen_jsapi_schema.py:100-108
+PY-208 | release/verify_release.py:16
+PY-209 | scripts/build_review_package.py:304
+PY-210 | release/tools/verify_artifact_set/verify_artifact_set.py:48-49
+PY-211 | scripts/dedup_release_assets.py:47
+PY-212 | release/verify_checksum_json.py:30-34 vs write_checksum_json.py:12-14
+PY-213 | scripts/verify_xaml_resources.py:47
+PY-214 | release/tools/verify_manifest/verify_manifest.py:36-44
+PY-215 | contracts/codegen/verify_bridge_guard.py:45-52,82-84
+PY-001 | contracts/schemas/version.schema.json:8
+PY-002 | contracts/schemas/update-manifest.schema.json:10
+PY-003 | contracts/schemas/update-manifest.schema.json:19-20
+PY-004 | release/update_verifier.py:50
+PY-005 | scripts/gen_jsapi_schema.py:66
+PY-006 | .github/workflows/release-windows.yml:5-11
+PY-007 | .github/workflows/release-android.yml:9-15
+PY-008 | .github/workflows/release-core.yml:9-15
+PY-009 | release/verify_release.py:43-46
+PY-010 | .github/workflows/ci.yml:51
+PY-011 | .github/workflows/ci.yml:77-85
+PY-012 | .github/workflows/release.yml:34
+PY-013 | .github/workflows/contracts.yml:26-75
+PY-014 | scripts/gen_jsapi_schema.py:104
+PY-015 | contracts/codegen/analyze_action_catalog.py:64
+PY-016 | contracts/codegen/generate_csharp.py:59
+PY-017 | contracts/codegen/generate_kotlin.py:58
+PY-018 | .github/workflows/release-windows.yml:59
+PY-019 | .github/workflows/core-rust.yml:41
+PY-020 | .github/workflows/agent-redteam.yml:21
+PY-021 | .github/workflows/release-windows.yml:90
+PY-022 | contracts/vectors/update-manifest-valid.json:4
+PY-023 | contracts/vectors/approvals-replay-and-expiry.json:4
+PY-024 | release/tools/verify_artifact_set/verify_artifact_set.py:46
+PY-025 | .github/workflows/release.yml:133-185
+PY-026 | 
+PY-027 | 
+PY-028 | 
+PY-029 | 
+PY-030 | 
+PY-031 | 
+PY-032 | 
+PY-033 | 
+PY-034 | 
+PY-035 | 
+PY-036 | 
+PY-037 | 
+PY-038 | 
+PY-039 | 
+PY-040 | 
+PY-041 | 
+PY-042 | 
+PY-043 | 
+PY-044 | 
+PY-045 | 
+PY-046 | 
+PY-047 | 
+PY-048 | 
+PY-049 | 
+PY-050 | 
+PY-051 | 
+PY-052 | 
+PY-053 | 
+PY-054 | 
+PY-055 | 
+PY-056 | 
+PY-057 | 
+PY-058 | 
+PY-059 | 
+PY-060 | 
+PY-061 | 
+PY-062 | 
+PY-063 | 
+PY-064 | 
+PY-065 | 
+PY-066 | 
+PY-067 | 
+PY-068 | 
+PY-069 | 
+PY-070 | 
+PY-071 | 
+PY-072 | 
+PY-073 | 
+PY-074 | 
+PY-075 | 
+PY-076 | 
+PY-077 | 
+PY-078 | 
+PY-079 | 
+PY-080 | 
+PY-081 | 
+PY-082 | 
+PY-083 | 
+PY-084 | 
+PY-085 | 
+PY-086 | 
+PY-087 | 
+PY-088 | 
+PY-089 | 
+PY-090 | 
+PY-091 | 
+PY-092 | 
+PY-093 | 
+PY-094 | 
+PY-095 | 
+PY-096 | 
+PY-097 | 
+PY-098 | 
+PY-099 | 
+PY-100 | 
+PY-101 | 
+PY-102 | 
+PY-103 | 
+PY-104 | 
+PY-105 | 
+PY-106 | 
+PY-107 | 
+PY-108 | 
+PY-109 | 
+PY-110 | 
+PY-111 | 
+PY-112 | 
+PY-113 | 
+PY-114 | 
+PY-115 | 
+PY-116 | 
+PY-117 | 
+PY-118 | 
+PY-119 | 
+PY-120 | 
+PY-121 | 
+PY-122 | 
+PY-123 | 
+PY-124 | 
+PY-125 | 
+PY-126 | 
+PY-127 | 
+PY-128 | 
+PY-129 | 
+PY-130 | 
+PY-131 | 
+PY-132 | 
+PY-133 | 
+PY-134 | 
+PY-135 | 
+PY-136 | 
+PY-137 | 
+PY-138 | 
+PY-139 | 
+PY-140 | 
+PY-141 | 
+PY-142 | 
+PY-143 | 
+PY-144 | 
+PY-145 | 
+PY-146 | 
+PY-147 | 
+PY-148 | 
+PY-149 | 
+PY-150 | 
+PY-151 | 
+PY-152 | 
+PY-153 | 
+PY-154 | 
+PY-155 | 
+PY-156 | 
+PY-157 | 
+PY-158 | 
+PY-159 | 
+PY-160 | 
+PY-161 | 
+PY-162 | 
+PY-163 | 
+PY-164 | 
+PY-165 | 
+PY-166 | 
+PY-167 | 
+PY-168 | 
+PY-169 | 
+PY-170 | 
+PY-171 | 
+PY-172 | 

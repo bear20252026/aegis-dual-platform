@@ -1,0 +1,255 @@
+AD-211 | android/.../AegisWebViewClient.kt:240
+AD-212 | android/.../WebViewHardening.kt:186-196
+AD-213 | android/.../OriginPolicy.kt:55-60
+AD-214 | android/.../SecureWebViewFactory.kt:144-149
+AD-211 | android/webview-adapter/src/main/kotlin/com/aegis/webviewadapter/AegisWebViewClient.kt:240
+AD-212 | android/app/src/main/java/com/aegis/browser/WebViewHardening.kt:186-196
+AD-213 | android/broker/src/main/kotlin/com/aegis/broker/OriginPolicy.kt:55-60
+AD-214 | android/app/src/main/java/com/aegis/browser/SecureWebViewFactory.kt:144-149
+AD-215 | android/app/.../BrowserViewModel.kt:107
+AD-216 | android/webview-adapter/.../AegisWebViewClient.kt:183 + BrowserViewModel.kt:274-276
+AD-217 | android/app/.../DownloadPolicy.kt:53-64
+AD-218 | android/app/.../WebViewVersionCheck.kt:21,37-43
+AD-219 | android/app/proguard-rules.pro:14-15
+AD-220 | android/app/.../WebViewDownloadHandler.kt:39,49
+AD-221 | android/webview-adapter/.../AegisWebViewClient.kt:223-227
+AD-222 | android/app/.../MainActivity.kt:372-377
+AD-223 | android/app/.../VerticalTabBar.kt:65-79
+AD-224 | android/app/.../BrowserViewModel.kt:235-249
+AD-225 | android/app/.../BrowserViewModel.kt:449-471
+AD-226 | android/app/.../MainActivity.kt:146-155
+AD-227 | android/app/.../ReaderMode.kt:92-94
+AD-228 | android/app/.../ReaderController.kt:34,51
+AD-229 | android/app/.../SecureNavigator.kt:42
+AD-230 | android/app/.../WebViewDownloadHandler.kt:92-96
+AD-231 | android/app/.../TranslateEntry.kt:28
+AD-232 | android/app/.../BrowserEngine.kt:82-87
+AD-233 | android/webview-adapter/.../AegisWebViewClient.kt:264
+AD-234 | android/app/.../WebViewVersionCheck.kt:14-17
+AD-235 | android/app/.../AegisHomeBridge.kt:70-73
+AD-236 | android/broker/.../NativePolicyCoreBridge.kt:123-125
+AD-237 | android/broker/.../NativePolicyCoreBridge.kt:118-121
+AD-238 | android/app/.../BrowserViewModel.kt:40,207
+AD-239 | android/app/.../MainActivity.kt:89-93
+AD-240 | android/app/.../MainActivity.kt:399-405
+AD-241 | android/app/build.gradle.kts:84-88
+AD-242 | android/build.gradle.kts:2-8
+AD-243 | .github/workflows/android-quality.yml:47-53
+AD-244 | android/contracts/.../generated/
+AD-245 | android/app/.../AegisTheme.kt:20-25
+AD-246 | android/webview-adapter/.../AegisWebViewClient.kt:96-101
+AD-247 | android/app/.../WebViewHardening.kt:151-312
+AD-248 | android/app/.../SearchEngines.kt:75-90
+AD-249 | android/broker/.../AndroidBroker.kt:337-346
+AD-250 | android/app/.../AegisHomeBridge.kt:90-109
+AD-251 | android/app/.../BrowserViewModel.kt:91 + MainActivity.kt:222-239
+AD-001 | android/app/src/main/AndroidManifest.xml:16
+AD-002 | android/.../DownloadPolicy.kt:48
+AD-003 | android/app/build.gradle.kts:107
+AD-004 | android/.../webviewadapter/AegisWebViewClient.kt:220
+AD-005 | android/.../WebViewHardening.kt:166
+AD-006 | android/.../MainActivity.kt:359
+AD-007 | webview-adapter/src/test（空）
+AD-008 | AegisWebViewClient.kt:88
+AD-009 | AegisWebViewClient.kt:198
+AD-010 | AegisWebViewClient.kt:70
+AD-011 | AegisWebViewClient.kt:63
+AD-012 | AegisWebViewClient.kt:239
+AD-013 | AegisWebViewClient.kt:359
+AD-014 | AegisWebViewClient.kt:225
+AD-015 | AegisWebViewClient.kt:97
+AD-016 | broker/.../AndroidBroker.kt:46
+AD-017 | AndroidBroker.kt:311
+AD-018 | AndroidBroker.kt:297
+AD-019 | AndroidBroker.kt:266
+AD-020 | AndroidBroker.kt:30
+AD-021 | app/.../BrowserEngine.kt:38
+AD-022 | app/.../SecureWebViewFactory.kt:123
+AD-023 | app/.../WebViewHardening.kt:23
+AD-024 | app/.../DownloadPolicy.kt:60
+AD-025 | app/.../DownloadPolicy.kt:6
+AD-026 | app/.../WebViewDownloadHandler.kt:105
+AD-027 | WebViewDownloadHandler.kt:77
+AD-028 | app/.../ReaderMode.kt:78
+AD-029 | app/.../TranslateEntry.kt:26
+AD-030 | app/.../WebViewVersionCheck.kt:46
+AD-031 | app/.../SearchEngines.kt:67
+AD-032 | 
+AD-033 | 
+AD-034 | 
+AD-035 | 
+AD-036 | 
+AD-037 | 
+AD-038 | 
+AD-039 | 
+AD-040 | 
+AD-041 | 
+AD-042 | 
+AD-043 | 
+AD-044 | 
+AD-045 | 
+AD-046 | 
+AD-047 | 
+AD-048 | 
+AD-049 | 
+AD-050 | 
+AD-051 | 
+AD-052 | 
+AD-053 | 
+AD-054 | 
+AD-055 | 
+AD-056 | 
+AD-057 | 
+AD-058 | 
+AD-059 | 
+AD-060 | 
+AD-061 | 
+AD-062 | 
+AD-063 | 
+AD-064 | 
+AD-065 | 
+AD-066 | 
+AD-067 | 
+AD-068 | 
+AD-069 | 
+AD-070 | 
+AD-071 | 
+AD-072 | 
+AD-073 | 
+AD-074 | 
+AD-075 | 
+AD-076 | 
+AD-077 | 
+AD-078 | 
+AD-079 | 
+AD-080 | 
+AD-081 | 
+AD-082 | 
+AD-083 | 
+AD-084 | 
+AD-085 | 
+AD-086 | 
+AD-087 | 
+AD-088 | 
+AD-089 | 
+AD-090 | 
+AD-091 | 
+AD-092 | 
+AD-093 | 
+AD-094 | 
+AD-095 | 
+AD-096 | 
+AD-097 | 
+AD-098 | 
+AD-099 | 
+AD-100 | 
+AD-101 | 
+AD-102 | 
+AD-103 | 
+AD-104 | 
+AD-105 | 
+AD-106 | 
+AD-107 | 
+AD-108 | 
+AD-109 | 
+AD-110 | 
+AD-111 | 
+AD-112 | 
+AD-113 | 
+AD-114 | 
+AD-115 | 
+AD-116 | 
+AD-117 | 
+AD-118 | 
+AD-119 | 
+AD-120 | 
+AD-121 | 
+AD-122 | 
+AD-123 | 
+AD-124 | 
+AD-125 | 
+AD-126 | 
+AD-127 | 
+AD-128 | 
+AD-129 | 
+AD-130 | 
+AD-131 | 
+AD-132 | 
+AD-133 | 
+AD-134 | 
+AD-135 | 
+AD-136 | 
+AD-137 | 
+AD-138 | 
+AD-139 | 
+AD-140 | 
+AD-141 | 
+AD-142 | 
+AD-143 | 
+AD-144 | 
+AD-145 | 
+AD-146 | 
+AD-147 | 
+AD-148 | 
+AD-149 | 
+AD-150 | 
+AD-151 | 
+AD-152 | 
+AD-153 | 
+AD-154 | 
+AD-155 | 
+AD-156 | 
+AD-157 | 
+AD-158 | 
+AD-159 | 
+AD-160 | 
+AD-161 | 
+AD-162 | 
+AD-163 | 
+AD-164 | 
+AD-165 | 
+AD-166 | 
+AD-167 | 
+AD-168 | 
+AD-169 | 
+AD-170 | 
+AD-171 | 
+AD-172 | 
+AD-173 | 
+AD-174 | 
+AD-175 | 
+AD-176 | 
+AD-177 | 
+AD-178 | 
+AD-179 | 
+AD-180 | 
+AD-181 | 
+AD-182 | 
+AD-183 | 
+AD-184 | 
+AD-185 | 
+AD-186 | 
+AD-187 | 
+AD-188 | 
+AD-189 | 
+AD-190 | 
+AD-191 | 
+AD-192 | 
+AD-193 | 
+AD-194 | 
+AD-195 | 
+AD-196 | 
+AD-197 | 
+AD-198 | 
+AD-199 | 
+AD-200 | 
+AD-201 | 
+AD-202 | 
+AD-203 | 
+AD-204 | 
+AD-205 | 
+AD-206 | 
+AD-207 | 
+AD-208 | 
+AD-209 | 
+AD-210 | 

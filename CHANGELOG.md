@@ -5,6 +5,13 @@
 > `docs/audit/` 各批次审计与修复日志；相关修复随**下一个正式版本发布时合并
 > 记账**进本文件（保持版本条目与发布制品一一对应，避免无发布实体的空转条目）。
 
+## beta.50（2026-09-28 · UI 现代化三批 + 启动崩溃修复）
+- **修复（fatal）**：Program.Main 跳过 App.InitializeComponent 的旧注解失实——App.xaml 携带全局合并资源字典后，Application.Resources 从未加载，主窗口 StaticResource（ChromeComboBox/IconFont）每次启动 XamlParseException（security.log 三次 [fatal] 实证）；现显式调用 InitializeComponent。
+- **UI 批①（33edbaa）**：工具栏/标签条 Unicode 字符与彩色 emoji → Segoe Fluent/MDL2 字体 glyph 单源；搜索引擎/每页条数原生白底下拉 → 深色模板化 ChromeComboBox；全窗深色细滚动条；独立窗口深/浅色原生标题栏（DWMWA_USE_IMMERSIVE_DARK_MODE）。
+- **UI 批②（38310f1）**：设置窗 iOS 卡片分组 + DarkCheck/DarkInput/SolidButton 全套深色控件；下载窗圆角卡片 + 📂→MDL2 glyph；标签条 Edge 式三态激活 pill。
+- **UI 批③（2c59a25）**：地址栏建议两行化（标题+URL+类型图标）；导航审批弹窗精修；无痕窗口标签选中态。
+- 壁纸系统（4 张 aurora + 右下切换圆点）全程零触碰。回归：dotnet 593+57 / node 82 / pytest 30 / validate_release 85 文件全绿。
+
 ## beta.32 – beta.49（2026-09-20 – 2026-09-23 · 全仓审计 1115 项与 P1 批次落地）
 > 完整清单：docs/audit/full-audit-2026-09-23-1000-items.md（六路审计 CS290/AD210/RS205/PY172/WB100/SP138）。
 ### 架构（beta.32 – beta.34，补账）

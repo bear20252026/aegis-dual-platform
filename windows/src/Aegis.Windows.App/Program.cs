@@ -11,10 +11,13 @@ public static class Program
     [STAThread]
     public static void Main()
     {
-        // App.xaml 现为无 StartupUri/无资源的组合根占位（窗口由 App.OnStartup
-        // 以注入依赖构造），PresentationBuildTasks 对空 Application XAML 不再
-        // 生成 InitializeComponent——无需加载的 XAML 资源，跳过调用。
+        // App.xaml 自 UI 现代化批①（33edbaa）起携带全局合并资源字典
+        // （ChromeStyles——图标字体/深色 ComboBox/细滚动条），必须经
+        // InitializeComponent 加载进 Application.Resources——跳过调用会使
+        // MainWindow 的 StaticResource 全部 XamlParseException（2026-09-28
+        // 三次启动 [fatal] 的根因：旧注释「无资源可跳过」已失实）。
         var app = new App();
+        app.InitializeComponent();
         app.Run();
     }
 }
