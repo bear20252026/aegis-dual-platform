@@ -69,13 +69,16 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
 
 ## 质量与审计状态
 
-- **两轮全仓审计**：2026-09-23 轮（1115 项，[台账](docs/audit/full-audit-2026-09-23-1000-items.md)）
-  已落地 **826 项**（RS/CS 两区全量闭环）；2026-09-26 轮全仓复扫（229 项新发现，
-  [报告](docs/audit/full-audit-2026-09-26-229-items.md)）**229/229 全部闭环**
-- 测试规模：cargo 460+ / dotnet 650+ / gradle JVM 160+ / pytest 220+ / node 70+ 用例，
+- **两轮全仓审计 + 一轮逐项核验，全量闭环**：
+  - 2026-09-23 轮（1115 项，[台账](docs/audit/full-audit-2026-09-23-1000-items.md)）
+    **1115/1115 全量闭环**——并经 V1 核验批对 RS/PY 两区 377 项逐项代码级复核，
+    19 项虚闭环补落地、2 项如实登记（RS-149 uniffi 上游阻塞暂缓 / PY-021 接受风险）
+  - 2026-09-26 轮全仓复扫（229 项新发现，
+    [报告](docs/audit/full-audit-2026-09-26-229-items.md)）**229/229 全部闭环**
+- 测试规模：cargo 450+ / dotnet 650+ / gradle JVM 280+ / pytest 230+ / node 80+ 用例，
   五门禁（validate_release / verify_versions / bridge_guard / contract_compatibility /
   cross_end_lists）常绿
-- 当前版本：`2.2.0-beta.49`（[shared/version.properties](shared/version.properties) 单源；
+- 当前版本：`2.2.0-beta.50`（[shared/version.properties](shared/version.properties) 单源；
   发布记录见 [CHANGELOG.md](CHANGELOG.md)，记账规则见文件头）
 
 ## 蓝图状态（蓝图文档已并入 docs/architecture-overview.md）

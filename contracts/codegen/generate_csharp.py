@@ -101,8 +101,8 @@ def enum_constant_lines(schema: dict, name: str) -> list[str]:
         return []
     lines = [
         "",
-        f"/// <summary>PY-188（2026-09-26 审计）：{name} 值域常量——schema enum/const 单源，"
-        "属性保持基础类型以兼容既有消费方。</summary>",
+        (f"/// <summary>PY-188（2026-09-26 审计）：{name} 值域常量——schema enum/const 单源，"
+         "属性保持基础类型以兼容既有消费方。</summary>"),
         f"public static class {name}Values",
         "{",
     ]

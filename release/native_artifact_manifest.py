@@ -13,7 +13,6 @@ import json
 import sys
 from pathlib import Path
 
-
 SCHEMA_VERSION = 1
 LIBRARY = "aegis_policy_core"
 EXPECTED_ARTIFACTS = {

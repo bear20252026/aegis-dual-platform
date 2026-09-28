@@ -133,9 +133,10 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001（验证脚本盲捕是设计）
         failures.append(f'JSON shared/release.json: {exc}')
     # SP-166（2026-09-26 审计）：MSIX/appinstaller 路线模板（*.template）已
-    # 确认死资产后删除（全仓仅退役 PyInstaller 管线 build-windows.ps1 引用
-    # ——该脚本本身引用的 windows/aegis_source 目录已不存在），对应校验
-    # 分支一并移除；模板校验不再有任何可校验对象。
+    # 确认死资产后删除（此前全仓仅退役 PyInstaller 管线 build-windows.ps1
+    # 引用——该脚本本身引用的 windows/aegis_source 目录已不存在）；PY-160
+    # （2026-09-23 审计·V1 核验批）将 build-windows.ps1 一并删除，退役
+    # PyInstaller/MSIX 打包链至此无残留。模板校验不再有任何可校验对象。
     if (windows / 'aegis_webview.nsi').exists():
         failures.append('Deprecated NSIS script still exists in the Windows working copy')
     failures.extend(check_lock_file(windows))

@@ -94,7 +94,7 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
         expires_raw = manifest.get("expires_at")
         if not isinstance(expires_raw, str):
             raise UpdateRejected("缺少过期时间")
-        expires = datetime.fromisoformat(expires_raw.replace("Z", "+00:00"))
+        expires = datetime.fromisoformat(expires_raw)
         if expires.tzinfo is None or expires <= now.astimezone(UTC):
             raise UpdateRejected("更新清单已过期或缺少时区")
 

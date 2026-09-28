@@ -1,6 +1,15 @@
 name: Native-Policy-Artifacts
 
 on:
+  # PY-172（2026-09-23 审计·V1 核验批）：补 push 触发（仅 master + 同 paths——
+  # 原先仅 PR 触发，直推 master 的 core 变更不经本链）
+  push:
+    branches:
+      - master
+    paths:
+      - 'core/rust-policy-core/**'
+      - 'release/native_artifact_manifest.py'
+      - '.github/workflows/native-policy-artifacts.yml'
   pull_request:
     paths:
       - 'core/rust-policy-core/**'
@@ -81,6 +90,12 @@ jobs:
         with:
           toolchain: stable
           targets: aarch64-linux-android  # 单架构：arm64-v8a
+      # PY-057（2026-09-23 审计·V1 核验批）：原批把缓存写进了 build-windows
+      # （且重复两份，后被 PY-193 去重）——build-android 从未补上，cargo-ndk
+      # 交叉编译每次冷跑。此处补齐。
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-057)
+        with:
+          workspaces: core/rust-policy-core
       - uses: android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
         with:
           packages: 'ndk;28.0.12433566'

@@ -35,12 +35,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
-      - name: cargo audit (Rust 依赖——core——依赖门禁——失败即阻断)
-        working-directory: core/rust-policy-core
-        run: |
-          cargo install cargo-audit --version 0.22.2 --locked
-          cargo audit
+      # PY-171（2026-09-23 审计·V1 核验批）：安装+执行块收敛为 composite action 单源
+      - uses: ./.github/actions/cargo-audit
       - name: SBOM generation (CycloneDX——随制品存档——依赖门禁证据)
+        # PY-166（2026-09-23 审计·V1 核验批）：本步输入是契约测试向量
+        # update-manifest-valid.json——验证的是 generate_sbom「清单→CycloneDX」
+        # 形态转换器本身，不是生产依赖 SBOM（故组件无 purl/version 依赖字段，
+        # 仅承载 artifact 级 name/sha256/platform）。生产依赖 SBOM 由各平台
+        # 发布链的 anchore/sbom-action 从真实锁文件生成（见 release-core.yml
+        # sbom job 等处）——两回事勿混。
         run: |
           python release/tools/generate_sbom/generate_sbom.py \
             contracts/vectors/update-manifest-valid.json /tmp/sbom.cdx.json

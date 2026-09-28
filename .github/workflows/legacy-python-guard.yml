@@ -86,20 +86,23 @@ jobs:
         run: ruff check . --exclude legacy
 
       - name: bandit 安全扫描（无 Medium/High）
-        # 设计豁免规则（见 docs/KNOWLEDGE_BASE.md「P6 bandit 豁免」）：
+        # 设计豁免规则单源 bandit.yaml（PY-156，2026-09-23 审计·V1 核验批——
+        # 此前 skip 清单仅在下方行内命令，无配置可复用）：
         # - B110 try_except_pass：静默降级是安全设计
         # - B404/B603/B607 subprocess：均为参数列表 + shell=False 的受控
         #   调用（security.py icacls / webview2_probe.py tasklist），无注入面
         # 其余规则 Medium/High 触发失败（bandit 退出码即门禁）。
-        run: bandit -r app/ -q --skip B110,B404,B603,B607
+        run: bandit -c bandit.yaml -r app/ -q
 
       - name: mypy 类型检查（归档栈 0 错误——全量目录口径）
         # SP-151（2026-09-26 审计）：原注释"新栈 0 错误"失实——检查对象是
         # 只读归档栈。PY-011：手工文件清单仅 17/33 个 app 模块——15 个静默
         # 免检；已本地实测 app/ 全量口径 0 错误（42 源文件），CI 与本地同
         # 口径全量覆盖。
+        # PY-155（2026-09-23 审计·V1 核验批）：文件清单/排除项单源 mypy.ini
+        # （裸 `mypy` 无参调用即消费 config files，实测 43 源文件 0 错误）。
         shell: bash
-        run: mypy main_webview.py app/ crash_reporter.py --exclude "System Volume Information"
+        run: mypy
 
       - name: Python 单元测试（tests/python——PY-103..148 工具链单测 + PY-149 发布链基建）
         # P5（审计 2026-09-25）：tests/python/ 此前从未入 CI——release_chain_test.py

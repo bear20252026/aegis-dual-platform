@@ -43,7 +43,7 @@ jobs:
         with:
           toolchain: stable
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-054)
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2（quality-gate 编译缓存）
         with:
           workspaces: core/rust-policy-core
       - name: cargo fmt --check
@@ -52,10 +52,8 @@ jobs:
         run: cargo clippy --locked -- -D warnings
       - name: cargo test --locked
         run: cargo test --locked
-      - name: cargo audit
-        run: |
-          cargo install cargo-audit --version 0.22.2 --locked
-          cargo audit
+      # PY-171（2026-09-23 审计·V1 核验批）：安装+执行块收敛为 composite action 单源
+      - uses: ./.github/actions/cargo-audit
 
   build:
     needs: quality-gate
@@ -70,6 +68,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772
         with:
           toolchain: stable
+      # PY-054（2026-09-23 审计·V1 核验批）：原批把缓存错加到 quality-gate（另
+      # 一 job 不共享 runner）——被点名的 build job 冷编译依旧。此处补齐。
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-054)
+        with:
+          workspaces: core/rust-policy-core
       - name: Build release library
         run: cargo build --release --locked --manifest-path core/rust-policy-core/Cargo.toml
       - name: Collect artifacts + SHA-256

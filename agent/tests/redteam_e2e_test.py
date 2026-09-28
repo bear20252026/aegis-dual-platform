@@ -34,7 +34,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
 from unittest import mock
 
@@ -233,7 +233,7 @@ def _parse_expires_at(value: str) -> datetime | None:
     except (TypeError, ValueError):
         return None
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -431,7 +431,7 @@ def test_expiry_enforced():
     SP-150：expires_at 为 schema 口径 RFC3339 date-time 字符串。
     SP-157：解析失败 fail-closed 视同过期（无宽限）。"""
     broker = E2EBroker()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assert broker.evaluate(_ok(
         nonce="e1", expires_at=(now - timedelta(seconds=10)).isoformat())) == Decision.DENY_EXPIRED
     assert broker.evaluate(_ok(
@@ -444,9 +444,9 @@ def test_max_ttl_enforced():
     """SP-157（2026-09-26 审计）：expires_at 超过 max_ttl——拒绝（now+10 年的
     授权不再永久有效）；TTL 内仍放行；构造器可收紧 max_ttl。"""
     broker = E2EBroker()
-    far = (datetime.now(timezone.utc) + timedelta(days=3650)).isoformat()
+    far = (datetime.now(UTC) + timedelta(days=3650)).isoformat()
     assert broker.evaluate(_ok(nonce="ttl1", expires_at=far)) == Decision.DENY_MAX_TTL
-    near = (datetime.now(timezone.utc) + timedelta(seconds=10)).isoformat()
+    near = (datetime.now(UTC) + timedelta(seconds=10)).isoformat()
     assert broker.evaluate(_ok(nonce="ttl2", expires_at=near)) == Decision.ALLOW
     tight = E2EBroker(max_ttl=5.0)
     assert tight.evaluate(_ok(nonce="ttl3", expires_at=near)) == Decision.DENY_MAX_TTL

@@ -7,8 +7,9 @@
 # 风格参照同目录 analyze_action_catalog.py（专项断言不与其重复检查项交叉：
 # 重复名/风险冲突/audit/fixtures 由 analyze_action_catalog.py 负责）。
 
-import sys
 import pathlib
+import sys
+
 import yaml
 
 CATALOG = pathlib.Path(__file__).resolve().parent.parent / "policy" / "action-catalog.yaml"

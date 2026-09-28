@@ -29,7 +29,7 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -217,7 +217,7 @@ def build(out_dir: Path) -> list[dict[str, str]]:
     props = version_props()
     version = props.get("VERSION_NAME", "unknown")
     short, subject = git_commit_and_head()
-    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    generated_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
     manifest_doc = {
         "generated_at": generated_at,
         "version": version,

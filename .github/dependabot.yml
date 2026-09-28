@@ -1,0 +1,25 @@
+# PY-157（2026-09-23 审计·V1 核验批）：三生态周频依赖更新——此前全仓无任何
+# dependabot 配置，依赖更新纯手工。三生态取活跃面：CI action（13 workflow
+# 全 SHA pin，dependabot 顺带刷新版本注记）、pip（根 requirements-ci.txt
+# hash 锁定工具链）、gradle（android/ 四模块）。
+# 约束：open-pull-requests-limit=5 防洪；pip 更新须重算 --hash（dependabot
+# 对 hash 锁定文件会连带更新 hash 条目，不合的 PR 直接关）。
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "gradle"
+    directory: "/android"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5

@@ -4,8 +4,9 @@
 # 用法：python contracts/codegen/analyze_action_catalog.py
 # 退出码：0=通过 / 1=发现问题 / 2=解析错误
 
-import sys
 import pathlib
+import sys
+
 import yaml
 
 CATALOG = pathlib.Path(__file__).resolve().parent.parent / "policy" / "action-catalog.yaml"
