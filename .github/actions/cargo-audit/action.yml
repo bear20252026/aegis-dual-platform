@@ -12,5 +12,6 @@ runs:
       run: cargo install cargo-audit --version 0.22.2 --locked
     - name: cargo audit
       shell: bash
-      # 显式 cd 而非 working-directory——composite step 的目录语义跨 runner 版本有差异
-      run: cd core/rust-policy-core && cargo audit
+      # 从 git 仓库根解析路径——调用方 job 可能带 defaults.run.working-directory
+      #（如 core-rust.yml cargo-gate），相对 cd 在不同 cwd 语义下会双重拼接
+      run: cd "$(git rev-parse --show-toplevel)/core/rust-policy-core" && cargo audit
