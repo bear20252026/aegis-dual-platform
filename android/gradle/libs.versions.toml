@@ -18,7 +18,7 @@ composeBom = "2026.06.00"
 # 工具链
 ktlint = "1.8.0"
 # 第三方
-kotlinxDatetime = "0.6.2"
+kotlinxDatetime = "0.8.0"
 # jna：登记为文档单源（broker 的 @aar 分类器依赖无法走 catalog，字面量需与此同步）
 # AD-099（审计 2026-09-23 清单·A6 批）：5.12.0 → 5.19.1 升级回归（broker 单测门禁）
 jna = "5.19.1"
