@@ -6,7 +6,7 @@
 [versions]
 # AD-242（2026-09-26 审计）：插件版本入 catalog 单源——root build.gradle.kts
 # 此前字面量散落（AD-154 只收敛了 app 依赖）
-agp = "9.3.1"
+agp = "9.4.1"
 kotlinComposePlugin = "2.4.20"
 gradleKtlintPlugin = "14.2.0"
 detektPlugin = "1.23.8"
