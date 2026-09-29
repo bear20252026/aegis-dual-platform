@@ -141,7 +141,14 @@ class BrowserViewModel(
             alertRes = { res -> _webViewAlert.value = alertText(res) },
         )
 
-    private lateinit var tabManager: TabManager
+    // AD-003 R8 真机回归（2026-09-29）：lateinit 换可空字段。 lateinit 的
+    // `::x.isInitialized` 在字节码层退化为字段空比较——R8 full mode 按
+    // @NotNull 声明把该比较折叠为 true，连 init() 开头的幂等检查
+    // `if (isInitialized) return` 也被折叠成无条件 return → tabManager 永不
+    // 初始化 → 启动即崩（retrace 实锤：Required value was null at
+    // AddressAndContent:248；整类 keep 不缓解）。可空字段 + ?./?: 语义由
+    // 类型系统承载，对优化器免疫（等价语义：未初始化 = null）。
+    private var tabManager: TabManager? = null
 
     /** P1-3 修复：渲染进程崩溃重建 WebView 需要 Context（init 时存应用级引用）。 */
     private var appContext: android.content.Context? = null
@@ -165,7 +172,7 @@ class BrowserViewModel(
     }
 
     /** 当前标签的 WebView（系统回退键消费 WebView 历史栈——未初始化返回 null）。 */
-    fun currentWebViewOrNull(): WebView? = if (::tabManager.isInitialized) tabManager.current()?.webView else null
+    fun currentWebViewOrNull(): WebView? = tabManager?.current()?.webView
 
     /**
      * AD-063：地址栏展示映射——首页 file:// 资产路径显示为 [HOME_DISPLAY_URL]
@@ -179,17 +186,18 @@ class BrowserViewModel(
      * 收口；init 前调用静默忽略（对齐类内索引操作约定）。
      */
     private fun withTabManager(block: (TabManager) -> Unit) {
-        if (::tabManager.isInitialized) block(tabManager)
+        tabManager?.let(block)
     }
 
     /** 初始化 TabManager 并创建首个标签。 */
     fun init(context: android.content.Context) {
-        if (::tabManager.isInitialized) return
+        if (tabManager != null) return
         appContext = context.applicationContext
-        tabManager = TabManager()
+        val tm = TabManager()
+        tabManager = tm
         val initialWebView = createSecureWebView(context)
         SecureWebViewFactory.navigatorFor(initialWebView)?.openTrustedHome()
-        tabManager.addTab(initialWebView, url = HOME_URL)
+        tm.addTab(initialWebView, url = HOME_URL)
         refresh()
     }
 
@@ -293,7 +301,7 @@ class BrowserViewModel(
      * 安全链路（broker 决策）不绕过。
      */
     private fun navigateWithDebounce(bypassDebounce: Boolean) {
-        val wv = if (::tabManager.isInitialized) tabManager.current()?.webView else null
+        val wv = tabManager?.current()?.webView
         if (wv == null ||
             (!bypassDebounce && !navigateDebounce.ok(_pendingNavigationConfirmation.value != null))
         ) {
@@ -381,7 +389,7 @@ class BrowserViewModel(
      */
     fun approvePendingNavigationConfirmation(): Boolean {
         val pending = _pendingNavigationConfirmation.value ?: return false
-        if (!::tabManager.isInitialized || tabManager.current()?.webView !== pending.webView) {
+        if (tabManager?.current()?.webView !== pending.webView) {
             _webViewAlert.value = alertText(R.string.confirm_switch_back)
             return false
         }
@@ -402,7 +410,7 @@ class BrowserViewModel(
     }
 
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */
-    fun getTabManager(): TabManager? = if (::tabManager.isInitialized) tabManager else null
+    fun getTabManager(): TabManager? = tabManager
 
     /** P1-3 修复：渲染进程崩溃后原位重建 WebView 并重载原 URL（主线程异步执行）。 */
     private fun rebuildAfterRendererGone(deadWebView: WebView) {
@@ -452,11 +460,11 @@ class BrowserViewModel(
             tabManagerOrNull = ::getTabManager,
             addressDraftActive = { addressDraftActive },
             mapDisplayAddress = ::displayAddress,
-            submitPageAddress = { _address.value = it },
-            submitPageError = { _pageError.value = it },
-            clearPageError = { this@BrowserViewModel.clearPageError() },
-            submitWebViewAlert = { _webViewAlert.value = it },
-            refreshTabs = ::refresh,
+            onSubmitPageAddress = { _address.value = it },
+            onSubmitPageError = { _pageError.value = it },
+            onClearPageError = { this@BrowserViewModel.clearPageError() },
+            onSubmitWebViewAlert = { _webViewAlert.value = it },
+            onRefreshTabs = ::refresh,
             errorStrings = { pageErrorStringsOf(::alertText, ::alertText) },
         )
 

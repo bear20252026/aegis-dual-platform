@@ -1,5 +1,6 @@
 package com.aegis.browser
 
+import android.webkit.WebView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.aegis.broker.AndroidBroker
@@ -8,6 +9,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * AD-067（2026-09-24 审计）：instrumented 冒烟集——真机/模拟器最小走查，
@@ -56,5 +59,44 @@ class SmokeInstrumentedTest {
                 "attachment; filename=\"report.pdf\"",
             ),
         )
+    }
+
+    @Test
+    fun perSiteSeedSha256KnownAnswerOnDevice() {
+        // AD-005（审计 2026-09-23 清单·真机批次）：per-site 种子派生迁移为
+        // JS 内嵌同步 SHA-256（构造对齐 Rust per_site_seed：hexDecode(sessionSeed)
+        // || 'aegis:per-site-seed:v2:' || domain，取前 16 字节）。JVM 无法执行
+        // WebView JS——在模拟器真 Chromium 上对 Kotlin MessageDigest 已知答案。
+        val sessionSeed = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+        val domain = "example.com"
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        md.update(sessionSeed.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
+        md.update("aegis:per-site-seed:v2:".toByteArray(Charsets.US_ASCII))
+        md.update(domain.toByteArray(Charsets.UTF_8))
+        val expected = md.digest().take(16).joinToString("") { "%02x".format(it) }
+
+        // 测试锚点替换：脚本派生入参从 location.hostname 固定为已知域名
+        // （仅测试副本做字符串手术，生产脚本不含该替换）
+        val script =
+            WebViewHardening
+                .fingerprintShieldScript(sessionSeed)
+                .replace("getETLD1(location.hostname)", "'example.com'")
+
+        val latch = CountDownLatch(1)
+        var actual: String? = null
+        var webView: WebView? = null
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            webView = WebView(InstrumentationRegistry.getInstrumentation().targetContext)
+            webView!!.settings.javaScriptEnabled = true
+            webView!!.evaluateJavascript(script) {
+                webView!!.evaluateJavascript("window.__AEGIS_SITE_SEED || ''") { result ->
+                    actual = result.trim().removeSurrounding("\"")
+                    latch.countDown()
+                }
+            }
+        }
+        assertTrue("evaluateJavascript 未在 30s 内回传", latch.await(30, TimeUnit.SECONDS))
+        InstrumentationRegistry.getInstrumentation().runOnMainSync { webView?.destroy() }
+        assertEquals("JS SHA-256 派生与 JVM MessageDigest 已知答案不一致", expected, actual)
     }
 }

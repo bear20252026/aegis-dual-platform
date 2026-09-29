@@ -8,6 +8,14 @@
 }
 -keep public class com.aegis.browser.MainActivity
 
+# ---- lateinit isInitialized × R8（AD-003 真机回归 2026-09-29 实锤）----
+# minified release 启动即崩 "Required value was null"（AddressAndContent:248）：
+# R8 full mode 按 @NotNull 声明折叠 `::tabManager.isInitialized` 的空比较为
+# true——init() 的幂等检查被折叠成无条件 return，tabManager 永不初始化。
+# 实验证据：整类 keep BrowserViewModel 不缓解（优化作用于字段空检查语义，
+# 非类名/合并）。修复取代码级：BrowserViewModel.tabManager lateinit → 可空
+# 字段（类型系统承载未初始化语义，对优化器免疫）——不设 keep 规则。
+
 # ---- Rust 策略核心桥（JNA）----
 # JNA 按「方法名」映射 native 符号（aegis_policy_core_broker_*）——
 # R8 混淆 Abi 接口后 System.load 可过但符号查找全部失败 → 静默 null →

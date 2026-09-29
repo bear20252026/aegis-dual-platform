@@ -17,11 +17,16 @@ internal class BrowserViewModelHost(
     private val tabManagerOrNull: () -> TabManager?,
     private val addressDraftActive: () -> Boolean,
     private val mapDisplayAddress: (String) -> String,
-    private val submitPageAddress: (String) -> Unit,
-    private val submitPageError: (PageError) -> Unit,
-    private val clearPageError: () -> Unit,
-    private val submitWebViewAlert: (String) -> Unit,
-    private val refreshTabs: () -> Unit,
+    // AD-003 回归（2026-09-29）：回调属性加 on 前缀——原名与 override 方法
+    // 同名（submitPageAddress/clearPageError 等 5 处），override 体内的裸
+    // 调用经 Kotlin 重载解析命中**成员函数自身**（函数优先于属性 invoke
+    // 约定）→ 无限自递归 StackOverflowError。debug 下因触发路径未被走查
+    // 潜伏；R8 真机回归（AD-003）启动期即实锤。改名消除名字遮蔽。
+    private val onSubmitPageAddress: (String) -> Unit,
+    private val onSubmitPageError: (PageError) -> Unit,
+    private val onClearPageError: () -> Unit,
+    private val onSubmitWebViewAlert: (String) -> Unit,
+    private val onRefreshTabs: () -> Unit,
     private val errorStrings: () -> PageErrorTexts.Strings,
 ) : WebViewEventAssembly.Host {
     override val activeTabManager: TabManager?
@@ -33,23 +38,23 @@ internal class BrowserViewModelHost(
     override fun displayAddress(url: String): String = mapDisplayAddress(url)
 
     override fun submitPageAddress(url: String) {
-        submitPageAddress(url)
+        onSubmitPageAddress(url)
     }
 
     override fun submitPageError(error: PageError) {
-        submitPageError(error)
+        onSubmitPageError(error)
     }
 
     override fun clearPageError() {
-        clearPageError()
+        onClearPageError()
     }
 
     override fun submitWebViewAlert(text: String) {
-        submitWebViewAlert(text)
+        onSubmitWebViewAlert(text)
     }
 
     override fun refreshTabs() {
-        refreshTabs()
+        onRefreshTabs()
     }
 
     override fun errorStrings(): PageErrorTexts.Strings = errorStrings()

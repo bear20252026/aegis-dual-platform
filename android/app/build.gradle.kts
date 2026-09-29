@@ -113,6 +113,12 @@ android {
             // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
             // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）
             abiFilters += listOf("arm64-v8a")
+            // 本地模拟器回归通道（AD-067 冒烟 / AD-003 R8 真机回归，2026-09-29）：
+            // 模拟器镜像多为 x86_64-only，经 -PlocalEmulatorAbi=x86_64 追加模拟器
+            // ABI 入包（配套 -PnativePolicyCoreDir 指向含 x86_64/ 的制品目录）。
+            // CI 与发布链不传该属性——单架构分发规则不受影响。
+            val localEmulatorAbi = providers.gradleProperty("localEmulatorAbi").orElse("")
+            if (localEmulatorAbi.get().isNotBlank()) abiFilters += localEmulatorAbi.get()
         }
     }
 
@@ -161,10 +167,12 @@ android {
             ) {
                 signingConfig = signingConfigs.getByName("release")
             }
-            // R8 混淆暂停（2026-08-30）：JNA 按名映射 / androidx.webkit setTag(R$id)
-            // 连环踩坑——keep 规则补一个漏一个，真机三连崩。止血：关闭混淆
-            // 保可用性（体积 +~7MB），R8 规则全量真机回归后再启用。
-            isMinifyEnabled = false
+            // AD-003（审计 2026-09-23 清单·真机批次）：恢复 R8 混淆。2026-08-30
+            // 止血关闭的原因（JNA 按名映射 / androidx.webkit setTag(R$id) 三连崩）
+            // 已由 keep 规则全量补齐（AD-097/098 + AD-219 probe 门禁接口 keep），
+            // 并经模拟器真机回归（connectedDebugAndroidTest + minified release
+            // 安装启动 + broker 冒烟）验证后重新启用。
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
