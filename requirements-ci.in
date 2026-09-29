@@ -1,0 +1,21 @@
+# requirements-ci.in —— requirements-ci.txt 的顶层 pin 源（pip-compile 输入）
+# 背景：PY-178 建锁文件时 .in 未随库入库（锁文件头注「top-level 8 pin 见 git
+# 历史」）——再生成不可复现。V1 核验批补交本文件，从此锁文件有单源输入。
+# 再生成（requirements-ci.txt 头注同款规程）：
+#   python -m venv <tmp> && <tmp>/Scripts/pip install pip-tools
+#   cp requirements-ci.txt <staging>          # 让 pip-compile 复用既有 pin（最小 diff）
+#   <tmp>/Scripts/pip-compile --generate-hashes --no-header \
+#     -o <staging> requirements-ci.in
+#   人工 diff 审查后替换 requirements-ci.txt（补回头注块）
+# 顶层 8 pin：ruff/bandit/mypy/pytest/pyyaml/jsonschema/rfc3339-validator/pip-audit。
+# cyclonedx-python-lib / py-serializable 不在此列——它们是 pip-audit 的传递
+# 依赖（CycloneDX 输出格式），随 pip-audit 树解算，勿单独 bump（#27/#35/#39
+# 三连坏 PR 根因：Dependabot 对 hash 锁文件只改被 bump 包自身，不重算传递树）。
+ruff==0.16.9
+bandit==1.9.4
+mypy==2.3.1
+pytest==9.1.1
+pyyaml==6.0.3
+jsonschema==4.26.0
+rfc3339-validator==0.1.4
+pip-audit==2.10.1
