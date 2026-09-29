@@ -245,7 +245,7 @@ jobs:
           cp sbom-windows.cdx.json dist/sbom-windows.cdx.json
           python release/write_checksum_json.py --root dist --output dist/SHA256SUMS.json
       - name: Attest SBOM (bind every artifact)
-        uses: actions/attest-sbom@5729fe4dc697fb7538e4e94fd44d040aac1367b2
+        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
         with:
           subject-path: dist/**
           sbom-path: sbom-windows.cdx.json
