@@ -75,7 +75,7 @@ val requireNativePolicyCore =
 
 android {
     namespace = "com.aegis.browser"
-    compileSdk = 36
+    compileSdk = 37
 
     // AD-156（审计 2026-09-23 清单·A7 批）：lint 配置显式化——此前本脚本无
     // lint 块，行为完全依赖默认值（关键开关对读者不可见，门禁语义隐式）。

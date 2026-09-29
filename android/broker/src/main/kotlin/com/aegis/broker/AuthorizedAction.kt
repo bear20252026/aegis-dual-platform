@@ -1,6 +1,6 @@
 package com.aegis.broker
 
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 
 /**
  * 阶段 D（蓝图 android/broker）：AuthorizedAction——唯一允许进入副作用服务的凭据

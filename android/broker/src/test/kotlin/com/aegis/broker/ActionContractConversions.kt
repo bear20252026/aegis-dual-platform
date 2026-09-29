@@ -1,7 +1,7 @@
 package com.aegis.broker
 
 import com.aegis.contracts.generated.ActionContract
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 
 // AD-210（审计 2026-09-23 清单·A7 批）：契约生成物与手写模型的双形态转换
 // 扩展单源——ActionContract.expires_at 为 String（JSON 原始形态——生成器

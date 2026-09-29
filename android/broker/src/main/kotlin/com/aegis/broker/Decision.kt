@@ -1,6 +1,6 @@
 package com.aegis.broker
 
-import kotlinx.datetime.Instant
+import kotlin.time.Instant
 
 /**
  * 阶段 D（蓝图 android/broker）：类型化安全决策——与 contracts（action/approval

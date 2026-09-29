@@ -1,10 +1,10 @@
 package com.aegis.broker
 
-import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.time.Instant
 
 /**
  * AndroidBroker P1 测试缺口补齐（2026-09-24 审计批次 A2——AD-016..020）。
@@ -249,7 +249,7 @@ class AndroidBrokerPolicyTtlTest {
     /** 可注入时钟（AD-020）——固定 instant 手动推进。 */
     private class FakeClock(
         var instant: Instant,
-    ) : kotlinx.datetime.Clock {
+    ) : kotlin.time.Clock {
         override fun now(): Instant = instant
     }
 }

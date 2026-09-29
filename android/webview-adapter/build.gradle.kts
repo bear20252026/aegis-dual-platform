@@ -18,7 +18,7 @@ detekt {
 
 android {
     namespace = "com.aegis.webviewadapter"
-    compileSdk = 36
+    compileSdk = 37
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21

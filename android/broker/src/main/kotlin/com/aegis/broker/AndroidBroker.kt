@@ -13,7 +13,7 @@ class AndroidBroker(
     private val nativePolicyCoreGate: NativePolicyCoreGate = DefaultNativePolicyCoreGate,
     // AD-020（2026-09-24 审计）：时钟可注入——SESSION_TTL 过期/滑动语义可 JVM
     // 单测（此前 Clock.System 硬编码，过期行为不可测）。
-    private val clock: kotlinx.datetime.Clock = kotlinx.datetime.Clock.System,
+    private val clock: kotlin.time.Clock = kotlin.time.Clock.System,
 ) {
     private val consumedNonces =
         java.util.LinkedHashSet<String>()

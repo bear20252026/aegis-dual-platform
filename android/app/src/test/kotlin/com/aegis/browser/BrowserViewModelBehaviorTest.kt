@@ -5,7 +5,6 @@ import android.webkit.WebView
 import androidx.test.core.app.ApplicationProvider
 import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
-import kotlinx.datetime.Clock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -18,6 +17,7 @@ import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import kotlin.time.Clock
 import org.mockito.Mockito.`when` as whenever
 
 /**

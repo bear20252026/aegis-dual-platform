@@ -3,8 +3,8 @@ package com.aegis.broker
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
-import kotlinx.datetime.Instant
 import org.json.JSONObject
+import kotlin.time.Instant
 
 /**
  * Android 侧的 Rust 策略核心受控桥接。

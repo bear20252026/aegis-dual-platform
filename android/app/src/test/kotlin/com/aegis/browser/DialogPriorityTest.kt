@@ -2,11 +2,11 @@ package com.aegis.browser
 
 import android.webkit.WebView
 import com.aegis.broker.ApprovalRequest
-import kotlinx.datetime.Clock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 import org.mockito.Mockito.mock
+import kotlin.time.Clock
 
 /**
  * AD-151（审计 2026-09-23 清单·A7 批）：对话框单槽状态机优先级锁定——

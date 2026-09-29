@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "com.aegis.contracts"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         minSdk = 26

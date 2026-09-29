@@ -1,10 +1,10 @@
 package com.aegis.browser
 
-import kotlinx.datetime.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.ZoneId
+import kotlin.time.Instant
 
 /**
  * AD-110（审计 2026-09-23 清单·A6 批）：审批对话框过期时刻格式化单测——

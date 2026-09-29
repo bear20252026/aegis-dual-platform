@@ -2,9 +2,9 @@ package com.aegis.browser
 
 import android.webkit.WebView
 import com.aegis.broker.ApprovalRequest
-import kotlinx.datetime.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.time.Instant
 
 /**
  * AD-103（审计 2026-09-23 清单·A6 批）：浏览器 UI 状态模型单文件——

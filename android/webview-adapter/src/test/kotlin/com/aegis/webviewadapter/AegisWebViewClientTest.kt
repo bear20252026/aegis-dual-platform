@@ -9,7 +9,6 @@ import com.aegis.broker.AndroidBroker
 import com.aegis.broker.AuthorizedAction
 import com.aegis.broker.Decision
 import com.aegis.broker.DenyReason
-import kotlinx.datetime.Clock
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -20,6 +19,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
+import kotlin.time.Clock
 import org.mockito.Mockito.`when` as whenever
 
 /**

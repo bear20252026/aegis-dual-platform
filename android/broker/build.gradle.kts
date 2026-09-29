@@ -34,7 +34,7 @@ val nativePolicyCoreFiles =
 
 android {
     namespace = "com.aegis.broker"
-    compileSdk = 36
+    compileSdk = 37
     buildFeatures {
         buildConfig = true
     }

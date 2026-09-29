@@ -93,7 +93,7 @@ class ContractAlignmentTest {
                 method = "GET",
                 canonicalParameters = "/p?x=1",
                 scope = "navigation",
-                expiresAt = kotlinx.datetime.Instant.fromEpochSeconds(1_700_000_123),
+                expiresAt = kotlin.time.Instant.fromEpochSeconds(1_700_000_123),
                 nonce = "session-x:abc123",
                 policyVersion = "1.0",
                 explanation = "audit trail",
