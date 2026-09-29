@@ -9,6 +9,9 @@ name: Contracts
       - 'contracts/**'
       - 'scripts/**'
       - 'shared/**'
+      # 本 workflow 以 --require-hashes 安装根级 hash 锁——锁变更须回验
+      - 'requirements-ci.in'
+      - 'requirements-ci.txt'
       - '.github/workflows/contracts.yml'
   pull_request: {}
   workflow_dispatch: {}
