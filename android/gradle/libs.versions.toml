@@ -14,7 +14,7 @@ detektPlugin = "1.23.8"
 androidx-webview = "1.15.0"
 androidx-activityCompose = "1.13.0"
 androidx-lifecycleRuntimeCompose = "2.10.0"
-composeBom = "2026.06.00"
+composeBom = "2026.09.00"
 # 工具链
 ktlint = "1.8.0"
 # 第三方
