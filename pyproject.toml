@@ -16,6 +16,27 @@ target-version = "py312"
 extend-exclude = ["legacy"]
 
 [tool.ruff.lint]
+# PY-238（2026-10-01 审计）：显式 select 固定规则面——此前无 select（默认
+# 面随 ruff 版本漂移：版本升级即静默扩/缩门禁面）。构成：
+# - E4/E7/E9/F 前缀整族（pycodestyle error 级 + pyflakes 全族——真错误类
+#   完整保留，F401/F811/F841 等不因固定面而丢失）；
+# - 其余为 2026-10-01 根口径实测默认面违规规则族的码级快照（新增规则
+#   不再随 ruff 升级自动入面——扩面须显式改本清单）。
+select = [
+    "E4", "E7", "E9",  # pycodestyle error 级（E402/E501 经 ignore 豁免）
+    "F",               # pyflakes 全族（F401/F811/F821/F841…）
+    "I001",            # unsorted-imports
+    "RUF100",          # unused-noqa
+    "RUF012",          # mutable-class-default
+    "RUF022",          # unsorted-dunder-all
+    "PLW1510",         # subprocess-run-without-check
+    "UP032",           # f-string
+    "UP045",           # non-pep604-annotation-optional
+    "SIM103",          # needless-bool
+    "SIM208",          # double-negation
+    "BLE001",          # blind-except（FFI/验证脚本边界以行内 noqa 显式豁免）
+    "PIE790",          # unnecessary-placeholder
+]
 # 中文项目：全角标点（RUF001/RUF003）忽略（按历史 RUF002 先例）+ 中文长行（E501——
 # 中文注释/文档串行宽不可控，PY-150 收口后行宽策略整体退场）——风格类
 # （TRY300/TRY003/TRY301/RUF021/E402）无真 bug——按日志分析（86 个非全角全是
@@ -31,7 +52,9 @@ ignore = ["RUF001", "RUF003", "E501", "TRY300", "TRY003", "TRY301", "RUF021", "E
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["INP001", "S101", "PLR2004"]
 "agent/tests/**" = ["INP001", "S101", "PLR2004"]
-"**/selftest_*.py" = ["INP001", "S101", "PLR2004"]
+# PY-239（2026-10-01 审计）：删除 "**/selftest_*.py" 豁免——全仓 selftest_*.py
+# 均在 legacy/windows-pywebview/（已被 extend-exclude = ["legacy"] 整树排除），
+# 该条目永无匹配文件（死配置）。若日后 selftest 回归活跃树，按需重加。
 
 # PY-149：pytest 基建（tests/python/ ——发布链离线单测落位）
 [tool.pytest.ini_options]

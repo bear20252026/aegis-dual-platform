@@ -15,10 +15,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import verify_cross_end_lists as vcel
+import verify_xaml_resources as vxr
 
-import verify_cross_end_lists as vcel  # noqa: E402
-import verify_xaml_resources as vxr  # noqa: E402
-from validate_release import (  # noqa: E402
+from validate_release import (
     check_lock_file,
     check_required_cs_files,
     check_shell_manifest_consistency,

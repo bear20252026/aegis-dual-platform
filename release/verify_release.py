@@ -9,7 +9,9 @@
 """
 
 import argparse
+import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +26,55 @@ from verify_checksum_json import verify_manifest
 # 一旦本脚本接线，truthy 的哨兵值会被当有效溯源证据通过（证据弱化）。
 # 校验侧显式拒绝（与写侧字面量保持同步；写侧见 release/build_metadata.py）。
 LOCAL_UNVERIFIED_SENTINEL = "local-unverified"
+
+
+def _verify_checksum_txt(dist: Path, txt_path: Path) -> int:
+    """PY-225（2026-10-01 审计）：core 平台 SHA256SUMS.txt 逐行强校验。
+
+    此前回退路径只数非空行（`sum(1 for line ...)`）——伪造清单一行
+    任意文本即过门禁（校验弱）。现对齐 sha256sum 文本格式做三重对账：
+    ① 逐行 `<64 位十六进制哈希>␣␣<文件>` 解析（格式非法即拒）；
+    ② 每条目 hashlib 重算真实文件哈希比对（防清单与内容脱节）；
+    ③ 文件集双向对账（dist 实际文件 ⊖ 清单条目均为失败——缺列/幽灵
+       均拒；清单自身与已由 JSON 路径排除的口径一致——自排除）。
+    返回受摘要覆盖的条目数（空清单在上游即拒）。
+    """
+    checksums: dict[str, str] = {}
+    for lineno, raw in enumerate(txt_path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.rstrip("\r")
+        if not line.strip():
+            continue
+        match = re.fullmatch(r"([0-9a-fA-F]{64}) {2}(.+)", line)
+        if not match:
+            sys.exit(f"SHA256SUMS.txt 第 {lineno} 行格式无效"
+                     f"（须为 '<64 位哈希>␣␣<文件>'——sha256sum 文本格式）: {line!r}")
+        rel, digest = match.group(2), match.group(1).lower()
+        target = (dist / rel).resolve()
+        if target != dist.resolve() and not target.is_relative_to(dist.resolve()):
+            sys.exit(f"SHA256SUMS.txt 条目越出发布根: {rel}（拒绝发布）")
+        if rel in checksums:
+            sys.exit(f"SHA256SUMS.txt 重复条目: {rel}（拒绝发布）")
+        checksums[rel] = digest
+    if not checksums:
+        sys.exit("SHA256SUMS.txt 为空——摘要不完整（拒绝发布）")
+    # ② 哈希重算比对
+    for rel, digest in checksums.items():
+        target = dist / rel
+        if not target.is_file():
+            sys.exit(f"SHA256SUMS.txt 条目文件缺失: {rel}（拒绝发布）")
+        actual = hashlib.sha256(target.read_bytes()).hexdigest()
+        if actual != digest:
+            sys.exit(f"SHA256SUMS.txt 哈希不符: {rel}（清单 {digest[:12]}… vs 实际 {actual[:12]}…——拒绝发布）")
+    # ③ 文件集双向对账（清单自身自排除——与 CI 生成口径一致）
+    actual_files = {
+        p.relative_to(dist).as_posix()
+        for p in dist.rglob("*")
+        if p.is_file() and p != txt_path.resolve()
+    }
+    unlisted = sorted(actual_files - set(checksums))
+    if unlisted:
+        sys.exit(f"dist 存在未列入 SHA256SUMS.txt 的文件: {', '.join(unlisted)}（拒绝发布）")
+    return len(checksums)
 
 
 def verify_bundle(bundle_dir: Path) -> None:
@@ -42,7 +93,14 @@ def verify_bundle(bundle_dir: Path) -> None:
     metadata_path = dist / "build-metadata.json"
     if not metadata_path.is_file():
         sys.exit("缺 build-metadata.json——制品无法关联版本与源提交（拒绝发布）")
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    # PY-235（2026-10-01 审计）：坏 JSON 此前直接 traceback（json.JSONDecodeError
+    # 原始栈）——发布门禁须给出干净报告并失败闭合，不裸抛。
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+        sys.exit(f"build-metadata.json 无法解析: {exc}（拒绝发布）")
+    if not isinstance(metadata, dict):
+        sys.exit("build-metadata.json 顶层必须是对象（拒绝发布）")
     required_metadata = ("schema_version", "product", "platform", "version_name", "source_revision", "source_ref")
     missing_metadata = [key for key in required_metadata if not metadata.get(key)]
     if metadata.get("schema_version") != 1 or missing_metadata:
@@ -65,12 +123,9 @@ def verify_bundle(bundle_dir: Path) -> None:
         checksum_count = verify_manifest(dist, sums_path)
     elif txt_path.is_file():
         # core 平台产物为纯 .txt 清单（无 per-file JSON manifest）——
-        # 退化为非空条目计数对账（CI: release-core.yml 只产 SHA256SUMS.txt）
-        checksum_count = sum(
-            1 for line in txt_path.read_text(encoding="utf-8").splitlines() if line.strip()
-        )
-        if checksum_count == 0:
-            sys.exit("SHA256SUMS.txt 为空——摘要不完整（拒绝发布）")
+        # PY-225：逐行 `<hash>␣␣<file>` 解析 + 哈希重算 + 文件集对账
+        #（CI: release-core.yml 只产 SHA256SUMS.txt——sha256sum 文本格式）
+        checksum_count = _verify_checksum_txt(dist, txt_path)
     else:
         sys.exit("缺 SHA256SUMS.json——摘要不完整（拒绝发布）")
 

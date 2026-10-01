@@ -67,6 +67,10 @@ def main() -> int:
             else:
                 f.rename(target)
                 print(f"renamed: {f.relative_to(d.parent)} -> {target.name}")
+            # PY-219（2026-10-01 审计）：改名产物此前不写 seen——后续目录中
+            # 原生同名资产（如第三方目录本就有 <platform>-x）再冲突时不再
+            # 改名，最终上传仍撞名 404（防的正是该场景）。改名即入账。
+            seen[target.name] = target
             renamed += 1
 
     print(f"OK: {renamed} duplicate(s) renamed{' (dry-run, no changes)' if dry_run else ''}")

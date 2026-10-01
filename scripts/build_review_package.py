@@ -124,15 +124,16 @@ def git_commit_and_head() -> tuple[str, str]:
 
 
 def version_props() -> dict[str, str]:
-    props: dict[str, str] = {}
+    # PY-234（2026-10-01 审计）：本函数此前是仓库第三份 properties 解析
+    #（宽松吞坏行——与 sync_versions.load_properties 单源语义分叉）。改为
+    # 复用 scripts/sync_versions.load_properties：坏行 RuntimeError 带
+    # 文件:行号（PY-026 口径，fail-fast 不再静默吞）。缺文件维持返回 {}
+    #（评审包工具对未初始化工作副本保持可用——与发布链必需键语义不同）。
+    from sync_versions import load_properties
     p = ROOT / "shared" / "version.properties"
-    if p.exists():
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                props[k.strip()] = v.strip()
-    return props
+    if not p.exists():
+        return {}
+    return load_properties(p)
 
 
 def _match_excluded(rel: Path) -> bool:

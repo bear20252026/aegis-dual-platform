@@ -5,6 +5,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from xml.sax.saxutils import unescape as xml_unescape
 
 # 平铺导入兜底：脱离 scripts/ 工作目录（如 CI 从仓库根调用）也能导入同目录模块。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -14,7 +15,14 @@ from sync_versions import ROOT, load_properties
 
 def expected_xml_value(text: str, element: str) -> str | None:
     match = re.search(rf"<\s*{re.escape(element)}\s*>([^<]+)</\s*{re.escape(element)}\s*>", text)
-    return match.group(1).strip() if match else None
+    if not match:
+        return None
+    # PY-223（2026-10-01 审计）：XML 文本节点取值不反转义——csproj 由
+    # sync_versions.escape() 写入，DISPLAY_NAME 含 & 时磁盘值是 "&amp;"
+    # 而单源值是 "&"，逐位比较必报漂移（写入合法、校验误报）。
+    # 与写侧 escape() 对偶做 unescape 还原后再比较（&amp;/&lt;/&gt;/
+    # &apos;/&quot;——写侧 escape() 默认全集）。
+    return xml_unescape(match.group(1).strip())
 
 
 def expected_assignment(text: str, name: str) -> str | None:
@@ -100,6 +108,19 @@ def main() -> int:
         "release.json version": (release_json.get("version"), values["VERSION_NAME"]),
         "release.json versionCode": (release_json.get("versionCode"), int(values["VERSION_CODE"])),
     }
+    # PY-230（2026-10-01 审计）：ANDROID_APPLICATION_ID 此前零消费者（死键），
+    # 真实值在 gradle 与 release.json 平行硬编码三处漂移无门禁。不改
+    # shared/version.properties（发布事实源），在此把死键复活为三方对账
+    # 单源：properties → gradle applicationId → release.json android.applicationId
+    # 任一漂移即 fail（缺键不强制——保持既有 required 清单语义）。
+    android_app_id = values.get("ANDROID_APPLICATION_ID")
+    if android_app_id:
+        expected["Android applicationId"] = (
+            expected_assignment(android_text, "applicationId"), android_app_id)
+        android_block = release_json.get("android")
+        expected["release.json android.applicationId"] = (
+            android_block.get("applicationId") if isinstance(android_block, dict) else None,
+            android_app_id)
     failures = [f"{label}: found {actual!r}, expected {wanted!r}" for label, (actual, wanted) in expected.items() if actual != wanted]
     if args.tag and args.tag != f"v{values['VERSION_NAME']}":
         failures.append(f"Release tag: found {args.tag!r}, expected 'v{values['VERSION_NAME']}'")

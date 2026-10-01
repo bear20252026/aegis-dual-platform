@@ -12,6 +12,10 @@ import pathlib
 import re
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# PY-242（2026-10-01 审计）：describe_value_domain 两份逐字重复抽单源
+from value_domain import describe_value_domain
+
 SCHEMAS = pathlib.Path(__file__).resolve().parents[1] / "schemas"
 # PY-102：发布事实声明（release.schema.json 校验 shared/release.json 用）
 # 不是跨语言消息契约——不参与模型生成
@@ -42,23 +46,15 @@ def cs_type(prop: dict) -> str:
     return CS_TYPE_MAP[t]
 
 
-# 值类型可空标记（引用类型 string?/List<T>? 由统一后缀处理）
-CS_VALUE_TYPES = {"long", "decimal", "bool"}
+# 值类型可空标记——PY-242：cs_nullable 化简后该集合无剩余消费者，删除
+#（此前 CS_VALUE_TYPES 分支与默认分支行为相同，属死结构）。
 
 
 # PY-188（2026-09-26 审计，收尾批完整化）：enum/const 生成「string 属性 +
 # 常量类」——属性保持 string 类型（不破坏镜像消费方），另生成
 # {Name}Values 静态常量类提供编译期拼写锚点（值域以 schema 为单源）。
-# describe_value_domain 保留：元数据 API 供测试与文档锁定值域。
-def describe_value_domain(prop: dict) -> str:
-    """提取属性的 enum/const 值域描述（enum → "enum: A | B | C"；const → "const: X"）。"""
-    if "enum" in prop:
-        values = prop["enum"]
-        rendered = " | ".join(str(v) for v in values)
-        return f"enum: {rendered}"
-    if "const" in prop:
-        return f"const: {prop['const']}"
-    return ""
+# PY-242（2026-10-01 审计）：describe_value_domain 移至 value_domain.py 单源
+#（与 generate_kotlin 共享），此处保留导入供测试与文档锁定值域。
 
 
 def _pascal(value: str) -> str:
@@ -115,8 +111,9 @@ def enum_constant_lines(schema: dict, name: str) -> list[str]:
 
 
 def cs_nullable(t: str) -> str:
-    if t in CS_VALUE_TYPES:
-        return f"{t}?"
+    """PY-242（2026-10-01 审计）：化简死结构——值类型与引用类型此前分两
+    分支返回同一 f"{t}?"；实际唯一差异是 object 不加 ?（本即可空）。
+    输出字节不变（verify_contract_compatibility 对账锁定）。"""
     if t == "object":
         return t  # object 本即可空
     return f"{t}?"
@@ -176,7 +173,11 @@ def main() -> int:
             continue
         schema = json.loads(f.read_text(encoding="utf-8"))
         name = contract_name(f)
-        (out_dir / f"{name}.cs").write_text(generate(schema, name) + "\n", encoding="utf-8")
+        # PY-232（2026-10-01 审计）：write_text 显式 newline="\n"——Windows
+        # 默认会把 \n 翻译为 CRLF，core.autocrlf 关闭的环境重生成即 CRLF
+        # 漂移、git diff 门禁假红。锁定 LF（与 git 归一存储一致）。
+        (out_dir / f"{name}.cs").write_text(
+            generate(schema, name) + "\n", encoding="utf-8", newline="\n")
         generated.add(f"{name}.cs")
         print(f"  ✅ 生成 C# 模型: {name}.cs")
     # 陈旧清理（差集删除）：此前 glob("*.schema.cs") 与生成名 {Name}Contract.cs

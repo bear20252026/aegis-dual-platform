@@ -7,7 +7,11 @@
 #   <tmp>/Scripts/pip-compile --generate-hashes --no-header \
 #     -o <staging> requirements-ci.in
 #   人工 diff 审查后替换 requirements-ci.txt（补回头注块）
-# 顶层 8 pin：ruff/bandit/mypy/pytest/pyyaml/jsonschema/rfc3339-validator/pip-audit。
+# 顶层 pin：ruff/bandit/mypy/pytest/pyyaml/jsonschema/rfc3339-validator/pip-audit/cryptography。
+# PY-221（2026-10-01 审计）：cryptography 入锁——release/update_verifier.py 顶层
+# 导入 Ed25519PublicKey（发布链 verify_manifest 路径），此前仅靠 legacy dev 锁
+# 的传递依赖侥幸可用；只装本锁的环境 import 即失败。显式入顶层 pin
+#（48.0.1＝本轮全量发布链单测实证通过版本）。
 # cyclonedx-python-lib / py-serializable 不在此列——它们是 pip-audit 的传递
 # 依赖（CycloneDX 输出格式），随 pip-audit 树解算，勿单独 bump（#27/#35/#39
 # 三连坏 PR 根因：Dependabot 对 hash 锁文件只改被 bump 包自身，不重算传递树）。
@@ -19,3 +23,4 @@ pyyaml==6.0.3
 jsonschema==4.26.0
 rfc3339-validator==0.1.4
 pip-audit==2.10.1
+cryptography==48.0.1

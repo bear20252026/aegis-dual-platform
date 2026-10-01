@@ -79,8 +79,15 @@ def main() -> int:
     required_sinks = _required_sinks_from_canonical(canonical)
     check("规范模板含 REQUIRED_SINKS 锚点行", bool(required_sinks),
           "锚点缺失——无回退清单（PY-215 严格单源）")
+    # PY-236（2026-10-01 审计）：required_sinks 自锚点行解析、又对同一
+    # canonical 全文做包含检查——锚点行本身就含各 sink 名，把 body 实现代码
+    # 删光（守卫空心化）门禁仍绿（恒真）。改为对剔除锚点行后的 body 文本
+    # 检查：每个声明的拦截点必须有真实实现代码承载。
+    body = "\n".join(
+        ln for ln in canonical.splitlines() if not ln.startswith("// REQUIRED_SINKS:"))
     for sink in required_sinks:
-        check(f"规范模板含拦截点/属性: {sink}", sink in canonical)
+        check(f"规范模板 body 含拦截点/属性: {sink}", sink in body,
+              "仅存在于锚点行声明、body 无实现承载（守卫空心化）")
 
     # 2) Rust：必须 include_str! 规范文件（编译期单源），禁止再内嵌 r#" 副本
     rust = norm(RUST.read_text(encoding="utf-8"))

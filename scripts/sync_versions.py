@@ -27,7 +27,11 @@ def replace_assignment(path: Path, name: str, value: str, quoted: bool) -> None:
     text = path.read_text(encoding="utf-8")
     assignment = f'{name} = "{value}"' if quoted else f"{name} = {value}"
     pattern = rf"(?m)^(?P<indent>[ \t]*){re.escape(name)}\s*=\s*(?:\"[^\"]*\"|\d+)\s*$"
-    updated, count = re.subn(pattern, rf"\g<indent>{assignment}", text, count=1)
+    # PY-224（2026-10-01 审计）：替换串此前经 rf"\g<indent>{assignment}" 反向
+    # 引用模板拼接——值含反斜杠（如 \1）会被当组引用解析（re.error 或静默
+    # 错位）。改为函数式替换（lambda）——替换内容不再经过 backslash 模板
+    # 解析（与 PY-186 replace_xml_value 同口径）。
+    updated, count = re.subn(pattern, lambda m: m.group("indent") + assignment, text, count=1)
     if count != 1:
         raise RuntimeError(f"expected {name} assignment not found in {path}")
     path.write_text(updated, encoding="utf-8")
@@ -71,9 +75,13 @@ def main() -> None:
             "version properties must be numeric: "
             + ", ".join(f"{key}={values.get(key)!r}" for key in non_numeric))
 
-    android_gradle = ROOT / "android" / "app" / "build.gradle.kts"
-    replace_assignment(android_gradle, "versionCode", values["VERSION_CODE"], quoted=False)
-    replace_assignment(android_gradle, "versionName", values["VERSION_NAME"], quoted=True)
+    # PY-216（2026-10-01 审计·P1）：删除 android gradle 的 versionCode/
+    # versionName 字面量写入（此前两行 replace_assignment 对真实
+    # build.gradle.kts 必抛 RuntimeError——AD-100 起 gradle 已构建期消费
+    # shared/version.properties（versionCodeFromProperties/
+    # versionNameFromProperties 单源接线），本脚本自 09-23 起不可用）。
+    # Android 版本不再有第二写入面：properties 是唯一事实源，
+    # verify_versions.py 校验接线本身（无字面量残留断言）。
 
     windows_project = ROOT / "windows" / "src" / "Aegis.Windows.App" / "Aegis.Windows.App.csproj"
     replace_xml_value(windows_project, "Version", values["VERSION_NAME"])

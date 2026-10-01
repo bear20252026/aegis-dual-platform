@@ -12,6 +12,10 @@ import pathlib
 import re
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# PY-242（2026-10-01 审计）：describe_value_domain 两份逐字重复抽单源
+from value_domain import describe_value_domain
+
 SCHEMAS = pathlib.Path(__file__).resolve().parents[1] / "schemas"
 # PY-102：发布事实声明（release.schema.json 校验 shared/release.json 用）
 # 不是跨语言消息契约——不参与模型生成
@@ -46,17 +50,9 @@ def kt_type(prop: dict) -> str:
 # PY-188（2026-09-26 审计，收尾批完整化）：enum/const 生成「基础类型属性 +
 # 常量 object」——与 generate_csharp.enum_constant_lines 对偶：属性保持
 # String/基础类型（不破坏镜像消费方），另生成 {Name}Values object 提供编译期
-# 拼写锚点（值域以 schema 为单源）。describe_value_domain 保留：元数据 API
-# 供测试与文档锁定值域。
-def describe_value_domain(prop: dict) -> str:
-    """提取属性的 enum/const 值域描述（enum → "enum: A | B"；const → "const: X"）。"""
-    if "enum" in prop:
-        values = prop["enum"]
-        rendered = " | ".join(str(v) for v in values)
-        return f"enum: {rendered}"
-    if "const" in prop:
-        return f"const: {prop['const']}"
-    return ""
+# 拼写锚点（值域以 schema 为单源）。
+# PY-242（2026-10-01 审计）：describe_value_domain 移至 value_domain.py 单源
+#（与 generate_csharp 共享），此处保留导入供测试与文档锁定值域。
 
 
 def _upper_snake(value: str) -> str:
@@ -165,7 +161,10 @@ def main() -> int:
             continue
         schema = json.loads(f.read_text(encoding="utf-8"))
         name = contract_name(f)
-        (out_dir / f"{name}.kt").write_text(generate(schema, name) + "\n", encoding="utf-8")
+        # PY-232（2026-10-01 审计）：write_text 显式 newline="\n"（同
+        # generate_csharp——防 Windows 重生成 CRLF 漂移、git diff 假红）
+        (out_dir / f"{name}.kt").write_text(
+            generate(schema, name) + "\n", encoding="utf-8", newline="\n")
         generated.add(f"{name}.kt")
         print(f"  ✅ 生成 Kotlin 模型: {name}.kt")
     # 陈旧清理（差集删除）：此前 glob("*.schema.kt") 与生成名 {Name}Contract.kt

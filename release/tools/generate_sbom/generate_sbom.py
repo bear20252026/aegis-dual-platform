@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from urllib.parse import unquote
 
 
 def generate_sbom(manifest: dict) -> dict:
@@ -18,7 +19,11 @@ def generate_sbom(manifest: dict) -> dict:
     for art in manifest.get("artifacts") or []:
         if not isinstance(art, dict):
             continue
-        name = str(art.get("url", "")).split("/")[-1] or "artifact"
+        # PY-226（2026-10-01 审计）：Release browser_url 对含空格/非 ASCII 的
+        # 资产名是 percent-encoded——此前不 unquote 直接取尾段，"a%20b.zip"
+        # 会作为字面 "a%20b.zip" 进 SBOM，与 verify_artifact_set 的本地文件名
+        # 对账必失败。与 PY-210 同款 unquote 后取尾段。
+        name = unquote(str(art.get("url", ""))).split("/")[-1] or "artifact"
         components.append({
             "type": "file",
             "name": name,

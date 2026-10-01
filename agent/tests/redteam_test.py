@@ -39,9 +39,16 @@ def test_redteam_fixtures_present_and_deny():
         assert all(v == "deny" for v in expecteds), f"{kind} 存在放行样例: {expecteds}"
 
 
+def _is_positive_int(value) -> bool:
+    """PY-251：正整数判定——bool 是 int 子类，显式排除（true 不得当 1 过门禁）。"""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
 def test_action_catalog_default_deny():
     """蓝图：Action Catalog 默认拒绝——未登记 action 不可用——首批只读低风险。
-    SP-022：每条 action 必须携带 int 预算（max_actions/max_bytes）。"""
+    SP-022：每条 action 必须携带 int 预算（max_actions/max_bytes）。
+    PY-251（2026-10-01 审计）：bool 是 int 子类——isinstance(x, int) 对
+    max_actions: true 放行，预算门禁可被布尔值绕过。显式排除 bool。"""
     catalog = yaml.safe_load(
         (ROOT.parent / "contracts/policy/action-catalog.yaml").read_text(encoding="utf-8"))
     assert catalog.get("default_deny") is True, "Action Catalog 必须默认拒绝（fail-closed）"
@@ -49,8 +56,20 @@ def test_action_catalog_default_deny():
     for action in catalog.get("actions", []):
         assert action.get("read_only") is True, f"首批必须只读: {action.get('name')}"
         budget = action.get("budget") or {}
-        assert isinstance(budget.get("max_actions"), int) and budget["max_actions"] > 0,             f"{action['name']} 需 int max_actions"
-        assert isinstance(budget.get("max_bytes"), int) and budget["max_bytes"] > 0,             f"{action['name']} 需 int max_bytes"
+        for key in ("max_actions", "max_bytes"):
+            assert _is_positive_int(budget.get(key)), (
+                f"{action['name']} 需正 int {key}（bool/非正数被拒——PY-251）")
+
+
+def test_bool_budget_not_accepted_as_int():
+    """PY-251 回归向量：布尔预算不得冒充整数过门禁（True 是 int 子类）。"""
+    assert not _is_positive_int(True)
+    assert not _is_positive_int(False)
+    assert _is_positive_int(1)
+    assert _is_positive_int(65536)
+    assert not _is_positive_int(0)
+    assert not _is_positive_int(-5)
+    assert not _is_positive_int("5")
 
 
 def test_fixture_references_exist():

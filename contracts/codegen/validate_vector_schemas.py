@@ -72,15 +72,28 @@ def main() -> int:
         if errors:
             failures.append(f"valid 向量 #{i} 应通过 schema: {errors[0].message}")
 
-    # 非法向量：schema 级失效必须被拒绝；语义级失效（schema 通过）为合法设计
+    # 非法向量：按 expected 声明分流（PY-241，2026-10-01 审计）
+    # - expected == "deny_schema"：schema 级失效——必须被 schema 拒绝
+    #   （此前对全部 invalid 向量只打 info 零断言——schema 削弱即枚举收窄、
+    #   pattern 放宽时门禁仍绿，失效向量全部沦为"语义级"豁免）
+    # - 其他 expected（deny_rollback/deny_threshold/deny_expired 等）：语义级
+    #   失效（schema 通过是合法设计——判定在 update_verifier 语义层），
+    #   打 info 不误报
     invalid_path = VECTORS / "update-manifest-invalid.json"
     if invalid_path.exists():
         for i, vector in enumerate(_load(invalid_path).get("vectors", [])):
             manifest = vector.get("manifest")
             if not isinstance(manifest, dict):
                 continue
-            if validator.is_valid(manifest):
-                print(f"[info] invalid 向量 #{i} 为语义级失效（schema 通过——不误报）")
+            schema_level = vector.get("expected") == "deny_schema"
+            is_valid = validator.is_valid(manifest)
+            if schema_level and is_valid:
+                failures.append(
+                    f"invalid 向量 #{i}（{vector.get('case', '?')}）声明 deny_schema "
+                    f"但 schema 放行——schema 已削弱或向量失效原因漂移（fail-closed）")
+            elif not schema_level and is_valid:
+                print(f"[info] invalid 向量 #{i}（{vector.get('case', '?')}）为语义级失效"
+                      f"（schema 通过——判定在 update_verifier 语义层，不误报）")
 
     # PY-094..096（审计 2026-09-25）：action / capability / audit-event 双向向量
     # ——严格 schema 级：valid 必须全过、invalid 必须全拒（不设语义级豁免，

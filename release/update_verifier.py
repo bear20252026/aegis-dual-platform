@@ -45,6 +45,14 @@ _SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0
 # 别名。此前 _SEMVER 的预发布段是宽松的 [0-9A-Za-z.-]+，前导零数字段漏过。
 _NUMERIC_ID = re.compile(r"0|[1-9][0-9]*")
 
+# PY-228（2026-10-01 审计）：expires_at 此前用 datetime.fromisoformat——它
+# 接受非 RFC3339 形态（"2026-01-01" 裸日期、空格分隔、无秒、无时区），
+# 与 schema format:date-time（RFC3339 严格口径）不一致：schema 拒的形态
+# 客户端验证器放行。先正则锚定 RFC3339 形态（T 分隔 + 秒 + 时区
+# Z/±HH:MM， fractional seconds 可选），再 fromisoformat 解析。
+_RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$")
+
 
 def _version_tuple(value: object) -> tuple:
     """解析 SemVer 字符串为可比较元组（无效格式抛 UpdateRejected——稳定拒绝）。
@@ -94,6 +102,10 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
         expires_raw = manifest.get("expires_at")
         if not isinstance(expires_raw, str):
             raise UpdateRejected("缺少过期时间")
+        # PY-228：非 RFC3339 形态（裸日期/空格分隔/无时区）与 schema 口径
+        # 一致拒绝——不再被 fromisoformat 宽松放行
+        if not _RFC3339.fullmatch(expires_raw):
+            raise UpdateRejected("过期时间格式无效（须为 RFC3339 date-time）")
         expires = datetime.fromisoformat(expires_raw)
         if expires.tzinfo is None or expires <= now.astimezone(UTC):
             raise UpdateRejected("更新清单已过期或缺少时区")

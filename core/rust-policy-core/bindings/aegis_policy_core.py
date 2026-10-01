@@ -14,26 +14,19 @@
 # helpers directly inline like we're doing here.
 
 from __future__ import annotations
-import os
-import sys
-import ctypes
-from dataclasses import dataclass
-import enum
-import struct
-import contextlib
-import datetime
-import threading
-import itertools
-import traceback
-import typing
-import platform
 
+import contextlib
+import ctypes
+import os
+import struct
+import sys
+import threading
+import typing
+from dataclasses import dataclass
 
 # Used for default argument values
 _DEFAULT = object() # type: typing.Any
 
-import ctypes
-import struct
 
 class _UniffiRustBuffer(ctypes.Structure):
     _fields_ = [
@@ -58,11 +51,7 @@ class _UniffiRustBuffer(ctypes.Structure):
         return _uniffi_rust_call(_UniffiLib.ffi_aegis_policy_core_rustbuffer_free, self)
 
     def __str__(self):
-        return "_UniffiRustBuffer(capacity={}, len={}, data={})".format(
-            self.capacity,
-            self.len,
-            self.data[0:self.len]
-        )
+        return f"_UniffiRustBuffer(capacity={self.capacity}, len={self.len}, data={self.data[0:self.len]})"
 
     @contextlib.contextmanager
     def alloc_with_builder(*args):
@@ -112,7 +101,7 @@ class _UniffiForeignBytes(ctypes.Structure):
     ]
 
     def __str__(self):
-        return "_UniffiForeignBytes(len={}, data={})".format(self.len, self.data[0:self.len])
+        return f"_UniffiForeignBytes(len={self.len}, data={self.data[0:self.len]})"
 
 
 class _UniffiFfiConverterByRefBytes:
@@ -132,7 +121,7 @@ class _UniffiFfiConverterByRefBytes:
         # Tighter than `bytes-like`: `lower` uses `ctypes.c_char_p` which only
         # accepts `bytes`/`None`, so fail fast with a matching check.
         if not isinstance(value, bytes):
-            raise TypeError("a bytes object is required, not {!r}".format(type(value).__name__))
+            raise TypeError(f"a bytes object is required, not {type(value).__name__!r}")
 
     @staticmethod
     def lower(value):
@@ -359,13 +348,14 @@ def _uniffi_check_call_status(error_ffi_converter, call_status):
             msg = "Unknown rust panic"
         raise InternalError(msg)
     else:
-        raise InternalError("Invalid _UniffiRustCallStatus code: {}".format(
-            call_status.code))
+        raise InternalError(f"Invalid _UniffiRustCallStatus code: {call_status.code}")
 
 def _uniffi_trait_interface_call(call_status, make_call, write_return_value):
     try:
         return write_return_value(make_call())
-    except Exception as e:
+    # PY-256（2026-10-01 审计）：UniFFI trait 边界设计性盲捕——任何异常都必须
+    # 转为 FFI 错误码（不允许异常穿透 C ABI），保留 except Exception。
+    except Exception as e:  # noqa: BLE001
         call_status.code = _UniffiRustCallStatus.CALL_UNEXPECTED_ERROR
         call_status.error_buf = _UniffiFfiConverterString.lower(repr(e))
 
@@ -376,7 +366,8 @@ def _uniffi_trait_interface_call_with_error(call_status, make_call, write_return
         except error_type as e:
             call_status.code = _UniffiRustCallStatus.CALL_ERROR
             call_status.error_buf = lower_error(e)
-    except Exception as e:
+    # PY-256：同上——外层兜底把一切未预期异常转为 FFI 错误码（C ABI 边界）
+    except Exception as e:  # noqa: BLE001
         call_status.code = _UniffiRustCallStatus.CALL_UNEXPECTED_ERROR
         call_status.error_buf = _UniffiFfiConverterString.lower(repr(e))
 # Initial value and increment amount for handles. 
@@ -445,22 +436,24 @@ class _UniffiConverterPrimitiveInt(_UniffiConverterPrimitive):
     def check_lower(cls, value):
         try:
             value = value.__index__()
-        except Exception:
-            raise TypeError("'{}' object cannot be interpreted as an integer".format(type(value).__name__))
+        # PY-256：__index__ 可抛任意异常（用户类型）——转 TypeError 是设计
+        except Exception:  # noqa: BLE001
+            raise TypeError(f"'{type(value).__name__}' object cannot be interpreted as an integer")
         if not isinstance(value, int):
-            raise TypeError("__index__ returned non-int (type {})".format(type(value).__name__))
+            raise TypeError(f"__index__ returned non-int (type {type(value).__name__})")
         if not cls.VALUE_MIN <= value < cls.VALUE_MAX:
-            raise ValueError("{} requires {} <= value < {}".format(cls.CLASS_NAME, cls.VALUE_MIN, cls.VALUE_MAX))
+            raise ValueError(f"{cls.CLASS_NAME} requires {cls.VALUE_MIN} <= value < {cls.VALUE_MAX}")
 
 class _UniffiConverterPrimitiveFloat(_UniffiConverterPrimitive):
     @classmethod
     def check_lower(cls, value):
         try:
             value = value.__float__()
-        except Exception:
-            raise TypeError("must be real number, not {}".format(type(value).__name__))
+        # PY-256：__float__ 可抛任意异常（用户类型）——转 TypeError 是设计
+        except Exception:  # noqa: BLE001
+            raise TypeError(f"must be real number, not {type(value).__name__}")
         if not isinstance(value, float):
-            raise TypeError("__float__ returned non-float (type {})".format(type(value).__name__))
+            raise TypeError(f"__float__ returned non-float (type {type(value).__name__})")
 
 # Helper class for wrapper types that will always go through a _UniffiRustBuffer.
 # Classes should inherit from this and implement the `read` and `write` static methods.
@@ -656,7 +649,7 @@ class _UniffiFfiConverterString:
     @staticmethod
     def check_lower(value):
         if not isinstance(value, str):
-            raise TypeError("argument must be str, not {}".format(type(value).__name__))
+            raise TypeError(f"argument must be str, not {type(value).__name__}")
         return value
 
     @staticmethod
@@ -719,7 +712,7 @@ class FfiAuthorizedAction:
 
     
     def __str__(self):
-        return "FfiAuthorizedAction(session_id={}, tab_id={}, document_generation={}, origin={}, method={}, canonical_parameters={}, scope={}, expires_at={}, nonce={}, policy_version={}, explanation={})".format(self.session_id, self.tab_id, self.document_generation, self.origin, self.method, self.canonical_parameters, self.scope, self.expires_at, self.nonce, self.policy_version, self.explanation)
+        return f"FfiAuthorizedAction(session_id={self.session_id}, tab_id={self.tab_id}, document_generation={self.document_generation}, origin={self.origin}, method={self.method}, canonical_parameters={self.canonical_parameters}, scope={self.scope}, expires_at={self.expires_at}, nonce={self.nonce}, policy_version={self.policy_version}, explanation={self.explanation})"
     def __eq__(self, other):
         if self.session_id != other.session_id:
             return False
@@ -741,9 +734,8 @@ class FfiAuthorizedAction:
             return False
         if self.policy_version != other.policy_version:
             return False
-        if self.explanation != other.explanation:
-            return False
-        return True
+        # PY-256（2026-10-01 审计）：SIM103——末段不等短路改直接返回相等判定
+        return self.explanation == other.explanation
 
 class _UniffiFfiConverterTypeFfiAuthorizedAction(_UniffiConverterRustBuffer):
     @staticmethod
@@ -804,15 +796,14 @@ class FfiDenyReason:
 
     
     def __str__(self):
-        return "FfiDenyReason(code={}, detail={}, explanation={})".format(self.code, self.detail, self.explanation)
+        return f"FfiDenyReason(code={self.code}, detail={self.detail}, explanation={self.explanation})"
     def __eq__(self, other):
         if self.code != other.code:
             return False
         if self.detail != other.detail:
             return False
-        if self.explanation != other.explanation:
-            return False
-        return True
+        # PY-256：SIM103——直接返回相等判定
+        return self.explanation == other.explanation
 
 class _UniffiFfiConverterTypeFfiDenyReason(_UniffiConverterRustBuffer):
     @staticmethod
@@ -848,13 +839,12 @@ class FfiOrigin:
 
     
     def __str__(self):
-        return "FfiOrigin(scheme={}, host={})".format(self.scheme, self.host)
+        return f"FfiOrigin(scheme={self.scheme}, host={self.host})"
     def __eq__(self, other):
         if self.scheme != other.scheme:
             return False
-        if self.host != other.host:
-            return False
-        return True
+        # PY-256：SIM103——直接返回相等判定
+        return self.host == other.host
 
 class _UniffiFfiConverterTypeFfiOrigin(_UniffiConverterRustBuffer):
     @staticmethod
@@ -894,22 +884,20 @@ class FfiDecision:
             self.action = action
             
             
-            pass
 
     
             
             
     
         def __str__(self):
-            return "FfiDecision.ALLOW(action={})".format(self.action)
+            return f"FfiDecision.ALLOW(action={self.action})"
         def __eq__(self, other):
             if not isinstance(other, FfiDecision):
                 return NotImplemented
             if not other.is_ALLOW():
                 return False
-            if self.action != other.action:
-                return False
-            return True
+            # PY-256：SIM103——直接返回相等判定
+            return self.action == other.action
 
     @dataclass
     class REQUIRE_CONFIRMATION:
@@ -921,14 +909,13 @@ class FfiDecision:
             self.method = method
             
             
-            pass
 
     
             
             
     
         def __str__(self):
-            return "FfiDecision.REQUIRE_CONFIRMATION(origin={}, method={})".format(self.origin, self.method)
+            return f"FfiDecision.REQUIRE_CONFIRMATION(origin={self.origin}, method={self.method})"
         def __eq__(self, other):
             if not isinstance(other, FfiDecision):
                 return NotImplemented
@@ -936,9 +923,8 @@ class FfiDecision:
                 return False
             if self.origin != other.origin:
                 return False
-            if self.method != other.method:
-                return False
-            return True
+            # PY-256：SIM103——直接返回相等判定
+            return self.method == other.method
 
     @dataclass
     class DENY:
@@ -947,22 +933,20 @@ class FfiDecision:
             self.reason = reason
             
             
-            pass
 
     
             
             
     
         def __str__(self):
-            return "FfiDecision.DENY(reason={})".format(self.reason)
+            return f"FfiDecision.DENY(reason={self.reason})"
         def __eq__(self, other):
             if not isinstance(other, FfiDecision):
                 return NotImplemented
             if not other.is_DENY():
                 return False
-            if self.reason != other.reason:
-                return False
-            return True
+            # PY-256：SIM103——直接返回相等判定
+            return self.reason == other.reason
 
     
 
@@ -1043,7 +1027,7 @@ class _UniffiFfiConverterTypeFfiDecision(_UniffiConverterRustBuffer):
 class _UniffiFfiConverterBoolean:
     @classmethod
     def check_lower(cls, value):
-        return not not value
+        return bool(value)
 
     @classmethod
     def lower(cls, value):
@@ -1218,7 +1202,7 @@ class _UniffiFfiConverterTypeFfiBroker:
     @staticmethod
     def check_lower(value: FfiBroker):
         if not isinstance(value, FfiBroker):
-            raise TypeError("Expected FfiBroker instance, {} found".format(type(value).__name__))
+            raise TypeError(f"Expected FfiBroker instance, {type(value).__name__} found")
 
     @staticmethod
     def lower(value: FfiBroker) -> ctypes.c_uint64:
@@ -1301,7 +1285,7 @@ def build_fingerprint_pipeline(session_seed: str) -> str:
         *_uniffi_lowered_args,
     )
     return _uniffi_lift_return(_uniffi_ffi_result)
-def extract_host(url: str) -> typing.Optional[str]:
+def extract_host(url: str) -> str | None:
     """
     URL 主机名提取（委托 util 模块）。
 """
@@ -1318,7 +1302,7 @@ def extract_host(url: str) -> typing.Optional[str]:
         *_uniffi_lowered_args,
     )
     return _uniffi_lift_return(_uniffi_ffi_result)
-def try_parse_external(raw_url: str) -> typing.Optional[FfiOrigin]:
+def try_parse_external(raw_url: str) -> FfiOrigin | None:
     """
     URL 校验（委托 origin 模块——消除 C#/Kotlin/Python 重复实现）。
 
@@ -1339,14 +1323,14 @@ def try_parse_external(raw_url: str) -> typing.Optional[FfiOrigin]:
     return _uniffi_lift_return(_uniffi_ffi_result)
 
 __all__ = [
-    "InternalError",
-    "FfiDecision",
     "FfiAuthorizedAction",
+    "FfiBroker",
+    "FfiBrokerProtocol",
+    "FfiDecision",
     "FfiDenyReason",
     "FfiOrigin",
+    "InternalError",
     "build_fingerprint_pipeline",
     "extract_host",
     "try_parse_external",
-    "FfiBroker",
-    "FfiBrokerProtocol",
 ]

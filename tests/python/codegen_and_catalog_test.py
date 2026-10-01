@@ -21,13 +21,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import analyze_action_catalog as aac
+import generate_csharp as gcs
+import generate_kotlin as gkt
 import pytest
+import verify_bridge_guard as vbg
+from verify_contract_compatibility import (
+    contract_name as contract_name_compat,
+)
 
-import analyze_action_catalog as aac  # noqa: E402
-import generate_csharp as gcs  # noqa: E402
-import generate_kotlin as gkt  # noqa: E402
-import verify_bridge_guard as vbg  # noqa: E402
-from verify_contract_compatibility import contract_name as contract_name_compat  # noqa: E402
 
 # ---------------------------------------------------------------- PY-125
 class TestCsType:
@@ -237,16 +239,20 @@ class TestBridgeGuardHelpers:
 
 
 # ---------------------------------------------------------------- PY-134
+# PY-236（2026-10-01 审计）：body 行必须真实承载锚点声明的每个 sink——
+# 合成模板补 sink 实现行（与真实 bridge_guard.template.js 同构），
+# 否则新 body 检查正确地拒绝空心化模板。
 CANONICAL_JS = (
     "// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open\n"
     "const HOSTS = __AEGIS_HOSTS__;\n"
     "const REQUIRE_HTTPS = __AEGIS_REQUIRE_HTTPS__;\n"
+    "window.fetch = function (...args) { guard(args); };\n"
     "if (!window.fetch) { XMLHttpRequest.prototype.open; }\n"
 )
 
 
 class TestKotlinPlaceholderNormalizationEndToEnd:
-    def _write_env(self, tmp_path: Path, kt_template: str) -> None:
+    def _write_env(self, tmp_path: Path, monkeypatch, kt_template: str) -> None:
         template = tmp_path / "bridge_guard.template.js"
         template.write_text(CANONICAL_JS, encoding="utf-8")
         rust = tmp_path / "bridge_guard.rs"
@@ -259,37 +265,82 @@ class TestKotlinPlaceholderNormalizationEndToEnd:
             "}\n",
             encoding="utf-8",
         )
-        vbg.CANONICAL = template
-        vbg.RUST = rust
-        vbg.KOTLIN = tmp_path / "WebViewHardening.kt"
+        # PY-231（2026-10-01 审计）：CANONICAL/RUST/KOTLIN 此前直接改模块全局
+        # 不经 monkeypatch——测试泄漏污染同进程后续用例（真实仓库路径被
+        # 覆盖后不还原）。三处统一走 monkeypatch.setattr（自动还原）。
+        monkeypatch.setattr(vbg, "CANONICAL", template)
+        monkeypatch.setattr(vbg, "RUST", rust)
+        monkeypatch.setattr(vbg, "KOTLIN", tmp_path / "WebViewHardening.kt")
 
     KT_OK = (
         "\n// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open\n"
         "const HOSTS = [$allowedHostsJson];\n"
         "const REQUIRE_HTTPS = $requireHttpsJson;\n"
+        "window.fetch = function (...args) { guard(args); };\n"
         "if (!window.fetch) { XMLHttpRequest.prototype.open; }\n"
     )
 
     def test_placeholders_normalized_and_match(self, tmp_path, monkeypatch):
         # PY-134：Kotlin 插值占位符归一化后与规范逐行一致 → 通过
         monkeypatch.setattr(vbg, "failures", [])
-        self._write_env(tmp_path, self.KT_OK)
+        self._write_env(tmp_path, monkeypatch, self.KT_OK)
         assert vbg.main() == 0
 
     def test_unregistered_interpolation_detected(self, tmp_path, monkeypatch):
         # 未登记的新增占位符 $newPh（替换 Kotlin 插值 $requireHttpsJson）→
         # 归一化后残留 $ → 门禁失败（防占位符漏登记）
         monkeypatch.setattr(vbg, "failures", [])
-        self._write_env(tmp_path, self.KT_OK.replace("$requireHttpsJson", "$newPh"))
+        self._write_env(tmp_path, monkeypatch, self.KT_OK.replace("$requireHttpsJson", "$newPh"))
         rc = vbg.main()
         assert rc == 1
         assert any("未登记插值" in f for f in vbg.failures)
 
     def test_drift_pinpointed(self, tmp_path, monkeypatch):
         monkeypatch.setattr(vbg, "failures", [])
-        self._write_env(tmp_path, self.KT_OK + "// extra line\n")
+        self._write_env(tmp_path, monkeypatch, self.KT_OK + "// extra line\n")
         assert vbg.main() == 1
         assert any("不一致" in f for f in vbg.failures)
+
+    def test_hollowed_body_rejected(self, tmp_path, monkeypatch):
+        # PY-236（2026-10-01 审计）：锚点行声明的 sink 此前对 canonical 全文
+        # 查包含——锚点行自身含 sink 名，把 body 实现代码删光（守卫空心化）
+        # 门禁仍绿。现对剔除锚点行后的 body 检查——空心化必须失败。
+        monkeypatch.setattr(vbg, "failures", [])
+        # 模板只剩锚点行 + 占位符声明（无任何 sink 实现代码）
+        hollow = (
+            "// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open\n"
+            "const HOSTS = __AEGIS_HOSTS__;\n"
+            "const REQUIRE_HTTPS = __AEGIS_REQUIRE_HTTPS__;\n"
+        )
+        (tmp_path / "bridge_guard.template.js").write_text(hollow, encoding="utf-8")
+        rust = tmp_path / "bridge_guard.rs"
+        rust.write_text('static SCRIPT: &str = include_str!("bridge_guard.template.js");\n',
+                        encoding="utf-8")
+        kt = tmp_path / "WebViewHardening.kt"
+        kt.write_text(
+            "object H {\n"
+            '    val BRIDGE_GUARD_JS: String\n'
+            '        get() = """\n' + hollow + '""".trimIndent()\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(vbg, "CANONICAL", tmp_path / "bridge_guard.template.js")
+        monkeypatch.setattr(vbg, "RUST", rust)
+        monkeypatch.setattr(vbg, "KOTLIN", kt)
+        assert vbg.main() == 1
+        assert any("body 含拦截点" in f for f in vbg.failures)
+
+    def test_module_paths_restored_after_run(self, tmp_path, monkeypatch):
+        # PY-231：模块级路径经 monkeypatch 注入后必须自动还原——
+        # 同进程后续用例不得读到 tmp 覆盖值（测试泄漏回归锚）
+        import contracts.codegen.verify_bridge_guard as fresh
+        before = (vbg.CANONICAL, vbg.RUST, vbg.KOTLIN)
+        monkeypatch.setattr(vbg, "failures", [])
+        self._write_env(tmp_path, monkeypatch, self.KT_OK)
+        assert vbg.main() == 0
+        monkeypatch.undo()
+        assert (vbg.CANONICAL, vbg.RUST, vbg.KOTLIN) == before
+        assert fresh.CANONICAL.is_absolute()
 
 
 # ---------------------------------------------------------------- PY-135..138
