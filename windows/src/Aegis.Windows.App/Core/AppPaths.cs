@@ -35,7 +35,8 @@ public static class AppPaths
     public static string SessionDbPath => Path.Combine(DataDir, "tabs.db");
     public static string BookmarksDbPath => Path.Combine(DataDir, "bookmarks.db");
     public static string HistoryDbPath => Path.Combine(DataDir, "history.db");
-    public static string DownloadsDbPath => Path.Combine(DataDir, "downloads.db");
+    // CS-344（2026-10-01 审计）：DownloadsDbPath 移除——downloads.db 唯一写入方
+    // DownloadRecordStore 已删（All() 零生产消费面，带 token 的 URL 无收益常驻磁盘）
     public static string FaviconsDir => Path.Combine(DataDir, "favicons");
     public static string ThreatFeedCachePath => Path.Combine(DataDir, "threat_feed.txt");
     public static string SecurityLogPath => Path.Combine(DataDir, "security.log");

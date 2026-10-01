@@ -15,6 +15,10 @@
     <Product>Aegis WebView</Product>
     <RequireNativePolicyCore Condition="'$(RequireNativePolicyCore)' == ''">false</RequireNativePolicyCore>
     <NativePolicyCorePath Condition="'$(NativePolicyCorePath)' == ''"></NativePolicyCorePath>
+    <!-- SP-177（2026-10-01 审计）：NuGet 锁文件——锁定直接+传递依赖可审计
+         （CONTRIBUTING/SECURITY 此前声称有锁文件而全仓无一处生成）。
+         packages.lock.json 随仓库提交；CI restore 的 locked-mode 由发布链接线 -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <Target Name="ValidateNativePolicyCore" BeforeTargets="PrepareForBuild"
           Condition="'$(RequireNativePolicyCore)' == 'true'">

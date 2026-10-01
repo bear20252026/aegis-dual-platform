@@ -95,28 +95,50 @@ public static class NtpAssets
         File.Exists(Path.Combine(dir, GeoEntryPath));
 
     /// <summary>把 NTP/画板虚拟主机映射到发布输出资源根（主窗口与无痕窗口
-    /// 共用——此前两份逐行复制漂移）。资源缺失的映射跳过（上层 fail-closed）。</summary>
+    /// 共用——此前两份逐行复制漂移）。资源缺失的映射跳过（上层 fail-closed）。
+    /// CS-334（2026-10-01 审计·P1）：AccessKind 用 Deny——Allow 等效 ACAO:*
+    /// 全放行，任意远程站点 fetch https://ntp.aegis.local/start.html 即可读
+    /// NTP/GeoGebra 资产，一行探测即可识别 Aegis 用户（指纹防护被单点旁路，
+    /// GeoGebra 整包也被任意外站热链）。Deny 只拒跨源请求：NTP 自身文档加载
+    /// 自身子资源是同源请求不受影响；远程页探测必失败（无 ACAO 头可读）。
+    /// CS-373（2026-10-01 审计）：成功映射日志进程级只记一次——此前每标签
+    /// 3-4 行（N 标签 3N 行冲刷 1MB 取证日志）；资源缺失失败仍每次留痕。</summary>
     public static void BindVirtualHosts(Microsoft.Web.WebView2.Core.CoreWebView2 core)
     {
         var ntpRoot = ResolveContentRoot();
-        // 映射结果写入安全日志——NTP 加载失败时可据此区分「资源根缺失」与「映射未生效」
-        Core.Security.SecurityLog.Write(
-            $"[init] ntp 资源根 = {ntpRoot ?? "<null>"}（BaseDirectory={AppContext.BaseDirectory}）");
         if (ntpRoot is not null)
         {
             core.SetVirtualHostNameToFolderMapping(
                 HostName, ntpRoot,
-                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
-            Core.Security.SecurityLog.Write($"[init] {HostName} 已映射 -> {ntpRoot}");
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Deny);
+            LogBindOnce(ref _ntpBindLogged, $"[init] {HostName} 已映射 -> {ntpRoot}（AccessKind=Deny——跨源拒读，防远程页探测指纹）");
+        }
+        else
+        {
+            // 失败不折叠——NTP 加载失败时需区分「资源根缺失」与「映射未生效」
+            Core.Security.SecurityLog.Write(
+                $"[init] ntp 资源根缺失（BaseDirectory={AppContext.BaseDirectory}）");
         }
         var geoRoot = ResolveGeoRoot();
         if (geoRoot is not null)
         {
             core.SetVirtualHostNameToFolderMapping(
                 GeoHostName, geoRoot,
-                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Allow);
-            Core.Security.SecurityLog.Write($"[init] {GeoHostName} 已映射 -> {geoRoot}");
+                Microsoft.Web.WebView2.Core.CoreWebView2HostResourceAccessKind.Deny);
+            LogBindOnce(ref _geoBindLogged, $"[init] {GeoHostName} 已映射 -> {geoRoot}（AccessKind=Deny）");
         }
+        // geo 缺失是稳定常态（画板包未随包即 fail-closed 降级）——不刷日志
+    }
+
+    private static bool _ntpBindLogged;
+    private static bool _geoBindLogged;
+
+    private static void LogBindOnce(ref bool logged, string message)
+    {
+        if (logged)
+            return;
+        Core.Security.SecurityLog.Write(message);
+        logged = true;
     }
 
     /// <summary>NTP 宿主桥的顶层文档门禁：core.Source 为当前顶层文档（非任一

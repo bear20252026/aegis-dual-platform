@@ -129,6 +129,65 @@ public sealed class WindowSmokeTests
         });
     }
 
+    // ===== CS-359（2026-10-01 审计）：源码查看器首屏预览 + 加载全部 =====
+
+    [Fact]
+    public void SourceViewerWindow_LargeSource_ShowsPreviewOnlyUntilLoadAll()
+    {
+        RunSta(() =>
+        {
+            var large = new string('a', SourceViewerWindow.PreviewChars + 10_000);
+            var w = new SourceViewerWindow("https://example.com", large);
+            // 首屏只装 256KB——5MB 全量塞非虚拟化 TextBox 即 UI 冻结
+            Assert.Equal(SourceViewerWindow.PreviewChars, w.SourceText.Text.Length);
+            Assert.Equal(System.Windows.Visibility.Visible, w.LoadAllButton.Visibility);
+
+            w.LoadAll_Click(this, new System.Windows.RoutedEventArgs());
+            Assert.Equal(large.Length, w.SourceText.Text.Length);
+            Assert.Equal(System.Windows.Visibility.Collapsed, w.LoadAllButton.Visibility);
+        });
+    }
+
+    [Fact]
+    public void SourceViewerWindow_SmallSource_ShowsEverythingImmediately()
+    {
+        RunSta(() =>
+        {
+            var w = new SourceViewerWindow("https://example.com", "short source");
+            Assert.Equal("short source", w.SourceText.Text);
+            Assert.Equal(System.Windows.Visibility.Collapsed, w.LoadAllButton.Visibility);
+        });
+    }
+
+    // ===== CS-364（2026-10-01 审计）：InPrivateWindow 唯一无 STA 冒烟补齐 =====
+
+    [Fact]
+    public void InPrivateWindowConstructsAndClosesWithoutThrowing()
+    {
+        RunSta(() =>
+        {
+            var logDir = Path.Combine(Path.GetTempPath(), $"aegis_ip_log_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(logDir);
+            Aegis.Windows.Core.Security.SecurityLog.SecurityLogDirOverride = logDir;
+            try
+            {
+                // 租约工厂注入缝（CS-364）：必败工厂——构造/关闭冒烟不拉起
+                // 真实 WebView2 环境与浏览器进程（初始化失败走 CS-358 留痕分支）
+                var w = new InPrivateWindow(
+                    searchEngine: null,
+                    leaseFactoryForTests: () => System.Threading.Tasks.Task.FromException<
+                        Aegis.Windows.WebView.InPrivateEnvironmentLease>(
+                        new InvalidOperationException("smoke-test-no-webview2")));
+                w.Close();
+            }
+            finally
+            {
+                Aegis.Windows.Core.Security.SecurityLog.SecurityLogDirOverride = null;
+                try { Directory.Delete(logDir, true); } catch (IOException) { }
+            }
+        });
+    }
+
     private static void RunSta(Action action)
     {
         Exception? caught = null;

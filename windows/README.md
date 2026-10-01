@@ -22,4 +22,4 @@ dotnet test ../../tests/Aegis.Windows.Broker.Tests    # broker 测试套件全�
 
 - `src/Aegis.Windows.App/` — 应用（Chrome UI / Core 数据层 / Broker 安全层 / WebView 封装）。
 - `tests/` — xUnit 测试两套件。
-- `packaging/` — 打包脚本。
+- 打包脚本不在本目录：安装包定义在 `docs/release/AegisSetup-CSharp.iss`（Inno Setup——CS-365 修正：`windows/packaging/` 目录不存在）。

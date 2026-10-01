@@ -76,17 +76,26 @@ public sealed class SettingsService
 
     /// <summary>从 AppSettings 模型应用并持久化——设置变更的唯一写入口：
     /// 归一化 → 原子写盘（失败不阻断、不改动运行时——内存/磁盘不分叉）→
-    /// 刷新运行时 PrivacySettings → 通知。</summary>
+    /// 刷新运行时 PrivacySettings → 通知。
+    /// CS-368（2026-10-01 审计）：无变更跳过写盘——启动链 Apply(从盘加载的
+    /// 原模型) 此前无条件整文件重写 settings.json（纯 IO 开销 + 文件时间戳
+    /// 扰动备份链）。比对按归一化快照的序列化内容（record 默认相等对
+    /// IReadOnlyDictionary 是引用比较，不可用）。</summary>
     public void Apply(AppSettings model)
     {
         var snapshot = Normalize(ToSnapshot(model));
-        SaveCore(snapshot);
+        if (!SnapshotContentEquals(_snapshot, snapshot))
+            SaveCore(snapshot);
         _snapshot = snapshot;
         PrivacySettings.ProtectionLevel = snapshot.ProtectionLevel;
         PrivacySettings.HttpsOnly = snapshot.HttpsOnly;
         PrivacySettings.SecureDns = snapshot.SecureDns;
         Changed?.Invoke(this, EventArgs.Empty);
     }
+
+    private bool SnapshotContentEquals(BrowserSettingsSnapshot a, BrowserSettingsSnapshot b) =>
+        JsonSerializer.Serialize(ToAppSettings(a), JsonOptions)
+            == JsonSerializer.Serialize(ToAppSettings(b), JsonOptions);
 
     private void SaveCore(BrowserSettingsSnapshot normalized)
     {

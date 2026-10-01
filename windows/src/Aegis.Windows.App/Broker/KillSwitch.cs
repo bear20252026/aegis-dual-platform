@@ -20,6 +20,11 @@ public sealed class KillSwitch
 
     public bool IsEngaged => _engaged;
 
+    /// <summary>CS-367（2026-10-01 审计）：触发通知——主窗据此显示常驻横幅
+    ///（此前 Engage 后零可见指示，用户只见"导航无反应"无从知晓原因）。
+    /// 仅首次触发时广播一次。</summary>
+    public event Action? Engaged;
+
     /// <summary>紧急终止（原生 UI 触发——立即撤销未执行授权；幂等）。</summary>
     public void Engage()
     {
@@ -27,5 +32,6 @@ public sealed class KillSwitch
             return;
         _engaged = true;
         Core.Security.SecurityLog.Write("[security] KillSwitch 已触发——导航/下载/批准链全部冻结（重启恢复）");
+        Engaged?.Invoke();
     }
 }

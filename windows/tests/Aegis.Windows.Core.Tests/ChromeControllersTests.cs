@@ -84,12 +84,18 @@ public sealed class ChromeControllersTests
     }
 
     [Fact]
-    public void BuildCountJs_EscapesQuery_ResolvedPromiseShape()
+    public void BuildCountJs_IsSynchronousExpression_NotPromise()
     {
+        // CS-338（2026-10-01 审计）：同步 IIFE 表达式——ExecuteScriptAsync 不
+        // 等待 Promise 解析，此前 Promise 形态的序列化结果恒 "null"，
+        // 命中计数恒 0（查找条永远显示"无结果"）
         var js = FindBarController.BuildCountJs("q\"q");
-        Assert.StartsWith("new Promise(r=>{try{var m=(document.body&&document.body.innerText)||'';", js);
+        Assert.StartsWith("(function(){try{var m=(document.body&&document.body.innerText)||'';", js);
         Assert.Contains("Q=\"q\\u0022q\";", js);
-        Assert.EndsWith("r(n);}catch(e){r(0);}});", js);
+        Assert.EndsWith("return n;}catch(e){return 0;}})()", js);
+        Assert.DoesNotContain("new Promise", js);
+        // 空查询防护：indexOf('') 恒命中且步进为 0——前置长度短路防死循环
+        Assert.Contains("if(Q.length)", js);
     }
 
     [Fact]

@@ -104,6 +104,10 @@ public partial class App : Application
         }
         try
         {
+            // CS-352（2026-10-01 审计）：启动清理崩溃残留的无痕临时目录
+            //（%TEMP%\Aegis.InPrivate.*——正常退出经引用计数清理，崩溃后永久
+            // 残留即隐私承诺失效）；失败留痕不打断启动
+            _ = WebView.WebViewEnvironment.CleanupOrphanInPrivateDirs();
             var window = new Chrome.MainWindow(Chrome.MainWindowDependencies.Defaults());
             MainWindow = window;
             window.Show();

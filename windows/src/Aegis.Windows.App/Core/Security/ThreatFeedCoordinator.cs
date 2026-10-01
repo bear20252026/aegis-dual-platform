@@ -35,26 +35,38 @@ public sealed class ThreatFeedCoordinator
             ?? ((url, cache) => ThreatFeedUpdater.FetchAndStore(url, cache));
     }
 
-    /// <summary>启动同步：先应用缓存快照，再（源有效时）后台异步刷新。
-    /// 返回是否启动了后台刷新（供测试同步等待完成）。</summary>
+    /// <summary>启动：后台线程加载缓存快照并应用，再（源有效时）后台刷新。
+    /// CS-350（2026-10-01 审计）：LoadCached（≤5MB 读盘）此前在启动链 UI 线程
+    /// 同步执行——改空快照启动（broker 保持默认空名单，fail-safe 放行）+
+    /// 全量后台加载后回投应用；返回是否启动了后台刷新（语义不变，供测试
+    /// 同步等待完成）。</summary>
     public bool Start()
     {
-        var snapshot = ThreatFeedUpdater.LoadCached(_cachePath);
-        _applyHosts(new BlockedHosts(snapshot));
-        _log($"[threat] 黑名单快照 {snapshot.Count} 条");
-
         var feedUrl = (_resolveFeedUrl() ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(feedUrl))
-            return false;
-        var validated = ThreatFeedUpdater.ValidateFeedUrl(feedUrl);
-        if (validated is null)
+        string? validated = null;
+        if (!string.IsNullOrWhiteSpace(feedUrl))
         {
-            _log("[threat] 订阅源非法（仅支持 https）——保持旧快照");
-            return false;
+            validated = ThreatFeedUpdater.ValidateFeedUrl(feedUrl);
+            if (validated is null)
+                _log("[threat] 订阅源非法（仅支持 https）——保持旧快照");
         }
-
-        Task.Run(() => Refresh(validated));
-        return true;
+        Task.Run(async () =>
+        {
+            try
+            {
+                var snapshot = ThreatFeedUpdater.LoadCached(_cachePath);
+                _applyHosts(new BlockedHosts(snapshot));
+                _log($"[threat] 黑名单快照 {snapshot.Count} 条");
+            }
+            catch (Exception ex)
+            {
+                _log($"[threat] 缓存快照加载失败（保持空名单）: {ex.Message}");
+            }
+            if (validated is null)
+                return;
+            await Refresh(validated);
+        });
+        return validated is not null;
     }
 
     private Task Refresh(string validated)

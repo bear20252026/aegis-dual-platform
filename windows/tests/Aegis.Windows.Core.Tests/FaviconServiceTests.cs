@@ -29,6 +29,21 @@ public sealed class FaviconServiceTests : IDisposable
         Assert.Matches("^[0-9A-F]{40}$", name);
     }
 
+    // ===== CS-356（2026-10-01 审计）：IPv6 host 抓取 URL 构造 =====
+
+    [Theory]
+    [InlineData("example.com", "https://example.com/favicon.ico")]
+    [InlineData("sub.example.com", "https://sub.example.com/favicon.ico")]
+    [InlineData("::1", "https://[::1]/favicon.ico")]                    // 无方括号形态补括号
+    [InlineData("[2001:db8::1]", "https://[2001:db8::1]/favicon.ico")]  // 已带括号不双包
+    [InlineData("2001:db8::1:8443", "https://[2001:db8::1:8443]/favicon.ico")]
+    public void BuildFaviconUrl_BracketsIpv6Literals(string host, string expected)
+    {
+        // IPv6 host 无方括号直接拼接产生非法 URL——永远失败并进负缓存；
+        // host 含 ':' 时按 RFC 3986 补方括号
+        Assert.Equal(expected, FaviconService.BuildFaviconUrl(host));
+    }
+
     // ===== C19b 批：CS-328（桩注入——确定性驱动异步路径） =====
 
     public FaviconServiceTests()

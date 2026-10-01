@@ -188,6 +188,27 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(corrupt, File.ReadAllText(_path + ".bak"));
     }
 
+    // ===== CS-368（2026-10-01 审计）：无变更跳过写盘 =====
+
+    [Fact]
+    public void Apply_UnchangedSnapshot_SkipsDiskWrite()
+    {
+        // 启动链 Apply(从盘加载的原模型) 此前无条件整文件重写——
+        // 无变更（与构造快照逐字段一致）时不产生任何磁盘写
+        var svc = new SettingsService(_path);
+        Assert.False(File.Exists(_path), "构造（文件缺失回退默认）不应写盘");
+
+        svc.Apply(new AppSettings());  // 默认模型 = 构造快照——无变更
+
+        Assert.False(File.Exists(_path), "无变更的 Apply 不应写盘");
+        Assert.NotNull(svc.Snapshot);  // 运行时状态照常刷新
+
+        svc.Apply(new AppSettings { SearchEngine = "bing" });  // 有变更——落盘
+
+        Assert.True(File.Exists(_path));
+        Assert.Contains("bing", File.ReadAllText(_path));
+    }
+
     public void Dispose()
     {
         try { File.Delete(_path); } catch (IOException) { }

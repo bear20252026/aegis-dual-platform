@@ -172,7 +172,7 @@ public static class FaviconService
     {
         try
         {
-            using var response = await Http.GetAsync("https://" + host + "/favicon.ico").ConfigureAwait(false);
+            using var response = await Http.GetAsync(BuildFaviconUrl(host)).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 return null;
             // 先看声明长度再缓冲——超大响应不进内存
@@ -188,6 +188,16 @@ public static class FaviconService
         {
             return null;
         }
+    }
+
+    /// <summary>favicon 抓取 URL 构造。CS-356（2026-10-01 审计）：IPv6 host
+    /// （Uri.Host 无方括号形态）直接拼接产生非法 URL（"https://::1/favicon.ico"）
+    /// ——永远失败并进负缓存；host 含 ':' 时补 RFC 3986 方括号。
+    /// 提 internal 直测。</summary>
+    internal static string BuildFaviconUrl(string host)
+    {
+        var authority = host.Contains(':') ? "[" + host.Trim('[', ']') + "]" : host;
+        return "https://" + authority + "/favicon.ico";
     }
 
     private static ImageSource? Decode(byte[] bytes)

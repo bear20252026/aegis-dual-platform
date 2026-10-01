@@ -54,6 +54,48 @@ public sealed class BookmarkStoreTests : IDisposable
         Assert.False(_store.Remove("https://nothing.example"));
     }
 
+    // ===== CS-340（2026-10-01 审计）：Add/Rename/Import 长度钳制补齐 =====
+
+    [Fact]
+    public void Add_ClampsOverlongTitleAndUrl()
+    {
+        // 页面可控任意长 title/URL 此前可原样落库回读渲染（CS-319 只落
+        // HistoryStore）；库层钳制与历史库同口径（256/2048，代理对安全）
+        var longTitle = new string('标', 300);
+        var longUrl = "https://example.com/" + new string('x', 3000);
+        Assert.True(_store.Add(longTitle, longUrl));
+
+        var all = _store.All();
+        var bookmark = Assert.Single(all);
+        Assert.Equal(256, bookmark.Title.Length);
+        Assert.Equal(2048, bookmark.Url.Length);
+    }
+
+    [Fact]
+    public void Rename_ClampsOverlongTitle()
+    {
+        Assert.True(_store.Add("甲", "https://jia.cn"));
+        var id = _store.All()[0].Id;
+
+        Assert.True(_store.Rename(id, new string('题', 300)));
+
+        Assert.Equal(256, _store.All()[0].Title.Length);
+    }
+
+    [Fact]
+    public void Import_ClampsOverlongCandidates()
+    {
+        var (imported, total) = _store.Import(
+        [
+            (new string('题', 300), "https://example.com/" + new string('y', 3000)),
+        ]);
+
+        Assert.Equal((1, 1), (imported, total));
+        var bookmark = Assert.Single(_store.All());
+        Assert.Equal(256, bookmark.Title.Length);
+        Assert.Equal(2048, bookmark.Url.Length);
+    }
+
     // ===== CS-046..050（审计 2026-09-25）：书签管理路径零覆盖补齐 =====
 
     [Fact]
@@ -198,8 +240,6 @@ public sealed class BookmarkImporterTests : IDisposable
         Assert.Equal(1, imported);
         Assert.Equal(2, total);
         Assert.True(store.Contains("https://jia.cn"));
-        store.Remove("https://jia.cn");
-        File.Delete(store.ToString());  // no-op 清理（db 路径独立）
     }
 
     // ===== CS-100..105（审计 2026-09-26）：解析容错与边界 =====

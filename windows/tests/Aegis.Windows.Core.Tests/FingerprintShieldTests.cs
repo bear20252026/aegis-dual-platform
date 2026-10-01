@@ -75,13 +75,49 @@ public sealed class FingerprintShieldTests
     {
         // 修 Python「putImageData 污染可见画布」缺陷——画布写回只允许发生在
         // 离屏副本 tmp 上
-        var script = FingerprintShield.BuildScript(SeedA);
+        var canvasProxy = SliceCanvasProxy();
 
-        var canvasProxy = script[script.IndexOf("var canvasProxy", StringComparison.Ordinal)..];
-        canvasProxy = canvasProxy[..canvasProxy.IndexOf("WebGL", StringComparison.Ordinal)];
         Assert.Contains("createElement('canvas')", canvasProxy);
         Assert.Contains("origToDataURL.apply(tmp", canvasProxy);
         Assert.DoesNotContain("putImageData(imageData, 0, 0);\n                return origToDataURL.apply(this", canvasProxy);
+    }
+
+    // ===== CS-335/336（2026-10-01 审计）：canvas 噪声门禁删除 + per-site 种子 =====
+
+    /// <summary>截取 canvas 代理段（var canvasProxy 到代理注册行之前——
+    /// 段内注释含 "WebGL" 字样，不能以它作段尾标记）。</summary>
+    private string SliceCanvasProxy()
+    {
+        var script = FingerprintShield.BuildScript(SeedA);
+        var slice = script[script.IndexOf("var canvasProxy", StringComparison.Ordinal)..];
+        return slice[..slice.IndexOf("registerProxy(canvasProxy", StringComparison.Ordinal)];
+    }
+
+    [Fact]
+    public void CanvasNoise_HasNo2dContextGate_OffscreenCopyCoversWebglCanvases()
+    {
+        // CS-335（P1）：删除 getContext('2d') 门禁——WebGL 画布取 2d 上下文得
+        // null 即无噪声回退，且无上下文画布被永久锁 2d。改离屏副本 drawImage
+        // 取像素（对 2d/WebGL 画布同路径生效）；原画布上下文绝不被触碰
+        var canvasProxy = SliceCanvasProxy();
+
+        Assert.DoesNotContain("this.getContext", canvasProxy);
+        Assert.Contains("tmp.getContext('2d')", canvasProxy);
+        Assert.Contains("drawImage(this, 0, 0)", canvasProxy);  // 离屏副本取像素——WebGL 同路径
+    }
+
+    [Fact]
+    public void CanvasNoise_UsesPerSiteSeed_CachedOnceAtLoad()
+    {
+        // CS-336：噪声种子改 per-site siteSeed——此前用会话级 SEED（同用户跨站
+        // 噪声相同，可跨站关联），且 siteSeed 计算后零引用（死代码）；
+        // siteSeed 在 IIFE 加载时缓存一次
+        var script = FingerprintShield.BuildScript(SeedA);
+        Assert.Contains("var siteSeed = deriveSeed(SEED, getETLD1(location.hostname));", script);
+
+        var canvasProxy = SliceCanvasProxy();
+        Assert.Contains("parseInt(siteSeed.slice(0, 8), 16)", canvasProxy);
+        Assert.DoesNotContain("parseInt(SEED.slice(0, 8), 16)", canvasProxy);
     }
 
     [Fact]

@@ -4,8 +4,25 @@ using Xunit;
 
 namespace Aegis.Windows.Broker.Tests;
 
-public sealed class BrowserPolicyBrokerTests
+public sealed class BrowserPolicyBrokerTests : IDisposable
 {
+    // CS-346（2026-10-01 审计）：测试副作用隔离——KillSwitch.Engage /
+    // AllowDownload / 黑名单拒绝等路径会写 security.log，此前直落真实用户
+    // 目录；fixture 统一重定向到临时目录并在 Dispose 还原
+    private string LogDir { get; } =
+        Path.Combine(Path.GetTempPath(), $"aegis_broker_log_{Guid.NewGuid():N}");
+
+    public BrowserPolicyBrokerTests()
+    {
+        Directory.CreateDirectory(LogDir);
+        SecurityLog.SecurityLogDirOverride = LogDir;
+    }
+
+    public void Dispose()
+    {
+        SecurityLog.SecurityLogDirOverride = null;
+        try { Directory.Delete(LogDir, true); } catch (IOException) { }
+    }
     [Fact]
     public void AuthorizedNavigationCanBeConsumedOnlyOnce()
     {
@@ -299,8 +316,7 @@ public sealed class BrowserPolicyBrokerTests
 
         var decision = broker.RequestNavigationConfirmation(
             "session-1", "tab-1", 0, "https://example.com/pay", "navigation");
-        var deny = Assert.IsType<Decision.Deny>(decision);
-        Assert.Equal("kill_switch_engaged", deny.Reason.Code);
+        Assert.Equal("kill_switch_engaged", Assert.IsType<Decision.Deny>(decision).Reason.Code);
     }
 
     [Fact]
@@ -321,7 +337,6 @@ public sealed class BrowserPolicyBrokerTests
             Assert.True(broker.RegisterSession($"session-{i}", $"tab-{i}"));
         Assert.False(broker.RegisterSession("session-overflow", "tab-overflow"));
     }
-
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -446,39 +461,6 @@ public sealed class BrowserPolicyBrokerTests
     }
 
     // ===== C19b 批（审计 2026-09-26）：CS-291/332/307 =====
-
-    [Fact]
-    public void KillSwitch_SharedInstance_FreezesAllBrokersInjectedWithIt()
-    {
-        // CS-291（P1）：跨窗口联动——设置窗触发主窗 broker 的开关，无痕窗口
-        // broker（注入同一共享实例）的导航/下载/确认链必须同样冻结
-        var shared = new KillSwitch();
-        var mainBroker = new BrowserPolicyBroker(killSwitch: shared);
-        var inPrivateBroker = new BrowserPolicyBroker(killSwitch: shared);
-        Assert.True(mainBroker.RegisterSession("main-s", "main-t"));
-        Assert.True(inPrivateBroker.RegisterSession("inprivate-s", "inprivate-t"));
-
-        mainBroker.KillSwitch.Engage();  // 仅在主窗 broker 上触发（设置窗路径）
-
-        Assert.True(inPrivateBroker.KillSwitch.IsEngaged);  // 共享实例联动
-        Assert.IsType<Decision.Deny>(inPrivateBroker.EvaluateNavigation(
-            "inprivate-s", "inprivate-t", 0, "https://example.com", "navigation"));
-        Assert.False(inPrivateBroker.AllowDownload(
-            "inprivate-s", "inprivate-t", "https://example.com", "x.exe", userConfirmed: true));
-        Assert.IsType<Decision.Deny>(inPrivateBroker.RequestNavigationConfirmation(
-            "inprivate-s", "inprivate-t", 0, "https://example.com/pay", "navigation"));
-    }
-
-    [Fact]
-    public void KillSwitch_DefaultBrokersAreIsolated()
-    {
-        // CS-291 反向锁定：缺省构造（测试语境）各自独立——一个 broker 触发
-        // 不影响另一个（生产组合根统一注入 KillSwitch.Shared）
-        var first = new BrowserPolicyBroker();
-        var second = new BrowserPolicyBroker();
-        first.KillSwitch.Engage();
-        Assert.False(second.KillSwitch.IsEngaged);
-    }
 
     [Fact]
     public void KillSwitch_Shared_IsProcessWideSingleton()

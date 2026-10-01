@@ -105,4 +105,43 @@ public sealed class DownloadPolicyTests
         // 未超长原样返回
         Assert.Equal(text, DownloadPolicy.TruncateSurrogateSafe(text, 50));
     }
+
+    // ===== CS-351（2026-10-01 审计）：危险扩展补齐（互联网快捷方式/ClickOnce/JNLP） =====
+
+    [Theory]
+    [InlineData("https://x.example/evil.url", "link.url")]
+    [InlineData("https://x.example/evil.website", "link.website")]
+    [InlineData("https://x.example/app.appref-ms", "clickonce.appref-ms")]
+    [InlineData("https://x.example/app.application", "clickonce.application")]
+    [InlineData("https://x.example/settings.settingcontent-ms", "settings.settingcontent-ms")]
+    [InlineData("https://x.example/launch.jnlp", "launch.jnlp")]
+    public void NewDangerousExtensionsRequireConfirmation(string url, string fileName)
+    {
+        // .url/.website（互联网快捷方式）/ .appref-ms/.application（ClickOnce）/
+        // .settingcontent-ms / .jnlp（Java Web Start）——直链执行载体此前
+        // 不在集合内，下载零确认即落盘
+        Assert.True(DownloadPolicy.RequiresExplicitConfirmation(url, fileName));
+    }
+
+    [Fact]
+    public void NewDangerousExtensions_AlsoHitViaQueryDirectLink()
+    {
+        // 查询串直链同口径命中（无 Content-Disposition 场景）
+        Assert.True(DownloadPolicy.RequiresExplicitConfirmation(
+            "https://x.example/download?file=x.url", ""));
+    }
+
+    // ===== CS-354（2026-10-01 审计）：超长扩展名打破 200 上限 =====
+
+    [Fact]
+    public void Sanitize_OverlongExtension_TotalLengthStillCapped()
+    {
+        // 整名即一个超长扩展（".bbb…400 字符"）——保留扩展的截断产物
+        // 1+ext 可达 400+，此前落盘必失败；截断后二次校验总长，超限回退
+        // 纯名截断（200 上限恒成立，产物非空）
+        var overlongExt = new string('a', 500) + "." + new string('b', 400);
+        var sanitized = DownloadPolicy.SanitizeFileName(overlongExt);
+        Assert.True(sanitized.Length <= 200, $"截断后长度 {sanitized.Length}");
+        Assert.True(sanitized.Length > 0);
+    }
 }

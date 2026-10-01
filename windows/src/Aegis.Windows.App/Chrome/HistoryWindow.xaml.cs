@@ -106,11 +106,34 @@ public partial class HistoryWindow : Window
         var history = _history;
         Task.Run(() =>
         {
-            var total = history.Count(query, from, to);
-            var totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
-            var currentPage = Math.Min(page, totalPages);
-            var entries = history.SearchRangePage(query, from, to, pageSize,
-                (currentPage - 1) * pageSize);
+            // CS-342（2026-10-01 审计）：体内捕获 SQLite 异常——此前 Task.Run 内
+            // 异常成为未观察任务异常（UI 停旧页且零提示）；回投 UI 线程呈现
+            // 失败态（EmptyHint）并留痕 SecurityLog
+            long total;
+            int totalPages;
+            int currentPage;
+            IReadOnlyList<HistoryEntry> entries;
+            try
+            {
+                total = history.Count(query, from, to);
+                totalPages = Math.Max(1, (int)Math.Ceiling(total / (double)pageSize));
+                currentPage = Math.Min(page, totalPages);
+                entries = history.SearchRangePage(query, from, to, pageSize,
+                    (currentPage - 1) * pageSize);
+            }
+            catch (Exception ex)
+            {
+                Aegis.Windows.Core.Security.SecurityLog.Write(
+                    $"[history] 页查询失败（后台）: {ex.GetType().Name}: {ex.Message}");
+                Dispatcher.Invoke(() =>
+                {
+                    if (generation != _loadGeneration || !IsLoaded)
+                        return;
+                    EmptyHint.Visibility = Visibility.Visible;
+                    EmptyHint.Text = "历史记录加载失败，请稍后重试。";
+                });
+                return;
+            }
             Dispatcher.Invoke(() =>
             {
                 if (generation != _loadGeneration || !IsLoaded)

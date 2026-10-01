@@ -7,10 +7,11 @@ using System.Linq;
 using Aegis.Windows.Core.Security;
 using Xunit;
 
-/// <summary>威胁黑名单刷新编排单测（上帝对象拆分·第六批）：启动即应用缓存
-/// 快照；订阅源缺失/非法不启动刷新；合法源后台刷新替换快照；刷新失败保持
-/// 旧快照。全部副作用注入——离线可测。</summary>
-public sealed class ThreatFeedCoordinatorTests
+/// <summary>威胁黑名单刷新编排单测（上帝对象拆分·第六批）：启动后台应用缓存
+/// 快照（CS-350：LoadCached 移出 UI 线程——空快照启动+后台加载）；订阅源
+/// 缺失/非法不启动刷新；合法源后台刷新替换快照；刷新失败保持旧快照。
+/// 全部副作用注入——离线可测。</summary>
+public sealed class ThreatFeedCoordinatorTests : IDisposable
 {
     private readonly string _cachePath =
         Path.Combine(Path.GetTempPath(), $"aegis_threat_{Guid.NewGuid():N}.txt");
@@ -43,37 +44,45 @@ public sealed class ThreatFeedCoordinatorTests
         File.WriteAllLines(_cachePath, ["doubleclick.net", "tracker.example"]);
     }
 
+    private IBlockedHosts LastApplied(Harness h) => h.Applied[^1];
+
     [Fact]
-    public void Start_AppliesCachedSnapshot_Immediately()
+    public async System.Threading.Tasks.Task Start_AppliesCachedSnapshot_InBackground()
     {
+        // CS-350：快照加载移到后台任务（此前 Start 内同步 LoadCached——
+        // 启动链 UI 线程 ≤5MB 读盘）；等待后台应用完成后语义不变。
+        // 取"含缓存快照内容的这一次应用"断言——后台刷新可能随后替换 Applied，
+        // 不能按 last 元素断言（竞态）
         var h = new Harness();
         var c = h.Build(_cachePath);
         c.Start();
-        var applied = Assert.Single(h.Applied);
-        Assert.True(applied.IsBlocked("doubleclick.net"));
+        await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any(b => b.IsBlocked("doubleclick.net")));
+        await SpinUntil(() => h.Logs.Any(l => l.Contains("黑名单快照 2 条")));
+        var applied = h.Applied.First(b => b is BlockedHosts blk && blk.IsBlocked("doubleclick.net"));
         Assert.True(applied.IsBlocked("sub.tracker.example"));
         Assert.False(applied.IsBlocked("example.com"));
-        Assert.Contains("[threat] 黑名单快照 2 条", h.Logs);
     }
 
     [Fact]
-    public void Start_WithoutFeedUrl_AppliesSnapshotOnly_NoRefresh()
+    public async System.Threading.Tasks.Task Start_WithoutFeedUrl_AppliesSnapshotOnly_NoRefresh()
     {
         var h = new Harness { FeedUrl = null };
         var c = h.Build(_cachePath);
         var started = c.Start();
         Assert.False(started);
+        await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any());
         Assert.Single(h.Applied); // 仅快照，无刷新替换
     }
 
     [Fact]
-    public void Start_InvalidFeedUrl_LogsAndKeepsSnapshot()
+    public async System.Threading.Tasks.Task Start_InvalidFeedUrl_LogsAndKeepsSnapshot()
     {
         var h = new Harness { FeedUrl = "http://plain.example/list.txt" }; // 明文拒
         var c = h.Build(_cachePath);
         var started = c.Start();
         Assert.False(started);
         Assert.Contains(h.Logs, l => l.Contains("订阅源非法"));
+        await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any());
         Assert.Single(h.Applied);
     }
 
@@ -83,9 +92,9 @@ public sealed class ThreatFeedCoordinatorTests
         var h = new Harness { FetchedCacheContents = ["refreshed.example"] };
         var c = h.Build(_cachePath);
         Assert.True(c.Start());
-        // 等待后台刷新完成
+        // 等待后台刷新完成（快照应用 + 刷新替换共两次）
         await SpinUntil(() => h.Applied.Count >= 2);
-        var final = h.Applied[^1];
+        var final = LastApplied(h);
         Assert.True(final.IsBlocked("refreshed.example"));
         Assert.False(final.IsBlocked("doubleclick.net")); // 旧快照被替换
         Assert.Contains(h.Logs, l => l.Contains("订阅源刷新完成"));
@@ -103,17 +112,20 @@ public sealed class ThreatFeedCoordinatorTests
             fetchAndStore: (_, _) => throw new InvalidOperationException("网络不可用"));
         Assert.True(c.Start());
         await SpinUntil(() => h.Logs.Any(l => l.Contains("订阅源刷新失败")));
-        // 快照从未被替换（仍只有初始一次）
+        // 快照未被替换（仍只有后台应用的一次），且内容保持缓存快照
+        await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any());
         Assert.Single(h.Applied);
+        Assert.True(LastApplied(h).IsBlocked("doubleclick.net"));
     }
 
     [Fact]
-    public void Start_WhitespaceFeedUrl_TreatedAsMissing()
+    public async System.Threading.Tasks.Task Start_WhitespaceFeedUrl_TreatedAsMissing()
     {
         // CS-245：空白订阅源地址裁剪后视为未配置——不启动刷新
         var h = new Harness { FeedUrl = "   " };
         var c = h.Build(_cachePath);
         Assert.False(c.Start());
+        await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any());
         Assert.Single(h.Applied);
     }
 
@@ -135,7 +147,7 @@ public sealed class ThreatFeedCoordinatorTests
             });
         Assert.True(c.Start());
         await SpinUntil(() => h.Applied.Count >= 2);
-        var final = h.Applied[^1];
+        var final = LastApplied(h);
         Assert.True(final.IsBlocked("fresh-from-fetch.example"));
         Assert.False(final.IsBlocked("stale-from-disk.example"));
     }

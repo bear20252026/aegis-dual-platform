@@ -97,19 +97,26 @@ public static class FingerprintShield
 
           // ====== Stage 3+7 合并: Canvas/WebGL/Audio（canvas 离屏副本扰动——
           // 修 Python putImageData 污染可见画布缺陷）======
+          // CS-335（2026-10-01 审计·P1）：删除 getContext('2d') 门禁——WebGL
+          // 画布取 2d 上下文得 null 即无噪声回退，且无上下文画布被永久锁 2d。
+          // 改为离屏副本 drawImage 取像素（对 2d/WebGL 画布同路径生效），
+          // 绝不触碰原画布上下文。
+          // CS-336（2026-10-01 审计）：噪声种子取 per-site 的 siteSeed（加载时
+          // 缓存一次）——此前用会话级 SEED，同用户跨站噪声相同可被跨站关联。
           var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
           var canvasProxy = function() {
             try {
-              var ctx = this.getContext('2d');
-              if (ctx && this.width && this.height) {
-                var imageData = ctx.getImageData(0, 0, this.width, this.height);
-                var seed = parseInt(SEED.slice(0, 8), 16);
+              if (this.width && this.height) {
+                var tmp = document.createElement('canvas');
+                tmp.width = this.width; tmp.height = this.height;
+                var tmpCtx = tmp.getContext('2d');
+                tmpCtx.drawImage(this, 0, 0);  // 离屏副本取像素——WebGL 画布同路径
+                var imageData = tmpCtx.getImageData(0, 0, this.width, this.height);
+                var seed = parseInt(siteSeed.slice(0, 8), 16);
                 for (var i = 0; i < imageData.data.length; i += 4) {
                   imageData.data[i] = (imageData.data[i] + ((seed + i) % 2 === 0 ? 1 : -1)) & 0xff;
                 }
-                var tmp = document.createElement('canvas');
-                tmp.width = this.width; tmp.height = this.height;
-                tmp.getContext('2d').putImageData(imageData, 0, 0);
+                tmpCtx.putImageData(imageData, 0, 0);
                 return origToDataURL.apply(tmp, arguments);
               }
             } catch (e) { /* tainted canvas——跳过扰动走原路径 */ }

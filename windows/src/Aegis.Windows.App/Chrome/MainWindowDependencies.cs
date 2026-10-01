@@ -3,7 +3,6 @@ namespace Aegis.Windows.Chrome;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Core;
 using Aegis.Windows.Core.Bookmarks;
-using Aegis.Windows.Core.Downloads;
 using Aegis.Windows.Core.History;
 using Aegis.Windows.Core.Settings;
 using Aegis.Windows.Core.Tabs;
@@ -18,12 +17,15 @@ public sealed record MainWindowDependencies(
     SettingsService SettingsService,
     BookmarkStore Bookmarks,
     HistoryStore History,
-    TabSessionStore SessionStore,
-    DownloadRecordStore DownloadRecords)
+    TabSessionStore SessionStore)
 {
     /// <summary>对齐旧行为的分发（SessionDbPath 等 AppPaths 默认路径）。
     /// CS-127：settings.json 单读双用——AppSettings.Load 读到的模型经
-    /// SettingsService.FromPreloaded 复用，不再由服务构造器二次读盘。</summary>
+    /// SettingsService.FromPreloaded 复用，不再由服务构造器二次读盘。
+    /// CS-344（2026-10-01 审计）：DownloadRecords 依赖移除——
+    /// DownloadRecordStore 的 All() 零生产调用（注释承诺"重启后仍可查看"
+    /// 失实；DownloadItem 需持有原生 DownloadOperation，重启后无法重建），
+    /// 带 token 的 URL 无收益常驻磁盘，整类删除。</summary>
     public static MainWindowDependencies Defaults()
     {
         var settings = AppSettings.Load(AppSettings.DefaultPath);
@@ -36,7 +38,6 @@ public sealed record MainWindowDependencies(
             SettingsService: SettingsService.FromPreloaded(settings),
             Bookmarks: new BookmarkStore(AppPaths.BookmarksDbPath),
             History: new HistoryStore(AppPaths.HistoryDbPath),
-            SessionStore: new TabSessionStore(AppPaths.SessionDbPath),
-            DownloadRecords: new DownloadRecordStore(AppPaths.DownloadsDbPath));
+            SessionStore: new TabSessionStore(AppPaths.SessionDbPath));
     }
 }
