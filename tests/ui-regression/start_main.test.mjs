@@ -28,6 +28,7 @@ function el(tag) {
     tabIndex: 0,
     _handlers: {},
     _attrs: {},
+    _removedAttrs: [],
     _focused: false,
     _textContent: '',
     appendChild(c) { node.children.push(c); return c; },
@@ -38,7 +39,23 @@ function el(tag) {
     // 方向键导航断言需要读取写入
     setAttribute(n, v) { node._attrs[n] = String(v); },
     getAttribute(n) { return n in node._attrs ? node._attrs[n] : null; },
+    // WB-137（2026-10-01 审计）：removeAttribute 记录——restoreBox 显示
+    // 改为移除 hidden 属性配对（不再压 style.display）
+    removeAttribute(n) { node._removedAttrs.push(n); delete node._attrs[n]; },
     focus() { node._focused = true; },
+    // WB-147（2026-10-01 审计）：classList 记录——geoBtn 降级态断言
+    // （classList.add('unavailable')）需要读取类名变化
+    classList: {
+      add(c) {
+        const parts = node.className ? node.className.split(' ') : [];
+        if (!parts.includes(c)) parts.push(c);
+        node.className = parts.join(' ');
+      },
+      remove(c) {
+        node.className = (node.className ? node.className.split(' ') : [])
+          .filter((x) => x !== c).join(' ');
+      },
+    },
     // WB-044：引擎菜单方向键从容器取菜单项——按 role 过滤后代
     querySelectorAll(sel) {
       const hit = [];
@@ -57,17 +74,20 @@ function el(tag) {
 }
 
 function makeHost() {
-  const state = { setCalls: [], errors: [], getWallpaperCb: null, hasSavedN: 0, hasSavedRaw: undefined, navigateCalls: 0, restoreCalls: 0 };
+  const state = { setCalls: [], errors: [], getWallpaperCb: null, hasSavedN: 0, hasSavedRaw: undefined, navigateCalls: 0, restoreCalls: 0, engineCalls: [], geoFailCalls: 0 };
   const host = {
     kind: () => 'cs',
     has: (f) => f === 'navigate' || f === 'geo',   // bookmarks=false → 书签宫格早退
     getEngine: (cb) => cb({ engine: 'baidu', engines: [{ key: 'baidu', name: '百度' }] }),
+    setEngine: (key) => state.engineCalls.push(key),
     getWallpaper: (cb) => { state.getWallpaperCb = cb; },
     hasSaved: (cb) => cb(state.hasSavedRaw !== undefined ? state.hasSavedRaw : state.hasSavedN),
     restoreSession: () => { state.restoreCalls += 1; },
     setWallpaper: (name) => state.setCalls.push(name),
     jsError: (...a) => state.errors.push(a.join(' ')),
     navigate: () => { state.navigateCalls += 1; },
+    // WB-147：openGeo 的回调即 onFail——默认成功形态（不触发降级）
+    openGeo: (onFail) => { state.geoCalls = (state.geoCalls || 0) + 1; return undefined; },
   };
   return { host, state };
 }
@@ -85,6 +105,7 @@ function loadMain(host, winExtras) {
     bm: el('div'),
     restoreBox: el('div'),
     restoreBtn: el('button'),
+    geoBtn: el('button'),
   };
   const docHandlers = {};
   const document = {
@@ -187,20 +208,25 @@ test('WB-013 桥调用失败：jsError 留痕且不阻断首屏装配', () => {
 });
 
 // WB-129（2026-09-26 审计）：restoreBox 渲染与按钮接线此前零测试
-test('WB-129 restoreBox 三态渲染：n=0/1 不显示，n=5 显示并接线', () => {
+// WB-137（2026-10-01 审计）：显示改 removeAttribute('hidden') 配对——
+// 断言随迁移（不再压 style.display，属性残留即回归）
+test('WB-129/137 restoreBox 三态渲染：n=0/1 不显示，n=5 移除 hidden 并接线', () => {
   for (const n of [0, 1]) {
     const { host, state } = makeHost();
     state.hasSavedN = n;
     const { elements } = loadMain(host);
+    assert.deepEqual(elements.restoreBox._removedAttrs, [],
+      `n=${n}（仅 >1 显示）不得移除 hidden（不显示恢复入口）`);
     assert.equal(elements.restoreBox.style.display, undefined,
-      `n=${n}（仅 >1 显示）不得显示恢复入口`);
+      `n=${n} 不得以 style.display 强行显示`);
     assert.equal(typeof elements.restoreBtn.onclick, 'undefined',
       `n=${n} 不得给按钮接线`);
   }
   const { host, state } = makeHost();
   state.hasSavedN = 5;
   const { elements } = loadMain(host);
-  assert.equal(elements.restoreBox.style.display, 'block', 'n=5 必须显示恢复入口');
+  assert.ok(elements.restoreBox._removedAttrs.includes('hidden'),
+    'n=5 必须以 removeAttribute(hidden) 显示（标记层配对，不留隐藏语义残留）');
   assert.match(elements.restoreBtn.textContent, /恢复上次会话（5 个标签）/,
     '按钮文案必须携带标签计数');
   elements.restoreBtn.onclick({});
@@ -213,13 +239,13 @@ test('WB-089 hasSaved parseInt 归一：字符串数字可用，垃圾值归 0 �
   const { host, state } = makeHost();
   state.hasSavedRaw = '3';
   const a = loadMain(host);
-  assert.equal(a.elements.restoreBox.style.display, 'block',
+  assert.ok(a.elements.restoreBox._removedAttrs.includes('hidden'),
     "字符串 '3' 必须归一为 3（>1 显示）");
   assert.match(a.elements.restoreBtn.textContent, /3 个标签/);
   const { host: h2, state: s2 } = makeHost();
   s2.hasSavedRaw = 'abc';
   const b = loadMain(h2);
-  assert.equal(b.elements.restoreBox.style.display, undefined,
+  assert.deepEqual(b.elements.restoreBox._removedAttrs, [],
     "'abc' 必须归一为 0（不显示恢复入口）");
 });
 
@@ -462,4 +488,70 @@ test('WB-048 空书签文案按平台差异化：cs 提示地址栏 ☆，androi
   const b = loadMain(h2);
   assert.equal(b.elements.bm.children[0].textContent, '还没有书签',
     'android 文案不得指向不存在的地址栏 ☆ 控件');
+});
+
+// WB-138（2026-10-01 审计）：书签 null 与空数组分流——csCall TTL 兜底
+// cb(null)/宿主无响应此前与空库同路径渲染「还没有书签」，加载失败被
+// 伪装成空库；null 必须呈现失败态文案
+test('WB-138 书签 null 分流：加载失败态不得伪装成空库文案', () => {
+  const { host } = makeHost();
+  host.has = (f) => f === 'navigate' || f === 'geo' || f === 'bookmarks';
+  host.bookmarks = (cb) => cb(null);           // TTL 兜底/无响应形态
+  const { elements } = loadMain(host);
+  assert.match(elements.bm.children[0].textContent, /书签加载失败/,
+    'null 回包必须分流为加载失败态（此前渲染「还没有书签」误导用户）');
+  assert.doesNotMatch(elements.bm.children[0].textContent, /还没有书签/,
+    '失败态不得复用空库文案');
+  // 对照：空数组仍走空库文案（WB-048 已锁平台差异化——这里只锁分流语义）
+  const { host: h2 } = makeHost();
+  h2.has = (f) => f === 'navigate' || f === 'geo' || f === 'bookmarks';
+  h2.bookmarks = (cb) => cb([]);
+  const b = loadMain(h2);
+  assert.match(b.elements.bm.children[0].textContent, /还没有书签/,
+    '空数组是确定的空库语义——不得被失败态吞并');
+});
+
+// WB-147（2026-10-01 审计）：geoBtn 降级路径零行为测试——openGeo 的
+// 回调即 onFail（P1-12 修复语义），回调触发必须置灰按钮并给出 title
+test('WB-147 geoBtn 降级：openGeo onFail 回调置灰按钮并写提示 title', () => {
+  const { host, state } = makeHost();
+  host.openGeo = (onFail) => onFail();         // 资源未随包形态——立即失败
+  const { elements } = loadMain(host);
+  (elements.geoBtn._handlers.click || []).forEach((fn) => fn({}));
+  assert.match(elements.geoBtn.className, /(^|\s)unavailable(\s|$)/,
+    'onFail 必须给按钮加 unavailable 置灰类');
+  assert.equal(elements.geoBtn.title, '当前安装包未包含画板资源',
+    'onFail 必须写明降级原因（此前 ReferenceError 被吞、置灰永不生效）');
+  assert.deepEqual(state.errors, [], '正常降级分支不得误报 jsError');
+  // 对照：成功形态不置灰
+  const { host: h2 } = makeHost();
+  const b = loadMain(h2);                      // makeHost 默认 openGeo 不触发 onFail
+  (b.elements.geoBtn._handlers.click || []).forEach((fn) => fn({}));
+  assert.equal(b.elements.geoBtn.className, '', '成功打开不得置灰');
+});
+
+// WB-148（2026-10-01 审计）：selectEngine 行为零测试——①引擎切换下发桥
+// ②UI 名同步 ③菜单收起 + aria-expanded 复位（三条断言）
+test('WB-148 selectEngine：下发 setEngine + UI 名同步 + 菜单收起复位', () => {
+  const { host, state } = makeHost();
+  host.getEngine = (cb) => cb({
+    engine: 'baidu',
+    engines: [
+      { key: 'baidu', name: '百度' },
+      { key: 'bing', name: '必应' },
+    ],
+  });
+  const { elements, exported } = loadMain(host);
+  // 先展开菜单（selectEngine 的收起断言需要前置 display:block）
+  exported.toggleEngineMenu();
+  assert.equal(elements.engineMenu.style.display, 'block', '前置：菜单展开');
+  exported.selectEngine(1);
+  assert.deepEqual(state.engineCalls, ['bing'],
+    '①选中必须经 Host.setEngine 下发所选引擎 key');
+  assert.equal(elements.engineName.textContent, '必应',
+    '②胶囊显示名必须同步到新引擎');
+  assert.equal(elements.engineMenu.style.display, 'none',
+    '③菜单必须收起');
+  assert.equal(elements.enginePill._attrs['aria-expanded'], 'false',
+    '③aria-expanded 必须复位（读屏状态一致）');
 });

@@ -1,3 +1,9 @@
+> **历史文档（WB-171，2026-10-01 审计）时代横幅**：本文为 2026-08-22
+> 调研期设计稿（Rust cdylib 跨平台 FFI 选型）。现行实现以
+> core/rust-policy-core（c_abi + Android JNA 消费）与 ADR-008（Rust 唯一
+> 裁决者）为准——文中目录/命名/示例与成品有出入；UniFFI 轨道为文档化
+> 暂缓（RS-149：uniffi 0.32 阻塞 edition 2024，升级后重启）。保留作设计溯源。
+
 # Aegis FFI 架构设计：Rust cdylib 跨平台统一
 
 > 参照：rustbridge / HyperWhisper / UniFFI / PyO3 / cbindgen

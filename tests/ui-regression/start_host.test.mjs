@@ -114,6 +114,26 @@ test('WB-024 无 cs 桥时同步降级 cb(null)（不挂死）', () => {
   assert.doesNotThrow(() => Host.setEngine('baidu'), '无 cb 调用不得抛错');
 });
 
+// WB-150（2026-10-01 审计）：Host.goBack 此前仅静态断言（存在性）——
+// 补双端行为断言：cs 端必须按协议信封 postMessage（__aegis/id/op/args），
+// android 端必须直调 AegisBridge.goBack
+test('WB-150 goBack 行为：cs 端 postMessage 信封 + android 端桥直调', () => {
+  const { bridge, posted } = makeCsBridge();
+  const Host = loadHost({ chrome: bridge });
+  Host.goBack();
+  assert.equal(posted.length, 1, 'cs 端 goBack 必须发出恰好一条 postMessage');
+  const msg = posted[0];
+  assert.equal(msg.__aegis, 1, '请求信封必须带 __aegis 标记');
+  assert.equal(msg.op, 'goBack', 'op 必须是 goBack');
+  assert.deepEqual(msg.args, [], 'goBack 无参数');
+  assert.ok(Number.isInteger(msg.id) && msg.id >= 1, '请求必须携带自增 id（回包关联）');
+  // android 端：同步桥直调
+  const calls = [];
+  const Host2 = loadHost({ AegisBridge: { goBack: () => calls.push('goBack') } });
+  Host2.goBack();
+  assert.deepEqual(calls, ['goBack'], 'android 端必须直调 AegisBridge.goBack');
+});
+
 // WB-037（审计 2026-09-23 清单·W5 批）：csCall pending 此前无 TTL——宿主
 // 永不回包时回调条目泄漏。惰性清扫实现：每次新请求前清理超龄条目并以
 // cb(null) 兜底；不引入定时器（保持「零定时器零 IO」性质——WB-128 回归锁）

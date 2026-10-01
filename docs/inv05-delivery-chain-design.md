@@ -1,8 +1,17 @@
 # INV-05 独立交付链设计
 
+> **历史文档（WB-163，2026-10-01 审计）时代横幅**：本文编制于 2026-08-15
+>（release.yml 单流水线期）。**目标架构已全量落地**——release.yml 编排器 +
+> release-windows / release-android / release-core 三平台独立子流 +
+> verify-gate fail-closed 聚合 + publish（受保护 environment）即本文「目标
+> 架构」节的实现（现行口径见 architecture-overview.md 1.5 节与
+> release-workflow 相关注记）。**「现状分析」节是编制当时的快照**，与当前
+> 实态不符（Windows 制品已由 PyInstaller 换为 C#/.NET 安装包——
+> AegisSetup-CSharp.iss），仅作差距对照保留；勿据「现状」节做当前决策。
+
 > 每发布制品独立可追溯——每平台独立 build→sign→SBOM→provenance→verify→publish
 
-## 现状分析
+## 现状分析（2026-08-15 快照——WB-163 标注：已过期，见顶部横幅）
 
 当前 `release.yml` 是单一流水线：
 
@@ -32,9 +41,12 @@ pin-check
 
 ### 每平台独立链
 
+（WB-163 标注：下表 build 产物列为编制时快照——Windows 现为 C#/.NET 10
+发布构建 + Inno Setup 安装包，Android/Rust 行仍准确）
+
 | 步骤 | Windows | Android | Rust Core |
 |------|---------|---------|-----------|
-| build | PyInstaller exe + SHA256 | Gradle apk + SHA256 | cargo build lib + SHA256 |
+| build | ~~PyInstaller exe~~（现为 dotnet publish + AegisSetup-CSharp.iss）+ SHA256 | Gradle apk + SHA256 | cargo build lib + SHA256 |
 | sbom | CycloneDX (pip deps) | CycloneDX (gradle deps) | CycloneDX (cargo deps) |
 | provenance | SLSA attest | SLSA attest | SLSA attest |
 | verify | attest verify + checksum | attest verify + checksum | attest verify + checksum |
@@ -58,9 +70,12 @@ pin-check
 
 ### 产物清单
 
+（WB-163 标注：下表 Windows 行为编制时快照——现行制品为
+AegisSetup-CSharp.exe 安装包，AegisWebView.exe/PyInstaller 已随 ADR-009 移除）
+
 | 平台 | 产物 | 格式 |
 |------|------|------|
-| Windows | AegisWebView.exe | PyInstaller 单文件 |
+| Windows | ~~AegisWebView.exe（PyInstaller 单文件）~~（现为 C# 安装包） | Inno Setup（版本运行时注入） |
 | Android | app-release.apk | Gradle signed |
 | Rust Core | aegis_policy_core.dll/.so | cargo build |
 | 全平台 | SHA256SUMS.json | 对账清单 |

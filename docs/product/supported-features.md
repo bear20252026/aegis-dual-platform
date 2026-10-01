@@ -21,9 +21,11 @@
 ### Android（Kotlin/Compose——阶段 D）
 
 - 导航经 broker 决策、地址栏/首页搜索框归一单源、多标签（含崩溃恢复）、
-  SSL/HTTP/加载错误中文错误页（可重试/返回安全页）、书签宫格、引擎切换、
+  SSL/HTTP/加载错误中文错误页（可重试/返回安全页）、引擎切换、
   壁纸、画板、贪吃蛇、下载（DownloadManager，文件名净化 + 危险扩展拦截）、
   WebView 版本检查提示、阅读模式入口、翻译入口
+  （WB-152，2026-10-01 审计：原列「书签宫格」——Android 全树零 bookmark
+  引用，功能不存在；书签/导入为 Windows 专属能力，见 start.js Host 能力面）
 - 安全：AegisBridge 壳页来源校验、safe browsing、权限默认拒绝、cleartext 禁用
 
 ### Windows 归档栈（legacy/windows-pywebview——只读，ADR-009 D4 冻结纪律）

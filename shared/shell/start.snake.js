@@ -22,6 +22,12 @@ var Snake = (function () {
       window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   } catch (e) { }
   var lastFocus = null;  // WB-112：打开浮层前的焦点元素（关闭时归还）
+  // WB-133（2026-10-01 审计）：模块级 isOpen 标志——浮层初始由 CSS 类
+  // .snake-overlay{display:none} 隐藏，内联 style.display 为空串。旧键盘
+  // 守卫判「style.display === 'none'」在加载后首开前恒不成立 → 按 Escape
+  // 即 close() → persistBest 把未 loadBest 的 best=0 写入 localStorage，
+  // 已存最高分被清零。open/close 显式置位，输入守卫只认该标志。
+  var isOpen = false;
 
   function el(id) { return document.getElementById(id); }
 
@@ -55,6 +61,7 @@ var Snake = (function () {
     // 触发元素，初始焦点移入常驻无副作用的关闭钮（对齐 start.import.js）
     try { lastFocus = document.activeElement || null; } catch (e) { lastFocus = null; }
     el('snakeOverlay').style.display = 'flex';
+    isOpen = true;   // WB-133：键盘/触摸守卫的唯一事实源
     var stage = canvas.parentElement;
     shown = Math.min(stage.clientWidth || 480, 500) || 480;
     canvas.style.width = shown + 'px';
@@ -81,6 +88,7 @@ var Snake = (function () {
     } catch (e) { }
   }
   function close() {
+    isOpen = false;  // WB-133：先清标志——后续任何一步异常也不留「幽灵开态」
     if (rafId) { cancelAnimationFrame(rafId); rafId = 0; }
     persistBest();
     el('snakeOverlay').style.display = 'none';
@@ -433,8 +441,10 @@ var Snake = (function () {
     else begin();
   }
   document.addEventListener('keydown', function (e) {
-    var ov = el('snakeOverlay');
-    if (!ov || ov.style.display === 'none') return;
+    // WB-133：守卫只认模块级 isOpen——浮层首开前内联 display 为空串，
+    // 旧「ov.style.display === 'none'」判定在加载态放行 Escape → close()
+    // → persistBest 用 best=0 覆盖已存最高分（见 open/close 置位注记）
+    if (!isOpen) return;
     var tgt = e.target;
     if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT')) return;
     var k = e.key;
@@ -448,8 +458,8 @@ var Snake = (function () {
   (function () {
     var sx = 0, sy = 0, on = false;
     document.addEventListener('touchstart', function (e) {
-      var ov = el('snakeOverlay');
-      if (!ov || ov.style.display === 'none') return;
+      // WB-133：同键盘守卫——isOpen 标志而非内联 display 判定
+      if (!isOpen) return;
       if (e.target && e.target.id !== 'snakeCanvas') return;
       sx = e.touches[0].clientX; sy = e.touches[0].clientY; on = true;
     }, { passive: true });
@@ -515,9 +525,17 @@ var Snake = (function () {
   // WB-076..081（审计 2026-09-23 清单·W5 批）：补只读钩子 stepMs/particles/
   // best 与受控写入 primaryAction/drawPixelText——提速下限/最高分即时更新/
   // localStorage 往返/四态文案/die 粒子/DIG 位图覆盖此前零测试
-  return {
+  // WB-151（2026-10-01 审计）：__test 受控钩子此前随生产脚本无条件注入成品
+  // ——远程页面可枚举 Snake.__test 调 setFood/primaryAction 等受控写入面。
+  // 改条件注入：仅当宿主显式声明 window.__AEGIS_SNAKE_TEST__（无头回归
+  // snake.test.js 加载前注入）时挂载；生产页面 __test 为 undefined。
+  var TEST_HOOKS = false;
+  try {
+    TEST_HOOKS = !!(typeof window !== 'undefined' && window.__AEGIS_SNAKE_TEST__);
+  } catch (e) { }
+  var api = {
     open: open, close: close,
-    __test: {
+    __test: TEST_HOOKS ? {
       turn: turn, step: step, freeCell: freeCell,
       state: function () { return state; },
       score: function () { return score; },
@@ -533,8 +551,11 @@ var Snake = (function () {
       setBonus: function (x, y) { bonus = { x: x, y: y, ttl: 40 }; },
       primaryAction: primaryAction,                      // 受控写入：状态机推进
       drawPixelText: drawPixelText,                      // 受控写入：像素文本绘制
-    },
+    } : undefined,
   };
+  // WB-151：冻结测试钩子面——测试态下也不得增删/替换钩子属性
+  if (api.__test && Object.freeze) { try { Object.freeze(api.__test); } catch (e) { } }
+  return api;
 })();
 
 function openSnake() { if (Host.has('snake')) Snake.open(); }

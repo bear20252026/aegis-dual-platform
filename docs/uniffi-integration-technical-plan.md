@@ -1,3 +1,9 @@
+> **历史文档（WB-171，2026-10-01 审计）时代横幅**：本文为 2026-08-22
+> 技术计划稿。UniFFI 集成为**文档化暂缓**项（RS-149：uniffi 0.32 与
+> edition 2024 不兼容，Cargo.toml:4-8 有评估注记与重启条件）；Android
+> 现行经 **JNA + C ABI**（android/broker NativePolicyCoreBridge）消费
+> Rust 核心。保留作计划溯源，勿作为现行集成方式依据。
+
 # Aegis UniFFI 集成技术方案（含代码示例）
 
 > 基于：UniFFI 官方文档 + 2026 生产实践 + HyperWhisper 项目结构 + uniffi-starter

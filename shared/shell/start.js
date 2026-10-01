@@ -19,7 +19,10 @@ var AegisTiming = {
   BOOKMARK_RETRY_MS: 200,          // 书签渲染：桥未就绪重试间隔
   BOOKMARK_RETRY_MAX: 10,          // 书签渲染：有界重试次数上限
   SEARCH_BUSY_RESET_MS: 1200,      // 搜索按钮「搜索中…」防重放锁复位延时
-  IMPORT_SCAN_TIMEOUT_MS: 15000    // 导入向导：扫描超时兜底
+  IMPORT_SCAN_TIMEOUT_MS: 15000,   // 导入向导：扫描超时兜底
+  IMPORT_RUN_TIMEOUT_MS: 60000     // 导入向导：执行总超时兜底（WB-135，
+                                    // 2026-10-01 审计——桥挂起时 running 态
+                                    // 不再永久卡死向导）
 };
 if (typeof window !== 'undefined') { window.AegisTiming = AegisTiming; }
 
@@ -155,3 +158,26 @@ var Host = (function () {
     },
   };
 })();
+
+// WB-140（2026-10-01 审计）：error/unhandledrejection 监听从 start.main.js
+//（四文件中最末加载）前移至首文件——此前 start.snake.js/start.import.js/
+// start.main.js 三个文件的顶层异常发生在监听注册前，零上报。本文件最先
+// 加载（WB-125 顺序契约），此处注册后全程覆盖。jsError 自身再失败则放弃
+//（防上报通道异常递归）。window.addEventListener 存在性守卫兼容无头测试
+// 的裸 window 桩（helpers.mjs loadHost 注入普通对象）。
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('error', function (e) {
+    try {
+      Host.jsError(
+        e.message || 'unknown', e.filename || '', e.lineno, e.colno,
+        (e.error && e.error.stack) || '');
+    } catch (err) {}
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    try {
+      Host.jsError(
+        'Promise rejection: ' + (e.reason || ''), '', 0, 0,
+        (e.reason && e.reason.stack) || '');
+    } catch (err) {}
+  });
+}

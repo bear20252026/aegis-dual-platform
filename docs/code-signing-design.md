@@ -1,5 +1,16 @@
 # B2 代码签名架构设计（code-signing-design）
 
+> **历史文档（WB-165，2026-10-01 审计）时代横幅**：本文为 2026-08-15 调研
+> 设计稿，其中 **sigstore keyless / Authenticode 轨道均为「待实施」设想，
+> 至今未落地**。现行签名与溯源面（正典口径）：**Android = apksigner
+> v1+v2+v3 全开**（enableV1/V2/V3Signing，见 KNOWLEDGE_BASE KB-DR-009）；
+> 发布链走 **GitHub artifact attestations（Sigstore 背书）**——release.yml
+> 构建产出 attestation，verify-gate 以 `gh attestation verify` 逐工件校验；
+> 更新清单为 Ed25519 阈值签名（signing-policy.yaml）；Windows 安装包当前
+> 未做代码签名，cosign 轨道在 release/runbooks/security-release.md 中标注
+> 为 planned（PY-229 口径）。本文保留作选型溯源；签名策略现行口径以
+> release/runbooks 与 ADR 为准。
+
 > 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级
 > final-development-checklist B2（代码签名——行业标准/防 AV 误报/2026 强制）
 > 依据：全球调研（中英全覆盖）——微软 SignTool 官方（/fd SHA256 + /td RFC3161

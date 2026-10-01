@@ -24,7 +24,10 @@ flowchart TB
 
 **三个信任域**：
 - 远程网页域：只渲染内容——无 native bridge/无 MCP token/无本地命令/无标签全量读取
-- 本地 chrome UI 域：固定 bundled origin——仅展示/意图发起/确认——不持有全局后台权限
+- 本地 chrome UI 域：受信壳页——按端分列（WB-169，2026-10-01 审计同步
+  trust-boundaries.md 的 WB-121 口径：Windows C# 正典栈 = `https://ntp.aegis.local`
+  受信虚拟主机；Android = `file:///android_asset/` 本地资产页）——仅展示/意图
+  发起/确认——不持有全局后台权限
 - Capability broker 域：唯一产生本地副作用的边界——验证来源/会话/标签代际/scope/参数/预算/批准/nonce——没有 `AuthorizedAction` 不能导航/下载/导出/改策略
 
 **类型化安全模型**（不再用 `allow_internal: bool`/`dict[str, Any]`）：
@@ -85,7 +88,8 @@ windows_host/
 - Kotlin/Compose 保留（不重写 UI）
 - TabManager/BrowserEngine 显式状态机（Active/Background/Suspended/Restoring/Crashed/Closed）
 - ViewModel + SavedStateHandle 保存可恢复导航状态（不持久化密码/令牌/敏感内容）
-- WebView 最小权限（JS bridge 只对 bundled origin 开放）
+- WebView 最小权限（JS bridge 只对受信壳页开放——Android = file:///android_asset/
+  本地资产页；WB-169，2026-10-01 审计同步 WB-121 分列口径，原「bundled origin」）
 
 ### 第 3 阶段：共享安全契约
 - 独立 `security-contract` 包——版本化 Origin/ExternalUrl/NavigationRequest/DownloadRequest/ProposedAction/AuthorizedAction/ApprovalRequest/UpdateManifest/AuditEvent/DenyReason
