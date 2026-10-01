@@ -109,6 +109,11 @@ android {
         versionName = versionNameFromProperties
         // AD-067：androidTest 冒烟集运行器
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // AD-288（2026-10-01 审计）：debug 加 applicationIdSuffix——debug 与
+        // release 可同机共存（真机回归无须先卸 release；e2e/发布链契约面向
+        // dist 的 release 制品，applicationId 保持 com.aegis.browser 不变，
+        // scripts/e2e-android-search.sh 的 PKG=com.aegis.browser 不受影响）。
+        // androidTest 面相应锁 com.aegis.browser.debug（SmokeInstrumentedTest）。
         ndk {
             // 单架构分发（2026-08-30）：仅 arm64-v8a——排除 32 位老架构与
             // x86/x86_64 模拟器 ABI 入包（双保险：上游 dist 只产 arm64）
@@ -161,6 +166,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // AD-288（2026-10-01 审计）：debug 包名/版本名后缀——与 release
+            // 同机共存（applicationIdSuffix 影响 R 类与 provider authority 的
+            // 合并，本工程无冲突的 manifestAuthority/provider 声明）。
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             if (signingPropertiesFile.exists() ||
                 System.getenv("AEGIS_KEYSTORE_FILE") != null
@@ -173,6 +185,11 @@ android {
             // 并经模拟器真机回归（connectedDebugAndroidTest + minified release
             // 安装启动 + broker 冒烟）验证后重新启用。
             isMinifyEnabled = true
+            // AD-278（2026-10-01 审计）：release 开 shrinkResources——minify 已
+            // 开而资源收缩未开，未引用资源全部入包（包体/攻击面双收）。资源
+            // 面均经资源引用或 manifest 消费（无反射按名取资源），经 lintRelease
+            // 回归验证。requires minifyEnabled（已满足）。
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -194,7 +211,10 @@ android {
 
     sourceSets {
         // 首页资源单一事实源（ADR-007）：shared/shell（start.html + wallpapers）
-        // 与 Windows 端（PyInstaller datas）共用同一目录——一处修改两端生效
+        // 与 Windows 端（Aegis.Windows.csproj 的 <Content Include> 项）打包同一
+        // 目录——一处修改两端生效。
+        // WB-170（2026-10-01 审计）：注释口径更正——Windows 端经 csproj Content
+        // 项消费本目录（非 PyInstaller datas，2026-09 迁移后的现行口径）。
         getByName("main").assets.srcDir(rootProject.file("../shared/shell"))
     }
     // 审计修复：测试文件不入 Android assets（打包体积与攻击面双收）。
@@ -211,6 +231,21 @@ android {
     }
     // 纯 JVM 单测可构造 android.webkit.WebView 等框架桩（方法返回默认值
     // 而非抛 "not mocked"）——TabManager 等注入接缝类的离线单测前提
+    //
+    // AD-290（2026-10-01 审计）：豁免范围固化（Gradle 无按包/按类收窄
+    // returnDefaultValues 的粒度——本开关为 unitTests 全局面，故以注释
+    // 固化「谁依赖它」的清单，新增依赖框架桩的测试须在此登记）：
+    // 依赖 returnDefaultValues 的测试面——
+    //   - TabManagerTest / TabTest：WebView 桩（pause/resume 注入接缝前提）
+    //   - AegisWebViewClientTest：android.util.Log 桩 + WebView/WebResourceRequest mock
+    //   - ReaderControllerTest：mock WebView.evaluateJavascript（桩下回调默认不触发）
+    //   - TranslateEntryTest：android.net.Uri.encode 桩（返回 null——仅前缀断言；
+    //     内容级断言走 Robolectric 的 TranslateEntryPrivacyTest）
+    //   - AegisHomeBridgeTest/PrefsTest：SharedPreferences/Context 桩
+    //   - DialogPriorityTest / DownloadPolicyTest / NavigateDebounceTest 等纯逻辑面
+    // 不依赖且需要真框架语义的测试一律走 Robolectric（BrowserEngineHardeningTest/
+    // BrowserViewModelBehaviorTest/TranslateEntryPrivacyTest——Robolectric 提供
+    // 真实 shadow，不受本开关影响）。
     testOptions {
         unitTests.isReturnDefaultValues = true
         // AD-055：Robolectric 需要 includeAndroidResources（合并资源/manifest

@@ -53,7 +53,7 @@ internal enum class ActiveDialog {
  */
 internal fun resolveActiveDialog(
     pendingConfirmation: PendingNavigationConfirmation?,
-    webViewAlert: String?,
+    webViewAlert: WebViewAlertNotice?,
     readerContent: ReaderContent?,
 ): ActiveDialog? =
     when {
@@ -69,23 +69,33 @@ internal fun resolveActiveDialog(
  * AD-204（审计 2026-09-23 清单·A7 批）：「去更新」失败降级——[onGoUpdate]
  * 由调用方消费 WebViewVersionCheck.openUpdate 的受理结果，跳转失败时
  * （无 Play Store/无浏览器）回填降级提示，不再静默无反馈。
+ *
+ * AD-260（2026-10-01 审计）：提示分型——版本检查（[Kind.VERSION_CHECK]）
+ * 双按钮（去更新/稍后）；一般安全提示（[Kind.SECURITY_NOTICE]）单按钮
+ * （知道了）——导航被拒/历史不可用等瞬时提示不再顶着「去更新」按钮误导。
  */
 @Suppress("FunctionNaming")
 @Composable
 internal fun WebViewAlertDialog(
-    message: String,
+    notice: WebViewAlertNotice,
     onGoUpdate: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.alert_title)) },
-        text = { Text(message) },
+        text = { Text(notice.message) },
         confirmButton = {
-            TextButton(onClick = onGoUpdate) { Text(stringResource(R.string.alert_go_update)) }
+            if (notice.kind == WebViewAlertNotice.Kind.VERSION_CHECK) {
+                TextButton(onClick = onGoUpdate) { Text(stringResource(R.string.alert_go_update)) }
+            } else {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.alert_ack)) }
+            }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.alert_later)) }
+            if (notice.kind == WebViewAlertNotice.Kind.VERSION_CHECK) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.alert_later)) }
+            }
         },
     )
 }
@@ -145,7 +155,11 @@ internal fun ReaderDialog(
             // AD-226（2026-09-26 审计）：正文分段渲染——原单个 Text 一次性
             // 测量至 200K 字符（ReaderMode.MAX_TEXT 上限），低端机测量/重组
             // 卡顿（ANR 面）。按 2K 字符分段 LazyColumn 只测量可视段。
-            val chunks = remember(content.text) { content.text.chunked(READER_TEXT_CHUNK_SIZE) }
+            // AD-261（2026-10-01 审计）：分段按 UTF-16 char 切段可劈开代理对
+            // （emoji/增补汉字在分段处渲染 �）——分段处复用码点边界回退
+            // （见 chunkAtCharBoundary）。
+            val chunks =
+                remember(content.text) { chunkTextAtCharBoundary(content.text, READER_TEXT_CHUNK_SIZE) }
             LazyColumn(
                 modifier =
                     Modifier
@@ -169,6 +183,28 @@ internal fun ReaderDialog(
 internal const val READER_TEXT_CHUNK_SIZE = 2000
 
 /**
+ * AD-261（2026-10-01 审计）：分段边界代理对安全切分——String.chunked 按
+ * UTF-16 char 计长，切点落在增补字符（emoji 等）的代理对中间会产生孤立
+ * 代理（渲染 � 且 length 语义失真）。切点尾部为高代理时把该 char 让渡给
+ * 后段（与 ReaderMode.takeAtCharBoundary 同口径——分段版）。ASCII 文本
+ * 行为与 chunked 一致。
+ */
+internal fun chunkTextAtCharBoundary(
+    text: String,
+    chunkSize: Int,
+): List<String> {
+    val raw = text.chunked(chunkSize).toMutableList()
+    for (i in raw.indices - 1) {
+        val chunk = raw[i]
+        if (chunk.isNotEmpty() && Character.isHighSurrogate(chunk.last())) {
+            raw[i] = chunk.dropLast(1)
+            raw[i + 1] = chunk.last() + raw[i + 1]
+        }
+    }
+    return raw.toList()
+}
+
+/**
  * AD-151/183：对话框宿主——单槽状态机的组合挂载点（MainActivity 只收集
  * 状态并回调上抛，槽位裁决与渲染收敛在本文件）。
  *
@@ -178,7 +214,7 @@ internal const val READER_TEXT_CHUNK_SIZE = 2000
 @Composable
 internal fun MainDialogHost(
     pendingConfirmation: PendingNavigationConfirmation?,
-    webViewAlert: String?,
+    webViewAlert: WebViewAlertNotice?,
     readerContent: ReaderContent?,
     onApprove: () -> Unit,
     onReject: () -> Unit,
@@ -198,9 +234,9 @@ internal fun MainDialogHost(
         }
 
         ActiveDialog.WEB_VIEW_ALERT -> {
-            webViewAlert?.let { message ->
+            webViewAlert?.let { notice ->
                 WebViewAlertDialog(
-                    message = message,
+                    notice = notice,
                     onGoUpdate = onGoUpdate,
                     onDismiss = onDismissAlert,
                 )

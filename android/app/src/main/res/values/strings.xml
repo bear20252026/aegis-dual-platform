@@ -10,6 +10,9 @@
     <string name="alert_title">安全提示</string>
     <string name="alert_go_update">去更新</string>
     <string name="alert_later">稍后</string>
+    <!-- AD-260（2026-10-01 审计）：一般安全提示单按钮（不再共用版本检查的
+         「去更新/稍后」双按钮） -->
+    <string name="alert_ack">知道了</string>
     <string name="confirm_title">需要确认的导航</string>
     <string name="confirm_origin">来源：%1$s</string>
     <string name="confirm_path">路径与查询：%1$s</string>
@@ -85,4 +88,8 @@
 
     <!-- AD-204（审计 2026-09-23 清单·A7 批）：「去更新」跳转失败降级提示 -->
     <string name="update_open_failed">无法打开应用商店，请手动更新 Android System WebView 后重试。</string>
+
+    <!-- AD-284（2026-10-01 审计）：mailto:/tel: 等外跳 scheme 的主框架导航
+         显式 Toast（不再与恶意 scheme 同走静默 Deny） -->
+    <string name="unsupported_link_scheme">不支持打开该类链接（邮件/电话等外部应用链接）</string>
 </resources>

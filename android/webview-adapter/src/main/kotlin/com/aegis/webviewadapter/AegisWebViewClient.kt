@@ -34,6 +34,10 @@ class AegisWebViewClient(
     private val onNavigationConfirmationRequested: (ApprovalRequest) -> Unit = {},
     private val onNavigationConfirmationResolved: () -> Unit = {},
     private val onNavigationDenied: (code: String, detail: String) -> Unit = { _, _ -> },
+    // AD-284（2026-10-01 审计）：mailto:/tel:/sms: 等外跳 scheme 的主框架
+    // 导航——显式上抛（app 层 Toast「不支持该类链接」），不再与恶意
+    // scheme 同走静默 Deny。回调参数：scheme、原始 URL。
+    private val onUnsupportedSchemeNavigation: (scheme: String, url: String) -> Unit = { _, _ -> },
     private val onPageUrlObserved: (String) -> Unit = {},
     // AD-035（2026-09-24 审计）：库模块不持 UI 文案——错误以（错误码, 机器可读
     // detail, isSsl, url）结构上抛，中文文案映射收敛在 app 层（BrowserViewModel）。
@@ -48,48 +52,71 @@ class AegisWebViewClient(
     private var documentGeneration = 0L
     private var pendingConfirmation: PendingConfirmedNavigation? = null
 
-    // AD-035：onPageError 错误码契约单源已收敛 WebViewErrorCodes.kt
-    // （AD-102 抽出——app 层按同一对象映射文案；本文件调用点 AD-136 起一律
-    // 引常量而非字面量）。
+    /**
+     * AD-284：外跳 scheme 集——系统/第三方应用处理的链接形态（WebView 自身
+     * 无法加载）。这些 scheme 的主框架导航阻断后必须给用户显式反馈，否则
+     * 表现为「点了没反应」的静默死链。
+     */
+    private val externalHandlerSchemes = setOf("mailto", "tel", "sms")
+
     override fun shouldOverrideUrlLoading(
         view: WebView,
         request: WebResourceRequest,
     ): Boolean {
         val requestedUrl = request.url.toString()
-        // http 请求必须由客户端经 authorizeNavigation 升级加载（loadWhenAllowed=true，
-        // 阻断 WebView 原始 http load）；升级本身在 authorizeNavigation 内单次执行。
-        // AD-010/011（2026-09-24 审计）：scheme 判定纯字符串化（原 android.net.Uri
-        // 依赖阻断 JVM 单测；语义与 Uri.parse 的 scheme 一致——非法 scheme 字符集
-        // 返回空——只影响 http/https 判定，行为不变）。
-        val isHttp = schemePrefixOf(requestedUrl) == "http"
-        // P1-2 修复（全面审计批次4）：仅**主框架** http 才走「阻断+升级+
-        // loadUrl 升级版」。子框架（iframe）http 此前同样 loadWhenAllowed=true
-        // ——authorizeNavigation 决策通过后 view.loadUrl 把 iframe 的 URL
-        // 加载进整个 Activity 顶层（页面内任一 http iframe 即可顶替主文档，
-        // 导航劫持面）。子框架改落通用分支：broker 决策（Deny → return true
-        // 阻断留痕；Allow → return false 放行原始加载——明文由
-        // network_security_config 的 cleartext 禁用兜底，iframe 加载失败
-        // 但绝不劫持顶层、绝不放行明文）。
-        if (isHttp && request.isForMainFrame) {
-            authorizeNavigation(
-                view,
-                requestedUrl,
-                loadWhenAllowed = true,
-                mayRequireConfirmation = true,
-            )
+        // AD-255（2026-10-01 审计）：以 request.isForMainFrame 为主分支条件——
+        // 原实现 `isHttp && isForMainFrame` 把 https 主框架链接漏进子框架轻量
+        // 分支（RequireConfirmation 确认对话框永不出现、Deny 不上抛——静默
+        // 死链）。scheme 现在只决定是否升级与外跳反馈，不再影响主/子分派：
+        // 主框架一律走 authorizeNavigation 全链（确认登记/自动批准 + Deny 以
+        // topLevel=true 上抛），子框架保持轻量判定（AD-246）。
+        val scheme = schemePrefixOf(requestedUrl)
+        if (request.isForMainFrame) {
+            return handleMainFrameNavigation(view, requestedUrl, scheme)
+        }
+        return handleSubFrameNavigation(requestedUrl)
+    }
+
+    /**
+     * AD-255：主框架导航——外跳 scheme（mailto:/tel:/sms:）显式反馈；其余
+     * （http/https/其他）走 authorizeNavigation 全链（阻断 WebView 原始
+     * 加载，放行时由客户端经 broker 升级后 loadUrl——P1-2 修复语义不变）。
+     */
+    private fun handleMainFrameNavigation(
+        view: WebView,
+        requestedUrl: String,
+        scheme: String,
+    ): Boolean {
+        // AD-284：外跳 scheme——显式上抛不支持提示，阻断 WebView 原始加载。
+        // 与策略拒绝（onNavigationDenied）分型，避免「点邮件链接无反应」的
+        // 静默死链。
+        if (scheme in externalHandlerSchemes) {
+            android.util.Log.w("AegisWebView", "主框架外跳 scheme 阻断: scheme=$scheme ${LogRedact.redact(requestedUrl)}")
+            onUnsupportedSchemeNavigation(scheme, requestedUrl)
             return true
         }
-        // AD-246（2026-09-26 审计）：子框架走轻量判定——单次 evaluateNavigation。
-        // 此前子框架与主框架同走「确认登记+自动批准+consumeNavigation」全链
-        // （native 模式下每次子框架导航三次 JNI→Rust 持锁跨界调用，iframe
-        // 密集页开销显著）。Deny → 阻断留痕；Allow → 放行原始加载（不消费
-        // 顶层授权对象）；RequireConfirmation 无子框架确认 UI 面——fail-closed
-        // 阻断。
-        // AD-178（审计 2026-09-23 清单·A7 批）：会话续期仅主框架——本分支
-        // 有意不调 renewSessionBeforeDecision：①iframe 密集页逐导航续期会把
-        // 「滑动 TTL」放大成常态性 JNI 重注册；②子框架导航不表达「用户仍在
-        // 活跃浏览」的顶层语义（无主框架事件的页面不该被子框架保活）。
-        // 主框架路径的续期见 authorizeNavigation。
+        authorizeNavigation(
+            view,
+            requestedUrl,
+            loadWhenAllowed = true,
+            mayRequireConfirmation = true,
+        )
+        return true
+    }
+
+    /**
+     * AD-246（2026-09-26 审计）：子框架轻量判定——单次 evaluateNavigation。
+     * 此前子框架与主框架同走「确认登记+自动批准+consumeNavigation」全链
+     * （native 模式下每次子框架导航三次 JNI→Rust 持锁跨界调用，iframe
+     * 密集页开销显著）。Deny → 阻断留痕；Allow → 放行原始加载（不消费
+     * 顶层授权对象）；RequireConfirmation 无子框架确认 UI 面——fail-closed
+     * 阻断。
+     * AD-178（审计 2026-09-23 清单·A7 批）：会话续期仅主框架——本路径有意
+     * 不调 renewSessionBeforeDecision：①iframe 密集页逐导航续期会把「滑动
+     * TTL」放大成常态性 JNI 重注册；②子框架导航不表达「用户仍在活跃浏览」
+     * 的顶层语义（无主框架事件的页面不该被子框架保活）。
+     */
+    private fun handleSubFrameNavigation(requestedUrl: String): Boolean {
         val subFrameUrl = upgradeToHttpsIfNeeded(requestedUrl)
         return when (
             val decision =
@@ -313,6 +340,28 @@ class AegisWebViewClient(
             documentGeneration -= 1
             android.util.Log.e("Aegis", "未注册或陈旧会话尝试加载页面；已停止加载")
             view.stopLoading()
+            // AD-265（2026-10-01 审计）：代际推进失败已 stopLoading——阻断的
+            // URL 不得再上抛地址栏（原实现仍观察 URL，地址栏被阻断 URL 覆盖，
+            // 页面实际未加载形成状态污染）。推进成功才继续观察/上抛。
+            super.onPageStarted(view, url, favicon)
+            return
+        }
+        // AD-256（2026-10-01 审计）：30x 重定向/表单 POST/reload 不经过
+        // shouldOverrideUrlLoading——此前放行后的 302 跳 userinfo 形态/
+        // 确认策略 URL 整链绕过。onPageStarted 对主框架 URL（本回调只对
+        // 主框架触发）做轻量 evaluateNavigation 复核：Deny 即 stopLoading +
+        // 顶层上抛。RequireConfirmation 有意不阻断——用户批准后 loadUrl 的
+        // 导航同样触发本回调，若此处 fail-closed 会破坏确认功能语义；
+        // 代际推进先行完成（复核用推进后的代际，不破坏 AD-201 回滚逻辑）。
+        if (!url.isNullOrBlank() && schemePrefixOf(url).let { it == "http" || it == "https" }) {
+            val target = upgradeToHttpsIfNeeded(url)
+            val recheck = broker.evaluateNavigation(sessionId, tabId, documentGeneration, target, "navigation")
+            if (recheck is Decision.Deny) {
+                denied(recheck.reason, topLevel = true, url = target)
+                view.stopLoading()
+                super.onPageStarted(view, url, favicon)
+                return
+            }
         }
         // P1-6 修复（全量复审 2026-09-01）：真实页面 URL 上抛——地址栏随实际
         // 页面同步（此前重定向/页内跳转后地址栏永远显示陈旧 URL）。
@@ -324,6 +373,12 @@ class AegisWebViewClient(
      * P2-1 修复（全面审计 2026-09-04）：SSL 证书错误——保持默认行为 cancel
      * （绝不调用 handler.proceed()：跳过证书校验等于向中间人攻击放行），
      * 并上报 UI 错误面板（原默认 cancel 后静默白屏，用户无从得知被拦截原因）。
+     *
+     * AD-271（2026-10-01 审计）：按 error.url 归属判定——与主框架当前 URL
+     * （view.url）一致的失败按整页错误上抛；归属不上的（子资源形态，或个别
+     * WebView 实现对子资源触发本回调）只 cancel + 留痕，不上抛整页遮罩
+     * （子资源证书错不该遮蔽整页内容）。view.url 为空（无已提交主文档）
+     * 时保守按主框架处理（保持既有错误面，不静默）。
      */
     override fun onReceivedSslError(
         view: WebView,
@@ -332,13 +387,22 @@ class AegisWebViewClient(
     ) {
         handler.cancel()
         val url = error.url
-        android.util.Log.w(
-            "AegisWebView",
-            "SSL 证书校验失败已取消: url=${LogRedact.redact(url)} primaryError=${error.primaryError}",
-        )
-        // AD-035：detail = SslError.primaryError 整数值（app 层映射中文文案）
-        // AD-136（审计 2026-09-23 清单·A6 批）：错误码字面量 → 常量单源
-        onPageError(WebViewErrorCodes.ERROR_SSL_CERTIFICATE, error.primaryError.toString(), true, url)
+        val mainFrameUrl = view.url
+        val isMainFrameFailure = mainFrameUrl.isNullOrEmpty() || url == mainFrameUrl
+        if (isMainFrameFailure) {
+            android.util.Log.w(
+                "AegisWebView",
+                "SSL 证书校验失败已取消: url=${LogRedact.redact(url)} primaryError=${error.primaryError}",
+            )
+            // AD-035：detail = SslError.primaryError 整数值（app 层映射中文文案）
+            // AD-136（审计 2026-09-23 清单·A6 批）：错误码字面量 → 常量单源
+            onPageError(WebViewErrorCodes.ERROR_SSL_CERTIFICATE, error.primaryError.toString(), true, url)
+        } else {
+            android.util.Log.w(
+                "AegisWebView",
+                "子资源 SSL 证书校验失败已取消（不遮蔽整页）: url=${LogRedact.redact(url)} primaryError=${error.primaryError}",
+            )
+        }
     }
 
     /**
@@ -407,7 +471,16 @@ class AegisWebViewClient(
         threatType: Int,
         callback: SafeBrowsingResponse,
     ) {
-        callback.backToSafety(true)
+        // AD-291（2026-10-01 审计）：恒 backToSafety 在无历史时无处可退
+        // （新标签直开恶意链接 → backToSafety 白屏）。有历史回安全页；
+        // 无历史显示 Safe Browsing 插页（API 27+；API 26 设备 showInterstitial
+        // 不可用，仍回退 backToSafety）。绝不 proceed——阻断语义不变。
+        val interstitialAvailable =
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1
+        when {
+            view.canGoBack() || !interstitialAvailable -> callback.backToSafety(true)
+            else -> callback.showInterstitial(true)
+        }
         android.util.Log.w(
             "Aegis",
             "SafeBrowsing 命中阻断: ${LogRedact.redact(request.url.toString())} threatType=$threatType",

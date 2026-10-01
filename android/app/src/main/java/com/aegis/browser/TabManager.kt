@@ -86,7 +86,20 @@ class TabManager(
         return true
     }
 
-    /** 关闭指定标签，自动切换到相邻标签；越界或仅剩 1 个返回 false。 */
+    /**
+     * 关闭指定标签；越界或仅剩 1 个返回 false。
+     *
+     * AD-254（2026-10-01 审计）：激活位按 index 与 activeIndex 关系分支——
+     * 原实现一律 `activeIndex = index`，关闭后台标签也把激活位切到被关位置
+     * （激活跳变 + 双活跃 WebView：原激活标签未被 pause，接管标签又被
+     * resume）。现在：
+     * - index > activeIndex：关闭的是激活标签之后的后台标签，激活位不动；
+     * - index < activeIndex：前方移除使后续标签左移，激活位同移一位（同一标签）；
+     * - index == activeIndex：关闭的是激活标签本身，相邻标签接管
+     *   （min(index, size-1)），接管标签挂起态时 resume——此时原激活标签
+     *   已随移除路径 pause + tearDown（原激活标签非 current 时 pause 的
+     *   单点即 [pause]（removed.webView））。
+     */
     fun closeTab(index: Int): Boolean {
         if (index !in tabs.indices) return false
         if (tabs.size <= 1) return false // 保留至少一个标签（浏览器约定）
@@ -94,11 +107,26 @@ class TabManager(
         pause(removed.webView) // 释放被关闭 WebView 的绘制资源
         // H-4 修复（审计 2026-08-31）：统一销毁序列（停载/摘除/注销/destroy 单源）
         SecureWebViewFactory.tearDown(removed.webView)
-        activeIndex = if (index < tabs.size) index else tabs.size - 1
-        current()?.let { current ->
-            if (current.suspended) {
-                resume(current.webView)
-                tabs[activeIndex] = current.copy(suspended = false)
+        when {
+            index > activeIndex -> {
+                Unit
+            }
+
+            // 后方后台标签：激活位不变
+            index < activeIndex -> {
+                activeIndex -= 1
+            }
+
+            // 前方移除：激活标签左移一位
+            else -> {
+                // 关闭激活标签：相邻标签接管并恢复（挂起态时）
+                activeIndex = minOf(index, tabs.size - 1)
+                current()?.let { current ->
+                    if (current.suspended) {
+                        resume(current.webView)
+                        tabs[activeIndex] = current.copy(suspended = false)
+                    }
+                }
             }
         }
         return true

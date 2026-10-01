@@ -46,6 +46,7 @@ object SecureWebViewFactory {
         onNavigationConfirmationRequested: (WebView, ApprovalRequest) -> Unit = { _, _ -> },
         onNavigationConfirmationResolved: (WebView) -> Unit = {},
         onNavigationDenied: (WebView, String, String) -> Unit = { _, _, _ -> },
+        onUnsupportedSchemeNavigation: (WebView, String, String) -> Unit = { _, _, _ -> },
         onPageUrlObserved: (WebView, String) -> Unit = { _, _ -> },
         onTitleObserved: (WebView, String) -> Unit = { _, _ -> },
         onRendererGone: (WebView) -> Unit = {},
@@ -99,6 +100,11 @@ object SecureWebViewFactory {
                 onNavigationDenied = { code, detail ->
                     onNavigationDenied(webView, code, detail)
                 },
+                // AD-284（2026-10-01 审计）：mailto:/tel:/sms: 主框架导航显式
+                // 上抛（app 层 Toast），不与恶意 scheme 同走静默 Deny。
+                onUnsupportedSchemeNavigation = { scheme, url ->
+                    onUnsupportedSchemeNavigation(webView, scheme, url)
+                },
                 onPageUrlObserved = { url ->
                     onPageUrlObserved(webView, url)
                 },
@@ -143,10 +149,15 @@ object SecureWebViewFactory {
     }
 
     /**
-     * WebView 销毁统一序列（单源）：detach → 停载 → 摘除页面 → 注销导航器/Broker
+     * WebView 销毁统一序列（单源）：detach → 停载 → 注销导航器/Broker
      * 会话 → destroy。标签关闭（TabManager.closeTab）与 Activity 销毁
      * （MainActivity.onDestroy）共用，此前两处各自手写一半序列（审计
      * 2026-09-02 收敛）。
+     *
+     * AD-281（2026-10-01 审计）：移除 destroy 前的 loadUrl(about:blank)——
+     * 已 stopLoading + 即将 destroy 的 WebView 上再发起加载必然夭折，且与
+     * 并发中的渲染管线竞态（「The WebView was destroyed」噪声源自此处）。
+     * 官方生命周期只要求 destroy 前从视图树摘除 + 停载。
      */
     fun tearDown(webView: WebView) {
         // AD-214（2026-09-26 审计）：destroy 前先从父容器 detach——关闭激活
@@ -155,7 +166,6 @@ object SecureWebViewFactory {
         // destroy 前从视图树摘除）。
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.stopLoading()
-        webView.loadUrl("about:blank")
         release(webView)
         webView.destroy()
     }

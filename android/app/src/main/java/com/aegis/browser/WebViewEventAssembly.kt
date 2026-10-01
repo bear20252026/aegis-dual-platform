@@ -74,6 +74,18 @@ internal class WebViewEventAssembly(
                     host.errorStrings().text(PageErrorTexts.denyAlertTextRes(code)),
                 )
             },
+            // AD-284（2026-10-01 审计）：mailto:/tel:/sms: 外跳 scheme 的主框架
+            // 导航——瞬时 Toast 显式反馈「不支持该类链接」（WebViewClient
+            // 回调在主线程，与 WebViewDownloadHandler 的 Toast 同口径；
+            // 瞬时提示不走常驻对话框状态——INV-04 状态面不收瞬时反馈）。
+            onUnsupportedSchemeNavigation = { wv, _, _ ->
+                android.widget.Toast
+                    .makeText(
+                        wv.context,
+                        wv.context.getString(R.string.unsupported_link_scheme),
+                        android.widget.Toast.LENGTH_SHORT,
+                    ).show()
+            },
             onPageUrlObserved = ::onPageUrlObserved,
             onTitleObserved = ::onTitleObserved,
             onRendererGone = onRendererGone,

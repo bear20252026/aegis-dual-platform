@@ -43,6 +43,13 @@ object OriginPolicy {
         // 0x 十六进制/简写（127.1）OS 解析器均接受，双重解释混淆面——与
         // Rust origin.rs / C# OriginPolicy 口径一致
         val host = uri.host!!.lowercase()
+        // AD-252（P1，2026-10-01 审计）：尾点 host（`localhost.` / `aegis.local.`）
+        // 拒绝——java.net.URI 保留尾点原样放行，而 Chromium 归一化剥除尾点后
+        // `location.hostname` 命中 bridge_guard 白名单（localhost/aegis.local）
+        // 成为 trustedCaller；canonicalOrigin 又会产出幻影 origin
+        // （https://localhost.）绑进 AuthorizedAction。本层是全链唯一能以
+        // URI 原始形态观察到尾点的收口点——备用编码判定之前整链 fail-closed。
+        if (host.endsWith(".")) return null
         if (isAlternateIpv4Encoding(host)) return null
         return uri
     }

@@ -54,13 +54,27 @@ class BrowserEngine(
         webView.settings.domStorageEnabled = true
         webView.settings.allowFileAccess = false
         webView.settings.allowContentAccess = false
+        // AD-292（2026-10-01 审计）：两项 FileURLs 设置 API 26 起 deprecated——
+        // 显式置 false 是安全立场声明（默认值随平台演进漂移不可依赖），
+        // 抑制编译告警而非删除设置。
+        @Suppress("DEPRECATION")
         webView.settings.allowFileAccessFromFileURLs = false
+        @Suppress("DEPRECATION")
         webView.settings.allowUniversalAccessFromFileURLs = false
         webView.settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         webView.settings.javaScriptCanOpenWindowsAutomatically = false
         webView.settings.setSupportMultipleWindows(false)
         webView.settings.mediaPlaybackRequiresUserGesture = true
         webView.settings.safeBrowsingEnabled = true
+        // AD-289（2026-10-01 审计）：显式立场——地理位置与表单自动填充默认
+        // 关闭（此前未声明，行为依赖 WebView 默认值漂移；WebSettings 无
+        // isGeolocationEnabled 公开 getter，JVM 侧无法断言——断言面见
+        // BrowserEngineHardeningTest 的 saveFormData 与真机冒烟）。
+        // setSaveFormData 在 API 26+ 标记 deprecated（平台侧已不保存表单数据，
+        // 显式置 false 是「fail-closed 立场声明」而非功能变更）。
+        webView.settings.setGeolocationEnabled(false)
+        @Suppress("DEPRECATION")
+        webView.settings.setSaveFormData(false)
         // 移动端渲染优化——页面适配手机屏幕，不再"粗糙"
         webView.settings.useWideViewPort = true
         webView.settings.loadWithOverviewMode = true
@@ -115,7 +129,11 @@ class BrowserEngine(
                     // （死回调噪声），且 WebViewEventAssembly.onTitleObserved
                     // 已有净化截断的 titleHit 日志（DEBUG 门控，AD-172）——
                     // 本行纯属重复留痕，随批移除。
-                    val safeTitle = title?.take(MAX_TITLE_LENGTH).orEmpty()
+                    // AD-268（2026-10-01 审计）：take 改代理对安全截断——
+                    // String.take 按 UTF-16 char 劈切，切点落在增补字符
+                    // （emoji 等）中间产生孤立代理对（渲染 � 且 length 失真）
+                    // ——与 ReaderMode.takeAtCharBoundary 同口径。
+                    val safeTitle = ReaderMode.takeAtCharBoundary(title.orEmpty(), MAX_TITLE_LENGTH)
                     onTitleObserved(safeTitle)
                 }
             }

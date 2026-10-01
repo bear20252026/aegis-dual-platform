@@ -251,4 +251,87 @@ class WebViewDownloadHandlerTest {
             WebViewDownloadHandler.resolveDownloadFileName("https://c.d/dl/malware%2Eexe", "", ""),
         )
     }
+
+    // ---------------- AD-263（2026-10-01 审计）：RFC 5987 严格解码 + 锚定 ----------------
+
+    @Test
+    fun rfc5987PlusSignStaysLiteral() {
+        // URLDecoder 把 `+` 按 query 语义解成空格——RFC 5987 里 `+` 是字面加号
+        assertEquals(
+            "a+b c.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename*=UTF-8''a+b%20c.pdf",
+            ),
+        )
+    }
+
+    @Test
+    fun rfc5987MultiByteSequenceDecodesAsWholeCharacter() {
+        // %E6%8A%A5 是「报」的三字节 UTF-8 序列——不得按单字节劈成 Latin-1
+        assertEquals(
+            "报告.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename*=UTF-8''%E6%8A%A5%E5%91%8A.pdf",
+            ),
+        )
+    }
+
+    @Test
+    fun xfilenameTokenIsNotMatched() {
+        // token 边界锚定：`xfilename=` 不再误命中 filename= 模式
+        assertEquals(
+            "fallback.bin",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; xfilename=\"evil.exe\"; filename=\"fallback.bin\"",
+            ),
+        )
+        assertEquals(
+            "redirect",
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; xfilename=\"evil.exe\"",
+            ),
+        )
+    }
+
+    // ---------------- AD-262（2026-10-01 审计）：字节数上限截断 ----------------
+
+    @Test
+    fun overLongCjkNameIsCappedByUtf8ByteBudget() {
+        // 200 个汉字 = 600 UTF-8 字节 > 文件系统 255 字节单名上限——按字节
+        // 度量截断（≤240 字节），保扩展名，不劈代理对
+        val longCjkName = "报".repeat(250) + ".pdf"
+        val resolved =
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename=\"$longCjkName\"",
+            )
+        assertTrue(
+            "截断后必须 ≤ 240 UTF-8 字节（实际 ${resolved.toByteArray(Charsets.UTF_8).size}）",
+            resolved.toByteArray(Charsets.UTF_8).size <= 240,
+        )
+        assertTrue("扩展名必须保留", resolved.endsWith(".pdf"))
+        assertTrue(resolved.all { !Character.isHighSurrogate(it) && !Character.isLowSurrogate(it) })
+    }
+
+    @Test
+    fun asciiNameCapSemanticsUnchanged() {
+        // ASCII 名仍受 200 字符约束（字节上限不放宽既有行为）
+        val resolved =
+            WebViewDownloadHandler.resolveDownloadFileName(
+                "https://c.d/redirect",
+                "",
+                "attachment; filename=\"${"a".repeat(250)}.pdf\"",
+            )
+        assertEquals(200, resolved.length)
+        assertTrue(resolved.endsWith(".pdf"))
+    }
 }

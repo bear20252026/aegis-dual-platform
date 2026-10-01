@@ -294,4 +294,101 @@ class TabManagerTest {
         assertEquals(1, first.size)
         assertEquals(2, tm.list().size)
     }
+
+    // ---------------- AD-254/AD-275（2026-10-01 审计）：后台关闭保持激活位 ----------------
+
+    @Test
+    fun closeBackgroundTabAfterActiveKeepsActiveIndexAndSameTab() {
+        // 分支一（index > activeIndex）：关闭激活标签之后的后台标签——激活位
+        // 不得跳到被关位置，原激活标签保持激活（无激活跳变/无双活跃 WebView）
+        val rec = Recorder()
+        val tm = manager(rec)
+        tm.addTab(newWebView()) // 0
+        tm.addTab(newWebView()) // 1
+        tm.addTab(newWebView()) // 2
+        tm.switchTo(0) // 激活 tab0（index 0）
+        val activeBefore = tm.list()[tm.activeIndex]
+        val resumesBefore = rec.resumed.size
+        val pausesBefore = rec.paused.size
+
+        assertTrue(tm.closeTab(2)) // index 2 > activeIndex 0
+
+        assertEquals("激活位保持（原实现跳到被关位置）", 0, tm.activeIndex)
+        assertSame("激活标签实例不变", activeBefore, tm.current())
+        assertEquals("关闭后台标签不得 resume 任何 WebView（无双活跃）", resumesBefore, rec.resumed.size)
+        assertEquals("被关标签 pause 恰一次（pause 单点=removed）", pausesBefore + 1, rec.paused.size)
+        assertEquals(2, tm.size)
+    }
+
+    @Test
+    fun closeBackgroundTabBeforeActiveShiftsActiveIndexToSameTab() {
+        // 分支二（index < activeIndex）：关闭激活标签之前的后台标签——后续
+        // 标签整体左移，激活位随同减一（仍指向同一标签实例）
+        val rec = Recorder()
+        val tm = manager(rec)
+        tm.addTab(newWebView()) // 0
+        tm.addTab(newWebView()) // 1
+        tm.addTab(newWebView()) // 2 激活
+        val activeBefore = tm.list()[2]
+        val resumesBefore = rec.resumed.size
+
+        assertTrue(tm.closeTab(0)) // index 0 < activeIndex 2
+
+        assertEquals("激活位随左移减一（原实现跳到被关位置 0）", 1, tm.activeIndex)
+        assertSame("激活标签实例不变（tab id=2 仍激活）", activeBefore, tm.current())
+        assertEquals("关闭后台标签不得 resume 任何 WebView", resumesBefore, rec.resumed.size)
+        assertEquals(2, tm.size)
+    }
+
+    @Test
+    fun closeActiveTabResumesOnlyTheTakeoverTab() {
+        // 分支三（index == activeIndex）：关闭激活标签——接管标签恢复
+        // （挂起态时 resume），且只有接管标签被 resume。maxActive=2 下
+        // addTab 三次后：tab0 被 LRU 挂起、tab1 被切换挂起（switchTo 离场
+        // pause）、tab2 激活未挂起。
+        val rec = Recorder()
+        val tm = manager(rec, maxActive = 2)
+        tm.addTab(newWebView()) // 0
+        tm.addTab(newWebView()) // 1
+        tm.addTab(newWebView()) // 2 激活——tab0 LRU 挂起，tab1 切换挂起
+        assertEquals(
+            setOf(0L, 1L),
+            tm
+                .list()
+                .filter { it.suspended }
+                .map { it.id }
+                .toSet(),
+        )
+        val resumesBefore = rec.resumed.size
+
+        assertTrue(tm.closeTab(2))
+
+        // 接管者=tab1（挂起态）→ resume 恰一次；激活位=min(2, size-1)=1
+        assertEquals("挂起态接管标签必须 resume（且仅它）", resumesBefore + 1, rec.resumed.size)
+        assertEquals(1, tm.activeIndex)
+        assertEquals(1L, tm.current()?.id)
+        assertFalse(tm.list().first { it.id == 1L }.suspended)
+        // tab0（非接管的后台标签）保持挂起，不被误恢复（双活跃回归）
+        assertTrue(tm.list().first { it.id == 0L }.suspended)
+
+        // 对照场景（maxActive=1）：仅 tab0 LRU 挂起，关闭激活 tab1 →
+        // 接管者 tab0 挂起态 → resume 恰一次
+        val rec2 = Recorder()
+        val tm2 = manager(rec2, maxActive = 1)
+        tm2.addTab(newWebView()) // 0
+        tm2.addTab(newWebView()) // 1 激活——tab0 LRU 挂起
+        assertEquals(
+            setOf(0L),
+            tm2
+                .list()
+                .filter { it.suspended }
+                .map { it.id }
+                .toSet(),
+        )
+        val resumesBefore2 = rec2.resumed.size
+        assertTrue(tm2.closeTab(1)) // 关闭激活 tab1 → 接管者 tab0 处挂起态
+        assertEquals("挂起态接管标签必须 resume", resumesBefore2 + 1, rec2.resumed.size)
+        assertEquals(0, tm2.activeIndex)
+        assertFalse(tm2.list().first { it.id == 0L }.suspended)
+    }
 }

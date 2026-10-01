@@ -7,6 +7,8 @@ import android.webkit.WebView
 import android.widget.Toast
 import com.aegis.webviewadapter.LogRedact
 
+// AD-262/263：字节数上限与严格解码引入的私有助手使函数数超阈值——各函数均为单一解析职责
+
 /**
  * WebView 下载统一处理（单文件单职责：从 SecureWebViewFactory 拆出——H-6）。
  *
@@ -14,7 +16,11 @@ import com.aegis.webviewadapter.LogRedact
  * - 危险扩展（exe/bat/apk 等——DownloadPolicy 白名单反查）直接拦截
  *   并以 Toast 明示用户，绝不静默放行；
  * - 其余交系统 DownloadManager（带会话 Cookie）。
+ *
+ * AD-262/263（2026-10-01 审计）：字节数上限与严格解码引入的私有助手使
+ * 函数数超 detekt 阈值——各函数均为单一解析职责。
  */
+@Suppress("TooManyFunctions")
 internal object WebViewDownloadHandler {
     /** P2-5 修复（全面审计 2026-09-04）：净化失败的默认下载名（无扩展名）。 */
     private const val DEFAULT_DOWNLOAD_NAME = "aegis_download"
@@ -24,6 +30,33 @@ internal object WebViewDownloadHandler {
      * 会导致 DownloadManager 落盘失败/通知栏渲染异常——截断基本名、保留扩展名。
      */
     private const val MAX_DOWNLOAD_NAME_LENGTH = 200
+
+    /**
+     * AD-262（2026-10-01 审计）：文件名字节上限——200 字符截断 ≠ 字节上限：
+     * 中文文件名 200 字符 = 600 UTF-8 字节，超出 ext4/FAT 文件系统单文件名
+     * 255 字节上限，DownloadManager 落盘失败。240（< 255，留文件系统编码
+     * 余量）按 UTF-8 字节度量截断，保扩展名；与字符上限（[MAX_DOWNLOAD_NAME_LENGTH]）
+     * 双重约束（ASCII 名仍受 200 字符约束，行为不变）。
+     */
+    private const val MAX_DOWNLOAD_NAME_BYTES = 240
+
+    /** AD-262/263 配套常量（detekt MagicNumber 命名化）。 */
+    private const val UTF8_1_BYTE_MAX = 0x7F
+
+    private const val UTF8_2_BYTE_MAX = 0x7FF
+
+    private const val UTF8_3_BYTE_MAX = 0xFFFF
+
+    private const val UTF8_3_BYTES = 3
+
+    private const val UTF8_4_BYTES = 4
+
+    private const val HEX_RADIX_OFFSET = 10
+
+    private const val HEX_NIBBLE_SHIFT = 4
+
+    /** `%XX` 转义全长（% + 两位十六进制）。 */
+    private const val PERCENT_ESCAPE_LENGTH = 3
 
     /**
      * AD-138（审计 2026-09-23 清单·A6 批）：mimetype → 扩展名白名单映射——
@@ -175,8 +208,13 @@ internal object WebViewDownloadHandler {
      * AD-032：超长文件名截断——基本名按上限截断、扩展名保留
      * （`<200 字符基本名>.pdf` 而非把 `.pdf` 切掉变成无类型文件）。
      * 截断后基本名可能以点结尾 → 再净化一次（trimEnd('.')）。
+     *
+     * AD-262（2026-10-01 审计）：字符截断后追加字节截断（UTF-8 度量）——
+     * CJK 文件名按字符数达标但按字节超文件系统 255 字节单名上限。
      */
-    private fun capLength(name: String): String =
+    private fun capLength(name: String): String = capByteLength(capCharLength(name))
+
+    private fun capCharLength(name: String): String =
         when {
             name.length <= MAX_DOWNLOAD_NAME_LENGTH -> {
                 name
@@ -194,15 +232,58 @@ internal object WebViewDownloadHandler {
         }
 
     /**
+     * AD-262：UTF-8 字节预算截断（码点安全——不劈代理对），保扩展名；
+     * 扩展名自身超预算一半时放弃保留（畸形输入防呆）。空结果回退默认名。
+     */
+    private fun capByteLength(name: String): String {
+        if (name.toByteArray(Charsets.UTF_8).size <= MAX_DOWNLOAD_NAME_BYTES) return name
+        val dot = name.lastIndexOf('.')
+        val keepExtension =
+            dot > 0 && name.substring(dot).toByteArray(Charsets.UTF_8).size <= MAX_DOWNLOAD_NAME_BYTES / 2
+        val extension = if (keepExtension) name.substring(dot) else ""
+        val base = if (keepExtension) name.substring(0, dot) else name
+        val budget = MAX_DOWNLOAD_NAME_BYTES - extension.toByteArray(Charsets.UTF_8).size
+        val capped = StringBuilder()
+        var usedBytes = 0
+        val codePoints = base.codePoints().iterator()
+        while (codePoints.hasNext()) {
+            val codePoint = codePoints.nextInt()
+            val codePointBytes = utf8ByteCount(codePoint)
+            if (usedBytes + codePointBytes > budget) break
+            capped.appendCodePoint(codePoint)
+            usedBytes += codePointBytes
+        }
+        return capped
+            .toString()
+            .trimEnd('.')
+            .plus(extension)
+            .ifBlank { DEFAULT_DOWNLOAD_NAME }
+    }
+
+    /** AD-262：码点 → UTF-8 字节数（RFC 3629 定长表）。 */
+    private fun utf8ByteCount(codePoint: Int): Int =
+        when {
+            codePoint <= UTF8_1_BYTE_MAX -> 1
+            codePoint <= UTF8_2_BYTE_MAX -> 2
+            codePoint <= UTF8_3_BYTE_MAX -> UTF8_3_BYTES
+            else -> UTF8_4_BYTES
+        }
+
+    /**
      * AD-230（2026-09-26 审计）：Content-Disposition 文件名解析——此前只认
      * 小写字面 `filename=`：RFC 5987 `filename*=UTF-8''…`（非 ASCII 文件名的
      * 标准形态）与大小写变体（`FileName=`）全部漏解析。优先 filename*
      * （剥 charset 前缀后百分号解码），回退 filename（大小写不敏感）；
      * 均未命中返回空串（交由后续 URL/默认名兜底）。
+     *
+     * AD-263（2026-10-01 审计）：①token 边界锚定——`(?:^|[;\\s])` 前置边界，
+     * `xfilename=` 不再误匹配；②RFC 5987 解码不走 URLDecoder（其把 `+` 按
+     * query 语义解成空格，filename* 里 `+` 是字面加号）——逐 %XX 严格解码
+     * （[decodePercentStrict]）。
      */
     internal fun resolveDispositionFileName(contentDisposition: String): String {
         val starred =
-            Regex("filename\\*=([^;]+)", RegexOption.IGNORE_CASE)
+            Regex("(?:^|[;\\s])filename\\*=([^;]+)", RegexOption.IGNORE_CASE)
                 .find(contentDisposition)
                 ?.groupValues
                 ?.get(1)
@@ -211,9 +292,9 @@ internal object WebViewDownloadHandler {
             // RFC 5987 形如 `UTF-8''%E6%8A%A5.pdf`——剥 charset'' 前缀后解码；
             // 无前缀（裸百分号编码）按原串处理
             val encoded = starred.substringAfter("''", missingDelimiterValue = starred)
-            return decodePercent(encoded)
+            return decodePercentStrict(encoded)
         }
-        return Regex("filename=([^;]+)", RegexOption.IGNORE_CASE)
+        return Regex("(?:^|[;\\s])filename=([^;]+)", RegexOption.IGNORE_CASE)
             .find(contentDisposition)
             ?.groupValues
             ?.get(1)
@@ -229,6 +310,67 @@ internal object WebViewDownloadHandler {
             raw
         } catch (_: java.io.UnsupportedEncodingException) {
             raw
+        }
+
+    /**
+     * AD-263：RFC 5987 严格百分号解码——逐 %XX 还原字节流后整体按 UTF-8 解码
+     * （多字节字符的 %E6%8A%A5 序列不得按单字节劈开）；`+` 保持字面（不经
+     * URLDecoder 的 query 语义转换）；%XX 后不足两位十六进制按字面 `%` 处理；
+     * 解码出非法 UTF-8 序列原样返回（fail-closed，与 [decodePercent] 同口径）。
+     */
+    private fun decodePercentStrict(raw: String): String {
+        // 字面字符按 UTF-8 展开最多 4 字节/字符——按上界分配
+        val bytes = ByteArray(raw.length * UTF8_4_BYTES)
+        var length = 0
+        var i = 0
+        while (i < raw.length) {
+            val escapedByte = hexEscapeByteAt(raw, i)
+            if (escapedByte != null) {
+                bytes[length++] = escapedByte
+                i += PERCENT_ESCAPE_LENGTH
+            } else {
+                val literal = raw[i].toString().toByteArray(Charsets.UTF_8)
+                literal.forEach { bytes[length++] = it }
+                i++
+            }
+        }
+        return try {
+            Charsets.UTF_8
+                .newDecoder()
+                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                .decode(java.nio.ByteBuffer.wrap(bytes, 0, length))
+                .toString()
+        } catch (_: java.nio.charset.CharacterCodingException) {
+            raw
+        }
+    }
+
+    /** AD-263：位置 [index] 起的 `%XX` 转义字节；非完整十六进制转义返回 null。 */
+    private fun hexEscapeByteAt(
+        raw: String,
+        index: Int,
+    ): Byte? {
+        val high = hexValue(raw.getOrNull(index + 1))
+        val low = hexValue(raw.getOrNull(index + 2))
+        return if (raw[index] == '%' && high != null && low != null) {
+            ((high shl HEX_NIBBLE_SHIFT) or low).toByte()
+        } else {
+            null
+        }
+    }
+
+    /** AD-263：单字符十六进制值；非十六进制返回 null。 */
+    private fun hexValue(c: Char?): Int? =
+        if (c == null) {
+            null
+        } else {
+            when (c) {
+                in '0'..'9' -> c - '0'
+                in 'a'..'f' -> c - 'a' + HEX_RADIX_OFFSET
+                in 'A'..'F' -> c - 'A' + HEX_RADIX_OFFSET
+                else -> null
+            }
         }
 
     /**
