@@ -64,9 +64,9 @@ SCHEMA = {
 class TestGenerateCSharp:
     def test_snapshot(self):
         # PY-126：快照断言——必选在前、可选默认 null、无尾逗号（C# 语法）
+        # PY-248：using 条件输出——本 schema 无数组属性，不再注入未用 using
         assert gcs.generate(SCHEMA, "Demo") == (
             "// 由 contracts/codegen/generate_csharp.py 生成（蓝图阶段 B——契约事实来源——请勿手工编辑）\n"
-            "using System.Collections.Generic;\n"
             "namespace Aegis.Windows.Contracts.Generated;\n"
             "\n"
             "public sealed record Demo(\n"
@@ -75,6 +75,65 @@ class TestGenerateCSharp:
             "    string? note = null\n"
             ");"
         )
+
+
+# ---------------------------------------------------------------- PY-243/248
+ARRAY_SCHEMA = {
+    "required": ["id", "items"],
+    "properties": {
+        "id": {"type": "string"},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["a", "b"]},
+                    "note": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
+class TestNestedArrayModels:
+    """PY-243：数组 items(object+properties) 生成嵌套子模型；PY-248：条件 using。"""
+
+    def test_cs_nested_model_and_conditional_using(self):
+        out = gcs.generate(ARRAY_SCHEMA, "Demo")
+        assert "using System.Collections.Generic;" in out  # 有数组属性 → 保留 using
+        assert "List<DemoItem> items" in out  # 强类型化，不再 List<object>
+        assert "public sealed record DemoItem(" in out  # 嵌套 record 同文件
+        assert "string name,\n    string? kind = null,\n    string? note = null\n);" in out  # 必选在前、可选可空
+        assert "public static class DemoItemValues" in out  # 嵌套 enum 亦获锚点
+        assert 'KindA = "a"' in out  # 常量名随属性名（Kind 而非 Platform）
+
+    def test_kt_nested_model_mirrors_cs(self):
+        out = gkt.generate(ARRAY_SCHEMA, "Demo")
+        assert "val items: List<DemoItem>," in out  # 与 C# 同名单源（ident.py）
+        assert "data class DemoItem(" in out
+        assert "object DemoItemValues {" in out
+        assert "const val KIND_A: String = \"a\"" in out
+
+    def test_free_form_object_items_stay_loose(self):
+        # 无 properties 的自由 object 无锚定面——保持原降级行为（向后兼容）
+        schema = {"required": ["xs"],
+                  "properties": {"xs": {"type": "array", "items": {"type": "object"}}}}
+        assert "List<object> xs" in gcs.generate(schema, "Demo")
+        assert "val xs: List<Any>," in gkt.generate(schema, "Demo")
+
+    def test_array_of_object_requires_nested_model(self):
+        # cs_type/kt_type 裸调用缺嵌套类型名即 fail-closed（禁止静默降级回 List<object>）
+        with pytest.raises(ValueError, match="fail-closed"):
+            gcs.cs_type(ARRAY_SCHEMA["properties"]["items"])
+        with pytest.raises(ValueError, match="fail-closed"):
+            gkt.kt_type(ARRAY_SCHEMA["properties"]["items"])
+
+    def test_no_array_no_using(self):
+        # PY-248：无数组属性的四份生成文件不再携带未用 using
+        assert "using System.Collections.Generic;" not in gcs.generate(SCHEMA, "Demo")
 
 
 # ---------------------------------------------------------------- PY-127/131

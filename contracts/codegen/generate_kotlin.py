@@ -13,6 +13,9 @@ import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# PY-243（2026-10-01 审计）：嵌套子模型命名规则单源（与 generate_csharp 共享）
+from ident import singular_pascal as _singular_pascal
+
 # PY-242（2026-10-01 审计）：describe_value_domain 两份逐字重复抽单源
 from value_domain import describe_value_domain
 
@@ -35,13 +38,24 @@ KT_TYPE_MAP = {
 }
 
 
-def kt_type(prop: dict) -> str:
+def kt_type(prop: dict, nested_item: str | None = None) -> str:
     t = prop.get("type", "string")
     if t == "array":
-        items = prop.get("items", {}).get("type", "string")
-        if items not in KT_TYPE_MAP:
-            raise ValueError(f"数组 items 类型不支持: {items!r}（fail-closed——禁止静默降级）")
-        return f"List<{KT_TYPE_MAP[items]}>"
+        items = prop.get("items", {})
+        it = items.get("type", "string")
+        # PY-243（2026-10-01 审计）：与 generate_csharp.cs_type 对偶——items
+        # 为 object 且带 properties 时生成嵌套子模型；自由 object 保持 List<Any>。
+        if it == "object":
+            if "properties" in items:
+                if not nested_item:
+                    raise ValueError(
+                        "数组 items 为 object 且带 properties——必须生成嵌套子模型"
+                        "（fail-closed——禁止降级 List<Any>）")
+                return f"List<{nested_item}>"
+            return "List<Any>"
+        if it not in KT_TYPE_MAP:
+            raise ValueError(f"数组 items 类型不支持: {it!r}（fail-closed——禁止静默降级）")
+        return f"List<{KT_TYPE_MAP[it]}>"
     if t not in KT_TYPE_MAP:
         raise ValueError(f"schema 类型不支持: {t!r}（fail-closed——禁止静默降级 Any）")
     return KT_TYPE_MAP[t]
@@ -109,6 +123,39 @@ def enum_constant_lines(schema: dict, name: str) -> list[str]:
     return lines
 
 
+def _nested_class_lines(items_schema: dict, nested_name: str) -> list[str]:
+    """PY-243：数组 items(object+properties) 的嵌套子模型——data class +
+    值域常量 object（与 generate_csharp._nested_record_lines 对偶）。
+    嵌套层内再出现 array-of-object 属契约面过深，fail-closed。"""
+    nprops = items_schema.get("properties", {})
+    nrequired = set(items_schema.get("required", []))
+    nunknown = nrequired - set(nprops)
+    if nunknown:
+        raise ValueError(
+            f"嵌套 items required 引用未定义属性: {sorted(nunknown)}（fail-closed）")
+    nordered = [k for k in nprops if k in nrequired] + [k for k in nprops if k not in nrequired]
+    lines = [
+        "",
+        (f"/** PY-243（2026-10-01 审计）：{nested_name} 嵌套子模型——"
+         "schema 数组 items 单源（字段获得编译期锚点，不再降级 Any）。 */"),
+        f"data class {nested_name}(",
+    ]
+    for pname in nordered:
+        p = nprops[pname]
+        if p.get("type") == "array":
+            raise ValueError("嵌套 items 内不支持数组属性（fail-closed——契约面过深）")
+        t = kt_type(p)
+        # 尾逗恒定输出（ktlint trailing-comma-on-declaration-site——A-2 门禁扩面）
+        if pname in nrequired:
+            lines.append(f"    val {pname}: {t},")
+        else:
+            lines.append(f"    val {pname}: {t}? = null,")
+    lines.append(")")
+    # enum_constant_lines 自带 Values 后缀——传嵌套类型名本身
+    lines.extend(enum_constant_lines(items_schema, nested_name))
+    return lines
+
+
 def generate(schema: dict, name: str) -> str:
     props = schema.get("properties", {})
     required = set(schema.get("required", []))
@@ -119,6 +166,15 @@ def generate(schema: dict, name: str) -> str:
     if unknown:
         raise ValueError(
             f"required 引用未定义属性: {sorted(unknown)}（schema={name}——fail-closed）")
+    # PY-243：array-of-object+properties 预扫描（与 generate_csharp 同规则同命名）
+    nested_models: list[tuple[str, dict]] = []
+    nested_by_pname: dict[str, str] = {}
+    for pname, p in props.items():
+        items = p.get("items", {}) if p.get("type") == "array" else {}
+        if items.get("type") == "object" and "properties" in items:
+            nested_name = f"{name}{_singular_pascal(pname)}"
+            nested_models.append((nested_name, items))
+            nested_by_pname[pname] = nested_name
     # PY-100：required 区分——必选在前（与 C# 对偶，构造可读性），组内保持
     # schema 声明序；非必选生成可空类型 + 默认 null
     ordered = [k for k in props if k in required] + [k for k in props if k not in required]
@@ -130,13 +186,15 @@ def generate(schema: dict, name: str) -> str:
     ]
     for pname in ordered:
         p = props[pname]
-        t = kt_type(p)
+        t = kt_type(p, nested_item=nested_by_pname.get(pname))
         # 尾逗恒定输出（ktlint trailing-comma-on-declaration-site——A-2 门禁扩面）
         if pname in required:
             lines.append(f"    val {pname}: {t},")
         else:
             lines.append(f"    val {pname}: {t}? = null,")
     lines.append(")")
+    for nested_name, items_schema in nested_models:
+        lines.extend(_nested_class_lines(items_schema, nested_name))
     lines.extend(enum_constant_lines(schema, name))
     return "\n".join(lines)
 
