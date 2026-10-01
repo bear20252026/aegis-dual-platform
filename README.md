@@ -54,8 +54,8 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
 
 - **Windows**（windows/src/Aegis.Windows.App）：`dotnet build`（.NET 10.0.x——0 警告）；
   `dotnet test tests/Aegis.Windows.Core.Tests` / `Aegis.Windows.Broker.Tests`
-- **Rust 核心**（core/rust-policy-core）：`cargo test && cargo clippy --all-targets
-  && cargo fmt --check`（全绿 + 0 警告）
+- **Rust 核心**（core/rust-policy-core）：`cargo test && cargo clippy --all-features
+  --all-targets -- -D warnings && cargo fmt --check`（全绿 + 0 警告；SP-183 与 CI 统一口径）
 - **Android**（四模块，与 CI 一致）：`./gradlew.bat :app:testDebugUnitTest
   :broker:testDebugUnitTest :webview-adapter:testDebugUnitTest` +
   `ktlintCheck/detekt` + `:app:lintDebug`
@@ -78,12 +78,19 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
 - 测试规模：cargo 450+ / dotnet 650+ / gradle JVM 280+ / pytest 230+ / node 80+ 用例，
   五门禁（validate_release / verify_versions / bridge_guard / contract_compatibility /
   cross_end_lists）常绿
+  （SP-198，2026-10-01 审计补口径：pytest 230+ 为**合计口径**——`tests/python`
+  发布链验证器 195+ 用例 + `agent/tests` 红队 30 用例；CHANGELOG 各版本条目中的
+  "pytest 30" 为当批 agent 红队单列口径，两者不矛盾）
 - 当前版本：`2.2.0-beta.50`（[shared/version.properties](shared/version.properties) 单源；
   发布记录见 [CHANGELOG.md](CHANGELOG.md)，记账规则见文件头）
 
 ## 蓝图状态（蓝图文档已并入 docs/architecture-overview.md）
 
-- 阶段 A（ADR 决策）→ G（Agent 复开）**全部完成** ✅；发布门禁 13 workflow 分层常跑 ✅
+- 阶段 A（ADR 决策）→ G（Agent 复开）**全部完成** ✅；发布门禁 13 workflow 分层 ✅
+  （SP-199，2026-10-01 审计如实口径：**常跑（push/PR 触发）7 个**——ci / contracts /
+  core-rust / android-quality / supply-chain / agent-redteam / native-policy-artifacts；
+  低频定时 2 个——compat（周一）/ legacy-python-guard（周六）；tag/编排触发 4 个——
+  release 编排器 + release-{windows,android,core} 三平台链）
 - 剩余（需真实设备/用户操作）：真机验证（[device-validation.md](docs/runbooks/device-validation.md)）｜
   正式发布（[release-checklist.md](docs/runbooks/release-checklist.md)——受保护环境 + 门禁全绿后 tag）
 

@@ -35,12 +35,15 @@ jobs:
         working-directory: legacy/windows-pywebview
     steps:
       - name: 检出代码
-        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
 
-      - name: 安装 Python 3.14
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0 (node24)
+      - name: 安装 Python 3.12
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (SP-180 更正注记)
         with:
-          # PY-063：与 ci.yml/contracts.yml 统一 3.12
+          # PY-063：与 contracts.yml/legacy-python-guard.yml 统一 3.12
+          # SP-181（2026-10-01 审计）：步骤名原书"安装 Python 3.14"与实装
+          # 3.12 不符；注释原引 ci.yml（该 workflow 无 Python 步骤）——
+          # 一并改为真实对齐对象。
           python-version: "3.12"
 
       - name: 运行自动化回归（validate_release + 3 selftest）
@@ -69,7 +72,7 @@ jobs:
           echo "快照已生成: probe-$stamp.json（仅 CI artifact，不回仓）"
 
       - name: 上传报告为 CI 制品（便于下载核对——含 PY-067 stderr 排障日志）
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: webview2-probe-report
           path: |

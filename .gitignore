@@ -7,6 +7,10 @@ signing.properties
 *.jks
 *.keystore
 *.p12
+# SP-194（2026-10-01 审计）：Authenticode 代码签名证书落盘面——release-windows
+# 的签名步骤在 RUNNER_TEMP 解出 aegis-codesign.pfx；本地签名流程同样会产出
+# pfx。与 *.jks/*.p12 同组的凭据红线，此前缺该条目（误加即凭据入库）。
+*.pfx
 
 # skylos 工具输出目录（报告归档于 docs/quality-reports/，此处不重复入库）
 .skylos/
@@ -67,7 +71,8 @@ legacy/windows-pywebview/dist/
 # assets/fonts/*（5 条）与 assets/fonts/fonts-bundle.zip 死规则删除；
 # android assets/geogebra 规则亦死（SP-145 后画板暂存迁 dist/geogebra-cache/，
 # APK assets 不落盘）
-**/docs/release/installer_output/
+# SP-193（2026-10-01 审计）：删除死规则 **/docs/release/installer_output/——
+# Inno Setup 脚本 OutputDir 已改 dist/（该目录不再有写入方，被 dist/ 全覆盖）。
 aegis-*.zip
 
 # 现代工具缓存（SP-097，审计 2026-09-23 清单·SP1 批：此前缺 .mypy_cache/

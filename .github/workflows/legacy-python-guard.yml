@@ -42,10 +42,10 @@ jobs:
         working-directory: legacy/windows-pywebview
     steps:
       - name: 检出代码
-        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
 
       - name: 安装 Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0 (node24)
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (SP-180 更正注记)
         with:
           # PY-063：与 contracts.yml 统一 3.12（3.14 过新——PySide6 类型桩兼容风险）
           python-version: "3.12"
@@ -59,6 +59,12 @@ jobs:
         # 全量安装：requirements.txt（运行依赖，含 PySide6——asset_scheme
         # 的 mypy 检查需要其类型桩）+ requirements-dev.txt（== 锁定版本，
         # P6 教训：CI 与本地口径一致）+ types-pywin32（security.py 桩）
+        # SP-214（2026-10-01 审计）取舍注明：requirements-dev.txt 为 == 版本
+        # 锁但无 --hash（归档栈文件，补 hash 锁须改动只读归档目录——与
+        # ADR-009 D4 冻结纪律冲突）。风险面：dev 工具链（ruff/bandit/mypy/
+        # pytest）安装期完整性依赖 TLS+PyPI；该锁不随制品发布、仅在 CI
+        # 短暂运行。PY-220 同批对齐其与 requirements-ci.in 的版本口径；
+        # 若日后归档纪律放宽再补 hash 锁（登记在案，非静默接受）。
         run: |
           python -m pip install --upgrade pip
           # PY-010：运行依赖走 hash 锁文件（此前装无 hash 的 requirements.txt，
@@ -73,8 +79,12 @@ jobs:
           的 Python 此前从未被 lint，pyproject 却声称在门禁范围内）
         # SP-164（2026-09-26 审计）：ignore/测试豁免清单收敛 pyproject 单源
         #（[tool.ruff.lint] + per-file-ignores）——行内 --ignore 双源删除
+        # SP-208（2026-10-01 审计）：门禁面补齐 validate_release.py、
+        # tests/python、core/rust-policy-core/bindings——pyproject 的
+        # per-file-ignores 声称覆盖 tests/** 而实际两处 ruff 均不扫这些面
+        #（与 PY-217/PY-256 配套；lint 清零由 PY 批同批落地后本门禁即全绿）
         working-directory: .
-        run: ruff check scripts release contracts agent
+        run: ruff check scripts release contracts agent validate_release.py tests core/rust-policy-core/bindings
       - name: ruff 检查（Lint + 格式，0 错误）
         # 工作目录为 legacy/windows-pywebview，`--exclude legacy` 排除其下的旧 Qt 栈归档
         # legacy/windows-pywebview/legacy/**（61 个 Python 不参与运行面——全量扫描会误报
@@ -85,7 +95,7 @@ jobs:
         # SP-164：ignore 清单随 ruff 向上发现根 pyproject.toml 单源，行内删除
         run: ruff check . --exclude legacy
 
-      - name: bandit 安全扫描（无 Medium/High）
+      - name: bandit 安全扫描（归档栈——无 Medium/High）
         # 设计豁免规则单源 bandit.yaml（PY-156，2026-09-23 审计·V1 核验批——
         # 此前 skip 清单仅在下方行内命令，无配置可复用）：
         # - B110 try_except_pass：静默降级是安全设计
@@ -93,6 +103,19 @@ jobs:
         #   调用（security.py icacls / webview2_probe.py tasklist），无注入面
         # 其余规则 Medium/High 触发失败（bandit 退出码即门禁）。
         run: bandit -c bandit.yaml -r app/ -q
+
+      - name: bandit 安全扫描（活跃树 scripts/release/contracts/agent——PY-245 接线）
+        # PY-245（2026-10-01 审计）：bandit/mypy 此前只扫 legacy 归档栈——
+        # 现役 scripts/release/contracts/agent 零 SAST。本步骤接线 bandit
+        #（配置单源根级 bandit.yaml，豁免口径与归档栈一致 + B101 测试断言）。
+        # -ll：仅 Medium/High 触发失败（实测活跃树存量 98 处 LOW——B101
+        #  测试 assert / B404/B603/B607 受控 subprocess / B406 ElementTree
+        #  解析仓内可信版本文件；与归档栈门禁的"无 Medium/High"语义一致）。
+        # mypy 面：本地实测 `mypy scripts release` 因多处同名 run.py 无
+        # __init__.py 报 duplicate module 错误、无法起步（需先做模块化/根
+        # mypy 配置——属 PY 批代码面），本批不接线、登记为部分完成。
+        working-directory: .
+        run: bandit -c bandit.yaml -r scripts release contracts agent -ll -q
 
       - name: mypy 类型检查（归档栈 0 错误——全量目录口径）
         # SP-151（2026-09-26 审计）：原注释"新栈 0 错误"失实——检查对象是

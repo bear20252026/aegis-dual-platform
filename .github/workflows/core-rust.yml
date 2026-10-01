@@ -25,18 +25,21 @@ jobs:
       run:
         working-directory: core/rust-policy-core
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-053)
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-053)
         with:
           workspaces: core/rust-policy-core
       - name: cargo fmt (蓝图阶段 F——cargo fmt 门禁)
         run: cargo fmt --all -- --check
+      # SP-183（2026-10-01 审计）：clippy 三口径统一——补 --all-targets
+      #（此前 README/CLAUDE 承诺 --all-targets 而 PR 门禁无——测试/bench 目标
+      # 逃检；本地实测统一口径 0 警告通过）
       - name: cargo clippy (蓝图——clippy 门禁——-D warnings)
-        run: cargo clippy --locked --all-features -- -D warnings
+        run: cargo clippy --locked --all-features --all-targets -- -D warnings
       - name: cargo test (vectors 差分——与 C#/Kotlin reference 一致)
         run: cargo test --locked --all-features
       - name: Generate Kotlin bindings from locked UniFFI toolchain

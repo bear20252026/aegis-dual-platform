@@ -29,19 +29,27 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 (PY-061)
-        with:
-          path: ~/.cache/pip
-          key: pip-contracts-${{ runner.os }}-reqci-hashlock-v1
+          # SP-201（2026-10-01 审计）：pip 缓存三口径统一——contracts 此前用
+          # actions/cache 静态键（锁文件更新不失效缓存）、supply-chain/
+          # agent-redteam 无缓存。统一 setup-python 内建 cache: pip + 锁文件
+          # 驱动 cache-dependency-path（三 workflow 同口径）。
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
       - name: Install contracts toolchain (PY-178 完整化——hash 锁定单源)
         # PY-178（2026-09-26 审计收尾批）：此前行内 == pin（且 jsonschema/pyyaml
         # 与 requirements-ci 漂移 4.23/6.0.2 vs 4.26/6.0.3）——统一根
         # requirements-ci.txt --require-hashes（传递依赖全 hash 锁定）
         run: python -m pip install --require-hashes -r requirements-ci.txt -q
+      # PY-222（2026-10-01 审计）：发布链验证器 207 项 pytest 此前只在周
+      # cron（legacy-python-guard）跑——tag 发布窗口零 pytest，工具回归不可
+      # 见。接线到常跑契约门禁（PY-221 同批为锁补 cryptography——本步骤
+      # 经 requirements-ci.txt hash 锁一并安装）。
+      - name: Release-chain unit tests (PY-222——tests/python 常跑)
+        run: python -m pytest tests/python -q
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
@@ -78,11 +86,11 @@ jobs:
       run:
         working-directory: core/rust-policy-core
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-052)
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-052)
         with:
           workspaces: core/rust-policy-core
       - name: Run Rust policy and vector conformance tests
@@ -92,21 +100,23 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4 (PY-058)
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.nuget/packages
+          # SP-177（2026-10-01 审计落地）：packages.lock.json 已入库——
+          # 缓存键随锁文件内容失效；下方 build/test 以 RestoreLockedMode 消费。
           key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/**/packages.lock.json') }}
           restore-keys: nuget-${{ runner.os }}-
       - name: Compile Windows broker and generated contracts
-        run: dotnet build windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj --configuration Release
+        run: dotnet build windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj --configuration Release -p:RestoreLockedMode=true
       - name: Test Windows Core domain layer
-        run: dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release
+        run: dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -p:RestoreLockedMode=true
       - name: Test Windows broker authorization lifecycle
-        run: dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release
+        run: dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -p:RestoreLockedMode=true
 
   android-contract-build:
     runs-on: windows-latest
@@ -115,13 +125,20 @@ jobs:
       run:
         working-directory: android
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/setup-java@97c5a5e13aa773f277f72c1287dda3c789f1366c
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: '21'
-          cache: gradle  # PY-062
-      - uses: android-actions/setup-android@035682743ab223ec9c6169af09811dff8247e520
+          # SP-215（2026-10-01 审计）：Gradle 缓存统一 setup-java cache: gradle
+          # 单机制——cache-dependency-path 与 android-quality/release-android
+          # 同源（含 libs.versions.toml，AD-243/SP-184 口径）
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/**
+            android/gradle/libs.versions.toml
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
       - name: Compile Android modules that consume generated contracts

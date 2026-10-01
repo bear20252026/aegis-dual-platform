@@ -25,7 +25,9 @@ dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全
 
 # —— Rust 策略核心 ——
 cd core/rust-policy-core
-cargo test && cargo clippy --all-targets && cargo fmt --check  # 全绿+0 警告
+# SP-183（2026-10-01 审计）：clippy 口径与 CI（core-rust/release-core）统一——
+# --all-features --all-targets -D warnings（测试/bench 目标同受检）
+cargo test && cargo clippy --all-features --all-targets -- -D warnings && cargo fmt --check  # 全绿+0 警告
 
 # —— 契约/版本门禁（仓库根）——
 python validate_release.py             # AST/JSON/XML 静态验证（版本校验在 scripts/verify_versions.py）
@@ -50,8 +52,16 @@ cd android
 # selftest_*.py 仅属该归档栈 P0 通道（WB-118）——正典栈不使用
 cd legacy/windows-pywebview
 ruff check . --exclude legacy           # SP-164：豁免清单已入本目录 ruff.toml 单源
-bandit -r app/ -q --skip B110,B404,B603,B607
-mypy main_webview.py app/                # 全量目录口径（42 源文件 0 错误）
+# SP-185（2026-10-01 审计）：bandit 豁免清单单源 bandit.yaml（PY-156）——
+# 行内 --skip 双源删除，与 legacy-python-guard.yml CI 同口径
+bandit -c bandit.yaml -r app/ -q
+# SP-186（2026-10-01 审计）：mypy 改裸调用（mypy.ini 单源——文件清单/排除项
+# 均在配置内；手写清单已漂移漏 crash_reporter.py 等）
+mypy                                     # 全量目录口径（mypy.ini 单源，0 错误）
+# SP-245（2026-10-01 审计）：活跃树 SAST 在根目录跑 bandit（配置根级
+# bandit.yaml 单源；-ll = Medium/High 门禁）——CI 同口径
+cd ../..
+bandit -c bandit.yaml -r scripts release contracts agent -ll -q
 ```
 
 ## 架构红线（改动前必须确认）
@@ -82,13 +92,20 @@ mypy main_webview.py app/                # 全量目录口径（42 源文件 0 �
 
 - [ ] 改动所涉技术栈的正典门禁全过（WB-118，2026-09-26 审计——按端选择）：
   - C#：`dotnet build`（0 警告）+ `dotnet test` 两套件全绿
-  - Rust：`cargo test && cargo clippy --all-targets && cargo fmt --check` 全绿
+  - Rust：`cargo test && cargo clippy --all-features --all-targets -- -D warnings
+    && cargo fmt --check` 全绿（SP-183 统一口径）
   - Android：四模块 ktlint + detekt + 单测 + `:app:lintDebug`（与 android-quality.yml 一致）
-  - shared/shell：`node --test`（显式文件清单）+ `node shared/shell/snake.test.js` 全绿
+  - shared/shell：`node --test`（目录 glob——SP-163，新增测试文件入目录即入门禁）
+    + `node shared/shell/snake.test.js` 全绿（SP-187：不再称"显式文件清单"）
   - scripts/contracts/release：`python validate_release.py` + `python scripts/verify_versions.py`
     + `python -m pytest tests/python/ -q`
 - [ ] `selftest_*.py` 仅适用 legacy 归档栈 P0 评估通道（正典栈新增逻辑写对应端的
   C#/Kotlin/Node/pytest 测试——WB-118）
+- [ ] agent/catalog 改动过红队门禁：`python -m pytest agent/tests -q` +
+  `python contracts/codegen/verify_agent_catalog.py`（SP-191——与 agent-redteam.yml 同口径）
+- [ ] 依赖/锁文件改动过供应链门禁：requirements-ci.txt 重锁后本地
+  `pip install --require-hashes -r requirements-ci.txt` 可装 + `pip-audit`
+  干净（SP-191——与 supply-chain.yml 同口径）
 - [ ] 遵守单文件单职责与行数红线
 - [ ] 涉及 URL/密码/下载/权限时说明了安全考虑
 - [ ] 更新了 CHANGELOG.md
@@ -105,7 +122,7 @@ mypy main_webview.py app/                # 全量目录口径（42 源文件 0 �
 | `android/broker/` + `android/webview-adapter/` | Android 授权 Broker 与导航状态机 |
 | `contracts/` | 契约单源（schemas/vectors/policy + codegen 生成器） |
 | `shared/` | 双端单源（version.properties/release.json/shell 首页资产） |
-| `docs/audit/` | 全仓审计报告（2026-09-07 200 项、2026-09-23 1115 项） |
+| `docs/audit/` | 全仓审计报告（2026-09-07 200 项、2026-09-23 1115 项、2026-09-26 229 项、2026-10-01 241 项——SP-188 补全台账索引） |
 | `legacy/windows-pywebview/` | 只读归档栈（ADR-009——禁止活跃改动，见红线 #1） |
 
 ## 常见陷阱

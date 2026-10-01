@@ -31,17 +31,25 @@
 | C# | Process.Start（WB-070，审计 2026-09-23 清单·W5 批补行） | 受限（现役仅 DownloadsWindow 以系统默认程序打开用户显式下载完成的文件——无任意命令/参数注入面；新增调用点须评审目标来源） |
 | C# | 原生 FFI（NativeLibrary C-ABI——Rust 策略核心，同批补行） | 受限（仅固定导出集委托绑定 + UTF-8 JSON 协议；解析/ABI 异常一律 fail-closed 拒绝——绝不回退第二套策略实现；NativePolicyCoreBridge SafeHandle 生命周期管理） |
 | Kotlin | 反射（KClass 动态调用） | 受限（webview-adapter 只事件转换——无动态命令） |
+| JS（单源首页 shared/shell） | postMessage/桥消息、动态注入脚本（WB-173，2026-10-01 审计补行） | 受限（首页经 NTP 虚拟主机白名单 origin 服务（NtpBridgeFactory 显式登记 + IsTopLevelNtpDocument 顶层文档门禁）；远程页面 WebMessage 按来源关闭——无动态 eval/Function 注入面；注入脚本三端守卫单源 bridge_guard 对账（ADR-007）） |
 
 ## 依赖与发布安全
 
-- 依赖：requirements-lock（**hash 锁定仅限 Python requirements**——pip-compile
-  --generate-hashes，WB-130，2026-09-26 审计——hash 表述不外推到其他端）+
+- 依赖（SP-192，2026-10-01 审计——双锁源如实口径）：Python 存在**两把 hash 锁**——
+  ① `legacy/windows-pywebview/requirements-lock.txt`（归档栈运行依赖，pip-compile
+  --generate-hashes 产物，仅 legacy-python-guard 消费）；② 根 `requirements-ci.txt`
+  （**活跃工具链锁**——contracts/agent-redteam/supply-chain/发布链验证器经
+  `--require-hashes` 消费，单源输入 `requirements-ci.in`）。hash 锁定仅限 Python
+  requirements（WB-130，2026-09-26 审计——hash 表述不外推到其他端）+
   Cargo.lock（版本锁定）+ supply-chain.yml（pip-audit/cargo audit/SBOM）
 - Android（WB-130，2026-09-26 审计）：Gradle 依赖无 lock 文件——新增/升级依赖须
   在 PR 说明并经 android-quality 门禁；APK 发布前经 apksigner 强制验签
   （release-android.yml fail-closed）
-- C#/.NET（WB-130，2026-09-26 审计）：NuGet 依赖经 packages.lock.json 锁定
-  （CI 缓存键消费）；WebView2 Runtime 为 evergreen 自更新组件——兼容性探测
-  走 WebView2-Compat 定时工作流，安全修复依赖 Edge 发布通道
+- C#/.NET（SP-177，2026-10-01 审计落地）：NuGet 依赖锁文件 `packages.lock.json`
+  已随三个 csproj（`RestorePackagesWithLockFile`）入库——CI restore/publish 以
+  `--locked-mode` 消费，传递依赖变更必须随批更新锁文件（contracts/release-windows/
+  native-policy-artifacts 三处接线）；WebView2 Runtime 为
+  evergreen 自更新组件——兼容性探测走 WebView2-Compat 定时工作流，安全修复依赖
+  Edge 发布通道
 - 发布：release.yml（v* 标签——失败闭合）+ 发布链独立验证（阶段 E 工具）——无 || true/截断验证
 - 更新：signatures[] 阈值 + 防回滚（P0-04/contracts 统一）

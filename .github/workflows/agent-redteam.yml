@@ -1,6 +1,16 @@
 name: Agent-Redteam
 "on":
-  push: {}
+  # SP-200（2026-10-01 审计）：push 补 paths 过滤——此前 push: {} 使 docs 等
+  # 改动也全量跑红队测试。触发面按测试输入圈定（PR 保持不过滤）
+  push:
+    paths:
+      - 'agent/**'
+      # verify_agent_catalog 消费 action catalog 单源
+      - 'contracts/**'
+      # pytest 工具链经 requirements-ci.txt hash 锁安装
+      - 'requirements-ci.in'
+      - 'requirements-ci.txt'
+      - '.github/workflows/agent-redteam.yml'
   pull_request: {}
   workflow_dispatch: {}
 
@@ -17,10 +27,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0 (node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (SP-180 更正注记)
         with:
           python-version: '3.12'
+          # SP-201（2026-10-01 审计）：pip 缓存三口径统一（此前本 workflow
+          # 无缓存——与 contracts/supply-chain 同批收敛为 setup-python 内建
+          # 缓存 + 锁文件驱动键）
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
       - name: Install test deps (PY-178 完整化——hash 锁定单源)
         # SP-171（2026-09-26 审计）：测试执行改单跑 pytest——pytest 一并锁版安装。
         # PY-178 收尾批：行内 == pin 改根 requirements-ci.txt --require-hashes

@@ -2,10 +2,12 @@
 
 - [ ] 改动所涉技术栈的门禁全过：
       C#：dotnet build（0 警告）+ dotnet test 两套件
-      Rust：cargo test && clippy && fmt --check
+      Rust：cargo test && clippy --all-features --all-targets -D warnings && fmt --check（SP-183 统一口径）
       Android：四模块 ktlint + detekt + 单测 + :app:lintDebug
-      shared/shell：node --test（显式清单）+ node shared/shell/snake.test.js
+      shared/shell：node --test（目录 glob——SP-163/187）+ node shared/shell/snake.test.js
       scripts/contracts/release：validate_release.py + verify_versions.py + pytest
+- [ ] agent/catalog 改动过红队门禁：pytest agent/tests + verify_agent_catalog.py（SP-191）
+- [ ] 依赖/锁文件改动过供应链门禁：--require-hashes 可装 + pip-audit 干净（SP-191）
 - [ ] 遵守单文件单职责与行数红线（新文件 ≤300，改造后 ≤500）
 - [ ] 涉及 URL/密码/下载/权限/导航时已说明安全考虑（fail-closed）
 - [ ] 有对应测试/断言入库（tests/ 或对应端测试套件；不为过检弱化断言）
