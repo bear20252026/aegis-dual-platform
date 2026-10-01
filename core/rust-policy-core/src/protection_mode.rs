@@ -38,9 +38,15 @@ impl ProtectionMode {
     /// 通用指纹脚本的免费探测点（读到一个属性就知道该页面有 Aegis 注入，
     /// 防护存在性本身泄漏）。Symbol 属性不出现在任何枚举通道
     /// （Object.keys / for-in / getOwnPropertyNames / JSON.stringify），
-    /// 按名探测落空（须先猜测描述串才可能触达）。经
-    /// `Symbol.for("aegis.protection.mode.v1")` 跨模块共享读取。
-    pub const MODE_SYMBOL: &'static str = "aegis.protection.mode.v1";
+    /// 按名探测落空（须先猜测描述串才可能触达）。
+    ///
+    /// RS-251（2026-10-01 审计）：描述串去品牌化——"aegis." 前缀的描述串
+    /// 本身即品牌指纹标记（getOwnPropertySymbols 列出后按描述串即知防护
+    /// 归属）。与 REGISTER_SYMBOL/ROUTING_SYMBOL/COMMAND_SYMBOL 统一为
+    /// 无品牌前缀形态。残余面（登记口径）：仍用 Symbol.for 注册表 Symbol
+    ///（跨脚本共享键是模式声明的前置契约），探测方可经 `Symbol.for`
+    /// 反查读取**模式值**——模式值可读是前端模式感知的设计意图，非泄漏。
+    pub const MODE_SYMBOL: &'static str = "protection.mode.v1";
 
     /// 从字符串解析保护模式。
     pub fn parse(s: &str) -> Option<Self> {
@@ -71,6 +77,14 @@ impl ProtectionMode {
     }
 
     /// 是否启用 ToStringGuard（Stage 1）。
+    ///
+    /// RS-256（2026-10-01 审计，登记口径）：Compatible 模式**有意**不启用
+    /// 本阶段但仍然注入 canvas 覆盖（Stage 3 全模式启用）——代价是
+    /// Compatible 下 `toDataURL.toString()` 可检出包装（无 ToStringGuard
+    /// 掩护，包装函数的 toString 注册为空转）。这是「网站兼容性最好」
+    /// 模式的既定取舍：Function.prototype.toString 全局包装对旧站点兼容
+    /// 风险最高，故最宽松模式宁可暴露可检测性也不引入全局函数原型改动。
+    /// 残余暴露面在此登记，不视为缺陷；需要掩护时用户应切换 Balanced+。
     pub fn enable_tostring_guard(&self) -> bool {
         matches!(self, Self::Balanced | Self::Maximum)
     }
@@ -226,6 +240,30 @@ mod tests {
         assert!(!m.enable_font_normalizer());
         assert!(!m.enable_timer_precision());
         assert!(!m.enable_ext_proxy());
+        // RS-256（登记口径回归）：Compatible 有意不启用 ToStringGuard 但仍注入
+        // canvas 覆盖——toString 可检出是既定取舍（见 enable_tostring_guard 注释）
+        assert!(!m.enable_tostring_guard());
+    }
+
+    // —— RS-251 回归（审计 2026-10-01）：描述串去品牌化 ——
+
+    #[test]
+    fn mode_symbol_description_is_debranded() {
+        // RS-251：描述串不得携带品牌前缀——描述串本身即探测标记
+        //（getOwnPropertySymbols 列出后按描述定位防护归属）
+        assert_eq!(ProtectionMode::MODE_SYMBOL, "protection.mode.v1");
+        assert!(
+            !ProtectionMode::MODE_SYMBOL.contains("aegis"),
+            "描述串不得含品牌名"
+        );
+        // 与其余三个 Symbol 键统一的无品牌前缀形态
+        for sym in [
+            crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL,
+            crate::space_routing::SpaceRouting::ROUTING_SYMBOL,
+            crate::command_bar::CommandBar::COMMAND_SYMBOL,
+        ] {
+            assert!(!sym.contains("aegis"), "{sym} 不得含品牌名");
+        }
     }
 
     #[test]

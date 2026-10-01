@@ -82,6 +82,15 @@ impl RoutingRule {
 
     /// 检查 URL 是否匹配此规则。
     pub fn matches(&self, url: &str) -> bool {
+        // RS-266（2026-10-01 审计）：单条匹配自行提取 hostname——批量路由
+        // （SpaceRouting::route）改走 matches_precomputed 单次提取复用
+        self.matches_precomputed(url, &extract_hostname(url))
+    }
+
+    /// RS-266：预提取 host 内核——调用方已持有 `url` 的归一化 hostname 时
+    /// 直接传入，免于 N 条 Domain 规则各自重复提取（route 热路径单次提取）。
+    /// 语义与 [`Self::matches`] 完全一致。
+    pub fn matches_precomputed(&self, url: &str, hostname: &str) -> bool {
         if !self.enabled {
             return false;
         }
@@ -97,7 +106,6 @@ impl RoutingRule {
                 if pattern.is_empty() {
                     return false;
                 }
-                let hostname = extract_hostname(url);
                 match hostname.strip_suffix(&pattern) {
                     // prefix 空 = 精确等值；否则必须是「.」边界（子域名）
                     Some(prefix) => prefix.is_empty() || prefix.ends_with('.'),
@@ -167,9 +175,14 @@ impl SpaceRouting {
     /// 根据 URL 路由到目标工作区。
     ///
     /// 返回第一个匹配规则的工作区 ID，无匹配则返回默认工作区。
+    ///
+    /// RS-266（2026-10-01 审计）：hostname 单次提取——N 条规则此前逐条经
+    /// `matches` 内的 extract_hostname 重复提取（每条 Domain 规则一次
+    /// URL 解析 + 分配）；现 route 提取一次传给预提取内核复用。
     pub fn route(&self, url: &str) -> String {
+        let hostname = extract_hostname(url);
         for rule in &self.rules {
-            if rule.matches(url) {
+            if rule.matches_precomputed(url, &hostname) {
                 return rule.workspace_id.clone();
             }
         }
@@ -313,6 +326,39 @@ mod tests {
         assert_eq!(sr.route("https://github.com/repo"), "work");
         assert_eq!(sr.route("https://youtube.com/watch"), "media");
         assert_eq!(sr.route("https://example.com"), "default");
+    }
+
+    // —— RS-266 回归（审计 2026-10-01）：预提取 host 内核 ——
+
+    #[test]
+    fn matches_precomputed_agrees_with_matches() {
+        // RS-266：route 单次提取 hostname 后逐规则复用——内核与公开入口
+        // 语义必须一致（同输入同判定，含子域/禁用/非 Domain 类型）
+        let rule = RoutingRule::domain("Google", "google.com", "search");
+        for url in [
+            "https://www.google.com/search",
+            "https://mail.google.com/inbox",
+            "https://google.com",
+            "https://example.com",
+            "about:blank",
+        ] {
+            let hostname = extract_hostname(url);
+            assert_eq!(
+                rule.matches_precomputed(url, &hostname),
+                rule.matches(url),
+                "预提取内核与公开入口在 {url} 上必须一致"
+            );
+        }
+        // 禁用规则同样一致
+        let mut disabled = RoutingRule::domain("GitHub", "github.com", "work");
+        disabled.enabled = false;
+        assert!(!disabled.matches_precomputed(
+            "https://github.com/repo",
+            &extract_hostname("https://github.com/repo")
+        ));
+        // 非 Domain 类型不消费 hostname（前缀/精确语义照常）
+        let path_rule = RoutingRule::path_prefix("Docs", "https://docs.example.com", "docs");
+        assert!(path_rule.matches_precomputed("https://docs.example.com/api", "irrelevant-host"));
     }
 
     #[test]

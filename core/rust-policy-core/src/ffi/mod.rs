@@ -18,7 +18,9 @@ use std::collections::HashMap;
 // ===== UniFFI 类型包装（Record/Enum）=====
 
 /// FFI 版授权行动（与 decision::AuthorizedAction 字段一致）。
-#[derive(Debug, uniffi::Record)]
+/// RS-268（2026-10-01 审计）：补 serde::Serialize 派生——c_abi 响应直写
+/// 强类型结构（不再构建 Value 树）；字段名（snake_case）与既有 JSON 契约一致。
+#[derive(Debug, serde::Serialize, uniffi::Record)]
 pub struct FfiAuthorizedAction {
     pub session_id: String,
     pub tab_id: String,
@@ -80,7 +82,8 @@ pub struct FfiDenyReason {
 }
 
 /// FFI 版审批请求；确认 UI 必须展示并绑定其完整语义，不能仅信任 origin/method。
-#[derive(Debug, uniffi::Record)]
+/// RS-268：补 serde::Serialize 派生（c_abi 强类型响应直写）。
+#[derive(Debug, serde::Serialize, uniffi::Record)]
 pub struct FfiApprovalRequest {
     pub origin: String,
     pub method: String,
@@ -149,7 +152,12 @@ pub struct FfiCanonicalUrl {
 /// 超长输入直接拒绝，不做任何 O(n) 之后的深解析。
 const MAX_FFI_URL_BYTES: usize = 64 * 1024;
 
-/// FFI URL 入口的 RS-173 前置长度检查（超长返回 None——fail-closed）。
+/// RS-254（2026-10-01 审计）：指纹管线 domain 参数长度上限（字节）——
+/// 与 evaluate_navigation 的 scope / RS-223 会话键 256 同口径。domain 直接
+/// 进入 PerSiteSeed 派生与注入脚本（无上限即任意长 host 串驻留注入产物）。
+const MAX_PIPELINE_DOMAIN_BYTES: usize = 256;
+
+/// RS-173 前置长度检查（超长返回 None——fail-closed）。
 fn ffi_url_length_ok(raw: &str) -> bool {
     !raw.is_empty() && raw.len() <= MAX_FFI_URL_BYTES
 }
@@ -245,13 +253,18 @@ impl From<FfiProtectionMode> for crate::protection_mode::ProtectionMode {
 /// - `session_seed`：64 字符 hex（非法返回空脚本——RS-036 fail-closed）；
 /// - `mode`：保护模式（决定启用的阶段集）；
 /// - `domain`：顶层文档 eTLD+1 域名（PerSiteSeed 按域派生站点种子——
-///   站点间噪声去相关，防跨站 canvas 哈希关联）。
+///   站点间噪声去相关，防跨站 canvas 哈希关联）。RS-254：超 256 字节
+///   返回空脚本（fail-closed——与 scope/会话键同口径上限）。
 #[uniffi::export]
 pub fn build_fingerprint_pipeline_with_mode(
     session_seed: String,
     mode: FfiProtectionMode,
     domain: String,
 ) -> String {
+    // RS-254：domain 长度前置防线（空 domain 为合法退化——等价裸域派生）
+    if domain.len() > MAX_PIPELINE_DOMAIN_BYTES {
+        return String::new();
+    }
     match hex_seed_to_bytes(&session_seed) {
         Some(seed) => crate::protection_mode::fingerprint_pipeline_with_mode(
             &crate::shield::FingerprintShield::from_seed(seed),
@@ -380,6 +393,32 @@ mod hex_seed_tests {
         assert!(script.contains("hardwareConcurrency"));
         assert!(!script.contains("__AEGIS_SITE_SEED"), "不含 per-site 阶段");
         assert!(!script.contains("PRECISION_US"), "不含 TimerPrecision 阶段");
+    }
+
+    // —— RS-254 回归（审计 2026-10-01）：管线 domain 长度上限 ——
+
+    #[test]
+    fn build_pipeline_with_mode_rejects_oversized_domain() {
+        // RS-254：domain 超过 256 字节返回空脚本（fail-closed）——
+        // 与 evaluate_navigation scope / RS-223 会话键同口径
+        let oversized = "a".repeat(MAX_PIPELINE_DOMAIN_BYTES + 1);
+        assert_eq!(
+            build_fingerprint_pipeline_with_mode(
+                "ab".repeat(32),
+                FfiProtectionMode::Maximum,
+                oversized,
+            ),
+            "",
+            "超长 domain 必须空脚本"
+        );
+        // 恰 256 字节放行（边界内侧）
+        let at_cap = "b".repeat(MAX_PIPELINE_DOMAIN_BYTES);
+        assert!(!build_fingerprint_pipeline_with_mode(
+            "ab".repeat(32),
+            FfiProtectionMode::Maximum,
+            at_cap,
+        )
+        .is_empty());
     }
 
     // —— RS-134（审计 2026-09-25）：hex 回归补强 ——

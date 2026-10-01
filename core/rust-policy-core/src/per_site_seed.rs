@@ -89,6 +89,13 @@ impl PerSiteSeed {
     /// 消费**——此前脚本仅 `return` 种子死值（无人消费、无任何防护效果）。
     /// 现在种子驱动 AudioBuffer.getChannelData 的 per-site 确定性微扰：
     /// 音频指纹按站点隔离（Brave 模型），同站点会话内稳定、跨站点/跨会话不同。
+    ///
+    /// RS-241（2026-10-01 审计）：噪声只施加一次——getChannelData 返回的是
+    /// 底层 Float32Array 的**直引用**，此前每次读取都对同一数组再叠加一遍
+    /// 噪声，双读比对（canvas 双读漂移检测的 Audio 孪生）即可检出防护。
+    /// 现按 buffer+channel 首次标记（WeakMap<AudioBuffer, Set<channel>>——
+    /// 键弱引用不阻碍 GC），已加噪的 (buffer, channel) 直接返回原数组，
+    /// 二次读取与首次读到的字节完全一致。
     pub fn inject_script(&self, domain: &str) -> String {
         let site_seed_hex = self.derive_hex(domain);
         // RS-218（2026-09-26 审计）：代理注册接口 Symbol 键单源引用
@@ -101,6 +108,10 @@ impl PerSiteSeed {
 (function() {{
   const __AEGIS_SITE_SEED = '{site_seed_hex}';
 
+  // RS-241：已加噪标记账本——WeakMap 按 buffer 持有 per-channel 集合
+  //（WeakSet 只能持对象，buffer+channel 复合键用 Set<number> 侧挂）
+  var noisedBuffers = new WeakMap();
+
   // RS-028：种子闭包内闭环驱动——AudioBuffer 通道数据 per-site 确定性微扰
   //（LCG 由站点种子播种：同站确定性，跨站/跨会话去相关）
   try {{
@@ -108,10 +119,20 @@ impl PerSiteSeed {
     AudioBuffer.prototype.getChannelData = function(channel) {{
       const data = origGetChannelData.call(this, channel);
       try {{
-        let s = parseInt(__AEGIS_SITE_SEED.slice(0, 8), 16) || 1;
-        for (let i = 0; i < data.length; i += 512) {{
-          s = (s * 1664525 + 1013904223) >>> 0;
-          data[i] = data[i] + (((s >>> 8) % 3) - 1) * 1e-7;
+        // RS-241：首次读取该 (buffer, channel) 才加噪——后续读取返回
+        // 同一（已加噪）数组，双读一致
+        var noisedChannels = noisedBuffers.get(this);
+        if (!noisedChannels) {{
+          noisedChannels = new Set();
+          noisedBuffers.set(this, noisedChannels);
+        }}
+        if (!noisedChannels.has(channel)) {{
+          noisedChannels.add(channel);
+          let s = parseInt(__AEGIS_SITE_SEED.slice(0, 8), 16) || 1;
+          for (let i = 0; i < data.length; i += 512) {{
+            s = (s * 1664525 + 1013904223) >>> 0;
+            data[i] = data[i] + (((s >>> 8) % 3) - 1) * 1e-7;
+          }}
         }}
       }} catch (e) {{}}
       return data;
@@ -244,5 +265,42 @@ mod tests {
         let expected: String = seed.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(pss.derive_hex("example.com"), expected);
         assert_eq!(pss.derive_hex("example.com").len(), 32);
+    }
+
+    // —— RS-241 回归（审计 2026-10-01）：双读一致（噪声只施加一次） ——
+
+    #[test]
+    fn channel_noise_applied_once_per_buffer_channel() {
+        // RS-241：getChannelData 对同一 (buffer, channel) 的二次读取不得
+        // 再叠加噪声——返回直引用 + 首次标记（WeakMap 账本），双读字节一致
+        //（canvas 双读漂移检测的 Audio 孪生向量闭合）
+        let script = PerSiteSeed::new(test_seed()).inject_script("example.com");
+        assert!(
+            script.contains("var noisedBuffers = new WeakMap();"),
+            "已加噪账本必须存在（弱键不阻碍 GC）"
+        );
+        assert!(
+            script.contains("noisedChannels.has(channel)"),
+            "加噪前必须查 (buffer, channel) 首次标记"
+        );
+        assert!(
+            script.contains("noisedChannels.add(channel);"),
+            "加噪后必须登记首次标记"
+        );
+        // 噪声循环必须位于首次标记分支内（条件包裹——非无条件施加）
+        let marker = script
+            .find("if (!noisedChannels.has(channel))")
+            .expect("首次分支");
+        let loop_pos = script
+            .find("for (let i = 0; i < data.length; i += 512)")
+            .expect("噪声循环");
+        let branch_close = script[marker..]
+            .find('}')
+            .map(|i| marker + i)
+            .expect("分支闭合");
+        assert!(
+            marker < loop_pos && loop_pos < branch_close,
+            "噪声循环必须包裹在首次标记分支内（二次读取直接返回原数组）"
+        );
     }
 }

@@ -284,6 +284,36 @@ mod tests {
         ));
     }
 
+    // —— RS-271 回归（审计 2026-10-01）：parse total 向量（fuzz 配套） ——
+
+    #[test]
+    fn parse_is_total_for_hostile_inputs() {
+        // RS-271：fuzz_executor_parse 的固定向量锚点——任意畸形 JSON 不
+        // panic，产出必为三态之一（类型化错误路径）
+        let hostile = [
+            "",
+            "   ",
+            "{",
+            "[][][]",
+            r#"{"command_type":null}"#,
+            r#"{"command_type":123,"target":"x"}"#,
+            r#"{"origin":123}"#,
+            r#"{"parameters":{"k":{"deep":[1,2]}}}"#,
+            "你好",
+            "\u{0}\u{1}\u{7}",
+        ];
+        for input in hostile {
+            let executor = Executor::new();
+            let _ = executor.execute_pipeline(input);
+        }
+        // 深嵌套参数不递归爆炸（serde_json 深度上限 → 类型化错误）
+        let deep = format!(
+            "{{\"command_type\":\"x\",\"target\":\"y\",\"parameters\":{{\"k\":{}}}}}",
+            "[".repeat(200)
+        );
+        let _ = Executor::new().execute_pipeline(&deep);
+    }
+
     // —— RS-097/098 回归（审计 2026-09-25） ——
 
     #[test]

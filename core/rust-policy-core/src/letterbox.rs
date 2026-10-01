@@ -120,45 +120,65 @@ impl LetterboxShield {
   // 覆盖 screen 属性
   // RS-237（2026-09-26 审计）：screen 四属性补 .get 判定——此前仅判
   // descriptor 存在（if (osW)）即调用 osW.get.call(this)，数据属性形态
-  // （get 为 undefined）下页面首读 screen.width 即抛 TypeError；
-  // window 组已是双守卫（if (oX && oX.get)），两组对齐
+  // （get 为 undefined）下页面首读 screen.width 即抛 TypeError。
+  // RS-250（2026-10-01 审计）：原型级替换——此前实例遮蔽
+  // （defineProperty(screen, ...)）可经
+  // Object.getOwnPropertyDescriptor(Screen.prototype, 'width').get.call(screen)
+  // 直取原值（font_norm 口径统一）。保留原 descriptor 的
+  // enumerable/configurable（属性形态对齐原生）
   try {{
     var osW = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'width');
     var osH = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'height');
     var osAW = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'availWidth');
     var osAH = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'availHeight');
-    if (osW && osW.get) Object.defineProperty(screen, 'width', {{ get: function() {{ return roundTo(osW.get.call(this), WS, MW); }} }});
-    if (osH && osH.get) Object.defineProperty(screen, 'height', {{ get: function() {{ return roundTo(osH.get.call(this), HS, MH); }} }});
-    if (osAW && osAW.get) Object.defineProperty(screen, 'availWidth', {{ get: function() {{ return roundTo(osAW.get.call(this), WS, MW); }} }});
-    if (osAH && osAH.get) Object.defineProperty(screen, 'availHeight', {{ get: function() {{ return roundTo(osAH.get.call(this), HS, MH); }} }});
+    if (osW && osW.get) Object.defineProperty(window.Screen.prototype, 'width', {{ get: function() {{ return roundTo(osW.get.call(this), WS, MW); }}, enumerable: osW.enumerable, configurable: osW.configurable }});
+    if (osH && osH.get) Object.defineProperty(window.Screen.prototype, 'height', {{ get: function() {{ return roundTo(osH.get.call(this), HS, MH); }}, enumerable: osH.enumerable, configurable: osH.configurable }});
+    if (osAW && osAW.get) Object.defineProperty(window.Screen.prototype, 'availWidth', {{ get: function() {{ return roundTo(osAW.get.call(this), WS, MW); }}, enumerable: osAW.enumerable, configurable: osAW.configurable }});
+    if (osAH && osAH.get) Object.defineProperty(window.Screen.prototype, 'availHeight', {{ get: function() {{ return roundTo(osAH.get.call(this), HS, MH); }}, enumerable: osAH.enumerable, configurable: osAH.configurable }});
   }} catch(e) {{}}
 
   // 覆盖 window 尺寸属性
+  // RS-250：原型优先、实例兜底——innerWidth 等在部分引擎定义于
+  // Window.prototype（此时实例遮蔽可被原型 getter 绕过），部分引擎为
+  // window 自有 accessor。descriptor 命中哪个定义位就在哪替换，并保留
+  // 原 enumerable/configurable 形态
+  function aegisResolveProp(container, prop) {{
+    var proto = container && container.prototype;
+    if (proto) {{
+      var pd = Object.getOwnPropertyDescriptor(proto, prop);
+      if (pd) return {{ d: pd, target: proto }};
+    }}
+    return {{ d: container ? Object.getOwnPropertyDescriptor(container, prop) : null, target: container }};
+  }}
   try {{
     // 先捕获原始 getter 再覆盖——若 getter 内再读 window.innerWidth，
     // 读到的已是覆盖后的自身，形成无限自递归栈溢出（RangeError）
-    var oIW = Object.getOwnPropertyDescriptor(window, 'innerWidth');
-    var oIH = Object.getOwnPropertyDescriptor(window, 'innerHeight');
-    var oOW = Object.getOwnPropertyDescriptor(window, 'outerWidth');
-    var oOH = Object.getOwnPropertyDescriptor(window, 'outerHeight');
-    if (oIW && oIW.get) Object.defineProperty(window, 'innerWidth', {{ get: function() {{ return roundTo(oIW.get.call(this), WS, MW); }} }});
-    if (oIH && oIH.get) Object.defineProperty(window, 'innerHeight', {{ get: function() {{ return roundTo(oIH.get.call(this), HS, MH); }} }});
-    if (oOW && oOW.get) Object.defineProperty(window, 'outerWidth', {{ get: function() {{ return roundTo(oOW.get.call(this), WS, MW); }} }});
-    if (oOH && oOH.get) Object.defineProperty(window, 'outerHeight', {{ get: function() {{ return roundTo(oOH.get.call(this), HS, MH); }} }});
+    var oIW = aegisResolveProp(window.Window, 'innerWidth');
+    var oIH = aegisResolveProp(window.Window, 'innerHeight');
+    var oOW = aegisResolveProp(window.Window, 'outerWidth');
+    var oOH = aegisResolveProp(window.Window, 'outerHeight');
+    if (oIW.d && oIW.d.get) Object.defineProperty(oIW.target, 'innerWidth', {{ get: function() {{ return roundTo(oIW.d.get.call(this), WS, MW); }}, enumerable: oIW.d.enumerable, configurable: oIW.d.configurable }});
+    if (oIH.d && oIH.d.get) Object.defineProperty(oIH.target, 'innerHeight', {{ get: function() {{ return roundTo(oIH.d.get.call(this), HS, MH); }}, enumerable: oIH.d.enumerable, configurable: oIH.d.configurable }});
+    if (oOW.d && oOW.d.get) Object.defineProperty(oOW.target, 'outerWidth', {{ get: function() {{ return roundTo(oOW.d.get.call(this), WS, MW); }}, enumerable: oOW.d.enumerable, configurable: oOW.d.configurable }});
+    if (oOH.d && oOH.d.get) Object.defineProperty(oOH.target, 'outerHeight', {{ get: function() {{ return roundTo(oOH.d.get.call(this), HS, MH); }}, enumerable: oOH.d.enumerable, configurable: oOH.d.configurable }});
   }} catch(e) {{}}
 
   // RS-079（审计 2026-09-25）：色深与 DPR 同属屏幕指纹面——colorDepth/
-  // pixelDepth 固定 24（Tor 标准口径），DPR 圆整到 0.25 步长
+  // pixelDepth 固定 24（Tor 标准口径），DPR 圆整到 0.25 步长。
+  // RS-250：colorDepth/pixelDepth 同步升级为原型级（原生定义于
+  // Screen.prototype，实例遮蔽可被原型 getter 绕过）
   try {{
     var oCD = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'colorDepth');
-    if (oCD) Object.defineProperty(screen, 'colorDepth', {{ get: function() {{ return 24; }} }});
+    if (oCD) Object.defineProperty(window.Screen.prototype, 'colorDepth', {{ get: function() {{ return 24; }}, enumerable: oCD.enumerable, configurable: oCD.configurable }});
     var oPD = Object.getOwnPropertyDescriptor(window.Screen.prototype, 'pixelDepth');
-    if (oPD) Object.defineProperty(screen, 'pixelDepth', {{ get: function() {{ return 24; }} }});
+    if (oPD) Object.defineProperty(window.Screen.prototype, 'pixelDepth', {{ get: function() {{ return 24; }}, enumerable: oPD.enumerable, configurable: oPD.configurable }});
   }} catch(e) {{}}
   try {{
     var oDPR = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
     if (oDPR && oDPR.get) Object.defineProperty(window, 'devicePixelRatio', {{
-      get: function() {{ return Math.round(oDPR.get.call(this) * 4) / 4; }}
+      get: function() {{ return Math.round(oDPR.get.call(this) * 4) / 4; }},
+      enumerable: oDPR.enumerable,
+      configurable: oDPR.configurable
     }});
   }} catch(e) {{}}
 }})();
@@ -198,10 +218,12 @@ mod tests {
     #[test]
     fn window_override_captures_original_getter() {
         // RS-001 回归：window 属性覆盖必须先捕获原 getter，
-        // 不得在 getter 内再读同名属性（无限自递归栈溢出）
+        // 不得在 getter 内再读同名属性（无限自递归栈溢出）。
+        // RS-250：原型优先解析（aegisResolveProp）后仍以捕获的 descriptor
+        // getter 为准
         let script = LetterboxShield::new().inject_script();
-        assert!(script.contains("getOwnPropertyDescriptor(window, 'innerWidth')"));
-        assert!(script.contains("getOwnPropertyDescriptor(window, 'outerHeight')"));
+        assert!(script.contains("aegisResolveProp(window.Window, 'innerWidth')"));
+        assert!(script.contains("aegisResolveProp(window.Window, 'outerHeight')"));
         // 覆盖体内不允许出现"读覆盖目标自身"的递归形态
         assert!(!script.contains("return roundTo(window.innerWidth"));
         assert!(!script.contains("return roundTo(window.innerHeight"));
@@ -228,12 +250,13 @@ mod tests {
                 "screen override missing guard {guard}"
             );
         }
-        // window 四属性：if (oX && oX.get) 双守卫（descriptor 存在且可读）
+        // window 四属性：if (oX.d && oX.d.get) 双守卫（RS-250：resolve 结构
+        // 携带 descriptor + 定义位目标，守卫形态同步升级）
         for guard in [
-            "if (oIW && oIW.get)",
-            "if (oIH && oIH.get)",
-            "if (oOW && oOW.get)",
-            "if (oOH && oOH.get)",
+            "if (oIW.d && oIW.d.get)",
+            "if (oIH.d && oIH.d.get)",
+            "if (oOW.d && oOW.d.get)",
+            "if (oOH.d && oOH.d.get)",
         ] {
             assert!(
                 script.contains(guard),
@@ -275,6 +298,42 @@ mod tests {
         let script = shield.inject_script();
         assert!(script.contains("100"));
         assert!(script.contains("50"));
+    }
+
+    // —— RS-250 回归（审计 2026-10-01）：原型级替换 ——
+
+    #[test]
+    fn screen_properties_replaced_at_prototype_level() {
+        // RS-250：screen 六属性（width/height/availWidth/availHeight/
+        // colorDepth/pixelDepth）必须在 Screen.prototype 替换——实例遮蔽
+        // （defineProperty(screen, ...)）可经原型 descriptor 的原 getter
+        // 直取原值（font_norm 口径统一）
+        let script = LetterboxShield::new().inject_script();
+        for prop in [
+            "width",
+            "height",
+            "availWidth",
+            "availHeight",
+            "colorDepth",
+            "pixelDepth",
+        ] {
+            assert!(
+                script.contains(&format!(
+                    "Object.defineProperty(window.Screen.prototype, '{prop}'"
+                )),
+                "screen.{prop} 必须原型级替换"
+            );
+        }
+        assert!(
+            !script.contains("defineProperty(screen, '"),
+            "实例遮蔽形态必须全部移除"
+        );
+        // 保留原 descriptor 属性（形态对齐原生）
+        assert!(script.contains("enumerable: osW.enumerable"));
+        assert!(script.contains("configurable: osW.configurable"));
+        // window 组：原型优先、实例兜底（引擎定义位差异兼容）
+        assert!(script.contains("aegisResolveProp(window.Window, 'innerWidth')"));
+        assert!(script.contains("enumerable: oIW.d.enumerable"));
     }
 
     #[test]

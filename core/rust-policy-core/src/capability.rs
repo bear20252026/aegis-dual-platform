@@ -400,4 +400,110 @@ mod tests {
         assert!(old.is_some(), "覆盖必须返回旧 capability");
         assert_eq!(old.unwrap().scope, CapabilityScope::Read);
     }
+
+    // —— RS-269 回归（审计 2026-10-01）：is_origin_allowed 三类边界 ——
+
+    #[test]
+    fn is_origin_allowed_total_for_hostile_inputs() {
+        // RS-271：fuzz_capability_origin 的固定向量锚点——任意 origin 输入
+        // 纯判定不 panic；空白名单恒拒 / "*" 恒放行两不变式
+        let hostile = [
+            "",
+            "*",
+            "https://",
+            "https://*",
+            "https://a@b@c:p/x",
+            "你好.example",
+        ];
+        let long = format!("https://{}.com/", "a".repeat(100_000));
+        let hostile: Vec<&str> = hostile.iter().copied().chain([long.as_str()]).collect();
+        for origin in hostile {
+            let empty = Capability::new("c", CapabilityScope::Execute, vec![], None);
+            assert!(!empty.is_origin_allowed(origin), "空白名单恒拒");
+            let wild = Capability::new("c", CapabilityScope::Execute, vec!["*".into()], None);
+            assert!(wild.is_origin_allowed(origin), "显式 * 恒放行");
+        }
+    }
+
+    #[test]
+    fn origin_allowed_userinfo_url_fail_closed() {
+        // RS-269：userinfo/@ 边界——白名单按 origin 前缀匹配，携带 userinfo
+        // 的完整 URL（https://token@trusted.com/...）不命中裸 origin 白名单
+        // （前缀即不同）。fail-closed 方向：含凭据形态宁可拒绝（调用方应
+        // 先剥 userinfo 再传入 canonical origin）
+        let cap = Capability {
+            name: "cap".into(),
+            scope: CapabilityScope::Execute,
+            allowed_origins: vec!["https://trusted.com".into()],
+            max_uses: None,
+            uses_count: 0,
+        };
+        assert!(
+            !cap.is_origin_allowed("https://token@trusted.com/path"),
+            "userinfo URL 不得命中裸 origin 白名单（fail-closed）"
+        );
+        assert!(
+            !cap.is_origin_allowed("https://user:pass@trusted.com/"),
+            "user:pass@ 形态同样不命中"
+        );
+        // 剥离 userinfo 后的 canonical origin 正常命中（既有口径）
+        assert!(cap.is_origin_allowed("https://trusted.com/path"));
+    }
+
+    #[test]
+    fn origin_allowed_port_variant_fail_closed() {
+        // RS-269：:port 边界——白名单 "https://trusted.com" 对带端口形态
+        // （https://trusted.com:8443）不命中（端口差异即不同 origin，
+        // 边界字符集不含 ':'）。需要放行端口变体必须显式登记该端口条目
+        let cap = Capability {
+            name: "cap".into(),
+            scope: CapabilityScope::Execute,
+            allowed_origins: vec!["https://trusted.com".into()],
+            max_uses: None,
+            uses_count: 0,
+        };
+        assert!(
+            !cap.is_origin_allowed("https://trusted.com:8443/path"),
+            "端口变体不得命中无端口白名单（origin 语义含端口）"
+        );
+        // 显式登记端口条目后命中（含子路径）
+        let cap_port = Capability {
+            name: "cap".into(),
+            scope: CapabilityScope::Execute,
+            allowed_origins: vec!["https://trusted.com:8443".into()],
+            max_uses: None,
+            uses_count: 0,
+        };
+        assert!(cap_port.is_origin_allowed("https://trusted.com:8443/path"));
+        assert!(cap_port.is_origin_allowed("https://trusted.com:8443"));
+        // 裸 origin 不命中带端口条目（对称 fail-closed）
+        assert!(!cap_port.is_origin_allowed("https://trusted.com"));
+    }
+
+    #[test]
+    fn origin_allowed_path_boundary_chars_exact() {
+        // RS-269：路径首字符边界——仅 '/' '?' '#' 开启「origin + 路径」形态；
+        // 其它字符（字母/点/冒号）拼接一律不命中
+        let cap = Capability {
+            name: "cap".into(),
+            scope: CapabilityScope::Read,
+            allowed_origins: vec!["https://trusted.com".into()],
+            max_uses: None,
+            uses_count: 0,
+        };
+        for ok_suffix in ["/path", "?q=1", "#frag"] {
+            assert!(
+                cap.is_origin_allowed(&format!("https://trusted.com{ok_suffix}")),
+                "边界 {ok_suffix} 必须命中"
+            );
+        }
+        for bad in [
+            "https://trusted.com.evil.net",
+            "https://trusted.com:8443",
+            "https://trusted company.com",
+            "https://xtrusted.com",
+        ] {
+            assert!(!cap.is_origin_allowed(bad), "非边界拼接 {bad} 不得命中");
+        }
+    }
 }

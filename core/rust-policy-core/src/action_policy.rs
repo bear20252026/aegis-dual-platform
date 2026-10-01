@@ -134,8 +134,14 @@ pub enum PolicyDecision {
     Ask(String),
 }
 
-/// 条件命中判定：条件串须出现在 token 边界（起点/`/`/`?`/`&`/`=`/`,`/空白之后）。
+/// 条件命中判定：条件串须出现在 token 边界（起点/`/`/`?`/`&`/`=`/`,`/`.`/空白之后）。
 /// 此前裸 contains——条件 "example.com" 被 "https://evil.com/?x=example.com" 命中。
+///
+/// RS-243（2026-10-01 审计）：before 边界集补 `.`——域名形条件（deny
+/// "example.com"）对子域 context（"https://sub.example.com/x"）此前不命中
+///（token 前是 `.`，非边界），Deny 规则在子域上静默失效（fail-open）。
+/// 补 `.` 后 token 按域名粒度命中子域；after 侧不含 `.`（"example.com.evil.net"
+/// 仍不命中——前缀域名不得命中超域 context，方向不对称是有意的）。
 fn context_contains_token(context: &str, token: &str) -> bool {
     if token.is_empty() {
         return false;
@@ -148,7 +154,7 @@ fn context_contains_token(context: &str, token: &str) -> bool {
         let before_ok = abs == 0
             || matches!(
                 ctx[abs - 1],
-                b'/' | b'?' | b'&' | b'=' | b',' | b' ' | b'\t' | b'\n' | b'\r'
+                b'/' | b'?' | b'&' | b'=' | b',' | b'.' | b' ' | b'\t' | b'\n' | b'\r'
             );
         let end = abs + tok.len();
         let after_ok = end == ctx.len()
@@ -260,7 +266,7 @@ mod tests {
 
     #[test]
     fn token_after_separator_matches() {
-        // ? & = / , 空白均为合法前置边界
+        // ? & = / , 空白 均为合法前置边界
         assert!(context_contains_token(
             "https://evil.com/?x=example.com",
             "example.com"
@@ -278,6 +284,58 @@ mod tests {
             "example.com"
         ));
         assert!(context_contains_token("a,b,example.com", "example.com"));
+    }
+
+    // —— RS-243 回归（审计 2026-10-01）：before 边界补 '.' ——
+
+    #[test]
+    fn dot_is_a_valid_before_boundary_for_domain_tokens() {
+        // RS-243：'.' 前置边界——子域 context 中的域名形 token 必须命中
+        //（此前 Deny 条件 "example.com" 对 "https://sub.example.com/x"
+        // 静默失效 = fail-open）
+        assert!(context_contains_token(
+            "https://sub.example.com/x",
+            "example.com"
+        ));
+        assert!(context_contains_token(
+            "https://a.b.example.com/x",
+            "example.com"
+        ));
+        // 反方向不命中：token 后接 '.'（前缀域名）不是 after 边界——
+        // "example.com" 不得命中 "example.com.evil.net"（超域伪装）
+        assert!(!context_contains_token(
+            "https://example.com.evil.net/x",
+            "example.com"
+        ));
+        // 非边界的连字符/字母前缀仍不命中
+        assert!(!context_contains_token(
+            "https://x-example.com/",
+            "example.com"
+        ));
+        assert!(!context_contains_token(
+            "https://notexample.com/",
+            "example.com"
+        ));
+    }
+
+    #[test]
+    fn deny_rule_condition_applies_to_subdomains() {
+        // RS-243 管线级：deny 规则条件 "example.com" 必须对子域 context 生效
+        // ——此前子域上静默放行（Deny 失效）
+        let mut policy = ActionPolicy::new(RuleEffect::Allow);
+        let mut rule = make_rule("deny_evil", "read*", RuleEffect::Deny);
+        rule.condition = Some("evil.com".into());
+        policy.add_rule(rule);
+        // 子域 context → Deny 命中
+        assert!(matches!(
+            policy.evaluate("read", "https://sub.evil.com/page"),
+            PolicyDecision::Deny(_)
+        ));
+        // 无关域不受影响
+        assert!(matches!(
+            policy.evaluate("read", "https://good.example/page"),
+            PolicyDecision::Allow(_)
+        ));
     }
 
     #[test]

@@ -62,4 +62,27 @@ test = false
 doc = false
 bench = false
 
+# RS-271（2026-10-01 审计）：新增 3 个 target——https_only 升级 / capability
+# 白名单判定 / executor 命令解析（照既有 target 模式）
+[[bin]]
+name = "fuzz_https_upgrade"
+path = "fuzz_targets/fuzz_https_upgrade.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_capability_origin"
+path = "fuzz_targets/fuzz_capability_origin.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_executor_parse"
+path = "fuzz_targets/fuzz_executor_parse.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

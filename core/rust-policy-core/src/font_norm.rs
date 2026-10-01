@@ -91,6 +91,9 @@ impl FontNormalizer {
                 .collect();
             format!("[{}]", items.join(","))
         };
+        // RS-242（2026-10-01 审计）：代理注册接口 Symbol 键单源引用
+        //（描述串去品牌化——详见 ToStringGuard::REGISTER_SYMBOL）
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
         format!(
             r#"
 // Aegis FontNormalizer — 字体指纹归一化（参照 Mullvad Browser）
@@ -104,6 +107,10 @@ impl FontNormalizer {
   try {{
     var origCheck = FontFaceSet.prototype.check;
     FontFaceSet.prototype.check = function(font) {{
+      // RS-245（2026-10-01 审计）：入口 String() 强制转换——原生 check 对
+      // 非字符串参数（如 check(123)）coerce 为 "123" 再解析，包装此前直接
+      // font.replace 即抛 TypeError（行为差异本身即探测点）
+      font = String(font);
       // 提取字体族名（忽略大小写和引号）
       var family = font.replace(/['"]/g, '').split(',')[0].trim().toLowerCase();
       // RS-019（审计 2026-09-24）：剥除尺寸/样式前缀——canvas check 传参
@@ -119,6 +126,9 @@ impl FontNormalizer {
       }}
       return false;
     }};
+    // RS-242：注册 ToStringGuard——未注册时 check.toString() 一行暴露包装源码
+    var __aegisReg = window[Symbol.for('{reg_sym}')];
+    if (__aegisReg) __aegisReg(FontFaceSet.prototype.check, origCheck);
   }} catch(e) {{}}
 
   // 覆盖 navigator.fonts（如果存在）
@@ -132,6 +142,9 @@ impl FontNormalizer {
           }});
         }});
       }};
+      // RS-242：注册 ToStringGuard（query 包装同面）
+      var __aegisReg2 = window[Symbol.for('{reg_sym}')];
+      if (__aegisReg2) __aegisReg2(navigator.fonts.query, origQuery);
     }}
   }} catch(e) {{}}
 
@@ -139,14 +152,27 @@ impl FontNormalizer {
   try {{
     var origMeasure = CanvasRenderingContext2D.prototype.measureText;
     CanvasRenderingContext2D.prototype.measureText = function(text) {{
-      // 强制使用安全字体族
       var currentFont = this.font || '';
-      var safeFont = SAFE_FONTS.slice(0, 6).join(', ') + ', sans-serif';
       // RS-018（审计 2026-09-24）：canvas font 是 CSS 简写（"16px Arial"），
       // 不含 "font-family:" 前缀——旧 replace 永不命中（整体 no-op）。
-      // 现解析简写尾部的 family 段并整段替换；解析失败则落到保守默认值
+      // 现解析简写尾部的 family 段；解析失败则落到保守默认尺寸
       var m = /^((?:normal|italic|oblique|bold|small-caps|[1-9]00)\s+)*(\d+(?:\.\d+)?(?:px|pt|pc|in|cm|mm|q|em|rem|ex|ch))(?:\s*\/\s*[\d.]+\S*)?\s+([\s\S]+)$/i.exec(currentFont);
-      var target = m ? (m[2] + ' ' + safeFont) : ('10px ' + safeFont);
+      var familyPart = m ? m[3] : currentFont;
+      var famNorm = familyPart.replace(/['"]/g, '').split(',')[0].trim().toLowerCase();
+      // RS-274（2026-10-01 审计）：SAFE_SET 内的 family 原样测量——此前
+      // 无条件替换为 sans 族，等宽/衬线字体测量系统性偏差（宽度指纹面
+      // 本身失真）；命中安全集不替换
+      if (SAFE_SET.has(famNorm)) {{
+        return origMeasure.apply(this, arguments);
+      }}
+      // RS-274：替换族按当前 family 的通用类选择（等宽/衬线/无衬线），
+      // 不再把 monospace 文本换成 sans 测量
+      var isMono = /\b(monospace|courier|consolas|menlo|dejavu\s*mono)\b/i.test(familyPart);
+      var isSerif = /\b(serif|times|georgia|garamond|book|roman)\b/i.test(familyPart);
+      var safeFont = isMono ? '"Courier New", Courier, monospace'
+                  : isSerif ? '"Times New Roman", Times, serif'
+                  : 'Arial, Helvetica, Verdana, sans-serif';
+      var target = (m ? m[2] : '10px') + ' ' + safeFont;
       // RS-210（2026-09-26 审计）：prevFont 保存 + finally 恢复——此前直接
       // `this.font = ...` 改写且不还原，页面后续所有绘制都被换成安全字体串，
       // 且回读 ctx.font 即检测到防护。JS 单线程保证测量调用外不可观测中间态
@@ -159,9 +185,13 @@ impl FontNormalizer {
         this.font = prevFont;
       }}
     }};
+    // RS-242：注册 ToStringGuard（measureText 包装同面）
+    var __aegisReg3 = window[Symbol.for('{reg_sym}')];
+    if (__aegisReg3) __aegisReg3(CanvasRenderingContext2D.prototype.measureText, origMeasure);
   }} catch(e) {{}}
 }})();
-"#
+"#,
+            fonts_json = fonts_json
         )
     }
 }
@@ -219,19 +249,16 @@ mod tests {
 
     #[test]
     fn measure_text_parses_shorthand_family() {
-        // RS-018：measureText 改为解析 CSS 简写尾部 family 段
+        // RS-018：measureText 改为解析 CSS 简写尾部 family 段；
+        // RS-274：SAFE_SET 命中直接原样测量，未命中按通用类替换
         let script = FontNormalizer::new().inject_script();
         assert!(
             script.contains(r"(?:px|pt|pc|in|cm|mm|q|em|rem|ex|ch)"),
             "measureText 必须按 CSS 简写尺寸单位解析"
         );
         assert!(
-            script.contains("m[2] + ' ' + safeFont"),
-            "解析成功时保留原尺寸段、替换 family 段"
-        );
-        assert!(
-            script.contains("'10px ' + safeFont"),
-            "解析失败时落到保守默认尺寸"
+            script.contains("(m ? m[2] : '10px') + ' ' + safeFont"),
+            "解析成功保留原尺寸段、失败落保守默认尺寸"
         );
     }
 
@@ -264,5 +291,71 @@ mod tests {
             script.contains("} finally {"),
             "恢复必须走 finally（异常路径同样还原）"
         );
+    }
+
+    // —— RS-242/245/274 回归（审计 2026-10-01） ——
+
+    #[test]
+    fn check_coerces_non_string_arguments() {
+        // RS-245：check 入口 String() 强制转换——原生 check(123) coerce 为
+        // "123"，包装此前直接 .replace 抛 TypeError（行为差异即探测点）
+        let script = FontNormalizer::new().inject_script();
+        assert!(
+            script.contains("font = String(font);"),
+            "check 必须先 coerce 非字符串参数"
+        );
+        // coerce 必须先于 replace（首个使用点之前）
+        let coerce = script.find("font = String(font);").expect("coerce");
+        let first_replace = script.find("font.replace(/['\"]/g").expect("replace");
+        assert!(coerce < first_replace, "coerce 必须先于字符串操作");
+    }
+
+    #[test]
+    fn measure_text_passes_safe_set_through() {
+        // RS-274：SAFE_SET 命中的 family 必须原样测量——此前无条件替换为
+        // sans 族，等宽/衬线测量系统性偏差
+        let script = FontNormalizer::new().inject_script();
+        assert!(
+            script.contains("if (SAFE_SET.has(famNorm)) {"),
+            "SAFE_SET 命中分支必须存在"
+        );
+        assert!(
+            script.contains("return origMeasure.apply(this, arguments);\n      }\n      // RS-274"),
+            "命中分支直接走原实现（零改写）"
+        );
+        // 替换表补等宽/衬线（按当前 family 通用类选择替换族）
+        assert!(
+            script.contains("var isMono = /\\b(monospace|courier|consolas|menlo|dejavu\\s*mono)\\b/i.test(familyPart);"),
+            "等宽族探测"
+        );
+        assert!(
+            script.contains("var isSerif = /\\b(serif|times|georgia|garamond|book|roman)\\b/i.test(familyPart);"),
+            "衬线族探测"
+        );
+        assert!(
+            script.contains("\"Courier New\", Courier, monospace"),
+            "等宽替换族"
+        );
+        assert!(
+            script.contains("\"Times New Roman\", Times, serif"),
+            "衬线替换族"
+        );
+    }
+
+    #[test]
+    fn all_wrappers_registered_with_tostring_guard() {
+        // RS-242：check/query/measureText 三个覆盖全部注册 ToStringGuard——
+        // 未注册时 fetch.toString() 一行暴露包装源码（内含品牌特征）
+        let script = FontNormalizer::new().inject_script();
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
+        assert_eq!(
+            script.matches(&format!("Symbol.for('{reg_sym}')")).count(),
+            3,
+            "三个覆盖点各注册一次"
+        );
+        assert!(script.contains("__aegisReg(FontFaceSet.prototype.check, origCheck)"));
+        assert!(script.contains("__aegisReg2(navigator.fonts.query, origQuery)"));
+        assert!(script
+            .contains("__aegisReg3(CanvasRenderingContext2D.prototype.measureText, origMeasure)"));
     }
 }

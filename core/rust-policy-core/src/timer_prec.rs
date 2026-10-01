@@ -74,6 +74,7 @@ impl TimerPrecision {
     /// - `performance.now()` 的 jitter（如果启用）
     /// - `Date.now()` — 圆整到 microseconds（RS-208：恒取整——原生值无小数）
     /// - mark/measure/rAF/getEntries* 家族（RS-074/RS-217）
+    /// - `Event.prototype.timeStamp` 与 `performance.timeOrigin`（RS-244）
     ///
     /// 不覆盖 `new Date()`（构造函数无法安全覆盖），
     /// 但 `Date.now()` 是主要的高精度计时来源。
@@ -110,14 +111,25 @@ impl TimerPrecision {
   try {{
     var origPerfNow = performance.now.bind(performance);
     var wrappedPerfNow = function() {{ return reducePrecision(origPerfNow()); }};
-    // RS-216（2026-09-26 审计）：属性描述符对齐原生——原生 performance.now
-    // 的 writable/configurable 均为 true，双 false 形态可被
-    // getOwnPropertyDescriptor(performance, 'now') 一查即破
-    Object.defineProperty(performance, 'now', {{
-      value: wrappedPerfNow,
-      writable: true,
-      configurable: true
-    }});
+    // RS-216（2026-09-26 审计）：属性描述符对齐原生——双 false 形态可被
+    // getOwnPropertyDescriptor 一查即破。
+    // RS-250（2026-10-01 审计）：原型级替换（保留原 descriptor 属性）——
+    // 此前实例 value 遮蔽可经 Performance.prototype.now.call(performance)
+    // 直取原实现。原型 descriptor 优先，实例形态兜底（引擎定义位差异）
+    var oPN = Object.getOwnPropertyDescriptor(Performance.prototype, 'now');
+    var tgtPN = Performance.prototype;
+    if (!oPN) {{
+      oPN = Object.getOwnPropertyDescriptor(performance, 'now');
+      tgtPN = performance;
+    }}
+    if (oPN) {{
+      Object.defineProperty(tgtPN, 'now', {{
+        value: wrappedPerfNow,
+        writable: oPN.writable,
+        enumerable: oPN.enumerable,
+        configurable: oPN.configurable
+      }});
+    }}
     var reg1 = window[Symbol.for('{reg_sym}')]; if (reg1) reg1(wrappedPerfNow, origPerfNow);
   }} catch(e) {{}}
 
@@ -192,6 +204,49 @@ impl TimerPrecision {
       return origRAF.call(window, function(ts) {{ cb(reducePrecision(ts)); }});
     }};
     var reg5 = window[Symbol.for('{reg_sym}')]; if (reg5) reg5(window.requestAnimationFrame, origRAF);
+  }} catch(e) {{}}
+
+  // RS-244（2026-10-01 审计）：Event.prototype.timeStamp——事件时间戳直取
+  // 宿主内部时钟（不经 JS 可见的 performance.now），仅覆盖 now 拦不住。
+  // 原型级 getter 替换（保留原 descriptor 的 enumerable/configurable——
+  // 属性形态对齐原生，getOwnPropertyDescriptor 一比对齐）
+  try {{
+    var oTS = Object.getOwnPropertyDescriptor(Event.prototype, 'timeStamp');
+    if (oTS && oTS.get) {{
+      var origTS = oTS.get;
+      var wrappedTS = function() {{ return reducePrecision(origTS.call(this)); }};
+      Object.defineProperty(Event.prototype, 'timeStamp', {{
+        get: wrappedTS,
+        enumerable: oTS.enumerable,
+        configurable: oTS.configurable
+      }});
+      var reg6 = window[Symbol.for('{reg_sym}')]; if (reg6) reg6(wrappedTS, origTS);
+    }}
+  }} catch(e) {{}}
+
+  // RS-244：performance.timeOrigin——导航起点是高精度计时指纹的锚点值
+  //（与 now 的差值参与指纹画像）。纯圆整不加 jitter：原生值同页恒定，
+  // 加 jitter 会让两次读取不一致（自身即异常信号）。原型级优先，
+  // 实例形态兜底（引擎间定义位差异）
+  try {{
+    var oTO = Object.getOwnPropertyDescriptor(Performance.prototype, 'timeOrigin');
+    var tgtTO = Performance.prototype;
+    if (!oTO) {{
+      oTO = Object.getOwnPropertyDescriptor(performance, 'timeOrigin');
+      tgtTO = performance;
+    }}
+    if (oTO && oTO.get) {{
+      var origTO = oTO.get;
+      var wrappedTO = function() {{
+        return Math.round(origTO.call(this) / PRECISION_MS) * PRECISION_MS;
+      }};
+      Object.defineProperty(tgtTO, 'timeOrigin', {{
+        get: wrappedTO,
+        enumerable: oTO.enumerable,
+        configurable: oTO.configurable
+      }});
+      var reg7 = window[Symbol.for('{reg_sym}')]; if (reg7) reg7(wrappedTO, origTO);
+    }}
   }} catch(e) {{}}
 }})();
 "#
@@ -317,15 +372,27 @@ mod tests {
 
     #[test]
     fn performance_now_descriptor_matches_native() {
-        // RS-216：performance.now 覆盖的属性描述符必须对齐原生——
-        // 原生 writable/configurable 均为 true，双 false 形态被
-        // getOwnPropertyDescriptor 一查即破
+        // RS-216：performance.now 覆盖的属性描述符必须对齐原生——双 false
+        // 形态被 getOwnPropertyDescriptor 一查即破。
+        // RS-250（2026-10-01 审计）：原型级替换 + 保留原 descriptor 的
+        // writable/enumerable/configurable（实例兜底兼容引擎定义位差异）
         let script = TimerPrecision::new().inject_script();
         assert!(
-            script.contains(
-                "value: wrappedPerfNow,\n      writable: true,\n      configurable: true"
-            ),
-            "performance.now 描述符必须 writable/configurable 双 true"
+            script.contains("Object.getOwnPropertyDescriptor(Performance.prototype, 'now')"),
+            "原型 descriptor 优先探测"
+        );
+        assert!(
+            script.contains("Object.getOwnPropertyDescriptor(performance, 'now')"),
+            "实例形态兜底"
+        );
+        assert!(
+            script.contains("writable: oPN.writable"),
+            "writable 保留原生形态"
+        );
+        assert!(
+            script.contains("enumerable: oPN.enumerable")
+                && script.contains("configurable: oPN.configurable"),
+            "enumerable/configurable 保留原生形态"
         );
         assert!(
             !script.contains("writable: false"),
@@ -346,5 +413,49 @@ mod tests {
             script.contains("aegisRoundEntry(list[i])"),
             "缓冲区条目必须逐个圆整"
         );
+    }
+
+    // —— RS-244 回归（审计 2026-10-01）：timeStamp / timeOrigin 补覆盖 ——
+
+    #[test]
+    fn event_timestamp_rounded_via_prototype_getter() {
+        // RS-244：Event.prototype.timeStamp 必须原型级 getter 替换——
+        // 事件时间戳直取宿主内部时钟，仅覆盖 performance.now 拦不住；
+        // descriptor 属性（enumerable/configurable）保留原生形态
+        let script = TimerPrecision::new().inject_script();
+        assert!(
+            script.contains("Object.getOwnPropertyDescriptor(Event.prototype, 'timeStamp')"),
+            "timeStamp 原型 descriptor 探测"
+        );
+        assert!(
+            script.contains("return reducePrecision(origTS.call(this));"),
+            "timeStamp getter 值经 reducePrecision 圆整"
+        );
+        assert!(
+            script.contains("enumerable: oTS.enumerable"),
+            "timeStamp 覆盖保留原生 enumerable 形态"
+        );
+        // 注册 ToStringGuard（getter 函数对）
+        assert!(script.contains("reg6(wrappedTS, origTS)"));
+    }
+
+    #[test]
+    fn time_origin_rounded_without_jitter() {
+        // RS-244：performance.timeOrigin 圆整——原型级优先、实例兜底；
+        // 纯圆整不加 jitter（原生值同页恒定，jitter 会让双读不一致）
+        let script = TimerPrecision::new().inject_script();
+        assert!(
+            script.contains("Object.getOwnPropertyDescriptor(Performance.prototype, 'timeOrigin')"),
+            "timeOrigin 原型 descriptor 优先探测"
+        );
+        assert!(
+            script.contains("Object.getOwnPropertyDescriptor(performance, 'timeOrigin')"),
+            "timeOrigin 实例形态兜底（引擎定义位差异）"
+        );
+        assert!(
+            script.contains("Math.round(origTO.call(this) / PRECISION_MS) * PRECISION_MS"),
+            "timeOrigin 纯圆整（无 jitter——双读恒定）"
+        );
+        assert!(script.contains("reg7(wrappedTO, origTO)"));
     }
 }

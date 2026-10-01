@@ -12,14 +12,17 @@
 //! 可拼接：通过 `AuditEvent` 与 executor/audit 层对接。
 
 use std::collections::{HashMap, VecDeque};
-use std::time::Instant;
 
 /// 快照记录（副作用执行前后的状态）。
+///
+/// RS-264（2026-10-01 审计）：`captured_at: Instant` 字段已删除——此前只写
+/// 不读（写入 `Instant::now()` 后任何验证/比较路径均不消费），是纯死数据面；
+/// verify 的结论完全由 state_before/state_after 差分决定（确定性契约）。
+/// 需要账龄信息的宿主应在自己的审计层记录时间戳（core 保持无时钟语义）。
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub action_id: String,
     pub session_id: String,
-    pub captured_at: Instant,
     pub state_before: HashMap<String, String>,
     pub state_after: HashMap<String, String>,
 }
@@ -197,7 +200,6 @@ mod tests {
         Snapshot {
             action_id: action.into(),
             session_id: "s1".into(),
-            captured_at: Instant::now(),
             state_before: before
                 .into_iter()
                 .map(|(k, v)| (k.into(), v.into()))

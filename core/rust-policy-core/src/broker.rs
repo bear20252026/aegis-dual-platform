@@ -12,6 +12,7 @@
 //!
 //! 安全管线（evaluate 方法）：
 //!   policy.evaluate(scope, origin) → capability.validate(scope, origin) → session/nonce 验证
+//!   → 全查通过后统一消费（nonce 入账 + capability max_uses 推进，RS-240）
 //!
 //! ⚠️ H-7 审计注记（2026-08-31）：上述三层管线仅在嵌入式宿主直接调用
 //! `ContextBroker::evaluate` 时生效。FFI 导航通路（ffi/broker.rs 的
@@ -169,11 +170,17 @@ impl ContextBroker {
         self.sessions.get(&session_id)
     }
 
-    /// 销毁会话（清理 nonce 记录）。
+    /// 销毁会话。
+    ///
+    /// RS-247（2026-10-01 审计）：不再清理该会话的 nonce 账本记录——此前
+    /// destroy 后同 id 重建（Android renewSession/宿主重注册），被清除的
+    /// 旧 nonce 变得可再次消费（重放窗口：会话身份按 id 判定，nonce 账本
+    /// 却随销毁抹除）。nonce 账本本就由 MAX_CONSUMED_NONCES fail-closed
+    /// 有界（绝不为容量淘汰记录），按会话销毁清理只是冗余的容量优化，
+    /// 却以重放保护为代价——记录保留到账本自然上限。
+    /// 配套回归：nonce_replay_survives_session_recreate。
     pub fn destroy_session(&mut self, session_id: &str) {
         self.sessions.remove(session_id);
-        self.consumed_nonces
-            .retain(|_, r| r.session_id != session_id);
     }
 
     /// RS-158（审计 2026-09-25）：会话 TTL 查询——可观测性 API（宿主
@@ -215,10 +222,16 @@ impl ContextBroker {
         }
     }
 
-    /// 完整安全管线：策略评估 → 能力验证 → 会话/nonce 验证。
+    /// 完整安全管线：策略评估 → 能力验证 → 会话/nonce 验证 + 能力消费。
     ///
     /// 这是修复安全管线断裂的核心方法。之前的 validate_action 只做会话验证，
     /// 现在 evaluate 串联 policy + capability + session 三层检查。
+    ///
+    /// RS-240（2026-10-01 审计）：三层只查不消费——`capabilities.validate`
+    /// 通过后 `max_uses` 永不推进，一次性能力（max_uses=Some(1)）可无限次
+    /// 通过管线，耗尽控制形同虚设。现三层全查通过后统一消费（nonce 先、
+    /// capability 后）；capability 消费失败回退 Deny（防御分支：validate
+    /// 已确认未耗尽且单线程无交错，正常不可达——fail-closed 收口）。
     pub fn evaluate(&mut self, action: &AuthorizedAction) -> Decision {
         // ===== 第 1 层：策略评估 =====
         let verdict = self.policy_engine.evaluate(&action.scope, &action.origin);
@@ -242,14 +255,31 @@ impl ContextBroker {
             }
         }
 
-        // ===== 第 3 层：会话 + nonce 验证 =====
-        // RS-221（2026-09-26 审计）：validate_and_consume 成功路径不再克隆
-        // 整个 AuthorizedAction——三层管线只消费判别；Decision::Allow 的
-        // 载荷在本层（evaluate 出口）按需构造一次
-        match self.validate_and_consume(action) {
-            Ok(()) => Decision::Allow(action.clone()),
-            Err(reason) => Decision::Deny(reason),
+        // ===== 第 3 层：会话 + nonce 验证（查）→ 消费（nonce + capability）=====
+        // RS-221（2026-09-26 审计）：成功路径不克隆整个 AuthorizedAction——
+        // 三层管线只消费判别；Decision::Allow 的载荷在本层（evaluate 出口）
+        // 按需构造一次。
+        // RS-240：先 validate（不消费）再统一消费——消费前全查通过，
+        // 失败路径不留半消费状态（capability 未推进、nonce 未入账）
+        if let Err(reason) = self.validate_action(action) {
+            return Decision::Deny(reason);
         }
+        if let Err(reason) = self.consume_nonce(&action.nonce, &action.session_id) {
+            return Decision::Deny(reason);
+        }
+        // RS-240：能力耗尽推进——validate 已确认未耗尽（同锁窗口内无交错），
+        // 此处消费失败即内部一致性破坏，fail-closed 回退 Deny
+        if !self.capabilities.consume(&action.scope) {
+            return Decision::Deny(DenyReason {
+                code: "capability_consume_failed".into(),
+                detail: format!("能力 {} 消费失败（内部一致性）", action.scope),
+                explanation: format!(
+                    "denied — capability {} consume failed after validation",
+                    action.scope
+                ),
+            });
+        }
+        Decision::Allow(action.clone())
     }
 
     /// 验证 AuthorizedAction 上下文（fail-closed）。
@@ -375,6 +405,9 @@ impl ContextBroker {
     ///
     /// RS-221：成功路径 `Ok(())` 零克隆（FFI consume 侧仅消费判别，
     /// Allow 载荷由调用方按持有的 action 构造）。
+    /// RS-240：三层管线 evaluate 已改为「validate_action + consume_nonce +
+    /// capabilities.consume」分步消费（capability 推进是管线职责）——本方法
+    /// 保留给 FFI consume 侧（仅 nonce 语义，不推进 capability）。
     pub fn validate_and_consume(&mut self, action: &AuthorizedAction) -> Result<(), DenyReason> {
         self.validate_action(action)?;
         self.consume_nonce(&action.nonce, &action.session_id)
@@ -668,7 +701,7 @@ mod tests {
             "策略+能力+会话三层全过必须 Allow，实际 {first:?}"
         );
         assert_eq!(broker.consumed_nonce_count(), 1, "nonce 必须入账");
-        // evaluate 内部走 validate_and_consume——同 nonce 第二次评估重放拒绝
+        // evaluate 内部消费 nonce——同 nonce 第二次评估重放拒绝
         let replay = broker.evaluate(&action);
         match replay {
             Decision::Deny(reason) => assert_eq!(reason.code, "nonce_replay"),
@@ -677,19 +710,108 @@ mod tests {
     }
 
     #[test]
-    fn destroy_session_clears_consumed_nonces() {
-        // RS-043 回归：destroy_session 必须同步清理该会话的 nonce 账本记录；
-        // 其他会话的记录不受影响（retain 精确过滤）
+    fn evaluate_advances_capability_max_uses() {
+        // RS-240（2026-10-01 审计）：三层管线只 validate 不 consume——
+        // max_uses 永不推进，一次性能力可无限次通过。现全查通过后统一
+        // 消费：max_uses=1 的能力第二次（换新 nonce）必须被 capability 层拒
+        let mut registry = CapabilityRegistry::new();
+        registry.register(Capability::new(
+            "navigation:read",
+            CapabilityScope::Read,
+            vec!["*".into()],
+            Some(1),
+        ));
+        let mut broker = ContextBroker::new(
+            "1.0".into(),
+            PolicyEngine::new(Box::new(AlwaysAllowLocalPolicy), None),
+            registry,
+        );
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        // 第一次：全链通过（nonce n1）+ 能力计数推进到 1/1
+        let first = broker.evaluate(&make_action("s1", 1, "n1"));
+        assert!(matches!(first, Decision::Allow(_)), "首次必须放行");
+        // 第二次：新 nonce（非重放）但能力已耗尽——validate 层拒绝
+        let second = broker.evaluate(&make_action("s1", 1, "n2"));
+        match second {
+            Decision::Deny(reason) => {
+                assert_eq!(reason.code, "capability_denied");
+                assert!(
+                    reason.detail.contains("已耗尽") || reason.explanation.contains("exhausted"),
+                    "拒绝文案应指明耗尽：{reason:?}"
+                );
+            }
+            other => panic!("耗尽能力必须拒绝，实际 {other:?}"),
+        }
+        // 无上限能力不受影响（None 永不耗尽——既有口径回归）
+        let mut registry_inf = CapabilityRegistry::new();
+        registry_inf.register(Capability::new(
+            "navigation:read",
+            CapabilityScope::Read,
+            vec!["*".into()],
+            None,
+        ));
+        let mut broker_inf = ContextBroker::new(
+            "1.0".into(),
+            PolicyEngine::new(Box::new(AlwaysAllowLocalPolicy), None),
+            registry_inf,
+        );
+        broker_inf.create_session("s2".into(), "tab-0".into(), 1, Duration::from_secs(3600));
+        for i in 0..3 {
+            assert!(
+                matches!(
+                    broker_inf.evaluate(&make_action("s2", 1, &format!("n{i}"))),
+                    Decision::Allow(_)
+                ),
+                "无上限能力第 {i} 次必须放行"
+            );
+        }
+    }
+
+    #[test]
+    fn destroy_session_keeps_consumed_nonce_records() {
+        // RS-247（2026-10-01 审计）修正 RS-043 口径：destroy_session 不再清理
+        // 该会话的 nonce 账本——按会话抹除记录会让同 id 重建后的旧 nonce
+        // 可重放（会话身份按 id 判定，nonce 一次性语义必须跨销毁/重建保持）。
+        // 账本容量由 MAX_CONSUMED_NONCES fail-closed 有界，无需会话级清理
         let mut broker = make_broker_with_defaults();
         broker.consume_nonce("n1", "s1").unwrap();
         broker.consume_nonce("n2", "s2").unwrap();
         assert_eq!(broker.consumed_nonce_count(), 2);
         broker.destroy_session("s1");
-        assert_eq!(broker.consumed_nonce_count(), 1, "s1 的 nonce 记录应被清除");
-        // n1 记录已清——换个会话重新消费可入账（账本不再含旧记录）
-        assert!(broker.consume_nonce("n1", "s3").is_ok());
-        // s2 的 nonce 记录不受影响——重放依旧拒绝
+        assert_eq!(
+            broker.consumed_nonce_count(),
+            2,
+            "销毁不得抹除已消费 nonce 记录（重放保护跨销毁保持）"
+        );
+        // s1 的旧 nonce 在任何会话名下重放都被拒绝
+        assert!(broker.consume_nonce("n1", "s1").is_err());
+        assert!(broker.consume_nonce("n1", "other").is_err());
+        // s2 的记录不受影响
         assert!(broker.consume_nonce("n2", "s2").is_err());
+    }
+
+    #[test]
+    fn nonce_replay_survives_session_recreate() {
+        // RS-247：同 id 销毁→重建后，旧 nonce 不得可重放——此前 destroy
+        // 清账本使旧 nonce「复活」（会话身份按 id 判定即匹配新会话）
+        let mut broker = make_broker_with_defaults();
+        broker.create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(60));
+        let action = make_action("s1", 1, "old-nonce");
+        assert!(broker.validate_and_consume(&action).is_ok(), "首次消费入账");
+        // 销毁后同 id 重建（renewSession 契约形态）
+        broker.destroy_session("s1");
+        broker
+            .create_session("s1".into(), "tab-0".into(), 1, Duration::from_secs(60))
+            .expect("同 id 重建");
+        // 旧 nonce 在新会话（同 id、同代际）名下重放必须拒绝
+        let replay = broker.validate_and_consume(&action);
+        match replay {
+            Err(reason) => assert_eq!(
+                reason.code, "nonce_replay",
+                "销毁重建后旧 nonce 重放必须拒（此前账本被清而放行）"
+            ),
+            Ok(()) => panic!("旧 nonce 重放不得通过"),
+        }
     }
     #[test]
     fn session_pool_cap_fails_closed() {
