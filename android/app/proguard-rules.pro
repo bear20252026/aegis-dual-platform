@@ -20,14 +20,15 @@
 # JNA 按「方法名」映射 native 符号（aegis_policy_core_broker_*）——
 # R8 混淆 Abi 接口后 System.load 可过但符号查找全部失败 → 静默 null →
 # registerSession fail-closed 崩溃（release minified 专属，debug 不复现）。
-# AD-279（2026-10-01 审计）：JNA 全量 keep（`com.sun.jna.** { *; }` 含全部
-# 内部实现与私有成员）抵消混淆——收窄为「公开类 + 公开成员」（JNA 对外
-# API 面：Native/Library/Pointer/Memory 等经反射触达的公开构造与方法）。
-# com.sun.jna.internal.**（Cleaner 等按类名反射探测的实现类）保持全量：
-# JNA 静态初始化按名字符串加载，成员被剥即运行期 NoSuchMethod。
--keep public class com.sun.jna.** { public *; }
--keep public interface com.sun.jna.** { *; }
--keep class com.sun.jna.internal.** { *; }
+# AD-294（2026-10-02 发布实证，v2.2.0-beta.51 真机闪退）：AD-279 的「公开类 +
+# 公开成员」收窄不成立——JNA 原生库还按名字段访问非公开成员（首个即
+# com.sun.jna.Pointer 的 protected peer 字段：原生侧 GetFieldID("peer","J")），
+# 收窄后 R8 改名 peer → UnsatisfiedLinkError "Can't obtain peer field ID"
+# → 原生核心加载失败 → 必需模式注册会话失败 → 启动即崩（模拟器 x86_64
+# minified release 复现，栈见 AegisBroker/AegisCrash）。JNA 对外 API 与
+# 内部实现均被 JNI 双向按名触达——成员级全量 keep 是该库的正确粒度，
+# 混淆收益（库内部名）不抵运行期风险，恢复 AD-279 前的全量口径。
+-keep class com.sun.jna.** { *; }
 -dontwarn com.sun.jna.**
 -keep interface com.aegis.broker.NativePolicyCoreBridge$NativePolicyCoreAbi { *; }
 -keep class com.aegis.broker.NativePolicyCoreBridge { *; }

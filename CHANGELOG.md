@@ -5,6 +5,12 @@
 > `docs/audit/` 各批次审计与修复日志；相关修复随**下一个正式版本发布时合并
 > 记账**进本文件（保持版本条目与发布制品一一对应，避免无发布实体的空转条目）。
 
+## beta.52（2026-10-02 · Android 启动闪退修复——v2.2.0-beta.51 真机实证）
+> 发布链批 4（模拟器 x86_64 minified release 复现 → 修复 → 复验，AD-294/295/296）。
+- **修复（fatal，Android）**：①AD-279 的 JNA keep 收窄不成立——`com.sun.jna.Pointer.peer`（protected 字段）由原生侧 `GetFieldID` 按名访问，R8 改名后 `UnsatisfiedLinkError: Can't obtain peer field ID` → 原生核心加载失败 → 必需模式注册会话失败 → 启动即崩；恢复 JNA 全量成员 keep（JNI 双向按名触达的库，成员级全量是该库正确粒度）。②AD-003 同族第二例：R8 full mode 折叠 `BrowserViewModel.tabManager` 可空字段的写入/读取错位（AddressAndContent:261 首帧 requireNotNull 即崩）——关闭 `android.enableR8.fullMode` 换发布正确性（minification 保留），代码级精修登记后续批。
+- 验证：模拟器复现崩溃栈（AegisCrash/AegisBroker 留痕 + R8 retrace 精确到源行）→ 修复后同构建通道进程存活、UI 完整渲染；AD-296 登记 release-android 无运行时冒烟门禁的结构缺口（arm64 制品 CI 无法模拟器直测——后续批以同 commit x86_64 冒烟代偿）。
+- Windows/桌面端无代码变更（随版本号重打）。
+
 ## beta.51（2026-10-02 · 2026-10-01 第三轮全仓审计批次合并记账）
 > 完整清单：docs/audit/full-audit-2026-10-01-241-items.md（六路审计 241 项 + 发布链批 7 项 = 248 项登记，闭环 245；CS-334..376 / AD-252..293 / RS-239..274 / PY-216..259 / WB-133..175 / SP-177..221）。
 - **安全 P1×4**：NTP/GeoGebra 虚拟主机映射 Allow→Deny（封死远程页 fetch 指纹探测单点旁路）；Windows canvas 噪声 WebGL 门禁删除 + per-site 种子（RS-206/207 孪生）；Android 尾点 host（`https://localhost./`）整链拒绝（java.net URI/Chromium 归一错位混淆面）；sync_versions 适配 gradle properties 单源接线（此前必抛、版本同步工具不可用）。
