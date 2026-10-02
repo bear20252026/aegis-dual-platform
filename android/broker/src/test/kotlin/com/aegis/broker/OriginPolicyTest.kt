@@ -275,7 +275,8 @@ class OriginPolicyTest {
                 ?: error("找不到共享向量 $fileName（相对仓库根定位失败）")
         val payload = JSONObject(String(Files.readAllBytes(path), Charsets.UTF_8))
         val vectors = payload.getJSONArray("vectors")
-        return (0 until vectors.length()).map { vectors.getJSONObject(it) }
+        return (0 until vectors.length())
+            .map { vectors.getJSONObject(it) }
             .map { it.getString("url") to it.getString("expected") }
     }
 

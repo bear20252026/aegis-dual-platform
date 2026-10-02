@@ -52,6 +52,16 @@ ignore = ["RUF001", "RUF003", "E501", "TRY300", "TRY003", "TRY301", "RUF021", "E
 # "**/selftest_*.py" 同类死条目。若日后 select 扩面纳入 INP001/S101/
 # PLR2004，再按需重加测试豁免（登记在案，非静默接受）。
 
+# RS-277 云端实证（PR #60 四轮）：bindgen 生成物路径级豁免——uniffi 输出
+# 形态不可手改（再生成即覆盖），SIM103/UP032/BLE001 等 47 处均为生成器
+# 风格、与活跃树代码无关；豁免面=本轮 select 面全集（生成物整体退出
+# lint 面，其正确性由 contracts 消费链与绑定漂移门禁保证，非 lint）
+[tool.ruff.lint.per-file-ignores]
+"core/rust-policy-core/bindings/**" = [
+    "E4", "E7", "E9", "F", "I001", "RUF100", "RUF012", "RUF022",
+    "PLW1510", "UP032", "UP045", "SIM103", "SIM208", "BLE001", "PIE790",
+]
+
 # PY-149：pytest 基建（tests/python/ ——发布链离线单测落位）
 [tool.pytest.ini_options]
 # PY-287（2026-10-02 审计）：testpaths 扩 agent/tests——本地一条裸 pytest
