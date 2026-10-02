@@ -143,6 +143,11 @@ impl FingerprintShield {
   // 渲染被破坏）。drawImage(this) 对任意上下文类型的源画布均可用，
   // 离屏副本自取 2d 上下文即可
   (function() {{
+    // RS-292（2026-10-02 审计）：worker 作用域守卫——HTMLCanvasElement 在
+    // worker 未定义，裸引用即抛未捕获 ReferenceError（脚本整体中断，后续
+    // 阶段全部失效）；注册行 try 包（worker 无 window，对齐 per_site_seed
+    // 全 try 口径）
+    if (typeof HTMLCanvasElement === 'undefined') return;
     const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = function(type) {{
       try {{
@@ -170,13 +175,15 @@ impl FingerprintShield {
       }} catch (e) {{}}
       return origToDataURL.apply(this, arguments);
     }};
-  if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](HTMLCanvasElement.prototype.toDataURL, origToDataURL);
+  try {{ if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](HTMLCanvasElement.prototype.toDataURL, origToDataURL); }} catch (e) {{}}
 }})();
 
 // RS-082（审计 2026-09-25）：toBlob 是 canvas 读取的第二通道——仅覆盖
 // toDataURL 时页面走 toBlob 拿到无噪声原图。同型离屏副本 + 噪声
 //（RS-206/207/215 口径与 toDataURL 通道一致）
 (function() {{
+  // RS-292：worker 作用域守卫 + 注册行 try 包（同 toDataURL 块口径）
+  if (typeof HTMLCanvasElement === 'undefined') return;
   const origToBlob = HTMLCanvasElement.prototype.toBlob;
   HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {{
     try {{
@@ -199,7 +206,7 @@ impl FingerprintShield {
     }} catch (e) {{}}
     return origToBlob.call(this, callback, type, quality);
   }};
-  if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](HTMLCanvasElement.prototype.toBlob, origToBlob);
+  try {{ if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](HTMLCanvasElement.prototype.toBlob, origToBlob); }} catch (e) {{}}
 }})();
 
 // RS-082：OffscreenCanvas.convertToBlob 是 worker 侧第三通道——同型防护
@@ -226,7 +233,7 @@ impl FingerprintShield {
     }} catch (e) {{}}
     return origConvert.call(this, options);
   }};
-  if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](OffscreenCanvas.prototype.convertToBlob, origConvert);
+  try {{ if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](OffscreenCanvas.prototype.convertToBlob, origConvert); }} catch (e) {{}}
 }})();
 
 // 音频指纹噪声由 PerSiteSeed（RS-028）负责——按站点隔离，不在此模块重复
@@ -238,6 +245,9 @@ impl FingerprintShield {
 // .get.call(navigator) 直取原值（与 letterbox/font_norm 口径统一为原型级）。
 // 保留原 descriptor 的 enumerable/configurable（属性形态对齐原生）
 (function() {{
+  // RS-292（2026-10-02 审计）：worker 作用域守卫——Navigator 在 worker
+  // 未定义，裸引用即抛未捕获 ReferenceError（脚本整体中断）
+  if (typeof Navigator === 'undefined') return;
   const seed = parseInt(__AEGIS_SESSION_SEED.slice(8, 16), 16);
   var oHC = Object.getOwnPropertyDescriptor(Navigator.prototype, 'hardwareConcurrency');
   if (oHC && oHC.get) {{
@@ -476,5 +486,39 @@ mod tests {
             script.contains("function aegisEtldPlus1("),
             "eTLD+1 提取单源函数"
         );
+    }
+
+    // —— RS-292 回归（2026-10-02）：worker 作用域守卫 ——
+
+    #[test]
+    fn worker_scope_guards_on_all_blocks() {
+        // RS-292：worker 注入守卫——HTMLCanvasElement/Navigator 在 worker
+        // 作用域未定义，裸引用抛未捕获 ReferenceError（脚本整体中断，
+        // 后续阶段全部失效）。各块入口 typeof 守卫 + 注册行 try 包
+        //（对齐 per_site_seed 全 try 口径；worker 无 window）
+        let script = FingerprintShield::from_seed([9u8; 32]).inject_script();
+        assert_eq!(
+            script
+                .matches("if (typeof HTMLCanvasElement === 'undefined') return;")
+                .count(),
+            2,
+            "toDataURL/toBlob 两块 canvas 入口守卫"
+        );
+        assert!(
+            script.contains("if (typeof OffscreenCanvas === 'undefined') return;"),
+            "convertToBlob 块守卫（既有）"
+        );
+        assert!(
+            script.contains("if (typeof Navigator === 'undefined') return;"),
+            "hardwareConcurrency 块守卫"
+        );
+        // 注册行必须 try 包裹（worker 无 window——裸 window 引用同样
+        // ReferenceError）。生成态脚本为单大括号形态（format! 的 {{ 已展开）
+        assert_eq!(script.matches("try {{ if (window[Symbol.for(").count(), 0);
+        let reg_count = script
+            .lines()
+            .filter(|l| l.contains("try { if (window[Symbol.for("))
+            .count();
+        assert_eq!(reg_count, 3, "三处注册行全部 try 包裹");
     }
 }

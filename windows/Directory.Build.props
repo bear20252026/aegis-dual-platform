@@ -1,0 +1,20 @@
+<Project>
+  <!-- CS-415（2026-10-02 审计）：三个 csproj 逐字相同的公共属性单源化到本文件
+       ——此前各自维护（改动漏一处即口径漂移）。仅上提完全一致项：
+       Version/AssemblyVersion/FileVersion 绝不上提（scripts/sync_versions.py
+       按各 csproj 正则回写）；各工程差异项（UseWPF/LangVersion/
+       EnableWindowsTargeting/ImplicitUsings/IsPackable/OutputType 等）留在原处。 -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <!-- SP-177（2026-10-01 审计）：NuGet 锁文件——锁定直接+传递依赖可审计
+         （CONTRIBUTING/SECURITY 此前声称有锁文件而全仓无一处生成）。
+         packages.lock.json 随仓库提交；CI restore 的 locked-mode 由发布链接线 -->
+    <!-- SP-220：锁含 RID（win-x64）——restore/build/test 必须带 -r win-x64 与锁一致，
+         否则 locked-mode 报 NU1004；无 -r 的裸 restore 会把锁改写回无 RID 形态 -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <!-- CS-413（2026-10-02 审计）：警告即错误——三工程统一置 true
+         （基线 0 警告；出现新警告必须修根因，不允许 #pragma 压制） -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>

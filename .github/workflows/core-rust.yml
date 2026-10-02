@@ -5,9 +5,18 @@ name: Core-Rust
     # 全量跑 cargo 门禁（PR 触发面保持不过滤）
     paths:
       - 'core/**'
+      # SP-236（2026-10-02 审计·S-32）：cargo-audit composite action 是本
+      # workflow 的门禁组成部分——action 自身变更须回验（PR 面已覆盖，此处
+      # 补 push 触发面）
+      - '.github/actions/cargo-audit/**'
       - '.github/workflows/core-rust.yml'
   pull_request: {}
   workflow_dispatch: {}
+  # SP-240（RS-309/I-05，2026-10-02 审计）：weekly schedule 供 fuzz-build-smoke
+  # job（仅 schedule + dispatch 触发；push/PR 不跑——见该 job 的 if 门控与
+  # cargo-gate 的 schedule 排除）
+  schedule:
+    - cron: "0 2 * * 1"            # 每周一 02:00 UTC
 
 permissions:
   contents: read
@@ -19,6 +28,9 @@ concurrency:
   cancel-in-progress: true
 jobs:
   cargo-gate:
+    # SP-240：schedule 触发仅供 fuzz-build-smoke——常跑 cargo 门禁不在
+    # weekly 定时里重复（push/PR/dispatch 行为不变）
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -54,3 +66,35 @@ jobs:
           nm -D target/release/libaegis_policy_core.so | grep -F ' T aegis_policy_core_abi_version'
       # PY-171（2026-09-23 审计·V1 核验批）：安装+执行块收敛为 composite action 单源
       - uses: ./.github/actions/cargo-audit
+
+  # SP-240（RS-309/I-05，2026-10-02 审计）：fuzz 编译性每周冒烟——fuzz/
+  # target 此前零 CI 覆盖（cargo fuzz 不入常规 test/clippy/fmt 门禁），上游
+  # 依赖升级或核心 API 漂移直到有人手跑 cargo fuzz 才暴露。本 job 每周验证
+  # 9 target 编译性（不执行 fuzzing——编译性即足以暴露 API/依赖漂移）。
+  # 触发面：仅 schedule + workflow_dispatch（push/PR 不跑，常跑门禁时长不变）；
+  # continue-on-error: false 显式声明——失败即红。
+  fuzz-build-smoke:
+    name: cargo fuzz build（9 target 编译性每周验证）
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    continue-on-error: false
+    defaults:
+      run:
+        working-directory: core/rust-policy-core
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
+        with:
+          # cargo-fuzz 的 sanitizer 插桩依赖 nightly 编译器能力
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: core/rust-policy-core
+      - name: Install cargo-fuzz (版本钉 0.13.2——升级随 weekly 批显式 bump)
+        # 钉版安装（--locked）保证每周冒烟口径可复现；升级走显式版本 bump
+        run: cargo install cargo-fuzz --version 0.13.2 --locked
+      - name: cargo fuzz build（编译全部 fuzz target——不执行）
+        # fuzz/ 为独立 crate（自带 Cargo.lock）；不加 --locked——fuzz 依赖树
+        # 允许随安装解算，编译失败即为门禁信号
+        run: cargo fuzz build

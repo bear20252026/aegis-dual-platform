@@ -9,7 +9,6 @@
 """
 
 import argparse
-import hashlib
 import json
 import re
 import sys
@@ -21,6 +20,11 @@ from pathlib import Path
 # release/ 目录（同 release/tools/verify_manifest.py:18 的模式）。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify_checksum_json import verify_manifest
+from write_checksum_json import sha256_file  # PY-264：流式哈希单源（见下方注记）
+
+# PY-264（2026-10-02 审计）：.txt 回退路径的哈希重算复用 write_checksum_json
+# 的流式 sha256_file 单源（1MiB 分块）——此前 hashlib.sha256(read_bytes())
+# 把整个制品读进内存，core 平台大体积 .so 制品在验证机上内存放大
 
 # PY-199（2026-09-26 审计）：build_metadata.py 本地运行时写入的降级哨兵——
 # 一旦本脚本接线，truthy 的哨兵值会被当有效溯源证据通过（证据弱化）。
@@ -67,7 +71,8 @@ def _verify_checksum_txt(dist: Path, txt_path: Path) -> int:
         target = dist / rel
         if not target.is_file():
             sys.exit(f"SHA256SUMS.txt 条目文件缺失: {rel}（拒绝发布）")
-        actual = hashlib.sha256(target.read_bytes()).hexdigest()
+        # PY-264：流式重算（sha256_file 返回大写 hex——清单侧已 lower 归一）
+        actual = sha256_file(target).lower()
         if actual != digest:
             sys.exit(f"SHA256SUMS.txt 哈希不符: {rel}（清单 {digest[:12]}… vs 实际 {actual[:12]}…——拒绝发布）")
     # ③ 文件集双向对账（清单自身自排除——与 CI 生成口径一致）。

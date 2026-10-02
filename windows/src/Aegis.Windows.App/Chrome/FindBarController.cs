@@ -91,13 +91,22 @@ public sealed class FindBarController
         ", false, " + (backwards ? "true" : "false") + ", true);";
 
     /// <summary>命中计数脚本（纯函数）：同步 IIFE 表达式——ExecuteScriptAsync
-    /// 直接返回其值（数字），无 Promise 形态。innerText 非重叠计数，异常回 0。
-    /// 空查询防护：indexOf('') 恒命中且步进为 0 会死循环，前置长度短路。</summary>
+    /// 直接返回其值（数字），无 Promise 形态。空查询防护：indexOf('') 恒命中
+    /// 且步进为 0 会死循环，前置长度短路。
+    /// CS-408（2026-10-02 审计）：计数改只统计可视文本节点（TreeWalker 遍历
+    /// + getComputedStyle 过滤 display:none/visibility:hidden）——此前用
+    /// innerText（含隐藏文本：visibility:hidden 仍占盒仍被序列化），而
+    /// window.find 的高亮仅落在可视文本上（计数 ≥ 高亮数，"3 处"却只见 2 处
+    /// 高亮）。取舍登记：非块级溢出裁剪（overflow 折叠区域）不逐节点判定
+    /// （成本不成比例），该形态下计数仍为上界。</summary>
     public static string BuildCountJs(string query)
     {
         var q = System.Text.Json.JsonSerializer.Serialize(query);
-        return "(function(){try{var m=(document.body&&document.body.innerText)||'';" +
-               "var n=0,i=0,Q=" + q + ";if(Q.length){while((i=m.indexOf(Q,i))!==-1){n++;i+=Q.length;}}" +
+        return "(function(){try{var Q=" + q + ";if(!Q.length||!document.body)return 0;" +
+               "var n=0;var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null,false);" +
+               "var t;while((t=w.nextNode())){var el=t.parentElement;if(!el)continue;" +
+               "var cs=window.getComputedStyle(el);if(cs.display==='none'||cs.visibility==='hidden')continue;" +
+               "var m=t.data||'';var i=0;while((i=m.indexOf(Q,i))!==-1){n++;i+=Q.length;}}" +
                "return n;}catch(e){return 0;}})()";
     }
 }

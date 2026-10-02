@@ -73,6 +73,58 @@ public sealed class HistoryImporterTests : IDisposable
         Assert.Empty(store.Recent(10));
     }
 
+    // ===== CS-399（2026-10-02 审计）：批量导入（单连接+事务+周期修剪） =====
+
+    [Fact]
+    public void ImportTo_WritesLargeBatchInSingleCall()
+    {
+        // 此前逐条 Add（每条新开 SQLite 连接）——批量接口一次写入全量
+        var store = new HistoryStore(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+        var candidates = Enumerable.Range(0, 300)
+            .Select(i => new HistoryCandidate($"页{i}", $"https://batch.example/{i}"))
+            .ToList();
+
+        var (imported, total) = HistoryImporter.ImportTo(store, candidates);
+
+        Assert.Equal(300, imported);
+        Assert.Equal(300, total);
+        Assert.Equal(300, store.Recent(500).Count);
+    }
+
+    [Fact]
+    public void ImportBatch_SkipsBlankUrls_AndCountsTotalSeparately()
+    {
+        // 空白 URL 跳过写入但计入解析总数（与既有 ImportTo 契约一致）
+        var store = new HistoryStore(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
+
+        var (imported, total) = HistoryImporter.ImportTo(store,
+        [
+            new HistoryCandidate("A", "https://a.example"),
+            new HistoryCandidate("B", "   "),
+            new HistoryCandidate("", ""),
+        ]);
+
+        Assert.Equal(1, imported);
+        Assert.Equal(3, total);
+        Assert.Single(store.Recent(10));
+    }
+
+    [Fact]
+    public void ImportBatch_BoundedByMaxRows_PeriodicPrune()
+    {
+        // 批内周期修剪（每 256 条同 Add 口径）+ 尾部收口——注入小阈值直测
+        var store = new HistoryStore(
+            Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()), maxRows: 10, pruneEveryAdds: 4);
+        var candidates = Enumerable.Range(0, 30)
+            .Select(i => new HistoryCandidate($"页{i}", $"https://prune.example/{i}"))
+            .ToList();
+
+        var imported = store.ImportBatch(candidates.Select(c => (c.Url, c.Title)));
+
+        Assert.Equal(30, imported);          // 写入全部成功
+        Assert.Equal(10, store.Recent(50).Count);  // 修剪后不超 maxRows
+    }
+
     [Theory]
     [InlineData(0, 1)]       // CS-096：下界钳 1
     [InlineData(-5, 1)]

@@ -1,14 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- CS-415（2026-10-02 审计）：TargetFramework/Nullable/
+       RestorePackagesWithLockFile（含 SP-177/SP-220 注释）与
+       TreatWarningsAsErrors 已单源化到 windows/Directory.Build.props -->
   <PropertyGroup>
-    <TargetFramework>net10.0-windows</TargetFramework>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
-    <!-- SP-177（2026-10-01 审计）：NuGet 锁文件（与 App 同批启用，提交入库） -->
-    <!-- SP-220：锁含 RID（win-x64）——restore/build/test 必须带 -r win-x64 与锁一致，
-         否则 locked-mode 报 NU1004；无 -r 的裸 restore 会把锁改写回无 RID 形态 -->
-    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
@@ -20,6 +17,17 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../src/Aegis.Windows.App/Aegis.Windows.App.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- CS-418（2026-10-02 审计）：contracts 向量跨语言消费（C# 侧）——
+         url-origin 有效/无效向量复制到输出目录，UrlOriginVectorTests
+         逐条断言 UrlSafety/OriginPolicy 判定与向量一致 -->
+    <None Include="..\..\..\contracts\vectors\url-origin-valid.json"
+          Link="contracts\vectors\url-origin-valid.json"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\contracts\vectors\url-origin-invalid.json"
+          Link="contracts\vectors\url-origin-invalid.json"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />

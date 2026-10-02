@@ -11,6 +11,13 @@ signing.properties
 # 的签名步骤在 RUNNER_TEMP 解出 aegis-codesign.pfx；本地签名流程同样会产出
 # pfx。与 *.jks/*.p12 同组的凭据红线，此前缺该条目（误加即凭据入库）。
 *.pfx
+# SP-248（2026-10-02 审计·S-25）：VS/IDE 本地产物与日志——凭据红线相邻区
+# 一并登记（.vs/ 含本地缓存与配置；*.user/*.suo 为用户级工程状态；*.log
+# 可能含本机路径/环境信息，一律不入库）
+.vs/
+*.user
+*.suo
+*.log
 
 # skylos 工具输出目录（报告归档于 docs/quality-reports/，此处不重复入库）
 .skylos/
@@ -49,12 +56,11 @@ core/rust-policy-core/fuzz/target/
 # Legacy Python (只读归档——不参与现役构建)
 # SP-095/096（审计 2026-09-23 清单·SP1 批）：legacy/windows-pywebview/build/
 # 被 **/build/ 覆盖、legacy/windows-pywebview/__pycache__/ 被 __pycache__/
-# 覆盖——两条子集冗余规则删除（dist/ 无全局规则，保留）。
-# SP-133（审计 2026-09-23 清单·SP1 批）核实修正：崩溃报告仅由 legacy 归档栈
-# 的 crash_reporter.py 产出（实际落盘 legacy/crash_reports/，已在本组）——
-# 原指向不存在写入方的 windows/crash_reports/ 死规则删除。
+# 覆盖——两条子集冗余规则删除。
+# SP-229（2026-10-02 审计·S-12）：legacy/windows-pywebview/dist/ 子集行删除
+# ——dist/ 为全局规则（上方"构建产物"组），SP-095 注记"dist/ 无全局规则，
+# 保留"已失实；SP-133 核实修正（crash_reports 落盘面）不受影响。
 legacy/crash_reports/
-legacy/windows-pywebview/dist/
 
 # ── 仓库卫生修正（新增：此前未覆盖、已随历史提交入库的构建/交付产物）──
 # .NET 生成产物（obj/bin——覆盖 windows 与评审包镜像；Rust 的 src/bin 为真实源码，不受影响）

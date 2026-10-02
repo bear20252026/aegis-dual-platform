@@ -100,6 +100,66 @@ public sealed class HistoryStore
     /// LIMIT 负值语义为"无上限"，此前 limit<=0 直接进 SQL（无界返回/无界内存）。</summary>
     private static int ClampLimit(int limit) => Math.Max(1, limit);
 
+    /// <summary>CS-399（2026-10-02 审计）：批量导入——单连接 + 事务 + 每 256 条
+    /// 修剪（与 Add 的 PruneEveryAdds 同口径）。此前 HistoryImporter.ImportTo
+    /// 逐条调 Add（每条新开 SQLite 连接再关闭；千条导入即千次连接建立）。
+    /// 返回真实写入条数（空白 URL 跳过）；磁盘异常吞掉并回滚（导入是可选
+    /// 功能——异常时事务整体回滚，无半批状态）。</summary>
+    public int ImportBatch(IEnumerable<(string Url, string Title)> rows)
+    {
+        var written = 0;
+        try
+        {
+            using var connection = Open();
+            using var transaction = connection.BeginTransaction();
+            using var insert = connection.CreateCommand();
+            insert.Transaction = transaction;
+            insert.CommandText = """
+                INSERT INTO visits(url, title, visited_at, visited_date)
+                VALUES($u,$t,$v,$d)
+                """;
+            var urlParam = insert.Parameters.Add("$u", SqliteType.Text);
+            var titleParam = insert.Parameters.Add("$t", SqliteType.Text);
+            var atParam = insert.Parameters.Add("$v", SqliteType.Text);
+            var dateParam = insert.Parameters.Add("$d", SqliteType.Text);
+            var counter = 0;
+            foreach (var (url, title) in rows)
+            {
+                if (string.IsNullOrWhiteSpace(url))
+                    continue;
+                var now = DateTime.Now;
+                urlParam.Value = ClampText(url, MaxUrlChars);
+                titleParam.Value = ClampText(title ?? string.Empty, MaxTitleChars);
+                atParam.Value = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+                // CS-089：InvariantCulture——部分文化默认日历会把 yyyy 漂移
+                dateParam.Value = now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+                insert.ExecuteNonQuery();
+                written++;
+                if (++counter % _pruneEveryAdds == 0)
+                    PruneWithinBatch(connection, transaction);
+            }
+            PruneWithinBatch(connection, transaction);  // 尾部收口（对齐 _maxRows）
+            transaction.Commit();
+            return written;
+        }
+        catch (Exception ex)
+        {
+            Security.SecurityLog.Write(
+                $"[history] 批量导入失败（事务回滚，无半批状态）: {ex.GetType().Name}: {ex.Message}");
+            return 0;
+        }
+    }
+
+    /// <summary>CS-399：批内有界保留修剪（与 Add 的周期修剪同一条 SQL）。</summary>
+    private void PruneWithinBatch(Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction)
+    {
+        using var prune = connection.CreateCommand();
+        prune.Transaction = transaction;
+        prune.CommandText = "DELETE FROM visits WHERE id NOT IN (SELECT id FROM visits ORDER BY id DESC LIMIT $max)";
+        prune.Parameters.AddWithValue("$max", _maxRows);
+        prune.ExecuteNonQuery();
+    }
+
     /// <summary>CS-319：代理对安全截断（emoji 等增补平面字符不劈成孤立代理）。
     /// 提 internal 供直测；CS-369 起实现单源在 Core.TextLimits.Clamp。</summary>
     internal static string ClampText(string text, int maxChars) =>
@@ -143,6 +203,28 @@ public sealed class HistoryStore
         return ReadEntries(reader);
     }
 
+    /// <summary>按 URL 子串查询（时间倒序）。
+    /// CS-401（2026-10-02 审计）：建议控制器消费口径单源——此前其 SQL 侧用
+    /// Search（url OR title 双列命中），MergeRows 又只保留 URL 命中行，标题
+    /// 命中的行白白查询传输；按 ChromeControllersTests 锁定的「历史仅 URL
+    /// 命中」口径在 SQL 侧收窄。LIKE 大小写语义与 Search 相同（仅 ASCII
+    /// 不区分——非 ASCII 精确匹配）。</summary>
+    public IReadOnlyList<HistoryEntry> SearchByUrl(string query, int limit = 200)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return Recent(limit);
+        using var connection = Open();
+        using var select = connection.CreateCommand();
+        select.CommandText = """
+            SELECT id, url, title, visited_at, visited_date FROM visits
+            WHERE url LIKE $q ESCAPE '\' ORDER BY visited_at DESC, id DESC LIMIT $lim
+            """;
+        select.Parameters.AddWithValue("$q", $"%{HistoryFilter.LikeEscape(query)}%");
+        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
+        using var reader = select.ExecuteReader();
+        return ReadEntries(reader);
+    }
+
     /// <summary>指定日期（yyyy-MM-dd，本地时区）的访问，时间倒序。</summary>
     public IReadOnlyList<HistoryEntry> ByDate(string date, int limit = 500)
     {
@@ -158,7 +240,11 @@ public sealed class HistoryStore
         return ReadEntries(reader);
     }
 
-    /// <summary>全部有记录的日期（yyyy-MM-dd，倒序）——供 UI 日期筛选下拉。</summary>
+    /// <summary>全部有记录的日期（yyyy-MM-dd，倒序）——供 UI 日期筛选下拉。
+    /// CS-397（2026-10-02 审计）：生产零调用（历史窗口改为页码式分页后本
+    /// 方法不再被 UI 消费）——保留原因与 CS-313 口径一致：作为库层日期
+    /// 聚合查询的既有公共面，删除属 API 收窄，须与消费方一起决策；注明
+    /// 保留避免误判为遗漏清理。</summary>
     public IReadOnlyList<string> Dates(int limit = 90)
     {
         using var connection = Open();

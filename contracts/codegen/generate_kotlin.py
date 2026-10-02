@@ -107,6 +107,17 @@ def enum_constant_lines(schema: dict, name: str) -> list[str]:
                            for v in p["enum"])
         elif "const" in p:
             entries.append((f"{_upper_snake(pname)}", p["const"], describe_value_domain(p)))
+    # PY-289（2026-10-02 审计）：常量名派生（值归一 upper_snake）无去重——
+    # 不同 enum 值（如 "a-b" 与 "a_b"）归一后撞名产生重复常量（Kotlin 编译
+    # 错 redeclaration）。生成前查重，撞名 fail-closed 抛 ValueError（与
+    # generate_csharp 同口径——提示改 enum 值或属性名）。
+    seen_constants: set[str] = set()
+    for const_name, _value, _domain in entries:
+        if const_name in seen_constants:
+            raise ValueError(
+                f"enum 常量名撞名: {const_name}（{name} 的属性/值经 upper_snake "
+                "归一后同名——改 enum 值或属性名后重新生成——fail-closed）")
+        seen_constants.add(const_name)
     if not entries:
         return []
     lines = [
@@ -217,7 +228,13 @@ def main() -> int:
     for f in sorted(SCHEMAS.glob("*.json")):
         if f.name in SKIP_SCHEMAS:
             continue
-        schema = json.loads(f.read_text(encoding="utf-8"))
+        # PY-288（2026-10-02 审计）：schema 文件坏 JSON/不可读此前裸栈——
+        # 干净报告 + return 1（与 generate_csharp 同口径）
+        try:
+            schema = json.loads(f.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"  ❌ schema 读取/解析失败: {f.name}: {exc}")
+            return 1
         name = contract_name(f)
         # PY-232（2026-10-01 审计）：write_text 显式 newline="\n"（同
         # generate_csharp——防 Windows 重生成 CRLF 漂移、git diff 假红）

@@ -207,11 +207,15 @@ test("初始得分为 0", () => {
 });
 
 test("最高分初始加载", () => {
+  // WB-192（2026-10-02 审计）：原用例零断言恒过——补 loadBest 双向断言
+  //（本用例位于 __test 钩子解构之前，直接经 Snake.__test 引用）
   mockStorage["snakeBest"] = "42";
   Snake.open();
-  // loadBest 在 open 中调用
+  assert.strictEqual(Snake.__test.best(), 42, "open 必须 loadBest 读入盘上最高分");
+  assert.strictEqual(elements["snakeBest"].textContent, "42", "最高分 chip 同步显示");
   mockStorage["snakeBest"] = null;  // 清理
   Snake.open();
+  assert.strictEqual(Snake.__test.best(), 0, "盘上无值时必须归 0（不得残留内存值）");
 });
 
 test("连续 open/close 10 次不崩溃（生命周期压力）", () => {
@@ -505,7 +509,10 @@ function loadFreshModule(opts) {
         textContent: "",
         style: { display: "", width: "", height: "" },
         classList: { add: () => {}, remove: () => {} },
-        addEventListener: () => {},
+        // WB-191（2026-10-02 审计）：记录元素级监听——静音开关 click 切换
+        // 路径此前无法从桩驱动（addEventListener 为 no-op）
+        _handlers: {},
+        addEventListener(t, f) { (els[id]._handlers[t] = els[id]._handlers[t] || []).push(f); },
         _attrs: {},
         setAttribute(n, v) { this._attrs[n] = String(v); },
         getAttribute(n) { return n in this._attrs ? this._attrs[n] : null; },
@@ -573,6 +580,74 @@ test("WB-151 __test 条件注入：未声明测试标志时钩子不得挂载", 
     "open/close 公共 API 不受测试标志影响");
   assert.doesNotThrow(() => { prod.Snake.open(); prod.Snake.close(); },
     "无钩子形态下 open/close 生命周期必须照常");
+});
+
+// ═══ WB-177/186/191（2026-10-02 审计）补充用例 ═══
+
+// WB-177：persistBest 盲写内存 best——同页旧实例（内存 best 陈旧）后关
+// 会把新实例落盘的最高分回退覆盖。写前读盘取 max 后只升不降
+test("WB-177 persistBest 跨实例：写前读盘取 max——旧实例后关不得回退最高分", () => {
+  const storage = {};
+  const stale = loadFreshModule({ testFlag: true, storage: storage });  // 旧实例：加载时盘上无值 → 内存 best=0
+  stale.Snake.open();
+  const fresh = loadFreshModule({ testFlag: true, storage: storage });  // 新实例（共享同一 localStorage）
+  fresh.Snake.open();
+  const head = fresh.Snake.__test.body()[0];
+  fresh.Snake.__test.setFood(head.x + 1, head.y);
+  fresh.Snake.__test.step();                     // 新实例推进到 10 分
+  fresh.Snake.close();                           // 落盘 10
+  assert.strictEqual(storage["snakeBest"], "10", "新实例关闭必须落盘 10");
+  stale.Snake.close();                           // 旧实例（内存 best=0）后关
+  assert.strictEqual(storage["snakeBest"], "10",
+    "旧实例后关必须取盘上 max——不得以陈旧内存 best 回退已落盘最高分");
+});
+
+// WB-186：Space/Enter 此前被全局监听抢占 preventDefault——聚焦按钮无法
+// 键盘原生激活（音效开关/关闭/出发等）
+test("WB-186 聚焦按钮 Space 放行：不得抢占按钮原生激活", () => {
+  const fresh = loadFreshModule({ testFlag: true });
+  fresh.Snake.open();
+  const handlers = fresh.listeners["keydown"] || [];
+  assert.ok(handlers.length >= 1, "前提：document keydown 守卫已注册");
+  let prevented = false;
+  handlers.forEach((fn) => fn({
+    key: " ", target: { tagName: "BUTTON" },
+    preventDefault() { prevented = true; },
+  }));
+  assert.strictEqual(fresh.Snake.__test.state(), "start",
+    "按钮聚焦时 Space 必须放行——不得触发 primaryAction（出发/暂停）");
+  assert.strictEqual(prevented, false,
+    "放行路径不得 preventDefault（按钮原生激活依赖默认行为）");
+  // 对照：焦点不在按钮上时 Space 仍归游戏消费
+  const fresh2 = loadFreshModule({ testFlag: true });
+  fresh2.Snake.open();
+  let prevented2 = false;
+  (fresh2.listeners["keydown"] || []).forEach((fn) => fn({
+    key: " ", target: { tagName: "CANVAS" },
+    preventDefault() { prevented2 = true; },
+  }));
+  assert.strictEqual(fresh2.Snake.__test.state(), "play",
+    "非按钮目标 Space 仍归游戏（start 态 → 出发）");
+  assert.strictEqual(prevented2, true, "游戏消费路径保持 preventDefault（防页面滚动）");
+});
+
+// WB-191：静音偏好往返零覆盖——盘上 '1' 打开须呈静音态，切换写回 '0'
+test("WB-191 静音偏好往返：盘上 '1' 打开呈静音态，点击切换写回 '0'", () => {
+  const fresh = loadFreshModule({ testFlag: true, storage: { snakeMuted: "1" } });
+  fresh.Snake.open();
+  const snd = fresh.els["snakeSound"];
+  assert.strictEqual(snd.textContent, "🔇", "盘上静音偏好必须在打开时生效");
+  assert.strictEqual(snd._attrs["aria-pressed"], "true",
+    "静音态 aria-pressed 必须同步（WB-046 打开复位路径）");
+  // 驱动 DOMContentLoaded 注册 + 点击切换
+  (fresh.listeners["DOMContentLoaded"] || []).forEach((fn) => fn());
+  const clickHandlers = snd._handlers.click || [];
+  assert.ok(clickHandlers.length >= 1, "音效开关必须接线 click 切换");
+  clickHandlers.forEach((fn) => fn({ stopPropagation() {} }));
+  assert.strictEqual(fresh.storage["snakeMuted"], "0", "切换必须写回 storage '0'");
+  assert.strictEqual(snd.textContent, "🔊", "切换后图标复原");
+  assert.strictEqual(snd._attrs["aria-pressed"], "false",
+    "切换后 aria-pressed 同步复位");
 });
 
 console.log(`\n=== 结果: ${passed} 通过, ${failed} 失败 ===\n`);

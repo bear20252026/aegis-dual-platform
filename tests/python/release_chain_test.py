@@ -83,6 +83,40 @@ class TestPrereleaseLeadingZeroRejected:
         assert _version_tuple("1.0.0-alpha.beta.1") == _version_tuple("1.0.0-alpha.beta.1")
 
 
+# ---------------------------------------------------------------- PY-279
+class TestSemverEmptyIdentifierRejected:
+    def test_empty_identifier_segments_rejected(self):
+        # PY-279（2026-10-02 审计）：预发布/构建段此前 [0-9A-Za-z.-]+ 接受
+        # 空标识符——"2.2.0-beta."（尾点）/"2.2.0-beta..1"（连续点）/
+        # "2.2.0-.beta"（首点）均为非法 SemVer 却过门。改 dot 分隔非空
+        # 标识符序列后必须拒绝（schema version.pattern 同步收紧）
+        for bad in ("2.2.0-beta.", "2.2.0-beta..1", "2.2.0-.beta",
+                    "2.2.0+build.", "2.2.0+build..1", "2.2.0+.build",
+                    "1.0.0-.", "1.0.0+."):
+            with pytest.raises(UpdateRejected):
+                _version_tuple(bad)
+
+    def test_dot_separated_nonempty_identifiers_still_accepted(self):
+        # PY-279 正向回归：合法 dot 分隔形态不受影响（含连字符标识符内点）
+        for good in ("2.2.0-beta.21", "2.2.0-beta.52", "1.0.0-alpha-beta.1",
+                     "1.0.0+build.5", "2.2.0"):
+            assert _version_tuple(good) == _version_tuple(good)
+
+    def test_schema_pattern_in_sync_with_verifier(self):
+        # PY-279 单源锁定：contracts/schemas/update-manifest.schema.json 的
+        # version.pattern 与 _version_tuple 拒绝面一致（空标识符形态双拒）
+        import re as _re
+        schema_text = (Path(__file__).resolve().parents[2]
+                       / "contracts" / "schemas" / "update-manifest.schema.json"
+                       ).read_text(encoding="utf-8")
+        doc = json.loads(schema_text)
+        pattern = _re.compile(doc["properties"]["version"]["pattern"])
+        for bad in ("2.2.0-beta.", "2.2.0-beta..1", "2.2.0-.beta", "2.2.0+build."):
+            assert not pattern.fullmatch(bad), f"schema 放行了空标识符形态: {bad}"
+        for good in ("2.2.0-beta.52", "1.0.0", "1.0.0+build.5"):
+            assert pattern.fullmatch(good)
+
+
 def _write(path, content: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(content)
@@ -142,6 +176,20 @@ class TestVerifyArtifactSet:
         _write(tmp_path / "windows" / "a.zip", b"x")
         failures = verify_artifact_set(tmp_path, self._manifest(["nope"]))
         assert any("非对象条目" in f for f in failures)
+
+    def test_non_hex_sha_rejected_as_invalid_entry(self, tmp_path):
+        # PY-280（2026-10-02 审计）：sha 此前只验长度不验 hex——64 个非十六
+        # 进制字符（"g"*64 / 空白）被当有效哈希入账（对账必「哈希不符」但
+        # 报错误导读）。现 fullmatch hex——非十六进制串直接判无效条目
+        _write(tmp_path / "windows" / "a.zip", b"x")
+        failures = verify_artifact_set(tmp_path, self._manifest([
+            {"platform": "windows-x64", "url": "https://c/a.zip", "sha256": "g" * 64}]))
+        assert any("manifest 工件条目无效" in f for f in failures)
+        # 大小写 hex 均合法（小写进 expected 时归一 lower 比对）
+        lower = self._manifest([
+            {"platform": "windows-x64", "url": "https://c/a.zip",
+             "sha256": hashlib.sha256(b"x").hexdigest()}])
+        assert verify_artifact_set(tmp_path, lower) == []
 
     # ---------------------------------------------------- SP-144 空集恒真
     def test_empty_manifest_fails_even_with_empty_dist(self, tmp_path):
@@ -214,6 +262,24 @@ class TestVerifyReleaseSentinel:
         from verify_release import verify_bundle
         self._write_dist(tmp_path, self._metadata())
         with pytest.raises(SystemExit, match="SHA256SUMS"):
+            verify_bundle(tmp_path)
+
+    def test_full_checksums_without_sbom_exits(self, tmp_path):
+        # PY-283（2026-10-02 审计）：完整 SHA256SUMS.json（覆盖 dist 全部文件
+        # 且哈希正确）+ 无 SBOM → SystemExit「缺 SBOM」（供应链透明门禁——
+        # 此前该分支零直接用例，只被平铺布局用例间接触达）
+        from verify_release import verify_bundle
+        self._write_dist(tmp_path, self._metadata())
+        payload = tmp_path / "dist" / "app.exe"
+        payload.write_bytes(b"payload")
+        manifest = [
+            {"Path": rel, "Hash": hashlib.sha256((tmp_path / "dist" / rel).read_bytes())
+             .hexdigest().upper()}
+            for rel in ("app.exe", "build-metadata.json")
+        ]
+        (tmp_path / "dist" / "SHA256SUMS.json").write_text(
+            json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(SystemExit, match="缺 SBOM"):
             verify_bundle(tmp_path)
 
     # ------------------------------------------------ RS-N1 布局兼容
@@ -469,11 +535,38 @@ class TestVerifyProvenanceTool:
         (tmp_path / "b.msi").write_bytes(b"y")
         assert run_provenance(tmp_path, self.OWNER, self.WORKFLOW) == []
 
+    def test_signer_workflow_identity_pinned_in_command(self, tmp_path, monkeypatch):
+        # SP-143（2026-10-01 审计）：gh attestation verify 必须固定 signer 身份
+        #（--owner + --signer-workflow——reusable workflow 必需），缺失即任意
+        # workflow 的 attestation 均可通过。PY-284 接线：本用例是
+        # signer_identity_mismatch 向量的反射锚点。
+        cmds: list[list[str]] = []
+
+        def _run(cmd, **kwargs):
+            cmds.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        (tmp_path / "a.exe").write_bytes(b"x")
+        assert run_provenance(tmp_path, self.OWNER, self.WORKFLOW) == []
+        assert len(cmds) == 1
+        # 命令行逐段锚定：owner 与 signer_workflow 均以旗标值对传入 gh
+        cmd = cmds[0]
+        assert cmd[:2] == ["gh", "attestation"]
+        owner_idx = cmd.index("--owner")
+        assert cmd[owner_idx + 1] == self.OWNER
+        wf_idx = cmd.index("--signer-workflow")
+        assert cmd[wf_idx + 1] == self.WORKFLOW
+        assert "--predicate-type" in cmd
+
     def test_main_exit_codes(self, tmp_path, monkeypatch, capsys):
         # 三退出码语义：用法 2 / 失败 1 / 通过 0
+        # PY-286：argparse 必填 positional——缺参以 SystemExit(2) 抛出
         import verify_provenance as vp
         monkeypatch.setattr(sys, "argv", ["verify_provenance.py", "dist", "owner"])
-        assert vp.main() == 2  # 参数不足
+        with pytest.raises(SystemExit) as excinfo:
+            vp.main()
+        assert excinfo.value.code == 2  # 参数不足
         monkeypatch.setattr(sys, "argv", ["verify_provenance.py",
                                           str(tmp_path / "ghost"), self.OWNER, self.WORKFLOW])
         assert vp.main() == 1  # dist 缺失 → 失败
@@ -489,20 +582,32 @@ class TestVerifyProvenanceTool:
 # SP1 批（审计 2026-09-23 清单）：release/test-vectors/release-verify.json 的
 # 8 条发布验证向量此前零执行消费者——落为元一致性门禁：向量集与实现面的
 # 映射锁定，任何新增/删除向量都必须同步接线实现，否则本门禁红。
+# PY-284（2026-10-02 审计）：IMPLEMENTED 由纯文案改为 (module, attr_path)
+# 二元组——原描述性字符串无锚定（测试改名/删除后文案静默失实）。
+# test_no_orphan_implementations 以 getattr 反射逐条断言载体可解析。
 class TestReleaseVerifyVectorsMetaGate:
     VECTORS = Path(__file__).resolve().parents[2] / "release" / "test-vectors" / "release-verify.json"
 
-    # 向量 case → 实现载体（工具分支/单测类）——映射本身即"执行消费者"
+    # 向量 case → 实现载体 (模块, 属性路径)——映射本身即"执行消费者"
     # RUF012：映射是门禁常量——显式 ClassVar（非可变实例默认）
-    IMPLEMENTED: ClassVar[dict[str, str]] = {
-        "missing_artifact": "verify_artifact_set 缺失工件分支（release_chain_test.TestVerifyArtifactSet.test_missing_detected）",
-        "hash_mismatch": "verify_artifact_set 哈希不符分支（release_chain_test.TestVerifyArtifactSet.test_hash_mismatch_detected）",
-        "unlisted_artifact": "verify_artifact_set 双向集合相等分支（release_chain_test.TestVerifyArtifactSet.test_unlisted_artifact_rejected）",
-        "rollback_version": "update_verifier 防回滚分支（release_tools_test.TestVerifyUpdateManifest.test_rollback_rejected）",
-        "threshold_insufficient": "update_verifier 阈值分支（release_tools_test.TestVerifyUpdateManifest.test_threshold_unmet_rejected）",
-        "sbom_missing": "发布门禁 SBOM 分支（verify_release.verify_bundle——SHA256SUMS/SBOM 缺失拒绝）",
-        "provenance_missing": "verify_provenance 失败分支（release_chain_test.TestVerifyProvenanceTool.test_nonzero_returncode_attaches_stderr_summary）",
-        "signer_identity_mismatch": "verify_provenance --signer-workflow 固定身份分支（SP-143 接线面）",
+    IMPLEMENTED: ClassVar[dict[str, tuple[str, str]]] = {
+        "missing_artifact": (
+            "release_chain_test", "TestVerifyArtifactSet.test_missing_detected"),
+        "hash_mismatch": (
+            "release_chain_test", "TestVerifyArtifactSet.test_hash_mismatch_detected"),
+        "unlisted_artifact": (
+            "release_chain_test", "TestVerifyArtifactSet.test_unlisted_artifact_rejected"),
+        "rollback_version": (
+            "release_tools_test", "TestVerifyUpdateManifest.test_rollback_rejected"),
+        "threshold_insufficient": (
+            "release_tools_test", "TestVerifyUpdateManifest.test_threshold_unmet_rejected"),
+        "sbom_missing": (
+            "release_chain_test", "TestVerifyReleaseSentinel.test_full_checksums_without_sbom_exits"),
+        "provenance_missing": (
+            "release_chain_test",
+            "TestVerifyProvenanceTool.test_nonzero_returncode_attaches_stderr_summary"),
+        "signer_identity_mismatch": (
+            "release_chain_test", "TestVerifyProvenanceTool.test_signer_workflow_identity_pinned_in_command"),
     }
 
     def test_vector_file_shape(self):
@@ -525,3 +630,15 @@ class TestReleaseVerifyVectorsMetaGate:
         doc = json.loads(self.VECTORS.read_text(encoding="utf-8"))
         vector_cases = {v["case"] for v in doc["vectors"]}
         assert set(self.IMPLEMENTED) == vector_cases
+        # PY-284：载体反射锚定——(module, attr_path) 必须解析到真实对象
+        #（测试改名/删除/文案漂移即本断言红——纯文案时代的静默失实消除）
+        import importlib
+        for case, (module_name, attr_path) in self.IMPLEMENTED.items():
+            module = sys.modules.get(module_name) or importlib.import_module(module_name)
+            target: object = module
+            for part in attr_path.split("."):
+                target = getattr(target, part, None)
+                assert target is not None, (
+                    f"向量 {case} 的实现载体不可解析: {module_name}.{attr_path}"
+                    "（测试已改名/删除？先更新映射再动测试——fail-closed）")
+            assert callable(target), f"载体必须是可调用测试: {module_name}.{attr_path}"

@@ -44,10 +44,12 @@ class MainActivity : ComponentActivity() {
     private val viewModel: BrowserViewModel by viewModels { BrowserViewModel.factory(application) }
 
     /**
-     * AD-283（2026-10-01 审计）：外链 VIEW intent 消费频控窗口（毫秒）——
-     * 第三方应用高频 intent 打断面；显式用户外链的单次意图间隔远大于此值。
+     * AD-302（2026-10-02 审计）：外链频控状态机抽独立类（原时间戳字段内联于
+     * onNewIntent，不可 JVM 单测）。AD-283 语义不变 + 修复：data=null 或
+     * action≠VIEW 的 intent 不烧频控窗口（原实现判 intent.data 前推进时间戳
+     * ——空 intent 也会打断面）。
      */
-    private var lastExternalIntentConsumedAt = 0L
+    private val externalIntentRateLimit = ExternalIntentRateLimit(EXTERNAL_INTENT_MIN_INTERVAL_MS)
 
     private companion object {
         /** AD-283：外链 intent 最小消费间隔（毫秒）。 */
@@ -84,13 +86,16 @@ class MainActivity : ComponentActivity() {
         // AD-197（审计 2026-09-23 清单·A7 批）：冷启动装配时序固化（次序即
         // 契约，不得重排）——
         //   ① init：TabManager 必须先就位（openExternalUrl 的导航链路依赖
-        //      当前标签 WebView；init 内 `if (::tabManager.isInitialized) return`
-        //      幂等，配置变更重建时安全直通）；
+        //      当前标签 WebView；init 内可空字段判空 `if (tabManager != null)
+        //      return` 幂等——AD-003 R8 回归起 lateinit 判空已改可空字段口径，
+        //      配置变更重建时安全直通）；
         //   ② attachActivity：宿主弱引用随后注入（P0-6 崩溃重建需要主题化
         //      Activity context，晚于 init 只损失「init 当刻即崩溃」的极端窗口）；
         //   ③ openExternalUrl：最后消费冷启动外链——此时安全导航链路（策略
         //      决策 + 防抖 + 错误上抛）才具备完整前提，外链不会被静默丢弃。
-        viewModel.init(this)
+        // AD-326（2026-10-02 审计）：init 透传 savedInstanceState——进程被杀
+        // 重建时恢复标签会话（tab.url 列表 + activeIndex，经安全导航链重载）。
+        viewModel.init(this, savedInstanceState)
         viewModel.attachActivity(this)
         viewModel.openExternalUrl(intent?.data?.toString())
 
@@ -125,6 +130,8 @@ class MainActivity : ComponentActivity() {
         val pendingConfirmation by viewModel.pendingNavigationConfirmation.collectAsStateWithLifecycle()
         val pageError by viewModel.pageError.collectAsStateWithLifecycle()
         val readerContent by viewModel.reader.content.collectAsStateWithLifecycle()
+        // AD-331：待确认下载（二级——仅查询参数命中危险扩展）
+        val pendingDownload by viewModel.pendingDownloadConfirmation.collectAsStateWithLifecycle()
         // AD-064：前进/后退可用性
         val canGoBack by viewModel.canGoBack.collectAsStateWithLifecycle()
         val canGoForward by viewModel.canGoForward.collectAsStateWithLifecycle()
@@ -133,10 +140,14 @@ class MainActivity : ComponentActivity() {
         // 至多呈现一个对话框（优先级见 MainDialogs.resolveActiveDialog）。
         MainDialogHost(
             pendingConfirmation = pendingConfirmation,
+            pendingDownload = pendingDownload,
             webViewAlert = webViewAlert,
             readerContent = readerContent,
             onApprove = { viewModel.approvePendingNavigationConfirmation() },
             onReject = { viewModel.rejectPendingNavigationConfirmation() },
+            // AD-331：二级下载确认（批准继续入队/拒绝放弃）
+            onApproveDownload = { viewModel.approvePendingDownload() },
+            onRejectDownload = { viewModel.rejectPendingDownload() },
             onDismissAlert = { viewModel.setWebViewAlert(null) },
             onGoUpdate = {
                 viewModel.setWebViewAlert(null)
@@ -296,16 +307,31 @@ class MainActivity : ComponentActivity() {
         // 浏览（页面被顶替）。窗口期内（[EXTERNAL_INTENT_MIN_INTERVAL_MS]）
         // 的重复 intent 静默丢弃（显式用户外链不受影响——单次意图本就间隔
         // 远大于窗口）。
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (now - lastExternalIntentConsumedAt < EXTERNAL_INTENT_MIN_INTERVAL_MS) {
+        // AD-302（2026-10-02 审计）：频控窗口只被「可消费」的 intent 烧
+        // ——data=null 或 action≠VIEW 的 intent 不进频控判定（原实现判 data
+        // 前推进时间戳，空 intent 也打断面）。
+        val externalUrl = intent.data?.toString()
+        val consumable = !externalUrl.isNullOrBlank() && intent.action == Intent.ACTION_VIEW
+        if (consumable &&
+            !externalIntentRateLimit.tryAcquire(android.os.SystemClock.elapsedRealtime(), consumable)
+        ) {
             android.util.Log.w("Aegis", "外链 VIEW intent 超频被丢弃（AD-283 频控）")
             return
         }
-        lastExternalIntentConsumedAt = now
         // P1-4 修复（全面审计批次4）：热启动外链消费——launchMode 调整或
         // singleTop 复用时 VIEW intent 经此分发；与 onCreate 冷启动路径
         // 同走 openExternalUrl 安全链路。
-        viewModel.openExternalUrl(intent.data?.toString())
+        viewModel.openExternalUrl(externalUrl)
+    }
+
+    /**
+     * AD-326（2026-10-02 审计）：标签会话持久化——tab.url 列表 + activeIndex
+     * （仅 https）写入 outState；init 检测 savedInstanceState 恢复。配置
+     * 变更重建（configChanges 已声明项之外的变更）与进程被杀同走本路径。
+     */
+    override fun onSaveInstanceState(outState: android.os.Bundle) {
+        super.onSaveInstanceState(outState)
+        viewModel.writeSessionState(outState)
     }
 
     override fun onDestroy() {
@@ -344,5 +370,34 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // AD-006 对称恢复：resumeTimers + 恢复当前标签（后台标签保持挂起）
         viewModel.getTabManager()?.resumeOnForeground()
+    }
+}
+
+/**
+ * AD-302（2026-10-02 审计）：外链 VIEW intent 消费频控状态机（纯 Kotlin——
+ * JVM 可测）。AD-283 语义：窗口期内的重复消费静默丢弃；AD-302 修复：
+ * 非可消费 intent（data=null / action≠VIEW）不烧窗口——此前时间戳在判
+ * data 前推进，空 intent 也会把后续真实外链挡在窗口外。
+ *
+ * 单线程约束：仅主线程（onNewIntent）调用，与 BrowserViewModel 草稿标记
+ * 同口径（无原子类型加重语义）。
+ */
+internal class ExternalIntentRateLimit(
+    private val minIntervalMs: Long,
+) {
+    private var lastConsumedAt = 0L
+
+    /**
+     * 尝试获取消费资格。[hasConsumableIntent]=false 恒 false 且不推进（不烧窗口）；
+     * 冷启动（lastConsumedAt=0）首个可消费 intent 豁免窗口；窗口期内重复消费 false。
+     */
+    fun tryAcquire(
+        now: Long,
+        hasConsumableIntent: Boolean,
+    ): Boolean {
+        // AD-302 冷启动豁免（锚点 0=未曾消费）——detekt ReturnCount 重构曾丢失该豁免（云端实证）。
+        val acquirable = hasConsumableIntent && (lastConsumedAt == 0L || now - lastConsumedAt >= minIntervalMs)
+        if (acquirable) lastConsumedAt = now
+        return acquirable
     }
 }

@@ -26,6 +26,17 @@ FIXTURE_DIRS = [
 ]
 
 
+def _expected_values(text: str) -> list[str]:
+    """提取 README 全部 expected 声明值。
+
+    PY-285（2026-10-02 审计）：捕获改 "([^"]+)"——原 [a-z_]+ 被末尾引号
+    锚定，含连字符/数字/大小写的值（如 "allow-v2"）整个不进捕获——零断言
+    面（静默逃逸：放行样例写在里面也不红）。改全字符捕获后逐个 == "deny"
+    断言，任何形态的声明值都受门禁。
+    """
+    return re.findall(r'"expected"\s*:\s*"([^"]+)"', text)
+
+
 def test_redteam_fixtures_present_and_deny():
     """4 类红队 fixtures 就位且声明拒绝（expected deny——无未批准副作用）。
     SP-018：解析全部 JSON 块的 expected 字段——不允许任何样例声明放行。"""
@@ -33,10 +44,21 @@ def test_redteam_fixtures_present_and_deny():
         readme = ROOT / "redteam" / kind / "README.md"
         assert readme.is_file(), f"缺少红队 fixtures: {kind}"
         text = readme.read_text(encoding="utf-8")
-        # SP-018/021：解析全部 expected 取值，逐个断言必须为 deny（无放行样例）
-        expecteds = re.findall(r'"expected"\s*:\s*"([a-z_]+)"', text)
+        # SP-018/021 + PY-285：解析全部 expected 取值（全字符捕获），
+        # 逐个断言必须为 deny（无放行样例——非 [a-z_] 形态不再逃逸）
+        expecteds = _expected_values(text)
         assert expecteds, f"{kind} 应含 expected 声明"
         assert all(v == "deny" for v in expecteds), f"{kind} 存在放行样例: {expecteds}"
+
+
+def test_expected_value_capture_rejects_allow_variant():
+    """PY-285 回归向量（负例）：含连字符的声明值 "allow-v2" 在旧正则
+    （[a-z_]+ 锚定引号）下完全不进捕获——静默逃逸断言面；新捕获必须
+    收到该值且判非 deny（放行样例必被门禁拒绝）。"""
+    values = _expected_values('"expected": "allow-v2"\n"expected": "deny"\n')
+    assert values == ["allow-v2", "deny"], "全字符捕获不得漏掉非 [a-z_] 形态"
+    # allow-v2 必须被判非 deny（放行样例语义——若混入 fixtures 必红）
+    assert not all(v == "deny" for v in values), "allow-v2 不得被当作 deny 放行"
 
 
 def _is_positive_int(value) -> bool:

@@ -11,67 +11,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+// WB-206（2026-10-02 审计）：DOM 节点桩下沉 helpers.mjs 单源——本文件只留
+// 元素表、装载器与用例（此前与 start_import.test.mjs 双份维护、语义易漂移）
+import { makeEl } from './helpers.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const MAINJS = readFileSync(join(ROOT, 'shared', 'shell', 'start.main.js'), 'utf8');
 
-// —— 最小 DOM 桩（仅覆盖 start.main.js 触及的表面） ——
-function el(tag) {
-  const node = {
-    tagName: tag,
-    children: [],
-    style: {},
-    dataset: {},
-    className: '',
-    title: '',
-    value: '',
-    tabIndex: 0,
-    _handlers: {},
-    _attrs: {},
-    _removedAttrs: [],
-    _focused: false,
-    _textContent: '',
-    appendChild(c) { node.children.push(c); return c; },
-    // WB-107：书签宫格经 replaceChildren 整段替换（frag 进容器）
-    replaceChildren(...cs) { node.children.length = 0; cs.forEach((c) => node.children.push(c)); },
-    addEventListener(type, fn) { (node._handlers[type] = node._handlers[type] || []).push(fn); },
-    // W5 批：属性/焦点记录——aria-expanded、role=menuitemradio、
-    // 方向键导航断言需要读取写入
-    setAttribute(n, v) { node._attrs[n] = String(v); },
-    getAttribute(n) { return n in node._attrs ? node._attrs[n] : null; },
-    // WB-137（2026-10-01 审计）：removeAttribute 记录——restoreBox 显示
-    // 改为移除 hidden 属性配对（不再压 style.display）
-    removeAttribute(n) { node._removedAttrs.push(n); delete node._attrs[n]; },
-    focus() { node._focused = true; },
-    // WB-147（2026-10-01 审计）：classList 记录——geoBtn 降级态断言
-    // （classList.add('unavailable')）需要读取类名变化
-    classList: {
-      add(c) {
-        const parts = node.className ? node.className.split(' ') : [];
-        if (!parts.includes(c)) parts.push(c);
-        node.className = parts.join(' ');
-      },
-      remove(c) {
-        node.className = (node.className ? node.className.split(' ') : [])
-          .filter((x) => x !== c).join(' ');
-      },
-    },
-    // WB-044：引擎菜单方向键从容器取菜单项——按 role 过滤后代
-    querySelectorAll(sel) {
-      const hit = [];
-      const want = sel === '[role="menuitemradio"]' ? 'menuitemradio' : null;
-      if (!want) return hit;
-      (function walk(n) { (n.children || []).forEach((c) => { if (c._attrs && c._attrs.role === want) hit.push(c); walk(c); }); })(node);
-      return hit;
-    },
-  };
-  // 真实 DOM 语义：对 textContent 赋值会清空全部子节点（容器换页依赖）
-  Object.defineProperty(node, 'textContent', {
-    get() { return node._textContent; },
-    set(v) { node._textContent = String(v); node.children.length = 0; },
-  });
-  return node;
-}
+// —— DOM 桩：共享 makeEl（见 helpers.mjs WB-206 注记） ——
+const el = makeEl;
 
 function makeHost() {
   const state = { setCalls: [], errors: [], getWallpaperCb: null, hasSavedN: 0, hasSavedRaw: undefined, navigateCalls: 0, restoreCalls: 0, engineCalls: [], geoFailCalls: 0 };
@@ -159,6 +107,10 @@ test('WB-025 对照组：合法壁纸正常应用 + 桥下发 + 圆点高亮迁�
   const titles = elements.wpList.children.map((d) => d.title);
   assert.deepEqual(titles, ['暖洋红', '晨曦青', '暮蓝', '星紫'],
     '壁纸圆点 tooltip 必须为中文名（label 字段）');
+  // WB-188（2026-10-02 审计）：选中态语义——aria-pressed 必须随 active 同步
+  assert.deepEqual(elements.wpList.children.map((d) => d._attrs['aria-pressed']),
+    ['false', 'true', 'false', 'false'],
+    'aria-pressed 必须与 .active 迁移同步翻转（读屏可感知当前壁纸）');
 });
 
 // WB-051（审计 2026-09-23 清单·W5 批）：壁纸圆点由 div[role=button] 改原生
@@ -172,7 +124,11 @@ test('WB-051 壁纸圆点必须是原生 button（type=button），非 div 模�
     assert.equal(d.type, 'button', '必须显式 type=button（防未来入 form 后触发提交）');
     assert.equal(d.className, 'wp', '样式类保持 .wp');
     assert.equal(typeof d.onclick, 'function', '点击接线保持');
+    // WB-188（2026-10-02 审计）：切换按钮语义——初始 aria-pressed 必须声明
+    assert.equal(d._attrs['aria-pressed'], 'false',
+      '圆点必须声明 aria-pressed 初始态（选中态由 setWallpaper 同步翻转）');
   }
+  // WB-188：容器 group 语义由标记层承担（静态断言在 start_page.test.mjs）
 });
 
 test('WB-025 持久化恢复路径同样受未知名守卫', () => {
@@ -532,7 +488,9 @@ test('WB-147 geoBtn 降级：openGeo onFail 回调置灰按钮并写提示 title
 
 // WB-148（2026-10-01 审计）：selectEngine 行为零测试——①引擎切换下发桥
 // ②UI 名同步 ③菜单收起 + aria-expanded 复位（三条断言）
-test('WB-148 selectEngine：下发 setEngine + UI 名同步 + 菜单收起复位', () => {
+// WB-187（2026-10-02 审计）：④焦点归还触发胶囊（此前焦点留在已移除的
+// 菜单项上——「焦点失踪」）
+test('WB-148 selectEngine：下发 setEngine + UI 名同步 + 菜单收起复位 + 焦点归还', () => {
   const { host, state } = makeHost();
   host.getEngine = (cb) => cb({
     engine: 'baidu',
@@ -554,4 +512,68 @@ test('WB-148 selectEngine：下发 setEngine + UI 名同步 + 菜单收起复位
     '③菜单必须收起');
   assert.equal(elements.enginePill._attrs['aria-expanded'], 'false',
     '③aria-expanded 必须复位（读屏状态一致）');
+  assert.equal(elements.enginePill._focused, true,
+    '④焦点必须归还胶囊（WB-187——不得留在已移除的菜单项上）');
+});
+
+// WB-180（2026-10-02 审计）：引擎菜单迟到回调重开竞态——收起路径作废
+// 未决回调，仅最新一次 toggle 的 getEngine 完成回调可展开
+test('WB-180 引擎菜单迟到回调：收起后迟到的完成回调不得重开菜单', () => {
+  const { host } = makeHost();
+  let engineCb = null;
+  host.getEngine = (cb) => { engineCb = cb; };   // 桥挂起——完成回调迟到
+  const { elements, exported, docHandlers } = loadMain(host);
+  exported.toggleEngineMenu();                   // 发起渲染（引擎表未就绪不展开）
+  assert.equal(elements.engineMenu.style.display, undefined,
+    '前提：引擎表未就绪期间菜单不展开（回调未到）');
+  docHandlers.click[0]();                        // 用户点击他处——收起路径
+  assert.equal(elements.engineMenu.style.display, 'none', '文档点击收起菜单');
+  engineCb({ engine: 'baidu', engines: [{ key: 'baidu', name: '百度' }] });   // 迟到回调
+  assert.equal(elements.engineMenu.style.display, 'none',
+    '迟到的完成回调不得重开已收起的菜单（竞态重开）');
+  assert.equal(elements.enginePill._attrs['aria-expanded'], 'false',
+    'aria-expanded 必须保持复位（不得因迟到回调翻真）');
+  // 对照：最新一次 toggle 的完成回调照常展开
+  exported.toggleEngineMenu();
+  engineCb({ engine: 'baidu', engines: [{ key: 'baidu', name: '百度' }] });
+  assert.equal(elements.engineMenu.style.display, 'block', '最新 toggle 的回调照常展开');
+  assert.equal(elements.enginePill._attrs['aria-expanded'], 'true');
+});
+
+// WB-190（2026-10-02 审计）：TIMING 等字面量兜底此前与 start.js 的
+// AegisTiming 单源无门禁——单源改值兜底不随动即语义漂移。从三份源码
+// 提取字面量 deepEqual 锁死一致。
+test('WB-190 时序字面量兜底与 start.js AegisTiming 单源一致', () => {
+  const hostJs = readFileSync(join(ROOT, 'shared', 'shell', 'start.js'), 'utf8');
+  const importJs = readFileSync(join(ROOT, 'shared', 'shell', 'start.import.js'), 'utf8');
+  const timingBlock = hostJs.match(/var AegisTiming = \{[\s\S]*?\n\};/);
+  assert.ok(timingBlock, 'start.js 必须存在 AegisTiming 单源块');
+  const single = {};
+  for (const m of timingBlock[0].matchAll(/([A-Z_]+): (\d+)/g)) {
+    single[m[1]] = parseInt(m[2], 10);
+  }
+  // start.main.js：书签重试/防抖复位三常量兜底
+  const mainFb = MAINJS.match(
+    /\{ BOOKMARK_RETRY_MS: (\d+), BOOKMARK_RETRY_MAX: (\d+), SEARCH_BUSY_RESET_MS: (\d+) \}/);
+  assert.ok(mainFb, 'start.main.js 必须保留字面量兜底（无头分文件加载形态）');
+  assert.deepEqual(
+    {
+      BOOKMARK_RETRY_MS: parseInt(mainFb[1], 10),
+      BOOKMARK_RETRY_MAX: parseInt(mainFb[2], 10),
+      SEARCH_BUSY_RESET_MS: parseInt(mainFb[3], 10),
+    },
+    {
+      BOOKMARK_RETRY_MS: single.BOOKMARK_RETRY_MS,
+      BOOKMARK_RETRY_MAX: single.BOOKMARK_RETRY_MAX,
+      SEARCH_BUSY_RESET_MS: single.SEARCH_BUSY_RESET_MS,
+    },
+    'main 兜底三常量必须与 AegisTiming 单源逐值一致');
+  // start.import.js：扫描/运行两个超时兜底
+  const scanFb = importJs.match(/IMPORT_SCAN_TIMEOUT_MS\) \|\| (\d+)/);
+  const runFb = importJs.match(/IMPORT_RUN_TIMEOUT_MS\) \|\| (\d+)/);
+  assert.ok(scanFb && runFb, 'start.import.js 必须保留扫描/运行超时兜底');
+  assert.equal(parseInt(scanFb[1], 10), single.IMPORT_SCAN_TIMEOUT_MS,
+    '扫描超时兜底必须与单源一致');
+  assert.equal(parseInt(runFb[1], 10), single.IMPORT_RUN_TIMEOUT_MS,
+    '运行超时兜底必须与单源一致');
 });

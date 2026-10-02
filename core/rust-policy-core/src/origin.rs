@@ -148,6 +148,12 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
     // RS-059（审计 2026-09-25）：split 恒产生首元素——unwrap_or_default
     // 属冗余解包，改 split_once 显式表达「无 # 即整段」语义
     let without_fragment = suffix.split_once('#').map_or(suffix, |(before, _)| before);
+    // RS-289（2026-10-02 审计）：path 段**不做归一**（点段折叠 / 百分号
+    // 解码均不执行）——同一逻辑资源的两种拼写产出不同 canonical_parameters
+    //（授权绑定按字面区分）。三端（Rust/C#/Kotlin）同步归一成本高，本轮
+    // 显式锁定「不归一」口径（契约测试 canonical_parameters_do_not_normalize_
+    // dot_segments_or_percent_encoding）；如需变更须经跨端契约评审同步三端，
+    // 不得单端先行
     let canonical_parameters = match without_fragment {
         "" => "/".to_string(),
         query if query.starts_with('?') => format!("/{query}"),
@@ -217,6 +223,25 @@ mod tests {
                 canonical_parameters: "/?x=1".into(),
             })
         );
+    }
+
+    // —— RS-289 回归（2026-10-02 审计）：path 不归一契约 ——
+
+    #[test]
+    fn canonical_parameters_do_not_normalize_dot_segments_or_percent_encoding() {
+        // RS-289：path 段不做点段折叠 / 百分号解码归一（RFC 3986 的
+        // remove_dot_segments 与 percent-decoding 均不执行）——同一逻辑
+        // 资源的两种拼写产出不同 canonical_parameters（授权绑定按字面
+        // 区分）。三端（Rust/C#/Kotlin）同步归一成本高，本轮锁定
+        // 「不归一」口径；变更须经跨端契约评审同步三端，不得单端先行
+        let dot = canonicalize_external("https://example.com/a/../b").unwrap();
+        assert_eq!(dot.canonical_parameters, "/a/../b", "点段不折叠");
+        let pct = canonicalize_external("https://example.com/%61%62").unwrap();
+        assert_eq!(pct.canonical_parameters, "/%61%62", "百分号编码不解码");
+        let dbl = canonicalize_external("https://example.com//double").unwrap();
+        assert_eq!(dbl.canonical_parameters, "//double", "双斜杠原样保留");
+        // 对照：scheme/host 归一仍生效（origin 侧既有口径不受影响）
+        assert_eq!(pct.origin, "https://example.com");
     }
 
     // —— 边界补强：授权绑定安全相关的规范化语义（此前仅 3 例正向覆盖）——

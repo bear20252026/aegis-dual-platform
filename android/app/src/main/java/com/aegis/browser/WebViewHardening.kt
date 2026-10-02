@@ -186,7 +186,13 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
     if (proxyMap.has(this)) return origToString.call(proxyMap.get(this));
     return origToString.call(this);
   };
-  Object.defineProperty(window, '__AEGIS_REGISTER_PROXY', {
+  // AD-297（2026-10-02 审计）：注册键改 Symbol.for('proxy.register.v1')——原
+  // 具名字符串键 '__AEGIS_REGISTER_PROXY' 与桥守卫（BRIDGE_GUARD_JS）读取的
+  // Symbol 键不匹配，桥守卫侧 __aegisReg 恒 undefined、四桥出口注册全部空转
+  //（fetch.toString() 一行暴露包装源码）。对齐 Rust ToStringGuard（RS-027）
+  // 与本脚本 Stage 3-9 各包装点的注册读取键：Symbol 键按具名字符串探测落空、
+  // 不出现在 Object.keys/getOwnPropertyNames 字符串枚举通道。
+  Object.defineProperty(window, Symbol.for('proxy.register.v1'), {
     value: function(proxy, original) { proxyMap.set(proxy, original); },
     writable: false, configurable: false
   });
@@ -203,7 +209,13 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
     'co.kr','or.kr','com.cn','net.cn','org.cn','gov.cn','edu.cn','com.tw','org.tw',
     'com.hk','org.hk','edu.hk','com.au','net.au','org.au','edu.au','gov.au','co.nz',
     'net.nz','org.nz','com.sg','com.my','co.in','net.in','org.in','com.br','com.mx',
-    'com.ar','co.za','com.tr','com.ru','co.th','com.vn','com.ph','co.id'];
+    'com.ar','co.za','com.tr','com.ru','co.th','com.vn','com.ph','co.id',
+    // AD-329（2026-10-02 审计）：高频两段公共后缀补齐——co.il/org.il/com.ua/
+    // com.pl/com.gr/com.pt/com.ro/com.sa/com.pk 未命中表时回落两段式，
+    // a.co.il 与 b.co.il 被推导出不同 site seed（eTLD+1 语义破坏）。
+    // 「同后缀两站种子不同」回归断言的例外清单即本表（两段式后缀命中
+    // 表内条目才折叠为公共后缀——例外以表为准，增删须同步评估）。
+    'co.il','org.il','com.ua','com.pl','com.gr','com.pt','com.ro','com.sa','com.pk'];
   function isPublicSuffix(tail) { return PUBLIC_SUFFIXES.indexOf(tail) >= 0; }
   function getETLD1(h) {
     var p = h.split('.');
@@ -294,10 +306,38 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
 // 仅用于返回值，原 ctx 不动；且不调用源画布 getContext（drawImage 对任意
 // 上下文类型的源画布均可用，也避免把尚无上下文的画布永久锁定为 2d）。
 (function() {
+  // AD-314（2026-10-02 审计）：各包装点补注册调用——AD-297 修好 Symbol 键后，
+  // Stage 1 的 ToStringGuard 才真正可达；本阶段三个 canvas 包装同样注册，
+  // 防止 toDataURL.toString() 暴露包装源码。
+  var __aegisReg = window[Symbol.for('proxy.register.v1')];
   // AD-270（2026-10-01 审计）：尺寸上限——16K×16K 画布的离屏副本 +
   // getImageData 峰值约 1GB（OOM 面）。超阈值直接走原实现降级（该形态
   // 画布本身已极难作为指纹载体，资源安全优先）。
   var MAX_NOISE_PIXELS = 4096 * 4096;
+  // AD-311（2026-10-02 审计）：Uint8ClampedArray 在 0/255 边界吸收 ±1 噪声
+  //（0-1 → 0、255+1 → 255，边界像素噪声不可见=指纹可分离）。边界像素噪声
+  // 取离岸方向（0→+1、255→-1），中间值按噪声位 ±1。
+  function aegisNudge(current, noiseBit) {
+    if (current === 0) return 1;
+    if (current === 255) return 254;
+    return noiseBit ? current + 1 : current - 1;
+  }
+  // AD-253（2026-10-01 审计）：逐像素确定性 PRNG——原 `(seed+i)%2` 在
+  // i+=4 步进下退化为每通道全图常量偏移（共 8 种组合，减法即可还原
+  // 原图）。现以像素索引乘黄金比例常数（0x9E3779B1）与 seed 异或后
+  // 取最低位；三通道用不同混合常数（0x85EBCA6B / 0x27D4EB2F，
+  // murmur3 finalizer 常数）——同 seed 相邻像素噪声不一致，且无
+  // 通道间常量偏置。口径与 Rust 侧 RS-249 等价（不要求字节级一致）。
+  // alpha 不动——不破坏合成透明度。三通道（toDataURL/toBlob/
+  // convertToBlob）共用同一噪声形态（AD-298）。
+  function applyNoise(imageData, seed) {
+    for (let px = 0, i = 0; i < imageData.data.length; px++, i += 4) {
+      imageData.data[i] = aegisNudge(imageData.data[i], ((seed ^ Math.imul(px, 0x9E3779B1)) >>> 0) & 1);
+      imageData.data[i + 1] = aegisNudge(imageData.data[i + 1], ((seed ^ Math.imul(px, 0x85EBCA6B)) >>> 0) & 1);
+      imageData.data[i + 2] = aegisNudge(imageData.data[i + 2], ((seed ^ Math.imul(px, 0x27D4EB2F)) >>> 0) & 1);
+    }
+  }
+  function noiseSeed() { return parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16); }
   var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
   HTMLCanvasElement.prototype.toDataURL = function(type) {
     try {
@@ -310,25 +350,59 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
       const octx = off.getContext('2d');
       octx.drawImage(this, 0, 0);
       const imageData = octx.getImageData(0, 0, off.width, off.height);
-      const seed = parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16);
-      // AD-253（2026-10-01 审计）：逐像素确定性 PRNG——原 `(seed+i)%2` 在
-      // i+=4 步进下退化为每通道全图常量偏移（共 8 种组合，减法即可还原
-      // 原图）。现以像素索引乘黄金比例常数（0x9E3779B1）与 seed 异或后
-      // 取最低位；三通道用不同混合常数（0x85EBCA6B / 0x27D4EB2F，
-      // murmur3 finalizer 常数）——同 seed 相邻像素噪声不一致，且无
-      // 通道间常量偏置。口径与 Rust 侧 RS-249 等价（不要求字节级一致）。
-      // alpha 不动——不破坏合成透明度。
-      for (let px = 0, i = 0; i < imageData.data.length; px++, i += 4) {
-        imageData.data[i] += (((seed ^ Math.imul(px, 0x9E3779B1)) >>> 0) & 1) ? 1 : -1;
-        imageData.data[i + 1] += (((seed ^ Math.imul(px, 0x85EBCA6B)) >>> 0) & 1) ? 1 : -1;
-        imageData.data[i + 2] += (((seed ^ Math.imul(px, 0x27D4EB2F)) >>> 0) & 1) ? 1 : -1;
-      }
+      applyNoise(imageData, noiseSeed());
       octx.putImageData(imageData, 0, 0);
       return origToDataURL.apply(off, arguments);
     } catch (e) {
       return origToDataURL.apply(this, arguments);
     }
   };
+  if (__aegisReg) __aegisReg(HTMLCanvasElement.prototype.toDataURL, origToDataURL);
+  // AD-298（2026-10-02 审计）：toBlob 是 canvas 读取的第二通道——此前仅覆盖
+  // toDataURL，页面走 toBlob 即拿到无噪声原图。按 Rust shield.rs RS-082 同型
+  // 补齐（离屏副本 + 逐像素噪声 + 尺寸上限，口径与 toDataURL 通道一致）。
+  var origToBlob = HTMLCanvasElement.prototype.toBlob;
+  HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
+    try {
+      if (this.width * this.height > MAX_NOISE_PIXELS) {
+        return origToBlob.call(this, callback, type, quality);
+      }
+      const off = document.createElement('canvas');
+      off.width = this.width;
+      off.height = this.height;
+      const octx = off.getContext('2d');
+      octx.drawImage(this, 0, 0);
+      const imageData = octx.getImageData(0, 0, off.width, off.height);
+      applyNoise(imageData, noiseSeed());
+      octx.putImageData(imageData, 0, 0);
+      return origToBlob.call(off, callback, type, quality);
+    } catch (e) {
+      return origToBlob.call(this, callback, type, quality);
+    }
+  };
+  if (__aegisReg) __aegisReg(HTMLCanvasElement.prototype.toBlob, origToBlob);
+  // AD-298：OffscreenCanvas.convertToBlob 是 worker 侧第三通道——同型防护
+  //（RS-082；宿主无 OffscreenCanvas 时本包装空转）。
+  if (typeof OffscreenCanvas !== 'undefined') {
+    const origConvert = OffscreenCanvas.prototype.convertToBlob;
+    OffscreenCanvas.prototype.convertToBlob = function(options) {
+      try {
+        if (this.width * this.height > MAX_NOISE_PIXELS) {
+          return origConvert.call(this, options);
+        }
+        const off = new OffscreenCanvas(this.width, this.height);
+        const octx = off.getContext('2d');
+        octx.drawImage(this, 0, 0);
+        const imageData = octx.getImageData(0, 0, off.width, off.height);
+        applyNoise(imageData, noiseSeed());
+        octx.putImageData(imageData, 0, 0);
+        return origConvert.call(off, options);
+      } catch (e) {
+        return origConvert.call(this, options);
+      }
+    };
+    if (__aegisReg) __aegisReg(OffscreenCanvas.prototype.convertToBlob, origConvert);
+  }
 })();
 // AD-258（2026-10-01 审计）：Stage 3 原有一个 WebGL getParameter 伪装包装，
 // 被 Stage 7 对同一常量（0x9245/0x9246）的先行返回遮蔽（永不可达死代码），
@@ -400,8 +474,12 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
     else if (input instanceof Request) input = new Request(strip(input.url), input);
     return origFetch.call(this, input, init);
   };
+  // AD-314（2026-10-02 审计）：本阶段四个出口注册 ToStringGuard（AD-297 键）。
+  var __aegisReg = window[Symbol.for('proxy.register.v1')];
+  if (__aegisReg) __aegisReg(window.fetch, origFetch);
   var origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url) { arguments[1] = strip(url); return origOpen.apply(this, arguments); };
+  if (__aegisReg) __aegisReg(XMLHttpRequest.prototype.open, origOpen);
   // AD-285（2026-10-01 审计）：sendBeacon/WebSocket 同口径包装——追踪参数
   // （gclid 等）经 beacon/WS 握手 URL 外发此前不受 strip，隐私覆盖面缺口。
   var origBeacon = navigator.sendBeacon && navigator.sendBeacon;
@@ -410,12 +488,14 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
       if (typeof url === 'string') arguments[0] = strip(url);
       return origBeacon.apply(navigator, arguments);
     };
+    if (__aegisReg) __aegisReg(navigator.sendBeacon, origBeacon);
   }
   var OrigWS = window.WebSocket;
   window.WebSocket = function(url, protocols) {
     if (typeof url === 'string') url = strip(url);
     return protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols);
   };
+  if (__aegisReg) __aegisReg(window.WebSocket, OrigWS);
   try {
     window.WebSocket.prototype = OrigWS.prototype;
     window.WebSocket.CONNECTING = OrigWS.CONNECTING;
@@ -437,6 +517,9 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
       if (SAFE_SET.has(family)) return origCheck.apply(this, arguments);
       return false;
     };
+    // AD-314（2026-10-02 审计）：包装点注册 ToStringGuard（AD-297 键）。
+    var __aegisReg = window[Symbol.for('proxy.register.v1')];
+    if (__aegisReg) __aegisReg(FontFaceSet.prototype.check, origCheck);
   } catch(e) {}
 })();
 
@@ -444,16 +527,22 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
 (function() {
   var VENDOR = 'Google Inc. (Intel)';
   var RENDERER = 'ANGLE (Intel, Intel(R) UHD Graphics 620, OpenGL 4.5)';
+  // AD-314（2026-10-02 审计）：包装点注册 ToStringGuard（AD-297 键）。
+  var __aegisReg = window[Symbol.for('proxy.register.v1')];
   function patch(proto) {
     var orig = proto.getParameter;
     proto.getParameter = function(p) {
       if (p === 0x9245 || p === 0x1F00) return VENDOR;
       if (p === 0x9246 || p === 0x1F01) return RENDERER;
       if (p === 0x0D33) return 16384;
-      if (p === 0x0D3A) return new Float32Array([16384, 16384]);
+      // AD-310（2026-10-02 审计）：MAX_VIEWPORT_DIMS 伪装改 Int32Array——
+      // 真机（Chromium）对该常量返回 Int32Array，Float32Array 伪装值自身
+      // 即高置信检测信号（类型断言一行可辨）。
+      if (p === 0x0D3A) return new Int32Array([16384, 16384]);
       if (p === 0x84E8) return 16384;
       return orig.call(this, p);
     };
+    if (__aegisReg) __aegisReg(proto.getParameter, orig);
   }
   try { patch(WebGLRenderingContext.prototype); } catch(e) {}
   try { patch(WebGL2RenderingContext.prototype); } catch(e) {}
@@ -469,8 +558,16 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
   // Date.now 只做 1ms 网格取整（无随机分量）。
   function reduce(v) { return Math.round(v / P) * P + (Math.random() - 0.5) * P / 2; }
   function reduceIntegral(v) { return Math.round(v / P) * P; }
-  try { var o = performance.now.bind(performance); Object.defineProperty(performance, 'now', { value: function() { return reduce(o()); }, writable: false, configurable: false }); } catch(e) {}
-  try { var d = Date.now; Date.now = function() { return reduceIntegral(d()); }; } catch(e) {}
+  // AD-314（2026-10-02 审计）：两个包装点注册 ToStringGuard（AD-297 键）——
+  // 包装函数先落变量再挂载（匿名 value 无法自注册）。
+  var __aegisReg = window[Symbol.for('proxy.register.v1')];
+  try {
+    var o = performance.now.bind(performance);
+    var nowWrapper = function() { return reduce(o()); };
+    Object.defineProperty(performance, 'now', { value: nowWrapper, writable: false, configurable: false });
+    if (__aegisReg) __aegisReg(nowWrapper, o);
+  } catch(e) {}
+  try { var d = Date.now; var dateWrapper = function() { return reduceIntegral(d()); }; Date.now = dateWrapper; if (__aegisReg) __aegisReg(dateWrapper, d); } catch(e) {}
 })();
 
 // === Stage 9: ExtProxy 匿名扩展代理（参照 Helium GPL-3.0）===
@@ -485,6 +582,9 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
       if (shouldIntercept(url)) { console.warn('[Aegis] CWS request intercepted (no proxy configured)'); }
       return origFetch.call(this, input, init);
     };
+    // AD-314（2026-10-02 审计）：包装点注册 ToStringGuard（AD-297 键）。
+    var __aegisReg = window[Symbol.for('proxy.register.v1')];
+    if (__aegisReg) __aegisReg(window.fetch, origFetch);
   } catch(e) {}
 })();
         """.trimIndent()

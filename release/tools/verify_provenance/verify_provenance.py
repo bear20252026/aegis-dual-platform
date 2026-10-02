@@ -9,6 +9,7 @@ provenance 逐工件验证（fail-closed——缺失 attestation 是失败不是
 
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -70,12 +71,20 @@ def verify_provenance(dist_dir: Path, owner: str, signer_workflow: str) -> list[
     return failures
 
 
-def main() -> int:
-    if len(sys.argv) < 4:
-        print("用法: verify_provenance.py <dist_dir> <owner> <signer_workflow>")
-        return 2
-    failures = verify_provenance(
-        Path(sys.argv[1]), sys.argv[2], sys.argv[3])
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    """PY-286（2026-10-02 审计）：手工 argv 索引改 argparse——必填 positional
+    缺参自动 exit 2（0/1/2 退出码语义不变：用法错误 2、验证失败 1、通过 0）。"""
+    parser = argparse.ArgumentParser(
+        description="provenance 逐工件验证（gh attestation verify——固定 signer 身份）")
+    parser.add_argument("dist_dir", type=Path, help="dist 制品目录")
+    parser.add_argument("owner", help="gh attestation --owner（仓库所有者）")
+    parser.add_argument("signer_workflow", help="--signer-workflow（固定 signer 身份——SP-143）")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    failures = verify_provenance(args.dist_dir, args.owner, args.signer_workflow)
     if failures:
         for f in failures:
             print(f"❌ {f}")

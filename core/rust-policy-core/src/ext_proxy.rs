@@ -17,6 +17,17 @@
 
 use std::fmt;
 
+/// RS-285（2026-10-02 审计）：endpoint 是否以 http(s):// 前缀开头（ASCII
+/// 大小写不敏感）。按字节前缀比较（eq_ignore_ascii_case），不做字符串
+/// 切片（避免多字节字符边界 panic）；WHATWG URL scheme 大小写不敏感，
+/// `HTTPS://`/`Http://` 是合法端点形态。
+fn endpoint_has_http_scheme(endpoint: &str) -> bool {
+    ["https://", "http://"].iter().any(|prefix| {
+        let bytes = endpoint.as_bytes();
+        bytes.len() >= prefix.len() && bytes[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+    })
+}
+
 /// 匿名代理端点配置。
 #[derive(Debug, Clone)]
 pub struct ExtProxyConfig {
@@ -76,8 +87,11 @@ impl ExtProxy {
     /// RS-086（审计 2026-09-25）：端点必须为 http(s) URL——此前任意串
     /// 直通注入 JS（`javascript:`/相对路径端点会把扩展流量导向攻击者
     /// 控制的上下文）。非法 scheme fail-closed 退化为空端点（观察模式）。
+    /// RS-285（2026-10-02 审计）：scheme 前缀比较改 ASCII 大小写不敏感
+    /// ——WHATWG URL scheme 大小写不敏感，`HTTPS://`/`Http://` 端点此前
+    /// 被 fail-closed 静默拒绝（合法配置退化禁用）。
     pub fn with_endpoint(endpoint: &str) -> Self {
-        let normalized = if endpoint.starts_with("https://") || endpoint.starts_with("http://") {
+        let normalized = if endpoint_has_http_scheme(endpoint) {
             endpoint.to_string()
         } else {
             String::new()
@@ -107,9 +121,9 @@ impl ExtProxy {
         // 之外，with_config/直接构造 ExtProxyConfig 可绕过校验携带任意
         // scheme 端点（javascript:/相对路径把扩展流量导向攻击者上下文）。
         // 注入是最后防线：非法端点在此退化空（观察模式），与 RS-086 同口径
-        let endpoint = if self.config.proxy_endpoint.starts_with("https://")
-            || self.config.proxy_endpoint.starts_with("http://")
-        {
+        // RS-285（2026-10-02 审计）：比较改 ASCII 大小写不敏感（WHATWG
+        // scheme 大小写不敏感，大写/混合形态端点是合法配置）
+        let endpoint = if endpoint_has_http_scheme(&self.config.proxy_endpoint) {
             &self.config.proxy_endpoint
         } else {
             ""
@@ -161,13 +175,22 @@ impl ExtProxy {
   try {{
     var origFetch = window.fetch;
     window.fetch = function(input, init) {{
-      var url = typeof input === 'string' ? input : (input instanceof Request ? input.url : '');
+      // RS-280（2026-10-02 审计）：补 URL 对象形态——此前 string/Request
+      // 之外的形态（URL 对象）取不到 url，shouldIntercept('') 恒 false，
+      // URL 对象请求完整绕过拦截
+      var isUrlObj = input instanceof URL;
+      var url = typeof input === 'string'
+        ? input
+        : (input instanceof Request ? input.url : (isUrlObj ? input.href : ''));
       if (shouldIntercept(url)) {{
         var proxied = proxyUrl(url);
         if (typeof input === 'string') {{
           input = proxied;
         }} else if (input instanceof Request) {{
           input = new Request(proxied, input);
+        }} else if (isUrlObj) {{
+          // RS-280：URL 对象形态以代理串传递（fetch 接受字符串）
+          input = proxied;
         }}
       }}
       return origFetch.call(this, input, init);
@@ -398,5 +421,59 @@ mod tests {
         );
         assert!(script.contains("__aegisReg(window.fetch, origFetch);"));
         assert!(script.contains("__aegisReg(XMLHttpRequest.prototype.open, origOpen);"));
+    }
+
+    // —— RS-280/285 回归（2026-10-02 审计） ——
+
+    #[test]
+    fn endpoint_scheme_case_insensitive() {
+        // RS-285：scheme 前缀比较 ASCII 大小写不敏感——WHATWG URL scheme
+        // 大小写不敏感，大写/混合形态端点是合法配置，此前被静默退化禁用
+        let upper = ExtProxy::with_endpoint("HTTPS://proxy.example.com/anon");
+        assert!(
+            !upper.config.proxy_endpoint.is_empty(),
+            "HTTPS:// 大写 scheme 必须接受"
+        );
+        assert!(upper
+            .inject_script()
+            .contains("PROXY_ENDPOINT = 'HTTPS://proxy.example.com/anon';"));
+        let mixed = ExtProxy::with_endpoint("Http://proxy.example.com/anon");
+        assert!(
+            !mixed.config.proxy_endpoint.is_empty(),
+            "混合大小写 scheme 必须接受"
+        );
+        // 防御性再校验（inject_script 内）同口径
+        let config = ExtProxyConfig {
+            proxy_endpoint: "HTTPS://proxy.example.com/anon".into(),
+            ..ExtProxyConfig::default()
+        };
+        assert!(ExtProxy::with_config(config)
+            .inject_script()
+            .contains("PROXY_ENDPOINT = 'HTTPS://proxy.example.com/anon';"));
+        // 非法 scheme 仍拒绝（javascript: 大小写变体 fail-closed）
+        let evil = ExtProxy::with_endpoint("JavaScript:alert(1)");
+        assert!(
+            evil.config.proxy_endpoint.is_empty(),
+            "javascript: 大小写变体拒绝"
+        );
+    }
+
+    #[test]
+    fn fetch_url_object_form_intercepted() {
+        // RS-280：fetch(URL 对象) 形态此前取不到 url（'' 恒 false 绕过）——
+        // 补 URL 对象取 href + 代理串传递
+        let script = ExtProxy::with_endpoint("https://proxy.example.com/anon").inject_script();
+        assert!(
+            script.contains("var isUrlObj = input instanceof URL;"),
+            "URL 对象形态必须显式识别"
+        );
+        assert!(
+            script.contains("(isUrlObj ? input.href : '')"),
+            "URL 对象取 href 参与拦截判定"
+        );
+        assert!(
+            script.contains("} else if (isUrlObj) {"),
+            "命中后 URL 对象形态以代理串传递"
+        );
     }
 }

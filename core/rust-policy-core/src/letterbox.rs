@@ -53,7 +53,9 @@ impl Default for LetterboxConfig {
 /// 参照 Mullvad Browser `privacy.resistFingerprinting` 的 letterboxing 实现：
 /// - 窗口尺寸圆整到 200×100px 网格
 /// - 所有用户落入有限桶中，防止单一化指纹
-/// - 内容区域用 CSS padding 填充到实际窗口尺寸
+/// - RS-299（2026-10-02 审计）：本实现**仅圆整 JS 报告值**（screen/window
+///   尺寸属性），不做 Tor 式 CSS padding 视觉 letterbox（内容区不加黑边、
+///   窗口实际尺寸不变）——名实对齐，防误读为完整视觉 letterboxing
 pub struct LetterboxShield {
     config: LetterboxConfig,
 }
@@ -174,11 +176,15 @@ impl LetterboxShield {
     if (oPD) Object.defineProperty(window.Screen.prototype, 'pixelDepth', {{ get: function() {{ return 24; }}, enumerable: oPD.enumerable, configurable: oPD.configurable }});
   }} catch(e) {{}}
   try {{
-    var oDPR = Object.getOwnPropertyDescriptor(window, 'devicePixelRatio');
-    if (oDPR && oDPR.get) Object.defineProperty(window, 'devicePixelRatio', {{
-      get: function() {{ return Math.round(oDPR.get.call(this) * 4) / 4; }},
-      enumerable: oDPR.enumerable,
-      configurable: oDPR.configurable
+    // RS-293（2026-10-02 审计）：DPR 走 aegisResolveProp 原型优先解析
+    //（对齐 innerWidth 组口径）——此前只查 window 自有 descriptor，
+    // 定义于 Window.prototype 的引擎整个覆盖不生效（实例位无 descriptor
+    // 即静默跳过，DPR 原值裸奔）
+    var oDPR = aegisResolveProp(window.Window, 'devicePixelRatio');
+    if (oDPR.d && oDPR.d.get) Object.defineProperty(oDPR.target, 'devicePixelRatio', {{
+      get: function() {{ return Math.round(oDPR.d.get.call(this) * 4) / 4; }},
+      enumerable: oDPR.d.enumerable,
+      configurable: oDPR.d.configurable
     }});
   }} catch(e) {{}}
 }})();
@@ -273,7 +279,7 @@ mod tests {
             "pixelDepth override missing guard"
         );
         assert!(
-            script.contains("if (oDPR && oDPR.get)"),
+            script.contains("if (oDPR.d && oDPR.d.get)"),
             "DPR override missing guard"
         );
         // 守卫与 defineProperty 一一配对：每个守卫行之后紧跟 defineProperty，
@@ -384,8 +390,49 @@ mod tests {
             "devicePixelRatio 覆盖"
         );
         assert!(
-            script.contains("Math.round(oDPR.get.call(this) * 4) / 4"),
+            script.contains("Math.round(oDPR.d.get.call(this) * 4) / 4"),
             "DPR 圆整到 0.25 步长"
+        );
+    }
+
+    // —— RS-293/299 回归（2026-10-02 审计） ——
+
+    #[test]
+    fn dpr_resolved_prototype_first_like_inner_width_group() {
+        // RS-293：devicePixelRatio 此前只查 window 自有 descriptor——定义
+        // 于 Window.prototype 的引擎整个覆盖不生效。现走 aegisResolveProp
+        // 原型优先解析（对齐 innerWidth 组）
+        let script = LetterboxShield::new().inject_script();
+        assert!(
+            script.contains("aegisResolveProp(window.Window, 'devicePixelRatio')"),
+            "DPR 必须原型优先解析"
+        );
+        assert!(
+            !script.contains("Object.getOwnPropertyDescriptor(window, 'devicePixelRatio')"),
+            "实例位直查形态不得残留"
+        );
+        assert!(
+            script.contains("Object.defineProperty(oDPR.target, 'devicePixelRatio'"),
+            "定义位随解析结果替换（原型/实例自适应）"
+        );
+    }
+
+    #[test]
+    fn doc_comment_does_not_claim_visual_css_letterbox() {
+        // RS-299：文档此前描述「内容区域用 CSS padding 填充」的视觉
+        // letterbox——实际只圆整 JS 报告值（无 CSS padding、无黑边）。
+        // 名实对齐：文档不得残留 CSS padding 声称。断言串经 concat 构造
+        //（直写字面量会被 include_str 的测试自身命中）
+        let source = include_str!("letterbox.rs");
+        let forbidden = ["内容区域用 CSS padding ", "填充到实际窗口尺寸"].concat();
+        assert!(
+            !source.contains(&forbidden),
+            "不得残留 CSS padding 视觉 letterbox 声称（实现只圆整 JS 报告值）"
+        );
+        let required = ["仅圆整 ", "JS 报告值"].concat();
+        assert!(
+            source.contains(&required),
+            "文档必须如实声明只圆整 JS 报告值"
         );
     }
 }

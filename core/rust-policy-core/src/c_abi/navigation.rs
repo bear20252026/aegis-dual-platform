@@ -64,7 +64,6 @@ pub extern "C" fn aegis_policy_core_broker_advance_document_generation(
 /// 超长 / 非 UTF-8（可观测性缺失面）。取首个 Err 原样透传。
 /// RS-239（2026-10-01 审计）：Ok 侧按值 String（read_utf8 单源）——
 /// 借用生命周期参数化（RS-211）仍 unsound，已收敛为按值返回。
-/// 宿主缓冲，非 'static）。
 fn unwrap_input_or_deny(result: Result<String, &'static str>) -> Result<String, *mut c_char> {
     result.map_err(input_deny)
 }

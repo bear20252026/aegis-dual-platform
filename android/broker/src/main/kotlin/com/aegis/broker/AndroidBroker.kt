@@ -87,14 +87,22 @@ class AndroidBroker(
         generation: Long = 0,
     ): Boolean {
         if (sessionId.isBlank() || tabId.isBlank() || generation < 0) return false
+        // AD-301（2026-10-02 审计）：JNI 跨界移出 authorizationLock——与
+        // consumeNavigation（AD-200）同型：锁内快照 → 锁外 JNI → 锁内终态
+        // 提交 + 二次校验。原生侧阻塞不再拖住全部会话的授权校验。
+        val duplicate = synchronized(authorizationLock) { sessions.containsKey(sessionId) }
+        val created =
+            !duplicate &&
+                nativeCoreGate { it.createSession(sessionId, tabId, generation, SESSION_TTL_SECONDS) }
         return synchronized(authorizationLock) {
-            if (sessions.containsKey(sessionId)) return@synchronized false
-            // AD-199：原生核心会话操作经 nativeCoreGate 收口
-            if (!nativeCoreGate { it.createSession(sessionId, tabId, generation, SESSION_TTL_SECONDS) }) {
-                return@synchronized false
+            // 并发注册同 id：后到者拒绝（先到者核心会话不受影响——createSession
+            // 为覆盖式重注册语义，与 renewSession 同型无害）。
+            if (created && !sessions.containsKey(sessionId)) {
+                sessions[sessionId] = SessionContext(tabId, generation)
+                true
+            } else {
+                false
             }
-            sessions[sessionId] = SessionContext(tabId, generation)
-            true
         }
     }
 
@@ -104,38 +112,68 @@ class AndroidBroker(
      * 传当前值保持双端一致），消除「启动 2 分钟后所有导航被 session_expired
      * 拒绝」。仅在会话存在且标签匹配时续期；待审批确认期间不续期（由调用方
      * 保证），避免孤儿化 pending nonce。非原生模式会话本无时效——恒真。
+     *
+     * AD-301（2026-10-02 审计）：JNI 跨界移出 authorizationLock——锁内快照
+     * 代际 → 锁外 JNI 重注册 → 锁内二次校验（会话仍在且标签匹配才算续期
+     * 成功；核心先重注册的窗口里会话被并发销毁时整体仍拒绝——fail-closed
+     * 方向不变，代价仅是核心侧多一次覆盖式重注册，无孤儿可消费面）。
      */
     fun renewSession(
         sessionId: String,
         tabId: String,
     ): Boolean {
-        return synchronized(authorizationLock) {
-            val session = sessions[sessionId] ?: return@synchronized false
-            if (session.tabId != tabId) return@synchronized false
-            // AD-199：与 registerSession 共用 nativeCoreGate 收口
-            nativeCoreGate { it.createSession(sessionId, tabId, session.documentGeneration, SESSION_TTL_SECONDS) }
-        }
+        val snapshotGeneration =
+            synchronized(authorizationLock) {
+                val session = sessions[sessionId]
+                if (session?.tabId == tabId) session.documentGeneration else null
+            } ?: return false
+        // AD-199：与 registerSession 共用 nativeCoreGate 收口
+        val renewed =
+            nativeCoreGate {
+                it.createSession(sessionId, tabId, snapshotGeneration, SESSION_TTL_SECONDS)
+            }
+        return renewed &&
+            synchronized(authorizationLock) {
+                sessions[sessionId]?.tabId == tabId
+            }
     }
 
-    /** 文档代际推进后立即同步；仅同标签严格单步推进，拒绝跳跃、回退和已销毁会话。 */
+    /**
+     * 文档代际推进后立即同步；仅同标签严格单步推进，拒绝跳跃、回退和已销毁会话。
+     *
+     * AD-301（2026-10-02 审计）：JNI 跨界移出 authorizationLock——锁内快照 +
+     * 前置校验 → 锁外 JNI 推进核心 → 锁内二次校验后提交本地代际（consumeNavigation
+     * 同型）。核心已推进、锁内校验失败的窗口里本地不提交：整体拒绝
+     * （fail-closed 不变），后续推进会因核心侧超前被拒——与 AD-200 烧 nonce
+     * 同代价口径（只收窄能力面，不放大）。
+     */
     fun updateDocumentGeneration(
         sessionId: String,
         tabId: String,
         generation: Long,
     ): Boolean {
+        val preconditionsMet =
+            synchronized(authorizationLock) {
+                val session = sessions[sessionId]
+                session != null && session.tabId == tabId &&
+                    session.documentGeneration != Long.MAX_VALUE &&
+                    generation == session.documentGeneration + 1
+            }
+        // AD-199：与 registerSession 共用 nativeCoreGate 收口
+        val advanced =
+            preconditionsMet &&
+                nativeCoreGate { it.advanceDocumentGeneration(sessionId, tabId, generation) }
         return synchronized(authorizationLock) {
-            val session = sessions[sessionId] ?: return@synchronized false
-            if (session.tabId != tabId || session.documentGeneration == Long.MAX_VALUE ||
-                generation != session.documentGeneration + 1
-            ) {
-                return@synchronized false
+            val session = sessions[sessionId]
+            // detekt-修复（2026-10-02 审计云端实证）：ComplexCondition(4)——四元合取拆 takeIf 中间 val（语义不变）。
+            val commitTarget = session?.takeIf { it.tabId == tabId && it.documentGeneration + 1 == generation }
+            // 单步推进不变式：提交时核心期望的前置代际必须仍是快照时值
+            if (advanced && commitTarget != null) {
+                commitTarget.documentGeneration = generation
+                true
+            } else {
+                false
             }
-            // AD-199：与 registerSession 共用 nativeCoreGate 收口
-            if (!nativeCoreGate { it.advanceDocumentGeneration(sessionId, tabId, generation) }) {
-                return@synchronized false
-            }
-            session.documentGeneration = generation
-            true
         }
     }
 

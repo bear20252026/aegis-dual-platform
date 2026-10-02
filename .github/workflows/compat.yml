@@ -5,6 +5,8 @@
 #          （validate_release + 3 selftest，经 app.webview2_probe.run_selftests）
 #       2. 生成 WebView2 兼容性探测报告（Runtime 版本 + 关键 API 可用性）
 #       3. 报告归档至 docs/compat-baselines/（形成版本×功能的回归基线）
+#       4. SP-222（2026-10-02 审计）：新增正典 C# 栈兼容 job（build + 双测试
+#          套件）——正典栈基线由 windows-canonical-stack 承担，归档栈探测保留
 # 触发：每周一 06:00 UTC 定时 + 手动（workflow_dispatch，供新 Runtime 发布后即跑）
 name: WebView2-Compat
 
@@ -79,3 +81,34 @@ jobs:
             docs/compat-baselines/probe-latest.json
             legacy/windows-pywebview/probe-stderr.log
           if-no-files-found: warn
+          # SP-253（2026-10-02 审计·S-30）：probe 报告是 WebView2 兼容性基线
+          # 证据（Runtime 版本 × API 可用性）——按基线类给 30 天留存
+          retention-days: 30
+
+  # SP-222（2026-10-02 审计·S-01）：上方唯一 job 的全部探测对象是归档栈
+  # （legacy/windows-pywebview——ADR-009 只读冻结），正典 C# 栈（windows/，
+  # 唯一发布制品）此前零 WebView2 兼容探测。新增本 job 承担正典栈基线：
+  # 与归档栈探测 job 同触发（weekly cron + workflow_dispatch），对正典栈跑
+  # 与 contracts.yml windows-contract-build 逐字同口径的构建 + 双测试套件
+  # 门禁；归档栈探测 job 保留不动。
+  windows-canonical-stack:
+    name: Windows 正典 C# 栈兼容门禁（build + 双测试套件——正典栈基线）
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (SP-244 单版本统一)
+        with:
+          path: ~/.nuget/packages
+          # 缓存键与 contracts.yml windows-contract-build 同口径
+          key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/**/packages.lock.json') }}
+          restore-keys: nuget-${{ runner.os }}-
+      - name: 正典栈构建门禁（与 contracts.yml windows-contract-build 同口径）
+        run: dotnet build windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+      - name: 正典栈测试门禁（Core 领域层）
+        run: dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+      - name: 正典栈测试门禁（Broker 授权生命周期）
+        run: dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true

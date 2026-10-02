@@ -1,7 +1,8 @@
 # sync_and_verify_test.py —— 版本同步/校验链单测（pytest）。
 # 覆盖审计条目：
 #   PY-103 load_properties（注释/空行/值含=）
-#   PY-104 replace_assignment（count/缩进/引号）
+#   PY-104 replace_assignment（count/缩进/引号）——PY-265：函数已迁本文件
+#         测试侧（生产零调用——PY-216 起 gradle 字面量写入删除）
 #   PY-105 replace_xml_value（缺失抛错/首匹配）
 #   PY-106 expected_xml_value
 #   PY-107 expected_assignment
@@ -12,6 +13,7 @@
 #（保留 ROOT——dedup 脚本 subprocess 路径仍需它）。
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -21,12 +23,29 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 import sync_versions
+from atomic_write import atomic_write_text
 from sync_versions import (
     load_properties,
-    replace_assignment,
     replace_xml_value,
 )
 from verify_versions import expected_assignment, expected_xml_value
+
+
+# ---------------------------------------------------------------- PY-265
+def replace_assignment(path: Path, name: str, value: str, quoted: bool) -> None:
+    """PY-265（2026-10-02 审计）：自 scripts/sync_versions.py 迁入测试侧——
+    PY-216 起 gradle 字面量写入已删除（AD-100 构建期消费 properties），
+    生产零调用（唯一消费方是本文件的 PY-104/PY-224 回归用例）。
+    保留原实现与原子写接线（PY-278 同口径——函数体行为不变受测）。"""
+    text = path.read_text(encoding="utf-8")
+    assignment = f'{name} = "{value}"' if quoted else f"{name} = {value}"
+    pattern = rf"(?m)^(?P<indent>[ \t]*){re.escape(name)}\s*=\s*(?:\"[^\"]*\"|\d+)\s*$"
+    # PY-224（2026-10-01 审计）：函数式替换（lambda）——替换内容不经过
+    # backslash 模板解析（值含 \1 不再被当组引用）
+    updated, count = re.subn(pattern, lambda m: m.group("indent") + assignment, text, count=1)
+    if count != 1:
+        raise RuntimeError(f"expected {name} assignment not found in {path}")
+    atomic_write_text(path, updated)
 
 
 # ---------------------------------------------------------------- PY-103
@@ -180,6 +199,93 @@ class TestExpectedValueExtractors:
         assert expected_assignment(text, "versionName") == "2.2.0"
         assert expected_assignment(text, "versionCode") == "20248"  # 首个匹配
         assert expected_assignment(text, "nope") is None
+
+
+# ---------------------------------------------------------------- PY-267
+class TestSyncVersionsReleaseJsonGuard:
+    """PY-267（2026-10-02 审计）：release.json 缺失/损坏此前裸栈
+    （FileNotFoundError / json.JSONDecodeError traceback）——现包守卫转
+    RuntimeError 带文件名（干净 fail-fast 报告）。"""
+
+    @staticmethod
+    def _make_tree(tmp_path: Path, release_json: str | None) -> Path:
+        """合成最小同步树：合法 properties + 含全部五个目标元素的 csproj。"""
+        props = tmp_path / "shared" / "version.properties"
+        props.parent.mkdir(parents=True, exist_ok=True)
+        props.write_text(
+            "VERSION_NAME=2.2.0\nVERSION_CODE=20248\nWINDOWS_PACKAGE_VERSION=2.2.0.0\n"
+            "WINDOWS_PACKAGE_IDENTITY=i\nDISPLAY_NAME=d\n",
+            encoding="utf-8",
+        )
+        csproj = tmp_path / "windows" / "src" / "Aegis.Windows.App" / "Aegis.Windows.App.csproj"
+        csproj.parent.mkdir(parents=True, exist_ok=True)
+        csproj.write_text(
+            "<Project><Version>0</Version><AssemblyVersion>0</AssemblyVersion>"
+            "<FileVersion>0</FileVersion><PackageId>i</PackageId><Product>d</Product></Project>",
+            encoding="utf-8",
+        )
+        if release_json is not None:
+            (tmp_path / "shared" / "release.json").write_text(release_json, encoding="utf-8")
+        return tmp_path
+
+    def test_missing_release_json_raises_runtime_error_with_filename(
+            self, tmp_path, monkeypatch):
+        root = self._make_tree(tmp_path, release_json=None)
+        monkeypatch.setattr(sync_versions, "PROPS", root / "shared" / "version.properties")
+        monkeypatch.setattr(sync_versions, "ROOT", root)
+        with pytest.raises(RuntimeError, match="无法读取.*release\\.json"):
+            sync_versions.main()
+
+    def test_corrupt_release_json_raises_runtime_error(
+            self, tmp_path, monkeypatch):
+        root = self._make_tree(tmp_path, release_json="{ broken")
+        monkeypatch.setattr(sync_versions, "PROPS", root / "shared" / "version.properties")
+        monkeypatch.setattr(sync_versions, "ROOT", root)
+        with pytest.raises(RuntimeError, match="无法读取"):
+            sync_versions.main()
+
+
+# ---------------------------------------------------------------- PY-278
+class TestAtomicWriteText:
+    """PY-278（2026-10-02 审计）：原子写单源（scripts/atomic_write.py——
+    同目录临时文件 + os.replace）——内容往返/无残骸/覆写既有文件/LF 锁定。"""
+
+    def test_roundtrip_content_and_no_temp_leftovers(self, tmp_path):
+        target = tmp_path / "out.json"
+        atomic_write_text(target, '{"a": 1}\n')
+        assert target.read_text(encoding="utf-8") == '{"a": 1}\n'
+        # 同目录不留 .tmp 残骸
+        assert [p.name for p in tmp_path.iterdir()] == ["out.json"]
+
+    def test_overwrite_existing_file(self, tmp_path):
+        target = tmp_path / "out.txt"
+        target.write_text("OLD", encoding="utf-8")
+        atomic_write_text(target, "NEW")
+        assert target.read_text(encoding="utf-8") == "NEW"
+        assert [p.name for p in tmp_path.iterdir()] == ["out.txt"]
+
+    def test_lf_locked_on_windows(self, tmp_path):
+        # newline 默认 LF——显式 \n 不被 Windows 文本模式翻译为 CRLF
+        target = tmp_path / "lines.txt"
+        atomic_write_text(target, "a\nb\n")
+        assert b"a\nb\n" == target.read_bytes()  # 字节级无 \r
+
+    def test_write_failure_leaves_target_intact_and_no_debris(self, tmp_path, monkeypatch):
+        # 写入抛错：目标保持旧内容、无 .tmp 残骸（失败清理路径）
+        import atomic_write
+        target = tmp_path / "keep.txt"
+        target.write_text("OLD", encoding="utf-8")
+
+        def boom(fd, *a, **k):
+            import os
+            os.close(fd)
+            raise OSError("disk full (simulated)")
+
+        monkeypatch.setattr(atomic_write.os, "fdopen", boom)
+        with pytest.raises(OSError, match="disk full"):
+            atomic_write_text(target, "NEW")
+        assert target.read_text(encoding="utf-8") == "OLD"
+        assert [p.name for p in tmp_path.iterdir()] == ["keep.txt"]
 
 
 # ---------------------------------------------------------------- PY-198

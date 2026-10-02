@@ -33,7 +33,9 @@ permissions:
 jobs:
   pin-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # SP-251（2026-10-02 审计·S-28）：pin 检查是纯 grep 秒级步骤——60 分钟
+    # 超时为子流模板遗留；三子流统一 5、编排器（release.yml）统一 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-182（2026-10-01 审计）：pin 检查收敛为 composite action 单源——
@@ -138,11 +140,27 @@ jobs:
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.0.12433566"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           export ANDROID_NDK="$ANDROID_NDK_HOME"
+          # SP-223（2026-10-02 审计·S-02）：构建缺 RUSTFLAGS 16K 对齐——此前仅
+          # native-policy-artifacts.yml 组合冒烟链有（同 ELF 段对齐要求），
+          # 发布链漏配。补齐后下方 readelf 对最终产物做 fail-closed 断言。
+          # ELF 段 16KB 对齐（ADR-009）：16KB 页设备（Android 15+ 部分
+          # 机型）安装时要求 LOAD 段 16K 对齐，否则 INSTALL_FAILED_INVALID_APK
+          export RUSTFLAGS="-C link-arg=-Wl,-z,max-page-size=16384"
           test -d "$ANDROID_NDK_HOME"
           cargo ndk --platform 26 \
             -t arm64-v8a \
             -o "$GITHUB_WORKSPACE/dist/native-policy/android" \
             build --release --locked
+          # SP-223 配套：LOAD 段对齐断言（readelf 实测产物——max-page-size=
+          # 16384 生效时每个 LOAD 段 Align 列为 0x4000；任一段不对齐即 fail）
+          SO_FILE="$GITHUB_WORKSPACE/dist/native-policy/android/arm64-v8a/libaegis_policy_core.so"
+          load_total=$(readelf -l "$SO_FILE" | grep -c ' LOAD ')
+          load_aligned=$(readelf -l "$SO_FILE" | grep ' LOAD ' | grep -c '0x4000')
+          echo "[readelf] LOAD 段数=$load_total，16K(0x4000) 对齐段数=$load_aligned"
+          if [ "$load_total" -eq 0 ] || [ "$load_total" -ne "$load_aligned" ]; then
+            echo "❌ LOAD 段未全部 16KB 对齐（max-page-size=16384 未生效）"
+            exit 1
+          fi
       - name: Generate Kotlin binding and native policy manifest
         working-directory: core/rust-policy-core
         run: |
@@ -189,6 +207,9 @@ jobs:
             echo "FAIL: 发现非 arm64-v8a ABI 入包（违反单架构分发规则）"
             exit 1
           fi
+          # I-08（2026-10-02 审计）：离线画板资产随包断言——prepare-geogebra
+          # 失败/路径改形时禁止静默缺画板出厂（与 release-windows.yml 对齐）
+          grep -Fx "assets/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html" <<< "$apk_entries"
       - name: Verify APK signature (fail-closed on tag)
         shell: bash
         env:

@@ -149,37 +149,78 @@ impl TimerPrecision {
   // now 属性拦不住这条路径，必须独立圆整
   try {{
     var origMark = performance.mark;
-    performance.mark = function(name, options) {{
+    // RS-278（2026-10-02 审计）：mark 返回的 entry 此前原样透传——
+    // startTime 经宿主内部时钟（绕过 JS 可见的 performance.now），
+    // entry 的 startTime/duration 是高精度原值。返回前统一走
+    // aegisRoundEntry 圆整（RS-296：WeakSet 保证双通道只圆整一次）
+    var wrappedMark = function(name, options) {{
       if (options && typeof options.startTime === 'number') {{
         options = Object.assign({{}}, options, {{ startTime: reducePrecision(options.startTime) }});
       }}
-      return origMark.call(this, name, options);
+      return aegisRoundEntry(origMark.call(this, name, options));
     }};
-    var reg3 = window[Symbol.for('{reg_sym}')]; if (reg3) reg3(performance.mark, origMark);
+    // RS-279（2026-10-02 审计）：原型级 defineProperty（保留原 descriptor
+    // 形态）——照 RS-250 now/timeOrigin 口径。此前实例 value 遮蔽可经
+    // Performance.prototype.mark.call(performance, ...) 直取原实现
+    var oPM = Object.getOwnPropertyDescriptor(Performance.prototype, 'mark');
+    var tgtPM = Performance.prototype;
+    if (!oPM) {{
+      oPM = Object.getOwnPropertyDescriptor(performance, 'mark');
+      tgtPM = performance;
+    }}
+    if (oPM) {{
+      Object.defineProperty(tgtPM, 'mark', {{
+        value: wrappedMark,
+        writable: oPM.writable,
+        enumerable: oPM.enumerable,
+        configurable: oPM.configurable
+      }});
+    }}
+    var reg3 = window[Symbol.for('{reg_sym}')]; if (reg3) reg3(wrappedMark, origMark);
   }} catch(e) {{}}
 
   try {{
     var origMeasure = performance.measure;
-    performance.measure = function(name, start, end) {{
-      var entry = origMeasure.call(this, name, start, end);
-      try {{
-        // entry 的 duration/timeStamp 是原型 getter——实例属性遮蔽圆整
-        Object.defineProperty(entry, 'duration', {{ value: reducePrecision(entry.duration) }});
-        Object.defineProperty(entry, 'startTime', {{ value: reducePrecision(entry.startTime) }});
-      }} catch (e2) {{}}
-      return entry;
+    // RS-296（2026-10-02 审计）：measure 直读与 getEntries* 缓冲区读取是
+    // 同一 entry 对象的两条通道——统一走 aegisRoundEntry 单源圆整
+    //（WeakSet 标记单次，独立圆整会叠加两份 jitter，双通道不一致可检测）
+    var wrappedMeasure = function(name, start, end) {{
+      return aegisRoundEntry(origMeasure.call(this, name, start, end));
     }};
-    var reg4 = window[Symbol.for('{reg_sym}')]; if (reg4) reg4(performance.measure, origMeasure);
+    // RS-279：原型级 defineProperty（保留原 descriptor 形态，RS-250 口径）
+    var oPMe = Object.getOwnPropertyDescriptor(Performance.prototype, 'measure');
+    var tgtPMe = Performance.prototype;
+    if (!oPMe) {{
+      oPMe = Object.getOwnPropertyDescriptor(performance, 'measure');
+      tgtPMe = performance;
+    }}
+    if (oPMe) {{
+      Object.defineProperty(tgtPMe, 'measure', {{
+        value: wrappedMeasure,
+        writable: oPMe.writable,
+        enumerable: oPMe.enumerable,
+        configurable: oPMe.configurable
+      }});
+    }}
+    var reg4 = window[Symbol.for('{reg_sym}')]; if (reg4) reg4(wrappedMeasure, origMeasure);
   }} catch(e) {{}}
 
   // RS-217（2026-09-26 审计）：getEntries* 家族——缓冲区读取通道直取宿主
   // 内部时钟，此前仅圆整 measure() 直接返回的 entry 与 mark 的显式
   // startTime，getEntries/getEntriesByName/getEntriesByType 返回的条目
   // 仍是原值。统一经实例属性遮蔽圆整 startTime/duration（与 measure 同型）
+  //
+  // RS-296（2026-10-02 审计）：同一 entry 只圆整一次——mark/measure 直读
+  // 与 getEntries* 是同一对象的两条通道，各自独立圆整会叠加两份 jitter
+  //（直读值 ≠ 缓冲区值，双通道不一致本身可检测）。WeakSet 标记已圆整的
+  // entry，二次通道直接跳过
+  var aegisRoundedEntries = new WeakSet();
   function aegisRoundEntry(entry) {{
     try {{
+      if (aegisRoundedEntries.has(entry)) return entry;
       Object.defineProperty(entry, 'startTime', {{ value: reducePrecision(entry.startTime) }});
       Object.defineProperty(entry, 'duration', {{ value: reducePrecision(entry.duration) }});
+      aegisRoundedEntries.add(entry);
     }} catch (e2) {{}}
     return entry;
   }}
@@ -192,7 +233,21 @@ impl TimerPrecision {
         try {{ for (var i = 0; i < list.length; i++) aegisRoundEntry(list[i]); }} catch (e2) {{}}
         return list;
       }};
-      performance[name] = wrappedGet;
+      // RS-279：原型级 defineProperty（保留原 descriptor 形态，RS-250 口径）
+      var oPG = Object.getOwnPropertyDescriptor(Performance.prototype, name);
+      var tgtPG = Performance.prototype;
+      if (!oPG) {{
+        oPG = Object.getOwnPropertyDescriptor(performance, name);
+        tgtPG = performance;
+      }}
+      if (oPG) {{
+        Object.defineProperty(tgtPG, name, {{
+          value: wrappedGet,
+          writable: oPG.writable,
+          enumerable: oPG.enumerable,
+          configurable: oPG.configurable
+        }});
+      }}
       var reg = window[Symbol.for('{reg_sym}')]; if (reg) reg(wrappedGet, origGet);
     }} catch(e) {{}}
   }});
@@ -457,5 +512,66 @@ mod tests {
             "timeOrigin 纯圆整（无 jitter——双读恒定）"
         );
         assert!(script.contains("reg7(wrappedTO, origTO)"));
+    }
+
+    // —— RS-278/279/296 回归（2026-10-02 审计） ——
+
+    #[test]
+    fn mark_returned_entry_rounded() {
+        // RS-278：mark 返回的 entry 必须经 aegisRoundEntry 圆整——此前
+        // 原样透传，startTime/duration 是宿主内部时钟的高精度原值
+        let script = TimerPrecision::new().inject_script();
+        assert!(
+            script.contains("return aegisRoundEntry(origMark.call(this, name, options));"),
+            "mark 返回 entry 必须圆整"
+        );
+    }
+
+    #[test]
+    fn mark_measure_getentries_prototype_level() {
+        // RS-279：mark/measure/getEntries* 此前实例级 value 遮蔽——照
+        // RS-250 口径改原型级 defineProperty（保留原 descriptor 形态）
+        let script = TimerPrecision::new().inject_script();
+        assert!(
+            script.contains("Object.getOwnPropertyDescriptor(Performance.prototype, 'mark')"),
+            "mark 原型 descriptor 优先探测"
+        );
+        assert!(
+            script.contains("Object.getOwnPropertyDescriptor(Performance.prototype, 'measure')"),
+            "measure 原型 descriptor 优先探测"
+        );
+        assert!(
+            script.contains("Object.getOwnPropertyDescriptor(Performance.prototype, name)"),
+            "getEntries* 原型 descriptor 优先探测"
+        );
+        // 实例形态兜底（引擎定义位差异）
+        assert!(script.contains("Object.getOwnPropertyDescriptor(performance, 'mark')"));
+        assert!(script.contains("Object.getOwnPropertyDescriptor(performance, 'measure')"));
+        // 旧实例赋值遮蔽形态不得残留
+        assert!(!script.contains("performance.mark ="));
+        assert!(!script.contains("performance.measure ="));
+        assert!(!script.contains("performance[name] = wrappedGet"));
+        // descriptor 属性保留原生形态
+        assert!(script.contains("writable: oPM.writable"));
+        assert!(script.contains("writable: oPMe.writable"));
+        assert!(script.contains("writable: oPG.writable"));
+    }
+
+    #[test]
+    fn entry_rounded_once_across_channels() {
+        // RS-296：同一 entry 直读与 getEntries* 双通道只圆整一次（WeakSet
+        // 标记）——独立圆整会叠加两份 jitter，双通道不一致本身可检测
+        let script = TimerPrecision::new().inject_script();
+        assert!(
+            script.contains("var aegisRoundedEntries = new WeakSet();"),
+            "WeakSet 标记必须存在"
+        );
+        assert!(script.contains("if (aegisRoundedEntries.has(entry)) return entry;"));
+        assert!(script.contains("aegisRoundedEntries.add(entry);"));
+        // measure 直读通道统一走 aegisRoundEntry（单源圆整）
+        assert!(
+            script.contains("return aegisRoundEntry(origMeasure.call(this, name, start, end));"),
+            "measure 直读与缓冲区通道必须单源"
+        );
     }
 }

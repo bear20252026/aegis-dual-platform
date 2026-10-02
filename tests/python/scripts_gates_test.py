@@ -17,6 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 import verify_release_schema as vrs
 import verify_vectors as vv
 from generate_sbom import generate_sbom as gen_sbom_mod
@@ -330,6 +331,23 @@ class TestVerifyAgentCatalogGate:
 
 # ---------------------------------------------------------------- SP-155
 class TestToolsBadJsonGuard:
+    def test_artifact_set_missing_args_exit_2(self, monkeypatch):
+        # PY-286（2026-10-02 审计）：手工 argv 改 argparse——必填 positional
+        # 缺参自动 SystemExit(2)（0/1/2 退出码语义保持）
+        from verify_artifact_set import main as vasm
+        monkeypatch.setattr(sys, "argv", ["verify_artifact_set.py", "dist-only"])
+        with pytest.raises(SystemExit) as excinfo:
+            vasm()
+        assert excinfo.value.code == 2
+
+    def test_generate_sbom_missing_args_exit_2(self, monkeypatch):
+        # PY-286：同上——generate_sbom 缺 output positional
+        import generate_sbom as gs
+        monkeypatch.setattr(sys, "argv", ["generate_sbom.py", "manifest-only"])
+        with pytest.raises(SystemExit) as excinfo:
+            gs.main()
+        assert excinfo.value.code == 2
+
     def test_artifact_set_main_bad_json_exit_2(self, tmp_path, capsys, monkeypatch):
         from verify_artifact_set import main as vasm
         bad = tmp_path / "manifest-bad.json"
@@ -392,6 +410,64 @@ class TestToolchainLocksAligned:
         drift = {k: (dev_pins.get(k), ci_pins[k]) for k in ci_pins
                  if dev_pins.get(k) != ci_pins[k]}
         assert not drift, f"双锁版本漂移（dev vs ci.in）: {drift}"
+
+
+# ---------------------------------------------------------------- PY-263
+class TestActiveTreeGates:
+    """PY-263（2026-10-02 审计）：活跃树 ruff/bandit 门禁命令单源封装
+    （scripts/active_tree_gates.py——legacy-python-guard 两步骤的命令参数
+    收拢点，workflow 后续直接调用；本地可随时复跑同一口径）。"""
+
+    def test_gate_targets_match_workflow_face(self):
+        # 目标面与 legacy-python-guard.yml 两步骤逐字一致（防封装漂移）
+        import active_tree_gates as atg
+        assert atg.RUFF_TARGETS == [
+            "scripts", "release", "contracts", "agent",
+            "validate_release.py", "tests", "core/rust-policy-core/bindings"]
+        # SP-227（2026-10-02 审计）：bandit 面对齐 ruff 面（validate_release.py/
+        # tests/bindings 此前不在 SAST 范围）
+        assert atg.BANDIT_TARGETS == [
+            "scripts", "release", "contracts", "agent",
+            "validate_release.py", "tests", "core/rust-policy-core/bindings"]
+        assert atg.BANDIT_EXTRA_ARGS == ["-ll", "-q"]
+
+    def test_subcommand_dispatch_and_exit_codes(self, monkeypatch, capsys):
+        import active_tree_gates as atg
+        calls: list[list[str]] = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        monkeypatch.setattr(atg.subprocess, "run", fake_run)
+        assert atg.main(["ruff"]) == 0
+        assert calls[-1][1] == "-m" and calls[-1][2] == "ruff" and calls[-1][3] == "check"
+        assert calls[-1][4:] == atg.RUFF_TARGETS
+        assert atg.main(["bandit"]) == 0
+        assert "bandit.yaml" in calls[-1] and "-ll" in calls[-1] and "-r" in calls[-1]
+        assert atg.main([]) == 0  # 默认 all = ruff + bandit
+        assert len(calls) == 4
+        # 统一经 sys.executable -m 调用（不依赖 PATH 安装形态）
+        assert all(cmd[0] == sys.executable for cmd in calls)
+        capsys.readouterr()  # 消费 gate 日志输出
+
+    def test_failure_exit_code_propagates(self, monkeypatch, capsys):
+        import active_tree_gates as atg
+
+        def fake_run(cmd, **kwargs):
+            return subprocess.CompletedProcess(cmd, 1, "", "")
+
+        monkeypatch.setattr(atg.subprocess, "run", fake_run)
+        assert atg.main(["ruff"]) == 1
+        assert atg.main(["bandit"]) == 1
+        assert atg.main([]) == 1  # all：任一失败即失败
+        capsys.readouterr()
+
+    def test_bad_gate_choice_rejected(self):
+        import active_tree_gates as atg
+        with pytest.raises(SystemExit) as excinfo:
+            atg.main(["nope"])
+        assert excinfo.value.code == 2
 
 
 # 脚本可独立运行（无 pytest 环境时的最低验证）

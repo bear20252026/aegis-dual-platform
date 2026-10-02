@@ -9,11 +9,16 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import re
 import sys
 import urllib.parse
 from pathlib import Path
+
+# PY-280：SHA-256 hex 形态锚定（64 位十六进制——此前只验长度）
+_SHA256_HEX = re.compile(r"[0-9a-fA-F]{64}")
 
 
 def _sha256(path: Path) -> str:
@@ -54,7 +59,11 @@ def verify_artifact_set(dist_dir: Path, manifest: dict) -> list[str]:
         rel = urllib.parse.unquote(url.split("/")[-1]) if url else ""
         platform = art.get("platform", "") if isinstance(art.get("platform"), str) else ""
         sha = art.get("sha256", "")
-        if rel and platform and isinstance(sha, str) and len(sha) == 64:
+        # PY-280（2026-10-02 审计）：sha 此前只验长度不验 hex——64 个任意
+        # 字符（如 "g"*64 / 空白填充）会被当有效哈希入账，对账必然「哈希
+        # 不符」但报错误导读。fullmatch 十六进制形态后，非 hex 直接判
+        # 无效条目（与 release workflow 侧 sha256sum 产物口径一致）
+        if rel and platform and isinstance(sha, str) and _SHA256_HEX.fullmatch(sha):
             expected.append((platform, rel, sha.lower()))
         else:
             failures.append(f"manifest 工件条目无效: {art}")
@@ -105,21 +114,27 @@ def verify_artifact_set(dist_dir: Path, manifest: dict) -> list[str]:
     return failures
 
 
-def main() -> int:
-    if len(sys.argv) < 3:
-        print("用法: verify_artifact_set.py <dist_dir> <manifest.json>")
-        return 2
-    dist_dir = Path(sys.argv[1])
-    manifest_path = Path(sys.argv[2])
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    """PY-286（2026-10-02 审计）：手工 argv 索引改 argparse——必填 positional
+    缺参自动 exit 2（0/1/2 退出码语义不变：用法/环境 2、验证失败 1、通过 0）。"""
+    parser = argparse.ArgumentParser(
+        description="逐工件闭合验证（dist 与 manifest 双向集合相等——fail-closed）")
+    parser.add_argument("dist_dir", type=Path, help="dist 制品目录")
+    parser.add_argument("manifest", type=Path, help="manifest.json（工件枚举）")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
     # SP-155（2026-09-26 审计）：main() 对 manifest JSON json.loads 无异常
     # 处理——坏 JSON 直接 traceback 替代干净报告。包 try/except：exit 2 +
     # 文件名上下文（与环境错误同一退出码语义）。
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"❌ manifest 读取/解析失败: {manifest_path.name}（{exc}）")
+        print(f"❌ manifest 读取/解析失败: {args.manifest.name}（{exc}）")
         return 2
-    failures = verify_artifact_set(dist_dir, manifest)
+    failures = verify_artifact_set(args.dist_dir, manifest)
     if failures:
         for f in failures:
             print(f"❌ {f}")

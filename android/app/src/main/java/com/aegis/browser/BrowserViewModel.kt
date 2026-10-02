@@ -1,6 +1,7 @@
 package com.aegis.browser
 
 import android.webkit.WebView
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aegis.broker.AndroidBroker
@@ -11,6 +12,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import com.aegis.browser.WebViewAlertNotice.Kind as AlertKind
+
+/** AD-303（2026-10-02 审计）：地址栏外跳 scheme 分型集合（与 WebViewClient 同源）。 */
+private val EXTERNAL_HANDLER_SCHEMES = com.aegis.webviewadapter.AegisWebViewClient.externalHandlerSchemes
 
 /**
  * 浏览器状态 ViewModel（INV-04：BrowserSessionState 是 UI 唯一事实来源）。
@@ -33,6 +37,12 @@ class BrowserViewModel(
 
         /** 「打开」按钮防抖间隔（毫秒）——P2 修复（全量复审 2026-09-01）。 */
         const val NAVIGATE_DEBOUNCE_MS = 500L
+
+        // AD-326（2026-10-02 审计）：会话持久化键/读写单源在 TabSessionState
+        // （BrowserModels.kt）——此处别名保持既有引用形态稳定。
+        const val STATE_TAB_URLS = TabSessionState.TAB_URLS
+
+        const val STATE_ACTIVE_TAB_INDEX = TabSessionState.ACTIVE_TAB_INDEX
 
         /**
          * AD-063（2026-09-24 审计）：首页的地址栏展示形态。首页是本地资产
@@ -118,6 +128,15 @@ class BrowserViewModel(
         _pendingNavigationConfirmation.asStateFlow()
 
     /**
+     * AD-331（2026-10-02 审计）：待确认下载（二级——仅查询参数命中危险扩展）
+     * ——单槽状态（MainDialogs 优先级介于导航审批与安全提示之间）。批准即
+     * 调用续体继续入队；拒绝/关闭即放弃（fail-closed）。
+     */
+    private val _pendingDownloadConfirmation = MutableStateFlow<PendingDownloadConfirmation?>(null)
+    val pendingDownloadConfirmation: StateFlow<PendingDownloadConfirmation?> =
+        _pendingDownloadConfirmation.asStateFlow()
+
+    /**
      * P2-1 修复（全面审计 2026-09-04）：页面级错误状态（SSL 证书失败 / 主框架
      * 加载失败 / 主框架 HTTP >= 400；null = 无错误）。INV-04：错误状态经
      * ViewModel StateFlow 流转，UI 只渲染不持有。
@@ -193,17 +212,44 @@ class BrowserViewModel(
         tabManager?.let(block)
     }
 
-    /** 初始化 TabManager 并创建首个标签。 */
-    fun init(context: android.content.Context) {
+    /**
+     * 初始化 TabManager 并创建首个标签。
+     *
+     * AD-307（2026-10-02 审计）：标签 WebView 改 applicationContext 创建——持
+     * Activity context 创建会在配置变更重建后泄漏旧 Activity（density/locale
+     * 等未声明项）；崩溃重建路径不受影响（仍优先宿主 Activity context，P0-6）。
+     * AD-326（2026-10-02 审计）：savedInstanceState 携带会话态（仅 https）时
+     * 恢复标签——经 navigateExternal 安全链路重载，不新增特权入口。
+     */
+    fun init(
+        context: android.content.Context,
+        savedInstanceState: android.os.Bundle? = null,
+    ) {
         if (tabManager != null) return
         appContext = context.applicationContext
         val tm = TabManager()
         tabManager = tm
-        val initialWebView = createSecureWebView(context)
+        val restoredUrls = TabSessionState.restorableUrls(savedInstanceState)
+        if (restoredUrls.isNotEmpty()) {
+            restoredUrls.forEach { url ->
+                val wv = createSecureWebView(context.applicationContext)
+                tm.addTab(wv, url = url)
+                // 经安全导航链重载（恢复不绕过策略）
+                SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url)
+            }
+            tm.switchTo(TabSessionState.restorableActiveIndex(savedInstanceState).coerceIn(0, tm.size - 1))
+            refresh()
+            return
+        }
+        val initialWebView = createSecureWebView(context.applicationContext)
         SecureWebViewFactory.navigatorFor(initialWebView)?.openTrustedHome()
         tm.addTab(initialWebView, url = HOME_URL)
         refresh()
     }
+
+    /** AD-326：会话态写出（MainActivity.onSaveInstanceState 调用）——单源在
+     *  [TabSessionState]（tab.url 仅 https 外存；activeIndex 映射过滤后列表）。 */
+    fun writeSessionState(outState: android.os.Bundle) = TabSessionState.write(tabManager, outState)
 
     /** 刷新状态（从 TabManager 同步到 StateFlow）。 */
     fun refresh() {
@@ -232,7 +278,8 @@ class BrowserViewModel(
             // 新标签会切换当前 WebView；不能把旧标签的明确批准带入新上下文。
             rejectPendingNavigationConfirmation()
             addressDraftActive = false
-            val wv = createSecureWebView(context)
+            // AD-307：applicationContext 创建（Activity context 泄漏面——见 init 注记）
+            val wv = createSecureWebView(context.applicationContext)
             SecureWebViewFactory.navigatorFor(wv)?.openTrustedHome()
             tm.addTab(wv, url = HOME_URL)
             refresh()
@@ -265,6 +312,11 @@ class BrowserViewModel(
                 if (_pendingNavigationConfirmation.value?.webView === tab.webView) {
                     SecureWebViewFactory.navigatorFor(tab.webView)?.rejectPendingNavigation()
                     _pendingNavigationConfirmation.value = null
+                }
+                // AD-331：归属标签关闭即放弃其待确认下载（WebView 已销毁，
+                // 续体入队的落盘目标语境不复存在——fail-closed）
+                if (_pendingDownloadConfirmation.value?.webView === tab.webView) {
+                    _pendingDownloadConfirmation.value = null
                 }
                 // AD-062（2026-09-24 审计）：不显式 navigator.close()——
                 // tabManager.closeTab → tearDown → release 已是单源销毁路径。
@@ -303,8 +355,14 @@ class BrowserViewModel(
      * 导航共享实现。AD-048（2026-09-24 审计）：防抖仅保护地址栏「打开」按钮
      * 连点；外链 intent 是用户明确的单次意图，经 [bypassDebounce] 绕过，
      * 安全链路（broker 决策）不绕过。
+     *
+     * AD-328 配套：[targetOverride] 供外链 intent 在草稿激活时以显式目标
+     * 导航（不经地址栏字段中转——草稿不被覆写）。
      */
-    private fun navigateWithDebounce(bypassDebounce: Boolean) {
+    private fun navigateWithDebounce(
+        bypassDebounce: Boolean,
+        targetOverride: String? = null,
+    ) {
         val wv = tabManager?.current()?.webView
         if (wv == null ||
             (!bypassDebounce && !navigateDebounce.ok(_pendingNavigationConfirmation.value != null))
@@ -313,11 +371,24 @@ class BrowserViewModel(
         }
         // AD-238（2026-09-26 审计）：地址栏停留首页占位（用户未编辑）时点
         // 「打开」——占位 aegis://home 不可导航，映射回 HOME_URL（等价刷新）。
-        val target = if (_address.value == HOME_DISPLAY_URL) HOME_URL else _address.value
-        // AD-111（审计 2026-09-23 清单·A6 批）：空输入静默 no-op——原实现空串
-        // 会走完归一链被拒后弹「无法通过安全策略验证」恐吓提示（用户只是清空
-        // 后误触「打开」）。空输入无导航意图，静默返回不提示。
-        if (target.isBlank()) return
+        val target =
+            targetOverride
+                ?: if (_address.value == HOME_DISPLAY_URL) HOME_URL else _address.value
+        // AD-111（2026-09-23 审计）：空输入无导航意图，静默 no-op。
+        // AD-303（2026-10-02 审计·云端实证）：外跳 scheme 进归一链前拦截——
+        // tel:10086 会被误判 host:port 归一成 https://tel:10086 白白导航；
+        // 反馈不依赖 broker（scheme 集与 AD-304 同源）。两分支合一（detekt
+        // ReturnCount≤2）。空输入/外跳都就地终止，不进归一链。
+        val silentSkip = target.isBlank()
+        val externalScheme = !silentSkip && target.substringBefore(':', "").lowercase() in EXTERNAL_HANDLER_SCHEMES
+        if (silentSkip || externalScheme) {
+            if (externalScheme) {
+                appContext?.let { ctx ->
+                    Toast.makeText(ctx, R.string.unsupported_link_scheme, Toast.LENGTH_SHORT).show()
+                }
+            }
+            return
+        }
         // 提交即清除草稿：后续 onPageStarted→onPageUrlObserved 正常同步地址栏
         addressDraftActive = false
         val navigated = SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(target).orFalse()
@@ -334,11 +405,17 @@ class BrowserViewModel(
      * P1-4 修复（全面审计批次4）：外链 intent 消费——经地址栏同一安全链路
      * （归一 + OriginPolicy + broker），非法 scheme 走既有拒绝反馈
      * （fail-closed），不新增特权入口。AD-048：外链绕过防抖。
+     *
+     * AD-328（2026-10-02 审计）：草稿激活时跳过地址栏覆写（后台到达的外链
+     * 导航不得打断用户输入——与 refresh/onPageUrlObserved 草稿保护同口径）；
+     * 导航本身照常发起（经显式目标，不经地址栏字段中转）。
      */
     fun openExternalUrl(url: String?) {
         if (url.isNullOrBlank()) return
-        _address.value = url
-        navigateWithDebounce(bypassDebounce = true)
+        if (!addressDraftActive) {
+            _address.value = url
+        }
+        navigateWithDebounce(bypassDebounce = true, targetOverride = url)
     }
 
     /** 历史导航（后退/前进/刷新——合并减少函数数——detekt TooManyFunctions）。
@@ -424,6 +501,21 @@ class BrowserViewModel(
         return SecureWebViewFactory.navigatorFor(pending.webView)?.rejectPendingNavigation() == true
     }
 
+    /**
+     * AD-331（2026-10-02 审计）：下载确认对话框「仍要下载」——仅消费当前
+     * 挂起项一次（批准后清除，续体单次调用；重复点击/dialog 复现均为 no-op）。
+     */
+    fun approvePendingDownload() {
+        val pending = _pendingDownloadConfirmation.value ?: return
+        _pendingDownloadConfirmation.value = null
+        pending.proceed()
+    }
+
+    /** AD-331：下载确认对话框拒绝/关闭——放弃待确认下载（fail-closed）。 */
+    fun rejectPendingDownload() {
+        _pendingDownloadConfirmation.value = null
+    }
+
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */
     fun getTabManager(): TabManager? = tabManager
 
@@ -482,7 +574,15 @@ class BrowserViewModel(
                 _webViewAlert.value = WebViewAlertNotice(message, WebViewAlertNotice.Kind.SECURITY_NOTICE)
             },
             onRefreshTabs = ::refresh,
-            errorStrings = { pageErrorStringsOf(::alertText, ::alertText) },
+            // AD-332 回归修复：宿主构造参数随 BrowserViewModelHost 属性改名
+            // （errorStrings → resolveErrorStrings——消除与 override fun
+            // errorStrings() 的同名遮蔽，AD-003 同型）。
+            resolveErrorStrings = { pageErrorStringsOf(::alertText, ::alertText) },
+            // AD-331：二级下载确认登记（单槽状态——MainDialogs 渲染）
+            onRequestDownloadConfirmation = { wv, url, proceed ->
+                _pendingDownloadConfirmation.value =
+                    PendingDownloadConfirmation(webView = wv, url = url, continuation = proceed)
+            },
         )
 
     /**

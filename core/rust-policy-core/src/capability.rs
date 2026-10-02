@@ -107,9 +107,15 @@ impl Capability {
                 if origin.eq_ignore_ascii_case(o) {
                     return true;
                 }
-                // 入参可为同源完整 URL：origin 白名单值 + 路径/查询/锚点起始
+                // 入参可为同源完整 URL：origin 白名单值 + 路径/查询/锚点起始。
+                // RS-288（2026-10-02 审计）：前缀比较改 ASCII 大小写不敏感
+                // ——URL host 大小写在语义上不敏感（HTTPS://TRUSTED.COM/x
+                // 与 https://trusted.com/x 同源），此前 starts_with 区分
+                // 大小写，大写形态完整 URL 被 fail-closed 拒绝（合法请求
+                // 误拒）。按字节比较（eq_ignore_ascii_case）避免多字节
+                // 边界切片 panic
                 origin.len() > o.len()
-                    && origin.starts_with(o)
+                    && origin.as_bytes()[..o.len()].eq_ignore_ascii_case(o.as_bytes())
                     && matches!(origin.as_bytes()[o.len()], b'/' | b'?' | b'#')
             })
     }
@@ -236,6 +242,34 @@ mod tests {
         assert!(!cap.is_origin_allowed("https://xnottrusted.com"));
         assert!(cap.is_origin_allowed("https://trusted.com/path"));
         assert!(cap.is_origin_allowed("https://trusted.com"));
+    }
+
+    // —— RS-288 回归（2026-10-02）：前缀比较大小写不敏感 ——
+
+    #[test]
+    fn origin_prefix_match_is_ascii_case_insensitive() {
+        // RS-288：完整 URL 前缀匹配此前 starts_with 区分大小写——
+        // HTTPS://TRUSTED.COM/path（host 大写，与白名单同源）被
+        // fail-closed 拒绝（合法请求误拒）。与 eq_ignore_ascii_case 的
+        // 精确匹配分支（既有行为）口径统一
+        let cap = Capability {
+            name: "read".into(),
+            scope: CapabilityScope::Read,
+            allowed_origins: vec!["https://trusted.com".into()],
+            max_uses: None,
+            uses_count: 0,
+        };
+        assert!(
+            cap.is_origin_allowed("HTTPS://TRUSTED.COM/path"),
+            "大写 scheme+host 的完整 URL 必须命中前缀白名单"
+        );
+        assert!(
+            cap.is_origin_allowed("https://TRUSTED.com/x?y=1"),
+            "混合大小写 host + 路径/查询边界"
+        );
+        // 误拦回归锚点保持：不同 host 仍拒绝（大小写不敏感 ≠ 放宽匹配域）
+        assert!(!cap.is_origin_allowed("https://evil-TRUSTED.com/path"));
+        assert!(!cap.is_origin_allowed("https://trusted.com.evil.net/path"));
     }
 
     #[test]

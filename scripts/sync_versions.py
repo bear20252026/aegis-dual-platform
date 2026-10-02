@@ -2,8 +2,14 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 from xml.sax.saxutils import escape  # PY-186：XML 文本转义单源（& < >）
+
+# PY-278（2026-10-02 审计）：原子写单源（同目录临时文件 + os.replace）——
+# 本脚本此前两处直接 write_text，写入中断留半截 csproj/release.json
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from atomic_write import atomic_write_text
 
 ROOT = Path(__file__).resolve().parents[1]
 PROPS = ROOT / "shared" / "version.properties"
@@ -23,18 +29,11 @@ def load_properties(path: Path) -> dict[str, str]:
     return values
 
 
-def replace_assignment(path: Path, name: str, value: str, quoted: bool) -> None:
-    text = path.read_text(encoding="utf-8")
-    assignment = f'{name} = "{value}"' if quoted else f"{name} = {value}"
-    pattern = rf"(?m)^(?P<indent>[ \t]*){re.escape(name)}\s*=\s*(?:\"[^\"]*\"|\d+)\s*$"
-    # PY-224（2026-10-01 审计）：替换串此前经 rf"\g<indent>{assignment}" 反向
-    # 引用模板拼接——值含反斜杠（如 \1）会被当组引用解析（re.error 或静默
-    # 错位）。改为函数式替换（lambda）——替换内容不再经过 backslash 模板
-    # 解析（与 PY-186 replace_xml_value 同口径）。
-    updated, count = re.subn(pattern, lambda m: m.group("indent") + assignment, text, count=1)
-    if count != 1:
-        raise RuntimeError(f"expected {name} assignment not found in {path}")
-    path.write_text(updated, encoding="utf-8")
+# PY-265（2026-10-02 审计）：删除 replace_assignment——PY-216 起 gradle 字面量
+# 写入已移除（AD-100 构建期消费 properties），生产零调用（唯一消费方是
+# sync_and_verify_test.py 的单测自身）。函数已迁入测试侧
+#（tests/python/sync_and_verify_test.py——PY-224 反向引用回归仍受锁定）；
+# verify_versions.expected_assignment 是独立的读侧提取器，不受影响。
 
 
 def replace_xml_value(path: Path, element: str, value: str) -> None:
@@ -49,7 +48,8 @@ def replace_xml_value(path: Path, element: str, value: str) -> None:
         pattern, lambda m: m.group(1) + escaped + m.group(2), text, count=1)
     if count != 1:
         raise RuntimeError(f"expected <{element}> element not found in {path}")
-    path.write_text(updated, encoding="utf-8")
+    # PY-278：原子落盘（半截写入消除）+ LF 锁定（PY-232 口径）
+    atomic_write_text(path, updated)
 
 
 def main() -> None:
@@ -94,10 +94,18 @@ def main() -> None:
     # CI 运行时 /D 注入，无写死版本）——改为同步 shared/release.json
     #（此前 sync 不覆盖该文件，漂移无门禁）
     release_json_path = ROOT / "shared" / "release.json"
-    release_json = json.loads(release_json_path.read_text(encoding="utf-8"))
+    # PY-267（2026-10-02 审计）：release.json 缺失/损坏此前裸栈
+    #（FileNotFoundError / json.JSONDecodeError traceback）——包守卫转
+    # RuntimeError 带文件名（fail-fast 干净报告，与 PY-026 坏行口径同语义）
+    try:
+        release_json = json.loads(release_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"无法读取 {release_json_path}: {exc}") from exc
     release_json["version"] = values["VERSION_NAME"]
     release_json["versionCode"] = int(values["VERSION_CODE"])
-    release_json_path.write_text(json.dumps(release_json, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # PY-268/278：newline="\n" 锁 LF + 原子落盘（半截写入消除）
+    atomic_write_text(
+        release_json_path, json.dumps(release_json, indent=2, ensure_ascii=False) + "\n")
 
     print("Version declarations synchronized from shared/version.properties")
 

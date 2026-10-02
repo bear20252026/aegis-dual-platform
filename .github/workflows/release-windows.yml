@@ -25,7 +25,9 @@ permissions:
 jobs:
   pin-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # SP-251（2026-10-02 审计·S-28）：pin 检查是纯 grep 秒级步骤——60 分钟
+    # 超时为子流模板遗留；三子流统一 5、编排器（release.yml）统一 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-182（2026-10-01 审计）：pin 检查收敛为 composite action 单源——
@@ -54,7 +56,10 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      # SP-244（2026-10-02 审计·S-21）：actions/cache 双主版本并存（本文件与
+      # contracts.yml 的 v4.3.0 vs native-policy/release-android 的 v6.1.0）
+      # ——统一 v6.1.0（git ls-remote 核对 tag SHA）
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
           # SP-177（2026-10-01 审计）：缓存键 glob 已含 packages.lock.json——
@@ -185,7 +190,12 @@ jobs:
           }
           $geo = "dist/aegis-windows/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html"
           $geoOk = Test-Path $geo
-          if (-not $geoOk) { Write-Warning "GeoGebra 未随包（画板降级为未随包提示）——允许降级" }
+          # SP-233（2026-10-02 审计·S-16）：GeoGebra 缺失由 warn-only 改 throw
+          # ——与上游 prepare-geogebra action 的 fail-closed 语义对齐（画板是
+          # 随包交付承诺的一部分，静默降级只留一条易被淹没的警告）。
+          # 产品决策注记：应用侧"未随包提示"的运行时降级路径保留（缺画板
+          # 不崩溃），但发布产物不得再静默缺画板——缺失即本步骤红。
+          if (-not $geoOk) { throw "GeoGebra 未随包（画板降级提示仍保留于应用侧，但发布产物完整性 fail-closed）" }
           # XAML 资源连通性：所有 FindResource(key) 必须有对应 x:Key
           #（崩溃根源 V3——BookmarkBarButton 未定义，有书签即启动崩溃）
           python scripts/verify_xaml_resources.py

@@ -14,20 +14,32 @@ Aegis 双端安全浏览器：Windows（C#/.NET 10 + 原生 WebView2——唯一
   进行**；P0 安全缺陷仅经安全披露通道评估（ADR-009 D4 冻结纪律的归档终态）；
 - `legacy/` 下的 Qt 与 `legacy/ui/` 为已归档死代码，禁止 import。
 
-## 关键命令（必须先跑）
+## 验证纪律（云端单源——2026-10-03 起，最高优先级）
+
+1. **本地只编辑，云端做检验**：本地环境仅用于代码编辑与 `git diff` 自查；
+   **禁止在本地运行任何构建/测试/lint/SAST/验证命令**（dotnet build/test、
+   cargo test/clippy、gradlew、node --test、pytest、ruff、bandit、
+   validate_release/verify_* 等一律不跑）。下方「关键命令」仅作 CI 口径参考。
+2. **每一轮修改都上云端**：改动完成即推送 GitHub（audit 分支 → PR），
+   由 GitHub Actions 全套门禁验证；**Actions 结果是唯一通过依据**。
+3. **红灯迭代**：CI 红灯 → 修复 → 再次推送（下一轮），直至全绿才可合并；
+   合并前必须全部 pull_request workflow 绿（contracts / ci / core-rust /
+   android-quality / supply-chain 等）。
+
+## 关键命令（CI 同口径参考——按验证纪律本地不执行）
 
 ```bash
 # —— Windows 正典栈（C#/.NET 10，ADR-009）——
 cd windows
-dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64   # 0 警告 0 错误——SP-220：-r 与 NuGet 锁一致
-dotnet test tests/Aegis.Windows.Core.Tests                    # 核心套件全绿
-dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全绿
+dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64 -p:RestoreLockedMode=true   # 0 警告 0 错误——SP-220/S-03：-r 与 NuGet 锁一致，锁模式防改写
+dotnet test tests/Aegis.Windows.Core.Tests -r win-x64 -p:RestoreLockedMode=true    # 核心套件全绿
+dotnet test tests/Aegis.Windows.Broker.Tests -r win-x64 -p:RestoreLockedMode=true  # Broker 套件全绿
 
 # —— Rust 策略核心 ——
 cd core/rust-policy-core
 # SP-183（2026-10-01 审计）：clippy 口径与 CI（core-rust/release-core）统一——
 # --all-features --all-targets -D warnings（测试/bench 目标同受检）
-cargo test && cargo clippy --all-features --all-targets -- -D warnings && cargo fmt --check  # 全绿+0 警告
+cargo test --locked --all-features && cargo clippy --locked --all-features --all-targets -- -D warnings && cargo fmt --check  # 全绿+0 警告——与 core-rust.yml 逐字同口径（SP-183/S-06）
 
 # —— 契约/版本门禁（仓库根）——
 python validate_release.py             # AST/JSON/XML 静态验证（版本校验在 scripts/verify_versions.py）
@@ -90,7 +102,7 @@ bandit -c bandit.yaml -r scripts release contracts agent -ll -q
 
 ## 代码检查清单（提交前自查）
 
-- [ ] 改动所涉技术栈的正典门禁全过（WB-118，2026-09-26 审计——按端选择）：
+- [ ] 遵守「验证纪律」：本地零检验，推送后 GitHub Actions 对应门禁全绿（红灯修复后再推）：
   - C#：`dotnet build`（0 警告）+ `dotnet test` 两套件全绿
   - Rust：`cargo test && cargo clippy --all-features --all-targets -- -D warnings
     && cargo fmt --check` 全绿（SP-183 统一口径）
@@ -122,7 +134,7 @@ bandit -c bandit.yaml -r scripts release contracts agent -ll -q
 | `android/broker/` + `android/webview-adapter/` | Android 授权 Broker 与导航状态机 |
 | `contracts/` | 契约单源（schemas/vectors/policy + codegen 生成器） |
 | `shared/` | 双端单源（version.properties/release.json/shell 首页资产） |
-| `docs/audit/` | 全仓审计报告（2026-09-07 200 项、2026-09-23 1115 项、2026-09-26 229 项、2026-10-01 241 项——SP-188 补全台账索引） |
+| `docs/audit/` | 全仓审计报告（2026-09-07 200 项、2026-09-23 1115 项、2026-09-26 229 项、2026-10-01 241 项、2026-10-02 217 项——附机器可读 CSV 索引供下轮自动去重，I-23） |
 | `legacy/windows-pywebview/` | 只读归档栈（ADR-009——禁止活跃改动，见红线 #1） |
 
 ## 常见陷阱

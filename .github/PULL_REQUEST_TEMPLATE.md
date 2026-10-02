@@ -5,7 +5,11 @@
       Rust：cargo test && clippy --all-features --all-targets -D warnings && fmt --check（SP-183 统一口径）
       Android：四模块 ktlint + detekt + 单测 + :app:lintDebug
       shared/shell：node --test（目录 glob——SP-163/187）+ node shared/shell/snake.test.js
-      scripts/contracts/release：validate_release.py + verify_versions.py + pytest
+      scripts/contracts/release：validate_release.py + verify_versions.py +
+      verify_release_schema.py + verify_cross_end_lists.py + verify_vectors.py +
+      verify_xaml_resources.py + verify_bridge_guard.py（SP-243：契约五脚本
+      补全——与 contracts.yml/release-windows.yml 门禁同口径）+
+      pytest（tests/python 与 agent/tests）
 - [ ] agent/catalog 改动过红队门禁：pytest agent/tests + verify_agent_catalog.py（SP-191）
 - [ ] 依赖/锁文件改动过供应链门禁：--require-hashes 可装 + pip-audit 干净（SP-191）
 - [ ] 遵守单文件单职责与行数红线（新文件 ≤300，改造后 ≤500）

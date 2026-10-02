@@ -67,11 +67,9 @@ public partial class HistoryWindow : Window
 
     private void ApplyFilter()
     {
-        string? from;
-        string? to;
-        _suppressFilter = true;
-        try { ComputeRange(out from, out to); }
-        finally { _suppressFilter = false; }
+        // CS-396（2026-10-02 审计）：删除 ComputeRange+suppress 包裹（其结果
+        // from/to 从未被消费——LoadPage 内自行重算；suppress 也不会触发的
+        // DateField 事件被无谓设防）。纯死开销，直接加载第一页
         LoadPage(1);
     }
 
@@ -260,7 +258,25 @@ public partial class HistoryWindow : Window
         if (!_initialized || _suppressFilter || sender is not ToggleButton tb)
             return;
         if (!(tb.IsChecked == true))
+        {
+            // CS-392（2026-10-02 审计）：Unchecked 分支此前空操作（ChipRange 取消
+            // 勾选后 RangePanel 残留、RangeFrom/To 旧值驻留——再次启用范围筛选
+            // 时状态机断裂）。收起范围面板并清空起止日期后重载；清值经
+            // suppress 防护（DateField 会触发 RangeDate_Changed）
+            _suppressFilter = true;
+            try
+            {
+                RangePanel.Visibility = Visibility.Collapsed;
+                RangeFrom.SelectedDate = null;
+                RangeTo.SelectedDate = null;
+            }
+            finally
+            {
+                _suppressFilter = false;
+            }
+            ApplyFilter();
             return;
+        }
         _suppressFilter = true;
         foreach (var chip in new[] { ChipAll, ChipToday, ChipYesterday, ChipWeek, ChipMonth, ChipRange })
             if (!ReferenceEquals(chip, tb))
@@ -285,7 +301,9 @@ public partial class HistoryWindow : Window
 
     private void RangeDate_Changed(object sender, EventArgs e)
     {
-        if (!_initialized)
+        // CS-392：suppress 期（程序化清值/互斥换选）不重载——用户手选日期
+        // 才触发查询（防一次状态翻转双查询）
+        if (!_initialized || _suppressFilter)
             return;
         ApplyFilter();
     }

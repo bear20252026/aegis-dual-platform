@@ -2,6 +2,7 @@ namespace Aegis.Windows.Chrome;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
@@ -38,6 +39,8 @@ public partial class InPrivateWindow : Window
     private readonly Func<Task<WebView.InPrivateEnvironmentLease>> _leaseFactory;
     // 引擎偏好构造时取一次（此后不再读盘——地址栏每次回车同步 IO 已移除）
     private readonly string _engineKey;
+    // CS-402（2026-10-02 审计）：KillSwitch 常驻横幅订阅句柄（Window_Closing 解绑）
+    private readonly Action _killSwitchEngagedHandler;
 
     private const string HomeUrl = Ntp.NtpAssets.Url;
 
@@ -81,6 +84,15 @@ public partial class InPrivateWindow : Window
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
         TabStrip.ItemsSource = _tabs.Tabs;
+        // CS-402（2026-10-02 审计）：KillSwitch 触发后的常驻指示（主窗 KillSwitchBanner
+        // 同款）——无痕窗 broker 复用进程级共享 KillSwitch（CS-291），设置窗触发的
+        // 紧急终止此前对本窗零指示（只见"导航没反应"）。横幅一经显示不再隐藏
+        //（Engage 单向——重启恢复）
+        _killSwitchEngagedHandler = () => Dispatcher.BeginInvoke(
+            () => KillSwitchBanner.Visibility = Visibility.Visible);
+        _broker.KillSwitch.Engaged += _killSwitchEngagedHandler;
+        if (_broker.KillSwitch.IsEngaged)
+            KillSwitchBanner.Visibility = Visibility.Visible;
         _tabs.NewTab(HomeUrl);
     }
 
@@ -95,6 +107,19 @@ public partial class InPrivateWindow : Window
                 if (ReferenceEquals(_environmentLease, lease))
                     _environmentLease = null;
                 lease.Dispose();
+                return;
+            }
+            // CS-384（2026-10-02 审计）：await 期间该标签可能已被关闭——校验
+            // tabId 仍在集合，不在则不再 Create（此前对已死标签照样创建 WebView
+            // 实例，随后成为孤儿控件）。租约是窗口级共享资源：窗口内已无任何
+            // 标签时才归还（其它标签仍在等待/使用同一环境）
+            if (_tabs.Tabs.All(t => t.TabId != tab.TabId))
+            {
+                if (_tabs.Tabs.Count == 0 && ReferenceEquals(_environmentLease, lease))
+                {
+                    _environmentLease = null;
+                    lease.Dispose();
+                }
                 return;
             }
             // 创建+挂载+初始化（异常观察）统一走协调器；无痕隔离环境经参数注入
@@ -143,6 +168,11 @@ public partial class InPrivateWindow : Window
             // CS-295：确认门事件接线（与主窗同口径——面板状态由控制器唯一持有）
             runtime.Host.NavigationConfirmationRequested += (_, e) => _approval.Request(tab.TabId, e);
             runtime.Host.NavigationConfirmationResolved += (_, _) => _approval.Resolved();
+            // CS-378（2026-10-02 审计）：策略拒绝原因订阅（主窗同款，参照
+            // MainWindow CreateRuntime 的 CS-355 接线）——此前无痕窗零订阅，
+            // broker DenyReason 在 HostWebView 内被丢弃（导航只是"无反应"，
+            // 零可见反馈）
+            runtime.NavigationDenied += msg => Dispatcher.BeginInvoke(() => ShowRejection(msg));
             // CS-292（2026-09-26 审计）：target=_blank/window.open 链接——主窗有
             // 订阅而无痕窗此前零订阅（HostWebView 一律 Handled 后转发，无人接
             // 收即点击无任何反应）；与主窗同口径：公网/本机地址放行新建标签
@@ -226,7 +256,14 @@ public partial class InPrivateWindow : Window
         };
     }
 
-    private void OnTabClosed(string tabId) => _runtimeCoordinator.Close(tabId);
+    private void OnTabClosed(string tabId)
+    {
+        _runtimeCoordinator.Close(tabId);
+        // CS-393（2026-10-02 审计）：关掉最后一个标签（CloseTab 返回 null——
+        // 集合已空）后窗口滞留空壳——此时关窗（与主窗同口径）
+        if (_tabs.Tabs.Count == 0)
+            Close();
+    }
 
     private void OnTabSwitched(Tab tab)
     {
@@ -261,9 +298,11 @@ public partial class InPrivateWindow : Window
 
     private void TabClose_Click(object sender, RoutedEventArgs e)
     {
+        // CS-411（2026-10-02 审计）：与主窗同口径的单源守卫（SecurityLog 留痕 +
+        // try/catch 不阻断——此前本窗裸调 CloseTab，库/集合异常直接炸窗）
         if (sender is System.Windows.FrameworkElement fe
             && (fe.Tag as string ?? (fe.DataContext as Tab)?.TabId) is { } id)
-            _tabs.CloseTab(id);
+            WindowSharedChrome.CloseTabSafely(_tabs, id);
     }
 
     private void TabStrip_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
@@ -375,6 +414,8 @@ public partial class InPrivateWindow : Window
     private void Window_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
         _closed = true;
+        // CS-402：解绑 KillSwitch 横幅订阅（横幅句柄不再持有已关窗口）
+        _broker.KillSwitch.Engaged -= _killSwitchEngagedHandler;
         // 全部 runtime 经协调器统一销毁（先摘视觉树再释放——与主窗口同序）
         // CS-366（2026-10-01 审计）：_runtimes 清空收敛到协调器 Dispose 单点
         _runtimeCoordinator.Dispose();

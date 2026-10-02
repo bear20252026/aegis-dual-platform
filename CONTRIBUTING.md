@@ -55,19 +55,27 @@
 
 ## 质量门槛
 
+> **云端验证纪律（WB-212，2026-10-02 审计补——最高优先级，与 CLAUDE.md
+> 「验证纪律」节同源）**：本地环境仅用于代码编辑与 `git diff` 自查，
+> **禁止在本地运行任何构建/测试/lint/SAST/验证命令**；改动推送 GitHub
+> （audit 分支 → PR）后由 GitHub Actions 全套门禁验证，**Actions 结果是
+> 唯一通过依据**（红灯迭代修复后再推，全绿才可合并）。下列命令仅作
+> CI 同口径参考，按纪律本地不执行。
+
 合并前必须全部通过（与 CLAUDE.md「关键命令」口径一致——WB-006 整改补全双栈）：
 
 ```bash
 # —— Windows 正典栈（C#/.NET 10，ADR-009 唯一发布制品）——
 cd windows
-dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64   # 0 警告 0 错误——SP-220：-r 与 NuGet 锁一致
-dotnet test tests/Aegis.Windows.Core.Tests                    # 核心套件全绿
-dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全绿
+dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64 -p:RestoreLockedMode=true   # 0 警告 0 错误——SP-220/S-03：-r 与 NuGet 锁一致，锁模式防改写
+dotnet test tests/Aegis.Windows.Core.Tests -r win-x64 -p:RestoreLockedMode=true    # 核心套件全绿
+dotnet test tests/Aegis.Windows.Broker.Tests -r win-x64 -p:RestoreLockedMode=true  # Broker 套件全绿
 
 # —— Rust 策略核心 ——
 cd ../core/rust-policy-core
 # SP-183（2026-10-01 审计）：clippy 口径与 CI 统一——--all-features --all-targets -D warnings
-cargo test && cargo clippy --all-features --all-targets -- -D warnings && cargo fmt --check  # 全绿 + 0 警告
+# S-06（2026-10-02 审计）：补 --locked（test 另补 --all-features）——与 core-rust.yml 逐字同口径
+cargo test --locked --all-features && cargo clippy --locked --all-features --all-targets -- -D warnings && cargo fmt --check  # 全绿 + 0 警告
 
 # —— 契约/版本/UI 回归门禁（回到仓库根执行；SP-163：node 21+ glob 展开——
 #    新测试文件入目录即入门禁，Windows 本地与 ci.yml 一致）——
@@ -79,6 +87,19 @@ node --test "tests/ui-regression/*.test.mjs"    # UI 回归
 node shared/shell/snake.test.js                   # 贪吃蛇逻辑回归
 python -m pytest tests/python/ -q                 # 发布链离线单测
 
+# —— contracts.yml 五脚本（WB-209，2026-10-02 审计补——契约门禁此前漏列，
+#    与 .github/workflows/contracts.yml 同口径）——
+python scripts/verify_release_schema.py                    # release.json 全 schema 校验（PY-102）
+python scripts/verify_vectors.py                           # 契约 JSON 与预期决策校验（PY-064）
+python contracts/codegen/validate_vector_schemas.py        # 向量对 JSON Schema 校验（PY-013）
+python contracts/codegen/analyze_action_catalog.py         # action-catalog 静态分析门禁（PY-015）
+python contracts/codegen/generate_csharp.py && \
+python contracts/codegen/generate_kotlin.py && \
+python contracts/codegen/verify_contract_compatibility.py  # 重生成 + 兼容性验证
+
+# —— Agent 红队（WB-209 补——agent-redteam.yml 同口径）——
+python -m pytest agent/tests -q
+
 # —— Android 端（四模块与 android-quality.yml 一致——WB-116 对齐 CI）——
 cd android
 ./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck
@@ -88,6 +109,21 @@ cd android
 
 # —— legacy 归档栈（只读——禁止在此修复，仅归档基线参考）——
 # python3 validate_release.py / ruff / bandit / mypy 仅在触及归档目录时运行
+```
+
+契约重生成 + 漂移门禁（WB-210，2026-10-02 审计补——触及 contracts/codegen
+模板或其输入时必跑；与 contracts.yml「Regenerate jsapi schema and fail on
+drift」「Fail if generated bindings are stale」两步同口径——生成物过期即红）：
+
+```bash
+python contracts/codegen/generate_csharp.py       # 重生成 C# 绑定
+python contracts/codegen/generate_kotlin.py       # 重生成 Kotlin 绑定
+python scripts/gen_jsapi_schema.py                # 重生成 jsapi schema（PY-014）
+git diff --exit-code -- shared/jsapi-schema.json \
+  windows/src/Aegis.Windows.App/Contracts/Generated \
+  android/contracts/src/main/kotlin/com/aegis/contracts/generated   # 有 diff = 生成物过期 → 门禁红
+python contracts/codegen/verify_contract_compatibility.py   # 契约兼容性验证
+python contracts/codegen/verify_bridge_guard.py             # 守卫 JS 单源（ADR-007）
 ```
 
 改动所涉技术栈的检查必须全过；**不允许**为通过检查而删除、注释或弱化已有测试与断言（"修好"而非"藏好"）。

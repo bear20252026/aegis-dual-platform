@@ -209,11 +209,20 @@ test('WB-125 脚本加载顺序硬契约：Host → snake → import → main', 
 
 // WB-126（2026-09-26 审计）：导入弹层初始隐藏依赖 hidden 属性与高特异度
 // CSS 规则配对——此前零回归测试，拆掉任一半即静默失效
-test('WB-126 导入弹层初始隐藏：hidden 属性 + [hidden] CSS 规则双断言', () => {
+// WB-179（2026-10-02 审计）：断言面扩到开/关配对——JS 显隐改 hidden 属性
+// 配对翻转，不再依赖内联 style.display（属性残留即「语义隐藏、视觉可见」）
+test('WB-126/179 导入弹层显隐：hidden 初始态 + CSS 配对 + JS 开/关配对翻转', () => {
   assert.match(HTML, /id="importModal"[^>]*\shidden>/,
     '标记层必须带 hidden 属性（初始隐藏语义）');
   assert.match(CSS, /#importModal\[hidden\]\s*\{\s*display:\s*none;\s*\}/,
     '作者 display:flex 会压过 hidden 的 UA 规则——[hidden] 高特异度配对规则必须存在');
+  assert.match(IMPORT, /modal\.removeAttribute\('hidden'\)/,
+    '打开必须移除 hidden（配对翻转的一半）');
+  assert.match(IMPORT, /modal\.setAttribute\('hidden', ''\)/,
+    '关闭必须回写 hidden（配对翻转的另一半）');
+  const importCode = IMPORT.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/modal\.style\.display/.test(importCode),
+    '弹层显隐不得再依赖内联 style.display（hidden 口径单源——WB-179）');
 });
 
 // WB-105（2026-09-26 审计）：meta CSP 不得再含 frame-ancestors——规范明文
@@ -268,10 +277,14 @@ test('WB-111 减动效偏好：CSS 媒体查询 + canvas shake/flash 渲染门�
 
 // WB-109（2026-09-26 审计）：主搜索框不得成为零焦点指示控件
 //（断言剥掉 CSS 注释——注释中的历史描述不算回归）
-test('WB-109 搜索框焦点指示：outline:none 规则不得回归', () => {
+// WB-182（2026-10-02 审计）：.search input 基础规则的 outline:0 同样压过
+// 全局 :focus-visible（特异度 0,1,1 > 0,1,0）——一并锁死不得回归
+test('WB-109/182 搜索框焦点指示：outline:none/outline:0 规则不得回归', () => {
   const cssCode = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
   assert.ok(!/\.search input:focus-visible\s*\{[^}]*outline:\s*none/.test(cssCode),
     '.search input:focus-visible outline:none 不得回归');
+  assert.ok(!/\.search input\s*\{[^}]*outline:\s*0/.test(cssCode),
+    '.search input 基础规则 outline:0 压过全局 :focus-visible——不得回归（WB-182）');
   assert.match(cssCode, /\.search:focus-within/, '胶囊容器必须有 focus-within 组级描边');
 });
 
@@ -283,6 +296,17 @@ test('WB-132 壁纸 tooltip：WALLPAPERS 表必须有中文 label 字段', () =>
   assert.match(MAINJS, /label:'星紫'/, 'violet 必须有中文名');
   assert.match(MAINJS, /d\.title = WALLPAPERS\[idx\]\.label;/, 'tooltip 必须用 label');
   assert.ok(!/d\.title = WALLPAPERS\[idx\]\.name;/.test(MAINJS), 'tooltip 不得回退到内部文件名');
+});
+
+// WB-188（2026-10-02 审计）：壁纸圆点选中态语义——容器 group + 圆点
+// aria-pressed 同步（行为级断言在 start_main.test.mjs WB-051/025 对照组）
+test('WB-188 壁纸圆点选中态语义：#wpList group 语义 + aria-pressed 同步', () => {
+  assert.match(HTML, /id="wpList"[^>]*role="group"[^>]*aria-label="壁纸选择"/,
+    '#wpList 容器必须声明 role=group 与可编程名称（读屏播报圆点组）');
+  assert.match(MAINJS, /setAttribute\('aria-pressed', 'false'\)/,
+    '圆点渲染时必须声明 aria-pressed 初始态');
+  assert.match(MAINJS, /setAttribute\('aria-pressed', isActive \? 'true' : 'false'\)/,
+    'setWallpaper 必须随选中态同步翻转 aria-pressed');
 });
 
 // WB-108（2026-09-26 审计）：引擎菜单两条关闭路径都必须复位 aria-expanded

@@ -45,17 +45,26 @@ select = [
 # 归档栈（legacy guard 口径）import 排序违规均为 0，重启零成本
 ignore = ["RUF001", "RUF003", "E501", "TRY300", "TRY003", "TRY301", "RUF021", "E402"]
 
-# SP-164（2026-09-26 审计）：测试豁免单源——此前 INP001/S101/PLR2004 在
-# workflow ruff 行内 --ignore 重复维护（与全局 ignore 清单双源漂移面）。
-# INP001 隐式命名空间包（测试目录无需 __init__.py）、S101 assert（测试语义）、
-# PLR2004 魔法值（断言可读性优先）。
+# PY-269（2026-10-02 审计）：删除 [tool.ruff.lint.per-file-ignores] 整节——
+# tests/** 与 agent/tests/** 的 INP001/S101/PLR2004 豁免在 PY-238 显式
+# select 固定规则面后不在面内（三条规则均未被 select——豁免永无生效对象，
+# 死配置），SP-164 注释所称「测试豁免单源」随之失实；PY-239 已先删
+# "**/selftest_*.py" 同类死条目。若日后 select 扩面纳入 INP001/S101/
+# PLR2004，再按需重加测试豁免（登记在案，非静默接受）。
+
+# RS-277 云端实证（PR #60 四轮）：bindgen 生成物路径级豁免——uniffi 输出
+# 形态不可手改（再生成即覆盖），SIM103/UP032/BLE001 等 47 处均为生成器
+# 风格、与活跃树代码无关；豁免面=本轮 select 面全集（生成物整体退出
+# lint 面，其正确性由 contracts 消费链与绑定漂移门禁保证，非 lint）
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["INP001", "S101", "PLR2004"]
-"agent/tests/**" = ["INP001", "S101", "PLR2004"]
-# PY-239（2026-10-01 审计）：删除 "**/selftest_*.py" 豁免——全仓 selftest_*.py
-# 均在 legacy/windows-pywebview/（已被 extend-exclude = ["legacy"] 整树排除），
-# 该条目永无匹配文件（死配置）。若日后 selftest 回归活跃树，按需重加。
+"core/rust-policy-core/bindings/**" = [
+    "E4", "E7", "E9", "F", "I001", "RUF100", "RUF012", "RUF022",
+    "PLW1510", "UP032", "UP045", "SIM103", "SIM208", "BLE001", "PIE790",
+]
 
 # PY-149：pytest 基建（tests/python/ ——发布链离线单测落位）
 [tool.pytest.ini_options]
-testpaths = ["tests/python"]
+# PY-287（2026-10-02 审计）：testpaths 扩 agent/tests——本地一条裸 pytest
+# 全收 282（此前 agent/tests 必须显式传参，遗漏即静默少跑红队面；
+# CI 侧 agent-redteam 等显式传参不受影响）
+testpaths = ["tests/python", "agent/tests"]

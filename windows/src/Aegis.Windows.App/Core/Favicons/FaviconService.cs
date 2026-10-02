@@ -22,12 +22,17 @@ public static class FaviconService
 {
     private const int MaxFaviconBytes = 200 * 1024;
     private const int MaxMemoryEntries = 500;
+    // CS-403（2026-10-02 审计）：负缓存 TTL——此前 Miss 只增不过期（一次失败
+    // 永不重试，站点补上 favicon 后要重启才可见）。参照 UrlSafety.LocalHostCache
+    // 模式存时间戳；internal static 供测试缩短（生产 60s）
+    internal static TimeSpan NegativeCacheTtl = TimeSpan.FromSeconds(60);
 
     // CS-121：内存缓存按持久化语义分面——无痕抓取不再写入普通窗口共享缓存
     // （图标元数据不跨信任语境混合；磁盘面此前已隔离，此处补内存面）。
+    // Miss 值为写入时刻（TickCount64）——TTL 判定见 IsMissFresh
     private static readonly ConcurrentDictionary<string, ImageSource?> Mem = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, ImageSource?> PrivateMem = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, byte> Miss = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, long> Miss = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, Task<ImageSource?>> InFlight = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HttpClient Http = CreateHttp();
 
@@ -64,9 +69,12 @@ public static class FaviconService
         // CS-309（2026-09-26 审计）：负缓存 Miss 同样按持久化语义分面——
         // 此前无痕标签抓取失败把 host 写入进程级共享 Miss，普通窗口随后
         // 首访直接命中负缓存不抓取（隐私语境泄漏到持久化语境）
-        if (Miss.ContainsKey(flightKey))
+        // CS-403（2026-10-02 审计）：TTL 内命中才短路——过期条目视为未缓存，
+        // 重新抓取（站点补上图标后无需重启）
+        if (Miss.TryGetValue(flightKey, out var missStamp)
+            && Environment.TickCount64 - missStamp < (long)NegativeCacheTtl.TotalMilliseconds)
         {
-            // 负缓存：此前已确认该 host 无可用图标——不再重复抓取
+            // 负缓存：此前已确认该 host 无可用图标——TTL 内不再重复抓取
             onLoaded?.Invoke(null);
             return null;
         }
@@ -76,7 +84,7 @@ public static class FaviconService
             icon ??= await (FetchHookForTests is { } hook ? hook(host) : FetchAsync(host)).ConfigureAwait(false);
             if (icon is null)
             {
-                Miss[flightKey] = 1;
+                Miss[flightKey] = Environment.TickCount64;
                 TrimCaches();
             }
             else
@@ -233,9 +241,10 @@ public static class FaviconService
     /// 驱动 in-flight/负缓存路径；生产恒 null）。</summary>
     internal static Func<string, Task<ImageSource?>>? FetchHookForTests;
 
-    /// <summary>host 是否已在该持久化语境的负缓存中。</summary>
+    /// <summary>host 是否已在该持久化语境的负缓存中（CS-403：TTL 内才算命中）。</summary>
     internal static bool IsMissCached(string host, bool persistToDisk) =>
-        Miss.ContainsKey(persistToDisk ? host : "\0private:" + host);
+        Miss.TryGetValue(persistToDisk ? host : "\0private:" + host, out var stamp)
+        && Environment.TickCount64 - stamp < (long)NegativeCacheTtl.TotalMilliseconds;
 
     /// <summary>该 host 在该持久化语境是否有进行中的抓取。</summary>
     internal static bool IsInFlight(string host, bool persistToDisk) =>
@@ -245,9 +254,10 @@ public static class FaviconService
     internal static int MissCount => Miss.Count;
 
     /// <summary>测试预置负缓存条目（等价"该语境已确认无图标"状态——
-    /// TrimCaches 上限用例需要大批量预置，经真实抓取路径成本不可行）。</summary>
+    /// TrimCaches 上限用例需要大批量预置，经真实抓取路径成本不可行；
+    /// CS-403：存当前时刻——TTL 语义与真实写入一致）。</summary>
     internal static void SeedMissForTests(string host, bool persistToDisk) =>
-        Miss[persistToDisk ? host : "\0private:" + host] = 1;
+        Miss[persistToDisk ? host : "\0private:" + host] = Environment.TickCount64;
 
     /// <summary>清空进程级缓存（测试隔离）。</summary>
     internal static void ClearCachesForTests()

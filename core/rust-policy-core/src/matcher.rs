@@ -203,7 +203,13 @@ fn covers(a: &[Tok], b: &[Tok], flat: bool) -> bool {
                 (Tok::DStar, _) => at(ai + 1, bi) || at(ai, bi + 1),
                 (Tok::Star, Tok::DStar) => flat && at(ai + 1, bi + 1),
                 (Tok::Star, Tok::Star) => at(ai + 1, bi + 1),
-                (Tok::Star, _) => (flat || !matches!(b[bi], Tok::Lit('/'))) && at(ai, bi + 1),
+                // RS-307 云端实证（PR #60 十一轮）：补 ε-转移——`*` 可匹配
+                // 空串，a[ai]=Star 匹配空后由 a[ai+1..] 继续覆盖 b[bi..]
+                //（与 DStar 双分支语义对齐）。此前缺此分支致 `*?` ⊑ `?`
+                // 误判 false（语言包含成立：? 的单字符语言真包含于 *?）
+                (Tok::Star, _) => {
+                    (flat || !matches!(b[bi], Tok::Lit('/'))) && (at(ai, bi + 1) || at(ai + 1, bi))
+                }
                 (_, Tok::Star | Tok::DStar) => false,
                 (Tok::Any1, Tok::Any1) => at(ai + 1, bi + 1),
                 (Tok::Any1, Tok::Lit(_)) => {
@@ -483,5 +489,106 @@ mod tests {
         // 限内正常覆盖不受影响
         let small = "a".repeat(100);
         assert!(glob_subsumes(&small, &small, false));
+    }
+}
+
+// —— RS-307（2026-10-02 审计）：glob_subsumes 性质测试 ——
+
+/// 性质测试（proptest——网络可用，经 `cargo add proptest --dev` 正规引入，
+/// 见 Cargo.toml dev-dependencies 注释；离线 xorshift 自写方案未启用）。
+/// 生成器由确定性默认种子驱动，失败样本自动收缩最小化复现。
+///
+/// 覆盖两条代数性质（此前只有点状用例，无性质级锁定）：
+/// - **可靠性（soundness）**：subsumes(a,b) ⇒ b 匹配的任意字面文本也匹配 a
+///   （覆盖判定的语义定义——false positive 即误报 shadowed 规则）；
+/// - **自反性（reflexivity）**：同模式同语言。
+///
+/// 传递性（a⊑b ∧ b⊑c ⇒ a⊑c）**不是本关系的契约**：covers 是「宁漏勿误」
+/// 的保守包含判定（RS-064/RS-015 口径——(Any1,Star)/跨段等面刻意 false），
+/// 保守不完整关系不保证传递闭包。proptest 传递性用例曾以随机反例实证
+///（`*?` ⊑ `**?` ⊑ `?` 但 `*?` ⋢ `?`）——其中 `*?` ⋢ `?` 一腿为 ε-转移
+/// 缺失（已修，见 covers (Star,_) 注释），其余缺腿为刻意保守面；据实把
+/// 传递性从性质契约移除，反例钉为下方回归单测。
+///
+/// 样本域：模式由 token 片段（`*`/`**`/`?`/字面 a/b/`/`）拼接（≤6 token），
+/// 文本由 a/b/`/` 拼接（≤8 字符），flat 两种口径均覆盖。
+#[cfg(test)]
+mod property_tests {
+    use super::{glob_match, glob_subsumes};
+    use proptest::prelude::*;
+
+    /// 模式 token 片段（通配三类 + 字面字符含段分隔符 `/`——`*` 与 `?`
+    /// 对 `/` 的跨段行为是 covers DP 的关键分支面）。
+    fn token_strategy() -> BoxedStrategy<String> {
+        prop_oneof![
+            2 => Just("*".to_string()),
+            2 => Just("**".to_string()),
+            2 => Just("?".to_string()),
+            5 => Just("a".to_string()),
+            4 => Just("b".to_string()),
+            3 => Just("/".to_string()),
+        ]
+        .boxed()
+    }
+
+    fn pattern_strategy() -> BoxedStrategy<String> {
+        proptest::collection::vec(token_strategy(), 0..=6)
+            .prop_map(|tokens| tokens.concat())
+            .boxed()
+    }
+
+    fn text_strategy() -> BoxedStrategy<String> {
+        proptest::collection::vec(
+            prop_oneof![
+                Just("a".to_string()),
+                Just("b".to_string()),
+                Just("/".to_string())
+            ],
+            0..=8,
+        )
+        .prop_map(|parts| parts.concat())
+        .boxed()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// RS-307：可靠性——covers(a,b)=true 时，b 的任意字面匹配必须也被
+        /// a 匹配（语言包含的语义定义；违反即 covers 存在 false positive）
+        #[test]
+        fn subsumes_sound_over_literal_matches(
+            a in pattern_strategy(),
+            b in pattern_strategy(),
+            s in text_strategy(),
+            flat in any::<bool>(),
+        ) {
+            if glob_subsumes(&a, &b, flat) && glob_match(&b, &s, flat) {
+                prop_assert!(
+                    glob_match(&a, &s, flat),
+                    "subsumes({a:?}, {b:?}, flat={flat}) 但文本 {s:?} 匹配 b 而不匹配 a"
+                );
+            }
+        }
+
+        /// RS-307 云端实证回归：ε-转移修复——`*` 的空匹配使
+        /// `*?` 的语言（长度 ≥1）真包含 `?` 的语言（恰 1 字符）
+        #[test]
+        fn star_empty_match_language_inclusion(
+            a in pattern_strategy(),
+            flat in any::<bool>(),
+        ) {
+            prop_assert!(glob_subsumes("*?", "?", flat), "*? 必须覆盖 ?（flat={flat}）");
+            prop_assert!(glob_subsumes("*a", "a", flat), "*a 必须覆盖 a（flat={flat}）");
+            let _ = a; // 保留生成器签名一致性（与相邻性质用例同域采样）
+        }
+
+        /// RS-307：自反性——任意模式覆盖自身（同模式同语言）
+        #[test]
+        fn subsumes_reflexive_for_all_samples(
+            a in pattern_strategy(),
+            flat in any::<bool>(),
+        ) {
+            prop_assert!(glob_subsumes(&a, &a, flat), "{a:?} 必须覆盖自身（flat={flat}）");
+        }
     }
 }

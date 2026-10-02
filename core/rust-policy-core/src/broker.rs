@@ -146,6 +146,11 @@ impl ContextBroker {
     /// 重注册（generation 传当前值，created_at/TTL 重置）。覆盖时旧 nonce
     /// 账本记录保留（重放保护不回退）。此语义由本注释显式声明，勿改回
     /// "静默覆盖"或"拒绝重复 id"（会破坏续期契约）。
+    ///
+    /// RS-294（2026-10-02 审计）：ttl=0 拒绝（None）——零时长会话是
+    /// 「签发成功、即刻过期」的静默失效形态（fail-open 陷阱面）。
+    /// FFI 层已有 MIN_SESSION_TTL_SECONDS 钳制不受影响；本防线管
+    /// 嵌入式宿主直调入口。
     pub fn create_session(
         &mut self,
         session_id: String,
@@ -153,6 +158,9 @@ impl ContextBroker {
         generation: u64,
         ttl: Duration,
     ) -> Option<&SessionContext> {
+        if ttl.is_zero() {
+            return None;
+        }
         if self.sessions.len() >= MAX_SESSIONS && !self.sessions.contains_key(&session_id) {
             self.evict_expired();
             if self.sessions.len() >= MAX_SESSIONS {
@@ -179,8 +187,12 @@ impl ContextBroker {
     /// 有界（绝不为容量淘汰记录），按会话销毁清理只是冗余的容量优化，
     /// 却以重放保护为代价——记录保留到账本自然上限。
     /// 配套回归：nonce_replay_survives_session_recreate。
-    pub fn destroy_session(&mut self, session_id: &str) {
-        self.sessions.remove(session_id);
+    ///
+    /// RS-286（2026-10-02 审计）：返回 bool（remove().is_some()）——此前
+    /// 对不存在的 id 也返回 ()，FFI 层无从区分「已销毁」与「本来就不存在」
+    /// （一律映射 true）。宿主可据此区分（幂等语义显式化）。
+    pub fn destroy_session(&mut self, session_id: &str) -> bool {
+        self.sessions.remove(session_id).is_some()
     }
 
     /// RS-158（审计 2026-09-25）：会话 TTL 查询——可观测性 API（宿主
@@ -209,7 +221,7 @@ impl ContextBroker {
         true
     }
 
-    /// 清理过期会话（LRU 淘汰）。
+    /// 清理已过期会话（TTL 驱动，非 LRU——RS-108 口径）。
     pub fn evict_expired(&mut self) {
         let expired: Vec<String> = self
             .sessions
@@ -838,17 +850,33 @@ mod tests {
     // —— RS-107 回归（审计 2026-09-25）：过期/逐出/续期语义 ——
 
     #[test]
-    fn zero_ttl_session_expires_and_evicts() {
-        // RS-107：过期判定 + evict_expired 真实逐出（ttl=0 即创建即过期）
+    fn zero_ttl_session_rejected_at_create() {
+        // RS-294：ttl=0 会话在创建即拒绝（None）——零时长是「签发成功、
+        // 即刻过期」的静默失效形态。过期逐出语义改用极小非零 TTL 覆盖
+        //（见 tiny_ttl_session_expires_and_evicts）
         let mut broker = make_broker_with_defaults();
-        broker.create_session("ephemeral".into(), "t".into(), 1, Duration::ZERO);
+        assert!(
+            broker
+                .create_session("ephemeral".into(), "t".into(), 1, Duration::ZERO)
+                .is_none(),
+            "ttl=0 必须创建即拒绝"
+        );
+        assert_eq!(broker.active_session_count(), 0, "拒绝路径不得入池");
+    }
+
+    #[test]
+    fn tiny_ttl_session_expires_and_evicts() {
+        // RS-107：过期判定 + evict_expired 真实逐出（RS-294 起 ttl=0 改为
+        // 创建拒绝，过期逐出语义经 1ms 极小 TTL 覆盖）
+        let mut broker = make_broker_with_defaults();
+        broker.create_session("ephemeral".into(), "t".into(), 1, Duration::from_millis(1));
         broker.create_session("durable".into(), "t".into(), 1, Duration::from_secs(3600));
-        // sleep 2ms 保证 elapsed > 0（纳秒时钟竞态防御）
+        // sleep 2ms 保证 elapsed > 1ms（纳秒时钟竞态防御）
         std::thread::sleep(Duration::from_millis(2));
         broker.evict_expired();
         assert!(
             !broker.sessions.contains_key("ephemeral"),
-            "ttl=0 会话必须被逐出"
+            "1ms TTL 会话必须被逐出"
         );
         assert!(broker.sessions.contains_key("durable"), "未过期会话保留");
     }
@@ -856,13 +884,14 @@ mod tests {
     #[test]
     fn expired_sessions_evicted_before_deny_at_cap() {
         // RS-107：池满时先清过期——有过期会话在池中则新会话不拒绝（M-16
-        // fail-closed 仅对「全满且全部未过期」生效）
+        // fail-closed 仅对「全满且全部未过期」生效）；RS-294 起过期源用
+        // 1ms 极小 TTL 构造
         let mut broker = ContextBroker::new(
             "pv".into(),
             PolicyEngine::default(),
             CapabilityRegistry::new(),
         );
-        broker.create_session("dead".into(), "t".into(), 1, Duration::ZERO);
+        broker.create_session("dead".into(), "t".into(), 1, Duration::from_millis(1));
         // sleep 2ms 保证 dead 会话过期（纳秒时钟竞态防御）
         std::thread::sleep(Duration::from_millis(2));
         for i in 1..MAX_SESSIONS {
@@ -971,15 +1000,33 @@ mod tests {
 
     #[test]
     fn session_ttl_query_reports_effective_ttl() {
-        // RS-158 配套：session_ttl 可观测性 API
+        // RS-158 配套：session_ttl 可观测性 API；RS-294 起 ttl=0 创建即拒
         let mut broker = make_broker_with_defaults();
         broker.create_session("s1".into(), "t".into(), 1, Duration::from_secs(120));
-        broker.create_session("s2".into(), "t".into(), 1, Duration::ZERO);
         assert_eq!(broker.session_ttl("s1"), Some(Duration::from_secs(120)));
-        assert_eq!(broker.session_ttl("s2"), Some(Duration::ZERO));
         assert_eq!(broker.session_ttl("missing"), None);
         broker.destroy_session("s1");
         assert_eq!(broker.session_ttl("s1"), None, "销毁后查询为 None");
+    }
+
+    // —— RS-286 回归（2026-10-02）：destroy_session 返回 bool ——
+
+    #[test]
+    fn destroy_session_reports_whether_session_existed() {
+        // RS-286：destroy 对不存在的 id 此前也映射 true（FFI 层无从区分）
+        // ——core 层改返回 remove().is_some()，宿主可区分「已销毁」与
+        // 「本来就不存在」
+        let mut broker = make_broker_with_defaults();
+        broker.create_session("live".into(), "t".into(), 1, Duration::from_secs(60));
+        assert!(broker.destroy_session("live"), "存在 id 销毁返回 true");
+        assert!(
+            !broker.destroy_session("live"),
+            "二次销毁（已不存在）返回 false"
+        );
+        assert!(
+            !broker.destroy_session("never-existed"),
+            "不存在 id 返回 false"
+        );
     }
 
     // —— RS-171/183/203（审计 2026-09-25）——

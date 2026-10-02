@@ -97,12 +97,18 @@ dependencies {
     // ApprovalRequest/AuthorizedAction 的公开 expiresAt 字段使用 Instant；
     // 该类型出现在模块 API 中，消费者必须能在编译期解析它。
     api(libs.kotlinx.datetime)
-    // @aar 分类器无法在 version catalog 表达（Gradle 限制）——唯一保留字面量的依赖
     // AD-099（审计 2026-09-23 清单·A6 批）：JNA 5.12.0 → 5.19.1（2026-09 时点
     // 最新稳定版；5.13..5.19 含 Android 目标修复与内部包重构）。JNA 按「方法名」
     // 映射 native 符号——升级后 broker JVM 单测全绿为回归门禁；proguard 侧
     // com.sun.jna.internal.** keep 规则已在位（5.13+ 内部包路径）。
-    implementation("net.java.dev.jna:jna:5.19.1@aar")
+    // AD-318（2026-10-02 审计）：依赖坐标/版本入 catalog（libs.jna）——
+    // @aar 分类器无法走 catalog 的旧说法失实（artifact { type } 块即可
+    // 表达），唯一字面量依赖随之消除。
+    implementation(libs.jna) {
+        artifact {
+            type = "aar"
+        }
+    }
     // A-2 接线：契约对齐守卫测试需要对照生成物 ActionContract 的字段面
     // AD-186（审计 2026-09-23 清单·A7 批）：test 接线评估收口——
     // ① :contracts 测试接线已在位（本行，ContractAlignmentTest 消费）；

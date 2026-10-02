@@ -29,7 +29,15 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
-    values = load_properties(ROOT / "shared" / "version.properties")
+    # PY-266（2026-10-02 审计）：缺 version.properties 此前在 load_properties
+    # 的 read_text 处裸 FileNotFoundError traceback——前置 is_file 检查，
+    # 缺失给干净报错退出 2（环境错误语义——与 SystemExit(1) 的属性缺失
+    # 门禁失败区分：前者是仓库/运行时环境不完整，后者是单源属性不全）
+    props_path = ROOT / "shared" / "version.properties"
+    if not props_path.is_file():
+        print(f"缺少共享版本源文件: {props_path}（环境错误——exit 2）", file=sys.stderr)
+        raise SystemExit(2)
+    values = load_properties(props_path)
     required = ("PRODUCT", "DISPLAY_NAME", "VERSION_NAME", "VERSION_CODE", "WINDOWS_PACKAGE_VERSION")
     missing = [key for key in required if not values.get(key)]
     if missing:
@@ -48,7 +56,12 @@ def main() -> None:
         "workflow_run_id": os.environ.get("GITHUB_RUN_ID", "local-unverified"),
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    # PY-268（2026-10-02 审计）：newline="\n" 显式锁定——Windows 默认把 \n
+    # 翻译为 CRLF，发布产物 build-metadata.json 在 autocrlf 关闭的环境即
+    # 行尾漂移（对账/diff 假红）
+    args.output.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8", newline="\n")
     # Windows GitHub-hosted runner 默认控制台可能为 cp1252；发布链日志必须可移植。
     print(f"Wrote {args.platform} build metadata: {args.output}")
 

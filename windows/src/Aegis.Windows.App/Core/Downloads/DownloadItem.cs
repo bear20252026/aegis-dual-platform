@@ -53,8 +53,11 @@ public sealed class DownloadItem : INotifyPropertyChanged
     /// <summary>状态显示文案（绑定点——由 StateKind 单点派生）。</summary>
     public string State => StateText(_stateKind);
 
-    /// <summary>类型化状态（CS-112——测试与内部比较不再解析中文字面量）。</summary>
-    internal DownloadItemState StateKind => _stateKind;
+    /// <summary>类型化状态（CS-112——测试与内部比较不再解析中文字面量）。
+    /// CS-394（2026-10-02 审计）：internal 改 public——WPF 绑定引擎只解析
+    /// 公共属性，DownloadsWindow DataTrigger 的 {Binding StateKind} 对
+    /// internal 属性静默失配（三钮恒 Collapsed，比修复前恒可见更糟）。</summary>
+    public DownloadItemState StateKind => _stateKind;
 
     public long ReceivedBytes { get => _receivedBytes; private set => SetField(ref _receivedBytes, value); }
 
@@ -157,6 +160,9 @@ public sealed class DownloadItem : INotifyPropertyChanged
         _stateKind = kind;
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(State)));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsCompleted)));
+        // CS-394（2026-10-02 审计）：下载面板按钮随 StateKind 显隐——绑定
+        // 需要状态机变更通知（与 State/IsCompleted 同批发出）
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(StateKind)));
     }
 
     public void Pause()

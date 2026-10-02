@@ -40,6 +40,12 @@ internal enum class ActiveDialog {
     /** 待审批导航确认（最高优先级——安全决策面）。 */
     PENDING_CONFIRMATION,
 
+    /**
+     * 待确认下载（AD-331，2026-10-02 审计）——仅查询参数命中危险扩展的
+     * 二级防线（路径/文件名命中已硬拦截，不再进本槽）。
+     */
+    DOWNLOAD_CONFIRMATION,
+
     /** WebView 版本/安全提示。 */
     WEB_VIEW_ALERT,
 
@@ -50,14 +56,18 @@ internal enum class ActiveDialog {
 /**
  * AD-151：对话框优先级裁决（单槽状态机的转移函数）。
  * 同刻多状态非空时仅返回最高优先级槽位；全空返回 null（无对话框）。
+ * AD-331（2026-10-02 审计）：新增下载确认槽（优先级介于导航审批与安全提示
+ * 之间——同为安全决策面，但不得遮蔽导航审批）。
  */
 internal fun resolveActiveDialog(
     pendingConfirmation: PendingNavigationConfirmation?,
+    pendingDownload: PendingDownloadConfirmation?,
     webViewAlert: WebViewAlertNotice?,
     readerContent: ReaderContent?,
 ): ActiveDialog? =
     when {
         pendingConfirmation != null -> ActiveDialog.PENDING_CONFIRMATION
+        pendingDownload != null -> ActiveDialog.DOWNLOAD_CONFIRMATION
         webViewAlert != null -> ActiveDialog.WEB_VIEW_ALERT
         readerContent != null -> ActiveDialog.READER_CONTENT
         else -> null
@@ -140,6 +150,31 @@ internal fun NavigationConfirmationDialog(
 }
 
 /**
+ * AD-331（2026-10-02 审计）：仅查询参数命中危险扩展的下载确认对话框——
+ * 路径/文件名命中的硬拦截不进本面（WebViewDownloadHandler 直接 Toast）。
+ * 批准即继续入队；关闭/取消即放弃（fail-closed）。
+ */
+@Suppress("FunctionNaming")
+@Composable
+internal fun DownloadConfirmationDialog(
+    pending: PendingDownloadConfirmation,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onReject,
+        title = { Text(stringResource(R.string.download_confirm_title)) },
+        text = { Text(stringResource(R.string.download_confirm_message, pending.url)) },
+        confirmButton = {
+            TextButton(onClick = onApprove) { Text(stringResource(R.string.download_confirm_allow)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onReject) { Text(stringResource(R.string.confirm_reject)) }
+        },
+    )
+}
+
+/**
  * 阅读模式对话框（正文分段渲染——AD-226；对话框本体自 MainActivity 抽出）。
  */
 @Suppress("FunctionNaming")
@@ -150,7 +185,9 @@ internal fun ReaderDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(content.title) },
+        // AD-322（2026-10-02 审计）：标题空值兜底迁 UI 层资源单源——
+        // ReaderMode 数据层不再硬编码中文标题（不可本地化）。
+        title = { Text(content.title.ifBlank { stringResource(R.string.reader_mode_title) }) },
         text = {
             // AD-226（2026-09-26 审计）：正文分段渲染——原单个 Text 一次性
             // 测量至 200K 字符（ReaderMode.MAX_TEXT 上限），低端机测量/重组
@@ -194,7 +231,12 @@ internal fun chunkTextAtCharBoundary(
     chunkSize: Int,
 ): List<String> {
     val raw = text.chunked(chunkSize).toMutableList()
-    for (i in raw.indices - 1) {
+    // AD-300（P2，2026-10-02 审计）：原 `for (i in raw.indices - 1)` 语义错误
+    // ——IntRange 无 minus(Int) 运算，实际命中 Iterable<Int>.minus（移除值为
+    // 1 的元素）：分段 1 的边界代理对永不迁移，且末段（i=size-1）参与循环
+    // 时 raw[i+1] 越界（末段恰以高代理结尾即 IndexOutOfBounds）。改为
+    // 0 until raw.size - 1（除末段外逐段检查——末段无后继可让渡）。
+    for (i in 0 until raw.size - 1) {
         val chunk = raw[i]
         if (chunk.isNotEmpty() && Character.isHighSurrogate(chunk.last())) {
             raw[i] = chunk.dropLast(1)
@@ -214,21 +256,35 @@ internal fun chunkTextAtCharBoundary(
 @Composable
 internal fun MainDialogHost(
     pendingConfirmation: PendingNavigationConfirmation?,
+    pendingDownload: PendingDownloadConfirmation?,
     webViewAlert: WebViewAlertNotice?,
     readerContent: ReaderContent?,
     onApprove: () -> Unit,
     onReject: () -> Unit,
+    onApproveDownload: () -> Unit,
+    onRejectDownload: () -> Unit,
     onDismissAlert: () -> Unit,
     onGoUpdate: () -> Unit,
     onDismissReader: () -> Unit,
 ) {
-    when (resolveActiveDialog(pendingConfirmation, webViewAlert, readerContent)) {
+    when (resolveActiveDialog(pendingConfirmation, pendingDownload, webViewAlert, readerContent)) {
         ActiveDialog.PENDING_CONFIRMATION -> {
             pendingConfirmation?.let { pending ->
                 NavigationConfirmationDialog(
                     pending = pending,
                     onApprove = onApprove,
                     onReject = onReject,
+                )
+            }
+        }
+
+        ActiveDialog.DOWNLOAD_CONFIRMATION -> {
+            // AD-331：二级（仅查询参数命中）下载确认——批准继续/拒绝放弃
+            pendingDownload?.let { pending ->
+                DownloadConfirmationDialog(
+                    pending = pending,
+                    onApprove = onApproveDownload,
+                    onReject = onRejectDownload,
                 )
             }
         }

@@ -99,6 +99,44 @@ public sealed class HostWebViewLogicTests
         Assert.True(UrlSafety.TryGetCachedLocalHost(host, out var isLocal));
         Assert.True(isLocal);
     }
+
+    // ===== CS-382/388（2026-10-02 审计）：顶层 HTTPS-only 升级豁免 =====
+
+    [Theory]
+    [InlineData("192.168.1.1", true)]      // 内网 IP 字面量——豁免（保持 http）
+    [InlineData("10.0.0.5", true)]
+    [InlineData("172.16.4.9", true)]
+    [InlineData("169.254.7.7", true)]      // 链路本地
+    [InlineData("127.0.0.1", true)]        // 回环
+    [InlineData("localhost", true)]
+    [InlineData("dev.localhost", true)]
+    [InlineData("printer.internal", true)] // 内网域名后缀（IsPublicHost 判非公网）
+    [InlineData("nas.local", true)]
+    public void IsExemptFromHttpsUpgrade_NonPublicHostsStayHttp(string host, bool expected)
+    {
+        // CS-388：裸内网 IP 被 UrlNormalizer 补 http:// 后又被升级炸掉的口径
+        // 互斥——非公网主机一律豁免升级（纯同步判定，无 DNS）
+        Assert.Equal(expected, HostWebView.IsExemptFromHttpsUpgrade(host));
+    }
+
+    [Fact]
+    public void IsExemptFromHttpsUpgrade_PublicHost_ColdCacheFailsClosedToUpgrade()
+    {
+        // CS-382：公网域名冷缓存按非本机 fail-closed（本次升级 https）——
+        // 判定纯同步，绝不在此发起 UI 线程 DNS（与帧路径 CS-339 口径统一）
+        Assert.False(HostWebView.IsExemptFromHttpsUpgrade(
+            $"public-{Guid.NewGuid():N}.aegis.example"));
+    }
+
+    [Fact]
+    public void IsExemptFromHttpsUpgrade_SeededLocalHost_CacheHitExempts()
+    {
+        // CS-382：后台预热缓存命中后，hosts 映射到本机的域名恢复放行
+        //（不升级——本地开发 http 场景）
+        var host = $"upgrade-seeded-{Guid.NewGuid():N}.aegis.invalid";
+        UrlSafety.SeedLocalHostCacheForTests(host, isLocal: true);
+        Assert.True(HostWebView.IsExemptFromHttpsUpgrade(host));
+    }
 }
 
 /// <summary>CS-352（2026-10-01 审计）：崩溃残留无痕临时目录启动清理。</summary>

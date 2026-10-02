@@ -33,7 +33,9 @@ jobs:
   # ──────────────────────────────────────────────
   pin-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # SP-251（2026-10-02 审计·S-28）：pin 检查是纯 grep 秒级步骤——45 分钟
+    # 超时为模板遗留；统一编排器 10 / 三子流 5（含下方 dry-run 自检余量）
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-182（2026-10-01 审计）：pin 检查收敛为 composite action 单源——
@@ -239,6 +241,11 @@ jobs:
         run: |
           cd dist
           zip -qr "Aegis-${GITHUB_REF_NAME#v}-review-package.zip" review-package
+          # SP-249（2026-10-02 审计·S-26）：评审包独立校验和——三平台
+          # SHA256SUMS 清单不含评审包（其校验和此前无处可查），zip 旁发布
+          # .sha256 供消费方离线核对完整性；随下方 files: dist/** 一并 publish
+          sha256sum "Aegis-${GITHUB_REF_NAME#v}-review-package.zip" \
+            > "Aegis-${GITHUB_REF_NAME#v}-review-package.zip.sha256"
           rm -rf review-package
 
       # 三平台 dist 目录存在同名文件（build-metadata.json / SHA256SUMS.json 等）——

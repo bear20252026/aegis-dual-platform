@@ -47,6 +47,18 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
+      # SP-241（2026-10-02 审计·S-11）：本 job 跑 dotnet test/publish（消费
+      # windows/ 正典栈）却未显式提供 dotnet 工具链——依赖镜像预装版本
+      # （PY-065 同型）。补 setup-dotnet 固化 10.0.x + NuGet 缓存（键口径与
+      # contracts.yml windows-contract-build 一致）
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (SP-244 单版本统一)
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/**/packages.lock.json') }}
+          restore-keys: nuget-${{ runner.os }}-
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
@@ -95,6 +107,8 @@ jobs:
             dist/native-policy/windows/
             dist/native-policy/windows-manifest.json
           if-no-files-found: error
+          # SP-253（2026-10-02 审计·S-30）：组合冒烟产物——只证当次构建的
+          # 原生工件组合可用，非长期基线；7 天排障窗口后即弃
           retention-days: 7
 
   build-android:
@@ -201,6 +215,8 @@ jobs:
             dist/native-policy/android/
             dist/native-policy/android-manifest.json
           if-no-files-found: error
+          # SP-253（2026-10-02 审计·S-30）：组合冒烟产物——只证当次构建的
+          # 原生工件组合可用，非长期基线；7 天排障窗口后即弃
           retention-days: 7
 
   verify-manifest:
@@ -235,4 +251,6 @@ jobs:
           name: native-policy-artifacts
           path: dist/native-policy/
           if-no-files-found: error
+          # SP-253（2026-10-02 审计·S-30）：组合冒烟产物——只证当次构建的
+          # 原生工件组合可用，非长期基线；7 天排障窗口后即弃
           retention-days: 7

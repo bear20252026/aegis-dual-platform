@@ -16,7 +16,6 @@ class BrowserEngine(
         const val HOME_URL = "file:///android_asset/start.html"
         private const val MAX_PROGRESS = 100
         private const val MAX_TITLE_LENGTH = 256
-        private const val TEXT_ZOOM_DEFAULT = 100
 
         /**
          * AD-195（审计 2026-09-23 清单·A7 批）：CookieManager 单例持有一次
@@ -81,7 +80,10 @@ class BrowserEngine(
         webView.settings.setSupportZoom(true)
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
-        webView.settings.textZoom = TEXT_ZOOM_DEFAULT
+        // AD-325（2026-10-02 审计）：删除 textZoom=100 钉死——该行覆盖系统
+        // 字体缩放（fontScale），大字号用户的 web 正文不随系统设置放大
+        // （系统级无障碍回退）。回归平台默认（textZoom 默认随 fontScale
+        // 派生）；TEXT_ZOOM_DEFAULT 常量随之清理（无其他引用）。
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         // WebViewClient 由 SecureWebViewFactory 统一注入 AegisWebViewClient（经 Broker 决策），
         // BrowserEngine 不得覆盖——单路径收敛（专家审计）。
@@ -132,8 +134,8 @@ class BrowserEngine(
                     // AD-268（2026-10-01 审计）：take 改代理对安全截断——
                     // String.take 按 UTF-16 char 劈切，切点落在增补字符
                     // （emoji 等）中间产生孤立代理对（渲染 � 且 length 失真）
-                    // ——与 ReaderMode.takeAtCharBoundary 同口径。
-                    val safeTitle = ReaderMode.takeAtCharBoundary(title.orEmpty(), MAX_TITLE_LENGTH)
+                    // ——AD-308 起与 LogSanitize 共用 takeAtCharBoundary 顶层函数。
+                    val safeTitle = takeAtCharBoundary(title.orEmpty(), MAX_TITLE_LENGTH)
                     onTitleObserved(safeTitle)
                 }
             }

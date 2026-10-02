@@ -1,0 +1,45 @@
+# SP-257（2026-10-02 审计·I-24）：仓库根 EditorConfig——跨端行尾/缩进/结尾
+# 换行统一单源。此前全仓仅 android/.editorconfig（root=true 自立），根级
+# 无配置——各端编辑器各随己意（CRLF/LF 混杂风险）。
+# 缩进口径按仓库现状抽查核定：C# 4（dotnet 默认）、Kotlin 4（ktlint/AGP
+# 默认，android/.editorconfig 同款）、JS/MJS 2（shared/shell 与
+# tests/ui-regression 既有 2 空格风格）、Python 4（PEP 8，全仓一致）、
+# Markdown 2。
+# 注意：android/ 面由 android/.editorconfig（root=true）独立管辖——其 CRLF
+# 与 [*.{kt,kts}] ktlint 微调保持现状、继续生效，本文件不重复、不覆盖。
+# Windows 批处理必须 CRLF（cmd 解析器对 LF 兼容性差），其余文本统一 LF。
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+
+[*.kt]
+indent_style = space
+indent_size = 4
+
+[*.{js,mjs}]
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_style = space
+indent_size = 4
+
+[*.md]
+indent_style = space
+indent_size = 2
+# Markdown 行尾双空格是硬换行语义——不做尾随空白裁剪
+trim_trailing_whitespace = false
+
+[*.bat]
+end_of_line = crlf
+indent_style = space
+indent_size = 2

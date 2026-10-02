@@ -27,7 +27,15 @@ internal class BrowserViewModelHost(
     private val onClearPageError: () -> Unit,
     private val onSubmitWebViewAlert: (String) -> Unit,
     private val onRefreshTabs: () -> Unit,
-    private val errorStrings: () -> PageErrorTexts.Strings,
+    // AD-332 回归修复（2026-10-02 审计）：属性改 resolveErrorStrings——原名与
+    // override fun errorStrings() 同名，override 体内裸调用与 AD-003 同型
+    // （同名成员函数优先于属性 invoke 约定 → 无限自递归 SOE 风险；本文件
+    // 头部 AD-003 注记同款）。改名消除名字遮蔽，override 委托真属性。
+    private val resolveErrorStrings: () -> PageErrorTexts.Strings,
+    // AD-331（2026-10-02 审计）：二级下载确认上抛（ViewModel 单写点登记
+    // PendingDownloadConfirmation——MainDialogs 单槽渲染）。
+    private val onRequestDownloadConfirmation: (android.webkit.WebView, String, () -> Unit) -> Unit =
+        { _, _, _ -> },
 ) : WebViewEventAssembly.Host {
     override val activeTabManager: TabManager?
         get() = tabManagerOrNull()
@@ -57,7 +65,15 @@ internal class BrowserViewModelHost(
         onRefreshTabs()
     }
 
-    override fun errorStrings(): PageErrorTexts.Strings = errorStrings()
+    override fun errorStrings(): PageErrorTexts.Strings = resolveErrorStrings()
+
+    override fun requestDownloadConfirmation(
+        webView: android.webkit.WebView,
+        url: String,
+        proceed: () -> Unit,
+    ) {
+        onRequestDownloadConfirmation(webView, url, proceed)
+    }
 }
 
 /**

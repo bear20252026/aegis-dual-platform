@@ -8,8 +8,18 @@
 | 信任域 | 内容 | 能力边界 |
 |---|---|---|
 | 远程网页域 | 不可信 renderer（互联网内容——脚本/iframe/重定向/下载） | 仅渲染——无 native bridge/无 MCP token/无本地命令/无标签全量读取（ADR-003） |
-| 本地 chrome UI 域 | 按端分列（WB-121，2026-09-26 审计）：Windows C# 正典栈 = `https://ntp.aegis.local` 受信虚拟主机（WebView2 SetVirtualHostNameToFolderMapping——非 file://）；Android = `file:///android_asset/` 本地资产页——展示/意图发起/确认 | 仅显示/提交意图——不持有全局后台权限（经 Broker 请求 action） |
+| 本地 chrome UI 域 | 按端分列（WB-121，2026-09-26 审计）：Windows C# 正典栈 = 受信虚拟主机两台（下表——非 file://）；Android = `file:///android_asset/` 本地资产页——展示/意图发起/确认 | 仅显示/提交意图——不持有全局后台权限（经 Broker 请求 action） |
 | Capability broker 域 | 唯一产生本地副作用的边界（Windows/Android Broker） | 验证来源/会话/代际/scope/参数/预算/批准/nonce——没有 AuthorizedAction 不能产生副作用（ADR-002——default_deny） |
+
+## 受信虚拟主机清单（Windows 正典栈——WebView2 SetVirtualHostNameToFolderMapping）
+
+<!-- WB-213（2026-10-02 审计）：补 geo.aegis.local 行——原表只列 ntp 一台，
+     画板虚拟主机的资产根映射/跨源 Deny 语义/信任假设失联 -->
+
+| 虚拟主机 | 资产根映射 | 信任假设与跨源语义 |
+|---|---|---|
+| `https://ntp.aegis.local` | 发布输出 `ntp/` 目录（shared/shell 单源首页资产——start.html/css/js 等） | 受信壳页：桥能力仅顶层文档放行（`NtpAssets.IsTopLevelNtpDocument`——帧内嵌复用即拒）；远程页面 WebMessage 被宿主按来源关闭 |
+| `https://geo.aegis.local` | 随包 GeoGebra 画板资源（`GeoGebra/HTML5/5.0/GeoGebra.html` 固定入口；资源未随包不映射——入口 fail-closed 置灰） | 离线画板信任假设：整包为随包静态资源、零运行时用户内容与网络请求；跨源 AccessKind=**Deny**（CS-334，2026-10-01 审计——远程页 fetch/热链探测一律失败，仅同源加载可用；防止任意站点探测识别 Aegis 用户） |
 
 ## 关键威胁与缓解
 

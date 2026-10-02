@@ -7,11 +7,16 @@
 
 ## 一、构建与测试（.NET 10——0 警告门禁）
 
+<!-- WB-211（2026-10-02 审计）：dotnet 命令补 -r win-x64（与 NuGet 锁文件的
+     rid 一致）与 -p:RestoreLockedMode=true（锁模式防还原改写锁）——
+     与 CLAUDE.md/CONTRIBUTING.md 质量门槛命令逐字对齐（SP-220） -->
+
 ```bash
 cd windows
-dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj   # 0 错误 0 警告
-dotnet test tests/Aegis.Windows.Core.Tests                    # 核心套件全绿
-dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全绿
+# SP-220：-r win-x64 与 NuGet 锁一致；RestoreLockedMode 锁模式防改写锁文件
+dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64 -p:RestoreLockedMode=true   # 0 错误 0 警告
+dotnet test tests/Aegis.Windows.Core.Tests -r win-x64 -p:RestoreLockedMode=true                    # 核心套件全绿
+dotnet test tests/Aegis.Windows.Broker.Tests -r win-x64 -p:RestoreLockedMode=true                  # Broker 套件全绿
 cd ../..
 ```
 
@@ -21,9 +26,10 @@ cd ../..
 ## 二、运行（本地启动 Aegis.Windows.App——GUI，仓库根执行）
 
 ```bash
-dotnet run --project windows/src/Aegis.Windows.App
+# WB-211：-r win-x64 与构建/锁文件口径一致（SP-220）
+dotnet run --project windows/src/Aegis.Windows.App -r win-x64
 # 或运行构建产物：
-# windows/src/Aegis.Windows.App/bin/Debug/net10.0-windows/Aegis.Windows.App.exe
+# windows/src/Aegis.Windows.App/bin/Debug/net10.0-windows/win-x64/Aegis.Windows.App.exe
 ```
 
 启动后：地址栏输入 URL（导航经 Broker 决策——NavigationStarting 真实取消）、

@@ -80,20 +80,19 @@ public sealed class SettingsServiceTests : IDisposable
     {
         // _path 指向一个已存在的目录——File.Move 必然失败（磁盘满/文件被锁的
         // 等价模拟）。契约：异常被吞（每次导航/缩放都触发保存，上抛即重复弹窗）、
-        // 内存快照仍然更新（内存/磁盘不分叉——下次保存重试）、Changed 仍通知。
+        // 内存快照仍然更新（内存/磁盘不分叉——下次保存重试）。
+        // CS-398（2026-10-02 审计）：Changed 事件已删除（生产零订阅）——断言
+        // 改为快照/运行时双更新
         var dirPath = Path.Combine(Path.GetTempPath(), $"settings_dir_{Guid.NewGuid():N}");
         Directory.CreateDirectory(dirPath);
         try
         {
             var svc = new SettingsService(dirPath);
-            var changed = 0;
-            svc.Changed += (_, _) => changed++;
 
             var ex = Record.Exception(() => svc.Apply(new AppSettings { SearchEngine = "bing" }));
 
             Assert.Null(ex);
             Assert.Equal("bing", svc.Snapshot.SearchEngine);
-            Assert.Equal(1, changed);
         }
         finally
         {
@@ -132,16 +131,11 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public void Apply_RaisesChangedExactlyOnce()
+    public void SettingsService_HasNoChangedEvent_SurfaceRemoved()
     {
-        // CS-126：Apply 唯一写入口恰通知一次（归一化内部路径不再重复触发）
-        var svc = new SettingsService(_path);
-        var fired = 0;
-        svc.Changed += (_, _) => fired++;
-
-        svc.Apply(new AppSettings { SearchEngine = "bing" });
-
-        Assert.Equal(1, fired);
+        // CS-398（2026-10-02 审计）：Changed 事件生产零订阅已删除——锁定不得
+        // 在没有消费方的情况下静默回归（未来新增订阅需求须与消费方一起落地）
+        Assert.Null(typeof(SettingsService).GetEvent("Changed"));
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 package com.aegis.browser
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -57,5 +58,28 @@ class LogSanitizeTest {
     @Test
     fun plainTextPassesThroughUnchanged() {
         assertEquals("正常日志消息 no controls", LogSanitize.flatten("正常日志消息 no controls", 100))
+    }
+
+    // ---------------- AD-308（2026-10-02 审计）：截断代理对边界 ----------------
+
+    @Test
+    fun truncationNeverSplitsSurrogatePairs() {
+        // emoji（增补字符，2 个 UTF-16 char）：切点落在代理对中间时回退——
+        // 不得产出孤立代理（logcat 渲染问号且 length 语义失真）
+        val emoji = "\uD83D\uDE00"
+        assertEquals("ab", LogSanitize.flatten("ab" + emoji + "cd", 3))
+        // 任意切点截断后不出现孤立高代理
+        val text = ("x" + emoji).repeat(50)
+        for (max in 1..10) {
+            val cut = LogSanitize.flatten(text, max)
+            cut.forEachIndexed { i, c ->
+                if (Character.isHighSurrogate(c)) {
+                    assertTrue(
+                        "高代理必须伴随低代理（max=$max index=$i）",
+                        i + 1 < cut.length && Character.isLowSurrogate(cut[i + 1]),
+                    )
+                }
+            }
+        }
     }
 }

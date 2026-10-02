@@ -52,12 +52,23 @@ class AegisWebViewClient(
     private var documentGeneration = 0L
     private var pendingConfirmation: PendingConfirmedNavigation? = null
 
-    /**
-     * AD-284：外跳 scheme 集——系统/第三方应用处理的链接形态（WebView 自身
-     * 无法加载）。这些 scheme 的主框架导航阻断后必须给用户显式反馈，否则
-     * 表现为「点了没反应」的静默死链。
-     */
-    private val externalHandlerSchemes = setOf("mailto", "tel", "sms")
+    companion object {
+        /** AD-330（2026-10-02 审计）：本类日志 tag 单源（原 "AegisWebView"/"Aegis" 混用）。 */
+        private const val TAG = "AegisWebView"
+
+        /**
+         * AD-284：外跳 scheme 集——系统/第三方应用处理的链接形态（WebView 自身
+         * 无法加载）。这些 schemes 的主框架导航阻断后必须给用户显式反馈，否则
+         * 表现为「点了没反应」的静默死链。
+         *
+         * AD-304（2026-10-02 审计）：补 smsto/mmsto/geo——短信/地理位置链接与
+         * mailto/tel/sms 同为系统分发形态，此前落策略拒绝（恐吓提示）而非
+         * 「不支持该类链接」分型反馈。AD-303 配套：companion 化供 app 层
+         * （BrowserViewModel 地址栏输入分型）共用同一集合，消除双源漂移面。
+         * 可见性 public：跨模块（app）共用同源集合。
+         */
+        val externalHandlerSchemes = setOf("mailto", "tel", "sms", "smsto", "mmsto", "geo")
+    }
 
     override fun shouldOverrideUrlLoading(
         view: WebView,
@@ -74,7 +85,7 @@ class AegisWebViewClient(
         if (request.isForMainFrame) {
             return handleMainFrameNavigation(view, requestedUrl, scheme)
         }
-        return handleSubFrameNavigation(requestedUrl)
+        return handleSubFrameNavigation(view, requestedUrl)
     }
 
     /**
@@ -91,14 +102,15 @@ class AegisWebViewClient(
         // 与策略拒绝（onNavigationDenied）分型，避免「点邮件链接无反应」的
         // 静默死链。
         if (scheme in externalHandlerSchemes) {
-            android.util.Log.w("AegisWebView", "主框架外跳 scheme 阻断: scheme=$scheme ${LogRedact.redact(requestedUrl)}")
+            android.util.Log.w(TAG, "主框架外跳 scheme 阻断: scheme=$scheme ${LogRedact.redact(requestedUrl)}")
             onUnsupportedSchemeNavigation(scheme, requestedUrl)
             return true
         }
+        // AD-320（2026-10-02 审计）：loadWhenAllowed 参数删除——两个调用点
+        // 恒传 true，参数只制造「存在不加载分支」的假状态空间。
         authorizeNavigation(
             view,
             requestedUrl,
-            loadWhenAllowed = true,
             mayRequireConfirmation = true,
         )
         return true
@@ -115,37 +127,51 @@ class AegisWebViewClient(
      * 不调 renewSessionBeforeDecision：①iframe 密集页逐导航续期会把「滑动
      * TTL」放大成常态性 JNI 重注册；②子框架导航不表达「用户仍在活跃浏览」
      * 的顶层语义（无主框架事件的页面不该被子框架保活）。
+     *
+     * AD-309（2026-10-02 审计）：Allow 放行与主框架同口径——原实现升级
+     * 只用于策略判定、放行仍载原始 http（明文子框架请求照发，cleartext
+     * 全局禁用下表现为子框架静默加载失败）。现 Allow 时返回 true 阻断
+     * 原始加载并由 view.loadUrl(升级后 URL) 重发（Deny/确认阻断语义不变）。
      */
-    private fun handleSubFrameNavigation(requestedUrl: String): Boolean {
+    private fun handleSubFrameNavigation(
+        view: WebView,
+        requestedUrl: String,
+    ): Boolean {
         val subFrameUrl = upgradeToHttpsIfNeeded(requestedUrl)
-        return when (
-            val decision =
-                broker.evaluateNavigation(sessionId, tabId, documentGeneration, subFrameUrl, "navigation")
-        ) {
-            is Decision.Allow -> {
-                false
-            }
+        // ktlint multiline-expression（云端二轮实证）：多行表达式（when 块）
+        // 必须另起一行——subject 与 when 均独立成句
+        val decision =
+            broker.evaluateNavigation(sessionId, tabId, documentGeneration, subFrameUrl, "navigation")
+        val blocked =
+            when (decision) {
+                is Decision.Allow -> {
+                    // AD-309：经升级后 URL 重发（不消费顶层授权对象——子框架
+                    // 轻量路径不产生新授权，重发请求自身仍受本回调约束）
+                    view.loadUrl(subFrameUrl)
+                    true
+                }
 
-            is Decision.RequireConfirmation -> {
-                android.util.Log.w(
-                    "AegisWebView",
-                    "子框架确认型导航被阻断（无子框架确认 UI 面）: ${LogRedact.redact(subFrameUrl)}",
-                )
-                true
-            }
+                is Decision.RequireConfirmation -> {
+                    android.util.Log.w(
+                        TAG,
+                        "子框架确认型导航被阻断（无子框架确认 UI 面）: ${LogRedact.redact(subFrameUrl)}",
+                    )
+                    true
+                }
 
-            is Decision.Deny -> {
-                denied(decision.reason, topLevel = false, url = subFrameUrl)
-                true
+                is Decision.Deny -> {
+                    denied(decision.reason, topLevel = false, url = subFrameUrl)
+                    true
+                }
             }
-        }
+        return blocked
     }
 
     /** 地址栏和首次外部导航必须调用此入口，不能直接调用 WebView.loadUrl。 */
     fun navigate(
         view: WebView,
         url: String,
-    ): Boolean = authorizeNavigation(view, url, loadWhenAllowed = true, mayRequireConfirmation = true)
+    ): Boolean = authorizeNavigation(view, url, mayRequireConfirmation = true)
 
     /**
      * 仅由受信 Compose chrome 的明确批准按钮调用。客户端不会创建授权；它把 Rust
@@ -186,7 +212,6 @@ class AegisWebViewClient(
     private fun authorizeNavigation(
         view: WebView,
         rawUrl: String,
-        loadWhenAllowed: Boolean,
         mayRequireConfirmation: Boolean,
     ): Boolean {
         val url = upgradeToHttpsIfNeeded(rawUrl)
@@ -206,57 +231,55 @@ class AegisWebViewClient(
         // 拒绝（真机复现：连搜索词都被弹「安全提示」）。待审批确认期间不续期，
         // 避免覆盖式重注册孤儿化 pending nonce。
         renewSessionBeforeDecision()
-        when (
-            val decision =
-                broker.requestNavigationConfirmation(
-                    sessionId,
-                    tabId,
-                    documentGeneration,
-                    url,
-                    "navigation",
-                )
-        ) {
-            is Decision.RequireConfirmation -> {
-                if (requireNavigationConfirmation && mayRequireConfirmation) {
-                    pendingConfirmation = PendingConfirmedNavigation(url, "navigation", decision.request)
-                    onNavigationConfirmationRequested(decision.request)
-                    return false
+        // detekt-修复（2026-10-02 审计云端实证）：ReturnCount(4>2)——三决策分支各自
+        // return 收敛为 when 表达式单 return；逐分支语义不变（登记/兑换/Deny 上抛）。
+        val decision =
+            broker.requestNavigationConfirmation(sessionId, tabId, documentGeneration, url, "navigation")
+        val allowed =
+            when (decision) {
+                is Decision.RequireConfirmation -> {
+                    if (requireNavigationConfirmation && mayRequireConfirmation) {
+                        pendingConfirmation = PendingConfirmedNavigation(url, "navigation", decision.request)
+                        onNavigationConfirmationRequested(decision.request)
+                        false
+                    } else {
+                        // 自动批准：保留 Rust 核心 nonce 语义（等同用户批准后兑换）
+                        // AD-050：决策经注入源（生产=broker 委托；测试=替身）。
+                        val approved = autoApproveDecision(decision.request, url, "navigation")
+                        val consumed =
+                            approved is Decision.Allow &&
+                                broker.consumeNavigation(
+                                    action = approved.action,
+                                    sessionId = sessionId,
+                                    tabId = tabId,
+                                    currentGeneration = documentGeneration,
+                                    rawUrl = url,
+                                    scope = "navigation",
+                                )
+                        if (consumed) view.loadUrl(url)
+                        consumed
+                    }
                 }
-                // 自动批准：保留 Rust 核心 nonce 语义（等同用户批准后兑换）
-                // AD-050：决策经注入源（生产=broker 委托；测试=替身）。
-                val approved = autoApproveDecision(decision.request, url, "navigation")
-                val consumed =
-                    approved is Decision.Allow &&
+
+                is Decision.Allow -> {
+                    val consumed =
                         broker.consumeNavigation(
-                            action = approved.action,
-                            sessionId = sessionId,
-                            tabId = tabId,
-                            currentGeneration = documentGeneration,
-                            rawUrl = url,
-                            scope = "navigation",
+                            decision.action,
+                            sessionId,
+                            tabId,
+                            documentGeneration,
+                            url,
+                            "navigation",
                         )
-                if (consumed && loadWhenAllowed) view.loadUrl(url)
-                return consumed
-            }
+                    if (consumed) view.loadUrl(url)
+                    consumed
+                }
 
-            is Decision.Allow -> {
-                val consumed =
-                    broker.consumeNavigation(
-                        decision.action,
-                        sessionId,
-                        tabId,
-                        documentGeneration,
-                        url,
-                        "navigation",
-                    )
-                if (consumed && loadWhenAllowed) view.loadUrl(url)
-                return consumed
+                is Decision.Deny -> {
+                    denied(decision.reason, mayRequireConfirmation, url)
+                }
             }
-
-            is Decision.Deny -> {
-                return denied(decision.reason, mayRequireConfirmation, url)
-            }
-        }
+        return allowed
     }
 
     /** P0 修复（全量复审 2026-09-01）：决策前滑动续期会话（待审批确认期间不续期）。 */
@@ -277,7 +300,7 @@ class AegisWebViewClient(
     ): Boolean {
         // AD-211（2026-09-26 审计）：日志行经 denialLogLine 单源组装——detail
         // 内嵌的明文 URL/query 一并脱敏（此前 detail 直拼原文入 logcat）。
-        android.util.Log.w("AegisWebView", WebViewErrorCodes.denialLogLine(reason, url))
+        android.util.Log.w(TAG, WebViewErrorCodes.denialLogLine(reason, url))
         if (topLevel) onNavigationDenied(reason.code, reason.detail)
         return false
     }
@@ -303,8 +326,8 @@ class AegisWebViewClient(
             // AD-233（2026-09-26 审计）：升级日志对每条 http 资源（含全部子
             // 框架）各打一条——降为 isLoggable(DEBUG) 门控（开发期 setprop
             // 可开启，release 默认静默）。
-            if (android.util.Log.isLoggable("Aegis", android.util.Log.DEBUG)) {
-                android.util.Log.d("Aegis", "HTTPS-only: 升级 ${LogRedact.redact(url)} → ${LogRedact.redact(upgraded)}")
+            if (android.util.Log.isLoggable(TAG, android.util.Log.DEBUG)) {
+                android.util.Log.d(TAG, "HTTPS-only: 升级 ${LogRedact.redact(url)} → ${LogRedact.redact(upgraded)}")
             }
             return upgraded
         }
@@ -323,7 +346,7 @@ class AegisWebViewClient(
         documentGeneration += 1
         if (!broker.updateDocumentGeneration(sessionId, tabId, documentGeneration)) {
             documentGeneration -= 1
-            android.util.Log.e("AegisWebView", "渲染进程崩溃后代际推进被拒（会话未注册/陈旧）")
+            android.util.Log.e(TAG, "渲染进程崩溃后代际推进被拒（会话未注册/陈旧）")
         }
         onRendererGone(view)
         return true
@@ -338,7 +361,7 @@ class AegisWebViewClient(
         documentGeneration += 1
         if (!broker.updateDocumentGeneration(sessionId, tabId, documentGeneration)) {
             documentGeneration -= 1
-            android.util.Log.e("Aegis", "未注册或陈旧会话尝试加载页面；已停止加载")
+            android.util.Log.e(TAG, "未注册或陈旧会话尝试加载页面；已停止加载")
             view.stopLoading()
             // AD-265（2026-10-01 审计）：代际推进失败已 stopLoading——阻断的
             // URL 不得再上抛地址栏（原实现仍观察 URL，地址栏被阻断 URL 覆盖，
@@ -391,7 +414,7 @@ class AegisWebViewClient(
         val isMainFrameFailure = mainFrameUrl.isNullOrEmpty() || url == mainFrameUrl
         if (isMainFrameFailure) {
             android.util.Log.w(
-                "AegisWebView",
+                TAG,
                 "SSL 证书校验失败已取消: url=${LogRedact.redact(url)} primaryError=${error.primaryError}",
             )
             // AD-035：detail = SslError.primaryError 整数值（app 层映射中文文案）
@@ -399,7 +422,7 @@ class AegisWebViewClient(
             onPageError(WebViewErrorCodes.ERROR_SSL_CERTIFICATE, error.primaryError.toString(), true, url)
         } else {
             android.util.Log.w(
-                "AegisWebView",
+                TAG,
                 "子资源 SSL 证书校验失败已取消（不遮蔽整页）: url=${LogRedact.redact(url)} primaryError=${error.primaryError}",
             )
         }
@@ -418,7 +441,7 @@ class AegisWebViewClient(
         if (!request.isForMainFrame) return
         val description = error.description?.toString().orEmpty()
         android.util.Log.w(
-            "AegisWebView",
+            TAG,
             "主框架加载错误: code=${error.errorCode} desc=$description url=${LogRedact.redact(request.url.toString())}",
         )
         // AD-035：detail = "errorCode:description"（app 层按 errorCode 映射文案）
@@ -444,7 +467,7 @@ class AegisWebViewClient(
         if (!request.isForMainFrame) return
         if (errorResponse.statusCode < WebViewErrorCodes.HTTP_ERROR_MIN) return
         android.util.Log.w(
-            "AegisWebView",
+            TAG,
             "主框架 HTTP 错误: status=${errorResponse.statusCode} url=${LogRedact.redact(request.url.toString())}",
         )
         // AD-035：detail = HTTP 状态码字符串（app 层映射文案）；AD-136 常量化
@@ -482,7 +505,7 @@ class AegisWebViewClient(
             else -> callback.showInterstitial(true)
         }
         android.util.Log.w(
-            "Aegis",
+            TAG,
             "SafeBrowsing 命中阻断: ${LogRedact.redact(request.url.toString())} threatType=$threatType",
         )
     }

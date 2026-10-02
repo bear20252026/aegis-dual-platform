@@ -48,6 +48,23 @@ class WebViewDownloadHandlerTest {
         )
     }
 
+    // ---------------- AD-305（2026-10-02 审计）：路径段 + 字面保留 ----------------
+
+    @Test
+    fun urlPathSegmentPlusSignStaysLiteral() {
+        // 路径中的 + 是字面加号（RFC 3986 path 无 query 的 +→空格语义）——
+        // 原 URLDecoder 把 a+b.pdf 解成 a b.pdf（文件名字面失真）
+        assertEquals(
+            "a+b.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/files/a+b.pdf", "", ""),
+        )
+        // 百分号编码不受影响（严格解码仍还原 %XX）
+        assertEquals(
+            "a b.pdf",
+            WebViewDownloadHandler.resolveDownloadFileName("https://c.d/files/a%20b.pdf", "", ""),
+        )
+    }
+
     @Test
     fun urlPathSegmentIsSecondPriority() {
         assertEquals(

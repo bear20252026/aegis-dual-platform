@@ -20,6 +20,14 @@ object TranslateEntry {
     private const val SERVICE = "https://www.translatetheweb.com/"
 
     /**
+     * AD-313（2026-10-02 审计）：外发前剥离的敏感查询参数名（小写比较）——
+     * OAuth Authorization Code 实际经 query 流转（?code=…&state=…），并非只
+     * 在 fragment；会话/CSRF token 同为 query 常客。翻译服务取页不需要它们，
+     * 原样外发即凭据泄漏面。
+     */
+    private val SENSITIVE_QUERY_PARAMS = setOf("code", "state", "token")
+
+    /**
      * 构建整页翻译 URL；pageUrl 非 http/https 返回 null
      * （本地壳页/about: 页无翻译意义，也不应外发）。
      */
@@ -32,10 +40,37 @@ object TranslateEntry {
             return null
         }
         // AD-280（2026-10-01 审计）：fragment 先剥再编码——fragment 不参与
-        // 服务端取页（Authorization Code/session token 常以 #access_token=
-        // 形态留在 URL 尾部，fragment 是其唯一载体），外发翻译服务即凭据
-        // 泄漏面。翻译服务取页只消费 scheme://authority/path?query。
-        val encoded = Uri.encode(url.substringBefore('#'))
+        // 服务端取页（session token 常以 #access_token= 形态留在 URL 尾部），
+        // 外发翻译服务即凭据泄漏面。
+        // AD-313（2026-10-02 审计）注释修正：凭据并非「fragment 是其唯一
+        // 载体」——OAuth Code/State 与各色 token 实际主要经 query 流转；
+        // 整 URL（含 query）原样编码外发才是泄漏面主体。配套：query 中
+        // 已知敏感参数（[SENSITIVE_QUERY_PARAMS]）剥离后再外发。
+        val sanitized = stripSensitiveQueryParams(url.substringBefore('#'))
+        val encoded = Uri.encode(sanitized)
         return "$SERVICE?from=auto&to=$TARGET_LANG&a=$encoded"
+    }
+
+    /**
+     * AD-313：剥离 query 中的敏感参数（code/state/token——名称大小写不敏感）。
+     * 纯字符串实现（JVM 可测）：参数名取 '=' 前段；无 query 或无命中原样
+     * 返回；全量剥空时移除 '?'（翻译服务取页不依赖空 query）。
+     */
+    internal fun stripSensitiveQueryParams(urlWithoutFragment: String): String {
+        val queryStart = urlWithoutFragment.indexOf('?')
+        if (queryStart < 0) return urlWithoutFragment
+        val base = urlWithoutFragment.substring(0, queryStart)
+        val entries = urlWithoutFragment.substring(queryStart + 1).split('&')
+        val kept =
+            entries.filter { entry ->
+                entry.substringBefore('=').lowercase() !in SENSITIVE_QUERY_PARAMS
+            }
+        // detekt-修复（2026-10-02 审计云端实证）：ReturnCount(3>2)——命中分型收敛
+        // 为 when 表达式（无命中原样返回/全量剥空移除 '?'/部分剥离重组）。
+        return when {
+            kept.size == entries.size -> urlWithoutFragment
+            kept.isEmpty() -> base
+            else -> "$base?${kept.joinToString("&")}"
+        }
     }
 }

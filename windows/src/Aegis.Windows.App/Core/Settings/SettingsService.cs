@@ -56,14 +56,14 @@ public sealed class SettingsService
     {
         _path = path ?? AppSettings.DefaultPath;
         _snapshot = Normalize(ReadSnapshot(_path));
-        ApplyRuntimeSnapshot(_snapshot, raiseChanged: false);
+        ApplyRuntimeSnapshot(_snapshot);
     }
 
     private SettingsService(string? path, AppSettings preloaded)
     {
         _path = path ?? AppSettings.DefaultPath;
         _snapshot = Normalize(ToSnapshot(preloaded));
-        ApplyRuntimeSnapshot(_snapshot, raiseChanged: false);
+        ApplyRuntimeSnapshot(_snapshot);
     }
 
     /// <summary>CS-127：从已加载模型构造——组合根（AppSettings.Load）与本服务
@@ -72,15 +72,17 @@ public sealed class SettingsService
         new(path, preloaded);
 
     public BrowserSettingsSnapshot Snapshot => _snapshot;
-    public event EventHandler? Changed;
 
     /// <summary>从 AppSettings 模型应用并持久化——设置变更的唯一写入口：
     /// 归一化 → 原子写盘（失败不阻断、不改动运行时——内存/磁盘不分叉）→
-    /// 刷新运行时 PrivacySettings → 通知。
+    /// 刷新运行时 PrivacySettings。
     /// CS-368（2026-10-01 审计）：无变更跳过写盘——启动链 Apply(从盘加载的
     /// 原模型) 此前无条件整文件重写 settings.json（纯 IO 开销 + 文件时间戳
     /// 扰动备份链）。比对按归一化快照的序列化内容（record 默认相等对
-    /// IReadOnlyDictionary 是引用比较，不可用）。</summary>
+    /// IReadOnlyDictionary 是引用比较，不可用）。
+    /// CS-398（2026-10-02 审计）：删除 Changed 事件与全部 raise 分支——生产
+    /// 零订阅（各消费方直读 Snapshot/PrivacySettings），死事件面徒增维护
+    /// 误解（调用方以为有通知语义）。</summary>
     public void Apply(AppSettings model)
     {
         var snapshot = Normalize(ToSnapshot(model));
@@ -90,7 +92,6 @@ public sealed class SettingsService
         PrivacySettings.ProtectionLevel = snapshot.ProtectionLevel;
         PrivacySettings.HttpsOnly = snapshot.HttpsOnly;
         PrivacySettings.SecureDns = snapshot.SecureDns;
-        Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private bool SnapshotContentEquals(BrowserSettingsSnapshot a, BrowserSettingsSnapshot b) =>
@@ -115,14 +116,14 @@ public sealed class SettingsService
         }
     }
 
-    private void ApplyRuntimeSnapshot(BrowserSettingsSnapshot snapshot, bool raiseChanged)
+    // CS-398：ApplyRuntimeSnapshot 仅剩构造路径消费——Changed 事件删除后
+    // raiseChanged 分支一并移除（构造期静默刷新运行时快照）
+    private void ApplyRuntimeSnapshot(BrowserSettingsSnapshot snapshot)
     {
-        var previous = _snapshot;
         _snapshot = snapshot;
         PrivacySettings.ProtectionLevel = snapshot.ProtectionLevel;
         PrivacySettings.HttpsOnly = snapshot.HttpsOnly;
         PrivacySettings.SecureDns = snapshot.SecureDns;
-        if (raiseChanged && !ReferenceEquals(previous, snapshot)) Changed?.Invoke(this, EventArgs.Empty);
     }
 
     private static BrowserSettingsSnapshot ReadSnapshot(string path)

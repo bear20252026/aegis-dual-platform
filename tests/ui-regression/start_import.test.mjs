@@ -8,51 +8,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+// WB-206（2026-10-02 审计）：DOM 节点桩下沉 helpers.mjs 单源——本文件只留
+// 元素表、装载器与用例（此前与 start_main.test.mjs 双份维护、语义易漂移）
+import { makeEl } from './helpers.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const IMPORT = readFileSync(join(ROOT, 'shared', 'shell', 'start.import.js'), 'utf8');
 
-// —— 最小 DOM 桩（仅覆盖 start.import.js 触及的表面） ——
-function el(tag) {
-  const node = {
-    tagName: tag,
-    children: [],
-    style: {},
-    dataset: {},
-    className: '',
-    title: '',
-    value: '',
-    disabled: false,
-    checked: false,
-    tabIndex: 0,
-    _handlers: {},
-    _focused: false,
-    _textContent: '',
-    _attrs: {},
-    appendChild(c) {
-      // WB-134（2026-10-01 审计）：真实 DOM 语义——append 已挂载节点是
-      // 「移动」而非复制（单例提示重复 append 不得产生副本）
-      const at = node.children.indexOf(c);
-      if (at !== -1) node.children.splice(at, 1);
-      node.children.push(c);
-      return c;
-    },
-    addEventListener(type, fn) { (node._handlers[type] = node._handlers[type] || []).push(fn); },
-    focus() { node._focused = true; },
-    // WB-145（2026-10-01 审计）：属性记录——历史条数下拉 aria-label 断言
-    setAttribute(n, v) { node._attrs[n] = String(v); },
-    getAttribute(n) { return n in node._attrs ? node._attrs[n] : null; },
-    contains() { return true; },
-    querySelectorAll() { return []; },
-  };
-  // 真实 DOM 语义：对 textContent 赋值会清空全部子节点——
-  // renderPick/renderDone 正是靠「先清容器再追加」换页，桩必须同构
-  Object.defineProperty(node, 'textContent', {
-    get() { return node._textContent; },
-    set(v) { node._textContent = String(v); node.children.length = 0; },
-  });
-  return node;
-}
+// —— DOM 桩：共享 makeEl（见 helpers.mjs WB-206 注记） ——
+const el = makeEl;
 
 function click(node) {
   (node._handlers.click || []).forEach((fn) =>
@@ -70,6 +34,9 @@ function loadImport(host, winExtras) {
     imClose: el('button'),
     importEntry: el('button'),
   };
+  // WB-179（2026-10-02 审计）：镜像标记层初始形态——start.html 的弹层带
+  // hidden 属性（WB-126），开/关配对断言依赖该初始态
+  elements.importModal.setAttribute('hidden', '');
   const docHandlers = {};
   const timers = {
     fired: [],
@@ -197,8 +164,10 @@ test('WB-027 焦点管理：打开初始聚焦弹层，关闭归还触发元素'
   const { elements, docHandlers } = loadImport(host);
   click(elements.importEntry);
   assert.equal(elements.imClose._focused, true, '打开后初始焦点必须进弹层');
+  // WB-179（2026-10-02 审计）：显隐口径改 hidden 属性配对翻转
+  assert.equal(elements.importModal.hasAttribute('hidden'), false, '打开必须移除 hidden');
   (docHandlers.keydown || []).forEach((fn) => fn({ key: 'Escape' }));   // 关闭
-  assert.equal(elements.importModal.style.display, 'none');
+  assert.equal(elements.importModal.hasAttribute('hidden'), true, '关闭必须回写 hidden');
   assert.equal(elements.importEntry._focused, true, '焦点必须归还触发元素');
 });
 
@@ -211,7 +180,9 @@ test('WB-055 未选来源点「开始导入」：弹层不关闭并提示先选�
   const rows = elements.imBody.children.filter((c) => c._cb);
   rows.forEach((r) => { r._cb.checked = false; });   // 全部取消勾选
   click(elements.imNext);
-  assert.equal(elements.importModal.style.display, 'flex', '弹层必须保持打开（此前静默关闭）');
+  // WB-179：显隐断言随迁移——hidden 属性口径（不再压内联 display）
+  assert.equal(elements.importModal.hasAttribute('hidden'), false,
+    '弹层必须保持打开（此前静默关闭）');
   const texts = elements.imBody.children.map((c) => c.textContent).join('\n');
   assert.match(texts, /请先选择至少一个导入来源与内容类型/,
     '必须给出明确提示（此前无任何反馈）');
@@ -241,13 +212,77 @@ test('WB-056 running 态 Escape 忽略：导入进行中不得关闭，完成后
   assert.ok(resolveBm, '导入任务必须已发起（Promise 悬挂中）');
   assert.equal(elements.imNext.disabled, true, 'running 态下一步必须禁用');
   (docHandlers.keydown || []).forEach((fn) => fn({ key: 'Escape' }));
-  assert.equal(elements.importModal.style.display, 'flex',
+  assert.equal(elements.importModal.hasAttribute('hidden'), false,
     'running 态 Escape 必须被忽略（此前静默中断、结果丢弃）');
   resolveBm({ imported: 1, total: 1 });            // 导入完成
   await flush(); await flush();
   assert.match(elements.imBody.children[0].textContent, /导入完成/, '完成页照常渲染');
   (docHandlers.keydown || []).forEach((fn) => fn({ key: 'Escape' }));
-  assert.equal(elements.importModal.style.display, 'none', 'done 态 Escape 恢复关闭');
+  assert.equal(elements.importModal.hasAttribute('hidden'), true, 'done 态 Escape 恢复关闭');
+});
+
+// ═══ WB-176/179/193/204（2026-10-02 审计）补充用例 ═══
+
+// WB-176：running 态点击「关闭」此前无守卫（Escape 路径 WB-056 已挡）——
+// 导入进行中点击即静默中断向导（桥任务照跑、结果丢弃且无提示）
+test('WB-176 running 态点击关闭被忽略：关闭钮禁用双保险，done 态恢复可关', async () => {
+  let resolveBm = null;
+  const host = {
+    has: () => true,
+    importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true }]),
+    importBookmarks: () => new Promise((r) => { resolveBm = r; }),   // 悬挂——running 态
+    importHistory: () => Promise.resolve({ imported: 0, total: 0 }),
+    jsError: () => {},
+  };
+  const { elements } = loadImport(host);
+  click(elements.importEntry);
+  click(elements.imNext);                          // → running
+  await flush();
+  assert.equal(elements.imClose.disabled, true, 'running 态关闭钮必须禁用（视觉态与守卫一致）');
+  click(elements.imClose);                         // running 态点击
+  assert.equal(elements.importModal.hasAttribute('hidden'), false,
+    'running 态点击关闭不得关闭弹层（结果不得静默丢弃）');
+  assert.match(elements.imBody.children[0].textContent, /正在导入/,
+    'running 态界面必须保持不动');
+  resolveBm({ imported: 1, total: 1 });            // 导入完成
+  await flush(); await flush();
+  assert.equal(elements.imClose.disabled, false, 'done 态关闭钮必须恢复可用');
+  click(elements.imClose);
+  assert.equal(elements.importModal.hasAttribute('hidden'), true, 'done 态点击关闭正常关闭');
+});
+
+// WB-204：未打开时 Escape 恒真执行 close——开态判定改 hidden 口径后
+// 未打开（hidden 属性在）时守卫恒假，Escape 必须零副作用
+test('WB-204 未打开时 Escape 无副作用：不得触发 close 路径', () => {
+  const host = { has: () => true, importScan: (cb) => cb([]), jsError: () => {} };
+  const { elements, docHandlers } = loadImport(host);
+  assert.equal(elements.importModal.hasAttribute('hidden'), true, '前提：初始隐藏由 hidden 承担');
+  (docHandlers.keydown || []).forEach((fn) => fn({ key: 'Escape' }));
+  assert.equal(elements.importModal.hasAttribute('hidden'), true,
+    '未打开时 Escape 不得翻转弹层状态（旧 display 判定恒真执行 close）');
+  assert.deepEqual(elements.importModal._removedAttrs, [],
+    '未打开时 Escape 不得移除 hidden（无「闪开即关」副作用）');
+  assert.equal(elements.importEntry._focused, false,
+    '未打开时 Escape 不得触发焦点归还路径');
+  // 对照：打开后 Escape 照常关闭（WB-027 已锁焦点归还——此处只锁状态翻转）
+  click(elements.importEntry);
+  (docHandlers.keydown || []).forEach((fn) => fn({ key: 'Escape' }));
+  assert.equal(elements.importModal.hasAttribute('hidden'), true, '开态 Escape 照常关闭');
+});
+
+// WB-193：importScan 同步抛错形态零覆盖——桥异常不得挂死向导
+test('WB-193 importScan 同步抛错：呈现「未检测到」且下一步可用（不挂死）', () => {
+  const host = {
+    has: () => true,
+    importScan: () => { throw new Error('bridge gone'); },   // 同步抛错形态
+    jsError: () => {},
+  };
+  const { elements, timers } = loadImport(host);
+  click(elements.importEntry);                     // openWizard try/catch → scanDone([])
+  assert.match(elements.imBody.children[0].textContent, /未检测到/,
+    '同步抛错必须走空结果兜底（与超时/拒绝同语义）');
+  assert.equal(elements.imNext.disabled, false, '下一步必须可用（不永久卡死）');
+  assert.equal(timers.cleared.length, 1, '兜底定时器必须被清除（无泄漏）');
 });
 
 // WB-090（审计 2026-09-23 清单·W5 批）：renderDone 三态文案——「导入失败」

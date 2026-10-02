@@ -68,6 +68,25 @@ public sealed class TabManagerTests
     }
 
     [Fact]
+    public void ClosingLastTab_StillReopenable_StateMachineNotStranded()
+    {
+        // CS-393（2026-10-02 审计）：关最后一个标签的边界——返回 null（订阅方
+        // 据此关窗）后撤销栈仍持有快照，PopClosed/NewTab 路径不被空集合卡死
+        var manager = new TabManager();
+        var only = manager.NewTab("https://example.com/only");
+
+        Assert.Null(manager.CloseTab(only.TabId));
+        Assert.Null(manager.CurrentTabId);
+        Assert.Equal(1, manager.ClosedCount);
+
+        var snapshot = manager.PopClosed();
+        Assert.NotNull(snapshot);
+        var reopened = manager.NewTab(snapshot!.Url, snapshot.Title);
+        Assert.Equal(reopened.TabId, manager.CurrentTabId);
+        Assert.Single(manager.Tabs);
+    }
+
+    [Fact]
     public void CloseUnknownTabIsNoOp()
     {
         var manager = new TabManager();
