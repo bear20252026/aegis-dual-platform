@@ -13,9 +13,9 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
-
 from update_verifier import UpdateRejected, _version_tuple
 from verify_artifact_set import verify_artifact_set
 from verify_provenance import verify_provenance as run_provenance
@@ -70,7 +70,6 @@ class TestPrereleaseLeadingZeroRejected:
             raise AssertionError(f"前导零数字段应拒绝: {bad!r}")
 
     def test_no_alias_between_01_and_1(self):
-        import pytest
         # PY-184 核心：防回滚比较不得存在别名——"01" 被拒绝（不归一化为 1），
         # "2.2.0-01" 与 "2.2.0-1" 永不可能比较相等
         with pytest.raises(UpdateRejected):
@@ -197,14 +196,12 @@ class TestVerifyReleaseSentinel:
 
     def test_local_unverified_sentinel_rejected(self, tmp_path):
         # PY-199：本地哨兵值 truthy——校验侧必须显式拒绝（不得当有效溯源）
-        import pytest
         from verify_release import verify_bundle
         self._write_dist(tmp_path, self._metadata(source_revision="local-unverified"))
         with pytest.raises(SystemExit, match="local-unverified"):
             verify_bundle(tmp_path)
 
     def test_sentinel_in_any_provenance_field_rejected(self, tmp_path):
-        import pytest
         from verify_release import verify_bundle
         self._write_dist(tmp_path, self._metadata(source_ref="local-unverified",
                                                   workflow_run_id="local-unverified"))
@@ -214,7 +211,6 @@ class TestVerifyReleaseSentinel:
     def test_real_provenance_passes_metadata_gate(self, tmp_path):
         # 真 SHA/ref 通过元数据门禁（走到"缺 SHA256SUMS.json"才停——证明
         # 哨兵检查未误伤正常元数据）
-        import pytest
         from verify_release import verify_bundle
         self._write_dist(tmp_path, self._metadata())
         with pytest.raises(SystemExit, match="SHA256SUMS"):
@@ -225,6 +221,7 @@ class TestVerifyReleaseSentinel:
         # CI verify-gate 传平铺平台目录（dist/<platform>，无嵌套 dist/）——
         # verify_bundle 须接受该布局并走完全部断言（meta+清单+SBOM）
         import json as _json
+
         from verify_release import verify_bundle
         (tmp_path / "build-metadata.json").write_text(
             _json.dumps(self._metadata(), ensure_ascii=False), encoding="utf-8")
@@ -241,22 +238,126 @@ class TestVerifyReleaseSentinel:
         assert verify_bundle(tmp_path) is None
 
     def test_core_txt_checksum_fallback(self, tmp_path):
-        # core 平台只有 SHA256SUMS.txt（无 JSON manifest）——.txt 回退计数
+        # core 平台只有 SHA256SUMS.txt（无 JSON manifest）——PY-225：.txt 回退
+        # 现为逐行 `<hash>␣␣<file>` 解析 + hashlib 重算 + 文件集对账。
+        # PY-250：deadbeef 假哈希此前把"只数行数"的弱行为锁死——改真实哈希
+        # 且清单必须覆盖 dist 全部文件（build-metadata/SBOM 同列入账）。
         import json as _json
+
         from verify_release import verify_bundle
         (tmp_path / "build-metadata.json").write_text(
             _json.dumps(self._metadata(platform="core"), ensure_ascii=False),
             encoding="utf-8")
         (tmp_path / "libaegis_policy_core.so").write_bytes(b"elf")
-        (tmp_path / "SHA256SUMS.txt").write_text(
-            "deadbeef  libaegis_policy_core.so\n", encoding="utf-8")
         (tmp_path / "sbom.cdx.json").write_text("{}", encoding="utf-8")
+        lines = [
+            f"{hashlib.sha256((tmp_path / p).read_bytes()).hexdigest()}  {p}"
+            for p in ("build-metadata.json", "libaegis_policy_core.so", "sbom.cdx.json")
+        ]
+        (tmp_path / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         assert verify_bundle(tmp_path) is None
+
+    def test_core_txt_dot_slash_prefix_and_relative_dist(self, tmp_path, monkeypatch):
+        # SP-221（2026-10-01 发布链批 3）：release-core 的清单重生成命令
+        #（find -print0 | xargs sha256sum）产出 "./" 前缀条目；verify-gate 以
+        # 相对路径（dist/core）调用本脚本。两者叠加时 ③ 文件集对账曾把全部
+        # 条目误判 unlisted（"v2.2.0-beta.51 第三次 tag 跑 verify-gate 实证）——
+        # 归一化后必须通过，且以相对 dist 路径复现 CI 调用形态。
+        import json as _json
+
+        from verify_release import verify_bundle
+        (tmp_path / "build-metadata.json").write_text(
+            _json.dumps(self._metadata(platform="core"), ensure_ascii=False),
+            encoding="utf-8")
+        (tmp_path / "libaegis_policy_core.so").write_bytes(b"elf")
+        (tmp_path / "sbom-core.cdx.json").write_text("{}", encoding="utf-8")
+        lines = [
+            f"{hashlib.sha256((tmp_path / p).read_bytes()).hexdigest()}  ./{p}"
+            for p in ("build-metadata.json", "libaegis_policy_core.so", "sbom-core.cdx.json")
+        ]
+        (tmp_path / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path.parent)  # 相对路径调用（CI 形态）
+        assert verify_bundle(Path(tmp_path.name)) is None
+
+    def test_core_txt_fake_hash_rejected(self, tmp_path):
+        # PY-225/PY-250：伪造哈希（deadbeef 填充）必须被哈希重算拒绝——
+        # 此前"只数非空行"时该清单可通过（弱行为已消除）
+        import json as _json
+
+        from verify_release import verify_bundle
+        (tmp_path / "build-metadata.json").write_text(
+            _json.dumps(self._metadata(platform="core"), ensure_ascii=False),
+            encoding="utf-8")
+        (tmp_path / "libaegis_policy_core.so").write_bytes(b"elf")
+        (tmp_path / "sbom.cdx.json").write_text("{}", encoding="utf-8")
+        lines = [
+            f"{hashlib.sha256((tmp_path / p).read_bytes()).hexdigest()}  {p}"
+            for p in ("build-metadata.json", "sbom.cdx.json")
+        ]
+        lines.append("deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+                     "  libaegis_policy_core.so")
+        (tmp_path / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with pytest.raises(SystemExit, match="哈希不符"):
+            verify_bundle(tmp_path)
+
+    def test_core_txt_malformed_line_rejected(self, tmp_path):
+        # PY-225：非 `<64hex>␣␣<file>` 形态（伪造单行文本）即拒——
+        # 此前一行的任意非空文本即可通过门禁
+        import json as _json
+
+        from verify_release import verify_bundle
+        (tmp_path / "build-metadata.json").write_text(
+            _json.dumps(self._metadata(platform="core"), ensure_ascii=False),
+            encoding="utf-8")
+        (tmp_path / "a.bin").write_bytes(b"x")
+        (tmp_path / "sbom.cdx.json").write_text("{}", encoding="utf-8")
+        (tmp_path / "SHA256SUMS.txt").write_text("totally-not-a-checksum\n", encoding="utf-8")
+        with pytest.raises(SystemExit, match="格式无效"):
+            verify_bundle(tmp_path)
+
+    def test_core_txt_unlisted_file_rejected(self, tmp_path):
+        # PY-225：文件集双向对账——dist 内存在未列入清单的文件即拒
+        import json as _json
+
+        from verify_release import verify_bundle
+        (tmp_path / "build-metadata.json").write_text(
+            _json.dumps(self._metadata(platform="core"), ensure_ascii=False),
+            encoding="utf-8")
+        (tmp_path / "libaegis_policy_core.so").write_bytes(b"elf")
+        (tmp_path / "rogue.dll").write_bytes(b"rogue")  # 幽灵文件——清单漏列
+        (tmp_path / "sbom.cdx.json").write_text("{}", encoding="utf-8")
+        lines = [
+            f"{hashlib.sha256((tmp_path / p).read_bytes()).hexdigest()}  {p}"
+            for p in ("build-metadata.json", "libaegis_policy_core.so", "sbom.cdx.json")
+        ]
+        (tmp_path / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with pytest.raises(SystemExit, match="未列入"):
+            verify_bundle(tmp_path)
+
+    def test_core_txt_path_escape_rejected(self, tmp_path):
+        # PY-225：清单条目越出发布根（../ 逃逸）即拒
+        import json as _json
+
+        from verify_release import verify_bundle
+        (tmp_path / "build-metadata.json").write_text(
+            _json.dumps(self._metadata(platform="core"), ensure_ascii=False),
+            encoding="utf-8")
+        (tmp_path / "sbom.cdx.json").write_text("{}", encoding="utf-8")
+        outside = tmp_path / "outside.bin"
+        outside.write_bytes(b"o")
+        lines = [
+            f"{hashlib.sha256((tmp_path / p).read_bytes()).hexdigest()}  {p}"
+            for p in ("build-metadata.json", "sbom.cdx.json")
+        ]
+        lines.append(f"{hashlib.sha256(outside.read_bytes()).hexdigest()}  ../outside.bin")
+        (tmp_path / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        with pytest.raises(SystemExit, match="越出发布根"):
+            verify_bundle(tmp_path)
 
     def test_empty_txt_checksum_rejected(self, tmp_path):
         # .txt 回退路径空清单同样 fail-closed
         import json as _json
-        import pytest
+
         from verify_release import verify_bundle
         (tmp_path / "build-metadata.json").write_text(
             _json.dumps(self._metadata(platform="core"), ensure_ascii=False),
@@ -266,14 +367,22 @@ class TestVerifyReleaseSentinel:
         with pytest.raises(SystemExit, match="SHA256SUMS.txt 为空"):
             verify_bundle(tmp_path)
 
+    def test_broken_metadata_json_clean_exit(self, tmp_path):
+        # PY-235：build-metadata.json 坏 JSON → SystemExit 干净报告
+        #（此前 json.JSONDecodeError 原始栈直接 traceback）
+        from verify_release import verify_bundle
+        (tmp_path / "build-metadata.json").write_text("{ broken", encoding="utf-8")
+        with pytest.raises(SystemExit, match="无法解析"):
+            verify_bundle(tmp_path)
+
 
 # ---------------------------------------------------------------- PY-212
 class TestIterReleaseFilesSingleSource:
     def test_write_and_verify_file_sets_identical(self, tmp_path):
         # PY-212：写/读两侧"排除清单自身"的文件集合必须来自同一
         # iter_release_files——对同一棵树分别构建清单与校验，集合一致
-        from write_checksum_json import build_manifest, iter_release_files
         from verify_checksum_json import verify_manifest
+        from write_checksum_json import build_manifest, iter_release_files
         (tmp_path / "app.exe").write_bytes(b"payload")
         (tmp_path / "sub").mkdir()
         (tmp_path / "sub" / "lib.so").write_bytes(b"native" * 1000)
@@ -384,7 +493,8 @@ class TestReleaseVerifyVectorsMetaGate:
     VECTORS = Path(__file__).resolve().parents[2] / "release" / "test-vectors" / "release-verify.json"
 
     # 向量 case → 实现载体（工具分支/单测类）——映射本身即"执行消费者"
-    IMPLEMENTED = {
+    # RUF012：映射是门禁常量——显式 ClassVar（非可变实例默认）
+    IMPLEMENTED: ClassVar[dict[str, str]] = {
         "missing_artifact": "verify_artifact_set 缺失工件分支（release_chain_test.TestVerifyArtifactSet.test_missing_detected）",
         "hash_mismatch": "verify_artifact_set 哈希不符分支（release_chain_test.TestVerifyArtifactSet.test_hash_mismatch_detected）",
         "unlisted_artifact": "verify_artifact_set 双向集合相等分支（release_chain_test.TestVerifyArtifactSet.test_unlisted_artifact_rejected）",

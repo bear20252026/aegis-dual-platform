@@ -1,0 +1,31 @@
+# pin-check —— SP-182（2026-10-01 审计）：SHA pin 检查单源 composite action。
+# 此前 release.yml（编排器）与 release-windows/android/core.yml 四处内联副本
+# 已漂移（存在性断言只落编排器）——收敛为单一修改点，四个调用方等价消费。
+# PY-012：grep 目标此前含已删除的 docs/release/release.yml——缺失文件使 grep
+# 返回码 2 被 if/else 吞成"通过"。先断言现存目标。
+# PY-177/SP-152（2026-09-26 审计）：pin 检查改白名单式——`uses:` 引用的 @ 后
+# 必须恰为 40 位十六进制（完整 SHA）才放行；本地相对路径引用（无 @，随
+# checkout 固定）豁免。旧黑名单正则要求 SHA 后跟非 hex 字符——行尾短 SHA
+# （@ 后跟 7 位短哈希且到行尾）不匹配（实测验证），@latest/@develop 等命名
+# ref 也漏检；且 .github/actions/**/action.yml 此前不在扫描面。首个 grep
+# 不自匹配（模式文本前导为 ']' 非空白）；注释行不得书写"uses: 名字@短哈希"
+# 字面示例——会被本检查命中。
+# SP-178（2026-10-01 审计）：全部外部 action 已重 pin 到上游现行 release tag
+# 并带 `# vX.Y.Z` 注记（git ls-remote 核对 8 个原 SHA 不被任何 release tag
+# 引用）——注记仅供人读，门禁只认 40 位完整 SHA。
+name: 'Pin check (fail-closed)'
+description: 'Assert every external action reference is pinned to a full 40-hex commit SHA'
+runs:
+  using: 'composite'
+  steps:
+    - name: Pin check (fail-closed)
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -d .github/workflows || { echo 'workflows 目录缺失'; exit 1; }
+        test -d .github/actions || { echo 'actions 目录缺失'; exit 1; }
+        if grep -rnE '(^|[[:space:]])uses: [^#@]*@' .github/workflows/ .github/actions/ \
+            | grep -vE '@[0-9a-fA-F]{40}([[:space:]]|$|#)'; then
+          echo "❌ 存在未固定完整 40 位十六进制 SHA 的 action 引用" && exit 1
+        fi
+        echo "✅ 全部 action 固定完整 SHA"

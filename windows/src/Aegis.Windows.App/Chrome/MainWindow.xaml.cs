@@ -45,10 +45,12 @@ public partial class MainWindow : Window
     // 源码查看器允许多实例并存——换肤时对仍存活者传播并清理已关闭项
     private readonly List<SourceViewerWindow> _sourceViewerWindows = new();
     private System.Windows.Threading.DispatcherTimer? _feedbackTimer;
-    // M4 下载管理面板数据源（跨标签共享——DownloadItem 由 TabRuntime 下载事件注入）
-    private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
-    private readonly Core.Downloads.DownloadRecordStore _downloadRecords;
-    private System.Windows.Threading.DispatcherTimer? _sleepTimer;
+        // M4 下载管理面板数据源（跨标签共享——DownloadItem 由 TabRuntime 下载事件注入）
+        private readonly System.Collections.ObjectModel.ObservableCollection<Core.Downloads.DownloadItem> _downloads = new();
+        // CS-344（2026-10-01 审计）：DownloadRecordStore 移除——其注释承诺
+        // "重启后仍可查看"，但 All() 零生产调用（DownloadItem 需持有原生
+        // DownloadOperation，重启后无法重建），带 token 的 URL 无收益常驻磁盘
+        private System.Windows.Threading.DispatcherTimer? _sleepTimer;
     // 会话落盘防抖（写放大治理）已外移 SessionSaveScheduler——可测的标脏/刷盘/恢复抑制
     private readonly SessionSaveScheduler _sessionSaver;
     private FindBarController _find = null!;
@@ -57,6 +59,11 @@ public partial class MainWindow : Window
     private Action? _zoomChangedHandler;
     // CS-299：后台历史写入链尾——串行化保证先后序（详见 OnTabNavigationCompleted）
     private Task _historyWriteTail = Task.CompletedTask;
+    // CS-355（2026-10-01 审计）：最近一次策略拒绝的用户可读原因（供
+    // NavigationCompleted 的 OperationCanceled 分支呈现）
+    private string? _pendingDenyMessage;
+    // CS-367（2026-10-01 审计）：KillSwitch 常驻横幅订阅句柄（OnClosed 解绑）
+    private readonly Action _killSwitchEngagedHandler;
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
@@ -101,7 +108,6 @@ public partial class MainWindow : Window
         _history = deps.History;
         _settings = deps.Settings;
         _settingsService = deps.SettingsService;
-        _downloadRecords = deps.DownloadRecords;
         InitializeComponent();
         _runtimeCoordinator = new TabRuntimeCoordinator(_runtimes, WebViewHost);
         // 虚拟主机首帧重试耗尽：停止加载条并展示明确错误——瞬态抑制不应让
@@ -133,6 +139,16 @@ public partial class MainWindow : Window
         RefreshBookmarkBar();
         StartThreatFeedRefresh();
         InitEngineCombo();
+        // CS-367（2026-10-01 审计）：KillSwitch 触发后的常驻指示——此前紧急
+        // 终止后主窗无任何提示（用户只见"导航没反应"无从知晓原因）。横幅
+        // 一经显示不再隐藏（Engage 单向——重启恢复）
+        _killSwitchEngagedHandler = () => Dispatcher.BeginInvoke(() =>
+        {
+            KillSwitchBanner.Visibility = Visibility.Visible;
+        });
+        _broker.KillSwitch.Engaged += _killSwitchEngagedHandler;
+        if (_broker.KillSwitch.IsEngaged)
+            KillSwitchBanner.Visibility = Visibility.Visible;
         ZoomStore.Load(_settings.ZoomByHost);
         // CS-261：BeginInvoke 非阻塞——ZoomStore.Changed 可能在非 UI 线程
         // 触发，Invoke 同步等待会造成跨线程阻塞面
@@ -386,6 +402,9 @@ public partial class MainWindow : Window
         // M4 下载管理面板：授权通过的 DownloadOperation 注入共享数据源
         // CS-260：与初始化/导入路径统一为 BeginInvoke——WebView2 事件线程
         // 不应被 UI 线程任务同步阻塞
+        // CS-344（2026-10-01 审计）：终态持久化（含 URL 落 downloads.db）随
+        // DownloadRecordStore 一并移除——All() 零生产调用（重启后无消费面），
+        // 带 token 的 URL 无收益常驻磁盘；会话内管理由 _downloads + CS-333 有界
         runtime.DownloadOperationStarted += (operation, dangerous) => Dispatcher.BeginInvoke(() =>
         {
             var item = new Core.Downloads.DownloadItem(
@@ -395,25 +414,6 @@ public partial class MainWindow : Window
                 dangerous);
             _downloads.Insert(0, item);
             TrimDownloadItems();
-            // CS-320（2026-09-26 审计）：记录持久化移到**完成态**——此前启动即
-            // 写档（completed_at 实为开始时刻，取消/进行中也留痕，与
-            // DownloadRecordStore "保存已完成/失败下载" 注释相悖）。终态经
-            // StateChanged 回投 UI 线程落库；对象已销毁（浏览器会话结束）无
-            // 终态可记则跳过。
-            try
-            {
-                var persisted = false;
-                operation.StateChanged += (_, _) => Dispatcher.BeginInvoke(() =>
-                {
-                    if (!persisted)
-                        persisted = PersistCompletedDownload(item, operation);
-                });
-            }
-            catch (Exception ex)
-            {
-                Core.Security.SecurityLog.Write(
-                    $"[download] 终态订阅失败（记录将缺失）: {ex.GetType().Name}: {ex.Message}");
-            }
         });
         // M1 加载指示接线：导航开始显示不定态条，完成/失败隐藏
         runtime.NavigationStarted += () =>
@@ -423,6 +423,16 @@ public partial class MainWindow : Window
         };
         runtime.Host.NavigationConfirmationRequested += (_, e) => _approval.Request(tab.TabId, e);
         runtime.Host.NavigationConfirmationResolved += (_, _) => _approval.Resolved();
+        // CS-355（2026-10-01 审计）：策略拒绝原因可见——broker 的 DenyReason
+        // 此前在 HostWebView 内被丢弃（导航只是"无反应"）；记录待
+        // NavigationCompleted(OperationCanceled) 分支呈现（该分支此前把错误页
+        // 一律收起——拒绝零可见反馈）
+        runtime.NavigationDenied += message =>
+        {
+            _pendingDenyMessage = message;
+            if (tab.TabId == _activeTabId)
+                ShowRejection(message);
+        };
         // target=_blank / window.open 链接：不再静默丢弃，改为验证地址后
         // 在当前窗口新建标签打开（对齐主流浏览器）。公网地址或本机/hosts
         // 映射到本机的域名放行（本地开发访问）；非法协议/内网/环回地址仍拒
@@ -439,17 +449,10 @@ public partial class MainWindow : Window
         // M3 危险扩展下载确认（审计补缺——此前 DownloadConfirmationRequested
         // 全仓零订阅者 → 危险下载恒被静默拒绝，该功能形同虚设）。用户显式
         // 确认才放行；窗口已关闭/异常仍 fail-closed 拒绝。
+        // CS-370（2026-10-01 审计）：确认对话框单源到 WindowSharedChrome
+        //（与无痕窗共用——此前两窗各持一份同形 MessageBox）
         runtime.DownloadConfirmationRequested += (downloadUrl, fileName) =>
-        {
-            if (!IsLoaded)
-                return false;
-            return MessageBox.Show(
-                this,
-                $"此文件的类型可能存在风险，是否允许下载？\n\n文件：{fileName}\n来源：{downloadUrl}",
-                "下载确认",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning) == MessageBoxResult.Yes;
-        };
+            WindowSharedChrome.ConfirmDangerousDownload(this, downloadUrl, fileName);
         // 视觉树挂载 + 初始化统一由协调器驱动（Create 已完成两者——
         // 显式初始化含安全 DNS 等参数，完成后触发 CoreWebView2InitializationCompleted，
         // 上方处理器负责映射+导航）。
@@ -462,53 +465,6 @@ public partial class MainWindow : Window
     /// 拆分第二批；保留薄转发以维持 CreateRuntime 内单一装配点）。</summary>
     private Chrome.Ntp.NtpBridge CreateNtpBridge(TabRuntime runtime) =>
         _ntpBridgeFactory.Create(runtime);
-
-    /// <summary>CS-320：下载到达终态时的持久化（Completed/Interrupted 落库、
-    /// UserCanceled 不留档）——completed_at 为真实完成时刻。返回 true=终态
-    /// 已处理（含"取消不留档"/对象销毁），监听方停止再投。</summary>
-    private bool PersistCompletedDownload(
-        Core.Downloads.DownloadItem item,
-        CoreWebView2DownloadOperation operation)
-    {
-        try
-        {
-            if (operation.State is not (CoreWebView2DownloadState.Completed
-                or CoreWebView2DownloadState.Interrupted))
-                return false;  // 非终态——继续等下一次状态变化
-        }
-        catch (Exception)
-        {
-            return true;  // 原生对象已销毁（会话结束）——无终态可记
-        }
-        try
-        {
-            item.Refresh();  // 同步条目状态（面板未打开时无人轮询）
-        }
-        catch (Exception)
-        {
-            return true;
-        }
-        if (item.StateKind != Core.Downloads.DownloadItemState.Interrupted
-            && item.StateKind != Core.Downloads.DownloadItemState.Completed)
-            return true;  // UserCanceled 已取消——不留档（对齐"保存已完成/失败下载"）
-        try
-        {
-            var filePath = operation.ResultFilePath ?? "";
-            var size = (long)(operation.TotalBytesToReceive ?? 0UL);
-            // CS-297（2026-09-26 审计）：InvariantCulture——自定义格式串中 ":"
-            // 是文化时间分隔符占位（CS-034/149/175 同类已修，此处随补）
-            _downloadRecords.Add(
-                System.IO.Path.GetFileName(filePath), filePath,
-                operation.Uri ?? "", size,
-                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-        }
-        catch (Exception ex)
-        {
-            Core.Security.SecurityLog.Write(
-                $"[download] 记录持久化失败: {ex.GetType().Name}: {ex.Message}");
-        }
-        return true;
-    }
 
     /// <summary>CS-333：下载集合有界——超阈值自尾部移除最早的非进行中条目
     ///（进行中保留；条目持有的原生操作对象随之释放）。</summary>
@@ -542,11 +498,8 @@ public partial class MainWindow : Window
         {
             if (id is null || !_runtimes.TryGetValue(id, out var runtime))
                 continue;
-            var isActive = id == _activeTabId;
-            System.Windows.Controls.Panel.SetZIndex(runtime.Control, isActive ? 5 : 0);
-            runtime.Control.Visibility = isActive ? Visibility.Visible : Visibility.Collapsed;
-            runtime.Control.IsHitTestVisible = isActive;
-            runtime.Control.IsEnabled = isActive;
+            // CS-371：四属性翻转单源（与无痕窗共用——此前两份同形副本）
+            WindowSharedChrome.ApplyTabVisibility(runtime.Control, id == _activeTabId);
         }
         WebViewHost.UpdateLayout();
         SyncAddressBar(tab.Url);
@@ -586,8 +539,19 @@ public partial class MainWindow : Window
         }
         else if (isActive)
         {
-            ErrorPagePanel.Visibility = Visibility.Collapsed;
+            // CS-355：策略拒绝的取消导航（OperationCanceled）此前直接收起错误
+            // 页——拒绝原因零可见反馈；有待呈现的拒绝说明时改呈现之
+            if (!isSuccess && status == CoreWebView2WebErrorStatus.OperationCanceled
+                && _pendingDenyMessage is { } deny)
+            {
+                ShowRejection(deny);
+            }
+            else
+            {
+                ErrorPagePanel.Visibility = Visibility.Collapsed;
+            }
         }
+        _pendingDenyMessage = null;
         if (isActive)
         {
             LoadingBar.Visibility = Visibility.Collapsed;
@@ -1443,14 +1407,17 @@ public partial class MainWindow : Window
         _feedbackTimer?.Stop();
         if (_zoomChangedHandler is not null)
             ZoomStore.Changed -= _zoomChangedHandler;
+        // CS-367：解绑 KillSwitch 横幅订阅（横幅句柄不再持有已关窗口）
+        _broker.KillSwitch.Engaged -= _killSwitchEngagedHandler;
         _tabs.TabOpened -= OnTabOpened;
         _tabs.TabClosed -= OnTabClosed;
         _tabs.TabSwitched -= OnTabSwitched;
         _runtimeCoordinator.NtpNavigationFailed -= OnNtpNavigationFailed;
         _sourceViewerWindows.Clear();  // CS-233：源码查看窗引用驻留清理（Owner=本窗）
         // 全部 runtime 经协调器统一销毁（先摘视觉树再释放，令牌一并取消）
+        // CS-366（2026-10-01 审计）：_runtimes 清空收敛到协调器 Dispose 单点
+        //（此前两调用方各自 Clear——约定分散）
         _runtimeCoordinator.Dispose();
-        _runtimes.Clear();
         _broker.Dispose();
         base.OnClosed(e);
     }

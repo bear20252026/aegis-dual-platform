@@ -98,6 +98,11 @@
             Visibility="Collapsed">
       <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
     </Border>
+    <!-- CS-349（2026-10-01 审计）：加载指示（与主窗 LoadingBar 同款 2px 不定态
+         条——此前无痕窗口零加载反馈，页面加载中无任何视觉信号） -->
+    <ProgressBar x:Name="LoadingBar" DockPanel.Dock="Top" Height="2" IsIndeterminate="True"
+                 Background="Transparent" Foreground="#FF9AA0FF" BorderThickness="0"
+                 Visibility="Collapsed"/>
     <!-- CS-295（2026-09-26 审计）：导航确认面板遮罩（与主窗 ApprovalOverlay 同结构——
          复用 ApprovalPanelController；此前确认门下无痕窗口零订阅，导航被静默取消） -->
     <Grid>

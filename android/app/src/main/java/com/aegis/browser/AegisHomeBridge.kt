@@ -4,6 +4,7 @@ import android.content.Context
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
+import com.aegis.webviewadapter.LogRedact
 
 /**
  * 首页宿主桥（shared/shell/start.html 的 Android 侧能力面——ADR-007 单源首页）。
@@ -106,7 +107,10 @@ class AegisHomeBridge(
                 ?.let { wv -> runCatching { wv.url }.getOrNull() }
         val trusted = isTrustedShellUrl(url)
         if (!trusted) {
-            android.util.Log.w("AegisHome", "[security] AegisBridge 拒绝非壳页调用: ${url.orEmpty()}")
+            // AD-257（2026-10-01 审计）：拒绝路径明文记录完整 URL 是脱敏口径的
+            // 第三处漏接（拒绝 URL 可含 query token）——统一经 LogRedact.redact
+            // （与 AegisWebViewClient/WebViewDownloadHandler 同单源）。
+            android.util.Log.w("AegisHome", "[security] AegisBridge 拒绝非壳页调用: ${LogRedact.redact(url)}")
         }
         return trusted
     }

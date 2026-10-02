@@ -18,13 +18,14 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
-import build_review_package as brp  # noqa: E402
-from gen_jsapi_schema import _doc_first_line, build_schema  # noqa: E402
+import build_review_package as brp
+from gen_jsapi_schema import _doc_first_line, build_schema
 
 
 # ---------------------------------------------------------------- PY-109
@@ -141,10 +142,36 @@ class Api(Base):
         assert methods["op"]["description"] == "api doc"
         assert methods["op"]["defined_in"] == "Api"
 
+    def test_name_conflict_warns_on_stderr(self, capsys):
+        # PY-255（2026-10-01 审计）：同名方法冲突此前被 setdefault 静默首胜——
+        # 方法悄然从 schema 消失无任何痕迹。现冲突必须输出 stderr 告警
+        #（schema 输出形状不变——shared/jsapi-schema.json 有 CI diff 门禁）。
+        override_src = '''
+class Base:
+    def op(self):
+        """base doc"""
+        return 1
+
+class Api(Base):
+    def op(self):
+        """api doc"""
+        return 2
+'''
+        build_schema(override_src)
+        err = capsys.readouterr().err
+        assert "同名方法冲突 1 处" in err
+        assert "Base" in err and "Api" in err
+
+    def test_no_conflict_no_warning(self, capsys):
+        # 无冲突零告警（真实 Api 链无同名——不得污染正常生成输出）
+        build_schema(API_SRC)
+        assert capsys.readouterr().err == ""
+
 
 # ---------------------------------------------------------------- PY-112
 class TestMatchExcluded:
-    CASES = [
+    # RUF012：表驱动用例是类级常量——显式 ClassVar（非可变实例默认）
+    CASES: ClassVar[list[tuple[Path, bool, str]]] = [
         (Path("src/bin/obj/x.cs"), True, "父目录命中 EXCLUDE_DIRS"),
         (Path("src/__pycache__/m.pyc"), True, "缓存目录"),
         (Path("app/node_modules/lib.js"), True, "node_modules"),
@@ -311,5 +338,7 @@ class TestCheckReviewed:
 
 # 脚本可独立运行（无 pytest 环境时的最低验证）
 if __name__ == "__main__":
-    rc = subprocess.run([sys.executable, "-m", "pytest", __file__, "-q"]).returncode
+    # PLW1510：独立运行入口不把 pytest 退出码当异常——显式 check=False
+    rc = subprocess.run([sys.executable, "-m", "pytest", __file__, "-q"],
+                         check=False).returncode
     sys.exit(rc)

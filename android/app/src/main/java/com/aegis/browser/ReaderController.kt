@@ -30,9 +30,22 @@ class ReaderController internal constructor(
     private val _content = MutableStateFlow<ReaderContent?>(null)
     val content: StateFlow<ReaderContent?> = _content.asStateFlow()
 
-    /** 阅读模式：提取当前标签正文（异步回填 [content]）。 */
+    /**
+     * 阅读模式：提取当前标签正文（异步回填 [content]）。
+     *
+     * AD-267（2026-10-01 审计）：evaluateJavascript 回填做归属校验——提取发起
+     * 后用户切标签，异步回调落地时 [currentWebView] 已不是发起时的 WebView：
+     * 旧正文不得写入新语境（闭包比对发起时 WebView 与当前 WebView 实例一致
+     * 才回填/提示）。
+     */
     fun toggleReaderMode() {
-        ReaderMode.extract(currentWebView()) { extracted ->
+        val originWebView = currentWebView()
+        ReaderMode.extract(originWebView) { extracted ->
+            if (currentWebView() !== originWebView) {
+                // 提取期间已切换标签——丢弃过期正文（不提示：新标签语境下
+                // 弹「无正文」同样错位）
+                return@extract
+            }
             if (extracted == null) {
                 alertRes(R.string.reader_no_content)
             } else {

@@ -1,0 +1,12 @@
+# SP-210（2026-10-01 审计）：Issue 模板引导入口——此前无 config.yml，
+# Issue 创建页对空白模板无任何引导（安全漏洞应走私密披露而非公开 Issue）。
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞披露（私密通道）
+    url: https://github.com/bear20252026/aegis-dual-platform/security/advisories/new
+    about: |
+      漏洞报告不要开公开 Issue——使用 GitHub Security Advisory 私密披露
+      （流程见 SECURITY.md：报告内容含影响面/复现/缓解建议，不含敏感载荷）。
+  - name: 功能与设计讨论
+    url: https://github.com/bear20252026/aegis-dual-platform/discussions
+    about: 新功能与架构设计先讨论再实现（涉及认证/凭据的话题仅走安全渠道）。

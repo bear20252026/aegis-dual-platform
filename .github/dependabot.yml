@@ -1,7 +1,10 @@
-# PY-157（2026-09-23 审计·V1 核验批）：三生态周频依赖更新——此前全仓无任何
-# dependabot 配置，依赖更新纯手工。三生态取活跃面：CI action（13 workflow
+# PY-157（2026-09-23 审计·V1 核验批）：依赖周频更新——此前全仓无任何
+# dependabot 配置，依赖更新纯手工。生态取活跃面：CI action（13 workflow
 # 全 SHA pin，dependabot 顺带刷新版本注记）、pip（根 requirements-ci.txt
-# hash 锁定工具链）、gradle（android/ 四模块）。
+# hash 锁定工具链）、gradle（android/ 四模块）、cargo（core/rust-policy-core
+# ——SP-203，2026-10-01 审计补：Rust 依赖此前无任何例行 bump，只靠
+# cargo audit 事后告警）、nuget（windows/——SP-203 同批补：C# 正典栈
+# PackageReference 例行 bump；packages.lock.json 由 CS 批启用后随 PR 一致更新）。
 # 约束：open-pull-requests-limit=5 防洪；pip 更新须重算 --hash（dependabot
 # 对 hash 锁定文件会连带更新 hash 条目，不合的 PR 直接关）。
 # ⚠️ 已知限制（2026-09-28 实证，#27/#35/#39 三连坏 PR 后）：requirements-ci.txt
@@ -27,6 +30,22 @@ updates:
 
   - package-ecosystem: "gradle"
     directory: "/android"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # SP-203（2026-10-01 审计）：cargo 生态例行 bump——Cargo.lock 随 PR 更新，
+  # core-rust/release-core 的 --locked 门禁保证锁与清单一致
+  - package-ecosystem: "cargo"
+    directory: "/core/rust-policy-core"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+
+  # SP-203（2026-10-01 审计）：nuget 生态例行 bump——windows/ 下 src 与 tests
+  # 的 PackageReference；PR 须过 contracts.yml 的 dotnet build/test 门禁
+  - package-ecosystem: "nuget"
+    directory: "/windows"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5

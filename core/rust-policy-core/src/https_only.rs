@@ -41,9 +41,18 @@ impl HttpsOnlyState {
 
     /// 检查域名是否被用户手动放行（允许 HTTP）。
     /// M-13 修复（审计 2026-08-31）：大小写不敏感比较。
+    ///
+    /// RS-267（2026-10-01 审计）：折叠单源——公开入口负责 ASCII 小写折叠，
+    /// 已折叠内核 [`Self::is_http_allowed_lc`] 供 upgrade（自身已折叠 domain）
+    /// 复用；此前 upgrade 折叠一次、is_http_allowed 内再折叠一次，同一
+    /// 请求串被重复扫描。
     pub fn is_http_allowed(&self, domain: &str) -> bool {
-        let lowered = domain.to_ascii_lowercase();
-        self.allowed_http_domains.contains(&lowered)
+        self.is_http_allowed_lc(&domain.to_ascii_lowercase())
+    }
+
+    /// RS-267：已折叠内核——入参必须已是 ASCII 小写（调用方契约）。
+    fn is_http_allowed_lc(&self, domain_lc: &str) -> bool {
+        self.allowed_http_domains.contains(domain_lc)
     }
 
     /// 用户手动放行 HTTP 域名（M-13：统一小写归一存储）。
@@ -98,7 +107,8 @@ impl HttpsOnlyState {
             .next()
             .unwrap_or("")
             .to_ascii_lowercase();
-        if self.is_http_allowed(&domain) {
+        // RS-267：domain 已折叠——直接走已折叠内核，不再经公开入口二次折叠
+        if self.is_http_allowed_lc(&domain) {
             return None; // 用户已放行
         }
 
@@ -319,6 +329,37 @@ mod tests {
         assert!(state.is_http_allowed("mixed.case.org"), "存储侧归一命中");
         // 不同域不串扰
         assert!(!state.is_http_allowed("other.com"));
+    }
+
+    // —— RS-271 回归（审计 2026-10-01）：upgrade total 向量（fuzz 配套） ——
+
+    #[test]
+    fn upgrade_is_total_for_hostile_inputs() {
+        // RS-271：fuzz_https_upgrade 的固定向量锚点——任意畸形输入不 panic，
+        // Some 产出必为 https 前缀
+        let hostile = [
+            "",
+            "http://",
+            "http://?",
+            "http://#",
+            "http://@",
+            "http://a@b@c/p",
+            "http://[::1]:99999/x",
+            "HTTP://MIXED.CASE/PATH",
+            "http://你好/",
+            "http://a",
+        ];
+        let long = format!("http://a.com/{}", "x".repeat(100_000));
+        let hostile: Vec<&str> = hostile.iter().copied().chain([long.as_str()]).collect();
+        for url in hostile {
+            let mut state = HttpsOnlyState::new();
+            if let Some(upgraded) = state.upgrade(url, "t") {
+                assert!(
+                    upgraded.starts_with("https://"),
+                    "升级产物必须 https 前缀：{url}"
+                );
+            }
+        }
     }
 
     #[test]

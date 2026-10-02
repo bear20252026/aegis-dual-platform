@@ -73,7 +73,12 @@ function mockEl(id, overrides) {
 
 const mockDocument = {
   getElementById: (id) => mockEl(id),
-  addEventListener: () => {},
+  // WB-133（2026-10-01 审计）：捕获 document 级监听器——键盘守卫回归
+  // 需要真实驱动 start.snake.js 注册的 keydown 处理器（此前桩为 no-op）
+  _listeners: {},
+  addEventListener: (type, fn) => {
+    (mockDocument._listeners[type] = mockDocument._listeners[type] || []).push(fn);
+  },
   createElement: (tag) => {
     if (tag === "canvas") return createMockCanvas();
     return { style: {}, appendChild: () => {}, addEventListener: () => {} };
@@ -121,6 +126,10 @@ mockEl("veilTitle");
 mockEl("veilSub");
 mockEl("veilBtn");
 mockEl("snakeClose");
+
+// WB-151（2026-10-01 审计）：__test 钩子改条件注入——生产脚本不再随成品
+// 挂载受控写入面；无头回归在加载前显式声明测试标志
+mockGlobal.window.__AEGIS_SNAKE_TEST__ = true;
 
 const sandbox = Object.assign({}, mockGlobal, {
   document: mockDocument,
@@ -480,6 +489,90 @@ test("WB-081 DIG 位图覆盖：+ 与 0-9 全部字形可绘制，未知字形�
   assert.doesNotThrow(() => T.drawPixelText("Z", 10, 10, "#FFF6E3"));
   assert.strictEqual(fillCalls.length, before2, "未知字形不得产生绘制");
   Snake.close();
+});
+
+// ═══ WB-133 / WB-151（2026-10-01 审计）——独立干净实例加载器 ═══
+// WB-133 的缺陷前提是「页面加载后、首次 open 前」：浮层内联 display 为空串
+//（初始隐藏由 CSS 类承担）。共享实例已被前置测试 open/close 过（内联
+// display 已是 'none'），无法复现——必须以全新模块实例 + 全新元素桩驱动。
+function loadFreshModule(opts) {
+  opts = opts || {};
+  const storage = opts.storage || {};
+  const els = {};
+  function freshEl(id) {
+    if (!els[id]) {
+      els[id] = {
+        textContent: "",
+        style: { display: "", width: "", height: "" },
+        classList: { add: () => {}, remove: () => {} },
+        addEventListener: () => {},
+        _attrs: {},
+        setAttribute(n, v) { this._attrs[n] = String(v); },
+        getAttribute(n) { return n in this._attrs ? this._attrs[n] : null; },
+        focus: () => {},
+      };
+    }
+    return els[id];
+  }
+  els["snakeCanvas"] = createMockCanvas();
+  // 前置建浮层元素——「首开前」形态断言需要读取其内联 display（空串）
+  freshEl("snakeOverlay");
+  const listeners = {};
+  const doc = {
+    getElementById: (id) => (id === "snakeCanvas" ? els["snakeCanvas"] : freshEl(id)),
+    addEventListener: (t, f) => { (listeners[t] = listeners[t] || []).push(f); },
+    createElement: (tag) => (tag === "canvas"
+      ? createMockCanvas()
+      : { style: {}, appendChild: () => {}, addEventListener: () => {} }),
+    body: { innerText: "" },
+  };
+  const win = Object.assign({}, mockGlobal.window);
+  delete win.__AEGIS_SNAKE_TEST__;
+  if (opts.testFlag) win.__AEGIS_SNAKE_TEST__ = true;
+  const sb = Object.assign({}, mockGlobal, {
+    document: doc,
+    window: win,
+    localStorage: {
+      getItem: (k) => storage[k] || null,
+      setItem: (k, v) => { storage[k] = v; },
+    },
+    requestAnimationFrame: mockGlobal.requestAnimationFrame,
+    cancelAnimationFrame: mockGlobal.cancelAnimationFrame,
+  });
+  sb.globalThis = sb;
+  vm.runInContext(code, vm.createContext(sb), { filename: "start.snake.js" });
+  return { Snake: sb.Snake, els, listeners, storage };
+}
+
+test("WB-133 加载态 Escape：首开前按键守卫必须挡下，snakeBest 不被 0 覆盖", () => {
+  // 缺陷前提：fresh 实例 best=0（loadBest 只在 open 中调用），
+  // localStorage 已存 57——旧守卫（判内联 display）此形态放行 Escape
+  const fresh = loadFreshModule({ testFlag: true, storage: { snakeBest: "57" } });
+  assert.strictEqual(fresh.els["snakeOverlay"].style.display, "",
+    "前提：首开前浮层内联 display 为空串（隐藏由 CSS 类承担）");
+  const handlers = fresh.listeners["keydown"] || [];
+  assert.ok(handlers.length >= 1, "start.snake.js 必须注册 document keydown 守卫");
+  handlers.forEach((fn) => fn({ key: "Escape", preventDefault() {} }));
+  assert.strictEqual(fresh.storage["snakeBest"], "57",
+    "首开前 Escape 必须被 isOpen 守卫挡下——不得以 best=0 覆盖已存最高分");
+  // 对照：open 后 Escape 走正常关闭路径——加载后的真实最高分持久化
+  fresh.Snake.open();
+  assert.strictEqual(fresh.Snake.__test.best(), 57, "open 必须加载既有最高分");
+  handlers.forEach((fn) => fn({ key: "Escape", preventDefault() {} }));
+  assert.strictEqual(fresh.els["snakeOverlay"].style.display, "none", "开态 Escape 正常关闭");
+  assert.strictEqual(fresh.storage["snakeBest"], "57", "正常关闭持久化的是加载后的最高分");
+});
+
+// ═══ WB-151（2026-10-01 审计）：__test 钩子条件注入——生产形态零暴露 ═══
+test("WB-151 __test 条件注入：未声明测试标志时钩子不得挂载", () => {
+  const prod = loadFreshModule({ testFlag: false });
+  assert.ok(prod.Snake, "生产形态模块对象必须存在");
+  assert.strictEqual(prod.Snake.__test, undefined,
+    "未声明 __AEGIS_SNAKE_TEST__ 时受控钩子不得随成品注入");
+  assert.strictEqual(typeof prod.Snake.open, "function",
+    "open/close 公共 API 不受测试标志影响");
+  assert.doesNotThrow(() => { prod.Snake.open(); prod.Snake.close(); },
+    "无钩子形态下 open/close 生命周期必须照常");
 });
 
 console.log(`\n=== 结果: ${passed} 通过, ${failed} 失败 ===\n`);

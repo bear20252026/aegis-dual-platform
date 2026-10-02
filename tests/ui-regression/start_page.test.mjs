@@ -353,3 +353,102 @@ test('WB-100 得分 chip aria-live：polite 播报且仅作用于得分', () => 
   assert.ok(bestChip && !/aria-live/.test(bestChip[1]),
     '「最高」chip 静态不播报（避免重复播报）');
 });
+
+// ═══ 2026-10-01 审计（第三轮 241 项）补充断言 ═══
+
+// WB-133：贪吃蛇键盘守卫——模块级 isOpen 标志（行为级回归在
+// shared/shell/snake.test.js 以干净实例驱动；此处锁代码结构不回退）
+test('WB-133 贪吃蛇输入守卫：模块级 isOpen，不得回退内联 display 判定', () => {
+  assert.match(SNAKE, /var isOpen = false;/, '必须声明模块级 isOpen 标志');
+  assert.match(SNAKE, /isOpen = true;\s*\/\/ WB-133|isOpen = true;\s*$/,
+    'open() 必须置位 isOpen');
+  assert.match(SNAKE, /isOpen = false;\s*\/\/ WB-133|isOpen = false;\s*$/,
+    'close() 必须复位 isOpen');
+  const guardBody = SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"));
+  assert.match(guardBody, /if \(!isOpen\) return;/,
+    '键盘守卫必须以 isOpen 短路（浮层初始由 CSS 类隐藏——内联 display 为空串，display 判定在首开前放行 Escape 清零最高分）');
+  // 断言剥掉注释——守卫注记中的历史表述不算回归
+  const snakeCode = SNAKE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/ov\.style\.display === 'none'/.test(snakeCode),
+    '旧「内联 display === none」守卫不得回归（键盘/触摸两处）');
+});
+
+// WB-137：restoreBox 显示必须移除 hidden 属性配对（不压 style.display）
+test('WB-137 restoreBox hidden 配对：removeAttribute 配对，不得 style.display 压制', () => {
+  assert.match(MAINJS, /removeAttribute\('hidden'\)/,
+    '显示必须移除 hidden 属性（行为级回归在 start_main.test.mjs WB-129/137）');
+  assert.ok(!/restoreBox[^;]*\.style\.display|box\.style\.display = 'block'/.test(MAINJS),
+    '不得以 style.display 压过 hidden 属性（语义残留）');
+});
+
+// WB-140：error/unhandledrejection 监听必须在首文件 start.js 注册
+test('WB-140 全局错误监听前移：start.js 注册，start.main.js 不得残留', () => {
+  assert.match(HOSTJS, /window\.addEventListener\('error'/, 'start.js 必须注册 error 监听');
+  assert.match(HOSTJS, /window\.addEventListener\('unhandledrejection'/,
+    'start.js 必须注册 unhandledrejection 监听');
+  const mainCode = MAINJS.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/window\.addEventListener\('error'/.test(mainCode),
+    'start.main.js 不得重复注册（最末脚本注册时前三文件顶层异常已零上报）');
+  assert.ok(!/window\.addEventListener\('unhandledrejection'/.test(mainCode),
+    'start.main.js 不得残留 unhandledrejection 注册');
+});
+
+// WB-141：forced-colors 高对比模式规则
+test('WB-141 forced-colors 规则：高对比模式必须恢复系统配色', () => {
+  assert.match(CSS, /@media \(forced-colors: active\)/,
+    'start.css 必须有 forced-colors 媒体查询（此前全文件 0 处）');
+  const fcBlock = CSS.substring(CSS.indexOf('@media (forced-colors: active)'));
+  for (const sysColor of ['CanvasText', 'ButtonFace', 'ButtonText']) {
+    assert.ok(fcBlock.includes(sysColor), `高对比规则必须使用系统色 ${sysColor}`);
+  }
+});
+
+// WB-142：coarse pointer 触控目标补齐（.link-btn/.snake-sound/.snake-close ≥44px）
+test('WB-142 触控目标保底补齐：三个遗漏控件进入 coarse pointer 规则', () => {
+  const start = CSS.indexOf('@media (pointer: coarse)');
+  assert.ok(start > 0, 'coarse pointer 媒体查询必须存在');
+  // 媒体块整体范围：截到下一个 @media（或文末）——首条规则内的 } 不是块边界
+  const next = CSS.indexOf('@media', start + 10);
+  const coarse = CSS.substring(start, next === -1 ? CSS.length : next);
+  for (const sel of ['.link-btn', '.snake-sound', '.snake-close']) {
+    assert.ok(coarse.includes(sel), `${sel} 必须纳入触控目标保底（此前 <44px）`);
+  }
+  assert.match(coarse, /min-height:44px/, '保底尺寸必须达到 44px');
+});
+
+// WB-143：placeholder 对比度 ≥4.5:1（#9aa1ad 实测 2.9:1 不得回归）
+test('WB-143 placeholder 对比度：不得回归低对比灰', () => {
+  const cssCode = CSS.replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.ok(!/placeholder\s*\{\s*color:\s*#9aa1ad/.test(cssCode),
+    '#9aa1ad（白底 2.9:1 < AA）不得回归');
+  assert.match(cssCode, /\.search input::placeholder\s*\{\s*color:\s*#6e747f;\s*\}/,
+    'placeholder 必须用加深灰 #6e747f（白底 4.70:1）');
+});
+
+// WB-144：移动端输入框字号 ≥16px（防 iOS 聚焦自动放大跳变）
+test('WB-144 移动端输入字号：≤640px 断点不得低于 16px', () => {
+  const mobile = CSS.substring(CSS.indexOf('@media (max-width: 640px)'));
+  const inputRule = mobile.match(/\.search input\s*\{[^}]*font-size:\s*(\d+)px[^}]*\}/);
+  assert.ok(inputRule, '移动端断点必须有 .search input 字号规则');
+  assert.ok(parseInt(inputRule[1], 10) >= 16,
+    `移动端输入字号必须 ≥16px（实际 ${inputRule[1]}px——<16px 触发 iOS 聚焦整页放大）`);
+});
+
+// WB-149：CSP img-src 必须放行 data:（WB-131 favicon data: URI 依赖）
+test('WB-149 CSP img-src data: 许可必须锁定（favicon data: URI 依赖）', () => {
+  const csp = HTML.match(/http-equiv="Content-Security-Policy"\s*\n?\s*content="([^"]*)"/);
+  assert.ok(csp, 'CSP meta 必须存在');
+  assert.match(csp[1], /img-src 'self' file: data:/,
+    "img-src 必须含 data:（去掉即 favicon 404 回归——WB-131）");
+});
+
+// WB-151：__test 钩子条件注入——生产脚本不得无条件挂载受控写入面
+test('WB-151 __test 条件注入：测试标志门控 + 冻结，生产零暴露', () => {
+  assert.match(SNAKE, /__AEGIS_SNAKE_TEST__/,
+    '__test 挂载必须由 window.__AEGIS_SNAKE_TEST__ 测试标志门控');
+  assert.match(SNAKE, /__test: TEST_HOOKS \? \{/, '钩子对象必须条件挂载');
+  assert.match(SNAKE, /Object\.freeze\(api\.__test\)/, '测试态钩子面必须冻结');
+  const bare = SNAKE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  assert.ok(!/return \{\s*open: open, close: close,\s*__test: \{/.test(bare),
+    '不得回退为无条件内联 __test 对象（行为级回归在 snake.test.js）');
+});

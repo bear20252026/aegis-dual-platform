@@ -126,11 +126,11 @@ def main() -> int:
     for path in python_files:
         try:
             ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
-        except Exception as exc:  # noqa: BLE001（验证脚本盲捕是设计）
+        except Exception as exc:  # 验证脚本盲捕是设计
             failures.append(f'Python {path.relative_to(root)}: {exc}')
     try:
         json.loads((root / 'shared' / 'release.json').read_text(encoding='utf-8'))
-    except Exception as exc:  # noqa: BLE001（验证脚本盲捕是设计）
+    except Exception as exc:  # 验证脚本盲捕是设计
         failures.append(f'JSON shared/release.json: {exc}')
     # SP-166（2026-09-26 审计）：MSIX/appinstaller 路线模板（*.template）已
     # 确认死资产后删除（此前全仓仅退役 PyInstaller 管线 build-windows.ps1

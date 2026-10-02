@@ -31,7 +31,11 @@ object TranslateEntry {
         if (!url.startsWith("http://", ignoreCase = true) && !url.startsWith("https://", ignoreCase = true)) {
             return null
         }
-        val encoded = Uri.encode(url)
+        // AD-280（2026-10-01 审计）：fragment 先剥再编码——fragment 不参与
+        // 服务端取页（Authorization Code/session token 常以 #access_token=
+        // 形态留在 URL 尾部，fragment 是其唯一载体），外发翻译服务即凭据
+        // 泄漏面。翻译服务取页只消费 scheme://authority/path?query。
+        val encoded = Uri.encode(url.substringBefore('#'))
         return "$SERVICE?from=auto&to=$TARGET_LANG&a=$encoded"
     }
 }

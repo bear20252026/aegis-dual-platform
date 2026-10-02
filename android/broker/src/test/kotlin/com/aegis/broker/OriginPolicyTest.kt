@@ -197,4 +197,29 @@ class OriginPolicyTest {
         // 上限 + 1 → fail-closed（此前只测了 99999，65536 精确边界缺失）
         assertNull(OriginPolicy.tryParseExternal("https://example.com:65536/"))
     }
+
+    // ---------- AD-252（P1，2026-10-01 审计）+ AD-274：尾点 host 拒绝 ----------
+
+    @Test
+    fun `trailing dot hostnames are rejected`() {
+        // 尾点 host：java.net.URI 保留尾点放行，Chromium 归一剥尾点后命中
+        // bridge_guard 白名单成 trustedCaller——必须整链 fail-closed。
+        // 回归锚点向量与审计台账一致（含带端口形态）。
+        assertNull(OriginPolicy.tryParseExternal("https://localhost./"))
+        assertNull(OriginPolicy.tryParseExternal("https://aegis.local./"))
+        assertNull(OriginPolicy.tryParseExternal("https://example.com.:8443/"))
+        assertNull(OriginPolicy.tryParseExternal("http://127.0.0.1./"))
+    }
+
+    @Test
+    fun `trailing dot rejection mixes with alternate encoding vectors`() {
+        // AD-274：尾点与备用编码混合形态同批锁定——任一混淆面命中即拒
+        assertNull(OriginPolicy.tryParseExternal("https://localhost./x?token=1"))
+        assertNull(OriginPolicy.tryParseExternal("https://LOCALHOST./"))
+        assertNull(OriginPolicy.tryParseExternal("https://aegis.local.:8443/path"))
+        // 对照组：无尾点的白名单/普通域保持放行（不因收窄误伤）
+        assertNotNull(OriginPolicy.tryParseExternal("https://localhost/"))
+        assertNotNull(OriginPolicy.tryParseExternal("https://aegis.local/home"))
+        assertNotNull(OriginPolicy.tryParseExternal("https://example.com:8443/"))
+    }
 }

@@ -20,13 +20,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 
-from sync_versions import (  # noqa: E402
+import sync_versions
+from sync_versions import (
     load_properties,
     replace_assignment,
     replace_xml_value,
 )
-import sync_versions
-from verify_versions import expected_assignment, expected_xml_value  # noqa: E402
+from verify_versions import expected_assignment, expected_xml_value
 
 
 # ---------------------------------------------------------------- PY-103
@@ -92,6 +92,15 @@ class TestReplaceAssignment:
         # 失败不落盘（原文件保持原样——fail-closed 不写半截）
         assert "other = 1" in p.read_text(encoding="utf-8")
 
+    def test_backslash_value_not_treated_as_backreference(self, tmp_path):
+        # PY-224（2026-10-01 审计）：值含 \1（正则反向引用形态）必须按字面
+        # 写入——函数式替换后替换串不再经过 backslash 模板解析
+        #（此前 re.error "bad escape" 或静默错位）
+        p = tmp_path / "f.txt"
+        p.write_text("suffix = \"old\"\n", encoding="utf-8")
+        replace_assignment(p, "suffix", r"C:\1\2", quoted=True)
+        assert 'suffix = "C:\\1\\2"' in p.read_text(encoding="utf-8")
+
 
 # ---------------------------------------------------------------- PY-105
 class TestReplaceXmlValue:
@@ -141,6 +150,30 @@ class TestExpectedValueExtractors:
     def test_expected_xml_value_regex_metachars_in_element(self):
         # 元素名经 re.escape——含正则元字符的元素名不得崩
         assert expected_xml_value("<a.b>1</a.b>", "a.b") == "1"
+
+    def test_expected_xml_value_unescapes_entities(self):
+        # PY-223（2026-10-01 审计）：磁盘 XML 文本节点是转义形态——取值须
+        # unescape 还原再比较（此前 DISPLAY_NAME 含 & 时 csproj 写入 "&amp;"
+        # 而单源值是 "&"，逐位比较必误报漂移）。与 sync_versions.escape() 对偶。
+        assert expected_xml_value(
+            "<Product>Aegis &amp; Bros</Product>", "Product") == "Aegis & Bros"
+        assert expected_xml_value("<P>a &lt; b &gt; c</P>", "P") == "a < b > c"
+        # 对偶边界：unescape 只还原写侧 escape() 会产生的三实体
+        #（&amp;/&lt;/&gt;——文本节点契约；&quot;/&apos; 是属性值形态，
+        # 写侧不产生，读侧亦不误动）
+        assert expected_xml_value(
+            "<P>q &quot;w&quot;</P>", "P") == "q &quot;w&quot;"
+
+    def test_xml_roundtrip_escape_unescape(self, tmp_path):
+        # PY-223 往返锁定：sync_versions 写入（escape）→ verify_versions 读出
+        # （unescape）——含 & 的 DISPLAY_NAME 全链零漂移
+        import sync_versions as sv
+        import verify_versions as vv
+        p = tmp_path / "a.csproj"
+        p.write_text("<Project><Product>old</Product></Project>", encoding="utf-8")
+        sv.replace_xml_value(p, "Product", "A & B <C>")
+        text = p.read_text(encoding="utf-8")
+        assert expected_xml_value(text, "Product") == vv.expected_xml_value(text, "Product") == "A & B <C>"
 
     def test_expected_assignment_quoted_and_numeric(self):
         text = 'versionName = "2.2.0"\nversionCode = 20248\n  versionCode = 77\n'
@@ -198,7 +231,57 @@ class TestVersionCodeDigitCheck:
         monkeypatch.setattr(sync_versions, "PROPS", props)
         monkeypatch.setattr(sync_versions, "ROOT", tmp_path)
         with pytest.raises(OSError):
-            sync_versions.main()  # 通过 isdigit 后因 tmp 树缺 gradle 文件失败——预期
+            sync_versions.main()  # 通过 isdigit 后因 tmp 树缺 csproj 文件失败——预期
+
+
+# ---------------------------------------------------------------- PY-216
+class TestSyncVersionsMainIntegration:
+    """PY-216（2026-10-01 审计·P1）集成测试：对真实仓库布局跑 main()。
+
+    gradle 版本已改构建期消费 properties（AD-100 单源接线）后，
+    sync_versions 仍按字面量正则替换 versionCode/versionName——对真实
+    build.gradle.kts 必抛 RuntimeError（自 09-23 起整脚本不可用）。修复
+    删除两行 gradle 写入；本集成测试锁定：main() 在真实 csproj/properties
+    输入下全程不抛、csproj/release.json 正确更新、android 目录零依赖
+    （不存在也不影响——若有人回加 gradle 写入，此处立即红）。
+    """
+
+    def test_main_real_repo_layout_no_gradle_dependency(self, tmp_path, monkeypatch, capsys):
+        real = ROOT
+        # 真实输入：csproj/release.json 自真实仓库拷贝，PROPS 不重定向
+        #（main() 读真实 shared/version.properties 单源值）
+        csproj_dst = tmp_path / "windows" / "src" / "Aegis.Windows.App"
+        csproj_dst.mkdir(parents=True)
+        real_csproj = real / "windows" / "src" / "Aegis.Windows.App" / "Aegis.Windows.App.csproj"
+        (csproj_dst / "Aegis.Windows.App.csproj").write_text(
+            real_csproj.read_text(encoding="utf-8"), encoding="utf-8")
+        shared_dst = tmp_path / "shared"
+        shared_dst.mkdir()
+        (shared_dst / "release.json").write_text(
+            (real / "shared" / "release.json").read_text(encoding="utf-8"),
+            encoding="utf-8")
+        # PY-216 核心：tmp 树刻意不放 android/——main() 不得再触碰 gradle
+        assert not (tmp_path / "android").exists()
+        monkeypatch.setattr(sync_versions, "ROOT", tmp_path)
+        # 不抛即通过（修复前此处对真实 gradle 必抛 RuntimeError）
+        sync_versions.main()
+        out = capsys.readouterr().out
+        assert "synchronized" in out
+        # csproj 已按真实 properties 更新
+        props = load_properties(real / "shared" / "version.properties")
+        updated = (csproj_dst / "Aegis.Windows.App.csproj").read_text(encoding="utf-8")
+        import json as _json
+
+        from verify_versions import expected_xml_value
+        assert expected_xml_value(updated, "Version") == props["VERSION_NAME"]
+        assert expected_xml_value(updated, "AssemblyVersion") == props["WINDOWS_PACKAGE_VERSION"]
+        assert expected_xml_value(updated, "Product") == props["DISPLAY_NAME"]
+        # release.json 版本字段同步（versionCode 转 int）
+        release_json = _json.loads((shared_dst / "release.json").read_text(encoding="utf-8"))
+        assert release_json["version"] == props["VERSION_NAME"]
+        assert release_json["versionCode"] == int(props["VERSION_CODE"])
+        # 全程未创建/读取 android 路径
+        assert not (tmp_path / "android").exists()
 
 
 # ---------------------------------------------------------------- PY-108
@@ -209,7 +292,8 @@ class TestDedupReleaseAssets:
     def _run(self, *args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
             [sys.executable, str(SCRIPT), *args],
-            capture_output=True, text=True, timeout=60,
+            capture_output=True, text=True, timeout=60, check=False,
+            # PLW1510：被测脚本以退出码为断言对象——不把非零当异常
         )
 
     def test_second_occurrence_renamed_with_platform_prefix(self, tmp_path):
@@ -249,6 +333,24 @@ class TestDedupReleaseAssets:
         proc = self._run(str(win), str(android))
         assert proc.returncode == 1
         assert "rename target exists" in proc.stderr
+
+    def test_renamed_artifact_registered_in_seen(self, tmp_path):
+        # PY-219（2026-10-01 审计）：改名产物不写 seen——第三方目录原生同名
+        # 资产（本就有 <platform>-x）再冲突时不再改名，最终上传仍撞名 404
+        #（防的正是该场景）。改名即入账：后续同名继续加前缀。
+        win, android, core = tmp_path / "win", tmp_path / "android", tmp_path / "core"
+        for d in (win, android, core):
+            d.mkdir()
+        (win / "x.bin").write_bytes(b"w")          # 基准：win/x.bin
+        (android / "x.bin").write_bytes(b"a")      # → android/android-x.bin（改名产物）
+        (core / "android-x.bin").write_bytes(b"c")  # 原生同名——必须也被改名
+        proc = self._run(str(win), str(android), str(core))
+        assert proc.returncode == 0, proc.stderr
+        # 三方最终文件名互不冲突
+        assert (win / "x.bin").exists()
+        assert (android / "android-x.bin").exists()
+        assert (core / "core-android-x.bin").exists()
+        assert not (core / "android-x.bin").exists()
 
     def test_not_a_directory_rejected(self, tmp_path):
         proc = self._run(str(tmp_path / "ghost"))

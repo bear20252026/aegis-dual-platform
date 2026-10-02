@@ -17,13 +17,17 @@ public static class DownloadPolicy
     private const int MaxFileNameChars = 200;
 
     /// <summary>危险扩展名集（可执行/脚本/磁盘镜像——对齐 Android 侧口径并
-    /// 补齐 lnk/reg/chm/scf/msc/diagcab/py 等 Windows 侧载体）。</summary>
+    /// 补齐 lnk/reg/chm/scf/msc/diagcab/py 等 Windows 侧载体）。
+    /// CS-351（2026-10-01 审计）：补 .url/.website/.appref-ms/.application/
+    /// .settingcontent-ms/.jnlp——互联网快捷方式与 ClickOnce/Java Web Start
+    /// 载体此前不在集合内，直链下载零确认即执行面。</summary>
     private static readonly HashSet<string> DangerousExtensions = new(StringComparer.Ordinal)
     {
         "exe", "msi", "msix", "appx", "bat", "cmd", "com", "scr", "pif",
         "ps1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "hta", "cpl",
         "jar", "apk", "dll", "sys", "vhd", "iso",
         "lnk", "reg", "chm", "scf", "msc", "diagcab", "py", "pyw", "msh", "msh1", "msh2", "psm1",
+        "url", "website", "appref-ms", "application", "settingcontent-ms", "jnlp",
     };
 
     /// <summary>Windows 保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9）——作文件名
@@ -99,6 +103,11 @@ public static class DownloadPolicy
             if (stemLen > keep)
                 name = TruncateSurrogateSafe(name, keep).TrimEnd('.') + ext;
             else
+                name = TruncateSurrogateSafe(name, MaxFileNameChars).TrimEnd('.');
+            // CS-354（2026-10-01 审计）：截断后二次校验总长——超长扩展名
+            //（如整名就是 ".aaaa…500 字符"）使 1+ext 反超 200 上限，
+            // 此前产物可 >500 字符落盘必失败；超限弃 ext 回退纯名截断
+            if (name.Length > MaxFileNameChars)
                 name = TruncateSurrogateSafe(name, MaxFileNameChars).TrimEnd('.');
         }
         return name.Length > 0 ? name : "aegis_download";

@@ -87,16 +87,17 @@ class WebViewHardeningTest {
         val js = WebViewHardening.fingerprintShieldScript(testSeed)
         val markers =
             listOf(
-                "window.__AEGIS_PROTECTION_VERSION", // 阶段标记：版本
+                // AD-269（2026-10-01 审计）：版本标记改 defineProperty 注入
+                // （不可枚举/不可配置）——标记锚定属性名字面量
+                "__AEGIS_PROTECTION_VERSION",
                 "Function.prototype.toString", // Stage 1：ToStringGuard
                 "__AEGIS_SITE_SEED", // Stage 2：PerSiteSeed
                 "HTMLCanvasElement.prototype.toDataURL", // Stage 3：Canvas 噪声
-                "WebGLRenderingContext.prototype.getParameter", // Stage 3b：WebGL 参数
                 "hardwareConcurrency", // Stage 3c：硬件并发伪装
                 "Screen.prototype", // Stage 4：LetterboxShield
                 "'__hsfp'", // Stage 5：QueryStripper
                 "FontFaceSet.prototype.check", // Stage 6：FontNormalizer
-                "0x9245", // Stage 7：WebGLSpoof
+                "0x9245", // Stage 7：WebGLSpoof（AD-258 后唯一 getParameter 伪装源）
                 "performance.now", // Stage 8：TimerPrecision
                 "clients2\\.google\\.com", // Stage 9：ExtProxy
             )

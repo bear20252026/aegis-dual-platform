@@ -9,6 +9,8 @@ signatures[]/重复 key_id 只计一次/异常封装 UpdateRejected——TUF 阈
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import sys
 from datetime import UTC, datetime
@@ -17,6 +19,9 @@ from pathlib import Path
 # 复用 P0-04 更新验证器（契约统一——contracts/schemas/update-manifest.schema.json）
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from release.update_verifier import UpdateRejected, verify_manifest
+
+# Ed25519 公钥原始长度（from_public_bytes 契约）
+_ED25519_RAW_KEY_BYTES = 32
 
 
 def _load_threshold(policy_path: Path | None = None) -> int:
@@ -55,6 +60,53 @@ def _load_threshold(policy_path: Path | None = None) -> int:
     return threshold
 
 
+def _decode_trusted_keys(trusted: object) -> dict[str, bytes] | str:
+    """PY-218（2026-10-01 审计）：trusted_keys.json 的键值解码为 Ed25519 原始公钥。
+
+    JSON 无 bytes 类型——真实 trusted_keys.json 的键值是 base64（优先）或
+    hex 编码字符串。此前 str 直传 Ed25519PublicKey.from_public_bytes 必抛
+    TypeError 且被验证器吞掉——CLI 对任何真实密钥恒拒（工具永久失效，
+    单测曾以 monkeypatch shim 掩盖）。现 main() 载入后解码：
+
+    - dict[str, str] → 逐键 base64（严格 validate）→ 失败再 hex → 解出
+      必须 32 字节（Ed25519 原始公钥长度）；
+    - dict[str, bytes] → 已是原始字节（仅长度校验）——供程序化调用；
+    - 其他结构 / 任何解码失败 → 返回错误消息（调用方 exit 2——环境错误，
+      与坏 JSON 同语义）。
+    """
+    if not isinstance(trusted, dict) or not trusted:
+        return "trusted_keys 必须是非空对象（key_id → 编码后的 32 字节 Ed25519 公钥）"
+    decoded: dict[str, bytes] = {}
+    for key_id, value in trusted.items():
+        if not isinstance(key_id, str):
+            return f"trusted_keys 键必须为字符串 key_id: {key_id!r}"
+        if isinstance(value, bytes):
+            raw = value
+        elif isinstance(value, str):
+            raw = None
+            # base64 优先（44 字符标准编码；严格校验拒绝静默忽略非法字符）
+            try:
+                candidate = base64.b64decode(value, validate=True)
+            except (binascii.Error, ValueError):
+                candidate = None
+            if candidate is not None and len(candidate) == _ED25519_RAW_KEY_BYTES:
+                raw = candidate
+            else:
+                try:
+                    candidate = bytes.fromhex(value)
+                except ValueError:
+                    return (f"trusted_keys[{key_id!r}] 既非合法 base64 也非合法 hex: "
+                            f"{value[:16]!r}…")
+                raw = candidate
+        else:
+            return f"trusted_keys[{key_id!r}] 值必须为编码字符串: {type(value).__name__}"
+        if len(raw) != _ED25519_RAW_KEY_BYTES:
+            return (f"trusted_keys[{key_id!r}] 解码后 {len(raw)} 字节——"
+                    f"必须为 {_ED25519_RAW_KEY_BYTES} 字节 Ed25519 原始公钥")
+        decoded[key_id] = raw
+    return decoded
+
+
 def main() -> int:
     if len(sys.argv) < 4:
         print("用法: verify_manifest.py <manifest.json> <trusted_keys.json> <min_version>")
@@ -70,8 +122,14 @@ def main() -> int:
         src = getattr(exc, "filename", None) or Path(sys.argv[1]).name
         print(f"❌ 输入文件读取/解析失败: {src}（{exc}）（终止发布——fail-closed）")
         return 2
+    # PY-218：编码字符串在此解码为 32 字节原始公钥再进验证器
+    #（此前 str 直传必 TypeError 被吞——CLI 对任何真实密钥恒拒）
+    decoded = _decode_trusted_keys(trusted)
+    if isinstance(decoded, str):
+        print(f"❌ trusted_keys 解码失败: {decoded}（终止发布——fail-closed）")
+        return 2
     try:
-        verify_manifest(manifest, trusted, sys.argv[3], datetime.now(UTC),
+        verify_manifest(manifest, decoded, sys.argv[3], datetime.now(UTC),
                         threshold=_load_threshold())
     except UpdateRejected as exc:
         print(f"❌ 更新清单验证失败: {exc}（终止发布——fail-closed）")

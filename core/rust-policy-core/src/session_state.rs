@@ -52,15 +52,25 @@ impl SessionState {
         const MAX_URL_LEN: usize = 8192;
         const MAX_STATE_BYTES: usize = 512 * 1024;
         // 解析前总长上限——此前 serde_json 先全量解析任意大小输入再逐字段
-        // 限长，超长 JSON 可先驱动无界内存分配（内存 DoS）。字段上限之和
-        // 远小于 1MB，超限输入不可能合法。
-        const MAX_JSON_BYTES: usize = 1024 * 1024;
+        // 限长，超长 JSON 可先驱动无界内存分配（内存 DoS）。
+        // RS-260（2026-10-01 审计）：1MB → 1_125_000——状态字节上限 512KB
+        // 经 hex 编码膨胀为 1MB（hex 每字节 2 字符），恰在上限的状态往返
+        // 超过 1MB 总长被拒，恢复静默失效。新上限 = 2×512KB + 余量
+        //（字段/转义开销），恰上限状态可往返。
+        const MAX_JSON_BYTES: usize = 1_125_000;
         if json.len() > MAX_JSON_BYTES {
             return None;
         }
 
         let map: HashMap<String, serde_json::Value> = serde_json::from_str(json).ok()?;
-        let schema_version = map.get("schemaVersion")?.as_u64()? as u32;
+        // RS-246（2026-10-01 审计）：u64 → u32 先判后转——`as u32` 截断使
+        // 2³²+1 回绕为 1（恰为 CURRENT_SCHEMA_VERSION）被接受，未来版本的
+        // 截断碰撞即版本门禁绕过。超 u32::MAX 一律拒绝
+        let schema_version_raw = map.get("schemaVersion")?.as_u64()?;
+        if schema_version_raw > u32::MAX as u64 {
+            return None;
+        }
+        let schema_version = schema_version_raw as u32;
         // 仅接受当前 schema（拒绝未来/未知版本，避免向后兼容盲区）
         if schema_version != CURRENT_SCHEMA_VERSION {
             return None;
@@ -91,8 +101,11 @@ impl SessionState {
             // 缺即拒——此前 unwrap_or(0) 静默默认，损坏会话的时间戳=0 会让
             // 宿主把该标签排为最旧（LRU 淘汰/最近使用排序全部失真）
             last_active_time: meta.get("lastActiveTime")?.as_u64()?,
-            can_go_back: meta.get("canGoBack")?.as_bool().unwrap_or(false),
-            can_go_forward: meta.get("canGoForward")?.as_bool().unwrap_or(false),
+            // RS-272（2026-10-01 审计）：canGoBack/canGoForward 与 RS-230 同
+            // 口径收紧——此前 unwrap_or(false) 静默默认：损坏会话的导航栈
+            // 状态失真（可后退标签恢复成不可后退，用户导航历史静默丢失）
+            can_go_back: meta.get("canGoBack")?.as_bool()?,
+            can_go_forward: meta.get("canGoForward")?.as_bool()?,
         };
         let timestamp = map.get("timestamp")?.as_u64()?;
         Some(Self {
@@ -274,8 +287,9 @@ mod tests {
 
     #[test]
     fn rejects_oversized_json_before_parse() {
-        // RS-009 回归：解析前总长上限——1MB 垃圾输入直接拒绝（不进 serde）
-        let junk = "x".repeat(1024 * 1024 + 1);
+        // RS-009 回归：解析前总长上限——超上限垃圾输入直接拒绝（不进 serde）
+        // RS-260：上限已提至 1_125_000（512KB 状态 hex 膨胀可往返）
+        let junk = "x".repeat(1_125_001);
         assert!(SessionState::from_json(&junk).is_none());
     }
 
@@ -421,5 +435,132 @@ mod tests {
             SessionState::from_json(&base(full_meta, "1700000000000")).expect("完整时间戳必须恢复");
         assert_eq!(state.metadata.last_active_time, 7);
         assert_eq!(state.timestamp, 1_700_000_000_000);
+    }
+
+    // —— RS-246/260/272 回归（审计 2026-10-01） ——
+
+    #[test]
+    fn schema_version_u32_wraparound_rejected() {
+        // RS-246：2³²+1 经 `as u32` 截断回绕为 1（恰为当前版本）——
+        // 此前被接受（版本门禁绕过）。先判 ≤ u32::MAX 再转后必须拒绝
+        let base = |version: &str| {
+            format!(
+                r#"{{"schemaVersion":{version},"tabId":"t","sessionStateBytes":"00","metadata":{{"title":"t","url":"u","isIncognito":false,"lastActiveTime":0,"canGoBack":false,"canGoForward":false}},"timestamp":0}}"#
+            )
+        };
+        // 2^32 + 1：截断回绕为 1 的攻击形态——必须拒绝
+        assert!(
+            SessionState::from_json(&base("4294967297")).is_none(),
+            "2^32+1 截断回绕为 1 不得被接受"
+        );
+        // 2^32 本身（回绕为 0 ≠ 1）与其他超界值同样拒绝
+        assert!(SessionState::from_json(&base("4294967296")).is_none());
+        assert!(SessionState::from_json(&base("18446744073709551615")).is_none());
+        // u32::MAX（≠1）拒绝——版本门禁仍只认 CURRENT_SCHEMA_VERSION
+        assert!(SessionState::from_json(&base("4294967295")).is_none());
+        // 恰当前版本仍接受（锚点）
+        assert!(SessionState::from_json(&base("1")).is_some());
+    }
+
+    #[test]
+    fn max_state_bytes_round_trips_under_raised_json_cap() {
+        // RS-260：恰 512KB 状态字节 → hex 膨胀 1MB + JSON 开销 ≈ 1.05MB——
+        // 旧 1MB 总长上限下往返失败（恢复静默失效）；提限后必须成功
+        let state = SessionState {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            tab_id: "t".into(),
+            session_state_bytes: vec![0xAB; 512 * 1024],
+            metadata: TabMetadata {
+                title: "t".into(),
+                url: "https://e.com".into(),
+                is_incognito: false,
+                last_active_time: 1,
+                can_go_back: true,
+                can_go_forward: false,
+            },
+            timestamp: 1,
+        };
+        let json = state.to_json();
+        assert!(
+            json.len() > 1024 * 1024,
+            "恰上限状态经 hex 膨胀必超 1MB（旧上限复现）：{}",
+            json.len()
+        );
+        assert!(
+            json.len() <= 1_125_000,
+            "上限状态总长应在新上限内：{}",
+            json.len()
+        );
+        assert_eq!(
+            SessionState::from_json(&json),
+            Some(state),
+            "恰 512KB 状态必须可往返（上限语义自洽）"
+        );
+    }
+
+    #[test]
+    fn json_cap_boundary_exact_limit_parses() {
+        // RS-260：恰 1_125_000 字节的合法 JSON（尾部空白填充）必须进入
+        // 解析；1_125_001 直接拒绝（解析前防线口径锁定）
+        let state = SessionState {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            tab_id: "t".into(),
+            session_state_bytes: vec![0xAB; 512 * 1024],
+            metadata: TabMetadata {
+                title: "t".into(),
+                url: "https://e.com".into(),
+                is_incognito: false,
+                last_active_time: 1,
+                can_go_back: true,
+                can_go_forward: false,
+            },
+            timestamp: 1,
+        };
+        let mut json = state.to_json();
+        while json.len() < 1_125_000 {
+            json.push(' ');
+        }
+        assert_eq!(json.len(), 1_125_000);
+        assert!(
+            SessionState::from_json(&json).is_some(),
+            "恰上限（合法 JSON + 尾部空白）必须通过"
+        );
+        json.push(' ');
+        assert_eq!(json.len(), 1_125_001);
+        assert!(SessionState::from_json(&json).is_none(), "超一字节拒绝");
+    }
+
+    #[test]
+    fn missing_navigation_flags_reject_restore() {
+        // RS-272：canGoBack/canGoForward 缺失或类型损坏必须拒恢复——
+        // 此前 unwrap_or(false) 静默默认，可后退标签恢复成不可后退
+        //（导航历史静默丢失）
+        let base = |metadata: &str| {
+            format!(
+                r#"{{"schemaVersion":{},"tabId":"t","sessionStateBytes":"00","metadata":{{{metadata}}},"timestamp":0}}"#,
+                CURRENT_SCHEMA_VERSION
+            )
+        };
+        // 缺 canGoBack / canGoForward
+        assert!(SessionState::from_json(&base(
+            r#""title":"t","url":"u","isIncognito":false,"lastActiveTime":0,"canGoForward":false"#
+        ))
+        .is_none());
+        assert!(SessionState::from_json(&base(
+            r#""title":"t","url":"u","isIncognito":false,"lastActiveTime":0,"canGoBack":false"#
+        ))
+        .is_none());
+        // 类型损坏（字符串）→ 拒绝
+        assert!(SessionState::from_json(&base(
+            r#""title":"t","url":"u","isIncognito":false,"lastActiveTime":0,"canGoBack":"yes","canGoForward":false"#
+        ))
+        .is_none());
+        // 显式 true/false 正常恢复且值保留
+        let state = SessionState::from_json(&base(
+            r#""title":"t","url":"u","isIncognito":false,"lastActiveTime":0,"canGoBack":true,"canGoForward":true"#,
+        ))
+        .expect("显式布尔必须恢复");
+        assert!(state.metadata.can_go_back);
+        assert!(state.metadata.can_go_forward);
     }
 }

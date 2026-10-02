@@ -22,9 +22,12 @@
 4. **注释**：解释"为什么"，不解释"是什么"；重要设计决策在文件头 docstring 记录背景与理由。
 5. **不引入不必要依赖**（WB-072，审计 2026-09-23 清单·W5 批补双栈口径——与 SECURITY.md
    「依赖与发布安全」一致）：优先标准库/平台内置。新增依赖必须：
-   - Python：`requirements.txt` 声明 + `requirements-ci.txt`（pip-compile --generate-hashes
-     生成的 hash 锁）随批更新并注明理由；
-   - C#/NuGet：`packages.lock.json` 锁定（CI 缓存键消费），PR 说明新增理由；
+   - Python：`requirements-ci.in` 顶层声明（SP-189，2026-10-01 审计更正——根目录
+     并无 `requirements.txt`，活跃声明的单源是 `.in` 文件）+ `requirements-ci.txt`
+     （pip-compile --generate-hashes 生成的 hash 锁）随批重锁并注明理由；
+   - C#/NuGet（SP-177，2026-10-01 审计落地）：三个 csproj 已启用
+     `RestorePackagesWithLockFile` 且 `packages.lock.json` 入库——CI/本地 restore
+     与 publish 以 `--locked-mode` 消费（传递依赖变更必须随批更新锁文件），PR 说明新增理由；
    - Android/Gradle：无 lock 文件——PR 必须说明新增/升级理由并过 android-quality 门禁；
    - Rust：`Cargo.lock` 随改随更，`cargo build --locked`/`cargo audit` 门禁通过。
 
@@ -56,15 +59,19 @@
 
 ```bash
 # —— Windows 正典栈（C#/.NET 10，ADR-009 唯一发布制品）——
-dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj   # 0 警告 0 错误
+cd windows
+dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64   # 0 警告 0 错误——SP-220：-r 与 NuGet 锁一致
 dotnet test tests/Aegis.Windows.Core.Tests                    # 核心套件全绿
 dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全绿
 
 # —— Rust 策略核心 ——
-cargo test && cargo clippy --all-targets && cargo fmt --check  # 全绿 + 0 警告
+cd ../core/rust-policy-core
+# SP-183（2026-10-01 审计）：clippy 口径与 CI 统一——--all-features --all-targets -D warnings
+cargo test && cargo clippy --all-features --all-targets -- -D warnings && cargo fmt --check  # 全绿 + 0 警告
 
-# —— 契约/版本/UI 回归门禁（仓库根；SP-163：node 21+ glob 展开——
+# —— 契约/版本/UI 回归门禁（回到仓库根执行；SP-163：node 21+ glob 展开——
 #    新测试文件入目录即入门禁，Windows 本地与 ci.yml 一致）——
+cd ../..
 python validate_release.py                        # AST/JSON/XML 静态验证
 python scripts/verify_versions.py                 # 版本单源一致性
 python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（ADR-007）
@@ -73,6 +80,7 @@ node shared/shell/snake.test.js                   # 贪吃蛇逻辑回归
 python -m pytest tests/python/ -q                 # 发布链离线单测
 
 # —— Android 端（四模块与 android-quality.yml 一致——WB-116 对齐 CI）——
+cd android
 ./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck
 ./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt
 ./gradlew.bat :app:lintDebug                      # Android Lint（0 错误）
@@ -92,7 +100,9 @@ python -m pytest tests/python/ -q                 # 发布链离线单测
 - [ ] 是否保持单文件单职责与行数红线
 - [ ] 是否更新了 [CHANGELOG.md](CHANGELOG.md)
 - [ ] 是否涉及安全敏感路径（URL 过滤/密码/下载/权限）并补充了安全考虑
-- [ ] 是否补充/更新了自检脚本（`selftest_*.py`）
+- [ ] 新增逻辑是否落在对应端的测试套件（SP-190，2026-10-01 审计更正——
+  C# 两套件 / Kotlin 单测 / Node UI 回归 / `tests/python` pytest；
+  `selftest_*.py` 仅属 legacy 归档栈 P0 评估通道，不再要求新增——WB-155/190）
 - [ ] 是否保持 Windows/Android 双端决策一致（WB-033，审计 2026-09-23 清单·W5 批：
   架构决策口径以 **ADR 索引 `docs/adr/`**（ADR-001..009）为单源——正典栈/能力
   broker/无远程 native bridge/Rust 单一裁决等；此前指向的 README「当前决策记录」

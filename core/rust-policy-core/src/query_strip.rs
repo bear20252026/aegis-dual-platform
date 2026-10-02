@@ -163,6 +163,9 @@ impl QueryStripper {
                 .collect();
             format!("[{}]", items.join(","))
         };
+        // RS-242（2026-10-01 审计）：代理注册接口 Symbol 键单源引用
+        //（描述串去品牌化——详见 ToStringGuard::REGISTER_SYMBOL）
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
         format!(
             r#"
 // Aegis QueryStripper — URL 追踪参数剥离（参照 LibreWolf/Brave）
@@ -186,7 +189,24 @@ impl QueryStripper {
         changed = true;
       }});
       return changed ? u.toString() : url;
-    }} catch(e) {{ return url; }}
+    }} catch(e) {{
+      // RS-248（2026-10-01 审计）：相对 URL 无 base 抛异常——此前原样
+      // 放行（追踪参数在相对请求上畅通剥离绕过）。手工剥离与 Rust strip
+      // 同语义：先分离 fragment 再定位 query，只动 query 段，保持相对形态
+      //（绝对化会改变请求字符串）
+      var hashIdx = url.indexOf('#');
+      var rest = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+      var hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
+      var qIdx = rest.indexOf('?');
+      if (qIdx < 0) return url;
+      var base = rest.slice(0, qIdx);
+      var kept = rest.slice(qIdx + 1).split('&').filter(function(param) {{
+        if (!param) return false;
+        var key = param.split('=')[0];
+        return !LOWER_SET[key.toLowerCase()];
+      }});
+      return kept.length ? (base + '?' + kept.join('&') + hash) : (base + hash);
+    }}
   }}
 
   // 拦截 fetch 请求
@@ -208,6 +228,14 @@ impl QueryStripper {
     var rest = Array.prototype.slice.call(arguments, 2);
     return origOpen.apply(this, [method, stripParams(url)].concat(rest));
   }};
+
+  // RS-242（2026-10-01 审计）：fetch/open 覆盖注册 ToStringGuard——
+  // 未注册时 fetch.toString() 一行暴露包装源码（内含品牌特征）
+  var __aegisReg = window[Symbol.for('{reg_sym}')];
+  if (__aegisReg) {{
+    __aegisReg(window.fetch, origFetch);
+    __aegisReg(XMLHttpRequest.prototype.open, origOpen);
+  }}
 }})();
 "#,
             params_json = params_json
@@ -423,5 +451,47 @@ mod tests {
         let qs = QueryStripper::new();
         assert_eq!(qs.filter_query("GCLID=x"), Vec::<&str>::new());
         assert_eq!(qs.filter_query("FbClId"), Vec::<&str>::new());
+    }
+
+    // —— RS-242/248 回归（审计 2026-10-01） ——
+
+    #[test]
+    fn js_strip_handles_relative_urls_manually() {
+        // RS-248：JS 侧 stripParams 对相对 URL（new URL 无 base 抛异常）
+        // 此前原样放行——现走手工剥离分支（与 Rust strip 同语义）
+        let script = QueryStripper::new().inject_script();
+        assert!(
+            script.contains("var hashIdx = url.indexOf('#');"),
+            "手工分支先分离 fragment（Rust strip 同语义）"
+        );
+        assert!(
+            script.contains("var qIdx = rest.indexOf('?');"),
+            "fragment 前缀中定位 query"
+        );
+        assert!(
+            script.contains(
+                "return kept.length ? (base + '?' + kept.join('&') + hash) : (base + hash);"
+            ),
+            "重建：全追踪参数剥 query 段，保留 fragment 与相对形态"
+        );
+        // 手工分支必须位于 catch 内（绝对 URL 仍走 URL 解析路径）
+        let catch_pos = script.find("} catch(e) {").expect("catch 分支");
+        let manual_pos = script.find("var hashIdx").expect("手工剥离");
+        assert!(catch_pos < manual_pos, "手工剥离在异常兜底分支内");
+    }
+
+    #[test]
+    fn fetch_and_xhr_wrappers_registered_with_tostring_guard() {
+        // RS-242：fetch/open 覆盖必须注册 ToStringGuard——未注册时
+        // fetch.toString() 一行暴露包装源码（内含品牌特征）
+        let script = QueryStripper::new().inject_script();
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
+        assert_eq!(
+            script.matches(&format!("Symbol.for('{reg_sym}')")).count(),
+            1,
+            "注册接口引用单次（批量注册两包装）"
+        );
+        assert!(script.contains("__aegisReg(window.fetch, origFetch);"));
+        assert!(script.contains("__aegisReg(XMLHttpRequest.prototype.open, origOpen);"));
     }
 }

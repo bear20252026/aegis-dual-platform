@@ -48,11 +48,18 @@
         return row;
       }
 
+      // WB-134（2026-10-01 审计）：提示节点单例——hint() 此前每次调用
+      // 新建 div 直接 append（runImport 校验失败连点 N 次即堆 N 条同文
+      // 提示不消散）。复用同一节点：textContent 换文案、appendChild 对
+      // 已挂载节点是移动而非复制，天然不堆叠。
+      var hintNode = null;
       function hint(text) {
-        var d = document.createElement('div');
-        d.className = 'im-empty';
-        d.textContent = text;
-        return d;
+        if (!hintNode) {
+          hintNode = document.createElement('div');
+          hintNode.className = 'im-empty';
+        }
+        hintNode.textContent = text;
+        return hintNode;
       }
 
       function renderPick() {
@@ -94,6 +101,9 @@
         var limText = document.createElement('span');
         limText.textContent = '历史条数上限：';
         limitSel = document.createElement('select');
+        // WB-145（2026-10-01 审计）：下拉无可编程名称——读屏只播报裸
+        // select 无语义；label 文案是平级 span 不构成表单关联
+        limitSel.setAttribute('aria-label', '历史条数上限');
         [100, 500, 1000, 2000].forEach(function (n) {
           var o = document.createElement('option');
           o.value = String(n);
@@ -144,20 +154,47 @@
         picked.forEach(function (src) {
           if (doBm) {
             chain = chain.then(function () { return a.importBookmarks(src); })
-              .then(function (r) { collect('书签', src, r); })
+              .then(function (r) {
+                // WB-136（2026-10-01 审计）：csCall TTL 兜底/null 回包此前经
+                // collect 的 r||{} 计入「成功 0/0」——无响应被伪装成成功来源；
+                // null/undefined 单列计入 failures
+                if (r === null || r === undefined) { failures++; return; }
+                collect('书签', src, r);
+              })
               .catch(function () { failures++; });
           }
           if (doHi) {
             chain = chain.then(function () { return a.importHistory(lim, src); })
-              .then(function (r) { collect('历史', src, r); })
+              .then(function (r) {
+                if (r === null || r === undefined) { failures++; return; }  // WB-136
+                collect('历史', src, r);
+              })
               .catch(function () { failures++; });
           }
         });
-        chain.then(function () { renderDone(failures); })
-          .catch(function () { renderDone(failures + 1); });
+        // WB-135（2026-10-01 审计）：导入总超时兜底——桥挂起（pending 永不
+        // resolve 且无后续 csCall 触发 TTL 清扫）时向导此前永久停在
+        // running 态（下一步禁用、Escape 被 WB-056 忽略）。约 60s 总超时后
+        // 渲染失败态；时长消费 start.js 的 AegisTiming 单源（字面量兜底一致）
+        var runSettled = false;
+        var runTimeoutMs = (typeof window !== 'undefined' &&
+          window.AegisTiming && window.AegisTiming.IMPORT_RUN_TIMEOUT_MS) || 60000;
+        var runTimer = setTimeout(function () {
+          if (runSettled || step !== 'running') return;
+          runSettled = true;
+          renderDone(failures + 1, true);
+        }, runTimeoutMs);
+        function runDone(failedCount) {
+          if (runSettled) return;
+          runSettled = true;
+          clearTimeout(runTimer);
+          renderDone(failedCount, false);
+        }
+        chain.then(function () { runDone(failures); })
+          .catch(function () { runDone(failures + 1); });
       }
 
-      function renderDone(failedCount) {
+      function renderDone(failedCount, timedOut) {
         body.textContent = '';
         step = 'done';
         nextBtn.disabled = false;
@@ -165,11 +202,15 @@
         var sum = document.createElement('div');
         sum.className = 'im-result';
         // 成功与失败不再渲染同一界面（此前 .then/.catch 同一 renderDone——
-        // 失败被伪装成"导入完成"）
+        // 失败被伪装成"导入完成"）；WB-135：timedOut=true 为总超时兜底路径
         if (failedCount > 0 && agg.imported === 0) {
-          sum.textContent = '导入失败：' + failedCount + ' 个来源未能读取（浏览器可能正在运行或数据不可用）。';
+          sum.textContent = timedOut
+            ? '导入超时：' + failedCount + ' 个来源无响应（宿主长时间未返回结果），请确认浏览器状态后重试。'
+            : '导入失败：' + failedCount + ' 个来源未能读取（浏览器可能正在运行或数据不可用）。';
         } else if (failedCount > 0) {
-          sum.textContent = '部分完成：新增 ' + agg.imported + ' 条（解析 ' + agg.total + ' 条），' + failedCount + ' 个来源失败。';
+          sum.textContent = timedOut
+            ? '部分完成（超时）：新增 ' + agg.imported + ' 条（解析 ' + agg.total + ' 条），' + failedCount + ' 个来源无响应。'
+            : '部分完成：新增 ' + agg.imported + ' 条（解析 ' + agg.total + ' 条），' + failedCount + ' 个来源失败。';
         } else {
           sum.textContent = '导入完成：共新增 ' + agg.imported + ' 条（解析 ' + agg.total + ' 条）。';
         }

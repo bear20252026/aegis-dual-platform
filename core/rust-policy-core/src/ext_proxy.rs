@@ -103,13 +103,26 @@ impl ExtProxy {
     ///
     /// 如果 proxy_endpoint 为空，脚本仅注册拦截逻辑但不转发（观察模式）。
     pub fn inject_script(&self) -> String {
-        let endpoint = &self.config.proxy_endpoint;
+        // RS-255（2026-10-01 审计）：scheme 归一防御性再校验——with_endpoint
+        // 之外，with_config/直接构造 ExtProxyConfig 可绕过校验携带任意
+        // scheme 端点（javascript:/相对路径把扩展流量导向攻击者上下文）。
+        // 注入是最后防线：非法端点在此退化空（观察模式），与 RS-086 同口径
+        let endpoint = if self.config.proxy_endpoint.starts_with("https://")
+            || self.config.proxy_endpoint.starts_with("http://")
+        {
+            &self.config.proxy_endpoint
+        } else {
+            ""
+        };
         // RS-225（2026-09-26 审计）：端点转义改走 util::js_escape_single_quoted
         // 单源——此前内联 replace 链漏 \n/\r 转义，端点含换行即产出
         // 语法错误脚本
         let endpoint_escaped = crate::util::js_escape_single_quoted(endpoint);
         let intercept_dl = self.config.intercept_downloads;
         let intercept_up = self.config.intercept_updates;
+        // RS-242（2026-10-01 审计）：代理注册接口 Symbol 键单源引用
+        //（描述串去品牌化——详见 ToStringGuard::REGISTER_SYMBOL）
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
         format!(
             r#"
 // Aegis ExtProxy — 匿名扩展下载代理（参照 Helium Browser）
@@ -173,6 +186,18 @@ impl ExtProxy {
       }}
       return origOpen.apply(this, [method, url].concat(rest));
     }};
+  }} catch(e) {{}}
+
+  // RS-242（2026-10-01 审计）：fetch/open 覆盖注册 ToStringGuard——
+  // 未注册时 fetch.toString() 一行暴露包装源码（内含品牌特征）。
+  // 注册接口在 ToStringGuard 阶段之后的注入次序下可用；Compatible 模式
+  // 无 guard 时为空转（登记口径见 protection_mode RS-256）
+  try {{
+    var __aegisReg = window[Symbol.for('{reg_sym}')];
+    if (__aegisReg) {{
+      __aegisReg(window.fetch, origFetch);
+      __aegisReg(XMLHttpRequest.prototype.open, origOpen);
+    }}
   }} catch(e) {{}}
 }})();
 "#
@@ -324,5 +349,54 @@ mod tests {
             !script.contains("arguments[1] ="),
             "arguments 写回形态必须移除（严格模式失效）"
         );
+    }
+
+    // —— RS-242/255 回归（审计 2026-10-01） ——
+
+    #[test]
+    fn inject_script_defensively_revalidates_endpoint_scheme() {
+        // RS-255：with_config/直接构造绕过 with_endpoint 的 scheme 校验——
+        // inject_script 是最后防线，非法端点退化空（观察模式）
+        let config = ExtProxyConfig {
+            proxy_endpoint: "javascript:alert(1)".into(),
+            ..ExtProxyConfig::default()
+        };
+        let script = ExtProxy::with_config(config).inject_script();
+        assert!(
+            script.contains("PROXY_ENDPOINT = '';"),
+            "非法 scheme 端点必须退化空"
+        );
+        assert!(!script.contains("javascript:"), "非法端点不得进入脚本");
+        assert!(script.contains("return originalUrl"), "观察模式直连");
+        // 相对路径形态同样退化
+        let config = ExtProxyConfig {
+            proxy_endpoint: "//evil.com/proxy".into(),
+            ..ExtProxyConfig::default()
+        };
+        assert!(ExtProxy::with_config(config)
+            .inject_script()
+            .contains("PROXY_ENDPOINT = '';"));
+        // 合法端点不受防御性校验影响
+        let config = ExtProxyConfig {
+            proxy_endpoint: "https://proxy.example.com/anon".into(),
+            ..ExtProxyConfig::default()
+        };
+        let script = ExtProxy::with_config(config).inject_script();
+        assert!(script.contains("PROXY_ENDPOINT = 'https://proxy.example.com/anon';"));
+    }
+
+    #[test]
+    fn fetch_and_xhr_wrappers_registered_with_tostring_guard() {
+        // RS-242：fetch/open 覆盖必须注册 ToStringGuard——未注册时
+        // fetch.toString() 一行暴露包装源码（内含品牌特征）
+        let script = ExtProxy::with_endpoint("https://proxy.example.com/anon").inject_script();
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
+        assert_eq!(
+            script.matches(&format!("Symbol.for('{reg_sym}')")).count(),
+            1,
+            "注册接口引用单次（批量注册两包装）"
+        );
+        assert!(script.contains("__aegisReg(window.fetch, origFetch);"));
+        assert!(script.contains("__aegisReg(XMLHttpRequest.prototype.open, origOpen);"));
     }
 }

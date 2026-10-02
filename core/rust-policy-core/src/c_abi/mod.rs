@@ -7,7 +7,7 @@
 
 use crate::ffi::{FfiApprovalRequest, FfiAuthorizedAction, FfiBroker, FfiDecision};
 use crate::POLICY_CORE_ABI_VERSION;
-use serde_json::{json, Value};
+use serde::Serialize;
 use std::ffi::{c_char, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
@@ -30,11 +30,13 @@ pub struct CAbiBroker {
 /// 异常宿主传入超长/无终止缓冲造成的无界越读。
 const FFI_INPUT_MAX_BYTES: usize = 64 * 1024;
 
-/// RS-211（2026-09-26 审计）：借用生命周期参数化——此前返回
-/// `Result<&'static str, &'static str>` 把宿主 C 缓冲的切片声明为
-/// 'static，签名层面 unsound：任何调用方把返回引用存入全局/缓存即悬垂。
-/// 现返回引用的生命周期由调用方栈帧约束（错误侧仍为 'static 字面量）。
-fn read_utf8<'a>(value: *const c_char) -> Result<&'a str, &'static str> {
+/// RS-239（2026-10-01 审计）：返回 String——RS-211 的生命周期参数化
+/// （`Result<&'a str, _>`）在签名层面仍是 unsound：`'a` 不在输入位置，
+/// 调用方可凭空调短它，把宿主 C 缓冲切片声明成任意长的生命周期后存入
+/// 全局/缓存（悬垂）。所有调用点本来就立即 `.to_owned()`，改为按值返回
+/// String 在消灭签名漏洞的同时不多付一次拷贝（此前是「借用 + 克隆」
+/// 两步，现在单次分配）。错误侧仍为 'static 字面量。
+fn read_utf8(value: *const c_char) -> Result<String, &'static str> {
     if value.is_null() {
         return Err("ffi_input_null");
     }
@@ -55,8 +57,11 @@ fn read_utf8<'a>(value: *const c_char) -> Result<&'a str, &'static str> {
             return Err("ffi_input_too_long");
         }
     }
+    // SAFETY: 长度由有界扫描确定，仅覆盖首个 NUL 之前的字节。
     let bytes = unsafe { std::slice::from_raw_parts(base, len) };
-    std::str::from_utf8(bytes).map_err(|_| "ffi_input_utf8")
+    std::str::from_utf8(bytes)
+        .map(|s| s.to_owned())
+        .map_err(|_| "ffi_input_utf8")
 }
 
 /// RS-139（审计 2026-09-25）：FALLBACK deny 响应预构造为进程级 static——
@@ -86,7 +91,11 @@ const FALLBACK_JSON: &[u8] = b"{\"abi_version\":0,\"decision\":\"deny\",\"reason
 /// RS-175（审计 2026-09-25）：`to_writer` 直接序列化进单缓冲——此前
 /// `value.to_string()` 走 Display 层再转 CString（额外一层 String 中转），
 /// writer 直写 Vec 省一次中转分配。
-fn write_response(value: Value) -> *mut c_char {
+/// RS-268（2026-10-01 审计）：入参泛型化为 `impl Serialize`——调用方传入
+/// 强类型响应结构（见下方 DenyJson/DecisionJson），不再先构建整棵
+/// serde_json::Value 树再序列化（Value 树每节点一次堆分配，序列化输出
+/// 再一次全量分配——双倍分配）。Value 仍可用（测试直传）。
+fn write_response(value: impl Serialize) -> *mut c_char {
     let mut buf = Vec::new();
     match serde_json::to_writer(&mut buf, &value)
         .ok()
@@ -97,87 +106,97 @@ fn write_response(value: Value) -> *mut c_char {
     }
 }
 
-fn deny(code: &str, detail: &str) -> Value {
-    json!({
-        "abi_version": POLICY_CORE_ABI_VERSION,
-        "decision": "deny",
-        "reason": {
-            "code": code,
-            "detail": detail,
-            "explanation": NATIVE_BOUNDARY_EXPLANATION,
-        }
-    })
+// ===== RS-268：强类型响应结构（直写序列化，取代 Value 树）=====
+
+/// deny 响应的 reason 子对象（借用形态——零拷贝引用调用方字符串）。
+#[derive(Serialize)]
+struct DenyReasonRef<'a> {
+    code: &'a str,
+    detail: &'a str,
+    explanation: &'a str,
 }
 
-fn action_json(action: FfiAuthorizedAction) -> Value {
-    json!({
-        "session_id": action.session_id,
-        "tab_id": action.tab_id,
-        "document_generation": action.document_generation,
-        "origin": action.origin,
-        "method": action.method,
-        "canonical_parameters": action.canonical_parameters,
-        "scope": action.scope,
-        "expires_at": action.expires_at,
-        "nonce": action.nonce,
-        "policy_version": action.policy_version,
-        "explanation": action.explanation,
-    })
+/// deny 响应信封（abi_version + decision + reason）。
+#[derive(Serialize)]
+struct DenyJson<'a> {
+    abi_version: u32,
+    decision: &'static str,
+    reason: DenyReasonRef<'a>,
 }
 
-fn approval_request_json(request: FfiApprovalRequest) -> Value {
-    json!({
-        "origin": request.origin,
-        "method": request.method,
-        "path": request.path,
-        "scope": request.scope,
-        "expires_at": request.expires_at,
-        "nonce": request.nonce,
-    })
-}
-
-fn decision_json(decision: FfiDecision) -> Value {
-    match decision {
-        FfiDecision::Allow { action } => json!({
-            "abi_version": POLICY_CORE_ABI_VERSION,
-            "decision": "allow",
-            "action": action_json(action),
-        }),
-        FfiDecision::RequireConfirmation { request } => json!({
-            "abi_version": POLICY_CORE_ABI_VERSION,
-            "decision": "require_confirmation",
-            "request": approval_request_json(request),
-        }),
-        FfiDecision::Deny { reason } => json!({
-            "abi_version": POLICY_CORE_ABI_VERSION,
-            "decision": "deny",
-            "reason": {
-                "code": reason.code,
-                "detail": reason.detail,
-                "explanation": reason.explanation,
-            },
-        }),
+fn deny<'a>(code: &'a str, detail: &'a str) -> DenyJson<'a> {
+    DenyJson {
+        abi_version: POLICY_CORE_ABI_VERSION,
+        decision: "deny",
+        reason: DenyReasonRef {
+            code,
+            detail,
+            explanation: NATIVE_BOUNDARY_EXPLANATION,
+        },
     }
 }
 
-fn read_string_field(value: &Value, name: &'static str) -> Result<String, &'static str> {
+/// 决策体——internally tagged（`decision` 字段），变体名 snake_case 对齐
+/// 既有 JSON 契约（allow / require_confirmation / deny）。
+#[derive(Serialize)]
+#[serde(tag = "decision", rename_all = "snake_case")]
+enum DecisionBody<'a> {
+    Allow { action: &'a FfiAuthorizedAction },
+    RequireConfirmation { request: &'a FfiApprovalRequest },
+    Deny { reason: DenyReasonRef<'a> },
+}
+
+/// 决策响应信封——abi_version 平铺 + 决策体 flatten（输出形态与既有
+/// Value 构造逐字段一致：{"abi_version":N,"decision":"...","action"|"request"|"reason":{...}}）。
+#[derive(Serialize)]
+struct DecisionJson<'a> {
+    abi_version: u32,
+    #[serde(flatten)]
+    body: DecisionBody<'a>,
+}
+
+fn decision_json(decision: &FfiDecision) -> DecisionJson<'_> {
+    let body = match decision {
+        FfiDecision::Allow { action } => DecisionBody::Allow { action },
+        FfiDecision::RequireConfirmation { request } => {
+            DecisionBody::RequireConfirmation { request }
+        }
+        FfiDecision::Deny { reason } => DecisionBody::Deny {
+            reason: DenyReasonRef {
+                code: &reason.code,
+                detail: &reason.detail,
+                explanation: &reason.explanation,
+            },
+        },
+    };
+    DecisionJson {
+        abi_version: POLICY_CORE_ABI_VERSION,
+        body,
+    }
+}
+
+fn read_string_field(
+    value: &serde_json::Value,
+    name: &'static str,
+) -> Result<String, &'static str> {
     value
         .get(name)
-        .and_then(Value::as_str)
+        .and_then(serde_json::Value::as_str)
         .filter(|field| !field.is_empty())
         .map(ToOwned::to_owned)
         .ok_or("ffi_action_invalid")
 }
 
-fn read_u64_field(value: &Value, name: &'static str) -> Result<u64, &'static str> {
+fn read_u64_field(value: &serde_json::Value, name: &'static str) -> Result<u64, &'static str> {
     value
         .get(name)
-        .and_then(Value::as_u64)
+        .and_then(serde_json::Value::as_u64)
         .ok_or("ffi_action_invalid")
 }
 
 fn parse_action(action_json: &str) -> Result<FfiAuthorizedAction, &'static str> {
-    let value: Value = serde_json::from_str(action_json).map_err(|_| "ffi_action_invalid_json")?;
+    let value: serde_json::Value =
+        serde_json::from_str(action_json).map_err(|_| "ffi_action_invalid_json")?;
     Ok(FfiAuthorizedAction {
         session_id: read_string_field(&value, "session_id")?,
         tab_id: read_string_field(&value, "tab_id")?,
@@ -191,7 +210,7 @@ fn parse_action(action_json: &str) -> Result<FfiAuthorizedAction, &'static str> 
         policy_version: read_string_field(&value, "policy_version")?,
         explanation: value
             .get("explanation")
-            .and_then(Value::as_str)
+            .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .to_owned(),
     })
@@ -248,7 +267,7 @@ pub extern "C" fn aegis_policy_core_broker_new(policy_version: *const c_char) ->
             }
         }
         let broker = Box::into_raw(Box::new(CAbiBroker {
-            inner: FfiBroker::new(policy_version.to_owned()),
+            inner: FfiBroker::new(policy_version),
             retired: AtomicBool::new(false),
         }));
         *live = Some(broker as usize);
@@ -313,7 +332,7 @@ mod tests {
         CString::new(value).expect("test input must not contain NUL")
     }
 
-    fn read_response(response: *mut c_char) -> Value {
+    fn read_response(response: *mut c_char) -> serde_json::Value {
         assert!(!response.is_null());
         // SAFETY: 本测试只读取本模块返回且尚未释放的响应字符串。
         let text = unsafe { CStr::from_ptr(response) }
@@ -577,7 +596,9 @@ mod tests {
 
     #[test]
     fn c_abi_encodes_complete_confirmation_request() {
-        let decision = decision_json(FfiDecision::RequireConfirmation {
+        // RS-268：decision_json 现返回强类型 Serialize 结构——经 to_value
+        // 观测 JSON 形态（与旧 Value 构造逐字段一致）
+        let decision_src = FfiDecision::RequireConfirmation {
             request: FfiApprovalRequest {
                 origin: "https://payments.example".into(),
                 method: "POST".into(),
@@ -586,13 +607,52 @@ mod tests {
                 expires_at: 1_700_000_000,
                 nonce: "approval-nonce".into(),
             },
-        });
+        };
+        let decision =
+            serde_json::to_value(decision_json(&decision_src)).expect("typed envelope serializes");
 
         assert_eq!(decision["decision"], "require_confirmation");
+        assert_eq!(decision["abi_version"], POLICY_CORE_ABI_VERSION);
+        assert_eq!(decision["request"]["origin"], "https://payments.example");
+        assert_eq!(decision["request"]["method"], "POST");
         assert_eq!(decision["request"]["path"], "/transfers");
         assert_eq!(decision["request"]["scope"], "payment:create");
         assert_eq!(decision["request"]["expires_at"], 1_700_000_000);
         assert_eq!(decision["request"]["nonce"], "approval-nonce");
+    }
+
+    /// RS-268：强类型信封的 flatten 输出与宿主 JSON 契约逐字段一致——
+    /// abi_version 平铺在顶层，决策字段随 tag 展开（不出现嵌套 "body"）。
+    #[test]
+    fn typed_envelope_flattens_to_legacy_json_shape() {
+        let deny_envelope = deny("probe_code", "probe detail");
+        let v = serde_json::to_value(&deny_envelope).expect("deny envelope serializes");
+        assert_eq!(v["abi_version"], POLICY_CORE_ABI_VERSION);
+        assert_eq!(v["decision"], "deny");
+        assert_eq!(v["reason"]["code"], "probe_code");
+        assert!(v.get("body").is_none(), "flatten 不得产生嵌套 body 键");
+
+        let allow_src = FfiDecision::Allow {
+            action: FfiAuthorizedAction {
+                session_id: "s".into(),
+                tab_id: "t".into(),
+                document_generation: 1,
+                origin: "https://example.com".into(),
+                method: "GET".into(),
+                canonical_parameters: "/p".into(),
+                scope: "navigation".into(),
+                expires_at: 42,
+                nonce: "n".into(),
+                policy_version: "1.0".into(),
+                explanation: "expl".into(),
+            },
+        };
+        let v = serde_json::to_value(decision_json(&allow_src)).expect("allow envelope serializes");
+        assert_eq!(v["decision"], "allow");
+        assert_eq!(v["action"]["session_id"], "s");
+        assert_eq!(v["action"]["document_generation"], 1);
+        assert_eq!(v["action"]["expires_at"], 42);
+        assert_eq!(v["action"]["explanation"], "expl");
     }
 
     /// RS-176（审计 2026-09-25）：deny explanation 同步性锁定——
@@ -610,8 +670,11 @@ mod tests {
         );
 
         // 解析级断言：fallback explanation 与 deny() 运行时产出一致。
-        let fallback: Value = serde_json::from_str(bytes).expect("fallback must be valid JSON");
-        let deny = deny("ffi_response_alloc", "response allocation failed");
+        let fallback: serde_json::Value =
+            serde_json::from_str(bytes).expect("fallback must be valid JSON");
+        // RS-268：deny() 现返回强类型结构——经 to_value 观测
+        let deny = serde_json::to_value(deny("ffi_response_alloc", "response allocation failed"))
+            .expect("deny envelope serializes");
         assert_eq!(
             fallback["reason"]["explanation"], deny["reason"]["explanation"],
             "fallback and deny() must share one explanation"
@@ -627,7 +690,10 @@ mod tests {
     /// to_writer 产出合法 JSON 且 CString NUL 终止契约未破坏）。
     #[test]
     fn write_response_round_trips_value_through_single_buffer() {
-        let value = json!({
+        // RS-175/RS-268：write_response 泛型化后 Value 仍可直接序列化——
+        // 经 read_response 往返必须逐字段还原（to_writer 产出合法 JSON 且
+        // CString NUL 终止契约未破坏）；强类型结构同口径往返
+        let value = serde_json::json!({
             "abi_version": POLICY_CORE_ABI_VERSION,
             "decision": "deny",
             "reason": {
@@ -639,12 +705,16 @@ mod tests {
         let parsed = read_response(write_response(value.clone()));
         assert_eq!(parsed, value);
         assert_eq!(parsed["reason"]["explanation"], NATIVE_BOUNDARY_EXPLANATION);
+        // 强类型 deny 信封直写同口径往返
+        let typed = read_response(write_response(deny("probe_code", "probe detail")));
+        assert_eq!(typed["decision"], "deny");
+        assert_eq!(typed["reason"]["explanation"], NATIVE_BOUNDARY_EXPLANATION);
     }
 
     #[test]
     fn c_abi_matches_native_navigation_decision_vectors() {
         let _serial = broker_test_guard();
-        let vectors: Value = serde_json::from_str(include_str!(
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../contracts/vectors/native-navigation-decision.json"
         ))
         .expect("native navigation decision vectors must be valid JSON");
@@ -782,7 +852,7 @@ mod tests {
     #[test]
     fn c_abi_matches_native_navigation_confirmation_vectors() {
         let _serial = broker_test_guard();
-        let vectors: Value = serde_json::from_str(include_str!(
+        let vectors: serde_json::Value = serde_json::from_str(include_str!(
             "../../../../contracts/vectors/native-navigation-confirmation.json"
         ))
         .expect("native navigation confirmation vectors must be valid JSON");
@@ -852,7 +922,7 @@ mod tests {
             }
             if vector
                 .get("reject")
-                .and_then(Value::as_bool)
+                .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false)
             {
                 assert_eq!(
@@ -1144,7 +1214,8 @@ mod tests {
     fn fallback_response_prebuilt_is_valid_json() {
         // RS-139：预构造 FALLBACK——无 panic 路径且字节是合法 deny JSON
         let text = FALLBACK_RESPONSE.to_str().expect("ASCII");
-        let parsed: Value = serde_json::from_str(text).expect("FALLBACK 必须是合法 JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(text).expect("FALLBACK 必须是合法 JSON");
         assert_eq!(parsed["abi_version"], 0);
         assert_eq!(parsed["decision"], "deny");
         assert_eq!(parsed["reason"]["code"], "ffi_response_alloc");

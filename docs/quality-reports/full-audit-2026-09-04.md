@@ -1,5 +1,14 @@
 # Aegis 全面审计报告（2026-09-04）
 
+> **历史文档（WB-174，2026-10-01 审计）时代横幅**：本报告编制于
+> **pywebview 现役栈时期**——文中「Windows 现役栈 = legacy Python 壳、
+> C# 端仅 5% 演示壳」的格局判断对应当时实态；此后 ADR-009（C# 全面迁移）
+> 已落地，Python 栈冻结归档至 `legacy/windows-pywebview/`（只读），C#/.NET 10
+> + WebView2 为唯一发布制品。本文件**不代表当前仓库状态**，其结论的修复
+> 走向见同目录 `fix-log-2026-09-04.md` 与后续三轮总台账
+>（docs/audit/full-audit-2026-09-23-1000-items.md 等）。保留作审计溯源，
+> 勿据其做当前决策。（原地加横幅而非移入 docs/audit/——避免既有引用断链。）
+
 > 审计范围：代码质量（Windows pywebview 现役栈 / Android / C# 目标栈 / Rust 核心 / contracts / CI 发布链）+ 用户体验 + 与真实浏览器（Chrome/Edge）功能差距。
 > 方法：4 路并行全源码审读（约 1.9 万行活跃代码）+ 关键结论本地实证（pywebview 6.2.1 源码比对、Android 逻辑推演、正则验证）。
 > 行号以 master@014100b 为准。

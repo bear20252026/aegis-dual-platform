@@ -21,7 +21,7 @@
 | BUG-008 | 宿主桥调用漂移（多副本直调） | 两份 start.html 并行 + pywebview 直调散落 | 无 pywebview 直调；Host 层存在且被使用 | `6e9b2f7` |
 | BUG-009 | 部分设备/文件协议下搜索回车仍无响应（submit 不触发） | file:// 页面 form submit 事件可能不派发（仅依赖 submit 单路径——WB-064/SP-039 补登记：此前被 start.html/start.main.js 注释引用却未在本库登记行） | BUG-002 断言含双路径锁定：form submit + 按钮 click 都必须直调 go()（start_page.test.mjs「搜索按钮必须 click 直调」） | start.main.js wireStaticHandlers（submit+click 双保底） |
 | BUG-011 | Android 地址栏贪吃蛇完全不动（滑动无效） | `tick` 状态只在循环自增、从未在组合中读取——Canvas 读的 `game` 引用不变，Compose 永不重绘，蛇视觉冻结 | 贪吃蛇渲染循环节拍断言（单源 `shared/shell/start.snake.js`） | 已修——载体由已删除的 AddressBarSnake.kt 迁至 start.snake.js（SP-007 纠正） |
-| BUG-012 | 首页返回按钮双端缺失/贪吃蛇 Win 缺失 | 返回键只存在于 Win 原生工具栏；贪吃蛇为 Android 独占 | start.html 单源内置返回按钮（Host.goBack 分发）+ 贪吃蛇双控断言 | `shared/shell/start.html` |
+| BUG-012 | 首页返回按钮双端缺失/贪吃蛇 Win 缺失 | 返回键只存在于 Win 原生工具栏；贪吃蛇为 Android 独占 | 返回形态统一后（95d9bac）改为反向锁定：HTML/CSS 无 back-fab 残留（返回由平台 chrome 承担）+ Host.goBack 适配能力保留 + 贪吃蛇双端单源断言（start_page.test.mjs——WB-157，2026-10-01 审计改述：原描述「单源内置返回按钮」与现行断言相反） | `shared/shell/start.html` |
 | BUG-013 | 手势导航设备上边缘滑动/返回键直接退出应用（回退从未生效） | targetSdk 36 起系统默认经 OnBackInvokedCallback 分发返回事件——onKeyDown(KEYCODE_BACK) 在手势导航设备上永远收不到；此前"验证通过"实为误读（进程存活 ≠ Activity 存活，截图实为桌面） | OnBackPressedCallback 接管断言（手势/按键双路径） | `MainActivity.kt` |
 | BUG-014 | 贪吃蛇版本替换残留（旧地址栏版未清）+ 最高分不持久化 | 地址栏版迁首页全屏版时旧实现（AddressBarSnake.kt 与 MainActivity 调用）残留；新版本最高分只存内存——重开即清零（SP-040 补登记：此前被 start_page.test.mjs「BUG-014 版本替换」断言引用却未在本库登记行） | snakeBest 最高分显示 + localStorage 持久化 + 全屏覆盖层样式 + AddressBarSnake.kt 必须已删除（start_page.test.mjs） | `shared/shell/start.snake.js` |
 
@@ -32,9 +32,9 @@
 
 | 层级 | 内容 | 触发点 | 阻断 |
 |------|------|--------|------|
-| 单元 | C# Core.Tests / Broker.Tests（单轨正典主单元面）、broker JVM 测试；selftest_*.py 为 legacy 归档守护（SP-041 口径更新——单元层主口径随 C# 单轨迁移） | ci.yml dotnet build+test / android 构建 | ✅ |
-| UI 回归 | tests/ui-regression（已知缺陷断言，node:test） | ci.yml ui-regression（每次 push/PR） | ✅ |
-| 静态门禁 | validate_release / ruff / mypy / bridge_guard / detekt / ktlint | ci.yml + android-quality.yml | ✅ |
+| 单元 | C# Core.Tests / Broker.Tests（单轨正典主单元面，dotnet build+test）、Rust cargo test、broker/app/webview-adapter JVM 单测（testDebugUnitTest）；selftest_*.py 为 legacy 归档守护（SP-041/SP-151 口径——单元层主口径随 C# 单轨迁移，归档自检移独立低频守护） | contracts.yml（dotnet build+test + cargo test）/ android-quality.yml（gradle 单测）/ legacy-python-guard.yml（selftest，周 cron） | ✅ |
+| UI 回归 | tests/ui-regression（已知缺陷断言，node:test） | ci.yml ui-regression（每次 push/PR——WB-158，2026-10-01 审计改挂：ci.yml 仅剩本 job） | ✅ |
+| 静态门禁 | validate_release / ruff / mypy（活跃树+归档栈）、bridge_guard、detekt / ktlint | legacy-python-guard.yml（validate_release/ruff/bandit/mypy）+ contracts.yml（bridge_guard/verify_*）+ android-quality.yml（ktlint/detekt）——WB-158 改挂：原「ci.yml + android-quality.yml」中 ci.yml 已不含静态工具 | ✅ |
 | 端到端 | scripts/e2e-android-search.sh（需真机：装/启/搜/退） | 手动或自建设备 runner（REQUIRES_DEVICE 跳过） | 报告 |
 | 发布门禁 | verify_versions + checksum/attestation 校验 + 入口断言 | release-*.yml | ✅ |
 

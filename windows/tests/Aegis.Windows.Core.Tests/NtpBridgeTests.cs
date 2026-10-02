@@ -14,7 +14,9 @@ public sealed class NtpBridgeTests
         Action<string>? onSetEngine = null,
         string? wallpaper = null,
         Action<string>? onSetWallpaper = null,
-        Action<string>? onNavigate = null,
+        // CS-375：与 Services.Navigate 的 Action<string?> 签名对齐（此前
+        // Action<string>? 实参触发 CS8620 可空性差异警告）
+        Action<string?>? onNavigate = null,
         Action? onRestore = null,
         Func<int, string?, (int, int, System.Collections.Generic.IReadOnlyList<NtpBridge.ImportResult>)>? onImportHistory = null) => new(
         SearchEngine: () => engine ?? "baidu",

@@ -120,21 +120,31 @@ internal object WebViewHardening {
     return false;
   }
   function deny(reason) { console.warn('[Aegis] Bridge blocked: ' + reason); }
+  // RS-242（2026-10-01 审计）：四桥出口注册 ToStringGuard（proxy.register.v1，
+  // 与 shield.rs 同款）——未注册时 fetch.toString() 一行暴露包装源码
+  //（内含品牌特征）。注册接口缺失/参数非法时为空转（防御性 if 守卫）
+  var __aegisReg = window[Symbol.for('proxy.register.v1')];
   const fetch0 = window.fetch;
   window.fetch = function(input, init) {
     if (shouldBlock(input && input.url ? input.url : input)) { deny('fetch'); return Promise.reject(new Error('Aegis: bridge blocked')); }
     return fetch0.apply(this, arguments);
   };
+  if (__aegisReg) __aegisReg(window.fetch, fetch0);
   const open0 = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url) {
     if (shouldBlock(url)) { deny('xhr'); throw new Error('Aegis: bridge blocked'); }
     return open0.apply(this, arguments);
   };
-  const beacon0 = navigator.sendBeacon && navigator.sendBeacon;
+  if (__aegisReg) __aegisReg(XMLHttpRequest.prototype.open, open0);
+  // PY-249（2026-10-01 审计）：beacon0 缺 .bind(navigator) 笔误——
+  // `sendBeacon && sendBeacon` 恒等自身，调用时 this 丢失（严格模式 TypeError
+  // 守卫自炸）。保留存在性短路 + 明确 bind
+  const beacon0 = navigator.sendBeacon && navigator.sendBeacon.bind(navigator);
   navigator.sendBeacon = function(url) {
     if (shouldBlock(url)) { deny('beacon'); return false; }
     return beacon0.apply(navigator, arguments);
   };
+  if (__aegisReg && beacon0) __aegisReg(navigator.sendBeacon, beacon0);
   const WS = window.WebSocket;
   window.WebSocket = function(url, protocols) {
     if (shouldBlock(url)) { deny('websocket'); throw new Error('Aegis: bridge blocked'); }
@@ -148,6 +158,7 @@ internal object WebViewHardening {
   // prototype 与真 WebSocket 实例无关，new WebSocket(...) instanceof
   // WebSocket 恒 false（页面一行即可探测防护存在性）。
   window.WebSocket.prototype = WS.prototype;
+  if (__aegisReg) __aegisReg(window.WebSocket, WS);
 })();
             """.trimIndent()
 
@@ -161,7 +172,12 @@ internal object WebViewHardening {
     @Suppress("LongMethod") // 该方法仅承载版本化脚本文本，不包含 Android 业务控制流。
     internal fun fingerprintShieldScript(sessionSeed: String): String =
         """
-window.__AEGIS_PROTECTION_VERSION = '1';
+// AD-269（2026-10-01 审计）：版本标记改 defineProperty——裸赋值产出的数据
+// 属性默认可枚举（Object.keys / for-in 一行可枚举）且可 delete；不可枚举 +
+// 不可配置后，枚举面不可见且不可删除（writable 同步锁死，防篡改降级探测）。
+Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
+  value: '1', writable: false, enumerable: false, configurable: false
+});
 // === Stage 1: ToStringGuard（参照 playwright-afp MIT）===
 (function() {
   var proxyMap = new WeakMap();
@@ -271,16 +287,23 @@ window.__AEGIS_PROTECTION_VERSION = '1';
   Object.defineProperty(window, '__AEGIS_SITE_SEED', { value: siteSeed, writable: false, configurable: false });
 })();
 
-// === Stage 3: Canvas/WebGL/Audio 噪声 ===
+// === Stage 3: Canvas 噪声 ===
 // AD-212（2026-09-26 审计）：噪声施加在**离屏副本**上（参照 Rust 侧 RS-025
 // 修复模式）——原实现 getImageData/putImageData 破坏性写回活画布：①二次读
 // 同一画布结果不同（噪声注入自身可检测）；②页面后续渲染被永久污染。副本
 // 仅用于返回值，原 ctx 不动；且不调用源画布 getContext（drawImage 对任意
 // 上下文类型的源画布均可用，也避免把尚无上下文的画布永久锁定为 2d）。
 (function() {
-  const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+  // AD-270（2026-10-01 审计）：尺寸上限——16K×16K 画布的离屏副本 +
+  // getImageData 峰值约 1GB（OOM 面）。超阈值直接走原实现降级（该形态
+  // 画布本身已极难作为指纹载体，资源安全优先）。
+  var MAX_NOISE_PIXELS = 4096 * 4096;
+  var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
   HTMLCanvasElement.prototype.toDataURL = function(type) {
     try {
+      if (this.width * this.height > MAX_NOISE_PIXELS) {
+        return origToDataURL.apply(this, arguments);
+      }
       const off = document.createElement('canvas');
       off.width = this.width;
       off.height = this.height;
@@ -288,15 +311,17 @@ window.__AEGIS_PROTECTION_VERSION = '1';
       octx.drawImage(this, 0, 0);
       const imageData = octx.getImageData(0, 0, off.width, off.height);
       const seed = parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16);
-      // AD-175（审计 2026-09-23 清单·A7 批）：多通道混淆——原噪声只扰动
-      // R 通道（stride 4 的第 0 字节），G/B 通道逐像素原样返回：canvas
-      // 读回值 2/3 的信息量未被覆盖，页面按通道差分即可高置信还原原图/
-      // 检测防护存在性。现 R/G/B 三通道以不同相位（+i/seed、+i/seed+1、
-      // +i/seed+2）各自 ±1 抖动（alpha 不动——不破坏合成透明度）。
-      for (let i = 0; i < imageData.data.length; i += 4) {
-        imageData.data[i] += ((seed + i) % 2 === 0 ? 1 : -1);
-        imageData.data[i + 1] += ((seed + i + 1) % 2 === 0 ? 1 : -1);
-        imageData.data[i + 2] += ((seed + i + 2) % 2 === 0 ? 1 : -1);
+      // AD-253（2026-10-01 审计）：逐像素确定性 PRNG——原 `(seed+i)%2` 在
+      // i+=4 步进下退化为每通道全图常量偏移（共 8 种组合，减法即可还原
+      // 原图）。现以像素索引乘黄金比例常数（0x9E3779B1）与 seed 异或后
+      // 取最低位；三通道用不同混合常数（0x85EBCA6B / 0x27D4EB2F，
+      // murmur3 finalizer 常数）——同 seed 相邻像素噪声不一致，且无
+      // 通道间常量偏置。口径与 Rust 侧 RS-249 等价（不要求字节级一致）。
+      // alpha 不动——不破坏合成透明度。
+      for (let px = 0, i = 0; i < imageData.data.length; px++, i += 4) {
+        imageData.data[i] += (((seed ^ Math.imul(px, 0x9E3779B1)) >>> 0) & 1) ? 1 : -1;
+        imageData.data[i + 1] += (((seed ^ Math.imul(px, 0x85EBCA6B)) >>> 0) & 1) ? 1 : -1;
+        imageData.data[i + 2] += (((seed ^ Math.imul(px, 0x27D4EB2F)) >>> 0) & 1) ? 1 : -1;
       }
       octx.putImageData(imageData, 0, 0);
       return origToDataURL.apply(off, arguments);
@@ -305,14 +330,9 @@ window.__AEGIS_PROTECTION_VERSION = '1';
     }
   };
 })();
-(function() {
-  const origGetParameter = WebGLRenderingContext.prototype.getParameter;
-  WebGLRenderingContext.prototype.getParameter = function(p) {
-    if (p === 37446) return 'ANGLE (Aegis)';
-    if (p === 37445) return 'Aegis Privacy';
-    return origGetParameter.call(this, p);
-  };
-})();
+// AD-258（2026-10-01 审计）：Stage 3 原有一个 WebGL getParameter 伪装包装，
+// 被 Stage 7 对同一常量（0x9245/0x9246）的先行返回遮蔽（永不可达死代码），
+// 且其返回值含品牌字符串（现成指纹标记）——已删除，伪装单源收敛 Stage 7。
 (function() {
   const seed = parseInt(window.__AEGIS_SITE_SEED.slice(8, 16), 16);
   Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 2 + (seed % 7) });
@@ -339,13 +359,27 @@ window.__AEGIS_PROTECTION_VERSION = '1';
     if (osAW) Object.defineProperty(screen, 'availWidth', { get: function() { return roundTo(osAW.get.call(this), WS); } });
     if (osAH) Object.defineProperty(screen, 'availHeight', { get: function() { return roundTo(osAH.get.call(this), HS); } });
   } catch(e) {}
-  try {
-    var iw = window.innerWidth, ih = window.innerHeight, ow = window.outerWidth, oh = window.outerHeight;
-    Object.defineProperty(window, 'innerWidth', { value: roundTo(iw, WS), configurable: true });
-    Object.defineProperty(window, 'innerHeight', { value: roundTo(ih, HS), configurable: true });
-    Object.defineProperty(window, 'outerWidth', { value: roundTo(ow, WS), configurable: true });
-    Object.defineProperty(window, 'outerHeight', { value: roundTo(oh, HS), configurable: true });
-  } catch(e) {}
+  // AD-259（2026-10-01 审计）：innerWidth/innerHeight/outerWidth/outerHeight
+  // 改 getter 包装动态量化——原实现一次性取值冻结为常量，旋转/键盘弹出/
+  // 分屏后页面读到的仍是旧值（响应式布局错乱，且与 screen.* 实时值产生
+  // 跨属性不一致——本身就是高置信探测信号）。getter 每次读取现值再量化，
+  // 量化网格与 screen.* 同源（WS/HS 一致性约束见上）。
+  function wrapWindowDimension(prop, step) {
+    try {
+      var desc = Object.getOwnPropertyDescriptor(Window.prototype, prop) ||
+                 Object.getOwnPropertyDescriptor(window, prop);
+      if (desc && desc.get) {
+        Object.defineProperty(window, prop, {
+          get: function() { return roundTo(desc.get.call(window), step); },
+          configurable: true
+        });
+      }
+    } catch(e) {}
+  }
+  wrapWindowDimension('innerWidth', WS);
+  wrapWindowDimension('innerHeight', HS);
+  wrapWindowDimension('outerWidth', WS);
+  wrapWindowDimension('outerHeight', HS);
 })();
 
 // === Stage 5: QueryStripper（参照 LibreWolf/Brave MPL-2.0）===
@@ -368,6 +402,27 @@ window.__AEGIS_PROTECTION_VERSION = '1';
   };
   var origOpen = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url) { arguments[1] = strip(url); return origOpen.apply(this, arguments); };
+  // AD-285（2026-10-01 审计）：sendBeacon/WebSocket 同口径包装——追踪参数
+  // （gclid 等）经 beacon/WS 握手 URL 外发此前不受 strip，隐私覆盖面缺口。
+  var origBeacon = navigator.sendBeacon && navigator.sendBeacon;
+  if (origBeacon) {
+    navigator.sendBeacon = function(url) {
+      if (typeof url === 'string') arguments[0] = strip(url);
+      return origBeacon.apply(navigator, arguments);
+    };
+  }
+  var OrigWS = window.WebSocket;
+  window.WebSocket = function(url, protocols) {
+    if (typeof url === 'string') url = strip(url);
+    return protocols === undefined ? new OrigWS(url) : new OrigWS(url, protocols);
+  };
+  try {
+    window.WebSocket.prototype = OrigWS.prototype;
+    window.WebSocket.CONNECTING = OrigWS.CONNECTING;
+    window.WebSocket.OPEN = OrigWS.OPEN;
+    window.WebSocket.CLOSING = OrigWS.CLOSING;
+    window.WebSocket.CLOSED = OrigWS.CLOSED;
+  } catch(e) {}
 })();
 
 // === Stage 6: FontNormalizer（参照 Mullvad Browser MPL-2.0）===

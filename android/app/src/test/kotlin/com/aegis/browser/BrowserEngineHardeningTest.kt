@@ -59,6 +59,35 @@ class BrowserEngineHardeningTest {
         assertFalse(CookieManager.getInstance().acceptThirdPartyCookies(webView))
     }
 
+    // ---------------- AD-289（2026-10-01 审计）：显式关闭立场 ----------------
+
+    @Test
+    fun formDataSavingIsExplicitlyDisabled() {
+        BrowserEngine(webView).configure()
+        // getSaveFormData 虽 deprecated 但仍可用（断言面）；geolocation 无
+        // 公开 getter——真机侧由 SmokeInstrumentedTest 覆盖 safeBrowsing 等
+        @Suppress("DEPRECATION")
+        assertFalse("表单自动填充必须显式关闭", webView.settings.saveFormData)
+    }
+
+    // ---------------- AD-268（2026-10-01 审计）：标题截断代理对安全 ----------------
+
+    @Test
+    fun receivedTitleTruncationIsSurrogateSafe() {
+        // 标题截断点落在增补字符（emoji）代理对中间时回退一个 char——
+        // 不产生孤立代理（渲染 � 且 length 语义失真）
+        val spyView = org.mockito.Mockito.spy(webView)
+        var observed: String? = null
+        BrowserEngine(spyView, onTitleObserved = { observed = it }).configure()
+        val chromeClient = chromeClientOf(spyView)
+        val title = "a" + "😀".repeat(200) // 401 chars；切点 256 命中代理对高半
+        chromeClient.onReceivedTitle(spyView, title)
+        assertEquals("代理对边界回退一个 char（256-1=255）", 255, observed!!.length)
+        assertFalse("段尾不得残留孤立高代理", Character.isHighSurrogate(observed.last()))
+        // 重组前缀与原文一致（无损截断）
+        assertEquals(title.take(255), observed)
+    }
+
     // ---------------- AD-165（审计 2026-09-23 清单·A7 批）：标题 256 截断 ----------------
 
     /** 经 ArgumentCaptor 捕获 configure() 注入的 WebChromeClient（spy 真实

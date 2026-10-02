@@ -98,6 +98,65 @@ class ReaderControllerTest {
         assertNull(controller.content.value)
     }
 
+    // --------------------------------------------- AD-267（2026-10-01 审计）
+
+    @Test
+    fun staleExtractionCallbackIsDroppedAfterTabSwitch() {
+        // evaluateJavascript 回填归属校验：提取发起后切标签，旧正文不得写入
+        // 新语境（回调落地时 currentWebView 已非发起时实例）
+        var current: WebView? = null
+        var deferred: ValueCallback<String>? = null
+        val origin =
+            mock(WebView::class.java).also { wv ->
+                whenever(wv.evaluateJavascript(anyString(), any<ValueCallback<String>?>()))
+                    .thenAnswer { invocation ->
+                        deferred = invocation.getArgument(1) as ValueCallback<String>
+                        null
+                    }
+            }
+        current = origin
+        val controller =
+            ReaderController(
+                currentWebView = { current },
+                currentUrl = { "https://a.example" },
+                navigateExternal = { true },
+                alertRes = { alerts.add(it) },
+            )
+        controller.toggleReaderMode()
+        // 提取挂起期间切换标签（currentWebView 指向新实例）
+        current = mock(WebView::class.java)
+        deferred?.onReceiveValue(payload(ok = true))
+        assertNull("切换后旧正文不得入新语境（AD-267）", controller.content.value)
+        assertTrue("过期回调不弹提示（新标签语境下提示同样错位）", alerts.isEmpty())
+    }
+
+    @Test
+    fun freshExtractionCallbackStillFillsContent() {
+        // 对照组：未切标签时同一异步回填路径正常写状态（归属校验不误伤）
+        var current: WebView? = null
+        var deferred: ValueCallback<String>? = null
+        val origin =
+            mock(WebView::class.java).also { wv ->
+                whenever(wv.evaluateJavascript(anyString(), any<ValueCallback<String>?>()))
+                    .thenAnswer { invocation ->
+                        deferred = invocation.getArgument(1) as ValueCallback<String>
+                        null
+                    }
+            }
+        current = origin
+        val controller =
+            ReaderController(
+                currentWebView = { current },
+                currentUrl = { "https://a.example" },
+                navigateExternal = { true },
+                alertRes = { alerts.add(it) },
+            )
+        controller.toggleReaderMode()
+        deferred?.onReceiveValue(payload(ok = true))
+        assertEquals("标题", controller.content.value!!.title)
+        assertTrue(alerts.isEmpty())
+    }
+
     // ---------------------------------------------------------------- AD-127
 
     @Test

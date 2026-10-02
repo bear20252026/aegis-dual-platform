@@ -1,5 +1,14 @@
 # B4 独立 Release Workflow 设计（release-workflow-design）
 
+> **历史文档（WB-164，2026-10-01 审计）时代横幅**：本文编制于 2026-08-15
+>（release.yml 初版设计期），与孪生说明文档
+> [release/b4-enable-notes.md](release/b4-enable-notes.md) 同批——后者已加
+> SP-107 横幅，本文件漏挂，现同口径补齐。文中三 job 线性化、PyInstaller/
+> Nuitka/PyArmor 构建描述均为设计时草案；现发布链已演进为 13 workflow 分层
+>（release.yml 编排 v* 标签 + 三平台独立子流 + verify-gate/publish——
+> 见 architecture-overview.md 1.5 节），Windows 制品为 C#/.NET 安装包。
+> 本文保留作发布门禁选型溯源，勿作现行配置依据。
+
 > 编制日期：2026-08-15 ｜ 级别：国家项目 / 专家级
 > final-development-checklist B4（独立 release workflow——build/publish 分离
 > + B1 混淆/B2 签名/B3 SBOM 集成 + 产物保留）

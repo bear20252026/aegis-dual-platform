@@ -53,8 +53,12 @@ impl FingerprintShield {
     }
 
     /// 种子的十六进制表示（注入 JS 时用）。
+    ///
+    /// RS-262（2026-10-01 审计）：收敛到 util::hex_encode 单源——此处逐字节
+    /// format! 是 crate 内第三份 hex 实现（util::hex_encode / ffi/broker 查表
+    /// 特化之外又一份），口径漂移面。
     pub fn seed_hex(&self) -> String {
-        self.seed.iter().map(|b| format!("{b:02x}")).collect()
+        crate::util::hex_encode(&self.seed)
     }
 
     /// 种子的原始字节（供 PerSiteSeed 等管道阶段使用）。
@@ -93,10 +97,30 @@ impl FingerprintShield {
 
   // RS-207（2026-09-26 审计）：canvas 噪声站点键——FNV-1a 域混合 + 两轮
   // xorshift 雪崩；同站同会话确定（噪声稳定），跨站/跨会话去相关
-  function aegisCanvasSeed() {{
-    var host = location.hostname || '';
+  // RS-257（2026-10-01 审计）：eTLD+1 提取带最小公共后缀表——此前固定取
+  // 最后两标签，a.co.uk 与 b.co.uk 共享种子（跨站关联面）。末两标签命中
+  // 公共后缀表时升到三标签（公共后缀本身不构成站点边界）
+  var AEGIS_PUBLIC_SUFFIXES = {{
+    'co.uk': 1, 'org.uk': 1, 'ac.uk': 1, 'gov.uk': 1,
+    'com.au': 1, 'net.au': 1, 'org.au': 1, 'edu.au': 1,
+    'co.jp': 1, 'ne.jp': 1, 'or.jp': 1, 'ac.jp': 1,
+    'com.br': 1, 'com.cn': 1, 'net.cn': 1, 'org.cn': 1,
+    'com.tw': 1, 'com.hk': 1, 'com.sg': 1, 'co.nz': 1, 'co.za': 1,
+    'github.io': 1, 'gitlab.io': 1, 'pages.dev': 1, 'vercel.app': 1,
+    'netlify.app': 1, 'appspot.com': 1, 'blogspot.com': 1,
+    'herokuapp.com': 1, 'azurewebsites.net': 1, 'cloudfront.net': 1
+  }};
+  function aegisEtldPlus1(host) {{
     var parts = host.split('.');
-    var etld1 = parts.length <= 2 ? host : parts.slice(-2).join('.');
+    if (parts.length <= 2) return host;
+    var last2 = parts.slice(-2).join('.');
+    if (AEGIS_PUBLIC_SUFFIXES[last2] && parts.length >= 3) {{
+      return parts.slice(-3).join('.');
+    }}
+    return last2;
+  }}
+  function aegisCanvasSeed() {{
+    var etld1 = aegisEtldPlus1(location.hostname || '');
     var h = 2166136261 >>> 0;
     for (var i = 0; i < etld1.length; i++) {{
       h = Math.imul(h ^ etld1.charCodeAt(i), 16777619) >>> 0;
@@ -131,11 +155,15 @@ impl FingerprintShield {
         const seed = aegisCanvasSeed();
         for (let i = 0; i < imageData.data.length; i += 4) {{
           // RS-215（2026-09-26 审计）：R/G/B 三通道扰动（对齐 Android
-          // AD-175 多通道口径——单 R 通道噪声形态本身即跨端指纹差异面）；
-          // alpha 不动（透明度变化视觉可察）
-          imageData.data[i] += ((seed + i) % 2 === 0) ? 1 : -1;
-          imageData.data[i + 1] += ((seed + i) % 3 === 0) ? 1 : -1;
-          imageData.data[i + 2] += ((seed + i) % 5 === 0) ? 1 : -1;
+          // AD-175 多通道口径）；alpha 不动（透明度变化视觉可察）
+          // RS-249（2026-10-01 审计）：逐像素混合——(seed+i)%N 在 i+=4 步进下
+          // 每通道全图只取一个常量偏置（整图减法即还原，与 Android AD-253
+          // 同病）。改为像素索引与种子经 Math.imul 混合取最低位，三通道
+          // 不同常数（0x9E3779B1 / 0x85EBCA6B / 0x27D4EB2F）——逐像素
+          // 0/1 扰动（Android 侧将实现等价口径，不要求字节级一致）
+          imageData.data[i] += (((seed ^ Math.imul(i, 0x9E3779B1)) >>> 0) & 1) ? 1 : -1;
+          imageData.data[i + 1] += (((seed ^ Math.imul(i, 0x85EBCA6B)) >>> 0) & 1) ? 1 : -1;
+          imageData.data[i + 2] += (((seed ^ Math.imul(i, 0x27D4EB2F)) >>> 0) & 1) ? 1 : -1;
         }}
         octx.putImageData(imageData, 0, 0);
         return origToDataURL.apply(off, arguments);
@@ -160,9 +188,11 @@ impl FingerprintShield {
       const imageData = octx.getImageData(0, 0, off.width, off.height);
       const seed = aegisCanvasSeed();
       for (let i = 0; i < imageData.data.length; i += 4) {{
-        imageData.data[i] += ((seed + i) % 2 === 0) ? 1 : -1;
-        imageData.data[i + 1] += ((seed + i) % 3 === 0) ? 1 : -1;
-        imageData.data[i + 2] += ((seed + i) % 5 === 0) ? 1 : -1;
+        // RS-249：逐像素 Math.imul 混合（三通道不同常数）——(seed+i)%N 形态
+        // 在 i+=4 步进下退化为通道常量偏置；口径与 toDataURL 通道一致
+        imageData.data[i] += (((seed ^ Math.imul(i, 0x9E3779B1)) >>> 0) & 1) ? 1 : -1;
+        imageData.data[i + 1] += (((seed ^ Math.imul(i, 0x85EBCA6B)) >>> 0) & 1) ? 1 : -1;
+        imageData.data[i + 2] += (((seed ^ Math.imul(i, 0x27D4EB2F)) >>> 0) & 1) ? 1 : -1;
       }}
       octx.putImageData(imageData, 0, 0);
       return origToBlob.call(off, callback, type, quality);
@@ -185,9 +215,11 @@ impl FingerprintShield {
       const imageData = octx.getImageData(0, 0, off.width, off.height);
       const seed = aegisCanvasSeed();
       for (let i = 0; i < imageData.data.length; i += 4) {{
-        imageData.data[i] += ((seed + i) % 2 === 0) ? 1 : -1;
-        imageData.data[i + 1] += ((seed + i) % 3 === 0) ? 1 : -1;
-        imageData.data[i + 2] += ((seed + i) % 5 === 0) ? 1 : -1;
+        // RS-249：逐像素 Math.imul 混合（三通道不同常数）——(seed+i)%N 形态
+        // 在 i+=4 步进下退化为通道常量偏置；口径与 toDataURL 通道一致
+        imageData.data[i] += (((seed ^ Math.imul(i, 0x9E3779B1)) >>> 0) & 1) ? 1 : -1;
+        imageData.data[i + 1] += (((seed ^ Math.imul(i, 0x85EBCA6B)) >>> 0) & 1) ? 1 : -1;
+        imageData.data[i + 2] += (((seed ^ Math.imul(i, 0x27D4EB2F)) >>> 0) & 1) ? 1 : -1;
       }}
       octx.putImageData(imageData, 0, 0);
       return origConvert.call(off, options);
@@ -200,11 +232,21 @@ impl FingerprintShield {
 // 音频指纹噪声由 PerSiteSeed（RS-028）负责——按站点隔离，不在此模块重复
 
 // hardwareConcurrency 随机化（2-8 核）
+// RS-250（2026-10-01 审计）：原型级 getter 替换——此前实例遮蔽
+// （defineProperty(navigator, ...)）可经
+// Object.getOwnPropertyDescriptor(Navigator.prototype, 'hardwareConcurrency')
+// .get.call(navigator) 直取原值（与 letterbox/font_norm 口径统一为原型级）。
+// 保留原 descriptor 的 enumerable/configurable（属性形态对齐原生）
 (function() {{
   const seed = parseInt(__AEGIS_SESSION_SEED.slice(8, 16), 16);
-  Object.defineProperty(navigator, 'hardwareConcurrency', {{
-    get: () => 2 + (seed % 7)
-  }});
+  var oHC = Object.getOwnPropertyDescriptor(Navigator.prototype, 'hardwareConcurrency');
+  if (oHC && oHC.get) {{
+    Object.defineProperty(Navigator.prototype, 'hardwareConcurrency', {{
+      get: function() {{ return 2 + (seed % 7); }},
+      enumerable: oHC.enumerable,
+      configurable: oHC.configurable
+    }});
+  }}
 }})();
 }})();
 "#
@@ -268,11 +310,12 @@ mod tests {
 
     #[test]
     fn seed_bytes_roundtrip_matches_hex() {
-        // RS-081：seed_bytes 与 seed_hex 同源一致（管线阶段消费契约）
+        // RS-081：seed_bytes 与 seed_hex 同源一致（管线阶段消费契约）；
+        // RS-262：seed_hex 已收敛 util::hex_encode 单源——期望值同源构造
         let seed = [7u8; 32];
         let s = FingerprintShield::from_seed(seed);
         assert_eq!(s.seed_bytes(), seed);
-        let hex_from_bytes: String = s.seed_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        let hex_from_bytes = crate::util::hex_encode(&s.seed_bytes());
         assert_eq!(hex_from_bytes, s.seed_hex());
     }
 
@@ -354,5 +397,84 @@ mod tests {
         );
         // alpha（i + 3）不动——透明度变化视觉可察
         assert!(!script.contains("imageData.data[i + 3]"));
+    }
+
+    // —— RS-249/250/257 回归（审计 2026-10-01） ——
+
+    #[test]
+    fn canvas_noise_is_per_pixel_not_constant_offset() {
+        // RS-249：噪声必须逐像素混合——(seed+i)%N 在 i+=4 步进下每通道
+        // 全图只取常量偏置（减法即还原）。三通道不同常数 Math.imul 混合
+        let script = FingerprintShield::from_seed([9u8; 32]).inject_script();
+        for (channel, k) in [(0usize, "0x9E3779B1"), (1, "0x85EBCA6B"), (2, "0x27D4EB2F")] {
+            let form = if channel == 0 {
+                "imageData.data[i]".to_string()
+            } else {
+                format!("imageData.data[i + {channel}]")
+            };
+            let expected = format!("Math.imul(i, {k})");
+            let line = script
+                .lines()
+                .find(|l| l.contains(&form) && l.contains("seed ^"))
+                .unwrap_or_else(|| panic!("通道 {channel} 缺少逐像素混合形态"));
+            assert!(
+                line.contains(&expected),
+                "通道 {channel} 必须用常数 {k} 混合：{line}"
+            );
+        }
+        // 旧的常量偏置形态必须消失
+        assert!(
+            !script.contains("(seed + i) % 2"),
+            "(seed+i)%N 常量偏置形态必须移除"
+        );
+        // 三通道噪声形态在全部三个读取通道（toDataURL/toBlob/convertToBlob）一致
+        assert_eq!(script.matches("Math.imul(i, 0x9E3779B1)").count(), 3);
+    }
+
+    #[test]
+    fn hardware_concurrency_replaced_at_prototype_level() {
+        // RS-250：hardwareConcurrency 必须原型级 getter 替换——实例遮蔽可经
+        // 原型 descriptor 的原 getter 直取原值
+        let script = FingerprintShield::from_seed([9u8; 32]).inject_script();
+        assert!(
+            script.contains(
+                "Object.getOwnPropertyDescriptor(Navigator.prototype, 'hardwareConcurrency')"
+            ),
+            "原型 descriptor 探测"
+        );
+        assert!(
+            script.contains("Object.defineProperty(Navigator.prototype, 'hardwareConcurrency'"),
+            "原型级替换"
+        );
+        assert!(
+            !script.contains("defineProperty(navigator, 'hardwareConcurrency'"),
+            "实例遮蔽形态必须移除"
+        );
+        // 保留原 descriptor 属性
+        assert!(script.contains("enumerable: oHC.enumerable"));
+        assert!(script.contains("configurable: oHC.configurable"));
+        // 种子切片消费保留（低熵值非关联向量）
+        assert!(script.contains("__AEGIS_SESSION_SEED.slice(8, 16)"));
+    }
+
+    #[test]
+    fn canvas_seed_uses_public_suffix_aware_etld1() {
+        // RS-257：eTLD+1 提取带公共后缀表——a.co.uk 与 b.co.uk 此前共享
+        // 站点键（最后两标签同为 co.uk，跨站关联面）
+        let script = FingerprintShield::from_seed([9u8; 32]).inject_script();
+        assert!(
+            script.contains("AEGIS_PUBLIC_SUFFIXES"),
+            "最小公共后缀表必须存在"
+        );
+        assert!(script.contains("'co.uk': 1"), "co.uk 在表中");
+        assert!(script.contains("'github.io': 1"), "github.io 在表中");
+        assert!(
+            script.contains("return parts.slice(-3).join('.');"),
+            "公共后缀命中时升级到三标签"
+        );
+        assert!(
+            script.contains("function aegisEtldPlus1("),
+            "eTLD+1 提取单源函数"
+        );
     }
 }

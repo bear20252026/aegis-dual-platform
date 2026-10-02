@@ -4,20 +4,9 @@
 // 加载顺序：start.js（Host 适配层）→ start.snake.js → start.import.js → 本文件。
 'use strict';
 
-window.addEventListener('error', function (e) {
-  try {
-    Host.jsError(
-      e.message || 'unknown', e.filename || '', e.lineno, e.colno,
-      (e.error && e.error.stack) || '');
-  } catch (err) {}
-});
-window.addEventListener('unhandledrejection', function (e) {
-  try {
-    Host.jsError(
-      'Promise rejection: ' + (e.reason || ''), '', 0, 0,
-      (e.reason && e.reason.stack) || '');
-  } catch (err) {}
-});
+// WB-140（2026-10-01 审计）：window error/unhandledrejection 监听已前移至
+// 首文件 start.js——本文件此前（最末加载）注册时，前三文件的顶层异常
+// 已零上报；此处不再重复注册。
 
 // WB-132（2026-09-26 审计）：label 为面向用户的中文名（tooltip/aria-label）——
 // 此前圆点直接暴露内部资产文件名；name 保持与 NtpAssets.cs /
@@ -285,7 +274,10 @@ function setWallpaper(name) {
         var btn = document.getElementById('restoreBtn');
         if (!box || !btn) return;
         btn.textContent = '恢复上次会话（' + n + ' 个标签）';
-        box.style.display = 'block';
+        // WB-137（2026-10-01 审计）：初始隐藏由标记层 hidden 属性承担——
+        // 显示时移除属性配对（此前只压 style.display='block'，属性残留：
+        // 语义上仍声明「隐藏」与视觉可见矛盾，且依赖内联样式压过 UA 规则）
+        box.removeAttribute('hidden');
         btn.onclick = function () {
           try { Host.restoreSession(); } catch (e) { bridgeError('restoreSession', e); }
         };
@@ -301,7 +293,18 @@ function renderBookmarks() {
   try {
     if (!Host.has('bookmarks')) return;
     Host.bookmarks(function (items) {
-      if (!items || !items.length) {
+      // WB-138（2026-10-01 审计）：null（csCall TTL 兜底 cb(null)/宿主无
+      // 响应）与空数组此前同路径渲染「还没有书签」——加载失败被伪装成
+      // 空库误导用户。分流：null/undefined = 加载失败；[] = 确为空库
+      if (items === null || items === undefined) {
+        box.textContent = '';
+        var err = document.createElement('div');
+        err.className = 'bm-empty';
+        err.textContent = '书签加载失败 — 请稍后刷新或重启浏览器重试';
+        box.appendChild(err);
+        return;
+      }
+      if (!items.length) {
         box.textContent = '';
         var empty = document.createElement('div');
         empty.className = 'bm-empty';

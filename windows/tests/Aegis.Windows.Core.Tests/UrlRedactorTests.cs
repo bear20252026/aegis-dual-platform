@@ -22,6 +22,30 @@ public sealed class UrlRedactorTests
             UrlRedactor.Redact("https://example.com/path?token=secret#frag"));
     }
 
+    // ===== CS-337（2026-10-01 审计）：userinfo 泄漏回归 =====
+
+    [Theory]
+    [InlineData("https://token@example.com/path", "https://example.com/path")]
+    [InlineData("https://token@example.com/path?token=secret#f", "https://example.com/path")]
+    [InlineData("https://user:secret@example.com:8443/p?q=1#f", "https://example.com:8443/p")]
+    [InlineData("https://token@sub.example.com/", "https://sub.example.com/")]
+    public void Userinfo_IsStripped_FromRedactedOutput(string raw, string expected)
+    {
+        // CS-337：GetLeftPart(Authority) 含 userinfo——https://token@host/ 被
+        // 拒后凭据完整落 security.log；改 Scheme + Uri.Authority 组装（实验
+        // 确认 .NET 10 的 Uri.Authority 不含 userinfo 且 IPv6 保留方括号）
+        Assert.Equal(expected, UrlRedactor.Redact(raw));
+    }
+
+    [Fact]
+    public void Ipv6Literal_KeepsBrackets_InRedactedOutput()
+    {
+        // Uri.Host/Authority 对 IPv6 保留方括号——脱敏产物仍是可读合法形态
+        Assert.Equal(
+            "https://[2001:db8::1]/x",
+            UrlRedactor.Redact("https://[2001:db8::1]/x?q=1"));
+    }
+
     [Fact]
     public void AtBoundary256_ReturnedWhole()
     {

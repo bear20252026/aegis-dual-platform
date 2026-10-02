@@ -39,7 +39,26 @@ runs:
           rm -f geogebra.zip
           exit 1
         }
-        python -c "import zipfile; zipfile.ZipFile('geogebra.zip').extractall('.')"
+        # SP-209（2026-10-01 审计）：extractall 前做 zip-slip 成员路径断言——
+        # SHA256 校验锁的是"今天的 zip 内容"，但 zip 来源是 Release 资产
+        # （仓库接管/资产重传场景下哈希会同步换、校验仍过）；绝对路径/
+        # ../ 回溯/盘符/反斜杠成员名可在解压时越出 dest-dir 写任意文件
+        # （进入 APK/安装包制品链）。检测到即 fail-closed 拒绝解压。
+        python - <<'PYEOF'
+        import zipfile
+        zf = zipfile.ZipFile('geogebra.zip')
+        def suspect(name):
+            parts = name.replace('\\', '/').split('/')
+            return (
+                name.startswith('/')
+                or name.startswith('\\')
+                or '..' in parts
+                or (len(parts[0]) > 1 and parts[0][1] == ':')  # Windows 盘符 C:
+            )
+        bad = [n for n in zf.namelist() if suspect(n)]
+        assert not bad, 'zip-slip suspect members (fail-closed): %r' % bad[:5]
+        zf.extractall('.')
+        PYEOF
         # zip 本身必须删除——残留会被 AGP 打包链/C# 安装包 Content 收进制品（+32MB）
         rm geogebra.zip
         python -c "import os; p='GeoGebra/HTML5/5.0/GeoGebra.html'; assert os.path.isfile(p), 'entry missing: '+p"

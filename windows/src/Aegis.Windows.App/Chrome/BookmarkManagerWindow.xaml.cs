@@ -11,7 +11,9 @@ using Aegis.Windows.Core.Security;
 /// <summary>书签管理器窗口：搜索/编辑标题/打开/删除/清空。数据层参数绑定。</summary>
 public partial class BookmarkManagerWindow : Window
 {
-    private const int TitleMaxLength = 256;
+    // CS-369（2026-10-01 审计）：标题上限单源到 Core.TextLimits——
+    // 此前与 BookmarkImporter/HistoryStore 三处独立维护
+    private const int TitleMaxLength = Aegis.Windows.Core.TextLimits.MaxTitleChars;
 
     private readonly BookmarkStore _bookmarks;
     private readonly MainWindow? _owner;
@@ -53,6 +55,8 @@ public partial class BookmarkManagerWindow : Window
 
     private void Reload(string query)
     {
+        // CS-353（2026-10-01 审计）：库损坏行（BLOB 形态）异常已在 BookmarkStore.All
+        // 内归并空 + SecurityLog 留痕——管理器窗口不再裸抛炸窗（与启动书签栏同口径）
         _rows.Clear();
         var q = query.Trim();
         var all = _bookmarks.All();

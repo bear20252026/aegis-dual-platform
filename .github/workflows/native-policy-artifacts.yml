@@ -3,17 +3,27 @@ name: Native-Policy-Artifacts
 on:
   # PY-172（2026-09-23 审计·V1 核验批）：补 push 触发（仅 master + 同 paths——
   # 原先仅 PR 触发，直推 master 的 core 变更不经本链）
+  # SP-197（2026-10-01 审计）：paths 补 windows/android——build-windows 消费
+  # windows/tests + windows/src（dotnet test/publish）、build-android 消费
+  # android/（gradle 打包与 Broker 测试），此前两目录变更永不触发本组合
+  # 冒烟（门禁覆盖空洞）。代价是触发面变宽——windows/android 变更同时也会
+  # 跑 contracts/android-quality 正典门禁，本链作为"原生策略工件组合冒烟"
+  # 接受该重叠。
   push:
     branches:
       - master
     paths:
       - 'core/rust-policy-core/**'
       - 'release/native_artifact_manifest.py'
+      - 'windows/**'
+      - 'android/**'
       - '.github/workflows/native-policy-artifacts.yml'
   pull_request:
     paths:
       - 'core/rust-policy-core/**'
       - 'release/native_artifact_manifest.py'
+      - 'windows/**'
+      - 'android/**'
       - '.github/workflows/native-policy-artifacts.yml'
   workflow_dispatch: {}
 
@@ -31,12 +41,17 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      # SP-196（2026-10-01 审计）：native_artifact_manifest.py 依赖镜像预装
+      # python——显式固化（PY-065 同型 5 处之一）
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
           targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-057)
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-057)
         with:
           workspaces: core/rust-policy-core
       # PY-193（2026-09-26 审计）：此处重复的第二个 Swatinem/rust-cache 步骤
@@ -59,19 +74,21 @@ jobs:
           $env:AEGIS_NATIVE_POLICY_CORE_PATH = $policyDll
           $env:AEGIS_REQUIRE_NATIVE_POLICY_CORE = "1"
           $env:AEGIS_REQUIRE_NAVIGATION_CONFIRMATION = "1"
-          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release
+          # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
+          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
             --self-contained false `
             --output dist/native-policy/windows/wpf-publish `
+            -p:RestoreLockedMode=true `
             -p:RequireNativePolicyCore=true `
             -p:NativePolicyCorePath=$policyDll
           if (-not (Test-Path dist/native-policy/windows/wpf-publish/aegis_policy_core.dll)) {
             throw "WPF 发布目录缺少受控原生策略 DLL"
           }
       - name: Upload Windows policy DLL
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-policy-windows
           path: |
@@ -85,26 +102,46 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      # SP-196（2026-10-01 审计）：native_artifact_manifest.py 依赖镜像预装
+      # python——显式固化
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
           targets: aarch64-linux-android  # 单架构：arm64-v8a
       # PY-057（2026-09-23 审计·V1 核验批）：原批把缓存写进了 build-windows
       # （且重复两份，后被 PY-193 去重）——build-android 从未补上，cargo-ndk
       # 交叉编译每次冷跑。此处补齐。
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-057)
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-057)
         with:
           workspaces: core/rust-policy-core
-      - uses: android-actions/setup-android@035682743ab223ec9c6169af09811dff8247e520
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
         with:
           packages: 'ndk;28.0.12433566'
-      - uses: actions/setup-java@97c5a5e13aa773f277f72c1287dda3c789f1366c
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: '21'
+          # SP-204（2026-10-01 审计）：本 job 三次 gradle（assembleDebug +
+          # 两轮 testDebugUnitTest）此前无任何 Gradle 缓存——补 setup-java
+          # 内建缓存（SP-215 全仓统一机制，键含 libs.versions.toml）
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/**
+            android/gradle/libs.versions.toml
+      # SP-202（2026-10-01 审计）：cargo install 从源码编译数分钟/次——缓存
+      # ~/.cargo/bin 二进制（键含版本号，升级自动失效）；命中时跳过安装
+      - name: Cache cargo-ndk binary (SP-202)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (SP-178 重 pin)
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-bin-4.1.2-${{ runner.os }}
       - name: Install locked Android Rust build tool
-        run: cargo install cargo-ndk --version 4.1.2 --locked
+        run: command -v cargo-ndk >/dev/null 2>&1 || cargo install cargo-ndk --version 4.1.2 --locked
       - name: Build arm64-v8a policy library
         # PY-194（2026-09-26 审计）：原名"Build four Android ABI policy libraries"
         # 与实现不符——实际单架构 arm64-v8a（单架构分发规则见 release-android.yml）
@@ -157,7 +194,7 @@ jobs:
             -PrequireNativePolicyCore=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
       - name: Upload Android policy libraries and Kotlin binding
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-policy-android
           path: |
@@ -172,8 +209,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      # SP-196（2026-10-01 审计）：native_artifact_manifest.py 依赖镜像预装
+      # python——显式固化
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1 (SP-178 重 pin)
         with:
           pattern: native-policy-*
           path: dist/native-policy
@@ -188,7 +230,7 @@ jobs:
           find windows android -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           sha256sum -c SHA256SUMS.txt
       - name: Upload consolidated native policy artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-policy-artifacts
           path: dist/native-policy/

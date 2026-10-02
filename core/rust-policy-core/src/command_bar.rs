@@ -121,15 +121,28 @@ impl CommandEntry {
     }
 
     /// 检查是否匹配查询。
+    ///
+    /// RS-261（2026-10-01 审计）：查询折叠单次——公开入口折叠一次后走
+    /// [`Self::matches_lc`] 内核；批量搜索（CommandBar::search）对同一查询
+    /// 只折叠一次再逐条目复用（此前每条目各自 to_lowercase 同一查询串）。
     pub fn matches(&self, query: &str) -> bool {
         if query.is_empty() {
             return true;
         }
-        // RS-039：title/subtitle/value 小写已预计算——此处仅查询侧一次
-        // to_lowercase。RS-231（2026-09-26 审计）：keywords 通道遍历已删——
-        // 其内容只是 title_lc/subtitle_lc 的克隆，与后两个 contains 完全重复
-        let q = query.to_lowercase();
-        self.title_lc.contains(&q) || self.subtitle_lc.contains(&q) || self.value_lc.contains(&q)
+        self.matches_lc(&query.to_lowercase())
+    }
+
+    /// RS-261：已折叠查询内核——入参必须已是全 Unicode 小写（调用方契约）。
+    fn matches_lc(&self, q_lc: &str) -> bool {
+        if q_lc.is_empty() {
+            return true;
+        }
+        // RS-039：title/subtitle/value 小写已预计算。RS-231（2026-09-26 审计）：
+        // keywords 通道遍历已删——其内容只是 title_lc/subtitle_lc 的克隆，
+        // 与后两个 contains 完全重复
+        self.title_lc.contains(q_lc)
+            || self.subtitle_lc.contains(q_lc)
+            || self.value_lc.contains(q_lc)
     }
 }
 
@@ -195,8 +208,11 @@ impl CommandBar {
             return Vec::new();
         }
         let mut results = Vec::new();
+        // RS-261：同一查询折叠一次——此前每条目经 matches 各自 to_lowercase
+        // 同一查询串（O(条目) 次重复分配）
+        let q = query.to_lowercase();
         for entry in &self.entries {
-            if entry.matches(query) {
+            if entry.matches_lc(&q) {
                 results.push(entry);
                 if results.len() == self.max_results {
                     break;

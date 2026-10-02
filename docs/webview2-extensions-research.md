@@ -1,3 +1,8 @@
+> **历史文档（WB-171，2026-10-01 审计）时代横幅**：本文为 2026-08-15
+> 调研期文档（pywebview + WebView2 前提），评估 WebView2 扩展生态可行性。
+> 现行立场见 docs/product/supported-features.md「明确不做」清单——
+> **浏览器扩展生态明确不做**；本文保留作选型溯源，不作为现行方案依据。
+
 # WebView2 WebExtension 生态调研（R5）
 
 > 调研日期：2026-08-15 ｜ 目标：评估 Aegis Windows 端（pywebview + WebView2）接入浏览器扩展的可行性

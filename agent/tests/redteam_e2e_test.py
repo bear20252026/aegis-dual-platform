@@ -61,6 +61,7 @@ class Decision:
     DENY_BUDGET = "deny_budget"              # 超 max_actions（broker 侧计数判定）
     DENY_BYTES = "deny_budget_bytes"         # 超 max_bytes（broker 侧累计判定）
     DENY_CANONICAL = "deny_canonical"        # canonical_parameters 缺失/非法
+    DENY_TAB = "deny_tab"                      # PY-252：session 已绑定其他 tab_id
     DENY_DESCRIPTION_HASH = "deny_description_hash"  # 工具描述哈希未批准/缺失
 
 
@@ -132,6 +133,11 @@ class E2EBroker:
         self._state_lock = threading.Lock()
         self._session_actions: dict[str, int] = {}  # SP-149：per-session 累计计数
         self._session_bytes: dict[str, int] = {}
+        # PY-252（2026-10-01 审计）：per-session tab 绑定——session.md 声称
+        # "session 绑定 tab_id + document_generation——跨标签/代际变化使批准
+        # 失效"，此前模拟面只比对代际。会话首笔固定 tab 绑定，后续同 session
+        # 换 tab_id 即拒（跨标签重放面闭合）。
+        self._session_tabs: dict[str, str] = {}
 
     def revoke(self) -> None:
         """SP-013：kill switch 撤销（ADR-004）——此后一切 evaluate 拒绝。"""
@@ -171,8 +177,10 @@ class E2EBroker:
         if action.expires_at is not None:
             expires = _parse_expires_at(action.expires_at)
             now = time.time()
-            if expires is None or expires.timestamp() < now:
-                return Decision.DENY_EXPIRED  # 已过；解析失败同拒（fail-closed）
+            # PY-237（2026-10-01 审计）：过期边界与 update_verifier 对齐（<=）——
+            # expires 恰等于 now 即过期（此前 e2e 用 < 留出 1 瞬窗口，两套口径）
+            if expires is None or expires.timestamp() <= now:
+                return Decision.DENY_EXPIRED  # 已过（含恰好到期）；解析失败同拒（fail-closed）
             if expires.timestamp() - now > self.max_ttl:
                 return Decision.DENY_MAX_TTL  # SP-157：TTL 超上限——超长授权拒绝
         # SP-159：显式 "" policy_version 不再回退 broker 默认（falsy 吞没消除）
@@ -185,6 +193,13 @@ class E2EBroker:
             return Decision.DENY_SCOPE
         if action.document_generation != self.current_generation:
             return Decision.DENY_GENERATION  # SP-158：与 broker 当前代际比对（可推进）
+        # PY-252：per-session tab 绑定——session 首笔固定绑定 tab_id，
+        # 同 session 换 tab_id 即拒（session.md「跨标签变化使批准失效」落地）
+        bound_tab = self._session_tabs.get(action.session_id)
+        if bound_tab is None:
+            self._session_tabs[action.session_id] = action.tab_id
+        elif bound_tab != action.tab_id:
+            return Decision.DENY_TAB
         if self.revoked:
             return Decision.DENY_REVOKED
         if action.canonical_parameters is None:
@@ -438,6 +453,42 @@ def test_expiry_enforced():
         nonce="e2", expires_at=(now + timedelta(seconds=10)).isoformat())) == Decision.ALLOW
     assert broker.evaluate(_ok(nonce="e3", expires_at=None)) == Decision.ALLOW  # 不过期显式
     assert broker.evaluate(_ok(nonce="e4", expires_at="not-a-timestamp")) == Decision.DENY_EXPIRED
+
+
+def test_expiry_boundary_inclusive_denied():
+    """PY-237（2026-10-01 审计）：expires_at 恰等于 now 即过期——与
+    update_verifier 的 <= 口径对齐（此前 e2e 用 < 留出同瞬放行窗口，
+    发布链验证器与 e2e 模拟面边界分叉）。"""
+    import time as _time
+    broker = E2EBroker()
+    frozen = datetime(2030, 1, 1, tzinfo=UTC)
+    original = _time.time
+    try:
+        _time.time = lambda: frozen.timestamp()
+        assert broker.evaluate(_ok(
+            nonce="eq1", expires_at=frozen.isoformat())) == Decision.DENY_EXPIRED
+        one_ns_later = frozen + timedelta(microseconds=1)
+        assert broker.evaluate(_ok(
+            nonce="eq2", expires_at=one_ns_later.isoformat())) == Decision.ALLOW
+    finally:
+        _time.time = original
+
+
+def test_session_tab_binding_enforced():
+    """PY-252（2026-10-01 审计）：session 绑定 tab_id——同 session 首笔固定
+    绑定，换 tab_id 即 DENY_TAB（session.md 声称的跨标签失效语义落地——
+    此前模拟面只比对代际，窄于文档）。"""
+    broker = E2EBroker()
+    assert broker.evaluate(_ok(nonce="t1", tab_id="tab-1")) == Decision.ALLOW
+    # 同 session 换 tab：拒绝（跨标签重放/劫持面）
+    assert broker.evaluate(_ok(nonce="t2", tab_id="tab-2")) == Decision.DENY_TAB
+    # 原 tab 继续：放行（绑定未失效）
+    assert broker.evaluate(_ok(nonce="t3", tab_id="tab-1")) == Decision.ALLOW
+    # 不同 session 各自独立绑定同一 tab：互不影响
+    assert broker.evaluate(_ok(nonce="t4", tab_id="tab-1",
+                               session_id="session-b")) == Decision.ALLOW
+    assert broker.evaluate(_ok(nonce="t5", tab_id="tab-9",
+                               session_id="session-b")) == Decision.DENY_TAB
 
 
 def test_max_ttl_enforced():

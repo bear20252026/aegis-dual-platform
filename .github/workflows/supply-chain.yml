@@ -1,6 +1,22 @@
 name: Supply-Chain
 "on":
-  push: {}
+  # SP-200（2026-10-01 审计）：push 补 paths 过滤——此前 push: {} 使 docs 等
+  # 与依赖面无关的改动也全量跑审计。触发面按扫描输入圈定（PR 保持不过滤）
+  push:
+    paths:
+      - 'requirements-ci.in'
+      - 'requirements-ci.txt'
+      # 归档栈两份锁/需求（pip-audit 扫描输入）
+      - 'legacy/windows-pywebview/requirements-lock.txt'
+      - 'legacy/windows-pywebview/requirements-dev.txt'
+      # cargo audit / Cargo.lock 面
+      - 'core/rust-policy-core/Cargo.lock'
+      - 'core/rust-policy-core/Cargo.toml'
+      # SBOM 转换器冒烟输入
+      - 'release/tools/generate_sbom/**'
+      - 'contracts/vectors/update-manifest-valid.json'
+      - '.github/workflows/supply-chain.yml'
+      - '.github/actions/cargo-audit/**'
   pull_request: {}
   workflow_dispatch: {}
 
@@ -17,22 +33,32 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v6.0.0 (node24)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (SP-180 更正注记)
         with:
           python-version: '3.12'
+          # SP-201（2026-10-01 审计）：pip 缓存三口径统一（contracts 同批改
+          # setup-python 内建缓存；此前本 workflow 无缓存）——锁文件驱动键
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
       - name: pip-audit (Python 依赖——依赖门禁——失败即阻断)
         # PY-183（2026-09-26 审计）：扫描面此前仅归档栈 requirements-lock——
         # requirements-dev（ruff/bandit/mypy/pytest）与根 requirements-ci
         # （contracts/agent-redteam/supply-chain 工具链，PY-178 建）全在
         # 依赖审计面之外。三份一并对账。
+        # SP-216（2026-10-01 审计）：归档栈 requirements-lock 从硬门禁降为
+        # 告警——该栈是只读冻结（ADR-009 D4），新 CVE 只会随上游时间累积，
+        # 硬门禁将永久阻断 push、逼人对只读归档做"修复"（纪律破坏面大于
+        # 风险面——归档栈不随制品发布）。活越树 requirements-ci.txt 保持
+        # 硬门禁（工具链在制品链内）。dev 锁维持 PY-183 的告警口径。
         run: |
           # PY-178 完整化：审计工具自身经 requirements-ci.txt hash 锁定安装
           python -m pip install --require-hashes -r requirements-ci.txt -q
-          pip-audit -r legacy/windows-pywebview/requirements-lock.txt
+          pip-audit -r legacy/windows-pywebview/requirements-lock.txt \
+            || echo "::warning::归档栈 requirements-lock 存在已知漏洞（只读冻结不随制品发布——SP-216 降告警，处置走披露通道评估）"
           pip-audit -r legacy/windows-pywebview/requirements-dev.txt || true  # dev 工具链漏洞仅告警——归档栈工具不随制品发布
           pip-audit -r requirements-ci.txt
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
       # PY-171（2026-09-23 审计·V1 核验批）：安装+执行块收敛为 composite action 单源

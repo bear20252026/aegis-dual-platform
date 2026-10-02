@@ -206,8 +206,11 @@
     <!-- ═══ 分页列表 ═══ -->
     <TextBlock x:Name="EmptyHint" Grid.Row="3" Margin="0,24,0,0" FontSize="14"
                Foreground="{DynamicResource TextMutedBrush}" HorizontalAlignment="Center"/>
+    <!-- CS-343（2026-10-01 审计）：补 AlternationCount——行模板的分隔线
+         DataTrigger 绑 AlternationIndex==0（首行不画线），但列表未设
+         AlternationCount 时 AlternationIndex 恒 0 → 分隔线永不显示 -->
     <ListBox x:Name="HistoryList" AutomationProperties.Name="历史记录列表" Grid.Row="3" Margin="0,16,0,0" Background="Transparent"
-             BorderThickness="0"
+             BorderThickness="0" AlternationCount="100000"
              ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto"
              VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
              Focusable="False"/>

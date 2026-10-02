@@ -25,8 +25,11 @@ public sealed class HistoryStore
     // CS-319（2026-09-26 审计）：库层统一长度上限——BookmarkImporter 有
     // 2048/256 上限而手写路径（Star_Click 直 Add）无上限可写入任意长串；
     // 与导入口径锁定（代理对安全截断）
-    internal const int MaxUrlChars = 2048;
-    internal const int MaxTitleChars = 256;
+    // CS-369（2026-10-01 审计）：常量与截断实现单源化到 Core.TextLimits
+    //（此前与 BookmarkImporter/BookmarkManagerWindow 三处独立维护）；
+    // 本处保留同义转发（既有测试引用 HistoryStore.MaxUrlChars/ClampText）
+    internal const int MaxUrlChars = TextLimits.MaxUrlChars;
+    internal const int MaxTitleChars = TextLimits.MaxTitleChars;
 
     private static readonly ConcurrentDictionary<string, byte> InitializedDbs = new(StringComparer.OrdinalIgnoreCase);
     // CS-091：双检锁宿主换成独立锁对象——锁 ConcurrentDictionary 实例与其
@@ -98,16 +101,9 @@ public sealed class HistoryStore
     private static int ClampLimit(int limit) => Math.Max(1, limit);
 
     /// <summary>CS-319：代理对安全截断（emoji 等增补平面字符不劈成孤立代理）。
-    /// 提 internal 供直测。</summary>
-    internal static string ClampText(string text, int maxChars)
-    {
-        if (text.Length <= maxChars)
-            return text;
-        var cut = maxChars;
-        if (char.IsHighSurrogate(text[cut - 1]))
-            cut--;
-        return text[..cut];
-    }
+    /// 提 internal 供直测；CS-369 起实现单源在 Core.TextLimits.Clamp。</summary>
+    internal static string ClampText(string text, int maxChars) =>
+        TextLimits.Clamp(text, maxChars);
 
     /// <summary>最近访问（时间倒序）。
     /// CS-301（2026-09-26 审计）：补 id 决胜列——分页查询均有 ", id DESC" 而

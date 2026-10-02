@@ -39,25 +39,29 @@ pub fn glob_match(pattern: &str, text: &str, flat: bool) -> bool {
             pattern.as_bytes(),
             text.as_bytes(),
             &b'*',
-            Some(&b'?'),
-            Some(&b'/'),
+            &b'?',
+            &b'/',
             flat,
         );
     }
     let pat: Vec<char> = pattern.chars().collect();
     let txt: Vec<char> = text.chars().collect();
-    run_match(&pat, &txt, &'*', Some(&'?'), Some(&'/'), flat)
+    run_match(&pat, &txt, &'*', &'?', &'/', flat)
 }
 
 /// RS-063：字节/字符双形态共用的迭代 DP（RS-015 自底向上，语义不变）。
 /// `star`/`question`/`slash` 为语法字符占位（两种形态分别传字节/字符），
 /// 字面匹配即 PartialEq 比较。
+///
+/// RS-263（2026-10-01 审计）：`question`/`slash` 死 Option 收敛——两调用点
+/// （ASCII 字节路径 / Unicode 字符路径）恒传 Some，`is_some`/`is_none` 分支
+/// 是永不可达的死代码；改直传 `&T`。
 fn run_match<T: PartialEq>(
     pat: &[T],
     txt: &[T],
     star: &T,
-    question: Option<&T>,
-    slash: Option<&T>,
+    question: &T,
+    slash: &T,
     flat: bool,
 ) -> bool {
     // 乘积上限：两侧同时接近 16K 时缓冲达 (16385)²≈256MiB——单条恶意
@@ -82,19 +86,17 @@ fn run_match<T: PartialEq>(
         } else {
             pi
         };
-        let is_question = question.is_some_and(|q| pat[pi] == *q);
+        let is_question = pat[pi] == *question;
         let spans_slash = flat || end - pi >= 2;
         // ti 降序：星号「吃一个字符」转移依赖同行星号行的 ti+1
         for ti in (0..width).rev() {
             let ok = if is_star {
                 dp[end * width + ti]
                     || (ti < txt.len()
-                        && (spans_slash || slash.is_none_or(|s| txt[ti] != *s))
+                        && (spans_slash || txt[ti] != *slash)
                         && dp[pi * width + ti + 1])
             } else if is_question {
-                ti < txt.len()
-                    && (flat || slash.is_none_or(|s| txt[ti] != *s))
-                    && dp[(pi + 1) * width + ti + 1]
+                ti < txt.len() && (flat || txt[ti] != *slash) && dp[(pi + 1) * width + ti + 1]
             } else {
                 ti < txt.len() && txt[ti] == pat[pi] && dp[(pi + 1) * width + ti + 1]
             };

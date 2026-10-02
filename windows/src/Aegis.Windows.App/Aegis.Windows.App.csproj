@@ -8,13 +8,19 @@
     <AssemblyName>Aegis.Windows.App</AssemblyName>
     <RootNamespace>Aegis.Windows</RootNamespace>
     <StartupObject>Aegis.Windows.Program</StartupObject>
-    <Version>2.2.0-beta.50</Version>
-    <AssemblyVersion>2.2.0.50</AssemblyVersion>
-    <FileVersion>2.2.0.50</FileVersion>
+    <Version>2.2.0-beta.51</Version>
+    <AssemblyVersion>2.2.0.51</AssemblyVersion>
+    <FileVersion>2.2.0.51</FileVersion>
     <PackageId>Aegis.Project.AegisWebView</PackageId>
     <Product>Aegis WebView</Product>
     <RequireNativePolicyCore Condition="'$(RequireNativePolicyCore)' == ''">false</RequireNativePolicyCore>
     <NativePolicyCorePath Condition="'$(NativePolicyCorePath)' == ''"></NativePolicyCorePath>
+    <!-- SP-177（2026-10-01 审计）：NuGet 锁文件——锁定直接+传递依赖可审计
+         （CONTRIBUTING/SECURITY 此前声称有锁文件而全仓无一处生成）。
+         packages.lock.json 随仓库提交；CI restore 的 locked-mode 由发布链接线 -->
+    <!-- SP-220：锁含 RID（win-x64）——restore/build/test 必须带 -r win-x64 与锁一致，
+         否则 locked-mode 报 NU1004；无 -r 的裸 restore 会把锁改写回无 RID 形态 -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <Target Name="ValidateNativePolicyCore" BeforeTargets="PrepareForBuild"
           Condition="'$(RequireNativePolicyCore)' == 'true'">

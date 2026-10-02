@@ -73,8 +73,10 @@ public static class WindowTheme
             var on = dark ? 1 : 0;
             _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref on, sizeof(int));
         }
-        catch (Exception _)
+        catch (Exception)
         {
+            // CS-374（2026-10-01 审计）：`catch (Exception _)` 触发 CS0168——
+            // 弃元须裸 catch(Exception) 才不占变量名（0 警告基线回归）
             // 旧 Windows / 句柄未建——标题栏保持系统默认，不影响功能
         }
     }

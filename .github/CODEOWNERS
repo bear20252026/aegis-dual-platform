@@ -1,0 +1,40 @@
+# CODEOWNERS —— SP-207（2026-10-01 审计）：安全敏感路径强制评审。
+# 此前全仓无 CODEOWNERS——任何分支保护配置都无法对安全敏感目录强制
+# 指定评审人。按信任边界分层：策略核心/契约/发布链/CI 门禁为最高敏感，
+# 双端实现次之，文档最低。
+# 注意：本文件生效需分支保护规则启用 "Require review from Code Owners"；
+# 未启用前作为评审引导清单（PR 自动推荐 reviewer）。
+# 所有者：当前唯一维护者 @bear20252026（团队规模化后按端拆分再分层）。
+
+# —— 最高敏感：策略裁决与安全契约 ——
+# Rust 策略核心（唯一裁决源——ADR-008，无 I/O 纯函数）
+/core/rust-policy-core/    @bear20252026
+# 跨端冻结契约与生成器（行为单源）
+/contracts/                @bear20252026
+# 双端单源（version.properties / release.json / 首页资产与守卫）
+/shared/                   @bear20252026
+
+# —— 发布链与供应链 ——
+# 发布链验证工具（checksum/attestation/manifest——fail-closed 面）
+/release/                  @bear20252026
+# CI 门禁与 composite actions（门禁定义即安全边界）
+/.github/                  @bear20252026
+# 根级工具链 hash 锁（供应链单源）
+/requirements-ci.in        @bear20252026
+/requirements-ci.txt       @bear20252026
+/pyproject.toml            @bear20252026
+/bandit.yaml               @bear20252026
+/validate_release.py       @bear20252026
+
+# —— 双端正典实现 ——
+/windows/                  @bear20252026
+/android/                  @bear20252026
+
+# —— Agent 复开面（红队测试敏感） ——
+/agent/                    @bear20252026
+
+# —— 脚本（构建/验证工具链） ——
+/scripts/                  @bear20252026
+
+# —— 兜底：全仓默认 ——
+*                         @bear20252026

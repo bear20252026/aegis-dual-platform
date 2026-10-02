@@ -12,6 +12,14 @@
    - `cosign sign-blob --key <key> --output-signature <f>.sig --output-certificate <f>.cert <f>`
    - SBOM 分离签名 + `sha256sum` 生成 SHA256SUMS
 
+> **PY-229（2026-10-01 审计）cosign 轨道口径更正**：上方第 2 步与第二节
+> 第 0/4 步的 cosign 命令是**预备（planned）步骤，当前未接线**——现役签名
+> 与溯源走 GitHub artifact attestations（Sigstore 背书）：release.yml 构建
+> 产出 attestation，verify-gate 以 `gh attestation verify` 逐工件校验
+> （见第二节第 3 步与 signing-policy.yaml 的 SP-147 口径——`planned_signing_tool:
+> cosign`）。在 cosign 轨道实际接线前，发布不得以"已执行第 2 步"为由
+> 声称密钥轨道签名完成；上列命令保留为启用时的承载参考。
+
 > **SP-136（审计 2026-09-23 清单·SP1 批）签名双轨说明**：上面是**密钥轨道**
 > （key-based cosign sign-blob——签 `.sig`/`.cert` 分离文件，适用于本地
 > 发布验签）；**keyless 轨道**由 GitHub Actions OIDC 承担——workflow 内
@@ -23,6 +31,7 @@
 
 ```bash
 # 0) 制品签名验证（cosign verify-blob——对应第一节密钥轨道签名，SP-032 补）
+#    【PY-229：planned——cosign 轨道未接线前本步骤不执行（见第一节更正块）】
 cosign verify-blob --key <key.pub> --signature <f>.sig --certificate <f>.cert <f>
 
 # 1) 更新清单验证（签名阈值/防回滚/过期——P0-04 契约统一；min_version 传
@@ -36,6 +45,8 @@ release/tools/verify_artifact_set/verify_artifact_set.py dist <manifest.json>
 release/tools/verify_provenance/verify_provenance.py dist <owner> <signer_workflow>
 
 # 4) SBOM 签名验证（SBOM 与制品同一密钥轨道——SP-033 补承载命令）
+#    【PY-229：planned——cosign 轨道未接线前本步骤不执行；SBOM 完整性现役
+#     由 SHA256SUMS 摘要对账 + attestation SBOM predicate 覆盖】
 cosign verify-blob --key <key.pub> --signature <sbom.cdx.json>.sig <sbom.cdx.json>
 ```
 

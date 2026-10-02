@@ -64,11 +64,15 @@ public static class UrlSafety
         // TryParse 失败时绝不可落到"公网主机名"兜底放行（链路本地逃逸面）
         if (normalized.Contains('%') || normalized.Contains('[') || normalized.Contains(']'))
             return false;
-        // CS-307（2026-09-26 审计）：前导零八进制 IPv4（"0177.0.0.1"）——
-        // .NET TryParse 按十进制解释为 177.0.0.1（判公网放行），而 OS 解析
-        // 栈按八进制解释为 127.0.0.1（回环）——双重解释逃逸面。必须在
-        // TryParse 之前拦截，按八进制语义解析后再走 IP 判定；不可解析的
-        // 畸形数字段按非公网 fail-closed
+        // CS-307（2026-09-26 审计）：前导零八进制 IPv4（"0177.0.0.1"）。
+        // CS-348（2026-10-01 审计·确定性实验统一口径）：.NET 10 实测
+        // IPAddress.TryParse("0177.0.0.1") 与 Uri.TryCreate 均按 inet_aton
+        // 八进制语义归一为 127.0.0.1（此前本注释称"按十进制解释为 177.0.0.1
+        // 判公网放行"——与实验不符，OriginPolicy.cs 侧注释才是对的）。
+        // 两防线分工：本层（公网判定）TryParseOctalIpv4 显式先行仍保留——
+        // IPAddress 对八进制形态的解释是平台/版本敏感到实现细节，防御纵深
+        // 不依赖它；OriginPolicy（导航白名单）对 raw authority 前置同判。
+        // 不可解析的畸形数字段按非公网 fail-closed
         if (TryParseOctalIpv4(normalized, out var octalAddress))
             return IsPublicIp(octalAddress);
         if (IPAddress.TryParse(normalized, out var address))
@@ -258,6 +262,38 @@ public static class UrlSafety
             LocalHostCache.Clear();
         return isLocal;
     }
+
+    /// <summary>CS-339（2026-10-01 审计）：只读缓存探测——绝不发起同步 DNS。
+    /// 帧导航路径此前缓存未命中即在 UI 线程逐帧同步解析（恶意页嵌多个不可解析
+    /// http iframe 即逐帧冻结 UI）。命中显式本机名/回环 IP 或既有缓存返回 true
+    /// 并给出判定；未知返回 false——调用方须 fail-closed 取消并自行后台预热。</summary>
+    public static bool TryGetCachedLocalHost(string host, out bool isLocal)
+    {
+        isLocal = false;
+        var normalized = host.TrimEnd('.').ToLowerInvariant();
+        if (normalized.Equals("localhost", StringComparison.Ordinal)
+            || normalized.EndsWith(".localhost", StringComparison.Ordinal))
+        {
+            isLocal = true;
+            return true;
+        }
+        if (IPAddress.TryParse(normalized, out var ip))
+        {
+            isLocal = IsLocalIp(ip);
+            return true;
+        }
+        if (LocalHostCache.TryGetValue(normalized, out var entry)
+            && Environment.TickCount64 - entry.StampMs < (long)LocalHostCacheTtl.TotalMilliseconds)
+        {
+            isLocal = entry.IsLocal;
+            return true;
+        }
+        return false;  // 未命中——不同步解析（调用方 fail-closed + 后台预热）
+    }
+
+    /// <summary>CS-339 测试缝：预置 DNS 缓存（单测避免真实解析的时延/环境漂移）。</summary>
+    internal static void SeedLocalHostCacheForTests(string host, bool isLocal) =>
+        LocalHostCache[host.TrimEnd('.').ToLowerInvariant()] = (isLocal, Environment.TickCount64);
 
     private static bool IsLocalIp(IPAddress address) =>
         address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any)

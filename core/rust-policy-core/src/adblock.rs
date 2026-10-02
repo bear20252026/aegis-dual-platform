@@ -10,6 +10,12 @@
 use std::collections::HashSet;
 
 /// 广告拦截提供者（照搬 Omni Browser AdBlockProvider）。
+///
+/// RS-265（2026-10-01 审计）：`rule_count`/`last_updated` 字段已删除——
+/// 此前恒为 0 且 core 无任何回写路径（filter list 的下载/解析/计数是宿主
+/// 职责，core 只消费 `load_blocked_domains` 注入的归一化 host 集），
+/// 常驻的假数据只会让 UI 展示面失真。宿主需要展示规则数/更新时间时在
+/// 自己的下载层维护（单一事实源），不得在此重新声明。
 #[derive(Debug, Clone)]
 pub struct AdBlockProvider {
     pub id: String,
@@ -17,8 +23,6 @@ pub struct AdBlockProvider {
     pub url: String,
     pub is_preset: bool,
     pub is_enabled: bool,
-    pub rule_count: usize,
-    pub last_updated: u64,
 }
 
 /// 广告/追踪拦截管理器（照搬 Omni Browser AdBlockManager）。
@@ -46,8 +50,6 @@ impl AdBlockManager {
                 url: "https://easylist.to/easylist/easylist.txt".into(),
                 is_preset: true,
                 is_enabled: true,
-                rule_count: 0,
-                last_updated: 0,
             },
             AdBlockProvider {
                 id: "adguard_base".into(),
@@ -55,8 +57,6 @@ impl AdBlockManager {
                 url: "https://filters.adtidy.org/extension/ublock/filters/2.txt".into(),
                 is_preset: true,
                 is_enabled: true,
-                rule_count: 0,
-                last_updated: 0,
             },
             AdBlockProvider {
                 id: "adguard_anti_adblock".into(),
@@ -64,8 +64,6 @@ impl AdBlockManager {
                 url: "https://filters.adtidy.org/extension/ublock/filters/14.txt".into(),
                 is_preset: true,
                 is_enabled: true,
-                rule_count: 0,
-                last_updated: 0,
             },
             AdBlockProvider {
                 id: "peter_lowe".into(),
@@ -73,8 +71,6 @@ impl AdBlockManager {
                 url: "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&showintro=0&mimetype=plaintext".into(),
                 is_preset: true,
                 is_enabled: true,
-                rule_count: 0,
-                last_updated: 0,
             },
             AdBlockProvider {
                 id: "fanboy_social".into(),
@@ -82,8 +78,6 @@ impl AdBlockManager {
                 url: "https://easylist.to/easylist/fanboy-social.txt".into(),
                 is_preset: true,
                 is_enabled: true,
-                rule_count: 0,
-                last_updated: 0,
             },
         ]
     }

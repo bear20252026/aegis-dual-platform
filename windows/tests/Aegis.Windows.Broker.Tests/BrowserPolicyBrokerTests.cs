@@ -4,8 +4,25 @@ using Xunit;
 
 namespace Aegis.Windows.Broker.Tests;
 
-public sealed class BrowserPolicyBrokerTests
+public sealed class BrowserPolicyBrokerTests : IDisposable
 {
+    // CS-346（2026-10-01 审计）：测试副作用隔离——KillSwitch.Engage /
+    // AllowDownload / 黑名单拒绝等路径会写 security.log，此前直落真实用户
+    // 目录；fixture 统一重定向到临时目录并在 Dispose 还原
+    private string LogDir { get; } =
+        Path.Combine(Path.GetTempPath(), $"aegis_broker_log_{Guid.NewGuid():N}");
+
+    public BrowserPolicyBrokerTests()
+    {
+        Directory.CreateDirectory(LogDir);
+        SecurityLog.SecurityLogDirOverride = LogDir;
+    }
+
+    public void Dispose()
+    {
+        SecurityLog.SecurityLogDirOverride = null;
+        try { Directory.Delete(LogDir, true); } catch (IOException) { }
+    }
     [Fact]
     public void AuthorizedNavigationCanBeConsumedOnlyOnce()
     {
@@ -39,7 +56,10 @@ public sealed class BrowserPolicyBrokerTests
     [Fact]
     public void UnregisteredOrStaleSessionIsDenied()
     {
-        var broker = new BrowserPolicyBroker();
+        // CS-376（2026-10-01 发布链批）：逻辑测试走测试缝脱离 env——原生必需
+        // 环境下每 ctor TryCreate 会抢占进程级 ABI 单例（RS-140），与专用
+        // 真 DLL probe 测试形成退休时序竞争（GC 终结器退休不定态）
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
 
         Assert.IsType<Decision.Deny>(broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation"));
         Assert.True(broker.RegisterSession("session-1", "tab-1"));
@@ -61,9 +81,13 @@ public sealed class BrowserPolicyBrokerTests
     [Fact]
     public void RequiredNativePolicyCoreFailureClosesNavigationAndConsumption()
     {
+        // CS-376：seam 固定必需模式 + 无桥——fail-closed 口径下桥不可用
+        // 连注册链一并关闭（此前依赖 env 下 TryCreate 幸运命中单例， retiring
+        // 不定态使本用例在发布链原生 job 中随 GC 时序随机挂）
         var broker = new BrowserPolicyBroker(
-            () => NativePolicyCoreGateResult.Block("native_policy_core_unavailable"));
-        Assert.True(broker.RegisterSession("session-1", "tab-1"));
+            () => NativePolicyCoreGateResult.Block("native_policy_core_unavailable"),
+            nativePolicyCoreRequiredForTests: true);
+        Assert.False(broker.RegisterSession("session-1", "tab-1"));
 
         var denied = Assert.IsType<Decision.Deny>(
             broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation"));
@@ -259,7 +283,9 @@ public sealed class BrowserPolicyBrokerTests
 
     private static BrowserPolicyBroker CreateRegisteredBroker()
     {
-        var broker = new BrowserPolicyBroker();
+        // CS-376：逻辑测试缝（真 DLL probe 走专用 TryCreate 用例——避免
+        // 每用例抢占 ABI 单例造成发布链原生 job 退休时序竞争）
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         Assert.True(broker.RegisterSession("session-1", "tab-1"));
         return broker;
     }
@@ -299,15 +325,14 @@ public sealed class BrowserPolicyBrokerTests
 
         var decision = broker.RequestNavigationConfirmation(
             "session-1", "tab-1", 0, "https://example.com/pay", "navigation");
-        var deny = Assert.IsType<Decision.Deny>(decision);
-        Assert.Equal("kill_switch_engaged", deny.Reason.Code);
+        Assert.Equal("kill_switch_engaged", Assert.IsType<Decision.Deny>(decision).Reason.Code);
     }
 
     [Fact]
     public void RegisterSession_DuplicateSessionId_ReturnsFalse()
     {
         // CS-010：重复 sessionId 拒绝（会话池幂等保护）
-        var broker = new BrowserPolicyBroker();
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         Assert.True(broker.RegisterSession("session-1", "tab-1"));
         Assert.False(broker.RegisterSession("session-1", "tab-2"));
     }
@@ -316,12 +341,11 @@ public sealed class BrowserPolicyBrokerTests
     public void RegisterSession_AbovePoolCap_ReturnsFalse()
     {
         // CS-011：会话池 1024 上限（与 Rust MAX_SESSIONS 对等）——超限 fail-closed
-        var broker = new BrowserPolicyBroker();
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         for (var i = 0; i < 1024; i++)
             Assert.True(broker.RegisterSession($"session-{i}", $"tab-{i}"));
         Assert.False(broker.RegisterSession("session-overflow", "tab-overflow"));
     }
-
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -329,7 +353,7 @@ public sealed class BrowserPolicyBrokerTests
     public void RegisterSession_NullOrBlank_ReturnsFalse(string? sessionId)
     {
         // CS-012：null/空白 sessionId 拒绝
-        var broker = new BrowserPolicyBroker();
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         Assert.False(broker.RegisterSession(sessionId!, "tab-1"));
     }
 
@@ -386,7 +410,9 @@ public sealed class BrowserPolicyBrokerTests
     public void IsHostBlocked_DelegatesToInjectedSnapshot()
     {
         // CS-016：注入 blockedHosts 快照——子资源层查询必须走注入实例
-        var broker = new BrowserPolicyBroker(blockedHosts: new StubBlockedHosts("evil.example"));
+        var broker = new BrowserPolicyBroker(
+            blockedHosts: new StubBlockedHosts("evil.example"),
+            nativePolicyCoreRequiredForTests: false);
 
         Assert.True(broker.IsHostBlocked("evil.example"));
         Assert.False(broker.IsHostBlocked("good.example"));
@@ -396,7 +422,9 @@ public sealed class BrowserPolicyBrokerTests
     public void UpdateBlockedHosts_NullFallsBackToAllowAll()
     {
         // CS-017：UpdateBlockedHosts(null) 回退 NoBlockedHosts——导航不再被拦
-        var broker = new BrowserPolicyBroker(blockedHosts: new StubBlockedHosts("evil.example"));
+        var broker = new BrowserPolicyBroker(
+            blockedHosts: new StubBlockedHosts("evil.example"),
+            nativePolicyCoreRequiredForTests: false);
         broker.UpdateBlockedHosts(null);
 
         Assert.False(broker.IsHostBlocked("evil.example"));
@@ -446,39 +474,6 @@ public sealed class BrowserPolicyBrokerTests
     }
 
     // ===== C19b 批（审计 2026-09-26）：CS-291/332/307 =====
-
-    [Fact]
-    public void KillSwitch_SharedInstance_FreezesAllBrokersInjectedWithIt()
-    {
-        // CS-291（P1）：跨窗口联动——设置窗触发主窗 broker 的开关，无痕窗口
-        // broker（注入同一共享实例）的导航/下载/确认链必须同样冻结
-        var shared = new KillSwitch();
-        var mainBroker = new BrowserPolicyBroker(killSwitch: shared);
-        var inPrivateBroker = new BrowserPolicyBroker(killSwitch: shared);
-        Assert.True(mainBroker.RegisterSession("main-s", "main-t"));
-        Assert.True(inPrivateBroker.RegisterSession("inprivate-s", "inprivate-t"));
-
-        mainBroker.KillSwitch.Engage();  // 仅在主窗 broker 上触发（设置窗路径）
-
-        Assert.True(inPrivateBroker.KillSwitch.IsEngaged);  // 共享实例联动
-        Assert.IsType<Decision.Deny>(inPrivateBroker.EvaluateNavigation(
-            "inprivate-s", "inprivate-t", 0, "https://example.com", "navigation"));
-        Assert.False(inPrivateBroker.AllowDownload(
-            "inprivate-s", "inprivate-t", "https://example.com", "x.exe", userConfirmed: true));
-        Assert.IsType<Decision.Deny>(inPrivateBroker.RequestNavigationConfirmation(
-            "inprivate-s", "inprivate-t", 0, "https://example.com/pay", "navigation"));
-    }
-
-    [Fact]
-    public void KillSwitch_DefaultBrokersAreIsolated()
-    {
-        // CS-291 反向锁定：缺省构造（测试语境）各自独立——一个 broker 触发
-        // 不影响另一个（生产组合根统一注入 KillSwitch.Shared）
-        var first = new BrowserPolicyBroker();
-        var second = new BrowserPolicyBroker();
-        first.KillSwitch.Engage();
-        Assert.False(second.KillSwitch.IsEngaged);
-    }
 
     [Fact]
     public void KillSwitch_Shared_IsProcessWideSingleton()

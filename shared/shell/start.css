@@ -50,7 +50,10 @@
   .search input {
     flex:1; border:0; outline:0; font-size:16px; background:transparent; color:#111;
   }
-  .search input::placeholder { color:#9aa1ad; }
+  /* WB-143（2026-10-01 审计）：placeholder 对比度——#9aa1ad 于白色胶囊上
+     实测 2.9:1（< AA 4.5:1）；#6e747f 相对亮度 0.173 → 4.70:1（AA 通过，
+     白底最坏情形；WCAG 相对亮度公式） */
+  .search input::placeholder { color:#6e747f; }
   .search input[type=search] { -webkit-appearance:none; }
   /* form 打断外层 flex——form 自身承担 flex 行（input+button 同行） */
   #searchForm {
@@ -213,7 +216,9 @@
     .logo { width:48px; height:48px; border-radius:14px; font-size:20px; margin-bottom:16px; }
     h1 { font-size:20px; margin-bottom:22px; letter-spacing:2px; }
     .search { width:100%; height:52px; border-radius:26px; padding:0 5px 0 6px; }
-    .search input { font-size:15px; }
+    /* WB-144（2026-10-01 审计）：15px → 16px——移动端 WebKit/iOS 对
+       <16px 的输入框聚焦时自动放大整页（跳变），16px 恰在阈值之上 */
+    .search input { font-size:16px; }
     .search button { height:42px; padding:0 18px; font-size:13px; flex:0 0 auto; letter-spacing:1px; }
     .quick-row { width:100%; margin-top:12px; }
     .quick-btn { width:auto; justify-content:center; height:30px; font-size:12px; padding:0 10px; }
@@ -227,6 +232,11 @@
   /* 触摸目标保底（移动端可用性） */
   @media (pointer: coarse) {
     .wp, .quick-btn, .search button, .engine-pill { min-height:40px; }
+    /* WB-142（2026-10-01 审计）：触控目标保底补齐——.link-btn（导入入口）
+       与 .snake-sound/.snake-close（30×30 圆钮）此前 <44px，低于
+       WCAG 2.5.5 / 平台 44×44 建议 */
+    .link-btn { min-height:44px; }
+    .snake-sound, .snake-close { min-height:44px; min-width:44px; }
   }
 
   /* —— 返回按钮 —— */
@@ -339,4 +349,32 @@
     }
     .wp:hover, .bm:hover, .veil-btn:hover, .veil-btn:active, .quick-btn:active { transform: none; }
     .snake-head .chip b.pop { animation: none; }
+  }
+
+  /* ═══ WB-141（2026-10-01 审计）：forced-colors（Windows 高对比等强制
+     配色模式）——此前全文件 0 处规则，半透明玻璃背景/backdrop-filter 与
+     近白前景在高对比模式互相压对比。交还系统配色：文本/边框用系统色，
+     容器去半透明底，控件用 ButtonFace/ButtonText 标准对（不强制
+     forced-color-adjust:none——让 UA 按需微调） ═══ */
+  @media (forced-colors: active) {
+    body { color: CanvasText; }
+    h1, .footer, .wp-label, .bm-name, .bm-empty, .snake-foot { color: CanvasText; text-shadow: none; }
+    .logo, .bm-ico, .im-card, .engine-menu, .snake-panel {
+      background: Canvas; color: CanvasText;
+      border: 1px solid CanvasText; backdrop-filter: none;
+    }
+    .search { background: Canvas; border: 1px solid CanvasText; backdrop-filter: none; }
+    .search input, .search input::placeholder { color: CanvasText; }
+    .search button, .restore-btn, .quick-btn, .veil-btn, .engine-pill {
+      background: ButtonFace; color: ButtonText;
+      border: 1px solid ButtonText;
+    }
+    .link-btn { background: transparent; color: LinkText; }
+    .engine-item, .engine-item.active { color: CanvasText; }
+    .engine-item.active .mark { color: Highlight; }
+    .snake-sound, .snake-close { background: ButtonFace; color: ButtonText; border: 1px solid ButtonText; }
+    .snake-head .title, .veil-title, .veil-sub { color: CanvasText; text-shadow: none; }
+    .wp { border: 2px solid ButtonText; }
+    .wp.active { border-color: Highlight; }
+    #wallpaper::after { background: none; }
   }

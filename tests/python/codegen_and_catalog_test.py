@@ -21,13 +21,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import analyze_action_catalog as aac
+import generate_csharp as gcs
+import generate_kotlin as gkt
 import pytest
+import verify_bridge_guard as vbg
+from verify_contract_compatibility import (
+    contract_name as contract_name_compat,
+)
 
-import analyze_action_catalog as aac  # noqa: E402
-import generate_csharp as gcs  # noqa: E402
-import generate_kotlin as gkt  # noqa: E402
-import verify_bridge_guard as vbg  # noqa: E402
-from verify_contract_compatibility import contract_name as contract_name_compat  # noqa: E402
 
 # ---------------------------------------------------------------- PY-125
 class TestCsType:
@@ -62,9 +64,9 @@ SCHEMA = {
 class TestGenerateCSharp:
     def test_snapshot(self):
         # PY-126：快照断言——必选在前、可选默认 null、无尾逗号（C# 语法）
+        # PY-248：using 条件输出——本 schema 无数组属性，不再注入未用 using
         assert gcs.generate(SCHEMA, "Demo") == (
             "// 由 contracts/codegen/generate_csharp.py 生成（蓝图阶段 B——契约事实来源——请勿手工编辑）\n"
-            "using System.Collections.Generic;\n"
             "namespace Aegis.Windows.Contracts.Generated;\n"
             "\n"
             "public sealed record Demo(\n"
@@ -73,6 +75,65 @@ class TestGenerateCSharp:
             "    string? note = null\n"
             ");"
         )
+
+
+# ---------------------------------------------------------------- PY-243/248
+ARRAY_SCHEMA = {
+    "required": ["id", "items"],
+    "properties": {
+        "id": {"type": "string"},
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                    "name": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["a", "b"]},
+                    "note": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+
+class TestNestedArrayModels:
+    """PY-243：数组 items(object+properties) 生成嵌套子模型；PY-248：条件 using。"""
+
+    def test_cs_nested_model_and_conditional_using(self):
+        out = gcs.generate(ARRAY_SCHEMA, "Demo")
+        assert "using System.Collections.Generic;" in out  # 有数组属性 → 保留 using
+        assert "List<DemoItem> items" in out  # 强类型化，不再 List<object>
+        assert "public sealed record DemoItem(" in out  # 嵌套 record 同文件
+        assert "string name,\n    string? kind = null,\n    string? note = null\n);" in out  # 必选在前、可选可空
+        assert "public static class DemoItemValues" in out  # 嵌套 enum 亦获锚点
+        assert 'KindA = "a"' in out  # 常量名随属性名（Kind 而非 Platform）
+
+    def test_kt_nested_model_mirrors_cs(self):
+        out = gkt.generate(ARRAY_SCHEMA, "Demo")
+        assert "val items: List<DemoItem>," in out  # 与 C# 同名单源（ident.py）
+        assert "data class DemoItem(" in out
+        assert "object DemoItemValues {" in out
+        assert "const val KIND_A: String = \"a\"" in out
+
+    def test_free_form_object_items_stay_loose(self):
+        # 无 properties 的自由 object 无锚定面——保持原降级行为（向后兼容）
+        schema = {"required": ["xs"],
+                  "properties": {"xs": {"type": "array", "items": {"type": "object"}}}}
+        assert "List<object> xs" in gcs.generate(schema, "Demo")
+        assert "val xs: List<Any>," in gkt.generate(schema, "Demo")
+
+    def test_array_of_object_requires_nested_model(self):
+        # cs_type/kt_type 裸调用缺嵌套类型名即 fail-closed（禁止静默降级回 List<object>）
+        with pytest.raises(ValueError, match="fail-closed"):
+            gcs.cs_type(ARRAY_SCHEMA["properties"]["items"])
+        with pytest.raises(ValueError, match="fail-closed"):
+            gkt.kt_type(ARRAY_SCHEMA["properties"]["items"])
+
+    def test_no_array_no_using(self):
+        # PY-248：无数组属性的四份生成文件不再携带未用 using
+        assert "using System.Collections.Generic;" not in gcs.generate(SCHEMA, "Demo")
 
 
 # ---------------------------------------------------------------- PY-127/131
@@ -237,16 +298,20 @@ class TestBridgeGuardHelpers:
 
 
 # ---------------------------------------------------------------- PY-134
+# PY-236（2026-10-01 审计）：body 行必须真实承载锚点声明的每个 sink——
+# 合成模板补 sink 实现行（与真实 bridge_guard.template.js 同构），
+# 否则新 body 检查正确地拒绝空心化模板。
 CANONICAL_JS = (
     "// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open\n"
     "const HOSTS = __AEGIS_HOSTS__;\n"
     "const REQUIRE_HTTPS = __AEGIS_REQUIRE_HTTPS__;\n"
+    "window.fetch = function (...args) { guard(args); };\n"
     "if (!window.fetch) { XMLHttpRequest.prototype.open; }\n"
 )
 
 
 class TestKotlinPlaceholderNormalizationEndToEnd:
-    def _write_env(self, tmp_path: Path, kt_template: str) -> None:
+    def _write_env(self, tmp_path: Path, monkeypatch, kt_template: str) -> None:
         template = tmp_path / "bridge_guard.template.js"
         template.write_text(CANONICAL_JS, encoding="utf-8")
         rust = tmp_path / "bridge_guard.rs"
@@ -259,37 +324,82 @@ class TestKotlinPlaceholderNormalizationEndToEnd:
             "}\n",
             encoding="utf-8",
         )
-        vbg.CANONICAL = template
-        vbg.RUST = rust
-        vbg.KOTLIN = tmp_path / "WebViewHardening.kt"
+        # PY-231（2026-10-01 审计）：CANONICAL/RUST/KOTLIN 此前直接改模块全局
+        # 不经 monkeypatch——测试泄漏污染同进程后续用例（真实仓库路径被
+        # 覆盖后不还原）。三处统一走 monkeypatch.setattr（自动还原）。
+        monkeypatch.setattr(vbg, "CANONICAL", template)
+        monkeypatch.setattr(vbg, "RUST", rust)
+        monkeypatch.setattr(vbg, "KOTLIN", tmp_path / "WebViewHardening.kt")
 
     KT_OK = (
         "\n// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open\n"
         "const HOSTS = [$allowedHostsJson];\n"
         "const REQUIRE_HTTPS = $requireHttpsJson;\n"
+        "window.fetch = function (...args) { guard(args); };\n"
         "if (!window.fetch) { XMLHttpRequest.prototype.open; }\n"
     )
 
     def test_placeholders_normalized_and_match(self, tmp_path, monkeypatch):
         # PY-134：Kotlin 插值占位符归一化后与规范逐行一致 → 通过
         monkeypatch.setattr(vbg, "failures", [])
-        self._write_env(tmp_path, self.KT_OK)
+        self._write_env(tmp_path, monkeypatch, self.KT_OK)
         assert vbg.main() == 0
 
     def test_unregistered_interpolation_detected(self, tmp_path, monkeypatch):
         # 未登记的新增占位符 $newPh（替换 Kotlin 插值 $requireHttpsJson）→
         # 归一化后残留 $ → 门禁失败（防占位符漏登记）
         monkeypatch.setattr(vbg, "failures", [])
-        self._write_env(tmp_path, self.KT_OK.replace("$requireHttpsJson", "$newPh"))
+        self._write_env(tmp_path, monkeypatch, self.KT_OK.replace("$requireHttpsJson", "$newPh"))
         rc = vbg.main()
         assert rc == 1
         assert any("未登记插值" in f for f in vbg.failures)
 
     def test_drift_pinpointed(self, tmp_path, monkeypatch):
         monkeypatch.setattr(vbg, "failures", [])
-        self._write_env(tmp_path, self.KT_OK + "// extra line\n")
+        self._write_env(tmp_path, monkeypatch, self.KT_OK + "// extra line\n")
         assert vbg.main() == 1
         assert any("不一致" in f for f in vbg.failures)
+
+    def test_hollowed_body_rejected(self, tmp_path, monkeypatch):
+        # PY-236（2026-10-01 审计）：锚点行声明的 sink 此前对 canonical 全文
+        # 查包含——锚点行自身含 sink 名，把 body 实现代码删光（守卫空心化）
+        # 门禁仍绿。现对剔除锚点行后的 body 检查——空心化必须失败。
+        monkeypatch.setattr(vbg, "failures", [])
+        # 模板只剩锚点行 + 占位符声明（无任何 sink 实现代码）
+        hollow = (
+            "// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open\n"
+            "const HOSTS = __AEGIS_HOSTS__;\n"
+            "const REQUIRE_HTTPS = __AEGIS_REQUIRE_HTTPS__;\n"
+        )
+        (tmp_path / "bridge_guard.template.js").write_text(hollow, encoding="utf-8")
+        rust = tmp_path / "bridge_guard.rs"
+        rust.write_text('static SCRIPT: &str = include_str!("bridge_guard.template.js");\n',
+                        encoding="utf-8")
+        kt = tmp_path / "WebViewHardening.kt"
+        kt.write_text(
+            "object H {\n"
+            '    val BRIDGE_GUARD_JS: String\n'
+            '        get() = """\n' + hollow + '""".trimIndent()\n'
+            "}\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(vbg, "CANONICAL", tmp_path / "bridge_guard.template.js")
+        monkeypatch.setattr(vbg, "RUST", rust)
+        monkeypatch.setattr(vbg, "KOTLIN", kt)
+        assert vbg.main() == 1
+        assert any("body 含拦截点" in f for f in vbg.failures)
+
+    def test_module_paths_restored_after_run(self, tmp_path, monkeypatch):
+        # PY-231：模块级路径经 monkeypatch 注入后必须自动还原——
+        # 同进程后续用例不得读到 tmp 覆盖值（测试泄漏回归锚）
+        import contracts.codegen.verify_bridge_guard as fresh
+        before = (vbg.CANONICAL, vbg.RUST, vbg.KOTLIN)
+        monkeypatch.setattr(vbg, "failures", [])
+        self._write_env(tmp_path, monkeypatch, self.KT_OK)
+        assert vbg.main() == 0
+        monkeypatch.undo()
+        assert (vbg.CANONICAL, vbg.RUST, vbg.KOTLIN) == before
+        assert fresh.CANONICAL.is_absolute()
 
 
 # ---------------------------------------------------------------- PY-135..138

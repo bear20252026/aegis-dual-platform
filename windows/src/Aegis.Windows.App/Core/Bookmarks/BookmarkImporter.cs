@@ -14,8 +14,10 @@ using System.Text.Json;
 public static class BookmarkImporter
 {
     private const int MaxDepth = 64;
-    private const int MaxTitleChars = 256;
-    private const int MaxUrlChars = 2048;
+    // CS-369（2026-10-01 审计）：标题/URL 上限单源到 Core.TextLimits——
+    // 此前与 HistoryStore/BookmarkManagerWindow 三处独立维护
+    private const int MaxTitleChars = Aegis.Windows.Core.TextLimits.MaxTitleChars;
+    private const int MaxUrlChars = Aegis.Windows.Core.TextLimits.MaxUrlChars;
 
     /// <summary>标准安装位置探测（Chrome/Edge 的 Default + Profile 1..9）。
     /// CS-231：探测路径共享单源。</summary>

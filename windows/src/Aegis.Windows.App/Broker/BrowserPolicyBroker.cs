@@ -45,17 +45,23 @@ public sealed class BrowserPolicyBroker : IBroker
     private readonly object _gateLock = new();
     private NativePolicyCoreGateResult? _cachedGateResult;
     private long _cachedGateStampTicks;
-    private static readonly TimeSpan GateFailureRetryTtl = TimeSpan.FromSeconds(30);
+    // CS-361（2026-10-01 审计）：失败重试 TTL 可注入——测试缩短到毫秒级断言
+    //「TTL 过期后失败结果不再缓存」；生产恒 30s
+    internal static TimeSpan GateFailureRetryTtl = TimeSpan.FromSeconds(30);
 
     public BrowserPolicyBroker(
         Func<NativePolicyCoreGateResult>? nativePolicyCoreGate = null,
         NativePolicyCoreBridge? nativePolicyCoreBridge = null,
         IBlockedHosts? blockedHosts = null,
-        KillSwitch? killSwitch = null)
+        KillSwitch? killSwitch = null,
+        bool? nativePolicyCoreRequiredForTests = null)
     {
         _nativePolicyCoreGate = nativePolicyCoreGate ?? NativePolicyCoreGate.ProbeFromEnvironment;
-        _nativePolicyCoreRequired = NativePolicyCoreGate.IsRequired;
-        if (_nativePolicyCoreRequired)
+        // CS-372（2026-10-01 审计）：native 必需态 internal 测试缝——生产路径
+        //（null）仍由环境变量决定并尝试创建真实桥；测试传 true 可注入假
+        // gate/黑名单锁定必需模式分支，不需要真实原生库
+        _nativePolicyCoreRequired = nativePolicyCoreRequiredForTests ?? NativePolicyCoreGate.IsRequired;
+        if (_nativePolicyCoreRequired && nativePolicyCoreRequiredForTests is null)
             NativePolicyCoreBridge.TryCreate(PolicyVersion, NativePolicyCoreGate.LibraryPath, out _nativePolicyCoreBridge);
         else
             _nativePolicyCoreBridge = nativePolicyCoreBridge;
@@ -63,8 +69,10 @@ public sealed class BrowserPolicyBroker : IBroker
         KillSwitch = killSwitch ?? new KillSwitch();
     }
 
-    /// <summary>替换黑名单快照（订阅源后台刷新完成时调用——原子换引用）。</summary>
-    public void UpdateBlockedHosts(IBlockedHosts blockedHosts) =>
+    /// <summary>替换黑名单快照（订阅源后台刷新完成时调用——原子换引用）。
+    /// CS-375（2026-10-01 审计）：参数如实声明可空（调用方以 null 表达
+    /// "回退空名单"，此前非空签名使 CS-017 回归用例报 CS8625）。</summary>
+    public void UpdateBlockedHosts(IBlockedHosts? blockedHosts) =>
         _blockedHosts = blockedHosts ?? NoBlockedHosts.Instance;
 
     /// <summary>子资源层黑名单查询（HostWebView WebResourceRequested 真拦截——
@@ -169,10 +177,10 @@ public sealed class BrowserPolicyBroker : IBroker
             return nativeDenied;
         if (_nativePolicyCoreRequired)
         {
-            if (_nativePolicyCoreBridge is null)
-                return NativeBridgeDenied(scope, "native_policy_core_bridge_unavailable");
-            // 黑名单门禁对 native 模式同样强制（此前 native 路径直接返回，导航级
-            // 黑名单在启用原生核心时静默失效）
+            // CS-372（2026-10-01 审计）：黑名单门禁前置到桥可用性检查之前——
+            // 黑名单命中给出具体拒绝原因（threat_blocklist）优于泛化的
+            // bridge_unavailable；此前顺序使「必需模式+无桥」下黑名单分支
+            // 不可达，测试无法锁定"native 模式黑名单同样强制"语义
             if (Uri.TryCreate(rawUrl, UriKind.Absolute, out var nativeUri)
                 && _blockedHosts.IsBlocked(nativeUri.Host))
             {
@@ -180,6 +188,8 @@ public sealed class BrowserPolicyBroker : IBroker
                 SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {UrlRedactor.Redact(rawUrl)}");
                 return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
             }
+            if (_nativePolicyCoreBridge is null)
+                return NativeBridgeDenied(scope, "native_policy_core_bridge_unavailable");
             var nativeDecision = _nativePolicyCoreBridge.EvaluateNavigation(sessionId, tabId, generation, rawUrl, scope);
             RecordNativeDecision(scope, nativeDecision);
             return nativeDecision;

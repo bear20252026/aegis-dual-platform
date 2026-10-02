@@ -21,17 +21,16 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+import build_metadata
+import native_artifact_manifest as nam
 import pytest
-
-from write_checksum_json import build_manifest  # noqa: E402
-from verify_checksum_json import verify_manifest  # noqa: E402
-from update_verifier import (  # noqa: E402
+from update_verifier import (
     UpdateRejected,
     canonical_unsigned,
 )
-from update_verifier import verify_manifest as verify_update_manifest  # noqa: E402
-import native_artifact_manifest as nam  # noqa: E402
-import build_metadata  # noqa: E402
+from update_verifier import verify_manifest as verify_update_manifest
+from verify_checksum_json import verify_manifest
+from write_checksum_json import build_manifest
 
 
 # ---------------------------------------------------------------- PY-139
@@ -211,6 +210,58 @@ class TestVerifyUpdateManifest:
             verify_update_manifest(manifest, keys, "2.2.0", NOW, threshold=2)
 
 
+# ---------------------------------------------------------------- PY-244
+class TestCanonicalBytesGoldenVectors:
+    """PY-244（2026-10-01 审计）：contracts/vectors/update-manifest-canonical.json
+    的 canonical 字节金标此前仅 Rust tests/vectors.rs 消费——Python 侧改
+    canonical_unsigned 序列化（键序/分隔/ensure_ascii）不红。逐条向量断言
+    canonical_unsigned(manifest).hex() == expected_canonical_hex——Python
+    序列化漂移即本门禁红（跨端字节级兼容锁定补 Python 面）。
+    """
+
+    VECTORS = Path(__file__).resolve().parents[2] / "contracts" / "vectors" / "update-manifest-canonical.json"
+
+    def test_every_golden_vector_matches_python_canonicalization(self):
+        doc = json.loads(self.VECTORS.read_text(encoding="utf-8"))
+        vectors = doc["vectors"]
+        assert len(vectors) >= 3, "canonical 金标向量不得静默缩水（增删须同步 Rust tests/vectors.rs）"
+        for v in vectors:
+            assert canonical_unsigned(v["manifest"]).hex() == v["expected_canonical_hex"], (
+                f"canonical 字节漂移: {v['name']}（Python 序列化与金标不一致）")
+
+
+# ---------------------------------------------------------------- PY-228/237
+class TestExpiryRfc3339AndBoundary:
+    def _manifest(self, expires_at):
+        return {
+            "schema": 1, "product": "Aegis", "version": "2.2.0",
+            "channel": "stable", "expires_at": expires_at,
+            "artifacts": [], "signatures": [{"key_id": "k", "sig": "AAAA"}],
+        }
+
+    def test_non_rfc3339_forms_rejected(self):
+        # PY-228：fromisoformat 宽松形态（裸日期/空格分隔/无时区）不再放行
+        #（与 schema format:date-time 口径一致）
+        keys, _signers = _make_keys(("k1", "k2"))
+        for bad in ("2026-01-01", "2026-01-01 00:00:00Z", "2026-01-01T00:00:00",
+                    "not-a-timestamp"):
+            with pytest.raises(UpdateRejected, match="过期时间格式无效|格式无效"):
+                verify_update_manifest(self._manifest(bad), keys, "1.0.0", NOW, threshold=1)
+
+    def test_expiry_boundary_is_inclusive(self):
+        # PY-237：expires 恰等于 now 即过期（<= 口径——与 e2e 对齐；
+        # 此前 e2e < / verifier <= 两套边界）
+        keys, _signers = _make_keys(("k1", "k2"))
+        with pytest.raises(UpdateRejected, match="过期"):
+            verify_update_manifest(self._manifest("2025-09-25T12:00:00Z"),
+                                   keys, "1.0.0", NOW, threshold=1)
+
+    def test_valid_rfc3339_still_accepted(self):
+        keys, signers = _make_keys(("k1",))
+        manifest = _signed_manifest(self._manifest("2099-01-01T00:00:00Z"), signers, ("k1",))
+        verify_update_manifest(manifest, keys, "1.0.0", NOW, threshold=1)  # 不抛即通过
+
+
 # ---------------------------------------------------------------- PY-146
 def _make_native_tree(tmp_path: Path) -> Path:
     dll = tmp_path / "windows" / "win-x64" / "aegis_policy_core.dll"
@@ -241,7 +292,13 @@ class TestNativeArtifactManifest:
         try:
             link.symlink_to(real)
         except OSError:
-            pytest.skip("平台不支持符号链接（Windows 非特权环境）")
+            # PY-257（2026-10-01 审计）长期跳过口径登记：Windows 非特权环境下
+            # 创建符号链接需开发者模式（SeCreateSymbolicLinkPrivilege）——
+            # 启用「Windows 设置 → 开发者选项 → 开发者模式」后本用例在本机
+            # 生效；CI（Linux runner）恒执行。跳过仅限本条符号链接负例，
+            # 非测试面缺口（其余用例覆盖 build_manifest 语义面）。
+            pytest.skip("平台不支持符号链接（Windows 非特权环境）"
+                        "——启用开发者模式后本用例可执行（PY-257 口径登记）")
         with pytest.raises(ValueError, match="缺少或不是普通文件"):
             nam.build_manifest(root, ["windows", "android"])
 
@@ -287,6 +344,11 @@ class TestBuildMetadata:
             build_metadata.main()
 
     def test_complete_properties_write_metadata(self, tmp_path, monkeypatch):
+        # PY-259（2026-10-01 发布链批）：build_metadata 写侧优先消费 GITHUB_*
+        # 环境变量——CI runner 上恒有值，哨兵断言必须显式清场（否则断言的是
+        # runner 环境而非被测降级路径——发布链 contracts job 实证）
+        for var in ("GITHUB_SHA", "GITHUB_REF", "GITHUB_RUN_ID"):
+            monkeypatch.delenv(var, raising=False)
         (tmp_path / "shared").mkdir()
         props = tmp_path / "shared" / "version.properties"
         props.write_text(
@@ -376,24 +438,23 @@ class TestLoadThresholdStructuredYaml:
 # ---------------------------------------------------------------- SP-024/025
 # SP1 批（审计 2026-09-23 清单）：verify_manifest.main() 三退出码路径此前
 # 零测试；SP-024 坏 JSON 此前直接 traceback（替代干净报告）。
+# PY-218（2026-10-01 审计）：删除 monkeypatch json shim——trusted_keys 的
+# base64/hex → 32 字节解码已在 main() 真实路径落地，本组用例全部改走
+# 真实 CLI 路径（此前 shim 恰好掩盖了"str 直传必拒"的工具失效）。
 class TestVerifyManifestToolMain:
     @staticmethod
-    def _shim_json():
-        # trusted_keys.json 的现实格式是 base64 字符串（JSON 无 bytes 类型）——
-        # main() 直读 json.loads 后键值仍是 str，Ed25519PublicKey.from_public_bytes
-        # 需要真 bytes。单测 shim：32 字节 base64（44 字符）值解码回 bytes，
-        # 其余 JSON 原样返回（manifest.json 不受影响）。
-        class _ShimJson:
-            JSONDecodeError = json.JSONDecodeError
-
-            @staticmethod
-            def loads(text):
-                doc = json.loads(text)
-                if isinstance(doc, dict) and doc and all(
-                        isinstance(v, str) and len(v) == 44 for v in doc.values()):
-                    return {k: base64.b64decode(v) for k, v in doc.items()}
-                return doc
-        return _ShimJson
+    def _write_real_env(tmp_path, monkeypatch, manifest, keys, signers, key_ids):
+        """真实路径环境：base64 编码 trusted_keys.json + manifest.json。"""
+        import verify_manifest as vm
+        trusted = tmp_path / "trusted_keys.json"
+        trusted.write_text(json.dumps(
+            {k: base64.b64encode(v).decode() for k, v in keys.items()}), encoding="utf-8")
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text(json.dumps(_signed_manifest(manifest, signers, key_ids)),
+                         encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(mpath), str(trusted), "1.0.0"])
+        return vm
 
     def test_usage_error_exit_2(self, monkeypatch):
         # SP-025①：参数不足 → exit 2（环境/用法错误语义）
@@ -424,47 +485,70 @@ class TestVerifyManifestToolMain:
                                           str(manifest), str(bad), "1.0.0"])
         assert vm.main() == 2
 
-    def _run_with_shim(self, tmp_path, monkeypatch, manifest):
-        import base64 as b64
-        import verify_manifest as vm
-        monkeypatch.setattr(vm, "json", self._shim_json())
-        keys, signers = _make_keys(("k1", "k2"))
-        trusted = tmp_path / "trusted_keys.json"
-        trusted.write_text(json.dumps(
-            {k: b64.b64encode(v).decode() for k, v in keys.items()}), encoding="utf-8")
-        mpath = tmp_path / "manifest.json"
-        mpath.write_text(json.dumps(_signed_manifest(manifest, signers, ("k1", "k2"))),
-                         encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(mpath), str(trusted), "1.0.0"])
-
     def test_rejected_manifest_exit_1(self, tmp_path, monkeypatch):
         # SP-025②：清单验证不通过（阈值不足——k2 签名被剥离）→ exit 1
-        import base64 as b64
-        import verify_manifest as vm
-        monkeypatch.setattr(vm, "json", self._shim_json())
+        # PY-218：走真实路径（base64 编码 trusted_keys + main() 解码）
         keys, signers = _make_keys(("k1", "k2"))
-        trusted = tmp_path / "trusted_keys.json"
-        trusted.write_text(json.dumps(
-            {k: b64.b64encode(v).decode() for k, v in keys.items()}), encoding="utf-8")
-        manifest = _signed_manifest({
-            "schema": 1, "product": "Aegis", "version": "2.2.0",
-            "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
-            "artifacts": [],
-        }, signers, ("k1",))  # 单签名 < 阈值 2
-        mpath = tmp_path / "manifest.json"
-        mpath.write_text(json.dumps(manifest), encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(mpath), str(trusted), "1.0.0"])
+        vm = self._write_real_env(
+            tmp_path, monkeypatch,
+            {"schema": 1, "product": "Aegis", "version": "2.2.0",
+             "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
+             "artifacts": []},
+            keys, signers, ("k1",))  # 单签名 < 阈值 2
         assert vm.main() == 1
 
     def test_valid_manifest_exit_0(self, tmp_path, monkeypatch, capsys):
         # SP-025③：双钥满足阈值 → exit 0（真实策略文件走 _load_threshold()）
-        self._run_with_shim(tmp_path, monkeypatch, {
+        # PY-218：真实路径——base64 编码键值经 main() 解码后验证通过
+        #（修复前 str 直传 from_public_bytes 必 TypeError → 恒拒）
+        keys, signers = _make_keys(("k1", "k2"))
+        vm = self._write_real_env(
+            tmp_path, monkeypatch,
+            {"schema": 1, "product": "Aegis", "version": "2.2.0",
+             "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
+             "artifacts": []},
+            keys, signers, ("k1", "k2"))
+        assert vm.main() == 0
+        assert "✅" in capsys.readouterr().out
+
+    def test_hex_encoded_keys_also_accepted(self, tmp_path, monkeypatch):
+        # PY-218：hex 编码的 32 字节键同样可解码（base64 优先、hex 兜底）
+        import verify_manifest as vm
+        keys, signers = _make_keys(("k1", "k2"))
+        trusted = tmp_path / "trusted_keys.json"
+        trusted.write_text(json.dumps(
+            {k: v.hex() for k, v in keys.items()}), encoding="utf-8")
+        manifest = _signed_manifest({
             "schema": 1, "product": "Aegis", "version": "2.2.0",
             "channel": "stable", "expires_at": "2099-01-01T00:00:00Z",
             "artifacts": [],
-        })
-        import verify_manifest as vm
+        }, signers, ("k1", "k2"))
+        mpath = tmp_path / "manifest.json"
+        mpath.write_text(json.dumps(manifest), encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(mpath), str(trusted), "1.0.0"])
         assert vm.main() == 0
-        assert "✅" in capsys.readouterr().out
+
+    def test_bad_key_encoding_exit_2(self, tmp_path, monkeypatch, capsys):
+        # PY-218：非 base64/hex 编码 → exit 2（环境错误，fail-closed）
+        import verify_manifest as vm
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text("{}", encoding="utf-8")
+        trusted = tmp_path / "trusted_keys.json"
+        trusted.write_text(json.dumps({"k1": "not-valid-encoding!!!"}), encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(manifest), str(trusted), "1.0.0"])
+        assert vm.main() == 2
+        assert "解码失败" in capsys.readouterr().out
+
+    def test_wrong_length_key_exit_2(self, tmp_path, monkeypatch):
+        # PY-218：解码成功但非 32 字节（Ed25519 原始公钥长度）→ exit 2
+        import verify_manifest as vm
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text("{}", encoding="utf-8")
+        trusted = tmp_path / "trusted_keys.json"
+        trusted.write_text(json.dumps(
+            {"k1": base64.b64encode(b"short").decode()}), encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(manifest), str(trusted), "1.0.0"])
+        assert vm.main() == 2

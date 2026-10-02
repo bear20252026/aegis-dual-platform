@@ -99,11 +99,34 @@ impl ToStringGuard {
   var KEY = Symbol.for('{sym}');
   Object.defineProperty(window, KEY, {{
     value: function(proxy, original) {{
+      // RS-252（2026-10-01 审计）：注册接口参数防御——页面拿到注册函数后
+      // 可注入伪造映射（自身钩子伪装成原生实现）。双函数校验 + original
+      // 不得是已注册代理（链式注册 proxy→proxy 会让包装源码经 toString
+      // 泄漏给任意后续注册者）
+      if (typeof proxy !== 'function' || typeof original !== 'function') return;
+      if (proxyMap.has(original)) return;
       proxyMap.set(proxy, original);
     }},
+    // RS-252：configurable: true 仅限注入窗口期（撤销通道）——注入窗口后
+    // 统一替换为惰性函数并锁死 configurable: false（见下方 setTimeout）
     writable: false,
-    configurable: false
+    configurable: true
   }});
+
+  // RS-252：注入窗口后撤销——各防护阶段脚本经 document-start 同步注入完毕
+  // 后（setTimeout(0) 宏任务），注册接口替换为惰性函数并锁死。页面脚本
+  // 无法在本任务内先行执行（document-start 先于页面脚本），窗口闭合后
+  // 伪造映射不再可注入；窗口期内页面仍可调用是残余面（original 未注册
+  // 校验限制其只能注册真原生函数对）。
+  setTimeout(function() {{
+    try {{
+      Object.defineProperty(window, KEY, {{
+        value: function() {{}},
+        writable: false,
+        configurable: false
+      }});
+    }} catch (e) {{}}
+  }}, 0);
 }})();
 "#,
             sym = Self::REGISTER_SYMBOL
@@ -181,16 +204,61 @@ mod tests {
 
     #[test]
     fn register_interface_tamper_proofed() {
-        // RS-080：注册接口防篡改——writable/configurable 双 false，页面
-        // 无法把注册函数偷换为收集代理的陷阱
+        // RS-080/RS-252：注册接口防篡改——writable: false（页面不可偷换注册
+        // 函数为收集代理的陷阱）；configurable 在注入窗口期为 true（撤销
+        // 通道），窗口期后经 setTimeout 锁死为 false（见下方专项测试）
         let script = guard_script();
         assert!(
-            script.contains("writable: false,\n    configurable: false"),
-            "注册接口只读不可重配"
+            script.contains("writable: false,\n    configurable: true"),
+            "注入窗口期：只读但可撤销（RS-252 撤销通道）"
+        );
+        assert!(
+            script.contains("writable: false,\n        configurable: false"),
+            "窗口期后：惰性函数 + 双 false 锁死"
         );
         assert!(
             !script.contains("enumerable: true"),
             "注册接口不得可枚举（泄漏进 Object.keys）"
+        );
+    }
+
+    // —— RS-252 回归（审计 2026-10-01）：注册接口参数防御 + 注入窗口撤销 ——
+
+    #[test]
+    fn register_interface_validates_arguments() {
+        // RS-252：注册函数必须校验双函数入参 + original 未注册——页面拿到
+        // 注册接口后不得注入伪造映射（非函数对/链式 proxy→proxy 注册）
+        let script = guard_script();
+        assert!(
+            script.contains("typeof proxy !== 'function' || typeof original !== 'function'"),
+            "双函数类型校验"
+        );
+        assert!(
+            script.contains("if (proxyMap.has(original)) return;"),
+            "original 不得是已注册代理（链式注册泄漏包装源码）"
+        );
+        // 校验先于登记
+        let check = script
+            .find("if (proxyMap.has(original)) return;")
+            .expect("校验存在");
+        let set = script
+            .find("proxyMap.set(proxy, original);")
+            .expect("登记存在");
+        assert!(check < set, "校验必须先于登记");
+    }
+
+    #[test]
+    fn register_interface_revoked_after_injection_window() {
+        // RS-252：注入窗口后撤销——setTimeout(0) 宏任务把注册接口替换为
+        // 惰性函数并锁死（document-start 阶段脚本全部同步完成后窗口闭合）
+        let script = guard_script();
+        assert!(
+            script.contains("setTimeout(function() {"),
+            "撤销必须经宏任务延迟（等 document-start 注入完成）"
+        );
+        assert!(
+            script.contains("value: function() {},"),
+            "撤销后替换为惰性函数（不再接受注册）"
         );
     }
 }

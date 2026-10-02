@@ -36,13 +36,15 @@ public static class OriginPolicy
             authority = authority[..authorityEnd];
         if (authority.Contains('@', StringComparison.Ordinal))
             return false;
-        // CS-307（2026-09-26 审计）：前导零八进制 IPv4（"0177.0.0.1"）——
-        // .NET Uri.TryCreate 阶段已按 OS inet_aton 语义把 host 归一化
-        //（"0177.0.0.1"→"127.0.0.1"、"192.168.001.001"→"192.168.1.1"），
-        // 下方 IsValidHost 只见归一化结果，前导零形态漏检。必须对未经
-        // 归一化的 raw authority 判定：4 段全数字且任一段前导零（含
-        // host:port 形态）按 IPv4 变体拒绝——与 Rust origin.rs「4 段全
-        // 数字逐段前导零拒绝」口径一致（双重解释混淆面）
+        // CS-307（2026-09-26 审计）：前导零八进制 IPv4（"0177.0.0.1"）。
+        // CS-348（2026-10-01 审计·确定性实验统一口径）：.NET 10 实测
+        // Uri.TryCreate 已按 OS inet_aton 语义归一化 host（"0177.0.0.1"→
+        // "127.0.0.1"、"192.168.001.001"→"192.168.1.1"，与 UrlSafety.cs 侧
+        // IPAddress 实验一致——两文件此前对 .NET 行为留相反注释，必有一处
+        // 失实，实验后统一为本口径）。对 raw authority 前置判定仍保留：
+        // 下方 IsValidHost 只见归一化结果，而归一化是平台实现细节——显式
+        // 拒绝原始前导零形态与 Rust origin.rs「4 段全数字逐段前导零拒绝」
+        // 口径一致（双重解释混淆面），不依赖归一化行为
         if (IsLeadingZeroIpv4(authority))
             return false;
         if (!string.IsNullOrEmpty(u.UserInfo))

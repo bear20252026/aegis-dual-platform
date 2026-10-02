@@ -33,29 +33,27 @@ jobs:
         working-directory: android
     steps:
       - name: 检出代码
-        uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
 
       - name: 安装 JDK 21（AGP 9.3 要求 ≥17；detekt/ktlint 兼容）
-        uses: actions/setup-java@97c5a5e13aa773f277f72c1287dda3c789f1366c
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: "21"
+          # SP-215（2026-10-01 审计）：Gradle 缓存统一为 setup-java cache: gradle
+          # 单机制（原下方"缓存 Gradle"步骤删除——两套机制并存漂移）。
+          # AD-243/SP-184 口径保留：cache-dependency-path 必含版本目录
+          # libs.versions.toml——版本目录变更须失效缓存，升级依赖后不得复用旧包。
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/**
+            android/gradle/libs.versions.toml
 
       - name: 设置 Android SDK（API 36）
-        uses: android-actions/setup-android@035682743ab223ec9c6169af09811dff8247e520
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
         with:
           packages: "platform-tools platforms;android-36 build-tools;36.0.0"
-
-      - name: 缓存 Gradle
-        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**', 'android/gradle/libs.versions.toml') }}
-          # AD-243（2026-09-26 审计）：hashFiles 追加版本目录 gradle/libs.versions.toml
-          # ——版本目录变更此前不失效缓存，升级依赖后仍复用旧包
-          restore-keys: gradle-${{ runner.os }}-
 
       - name: ktlint 检查（0 错误门禁）
         run: ./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck --no-daemon
@@ -82,7 +80,7 @@ jobs:
 
       - name: 上传 detekt 报告（排障用——PY-066 四模块聚合）
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: detekt-report
           path: |

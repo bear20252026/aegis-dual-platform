@@ -68,8 +68,10 @@ class SecureWebViewFactoryTest {
 
     @Test
     fun tearDownFollowsUnifiedSequenceOrder() {
-        // 统一销毁序列全序固化：detach → stopLoading → about:blank 置空 →
-        // （release 注销，未注册即 no-op）→ destroy
+        // 统一销毁序列全序固化：detach → stopLoading →（release 注销，未注册
+        // 即 no-op）→ destroy。AD-281（2026-10-01 审计）：destroy 前
+        // loadUrl(about:blank) 已移除（必夭折 + 竞态噪声）——次序断言同步
+        // 收紧：不得再发起任何加载。
         val wv = mock(WebView::class.java)
         val parent = mock(android.view.ViewGroup::class.java)
         whenever(wv.parent).thenReturn(parent)
@@ -77,7 +79,9 @@ class SecureWebViewFactoryTest {
         val order = inOrder(parent, wv)
         order.verify(parent).removeView(wv)
         order.verify(wv).stopLoading()
-        order.verify(wv).loadUrl("about:blank")
         order.verify(wv).destroy()
+        org.mockito.Mockito
+            .verify(wv, org.mockito.Mockito.never())
+            .loadUrl(org.mockito.ArgumentMatchers.anyString())
     }
 }

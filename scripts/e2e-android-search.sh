@@ -65,7 +65,11 @@ adb shell screencap -p /sdcard/e2e_after.png || die "设备端截屏失败"
 adb pull /sdcard/e2e_after.png "$SHOT_DIR/e2e_after.png" >/dev/null || die "截屏拉取失败"
 adb shell rm -f /sdcard/e2e_after.png || true
 # 启发式：截图字节数与首页（壁纸页）显著不同即认为发生导航
-if adb shell dumpsys window 2>/dev/null | grep -q "mCurrentFocus.*$PKG"; then
+# PY-247（2026-10-01 审计）：$PKG 的点号此前未转义进正则——"com.aegis.browser"
+# 中 . 匹配任意字符（comZaegisXbrowser 同样命中，焦点断言被放宽）。grep 正则
+# 消费处显式转义（adb shell 用原始 $PKG——非正则语境，两处分开）。
+PKG_RE="${PKG//./\\.}"
+if adb shell dumpsys window 2>/dev/null | grep -q "mCurrentFocus.*${PKG_RE}"; then
   :  # 应用在前台（未被导航确认面板外的系统页抢焦点）
 else
   die "应用失去前台焦点"
@@ -73,9 +77,12 @@ fi
 # 直接证据：WebView 不再处于 start.html——查进程内最近页面标题
 TITLE="$(adb logcat -d | grep -oE "R12 title: [^\"]*" | tail -n 1 || true)"
 echo "[e2e] 最近页面标题: $TITLE"
+# PY-247（2026-10-01 审计，SP-212 同批）：标题日志缺失此前仅 WARN 仍判 PASS
+# ——断言面存在静默可空转（e2e 可空转）。空标题计 FAIL（真机回归必须拿到
+# 导航证据，拿不到即失败——人工重跑取证，不默认放行）。
 case "$TITLE" in
   *"新标签页"*) die "仍在首页——搜索未触发导航" ;;
-  "") echo "[e2e][WARN] 标题日志缺失（可能被清理）——人工复核 $SHOT_DIR/e2e_after.png" ;;
+  "") die "标题日志缺失（logcat 被清理或 R12 未打点）——无导航证据即失败" ;;
   *) echo "[e2e][PASS] 导航到: $TITLE" ;;
 esac
 

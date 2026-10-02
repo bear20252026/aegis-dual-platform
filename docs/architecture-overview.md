@@ -53,7 +53,9 @@ android/app/src/main/java/com/aegis/browser/
 ├── TabManager.kt / Tab.kt / UI 层     标签（StateListener——copy() 替换实例）
 ├── SecureWebViewFactory.kt            WebView 安全工厂
 ├── DownloadPolicy.kt / WebViewDownloadHandler.kt   下载策略（危险扩展拦截）
-└── reader/ translate/ 等              阅读模式 / 翻译入口
+├── ReaderController.kt / ReaderMode.kt            阅读模式（平文件——非目录，
+│                                                  WB-160，2026-10-01 审计改述）
+└── TranslateEntry.kt                              翻译入口（平文件）
 ```
 
 ### 1.4 单源 UI（双端共享）
@@ -72,8 +74,12 @@ shared/release.json                   版本/分发单源（verify_versions 校�
 
 - 更新验证：update_verifier（SemVer precedence 防回滚）+ verify_manifest
   （签名阈值单源读 signing-policy.yaml）
-- CI：Core-Rust / Android-Quality / Contracts / Supply-Chain / Agent-Redteam
-  五门禁常跑 + release-*（构建型）+ WebView2-Compat（每周定时探测）
+- CI：**13 workflow 分层**（WB-160，2026-10-01 审计对齐实树——原「五门禁」
+  漏计 ci/legacy-python-guard 等）。常跑门禁 6（push/PR：ci UI 回归 /
+  core-rust / contracts / android-quality / supply-chain / agent-redteam）
+  + 组合冒烟 1（native-policy-artifacts，master+paths）+ 周定时 2
+  （compat WebView2 探测 / legacy-python-guard 归档守护）+ 发布链 4
+  （release.yml 编排 v* 标签 + release-windows/android/core 三平台子流）
 
 ### 1.6 归档（只读——禁止修复）
 
@@ -108,7 +114,10 @@ legacy/（Qt、ui/）                    死代码
 ① 导航流：输入 → Broker 决策 → Rust 裁决 → WebView 加载 → 审计
 ② 会话流（Android）：registerSession → 每次导航前 renewSession（TTL 单源）
 ③ 发布流：tag → CI 构建 → 签名/校验（fail-closed）→ 安装包/ZIP 分发
-④ 回归流：selftest ×N + parity 勾验 + 真机走查 runbook
+④ 回归流：四栈回归（node ui-regression + snake / dotnet Core+Broker 套件 /
+  cargo test / gradle 四模块单测）+ pytest 发布链 + parity 勾验 + 真机走查
+  runbook（WB-159，2026-10-01 审计改述——selftest 已随 SP-041/SP-151 降为
+  legacy 归档守护，不再是回归正典）
 
 ## 四、演进史（六阶段，详见 docs/adr/）
 
@@ -119,4 +128,5 @@ Qt 旧栈 → PyWebview 分层（白名单/NavQueue）→ 安全纵深 → 契�
 ## 五、结论
 
 **Aegis = C# 正典壳 + Rust 唯一裁决 + Kotlin 双端 + 单源 UI/契约 +
-五门禁 CI 的双端安全浏览器**——安全不变量跨端一致，演进以 ADR 治理。
+分层 CI（13 workflow——WB-160 口径）的双端安全浏览器**——安全不变量跨端
+一致，演进以 ADR 治理。

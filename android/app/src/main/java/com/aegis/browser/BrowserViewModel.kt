@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.aegis.browser.WebViewAlertNotice.Kind as AlertKind
 
 /**
  * 浏览器状态 ViewModel（INV-04：BrowserSessionState 是 UI 唯一事实来源）。
@@ -106,8 +107,11 @@ class BrowserViewModel(
             if (_tabsPosition.value == TabsPosition.TOP) TabsPosition.LEFT else TabsPosition.TOP
     }
 
-    private val _webViewAlert = MutableStateFlow<String?>(null)
-    val webViewAlert: StateFlow<String?> = _webViewAlert.asStateFlow()
+    // AD-260（2026-10-01 审计）：安全提示分型——一般提示（导航被拒/历史不可用
+    // 等）单按钮「知道了」；版本检查提示经 [setWebViewVersionAlert] 登记
+    // （双按钮「去更新/稍后」）。原 String? 单态使所有提示共用版本检查按钮。
+    private val _webViewAlert = MutableStateFlow<WebViewAlertNotice?>(null)
+    val webViewAlert: StateFlow<WebViewAlertNotice?> = _webViewAlert.asStateFlow()
 
     private val _pendingNavigationConfirmation = MutableStateFlow<PendingNavigationConfirmation?>(null)
     val pendingNavigationConfirmation: StateFlow<PendingNavigationConfirmation?> =
@@ -138,7 +142,7 @@ class BrowserViewModel(
             },
             // AD-228（2026-09-26 审计）：页面功能提示经资源 id 上抛，文案
             // 收敛 strings.xml 单源。
-            alertRes = { res -> _webViewAlert.value = alertText(res) },
+            alertRes = { res -> _webViewAlert.value = alertNotice(res) },
         )
 
     // AD-003 R8 真机回归（2026-09-29）：lateinit 换可空字段。 lateinit 的
@@ -322,7 +326,7 @@ class BrowserViewModel(
             // 「被拒」共用 false 返回——确认对话框已挂起时不得再弹恐吓提示。
             _pendingNavigationConfirmation.value == null
         ) {
-            _webViewAlert.value = alertText(R.string.nav_rejected)
+            _webViewAlert.value = alertNotice(R.string.nav_rejected)
         }
     }
 
@@ -342,8 +346,13 @@ class BrowserViewModel(
     fun navigateHistory(action: HistoryAction) {
         withTabManager { tm ->
             val wv = tm.current()?.webView ?: return@withTabManager
-            if (!SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(action).orFalse()) {
-                _webViewAlert.value = alertText(R.string.history_unavailable)
+            if (SecureWebViewFactory.navigatorFor(wv)?.navigateHistory(action).orFalse()) {
+                // AD-266（2026-10-01 审计）：导航成功即清地址草稿——历史导航
+                // （含返回/前进到已缓存页，无网络事件链路）后页面已变，地址栏
+                // 不得停留旧草稿（与 navigateWithDebounce 提交路径同口径）。
+                addressDraftActive = false
+            } else {
+                _webViewAlert.value = alertNotice(R.string.history_unavailable)
             }
             // AD-064：历史导航后立即同步前进/后退可用性（缓存页导航等无网络
             // 事件的场景也准确）
@@ -351,9 +360,15 @@ class BrowserViewModel(
         }
     }
 
-    /** 设置/清除安全提示（null = 清除）。 */
+    /** 设置/清除一般安全提示（null = 清除；AD-260：单按钮「知道了」分型）。 */
     fun setWebViewAlert(message: String?) {
-        _webViewAlert.value = message
+        _webViewAlert.value =
+            message?.let { WebViewAlertNotice(it, WebViewAlertNotice.Kind.SECURITY_NOTICE) }
+    }
+
+    /** AD-260：登记版本检查提示（双按钮「去更新/稍后」——与一般提示分型）。 */
+    fun setWebViewVersionAlert(message: String) {
+        _webViewAlert.value = WebViewAlertNotice(message, WebViewAlertNotice.Kind.VERSION_CHECK)
     }
 
     /**
@@ -390,7 +405,7 @@ class BrowserViewModel(
     fun approvePendingNavigationConfirmation(): Boolean {
         val pending = _pendingNavigationConfirmation.value ?: return false
         if (tabManager?.current()?.webView !== pending.webView) {
-            _webViewAlert.value = alertText(R.string.confirm_switch_back)
+            _webViewAlert.value = alertNotice(R.string.confirm_switch_back)
             return false
         }
         _pendingNavigationConfirmation.value = null
@@ -398,7 +413,7 @@ class BrowserViewModel(
             SecureWebViewFactory
                 .navigatorFor(pending.webView)
                 ?.approvePendingNavigation() == true
-        if (!approved) _webViewAlert.value = alertText(R.string.confirm_invalid)
+        if (!approved) _webViewAlert.value = alertNotice(R.string.confirm_invalid)
         return approved
     }
 
@@ -434,7 +449,7 @@ class BrowserViewModel(
                     navigator?.openTrustedHome()
                 }
                 refresh()
-                _webViewAlert.value = alertText(R.string.renderer_restored)
+                _webViewAlert.value = alertNotice(R.string.renderer_restored)
             }
         }
     }
@@ -463,7 +478,9 @@ class BrowserViewModel(
             onSubmitPageAddress = { _address.value = it },
             onSubmitPageError = { _pageError.value = it },
             onClearPageError = { this@BrowserViewModel.clearPageError() },
-            onSubmitWebViewAlert = { _webViewAlert.value = it },
+            onSubmitWebViewAlert = { message ->
+                _webViewAlert.value = WebViewAlertNotice(message, WebViewAlertNotice.Kind.SECURITY_NOTICE)
+            },
             onRefreshTabs = ::refresh,
             errorStrings = { pageErrorStringsOf(::alertText, ::alertText) },
         )
@@ -500,6 +517,9 @@ class BrowserViewModel(
 
     /** AD-046：提示文案经资源单源（init 后 appContext 必然可用）。 */
     private fun alertText(id: Int): String = appContext?.getString(id).orEmpty()
+
+    /** AD-260：一般安全提示构造单点（文案 + SECURITY_NOTICE 分型）。 */
+    private fun alertNotice(id: Int) = WebViewAlertNotice(alertText(id), AlertKind.SECURITY_NOTICE)
 
     private fun alertText(
         id: Int,

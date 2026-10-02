@@ -145,6 +145,60 @@ public sealed class TabSessionStoreTests : IDisposable
         Assert.Empty(loaded);
     }
 
+    // ===== CS-341/353（2026-10-01 审计）：会话保存钳制 + BLOB 行 fail-safe =====
+
+    [Fact]
+    public void Save_ClampsOverlongUrlAndTitle()
+    {
+        // CS-341：页面可控任意长 url/title 此前原样落 tabs.db（单页即可撑大
+        // 库文件）；INSERT 前 2048/256 钳制（与书签/历史库同源口径）
+        var store = new TabSessionStore(_dbPath);
+        var longUrl = "https://example.com/" + new string('u', 3000);
+        var longTitle = new string('题', 300);
+
+        store.Save([new("tab-a", longUrl, longTitle)], "tab-a");
+        var loaded = store.Load();
+
+        var tab = Assert.Single(loaded);
+        Assert.Equal(2048, tab.Url.Length);
+        Assert.Equal(256, tab.Title.Length);
+    }
+
+    [Fact]
+    public void CorruptedBlobRow_DoesNotThrowIntoStartup()
+    {
+        // CS-353（2026-10-01 核验）：Microsoft.Data.Sqlite 10 实测 GetString 对
+        // BLOB 存储类做 UTF-8 替换解码**返回串**而非抛 InvalidCastException
+        //（审计所称的逃逸向量在本驱动版本不可复现；InvalidCastException 防御
+        // 仍保留为纵深——未来驱动行为收紧时兜底）。锁定可观察契约：损坏行
+        // 绝不向启动恢复链抛异常（容忍/回退皆可，进程不可崩）。
+        // BLOB 经参数绑定写入（TEXT 列亲和性不转换 BLOB——CAST 形态会被
+        // 亲和性转回 TEXT，参数绑定才保持 BLOB 存储类）
+        var store = new TabSessionStore(_dbPath);
+        store.Save(
+        [
+            new("tab-a", "https://a.example", "A"),
+            new("tab-b", "https://b.example", "B"),
+        ], "tab-b");
+        using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+            new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder
+            {
+                DataSource = _dbPath,
+                Pooling = false,
+            }.ToString()))
+        {
+            connection.Open();
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "UPDATE tabs SET url = $blob WHERE tab_id = 'tab-a'";
+            cmd.Parameters.AddWithValue("$blob", new byte[] { 0xC3, 0x28, 0xFF, 0x00 });  // 非 UTF-8 序列 BLOB
+            cmd.ExecuteNonQuery();
+        }
+
+        var ex = Record.Exception(() => store.Load());
+
+        Assert.Null(ex);  // fail-safe：损坏行不阻断启动恢复
+    }
+
     public void Dispose()
     {
         if (File.Exists(_dbPath))

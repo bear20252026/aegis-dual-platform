@@ -28,11 +28,20 @@ function el(tag) {
     _handlers: {},
     _focused: false,
     _textContent: '',
-    appendChild(c) { node.children.push(c); return c; },
+    _attrs: {},
+    appendChild(c) {
+      // WB-134（2026-10-01 审计）：真实 DOM 语义——append 已挂载节点是
+      // 「移动」而非复制（单例提示重复 append 不得产生副本）
+      const at = node.children.indexOf(c);
+      if (at !== -1) node.children.splice(at, 1);
+      node.children.push(c);
+      return c;
+    },
     addEventListener(type, fn) { (node._handlers[type] = node._handlers[type] || []).push(fn); },
     focus() { node._focused = true; },
-    setAttribute() {},
-    getAttribute() { return null; },
+    // WB-145（2026-10-01 审计）：属性记录——历史条数下拉 aria-label 断言
+    setAttribute(n, v) { node._attrs[n] = String(v); },
+    getAttribute(n) { return n in node._attrs ? node._attrs[n] : null; },
     contains() { return true; },
     querySelectorAll() { return []; },
   };
@@ -297,4 +306,118 @@ test('WB-057 扫描超时时长单源注入：window.AegisTiming 生效', () => 
   click(elements.importEntry);
   assert.equal(timers.fired.length, 1, '打开向导必须布扫描兜底定时器');
   assert.equal(timers.fired[0].ms, 999, '注入的 IMPORT_SCAN_TIMEOUT_MS 必须生效（默认 15000 由 WB-020 锁定）');
+});
+
+// ═══ WB-134/135/136/145（2026-10-01 审计）补充断言 ═══
+
+// WB-134：提示节点单例——校验失败连点 N 次不得堆 N 条同文提示
+test('WB-134 提示节点单例：重复触发不堆叠，文案就地更新', () => {
+  const host = { has: () => true, importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true }]), jsError: () => {} };
+  const { elements } = loadImport(host);
+  click(elements.importEntry);
+  const rows = elements.imBody.children.filter((c) => c._cb);
+  rows.forEach((r) => { r._cb.checked = false; });
+  const countBefore = elements.imBody.children.length;
+  click(elements.imNext);                          // 第 1 次校验失败 → append 提示
+  const hints = elements.imBody.children.filter((c) => c.className === 'im-empty');
+  assert.equal(hints.length, 1, '第一次校验失败恰一条提示');
+  click(elements.imNext);                          // 第 2 次连点
+  click(elements.imNext);                          // 第 3 次连点
+  assert.equal(elements.imBody.children.filter((c) => c.className === 'im-empty').length, 1,
+    '提示节点必须单例复用——连点不得堆叠多条同文提示');
+  assert.equal(elements.imBody.children.length, countBefore + 1,
+    '除单例提示外不得新增其他节点（选择行/勾选状态原样保留）');
+  const hintNode = elements.imBody.children.find((c) => c.className === 'im-empty');
+  assert.equal(hints[0], hintNode, '复用的是同一节点实例（appendChild 为移动非复制）');
+});
+
+// WB-136：csCall TTL null 回包不得计入成功统计——必须单列 failures
+test('WB-136 null 回包分流：无响应来源计入失败数，不得伪装成「成功 0/0」', async () => {
+  const host = {
+    has: () => true,
+    importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true, history: true }]),
+    importBookmarks: () => Promise.resolve(null),                        // TTL 兜底形态
+    importHistory: () => Promise.resolve({ imported: 4, total: 8 }),    // 正常来源
+    jsError: () => {},
+  };
+  const { elements } = loadImport(host);
+  click(elements.importEntry);
+  click(elements.imNext);
+  await flush(); await flush();
+  const texts = elements.imBody.children.map((c) => c.textContent).join('\n');
+  assert.match(texts, /部分完成：新增 4 条（解析 8 条），1 个来源失败。/,
+    'null 回包必须计入失败数（此前 collect 的 r||{} 把无响应计成成功 0/0）');
+  assert.doesNotMatch(texts, /Chrome 书签：导入 0 \/ 0/,
+    '无响应来源不得出现在成功统计行（伪装成 0/0 成功）');
+});
+
+// WB-135：导入总超时兜底——桥挂起（pending 永不 resolve）时 running 态
+// 不得永久卡死；约 60s（默认）超时后渲染失败态，且时长消费 AegisTiming 单源
+test('WB-135 导入总超时：挂起链 60s 兜底渲染失败态，及时完成则清除定时器', async () => {
+  const host = {
+    has: () => true,
+    importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true, history: true }]),
+    importBookmarks: () => new Promise(() => {}),                       // 永不回包——桥挂起
+    importHistory: () => new Promise(() => {}),
+    jsError: () => {},
+  };
+  const { elements, timers } = loadImport(host);
+  click(elements.importEntry);
+  click(elements.imNext);                            // → running
+  await flush();
+  const runTimers = timers.fired.filter((t) => t.ms === 60000);
+  assert.equal(runTimers.length, 1, 'running 态必须布且仅布一个 60s 总超时定时器（默认值）');
+  assert.equal(elements.imNext.disabled, true, '超时前下一步保持禁用');
+  runTimers[0].fn();                                 // 60s 到点
+  assert.equal(elements.imNext.disabled, false, '超时后必须放行（不再永久卡死）');
+  const texts = elements.imBody.children.map((c) => c.textContent).join('\n');
+  assert.match(texts, /导入超时：1 个来源无响应/,
+    '超时路径必须渲染明确的失败态文案（不得伪装成导入完成）');
+  assert.doesNotMatch(texts, /导入完成：共新增/, '超时态不得复用成功句式');
+  // 及时完成路径：兜底定时器必须被清除（无泄漏）
+  const host2 = {
+    has: () => true,
+    importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true }]),
+    importBookmarks: () => Promise.resolve({ imported: 2, total: 3 }),
+    importHistory: () => Promise.resolve({ imported: 0, total: 0 }),
+    jsError: () => {},
+  };
+  const b = loadImport(host2);
+  click(b.elements.importEntry);
+  click(b.elements.imNext);
+  await flush(); await flush();
+  const bRun = b.timers.fired.filter((t) => t.ms === 60000);
+  assert.equal(bRun.length, 1, '及时完成路径同样先布兜底定时器');
+  assert.ok(b.timers.cleared.includes(b.timers.fired.indexOf(bRun[0]) + 1),
+    '完成时必须 clearTimeout 总超时定时器（防迟到超时覆盖完成页）');
+  const bTexts = b.elements.imBody.children.map((c) => c.textContent).join('\n');
+  assert.match(bTexts, /导入完成：共新增 2 条/, '正常完成页照常渲染');
+});
+
+// WB-135：总超时时长消费 window.AegisTiming.IMPORT_RUN_TIMEOUT_MS 单源
+test('WB-135 导入总超时时长单源注入：window.AegisTiming 生效', async () => {
+  const host = {
+    has: () => true,
+    importScan: (cb) => cb([{ browser: 'chrome', bookmarks: true }]),
+    importBookmarks: () => new Promise(() => {}),
+    jsError: () => {},
+  };
+  const { elements, timers } = loadImport(host, { AegisTiming: { IMPORT_RUN_TIMEOUT_MS: 777 } });
+  click(elements.importEntry);
+  click(elements.imNext);
+  await flush();
+  assert.equal(timers.fired.filter((t) => t.ms === 777).length, 1,
+    '注入的 IMPORT_RUN_TIMEOUT_MS 必须生效（默认 60000 由上一用例锁定）');
+});
+
+// WB-145：历史条数下拉可编程名称——aria-label 必须存在
+test('WB-145 历史条数下拉 aria-label：读屏可获得可编程名称', () => {
+  const host = { has: () => true, importScan: (cb) => cb([{ browser: 'chrome', history: true }]), jsError: () => {} };
+  const { elements } = loadImport(host);
+  click(elements.importEntry);
+  const select = elements.imBody.children.map((c) => c.children && c.children[1])
+    .find((c) => c && c.tagName === 'select');
+  assert.ok(select, '必须渲染历史条数下拉');
+  assert.equal(select._attrs['aria-label'], '历史条数上限',
+    '下拉必须带 aria-label（相邻 span 文案不构成表单关联，读屏只播报裸 select）');
 });

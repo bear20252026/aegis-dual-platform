@@ -20,21 +20,31 @@
     return false;
   }
   function deny(reason) { console.warn('[Aegis] Bridge blocked: ' + reason); }
+  // RS-242（2026-10-01 审计）：四桥出口注册 ToStringGuard（proxy.register.v1，
+  // 与 shield.rs 同款）——未注册时 fetch.toString() 一行暴露包装源码
+  //（内含品牌特征）。注册接口缺失/参数非法时为空转（防御性 if 守卫）
+  var __aegisReg = window[Symbol.for('proxy.register.v1')];
   const fetch0 = window.fetch;
   window.fetch = function(input, init) {
     if (shouldBlock(input && input.url ? input.url : input)) { deny('fetch'); return Promise.reject(new Error('Aegis: bridge blocked')); }
     return fetch0.apply(this, arguments);
   };
+  if (__aegisReg) __aegisReg(window.fetch, fetch0);
   const open0 = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(method, url) {
     if (shouldBlock(url)) { deny('xhr'); throw new Error('Aegis: bridge blocked'); }
     return open0.apply(this, arguments);
   };
-  const beacon0 = navigator.sendBeacon && navigator.sendBeacon;
+  if (__aegisReg) __aegisReg(XMLHttpRequest.prototype.open, open0);
+  // PY-249（2026-10-01 审计）：beacon0 缺 .bind(navigator) 笔误——
+  // `sendBeacon && sendBeacon` 恒等自身，调用时 this 丢失（严格模式 TypeError
+  // 守卫自炸）。保留存在性短路 + 明确 bind
+  const beacon0 = navigator.sendBeacon && navigator.sendBeacon.bind(navigator);
   navigator.sendBeacon = function(url) {
     if (shouldBlock(url)) { deny('beacon'); return false; }
     return beacon0.apply(navigator, arguments);
   };
+  if (__aegisReg && beacon0) __aegisReg(navigator.sendBeacon, beacon0);
   const WS = window.WebSocket;
   window.WebSocket = function(url, protocols) {
     if (shouldBlock(url)) { deny('websocket'); throw new Error('Aegis: bridge blocked'); }
@@ -48,4 +58,5 @@
   // prototype 与真 WebSocket 实例无关，new WebSocket(...) instanceof
   // WebSocket 恒 false（页面一行即可探测防护存在性）。
   window.WebSocket.prototype = WS.prototype;
+  if (__aegisReg) __aegisReg(window.WebSocket, WS);
 })();

@@ -7,9 +7,17 @@ description: 'Install pinned cargo-audit and audit core/rust-policy-core (fails 
 runs:
   using: 'composite'
   steps:
+    # SP-202（2026-10-01 审计）：cargo install 从源码编译每次数分钟——缓存
+    # ~/.cargo/bin 下的已编译二进制（键含版本号，升级自动失效；只缓存 bin，
+    # registry 交给 Swatinem/rust-cache 避免双缓存冲突）。命中时跳过安装。
+    - name: Cache cargo-audit binary (SP-202)
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (SP-178 重 pin)
+      with:
+        path: ~/.cargo/bin/cargo-audit
+        key: cargo-audit-bin-0.22.2-${{ runner.os }}
     - name: Install cargo-audit (pinned)
       shell: bash
-      run: cargo install cargo-audit --version 0.22.2 --locked
+      run: command -v cargo-audit >/dev/null 2>&1 || cargo install cargo-audit --version 0.22.2 --locked
     - name: cargo audit
       shell: bash
       # 从 git 仓库根解析路径——调用方 job 可能带 defaults.run.working-directory

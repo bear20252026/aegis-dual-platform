@@ -1,7 +1,6 @@
 namespace Aegis.Windows.WebView;
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Chrome.Ntp;
@@ -49,6 +48,12 @@ public sealed class HostWebView : IDisposable
     /// Handled=true 静默丢弃 → 新闻/热搜等 target=_blank 链接点击无反应）。</summary>
     public event Action<string>? NewWindowRequested;
 
+    /// <summary>CS-355（2026-10-01 审计）：策略拒绝导航的原因上抛受信 chrome。
+    /// 此前 broker 的 DenyReason 被 TryAuthorizeNavigation 丢弃（只回 false），
+    /// 取消导航的 NavigationCompleted 以 OperationCanceled 呈现——零可见反馈。
+    /// 参数为用户可读的拒绝说明（DenyReason.Detail）。</summary>
+    public event Action<string>? NavigationDenied;
+
     /// <summary>构造器注入授权边界与隐私策略读取面（默认 LivePrivacySettings——
     /// 读进程级静态；测试可注入假实现）。</summary>
     public HostWebView(IBroker broker, string sessionId, string? tabId = null, IPrivacySettings? privacy = null)
@@ -75,12 +80,16 @@ public sealed class HostWebView : IDisposable
         // CS-317（2026-09-26 审计）：HTTPS-only 对 iframe 子文档同判——顶层
         // http 会升级 https 而 http frame 保持明文是策略缺口。帧无法重定向
         // 顶层导航，只能取消并留审计（本机/回环例外口径与顶层一致）。
+        // CS-339（2026-10-01 审计）：帧路径本机判定改只读缓存——此前
+        // IsLocalHostOrResolvesLocalHost 缓存未命中即在 UI 线程同步 DNS，
+        // 恶意页嵌多个不可解析 http iframe 即逐帧冻结 UI；未命中 fail-closed
+        // 取消 + 后台预热（下次加载命中缓存即恢复 hosts 本地域名放行）。
         _onFrameNavigationStarting = (sender, e) =>
         {
             if (_privacy.HttpsOnly
                 && Uri.TryCreate(e.Uri, UriKind.Absolute, out var frameUri)
                 && frameUri.Scheme == Uri.UriSchemeHttp
-                && !Core.UrlSafety.IsLocalHostOrResolvesLocalHost(frameUri.Host))
+                && !TryClassifyFrameHostAsLocal(frameUri.Host))
             {
                 e.Cancel = true;
                 SecurityLog.Write($"[https] 明文 iframe 导航已取消: {RedactUrl(e.Uri)}");
@@ -146,12 +155,33 @@ public sealed class HostWebView : IDisposable
             && !Core.UrlSafety.IsLocalHostOrResolvesLocalHost(uri.Host))
         {
             e.Cancel = true;
-            var httpsUrl = "https://" + uri.GetComponents(
-                UriComponents.HostAndPort | UriComponents.PathAndQuery, UriFormat.UriEscaped);
-            webView.Navigate(httpsUrl);
+            webView.Navigate(BuildHttpsUpgradeUrl(uri));
             return;
         }
         e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: true);
+    }
+
+    /// <summary>CS-362（2026-10-01 审计）：HTTPS-only 升级 URL 构造提纯 internal
+    /// 直测。实验（.NET 10）：UriComponents.HostAndPort 会**补默认端口**
+    /// （http://example.com → "example.com:80"）——原内联实现产出
+    /// https://example.com:80/…（https 走 80 端口的隐性升级断裂），改用
+    /// Uri.Authority（不含 userinfo/默认端口、IPv6 保留方括号）+ PathAndQuery。</summary>
+    internal static string BuildHttpsUpgradeUrl(Uri uri) =>
+        "https://" + uri.Authority
+        + uri.GetComponents(UriComponents.PathAndQuery, UriFormat.UriEscaped);
+
+    /// <summary>CS-339（2026-10-01 审计）：帧路径本机判定——只读缓存探测，
+    /// 绝不在 UI 线程同步 DNS。命中（显式本机名/回环 IP/既有缓存）按判定
+    /// 返回；未命中 fail-closed 视为非本机（本次帧导航取消），并后台预热
+    /// 缓存（下一次加载命中即恢复放行语义——hosts 本地域名开发场景）。</summary>
+    private static bool TryClassifyFrameHostAsLocal(string host)
+    {
+        if (Core.UrlSafety.TryGetCachedLocalHost(host, out var isLocal))
+            return isLocal;
+        var captured = host;
+        _ = System.Threading.Tasks.Task.Run(
+            () => Core.UrlSafety.IsLocalHostOrResolvesLocalHost(captured));
+        return false;
     }
 
     /// <summary>M3 下载管理（ADR-009）：全量经 broker 审计；危险扩展（对齐
@@ -266,36 +296,28 @@ public sealed class HostWebView : IDisposable
     }
 
     // —— CS-308（2026-09-26 审计）：拦截类事件聚合落盘 ——
-
     // 跟踪器密集页此前每个被拦截子请求同步 SecurityLog.Write（每条
     // File.AppendAllText）——IO 放大且 1MB 取证日志被冲掉。按 host 聚合计数，
     // 周期性（累计 BlockAggregateFlushThreshold 次）落一行；Dispose 兜底清空。
-    // WebResourceRequested 在创建控件的 UI 线程触发——单线程访问，无需加锁。
-    private const int BlockAggregateFlushThreshold = 50;
-    private readonly Dictionary<string, (int Count, string Detail)> _trackerBlockAggregates =
-        new(StringComparer.OrdinalIgnoreCase);
-    private int _trackerBlocksSinceFlush;
+    // CS-363（2026-10-01 审计）：聚合逻辑提纯到 TrackerBlockAggregator
+    //（单测直测聚合/阈值/尾部 flush），HostWebView 只保留落盘接线。
+    private readonly TrackerBlockAggregator _trackerBlocks = new(BlockAggregateFlushThreshold);
+
+    private const int BlockAggregateFlushThreshold = TrackerBlockAggregator.DefaultFlushThreshold;
 
     private void RecordTrackerBlock(Uri uri, int level, CoreWebView2WebResourceContext context)
     {
-        var detail = $"级别{level} ctx={context}";
-        if (_trackerBlockAggregates.TryGetValue(uri.Host, out var existing))
-            _trackerBlockAggregates[uri.Host] = (existing.Count + 1, existing.Detail);
-        else
-            _trackerBlockAggregates[uri.Host] = (1, detail);
-        if (++_trackerBlocksSinceFlush >= BlockAggregateFlushThreshold)
+        if (_trackerBlocks.Record(uri.Host, $"级别{level} ctx={context}"))
             FlushTrackerBlocks();
     }
 
     private void FlushTrackerBlocks()
     {
-        foreach (var pair in _trackerBlockAggregates)
+        foreach (var row in _trackerBlocks.Drain())
         {
             SecurityLog.Write(
-                $"[privacy] 跟踪防护拦截聚合: {pair.Key} ×{pair.Value.Count}（{pair.Value.Detail}）");
+                $"[privacy] 跟踪防护拦截聚合: {row.Host} ×{row.Count}（{row.Detail}）");
         }
-        _trackerBlockAggregates.Clear();
-        _trackerBlocksSinceFlush = 0;
     }
 
     // CS-070（审计 2026-09-25）：脱敏单源——与 Broker 各持一份相同实现已收敛
@@ -310,7 +332,7 @@ public sealed class HostWebView : IDisposable
         UnwireEvents();
         RejectPendingNavigation();
         // CS-308：会话结束时落最后一批未满阈值的拦截聚合（取证不留尾巴）
-        if (_trackerBlocksSinceFlush > 0)
+        if (_trackerBlocks.PendingCount > 0)
             FlushTrackerBlocks();
         _broker.DestroySession(_sessionId);
         _disposed = true;
@@ -373,6 +395,12 @@ public sealed class HostWebView : IDisposable
                 return false;
             }
             // 原生核心、会话或协议错误均不能继续；若未来策略直接 Allow，仍走既有消费边界。
+            if (confirmationDecision is Broker.Decision.Deny confirmationDeny)
+            {
+                // CS-355：确认门前的直接拒绝同样上抛原因（不只静默取消）
+                NavigationDenied?.Invoke(confirmationDeny.Reason.Detail);
+                return false;
+            }
             if (confirmationDecision is not Broker.Decision.Allow immediate
                 || !_broker.TryConsumeNavigation(immediate.Action, _sessionId, _tabId, _documentGeneration, rawUrl, "navigation"))
                 return false;
@@ -380,6 +408,13 @@ public sealed class HostWebView : IDisposable
         }
 
         var decision = _broker.EvaluateNavigation(_sessionId, _tabId, _documentGeneration, rawUrl, "navigation");
+        if (decision is Broker.Decision.Deny deny)
+        {
+            // CS-355（2026-10-01 审计）：拒绝原因上抛受信 chrome——此前被
+            // OperationCanceled 过滤，用户只看到"导航无反应"
+            NavigationDenied?.Invoke(deny.Reason.Detail);
+            return false;
+        }
         if (decision is not Broker.Decision.Allow allow
             || !_broker.TryConsumeNavigation(allow.Action, _sessionId, _tabId, _documentGeneration, rawUrl, "navigation"))
             return false;

@@ -9,8 +9,15 @@ from __future__ import annotations
 
 import json
 import pathlib
-import re
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# PY-243（2026-10-01 审计）：嵌套子模型命名规则单源（与 generate_kotlin 共享）
+from ident import pascal as _pascal
+from ident import singular_pascal as _singular_pascal
+
+# PY-242（2026-10-01 审计）：describe_value_domain 两份逐字重复抽单源
+from value_domain import describe_value_domain
 
 SCHEMAS = pathlib.Path(__file__).resolve().parents[1] / "schemas"
 # PY-102：发布事实声明（release.schema.json 校验 shared/release.json 用）
@@ -30,43 +37,40 @@ CS_TYPE_MAP = {
 }
 
 
-def cs_type(prop: dict) -> str:
+def cs_type(prop: dict, nested_item: str | None = None) -> str:
     t = prop.get("type", "string")
     if t == "array":
-        items = prop.get("items", {}).get("type", "string")
-        if items not in CS_TYPE_MAP:
-            raise ValueError(f"数组 items 类型不支持: {items!r}（fail-closed——禁止静默降级）")
-        return f"List<{CS_TYPE_MAP[items]}>"
+        items = prop.get("items", {})
+        it = items.get("type", "string")
+        # PY-243（2026-10-01 审计）：数组 items 为 object 且带 properties 时
+        # 生成嵌套子模型（调用方传嵌套类型名）——内部 platform/format/url/
+        # sha256/size 五字段获得编译期锚点，不再降级 List<object>。无
+        # properties 的自由 object 保持 List<object>（nothing to anchor）。
+        if it == "object":
+            if "properties" in items:
+                if not nested_item:
+                    raise ValueError(
+                        "数组 items 为 object 且带 properties——必须生成嵌套子模型"
+                        "（fail-closed——禁止降级 List<object>）")
+                return f"List<{nested_item}>"
+            return "List<object>"
+        if it not in CS_TYPE_MAP:
+            raise ValueError(f"数组 items 类型不支持: {it!r}（fail-closed——禁止静默降级）")
+        return f"List<{CS_TYPE_MAP[it]}>"
     if t not in CS_TYPE_MAP:
         raise ValueError(f"schema 类型不支持: {t!r}（fail-closed——禁止静默降级 object）")
     return CS_TYPE_MAP[t]
 
 
-# 值类型可空标记（引用类型 string?/List<T>? 由统一后缀处理）
-CS_VALUE_TYPES = {"long", "decimal", "bool"}
+# 值类型可空标记——PY-242：cs_nullable 化简后该集合无剩余消费者，删除
+#（此前 CS_VALUE_TYPES 分支与默认分支行为相同，属死结构）。
 
 
 # PY-188（2026-09-26 审计，收尾批完整化）：enum/const 生成「string 属性 +
 # 常量类」——属性保持 string 类型（不破坏镜像消费方），另生成
 # {Name}Values 静态常量类提供编译期拼写锚点（值域以 schema 为单源）。
-# describe_value_domain 保留：元数据 API 供测试与文档锁定值域。
-def describe_value_domain(prop: dict) -> str:
-    """提取属性的 enum/const 值域描述（enum → "enum: A | B | C"；const → "const: X"）。"""
-    if "enum" in prop:
-        values = prop["enum"]
-        rendered = " | ".join(str(v) for v in values)
-        return f"enum: {rendered}"
-    if "const" in prop:
-        return f"const: {prop['const']}"
-    return ""
-
-
-def _pascal(value: str) -> str:
-    """schema 值 → PascalCase 标识符段：require_confirmation→RequireConfirmation，
-    GET→GET（全大写词保留），非字母数字作分隔。"""
-    tokens = [t for t in re.split(r"[^A-Za-z0-9]+", value) if t]
-    out = "".join(t if t.isupper() else t[:1].upper() + t[1:] for t in tokens)
-    return out or "Value"
+# PY-242（2026-10-01 审计）：describe_value_domain 移至 value_domain.py 单源
+#（与 generate_kotlin 共享），此处保留导入供测试与文档锁定值域。
 
 
 def _cs_literal_type(value) -> str:
@@ -115,11 +119,45 @@ def enum_constant_lines(schema: dict, name: str) -> list[str]:
 
 
 def cs_nullable(t: str) -> str:
-    if t in CS_VALUE_TYPES:
-        return f"{t}?"
+    """PY-242（2026-10-01 审计）：化简死结构——值类型与引用类型此前分两
+    分支返回同一 f"{t}?"；实际唯一差异是 object 不加 ?（本即可空）。
+    输出字节不变（verify_contract_compatibility 对账锁定）。"""
     if t == "object":
         return t  # object 本即可空
     return f"{t}?"
+
+
+def _nested_record_lines(items_schema: dict, nested_name: str) -> list[str]:
+    """PY-243：数组 items(object+properties) 的嵌套子模型——record + 值域常量
+    类（复用 enum_constant_lines，platform/format 的 enum 亦获编译期锚点）。
+    嵌套层内再出现 array-of-object 属契约面过深，fail-closed。"""
+    nprops = items_schema.get("properties", {})
+    nrequired = set(items_schema.get("required", []))
+    nunknown = nrequired - set(nprops)
+    if nunknown:
+        raise ValueError(
+            f"嵌套 items required 引用未定义属性: {sorted(nunknown)}（fail-closed）")
+    nordered = [k for k in nprops if k in nrequired] + [k for k in nprops if k not in nrequired]
+    lines = [
+        "",
+        (f"/// <summary>PY-243（2026-10-01 审计）：{nested_name} 嵌套子模型——"
+         "schema 数组 items 单源（字段获得编译期锚点，不再降级 object）。</summary>"),
+        f"public sealed record {nested_name}(",
+    ]
+    for index, pname in enumerate(nordered):
+        p = nprops[pname]
+        if p.get("type") == "array":
+            raise ValueError("嵌套 items 内不支持数组属性（fail-closed——契约面过深）")
+        t = cs_type(p)
+        suffix = "," if index < len(nordered) - 1 else ""
+        if pname in nrequired:
+            lines.append(f"    {t} {pname}{suffix}")
+        else:
+            lines.append(f"    {cs_nullable(t)} {pname} = null{suffix}")
+    lines.append(");")
+    # enum_constant_lines 自带 Values 后缀——传嵌套类型名本身
+    lines.extend(enum_constant_lines(items_schema, nested_name))
+    return lines
 
 
 def generate(schema: dict, name: str) -> str:
@@ -132,25 +170,42 @@ def generate(schema: dict, name: str) -> str:
     if unknown:
         raise ValueError(
             f"required 引用未定义属性: {sorted(unknown)}（schema={name}——fail-closed）")
+    # PY-243：array-of-object+properties 属性预扫描——登记嵌套子模型类型名
+    nested_models: list[tuple[str, dict]] = []  # (类型名, items schema)
+    nested_by_pname: dict[str, str] = {}
+    for pname, p in props.items():
+        items = p.get("items", {}) if p.get("type") == "array" else {}
+        if items.get("type") == "object" and "properties" in items:
+            nested_name = f"{name}{_singular_pascal(pname)}"
+            nested_models.append((nested_name, items))
+            nested_by_pname[pname] = nested_name
+    # PY-248（2026-10-01 审计）：using 仅在存在数组属性时输出——6 份生成
+    # 文件中 4 份零 List<> 使用，无条件注入产生未用 using 噪声。
+    has_array = any(p.get("type") == "array" for p in props.values())
     # PY-099：required 区分——必选在前（C# record 可选参数必须位于必选参数
     # 之后），组内保持 schema 声明序；非必选生成可空类型 + 默认 null
     ordered = [k for k in props if k in required] + [k for k in props if k not in required]
     lines = [
         "// 由 contracts/codegen/generate_csharp.py 生成（蓝图阶段 B——契约事实来源——请勿手工编辑）",
-        "using System.Collections.Generic;",
+    ]
+    if has_array:
+        lines.append("using System.Collections.Generic;")
+    lines.extend([
         "namespace Aegis.Windows.Contracts.Generated;",
         "",
         f"public sealed record {name}(",
-    ]
+    ])
     for index, pname in enumerate(ordered):
         p = props[pname]
-        t = cs_type(p)
+        t = cs_type(p, nested_item=nested_by_pname.get(pname))
         suffix = "," if index < len(ordered) - 1 else ""
         if pname in required:
             lines.append(f"    {t} {pname}{suffix}")
         else:
             lines.append(f"    {cs_nullable(t)} {pname} = null{suffix}")
     lines.append(");")
+    for nested_name, items_schema in nested_models:
+        lines.extend(_nested_record_lines(items_schema, nested_name))
     lines.extend(enum_constant_lines(schema, name))
     return "\n".join(lines)
 
@@ -176,7 +231,11 @@ def main() -> int:
             continue
         schema = json.loads(f.read_text(encoding="utf-8"))
         name = contract_name(f)
-        (out_dir / f"{name}.cs").write_text(generate(schema, name) + "\n", encoding="utf-8")
+        # PY-232（2026-10-01 审计）：write_text 显式 newline="\n"——Windows
+        # 默认会把 \n 翻译为 CRLF，core.autocrlf 关闭的环境重生成即 CRLF
+        # 漂移、git diff 门禁假红。锁定 LF（与 git 归一存储一致）。
+        (out_dir / f"{name}.cs").write_text(
+            generate(schema, name) + "\n", encoding="utf-8", newline="\n")
         generated.add(f"{name}.cs")
         print(f"  ✅ 生成 C# 模型: {name}.cs")
     # 陈旧清理（差集删除）：此前 glob("*.schema.cs") 与生成名 {Name}Contract.cs

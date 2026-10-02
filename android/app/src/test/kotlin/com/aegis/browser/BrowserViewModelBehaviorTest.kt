@@ -88,7 +88,7 @@ class BrowserViewModelBehaviorTest {
         assertEquals(
             "拒绝必须上抛「切回原标签」提示（不再静默）",
             ApplicationProvider.getApplicationContext<Application>().getString(R.string.confirm_switch_back),
-            viewModel.webViewAlert.value,
+            viewModel.webViewAlert.value?.message,
         )
         // 拒绝路径不清除 pending（用户切回原标签后仍可正常批准）
         assertTrue(viewModel.pendingNavigationConfirmation.value != null)

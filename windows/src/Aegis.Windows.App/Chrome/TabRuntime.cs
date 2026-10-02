@@ -71,6 +71,14 @@ public sealed class TabRuntime : IDisposable
         remove => Host.NewWindowRequested -= value;
     }
 
+    /// <summary>CS-355（2026-10-01 审计）：策略拒绝导航的原因转发（用户可读
+    /// 拒绝说明——此前被 OperationCanceled 过滤零可见反馈）。</summary>
+    public event Action<string>? NavigationDenied
+    {
+        add => Host.NavigationDenied += value;
+        remove => Host.NavigationDenied -= value;
+    }
+
     /// <summary>M4 下载管理面板数据源：授权通过的 DownloadOperation 转交
     ///（dangerous=经用户显式确认的危险扩展下载）。</summary>
     public event Action<CoreWebView2DownloadOperation, bool>? DownloadOperationStarted;

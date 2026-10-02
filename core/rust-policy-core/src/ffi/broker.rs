@@ -17,6 +17,9 @@ pub struct FfiBroker {
     /// 仅由策略核心登记的待审批动作；平台不能凭展示用请求重建授权。
     pending_navigation_approvals: std::sync::Mutex<HashMap<String, AuthorizedAction>>,
     policy_version: String,
+    /// RS-270：授权过期窗口（秒）——生产恒为 ACTION_EXPIRY_SECONDS；
+    /// 测试构造器注入极小值触达过期分支
+    action_expiry_seconds: u64,
 }
 
 /// 原生策略核心签发的授权状态。已消费记录保留到会话撤销，
@@ -26,6 +29,12 @@ enum IssuedAuthorization {
     Pending(Box<AuthorizedAction>),
     Consumed { session_id: String },
 }
+
+/// RS-270（2026-10-01 审计）：ACTION_EXPIRY_SECONDS 可测参数化——
+/// FfiBroker 持有过期窗口（生产构造器恒取默认常量；测试构造器注入
+/// 极小窗口使「过期 approve/consume 拒绝」分支可真实触达）。
+#[cfg(test)]
+const TEST_ACTION_EXPIRY_SECONDS: u64 = 0;
 
 /// M-15 修复（审计 2026-08-31）：授权账本上限——镜像 consumed_nonces 的
 /// fail-closed 模式（满时先惰性清理，仍满即拒绝，绝不无界增长）。
@@ -53,6 +62,19 @@ const MAX_SESSION_TTL_SECONDS: u64 = 86_400;
 /// 键长度的第一道防线，core 层上限管不到本入口）。
 const MAX_SESSION_KEY_BYTES: usize = 256;
 
+/// RS-253（2026-10-01 审计）：UniFFI 构造器的空 policy_version 默认值——
+/// C ABI（aegis_policy_core_broker_new）对空版本返回 null 拒绝；UniFFI
+/// constructor 签名必须返回 Self（不可失败），无法同拒。行为分叉按
+/// 「默认版本」收口：空版本在此替换为显式哨兵（文档化），授权签发与
+/// 校验仍自洽（action.policy_version == broker.policy_version）。
+const DEFAULT_POLICY_VERSION: &str = "unversioned";
+
+/// RS-254（2026-10-01 审计）：evaluate_navigation 的 scope 长度上限（字节）
+/// ——与 RS-223 会话键 256 对齐。此前 scope 无长度上限（RS-223 只限会话
+/// 键）：授权账本以 nonce 为键不受直接影响，但 issued action 携带任意长
+/// scope 串驻留内存（宿主 FFI 边界是第一道防线）。
+const MAX_SCOPE_BYTES: usize = 256;
+
 impl IssuedAuthorization {
     fn session_id(&self) -> &str {
         match self {
@@ -65,18 +87,15 @@ impl IssuedAuthorization {
 #[uniffi::export]
 impl FfiBroker {
     /// 创建 Broker（policy_version 锁定——INV-03 一致性）。
+    ///
+    /// RS-253（2026-10-01 审计）：空 policy_version 默认化——C ABI 对空版本
+    /// 返回 null；UniFFI constructor 不可失败，无法同拒。空串在此替换为
+    /// DEFAULT_POLICY_VERSION 哨兵（授权签发/校验自洽），行为分叉以
+    /// 「默认版本」收口（audit 提供的两选项之一），一致性由
+    /// empty_policy_version_defaults_on_uniffi_path 测试锁定。
     #[uniffi::constructor]
     pub fn new(policy_version: String) -> Self {
-        Self {
-            inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(
-                policy_version.clone(),
-                PolicyEngine::default(),
-                CapabilityRegistry::new(),
-            )),
-            issued_actions: std::sync::Mutex::new(HashMap::new()),
-            pending_navigation_approvals: std::sync::Mutex::new(HashMap::new()),
-            policy_version,
-        }
+        Self::with_action_expiry(policy_version, ACTION_EXPIRY_SECONDS)
     }
 
     /// 评估导航意图（URL 解析 + 会话验证 → FfiDecision——fail-closed）。
@@ -92,15 +111,27 @@ impl FfiBroker {
         raw_url: String,
         scope: String,
     ) -> FfiDecision {
+        // RS-254：scope 长度上限（256——与 RS-223 会话键同口径）
+        if scope.len() > MAX_SCOPE_BYTES {
+            return ffi_deny(
+                "ffi_scope_too_long",
+                &format!("scope 超长（{} 字节，上限 {MAX_SCOPE_BYTES}）", scope.len()),
+                "denied — scope exceeds the 256-byte FFI boundary cap",
+            );
+        }
         // URL 解析（fail-closed：解析失败 → Deny）
         let canonical_url = match crate::origin::canonicalize_external(&raw_url) {
             Some(p) => p,
             None => {
+                // RS-258（2026-10-01 审计）：deny 文案不内嵌完整明文 URL——
+                // query（token 载体）/userinfo 剥除后再组装（AD-211 认识的
+                // Rust 侧同步）
+                let redacted = redact_url_for_log(&raw_url);
                 return FfiDecision::Deny {
                     reason: FfiDenyReason {
                         code: "url_policy".into(),
-                        detail: format!("拒绝 URL: {raw_url}"),
-                        explanation: format!("denied origin — URL parsing failed: {raw_url}"),
+                        detail: format!("拒绝 URL: {redacted}"),
+                        explanation: format!("denied origin — URL parsing failed: {redacted}"),
                     },
                 };
             }
@@ -110,9 +141,10 @@ impl FfiBroker {
             Err(reason) => return FfiDecision::Deny { reason },
         };
         // RS-220（2026-09-26 审计）：UNIX 秒经 broker::now_unix_secs 单源
-        // （此前本文件 3 处内联 SystemTime::now——时钟不可用语义各自维护）
+        // （此前本文件 3 处内联 SystemTime::now——时钟不可用语义各自维护）。
+        // RS-270：过期窗口经实例字段（生产默认 ACTION_EXPIRY_SECONDS）
         let expires_at = match crate::broker::now_unix_secs() {
-            Some(secs) => secs.saturating_add(ACTION_EXPIRY_SECONDS),
+            Some(secs) => secs.saturating_add(self.action_expiry_seconds),
             None => {
                 return FfiDecision::Deny {
                     reason: FfiDenyReason {
@@ -551,6 +583,32 @@ impl FfiBroker {
     }
 }
 
+impl FfiBroker {
+    /// RS-270：参数化构造器——生产入口恒为 `new`（uniffi constructor，
+    /// ACTION_EXPIRY_SECONDS 默认）；测试注入极小窗口以真实触达
+    /// 「过期 approve/consume 拒绝」分支。uniffi 导出块不支持自由关联函数，
+    /// 本构造器只走 Rust 内部（不进跨语言绑定面）。
+    /// 空 policy_version 的默认化（RS-253）在此单点实现。
+    fn with_action_expiry(policy_version: String, action_expiry_seconds: u64) -> Self {
+        let policy_version = if policy_version.is_empty() {
+            DEFAULT_POLICY_VERSION.to_string()
+        } else {
+            policy_version
+        };
+        Self {
+            inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(
+                policy_version.clone(),
+                PolicyEngine::default(),
+                CapabilityRegistry::new(),
+            )),
+            issued_actions: std::sync::Mutex::new(HashMap::new()),
+            pending_navigation_approvals: std::sync::Mutex::new(HashMap::new()),
+            policy_version,
+            action_expiry_seconds,
+        }
+    }
+}
+
 /// 绑定性比较：仅比较安全绑定属性，**不含 explanation**（人类可读审计
 /// 文本，不参与权限判定）。此前 consume 用 `*issued == action`（含
 /// explanation），而托管端序列化 NativeAction 不携带 explanation，
@@ -608,13 +666,36 @@ fn ledger_can_admit(issued: &mut HashMap<String, IssuedAuthorization>) -> bool {
 }
 
 fn deny_url(raw_url: String) -> FfiDecision {
+    // RS-258：deny 文案不内嵌完整明文 URL——query/userinfo 剥除后组装
+    let redacted = redact_url_for_log(&raw_url);
     FfiDecision::Deny {
         reason: FfiDenyReason {
             code: "url_policy".into(),
-            detail: format!("拒绝 URL: {raw_url}"),
-            explanation: format!("denied origin — URL parsing failed: {raw_url}"),
+            detail: format!("拒绝 URL: {redacted}"),
+            explanation: format!("denied origin — URL parsing failed: {redacted}"),
         },
     }
+}
+
+/// RS-258（2026-10-01 审计）：日志/文案面的 URL 脱敏——detail/explanation
+/// 此前双份内嵌完整明文 URL（query 中的 token、userinfo 中的凭据随拒绝
+/// 响应外泄，AD-211 已在 Windows 侧立认识）。此处剥 query/fragment/userinfo，
+/// 仅保留 scheme://host[:port] 形态；无法定位 authority 的输入整体占位。
+fn redact_url_for_log(raw_url: &str) -> String {
+    let Some(scheme_end) = raw_url.find("://").map(|i| i + 3) else {
+        return "<opaque-url>".to_string();
+    };
+    let authority_end = raw_url[scheme_end..]
+        .find(['/', '?', '#'])
+        .map(|i| scheme_end + i)
+        .unwrap_or(raw_url.len());
+    let authority = &raw_url[scheme_end..authority_end];
+    // 剥 userinfo（最后一个 @ 之前是凭据）
+    let host_part = match authority.rfind('@') {
+        Some(at) => &authority[at + 1..],
+        None => authority,
+    };
+    format!("{}{}", &raw_url[..scheme_end], host_part)
 }
 
 fn ffi_deny(code: &str, detail: &str, explanation: &str) -> FfiDecision {
@@ -1054,6 +1135,198 @@ mod ffi_navigation_tests {
             );
         }
         assert!(!ledger_can_admit(&mut consumed_full));
+    }
+
+    // —— RS-253/254/258/270 回归（审计 2026-10-01） ——
+
+    #[test]
+    fn empty_policy_version_defaults_on_uniffi_path() {
+        // RS-253：C ABI 拒空 policy_version（aegis_policy_core_broker_new 返回
+        // null）；UniFFI constructor 不可失败——空版本按「默认版本」收口：
+        // 签发的 action 携带哨兵版本，与 broker 自身校验自洽
+        let broker = FfiBroker::new(String::new());
+        assert!(broker.create_session("s".into(), "t".into(), 1, 60));
+        let decision = broker.evaluate_navigation(
+            "s".into(),
+            "t".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        );
+        match decision {
+            FfiDecision::Allow { action } => {
+                assert_eq!(action.policy_version, DEFAULT_POLICY_VERSION);
+            }
+            other => panic!("空版本默认化后导航应正常评估，实际 {other:?}"),
+        }
+        // C ABI 侧仍拒绝空版本（行为差异以测试锚点双端登记）
+        // —— 见 c_abi::tests::c_abi_rejects_empty_policy_version
+    }
+
+    #[test]
+    fn evaluate_navigation_rejects_oversized_scope() {
+        // RS-254：scope 长度上限 256（与 RS-223 会话键同口径）——
+        // 此前 FFI 边界对 scope 无长度防线
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s".into(), "t".into(), 1, 60));
+        let oversized = "x".repeat(MAX_SCOPE_BYTES + 1);
+        match broker.evaluate_navigation(
+            "s".into(),
+            "t".into(),
+            1,
+            "https://example.com/".into(),
+            oversized,
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "ffi_scope_too_long"),
+            other => panic!("超长 scope 必须拒绝，实际 {other:?}"),
+        }
+        // 恰 256 字节放行（边界内侧）
+        let at_cap = "y".repeat(MAX_SCOPE_BYTES);
+        assert!(matches!(
+            broker.evaluate_navigation(
+                "s".into(),
+                "t".into(),
+                1,
+                "https://example.com/".into(),
+                at_cap,
+            ),
+            FfiDecision::Allow { .. } | FfiDecision::RequireConfirmation { .. }
+        ));
+    }
+
+    #[test]
+    fn deny_reasons_redact_url_query_and_userinfo() {
+        // RS-258：url_policy deny 的 detail/explanation 不得内嵌完整明文
+        // URL——query（token 载体）与 userinfo 剥除（AD-211 的 Rust 同步）
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s".into(), "t".into(), 1, 60));
+        // 对照锚点：可解析 URL 正常评估（token 在 query 中但页面可解析，
+        // 非 deny 路径——不进入文案面）
+        let token_url = "https://example.com/path?session_token=SECRET&x=1#frag";
+        assert!(matches!(
+            broker.evaluate_navigation(
+                "s".into(),
+                "t".into(),
+                1,
+                token_url.into(),
+                "navigation".into(),
+            ),
+            FfiDecision::Allow { .. } | FfiDecision::RequireConfirmation { .. }
+        ));
+        // 解析失败路径：userinfo 形态被 canonicalize 拒绝
+        // （canonicalize_external 拒 userinfo），deny 文案应只含 host
+        let userinfo_url = "https://user:secretpw@example.com/path?token=LEAK";
+        let denied = match broker.evaluate_navigation(
+            "s".into(),
+            "t".into(),
+            1,
+            userinfo_url.into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => reason,
+            other => panic!("userinfo URL 应被拒，实际 {other:?}"),
+        };
+        let combined = format!("{}{}", denied.detail, denied.explanation);
+        assert!(
+            !combined.contains("secretpw") && !combined.contains("LEAK"),
+            "凭据/query token 不得泄入 deny 文案：{combined}"
+        );
+        assert!(
+            combined.contains("example.com"),
+            "host 可保留（定位信息）：{combined}"
+        );
+        // 脱敏单源函数直测：query/fragment/userinfo 全剥、scheme+host 保留
+        assert_eq!(
+            redact_url_for_log("https://example.com/p?token=1#f"),
+            "https://example.com"
+        );
+        assert_eq!(
+            redact_url_for_log("https://u:p@example.com:8443/p"),
+            "https://example.com:8443"
+        );
+        assert_eq!(redact_url_for_log("not a url"), "<opaque-url>");
+    }
+
+    #[test]
+    fn zero_expiry_window_issues_immediately_expired_actions() {
+        // RS-270：ACTION_EXPIRY_SECONDS 可测参数化——注入 0 秒窗口后签发的
+        // 授权 expires_at == 签发时刻，evaluate 自身的会话验证即判过期
+        // （RS-156 口径 == now 即过期），参数真实生效
+        let broker =
+            FfiBroker::with_action_expiry(POLICY_VERSION.into(), TEST_ACTION_EXPIRY_SECONDS);
+        assert!(broker.create_session("s".into(), "t".into(), 1, 120));
+        match broker.evaluate_navigation(
+            "s".into(),
+            "t".into(),
+            1,
+            "https://example.com/".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "action_expired"),
+            other => panic!("零窗口签发必须即刻过期，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expired_pending_approval_and_issued_action_rejected() {
+        // RS-270：过期 approve/consume 分支直测——向两本账本注入已过期授权
+        // （expires_at < now，确定性构造，无时钟竞态），绑定全部匹配的
+        // 前提下必须以 action_expired 拒绝（此前恒 120s 窗口零覆盖）
+        let broker = FfiBroker::new(POLICY_VERSION.into());
+        assert!(broker.create_session("s".into(), "t".into(), 1, 120));
+        let now = crate::broker::now_unix_secs().unwrap_or(0);
+        let expired = AuthorizedAction {
+            session_id: "s".into(),
+            tab_id: "t".into(),
+            document_generation: 1,
+            origin: "https://example.com".into(),
+            method: "GET".into(),
+            canonical_parameters: "/late".into(),
+            scope: "navigation".into(),
+            expires_at: now.saturating_sub(1),
+            nonce: "expired-nonce".into(),
+            policy_version: POLICY_VERSION.into(),
+            explanation: String::new(),
+        };
+        // approve 侧：pending 账本中的过期授权 → action_expired
+        broker
+            .pending_navigation_approvals
+            .lock()
+            .unwrap()
+            .insert("expired-nonce".into(), expired.clone());
+        match broker.approve_navigation_confirmation(
+            "expired-nonce".into(),
+            "https://example.com/late".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "action_expired"),
+            other => panic!("过期授权 approve 必须拒绝，实际 {other:?}"),
+        }
+        // consume 侧：issued 账本中的过期 Pending 授权 → action_expired
+        broker.issued_actions.lock().unwrap().insert(
+            "expired-nonce".into(),
+            IssuedAuthorization::Pending(Box::new(expired)),
+        );
+        match broker.consume_navigation(
+            FfiAuthorizedAction {
+                session_id: "s".into(),
+                tab_id: "t".into(),
+                document_generation: 1,
+                origin: "https://example.com".into(),
+                method: "GET".into(),
+                canonical_parameters: "/late".into(),
+                scope: "navigation".into(),
+                expires_at: now.saturating_sub(1),
+                nonce: "expired-nonce".into(),
+                policy_version: POLICY_VERSION.into(),
+                explanation: String::new(),
+            },
+            "https://example.com/late".into(),
+            "navigation".into(),
+        ) {
+            FfiDecision::Deny { reason } => assert_eq!(reason.code, "action_expired"),
+            other => panic!("过期授权 consume 必须拒绝，实际 {other:?}"),
+        }
     }
 }
 

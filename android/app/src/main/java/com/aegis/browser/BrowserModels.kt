@@ -51,6 +51,21 @@ enum class TabsPosition { TOP, LEFT }
 internal fun Boolean?.orFalse(): Boolean = this ?: false
 
 /**
+ * AD-260（2026-10-01 审计）：WebView 安全提示分型——版本检查提示与一般
+ * 安全提示此前共用同一对话框（按钮恒「去更新/稍后」：导航被拒/历史不可用
+ * 等瞬时提示也顶着「去更新」按钮，误导用户）。类型化后由
+ * [com.aegis.browser.MainDialogs] 按分型渲染：VERSION_CHECK 双按钮
+ * （去更新/稍后），SECURITY_NOTICE 单按钮（知道了）。
+ */
+data class WebViewAlertNotice internal constructor(
+    val message: String,
+    val kind: Kind,
+) {
+    /** 提示分型（决定对话框按钮形态）。 */
+    enum class Kind { VERSION_CHECK, SECURITY_NOTICE }
+}
+
+/**
  * AD-110（审计 2026-09-23 清单·A6 批）：审批对话框过期时刻的用户可读格式化。
  * Instant.toString() 输出 ISO-8601（如 2026-09-27T04:30:00Z），用户不可读——
  * 格式化为系统时区 `yyyy-MM-dd HH:mm`。minSdk 26 可用 java.time；kotlinx

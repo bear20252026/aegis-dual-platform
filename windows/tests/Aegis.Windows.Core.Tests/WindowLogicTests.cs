@@ -76,8 +76,8 @@ public sealed class SecurityLogTests : IDisposable
         Aegis.Windows.Core.Security.SecurityLog.Write("第一行\r\n第二行\\结束");
 
         var text = ReadLog();
-        Assert.Single(text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.Contains("第一行")));
+        Assert.Single(text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries),
+            l => l.Contains("第一行"));
         Assert.DoesNotContain(text, "第一行" + Environment.NewLine);
     }
 
@@ -88,10 +88,46 @@ public sealed class SecurityLogTests : IDisposable
         Aegis.Windows.Core.Security.SecurityLog.Write(new string('x', 5000));
 
         var text = ReadLog();
-        var line = Assert.Single(text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
-            .Where(l => l.Contains("xxxx")));
+        var line = Assert.Single(text.Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries),
+            l => l.Contains("xxxx"));
         Assert.True(line.Length < 4100);
         Assert.EndsWith("…(截断)", line);
+    }
+
+    // ===== CS-360（2026-10-01 审计）：1MB 轮转行为（保留 .1）零测试补齐 =====
+
+    [Fact]
+    public void Write_RotatesAt1MB_RetainingSingleBackup()
+    {
+        // CS-360：满 1MB 改名保留一份 .1——刷量攻击不能抹除全部取证痕迹
+        //（此前 File.Delete 直接清空）；轮转后当前文件重新计体量
+        var big = new string('x', 4000);
+        for (var i = 0; i < 300; i++)  // 300 × ~4KB ≈ 1.2MB——跨过 1MB 阈值
+            Aegis.Windows.Core.Security.SecurityLog.Write(big);
+
+        var path = Path.Combine(_dir, "security.log");
+        Assert.True(File.Exists(path), "轮转后当前日志文件应重建");
+        Assert.True(File.Exists(path + ".1"), "超过 1MB 后应轮转保留 .1 备份");
+        Assert.True(new FileInfo(path).Length <= 1024 * 1024 + 8192,
+            "当前文件应在轮转后回到远低于 1MB 的体量");
+    }
+
+    // ===== WB-139（2026-10-01 审计核验）：页面可控多段载荷的换行折叠回归锚 =====
+
+    [Fact]
+    public void Write_FoldsNewlines_InMultiSegmentPageControlledPayload()
+    {
+        // WB-139 前提核验：NtpBridge.jsError 把页面可控串传入 SecurityLog.Write，
+        // 而 Write 在唯一落盘点对**全部**消息折叠 \r\n（SecurityLog.cs:53-55）
+        //——jsError 无特权旁路，前提已由 CS-247 修复闭环。本用例锁定
+        // 多段载荷（message | 堆栈）整链路的折叠契约
+        Aegis.Windows.Core.Security.SecurityLog.Write(
+            "TypeError: boom\r\nat https://evil.example/x?token=1\t[1]");
+
+        var lines = File.ReadAllLines(Path.Combine(_dir, "security.log"));
+        var payload = Assert.Single(lines, l => l.Contains("TypeError"));
+        Assert.DoesNotContain("\r", payload);
+        Assert.DoesNotContain("\n", payload);
     }
 
     private string ReadLog() =>

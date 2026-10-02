@@ -76,9 +76,12 @@ def read_manifest(path: Path) -> dict[str, object]:
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"无法读取清单: {path}: {error}") from error
     if not isinstance(value, dict):
-        # TRY004 豁免：ValueError 是本模块清单校验的既定契约
-        #（PY-146 用例与调用方均按 ValueError 处理），不改抛 TypeError
-        raise ValueError("清单根节点必须是对象")  # noqa: TRY004
+        # ValueError 是本模块清单校验的既定契约（PY-146 用例与调用方
+        # 均按 ValueError 处理），不改抛 TypeError。
+        # PY-238（2026-10-01 审计）：显式 select 后 TRY004 不在规则面——
+        # 该 noqa 成为死指令（RUF100），删除；如日后扩面纳入 TRY004
+        # 再按需重新豁免。
+        raise ValueError("清单根节点必须是对象")
     return value
 
 

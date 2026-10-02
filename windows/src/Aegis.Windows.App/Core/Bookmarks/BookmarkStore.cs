@@ -17,7 +17,10 @@ public sealed class BookmarkStore
 
     public BookmarkStore(string dbPath) => _dbPath = dbPath;
 
-    /// <summary>添加书签；URL 重复为 no-op 并返回 false（幂等）。</summary>
+    /// <summary>添加书签；URL 重复为 no-op 并返回 false（幂等）。
+    /// CS-340（2026-10-01 审计）：Add/Rename/Import 补长度钳制（CS-319 只落
+    /// HistoryStore）——页面可控任意长 title/URL 此前可落库回读渲染；
+    /// 复用 TextLimits.Clamp 代理对安全口径（2048 URL / 256 标题）。</summary>
     public bool Add(string title, string url)
     {
         if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(title))
@@ -25,8 +28,8 @@ public sealed class BookmarkStore
         using var connection = Open();
         using var insert = connection.CreateCommand();
         insert.CommandText = "INSERT OR IGNORE INTO bookmarks(title, url, created_at) VALUES($t,$u,$c)";
-        insert.Parameters.AddWithValue("$t", title);
-        insert.Parameters.AddWithValue("$u", url);
+        insert.Parameters.AddWithValue("$t", Aegis.Windows.Core.TextLimits.Clamp(title, Aegis.Windows.Core.TextLimits.MaxTitleChars));
+        insert.Parameters.AddWithValue("$u", Aegis.Windows.Core.TextLimits.Clamp(url, Aegis.Windows.Core.TextLimits.MaxUrlChars));
         // CS-286：UTC round-trip 口径——与 HistoryStore.visited_at 一致（C8 已统一）；
         // 两库时间戳同源，跨库排序/对账不再有本地时偏移错位
         insert.Parameters.AddWithValue("$c", DateTime.UtcNow.ToString("o"));
@@ -53,8 +56,10 @@ public sealed class BookmarkStore
             if (string.IsNullOrWhiteSpace(candidate.Url) || string.IsNullOrWhiteSpace(candidate.Title))
                 continue;
             total++;
-            title.Value = candidate.Title;
-            url.Value = candidate.Url;
+            // CS-340：导入路径同口径钳制（BookmarkImporter 的上限此前只过滤
+            // 不截断——恰超限条目整条丢弃；库层钳制后保留前缀）
+            title.Value = Aegis.Windows.Core.TextLimits.Clamp(candidate.Title, Aegis.Windows.Core.TextLimits.MaxTitleChars);
+            url.Value = Aegis.Windows.Core.TextLimits.Clamp(candidate.Url, Aegis.Windows.Core.TextLimits.MaxUrlChars);
             createdAt.Value = DateTime.UtcNow.ToString("o");
             if (insert.ExecuteNonQuery() > 0)
                 imported++;
@@ -83,7 +88,7 @@ public sealed class BookmarkStore
         return delete.ExecuteNonQuery() > 0;
     }
 
-    /// <summary>重命名书签标题（书签管理器使用）。</summary>
+    /// <summary>重命名书签标题（书签管理器使用）。CS-340：标题钳制 256。</summary>
     public bool Rename(long id, string title)
     {
         if (string.IsNullOrWhiteSpace(title))
@@ -91,7 +96,7 @@ public sealed class BookmarkStore
         using var connection = Open();
         using var update = connection.CreateCommand();
         update.CommandText = "UPDATE bookmarks SET title = $t WHERE id = $id";
-        update.Parameters.AddWithValue("$t", title);
+        update.Parameters.AddWithValue("$t", Aegis.Windows.Core.TextLimits.Clamp(title, Aegis.Windows.Core.TextLimits.MaxTitleChars));
         update.Parameters.AddWithValue("$id", id);
         return update.ExecuteNonQuery() > 0;
     }
@@ -115,17 +120,29 @@ public sealed class BookmarkStore
         return Convert.ToInt64(select.ExecuteScalar()) > 0;
     }
 
-    /// <summary>全部书签（按加入顺序）。</summary>
+    /// <summary>全部书签（按加入顺序）。
+    /// CS-353（2026-10-01 审计）：库损坏 BLOB 行抛 InvalidCastException 此前
+    /// 裸逃逸（书签管理器 Reload 直接炸窗）——归并空 + SecurityLog 留痕
+    ///（fail-safe：书签栏为空可恢复，进程不可崩）。</summary>
     public IReadOnlyList<Bookmark> All()
     {
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        select.CommandText = "SELECT id, title, url FROM bookmarks ORDER BY id";
-        using var reader = select.ExecuteReader();
-        var list = new List<Bookmark>();
-        while (reader.Read())
-            list.Add(new Bookmark(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
-        return list;
+        try
+        {
+            using var connection = Open();
+            using var select = connection.CreateCommand();
+            select.CommandText = "SELECT id, title, url FROM bookmarks ORDER BY id";
+            using var reader = select.ExecuteReader();
+            var list = new List<Bookmark>();
+            while (reader.Read())
+                list.Add(new Bookmark(reader.GetInt64(0), reader.GetString(1), reader.GetString(2)));
+            return list;
+        }
+        catch (Exception ex) when (ex is SqliteException or InvalidCastException or InvalidOperationException or IOException)
+        {
+            Security.SecurityLog.Write(
+                $"[bookmark] 书签读取失败（回退空列表）: {ex.GetType().Name}: {ex.Message}");
+            return Array.Empty<Bookmark>();
+        }
     }
 
     private SqliteConnection Open()

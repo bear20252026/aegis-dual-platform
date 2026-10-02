@@ -19,6 +19,26 @@ class AegisApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // AD-282（2026-10-01 审计）：broker 后台预热——lazy 的首次消费发生在
+        // 主线程（BrowserViewModel.factory → AndroidBroker() 构造，含
+        // REQUIRE_NATIVE_POLICY_CORE=true 时的 JNA Native.load dlopen），
+        // 冷启动首帧被同步原生加载拖住。后台线程提前触发 lazy 初始化
+        // （synchronized 惰性线程安全），主线程首消费退化为已初始化字段读取。
+        Thread(
+            {
+                try {
+                    broker.toString()
+                } catch (expected: RuntimeException) {
+                    // 预热失败不阻塞启动——正式消费点会再次初始化并按其
+                    // fail-closed 语义处理（此处仅记录）
+                    android.util.Log.w("Aegis", "broker 预热失败（延迟到首消费处理）: ${expected.javaClass.name}")
+                }
+            },
+            "aegis-broker-prewarm",
+        ).apply {
+            isDaemon = true
+            start()
+        }
         // AD-065（2026-09-24 审计）：注册全局未捕获异常处理器——崩溃前留痕
         // （logcat -s AegisCrash），随后委托系统默认处理器（崩溃语义不变：
         // 该弹的弹、该杀的杀，只是多一条带堆栈的记录）。

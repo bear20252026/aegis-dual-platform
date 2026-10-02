@@ -17,10 +17,14 @@ using Microsoft.Web.WebView2.Core;
 ///   存活窗口仍在使用的数据目录）。</summary>
 public static class WebViewEnvironment
 {
-    // CS-178：Lazy（ExecutionAndPublication）——`??=` 赋值非原子，两个标签
-    // 并发首开可各建一个环境（其中一个连同其浏览器进程泄漏）
-    private static readonly Lazy<Task<CoreWebView2Environment>> Shared =
-        new(() => CreateAsync(null));
+    // CS-178：门闩串行化——`??=` 赋值非原子，两个标签并发首开可各建一个环境
+    //（其中一个连同其浏览器进程泄漏）。
+    // CS-347（2026-10-01 审计）：失败可重置——Lazy 会把 Faulted 任务永久缓存，
+    // 首建失败（如 WebView2 运行时未装/用户目录被锁）后所有标签不可用到重启。
+    // 改 SemaphoreSlim 门闩：成功结果保留单次创建语义（恒缓存），失败不缓存
+    //（下次调用重试）。
+    private static readonly SemaphoreSlim SharedGate = new(1, 1);
+    private static Task<CoreWebView2Environment>? _shared;
 
     private static readonly object _inPrivateLock = new();
     private static readonly List<string> _inPrivateDirs = new();
@@ -28,9 +32,31 @@ public static class WebViewEnvironment
     // CS-181：临时目录清理重试参数（WebView2 子进程退出有延迟——锁定窗口内删除必然失败）
     private const int DeleteRetryCount = 5;
     private const int DeleteRetryDelayMs = 800;
+    private const string InPrivateDirPrefix = "Aegis.InPrivate.";
 
-    /// <summary>共享环境（惰性创建——参数依 PrivacySettings.SecureDns）。</summary>
-    public static Task<CoreWebView2Environment> SharedAsync() => Shared.Value;
+    /// <summary>共享环境（惰性创建——参数依 PrivacySettings.SecureDns）。
+    /// 并发首开串行化；创建失败不缓存（下次重试），成功后单例。</summary>
+    public static async Task<CoreWebView2Environment> SharedAsync()
+    {
+        var cached = _shared;
+        if (cached is not null)
+            return await cached;
+        await SharedGate.WaitAsync();
+        try
+        {
+            if (_shared is null)
+            {
+                // 仅成功结果入缓存；异常向上抛且不留 Faulted 任务
+                var environment = await CreateAsync(null);
+                _shared = Task.FromResult(environment);
+            }
+            return await _shared;
+        }
+        finally
+        {
+            SharedGate.Release();
+        }
+    }
 
     /// <summary>InPrivate 环境（每个无痕窗口独立用户目录）。返回租约——窗口
     /// 关闭时 Dispose，最后一个租约释放后异步清理全部临时目录。</summary>
@@ -43,7 +69,7 @@ public static class WebViewEnvironment
         lock (_inPrivateLock)
         {
             dir = Path.Combine(
-                Path.GetTempPath(), "Aegis.InPrivate." + Guid.NewGuid().ToString("N"));
+                Path.GetTempPath(), InPrivateDirPrefix + Guid.NewGuid().ToString("N"));
             _inPrivateDirs.Add(dir);
         }
         try
@@ -69,6 +95,20 @@ public static class WebViewEnvironment
         _ = Task.Run(() => DeleteWithRetry(dir));
     }
 
+    // CS-352 测试缝：登记/撤销"本进程在用"目录（孤儿清理的跳过分支）——
+    // 不触发清理副作用，测试结束撤销即可
+    internal static void RegisterInPrivateDirForTests(string dir)
+    {
+        lock (_inPrivateLock)
+            _inPrivateDirs.Add(dir);
+    }
+
+    internal static void UnregisterInPrivateDirForTests(string dir)
+    {
+        lock (_inPrivateLock)
+            _inPrivateDirs.Remove(dir);
+    }
+
     private static void DeleteWithRetry(string dir)
     {
         for (var i = 0; i < DeleteRetryCount; i++)
@@ -86,6 +126,47 @@ public static class WebViewEnvironment
         }
         // CS-180：重试全败不再静默——临时目录残留可观测（磁盘占用/隐私审计）
         SecurityLog.Write($"[inprivate] 无痕临时目录清理失败（保留待下次清理）: {dir}");
+    }
+
+    /// <summary>CS-352（2026-10-01 审计）：启动扫描 %TEMP% 清理崩溃残留的
+    /// 无痕临时目录——正常退出路径经引用计数清理，崩溃/强杀后永久残留
+    //（隐私承诺失效）。仅删除本进程未持有的 Aegis.InPrivate.* 目录；删除
+    /// 失败（被并发实例的浏览器进程锁定等）跳过留痕，不打断启动。
+    /// tempRoot 参数为测试注入缝（生产恒为真实 %TEMP%）。</summary>
+    internal static int CleanupOrphanInPrivateDirs(string? tempRoot = null)
+    {
+        var root = tempRoot ?? Path.GetTempPath();
+        string[] candidates;
+        try
+        {
+            candidates = Directory.GetDirectories(root, InPrivateDirPrefix + "*");
+        }
+        catch (Exception)
+        {
+            return 0;  // %TEMP% 不可读——不打断启动
+        }
+        lock (_inPrivateLock)
+        {
+            var removed = 0;
+            foreach (var candidate in candidates)
+            {
+                if (_inPrivateDirs.Contains(candidate))
+                    continue;  // 本进程在用（无痕窗口存活）
+                try
+                {
+                    Directory.Delete(candidate, recursive: true);
+                    removed++;
+                }
+                catch (Exception)
+                {
+                    // 并发实例持有/句柄未释放——留待下次启动（失败可观测）
+                    SecurityLog.Write($"[inprivate] 崩溃残留无痕目录清理失败（跳过）: {candidate}");
+                }
+            }
+            if (removed > 0)
+                SecurityLog.Write($"[inprivate] 已清理崩溃残留无痕临时目录 {removed} 个");
+            return removed;
+        }
     }
 
     private static async Task<CoreWebView2Environment> CreateAsync(string? userDataFolder)

@@ -92,7 +92,12 @@ pub fn extract_host(url: &str) -> Option<String> {
     if host.is_empty() {
         None
     } else {
-        Some(host.to_lowercase())
+        // RS-259（2026-10-01 审计）：ASCII 小写归一——此前全量 to_lowercase
+        //（Unicode 折叠）与 origin.rs 的 to_ascii_lowercase 双链路口径分叉：
+        // 非 ASCII host（如土耳其语 İ）经 Unicode 折叠会改变字节长度/内容
+        // （İ → i+U+0307），同一 host 在两条链路产出不同键。host 匹配域
+        // 是 DNS（ASCII 语义），统一 ASCII 折叠。
+        Some(host.to_ascii_lowercase())
     }
 }
 
@@ -311,5 +316,29 @@ mod tests {
         assert_eq!(extract_host("https://:8080/x"), None);
         // host:port（authority 即全部）保留端口语义
         assert_eq!(extract_hostname("host:8080"), "host:8080");
+    }
+
+    // —— RS-259 回归（审计 2026-10-01）：ASCII 小写归一 ——
+
+    #[test]
+    fn extract_host_lowercases_ascii_only_like_origin_chain() {
+        // RS-259：与 origin.rs 的 to_ascii_lowercase 统一——非 ASCII 大写
+        // 字符按原样保留（Unicode 折叠会改变字节形态，双链路键分叉）。
+        // 土耳其语 İ（U+0130）经全量 to_lowercase 变为 "i"+U+0307（两码元），
+        // ASCII 折叠则原样保留。
+        assert_eq!(
+            extract_host("https://İstanbul.COM/"),
+            Some("İstanbul.com".into()),
+            "非 ASCII 大写保留原样，ASCII 大写折叠（与 origin 链同口径）"
+        );
+        assert_eq!(
+            extract_host("https://Ünïcode.EXAMPLE/"),
+            Some("Ünïcode.example".into())
+        );
+        // 纯 ASCII 折叠行为不变（既有锚点）
+        assert_eq!(
+            extract_host("https://Mixed-Case.Host.IO/"),
+            Some("mixed-case.host.io".into())
+        );
     }
 }

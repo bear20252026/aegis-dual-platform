@@ -43,6 +43,17 @@ class MainActivity : ComponentActivity() {
     // broker 收敛到这一个组合点（factory(application)），其余层不再强转。
     private val viewModel: BrowserViewModel by viewModels { BrowserViewModel.factory(application) }
 
+    /**
+     * AD-283（2026-10-01 审计）：外链 VIEW intent 消费频控窗口（毫秒）——
+     * 第三方应用高频 intent 打断面；显式用户外链的单次意图间隔远大于此值。
+     */
+    private var lastExternalIntentConsumedAt = 0L
+
+    private companion object {
+        /** AD-283：外链 intent 最小消费间隔（毫秒）。 */
+        const val EXTERNAL_INTENT_MIN_INTERVAL_MS = 1_500L
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // edge-to-edge（targetSdk 36 在 Android 15+ 强制启用）：内容默认延伸进
@@ -65,7 +76,9 @@ class MainActivity : ComponentActivity() {
             // AD-239（2026-09-26 审计）：检查经 ViewModel 存续层去重——未声明
             // configChanges 的变更触发 Activity 重建后不得再次弹提示。
             viewModel.checkWebViewVersionOnce { message ->
-                lifecycleScope.launch(Dispatchers.Main) { viewModel.setWebViewAlert(message) }
+                // AD-260（2026-10-01 审计）：版本检查提示走 VERSION_CHECK 分型
+                // （双按钮「去更新/稍后」）——与一般安全提示（单按钮）分型渲染。
+                lifecycleScope.launch(Dispatchers.Main) { viewModel.setWebViewVersionAlert(message) }
             }
         }
         // AD-197（审计 2026-09-23 清单·A7 批）：冷启动装配时序固化（次序即
@@ -278,6 +291,17 @@ class MainActivity : ComponentActivity() {
         // AD-240（2026-09-26 审计）：更新宿主 Intent——不 setIntent 则后续
         // getIntent() 仍指旧 Intent（launchMode 复用路径的 intent 消费语义）。
         setIntent(intent)
+        // AD-283（2026-10-01 审计）：外链消费频控——openExternalUrl 经
+        // bypassDebounce 绕过防抖，第三方应用高频发 VIEW intent 可持续打断
+        // 浏览（页面被顶替）。窗口期内（[EXTERNAL_INTENT_MIN_INTERVAL_MS]）
+        // 的重复 intent 静默丢弃（显式用户外链不受影响——单次意图本就间隔
+        // 远大于窗口）。
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastExternalIntentConsumedAt < EXTERNAL_INTENT_MIN_INTERVAL_MS) {
+            android.util.Log.w("Aegis", "外链 VIEW intent 超频被丢弃（AD-283 频控）")
+            return
+        }
+        lastExternalIntentConsumedAt = now
         // P1-4 修复（全面审计批次4）：热启动外链消费——launchMode 调整或
         // singleTop 复用时 VIEW intent 经此分发；与 onCreate 冷启动路径
         // 同走 openExternalUrl 安全链路。

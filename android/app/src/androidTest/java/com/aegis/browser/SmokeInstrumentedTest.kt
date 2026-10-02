@@ -22,7 +22,35 @@ class SmokeInstrumentedTest {
     @Test
     fun targetPackageIsAegis() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.aegis.browser", context.packageName)
+        // AD-288（2026-10-01 审计）：debug 构建带 .debug 后缀（applicationIdSuffix）
+        // ——instrumented 面锁 debug 包名；release/distribution 保持
+        // com.aegis.browser（e2e 脚本与发布链契约）。
+        assertEquals("com.aegis.browser.debug", context.packageName)
+    }
+
+    /**
+     * AD-276（2026-10-01 审计）：safeBrowsingEnabled=true 此前零自动化断言
+     * （注释称真机覆盖，实际不存在）。getSafeBrowsingEnabled 是 API 26+
+     * getter——JVM/Robolectric 侧无实现（恒 false），在真机/模拟器断言。
+     */
+    @Test
+    fun safeBrowsingIsEnabledAfterEngineConfigure() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        var assertionError: AssertionError? = null
+        InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            try {
+                val wv = WebView(context)
+                try {
+                    BrowserEngine(wv).configure()
+                    assertTrue("safeBrowsingEnabled 必须为 true（AD-276）", wv.settings.safeBrowsingEnabled)
+                } finally {
+                    wv.destroy()
+                }
+            } catch (e: AssertionError) {
+                assertionError = e
+            }
+        }
+        assertionError?.let { throw it }
     }
 
     @Test

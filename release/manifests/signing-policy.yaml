@@ -11,6 +11,14 @@
 # 改述为 gh-attestation，身份字段对齐 --signer-workflow 承诺约束；cosign
 # 路线降级为 planned_* 字段（未接线——消除"声明 cosign、执行 gh"的假承诺）。
 # 取舍：不改实现去凑旧策略（cosign 接线无排期），而让策略描述现实。
+#
+# PY-253（2026-10-01 审计）：机器消费口径注明——本文件当前唯一被机器
+# 消费的字段是 policy.threshold（release/tools/verify_manifest/verify_manifest.py
+# 的 _load_threshold 以 yaml.safe_load 结构化读取；测试锚见
+# release_tools_test.TestLoadThresholdStructuredYaml.test_real_policy_threshold_is_two）。
+# 其余字段（signing_tool/signer_workflow/planned_*/rollback/verify）是
+# 文档型声明，无代码读取——变更它们不会触发任何门禁，修改时须人工同步
+# release.yml 与 runbooks/security-release.md（或后续接 signer_workflow 消费）。
 
 policy:
   version: "1.1"

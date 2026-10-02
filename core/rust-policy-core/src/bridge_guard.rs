@@ -196,4 +196,41 @@ mod tests {
         let s2 = guard_no_https.inject_script();
         assert!(s2.contains("REQUIRE_HTTPS = false"));
     }
+
+    // —— PY-249/RS-242 回归（审计 2026-10-01） ——
+
+    #[test]
+    fn beacon_backed_with_navigator_preserving_existence_short_circuit() {
+        // PY-249：beacon0 必须 bind(navigator)——`sendBeacon && sendBeacon`
+        // 恒等自身的笔误使调用时 this 丢失（严格模式 TypeError 守卫自炸）；
+        // 存在性短路（sendBeacon 缺失时 undefined）保留
+        let s = BridgeGuard::new(vec![], false).inject_script();
+        assert!(
+            s.contains("navigator.sendBeacon && navigator.sendBeacon.bind(navigator);"),
+            "beacon0 必须保留存在性短路 + 明确 bind(navigator)"
+        );
+        assert!(
+            !s.contains("navigator.sendBeacon && navigator.sendBeacon;"),
+            "恒等自身的笔误形态必须移除"
+        );
+    }
+
+    #[test]
+    fn all_four_outlets_registered_with_tostring_guard() {
+        // RS-242：fetch/XHR.open/sendBeacon/WebSocket 四桥出口覆盖注册
+        // proxy.register.v1（与 shield.rs 同款）——未注册时 toString() 一行
+        // 暴露包装源码（内含品牌特征）
+        let s = BridgeGuard::new(vec![], false).inject_script();
+        let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
+        assert_eq!(
+            s.matches(&format!("Symbol.for('{reg_sym}')")).count(),
+            1,
+            "注册接口引用单次（取一次批量注册）"
+        );
+        assert!(s.contains("__aegisReg(window.fetch, fetch0);"));
+        assert!(s.contains("__aegisReg(XMLHttpRequest.prototype.open, open0);"));
+        // beacon 注册带 beacon0 存在性守卫（sendBeacon 缺失时不注册 undefined）
+        assert!(s.contains("if (__aegisReg && beacon0) __aegisReg(navigator.sendBeacon, beacon0);"));
+        assert!(s.contains("__aegisReg(window.WebSocket, WS);"));
+    }
 }

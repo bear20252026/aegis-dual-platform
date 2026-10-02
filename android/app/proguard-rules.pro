@@ -20,8 +20,14 @@
 # JNA 按「方法名」映射 native 符号（aegis_policy_core_broker_*）——
 # R8 混淆 Abi 接口后 System.load 可过但符号查找全部失败 → 静默 null →
 # registerSession fail-closed 崩溃（release minified 专属，debug 不复现）。
--keep class com.sun.jna.** { *; }
--keep class com.sun.jna.ptr.** { *; }
+# AD-279（2026-10-01 审计）：JNA 全量 keep（`com.sun.jna.** { *; }` 含全部
+# 内部实现与私有成员）抵消混淆——收窄为「公开类 + 公开成员」（JNA 对外
+# API 面：Native/Library/Pointer/Memory 等经反射触达的公开构造与方法）。
+# com.sun.jna.internal.**（Cleaner 等按类名反射探测的实现类）保持全量：
+# JNA 静态初始化按名字符串加载，成员被剥即运行期 NoSuchMethod。
+-keep public class com.sun.jna.** { public *; }
+-keep public interface com.sun.jna.** { *; }
+-keep class com.sun.jna.internal.** { *; }
 -dontwarn com.sun.jna.**
 -keep interface com.aegis.broker.NativePolicyCoreBridge$NativePolicyCoreAbi { *; }
 -keep class com.aegis.broker.NativePolicyCoreBridge { *; }
@@ -29,7 +35,6 @@
 # 与 Bridge 的 Abi 同为按名映射接口——漏 keep 时方法名被混淆，
 # Native.load 符号查找失败 → 门禁 block → 全部导航 fail-closed 拒绝。
 -keep interface com.aegis.broker.NativePolicyCoreGate$NativePolicyCoreAbi { *; }
--keep class com.sun.jna.internal.** { *; }
 
 # ---- androidx.webkit：document-start 注入用 View.setTag(key=R$id) ——
 # R8 优化掉未引用的 R$id 字段后 key=0 → IllegalArgumentException 启动崩

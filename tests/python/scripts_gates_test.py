@@ -17,8 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import verify_vectors as vv
 import verify_release_schema as vrs
+import verify_vectors as vv
 from generate_sbom import generate_sbom as gen_sbom_mod
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -201,6 +201,133 @@ class TestBootstrapPythonCheck:
         assert "python" in out
 
 
+# ---------------------------------------------------------------- PY-233/246
+class TestBootstrapVersionFloors:
+    """PY-233（2026-10-01 审计）：dotnet/node 版本下限断言（此前只验存在）。"""
+
+    def test_version_floor_parsing(self):
+        mod = _load_dash_script(ROOT / "scripts" / "bootstrap-dev-environment" / "run.py")
+        f = mod._version_floor_ok
+        # dotnet 口径："10.0.100" >= (10,)
+        assert f("10.0.100", (10,)) is True
+        assert f("9.0.204", (10,)) is False
+        assert f("11.0.100", (10,)) is True
+        # node 口径："v21.7.0" >= (21,)
+        assert f("v21.7.0", (21,)) is True
+        assert f("v20.11.0", (21,)) is False
+        assert f("v22.0.0", (21,)) is True
+        # fail-closed：解析不出任何数字段 → 不达标
+        assert f("unknown", (10,)) is False
+        assert f("", (10,)) is False
+
+    def test_check_enforces_floor(self, monkeypatch):
+        # _check 对版本不足的工具必须报失败（不只是展示版本号）
+        mod = _load_dash_script(ROOT / "scripts" / "bootstrap-dev-environment" / "run.py")
+        monkeypatch.setattr(mod.shutil, "which", lambda exe: r"C:\fake\dotnet.exe")
+
+        def fake_run(cmd, **k):
+            return subprocess.CompletedProcess(cmd, 0, stdout="8.0.412\n", stderr="")
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+        ok, detail = mod._check("dotnet", ["dotnet", "--version"], (10,))
+        assert ok is False and "8.0.412" in detail and "10" in detail
+
+    def test_check_accepts_floor_met(self, monkeypatch):
+        mod = _load_dash_script(ROOT / "scripts" / "bootstrap-dev-environment" / "run.py")
+        monkeypatch.setattr(mod.shutil, "which", lambda exe: r"C:\fake\node.exe")
+
+        def fake_run(cmd, **k):
+            return subprocess.CompletedProcess(cmd, 0, stdout="v21.7.0\n", stderr="")
+
+        monkeypatch.setattr(mod.subprocess, "run", fake_run)
+        ok, detail = mod._check("node", ["node", "--version"], (21,))
+        assert ok is True and "v21.7.0" in detail
+
+
+class TestMigrateProfileDataSkeleton:
+    """PY-246（2026-10-01 审计）：migrate-profile-data 骨架零单测补齐
+    （含 python -O 下断言剥离仍稳定——SP-038/085 语义由退出码承载）。"""
+
+    @staticmethod
+    def _load():
+        return _load_dash_script(ROOT / "scripts" / "migrate-profile-data" / "run.py")
+
+    def test_skeleton_returns_not_implemented(self, capsys):
+        mod = self._load()
+        assert mod.main([]) == mod.EXIT_NOT_IMPLEMENTED == 3
+        out = capsys.readouterr().out
+        assert "四步骤" not in out  # 只是措辞锚——真实锚在下方
+        assert out.count("1. ") == 1 and "4. " in out  # 四步骤逐项打印
+
+    def test_cli_args_accepted(self, capsys):
+        mod = self._load()
+        assert mod.main(["--source", "old", "--target", "new", "--dry-run"]) == 3
+        out = capsys.readouterr().out
+        assert "old" in out and "new" in out and "dry_run=True" in out
+
+    def test_python_O_still_returns_not_implemented(self):
+        # PY-246：`python -O` 剥离 assert 后骨架语义不变（退出码 3 不依赖断言）
+        import subprocess as sp
+        prog = ROOT / "scripts" / "migrate-profile-data" / "run.py"
+        proc = sp.run([sys.executable, "-O", str(prog)],
+                      capture_output=True, text=True, timeout=60, check=False)
+        assert proc.returncode == 3
+
+    def test_migration_steps_declared(self):
+        mod = self._load()
+        assert len(mod.MIGRATION_STEPS) == 4
+        assert all(mod.MIGRATION_STEPS)
+
+
+class TestVerifyAgentCatalogGate:
+    """PY-246/254（2026-10-01 审计）：verify_agent_catalog.check() 四项断言单测
+    （此前 CI 脚本零单测且只断言两项——门禁弱于 pytest 侧）。"""
+
+    @staticmethod
+    def _load():
+        import verify_agent_catalog as vac
+        return vac
+
+    def test_real_catalog_passes(self):
+        vac = self._load()
+        doc = __import__("yaml").safe_load(
+            vac.CATALOG.read_text(encoding="utf-8"))
+        assert vac.check(doc) == []
+
+    def test_missing_policy_version_reported(self):
+        vac = self._load()
+        doc = {"default_deny": True, "policy_version": "",
+               "actions": [{"name": "a", "read_only": True,
+                            "budget": {"max_actions": 5, "max_bytes": 64}}]}
+        errors = vac.check(doc)
+        assert any("policy_version" in e for e in errors)
+
+    def test_bool_budget_rejected(self):
+        # PY-251 口径：bool 是 int 子类——max_actions: true 不得过 CI 门禁
+        vac = self._load()
+        doc = {"default_deny": True, "policy_version": "1.0",
+               "actions": [{"name": "a", "read_only": True,
+                            "budget": {"max_actions": True, "max_bytes": 64}}]}
+        errors = vac.check(doc)
+        assert any("max_actions" in e and "正整数" in e for e in errors)
+
+    def test_read_only_and_default_deny_enforced(self):
+        vac = self._load()
+        doc = {"default_deny": False, "policy_version": "1.0",
+               "actions": [{"name": "a", "read_only": False,
+                            "budget": {"max_actions": 5, "max_bytes": 64}}]}
+        errors = vac.check(doc)
+        assert any("default_deny" in e for e in errors)
+        assert any("read_only" in e for e in errors)
+
+    def test_main_exit_codes(self, monkeypatch, capsys):
+        vac = self._load()
+        import pathlib
+        bad = pathlib.Path("bad-catalog-does-not-exist.yaml")
+        monkeypatch.setattr(vac, "CATALOG", bad)
+        assert vac.main() == 2
+
+
 # ---------------------------------------------------------------- SP-155
 class TestToolsBadJsonGuard:
     def test_artifact_set_main_bad_json_exit_2(self, tmp_path, capsys, monkeypatch):
@@ -234,6 +361,37 @@ class TestToolsBadJsonGuard:
         doc = json.loads(out.read_text(encoding="utf-8"))
         assert doc["bomFormat"] == "CycloneDX"
         assert gen_sbom_mod({"artifacts": []})["components"] == []
+
+    def test_generate_sbom_percent_encoded_url_unquoted(self):
+        # PY-226（2026-10-01 审计）：Release browser_url 对含空格资产名是
+        # percent-encoded——SBOM 组件名须 unquote（与 verify_artifact_set 的
+        # PY-210 口径一致），否则 SBOM 对账必失败
+        sbom = gen_sbom_mod({"artifacts": [
+            {"platform": "windows-x64",
+             "url": "https://github.com/o/r/releases/download/v1/a%20b%20v2.zip",
+             "sha256": "a" * 64}]})
+        assert sbom["components"][0]["name"] == "a b v2.zip"
+
+
+# ---------------------------------------------------------------- PY-220
+class TestToolchainLocksAligned:
+    def test_legacy_dev_lock_matches_ci_lock_versions(self):
+        # PY-220（2026-10-01 审计）：legacy-python-guard 用 legacy dev 锁装
+        # 工具却跑活跃树门禁——两把锁版本漂移即两套规则口径。共同工具的
+        # pin 必须与根 requirements-ci.in 一致（锁定对齐，防再漂移）。
+        import re as _re
+        ci = (ROOT / "requirements-ci.in").read_text(encoding="utf-8")
+        dev = (ROOT / "legacy" / "windows-pywebview" / "requirements-dev.txt").read_text(encoding="utf-8")
+
+        def pins(text):
+            return dict(_re.findall(r"^(ruff|mypy|bandit|pytest)==([\w.]+)$",
+                                    text, _re.MULTILINE))
+
+        ci_pins, dev_pins = pins(ci), pins(dev)
+        assert ci_pins and dev_pins
+        drift = {k: (dev_pins.get(k), ci_pins[k]) for k in ci_pins
+                 if dev_pins.get(k) != ci_pins[k]}
+        assert not drift, f"双锁版本漂移（dev vs ci.in）: {drift}"
 
 
 # 脚本可独立运行（无 pytest 环境时的最低验证）

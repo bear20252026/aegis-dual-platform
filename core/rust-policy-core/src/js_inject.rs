@@ -85,12 +85,20 @@ impl JsPipeline {
     /// RS-053（审计 2026-09-25）：拼接统一走 Vec collect + join——O(n)
     /// 单次分配，禁止回退为 format! 链式拼接（9 阶段嵌套 format! 每次
     /// 重新分配且参数顺序易错）。
+    ///
+    /// RS-273（2026-10-01 审计）：`name()` 接入生产消费——每个启用阶段的
+    /// 脚本前输出一行 `// stage: <name>` 注释（诊断/可观测通道；此前
+    /// trait 的 name() 生产零消费，是死接口）。阶段名内的行分隔符折叠为
+    /// 空格（自定义阶段名不得逃逸出注释行破坏 JS 语法）。
     pub fn build(&self) -> String {
         let parts: Vec<String> = self
             .stages
             .iter()
             .filter(|s| s.enabled())
-            .map(|s| s.inject_script())
+            .map(|s| {
+                let name = s.name().replace(['\n', '\r'], " ");
+                format!("// stage: {name}\n{}", s.inject_script())
+            })
             .collect();
         parts.join("\n")
     }
@@ -254,6 +262,60 @@ mod tests {
         let pos_second = script.find("var second = 2;").expect("second 阶段缺失");
         assert!(pos_first < pos_second, "阶段顺序必须保持注册序");
         assert!(script.contains('\n'), "阶段间以换行连接");
+    }
+
+    // —— RS-273 回归（审计 2026-10-01）：name() 生产消费 ——
+
+    #[test]
+    fn build_emits_stage_name_comments() {
+        // RS-273：build 输出逐阶段 `// stage: <name>` 注释——name() 此前
+        // 生产零消费（死接口），现作为管线输出的可观测通道
+        let mut pipeline = JsPipeline::new();
+        pipeline.add(Box::new(MockStage {
+            name: "Alpha",
+            js: "var a = 1;",
+            active: true,
+        }));
+        pipeline.add(Box::new(MockStage {
+            name: "Disabled",
+            js: "var d = 0;",
+            active: false,
+        }));
+        pipeline.add(Box::new(MockStage {
+            name: "Beta",
+            js: "var b = 2;",
+            active: true,
+        }));
+        let script = pipeline.build();
+        assert!(script.contains("// stage: Alpha\n"), "启用阶段名注释");
+        assert!(script.contains("// stage: Beta\n"), "第二启用阶段名注释");
+        assert!(!script.contains("// stage: Disabled"), "禁用阶段不得输出");
+        // 注释先于阶段脚本（同名配对可定位）
+        let pos_comment = script.find("// stage: Alpha").expect("Alpha 注释");
+        let pos_body = script.find("var a = 1;").expect("Alpha 脚本");
+        assert!(pos_comment < pos_body);
+    }
+
+    #[test]
+    fn stage_name_line_breaks_folded_in_comment() {
+        // RS-273：自定义阶段名含换行——折叠为空格，不得逃逸注释行破坏 JS
+        struct Tricky;
+        impl JsInjectable for Tricky {
+            fn name(&self) -> &str {
+                "evil\nalert(1); //"
+            }
+            fn inject_script(&self) -> String {
+                "var t = 1;".into()
+            }
+        }
+        let mut pipeline = JsPipeline::new();
+        pipeline.add(Box::new(Tricky));
+        let script = pipeline.build();
+        assert!(
+            script.starts_with("// stage: evil alert(1); //\n"),
+            "换行折叠为空格（注释行闭合）：{script:?}"
+        );
+        assert!(!script.contains("evil\nalert"));
     }
 
     #[test]

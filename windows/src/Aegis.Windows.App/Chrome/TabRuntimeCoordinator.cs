@@ -199,5 +199,8 @@ public sealed class TabRuntimeCoordinator : IDisposable
             catch (Exception) { }
         }
         _lifetimes.Clear();
+        // CS-366（2026-10-01 审计）：宿主字典清空收敛到 Dispose 单点——此前
+        // 两个调用方（主窗/无痕窗）各自 _runtimes.Clear()，约定分散易漂移
+        _runtimes.Clear();
     }
 }

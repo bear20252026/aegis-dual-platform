@@ -90,12 +90,25 @@ public partial class DownloadsWindow : Window
     {
         if (sender is FrameworkElement { DataContext: DownloadItem item })
         {
+            // CS-357（2026-10-01 审计）：FilePath 读取移入 try——item.FilePath 底层是
+            // Operation.ResultFilePath（RCW），浏览器会话结束后读取抛 COM 异常，
+            // 此前在 try 外读即未捕获弹窗（与 ShowInFolder 对齐口径）
+            string path;
+            try
+            {
+                path = item.FilePath;
+            }
+            catch (Exception)
+            {
+                MessageBox.Show(this, "文件信息已不可用（浏览器会话已结束）。", "打开文件",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
             // CS-172：危险扩展条目打开前二次确认（此前经确认下载后可直接执行）
             if (item.Dangerous
                 && MessageBox.Show(this, $"「{item.FileName}」为危险扩展文件，打开可能运行程序。确定打开？",
                     "危险文件", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
                 return;
-            var path = item.FilePath;
             if (string.IsNullOrEmpty(path) || !File.Exists(path))
             {
                 MessageBox.Show(this, "文件尚未下载完成或已移动。", "打开文件",

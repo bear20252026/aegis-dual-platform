@@ -25,6 +25,10 @@
 - 依据：S1 拆分 `main_webview.py`（763 行 → 薄入口 + shell_toolbar/nav_queue/api_bridge）的收益验证。
 
 ### D5：导航线程队列（NavQueue）防死锁（2026-08-14）
+> **WB-166（2026-10-01 审计）时代注记**：D5-D7 为 pywebview 归档栈专属
+> 决策（NavQueue/js_api 白名单/app.security.py）——C# 正典栈对应机制为
+> HostWebView 事件接线 + BrowserPolicyBroker 决策 + UrlSafety/OriginPolicy
+> URL 门禁（ADR-009）。保留作决策溯源。
 - **问题**：js_api 回调在 pywebview HTTP 服务线程运行；若同步调用 load_url/evaluate_js，winforms 后端 Invoke 到 UI 线程并阻塞等待 → 互相等待死锁（"搜索后页面不跳转/冻结"）。
 - **方案**：所有窗口操作投递到独立导航线程串行执行；单操作带 6s 超时（防 evaluate_js 的 semaphore 无限阻塞）；看门狗监控线程健康并自动重启。
 - **红线**：js_api 方法绝不同步执行窗口操作。
@@ -75,18 +79,27 @@
 | ruff | 0.16.3 | Lint + 格式 | 项目自带 ruff.toml（豁免 BLE001/S110，安全设计要求） |
 | bandit | 1.9.4 | 安全扫描 | Medium/High 必须为 0；B110 与 S110 同源，属设计豁免 |
 | mypy | 2.3.0 | 类型检查 | 需 `types-pywin32`（security.py 的 pywin32 桩） |
-| ktlint/detekt | 1.8.0/1.23.8 | Kotlin（待 Gradle 环境） | Android 完整检查需 Android Studio |
+| ktlint/detekt | 1.8.0/1.23.8 | Kotlin（android-quality.yml 常跑门禁） | 四模块 ktlintCheck+detekt+单测全绿（WB-167，2026-10-01 审计更正：原「待 Gradle 环境」已过期——CI 常跑 + 本地 jar 复现方法见 25.6 节） |
 
 ## 5. 版本与发布
 
-- `shared/version.properties` 是双端版本**单一来源**；`scripts/sync_versions.py` 同步声明。
+- `shared/version.properties` 是双端版本**单一来源**；Android gradle 侧经
+  **构建期消费** properties（`versionCodeFromProperties`/`versionNameFromProperties`
+  ——AD-100 接线，sync_versions **不再写** build.gradle.kts）；其余声明文件
+  （csproj/release.json 等）由 `scripts/sync_versions.py` 同步。
+  （PY-216 配套更正，2026-10-01 审计：原表述「sync_versions.py 同步声明」
+  未区分 gradle——脚本旧字面量正则对已改构建期消费的 gradle 必抛
+  RuntimeError，gradle 写入分支已删，勿再据旧表述调用。）
 - WB-058（审计 2026-09-23 清单·W5 批）：基线口径更新——当前基线
   **2.2.0-beta.49**（C#/.NET 10 正典栈 ADR-009 M1-M4 落地 + 全仓审计批次；
   此前记录的 v0.3.0 为 2026-08-14 时代口径，严重过期——发布制品为
   Windows C# 安装包 + Android APK，PyInstaller 包已移除）。
 - 发布流程：提交 → 打 `v*` 标签 → **release.yml 自动触发**（6 job fail-closed：
   构建/签名/逐工件闭合验证——不再是早期"提交 → 打标签 → gh release create"手工流）。
-- GitHub 仓库：`bear20252026/aegis-dual-platform`（私有）；CI 已在 `.github/workflows/ci.yml` 配置。
+- GitHub 仓库：`bear20252026/aegis-dual-platform`（私有）；CI 为 **13 workflow
+  分层**（WB-167，2026-10-01 审计更正：原「CI 已在 ci.yml 配置」为单文件
+  时代口径——ci.yml 现仅剩 ui-regression，常跑门禁 6 + 组合冒烟 1 +
+  周定时 2 + 发布链 4，详见 architecture-overview.md 1.5 节）。
 
 ## 6. 待办与方向（源自壳浏览器研读，2026-08-15）
 
@@ -104,6 +117,9 @@
 > **SP-104 时代横幅（审计 2026-09-23 清单·SP1 批）**：本节至第 13 节为
 > **2026-08-15 pywebview 双栈时代**的调研记录——栈归属/体量/迁移结论的
 > 现行口径以 ADR-009（C# 单轨终局）为准；本区仅作决策溯源保留。
+> **WB-166（2026-10-01 审计）范围扩齐**：第 14-24 节（FreeDom/brave/
+> Nuitka/B/C 级收官等）同为该时代调研记录，横幅覆盖范围由「本节至第
+> 13 节」扩至「本节至第 24 节」——消除「部分节有横幅部分无」的双标。
 
 ## 7. 开源浏览器审计结论（2026-08-15，详见 docs/audit/open-source-browser-audit.md）
 
@@ -430,6 +446,14 @@
 - **Agent 安全体系**（四级纵深 + 供应链 + 保护）：mcp 工具层白名单/审计 → 请求管线（域/动作/条件三层策略）→ SBOM/依赖审计 → Nuitka 核心编译保护——完整纵深防御。
 
 ## 25. Windows 标签增强 + 会话恢复（2026-08-30）
+
+> **WB-166（2026-10-01 审计）时代注记**：本节（25.1-25.8）为 2026-08-30
+> **pywebview 现役栈时期**的 PR 记录（app/tab_ops.py、session_store.py、
+> bridge_hooks 等均属该栈）。此后 ADR-009 迁移完成：标签/会话恢复/导入
+> 向导等能力已由 C# 正典栈对应实现承接（TabManager/TabSessionStore/
+> BookmarkStore/NTP 导入向导），Python 栈冻结归档至
+> legacy/windows-pywebview/。本节保留作行为语义与复审记录溯源——其中
+> 25.6（ktlint 复现）/25.7（ADR-007 门禁常跑）的工具链与治理结论仍现行。
 
 > 变更：PR「feat: Windows 标签增强（拖拽排序/固定/中键关闭/Ctrl+T/W/会话恢复）」
 

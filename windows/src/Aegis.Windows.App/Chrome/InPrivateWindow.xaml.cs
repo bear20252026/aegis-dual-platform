@@ -33,6 +33,9 @@ public partial class InPrivateWindow : Window
     private WebView.InPrivateEnvironmentLease? _environmentLease;
     // 租约获取串行化门闩——??= 与 await 非原子（见 GetLeaseAsync）
     private readonly System.Threading.SemaphoreSlim _leaseGate = new(1, 1);
+    // CS-364（2026-10-01 审计）：租约工厂注入缝——STA 冒烟测试注入必败工厂，
+    // 构造/关闭路径不再拉起真实 WebView2 环境（生产恒走 InPrivateAsync）
+    private readonly Func<Task<WebView.InPrivateEnvironmentLease>> _leaseFactory;
     // 引擎偏好构造时取一次（此后不再读盘——地址栏每次回车同步 IO 已移除）
     private readonly string _engineKey;
 
@@ -42,7 +45,15 @@ public partial class InPrivateWindow : Window
     /// 无痕窗口不再每窗同步读一次 settings.json；直接启动等无参路径保留
     /// 读盘兜底。</summary>
     public InPrivateWindow(string? searchEngine = null)
+        : this(searchEngine, leaseFactoryForTests: null)
     {
+    }
+
+    /// <summary>CS-364：internal 测试构造（leaseFactoryForTests 注入假租约工厂
+    /// ——冒烟测试不创建真实 WebView2 环境与浏览器进程）。</summary>
+    internal InPrivateWindow(string? searchEngine, Func<Task<WebView.InPrivateEnvironmentLease>>? leaseFactoryForTests)
+    {
+        _leaseFactory = leaseFactoryForTests ?? WebView.WebViewEnvironment.InPrivateAsync;
         InitializeComponent();
         if (searchEngine is not null && UrlNormalizer.EngineUrls.ContainsKey(searchEngine))
             _engineKey = searchEngine;
@@ -92,7 +103,15 @@ public partial class InPrivateWindow : Window
                 .Runtime;
             runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
             {
-                if (!e.IsSuccess || _closed || !_runtimes.ContainsKey(tab.TabId))
+                // CS-358（2026-10-01 审计）：初始化失败留痕（主窗同分支有
+                // SecurityLog——此前无痕窗口静默空白不可诊断）
+                if (!e.IsSuccess)
+                {
+                    Core.Security.SecurityLog.Write(
+                        $"[inprivate] 标签 {tab.TabId} WebView2 初始化失败: {e.InitializationException?.Message ?? "e.IsSuccess=false（未知原因）"}");
+                    return;
+                }
+                if (_closed || !_runtimes.ContainsKey(tab.TabId))
                     return;
                 var core = runtime.Control.CoreWebView2;
                 Ntp.NtpAssets.BindVirtualHosts(core);
@@ -112,7 +131,15 @@ public partial class InPrivateWindow : Window
                     TabRuntime.Navigate(runtime, tab.Url);
                 }
             };
-            runtime.NavigationCompleted += (_, _) => Dispatcher.BeginInvoke(() => SyncAddressBar(tab));
+            runtime.NavigationCompleted += (_, _) => Dispatcher.BeginInvoke(() =>
+            {
+                // CS-349（2026-10-01 审计）：加载指示收起（主窗同款 LoadingBar）
+                LoadingBar.Visibility = Visibility.Collapsed;
+                SyncAddressBar(tab);
+            });
+            // CS-349：导航开始显示不定态加载条（主窗有加载指示——无痕窗此前零反馈）
+            runtime.NavigationStarted += () => Dispatcher.BeginInvoke(
+                () => LoadingBar.Visibility = Visibility.Visible);
             // CS-295：确认门事件接线（与主窗同口径——面板状态由控制器唯一持有）
             runtime.Host.NavigationConfirmationRequested += (_, e) => _approval.Request(tab.TabId, e);
             runtime.Host.NavigationConfirmationResolved += (_, _) => _approval.Resolved();
@@ -132,17 +159,10 @@ public partial class InPrivateWindow : Window
             // CS-294（2026-09-26 审计）：危险扩展下载确认——此前零订阅者走
             // fail-closed 分支被静默取消，用户看不到任何提示；提供与主窗同款
             // 确认对话框（窗口已关闭仍 fail-closed 拒绝）
+            // CS-370（2026-10-01 审计）：确认对话框单源到 WindowSharedChrome
+            //（与主窗共用——此前两窗各持一份同形 MessageBox）
             runtime.DownloadConfirmationRequested += (downloadUrl, fileName) =>
-            {
-                if (!IsLoaded)
-                    return false;
-                return MessageBox.Show(
-                    this,
-                    $"此文件的类型可能存在风险，是否允许下载？\n\n文件：{fileName}\n来源：{downloadUrl}",
-                    "下载确认",
-                    MessageBoxButton.YesNo,
-                    MessageBoxImage.Warning) == MessageBoxResult.Yes;
-            };
+                WindowSharedChrome.ConfirmDangerousDownload(this, downloadUrl, fileName);
         }
         catch (Exception ex)
         {
@@ -153,13 +173,14 @@ public partial class InPrivateWindow : Window
 
     /// <summary>获取（或复用）无痕环境租约。`??=` 与 await 非原子——启动期
     /// 快速二连开标签时两路 await 都创建环境，后完成者的租约被 `??=` 丢弃
-    /// 且永不 Dispose（临时目录永久残留），故以门闩串行化。</summary>
+    /// 且永不 Dispose（临时目录永久残留），故以门闩串行化。
+    /// CS-364：工厂可注入（测试），生产恒为 WebViewEnvironment.InPrivateAsync。</summary>
     private async Task<WebView.InPrivateEnvironmentLease> GetLeaseAsync()
     {
         await _leaseGate.WaitAsync();
         try
         {
-            _environmentLease ??= await WebView.WebViewEnvironment.InPrivateAsync();
+            _environmentLease ??= await _leaseFactory();
             return _environmentLease;
         }
         finally
@@ -212,11 +233,9 @@ public partial class InPrivateWindow : Window
         _activeTabId = tab.TabId;
         foreach (var pair in _runtimes)
         {
-            var on = pair.Key == _activeTabId;
-            System.Windows.Controls.Panel.SetZIndex(pair.Value.Control, on ? 5 : 0);
-            pair.Value.Control.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-            pair.Value.Control.IsHitTestVisible = on;  // CS-177：对齐 MainWindow 切换口径
-            pair.Value.Control.IsEnabled = on;         // CS-327（2026-09-26 审计）：对齐主窗四属性口径
+            // CS-177/327/371：与 MainWindow 切换口径一致——四属性翻转单源
+            //（此前两窗各持一份同形实现）
+            WindowSharedChrome.ApplyTabVisibility(pair.Value.Control, pair.Key == _activeTabId);
         }
         WebViewHost.UpdateLayout();
         SyncAddressBar(tab);
@@ -357,8 +376,8 @@ public partial class InPrivateWindow : Window
     {
         _closed = true;
         // 全部 runtime 经协调器统一销毁（先摘视觉树再释放——与主窗口同序）
+        // CS-366（2026-10-01 审计）：_runtimes 清空收敛到协调器 Dispose 单点
         _runtimeCoordinator.Dispose();
-        _runtimes.Clear();
         _broker.Dispose();
         _environmentLease?.Dispose();
         _environmentLease = null;

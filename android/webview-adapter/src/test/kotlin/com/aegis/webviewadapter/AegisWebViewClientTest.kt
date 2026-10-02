@@ -1,7 +1,10 @@
 package com.aegis.webviewadapter
 
 import android.net.Uri
+import android.net.http.SslError
 import android.webkit.RenderProcessGoneDetail
+import android.webkit.SafeBrowsingResponse
+import android.webkit.SslErrorHandler
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -14,6 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
@@ -515,5 +519,225 @@ class AegisWebViewClientTest {
         whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(true)
         assertTrue(client.onRenderProcessGone(view, detail))
         verify(broker, times(2)).updateDocumentGeneration(SESSION, TAB, 1L)
+    }
+
+    // ------------------------------------------------------------- AD-255
+    // 主框架判定以 isForMainFrame 为主分支——https 主框架链接不再漏进子框架
+    // 轻量分支（确认对话框永不出现、Deny 不上抛的静默死链）。
+
+    @Test
+    fun mainFrameHttpsConfirmationIsSurfacedNotSilentlyBlocked() {
+        val confirmationRequest = approvalRequest()
+        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(Decision.RequireConfirmation(confirmationRequest))
+        var requested = false
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                requireNavigationConfirmation = true,
+                onNavigationConfirmationRequested = { requested = true },
+                onNavigationDenied = { code, _ -> deniedCodes.add(code) },
+            )
+        // 返回 true = 阻断 WebView 原始加载（由客户端经批准流程恢复）
+        assertTrue(client.shouldOverrideUrlLoading(view, fakeRequest("https://example.com/", isMainFrame = true)))
+        assertTrue("主框架 RequireConfirmation 必须走确认登记（不再静默阻断）", requested)
+        assertTrue(deniedCodes.isEmpty())
+        verify(view, never()).loadUrl(anyString())
+    }
+
+    @Test
+    fun mainFrameHttpsDenialIsSurfacedTopLevel() {
+        stubDeny("url_policy")
+        val client = newClient()
+        val blocked = client.shouldOverrideUrlLoading(view, fakeRequest("https://evil.example/", isMainFrame = true))
+        // 返回 true 阻断 + onNavigationDenied 顶层上抛（原实现落子框架分支
+        // 只留日志——静默死链）
+        assertTrue(blocked)
+        assertEquals(listOf("url_policy"), deniedCodes)
+        verify(view, never()).loadUrl(anyString())
+    }
+
+    @Test
+    fun mainFrameHttpsAllowLoadsThroughFullChain() {
+        stubAllow()
+        val client = newClient()
+        assertTrue(client.shouldOverrideUrlLoading(view, fakeRequest("https://example.com/", isMainFrame = true)))
+        // 全链（requestNavigationConfirmation + consumeNavigation + loadUrl）
+        verify(broker).requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation")
+        verify(broker).consumeNavigation(allowAction, SESSION, TAB, 0L, "https://example.com/", "navigation")
+        verify(view).loadUrl("https://example.com/")
+    }
+
+    // ------------------------------------------------------------- AD-284
+    @Test
+    fun mailtoMainFrameNavigationSurfacesUnsupportedSchemeFeedback() {
+        var unsupported: String? = null
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                onUnsupportedSchemeNavigation = { scheme, _ -> unsupported = scheme },
+            )
+        val blocked = client.shouldOverrideUrlLoading(view, fakeRequest("mailto:a@b.example", isMainFrame = true))
+        assertTrue("外跳 scheme 必须阻断 WebView 原始加载", blocked)
+        assertEquals("mailto", unsupported)
+        // 不与恶意 scheme 同走 Deny 提示（onNavigationDenied 不触发）
+        assertTrue(deniedCodes.isEmpty())
+        verify(
+            broker,
+            never(),
+        ).requestNavigationConfirmation(anyString(), anyString(), anyLong(), anyString(), anyString())
+
+        // tel: 同口径
+        val telBlocked = client.shouldOverrideUrlLoading(view, fakeRequest("tel:10086", isMainFrame = true))
+        assertTrue(telBlocked)
+        assertEquals("tel", unsupported)
+    }
+
+    // ------------------------------------------------------------- AD-256
+    @Test
+    fun onPageStartedRecheckStopsPolicyDeniedRedirect() {
+        // 302 重定向不经 shouldOverrideUrlLoading——onPageStarted 复核 Deny 即
+        // stopLoading + 顶层上抛，且阻断 URL 不进地址栏
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(true)
+        whenever(broker.evaluateNavigation(SESSION, TAB, 1L, "https://evil.example/redirected", "navigation"))
+            .thenReturn(Decision.Deny(DenyReason("url_policy", "拒绝 URL: https://evil.example/redirected?token=1")))
+        var observed: String? = "sentinel"
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                onNavigationDenied = { code, _ -> deniedCodes.add(code) },
+                onPageUrlObserved = { observed = it },
+            )
+        client.onPageStarted(view, "https://evil.example/redirected", null)
+        verify(view).stopLoading()
+        assertEquals(listOf("url_policy"), deniedCodes)
+        assertEquals("阻断的 URL 不得上抛地址栏", "sentinel", observed)
+    }
+
+    @Test
+    fun onPageStartedRecheckAllowsLegitimateLoadAndObservesUrl() {
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(true)
+        whenever(broker.evaluateNavigation(SESSION, TAB, 1L, "https://example.com/", "navigation"))
+            .thenReturn(Decision.Allow(allowAction))
+        var observed: String? = null
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                onPageUrlObserved = { observed = it },
+            )
+        client.onPageStarted(view, "https://example.com/", null)
+        verify(view, never()).stopLoading()
+        assertEquals("https://example.com/", observed)
+    }
+
+    @Test
+    fun onPageStartedSkipsRecheckForNonHttpSchemes() {
+        // 受信首页（file://）/about: 页不做策略复核（否则首页加载被误杀）
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(true)
+        var observed: String? = null
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                onPageUrlObserved = { observed = it },
+            )
+        client.onPageStarted(view, "file:///android_asset/start.html", null)
+        verify(broker, never()).evaluateNavigation(anyString(), anyString(), anyLong(), anyString(), anyString())
+        verify(view, never()).stopLoading()
+        assertEquals("file:///android_asset/start.html", observed)
+    }
+
+    // ------------------------------------------------------------- AD-265
+    @Test
+    fun onPageStartedStaleSessionDoesNotObserveBlockedUrl() {
+        // 代际推进失败已 stopLoading——阻断 URL 不得再上抛地址栏（状态污染）
+        whenever(broker.updateDocumentGeneration(SESSION, TAB, 1L)).thenReturn(false)
+        var observed: String? = "sentinel"
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                onPageUrlObserved = { observed = it },
+            )
+        client.onPageStarted(view, "https://stale.example/blocked", null)
+        verify(view).stopLoading()
+        assertEquals("阻断的 URL 不得上抛地址栏（AD-265）", "sentinel", observed)
+    }
+
+    // ------------------------------------------------------------- AD-271/AD-273
+    @Test
+    fun sslErrorOnMainFrameCancelsAndReportsErrorPanel() {
+        val errors = mutableListOf<String>()
+        val client = newClient(onPageError = { code, _, _, _ -> errors.add(code) })
+        val handler = mock(SslErrorHandler::class.java)
+        val error = mock(SslError::class.java)
+        whenever(error.url).thenReturn("https://example.com/")
+        whenever(error.primaryError).thenReturn(3)
+        whenever(view.url).thenReturn("https://example.com/")
+
+        client.onReceivedSslError(view, handler, error)
+
+        // 绝不 proceed；主框架归属 → 错误面板上抛
+        verify(handler).cancel()
+        verify(handler, never()).proceed()
+        assertEquals(listOf(WebViewErrorCodes.ERROR_SSL_CERTIFICATE), errors)
+    }
+
+    @Test
+    fun sslErrorOnSubResourceCancelsWithoutMaskingWholePage() {
+        // 归属判定：error.url 与主框架 URL 不一致（子资源形态）→ 只 cancel
+        // + 留痕，不上抛整页遮罩
+        val errors = mutableListOf<String>()
+        val client = newClient(onPageError = { code, _, _, _ -> errors.add(code) })
+        val handler = mock(SslErrorHandler::class.java)
+        val error = mock(SslError::class.java)
+        whenever(error.url).thenReturn("https://cdn.example/sub.js")
+        whenever(error.primaryError).thenReturn(2)
+        whenever(view.url).thenReturn("https://example.com/")
+
+        client.onReceivedSslError(view, handler, error)
+
+        verify(handler).cancel()
+        verify(handler, never()).proceed()
+        assertTrue("子资源证书错不得遮蔽整页", errors.isEmpty())
+    }
+
+    // ------------------------------------------------------------- AD-273/AD-291
+    @Test
+    fun safeBrowsingHitNeverProceedsAndFallsBackWithoutHistory() {
+        // 阻断语义锁定：绝不 proceed；有历史 backToSafety。无历史的插页
+        // 分支依赖 Build.VERSION.SDK_INT ≥ 27（JVM 桩下为 0 → 走 backToSafety
+        // 兜底，插页分支由真机/Robolectric 覆盖）。
+        val response = mock(SafeBrowsingResponse::class.java)
+        val client = newClient()
+        whenever(view.canGoBack()).thenReturn(true)
+        client.onSafeBrowsingHit(view, fakeRequest("https://evil.example/x", isMainFrame = true), 5, response)
+        verify(response).backToSafety(true)
+        verify(response, never()).proceed(org.mockito.ArgumentMatchers.anyBoolean())
+
+        // 无历史 + JVM 桩 SDK_INT=0 → 仍 backToSafety（不 proceed、不崩溃）
+        val response2 = mock(SafeBrowsingResponse::class.java)
+        val view2 = mock(WebView::class.java)
+        whenever(view2.canGoBack()).thenReturn(false)
+        client.onSafeBrowsingHit(view2, fakeRequest("https://evil.example/y", isMainFrame = true), 5, response2)
+        verify(response2).backToSafety(true)
+        verify(response2, never()).proceed(org.mockito.ArgumentMatchers.anyBoolean())
+        verify(response2, never()).showInterstitial(org.mockito.ArgumentMatchers.anyBoolean())
     }
 }

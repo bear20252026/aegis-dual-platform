@@ -9,7 +9,23 @@ name: Release-Android
 on:
   # 编排器（release.yml workflow_call）独占触发——移除 tag 直推双触发面（PY-007）
   workflow_dispatch: {}
-  workflow_call: {}
+  workflow_call:
+    # SP-218（2026-10-01 发布链批）：同 release-windows——编排器显式传参要求
+    # 本子流声明 secret 面,否则 startup_failure。required:false 保留 dispatch
+    # 无凭据调试路径(缺省走未签名 APK 告警分支——v2.1.12 教训)。
+    secrets:
+      AEGIS_KEYSTORE_FILE:
+        required: false
+        description: Android 签名 keystore(base64;缺失走未签名告警路径)
+      AEGIS_KEYSTORE_PASSWORD:
+        required: false
+        description: keystore 存储密码
+      AEGIS_KEY_ALIAS:
+        required: false
+        description: 签名 key 别名
+      AEGIS_KEY_PASSWORD:
+        required: false
+        description: 签名 key 密码
 
 permissions:
   contents: read
@@ -19,16 +35,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - name: Pin check (fail-closed)
-        run: |
-          # PY-177/SP-152（2026-09-26 审计）：pin 检查改白名单式并纳入
-          # .github/actions/**/action.yml 扫描面（详见 release.yml 同名步骤）
-          if grep -rnE '(^|[[:space:]])uses: [^#@]*@' .github/workflows/ .github/actions/ \
-              | grep -vE '@[0-9a-fA-F]{40}([[:space:]]|$|#)'; then
-            echo "❌ 存在未固定完整 40 位十六进制 SHA 的 action 引用" && exit 1
-          fi
-          echo "✅ 全部 action 固定完整 SHA"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      # SP-182（2026-10-01 审计）：pin 检查收敛为 composite action 单源——
+      # 四副本漂移（存在性断言/注释详略不一）消除
+      - uses: ./.github/actions/pin-check
 
   build:
     needs: pin-check
@@ -42,26 +52,45 @@ jobs:
       run:
         working-directory: android
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      # SP-196（2026-10-01 审计）：verify_versions / build_metadata /
+      # write_checksum_json / native_artifact_manifest 依赖镜像预装 python——
+      # 显式固化（PY-065 同型 5 处之一）
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
           targets: aarch64-linux-android  # 单架构：arm64-v8a（99% 真机）
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2 (PY-056)
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-056)
         with:
           workspaces: core/rust-policy-core
       - name: Install JDK 21
-        uses: actions/setup-java@97c5a5e13aa773f277f72c1287dda3c789f1366c
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: "21"
+          # SP-215（2026-10-01 审计）：Gradle 缓存统一为 setup-java cache: gradle
+          # 单机制——此前本文件/android-quality 用 actions/cache 自管键、
+          # contracts 用 setup-java 内建缓存，两套机制并存漂移。缓存键统一
+          # 消费 cache-dependency-path（含 libs.versions.toml——AD-243：版本
+          # 目录变更必须失效缓存；SP-184：本文件旧键漏该文件）。
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/**
+            android/gradle/libs.versions.toml
       - name: Restore release signing keystore (from secrets)
         env:
           AEGIS_KEYSTORE_FILE_B64: ${{ secrets.AEGIS_KEYSTORE_FILE }}
+          # SP-213（2026-10-01 审计）：github.ref_type 直插脚本与同步骤
+          # ref_name 的 env 中转口径不一（PY-181 同型）——统一经 env 引用
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           if [ -z "$AEGIS_KEYSTORE_FILE_B64" ]; then
             # 审计整改：tag 构建必须带签名 keystore——未签名 APK 不得进入发布
-            if [ "${{ github.ref_type }}" = "tag" ]; then
+            if [ "$REF_TYPE" = "tag" ]; then
               echo "❌ AEGIS_KEYSTORE_FILE 未配置——tag 发布必须产出已签名 APK（fail-closed）"
               exit 1
             fi
@@ -85,25 +114,27 @@ jobs:
             python ../scripts/verify_versions.py
           fi
       - name: Setup Android SDK (API 36)
-        uses: android-actions/setup-android@035682743ab223ec9c6169af09811dff8247e520
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
         with:
           packages: "platform-tools platforms;android-36 build-tools;36.0.0 ndk;28.0.12433566"
-      - name: Cache Gradle
-        uses: actions/cache@3edfce9056124e459a23f683a21433670d47daca
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle.kts', 'android/gradle/**') }}
-          restore-keys: gradle-${{ runner.os }}-
+      # SP-215（2026-10-01 审计）：原"Cache Gradle"步骤（actions/cache 自管键）
+      # 已删除——统一走上方 setup-java cache: gradle 单机制（键含
+      # libs.versions.toml，见 SP-184 注记）
       - name: Prepare offline GeoGebra pad into APK assets
         uses: ./.github/actions/prepare-geogebra
         with:
           dest-dir: android/app/src/main/assets/geogebra
+      # SP-202（2026-10-01 审计）：cargo install 从源码编译数分钟/次——缓存
+      # ~/.cargo/bin 二进制（键含版本号，升级自动失效）；命中时跳过安装
+      - name: Cache cargo-ndk binary (SP-202)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (SP-178 重 pin)
+        with:
+          path: ~/.cargo/bin/cargo-ndk
+          key: cargo-ndk-bin-4.1.2-${{ runner.os }}
       - name: Build Android arm64-v8a native policy library
         working-directory: core/rust-policy-core
         run: |
-          cargo install cargo-ndk --version 4.1.2 --locked
+          command -v cargo-ndk >/dev/null 2>&1 || cargo install cargo-ndk --version 4.1.2 --locked
           export ANDROID_NDK_HOME="${ANDROID_HOME}/ndk/28.0.12433566"
           export ANDROID_NDK_ROOT="$ANDROID_NDK_HOME"
           export ANDROID_NDK="$ANDROID_NDK_HOME"
@@ -160,12 +191,15 @@ jobs:
           fi
       - name: Verify APK signature (fail-closed on tag)
         shell: bash
+        env:
+          # SP-213（2026-10-01 审计）：ref_type 经 env 中转（与 ref_name 同口径）
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           BT=$(ls -d "$ANDROID_HOME/build-tools/"*/ | sort -V | tail -1)
           APK_FILE=$(ls app/build/outputs/apk/release/*.apk)
           if "$BT/apksigner" verify --print-certs "$APK_FILE" > /tmp/apksigner.out 2>&1; then
             echo "[apksigner] 签名验证 OK"; cat /tmp/apksigner.out
-          elif [ "${{ github.ref_type }}" = "tag" ]; then
+          elif [ "$REF_TYPE" = "tag" ]; then
             echo "❌ APK 未签名或签名损坏——tag 发布必须已签名（fail-closed）"
             exit 1
           else
@@ -185,11 +219,11 @@ jobs:
           python ../release/build_metadata.py --platform android --output ../dist/build-metadata.json
           python ../release/write_checksum_json.py --root ../dist --output ../dist/SHA256SUMS.json
       - name: Attest build provenance (SLSA)
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/**
       - name: Upload Android artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-android
           path: dist/
@@ -204,13 +238,17 @@ jobs:
       attestations: write
       contents: read
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      # SP-196（2026-10-01 审计）：write_checksum_json 依赖镜像预装 python
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1 (SP-178 重 pin)
         with:
           name: release-android
           path: dist
       - name: Generate CycloneDX SBOM (gradle deps)
-        uses: anchore/sbom-action@6b31fa7e2d592e47d95d2a5e0520a7352d47ead5
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2 (SP-178 重 pin)
         with:
           path: android
           format: cyclonedx-json
@@ -224,7 +262,7 @@ jobs:
           cp sbom-android.cdx.json dist/sbom-android.cdx.json
           python release/write_checksum_json.py --root dist --output dist/SHA256SUMS.json
       - name: Attest SBOM (bind every artifact)
-        uses: actions/attest-sbom@4c8abdcbea4a6b66f70fd1169e70af4bf5b13701
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0 (SP-178 重 pin)
         with:
           subject-path: dist/**
           sbom-path: sbom-android.cdx.json
@@ -232,16 +270,16 @@ jobs:
       # 已变、SBOM 文件为新增——对最终 dist 重新 attest SLSA provenance，
       # 使 verify 段逐工件 attestation 校验对现摘要成立（同 run signer 一致）
       - name: Re-attest build provenance for final dist (SLSA)
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: dist/**
       - name: Upload SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-android
           path: sbom-android.cdx.json
       - name: Upload Android artifacts (PY-180：重传含 SBOM 的 dist)
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: release-android
           path: dist/
@@ -258,8 +296,12 @@ jobs:
       attestations: read
       contents: read
     steps:
-      - uses: actions/checkout@f548e57e544e1ff5a4c46bf1e1b8685f8e4a348a
-      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      # SP-196（2026-10-01 审计）：verify_checksum_json 依赖镜像预装 python
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1 (SP-178 重 pin)
         with:
           name: release-android
           path: dist

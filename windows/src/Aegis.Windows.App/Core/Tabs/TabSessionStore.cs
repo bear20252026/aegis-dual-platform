@@ -46,10 +46,13 @@ public sealed class TabSessionStore
                     INSERT INTO tabs(position, tab_id, url, title, is_current, is_pinned)
                     VALUES($p,$t,$u,$ti,$c,$pin)
                     """;
+                // CS-341（2026-10-01 审计）：会话 Save 补长度钳制——页面可控的
+                // 任意长 url/title 此前原样落 tabs.db（单页即可撑大库文件）；
+                // 2048/256 与书签/历史库同源（TextLimits——代理对安全）
                 insert.Parameters.AddWithValue("$p", i);
                 insert.Parameters.AddWithValue("$t", tabs[i].TabId);
-                insert.Parameters.AddWithValue("$u", tabs[i].Url);
-                insert.Parameters.AddWithValue("$ti", tabs[i].Title);
+                insert.Parameters.AddWithValue("$u", Aegis.Windows.Core.TextLimits.Clamp(tabs[i].Url, Aegis.Windows.Core.TextLimits.MaxUrlChars));
+                insert.Parameters.AddWithValue("$ti", Aegis.Windows.Core.TextLimits.Clamp(tabs[i].Title, Aegis.Windows.Core.TextLimits.MaxTitleChars));
                 insert.Parameters.AddWithValue("$c", tabs[i].TabId == currentTabId ? 1 : 0);
                 insert.Parameters.AddWithValue("$pin", tabs[i].IsPinned ? 1 : 0);
                 insert.ExecuteNonQuery();
@@ -113,7 +116,10 @@ public sealed class TabSessionStore
             currentTabId ??= tabs.LastOrDefault()?.TabId;
             return tabs;
         }
-        catch (Exception ex) when (ex is SqliteException or IOException or InvalidOperationException)
+        // CS-353（2026-10-01 审计）：库损坏行以 BLOB 形态存 url/title 时
+        // GetString 抛 InvalidCastException——不在原 SqliteException 过滤集内，
+        // 启动恢复路径会裸逃逸；并入 fail-safe 空会话
+        catch (Exception ex) when (ex is SqliteException or InvalidCastException or IOException or InvalidOperationException)
         {
             Security.SecurityLog.Write(
                 $"[session] 会话读取失败（回退空会话）: {ex.GetType().Name}: {ex.Message}");

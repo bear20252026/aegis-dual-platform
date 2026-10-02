@@ -163,12 +163,30 @@ def build_schema(
     registry = _build_class_registry(sources)
     methods: dict[str, dict] = {}
     api_cls = registry.get("Api")
+    # PY-255（2026-10-01 审计）：同名方法冲突此前被 setdefault 静默首胜——
+    # 派生类覆盖（合理重写）与平行 mixin 撞名（方法悄然从 schema 消失）
+    # 不可区分。冲突不再静默：全部冲突清单输出 stderr（人工判定是否
+    # 合理重写；非预期撞名须修 mixin 命名——fail-loud 不 fail-closed）。
+    conflicts: list[str] = []
     if api_cls is not None:
         for cls in [api_cls, *_base_chain(registry, api_cls)]:
             for name, entry in _extract_methods(cls, exposed).items():
-                # 同名方法以更派生类（Api 本体）为准——先到先得
-                methods.setdefault(name, entry)
+                existing = methods.get(name)
+                if existing is None:
+                    methods.setdefault(name, entry)
+                elif existing.get("defined_in") != cls.name:
+                    # 同名方法已由更派生类（链更靠前）提供——记录覆盖事实
+                    conflicts.append(
+                        f"{name}: {cls.name} 的定义被 {existing['defined_in']} "
+                        f"（更派生）覆盖——schema 只收录后者")
 
+    # PY-255：冲突告警（有冲突才输出——不改变 schema 输出形状，
+    # shared/jsapi-schema.json 有 CI git diff 门禁，勿无条件加键）
+    if conflicts:
+        print(f"[warn] 同名方法冲突 {len(conflicts)} 处（schema 只收录更派生类定义）:",
+              file=sys.stderr)
+        for c in conflicts:
+            print(f"  - {c}", file=sys.stderr)
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "title": "Aegis js_api Bridge Schema",
@@ -205,8 +223,11 @@ def main() -> int:
                           "由 scripts/gen_jsapi_schema.py 生成，请勿手改（CI diff 门禁）。",
               **schema}
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    # PY-232（2026-10-01 审计）：write_text 显式 newline="\n"——Windows 默认
+    # 把 \n 翻译为 CRLF，重生成 shared/jsapi-schema.json 在 autocrlf 关闭的
+    # 环境（CI diff 门禁）即行尾漂移假红。锁定 LF（与生成契约一致）。
     OUTPUT.write_text(
-        json.dumps(schema, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(schema, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n")
     exposed = schema["properties"]["js_exposed_methods"]
     documented = sum(1 for m in schema["properties"]["methods"].values()
                      if m["exposed_to_js"])

@@ -377,8 +377,19 @@ public sealed class NativePolicyCoreBridge : IDisposable
 
         protected override bool ReleaseHandle()
         {
-            NativeLibrary.Free(handle);
-            return true;
+            // CS-376（2026-10-01 发布链批）：进程退出终结波中 FreeLibrary 可能
+            // 失败（OS loader 关停竞态）——NativeLibrary.Free 抛 InvalidOperationException
+            // 且终结器不允许异常外逃（外逃即杀死整个测试宿主/进程）。Best-effort
+            // 释放语义：失败吞掉返回 false（泄漏面与关闭竞态代价远小于宿主崩溃）。
+            try
+            {
+                NativeLibrary.Free(handle);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
     }
 
