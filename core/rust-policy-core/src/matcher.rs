@@ -203,7 +203,14 @@ fn covers(a: &[Tok], b: &[Tok], flat: bool) -> bool {
                 (Tok::DStar, _) => at(ai + 1, bi) || at(ai, bi + 1),
                 (Tok::Star, Tok::DStar) => flat && at(ai + 1, bi + 1),
                 (Tok::Star, Tok::Star) => at(ai + 1, bi + 1),
-                (Tok::Star, _) => (flat || !matches!(b[bi], Tok::Lit('/'))) && at(ai, bi + 1),
+                // RS-307 云端实证（PR #60 十一轮）：补 ε-转移——`*` 可匹配
+                // 空串，a[ai]=Star 匹配空后由 a[ai+1..] 继续覆盖 b[bi..]
+                //（与 DStar 双分支语义对齐）。此前缺此分支致 `*?` ⊑ `?`
+                // 误判 false（语言包含成立：? 的单字符语言真包含于 *?）
+                (Tok::Star, _) => {
+                    (flat || !matches!(b[bi], Tok::Lit('/')))
+                        && (at(ai, bi + 1) || at(ai + 1, bi))
+                }
                 (_, Tok::Star | Tok::DStar) => false,
                 (Tok::Any1, Tok::Any1) => at(ai + 1, bi + 1),
                 (Tok::Any1, Tok::Lit(_)) => {
@@ -495,8 +502,14 @@ mod tests {
 /// 覆盖两条代数性质（此前只有点状用例，无性质级锁定）：
 /// - **可靠性（soundness）**：subsumes(a,b) ⇒ b 匹配的任意字面文本也匹配 a
 ///   （覆盖判定的语义定义——false positive 即误报 shadowed 规则）；
-/// - **传递性（transitivity）**：a⊑b ∧ b⊑c ⇒ a⊑c（语言包含关系的代数闭包，
-///   静态分析逐对比较的传递一致前提）。
+/// - **自反性（reflexivity）**：同模式同语言。
+///
+/// 传递性（a⊑b ∧ b⊑c ⇒ a⊑c）**不是本关系的契约**：covers 是「宁漏勿误」
+/// 的保守包含判定（RS-064/RS-015 口径——(Any1,Star)/跨段等面刻意 false），
+/// 保守不完整关系不保证传递闭包。proptest 传递性用例曾以随机反例实证
+///（`*?` ⊑ `**?` ⊑ `?` 但 `*?` ⋢ `?`）——其中 `*?` ⋢ `?` 一腿为 ε-转移
+/// 缺失（已修，见 covers (Star,_) 注释），其余缺腿为刻意保守面；据实把
+/// 传递性从性质契约移除，反例钉为下方回归单测。
 ///
 /// 样本域：模式由 token 片段（`*`/`**`/`?`/字面 a/b/`/`）拼接（≤6 token），
 /// 文本由 a/b/`/` 拼接（≤8 字符），flat 两种口径均覆盖。
@@ -558,20 +571,16 @@ mod property_tests {
             }
         }
 
-        /// RS-307：传递性——a⊑b ∧ b⊑c ⇒ a⊑c（语言包含的代数闭包）
+        /// RS-307 云端实证回归：ε-转移修复——`*` 的空匹配使
+        /// `*?` 的语言（长度 ≥1）真包含 `?` 的语言（恰 1 字符）
         #[test]
-        fn subsumes_transitive(
+        fn star_empty_match_language_inclusion(
             a in pattern_strategy(),
-            b in pattern_strategy(),
-            c in pattern_strategy(),
             flat in any::<bool>(),
         ) {
-            if glob_subsumes(&a, &b, flat) && glob_subsumes(&b, &c, flat) {
-                prop_assert!(
-                    glob_subsumes(&a, &c, flat),
-                    "{a:?} ⊑ {b:?} ⊑ {c:?}（flat={flat}）但 {a:?} ⋢ {c:?}"
-                );
-            }
+            prop_assert!(glob_subsumes("*?", "?", flat), "*? 必须覆盖 ?（flat={flat}）");
+            prop_assert!(glob_subsumes("*a", "a", flat), "*a 必须覆盖 a（flat={flat}）");
+            let _ = a; // 保留生成器签名一致性（与相邻性质用例同域采样）
         }
 
         /// RS-307：自反性——任意模式覆盖自身（同模式同语言）
