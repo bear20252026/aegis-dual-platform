@@ -9,7 +9,23 @@ name: Release-Android
 on:
   # 编排器（release.yml workflow_call）独占触发——移除 tag 直推双触发面（PY-007）
   workflow_dispatch: {}
-  workflow_call: {}
+  workflow_call:
+    # SP-218（2026-10-01 发布链批）：同 release-windows——编排器显式传参要求
+    # 本子流声明 secret 面,否则 startup_failure。required:false 保留 dispatch
+    # 无凭据调试路径(缺省走未签名 APK 告警分支——v2.1.12 教训)。
+    secrets:
+      AEGIS_KEYSTORE_FILE:
+        required: false
+        description: Android 签名 keystore(base64;缺失走未签名告警路径)
+      AEGIS_KEYSTORE_PASSWORD:
+        required: false
+        description: keystore 存储密码
+      AEGIS_KEY_ALIAS:
+        required: false
+        description: 签名 key 别名
+      AEGIS_KEY_PASSWORD:
+        required: false
+        description: 签名 key 密码
 
 permissions:
   contents: read

@@ -56,7 +56,10 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     [Fact]
     public void UnregisteredOrStaleSessionIsDenied()
     {
-        var broker = new BrowserPolicyBroker();
+        // CS-376（2026-10-01 发布链批）：逻辑测试走测试缝脱离 env——原生必需
+        // 环境下每 ctor TryCreate 会抢占进程级 ABI 单例（RS-140），与专用
+        // 真 DLL probe 测试形成退休时序竞争（GC 终结器退休不定态）
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
 
         Assert.IsType<Decision.Deny>(broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation"));
         Assert.True(broker.RegisterSession("session-1", "tab-1"));
@@ -78,9 +81,13 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     [Fact]
     public void RequiredNativePolicyCoreFailureClosesNavigationAndConsumption()
     {
+        // CS-376：seam 固定必需模式 + 无桥——fail-closed 口径下桥不可用
+        // 连注册链一并关闭（此前依赖 env 下 TryCreate 幸运命中单例， retiring
+        // 不定态使本用例在发布链原生 job 中随 GC 时序随机挂）
         var broker = new BrowserPolicyBroker(
-            () => NativePolicyCoreGateResult.Block("native_policy_core_unavailable"));
-        Assert.True(broker.RegisterSession("session-1", "tab-1"));
+            () => NativePolicyCoreGateResult.Block("native_policy_core_unavailable"),
+            nativePolicyCoreRequiredForTests: true);
+        Assert.False(broker.RegisterSession("session-1", "tab-1"));
 
         var denied = Assert.IsType<Decision.Deny>(
             broker.EvaluateNavigation("session-1", "tab-1", 0, "https://example.com", "navigation"));
@@ -276,7 +283,9 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
 
     private static BrowserPolicyBroker CreateRegisteredBroker()
     {
-        var broker = new BrowserPolicyBroker();
+        // CS-376：逻辑测试缝（真 DLL probe 走专用 TryCreate 用例——避免
+        // 每用例抢占 ABI 单例造成发布链原生 job 退休时序竞争）
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         Assert.True(broker.RegisterSession("session-1", "tab-1"));
         return broker;
     }
@@ -323,7 +332,7 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     public void RegisterSession_DuplicateSessionId_ReturnsFalse()
     {
         // CS-010：重复 sessionId 拒绝（会话池幂等保护）
-        var broker = new BrowserPolicyBroker();
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         Assert.True(broker.RegisterSession("session-1", "tab-1"));
         Assert.False(broker.RegisterSession("session-1", "tab-2"));
     }
@@ -332,7 +341,7 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     public void RegisterSession_AbovePoolCap_ReturnsFalse()
     {
         // CS-011：会话池 1024 上限（与 Rust MAX_SESSIONS 对等）——超限 fail-closed
-        var broker = new BrowserPolicyBroker();
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         for (var i = 0; i < 1024; i++)
             Assert.True(broker.RegisterSession($"session-{i}", $"tab-{i}"));
         Assert.False(broker.RegisterSession("session-overflow", "tab-overflow"));
@@ -344,7 +353,7 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     public void RegisterSession_NullOrBlank_ReturnsFalse(string? sessionId)
     {
         // CS-012：null/空白 sessionId 拒绝
-        var broker = new BrowserPolicyBroker();
+        var broker = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         Assert.False(broker.RegisterSession(sessionId!, "tab-1"));
     }
 
@@ -401,7 +410,9 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     public void IsHostBlocked_DelegatesToInjectedSnapshot()
     {
         // CS-016：注入 blockedHosts 快照——子资源层查询必须走注入实例
-        var broker = new BrowserPolicyBroker(blockedHosts: new StubBlockedHosts("evil.example"));
+        var broker = new BrowserPolicyBroker(
+            blockedHosts: new StubBlockedHosts("evil.example"),
+            nativePolicyCoreRequiredForTests: false);
 
         Assert.True(broker.IsHostBlocked("evil.example"));
         Assert.False(broker.IsHostBlocked("good.example"));
@@ -411,7 +422,9 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     public void UpdateBlockedHosts_NullFallsBackToAllowAll()
     {
         // CS-017：UpdateBlockedHosts(null) 回退 NoBlockedHosts——导航不再被拦
-        var broker = new BrowserPolicyBroker(blockedHosts: new StubBlockedHosts("evil.example"));
+        var broker = new BrowserPolicyBroker(
+            blockedHosts: new StubBlockedHosts("evil.example"),
+            nativePolicyCoreRequiredForTests: false);
         broker.UpdateBlockedHosts(null);
 
         Assert.False(broker.IsHostBlocked("evil.example"));

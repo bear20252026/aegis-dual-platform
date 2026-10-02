@@ -6,7 +6,18 @@ name: Release-Windows
   # 编排器（release.yml workflow_call）独占触发——此前 tag 直推可叠加
   # 触发一次：双路径重复构建与重复发布竞态（PY-006）；dispatch 供手动调试
   workflow_dispatch: {}
-  workflow_call: {}
+  workflow_call:
+    # SP-218（2026-10-01 发布链批）：编排器 SP-205 显式逐 secret 传参后,
+    # 被调子流必须声明可接收的 secret 面——未声明时 Actions 直接 startup_failure
+    #（"Invalid workflow file"）。required:false 保留 workflow_dispatch 无凭据
+    # 调试路径(缺省走未签名产物 + 醒目告警的既有分支)。
+    secrets:
+      AEGIS_CODE_SIGN_CERT:
+        required: false
+        description: Authenticode 签名证书(PFX base64;缺失走未签名告警路径)
+      AEGIS_CODE_SIGN_PASSWORD:
+        required: false
+        description: 签名证书密码
 
 permissions:
   contents: read

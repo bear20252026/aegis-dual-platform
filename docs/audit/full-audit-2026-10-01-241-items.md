@@ -2,7 +2,7 @@
 
 **范围**:接续 docs/audit/full-audit-2026-09-26-229-items.md(229 项全闭环)之后的**新一轮全仓新鲜扫描**——六区并行审计代理逐文件核对当前代码状态(含 D1 真机批之后),凡与已登记条目相同或高度相似的一律剔除;另由正典门禁实测(0 警告基线/ruff 根口径/gradle 弃用告警)补充 7 项实证条目。
 **方式**:6 路并行审计(Windows C# / Android / Rust 核心 / Python·契约·发布链 / Web 资产·文档 / CI·根配置·盲区),每项带 file:line 证据与具体修复方案;关键 P1/P2 声明由主审计代理二次抽查复核(NtpAssets Allow、sync_versions 断裂、CS0168 均实证)。
-**总量**:**245 行登记,去重合并 4 行(WB-146≡CS-334、WB-153≡SP-188、WB-154≡SP-185、WB-155≡SP-190)后 241 项**:问题 140 / 提升 101;P1×4 / P2×23 / P3×214。
+**总量**:**245 行登记,去重合并 4 行(WB-146≡CS-334、WB-153≡SP-188、WB-154≡SP-185、WB-155≡SP-190)后 241 项;发布链批(v2.2.0-beta.51 tag 首跑实证)追加 5 项 → 246 项**:问题 140+4 / 提升 101+1;P1×4 / P2×23 / P3×219。
 
 > 编号体系:延续既往(CS=C# 正典栈,AD=Android,RS=Rust 策略核心,PY=Python/CI/契约/发布链,WB=Web 资产+文档,SP=补充盲区)。
 > 优先级:P1=必须(缺陷/安全/门禁失效),P2=应该(正确性/一致性/重要测试),P3=可以(打磨/补测/归置)。
@@ -92,6 +92,7 @@
 | CS-373 | P3 | 提升/降噪 | NtpAssets.cs:99-119 | BindVirtualHosts 每标签写 3-4 行日志,3N 行冲刷 1MB 取证日志 → 进程级只记一次(失败仍每次) |
 | CS-374 | P2 | 问题/门禁回归 | WindowTheme.cs:76 | (见汇总;本轮门禁实测 CS0168×2) |
 | CS-375 | P3 | 提升/测试警告 | ThreatFeedCoordinatorTests.cs:154 + WindowLogicTests.cs:79,91 + BrowserPolicyBrokerTests.cs:400 | 4 处分析器警告(xUnit1013/xUnit2031×2/CS8625) → 逐处修复至测试构建 0 警告 |
+| CS-376 | P2 | 问题/发布链实证 | NativePolicyCoreBridge.cs:378 + 两 Broker 测试文件 | v2.2.0-beta.51 tag 首跑实证:①原生 ABI 进程级单例(RS-140)×未 Dispose broker 靠 GC 终结退休——CS-372 NativeGateTests 与既有 probe 测试创建时序竞争,发布链原生 job 随机挂;②CS-207 NativeLibraryHandle 终结波 FreeLibrary 失败(loader 关停竞态)抛异常杀死测试宿主(运行总数截断 62→9 实证);③生产隐患登记:required 模式下主窗+无痕窗两 broker 抢单例,第二者拿不到桥即全拒(现网不设 env,登记待评估) → 逻辑测试改 CS-372 测试缝、真 DLL probe 保留独占;ReleaseHandle 兜底吞异常(终结器不允许外逃);连跑 3× 62/62 全绿 |
 
 ## 2. Android(AD-252..292,41 行)
 
@@ -138,6 +139,7 @@
 | AD-290 | P3 | 提升/测试基建 | app/build.gradle.kts:214-216 | unitTests.isReturnDefaultValues 全局开——掩盖真实框架依赖 → 收窄/注释固化豁免范围 |
 | AD-291 | P3 | 提升/SafeBrowsing | AegisWebViewClient.kt:404-415 | onSafeBrowsingHit 恒 backToSafety——无历史时无处可退白屏 → showInterstitial 或回 HOME_URL |
 | AD-292 | P3 | 提升/构建卫生 | android/(gradle 输出) | Gradle 9.8 报 Deprecated features + 提示 configuration cache(本轮门禁实测) → --warning-mode all 定位逐项清(与 AD-287 分列) |
+| AD-293 | P2 | 问题/发布链实证 | android/broker/build.gradle.kts:74-87 | AD-287 启用的 configuration-cache 与 broker preBuild doFirst 捕获脚本对象引用冲突——仅 -PrequireNativePolicyCore=true(发布链独有)触发,本地门禁无此 flag 故未暴露;云端 Android 原生打包 job 实证 BUILD FAILED(cannot serialize Gradle script object references) → 脚本态值拷入局部 val 后闭包只引局部量;preBuild CC stored/reused 双跑验证 |
 
 ## 3. Rust 策略核心(RS-239..274,36 行)
 
@@ -226,6 +228,8 @@
 | PY-255 | P3 | 提升/静默首胜 | gen_jsapi_schema.py:51-62 | setdefault 静默取首个同名类——方法悄然从 schema 消失 → 冲突清单 stderr 告警或 fail |
 | PY-256 | P3 | 提升/lint 治理 | core/rust-policy-core/bindings/ | 43 处 ruff 违规(F401 等,33 可自动修)且不在任何门禁面(本轮根口径实测) → --fix 清零+接线 |
 | PY-257 | P3 | 提升/跳过口径 | tests/python/release_tools_test.py:244 | 1 例 skip(Windows 符号链接非特权)长期跳过且口径未登记 → 注明口径/开发者模式启用说明 |
+| PY-258 | P2 | 问题/供应链 | requirements-ci.in:26 + requirements-ci.txt | cryptography==48.0.1 命中 PYSEC-2026-3552/3553/3554(supply-chain pip-audit 门禁实证 6 条,修复版本 49.0.0/50.0.0)——PY-221 入锁时未过漏洞扫描 → 升级 50.0.0 + pip-compile --generate-hashes 真实重锁(989 hash),--require-hashes dry-run 通过 |
+| PY-259 | P3 | 问题/测试环境泄漏 | tests/python/release_tools_test.py:355-364 | test_complete_properties_write_metadata 断言 source_revision=local-unverified,但 build_metadata 写侧优先消费 GITHUB_SHA/GITHUB_REF/GITHUB_RUN_ID——CI runner 恒有值,断言的是 runner 环境(本地绿/contracts job 红的环境泄漏) → monkeypatch.delenv 三变量 |
 
 ## 5. Web 资产·文档(WB-133..175,43 行)
 
@@ -320,6 +324,8 @@
 | SP-215 | P3 | 提升/缓存双源 | contracts vs android-quality/release-android | Gradle 缓存两套机制并存 → 统一 |
 | SP-216 | P3 | 提升/归档门禁 | supply-chain.yml:32 | pip-audit 对归档栈硬门禁——新 CVE 永久阻断 push 逼人改只读归档 → 降告警或移周守护 |
 | SP-217 | P3 | 提升/记账 | CHANGELOG.md | 本轮 241 项整改变更未入账 → 补 Unreleased 条目 |
+| SP-218 | P2 | 问题/门禁失效 | release-windows.yml:12 + release-android.yml:11 | SP-205 把 secrets:inherit 改显式逐 secret 传参,但两被调子流 workflow_call 未声明 secrets 面——Actions 语义校验直接 startup_failure(「Invalid workflow file」),release.yml 对 v2.2.0-beta.51 tag 完全无法启动;本地 yaml.safe_load/actionlint 双绿仍漏(校验发生在 Actions 侧被调方声明层) → 两子流补 secrets 声明(required:false 保留 dispatch 无凭据调试路径);actionlint 复验 0 告警 |
+| SP-219 | P3 | 外部观察/依赖提交 | (GitHub 内置 Automatic Dependency Submission) | submit-nuget 内置工作流在 ubuntu restore net10.0-windows 工程失败(EnableWindowsTargeting)——仓库侧无 workflow 文件可修,仅影响依赖图提交面,不阻塞发布链 → 处置:仓库设置关闭自动依赖提交,或自管 workflow 加 -p:EnableWindowsTargeting=true 承接 |
 
 ---
 
@@ -336,6 +342,7 @@
 | 主审计收尾 | Kotlin BRIDGE_GUARD_JS 镜像同步新模板(RS-242/PY-249 三端一致)/WB-156 CONTRIBUTING cd 前缀/SP-177 全闭环(锁文件入库+三 workflow RestoreLockedMode+CONTRIBUTING/SECURITY 如实口径)/SP-217 按 WB-102 记账规则随下个正式版本合并记账(事实源=本台账) | 4 | verify_bridge_guard 三端过、dotnet build -p:RestoreLockedMode 0 警告 |
 | 收尾批 2 | PY-243/248 生成镜像同批落地:codegen 新增 ident.py 单源(pascal/singular_pascal),两生成器对 array-of-object+properties 生成嵌套子模型(UpdateManifestContractArtifact/Signature + 值域常量类,六字段组全部获得编译期锚点)、自由 object 保持原降级、using 条件输出(4 份去未用 using);pytest 补 5 用例 | 2 | pytest 280(275→280)、compat 对账过、validate 87 文件、ruff 绿、dotnet build 0 警告、:contracts ktlint+compile 过 |
 | 中央总验 | 全部正典门禁在六批+收尾合并后整体重跑 | — | ruff 全过、pytest 275、validate/versions/bridge_guard/cross_end/compat/vectors/catalog 全过、node 100/100+snake 27/27、YAML 17/17;cargo/dotnet/gradle 三端重跑结果见下 | 
+| 发布链批(2026-10-02) | SP-218/PY-258/PY-259/AD-293/CS-376:v2.2.0-beta.51 tag 触发云端发布链首跑,5 个 workflow 实证失败(Release startup_failure/supply-chain pip-audit/contracts 测试/native-policy 双 job)+ submit-nuget 外部观察(SP-219) | 5+1 | actionlint 0 告警、YAML 全解、Broker.Tests 全 env 双口径 3×62/62、dotnet 0 警告+Core 633、pytest 280、gradle preBuild CC stored/reused、--require-hashes dry-run 过 |
 
-> 完成度:**241 项中 238 项闭环**;CS-345/WB-139 两项经证据推翻登记为无效;PY-245 mypy 半面、AD-289 geolocation 断言半面、AD-279 R8 运行时冒烟留真机批为部分闭环。跨 8 批全部经区级门禁全绿后落盘。
+> 完成度:**246 项中 243 项闭环**(含发布链批 5 项);CS-345/WB-139 两项经证据推翻登记为无效;PY-245 mypy 半面、AD-289 geolocation 断言半面、AD-279 R8 运行时冒烟留真机批为部分闭环;SP-219 为外部观察不占闭环。跨 9 批全部经区级门禁全绿后落盘。
 

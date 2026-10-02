@@ -40,11 +40,13 @@ public sealed class BrowserPolicyBrokerNativeGateTests : IDisposable
         // 成功结果进程内不变——恒缓存（此后每次导航决策不再跑
         // NativeLibrary.TryLoad+GetExport+Free）
         var probes = 0;
-        using var broker = new BrowserPolicyBroker(() =>
-        {
-            probes++;
-            return NativePolicyCoreGateResult.Enabled();
-        });
+        using var broker = new BrowserPolicyBroker(
+            () =>
+            {
+                probes++;
+                return NativePolicyCoreGateResult.Enabled();
+            },
+            nativePolicyCoreRequiredForTests: false);
         Assert.True(broker.RegisterSession("gate-s", "gate-t"));
 
         Assert.IsType<Decision.Allow>(broker.EvaluateNavigation(
@@ -60,11 +62,13 @@ public sealed class BrowserPolicyBrokerNativeGateTests : IDisposable
     {
         // 失败按短 TTL 重试（库文件可能随后就位）——TTL 内缓存，过期后重探
         var probes = 0;
-        using var broker = new BrowserPolicyBroker(() =>
-        {
-            probes++;
-            return NativePolicyCoreGateResult.Block("native_policy_core_unavailable");
-        });
+        using var broker = new BrowserPolicyBroker(
+            () =>
+            {
+                probes++;
+                return NativePolicyCoreGateResult.Block("native_policy_core_unavailable");
+            },
+            nativePolicyCoreRequiredForTests: false);
 
         Assert.IsType<Decision.Deny>(broker.EvaluateNavigation("s", "t", 0, "https://example.com", "navigation"));
         Assert.IsType<Decision.Deny>(broker.EvaluateNavigation("s", "t", 0, "https://example.com", "navigation"));
@@ -127,8 +131,10 @@ public sealed class BrowserPolicyBrokerNativeGateTests : IDisposable
         // CS-291（P1）：跨窗口联动——设置窗触发主窗 broker 的开关，无痕窗口
         // broker（注入同一共享实例）的导航/下载/确认链必须同样冻结
         var shared = new KillSwitch();
-        var mainBroker = new BrowserPolicyBroker(killSwitch: shared);
-        var inPrivateBroker = new BrowserPolicyBroker(killSwitch: shared);
+        var mainBroker = new BrowserPolicyBroker(
+            killSwitch: shared, nativePolicyCoreRequiredForTests: false);
+        var inPrivateBroker = new BrowserPolicyBroker(
+            killSwitch: shared, nativePolicyCoreRequiredForTests: false);
         Assert.True(mainBroker.RegisterSession("main-s", "main-t"));
         Assert.True(inPrivateBroker.RegisterSession("inprivate-s", "inprivate-t"));
 
@@ -148,8 +154,8 @@ public sealed class BrowserPolicyBrokerNativeGateTests : IDisposable
     {
         // CS-291 反向锁定：缺省构造（测试语境）各自独立——一个 broker 触发
         // 不影响另一个（生产组合根统一注入 KillSwitch.Shared）
-        var first = new BrowserPolicyBroker();
-        var second = new BrowserPolicyBroker();
+        var first = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
+        var second = new BrowserPolicyBroker(nativePolicyCoreRequiredForTests: false);
         first.KillSwitch.Engage();
         Assert.False(second.KillSwitch.IsEngaged);
     }

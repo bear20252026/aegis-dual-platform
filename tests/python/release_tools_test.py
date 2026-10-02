@@ -344,6 +344,11 @@ class TestBuildMetadata:
             build_metadata.main()
 
     def test_complete_properties_write_metadata(self, tmp_path, monkeypatch):
+        # PY-259（2026-10-01 发布链批）：build_metadata 写侧优先消费 GITHUB_*
+        # 环境变量——CI runner 上恒有值，哨兵断言必须显式清场（否则断言的是
+        # runner 环境而非被测降级路径——发布链 contracts job 实证）
+        for var in ("GITHUB_SHA", "GITHUB_REF", "GITHUB_RUN_ID"):
+            monkeypatch.delenv(var, raising=False)
         (tmp_path / "shared").mkdir()
         props = tmp_path / "shared" / "version.properties"
         props.write_text(

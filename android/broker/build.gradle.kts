@@ -72,14 +72,21 @@ android {
 }
 
 if (requireNativePolicyCore) {
+    // AD-293（2026-10-01 发布链批）：configuration cache 下 doFirst 闭包不得
+    // 捕获 Gradle 脚本对象引用（script receiver）——此前的脚本级属性直引使
+    // `-PrequireNativePolicyCore=true`（发布链路径）构建即报
+    // "cannot serialize Gradle script object references"。先把脚本态值拷入
+    // 局部 val（File/String 均可序列化），闭包只引用局部量。
+    val configuredNativePolicyCoreDir = nativePolicyCoreDir
+    val requiredNativePolicyCoreFiles = nativePolicyCoreFiles
     tasks.named("preBuild").configure {
         doFirst {
-            check(nativePolicyCoreDir != null) {
+            check(configuredNativePolicyCoreDir != null) {
                 "requireNativePolicyCore=true 时必须设置 -PnativePolicyCoreDir=<ABI 制品目录>"
             }
-            nativePolicyCoreFiles.forEach { relativePath ->
-                check(nativePolicyCoreDir.resolve(relativePath).isFile) {
-                    "缺少受控原生策略制品: ${nativePolicyCoreDir.resolve(relativePath)}"
+            requiredNativePolicyCoreFiles.forEach { relativePath ->
+                check(configuredNativePolicyCoreDir.resolve(relativePath).isFile) {
+                    "缺少受控原生策略制品: ${configuredNativePolicyCoreDir.resolve(relativePath)}"
                 }
             }
         }
