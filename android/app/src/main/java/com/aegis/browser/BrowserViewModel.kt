@@ -385,15 +385,15 @@ class BrowserViewModel(
             // 「被拒」共用 false 返回——确认对话框已挂起时不得再弹恐吓提示。
             _pendingNavigationConfirmation.value == null
         ) {
-            // AD-303（2026-10-02 审计）：外跳 scheme 分型——地址栏输入
-            // tel:/mailto:/sms: 等（与 AegisWebViewClient.externalHandlerSchemes
-            // 同集，AD-304 配套 companion 化共用）走「不支持该类链接」瞬时
-            // Toast（WebView 内链接点击同款反馈），其余保持策略拒绝提示。
+            // AD-303（2026-10-02 审计）：外跳 scheme 分型——地址栏输入 tel:/mailto:/sms:
+            // 等（与 AegisWebViewClient.externalHandlerSchemes 同集，AD-304 配套
+            // companion 化共用）走「不支持该类链接」瞬时 Toast（同款反馈），其余拒绝提示。
             if (target.substringBefore(':', "").lowercase() in EXTERNAL_HANDLER_SCHEMES) {
                 appContext?.let { ctx ->
-                    android.widget.Toast
-                        .makeText(ctx, ctx.getString(R.string.unsupported_link_scheme), android.widget.Toast.LENGTH_SHORT)
-                        .show()
+                    // detekt-修复（2026-10-02 审计云端实证）：MaxLineLength>120——文案短引用。
+                    val text = ctx.getString(R.string.unsupported_link_scheme)
+                    val toast = android.widget.Toast.makeText(ctx, text, android.widget.Toast.LENGTH_SHORT)
+                    toast.show()
                 }
             } else {
                 _webViewAlert.value = alertNotice(R.string.nav_rejected)

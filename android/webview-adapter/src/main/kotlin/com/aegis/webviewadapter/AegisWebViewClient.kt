@@ -231,57 +231,55 @@ class AegisWebViewClient(
         // 拒绝（真机复现：连搜索词都被弹「安全提示」）。待审批确认期间不续期，
         // 避免覆盖式重注册孤儿化 pending nonce。
         renewSessionBeforeDecision()
-        when (
-            val decision =
-                broker.requestNavigationConfirmation(
-                    sessionId,
-                    tabId,
-                    documentGeneration,
-                    url,
-                    "navigation",
-                )
-        ) {
-            is Decision.RequireConfirmation -> {
-                if (requireNavigationConfirmation && mayRequireConfirmation) {
-                    pendingConfirmation = PendingConfirmedNavigation(url, "navigation", decision.request)
-                    onNavigationConfirmationRequested(decision.request)
-                    return false
+        // detekt-修复（2026-10-02 审计云端实证）：ReturnCount(4>2)——三决策分支各自
+        // return 收敛为 when 表达式单 return；逐分支语义不变（登记/兑换/Deny 上抛）。
+        val decision =
+            broker.requestNavigationConfirmation(sessionId, tabId, documentGeneration, url, "navigation")
+        val allowed =
+            when (decision) {
+                is Decision.RequireConfirmation -> {
+                    if (requireNavigationConfirmation && mayRequireConfirmation) {
+                        pendingConfirmation = PendingConfirmedNavigation(url, "navigation", decision.request)
+                        onNavigationConfirmationRequested(decision.request)
+                        false
+                    } else {
+                        // 自动批准：保留 Rust 核心 nonce 语义（等同用户批准后兑换）
+                        // AD-050：决策经注入源（生产=broker 委托；测试=替身）。
+                        val approved = autoApproveDecision(decision.request, url, "navigation")
+                        val consumed =
+                            approved is Decision.Allow &&
+                                broker.consumeNavigation(
+                                    action = approved.action,
+                                    sessionId = sessionId,
+                                    tabId = tabId,
+                                    currentGeneration = documentGeneration,
+                                    rawUrl = url,
+                                    scope = "navigation",
+                                )
+                        if (consumed) view.loadUrl(url)
+                        consumed
+                    }
                 }
-                // 自动批准：保留 Rust 核心 nonce 语义（等同用户批准后兑换）
-                // AD-050：决策经注入源（生产=broker 委托；测试=替身）。
-                val approved = autoApproveDecision(decision.request, url, "navigation")
-                val consumed =
-                    approved is Decision.Allow &&
+
+                is Decision.Allow -> {
+                    val consumed =
                         broker.consumeNavigation(
-                            action = approved.action,
-                            sessionId = sessionId,
-                            tabId = tabId,
-                            currentGeneration = documentGeneration,
-                            rawUrl = url,
-                            scope = "navigation",
+                            decision.action,
+                            sessionId,
+                            tabId,
+                            documentGeneration,
+                            url,
+                            "navigation",
                         )
-                if (consumed) view.loadUrl(url)
-                return consumed
-            }
+                    if (consumed) view.loadUrl(url)
+                    consumed
+                }
 
-            is Decision.Allow -> {
-                val consumed =
-                    broker.consumeNavigation(
-                        decision.action,
-                        sessionId,
-                        tabId,
-                        documentGeneration,
-                        url,
-                        "navigation",
-                    )
-                if (consumed) view.loadUrl(url)
-                return consumed
+                is Decision.Deny -> {
+                    denied(decision.reason, mayRequireConfirmation, url)
+                }
             }
-
-            is Decision.Deny -> {
-                return denied(decision.reason, mayRequireConfirmation, url)
-            }
-        }
+        return allowed
     }
 
     /** P0 修复（全量复审 2026-09-01）：决策前滑动续期会话（待审批确认期间不续期）。 */

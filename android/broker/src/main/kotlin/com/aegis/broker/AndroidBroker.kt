@@ -165,11 +165,11 @@ class AndroidBroker(
                 nativeCoreGate { it.advanceDocumentGeneration(sessionId, tabId, generation) }
         return synchronized(authorizationLock) {
             val session = sessions[sessionId]
+            // detekt-修复（2026-10-02 审计云端实证）：ComplexCondition(4)——四元合取拆 takeIf 中间 val（语义不变）。
+            val commitTarget = session?.takeIf { it.tabId == tabId && it.documentGeneration + 1 == generation }
             // 单步推进不变式：提交时核心期望的前置代际必须仍是快照时值
-            if (advanced && session != null && session.tabId == tabId &&
-                session.documentGeneration + 1 == generation
-            ) {
-                session.documentGeneration = generation
+            if (advanced && commitTarget != null) {
+                commitTarget.documentGeneration = generation
                 true
             } else {
                 false

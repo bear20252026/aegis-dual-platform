@@ -59,7 +59,14 @@ class WebViewEventAssemblyTest {
 
         override val isAddressDraftActive: Boolean = false
 
-        override fun displayAddress(url: String): String = if (url.startsWith("file://")) BrowserViewModel.HOME_DISPLAY_URL else url
+        // detekt-修复（2026-10-02 审计云端实证）：MaxLineLength>120——if-else 加花括号拆行
+        // （ktlint expression-body 会回收单行可容纳的折行——花括号块不回收，结构稳定）
+        override fun displayAddress(url: String): String =
+            if (url.startsWith("file://")) {
+                BrowserViewModel.HOME_DISPLAY_URL
+            } else {
+                url
+            }
 
         override fun submitPageAddress(url: String) {
             addresses.add(url)
@@ -81,7 +88,12 @@ class WebViewEventAssemblyTest {
             refreshCount++
         }
 
-        override fun errorStrings(): PageErrorTexts.Strings = pageErrorStringsOf({ id -> "res($id)" }, { id, arg -> "res($id,$arg)" })
+        // detekt-修复（2026-10-02 审计云端实证）：MaxLineLength>120——实参折行（ktlint 不回收已折行实参）。
+        override fun errorStrings(): PageErrorTexts.Strings =
+            pageErrorStringsOf(
+                { id -> "res($id)" },
+                { id, arg -> "res($id,$arg)" },
+            )
 
         override fun requestDownloadConfirmation(
             webView: WebView,
@@ -239,7 +251,8 @@ class WebViewEventAssemblyTest {
 
     @Test
     fun downloadConfirmationRequestReachesHost() {
-        val context = ApplicationProvider.getApplicationContext<Application>()
+        // detekt-修复（2026-10-02 审计云端实证）：删除未用局部 context（ApplicationProvider
+        // 取值后无人引用——robolectric 假 Host 不触 UI 上下文）
         // 查询参数携带危险扩展（二级）——非 http(s) 前置拦截不会触发；
         // 直接驱动下载监听（工厂接线面）
         val listener = shadowOf(webView).getDownloadListener()

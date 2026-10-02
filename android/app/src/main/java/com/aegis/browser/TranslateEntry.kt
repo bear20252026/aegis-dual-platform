@@ -65,8 +65,12 @@ object TranslateEntry {
             entries.filter { entry ->
                 entry.substringBefore('=').lowercase() !in SENSITIVE_QUERY_PARAMS
             }
-        // 无命中：原样返回（保留用户 URL 字节形态）
-        if (kept.size == entries.size) return urlWithoutFragment
-        return if (kept.isEmpty()) base else "$base?${kept.joinToString("&")}"
+        // detekt-修复（2026-10-02 审计云端实证）：ReturnCount(3>2)——命中分型收敛
+        // 为 when 表达式（无命中原样返回/全量剥空移除 '?'/部分剥离重组）。
+        return when {
+            kept.size == entries.size -> urlWithoutFragment
+            kept.isEmpty() -> base
+            else -> "$base?${kept.joinToString("&")}"
+        }
     }
 }

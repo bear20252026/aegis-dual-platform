@@ -395,9 +395,9 @@ internal class ExternalIntentRateLimit(
         now: Long,
         hasConsumableIntent: Boolean,
     ): Boolean {
-        if (!hasConsumableIntent) return false
-        if (now - lastConsumedAt < minIntervalMs) return false
-        lastConsumedAt = now
-        return true
+        // detekt-修复（2026-10-02 审计云端实证）：ReturnCount(3>2)——前置判定合并单布尔表达式（频控语义不变）。
+        val acquirable = hasConsumableIntent && now - lastConsumedAt >= minIntervalMs
+        if (acquirable) lastConsumedAt = now
+        return acquirable
     }
 }

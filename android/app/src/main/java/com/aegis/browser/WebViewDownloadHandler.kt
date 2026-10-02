@@ -99,9 +99,8 @@ internal object WebViewDownloadHandler {
         url: String,
         mimeType: String,
         contentDisposition: String,
-        // AD-331（2026-10-02 审计）：二级确认回调——仅查询参数命中危险扩展时
-        // 调用；回调展示确认 UI，用户批准时调用 proceed() 继续入队，否则放弃
-        // （fail-closed）。生产经 SecureWebViewFactory 接 MainDialogs 单槽。
+        // AD-331（2026-10-02 审计）：二级确认回调——仅查询参数命中危险扩展时调用；回调展示确认 UI，
+        // 用户批准时调用 proceed() 继续入队，否则放弃（fail-closed）。生产经 SecureWebViewFactory 接 MainDialogs 单槽。
         requestConfirmation: (proceed: () -> Unit) -> Unit = { proceed -> proceed() },
     ) {
         val context = webView.context
@@ -117,26 +116,27 @@ internal object WebViewDownloadHandler {
                 .show()
             return
         }
-        // P2-5 修复：文件名先解析（净化后）再判定危险扩展——`/download?file=x.exe`
-        // 类直链的文件名在 Content-Disposition，判定需要拿到净化后文件名。
+        // P2-5 修复：文件名先解析（净化后）再判定危险扩展——`/download?file=x.exe` 类直链的文件名在 Content-Disposition，判定需净化后文件名。
         val fileName = resolveDownloadFileName(url, mimeType, contentDisposition)
-        // AD-331（2026-10-02 审计）：拆两级——路径/文件名命中硬拦截；仅查询
-        // 参数命中经确认对话框放行（原 requiresExplicitConfirmation 名实不符：
-        // 承诺确认、实现硬拦截）。
-        if (DownloadPolicy.isHardBlocked(url, fileName)) {
-            // AD-220（2026-09-26 审计）：下载日志统一接入脱敏单源。
-            android.util.Log.w("AegisDownload", "拦截危险扩展下载: ${LogRedact.redact(url)}")
-            Toast
-                .makeText(context, context.getString(R.string.download_blocked_dangerous), Toast.LENGTH_LONG)
-                .show()
-            return
+        // detekt-修复（2026-10-02 审计云端实证）：ReturnCount(3>2)——AD-331 两级拦截分型收敛为 when（顺序/副作用不变）。
+        when {
+            DownloadPolicy.isHardBlocked(url, fileName) -> {
+                // AD-220（2026-09-26 审计）：下载日志统一接入脱敏单源。
+                android.util.Log.w("AegisDownload", "拦截危险扩展下载: ${LogRedact.redact(url)}")
+                Toast
+                    .makeText(context, context.getString(R.string.download_blocked_dangerous), Toast.LENGTH_LONG)
+                    .show()
+            }
+
+            DownloadPolicy.requiresExplicitConfirmation(url, fileName) -> {
+                android.util.Log.w("AegisDownload", "危险扩展下载待确认（仅查询参数命中）: ${LogRedact.redact(url)}")
+                requestConfirmation { enqueueDownload(context, url, mimeType, fileName) }
+            }
+
+            else -> {
+                enqueueDownload(context, url, mimeType, fileName)
+            }
         }
-        if (DownloadPolicy.requiresExplicitConfirmation(url, fileName)) {
-            android.util.Log.w("AegisDownload", "危险扩展下载待确认（仅查询参数命中）: ${LogRedact.redact(url)}")
-            requestConfirmation { enqueueDownload(context, url, mimeType, fileName) }
-            return
-        }
-        enqueueDownload(context, url, mimeType, fileName)
     }
 
     /** AD-331：入队单源（确认续体与直通路径共用——参数已解析完毕）。 */

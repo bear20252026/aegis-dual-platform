@@ -161,64 +161,9 @@ class AegisWebViewClientTest {
         verify(view).loadUrl("https://example.com/x")
     }
 
-    // ------------------------------------------------------------- AD-011 / AD-246 / AD-309
-    @Test
-    fun subFrameHttpIsBlockedAndResentUpgraded() {
-        // AD-309（2026-10-02 审计）：子框架 Allow 与主框架同口径——升级只用于
-        // 判定、放行仍载原始 http 的旧形态（cleartext 禁用下子框架静默失败）
-        // 改为返回 true 阻断原始加载 + view.loadUrl(升级后 URL) 重发。
-        val client = newClient()
-        whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
-            .thenReturn(Decision.Allow(allowAction))
-        val blocked =
-            client.shouldOverrideUrlLoading(view, fakeRequest("http://ads.example/frame", isMainFrame = false))
-        assertTrue("原始 http 子框架加载必须阻断", blocked)
-        // broker 收到升级后 URL，且经 loadUrl 重发（不消费顶层授权对象）
-        verify(broker).evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation")
-        verify(view).loadUrl("https://ads.example/frame")
-        verify(
-            broker,
-            never(),
-        ).consumeNavigation(allowAction, SESSION, TAB, 0L, "https://ads.example/frame", "navigation")
-
-        // 子框架 Deny：return true（阻断留痕，不重发）
-        whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
-            .thenReturn(
-                Decision.Deny(
-                    DenyReason("url_policy", "拒绝 URL: https://ads.example/frame?token=secret"),
-                ),
-            )
-        val denied = client.shouldOverrideUrlLoading(view, fakeRequest("http://ads.example/frame", isMainFrame = false))
-        assertTrue(denied)
-        // Deny 后无第三次 loadUrl（上面 Allow 分支恰好一次）
-        verify(view, times(1)).loadUrl(anyString())
-    }
-
-    // ------------------------------------------------------------- AD-321
-    @Test
-    fun subFrameRequireConfirmationFailsClosed() {
-        // 子框架 RequireConfirmation：无子框架确认 UI 面——fail-closed 阻断
-        // （不弹确认、不放行、不登记 pending）
-        val confirmationRequest = approvalRequest()
-        whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
-            .thenReturn(Decision.RequireConfirmation(confirmationRequest))
-        var requested = false
-        val client =
-            AegisWebViewClient(
-                broker = broker,
-                sessionId = SESSION,
-                tabId = TAB,
-                onRendererGone = {},
-                requireNavigationConfirmation = true,
-                onNavigationConfirmationRequested = { requested = true },
-                onNavigationDenied = { code, _ -> deniedCodes.add(code) },
-            )
-        val blocked = client.shouldOverrideUrlLoading(view, fakeRequest("https://ads.example/frame", isMainFrame = false))
-        assertTrue("确认型子框架导航必须 fail-closed 阻断", blocked)
-        assertFalse("不得登记确认请求（无子框架确认 UI 面）", requested)
-        assertTrue(deniedCodes.isEmpty())
-        verify(view, never()).loadUrl(anyString())
-    }
+    // detekt-修复（2026-10-02 审计云端实证）：子框架导航域（AD-011/AD-246/AD-309、
+    // AD-321、AD-221 子框架续期抑制）拆至 AegisWebViewClientSubFrameNavigationTest
+    // （原类 829 行触发 LargeClass(600)）——断言原样搬移。
 
     // ------------------------------------------------------------- AD-321
     @Test
@@ -265,34 +210,9 @@ class AegisWebViewClientTest {
     }
 
     // ------------------------------------------------------------- AD-221
-    @Test
-    fun sessionRenewalIsSuppressedWhileConfirmationIsPending() {
-        // 待审批确认期间不得续期——覆盖式重注册会孤儿化 Rust 核心的 pending
-        // nonce（renewSessionBeforeDecision 门控的关键时序此前零测试）。
-        // 注意：同一请求实例贯穿登记/批准（data class equals 含时间戳——
-        // 每次新建实例会使 stub 匹配失效）
-        val pendingRequest = approvalRequest()
-        whenever(broker.requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation"))
-            .thenReturn(Decision.RequireConfirmation(pendingRequest))
-        val client = newClient(requireConfirmation = true)
-        assertFalse(client.navigate(view, "https://example.com/"))
-        verify(broker, times(1)).renewSession(SESSION, TAB)
-
-        // pending 期间的子框架导航：轻量路径不续期（防孤儿化 pending nonce）
-        whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
-            .thenReturn(Decision.Allow(allowAction))
-        client.shouldOverrideUrlLoading(view, fakeRequest("https://ads.example/frame", isMainFrame = false))
-        verify(broker, times(1)).renewSession(SESSION, TAB)
-
-        // 批准消费后恢复续期
-        whenever(broker.approveNavigationConfirmation(pendingRequest, "https://example.com/", "navigation"))
-            .thenReturn(Decision.Allow(allowAction))
-        whenever(broker.consumeNavigation(allowAction, SESSION, TAB, 0L, "https://example.com/", "navigation"))
-            .thenReturn(true)
-        assertTrue(client.approvePendingNavigation(view))
-        client.navigate(view, "https://example.com/")
-        verify(broker, times(2)).renewSession(SESSION, TAB)
-    }
+    // detekt-修复（2026-10-02 审计云端实证）：sessionRenewalIsSuppressed...（含
+    // pending 期间子框架续期抑制断言）已随子框架域迁至
+    // AegisWebViewClientSubFrameNavigationTest。
 
     // ------------------------------------------------------------- AD-211
     @Test

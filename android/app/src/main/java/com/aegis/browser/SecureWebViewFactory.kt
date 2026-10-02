@@ -130,10 +130,22 @@ object SecureWebViewFactory {
             AegisHomeBridge(context.applicationContext, webViewProvider = { webView }),
             "AegisBridge",
         )
-        // H-6 修复（审计 2026-08-31）：下载防线接线——原 DownloadPolicy
-        // 为死代码，WebView 默认下载行为未处理（危险扩展确认机制不存在、
-        // 下载静默失败）。统一收口：DownloadPolicy 判定 → DownloadManager。
-        // AD-331：二级（仅查询参数命中）确认上抛调用方单槽对话框。
+        // detekt-修复（2026-10-02 审计云端实证）：LongMethod(61>60)——下载防线
+        // 接线（H-6/AD-331）提取为 [installDownloadListener] 私有函数，接线语义不变。
+        installDownloadListener(webView, onDownloadConfirmationNeeded)
+        return webView
+    }
+
+    /**
+     * H-6 修复（审计 2026-08-31）：下载防线接线——原 DownloadPolicy
+     * 为死代码，WebView 默认下载行为未处理（危险扩展确认机制不存在、
+     * 下载静默失败）。统一收口：DownloadPolicy 判定 → DownloadManager。
+     * AD-331：二级（仅查询参数命中）确认上抛调用方单槽对话框。
+     */
+    private fun installDownloadListener(
+        webView: WebView,
+        onDownloadConfirmationNeeded: (WebView, url: String, proceed: () -> Unit) -> Unit,
+    ) {
         webView.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
             WebViewDownloadHandler.handleDownload(
                 webView,
@@ -145,7 +157,6 @@ object SecureWebViewFactory {
                 },
             )
         }
-        return webView
     }
 
     /** 仅工厂创建的 WebView 才拥有受控导航器；不存在时调用方必须拒绝外部导航。 */
