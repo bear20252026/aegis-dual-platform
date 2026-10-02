@@ -40,7 +40,7 @@
     "core/rust-policy-core/src/https_only.rs": 396,
     "core/rust-policy-core/src/js_inject.rs": 389,
     "core/rust-policy-core/src/letterbox.rs": 438,
-    "core/rust-policy-core/src/matcher.rs": 586,
+    "core/rust-policy-core/src/matcher.rs": 594,
     "core/rust-policy-core/src/oracle.rs": 378,
     "core/rust-policy-core/src/origin.rs": 458,
     "core/rust-policy-core/src/per_site_seed.rs": 304,

@@ -208,8 +208,7 @@ fn covers(a: &[Tok], b: &[Tok], flat: bool) -> bool {
                 //（与 DStar 双分支语义对齐）。此前缺此分支致 `*?` ⊑ `?`
                 // 误判 false（语言包含成立：? 的单字符语言真包含于 *?）
                 (Tok::Star, _) => {
-                    (flat || !matches!(b[bi], Tok::Lit('/')))
-                        && (at(ai, bi + 1) || at(ai + 1, bi))
+                    (flat || !matches!(b[bi], Tok::Lit('/'))) && (at(ai, bi + 1) || at(ai + 1, bi))
                 }
                 (_, Tok::Star | Tok::DStar) => false,
                 (Tok::Any1, Tok::Any1) => at(ai + 1, bi + 1),

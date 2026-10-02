@@ -134,7 +134,7 @@ class WebViewEventAssemblyTest {
         webView = assembly.create(ApplicationProvider.getApplicationContext<Application>())
         tm.addTab(webView, url = "https://start.example/")
         client = webView.webViewClient
-        chromeClient = webView.webChromeClient
+        chromeClient = webView.webChromeClient!!
     }
 
     // ---------------- URL 展示归一（AD-063 口径经装配面回归） ----------------
