@@ -34,8 +34,8 @@ internal class BrowserViewModelHost(
     private val resolveErrorStrings: () -> PageErrorTexts.Strings,
     // AD-331（2026-10-02 审计）：二级下载确认上抛（ViewModel 单写点登记
     // PendingDownloadConfirmation——MainDialogs 单槽渲染）。
-    private val onRequestDownloadConfirmation:
-        (android.webkit.WebView, String, () -> Unit) -> Unit = { _, _, _ -> },
+    private val onRequestDownloadConfirmation: (android.webkit.WebView, String, () -> Unit) -> Unit =
+        { _, _, _ -> },
 ) : WebViewEventAssembly.Host {
     override val activeTabManager: TabManager?
         get() = tabManagerOrNull()

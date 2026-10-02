@@ -38,7 +38,7 @@ class BrowserViewModel(
         const val NAVIGATE_DEBOUNCE_MS = 500L
 
         // AD-326（2026-10-02 审计）：会话持久化键/读写单源在 TabSessionState
-        //（BrowserModels.kt）——此处别名保持既有引用形态稳定。
+        // （BrowserModels.kt）——此处别名保持既有引用形态稳定。
         const val STATE_TAB_URLS = TabSessionState.TAB_URLS
 
         const val STATE_ACTIVE_TAB_INDEX = TabSessionState.ACTIVE_TAB_INDEX
@@ -575,7 +575,7 @@ class BrowserViewModel(
             },
             onRefreshTabs = ::refresh,
             // AD-332 回归修复：宿主构造参数随 BrowserViewModelHost 属性改名
-            //（errorStrings → resolveErrorStrings——消除与 override fun
+            // （errorStrings → resolveErrorStrings——消除与 override fun
             // errorStrings() 的同名遮蔽，AD-003 同型）。
             resolveErrorStrings = { pageErrorStringsOf(::alertText, ::alertText) },
             // AD-331：二级下载确认登记（单槽状态——MainDialogs 渲染）

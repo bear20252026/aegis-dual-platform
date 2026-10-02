@@ -382,7 +382,9 @@ class MainActivity : ComponentActivity() {
  * 单线程约束：仅主线程（onNewIntent）调用，与 BrowserViewModel 草稿标记
  * 同口径（无原子类型加重语义）。
  */
-internal class ExternalIntentRateLimit(private val minIntervalMs: Long) {
+internal class ExternalIntentRateLimit(
+    private val minIntervalMs: Long,
+) {
     private var lastConsumedAt = 0L
 
     /**

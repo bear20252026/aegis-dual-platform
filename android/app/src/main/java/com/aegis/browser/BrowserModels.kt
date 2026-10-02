@@ -62,8 +62,9 @@ internal object TabSessionState {
             .filter { it.startsWith("https://") }
 
     /** 读取恢复的激活下标（越界由调用方 coerce——这里只做缺省）。 */
-    fun restorableActiveIndex(savedInstanceState: android.os.Bundle?): Int =
-        savedInstanceState?.getInt(ACTIVE_TAB_INDEX, 0) ?: 0
+    fun restorableActiveIndex(savedInstanceState: android.os.Bundle?): Int {
+        return savedInstanceState?.getInt(ACTIVE_TAB_INDEX, 0) ?: 0
+    }
 
     /** 写出会话态：https 过滤 + 激活位映射（激活标签非 https 时回落 0）。 */
     fun write(

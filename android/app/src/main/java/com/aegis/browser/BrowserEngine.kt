@@ -82,7 +82,7 @@ class BrowserEngine(
         webView.settings.displayZoomControls = false
         // AD-325（2026-10-02 审计）：删除 textZoom=100 钉死——该行覆盖系统
         // 字体缩放（fontScale），大字号用户的 web 正文不随系统设置放大
-        //（系统级无障碍回退）。回归平台默认（textZoom 默认随 fontScale
+        // （系统级无障碍回退）。回归平台默认（textZoom 默认随 fontScale
         // 派生）；TEXT_ZOOM_DEFAULT 常量随之清理（无其他引用）。
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         // WebViewClient 由 SecureWebViewFactory 统一注入 AegisWebViewClient（经 Broker 决策），
