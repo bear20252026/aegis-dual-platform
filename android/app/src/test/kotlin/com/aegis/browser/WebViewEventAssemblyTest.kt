@@ -9,6 +9,7 @@ import android.webkit.WebView
 import androidx.test.core.app.ApplicationProvider
 import com.aegis.broker.AndroidBroker
 import com.aegis.broker.Decision
+import com.aegis.broker.DenyReason
 import com.aegis.webviewadapter.WebViewErrorCodes
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -20,7 +21,6 @@ import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import kotlin.time.Clock
 import org.mockito.Mockito.`when` as whenever
 
 /**
@@ -154,18 +154,26 @@ class WebViewEventAssemblyTest {
 
     @Test
     fun onPageStartedRechecksRedirectTargetAgainstPolicy() {
-        // AD-256：302 重定向复核——Allow 放行并观察 URL
+        // AD-256：302 落地复核——Deny 即顶层上抛 + 阻断 URL 不得进地址栏
+        // （Allow 放行观察面已由 onPageStartedSubmitsNormalizedDisplayAddress 覆盖。
+        //   桩形全仓放行口径：纯 any 系——eq 混桩对 Kotlin 非空参数求值为 null，
+        //   本工具链恒 NPE 且脏 matcher 栈级联污染下一用例）
         whenever(
             broker.evaluateNavigation(
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyLong(),
-                org.mockito.ArgumentMatchers.eq("https://example.com/redirected"),
+                org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
             ),
-        ).thenReturn(Decision.Allow(stubAction()))
+        ).thenReturn(Decision.Deny(DenyReason("url_policy", "拒绝重定向 URL")))
         client.onPageStarted(webView, "https://example.com/redirected", null)
-        assertEquals(listOf("https://example.com/redirected"), host.addresses)
+        assertTrue("被拒重定向不得上抛地址栏", host.addresses.isEmpty())
+        assertEquals(
+            "顶层拒绝必须上抛安全提示（deny code → 文案资源映射单源）",
+            listOf(host.errorStrings().text(PageErrorTexts.denyAlertTextRes("url_policy"))),
+            host.alerts,
+        )
     }
 
     // ---------------- 标题截断（超长标题不进标签数据层） ----------------
@@ -268,20 +276,6 @@ class WebViewEventAssemblyTest {
     }
 
     // ---------------- 辅助 ----------------
-
-    private fun stubAction() =
-        com.aegis.broker.AuthorizedAction(
-            sessionId = "stub-session",
-            tabId = "stub-tab",
-            documentGeneration = 0,
-            origin = "https://example.com",
-            method = "GET",
-            canonicalParameters = "/",
-            scope = "navigation",
-            expiresAt = Clock.System.now().plus(kotlin.time.Duration.parse("120s")),
-            nonce = "stub-nonce",
-            policyVersion = "1.0",
-        )
 
     private fun fakeRequest(
         url: String,

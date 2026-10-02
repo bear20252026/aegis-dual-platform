@@ -52,8 +52,7 @@ class BrowserViewModelBehaviorTest {
             ),
         ).thenReturn(true)
         viewModel = BrowserViewModel(broker)
-        val application = ApplicationProvider.getApplicationContext<Application>()
-        viewModel.init(application)
+        viewModel.init(ApplicationProvider.getApplicationContext())
     }
 
     private fun approvalRequest(): ApprovalRequest =
@@ -215,9 +214,10 @@ class BrowserViewModelBehaviorTest {
     }
 
     // ---------------- AD-326（2026-10-02 审计）：标签会话持久化 ----------------
-
     @Test
     fun sessionStateRestoreRebuildsTabsFromSavedHttpsUrls() {
+        // 恢复重载走 navigateExternal 安全链——mock broker 决策桩不接即 Decision 穷举 when 失败
+        stubBrokerAllowChain()
         val bundle =
             android.os.Bundle().apply {
                 putStringArrayList(

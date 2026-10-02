@@ -1,17 +1,27 @@
 package com.aegis.browser
 
+import android.app.Application
+import androidx.test.core.app.ApplicationProvider
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /**
  * ReaderMode 两段解析 JVM 单测（2026-09-24 审计——AD-028）。
  * parse 是「页内脚本返回值」的信任边界——畸形返回不得崩溃、
  * ok=false/空正文不得进入阅读模式、超长正文必须截断。
+ *
+ * Robolectric（AD-322）：空标题兜底断言需资源解析
+ * （R.string.reader_mode_title 与 MainDialogs.ReaderDialog 渲染同源）。
  */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class ReaderModeTest {
     /** 构建 payload JSON（非链式——ktlint chained-expression 规则）。 */
     private fun payload(
@@ -61,7 +71,16 @@ class ReaderModeTest {
 
     @Test
     fun blankTitleFallsBackToDefault() {
-        assertEquals("阅读模式", ReaderMode.parse(payload(ok = true, text = "正文"))!!.title)
+        // AD-322：空标题兜底迁 UI 层资源单源——数据层 parse 空标题原样透传
+        // （不再硬编码中文）；ReaderDialog 渲染以 R.string.reader_mode_title
+        // ifBlank 兜底。期望文本经资源解析与渲染同源，不硬编码。
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val content = ReaderMode.parse(payload(ok = true, text = "正文"))!!
+        assertEquals("数据层空标题必须原样透传（兜底职责在 UI 层）", "", content.title)
+        assertEquals(
+            app.getString(R.string.reader_mode_title),
+            content.title.ifBlank { app.getString(R.string.reader_mode_title) },
+        )
     }
 
     @Test
