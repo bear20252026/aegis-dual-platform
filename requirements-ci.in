@@ -25,4 +25,4 @@ rfc3339-validator==0.1.4
 pip-audit==2.10.1
 # PY-258（2026-10-01 发布链批）：48.0.1 命中 PYSEC-2026-3552/3553/3554
 #（pip-audit 门禁实证 6 条）——升级到覆盖全部修复的 50.0.0
-cryptography==50.0.0
+cryptography==50.0.1
