@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <!-- SP-177（2026-10-01 审计）：NuGet 锁文件（与 App 同批启用，提交入库） -->
+    <!-- SP-220：锁含 RID（win-x64）——restore/build/test 必须带 -r win-x64 与锁一致，
+         否则 locked-mode 报 NU1004；无 -r 的裸 restore 会把锁改写回无 RID 形态 -->
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
   <ItemGroup>

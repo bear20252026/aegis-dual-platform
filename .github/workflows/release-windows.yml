@@ -110,8 +110,8 @@ jobs:
           $env:AEGIS_NATIVE_POLICY_CORE_TEST_PATH = $policyDll
           # 全量 C# 测试门禁（Core 领域层 + Broker 授权链——此前仅 Broker）；
           # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
-          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -p:RestoreLockedMode=true
-          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -p:RestoreLockedMode=true
+          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `

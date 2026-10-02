@@ -112,11 +112,11 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/**/packages.lock.json') }}
           restore-keys: nuget-${{ runner.os }}-
       - name: Compile Windows broker and generated contracts
-        run: dotnet build windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj --configuration Release -p:RestoreLockedMode=true
+        run: dotnet build windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
       - name: Test Windows Core domain layer
-        run: dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -p:RestoreLockedMode=true
+        run: dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
       - name: Test Windows broker authorization lifecycle
-        run: dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -p:RestoreLockedMode=true
+        run: dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
 
   android-contract-build:
     runs-on: windows-latest

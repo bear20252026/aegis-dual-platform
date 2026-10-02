@@ -19,7 +19,7 @@ Aegis 双端安全浏览器：Windows（C#/.NET 10 + 原生 WebView2——唯一
 ```bash
 # —— Windows 正典栈（C#/.NET 10，ADR-009）——
 cd windows
-dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj   # 0 警告 0 错误
+dotnet build src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64   # 0 警告 0 错误——SP-220：-r 与 NuGet 锁一致
 dotnet test tests/Aegis.Windows.Core.Tests                    # 核心套件全绿
 dotnet test tests/Aegis.Windows.Broker.Tests                  # Broker 套件全绿
 

@@ -75,7 +75,7 @@ jobs:
           $env:AEGIS_REQUIRE_NATIVE_POLICY_CORE = "1"
           $env:AEGIS_REQUIRE_NAVIGATION_CONFIRMATION = "1"
           # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
-          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -p:RestoreLockedMode=true
+          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
