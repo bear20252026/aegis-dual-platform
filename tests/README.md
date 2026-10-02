@@ -10,8 +10,11 @@
 | `python/` | 发布链与脚本门禁单测 | `py -m pytest tests/python/ -q` | release/ 工具链（verify_artifact_set/verify_manifest/verify_provenance/generate_sbom）、update_verifier、build_metadata、scripts 门禁（verify_vectors/verify_release_schema 等）、contracts codegen/catalog |
 | `ui-regression/` | 已知缺陷 UI 回归（node:test） | `node --test "tests/ui-regression/*.test.mjs"` | `shared/shell/` 单源首页的缺陷断言面（BUG-*）与 WB 系列行为/ARIA 断言 |
 | `KNOWN_DEFECTS.md` | 缺陷登记库（文档） | ——（被上面两层引用） | BUG-NNN 登记/根因/回归断言/修复 账本 |
-| `../shared/shell/snake.test.js` | 贪吃蛇逻辑回归（node:test） | `node --test shared/shell/snake.test.js` | start.snake.js 单源游戏逻辑 |
+| `../shared/shell/snake.test.js` | 贪吃蛇逻辑回归（独立 assert runner——WB-196，2026-10-02 审计更正：非 node:test，自研 test()/计数 runner） | `node shared/shell/snake.test.js` | start.snake.js 单源游戏逻辑 |
 | `../agent/tests/` | 红队端到端（pytest） | `python -m pytest agent/tests -q` | broker default-deny：注入/投毒/重放/预算/会话/代际/撤销全拒绝 |
+| `../windows/tests/` | C# 双套件（Core.Tests / Broker.Tests——WB-207，2026-10-02 审计补行） | `dotnet test`（带 `-r win-x64 -p:RestoreLockedMode=true`，见 CLAUDE.md）｜CI：contracts.yml 构建验证 + release-windows.yml | Windows 正典栈回归 |
+| `../android/`（app/broker/webview-adapter 的 src/test） | Android 单测（WB-207 补行；contracts 模块无独立测试源码，ktlint/detekt 四模块覆盖） | `./gradlew.bat :broker:testDebugUnitTest :app:testDebugUnitTest :webview-adapter:testDebugUnitTest`｜CI：android-quality.yml | Kotlin 端回归 |
+| `../core/rust-policy-core/tests/` | Rust 单测 + 跨语言契约向量（vectors.rs——WB-207 补行） | `cargo test --locked --all-features`｜CI：core-rust.yml；向量另经 `python scripts/verify_vectors.py` 逐条校验（contracts.yml） | Rust 策略核心 + 契约向量 |
 
 ## ui-regression 断言面拆分（WB-124）
 

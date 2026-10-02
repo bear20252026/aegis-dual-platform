@@ -70,6 +70,14 @@ shared/shell/                         start.html + start.css + start.js
 shared/release.json                   版本/分发单源（verify_versions 校验）
 ```
 
+> 受信虚拟主机清单（WB-213，2026-10-02 审计同步——原文本未列）：Windows
+> 正典栈以 WebView2 SetVirtualHostNameToFolderMapping 加载单源 UI——
+> `https://ntp.aegis.local`（映射发布输出 ntp/ 目录：首页资产）与
+> `https://geo.aegis.local`（映射随包 GeoGebra 画板资源；资源未随包不映射
+> ——入口 fail-closed 置灰）。两台均 AccessKind=Deny（跨源 fetch/热链
+> 探测一律失败——CS-334）；桥能力仅 ntp 顶层文档放行。
+> 逐项语义与信任假设见 docs/threat-model/trust-boundaries.md。
+
 ### 1.5 发布链（release/ + .github/workflows）
 
 - 更新验证：update_verifier（SemVer precedence 防回滚）+ verify_manifest

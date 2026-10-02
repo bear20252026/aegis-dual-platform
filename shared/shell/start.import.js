@@ -24,7 +24,15 @@
       function label(b) { return b === 'chrome' ? 'Chrome' : 'Edge'; }
 
       function close() {
-        modal.style.display = 'none';
+        // WB-176（2026-10-02 审计）：running 态关闭守卫——closeBtn click 路径
+        // 此前无守卫（Escape 路径 WB-056 已挡）：导入进行中点击「关闭」即
+        // 静默中断向导（桥任务照跑、结果丢弃且无提示）。与 Escape 语义对齐，
+        // 并以 runImport/renderDone 的 closeBtn.disabled 作双保险
+        if (step === 'running') return;
+        // WB-179（2026-10-02 审计）：显隐改 hidden 属性配对翻转——此前压
+        // 内联 style.display，hidden 属性残留（语义仍声明「隐藏」与视觉
+        // 可见矛盾）。初始隐藏由标记层 hidden 承担，开/关必须配对
+        modal.setAttribute('hidden', '');
         body.textContent = '';
         step = 'pick';
         nextBtn.disabled = false;
@@ -142,9 +150,12 @@
           return;
         }
         var a = api();
-        if (!a) { close(); return; }
+        // WB-189（2026-10-02 审计）：删除恒假守卫 if(!a){close();return;}——
+        // openWizard 入口已挡无桥形态，能走到此行则 Host 必在
         step = 'running';
         nextBtn.disabled = true;
+        // WB-176：running 态关闭钮同步禁用——视觉态与 close() 守卫一致
+        closeBtn.disabled = true;
         body.textContent = '';
         body.appendChild(hint('正在导入…（浏览器数据库只读访问，不影响源浏览器）'));
         var lim = parseInt(limitSel ? limitSel.value : '500', 10) || 500;
@@ -198,6 +209,8 @@
         body.textContent = '';
         step = 'done';
         nextBtn.disabled = false;
+        // WB-176：离开 running 态——关闭钮恢复可用
+        closeBtn.disabled = false;
         nextBtn.textContent = '完成';
         var sum = document.createElement('div');
         sum.className = 'im-result';
@@ -231,7 +244,9 @@
         if (!a) return;
         // WB-027：记录触发元素（关闭时归还焦点）——必须在显示弹层前取
         try { lastFocus = document.activeElement || entry; } catch (e) { lastFocus = entry; }
-        modal.style.display = 'flex';
+        // WB-179：打开 = 移除 hidden 属性（与 close 的 setAttribute 配对
+        // 翻转；[hidden] 高特异度 CSS 规则压过作者 display:flex——WB-126）
+        modal.removeAttribute('hidden');
         body.textContent = '';
         step = 'pick';
         nextBtn.disabled = true;
@@ -283,7 +298,10 @@
         // WB-056（审计 2026-09-23 清单·W5 批）：running 态 Escape 不再关闭——
         // 此前导入进行中按 Esc 静默中断向导（桥任务照跑、结果丢弃且无提示）。
         // running 期间忽略 Escape；pick/done 态维持即关
-        if (e.key === 'Escape' && modal.style.display !== 'none') {
+        // WB-179/204（2026-10-02 审计）：开态判定改 hidden 属性口径——旧
+        // 「style.display !== 'none'」在未打开时恒真（内联 display 为空串），
+        // Escape 恒执行 close 副作用；hidden 在未打开时存在 → 守卫恒假
+        if (e.key === 'Escape' && !modal.hasAttribute('hidden')) {
           if (step === 'running') return;
           close();
         }
@@ -292,7 +310,8 @@
       // aria-modal 遮蔽的背景页（聚焦集合每次按键时实时收集，覆盖
       // 各步骤动态重建的复选框/下拉）
       modal.addEventListener('keydown', function (e) {
-        if (e.key !== 'Tab' || modal.style.display === 'none') return;
+        // WB-179：同 Escape 口径——陷阱只应在开态接管 Tab
+        if (e.key !== 'Tab' || modal.hasAttribute('hidden')) return;
         var items = [];
         try {
           var all = modal.querySelectorAll('button, input, select, [tabindex]');

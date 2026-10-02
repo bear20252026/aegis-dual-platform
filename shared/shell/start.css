@@ -1,5 +1,8 @@
   * { margin:0; padding:0; box-sizing:border-box; }
-  html,body { height:100%; overflow:hidden; }
+  /* WB-181（2026-10-02 审计）：overflow:hidden → overflow-y:auto——矮视口
+     （小窗/横屏手机）此前整页硬裁切、下方内容不可达；#wallpaper 为
+     fixed 定位不随滚动，壁纸视觉不受影响 */
+  html,body { height:100%; overflow-y:auto; }
   body {
     font-family: system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
     color:#fff; -webkit-font-smoothing:antialiased;
@@ -47,8 +50,12 @@
     border:1px solid rgba(255,255,255,0.60);
     box-shadow:0 12px 36px rgba(0,0,0,0.22);
   }
+  /* WB-182（2026-10-02 审计）：删除 outline:0——该基础规则特异度
+     (0,1,1) 压过全局 :focus-visible (0,1,0)，主搜索输入框实际仍是
+     全页唯一零键盘焦点指示的控件（WB-109 注释失实处）；删除后输入框
+     真正继承全局键盘焦点描边，胶囊容器另加 focus-within 组级指示 */
   .search input {
-    flex:1; border:0; outline:0; font-size:16px; background:transparent; color:#111;
+    flex:1; border:0; font-size:16px; background:transparent; color:#111;
   }
   /* WB-143（2026-10-01 审计）：placeholder 对比度——#9aa1ad 于白色胶囊上
      实测 2.9:1（< AA 4.5:1）；#6e747f 相对亮度 0.173 → 4.70:1（AA 通过，
@@ -114,8 +121,12 @@
   .bm-name { max-width:82px; font-size:11px; color:rgba(255,255,255,0.92); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   /* 添加常用站点磁贴（浅色虚线圈 + 提示） */
   .bm-add .bm-ico { background:rgba(255,255,255,0.05); border:1px dashed rgba(255,255,255,0.34); color:#fff; font-size:24px; }
-  .bm-add .bm-name { color:rgba(255,255,255,0.66); }
-  .bm-empty { font-size:12px; color:rgba(255,255,255,0.72); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  /* WB-184（2026-10-02 实测对比度）：0.66 → 0.92——白系文字于壁纸亮部
+     最坏情形实测 1.9:1（< AA 4.5:1）；0.92 对齐 .bm-name/.footer 口径
+     （见 #wallpaper::after 实测注记，AA 通过），text-shadow 保留 */
+  .bm-add .bm-name { color:rgba(255,255,255,0.92); }
+  /* WB-184：0.72 → 0.92——同上口径（实测 1.9:1 → AA 通过） */
+  .bm-empty { font-size:12px; color:rgba(255,255,255,0.92); width:100%; text-align:center; text-shadow:0 1px 4px rgba(0,0,0,0.5); }
   /* WB-047（审计 2026-09-23 清单·W5 批）：0.7 → 0.92——见 #wallpaper::after
      处实测注记（亮部最坏情形 2.84:1 → 5.11:1，AA 通过） */
   .footer { position:fixed; left:0; right:0; bottom:10px; z-index:4; text-align:center; font-size:12px; color:rgba(255,255,255,0.92); text-shadow:0 1px 4px rgba(0,0,0,0.5); }
@@ -300,7 +311,9 @@
   .veil-card { text-align:center; padding:10px 26px; }
   .veil-emoji { font-size:46px; line-height:1; }
   .veil-title { color:#FFF3DC; font-size:22px; font-weight:700; margin-top:10px; text-shadow:0 2px 0 rgba(120,70,20,0.35); }
-  .veil-sub { color:rgba(255,236,204,0.72); font-size:12.5px; margin-top:8px; }
+  /* WB-185（2026-10-02 实测对比度）：0.72 → 0.88——veil 半透明底上白系
+     文字对比不足；veil-title（#FFF3DC 实色 + 阴影）同步复测保持通过 */
+  .veil-sub { color:rgba(255,236,204,0.88); font-size:12.5px; margin-top:8px; }
   .veil-btn {
     margin-top:16px; border:0; cursor:pointer;
     background:linear-gradient(180deg, #FFD9A0, #F0A840); color:#3A2410;

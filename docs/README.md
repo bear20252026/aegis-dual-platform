@@ -18,6 +18,8 @@
 | [quality-reports/](quality-reports/) | 2026-08-14/15 双栈期工具扫描快照（pyscn / skylos / valknut / repo-health / hotspottriage——旧扫描机绝对路径已失效，仅溯源）+ full-audit-2026-09-04（带历史横幅）+ fix-log（WB-162，2026-10-01 审计改述——原行仅列三工具名，未注明快照性质与其余内容） |
 | [audit/](audit/) | **全部历史审计报告 + 历轮总台账**（见下） |
 | [KNOWN_DEFECTS](../tests/KNOWN_DEFECTS.md)→[../tests/](../tests/) | 已知缺陷库与测试分层 |
+| [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md) | 工程知识库（经验教训/工具链/发布口径台账——WB-200，2026-10-02 审计补行：现行表此前漏列本文档） |
+| 设计文档组（WB-200 补行——此前失联未索引） | [code-signing-design.md](code-signing-design.md)（代码签名）｜[ffi-architecture-design.md](ffi-architecture-design.md)（FFI 架构）｜[inv05-delivery-chain-design.md](inv05-delivery-chain-design.md)（交付链）｜[release-workflow-design.md](release-workflow-design.md)（发布链设计）｜[threat-context-design.md](threat-context-design.md)（威胁上下文）｜[refactor-final-route.md](refactor-final-route.md)（重构终局路线） |
 
 ## docs/audit/（历史审计归档 + 现行台账）
 
@@ -29,11 +31,16 @@
   audit-full-rescan-2026-09-01 / audit-search / code-audit / architecture-audit×2 /
   open-source-browser-audit×3 / security-audit-red-blue / privacy-defaults /
   dependency-audit / expert-audit-report / expert-review / apple-design-analysis
+- **历史全仓审计（WB-199，2026-10-02 审计补列——本清单此前漏列该轮）**：
+  `full-audit-2026-09-07-200-items.md`（首轮 200 项全仓审计，已闭环）
 
 ## 历史调研（原地保留 + 时代横幅，不作为现行依据）
 
 tauri-migration-report×2、pytauri-×2、rust-desktop-landscape-2026、
 tech-evolution-plan、optimization-plan、source-study-report、
 browser-ecosystem-research、threat-feed-mirror-plan、obfuscation-isolation-design、
-code-structure-review-2026、final-development-checklist、toolchain-plan 等——
-横幅注明被取代口径（SP-060/110..123）。
+code-structure-review-2026、final-development-checklist、toolchain-plan——
+横幅注明被取代口径（SP-060/110..123）；其余失联调研/评审件一并点名
+（WB-200，2026-10-02 审计）：code-quality-assessment、pytauri-capabilities-mapping、
+pytauri-migration-technical-plan、review-and-hardening-2026-08-28、
+security-testing-guide、uniffi-integration-technical-plan。

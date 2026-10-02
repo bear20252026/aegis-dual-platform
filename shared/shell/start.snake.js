@@ -135,7 +135,13 @@ var Snake = (function () {
     el('snakeBest').textContent = String(best);
   }
   function persistBest() {
-    try { localStorage.setItem('snakeBest', String(best)); } catch (e) { }
+    // WB-177（2026-10-02 审计）：盲写内存 best——多实例并存（同页旧实例
+    // 后关）时以陈旧内存值覆盖新实例落盘的最高分（回退）。写前先读盘取
+    // max 再写：单实例形态行为不变，跨实例只升不降
+    try {
+      var stored = parseInt(localStorage.getItem('snakeBest') || '0', 10) || 0;
+      localStorage.setItem('snakeBest', String(Math.max(best, stored)));
+    } catch (e) { }
   }
   function loadBest() {
     try { best = parseInt(localStorage.getItem('snakeBest') || '0', 10) || 0; } catch (e) { best = 0; }
@@ -448,6 +454,10 @@ var Snake = (function () {
     var tgt = e.target;
     if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.tagName === 'SELECT')) return;
     var k = e.key;
+    // WB-186（2026-10-02 审计）：焦点在按钮上时放行 Space/Enter——全局监听
+    // 此前抢占 Space 并 preventDefault，聚焦按钮（音效开关/关闭/出发）无法
+    // 以键盘原生激活；Enter 虽未被消费，一并显式放行保持语义完整
+    if (tgt && tgt.tagName === 'BUTTON' && (k === ' ' || k === 'Enter')) return;
     if (k === 'ArrowUp' || k === 'w' || k === 'W') { turn(0, -1); e.preventDefault(); }
     else if (k === 'ArrowDown' || k === 's' || k === 'S') { turn(0, 1); e.preventDefault(); }
     else if (k === 'ArrowLeft' || k === 'a' || k === 'A') { turn(-1, 0); e.preventDefault(); }

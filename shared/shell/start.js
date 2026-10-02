@@ -146,13 +146,15 @@ var Host = (function () {
       if (andApi()) { cb([]); return; }
       csCall('importScan', [], cb);
     },
-    importBookmarks: function (src, cb) {
+    importBookmarks: function (src) {
       // 返回 Promise——导入向导 runImport 以返回值收集统计（WB-001：此前
-      // 适配层分支返回 undefined，cs 端结果只进回调，导入统计恒 0/0）
+      // 适配层分支返回 undefined，cs 端结果只进回调，导入统计恒 0/0）。
+      // WB-189（2026-10-02 审计）：删除死 cb 形参——调用方只用返回值
       if (andApi()) { return Promise.resolve({ imported: 0, total: 0 }); }
       return new Promise(function (resolve) { csCall('importBookmarks', [src], resolve); });
     },
-    importHistory: function (limit, src, cb) {
+    importHistory: function (limit, src) {
+      // WB-189：同 importBookmarks——删除死 cb 形参
       if (andApi()) { return Promise.resolve({ imported: 0, total: 0 }); }
       return new Promise(function (resolve) { csCall('importHistory', [limit, src], resolve); });
     },

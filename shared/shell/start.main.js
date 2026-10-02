@@ -34,17 +34,25 @@ function renderEngine() {
   var el = document.getElementById('engineName');
   if (el && ENGINES.length) el.textContent = ENGINES[engineIdx].name;
 }
+// WB-180（2026-10-02 审计）：引擎菜单代次 token——toggle 意图与迟到的
+// getEngine 完成回调解耦：任何收起路径都使未决回调失效，仅最新一次
+// toggle 的完成回调可展开（迟到回调此前会把已收起的菜单重新打开）
+var engineMenuGen = 0;
+function invalidateEngineMenu() { engineMenuGen += 1; }
 function toggleEngineMenu(ev) {
   if (ev) ev.stopPropagation();
   var m = document.getElementById('engineMenu');
   var pill = document.getElementById('enginePill');
   if (!m) return;
   if (m.style.display === 'block') {
+    invalidateEngineMenu();
     m.style.display = 'none';
     if (pill) pill.setAttribute('aria-expanded', 'false');
     return;
   }
+  var gen = ++engineMenuGen;   // 先占代次再发起渲染（挂起桥回调期间可作废）
   renderEngineMenu(function () {
+    if (gen !== engineMenuGen) return;   // 已被收起路径作废——迟到回调不得重开
     m.style.display = 'block';
     if (pill) pill.setAttribute('aria-expanded', 'true');
   });
@@ -92,6 +100,7 @@ function renderEngineMenu(done) {
           //（menu 模式要求——读屏用户此前只能再按 Tab/点击才能离开菜单）
           if (ev.key === 'Escape') {
             ev.preventDefault(); ev.stopPropagation();
+            invalidateEngineMenu();          // WB-180：收起即作废未决回调
             m.style.display = 'none';
             var pillEl = document.getElementById('enginePill');
             if (pillEl) {
@@ -128,14 +137,22 @@ function selectEngine(idx) {
   renderEngine();
   try { Host.setEngine(ENGINES[engineIdx].key); } catch (e) { bridgeError('setEngine', e); }
   var m = document.getElementById('engineMenu');
-  if (m) m.style.display = 'none';
+  if (m) { invalidateEngineMenu(); m.style.display = 'none'; }  // WB-180：收起即作废未决回调
   // WB-108（2026-09-26 审计）：选中即关闭——aria-expanded 必须同步复位，
   // 否则读屏在菜单已收起后仍持续播报「已展开」
   var pill = document.getElementById('enginePill');
-  if (pill) pill.setAttribute('aria-expanded', 'false');
+  if (pill) {
+    pill.setAttribute('aria-expanded', 'false');
+    // WB-187（2026-10-02 审计）：焦点归还触发胶囊——键盘/读屏用户选完
+    // 引擎后焦点此前留在已被移除的菜单项上（焦点失踪，Tab 从页首重来）
+    try { pill.focus(); } catch (e2) {}
+  }
 }
 document.addEventListener('click', function () {
   var m = document.getElementById('engineMenu');
+  // WB-180：任意文档点击都作废未决展开回调（toggle 发起后菜单尚未渲染
+  // 期间 display 仍为空串——按「是否 block」判定会漏掉该窗口期）
+  invalidateEngineMenu();
   if (m) m.style.display = 'none';
   // WB-108（2026-09-26 审计）：document 级点击关闭是第二条收起路径——
   // 与 toggleEngineMenu 对称复位 aria-expanded（读屏状态一致）
@@ -177,7 +194,11 @@ function go() {
   setTimeout(function () { btn.textContent = orig; _searchBusy = false; }, TIMING.SEARCH_BUSY_RESET_MS);
 }
 function openUrl(u) {
-  if (Host.has('navigate')) Host.navigate(u);
+  // WB-183（2026-10-02 审计）：桥同步抛错此前无兜底直接逃逸回调——对齐
+  // go() 包 try/catch，并经 bridgeError 留痕（self-guard 不二次抛）
+  try {
+    if (Host.has('navigate')) Host.navigate(u);
+  } catch (e) { bridgeError('openUrl', e); }
 }
 document.addEventListener('keydown', function (e) {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'l') {
@@ -189,6 +210,7 @@ document.addEventListener('keydown', function (e) {
     var menu = document.getElementById('engineMenu');
     var pill = document.getElementById('enginePill');
     if (menu && menu.style.display === 'block') {
+      invalidateEngineMenu();            // WB-180：收起即作废未决回调
       menu.style.display = 'none';
       if (pill) pill.setAttribute('aria-expanded', 'false');
     }
@@ -206,7 +228,11 @@ function setWallpaper(name) {
   document.getElementById('wallpaper').style.backgroundImage = "url('" + hit.url.replace(/'/g, '%27') + "')";
   var dots = document.getElementById('wpList').children;
   for (var j = 0; j < dots.length; j++) {
-    dots[j].className = 'wp' + (WALLPAPERS[dots[j].dataset.i].name === name ? ' active' : '');
+    var isActive = WALLPAPERS[dots[j].dataset.i].name === name;
+    dots[j].className = 'wp' + (isActive ? ' active' : '');
+    // WB-188（2026-10-02 审计）：选中态语义同步——圆点此前只有视觉 .active
+    // 类，读屏无法感知当前选中哪张壁纸（aria-pressed 与 active 同步翻转）
+    try { dots[j].setAttribute('aria-pressed', isActive ? 'true' : 'false'); } catch (e2) {}
   }
   try { Host.setWallpaper(name); } catch (e) { bridgeError('setWallpaper', e); }
 }
@@ -228,6 +254,8 @@ function setWallpaper(name) {
       // 暴露内部资产文件名（此前 title 直接显示 "aurora-magenta.jpg"）
       d.title = WALLPAPERS[idx].label;
       d.setAttribute('aria-label', '壁纸 ' + WALLPAPERS[idx].label);
+      // WB-188：aria-pressed 初始态——选中态由 setWallpaper 同步翻转
+      d.setAttribute('aria-pressed', 'false');
       function pick() { setWallpaper(WALLPAPERS[idx].name); }
       d.onclick = pick;
       wl.appendChild(d);

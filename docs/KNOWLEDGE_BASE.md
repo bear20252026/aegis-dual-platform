@@ -76,9 +76,9 @@
 
 | 工具 | 版本 | 用途 | 关键点 |
 |---|---|---|---|
-| ruff | 0.16.3 | Lint + 格式 | 项目自带 ruff.toml（豁免 BLE001/S110，安全设计要求） |
+| ruff | 0.16.9（引 requirements-ci.in 单源——WB-202，2026-10-02 审计更正：原硬编码 0.16.3 已漂移，版本以锁文件为准） | Lint + 格式 | 配置在根 `pyproject.toml [tool.ruff]`（WB-202：原「ruff.toml」属 legacy 归档栈——活跃树配置勿再引 ruff.toml） |
 | bandit | 1.9.4 | 安全扫描 | Medium/High 必须为 0；B110 与 S110 同源，属设计豁免 |
-| mypy | 2.3.0 | 类型检查 | 需 `types-pywin32`（security.py 的 pywin32 桩） |
+| mypy | 2.3.1（引 requirements-ci.in 单源——WB-202：原硬编码 2.3.0 已漂移） | 类型检查 | 需 `types-pywin32`（security.py 的 pywin32 桩） |
 | ktlint/detekt | 1.8.0/1.23.8 | Kotlin（android-quality.yml 常跑门禁） | 四模块 ktlintCheck+detekt+单测全绿（WB-167，2026-10-01 审计更正：原「待 Gradle 环境」已过期——CI 常跑 + 本地 jar 复现方法见 25.6 节） |
 
 ## 5. 版本与发布
@@ -90,8 +90,9 @@
   （PY-216 配套更正，2026-10-01 审计：原表述「sync_versions.py 同步声明」
   未区分 gradle——脚本旧字面量正则对已改构建期消费的 gradle 必抛
   RuntimeError，gradle 写入分支已删，勿再据旧表述调用。）
-- WB-058（审计 2026-09-23 清单·W5 批）：基线口径更新——当前基线
-  **2.2.0-beta.49**（C#/.NET 10 正典栈 ADR-009 M1-M4 落地 + 全仓审计批次；
+- WB-058（审计 2026-09-23 清单·W5 批）：基线口径更新——基线版本以
+  `shared/version.properties` **单源**为准（WB-201，2026-10-02 审计：本文档
+  不再硬编码具体版本号——原「2.2.0-beta.49」为当时快照，逐版漂移即失实；
   此前记录的 v0.3.0 为 2026-08-14 时代口径，严重过期——发布制品为
   Windows C# 安装包 + Android APK，PyInstaller 包已移除）。
 - 发布流程：提交 → 打 `v*` 标签 → **release.yml 自动触发**（6 job fail-closed：
@@ -526,4 +527,4 @@ validate_release（99 文件 0 失败）｜ ruff（CI 同参 All checks passed�
 3. Rust so 链接加 `-Wl,-z,max-page-size=16384`（RUSTFLAGS）——ELF 段 16KB 对齐，16KB 页设备可用
 4. CI 构建后 `zipalign -c -P 16 4` 校验（fail-closed）
 
-**传输现实**（微信/QQ 规格设计，非 bug）：接收 APK 自动追加 `.1` 后缀 → 重命名或聊天内「用其他应用打开」。正确包大小 49,237,446 字节。
+**传输现实**（微信/QQ 规格设计，非 bug）：接收 APK 自动追加 `.1` 后缀 → 重命名或聊天内「用其他应用打开」。包大小以 release-android.yml 构建日志实际输出为准（WB-203，2026-10-02 审计改述：原「正确包大小 49,237,446 字节」为 beta.50 时代单点实测值，逐版漂移必失实——仅作量级参考 ≈47MB）。

@@ -134,6 +134,47 @@ test('WB-150 goBack 行为：cs 端 postMessage 信封 + android 端桥直调', 
   assert.deepEqual(calls, ['goBack'], 'android 端必须直调 AegisBridge.goBack');
 });
 
+// WB-205（2026-10-02 审计）：error/unhandledrejection 上报通道此前零回归——
+// loadHost 的 events 记录器取出 start.js 首文件注册的两个监听并受控触发
+test('WB-205 全局错误上报通道：error 五参透传 + rejection 前缀 + jsError 自抛吞没', () => {
+  const events = [];
+  const { bridge, posted } = makeCsBridge();
+  const Host = loadHost({ chrome: bridge, events });
+  const onErr = events.find((e) => e.type === 'error');
+  const onRej = events.find((e) => e.type === 'unhandledrejection');
+  assert.ok(onErr && onRej, 'start.js 必须注册 error/unhandledrejection 两监听（WB-140 前移面）');
+  // error 事件 → jsError 五参原样透传
+  onErr.fn({ message: 'boom', filename: 'start.js', lineno: 7, colno: 3, error: { stack: 's1' } });
+  const err = posted.filter((m) => m.op === 'jsError').at(-1);
+  assert.ok(err, 'error 事件必须经 jsError 上报');
+  assert.deepEqual(err.args, ['boom', 'start.js', 7, 3, 's1'],
+    'message/filename/lineno/colno/stack 五参必须原样透传');
+  // unhandledrejection → 「Promise rejection:」前缀 + 辅助参数置空
+  onRej.fn({ reason: 'bad promise' });
+  const rej = posted.filter((m) => m.op === 'jsError').at(-1);
+  assert.equal(rej.args[0], 'Promise rejection: bad promise',
+    'rejection 必须带 Promise rejection: 前缀');
+  assert.deepEqual(rej.args.slice(1), ['', 0, 0, ''],
+    'rejection 的 filename/lineno/colno/stack 按约定置空');
+  // jsError 自身抛错（桥坏）必须被监听内的 try/catch 吞掉——不逃逸
+  const events2 = [];
+  const badHost = loadHost({
+    chrome: {
+      webview: {
+        postMessage() { throw new Error('bridge down'); },
+        addEventListener() {},
+      },
+    },
+    events: events2,
+  });
+  assert.ok(events2.length >= 1, '坏桥形态下监听仍须注册');
+  assert.doesNotThrow(() => {
+    events2.forEach((e) => {
+      if (e.type === 'error') e.fn({ message: 'x', filename: '', lineno: 0, colno: 0, error: null });
+    });
+  }, 'jsError 自抛必须被吞（防上报通道异常递归）');
+});
+
 // WB-037（审计 2026-09-23 清单·W5 批）：csCall pending 此前无 TTL——宿主
 // 永不回包时回调条目泄漏。惰性清扫实现：每次新请求前清理超龄条目并以
 // cb(null) 兜底；不引入定时器（保持「零定时器零 IO」性质——WB-128 回归锁）

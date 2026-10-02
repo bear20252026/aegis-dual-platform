@@ -42,9 +42,11 @@ android/    Kotlin/Compose（app/broker/webview-adapter/contracts——分层单
 agent/      Agent/MCP 逐项复开（action-catalog——红队 fixtures——测试优先）
 release/    发布链独立验证产品（逐工件闭合——fail-closed）
 docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审计台账）
-.github/    CI 分层门禁（13 个 workflow——contracts/windows/android/core-rust/
-            agent-redteam/supply-chain/release 编排 + release-{windows,android,core}
-            平台链 + compat/native-policy-artifacts/legacy-python-guard）
+.github/    CI 分层门禁（13 个 workflow——WB-214，2026-10-02 审计对齐实树：
+            ci / contracts / core-rust / android-quality / supply-chain /
+            agent-redteam / native-policy-artifacts / compat /
+            legacy-python-guard / release 编排 + release-{windows,android,core}
+            三平台链——无「windows」这一独立 workflow）
 ```
 
 **三个信任域**（ADR-002/003）：远程网页域（无 native bridge）/本地 chrome UI 域
@@ -52,13 +54,22 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
 
 ## 构建
 
-- **Windows**（windows/src/Aegis.Windows.App）：`dotnet build`（.NET 10.0.x——0 警告）；
-  `dotnet test tests/Aegis.Windows.Core.Tests` / `Aegis.Windows.Broker.Tests`
+<!-- WB-197（2026-10-02 审计）：与 CLAUDE.md「关键命令」逐字对齐——Windows 补
+     cd windows 前缀与 -r win-x64/-p:RestoreLockedMode=true，Android 四模块
+     ktlint/detekt 补 :contracts: 枚举 -->
+- **Windows**（正典栈，ADR-009）：`cd windows` 后 `dotnet build
+  src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64 -p:RestoreLockedMode=true`
+  （.NET 10.0.x——0 警告）；`dotnet test tests/Aegis.Windows.Core.Tests -r win-x64
+  -p:RestoreLockedMode=true` / `dotnet test tests/Aegis.Windows.Broker.Tests -r
+  win-x64 -p:RestoreLockedMode=true`
 - **Rust 核心**（core/rust-policy-core）：`cargo test && cargo clippy --all-features
   --all-targets -- -D warnings && cargo fmt --check`（全绿 + 0 警告；SP-183 与 CI 统一口径）
-- **Android**（四模块，与 CI 一致）：`./gradlew.bat :app:testDebugUnitTest
-  :broker:testDebugUnitTest :webview-adapter:testDebugUnitTest` +
-  `ktlintCheck/detekt` + `:app:lintDebug`
+- **Android**（与 CI 一致）：`cd android` 后四模块
+  `./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck`
+  + `./gradlew.bat :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt`
+  + `./gradlew.bat :app:lintDebug` + `./gradlew.bat :broker:testDebugUnitTest
+  :app:testDebugUnitTest :webview-adapter:testDebugUnitTest`（contracts 模块
+  无独立测试源码——ktlint/detekt 四模块覆盖）
 - **契约门禁**（仓库根）：`python validate_release.py` +
   `python contracts/codegen/verify_bridge_guard.py`（守卫 JS 单源——ADR-007）+
   `python scripts/verify_versions.py`
@@ -69,19 +80,25 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
 
 ## 质量与审计状态
 
-- **两轮全仓审计 + 一轮逐项核验，全量闭环**：
+<!-- WB-198（2026-10-02 审计）：审计轮次口径更新为四轮（原漏 09-07/10-01 两轮） -->
+- **四轮全仓审计，全量闭环**：
+  - 2026-09-07 轮（200 项，[台账](docs/audit/full-audit-2026-09-07-200-items.md)）
   - 2026-09-23 轮（1115 项，[台账](docs/audit/full-audit-2026-09-23-1000-items.md)）
     **1115/1115 全量闭环**——并经 V1 核验批对 RS/PY 两区 377 项逐项代码级复核，
     19 项虚闭环补落地、2 项如实登记（RS-149 uniffi 上游阻塞暂缓 / PY-021 接受风险）
   - 2026-09-26 轮全仓复扫（229 项新发现，
     [报告](docs/audit/full-audit-2026-09-26-229-items.md)）**229/229 全部闭环**
+  - 2026-10-01 轮（241 项，
+    [台账](docs/audit/full-audit-2026-10-01-241-items.md)——WB-198 链接补齐：
+    本轮六区新鲜扫描，P1×4 / P2×23 / P3×214）
 - 测试规模：cargo 450+ / dotnet 650+ / gradle JVM 280+ / pytest 230+ / node 80+ 用例，
   五门禁（validate_release / verify_versions / bridge_guard / contract_compatibility /
   cross_end_lists）常绿
   （SP-198，2026-10-01 审计补口径：pytest 230+ 为**合计口径**——`tests/python`
   发布链验证器 195+ 用例 + `agent/tests` 红队 30 用例；CHANGELOG 各版本条目中的
   "pytest 30" 为当批 agent 红队单列口径，两者不矛盾）
-- 当前版本：`2.2.0-beta.50`（[shared/version.properties](shared/version.properties) 单源；
+- 当前版本：见 [shared/version.properties](shared/version.properties) **单源**
+  （WB-178，2026-10-02 审计：本文不再硬编码具体版本号——逐版漂移即失实；
   发布记录见 [CHANGELOG.md](CHANGELOG.md)，记账规则见文件头）
 
 ## 蓝图状态（蓝图文档已并入 docs/architecture-overview.md）
