@@ -5,6 +5,17 @@
 > `docs/audit/` 各批次审计与修复日志；相关修复随**下一个正式版本发布时合并
 > 记账**进本文件（保持版本条目与发布制品一一对应，避免无发布实体的空转条目）。
 
+## beta.51（2026-10-02 · 2026-10-01 第三轮全仓审计批次合并记账）
+> 完整清单：docs/audit/full-audit-2026-10-01-241-items.md（六路审计 241 项——问题 140/提升 101，闭环 238；CS-334..375 / AD-252..292 / RS-239..274 / PY-216..257 / WB-133..175 / SP-177..217）。
+- **安全 P1×4**：NTP/GeoGebra 虚拟主机映射 Allow→Deny（封死远程页 fetch 指纹探测单点旁路）；Windows canvas 噪声 WebGL 门禁删除 + per-site 种子（RS-206/207 孪生）；Android 尾点 host（`https://localhost./`）整链拒绝（java.net URI/Chromium 归一错位混淆面）；sync_versions 适配 gradle properties 单源接线（此前必抛、版本同步工具不可用）。
+- **Windows（42 项）**：UrlRedactor 剥 userinfo 凭据落盘、查找条命中计数恒 0、帧导航 DNS 移出 UI 线程（恶意页冻结面 fail-closed）、0 警告基线恢复、NuGet packages.lock.json 三项目锁定 + CI RestoreLockedMode、KillSwitch 常驻横幅、无痕临时目录崩溃残留清扫、TextLimits/WindowSharedChrome/TrackerBlockAggregator 单源收敛。
+- **Android（41 项）**：canvas 逐像素 PRNG（模 2 折叠退化修复）、closeTab 激活保持三分支（双活跃 WebView）、onPageStarted 重定向策略复核（30x 旁路）、日志泄敏第三/四处补接、gradle wrapper distributionSha256Sum 钉定、shrinkResources、JNA keep 收窄、debug applicationIdSuffix。
+- **Rust 策略核心（36 项）**：能力 max_uses 管线消费生效（耗尽控制此前形同虚设）、AudioBuffer 噪声双读漂移、deny 条件子域边界、会话销毁 nonce 重放窗、deny detail/explanation 脱敏、timeStamp/timeOrigin 圆整、read_utf8 FFI 签名 unsound 消除、新增 3 个 fuzz target。
+- **发布链/契约/CI（PY+SP 批 80 项）**：verify_manifest 密钥解码修复（CLI 此前对真实密钥恒拒）、cryptography 入 hash 锁真实重锁、ruff 83→0 + 显式 select、8 个 action pin 重钉上游 release tag（孤儿 SHA 消除）、publish 重生成清单后逐平台复验、pin-check 抽 composite 单源、clippy 口径统一 -D warnings、13 job setup-python 固化、secrets 显式映射、release concurrency 组、CODEOWNERS、bandit 活跃树接线、归档 pip-audit 降告警。
+- **Web 资产/文档（43 项）**：首页 snake Escape 守卫失效清零最高分缺陷（P2）、导入超时兜底与 null 回包统计、forced-colors/对比度 AA/触摸目标 44px 可访问性、__test 钩子条件注入、19 处文档失实修正 + 7 份调研文档补时代横幅。
+- **契约生成器**：嵌套子模型生成——update-manifest artifacts/signatures 字段组获编译期锚点（终结 List<object> 降级）+ 条件 using + ident.py 命名单源（PY-243/248）。
+- 回归：dotnet 0 警告 0 错误 + 695 测试、cargo 509 + clippy -D warnings、gradle 四门禁 + 339 单测、pytest 280、node 127 全绿；YAML 19 解析 0 坏。
+
 ## beta.50（2026-09-28 · UI 现代化三批 + 启动崩溃修复）
 - **修复（fatal）**：Program.Main 跳过 App.InitializeComponent 的旧注解失实——App.xaml 携带全局合并资源字典后，Application.Resources 从未加载，主窗口 StaticResource（ChromeComboBox/IconFont）每次启动 XamlParseException（security.log 三次 [fatal] 实证）；现显式调用 InitializeComponent。
 - **UI 批①（33edbaa）**：工具栏/标签条 Unicode 字符与彩色 emoji → Segoe Fluent/MDL2 字体 glyph 单源；搜索引擎/每页条数原生白底下拉 → 深色模板化 ChromeComboBox；全窗深色细滚动条；独立窗口深/浅色原生标题栏（DWMWA_USE_IMMERSIVE_DARK_MODE）。
