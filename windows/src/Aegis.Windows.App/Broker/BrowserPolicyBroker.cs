@@ -191,7 +191,7 @@ public sealed class BrowserPolicyBroker : IBroker
             if (_nativePolicyCoreBridge is null)
                 return NativeBridgeDenied(scope, "native_policy_core_bridge_unavailable");
             var nativeDecision = _nativePolicyCoreBridge.EvaluateNavigation(sessionId, tabId, generation, rawUrl, scope);
-            RecordNativeDecision(scope, nativeDecision);
+            RecordNativeDecision(scope, nativeDecision, rawUrl);
             return nativeDecision;
         }
         if (!HasCurrentSession(sessionId, tabId, generation))
@@ -239,7 +239,7 @@ public sealed class BrowserPolicyBroker : IBroker
         if (!_nativePolicyCoreRequired || _nativePolicyCoreBridge is null)
             return NativeBridgeDenied(scope, "native_confirmation_core_required");
         var decision = _nativePolicyCoreBridge.RequestNavigationConfirmation(sessionId, tabId, generation, rawUrl, scope);
-        RecordNativeDecision(scope, decision);
+        RecordNativeDecision(scope, decision, rawUrl);
         return decision;
     }
 
@@ -256,7 +256,7 @@ public sealed class BrowserPolicyBroker : IBroker
         if (!_nativePolicyCoreRequired || _nativePolicyCoreBridge is null)
             return NativeBridgeDenied(scope, "native_confirmation_core_required");
         var decision = _nativePolicyCoreBridge.ApproveNavigationConfirmation(request, rawUrl, scope);
-        RecordNativeDecision(scope, decision);
+        RecordNativeDecision(scope, decision, rawUrl);
         return decision;
     }
 
@@ -426,7 +426,11 @@ public sealed class BrowserPolicyBroker : IBroker
         return new Decision.Deny(new DenyReason(code, "已启用的原生策略核心桥接不可用"));
     }
 
-    private void RecordNativeDecision(string scope, Decision decision)
+    /// <summary>记录原生核心决策的审计行。CS-404（2026-10-02 审计）：deny 行
+    /// 的 origin 此前恒记字面量 "native-policy-core"（被拒地址不可追溯）——
+    /// 改记脱敏后的原始 URL（RecordAudit 内部再过一次 UrlRedactor.Redact，
+    /// 此处显式脱敏以与其它 deny 行同口径）。</summary>
+    private void RecordNativeDecision(string scope, Decision decision, string rawUrl)
     {
         switch (decision)
         {
@@ -434,7 +438,7 @@ public sealed class BrowserPolicyBroker : IBroker
                 RecordAudit("allow", scope, allow.Action.Origin, null);
                 break;
             case Decision.Deny deny:
-                RecordAudit("deny", scope, "native-policy-core", deny.Reason.Code);
+                RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), deny.Reason.Code);
                 break;
             case Decision.RequireConfirmation confirmation:
                 RecordAudit("require_confirmation", confirmation.Request.Scope, confirmation.Request.Origin, null);

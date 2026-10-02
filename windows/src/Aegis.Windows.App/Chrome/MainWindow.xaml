@@ -28,6 +28,9 @@
     <SolidColorBrush x:Key="FeedbackInfoBackgroundBrush" Color="#FF0F2A1B"/>
     <SolidColorBrush x:Key="FeedbackWarningBackgroundBrush" Color="#FF2A1215"/>
     <SolidColorBrush x:Key="FeedbackTextBrush" Color="#FF86EFAC"/>
+    <!-- CS-391（2026-10-02 审计）：地址栏光标色（此前硬编码 #FFFFFFFF——浅色
+         主题白底白光标不可见；ApplyTheme 按主题覆盖，与 HistoryWindow 同源） -->
+    <SolidColorBrush x:Key="AccentBrush" Color="#FF0A84FF"/>
 
     <!-- 圆形玻璃导航钮（对齐 Android ChromeIconButton）。
          CS-218：Focusable=False 为既定视觉取舍（键盘聚焦虚线框在圆形玻璃钮上
@@ -358,7 +361,7 @@
               <TextBlock x:Name="AddressHint" Text="搜索网页或输入网址" VerticalAlignment="Center" 
                          Foreground="{DynamicResource TextSecondaryBrush}" IsHitTestVisible="False"/>
               <TextBox x:Name="AddressBar" BorderThickness="0" Background="Transparent"
-                       Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="#FFFFFFFF"
+                       Foreground="{DynamicResource TextPrimaryBrush}" CaretBrush="{DynamicResource AccentBrush}"
                        VerticalAlignment="Center" VerticalContentAlignment="Center" Height="30"
                        ToolTip="地址栏（搜索词自动拼引擎；导航经 Broker 决策——真实取消）"
                        TextChanged="AddressBar_TextChanged" KeyDown="AddressBar_KeyDown"

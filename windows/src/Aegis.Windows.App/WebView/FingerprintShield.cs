@@ -83,7 +83,26 @@ public static class FingerprintShield
           registerProxy(Function.prototype.toLocaleString, origToLocale);
 
           // ====== Stage 2: PerSiteSeed ======
-          function getETLD1(h) { var p = h.split('.'); return p.length <= 2 ? h : p.slice(-2).join('.'); }
+          // CS-381（2026-10-02 审计）：getETLD1 引入小型公共后缀清单——此前简单取
+          // 后两标签，bbc.co.uk 与 shop.co.uk 同得 "co.uk" 种子（跨站噪声可关联
+          // ——Rust/Android 侧同孪生已修）；命中清单取后 3 标签（真 eTLD+1）
+          var PUBLIC_SUFFIXES = { 'co.uk':1,'org.uk':1,'ac.uk':1,'gov.uk':1,'net.uk':1,
+            'com.cn':1,'net.cn':1,'org.cn':1,'gov.cn':1,'edu.cn':1,'ac.cn':1,
+            'com.au':1,'net.au':1,'org.au':1,'edu.au':1,
+            'co.jp':1,'or.jp':1,'ne.jp':1,'ac.jp':1,'go.jp':1,
+            'co.kr':1,'or.kr':1,'ne.kr':1,'co.in':1,'co.za':1,'com.br':1,'com.mx':1,
+            'com.tw':1,'com.hk':1,'com.sg':1,'net.sg':1,'org.sg':1,'co.nz':1,
+            'com.ar':1,'com.tr':1,'com.ua':1,'com.pl':1,'com.ru':1,'org.ru':1,
+            'co.id':1,'go.id':1,'com.my':1,'com.ph':1,'com.vn':1,'co.th':1,'or.th':1,'ac.th':1,
+            'com.co':1,'com.pe':1,'com.ve':1,'com.ec':1,'com.py':1,'com.uy':1,'gob.mx':1 };
+          function getETLD1(h) {
+            var p = h.toLowerCase().split('.');
+            if (p.length < 2) return h;
+            var last2 = p.slice(-2).join('.');
+            // bbc.co.uk → bbc.co.uk（后 3）；shop.co.uk → shop.co.uk——两站种子不同
+            if (p.length > 2 && PUBLIC_SUFFIXES[last2]) return p.slice(-3).join('.');
+            return last2;
+          }
           function deriveSeed(hex, domain) {
             var r = '';
             for (var i = 0; i < 16; i++) {
@@ -103,27 +122,93 @@ public static class FingerprintShield
           // 绝不触碰原画布上下文。
           // CS-336（2026-10-01 审计）：噪声种子取 per-site 的 siteSeed（加载时
           // 缓存一次）——此前用会话级 SEED，同用户跨站噪声相同可被跨站关联。
+          // CS-380（2026-10-02 审计）：噪声出口补齐 toBlob 与
+          // OffscreenCanvas.convertToBlob（对齐 Rust shield.rs RS-206/RS-082
+          // 覆盖面）——此前只包裹 toDataURL，另两出口原样读出无噪声。
+          // CS-379（2026-10-02 审计）：逐像素 PRNG（mulberry32）——此前
+          // (seed+i)%2 的扰动对整图退化为同一常量偏移（孪生 Rust/Android 已修）。
+          function mulberry32(a) {
+            return function() {
+              a |= 0; a = (a + 0x6D2B79F5) | 0;
+              var t = Math.imul(a ^ (a >>> 15), 1 | a);
+              t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+              return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+          }
+          function buildNoisedCopy(source) {
+            if (!source.width || !source.height) return null;
+            var tmp, tmpCtx;
+            if (typeof document !== 'undefined') {
+              tmp = document.createElement('canvas');
+              tmp.width = source.width; tmp.height = source.height;
+              tmpCtx = tmp.getContext('2d');
+            } else if (typeof OffscreenCanvas !== 'undefined') {
+              // Worker 语境无 DOM——离屏画布直接做噪声副本
+              tmp = new OffscreenCanvas(source.width, source.height);
+              tmpCtx = tmp.getContext('2d');
+            } else {
+              return null;
+            }
+            tmpCtx.drawImage(source, 0, 0);  // 离屏副本取像素——WebGL 画布同路径
+            var imageData = tmpCtx.getImageData(0, 0, source.width, source.height);
+            var seed = parseInt(siteSeed.slice(0, 8), 16);
+            for (var i = 0; i < imageData.data.length; i += 4) {
+              // 逐像素独立流（seed ^ 像素字节偏移）——相邻像素扰动不一致；
+              // R/G/B 三通道独立扰动（单通道偏移可被通道差分抵消）
+              var rng = mulberry32((seed ^ i) | 0);
+              imageData.data[i] = (imageData.data[i] + (((rng() * 5) | 0) - 2)) & 0xff;
+              imageData.data[i + 1] = (imageData.data[i + 1] + (((rng() * 5) | 0) - 2)) & 0xff;
+              imageData.data[i + 2] = (imageData.data[i + 2] + (((rng() * 5) | 0) - 2)) & 0xff;
+            }
+            tmpCtx.putImageData(imageData, 0, 0);
+            return tmp;
+          }
           var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
           var canvasProxy = function() {
             try {
-              if (this.width && this.height) {
-                var tmp = document.createElement('canvas');
-                tmp.width = this.width; tmp.height = this.height;
-                var tmpCtx = tmp.getContext('2d');
-                tmpCtx.drawImage(this, 0, 0);  // 离屏副本取像素——WebGL 画布同路径
-                var imageData = tmpCtx.getImageData(0, 0, this.width, this.height);
-                var seed = parseInt(siteSeed.slice(0, 8), 16);
-                for (var i = 0; i < imageData.data.length; i += 4) {
-                  imageData.data[i] = (imageData.data[i] + ((seed + i) % 2 === 0 ? 1 : -1)) & 0xff;
-                }
-                tmpCtx.putImageData(imageData, 0, 0);
-                return origToDataURL.apply(tmp, arguments);
-              }
+              var tmp = buildNoisedCopy(this);
+              if (tmp) return origToDataURL.apply(tmp, arguments);
             } catch (e) { /* tainted canvas——跳过扰动走原路径 */ }
             return origToDataURL.apply(this, arguments);
           };
           registerProxy(canvasProxy, origToDataURL);
           HTMLCanvasElement.prototype.toDataURL = canvasProxy;
+          // CS-380：toBlob 出口同款噪声（返回值无关——噪声发生在回调读出的
+          // blob 内容上，代理只需让原方法消费噪声副本）
+          var origToBlob = HTMLCanvasElement.prototype.toBlob;
+          var toBlobProxy = function() {
+            try {
+              var tmp = buildNoisedCopy(this);
+              if (tmp) return origToBlob.apply(tmp, arguments);
+            } catch (e) { /* tainted canvas——跳过扰动走原路径 */ }
+            return origToBlob.apply(this, arguments);
+          };
+          registerProxy(toBlobProxy, origToBlob);
+          HTMLCanvasElement.prototype.toBlob = toBlobProxy;
+          // CS-380：OffscreenCanvas.convertToBlob 出口（Worker 无 DOM——
+          // buildNoisedCopy 的 OffscreenCanvas 分支覆盖）
+          try {
+            if (typeof OffscreenCanvas !== 'undefined' && OffscreenCanvas.prototype.convertToBlob) {
+              var origConvertToBlob = OffscreenCanvas.prototype.convertToBlob;
+              var convertToBlobProxy = function() {
+                try {
+                  var tmp = buildNoisedCopy(this);
+                  if (tmp) {
+                    if (!(tmp instanceof OffscreenCanvas)) {
+                      // 窗口语境（document 可用）产的是 DOM 画布——转投离屏
+                      var off = new OffscreenCanvas(tmp.width, tmp.height);
+                      off.getContext('2d').drawImage(tmp, 0, 0);
+                      tmp = off;
+                    }
+                    return origConvertToBlob.apply(tmp, arguments);
+                  }
+                } catch (e) { /* tainted canvas——跳过扰动走原路径 */ }
+                return origConvertToBlob.apply(this, arguments);
+              };
+              registerProxy(convertToBlobProxy, origConvertToBlob);
+              OffscreenCanvas.prototype.convertToBlob = convertToBlobProxy;
+            }
+          } catch (e) {}
 
           // WebGL getParameter（单一代理——WebGLSpoof）
           var VENDOR = 'Google Inc. (Intel)';

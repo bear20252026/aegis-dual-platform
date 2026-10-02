@@ -83,14 +83,15 @@ public sealed class FingerprintShieldTests
     }
 
     // ===== CS-335/336（2026-10-01 审计）：canvas 噪声门禁删除 + per-site 种子 =====
+    // ===== CS-379/380（2026-10-02 审计）：逐像素 PRNG + 三出口噪声代理 =====
 
-    /// <summary>截取 canvas 代理段（var canvasProxy 到代理注册行之前——
-    /// 段内注释含 "WebGL" 字样，不能以它作段尾标记）。</summary>
+    /// <summary>截取 canvas 噪声机具段（mulberry32/buildNoisedCopy 到
+    /// toDataURL 代理注册行——段内含噪声副本构造与首个代理出口）。</summary>
     private string SliceCanvasProxy()
     {
         var script = FingerprintShield.BuildScript(SeedA);
-        var slice = script[script.IndexOf("var canvasProxy", StringComparison.Ordinal)..];
-        return slice[..slice.IndexOf("registerProxy(canvasProxy", StringComparison.Ordinal)];
+        var slice = script[script.IndexOf("function mulberry32", StringComparison.Ordinal)..];
+        return slice[..slice.IndexOf("HTMLCanvasElement.prototype.toDataURL = canvasProxy;", StringComparison.Ordinal)];
     }
 
     [Fact]
@@ -103,7 +104,7 @@ public sealed class FingerprintShieldTests
 
         Assert.DoesNotContain("this.getContext", canvasProxy);
         Assert.Contains("tmp.getContext('2d')", canvasProxy);
-        Assert.Contains("drawImage(this, 0, 0)", canvasProxy);  // 离屏副本取像素——WebGL 同路径
+        Assert.Contains("tmpCtx.drawImage(source, 0, 0)", canvasProxy);  // 离屏副本取像素——WebGL 同路径
     }
 
     [Fact]
@@ -118,6 +119,53 @@ public sealed class FingerprintShieldTests
         var canvasProxy = SliceCanvasProxy();
         Assert.Contains("parseInt(siteSeed.slice(0, 8), 16)", canvasProxy);
         Assert.DoesNotContain("parseInt(SEED.slice(0, 8), 16)", canvasProxy);
+    }
+
+    // ===== CS-379（2026-10-02 审计）：canvas 噪声逐像素 PRNG =====
+
+    [Fact]
+    public void CanvasNoise_PerPixelPrng_AdjacentPixelsDiffer()
+    {
+        // CS-379：mulberry32 逐像素独立流（seed ^ 像素字节偏移）——此前
+        // (seed+i)%2 的扰动对整图退化为同一常量偏移（Rust/Android 孪生已修）；
+        // R/G/B 三通道独立扰动（单通道常量偏移可被通道差分抵消）
+        var noise = SliceCanvasProxy();
+
+        Assert.Contains("function mulberry32", noise);
+        Assert.Contains("mulberry32((seed ^ i) | 0)", noise);
+        Assert.DoesNotContain("(seed + i) % 2", noise);
+        Assert.Contains("imageData.data[i + 1]", noise);   // G 通道独立扰动
+        Assert.Contains("imageData.data[i + 2]", noise);   // B 通道独立扰动
+    }
+
+    // ===== CS-380（2026-10-02 审计）：toBlob / convertToBlob 出口噪声 =====
+
+    [Fact]
+    public void CanvasNoise_ProxiesCoverToBlobAndOffscreenConvertToBlob()
+    {
+        // 对齐 Rust shield.rs RS-206/RS-082 覆盖面——此前只包裹 toDataURL，
+        // 另两个像素读出口原样读出无噪声
+        var script = FingerprintShield.BuildScript(SeedA);
+
+        Assert.Contains("HTMLCanvasElement.prototype.toBlob = toBlobProxy", script);
+        Assert.Contains("origToBlob.apply(tmp, arguments)", script);
+        Assert.Contains("OffscreenCanvas.prototype.convertToBlob = convertToBlobProxy", script);
+        Assert.Contains("origConvertToBlob.apply(tmp, arguments)", script);
+    }
+
+    // ===== CS-381（2026-10-02 审计）：getETLD1 公共后缀清单 =====
+
+    [Fact]
+    public void GetETLD1_PublicSuffixList_SplitsSameSuffixSites()
+    {
+        // bbc.co.uk 与 shop.co.uk 此前简单取后两标签同得 "co.uk" 种子
+        //（跨站噪声可关联）——公共后缀命中取后 3 标签（真 eTLD+1），两站种子不同
+        var script = FingerprintShield.BuildScript(SeedA);
+
+        Assert.Contains("PUBLIC_SUFFIXES", script);
+        Assert.Contains("'co.uk':1", script);
+        Assert.Contains("slice(-3)", script);
+        Assert.Contains("p.slice(-2).join('.')", script);
     }
 
     [Fact]
@@ -190,7 +238,9 @@ public sealed class WebView2HardeningTests
     [Theory]
     [InlineData("ntp.aegis.local", true)]
     [InlineData("NTP.AEGIS.LOCAL", true)]     // 大小写不敏感
-    [InlineData("chrome.aegis.local", true)]  // 预留宿主在白名单
+    // CS-389（2026-10-02 审计）：chrome.aegis.local 白名单条目已删除——
+    // 该虚拟主机从未被映射（NtpAssets 只映射 ntp/geo）；真实映射加入时再登记
+    [InlineData("chrome.aegis.local", false)]
     [InlineData("evil.example", false)]
     [InlineData("sub.ntp.aegis.local", false)] // 子域不匹配（精确白名单）
     [InlineData("", false)]

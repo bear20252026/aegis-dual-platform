@@ -98,6 +98,14 @@
             Visibility="Collapsed">
       <TextBlock x:Name="ErrorPage" Foreground="#FFFCA5A5" TextWrapping="Wrap"/>
     </Border>
+    <!-- CS-402（2026-10-02 审计）：紧急终止开关常驻横幅（与主窗 KillSwitchBanner
+         同款）——无痕窗 broker 复用进程级共享 KillSwitch，设置窗触发的紧急终止
+         此前对本窗零指示；单向（重启恢复）故一经显示不再隐藏 -->
+    <Border x:Name="KillSwitchBanner" DockPanel.Dock="Top" Background="#FF7F1D1D" Padding="12,8"
+            Visibility="Collapsed">
+      <TextBlock Text="紧急终止开关已触发：全部导航已冻结（重启浏览器恢复）"
+                 Foreground="White" TextWrapping="Wrap"/>
+    </Border>
     <!-- CS-349（2026-10-01 审计）：加载指示（与主窗 LoadingBar 同款 2px 不定态
          条——此前无痕窗口零加载反馈，页面加载中无任何视觉信号） -->
     <ProgressBar x:Name="LoadingBar" DockPanel.Dock="Top" Height="2" IsIndeterminate="True"

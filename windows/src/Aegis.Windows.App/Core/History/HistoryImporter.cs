@@ -64,19 +64,15 @@ public static class HistoryImporter
     }
 
     /// <summary>导入到历史库。返回（成功写入数, 解析总数）——此前两者无条件
-    /// 同自增（返回值无信息量）；Add 现返回真实写入结果。</summary>
+    /// 同自增（返回值无信息量）；Add 现返回真实写入结果。
+    /// CS-399（2026-10-02 审计）：逐条 Add（每条新开 SQLite 连接）改批量接口
+    /// ImportBatch——单连接+事务+周期修剪（千条导入不再千次连接建立/关闭）。</summary>
     public static (int Imported, int Total) ImportTo(
         HistoryStore store, IEnumerable<HistoryCandidate> candidates)
     {
-        var imported = 0;
-        var total = 0;
-        foreach (var candidate in candidates)
-        {
-            total++;
-            if (store.Add(candidate.Url, candidate.Title))
-                imported++;
-        }
-        return (imported, total);
+        var materialized = candidates as IReadOnlyList<HistoryCandidate> ?? candidates.ToList();
+        var imported = store.ImportBatch(materialized.Select(c => (c.Url, c.Title)));
+        return (imported, materialized.Count);
     }
 
     /// <summary>CS-096：解析条数上限钳制（1..2000）——此前内联在 SQL 绑定处

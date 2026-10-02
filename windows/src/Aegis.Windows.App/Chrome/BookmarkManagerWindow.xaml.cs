@@ -53,23 +53,36 @@ public partial class BookmarkManagerWindow : Window
             || url.Contains(query, StringComparison.OrdinalIgnoreCase);
     }
 
+    // CS-400（2026-10-02 审计）：重载代际——快速连续搜索/编辑时迟到结果丢弃
+    private int _reloadGeneration;
+
     private void Reload(string query)
     {
         // CS-353（2026-10-01 审计）：库损坏行（BLOB 形态）异常已在 BookmarkStore.All
         // 内归并空 + SecurityLog 留痕——管理器窗口不再裸抛炸窗（与启动书签栏同口径）
-        _rows.Clear();
+        // CS-400（2026-10-02 审计）：书签全表查询（SQLite）移后台线程 + 回投
+        //（参照 HistoryWindow CS-159 模式）——此前在 UI 线程同步 All()，大书签库
+        // 每次防抖到期/编辑保存即冻结；迟到结果按代际丢弃（不回显旧列表）
+        var generation = System.Threading.Interlocked.Increment(ref _reloadGeneration);
         var q = query.Trim();
-        var all = _bookmarks.All();
-        foreach (var b in all)
-        {
-            if (MatchesQuery(b.Title, b.Url, q))
-                _rows.Add(new BookmarkRow(b.Id, b.Title, b.Url));
-        }
-        // CS-166：筛选态下「共 N」语义误导 → 明示 匹配 N / 共 M
-        SummaryText.Text = string.IsNullOrEmpty(q)
-            ? $"共 {_rows.Count} 个书签"
-            : $"匹配 {_rows.Count} / 共 {all.Count} 个书签";
-        SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
+        _ = System.Threading.Tasks.Task.Run(() => _bookmarks.All())
+            .ContinueWith(t => Dispatcher.BeginInvoke(new Action(() =>
+            {
+                if (generation != _reloadGeneration || !IsLoaded)
+                    return;
+                var all = t.IsFaulted ? Array.Empty<Bookmark>() : t.Result;
+                _rows.Clear();
+                foreach (var b in all)
+                {
+                    if (MatchesQuery(b.Title, b.Url, q))
+                        _rows.Add(new BookmarkRow(b.Id, b.Title, b.Url));
+                }
+                // CS-166：筛选态下「共 N」语义误导 → 明示 匹配 N / 共 M
+                SummaryText.Text = string.IsNullOrEmpty(q)
+                    ? $"共 {_rows.Count} 个书签"
+                    : $"匹配 {_rows.Count} / 共 {all.Count} 个书签";
+                SearchHint.Visibility = string.IsNullOrEmpty(SearchBox.Text) ? Visibility.Visible : Visibility.Collapsed;
+            })));
     }
 
     private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)

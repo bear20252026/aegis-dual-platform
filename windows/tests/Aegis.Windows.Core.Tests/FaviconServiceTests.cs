@@ -129,4 +129,46 @@ public sealed class FaviconServiceTests : IDisposable
         Assert.True(FaviconService.MissCount <= 1,
             $"超限后负缓存应被清空（实际 {FaviconService.MissCount}）");
     }
+
+    // ===== CS-403（2026-10-02 审计）：负缓存 TTL——过期重试 =====
+
+    [Fact]
+    public async Task NegativeCache_ExpiresAfterTtl_AndRetriesFetch()
+    {
+        // 此前 Miss 只增不过期（一次失败永不重试，站点补上 favicon 后要重启
+        // 才可见）——TTL 缩短到 500ms 驱动过期分支；过期后 Get 再次真实抓取
+        var originalTtl = FaviconService.NegativeCacheTtl;
+        FaviconService.NegativeCacheTtl = TimeSpan.FromMilliseconds(500);
+        try
+        {
+            var host = $"ttl-{Guid.NewGuid():N}.invalid";
+            var first = new TaskCompletionSource<System.Windows.Media.ImageSource?>();
+            var firstCalls = 0;
+            FaviconService.FetchHookForTests = _ => { firstCalls++; return first.Task; };
+
+            _ = FaviconService.Get(host, onLoaded: null, persistToDisk: true);
+            first.SetResult(null);  // 首次抓取失败 → 负缓存写入
+            await WaitForFlightSettleAsync(host, persistToDisk: true);
+
+            Assert.Equal(1, firstCalls);
+            Assert.True(FaviconService.IsMissCached(host, persistToDisk: true), "TTL 内负缓存命中短路");
+
+            await Task.Delay(700);  // 越过 TTL（500ms）
+
+            Assert.False(FaviconService.IsMissCached(host, persistToDisk: true), "过期条目不再命中");
+
+            var second = new TaskCompletionSource<System.Windows.Media.ImageSource?>();
+            var secondCalls = 0;
+            FaviconService.FetchHookForTests = _ => { secondCalls++; return second.Task; };
+            _ = FaviconService.Get(host, onLoaded: null, persistToDisk: true);
+            second.SetResult(null);
+            await WaitForFlightSettleAsync(host, persistToDisk: true);
+
+            Assert.Equal(1, secondCalls);  // 过期后重试——真实抓取再次发起
+        }
+        finally
+        {
+            FaviconService.NegativeCacheTtl = originalTtl;
+        }
+    }
 }

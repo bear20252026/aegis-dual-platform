@@ -65,22 +65,25 @@ public static class WebView2Hardening
         // 红蓝对抗管道——每标签会话独立 32 字节加密随机种子）
         // CS-182：注入不再 fire-and-forget——失败留痕（注入静默失败=指纹
         // 防护整段失效且不可观测）
+        // CS-405（2026-10-02 审计）：成功日志移入 ContinueWith 的非故障分支
+        // ——此前写在 ContinueWith 外，注入实际失败时仍记"已注入"（日志说谎）
         _ = core.AddScriptToExecuteOnDocumentCreatedAsync(
                 FingerprintShield.BuildScript(FingerprintShield.NewSessionSeed()))
             .ContinueWith(t =>
             {
                 if (t.IsFaulted)
                     SecurityLog.Write($"[security] 标签 {tabId}: 指纹防护注入失败: {t.Exception?.GetBaseException().Message}");
+                else
+                    SecurityLog.Write($"[security] 标签 {tabId}: 指纹防护全量管道已注入（页面脚本前生效）");
             }, TaskScheduler.Default);
-        SecurityLog.Write($"[security] 标签 {tabId}: 指纹防护全量管道已注入（页面脚本前生效）");
         applied++;
         return applied;
     }
 
     /// <summary>按来源翻转 IsWebMessageEnabled（每次顶层/子框架导航时调用）。
     /// 远程 http/https 页面禁用——js_api 无桥架构（ADR-003）下此通道必须关死。
-    /// 唯一例外：受信本地虚拟主机（ntp.aegis.local——M3 新标签页宿主桥；
-    /// chrome.aegis.local 预留）——虚拟主机只映射发布资源目录，非远程内容。</summary>
+    /// 唯一例外：受信本地虚拟主机（ntp.aegis.local——M3 新标签页宿主桥）
+    /// ——虚拟主机只映射发布资源目录，非远程内容。</summary>
     public static void SetPerOrigin(CoreWebView2 core, string? url)
     {
         try
@@ -98,8 +101,10 @@ public static class WebView2Hardening
     }
 
     /// <summary>受信本地虚拟主机白名单（NTP 宿主桥唯一激活面；请求通道另经
-    /// NtpBridge.IsTrustedSource 双重校验——远程页即便伪装也不可达）。</summary>
+    /// NtpBridge.IsTrustedSource 双重校验——远程页即便伪装也不可达）。
+    /// CS-389（2026-10-02 审计）：删除 chrome.aegis.local 条目——该虚拟主机
+    /// 从未被映射（NtpAssets 只映射 ntp/geo），白名单条目指向不存在的宿主；
+    /// 真实映射加入时再随映射一并登记。</summary>
     public static bool IsTrustedLocalHost(string host) =>
-        host.Equals(Chrome.Ntp.NtpAssets.HostName, StringComparison.OrdinalIgnoreCase)
-        || host.Equals("chrome.aegis.local", StringComparison.OrdinalIgnoreCase);
+        host.Equals(Chrome.Ntp.NtpAssets.HostName, StringComparison.OrdinalIgnoreCase);
 }

@@ -22,7 +22,12 @@ using Microsoft.Web.WebView2.Core;
 /// 不能绕过 Broker（ADR-002）。远程页面无 native bridge（ADR-003）。
 /// M1-T1（ADR-009）：多标签编排——TabManager（领域状态）+ TabRuntime（每标签
 /// 一 WebView 实例）；切换即可见性切换，页面状态天然保留；标签条为原生
-/// 控件（与页面 DOM 隔离——注入式 UI 成为历史）。</summary>
+/// 控件（与页面 DOM 隔离——注入式 UI 成为历史）。
+/// CS-377（2026-10-02 审计）：单文件 1424 行超「改造后 ≤500」红线——按职责
+/// 拆 partial 文件（零行为变化、纯代码移动）：本文件=核心装配（字段/构造/
+/// 主题/引擎/会话持久化/反馈条），Tabs=标签生命周期与交互，Shortcuts=快捷键
+/// 与地址栏，SourceViewer=源码查看器，WindowState=窗口状态与关闭链，
+/// Menus=右键菜单与工具栏入口。</summary>
 public partial class MainWindow : Window
 {
     private readonly BrowserPolicyBroker _broker;
@@ -61,9 +66,14 @@ public partial class MainWindow : Window
     private Task _historyWriteTail = Task.CompletedTask;
     // CS-355（2026-10-01 审计）：最近一次策略拒绝的用户可读原因（供
     // NavigationCompleted 的 OperationCanceled 分支呈现）
-    private string? _pendingDenyMessage;
+    // CS-386（2026-10-02 审计）：窗口级单槽改按 tabId 存取——此前任一标签的
+    // 拒绝都可能被另一标签的 NavigationCompleted 呈现/清除（多标签串扰）
+    private readonly Dictionary<string, string> _pendingDenyMessages = new();
     // CS-367（2026-10-01 审计）：KillSwitch 常驻横幅订阅句柄（OnClosed 解绑）
     private readonly Action _killSwitchEngagedHandler;
+    // CS-393（2026-10-02 审计）：会话重建期抑制「集合清空即关窗」——
+    // RestoreSavedSession 先关全部旧标签再重建，瞬时空集不得关窗
+    private bool _restoringSession;
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
@@ -72,22 +82,6 @@ public partial class MainWindow : Window
     private const int SleepCheckIntervalSec = 30;     // 后台标签睡眠巡检周期
     private const int FeedbackHideMs = 2500;          // 反馈条自动隐藏
     private const int SessionSaveDebounceMs = 2000;   // 会话落盘防抖（写放大治理）
-    // CS-064：源码抓取共享客户端（连接池 5 分钟回收——DNS 变更可感知）
-    private static readonly System.Net.Http.HttpClient SourceFetchClient = CreateSourceFetchClient();
-
-    private static System.Net.Http.HttpClient CreateSourceFetchClient()
-    {
-        var client = new System.Net.Http.HttpClient(
-            new System.Net.Http.SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
-        {
-            Timeout = TimeSpan.FromSeconds(SourceFetchTimeoutSec),
-        };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (AegisBrowser-SourceViewer)");
-        return client;
-    }
-
-    private const int SourceFetchTimeoutSec = 15;     // 源码查看抓取超时
-    private const int SourceMaxBytes = 5 * 1024 * 1024; // 源码查看大小上限
     private const int BookmarkChipMaxChars = 14;      // 书签栏标题截断
     private const int BookmarkBarMaxChips = 20;       // CS-153：书签栏直显上限（其余收进溢出项）
     // CS-150：窗口状态恢复阈值（此前 400/300/1200/800 四个魔法数内联）
@@ -114,6 +108,10 @@ public partial class MainWindow : Window
         // 加载条永久旋转，用户须能感知"虚拟主机资源无法加载"。
         _runtimeCoordinator.NtpNavigationFailed += OnNtpNavigationFailed;
         try { ApplyTheme(_settings.Theme); } catch (Exception ex) { Core.Security.SecurityLog.Write($"[theme] 应用主题失败（启动继续）: {ex.GetType().Name}: {ex.Message}"); }  // CS-234
+        // CS-391：AccentBrush 缺省兜底（ApplyTheme 失败时 XAML DynamicResource
+        // 仍有默认值可命中——与其它资源键同模式）
+        if (!Resources.Contains("AccentBrush"))
+            SetBrush("AccentBrush", "#FF0A84FF");
         _tabs.TabOpened += OnTabOpened;
         _tabs.TabClosed += OnTabClosed;
         _tabs.TabSwitched += OnTabSwitched;
@@ -164,10 +162,11 @@ public partial class MainWindow : Window
         StartSleepTimer();
     }
 
-    /// <summary>设置导航地址的统一容错入口（地址非法/控件已释放时拒绝而不是
-    /// 抛异常——地址栏、书签、NTP 桥全部经此）。</summary>
     /// <summary>截断标题而不劈开代理对（emoji 等——此前 b.Title[..14] 可把
-    /// 双字符字形切成乱码）。CS-155：提 internal 直测。</summary>
+    /// 双字符字形切成乱码）。CS-155：提 internal 直测。
+    /// CS-395（2026-10-02 审计）：删除上叠挂的孤儿 summary（其描述的
+    /// 「设置导航地址的统一容错入口」是 TabRuntime.Navigate 的契约，
+    /// CS-038 时随代码迁移遗落在此）。</summary>
     internal static string TruncateTitle(string title, int maxChars)
     {
         if (title.Length <= maxChars)
@@ -193,8 +192,24 @@ public partial class MainWindow : Window
             catch (Exception) { System.Diagnostics.Debug.WriteLine("BookmarkBarButton 资源缺失，使用默认按钮样式"); }
         }
         var chip = _bookmarkChipStyle;
+        // CS-400（2026-10-02 审计）：书签全表查询（SQLite）移后台线程 + 回投——
+        // 此前在 UI 线程同步 _bookmarks.All()（与 HistoryWindow CS-159 口径相悖，
+        // 大书签库时开关管理器/编辑书签即冻结）；查询期间窗口关闭则丢弃结果
+        Task.Run(() => _bookmarks.All())
+            .ContinueWith(
+                t => Dispatcher.BeginInvoke(
+                    new Action(() =>
+                    {
+                        if (!IsLoaded)
+                            return;  // 抓取期间窗口已关闭——不再触碰已卸载控件
+                        RenderBookmarkBar(t.IsFaulted ? Array.Empty<Bookmark>() : t.Result, chip);
+                    })));
+    }
+
+    /// <summary>CS-400：书签栏渲染（UI 线程——查询结果到 chip 的纯呈现段）。</summary>
+    private void RenderBookmarkBar(IReadOnlyList<Bookmark> all, Style? chip)
+    {
         BookmarkBarItems.Items.Clear();
-        var all = _bookmarks.All();
         // CS-153：直显上限+溢出项——此前全部书签无上限重建（数百书签时
         // 栏内 chip 无限堆积挤压布局），超限部分收进「还有 N 条」溢出项
         foreach (var b in all.Take(BookmarkBarMaxChips))
@@ -266,6 +281,10 @@ public partial class MainWindow : Window
         SetBrush("FieldBorderBrush", light ? "#FFDADCE0" : "#2EFFFFFF");
         SetBrush("SurfaceBrush", light ? "#FFFFFFFF" : "#FF1B2537");
         SetBrush("FieldBorderFocusedBrush", light ? "#FF0B57D0" : "#66FFFFFF");
+        // CS-391（2026-10-02 审计）：地址栏光标色资源键——此前 XAML 硬编码
+        // #FFFFFFFF（浅色主题白底白光标不可见）；与 HistoryWindow/
+        // BookmarkManagerWindow 的 AccentBrush 口径一致（深浅各自取值）
+        SetBrush("AccentBrush", light ? "#FF0B57D0" : "#FF0A84FF");
         SetBrush("TextPrimaryBrush", light ? "#FF1A1A1A" : "#FFFFFFFF");
         SetBrush("TextSecondaryBrush", light ? "#FF5F6368" : "#B3FFFFFF");
         // 补齐子窗口依赖的画刷（默认深色值——各独立窗口资源键与主窗口统一）
@@ -313,536 +332,6 @@ public partial class MainWindow : Window
                 ? Environment.GetEnvironmentVariable("AEGIS_THREAT_FEED_URL")
                 : _settings.ThreatFeedUrl,
             log: message => Core.Security.SecurityLog.Write(message)).Start();
-    }
-
-    // ================= 标签生命周期（TabManager 事件 → runtime 管理） =================
-
-    /// <summary>创建标签的 UI 运行时并挂入容器（不激活——激活由 TabSwitched 统一）。</summary>
-    private void OnTabOpened(Tab tab) => CreateRuntime(tab, tab.Url);
-
-    private void CreateRuntime(Tab tab, string initialUrl)
-    {
-        // 日志脱敏：不落 query（token/搜索词）。
-        // CS-325（2026-09-26 审计）：改调 UrlRedactor.Redact 单源——此前内联
-        // 手写同形逻辑且回退分支缺 256 截断（双源漂移面）
-        Core.Security.SecurityLog.Write(
-            $"[tab] 创建标签 {tab.TabId} url={Core.Security.UrlRedactor.Redact(initialUrl)}");
-        var runtime = _runtimeCoordinator.Create(_broker, tab).Runtime;
-        runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
-        {
-            if (!e.IsSuccess)
-            {
-                Core.Security.SecurityLog.Write(
-                    $"[init] 标签 {tab.TabId} 初始化失败: {e.InitializationException?.Message ?? "e.IsSuccess=false（未知原因）"}");
-                return;
-            }
-            var core = runtime.Control.CoreWebView2;
-            Ntp.NtpAssets.BindVirtualHosts(core);
-            runtime.OnCoreReady(core);
-            // 虚拟主机地址（NTP/画板）：映射就绪后才导航，且**推迟到下一
-            // Dispatcher 周期**——同一调用栈里 SetVirtualHostNameToFolderMapping
-            // 后立即导航会因映射尚未传播到渲染进程而 ConnectionAborted
-            //（实机复现：点主页能渲染、初始化时同步导航即 abort）。推迟后
-            // 与「点主页成功」路径一致。
-            if (Chrome.Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
-            {
-                // 经协调器延迟导航：执行前重新校验 runtime 引用/令牌/窗口状态，
-                // 避免在已释放控件上设 Source 抛异常（「新建标签删不掉」防护）。
-                _runtimeCoordinator.PostDelayedNavigation(tab.TabId, tab.Url, () => IsLoaded);
-            }
-            else
-            {
-                // 普通站点：初始化（含虚拟主机映射）就绪后立即导航。
-                // 修复：此前用 else if (!_restoring) 导致会话恢复时普通标签
-                // 初始化后不导航（停留在空标签）——恢复与否都应导航。
-                TabRuntime.Navigate(runtime, tab.Url);
-            }
-            // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
-            // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
-            //（内嵌 iframe 伪装 ntp 来源的请求在顶层门禁处拒绝——ADR-003 无桥
-            // 保证的纵深防御）；导航意图回归 NavigationStarting→broker 唯一路径
-            var ntp = CreateNtpBridge(runtime);
-            core.WebMessageReceived += (_, ev) =>
-            {
-                // 顶层文档（core.Source）必须是 NTP 虚拟主机；发送来源（ev.Source）
-                // 由 NtpBridge 二次校验。二者任一不符即静默忽略——帧内嵌不可达。
-                if (!Ntp.NtpAssets.IsTopLevelNtpDocument(core))
-                    return;
-                try
-                {
-                    ntp.TryHandle(
-                        ev.Source, ev.WebMessageAsJson,
-                        result =>
-                        {
-                            // restoreSession 会同步拆除当前标签（含发送标签）——
-                            // core 可能已被释放；响应注入必须容错，绝不抛未处理异常
-                            try
-                            {
-                                core.PostWebMessageAsJson(
-                                    System.Text.Json.JsonSerializer.Serialize(result));
-                            }
-                            catch (Exception)
-                            {
-                                // 发送标签已随会话重建销毁——响应无处可达，静默丢弃
-                            }
-                        },
-                        // CS-031：导入 I/O 移出 UI 线程，完成后回投 UI 线程注入响应
-                        action => Dispatcher.BeginInvoke(action));
-                }
-                catch (Exception ex)
-                {
-                    // 桥内服务（书签/历史 SQLite、导入）异常不得沿 WebMessageReceived
-                    // 冒泡成全局未处理异常弹窗——记录后吞掉
-                    Core.Security.SecurityLog.Write(
-                        $"[ntp] 桥处理异常: {ex.GetType().Name}: {ex.Message}");
-                }
-            };
-        };
-        runtime.NavigationCompleted += (ok, status) => OnTabNavigationCompleted(tab.TabId, ok, status);
-        // M4 下载管理面板：授权通过的 DownloadOperation 注入共享数据源
-        // CS-260：与初始化/导入路径统一为 BeginInvoke——WebView2 事件线程
-        // 不应被 UI 线程任务同步阻塞
-        // CS-344（2026-10-01 审计）：终态持久化（含 URL 落 downloads.db）随
-        // DownloadRecordStore 一并移除——All() 零生产调用（重启后无消费面），
-        // 带 token 的 URL 无收益常驻磁盘；会话内管理由 _downloads + CS-333 有界
-        runtime.DownloadOperationStarted += (operation, dangerous) => Dispatcher.BeginInvoke(() =>
-        {
-            var item = new Core.Downloads.DownloadItem(
-                operation,
-                System.IO.Path.GetFileName(operation.ResultFilePath ?? string.Empty),
-                operation.Uri ?? string.Empty,
-                dangerous);
-            _downloads.Insert(0, item);
-            TrimDownloadItems();
-        });
-        // M1 加载指示接线：导航开始显示不定态条，完成/失败隐藏
-        runtime.NavigationStarted += () =>
-        {
-            if (tab.TabId == _activeTabId)
-                LoadingBar.Visibility = Visibility.Visible;
-        };
-        runtime.Host.NavigationConfirmationRequested += (_, e) => _approval.Request(tab.TabId, e);
-        runtime.Host.NavigationConfirmationResolved += (_, _) => _approval.Resolved();
-        // CS-355（2026-10-01 审计）：策略拒绝原因可见——broker 的 DenyReason
-        // 此前在 HostWebView 内被丢弃（导航只是"无反应"）；记录待
-        // NavigationCompleted(OperationCanceled) 分支呈现（该分支此前把错误页
-        // 一律收起——拒绝零可见反馈）
-        runtime.NavigationDenied += message =>
-        {
-            _pendingDenyMessage = message;
-            if (tab.TabId == _activeTabId)
-                ShowRejection(message);
-        };
-        // target=_blank / window.open 链接：不再静默丢弃，改为验证地址后
-        // 在当前窗口新建标签打开（对齐主流浏览器）。公网地址或本机/hosts
-        // 映射到本机的域名放行（本地开发访问）；非法协议/内网/环回地址仍拒
-        //（安全约束——本机除外）。
-        runtime.NewWindowRequested += targetUrl =>
-        {
-            if (!Core.UrlSafety.CanOpenHttpUrl(targetUrl))
-            {
-                ShowFeedback("已拒绝打开该链接（非公网/本机地址）", isWarning: true);
-                return;
-            }
-            _tabs.NewTab(targetUrl);
-        };
-        // M3 危险扩展下载确认（审计补缺——此前 DownloadConfirmationRequested
-        // 全仓零订阅者 → 危险下载恒被静默拒绝，该功能形同虚设）。用户显式
-        // 确认才放行；窗口已关闭/异常仍 fail-closed 拒绝。
-        // CS-370（2026-10-01 审计）：确认对话框单源到 WindowSharedChrome
-        //（与无痕窗共用——此前两窗各持一份同形 MessageBox）
-        runtime.DownloadConfirmationRequested += (downloadUrl, fileName) =>
-            WindowSharedChrome.ConfirmDangerousDownload(this, downloadUrl, fileName);
-        // 视觉树挂载 + 初始化统一由协调器驱动（Create 已完成两者——
-        // 显式初始化含安全 DNS 等参数，完成后触发 CoreWebView2InitializationCompleted，
-        // 上方处理器负责映射+导航）。
-    }
-
-    /// <summary>M3：虚拟主机资源映射与 NTP 顶层文档门禁统一在 NtpAssets
-    ///（主窗口与无痕窗口共用单源——此前两份逐行复制漂移）。</summary>
-
-    /// <summary>M3：新标签页宿主桥组装（逻辑在 NtpBridgeFactory——上帝对象
-    /// 拆分第二批；保留薄转发以维持 CreateRuntime 内单一装配点）。</summary>
-    private Chrome.Ntp.NtpBridge CreateNtpBridge(TabRuntime runtime) =>
-        _ntpBridgeFactory.Create(runtime);
-
-    /// <summary>CS-333：下载集合有界——超阈值自尾部移除最早的非进行中条目
-    ///（进行中保留；条目持有的原生操作对象随之释放）。</summary>
-    private void TrimDownloadItems()
-    {
-        for (var i = _downloads.Count - 1; i >= 0 && _downloads.Count > MaxDownloadItems; i--)
-        {
-            if (_downloads[i].StateKind != Core.Downloads.DownloadItemState.InProgress)
-                _downloads.RemoveAt(i);
-        }
-    }
-
-    private void OnTabClosed(string tabId)
-    {
-        _runtimeCoordinator.Close(tabId);
-        SaveSession();
-    }
-
-    private void OnTabSwitched(Tab tab)
-    {
-        var previousId = _activeTabId;
-        _activeTabId = tab.TabId;
-        tab.LastActivated = DateTime.Now;
-        if (tab.IsSleeping)
-            WakeTab(tab);  // 睡眠标签激活 → 复活（重建 WebView 实例）
-        // CS-257：仅翻转旧/新两个 runtime——此前每次切换遍历全部 runtime
-        // 重设四属性（10+ 标签时纯开销）。WebView2 是 HWND 承载控件：仅切
-        // Visibility 在部分 WPF 版本中不足以刷新层级，显式控制 Z 序、命中
-        // 测试和可见性（ApprovalOverlay 的 Z=10 仍保持最顶层）。
-        foreach (var id in new[] { previousId, tab.TabId })
-        {
-            if (id is null || !_runtimes.TryGetValue(id, out var runtime))
-                continue;
-            // CS-371：四属性翻转单源（与无痕窗共用——此前两份同形副本）
-            WindowSharedChrome.ApplyTabVisibility(runtime.Control, id == _activeTabId);
-        }
-        WebViewHost.UpdateLayout();
-        SyncAddressBar(tab.Url);
-        // CS-283：SelectionChanged 回调同步抛出时抑制标志必须复位——finally 包裹
-        _suppressTabSelection = true;
-        try
-        {
-            TabStrip.SelectedItem = tab;
-        }
-        finally
-        {
-            _suppressTabSelection = false;
-        }
-    }
-
-    private void OnTabNavigationCompleted(string tabId, bool isSuccess, CoreWebView2WebErrorStatus status)
-    {
-        var tab = _tabs.Tabs.FirstOrDefault(t => t.TabId == tabId);
-        if (tab is null)
-            return;
-        var isActive = tabId == _activeTabId;
-        // NTP 虚拟主机映射传播期间可能先收到 ConnectionAborted；协调器已
-        // 注册有界重试。不要把这个内部瞬态失败渲染成错误页，否则用户会先
-        // 看到乱码/错误文档，随后才跳回主页面。
-        if (isActive && !isSuccess
-            && Ntp.NtpAssets.IsVirtualHostUrl(tab.Url)
-            && status == CoreWebView2WebErrorStatus.ConnectionAborted)
-        {
-            LoadingBar.Visibility = Visibility.Visible;
-            ErrorPagePanel.Visibility = Visibility.Collapsed;
-            return;
-        }
-        if (isActive && !isSuccess && status != CoreWebView2WebErrorStatus.OperationCanceled)
-        {
-            ErrorPage.Text = $"导航失败：{status}（已拒绝/无法加载）";
-            ErrorPagePanel.Visibility = Visibility.Visible;
-        }
-        else if (isActive)
-        {
-            // CS-355：策略拒绝的取消导航（OperationCanceled）此前直接收起错误
-            // 页——拒绝原因零可见反馈；有待呈现的拒绝说明时改呈现之
-            if (!isSuccess && status == CoreWebView2WebErrorStatus.OperationCanceled
-                && _pendingDenyMessage is { } deny)
-            {
-                ShowRejection(deny);
-            }
-            else
-            {
-                ErrorPagePanel.Visibility = Visibility.Collapsed;
-            }
-        }
-        _pendingDenyMessage = null;
-        if (isActive)
-        {
-            LoadingBar.Visibility = Visibility.Collapsed;
-            SyncAddressBar(tab.Url);
-        }
-        // 浏览历史记录（M2 缺口修复——此前仅导入写入，浏览从未落库）：
-        // 成功导航 + 历史开关开 + 非内部页（首页/画板/空白页——避免「历史
-        // 全被首页占满」）。后台标签完成导航同样记录。
-        if (isSuccess && _settings.HistoryEnabled
-            && Core.History.HistoryRecorder.IsRecordableUrl(tab.Url))
-        {
-            // CS-299（2026-09-26 审计）：历史写入移出 UI 线程——_history.Add
-            // 每次新建 SQLite 连接+INSERT+周期修剪，此前在导航完成的 UI 线程
-            // 同步执行（与 CS-031/159 "IO 移出 UI 线程" 口径相悖）。链式追加
-            // 保证写入顺序（同标签快速连续导航时 visited_at 不逆序）；异常在
-            // HistoryStore.Add 内部已吞（不向 ContinueWith 链传播）
-            var url = tab.Url;
-            var title = tab.Title;
-            _historyWriteTail = _historyWriteTail.ContinueWith(
-                _ => _history.Add(url, title));
-        }
-        // 每次导航完成即落盘（对齐 Python 栈崩溃恢复能力——强杀/崩溃后
-        // 重启仍可恢复到最后的页面集合，而非仅正常关闭时的快照）
-        SaveSession();
-    }
-
-    /// <summary>虚拟主机首帧有界重试耗尽（协调器事件）：停止加载条并展示明确
-    /// 错误——瞬态抑制只针对映射传播期，重试放弃后必须让用户可见失败。</summary>
-    private void OnNtpNavigationFailed(string tabId, CoreWebView2WebErrorStatus status)
-    {
-        if (tabId != _activeTabId)
-            return;  // 仅对激活标签反映 UI 状态
-        LoadingBar.Visibility = Visibility.Collapsed;
-        ErrorPage.Text = $"首页资源加载失败：{status}（已重试，无法加载）";
-        ErrorPagePanel.Visibility = Visibility.Visible;
-    }
-
-    // ================= 标签条交互 =================
-
-    private void NewTab_Click(object sender, RoutedEventArgs e) => _tabs.NewTab(HomeUrl);
-
-    private void TabClose_Click(object sender, RoutedEventArgs e)
-    {
-        // tabId 来源：优先按钮 Tag（="{Binding TabId}"）；Tag 未命中时回退到
-        // 按钮 DataContext（列表项即 Tab），两者兼取保证关闭可靠触发
-        if (sender is not System.Windows.FrameworkElement fe)
-            return;
-        var tabId = fe.Tag as string
-            ?? (fe.DataContext as Core.Tabs.Tab)?.TabId;
-        if (string.IsNullOrEmpty(tabId))
-            return;
-        Core.Security.SecurityLog.Write($"[tab] 请求关闭标签 {tabId}");
-        try
-        {
-            _tabs.CloseTab(tabId);
-        }
-        catch (Exception ex)
-        {
-            Core.Security.SecurityLog.Write($"[tab] 关闭标签异常（已捕获，不阻断）: {ex.GetType().Name}: {ex.Message}");
-        }
-    }
-
-    private void TabStrip_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
-    {
-        if (_suppressTabSelection)
-            return;
-        if (TabStrip.SelectedItem is Core.Tabs.Tab tab)
-            _tabs.SwitchTo(tab.TabId);
-    }
-
-    /// <summary>显式标签点击切换（兜底）：自定义 ListBoxItem 模板里同时有
-    /// 关闭按钮与 DockPanel 子元素，部分环境下仅靠 SelectionChanged 的
-    /// 隐式命中可能失效（表现为「新建了标签但点击切不过去」）。此处直接
-    /// 命中标签项即切换，命中关闭按钮则交给其自身的 Click（不动手切换）。</summary>
-    private void TabStrip_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-    {
-        // 记录按下起点——拖拽需超过阈值移动才判定为拖拽（防误触发吞点击）
-        _tabDrag.RecordDragStart(e.GetPosition(TabStrip));
-        if (TabStrip.InputHitTest(e.GetPosition(TabStrip)) is not DependencyObject hit)
-            return;
-        var node = hit;
-        while (node is not null && node is not System.Windows.Controls.ListBoxItem)
-            node = System.Windows.Media.VisualTreeHelper.GetParent(node);
-        if (node is not System.Windows.Controls.ListBoxItem item
-            || item.DataContext is not Core.Tabs.Tab tab)
-            return;
-        // 命中关闭按钮（✕）→ 让按钮自己的 Click 处理关闭，不在此切换
-        var probe = hit;
-        while (probe is not null)
-        {
-            if (probe is System.Windows.Controls.Button button && ReferenceEquals(button.Tag, tab.TabId))
-                return;
-            probe = System.Windows.Media.VisualTreeHelper.GetParent(probe);
-        }
-        _tabs.SwitchTo(tab.TabId);
-    }
-
-
-
-    private TabRuntime? ActiveRuntime() =>
-        _activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var r) ? r : null;
-
-    private void ZoomActive(double delta)
-    {
-        var rt = ActiveRuntime();
-        if (rt?.Control.CoreWebView2 is null)
-            return;
-        var host = Uri.TryCreate(rt.Control.CoreWebView2.Source, UriKind.Absolute, out var u)
-            ? u.Host : null;
-        // 与 ZoomStore/设置归一同口径（clamp 边界在 ZoomPolicy——上帝对象拆分·第七批）
-        var z = ZoomPolicy.ApplyStep(rt.Control.ZoomFactor, delta);
-        rt.Control.ZoomFactor = z;
-        if (host is not null)
-            Core.Tabs.ZoomStore.Set(host, z);
-    }
-
-    private void SleepCheck()
-    {
-        var minutes = _settings.SleepMinutes;
-        if (minutes <= 0 || _activeTabId is null)
-            return;
-        foreach (var tab in TabSleepPolicy.SelectTabsToSleep(
-                     _tabs.Tabs, _activeTabId, minutes, DateTime.Now,
-                     tabId => _runtimes.ContainsKey(tabId)))
-        {
-            _runtimeCoordinator.Sleep(tab.TabId);
-            tab.IsSleeping = true;
-        }
-    }
-
-    private void WakeTab(Tab tab)
-    {
-        if (_runtimes.ContainsKey(tab.TabId))
-            return;
-        tab.IsSleeping = false;
-        CreateRuntime(tab, tab.Url);
-    }
-
-    private Core.Tabs.Tab? TabItemAt(System.Windows.Point p)
-    {
-        var element = TabStrip.InputHitTest(p) as DependencyObject;
-        while (element is not null && element is not System.Windows.Controls.ListBoxItem)
-            element = System.Windows.Media.VisualTreeHelper.GetParent(element);
-        return (element as System.Windows.Controls.ListBoxItem)?.DataContext as Core.Tabs.Tab;
-    }
-
-    private void TabStrip_ContextMenuOpening(object sender, System.Windows.Controls.ContextMenuEventArgs e)
-    {
-        if (TabItemAt(Mouse.GetPosition(TabStrip)) is not Core.Tabs.Tab tab)
-            return;
-        TabStrip.ContextMenu ??= new System.Windows.Controls.ContextMenu();
-        var menu = TabStrip.ContextMenu;
-        menu.Items.Clear();
-        // CS-258：绑定快捷键的菜单项补 InputGestureText（未绑定项不虚标）
-        var close = new System.Windows.Controls.MenuItem { Header = "关闭标签", InputGestureText = "Ctrl+W" };
-        close.Click += (_, _) => _tabs.CloseTab(tab.TabId);
-        var closeOthers = new System.Windows.Controls.MenuItem { Header = "关闭其他标签" };
-        closeOthers.Click += (_, _) => _tabs.CloseOthers(tab.TabId);
-        var closeRight = new System.Windows.Controls.MenuItem { Header = "关闭右侧标签" };
-        closeRight.Click += (_, _) => _tabs.CloseRight(tab.TabId);
-        var pin = new System.Windows.Controls.MenuItem { Header = tab.IsPinned ? "取消固定标签" : "固定标签" };
-        pin.Click += (_, _) => _tabs.SetPinned(tab.TabId, !tab.IsPinned);
-        var dup = new System.Windows.Controls.MenuItem { Header = "复制标签" };
-        dup.Click += (_, _) => _tabs.Duplicate(tab.TabId);
-        var reopen = new System.Windows.Controls.MenuItem
-        {
-            Header = _tabs.ClosedCount > 0 ? "重新打开已关闭的标签" : "重新打开已关闭的标签（无）",
-            IsEnabled = _tabs.ClosedCount > 0,
-        };
-        reopen.Click += (_, _) => ReopenClosedTab();
-        menu.Items.Add(close);
-        menu.Items.Add(closeOthers);
-        menu.Items.Add(closeRight);
-        menu.Items.Add(new System.Windows.Controls.Separator());
-        menu.Items.Add(pin);
-        menu.Items.Add(dup);
-        menu.Items.Add(new System.Windows.Controls.Separator());
-        menu.Items.Add(reopen);
-    }
-
-    private void ReopenClosedTab()
-    {
-        var s = _tabs.PopClosed();
-        if (s is not null)
-            _tabs.NewTab(s.Url, s.Title);
-    }
-
-    private void TabStrip_PreviewMouseDown(object sender, MouseButtonEventArgs e)
-    {
-        if (e.ChangedButton != MouseButton.Middle || e.ButtonState != MouseButtonState.Pressed)
-            return;
-        if (TabItemAt(e.GetPosition(TabStrip)) is Core.Tabs.Tab tab)
-        {
-            _tabs.CloseTab(tab.TabId);
-            e.Handled = true;
-        }
-    }
-
-    // —— 页内查找（逻辑在 FindBarController——上帝对象拆分第一批） ——
-    private void FindBox_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
-    {
-        if (!string.IsNullOrWhiteSpace(FindBox.Text))
-            _ = _find.SearchAsync(FindBox.Text, backwards: false);
-    }
-
-    private async void Find_Executed(object sender, RoutedEventArgs e)
-    {
-        var backwards = (e.OriginalSource as System.Windows.Controls.Button)?.Tag as string == "b";
-        await _find.SearchAsync(FindBox.Text, backwards);
-    }
-
-    private void CloseFind_Click(object sender, RoutedEventArgs e) => _find.Close();
-
-    // —— 地址栏自动补全（逻辑在 SuggestionController） ——
-    private void SuggestionList_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter && _suggest.Selected() is { } sel)
-        {
-            _suggest.Pick(sel);
-            e.Handled = true;
-        }
-        else if (e.Key == Key.Escape)
-        {
-            _suggest.Close();
-            e.Handled = true;
-        }
-    }
-
-    /// <summary>鼠标点击建议项即导航（此前仅键盘可达——鼠标点击只关弹层）。</summary>
-    private void SuggestionList_PreviewMouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        if (_suggest.Selected() is { } sel)
-        {
-            _suggest.Pick(sel);
-            e.Handled = true;
-        }
-    }
-
-    // —— InPrivate ——
-    private void InPrivate_Click(object sender, RoutedEventArgs e) => OpenInPrivateNew();
-
-    private void OpenInPrivateNew() => new InPrivateWindow(_settings.SearchEngine).Show();  // CS-224
-
-    // —— 窗口状态记忆 ——
-    private void SaveWindowState()
-    {
-        _settings.WindowMaximized = WindowState == WindowState.Maximized;
-        if (WindowState == WindowState.Normal)
-        {
-            _settings.WindowLeft = Left;
-            _settings.WindowTop = Top;
-            _settings.WindowWidth = Width;
-            _settings.WindowHeight = Height;
-        }
-    }
-    private void RestoreWindowState()
-    {
-        var sw = SystemParameters.VirtualScreenWidth;
-        var sh = SystemParameters.VirtualScreenHeight;
-        var vsl = SystemParameters.VirtualScreenLeft;
-        var vst = SystemParameters.VirtualScreenTop;
-        // CS-067：下界防残窗，上界钳到虚拟屏幕——持久化值被外部
-        // 篡改成超大数（如 int.MaxValue）时不再撑出不可操作的巨型窗口
-        // CS-150：回退宽高引用快照级单源常量（CS-123），下界为窗口级命名常量
-        Width = _settings.WindowWidth > MinRestoredWidth
-            ? Math.Min(_settings.WindowWidth, sw)
-            : Core.Settings.BrowserSettingsSnapshot.DefaultWindowWidth;
-        Height = _settings.WindowHeight > MinRestoredHeight
-            ? Math.Min(_settings.WindowHeight, sh)
-            : Core.Settings.BrowserSettingsSnapshot.DefaultWindowHeight;
-        // CS-298（2026-09-26 审计）：Left/Top 此前只校验上界（<sw/<sh，且比
-        // 的是尺寸而非坐标原点）——负值（NormalizeWindow 允许持久化到
-        // -100000）可把窗口恢复到虚拟屏幕外不可见。改为完整区间校验
-        // [VirtualScreenLeft, VirtualScreenLeft+ScreenWidth-Width]（Top 同理），
-        // 越界回退虚拟屏幕居中
-        var maxLeft = vsl + sw - Width;
-        var maxTop = vst + sh - Height;
-        if (!double.IsNaN(_settings.WindowLeft) && !double.IsNaN(_settings.WindowTop)
-            && _settings.WindowLeft >= vsl && _settings.WindowLeft <= maxLeft
-            && _settings.WindowTop >= vst && _settings.WindowTop <= maxTop)
-        {
-            Left = _settings.WindowLeft;
-            Top = _settings.WindowTop;
-        }
-        else
-        {
-            Left = vsl + (sw - Width) / 2;
-            Top = vst + (sh - Height) / 2;
-        }
-        if (_settings.WindowMaximized)
-            WindowState = WindowState.Maximized;
     }
 
     // ================= 会话持久化 =================
@@ -898,169 +387,21 @@ public partial class MainWindow : Window
         }
         using (_sessionSaver.BeginRestore())
         {
-            foreach (var tab in _tabs.Tabs.ToList())
-                _tabs.CloseTab(tab.TabId);
+            // CS-393：重建期守卫——清空旧标签的瞬时空集不触发关窗
+            _restoringSession = true;
+            try
+            {
+                foreach (var tab in _tabs.Tabs.ToList())
+                    _tabs.CloseTab(tab.TabId);
+            }
+            finally
+            {
+                _restoringSession = false;
+            }
             RebuildTabsFromSnapshot(saved, currentTabId);
         }
         SaveSession();
         ShowFeedback($"已恢复上次会话（{saved.Count} 个标签）");
-    }
-
-    // ================= 地址栏与导航 =================
-
-    private void AddressBar_TextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
-    {
-        AddressHint.Visibility = AddressBar.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
-        _suggest.OnTextChanged();
-    }
-
-    /// <summary>M1：地址栏获得焦点即全选（Ctrl+L 与鼠标点击同语义——
-    /// 对齐 Python shell_toolbar 聚焦选中契约）。</summary>
-    private void AddressBar_GotKeyboardFocus(object sender, KeyboardFocusChangedEventArgs e) =>
-        AddressBar.SelectAll();
-
-    private void SyncAddressBar(string url)
-    {
-        if (!AddressBar.IsKeyboardFocused)
-            AddressBar.Text = url;
-    }
-
-    private void NavigateFromAddressBar()
-    {
-        // 输入归一单源（UrlNormalizer——与 Android SearchEngines.kt 跨端契约对齐）；
-        // 最终仍经该标签 HostWebView 的 NavigationStarting → Broker 决策。
-        var target = UrlNormalizer.Normalize(AddressBar.Text, _settings.SearchEngine);
-        if (target is null)
-        {
-            // CS-288：fail-closed 拒绝留审计——非导航协议尝试是安全相关事件
-            Core.Security.SecurityLog.Write("[nav] 地址栏归一拒绝（空输入或非导航协议）");
-            ErrorPage.Text = "无法导航：输入为空，或属于非导航协议（file:/javascript:/data: 等已被拒绝）。";
-            ErrorPagePanel.Visibility = Visibility.Visible;
-            return;
-        }
-        // 归一器已保证产物可被 Uri 解析；此处兜底捕获非法输入（此前直接
-        // new Uri(target)，"http://" 类输入抛 UriFormatException）
-        if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var runtime))
-        {
-            if (!TabRuntime.Navigate(runtime, target))
-            {
-                ErrorPage.Text = "无法导航：地址无效。";
-                ErrorPagePanel.Visibility = Visibility.Visible;
-            }
-        }
-    }
-
-    private void AddressBar_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (_suggest.IsOpenWithItems)
-        {
-            if (e.Key == Key.Down)
-            {
-                _suggest.MoveSelection(1);
-                e.Handled = true; return;
-            }
-            if (e.Key == Key.Up)
-            {
-                _suggest.MoveSelection(-1);
-                e.Handled = true; return;
-            }
-            if (e.Key == Key.Enter && _suggest.Selected() is { } sel)
-            {
-                _suggest.Pick(sel);
-                e.Handled = true; return;
-            }
-            if (e.Key == Key.Escape)
-            {
-                _suggest.Close();
-                e.Handled = true; return;
-            }
-        }
-        if (e.Key == Key.Enter)
-            NavigateFromAddressBar();
-    }
-
-    private void Open_Click(object sender, RoutedEventArgs e) => NavigateFromAddressBar();
-
-    private Microsoft.Web.WebView2.Wpf.WebView2? ActiveControl() =>
-        _activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var r) ? r.Control : null;
-
-    /// <summary>M2 收藏☆：toggle 当前页（零页面可控参数——URL/标题服务端取，
-    /// 与 Android AegisBridge/Python toggle_bookmark 同安全模型）。</summary>
-    private void Star_Click(object sender, RoutedEventArgs e)
-    {
-        var tab = _tabs.Current;
-        if (tab is null || !Uri.TryCreate(tab.Url, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            ShowFeedback("当前页面不支持收藏", isWarning: true);
-            return;
-        }
-        // CS-228：内部虚拟主机页（NTP/画板）排除——地址仅本进程 WebView 可解析，
-        // 落书签后任何语境都无法打开
-        if (Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
-        {
-            ShowFeedback("内部页面不支持收藏", isWarning: true);
-            return;
-        }
-        var wasStarred = _bookmarks.Contains(tab.Url);
-        var ok = wasStarred
-            ? _bookmarks.Remove(tab.Url)
-            : _bookmarks.Add(string.IsNullOrWhiteSpace(tab.Title) ? uri.Host : tab.Title, tab.Url);
-        ShowFeedback(ok ? (wasStarred ? "已取消收藏" : "已收藏") : "操作失败", isWarning: !ok);
-    }
-
-    private void Settings_Click(object sender, RoutedEventArgs e)
-    {
-        if (_settingsWindow is null || !_settingsWindow.IsLoaded)
-        {
-            _settingsWindow = new SettingsWindow(_settings, _broker, this, _settingsService) { Owner = this };
-            // 创建即换肤——此前漏调：浅色模式下首次打开设置窗仍深色，直到下次
-            // 全局换肤才纠正（对比历史/书签/下载三处创建时都有）
-            _settingsWindow.ApplyTheme(_settings.Theme);
-        }
-        _settingsWindow.Show();
-        _settingsWindow.Activate();
-    }
-
-    /// <summary>在当前激活标签导航到指定 URL（供书签管理器等调用）。</summary>
-    public void OpenInActiveTab(string url)
-    {
-        if (_activeTabId is not null && _runtimes.TryGetValue(_activeTabId, out var runtime))
-            TabRuntime.Navigate(runtime, url);
-    }
-
-    private void BookmarkManager_Click(object sender, RoutedEventArgs e)
-    {
-        if (_bookmarkManagerWindow is null || !_bookmarkManagerWindow.IsLoaded)
-        {
-            _bookmarkManagerWindow = new BookmarkManagerWindow(_bookmarks, this) { Owner = this };
-            _bookmarkManagerWindow.ApplyTheme(_settings.Theme);
-        }
-        _bookmarkManagerWindow.Show();
-        _bookmarkManagerWindow.Activate();
-    }
-
-    private void History_Click(object sender, RoutedEventArgs e)
-    {
-        if (_historyWindow is null || !_historyWindow.IsLoaded)
-        {
-            _historyWindow = new HistoryWindow(_history) { Owner = this };
-            _historyWindow.ApplyTheme(_settings.Theme);
-        }
-        _historyWindow.Show();
-        _historyWindow.Activate();
-    }
-
-    /// <summary>M4 下载管理面板（共享数据源——新下载自动进入列表）。</summary>
-    private void Downloads_Click(object sender, RoutedEventArgs e)
-    {
-        if (_downloadsWindow is null || !_downloadsWindow.IsLoaded)
-        {
-            _downloadsWindow = new DownloadsWindow(_downloads) { Owner = this };
-            _downloadsWindow.ApplyTheme(_settings.Theme);
-        }
-        _downloadsWindow.Show();
-        _downloadsWindow.Activate();
     }
 
     // CS-152：反馈条背景经主题资源键取用——ApplyTheme 已按主题写入
@@ -1091,334 +432,4 @@ public partial class MainWindow : Window
         _feedbackTimer.Start();
     }
 
-    /// <summary>M3 源码查看器（Ctrl+U）：后台线程抓取当前页（15s/5MB 上限），
-    /// 全转义纯文本展示于独立窗口——查看源码永不等于执行源码
-    /// （Python api_bridge.view_source 语义移植）。</summary>
-    private void OpenSourceViewer()
-    {
-        var tab = _tabs.Current;
-        if (tab is null
-            || !Uri.TryCreate(tab.Url, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-        {
-            ShowFeedback("当前页面不支持查看源代码（仅限 http/https）", isWarning: true);
-            return;
-        }
-        // CS-229：虚拟主机 URL 在 WebView 外不可解析——后台抓源必失败，
-        // 前置拦截并提示（不再让用户等 15s 超时后看失败反馈）
-        if (Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
-        {
-            ShowFeedback("内部页面不支持查看源代码", isWarning: true);
-            return;
-        }
-        var url = tab.Url;
-        ShowFeedback("正在获取页面源代码…");
-        Task.Run(async () =>
-        {
-            try
-            {
-                // CS-064（审计 2026-09-25）：静态共享客户端——此前每次查看源码
-                // new HttpClient（SocketException 端口耗尽经典面）
-                using var response = await SourceFetchClient.GetAsync(url);
-                response.EnsureSuccessStatusCode();
-                var bytes = await response.Content.ReadAsByteArrayAsync();
-                if (bytes.Length > SourceMaxBytes)
-                    throw new InvalidOperationException("源码超过 5MB 上限");
-                var text = System.Text.Encoding.UTF8.GetString(bytes);
-                Dispatcher.Invoke(() =>
-                {
-                    // 抓取期间主窗口可能已关闭——Owner=已关闭窗口会抛异常
-                    if (!IsLoaded)
-                        return;
-                    var viewer = new SourceViewerWindow(url, text) { Owner = this };
-                    viewer.ApplyTheme(_settings.Theme);
-                    _sourceViewerWindows.RemoveAll(w => !w.IsLoaded);
-                    _sourceViewerWindows.Add(viewer);
-                    viewer.Show();
-                    ShowFeedback("源码已加载（全转义，零脚本执行）");
-                });
-            }
-            catch (Exception ex)
-            {
-                // CS-154：失败分支同样守卫 IsLoaded——抓取期间窗口关闭时
-                // ShowFeedback 触碰已卸载控件会抛（成功分支已有守卫）
-                Dispatcher.Invoke(() =>
-                {
-                    if (!IsLoaded)
-                        return;
-                    ShowFeedback($"获取源码失败：{ex.Message}", isWarning: true);
-                });
-            }
-        });
-    }
-
-    private void Back_Click(object sender, RoutedEventArgs e) => ActiveControl()?.GoBack();
-    private void Forward_Click(object sender, RoutedEventArgs e) => ActiveControl()?.GoForward();
-    private void Refresh_Click(object sender, RoutedEventArgs e) => ActiveControl()?.Reload();
-    private void Stop_Click(object sender, RoutedEventArgs e) => ActiveControl()?.Stop();
-    /// <summary>主页（Edge 对齐：回到新标签页，导航仍经 broker 决策）。</summary>
-    private void Home_Click(object sender, RoutedEventArgs e)
-    {
-        if (ActiveRuntime() is { } runtime)
-            TabRuntime.Navigate(runtime, HomeUrl);
-    }
-
-    /// <summary>个人资料占位：无账号体系，点击聚焦地址栏（对齐 Edge 圆钮位置）。</summary>
-    private void Profile_Click(object sender, RoutedEventArgs e)
-    {
-        AddressBar.Focus();
-        AddressBar.SelectAll();
-    }
-
-    // ================= M1 标签条拖拽排序（逻辑在 TabStripDragController） =================
-
-    private void TabStrip_PreviewMouseMove(object sender, MouseEventArgs e) =>
-        _tabDrag.HandlePreviewMouseMove(e);
-
-    private void TabStrip_DragOver(object sender, DragEventArgs e) =>
-        _tabDrag.HandleDragOver(e);
-
-    private void TabStrip_Drop(object sender, DragEventArgs e) =>
-        _tabDrag.HandleDrop(e);
-
-    // ================= 导航确认面板（逻辑在 ApprovalPanelController） =================
-
-    private void ApprovalAllow_Click(object sender, RoutedEventArgs e) => _approval.Allow();
-
-    private void ApprovalDeny_Click(object sender, RoutedEventArgs e) => _approval.Deny();
-
-    private void ShowRejection(string message)
-    {
-        ErrorPage.Text = message;
-        ErrorPagePanel.Visibility = Visibility.Visible;
-    }
-
-    // ================= 快捷键与关闭 =================
-
-    private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        // Ctrl+L 聚焦地址栏 / Ctrl+T 新建 / Ctrl+W 关闭当前（标签条 tooltip 契约）
-        if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift))
-        {
-            if (e.Key == Key.Tab)
-            {
-                CycleTab(-1);
-                e.Handled = true;
-                return;
-            }
-            if (e.Key == Key.T)
-            {
-                ReopenClosedTab();
-                e.Handled = true;
-                return;
-            }
-        }
-        else if (Keyboard.Modifiers == ModifierKeys.Control)
-        {
-            switch (e.Key)
-            {
-                case Key.L:
-                    AddressBar.Focus();
-                    AddressBar.SelectAll();
-                    e.Handled = true;
-                    return;
-                case Key.T:
-                    _tabs.NewTab(HomeUrl);
-                    e.Handled = true;
-                    return;
-                case Key.W when _tabs.CurrentTabId is not null:
-                    _tabs.CloseTab(_tabs.CurrentTabId);
-                    e.Handled = true;
-                    return;
-                case Key.U:
-                    OpenSourceViewer();
-                    e.Handled = true;
-                    return;
-                case Key.F:
-                    _find.Open();
-                    e.Handled = true;
-                    return;
-                case Key.H:
-                    History_Click(this, e);
-                    e.Handled = true;
-                    return;
-                case Key.J:
-                    Downloads_Click(this, e);
-                    e.Handled = true;
-                    return;
-                case Key.D:
-                    Star_Click(this, e);
-                    e.Handled = true;
-                    return;
-                case Key.R:
-                    ActiveControl()?.Reload();
-                    e.Handled = true;
-                    return;
-                case Key.Tab:
-                    CycleTab(1);
-                    e.Handled = true;
-                    return;
-                case Key.D0:
-                case Key.NumPad0:
-                    ActiveRuntime()?.ResetZoom();
-                    e.Handled = true;
-                    return;
-                case Key.OemPlus:
-                case Key.Add:
-                    ZoomActive(0.1);
-                    e.Handled = true;
-                    return;
-                case Key.OemMinus:
-                case Key.Subtract:
-                    ZoomActive(-0.1);
-                    e.Handled = true;
-                    return;
-                // Ctrl+1..8 直达标签 / Ctrl+9 末位标签（Edge 契约）
-                case Key.D1 or Key.D2 or Key.D3 or Key.D4 or Key.D5
-                     or Key.D6 or Key.D7 or Key.D8 or Key.D9
-                     or Key.NumPad1 or Key.NumPad2 or Key.NumPad3 or Key.NumPad4 or Key.NumPad5
-                     or Key.NumPad6 or Key.NumPad7 or Key.NumPad8 or Key.NumPad9:
-                    JumpToTabByKey(e.Key);
-                    e.Handled = true;
-                    return;
-            }
-        }
-        else if (Keyboard.Modifiers == ModifierKeys.Alt)
-        {
-            // Alt+←/→ 历史
-            if (e.Key == Key.Left)
-            {
-                ActiveControl()?.GoBack();
-                e.Handled = true;
-                return;
-            }
-            if (e.Key == Key.Right)
-            {
-                ActiveControl()?.GoForward();
-                e.Handled = true;
-                return;
-            }
-        }
-        else if (Keyboard.Modifiers == ModifierKeys.None)
-        {
-            switch (e.Key)
-            {
-                case Key.F5:
-                    ActiveControl()?.Reload();
-                    e.Handled = true;
-                    return;
-                case Key.F6:
-                    AddressBar.Focus();
-                    AddressBar.SelectAll();
-                    e.Handled = true;
-                    return;
-                case Key.Tab:
-                    // 无修饰 Tab 由 WPF 焦点遍历处理（地址栏/查找框间移动）
-                    break;
-            }
-        }
-        if (!_approval.IsVisible || e.Key != Key.Escape)
-            return;
-        _approval.Deny();
-        e.Handled = true;
-    }
-
-    /// <summary>Ctrl+Tab / Ctrl+Shift+Tab 循环切换标签。</summary>
-    private void CycleTab(int direction)
-    {
-        var count = _tabs.Tabs.Count;
-        if (count == 0)
-            return;
-        // CS-151：就地循环定位——此前 ToList() 全表复制只为找当前索引
-        var current = -1;
-        if (_tabs.CurrentTabId is { } id)
-        {
-            for (var i = 0; i < count; i++)
-            {
-                if (_tabs.Tabs[i].TabId == id)
-                {
-                    current = i;
-                    break;
-                }
-            }
-        }
-        _tabs.SwitchTo(_tabs.Tabs[NextIndex(current, direction, count)].TabId);
-    }
-
-    /// <summary>CS-158：循环切换的目标索引提纯直测（未找到/负索引钳 0 起算）。</summary>
-    internal static int NextIndex(int currentIndex, int direction, int count)
-    {
-        var current = currentIndex < 0 ? 0 : currentIndex;
-        return ((current + direction) % count + count) % count;
-    }
-
-    /// <summary>Ctrl+1..8 直达对应标签，Ctrl+9 末位标签。</summary>
-    private void JumpToTabByKey(Key key)
-    {
-        var digit = ToDigit(key);
-        if (digit == 0)
-            return;
-        var index = digit == 9 ? _tabs.Tabs.Count - 1 : digit - 1;
-        if (index >= 0 && index < _tabs.Tabs.Count)
-            _tabs.SwitchTo(_tabs.Tabs[index].TabId);
-    }
-
-    /// <summary>CS-157：数字键 → 序号（1..9，非数字键 0）提纯直测。</summary>
-    internal static int ToDigit(Key key) => key switch
-    {
-        Key.D1 => 1, Key.D2 => 2, Key.D3 => 3, Key.D4 => 4, Key.D5 => 5,
-        Key.D6 => 6, Key.D7 => 7, Key.D8 => 8, Key.D9 => 9,
-        Key.NumPad1 => 1, Key.NumPad2 => 2, Key.NumPad3 => 3, Key.NumPad4 => 4,
-        Key.NumPad5 => 5, Key.NumPad6 => 6, Key.NumPad7 => 7, Key.NumPad8 => 8,
-        Key.NumPad9 => 9,
-        _ => 0,
-    };
-
-    private void Window_Closing(object? sender, CancelEventArgs e)
-    {
-        // CS-156：FlushSession 保留 OnClosed 单点——Closing 在未取消时必达
-        // Closed，此前两处各落盘一次（每次关闭双份 SQLite 写）
-        SaveWindowState();
-        _settings.ZoomByHost = ZoomStore.Snapshot();
-        _settingsService.Apply(_settings);
-        foreach (var runtime in _runtimes.Values)
-            runtime.Host.RejectPendingNavigation();
-    }
-
-    private void SetNavigationControlsEnabled(bool isEnabled)
-    {
-        AddressBar.IsEnabled = isEnabled;
-        OpenButton.IsEnabled = isEnabled;
-        BackButton.IsEnabled = isEnabled;
-        ForwardButton.IsEnabled = isEnabled;
-        RefreshButton.IsEnabled = isEnabled;
-        StopButton.IsEnabled = isEnabled;
-        HomeButton.IsEnabled = isEnabled;
-    }
-
-    protected override void OnClosed(EventArgs e)
-    {
-        FlushSession();
-        // 审计修复：停全部定时器 + 解绑事件——主窗口关闭但 InPrivate 存活时，
-        // 此前 30s 睡眠巡检/建议定时器继续空转、ZoomStore.Changed 永久持有
-        // 对已关窗口的引用（内存泄漏）
-        _sleepTimer?.Stop();
-        _suggest.StopDebounce();
-        _feedbackTimer?.Stop();
-        if (_zoomChangedHandler is not null)
-            ZoomStore.Changed -= _zoomChangedHandler;
-        // CS-367：解绑 KillSwitch 横幅订阅（横幅句柄不再持有已关窗口）
-        _broker.KillSwitch.Engaged -= _killSwitchEngagedHandler;
-        _tabs.TabOpened -= OnTabOpened;
-        _tabs.TabClosed -= OnTabClosed;
-        _tabs.TabSwitched -= OnTabSwitched;
-        _runtimeCoordinator.NtpNavigationFailed -= OnNtpNavigationFailed;
-        _sourceViewerWindows.Clear();  // CS-233：源码查看窗引用驻留清理（Owner=本窗）
-        // 全部 runtime 经协调器统一销毁（先摘视觉树再释放，令牌一并取消）
-        // CS-366（2026-10-01 审计）：_runtimes 清空收敛到协调器 Dispose 单点
-        //（此前两调用方各自 Clear——约定分散）
-        _runtimeCoordinator.Dispose();
-        _broker.Dispose();
-        base.OnClosed(e);
-    }
 }

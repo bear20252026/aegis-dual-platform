@@ -6,11 +6,19 @@ using System.Linq;
 
 /// <summary>Origin/URL 策略（阶段 C——Broker 导航决策核心——与 contracts/vectors 对齐）。
 /// 外部导航仅 http/https；拒绝 data:/blob:/javascript:/userinfo/控制字符/空白/
-/// 无 host/非法端口/超长/尾点 host/IDN bidi 混排（url-origin-invalid 向量——契约一致）。</summary>
+/// 无 host/非法端口（0 与越界——CS-418）/超长/尾点 host/IDN bidi 混排/
+/// IPv4 八位组越界（CS-418——AD-299 同款口径）（url-origin-invalid 向量——契约一致）。</summary>
 public static class OriginPolicy
 {
     public const int MaxUrlLength = 8192;
     public const int MaxHostLength = 253;
+
+    /// <summary>CS-418（2026-10-02 审计）：TCP 端口上限（RFC 6335——与 Kotlin
+    /// AD-299/Rust origin.rs PY-075 向量同口径）。.NET Uri 解析虽已拒绝 >65535
+    /// 的显式端口（既有测试锁定），端口 0 仍被原样放行——此处显式收口，判定
+    /// 不依赖平台解析细节；未写端口的 URL Port 为 scheme 默认值（80/443，恒在
+    /// 区间内），不受影响。</summary>
+    private const int MaxPort = 65535;
 
     public static bool TryParseExternal(string raw, out Uri uri)
     {
@@ -50,6 +58,9 @@ public static class OriginPolicy
         if (!string.IsNullOrEmpty(u.UserInfo))
             return false;
         if (string.IsNullOrEmpty(u.Host))
+            return false;
+        // CS-418（2026-10-02 审计）：端口 0/越界拒绝（PY-075 向量——见 MaxPort 注）
+        if (u.Port is < 1 or > MaxPort)
             return false;
         if (!IsValidHost(u.Host))
             return false;
@@ -110,6 +121,15 @@ public static class OriginPolicy
         if (segments.Length == 4
             && segments.All(s => s.Length > 0 && s.All(char.IsAsciiDigit))
             && segments.Any(s => s.Length > 1 && s[0] == '0'))
+            return false;
+        // CS-418（2026-10-02 审计）：IPv4 八位组越界拒绝（RS-228 向量——
+        // "999.1.1.1"/"256.0.0.1"/"300.300.300.300"；WHATWG IPv4 解析器逐段
+        // ≤255 口径，与 Kotlin AD-299/Rust origin.rs 对齐）。此前只看段数，
+        // 越界形态混过。超 3 位的数字段必然 >255——先按长度 fail-closed
+        //（int.Parse 溢出面），再逐段数值判定
+        if (segments.Length == 4
+            && segments.All(s => s.Length > 0 && s.All(char.IsAsciiDigit))
+            && segments.Any(s => s.Length > 3 || int.Parse(s, CultureInfo.InvariantCulture) > 255))
             return false;
         if (lower.StartsWith("0x") && lower[2..].All(c => char.IsAsciiDigit(c) || (c >= 'a' && c <= 'f')))
             return false;

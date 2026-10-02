@@ -93,9 +93,17 @@
                       <TextBlock Text="打开文件" Margin="5,0,0,0"/>
                     </StackPanel>
                   </Button>
-                  <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="暂停下载" Content="暂停" Click="Pause_Click" Margin="4,0,0,0"/>
-                  <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="继续下载" Content="继续" Click="Resume_Click" Margin="4,0,0,0"/>
-                  <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="取消下载" Content="取消" Click="Cancel_Click" Margin="4,0,0,0"/>
+                  <!-- CS-394（2026-10-02 审计）：暂停/继续/取消随 StateKind 显隐——
+                       此前三钮恒可见恒可用（对已完成的条目点"暂停"是空操作噪音）。
+                       进行中→暂停/取消；已中断→继续；已完成/已取消/已结束→全收起。
+                       注：原生暂停态仍上报 InProgress（WebView2 无 Paused 枚举），
+                       暂停中的条目继续展示暂停/取消（暂停幂等，取消可用） -->
+                  <Button x:Name="PauseBtn" Style="{StaticResource LinkButton}" AutomationProperties.Name="暂停下载" Content="暂停" Click="Pause_Click" Margin="4,0,0,0"
+                          Visibility="Collapsed"/>
+                  <Button x:Name="ResumeBtn" Style="{StaticResource LinkButton}" AutomationProperties.Name="继续下载" Content="继续" Click="Resume_Click" Margin="4,0,0,0"
+                          Visibility="Collapsed"/>
+                  <Button x:Name="CancelBtn" Style="{StaticResource LinkButton}" AutomationProperties.Name="取消下载" Content="取消" Click="Cancel_Click" Margin="4,0,0,0"
+                          Visibility="Collapsed"/>
                   <Button Style="{StaticResource LinkButton}" AutomationProperties.Name="打开下载所在文件夹" Click="ShowInFolder_Click" Margin="4,0,0,0">
                     <StackPanel Orientation="Horizontal">
                       <TextBlock Text="&#xE838;" FontFamily="{StaticResource IconFont}" FontSize="12" VerticalAlignment="Center"/>
@@ -106,6 +114,15 @@
               </Grid>
             </Grid>
           </Border>
+          <DataTemplate.Triggers>
+            <DataTrigger Binding="{Binding StateKind}" Value="InProgress">
+              <Setter TargetName="PauseBtn" Property="Visibility" Value="Visible"/>
+              <Setter TargetName="CancelBtn" Property="Visibility" Value="Visible"/>
+            </DataTrigger>
+            <DataTrigger Binding="{Binding StateKind}" Value="Interrupted">
+              <Setter TargetName="ResumeBtn" Property="Visibility" Value="Visible"/>
+            </DataTrigger>
+          </DataTemplate.Triggers>
         </DataTemplate>
       </ListBox.ItemTemplate>
     </ListBox>

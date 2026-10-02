@@ -262,6 +262,39 @@ public sealed class NtpBridgeTests
     }
 
     [Fact]
+    public void WallpaperWhitelistMatchesSharedShellDirectoryBidirectionally()
+    {
+        // CS-414（2026-10-02 审计）：壁纸断言从数量抽查加强与磁盘单源目录
+        //（shared/shell/wallpapers）双向差集为空——白名单多登记（指向不存在的
+        // 文件：设置后渲染 404）与漏登记（磁盘新壁纸被 fail-closed 拒绝）都即刻失败
+        var dir = FindSharedWallpapersDir();
+        var onDisk = new HashSet<string>(
+            Directory.GetFiles(dir, "*.jpg").Select(System.IO.Path.GetFileName)!,
+            StringComparer.Ordinal);
+        Assert.NotEmpty(onDisk);
+        Assert.Empty(onDisk.Except(NtpAssets.Wallpapers));   // 磁盘有而白名单无
+        Assert.Empty(NtpAssets.Wallpapers.Except(onDisk));   // 白名单有而磁盘无
+    }
+
+    /// <summary>CS-414：向上定位仓库根的 shared/shell/wallpapers 单源目录
+    ///（测试输出在 windows/tests/*/bin/&lt;Cfg&gt;/&lt;TFM&gt;[/rid]，层级深度随
+    /// RID 变化——逐级向上按目录标记定位，不依赖固定层数）。</summary>
+    private static string FindSharedWallpapersDir()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            var candidate = Path.Combine(dir.FullName, "shared", "shell", "wallpapers");
+            if (Directory.Exists(candidate))
+                return candidate;
+            dir = dir.Parent!;
+        }
+        // 显式 throw（Assert.Fail 标注 DoesNotReturn——其后不可达代码在
+        // TreatWarningsAsErrors 下即 CS0162 编译错误）
+        throw new InvalidOperationException("未定位到 shared/shell/wallpapers（仓库布局契约）");
+    }
+
+    [Fact]
     public void ImportHistory_AcceptsStringNumberArg()
     {
         // CS-190：args 数字以字符串形态传入（"100"）——此前仅 Number 分支可解析

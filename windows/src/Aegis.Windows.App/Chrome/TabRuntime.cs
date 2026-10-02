@@ -95,6 +95,12 @@ public sealed class TabRuntime : IDisposable
         coreWebView2.NavigationStarting += OnCoreNavigationStarted;  // CS-237：命名化（匿名闭包无法退订）
         coreWebView2.DownloadStarting += (_, e) =>
         {
+            // CS-385（2026-10-02 审计）：HostWebView 拒绝分支（Handled=true）后
+            // 本处理器仍入列幽灵条目——下载面板出现不可操作且立即消失的条目。
+            // 同一 WebView2 事件上两订阅者按序执行，HostWebView 先拒（Handled），
+            // 此处开头即让位
+            if (e.Handled)
+                return;
             try
             {
                 var dangerous = Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(

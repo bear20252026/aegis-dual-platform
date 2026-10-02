@@ -188,6 +188,32 @@ public sealed class WindowSmokeTests
         });
     }
 
+    // ===== CS-406（2026-10-02 审计）：ApplyTabVisibility 四属性翻转零直测补齐 =====
+
+    [Fact]
+    public void ApplyTabVisibility_FlipsZIndexVisibilityHitTestAndIsEnabled()
+    {
+        // 主窗/无痕窗两处消费的单源实现此前零直测——锁定四属性（Z 序/可见性/
+        // 命中测试/使能）在激活/非激活两态的完整翻转（WebView2 HWND 承载控件
+        // 仅切 Visibility 不足以刷新层级的行为契约）
+        RunSta(() =>
+        {
+            var control = new System.Windows.Controls.Border();
+
+            WindowSharedChrome.ApplyTabVisibility(control, false);
+            Assert.Equal(0, System.Windows.Controls.Panel.GetZIndex(control));
+            Assert.Equal(System.Windows.Visibility.Collapsed, control.Visibility);
+            Assert.False(control.IsHitTestVisible);
+            Assert.False(control.IsEnabled);
+
+            WindowSharedChrome.ApplyTabVisibility(control, true);
+            Assert.Equal(5, System.Windows.Controls.Panel.GetZIndex(control));
+            Assert.Equal(System.Windows.Visibility.Visible, control.Visibility);
+            Assert.True(control.IsHitTestVisible);
+            Assert.True(control.IsEnabled);
+        });
+    }
+
     private static void RunSta(Action action)
     {
         Exception? caught = null;

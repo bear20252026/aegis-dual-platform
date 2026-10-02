@@ -6,7 +6,6 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
-using System.Windows.Threading;
 using Aegis.Windows.Core.Bookmarks;
 using Aegis.Windows.Core.History;
 
@@ -28,7 +27,10 @@ public sealed class SuggestionController
     private readonly BookmarkStore _bookmarks;
     private readonly HistoryStore _history;
     private readonly Action _navigate;
-    private readonly DispatcherTimer _timer;
+    // CS-410（2026-10-02 审计）：防抖计时器改 IDebounceTimer 抽象注入
+    //（SessionSaveScheduler 已有同款）——DispatcherTimer 不可注入，防抖时序
+    // 此前零单测；生产默认 DispatcherDebounceTimer
+    private readonly IDebounceTimer _timer;
     private string? _lastQuery;
 
     public SuggestionController(
@@ -37,7 +39,8 @@ public sealed class SuggestionController
         ListBox list,
         BookmarkStore bookmarks,
         HistoryStore history,
-        Action navigate)
+        Action navigate,
+        IDebounceTimer? debounceTimer = null)
     {
         _addressBar = addressBar ?? throw new ArgumentNullException(nameof(addressBar));
         _popup = popup ?? throw new ArgumentNullException(nameof(popup));
@@ -45,16 +48,13 @@ public sealed class SuggestionController
         _bookmarks = bookmarks ?? throw new ArgumentNullException(nameof(bookmarks));
         _history = history ?? throw new ArgumentNullException(nameof(history));
         _navigate = navigate ?? throw new ArgumentNullException(nameof(navigate));
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(DebounceMs) };
-        _timer.Tick += (_, _) => Run();
+        _timer = debounceTimer ?? new DispatcherDebounceTimer();
+        _timer.Elapsed += (_, _) => Run();
     }
 
     /// <summary>地址栏文本变化——重启防抖计时（逐键不即时查询）。</summary>
-    public void OnTextChanged()
-    {
-        _timer.Stop();
-        _timer.Start();
-    }
+    public void OnTextChanged() =>
+        _timer.Restart(TimeSpan.FromMilliseconds(DebounceMs));
 
     /// <summary>停掉待发的防抖查询（窗口关闭/导航提交时）。</summary>
     public void StopDebounce() => _timer.Stop();
@@ -103,7 +103,10 @@ public sealed class SuggestionController
 
     private List<SuggestionRow> BuildSuggestions(string query)
     {
-        var hits = _history.Search(query.ToLowerInvariant(), null, HistoryScanRows);
+        // CS-401（2026-10-02 审计）：历史侧改 URL-only 查询——SQL 层此前
+        // url OR title 双列命中而 MergeRows 只保留 URL 命中（两层取一：按
+        // ChromeControllersTests 锁定的「仅 URL」口径收窄 SQL 侧）
+        var hits = _history.SearchByUrl(query, HistoryScanRows);
         return MergeRows(query, _bookmarks.All(), hits, MaxRows);
     }
 

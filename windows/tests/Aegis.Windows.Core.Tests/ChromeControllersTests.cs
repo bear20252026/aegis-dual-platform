@@ -89,13 +89,22 @@ public sealed class ChromeControllersTests
         // CS-338（2026-10-01 审计）：同步 IIFE 表达式——ExecuteScriptAsync 不
         // 等待 Promise 解析，此前 Promise 形态的序列化结果恒 "null"，
         // 命中计数恒 0（查找条永远显示"无结果"）
+        // CS-408（2026-10-02 审计）：计数只统计可视文本节点（TreeWalker +
+        // getComputedStyle 过滤 display:none/visibility:hidden——innerText 含
+        // 隐藏文本，与 window.find 仅高亮可视文本不一致）
         var js = FindBarController.BuildCountJs("q\"q");
-        Assert.StartsWith("(function(){try{var m=(document.body&&document.body.innerText)||'';", js);
+        Assert.StartsWith("(function(){try{var Q=", js);
         Assert.Contains("Q=\"q\\u0022q\";", js);
         Assert.EndsWith("return n;}catch(e){return 0;}})()", js);
         Assert.DoesNotContain("new Promise", js);
+        Assert.DoesNotContain("innerText", js);
+        // 可视过滤锚：遍历文本节点 + 样式判定
+        Assert.Contains("createTreeWalker", js);
+        Assert.Contains("getComputedStyle", js);
+        Assert.Contains("display==='none'", js);
+        Assert.Contains("visibility==='hidden'", js);
         // 空查询防护：indexOf('') 恒命中且步进为 0——前置长度短路防死循环
-        Assert.Contains("if(Q.length)", js);
+        Assert.Contains("if(!Q.length||!document.body)return 0;", js);
     }
 
     [Fact]
@@ -158,4 +167,90 @@ public sealed class ChromeControllersTests
     [InlineData(0, 2, false, 2)]
     public void ResolveDropIndex_HalfSideDecision(int from, int to, bool centerIsBefore, int expected) =>
         Assert.Equal(expected, TabStripDragController.ResolveDropIndex(from, to, centerIsBefore));
+
+    // ===== CS-401（2026-10-02 审计）：建议历史侧 URL-only 查询（SQL 侧收窄） =====
+
+    [Fact]
+    public void SearchByUrl_MatchesUrlOnly_TitleNeverMatches()
+    {
+        // SQL 层此前 url OR title 双列命中而 MergeRows 只保留 URL 命中——两层
+        // 取一，按「仅 URL」口径收窄 SQL 侧（本测试锁定该单源）
+        var store = new HistoryStore(Path.Combine(Path.GetTempPath(), $"suv_{Guid.NewGuid():N}.db"));
+        store.Add("https://query.example/url-hit", "无关标题");
+        store.Add("https://plain.example/other", "query in title");
+
+        var hits = store.SearchByUrl("query");
+
+        var row = Assert.Single(hits);
+        Assert.Equal("https://query.example/url-hit", row.Url);
+    }
+
+    // ===== CS-410（2026-10-02 审计）：防抖计时器可注入 =====
+
+    [Fact]
+    public void SuggestionController_OnTextChanged_RestartsInjectedDebounce()
+    {
+        // IDebounceTimer 注入缝（SessionSaveScheduler 同款抽象）——此前
+        // DispatcherTimer 不可注入，防抖时序零单测
+        RunSta(() =>
+        {
+            var addressBar = new System.Windows.Controls.TextBox();
+            var popup = new System.Windows.Controls.Primitives.Popup();
+            var list = new System.Windows.Controls.ListBox();
+            var bookmarks = new BookmarkStore(Path.Combine(Path.GetTempPath(), $"sug_{Guid.NewGuid():N}.db"));
+            var history = new HistoryStore(Path.Combine(Path.GetTempPath(), $"sug_{Guid.NewGuid():N}.db"));
+            var fake = new FakeDebounceTimer();
+            var suggest = new SuggestionController(
+                addressBar, popup, list, bookmarks, history, () => { }, debounceTimer: fake);
+
+            suggest.OnTextChanged();
+
+            Assert.Equal(1, fake.Restarts);
+            Assert.Equal(TimeSpan.FromMilliseconds(SuggestionController.DebounceMs), fake.LastInterval);
+
+            // Elapsed → Run：空输入关弹层（防抖到期行为随注入确定性驱动）
+            popup.IsOpen = true;
+            fake.Fire();
+            Assert.False(popup.IsOpen);
+        });
+    }
+
+    /// <summary>CS-410：可控假防抖计时器（Restart 计数/间隔捕获 + 手动触发 Elapsed）。</summary>
+    private sealed class FakeDebounceTimer : IDebounceTimer
+    {
+        public int Restarts;
+        public TimeSpan LastInterval;
+
+        public event EventHandler? Elapsed;
+
+        public void Restart(TimeSpan interval)
+        {
+            Restarts++;
+            LastInterval = interval;
+        }
+
+        public void Stop()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+
+        public void Fire() => Elapsed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private static void RunSta(Action action)
+    {
+        Exception? caught = null;
+        var thread = new Thread(() =>
+        {
+            try { action(); }
+            catch (Exception ex) { caught = ex; }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        Assert.Null(caught);
+    }
 }

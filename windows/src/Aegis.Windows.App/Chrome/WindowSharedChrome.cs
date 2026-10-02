@@ -34,4 +34,25 @@ internal static class WindowSharedChrome
         control.IsHitTestVisible = isActive;
         control.IsEnabled = isActive;
     }
+
+    /// <summary>CS-411（2026-10-02 审计）：标签关闭单源守卫（主窗与无痕窗共用）
+    /// ——主窗有 SecurityLog 留痕 + try/catch 不阻断，无痕窗此前裸调
+    /// CloseTab（集合/库异常直接炸窗）。返回是否实际发起了关闭。</summary>
+    internal static bool CloseTabSafely(Core.Tabs.TabManager tabs, string? tabId)
+    {
+        if (string.IsNullOrEmpty(tabId))
+            return false;
+        Core.Security.SecurityLog.Write($"[tab] 请求关闭标签 {tabId}");
+        try
+        {
+            tabs.CloseTab(tabId);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Core.Security.SecurityLog.Write(
+                $"[tab] 关闭标签异常（已捕获，不阻断）: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
 }
