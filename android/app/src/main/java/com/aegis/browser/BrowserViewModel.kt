@@ -373,19 +373,25 @@ class BrowserViewModel(
         val target =
             targetOverride
                 ?: if (_address.value == HOME_DISPLAY_URL) HOME_URL else _address.value
-        // AD-111（审计 2026-09-23 清单·A6 批）：空输入静默 no-op——原实现空串
-        // 会走完归一链被拒后弹「无法通过安全策略验证」恐吓提示（用户只是清空
-        // 后误触「打开」）。空输入无导航意图，静默返回不提示。
-        if (target.isBlank()) return
-        // AD-303（2026-10-02 审计·云端回归实证）：外跳 scheme 在进归一链前拦截——
-        // tel:10086 数字形态会被误判 host:port、归一成 https://tel:10086 白白导航，
-        // 且该反馈不应依赖 broker 决策（AD-302 同源；scheme 集与 AD-304 同源共用）。
-        if (target.substringBefore(':', "").lowercase() in EXTERNAL_HANDLER_SCHEMES) {
-            appContext?.let { ctx ->
-                val text = ctx.getString(R.string.unsupported_link_scheme)
-                android.widget.Toast
-                    .makeText(ctx, text, android.widget.Toast.LENGTH_SHORT)
-                    .show()
+        // AD-111（2026-09-23 审计）：空输入无导航意图，静默 no-op。
+        // AD-303（2026-10-02 审计·云端实证）：外跳 scheme 进归一链前拦截——
+        // tel:10086 会被误判 host:port 归一成 https://tel:10086 白白导航；
+        // 反馈不依赖 broker（scheme 集与 AD-304 同源）。两分支合一（detekt
+        // ReturnCount≤2）。空输入/外跳都就地终止，不进归一链。
+        val silentSkip = target.isBlank()
+        val externalScheme =
+            !silentSkip && target.substringBefore(':', "").lowercase() in EXTERNAL_HANDLER_SCHEMES
+        if (silentSkip || externalScheme) {
+            if (externalScheme) {
+                appContext?.let { ctx ->
+                    android.widget.Toast
+                        .makeText(
+                            ctx,
+                            ctx.getString(R.string.unsupported_link_scheme),
+                            android.widget.Toast.LENGTH_SHORT,
+                        )
+                        .show()
+                }
             }
             return
         }
