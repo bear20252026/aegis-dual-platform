@@ -1,6 +1,7 @@
 package com.aegis.browser
 
 import android.webkit.WebView
+import android.widget.Toast
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.aegis.broker.AndroidBroker
@@ -383,13 +384,7 @@ class BrowserViewModel(
         if (silentSkip || externalScheme) {
             if (externalScheme) {
                 appContext?.let { ctx ->
-                    android.widget.Toast
-                        .makeText(
-                            ctx,
-                            ctx.getString(R.string.unsupported_link_scheme),
-                            android.widget.Toast.LENGTH_SHORT,
-                        )
-                        .show()
+                    Toast.makeText(ctx, R.string.unsupported_link_scheme, Toast.LENGTH_SHORT).show()
                 }
             }
             return

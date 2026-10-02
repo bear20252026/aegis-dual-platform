@@ -10,7 +10,7 @@
   "files": {
     "agent/tests/redteam_e2e_test.py": 699,
     "android/app/build.gradle.kts": 316,
-    "android/app/src/main/java/com/aegis/browser/BrowserViewModel.kt": 633,
+    "android/app/src/main/java/com/aegis/browser/BrowserViewModel.kt": 628,
     "android/app/src/main/java/com/aegis/browser/MainActivity.kt": 403,
     "android/app/src/main/java/com/aegis/browser/MainDialogs.kt": 315,
     "android/app/src/main/java/com/aegis/browser/WebViewDownloadHandler.kt": 418,
