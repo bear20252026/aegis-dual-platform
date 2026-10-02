@@ -424,7 +424,11 @@ class TestActiveTreeGates:
         assert atg.RUFF_TARGETS == [
             "scripts", "release", "contracts", "agent",
             "validate_release.py", "tests", "core/rust-policy-core/bindings"]
-        assert atg.BANDIT_TARGETS == ["scripts", "release", "contracts", "agent"]
+        # SP-227（2026-10-02 审计）：bandit 面对齐 ruff 面（validate_release.py/
+        # tests/bindings 此前不在 SAST 范围）
+        assert atg.BANDIT_TARGETS == [
+            "scripts", "release", "contracts", "agent",
+            "validate_release.py", "tests", "core/rust-policy-core/bindings"]
         assert atg.BANDIT_EXTRA_ARGS == ["-ll", "-q"]
 
     def test_subcommand_dispatch_and_exit_codes(self, monkeypatch, capsys):
