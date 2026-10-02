@@ -11,8 +11,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.shadows.ShadowToast
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowToast
 import org.mockito.Mockito.`when` as whenever
 
 /**
