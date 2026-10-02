@@ -5,8 +5,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from collections.abc import Iterator
 from pathlib import Path
+
+# PY-278（2026-10-02 审计）：原子写单源（scripts/atomic_write.py——同目录
+# 临时文件 + os.replace）——此前直接 write_text，写入中断留半截清单
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+from atomic_write import atomic_write_text
 
 # 1MiB 分块（PY-039：发布目录可含大体积制品——安装包/库——流式摘要）
 _CHUNK = 1 << 20
@@ -66,7 +72,9 @@ def main() -> int:
         output.relative_to(root)
     except ValueError as error:
         raise SystemExit("输出清单必须位于发布根目录") from error
-    output.write_text(json.dumps(build_manifest(root, output), indent=2) + "\n", encoding="utf-8")
+    # PY-268/278：LF 锁定 + 原子落盘（半截清单消除——newline 与同步侧口径一致）
+    atomic_write_text(
+        output, json.dumps(build_manifest(root, output), indent=2) + "\n")
     return 0
 
 

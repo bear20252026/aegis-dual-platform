@@ -226,6 +226,20 @@ class TestShellManifestConsistency:
         )
         assert check_shell_manifest_consistency(root) == []
 
+    def test_missing_asset_reported_exactly_once(self, tmp_path):
+        # PY-271（2026-10-02 审计）：main() 的「逐条资产存在性」循环已删——
+        # 缺失/幽灵资产由 check_shell_manifest_consistency 单点报告（此前
+        # 同一缺失既报「未登记 manifest.txt」又报「缺跨端单源首页资产」，
+        # 双份噪声）。锁定：每个缺失资产恰一条失败明细
+        root = self._tree(
+            tmp_path,
+            listed=["start.html", "ghost.css"],
+            actual=["start.html"],
+        )
+        problems = check_shell_manifest_consistency(root)
+        assert len(problems) == 1
+        assert "manifest.txt 登记的文件不存在: shared/shell/ghost.css" in problems[0]
+
 
 # ---------------------------------------------------------------- SP-154
 class TestLegacyEndpointsOptional:

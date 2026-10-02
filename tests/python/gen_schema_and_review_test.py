@@ -167,6 +167,24 @@ class Api(Base):
         build_schema(API_SRC)
         assert capsys.readouterr().err == ""
 
+    # ------------------------------------------------------- PY-281
+    def test_class_registry_duplicate_name_warns(self, capsys):
+        # PY-281（2026-10-02 审计）：类注册表跨文件同名首胜且 glob 顺序不定
+        # ——哪个文件的类被收录随环境漂移。撞名现输出 stderr 告警
+        #（收录先者——输入序已由 sorted glob 固定，结果可复现）
+        src1 = "class Dup:\n    def a(self):\n        return 1\n"
+        src2 = "class Dup:\n    def b(self):\n        return 2\n"
+        build_schema("class Api:\n    def m(self):\n        return 0\n",
+                     {"app/x1.py": src1, "app/x2.py": src2})
+        err = capsys.readouterr().err
+        assert "类注册表撞名" in err and "Dup" in err
+        assert "app/x1.py" in err and "app/x2.py" in err
+
+    def test_class_registry_no_duplicate_no_warning(self, capsys):
+        # PY-281 正向：无撞名零告警（不污染正常生成输出）
+        build_schema(API_SRC, {"app/bridge/tab.py": MIXIN_SRC})
+        assert capsys.readouterr().err == ""
+
 
 # ---------------------------------------------------------------- PY-112
 class TestMatchExcluded:
@@ -334,6 +352,34 @@ class TestCheckReviewed:
         import inspect
         sig = inspect.signature(brp.build)
         assert "apply_edit" not in sig.parameters
+
+
+# ---------------------------------------------------------------- PY-275/277
+class TestBuildReviewPackageCliAndExclusions:
+    def test_no_args_exits_2(self, monkeypatch):
+        # PY-275（2026-10-02 审计）：无参调用此前 print_help 返回 0（什么都没
+        # 做却报成功）。互斥组 required=True 后由 argparse 报错 SystemExit(2)
+        monkeypatch.setattr(sys, "argv", ["build_review_package.py"])
+        with pytest.raises(SystemExit) as excinfo:
+            brp.main()
+        assert excinfo.value.code == 2
+
+    def test_dead_exe_entry_removed_from_exclude_names(self):
+        # PY-277（2026-10-02 审计）：AegisBrowser-Setup-2.1.6.exe 是死条目——
+        # .exe 已被 EXCLUDE_SUFFIXES 整类排除（后缀规则先命中，文件名条目
+        # 永无独立生效面）。条目删除后排除语义不变（回归锁定）
+        assert "AegisBrowser-Setup-2.1.6.exe" not in brp.EXCLUDE_NAMES
+        assert ".exe" in brp.EXCLUDE_SUFFIXES  # .exe 仍由后缀规则整类拦截
+        # 任何 .exe 路径仍被排除（含被删条目的原名）
+        assert brp._match_excluded(Path("dist/AegisBrowser-Setup-2.1.6.exe"))
+        assert brp._match_excluded(Path("windows/any-setup.exe"))
+
+    def test_readme_template_windows_stack_wording(self):
+        # PY-276（2026-10-02 审计）：README 模板「Windows Python + C#」并列表述
+        # 失实——正典 Windows 栈是 C#（ADR-009 单轨），Python 是 legacy 归档基线
+        template = brp._readme_template("2.2.0", "abc1234", "subj", "NOW", 5)
+        assert "Windows C#（附 legacy Python 归档基线）" in template
+        assert "Windows Python + C#" not in template
 
 
 # 脚本可独立运行（无 pytest 环境时的最低验证）

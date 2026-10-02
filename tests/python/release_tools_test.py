@@ -261,6 +261,21 @@ class TestExpiryRfc3339AndBoundary:
         manifest = _signed_manifest(self._manifest("2099-01-01T00:00:00Z"), signers, ("k1",))
         verify_update_manifest(manifest, keys, "1.0.0", NOW, threshold=1)  # 不抛即通过
 
+    # ------------------------------------------------------- PY-262 小写双向量
+    def test_lowercase_t_z_separator_accepted(self):
+        # PY-262（2026-10-02 审计）：_RFC3339 正则放行小写 t/z（RFC3339 大小写
+        # 不敏感）但 fromisoformat 拒绝——解析前归一 t→T/z→Z 后小写形态放行
+        keys, signers = _make_keys(("k1",))
+        manifest = _signed_manifest(self._manifest("2099-01-01t00:00:00z"), signers, ("k1",))
+        verify_update_manifest(manifest, keys, "1.0.0", NOW, threshold=1)  # 不抛即通过
+
+    def test_lowercase_separator_expiry_still_enforced(self):
+        # PY-262 对偶边界：小写形态同样参与过期判定（归一只改字符不改语义）
+        keys, _signers = _make_keys(("k1", "k2"))
+        with pytest.raises(UpdateRejected, match="过期"):
+            verify_update_manifest(self._manifest("2020-01-01t00:00:00z"),
+                                   keys, "1.0.0", NOW, threshold=1)
+
 
 # ---------------------------------------------------------------- PY-146
 def _make_native_tree(tmp_path: Path) -> Path:
@@ -329,9 +344,41 @@ class TestVerifyModeRejects:
         assert nam.main() == 1
         assert "不一致" in capsys.readouterr().err
 
+    def test_verify_reversed_require_order_still_matches(self, tmp_path, monkeypatch, capsys):
+        # PY-261（2026-10-02 审计）：manifest 比较此前依赖 --require 旗标序
+        # ——artifacts 列表按平台传入序生成，换序重跑（android 在前）即被
+        # 误判「不一致」。比较前按 (platform, abi, path) 排序归一——制品集合
+        # 相同必须通过（换序回归向量）
+        root = _make_native_tree(tmp_path)
+        output = tmp_path / "native-manifest.json"
+        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py",
+                                          "--root", str(root),
+                                          "--output", str(output),
+                                          "--require", "windows", "--require", "android"])
+        assert nam.main() == 0  # 以 windows 在前的顺序生成
+        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py",
+                                          "--root", str(root),
+                                          "--output", str(output),
+                                          "--require", "android", "--require", "windows",
+                                          "--verify"])
+        assert nam.main() == 0  # 反序复核——集合相同即通过
+        assert "verified" in capsys.readouterr().out
+
 
 # ---------------------------------------------------------------- PY-148
 class TestBuildMetadata:
+    def test_missing_properties_file_exits_2(self, tmp_path, monkeypatch, capsys):
+        # PY-266（2026-10-02 审计）：缺 version.properties 此前在 read_text 处
+        # 裸 FileNotFoundError traceback——前置 is_file 检查后干净报错 exit 2
+        #（环境错误语义，区别于缺必需属性的 SystemExit 消息退出）
+        monkeypatch.setattr(build_metadata, "ROOT", tmp_path)  # tmp 树无 shared/
+        monkeypatch.setattr(sys, "argv", ["build_metadata.py", "--platform", "windows",
+                                          "--output", str(tmp_path / "out.json")])
+        with pytest.raises(SystemExit) as excinfo:
+            build_metadata.main()
+        assert excinfo.value.code == 2
+        assert "version.properties" in capsys.readouterr().err
+
     def test_missing_required_property_raises_systemexit(self, tmp_path, monkeypatch):
         # PY-148：缺共享版本属性 → SystemExit 且列出缺失键
         (tmp_path / "shared").mkdir()
@@ -458,9 +505,28 @@ class TestVerifyManifestToolMain:
 
     def test_usage_error_exit_2(self, monkeypatch):
         # SP-025①：参数不足 → exit 2（环境/用法错误语义）
+        # PY-286：argparse 必填 positional——缺参以 SystemExit(2) 抛出
         import verify_manifest as vm
         monkeypatch.setattr(sys, "argv", ["verify_manifest.py", "a", "b"])
+        with pytest.raises(SystemExit) as excinfo:
+            vm.main()
+        assert excinfo.value.code == 2
+
+    def test_invalid_min_version_exit_2(self, tmp_path, monkeypatch, capsys):
+        # PY-273（2026-10-02 审计）：min_version 输入错误（非法 SemVer）此前
+        # 进验证器与清单错误混同报「更新清单验证失败」exit 1——先预校验：
+        # 无效即 exit 2 报「min_version 无效」（用法错误语义）
+        import verify_manifest as vm
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text("{}", encoding="utf-8")
+        trusted = tmp_path / "trusted_keys.json"
+        trusted.write_text('{"k1": "' + base64.b64encode(b"x" * 32).decode() + '"}',
+                           encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
+                                          str(manifest), str(trusted), "not-semver"])
         assert vm.main() == 2
+        out = capsys.readouterr().out
+        assert "min_version 无效" in out and "not-semver" in out
 
     def test_bad_json_exit_2_no_traceback(self, tmp_path, monkeypatch, capsys):
         # SP-024：manifest 坏 JSON → exit 2 + 文件名上下文（不 traceback）

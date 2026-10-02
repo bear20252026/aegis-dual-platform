@@ -37,7 +37,14 @@ def canonical_unsigned(manifest: dict) -> bytes:
 # P0-04 修复（专家审查）：SemVer 字符串版本解析（替代整数比较——
 # 与 Schema（SemVer 字符串 pattern）契约一致——TUF 阈值签名对齐）
 # 审计修复：接受预发布后缀（实际版本 2.2.0-beta.21 此前被判"版本格式无效"）
-_SEMVER = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?(?:\+([0-9A-Za-z.-]+))?$")
+# PY-279（2026-10-02 审计）：预发布/构建段此前 [0-9A-Za-z.-]+ 接受空标识符
+# （首尾点/连续点——"2.2.0-beta." 合法过门）。改 dot 分隔的非空
+# [0-9A-Za-z-]+ 标识符序列（禁连续/首尾点）；contracts/schemas/
+# update-manifest.schema.json 的 version.pattern 同步收紧。
+_SEMVER = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
+    r"(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$")
 
 # PY-184（2026-09-26 审计）：预发布段中的数字标识符必须无前导零——SemVer 规范
 #（§10："Numeric identifiers MUST NOT include leading zeroes"）："2.2.0-01" 是
@@ -106,7 +113,10 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
         # 一致拒绝——不再被 fromisoformat 宽松放行
         if not _RFC3339.fullmatch(expires_raw):
             raise UpdateRejected("过期时间格式无效（须为 RFC3339 date-time）")
-        expires = datetime.fromisoformat(expires_raw)
+        # PY-262（2026-10-02 审计）：正则放行小写 t/z 分隔符（RFC3339 大小写
+        # 不敏感）但 fromisoformat 拒绝——解析前归一 t→T/z→Z（正则锚定下
+        # 小写字母只可能出现在分隔符/后缀位，全局替换无误伤面）
+        expires = datetime.fromisoformat(expires_raw.replace("t", "T").replace("z", "Z"))
         if expires.tzinfo is None or expires <= now.astimezone(UTC):
             raise UpdateRejected("更新清单已过期或缺少时区")
 

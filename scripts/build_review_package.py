@@ -93,8 +93,11 @@ EXCLUDE_SUFFIXES = {
     ".gif", ".webp", ".ico", ".zip", ".gz", ".tar", ".7z",
 }
 # 明确要去除的生成物（体积大且可复现，评审包只保留源码）
+# PY-277（2026-10-02 审计）：删除死条目 AegisBrowser-Setup-2.1.6.exe——
+# .exe 已被 EXCLUDE_SUFFIXES 整类排除（后缀规则先命中），该文件名条目
+# 永无独立生效面（同名 .exe 无论出现在哪个目录都被后缀规则拦截）。
 EXCLUDE_NAMES = {
-    "gradle-wrapper.jar", "fonts-bundle.zip", "AegisBrowser-Setup-2.1.6.exe",
+    "gradle-wrapper.jar", "fonts-bundle.zip",
     "app-debug.apk", "app-release.aab",
 }
 
@@ -243,12 +246,15 @@ def build(out_dir: Path) -> list[dict[str, str]]:
         if rel not in produced:
             p.unlink()
     # 清空空目录
+    # PY-274（2026-10-02 审计）：rmdir 的 OSError 兜底按设计静默（非空目录
+    # 保留）——行级 nosec 注记替代 bandit.yaml 的 B110 全局面豁免（注记行
+    # 只写 nosec 本体——bandit 会把同行后续词元当附加测试 ID 解析）
     for d in sorted(out_dir.rglob("*"), reverse=True):
         if d.is_dir():
             try:
                 d.rmdir()
             except OSError:
-                pass
+                pass  # nosec B110
 
     # 更新/生成 README 头部戳记（保留正文编辑内容）
     stamp_readme(out_dir, version, short, subject, generated_at, len(manifest))
@@ -293,7 +299,9 @@ def _readme_template(version: str, short: str, subject: str,
         f"# 源码文件数: {file_count}\n"
         "\n"
         "## 包含内容\n"
-        "- 源代码: Rust policy-core + Android + Windows Python + C#\n"
+        # PY-276（2026-10-02 审计）：正典 Windows 栈是 C#（ADR-009 单轨）——
+        # 原「Windows Python + C#」并列表述失实（Python 栈是 legacy 归档基线）
+        "- 源代码: Rust policy-core + Android + Windows C#（附 legacy Python 归档基线）\n"
         "- 文档: 安全审计报告 + 架构设计 + 开源浏览器调研 + 安全测试指南 + 红蓝对抗审计\n"
         "- CI/CD: GitHub Actions workflow\n"
         "\n"
@@ -351,7 +359,10 @@ def check_reviewed(out_dir: Path) -> tuple[bool, list[str]]:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Generate / verify the Aegis review package.")
-    g = ap.add_mutually_exclusive_group()
+    # PY-275（2026-10-02 审计）：互斥组 required=True——无参调用此前落到
+    # print_help() 且返回 0（什么都没做却报成功，CI 误判绿灯）。现无参由
+    # argparse 直接报错 exit 2（用法错误语义）
+    g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--build", action="store_true", help="Assemble the review package in place.")
     g.add_argument("--check", action="store_true", help="Verify the committed package is in sync.")
     ap.add_argument("--out", type=Path, default=DEFAULT_PKG, help="Output directory.")
@@ -367,16 +378,13 @@ def main() -> int:
             print(f"  - {p}")
         return 1
 
-    if args.build:
-        manifest = build(args.out)
-        props = version_props()
-        print(
-            f"BUILT: {args.out} — {len(manifest)} 个源码文件, "
-            f"版本 {props.get('VERSION_NAME', 'unknown')} 戳记已更新"
-        )
-        return 0
-
-    ap.print_help()
+    # required=True 保证 --build/--check 至少其一——此处必为 --build
+    manifest = build(args.out)
+    props = version_props()
+    print(
+        f"BUILT: {args.out} — {len(manifest)} 个源码文件, "
+        f"版本 {props.get('VERSION_NAME', 'unknown')} 戳记已更新"
+    )
     return 0
 
 

@@ -465,6 +465,111 @@ class TestAnalyzeActionCatalog:
         assert "首次出现列表下标 0" in dup, dup
 
 
+# ---------------------------------------------------------------- PY-272
+class TestValidateVectorSchemasInputGuard:
+    """PY-272（2026-10-02 审计）：valid 侧 _load 无守卫——schema 本体/valid
+    向量缺失或坏 JSON 此前裸 FileNotFoundError/JSONDecodeError 栈。三处
+    （schema/valid/invalid）统一包守卫 → 干净报告 + return 1。"""
+
+    def test_missing_schema_file_returns_1_no_traceback(self, tmp_path, monkeypatch, capsys):
+        import validate_vector_schemas as vvs
+        # 空合成树：SCHEMAS/VECTORS 指向 tmp（update-manifest.schema.json 缺失）
+        monkeypatch.setattr(vvs, "SCHEMAS", tmp_path / "schemas")
+        monkeypatch.setattr(vvs, "VECTORS", tmp_path / "vectors")
+        assert vvs.main() == 1
+        err = capsys.readouterr().err
+        assert "输入文件读取/解析失败" in err
+
+    def test_corrupt_valid_vectors_returns_1(self, tmp_path, monkeypatch, capsys):
+        import json as _json
+
+        import validate_vector_schemas as vvs
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        # 合法 schema 本体（最小可构造）+ 损坏的 valid 向量文件
+        (schemas / "update-manifest.schema.json").write_text(
+            _json.dumps({"type": "object"}), encoding="utf-8")
+        vectors = tmp_path / "vectors"
+        vectors.mkdir()
+        (vectors / "update-manifest-valid.json").write_text("{ broken", encoding="utf-8")
+        monkeypatch.setattr(vvs, "SCHEMAS", schemas)
+        monkeypatch.setattr(vvs, "VECTORS", vectors)
+        assert vvs.main() == 1
+        assert "update-manifest-valid.json" in capsys.readouterr().err
+
+    def test_corrupt_dual_direction_vector_counted_as_failure(
+            self, tmp_path, monkeypatch, capsys):
+        # PY-272 第三处：action/capability/audit-event 双向向量的 _load 同守卫
+        # ——坏文件计入 failures 干净退出（不裸栈）
+        import json as _json
+
+        import validate_vector_schemas as vvs
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        (schemas / "update-manifest.schema.json").write_text(
+            _json.dumps({"type": "object"}), encoding="utf-8")
+        vectors = tmp_path / "vectors"
+        vectors.mkdir()
+        (vectors / "update-manifest-valid.json").write_text(
+            _json.dumps({"vectors": []}), encoding="utf-8")
+        (vectors / "action-valid.json").write_text("not json at all", encoding="utf-8")
+        monkeypatch.setattr(vvs, "SCHEMAS", schemas)
+        monkeypatch.setattr(vvs, "VECTORS", vectors)
+        assert vvs.main() == 1
+        err = capsys.readouterr().err
+        assert "action-valid.json" in err and "读取/解析失败" in err
+
+
+# ---------------------------------------------------------------- PY-288
+class TestGeneratorBadSchemaJson:
+    """PY-288（2026-10-02 审计）：schema 文件坏 JSON 此前裸栈——干净报告 +
+    return 1（C#/Kotlin 两生成器同口径）。"""
+
+    def test_csharp_bad_schema_returns_1(self, tmp_path, monkeypatch, capsys):
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        (schemas / "action.schema.json").write_text("{ broken", encoding="utf-8")
+        monkeypatch.setattr(gcs, "SCHEMAS", schemas)
+        monkeypatch.setattr(gcs, "OUT", tmp_path / "out")
+        assert gcs.main() == 1
+        assert "action.schema.json" in capsys.readouterr().out
+
+    def test_kotlin_bad_schema_returns_1(self, tmp_path, monkeypatch, capsys):
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        (schemas / "action.schema.json").write_text("{ broken", encoding="utf-8")
+        monkeypatch.setattr(gkt, "SCHEMAS", schemas)
+        monkeypatch.setattr(gkt, "OUT", tmp_path / "out_kt")
+        assert gkt.main() == 1
+        assert "action.schema.json" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- PY-289
+class TestEnumConstantNameCollision:
+    """PY-289（2026-10-02 审计）：enum 常量名派生（值归一 pascal/upper_snake）
+    无去重——不同值归一后撞名在生成文件里产生重复常量（C# CS0101 /
+    Kotlin redeclaration）。生成前查重，撞名 fail-closed ValueError。"""
+
+    def test_csharp_normalized_collision_raises(self):
+        # "a-b" 与 "a_b" 经 pascal 均归一为 "AB"——撞名必须 ValueError
+        schema = {"properties": {"mode": {"type": "string", "enum": ["a-b", "a_b"]}}}
+        with pytest.raises(ValueError, match="撞名"):
+            gcs.generate(schema, "Demo")
+
+    def test_kotlin_normalized_collision_raises(self):
+        # "a-b" 与 "a_b" 经 upper_snake 均归一为 "A_B"——撞名必须 ValueError
+        schema = {"properties": {"mode": {"type": "string", "enum": ["a-b", "a_b"]}}}
+        with pytest.raises(ValueError, match="撞名"):
+            gkt.generate(schema, "Demo")
+
+    def test_distinct_values_still_generate(self):
+        # 正向回归：归一后互异的真实值域不受查重影响
+        schema = {"properties": {"method": {"type": "string",
+                                            "enum": ["GET", "POST", "DELETE"]}}}
+        assert 'MethodGET = "GET"' in gcs.generate(schema, "Demo")
+        assert 'METHOD_GET: String = "GET"' in gkt.generate(schema, "Demo")
+
+
 # ---------------------------------------------------------------- PY-215
 class TestBridgeGuardNoFallback:
     def test_missing_anchor_is_failure_not_fallback(self, tmp_path, monkeypatch):

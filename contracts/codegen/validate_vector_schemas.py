@@ -56,14 +56,38 @@ def _load(path: Path) -> dict:
 
 
 def main() -> int:
-    schema = _load(SCHEMAS / "update-manifest.schema.json")
+    failures: list[str] = []
+    # PY-272（2026-10-02 审计）：update-manifest 三处输入 _load（schema 本体/
+    # valid 向量/invalid 向量）此前无守卫——缺文件裸 FileNotFoundError 栈、
+    # 坏 JSON 裸 JSONDecodeError 栈（门禁脚本必须干净报告+非零退出）。
+    # 统一包 (OSError, json.JSONDecodeError) → 带文件路径干净报告 + return 1
+    #（校验失败语义）。
+    invalid_path = VECTORS / "update-manifest-invalid.json"
+
+    def _fail_load(path: Path, exc: Exception) -> int:
+        print(f"[fail] 输入文件读取/解析失败: {path}（{exc}——fail-closed）",
+              file=sys.stderr)
+        return 1
+
+    try:
+        schema = _load(SCHEMAS / "update-manifest.schema.json")
+    except (OSError, json.JSONDecodeError) as exc:
+        return _fail_load(SCHEMAS / "update-manifest.schema.json", exc)
+    try:
+        valid_vectors = _load(VECTORS / "update-manifest-valid.json").get("vectors", [])
+    except (OSError, json.JSONDecodeError) as exc:
+        return _fail_load(VECTORS / "update-manifest-valid.json", exc)
+    try:
+        invalid_vectors = (_load(invalid_path).get("vectors", [])
+                           if invalid_path.exists() else [])
+    except (OSError, json.JSONDecodeError) as exc:
+        return _fail_load(invalid_path, exc)
     validator = jsonschema.Draft202012Validator(
         schema, format_checker=jsonschema.FormatChecker(),
     )
-    failures: list[str] = []
 
     # 合法向量：schema 校验必须通过
-    for i, vector in enumerate(_load(VECTORS / "update-manifest-valid.json").get("vectors", [])):
+    for i, vector in enumerate(valid_vectors):
         manifest = vector.get("manifest")
         if not isinstance(manifest, dict):
             failures.append(f"valid 向量 #{i} 缺 manifest 对象")
@@ -77,23 +101,21 @@ def main() -> int:
     #   （此前对全部 invalid 向量只打 info 零断言——schema 削弱即枚举收窄、
     #   pattern 放宽时门禁仍绿，失效向量全部沦为"语义级"豁免）
     # - 其他 expected（deny_rollback/deny_threshold/deny_expired 等）：语义级
-    #   失效（schema 通过是合法设计——判定在 update_verifier 语义层），
-    #   打 info 不误报
-    invalid_path = VECTORS / "update-manifest-invalid.json"
-    if invalid_path.exists():
-        for i, vector in enumerate(_load(invalid_path).get("vectors", [])):
-            manifest = vector.get("manifest")
-            if not isinstance(manifest, dict):
-                continue
-            schema_level = vector.get("expected") == "deny_schema"
-            is_valid = validator.is_valid(manifest)
-            if schema_level and is_valid:
-                failures.append(
-                    f"invalid 向量 #{i}（{vector.get('case', '?')}）声明 deny_schema "
-                    f"但 schema 放行——schema 已削弱或向量失效原因漂移（fail-closed）")
-            elif not schema_level and is_valid:
-                print(f"[info] invalid 向量 #{i}（{vector.get('case', '?')}）为语义级失效"
-                      f"（schema 通过——判定在 update_verifier 语义层，不误报）")
+    # 失效（schema 通过是合法设计——判定在 update_verifier 语义层），
+    # 打 info 不误报
+    for i, vector in enumerate(invalid_vectors):
+        manifest = vector.get("manifest")
+        if not isinstance(manifest, dict):
+            continue
+        schema_level = vector.get("expected") == "deny_schema"
+        is_valid = validator.is_valid(manifest)
+        if schema_level and is_valid:
+            failures.append(
+                f"invalid 向量 #{i}（{vector.get('case', '?')}）声明 deny_schema "
+                f"但 schema 放行——schema 已削弱或向量失效原因漂移（fail-closed）")
+        elif not schema_level and is_valid:
+            print(f"[info] invalid 向量 #{i}（{vector.get('case', '?')}）为语义级失效"
+                  f"（schema 通过——判定在 update_verifier 语义层，不误报）")
 
     # PY-094..096（审计 2026-09-25）：action / capability / audit-event 双向向量
     # ——严格 schema 级：valid 必须全过、invalid 必须全拒（不设语义级豁免，
@@ -104,14 +126,21 @@ def main() -> int:
         if not path.exists():
             failures.append(f"缺失向量文件: {fname}（PY-094..096 契约）")
             continue
-        if key not in validators:
-            validators[key] = jsonschema.Draft202012Validator(
-                _load(SCHEMAS / SCHEMA_FOR_KEY[key]),
-                format_checker=jsonschema.FormatChecker(),
-            )
+        # PY-272：双向向量/schema 的 _load 同守卫——坏文件计入 failures
+        # 干净退出（不裸栈）
+        try:
+            if key not in validators:
+                validators[key] = jsonschema.Draft202012Validator(
+                    _load(SCHEMAS / SCHEMA_FOR_KEY[key]),
+                    format_checker=jsonschema.FormatChecker(),
+                )
+            vector_doc = _load(path).get("vectors", [])
+        except (OSError, json.JSONDecodeError) as exc:
+            failures.append(f"{fname} 读取/解析失败: {exc}")
+            continue
         v = validators[key]
         expect_reject = fname.endswith("invalid.json")
-        for i, vector in enumerate(_load(path).get("vectors", [])):
+        for i, vector in enumerate(vector_doc):
             instance = vector.get(key)
             if not isinstance(instance, dict):
                 failures.append(f"{fname} 向量 #{i} 缺 {key} 对象")

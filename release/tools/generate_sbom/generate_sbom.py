@@ -8,6 +8,7 @@ artifacts——sha256）——随发布制品存档（签名 + SHA256SUMS——B
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -41,22 +42,31 @@ def generate_sbom(manifest: dict) -> dict:
     }
 
 
-def main() -> int:
-    if len(sys.argv) < 3:
-        print("用法: generate_sbom.py <manifest.json> <output.cdx.json>")
-        return 2
-    manifest_path = Path(sys.argv[1])
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    """PY-286（2026-10-02 审计）：手工 argv 索引改 argparse——必填 positional
+    缺参自动 exit 2（0/2 退出码语义不变：用法/环境错误 2、生成成功 0）。"""
+    parser = argparse.ArgumentParser(
+        description="SBOM 生成（CycloneDX JSON——随制品存档）")
+    parser.add_argument("manifest", type=Path, help="manifest.json（工件枚举）")
+    parser.add_argument("output", type=Path, help="输出 *.cdx.json 路径")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
     # SP-155（2026-09-26 审计）：main() 对 manifest JSON json.loads 无异常
     # 处理——坏 JSON 直接 traceback。包 try/except：exit 2 + 文件名上下文。
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        print(f"❌ manifest 读取/解析失败: {manifest_path.name}（{exc}）")
+        print(f"❌ manifest 读取/解析失败: {args.manifest.name}（{exc}）")
         return 2
     sbom = generate_sbom(manifest)
-    Path(sys.argv[2]).write_text(
-        json.dumps(sbom, indent=2, ensure_ascii=False), encoding="utf-8")
-    print(f"✅ SBOM 生成（CycloneDX——{len(sbom['components'])} 个工件）: {sys.argv[2]}")
+    # PY-268（2026-10-02 审计）：newline="\n" 锁 LF——Windows 默认把 \n 翻译
+    # 为 CRLF，SBOM 作为发布产物在 autocrlf 关闭的环境即行尾漂移
+    args.output.write_text(
+        json.dumps(sbom, indent=2, ensure_ascii=False), encoding="utf-8", newline="\n")
+    print(f"✅ SBOM 生成（CycloneDX——{len(sbom['components'])} 个工件）: {args.output}")
     return 0
 
 

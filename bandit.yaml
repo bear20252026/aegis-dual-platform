@@ -6,10 +6,15 @@
 # 豁免口径与归档栈 legacy/windows-pywebview/bandit.yaml（PY-156）对齐并追加：
 # - B101 assert_used：测试目录断言是语义（ruff per-file-ignores 同款豁免
 #   S101；agent/tests 大量 assert 红队断言）
-# - B110 try_except_pass：静默降级是安全设计（fail-closed 兜底分支）
 # - B404/B603/B607 subprocess：均为参数列表 + shell=False 的受控调用
 #   （构建/验证工具链调用，无外部输入拼接面）
-# 其余规则交由 -ll 阈值门禁（Medium/High 触发失败）。已知存量 LOW：
-# B406（ElementTree 解析仓内可信 version 文件——sync_versions.py），
-# 属误报性质、不足门禁阈值。
-skips: ["B101", "B110", "B404", "B603", "B607"]
+# 其余规则交由 -ll 阈值门禁（Medium/High 触发失败）。
+# PY-270（2026-10-02 审计）：删除 B406「ElementTree 解析仓内可信版本文件」
+# 存量注记——活跃树（scripts/release/contracts/agent）实测零 ElementTree
+# 使用（sync_versions 用 xml.sax.saxutils.escape，非 ElementTree），该句
+# 描述的是不存在的事实。
+# PY-274（2026-10-02 审计）：B110 移出 skips——全局面豁免过宽（try/except
+# pass 的静默降级须逐处显式注记而非整类放行）。活跃树现存唯一 B110 位点
+# （build_review_package.py 空目录清理的 rmdir 兜底）已改行级 # nosec B110
+# 注记；本地复跑 bandit -ll 确认 0 发现。
+skips: ["B101", "B404", "B603", "B607"]

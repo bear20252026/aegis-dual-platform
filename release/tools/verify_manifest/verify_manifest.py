@@ -9,6 +9,7 @@ signatures[]/重复 key_id 只计一次/异常封装 UpdateRejected——TUF 阈
 
 from __future__ import annotations
 
+import argparse
 import base64
 import binascii
 import json
@@ -18,7 +19,7 @@ from pathlib import Path
 
 # 复用 P0-04 更新验证器（契约统一——contracts/schemas/update-manifest.schema.json）
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
-from release.update_verifier import UpdateRejected, verify_manifest
+from release.update_verifier import UpdateRejected, _version_tuple, verify_manifest
 
 # Ed25519 公钥原始长度（from_public_bytes 契约）
 _ED25519_RAW_KEY_BYTES = 32
@@ -107,19 +108,38 @@ def _decode_trusted_keys(trusted: object) -> dict[str, bytes] | str:
     return decoded
 
 
-def main() -> int:
-    if len(sys.argv) < 4:
-        print("用法: verify_manifest.py <manifest.json> <trusted_keys.json> <min_version>")
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    """PY-286（2026-10-02 审计）：手工 argv 索引改 argparse——必填 positional
+    缺参由 argparse 自动报错 exit 2（与既有 0/1/2 退出码语义一致：用法/环境
+    错误 2、验证结论失败 1、通过 0）。"""
+    parser = argparse.ArgumentParser(
+        description="更新清单验证（签名阈值/防回滚/过期——复用 release/update_verifier）")
+    parser.add_argument("manifest", type=Path, help="待验证 manifest.json")
+    parser.add_argument("trusted_keys", type=Path, help="trusted_keys.json（key_id → 编码公钥）")
+    parser.add_argument("min_version", help="已接受最低版本（SemVer——防回滚基线）")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    # PY-273（2026-10-02 审计）：min_version 输入错误（非法 SemVer）此前进入
+    # 验证器后与清单错误混同报「更新清单验证失败」exit 1——调用方误以为是
+    # 清单结论问题去查签名。先预校验：无效即 exit 2 报「min_version 无效」
+    #（用法错误语义——fail-fast 不进验证器）
+    try:
+        _version_tuple(args.min_version)
+    except UpdateRejected as exc:
+        print(f"❌ min_version 无效: {args.min_version!r}（{exc}）（用法错误——exit 2）")
         return 2
     # SP-024（审计 2026-09-23 清单·SP1 批）：manifest/trusted_keys 坏 JSON 直接
     # traceback 替代干净报告——包 try/except：exit 2 + 文件名上下文（与
     # SP-155 verify_artifact_set/generate_sbom 同一退出码语义——环境错误一律
     # exit 2，验证结论失败才是 exit 1）。
     try:
-        manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-        trusted = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        trusted = json.loads(args.trusted_keys.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
-        src = getattr(exc, "filename", None) or Path(sys.argv[1]).name
+        src = getattr(exc, "filename", None) or args.manifest.name
         print(f"❌ 输入文件读取/解析失败: {src}（{exc}）（终止发布——fail-closed）")
         return 2
     # PY-218：编码字符串在此解码为 32 字节原始公钥再进验证器
@@ -129,7 +149,7 @@ def main() -> int:
         print(f"❌ trusted_keys 解码失败: {decoded}（终止发布——fail-closed）")
         return 2
     try:
-        verify_manifest(manifest, decoded, sys.argv[3], datetime.now(UTC),
+        verify_manifest(manifest, decoded, args.min_version, datetime.now(UTC),
                         threshold=_load_threshold())
     except UpdateRejected as exc:
         print(f"❌ 更新清单验证失败: {exc}（终止发布——fail-closed）")

@@ -49,16 +49,29 @@ def _doc_first_line(docstring: str | None) -> str:
 
 
 def _build_class_registry(sources: dict[str, str]) -> dict[str, ast.ClassDef]:
-    """全量 ClassDef 索引（Api + mixin 解析跨文件——PY-005）。"""
+    """全量 ClassDef 索引（Api + mixin 解析跨文件——PY-005）。
+
+    PY-281（2026-10-02 审计）：同名类跨文件首胜（setdefault）且输入序来自
+    glob——文件系统枚举序不定，哪个文件的类被收录随环境漂移。现：① 调用
+    方（main 的 extra 收集）glob 已 sorted 固定输入序（先到者可复现）；
+    ② 撞名输出 stderr 告警（fail-loud——不静默吞掉平行同名类）。
+    """
     registry: dict[str, ast.ClassDef] = {}
-    for text in sources.values():
+    seen_in: dict[str, str] = {}
+    for fname, text in sources.items():
         try:
             tree = ast.parse(text)
         except SyntaxError:
             continue
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
-                registry.setdefault(node.name, node)
+                if node.name in registry:
+                    print(f"[warn] 类注册表撞名: {node.name}"
+                          f"（{seen_in[node.name]} 与 {fname}——收录先者，后者被忽略）",
+                          file=sys.stderr)
+                    continue
+                registry[node.name] = node
+                seen_in[node.name] = fname
     return registry
 
 
@@ -207,8 +220,10 @@ def main() -> int:
         return 1
     src = API_BRIDGE.read_text(encoding="utf-8")
     # PY-005：registry 需要覆盖 mixin 所在文件（app/*.py + app/bridge/*.py）
+    # PY-281（2026-10-02 审计）：glob 枚举序不定（随文件系统而变）——sorted
+    # 固定输入序，同名类的「首胜」结果跨环境可复现（撞名另有 stderr 告警）
     extra: dict[str, str] = {}
-    for py in [*APP_DIR.glob("*.py"), *APP_DIR.glob("bridge/*.py")]:
+    for py in sorted([*APP_DIR.glob("*.py"), *APP_DIR.glob("bridge/*.py")]):
         if py == API_BRIDGE:
             continue
         try:

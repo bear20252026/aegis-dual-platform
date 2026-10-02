@@ -85,6 +85,25 @@ def read_manifest(path: Path) -> dict[str, object]:
     return value
 
 
+# PY-261（2026-10-02 审计）：--require 旗标序无关的规范比较形态——
+# artifacts 列表按 (platform, abi, path) 排序（字符串元组序稳定），
+# 其余顶层字段原样保留参与相等比较。
+def _artifact_sort_key(artifact: object) -> tuple[str, str, str]:
+    if not isinstance(artifact, dict):
+        return ("", "", "")
+    return (str(artifact.get("platform", "")),
+            str(artifact.get("abi", "")),
+            str(artifact.get("path", "")))
+
+
+def _canonical_for_compare(manifest: dict[str, object]) -> dict[str, object]:
+    canonical = dict(manifest)
+    artifacts = canonical.get("artifacts")
+    if isinstance(artifacts, list):
+        canonical["artifacts"] = sorted(artifacts, key=_artifact_sort_key)
+    return canonical
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, required=True, help="原生制品根目录")
@@ -103,7 +122,12 @@ def main() -> int:
         manifest = build_manifest(args.root, args.require)
         if args.verify:
             existing = read_manifest(args.output)
-            if existing != manifest:
+            # PY-261（2026-10-02 审计）：比较前按 (platform, abi, path) 排序
+            # artifacts——build_manifest 按 --require 旗标序生成，换序重跑
+            #（android 在前/windows 在前）会因列表顺序不同被误判「不一致」
+            #（制品集合本身相同）。排序归一后比较，只对真实差异（文件/哈希/
+            # 字段）失败；清单其余顶层字段仍全量比对。
+            if _canonical_for_compare(existing) != _canonical_for_compare(manifest):
                 raise ValueError("原生制品清单与当前文件、路径或 SHA-256 不一致")
             print(f"OK: native artifact manifest verified: {args.output}")
         else:

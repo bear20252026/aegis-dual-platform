@@ -101,6 +101,17 @@ def enum_constant_lines(schema: dict, name: str) -> list[str]:
             entries.extend((f"{_pascal(pname)}{_pascal(str(v))}", v, domain) for v in p["enum"])
         elif "const" in p:
             entries.append((f"{_pascal(pname)}", p["const"], describe_value_domain(p)))
+    # PY-289（2026-10-02 审计）：常量名派生（值归一 pascal）无去重——不同
+    # enum 值（如 "a-b" 与 "a_b"）归一后撞名会在生成文件里产生重复常量
+    # （C# 编译错 CS0101，或手改遮蔽）。生成前查重，撞名 fail-closed 抛
+    # ValueError（提示改 enum 值或属性名——契约面问题在 schema 侧修）。
+    seen_constants: set[str] = set()
+    for const_name, _value, _domain in entries:
+        if const_name in seen_constants:
+            raise ValueError(
+                f"enum 常量名撞名: {const_name}（{name} 的属性/值经 pascal 归一后"
+                "同名——改 enum 值或属性名后重新生成——fail-closed）")
+        seen_constants.add(const_name)
     if not entries:
         return []
     lines = [
@@ -229,7 +240,13 @@ def main() -> int:
     for f in sorted(SCHEMAS.glob("*.json")):
         if f.name in SKIP_SCHEMAS:
             continue
-        schema = json.loads(f.read_text(encoding="utf-8"))
+        # PY-288（2026-10-02 审计）：schema 文件坏 JSON/不可读此前裸栈
+        # （JSONDecodeError/FileNotFoundError traceback）——干净报告 + return 1
+        try:
+            schema = json.loads(f.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"  ❌ schema 读取/解析失败: {f.name}: {exc}")
+            return 1
         name = contract_name(f)
         # PY-232（2026-10-01 审计）：write_text 显式 newline="\n"——Windows
         # 默认会把 \n 翻译为 CRLF，core.autocrlf 关闭的环境重生成即 CRLF

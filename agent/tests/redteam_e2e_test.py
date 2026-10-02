@@ -30,6 +30,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import pathlib
+import sys
 import threading
 import time
 import uuid
@@ -43,6 +44,12 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 CATALOG = yaml.safe_load(
     (ROOT.parent / "contracts/policy/action-catalog.yaml").read_text(encoding="utf-8"))
+
+# PY-282（2026-10-02 审计）：expires_at 解析复用发布链 update_verifier 的
+# RFC3339 锚定正则单源（此前 e2e 侧裸 fromisoformat——宽于 schema
+# format:date-time 口径，两套判定面漂移）。
+sys.path.insert(0, str(ROOT.parent / "release"))
+from update_verifier import _RFC3339
 
 
 class Decision:
@@ -169,7 +176,8 @@ class E2EBroker:
         SP-142 / per-action 预算——SP-148）+ 会话（SP-140）+ 过期/TTL 上限
         （SP-157）+ 版本 + 代际（SP-158）+ 撤销 + 参数规范化 + broker 侧
         per-session 累计预算（SP-149）+ 描述哈希（SP-141）+ nonce 一次性
-        （跨会话全局——有界缓存 SP-156）。deny 不消费 nonce、不计预算（SP-066）。"""
+        （跨会话全局——有界缓存 SP-156）+ 会话-tab 绑定（PY-252/260——锁内
+        全部门禁通过后落绑定）。deny 不消费 nonce、不计预算（SP-066）。"""
         if action.intent not in self.ALLOWED_INTENTS:
             return Decision.DENY_UNKNOWN
         if not action.session_id:
@@ -193,12 +201,12 @@ class E2EBroker:
             return Decision.DENY_SCOPE
         if action.document_generation != self.current_generation:
             return Decision.DENY_GENERATION  # SP-158：与 broker 当前代际比对（可推进）
-        # PY-252：per-session tab 绑定——session 首笔固定绑定 tab_id，
-        # 同 session 换 tab_id 即拒（session.md「跨标签变化使批准失效」落地）
+        # PY-252：per-session tab 绑定——同 session 换 tab_id 即拒。
+        # PY-260（2026-10-02 审计）：绑定写入移进 _state_lock、置于全部门禁
+        # 通过后——此前绑定在全部 deny 门之前且在锁外（deny 燃烧绑定 +
+        # 并发竞态）。此处只保留只读预检（快速失败），不写状态。
         bound_tab = self._session_tabs.get(action.session_id)
-        if bound_tab is None:
-            self._session_tabs[action.session_id] = action.tab_id
-        elif bound_tab != action.tab_id:
+        if bound_tab is not None and bound_tab != action.tab_id:
             return Decision.DENY_TAB
         if self.revoked:
             return Decision.DENY_REVOKED
@@ -223,11 +231,20 @@ class E2EBroker:
         elif action.tool_description_hash:
             # 未注册哈希绑定的工具自带哈希——无从校验——fail-closed（原语义保留）
             return Decision.DENY_DESCRIPTION_HASH  # 工具哈希绑定（CSA——描述变更需重新批准）
-        # nonce 一次性 + 预算计数：检查/登记/累计必须同锁窗口（原子——防并发
-        # 双消费与并发超限——SP-012/SP-149）。deny 不消费 nonce、不计预算。
+        # nonce 一次性 + 预算计数 + tab 绑定：检查/登记/累计/绑定必须同锁窗口
+        # （原子——防并发双消费与并发超限——SP-012/SP-149；PY-260 补 tab 绑定）。
+        # deny 不消费 nonce、不计预算、不燃烧 tab 绑定（SP-066/PY-260）。
         with self._state_lock:
             if action.nonce in self.consumed_nonces:
                 return Decision.DENY_REPLAY
+            # PY-260：会话-tab 绑定写入移到锁内全部门禁通过后——首笔放行才
+            # 落绑定（deny 路径不再燃烧绑定）；并发首笔不同 tab 只有一笔能
+            # 绑定，迟到者在锁内复核即拒（锁外竞态窗口消除）
+            bound_tab = self._session_tabs.get(session)
+            if bound_tab is None:
+                self._session_tabs[session] = action.tab_id
+            elif bound_tab != action.tab_id:
+                return Decision.DENY_TAB
             if self._session_actions.get(session, 0) + 1 > limit_actions:  # 锁内复核
                 return Decision.DENY_BUDGET
             if self._session_bytes.get(session, 0) + action.max_bytes > limit_bytes:
@@ -242,10 +259,17 @@ class E2EBroker:
 
 def _parse_expires_at(value: str) -> datetime | None:
     """SP-150（2026-09-26 审计）：expires_at 为 schema 口径 RFC3339 date-time
-    字符串——解析失败返回 None（调用方 fail-closed 拒绝）；无时区按 UTC。"""
+    字符串——解析失败返回 None（调用方 fail-closed 拒绝）；无时区按 UTC。
+    PY-282（2026-10-02 审计）：与 update_verifier 口径对齐——先锚定
+    RFC3339 形态（复用其 _RFC3339 正则单源），再 fromisoformat；裸日期/
+    空格分隔等宽松形态不再被 fromisoformat 悄悄放行（两套判定面归一）。"""
+    if not isinstance(value, str) or not _RFC3339.fullmatch(value):
+        return None
+    # 小写 t/z 分隔符归一（正则放行、fromisoformat 拒绝——PY-262 同款归一）
+    normalized = value.replace("t", "T").replace("z", "Z")
     try:
-        parsed = datetime.fromisoformat(value)
-    except (TypeError, ValueError):
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=UTC)
@@ -489,6 +513,77 @@ def test_session_tab_binding_enforced():
                                session_id="session-b")) == Decision.ALLOW
     assert broker.evaluate(_ok(nonce="t5", tab_id="tab-9",
                                session_id="session-b")) == Decision.DENY_TAB
+
+
+def test_deny_does_not_burn_tab_binding():
+    """PY-260（2026-10-02 审计）：deny 不燃烧会话-tab 绑定——绑定写入移进
+    _state_lock、置于全部门禁通过后。此前绑定在全部 deny 门之前且在锁外：
+    首笔被 deny（scope/撤销/预算/重放…）的请求也会固定 tab 绑定，后续合法
+    tab 的请求被无端 DENY_TAB（deny 燃烧绑定）；且锁外写入与并发评估竞态。"""
+    # 场景①：撤销后首笔（tab-1）被拒——绑定不得落在 tab-1 上
+    broker = E2EBroker()
+    broker.revoke()
+    assert broker.evaluate(_ok(nonce="nb1", tab_id="tab-1")) == Decision.DENY_REVOKED
+    assert broker._session_tabs == {}  # deny 未燃烧绑定（绑定表空）
+    broker.revoked = False  # 撤销恢复（仅测试构造）
+    assert broker.evaluate(_ok(nonce="nb2", tab_id="tab-2")) == Decision.ALLOW
+    # 场景②：换 tab 的请求被 DENY_TAB 拒绝后，原 tab 请求继续放行——
+    # 拒绝路径不覆盖/不破坏既有绑定
+    assert broker.evaluate(_ok(nonce="nb3", tab_id="tab-9")) == Decision.DENY_TAB
+    assert broker.evaluate(_ok(nonce="nb4", tab_id="tab-2")) == Decision.ALLOW
+    # 场景③：scope deny 首笔同样不燃烧绑定
+    broker2 = E2EBroker()
+    denied = _ok(scope="downloads:read", nonce="nb5", tab_id="tab-1")
+    assert broker2.evaluate(denied) == Decision.DENY_SCOPE
+    assert broker2._session_tabs == {}
+    assert broker2.evaluate(_ok(nonce="nb6", tab_id="tab-7")) == Decision.ALLOW
+
+
+def test_concurrent_first_binding_single_winner():
+    """PY-260（2026-10-02 审计）：并发首笔绑定无竞态——多线程同时以不同
+    tab_id 评估同一 session 时，恰好一笔完成绑定（其余 DENY_TAB），绑定表
+    不因锁外写入出现后写覆盖先写的双绑定窗口。"""
+    n_threads = 8
+    broker = E2EBroker(max_actions=n_threads)  # 提升限额——隔离绑定语义
+    results: list[str] = []
+    lock = threading.Lock()
+
+    def worker(i: int) -> None:
+        decision = broker.evaluate(_ok(nonce=f"race{i}", tab_id=f"tab-{i}"))
+        with lock:
+            results.append(decision)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(n_threads)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    # 恰好一笔 ALLOW（首笔绑定者），其余全部 DENY_TAB——无双绑定/无丢失
+    assert results.count(Decision.ALLOW) == 1, results
+    assert results.count(Decision.DENY_TAB) == n_threads - 1
+    assert len(broker._session_tabs) == 1
+
+
+def test_expires_at_rfc3339_anchored():
+    """PY-282（2026-10-02 审计）：expires_at 解析与 update_verifier._RFC3339
+    锚定口径对齐——裸日期/空格分隔/无时区等宽松形态在 e2e 侧同样拒绝
+    （DENY_EXPIRED fail-closed），不再被裸 fromisoformat 悄悄放行。"""
+    broker = E2EBroker()
+    # 宽松形态（fromisoformat 可解析但非 RFC3339）→ 拒绝（对齐 schema 口径）
+    for bad in ("2026-01-01", "2026-01-01 12:00:00Z", "2026-01-01T12:00:00"):
+        assert broker.evaluate(_ok(nonce=f"an{bad}", expires_at=bad)) == Decision.DENY_EXPIRED, bad
+    # 小写 t/z 分隔符——正则放行 + 归一后可解析（PY-262 同款归一口径）
+    near = datetime.now(UTC) + timedelta(seconds=30)  # TTL 上限内
+    assert broker.evaluate(_ok(
+        nonce="an-lower",
+        expires_at=near.strftime("%Y-%m-%dt%H:%M:%Sz"))) == Decision.ALLOW
+    # 标准 RFC3339（大写 T/Z 与 ±HH:MM 偏移）不受影响
+    assert broker.evaluate(_ok(
+        nonce="an-upper",
+        expires_at=near.strftime("%Y-%m-%dT%H:%M:%SZ"))) == Decision.ALLOW
+    assert broker.evaluate(_ok(
+        nonce="an-off",
+        expires_at=near.strftime("%Y-%m-%dT%H:%M:%S") + "+00:00")) == Decision.ALLOW
 
 
 def test_max_ttl_enforced():

@@ -148,21 +148,11 @@ def main() -> int:
     # WB-054（审计 2026-09-23 清单·W5 批）：csproj 排除 snake.test.js 断言
     failures.extend(check_csproj_shell_test_excluded(csproj))
     # PY-038：资产清单与 release-windows.yml 平行维护（改一处漏一处）——
-    # 抽 shared/shell/manifest.txt 共享单源，两处共同消费
-    shell_manifest = root / 'shared' / 'shell' / 'manifest.txt'
-    if not shell_manifest.is_file():
-        failures.append('缺跨端资产清单 shared/shell/manifest.txt')
-    else:
-        shell_assets = [
-            line.strip()
-            for line in shell_manifest.read_text(encoding='utf-8').splitlines()
-            if line.strip() and not line.strip().startswith('#')
-        ]
-        for shell_asset in shell_assets:
-            if not (root / 'shared' / 'shell' / shell_asset).is_file():
-                failures.append(f'缺跨端单源首页资产 shared/shell/{shell_asset}')
-    # SP-166 + WB-103（2026-09-26 审计）：清单差集对账接线——manifest.txt
-    # 漏登记（如壁纸只列 1/4）或登记幽灵文件均 fail-closed
+    # 抽 shared/shell/manifest.txt 共享单源，两处共同消费。
+    # PY-271（2026-10-02 审计）：删除上方「逐条资产存在性」循环——该面
+    # 已被 check_shell_manifest_consistency 的双向差集对账完整覆盖（幽灵
+    # 条目即报告「登记的文件不存在」），两处并存导致同一缺失重复报错
+    #（单点保留 consistency——清单缺失/未登记/幽灵三态均在其内 fail-closed）
     failures.extend(check_shell_manifest_consistency(root))
     print(f'python_files={len(python_files)}')
     print(f'failures={len(failures)}')
