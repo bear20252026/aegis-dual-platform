@@ -2,7 +2,7 @@
 
 **范围**:接续 docs/audit/full-audit-2026-09-26-229-items.md(229 项全闭环)之后的**新一轮全仓新鲜扫描**——六区并行审计代理逐文件核对当前代码状态(含 D1 真机批之后),凡与已登记条目相同或高度相似的一律剔除;另由正典门禁实测(0 警告基线/ruff 根口径/gradle 弃用告警)补充 7 项实证条目。
 **方式**:6 路并行审计(Windows C# / Android / Rust 核心 / Python·契约·发布链 / Web 资产·文档 / CI·根配置·盲区),每项带 file:line 证据与具体修复方案;关键 P1/P2 声明由主审计代理二次抽查复核(NtpAssets Allow、sync_versions 断裂、CS0168 均实证)。
-**总量**:**245 行登记,去重合并 4 行(WB-146≡CS-334、WB-153≡SP-188、WB-154≡SP-185、WB-155≡SP-190)后 241 项;发布链批(tag 实证)追加 7 项 → 248 项**:问题 140+6 / 提升 101+1;P1×4 / P2×25 / P3×219。
+**总量**:**245 行登记,去重合并 4 行(WB-146≡CS-334、WB-153≡SP-188、WB-154≡SP-185、WB-155≡SP-190)后 241 项;发布链批(tag/真机实证)追加 10 项 → 251 项**:问题 140+8 / 提升 101+2;P1×4 / P2×27 / P3×220。
 
 > 编号体系:延续既往(CS=C# 正典栈,AD=Android,RS=Rust 策略核心,PY=Python/CI/契约/发布链,WB=Web 资产+文档,SP=补充盲区)。
 > 优先级:P1=必须(缺陷/安全/门禁失效),P2=应该(正确性/一致性/重要测试),P3=可以(打磨/补测/归置)。
@@ -326,7 +326,9 @@
 | SP-217 | P3 | 提升/记账 | CHANGELOG.md | 本轮 241 项整改变更未入账 → 补 Unreleased 条目 |
 | SP-218 | P2 | 问题/门禁失效 | release-windows.yml:12 + release-android.yml:11 | SP-205 把 secrets:inherit 改显式逐 secret 传参,但两被调子流 workflow_call 未声明 secrets 面——Actions 语义校验直接 startup_failure(「Invalid workflow file」),release.yml 对 v2.2.0-beta.51 tag 完全无法启动;本地 yaml.safe_load/actionlint 双绿仍漏(校验发生在 Actions 侧被调方声明层) → 两子流补 secrets 声明(required:false 保留 dispatch 无凭据调试路径);actionlint 复验 0 告警 |
 | SP-219 | P3 | 外部观察/依赖提交 | (GitHub 内置 Automatic Dependency Submission) | submit-nuget 内置工作流在 ubuntu restore net10.0-windows 工程失败(EnableWindowsTargeting)——仓库侧无 workflow 文件可修,仅影响依赖图提交面,不阻塞发布链 → 处置:仓库设置关闭自动依赖提交,或自管 workflow 加 -p:EnableWindowsTargeting=true 承接 |
-| SP-221 | P2 | 问题/发布链实证 | release/verify_release.py:51-77 + release-core.yml:137 | 第三次 tag 跑实证:三平台 build/sbom/verify 首次全绿,verify-gate 的 core .txt 对账误拒全部条目——①release-core 清单重生成命令(find -print0|xargs sha256sum)产出 "./" 前缀条目,与实际文件名集合判不一致;②自排除比较拿相对 rglob 路径对 resolve() 绝对路径恒不等,清单自身落入 unlisted——PY-225 加强校验暴露生成/校验两侧形态漂移(此前弱校验"只数行"看不见) → 条目归一化(反斜杠→正斜杠+剥 ./ 前缀)+自排除改 p.resolve() 同侧比较;补 "./" 前缀+相对 dist 路径双形态回归用例 | 第二次 tag 跑实证:publish 带 --runtime win-x64 而 CS-SP-177 批本地生成的锁无 RID——locked-mode NU1004「runtime identifiers have changed」,restore 失败连带发布目录缺 DLL;build/test(无 RID)恰好与无 RID 锁一致故绿(假象) → 三锁以 -r win-x64 重生成(+38 行 RID 专属依赖);CI 全部 dotnet 命令统一 -r win-x64(contracts 3 处/release-windows test 2 处/native-policy test 1 处,publish 本就带 --runtime);csproj 属性处注记「无 -r 裸 restore 会把锁改写回无 RID」;CLAUDE/CONTRIBUTING 本地命令同步;locked build/test 本地复验 0 警告+695 全绿 |
+| AD-294 | P2 | 问题/发布链实证 | android/app/proguard-rules.pro:28-31 | v2.2.0-beta.51 真机闪退第一层:AD-279 JNA keep 收窄为「公开类+公开成员」,但 com.sun.jna.Pointer 的 protected peer 字段被原生侧 GetFieldID 按名访问——R8 改名 → UnsatisfiedLinkError「Can't obtain peer field ID」→ 原生核心加载失败 → REQUIRE_NATIVE_POLICY_CORE=true 注册会话失败 → MainActivity.onCreate 启动即崩(模拟器复现,AegisBroker/AegisCrash 留痕) → 恢复 JNA 全量成员 keep(-keep class com.sun.jna.** {*;}),AD-279 收窄作废并注记原因 |
+| AD-295 | P2 | 问题/发布链实证 | android/gradle.properties + BrowserViewModel.kt:155,197 | 修复 ① 后露出第二层:R8 full mode 折叠 BrowserViewModel.tabManager 可空字段(AD-003 同族第二例)——init 的字段写入与组合期读取错位,AddressAndContent:261 requireNotNull 首帧即崩(R8 retrace 精确定位;init 于 onCreate:93 先行,非时序问题) → android.enableR8.fullMode=false(模拟器同代码存活+UI 完整渲染实证);被折叠 store/load 对的代码级精修登记后续批 |
+| AD-296 | P3 | 提升/门禁缺口 | .github/workflows/release-android.yml | 发布链无运行时冒烟:zipalign/签名/条目校验均为静态,启动崩溃(beta.51)零拦截——arm64 制品与 CI 模拟器(x86_64 无转译)ABI 错配无法直测 → 登记结构缺口;后续批以「同 commit x86_64 minified 构建+模拟器启动存活」代偿冒烟(本次人工执行) | 第三次 tag 跑实证:三平台 build/sbom/verify 首次全绿,verify-gate 的 core .txt 对账误拒全部条目——①release-core 清单重生成命令(find -print0|xargs sha256sum)产出 "./" 前缀条目,与实际文件名集合判不一致;②自排除比较拿相对 rglob 路径对 resolve() 绝对路径恒不等,清单自身落入 unlisted——PY-225 加强校验暴露生成/校验两侧形态漂移(此前弱校验"只数行"看不见) → 条目归一化(反斜杠→正斜杠+剥 ./ 前缀)+自排除改 p.resolve() 同侧比较;补 "./" 前缀+相对 dist 路径双形态回归用例 | 第二次 tag 跑实证:publish 带 --runtime win-x64 而 CS-SP-177 批本地生成的锁无 RID——locked-mode NU1004「runtime identifiers have changed」,restore 失败连带发布目录缺 DLL;build/test(无 RID)恰好与无 RID 锁一致故绿(假象) → 三锁以 -r win-x64 重生成(+38 行 RID 专属依赖);CI 全部 dotnet 命令统一 -r win-x64(contracts 3 处/release-windows test 2 处/native-policy test 1 处,publish 本就带 --runtime);csproj 属性处注记「无 -r 裸 restore 会把锁改写回无 RID」;CLAUDE/CONTRIBUTING 本地命令同步;locked build/test 本地复验 0 警告+695 全绿 |
 
 ---
 
@@ -346,6 +348,7 @@
 | 发布链批(2026-10-02) | SP-218/PY-258/PY-259/AD-293/CS-376:v2.2.0-beta.51 tag 触发云端发布链首跑,5 个 workflow 实证失败(Release startup_failure/supply-chain pip-audit/contracts 测试/native-policy 双 job)+ submit-nuget 外部观察(SP-219) | 5+1 | actionlint 0 告警、YAML 全解、Broker.Tests 全 env 双口径 3×62/62、dotnet 0 警告+Core 633、pytest 280、gradle preBuild CC stored/reused、--require-hashes dry-run 过 |
 | 发布链批 2(2026-10-02) | SP-220:第二次 tag 跑——android/core 两平台全链路绿,release-windows build NU1004(锁无 RID vs publish --runtime) → 三锁 -r win-x64 重生成 + CI 6 处命令统一 RID + 文档口径 | 1 | locked build 0 警告、Core 633/Broker 62 locked 全绿、锁幂等、YAML/actionlint 过 |
 | 发布链批 3(2026-10-02) | SP-221:第三次 tag 跑——三平台 build/sbom/verify 全链路首次全绿,verify-gate core .txt 对账误拒(./ 前缀条目+自排除恒不等) → verify_release 归一化+同侧比较 | 1 | release_chain 44/44(新增双形态回归)、pytest 281、ruff/validate 过 |
+| 发布链批 4(2026-10-02) | AD-294/295/296:beta.51 真机闪退——模拟器 x86_64 minified release 复现(AegisCrash 留痕+R8 retrace)双层根因(JNA peer 字段 keep 收窄/R8 full mode 折叠可空字段) → 恢复全量 keep+关闭 full mode;同通道复验进程存活+UI 完整渲染 | 3 | 模拟器冒烟(启动存活+截图)、beta.52 版本推进 verify_versions 过 |
 
-> 完成度:**248 项中 245 项闭环**(含发布链批 7 项);CS-345/WB-139 两项经证据推翻登记为无效;PY-245 mypy 半面、AD-289 geolocation 断言半面、AD-279 R8 运行时冒烟留真机批为部分闭环;SP-219 为外部观察不占闭环。跨 9 批全部经区级门禁全绿后落盘。
+> 完成度:**251 项中 248 项闭环**(含发布链批 10 项);AD-296 以人工模拟器冒烟代偿为部分闭环;CS-345/WB-139 两项经证据推翻登记为无效;PY-245 mypy 半面、AD-289 geolocation 断言半面、AD-279 R8 运行时冒烟留真机批为部分闭环;SP-219 为外部观察不占闭环。跨 9 批全部经区级门禁全绿后落盘。
 
