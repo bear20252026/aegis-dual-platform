@@ -18,6 +18,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowToast
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import kotlin.time.Clock
@@ -180,7 +181,7 @@ class BrowserViewModelBehaviorTest {
         val app = ApplicationProvider.getApplicationContext<Application>()
         assertEquals(
             app.getString(R.string.unsupported_link_scheme),
-            org.robolectric.shadows.ShadowToast.getTextOfLatestToast(),
+            ShadowToast.getTextOfLatestToast(),
         )
     }
 

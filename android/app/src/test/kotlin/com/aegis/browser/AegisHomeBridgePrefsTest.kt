@@ -11,6 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.shadows.ShadowToast
 import org.robolectric.annotation.Config
 import org.mockito.Mockito.`when` as whenever
 
@@ -74,7 +75,7 @@ class AegisHomeBridgePrefsTest {
         bridge.navigate("https://example.com/")
         assertEquals(
             context.getString(R.string.bridge_open_rejected),
-            org.robolectric.shadows.ShadowToast.getTextOfLatestToast(),
+            ShadowToast.getTextOfLatestToast(),
         )
     }
 
