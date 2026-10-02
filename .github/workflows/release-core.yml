@@ -17,7 +17,9 @@ permissions:
 jobs:
   pin-check:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # SP-251（2026-10-02 审计·S-28）：pin 检查是纯 grep 秒级步骤——40 分钟
+    # 超时为模板遗留；三子流统一 5、编排器（release.yml）统一 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-182（2026-10-01 审计）：pin 检查收敛为 composite action 单源——
@@ -48,8 +50,10 @@ jobs:
       #（本地实测该口径 0 警告通过）。
       - name: cargo clippy --locked --all-features --all-targets -D warnings
         run: cargo clippy --locked --all-features --all-targets -- -D warnings
-      - name: cargo test --locked
-        run: cargo test --locked
+      - name: cargo test --locked --all-features
+        # SP-226（2026-10-02 审计·S-05）：补 --all-features——与 core-rust.yml
+        # 统一口径（发布链 quality-gate 此前 feature 门控代码零测试）
+        run: cargo test --locked --all-features
       # PY-171（2026-09-23 审计·V1 核验批）：安装+执行块收敛为 composite action 单源
       - uses: ./.github/actions/cargo-audit
 

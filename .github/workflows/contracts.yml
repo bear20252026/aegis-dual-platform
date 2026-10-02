@@ -9,6 +9,10 @@ name: Contracts
       - 'contracts/**'
       - 'scripts/**'
       - 'shared/**'
+      # SP-225（2026-10-02 审计·S-04）：pytest tests/python 与 validate_release.py
+      # 均在本 workflow 消费——改动不经此触发则发布链验证回归不可见
+      - 'tests/python/**'
+      - 'validate_release.py'
       # 本 workflow 以 --require-hashes 安装根级 hash 锁——锁变更须回验
       - 'requirements-ci.in'
       - 'requirements-ci.txt'
@@ -50,6 +54,22 @@ jobs:
       # 经 requirements-ci.txt hash 锁一并安装）。
       - name: Release-chain unit tests (PY-222——tests/python 常跑)
         run: python -m pytest tests/python -q
+      # SP-239（PY-263 接线，2026-10-02 审计）：活跃树 ruff/bandit 此前仅周六
+      # cron（legacy-python-guard）低频跑——push/PR 零覆盖。本 job 已装
+      # requirements-ci.txt（含 ruff/bandit pin），直接调单源脚本（push 与
+      # PR 触发面均生效）。命令行单源：scripts/active_tree_gates.py。
+      - name: Active-tree ruff gate (PY-263——活跃树 lint 单源)
+        run: python scripts/active_tree_gates.py ruff
+      - name: Active-tree bandit gate (PY-263——活跃树 SAST 单源，Medium/High 失败)
+        run: python scripts/active_tree_gates.py bandit
+      # SP-255（2026-10-02 审计·I-03）：行数红线（新文件 ≤300 / 改造后 ≤500）
+      # + 基线 ratchet——基线外文件按 300 红线，基线内文件只许减不许增
+      - name: File size red line gate (SP-255——行数红线 + 基线 ratchet)
+        run: python scripts/check_file_sizes.py
+      # SP-256（2026-10-02 审计·I-19）：全仓 *.md 相对链接目标存在性——
+      # 死链 fail-closed（http/mailto/锚点/代码块内链接不在校验面）
+      - name: Markdown relative link gate (SP-256——死链 fail-closed)
+        run: python scripts/check_markdown_links.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
@@ -94,7 +114,9 @@ jobs:
         with:
           workspaces: core/rust-policy-core
       - name: Run Rust policy and vector conformance tests
-        run: cargo test --locked
+        # SP-226（2026-10-02 审计·S-05）：补 --all-features——与 core-rust.yml
+        # 统一口径（feature 门控代码此前在本 conformance 面逃检）
+        run: cargo test --locked --all-features
 
   windows-contract-build:
     runs-on: windows-latest
@@ -104,7 +126,10 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      # SP-244（2026-10-02 审计·S-21）：actions/cache 双主版本并存（本文件与
+      # release-windows.yml 的 v4.3.0 vs native-policy/release-android 的 v6.1.0）
+      # ——统一 v6.1.0（git ls-remote 核对 tag SHA）
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.nuget/packages
           # SP-177（2026-10-01 审计落地）：packages.lock.json 已入库——

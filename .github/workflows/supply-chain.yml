@@ -1,5 +1,9 @@
 name: Supply-Chain
 "on":
+  # SP-242（2026-10-02 审计·S-18）：补周一定时——依赖面 CVE 持续暴露，此前仅
+  # push/PR 触发，无人改依赖文件则依赖审计永不重跑（新 CVE 零发现窗口）
+  schedule:
+    - cron: "0 4 * * 1"            # 每周一 04:00 UTC
   # SP-200（2026-10-01 审计）：push 补 paths 过滤——此前 push: {} 使 docs 等
   # 与依赖面无关的改动也全量跑审计。触发面按扫描输入圈定（PR 保持不过滤）
   push:
@@ -56,8 +60,31 @@ jobs:
           python -m pip install --require-hashes -r requirements-ci.txt -q
           pip-audit -r legacy/windows-pywebview/requirements-lock.txt \
             || echo "::warning::归档栈 requirements-lock 存在已知漏洞（只读冻结不随制品发布——SP-216 降告警，处置走披露通道评估）"
-          pip-audit -r legacy/windows-pywebview/requirements-dev.txt || true  # dev 工具链漏洞仅告警——归档栈工具不随制品发布
+          # SP-228（2026-10-02 审计·S-08）：裸 `|| true` 吞错无痕（审计记录里
+          # 看不出"扫了但有洞"）——改 ::warning 结构化告警（与上方
+          # requirements-lock 行同口径）；dev 工具链漏洞仅告警——归档栈工具
+          # 不随制品发布
+          pip-audit -r legacy/windows-pywebview/requirements-dev.txt \
+            || echo "::warning::dev 工具链存在已知漏洞（不随制品发布）"
           pip-audit -r requirements-ci.txt
+      # SP-246（2026-10-02 审计·S-23）：NuGet 面此前零漏扫（pip-audit / cargo
+      # audit 分别覆盖 Python/Rust——三生态只扫两个）。ubuntu runner 上 restore
+      # net10.0-windows 工程须显式 EnableWindowsTargeting（WPF 工程默认仅
+      # Windows 可 restore）。
+      # TODO(gradle-漏扫)：Android Gradle 侧依赖漏扫工具选型未定
+      # （OWASP dependency-check / lockfile 解析类）——登记待接，防止
+      # "四生态只扫三"成为终态。
+      - name: Setup .NET 10 (NuGet 漏扫工具链——SP-246 显式固化，不依赖镜像预装)
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: NuGet vulnerability scan (发现已知漏洞即非零退出——fail-closed)
+        # .NET 8+ 起 dotnet list package --vulnerable 命中漏洞即返回非零
+        # 退出码（--include-transitive 含传递依赖——扫描面为随制品发布的
+        # 正典应用工程依赖闭包）
+        run: |
+          dotnet restore windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj -p:EnableWindowsTargeting=true
+          dotnet list windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj package --vulnerable --include-transitive
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable

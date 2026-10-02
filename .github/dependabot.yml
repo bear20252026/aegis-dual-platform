@@ -21,18 +21,36 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # SP-245（2026-10-02 审计·S-22）：minor/patch 合并为单 PR——压周更 PR
+    # 洪水；major 保持单包单 PR（破坏性变更逐个评审）。下同（pip 除外，见
+    # 其条目注释）
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "pip"
     directory: "/"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # SP-245：pip 不设 groups——requirements-ci.txt 为 pip-compile
+    # --generate-hashes 产物（见文件头"已知限制"）：合并 bump 会放大传递
+    # 依赖树重算面，且失败难归因。单包单 PR 便于失败定位与本地
+    # pip-compile 重生成单提。
 
   - package-ecosystem: "gradle"
     directory: "/android"
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # SP-245：同 github-actions 组口径
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   # SP-203（2026-10-01 审计）：cargo 生态例行 bump——Cargo.lock 随 PR 更新，
   # core-rust/release-core 的 --locked 门禁保证锁与清单一致
@@ -41,6 +59,12 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # SP-245：同 github-actions 组口径
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
 
   # SP-203（2026-10-01 审计）：nuget 生态例行 bump——windows/ 下 src 与 tests
   # 的 PackageReference；PR 须过 contracts.yml 的 dotnet build/test 门禁
@@ -49,3 +73,9 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # SP-245：同 github-actions 组口径
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"

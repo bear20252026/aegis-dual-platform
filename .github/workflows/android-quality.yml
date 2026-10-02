@@ -1,7 +1,12 @@
 # Aegis Android 质量门禁（工具链 P0：ktlint + detekt）
-# 触发：对 android/** 的 push / PR / 手动。windows-latest 自带 JDK 21 兼容，
-# 使用项目 Gradle 9.7.0 wrapper。ktlintCheck + detekt 作为合并门禁，
-# detekt 基线文件（detekt-baseline.xml）对遗留项目友好——仅新引入问题失败。
+# 触发：对 android/** 的 push / PR / 手动。JDK 21 由下方 setup-java 显式安装
+#（temurin——SP-252 注记：原注释"windows-latest 自带 JDK 21 兼容"已失实，
+# 工具链不再依赖镜像预装）。使用项目 Gradle 9.8.0 wrapper（SP-252 随手更正：
+# 原注释 9.7.0 已漂移）。ktlintCheck + detekt 作为合并门禁，detekt 基线文件
+# （detekt-baseline.xml）对遗留项目友好——仅新引入问题失败。
+# SP-252（2026-10-02 审计·S-29）：TODO——ubuntu-latest 迁移（排队更快/费用
+# 更低）待评估：gradlew.bat → ./gradlew、SDK 组件路径与本地 Windows 口径需
+# 同步调整，本批仅登记、不实际迁移。
 name: Android-Quality
 
 "on":
@@ -35,7 +40,9 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
 
-      - name: 安装 JDK 21（AGP 9.3 要求 ≥17；detekt/ktlint 兼容）
+      # SP-238（2026-10-02 审计）：注释 AGP 9.3→9.4.1 更正（libs.versions.toml
+      # 单源 agp = "9.4.1"，原注释已漂移）
+      - name: 安装 JDK 21（AGP 9.4.1 要求 ≥17；detekt/ktlint 兼容）
         uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
@@ -50,13 +57,22 @@ jobs:
             android/gradle/**
             android/gradle/libs.versions.toml
 
-      - name: 设置 Android SDK（API 36）
+      - name: 设置 Android SDK（API 37——与 :app compileSdk 单源对齐）
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
         with:
-          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+          # SP-238（2026-10-02 审计）：platforms 升 android-37（:app
+          # compileSdk=37——原 android-36 落后于源码声明）；build-tools 核对后
+          # 同步 37.0.0（上游已随 API 37 发布，F-Droid/WebRTC 构建在用）
+          packages: "platform-tools platforms;android-37 build-tools;37.0.0"
 
       - name: ktlint 检查（0 错误门禁）
         run: ./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck --no-daemon
+
+      # SP-237（AD-316，2026-10-02 审计）：androidTest 源集此前零编译门禁——
+      # 单测步骤只编译 test（JVM）源集，androidTest（instrumented）目录的
+      # 语法/依赖错误不会被任何 CI 步骤发现。CI 无模拟器，编译验证即可。
+      - name: androidTest 编译门禁（AD-316——CI 无模拟器，编译验证即可）
+        run: ./gradlew.bat :app:assembleDebugAndroidTest --no-daemon
 
       # PY-065：verify_versions 依赖 runner 预装 Python（镜像变更即碎）——显式固化
       - name: 安装 Python（verify_versions 依赖——不再依赖 runner 预装）
@@ -89,3 +105,5 @@ jobs:
             android/webview-adapter/build/reports/detekt/
             android/contracts/build/reports/detekt/
           if-no-files-found: warn
+          # SP-253（2026-10-02 审计·S-30）：排障类制品统一 14 天留存
+          retention-days: 14

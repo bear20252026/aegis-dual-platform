@@ -5,8 +5,9 @@
 #       workflow：weekly cron + workflow_dispatch（手动按需触发）。
 # 取舍：拆独立 workflow 而非在 ci.yml 内加 schedule——①定时触发不连带跑
 #       ci.yml 的 ui-regression；②ci.yml 常跑门禁从此对准现役栈；③归档
-#       守护可独立手动触发。活跃树 ruff（scripts/release/contracts/agent）
-#       随本守护低频执行——如需常跑 push/PR 门禁属后续批次。
+#       守护可独立手动触发。活跃树 ruff/bandit 原随本守护低频执行——
+#       SP-239（2026-10-02 审计，PY-263 接线）已常跑接线 contracts.yml
+#       （push/PR 均生效，同调 scripts/active_tree_gates.py 单源）。
 # 注意：本 workflow 检查对象是"只读归档"——仅守护其基线不腐化（漂移
 #       检测），不作为功能变更门禁。
 
@@ -50,9 +51,12 @@ jobs:
           # PY-063：与 contracts.yml 统一 3.12（3.14 过新——PySide6 类型桩兼容风险）
           python-version: "3.12"
           # PY-060：pip 缓存（依赖锁文件驱动 key）
+          # SP-234（2026-10-02 审计·S-17）：key 面对齐实际安装面——requirements.txt
+          # 已不在安装命令中（下方走 requirements-lock.txt hash 锁），缓存键
+          # 却仍挂它——锁更新不失效缓存。改 requirements-lock.txt + dev 锁。
           cache: pip
           cache-dependency-path: |
-            legacy/windows-pywebview/requirements.txt
+            legacy/windows-pywebview/requirements-lock.txt
             legacy/windows-pywebview/requirements-dev.txt
 
       - name: 安装检查工具
@@ -70,21 +74,16 @@ jobs:
           # PY-010：运行依赖走 hash 锁文件（此前装无 hash 的 requirements.txt，
           # 绕过 validate_release 专门门禁的 requirements-lock.txt）
           pip install --require-hashes -r requirements-lock.txt
-          pip install -r requirements-dev.txt types-pywin32
+          # SP-250（2026-10-02 审计·S-27）：types-pywin32 此前无 pin——PyPI 发布
+          # 新版本（含破坏性 stub 变更）即 CI 漂移。钉最新稳定版 312.0.0.20260928
+          #（2026-10-02 经 PyPI 元数据核对；requires_python >=3.10 与本 job
+          # 3.12 兼容）。更新节奏随 requirements-dev.txt 的 dev 锁批一并 bump，
+          # 不单独追新。
+          pip install -r requirements-dev.txt types-pywin32==312.0.0.20260928
 
       - name: 静态验证（AST / JSON / XML / 版本声明）
         run: python ../../validate_release.py
 
-      - name: ruff 检查（根仓库脚本——审计修复：scripts/release/contracts/agent
-          的 Python 此前从未被 lint，pyproject 却声称在门禁范围内）
-        # SP-164（2026-09-26 审计）：ignore/测试豁免清单收敛 pyproject 单源
-        #（[tool.ruff.lint] + per-file-ignores）——行内 --ignore 双源删除
-        # SP-208（2026-10-01 审计）：门禁面补齐 validate_release.py、
-        # tests/python、core/rust-policy-core/bindings——pyproject 的
-        # per-file-ignores 声称覆盖 tests/** 而实际两处 ruff 均不扫这些面
-        #（与 PY-217/PY-256 配套；lint 清零由 PY 批同批落地后本门禁即全绿）
-        working-directory: .
-        run: ruff check scripts release contracts agent validate_release.py tests core/rust-policy-core/bindings
       - name: ruff 检查（Lint + 格式，0 错误）
         # 工作目录为 legacy/windows-pywebview，`--exclude legacy` 排除其下的旧 Qt 栈归档
         # legacy/windows-pywebview/legacy/**（61 个 Python 不参与运行面——全量扫描会误报
@@ -92,7 +91,10 @@ jobs:
         # SP-151（2026-09-26 审计）：原注释称其余部分为"活跃新栈（app/ +
         # main_webview.py + selftest）"已失实——该栈整体为只读归档，措辞随
         # 迁移一并更正。
-        # SP-164：ignore 清单随 ruff 向上发现根 pyproject.toml 单源，行内删除
+        # SP-230（2026-10-02 审计·S-13）：SP-164 注记"ignore 清单随 ruff 向上
+        # 发现根 pyproject.toml 单源"失实——本步骤工作目录在归档栈内，ruff
+        # 按就近原则消费 legacy/windows-pywebview/ruff.toml（归档栈豁免清单
+        # 单源），不读根 pyproject.toml
         run: ruff check . --exclude legacy
 
       - name: bandit 安全扫描（归档栈——无 Medium/High）
@@ -103,19 +105,6 @@ jobs:
         #   调用（security.py icacls / webview2_probe.py tasklist），无注入面
         # 其余规则 Medium/High 触发失败（bandit 退出码即门禁）。
         run: bandit -c bandit.yaml -r app/ -q
-
-      - name: bandit 安全扫描（活跃树 scripts/release/contracts/agent——PY-245 接线）
-        # PY-245（2026-10-01 审计）：bandit/mypy 此前只扫 legacy 归档栈——
-        # 现役 scripts/release/contracts/agent 零 SAST。本步骤接线 bandit
-        #（配置单源根级 bandit.yaml，豁免口径与归档栈一致 + B101 测试断言）。
-        # -ll：仅 Medium/High 触发失败（实测活跃树存量 98 处 LOW——B101
-        #  测试 assert / B404/B603/B607 受控 subprocess / B406 ElementTree
-        #  解析仓内可信版本文件；与归档栈门禁的"无 Medium/High"语义一致）。
-        # mypy 面：本地实测 `mypy scripts release` 因多处同名 run.py 无
-        # __init__.py 报 duplicate module 错误、无法起步（需先做模块化/根
-        # mypy 配置——属 PY 批代码面），本批不接线、登记为部分完成。
-        working-directory: .
-        run: bandit -c bandit.yaml -r scripts release contracts agent -ll -q
 
       - name: mypy 类型检查（归档栈 0 错误——全量目录口径）
         # SP-151（2026-09-26 审计）：原注释"新栈 0 错误"失实——检查对象是
@@ -146,3 +135,25 @@ jobs:
           python selftest_navigation_search.py
           python selftest_view_source.py
           python selftest_native_core.py
+
+      # ── 活跃树门禁（PY-263 单源接线 + SP-254 CI 锁隔离）──────────────────
+      # SP-239（PY-263 接线，2026-10-02 审计）：活跃树 ruff/bandit 命令行收敛
+      # 为 scripts/active_tree_gates.py 单源（本地与 CI 同口径复跑；脚本经
+      # sys.executable -m 调用已装工具、不自带安装）。
+      # SP-254（2026-10-02 审计·S-31）：活跃树两步骤改装根 requirements-ci.txt
+      # --require-hashes（工具链与 contracts/supply-chain 同锁单源）；归档栈面
+      # （上方 ruff/bandit/mypy/pytest/selftest）仍用 dev 锁——故本组后置到
+      # job 末尾：先装 ci 锁再跑门禁，不污染上方归档栈工具链。
+      # 历史口径注记：ruff 面 = scripts/release/contracts/agent +
+      # validate_release.py + tests + core bindings（SP-208 补面，规则单源根
+      # pyproject.toml）；bandit 面 = scripts/release/contracts/agent，-ll 仅
+      # Medium/High 失败（PY-245 接线，豁免单源根 bandit.yaml）。
+      - name: 安装活跃树门禁工具链（SP-254——requirements-ci hash 锁）
+        working-directory: .
+        run: python -m pip install --require-hashes -r requirements-ci.txt -q
+      - name: ruff 检查（活跃树——PY-263 单源）
+        working-directory: .
+        run: python scripts/active_tree_gates.py ruff
+      - name: bandit 安全扫描（活跃树——PY-263 单源，Medium/High 失败）
+        working-directory: .
+        run: python scripts/active_tree_gates.py bandit
