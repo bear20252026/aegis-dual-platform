@@ -388,15 +388,15 @@ internal class ExternalIntentRateLimit(
     private var lastConsumedAt = 0L
 
     /**
-     * 尝试获取消费资格。[hasConsumableIntent]=false 时恒 false 且不推进
-     * 时间戳（不烧窗口）；窗口期内的重复消费返回 false。
+     * 尝试获取消费资格。[hasConsumableIntent]=false 恒 false 且不推进（不烧窗口）；
+     * 冷启动（lastConsumedAt=0）首个可消费 intent 豁免窗口；窗口期内重复消费 false。
      */
     fun tryAcquire(
         now: Long,
         hasConsumableIntent: Boolean,
     ): Boolean {
-        // detekt-修复（2026-10-02 审计云端实证）：ReturnCount(3>2)——前置判定合并单布尔表达式（频控语义不变）。
-        val acquirable = hasConsumableIntent && now - lastConsumedAt >= minIntervalMs
+        // AD-302 冷启动豁免（锚点 0=未曾消费）——detekt ReturnCount 重构曾丢失该豁免（云端实证）。
+        val acquirable = hasConsumableIntent && (lastConsumedAt == 0L || now - lastConsumedAt >= minIntervalMs)
         if (acquirable) lastConsumedAt = now
         return acquirable
     }

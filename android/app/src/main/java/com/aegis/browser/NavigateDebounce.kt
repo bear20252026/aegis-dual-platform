@@ -21,8 +21,9 @@ internal class NavigateDebounce(
      *  = 待审批确认挂起中（此时一律不放行，且不推进锚点——挂起期间不
      *  消耗防抖窗口）。 */
     fun ok(pendingConfirmationActive: Boolean): Boolean {
-        val elapsed = now() - lastAttemptAt
-        val allowed = !pendingConfirmationActive && elapsed >= intervalMs
+        // AD-303 配套（2026-10-02 审计）：锚点 0 = 未曾尝试（冷启动豁免，与 AD-302 同源）
+        // ——近零时钟环境（Robolectric/刚开机）首个尝试不得被窗口吞掉。
+        val allowed = !pendingConfirmationActive && (lastAttemptAt == 0L || now() - lastAttemptAt >= intervalMs)
         if (allowed) lastAttemptAt = now()
         return allowed
     }

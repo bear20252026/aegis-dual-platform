@@ -117,7 +117,12 @@ class WebViewHardeningTest {
         assertTrue("副本必须经 drawImage 取源", js.contains("drawImage(this, 0, 0)"))
         assertTrue("噪声写回副本上下文", js.contains("octx.putImageData(imageData, 0, 0)"))
         assertTrue("返回值取自副本", js.contains("origToDataURL.apply(off, arguments)"))
-        assertFalse("不得直读源画布像素尺寸（破坏性读改写检测面）", js.contains("this.width, this.height"))
+        // AD-298 后 convertToBlob 通道以 new OffscreenCanvas(this.width, this.height)
+        // 取副本尺寸（合法）——破坏性形态只锁「按源画布尺寸直读源像素」。
+        assertFalse(
+            "不得按源画布尺寸直读源像素（破坏性读改写检测面）",
+            js.contains("getImageData(0, 0, this.width, this.height)"),
+        )
         assertFalse("不得取源画布 2d 上下文（无上下文画布被永久锁定 2d）", js.contains("this.getContext"))
     }
 
@@ -163,9 +168,11 @@ class WebViewHardeningTest {
         // AD-108：随机抖动只进 performance.now——Date.now 返回非整数毫秒
         // 本身是高置信检测信号，且破坏页内整毫秒假设
         val js = WebViewHardening.fingerprintShieldScript(testSeed)
+        // AD-314 起包装先落具名变量再挂载（ToStringGuard 注册需要引用）——断言
+        // 对齐实际挂载形态；整数取整（无随机分量）语义不变。
         assertTrue(
             "Date.now 必须走整数取整路径（无随机分量）",
-            js.contains("Date.now = function() { return reduceIntegral(d()); }"),
+            js.contains("var dateWrapper = function() { return reduceIntegral(d()); };"),
         )
         assertFalse("Date.now 不得叠加随机抖动", js.contains("return reduce(d());"))
     }

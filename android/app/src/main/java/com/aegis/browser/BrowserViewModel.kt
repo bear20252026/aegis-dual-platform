@@ -377,6 +377,18 @@ class BrowserViewModel(
         // 会走完归一链被拒后弹「无法通过安全策略验证」恐吓提示（用户只是清空
         // 后误触「打开」）。空输入无导航意图，静默返回不提示。
         if (target.isBlank()) return
+        // AD-303（2026-10-02 审计·云端回归实证）：外跳 scheme 在进归一链前拦截——
+        // tel:10086 数字形态会被误判 host:port、归一成 https://tel:10086 白白导航，
+        // 且该反馈不应依赖 broker 决策（AD-302 同源；scheme 集与 AD-304 同源共用）。
+        if (target.substringBefore(':', "").lowercase() in EXTERNAL_HANDLER_SCHEMES) {
+            appContext?.let { ctx ->
+                val text = ctx.getString(R.string.unsupported_link_scheme)
+                android.widget.Toast
+                    .makeText(ctx, text, android.widget.Toast.LENGTH_SHORT)
+                    .show()
+            }
+            return
+        }
         // 提交即清除草稿：后续 onPageStarted→onPageUrlObserved 正常同步地址栏
         addressDraftActive = false
         val navigated = SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(target).orFalse()
@@ -385,19 +397,7 @@ class BrowserViewModel(
             // 「被拒」共用 false 返回——确认对话框已挂起时不得再弹恐吓提示。
             _pendingNavigationConfirmation.value == null
         ) {
-            // AD-303（2026-10-02 审计）：外跳 scheme 分型——地址栏输入 tel:/mailto:/sms:
-            // 等（与 AegisWebViewClient.externalHandlerSchemes 同集，AD-304 配套
-            // companion 化共用）走「不支持该类链接」瞬时 Toast（同款反馈），其余拒绝提示。
-            if (target.substringBefore(':', "").lowercase() in EXTERNAL_HANDLER_SCHEMES) {
-                appContext?.let { ctx ->
-                    // detekt-修复（2026-10-02 审计云端实证）：MaxLineLength>120——文案短引用。
-                    val text = ctx.getString(R.string.unsupported_link_scheme)
-                    val toast = android.widget.Toast.makeText(ctx, text, android.widget.Toast.LENGTH_SHORT)
-                    toast.show()
-                }
-            } else {
-                _webViewAlert.value = alertNotice(R.string.nav_rejected)
-            }
+            _webViewAlert.value = alertNotice(R.string.nav_rejected)
         }
     }
 

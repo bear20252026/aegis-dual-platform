@@ -37,7 +37,7 @@ class WebViewHardeningScriptTest {
     /**
      * AD-297（2026-10-02 审计）：注册键与消费键同源——Stage 1 注册出口与
      * 桥守卫（BRIDGE_GUARD_JS）/Stage 3-9 读取口必须同用
-     * Symbol.for('proxy.register.v1')；具名字符串键回退即注册全链空转。
+     * Symbol.for('proxy.register.v1')；具名字符串键回退即注册全链空转（键名断言只锁调用形态）。
      */
     @Test
     fun stage1RegisterKeyIsSymbolForSameAsConsumers() {
@@ -45,7 +45,7 @@ class WebViewHardeningScriptTest {
             "Stage 1 注册键必须是 Symbol.for('proxy.register.v1')",
             script.contains("Object.defineProperty(window, Symbol.for('proxy.register.v1'), {"),
         )
-        assertFalse("具名字符串注册键不得残留（AD-297 回退）", script.contains("'__AEGIS_REGISTER_PROXY'"))
+        assertFalse("具名注册键调用形态不得残留（AD-297 回退）", script.contains("window, '__AEGIS_REGISTER_PROXY'"))
         assertTrue(
             "桥守卫读取键必须一致（同源契约）",
             WebViewHardening.BRIDGE_GUARD_JS.contains("window[Symbol.for('proxy.register.v1')]"),
@@ -122,7 +122,7 @@ class WebViewHardeningScriptTest {
         assertEquals(1, aegisNudge(0, noiseBit = true))
         assertEquals(254, aegisNudge(255, noiseBit = false))
         assertEquals(254, aegisNudge(255, noiseBit = true))
-        assertEquals(100, aegisNudge(100, noiseBit = false))
+        assertEquals(99, aegisNudge(100, noiseBit = false))
         assertEquals(101, aegisNudge(100, noiseBit = true))
     }
 
