@@ -99,6 +99,10 @@ internal object WebViewDownloadHandler {
         url: String,
         mimeType: String,
         contentDisposition: String,
+        // AD-331（2026-10-02 审计）：二级确认回调——仅查询参数命中危险扩展时
+        // 调用；回调展示确认 UI，用户批准时调用 proceed() 继续入队，否则放弃
+        //（fail-closed）。生产经 SecureWebViewFactory 接 MainDialogs 单槽。
+        requestConfirmation: (proceed: () -> Unit) -> Unit = { proceed -> proceed() },
     ) {
         val context = webView.context
         val scheme =
@@ -116,7 +120,10 @@ internal object WebViewDownloadHandler {
         // P2-5 修复：文件名先解析（净化后）再判定危险扩展——`/download?file=x.exe`
         // 类直链的文件名在 Content-Disposition，判定需要拿到净化后文件名。
         val fileName = resolveDownloadFileName(url, mimeType, contentDisposition)
-        if (DownloadPolicy.requiresExplicitConfirmation(url, fileName)) {
+        // AD-331（2026-10-02 审计）：拆两级——路径/文件名命中硬拦截；仅查询
+        // 参数命中经确认对话框放行（原 requiresExplicitConfirmation 名实不符：
+        // 承诺确认、实现硬拦截）。
+        if (DownloadPolicy.isHardBlocked(url, fileName)) {
             // AD-220（2026-09-26 审计）：下载日志统一接入脱敏单源。
             android.util.Log.w("AegisDownload", "拦截危险扩展下载: ${LogRedact.redact(url)}")
             Toast
@@ -124,6 +131,21 @@ internal object WebViewDownloadHandler {
                 .show()
             return
         }
+        if (DownloadPolicy.requiresExplicitConfirmation(url, fileName)) {
+            android.util.Log.w("AegisDownload", "危险扩展下载待确认（仅查询参数命中）: ${LogRedact.redact(url)}")
+            requestConfirmation { enqueueDownload(context, url, mimeType, fileName) }
+            return
+        }
+        enqueueDownload(context, url, mimeType, fileName)
+    }
+
+    /** AD-331：入队单源（确认续体与直通路径共用——参数已解析完毕）。 */
+    private fun enqueueDownload(
+        context: android.content.Context,
+        url: String,
+        mimeType: String,
+        fileName: String,
+    ) {
         val request =
             DownloadManager
                 .Request(android.net.Uri.parse(url))
@@ -180,8 +202,12 @@ internal object WebViewDownloadHandler {
     ): String {
         // AD-217（2026-09-26 审计）：URL 路径段先百分号解码再取尾段（与
         // DownloadPolicy 判定口径一致——`/dl/malware%2Eexe` 此前不解码）。
+        // AD-305（2026-10-02 审计）：路径段改 [decodePercentStrict]——路径中
+        // `+` 是字面加号（RFC 3986 path 不含 query 的 `+`→空格语义），原
+        // URLDecoder 把 `a+b.pdf` 解成 `a b.pdf`（文件名字面失真；与 AD-263
+        // 的 RFC 5987 filename* 解码同口径）。
         val urlPathSegment =
-            decodePercent(url.substringBefore('#').substringBefore('?'))
+            decodePercentStrict(url.substringBefore('#').substringBefore('?'))
                 .substringAfterLast('/')
         val fromDisposition = resolveDispositionFileName(contentDisposition)
         val base =
@@ -302,21 +328,12 @@ internal object WebViewDownloadHandler {
             .orEmpty()
     }
 
-    /** AD-230/AD-217 配套：百分号解码；非法编码原样返回（fail-closed）。 */
-    private fun decodePercent(raw: String): String =
-        try {
-            java.net.URLDecoder.decode(raw, "UTF-8")
-        } catch (_: IllegalArgumentException) {
-            raw
-        } catch (_: java.io.UnsupportedEncodingException) {
-            raw
-        }
-
     /**
      * AD-263：RFC 5987 严格百分号解码——逐 %XX 还原字节流后整体按 UTF-8 解码
      * （多字节字符的 %E6%8A%A5 序列不得按单字节劈开）；`+` 保持字面（不经
      * URLDecoder 的 query 语义转换）；%XX 后不足两位十六进制按字面 `%` 处理；
-     * 解码出非法 UTF-8 序列原样返回（fail-closed，与 [decodePercent] 同口径）。
+     * 解码出非法 UTF-8 序列原样返回（fail-closed）。AD-305：URL 路径段解码
+     * 自本函数单源（原 decodePercent 的 query 语义已随 AD-305 移除）。
      */
     private fun decodePercentStrict(raw: String): String {
         // 字面字符按 UTF-8 展开最多 4 字节/字符——按上界分配

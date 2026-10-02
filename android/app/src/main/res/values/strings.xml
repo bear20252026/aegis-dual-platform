@@ -92,4 +92,15 @@
     <!-- AD-284（2026-10-01 审计）：mailto:/tel: 等外跳 scheme 的主框架导航
          显式 Toast（不再与恶意 scheme 同走静默 Deny） -->
     <string name="unsupported_link_scheme">不支持打开该类链接（邮件/电话等外部应用链接）</string>
+
+    <!-- AD-322（2026-10-02 审计）：默认标签标题与阅读模式标题兜底——数据层
+         （TabManager/ReaderMode）不再硬编码中文，UI 层渲染时兜底取资源单源 -->
+    <string name="tab_default_title">新标签页</string>
+    <string name="reader_mode_title">阅读模式</string>
+
+    <!-- AD-331（2026-10-02 审计）：仅查询参数命中危险扩展的下载确认对话框
+         （二级防线——路径/文件名命中已硬拦截，不进本对话框） -->
+    <string name="download_confirm_title">确认下载</string>
+    <string name="download_confirm_message">该下载链接的查询参数中包含疑似危险文件类型，确认要继续下载吗？\n%1$s</string>
+    <string name="download_confirm_allow">仍要下载</string>
 </resources>

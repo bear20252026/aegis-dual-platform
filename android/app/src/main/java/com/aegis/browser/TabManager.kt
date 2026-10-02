@@ -26,10 +26,9 @@ class TabManager(
     private val pause: (WebView) -> Unit = WebView::onPause,
     private val resume: (WebView) -> Unit = WebView::onResume,
 ) {
-    companion object {
-        /** AD-085（2026-09-26 审计）：默认标题单源（TabChipCore 空标题兜底共用）。 */
-        const val DEFAULT_TAB_TITLE = "新标签页"
-    }
+    // AD-322（2026-10-02 审计）：DEFAULT_TAB_TITLE 硬编码中文已迁 R.string
+    //（UI 层渲染兜底——TabChipCore 空标题取 stringResource(tab_default_title)）。
+    // 数据层默认标题为空串：本地化是展示职责，数据层只承载状态。
 
     private val tabs = mutableListOf<Tab>()
     private var nextId = 0L
@@ -46,7 +45,7 @@ class TabManager(
     fun addTab(
         webView: WebView,
         url: String = "",
-        title: String = DEFAULT_TAB_TITLE,
+        title: String = "",
     ): Tab {
         tabs +=
             Tab(
@@ -139,18 +138,25 @@ class TabManager(
      * P1-3 修复（全量复审 2026-09-01）：渲染进程崩溃后原位替换 WebView。
      * 保留标签 id/标题/挂起状态，返回旧 WebView（清理由调用方负责：
      * SecureWebViewFactory.release + destroy）；越界返回 null。
+     *
+     * AD-312（2026-10-02 审计）：挂起态按原标签透传——原实现恒 suspended=
+     * false，后台标签崩溃重建后状态标记丢失（「真挂起」变「伪前台」，双
+     * 活跃面回归）。需真挂起时对全新 WebView 立即 pause（替换件从未 pause
+     * ——AD-060 的失真问题由真实 pause 消除，而非改标记）。显式传
+     * [inheritSuspended]=false 恢复旧行为（前台标签崩溃重建直通）。
      */
     fun replaceWebView(
         index: Int,
         newWebView: WebView,
+        inheritSuspended: Boolean = true,
     ): WebView? {
         if (index !in tabs.indices) return null
         val old = tabs[index].webView
-        // AD-060（2026-09-24 审计）：重置 suspended——替换进来的新 WebView 是
-        // 全新运行态（从未 pause），沿用旧标签的 suspended=true 会造成
-        // 「状态标记挂起 / 实际在前台跑」的失真（切回该标签时 switchTo 因
-        // suspended 已为 true 不会再 resume——语义一致但永不准确）。
-        tabs[index] = tabs[index].copy(webView = newWebView, suspended = false)
+        val targetSuspended = inheritSuspended && tabs[index].suspended
+        if (targetSuspended) {
+            pause(newWebView)
+        }
+        tabs[index] = tabs[index].copy(webView = newWebView, suspended = targetSuspended)
         return old
     }
 

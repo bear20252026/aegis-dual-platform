@@ -101,10 +101,10 @@ class ReaderModeTest {
     @Test
     fun takeAtCharBoundaryFallsBackBeforeDanglingSurrogate() {
         // 高代理落在切点尾 → 回退一个 char；ASCII 行为与 String.take 一致
-        assertEquals(1, ReaderMode.takeAtCharBoundary("a\uD83D\uDE00", 2).length)
-        assertEquals("", ReaderMode.takeAtCharBoundary("\uD83D\uDE00", 1))
-        assertEquals("abc", ReaderMode.takeAtCharBoundary("abcdef", 3))
-        assertEquals("abcdef", ReaderMode.takeAtCharBoundary("abcdef", 6))
+        assertEquals(1, takeAtCharBoundary("a\uD83D\uDE00", 2).length)
+        assertEquals("", takeAtCharBoundary("\uD83D\uDE00", 1))
+        assertEquals("abc", takeAtCharBoundary("abcdef", 3))
+        assertEquals("abcdef", takeAtCharBoundary("abcdef", 6))
     }
 
     @Test

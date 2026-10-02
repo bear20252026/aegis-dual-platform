@@ -30,6 +30,11 @@ import com.aegis.webviewadapter.LogRedact
 class AegisHomeBridge(
     private val context: Context,
     private val webViewProvider: () -> WebView?,
+    // AD-323（2026-10-02 审计）：主线程投递抽可注入 executor——原 navigate 的
+    // wv.post 内联使 JVM 单测无法驱动「归一→投递→导航」链（投递不可观测）。
+    // 生产默认 wv.post（WebView API 必须主线程调用）；测试注入同步执行器
+    // 断言归一/拒绝分支。
+    private val postToMainThread: (WebView, () -> Unit) -> Unit = { wv, block -> wv.post(block) },
 ) {
     private val prefs = context.getSharedPreferences(SearchEngines.PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -177,7 +182,8 @@ class AegisHomeBridge(
         // 主线程调用（WrongThreadViolation：loadUrl 被吞 → 导航静默失效）
         // P0 修复（全量复审 2026-09-01）：失败不再静默——此前返回值被丢弃，
         // 会话过期/策略拒绝时首页搜索与地址栏跳转零反馈（用户以为点了没反应）
-        wv.post {
+        // AD-323：投递经可注入 executor（生产 wv.post；测试同步驱动）
+        postToMainThread(wv) {
             val ok = SecureWebViewFactory.navigatorFor(wv)?.navigateExternal(url) == true
             if (!ok) {
                 // AD-134（审计 2026-09-23 清单·A6 批）：Toast 文案迁 strings.xml

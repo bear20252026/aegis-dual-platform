@@ -31,8 +31,25 @@ class WebViewHardeningScriptTest {
     @Test
     fun stage1ToStringGuardRegistersProxyMap() {
         assertTrue("Stage 1 缺少 ToStringGuard 劫持点", script.contains("Function.prototype.toString"))
-        assertTrue("Stage 1 缺少代理注册出口", script.contains("__AEGIS_REGISTER_PROXY"))
         assertTrue("Stage 1 缺少 proxyMap 归一查表", script.contains("proxyMap.has(this)"))
+    }
+
+    /**
+     * AD-297（2026-10-02 审计）：注册键与消费键同源——Stage 1 注册出口与
+     * 桥守卫（BRIDGE_GUARD_JS）/Stage 3-9 读取口必须同用
+     * Symbol.for('proxy.register.v1')；具名字符串键回退即注册全链空转。
+     */
+    @Test
+    fun stage1RegisterKeyIsSymbolForSameAsConsumers() {
+        assertTrue(
+            "Stage 1 注册键必须是 Symbol.for('proxy.register.v1')",
+            script.contains("Object.defineProperty(window, Symbol.for('proxy.register.v1'), {"),
+        )
+        assertFalse("具名字符串注册键不得残留（AD-297 回退）", script.contains("'__AEGIS_REGISTER_PROXY'"))
+        assertTrue(
+            "桥守卫读取键必须一致（同源契约）",
+            WebViewHardening.BRIDGE_GUARD_JS.contains("window[Symbol.for('proxy.register.v1')]"),
+        )
     }
 
     // ------------------------------------------------------------- Stage 2
@@ -66,6 +83,101 @@ class WebViewHardeningScriptTest {
         // AD-270：超尺寸画布直接走原实现（资源放大防护）
         assertTrue("Stage 3 缺少尺寸上限常量", script.contains("MAX_NOISE_PIXELS"))
         assertTrue("Stage 3 缺少超限降级分支", script.contains("origToDataURL.apply(this, arguments)"))
+    }
+
+    /**
+     * AD-298（2026-10-02 审计）：canvas 读取三通道全覆盖——toDataURL/toBlob/
+     * OffscreenCanvas.convertToBlob（漏任一通道 = 噪声绕过；对齐 Rust RS-082）。
+     * 三通道共用 applyNoise 单源——噪声形态逐字节同构。
+     */
+    @Test
+    fun stage3CoversAllThreeCanvasReadChannels() {
+        assertTrue("toBlob 第二通道必须覆盖", script.contains("HTMLCanvasElement.prototype.toBlob"))
+        assertTrue("convertToBlob 第三通道必须覆盖", script.contains("OffscreenCanvas.prototype.convertToBlob"))
+        assertTrue("OffscreenCanvas 缺失环境须空转守卫", script.contains("typeof OffscreenCanvas !== 'undefined'"))
+        // 三通道共用同一噪声实现（形态一致——不出现第二份噪声循环）
+        assertEquals("噪声循环必须单源共享（三通道同构）", 1, Regex("for \\(let px = 0, i = 0").findAll(script).count())
+    }
+
+    /** AD-311（2026-10-02 审计）：aegisNudge 的 Kotlin 镜像（0/255 边界离岸）。 */
+    private fun aegisNudge(
+        current: Int,
+        noiseBit: Boolean,
+    ): Int =
+        when (current) {
+            0 -> 1
+            255 -> 254
+            else -> if (noiseBit) current + 1 else current - 1
+        }
+
+    @Test
+    fun stage3BoundaryNoiseTakesOffshoreDirection() {
+        // 0/255 边界：Uint8ClampedArray 的 clamp 会吸收向岸噪声（0-1→0、
+        // 255+1→255）——边界像素噪声必须取离岸方向（0→+1、255→-1）。
+        assertTrue("Stage 3 缺少边界离岸函数", script.contains("function aegisNudge"))
+        assertTrue("0 边界离岸缺失", script.contains("if (current === 0) return 1;"))
+        assertTrue("255 边界离岸缺失", script.contains("if (current === 255) return 254;"))
+        // Kotlin 镜像同口径：边界恒离岸；中间值随噪声位 ±1
+        assertEquals(1, aegisNudge(0, noiseBit = false))
+        assertEquals(1, aegisNudge(0, noiseBit = true))
+        assertEquals(254, aegisNudge(255, noiseBit = false))
+        assertEquals(254, aegisNudge(255, noiseBit = true))
+        assertEquals(100, aegisNudge(100, noiseBit = false))
+        assertEquals(101, aegisNudge(100, noiseBit = true))
+    }
+
+    /**
+     * AD-314（2026-10-02 审计）：Stage 3-9 每个包装点必须存在 __aegisReg
+     * 注册行——漏注册即该包装 toString() 暴露源码（品牌特征一行可探）。
+     */
+    @Test
+    fun stage3To9EveryWrapperRegistersToStringGuard() {
+        val expectedRegistrations =
+            listOf(
+                "if (__aegisReg) __aegisReg(HTMLCanvasElement.prototype.toDataURL, origToDataURL);",
+                "if (__aegisReg) __aegisReg(HTMLCanvasElement.prototype.toBlob, origToBlob);",
+                "if (__aegisReg) __aegisReg(OffscreenCanvas.prototype.convertToBlob, origConvert);",
+                "if (__aegisReg) __aegisReg(window.fetch, origFetch);", // Stage 5 + Stage 9 各一次
+                "if (__aegisReg) __aegisReg(XMLHttpRequest.prototype.open, origOpen);",
+                "if (__aegisReg) __aegisReg(navigator.sendBeacon, origBeacon);",
+                "if (__aegisReg) __aegisReg(window.WebSocket, OrigWS);",
+                "if (__aegisReg) __aegisReg(FontFaceSet.prototype.check, origCheck);",
+                "if (__aegisReg) __aegisReg(proto.getParameter, orig);",
+                "if (__aegisReg) __aegisReg(nowWrapper, o);",
+                "if (__aegisReg) __aegisReg(dateWrapper, d);",
+            )
+        expectedRegistrations.forEach { line ->
+            assertTrue("缺少包装注册行：$line", script.contains(line))
+        }
+        // fetch 被 Stage 5 与 Stage 9 各包装一次——两处都要注册
+        assertEquals(
+            "Stage 5/Stage 9 的 fetch 包装都必须注册",
+            2,
+            Regex(Regex.escape("if (__aegisReg) __aegisReg(window.fetch, origFetch);")).findAll(script).count(),
+        )
+    }
+
+    /** AD-310（2026-10-02 审计）：MAX_VIEWPORT_DIMS 伪装类型对齐真机 Int32Array。 */
+    @Test
+    fun stage7MaxViewportDimsSpoofsInt32Array() {
+        assertTrue("0x0D3A 必须返回 Int32Array", script.contains("new Int32Array([16384, 16384])"))
+        assertFalse("Float32Array 伪装不得残留（AD-310 回退）", script.contains("new Float32Array([16384, 16384])"))
+    }
+
+    /**
+     * AD-329（2026-10-02 审计）：高频两段公共后缀表补齐——表内条目命中才
+     * 折叠为公共后缀；本表即「同后缀两站种子不同」回归断言的例外清单。
+     */
+    @Test
+    fun stage2PublicSuffixTableCoversHighFrequencyTwoLabelSuffixes() {
+        val suffixes =
+            listOf(
+                "co.il", "org.il", "com.ua", "com.pl", "com.gr",
+                "com.pt", "com.ro", "com.sa", "com.pk",
+            )
+        suffixes.forEach { suffix ->
+            assertTrue("迷你 PSL 缺少高频两段后缀 $suffix（AD-329）", script.contains("'$suffix'"))
+        }
     }
 
     @Test

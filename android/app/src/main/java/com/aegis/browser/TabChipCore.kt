@@ -73,7 +73,9 @@ internal fun TabChipCore(
             modifier = Modifier.padding(start = 12.dp, end = 2.dp),
         ) {
             Text(
-                text = tab.title.ifBlank { TabManager.DEFAULT_TAB_TITLE },
+                // AD-322（2026-10-02 审计）：空标题兜底迁 UI 层资源单源——
+                // 数据层（TabManager）不再硬编码中文默认标题。
+                text = tab.title.ifBlank { stringResource(R.string.tab_default_title) },
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

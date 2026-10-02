@@ -52,6 +52,12 @@ object SecureWebViewFactory {
         onRendererGone: (WebView) -> Unit = {},
         onPageError: (WebView, code: String, detail: String, isSsl: Boolean, url: String) -> Unit =
             { _, _, _, _, _ -> },
+        // AD-331（2026-10-02 审计）：二级下载确认（仅查询参数命中危险扩展）
+        //——生产恒经 WebViewEventAssembly → BrowserViewModel 接 MainDialogs
+        // 单槽；未接线调用方（测试面）按默认直通（旧全拦截行为的放行半区
+        // 由 DownloadPolicy.isHardBlocked 独立把守，直通只影响二级形态）。
+        onDownloadConfirmationNeeded: (WebView, url: String, proceed: () -> Unit) -> Unit =
+            { _, _, proceed -> proceed() },
     ): WebView {
         // 架构解耦（第 5 项）：broker 由组合根（MainActivity 的 ViewModel
         // 工厂对 Application 收敛注入）显式传入——工厂不再
@@ -125,12 +131,16 @@ object SecureWebViewFactory {
         // H-6 修复（审计 2026-08-31）：下载防线接线——原 DownloadPolicy
         // 为死代码，WebView 默认下载行为未处理（危险扩展确认机制不存在、
         // 下载静默失败）。统一收口：DownloadPolicy 判定 → DownloadManager。
+        // AD-331：二级（仅查询参数命中）确认上抛调用方单槽对话框。
         webView.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
             WebViewDownloadHandler.handleDownload(
                 webView,
                 url.orEmpty(),
                 mimeType.orEmpty(),
                 contentDisposition.orEmpty(),
+                requestConfirmation = { proceed ->
+                    onDownloadConfirmationNeeded(webView, url.orEmpty(), proceed)
+                },
             )
         }
         return webView

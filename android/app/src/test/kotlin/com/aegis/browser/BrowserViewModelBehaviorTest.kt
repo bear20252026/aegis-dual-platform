@@ -17,6 +17,9 @@ import org.junit.runner.RunWith
 import org.mockito.Mockito.mock
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import com.aegis.broker.AuthorizedAction
+import com.aegis.broker.Decision
+import org.robolectric.Shadows.shadowOf
 import kotlin.time.Clock
 import org.mockito.Mockito.`when` as whenever
 
@@ -163,5 +166,186 @@ class BrowserViewModelBehaviorTest {
         val sizeBefore = viewModel.getTabManager()?.size ?: error("tabManager 必须已初始化")
         viewModel.closeTab(0)
         assertEquals("最后一个标签必须保留", sizeBefore, viewModel.getTabManager()?.size)
+    }
+
+    // ---------------- AD-303（2026-10-02 审计）：地址栏外跳 scheme 分型 ----------------
+
+    @Test
+    fun addressBarExternalSchemeShowsUnsupportedToastNotRejectionAlert() {
+        // tel: 输入：走「不支持该类链接」瞬时 Toast（与 WebView 内链接点击
+        // 同款反馈），不再弹「无法通过安全策略验证」恐吓对话框
+        viewModel.updateAddress("tel:10086")
+        viewModel.navigateToAddress()
+        assertNull("外跳 scheme 不得弹策略拒绝提示", viewModel.webViewAlert.value)
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        assertEquals(
+            app.getString(R.string.unsupported_link_scheme),
+            org.robolectric.shadows.ShadowToast.textOfLatestToast,
+        )
+    }
+
+    @Test
+    fun addressBarForbiddenSchemeKeepsRejectionAlert() {
+        // 非外跳的非法 scheme（javascript:）保持既有拒绝提示（fail-closed）
+        viewModel.updateAddress("javascript:alert(1)")
+        viewModel.navigateToAddress()
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        assertEquals(
+            app.getString(R.string.nav_rejected),
+            viewModel.webViewAlert.value?.message,
+        )
+    }
+
+    // ---------------- AD-328（2026-10-02 审计）：外链不覆写地址草稿 ----------------
+
+    @Test
+    fun openExternalUrlDoesNotOverwriteActiveAddressDraft() {
+        stubBrokerAllowChain()
+        viewModel.updateAddress("draft in progress")
+        viewModel.openExternalUrl("https://external.example/x")
+        assertEquals("外链 intent 不得覆写未提交草稿", "draft in progress", viewModel.address.value)
+    }
+
+    @Test
+    fun openExternalUrlOverwritesAddressWhenNoDraftActive() {
+        stubBrokerAllowChain()
+        viewModel.openExternalUrl("https://external.example/x")
+        assertEquals("https://external.example/x", viewModel.address.value)
+    }
+
+    // ---------------- AD-326（2026-10-02 审计）：标签会话持久化 ----------------
+
+    @Test
+    fun sessionStateRestoreRebuildsTabsFromSavedHttpsUrls() {
+        val bundle =
+            android.os.Bundle().apply {
+                putStringArrayList(
+                    BrowserViewModel.STATE_TAB_URLS,
+                    arrayListOf("https://a.example/", "https://b.example/"),
+                )
+                putInt(BrowserViewModel.STATE_ACTIVE_TAB_INDEX, 1)
+            }
+        val restored = BrowserViewModel(broker)
+        restored.init(ApplicationProvider.getApplicationContext(), bundle)
+        assertEquals("恢复标签数", 2, restored.tabs.value.size)
+        assertEquals("https://a.example/", restored.tabs.value[0].url)
+        assertEquals("https://b.example/", restored.tabs.value[1].url)
+        assertEquals("激活位恢复", 1, restored.activeIndex.value)
+    }
+
+    @Test
+    fun sessionStateRestoreIgnoresNonHttpsEntries() {
+        // 恢复侧防御：非 https 条目（file:/about:/http 明文）不参与重建
+        val bundle =
+            android.os.Bundle().apply {
+                putStringArrayList(
+                    BrowserViewModel.STATE_TAB_URLS,
+                    arrayListOf("http://plain.example/", "file:///android_asset/start.html"),
+                )
+            }
+        val restored = BrowserViewModel(broker)
+        restored.init(ApplicationProvider.getApplicationContext(), bundle)
+        assertEquals("非 https 全滤除后回落单标签冷启动", 1, restored.tabs.value.size)
+    }
+
+    @Test
+    fun writeSessionStatePersistsOnlyHttpsUrlsAndActiveIndex() {
+        val tm = viewModel.getTabManager() ?: error("tabManager 必须已初始化")
+        // 首页标签 url 为 file://（不外存）；更新为 https 后外存
+        tm.current()?.let { tm.updateUrl(it.id, "https://keep.example/page") }
+        val bundle = android.os.Bundle()
+        viewModel.writeSessionState(bundle)
+        assertEquals(
+            arrayListOf("https://keep.example/page"),
+            bundle.getStringArrayList(BrowserViewModel.STATE_TAB_URLS),
+        )
+        assertEquals(0, bundle.getInt(BrowserViewModel.STATE_ACTIVE_TAB_INDEX))
+    }
+
+    @Test
+    fun writeSessionStateFiltersOutFileHomeUrl() {
+        val bundle = android.os.Bundle()
+        viewModel.writeSessionState(bundle)
+        assertEquals(
+            "file:// 首页不外存（恢复由 openTrustedHome 承担）",
+            arrayListOf<String>(),
+            bundle.getStringArrayList(BrowserViewModel.STATE_TAB_URLS),
+        )
+    }
+
+    // ---------------- AD-327（2026-10-02 审计）：三入口行为 ----------------
+
+    @Test
+    fun retryCurrentPageClearsErrorPanel() {
+        val wv = viewModel.currentWebViewOrNull() ?: error("init 后必有当前标签")
+        raiseMainFrameSslError(wv)
+        org.junit.Assert.assertNotNull("前置：错误面板已上抛", viewModel.pageError.value)
+        viewModel.retryCurrentPage()
+        assertNull("重试入口必须清除错误面板", viewModel.pageError.value)
+    }
+
+    @Test
+    fun returnToSafeHomeLoadsTrustedHomeUrl() {
+        raiseMainFrameSslError(viewModel.currentWebViewOrNull() ?: error("init 后必有当前标签"))
+        viewModel.returnToSafeHome()
+        val wv = viewModel.currentWebViewOrNull() ?: error("init 后必有当前标签")
+        assertEquals(BrowserViewModel.HOME_URL, shadowOf(wv).lastLoadedUrl)
+        assertNull("返回安全页清除错误面板", viewModel.pageError.value)
+    }
+
+    @Test
+    fun openExternalUrlNavigatesThroughSecureChain() {
+        stubBrokerAllowChain()
+        viewModel.openExternalUrl("https://chain.example/path")
+        val wv = viewModel.currentWebViewOrNull() ?: error("init 后必有当前标签")
+        assertEquals("经归一 + broker 授权后 loadUrl", "https://chain.example/path", shadowOf(wv).lastLoadedUrl)
+    }
+
+    // ---------------- 辅助（AD-326/327/328 共用） ----------------
+
+    /** 全链放行桩：requestNavigationConfirmation→Allow + consumeNavigation→true。 */
+    private fun stubBrokerAllowChain() {
+        val action =
+            AuthorizedAction(
+                sessionId = "stub-session",
+                tabId = "stub-tab",
+                documentGeneration = 0,
+                origin = "https://stub.example",
+                method = "GET",
+                canonicalParameters = "/",
+                scope = "navigation",
+                expiresAt = Clock.System.now().plus(kotlin.time.Duration.parse("120s")),
+                nonce = "stub-nonce",
+                policyVersion = "1.0",
+            )
+        whenever(
+            broker.requestNavigationConfirmation(
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+            ),
+        ).thenReturn(Decision.Allow(action))
+        whenever(
+            broker.consumeNavigation(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(),
+            ),
+        ).thenReturn(true)
+    }
+
+    /** 主框架 SSL 错误注入：驱动 AegisWebViewClient.onReceivedSslError 上抛面板。 */
+    private fun raiseMainFrameSslError(wv: WebView) {
+        val handler = mock(android.net.http.SslErrorHandler::class.java)
+        val error = mock(android.net.http.SslError::class.java)
+        whenever(error.url).thenReturn("https://example.com/")
+        whenever(error.primaryError).thenReturn(3)
+        wv.loadUrl("https://example.com/") // view.url 与 error.url 归属一致（主框架）
+        wv.webViewClient.onReceivedSslError(wv, handler, error)
     }
 }

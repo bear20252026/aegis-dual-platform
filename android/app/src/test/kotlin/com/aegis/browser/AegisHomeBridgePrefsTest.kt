@@ -36,6 +36,48 @@ class AegisHomeBridgePrefsTest {
             .getSharedPreferences(SearchEngines.PREFS_NAME, Context.MODE_PRIVATE)
             .getString(key, null)
 
+    // ---------------- AD-323（2026-10-02 审计）：navigate 主线程投递可注入 ----------------
+
+    @Test
+    fun navigateRejectsUntrustedCallerWithoutPosting() {
+        // 非受信壳页调用：投递前即拒绝（executor 不被触发）
+        val remote = mock(WebView::class.java).also { whenever(it.url).thenReturn("https://evil.example/") }
+        var posted = 0
+        val bridge = AegisHomeBridge(context, { remote }) { _, _ -> posted++ }
+        bridge.navigate("https://example.com/")
+        assertEquals("非受信壳页调用不得投递", 0, posted)
+    }
+
+    @Test
+    fun navigateEmptyInputReturnsBeforePosting() {
+        var posted = 0
+        val bridge = AegisHomeBridge(context, { trustedWebView }) { _, _ -> posted++ }
+        bridge.navigate("   ")
+        assertEquals("空输入在归一前返回（不投递）", 0, posted)
+    }
+
+    @Test
+    fun navigateNormalizesDomainInputAndPosts() {
+        // 归一分支：域名输入经 SearchEngines.normalizeInput 拼装 https URL
+        // 后投递主线程（executor 恰一次；受信壳页放行）
+        var posted = 0
+        val bridge = AegisHomeBridge(context, { trustedWebView }) { _, _ -> posted++ }
+        bridge.navigate("  example.com  ")
+        assertEquals("归一成功必须投递主线程", 1, posted)
+    }
+
+    @Test
+    fun navigatePostsAndToastsRejectionWhenNavigatorUnavailable() {
+        // 同步 executor 驱动投递体：mock WebView 不在导航器注册表——
+        // navigateExternal 失败必须回填拒绝 Toast（不再静默）
+        val bridge = AegisHomeBridge(context, { trustedWebView }) { _, block -> block() }
+        bridge.navigate("https://example.com/")
+        assertEquals(
+            context.getString(R.string.bridge_open_rejected),
+            org.robolectric.shadows.ShadowToast.textOfLatestToast,
+        )
+    }
+
     // ---------------------------------------------------------------- AD-114
 
     @Test

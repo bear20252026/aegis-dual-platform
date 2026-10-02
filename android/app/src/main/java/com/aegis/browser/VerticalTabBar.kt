@@ -53,7 +53,7 @@ fun VerticalTabBar(
     Column(
         modifier =
             modifier
-                .width(180.dp)
+                .width(UiDimens.VERTICAL_TAB_BAR_WIDTH.dp)
                 .fillMaxHeight()
                 .background(LocalAegisChromeColors.current.toolbarBackground),
     ) {
@@ -67,15 +67,15 @@ fun VerticalTabBar(
         LazyColumn(
             state = listState,
             modifier = Modifier.weight(1f).fillMaxWidth(),
-            contentPadding = PaddingValues(6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+            contentPadding = PaddingValues(UiDimens.TAB_BAR_SPACING.dp),
+            verticalArrangement = Arrangement.spacedBy(UiDimens.VERTICAL_TAB_SPACING.dp),
         ) {
             // AD-040：key=tab.id（与 TabBar 同口径——复用 item + 防索引位移）
             itemsIndexed(tabs, key = { _, tab -> tab.id }) { index, tab ->
                 TabChipCore(
                     tab = tab,
                     active = index == activeIndex,
-                    modifier = Modifier.fillMaxWidth().height(34.dp),
+                    modifier = Modifier.fillMaxWidth().height(UiDimens.VERTICAL_TAB_CHIP_HEIGHT.dp),
                     onSelect = { onSelect(index) },
                     onClose = { onClose(index) },
                 )
@@ -89,8 +89,8 @@ fun VerticalTabBar(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .padding(6.dp)
-                    .height(36.dp),
+                    .padding(UiDimens.VERTICAL_NEW_TAB_BUTTON_PADDING.dp)
+                    .height(UiDimens.VERTICAL_NEW_TAB_BUTTON_HEIGHT.dp),
             onNewTab = onNewTab,
         )
     }

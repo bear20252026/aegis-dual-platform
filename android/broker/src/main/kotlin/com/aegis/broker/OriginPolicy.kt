@@ -14,6 +14,9 @@ object OriginPolicy {
     /** 点分十进制 IPv4 段数（段数≠4 且全数字 = 备用编码，拒绝）。 */
     private const val IPV4_SEGMENT_COUNT = 4
 
+    /** AD-299：IPv4 八位组上限（WHATWG 口径——逐段 ≤255，越界拒绝）。 */
+    private const val IPV4_OCTET_MAX = 255
+
     /** 解析外部 URL（仅 http/https——非法返回 null——fail-closed）。 */
     fun tryParseExternal(raw: String?): java.net.URI? {
         if (raw.isNullOrBlank() || raw.length > MAX_URL_LENGTH) return null
@@ -39,6 +42,10 @@ object OriginPolicy {
         // A-3 对齐（跨端口径）：java.net.URI 不校验端口上限——99999 这类
         // 越界端口 Rust origin.rs/Python security.py 均拒绝，此处显式对齐
         if (uri.port > MAX_PORT) return null
+        // AD-299（P2，2026-10-02 审计）：端口 0 拒绝——Rust origin.rs（PY-075
+        // 向量同口径）对 port_num == 0 fail-closed（保留端口不可用作目标），
+        // java.net.URI 原样放行 port=0，此处对齐（-1 = 未写端口，保持放行）。
+        if (uri.port == 0) return null
         // PY-071/072（审计 2026-09-25）：非点分十进制 IPv4 编码拒绝——整数/
         // 0x 十六进制/简写（127.1）OS 解析器均接受，双重解释混淆面——与
         // Rust origin.rs / C# OriginPolicy 口径一致
@@ -50,6 +57,15 @@ object OriginPolicy {
         // （https://localhost.）绑进 AuthorizedAction。本层是全链唯一能以
         // URI 原始形态观察到尾点的收口点——备用编码判定之前整链 fail-closed。
         if (host.endsWith(".")) return null
+        // AD-299（P2，2026-10-02 审计）：host 校验对齐 Rust origin.rs RS-012——
+        // ①字符集白名单 [a-z0-9.-]（xn-- punycode 在集内；下划线/引号等
+        // DNS 不安全字符拒绝，PY-074 向量）；②前导点（空首标签）与 `..`
+        // （连续点/空标签）拒绝（PY-073 向量——多数形态 java.net.URI 已折
+        // host=null，此处显式收口防解析器漂移）；③`[` 拒绝——java.net.URI
+        // 对 IPv6 字面量保留方括号原样放行（host="[::1]"），Rust 对 authority
+        // 方括号形态一律拒绝（PY-069/070 向量）。
+        if (host.startsWith(".") || host.contains("..") || host.contains("[")) return null
+        if (!host.all { it in 'a'..'z' || it.isDigit() || it == '.' || it == '-' }) return null
         if (isAlternateIpv4Encoding(host)) return null
         return uri
     }
@@ -77,6 +93,13 @@ object OriginPolicy {
             segments.any { seg -> seg.length > 1 && seg.startsWith('0') && seg.all { it.isDigit() } }
         // 简写/整数形态：全数字但非四段（127.1、2130706433）
         val isShorthand = segments.all { it.isNotEmpty() && it.all { c -> c.isDigit() } }
+        // AD-299（P2，2026-10-02 审计）：四段全数字时逐段 ≤255——对齐 Rust
+        // RS-228（WHATWG IPv4 解析器口径）。此前只看段数，999.1.1.1 /
+        // 256.0.0.1 等八位组越界形态混过（跨端向量 RS-228 三条）。
+        // 超长纯数字段（toInt 溢出）必然越界——按拒绝处理（fail-closed）。
+        if (segments.size == IPV4_SEGMENT_COUNT && isShorthand) {
+            if (segments.any { (it.toIntOrNull() ?: IPV4_OCTET_MAX + 1) > IPV4_OCTET_MAX }) return true
+        }
         return hasHexSegment || hasLeadingZeroSegment ||
             (isShorthand && segments.size != IPV4_SEGMENT_COUNT)
     }

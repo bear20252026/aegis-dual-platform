@@ -161,27 +161,27 @@ class AegisWebViewClientTest {
         verify(view).loadUrl("https://example.com/x")
     }
 
-    // ------------------------------------------------------------- AD-011 / AD-246
+    // ------------------------------------------------------------- AD-011 / AD-246 / AD-309
     @Test
-    fun subFrameHttpNeverHijacksTopLevel() {
-        // AD-246（2026-09-26 审计）：子框架走轻量判定——单次 evaluateNavigation
-        // （不走确认登记+自动批准+consumeNavigation 全链），Allow 放行原始
-        // 加载（不消费顶层授权）、Deny 阻断留痕
+    fun subFrameHttpIsBlockedAndResentUpgraded() {
+        // AD-309（2026-10-02 审计）：子框架 Allow 与主框架同口径——升级只用于
+        // 判定、放行仍载原始 http 的旧形态（cleartext 禁用下子框架静默失败）
+        // 改为返回 true 阻断原始加载 + view.loadUrl(升级后 URL) 重发。
         val client = newClient()
-        // 子框架 Allow：直接放行（不 loadUrl、不 consume）
         whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
             .thenReturn(Decision.Allow(allowAction))
-        val allowed =
+        val blocked =
             client.shouldOverrideUrlLoading(view, fakeRequest("http://ads.example/frame", isMainFrame = false))
-        // Allow → return false（放行原始子框架加载——明文由 cleartext 禁用兜底）
-        assertFalse(allowed)
-        verify(view, never()).loadUrl(anyString())
+        assertTrue("原始 http 子框架加载必须阻断", blocked)
+        // broker 收到升级后 URL，且经 loadUrl 重发（不消费顶层授权对象）
+        verify(broker).evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation")
+        verify(view).loadUrl("https://ads.example/frame")
         verify(
             broker,
             never(),
         ).consumeNavigation(allowAction, SESSION, TAB, 0L, "https://ads.example/frame", "navigation")
 
-        // 子框架 Deny：return true（阻断留痕）
+        // 子框架 Deny：return true（阻断留痕，不重发）
         whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
             .thenReturn(
                 Decision.Deny(
@@ -190,7 +190,53 @@ class AegisWebViewClientTest {
             )
         val denied = client.shouldOverrideUrlLoading(view, fakeRequest("http://ads.example/frame", isMainFrame = false))
         assertTrue(denied)
+        // Deny 后无第三次 loadUrl（上面 Allow 分支恰好一次）
+        verify(view, times(1)).loadUrl(anyString())
+    }
+
+    // ------------------------------------------------------------- AD-321
+    @Test
+    fun subFrameRequireConfirmationFailsClosed() {
+        // 子框架 RequireConfirmation：无子框架确认 UI 面——fail-closed 阻断
+        // （不弹确认、不放行、不登记 pending）
+        val confirmationRequest = approvalRequest()
+        whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
+            .thenReturn(Decision.RequireConfirmation(confirmationRequest))
+        var requested = false
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                requireNavigationConfirmation = true,
+                onNavigationConfirmationRequested = { requested = true },
+                onNavigationDenied = { code, _ -> deniedCodes.add(code) },
+            )
+        val blocked = client.shouldOverrideUrlLoading(view, fakeRequest("https://ads.example/frame", isMainFrame = false))
+        assertTrue("确认型子框架导航必须 fail-closed 阻断", blocked)
+        assertFalse("不得登记确认请求（无子框架确认 UI 面）", requested)
+        assertTrue(deniedCodes.isEmpty())
         verify(view, never()).loadUrl(anyString())
+    }
+
+    // ------------------------------------------------------------- AD-321
+    @Test
+    fun onReceivedErrorMainFrameReportsAndSubFrameStaysSilent() {
+        // onReceivedError：主框架加载失败上报错误面板；子框架静默（不遮蔽整页）
+        val errors = mutableListOf<String>()
+        val client = newClient(onPageError = { code, detail, _, url -> errors.add("$code:$detail|$url") })
+        val error = mock(android.webkit.WebResourceError::class.java)
+        whenever(error.errorCode).thenReturn(-2)
+        whenever(error.description).thenReturn("host lookup")
+
+        // 子框架：静默
+        client.onReceivedError(view, fakeRequest("https://ads.example/frame", isMainFrame = false), error)
+        assertTrue(errors.isEmpty())
+
+        // 主框架：上报（错误码结构——文案映射在 app 层）
+        client.onReceivedError(view, fakeRequest("https://example.com/x", isMainFrame = true), error)
+        assertEquals(listOf("main_frame:-2:host lookup|https://example.com/x"), errors)
     }
 
     // ------------------------------------------------------------- AD-216
@@ -597,6 +643,46 @@ class AegisWebViewClientTest {
         val telBlocked = client.shouldOverrideUrlLoading(view, fakeRequest("tel:10086", isMainFrame = true))
         assertTrue(telBlocked)
         assertEquals("tel", unsupported)
+    }
+
+    // ------------------------------------------------------------- AD-304
+    @Test
+    fun newExternalHandlerSchemesSurfaceUnsupportedSchemeFeedback() {
+        // AD-304（2026-10-02 审计）：smsto/mmsto/geo 与 mailto/tel/sms 同为
+        // 系统分发形态——主框架导航必须走「不支持该类链接」分型上抛，
+        // 不得落策略拒绝（onNavigationDenied/恐吓提示）或静默放行。
+        assertTrue(
+            "externalHandlerSchemes 缺少 smsto（AD-304）",
+            "smsto" in AegisWebViewClient.externalHandlerSchemes,
+        )
+        assertTrue(
+            "externalHandlerSchemes 缺少 mmsto（AD-304）",
+            "mmsto" in AegisWebViewClient.externalHandlerSchemes,
+        )
+        assertTrue(
+            "externalHandlerSchemes 缺少 geo（AD-304）",
+            "geo" in AegisWebViewClient.externalHandlerSchemes,
+        )
+        val observed = mutableListOf<String>()
+        val client =
+            AegisWebViewClient(
+                broker = broker,
+                sessionId = SESSION,
+                tabId = TAB,
+                onRendererGone = {},
+                onUnsupportedSchemeNavigation = { scheme, _ -> observed.add(scheme) },
+            )
+        listOf("smsto:10086", "mmsto:10086", "geo:39.9,116.4").forEach { url ->
+            val blocked = client.shouldOverrideUrlLoading(view, fakeRequest(url, isMainFrame = true))
+            assertTrue("外跳 scheme $url 必须阻断 WebView 原始加载", blocked)
+            // 不与恶意 scheme 同走 Deny 提示
+            assertTrue(deniedCodes.isEmpty())
+        }
+        assertEquals(listOf("smsto", "mmsto", "geo"), observed)
+        verify(
+            broker,
+            never(),
+        ).requestNavigationConfirmation(anyString(), anyString(), anyLong(), anyString(), anyString())
     }
 
     // ------------------------------------------------------------- AD-256

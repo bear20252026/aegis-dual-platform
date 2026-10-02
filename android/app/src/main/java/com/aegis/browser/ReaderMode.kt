@@ -20,6 +20,24 @@ data class ReaderContent(
     val text: String,
 )
 
+/**
+ * AD-109（审计 2026-09-23 清单·A6 批）：代理对边界回退截断——切点尾部为
+ * 高代理（其低代理被切掉）时回退一个 char，不产生孤立代理对。ASCII 文本
+ * 行为与 String.take 一致。
+ *
+ * AD-308（2026-10-02 审计）：自 ReaderMode 成员提升为共享 internal 顶层
+ * 函数——LogSanitize.flatten 的截断同有劈代理对面（标题/日志净化口径
+ * 单源），MainDialogs 分段（chunkTextAtCharBoundary）注释口径同源。
+ */
+internal fun takeAtCharBoundary(
+    value: String,
+    max: Int,
+): String {
+    if (value.length <= max) return value
+    val cut = value.substring(0, max)
+    return if (Character.isHighSurrogate(cut.last())) cut.dropLast(1) else cut
+}
+
 object ReaderMode {
     /** 正文长度上限（200K 字符——超出截断，防渲染层过载）。 */
     private const val MAX_TEXT = 200_000
@@ -110,23 +128,13 @@ object ReaderMode {
             val text = takeAtCharBoundary(payload.optString("text", ""), MAX_TEXT)
             if (text.isBlank()) return@runCatching null
             ReaderContent(
-                // AD-227：title 与 text 同走上限截断（超长标题不进对话框标题）
-                title = takeAtCharBoundary(payload.optString("title", ""), MAX_TITLE).ifBlank { "阅读模式" },
+                // AD-227：title 与 text 同走上限截断（超长标题不进对话框标题）。
+                // AD-322（2026-10-02 审计）：空标题兜底迁 UI 层资源单源
+                //（ReaderDialog 渲染时取 R.string.reader_mode_title）——
+                // 数据层不再硬编码中文。
+                title = takeAtCharBoundary(payload.optString("title", ""), MAX_TITLE),
                 text = text,
             )
         }.getOrNull()
-    }
-
-    /**
-     * AD-109：代理对边界回退截断——切点尾部为高代理（其低代理被切掉）时
-     * 回退一个 char，不产生孤立代理对。ASCII 文本行为与 String.take 一致。
-     */
-    internal fun takeAtCharBoundary(
-        value: String,
-        max: Int,
-    ): String {
-        if (value.length <= max) return value
-        val cut = value.substring(0, max)
-        return if (Character.isHighSurrogate(cut.last())) cut.dropLast(1) else cut
     }
 }

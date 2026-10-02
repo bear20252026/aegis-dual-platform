@@ -61,10 +61,10 @@ fun TabBar(
         modifier =
             modifier
                 .fillMaxWidth()
-                .height(44.dp)
+                .height(UiDimens.TAB_BAR_HEIGHT.dp)
                 .background(chrome.toolbarBackground),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        contentPadding = PaddingValues(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(UiDimens.TAB_BAR_SPACING.dp),
+        contentPadding = PaddingValues(horizontal = UiDimens.TAB_BAR_CONTENT_PADDING.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // AD-039：key=tab.id——标题变化（copy 替换实例）时复用既有 item 而非
@@ -75,8 +75,8 @@ fun TabBar(
                 active = index == activeIndex,
                 modifier =
                     Modifier
-                        .height(32.dp)
-                        .widthIn(max = 200.dp),
+                        .height(UiDimens.TAB_CHIP_HEIGHT.dp)
+                        .widthIn(max = UiDimens.TAB_CHIP_MAX_WIDTH.dp),
                 onSelect = { onSelect(index) },
                 onClose = { onClose(index) },
             )
@@ -87,7 +87,7 @@ fun TabBar(
             NewTabButton(
                 label = "+",
                 shape = CircleShape,
-                modifier = Modifier.size(32.dp),
+                modifier = Modifier.size(UiDimens.TAB_NEW_BUTTON_SIZE.dp),
                 onNewTab = onNewTab,
             )
         }

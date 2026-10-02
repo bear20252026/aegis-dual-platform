@@ -20,6 +20,14 @@ class DialogPriorityTest {
     /** AD-260：一般安全提示（单按钮分型）构造器。 */
     private fun securityNotice(text: String = "提示") = WebViewAlertNotice(text, AlertKind.SECURITY_NOTICE)
 
+    /** AD-331：待确认下载构造器（continuation 空实现——状态机只看非 null）。 */
+    private fun pendingDownload(url: String = "https://example.com/dl?file=x.exe") =
+        PendingDownloadConfirmation(
+            webView = mock(WebView::class.java),
+            url = url,
+            continuation = {},
+        )
+
     private fun pending(): PendingNavigationConfirmation =
         PendingNavigationConfirmation(
             webView = mock(WebView::class.java),
@@ -36,16 +44,16 @@ class DialogPriorityTest {
 
     @Test
     fun emptyStateYieldsNoDialog() {
-        assertNull(resolveActiveDialog(null, null, null))
+        assertNull(resolveActiveDialog(null, null, null, null))
     }
 
     @Test
     fun singleStatesResolveToTheirOwnSlot() {
-        assertEquals(ActiveDialog.PENDING_CONFIRMATION, resolveActiveDialog(pending(), null, null))
-        assertEquals(ActiveDialog.WEB_VIEW_ALERT, resolveActiveDialog(null, securityNotice(), null))
+        assertEquals(ActiveDialog.PENDING_CONFIRMATION, resolveActiveDialog(pending(), null, null, null))
+        assertEquals(ActiveDialog.WEB_VIEW_ALERT, resolveActiveDialog(null, null, securityNotice(), null))
         assertEquals(
             ActiveDialog.READER_CONTENT,
-            resolveActiveDialog(null, null, ReaderContent(title = "标题", text = "正文")),
+            resolveActiveDialog(null, null, null, ReaderContent(title = "标题", text = "正文")),
         )
     }
 
@@ -53,7 +61,7 @@ class DialogPriorityTest {
     fun pendingConfirmationBeatsAlertAndReader() {
         assertEquals(
             ActiveDialog.PENDING_CONFIRMATION,
-            resolveActiveDialog(pending(), securityNotice(), ReaderContent(title = "标题", text = "正文")),
+            resolveActiveDialog(pending(), null, securityNotice(), ReaderContent(title = "标题", text = "正文")),
         )
     }
 
@@ -61,7 +69,7 @@ class DialogPriorityTest {
     fun alertBeatsReader() {
         assertEquals(
             ActiveDialog.WEB_VIEW_ALERT,
-            resolveActiveDialog(null, securityNotice(), ReaderContent(title = "标题", text = "正文")),
+            resolveActiveDialog(null, null, securityNotice(), ReaderContent(title = "标题", text = "正文")),
         )
     }
 
@@ -81,8 +89,8 @@ class DialogPriorityTest {
         assertEquals(WebViewAlertNotice.Kind.VERSION_CHECK, version.kind)
         assertEquals(WebViewAlertNotice.Kind.SECURITY_NOTICE, security.kind)
         // 两种分型都占用同一对话框槽位（优先级不因分型改变）
-        assertEquals(ActiveDialog.WEB_VIEW_ALERT, resolveActiveDialog(null, version, null))
-        assertEquals(ActiveDialog.WEB_VIEW_ALERT, resolveActiveDialog(null, security, null))
+        assertEquals(ActiveDialog.WEB_VIEW_ALERT, resolveActiveDialog(null, null, version, null))
+        assertEquals(ActiveDialog.WEB_VIEW_ALERT, resolveActiveDialog(null, null, security, null))
     }
 
     // ---------------- AD-261（2026-10-01 审计）：分段代理对安全 ----------------
@@ -105,6 +113,51 @@ class DialogPriorityTest {
         val mixed = ("ab😀😀汉字😀cd").repeat(100)
         val mixedChunks = chunkTextAtCharBoundary(mixed, 13)
         assertEquals(mixed, mixedChunks.joinToString(""))
+    }
+
+    // ---------------- AD-331（2026-10-02 审计）：下载确认槽位 ----------------
+
+    @Test
+    fun downloadConfirmationBeatsAlertAndReaderButNotNavigation() {
+        // 安全优先级：导航审批 > 下载确认 > 安全提示 > 阅读模式
+        assertEquals(
+            ActiveDialog.PENDING_CONFIRMATION,
+            resolveActiveDialog(pending(), pendingDownload(), securityNotice(), ReaderContent(title = "t", text = "x")),
+        )
+        assertEquals(
+            ActiveDialog.DOWNLOAD_CONFIRMATION,
+            resolveActiveDialog(null, pendingDownload(), securityNotice(), ReaderContent(title = "t", text = "x")),
+        )
+        assertEquals(ActiveDialog.DOWNLOAD_CONFIRMATION, resolveActiveDialog(null, pendingDownload(), null, null))
+    }
+
+    // ---------------- AD-300（2026-10-02 审计）：indices-1 语义修复回归 ----------------
+
+    @Test
+    fun chunkBoundarySurrogateAtInteriorSegmentIsMovedToNextChunk() {
+        // 构造位置 2*chunkSize-1 恰为高代理：原 `raw.indices - 1`（Iterable.minus
+        // 移除元素 1）使分段 1 的边界代理对永不迁移——重组出现孤立代理。
+        // chunkSize=4：下标 7 为高代理（第二段段尾），其低代理落入第三段；
+        // 迁移后第三段 = 高代理 + 原第三段（低代理 + 'C'）——共 3 段。
+        val text = "AAAABBB\uD83C\uDF14C"
+        val chunks = chunkTextAtCharBoundary(text, 4)
+        assertEquals(text, chunks.joinToString(""))
+        assertEquals(listOf("AAAA", "BBB", "\uD83C\uDF14C"), chunks)
+        chunks.dropLast(1).forEach { chunk ->
+            assertFalse(
+                "非末段段尾不得是孤立高代理",
+                chunk.isNotEmpty() && Character.isHighSurrogate(chunk.last()),
+            )
+        }
+    }
+
+    @Test
+    fun chunkLastSegmentEndingWithHighSurrogateDoesNotThrow() {
+        // 末段以孤立高代理结尾（其后无低代理——畸形输入）：原实现末段参与
+        // 循环导致 raw[i+1] 越界（IndexOutOfBounds）。修复后末段不再检查。
+        val text = "ABCDEFGH\uD83C" // 8 字符 + 孤立高代理 = 9
+        val chunks = chunkTextAtCharBoundary(text, 4)
+        assertEquals(listOf("ABCD", "EFGH", "\uD83C"), chunks)
     }
 
     @Test

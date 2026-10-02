@@ -119,7 +119,7 @@ class TabManagerTest {
         assertSame(original, old)
         val updated = tm.list().first { it.id == tab.id }
         assertSame(replacement, updated.webView)
-        assertEquals("新标签页", updated.title)
+        assertEquals("", updated.title) // AD-322：默认标题空串（UI 层资源兜底）
         assertNull(tm.replaceWebView(9, newWebView()))
     }
 
@@ -134,7 +134,7 @@ class TabManagerTest {
         // 实例替换（而非原地改 var）——StateFlow 依赖 equals 感知变化
         assertFalse(before === after)
         assertEquals("新标题", after.title)
-        assertEquals("新标签页", before.title) // 旧快照不受影响
+        assertEquals("", before.title) // 旧快照不受影响（AD-322：默认标题空串）
         // 未知 id 静默忽略
         tm.updateTitle(999L, "x")
     }
@@ -155,17 +155,62 @@ class TabManagerTest {
         tm.updateUrl(999L, "https://ignored.example")
     }
 
-    /** AD-060（2026-09-24 审计）：replaceWebView 重置 suspended——新 WebView 是运行态。 */
+    /**
+     * AD-060（2026-09-24 审计）→ AD-312（2026-10-02 审计）语义更新：
+     * replaceWebView 默认按原标签挂起态透传——后台标签崩溃重建后保持挂起
+     * 语义（需真挂起：替换件创建后立即 pause）；显式 inheritSuspended=false
+     * 恢复「前台标签崩溃重建直通」旧行为。
+     */
     @Test
-    fun replaceWebView_resetsStaleSuspendedFlag() {
+    fun replaceWebView_inheritsSuspendedAndPausesFreshWebView() {
         val rec = Recorder()
         val tm = manager(rec, maxActive = 1)
         tm.addTab(newWebView()) // tab0
         tm.addTab(newWebView()) // tab1 激活——tab0 被 LRU 挂起
         assertTrue(tm.list().first { it.id == 0L }.suspended)
-        tm.replaceWebView(0, newWebView())
-        // 替换进来的 WebView 从未 pause——沿用 suspended=true 属状态失真
+        val fresh = newWebView()
+        val pausesBefore = rec.paused.size
+        tm.replaceWebView(0, fresh)
+        // 后台崩溃重建：挂起态透传 + 替换件真实 pause（非仅改标记）
+        assertTrue(tm.list().first { it.id == 0L }.suspended)
+        assertEquals("挂起态替换件必须真实 pause", pausesBefore + 1, rec.paused.size)
+        assertEquals(fresh, rec.paused.last())
+        // 切回时按挂起路径恢复（resume 生效）
+        assertTrue(tm.switchTo(0))
         assertFalse(tm.list().first { it.id == 0L }.suspended)
+    }
+
+    /** AD-312：显式不继承挂起态——前台标签崩溃重建直通（原 AD-060 行为）。 */
+    @Test
+    fun replaceWebView_explicitNonInheritResetsToRunning() {
+        val rec = Recorder()
+        val tm = manager(rec, maxActive = 1)
+        tm.addTab(newWebView()) // tab0
+        tm.addTab(newWebView()) // tab1 激活——tab0 被 LRU 挂起
+        assertTrue(tm.list().first { it.id == 0L }.suspended)
+        tm.replaceWebView(0, newWebView(), inheritSuspended = false)
+        assertFalse(tm.list().first { it.id == 0L }.suspended)
+    }
+
+    /** AD-312：后台崩溃重建全链——挂起标签崩溃→替换仍挂起→切回恢复。 */
+    @Test
+    fun replaceWebView_backgroundCrashRebuildKeepsSuspendedLifecycle() {
+        val rec = Recorder()
+        val tm = manager(rec, maxActive = 1)
+        tm.addTab(newWebView(), url = "https://a.example") // tab0（将挂起）
+        tm.addTab(newWebView(), url = "https://b.example") // tab1 激活
+        val suspendedTab = tm.list().first { it.id == 0L }
+        assertTrue(suspendedTab.suspended)
+        val fresh = newWebView()
+        tm.replaceWebView(0, fresh, inheritSuspended = true)
+        val rebuilt = tm.list().first { it.id == 0L }
+        assertTrue("后台标签崩溃重建后保持挂起标记", rebuilt.suspended)
+        assertSame(fresh, rebuilt.webView)
+        assertEquals("重建的挂起标签不得被 resume", 0, rec.resumed.count { it === fresh })
+        // 切回：挂起态接管者恢复运行
+        tm.switchTo(0)
+        assertFalse(tm.list().first { it.id == 0L }.suspended)
+        assertEquals(1, rec.resumed.count { it === fresh })
     }
 
     /** AD-056（2026-09-24 审计）：addTab 超上限即时挂起最旧标签（无需切换操作）。 */

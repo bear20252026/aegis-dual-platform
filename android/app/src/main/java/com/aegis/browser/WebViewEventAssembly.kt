@@ -51,6 +51,12 @@ internal class WebViewEventAssembly(
         /** 安全提示写入。 */
         fun submitWebViewAlert(text: String)
 
+        /**
+         * AD-331（2026-10-02 审计）：二级下载确认（仅查询参数命中危险扩展）
+         * ——宿主展示单槽确认对话框，用户批准时调用 proceed() 继续入队。
+         */
+        fun requestDownloadConfirmation(webView: WebView, url: String, proceed: () -> Unit)
+
         /** 标签列表/可用性随事件刷新（AD-225 URL 回调尾部刷新同口径）。 */
         fun refreshTabs()
 
@@ -90,6 +96,10 @@ internal class WebViewEventAssembly(
             onTitleObserved = ::onTitleObserved,
             onRendererGone = onRendererGone,
             onPageError = ::onPageError,
+            // AD-331（2026-10-02 审计）：二级下载确认经宿主单槽对话框
+            onDownloadConfirmationNeeded = { wv, url, proceed ->
+                host.requestDownloadConfirmation(wv, url, proceed)
+            },
         )
 
     /**

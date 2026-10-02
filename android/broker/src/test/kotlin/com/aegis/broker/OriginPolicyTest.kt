@@ -1,9 +1,13 @@
 package com.aegis.broker
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * A-3 回归（架构审计 2026-08-31）：OriginPolicy 与 Rust origin.rs /
@@ -209,6 +213,102 @@ class OriginPolicyTest {
         assertNull(OriginPolicy.tryParseExternal("https://aegis.local./"))
         assertNull(OriginPolicy.tryParseExternal("https://example.com.:8443/"))
         assertNull(OriginPolicy.tryParseExternal("http://127.0.0.1./"))
+    }
+
+    // ---------- AD-299（P2，2026-10-02 审计）：host 校验对齐 Rust origin.rs ----------
+
+    @Test
+    fun `charset whitelist rejects unsafe host characters`() {
+        // PY-074：下划线/引号不在 DNS 安全字符集 [a-z0-9.-]
+        assertNull(OriginPolicy.tryParseExternal("https://exa_mple.org/"))
+        assertNull(OriginPolicy.tryParseExternal("https://exa\"mple.org/"))
+        // 对照：punycode（xn--）与普通域放行
+        assertNotNull(OriginPolicy.tryParseExternal("https://xn--e1afmkfd.xn--p1ai/"))
+    }
+
+    @Test
+    fun `leading dot and empty labels are rejected`() {
+        // PY-073：前导点（空首标签）/ 连续点（空标签）拒绝
+        assertNull(OriginPolicy.tryParseExternal("https://.example.org/"))
+        assertNull(OriginPolicy.tryParseExternal("https://a..example.org/"))
+    }
+
+    @Test
+    fun `ipv6 bracket hosts are rejected`() {
+        // PY-069/070：java.net.URI 保留方括号（host="[::1]"）——Rust 对
+        // authority 方括号形态一律拒绝，此处对齐
+        assertNull(OriginPolicy.tryParseExternal("http://[::1]/"))
+        assertNull(OriginPolicy.tryParseExternal("http://[::ffff:192.168.1.1]/"))
+        assertNull(OriginPolicy.tryParseExternal("http://[::ffff:127.0.0.1]/"))
+    }
+
+    @Test
+    fun `port zero is rejected`() {
+        // PY-075：保留端口 0 不可用作目标（-1 = 未写端口保持放行）
+        assertNull(OriginPolicy.tryParseExternal("https://example.org:0/"))
+        assertNotNull(OriginPolicy.tryParseExternal("https://example.org/"))
+    }
+
+    @Test
+    fun `ipv4 octets beyond 255 are rejected`() {
+        // RS-228：四段全数字逐段 ≤255（WHATWG IPv4 解析器口径）
+        assertNull(OriginPolicy.tryParseExternal("https://999.1.1.1/"))
+        assertNull(OriginPolicy.tryParseExternal("https://256.0.0.1/"))
+        assertNull(OriginPolicy.tryParseExternal("https://300.300.300.300/"))
+        // 超长纯数字段（toInt 溢出）必然越界——fail-closed
+        assertNull(OriginPolicy.tryParseExternal("https://99999999999999.1.1.1/"))
+        // 合法边界保留
+        assertNotNull(OriginPolicy.tryParseExternal("https://255.255.255.255/"))
+        assertNotNull(OriginPolicy.tryParseExternal("https://93.184.216.34/"))
+    }
+
+    // ---------- AD-315（2026-10-02 审计）：跨端共享向量消费 ----------
+
+    /** AD-315：加载共享向量（仓库根 contracts/vectors 相对定位——参照
+     *  app 侧 SearchNormalizeVectorsTest 先例：工作目录向上游走找仓库根）。 */
+    private fun loadSharedVectors(fileName: String): List<Pair<String, String>> {
+        val path =
+            generateSequence(Path.of(System.getProperty("user.dir")).toAbsolutePath()) { it.parent }
+                .take(8)
+                .map { it.resolve("contracts").resolve("vectors").resolve(fileName) }
+                .firstOrNull { Files.isRegularFile(it) }
+                ?: error("找不到共享向量 $fileName（相对仓库根定位失败）")
+        val payload = JSONObject(String(Files.readAllBytes(path), Charsets.UTF_8))
+        val vectors = payload.getJSONArray("vectors")
+        return (0 until vectors.length()).map { vectors.getJSONObject(it) }
+            .map { it.getString("url") to it.getString("expected") }
+    }
+
+    /**
+     * AD-315：超长 URL 锚点物化——向量内的语义锚点 token（PY-078）由消费端
+     * 物化为 https://example.org/ + 'a'×9000（> 8192 上限；与 Rust vectors.rs
+     * 同口径——Kotlin 侧此前以 9000 字符字面样本覆盖，现随共享向量单源化）。
+     */
+    private fun materialize(url: String): String =
+        if (url.endsWith("oversize-url-limit-test")) {
+            "https://example.org/" + "a".repeat(9000)
+        } else {
+            url
+        }
+
+    @Test
+    fun sharedUrlOriginVectorsMatchPolicyVerdict() {
+        val valid = loadSharedVectors("url-origin-valid.json")
+        val invalid = loadSharedVectors("url-origin-invalid.json")
+        assertTrue("共享合法向量不得为空", valid.isNotEmpty())
+        assertTrue("共享非法向量不得为空", invalid.isNotEmpty())
+        valid.forEach { (url, _) ->
+            assertNotNull(
+                "共享向量判 allow 但 OriginPolicy 拒绝（url=「$url」）",
+                OriginPolicy.tryParseExternal(materialize(url)),
+            )
+        }
+        invalid.forEach { (url, _) ->
+            assertNull(
+                "共享向量判 deny 但 OriginPolicy 放行（url=「$url」）",
+                OriginPolicy.tryParseExternal(materialize(url)),
+            )
+        }
     }
 
     @Test

@@ -20,6 +20,62 @@ data class PendingNavigationConfirmation internal constructor(
 )
 
 /**
+ * AD-331（2026-10-02 审计）：待确认下载——仅查询参数命中危险扩展（二级），
+ * 经 MainDialogs 单槽确认后允许继续入队。普通 class（非 data）：continuation
+ * 是函数引用，equals 语义无意义且易误用。
+ *
+ * @param webView     触发下载的 WebView（归属对账用——同 [PageError] 口径）
+ * @param url         下载直链（确认对话框展示定位）
+ * @param continuation 用户批准后继续入队的续体（拒绝即放弃，不调用）
+ */
+internal class PendingDownloadConfirmation(
+    internal val webView: WebView,
+    val url: String,
+    private val continuation: () -> Unit,
+) {
+    /** 用户批准后继续（仅由 BrowserViewModel 单写点调用一次）。 */
+    fun proceed() = continuation()
+}
+
+/**
+ * AD-326（2026-10-02 审计）：标签会话持久化单源——onSaveInstanceState 存
+ * tab.url 列表 + activeIndex（仅 https：file:// 壳页恢复由 openTrustedHome
+ * 承担、http 明文不外存）；init 检测 savedInstanceState 恢复（经安全导航链
+ * 重载——恢复不绕过策略）。自 BrowserViewModel 抽出（LargeClass 阈值）。
+ */
+internal object TabSessionState {
+    /** 持久化键：https 标签 URL 列表。 */
+    const val TAB_URLS = "aegis.state.tab_urls"
+
+    /** 持久化键：激活标签下标（https 过滤后列表坐标系）。 */
+    const val ACTIVE_TAB_INDEX = "aegis.state.active_tab_index"
+
+    /** 读取可恢复标签 URL 列表（仅 https——其余形态不外存/不恢复）。 */
+    fun restorableUrls(savedInstanceState: android.os.Bundle?): List<String> =
+        savedInstanceState
+            ?.getStringArrayList(TAB_URLS)
+            .orEmpty()
+            .filter { it.startsWith("https://") }
+
+    /** 读取恢复的激活下标（越界由调用方 coerce——这里只做缺省）。 */
+    fun restorableActiveIndex(savedInstanceState: android.os.Bundle?): Int =
+        savedInstanceState?.getInt(ACTIVE_TAB_INDEX, 0) ?: 0
+
+    /** 写出会话态：https 过滤 + 激活位映射（激活标签非 https 时回落 0）。 */
+    fun write(
+        tabManager: TabManager?,
+        outState: android.os.Bundle,
+    ) {
+        val tm = tabManager ?: return
+        val httpsUrls = tm.list().map { it.url }.filter { it.startsWith("https://") }
+        val activeUrl = tm.current()?.url.orEmpty()
+        val activeIndex = httpsUrls.indexOf(activeUrl).takeIf { it >= 0 } ?: 0
+        outState.putStringArrayList(TAB_URLS, ArrayList(httpsUrls))
+        outState.putInt(ACTIVE_TAB_INDEX, activeIndex)
+    }
+}
+
+/**
  * P2-1 修复（全面审计 2026-09-04）：页面级错误（不可变数据类）。
  *
  * @param description 简短中文错误说明（错误面板主文案）
