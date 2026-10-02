@@ -379,8 +379,7 @@ class BrowserViewModel(
         // 反馈不依赖 broker（scheme 集与 AD-304 同源）。两分支合一（detekt
         // ReturnCount≤2）。空输入/外跳都就地终止，不进归一链。
         val silentSkip = target.isBlank()
-        val externalScheme =
-            !silentSkip && target.substringBefore(':', "").lowercase() in EXTERNAL_HANDLER_SCHEMES
+        val externalScheme = !silentSkip && target.substringBefore(':', "").lowercase() in EXTERNAL_HANDLER_SCHEMES
         if (silentSkip || externalScheme) {
             if (externalScheme) {
                 appContext?.let { ctx ->
