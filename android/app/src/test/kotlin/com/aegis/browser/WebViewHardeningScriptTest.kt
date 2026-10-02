@@ -172,8 +172,15 @@ class WebViewHardeningScriptTest {
     fun stage2PublicSuffixTableCoversHighFrequencyTwoLabelSuffixes() {
         val suffixes =
             listOf(
-                "co.il", "org.il", "com.ua", "com.pl", "com.gr",
-                "com.pt", "com.ro", "com.sa", "com.pk",
+                "co.il",
+                "org.il",
+                "com.ua",
+                "com.pl",
+                "com.gr",
+                "com.pt",
+                "com.ro",
+                "com.sa",
+                "com.pk",
             )
         suffixes.forEach { suffix ->
             assertTrue("迷你 PSL 缺少高频两段后缀 $suffix（AD-329）", script.contains("'$suffix'"))

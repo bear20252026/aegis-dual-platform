@@ -232,7 +232,7 @@ internal fun chunkTextAtCharBoundary(
 ): List<String> {
     val raw = text.chunked(chunkSize).toMutableList()
     // AD-300（P2，2026-10-02 审计）：原 `for (i in raw.indices - 1)` 语义错误
-    //——IntRange 无 minus(Int) 运算，实际命中 Iterable<Int>.minus（移除值为
+    // ——IntRange 无 minus(Int) 运算，实际命中 Iterable<Int>.minus（移除值为
     // 1 的元素）：分段 1 的边界代理对永不迁移，且末段（i=size-1）参与循环
     // 时 raw[i+1] 越界（末段恰以高代理结尾即 IndexOutOfBounds）。改为
     // 0 until raw.size - 1（除末段外逐段检查——末段无后继可让渡）。

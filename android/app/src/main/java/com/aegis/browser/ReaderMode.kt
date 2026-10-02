@@ -130,7 +130,7 @@ object ReaderMode {
             ReaderContent(
                 // AD-227：title 与 text 同走上限截断（超长标题不进对话框标题）。
                 // AD-322（2026-10-02 审计）：空标题兜底迁 UI 层资源单源
-                //（ReaderDialog 渲染时取 R.string.reader_mode_title）——
+                // （ReaderDialog 渲染时取 R.string.reader_mode_title）——
                 // 数据层不再硬编码中文。
                 title = takeAtCharBoundary(payload.optString("title", ""), MAX_TITLE),
                 text = text,

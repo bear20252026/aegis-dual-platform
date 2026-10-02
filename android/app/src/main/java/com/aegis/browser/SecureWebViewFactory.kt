@@ -53,7 +53,7 @@ object SecureWebViewFactory {
         onPageError: (WebView, code: String, detail: String, isSsl: Boolean, url: String) -> Unit =
             { _, _, _, _, _ -> },
         // AD-331（2026-10-02 审计）：二级下载确认（仅查询参数命中危险扩展）
-        //——生产恒经 WebViewEventAssembly → BrowserViewModel 接 MainDialogs
+        // ——生产恒经 WebViewEventAssembly → BrowserViewModel 接 MainDialogs
         // 单槽；未接线调用方（测试面）按默认直通（旧全拦截行为的放行半区
         // 由 DownloadPolicy.isHardBlocked 独立把守，直通只影响二级形态）。
         onDownloadConfirmationNeeded: (WebView, url: String, proceed: () -> Unit) -> Unit =

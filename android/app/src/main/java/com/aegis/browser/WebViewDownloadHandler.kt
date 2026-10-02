@@ -101,7 +101,7 @@ internal object WebViewDownloadHandler {
         contentDisposition: String,
         // AD-331（2026-10-02 审计）：二级确认回调——仅查询参数命中危险扩展时
         // 调用；回调展示确认 UI，用户批准时调用 proceed() 继续入队，否则放弃
-        //（fail-closed）。生产经 SecureWebViewFactory 接 MainDialogs 单槽。
+        // （fail-closed）。生产经 SecureWebViewFactory 接 MainDialogs 单槽。
         requestConfirmation: (proceed: () -> Unit) -> Unit = { proceed -> proceed() },
     ) {
         val context = webView.context

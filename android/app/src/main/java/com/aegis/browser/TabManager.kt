@@ -27,7 +27,7 @@ class TabManager(
     private val resume: (WebView) -> Unit = WebView::onResume,
 ) {
     // AD-322（2026-10-02 审计）：DEFAULT_TAB_TITLE 硬编码中文已迁 R.string
-    //（UI 层渲染兜底——TabChipCore 空标题取 stringResource(tab_default_title)）。
+    // （UI 层渲染兜底——TabChipCore 空标题取 stringResource(tab_default_title)）。
     // 数据层默认标题为空串：本地化是展示职责，数据层只承载状态。
 
     private val tabs = mutableListOf<Tab>()

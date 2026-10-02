@@ -18,7 +18,7 @@
     "android/app/src/test/kotlin/com/aegis/browser/SearchEnginesTest.kt": 303,
     "android/app/src/test/kotlin/com/aegis/browser/TabManagerTest.kt": 439,
     "android/app/src/test/kotlin/com/aegis/browser/WebViewDownloadHandlerTest.kt": 354,
-    "android/app/src/test/kotlin/com/aegis/browser/WebViewHardeningScriptTest.kt": 316,
+    "android/app/src/test/kotlin/com/aegis/browser/WebViewHardeningScriptTest.kt": 323,
     "android/broker/src/main/kotlin/com/aegis/broker/AndroidBroker.kt": 447,
     "android/broker/src/main/kotlin/com/aegis/broker/NativePolicyCoreBridge.kt": 332,
     "android/broker/src/test/kotlin/com/aegis/broker/AndroidBrokerTest.kt": 480,

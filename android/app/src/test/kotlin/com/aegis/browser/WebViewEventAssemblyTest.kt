@@ -44,7 +44,9 @@ class WebViewEventAssemblyTest {
     private lateinit var chromeClient: android.webkit.WebChromeClient
 
     /** 假 Host：记录装配点的全部状态写入（AD-332）。 */
-    private class RecordingHost(private val tabManager: () -> TabManager?) : WebViewEventAssembly.Host {
+    private class RecordingHost(
+        private val tabManager: () -> TabManager?,
+    ) : WebViewEventAssembly.Host {
         val addresses = mutableListOf<String>()
         val alerts = mutableListOf<String>()
         val errors = mutableListOf<PageError>()
@@ -57,8 +59,7 @@ class WebViewEventAssemblyTest {
 
         override val isAddressDraftActive: Boolean = false
 
-        override fun displayAddress(url: String): String =
-            if (url.startsWith("file://")) BrowserViewModel.HOME_DISPLAY_URL else url
+        override fun displayAddress(url: String): String = if (url.startsWith("file://")) BrowserViewModel.HOME_DISPLAY_URL else url
 
         override fun submitPageAddress(url: String) {
             addresses.add(url)
@@ -80,8 +81,7 @@ class WebViewEventAssemblyTest {
             refreshCount++
         }
 
-        override fun errorStrings(): PageErrorTexts.Strings =
-            pageErrorStringsOf({ id -> "res($id)" }, { id, arg -> "res($id,$arg)" })
+        override fun errorStrings(): PageErrorTexts.Strings = pageErrorStringsOf({ id -> "res($id)" }, { id, arg -> "res($id,$arg)" })
 
         override fun requestDownloadConfirmation(
             webView: WebView,
