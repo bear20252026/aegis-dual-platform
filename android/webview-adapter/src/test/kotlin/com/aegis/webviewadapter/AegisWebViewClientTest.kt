@@ -181,7 +181,7 @@ class AegisWebViewClientTest {
 
         // 主框架：上报（错误码结构——文案映射在 app 层）
         client.onReceivedError(view, fakeRequest("https://example.com/x", isMainFrame = true), error)
-        assertEquals(listOf("main_frame:-2:host lookup|https://example.com/x"), errors)
+        assertEquals(listOf("${WebViewErrorCodes.ERROR_MAIN_FRAME}:-2:host lookup|https://example.com/x"), errors)
     }
 
     // ------------------------------------------------------------- AD-216

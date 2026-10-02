@@ -77,7 +77,7 @@ class DialogPriorityTest {
     fun blankAlertTextStillClaimsAlertSlot() {
         // webViewAlert 的空串语义由写入方保证（alertText 兜底非空文案）——
         // 状态机只按「非 null 即挂起」裁决，空串不会被静默跳过
-        assertEquals(ActiveDialog.WEB_VIEW_ALERT, resolveActiveDialog(null, securityNotice(""), null))
+        assertEquals(ActiveDialog.WEB_VIEW_ALERT, resolveActiveDialog(null, null, securityNotice(""), null))
     }
 
     // ---------------- AD-260（2026-10-01 审计）：提示分型语义 ----------------

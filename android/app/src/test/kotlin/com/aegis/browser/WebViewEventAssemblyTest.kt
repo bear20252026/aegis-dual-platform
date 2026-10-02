@@ -201,7 +201,7 @@ class WebViewEventAssemblyTest {
 
     @Test
     fun sslErrorOnMainFrameRoutesSslPanelText() {
-        val handler = mock(android.net.http.SslErrorHandler::class.java)
+        val handler = mock(android.webkit.SslErrorHandler::class.java)
         val sslError = mock(SslError::class.java)
         whenever(sslError.url).thenReturn("https://example.com/")
         whenever(sslError.primaryError).thenReturn(3)

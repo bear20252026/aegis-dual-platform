@@ -180,7 +180,7 @@ class BrowserViewModelBehaviorTest {
         val app = ApplicationProvider.getApplicationContext<Application>()
         assertEquals(
             app.getString(R.string.unsupported_link_scheme),
-            org.robolectric.shadows.ShadowToast.textOfLatestToast,
+            org.robolectric.shadows.ShadowToast.getTextOfLatestToast(),
         )
     }
 
@@ -341,7 +341,7 @@ class BrowserViewModelBehaviorTest {
 
     /** 主框架 SSL 错误注入：驱动 AegisWebViewClient.onReceivedSslError 上抛面板。 */
     private fun raiseMainFrameSslError(wv: WebView) {
-        val handler = mock(android.net.http.SslErrorHandler::class.java)
+        val handler = mock(android.webkit.SslErrorHandler::class.java)
         val error = mock(android.net.http.SslError::class.java)
         whenever(error.url).thenReturn("https://example.com/")
         whenever(error.primaryError).thenReturn(3)

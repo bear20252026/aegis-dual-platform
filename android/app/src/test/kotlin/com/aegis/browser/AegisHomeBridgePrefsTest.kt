@@ -74,7 +74,7 @@ class AegisHomeBridgePrefsTest {
         bridge.navigate("https://example.com/")
         assertEquals(
             context.getString(R.string.bridge_open_rejected),
-            org.robolectric.shadows.ShadowToast.textOfLatestToast,
+            org.robolectric.shadows.ShadowToast.getTextOfLatestToast(),
         )
     }
 
