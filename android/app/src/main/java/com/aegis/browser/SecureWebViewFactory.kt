@@ -125,7 +125,9 @@ object SecureWebViewFactory {
         // 首页宿主桥（ADR-003 复审口径）：仅暴露入口级无敏感操作
         // （导航走 Broker 授权；壁纸/引擎为偏好写入；画板为内置资源跳转）
         webView.addJavascriptInterface(
-            AegisHomeBridge(context.applicationContext) { webView },
+            // 云端实证（PR #60）：尾随 lambda 会绑到最后一个参数
+            // postToMainThread——webViewProvider 必须具名传参
+            AegisHomeBridge(context.applicationContext, webViewProvider = { webView }),
             "AegisBridge",
         )
         // H-6 修复（审计 2026-08-31）：下载防线接线——原 DownloadPolicy

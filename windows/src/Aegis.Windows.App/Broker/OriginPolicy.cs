@@ -55,6 +55,15 @@ public static class OriginPolicy
         // 口径一致（双重解释混淆面），不依赖归一化行为
         if (IsLeadingZeroIpv4(authority))
             return false;
+        // CS-418（2026-10-02 审计·云端实证补口）：raw 层备用 IPv4 编码拒绝。
+        // .NET Uri.TryCreate 把 "127.1"/"2130706433"/"0x7f.1"/"0x7f000001"
+        // 归一化为 "127.0.0.1"（CS-348 实验口径）——IsValidHost 的段数/十六
+        // 进制判定只见归一化结果，四条共享向量（deny）全部放行（PR #60
+        // UrlOriginVectorTests 红灯实证）。口径对齐 Kotlin
+        // isAlternateIpv4Encoding（PY-071/072/AD-213）/Rust origin.rs：任一段
+        // 0x 前缀十六进制、全数字段数 ≠ 4 一律拒绝（双重解释混淆面）
+        if (IsAlternateIpv4Encoding(authority))
+            return false;
         if (!string.IsNullOrEmpty(u.UserInfo))
             return false;
         if (string.IsNullOrEmpty(u.Host))
@@ -159,5 +168,38 @@ public static class OriginPolicy
         return segments.Length == 4
             && segments.All(s => s.Length > 0 && s.All(char.IsAsciiDigit))
             && segments.Any(s => s.Length > 1 && s[0] == '0');
+    }
+
+    /// <summary>CS-418：raw authority 备用 IPv4 编码检测（host:port 先剥端口
+    /// 段——IsLeadingZeroIpv4 同口径；IPv6 '[' 开头不属点分形态）。覆盖整数
+    ///（"2130706433"）、0x 十六进制（整串或逐段，如 "0x7f.1"）、非四段简写
+    ///（"127.1"）——OS 解析栈均接受、与归一化显示值构成双重解释混淆面。
+    /// 四段全数字（合法点分 IPv4）不属本判定面。</summary>
+    private static bool IsAlternateIpv4Encoding(string authority)
+    {
+        if (authority.Length == 0 || authority[0] == '[')
+            return false;  // IPv6 字面量或空 authority——非点分 IPv4 形态
+        var host = authority;
+        var colon = host.LastIndexOf(':');
+        if (colon >= 0)
+        {
+            var port = host[(colon + 1)..];
+            if (port.Length == 0 || !port.All(char.IsAsciiDigit))
+                return false;
+            host = host[..colon];
+        }
+        var segments = host.Split('.');
+        foreach (var seg in segments)
+        {
+            if (seg.Length > 2
+                && (seg.StartsWith("0x", StringComparison.Ordinal) || seg.StartsWith("0X", StringComparison.Ordinal))
+                && seg[2..].All(c => char.IsAsciiDigit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+            {
+                return true;
+            }
+        }
+        return segments.Length != 4
+            && segments.Length > 0
+            && segments.All(s => s.Length > 0 && s.All(char.IsAsciiDigit));
     }
 }

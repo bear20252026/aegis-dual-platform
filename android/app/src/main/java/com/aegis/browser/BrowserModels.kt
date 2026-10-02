@@ -27,8 +27,12 @@ data class PendingNavigationConfirmation internal constructor(
  * @param webView     触发下载的 WebView（归属对账用——同 [PageError] 口径）
  * @param url         下载直链（确认对话框展示定位）
  * @param continuation 用户批准后继续入队的续体（拒绝即放弃，不调用）
+ *
+ * 云端实证（PR #60）：类型须 public——BrowserViewModel.webViewAlert 同族
+ * StateFlow 公开暴露该类型参数，internal 类型 + public 属性即 KT 编译错
+ * （public property exposes its internal type argument）。
  */
-internal class PendingDownloadConfirmation(
+class PendingDownloadConfirmation internal constructor(
     internal val webView: WebView,
     val url: String,
     private val continuation: () -> Unit,

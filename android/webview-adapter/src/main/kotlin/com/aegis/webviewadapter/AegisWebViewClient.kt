@@ -66,7 +66,9 @@ class AegisWebViewClient(
          * 「不支持该类链接」分型反馈。AD-303 配套：companion 化供 app 层
          * （BrowserViewModel 地址栏输入分型）共用同一集合，消除双源漂移面。
          */
+
         // public：app 模块（BrowserViewModel 地址栏分型——AD-303）跨模块共用同源集合
+        // （ktlint：注释紧随 KDoc 须空行分隔——云端首跑实证）
         val externalHandlerSchemes = setOf("mailto", "tel", "sms", "smsto", "mmsto", "geo")
     }
 
@@ -138,10 +140,11 @@ class AegisWebViewClient(
         requestedUrl: String,
     ): Boolean {
         val subFrameUrl = upgradeToHttpsIfNeeded(requestedUrl)
-        val blocked = when (
-            val decision =
-                broker.evaluateNavigation(sessionId, tabId, documentGeneration, subFrameUrl, "navigation")
-        ) {
+        // ktlint multiline-expression：subject 提取为独立语句——嵌套 when (val x = ...)
+        // 触发「多行表达式应另起一行」（云端首跑实证 :141）
+        val decision =
+            broker.evaluateNavigation(sessionId, tabId, documentGeneration, subFrameUrl, "navigation")
+        val blocked = when (decision) {
             is Decision.Allow -> {
                 // AD-309：经升级后 URL 重发（不消费顶层授权对象——子框架
                 // 轻量路径不产生新授权，重发请求自身仍受本回调约束）

@@ -84,9 +84,9 @@ jobs:
         # 正典应用工程依赖闭包）
         run: |
           dotnet restore windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj -p:EnableWindowsTargeting=true
-          # 云端实证（PR #60 首跑）：dotnet list package 自带 evaluate 同样吃
-          # NETSDK1100——属性须与 restore 同传
-          dotnet list windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj package --vulnerable --include-transitive -p:EnableWindowsTargeting=true
+          # 云端实证（PR #60 二轮）：dotnet list package 不接受 -p: 选项（打印
+          # help 退出 1）——属性经 MSBuild 环境变量通道传入（restore 亦兼容）
+          EnableWindowsTargeting=true dotnet list windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj package --vulnerable --include-transitive
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # v1
         with:
           toolchain: stable
