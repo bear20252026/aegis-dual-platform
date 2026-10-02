@@ -69,13 +69,11 @@ impl PerSiteSeed {
     ///
     /// RS-084（审计 2026-09-25）：单缓冲 write! 写入——此前 16 次
     /// format! 各自分配（每次派生 17 次堆分配）。
+    /// RS-302（2026-10-02 审计）：改走 util::hex_encode 单源——手写
+    /// write! 循环是 crate 内又一份 hex 编码实现（与 util/ffi 查表特化
+    /// 各自维护，口径漂移面）；RS-084 的单缓冲语义在 util 单源处保持
     pub fn derive_hex(&self, domain: &str) -> String {
-        use std::fmt::Write as _;
-        let mut out = String::with_capacity(32);
-        for b in self.derive(domain) {
-            let _ = write!(out, "{b:02x}");
-        }
-        out
+        crate::util::hex_encode(&self.derive(domain))
     }
 
     /// 生成指定域名的 per-site 种子注入 JS 脚本。

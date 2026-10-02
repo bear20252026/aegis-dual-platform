@@ -117,8 +117,12 @@ impl FontNormalizer {
       // 形如 "12px Arial" / "italic bold 12px 'Times New Roman'"，此前带
       // 尺寸前缀的 family 永不在 SAFE_SET 内 → check 对安全字体也返回
       // false（防护反向失效：安全字体被伪装成不可用）
+      // RS-276（2026-10-02 审计）：样式 token 组不含空白分隔——`italic bold
+      // 12px arial` 多关键字前缀剥不掉（多关键字后整个正则失配，family 带
+      // 尺寸前缀永不在 SAFE_SET 内）。对齐同文件 measureText 的 \s+ 口径：
+      // 每个样式 token 连同其后的空白一起消费。
       family = family.replace(
-        /^(?:normal|italic|oblique|bold|[1-9]00\b)*\s*\d+(?:\.\d+)?[a-z%]*\s+/, '').trim();
+        /^(?:(?:normal|italic|oblique|bold|small-caps|[1-9]00)\s+)*\d+(?:\.\d+)?[a-z%]*\s+/, '').trim();
       // 去掉样式后缀
       family = family.replace(/\s+(regular|bold|italic|light|medium|heavy)$/i, '').trim();
       if (SAFE_SET.has(family)) {{
@@ -269,6 +273,28 @@ mod tests {
         let script = fn_.inject_script();
         assert!(script.contains("Foo\\'bar"), "单引号必须已转义");
         assert!(!script.contains("'Foo'bar'"), "不得残留未转义直拼");
+    }
+
+    // —— RS-276 回归（2026-10-02）：check 多关键字样式前缀剥离 ——
+
+    #[test]
+    fn check_strips_multi_keyword_style_prefix() {
+        // RS-276：样式 token 组此前不含空白分隔——`italic bold 12px arial`
+        // 的多关键字前缀剥不掉（正则失配，family 带前缀永不在 SAFE_SET）。
+        // 现每 token 连同其后空白一起消费（对齐 measureText 的 \s+ 口径），
+        // 并补 small-caps token。
+        let script = FontNormalizer::new().inject_script();
+        assert!(
+            script.contains(
+                r"^(?:(?:normal|italic|oblique|bold|small-caps|[1-9]00)\s+)*\d+(?:\.\d+)?[a-z%]*\s+"
+            ),
+            "check() 剥离正则必须逐 token 消费空白（多关键字可剥）"
+        );
+        // 旧形态（token 组不含空白）不得残留
+        assert!(
+            !script.contains(r"^(?:normal|italic|oblique|bold|[1-9]00\b)*\s*\d+"),
+            "旧的单 token 紧邻形态必须已移除"
+        );
     }
 
     // —— RS-210 回归（审计 2026-09-26） ——

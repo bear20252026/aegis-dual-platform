@@ -233,9 +233,40 @@ impl SpaceRouting {
   var DEFAULT_WS = {default_ws_json};
 
   function getHostname(url) {{
+    // RS-290（2026-10-02 审计）：与 Rust util::extract_host 同语义——此前
+    // 用 new URL 解析，about:blank 等非 authority 形态 hostname 为 ''
+    //（Rust 侧整串视 authority、剥端口后得 'about'），双端路由分叉。
+    // 手工提取：scheme://（或前导 //）之后到首个 /?# 是 authority，
+    // 剥 userinfo（最后 @）与端口；方括号 IPv6 剥段、裸多冒号
+    // fail-closed 空串（对齐 RS-014/055 口径），host ASCII 小写
     try {{
-      var u = new URL(url);
-      return u.hostname;
+      var s = String(url);
+      var rest = s;
+      var schemePos = s.indexOf('://');
+      if (schemePos >= 0) {{
+        rest = s.slice(schemePos + 3);
+      }} else if (s.indexOf('//') === 0) {{
+        rest = s.slice(2);
+      }}
+      var cut = rest.search(/[/?#]/);
+      var authority = cut >= 0 ? rest.slice(0, cut) : rest;
+      var at = authority.lastIndexOf('@');
+      if (at >= 0) authority = authority.slice(at + 1);
+      var host;
+      if (authority.charAt(0) === '[') {{
+        var close = authority.indexOf(']');
+        if (close < 0) return '';
+        host = authority.slice(1, close);
+      }} else {{
+        var colon = authority.indexOf(':');
+        if (colon >= 0) {{
+          if (authority.indexOf(':', colon + 1) >= 0) return '';
+          host = authority.slice(0, colon);
+        }} else {{
+          host = authority;
+        }}
+      }}
+      return host ? host.toLowerCase() : '';
     }} catch(e) {{ return ''; }}
   }}
 
@@ -246,12 +277,17 @@ impl SpaceRouting {
       if (!r.enabled) continue;
       var matched = false;
       if (r.type === 'domain') {{
+        // RS-284（2026-10-02 审计）：pattern 再小写——Rust 侧
+        // matches_precomputed 对 pattern to_ascii_lowercase 防御性再归一
+        //（字段 pub 可绕过构造器归一），JS 孪生此前直用原始 pattern
+        //（大写 pattern 的 Domain 规则双端分叉：Rust 命中、JS 不命中）
+        var p = r.pattern.toLowerCase();
         // RS-209（2026-09-26 审计）：空 pattern 防御——Rust 侧 RS-119 已拒
         // 空 pattern（'' === '' 空串等值命中会把无 host URL 路由到该规则），
         // JS 孪生此前未同步（双端口径漂移）
-        if (!r.pattern) continue;
+        if (!p) continue;
         var h = getHostname(url);
-        matched = (h === r.pattern) || h.endsWith('.' + r.pattern);
+        matched = (h === p) || h.endsWith('.' + p);
       }} else if (r.type === 'path') {{
         matched = url.startsWith(r.pattern);
       }} else if (r.type === 'exact') {{
@@ -435,11 +471,81 @@ mod tests {
     fn script_domain_match_skips_empty_pattern() {
         // RS-209：注入 JS 的 route() 必须与 Rust matches() 同步拒空 pattern——
         // 此前 pattern="" 的 Domain 规则对无 host URL（getHostname 得 ''）
-        // 空串等值命中（'' === ''），无 host URL 被错误路由
+        // 空串等值命中（'' === ''），无 host URL 被错误路由。
+        // RS-284（2026-10-02）：pattern 先 toLowerCase 再判空（小写化不改
+        // 空串语义）
         let script = SpaceRouting::new("default").inject_script();
         assert!(
-            script.contains("if (!r.pattern) continue;"),
+            script.contains("var p = r.pattern.toLowerCase();"),
+            "RS-284：JS 域匹配必须对 pattern 再小写（对齐 Rust 防御性归一）"
+        );
+        assert!(
+            script.contains("if (!p) continue;"),
             "JS route() 必须短路空 pattern 域规则（与 RS-119 双端口径一致）"
+        );
+        assert!(
+            script.contains("matched = (h === p) || h.endsWith('.' + p);"),
+            "域匹配必须用小写化后的 pattern"
+        );
+    }
+
+    // —— RS-284/290 回归（2026-10-02 审计）：JS/Rust 双端一致 ——
+
+    #[test]
+    fn script_domain_pattern_lowercase_matches_rust_semantics() {
+        // RS-284：大写 pattern 的 Domain 规则——Rust 侧构造器归一 +
+        // matches_precomputed 防御性 to_ascii_lowercase 均命中；JS 注入侧
+        // 此前直用原始 pattern（'github.com' !== 'GitHub.COM'）不命中，
+        // 双端分叉。现 JS 侧同样再小写
+        let mut sr = SpaceRouting::new("default");
+        let mut rule = RoutingRule::domain("Corp", "GitHub.COM", "work");
+        // 模拟直接构造绕过构造器归一（字段 pub——Rust 防御性再归一的
+        // 触发形态）
+        rule.pattern = "GitHub.COM".into();
+        sr.add_rule(rule);
+        assert!(
+            sr.route("https://api.github.com/x") == "work",
+            "Rust 侧防御性再归一命中（既有锚点）"
+        );
+        // JS 侧脚本形态锁定：小写化变量存在且用于等值/后缀匹配
+        let script = sr.inject_script();
+        assert!(script.contains("var p = r.pattern.toLowerCase();"));
+        assert!(
+            !script.contains("h.endsWith('.' + r.pattern)"),
+            "旧直用形态不得残留"
+        );
+    }
+
+    #[test]
+    fn script_gethostname_manual_extraction_matches_rust_semantics() {
+        // RS-290：JS getHostname 此前用 new URL 解析（about:blank → ''），
+        // Rust extract_hostname 剥端口得 'about'——双端分叉。现 JS 手工
+        // 提取与 Rust util::extract_host 同语义
+        let script = SpaceRouting::new("default").inject_script();
+        assert!(
+            !script.contains("new URL(url)"),
+            "不得依赖 URL 解析（about:blank 等形态与 Rust 分叉）"
+        );
+        assert!(
+            script.contains("var cut = rest.search(/[/?#]/);"),
+            "authority 终止符 /?# 手工定位（WHATWG 语义）"
+        );
+        assert!(
+            script.contains("var at = authority.lastIndexOf('@');"),
+            "userinfo 取最后一个 @（RS-275 口径）"
+        );
+        assert!(
+            script.contains("host ? host.toLowerCase() : ''"),
+            "空 host fail-closed 空串 + ASCII 小写（Rust extract_host 口径）"
+        );
+        // Rust 侧对照锚点：about:blank 的伪主机名 'about'（scheme 取 host
+        // 口径）——若为 'about' 建 Domain 规则，Rust route 命中
+        let mut sr = SpaceRouting::new("ws-default");
+        sr.add_rule(RoutingRule::domain("About", "about", "ws-about"));
+        assert_eq!(
+            sr.route("about:blank"),
+            "ws-about",
+            "Rust 侧 about:blank → 'about'（剥端口），Domain 规则命中"
         );
     }
 

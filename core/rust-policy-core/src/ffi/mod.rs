@@ -20,7 +20,9 @@ use std::collections::HashMap;
 /// FFI 版授权行动（与 decision::AuthorizedAction 字段一致）。
 /// RS-268（2026-10-01 审计）：补 serde::Serialize 派生——c_abi 响应直写
 /// 强类型结构（不再构建 Value 树）；字段名（snake_case）与既有 JSON 契约一致。
-#[derive(Debug, serde::Serialize, uniffi::Record)]
+/// RS-301（2026-10-02 审计）：补 Clone 派生——consume 收尾测试需要二次
+/// 提交同一 action（满账本 deny 后的重放断言）。
+#[derive(Debug, Clone, serde::Serialize, uniffi::Record)]
 pub struct FfiAuthorizedAction {
     pub session_id: String,
     pub tab_id: String,
@@ -281,18 +283,12 @@ pub fn build_fingerprint_pipeline_with_mode(
 /// 指纹种子（全体用户同噪声可被指纹聚类），非法 hex 位也按 0 混入。
 /// 现在要求**恰好 64 个合法 hex 字符**，任何畸形（长度≠64 / 非法字符）
 /// 返回 None——调用方不得回退到固定种子。
+///
+/// RS-303（2026-10-02 审计）：解码改 util::hex_decode 单源——手写
+/// nibble 循环是 crate 内又一份 hex 解码实现（口径漂移面）；64 字符
+/// 恰好解出 32 字节，`try_into` 收口定长形态。
 pub fn hex_seed_to_bytes(hex: &str) -> Option<[u8; 32]> {
-    let bytes = hex.as_bytes();
-    if bytes.len() != 64 {
-        return None;
-    }
-    let mut out = [0u8; 32];
-    for i in 0..32 {
-        let hi = crate::util::hex_digit(bytes[i * 2])?;
-        let lo = crate::util::hex_digit(bytes[i * 2 + 1])?;
-        out[i] = (hi << 4) | lo;
-    }
-    Some(out)
+    crate::util::hex_decode(hex)?.as_slice().try_into().ok()
 }
 
 mod broker;
@@ -438,6 +434,21 @@ mod hex_seed_tests {
         hex.push_str(&"ab".repeat(28)); // 补齐 64 字符
         let out = hex_seed_to_bytes(&hex).unwrap();
         assert_eq!(&out[..4], &[0x0f, 0xf0, 0x00, 0x00]);
+    }
+
+    // —— RS-303 回归（2026-10-02）：hex_decode 单源往返 ——
+
+    #[test]
+    fn hex_seed_roundtrips_with_util_codec() {
+        // RS-303：hex_seed_to_bytes 改 util::hex_decode 单源——64 字符
+        // hex 与 util::hex_encode 往返逐字节一致（定长 [u8;32] 收口）
+        let bytes: [u8; 32] = core::array::from_fn(|i| (i as u8).wrapping_mul(7) ^ 0x5a);
+        let hex = crate::util::hex_encode(&bytes);
+        assert_eq!(hex.len(), 64, "32 字节 → 64 字符");
+        assert_eq!(hex_seed_to_bytes(&hex), Some(bytes), "编解码往返逐字节一致");
+        // util::hex_decode 单源语义：奇数长度/非法字符在单源处拒绝（本
+        // 函数不再手写 nibble 判定）
+        assert_eq!(crate::util::hex_decode("zz"), None);
     }
 
     #[test]

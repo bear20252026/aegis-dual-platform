@@ -14,19 +14,26 @@
 # helpers directly inline like we're doing here.
 
 from __future__ import annotations
-
-import contextlib
-import ctypes
 import os
-import struct
 import sys
-import threading
-import typing
+import ctypes
 from dataclasses import dataclass
+import enum
+import struct
+import contextlib
+import datetime
+import threading
+import itertools
+import traceback
+import typing
+import platform
+
 
 # Used for default argument values
 _DEFAULT = object() # type: typing.Any
 
+import ctypes
+import struct
 
 class _UniffiRustBuffer(ctypes.Structure):
     _fields_ = [
@@ -51,7 +58,11 @@ class _UniffiRustBuffer(ctypes.Structure):
         return _uniffi_rust_call(_UniffiLib.ffi_aegis_policy_core_rustbuffer_free, self)
 
     def __str__(self):
-        return f"_UniffiRustBuffer(capacity={self.capacity}, len={self.len}, data={self.data[0:self.len]})"
+        return "_UniffiRustBuffer(capacity={}, len={}, data={})".format(
+            self.capacity,
+            self.len,
+            self.data[0:self.len]
+        )
 
     @contextlib.contextmanager
     def alloc_with_builder(*args):
@@ -101,7 +112,7 @@ class _UniffiForeignBytes(ctypes.Structure):
     ]
 
     def __str__(self):
-        return f"_UniffiForeignBytes(len={self.len}, data={self.data[0:self.len]})"
+        return "_UniffiForeignBytes(len={}, data={})".format(self.len, self.data[0:self.len])
 
 
 class _UniffiFfiConverterByRefBytes:
@@ -121,7 +132,7 @@ class _UniffiFfiConverterByRefBytes:
         # Tighter than `bytes-like`: `lower` uses `ctypes.c_char_p` which only
         # accepts `bytes`/`None`, so fail fast with a matching check.
         if not isinstance(value, bytes):
-            raise TypeError(f"a bytes object is required, not {type(value).__name__!r}")
+            raise TypeError("a bytes object is required, not {!r}".format(type(value).__name__))
 
     @staticmethod
     def lower(value):
@@ -348,14 +359,13 @@ def _uniffi_check_call_status(error_ffi_converter, call_status):
             msg = "Unknown rust panic"
         raise InternalError(msg)
     else:
-        raise InternalError(f"Invalid _UniffiRustCallStatus code: {call_status.code}")
+        raise InternalError("Invalid _UniffiRustCallStatus code: {}".format(
+            call_status.code))
 
 def _uniffi_trait_interface_call(call_status, make_call, write_return_value):
     try:
         return write_return_value(make_call())
-    # PY-256（2026-10-01 审计）：UniFFI trait 边界设计性盲捕——任何异常都必须
-    # 转为 FFI 错误码（不允许异常穿透 C ABI），保留 except Exception。
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         call_status.code = _UniffiRustCallStatus.CALL_UNEXPECTED_ERROR
         call_status.error_buf = _UniffiFfiConverterString.lower(repr(e))
 
@@ -366,8 +376,7 @@ def _uniffi_trait_interface_call_with_error(call_status, make_call, write_return
         except error_type as e:
             call_status.code = _UniffiRustCallStatus.CALL_ERROR
             call_status.error_buf = lower_error(e)
-    # PY-256：同上——外层兜底把一切未预期异常转为 FFI 错误码（C ABI 边界）
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         call_status.code = _UniffiRustCallStatus.CALL_UNEXPECTED_ERROR
         call_status.error_buf = _UniffiFfiConverterString.lower(repr(e))
 # Initial value and increment amount for handles. 
@@ -436,24 +445,22 @@ class _UniffiConverterPrimitiveInt(_UniffiConverterPrimitive):
     def check_lower(cls, value):
         try:
             value = value.__index__()
-        # PY-256：__index__ 可抛任意异常（用户类型）——转 TypeError 是设计
-        except Exception:  # noqa: BLE001
-            raise TypeError(f"'{type(value).__name__}' object cannot be interpreted as an integer")
+        except Exception:
+            raise TypeError("'{}' object cannot be interpreted as an integer".format(type(value).__name__))
         if not isinstance(value, int):
-            raise TypeError(f"__index__ returned non-int (type {type(value).__name__})")
+            raise TypeError("__index__ returned non-int (type {})".format(type(value).__name__))
         if not cls.VALUE_MIN <= value < cls.VALUE_MAX:
-            raise ValueError(f"{cls.CLASS_NAME} requires {cls.VALUE_MIN} <= value < {cls.VALUE_MAX}")
+            raise ValueError("{} requires {} <= value < {}".format(cls.CLASS_NAME, cls.VALUE_MIN, cls.VALUE_MAX))
 
 class _UniffiConverterPrimitiveFloat(_UniffiConverterPrimitive):
     @classmethod
     def check_lower(cls, value):
         try:
             value = value.__float__()
-        # PY-256：__float__ 可抛任意异常（用户类型）——转 TypeError 是设计
-        except Exception:  # noqa: BLE001
-            raise TypeError(f"must be real number, not {type(value).__name__}")
+        except Exception:
+            raise TypeError("must be real number, not {}".format(type(value).__name__))
         if not isinstance(value, float):
-            raise TypeError(f"__float__ returned non-float (type {type(value).__name__})")
+            raise TypeError("__float__ returned non-float (type {})".format(type(value).__name__))
 
 # Helper class for wrapper types that will always go through a _UniffiRustBuffer.
 # Classes should inherit from this and implement the `read` and `write` static methods.
@@ -517,19 +524,33 @@ def _uniffi_check_contract_api_version(lib):
         raise InternalError("UniFFI contract version mismatch: try cleaning and rebuilding your project")
 
 def _uniffi_check_api_checksums(lib):
-    if lib.uniffi_aegis_policy_core_checksum_func_build_fingerprint_pipeline() != 64820:
+    if lib.uniffi_aegis_policy_core_checksum_func_build_fingerprint_pipeline() != 55508:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_aegis_policy_core_checksum_func_build_fingerprint_pipeline_with_mode() != 28104:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_aegis_policy_core_checksum_func_canonicalize_external() != 33753:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_aegis_policy_core_checksum_func_extract_host() != 5061:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_aegis_policy_core_checksum_func_try_parse_external() != 54381:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_create_session() != 558:
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_advance_document_generation() != 51947:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_destroy_session() != 38937:
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_approve_navigation_confirmation() != 24260:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_evaluate_navigation() != 5946:
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_consume_navigation() != 38871:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_aegis_policy_core_checksum_constructor_ffibroker_new() != 18503:
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_create_session() != 29776:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_destroy_session() != 50576:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_evaluate_navigation() != 7022:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_reject_navigation_confirmation() != 15910:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_request_navigation_confirmation() != 39993:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_aegis_policy_core_checksum_constructor_ffibroker_new() != 22735:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
 
 # A ctypes library to expose the extern-C FFI definitions.
@@ -563,12 +584,27 @@ _UniffiLib.ffi_aegis_policy_core_uniffi_contract_version.restype = ctypes.c_uint
 _UniffiLib.uniffi_aegis_policy_core_checksum_func_build_fingerprint_pipeline.argtypes = (
 )
 _UniffiLib.uniffi_aegis_policy_core_checksum_func_build_fingerprint_pipeline.restype = ctypes.c_uint16
+_UniffiLib.uniffi_aegis_policy_core_checksum_func_build_fingerprint_pipeline_with_mode.argtypes = (
+)
+_UniffiLib.uniffi_aegis_policy_core_checksum_func_build_fingerprint_pipeline_with_mode.restype = ctypes.c_uint16
+_UniffiLib.uniffi_aegis_policy_core_checksum_func_canonicalize_external.argtypes = (
+)
+_UniffiLib.uniffi_aegis_policy_core_checksum_func_canonicalize_external.restype = ctypes.c_uint16
 _UniffiLib.uniffi_aegis_policy_core_checksum_func_extract_host.argtypes = (
 )
 _UniffiLib.uniffi_aegis_policy_core_checksum_func_extract_host.restype = ctypes.c_uint16
 _UniffiLib.uniffi_aegis_policy_core_checksum_func_try_parse_external.argtypes = (
 )
 _UniffiLib.uniffi_aegis_policy_core_checksum_func_try_parse_external.restype = ctypes.c_uint16
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_advance_document_generation.argtypes = (
+)
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_advance_document_generation.restype = ctypes.c_uint16
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_approve_navigation_confirmation.argtypes = (
+)
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_approve_navigation_confirmation.restype = ctypes.c_uint16
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_consume_navigation.argtypes = (
+)
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_consume_navigation.restype = ctypes.c_uint16
 _UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_create_session.argtypes = (
 )
 _UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_create_session.restype = ctypes.c_uint16
@@ -578,6 +614,12 @@ _UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_destroy_session.re
 _UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_evaluate_navigation.argtypes = (
 )
 _UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_evaluate_navigation.restype = ctypes.c_uint16
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_reject_navigation_confirmation.argtypes = (
+)
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_reject_navigation_confirmation.restype = ctypes.c_uint16
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_request_navigation_confirmation.argtypes = (
+)
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_request_navigation_confirmation.restype = ctypes.c_uint16
 _UniffiLib.uniffi_aegis_policy_core_checksum_constructor_ffibroker_new.argtypes = (
 )
 _UniffiLib.uniffi_aegis_policy_core_checksum_constructor_ffibroker_new.restype = ctypes.c_uint16
@@ -586,6 +628,18 @@ _UniffiLib.uniffi_aegis_policy_core_fn_func_build_fingerprint_pipeline.argtypes 
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_aegis_policy_core_fn_func_build_fingerprint_pipeline.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_aegis_policy_core_fn_func_build_fingerprint_pipeline_with_mode.argtypes = (
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_aegis_policy_core_fn_func_build_fingerprint_pipeline_with_mode.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_aegis_policy_core_fn_func_canonicalize_external.argtypes = (
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_aegis_policy_core_fn_func_canonicalize_external.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_aegis_policy_core_fn_func_extract_host.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -596,6 +650,30 @@ _UniffiLib.uniffi_aegis_policy_core_fn_func_try_parse_external.argtypes = (
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_aegis_policy_core_fn_func_try_parse_external.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_advance_document_generation.argtypes = (
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_advance_document_generation.restype = ctypes.c_int8
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_approve_navigation_confirmation.argtypes = (
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_approve_navigation_confirmation.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_consume_navigation.argtypes = (
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_consume_navigation.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_create_session.argtypes = (
     ctypes.c_uint64,
     _UniffiRustBuffer,
@@ -621,6 +699,22 @@ _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_evaluate_navigation.argt
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_evaluate_navigation.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_reject_navigation_confirmation.argtypes = (
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_reject_navigation_confirmation.restype = ctypes.c_int8
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_request_navigation_confirmation.argtypes = (
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_request_navigation_confirmation.restype = _UniffiRustBuffer
 _UniffiLib.uniffi_aegis_policy_core_fn_constructor_ffibroker_new.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -649,7 +743,7 @@ class _UniffiFfiConverterString:
     @staticmethod
     def check_lower(value):
         if not isinstance(value, str):
-            raise TypeError(f"argument must be str, not {type(value).__name__}")
+            raise TypeError("argument must be str, not {}".format(type(value).__name__))
         return value
 
     @staticmethod
@@ -691,9 +785,77 @@ class _UniffiFfiConverterUInt64(_UniffiConverterPrimitiveInt):
         buf.write_u64(value)
 
 @dataclass
+class FfiApprovalRequest:
+    """
+    FFI 版审批请求；确认 UI 必须展示并绑定其完整语义，不能仅信任 origin/method。
+    RS-268：补 serde::Serialize 派生（c_abi 强类型响应直写）。
+"""
+    def __init__(self, *, origin:str, method:str, path:str, scope:str, expires_at:int, nonce:str):
+        self.origin = origin
+        self.method = method
+        self.path = path
+        self.scope = scope
+        self.expires_at = expires_at
+        self.nonce = nonce
+        
+        
+
+    
+    def __str__(self):
+        return "FfiApprovalRequest(origin={}, method={}, path={}, scope={}, expires_at={}, nonce={})".format(self.origin, self.method, self.path, self.scope, self.expires_at, self.nonce)
+    def __eq__(self, other):
+        if self.origin != other.origin:
+            return False
+        if self.method != other.method:
+            return False
+        if self.path != other.path:
+            return False
+        if self.scope != other.scope:
+            return False
+        if self.expires_at != other.expires_at:
+            return False
+        if self.nonce != other.nonce:
+            return False
+        return True
+
+class _UniffiFfiConverterTypeFfiApprovalRequest(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return FfiApprovalRequest(
+            origin=_UniffiFfiConverterString.read(buf),
+            method=_UniffiFfiConverterString.read(buf),
+            path=_UniffiFfiConverterString.read(buf),
+            scope=_UniffiFfiConverterString.read(buf),
+            expires_at=_UniffiFfiConverterUInt64.read(buf),
+            nonce=_UniffiFfiConverterString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiFfiConverterString.check_lower(value.origin)
+        _UniffiFfiConverterString.check_lower(value.method)
+        _UniffiFfiConverterString.check_lower(value.path)
+        _UniffiFfiConverterString.check_lower(value.scope)
+        _UniffiFfiConverterUInt64.check_lower(value.expires_at)
+        _UniffiFfiConverterString.check_lower(value.nonce)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiFfiConverterString.write(value.origin, buf)
+        _UniffiFfiConverterString.write(value.method, buf)
+        _UniffiFfiConverterString.write(value.path, buf)
+        _UniffiFfiConverterString.write(value.scope, buf)
+        _UniffiFfiConverterUInt64.write(value.expires_at, buf)
+        _UniffiFfiConverterString.write(value.nonce, buf)
+
+@dataclass
 class FfiAuthorizedAction:
     """
     FFI 版授权行动（与 decision::AuthorizedAction 字段一致）。
+    RS-268（2026-10-01 审计）：补 serde::Serialize 派生——c_abi 响应直写
+    强类型结构（不再构建 Value 树）；字段名（snake_case）与既有 JSON 契约一致。
+    RS-301（2026-10-02 审计）：补 Clone 派生——consume 收尾测试需要二次
+    提交同一 action（满账本 deny 后的重放断言）。
 """
     def __init__(self, *, session_id:str, tab_id:str, document_generation:int, origin:str, method:str, canonical_parameters:str, scope:str, expires_at:int, nonce:str, policy_version:str, explanation:str):
         self.session_id = session_id
@@ -712,7 +874,7 @@ class FfiAuthorizedAction:
 
     
     def __str__(self):
-        return f"FfiAuthorizedAction(session_id={self.session_id}, tab_id={self.tab_id}, document_generation={self.document_generation}, origin={self.origin}, method={self.method}, canonical_parameters={self.canonical_parameters}, scope={self.scope}, expires_at={self.expires_at}, nonce={self.nonce}, policy_version={self.policy_version}, explanation={self.explanation})"
+        return "FfiAuthorizedAction(session_id={}, tab_id={}, document_generation={}, origin={}, method={}, canonical_parameters={}, scope={}, expires_at={}, nonce={}, policy_version={}, explanation={})".format(self.session_id, self.tab_id, self.document_generation, self.origin, self.method, self.canonical_parameters, self.scope, self.expires_at, self.nonce, self.policy_version, self.explanation)
     def __eq__(self, other):
         if self.session_id != other.session_id:
             return False
@@ -734,8 +896,9 @@ class FfiAuthorizedAction:
             return False
         if self.policy_version != other.policy_version:
             return False
-        # PY-256（2026-10-01 审计）：SIM103——末段不等短路改直接返回相等判定
-        return self.explanation == other.explanation
+        if self.explanation != other.explanation:
+            return False
+        return True
 
 class _UniffiFfiConverterTypeFfiAuthorizedAction(_UniffiConverterRustBuffer):
     @staticmethod
@@ -783,6 +946,57 @@ class _UniffiFfiConverterTypeFfiAuthorizedAction(_UniffiConverterRustBuffer):
         _UniffiFfiConverterString.write(value.explanation, buf)
 
 @dataclass
+class FfiCanonicalUrl:
+    """
+    FFI 版规范化 URL 授权绑定：fragment 不参与副作用授权。
+"""
+    def __init__(self, *, scheme:str, host:str, origin:str, canonical_parameters:str):
+        self.scheme = scheme
+        self.host = host
+        self.origin = origin
+        self.canonical_parameters = canonical_parameters
+        
+        
+
+    
+    def __str__(self):
+        return "FfiCanonicalUrl(scheme={}, host={}, origin={}, canonical_parameters={})".format(self.scheme, self.host, self.origin, self.canonical_parameters)
+    def __eq__(self, other):
+        if self.scheme != other.scheme:
+            return False
+        if self.host != other.host:
+            return False
+        if self.origin != other.origin:
+            return False
+        if self.canonical_parameters != other.canonical_parameters:
+            return False
+        return True
+
+class _UniffiFfiConverterTypeFfiCanonicalUrl(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        return FfiCanonicalUrl(
+            scheme=_UniffiFfiConverterString.read(buf),
+            host=_UniffiFfiConverterString.read(buf),
+            origin=_UniffiFfiConverterString.read(buf),
+            canonical_parameters=_UniffiFfiConverterString.read(buf),
+        )
+
+    @staticmethod
+    def check_lower(value):
+        _UniffiFfiConverterString.check_lower(value.scheme)
+        _UniffiFfiConverterString.check_lower(value.host)
+        _UniffiFfiConverterString.check_lower(value.origin)
+        _UniffiFfiConverterString.check_lower(value.canonical_parameters)
+
+    @staticmethod
+    def write(value, buf):
+        _UniffiFfiConverterString.write(value.scheme, buf)
+        _UniffiFfiConverterString.write(value.host, buf)
+        _UniffiFfiConverterString.write(value.origin, buf)
+        _UniffiFfiConverterString.write(value.canonical_parameters, buf)
+
+@dataclass
 class FfiDenyReason:
     """
     FFI 版拒绝原因。
@@ -796,14 +1010,15 @@ class FfiDenyReason:
 
     
     def __str__(self):
-        return f"FfiDenyReason(code={self.code}, detail={self.detail}, explanation={self.explanation})"
+        return "FfiDenyReason(code={}, detail={}, explanation={})".format(self.code, self.detail, self.explanation)
     def __eq__(self, other):
         if self.code != other.code:
             return False
         if self.detail != other.detail:
             return False
-        # PY-256：SIM103——直接返回相等判定
-        return self.explanation == other.explanation
+        if self.explanation != other.explanation:
+            return False
+        return True
 
 class _UniffiFfiConverterTypeFfiDenyReason(_UniffiConverterRustBuffer):
     @staticmethod
@@ -839,12 +1054,13 @@ class FfiOrigin:
 
     
     def __str__(self):
-        return f"FfiOrigin(scheme={self.scheme}, host={self.host})"
+        return "FfiOrigin(scheme={}, host={})".format(self.scheme, self.host)
     def __eq__(self, other):
         if self.scheme != other.scheme:
             return False
-        # PY-256：SIM103——直接返回相等判定
-        return self.host == other.host
+        if self.host != other.host:
+            return False
+        return True
 
 class _UniffiFfiConverterTypeFfiOrigin(_UniffiConverterRustBuffer):
     @staticmethod
@@ -884,47 +1100,46 @@ class FfiDecision:
             self.action = action
             
             
+            pass
 
     
             
             
     
         def __str__(self):
-            return f"FfiDecision.ALLOW(action={self.action})"
+            return "FfiDecision.ALLOW(action={})".format(self.action)
         def __eq__(self, other):
             if not isinstance(other, FfiDecision):
                 return NotImplemented
             if not other.is_ALLOW():
                 return False
-            # PY-256：SIM103——直接返回相等判定
-            return self.action == other.action
+            if self.action != other.action:
+                return False
+            return True
 
     @dataclass
     class REQUIRE_CONFIRMATION:
         
-        def __init__(self, origin:str, method:str):
-            self.origin = origin
+        def __init__(self, request:FfiApprovalRequest):
+            self.request = request
             
             
-            self.method = method
-            
-            
+            pass
 
     
             
             
     
         def __str__(self):
-            return f"FfiDecision.REQUIRE_CONFIRMATION(origin={self.origin}, method={self.method})"
+            return "FfiDecision.REQUIRE_CONFIRMATION(request={})".format(self.request)
         def __eq__(self, other):
             if not isinstance(other, FfiDecision):
                 return NotImplemented
             if not other.is_REQUIRE_CONFIRMATION():
                 return False
-            if self.origin != other.origin:
+            if self.request != other.request:
                 return False
-            # PY-256：SIM103——直接返回相等判定
-            return self.method == other.method
+            return True
 
     @dataclass
     class DENY:
@@ -933,20 +1148,22 @@ class FfiDecision:
             self.reason = reason
             
             
+            pass
 
     
             
             
     
         def __str__(self):
-            return f"FfiDecision.DENY(reason={self.reason})"
+            return "FfiDecision.DENY(reason={})".format(self.reason)
         def __eq__(self, other):
             if not isinstance(other, FfiDecision):
                 return NotImplemented
             if not other.is_DENY():
                 return False
-            # PY-256：SIM103——直接返回相等判定
-            return self.reason == other.reason
+            if self.reason != other.reason:
+                return False
+            return True
 
     
 
@@ -986,8 +1203,7 @@ class _UniffiFfiConverterTypeFfiDecision(_UniffiConverterRustBuffer):
             )
         if variant == 2:
             return FfiDecision.REQUIRE_CONFIRMATION(
-                _UniffiFfiConverterString.read(buf),
-                _UniffiFfiConverterString.read(buf),
+                _UniffiFfiConverterTypeFfiApprovalRequest.read(buf),
             )
         if variant == 3:
             return FfiDecision.DENY(
@@ -1001,8 +1217,7 @@ class _UniffiFfiConverterTypeFfiDecision(_UniffiConverterRustBuffer):
             _UniffiFfiConverterTypeFfiAuthorizedAction.check_lower(value.action)
             return
         if value.is_REQUIRE_CONFIRMATION():
-            _UniffiFfiConverterString.check_lower(value.origin)
-            _UniffiFfiConverterString.check_lower(value.method)
+            _UniffiFfiConverterTypeFfiApprovalRequest.check_lower(value.request)
             return
         if value.is_DENY():
             _UniffiFfiConverterTypeFfiDenyReason.check_lower(value.reason)
@@ -1016,18 +1231,78 @@ class _UniffiFfiConverterTypeFfiDecision(_UniffiConverterRustBuffer):
             _UniffiFfiConverterTypeFfiAuthorizedAction.write(value.action, buf)
         if value.is_REQUIRE_CONFIRMATION():
             buf.write_i32(2)
-            _UniffiFfiConverterString.write(value.origin, buf)
-            _UniffiFfiConverterString.write(value.method, buf)
+            _UniffiFfiConverterTypeFfiApprovalRequest.write(value.request, buf)
         if value.is_DENY():
             buf.write_i32(3)
             _UniffiFfiConverterTypeFfiDenyReason.write(value.reason, buf)
 
 
 
+
+
+
+
+
+class FfiProtectionMode(enum.Enum):
+    """
+    FFI 版保护模式（镜像 protection_mode::ProtectionMode——core 类型不做
+    uniffi 派生，遵循本模块「仅包装」原则，与 FfiBroker/ FfiDecision 同款）。
+"""
+    
+    COMPATIBLE = 0
+    """
+    兼容模式——仅 Canvas 噪声（网站兼容性最好）。
+"""
+    
+    BALANCED = 1
+    """
+    平衡模式——大部分防护启用（默认）。
+"""
+    
+    MAXIMUM = 2
+    """
+    最大隐私模式——全部 9 阶段启用。
+"""
+    
+
+
+class _UniffiFfiConverterTypeFfiProtectionMode(_UniffiConverterRustBuffer):
+    @staticmethod
+    def read(buf):
+        variant = buf.read_i32()
+        if variant == 1:
+            return FfiProtectionMode.COMPATIBLE
+        if variant == 2:
+            return FfiProtectionMode.BALANCED
+        if variant == 3:
+            return FfiProtectionMode.MAXIMUM
+        raise InternalError("Raw enum value doesn't match any cases")
+
+    @staticmethod
+    def check_lower(value):
+        if value == FfiProtectionMode.COMPATIBLE:
+            return
+        if value == FfiProtectionMode.BALANCED:
+            return
+        if value == FfiProtectionMode.MAXIMUM:
+            return
+        raise ValueError(value)
+
+    @staticmethod
+    def write(value, buf):
+        if value == FfiProtectionMode.COMPATIBLE:
+            buf.write_i32(1)
+        if value == FfiProtectionMode.BALANCED:
+            buf.write_i32(2)
+        if value == FfiProtectionMode.MAXIMUM:
+            buf.write_i32(3)
+
+
+
 class _UniffiFfiConverterBoolean:
     @classmethod
     def check_lower(cls, value):
-        return bool(value)
+        return not not value
 
     @classmethod
     def lower(cls, value):
@@ -1050,23 +1325,74 @@ class FfiBrokerProtocol(typing.Protocol):
     """
     FFI 版 Broker——跨语言导航决策（委托 ContextBroker）。
 
-    C#/Kotlin/Python 各自实例化，替代三语言重复的 Broker 实现。
+    平台运行时接入须使用生成的绑定和受验证的原生制品；在此之前此类型仅定义共享边界。
     内部用 Mutex 提供可变性——UniFFI Object 方法只支持 &self（Arc 只读）。
 """
     
+    def advance_document_generation(self, session_id: str,tab_id: str,next_generation: int) -> bool:
+        """
+        顶层文档切换后推进会话代际；错标签、跳跃与回退均拒绝。
+"""
+        raise NotImplementedError
+    def approve_navigation_confirmation(self, nonce: str,raw_url: str,scope: str) -> FfiDecision:
+        """
+        显式批准当前待审批导航。该入口仅兑换策略核心保留的精确授权，
+        并再次绑定当前 URL/scope、会话、代际、策略版本与过期时间。
+"""
+        raise NotImplementedError
+    def consume_navigation(self, action: FfiAuthorizedAction,raw_url: str,scope: str) -> FfiDecision:
+        """
+        在导航副作用执行点校验当前 URL/scope 并消费授权，拒绝参数替换或 nonce 重放。
+        绑定性比较：仅比较安全绑定属性，**不含 explanation**（人类可读审计
+        文本，不参与权限判定）。此前用 `*issued == action`（含 explanation），
+        而托管端序列化 NativeAction 不携带 explanation，导致合法一次消费被
+        误判 action_not_issued（"安装版崩溃"排查中暴露的确定性缺陷）。
+"""
+        raise NotImplementedError
     def create_session(self, session_id: str,tab_id: str,generation: int,ttl_seconds: int) -> bool:
         """
         创建新会话（ttl 秒）。
+
+        P1-11 修复（全量复审 2026-09-01）：TTL 下限钳制——宿主传 0 会
+        得到"签发成功、即刻过期"的静默失效会话（fail-open 陷阱面）。
+        钳到 MIN_SESSION_TTL_SECONDS 保底；RS-158：上限同样钳制到
+        MAX_SESSION_TTL_SECONDS（24h）——超长 TTL 会话近乎永生，扩大
+        授权/nonce 账本驻留暴露面。
+
+        RS-159：空 session_id 拒绝（fail-closed，与 contracts Action schema
+        的 minLength 1 对齐）——空 id 会话即匿名共享会话，任何传空 id 的
+        调用方都会落到同一会话，破坏 persona 隔离语义。
+        RS-223：session_id/tab_id 键长度上限 256 字节（与 core 层
+        MAX_TAB_ID_LEN 对齐）——超长键拒绝，封堵会话池键驻留内存放大面。
 """
         raise NotImplementedError
     def destroy_session(self, session_id: str) -> bool:
         """
         销毁会话。
+
+        RS-286（2026-10-02 审计）：core 层 destroy_session 改返回 bool
+        （remove().is_some()）——此前对不存在的 id 也恒 true，宿主无从区分
+        「已销毁」与「本来就不存在」。本入口透传 core 结果。
 """
         raise NotImplementedError
     def evaluate_navigation(self, session_id: str,tab_id: str,generation: int,raw_url: str,scope: str) -> FfiDecision:
         """
         评估导航意图（URL 解析 + 会话验证 → FfiDecision——fail-closed）。
+
+        职责边界（H-7）：本通路仅执行会话/代际/nonce 验证，policy.evaluate /
+        capability.validate 未接入 FFI 通路——单一事实源见 broker.rs 模块文档
+        H-7 审计注记，FFI 语义由本文件 ffi_navigation_tests 回归测试锁定。
+"""
+        raise NotImplementedError
+    def reject_navigation_confirmation(self, nonce: str) -> bool:
+        """
+        显式拒绝待审批导航。未知、已过期、已兑换或已拒绝的 nonce 一律返回 false。
+"""
+        raise NotImplementedError
+    def request_navigation_confirmation(self, session_id: str,tab_id: str,generation: int,raw_url: str,scope: str) -> FfiDecision:
+        """
+        将当前导航登记为待审批请求。它复用完整的策略评估和会话验证，
+        但不会向宿主发放可消费授权；只有同一 Broker 的显式批准才能兑换原始动作。
 """
         raise NotImplementedError
 
@@ -1074,7 +1400,7 @@ class FfiBroker(FfiBrokerProtocol):
     """
     FFI 版 Broker——跨语言导航决策（委托 ContextBroker）。
 
-    C#/Kotlin/Python 各自实例化，替代三语言重复的 Broker 实现。
+    平台运行时接入须使用生成的绑定和受验证的原生制品；在此之前此类型仅定义共享边界。
     内部用 Mutex 提供可变性——UniFFI Object 方法只支持 &self（Arc 只读）。
 """
     
@@ -1082,6 +1408,12 @@ class FfiBroker(FfiBrokerProtocol):
     def __init__(self, policy_version: str):
         """
         创建 Broker（policy_version 锁定——INV-03 一致性）。
+
+        RS-253（2026-10-01 审计）：空 policy_version 默认化——C ABI 对空版本
+        返回 null；UniFFI constructor 不可失败，无法同拒。空串在此替换为
+        DEFAULT_POLICY_VERSION 哨兵（授权签发/校验自洽），行为分叉以
+        「默认版本」收口（audit 提供的两选项之一），一致性由
+        empty_policy_version_defaults_on_uniffi_path 测试锁定。
 """
         
         _UniffiFfiConverterString.check_lower(policy_version)
@@ -1114,9 +1446,98 @@ class FfiBroker(FfiBrokerProtocol):
         inst = cls.__new__(cls)
         inst._handle = handle
         return inst
+    def advance_document_generation(self, session_id: str,tab_id: str,next_generation: int) -> bool:
+        """
+        顶层文档切换后推进会话代际；错标签、跳跃与回退均拒绝。
+"""
+        
+        _UniffiFfiConverterString.check_lower(session_id)
+
+        _UniffiFfiConverterString.check_lower(tab_id)
+
+        _UniffiFfiConverterUInt64.check_lower(next_generation)
+        _uniffi_lowered_args = (
+            self._uniffi_clone_handle(),
+            _UniffiFfiConverterString.lower(session_id),
+            _UniffiFfiConverterString.lower(tab_id),
+            _UniffiFfiConverterUInt64.lower(next_generation),
+        )
+        _uniffi_lift_return = _UniffiFfiConverterBoolean.lift
+        _uniffi_error_converter = None
+        _uniffi_ffi_result = _uniffi_rust_call_with_error(
+            _uniffi_error_converter,
+            _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_advance_document_generation,
+            *_uniffi_lowered_args,
+        )
+        return _uniffi_lift_return(_uniffi_ffi_result)
+    def approve_navigation_confirmation(self, nonce: str,raw_url: str,scope: str) -> FfiDecision:
+        """
+        显式批准当前待审批导航。该入口仅兑换策略核心保留的精确授权，
+        并再次绑定当前 URL/scope、会话、代际、策略版本与过期时间。
+"""
+        
+        _UniffiFfiConverterString.check_lower(nonce)
+
+        _UniffiFfiConverterString.check_lower(raw_url)
+
+        _UniffiFfiConverterString.check_lower(scope)
+        _uniffi_lowered_args = (
+            self._uniffi_clone_handle(),
+            _UniffiFfiConverterString.lower(nonce),
+            _UniffiFfiConverterString.lower(raw_url),
+            _UniffiFfiConverterString.lower(scope),
+        )
+        _uniffi_lift_return = _UniffiFfiConverterTypeFfiDecision.lift
+        _uniffi_error_converter = None
+        _uniffi_ffi_result = _uniffi_rust_call_with_error(
+            _uniffi_error_converter,
+            _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_approve_navigation_confirmation,
+            *_uniffi_lowered_args,
+        )
+        return _uniffi_lift_return(_uniffi_ffi_result)
+    def consume_navigation(self, action: FfiAuthorizedAction,raw_url: str,scope: str) -> FfiDecision:
+        """
+        在导航副作用执行点校验当前 URL/scope 并消费授权，拒绝参数替换或 nonce 重放。
+        绑定性比较：仅比较安全绑定属性，**不含 explanation**（人类可读审计
+        文本，不参与权限判定）。此前用 `*issued == action`（含 explanation），
+        而托管端序列化 NativeAction 不携带 explanation，导致合法一次消费被
+        误判 action_not_issued（"安装版崩溃"排查中暴露的确定性缺陷）。
+"""
+        
+        _UniffiFfiConverterTypeFfiAuthorizedAction.check_lower(action)
+
+        _UniffiFfiConverterString.check_lower(raw_url)
+
+        _UniffiFfiConverterString.check_lower(scope)
+        _uniffi_lowered_args = (
+            self._uniffi_clone_handle(),
+            _UniffiFfiConverterTypeFfiAuthorizedAction.lower(action),
+            _UniffiFfiConverterString.lower(raw_url),
+            _UniffiFfiConverterString.lower(scope),
+        )
+        _uniffi_lift_return = _UniffiFfiConverterTypeFfiDecision.lift
+        _uniffi_error_converter = None
+        _uniffi_ffi_result = _uniffi_rust_call_with_error(
+            _uniffi_error_converter,
+            _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_consume_navigation,
+            *_uniffi_lowered_args,
+        )
+        return _uniffi_lift_return(_uniffi_ffi_result)
     def create_session(self, session_id: str,tab_id: str,generation: int,ttl_seconds: int) -> bool:
         """
         创建新会话（ttl 秒）。
+
+        P1-11 修复（全量复审 2026-09-01）：TTL 下限钳制——宿主传 0 会
+        得到"签发成功、即刻过期"的静默失效会话（fail-open 陷阱面）。
+        钳到 MIN_SESSION_TTL_SECONDS 保底；RS-158：上限同样钳制到
+        MAX_SESSION_TTL_SECONDS（24h）——超长 TTL 会话近乎永生，扩大
+        授权/nonce 账本驻留暴露面。
+
+        RS-159：空 session_id 拒绝（fail-closed，与 contracts Action schema
+        的 minLength 1 对齐）——空 id 会话即匿名共享会话，任何传空 id 的
+        调用方都会落到同一会话，破坏 persona 隔离语义。
+        RS-223：session_id/tab_id 键长度上限 256 字节（与 core 层
+        MAX_TAB_ID_LEN 对齐）——超长键拒绝，封堵会话池键驻留内存放大面。
 """
         
         _UniffiFfiConverterString.check_lower(session_id)
@@ -1144,6 +1565,10 @@ class FfiBroker(FfiBrokerProtocol):
     def destroy_session(self, session_id: str) -> bool:
         """
         销毁会话。
+
+        RS-286（2026-10-02 审计）：core 层 destroy_session 改返回 bool
+        （remove().is_some()）——此前对不存在的 id 也恒 true，宿主无从区分
+        「已销毁」与「本来就不存在」。本入口透传 core 结果。
 """
         
         _UniffiFfiConverterString.check_lower(session_id)
@@ -1162,6 +1587,10 @@ class FfiBroker(FfiBrokerProtocol):
     def evaluate_navigation(self, session_id: str,tab_id: str,generation: int,raw_url: str,scope: str) -> FfiDecision:
         """
         评估导航意图（URL 解析 + 会话验证 → FfiDecision——fail-closed）。
+
+        职责边界（H-7）：本通路仅执行会话/代际/nonce 验证，policy.evaluate /
+        capability.validate 未接入 FFI 通路——单一事实源见 broker.rs 模块文档
+        H-7 审计注记，FFI 语义由本文件 ffi_navigation_tests 回归测试锁定。
 """
         
         _UniffiFfiConverterString.check_lower(session_id)
@@ -1189,6 +1618,55 @@ class FfiBroker(FfiBrokerProtocol):
             *_uniffi_lowered_args,
         )
         return _uniffi_lift_return(_uniffi_ffi_result)
+    def reject_navigation_confirmation(self, nonce: str) -> bool:
+        """
+        显式拒绝待审批导航。未知、已过期、已兑换或已拒绝的 nonce 一律返回 false。
+"""
+        
+        _UniffiFfiConverterString.check_lower(nonce)
+        _uniffi_lowered_args = (
+            self._uniffi_clone_handle(),
+            _UniffiFfiConverterString.lower(nonce),
+        )
+        _uniffi_lift_return = _UniffiFfiConverterBoolean.lift
+        _uniffi_error_converter = None
+        _uniffi_ffi_result = _uniffi_rust_call_with_error(
+            _uniffi_error_converter,
+            _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_reject_navigation_confirmation,
+            *_uniffi_lowered_args,
+        )
+        return _uniffi_lift_return(_uniffi_ffi_result)
+    def request_navigation_confirmation(self, session_id: str,tab_id: str,generation: int,raw_url: str,scope: str) -> FfiDecision:
+        """
+        将当前导航登记为待审批请求。它复用完整的策略评估和会话验证，
+        但不会向宿主发放可消费授权；只有同一 Broker 的显式批准才能兑换原始动作。
+"""
+        
+        _UniffiFfiConverterString.check_lower(session_id)
+
+        _UniffiFfiConverterString.check_lower(tab_id)
+
+        _UniffiFfiConverterUInt64.check_lower(generation)
+
+        _UniffiFfiConverterString.check_lower(raw_url)
+
+        _UniffiFfiConverterString.check_lower(scope)
+        _uniffi_lowered_args = (
+            self._uniffi_clone_handle(),
+            _UniffiFfiConverterString.lower(session_id),
+            _UniffiFfiConverterString.lower(tab_id),
+            _UniffiFfiConverterUInt64.lower(generation),
+            _UniffiFfiConverterString.lower(raw_url),
+            _UniffiFfiConverterString.lower(scope),
+        )
+        _uniffi_lift_return = _UniffiFfiConverterTypeFfiDecision.lift
+        _uniffi_error_converter = None
+        _uniffi_ffi_result = _uniffi_rust_call_with_error(
+            _uniffi_error_converter,
+            _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_request_navigation_confirmation,
+            *_uniffi_lowered_args,
+        )
+        return _uniffi_lift_return(_uniffi_ffi_result)
 
 
 
@@ -1202,7 +1680,7 @@ class _UniffiFfiConverterTypeFfiBroker:
     @staticmethod
     def check_lower(value: FfiBroker):
         if not isinstance(value, FfiBroker):
-            raise TypeError(f"Expected FfiBroker instance, {type(value).__name__} found")
+            raise TypeError("Expected FfiBroker instance, {} found".format(type(value).__name__))
 
     @staticmethod
     def lower(value: FfiBroker) -> ctypes.c_uint64:
@@ -1218,6 +1696,31 @@ class _UniffiFfiConverterTypeFfiBroker:
     @classmethod
     def write(cls, value: FfiBroker, buf: _UniffiRustBuffer):
         buf.write_u64(cls.lower(value))
+
+class _UniffiFfiConverterOptionalTypeFfiCanonicalUrl(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        if value is not None:
+            _UniffiFfiConverterTypeFfiCanonicalUrl.check_lower(value)
+
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.write_u8(0)
+            return
+
+        buf.write_u8(1)
+        _UniffiFfiConverterTypeFfiCanonicalUrl.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.read_u8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return _UniffiFfiConverterTypeFfiCanonicalUrl.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
 
 class _UniffiFfiConverterOptionalString(_UniffiConverterRustBuffer):
     @classmethod
@@ -1270,7 +1773,24 @@ class _UniffiFfiConverterOptionalTypeFfiOrigin(_UniffiConverterRustBuffer):
             raise InternalError("Unexpected flag byte for optional type")
 def build_fingerprint_pipeline(session_seed: str) -> str:
     """
-    生成指纹防护管道 JS（委托 fingerprint_pipeline 逻辑——跨端统一）。
+    生成指纹防护管道 JS（委托 shield::FingerprintShield——跨端统一）。
+
+    RS-036：非法种子（长度≠64 或含非 hex 字符）返回**空脚本**——
+    此前畸形种子静默退化为全零种子（全体用户同噪声可被指纹聚类）。
+    宿主应在调用前校验种子；空脚本注入无效果（fail-closed——绝不以
+    固定种子注入）。
+
+    RS-133（审计 2026-09-25）：修正过期注释——JS 生成**就在 Rust 侧**
+    （FingerprintShield::from_seed(seed).inject_script()），并非
+    "Python 侧 legacy、Rust 仅提供 seed 派生"；文档与实现此前不符。
+
+    RS-214（2026-09-26 审计）：名实澄清——本函数名为 pipeline 实则只生成
+    **单阶段** FingerprintShield 脚本（canvas 噪声 + hardwareConcurrency），
+    **不是**九阶段管线（孪生对账口径：Android WebViewHardening
+    fingerprintShieldScript / Windows FingerprintShield.cs 同为单阶段
+    shield 脚本）。per-site 隔离的完整九阶段管线经
+    [`build_fingerprint_pipeline_with_mode`]（domain + mode 参数）获取——
+    此前宿主经 FFI 永远拿不到带 domain 的真正管线。
 """
     
     _UniffiFfiConverterString.check_lower(session_seed)
@@ -1285,7 +1805,57 @@ def build_fingerprint_pipeline(session_seed: str) -> str:
         *_uniffi_lowered_args,
     )
     return _uniffi_lift_return(_uniffi_ffi_result)
-def extract_host(url: str) -> str | None:
+def build_fingerprint_pipeline_with_mode(session_seed: str,mode: FfiProtectionMode,domain: str) -> str:
+    """
+    生成模式感知 + per-site 隔离的完整指纹防护管线 JS（RS-214 新增导出）。
+
+    此前宿主经 FFI 只能拿到 [`build_fingerprint_pipeline`] 的单阶段脚本，
+    带 domain 的九阶段管线（protection_mode::fingerprint_pipeline_with_mode）
+    未做 `#[uniffi::export]`——per-site 隔离管线对宿主不可达。
+
+    - `session_seed`：64 字符 hex（非法返回空脚本——RS-036 fail-closed）；
+    - `mode`：保护模式（决定启用的阶段集）；
+    - `domain`：顶层文档 eTLD+1 域名（PerSiteSeed 按域派生站点种子——
+    站点间噪声去相关，防跨站 canvas 哈希关联）。RS-254：超 256 字节
+    返回空脚本（fail-closed——与 scope/会话键同口径上限）。
+"""
+    
+    _UniffiFfiConverterString.check_lower(session_seed)
+
+    _UniffiFfiConverterTypeFfiProtectionMode.check_lower(mode)
+
+    _UniffiFfiConverterString.check_lower(domain)
+    _uniffi_lowered_args = (
+        _UniffiFfiConverterString.lower(session_seed),
+        _UniffiFfiConverterTypeFfiProtectionMode.lower(mode),
+        _UniffiFfiConverterString.lower(domain),
+    )
+    _uniffi_lift_return = _UniffiFfiConverterString.lift
+    _uniffi_error_converter = None
+    _uniffi_ffi_result = _uniffi_rust_call_with_error(
+        _uniffi_error_converter,
+        _UniffiLib.uniffi_aegis_policy_core_fn_func_build_fingerprint_pipeline_with_mode,
+        *_uniffi_lowered_args,
+    )
+    return _uniffi_lift_return(_uniffi_ffi_result)
+def canonicalize_external(raw_url: str) -> typing.Optional[FfiCanonicalUrl]:
+    """
+    跨端导航使用的规范化入口，确保授权绑定到一致的 origin 与 path/query。
+"""
+    
+    _UniffiFfiConverterString.check_lower(raw_url)
+    _uniffi_lowered_args = (
+        _UniffiFfiConverterString.lower(raw_url),
+    )
+    _uniffi_lift_return = _UniffiFfiConverterOptionalTypeFfiCanonicalUrl.lift
+    _uniffi_error_converter = None
+    _uniffi_ffi_result = _uniffi_rust_call_with_error(
+        _uniffi_error_converter,
+        _UniffiLib.uniffi_aegis_policy_core_fn_func_canonicalize_external,
+        *_uniffi_lowered_args,
+    )
+    return _uniffi_lift_return(_uniffi_ffi_result)
+def extract_host(url: str) -> typing.Optional[str]:
     """
     URL 主机名提取（委托 util 模块）。
 """
@@ -1302,7 +1872,7 @@ def extract_host(url: str) -> str | None:
         *_uniffi_lowered_args,
     )
     return _uniffi_lift_return(_uniffi_ffi_result)
-def try_parse_external(raw_url: str) -> FfiOrigin | None:
+def try_parse_external(raw_url: str) -> typing.Optional[FfiOrigin]:
     """
     URL 校验（委托 origin 模块——消除 C#/Kotlin/Python 重复实现）。
 
@@ -1323,14 +1893,19 @@ def try_parse_external(raw_url: str) -> FfiOrigin | None:
     return _uniffi_lift_return(_uniffi_ffi_result)
 
 __all__ = [
-    "FfiAuthorizedAction",
-    "FfiBroker",
-    "FfiBrokerProtocol",
+    "InternalError",
     "FfiDecision",
+    "FfiProtectionMode",
+    "FfiApprovalRequest",
+    "FfiAuthorizedAction",
+    "FfiCanonicalUrl",
     "FfiDenyReason",
     "FfiOrigin",
-    "InternalError",
     "build_fingerprint_pipeline",
+    "build_fingerprint_pipeline_with_mode",
+    "canonicalize_external",
     "extract_host",
     "try_parse_external",
+    "FfiBroker",
+    "FfiBrokerProtocol",
 ]

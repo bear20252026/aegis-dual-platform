@@ -54,8 +54,13 @@ pub fn extract_hostname(url: &str) -> &str {
         .find(['/', '?', '#'])
         .unwrap_or(without_scheme.len());
     let authority = &without_scheme[..authority_end];
-    // 剥 userinfo（user@host——authority 内任意 @ 之后是 host）
-    match authority.find('@') {
+    // 剥 userinfo（user@host——authority 内最后一个 @ 之后是 host）
+    // RS-275（2026-10-02 审计）：userinfo 终止符取首个 @（find）与 WHATWG
+    // 及本 crate 其它链路（https_only rsplit_once / redact_url_for_log rfind）
+    // 分叉——`https://x@evil@ads.example.com/` 中首个 @ 把 `evil@ads.example.com`
+    // 整段当 host 前缀，adblock 提取的 host 带 `evil@` 前缀导致漏拦。
+    // 统一取最后一个 @（WHATWG 口径）。
+    match authority.rfind('@') {
         Some(at) => &authority[at + 1..],
         None => authority,
     }
@@ -339,6 +344,28 @@ mod tests {
         assert_eq!(
             extract_host("https://Mixed-Case.Host.IO/"),
             Some("mixed-case.host.io".into())
+        );
+    }
+
+    // —— RS-275 回归（2026-10-02）：userinfo 取最后一个 @ ——
+
+    #[test]
+    fn extract_hostname_userinfo_takes_last_at() {
+        // RS-275：`a@b@blocked.host` 此前取首个 @，把 `b@blocked.host` 整段
+        // 当 host——adblock 漏拦；与 WHATWG / https_only（rsplit_once）/
+        // redact_url_for_log（rfind）统一取最后一个 @
+        assert_eq!(
+            extract_hostname("https://a@b@blocked.host/path"),
+            "blocked.host"
+        );
+        assert_eq!(
+            extract_host("https://x@evil@ads.example.com/"),
+            Some("ads.example.com".into())
+        );
+        // 单 @ userinfo 行为不变（既有锚点）
+        assert_eq!(
+            extract_hostname("https://user:pass@example.com/x"),
+            "example.com"
         );
     }
 }

@@ -175,38 +175,24 @@ impl QueryStripper {
   var LOWER_SET = {{}};
   TRACKING_PARAMS.forEach(function(p) {{ LOWER_SET[p.toLowerCase()] = true; }});
   function stripParams(url) {{
-    try {{
-      var u = new URL(url);
-      var changed = false;
-      // 大小写不敏感剥离——searchParams.has 区分大小写，Gclid/gClId
-      // 变体此前在浏览器拦截路径完整绕过（Rust 侧已是 ignore_case）
-      var doomed = [];
-      u.searchParams.forEach(function(v, k) {{
-        if (LOWER_SET[k.toLowerCase()]) doomed.push(k);
-      }});
-      doomed.forEach(function(k) {{
-        u.searchParams.delete(k);
-        changed = true;
-      }});
-      return changed ? u.toString() : url;
-    }} catch(e) {{
-      // RS-248（2026-10-01 审计）：相对 URL 无 base 抛异常——此前原样
-      // 放行（追踪参数在相对请求上畅通剥离绕过）。手工剥离与 Rust strip
-      // 同语义：先分离 fragment 再定位 query，只动 query 段，保持相对形态
-      //（绝对化会改变请求字符串）
-      var hashIdx = url.indexOf('#');
-      var rest = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
-      var hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
-      var qIdx = rest.indexOf('?');
-      if (qIdx < 0) return url;
-      var base = rest.slice(0, qIdx);
-      var kept = rest.slice(qIdx + 1).split('&').filter(function(param) {{
-        if (!param) return false;
-        var key = param.split('=')[0];
-        return !LOWER_SET[key.toLowerCase()];
-      }});
-      return kept.length ? (base + '?' + kept.join('&') + hash) : (base + hash);
-    }}
+    // RS-295（2026-10-02 审计）：此前绝对 URL 经 URL 对象解析后按序列化
+    // 输出（toString 通道），序列化引入额外归一化（scheme/host 大小写
+    // 折叠、空 path 补尾斜杠），请求字符串被静默改写——与 Rust strip 的
+    // 纯字符串手术口径分叉。相对 URL（RS-248）与绝对 URL 统一纯字符串
+    // 手术单源：先分离 fragment 再定位 query，只动 query 段，其余字节
+    // 原样保留
+    var hashIdx = url.indexOf('#');
+    var rest = hashIdx >= 0 ? url.slice(0, hashIdx) : url;
+    var hash = hashIdx >= 0 ? url.slice(hashIdx) : '';
+    var qIdx = rest.indexOf('?');
+    if (qIdx < 0) return url;
+    var base = rest.slice(0, qIdx);
+    var kept = rest.slice(qIdx + 1).split('&').filter(function(param) {{
+      if (!param) return false;
+      var key = param.split('=')[0];
+      return !LOWER_SET[key.toLowerCase()];
+    }});
+    return kept.length ? (base + '?' + kept.join('&') + hash) : (base + hash);
   }}
 
   // 拦截 fetch 请求
@@ -216,6 +202,12 @@ impl QueryStripper {
       input = stripParams(input);
     }} else if (input instanceof Request) {{
       input = new Request(stripParams(input.url), input);
+    }} else if (input instanceof URL) {{
+      // RS-280（2026-10-02 审计）：fetch(URL 对象) 形态此前 string/Request
+      // 两分支均不命中、URL 对象原样透传——追踪参数完整绕过。剥后以
+      // 字符串形态传递（fetch 接受字符串，且避免重建 URL 对象引入
+      // 二次归一化）
+      input = stripParams(input.href);
     }}
     return origFetch.call(this, input, init);
   }};
@@ -457,8 +449,9 @@ mod tests {
 
     #[test]
     fn js_strip_handles_relative_urls_manually() {
-        // RS-248：JS 侧 stripParams 对相对 URL（new URL 无 base 抛异常）
-        // 此前原样放行——现走手工剥离分支（与 Rust strip 同语义）
+        // RS-248：JS 侧 stripParams 此前对相对 URL（new URL 无 base 抛
+        // 异常）原样放行。RS-295（2026-10-02 审计）起绝对/相对统一走纯
+        // 字符串手术单源——不再依赖 URL 解析，无异常分支，相对形态天然保留
         let script = QueryStripper::new().inject_script();
         assert!(
             script.contains("var hashIdx = url.indexOf('#');"),
@@ -474,10 +467,58 @@ mod tests {
             ),
             "重建：全追踪参数剥 query 段，保留 fragment 与相对形态"
         );
-        // 手工分支必须位于 catch 内（绝对 URL 仍走 URL 解析路径）
-        let catch_pos = script.find("} catch(e) {").expect("catch 分支");
-        let manual_pos = script.find("var hashIdx").expect("手工剥离");
-        assert!(catch_pos < manual_pos, "手工剥离在异常兜底分支内");
+        // RS-295：URL 解析路径必须整体移除（相对/绝对单源，无异常兜底）
+        assert!(
+            !script.contains("new URL("),
+            "不得依赖 URL 解析（相对 URL 会抛异常，序列化引入归一化）"
+        );
+    }
+
+    // —— RS-280/295 回归（2026-10-02 审计） ——
+
+    #[test]
+    fn fetch_url_object_branch_strips() {
+        // RS-280：fetch(URL 对象) 形态此前 string/Request 两分支均不命中、
+        // URL 对象原样透传——追踪参数在 URL 对象请求上完整绕过
+        let script = QueryStripper::new().inject_script();
+        assert!(
+            script.contains("} else if (input instanceof URL) {"),
+            "fetch 包装必须有 URL 对象分支"
+        );
+        assert!(
+            script.contains("input = stripParams(input.href);"),
+            "URL 对象取 href 剥离，剥后以字符串形态传递"
+        );
+    }
+
+    #[test]
+    fn js_strip_is_pure_string_surgery_single_source() {
+        // RS-295：changed 分支此前返回 u.toString()——URL 序列化引入额外
+        // 归一化（scheme/host 大小写折叠、补尾斜杠）。统一纯字符串手术
+        // 单源（绝对/相对同路径），序列化路径必须移除
+        let script = QueryStripper::new().inject_script();
+        assert!(!script.contains("u.toString()"), "不得走 URL 序列化");
+        assert!(
+            !script.contains("searchParams"),
+            "searchParams 通道必须移除"
+        );
+    }
+
+    #[test]
+    fn strip_preserves_scheme_host_case_and_trailing_slash_form() {
+        // RS-295：纯字符串手术的往返锚点——scheme/host 大小写与尾斜杠
+        // 形态原样保留（不引入 URL 序列化归一化；双端口径一致）
+        let qs = QueryStripper::new();
+        assert_eq!(
+            qs.strip("HTTPS://EXAMPLE.COM:8443?fbclid=x"),
+            "HTTPS://EXAMPLE.COM:8443",
+            "scheme/host 大小写保留，空 path 不补尾斜杠"
+        );
+        assert_eq!(
+            qs.strip("https://Example.com/path/?id=1&fbclid=y"),
+            "https://Example.com/path/?id=1",
+            "既有尾斜杠保留，不增不删"
+        );
     }
 
     #[test]

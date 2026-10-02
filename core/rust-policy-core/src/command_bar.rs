@@ -270,6 +270,12 @@ impl CommandBar {
                     "subtitle": e.subtitle,
                     "value": e.value,
                     "icon": e.icon,
+                    // RS-305（2026-10-02 审计）：注入侧预计算小写缓存——
+                    // JS search 此前每条目每次搜索 3 次 toLowerCase
+                    //（O(条目×查询) 分配，与 Rust RS-039 修复前的形态同病）
+                    "title_lc": e.title_lc,
+                    "subtitle_lc": e.subtitle_lc,
+                    "value_lc": e.value_lc,
                 })
                 .to_string()
             })
@@ -288,12 +294,12 @@ impl CommandBar {
     var q = (query || '').toLowerCase();
     if (!q) return ENTRIES.slice(0, MAX_RESULTS);
     return ENTRIES.filter(function(e) {{
-      // RS-123（审计 2026-09-25）：与 Rust CommandEntry::matches 口径对齐——
-      // Rust 侧含 value 通道（title+subtitle+value），此前 JS 漏
-      // value（URL/action name 搜索结果两端不一致）
-      return e.title.toLowerCase().indexOf(q) >= 0 ||
-             e.subtitle.toLowerCase().indexOf(q) >= 0 ||
-             e.value.toLowerCase().indexOf(q) >= 0;
+      // RS-305（2026-10-02 审计）：条目小写用注入侧预计算缓存
+      //（title_lc/subtitle_lc/value_lc——Rust RS-039 同口径），此前每条目
+      // 每次搜索 3 次 toLowerCase。RS-123 的 value 通道口径保持
+      return e.title_lc.indexOf(q) >= 0 ||
+             e.subtitle_lc.indexOf(q) >= 0 ||
+             e.value_lc.indexOf(q) >= 0;
     }}).slice(0, MAX_RESULTS);
   }}
 
@@ -528,12 +534,49 @@ mod tests {
     #[test]
     fn script_search_aligns_with_rust_value_channel() {
         // RS-123 回归：JS search 必须检查 value 通道（此前漏掉——
-        // 与 Rust matches() 口径漂移）
+        // 与 Rust matches() 口径漂移）。RS-305（2026-10-02 审计）起 value
+        // 通道改用注入侧预计算小写缓存（value_lc——Rust RS-039 同口径），
+        // 不再每条目每次搜索 toLowerCase
         let cb = CommandBar::new();
         let script = cb.inject_script();
         assert!(
-            script.contains("e.value.toLowerCase().indexOf(q) >= 0"),
-            "JS search 必须覆盖 value 通道（与 Rust 口径对齐）"
+            script.contains("e.value_lc.indexOf(q) >= 0"),
+            "JS search 必须覆盖 value 通道（预计算缓存形态）"
+        );
+    }
+
+    // —— RS-305 回归（2026-10-02 审计）：注入侧小写缓存 ——
+
+    #[test]
+    fn script_search_uses_precomputed_lowercase_cache() {
+        // RS-305：JS search 此前每条目每次搜索 3 次 toLowerCase（与 Rust
+        // RS-039 修复前同病）——注入侧构造时预计算 title_lc/subtitle_lc/
+        // value_lc，搜索只折叠查询一次
+        let mut cb = CommandBar::new();
+        cb.add_entry(CommandEntry::navigate("GitHub", "https://github.com"));
+        let script = cb.inject_script();
+        for field in ["title_lc", "subtitle_lc", "value_lc"] {
+            assert!(
+                script.contains(&format!("\"{field}\":\"")),
+                "条目 JSON 必须携带预计算缓存 {field}"
+            );
+            assert!(
+                script.contains(&format!("e.{field}.indexOf(q) >= 0")),
+                "search 必须消费缓存 {field}"
+            );
+        }
+        assert!(
+            script.contains("\"title_lc\":\"github\""),
+            "缓存值为小写形态"
+        );
+        // 每条目逐字段的旧 toLowerCase 形态不得残留（查询侧单次折叠保留）
+        assert!(!script.contains("e.title.toLowerCase()"));
+        assert!(!script.contains("e.subtitle.toLowerCase()"));
+        assert!(!script.contains("e.value.toLowerCase()"));
+        assert_eq!(
+            script.matches("toLowerCase()").count(),
+            1,
+            "仅查询折叠一次 toLowerCase"
         );
     }
 

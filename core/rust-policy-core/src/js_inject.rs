@@ -14,6 +14,16 @@
 /// - `name`：模块名称（用于日志/调试）
 /// - `inject_script`：生成完整的 JS 注入脚本
 /// - `enabled`：是否启用（默认 true，可按 ProtectionMode 覆盖）
+///
+/// RS-304（2026-10-02 审计）：**参数化阶段不经 trait** 的取舍登记——
+/// `PerSiteSeed::inject_script(&self, domain: &str)` 需要宿主传入顶层
+/// 文档域名（eTLD+1，页面不可伪造的参数），与本 trait 的零参签名不
+/// 兼容。为它引入带参 trait 变体会让通用 `JsPipeline` 组装面复杂化
+///（每个参数化阶段一套签名），取舍为：参数化阶段由
+/// `protection_mode::fingerprint_pipeline_with_mode` 在管线组装单源处
+/// 显式调用（不经 trait 名单）；零参阶段全部走本 trait（名单见下方
+/// impl_js_injectable，与管线 9 阶段一一对应——ProtectionMode 的模式
+/// 声明阶段亦在名单内）。
 pub trait JsInjectable {
     /// 模块名称（如 "LetterboxShield"、"WebGLSpoof"）。
     fn name(&self) -> &str;
@@ -144,6 +154,7 @@ macro_rules! impl_js_injectable {
 }
 
 impl_js_injectable!(
+    crate::protection_mode::ProtectionMode => "ProtectionMode",
     crate::tostring_guard::ToStringGuard => "ToStringGuard",
     crate::shield::FingerprintShield => "FingerprintShield",
     crate::letterbox::LetterboxShield => "LetterboxShield",
@@ -342,5 +353,37 @@ mod tests {
         let pos_a = script.find("A_MARKER;").expect("A 缺失");
         let pos_c = script.find("C_MARKER;").expect("C 缺失");
         assert!(pos_a < pos_c, "剩余阶段相对顺序保持");
+    }
+
+    // —— RS-304 回归（2026-10-02 审计）：trait 名单对齐管线 9 阶段 ——
+
+    #[test]
+    fn protection_mode_is_trait_injectable() {
+        // RS-304：名单此前 8 项 vs 管线 9 阶段——ProtectionMode 的模式
+        // 声明阶段（Stage 0）不在 trait 名单（自定义管线组装不了该阶段）。
+        // 现补 impl_js_injectable；PerSiteSeed 为参数化阶段（domain 参数），
+        // 按 trait 文档登记的取舍不经 trait（由管线组装单源显式调用）
+        use crate::protection_mode::ProtectionMode;
+        let mode = ProtectionMode::Maximum;
+        assert_eq!(JsInjectable::name(&mode), "ProtectionMode");
+        let script = JsInjectable::inject_script(&mode);
+        assert!(script.contains("'maximum'"), "模式声明经 trait 可组装");
+        // 经 JsPipeline 组装同样可用（trait 对象路径真实接线）
+        let mut pipeline = JsPipeline::new();
+        pipeline.add(Box::new(mode));
+        assert!(pipeline.build().contains("// stage: ProtectionMode"));
+    }
+
+    #[test]
+    fn per_site_seed_documented_as_parameterized_stage() {
+        // RS-304：PerSiteSeed 的取舍登记在 trait 文档——参数化阶段
+        //（inject_script(&self, domain)）不经 trait 名单，由
+        // protection_mode::fingerprint_pipeline_with_mode 在组装单源处
+        // 显式调用。文档锚点：防止后来者「补齐名单」时误引入带参 trait
+        let source = include_str!("js_inject.rs");
+        assert!(
+            source.contains("参数化阶段不经 trait"),
+            "trait 文档必须登记参数化阶段取舍"
+        );
     }
 }

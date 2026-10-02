@@ -168,15 +168,22 @@ impl Executor {
             Some(serde_json::Value::String(s)) => s.clone(),
             Some(_) => return ParseResult::Error("origin 字段类型非法（必须为字符串）".into()),
         };
+        // RS-291（2026-10-02 审计）：parameters 存在但非 object——类型损坏
+        // 走类型化错误（对齐 RS-229 origin 口径：缺省语义仅适用于字段
+        // **缺失**，此前 `"parameters": [1,2]` 被同路径静默吞成空参数表）
         let mut parameters = HashMap::new();
-        if let Some(obj) = value.get("parameters").and_then(|v| v.as_object()) {
-            for (k, v) in obj {
-                let s = match v {
-                    serde_json::Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                };
-                parameters.insert(k.clone(), s);
+        match value.get("parameters") {
+            None => {}
+            Some(serde_json::Value::Object(obj)) => {
+                for (k, v) in obj {
+                    let s = match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    };
+                    parameters.insert(k.clone(), s);
+                }
             }
+            Some(_) => return ParseResult::Error("parameters 字段类型非法（必须为对象）".into()),
         }
         ParseResult::Ok(ParsedCommand {
             command_type,
@@ -456,6 +463,44 @@ mod tests {
         with_handler.register_handler(Box::new(MockHandler));
         assert!(matches!(
             with_handler.execute_pipeline(r#"{"command_type":"test","target":"x"}"#),
+            ExecuteResult::Success(_)
+        ));
+    }
+
+    // —— RS-291 回归（2026-10-02）：非 object parameters 类型化错误 ——
+
+    #[test]
+    fn non_object_parameters_is_typed_error() {
+        // RS-291：`"parameters": [1,2]`（类型损坏）不得静默落空参数表——
+        // as_object 的缺省语义仅适用于字段缺失
+        let executor = Executor::new();
+        assert!(
+            matches!(
+                executor
+                    .execute_pipeline(r#"{"command_type":"test","target":"x","parameters":[1,2]}"#),
+                ExecuteResult::Error(_)
+            ),
+            "数组形态 parameters 必须走类型化错误"
+        );
+        assert!(
+            matches!(
+                executor
+                    .execute_pipeline(r#"{"command_type":"test","target":"x","parameters":"k=v"}"#),
+                ExecuteResult::Error(_)
+            ),
+            "字符串形态 parameters 必须走类型化错误"
+        );
+        // 字段缺失仍落空参数表（缺省语义保留——既有 handler 路径）
+        let mut with_handler = Executor::new();
+        with_handler.register_handler(Box::new(MockHandler));
+        assert!(matches!(
+            with_handler.execute_pipeline(r#"{"command_type":"test","target":"x"}"#),
+            ExecuteResult::Success(_)
+        ));
+        // object 形态照常提取（既有锚点）
+        assert!(matches!(
+            with_handler
+                .execute_pipeline(r#"{"command_type":"test","target":"x","parameters":{"k":"v"}}"#),
             ExecuteResult::Success(_)
         ));
     }

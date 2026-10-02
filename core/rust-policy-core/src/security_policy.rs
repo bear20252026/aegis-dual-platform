@@ -124,6 +124,16 @@ impl SecurityPolicy {
                 sanitized.truncate(cut);
             }
 
+            // RS-281（2026-10-02 审计）：截断后二次长度复查——扩展名自身
+            // ≥ MAX 时 max_base 饱和 0，保扩展名重组后整体仍超限（文件名
+            // 上限被突破）。超限整体截到 MAX（floor_boundary 字符边界内
+            // 截断，多字节字符安全——Rust String 为 UTF-8，不存在孤立
+            // 代理对形态）
+            if sanitized.len() > MAX_FILENAME_LENGTH {
+                let cut = floor_boundary(&sanitized, MAX_FILENAME_LENGTH);
+                sanitized.truncate(cut);
+            }
+
             // RS-114（审计 2026-09-25）：截断后复查保留名——此前检查仅在
             // 截断前执行，"CONX.ffff..." 截断后 base 变 "CON" 即绕过保留名
             // 消解（截断保头部，可把非保留 base 裁成保留名）
@@ -339,8 +349,28 @@ mod tests {
         assert!(SecurityPolicy::sanitize_filename(Some("PRN.doc")).starts_with('_'));
     }
 
-    // —— RS-115 回归（审计 2026-09-25） ——
+    // —— RS-281 回归（2026-10-02）：扩展名超上限 ——
 
+    #[test]
+    fn oversized_extension_does_not_break_length_cap() {
+        // RS-281：扩展名自身 ≥ MAX 时 max_base 饱和 0，保扩展名重组后
+        // 整体仍超限（上限被突破）——截断后二次复查整体截到 MAX
+        let input = format!("a.{}", "x".repeat(250));
+        assert!(input.len() > MAX_FILENAME_LENGTH, "必须触发截断");
+        let out = SecurityPolicy::sanitize_filename(Some(&input));
+        assert!(
+            out.len() <= MAX_FILENAME_LENGTH,
+            "扩展名超上限时整体截到 MAX：{}",
+            out.len()
+        );
+        // 多字节扩展名形态（CJK 每字 3 字节）同样复查——字符边界内截断
+        let input = format!("b.{}", "汉".repeat(120));
+        assert!(input.len() > MAX_FILENAME_LENGTH);
+        let out = SecurityPolicy::sanitize_filename(Some(&input));
+        assert!(out.len() <= MAX_FILENAME_LENGTH, "多字节扩展名同口径");
+    }
+
+    // —— RS-115 回归（审计 2026-09-25） ——
     #[test]
     fn scheme_checks_are_case_insensitive() {
         // RS-115：scheme 大小写变体——白名单/黑名单均 ASCII 大小写折叠

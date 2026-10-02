@@ -485,3 +485,102 @@ mod tests {
         assert!(glob_subsumes(&small, &small, false));
     }
 }
+
+// —— RS-307（2026-10-02 审计）：glob_subsumes 性质测试 ——
+
+/// 性质测试（proptest——网络可用，经 `cargo add proptest --dev` 正规引入，
+/// 见 Cargo.toml dev-dependencies 注释；离线 xorshift 自写方案未启用）。
+/// 生成器由确定性默认种子驱动，失败样本自动收缩最小化复现。
+///
+/// 覆盖两条代数性质（此前只有点状用例，无性质级锁定）：
+/// - **可靠性（soundness）**：subsumes(a,b) ⇒ b 匹配的任意字面文本也匹配 a
+///   （覆盖判定的语义定义——false positive 即误报 shadowed 规则）；
+/// - **传递性（transitivity）**：a⊑b ∧ b⊑c ⇒ a⊑c（语言包含关系的代数闭包，
+///   静态分析逐对比较的传递一致前提）。
+///
+/// 样本域：模式由 token 片段（`*`/`**`/`?`/字面 a/b/`/`）拼接（≤6 token），
+/// 文本由 a/b/`/` 拼接（≤8 字符），flat 两种口径均覆盖。
+#[cfg(test)]
+mod property_tests {
+    use super::{glob_match, glob_subsumes};
+    use proptest::prelude::*;
+
+    /// 模式 token 片段（通配三类 + 字面字符含段分隔符 `/`——`*` 与 `?`
+    /// 对 `/` 的跨段行为是 covers DP 的关键分支面）。
+    fn token_strategy() -> BoxedStrategy<String> {
+        prop_oneof![
+            2 => Just("*".to_string()),
+            2 => Just("**".to_string()),
+            2 => Just("?".to_string()),
+            5 => Just("a".to_string()),
+            4 => Just("b".to_string()),
+            3 => Just("/".to_string()),
+        ]
+        .boxed()
+    }
+
+    fn pattern_strategy() -> BoxedStrategy<String> {
+        proptest::collection::vec(token_strategy(), 0..=6)
+            .prop_map(|tokens| tokens.concat())
+            .boxed()
+    }
+
+    fn text_strategy() -> BoxedStrategy<String> {
+        proptest::collection::vec(
+            prop_oneof![
+                Just("a".to_string()),
+                Just("b".to_string()),
+                Just("/".to_string())
+            ],
+            0..=8,
+        )
+        .prop_map(|parts| parts.concat())
+        .boxed()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// RS-307：可靠性——covers(a,b)=true 时，b 的任意字面匹配必须也被
+        /// a 匹配（语言包含的语义定义；违反即 covers 存在 false positive）
+        #[test]
+        fn subsumes_sound_over_literal_matches(
+            a in pattern_strategy(),
+            b in pattern_strategy(),
+            s in text_strategy(),
+            flat in any::<bool>(),
+        ) {
+            if glob_subsumes(&a, &b, flat) && glob_match(&b, &s, flat) {
+                prop_assert!(
+                    glob_match(&a, &s, flat),
+                    "subsumes({a:?}, {b:?}, flat={flat}) 但文本 {s:?} 匹配 b 而不匹配 a"
+                );
+            }
+        }
+
+        /// RS-307：传递性——a⊑b ∧ b⊑c ⇒ a⊑c（语言包含的代数闭包）
+        #[test]
+        fn subsumes_transitive(
+            a in pattern_strategy(),
+            b in pattern_strategy(),
+            c in pattern_strategy(),
+            flat in any::<bool>(),
+        ) {
+            if glob_subsumes(&a, &b, flat) && glob_subsumes(&b, &c, flat) {
+                prop_assert!(
+                    glob_subsumes(&a, &c, flat),
+                    "{a:?} ⊑ {b:?} ⊑ {c:?}（flat={flat}）但 {a:?} ⋢ {c:?}"
+                );
+            }
+        }
+
+        /// RS-307：自反性——任意模式覆盖自身（同模式同语言）
+        #[test]
+        fn subsumes_reflexive_for_all_samples(
+            a in pattern_strategy(),
+            flat in any::<bool>(),
+        ) {
+            prop_assert!(glob_subsumes(&a, &a, flat), "{a:?} 必须覆盖自身（flat={flat}）");
+        }
+    }
+}

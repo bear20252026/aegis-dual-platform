@@ -277,6 +277,40 @@ fn base64_decode(input: &str) -> Result<Vec<u8>, ()> {
     Ok(out)
 }
 
+/// 基础 base64 标准编码（与 [`base64_decode`] 对偶——纯函数简版）。
+///
+/// RS-306（2026-10-02 审计）：共享单源——此前本实现以两份逐字节相同的
+/// 副本分别内联在 update_manifest 单元测试模块与 tests/vectors.rs 集成
+/// 测试（同一编码格式两处维护，漂移面）。集成测试（tests/ 目录）按外部
+/// 消费者编译，无法访问 crate 私有/`#[cfg(test)]` 项，故以 pub 导出为
+/// 单一事实源（生产解码器 base64_decode 的逆函数，pub 是测试共享的
+/// 必要取舍）。
+pub fn b64_encode(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            chunk.get(1).copied().unwrap_or(0),
+            chunk.get(2).copied().unwrap_or(0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,32 +437,9 @@ mod tests {
 
     use ed25519_dalek::{Signer, SigningKey};
 
-    /// 测试辅助：base64 标准编码（与 base64_decode 对偶）。
-    fn b64_encode(data: &[u8]) -> String {
-        const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = String::new();
-        for chunk in data.chunks(3) {
-            let b = [
-                chunk[0],
-                chunk.get(1).copied().unwrap_or(0),
-                chunk.get(2).copied().unwrap_or(0),
-            ];
-            let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-            out.push(TABLE[(n >> 18) as usize & 63] as char);
-            out.push(TABLE[(n >> 12) as usize & 63] as char);
-            out.push(if chunk.len() > 1 {
-                TABLE[(n >> 6) as usize & 63] as char
-            } else {
-                '='
-            });
-            out.push(if chunk.len() > 2 {
-                TABLE[n as usize & 63] as char
-            } else {
-                '='
-            });
-        }
-        out
-    }
+    // RS-306（2026-10-02 审计）：b64_encode 已收敛为模块级共享单源
+    //（super::b64_encode 经 use super::* 可见）——本模块此前内联的
+    // 逐字节相同副本已删除
 
     /// 测试辅助：用固定种子密钥签名 canonical payload，返回
     /// (key_id, 公钥字节, 签名条目)。

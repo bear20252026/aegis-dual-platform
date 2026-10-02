@@ -11,7 +11,9 @@
 use aegis_policy_core::decision::AuthorizedAction;
 use aegis_policy_core::matcher::{glob_match, glob_subsumes};
 use aegis_policy_core::origin::try_parse_external;
-use aegis_policy_core::update_manifest::{canonical_unsigned, verify_threshold, version_tuple};
+use aegis_policy_core::update_manifest::{
+    b64_encode, canonical_unsigned, verify_threshold, version_tuple,
+};
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
 
@@ -85,32 +87,9 @@ fn update_manifest_valid_vectors() {
 //   invalid_base64）逐条对齐 Rust 侧机制；纯 schema 规则（const/字段形态）
 //   属 Python/schema 层职责，显式登记不在此断言。
 
-/// 测试辅助：标准 base64 编码（与 update_manifest::base64_decode 对偶）。
-fn b64_encode(data: &[u8]) -> String {
-    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in data.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-        out.push(TABLE[(n >> 18) as usize & 63] as char);
-        out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            TABLE[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            TABLE[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
+/// RS-306（2026-10-02 审计）：b64_encode 已收敛到
+/// update_manifest::b64_encode 共享单源（本文件此前内联的逐字节相同
+/// 副本已删除——同一编码格式单处维护）。
 
 #[test]
 fn update_manifest_valid_vectors_reach_threshold_verification() {

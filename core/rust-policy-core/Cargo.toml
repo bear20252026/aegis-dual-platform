@@ -73,3 +73,9 @@ suspicious = "deny"
 [profile.release]
 lto = true
 strip = "debuginfo"
+
+# RS-307（2026-10-02 审计）：glob_subsumes 性质测试（可靠性/传递性/自反性）
+# ——dev-only（不进生产依赖面；网络不可用环境的离线方案未启用，
+# 见 matcher.rs property_tests 注释的取舍说明）
+[dev-dependencies]
+proptest = "1.11.0"

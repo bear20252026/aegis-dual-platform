@@ -101,8 +101,13 @@ impl AdBlockManager {
     /// 归一）——**fail-open 方向**：看起来已拦截实际放行。RS-180：空串
     /// 与归一后为空的条目不入库（空键会被无 host 形态意外命中）。
     pub fn load_blocked_domains(&mut self, domains: impl IntoIterator<Item = String>) {
+        // RS-283（2026-10-02 审计）：入库折叠改 ASCII 口径——此前全量
+        // to_lowercase（Unicode 折叠），而查询侧 extract_host 自 RS-259 起
+        // to_ascii_lowercase。非 ASCII 条目（如土耳其语 İ）经 Unicode 折叠
+        // 变 "i"+U+0307，查询侧 ASCII 折叠保留原样——条目入库后永远无法
+        // 命中（fail-open）。host 匹配域是 DNS（ASCII 语义），统一 ASCII。
         let normalized = domains.into_iter().filter_map(|d| {
-            let lowered = d.trim().to_lowercase();
+            let lowered = d.trim().to_ascii_lowercase();
             let stripped = lowered.strip_suffix('.').unwrap_or(&lowered);
             if stripped.is_empty() {
                 None // 空串/纯尾点条目拒绝入库
@@ -335,5 +340,51 @@ mod tests {
         mgr.load_blocked_domains(["dup.com".to_string()]);
         assert!(mgr.should_block("https://dup.com/"));
         assert_eq!(mgr.total_blocked, 1, "重复入库不放大命中计数");
+    }
+
+    // —— RS-275 回归（2026-10-02）：userinfo 双 @ 不得漏拦 ——
+
+    #[test]
+    fn userinfo_with_embedded_at_still_blocks() {
+        // RS-275：`https://x@evil@ads.example.com/` 此前 extract_host 取
+        // 首个 @，host 被提取为 "evil@ads.example.com"（带前缀）——黑名单
+        // ads.example.com 永不命中（漏拦）。统一取最后一个 @ 后命中
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(vec!["ads.example.com".into()]);
+        assert!(
+            mgr.should_block("https://x@evil@ads.example.com/"),
+            "双 @ userinfo 形态必须仍按真实 host 拦截"
+        );
+        assert!(
+            mgr.should_block("https://a@b@ads.example.com/banner"),
+            "a@b@blocked.host 向量"
+        );
+    }
+
+    // —— RS-283 回归（2026-10-02）：入库与查询侧折叠口径一致 ——
+
+    #[test]
+    fn non_ascii_entries_fold_ascii_like_query_side() {
+        // RS-283：非 ASCII 条目入库与查询侧（to_ascii_lowercase）同口径——
+        // 此前 Unicode 折叠把 İ 变 "i"+U+0307，条目永不命中（fail-open）
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains([
+            "İstanbul.example".to_string(),
+            "Ads.XN--EXAMPLE".to_string(),
+        ]);
+        // 查询侧 ASCII 折叠保留非 ASCII 字符原样 → 与入库键相等 → 命中
+        assert!(
+            mgr.should_block("https://İstanbul.example/"),
+            "非 ASCII 条目必须可命中（双侧同 ASCII 折叠）"
+        );
+        assert!(
+            mgr.should_block("https://ads.xn--example/"),
+            "纯 ASCII 折叠行为不变"
+        );
+        // Unicode 折叠特有形态不得出现：入库键不得是 "i̇stanbul..."（i+U+0307）
+        assert!(
+            !mgr.should_block_host("i̇stanbul.example"),
+            "Unicode 折叠形态不是入库键"
+        );
     }
 }
