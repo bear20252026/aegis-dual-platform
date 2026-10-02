@@ -257,6 +257,28 @@ class TestVerifyReleaseSentinel:
         (tmp_path / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
         assert verify_bundle(tmp_path) is None
 
+    def test_core_txt_dot_slash_prefix_and_relative_dist(self, tmp_path, monkeypatch):
+        # SP-221（2026-10-01 发布链批 3）：release-core 的清单重生成命令
+        #（find -print0 | xargs sha256sum）产出 "./" 前缀条目；verify-gate 以
+        # 相对路径（dist/core）调用本脚本。两者叠加时 ③ 文件集对账曾把全部
+        # 条目误判 unlisted（"v2.2.0-beta.51 第三次 tag 跑 verify-gate 实证）——
+        # 归一化后必须通过，且以相对 dist 路径复现 CI 调用形态。
+        import json as _json
+
+        from verify_release import verify_bundle
+        (tmp_path / "build-metadata.json").write_text(
+            _json.dumps(self._metadata(platform="core"), ensure_ascii=False),
+            encoding="utf-8")
+        (tmp_path / "libaegis_policy_core.so").write_bytes(b"elf")
+        (tmp_path / "sbom-core.cdx.json").write_text("{}", encoding="utf-8")
+        lines = [
+            f"{hashlib.sha256((tmp_path / p).read_bytes()).hexdigest()}  ./{p}"
+            for p in ("build-metadata.json", "libaegis_policy_core.so", "sbom-core.cdx.json")
+        ]
+        (tmp_path / "SHA256SUMS.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path.parent)  # 相对路径调用（CI 形态）
+        assert verify_bundle(Path(tmp_path.name)) is None
+
     def test_core_txt_fake_hash_rejected(self, tmp_path):
         # PY-225/PY-250：伪造哈希（deadbeef 填充）必须被哈希重算拒绝——
         # 此前"只数非空行"时该清单可通过（弱行为已消除）

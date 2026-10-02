@@ -49,6 +49,11 @@ def _verify_checksum_txt(dist: Path, txt_path: Path) -> int:
             sys.exit(f"SHA256SUMS.txt 第 {lineno} 行格式无效"
                      f"（须为 '<64 位哈希>␣␣<文件>'——sha256sum 文本格式）: {line!r}")
         rel, digest = match.group(2), match.group(1).lower()
+        # SP-221（2026-10-01 发布链批 3）：归一化 sha256sum 两种实际形态——
+        # `cd dist && sha256sum *` 产裸名、`find -print0 | xargs sha256sum`
+        # 产 "./" 前缀（release-core.yml 重生成命令实证）；不归一则 ③ 文件集
+        # 对账把每个 "./x" 条目与实际名 "x" 判为不一致，全量误拒。
+        rel = rel.replace("\\", "/").removeprefix("./")
         target = (dist / rel).resolve()
         if target != dist.resolve() and not target.is_relative_to(dist.resolve()):
             sys.exit(f"SHA256SUMS.txt 条目越出发布根: {rel}（拒绝发布）")
@@ -65,11 +70,13 @@ def _verify_checksum_txt(dist: Path, txt_path: Path) -> int:
         actual = hashlib.sha256(target.read_bytes()).hexdigest()
         if actual != digest:
             sys.exit(f"SHA256SUMS.txt 哈希不符: {rel}（清单 {digest[:12]}… vs 实际 {actual[:12]}…——拒绝发布）")
-    # ③ 文件集双向对账（清单自身自排除——与 CI 生成口径一致）
+    # ③ 文件集双向对账（清单自身自排除——与 CI 生成口径一致）。
+    # SP-221：排除比较须同侧归一——rglob 产出相对路径（dist 传相对路径时）
+    # 而右侧是 resolve() 绝对路径，恒不等导致清单自身落入 unlisted 误拒。
     actual_files = {
         p.relative_to(dist).as_posix()
         for p in dist.rglob("*")
-        if p.is_file() and p != txt_path.resolve()
+        if p.is_file() and p.resolve() != txt_path.resolve()
     }
     unlisted = sorted(actual_files - set(checksums))
     if unlisted:
