@@ -57,13 +57,15 @@ jobs:
             android/gradle/**
             android/gradle/libs.versions.toml
 
-      - name: 设置 Android SDK（API 37——与 :app compileSdk 单源对齐）
+      - name: 设置 Android SDK（基线包 + AGP 构建期自动装配 compileSdk 37）
         uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
         with:
-          # SP-238（2026-10-02 审计）：platforms 升 android-37（:app
-          # compileSdk=37——原 android-36 落后于源码声明）；build-tools 核对后
-          # 同步 37.0.0（上游已随 API 37 发布，F-Droid/WebRTC 构建在用）
-          packages: "platform-tools platforms;android-37 build-tools;37.0.0"
+          # SP-238（2026-10-02 审计）+ 云端实证（PR #60 首跑）：platforms;android-37
+          # 未进 sdkmanager stable 渠道（Failed to find package），显式 pin 37 必失败；
+          # android-37 平台由 AGP 构建期自动装配（setup-android 已预接受许可）——
+          # 显式 pin 仅覆盖 platform-tools/build-tools 基线（build-tools 37.0.0 同退回
+          # 36.0.0：与平台包同渠道约束），compileSdk=37 与基线包的差集即 AGP 自动装配面
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
 
       - name: ktlint 检查（0 错误门禁）
         run: ./gradlew.bat :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck --no-daemon
