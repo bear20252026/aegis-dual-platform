@@ -26,7 +26,9 @@
 - **现行台账（活跃）**：`full-audit-2026-09-23-1000-items.md`（1115 项主台账）、
   `full-audit-2026-09-26-229-items.md`（第二轮 229 项报告）、
   `full-audit-2026-10-01-241-items.md`（第三轮 241 项——WB-175，2026-10-01
-  审计补列：本轮六区新鲜扫描，P1×4 / P2×23 / P3×214）
+  审计补列：本轮六区新鲜扫描，P1×4 / P2×23 / P3×214）、
+  `full-audit-2026-10-02-217-items.md`（第四轮 217 项——2026-10-02/03 审计：
+  七路扫描问题 111/提升 106，闭环 214，附同机读索引 .csv——I-23）
 - **历史归档（2026-08 双栈期，带时代横幅）**：audit-report / audit-2026 /
   audit-full-rescan-2026-09-01 / audit-search / code-audit / architecture-audit×2 /
   open-source-browser-audit×3 / security-audit-red-blue / privacy-defaults /

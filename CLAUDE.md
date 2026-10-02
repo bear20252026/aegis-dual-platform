@@ -134,7 +134,7 @@ bandit -c bandit.yaml -r scripts release contracts agent -ll -q
 | `android/broker/` + `android/webview-adapter/` | Android 授权 Broker 与导航状态机 |
 | `contracts/` | 契约单源（schemas/vectors/policy + codegen 生成器） |
 | `shared/` | 双端单源（version.properties/release.json/shell 首页资产） |
-| `docs/audit/` | 全仓审计报告（2026-09-07 200 项、2026-09-23 1115 项、2026-09-26 229 项、2026-10-01 241 项——SP-188 补全台账索引） |
+| `docs/audit/` | 全仓审计报告（2026-09-07 200 项、2026-09-23 1115 项、2026-09-26 229 项、2026-10-01 241 项、2026-10-02 217 项——附机器可读 CSV 索引供下轮自动去重，I-23） |
 | `legacy/windows-pywebview/` | 只读归档栈（ADR-009——禁止活跃改动，见红线 #1） |
 
 ## 常见陷阱
