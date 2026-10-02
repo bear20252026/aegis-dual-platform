@@ -297,4 +297,4 @@
 | SP 批 | fix(ci) | .github/.gitignore/.editorconfig/新门禁脚本 | 34+1 | 33+1(S-08 断言=I-08 收尾;258 暂缓;260 待处置) |
 | 纪律批 | docs | CLAUDE.md 验证纪律节+CONTRIBUTING 口径 | — | — |
 
-**云端验证(本 PR #60 起,验证纪律首轮执行)**:Core-Rust/CI/Agent-Redteam 首轮即绿;红灯 2 项(android-37 平台包渠道、dotnet list 缺 EnableWindowsTargeting)当轮修复并回写为 AD-317/SP-246 的实证口径;SP-260 为云端首跑新登记。后续轮次以 Actions 结果为唯一通过依据。
+**云端验证（本 PR #60 起，验证纪律首轮执行）**:Core-Rust/CI/Agent-Redteam 首轮即绿;红灯 2 项(android-37 平台包渠道、dotnet list 缺 EnableWindowsTargeting)当轮修复并回写为 AD-317/SP-246 的实证口径;SP-260 为云端首跑新登记。**经 18 轮推送迭代红灯全清,七 workflow(contracts/ci/core-rust/android-quality/supply-chain/agent-redteam/native-policy-artifacts)全绿**。云端迭代额外产出(均回写代码):proptest 传递性反例实证 covers 缺 ε-转移(RS-307 修根因+性质契约据实改为可靠性/自反性)、AD-303 数字外跳 Toast 分支永不可达(tel:10086 被 port 规则误判,拦截前移)、ExternalIntentRateLimit/NavigateDebounce 冷启动锚点缺陷(吞首条真实外链)、NuGet 漏扫与行数基线四轮校准、盲写测试与真实 API 的十余处错位对齐。
