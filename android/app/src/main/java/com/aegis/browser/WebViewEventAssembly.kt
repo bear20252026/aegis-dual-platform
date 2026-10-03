@@ -80,8 +80,11 @@ internal class WebViewEventAssembly(
                 // webViewAlert 上抛 UI（此前用户只看到白屏/无反应）。
                 // AD-203（审计 2026-09-23 清单·A7 批）：deny code → 文案资源
                 // 映射抽 PageErrorTexts.denyAlertTextRes 单源（映射矩阵可 JVM 直测）。
+                // 审计第六轮（2026-10-03）：改走 denyAlertText 渲染单源——旧
+                // 形态对声明了 %1$s 的 nav_rejected_code 用 1 参 getString，
+                // 用户字面看到「…（%1$s）」且 deny code 从未上屏。
                 host.submitWebViewAlert(
-                    host.errorStrings().text(PageErrorTexts.denyAlertTextRes(code)),
+                    PageErrorTexts.denyAlertText(code, host.errorStrings()),
                 )
             },
             // AD-284（2026-10-01 审计）：mailto:/tel:/sms: 外跳 scheme 的主框架

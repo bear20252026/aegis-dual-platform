@@ -97,4 +97,21 @@ class PageErrorTextsTest {
         assertEquals(R.string.nav_rejected_code, PageErrorTexts.denyAlertTextRes("tab_mismatch"))
         assertEquals(R.string.nav_rejected_code, PageErrorTexts.denyAlertTextRes("future_native_code"))
     }
+
+    @Test
+    fun denyAlertTextPassesCodeAsFormatArgument() {
+        // 审计第六轮（2026-10-03）：渲染单源必须把 deny code 作为格式化实参
+        // 传入——nav_rejected_code 声明了 %1$s，旧装配点用 1 参 getString 让
+        // 占位符原样上屏、code 丢失。本用例锚定「实参有传」（假 Strings 把
+        // 实参回显进串），真实占位符替换见 WebViewEventAssemblyTest 的
+        // Robolectric 资源表用例。
+        assertEquals(
+            "s${R.string.nav_rejected_code}(url_policy)",
+            PageErrorTexts.denyAlertText("url_policy", fake),
+        )
+        assertEquals(
+            "s${R.string.session_expired}(session_expired)",
+            PageErrorTexts.denyAlertText("session_expired", fake),
+        )
+    }
 }

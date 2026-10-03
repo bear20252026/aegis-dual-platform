@@ -199,6 +199,9 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
 })();
 
 // === Stage 2: PerSiteSeed（参照 Brave Browser MPL-2.0）===
+// 审计第六轮（2026-10-03）：本闭包除派生种子外，还内嵌 Stage 3（canvas 噪声）
+// 与 Stage 3c（hardwareConcurrency）两个种子消费点——参照实现
+// per_site_seed.rs:24-28 的封装口径（种子只活在这一层作用域里）。
 (function() {
   // AD-107（审计 2026-09-23 清单·A6 批）：getETLD1 迷你公共后缀表——原实现
   // 一律取最后两段，对共享公共后缀（co.uk/com.cn/com.hk/com.au/co.jp/…）
@@ -295,121 +298,136 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
     for (var i = 0; i < 16; i++) r += ('0' + digest[i].toString(16)).slice(-2);
     return r;
   }
-  var siteSeed = deriveSeed('$sessionSeed', getETLD1(location.hostname));
-  Object.defineProperty(window, '__AEGIS_SITE_SEED', { value: siteSeed, writable: false, configurable: false });
-})();
+  // 审计第六轮（2026-10-03）：站点种子不再经 defineProperty 导出为 window
+  // 全局（P1）——applyNoise 是「种子 + 像素索引」的纯函数，页面按名读走
+  // 种子、复刻 aegisNudge 与三枚 Math.imul 常数即可确定性去噪还原真画布；
+  // 具名 __AEGIS_* 全局本身还是防护存在性的现成探针。对齐参照实现
+  // core/rust-policy-core/src/per_site_seed.rs:24-28（「站点种子按域派生
+  // 后仅存在于闭包内」）：种子改闭包局部 const，Stage 3/3c 两处消费点
+  // 下移进本闭包（嵌套块整体缩进两级以示作用域边界——边界见本闭包尾注）。
+  // 已知未完成半区：种子的 eTLD+1 框定仍取 location.hostname（本帧自身
+  // 主机名）而非顶层站点——DOCUMENT_START 注入无顶层源可达通道，宿主下发
+  // 前第三方帧在所有站点产出同一种子（跨站标识符），登记待办见审计报告。
+  const __AEGIS_SITE_SEED = deriveSeed('$sessionSeed', getETLD1(location.hostname));
 
-// === Stage 3: Canvas 噪声 ===
-// AD-212（2026-09-26 审计）：噪声施加在**离屏副本**上（参照 Rust 侧 RS-025
-// 修复模式）——原实现 getImageData/putImageData 破坏性写回活画布：①二次读
-// 同一画布结果不同（噪声注入自身可检测）；②页面后续渲染被永久污染。副本
-// 仅用于返回值，原 ctx 不动；且不调用源画布 getContext（drawImage 对任意
-// 上下文类型的源画布均可用，也避免把尚无上下文的画布永久锁定为 2d）。
-(function() {
-  // AD-314（2026-10-02 审计）：各包装点补注册调用——AD-297 修好 Symbol 键后，
-  // Stage 1 的 ToStringGuard 才真正可达；本阶段三个 canvas 包装同样注册，
-  // 防止 toDataURL.toString() 暴露包装源码。
-  var __aegisReg = window[Symbol.for('proxy.register.v1')];
-  // AD-270（2026-10-01 审计）：尺寸上限——16K×16K 画布的离屏副本 +
-  // getImageData 峰值约 1GB（OOM 面）。超阈值直接走原实现降级（该形态
-  // 画布本身已极难作为指纹载体，资源安全优先）。
-  var MAX_NOISE_PIXELS = 4096 * 4096;
-  // AD-311（2026-10-02 审计）：Uint8ClampedArray 在 0/255 边界吸收 ±1 噪声
-  //（0-1 → 0、255+1 → 255，边界像素噪声不可见=指纹可分离）。边界像素噪声
-  // 取离岸方向（0→+1、255→-1），中间值按噪声位 ±1。
-  function aegisNudge(current, noiseBit) {
-    if (current === 0) return 1;
-    if (current === 255) return 254;
-    return noiseBit ? current + 1 : current - 1;
-  }
-  // AD-253（2026-10-01 审计）：逐像素确定性 PRNG——原 `(seed+i)%2` 在
-  // i+=4 步进下退化为每通道全图常量偏移（共 8 种组合，减法即可还原
-  // 原图）。现以像素索引乘黄金比例常数（0x9E3779B1）与 seed 异或后
-  // 取最低位；三通道用不同混合常数（0x85EBCA6B / 0x27D4EB2F，
-  // murmur3 finalizer 常数）——同 seed 相邻像素噪声不一致，且无
-  // 通道间常量偏置。口径与 Rust 侧 RS-249 等价（不要求字节级一致）。
-  // alpha 不动——不破坏合成透明度。三通道（toDataURL/toBlob/
-  // convertToBlob）共用同一噪声形态（AD-298）。
-  function applyNoise(imageData, seed) {
-    for (let px = 0, i = 0; i < imageData.data.length; px++, i += 4) {
-      imageData.data[i] = aegisNudge(imageData.data[i], ((seed ^ Math.imul(px, 0x9E3779B1)) >>> 0) & 1);
-      imageData.data[i + 1] = aegisNudge(imageData.data[i + 1], ((seed ^ Math.imul(px, 0x85EBCA6B)) >>> 0) & 1);
-      imageData.data[i + 2] = aegisNudge(imageData.data[i + 2], ((seed ^ Math.imul(px, 0x27D4EB2F)) >>> 0) & 1);
+  // === Stage 3: Canvas 噪声 ===
+  // AD-212（2026-09-26 审计）：噪声施加在**离屏副本**上（参照 Rust 侧 RS-025
+  // 修复模式）——原实现 getImageData/putImageData 破坏性写回活画布：①二次读
+  // 同一画布结果不同（噪声注入自身可检测）；②页面后续渲染被永久污染。副本
+  // 仅用于返回值，原 ctx 不动；且不调用源画布 getContext（drawImage 对任意
+  // 上下文类型的源画布均可用，也避免把尚无上下文的画布永久锁定为 2d）。
+  (function() {
+    // AD-314（2026-10-02 审计）：各包装点补注册调用——AD-297 修好 Symbol 键后，
+    // Stage 1 的 ToStringGuard 才真正可达；本阶段三个 canvas 包装同样注册，
+    // 防止 toDataURL.toString() 暴露包装源码。
+    var __aegisReg = window[Symbol.for('proxy.register.v1')];
+    // AD-270（2026-10-01 审计）：尺寸上限——16K×16K 画布的离屏副本 +
+    // getImageData 峰值约 1GB（OOM 面）。超阈值直接走原实现降级（该形态
+    // 画布本身已极难作为指纹载体，资源安全优先）。
+    var MAX_NOISE_PIXELS = 4096 * 4096;
+    // AD-311（2026-10-02 审计）：Uint8ClampedArray 在 0/255 边界吸收 ±1 噪声
+    //（0-1 → 0、255+1 → 255，边界像素噪声不可见=指纹可分离）。边界像素噪声
+    // 取离岸方向（0→+1、255→-1），中间值按噪声位 ±1。
+    function aegisNudge(current, noiseBit) {
+      if (current === 0) return 1;
+      if (current === 255) return 254;
+      return noiseBit ? current + 1 : current - 1;
     }
-  }
-  function noiseSeed() { return parseInt(window.__AEGIS_SITE_SEED.slice(0, 8), 16); }
-  var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-  HTMLCanvasElement.prototype.toDataURL = function(type) {
-    try {
-      if (this.width * this.height > MAX_NOISE_PIXELS) {
-        return origToDataURL.apply(this, arguments);
+    // AD-253（2026-10-01 审计）：逐像素确定性 PRNG——原 `(seed+i)%2` 在
+    // i+=4 步进下退化为每通道全图常量偏移（共 8 种组合，减法即可还原
+    // 原图）。现以像素索引乘黄金比例常数（0x9E3779B1）与 seed 异或后
+    // 取最低位；三通道用不同混合常数（0x85EBCA6B / 0x27D4EB2F，
+    // murmur3 finalizer 常数）——同 seed 相邻像素噪声不一致，且无
+    // 通道间常量偏置。口径与 Rust 侧 RS-249 等价（不要求字节级一致）。
+    // alpha 不动——不破坏合成透明度。三通道（toDataURL/toBlob/
+    // convertToBlob）共用同一噪声形态（AD-298）。
+    function applyNoise(imageData, seed) {
+      for (let px = 0, i = 0; i < imageData.data.length; px++, i += 4) {
+        imageData.data[i] = aegisNudge(imageData.data[i], ((seed ^ Math.imul(px, 0x9E3779B1)) >>> 0) & 1);
+        imageData.data[i + 1] = aegisNudge(imageData.data[i + 1], ((seed ^ Math.imul(px, 0x85EBCA6B)) >>> 0) & 1);
+        imageData.data[i + 2] = aegisNudge(imageData.data[i + 2], ((seed ^ Math.imul(px, 0x27D4EB2F)) >>> 0) & 1);
       }
-      const off = document.createElement('canvas');
-      off.width = this.width;
-      off.height = this.height;
-      const octx = off.getContext('2d');
-      octx.drawImage(this, 0, 0);
-      const imageData = octx.getImageData(0, 0, off.width, off.height);
-      applyNoise(imageData, noiseSeed());
-      octx.putImageData(imageData, 0, 0);
-      return origToDataURL.apply(off, arguments);
-    } catch (e) {
-      return origToDataURL.apply(this, arguments);
     }
-  };
-  if (__aegisReg) __aegisReg(HTMLCanvasElement.prototype.toDataURL, origToDataURL);
-  // AD-298（2026-10-02 审计）：toBlob 是 canvas 读取的第二通道——此前仅覆盖
-  // toDataURL，页面走 toBlob 即拿到无噪声原图。按 Rust shield.rs RS-082 同型
-  // 补齐（离屏副本 + 逐像素噪声 + 尺寸上限，口径与 toDataURL 通道一致）。
-  var origToBlob = HTMLCanvasElement.prototype.toBlob;
-  HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
-    try {
-      if (this.width * this.height > MAX_NOISE_PIXELS) {
-        return origToBlob.call(this, callback, type, quality);
-      }
-      const off = document.createElement('canvas');
-      off.width = this.width;
-      off.height = this.height;
-      const octx = off.getContext('2d');
-      octx.drawImage(this, 0, 0);
-      const imageData = octx.getImageData(0, 0, off.width, off.height);
-      applyNoise(imageData, noiseSeed());
-      octx.putImageData(imageData, 0, 0);
-      return origToBlob.call(off, callback, type, quality);
-    } catch (e) {
-      return origToBlob.call(this, callback, type, quality);
-    }
-  };
-  if (__aegisReg) __aegisReg(HTMLCanvasElement.prototype.toBlob, origToBlob);
-  // AD-298：OffscreenCanvas.convertToBlob 是 worker 侧第三通道——同型防护
-  //（RS-082；宿主无 OffscreenCanvas 时本包装空转）。
-  if (typeof OffscreenCanvas !== 'undefined') {
-    const origConvert = OffscreenCanvas.prototype.convertToBlob;
-    OffscreenCanvas.prototype.convertToBlob = function(options) {
+    // 审计第六轮（2026-10-03）：裸标识符取外层 Stage 2 闭包常量（种子
+    // 全局导出已撤销）——种子不外泄，噪声消费点仍在同一闭包作用域内闭环。
+    function noiseSeed() { return parseInt(__AEGIS_SITE_SEED.slice(0, 8), 16); }
+    var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function(type) {
       try {
         if (this.width * this.height > MAX_NOISE_PIXELS) {
-          return origConvert.call(this, options);
+          return origToDataURL.apply(this, arguments);
         }
-        const off = new OffscreenCanvas(this.width, this.height);
+        const off = document.createElement('canvas');
+        off.width = this.width;
+        off.height = this.height;
         const octx = off.getContext('2d');
         octx.drawImage(this, 0, 0);
         const imageData = octx.getImageData(0, 0, off.width, off.height);
         applyNoise(imageData, noiseSeed());
         octx.putImageData(imageData, 0, 0);
-        return origConvert.call(off, options);
+        return origToDataURL.apply(off, arguments);
       } catch (e) {
-        return origConvert.call(this, options);
+        return origToDataURL.apply(this, arguments);
       }
     };
-    if (__aegisReg) __aegisReg(OffscreenCanvas.prototype.convertToBlob, origConvert);
-  }
-})();
-// AD-258（2026-10-01 审计）：Stage 3 原有一个 WebGL getParameter 伪装包装，
-// 被 Stage 7 对同一常量（0x9245/0x9246）的先行返回遮蔽（永不可达死代码），
-// 且其返回值含品牌字符串（现成指纹标记）——已删除，伪装单源收敛 Stage 7。
-(function() {
-  const seed = parseInt(window.__AEGIS_SITE_SEED.slice(8, 16), 16);
-  Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 2 + (seed % 7) });
+    if (__aegisReg) __aegisReg(HTMLCanvasElement.prototype.toDataURL, origToDataURL);
+    // AD-298（2026-10-02 审计）：toBlob 是 canvas 读取的第二通道——此前仅覆盖
+    // toDataURL，页面走 toBlob 即拿到无噪声原图。按 Rust shield.rs RS-082 同型
+    // 补齐（离屏副本 + 逐像素噪声 + 尺寸上限，口径与 toDataURL 通道一致）。
+    var origToBlob = HTMLCanvasElement.prototype.toBlob;
+    HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
+      try {
+        if (this.width * this.height > MAX_NOISE_PIXELS) {
+          return origToBlob.call(this, callback, type, quality);
+        }
+        const off = document.createElement('canvas');
+        off.width = this.width;
+        off.height = this.height;
+        const octx = off.getContext('2d');
+        octx.drawImage(this, 0, 0);
+        const imageData = octx.getImageData(0, 0, off.width, off.height);
+        applyNoise(imageData, noiseSeed());
+        octx.putImageData(imageData, 0, 0);
+        return origToBlob.call(off, callback, type, quality);
+      } catch (e) {
+        return origToBlob.call(this, callback, type, quality);
+      }
+    };
+    if (__aegisReg) __aegisReg(HTMLCanvasElement.prototype.toBlob, origToBlob);
+    // AD-298：OffscreenCanvas.convertToBlob 是 worker 侧第三通道——同型防护
+    //（RS-082；宿主无 OffscreenCanvas 时本包装空转）。
+    if (typeof OffscreenCanvas !== 'undefined') {
+      const origConvert = OffscreenCanvas.prototype.convertToBlob;
+      OffscreenCanvas.prototype.convertToBlob = function(options) {
+        try {
+          if (this.width * this.height > MAX_NOISE_PIXELS) {
+            return origConvert.call(this, options);
+          }
+          const off = new OffscreenCanvas(this.width, this.height);
+          const octx = off.getContext('2d');
+          octx.drawImage(this, 0, 0);
+          const imageData = octx.getImageData(0, 0, off.width, off.height);
+          applyNoise(imageData, noiseSeed());
+          octx.putImageData(imageData, 0, 0);
+          return origConvert.call(off, options);
+        } catch (e) {
+          return origConvert.call(this, options);
+        }
+      };
+      if (__aegisReg) __aegisReg(OffscreenCanvas.prototype.convertToBlob, origConvert);
+    }
+  })();
+  // AD-258（2026-10-01 审计）：Stage 3 原有一个 WebGL getParameter 伪装包装，
+  // 被 Stage 7 对同一常量（0x9245/0x9246）的先行返回遮蔽（永不可达死代码），
+  // 且其返回值含品牌字符串（现成指纹标记）——已删除，伪装单源收敛 Stage 7。
+  (function() {
+    // 审计第六轮（2026-10-03）：种子消费点 2/2——同取外层 Stage 2 闭包常量
+    //（种子全局导出已撤销，切片偏移 8..16 口径不变）。
+    const seed = parseInt(__AEGIS_SITE_SEED.slice(8, 16), 16);
+    Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 2 + (seed % 7) });
+  })();
+// 审计第六轮（2026-10-03）：Stage 2 闭包边界收口——站点种子自派生到两处
+// 消费（canvas 噪声 / hardwareConcurrency）全程不出闭包，页面无可读句柄。
 })();
 
 // === Stage 4: LetterboxShield（参照 Mullvad/Tor Browser MPL-2.0）===

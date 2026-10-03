@@ -91,4 +91,17 @@ internal object PageErrorTexts {
             DENY_CODE_SESSION_EXPIRED -> R.string.session_expired
             else -> R.string.nav_rejected_code
         }
+
+    /**
+     * 审计第六轮（2026-10-03）：deny code → 安全提示**文案**渲染单源——
+     * 装配点此前直接 `Strings.text(resId)`（1 参 getString），而回落资源
+     * nav_rejected_code 声明了 %1$s 替换符：用户字面看到「…（%1$s）」、
+     * deny code 永不现形（AD-203 的映射矩阵只对了一半）。现统一把 code 作
+     * 格式化实参传入；无占位符的资源（session_expired）由 String.format
+     * 忽略多余实参，文案不变。
+     */
+    fun denyAlertText(
+        code: String,
+        strings: Strings,
+    ): String = strings.text(denyAlertTextRes(code), code)
 }

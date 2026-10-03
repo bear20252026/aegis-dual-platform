@@ -12,6 +12,7 @@ import com.aegis.broker.Decision
 import com.aegis.broker.DenyReason
 import com.aegis.webviewadapter.WebViewErrorCodes
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -169,10 +170,36 @@ class WebViewEventAssemblyTest {
         ).thenReturn(Decision.Deny(DenyReason("url_policy", "拒绝重定向 URL")))
         client.onPageStarted(webView, "https://example.com/redirected", null)
         assertTrue("被拒重定向不得上抛地址栏", host.addresses.isEmpty())
+        // 审计第六轮（2026-10-03）：旧断言与装配点同式（都写死 1 参 text）——
+        // 是恒等式而非期望，看不见「%1$s 原样上屏、code 丢失」这个缺陷。
+        // 现锚定渲染单源 denyAlertText，并直接断 code 出现在提示文案里。
         assertEquals(
-            "顶层拒绝必须上抛安全提示（deny code → 文案资源映射单源）",
-            listOf(host.errorStrings().text(PageErrorTexts.denyAlertTextRes("url_policy"))),
+            "顶层拒绝必须上抛安全提示（deny code 作格式化实参带出）",
+            listOf(PageErrorTexts.denyAlertText("url_policy", host.errorStrings())),
             host.alerts,
+        )
+        assertTrue("提示文案必须带出 deny code：${host.alerts}", host.alerts.single().contains("url_policy"))
+    }
+
+    @Test
+    fun denyAlertRendersCodeWithoutRawPlaceholder() {
+        // 审计第六轮（2026-10-03）：真实资源表渲染回归——nav_rejected_code 声明
+        // %1$s，装配点旧形态走 1 参 getString：用户字面看到「…（%1$s）」，
+        // 拒绝原因（code）永不现形。假 Strings 只能验「实参有传」，占位符
+        // 是否真被替换必须经 Robolectric 的 AAPT 资源表判定。
+        val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val realStrings =
+            pageErrorStringsOf(
+                text = { id -> ctx.getString(id) },
+                textWithArg = { id, arg -> ctx.getString(id, arg) },
+            )
+        val rendered = PageErrorTexts.denyAlertText("navigation_not_consumed", realStrings)
+        assertTrue("渲染文案必须带出 deny code：$rendered", rendered.contains("navigation_not_consumed"))
+        assertFalse("渲染文案不得残留原始占位符：$rendered", rendered.contains("%1"))
+        // 专有条目（session_expired 无占位符）不因带实参而变形
+        assertEquals(
+            ctx.getString(R.string.session_expired),
+            PageErrorTexts.denyAlertText("session_expired", realStrings),
         )
     }
 

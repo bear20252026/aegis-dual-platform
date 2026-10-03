@@ -11,6 +11,7 @@ import android.webkit.WebViewClient
 import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
 import com.aegis.broker.Decision
+import com.aegis.broker.DenyReason
 
 /**
  * 阶段 D（蓝图 android/webview-adapter）：WebViewClient 封装——只把 WebView 回调
@@ -52,6 +53,11 @@ class AegisWebViewClient(
     private var documentGeneration = 0L
     private var pendingConfirmation: PendingConfirmedNavigation? = null
 
+    // 审计第六轮（2026-10-03）：标签销毁标志——tearDown→release→close 序列置位，
+    // 投递到主线程下一轮的放行加载（[loadAllowed]）据此短路，避免对已
+    // destroy 的 WebView 触达 loadUrl（AD-281 销毁序列已无 about:blank 占位）。
+    private var closed = false
+
     companion object {
         /** AD-330（2026-10-02 审计）：本类日志 tag 单源（原 "AegisWebView"/"Aegis" 混用）。 */
         private const val TAG = "AegisWebView"
@@ -68,6 +74,19 @@ class AegisWebViewClient(
          * 可见性 public：跨模块（app）共用同源集合。
          */
         val externalHandlerSchemes = setOf("mailto", "tel", "sms", "smsto", "mmsto", "geo")
+
+        /**
+         * 审计第六轮（2026-10-03）：授权兑换失败的合成拒绝原因——
+         * broker.consumeNavigation 只回布尔（会话过期/代际不符/nonce 重放/
+         * Kotlin 侧 expiresAt 已到皆归此处），无原生 code 可透传，客户端侧
+         * 补一码上抛（app 层经 nav_rejected_code 文案带出 code——拒绝必须
+         * 用户可见，AD-009 同口径）。
+         */
+        val NOT_CONSUMED_REASON =
+            DenyReason(
+                WebViewErrorCodes.ERROR_NAVIGATION_NOT_CONSUMED,
+                "导航授权兑换失败（会话过期/代际不符/nonce 重放）",
+            )
     }
 
     override fun shouldOverrideUrlLoading(
@@ -85,13 +104,17 @@ class AegisWebViewClient(
         if (request.isForMainFrame) {
             return handleMainFrameNavigation(view, requestedUrl, scheme)
         }
-        return handleSubFrameNavigation(view, requestedUrl)
+        return handleSubFrameNavigation(requestedUrl)
     }
 
     /**
      * AD-255：主框架导航——外跳 scheme（mailto:/tel:/sms:）显式反馈；其余
      * （http/https/其他）走 authorizeNavigation 全链（阻断 WebView 原始
      * 加载，放行时由客户端经 broker 升级后 loadUrl——P1-2 修复语义不变）。
+     *
+     * 审计第六轮（2026-10-03）：本路径由 WebView 回调内发起，放行加载经
+     * view.post 投递（shouldOverrideUrlLoading 契约不得在回调内同步改动
+     * WebView 状态）——见 [loadAllowed]；回调返回值语义不变（true=已接管）。
      */
     private fun handleMainFrameNavigation(
         view: WebView,
@@ -112,6 +135,7 @@ class AegisWebViewClient(
             view,
             requestedUrl,
             mayRequireConfirmation = true,
+            fromNavigationCallback = true,
         )
         return true
     }
@@ -132,11 +156,28 @@ class AegisWebViewClient(
      * 只用于策略判定、放行仍载原始 http（明文子框架请求照发，cleartext
      * 全局禁用下表现为子框架静默加载失败）。现 Allow 时返回 true 阻断
      * 原始加载并由 view.loadUrl(升级后 URL) 重发（Deny/确认阻断语义不变）。
+     *
+     * 审计第六轮（2026-10-03）：撤销 AD-309 的「Allow → view.loadUrl」重发
+     * 形态（P1 回归）——WebView.loadUrl 恒作用主框架：任何页内子框架跳转
+     * （轮播广告位、target="_self" 链接、iframe 自身 location= 赋值）都会
+     * 把整个标签替换成该 URL、真 iframe 反而不加载；而本路径是「良构 URL
+     * 一律 Allow、不需确认」的轻量判定，等于 UI 红描通道（小 iframe 导航
+     * 到攻击页 = 全标签渲染，绕过主框架授权链）。Allow 的正确语义是放行
+     * 原始子框架请求（返回 false，不接管）。
+     * AD-309 想解决的「子框架 HTTPS 升级」在本回调内没有正确解，逐方案
+     * 排除后取①：
+     * ① 交回 WebView + 网络层硬禁明文——network_security_config base-config
+     *    cleartextTrafficPermitted="false" + manifest usesCleartextTraffic=
+     *    "false"（NetworkSecurityConfigGuardTest 三层联防守护）已保证原始
+     *    http 子框架请求由 Chromium 直接 ERR_CLEARTEXT_NOT_PERMITTED 失败，
+     *    不存在明文漏发；策略判定仍按升级后 https URL 评估（与主框架同口径）。
+     * ② shouldInterceptRequest 无「改写请求」语义——要返回升级后的响应必须
+     *    自建网络栈代抓（脱离 Chromium 缓存/Cookie/重定向/编码语义，且回调
+     *    线程不得做网络阻塞），代价与风险远超收益。本类不实现该回调。
+     * 形参不再收 view（detekt UnusedParameter 同证）——本路径对 WebView
+     * 零副作用是不变式，测试侧另有「子框架路径不得出现 loadUrl」断言兜底。
      */
-    private fun handleSubFrameNavigation(
-        view: WebView,
-        requestedUrl: String,
-    ): Boolean {
+    private fun handleSubFrameNavigation(requestedUrl: String): Boolean {
         val subFrameUrl = upgradeToHttpsIfNeeded(requestedUrl)
         // ktlint multiline-expression（云端二轮实证）：多行表达式（when 块）
         // 必须另起一行——subject 与 when 均独立成句
@@ -145,10 +186,9 @@ class AegisWebViewClient(
         val blocked =
             when (decision) {
                 is Decision.Allow -> {
-                    // AD-309：经升级后 URL 重发（不消费顶层授权对象——子框架
-                    // 轻量路径不产生新授权，重发请求自身仍受本回调约束）
-                    view.loadUrl(subFrameUrl)
-                    true
+                    // 审计第六轮（2026-10-03）：放行原始子框架请求——本回调
+                    // 内不得调用任何改动 WebView 状态的方法（loadUrl 落主框架）
+                    false
                 }
 
                 is Decision.RequireConfirmation -> {
@@ -167,11 +207,18 @@ class AegisWebViewClient(
         return blocked
     }
 
-    /** 地址栏和首次外部导航必须调用此入口，不能直接调用 WebView.loadUrl。 */
+    /**
+     * 地址栏和首次外部导航必须调用此入口，不能直接调用 WebView.loadUrl。
+     *
+     * 审计第六轮（2026-10-03）：本入口不在 WebView 回调内（SecureNavigator
+     * 地址栏提交/冷启动外链），放行加载保持同步执行——未 attach 的 WebView
+     * 上 View.post 只入 HandlerActionQueue、attach 前不执行，投递会让冷启动
+     * 外链导航静默丢失（[loadAllowed] 的 fromNavigationCallback 分派理由）。
+     */
     fun navigate(
         view: WebView,
         url: String,
-    ): Boolean = authorizeNavigation(view, url, mayRequireConfirmation = true)
+    ): Boolean = authorizeNavigation(view, url, mayRequireConfirmation = true, fromNavigationCallback = false)
 
     /**
      * 仅由受信 Compose chrome 的明确批准按钮调用。客户端不会创建授权；它把 Rust
@@ -213,6 +260,7 @@ class AegisWebViewClient(
         view: WebView,
         rawUrl: String,
         mayRequireConfirmation: Boolean,
+        fromNavigationCallback: Boolean,
     ): Boolean {
         val url = upgradeToHttpsIfNeeded(rawUrl)
         if (requireNavigationConfirmation && mayRequireConfirmation && pendingConfirmation != null) {
@@ -256,8 +304,16 @@ class AegisWebViewClient(
                                     rawUrl = url,
                                     scope = "navigation",
                                 )
-                        if (consumed) view.loadUrl(url)
-                        consumed
+                        // 审计第六轮（2026-10-03）：!consumed 不再静默死点击——
+                        // 兑换失败顶层上抛可见提示；注入决策本身被拒时沿用其
+                        // reason（策略口径），不谎报为兑换失败。
+                        finishMainFrameAuthorization(
+                            view,
+                            url,
+                            consumed,
+                            fromNavigationCallback,
+                            denyReason = (approved as? Decision.Deny)?.reason,
+                        )
                     }
                 }
 
@@ -271,8 +327,16 @@ class AegisWebViewClient(
                             url,
                             "navigation",
                         )
-                    if (consumed) view.loadUrl(url)
-                    consumed
+                    // 审计第六轮（2026-10-03）：同上——兑换失败（会话过期/
+                    // 代际不符/nonce 重放/Kotlin 侧 expiresAt 已到）经 denied
+                    // 顶层上抛，此前只 return false 零反馈。
+                    finishMainFrameAuthorization(
+                        view,
+                        url,
+                        consumed,
+                        fromNavigationCallback,
+                        denyReason = null,
+                    )
                 }
 
                 is Decision.Deny -> {
@@ -280,6 +344,49 @@ class AegisWebViewClient(
                 }
             }
         return allowed
+    }
+
+    /**
+     * 审计第六轮（2026-10-03）：主框架放行收敛——兑换成功才加载，失败一律
+     * 顶层上抛可见提示（项目自身规则「拒绝不得静默」——AD-009/P0 复审同
+     * 口径）。返回值即 consumed，调用方 when 分支语义不变。
+     */
+    private fun finishMainFrameAuthorization(
+        view: WebView,
+        url: String,
+        consumed: Boolean,
+        fromNavigationCallback: Boolean,
+        denyReason: DenyReason?,
+    ): Boolean {
+        if (consumed) {
+            loadAllowed(view, url, fromNavigationCallback)
+        } else {
+            denied(denyReason ?: NOT_CONSUMED_REASON, topLevel = true, url = url)
+        }
+        return consumed
+    }
+
+    /**
+     * 审计第六轮（2026-10-03）：放行加载的投递口径——API 24
+     * shouldOverrideUrlLoading 契约警示回调内不得同步改动 WebView 状态，
+     * 回调内的加载改经 view.post 投递到下一主线程轮次；非回调入口
+     * （[navigate]）保持同步（未 attach 的 WebView 上 View.post 只入
+     * HandlerActionQueue、attach 前不执行，投递会静默丢失冷启动外链导航）。
+     * AD-281 关联：销毁序列已无 about:blank 占位——投递任务与 destroy 竞态
+     * 时由 [closed] 标志短路，绝不对已销毁 WebView 触达 loadUrl。
+     */
+    private fun loadAllowed(
+        view: WebView,
+        url: String,
+        fromNavigationCallback: Boolean,
+    ) {
+        if (fromNavigationCallback) {
+            view.post {
+                if (!closed) view.loadUrl(url)
+            }
+        } else {
+            view.loadUrl(url)
+        }
     }
 
     /** P0 修复（全量复审 2026-09-01）：决策前滑动续期会话（待审批确认期间不续期）。 */
@@ -476,6 +583,9 @@ class AegisWebViewClient(
 
     /** 标签关闭时显式释放 Broker 会话，禁止遗留 WebView 再消费旧授权。 */
     fun close() {
+        // 审计第六轮（2026-10-03）：先置销毁标志——已投递但尚未执行的放行加载
+        // （loadAllowed 的 view.post）据此短路，不再触达已 destroy 的 WebView。
+        closed = true
         rejectPendingNavigation()
         broker.destroySession(sessionId)
     }

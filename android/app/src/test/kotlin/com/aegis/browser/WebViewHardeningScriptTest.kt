@@ -66,6 +66,36 @@ class WebViewHardeningScriptTest {
         assertFalse("自制 acc*31 混合仍在脚本中（AD-005 迁移回退）", script.contains("Math.imul(acc, 31)"))
     }
 
+    /**
+     * 审计第六轮（2026-10-03，P1）：站点种子只在闭包内——撤销 window 全局
+     * 导出（__AEGIS_SITE_SEED）的回归锚点。种子可被页面按名读取 = 复刻
+     * aegisNudge 与三枚 Math.imul 常数即可确定性去噪还原真画布（噪声防护
+     * 归零），且具名 __AEGIS_* 全局本身就是防护存在性探针。口径对齐参照
+     * 实现 core/rust-policy-core/src/per_site_seed.rs:24-28「站点种子按域
+     * 派生后仅存在于闭包内」。
+     */
+    @Test
+    fun stage2SiteSeedIsClosureScopedNeverGlobal() {
+        assertTrue("种子必须是闭包局部 const", script.contains("const __AEGIS_SITE_SEED = deriveSeed("))
+        assertFalse("种子全局导出不得残留（P1 泄漏回归）", script.contains("window.__AEGIS_SITE_SEED"))
+        assertFalse("不得对 window defineProperty 种子", script.contains("defineProperty(window, '__AEGIS_SITE_SEED'"))
+        // 两处消费点必须以裸标识符取外层闭包常量（漏一处即该通道失效/回退全局）
+        assertTrue("canvas 噪声消费点未取闭包种子", script.contains("parseInt(__AEGIS_SITE_SEED.slice(0, 8), 16)"))
+        assertTrue(
+            "hardwareConcurrency 消费点未取闭包种子",
+            script.contains("parseInt(__AEGIS_SITE_SEED.slice(8, 16), 16)"),
+        )
+        // 结构不变式：种子声明与最后一个消费点之间 Stage 2 闭包不得提前收口
+        //（消费块整体缩进两级内嵌——列 0 的 })(); 只允许出现在消费点之后）
+        val seedDecl = script.indexOf("const __AEGIS_SITE_SEED =")
+        val lastConsumer = script.indexOf("parseInt(__AEGIS_SITE_SEED.slice(8, 16), 16)")
+        assertTrue("种子声明必须先于消费点（seedDecl=$seedDecl, consumer=$lastConsumer）", seedDecl in 0 until lastConsumer)
+        assertFalse(
+            "Stage 2 闭包不得在消费点前提前闭合",
+            Regex("(?m)^\\}\\(\\)\\);").containsMatchIn(script.substring(seedDecl, lastConsumer)),
+        )
+    }
+
     // ------------------------------------------------------------- Stage 3
 
     @Test
