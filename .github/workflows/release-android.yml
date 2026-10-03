@@ -154,10 +154,22 @@ jobs:
           # SP-223 配套：LOAD 段对齐断言（readelf 实测产物——max-page-size=
           # 16384 生效时每个 LOAD 段 Align 列为 0x4000；任一段不对齐即 fail）
           SO_FILE="$GITHUB_WORKSPACE/dist/native-policy/android/arm64-v8a/libaegis_policy_core.so"
-          load_total=$(readelf -l "$SO_FILE" | grep -c ' LOAD ')
-          load_aligned=$(readelf -l "$SO_FILE" | grep ' LOAD ' | grep -c '0x4000')
+          # grep -c 计 0 时以退出码 1 终止管道——set -e 下赋值语句静默中断
+          #（dispatch 首跑实证，echo 从未到达）；|| true 保住探针可观测
+          if [ ! -f "$SO_FILE" ]; then
+            echo "❌ 产物缺失：$SO_FILE——dist 现场转储："
+            find "$GITHUB_WORKSPACE/dist/native-policy" -type f || true
+            exit 1
+          fi
+          # readelf 默认窄输出把 LOAD 行折成两行（Flags/Align 在续行）——
+          # "grep ' LOAD ' | grep -c '0x4000'" 恒为 0（dispatch 首跑实证，
+          # 产物实际全对齐而误报）。-lW 宽输出单行化 + bash 十六进制数值比较
+          load_total=$(readelf -lW "$SO_FILE" | grep -c ' LOAD ' || true)
+          load_aligned=$(readelf -lW "$SO_FILE" | awk '/ LOAD / {print $NF}' |
+            while read -r a; do [ $((a)) -ge 16384 ] && echo 1; done | wc -l)
           echo "[readelf] LOAD 段数=$load_total，16K(0x4000) 对齐段数=$load_aligned"
           if [ "$load_total" -eq 0 ] || [ "$load_total" -ne "$load_aligned" ]; then
+            readelf -lW "$SO_FILE" | sed -n '/Program Headers/,/Section to Segment/p'
             echo "❌ LOAD 段未全部 16KB 对齐（max-page-size=16384 未生效）"
             exit 1
           fi

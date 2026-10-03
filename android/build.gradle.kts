@@ -1,3 +1,37 @@
+// ============================================================================
+// 构建类路径安全地板（2026-10-03 依赖告警处置批）
+// ============================================================================
+// 背景：Gradle-Dependency-Graph 接线后（SP-246 收尾），Dependabot alerts 首次
+// 对 Android 构建面生效——11 项告警（1 critical/3 high/4 medium/3 low）全部
+// 指向 AGP 9.4.1 构建类路径的传递依赖（gradle-dependency-insight 工具实证父链）：
+//   bcprov/bcpkix 1.80.2、jose4j 0.9.5（bundletool 1.18.3）、
+//   jdom2 2.0.6（jetifier-processor）、commons-lang3 3.16.0（sdklib→commons-io）、
+//   httpclient 4.5.6（sdklib→httpmime，树内已冲突解析至 4.5.14）。
+// 暴露面证明（同工具，runtime.txt 零命中）：debugRuntimeClasspath 闭包不含
+// 上述任何包——**产品 APK 不受影响**，本地板只收紧构建机（dev/CI）侧暴露。
+// 机制：buildscript 类路径与 plugins DSL 类路径合并后冲突解析取最高版本——
+// 显式 classpath 地板把五包抬到修复版（BC 1.80→1.85 / jose4j 0.9.5→0.9.6 /
+// jdom2 2.0.6→2.0.6.1 / lang3 3.16→3.18.0 / httpclient 钉 4.5.14）。
+// 范围取舍：logback 3×low 不在本树（依赖图另一节点，疑为插件自有类路径），
+// 留给 AGP/工具链升级承接——不对不在解析树内的包盲加地板。
+// 版本来源：各告警的 first_patched_version（11/12→1.85、7→1.84、5→0.9.6、
+// 4→2.0.6.1、3→3.18.0、2→4.5.13 已被树解析超集 4.5.14 覆盖——显式钉版防回退）。
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("org.bouncycastle:bcprov-jdk18on:1.85")
+        classpath("org.bouncycastle:bcutil-jdk18on:1.85")
+        classpath("org.bouncycastle:bcpkix-jdk18on:1.84")
+        classpath("org.bitbucket.b_c:jose4j:0.9.6")
+        classpath("org.jdom:jdom2:2.0.6.1")
+        classpath("org.apache.commons:commons-lang3:3.18.0")
+        classpath("org.apache.httpcomponents:httpclient:4.5.14")
+    }
+}
+
 plugins {
     // AD-292（2026-10-01 审计，--warning-mode all 实测）：Gradle 9.8 下仅存的
     // 两条 Deprecated 告警均来自第三方 Gradle 插件内部，非本仓脚本：

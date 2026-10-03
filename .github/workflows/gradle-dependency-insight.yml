@@ -8,7 +8,7 @@ name: Gradle-Dependency-Insight
   workflow_dispatch:
     inputs:
       packages:
-        description: '依赖坐标关键字（逗号分隔——dependencyInsight/链提取对象）'
+        description: '依赖坐标关键字（逗号分隔）'
         required: false
         default: "bouncycastle,bcpkix,jose4j,jdom,httpclient,commons-lang3,logback"
 
@@ -27,6 +27,9 @@ jobs:
     defaults:
       run:
         working-directory: android
+    env:
+      # 逗号清单 → grep 交替正则（首跑实证：原始逗号串是字面量匹配，判定全废）
+      PKG_REGEX: bouncycastle|bcpkix|jose4j|jdom|httpclient|commons-lang3|logback
     steps:
       - name: 检出代码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
@@ -45,37 +48,48 @@ jobs:
       - name: 构建类路径闭包（buildEnvironment——插件/AGP 传递树）
         run: |
           ./gradlew buildEnvironment --no-daemon > /tmp/build-env.txt
-          echo "=== build classpath 命中 ==="
-          grep -nE '${{ github.event.inputs.packages }}' /tmp/build-env.txt || echo "(零命中)"
+          echo "=== build classpath 命中（含上下文父链） ==="
+          grep -nE -B3 "$PKG_REGEX" /tmp/build-env.txt || echo "(零命中)"
 
       - name: 产品运行时闭包（debugRuntimeClasspath——APK 暴露面证明）
         run: |
           ./gradlew :app:dependencies --configuration debugRuntimeClasspath --no-daemon > /tmp/runtime.txt
           echo "=== runtime 命中 ==="
-          grep -nE '${{ github.event.inputs.packages }}' /tmp/runtime.txt || echo "(零命中——产品不暴露)"
+          grep -nE "$PKG_REGEX" /tmp/runtime.txt || echo "(零命中——产品运行时不暴露)"
 
-      - name: 测试类路径闭包（testDebugUnitTestRuntimeClasspath——工具链暴露面）
+      - name: 测试类路径闭包（单元测试 runtime——工具链暴露面；AGP 9 配置名自适配）
         run: |
-          ./gradlew :app:dependencies --configuration testDebugUnitTestRuntimeClasspath --no-daemon > /tmp/testcp.txt
-          echo "=== test classpath 命中 ==="
-          grep -nE '${{ github.event.inputs.packages }}' /tmp/testcp.txt || echo "(零命中)"
+          CFG=""
+          for cand in debugUnitTestRuntimeClasspath testDebugUnitTestRuntimeClasspath; do
+            if ./gradlew :app:dependencies --configuration "$cand" --no-daemon > /tmp/testcp.txt; then
+              CFG="$cand"; break
+            fi
+          done
+          [ -n "$CFG" ] || { echo "FAIL: 未找到单元测试 runtime 配置"; exit 1; }
+          echo "=== test classpath（$CFG）命中 ==="
+          grep -nE -B3 "$PKG_REGEX" /tmp/testcp.txt || echo "(零命中)"
 
-      - name: 依赖链洞察（dependencyInsight——包→父链）
+      - name: 依赖链洞察（dependencyInsight——按需解析两条 classpath）
         run: |
           IFS=',' read -ra PKGS <<< "${{ github.event.inputs.packages }}"
           for pkg in "${PKGS[@]}"; do
-            echo "=== insight: $pkg (buildEnvironment) ==="
-            ./gradlew buildEnvironment --no-daemon --dependency "$pkg" 2>&1 | tail -40 || true
+            echo "=== insight($pkg) @ debugRuntimeClasspath ==="
+            ./gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency "$pkg" --no-daemon 2>&1 | tail -25 || true
           done
 
+      # upload-artifact 拒绝 workspace 外路径——先拷回
+      - name: 归集闭包树到 workspace
+        if: always()
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/dependency-trees
+          for f in build-env runtime testcp; do
+            [ -f /tmp/$f.txt ] && cp /tmp/$f.txt $GITHUB_WORKSPACE/dependency-trees/
+          done
       - name: 上传完整闭包树（排障用）
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dependency-trees
-          path: |
-            /tmp/build-env.txt
-            /tmp/runtime.txt
-            /tmp/testcp.txt
+          path: dependency-trees/
           if-no-files-found: warn
           retention-days: 14
