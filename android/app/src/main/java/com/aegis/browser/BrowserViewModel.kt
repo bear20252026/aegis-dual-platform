@@ -125,6 +125,7 @@ class BrowserViewModel(
         BrowserViewModelConfirmations(
             currentWebView = { tabManager?.current()?.webView },
             resolveText = { id -> appContext?.getString(id).orEmpty() },
+            resolveTextWithArg = { id, arg -> appContext?.getString(id, arg).orEmpty() },
         )
 
     val webViewAlert: StateFlow<WebViewAlertNotice?> get() = confirmations.webViewAlert

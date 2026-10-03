@@ -25,6 +25,7 @@ internal class BrowserViewModelConfirmations(
     private val currentWebView: () -> android.webkit.WebView?,
     /** AD-046：提示文案经资源单源（init 后 appContext 必然可用）。 */
     private val resolveText: (Int) -> String,
+    private val resolveTextWithArg: (Int, String) -> String = { _, _ -> "" },
 ) {
     private val _webViewAlert = MutableStateFlow<WebViewAlertNotice?>(null)
     val webViewAlert: StateFlow<WebViewAlertNotice?> = _webViewAlert.asStateFlow()
@@ -57,6 +58,12 @@ internal class BrowserViewModelConfirmations(
 
     /** 页面错误/提示文案缝（pageErrorStringsOf 注入面——含带参重载）。 */
     fun alertText(id: Int): String = resolveText(id)
+
+    /** 带参文案缝（AD-258 类占位符——pageErrorStringsOf 第二缝）。 */
+    fun alertText(
+        id: Int,
+        arg: String,
+    ): String = resolveTextWithArg(id, arg)
 
     /**
      * Compose 的明确批准操作。只允许当前活动标签的待审批请求恢复导航，
