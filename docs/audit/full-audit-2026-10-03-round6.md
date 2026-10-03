@@ -32,6 +32,17 @@ CI-供应链 / Python+文档核验），覆盖 649 个跟踪文件、约 70K LOC
 
 ### 一之二、延续轮（2026-10-04）新增闭环——架构主轴的两条断链
 
+> **本轮不自证的限定**：R6-20 交付的是核心侧**接入面**，目前**没有任何一端调用它**。
+> Android 全树没有威胁订阅源实现（无可喂数据）；Windows 的黑名单仍在端侧
+> `BrowserPolicyBroker._blockedHosts` 里判定。因此"FFI 通路无内容判定"这条断链
+> 在**核心层**已闭合（可注入、可拒、有向量钉住），但在**出货行为层**尚未闭合——
+> 恶意 host 在两端仍按各自既有的方式处理。把它写成"黑名单已统一"就是又一次
+> 虚闭环，故此处显式标注。后续动作（Windows 侧）：在
+> `ThreatFeedCoordinator.applyHosts` 回调里把同一快照同时喂给
+> `aegis_policy_core_broker_update_host_denylist_json`，使 native 模式与托管模式
+> 共用一份 denylist；Android 侧则要先有订阅源实现。
+
+
 | 编号 | 级别 | 缺陷 | 修复 | 验证 |
 |---|---|---|---|---|
 | R6-20 | P0 | **FFI 通路无任何内容判定**：`evaluate_navigation` 只做 URL 归一 + 会话/代际/nonce 校验，从不调 `PolicyEngine::evaluate`/`CapabilityRegistry::validate`，也无 host 黑名单——任意良构 https（含钓鱼/恶意 host）一律 Allow 并发放可消费 nonce。因 `PolicyEngine::default()` 是 deny-all 故从未接线（代码 H-7 自述），结果是"单一裁决源"退化为"单一 nonce 记账员" | 新增 C ABI 入口 `aegis_policy_core_broker_update_host_denylist_json`（入参 JSON host 数组，返回 `{decision,accepted,input}`；未注入时黑名单为空=行为不变，不 deny-all），`evaluate_navigation` 在归一后先查黑名单命中即 `deny/threat_blocklist`。锁中毒按"被拒"处理。已登记入 `c_abi_export_surface_is_frozen` 冻结符号表 | 新增 3 条跨端向量（`blocklisted_host_denied` / 大小写形态 / `bad.example:8443` 带端口形态）；`cargo test` 551 通过。带端口那条是开发期实测到的**我自己的**绕过：`CanonicalExternalUrl.host` 依 RS-227 保留非默认端口，直接比对会使 `bad.example` 匹配不上 `bad.example:8443`——已改为剥端口后比对并加向量钉住 |
