@@ -120,7 +120,7 @@ class BrowserViewModel(
     // 等）单按钮「知道了」；版本检查提示经 [setWebViewVersionAlert] 登记
     // （双按钮「去更新/稍后」）。原 String? 单态使所有提示共用版本检查按钮。
     // 拆分批（2026-10-03）：安全提示 + 双确认流内聚到 BrowserViewModelConfirmations
-    //（AD-103 host 接缝同款模式）——公开读与操作经委托保持签名不变（单测零改动）。
+    // （AD-103 host 接缝同款模式）——公开读与操作经委托保持签名不变（单测零改动）。
     private val confirmations =
         BrowserViewModelConfirmations(
             currentWebView = { tabManager?.current()?.webView },
