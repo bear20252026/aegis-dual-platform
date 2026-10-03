@@ -32,6 +32,28 @@ def check_lock_file(windows_dir: Path) -> list[str]:
     return problems
 
 
+# 审计第六轮（2026-10-03）：B3「依赖 hash 锁定」门禁此前只断言
+# legacy/windows-pywebview/requirements-lock.txt——那是 ADR-009 只读归档栈的锁，
+# 而 CI 实际以 --require-hashes 安装的是根级 requirements-ci.txt。仓库级没有任何
+# 门禁断言后者存在/带 hash（仅各 workflow 里 pip 调用顺带踩到）。归档锁被删掉或
+# 去 hash 会红，活跃锁被去 hash 反而无人知晓——门禁守的是退役产物，不是发布产物。
+def check_active_lock_file(root: Path) -> list[str]:
+    """根级 requirements-ci.txt（CI 真实安装面）必须存在且带 hash。"""
+    problems: list[str] = []
+    lock_file = root / 'requirements-ci.txt'
+    if not lock_file.is_file():
+        problems.append('缺 requirements-ci.txt（CI 以 --require-hashes 消费的活跃锁）')
+        return problems
+    text = lock_file.read_text(encoding='utf-8')
+    if '--hash=' not in text:
+        problems.append('requirements-ci.txt 无 hash（pip-compile --generate-hashes 重新生成）')
+    # 源清单存在性——锁由 .in 编译而来，二者须同批演进
+    source = root / 'requirements-ci.in'
+    if not source.is_file():
+        problems.append('缺 requirements-ci.in（requirements-ci.txt 的编译源）')
+    return problems
+
+
 # PY-124（审计 2026-09-25）：C# 关键文件断言抽函数化——单测可直接对
 # 合成目录树断言，不必依赖真实仓库布局
 def check_required_cs_files(csproj: Path) -> list[str]:
@@ -140,6 +162,8 @@ def main() -> int:
     if (windows / 'aegis_webview.nsi').exists():
         failures.append('Deprecated NSIS script still exists in the Windows working copy')
     failures.extend(check_lock_file(windows))
+    # 审计第六轮（2026-10-03）：同批断言**活跃**锁（CI --require-hashes 消费面）
+    failures.extend(check_active_lock_file(root))
 
     # 审计修复：正典 C# 栈存在性断言（此前脚本只看 legacy 栈——C# 代码不经
     # 任何检查；发布资源断言在 release-windows.yml，这里是仓库级快速门禁）

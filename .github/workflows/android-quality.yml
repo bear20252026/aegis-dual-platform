@@ -1,5 +1,7 @@
 # Aegis Android 质量门禁（工具链 P0：ktlint + detekt）
-# 触发：对 android/** 的 push / PR / 手动。JDK 21 由下方 setup-java 显式安装
+# 触发：任意 push / PR / 手动——无 paths: 过滤（审计第六轮 2026-10-03 删除，
+# 依 ADR-007 D3「门禁型 workflow 全量常跑」；原注释"对 android/** 的 push"
+# 随过滤一并失效）。JDK 21 由下方 setup-java 显式安装
 #（temurin——SP-252 注记：原注释"windows-latest 自带 JDK 21 兼容"已失实，
 # 工具链不再依赖镜像预装）。使用项目 Gradle 9.8.0 wrapper（SP-252 随手更正：
 # 原注释 9.7.0 已漂移）。ktlintCheck + detekt 作为合并门禁，detekt 基线文件
@@ -11,12 +13,18 @@
 name: Android-Quality
 
 "on":
-  push:
-    # PY-206（2026-09-26 审计）：push 触发补 paths 过滤——docs 改动不再
-    # 全量跑 Gradle 门禁（PR 触发面保持不过滤）
-    paths:
-      - 'android/**'
-      - '.github/workflows/android-quality.yml'
+  # 审计第六轮（2026-10-03）：删除 push 的 paths: 过滤（PY-206 遗留）——
+  # ADR-007 D3 把 android-quality 明列为「门禁型」并要求移除全部 paths:
+  # 过滤（"paths: 过滤 = 不设防"）。实证漏检面：本 job 的消费输入不止
+  # android/**——"Verify shared product version declarations" 步骤执行
+  # ../scripts/verify_versions.py 并读 shared/version.properties（两者均不在
+  # 旧过滤面内），.github/actions/** 复合动作同样不在——直推只改这些文件时
+  # Android 门禁整轮跳过。旧过滤面覆盖 android/** 本身无洞，洞在"其余输入"
+  # 侧；PR 触发面原本不过滤，故仅直推路径受影响。取舍：恢复全量常跑
+  #（ADR-007 D3 判定省时收益 << 漏检成本，ktlint 长期 FAIL 未被发现即实证）。
+  # 分支面保持原样（原 push 无 branches: 限定→任意分支 push 均触发；不得新增
+  #  branches 收窄，否则制造新的过滤型漏检）
+  push: {}
   pull_request: {}
   workflow_dispatch: {}
 

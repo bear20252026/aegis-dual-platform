@@ -19,6 +19,9 @@ name: Supply-Chain
       # SBOM 转换器冒烟输入
       - 'release/tools/generate_sbom/**'
       - 'contracts/vectors/update-manifest-valid.json'
+      # 审计第六轮（2026-10-03）：validate_release.py 本体入 push 过滤面——
+      # 下方 repo-integrity 门禁的脚本自身改动必须在直推路径上也重跑
+      - 'validate_release.py'
       - '.github/workflows/supply-chain.yml'
       - '.github/actions/cargo-audit/**'
   pull_request: {}

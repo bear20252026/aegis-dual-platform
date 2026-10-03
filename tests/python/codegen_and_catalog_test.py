@@ -301,12 +301,30 @@ class TestBridgeGuardHelpers:
 # PY-236（2026-10-01 审计）：body 行必须真实承载锚点声明的每个 sink——
 # 合成模板补 sink 实现行（与真实 bridge_guard.template.js 同构），
 # 否则新 body 检查正确地拒绝空心化模板。
+# 审计第六轮（2026-10-03）：sink 清单迁出模板、由门禁策略文件驱动正则断言——
+# 合成用例改用「自带最小 2-sink 策略文件」（fetch + xhr_open），body 行必须是
+# 真赋值 hook（`X = function`），锚点行 token 集合须 ⊇ 策略 anchor_token。
 CANONICAL_JS = (
     "// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open\n"
     "const HOSTS = __AEGIS_HOSTS__;\n"
     "const REQUIRE_HTTPS = __AEGIS_REQUIRE_HTTPS__;\n"
     "window.fetch = function (...args) { guard(args); };\n"
-    "if (!window.fetch) { XMLHttpRequest.prototype.open; }\n"
+    "XMLHttpRequest.prototype.open = function (m, u) { guard(u); };\n"
+)
+
+# 审计第六轮：合成 2-sink 策略文件（结构须满足 _load_policy 的 fail-closed 校验）
+SYN_SINKS_POLICY = (
+    'version: "1"\n'
+    "required_placeholders: [__AEGIS_HOSTS__, __AEGIS_REQUIRE_HTTPS__]\n"
+    "sinks:\n"
+    "  - id: fetch\n"
+    '    anchor_token: "window.fetch = function"\n'
+    '    hook_pattern: "window\\\\.fetch\\\\s*=\\\\s*function"\n'
+    "  - id: xhr_open\n"
+    '    anchor_token: "XMLHttpRequest.prototype.open"\n'
+    '    hook_pattern: "XMLHttpRequest\\\\.prototype\\\\.open\\\\s*=\\\\s*function"\n'
+    "out_of_scope:\n"
+    "  same_realm_unhooked: [EventSource]\n"
 )
 
 
@@ -326,17 +344,20 @@ class TestKotlinPlaceholderNormalizationEndToEnd:
         )
         # PY-231（2026-10-01 审计）：CANONICAL/RUST/KOTLIN 此前直接改模块全局
         # 不经 monkeypatch——测试泄漏污染同进程后续用例（真实仓库路径被
-        # 覆盖后不还原）。三处统一走 monkeypatch.setattr（自动还原）。
+        # 覆盖后不还原）。四处统一走 monkeypatch.setattr（自动还原）。
         monkeypatch.setattr(vbg, "CANONICAL", template)
         monkeypatch.setattr(vbg, "RUST", rust)
         monkeypatch.setattr(vbg, "KOTLIN", tmp_path / "WebViewHardening.kt")
+        # 审计第六轮：策略文件亦 monkeypatch 为自带 2-sink 合成清单
+        (tmp_path / "bridge-sinks.yaml").write_text(SYN_SINKS_POLICY, encoding="utf-8")
+        monkeypatch.setattr(vbg, "SINKS_POLICY", tmp_path / "bridge-sinks.yaml")
 
     KT_OK = (
         "\n// REQUIRED_SINKS: window.fetch = function|XMLHttpRequest.prototype.open\n"
         "const HOSTS = [$allowedHostsJson];\n"
         "const REQUIRE_HTTPS = $requireHttpsJson;\n"
         "window.fetch = function (...args) { guard(args); };\n"
-        "if (!window.fetch) { XMLHttpRequest.prototype.open; }\n"
+        "XMLHttpRequest.prototype.open = function (m, u) { guard(u); };\n"
     )
 
     def test_placeholders_normalized_and_match(self, tmp_path, monkeypatch):
@@ -391,15 +412,17 @@ class TestKotlinPlaceholderNormalizationEndToEnd:
 
     def test_module_paths_restored_after_run(self, tmp_path, monkeypatch):
         # PY-231：模块级路径经 monkeypatch 注入后必须自动还原——
-        # 同进程后续用例不得读到 tmp 覆盖值（测试泄漏回归锚）
-        import contracts.codegen.verify_bridge_guard as fresh
+        # 同进程后续用例不得读到 tmp 覆盖值（测试泄漏回归锚）。
+        # 审计第六轮：failures 已 per-invocation 重置——不再需要 re-import 模块
+        # 拿干净全局，也不需预置 failures=[]（旧 workaround 随之退役）。
+        pristine = vbg.CANONICAL
+        assert pristine.is_absolute()
         before = (vbg.CANONICAL, vbg.RUST, vbg.KOTLIN)
-        monkeypatch.setattr(vbg, "failures", [])
         self._write_env(tmp_path, monkeypatch, self.KT_OK)
         assert vbg.main() == 0
+        assert vbg.main() == 0  # 连跑两次——per-invocation 重置后不累加陈旧失败
         monkeypatch.undo()
         assert (vbg.CANONICAL, vbg.RUST, vbg.KOTLIN) == before
-        assert fresh.CANONICAL.is_absolute()
 
 
 # ---------------------------------------------------------------- PY-135..138
@@ -604,3 +627,66 @@ class TestBridgeGuardNoFallback:
     def test_no_fallback_constant_left(self):
         # PY-215：第二事实源已物理移除
         assert not hasattr(vbg, "REQUIRED_SINKS_FALLBACK")
+
+
+# ------------------------------------------------ 审计第六轮（2026-10-03）
+class TestSinkPolicyIsGateOwned:
+    """sink 清单必须存活于门禁自有策略文件，而非被证明的模板自身注释。"""
+
+    POLICY = Path(vbg.ROOT / "contracts" / "policy" / "bridge-sinks.yaml")
+
+    def test_policy_file_exists_and_authoritative(self):
+        assert self.POLICY.is_file()
+
+    def test_sinks_list_not_shrinking(self):
+        # 清单不得缩水：6 个已实现 sink 全部在册（fetch/xhr/beacon/ws/
+        # trustedCaller/location.hostname）——静默删一项即回归红
+        import yaml
+        data = yaml.safe_load(self.POLICY.read_text(encoding="utf-8"))
+        assert {s["id"] for s in data["sinks"]} == {
+            "fetch", "xhr_open", "send_beacon", "websocket",
+            "trusted_caller", "location_hostname"}
+        # 每个 sink 三字段齐备（id/anchor_token/hook_pattern）——门禁双向断言依赖
+        for s in data["sinks"]:
+            assert {"id", "anchor_token", "hook_pattern"} <= set(s)
+
+    def test_gaps_are_documented_not_silently_absent(self):
+        # 已知缺口须显式登记（out_of_scope）：同 realm 未 hook / 其他 realm /
+        # 歧义环回 host 三类必须在册——防止「四出口即全覆盖」的过度声明
+        import yaml
+        data = yaml.safe_load(self.POLICY.read_text(encoding="utf-8"))
+        oos = data["out_of_scope"]
+        assert isinstance(oos, dict) and oos
+        assert {"same_realm_unhooked", "other_realms_unhooked",
+                "ambiguous_loopback_hosts"} <= set(oos)
+        flat = {str(x) for grp in oos.values() for x in grp}
+        assert any("Worker" in x for x in flat)  # Worker realm 完全未覆盖
+        assert any("[::1]" in x for x in flat)   # 歧义环回 host 在册
+
+    def test_removing_a_hook_from_template_copy_fails(self, tmp_path, monkeypatch):
+        # 门禁「无法失败」缺陷的直接回归：从规范模板副本删去 sendBeacon 整段
+        # 实现——门禁必须红（此前锚点+实现同删恒绿）。
+        real = Path(vbg.CANONICAL).read_text(encoding="utf-8")
+        lines = [ln.replace("navigator.sendBeacon = function|", "")
+                 for ln in real.splitlines(keepends=True)]
+        start = next(i for i, ln in enumerate(lines) if "const beacon0" in ln)
+        end = next(i for i, ln in enumerate(lines)
+                   if "__aegisReg(navigator.sendBeacon, beacon0)" in ln)
+        hollowed = "".join(lines[:start] + lines[end + 1:])
+        copy = tmp_path / "bridge_guard.template.js"
+        copy.write_text(hollowed, encoding="utf-8")
+        # 策略文件保持真实权威清单（不 monkeypatch）——模板演进必须改门禁侧
+        monkeypatch.setattr(vbg, "CANONICAL", copy)
+        rc = vbg.main()
+        assert rc == 1
+        assert any("send_beacon" in f for f in vbg.failures), vbg.failures
+
+
+# ------------------------------------------------ 审计第六轮（2026-10-03）
+# failures 累加陷阱回归：同一进程连续两次 main() 不得把上一次的失败带到下一次。
+def test_failures_do_not_accumulate_across_main_calls(monkeypatch):
+    monkeypatch.setattr(vbg, "CANONICAL", Path("nope-missing.js"))
+    assert vbg.main() == 1  # 规范模板缺失——若累加未清，此次失败会带到下一次
+    monkeypatch.undo()
+    assert vbg.main() == 0  # 真实路径重跑
+    assert vbg.failures == []  # 第二次运行零失败，证明已 per-invocation 重置
