@@ -1,4 +1,6 @@
-# gate_scripts_selftest.py —— 两个新门禁脚本的自测（SP-258 覆盖率报告驱动补测）。
+# gate_scripts_test.py —— 两个新门禁脚本的自测（SP-258 覆盖率报告驱动补测；
+# 2026-10-03 自 selftest 改名——pytest 收集模式 *_test.py，旧名从未被收集，
+# 即 #62 起 check_file_sizes/check_markdown_links 0% 覆盖的根因）。
 # 背景：2026-10-03 覆盖率报告（contracts job --cov 实测）显示 SP-255/SP-256
 # 两个门禁自身 0% 覆盖——门禁的正确性（ratchet 判定/死链判定）零回归锚。
 # 本文件补齐：check_file_sizes.py（行数红线）与 check_markdown_links.py
