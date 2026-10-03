@@ -30,7 +30,7 @@ required-features = ["uniffi-bindgen"]
 
 [dependencies]
 # 最小 crate 依赖（蓝图：最小依赖 + 固定 toolchain + cargo audit/deny——CI 门禁）
-ed25519-dalek = { version = "2", features = ["rand_core", "zeroize"] }
+ed25519-dalek = { version = "3", features = ["rand_core", "zeroize"] }
 # RS-153（审计 2026-09-25）：getrandom 0.2 → 0.3——0.2 线已进入维护模式，
 # 0.3 为当前主线（API：getrandom() 更名 fill()，错误类型重构）。ed25519-dalek
 # 经 rand_core 0.6 仍消费 getrandom 0.2——cargo 语义化版本共存，无冲突
