@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-# 仓库根锚定（不依赖 pytest 调用 CWD——CI 与本地同口径）
-REPO = Path(__file__).resolve().parents[1]
+# 仓库根锚定（不依赖 pytest 调用 CWD——CI 与本地同口径；tests/python→tests→根）
+REPO = Path(__file__).resolve().parents[2]
 
 
 # ---------------- verify_versions.py ----------------
