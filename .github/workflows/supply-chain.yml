@@ -71,9 +71,10 @@ jobs:
       # audit 分别覆盖 Python/Rust——三生态只扫两个）。ubuntu runner 上 restore
       # net10.0-windows 工程须显式 EnableWindowsTargeting（WPF 工程默认仅
       # Windows 可 restore）。
-      # TODO(gradle-漏扫)：Android Gradle 侧依赖漏扫工具选型未定
-      # （OWASP dependency-check / lockfile 解析类）——登记待接，防止
-      # "四生态只扫三"成为终态。
+      # gradle 漏扫已接（2026-10-03 剩余项批）——gradle-dependency-graph.yml
+      # 把 Android 依赖闭包提交 GitHub 依赖图，Dependabot alerts 面生效
+      # （11 项告警实证产出）；本文件的 fail-closed 合入门禁保持 pip/cargo/NuGet
+      # 三生态，gradle 走 alerts 持续告警通道（互补分工，终态成立）。
       - name: Setup .NET 10 (NuGet 漏扫工具链——SP-246 显式固化，不依赖镜像预装)
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
