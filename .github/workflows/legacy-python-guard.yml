@@ -116,11 +116,11 @@ jobs:
         shell: bash
         run: mypy
 
-      - name: Python 单元测试（tests/python——PY-103..148 工具链单测 + PY-149 发布链基建）
-        # P5（审计 2026-09-25）：tests/python/ 此前从未入 CI——release_chain_test.py
-        # 是死测试基建。pytest 经 requirements-dev.txt 锁版安装，与本地口径一致。
-        working-directory: .
-        run: python -m pytest tests/python -q
+      # 2026-10-03 移除 P5 时代残留的 `pytest tests/python` 步骤：
+      # ① tests/python 归属已移交 contracts.yml 常跑（PY-222）——本步骤是
+      #    双源重复；② SP-254 活跃面改装 ci 锁后，本步骤跑在 dev 锁环境
+      #    （缺 jsonschema）——周六 cron INTERNALERROR 实证。归档栈守护
+      #    面保持 ruff/bandit/mypy/validate_release/selftest（与步骤名一致）。
 
       - name: 自检脚本（session_store / api_bridge / s1 集成 / shell_toolbar / tab_state / navigation_search / view_source / native_core）
         # SP-151（2026-09-26 审计）：随 job 迁移改为低频归档守护——原 ci.yml
