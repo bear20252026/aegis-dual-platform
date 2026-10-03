@@ -97,7 +97,11 @@ internal class BrowserViewModelTabs(
 
     /** AD-063：地址栏展示映射——首页 file:// 资产路径显示为占位。 */
     internal fun displayAddress(url: String): String =
-        if (url.startsWith("file://")) BrowserViewModel.HOME_DISPLAY_URL else url
+        if (url.startsWith("file://")) {
+            BrowserViewModel.HOME_DISPLAY_URL
+        } else {
+            url
+        }
 
     /**
      * AD-149（审计 2026-09-23 清单·A6 批）：TabManager 守卫样板单源——
