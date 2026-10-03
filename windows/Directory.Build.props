@@ -3,7 +3,7 @@
        ——此前各自维护（改动漏一处即口径漂移）。仅上提完全一致项：
        Version/AssemblyVersion/FileVersion 绝不上提（scripts/sync_versions.py
        按各 csproj 正则回写）；各工程差异项（UseWPF/LangVersion/
-       EnableWindowsTargeting/ImplicitUsings/IsPackable/OutputType 等）留在原处。 -->
+       ImplicitUsings/IsPackable/OutputType 等）留在原处。 -->
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
@@ -16,5 +16,13 @@
     <!-- CS-413（2026-10-02 审计）：警告即错误——三工程统一置 true
          （基线 0 警告；出现新警告必须修根因，不允许 #pragma 压制） -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- SP-260（2026-10-02 审计·云端实证）：GitHub 自动依赖提交动态 workflow
+         （Automatic Dependency Submission (NuGet)）在 ubuntu runner 逐工程裸
+         restore——Aegis.Windows.App.csproj 此前缺 EnableWindowsTargeting 而报
+         NETSDK1100（两个测试工程已各自置 true 且是级联失败面），NuGet 依赖图
+         静默停更。三工程统一上提单源；true 在 Windows 本地为无操作。
+         注意：裸 restore 仍会按 RestorePackagesWithLockFile 重写锁——动态
+         workflow 在自身 runner 工作区运行，不入库，无影响。 -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
 </Project>

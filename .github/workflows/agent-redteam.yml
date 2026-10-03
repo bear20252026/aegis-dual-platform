@@ -46,7 +46,8 @@ jobs:
       # 单跑 pytest：自动收集 redteam_test.py / redteam_e2e_test.py 全部用例
       # （含 test_action_catalog_default_deny），同套用例不再双跑
       - name: Red team tests via pytest (提示注入/投毒/重放/预算——阶段 G)
-        run: python -m pytest agent/tests -q
+        # SP-258（2026-10-02 审计）：--cov 出覆盖率报告（不设阈值，供补测排序）
+        run: python -m pytest agent/tests -q --cov=agent --cov-report=term-missing:skip-covered
       # PY-202（2026-09-26 审计）：heredoc 内联 Python（open 无 close、结构
       # 变化时 KeyError 原始栈）移出为单源脚本 contracts/codegen/
       # verify_agent_catalog.py——workflow 改调脚本，catalog 门禁保留独立步骤

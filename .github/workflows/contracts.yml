@@ -53,7 +53,10 @@ jobs:
       # 见。接线到常跑契约门禁（PY-221 同批为锁补 cryptography——本步骤
       # 经 requirements-ci.txt hash 锁一并安装）。
       - name: Release-chain unit tests (PY-222——tests/python 常跑)
-        run: python -m pytest tests/python -q
+        # SP-258（2026-10-02 审计）：--cov 出覆盖率报告（不设阈值，供补测排序）。
+        # coverage 的 source 面只接受包/目录——validate_release.py 根级单文件
+        # 不入测量面（其 AST 门禁自身有独立对账）
+        run: python -m pytest tests/python -q --cov=scripts --cov=release --cov=contracts --cov=agent --cov-report=term-missing:skip-covered
       # SP-239（PY-263 接线，2026-10-02 审计）：活跃树 ruff/bandit 此前仅周六
       # cron（legacy-python-guard）低频跑——push/PR 零覆盖。本 job 已装
       # requirements-ci.txt（含 ruff/bandit pin），直接调单源脚本（push 与
