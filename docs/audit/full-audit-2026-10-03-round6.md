@@ -30,6 +30,33 @@ CI-供应链 / Python+文档核验），覆盖 649 个跟踪文件、约 70K LOC
 | R6-18 | P1 | 签名身份从不校验：`apksigner verify` / `signtool verify /pa` 只证明"有签名且成链"，不证明"是谁签的"。keystore secret 被替换时 CI 会用攻击者钥匙签名并**全程绿灯发布**（恶意更新链）。预期值若也放 secret，则与 keystore 同爆炸半径 | 新增受版本控制、经评审的 `docs/release/signing-identity.txt`（含实测指纹）+ `release-android.yml` 对账步骤，身份文件缺失/未登记/不匹配一律 fail-closed | 本地实跑该步骤逻辑：真机制品指纹 → exit 0；攻击者指纹 → **exit 1**；空登记 → **exit 1** |
 | R6-19 | P3 | bandit 全局豁免 B603/B607（`-ll` 阈值下实测零新增发现，故危害在增量而非存量） | `bandit.yaml` skips 收窄为 `["B101","B404"]` | `bandit -c bandit.yaml -r scripts release contracts agent -ll -q` **exit 0**，零发现 |
 
+### 一之二、延续轮（2026-10-04）新增闭环——架构主轴的两条断链
+
+| 编号 | 级别 | 缺陷 | 修复 | 验证 |
+|---|---|---|---|---|
+| R6-20 | P0 | **FFI 通路无任何内容判定**：`evaluate_navigation` 只做 URL 归一 + 会话/代际/nonce 校验，从不调 `PolicyEngine::evaluate`/`CapabilityRegistry::validate`，也无 host 黑名单——任意良构 https（含钓鱼/恶意 host）一律 Allow 并发放可消费 nonce。因 `PolicyEngine::default()` 是 deny-all 故从未接线（代码 H-7 自述），结果是"单一裁决源"退化为"单一 nonce 记账员" | 新增 C ABI 入口 `aegis_policy_core_broker_update_host_denylist_json`（入参 JSON host 数组，返回 `{decision,accepted,input}`；未注入时黑名单为空=行为不变，不 deny-all），`evaluate_navigation` 在归一后先查黑名单命中即 `deny/threat_blocklist`。锁中毒按"被拒"处理。已登记入 `c_abi_export_surface_is_frozen` 冻结符号表 | 新增 3 条跨端向量（`blocklisted_host_denied` / 大小写形态 / `bad.example:8443` 带端口形态）；`cargo test` 551 通过。带端口那条是开发期实测到的**我自己的**绕过：`CanonicalExternalUrl.host` 依 RS-227 保留非默认端口，直接比对会使 `bad.example` 匹配不上 `bad.example:8443`——已改为剥端口后比对并加向量钉住 |
+| R6-21 | P1 | **确认流被核心侧无条件触发**：`request_navigation_confirmation` 把每一个 Allow 都转成 RequireConfirmation，等价于"每次导航都弹确认"，因而 2026-08-30 被关闭、整套确认域（pendingConfirmation / 防孤儿 nonce / 受信 Compose 批准入口）沦为死代码 | 高危判据落进核心：`SecurityPolicy::is_local_or_private_host`（127/8、0/8、10/8、172.16/12、192.168/16、169.254/16 含云元数据、`localhost`），仅高危目标登记待审批；普通公网导航直接 Allow。CI 释放构建恢复 `-PrequireNavigationConfirmation=true` | 5 条高危向量（127.0.0.1、127.0.0.1:6379、localhost、192.168.1.1、169.254.169.254 → require_confirmation）+ 公网对照 → allow；`assert!(evaluated.get("action").is_none())` 钉住"高危不得同时发放可消费授权"。副带收益：子框架轻量路径只调 `evaluate_navigation`，收到 require_confirmation 即 fail-closed 阻断——远程页嵌 iframe 打 127.0.0.1/私网的 SSRF 面在核心层被拦，不依赖端侧实现 |
+
+判定口径的两处诚实限定（写在代码注释里，此处同步）：
+
+1. **不按 `.local`/`.internal` 后缀名判高危**——宿主自有资产虚拟主机
+   （Windows `ntp.aegis.local` / `geo.aegis.local`）正是该形态，按名匹配会把
+   chrome UI 自己拖进高危集。DNS rebinding（域名 A 记录指向 127.0.0.1）超出
+   无 I/O 纯函数能力，仍属宿主侧判定面，核心不假装全覆盖。
+2. **退化信任锚未被证明可利用**：`update_manifest` 对可信密钥只做
+   `VerifyingKey::from_bytes` + 长度校验，未筛除单位元/小顺序点。按 [k]A=O
+   构造的 forged 签名（R=基点编码、s=1）在 ed25519-dalek 3.x 下被
+   `verify_strict` **拒绝**——实测不可利用，因此本轮**不声称修了一个漏洞**，
+   而是留 `identity_anchor_does_not_verify_forged_signature` 作 tripwire：
+   dalek 换版或改用非 strict 验证时即红。keyid 与密钥字节无绑定一事同样以
+   `keyid_is_not_bound_to_key_bytes_current_state` 记录现状供后续格式改造对齐。
+3. **降级保护此前只存在于离线验证器**：`verify_threshold` 完全不看版本，全仓
+   唯一降级判定在 `release/update_verifier.py`（设备侧运行时不校验更新）。新增
+   `accept_update_version`（严格高于已接受版本、≥ min_version 下限、不可解析
+   即拒），并把 `update-manifest-invalid.json` 的 rollback 用例从"断言向量自身
+   两字段 cur<min"的同义反复改为真实调用该函数——同时补一条反向对照断言，
+   防止实现退化为恒拒（那同样是假闭环）。
+
 ## 二、分端裁决现状（本轮确立的准确口径）
 
 README 原述"裁决逻辑收敛在无 I/O 的 Rust 策略核心（单一裁决源）"对**两条发布

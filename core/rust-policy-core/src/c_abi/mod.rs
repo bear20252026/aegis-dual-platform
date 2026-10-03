@@ -444,8 +444,8 @@ mod tests {
         let broker = aegis_policy_core_broker_new(version.as_ptr());
         let session = c_string("confirmation-session");
         let tab = c_string("confirmation-tab");
-        let url = c_string("https://example.com/confirm?transfer=1");
-        let mismatched_url = c_string("https://example.com/confirm?transfer=2");
+        let url = c_string("https://127.0.0.1/confirm?transfer=1");
+        let mismatched_url = c_string("https://127.0.0.1/confirm?transfer=2");
         let scope = c_string("navigation");
         assert_eq!(
             aegis_policy_core_broker_create_session(broker, session.as_ptr(), tab.as_ptr(), 0, 60),
@@ -740,6 +740,24 @@ mod tests {
                     "{name}: session registration"
                 );
             }
+            // 审计第六轮（2026-10-03/04）：可选威胁 host 黑名单注入。
+            // deny-by-content 此前在向量里没有表达形式（native-navigation-decision
+            // 只覆盖 url_policy / session_not_found 两类拒绝），"黑名单匹配"这类
+            // 最像安全特性的代码从未被跨端锁定。accepted 必须等于条目数——不等即
+            // 说明有条目被形态校验拒收，将成为永不命中的死条目。
+            if let Some(hosts) = vector.get("deny_hosts") {
+                let payload = c_string(&hosts.to_string());
+                let applied = read_response(aegis_policy_core_broker_update_host_denylist_json(
+                    broker,
+                    payload.as_ptr(),
+                ));
+                assert_eq!(applied["decision"], "ok", "{name}: 黑名单注入失败");
+                assert_eq!(
+                    applied["accepted"].as_u64(),
+                    Some(hosts.as_array().expect("deny_hosts 必须是数组").len() as u64),
+                    "{name}: 黑名单有条目被形态校验拒收（静默死条目）"
+                );
+            }
             let url = c_string(vector["url"].as_str().expect("url"));
             let scope = c_string(vector["scope"].as_str().expect("scope"));
             let evaluated = read_response(aegis_policy_core_broker_evaluate_navigation_json(
@@ -758,6 +776,24 @@ mod tests {
                 assert_eq!(
                     evaluated["reason"]["code"], vector["expected_deny_code"],
                     "{name}: evaluate denial code"
+                );
+                // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
+                unsafe { aegis_policy_core_broker_free(broker) };
+                continue;
+            }
+            // 审计第六轮（2026-10-03/04）：高危目标（本机/私网）走待审批分支——
+            // 核心不得发放可消费授权，只回 request；这条分支此前不存在，因为
+            // evaluate_navigation 从不做内容判定。
+            if evaluated["decision"] == "require_confirmation" {
+                if let Some(expected_origin) = vector.get("expected_origin") {
+                    assert_eq!(
+                        evaluated["request"]["origin"], *expected_origin,
+                        "{name}: 待审批请求 origin"
+                    );
+                }
+                assert!(
+                    evaluated.get("action").is_none(),
+                    "{name}: 高危目标不得同时发放可消费授权"
                 );
                 // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
                 unsafe { aegis_policy_core_broker_free(broker) };
@@ -876,6 +912,24 @@ mod tests {
                     ),
                     1,
                     "{name}: session registration"
+                );
+            }
+            // 审计第六轮（2026-10-03/04）：可选威胁 host 黑名单注入。
+            // deny-by-content 此前在向量里没有表达形式（native-navigation-decision
+            // 只覆盖 url_policy / session_not_found 两类拒绝），"黑名单匹配"这类
+            // 最像安全特性的代码从未被跨端锁定。accepted 必须等于条目数——不等即
+            // 说明有条目被形态校验拒收，将成为永不命中的死条目。
+            if let Some(hosts) = vector.get("deny_hosts") {
+                let payload = c_string(&hosts.to_string());
+                let applied = read_response(aegis_policy_core_broker_update_host_denylist_json(
+                    broker,
+                    payload.as_ptr(),
+                ));
+                assert_eq!(applied["decision"], "ok", "{name}: 黑名单注入失败");
+                assert_eq!(
+                    applied["accepted"].as_u64(),
+                    Some(hosts.as_array().expect("deny_hosts 必须是数组").len() as u64),
+                    "{name}: 黑名单有条目被形态校验拒收（静默死条目）"
                 );
             }
             let url = c_string(vector["url"].as_str().expect("url"));
@@ -1005,7 +1059,7 @@ mod tests {
         assert!(!broker.is_null());
         let sid = c_string("s");
         let tid = c_string("t");
-        let url = c_string("https://example.com/");
+        let url = c_string("https://127.0.0.1/");
         let scope = c_string("navigation");
         // SAFETY: broker 由本测试创建。
         unsafe { aegis_policy_core_broker_free(broker) };
@@ -1083,7 +1137,7 @@ mod tests {
         let broker = aegis_policy_core_broker_new(version.as_ptr());
         assert!(!broker.is_null());
         let not_json = c_string("{not json");
-        let url = c_string("https://example.com/");
+        let url = c_string("https://127.0.0.1/");
         let scope = c_string("navigation");
         let res = read_response(aegis_policy_core_broker_consume_navigation_json(
             broker,
@@ -1116,7 +1170,7 @@ mod tests {
         assert!(!broker.is_null());
         let session = c_string("s");
         let tab = c_string("t");
-        let url = c_string("https://example.com/");
+        let url = c_string("https://127.0.0.1/");
         let scope = c_string("navigation");
         // null session 指针 → ffi_input_null（非折叠码）
         let res = read_response(aegis_policy_core_broker_evaluate_navigation_json(
@@ -1174,7 +1228,7 @@ mod tests {
         assert!(!broker.is_null());
         let sid = c_string("s-max");
         let tid = c_string("t");
-        let url = c_string("https://example.com/");
+        let url = c_string("https://127.0.0.1/");
         let scope = c_string("navigation");
         assert_eq!(
             aegis_policy_core_broker_create_session(
@@ -1270,6 +1324,9 @@ mod tests {
             "aegis_policy_core_broker_approve_navigation_confirmation_json",
             "aegis_policy_core_broker_reject_navigation_confirmation",
             "aegis_policy_core_broker_consume_navigation_json",
+            // 审计第六轮（2026-10-03/04）：威胁 host 黑名单注入入口——FFI 通路
+            // 此前无任何 deny-by-content 接入面（H-7），Android 端因此整体缺黑名单
+            "aegis_policy_core_broker_update_host_denylist_json",
         ];
         // 扫描源文件：no_mangle 属性行的下一个 `pub ... fn name(` 行
         // 提取符号名（本 crate 导出全部为该两行形态）

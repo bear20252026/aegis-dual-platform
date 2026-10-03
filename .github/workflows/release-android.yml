@@ -200,10 +200,19 @@ jobs:
           AEGIS_KEY_ALIAS: ${{ secrets.AEGIS_KEY_ALIAS }}
           AEGIS_KEY_PASSWORD: ${{ secrets.AEGIS_KEY_PASSWORD }}
         run: |
-          # requireNavigationConfirmation 关闭（用户决策 2026-08-30）：
-          # 每次导航弹确认不可用——Broker allow/deny 策略仍在，仅免确认弹窗
+          # 审计第六轮（2026-10-03/04）：确认开关恢复启用。
+          # 2026-08-30 关闭它的根因在核心侧：request_navigation_confirmation 把
+          # 「每一个」可放行导航都转成 RequireConfirmation——等价于每次导航都弹确认，
+          # 不可用。本轮在 Rust FFI 通路落定高危判据（本机/私网：127/8、0/8、10/8、
+          # 172.16/12、192.168/16、169.254/16 与 localhost），普通公网导航直接
+          # Allow，确认面板自此只对少数目标触发。
+          # 原注释「Broker allow/deny 策略仍在，仅免确认弹窗」在当时并不成立：
+          # 自动批准路径由不受信的内容导航回调自行兑换一次性 nonce，整套确认域
+          # （pendingConfirmation / 防孤儿 nonce / 受信 Compose 批准入口）为死代码。
+          # 该面板自本次起才是活代码——发布前须按 device-validation.md 真机验证。
           bash ./gradlew :app:assembleRelease --no-daemon \
             -PrequireNativePolicyCore=true \
+            -PrequireNavigationConfirmation=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
           # zipalign 校验（ADR-009）：4K + 16K 页对齐双验证，不对齐即失败
           BT=$(ls -d "$ANDROID_HOME/build-tools/"*/ | sort -V | tail -1)

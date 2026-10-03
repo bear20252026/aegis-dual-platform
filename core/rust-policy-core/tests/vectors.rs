@@ -12,7 +12,7 @@ use aegis_policy_core::decision::AuthorizedAction;
 use aegis_policy_core::matcher::{glob_match, glob_subsumes};
 use aegis_policy_core::origin::try_parse_external;
 use aegis_policy_core::update_manifest::{
-    b64_encode, canonical_unsigned, verify_threshold, version_tuple,
+    accept_update_version, b64_encode, canonical_unsigned, verify_threshold, version_tuple,
 };
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::{json, Value};
@@ -160,12 +160,22 @@ fn update_manifest_invalid_vectors_semantic_rules() {
         let case = v["case"].as_str().unwrap_or("unnamed");
         match case {
             "rollback" => {
-                // 回滚：version < min_version 数值比较即拒
-                let cur = version_tuple(v["version"].as_str().expect("缺 version"))
-                    .expect("回滚向量版本必须可解析");
-                let min = version_tuple(v["min_version"].as_str().expect("缺 min_version"))
-                    .expect("回滚向量下限必须可解析");
-                assert!(cur < min, "向量 {case}: 回滚形态必须 version < min_version");
+                // 审计第六轮（2026-10-03/04）：此前沿用"读向量自己的两个字段、
+                // 断言 cur < min"的同义反复写法——不触及任何核心代码，回滚分支
+                // 在台账里记为已闭环而核心里根本不存在该判定。现改为真实调用
+                // accept_update_version：以向量的 min_version 充当"已接受最高版本"
+                // 与下限，断言核心拒绝该降级清单。
+                let version = v["version"].as_str().expect("缺 version");
+                let min_version = v["min_version"].as_str().expect("缺 min_version");
+                assert!(
+                    !accept_update_version(version, min_version, Some(min_version)),
+                    "向量 {case}: 核心必须拒绝降级清单（version {version} ≤ 已接受 {min_version}）"
+                );
+                // 反向对照：同一核心函数必须放行严格更高的版本
+                assert!(
+                    accept_update_version(min_version, version, None),
+                    "向量 {case}: 更高版本必须被同一函数放行（否则判定恒拒=假闭环）"
+                );
                 semantic += 1;
             }
             "threshold_insufficient" => {
