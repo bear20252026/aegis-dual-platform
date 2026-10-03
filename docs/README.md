@@ -20,6 +20,7 @@
 | [KNOWN_DEFECTS](../tests/KNOWN_DEFECTS.md)→[../tests/](../tests/) | 已知缺陷库与测试分层 |
 | [KNOWLEDGE_BASE.md](KNOWLEDGE_BASE.md) | 工程知识库（经验教训/工具链/发布口径台账——WB-200，2026-10-02 审计补行：现行表此前漏列本文档） |
 | 设计文档组（WB-200 补行——此前失联未索引） | [code-signing-design.md](code-signing-design.md)（代码签名）｜[ffi-architecture-design.md](ffi-architecture-design.md)（FFI 架构）｜[inv05-delivery-chain-design.md](inv05-delivery-chain-design.md)（交付链）｜[release-workflow-design.md](release-workflow-design.md)（发布链设计）｜[threat-context-design.md](threat-context-design.md)（威胁上下文）｜[refactor-final-route.md](refactor-final-route.md)（重构终局路线） |
+| 安全分诊（2026-10-03 依赖告警处置批） | [security/android-build-classpath-triage.md](security/android-build-classpath-triage.md)（Android 构建类路径依赖告警分诊——暴露面证据/地板/复检规程） |
 
 ## docs/audit/（历史审计归档 + 现行台账）
 
