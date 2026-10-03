@@ -389,7 +389,7 @@ class BrowserViewModel(
     fun rejectPendingDownload() = confirmations.rejectPendingDownload()
 
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */
-    fun getTabManager(): TabManager? = tabManager
+    fun getTabManager(): TabManager? = currentTabManager
 
     // ---------------- WebViewEventAssembly.Host 接缝（AD-103；实现在
     // BrowserViewModelHost.kt——A7 批抽出使本文件回到改造红线 500 行内） ----------------
