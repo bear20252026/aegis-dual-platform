@@ -26,10 +26,17 @@ const MAX_FILENAME_LENGTH: usize = 200;
 pub struct SecurityPolicy;
 
 impl SecurityPolicy {
-    /// 检查 scheme 是否为安全导航 scheme（null/空视为相对 URL——允许）。
+    /// 检查 scheme 是否为安全导航 scheme。
+    ///
+    /// 审计第六轮（2026-10-03）：`None` / `Some("")` 改为 **false**。此前
+    /// 把「scheme 缺失/解析失败」当作相对 URL 放行（true）——在 fail-closed
+    /// 裁决器里提取失败不是「合法」的证据，错误→ALLOW 是方向性缺陷：
+    /// 上游解析畸形输入拿不到 scheme 时，调用方按本函数返回值即放行。
+    /// 需要相对 URL 语义的调用方必须先自行补全 scheme 再判定。
     pub fn is_valid_navigation_scheme(scheme: Option<&str>) -> bool {
         match scheme {
-            None | Some("") => true,
+            // 提取失败面：无 scheme / 空 scheme 一律拒绝（fail-closed）
+            None | Some("") => false,
             Some(s) => ALLOWED_NAVIGATION_SCHEMES
                 .iter()
                 .any(|allowed| allowed.eq_ignore_ascii_case(s)),
@@ -54,6 +61,9 @@ impl SecurityPolicy {
     /// - 控制字符（ASCII < 32）
     /// - 路径分隔符（../, ..\）
     /// - Windows 保留设备名（RS-114：截断后复查）
+    ///   审计第六轮（2026-10-03）：基名按**首个**点切分（Win32 在首点截断
+    ///   设备名——`CON.dll.exe` 仍是 CON），且 `_` 前缀在长度复查之前加入
+    ///   （≤MAX 的名字加前缀后不得溢出）
     /// - RTL 双向控制符（RS-113：扩展名伪装面）
     /// - 过长文件名（保留扩展名）
     pub fn sanitize_filename(name: Option<&str>) -> String {
@@ -143,6 +153,16 @@ impl SecurityPolicy {
             Self::ensure_not_reserved(&mut sanitized);
         }
 
+        // 审计第六轮（2026-10-03）：长度上限复查移到保留名消解**之后**——
+        // 此前 RS-281 的整体截断复查只跑在截断分支内、且早于该分支尾部的
+        // `_` 前缀，恰好 ≤MAX 的保留名加前缀后变 MAX+1（200 → 201），文档
+        // 上限被突破 1 字节。截断只保头部，前缀已在首字符（基名变 "_…"
+        // 形态，ensure_not_reserved 幂等不再追加），故无需再复查保留名
+        if sanitized.len() > MAX_FILENAME_LENGTH {
+            let cut = floor_boundary(&sanitized, MAX_FILENAME_LENGTH);
+            sanitized.truncate(cut);
+        }
+
         if sanitized.is_empty() {
             "download".to_string()
         } else {
@@ -166,9 +186,14 @@ fn floor_boundary(s: &str, cut: usize) -> usize {
 
 impl SecurityPolicy {
     /// Windows 保留设备名检查 + `_` 前缀消解（RS-114：抽 helper 供截断后复查）。
+    ///
+    /// 审计第六轮（2026-10-03）：候选基名取**首个**点前段（`split_once('.')`）
+    /// 而非末个点前段（`rsplit_once('.')`）。Win32 解析设备名时在第一个点处
+    /// 截断——`CON.dll` 本身就是 `CON` 设备（多层扩展同理：`CON.dll.exe`），
+    /// 末点口径给出的基名 `CON.dll` 不在 RESERVED_NAMES 里即放行。
     fn ensure_not_reserved(sanitized: &mut String) {
         let base_name = sanitized
-            .rsplit_once('.')
+            .split_once('.')
             .map(|(b, _)| b)
             .unwrap_or(sanitized.as_str())
             .to_uppercase();
@@ -383,5 +408,98 @@ mod tests {
         )));
         assert!(SecurityPolicy::is_dangerous_external_scheme(Some("Data")));
         assert!(!SecurityPolicy::is_dangerous_external_scheme(Some("HTTPS")));
+    }
+
+    // —— 审计第六轮（2026-10-03）：保留名基名按首点 + 前缀后长度复查 ——
+
+    #[test]
+    fn reserved_name_base_uses_first_dot_not_last() {
+        // Win32 在首个点处截断设备名：CON.dll 即 CON 设备，CON.dll.exe 同样
+        // 末点口径给出基名 "CON.dll"（不在 RESERVED_NAMES）→ 此前放行
+        for name in ["CON.dll.exe", "con.dll.exe", "CON.dll", "NUL.log.txt"] {
+            let out = SecurityPolicy::sanitize_filename(Some(name));
+            assert!(
+                out.starts_with('_'),
+                "首点基名保留设备名必须加前缀消解：{name} → {out}"
+            );
+        }
+        // nul.txt：首点基名 "nul" → NUL 设备
+        let out = SecurityPolicy::sanitize_filename(Some("nul.txt"));
+        assert_eq!(out, "_nul.txt", "nul.txt 必须消解为 _nul.txt");
+        // 多层扩展的 COM/LPT 形态同样消解
+        assert!(SecurityPolicy::sanitize_filename(Some("LPT1.a.b")).starts_with('_'));
+        // 对照：首点基名非保留名不加前缀（不误伤）
+        assert_eq!(
+            SecurityPolicy::sanitize_filename(Some("my.con.exe")),
+            "my.con.exe"
+        );
+        // 无点名的基名 = 整串（首点口径的退化分支）——200 字节 "CONbbb…"
+        // 不是设备名（设备名要求整名即 CON），不加前缀也不截断
+        let no_dot = "CON".to_string() + &"b".repeat(197);
+        assert_eq!(no_dot.len(), MAX_FILENAME_LENGTH);
+        assert_eq!(SecurityPolicy::sanitize_filename(Some(&no_dot)), no_dot);
+    }
+
+    /// 输出基名（首个点前段，大写归一）——保留设备名判定的输入口径单源。
+    fn reserved_base_of(name: &str) -> String {
+        name.split_once('.')
+            .map(|(b, _)| b)
+            .unwrap_or(name)
+            .to_uppercase()
+    }
+
+    #[test]
+    fn reserved_name_prefix_never_breaks_length_cap() {
+        // 200 字节边界：恰好 MAX 的保留名加 `_` 前缀即 201——前缀必须在长度
+        // 复查之前加入，否则文档上限被突破 1 字节。
+        // 审计第六轮（2026-10-03）断言口径更正：此前断言 `starts_with("_CON")`
+        // 断言的是**外观**而非安全属性。实际路径为 201 → 进入"保扩展名"截断分支：
+        // 扩展名 "." + 196×'a' 长 197，max_base = 200-197 = 3，基名被裁到 3 字符
+        // = "_CO"。这是既有 RS-114/RS-281 截断策略的既定取舍（扩展名语义优先，
+        // 危险扩展判定依赖它），不是回归。真正必须守住的是两条安全不变量：
+        // ① 长度 ≤MAX；② 结果基名不再是 Windows 保留设备名。二者均满足
+        //（"_CO" 不是设备名），故本用例改断言不变量而非前缀外观。
+        let exact = format!("CON.{}", "a".repeat(196));
+        assert_eq!(exact.len(), MAX_FILENAME_LENGTH, "必须恰好触到上限");
+        let out = SecurityPolicy::sanitize_filename(Some(&exact));
+        assert!(
+            out.len() <= MAX_FILENAME_LENGTH,
+            "前缀后仍须 ≤MAX，实际 {}",
+            out.len()
+        );
+        assert!(
+            !RESERVED_NAMES.contains(&reserved_base_of(&out).as_str()),
+            "基名必须已脱离保留设备名集：{out}"
+        );
+        assert!(out.starts_with('_'), "消解前缀至少须存活一位：{out}");
+        // 对照：MAX-1 的保留名加前缀恰好用满上限
+        let edge = format!("CON.{}", "a".repeat(195));
+        let out = SecurityPolicy::sanitize_filename(Some(&edge));
+        assert_eq!(out.len(), MAX_FILENAME_LENGTH, "前缀后恰好用满上限");
+        // 截断路径（RS-114 场景）同样受新次序保护：消解后仍 ≤MAX 且基名非设备名
+        let truncating = format!("CONX.{}", "f".repeat(196));
+        let out = SecurityPolicy::sanitize_filename(Some(&truncating));
+        assert!(out.len() <= MAX_FILENAME_LENGTH, "截断路径：{}", out.len());
+        assert!(
+            !RESERVED_NAMES.contains(&reserved_base_of(&out).as_str()),
+            "截断不得把基名裁回设备名：{out}"
+        );
+        assert!(out.starts_with("_CON"), "截断后复查仍消解：{out}");
+    }
+
+    // —— 审计第六轮（2026-10-03）：scheme 提取失败 fail-closed ——
+
+    #[test]
+    fn missing_or_empty_scheme_is_not_valid() {
+        // 错误→ALLOW 修正：None/空 scheme 是提取失败面，不是「相对 URL 即
+        // 放行」的证据；白名单判定只在拿到真实 scheme 后才成立
+        assert!(!SecurityPolicy::is_valid_navigation_scheme(None));
+        assert!(!SecurityPolicy::is_valid_navigation_scheme(Some("")));
+        assert!(!SecurityPolicy::is_valid_navigation_scheme(Some(" ")));
+        // 白名单内 scheme 仍放行（回归锚点）
+        assert!(SecurityPolicy::is_valid_navigation_scheme(Some("https")));
+        // 危险黑名单口径不变（空/None 仍非危险）
+        assert!(!SecurityPolicy::is_dangerous_external_scheme(None));
+        assert!(!SecurityPolicy::is_dangerous_external_scheme(Some("")));
     }
 }

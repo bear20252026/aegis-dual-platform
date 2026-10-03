@@ -66,6 +66,26 @@ pub fn extract_hostname(url: &str) -> &str {
     }
 }
 
+/// host 匹配域归一单源（ASCII 小写 + 剥一个尾点 + 非空校验）。
+///
+/// 审计第六轮（2026-10-03）：黑名单入库（`adblock::load_blocked_domains`）
+/// 与查询侧（[`extract_host`]）此前各自手写归一——入库剥尾点、查询不剥，
+/// `https://tracker.org./` 对黑名单条目 `tracker.org` 漏拦（denylist
+/// fail-open）。两侧现共用本函数，堵住「第三份手写变体」。
+///
+/// 口径边界：origin.rs **不**共用本函数——授权归一层把尾点 host 判为拒绝项
+/// （RS-012/AD-252 三端口径，剥尾点归一正是 Chromium 归一攻击面）；只有
+/// 「已放行的 host 与名单条目做集合匹配」这一匹配域才折叠尾点。
+pub fn normalize_host_key(raw: &str) -> Option<String> {
+    let lowered = raw.to_ascii_lowercase();
+    let stripped = lowered.strip_suffix('.').unwrap_or(&lowered);
+    if stripped.is_empty() {
+        None // 空串/纯尾点：空键会被无意命中，拒绝
+    } else {
+        Some(stripped.to_string())
+    }
+}
+
 /// 从 URL 提取小写主机名（不含端口号）。
 ///
 /// 用于广告拦截等需要大小写不敏感匹配的场景。
@@ -102,7 +122,10 @@ pub fn extract_host(url: &str) -> Option<String> {
         // 非 ASCII host（如土耳其语 İ）经 Unicode 折叠会改变字节长度/内容
         // （İ → i+U+0307），同一 host 在两条链路产出不同键。host 匹配域
         // 是 DNS（ASCII 语义），统一 ASCII 折叠。
-        Some(host.to_ascii_lowercase())
+        // 审计第六轮（2026-10-03）：折叠改走 normalize_host_key 单源——
+        // 本侧不剥尾点时，`https://tracker.org./` 对黑名单条目 `tracker.org`
+        // 漏拦（denylist fail-open），入库/查询双侧现共用同一归一
+        normalize_host_key(host)
     }
 }
 
@@ -229,6 +252,43 @@ mod tests {
     #[test]
     fn extract_host_empty() {
         assert_eq!(extract_host(""), None);
+    }
+
+    // —— 审计第六轮（2026-10-03）：匹配域归一单源（入库/查询同口径） ——
+
+    #[test]
+    fn normalize_host_key_folds_case_and_single_trailing_dot() {
+        assert_eq!(
+            normalize_host_key("Ads.Example.COM"),
+            Some("ads.example.com".into())
+        );
+        assert_eq!(
+            normalize_host_key("tracker.org."),
+            Some("tracker.org".into()),
+            "剥一个尾点"
+        );
+        assert_eq!(
+            normalize_host_key("tracker.org.."),
+            Some("tracker.org.".into()),
+            "只剥一层（连续点不是合法 host）"
+        );
+        // 空键拒绝——空串入库会被无 host 形态意外命中（RS-180 口径）
+        assert_eq!(normalize_host_key(""), None);
+        assert_eq!(normalize_host_key("."), None);
+    }
+
+    #[test]
+    fn extract_host_strips_trailing_dot_like_list_entries() {
+        // 查询侧此前不剥尾点而入库侧剥——`https://tracker.org./ad.js` 漏拦
+        assert_eq!(
+            extract_host("https://tracker.org./ad.js"),
+            Some("tracker.org".into())
+        );
+        assert_eq!(
+            extract_host("https://ADS.Example.COM.:8080/x"),
+            Some("ads.example.com".into()),
+            "端口 + 尾点 + 大写同批归一"
+        );
     }
 
     // —— RS-013/014 回归（审计 2026-09-24） ——
