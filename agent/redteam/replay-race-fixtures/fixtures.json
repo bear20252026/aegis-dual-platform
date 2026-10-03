@@ -1,0 +1,69 @@
+{
+  "kind": "replay-race-fixtures",
+  "note": "一次性 nonce 重放、会话-标签绑定竞态与紧急终止冻结。同一 case 内的 steps 共享一个 broker 实例（跨步状态即被测面），不同 case 之间各自新建 broker。step 上可选 \"revoke\": true 表示评测该步前先触发 kill switch。",
+  "cases": [
+    {
+      "id": "one-time-nonce-replay",
+      "note": "已消费的 nonce 再次提交必须拒",
+      "steps": [
+        {
+          "desc": "对照：首次提交放行",
+          "overrides": {
+            "nonce": "replay-fixed-nonce"
+          },
+          "expect": "allow"
+        },
+        {
+          "desc": "同一 nonce 重放（窗口内必拒）",
+          "overrides": {
+            "nonce": "replay-fixed-nonce"
+          },
+          "expect": "deny_replay"
+        }
+      ]
+    },
+    {
+      "id": "session-tab-binding-swap",
+      "note": "PY-252：会话首次绑定标签后换 tab_id 提交即拒（防跨标签劫持）",
+      "steps": [
+        {
+          "desc": "对照：首标签放行并完成绑定",
+          "overrides": {
+            "tab_id": "tab-A",
+            "nonce": "bind-a-1"
+          },
+          "expect": "allow"
+        },
+        {
+          "desc": "同会话改投 tab-B",
+          "overrides": {
+            "tab_id": "tab-B",
+            "nonce": "bind-b-1"
+          },
+          "expect": "deny_tab"
+        }
+      ]
+    },
+    {
+      "id": "kill-switch-freezes-unexecuted",
+      "note": "紧急终止后任何未执行授权冻结——用新 nonce 排除重放干扰，确保拒因是 revoked",
+      "steps": [
+        {
+          "desc": "对照：撤销前放行",
+          "overrides": {
+            "nonce": "pre-revoke-1"
+          },
+          "expect": "allow"
+        },
+        {
+          "desc": "触发 kill switch 后提交",
+          "revoke": true,
+          "overrides": {
+            "nonce": "post-revoke-1"
+          },
+          "expect": "deny_revoked"
+        }
+      ]
+    }
+  ]
+}

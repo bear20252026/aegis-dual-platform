@@ -297,8 +297,14 @@ def handle_request(api: Any, raw: str | dict, auth: AgentAuthContext | None = No
         if not isinstance(arguments, dict):
             return _err(-32602, "arguments 必须为对象")
         # P0-02 修复：scope 校验（未授权工具拒绝）+ 参数/文本资源预算
+        # 审计第六轮（2026-10-03）：default-deny——此前 `if need and ...`，
+        # 新增工具忘记登记 _TOOL_SCOPE 时 need=None，scope 校验被整段跳过，
+        # 只剩粗粒度 auth/过期门即执行（"未知→放行"形态，与本模块 P0 docstring
+        # 「工具白名单 + scope 最小权限」相悖）。未登记 scope 一律拒绝。
         need = _TOOL_SCOPE.get(name)
-        if need and not auth.allows(need):
+        if not need:
+            return _err(-32004, f"工具 {name} 未登记 scope——default-deny 拒绝")
+        if not auth.allows(need):
             return _err(-32003, f"无权限调用 {name}（需 scope: {need}）")
         if not _json_within_limit(arguments, MAX_ARGUMENT_BYTES):
             return _err(-32602, "arguments 过大")

@@ -61,9 +61,22 @@ def redact_url(raw: str) -> str:
             (k, "[REDACTED]" if k.lower() in SENSITIVE_QUERY_KEYS else v)
             for k, v in parse_qsl(parsed.query, keep_blank_values=True)
         ]
+        # 审计第六轮（2026-10-03）：此前用 parsed.netloc 重组——netloc 含
+        # user:password@host，userinfo 里的凭据原样进日志（CS-337 在 C# 侧
+        # 改用 uri.Authority、AD-264 在 Kotlin 侧剥离 userinfo，同一缺陷类
+        # 从未回落到本文件）。现仅取 hostname+port，userinfo 一律丢弃。
+        hostname = parsed.hostname or ""
+        try:
+            port = parsed.port
+        except ValueError:
+            port = None  # 非法端口——不保留不可解析的 authority 原文
+        netloc = f"{hostname}:{port}" if port is not None else hostname
         return urlunsplit(
-            (parsed.scheme, parsed.netloc, parsed.path,
+            (parsed.scheme, netloc, parsed.path,
              urlencode(pairs, safe="[]"), "")  # safe="[]" 保留 [REDACTED] 可读标记
         )
     except Exception:
-        return raw  # 解析失败保持原样（调用方另行兜底）
+        # 审计第六轮（2026-10-03）：fail-closed——解析失败绝不回吐原文
+        #（原文可能正含 userinfo/令牌）；此前 `return raw` 让脱敏函数在最
+        # 需要它的畸形输入上失效
+        return "[unparseable-url-redacted]"

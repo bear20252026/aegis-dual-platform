@@ -52,9 +52,13 @@ def main(argv: list[str] | None = None) -> int:
     print("步骤（按蓝图迁移表）：")
     for index, step in enumerate(MIGRATION_STEPS, start=1):
         # SP-085：步骤声明非空断言——清单被误改空/截断即在此暴露
-        assert step, f"迁移步骤 {index} 描述为空（MIGRATION_STEPS 损坏）"
+        # 审计第六轮（2026-10-03）：改显式 raise——-O/PYTHONOPTIMIZE 剥离断言，
+        # MIGRATION_STEPS 损坏将完全不可见（PY-187/SP-209 同型）
+        if not step:
+            raise SystemExit(f"迁移步骤 {index} 描述为空（MIGRATION_STEPS 损坏）")
         print(f"  {index}. {step}")
-    assert len(MIGRATION_STEPS) == 4, "蓝图定义迁移必须为四步骤（回归保护）"
+    if len(MIGRATION_STEPS) != 4:
+        raise SystemExit("蓝图定义迁移必须为四步骤（回归保护）")
     print("骨架——完整迁移实现按蓝图阶段 C/D 迭代（exit 3=未实现）")
     return EXIT_NOT_IMPLEMENTED
 

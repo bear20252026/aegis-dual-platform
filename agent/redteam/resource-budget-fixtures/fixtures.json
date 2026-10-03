@@ -1,0 +1,87 @@
+{
+  "kind": "resource-budget-fixtures",
+  "note": "动作次数与字节预算超限。case 上可选 \"broker\" 配置字典作为 PolicyBroker 构造参数（显式 0 表示全部拒绝——SP-159 is None 判定口径）。",
+  "cases": [
+    {
+      "id": "action-budget-exhausted",
+      "note": "max_actions=1：第二次调用必须拒",
+      "broker": {
+        "max_actions": 1
+      },
+      "steps": [
+        {
+          "desc": "对照：预算内首次放行",
+          "overrides": {
+            "nonce": "budget-1"
+          },
+          "expect": "allow"
+        },
+        {
+          "desc": "新 nonce 第二次——预算耗尽",
+          "overrides": {
+            "nonce": "budget-2"
+          },
+          "expect": "deny_budget"
+        }
+      ]
+    },
+    {
+      "id": "zero-budget-denies-everything",
+      "note": "SP-140/SP-159：显式 max_actions=0 不得被默认值吞掉——首个动作即拒",
+      "broker": {
+        "max_actions": 0
+      },
+      "steps": [
+        {
+          "desc": "零预算下的首次调用",
+          "overrides": {
+            "nonce": "zero-1"
+          },
+          "expect": "deny_budget"
+        }
+      ]
+    },
+    {
+      "id": "byte-budget-exceeded",
+      "note": "数据体字节超 broker 上限",
+      "broker": {
+        "max_bytes": 1
+      },
+      "steps": [
+        {
+          "desc": "申报 999 字节 > 上限 1",
+          "overrides": {
+            "nonce": "bytes-1",
+            "max_bytes": 999
+          },
+          "expect": "deny_budget_bytes"
+        }
+      ]
+    },
+    {
+      "id": "self-reported-budget-lie-denied",
+      "note": "SP-149：payload 自报 budget_used 不可信——计数在 broker 侧，谎报低用量不能绕过",
+      "broker": {
+        "max_actions": 1
+      },
+      "steps": [
+        {
+          "desc": "对照：首次放行",
+          "overrides": {
+            "nonce": "lie-1",
+            "budget_used": 1
+          },
+          "expect": "allow"
+        },
+        {
+          "desc": "谎报 budget_used=0 试图伪装成首次",
+          "overrides": {
+            "nonce": "lie-2",
+            "budget_used": 0
+          },
+          "expect": "deny_budget"
+        }
+      ]
+    }
+  ]
+}

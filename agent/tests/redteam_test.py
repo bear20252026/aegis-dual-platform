@@ -12,8 +12,10 @@ SP-170（2026-09-26 审计）：__main__ 运行器对齐 e2e 收集-汇总模式
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
+import sys
 
 import yaml
 
@@ -24,6 +26,12 @@ FIXTURE_DIRS = [
     "replay-race-fixtures",
     "resource-budget-fixtures",
 ]
+
+# 被测对象为出厂模块（agent/broker.py），非本文件内脚手架——审计第六轮
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from broker import PolicyBroker, well_formed_action
 
 
 def _expected_values(text: str) -> list[str]:
@@ -108,6 +116,89 @@ def test_kill_switch_revocation_documented():
     rev = (ROOT / "local-ipc" / "revocation.md").read_text(encoding="utf-8")
     assert "Kill Switch" in rev and "撤销" in rev
 
+
+
+# --------------------------------------------------------------------------- #
+# 审计第六轮（2026-10-03）：fixtures 必须由 broker 真实执行
+#
+# 上方 test_redteam_fixtures_present_and_deny 只证明 README 散文里写了 deny
+# ——没有任何载荷被喂给任何 broker，也没有任何可解析样例存在（本目录此前只有
+# README.md）。那是纯粹的假保证：任何人新增一个实际会被放行的样例、只要把它
+# 标注成 "expected": "deny"，门禁依旧全绿。下面补上行为面——解析各 kind 的
+# 机器可读 fixtures.json，逐步构造 ProposedAction 调用**出厂** PolicyBroker
+# （agent/broker.py，非测试内脚手架），断言精确决策串与声明一致。
+# --------------------------------------------------------------------------- #
+
+# 合法 expect 取值：allow 或 broker 的具名 deny 原因。禁止笼统的 "deny"——
+# 断言必须钉到具体拒绝码，否则拒绝原因漂移（如 deny_replay 退化成
+# deny_unknown）不会被发现。
+ALLOW_EXPECT = "allow"
+DENY_EXPECTS = frozenset({
+    "deny_unknown", "deny_session", "deny_expired", "deny_max_ttl",
+    "deny_policy", "deny_scope", "deny_generation", "deny_revoked",
+    "deny_replay", "deny_budget", "deny_budget_bytes", "deny_canonical",
+    "deny_tab", "deny_description_hash", "deny_payload",
+})
+
+
+def _fixture_files() -> list[tuple[str, pathlib.Path]]:
+    return [(kind, ROOT / "redteam" / kind / "fixtures.json") for kind in FIXTURE_DIRS]
+
+
+def _run_step(broker, step: dict) -> str:
+    """执行一个步骤，返回 broker 实际决策串。"""
+    if step.get("revoke"):
+        broker.revoke()
+    if "raw_payload" in step:
+        return broker.decide(step["raw_payload"])
+    return broker.evaluate(well_formed_action(**(step.get("overrides") or {})))
+
+
+def test_redteam_fixtures_are_executed_by_broker():
+    """红队载荷真实驱动出厂 broker——声明 deny 而实际 allow 即红。"""
+    files = _fixture_files()
+    missing = [str(path) for kind, path in files if not path.is_file()]
+    assert not missing, f"缺少机器可读红队载荷文件（README 散文不算）: {missing}"
+
+    total_cases = 0
+    total_deny_steps = 0
+    total_allow_controls = 0
+    for kind, path in files:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        cases = doc.get("cases") or []
+        assert cases, f"{kind}: fixtures.json 无任何 case（空参数化=恒绿陷阱）"
+        for case in cases:
+            cid = case.get("id") or f"{kind}/{total_cases}"
+            steps = case.get("steps") or []
+            assert steps, f"{cid}: 无步骤"
+            broker = PolicyBroker(**(case.get("broker") or {}))
+            case_has_deny = False
+            for index, step in enumerate(steps, start=1):
+                expect = step.get("expect")
+                assert expect is not None, f"{cid} step{index}: 未声明 expect"
+                assert expect == ALLOW_EXPECT or expect in DENY_EXPECTS, (
+                    f"{cid} step{index}: expect={expect!r} 非法——"
+                    "必须是 allow 或 broker 具名拒绝码（禁止笼统 'deny'）")
+                actual = _run_step(broker, step)
+                assert actual == expect, (
+                    f"{cid} step{index}: broker 实际判定 {actual!r} ≠ 声明 {expect!r}"
+                    f" —— {'样例声明 deny 却实际放行（假保证）' if expect != ALLOW_EXPECT else '对照步骤被误拒'}")
+                if expect == ALLOW_EXPECT:
+                    total_allow_controls += 1
+                else:
+                    case_has_deny = True
+                    total_deny_steps += 1
+            assert case_has_deny, f"{cid}: 无拒绝步骤"
+            total_cases += 1
+
+    # broker 存活对照：若一个 allow 都没有，说明 broker 被整体改成一律拒绝，
+    # 此时所有 deny 断言都是同义反复（拒绝源自 broker 失效而非攻击）——必须红。
+    assert total_allow_controls >= len(files), (
+        f"全量 fixtures 仅 {total_allow_controls} 个 allow 对照步骤——不足以证明"
+        f" broker 存活（应至少每 kind 一个）")
+    assert total_cases >= 8 and total_deny_steps >= 8, (
+        f"红队覆盖塌缩：cases={total_cases} deny_steps={total_deny_steps}"
+        "（低于第八轮审计基线，说明样例被删减）")
 
 if __name__ == "__main__":
     # SP-170（2026-09-26 审计）：对齐 e2e 运行器——逐用例异常捕获+汇总

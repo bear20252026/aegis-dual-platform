@@ -66,6 +66,27 @@ def parse_feed_line(line: str):
     return text
 
 
+def _require_same_https_scheme(resp, expected_url: str) -> None:
+    """审计第六轮（2026-10-03）：重定向后的最终 URL 仍须是 https。
+
+    validate_feed_url 只校验**初始**地址；urllib 的 HTTPRedirectHandler 允许
+    https↔http 跨 scheme 跳转，因此一个 https 订阅源只要 302 到
+    http://evil/poisoned.txt，urlopen 就会静默跟随——明文响应可被中间人篡改，
+    注入或删除黑名单条目，等于从供给侧瓦解整条导航门禁。
+    （200 轮台账 P43 记「最终 URL scheme 强制 https」为已闭环，实际两处
+    urlopen 均未复查 resp.geturl()——同仓 api_bridge._fetch_page_source 与
+    C# Core/Security/ThreatFeed.cs 都做了这件事，本文件是唯一漏点。）
+    file:// 仅在显式离线开关下作为初始 scheme 允许，且不得由跳转产生——
+    故按"最终 scheme 必须等于初始 scheme 且属于 {https, file}"判定。
+    """
+    final = resp.geturl() or expected_url
+    want = urlparse(expected_url).scheme
+    got = urlparse(final).scheme
+    if got != want or got not in ("https", "file"):
+        raise ValueError(
+            f"订阅源重定向越界：初始 scheme={want!r} → 最终 scheme={got!r}")
+
+
 def fetch_feed(feed_url: str, timeout: float = 15.0) -> list:
     """拉取并解析订阅源，返回域名列表。
 
@@ -78,6 +99,8 @@ def fetch_feed(feed_url: str, timeout: float = 15.0) -> list:
     # nosec B310: url 已由 validate_feed_url 强制为 https（上方校验），
     # 非 https 地址在此路径前已抛 ValueError。
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # nosec B310
+        # 审计第六轮（2026-10-03）：读取前先复查最终 scheme（见 helper 文档）
+        _require_same_https_scheme(resp, url)
         # L-4 修复（防御性安全审查）：订阅源大小上限——防恶意/失控源
         # 耗尽内存（Content-Length 预检 + 流式读取 5MB 上限）
         raw_bytes = _read_limited(resp, max_bytes=5 * 1024 * 1024)
@@ -158,6 +181,8 @@ class ThreatFeedUpdater:
                 # nosec B310: feed_url 已由 validate_feed_url 强制为 https（见上文），
                 # 且可选 verify 签名校验；非 https 地址在此路径前已被拒绝。
                 with urllib.request.urlopen(feed_url, timeout=15.0) as resp:  # nosec B310
+                    # 审计第六轮（2026-10-03）：限流读取前先复查最终 scheme
+                    _require_same_https_scheme(resp, feed_url)
                     # P1-2 修复（专家审查）：复用 _read_limited（限流读取——
                     # 防失控/恶意订阅源耗尽内存——N-12）
                     raw = _read_limited(resp, max_bytes=5 * 1024 * 1024)
