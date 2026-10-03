@@ -174,9 +174,9 @@ def _materialize_models(vcc, repo, contracts, only=None):
 
 def test_contract_name_normalization():
     import verify_contract_compatibility as vcc
-    import pathlib
-    assert vcc.contract_name(pathlib.Path("update-manifest.schema.json")) == "UpdateManifestContract"
-    assert vcc.contract_name(pathlib.Path("approval.json")) == "ApprovalContract"
+
+    assert vcc.contract_name(Path("update-manifest.schema.json")) == "UpdateManifestContract"
+    assert vcc.contract_name(Path("approval.json")) == "ApprovalContract"
 
 
 def test_contract_compatibility_happy_path(vcc_tree, capsys):
