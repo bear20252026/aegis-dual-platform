@@ -113,9 +113,14 @@ public sealed class DecouplingTests
     public void NativePolicyCoreGate_NotRequiredIsDisabledAndAllowsPlatformBroker()
     {
         // 未启用强制原生核心（env 非 "1"）→ Disabled 放行（走经验证的 C# Broker）
+        // 审计第六轮（2026-10-04）：门禁新增第二来源（安装期标记，HKCU）——
+        // 本用例断言的是"两者皆无"的开发机形态，故假读取器同时中和第二来源，
+        // 否则在真正装过 Aegis 的机器上该用例会因标记存在而虚假变红
         var previous = Environment.GetEnvironmentVariable(NativePolicyCoreGate.EnableEnvironmentVariable);
+        var previousMarkerReader = InstalledBuildMarker.ValueReaderForTests;
         try
         {
+            InstalledBuildMarker.ValueReaderForTests = (_, _) => null;
             Environment.SetEnvironmentVariable(NativePolicyCoreGate.EnableEnvironmentVariable, null);
             var result = NativePolicyCoreGate.ProbeFromEnvironment();
             Assert.True(result.AllowsPlatformBroker);
@@ -125,6 +130,7 @@ public sealed class DecouplingTests
         finally
         {
             Environment.SetEnvironmentVariable(NativePolicyCoreGate.EnableEnvironmentVariable, previous);
+            InstalledBuildMarker.ValueReaderForTests = previousMarkerReader;
         }
     }
 

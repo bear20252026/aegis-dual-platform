@@ -48,6 +48,17 @@ CI-供应链 / Python+文档核验），覆盖 649 个跟踪文件、约 70K LOC
 | R6-20 | P0 | **FFI 通路无任何内容判定**：`evaluate_navigation` 只做 URL 归一 + 会话/代际/nonce 校验，从不调 `PolicyEngine::evaluate`/`CapabilityRegistry::validate`，也无 host 黑名单——任意良构 https（含钓鱼/恶意 host）一律 Allow 并发放可消费 nonce。因 `PolicyEngine::default()` 是 deny-all 故从未接线（代码 H-7 自述），结果是"单一裁决源"退化为"单一 nonce 记账员" | 新增 C ABI 入口 `aegis_policy_core_broker_update_host_denylist_json`（入参 JSON host 数组，返回 `{decision,accepted,input}`；未注入时黑名单为空=行为不变，不 deny-all），`evaluate_navigation` 在归一后先查黑名单命中即 `deny/threat_blocklist`。锁中毒按"被拒"处理。已登记入 `c_abi_export_surface_is_frozen` 冻结符号表 | 新增 3 条跨端向量（`blocklisted_host_denied` / 大小写形态 / `bad.example:8443` 带端口形态）；`cargo test` 551 通过。带端口那条是开发期实测到的**我自己的**绕过：`CanonicalExternalUrl.host` 依 RS-227 保留非默认端口，直接比对会使 `bad.example` 匹配不上 `bad.example:8443`——已改为剥端口后比对并加向量钉住 |
 | R6-21 | P1 | **确认流被核心侧无条件触发**：`request_navigation_confirmation` 把每一个 Allow 都转成 RequireConfirmation，等价于"每次导航都弹确认"，因而 2026-08-30 被关闭、整套确认域（pendingConfirmation / 防孤儿 nonce / 受信 Compose 批准入口）沦为死代码 | 高危判据落进核心：`SecurityPolicy::is_local_or_private_host`（127/8、0/8、10/8、172.16/12、192.168/16、169.254/16 含云元数据、`localhost`），仅高危目标登记待审批；普通公网导航直接 Allow。CI 释放构建恢复 `-PrequireNavigationConfirmation=true` | 5 条高危向量（127.0.0.1、127.0.0.1:6379、localhost、192.168.1.1、169.254.169.254 → require_confirmation）+ 公网对照 → allow；`assert!(evaluated.get("action").is_none())` 钉住"高危不得同时发放可消费授权"。副带收益：子框架轻量路径只调 `evaluate_navigation`，收到 require_confirmation 即 fail-closed 阻断——远程页嵌 iframe 打 127.0.0.1/私网的 SSRF 面在核心层被拦，不依赖端侧实现 |
 
+| R6-22 | P1 | **出货 Windows 从不咨询 Rust 核心**（第一节断链之一）：`NativePolicyCoreGate.IsRequired` 只读环境变量，而全仓唯一赋值点在 CI 构建步 shell 里（不随安装包交付）→ 运行时恒 `Disabled()`，`aegis_policy_core.dll` 随包发布却零调用，"单一裁决源"对唯一发布制品不成立 | 新增 `InstalledBuildMarker`（`HKCU\Software\Aegis Browser\RequireNativePolicyCore=1`）作为门禁第二来源，`AegisSetup-CSharp.iss` 安装期写入、卸载删除；`App.xaml.cs` 启动记 `[adjudication]` 留痕（只写布尔与拒绝码，不落绝对路径） | **真实安装往返实测**：ISCC 编译现有 .iss 通过（128.7s）；探针安装包（同一 `[Registry]` 行 + `PrivilegesRequired=lowest` + 64 位模式）静默安装后确实写入该键值，随货门禁代码翻为 native-required（锚点测试 exit 1）；静默卸载后键值同删、测试复绿。**开发工作流未被破坏**：无环境变量且无标记的 `dotnet build` 恒 `Disabled()`（未加任何无条件置位）。17 例新测试含"安装器字符串 ↔ C# 常量"对账（直接读 .iss 比对，任一侧改名即红）；Broker.Tests 67、Core.Tests 708、构建 0 警告 |
+| R6-23 | P2 | **黑名单只在签发点判定**（R6-20 遗留的 TOCTOU，由 R6-22 执行方复核时反推发现）：evaluate 与 consume 之间隔着一次用户批准与一次网络往返，若订阅源在该窗口内新增 host，则 60s 有效期内已签发授权一律照放——黑名单更新对在手授权不生效 | `consume_navigation` 在归一后复判黑名单（命中即 `threat_blocklist`）；**有意不复判高危**——高危目标从不进 issued 账本，此处再拦会把用户刚批准的本机导航自我否决、使确认流变死路径 | 3 例直接测试：签发后拉黑 → consume 拒；未拉黑 → 仍可消费（防恒拒假闭环）；本机目标经批准 → 可消费（防确认流被自毁） |
+
+刻意**不**写入安装标记的一项（避免制造死路径 + 新漏洞面）：`RequireNavigationConfirmation`
+不随安装包置位。理由不是"未做"，而是当前代码状态下启用有害——核心高危判据已收窄为
+本机/私网 host，而 Windows 在 `EvaluateNavigation` 与 `TryConsumeNavigation` 两点已对
+私网硬拒，弹面板后再拒即死路径；且确认链不复判托管黑名单、核心的黑名单注入入口尚无
+C# 绑定与调用点，此刻启用等于给黑名单 host 开一条"批准即放行"的面。启用顺序应为：
+先把订阅源快照喂给 `aegis_policy_core_broker_update_host_denylist_json`，再评估出厂置位。
+`InstallerScript_DoesNotShipNavigationConfirmationMarker` 会在有人未推翻该分析就添加时失败。
+
 判定口径的两处诚实限定（写在代码注释里，此处同步）：
 
 1. **不按 `.local`/`.internal` 后缀名判高危**——宿主自有资产虚拟主机

@@ -17,9 +17,12 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
 
 - **导航裁决链**：每次导航经 Broker 决策（fail-closed）。**注意分端差异**——
   Rust 核心的 FFI 入口 `evaluate_navigation` 内不含策略/能力/黑名单层（代码自述
-  H-7：`policy.evaluate / capability.validate 未接入 FFI 通路`），且 Windows 发布物
-  运行时从不置位原生门禁环境变量、Android 发布 APK 把确认开关关闭后由客户端
-  **自行兑换**一次性 nonce，故"高危目标触发用户确认流"目前两端均未生效
+  H-7：`policy.evaluate / capability.validate 未接入 FFI 通路`）；Windows 发布物的
+  原生门禁此前依赖永不置位的环境变量，第六轮已改由安装器写入的按用户注册表标记
+  （`HKCU\Software\Aegis Browser\RequireNativePolicyCore`）驱动，故安装包内导航
+  确实经 Rust 核心裁决（启动留痕见安全日志 `[adjudication]` 行）；Android 发布 APK
+  把确认开关关闭后由客户端**自行兑换**一次性 nonce，故"高危目标触发用户确认流"
+  目前两端均未生效
   （详见 [第六轮台账](docs/audit/full-audit-2026-10-03-round6.md) 第二节）
 - **指纹防护**：Canvas/WebGL/AudioBuffer/字体/计时器/屏幕多维欺骗，噪声按
   **per-site 种子**隔离（跨站不可关联），注入脚本经三端守卫单源（bridge_guard）对账
