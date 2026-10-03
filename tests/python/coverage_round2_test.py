@@ -110,7 +110,8 @@ def test_verify_versions_flags_hardcoded_android_version(vv_tree, capsys):
     vv, build = vv_tree
     build(gradle=GRADLE_HARDCODED)
     assert vv.main() == 1
-    assert "Android versionName wiring" in capsys.readouterr().out
+    # 硬编码回潮 → wiring 判 False（报告标签为 expected 字典键 "Android versionName"）
+    assert "Android versionName: found False, expected True" in capsys.readouterr().out
 
 
 def test_verify_versions_missing_file_and_key(vv_tree, capsys):
