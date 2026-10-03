@@ -22,8 +22,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath("org.bouncycastle:bcprov-jdk18on:1.85")
-        classpath("org.bouncycastle:bcutil-jdk18on:1.85")
+        classpath("org.bouncycastle:bcprov-jdk18on:1.86")
+        classpath("org.bouncycastle:bcutil-jdk18on:1.86")
         classpath("org.bouncycastle:bcpkix-jdk18on:1.84")
         classpath("org.bitbucket.b_c:jose4j:0.9.6")
         classpath("org.jdom:jdom2:2.0.6.1")
