@@ -1,0 +1,81 @@
+# Gradle 依赖洞察（诊断工具——2026-10-03 剩余项批）
+# 用途：Dependabot alerts 指向传递依赖时（REST API 不暴露依赖路径），在云端
+# 解析 build/plugin classpath 与各模块 classpath 闭包，输出包→父链证据。
+# 触发：仅手动 dispatch（诊断工具不进常跑门禁；结果读 log）。
+name: Gradle-Dependency-Insight
+
+"on":
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: '依赖坐标关键字（逗号分隔——dependencyInsight/链提取对象）'
+        required: false
+        default: "bouncycastle,bcpkix,jose4j,jdom,httpclient,commons-lang3,logback"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  insight:
+    name: 依赖路径洞察
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+
+      - name: 安装 JDK 21（AGP 9.4.1 要求 ≥17）
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: 设置 Android SDK（基线包——android-quality 同口径）
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+
+      - name: 构建类路径闭包（buildEnvironment——插件/AGP 传递树）
+        run: |
+          ./gradlew buildEnvironment --no-daemon > /tmp/build-env.txt
+          echo "=== build classpath 命中 ==="
+          grep -nE '${{ github.event.inputs.packages }}' /tmp/build-env.txt || echo "(零命中)"
+
+      - name: 产品运行时闭包（debugRuntimeClasspath——APK 暴露面证明）
+        run: |
+          ./gradlew :app:dependencies --configuration debugRuntimeClasspath --no-daemon > /tmp/runtime.txt
+          echo "=== runtime 命中 ==="
+          grep -nE '${{ github.event.inputs.packages }}' /tmp/runtime.txt || echo "(零命中——产品不暴露)"
+
+      - name: 测试类路径闭包（testDebugUnitTestRuntimeClasspath——工具链暴露面）
+        run: |
+          ./gradlew :app:dependencies --configuration testDebugUnitTestRuntimeClasspath --no-daemon > /tmp/testcp.txt
+          echo "=== test classpath 命中 ==="
+          grep -nE '${{ github.event.inputs.packages }}' /tmp/testcp.txt || echo "(零命中)"
+
+      - name: 依赖链洞察（dependencyInsight——包→父链）
+        run: |
+          IFS=',' read -ra PKGS <<< "${{ github.event.inputs.packages }}"
+          for pkg in "${PKGS[@]}"; do
+            echo "=== insight: $pkg (buildEnvironment) ==="
+            ./gradlew buildEnvironment --no-daemon --dependency "$pkg" 2>&1 | tail -40 || true
+          done
+
+      - name: 上传完整闭包树（排障用）
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-trees
+          path: |
+            /tmp/build-env.txt
+            /tmp/runtime.txt
+            /tmp/testcp.txt
+          if-no-files-found: warn
+          retention-days: 14
