@@ -19,10 +19,11 @@ import kotlinx.coroutines.flow.asStateFlow
  *   （仅 ViewModel 保存发起 WebView 引用——AD-158 internal 化供 JVM 单测）；
  * - [pendingDownloadConfirmation] 批准即续体单次调用（AD-331，重复点击
  *   /dialog 复现均为 no-op）。
+ *
+ * TooManyFunctions 豁免（BrowserViewModelHost 的 LongParameterList 同款先例）：
+ * 「提示 + 双确认流」是单职责内聚块——13 个函数全部围绕三个单槽 StateFlow
+ * 的登记/撤销/分型文案，拆分反而引入状态对象间接层。
  */
-// TooManyFunctions 豁免（BrowserViewModelHost 的 LongParameterList 同款先例）：
-// 「提示 + 双确认流」是单职责内聚块——13 个函数全部围绕三个单槽 StateFlow
-// 的登记/撤销/分型文案，拆分反而引入状态对象间接层。
 @Suppress("TooManyFunctions")
 internal class BrowserViewModelConfirmations(
     /** 审批归属校验缝：只允许当前活动标签的 WebView 消费授权（防错标）。 */
