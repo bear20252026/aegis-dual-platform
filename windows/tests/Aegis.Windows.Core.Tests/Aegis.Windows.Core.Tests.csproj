@@ -3,7 +3,6 @@
        RestorePackagesWithLockFile（含 SP-177/SP-220 注释）与
        TreatWarningsAsErrors 已单源化到 windows/Directory.Build.props -->
   <PropertyGroup>
-    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
   </PropertyGroup>

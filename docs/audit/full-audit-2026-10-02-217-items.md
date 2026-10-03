@@ -4,7 +4,7 @@
 
 **方式**:7 路并行审计(Windows C# / Android / Rust 核心 / Python·契约·发布链 / Web 资产·文档 / CI·根配置·盲区 / 提升点专项),每项带 file:line 证据与具体修复方案;修复批按文件所有权 5 路并行(CS/AD/RS/WB/SP)+PY 批,交接项由主审计收尾。
 
-**总量**:**217 行登记(问题 111 / 提升 106)**:登记 216 项 + 云端实证追加 1 项(SP-260);**本轮闭环 214 项**,暂缓 2 项(WB-195/SP-258——需跨端断言面/依赖锁重算,留下轮),待处置 1 项(SP-260——仓库设置层,非文件可修)。P1×0 / P2×26 / P3×191。机器可读索引:full-audit-2026-10-02-217-items.csv(I-23)。
+**总量**:**217 行登记(问题 111 / 提升 106)**:登记 216 项 + 云端实证追加 1 项(SP-260);**本轮闭环 217 项**(含 2026-10-03 跟进批:原暂缓 WB-195/SP-258 与待处置 SP-260 三项经 in-repo 方案闭环——SP-260 根因是 App.csproj 缺 EnableWindowsTargeting 而非纯设置层,props 单源根除)。P1×0 / P2×26 / P3×191。机器可读索引:full-audit-2026-10-02-217-items.csv(I-23)。
 
 > 编号体系:延续既往(CS=C# 正典栈,AD=Android,RS=Rust 策略核心,PY=Python/CI/契约/发布链,WB=Web 资产+文档,SP=补充盲区/治理)。
 > 优先级:P1=必须(缺陷/安全/门禁失效),P2=应该(正确性/一致性/重要测试),P3=可以(打磨/补测/归置)。
@@ -225,7 +225,7 @@
 | WB-192 | P3 | 提升/测试质量 | shared/shell/snake.test.js:209-215 | 「最高分初始加载」零断言恒通过——伪装覆盖 → 补断言 | ✅ WB批 |
 | WB-193 | P3 | 提升/补测试 | tests/ui-regression/start_import.test.mjs | importScan 同步抛错路径无用例(只测 rejected Promise 形态) → 补第三形态 | ✅ WB批 |
 | WB-194 | P3 | 问题/注释失实 | tests/ui-regression/helpers.mjs:33 | 「chromium.webview 形态」为 pywebview 时代残留措辞 → 改「bridge.webview(注入为 window.chrome)」 | ✅ WB批 |
-| WB-195 | P3 | 提升/一致性收敛 | tests/ui-regression(跨端桥 op 词表) | start.js 14 op 与 NtpBridge.cs/AegisHomeBridge.kt 集合零对账——新增 JS op 漏宿主 case 静默 TTL 兜底(WB-037) → ui-regression 断言集合覆盖 | ⏸ 暂缓(跨端断言面,留下轮) |
+| WB-195 | P3 | 提升/一致性收敛 | tests/ui-regression(跨端桥 op 词表) | start.js 14 op 与 NtpBridge.cs/AegisHomeBridge.kt 集合零对账——新增 JS op 漏宿主 case 静默 TTL 兜底(WB-037) → ui-regression 断言集合覆盖 | ✅ 跟进批(2026-10-03,PR #61——bridge_ops.test.mjs 三源正则提取+反腐烂锚) |
 | WB-196 | P3 | 问题/文档失实 | tests/README.md:13 | snake.test.js 标「node:test」失实(自研 assert runner,ci.yml:51 直跑) → 改述+正确命令(≡SP-232) | ✅ WB批 |
 | WB-197 | P3 | 问题/命令失实 | README.md:55-61 | Windows 命令漏 `cd windows` 前缀(照抄必失败)+Android 漏 :contracts: 模块 → 与 CLAUDE.md 逐字对齐 | ✅ WB批 |
 | WB-198 | P3 | 问题/文档失实 | README.md:72-77 | 审计轮次仅列两轮(漏 09-07/10-01),同文件却引用 10-01 编号 → 四轮口径+台账链接 | ✅ WB批 |
@@ -281,9 +281,9 @@
 | SP-255 | P3 | 提升/治理(I-03) | 全仓无行数红线门禁 | 「新 ≤300/改造 ≤500」纯口头(AD-101/102 靠人工) → scripts/check_file_sizes.py ratchet+86 项基线+contracts 接线 | ✅ SP批 |
 | SP-256 | P3 | 提升/文档工具(I-19) | 70+ 份 md 零链接校验 | WB-033 类死链只能人工发现 → scripts/check_markdown_links.py+contracts 接线 | ✅ SP批 |
 | SP-257 | P3 | 提升/一致性(I-24) | 仓库根无 .editorconfig | 五栈行尾/缩进/最终换行零底线约定(仅 android 子目录有) → 根级单源+android 继承微调 | ✅ SP批 |
-| SP-258 | P3 | 提升/可观测(I-12) | 三端零覆盖率度量 | pytest/gradle/dotnet 无 coverage——补测优先级只能靠人工审计 → 覆盖率报告起步 | ⏸ 暂缓(coverage.py 入锁需 pip-compile 重锁,留下轮) |
+| SP-258 | P3 | 提升/可观测(I-12) | 三端零覆盖率度量 | pytest/gradle/dotnet 无 coverage——补测优先级只能靠人工审计 → 覆盖率报告起步 | ✅ 跟进批(2026-10-03,PR #61——pytest-cov 7.1.0 重锁+contracts/agent-redteam --cov 报告) |
 | SP-259 | P3 | 提升/制品链完整性(I-08) | release-android.yml apk_entries | Android 发布链无画板资产断言(Windows 侧有)——prepare 失败静默缺画板出厂 → assets/geogebra/.../GeoGebra.html 断言 | ✅ 主审计收尾 |
-| SP-260 | P3 | 问题/供应链可观测 | 仓库设置层(GitHub 动态 workflow「Automatic Dependency Submission (NuGet)」) | 动态依赖提交在 ubuntu restore net10.0-windows 必失败 NETSDK1100(PR #60 云端首跑实证;master 同病)——NuGet 依赖图静默停更 → 仓库设置处置:禁用该面(依赖图 NuGet 以发布 SBOM 为准)或自管 workflow 带 EnableWindowsTargeting;非仓库文件可修 | ⏸ 登记待处置(设置层) |
+| SP-260 | P3 | 问题/供应链可观测 | 仓库设置层(GitHub 动态 workflow「Automatic Dependency Submission (NuGet)」) | 动态依赖提交在 ubuntu restore net10.0-windows 必失败 NETSDK1100(PR #60 云端首跑实证;master 同病)——NuGet 依赖图静默停更 → 仓库设置处置:禁用该面(依赖图 NuGet 以发布 SBOM 为准)或自管 workflow 带 EnableWindowsTargeting;非仓库文件可修 | ✅ 跟进批(2026-10-03,PR #61——in-repo 修复:EnableWindowsTargeting 上提三工程单源,NETSDK1100 根除) |
 
 ## 7. 批次日志与闭环统计
 
