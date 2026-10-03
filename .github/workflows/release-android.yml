@@ -238,6 +238,38 @@ jobs:
           else
             echo "::warning::APK 未签名或签名校验未通过（非 tag 调试构建）"
           fi
+      - name: Assert signing certificate identity (pin)
+        # 审计第六轮（2026-10-03）：上一步只证明「有签名且成链」，未证明
+        # 「是谁签的」。AEGIS_KEYSTORE_* 四件套被替换（管理员误改/secret 供
+        # 应链/账号被钓）时，CI 会用攻击者的钥匙签名，随后 apksigner 通过、
+        # SBOM 生成、attestation 签发、SHA256SUMS 齐备、全绿发布——一条恶意
+        # 更新链完整穿过流水线。现把制品实签指纹与受版本控制、经评审的身份
+        # 文件对账。放仓库文件而非 secret：能替换 keystore secret 的人同样能
+        # 替换 expected secret（同一爆炸半径），文件则另需 git 写权限并过评审，
+        # 且 v* tag ruleset 已使发布 tag 不可改写。
+        shell: bash
+        run: |
+          IDENTITY=../docs/release/signing-identity.txt
+          if [ ! -f "$IDENTITY" ]; then
+            echo "❌ 签名身份文件缺失：$IDENTITY——无法对账（fail-closed）"
+            exit 1
+          fi
+          EXPECTED=$(sed -n 's/^APK_CERT_SHA256=//p' "$IDENTITY" | head -1 | tr -d '\r' | tr 'A-Z' 'a-z')
+          if [ -z "$EXPECTED" ]; then
+            echo "❌ $IDENTITY 未登记 APK_CERT_SHA256——无法对账（fail-closed）"
+            exit 1
+          fi
+          ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: *//p' /tmp/apksigner.out | head -1 | tr -d '\r' | tr 'A-Z' 'a-z')
+          if [ -z "$ACTUAL" ]; then
+            echo "❌ 无法从 apksigner 输出提取证书指纹（签名验证步骤未产出结果）"
+            exit 1
+          fi
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "❌ 签名身份不匹配：APK 实签 $ACTUAL ≠ 预期 $EXPECTED"
+            echo "   可能为密钥替换/供应链事件——停止发布（fail-closed）"
+            exit 1
+          fi
+          echo "[pin] 签名身份对账通过：$ACTUAL"
       - name: Collect APK + generate SHA-256
         shell: bash
         run: |

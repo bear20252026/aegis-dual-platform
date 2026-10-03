@@ -56,10 +56,26 @@ runs:
                 or (len(parts[0]) > 1 and parts[0][1] == ':')  # Windows 盘符 C:
             )
         bad = [n for n in zf.namelist() if suspect(n)]
-        assert not bad, 'zip-slip suspect members (fail-closed): %r' % bad[:5]
+        # 审计第六轮（2026-10-03）：不用 assert——SP-209 的闭环当初就是用
+        # assert 写的，PYTHONOPTIMIZE=1 / python -O 下断言在字节码编译期被整体
+        # 剥离，紧接其后的 extractall 便对未校验成员裸跑（PY-187 同型缺陷，
+        # 本仓 verify_vectors.py 的闭环已采用显式 raise 口径）。zip 由外部
+        # 下载而来，属不可信输入，containment 必须显式抛出。
+        if bad:
+            import sys
+            print('zip-slip suspect members (fail-closed): %r' % bad[:5], file=sys.stderr)
+            sys.exit(1)
         zf.extractall('.')
         PYEOF
         # zip 本身必须删除——残留会被 AGP 打包链/C# 安装包 Content 收进制品（+32MB）
         rm geogebra.zip
-        python -c "import os; p='GeoGebra/HTML5/5.0/GeoGebra.html'; assert os.path.isfile(p), 'entry missing: '+p"
+        # 审计第六轮（2026-10-03）：入口文件存在性同样不得用 assert（同上 -O 剥离面）
+        python - <<'PYEOF'
+        import os
+        import sys
+        p = 'GeoGebra/HTML5/5.0/GeoGebra.html'
+        if not os.path.isfile(p):
+            print(f'geogebra entry missing: {p}', file=sys.stderr)
+            sys.exit(1)
+        PYEOF
         echo "[geogebra] assets ready at $GEOGEBRA_DEST_DIR"
