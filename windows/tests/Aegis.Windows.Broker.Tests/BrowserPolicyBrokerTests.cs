@@ -124,6 +124,44 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
         Assert.Null(result.DenialCode);
     }
 
+    /// <summary>审计第六轮（2026-10-03）：反"假绿"锚点——一旦声明原生模式，
+    /// 必须真跑一次完整跨界往返，否则**失败**而非静默通过。
+    /// 背景：上方四个原生用例在环境变量缺失时直接 `return`，xunit 记为**通过**
+    /// ——P/Invoke 面从未被触碰也报全绿（本地实测：DLL 缺席时
+    /// 失败0/通过49/已跳过0，"已跳过"恒为 0 正是伪装成绿的证据）。xunit 2.9.3
+    /// 没有 Assert.Skip（v3 才引入），本仓不为此加包，故改由"实跑否则红"收口。
+    /// 同时钉住 NativePolicyCoreBridgeHub 的共存语义：Rust 侧 RS-140 强制
+    /// 进程内单 broker，主窗 + 无痕窗各自 Acquire 时第二个拿到 null 桥，
+    /// 无痕窗口每一条导航/下载/帧都回 native_policy_core_bridge_unavailable
+    /// ——即整窗不可用（实测缺陷，非理论风险）。</summary>
+    [Fact]
+    public void DeclaredNativeModeMustActuallyRoundTripAndSupportTwoCoexistingBrokers()
+    {
+        if (!NativePolicyCoreGate.IsRequired)
+            return;  // 未声明原生模式（本地默认走托管 C# 裁决）——原生 job 显式置 1
+
+        var probe = NativePolicyCoreGate.ProbeFromEnvironment();
+        Assert.True(probe.AllowsPlatformBroker,
+            $"原生模式已声明但库探测失败: {probe.DenialCode}");
+
+        using var main = new BrowserPolicyBroker();
+        using var inPrivate = new BrowserPolicyBroker();
+        Assert.True(main.RegisterSession("anchor-main", "tab-1", 0));
+        Assert.True(inPrivate.RegisterSession("anchor-incog", "tab-1", 0));
+
+        foreach (var pair in new[]
+                 { (Broker: main, Session: "anchor-main"), (Broker: inPrivate, Session: "anchor-incog") })
+        {
+            var decision = pair.Broker.EvaluateNavigation(
+                pair.Session, "tab-1", 0, "https://example.com/", "navigation");
+            if (decision is Decision.Deny deny)
+                Assert.True(
+                    deny.Reason.Code != "native_policy_core_bridge_unavailable",
+                    $"第二个 broker 未取得共享桥（RS-140 单 broker 约束未被 Hub 化解）：" +
+                    $"{pair.Session} → {deny.Reason.Code} / {deny.Reason.Detail}");
+        }
+    }
+
     // ===== CS-073（审计 2026-09-25）：TryCreate(null) 空参拒绝 =====
 
     [Theory]

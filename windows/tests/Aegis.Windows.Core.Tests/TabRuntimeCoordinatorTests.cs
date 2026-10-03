@@ -28,6 +28,9 @@ public sealed class TabRuntimeCoordinatorTests
         public bool AllowDownload(string s, string t, string o, string f, bool c) => true;
         public void DenyDownload(string s, string t, string o) { }
         public bool IsHostBlocked(string host) => false;
+        // 审计第六轮（2026-10-03）：IBroker 新增 KillSwitch 读取面——假 Broker
+        // 持独立实例（不用 KillSwitch.Shared），避免测试间经进程单例串扰。
+        public Aegis.Windows.Broker.KillSwitch KillSwitch { get; } = new();
         public void Dispose() { }
     }
 

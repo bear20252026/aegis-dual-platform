@@ -26,6 +26,9 @@ public sealed class BrowserPolicyBroker : IBroker
     private readonly object _sessionLock = new();
     private readonly Func<NativePolicyCoreGateResult> _nativePolicyCoreGate;
     private readonly NativePolicyCoreBridge? _nativePolicyCoreBridge;
+    // 审计第七轮（2026-10-03）：桥来自进程级共享持有者——Dispose 时归还引用而非
+    // 释放（原生侧单活 broker，误释放即全进程永久失去原生核心，见 Hub 注释）
+    private readonly bool _nativePolicyCoreBridgeShared;
     private readonly bool _nativePolicyCoreRequired;
     // M1-T2（ADR-009）：威胁黑名单（可变引用——订阅刷新后整体替换快照）。
     // 策略数据归 broker（ADR-002：broker 唯一策略裁决点），HostWebView 只消费。
@@ -62,18 +65,40 @@ public sealed class BrowserPolicyBroker : IBroker
         // gate/黑名单锁定必需模式分支，不需要真实原生库
         _nativePolicyCoreRequired = nativePolicyCoreRequiredForTests ?? NativePolicyCoreGate.IsRequired;
         if (_nativePolicyCoreRequired && nativePolicyCoreRequiredForTests is null)
-            NativePolicyCoreBridge.TryCreate(PolicyVersion, NativePolicyCoreGate.LibraryPath, out _nativePolicyCoreBridge);
+        {
+            // 审计第七轮（2026-10-03·latent：仅在原生门禁开启时生效）：改取进程级
+            // 共享桥。Rust 侧 aegis_policy_core_broker_new 强制「进程内单活 broker」
+            //（RS-140），第二个 broker_new 返回 null——主窗已在组合根占掉唯一名额，
+            // 无痕窗自建桥必得 null → 原生模式下无痕窗每一帧/每一次下载全部
+            // native_policy_core_bridge_unavailable（实测缺陷，非理论风险）。
+            _nativePolicyCoreBridge = NativePolicyCoreBridgeHub.Acquire(PolicyVersion);
+            _nativePolicyCoreBridgeShared = _nativePolicyCoreBridge is not null;
+        }
         else
+        {
             _nativePolicyCoreBridge = nativePolicyCoreBridge;
+        }
         _blockedHosts = blockedHosts ?? NoBlockedHosts.Instance;
         KillSwitch = killSwitch ?? new KillSwitch();
     }
 
     /// <summary>替换黑名单快照（订阅源后台刷新完成时调用——原子换引用）。
     /// CS-375（2026-10-01 审计）：参数如实声明可空（调用方以 null 表达
-    /// "回退空名单"，此前非空签名使 CS-017 回归用例报 CS8625）。</summary>
-    public void UpdateBlockedHosts(IBlockedHosts? blockedHosts) =>
-        _blockedHosts = blockedHosts ?? NoBlockedHosts.Instance;
+    /// "回退空名单"，此前非空签名使 CS-017 回归用例报 CS8625）。
+    /// 审计第七轮（2026-10-03）：注入的是进程级共享持有者（SharedBlockedHosts
+    /// .Shared）时改向其发布——否则无痕窗口 broker（组合根注入同一持有者、
+    /// 自身从不被刷新调用）永远看不到新快照，等价于 denylist 对隐私路径失效；
+    /// 实例级注入（单测/独立名单）保持旧的实例内替换语义。</summary>
+    public void UpdateBlockedHosts(IBlockedHosts? blockedHosts)
+    {
+        var snapshot = blockedHosts ?? NoBlockedHosts.Instance;
+        if (_blockedHosts is SharedBlockedHosts shared)
+        {
+            shared.Publish(snapshot);
+            return;
+        }
+        _blockedHosts = snapshot;
+    }
 
     /// <summary>子资源层黑名单查询（HostWebView WebResourceRequested 真拦截——
     /// 命中返回 403 stub。导航层的同名单独在 EvaluateNavigation 内强制）。</summary>
@@ -181,12 +206,18 @@ public sealed class BrowserPolicyBroker : IBroker
             // 黑名单命中给出具体拒绝原因（threat_blocklist）优于泛化的
             // bridge_unavailable；此前顺序使「必需模式+无桥」下黑名单分支
             // 不可达，测试无法锁定"native 模式黑名单同样强制"语义
-            if (Uri.TryCreate(rawUrl, UriKind.Absolute, out var nativeUri)
-                && _blockedHosts.IsBlocked(nativeUri.Host))
+            if (Uri.TryCreate(rawUrl, UriKind.Absolute, out var nativeUri))
             {
-                RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "threat_blocklist");
-                SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {UrlRedactor.Redact(rawUrl)}");
-                return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
+                if (_blockedHosts.IsBlocked(nativeUri.Host))
+                {
+                    RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "threat_blocklist");
+                    SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {UrlRedactor.Redact(rawUrl)}");
+                    return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
+                }
+                // 审计第七轮（2026-10-03）：私有/回环拒绝在原生模式同样前置（托管
+                // 侧的强制面，与黑名单同源同理——Rust 核心不含本仓的隐私网络边界）
+                if (IsNonPublicNavigationTarget(nativeUri))
+                    return DenyNonPublicTarget(scope, rawUrl);
             }
             if (_nativePolicyCoreBridge is null)
                 return NativeBridgeDenied(scope, "native_policy_core_bridge_unavailable");
@@ -211,6 +242,10 @@ public sealed class BrowserPolicyBroker : IBroker
             SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {UrlRedactor.Redact(rawUrl)}");
             return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
         }
+        // 审计第七轮（2026-10-03）：本机/内网/链路本地/元数据地址默认拒绝——
+        // 远程页的 SSRF/CSRF 原语（含 iframe 子文档，同一入口）
+        if (IsNonPublicNavigationTarget(uri))
+            return DenyNonPublicTarget(scope, rawUrl);
         var origin = uri.GetLeftPart(UriPartial.Authority);
         var action = new AuthorizedAction(sessionId, tabId, generation, origin, "GET",
             uri.GetComponents(UriComponents.PathAndQuery, UriFormat.UriEscaped), scope, DateTime.UtcNow.Add(ActionLifetime),
@@ -305,11 +340,19 @@ public sealed class BrowserPolicyBroker : IBroker
             RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "kill_switch_engaged");
             return false;
         }
+        // 审计第七轮（2026-10-03）：消费点同样强制隐私网络边界（两种模式共用）——
+        // 托管授权只能在 EvaluateNavigation 签发（那里已拒），此处兜住"原生核心
+        // 签发的内网授权"与调用方伪造动作（与 KillSwitch 在消费点复判同理）
+        if (OriginPolicy.TryParseExternal(rawUrl, out var targetUri)
+            && IsNonPublicNavigationTarget(targetUri))
+        {
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "private_network");
+            return false;
+        }
         if (_nativePolicyCoreRequired)
         {
             if (_nativePolicyCoreBridge is null)
-                return false;
-            lock (_sessionLock)
+                return false;            lock (_sessionLock)
             {
                 if (!IsValidInCurrentSession(action, currentGeneration)
                     || action.SessionId != sessionId || action.TabId != tabId)
@@ -353,7 +396,12 @@ public sealed class BrowserPolicyBroker : IBroker
             _sessions.Clear();
         lock (_nonceLock)
             _consumedNonces.Clear();
-        _nativePolicyCoreBridge?.Dispose();
+        if (_nativePolicyCoreBridgeShared)
+            // 审计第七轮（2026-10-03）：共享桥只归还引用（归零才真正释放）——
+            // 直接 Dispose 会让存活窗口的原生链全断
+            NativePolicyCoreBridgeHub.Release(_nativePolicyCoreBridge);
+        else
+            _nativePolicyCoreBridge?.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -444,6 +492,33 @@ public sealed class BrowserPolicyBroker : IBroker
                 RecordAudit("require_confirmation", confirmation.Request.Scope, confirmation.Request.Origin, null);
                 break;
         }
+    }
+
+    /// <summary>审计第七轮（2026-10-03·P2）：本机/内网/链路本地/元数据地址判定。
+    /// 此前 EvaluateNavigation 只看协议/主机语法 + 黑名单：
+    /// &lt;iframe src="http://127.0.0.1:6379/"&gt;、http://169.254.169.254/latest/
+    /// meta-data/（云元数据）、http://192.168.1.1/set_config 都带着用户 cookie 与
+    /// 内网位置直接加载，iframe 子文档与顶层同判（同一入口），构成远程页
+    /// SSRF/CSRF 原语；IsPublicHost 的既有豁免（HTTPS-only 升级例外、
+    /// NewWindowRequested）反而把明文内网请求放到最终。
+    /// 判定复用 UrlSafety.IsPublicHost 单源（覆盖 127.0.0.0/8、::1、0.0.0.0、
+    /// 169.254.0.0/16 含元数据 IP、10/8、172.16/12、192.168/16、fc00::/7、
+    /// CGNAT/组播/广播/保留段，以及十进制/十六进制/八进制/简写 IPv4 变体与
+    /// localhost/.local/.internal 主机名形态），不重解析第二套。
+    /// 唯一豁免：宿主自有虚拟主机（TrustedChromeUiOrigins——ntp/geo 本地资源页，
+    /// **不是**"所有 localhost"）。DNS 重bind（公网名解析到 127.0.0.1）属解析
+    /// 层问题：本层是纯语法判定，且 UI 线程同步 DNS 是 CS-339 已封的冻结面
+    ///（跟进项见交付报告）。</summary>
+    private static bool IsNonPublicNavigationTarget(Uri uri) =>
+        !TrustedChromeUiOrigins.IsLocalAssetDocument(uri)
+        && !Core.UrlSafety.IsPublicHost(uri.Host);
+
+    private Decision.Deny DenyNonPublicTarget(string scope, string rawUrl)
+    {
+        RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "private_network");
+        SecurityLog.Write($"[network] 导航拒绝（本机/内网/链路本地地址）: {UrlRedactor.Redact(rawUrl)}");
+        return new Decision.Deny(new DenyReason(
+            "private_network", "目标为本机、内网或链路本地地址（含云元数据服务），已按隐私网络边界拒绝。"));
     }
 
     private bool HasCurrentSession(string sessionId, string tabId, ulong generation)

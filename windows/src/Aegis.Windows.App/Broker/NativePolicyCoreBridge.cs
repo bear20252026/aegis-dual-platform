@@ -27,8 +27,48 @@ public sealed class NativePolicyCoreBridge : IDisposable
     private readonly ConsumeNavigationDelegate _consumeNavigation;
     private bool _disposed;
 
-    /// <summary>broker 指针透传（各委托调用点取用——句柄存活期内有效）。</summary>
+    /// <summary>审计第七轮（2026-10-03·latent）：**不得**再直接
+    /// DangerousGetHandle 透传指针——此前 `Broker => _brokerHandle.DangerousGetHandle()`
+    /// 绕过引用计数，取指针与调用之间可被 Dispose/终结器释放（use-after-free 进
+    /// DLL 蹦床）。全部原生调用改走 TryAcquireLease/ReleaseLease（AddRef/Release
+    /// 成对），并在入口检 _disposed。仅在持有租约期间调用本属性。</summary>
     private IntPtr Broker => _brokerHandle.DangerousGetHandle();
+
+    /// <summary>取得 broker 使用期引用（DangerousAddRef）。返回 false 即不得调用
+    /// 任何原生入口（已 Dispose/句柄失效）——fail-closed。</summary>
+    private bool TryAcquireLease()
+    {
+        if (_disposed)
+            return false;
+        try
+        {
+            var success = false;
+            _brokerHandle.DangerousAddRef(ref success);
+            return success;
+        }
+        catch (Exception)
+        {
+            // 句柄已释放/关闭（Dispose 或终结器先行）——不猜测引用计数，直接拒绝
+            return false;
+        }
+    }
+
+    private void ReleaseLease()
+    {
+        try
+        {
+            _brokerHandle.DangerousRelease();
+        }
+        catch (Exception)
+        {
+            // 引用已随 Dispose 归零——不存在可撤销的原生副作用
+        }
+    }
+
+    /// <summary>审计第七轮（2026-10-03）：原生调用统一守卫——
+    /// Dispose/终结之后一律 fail-closed（此前 CreateSession/EvaluateNavigation/
+    /// TryConsumeNavigation 等全部入口不检 _disposed，释放后仍可进 DLL）。</summary>
+    private bool IsUsable => !_disposed && !_brokerHandle.IsClosed && !_brokerHandle.IsInvalid;
 
     private NativePolicyCoreBridge(
         IntPtr library,

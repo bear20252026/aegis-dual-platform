@@ -92,6 +92,21 @@ public sealed class TabRuntime : IDisposable
     public void OnCoreReady(CoreWebView2 coreWebView2)
     {
         Host.WireEvents(coreWebView2);
+        // 审计第六轮（2026-10-03）：关闭外部拖放。WPF 控件默认允许拖入，
+        // 页面据此可取得用户从磁盘拖来的 DataTransfer.files（真实字节+文件名+
+        // 路径）——"把文件夹拖进来说明你是本人"式钓鱼即成本地文件外泄通道，
+        // 的本代码库其他任何控制都未覆盖的一面。WPF 控件直接转发
+        // CoreWebView2Controller.AllowExternalDrop（本 SDK 版本不在控件上暴露
+        // Controller，故经控件属性设置）。
+        try
+        {
+            Control.AllowExternalDrop = false;
+        }
+        catch (Exception ex)
+        {
+            Core.Security.SecurityLog.Write(
+                $"[security] 标签 {Tab.TabId}: 外部拖放未能关闭: {ex.GetType().Name}");
+        }
         coreWebView2.NavigationStarting += OnCoreNavigationStarted;  // CS-237：命名化（匿名闭包无法退订）
         coreWebView2.DownloadStarting += (_, e) =>
         {
@@ -218,6 +233,21 @@ public sealed class TabRuntime : IDisposable
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
             return false;
+        // 审计第六轮（2026-10-03）：核心未就绪/未接线一律拒绝。此前只校验 URL
+        // 形状即写 Control.Source——初始化失败（e.IsSuccess==false 只记日志返回）
+        // 或 WireEvents 抛异常（RegisterSession 在 1024 会话池耗尽时返回 false，
+        // 可由页面 window.open 洪水触发）后，runtime 仍在 _runtimes 中，地址栏/
+        // 书签/建议/首页等每条用户路径都能走到这里；对未初始化控件设置 Source
+        // 会触发 SDK 的**隐式初始化**，用默认环境重建内核——无 NavigationStarting
+        // /FrameNavigationStarting/DownloadStarting/PermissionRequested/
+        // WebResourceRequested 处理器、无 WebView2Hardening.Apply，SDK 默认值
+        // （宿主对象允许、脚本对话框启用）全部生效，策略层被整体旁路。
+        if (!runtime.IsCoreReady || !runtime.Host.IsWired)
+        {
+            Core.Security.SecurityLog.Write(
+                $"[security] 标签 {runtime.Tab.TabId}: 核心未就绪/未接线，导航已拒绝（fail-closed）");
+            return false;
+        }
         try
         {
             runtime.Control.Source = uri;

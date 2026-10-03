@@ -33,6 +33,10 @@ public sealed class DecouplingTests
         public bool AllowDownload(string s, string t, string o, string f, bool c) => true;
         public void DenyDownload(string s, string t, string o) { }
         public bool IsHostBlocked(string host) => false;
+        // 审计第六轮（2026-10-03）：IBroker 新增 KillSwitch 读取面（WebView 侧
+        // 需据此登记紧急终止反应）——假 Broker 用独立实例，不碰 KillSwitch.Shared，
+        // 否则测试之间会经由进程级单例互相污染。
+        public Aegis.Windows.Broker.KillSwitch KillSwitch { get; } = new();
         public void Dispose() { }
     }
 

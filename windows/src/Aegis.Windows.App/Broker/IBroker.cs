@@ -46,4 +46,11 @@ public interface IBroker : IDisposable
 
     /// <summary>子资源层黑名单查询（HostWebView WebResourceRequested 真拦截）。</summary>
     bool IsHostBlocked(string host);
+
+    /// <summary>审计第七轮（2026-10-03）：本边界生效的紧急终止开关。HostWebView
+    /// 此前无从判定"自己的子资源通道/下载"是否处于冻结态（KillSwitch 只在
+    /// broker 入口检查，Engage 后活动页面仍继续流式请求）——子资源/桥/下载
+    /// 反应必须与授权链同一个开关，故经本接口暴露而非让 WebView 层偷读
+    /// KillSwitch.Shared（那会让注入独立开关的 broker 与 WebView 判定分裂）。</summary>
+    KillSwitch KillSwitch { get; }
 }

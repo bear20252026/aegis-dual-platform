@@ -13,14 +13,17 @@ using System.IO;
 ///   open_geogebra 的「资源缺失→不可用」语义一致）。</summary>
 public static class NtpAssets
 {
-    /// <summary>NTP 虚拟主机名（https scheme 由 WebView2 虚拟主机机制提供）。</summary>
-    public const string HostName = "ntp.aegis.local";
+    /// <summary>NTP 虚拟主机名（https scheme 由 WebView2 虚拟主机机制提供）。
+    /// 审计第七轮（2026-10-03）：常量单源上提到 Broker.TrustedChromeUiOrigins——
+    /// 导航层的私有/回环拒绝必须为宿主虚拟主机豁免，两处判定不同源即漂移
+    ///（首页/画板被自家策略拒掉的实机风险）。</summary>
+    public const string HostName = Broker.TrustedChromeUiOrigins.NtpHost;
 
     /// <summary>NTP 入口 URL（每标签新建页/主页按钮的目标地址）。</summary>
     public const string Url = "https://" + HostName + "/start.html";
 
-    /// <summary>离线几何画板虚拟主机名（资源随包时才映射）。</summary>
-    public const string GeoHostName = "geo.aegis.local";
+    /// <summary>离线几何画板虚拟主机名（资源随包时才映射）。单源同上。</summary>
+    public const string GeoHostName = Broker.TrustedChromeUiOrigins.GeoHost;
 
     /// <summary>GeoGebra bundle 入口（相对资源根的固定路径——编译期常量）。</summary>
     public const string GeoEntryPath = "GeoGebra/HTML5/5.0/GeoGebra.html";
