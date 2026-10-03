@@ -161,11 +161,15 @@ jobs:
             find "$GITHUB_WORKSPACE/dist/native-policy" -type f || true
             exit 1
           fi
-          load_total=$(readelf -l "$SO_FILE" | grep -c ' LOAD ' || true)
-          load_aligned=$(readelf -l "$SO_FILE" | grep ' LOAD ' | grep -c '0x4000' || true)
+          # readelf 默认窄输出把 LOAD 行折成两行（Flags/Align 在续行）——
+          # "grep ' LOAD ' | grep -c '0x4000'" 恒为 0（dispatch 首跑实证，
+          # 产物实际全对齐而误报）。-lW 宽输出单行化 + bash 十六进制数值比较
+          load_total=$(readelf -lW "$SO_FILE" | grep -c ' LOAD ' || true)
+          load_aligned=$(readelf -lW "$SO_FILE" | awk '/ LOAD / {print $NF}' |
+            while read -r a; do [ $((a)) -ge 16384 ] && echo 1; done | wc -l)
           echo "[readelf] LOAD 段数=$load_total，16K(0x4000) 对齐段数=$load_aligned"
           if [ "$load_total" -eq 0 ] || [ "$load_total" -ne "$load_aligned" ]; then
-            readelf -l "$SO_FILE" | sed -n '/Program Headers/,/Section to Segment/p'
+            readelf -lW "$SO_FILE" | sed -n '/Program Headers/,/Section to Segment/p'
             echo "❌ LOAD 段未全部 16KB 对齐（max-page-size=16384 未生效）"
             exit 1
           fi
