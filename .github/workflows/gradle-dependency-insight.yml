@@ -76,3 +76,20 @@ jobs:
             echo "=== insight($pkg) @ debugRuntimeClasspath ==="
             ./gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency "$pkg" --no-daemon 2>&1 | tail -25 || true
           done
+
+      # upload-artifact 拒绝 workspace 外路径——先拷回
+      - name: 归集闭包树到 workspace
+        if: always()
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/dependency-trees
+          for f in build-env runtime testcp; do
+            [ -f /tmp/$f.txt ] && cp /tmp/$f.txt $GITHUB_WORKSPACE/dependency-trees/
+          done
+      - name: 上传完整闭包树（排障用）
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dependency-trees
+          path: dependency-trees/
+          if-no-files-found: warn
+          retention-days: 14
