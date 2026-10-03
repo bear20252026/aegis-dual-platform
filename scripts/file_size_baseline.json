@@ -5,12 +5,12 @@
     "快照口径：wc -l（按换行符计数）× git ls-files（*.py *.cs *.kt *.kts *.rs *.js *.mjs，排除两处契约生成物目录）。",
     "重建规程：python scripts/check_file_sizes.py --write-baseline，人工 diff 核对后入库；基线增长须在 PR 说明拆分计划。",
     "快照时间：2026-10-02（audit-2026-10-02）。",
-    "BrowserViewModel 628→634（2026-10-03 PR #60 云端迭代说明：AD-303/328/302 等审计修复净增量；拆分计划——导航分型/会话持久化继续向 BrowserModels 抽出，下轮执行）"
+    "BrowserViewModel 628→568（2026-10-03 剩余项批：确认流控制器 BrowserViewModelConfirmations.kt 拆出——剩余项：tab 管理块控制器化 ~70 行回归 500 红线，下轮执行）"
   ],
   "files": {
     "agent/tests/redteam_e2e_test.py": 699,
     "android/app/build.gradle.kts": 316,
-    "android/app/src/main/java/com/aegis/browser/BrowserViewModel.kt": 628,
+    "android/app/src/main/java/com/aegis/browser/BrowserViewModel.kt": 569,
     "android/app/src/main/java/com/aegis/browser/MainActivity.kt": 403,
     "android/app/src/main/java/com/aegis/browser/MainDialogs.kt": 315,
     "android/app/src/main/java/com/aegis/browser/WebViewDownloadHandler.kt": 418,

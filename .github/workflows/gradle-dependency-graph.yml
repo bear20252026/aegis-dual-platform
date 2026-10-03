@@ -1,0 +1,53 @@
+# Gradle 依赖图提交（SP-246 收尾——2026-10-03 剩余项批）
+# 背景：supply-chain 的三生态漏扫此前只覆盖 pip（pip-audit）/cargo（cargo-audit）/
+# NuGet（dotnet list --vulnerable）——Android Gradle 侧零漏扫（supply-chain.yml
+# 内 TODO(gradle-漏扫) 登记待接，"四生态只扫三"不得成为终态）。
+# 方案：gradle/actions/dependency-submission 把 Gradle 解析出的依赖闭包提交到
+# GitHub 依赖图——此后 Dependabot alerts / dependency review 对 Android 依赖
+# 生效（GitHub 原生漏扫通道，与 supply-chain 的 fail-closed 漏扫互补：
+# alerts 是持续告警面，supply-chain 是合入门禁面）。
+# 权限：dependency submission API 要求 contents: write——单 workflow 收口，
+# 不放大 supply-chain 的最小权限面。
+name: Gradle-Dependency-Graph
+
+"on":
+  push:
+    branches: [master]
+    paths:
+      - 'android/**'
+      - '.github/workflows/gradle-dependency-graph.yml'
+  schedule:
+    # 周一 03:30 UTC（与 compat 03:00/supply-chain 04:00 错峰）——仓库静默期
+    # 依赖图按周刷新，新披露 CVE 进入 alerts 视野
+    - cron: "30 3 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# PY-044..051 口径：同分支重复运行取消旧运行
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  submit-dependency-graph:
+    name: 提交 Gradle 依赖图（Android 依赖漏扫面——SP-246 收尾）
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+
+      # AGP 9.4.1 要求 ≥17；配置解析即需 JDK（依赖图来自 gradle 依赖解析）
+      - name: 安装 JDK 21
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: 提交依赖图（generate-and-submit——失败即红，fail-closed）
+        uses: gradle/actions/dependency-submission@da187c8e6ffbd3802e00f2477aa5a822b25f2dda # v4.4.4
+        with:
+          build-root-directory: android
+          dependency-graph: generate-and-submit

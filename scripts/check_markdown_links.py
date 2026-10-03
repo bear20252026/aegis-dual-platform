@@ -57,8 +57,11 @@ def list_markdown_files() -> list[Path]:
 def extract_target(raw: str) -> str:
     """从括号内原文提取路径目标：去空白 / <> 包裹 / "标题" 后缀。"""
     target = raw.strip()
-    if target.startswith("<") and target.endswith(">"):
-        target = target[1:-1].strip()
+    # <> 包裹（markdown 用于含空格路径）：取 < 到首个 > 之间——尖括号后可
+    # 跟 "标题" 后缀（`[x](<a b.md> "标题")`，原实现要求整串以 > 结尾，
+    # 该形态被误解析为 '<a' 死链；2026-10-03 自测批实证修正）
+    if target.startswith("<") and ">" in target:
+        return target[1:target.index(">")].strip()
     # 目标与标题以空白分隔——取首个空白前 token；纯空白目标按空处理
     return target.split()[0] if target else ""
 

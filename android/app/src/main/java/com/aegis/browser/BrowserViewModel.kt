@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import com.aegis.browser.WebViewAlertNotice.Kind as AlertKind
 
 /** AD-303（2026-10-02 审计）：地址栏外跳 scheme 分型集合（与 WebViewClient 同源）。 */
 private val EXTERNAL_HANDLER_SCHEMES = com.aegis.webviewadapter.AegisWebViewClient.externalHandlerSchemes
@@ -120,21 +119,22 @@ class BrowserViewModel(
     // AD-260（2026-10-01 审计）：安全提示分型——一般提示（导航被拒/历史不可用
     // 等）单按钮「知道了」；版本检查提示经 [setWebViewVersionAlert] 登记
     // （双按钮「去更新/稍后」）。原 String? 单态使所有提示共用版本检查按钮。
-    private val _webViewAlert = MutableStateFlow<WebViewAlertNotice?>(null)
-    val webViewAlert: StateFlow<WebViewAlertNotice?> = _webViewAlert.asStateFlow()
+    // 拆分批（2026-10-03）：安全提示 + 双确认流内聚到 BrowserViewModelConfirmations
+    // （AD-103 host 接缝同款模式）——公开读与操作经委托保持签名不变（单测零改动）。
+    private val confirmations =
+        BrowserViewModelConfirmations(
+            currentWebView = { tabManager?.current()?.webView },
+            resolveText = { id -> appContext?.getString(id).orEmpty() },
+            resolveTextWithArg = { id, arg -> appContext?.getString(id, arg).orEmpty() },
+        )
 
-    private val _pendingNavigationConfirmation = MutableStateFlow<PendingNavigationConfirmation?>(null)
-    val pendingNavigationConfirmation: StateFlow<PendingNavigationConfirmation?> =
-        _pendingNavigationConfirmation.asStateFlow()
+    val webViewAlert: StateFlow<WebViewAlertNotice?> get() = confirmations.webViewAlert
 
-    /**
-     * AD-331（2026-10-02 审计）：待确认下载（二级——仅查询参数命中危险扩展）
-     * ——单槽状态（MainDialogs 优先级介于导航审批与安全提示之间）。批准即
-     * 调用续体继续入队；拒绝/关闭即放弃（fail-closed）。
-     */
-    private val _pendingDownloadConfirmation = MutableStateFlow<PendingDownloadConfirmation?>(null)
-    val pendingDownloadConfirmation: StateFlow<PendingDownloadConfirmation?> =
-        _pendingDownloadConfirmation.asStateFlow()
+    val pendingNavigationConfirmation: StateFlow<PendingNavigationConfirmation?>
+        get() = confirmations.pendingNavigationConfirmation
+
+    val pendingDownloadConfirmation: StateFlow<PendingDownloadConfirmation?>
+        get() = confirmations.pendingDownloadConfirmation
 
     /**
      * P2-1 修复（全面审计 2026-09-04）：页面级错误状态（SSL 证书失败 / 主框架
@@ -161,7 +161,7 @@ class BrowserViewModel(
             },
             // AD-228（2026-09-26 审计）：页面功能提示经资源 id 上抛，文案
             // 收敛 strings.xml 单源。
-            alertRes = { res -> _webViewAlert.value = alertNotice(res) },
+            alertRes = { res -> confirmations.setSecurityNotice(res) },
         )
 
     // AD-003 R8 真机回归（2026-09-29）：lateinit 换可空字段。 lateinit 的
@@ -309,15 +309,13 @@ class BrowserViewModel(
         withTabManager { tm ->
             if (tm.size <= 1) return@withTabManager
             tm.list().getOrNull(index)?.let { tab ->
-                if (_pendingNavigationConfirmation.value?.webView === tab.webView) {
+                if (confirmations.pendingNavigationConfirmation.value?.webView === tab.webView) {
                     SecureWebViewFactory.navigatorFor(tab.webView)?.rejectPendingNavigation()
-                    _pendingNavigationConfirmation.value = null
+                    confirmations.resolvePendingConfirmation(tab.webView)
                 }
                 // AD-331：归属标签关闭即放弃其待确认下载（WebView 已销毁，
                 // 续体入队的落盘目标语境不复存在——fail-closed）
-                if (_pendingDownloadConfirmation.value?.webView === tab.webView) {
-                    _pendingDownloadConfirmation.value = null
-                }
+                confirmations.resolvePendingDownload(tab.webView)
                 // AD-062（2026-09-24 审计）：不显式 navigator.close()——
                 // tabManager.closeTab → tearDown → release 已是单源销毁路径。
             }
@@ -365,7 +363,7 @@ class BrowserViewModel(
     ) {
         val wv = tabManager?.current()?.webView
         if (wv == null ||
-            (!bypassDebounce && !navigateDebounce.ok(_pendingNavigationConfirmation.value != null))
+            (!bypassDebounce && !navigateDebounce.ok(confirmations.pendingNavigationConfirmation.value != null))
         ) {
             return
         }
@@ -395,9 +393,9 @@ class BrowserViewModel(
         if (!navigated &&
             // AD-216（2026-09-26 审计）：RequireConfirmation「待确认」与 Deny
             // 「被拒」共用 false 返回——确认对话框已挂起时不得再弹恐吓提示。
-            _pendingNavigationConfirmation.value == null
+            confirmations.pendingNavigationConfirmation.value == null
         ) {
-            _webViewAlert.value = alertNotice(R.string.nav_rejected)
+            confirmations.setSecurityNotice(R.string.nav_rejected)
         }
     }
 
@@ -429,7 +427,7 @@ class BrowserViewModel(
                 // 不得停留旧草稿（与 navigateWithDebounce 提交路径同口径）。
                 addressDraftActive = false
             } else {
-                _webViewAlert.value = alertNotice(R.string.history_unavailable)
+                confirmations.setSecurityNotice(R.string.history_unavailable)
             }
             // AD-064：历史导航后立即同步前进/后退可用性（缓存页导航等无网络
             // 事件的场景也准确）
@@ -438,15 +436,10 @@ class BrowserViewModel(
     }
 
     /** 设置/清除一般安全提示（null = 清除；AD-260：单按钮「知道了」分型）。 */
-    fun setWebViewAlert(message: String?) {
-        _webViewAlert.value =
-            message?.let { WebViewAlertNotice(it, WebViewAlertNotice.Kind.SECURITY_NOTICE) }
-    }
+    fun setWebViewAlert(message: String?) = confirmations.setWebViewAlert(message)
 
     /** AD-260：登记版本检查提示（双按钮「去更新/稍后」——与一般提示分型）。 */
-    fun setWebViewVersionAlert(message: String) {
-        _webViewAlert.value = WebViewAlertNotice(message, WebViewAlertNotice.Kind.VERSION_CHECK)
-    }
+    fun setWebViewVersionAlert(message: String) = confirmations.setWebViewVersionAlert(message)
 
     /**
      * P2-1 修复（全面审计 2026-09-04）：清除页面错误面板。新导航开始时由
@@ -479,42 +472,16 @@ class BrowserViewModel(
      * Compose 的明确批准操作。只允许当前活动标签的待审批请求恢复导航，防止标签切换后
      * 在错误 WebView 上消费授权；客户端仍会在恢复前调用 Rust 核心批准并消费。
      */
-    fun approvePendingNavigationConfirmation(): Boolean {
-        val pending = _pendingNavigationConfirmation.value ?: return false
-        if (tabManager?.current()?.webView !== pending.webView) {
-            _webViewAlert.value = alertNotice(R.string.confirm_switch_back)
-            return false
-        }
-        _pendingNavigationConfirmation.value = null
-        val approved =
-            SecureWebViewFactory
-                .navigatorFor(pending.webView)
-                ?.approvePendingNavigation() == true
-        if (!approved) _webViewAlert.value = alertNotice(R.string.confirm_invalid)
-        return approved
-    }
+    fun approvePendingNavigationConfirmation(): Boolean = confirmations.approvePendingNavigationConfirmation()
 
     /** 对话框关闭、返回键或拒绝按钮一律走此入口；失败不会恢复导航。 */
-    fun rejectPendingNavigationConfirmation(): Boolean {
-        val pending = _pendingNavigationConfirmation.value ?: return false
-        _pendingNavigationConfirmation.value = null
-        return SecureWebViewFactory.navigatorFor(pending.webView)?.rejectPendingNavigation() == true
-    }
+    fun rejectPendingNavigationConfirmation(): Boolean = confirmations.rejectPendingNavigationConfirmation()
 
-    /**
-     * AD-331（2026-10-02 审计）：下载确认对话框「仍要下载」——仅消费当前
-     * 挂起项一次（批准后清除，续体单次调用；重复点击/dialog 复现均为 no-op）。
-     */
-    fun approvePendingDownload() {
-        val pending = _pendingDownloadConfirmation.value ?: return
-        _pendingDownloadConfirmation.value = null
-        pending.proceed()
-    }
+    /** AD-331：下载确认「仍要下载」——续体单次调用（重复点击 no-op）。 */
+    fun approvePendingDownload() = confirmations.approvePendingDownload()
 
-    /** AD-331：下载确认对话框拒绝/关闭——放弃待确认下载（fail-closed）。 */
-    fun rejectPendingDownload() {
-        _pendingDownloadConfirmation.value = null
-    }
+    /** AD-331：下载确认拒绝/关闭——放弃待确认下载（fail-closed）。 */
+    fun rejectPendingDownload() = confirmations.rejectPendingDownload()
 
     /** 获取 TabManager 实例（供 WebContentArea 使用）。 */
     fun getTabManager(): TabManager? = tabManager
@@ -541,7 +508,7 @@ class BrowserViewModel(
                     navigator?.openTrustedHome()
                 }
                 refresh()
-                _webViewAlert.value = alertNotice(R.string.renderer_restored)
+                confirmations.setSecurityNotice(R.string.renderer_restored)
             }
         }
     }
@@ -570,19 +537,14 @@ class BrowserViewModel(
             onSubmitPageAddress = { _address.value = it },
             onSubmitPageError = { _pageError.value = it },
             onClearPageError = { this@BrowserViewModel.clearPageError() },
-            onSubmitWebViewAlert = { message ->
-                _webViewAlert.value = WebViewAlertNotice(message, WebViewAlertNotice.Kind.SECURITY_NOTICE)
-            },
+            onSubmitWebViewAlert = { message -> confirmations.setWebViewAlert(message) },
             onRefreshTabs = ::refresh,
             // AD-332 回归修复：宿主构造参数随 BrowserViewModelHost 属性改名
             // （errorStrings → resolveErrorStrings——消除与 override fun
             // errorStrings() 的同名遮蔽，AD-003 同型）。
-            resolveErrorStrings = { pageErrorStringsOf(::alertText, ::alertText) },
+            resolveErrorStrings = { pageErrorStringsOf(confirmations::alertText, confirmations::alertText) },
             // AD-331：二级下载确认登记（单槽状态——MainDialogs 渲染）
-            onRequestDownloadConfirmation = { wv, url, proceed ->
-                _pendingDownloadConfirmation.value =
-                    PendingDownloadConfirmation(webView = wv, url = url, continuation = proceed)
-            },
+            onRequestDownloadConfirmation = confirmations::registerPendingDownload,
         )
 
     /**
@@ -595,34 +557,13 @@ class BrowserViewModel(
             broker = broker,
             host = hostImpl,
             onRendererGone = ::rebuildAfterRendererGone,
-            onConfirmationRequested = ::registerPendingConfirmation,
-            onConfirmationResolved = ::resolvePendingConfirmation,
+            onConfirmationRequested = confirmations::registerPendingConfirmation,
+            onConfirmationResolved = confirmations::resolvePendingConfirmation,
         )
 
-    /** 仅 ViewModel 保存发起 WebView 引用（PendingNavigationConfirmation 单写点）。
-     *  AD-158 配套：internal 化供 JVM/Robolectric 单测注入待审批状态。 */
+    /** 仅 ViewModel 保存发起 WebView 引用（AD-158：internal 化供 JVM 单测注入）。 */
     internal fun registerPendingConfirmation(
         webView: WebView,
         request: ApprovalRequest,
-    ) {
-        _pendingNavigationConfirmation.value = PendingNavigationConfirmation(webView, request)
-    }
-
-    /** 待审批解除：仅当解除请求来自挂起请求自身（幂等防错标）。 */
-    private fun resolvePendingConfirmation(webView: WebView) {
-        if (_pendingNavigationConfirmation.value?.webView === webView) {
-            _pendingNavigationConfirmation.value = null
-        }
-    }
-
-    /** AD-046：提示文案经资源单源（init 后 appContext 必然可用）。 */
-    private fun alertText(id: Int): String = appContext?.getString(id).orEmpty()
-
-    /** AD-260：一般安全提示构造单点（文案 + SECURITY_NOTICE 分型）。 */
-    private fun alertNotice(id: Int) = WebViewAlertNotice(alertText(id), AlertKind.SECURITY_NOTICE)
-
-    private fun alertText(
-        id: Int,
-        arg: String,
-    ): String = appContext?.getString(id, arg).orEmpty()
+    ) = confirmations.registerPendingConfirmation(webView, request)
 }
