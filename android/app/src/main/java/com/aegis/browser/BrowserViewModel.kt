@@ -107,7 +107,7 @@ class BrowserViewModel(
     // （AD-103 host 接缝同款模式）——公开读与操作经委托保持签名不变（单测零改动）。
     private val confirmations =
         BrowserViewModelConfirmations(
-            currentWebView = { tabManager?.current()?.webView },
+            currentWebView = { currentTabManager?.current()?.webView },
             resolveText = { id -> appContext?.getString(id).orEmpty() },
             resolveTextWithArg = { id, arg -> appContext?.getString(id, arg).orEmpty() },
         )
@@ -169,7 +169,7 @@ class BrowserViewModel(
             confirmations = confirmations,
         )
 
-    private val tabManager: TabManager? get() = tabsController.tabManagerOrNull()
+    private val currentTabManager: TabManager? get() = tabsController.tabManagerOrNull()
 
     val tabs: StateFlow<List<Tab>> get() = tabsController.tabs
 
@@ -201,7 +201,7 @@ class BrowserViewModel(
     }
 
     /** 当前标签的 WebView（系统回退键消费 WebView 历史栈——未初始化返回 null）。 */
-    fun currentWebViewOrNull(): WebView? = tabManager?.current()?.webView
+    fun currentWebViewOrNull(): WebView? = currentTabManager?.current()?.webView
 
     /**
      * AD-149（审计 2026-09-23 清单·A6 批）：TabManager 守卫样板单源——
@@ -266,7 +266,7 @@ class BrowserViewModel(
         bypassDebounce: Boolean,
         targetOverride: String? = null,
     ) {
-        val wv = tabManager?.current()?.webView
+        val wv = currentTabManager?.current()?.webView
         if (wv == null ||
             (!bypassDebounce && !navigateDebounce.ok(confirmations.pendingNavigationConfirmation.value != null))
         ) {
