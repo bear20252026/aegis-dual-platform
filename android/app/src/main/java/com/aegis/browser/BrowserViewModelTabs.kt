@@ -21,8 +21,10 @@ import kotlinx.coroutines.flow.asStateFlow
  *
  * LongParameterList 豁免（BrowserViewModelHost 同款先例）：10 个参数全部
  * 是标签块的状态缝/宿主缝装配点——拆分反而引入状态对象间接层。
+ * TooManyFunctions 豁免（同先例）：12 个函数全部围绕标签生命周期单职责块
+ * （四 StateFlow 同步 + 生命周期操作 + 崩溃重建），拆分反而引入状态对象间接层。
  */
-@Suppress("LongParameterList")
+@Suppress("LongParameterList", "TooManyFunctions")
 internal class BrowserViewModelTabs(
     /** 标签 WebView 创建缝（webViewEvents.create——装配点单源）。 */
     private val createWebView: (android.content.Context) -> WebView,
