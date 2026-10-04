@@ -114,7 +114,7 @@ public sealed class FingerprintShieldTests
         // 噪声相同，可跨站关联），且 siteSeed 计算后零引用（死代码）；
         // siteSeed 在 IIFE 加载时缓存一次
         var script = FingerprintShield.BuildScript(SeedA);
-        Assert.Contains("var siteSeed = deriveSeed(SEED, getETLD1(location.hostname));", script);
+        Assert.Contains("var siteSeed = deriveSeed(SEED, getETLD1(aegisTopLevelHostname()));", script);
 
         var canvasProxy = SliceCanvasProxy();
         Assert.Contains("parseInt(siteSeed.slice(0, 8), 16)", canvasProxy);
@@ -166,6 +166,55 @@ public sealed class FingerprintShieldTests
         Assert.Contains("'co.uk':1", script);
         Assert.Contains("slice(-3)", script);
         Assert.Contains("p.slice(-2).join('.')", script);
+    }
+
+    [Fact]
+    public void SeedFraming_UsesTopLevelHost_NotFrameHost()
+    {
+        // R7-CS1-05≡R7-CS2-01（第七轮）：种子必须按**顶层站** eTLD+1 框定。
+        // 按本帧 host 派生时，同一第三方跟踪帧在该用户的所有宿主站点上产出同
+        // 一种子——加噪后的画布哈希本身就成了跨站持久标识符（正是要消除的东西）。
+        var script = FingerprintShield.BuildScript(SeedA);
+
+        // 顶层通道存在且被种子消费
+        Assert.Contains("function aegisTopLevelHostname()", script);
+        Assert.Contains("location.ancestorOrigins", script);
+        Assert.Contains("getETLD1(aegisTopLevelHostname())", script);
+        // 缺陷形态不得回归：直接把本帧 hostname 当站点键
+        Assert.DoesNotContain("getETLD1(location.hostname)", script);
+        // 取不到祖先链时保守退回本帧（绝不因顶层失败而放弃噪声）
+        Assert.Contains("return location.hostname;", script);
+    }
+
+    [Fact]
+    public void PublicSuffixList_RenderedFromSingleSourceArray()
+    {
+        // R7-CS2-10：表体取自 FingerprintShield.PublicSuffixes（与
+        // contracts/policy/public-suffix-list.txt 逐项对账的 CI 门禁由
+        // contracts/codegen/verify_seed_framing_parity.py 负责——本用例只锁"C# 侧渲染的
+        // 是这份数组"，防表退回 JS 里的手抄字面量）
+        var script = FingerprintShield.BuildScript(SeedA);
+
+        Assert.Contains(string.Join(",", FingerprintShield.PublicSuffixes.Select(s => $"'{s}':1")), script);
+        Assert.Contains("'github.io':1", script);   // 托管域取到用户子域为止
+        Assert.Contains("'co.il':1", script);       // 第七轮前只有 Android 有
+        Assert.Contains("'edu.cn':1", script);      // 第七轮前只有 C# 有
+    }
+
+    [Fact]
+    public void InjectedScript_IsParenBraceBalanced()
+    {
+        // 模板拼接的 JS 必须整体可解析——第七轮在 Rust 孪生侧实测：把表体插值
+        // 写进 format! 时花括号被吞，产出 `var PUBLIC_SUFFIXES = 'co.uk': 1, …`
+        // （node --check: SyntaxError）。本地已用 node --check 复验两端产物，
+        // 本用例是常驻锚点（不依赖 node）。
+        var script = FingerprintShield.BuildScript(SeedA);
+
+        Assert.Equal(
+            script.Count(c => c == '{'), script.Count(c => c == '}'));
+        Assert.Equal(
+            script.Count(c => c == '('), script.Count(c => c == ')'));
+        Assert.Contains("var PUBLIC_SUFFIXES = { '", script);  // 表体必须是对象字面量
     }
 
     [Fact]

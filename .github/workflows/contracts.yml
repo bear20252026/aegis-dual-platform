@@ -70,6 +70,11 @@ jobs:
         run: python scripts/active_tree_gates.py ruff
       - name: Active-tree bandit gate (PY-263——活跃树 SAST 单源，Medium/High 失败)
         run: python scripts/active_tree_gates.py bandit
+      # PR #82 实测教训：本地 Python 3.14 全绿、CI 钉 3.12 直接 TypeError
+      #（Path.read_text 的 newline 关键字是 3.13+）——版本差异类缺陷只有按
+      # CI 钉版扫描才看得见，故与 ruff/bandit 同面常跑。
+      - name: Active-tree Python 3.12 compat gate (CI 钉版 vs 本地高版本漂移面)
+        run: python scripts/active_tree_gates.py compat
       # SP-255（2026-10-02 审计·I-03）：行数红线（新文件 ≤300 / 改造后 ≤500）
       # + 基线 ratchet——基线外文件按 300 红线，基线内文件只许减不许增
       - name: File size red line gate (SP-255——行数红线 + 基线 ratchet)
@@ -104,6 +109,8 @@ jobs:
           python contracts/codegen/verify_contract_compatibility.py
       - name: Verify bridge guard JS single source (Rust include_str + Kotlin parity)
         run: python contracts/codegen/verify_bridge_guard.py
+      - name: Verify seed framing parity (R7-CS1-05/R7-CS2-10——顶层框定 + 后缀清单单源)
+        run: python contracts/codegen/verify_seed_framing_parity.py
       - name: Regenerate jsapi schema and fail on drift (PY-014——生成器接入门禁)
         run: |
           python scripts/gen_jsapi_schema.py

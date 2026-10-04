@@ -110,12 +110,19 @@ class SmokeInstrumentedTest {
         val expected = md.digest().take(16).joinToString("") { "%02x".format(it) }
         val expectedHardwareConcurrency = 2 + (expected.substring(8, 16).toLong(16) % 7)
 
-        // 测试锚点替换：脚本派生入参从 location.hostname 固定为已知域名
-        // （仅测试副本做字符串手术，生产脚本不含该替换）
-        val script =
-            WebViewHardening
-                .fingerprintShieldScript(sessionSeed)
-                .replace("getETLD1(location.hostname)", "'example.com'")
+        // R7-AD-03（第七轮 2026-10-04）：锚点替换必须**命中生产脚本**。此前替换目标
+        // 写的是已被淘汰的 `getETLD1(location.hostname)`（R6-25 起生产改走顶层框定，
+        // grep 该串零命中），replace 恒为 no-op ⇒ known-answer 断言不可能通过；而
+        // androidQuality 只 `assembleDebugAndroidTest` 不执行 ⇒ 全程静默，AD-005/AD-067
+        // 声称的「JS 内嵌 SHA-256 与 Kotlin/Rust 逐字节验证」实际上已不存在。
+        // 现先断言锚点在产物中存在（改名/改形态即红），再做字符串手术。
+        val production = WebViewHardening.fingerprintShieldScript(sessionSeed)
+        val anchor = "getETLD1(aegisTopLevelHostname())"
+        assertTrue(
+            "锚点未命中生产脚本——派生入口已变更，本用例失去判定力",
+            production.contains(anchor),
+        )
+        val script = production.replace(anchor, "getETLD1('$domain')")
 
         val latch = CountDownLatch(1)
         var probe: String? = null

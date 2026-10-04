@@ -204,21 +204,21 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
 // per_site_seed.rs:24-28 的封装口径（种子只活在这一层作用域里）。
 (function() {
   // AD-107（审计 2026-09-23 清单·A6 批）：getETLD1 迷你公共后缀表——原实现
-  // 一律取最后两段，对共享公共后缀（co.uk/com.cn/com.hk/com.au/co.jp/…）
-  // 会把 a.co.uk 与 b.co.uk 推导出不同的 site seed（eTLD+1 应同为 co.uk 域，
-  // 同站不同源实体却各持指纹种子，既不隐私正确也不一致）。无网络依赖的
-  // 内嵌迷你 PSL（覆盖最高频多段公共后缀；未命中回落两段式保守行为）。
-  var PUBLIC_SUFFIXES = ['co.uk','org.uk','ac.uk','gov.uk','co.jp','ne.jp','or.jp',
-    'co.kr','or.kr','com.cn','net.cn','org.cn','gov.cn','edu.cn','com.tw','org.tw',
-    'com.hk','org.hk','edu.hk','com.au','net.au','org.au','edu.au','gov.au','co.nz',
-    'net.nz','org.nz','com.sg','com.my','co.in','net.in','org.in','com.br','com.mx',
-    'com.ar','co.za','com.tr','com.ru','co.th','com.vn','com.ph','co.id',
-    // AD-329（2026-10-02 审计）：高频两段公共后缀补齐——co.il/org.il/com.ua/
-    // com.pl/com.gr/com.pt/com.ro/com.sa/com.pk 未命中表时回落两段式，
-    // a.co.il 与 b.co.il 被推导出不同 site seed（eTLD+1 语义破坏）。
-    // 「同后缀两站种子不同」回归断言的例外清单即本表（两段式后缀命中
-    // 表内条目才折叠为公共后缀——例外以表为准，增删须同步评估）。
-    'co.il','org.il','com.ua','com.pl','com.gr','com.pt','com.ro','com.sa','com.pk'];
+  // 一律取最后两段，把 a.co.uk 与 b.co.uk 推导出不同 site seed（eTLD+1 应同为
+  // co.uk 域，同站不同源实体各持指纹种子既不隐私正确也不一致）。未命中回落两段式。
+  // R7-CS2-10（第七轮 2026-10-04）：表体与 contracts/policy/public-suffix-list.txt
+  // 逐项对账（contracts/codegen/verify_seed_framing_parity.py）——三端曾各持 51/54/31 条手抄表，
+  // user.github.io 在缺托管域条目的一侧被折成 github.io，该用户全部 GitHub Pages
+  // 站点共享一种子；AD-329 补齐的两段后缀（co.il/org.il/com.ua/…）同表保留。
+  var PUBLIC_SUFFIXES = ['ac.cn','ac.jp','ac.th','ac.uk','appspot.com','azurewebsites.net','blogspot.com','cloudfront.net','co.id',
+    'co.il','co.in','co.jp','co.kr','co.nz','co.th','co.uk','co.za','com.ar',
+    'com.au','com.br','com.cn','com.co','com.ec','com.gr','com.hk','com.mx','com.my',
+    'com.pe','com.ph','com.pk','com.pl','com.pt','com.py','com.ro','com.ru','com.sa',
+    'com.sg','com.tr','com.tw','com.ua','com.uy','com.ve','com.vn','edu.au','edu.cn',
+    'edu.hk','github.io','gitlab.io','go.id','go.jp','gob.mx','gov.au','gov.cn','gov.uk',
+    'herokuapp.com','ne.jp','ne.kr','net.au','net.cn','net.in','net.nz','net.sg','net.uk',
+    'netlify.app','or.jp','or.kr','or.th','org.au','org.cn','org.hk','org.il','org.in',
+    'org.nz','org.ru','org.sg','org.tw','org.uk','pages.dev','vercel.app'];
   function isPublicSuffix(tail) { return PUBLIC_SUFFIXES.indexOf(tail) >= 0; }
   function getETLD1(h) {
     var p = h.split('.');

@@ -28,6 +28,7 @@ ruff/bandit 在 PATH 中的安装形态（与 pytest 调用口径一致）。
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -50,6 +51,76 @@ BANDIT_TARGETS = [
     "validate_release.py", "tests", "core/rust-policy-core/bindings",
 ]
 BANDIT_EXTRA_ARGS = ["-ll", "-q"]
+
+# CI 解释器钉在 3.12（各 workflow 的 python-version），本地常跑 3.13+。
+# 只在 3.13+ 才存在的 API 写进活跃树时，本地全绿、CI 直接 TypeError——
+# PR #82 实测：`Path.read_text(newline="")` 的 newline 关键字是 3.13 新增，
+# 整套 tests/python 在 CI 上报 "got an unexpected keyword argument 'newline'"。
+# 本门禁把这类"只在更高版本成立"的写法扫出来，不让它再靠一次红 CI 才被发现。
+HIGH_VERSION_APIS = [
+    # 模式与提示串都拆成相邻字面量书写——否则本表会扫到自己（自指假阳性）。
+    # 用 [^)]* 界定参数列，不再写单词边界转义（转义在部分工具链里会被吞掉）。
+    ("read_text_newline",
+     r"\.read_" r"text\([^)]*newline\s*=",
+     "Path.read_" r"text(newline=) 需 3.13+——改用 open(path, newline=...)"),
+    ("walk_recurse_on_error",
+     r"\.w" r"alk\([^)]*recurse_on_error\s*=",
+     "Path.w" r"alk(recurse_on_error=) 需 3.13+"),
+    ("path_fromuri",
+     r"Path\.from" r"uri\(",
+     "Path.from" r"uri() 需 3.13+——CI 钉 3.12"),
+]
+
+
+def _python_files(targets: list[str]) -> list[Path]:
+    files: list[Path] = []
+    for target in targets:
+        base = ROOT / target
+        if base.is_file() and base.suffix == ".py":
+            files.append(base)
+        elif base.is_dir():
+            files.extend(sorted(base.rglob("*.py")))
+    return files
+
+
+def compat_violations(files: list[Path]) -> list[str]:
+    """扫描给定 py 文件里"仅高版本 Python 才成立"的写法。
+
+    限制（如实声明）：按行匹配并跳过 `#` 之后的内容——串里含 `#` 时可能漏判；
+    本门禁的目标是窄集合（钉版差异），不是通用 AST lint。"""
+    problems: list[str] = []
+    for path in files:
+        if "__pycache__" in path.parts:
+            continue
+        for number, line in enumerate(
+                path.read_text(encoding="utf-8", errors="replace").splitlines(), start=1):
+            code = line.split("#", 1)[0]
+            for _rule_id, pattern, message in HIGH_VERSION_APIS:
+                if re.search(pattern, code):
+                    # 相对根目录显示；扫描面在根之外（单测用 tmp_path）时退回原路径
+                    try:
+                        label = str(path.relative_to(ROOT))
+                    except ValueError:
+                        label = str(path)
+                    problems.append(f"{label}:{number}: {message}")
+    return problems
+
+
+def run_compat() -> int:
+    """3.12 兼容门禁（口径与 ruff/bandit 同面——同一 TARGETS，不另立范围）。"""
+    files = _python_files(RUFF_TARGETS)
+    problems = compat_violations(files)
+    print(f"[gate] py312-compat: 扫描 {len(files)} 个文件")
+    if not files:
+        print("[gate] py312-compat: FAILED（扫描面为空——空面即恒绿）")
+        return 2
+    if problems:
+        for problem in problems:
+            print(f"  ❌ {problem}")
+        print("[gate] py312-compat: FAILED")
+        return 1
+    print("[gate] py312-compat: OK")
+    return 0
 
 
 def _run_gate(name: str, cmd: list[str]) -> int:
@@ -81,17 +152,18 @@ def main(argv: list[str] | None = None) -> int:
         description="活跃树（scripts/release/contracts/agent）质量门禁单源"
                     "（ruff + bandit——与 legacy-python-guard 步骤同口径）")
     parser.add_argument(
-        "gate", nargs="?", choices=("ruff", "bandit", "all"), default="all",
-        help="执行哪个门禁（默认 all=ruff+bandit）")
+        "gate", nargs="?", choices=("ruff", "bandit", "compat", "all"), default="all",
+        help="执行哪个门禁（默认 all=ruff+bandit+compat）")
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if args.gate == "ruff":
         return run_ruff()
     if args.gate == "bandit":
         return run_bandit()
+    if args.gate == "compat":
+        return run_compat()
     # all：任一失败即失败（ruff 先行——静态违规通常比 SAST 发现更快定位）
-    ruff_rc = run_ruff()
-    bandit_rc = run_bandit()
-    return 0 if ruff_rc == 0 and bandit_rc == 0 else 1
+    codes = [run_ruff(), run_bandit(), run_compat()]
+    return 0 if all(code == 0 for code in codes) else 1
 
 
 if __name__ == "__main__":
