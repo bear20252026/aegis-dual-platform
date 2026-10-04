@@ -23,7 +23,7 @@
     "android/broker/src/main/kotlin/com/aegis/broker/NativePolicyCoreBridge.kt": 332,
     "android/broker/src/test/kotlin/com/aegis/broker/AndroidBrokerTest.kt": 480,
     "android/broker/src/test/kotlin/com/aegis/broker/OriginPolicyTest.kt": 326,
-    "android/webview-adapter/src/main/kotlin/com/aegis/webviewadapter/AegisWebViewClient.kt": 622,
+    "android/webview-adapter/src/main/kotlin/com/aegis/webviewadapter/AegisWebViewClient.kt": 641,
     "android/webview-adapter/src/test/kotlin/com/aegis/webviewadapter/AegisWebViewClientTest.kt": 804,
     "core/rust-policy-core/bindings/aegis_policy_core.py": 1910,
     "core/rust-policy-core/src/action_policy.rs": 476,
