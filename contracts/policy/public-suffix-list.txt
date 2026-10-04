@@ -1,0 +1,99 @@
+# 公共后缀清单（隐私种子用·三端唯一权威）——R7-CS2-10（第七轮 2026-10-04）
+#
+# 用途：指纹噪声种子按「顶层站的 eTLD+1」派生（per_site_seed.rs 引 Brave 原文
+# "Third party frames and script share the seed value of the top level eTLD+1
+# domain"）。本表列出需要多取一个标签的后缀：命中表内条目的 host，其 eTLD+1 取
+# 后三段（a.co.uk 与 b.co.uk 才是两个站点）；未命中取后两段。
+#
+# 为什么需要一张跨端单源表：三端各自内嵌一份 JS 字面量表（C# FingerprintShield、
+# Kotlin WebViewHardening、Rust shield.rs）。第七轮实测三份是 54 / 51 / 31 条，
+# 差集直接改变种子归属——`user.github.io` 在含 github.io 的一侧 eTLD+1 是
+# `user.github.io`（各站独立种子），在不含的一侧是 `github.io`（**该用户全部
+# GitHub Pages 站点共享一种子**，正是 CS-381/AD-107 要消除的跨站关联面）。
+#
+# 口径：把 appspot.com/blogspot.com/github.io 这类「托管域」列入，等价于按 PSL
+# 的 PRIVATE 段处理——取到用户子域为止，隔离更细，不是更粗。
+#
+# 一致性由 contracts/codegen/verify_seed_framing_parity.py 强制（挂在 contracts.yml 的
+# 必需 job 里）：三端内嵌表与本表逐项对账，且三端种子都必须经顶层框定函数取值。
+# 本表是**对账权威**，三端各持一份内嵌副本（构建期注入，运行期零 I/O——
+# Rust 核心无文件访问、Windows 制品不额外发布数据文件）。
+ac.cn
+ac.jp
+ac.th
+ac.uk
+appspot.com
+azurewebsites.net
+blogspot.com
+cloudfront.net
+co.id
+co.il
+co.in
+co.jp
+co.kr
+co.nz
+co.th
+co.uk
+co.za
+com.ar
+com.au
+com.br
+com.cn
+com.co
+com.ec
+com.gr
+com.hk
+com.mx
+com.my
+com.pe
+com.ph
+com.pk
+com.pl
+com.pt
+com.py
+com.ro
+com.ru
+com.sa
+com.sg
+com.tr
+com.tw
+com.ua
+com.uy
+com.ve
+com.vn
+edu.au
+edu.cn
+edu.hk
+github.io
+gitlab.io
+go.id
+go.jp
+gob.mx
+gov.au
+gov.cn
+gov.uk
+herokuapp.com
+ne.jp
+ne.kr
+net.au
+net.cn
+net.in
+net.nz
+net.sg
+net.uk
+netlify.app
+or.jp
+or.kr
+or.th
+org.au
+org.cn
+org.hk
+org.il
+org.in
+org.nz
+org.ru
+org.sg
+org.tw
+org.uk
+pages.dev
+vercel.app

@@ -8,8 +8,9 @@ using System.Security.Cryptography;
 /// 32 字节加密随机种子；防护 + 反检测在单一闭包内，页面脚本无法绕过
 /// （AddScriptToExecuteOnDocumentCreated 文档创建前注入）。
 /// 对 Python 版的修正：canvas 噪声仅在离屏副本上扰动读路径——绝不
-/// putImageData 写回可见画布（修 Python「污染画布本体」缺陷）。</summary>
-public static class FingerprintShield
+/// putImageData 写回可见画布（修 Python「污染画布本体」缺陷）。
+/// 分片：站点框定素材（公共后缀清单 + 顶层 host 函数）见 FingerprintShield.Seed.cs。</summary>
+public static partial class FingerprintShield
 {
     /// <summary>生成会话种子（32 字节 → 64 位小写 hex——与 Python
     /// generate_session_seed 的 secrets.token_hex(32) 同构）。</summary>
@@ -83,18 +84,17 @@ public static class FingerprintShield
           registerProxy(Function.prototype.toLocaleString, origToLocale);
 
           // ====== Stage 2: PerSiteSeed ======
-          // CS-381（2026-10-02 审计）：getETLD1 引入小型公共后缀清单——此前简单取
+          // CS-381（2026-10-02 审计）：getETLD1 引入公共后缀清单——此前简单取
           // 后两标签，bbc.co.uk 与 shop.co.uk 同得 "co.uk" 种子（跨站噪声可关联
-          // ——Rust/Android 侧同孪生已修）；命中清单取后 3 标签（真 eTLD+1）
-          var PUBLIC_SUFFIXES = { 'co.uk':1,'org.uk':1,'ac.uk':1,'gov.uk':1,'net.uk':1,
-            'com.cn':1,'net.cn':1,'org.cn':1,'gov.cn':1,'edu.cn':1,'ac.cn':1,
-            'com.au':1,'net.au':1,'org.au':1,'edu.au':1,
-            'co.jp':1,'or.jp':1,'ne.jp':1,'ac.jp':1,'go.jp':1,
-            'co.kr':1,'or.kr':1,'ne.kr':1,'co.in':1,'co.za':1,'com.br':1,'com.mx':1,
-            'com.tw':1,'com.hk':1,'com.sg':1,'net.sg':1,'org.sg':1,'co.nz':1,
-            'com.ar':1,'com.tr':1,'com.ua':1,'com.pl':1,'com.ru':1,'org.ru':1,
-            'co.id':1,'go.id':1,'com.my':1,'com.ph':1,'com.vn':1,'co.th':1,'or.th':1,'ac.th':1,
-            'com.co':1,'com.pe':1,'com.ve':1,'com.ec':1,'com.py':1,'com.uy':1,'gob.mx':1 };
+          // ——Rust/Android 侧同孪生已修）；命中清单取后 3 标签（真 eTLD+1）。
+          // R7-CS2-10：表体单源化到 FingerprintShield.PublicSuffixes（对账门禁
+          // contracts/codegen/verify_seed_framing_parity.py——三端手抄不同表时，同一用户在
+          // 不同端拿到不同 eTLD+1，跨站关联面从侧门回来）。
+          var PUBLIC_SUFFIXES = {{PublicSuffixTableJs}};
+          // R7-CS1-05≡R7-CS2-01：种子必须按**顶层站**框定（Brave 原文：第三方帧
+          // 与脚本共享顶层 eTLD+1 的种子）——按本帧 host 派生时，同一跟踪帧在
+          // 所有宿主站点产出同一种子，加噪画布哈希本身即跨站持久标识符。
+          {{TopLevelHostJs}}
           function getETLD1(h) {
             var p = h.toLowerCase().split('.');
             if (p.length < 2) return h;
@@ -112,7 +112,7 @@ public static class FingerprintShield
             }
             return r;
           }
-          var siteSeed = deriveSeed(SEED, getETLD1(location.hostname));
+          var siteSeed = deriveSeed(SEED, getETLD1(aegisTopLevelHostname()));
 
           // ====== Stage 3+7 合并: Canvas/WebGL/Audio（canvas 离屏副本扰动——
           // 修 Python putImageData 污染可见画布缺陷）======

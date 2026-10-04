@@ -104,6 +104,8 @@ jobs:
           python contracts/codegen/verify_contract_compatibility.py
       - name: Verify bridge guard JS single source (Rust include_str + Kotlin parity)
         run: python contracts/codegen/verify_bridge_guard.py
+      - name: Verify seed framing parity (R7-CS1-05/R7-CS2-10——顶层框定 + 后缀清单单源)
+        run: python contracts/codegen/verify_seed_framing_parity.py
       - name: Regenerate jsapi schema and fail on drift (PY-014——生成器接入门禁)
         run: |
           python scripts/gen_jsapi_schema.py

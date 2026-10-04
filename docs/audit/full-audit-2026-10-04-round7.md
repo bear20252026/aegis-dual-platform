@@ -239,7 +239,48 @@ fail-closed；服务端 `strict`/`enforce_admins`/评审要求；本机与局域
 | B3 | **已落地** | 见本节「B3 落地」。 |
 | B5 | **已落地** | 见本节「B5 落地」。 |
 | R7-TOOL-02 | **已落地** | 见本节「R7-TOOL-02 落地」——第九节批次表漏排的 P1，B3/B5 之后仍红，故未等排期直接补做。 |
-| B4/B6/B7 | 未动 | 见第九节。B6 的三项与 B7 的部分需先取得用户裁决（第八节 4）；B4 与 B6 同改 `WebViewHardening.kt`、B6 与 B3 同改 `HostWebView.cs`，须串行。 |
+| B4 | **已落地** | 见本节「B4 落地」。 |
+| B6/B7 | 未动 | 见第九节。B6 的三项与 B7 的部分需先取得用户裁决（第八节 4）；B6 与 B3/B4 同改 `HostWebView.cs`/`WebViewHardening.kt`，须串行。 |
+
+### B4 落地（种子框定三端对齐 + 后缀清单单源 + androidTest 锚点）
+
+R7-CS1-05≡R7-CS2-01：C# 与 Rust 的站点键都改成**顶层框定**——新增与 Android
+逐字同口径的 `aegisHostFromOrigin` + `aegisTopLevelHostname`（`location.ancestorOrigins[0]`
+→ host，取不到才保守退回本帧 hostname，绝不因顶层链失败而放弃噪声）。两端原先
+正向断言缺陷字串（`FingerprintShieldTests.cs:117` 断言
+`getETLD1(location.hostname)`、`shield.rs` 断言 `contains("location.hostname")`），
+现改为性质断言：必须经 `aegisTopLevelHostname()`、必须出现 `var anc = location.ancestorOrigins;`、
+**缺陷调用形态出现即红**。
+
+R7-CS2-10：新增 `contracts/policy/public-suffix-list.txt`（79 条 = 三份手抄表
+54/51/31 的并集，实测数字）为唯一权威。Rust 端 **`include_str!` 现算生成**（零手抄，
+编译期读取——核心运行期无 I/O 的约束不破）；C#/Kotlin 各持一份内嵌副本（不额外发布
+数据文件、不改打包），由新门禁 `contracts/codegen/verify_seed_framing_parity.py`
+逐项对账并挂进必需的 contracts job。门禁另有 `--self-test` 四类植入漂移（Kotlin 少一条 /
+C# 多一条 / Rust 回退手抄 / C# 退回本帧口径）全部检出，`tests/python/seed_framing_parity_test.py`
+12 例含「解析塌陷判 exit 2」「注释顶不掉要件（要件取代码形态）」「门禁挂在常跑 job 里」。
+
+R7-AD-03：`SmokeInstrumentedTest.kt` 的锚点从已被淘汰的 `getETLD1(location.hostname)`
+改指生产实际形态，并新增「**锚点必须命中生产脚本**」断言——此前 replace 恒为 no-op，
+known-answer 不可能通过，而 android-quality 只 assemble 不执行 ⇒ 全程静默。
+
+**落地过程中被实证抓到的两个自身缺陷**（都留下常驻锚点，不是口头修正）：
+① `format!` 里写 `{psl}` 时花括号被当插值吞掉，产出 `var AEGIS_PUBLIC_SUFFIXES = 'co.uk': 1, …`
+——三端产物 dump 后 `node --check` 当场报 SyntaxError；两端各加常驻锚（花括号/圆括号配平 +
+「表体必须是对象字面量」），Rust 侧生成函数改为自带花括号。
+② 门禁自证用 `write_text(encoding=…)` 未带 `newline=""`，把 CRLF 工作副本改写成 LF——
+即「门禁自己污染源文件」；现按 `newline=""` 读写并**逐字节校验还原**，还原失败即判失败。
+
+验证：cargo 561+10+4、fmt/clippy 干净；Core.Tests **711/711**、Broker.Tests 128/128；
+`pytest tests/python` 383 passed；`run-security-e2e` ✅；active-tree ruff/bandit ✅；
+`check_file_sizes` ✅（shield.rs 524→322，测试外迁 `shield/tests.rs` 300 行；
+FingerprintShield.cs 399 持平，种子素材拆入 71 行的 `FingerprintShield.Seed.cs`；
+WebViewHardening.kt 636 持平——表体 reflow 净零）；三端 JS 产物 node --check 全通过。
+
+未验证：新框定在真实 WebView2/WebView 第三方帧上的行为（需安装态/真机——本批只有
+结构与纯函数量级的证据）；`ancestorOrigins[0]` 即最顶层祖先这一前提沿用 Android 侧
+既有口径，未另行在设备上复核。androidTest 仍不被 CI 执行（只 assemble），如实保留。
+
 
 ### B3 落地（隐私网络边界补到子资源与下载两层）
 
