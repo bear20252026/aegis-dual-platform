@@ -224,3 +224,12 @@ B4 与 B6 都改 `WebViewHardening.kt`。同文件并行必冲突，按表内串
 **需用户裁决后才动的三项**（不列入上述批次）：Windows tag 发布缺 Authenticode 是否
 fail-closed；服务端 `strict`/`enforce_admins`/评审要求；本机与局域网浏览是否继续支持
 （决定 B3/B6 的谓词方向与三处死路径的处置）。
+
+
+## 十、落地状态（同轮续）
+
+| 批 | 状态 | 备注 |
+| --- | --- | --- |
+| **B1** | **已落地** | `release-windows.yml`（cargo test / 两条 dotnet test / verify_versions）与 `native-policy-artifacts.yml`（cargo build / dotnet test）逐条显式断 `$LASTEXITCODE`；新增 `scripts/check_workflow_shells.py` 作常跑门禁（挂进 `contracts.yml` 既有 required job，不新增 context 名，避免 merge box 卡 `Expected`），带 `--self-test` 故障注入自证。**本地实证**：PS 5.1 下「原生命令中段失败 + 后续命令成功」实测步骤 exit=0（输出只剩 `publish ok`），加断言后 exit=1。runner 侧 pwsh 7 语义的最终定论仍待一次 CI 故障注入——修复在两种语义下都正确。 |
+| **B2** | **已落地** | 六项全部收口：R7-SH-01（`check_real_models` / `check_mirror_consumption` 真正接进 `main()`，capability 误接映射按实测删除并留注释，17 条新用例逐个钉失败分支）；R7-SH-03（zip-slip 改**行为级**回归——真跑恶意 zip，另加一条对照用例证明「把判定掏空后旧 token 锚仍全绿」）；R7-SH-04（`` 正则覆盖 `assert(x)`；活跃树非测试 Python 全面禁令，实测当下 0 命中 ⇒ 是防腐而非补票）；R7-SH-07（invalid 向量缺失改无条件 fail-closed + `expected` 取值白名单 + 反向对照）；R7-TOOL-04（三门禁加空扫描面非零退出 + 锚点去文件名化）；R7-TOOL-05（基线未同步收窄即判失败——新规则当场抓出 3 处 stale，实降 507→503 / 692→691 / 477→450）；R7-TOOL-06（**删除两份红队套件的手工运行器**：`-O` 全绿的根因是「手工收集裸 assert」这个形态本身，唯一入口改 pytest，`run-security-e2e` 相应改为驱动 pytest 并拒绝 `-O`）。 |
+| B3–B7 | 未动 | 见第九节。B3/B4/B5/B6 需先取得 Windows 契约/测试区与 Android 端的运行基线（第八节 1）；B7 含 3 项待用户裁决。 |

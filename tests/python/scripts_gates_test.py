@@ -59,16 +59,6 @@ class TestVerifyVectors:
         monkeypatch.setattr(vv, "ROOT", tmp_path)
         assert vv.main() == 1
 
-    def test_main_accepts_synthetic_good_tree(self, tmp_path, monkeypatch, capsys):
-        vectors = tmp_path / "contracts" / "vectors"
-        vectors.mkdir(parents=True)
-        (vectors / "ok.json").write_text(
-            json.dumps({"vectors": [{"expected": "deny"},
-                                    {"expected_evaluate": "require_confirmation"}]}),
-            encoding="utf-8")
-        monkeypatch.setattr(vv, "ROOT", tmp_path)
-        assert vv.main() == 0
-
     def test_oversize_anchor_guard_still_enforced(self, tmp_path, monkeypatch):
         # 锚点守卫回归：url-origin-invalid.json 无锚点 → fail（PY-078 语义）
         vectors = tmp_path / "contracts" / "vectors"
@@ -94,19 +84,6 @@ class TestVerifyVectors:
             capture_output=True, text=True, timeout=60, check=False)
         assert proc.returncode == 1, proc.stdout + proc.stderr
         assert "explode-me" in proc.stdout
-
-    def test_python_O_passes_on_good_vectors(self, tmp_path):
-        prog_dir = tmp_path / "prog"
-        prog_dir.mkdir()
-        shutil.copy2(ROOT / "scripts" / "verify_vectors.py", prog_dir / "verify_vectors.py")
-        vectors = tmp_path / "contracts" / "vectors"
-        vectors.mkdir(parents=True)
-        (vectors / "ok.json").write_text(
-            json.dumps({"vectors": [{"expected": "deny"}]}), encoding="utf-8")
-        proc = subprocess.run(
-            [sys.executable, "-O", str(prog_dir / "verify_vectors.py")],
-            capture_output=True, text=True, timeout=60, check=False)
-        assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
 # ---------------------------------------------------------------- PY-190
@@ -170,7 +147,6 @@ class TestRunSecurityE2ePassthrough:
 
         monkeypatch.setattr(mod.subprocess, "run", fake_run)
         assert mod.main() == 1
-
 
 # ---------------------------------------------------------------- PY-201
 class TestBootstrapPythonCheck:

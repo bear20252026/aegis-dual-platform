@@ -73,6 +73,9 @@ jobs:
         run: |
           $env:PYTHONUTF8 = "1"
           cargo build --release --locked --manifest-path core/rust-policy-core/Cargo.toml --target x86_64-pc-windows-msvc
+          # 审计第七轮（R7-TOOL-01）：pwsh 原生命令非零不中断脚本，步骤退出码取末条
+          # 原生命令——本步此前 cargo 之后还有 Copy-Item/python，构建失败会被吞掉。
+          if ($LASTEXITCODE -ne 0) { throw "cargo build 失败（exit $LASTEXITCODE）" }
           New-Item -ItemType Directory -Force dist/native-policy/windows/win-x64 | Out-Null
           Copy-Item core/rust-policy-core/target/x86_64-pc-windows-msvc/release/aegis_policy_core.dll `
             dist/native-policy/windows/win-x64/aegis_policy_core.dll
@@ -87,7 +90,10 @@ jobs:
           $env:AEGIS_REQUIRE_NATIVE_POLICY_CORE = "1"
           $env:AEGIS_REQUIRE_NAVIGATION_CONFIRMATION = "1"
           # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
+          # R7-TOOL-01：本 job 是**唯一**以 AEGIS_REQUIRE_NATIVE_POLICY_CORE=1 真跑
+          # P/Invoke 往返的作业，其判定不得被后面的 dotnet publish 吞掉退出码。
           dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          if ($LASTEXITCODE -ne 0) { throw "原生模式 Broker.Tests 失败（exit $LASTEXITCODE）——P/Invoke 面未通过" }
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `

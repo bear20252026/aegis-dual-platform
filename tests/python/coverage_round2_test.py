@@ -143,12 +143,31 @@ def test_expected_xml_value_unescapes_and_assignment_forms():
 
 @pytest.fixture()
 def vcc_tree(tmp_path, monkeypatch):
-    """真实 schemas/vectors 拷入 tmp 契约树；生成物目录按需产出。"""
+    """真实 schemas/vectors 拷入 tmp 契约树；生成物目录按需产出。
+
+    审计第七轮（R7-SH-01 新增 check_real_models）：合成树必须同时带上被对账的
+    **手写模型原件**（Decision.cs / AuditEvent.cs），否则新检查在合成树里读不到
+    文件、happy path 恒失败——那不是门禁严格，是合成树不完整。
+    """
     import verify_contract_compatibility as vcc
     repo = tmp_path / "repo"
     contracts = repo / "contracts"
     shutil.copytree(REPO / "contracts" / "schemas", contracts / "schemas")
     shutil.copytree(REPO / "contracts" / "vectors", contracts / "vectors")
+    for rel_schema, (rel_model, _lang, _type) in vcc.REAL_MODEL_CONTRACTS.items():
+        src = REPO / rel_model
+        if not src.is_file():
+            # 表内登记的模型文件在真实仓库里不存在——这本身就是缺陷，让测试炸
+            raise AssertionError(f"REAL_MODEL_CONTRACTS 指向的模型文件缺失：{rel_model}")
+        dst = repo / rel_model
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+    # 生成目录本身在真实仓库里恒存在——合成树也要建（空目录=有镜像面但无镜像），
+    # 否则 check_mirror_consumption 会把「目录不存在」报成缺陷，掩盖被测语义本身。
+    (repo / "windows" / "src" / "Aegis.Windows.App" / "Contracts" / "Generated").mkdir(
+        parents=True, exist_ok=True)
+    (repo / "android" / "contracts" / "src" / "main" / "kotlin" / "com" / "aegis"
+     / "contracts" / "generated").mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(vcc, "ROOT", contracts)
     monkeypatch.setattr(vcc, "SCHEMAS", contracts / "schemas")
     monkeypatch.setattr(vcc, "VECTORS", contracts / "vectors")
@@ -199,7 +218,7 @@ def test_contract_compatibility_detects_drift(vcc_tree, capsys):
     assert "C# 模型缺失" in out and "Kotlin 模型缺失" in out
 
 
-def test_contract_compatibility_skip_schema_needs_no_model(vcc_tree, capsys):
+def test_contract_compatibility_skip_schema_needs_no_model(vcc_tree, capsys, monkeypatch):
     vcc, repo, contracts = vcc_tree
     skip = sorted(vcc.SKIP_SCHEMAS)[0]
     for f in list(vcc.SCHEMAS.glob("*.json")):
@@ -207,6 +226,12 @@ def test_contract_compatibility_skip_schema_needs_no_model(vcc_tree, capsys):
             f.unlink()
     for f in list(vcc.VECTORS.glob("*.json")):
         f.unlink()
+    # 本用例只测 PY-102 跳过集语义，因此把合成树删到只剩一个 SKIP 集 schema。
+    # R7-SH-01 的 check_real_models 会因 approval/audit-event schema 被删而报
+    # 「真实模型对账无法进行」——那是**正确**判定（删 schema 文件确实减了契约面，
+    # 旧门禁对此完全无感，见 contract_models_test.py::test_missing_referenced_schema
+    # 专门钉这条），只是与 PY-102 无关，故此处把对账表清空以隔离被测语义。
+    monkeypatch.setattr(vcc, "REAL_MODEL_CONTRACTS", {})
     # 仅剩 SKIP 集内 schema——不生成模型也应通过（PY-102 跳过集单源口径）
     assert vcc.main() == 0
 

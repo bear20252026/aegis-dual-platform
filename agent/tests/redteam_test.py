@@ -201,17 +201,12 @@ def test_redteam_fixtures_are_executed_by_broker():
         "（低于第八轮审计基线，说明样例被删减）")
 
 if __name__ == "__main__":
-    # SP-170（2026-09-26 审计）：对齐 e2e 运行器——逐用例异常捕获+汇总
-    #（首个失败不再中断后续用例——失败一次看全）。
-    failures = []
-    for name, fn in sorted(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"  ✅ {name}")
-            except Exception as ex:  # noqa: BLE001
-                failures.append((name, ex))
-                print(f"  ❌ {name}: {ex}")
-    if failures:
-        raise SystemExit(f"{len(failures)} 失败")
-    print("ALL OK — 阶段 G 红队测试通过（注入/投毒/重放/预算全部拒绝——无未批准副作用）")
+    # R7-TOOL-06（第七轮 2026-10-04）：删除本文件的 __main__ 手工运行器。
+    # 本套件断言全为裸 `assert`，`python -O` / `PYTHONOPTIMIZE=1` 下在字节码
+    # 编译期被整体剥离——原独立运行器实测「声明 deny 实 allow」的注入样例时
+    # 打印 ALL OK、exit 0，等于一条环境变量摘掉整套行为门。唯一安全入口是
+    # pytest（其重写器把 assert 改写成显式断言，-O 下仍红：实测 `-O -m pytest`
+    # 照样 failed）。故直接执行本文件一律响亮失败，不再自行收集运行。
+    print("本套件必须经 pytest 运行：python -m pytest -q agent/tests/redteam_test.py",
+          file=sys.stderr)
+    raise SystemExit(2)

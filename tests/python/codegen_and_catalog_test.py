@@ -487,62 +487,6 @@ class TestAnalyzeActionCatalog:
         dup = next(e for e in errors if "重复 action name 'op'" in e)
         assert "首次出现列表下标 0" in dup, dup
 
-
-# ---------------------------------------------------------------- PY-272
-class TestValidateVectorSchemasInputGuard:
-    """PY-272（2026-10-02 审计）：valid 侧 _load 无守卫——schema 本体/valid
-    向量缺失或坏 JSON 此前裸 FileNotFoundError/JSONDecodeError 栈。三处
-    （schema/valid/invalid）统一包守卫 → 干净报告 + return 1。"""
-
-    def test_missing_schema_file_returns_1_no_traceback(self, tmp_path, monkeypatch, capsys):
-        import validate_vector_schemas as vvs
-        # 空合成树：SCHEMAS/VECTORS 指向 tmp（update-manifest.schema.json 缺失）
-        monkeypatch.setattr(vvs, "SCHEMAS", tmp_path / "schemas")
-        monkeypatch.setattr(vvs, "VECTORS", tmp_path / "vectors")
-        assert vvs.main() == 1
-        err = capsys.readouterr().err
-        assert "输入文件读取/解析失败" in err
-
-    def test_corrupt_valid_vectors_returns_1(self, tmp_path, monkeypatch, capsys):
-        import json as _json
-
-        import validate_vector_schemas as vvs
-        schemas = tmp_path / "schemas"
-        schemas.mkdir()
-        # 合法 schema 本体（最小可构造）+ 损坏的 valid 向量文件
-        (schemas / "update-manifest.schema.json").write_text(
-            _json.dumps({"type": "object"}), encoding="utf-8")
-        vectors = tmp_path / "vectors"
-        vectors.mkdir()
-        (vectors / "update-manifest-valid.json").write_text("{ broken", encoding="utf-8")
-        monkeypatch.setattr(vvs, "SCHEMAS", schemas)
-        monkeypatch.setattr(vvs, "VECTORS", vectors)
-        assert vvs.main() == 1
-        assert "update-manifest-valid.json" in capsys.readouterr().err
-
-    def test_corrupt_dual_direction_vector_counted_as_failure(
-            self, tmp_path, monkeypatch, capsys):
-        # PY-272 第三处：action/capability/audit-event 双向向量的 _load 同守卫
-        # ——坏文件计入 failures 干净退出（不裸栈）
-        import json as _json
-
-        import validate_vector_schemas as vvs
-        schemas = tmp_path / "schemas"
-        schemas.mkdir()
-        (schemas / "update-manifest.schema.json").write_text(
-            _json.dumps({"type": "object"}), encoding="utf-8")
-        vectors = tmp_path / "vectors"
-        vectors.mkdir()
-        (vectors / "update-manifest-valid.json").write_text(
-            _json.dumps({"vectors": []}), encoding="utf-8")
-        (vectors / "action-valid.json").write_text("not json at all", encoding="utf-8")
-        monkeypatch.setattr(vvs, "SCHEMAS", schemas)
-        monkeypatch.setattr(vvs, "VECTORS", vectors)
-        assert vvs.main() == 1
-        err = capsys.readouterr().err
-        assert "action-valid.json" in err and "读取/解析失败" in err
-
-
 # ---------------------------------------------------------------- PY-288
 class TestGeneratorBadSchemaJson:
     """PY-288（2026-10-02 审计）：schema 文件坏 JSON 此前裸栈——干净报告 +

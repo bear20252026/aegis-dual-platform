@@ -83,17 +83,29 @@ jobs:
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          if ($env:REF_TYPE -eq "tag") {
-            python scripts/verify_versions.py --tag $env:REF_NAME
-          } else {
-            python scripts/verify_versions.py
-          }
+          # R7-TOOL-01：原写法把 python 调用复制进 if/else 两个分支，退出码虽各自落在
+          # 分支尾部，但形态上「一条原生命令后面还有别的命令」正是本门禁要禁的形态
+          # （scripts/check_workflow_shells.py 对分支内不连续的检查不作分支语义推断）。
+          # 改为单条调用 + 数组 splatting，一条命令一条断言，形态无歧义。
+          # $args 是 PowerShell 自动变量，故用 $verifyArgs。
+          $verifyArgs = @()
+          if ($env:REF_TYPE -eq "tag") { $verifyArgs = @("--tag", $env:REF_NAME) }
+          python scripts/verify_versions.py @verifyArgs
+          if ($LASTEXITCODE -ne 0) { throw "shared/version.properties 与发布 tag 一致性校验失败（exit $LASTEXITCODE）" }
       - name: Build versioned Rust navigation decision DLL
         shell: pwsh
+        # 审计第七轮（2026-10-04·R7-TOOL-01）：pwsh 下**原生命令非零不会中断脚本**
+        #——`$ErrorActionPreference='Stop'` 只约束 cmdlet 错误，runner 包装脚本也不设
+        # $PSNativeCommandUseErrorActionPreference（PS 7.3 引入时仍标 experimental）。
+        # 步骤退出码因此取自**末条**原生命令：原写法 `cargo test` 之后还有
+        # `cargo build`/`Copy-Item`，测试红而构建绿 ⇒ 步骤绿 ⇒ 未测过的 DLL 进正典包。
+        # 逐条显式断 $LASTEXITCODE（与本文件签名/安装步骤 :149/:173/:175 同口径）。
         run: |
-          # 随包发布的原生策略核心必须是"测过"的产物（159 个 Rust 测试全过）
+          # 随包发布的原生策略核心必须是"测过"的产物（Rust 全测试集含向量差分通过）
           cargo test --manifest-path core/rust-policy-core/Cargo.toml --locked
+          if ($LASTEXITCODE -ne 0) { throw "cargo test 失败（exit $LASTEXITCODE）——禁止携带未通过的 Rust 构建正典原生核心" }
           cargo build --manifest-path core/rust-policy-core/Cargo.toml --release --locked --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "cargo build 失败（exit $LASTEXITCODE）" }
           New-Item -ItemType Directory -Force -Path dist/native-policy/windows/win-x64
           Copy-Item core/rust-policy-core/target/x86_64-pc-windows-msvc/release/aegis_policy_core.dll `
             dist/native-policy/windows/win-x64/aegis_policy_core.dll
@@ -115,8 +127,12 @@ jobs:
           $env:AEGIS_NATIVE_POLICY_CORE_TEST_PATH = $policyDll
           # 全量 C# 测试门禁（Core 领域层 + Broker 授权链——此前仅 Broker）；
           # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
+          # R7-TOOL-01：两条 dotnet test 必须各自断退出码——它们原先被后面的
+          # `dotnet publish` 吞掉（步骤退出码取末条原生命令）。
           dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          if ($LASTEXITCODE -ne 0) { throw "Core.Tests 失败（exit $LASTEXITCODE）——禁止在未通过测试上发布正典制品" }
           dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          if ($LASTEXITCODE -ne 0) { throw "Broker.Tests（授权链/原生桥面）失败（exit $LASTEXITCODE）" }
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
