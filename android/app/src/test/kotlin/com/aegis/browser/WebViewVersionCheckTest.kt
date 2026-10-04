@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,21 +26,54 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class WebViewVersionCheckTest {
-    private val threshold = 132_000_000L
+    // R7-AD-01（第七轮 2026-10-04）：阈值改**版本名**口径。旧实现把 132_000_000
+    // 直接与 longVersionCode 比较，而真实 ASW 的 longVersionCode 是十位量级
+    // （同仓 ProviderTest 用 141_000_7390L 表示 141.0.7390.0）——于是任何能跑
+    // minSdk 26 的设备都恒判"版本安全"，CVE-2026-12438/11295 提示静默为零。
+
+    private fun version(
+        name: String,
+        code: Long = 0L,
+    ) = WebViewVersionCheck.WebViewVersion(name, code)
 
     @Test
-    fun belowThresholdIsOutdated() {
-        assertTrue(WebViewVersionCheck.isOutdated(threshold - 1))
-        assertTrue(WebViewVersionCheck.isOutdated(0))
-        assertTrue(WebViewVersionCheck.isOutdated(-1))
+    fun belowSafeMajorIsOutdated() {
+        assertTrue(WebViewVersionCheck.isOutdated(version("131.0.6778.135")))
+        assertTrue(WebViewVersionCheck.isOutdated(version("118.0.1997.106")))
+        assertTrue(WebViewVersionCheck.isOutdated(version("40.0.2214.89")))
     }
 
     @Test
-    fun atOrAboveThresholdIsNotOutdated() {
-        // 恰好等于阈值不告警（>= 安全版本即放行——boundary 断言防 off-by-one）
-        assertFalse(WebViewVersionCheck.isOutdated(threshold))
-        assertFalse(WebViewVersionCheck.isOutdated(threshold + 1))
-        assertFalse(WebViewVersionCheck.isOutdated(Long.MAX_VALUE))
+    fun atOrAboveSafeMajorIsNotOutdated() {
+        assertFalse(WebViewVersionCheck.isOutdated(version("132.0.6834.163")))
+        assertFalse(WebViewVersionCheck.isOutdated(version("141.0.7390.0")))
+        assertFalse(WebViewVersionCheck.isOutdated(version("150.0.7871.124")))
+    }
+
+    @Test
+    fun unparsableNameFailsClosedToWarning() {
+        // 判不了就提示——绝不因为"读不懂版本名"而静默宣布安全
+        assertTrue(WebViewVersionCheck.isOutdated(version("unknown")))
+        assertTrue(WebViewVersionCheck.isOutdated(version("")))
+        assertTrue(WebViewVersionCheck.isOutdated(version("beta-nightly")))
+        assertTrue(WebViewVersionCheck.isOutdated(version("141")))
+    }
+
+    @Test
+    fun suffixAndVendorFormsParse() {
+        assertEquals(141 to 7390, WebViewVersionCheck.parseVersion("141.0.7390.163"))
+        assertEquals(141 to 7390, WebViewVersionCheck.parseVersion("141.0.7390.163-bugfix"))
+        assertEquals(132 to 0, WebViewVersionCheck.parseVersion("132.0"))
+        assertNull(WebViewVersionCheck.parseVersion("141"))
+        assertNull(WebViewVersionCheck.parseVersion("not.a.version"))
+    }
+
+    @Test
+    fun decisionNeverReadsVersionCode() {
+        // 判定必须取版本名：给一个"十位 longVersionCode + 过旧版本名"的组合，
+        // 仍须判过旧——旧实现正是被编码量级骗过（阈值 1.32×10⁸ vs 编码 10 位）
+        assertTrue(WebViewVersionCheck.isOutdated(version("118.0.1997.106", code = 1_180_199_710L)))
+        assertFalse(WebViewVersionCheck.isOutdated(version("141.0.7390.0", code = 1_410_007_390L)))
     }
 
     // ---------------- AD-204（审计 2026-09-23 清单·A7 批）：双跳转受理结果 ----------------

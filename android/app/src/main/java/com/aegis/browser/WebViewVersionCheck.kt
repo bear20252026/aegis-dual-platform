@@ -23,12 +23,29 @@ object WebViewVersionCheck {
     /** Android System WebView 包名（Google 发行版——更新跳转目标）。 */
     private const val WEBVIEW_PKG = "com.google.android.webview"
 
-    /**
-     * 最低安全版本阈值（versionCode）。
-     * 注：需按 Google 安全公告动态更新（CVE-2026-12438/11295 对应版本
-     * 以官方公告为准）；此处为可配置常量，随安全公告维护。
-     */
-    private const val MIN_SAFE_VERSION_CODE = 132_000_000
+    // 最低安全版本阈值——**版本名口径**（major / build 两段）。
+    //
+    // R7-AD-01（第七轮 2026-10-04）：此前阈值写成 `132_000_000L` 直接与
+    // `getLongVersionCode` 比较。Chromium 的 longVersionCode 是十位量级——本仓
+    // WebViewVersionCheckProviderTest 自己就用 `141_000_7390L` 表示
+    // `141.0.7390.0`——于是 1.32×10⁸ 反推回版本只约等于 m40 时代，任何能跑
+    // minSdk 26 的设备恒判「版本安全」，MainActivity 声明的 CVE-2026-12438/11295
+    // 提示在全部出货设备上静默为零。改取版本名的数字段比较，不再依赖各发行版
+    // 并不一致的后缀编码；随安全公告维护时只改本对常量。
+    internal const val MIN_SAFE_MAJOR = 132
+    internal const val MIN_SAFE_BUILD = 0
+
+    // 版本名分隔（非数字段）——厂商后缀（"-bugfix"）与四段式共用一套解析
+    private val VERSION_SEGMENT_SEPARATOR = Regex("[^0-9]+")
+
+    // build 段在数字序列中的下标（major, minor, build[, patch]）
+    private const val BUILD_SEGMENT_INDEX = 2
+
+    // 判定所需的最少数字段数——单段（"141"）不足以区分同主版本内的构建
+    private const val MIN_VERSION_SEGMENTS = 2
+
+    // 两段形态（"132.0"）下的 build 取值
+    private const val ZERO_BUILD = 0
 
     /** 版本信息（versionName, versionCode）；未安装返回 null（静默）。 */
     data class WebViewVersion(
@@ -58,8 +75,37 @@ object WebViewVersionCheck {
             null
         }
 
-    /** 版本是否过旧（低于最低安全阈值）。 */
-    fun isOutdated(versionCode: Long): Boolean = versionCode < MIN_SAFE_VERSION_CODE
+    /**
+     * 解析版本名的数字前缀（major, build）——`141.0.7390.0` → (141, 7390)。
+     * 厂商后缀（`141.0.7390.163-bugfix`）、缺段（`141`）、非数字段都按不可判定
+     * 返回 null（调用方 fail-closed 到"提示更新"一侧，绝不静默判安全）。
+     */
+    internal fun parseVersion(name: String): Pair<Int, Int>? {
+        val numbers =
+            name
+                .split(VERSION_SEGMENT_SEPARATOR)
+                .mapNotNull { it.toIntOrNull() }
+        val major = numbers.firstOrNull()
+        val build =
+            when {
+                // 一段（"141"）或空——build 段无从判定，不猜
+                numbers.size < MIN_VERSION_SEGMENTS -> null
+
+                // 两段（"132.0"）——Chromium 版本恒为四段，此处按公告口径视作 build 0
+                numbers.size == MIN_VERSION_SEGMENTS -> ZERO_BUILD
+
+                else -> numbers.getOrNull(BUILD_SEGMENT_INDEX)
+            }
+        return if (major != null && build != null) major to build else null
+    }
+
+    /** 版本是否过旧（低于最低安全阈值）。取版本名口径，见 [MIN_SAFE_MAJOR]。 */
+    fun isOutdated(version: WebViewVersion): Boolean {
+        val parsed = parseVersion(version.name) ?: return true
+        val (major, build) = parsed
+        return major < MIN_SAFE_MAJOR ||
+            (major == MIN_SAFE_MAJOR && build < MIN_SAFE_BUILD)
+    }
 
     /** 检查并触发提示（版本过旧时回调提示文案；由调用方呈现 UI）。
      *  AD-135（审计 2026-09-23 清单·A6 批）：提示文案迁 strings.xml 单源
@@ -69,7 +115,7 @@ object WebViewVersionCheck {
         onOutdated: (String) -> Unit,
     ) {
         val v = getWebViewVersion(context) ?: return
-        if (isOutdated(v.code)) {
+        if (isOutdated(v)) {
             onOutdated(context.getString(R.string.webview_outdated, v.name))
         }
     }

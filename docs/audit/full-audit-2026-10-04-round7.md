@@ -241,6 +241,7 @@ fail-closed；服务端 `strict`/`enforce_admins`/评审要求；本机与局域
 | R7-TOOL-02 | **已落地** | 见本节「R7-TOOL-02 落地」——第九节批次表漏排的 P1，B3/B5 之后仍红，故未等排期直接补做。 |
 | B4 | **已落地** | 见本节「B4 落地」。 |
 | R7-CS1-15 / 04 | **已落地** | 根因是**镜像被卸载后仍可能调用其内函数指针**（崩溃转储模块列表零命中 aegis_policy_core.dll），不只是缺租约：镜像常驻 + 八个入口全走 `InvokeLeased` + `IsUsable` 接成入口判据 + 原生作业补跑 Core.Tests。原生模式 711/711 三轮全绿（修复前中止点 667/403/389/502 不稳定）。见「R7-CS1-15 / R7-CS1-04 落地」。 |
+| R7-AD-01 | **已落地** | 见「R7-AD-01 落地」——第八个 P1 就此收口；阈值取版本名口径，不可解析 fail-closed 到提示侧。 |
 | B6/B7 | 未动 | 见第九节。B6 的三项与 B7 的部分需先取得用户裁决（第八节 4）；B6 与 B3/B4 同改 `HostWebView.cs`/`WebViewHardening.kt`，须串行。 |
 
 ### B4 落地（种子框定三端对齐 + 后缀清单单源 + androidTest 锚点）
@@ -392,8 +393,36 @@ GC 时序，把它当唯一防线就是假保证）：八个入口逐个必须�
   的示例 `expires_at` 是 2027 年（超 `max_ttl` 必被拒——已注明"仅示意形态"）。
   `agent/broker.py` 红线 446→445。
 
-### B1 落地当天即抓到一个被吞掉的真实失败
+### R7-AD-01 落地（Android WebView 版本阈值：编码量级错一个数量级 → 恒判"版本安全"）
 
+旧实现 `MIN_SAFE_VERSION_CODE = 132_000_000` 直接与 `getLongVersionCode` 比较。真实
+ASW 的 longVersionCode 是**十位量级**——本仓自己的 `WebViewVersionCheckProviderTest`
+就用 `141_000_7390L` 表示 `141.0.7390.0`——于是 1.32×10⁸ 反推回去只约等于 m40 时代，
+任何能跑 minSdk 26 的设备恒判安全，`MainActivity` 声明的 CVE-2026-12438/11295 提示在
+全部出货设备上静默为零。
+
+处置：判定改取**版本名的数字段**（`MIN_SAFE_MAJOR = 132` / `MIN_SAFE_BUILD = 0`），
+不再依赖各发行版并不一致的后缀编码；`parseVersion` 支持厂商后缀
+（`141.0.7390.163-bugfix`）与两段形态（`132.0`→build 0），**不可解析一律 fail-closed 到
+"提示更新"侧**（绝不因为读不懂版本名就宣布安全）。`parseVersion` 单 return、无常量魔数
+（detekt `ReturnCount`/`MagicNumber` 当场抓到过）；`isOutdated(WebViewVersion)` 取代
+`isOutdated(Long)`。
+
+验证：`:app:testDebugUnitTest`（WebViewVersionCheckTest 10 例 + ProviderTest 6 例）全绿、
+`:app:ktlintCheck` 与 `:app:detekt` 全绿。**因果实证**：把 `isOutdated` 退回
+`version.code < 132_000_000L` → `atOrAboveSafeMajorIsNotOutdated` 与
+`decisionNeverReadsVersionCode` 两例转红；还原后重新全绿。新用例里
+`decisionNeverReadsVersionCode` 专门钉住旧失效方向：给"十位 longVersionCode + 过旧版本名"
+的组合（`118.0.1997.106` / `1_180_199_710L`）必须仍判过旧。
+
+残余（不假称已核）：阈值取 m132 沿用仓库既有声明——CVE-2026-12438/11295 的**确切**
+修复版本需按 Google 安全公告核对，本轮无法离线核实，故只修"编码量级"这一确定缺陷、
+不新增我无法验证的公告号；真机上 provider 版本读取与提示对话框呈现仍未验证（无设备）；
+R7-AD-04（检查协程早于 `appContext` 初始化的启动竞态）另计，未随本条动。
+
+
+
+### B1 落地当天即抓到一个被吞掉的真实失败
 `Build Windows x64 policy DLL` job 补上 `$LASTEXITCODE` 断言后立刻变红：`BrowserPolicyBrokerTests.NativePolicyCoreBridgeRequiresApprovalBeforeConfirmationNavigationCanConsume` 断言 `RequireConfirmation` 而核心回 `Allow`（1 失败 / 86 通过）。根因是 R6-21 把确认域收窄为「仅高危目标」后，该用例仍拿 `https://example.com/…` 期望确认——**它自第六轮起一直是红的**，被「测试红 + 后续 `dotnet publish` 绿 ⇒ 步骤绿」与「该 job 不在必需检查里」两层叠加吞掉。
 
 处置：用例按既定口径改用 `http://127.0.0.1:8080/…` 触发确认域，并新增**公网 host 不得触发确认**的对照断言（此前 C# 侧对 R6-21 的收窄零锚点，正是 R7-CS2-02 指出的空洞）；本地以现建 DLL 实跑 87/87 通过，并用假路径做反证（该用例转红）以证明它真走了跨界路径。
