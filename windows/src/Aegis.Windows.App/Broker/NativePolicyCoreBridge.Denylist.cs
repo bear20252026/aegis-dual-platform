@@ -16,10 +16,29 @@ using System.Text.Json;
 /// 已装应用对着旧 DLL 运行不得因此变砖。
 /// 生命周期口径沿用 CS-207/R6：原生入口只在持有 broker 租约期间调用；
 /// 解析导出时另取库句柄租约（DangerousAddRef/Release 成对），入口检 _disposed。
+/// 审计第七轮 R7-RS-02（2026-10-04）：本入口新增第三个参数 <c>clear</c>
+/// （0=追加，非0=先清空再接受本批）。核心侧的 64KiB 单载荷上限
+///（<c>FFI_INPUT_MAX_BYTES</c>）遇上托管侧允许的 5 MiB 订阅源，整批替换
+/// 必然注入失败——故本类现按上限切批推送（首批 clear=1，其余 clear=0）。
+/// 参数是就地加的（符号名未变、ABI 版本仍为 v3），因此符号名探测区分不了
+/// "2 参旧核心"与"3 参新核心"：对着 2 参旧核心调用时多传的实参被忽略，
+/// 行为退化为既往的整批替换（内存安全，x64 cdecl 下多余参数不被解引用），
+/// 但分批会各自整批替换 → 最终快照只剩最后一批。应答信封里的 <c>clear</c>
+/// 回显是本类唯一的"核心是否真带该参数"探针（信封不含 abi_version）：多批
+/// 推送时首批不回显即中止并记 <c>core_lacks_clear_parameter</c>，核心侧留下的
+/// 前缀规模如实写进 Detail——绝不静默推完 86 批换回一个残缺名单。单批推送
+/// 无需该判据（clear=1 与旧核心的整批替换同义，行为与既往一致）。
+/// 应用与核心 DLL 由同一构建产出、同一安装器投递，混版态属增量替换事故面。
 /// </summary>
 public sealed partial class NativePolicyCoreBridge
 {
     private const string HostDenylistExport = "aegis_policy_core_broker_update_host_denylist_json";
+
+    /// <summary>单批载荷字节上限：核心 <c>read_utf8</c> 在 64KiB 处拒批
+    ///（<c>core/rust-policy-core/src/c_abi/mod.rs</c> 的 FFI_INPUT_MAX_BYTES）。
+    /// 留 ~4KiB 余量给数组括号与逐批计费的序列化误差——宁可多切一刀，
+    /// 也不能让任何一批撞上上限（撞上的那一批是被拒、不是被截断）。</summary>
+    private const int MaxChunkPayloadBytes = 60 * 1024;
 
     // 可选导出的惰性解析缓存：一个桥实例对应一个已加载模块，导出表不会热换，
     // 故探测一次即定终身（缺席就恒缺席，无需每轮刷新重探）。
@@ -27,8 +46,10 @@ public sealed partial class NativePolicyCoreBridge
     private UpdateHostDenylistDelegate? _hostDenylistEntry;
     private bool _hostDenylistProbed;
 
-    /// <summary>把威胁 host 快照注入原生核心黑名单（整批替换语义——空集合即清空，
-    /// 核心侧未设置时恒放行，绝不默认 deny-all）。任何失败都以
+    /// <summary>把威胁 host 快照注入原生核心黑名单。空集合即清空，
+    /// 核心侧未设置时恒放行，绝不默认 deny-all。快照超过单载荷上限时
+    /// 按 <see cref="MaxChunkPayloadBytes"/> 分批（首批清空、其余追加），
+    /// 因此不再是"整批替换一次成功/一次失败"。任何失败都以
     /// <see cref="CoreDenylistUpdateResult.Outcome"/> 如实回报，
     /// 调用方**不得**把失败当成"黑名单已生效"。</summary>
     public CoreDenylistUpdateResult UpdateHostDenylist(IReadOnlyCollection<string> hosts)
@@ -43,7 +64,7 @@ public sealed partial class NativePolicyCoreBridge
             var entry = ResolveHostDenylistEntry();
             return entry is null
                 ? CoreDenylistUpdateResult.MissingExport(input)
-                : InvokeHostDenylist(entry, hosts, input);
+                : PushInChunks(entry, hosts, input);
         }
         catch (Exception)
         {
@@ -97,19 +118,77 @@ public sealed partial class NativePolicyCoreBridge
         }
     }
 
+    /// <summary>清空/追加两阶段分块推送（R7-RS-02）。首批 <c>clear=true</c> 建立快照、
+    /// 其余 <c>clear=false</c> 追加。两种中止条件：某一批被核心整体拒收（非形态拒收），
+    /// 或多批场景下首批应答不带 <c>clear</c> 回显——符号名区分不了 2 参与 3 参核心，
+    /// 回显是唯一探针；缺回显还继续推，每批都会整批抹掉前一批，最终快照只剩最后一批
+    ///（又一个"看起来在工作"的残缺名单，正是本条要修的形态）。单批推送不需该判据：
+    /// clear=1 与旧核心的整批替换同义，行为与既往一致。中止时核心侧留下的是**已推送
+    /// 前缀**而非上一份快照（首批即带清空），故 Detail 如实带出前缀规模与停在哪一批，
+    /// 绝不写成"完好无损"。形态拒收（accepted &lt; input）不中止：托管侧仍在拦那些
+    /// 条目，与既往单批口径一致，汇总后以 PartiallyPublished 呈现。</summary>
+    private CoreDenylistUpdateResult PushInChunks(
+        UpdateHostDenylistDelegate entry, IReadOnlyCollection<string> hosts, int input)
+    {
+        var batches = EnumerateBatches(hosts);
+        var accepted = 0;
+        for (var batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+        {
+            var batch = batches[batchIndex];
+            var result = InvokeHostDenylist(entry, batch, batchIndex == 0, batch.Count);
+            if (!result.Published)
+                return ChunkFailed(batchIndex, accepted, input, "denylist_chunk_failed");
+            accepted += result.Accepted;
+            if (batchIndex == 0 && batches.Count > 1 && !result.CoreEchoesClear)
+                return ChunkFailed(batchIndex, accepted, input, "core_lacks_clear_parameter");
+        }
+        return CoreDenylistUpdateResult.Apply(accepted, input);
+    }
+
+    private static CoreDenylistUpdateResult ChunkFailed(
+        int batchIndex, int accepted, int input, string detail) => new(
+        CoreDenylistOutcome.NotPublished, accepted, input,
+        $"{detail}@{batchIndex}（核心侧保留已推送前缀 {accepted} 条）");
+
+    /// <summary>按核心单载荷上限切批（逐元素 UTF-8 字节计费，+1 为元素间逗号）。
+    /// 空快照也必须产出一个空批——"清空核心名单"正是靠 clear=true 的空批表达，
+    /// 不推空批就会让已撤销的条目在核心侧残留。internal 同 ParseUpdateResponse：
+    /// 纯函数可直接钉（NativeDenylistChunkingTests），不扩公开 API。</summary>
+    internal static List<List<string>> EnumerateBatches(IReadOnlyCollection<string> hosts)
+    {
+        var batches = new List<List<string>>();
+        var current = new List<string>();
+        var budget = 2;  // 数组本身的 "[]"
+        foreach (var host in hosts)
+        {
+            var cost = JsonSerializer.SerializeToUtf8Bytes(host).Length + 1;
+            if (current.Count > 0 && budget + cost > MaxChunkPayloadBytes)
+            {
+                batches.Add(current);
+                current = [];
+                budget = 2;
+            }
+            current.Add(host);
+            budget += cost;
+        }
+        batches.Add(current);
+        return batches;
+    }
+
     private CoreDenylistUpdateResult InvokeHostDenylist(
         UpdateHostDenylistDelegate entry,
-        IReadOnlyCollection<string> hosts,
+        List<string> hosts,
+        bool clear,
         int input)
     {
         // 入参形态是 JSON 字符串数组（核心侧 serde 反序列化为 Vec<String>）；
         // host 已由 BlockedHosts 归一（小写、去尾点），此处不再加工。
-        var payload = JsonSerializer.Serialize(new List<string>(hosts));
+        var payload = JsonSerializer.Serialize(hosts);
         var hostsPointer = Utf8(payload);
         IntPtr response;
         try
         {
-            response = entry(Broker, hostsPointer);
+            response = entry(Broker, hostsPointer, clear ? 1 : 0);
         }
         finally
         {
@@ -153,7 +232,9 @@ public sealed partial class NativePolicyCoreBridge
             var accepted = ReadCount(root, "accepted");
             // 核心如实回报 input；应答缺失时退回本地 offered 数（不虚报成功）
             var offered = root.TryGetProperty("input", out _) ? ReadCount(root, "input") : input;
-            return CoreDenylistUpdateResult.Apply(accepted, offered);
+            // clear 回显只用于"所加载核心是否真带第三参"判据（见 PushInChunks）
+            return CoreDenylistUpdateResult.Apply(
+                accepted, offered, root.TryGetProperty("clear", out _));
         }
         catch (Exception)
         {
@@ -167,7 +248,7 @@ public sealed partial class NativePolicyCoreBridge
             : 0;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate IntPtr UpdateHostDenylistDelegate(IntPtr broker, IntPtr hostsJson);
+    private delegate IntPtr UpdateHostDenylistDelegate(IntPtr broker, IntPtr hostsJson, int clear);
 }
 
 /// <summary>原生核心黑名单注入结果。<see cref="CoreDenylistPublisher"/> 据此
@@ -188,12 +269,15 @@ public enum CoreDenylistOutcome
     NotPublished,
 }
 
-/// <summary>注入结果快照（不含 host 内容与任何本机路径——可安全落日志）。</summary>
+/// <summary>注入结果快照（不含 host 内容与任何本机路径——可安全落日志）。
+/// <see cref="CoreEchoesClear"/> 只服务于分批判据（所加载核心是否真带
+/// <c>clear</c> 参数），不参与 <see cref="Published"/> 语义。</summary>
 public sealed record CoreDenylistUpdateResult(
     CoreDenylistOutcome Outcome,
     int Accepted,
     int Input,
-    string Detail)
+    string Detail,
+    bool CoreEchoesClear = false)
 {
     /// <summary>核心侧是否真的拿到了这一批条目。</summary>
     public bool Published => Outcome is CoreDenylistOutcome.Published or CoreDenylistOutcome.PartiallyPublished;
@@ -201,11 +285,12 @@ public sealed record CoreDenylistUpdateResult(
     /// <summary>被核心形态校验/去重拒收的条目数（托管侧仍拦，核心侧永不命中）。</summary>
     public int RejectedEntryCount => Published ? Math.Max(Input - Accepted, 0) : Input;
 
-    internal static CoreDenylistUpdateResult Apply(int accepted, int input) => new(
+    internal static CoreDenylistUpdateResult Apply(int accepted, int input, bool coreEchoesClear = false) => new(
         accepted < input ? CoreDenylistOutcome.PartiallyPublished : CoreDenylistOutcome.Published,
         accepted,
         input,
-        accepted < input ? "partial_accept" : "ok");
+        accepted < input ? "partial_accept" : "ok",
+        coreEchoesClear);
 
     internal static CoreDenylistUpdateResult MissingExport(int input) =>
         new(CoreDenylistOutcome.ExportMissing, 0, input, "denylist_export_missing");

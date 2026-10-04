@@ -237,22 +237,32 @@ pub extern "C" fn aegis_policy_core_broker_consume_navigation_json(
     .unwrap_or_else(|_| write_response(deny("native_panic", "native policy core panicked")))
 }
 
-/// 注入/替换威胁 host 黑名单快照（审计第六轮 2026-10-03/04）。
+/// 注入威胁 host 黑名单快照（审计第六轮 2026-10-03/04）。
 ///
-/// 入参：JSON 字符串数组（`["evil.example","ads.example.com"]`）。
-/// 返回：`{"decision":"ok","accepted":N,"input":M}` —— 宿主据
-/// `accepted < input` 即可发现"有条目被形态校验拒收"，而不是静默变成
-/// 永不命中的死条目。非法输入/非法 JSON/空句柄/panic 一律返回 deny JSON，
-/// 绝不静默报成功。
+/// 入参：`hosts_json` 为 JSON 字符串数组（`["evil.example","ads.example.com"]`）；
+/// `clear` 为两阶段档位（第七轮 R7-RS-02）——非 0 先清空再接受本批（整批替换，
+/// 等价于本入口的既往语义），0 表示**追加**到现有快照。
+/// 返回：`{"decision":"ok","accepted":N,"input":M,"clear":bool}` —— 宿主据
+/// `accepted < input` 即可发现"有条目被形态校验拒收"，而不是静默变成永不命中的
+/// 死条目。非法输入/非法 JSON/空句柄/panic 一律返回 deny JSON，绝不静默报成功。
 ///
 /// 存在理由：此前 FFI 通路完全没有 deny-by-content 层（H-7 注记：
 /// `policy.evaluate / capability.validate 未接入 FFI 通路`），黑名单只活在
 /// 端侧代码里，Android 端因此整体没有威胁拦截。本入口是核心侧的最小接入面；
 /// 未调用时黑名单为空、行为与既往一致（不 deny-all）。
+///
+/// 分批的硬需求（R7-RS-02）：`hosts_json` 受 `read_utf8` 的
+/// `FFI_INPUT_MAX_BYTES` = 64KiB 上限约束，而托管侧订阅源允许 5 MiB
+///（Windows `ThreatFeed.MaxBytes`）——整批替换且无追加时，真实规模的名单
+/// **必然**注入失败（`ffi_input_too_long`），核心侧 `threat_blocklist` 分支
+/// 因此从不执行。宿主据此可分块推送：首块 `clear=1`，其余 `clear=0`。
+/// `clear` 回显是宿主判别"所加载核心是否带本参数"的唯一探针（应答信封不含
+/// abi_version）；旧 2 参核心会忽略多余实参并按整批替换行事。
 #[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_update_host_denylist_json(
     broker: *mut CAbiBroker,
     hosts_json: *const c_char,
+    clear: i32,
 ) -> *mut c_char {
     catch_unwind(AssertUnwindSafe(|| {
         let hosts_json = match unwrap_input_or_deny(read_utf8(hosts_json)) {
@@ -264,8 +274,9 @@ pub extern "C" fn aegis_policy_core_broker_update_host_denylist_json(
             Err(_) => return input_deny("denylist_input_invalid"),
         };
         let input = parsed.len() as u32;
+        let clear_batch = clear != 0;
         let Some(accepted) = with_broker(broker, move |value| {
-            value.inner.update_host_denylist(parsed)
+            value.inner.apply_host_denylist(parsed, clear_batch)
         }) else {
             return input_deny("ffi_broker_null");
         };
@@ -276,6 +287,7 @@ pub extern "C" fn aegis_policy_core_broker_update_host_denylist_json(
             "decision": "ok",
             "accepted": accepted,
             "input": input,
+            "clear": clear_batch,
         }))
     }))
     .unwrap_or_else(|_| write_response(deny("native_panic", "native policy core panicked")))

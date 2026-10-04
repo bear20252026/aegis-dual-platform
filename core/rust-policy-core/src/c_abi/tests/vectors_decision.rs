@@ -38,9 +38,11 @@ fn c_abi_matches_native_navigation_decision_vectors() {
         // 说明有条目被形态校验拒收，将成为永不命中的死条目。
         if let Some(hosts) = vector.get("deny_hosts") {
             let payload = c_string(&hosts.to_string());
+            // clear=1：向量按"整批快照"注入（追加档位见 buffer_boundaries）
             let applied = read_response(aegis_policy_core_broker_update_host_denylist_json(
                 broker,
                 payload.as_ptr(),
+                1,
             ));
             assert_eq!(applied["decision"], "ok", "{name}: 黑名单注入失败");
             assert_eq!(

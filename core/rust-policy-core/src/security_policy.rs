@@ -215,6 +215,15 @@ impl SecurityPolicy {
     ///（Windows `ntp.aegis.local` / `geo.aegis.local`）正是该形态，按名匹配会
     /// 把 chrome UI 自身拖进高危集。域名经 DNS 指向环回（rebinding）超出纯
     /// 函数能力，属宿主侧判定面——此处不为不可判定的形态假装全覆盖。
+    ///
+    /// **IPv6 不在本函数覆盖面内**（如实记边界，第七轮 R7-RS-05）：入参是归一
+    /// 后的 host，而 `origin::try_parse_external` 的字符集闸门只允许
+    /// `[A-Za-z0-9.-]`——`:`/`[` 形态的 IPv6 字面量在归一层即被拒（RS-177/
+    /// PY-069/070，见 origin/tests/host_grammar.rs 的
+    /// bracketed_ipv6_authority_rejected）。故 C# 孪生
+    ///（`UrlSafety.IsPublicIp`）按 IPAddress 字节判的 IPv6 ULA `fc00::/7`、
+    /// 组播 `ff00::/8`、site-local `fec0::/10` 在本函数**取不到入参**，
+    /// 不是"漏判"而是"无从判定"；要覆盖须先动归一层的 IPv6 支持，属另一批次。
     pub fn is_local_or_private_host(host: &str) -> bool {
         if host == "localhost" {
             return true;
@@ -240,8 +249,23 @@ impl SecurityPolicy {
         a == 0 || a == 127 || a == 10
         // 链路本地含云元数据地址 169.254.169.254
             || (a == 169 && b == 254)
+            // 172.16.0.0/12
             || (a == 172 && (16..=31).contains(&b))
             || (a == 192 && b == 168)
+            // 审计第七轮 R7-RS-05（2026-10-04）：补齐至 C# 孪生
+            // `UrlSafety.IsPublicIp`（windows/.../Core/UrlSafety.cs:183-200）
+            // 的高危段集——以下四段此前核心判"公网"，R6-21 声称的「SSRF 面在
+            // 核心层被拦」对其不成立。段集边界由向量逐条钉住
+            //（contracts/vectors/native-navigation-decision.json R7_RS_05_*，
+            // 含每段左右两侧的公网对照，防"整段扩大化"式过度收紧）：
+            // 100.64.0.0/10 CGNAT——含阿里云元数据端点 100.100.100.200
+            || (a == 100 && (64..=127).contains(&b))
+            // 192.0.2.0/24 TEST-NET-1（文档示例段，不可路由）
+            || (a == 192 && b == 0 && octets[2] == 2)
+            // 198.18.0.0/15 基准测试段
+            || (a == 198 && (b == 18 || b == 19))
+            // 224.0.0.0/4 组播（含 239.*/255.255.255.255 广播——孪生同段收口）
+            || a >= 224
     }
 
     /// 手动 URL 解码（零依赖——处理 %XX 编码）。

@@ -217,16 +217,16 @@ fn try_verify_signature(
     let key_bytes = trusted_keys.get(&key_id)?;
     let sig_str = obj.get("sig").and_then(|v| v.as_str())?;
     let sig_bytes = base64_decode(sig_str).ok()?;
-    // ed25519-dalek 2.x：from_bytes 期望固定长度数组（[u8; 32]/[u8; 64]——
-    // E0308 修复——公钥/签名长度校验——try_into）
+    // ed25519-dalek 3.x（第七轮 R7-RS-09：原误称 2.x——Cargo.toml 钉 "3"）：from_bytes
+    // 期望固定长度数组（[u8; 32]/[u8; 64]——E0308 修复——公钥/签名长度校验——try_into）
     let key_arr = <[u8; 32]>::try_from(key_bytes.as_slice()).ok()?;
     let sig_arr = <[u8; 64]>::try_from(sig_bytes.as_slice()).ok()?;
     // 审计第六轮延续（2026-10-04）：显式拒退化信任锚（见 is_degenerate_public_key）
     if is_degenerate_public_key(&key_arr) {
         return None;
     }
-    // ed25519-dalek 2.x：VerifyingKey::from_bytes 返回 Result；Signature::
-    // from_bytes 直接返回 Signature（非 Result——2.x API）
+    // ed25519-dalek 3.x：VerifyingKey::from_bytes 返回 Result；Signature::from_bytes
+    // 直接返回 Signature（非 Result——3.x API，R7-RS-09 同处改述）
     let verifying_key = VerifyingKey::from_bytes(&key_arr).ok()?;
     let signature = Signature::from_bytes(&sig_arr);
     // verify_strict：严格验证——防 malleability（Houseme 生产实践）

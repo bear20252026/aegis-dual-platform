@@ -2,6 +2,11 @@
 
 use super::*;
 
+// 生产子模块（非测试模块）：威胁 host 黑名单的匹配与注入口径。
+// 行数红线之外另有单一职责理由——该口径有三端孪生（adblock / ThreatFeed /
+// threat_feed.py），对账记录集中在一个文件里才不会与导航状态机互相稀释。
+pub(crate) mod denylist;
+
 // ===== UniFFI Object（有状态对象——跨调用保持状态）=====
 
 /// FFI 版 Broker——跨语言导航决策（委托 ContextBroker）。
@@ -24,13 +29,11 @@ pub struct FfiBroker {
     ///（50K）；测试构造器注入小容量，fail-closed 满账本分支经公共路径
     ///（evaluate/approve/consume）真实触达（50K 次公共调用在单测内是负担）
     max_issued_actions: usize,
-    /// 审计第六轮（2026-10-03/04）：威胁 host 黑名单快照（deny-by-content）。
-    /// 此前 FFI 通路完全没有策略层——H-7 注记明载「policy.evaluate /
-    /// capability.validate 未接入 FFI 通路」，故 evaluate_navigation 的拒绝
-    /// 条件只有"URL 是否良构"，任意良构 https URL 一律 Allow（恶意 host 不例外）。
-    /// 空集 = 不拦（默认不 deny-all，避免未接线端整体不可用）；由宿主经
-    /// update_host_denylist 注入订阅源快照。
-    deny_hosts: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// 威胁 host 黑名单快照（deny-by-content）——匹配口径（父域后缀链）、注入
+    /// 规模（清空/追加两阶段）与孪生实现对账记录均在其模块文档内：
+    /// 审计第六轮 H-7 注记（FFI 通路无策略层）与第七轮 R7-RS-01/R7-RS-02。
+    /// 空集 = 不拦（默认不 deny-all，避免未接线端整体不可用）。
+    deny_hosts: denylist::HostDenylist,
 }
 
 /// 原生策略核心签发的授权状态。已消费记录保留到会话撤销，
@@ -108,19 +111,22 @@ impl IssuedAuthorization {
     }
 }
 
-/// 黑名单条目 host 形态校验——与 `canonicalize_external` 的 host 口径一致。
-/// 尾点/前导点/空段/越界字符的条目永远不会被命中，收下即制造"已登记但永不生效"
-/// 的死条目（比不登记更坏：订阅源看起来是工作的）。
-/// 审计第六轮（2026-10-03/04）：置于模块级而非 impl 内——`#[uniffi::export]`
-/// 的 impl 块不接受无 self 关联函数（编译期报 associated functions not supported）。
-fn denylist_host_shape_ok(host: &str) -> bool {
-    !host.is_empty()
-        && !host.starts_with('.')
-        && !host.ends_with('.')
-        && !host.contains("..")
-        && host
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+/// 内容判定用的 host 口径单源（evaluate 与 consume 复判共用，R7-RS-01/R7-RS-02）：
+/// **剥去端口**的纯主机名。
+///
+/// CanonicalExternalUrl.host 依 RS-227 口径保留非默认端口（:8080 形态实证在
+/// host 内），直接拿它比对会同时制造两个绕过：
+///   ① 黑名单条目 `bad.example` 匹配不上 `bad.example:8443`；
+///   ② 高危判定把 `127.0.0.1:8080` 当成非本机（split('.') 末段
+///      "8080" 之外的 "1:8080" 解析失败）而放行。
+/// IPv6 字面量（方括号形态）已在归一层被拒（PY-069/070），此处
+/// split(':') 取首段无歧义。host 永不为空（归一层已拒空）。
+fn policy_host_of(canonical: &crate::origin::CanonicalExternalUrl) -> &str {
+    canonical
+        .host
+        .split(':')
+        .next()
+        .unwrap_or(canonical.host.as_str())
 }
 
 #[uniffi::export]
@@ -189,23 +195,12 @@ impl FfiBroker {
                 };
             }
         };
-        // 内容判定的 host 口径：**剥去端口**的纯主机名。
-        // CanonicalExternalUrl.host 依 RS-227 口径保留非默认端口（:8080 形态
-        // 实证在 host 内），直接拿它比对会同时制造两个绕过：
-        //   ① 黑名单条目 `bad.example` 匹配不上 `bad.example:8443`；
-        //   ② 高危判定把 `127.0.0.1:8080` 当成非本机（split('.') 末段
-        //      "8080" 之外的 "1:8080" 解析失败）而放行。
-        // IPv6 字面量（方括号形态）已在归一层被拒（PY-069/070），此处
-        // split(':') 取首段无歧义。host 永不为空（归一层已拒空）。
-        let policy_host = canonical_url
-            .host
-            .split(':')
-            .next()
-            .unwrap_or(canonical_url.host.as_str());
+        // 内容判定的 host 口径单源见 policy_host_of（剥端口，与 consume 复判同源）
+        let policy_host = policy_host_of(&canonical_url);
         // 审计第六轮（2026-10-03/04）：deny-by-content 首次在 FFI 通路生效——
         // 命中威胁黑名单即拒（此前黑名单只活在两端宿主代码里，Android 端整体缺失）。
         // 用 policy host 比对，不用 raw_url：raw 可含 userinfo/query 混淆形态。
-        if self.is_host_denied(policy_host) {
+        if self.deny_hosts.host_denied(policy_host) {
             return FfiDecision::Deny {
                 reason: FfiDenyReason {
                     code: "threat_blocklist".into(),
@@ -319,36 +314,25 @@ impl FfiBroker {
 // #[uniffi::export] 的 impl 会把其中所有方法计入 FFI 面
 //（内部类型 AuthorizedAction 未导出，被引用即编译失败）。
 impl FfiBroker {
-    /// 威胁黑名单判定（审计第六轮 2026-10-03/04）。锁中毒按**被拒**处理——
-    /// 黑名单是拦截面，判定失败绝不 fail-open。
-    fn is_host_denied(&self, host: &str) -> bool {
-        match self.deny_hosts.lock() {
-            Ok(denied) => denied.contains(host),
-            Err(_) => true,
-        }
+    /// 黑名单快照注入的 Rust 侧单点（R7-RS-02 清空/追加两阶段）。本入口的
+    /// 跨语言面只在 C ABI（`c_abi::navigation`）——UniFFI 绑定面维持下方
+    /// `update_host_denylist`（整批替换）不变、不新增导出项（生成绑定的滞后另有
+    /// 第七轮 R7-RS-03 登记）。
+    pub(crate) fn apply_host_denylist(&self, hosts: Vec<String>, clear: bool) -> u32 {
+        self.deny_hosts.apply(hosts, clear)
     }
 }
 
 #[uniffi::export]
 impl FfiBroker {
-    /// 注入/替换威胁 host 黑名单快照（审计第六轮 2026-10-03/04）。
+    /// 注入/替换威胁 host 黑名单快照（整批替换，即两阶段的 `clear=true` 特例）。
     ///
     /// 返回**被接受**的条目数：调用方可用 `输入数 - 返回值` 发现有一批条目
     /// 被形态校验拒收，而不是静默变成死条目。空输入 = 清空（**不** deny-all）——
     /// 未接入订阅源的端行为与既往完全一致，这是本改动能安全落地的前提。
+    /// 匹配口径（精确 + 父域后缀链）见 `ffi::broker::denylist`。
     pub fn update_host_denylist(&self, hosts: Vec<String>) -> u32 {
-        let accepted: std::collections::HashSet<String> = hosts
-            .into_iter()
-            .map(|host| host.trim().to_ascii_lowercase())
-            .filter(|host| denylist_host_shape_ok(host))
-            .collect();
-        let count = accepted.len() as u32;
-        match self.deny_hosts.lock() {
-            Ok(mut denied) => *denied = accepted,
-            // 锁中毒：不覆盖（保留旧快照比清空安全），并如实报 0 接受
-            Err(_) => return 0,
-        }
-        count
+        self.apply_host_denylist(hosts, true)
     }
 }
 
@@ -650,12 +634,10 @@ impl FfiBroker {
         // 注意：这里**只复判黑名单，不复判高危**——高危目标在签发阶段就走
         // 待审批分支、从不进入 issued 账本；若在此处再拦高危，用户刚批准的
         // 本机/私网导航会被自己否决，把确认流变成死路径。
-        let policy_host = canonical_url
-            .host
-            .split(':')
-            .next()
-            .unwrap_or(canonical_url.host.as_str());
-        if self.is_host_denied(policy_host) {
+        // R7-RS-01（第七轮）：复判与 evaluate **同源**——同一个 policy_host_of
+        // 口径、同一个 HostDenylist::host_denied 判定，不写第二份后缀链逻辑。
+        let policy_host = policy_host_of(&canonical_url);
+        if self.deny_hosts.host_denied(policy_host) {
             return FfiDecision::Deny {
                 reason: FfiDenyReason {
                     code: "threat_blocklist".into(),
@@ -775,7 +757,7 @@ impl FfiBroker {
             )),
             issued_actions: std::sync::Mutex::new(HashMap::new()),
             pending_navigation_approvals: std::sync::Mutex::new(HashMap::new()),
-            deny_hosts: std::sync::Mutex::new(std::collections::HashSet::new()),
+            deny_hosts: denylist::HostDenylist::default(),
             policy_version,
             action_expiry_seconds,
             max_issued_actions: MAX_ISSUED_ACTIONS,
