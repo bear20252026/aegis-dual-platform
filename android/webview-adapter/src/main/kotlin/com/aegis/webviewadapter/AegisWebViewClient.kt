@@ -256,6 +256,41 @@ class AegisWebViewClient(
         return rejected
     }
 
+    /**
+     * 自动批准分支：经注入决策源兑换一次性 nonce，等同用户批准后的兑换
+     * （AD-050：决策源生产为 broker 委托、测试为替身）。
+     *
+     * 审计第六轮（2026-10-04）：自 authorizeNavigation 抽出——detekt LongMethod
+     * 命中 60 行上限（第六轮为该函数加入兑换失败可见化分支后越线）。逐行语义
+     * 不变，不借抽取之名改判定：!consumed 仍走可见拒绝，注入决策本身被拒时
+     * 沿用其 reason（策略口径），不谎报为兑换失败。
+     */
+    private fun authorizeByAutoApproval(
+        view: WebView,
+        url: String,
+        request: ApprovalRequest,
+        fromNavigationCallback: Boolean,
+    ): Boolean {
+        val approved = autoApproveDecision(request, url, "navigation")
+        val consumed =
+            approved is Decision.Allow &&
+                broker.consumeNavigation(
+                    action = approved.action,
+                    sessionId = sessionId,
+                    tabId = tabId,
+                    currentGeneration = documentGeneration,
+                    rawUrl = url,
+                    scope = "navigation",
+                )
+        return finishMainFrameAuthorization(
+            view,
+            url,
+            consumed,
+            fromNavigationCallback,
+            denyReason = (approved as? Decision.Deny)?.reason,
+        )
+    }
+
     private fun authorizeNavigation(
         view: WebView,
         rawUrl: String,
@@ -292,27 +327,11 @@ class AegisWebViewClient(
                         false
                     } else {
                         // 自动批准：保留 Rust 核心 nonce 语义（等同用户批准后兑换）
-                        // AD-050：决策经注入源（生产=broker 委托；测试=替身）。
-                        val approved = autoApproveDecision(decision.request, url, "navigation")
-                        val consumed =
-                            approved is Decision.Allow &&
-                                broker.consumeNavigation(
-                                    action = approved.action,
-                                    sessionId = sessionId,
-                                    tabId = tabId,
-                                    currentGeneration = documentGeneration,
-                                    rawUrl = url,
-                                    scope = "navigation",
-                                )
-                        // 审计第六轮（2026-10-03）：!consumed 不再静默死点击——
-                        // 兑换失败顶层上抛可见提示；注入决策本身被拒时沿用其
-                        // reason（策略口径），不谎报为兑换失败。
-                        finishMainFrameAuthorization(
+                        authorizeByAutoApproval(
                             view,
                             url,
-                            consumed,
+                            decision.request,
                             fromNavigationCallback,
-                            denyReason = (approved as? Decision.Deny)?.reason,
                         )
                     }
                 }
