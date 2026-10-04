@@ -240,6 +240,7 @@ fail-closed；服务端 `strict`/`enforce_admins`/评审要求；本机与局域
 | B5 | **已落地** | 见本节「B5 落地」。 |
 | R7-TOOL-02 | **已落地** | 见本节「R7-TOOL-02 落地」——第九节批次表漏排的 P1，B3/B5 之后仍红，故未等排期直接补做。 |
 | B4 | **已落地** | 见本节「B4 落地」。 |
+| R7-CS1-15 / 04 | **已落地** | 根因是**镜像被卸载后仍可能调用其内函数指针**（崩溃转储模块列表零命中 aegis_policy_core.dll），不只是缺租约：镜像常驻 + 八个入口全走 `InvokeLeased` + `IsUsable` 接成入口判据 + 原生作业补跑 Core.Tests。原生模式 711/711 三轮全绿（修复前中止点 667/403/389/502 不稳定）。见「R7-CS1-15 / R7-CS1-04 落地」。 |
 | B6/B7 | 未动 | 见第九节。B6 的三项与 B7 的部分需先取得用户裁决（第八节 4）；B6 与 B3/B4 同改 `HostWebView.cs`/`WebViewHardening.kt`，须串行。 |
 
 ### B4 落地（种子框定三端对齐 + 后缀清单单源 + androidTest 锚点）
@@ -317,6 +318,47 @@ Core.Tests 708/708 首次取得运行态证据；代价是构建会剥掉 `packa
 行数红线同 PR 收窄 556→549 / 604→584，为此把 `HostWebView` 的拦截落盘接线（CS-308/CS-363）
 拆出 `HostWebView.TrackerBlocks.cs`（partial，逻辑零改动）。子资源层的 403 与下载层的
 落盘抑制仍只能静态判定（需真实 CoreWebView2 COM 环境），如实登记。
+
+### R7-CS1-15 / R7-CS1-04 落地（原生跨界：租约纪律 + 镜像常驻 + 原生模式门禁入口）
+
+**根因不是"没加租约"这一条**。崩溃转储（`dotnet test --blame` 采集，502 例通过时中止）
+的模块列表里 `aegis_policy_core.dll` **已不在场**——AV 来自「调用已卸载镜像中的函数指针」：
+委托（`_createSession` 等）指向镜像地址，其生命周期与某个桥实例并不一对一（桥可被
+Dispose/终结，委托却被另一个仍在用的桥持有；门禁探测另有 TryLoad/Free 配平）。
+原 `NativeLibraryHandle.ReleaseHandle` 只处理了 CS-376 的「Free 抛异常」，
+未处理「Free 成功本身才是缺陷」。
+
+三层处置：
+
+1. **镜像常驻**：`ReleaseHandle` 不再 `NativeLibrary.Free`（进程退出由 OS 回收映射）；
+   SafeHandle 形态保留（IsClosed/IsInvalid 语义不变）。
+2. **租约纪律**：八个原生入口全部经 `InvokeLeased<T>`——先 `TryAcquireLease()`
+   （`DangerousAddRef`）再在租约内读 `Broker`，取不到租约即 fail-closed
+   （bool→false，Decision→`native_policy_core_disposed`）；裸指针获取点全文件**只有一处**
+   （`return operation(Broker);`），入口自行取指针不再可能。
+3. **死守卫接上**：`IsUsable` 此前全仓零引用（注释把它写成守卫），现作为
+   `TryAcquireLease` 的入口判据——R7-CS1-04 由「注释失实 + 潜在」实质收口。
+4. **门禁入口补上**：`native-policy-artifacts.yml`（唯一置 `AEGIS_REQUIRE_NATIVE_POLICY_CORE=1`
+   的作业）原样只跑 Broker.Tests——Core.Tests 从未走过跨界路径，这正是崩溃藏了五轮的原因。
+   现加 Core.Tests 原生模式一步，并按 B1 口径显式断 `$LASTEXITCODE`。
+
+**证据**：修复后原生模式 Core.Tests **711/711 连跑三轮全绿**（修复前实测中止点不稳定：
+667 / 403 / 389 / 502，是终结器与调用竞态的典型签名）；Broker.Tests 托管 140/140、
+原生 140/140；托管 Core.Tests 711/711。
+**因果实证（故障注入）**：把 `NativeLibrary.Free` 单行加回 → 原生 Core.Tests 第 45 例即
+中止；再改回常驻 → 同一条命令 711/711。故"镜像常驻"一项的因果成立，不是顺带改。
+**常驻锚**（`NativePolicyCoreBridgeLeaseTests` 12 例，源码静态锚——运行期无法稳定复现
+GC 时序，把它当唯一防线就是假保证）：八个入口逐个必须含 `InvokeLeased(`；
+`_brokerHandle.DangerousGetHandle()` 代码行计数必须为 1 且位于 `InvokeLeased` 内、
+`Broker,` 计数必须为 0；`IsUsable` 必须有消费者；`NativeLibraryHandle` 的 ReleaseHandle
+不得再出现 `NativeLibrary.Free`；workflow 必须在置位原生开关后跑 Core.Tests
+且其后有 publish 步（防退出码被吞的老形态）。行数：`NativePolicyCoreBridge.cs` 480→433
+（互操作面拆入 `NativePolicyCoreBridge.NativeInterop.cs` 94 行）。
+
+**残余**：镜像常驻意味着本进程的 DLL 不卸载——若将来要求可卸载（例如热替换策略核心），
+必须先把「委托 → 镜像」引用做成显式计数，而不是回到 FreeLibrary。
+
+
 
 ### R7-TOOL-02 落地（第九节批次表漏排的唯一 P1）
 

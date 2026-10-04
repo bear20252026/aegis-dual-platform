@@ -35,10 +35,13 @@ public sealed partial class NativePolicyCoreBridge : IDisposable
     private IntPtr Broker => _brokerHandle.DangerousGetHandle();
 
     /// <summary>取得 broker 使用期引用（DangerousAddRef）。返回 false 即不得调用
-    /// 任何原生入口（已 Dispose/句柄失效）——fail-closed。</summary>
+    /// 任何原生入口（已 Dispose/句柄失效）——fail-closed。
+    /// R7-CS1-04/15：入口判 IsUsable（此前该属性全仓零引用＝伪装成守卫的死代码，
+    /// 而八个原生入口又不检 _disposed 直取指针，实测原生模式下测试主机
+    /// 0xC0000005 use-after-free）。</summary>
     private bool TryAcquireLease()
     {
-        if (_disposed)
+        if (!IsUsable)
             return false;
         try
         {
@@ -64,6 +67,28 @@ public sealed partial class NativePolicyCoreBridge : IDisposable
             // 引用已随 Dispose 归零——不存在可撤销的原生副作用
         }
     }
+
+    /// <summary>R7-CS1-15（第七轮·原生模式下实测 0xC0000005）：唯一的原生调用出口。
+    /// 先取得引用计数租约（Dispose/终结竞争下句柄不得在调用期间被释放），再在租约
+    /// 内取 broker 指针。取不到租约一律返回 whenUnavailable（bool → false，
+    /// Decision → Deny）——"猜测句柄仍然有效"正是越界访问的入口。</summary>
+    private T InvokeLeased<T>(Func<IntPtr, T> operation, T whenUnavailable)
+    {
+        if (!TryAcquireLease())
+            return whenUnavailable;
+        try
+        {
+            return operation(Broker);
+        }
+        finally
+        {
+            ReleaseLease();
+        }
+    }
+
+    /// <summary>决策类入口在租约不可得时的拒绝（与协议异常分码，便于归因）。</summary>
+    private static Decision DisposedDeny(string detail) =>
+        Deny("native_policy_core_disposed", detail);
 
     /// <summary>审计第七轮（2026-10-03）：原生调用统一守卫——
     /// Dispose/终结之后一律 fail-closed（此前 CreateSession/EvaluateNavigation/
@@ -162,22 +187,25 @@ public sealed partial class NativePolicyCoreBridge : IDisposable
     }
 
     public bool CreateSession(string sessionId, string tabId, ulong generation, ulong ttlSeconds) =>
-        InvokeTwoStrings(sessionId, tabId, (session, tab) =>
-            _createSession(Broker, session, tab, generation, ttlSeconds) == 1);
+        InvokeLeased(broker => InvokeTwoStrings(sessionId, tabId, (session, tab) =>
+            _createSession(broker, session, tab, generation, ttlSeconds) == 1), false);
 
     public bool DestroySession(string sessionId) =>
-        InvokeOneString(sessionId, session => _destroySession(Broker, session) == 1);
+        InvokeLeased(broker => InvokeOneString(sessionId, session =>
+            _destroySession(broker, session) == 1), false);
 
     public bool AdvanceDocumentGeneration(string sessionId, string tabId, ulong nextGeneration) =>
-        InvokeTwoStrings(sessionId, tabId, (session, tab) =>
-            _advanceGeneration(Broker, session, tab, nextGeneration) == 1);
+        InvokeLeased(broker => InvokeTwoStrings(sessionId, tabId, (session, tab) =>
+            _advanceGeneration(broker, session, tab, nextGeneration) == 1), false);
 
     public Decision EvaluateNavigation(string sessionId, string tabId, ulong generation, string rawUrl, string scope)
     {
         try
         {
-            return InvokeFourStrings(sessionId, tabId, rawUrl, scope, (session, tab, url, requestedScope) =>
-                ParseDecision(_evaluateNavigation(Broker, session, tab, generation, url, requestedScope)));
+            return InvokeLeased(broker => InvokeFourStrings(sessionId, tabId, rawUrl, scope,
+                (session, tab, url, requestedScope) =>
+                    ParseDecision(_evaluateNavigation(broker, session, tab, generation, url, requestedScope))),
+                DisposedDeny("原生策略核心桥已释放，拒绝跨界导航裁决"));
         }
         catch (Exception)
         {
@@ -190,8 +218,10 @@ public sealed partial class NativePolicyCoreBridge : IDisposable
     {
         try
         {
-            return InvokeFourStrings(sessionId, tabId, rawUrl, scope, (session, tab, url, requestedScope) =>
-                ParseDecision(_requestNavigationConfirmation(Broker, session, tab, generation, url, requestedScope)));
+            return InvokeLeased(broker => InvokeFourStrings(sessionId, tabId, rawUrl, scope,
+                (session, tab, url, requestedScope) =>
+                    ParseDecision(_requestNavigationConfirmation(broker, session, tab, generation, url, requestedScope))),
+                DisposedDeny("原生策略核心桥已释放，拒绝登记确认请求"));
         }
         catch (Exception)
         {
@@ -204,8 +234,10 @@ public sealed partial class NativePolicyCoreBridge : IDisposable
     {
         try
         {
-            return InvokeThreeStrings(request.Nonce, rawUrl, scope, (nonce, url, requestedScope) =>
-                ParseDecision(_approveNavigationConfirmation(Broker, nonce, url, requestedScope)));
+            return InvokeLeased(broker => InvokeThreeStrings(request.Nonce, rawUrl, scope,
+                (nonce, url, requestedScope) =>
+                    ParseDecision(_approveNavigationConfirmation(broker, nonce, url, requestedScope))),
+                DisposedDeny("原生策略核心桥已释放，拒绝兑换确认授权"));
         }
         catch (Exception)
         {
@@ -213,12 +245,13 @@ public sealed partial class NativePolicyCoreBridge : IDisposable
         }
     }
 
-    /// <summary>显式拒绝待审批导航；异常或未知 nonce 均返回 false。</summary>
+    /// <summary>显式拒绝待审批导航；异常、未知 nonce 或桥已释放均返回 false。</summary>
     public bool RejectNavigationConfirmation(ApprovalRequest request)
     {
         try
         {
-            return InvokeOneString(request.Nonce, nonce => _rejectNavigationConfirmation(Broker, nonce) == 1);
+            return InvokeLeased(broker => InvokeOneString(request.Nonce,
+                nonce => _rejectNavigationConfirmation(broker, nonce) == 1), false);
         }
         catch (Exception)
         {
@@ -241,8 +274,10 @@ public sealed partial class NativePolicyCoreBridge : IDisposable
                 new DateTimeOffset(action.ExpiresAt).ToUnixTimeSeconds(),
                 action.Nonce,
                 action.PolicyVersion));
-            return InvokeThreeStrings(actionJson, rawUrl, scope, (serializedAction, url, requestedScope) =>
-                ParseDecision(_consumeNavigation(Broker, serializedAction, url, requestedScope)) is Decision.Allow);
+            return InvokeLeased(broker => InvokeThreeStrings(actionJson, rawUrl, scope,
+                (serializedAction, url, requestedScope) =>
+                    ParseDecision(_consumeNavigation(broker, serializedAction, url, requestedScope)) is Decision.Allow),
+                false);
         }
         catch (Exception)
         {
@@ -395,86 +430,4 @@ public sealed partial class NativePolicyCoreBridge : IDisposable
         }
         finally { Marshal.FreeCoTaskMem(firstPointer); }
     }
-
-    private sealed record NativeAction(
-        [property: System.Text.Json.Serialization.JsonPropertyName("session_id")] string SessionId,
-        [property: System.Text.Json.Serialization.JsonPropertyName("tab_id")] string TabId,
-        [property: System.Text.Json.Serialization.JsonPropertyName("document_generation")] ulong DocumentGeneration,
-        [property: System.Text.Json.Serialization.JsonPropertyName("origin")] string Origin,
-        [property: System.Text.Json.Serialization.JsonPropertyName("method")] string Method,
-        [property: System.Text.Json.Serialization.JsonPropertyName("canonical_parameters")] string CanonicalParameters,
-        [property: System.Text.Json.Serialization.JsonPropertyName("scope")] string Scope,
-        [property: System.Text.Json.Serialization.JsonPropertyName("expires_at")] long ExpiresAt,
-        [property: System.Text.Json.Serialization.JsonPropertyName("nonce")] string Nonce,
-        [property: System.Text.Json.Serialization.JsonPropertyName("policy_version")] string PolicyVersion);
-
-    /// <summary>CS-207：原生库句柄 SafeHandle——关键终结兜底 NativeLibrary.Free。</summary>
-    private sealed class NativeLibraryHandle : System.Runtime.InteropServices.SafeHandle
-    {
-        internal NativeLibraryHandle(IntPtr pointer) : base(IntPtr.Zero, true) => SetHandle(pointer);
-
-        public override bool IsInvalid => handle == IntPtr.Zero;
-
-        protected override bool ReleaseHandle()
-        {
-            // CS-376（2026-10-01 发布链批）：进程退出终结波中 FreeLibrary 可能
-            // 失败（OS loader 关停竞态）——NativeLibrary.Free 抛 InvalidOperationException
-            // 且终结器不允许异常外逃（外逃即杀死整个测试宿主/进程）。Best-effort
-            // 释放语义：失败吞掉返回 false（泄漏面与关闭竞态代价远小于宿主崩溃）。
-            try
-            {
-                NativeLibrary.Free(handle);
-                return true;
-            }
-            catch (Exception)
-            {
-                return false;
-            }
-        }
-    }
-
-    /// <summary>CS-207：原生 broker 句柄 SafeHandle——关键终结兜底 brokerFree。</summary>
-    private sealed class NativeBrokerHandle : System.Runtime.InteropServices.SafeHandle
-    {
-        private readonly BrokerFreeDelegate _free;
-
-        internal NativeBrokerHandle(IntPtr pointer, BrokerFreeDelegate free) : base(IntPtr.Zero, true)
-        {
-            SetHandle(pointer);
-            _free = free;
-        }
-
-        public override bool IsInvalid => handle == IntPtr.Zero;
-
-        protected override bool ReleaseHandle()
-        {
-            _free(handle);
-            return true;
-        }
-    }
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint AbiVersionDelegate();
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate IntPtr BrokerNewDelegate(IntPtr policyVersion);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void BrokerFreeDelegate(IntPtr broker);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate void StringFreeDelegate(IntPtr response);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate byte CreateSessionDelegate(IntPtr broker, IntPtr sessionId, IntPtr tabId, ulong generation, ulong ttlSeconds);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate byte DestroySessionDelegate(IntPtr broker, IntPtr sessionId);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate byte AdvanceGenerationDelegate(IntPtr broker, IntPtr sessionId, IntPtr tabId, ulong nextGeneration);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate IntPtr EvaluateNavigationDelegate(IntPtr broker, IntPtr sessionId, IntPtr tabId, ulong generation, IntPtr rawUrl, IntPtr scope);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate IntPtr RequestNavigationConfirmationDelegate(IntPtr broker, IntPtr sessionId, IntPtr tabId, ulong generation, IntPtr rawUrl, IntPtr scope);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate IntPtr ApproveNavigationConfirmationDelegate(IntPtr broker, IntPtr nonce, IntPtr rawUrl, IntPtr scope);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate byte RejectNavigationConfirmationDelegate(IntPtr broker, IntPtr nonce);
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate IntPtr ConsumeNavigationDelegate(IntPtr broker, IntPtr actionJson, IntPtr rawUrl, IntPtr scope);
 }
