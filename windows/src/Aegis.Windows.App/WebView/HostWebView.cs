@@ -11,8 +11,9 @@ using Microsoft.Web.WebView2.Core;
 
 /// <summary>WebView2 封装（阶段 C——蓝图 windows/src/Aegis.Windows.WebView）。
 /// 只负责 WebView2 API 与事件转换——不拥有安全策略（ADR-002）。
-/// 远程页面无 native bridge——不注入 host object（ADR-003）。</summary>
-public sealed class HostWebView : IDisposable
+/// 远程页面无 native bridge——不注入 host object（ADR-003）。
+/// 分片：拦截事件落盘接线见 HostWebView.TrackerBlocks.cs。</summary>
+public sealed partial class HostWebView : IDisposable
 {
     private readonly IBroker _broker;
     private readonly IPrivacySettings _privacy;
@@ -345,8 +346,10 @@ public sealed class HostWebView : IDisposable
         }
     }
 
-    /// <summary>DNT 注入 + 黑名单子资源真拦截（WebResourceRequested 原生返回
-    /// 403——pywebview 时代只能标记不能拦截的缺口，原生 API 直接闭合）。</summary>
+    /// <summary>DNT 注入 + 子资源真拦截（WebResourceRequested 原生返回 403——
+    /// pywebview 时代只能标记不能拦截的缺口，原生 API 直接闭合）。拦截面两条：
+    /// 威胁黑名单，以及隐私网络边界（R7-CS1-01——本机/内网/链路本地/云元数据，
+    /// 与导航层同一谓词单源 PrivateNetworkBoundary）。</summary>
     private void OnWebResourceRequested(CoreWebView2 webView, CoreWebView2WebResourceRequestedEventArgs e)
     {
         try
@@ -355,11 +358,14 @@ public sealed class HostWebView : IDisposable
             if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
                 || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
                 return;
-            // 威胁黑名单（既有——子资源真拦截）
-            if (_broker.IsHostBlocked(uri.Host))
+            // 威胁黑名单 + 隐私网络边界（远程页把内网目标改写成 <img>/fetch 时，
+            // 导航层的边界管不到这里——子资源层必须自己判一次）
+            var deniedBy = _broker.IsHostBlocked(uri.Host) ? "黑名单"
+                : PrivateNetworkBoundary.Denies(uri) ? "隐私网络边界" : null;
+            if (deniedBy is not null)
             {
                 Core.Security.SecurityLog.Write(
-                    $"[threat] 子资源拦截（黑名单命中）: {RedactUrl(e.Request.Uri)}");
+                    $"[threat] 子资源拦截（{deniedBy}命中）: {RedactUrl(e.Request.Uri)}");
                 e.Response = webView.Environment.CreateWebResourceResponse(
                     null, 403, "Blocked", "Content-Type: text/plain");
                 return;
@@ -403,35 +409,9 @@ public sealed class HostWebView : IDisposable
         }
     }
 
-    // —— CS-308（2026-09-26 审计）：拦截类事件聚合落盘 ——
-    // 跟踪器密集页此前每个被拦截子请求同步 SecurityLog.Write（每条
-    // File.AppendAllText）——IO 放大且 1MB 取证日志被冲掉。按 host 聚合计数，
-    // 周期性（累计 BlockAggregateFlushThreshold 次）落一行；Dispose 兜底清空。
-    // CS-363（2026-10-01 审计）：聚合逻辑提纯到 TrackerBlockAggregator
-    //（单测直测聚合/阈值/尾部 flush），HostWebView 只保留落盘接线。
-    private readonly TrackerBlockAggregator _trackerBlocks = new(BlockAggregateFlushThreshold);
-
-    private const int BlockAggregateFlushThreshold = TrackerBlockAggregator.DefaultFlushThreshold;
-
-    private void RecordTrackerBlock(Uri uri, int level, CoreWebView2WebResourceContext context)
-    {
-        if (_trackerBlocks.Record(uri.Host, $"级别{level} ctx={context}"))
-            FlushTrackerBlocks();
-    }
-
-    private void FlushTrackerBlocks()
-    {
-        foreach (var row in _trackerBlocks.Drain())
-        {
-            SecurityLog.Write(
-                $"[privacy] 跟踪防护拦截聚合: {row.Host} ×{row.Count}（{row.Detail}）");
-        }
-    }
-
     // CS-070（审计 2026-09-25）：脱敏单源——与 Broker 各持一份相同实现已收敛
     // 到 UrlRedactor.Redact（丢弃 query/fragment，超长截断）。
     private static string RedactUrl(string? url) => UrlRedactor.Redact(url);
-
 
     public void Dispose()
     {

@@ -39,7 +39,8 @@
 
 **未覆盖面如实声明：本轮不是「全仓 100%」**。Rust 指纹族与 Android 展示层为抽样；
 Windows 契约/测试区**没有任何运行态证据**（`dotnet test` 因 `-r win-x64` 锁约束未跑通，
-陈旧产物 177 例与台账 708 例不可比，故该区全部为静态判定）。
+陈旧产物 177 例与台账 708 例不可比，故该区全部为静态判定）——本条已在 B3 落地时闭合，
+见第十节。
 
 ## 三、本轮 P1（8 条，全部经主代理回读或实跑证实）
 
@@ -191,7 +192,9 @@ R7-CS1-09（`CoreDenylistPublisher` 注释承诺「每一次订阅源刷新」�
 
 ## 八、本轮未覆盖 / 需下一轮或需用户裁决
 
-1. **Windows 契约/测试区无运行态证据**：`dotnet test -p:RestoreLockedMode=true`（未加 `-r win-x64`）
+1. **Windows 契约/测试区无运行态证据**：（本轮 B3 已闭合，见第十节「B3 落地」末段——
+   不加 `-r win-x64` 即可跑通，Broker 128/128、Core 708/708。以下保留派发时的原始记录：）
+   `dotnet test -p:RestoreLockedMode=true`（未加 `-r win-x64`）
    报 NU1004——`packages.lock.json` 的 RID 是 win-x64（`Directory.Build.props` SP-220 自述该约束），
    `--no-build` 命中的是 2026-09-07 陈旧产物（177 例，与台账 708 例不可比）。该区所有结论均为
    静态判定，**未声称任何测试通过**；`packages.lock.json` 未被改写（`git status` 干净）。
@@ -233,7 +236,33 @@ fail-closed；服务端 `strict`/`enforce_admins`/评审要求；本机与局域
 | --- | --- | --- |
 | **B1** | **已落地** | `release-windows.yml`（cargo test / 两条 dotnet test / verify_versions）与 `native-policy-artifacts.yml`（cargo build / dotnet test）逐条显式断 `$LASTEXITCODE`；新增 `scripts/check_workflow_shells.py` 作常跑门禁（挂进 `contracts.yml` 既有 required job，不新增 context 名，避免 merge box 卡 `Expected`），带 `--self-test` 故障注入自证。**本地实证**：PS 5.1 下「原生命令中段失败 + 后续命令成功」实测步骤 exit=0（输出只剩 `publish ok`），加断言后 exit=1。runner 侧 pwsh 7 语义的最终定论仍待一次 CI 故障注入——修复在两种语义下都正确。 |
 | **B2** | **已落地** | 六项全部收口：R7-SH-01（`check_real_models` / `check_mirror_consumption` 真正接进 `main()`，capability 误接映射按实测删除并留注释，17 条新用例逐个钉失败分支）；R7-SH-03（zip-slip 改**行为级**回归——真跑恶意 zip，另加一条对照用例证明「把判定掏空后旧 token 锚仍全绿」）；R7-SH-04（`` 正则覆盖 `assert(x)`；活跃树非测试 Python 全面禁令，实测当下 0 命中 ⇒ 是防腐而非补票）；R7-SH-07（invalid 向量缺失改无条件 fail-closed + `expected` 取值白名单 + 反向对照）；R7-TOOL-04（三门禁加空扫描面非零退出 + 锚点去文件名化）；R7-TOOL-05（基线未同步收窄即判失败——新规则当场抓出 3 处 stale，实降 507→503 / 692→691 / 477→450）；R7-TOOL-06（**删除两份红队套件的手工运行器**：`-O` 全绿的根因是「手工收集裸 assert」这个形态本身，唯一入口改 pytest，`run-security-e2e` 相应改为驱动 pytest 并拒绝 `-O`）。 |
-| B3–B7 | 未动 | 见第九节。B3/B4/B5/B6 需先取得 Windows 契约/测试区与 Android 端的运行基线（第八节 1）；B7 含 3 项待用户裁决。 |
+| B3 | **已落地** | 见本节「B3 落地」。 |
+| B5 | **已落地** | 见本节「B5 落地」。 |
+| B4/B6/B7 | 未动 | 见第九节。B6 的三项与 B7 的部分需先取得用户裁决（第八节 4）；B4 与 B6 同改 `WebViewHardening.kt`、B6 与 B3 同改 `HostWebView.cs`，须串行。 |
+
+### B3 落地（隐私网络边界补到子资源与下载两层）
+
+谓词从 `BrowserPolicyBroker.IsNonPublicNavigationTarget` 提纯为单源
+`Broker/PrivateNetworkBoundary.cs`（`Denies(Uri)` / `DeniesRaw(string)` / `DenyCode` / `Reason`
+四个成员一处定义），四类出口全部接上：原生前置（`BrowserPolicyBroker.cs:230`）、托管导航
+（`:258`）、消费点复判（`:358`）、下载（`:124` `AllowDownload` 此前从不看 URL）、子资源
+（`HostWebView.cs:364` 与黑名单同一 403 分支，命中来源写进日志以便归因）。
+
+R7-CS2-02 的零断言空洞由 `PrivateNetworkBoundaryTests` 33 例补上（谓词矩阵 14 形态：
+127.0.0.1/localhost/192.168.1.1/169.254.169.254/10/8/`[::1]`/`0177.0.0.1`/100.64/10 +
+公网与宿主虚拟主机对照 + 「非默认端口与明文的 `.local` 不豁免」；三类出口的拒绝码与审计
+留痕；伪造授权在消费点被复判拒绝）。**可失败性实证**：把 `AllowDownload` 的边界判定与
+`OnWebResourceRequested` 的谓词调用各替换成一条恒假表达式后重跑 → 6 例转红
+（4 条下载 + 1 条不可判定 + 静态锚），随后逐项还原；静态锚断言 broker 内 ≥4 处调用、
+且子资源处理器体内必须出现该调用，专门防「只定义不接线」（R6-26 失效形态）。
+
+**运行基线缺口就此闭合（更正第八节 1）**：`dotnet test --configuration Release`（不加
+`-r win-x64`、不加 `RestoreLockedMode`）在本树可直接跑通——Broker.Tests 128/128、
+Core.Tests 708/708 首次取得运行态证据；代价是构建会剥掉 `packages.lock.json` 的
+`net10.0-windows7.0/win-x64` 节，必须随即 `git checkout` 还原（本轮两次踩到并还原）。
+行数红线同 PR 收窄 556→549 / 604→584，为此把 `HostWebView` 的拦截落盘接线（CS-308/CS-363）
+拆出 `HostWebView.TrackerBlocks.cs`（partial，逻辑零改动）。子资源层的 403 与下载层的
+落盘抑制仍只能静态判定（需真实 CoreWebView2 COM 环境），如实登记。
 
 ### B1 落地当天即抓到一个被吞掉的真实失败
 
