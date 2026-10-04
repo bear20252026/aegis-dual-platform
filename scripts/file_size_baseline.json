@@ -89,7 +89,7 @@
     "windows/src/Aegis.Windows.App/Core/UrlSafety.cs": 301,
     "windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs": 399,
     "windows/src/Aegis.Windows.App/WebView/HostWebView.cs": 604,
-    "windows/tests/Aegis.Windows.Broker.Tests/BrowserPolicyBrokerTests.cs": 551,
+    "windows/tests/Aegis.Windows.Broker.Tests/BrowserPolicyBrokerTests.cs": 520,
     "windows/tests/Aegis.Windows.Core.Tests/BookmarkTests.cs": 340,
     "windows/tests/Aegis.Windows.Core.Tests/NtpBridgeTests.cs": 348,
     "windows/tests/Aegis.Windows.Core.Tests/TabManagerTests.cs": 468
