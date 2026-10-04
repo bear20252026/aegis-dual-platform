@@ -33,7 +33,13 @@ public sealed record MainWindowDependencies(
             Tabs: new TabManager(),
             // CS-291（2026-09-26 审计）：主窗 broker 注入进程级共享 KillSwitch——
             // 无痕窗口 broker 复用同一实例，设置窗触发的紧急终止冻结全进程
-            Broker: new BrowserPolicyBroker(killSwitch: KillSwitch.Shared),
+            // 审计第六轮（2026-10-03）：同款模式注入共享黑名单持有者——此前
+            // StartThreatFeedRefresh 的快照只落在主窗 broker 实例字段，无痕窗口
+            // 的 denylist 永久为空（隐私路径保护最弱）。注入同一持有者后
+            // UpdateBlockedHosts → SharedBlockedHosts.Publish 一次即全窗口生效。
+            Broker: new BrowserPolicyBroker(
+                blockedHosts: SharedBlockedHosts.Shared,
+                killSwitch: KillSwitch.Shared),
             Settings: settings,
             SettingsService: SettingsService.FromPreloaded(settings),
             Bookmarks: new BookmarkStore(AppPaths.BookmarksDbPath),

@@ -24,6 +24,13 @@ pub struct FfiBroker {
     ///（50K）；测试构造器注入小容量，fail-closed 满账本分支经公共路径
     ///（evaluate/approve/consume）真实触达（50K 次公共调用在单测内是负担）
     max_issued_actions: usize,
+    /// 审计第六轮（2026-10-03/04）：威胁 host 黑名单快照（deny-by-content）。
+    /// 此前 FFI 通路完全没有策略层——H-7 注记明载「policy.evaluate /
+    /// capability.validate 未接入 FFI 通路」，故 evaluate_navigation 的拒绝
+    /// 条件只有"URL 是否良构"，任意良构 https URL 一律 Allow（恶意 host 不例外）。
+    /// 空集 = 不拦（默认不 deny-all，避免未接线端整体不可用）；由宿主经
+    /// update_host_denylist 注入订阅源快照。
+    deny_hosts: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 /// 原生策略核心签发的授权状态。已消费记录保留到会话撤销，
@@ -101,6 +108,21 @@ impl IssuedAuthorization {
     }
 }
 
+/// 黑名单条目 host 形态校验——与 `canonicalize_external` 的 host 口径一致。
+/// 尾点/前导点/空段/越界字符的条目永远不会被命中，收下即制造"已登记但永不生效"
+/// 的死条目（比不登记更坏：订阅源看起来是工作的）。
+/// 审计第六轮（2026-10-03/04）：置于模块级而非 impl 内——`#[uniffi::export]`
+/// 的 impl 块不接受无 self 关联函数（编译期报 associated functions not supported）。
+fn denylist_host_shape_ok(host: &str) -> bool {
+    !host.is_empty()
+        && !host.starts_with('.')
+        && !host.ends_with('.')
+        && !host.contains("..")
+        && host
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+}
+
 #[uniffi::export]
 impl FfiBroker {
     /// 创建 Broker（policy_version 锁定——INV-03 一致性）。
@@ -167,6 +189,34 @@ impl FfiBroker {
                 };
             }
         };
+        // 内容判定的 host 口径：**剥去端口**的纯主机名。
+        // CanonicalExternalUrl.host 依 RS-227 口径保留非默认端口（:8080 形态
+        // 实证在 host 内），直接拿它比对会同时制造两个绕过：
+        //   ① 黑名单条目 `bad.example` 匹配不上 `bad.example:8443`；
+        //   ② 高危判定把 `127.0.0.1:8080` 当成非本机（split('.') 末段
+        //      "8080" 之外的 "1:8080" 解析失败）而放行。
+        // IPv6 字面量（方括号形态）已在归一层被拒（PY-069/070），此处
+        // split(':') 取首段无歧义。host 永不为空（归一层已拒空）。
+        let policy_host = canonical_url
+            .host
+            .split(':')
+            .next()
+            .unwrap_or(canonical_url.host.as_str());
+        // 审计第六轮（2026-10-03/04）：deny-by-content 首次在 FFI 通路生效——
+        // 命中威胁黑名单即拒（此前黑名单只活在两端宿主代码里，Android 端整体缺失）。
+        // 用 policy host 比对，不用 raw_url：raw 可含 userinfo/query 混淆形态。
+        if self.is_host_denied(policy_host) {
+            return FfiDecision::Deny {
+                reason: FfiDenyReason {
+                    code: "threat_blocklist".into(),
+                    detail: format!("目标 host 在威胁黑名单: {policy_host}"),
+                    explanation: "denied — host is on the threat blocklist".into(),
+                },
+            };
+        }
+        // 高危目标判定（本机/私网）——纯函数，见 security_policy 文档
+        let high_risk =
+            crate::security_policy::SecurityPolicy::is_local_or_private_host(policy_host);
         let nonce = match generate_nonce() {
             Ok(value) => value,
             Err(reason) => return FfiDecision::Deny { reason },
@@ -218,6 +268,16 @@ impl FfiBroker {
             }),
         };
         match verdict {
+            // 审计第六轮（2026-10-03/04）：高危目标（本机/私网）不直发放行授权，
+            // 改登记为待审批。确认流自此**只对高危目标触发**，普通公网导航直接
+            // Allow——此前 request_navigation_confirmation 把每一个 Allow 无条件转成
+            // RequireConfirmation，等价于"每次导航都弹确认"，因而该开关在
+            // 2026-08-30 被实测定案关闭、整套确认域（pendingConfirmation/防孤儿
+            // nonce/受信兑换）沦为死代码。收窄到高危及开关可重新启用。
+            // 副带收益：子框架轻量路径只调 evaluate_navigation，收到
+            // RequireConfirmation 即按既有语义 fail-closed 阻断——远程页嵌
+            // iframe 打 127.0.0.1/私网的 SSRF 面自此在核心层被拦，不依赖端侧实现。
+            Ok(()) if high_risk => self.register_pending_approval(action),
             Ok(()) => match self.issued_actions.lock() {
                 Ok(mut issued_actions) => {
                     // M-15 修复（审计 2026-08-31）：账本容量 fail-closed
@@ -253,42 +313,52 @@ impl FfiBroker {
             },
         }
     }
+}
 
-    /// 将当前导航登记为待审批请求。它复用完整的策略评估和会话验证，
-    /// 但不会向宿主发放可消费授权；只有同一 Broker 的显式批准才能兑换原始动作。
-    pub fn request_navigation_confirmation(
-        &self,
-        session_id: String,
-        tab_id: String,
-        generation: u64,
-        raw_url: String,
-        scope: String,
-    ) -> FfiDecision {
-        let authorized =
-            match self.evaluate_navigation(session_id, tab_id, generation, raw_url, scope) {
-                FfiDecision::Allow { action } => AuthorizedAction::from(action),
-                other => return other,
-            };
-        let removed_from_issued = match self.issued_actions.lock() {
-            Ok(mut issued_actions) => matches!(
-                issued_actions.remove(&authorized.nonce),
-                Some(IssuedAuthorization::Pending(issued)) if *issued == authorized
-            ),
-            Err(_) => {
-                return ffi_deny(
-                    "authorization_ledger",
-                    "授权账本锁获取失败",
-                    "denied — issued authorization ledger lock poisoned",
-                );
-            }
-        };
-        if !removed_from_issued {
-            return ffi_deny(
-                "authorization_ledger",
-                "策略核心未能登记待审批授权",
-                "denied — evaluated authorization was missing from the issued ledger",
-            );
+// 审计第六轮（2026-10-03/04）：内部判定/登记辅助——置于非导出 impl 块，
+// #[uniffi::export] 的 impl 会把其中所有方法计入 FFI 面
+//（内部类型 AuthorizedAction 未导出，被引用即编译失败）。
+impl FfiBroker {
+    /// 威胁黑名单判定（审计第六轮 2026-10-03/04）。锁中毒按**被拒**处理——
+    /// 黑名单是拦截面，判定失败绝不 fail-open。
+    fn is_host_denied(&self, host: &str) -> bool {
+        match self.deny_hosts.lock() {
+            Ok(denied) => denied.contains(host),
+            Err(_) => true,
         }
+    }
+}
+
+#[uniffi::export]
+impl FfiBroker {
+    /// 注入/替换威胁 host 黑名单快照（审计第六轮 2026-10-03/04）。
+    ///
+    /// 返回**被接受**的条目数：调用方可用 `输入数 - 返回值` 发现有一批条目
+    /// 被形态校验拒收，而不是静默变成死条目。空输入 = 清空（**不** deny-all）——
+    /// 未接入订阅源的端行为与既往完全一致，这是本改动能安全落地的前提。
+    pub fn update_host_denylist(&self, hosts: Vec<String>) -> u32 {
+        let accepted: std::collections::HashSet<String> = hosts
+            .into_iter()
+            .map(|host| host.trim().to_ascii_lowercase())
+            .filter(|host| denylist_host_shape_ok(host))
+            .collect();
+        let count = accepted.len() as u32;
+        match self.deny_hosts.lock() {
+            Ok(mut denied) => *denied = accepted,
+            // 锁中毒：不覆盖（保留旧快照比清空安全），并如实报 0 接受
+            Err(_) => return 0,
+        }
+        count
+    }
+}
+
+impl FfiBroker {
+    /// 把已通过会话/代际校验的授权登记为待审批请求（用户确认面）。
+    ///
+    /// 审计第六轮（2026-10-03/04）：自 request_navigation_confirmation 抽出，
+    /// 现由 evaluate_navigation 的高危分支直接调用——授权不再"先进 issued 账本
+    /// 再搬出来"，消除已发放未消费的中间态；owner 转移单段完成。
+    fn register_pending_approval(&self, authorized: AuthorizedAction) -> FfiDecision {
         let request = FfiApprovalRequest {
             origin: authorized.origin.clone(),
             method: authorized.method.clone(),
@@ -326,6 +396,29 @@ impl FfiBroker {
                 "denied — pending approval ledger lock poisoned",
             ),
         }
+    }
+}
+
+#[uniffi::export]
+impl FfiBroker {
+    /// 将当前导航登记为待审批请求（仅当其确属高危目标）。
+    ///
+    /// 审计第六轮（2026-10-03/04）：**语义收窄**。本函数不再把每一个可放行导航
+    /// 一律转成 RequireConfirmation——高危判定（本机/私网）与黑名单拦截都已在
+    /// evaluate_navigation 内完成，这里只作委托：Allow 原样返回（宿主可直接消费），
+    /// RequireConfirmation / Deny 原样返回。
+    /// 旧口径「每次导航都要确认」是使用方于 2026-08-30 关闭确认开关、进而使整套
+    /// 确认域（pendingConfirmation / 防孤儿 nonce / 受信兑换入口）退化为死代码的
+    /// 直接根因；收窄后确认只对少数目标触发，开关可重新启用而不牺牲可用性。
+    pub fn request_navigation_confirmation(
+        &self,
+        session_id: String,
+        tab_id: String,
+        generation: u64,
+        raw_url: String,
+        scope: String,
+    ) -> FfiDecision {
+        self.evaluate_navigation(session_id, tab_id, generation, raw_url, scope)
     }
 
     /// 显式批准当前待审批导航。该入口仅兑换策略核心保留的精确授权，
@@ -550,6 +643,27 @@ impl FfiBroker {
         let Some(canonical_url) = crate::origin::canonicalize_external(&raw_url) else {
             return deny_url(raw_url);
         };
+        // 审计第六轮延续（2026-10-04）：消费点**复判黑名单**（TOCTOU 收口）。
+        // evaluate 与 consume 之间隔着一次用户批准/一次网络往返，订阅源快照
+        // 可能在这段窗口里新增该 host；只在 evaluate 判一次，等于"已签发授权
+        // 一旦到手就永久有效"，60s 有效期内黑名单更新对已授权导航不生效。
+        // 注意：这里**只复判黑名单，不复判高危**——高危目标在签发阶段就走
+        // 待审批分支、从不进入 issued 账本；若在此处再拦高危，用户刚批准的
+        // 本机/私网导航会被自己否决，把确认流变成死路径。
+        let policy_host = canonical_url
+            .host
+            .split(':')
+            .next()
+            .unwrap_or(canonical_url.host.as_str());
+        if self.is_host_denied(policy_host) {
+            return FfiDecision::Deny {
+                reason: FfiDenyReason {
+                    code: "threat_blocklist".into(),
+                    detail: format!("消费点复判：host 已进入威胁黑名单 {policy_host}"),
+                    explanation: "denied — host entered the threat blocklist after issuance".into(),
+                },
+            };
+        }
         let action = AuthorizedAction::from(action);
         if !matches_navigation_binding(&action, &scope, &canonical_url) {
             return FfiDecision::Deny {
@@ -661,6 +775,7 @@ impl FfiBroker {
             )),
             issued_actions: std::sync::Mutex::new(HashMap::new()),
             pending_navigation_approvals: std::sync::Mutex::new(HashMap::new()),
+            deny_hosts: std::sync::Mutex::new(std::collections::HashSet::new()),
             policy_version,
             action_expiry_seconds,
             max_issued_actions: MAX_ISSUED_ACTIONS,
@@ -1035,7 +1150,7 @@ mod ffi_navigation_tests {
             "s1".into(),
             "t1".into(),
             0,
-            "https://example.com/b".into(),
+            "https://127.0.0.1/b".into(),
             "navigation".into(),
         ) else {
             panic!("expected pending");
@@ -1052,7 +1167,7 @@ mod ffi_navigation_tests {
         // 待审批请求随销毁清理
         match broker.approve_navigation_confirmation(
             request.nonce,
-            "https://example.com/b".into(),
+            "https://127.0.0.1/b".into(),
             "navigation".into(),
         ) {
             FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
@@ -1071,7 +1186,7 @@ mod ffi_navigation_tests {
             "s1".into(),
             "t1".into(),
             0,
-            "https://example.com/c".into(),
+            "https://127.0.0.1/c".into(),
             "navigation".into(),
         ) else {
             panic!("expected pending");
@@ -1084,7 +1199,7 @@ mod ffi_navigation_tests {
         // 空 nonce 的审批入口同样 fail-closed
         match broker.approve_navigation_confirmation(
             String::new(),
-            "https://example.com/c".into(),
+            "https://127.0.0.1/c".into(),
             "navigation".into(),
         ) {
             FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
@@ -1099,7 +1214,7 @@ mod ffi_navigation_tests {
         let broker = FfiBroker::new(POLICY_VERSION.into());
         assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
         for i in 0..MAX_PENDING_APPROVALS {
-            let url = format!("https://example.com/pending/{i}");
+            let url = format!("https://127.0.0.1/pending/{i}");
             let decision = broker.request_navigation_confirmation(
                 "s1".into(),
                 "t1".into(),
@@ -1116,7 +1231,7 @@ mod ffi_navigation_tests {
             "s1".into(),
             "t1".into(),
             0,
-            "https://example.com/overflow".into(),
+            "https://127.0.0.1/overflow".into(),
             "navigation".into(),
         );
         match overflow {
@@ -1363,7 +1478,7 @@ mod ffi_navigation_tests {
             "s".into(),
             "t".into(),
             1,
-            "https://example.com/ok".into(),
+            "https://127.0.0.1/ok".into(),
             "navigation".into(),
         ) else {
             panic!("正常请求必须登记")
@@ -1380,7 +1495,7 @@ mod ffi_navigation_tests {
         assert!(matches!(
             broker.approve_navigation_confirmation(
                 request.nonce,
-                "https://example.com/ok".into(),
+                "https://127.0.0.1/ok".into(),
                 "navigation".into()
             ),
             FfiDecision::Allow { .. }
@@ -1827,7 +1942,7 @@ mod nonce_tests {
             "s".into(),
             "t".into(),
             1,
-            "https://example.com/confirm".into(),
+            "https://127.0.0.1/confirm".into(),
             "navigation".into(),
         );
         let FfiDecision::RequireConfirmation { request } = decision else {
@@ -1848,7 +1963,7 @@ mod nonce_tests {
         // pending 已被移除（一次性语义）：同 nonce 重试 → approval_not_pending
         let retry = broker.approve_navigation_confirmation(
             request.nonce,
-            "https://example.com/confirm".into(),
+            "https://127.0.0.1/confirm".into(),
             "navigation".into(),
         );
         match retry {
@@ -1857,5 +1972,96 @@ mod nonce_tests {
             }
             other => panic!("期望 approval_not_pending，实际 {other:?}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod consume_recheck_tests {
+    use super::*;
+
+    /// 黑名单在 evaluate 之后新增 → 已签发授权在 consume 点被复判拒绝。
+    /// 这是 TOCTOU 收口断言：若只在 evaluate 判一次，60s 有效期内
+    /// 订阅源更新对已授权导航完全不生效（审计第六轮延续 2026-10-04）。
+    #[test]
+    fn blocklist_added_after_issue_is_enforced_at_consume() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s".into(), "t".into(), 0, 60));
+        let url = "https://late-block.example/x";
+
+        // 未注入黑名单时正常签发
+        let FfiDecision::Allow { action } =
+            broker.evaluate_navigation("s".into(), "t".into(), 0, url.into(), "navigation".into())
+        else {
+            panic!("签发前 host 不在黑名单，应放行");
+        };
+
+        // 授权到手之后订阅源刷新，新增该 host
+        assert_eq!(
+            broker.update_host_denylist(vec!["late-block.example".into()]),
+            1,
+            "黑名单条目形态合法应被接受"
+        );
+
+        // 消费点必须复判拒绝，而不是沿用签发时刻的判定
+        match broker.consume_navigation(action, url.into(), "navigation".into()) {
+            FfiDecision::Deny { reason } => assert_eq!(
+                reason.code, "threat_blocklist",
+                "consume 复判应给出 threat_blocklist，实际 {}",
+                reason.code
+            ),
+            other => panic!("黑名单新增后 consume 不得放行，实际 {other:?}"),
+        }
+    }
+
+    /// 反向对照：同一 host 未被拉黑时，consume 仍正常放行——
+    /// 防止复判实现退化为恒拒（恒拒同样是假闭环）。
+    #[test]
+    fn unblocklisted_host_still_consumes() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s".into(), "t".into(), 0, 60));
+        let url = "https://fine.example/x";
+        let FfiDecision::Allow { action } =
+            broker.evaluate_navigation("s".into(), "t".into(), 0, url.into(), "navigation".into())
+        else {
+            panic!("应放行");
+        };
+        broker.update_host_denylist(vec!["other.example".into()]);
+        assert!(
+            matches!(
+                broker.consume_navigation(action, url.into(), "navigation".into()),
+                FfiDecision::Allow { .. }
+            ),
+            "未命中黑名单的既有授权必须仍可消费"
+        );
+    }
+
+    /// 高危目标经批准后仍可消费（复判只针对黑名单，不针对高危）——
+    /// 否则用户刚批准的本机导航会被自己否决，确认流成死路径。
+    #[test]
+    fn approved_loopback_navigation_can_consume() {
+        let broker = FfiBroker::new("1.0".into());
+        assert!(broker.create_session("s".into(), "t".into(), 0, 60));
+        let url = "https://127.0.0.1:8080/admin";
+        let FfiDecision::RequireConfirmation { request } = broker.request_navigation_confirmation(
+            "s".into(),
+            "t".into(),
+            0,
+            url.into(),
+            "navigation".into(),
+        ) else {
+            panic!("本机目标应走待审批");
+        };
+        let FfiDecision::Allow { action } =
+            broker.approve_navigation_confirmation(request.nonce, url.into(), "navigation".into())
+        else {
+            panic!("批准应发放授权");
+        };
+        assert!(
+            matches!(
+                broker.consume_navigation(action, url.into(), "navigation".into()),
+                FfiDecision::Allow { .. }
+            ),
+            "批准后的本机导航应可消费——高危复判会摧毁确认流"
+        );
     }
 }

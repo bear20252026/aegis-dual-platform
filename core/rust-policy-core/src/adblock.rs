@@ -100,20 +100,14 @@ impl AdBlockManager {
     /// 按字面入库，`Ads.Example.COM` 之类条目永远无法命中（查询侧已
     /// 归一）——**fail-open 方向**：看起来已拦截实际放行。RS-180：空串
     /// 与归一后为空的条目不入库（空键会被无 host 形态意外命中）。
+    /// 审计第六轮（2026-10-03）：入库折叠改调 util::normalize_host_key
+    /// 单源——此前本处与查询侧各写一份归一（本处剥尾点、extract_host
+    /// 不剥），两侧永远对不齐（尾点查询漏拦）。
     pub fn load_blocked_domains(&mut self, domains: impl IntoIterator<Item = String>) {
-        // RS-283（2026-10-02 审计）：入库折叠改 ASCII 口径——此前全量
-        // to_lowercase（Unicode 折叠），而查询侧 extract_host 自 RS-259 起
-        // to_ascii_lowercase。非 ASCII 条目（如土耳其语 İ）经 Unicode 折叠
-        // 变 "i"+U+0307，查询侧 ASCII 折叠保留原样——条目入库后永远无法
-        // 命中（fail-open）。host 匹配域是 DNS（ASCII 语义），统一 ASCII。
         let normalized = domains.into_iter().filter_map(|d| {
-            let lowered = d.trim().to_ascii_lowercase();
-            let stripped = lowered.strip_suffix('.').unwrap_or(&lowered);
-            if stripped.is_empty() {
-                None // 空串/纯尾点条目拒绝入库
-            } else {
-                Some(stripped.to_string())
-            }
+            // RS-283（2026-10-02 审计）：入库折叠 ASCII 口径（host 匹配域
+            // 是 DNS 语义）——归一单源后与查询侧同函数，不再分叉
+            crate::util::normalize_host_key(d.trim())
         });
         self.blocked_domains.extend(normalized);
     }
@@ -128,10 +122,22 @@ impl AdBlockManager {
     /// RS-069：本方法每次调用经 extract_host 分配归一化 String。
     /// 高频调用方 / 已持有归一化 host 的调用方应改用
     /// [`AdBlockManager::should_block_host`]（预归一 API，零分配）。
+    ///
+    /// 审计第六轮（2026-10-03）：host 解析失败由「不拦截」改为**拦截**——
+    /// 此前 `extract_host` 返回 None 即 `false`，畸形/无法解析的 URL 一律
+    /// 放行（黑名单是 denylist，提取失败不是「不在名单上」的证据，而是
+    /// 「无法证明不在名单上」）。禁用态（is_enabled=false）是用户显式
+    /// 关闭拦截，仍整体放行——解析失败不越过显式开关。
     pub fn should_block(&mut self, url: &str) -> bool {
+        if !self.is_enabled {
+            return false;
+        }
         match Self::extract_host(url) {
             Some(host) => self.should_block_host(&host),
-            None => false,
+            None => {
+                self.total_blocked += 1;
+                true // fail-closed：解析失败按拦截处理
+            }
         }
     }
 
@@ -140,6 +146,10 @@ impl AdBlockManager {
     /// RS-069（审计 2026-09-25）预归一 API：调用方绕过 URL 解析与
     /// to_lowercase 分配；语义与 [`AdBlockManager::should_block`]
     /// 完全一致（含父域链迭代与命中计数）。
+    /// 审计第六轮（2026-10-03）：口径边界补充——「完全一致」指**已归一
+    /// host 的匹配语义**一致；fail-closed（解析失败即拦截）只发生在
+    /// [`AdBlockManager::should_block`] 的 URL 解析面。本 API 的入参由调用方
+    /// 保证已归一（空串等非法键只可能精确命中同名条目，不做解析失败推断）。
     pub fn should_block_host(&mut self, host: &str) -> bool {
         if !self.is_enabled {
             return false;
@@ -262,14 +272,56 @@ mod tests {
     }
 
     #[test]
-    fn malformed_urls_never_panic_and_never_block() {
-        // RS-065：畸形 URL fail-closed——不拦截、不 panic
+    fn malformed_urls_fail_closed_as_blocked() {
+        // RS-065 + 审计第六轮（2026-10-03）：畸形 URL 不 panic；语义由
+        // 「不拦截」改为**拦截**——denylist 遇到无法解析的 host 时，
+        // 「提取失败」不等于「不在名单上」（此前 None → false 即 fail-open：
+        // 把 URL 写成畸形形态即可绕过整张黑名单）
         let mut mgr = AdBlockManager::new();
         mgr.load_blocked_domains(vec!["ads.example.com".into()]);
-        assert!(!mgr.should_block(""));
-        assert!(!mgr.should_block("https://"));
-        assert!(!mgr.should_block("2001:db8::1"));
-        assert!(!mgr.should_block("https://[unclosed/x"));
+        for malformed in ["", "https://", "2001:db8::1", "https://[unclosed/x"] {
+            assert!(
+                mgr.should_block(malformed),
+                "解析失败必须 fail-closed 拦截：{malformed:?}"
+            );
+        }
+        assert_eq!(mgr.total_blocked(), 4, "fail-closed 拦截同样计数");
+        // 显式禁用是用户关闭拦截——解析失败不越过该开关
+        mgr.set_enabled(false);
+        assert!(!mgr.should_block(""), "禁用态整体放行");
+        assert!(!mgr.should_block("https://ads.example.com/x"), "禁用态放行");
+    }
+
+    #[test]
+    fn query_side_trailing_dot_hits_normalized_entry() {
+        // 审计第六轮（2026-10-03）：入库剥尾点而查询侧不剥——同一 host 的
+        // 两种拼写只有归一后才是同一个键（查询侧现共用 normalize_host_key）
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(vec!["tracker.org".into()]);
+        assert!(
+            mgr.should_block("https://tracker.org./ad.js"),
+            "查询侧尾点必须与入库条目对齐"
+        );
+        assert!(
+            mgr.should_block("https://TRACKER.ORG./ad.js"),
+            "大写 + 尾点同批归一"
+        );
+        // 父域链在归一后的 host 上仍成立（剥尾点不影响逐级剥标签）
+        assert!(mgr.should_block("https://cdn.tracker.org./ad.js"));
+    }
+
+    #[test]
+    fn parent_chain_probe_survives_normalization() {
+        // 审计第六轮（2026-10-03）：新增「解析失败 fail-closed」不得吃掉
+        // 父域链正常路径——三级子域对两段父域 / 对 TLD 条目均命中
+        let mut mgr = AdBlockManager::new();
+        mgr.load_blocked_domains(["ads.com".into(), "net".into()]);
+        assert!(mgr.should_block("https://a.b.ads.com/x"), "两段父域命中");
+        assert!(mgr.should_block("https://x.y.example.NET/"), "TLD 条目命中");
+        assert!(
+            !mgr.should_block("https://a.b.example.com/x"),
+            "未登记域不误拦（解析成功路径不被 fail-closed 波及）"
+        );
     }
 
     #[test]

@@ -236,3 +236,47 @@ pub extern "C" fn aegis_policy_core_broker_consume_navigation_json(
     }))
     .unwrap_or_else(|_| write_response(deny("native_panic", "native policy core panicked")))
 }
+
+/// 注入/替换威胁 host 黑名单快照（审计第六轮 2026-10-03/04）。
+///
+/// 入参：JSON 字符串数组（`["evil.example","ads.example.com"]`）。
+/// 返回：`{"decision":"ok","accepted":N,"input":M}` —— 宿主据
+/// `accepted < input` 即可发现"有条目被形态校验拒收"，而不是静默变成
+/// 永不命中的死条目。非法输入/非法 JSON/空句柄/panic 一律返回 deny JSON，
+/// 绝不静默报成功。
+///
+/// 存在理由：此前 FFI 通路完全没有 deny-by-content 层（H-7 注记：
+/// `policy.evaluate / capability.validate 未接入 FFI 通路`），黑名单只活在
+/// 端侧代码里，Android 端因此整体没有威胁拦截。本入口是核心侧的最小接入面；
+/// 未调用时黑名单为空、行为与既往一致（不 deny-all）。
+#[unsafe(no_mangle)]
+pub extern "C" fn aegis_policy_core_broker_update_host_denylist_json(
+    broker: *mut CAbiBroker,
+    hosts_json: *const c_char,
+) -> *mut c_char {
+    catch_unwind(AssertUnwindSafe(|| {
+        let hosts_json = match unwrap_input_or_deny(read_utf8(hosts_json)) {
+            Ok(value) => value,
+            Err(response) => return response,
+        };
+        let parsed: Vec<String> = match serde_json::from_str(&hosts_json) {
+            Ok(values) => values,
+            Err(_) => return input_deny("denylist_input_invalid"),
+        };
+        let input = parsed.len() as u32;
+        let Some(accepted) = with_broker(broker, move |value| {
+            value.inner.update_host_denylist(parsed)
+        }) else {
+            return input_deny("ffi_broker_null");
+        };
+        // write_response 接收 impl Serialize 并**直接序列化**——传 String 会被
+        // 二次编码成 JSON 字符串字面量（消费方按对象取值即得 Null）。与既有
+        // decision_json 入口保持同一形态：交 Value 本体。
+        write_response(serde_json::json!({
+            "decision": "ok",
+            "accepted": accepted,
+            "input": input,
+        }))
+    }))
+    .unwrap_or_else(|_| write_response(deny("native_panic", "native policy core panicked")))
+}

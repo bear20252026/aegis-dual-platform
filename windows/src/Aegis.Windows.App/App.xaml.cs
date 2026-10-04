@@ -89,6 +89,43 @@ public partial class App : Application
         }
     }
 
+    /// <summary>审计第六轮（2026-10-04）：裁决路径出厂留痕——"原生核心是否被
+    /// 要求、探测是否成功、确认门是否开启"此前零痕迹，这正是"环境变量只在 CI
+    /// 构建机赋值 → 出货制品运行时恒 Disabled()、Rust 核心从不被咨询"的断链
+    /// 连续五轮审计未被发现的根因（决策路径差异不可观察）。只记布尔与门禁
+    /// 拒绝码：不含 DLL 绝对路径（NativePolicyCoreGate 刻意使失败信息不带本机
+    /// 路径——同一约束在此延续），也不记注册表值内容。</summary>
+    private static void LogAdjudicationDecisionPath()
+    {
+        try
+        {
+            var required = Broker.NativePolicyCoreGate.IsRequired;
+            var fromInstalledMarker = Broker.InstalledBuildMarker.IsSet(
+                Broker.InstalledBuildMarker.NativePolicyCoreValueName);
+            // 未要求时恒 Disabled()（探测即 TryLoad+Free，无副作用）
+            var probe = Broker.NativePolicyCoreGate.ProbeFromEnvironment();
+            var probeText = !required
+                ? "未执行（Disabled）"
+                : probe.AllowsPlatformBroker ? "通过" : $"失败:{probe.DenialCode}";
+            var verdict = !required
+                ? "导航由托管 C# broker 裁决"
+                : probe.AllowsPlatformBroker
+                    ? "导航由 Rust 策略核心裁决"
+                    : "已要求原生核心但不可用：全部导航 fail-closed";
+            TryLog(
+                $"[adjudication] 原生策略核心要求={required}" +
+                $"（安装期标记={fromInstalledMarker}，" +
+                $"自定义库路径已配置={Broker.NativePolicyCoreGate.LibraryPath is not null}）；" +
+                $"探测结果={probeText}；" +
+                $"导航确认门要求={WebView.NavigationConfirmationGate.IsRequired}；{verdict}");
+        }
+        catch (Exception ex)
+        {
+            // 留痕本身绝不影响启动（门禁语义由 broker 侧独立强制）
+            TryLog($"[adjudication] 裁决路径留痕失败: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     /// <summary>组合根：装配存储/策略/broker 后构造主窗口。MainWindow 不再自建
     /// 依赖（此前的字段初始器）——依赖显式可注入、可换内存实现、可构造测。</summary>
     protected override void OnStartup(StartupEventArgs e)
@@ -104,6 +141,9 @@ public partial class App : Application
         }
         try
         {
+            // 审计第六轮（2026-10-04）：出厂裁决路径留痕——必须在主窗构造之前，
+            // 使 fail-closed 启动（原生核心不可用）也留下判定依据
+            LogAdjudicationDecisionPath();
             // CS-352（2026-10-01 审计）：启动清理崩溃残留的无痕临时目录
             //（%TEMP%\Aegis.InPrivate.*——正常退出经引用计数清理，崩溃后永久
             // 残留即隐私承诺失效）；失败留痕不打断启动

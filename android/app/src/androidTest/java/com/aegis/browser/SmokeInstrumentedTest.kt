@@ -95,6 +95,12 @@ class SmokeInstrumentedTest {
         // JS 内嵌同步 SHA-256（构造对齐 Rust per_site_seed：hexDecode(sessionSeed)
         // || 'aegis:per-site-seed:v2:' || domain，取前 16 字节）。JVM 无法执行
         // WebView JS——在模拟器真 Chromium 上对 Kotlin MessageDigest 已知答案。
+        //
+        // 审计第六轮（2026-10-03）：探针改黑箱——站点种子不再导出为
+        // window.__AEGIS_SITE_SEED 全局（页面可读 = 噪声可确定性去除 + 跨站
+        // 标识符），本用例此前正是靠那个全局读种子。现改经「闭包内消费者」
+        // 反证派生正确：hardwareConcurrency = 2 + (种子[8,16) mod 7)，并由
+        // 已知答案直接核算；同时断言全局确实已消失（泄漏回归即红）。
         val sessionSeed = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
         val domain = "example.com"
         val md = java.security.MessageDigest.getInstance("SHA-256")
@@ -102,6 +108,7 @@ class SmokeInstrumentedTest {
         md.update("aegis:per-site-seed:v2:".toByteArray(Charsets.US_ASCII))
         md.update(domain.toByteArray(Charsets.UTF_8))
         val expected = md.digest().take(16).joinToString("") { "%02x".format(it) }
+        val expectedHardwareConcurrency = 2 + (expected.substring(8, 16).toLong(16) % 7)
 
         // 测试锚点替换：脚本派生入参从 location.hostname 固定为已知域名
         // （仅测试副本做字符串手术，生产脚本不含该替换）
@@ -111,20 +118,28 @@ class SmokeInstrumentedTest {
                 .replace("getETLD1(location.hostname)", "'example.com'")
 
         val latch = CountDownLatch(1)
-        var actual: String? = null
+        var probe: String? = null
         var webView: WebView? = null
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
             webView = WebView(InstrumentationRegistry.getInstrumentation().targetContext)
             webView!!.settings.javaScriptEnabled = true
             webView!!.evaluateJavascript(script) {
-                webView!!.evaluateJavascript("window.__AEGIS_SITE_SEED || ''") { result ->
-                    actual = result.trim().removeSurrounding("\"")
+                // 单表达式取两观测：typeof 种子全局 | hardwareConcurrency 实测
+                webView!!.evaluateJavascript(
+                    "(function(){return typeof window.__AEGIS_SITE_SEED + '|' + navigator.hardwareConcurrency;})()",
+                ) { result ->
+                    probe = result.trim().removeSurrounding("\"")
                     latch.countDown()
                 }
             }
         }
         assertTrue("evaluateJavascript 未在 30s 内回传", latch.await(30, TimeUnit.SECONDS))
         InstrumentationRegistry.getInstrumentation().runOnMainSync { webView?.destroy() }
-        assertEquals("JS SHA-256 派生与 JVM MessageDigest 已知答案不一致", expected, actual)
+        assertEquals("站点种子全局不得存在（审计第六轮：闭包封装泄漏回归）", "undefined", probe?.substringBefore('|'))
+        assertEquals(
+            "JS 闭包内 SHA-256 派生与 JVM MessageDigest 已知答案不一致（经消费者侧反证）",
+            expectedHardwareConcurrency.toString(),
+            probe?.substringAfter('|'),
+        )
     }
 }

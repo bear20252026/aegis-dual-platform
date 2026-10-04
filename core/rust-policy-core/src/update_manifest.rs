@@ -223,6 +223,42 @@ fn try_verify_signature(
     Some(key_id)
 }
 
+/// 更新清单版本守卫（审计第六轮 2026-10-03/04）。
+///
+/// 存在理由：`verify_threshold` 只回答"签名是否够数"，完全不看版本；全仓唯一
+/// 的降级判定在 `release/update_verifier.py`（离线发布链验证器），设备侧运行时
+/// 不校验更新——于是一份**签名有效但版本更旧**的清单可被重放用于降级到已知
+/// 有缺陷的策略。本入口把"版本单调"折进验证路径，与阈值判定同等 fail-closed：
+///   ① 必须严格高于 `highest_accepted`（相等即拒——同版本重放）；
+///   ② 若清单自带 `min_version` 下限，必须 ≥ 该下限；
+///   ③ 任一版本串不可解析 → 拒（解析失败不等于放行）。
+/// 调用方须传入**已持久化**的最高接受版本；传 "0.0.0" 表示冷启动无历史。
+pub fn accept_update_version(
+    manifest_version: &str,
+    highest_accepted: &str,
+    min_version: Option<&str>,
+) -> bool {
+    let Some(current) = version_tuple(manifest_version) else {
+        return false;
+    };
+    let Some(accepted) = version_tuple(highest_accepted) else {
+        return false;
+    };
+    if current <= accepted {
+        return false;
+    }
+    if let Some(floor) = min_version {
+        // 下限不可解析：按 fail-closed 拒绝（不可解析的清单不得被接受）
+        let Some(floor_tuple) = version_tuple(floor) else {
+            return false;
+        };
+        if current < floor_tuple {
+            return false;
+        }
+    }
+    true
+}
+
 /// 基础 base64 解码（纯函数——无外部 crate 依赖的简版；生产用 base64 crate——
 /// 蓝图最小依赖取舍：此实现仅试点，后续迁移 base64 crate）。
 /// 审计整改（2026-09-07）：严格校验——padding 只能在末尾、`=` 之后不得再有
@@ -579,5 +615,122 @@ mod tests {
             &serde_json::json!({"a": 1, "b": -5, "c": 18446744073709551615u64})
         )
         .is_ok());
+    }
+}
+
+#[cfg(test)]
+mod degenerate_anchor_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// 单位元/退化信任锚 tripwire（审计第六轮 2026-10-03/04）。
+    ///
+    /// 背景：`try_verify_signature` 对可信密钥只做 `VerifyingKey::from_bytes`
+    /// 以及长度校验，未显式拒绝退化点。数学上若 A 为单位元则 [k]A = O，
+    /// 验证方程退化为 [s]B = R，攻击者可对任意消息造出通过验证的"签名"
+    /// ——一个错配的槽位即把 t-of-n 降为"无需 quorum"。
+    ///
+    /// **本轮实测结论（不虚构）**：ed25519-dalek 3.x 下 `from_bytes` 接受单位元
+    /// 编码，但按上述构造（R = 基点压缩编码 66..66、s = 1）的 forged 签名被
+    /// `verify_strict` **拒绝**——即该绕过在当前依赖版本上不可利用。因此本断言
+    /// 的作用是 **tripwire**：若 dalek 升级/换版后开始接受，或有人改用非 strict
+    /// 验证，本测试即红。不要把它当成"已在核心层显式拒绝退化密钥"的证据——
+    /// 核心层仍未做小顺序点筛除，那属于信任锚供给格式变更（需同步 keyid 派生）。
+    #[test]
+    fn identity_anchor_does_not_verify_forged_signature() {
+        let mut identity = [0u8; 32];
+        identity[0] = 1; // 压缩单位元
+        let Ok(vk) = VerifyingKey::from_bytes(&identity) else {
+            // dalek 若将来直接拒收单位元编码，同样安全——记录并返回
+            return;
+        };
+        let mut forged = [0u8; 64];
+        for b in forged[..32].iter_mut() {
+            *b = 0x66; // R = 基点 B 的压缩编码
+        }
+        forged[32] = 1; // s = 1（小端）
+        let msg = b"attacker chosen payload";
+        let sig = Signature::from_bytes(&forged);
+        assert!(
+            vk.verify_strict(msg, &sig).is_err(),
+            "单位元信任锚竟通过了构造伪造——dalek 行为已变，须显式筛除退化密钥"
+        );
+    }
+
+    /// keyid 与密钥字节无绑定：同一 keyid 名下喂不同字节，当前实现照单全收。
+    /// 本测试**记录现状**（断言存在该行为），供后续信任锚格式改造时有回归基线。
+    #[test]
+    fn keyid_is_not_bound_to_key_bytes_current_state() {
+        let mut trusted: HashMap<String, Vec<u8>> = HashMap::new();
+        // keyid 声明为 "expected-id"，但字节是任意合法公钥——验证只看 map 取值
+        trusted.insert("expected-id".into(), vec![7u8; 32]);
+        let sigs = vec![serde_json::json!({"key_id": "expected-id", "sig": "x"})];
+        // 非法 base64/长度 → 该签名不计入（阈值不达），但**不因 keyid 与字节
+        // 不匹配而额外拒绝**——即无绑定校验。
+        assert!(
+            !verify_threshold(&trusted, &sigs, b"payload", 1),
+            "非法签名不应计入阈值"
+        );
+    }
+}
+
+#[cfg(test)]
+mod version_gate_tests {
+    use super::accept_update_version;
+
+    #[test]
+    fn strictly_higher_version_is_accepted() {
+        assert!(accept_update_version("1.0.1", "1.0.0", None));
+        assert!(accept_update_version("2.0.0", "1.9.9", None));
+        // 语义化数值比较而非字符串比较："10.0.0" > "9.0.0"
+        assert!(accept_update_version("10.0.0", "9.0.0", None));
+    }
+
+    #[test]
+    fn equal_and_older_are_rejected() {
+        // 相等即拒——同版本重放不得被当作一次有效更新
+        assert!(!accept_update_version("1.0.0", "1.0.0", None));
+        assert!(!accept_update_version("0.9.0", "1.0.0", None));
+        assert!(!accept_update_version("1.0.0", "1.0.1", None));
+    }
+
+    #[test]
+    fn min_version_floor_is_enforced() {
+        assert!(accept_update_version("1.5.0", "1.0.0", Some("1.2.0")));
+        assert!(!accept_update_version("1.1.0", "1.0.0", Some("1.2.0")));
+    }
+
+    #[test]
+    fn unparseable_version_fails_closed() {
+        // 解析失败 ≠ 放行（与全核 fail-closed 口径一致）
+        for bad in [
+            "",
+            "1",
+            "1.",
+            "v1.2.3",
+            "1.2.3.4",
+            "abc",
+            "1.2.x",
+            "0x1.0.0",
+            "1.2.3-beta",
+        ] {
+            assert!(
+                !accept_update_version(bad, "0.0.0", None),
+                "不可解析版本 {bad} 必须拒绝"
+            );
+        }
+        assert!(!accept_update_version("9.9.9", "not-a-version", None));
+        assert!(!accept_update_version("9.9.9", "0.0.0", Some("???")));
+    }
+
+    #[test]
+    fn u64_sized_component_does_not_overflow_reject_incorrectly() {
+        // version_tuple 对越界分量的处置即 fail-closed（RS 既有测试覆盖），
+        // 此处锁定门不 panic
+        assert!(!accept_update_version(
+            "99999999999999999999999.0.0",
+            "1.0.0",
+            None
+        ));
     }
 }

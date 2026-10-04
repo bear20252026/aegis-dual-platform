@@ -16,10 +16,23 @@ public static class NativePolicyCoreGate
     public const uint ExpectedAbiVersion = 3;
 
     public static bool IsRequired =>
-        string.Equals(Environment.GetEnvironmentVariable(EnableEnvironmentVariable), "1", StringComparison.Ordinal);
+        string.Equals(Environment.GetEnvironmentVariable(EnableEnvironmentVariable), "1", StringComparison.Ordinal)
+        // 审计第六轮（2026-10-04）：第二来源——安装期标记（HKCU，见
+        // InstalledBuildMarker 的键路径与理由）。环境变量只在 CI 构建步的 shell
+        // 里赋值，不随安装包交付，于是出货制品的运行时恒 Disabled()：
+        // aegis_policy_core.dll 随包发布却从不被咨询。标记只存在于已安装的
+        // 发布构建，故 dotnet build 的开发机恒走 Disabled()（不毁掉开发工作流）。
+        || InstalledBuildMarker.IsSet(InstalledBuildMarker.NativePolicyCoreValueName);
 
+    /// <summary>库路径仅由环境变量指定（开发/CI 指向 dist 里的构建产物）；
+    /// 安装构建不写该值——DLL 与 exe 同目录，缺省库名 "aegis_policy_core"
+    /// 由 LoadLibrary 的应用目录搜索命中。</summary>
     public static string? LibraryPath => Environment.GetEnvironmentVariable(LibraryPathEnvironmentVariable);
 
+    /// <summary>启动期/决策期门禁探测。名称保留 "FromEnvironment"（调用点已
+    /// 稳定）——判定源为环境变量 + 安装期标记两者，见 IsRequired。
+    /// 语义不变：未要求 → Disabled() 放行托管 broker；要求而库不可用 →
+    /// Block() 且绝不回退到另一套策略实现。</summary>
     public static NativePolicyCoreGateResult ProbeFromEnvironment()
     {
         if (!IsRequired)

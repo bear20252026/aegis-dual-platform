@@ -1,6 +1,7 @@
 namespace Aegis.Windows.WebView;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Chrome.Ntp;
@@ -25,6 +26,11 @@ public sealed class HostWebView : IDisposable
     // —— 命名处理器（审计遗留项：此前匿名闭包订阅不可退订，且重复 Wire 会
     //    双重订阅导致每导航双重决策/双重消费）——
     private CoreWebView2? _wired;
+
+    /// <summary>审计第六轮（2026-10-03）：安全事件是否已完成接线。宿主导航入口
+    /// 须以此 fail-closed——未接线的控件被设置 Source 时会隐式初始化成默认
+    /// 环境（零策略处理器），等于旁路整个 ADR-002 授权面。</summary>
+    public bool IsWired => _wired is not null;
     private EventHandler<CoreWebView2NavigationStartingEventArgs>? _onNavigationStarting;
     private EventHandler<CoreWebView2NavigationStartingEventArgs>? _onNavigationOriginFlip;
     private EventHandler<CoreWebView2NavigationStartingEventArgs>? _onFrameNavigationStarting;
@@ -32,6 +38,15 @@ public sealed class HostWebView : IDisposable
     private EventHandler<CoreWebView2DownloadStartingEventArgs>? _onDownloadStarting;
     private EventHandler<CoreWebView2PermissionRequestedEventArgs>? _onPermissionRequested;
     private EventHandler<CoreWebView2WebResourceRequestedEventArgs>? _onWebResourceRequested;
+
+    // 审计第六轮（2026-10-03）：紧急终止的**进程级反应**接线。此前
+    // KillSwitch.RegisterProcessReaction 建好却零调用者——Engage 只冻结
+    // broker 入口判定，已建立的内核仍继续流式拉取 XHR/子资源、进行中的
+    // 下载照常完成，与"进程级紧急冻结"承诺不符。本实例接线期间登记反应，
+    // 解绑时注销（开关不得持有已释放控件）。
+    private IDisposable? _killSwitchReaction;
+    private readonly object _downloadsLock = new();
+    private readonly List<CoreWebView2DownloadOperation> _trackedDownloads = new();
 
     /// <summary>仅受信 WPF chrome 订阅；远程页面无法调用此事件或取得授权动作。</summary>
     public event EventHandler<NavigationConfirmationRequestedEventArgs>? NavigationConfirmationRequested;
@@ -111,7 +126,16 @@ public sealed class HostWebView : IDisposable
         // 来源启用**（IsWebMessageEnabled 是 core 级全局开关——若子框架为
         // ntp.aegis.local 就把全局打开，远程页可内嵌该帧驱动受信桥——
         // 审计 M4 发现并封死）。
-        _onNavigationOriginFlip = (sender, e) => WebView2Hardening.SetPerOrigin(webView, e.Uri);
+        // 审计第六轮（2026-10-03）：本处理器订阅在取消处理器**之后**，故
+        // broker 已 Cancel 的导航仍会执行翻转——按未经提交的 URL 改通道状态。
+        // 目标为受信 host 而导航被取消时，屏幕显示的仍是旧远程文档，通道却被
+        // 打开。加 e.Cancel 短路：被取消的导航不改状态（显示文档未变）。
+        _onNavigationOriginFlip = (sender, e) =>
+        {
+            if (e.Cancel)
+                return;
+            WebView2Hardening.SetPerOrigin(webView, e.Uri);
+        };
         _onWebResourceRequested = (sender, e) => OnWebResourceRequested(webView, e);
 
         webView.NavigationStarting += _onNavigationStarting;
@@ -124,6 +148,41 @@ public sealed class HostWebView : IDisposable
         webView.WebResourceRequested += _onWebResourceRequested;
         // M1-T2（ADR-009）：加固束 + 原生红利接线
         WebView2Hardening.Apply(webView, _tabId);
+        // 审计第六轮（2026-10-03）：登记紧急终止反应。已处于终止态时
+        // RegisterProcessReaction 立即执行（新建标签同样被冻结——fail-closed）。
+        // Engage 与本接线同在 UI 线程（WPF），CoreWebView2.Stop 的线程要求满足。
+        _killSwitchReaction = _broker.KillSwitch.RegisterProcessReaction(StopLiveTraffic);
+    }
+
+    /// <summary>审计第六轮（2026-10-03）：紧急终止的进程级反应——中止本 WebView
+    /// 的在途流量。broker 入口的 IsEngaged 判定只能挡住**新的**副作用请求；
+    /// 已建立的流式子资源与进行中的下载不会自行停下，故必须显式 Stop/Cancel，
+    /// 否则"冻结全进程"名不副实。</summary>
+    private void StopLiveTraffic()
+    {
+        try
+        {
+            _wired?.Stop();
+        }
+        catch (Exception)
+        {
+            // 内核可能已销毁——终止语义已由入口判定保证，不放大异常
+            SecurityLog.Write($"[killswitch] tab={_tabId} 内核 Stop 未生效（可能已销毁）");
+        }
+        CoreWebView2DownloadOperation[] snapshot;
+        lock (_downloadsLock)
+            snapshot = _trackedDownloads.ToArray();
+        foreach (var download in snapshot)
+        {
+            try
+            {
+                download.Cancel();
+            }
+            catch (Exception)
+            {
+                // 下载可能已完成——取消失败不改变拒绝语义
+            }
+        }
     }
 
     /// <summary>显式解绑全部订阅（Dispose 调用；也可供宿主在复用 WebView 时手动
@@ -139,6 +198,12 @@ public sealed class HostWebView : IDisposable
         webView.DownloadStarting -= _onDownloadStarting;
         webView.PermissionRequested -= _onPermissionRequested;
         webView.WebResourceRequested -= _onWebResourceRequested;
+        // 审计第六轮（2026-10-03）：注销紧急终止反应并丢在途下载引用——
+        // 开关的注册表若继续持有已释放控件，Engage 时即对死对象调 Stop/Cancel
+        _killSwitchReaction?.Dispose();
+        _killSwitchReaction = null;
+        lock (_downloadsLock)
+            _trackedDownloads.Clear();
         _wired = null;
     }
 
@@ -213,6 +278,7 @@ public sealed class HostWebView : IDisposable
     {
         var downloadUrl = string.Empty;
         var suggested = string.Empty;
+        var metadataReadable = true;
         try
         {
             downloadUrl = e.DownloadOperation?.Uri ?? string.Empty;
@@ -221,10 +287,21 @@ public sealed class HostWebView : IDisposable
         }
         catch (Exception)
         {
-            // 元数据读取失败不影响策略判定
+            metadataReadable = false;
         }
-        var fileName = Core.Downloads.DownloadPolicy.SanitizeFileName(suggested);
-        var dangerous = Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(downloadUrl, fileName);
+        // 审计第六轮（2026-10-03）：元数据**就是**策略输入，不是可忽略的旁路。
+        // 此前读取失败被吞成空串——SanitizeFileName("") 得 benign 默认名、
+        // RequiresExplicitConfirmation("","aegis_download") 判非危险、
+        // AllowDownload(session,tab,"",…) 因会话仍在而返回 true，于是 COM 抖动
+        // 一次就让 Content-Disposition: evil.exe 静默落盘（fail-open）。
+        // 现口径：读不到 / 无 URL / 无操作对象 = 按危险处理，无确认订阅者即拒。
+        if (string.IsNullOrEmpty(downloadUrl))
+            metadataReadable = false;
+        var fileName = metadataReadable
+            ? Core.Downloads.DownloadPolicy.SanitizeFileName(suggested)
+            : string.Empty;
+        var dangerous = !metadataReadable
+            || Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(downloadUrl, fileName);
         if (dangerous
             && (DownloadConfirmationRequested is null
                 || !DownloadConfirmationRequested.Invoke(downloadUrl, fileName)))
@@ -257,6 +334,14 @@ public sealed class HostWebView : IDisposable
                 // 操作可能尚未启动——拒绝语义已由 Handled 保证
             }
             _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
+            return;
+        }
+        // 审计第六轮（2026-10-03）：放行后登记在途下载，供紧急终止取消——
+        // 入口判定只能挡新的副作用请求，已开始的下载不会自行停下。
+        if (e.DownloadOperation is { } operation)
+        {
+            lock (_downloadsLock)
+                _trackedDownloads.Add(operation);
         }
     }
 

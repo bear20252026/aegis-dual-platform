@@ -1,0 +1,76 @@
+{
+  "kind": "tool-result-poisoning-fixtures",
+  "note": "工具描述投毒与授权元数据伪造——每步由出厂 PolicyBroker 真实判定，expect 为精确决策串。control 步骤必须 allow，用以证明后续 deny 源自攻击本身而非 broker 整体失效。",
+  "cases": [
+    {
+      "id": "poisoned-tool-description",
+      "note": "工具描述哈希被换（描述投毒——Agent 依据被篡改的 tool description 决策）",
+      "steps": [
+        {
+          "desc": "对照：未声明哈希时不额外要求",
+          "overrides": {},
+          "expect": "allow"
+        },
+        {
+          "desc": "声明一个未经批准的 tool_description_hash",
+          "overrides": {
+            "tool_description_hash": "deadbeef"
+          },
+          "expect": "deny_description_hash"
+        }
+      ]
+    },
+    {
+      "id": "forged-expiry-unparsable",
+      "note": "expires_at 伪造面：解析失败必须等同过期（fail-closed）；远未来时间戳不得等同「永久有效」（SP-157 max_ttl）",
+      "steps": [
+        {
+          "desc": "对照：不带 expires_at（缺省不过期）放行",
+          "overrides": {},
+          "expect": "allow"
+        },
+        {
+          "desc": "已过去的合法 RFC3339——必须拒",
+          "overrides": {
+            "expires_at": "2000-01-01T00:00:00Z"
+          },
+          "expect": "deny_expired"
+        },
+        {
+          "desc": "远未来 2099 时间戳——超 max_ttl（300s 默认）即拒，不得当永久授权",
+          "overrides": {
+            "expires_at": "2099-01-01T00:00:00Z"
+          },
+          "expect": "deny_max_ttl"
+        },
+        {
+          "desc": "垃圾串伪装时间戳——解析失败同拒",
+          "overrides": {
+            "expires_at": "not-a-date"
+          },
+          "expect": "deny_expired"
+        }
+      ]
+    },
+    {
+      "id": "policy-version-spoof",
+      "note": "携带非当前 policy_version 的授权（旧策略快照重放）",
+      "steps": [
+        {
+          "desc": "对照：broker 当前版本放行",
+          "overrides": {
+            "policy_version": "1.0"
+          },
+          "expect": "allow"
+        },
+        {
+          "desc": "伪报 9.9.9",
+          "overrides": {
+            "policy_version": "9.9.9"
+          },
+          "expect": "deny_policy"
+        }
+      ]
+    }
+  ]
+}

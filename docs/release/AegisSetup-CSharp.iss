@@ -58,6 +58,26 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
+[Registry]
+; 审计第六轮（2026-10-04）：出厂裁决模式标记——安装期写入，卸载删除。
+; 为什么要写注册表：AEGIS_REQUIRE_NATIVE_POLICY_CORE 此前只在 CI 构建步的 shell
+; 里赋值，既不随安装包交付也不进入终端用户进程环境——aegis_policy_core.dll
+; 随包发布却从不被咨询，出货制品的导航裁决与构建期被测路径不是同一条。
+; 为什么是 HKCU（与 PrivilegesRequired=lowest 的按用户安装一致）：本脚本不提权，
+; HKLM 写入需要管理员；HKCU 是安装器可写、应用可读、无需提升的落点。
+; ArchitecturesInstallIn64BitMode=x64compatible 下 HKCU 即 64 位视图，与 x64
+; 应用默认读取的视图一致（两侧都不涉及 WOW6432Node 重定向）。
+; 键路径/值名必须与 windows/src/Aegis.Windows.App/Broker/InstalledBuildMarker.cs
+; 的常量逐字一致——Broker.Tests 的 InstalledBuildMarkerTests 直接读取本文件对账，
+; 任一侧改名即失败（本仓反复复发的正是这类字符串漂移）。
+; RequireNavigationConfirmation 刻意不写：完整理由记在 InstalledBuildMarker 的
+; NavigationConfirmationValueName 注释（要点——核心现在的高危判据是本机/私网 host，
+; Windows 在 EvaluateNavigation 与 TryConsumeNavigation 两点已硬拒＝弹面板后再拒的
+; 死路径；且确认链不复判托管黑名单，而核心的黑名单注入入口尚无 C# 绑定与调用点，
+; 此刻启用等于给黑名单 host 开一条"批准即放行"的面）。启用顺序：先把订阅源快照
+; 喂给 aegis_policy_core_broker_update_host_denylist_json，再评估出厂置位。
+Root: HKCU; Subkey: "Software\Aegis Browser"; ValueType: dword; ValueName: "RequireNativePolicyCore"; ValueData: "1"; Flags: uninsdeletevalue uninsdeletekeyifempty
+
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 

@@ -17,6 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.mockito.ArgumentCaptor
 import org.mockito.ArgumentMatchers.anyLong
 import org.mockito.ArgumentMatchers.anyString
 import org.mockito.Mockito.mock
@@ -123,6 +124,9 @@ class AegisWebViewClientTest {
         val client = newClient()
         assertFalse(client.navigate(view, "https://example.com/"))
         verify(view, never()).loadUrl(anyString())
+        // 审计第六轮（2026-10-03）：兑换失败不得静默——顶层上抛可见拒绝提示
+        // （此前只 return false，用户症状是「点了没反应」的死点击）
+        assertEquals(listOf(WebViewErrorCodes.ERROR_NAVIGATION_NOT_CONSUMED), deniedCodes)
     }
 
     // ------------------------------------------------------------- AD-009
@@ -158,6 +162,8 @@ class AegisWebViewClientTest {
         assertTrue(client.shouldOverrideUrlLoading(view, request))
         // broker 收到的是升级后的 https URL（明文绝不透传决策层）
         verify(broker).requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/x", "navigation")
+        // 审计第六轮（2026-10-03）：回调内放行加载改经 view.post 投递
+        runPostedLoad()
         verify(view).loadUrl("https://example.com/x")
     }
 
@@ -278,6 +284,17 @@ class AegisWebViewClientTest {
 
     // ------------------------------------------------------------- 辅助
 
+    /**
+     * 审计第六轮（2026-10-03）：回调内放行加载经 view.post 投递——mock WebView
+     * 的 post 不会执行 Runnable，测试取出投递任务手动运行（等价主线程下一轮），
+     * 以此断言「投递的就是这一条加载」而非放任同步调用。
+     */
+    private fun runPostedLoad() {
+        val captor = ArgumentCaptor.forClass(Runnable::class.java)
+        verify(view).post(captor.capture())
+        captor.value.run()
+    }
+
     /** AD-216/AD-221：待审批请求构造器（多断言共用；data class equals 匹配 stub）。 */
     private fun approvalRequest(): com.aegis.broker.ApprovalRequest =
         com.aegis.broker.ApprovalRequest(
@@ -358,10 +375,14 @@ class AegisWebViewClientTest {
                 tabId = TAB,
                 onRendererGone = {},
                 requireNavigationConfirmation = false,
+                onNavigationDenied = { code, _ -> deniedCodes.add(code) },
                 autoApproveDecision = { _, _, _ -> Decision.Deny(DenyReason("url_policy", "detail")) },
             )
         assertFalse(client.navigate(view, "https://example.com/"))
         verify(view, never()).loadUrl(anyString())
+        // 审计第六轮（2026-10-03）：自动批准决策本身被拒 → 上抛的是注入的
+        // reason code（策略口径），不得谎报为 navigation_not_consumed 兑换失败
+        assertEquals(listOf("url_policy"), deniedCodes)
     }
 
     // ------------------------------------------------------------- AD-053
@@ -534,7 +555,41 @@ class AegisWebViewClientTest {
         // 全链（requestNavigationConfirmation + consumeNavigation + loadUrl）
         verify(broker).requestNavigationConfirmation(SESSION, TAB, 0L, "https://example.com/", "navigation")
         verify(broker).consumeNavigation(allowAction, SESSION, TAB, 0L, "https://example.com/", "navigation")
+        // 审计第六轮（2026-10-03）：回调内加载改投递（shouldOverrideUrlLoading
+        // 契约不得同步改动 WebView 状态）——取出投递任务执行后照常加载
+        runPostedLoad()
         verify(view).loadUrl("https://example.com/")
+    }
+
+    @Test
+    fun mainFrameConsumeFailureFromCallbackIsSurfacedNotSilentDeadClick() {
+        // 审计第六轮（2026-10-03）：真机症状复现——标签闲置过 120s TTL 后点
+        // 任意链接，consumeNavigation 拒绝兑换（会话过期/代际不符/nonce 重放/
+        // Kotlin expiresAt 已到），旧实现「什么都不加载、什么都不提示」。
+        // 现经 denied(topLevel = true) 上抛 navigation_not_consumed。
+        stubAllow()
+        whenever(broker.consumeNavigation(allowAction, SESSION, TAB, 0L, "https://example.com/", "navigation"))
+            .thenReturn(false)
+        val client = newClient()
+        val blocked = client.shouldOverrideUrlLoading(view, fakeRequest("https://example.com/", isMainFrame = true))
+        assertTrue("已接管该导航（返回 true 阻断 WebView 原始加载）", blocked)
+        assertEquals(listOf(WebViewErrorCodes.ERROR_NAVIGATION_NOT_CONSUMED), deniedCodes)
+        verify(view, never()).loadUrl(anyString())
+    }
+
+    @Test
+    fun postedLoadAfterCloseNeverTouchesDestroyedWebView() {
+        // 审计第六轮（2026-10-03）：投递任务与 tearDown→release→close 竞态——
+        // AD-281 后销毁序列不再 loadUrl(about:blank) 占位，排队中的放行加载
+        // 必须由 closed 标志短路（绝不对已 destroy 的 WebView 触达 loadUrl）。
+        stubAllow()
+        val client = newClient()
+        assertTrue(client.shouldOverrideUrlLoading(view, fakeRequest("https://example.com/", isMainFrame = true)))
+        val captor = ArgumentCaptor.forClass(Runnable::class.java)
+        verify(view).post(captor.capture())
+        client.close()
+        captor.value.run()
+        verify(view, never()).loadUrl(anyString())
     }
 
     // ------------------------------------------------------------- AD-284

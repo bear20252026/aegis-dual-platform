@@ -16,6 +16,7 @@ import org.mockito.Mockito.mock
 import org.mockito.Mockito.never
 import org.mockito.Mockito.times
 import org.mockito.Mockito.verify
+import org.mockito.Mockito.verifyNoInteractions
 import kotlin.time.Clock
 import org.mockito.Mockito.`when` as whenever
 
@@ -26,6 +27,11 @@ import org.mockito.Mockito.`when` as whenever
  * LargeClass 600 阈值）拆出子框架导航同域用例——AD-011/AD-246/AD-309
  * （升级重发）、AD-321（确认型 fail-closed）、AD-221（pending 期间子框架
  * 轻量路径不续期）。断言与桩原样搬移，不改语义。
+ *
+ * 审计第六轮（2026-10-03）：AD-309 的「Allow → loadUrl 重发」期望随生产修复
+ * 撤销（loadUrl 恒作用主框架 = 整标签劫持 + UI 红描通道）；本类的假 WebView
+ * 无框架语义，正是该回归此前不可见的原因，故 Allow 用例改断「子框架路径对
+ * WebView 零调用」这一更强性质。Deny/RequireConfirmation 的阻断期望不变。
  *
  * 前置（与原类同一 JVM 可测化口径）：
  * - android.util.Log 经 unitTests.returnDefaultValues 兜底；
@@ -74,25 +80,29 @@ class AegisWebViewClientSubFrameNavigationTest {
 
     // ------------------------------------------------------------- AD-011 / AD-246 / AD-309
     @Test
-    fun subFrameHttpIsBlockedAndResentUpgraded() {
-        // AD-309（2026-10-02 审计）：子框架 Allow 与主框架同口径——升级只用于
-        // 判定、放行仍载原始 http 的旧形态（cleartext 禁用下子框架静默失败）
-        // 改为返回 true 阻断原始加载 + view.loadUrl(升级后 URL) 重发。
+    fun subFrameHttpAllowNeverLoadsMainFrame() {
+        // 审计第六轮（2026-10-03）：AD-309「Allow → 返回 true + view.loadUrl
+        // (升级后 URL) 重发」的期望撤销——loadUrl 恒作用主框架（真 iframe 不
+        // 加载、整个标签被 iframe 目标替换，且本路径不需确认 = UI 红描通道）。
+        // 正确语义：Allow 交回 WebView 继续原始子框架请求（返回 false）。
+        // 假 WebView 无框架语义（旧断言正是因此看不见回归），故本用例只断
+        // 更强的性质：子框架路径绝不允许对 WebView 产生任何调用。
         val client = newClient()
         whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
             .thenReturn(Decision.Allow(allowAction))
         val blocked =
             client.shouldOverrideUrlLoading(view, fakeRequest("http://ads.example/frame", isMainFrame = false))
-        assertTrue("原始 http 子框架加载必须阻断", blocked)
-        // broker 收到升级后 URL，且经 loadUrl 重发（不消费顶层授权对象）
+        assertFalse("Allow 的子框架导航必须放行原始请求（不得接管）", blocked)
+        // broker 收到升级后 URL（判定口径与主框架一致；明文由 network_security_config 硬禁）
         verify(broker).evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation")
-        verify(view).loadUrl("https://ads.example/frame")
+        verifySubFramePathLeavesWebViewUntouched()
+        // 不消费顶层授权对象（子框架轻量路径不产生新授权）
         verify(
             broker,
             never(),
         ).consumeNavigation(allowAction, SESSION, TAB, 0L, "https://ads.example/frame", "navigation")
 
-        // 子框架 Deny：return true（阻断留痕，不重发）
+        // 子框架 Deny：return true（阻断留痕，不重发——阻断语义不变）
         whenever(broker.evaluateNavigation(SESSION, TAB, 0L, "https://ads.example/frame", "navigation"))
             .thenReturn(
                 Decision.Deny(
@@ -101,8 +111,7 @@ class AegisWebViewClientSubFrameNavigationTest {
             )
         val denied = client.shouldOverrideUrlLoading(view, fakeRequest("http://ads.example/frame", isMainFrame = false))
         assertTrue(denied)
-        // Deny 后无第三次 loadUrl（上面 Allow 分支恰好一次）
-        verify(view, times(1)).loadUrl(anyString())
+        verifySubFramePathLeavesWebViewUntouched()
     }
 
     // ------------------------------------------------------------- AD-321
@@ -164,6 +173,16 @@ class AegisWebViewClientSubFrameNavigationTest {
     }
 
     // ------------------------------------------------------------- 辅助
+
+    /**
+     * 审计第六轮（2026-10-03）：子框架路径对 WebView 零副作用——loadUrl 一次
+     * 都不许出现（loadUrl 恒作用主框架），post 亦禁（投递加载是主框架放行
+     * 专用通道）。verifyNoInteractions 兜住其余任何 WebView 方法调用形态。
+     */
+    private fun verifySubFramePathLeavesWebViewUntouched() {
+        verify(view, never()).loadUrl(anyString())
+        verifyNoInteractions(view)
+    }
 
     /** AD-216/AD-221：待审批请求构造器（多断言共用；data class equals 匹配 stub）。 */
     private fun approvalRequest(): com.aegis.broker.ApprovalRequest =

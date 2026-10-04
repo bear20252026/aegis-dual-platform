@@ -1,0 +1,49 @@
+Aegis 发布签名身份（signing identity pin）
+==========================================
+
+审计第六轮（2026-10-03）新增。用途：CI 在发布前把**制品实签证书指纹**与本文
+件对账，不一致即 fail-closed 停止发布。
+
+为什么不是 GitHub secret
+------------------------
+`release-android.yml` 只做了 `apksigner verify --print-certs`（证明"有签名且
+成链"），`release-windows.yml` 只做 `signtool verify /pa`——两者都不校验
+"是谁签的"。若 `AEGIS_KEYSTORE_*` 四件套被替换（管理员误改、secret 供应链、
+账号被钓），CI 会用攻击者的钥匙签名，随后 apksigner 验证通过、SBOM 生成、
+attestation 签发、SHA256SUMS 齐备、发布全绿——一条恶意更新链完整穿过流水线，
+且自动更新端无法察觉。
+
+把预期身份放 secret 里并不能解决：能换 `AEGIS_KEYSTORE_FILE` 的人同样能换
+`AEGIS_EXPECTED_APK_CERT_SHA256`（同一爆炸半径）。放**受版本控制的已评审文
+件**才是更强的控制：改动需要 git 写权限 + 通过评审，且已启用的 `v*` tag
+ruleset 使发布 tag 不可改写。
+
+Android（APK）
+--------------
+签名者 #1 证书 DN：CN=Aegis Browser, OU=Aegis, O=Aegis Project, C=CN
+证书 SHA-256：deaafc19628a8e7261edb8582bca689a0c5c7bc589dca1831854232102845217
+
+APK_CERT_SHA256=deaafc19628a8e7261edb8582bca689a0c5c7bc589dca1831854232102845217
+
+来源与核验方法：从已发布制品 Aegis-2.2.0-beta.50-android-arm64.apk 实测取得
+（Android SDK build-tools apksigner）：
+
+    apksigner verify --print-certs Aegis-2.2.0-beta.50-android-arm64.apk
+
+任何人可用同一命令对最新 Release 制品复核此值。
+
+Windows（Authenticode）
+----------------------
+未配置。本仓库 GitHub Actions 目前不存在 AEGIS_CODE_SIGN_CERT secret，
+C# 安装包在每次发布中都**跳过签名**（release-windows.yml 缺证书时
+Write-Warning + exit 0）。因此此处无从登记指纹；一旦配置 Authenticode
+证书，请按下面格式补一行并同步 workflow：
+
+AUTHENTICODE_SHA256=<证书 SHA-256 指纹，去分隔符小写>
+
+轮换流程
+--------
+1. 生成/取得新证书；
+2. 用新证书构建并本地 apksigner verify 确认；
+3. 本文件改值 + 同步 GitHub secrets 四件套（一个 PR，经评审）；
+4. 打 tag 发布——CI 会拒绝"制品指纹与本文件不符"的构建。

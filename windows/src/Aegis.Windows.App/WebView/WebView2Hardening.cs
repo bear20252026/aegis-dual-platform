@@ -80,18 +80,24 @@ public static class WebView2Hardening
         return applied;
     }
 
-    /// <summary>按来源翻转 IsWebMessageEnabled（每次顶层/子框架导航时调用）。
-    /// 远程 http/https 页面禁用——js_api 无桥架构（ADR-003）下此通道必须关死。
-    /// 唯一例外：受信本地虚拟主机（ntp.aegis.local——M3 新标签页宿主桥）
-    /// ——虚拟主机只映射发布资源目录，非远程内容。</summary>
+    /// <summary>按来源翻转 IsWebMessageEnabled（每次顶层导航时调用）。
+    /// 审计第六轮（2026-10-03）：改**默认拒绝**——仅显式白名单的本地资产虚拟
+    /// 主机（https + 受信 host）才开该通道。此前判据是 `isRemote`（仅对
+    /// http/https 为真），于是 file:/data:/about: 及一切非 http(s) 形态都落到
+    /// <code>!isRemote</code>＝启用分支：远程页执行 <code>location='file:///x'</code>
+    /// 虽被 broker 取消导航，仍在显示的远程文档却已被打开 WebMessage 通道
+    /// ——ADR-003 声称关死的通道实际处于 fail-open，今日只靠 NtpBridge
+    /// .IsTrustedSource + NtpAssets.IsTopLevelNtpDocument 二层兜底。
+    /// 白名单口径不扩大（仅 NTP host，与既有 IsTrustedLocalHost 一致）。</summary>
     public static void SetPerOrigin(CoreWebView2 core, string? url)
     {
         try
         {
-            var isRemote = Uri.TryCreate(url, UriKind.Absolute, out var uri)
-                           && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps)
-                           && !IsTrustedLocalHost(uri.Host);
-            core.Settings.IsWebMessageEnabled = !isRemote;
+            var isTrustedShell =
+                Uri.TryCreate(url, UriKind.Absolute, out var uri)
+                && uri.Scheme == Uri.UriSchemeHttps
+                && IsTrustedLocalHost(uri.Host);
+            core.Settings.IsWebMessageEnabled = isTrustedShell;
         }
         catch
         {

@@ -132,6 +132,16 @@
       "url": "https://0x7f.1/",
       "expected": "deny",
       "note": "RS-238 混合 0x 段（整串 startsWith('0x') 因含 '.' 不命中——逐段判定拒绝，跨端对齐 AD-213）"
+    },
+    {
+      "url": "https://example.org./x",
+      "expected": "deny",
+      "note": "审计第六轮（2026-10-03）：尾点 host 三端统一拒绝——Rust origin.rs 此前剥离归一（与 C# OriginPolicy.IsValidHost 的 host.EndsWith(\".\") 即 false / Kotlin OriginPolicy.isAcceptedHostShape 的 !host.endsWith(\".\") 分叉），本轮对齐拒绝口径"
+    },
+    {
+      "url": "https://localhost./",
+      "expected": "deny",
+      "note": "审计第六轮（2026-10-03）：AD-252 攻击面锚点——Chromium 归一剥尾点后 location.hostname == \"localhost\" 命中 bridge_guard 环回白名单成为 trustedCaller；归一层不得替攻击者完成剥离，三端一律拒绝"
     }
   ]
 }

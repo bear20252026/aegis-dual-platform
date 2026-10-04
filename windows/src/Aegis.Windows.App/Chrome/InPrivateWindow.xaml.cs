@@ -21,7 +21,13 @@ public partial class InPrivateWindow : Window
 {
     // CS-291（2026-09-26 审计）：无痕窗 broker 复用进程级共享 KillSwitch——
     // 此前每窗独立开关，设置窗触发的紧急终止对无痕窗口完全失效（fail-open）
-    private readonly BrowserPolicyBroker _broker = new(killSwitch: KillSwitch.Shared);
+    // 审计第六轮（2026-10-03）：同款模式补共享黑名单持有者——本窗此前只共享
+    // KillSwitch 不共享 denylist，威胁订阅源刷新永不下发到无痕窗口，已知恶意
+    // host 在隐私路径照常导航且 OnWebResourceRequested 不 403（与 CS-291 修复
+    // 前同一缺陷类：修了一个共享字段，漏了同文件的另一个）
+    private readonly BrowserPolicyBroker _broker = new(
+        blockedHosts: SharedBlockedHosts.Shared,
+        killSwitch: KillSwitch.Shared);
     private readonly TabManager _tabs = new();
     private readonly Dictionary<string, TabRuntime> _runtimes = new();
     private TabRuntimeCoordinator _runtimeCoordinator = null!;

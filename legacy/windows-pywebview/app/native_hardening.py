@@ -75,6 +75,7 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                 # 非信任站点（远程网页）禁用 WebMessage 通道 + 脚本对话框；本地页面
                 # 保持开启。js_api 桥不依赖 IsWebMessageEnabled（零功能影响）；设置
                 # 幂等（每次请求按来源设置，下个导航生效——pywebview 无导航事件）。
+                settings = None
                 try:
                     core = (shell_adapter.core(window)
                             if shell_adapter is not None else None)
@@ -83,8 +84,24 @@ def _apply_request_policy(window: Any, blocked: set | None = None,
                         remote = bool(host)  # host 非空 = 远程网页（非信任）
                         settings.IsWebMessageEnabled = not remote
                         settings.AreDefaultScriptDialogsEnabled = not remote
-                except Exception:
-                    pass  # 设置失败静默（版本不支持/属性缺失，不影响请求）
+                except Exception as exc:
+                    # 审计第六轮（2026-10-03）：原为 `except Exception: pass`——
+                    # 静默即 fail-open。本模块 docstring 第 6 行自陈「安全状态变化
+                    # 一律 log_event 显式留痕（不再静默）」，且同文件后文记明
+                    # pywebview 6.2.1 的 js_api 传输正是 WebMessageReceived 通道：
+                    # 翻转一旦被跳过，远程页面保住 WebMessage 通道 = XSS→native 桥
+                    # 路径。改 fail-closed：尽力关闭两条通道，并显式留痕。
+                    for _attr in ("IsWebMessageEnabled",
+                                  "AreDefaultScriptDialogsEnabled"):
+                        try:
+                            setattr(settings, _attr, False)
+                        except Exception:
+                            pass  # settings 为 None/属性缺失——关闭尝试本身不可用
+                    from crash_reporter import log_event
+                    log_event(
+                        "[native] per-origin 加固设置异常，已 fail-closed 关闭"
+                        f" WebMessage/脚本对话框: {type(exc).__name__}"
+                    )
                 if host and blocked:
                     from app.threat_feed import host_is_blocked
                     if host_is_blocked(host, blocked):

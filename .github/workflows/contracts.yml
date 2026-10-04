@@ -2,21 +2,19 @@ name: Contracts
 
 "on":
   push:
-    # PY-206（2026-09-26 审计）：push 触发补 paths 过滤——此前 push: {} 全
-    # 分支全路径触发，docs 改动也全量跑契约/Gradle/cargo 门禁（PR 触发面
-    # 保持不过滤：PR 需要完整反馈）
-    paths:
-      - 'contracts/**'
-      - 'scripts/**'
-      - 'shared/**'
-      # SP-225（2026-10-02 审计·S-04）：pytest tests/python 与 validate_release.py
-      # 均在本 workflow 消费——改动不经此触发则发布链验证回归不可见
-      - 'tests/python/**'
-      - 'validate_release.py'
-      # 本 workflow 以 --require-hashes 安装根级 hash 锁——锁变更须回验
-      - 'requirements-ci.in'
-      - 'requirements-ci.txt'
-      - '.github/workflows/contracts.yml'
+    # 审计第六轮（2026-10-03）：删除 paths 过滤——回归 ADR-007 D3 口径
+    # （「门禁型 workflow 移除全部 paths: 过滤——paths: 过滤 = 不设防」）。
+    # PY-206（2026-09-26）曾重新加回，动机是省 CI（docs 改动也跑契约/cargo/
+    # Gradle）。但它制造了真实盲区：本 workflow 的 verify_bridge_guard.py 存在的
+    # 唯一理由，是对账
+    #   android/**/WebViewHardening.kt 内嵌守卫副本 与
+    #   core/rust-policy-core/src/bridge_guard.rs（include_str! 消费）——
+    # 而这两条路径都不在过滤清单内。只改这两个文件之一的直接 push，契约门禁
+    # 零作业运行，守卫漂移可静默进 master。
+    # 代价如实声明：master 每次 push 都跑本 workflow（含 cargo 与双端契约构建）。
+    # 正确的省法不是给安全门禁加过滤，而是用分支保护/ruleset 把必需检查设为门禁，
+    # 让 CI 成本由合并流程承担，而不是靠让门禁不跑来节省。
+    {}
   pull_request: {}
   workflow_dispatch: {}
 
@@ -77,6 +75,13 @@ jobs:
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
         run: python scripts/verify_release_schema.py
+      - name: Repo-level release integrity validator (审计第六轮 2026-10-03)
+        # README 把 validate_release.py 列为「五门禁常绿」之一，但此前它
+        # 的唯一 CI 执行点是 legacy-python-guard.yml 的周六 cron 与 compat.yml
+        # 的每周探针——push / PR 与发布路径都不跑，回归要等到打 tag 才可见
+        #（241 轮 SP-199 已承认 7 个常跑门禁不含它）。接入本 job 使「常绿」
+        # 名副其实：改动脚本本体或依赖锁时同批回验。
+        run: python validate_release.py
       - name: Verify cross-end data lists (wallpapers/engines——A-7)
         run: python scripts/verify_cross_end_lists.py
       - name: Validate contracts JSON and expected decisions (PY-064 抽脚本单源)

@@ -2,6 +2,8 @@
 //!
 //! 与 contracts/vectors/url-origin-valid|invalid.json 一致（http/https 放行——
 //! data:/blob:/javascript:/userinfo/控制字符/无 host/超长拒绝——P0-01 同语义）。
+//! 审计第六轮（2026-10-03）：尾点 host（`https://example.org./`）纳入拒绝集——
+//! 三端（Rust/C#/Kotlin）归一口径统一，剥尾点归一即 AD-252 攻击面本身。
 //! 纯函数——无 I/O。
 
 /// 已规范化的外部 URL；fragment 不参与副作用授权绑定。
@@ -73,11 +75,20 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
     if host.is_empty() {
         return None;
     }
-    // RS-012（审计 2026-09-24）：host 字符白名单 + 尾点剥离——与 C# 口径
-    // 一致。尾点为合法 FQDN 根表示（example.org.）——剥离后归一；剥离后
-    // 仅允许 [a-z0-9.-]（xn-- punycode 亦在集内），其余字符（下划线/空格/
-    // 控制符等）一律拒绝
-    let host = host.strip_suffix('.').unwrap_or(&host);
+    // RS-012（审计 2026-09-24）：host 字符白名单——剥离后仅允许
+    // [a-z0-9.-]（xn-- punycode 亦在集内），其余字符（下划线/空格/控制符
+    // 等）一律拒绝。
+    // 审计第六轮（2026-10-03）：尾点 host 由「剥离归一」改为**拒绝**——
+    // 与 C# OriginPolicy.IsValidHost（`host.EndsWith(".")` 即 false）/
+    // Kotlin OriginPolicy.isAcceptedHostShape（`!host.endsWith(".")`）
+    // 口径一致（RS-012 注释曾称「与 C# 口径一致」却做了反向归一，本轮
+    // 更正）。理由：Chromium 归一化剥尾点，`https://localhost./` 在内核
+    // 侧呈现 `location.hostname == "localhost"` 并命中 bridge_guard 环回
+    // 白名单（AD-252 记录的攻击面）——归一层剥尾点正是该攻击本身，
+    // 而非合法 FQDN 根表示的宽容
+    if host.ends_with('.') {
+        return None; // 尾点 host（含 "." 单点形态）拒绝
+    }
     if host.is_empty()
         || host.starts_with('.')
         || host.contains("..")
@@ -310,13 +321,20 @@ mod tests {
 
     #[test]
     fn host_character_whitelist_and_trailing_dot() {
-        // RS-012：字符白名单 + 尾点剥离
-        assert!(
-            try_parse_external("https://example.org./x").is_some(),
-            "尾点 FQDN 剥离后放行"
+        // RS-012：字符白名单；审计第六轮（2026-10-03）：尾点由「剥离放行」
+        // 改为拒绝（与 C#/Kotlin OriginPolicy 对齐；contracts 侧
+        // url-origin-invalid.json 同批补入尾点 deny 向量）
+        assert_eq!(
+            try_parse_external("https://example.org./x"),
+            None,
+            "尾点 FQDN 拒绝（不再剥离归一）"
         );
-        let stripped = canonicalize_external("https://example.org./x").unwrap();
-        assert_eq!(stripped.host, "example.org", "尾点剥离后 origin 归一");
+        assert_eq!(canonicalize_external("https://example.org./x"), None);
+        assert_eq!(
+            canonicalize_external("https://example.org./"),
+            None,
+            "纯尾点根域同样拒绝"
+        );
         assert_eq!(
             try_parse_external("https://exa mple.org/"),
             None,
@@ -341,6 +359,30 @@ mod tests {
             None,
             "裸点拒绝"
         );
+    }
+
+    // —— 审计第六轮（2026-10-03）：AD-252 尾点攻击面三端对齐 ——
+
+    #[test]
+    fn trailing_dot_loopback_and_whitelist_shapes_rejected() {
+        // AD-252（Kotlin OriginPolicy.kt 记录）：Chromium 归一剥尾点后
+        // `https://localhost./` 的 location.hostname == "localhost"，命中
+        // bridge_guard 环回白名单成为 trustedCaller——归一层必须先行拒绝，
+        // 不得替攻击者完成剥离
+        for url in [
+            "https://localhost./",
+            "https://LOCALHOST./",
+            "https://localhost./x?token=1",
+            "https://localhost.:8443/",
+            "https://aegis.local./",
+            "https://127.0.0.1./",
+            "https://example.org./",
+        ] {
+            assert_eq!(try_parse_external(url), None, "尾点形态必须拒绝：{url}");
+        }
+        // 对照：无尾点的同一批 host 保持放行（收窄不误伤）
+        assert!(try_parse_external("https://localhost/").is_some());
+        assert!(try_parse_external("https://127.0.0.1/").is_some());
     }
 
     // —— RS-057/058 回归（审计 2026-09-25） ——

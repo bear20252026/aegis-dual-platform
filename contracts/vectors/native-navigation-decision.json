@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Rust 原生导航决策 C ABI 的跨端语义向量；每项均绑定 session/tab/generation/origin/path+query/scope/nonce。",
+  "description": "Rust 原生导航决策 C ABI 的跨端语义向量；每项均绑定 session/tab/generation/origin/path+query/scope/nonce。 审计第六轮（2026-10-03/04）补入 deny-by-content 与高危目标（本机/私网）require_confirmation 向量——此前本文件只覆盖 url_policy/session_not_found 两类拒绝，\"黑名单匹配\"与\"确认只对高危触发\"均无跨端锁定。",
   "vectors": [
     {
       "name": "canonical_url_fragment_and_replay",
@@ -79,6 +79,118 @@
       "destroy_session": true,
       "expected_reconsume_code": "action_not_issued",
       "note": "PY-091 KillSwitch 等价语义：会话销毁后消费点 fail-closed（action_not_issued——上下文已销毁，action 不可达；native core 无 KillSwitch 注入口——C# broker 层能力）"
+    },
+    {
+      "name": "public_host_allows_without_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://example.org/news?q=1",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://example.org",
+      "expected_parameters": "/news?q=1",
+      "consume_url": "https://example.org/news?q=1",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "expected_replay_code": "nonce_replay"
+    },
+    {
+      "name": "loopback_ip_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://127.0.0.1:8080/admin",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "https://127.0.0.1:8080"
+    },
+    {
+      "name": "localhost_name_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://localhost/panel",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "https://localhost"
+    },
+    {
+      "name": "private_rfc1918_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://192.168.1.1/set_config",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://192.168.1.1"
+    },
+    {
+      "name": "link_local_metadata_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://169.254.169.254/latest/meta-data/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://169.254.169.254"
+    },
+    {
+      "name": "blocklisted_host_denied",
+      "register_session": true,
+      "generation": 0,
+      "deny_hosts": [
+        "bad.example"
+      ],
+      "url": "https://bad.example/payload",
+      "scope": "navigation",
+      "expected_evaluate": "deny",
+      "expected_deny_code": "threat_blocklist"
+    },
+    {
+      "name": "blocklist_entry_form_is_case_insensitive",
+      "register_session": true,
+      "generation": 0,
+      "deny_hosts": [
+        "BAD.Example"
+      ],
+      "url": "https://bad.example/payload",
+      "scope": "navigation",
+      "expected_evaluate": "deny",
+      "expected_deny_code": "threat_blocklist"
+    },
+    {
+      "name": "blocklist_suffix_confusion_does_not_over_block",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://good.example.evil.test/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://good.example.evil.test",
+      "expected_parameters": "/",
+      "consume_url": "https://good.example.evil.test/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "deny_hosts": [
+        "good.example"
+      ],
+      "expected_replay_code": "nonce_replay"
+    },
+    {
+      "name": "blocklisted_host_with_nondefault_port_is_denied",
+      "register_session": true,
+      "generation": 0,
+      "deny_hosts": [
+        "bad.example"
+      ],
+      "url": "https://bad.example:8443/payload",
+      "scope": "navigation",
+      "expected_evaluate": "deny",
+      "expected_deny_code": "threat_blocklist"
+    },
+    {
+      "name": "loopback_with_nondefault_port_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://127.0.0.1:6379/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "https://127.0.0.1:6379"
     }
   ]
 }

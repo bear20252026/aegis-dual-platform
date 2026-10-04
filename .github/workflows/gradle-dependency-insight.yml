@@ -70,8 +70,18 @@ jobs:
           grep -nE -B3 "$PKG_REGEX" /tmp/testcp.txt || echo "(零命中)"
 
       - name: 依赖链洞察（dependencyInsight——按需解析两条 classpath）
+        env:
+          # 审计第六轮（2026-10-03）：PY-181 同型残留——${{ }} 在 shell 解析
+          # 之前完成文本替换，dispatch 输入 packages=a"$(id)"b 会在 runner 上
+          # 执行任意命令（需仓库写权限才能 dispatch，非外部可达，但属实时
+          # 注入面）。改经 env 中转：run: 文本内只有字面 "$PKGS_INPUT"，
+          # 输入内容永不进入脚本源码（全量扫描 workflows/** + actions/**
+          # 后本行是唯一残留 in-run 表达式）
+          PKGS_INPUT: ${{ inputs.packages }}
         run: |
-          IFS=',' read -ra PKGS <<< "${{ github.event.inputs.packages }}"
+          # "$PKGS_INPUT" 双引号 + 整体作单个词——IFS 拆分仅按逗号，
+          # $ ( " 等元字符不被二次解释
+          IFS=',' read -ra PKGS <<< "$PKGS_INPUT"
           for pkg in "${PKGS[@]}"; do
             echo "=== insight($pkg) @ debugRuntimeClasspath ==="
             ./gradlew :app:dependencyInsight --configuration debugRuntimeClasspath --dependency "$pkg" --no-daemon 2>&1 | tail -25 || true

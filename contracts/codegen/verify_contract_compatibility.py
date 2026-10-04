@@ -23,6 +23,36 @@ from generate_kotlin import generate as generate_kt_model
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "schemas"
 VECTORS = ROOT / "vectors"
+# 审计第六轮（2026-10-03）：仓库根——真实手写模型对账的锚定根（不经 ROOT，
+# 因单测把 ROOT/SCHEMAS/VECTORS 重定向到合成契约树，真实模型仍在仓库原位）。
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+# 审计第六轮（2026-10-03）：schema ↔ 真实手写模型对账映射。
+# 此前 check_generated_models 只把 schema 与其自身生成镜像比对——「契约兼容性 =
+# 跨语言一致」在 schema 与自己镜像之间自证，从不触及两端实际运行的手写类型
+#（AD-244 已坦白）。本表把每条冻结契约对到其消费端手写实现，缺失/可选性漂移即红。
+# 值 = (模型文件, 语言, 类型名)。只读这些文件，绝不写。
+REAL_MODEL_CONTRACTS: dict[str, tuple[pathlib.Path, str, str]] = {
+    "approval.schema.json": (
+        REPO_ROOT / "windows" / "src" / "Aegis.Windows.App" / "Broker" / "Decision.cs",
+        "cs", "ApprovalRequest"),
+    "audit-event.schema.json": (
+        REPO_ROOT / "windows" / "src" / "Aegis.Windows.App" / "Broker" / "Audit" / "AuditEvent.cs",
+        "cs", "AuditEvent"),
+    "capability.schema.json": (
+        REPO_ROOT / "core" / "rust-policy-core" / "src" / "capability.rs",
+        "rust", "Capability"),
+}
+
+# 审计第六轮：已声明为「设计标注镜像」的生成物——AD-244：当前零消费方，保留仅为
+# 跨语言契约镜像完整性。列于此显式承认为非承重镜像；此集外的任何镜像若无真实
+# 消费方则 check_mirror_consumption 计入 failures（防镜像悄悄沦为无人消费的假保证）。
+DESIGN_NOTATION_MIRRORS = {
+    "ApprovalContract", "AuditEventContract", "CapabilityContract",
+    "UpdateManifestContract", "VersionContract",
+}
+
 
 
 def contract_name(schema_file: pathlib.Path) -> str:

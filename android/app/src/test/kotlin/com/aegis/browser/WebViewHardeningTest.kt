@@ -91,6 +91,9 @@ class WebViewHardeningTest {
                 // （不可枚举/不可配置）——标记锚定属性名字面量
                 "__AEGIS_PROTECTION_VERSION",
                 "Function.prototype.toString", // Stage 1：ToStringGuard
+                // 审计第六轮（2026-10-03）：Stage 2 种子改闭包局部 const——
+                // 标记锚定标识符本身（不再是 window 全局；全局导出断言见
+                // WebViewHardeningScriptTest.stage2SiteSeedIsClosureScopedNeverGlobal）
                 "__AEGIS_SITE_SEED", // Stage 2：PerSiteSeed
                 "HTMLCanvasElement.prototype.toDataURL", // Stage 3：Canvas 噪声
                 "hardwareConcurrency", // Stage 3c：硬件并发伪装

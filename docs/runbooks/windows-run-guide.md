@@ -47,6 +47,14 @@ cargo test                     # 策略核心单测全绿
 # 3) 验证：导航裁决走 Rust 核心（deny/allow 决策与解释可见于审计日志）
 ```
 
+> 审计第六轮（2026-10-04）：环境变量只在**当前进程**有效，不会随安装包交付，
+> 因此上面的手动开关只覆盖开发/CI 联调。出货制品的原生裁决由安装器写入的
+> 按用户标记驱动（`HKCU\Software\Aegis Browser\RequireNativePolicyCore=1`，
+> 见 docs/release/AegisSetup-CSharp.iss 的 [Registry] 段与
+> Broker/InstalledBuildMarker.cs）。已安装制品的判定路径可在启动后的安全日志
+> 首行 `[adjudication]` 直接读出（要求=true/false、来源、探测结果、确认门状态）——
+> 该项留痕本身就是修复的一部分：断链此前因零痕迹而连续五轮未被发现。
+
 联调口径：Rust 侧只修 `core/rust-policy-core`；C# 绑定层改动需两套件
 （Core/Broker.Tests）+ `cargo test` 双绿。
 

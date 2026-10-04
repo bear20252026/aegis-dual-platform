@@ -25,6 +25,15 @@ object WebViewErrorCodes {
     const val ERROR_HTTP = "http_error"
 
     /**
+     * 审计第六轮（2026-10-03）：授权兑换失败（consumeNavigation 返回 false——
+     * 会话过期/代际不符/nonce 重放/Kotlin 侧 expiresAt 已到）。broker 只回
+     * 布尔、无原生 deny code 可透传，此前表现为「点了没反应」的静默死链；
+     * 现由客户端补此码经 onNavigationDenied 顶层上抛（app 层回落
+     * nav_rejected_code 文案带出 code——拒绝必须用户可见）。
+     */
+    const val ERROR_NAVIGATION_NOT_CONSUMED = "navigation_not_consumed"
+
+    /**
      * AD-211（2026-09-26 审计）：拒绝日志整行组装单源——detail 与 url
      * 一并脱敏。原实现只对 url 参数走 LogRedact，但 AndroidBroker/Rust
      * 核心的 deny detail 内嵌完整明文 URL（`拒绝 URL: $rawUrl` 直接拼
