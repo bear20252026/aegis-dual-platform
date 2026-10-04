@@ -79,7 +79,7 @@
     "tests/python/verify_lists_and_release_test.py": 321,
     "tests/ui-regression/start_import.test.mjs": 458,
     "tests/ui-regression/start_main.test.mjs": 579,
-    "tests/ui-regression/start_page.test.mjs": 478,
+    "tests/ui-regression/start_page.test.mjs": 490,
     "windows/src/Aegis.Windows.App/Broker/BrowserPolicyBroker.cs": 556,
     "windows/src/Aegis.Windows.App/Broker/NativePolicyCoreBridge.cs": 480,
     "windows/src/Aegis.Windows.App/Chrome/HistoryWindow.xaml.cs": 391,
