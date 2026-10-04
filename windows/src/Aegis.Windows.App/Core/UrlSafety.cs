@@ -91,7 +91,7 @@ public static class UrlSafety
 
     /// <summary>解析非点分十进制 IPv4 编码（十进制整数 / 0x 十六进制 / 2-3 段
     /// 简写如 127.1 = 127.0.0.1）。非该类形态返回 false。</summary>
-    private static bool TryParseAlternateIpv4(string host, out IPAddress address)
+    internal static bool TryParseAlternateIpv4(string host, out IPAddress address)
     {
         address = IPAddress.None;
         // 纯十进制整数（2130706433 → 127.0.0.1）
@@ -135,7 +135,7 @@ public static class UrlSafety
     ///（inet_aton 语义）对前导零段按八进制解释（"0177.0.0.1" = 127.0.0.1）。
     /// 仅识别该形态；逐段八进制/十进制混合解析，畸形（非八进制数字/越界）
     /// 返回 false 由调用方 fail-closed 判非公网。</summary>
-    private static bool TryParseOctalIpv4(string host, out IPAddress address)
+    internal static bool TryParseOctalIpv4(string host, out IPAddress address)
     {
         address = IPAddress.None;
         var parts = host.Split('.');

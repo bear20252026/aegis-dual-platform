@@ -348,8 +348,8 @@ public sealed partial class HostWebView : IDisposable
 
     /// <summary>DNT 注入 + 子资源真拦截（WebResourceRequested 原生返回 403——
     /// pywebview 时代只能标记不能拦截的缺口，原生 API 直接闭合）。拦截面两条：
-    /// 威胁黑名单，以及隐私网络边界（R7-CS1-01——本机/内网/链路本地/云元数据，
-    /// 与导航层同一谓词单源 PrivateNetworkBoundary）。</summary>
+    /// 威胁黑名单，以及保留地址边界（R7-CS1-01——链路本地/云元数据/组播/保留段，
+    /// 与导航层同一谓词单源 ReservedAddressBoundary）。</summary>
     private void OnWebResourceRequested(CoreWebView2 webView, CoreWebView2WebResourceRequestedEventArgs e)
     {
         try
@@ -358,10 +358,10 @@ public sealed partial class HostWebView : IDisposable
             if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
                 || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
                 return;
-            // 威胁黑名单 + 隐私网络边界（远程页把内网目标改写成 <img>/fetch 时，
-            // 导航层的边界管不到这里——子资源层必须自己判一次）
+            // 威胁黑名单 + 保留地址边界（远程页把元数据/链路本地目标改写成
+            // <img>/fetch 时，导航层的边界管不到这里——子资源层必须自己判一次）
             var deniedBy = _broker.IsHostBlocked(uri.Host) ? "黑名单"
-                : PrivateNetworkBoundary.Denies(uri) ? "隐私网络边界" : null;
+                : ReservedAddressBoundary.DeniesRaw(e.Request.Uri) ? "保留地址边界" : null;
             if (deniedBy is not null)
             {
                 Core.Security.SecurityLog.Write(

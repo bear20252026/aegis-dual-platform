@@ -241,6 +241,7 @@ fail-closed；服务端 `strict`/`enforce_admins`/评审要求；本机与局域
 | R7-TOOL-02 | **已落地** | 见本节「R7-TOOL-02 落地」——第九节批次表漏排的 P1，B3/B5 之后仍红，故未等排期直接补做。 |
 | B4 | **已落地** | 见本节「B4 落地」。 |
 | R7-CS1-15 / 04 | **已落地** | 根因是**镜像被卸载后仍可能调用其内函数指针**（崩溃转储模块列表零命中 aegis_policy_core.dll），不只是缺租约：镜像常驻 + 八个入口全走 `InvokeLeased` + `IsUsable` 接成入口判据 + 原生作业补跑 Core.Tests。原生模式 711/711 三轮全绿（修复前中止点 667/403/389/502 不稳定）。见「R7-CS1-15 / R7-CS1-04 落地」。 |
+| B8 本机/内网可浏览 | **已落地** | 见「B8 落地」——用户裁决「本机与内网要能打开」，私网拒绝改为仅拦保留/元数据/组播/广播/文档段。 |
 | R7-AD-01 | **已落地** | 见「R7-AD-01 落地」——第八个 P1 就此收口；阈值取版本名口径，不可解析 fail-closed 到提示侧。 |
 | B6/B7 | 未动 | 见第九节。B6 的三项与 B7 的部分需先取得用户裁决（第八节 4）；B6 与 B3/B4 同改 `HostWebView.cs`/`WebViewHardening.kt`，须串行。 |
 
@@ -297,6 +298,9 @@ WebViewHardening.kt 636 持平——表体 reflow 净零）；三端 JS 产物 n
 
 
 ### B3 落地（隐私网络边界补到子资源与下载两层）
+
+**（本节的边界口径已于同日按用户裁决改版，见「B8 落地」——`PrivateNetworkBoundary`
+已改名 `ReservedAddressBoundary`，本机与内网改为放行；下文保留建立时的原始描述。）**
 
 谓词从 `BrowserPolicyBroker.IsNonPublicNavigationTarget` 提纯为单源
 `Broker/PrivateNetworkBoundary.cs`（`Denies(Uri)` / `DeniesRaw(string)` / `DenyCode` / `Reason`
@@ -421,6 +425,41 @@ ASW 的 longVersionCode 是**十位量级**——本仓自己的 `WebViewVersion
 R7-AD-04（检查协程早于 `appContext` 初始化的启动竞态）另计，未随本条动。
 
 
+
+### B8 落地（2026-10-04 用户裁决：本机与内网必须能打开）
+
+裁决内容：**GitHub 仓库不开评审要求**（单人推送，开了等于自锁——只做不需要审批的那部分）；
+**本机地址与内网一律允许打开**。因此 B3 建立的「本机/内网/链路本地默认拒绝」需要收口成
+「只拦根本不是任何设备的地址形态」，而不是继续全量私网拒绝。
+
+- `PrivateNetworkBoundary` → **`ReservedAddressBoundary`**（改名以免类名与口径相反），
+  拒绝码 `private_network` → `reserved_address`；四类出口（原生前置导航、托管导航、
+  消费点复判、下载、子资源 403）仍共用同一谓词单源。
+- **放行**：127/8 与 `::1`、`localhost`、10/8、172.16/12、192.168/16、100.64/10
+  （CGNAT/Tailscale）、`fc00::/7`（ULA）、`*.local`/`*.internal` 主机名（mDNS 的 NAS/
+  打印机）、宿主自有 `ntp/geo.aegis.local`。宿主虚拟主机豁免分支随之删除——主机名形态
+  本来就不再被拒，留着会误导。
+- **仍拒**：169.254.0.0/16（链路本地，含云元数据 `169.254.169.254`）、`0.0.0.0/8` 与 `::`
+  未指定、224/4 组播、255.255.255.255 广播、240/4 保留、`fe80::/10`、`ff00::/8`、
+  TEST-NET-1/2/3 与 198.18/15 基准段、IPv4-mapped 形态、取不到 host 的不可判定输入。
+- **编码变体按更严一侧判**（实测平台差异）：`.NET` 把 `http://2852168190/` 的 host 归一成
+  `170.0.161.254`，而 Chromium 按 inet_aton 解析成 `169.254.169.254`（元数据端点）——
+  只看归一后的 host 就是留一条绕过路，故对**原始 authority** 是纯数字或 `0x` 形态的一律拒；
+  `UrlSafety` 的两个归一化器由 private 改 internal 复用（零行变动，不破红线）。
+- 测试面同步改版：`ReservedAddressBoundaryTests` 55 例（托管与原生模式下各跑一遍均全绿）——矩阵 34 形态（含八进制
+  `0251.0376.0251.0376`、十进制整数、简写 `169.254.1`、IPv6 zone/组播/mapped），
+  并单列 `LocalAndLanTargets_AreOpenableByRuling` 钉住裁决本身（防后来者把「SSRF 加固」
+  理解成「恢复私网拒绝」而静默改回），静态锚另加「源码里不得再出现 private_network /
+  PrivateNetworkBoundary」，杜绝两条面分叉。
+
+**已知代价（不假称已封）**：阿里云元数据端点 `100.100.100.200` 落在按裁决放行的 CGNAT 段内；
+本机/内网服务本身仍会以用户身份被远程页面访问（导航/子资源/下载三层都放行），只剩黑名单与
+用户确认这一层拦——高危目标（含 `127.0.0.1:*`）仍走 Rust 核心的确认域，需用户点一次确认。
+
+验证：Broker.Tests **162/162**、Core.Tests **711/711**（托管）；`check_file_sizes` ✅
+（新文件 137 行；`HostWebView.cs` 584、`BrowserPolicyBroker.cs` 549 均持平或收窄）；
+`check_markdown_links` ✅。Android 与 Rust 侧本批零改动（Rust 核心的
+`is_local_or_private_host` 只驱动「高危需确认」，不做拒绝，故与本裁决不冲突）。
 
 ### B1 落地当天即抓到一个被吞掉的真实失败
 `Build Windows x64 policy DLL` job 补上 `$LASTEXITCODE` 断言后立刻变红：`BrowserPolicyBrokerTests.NativePolicyCoreBridgeRequiresApprovalBeforeConfirmationNavigationCanConsume` 断言 `RequireConfirmation` 而核心回 `Allow`（1 失败 / 86 通过）。根因是 R6-21 把确认域收窄为「仅高危目标」后，该用例仍拿 `https://example.com/…` 期望确认——**它自第六轮起一直是红的**，被「测试红 + 后续 `dotnet publish` 绿 ⇒ 步骤绿」与「该 job 不在必需检查里」两层叠加吞掉。

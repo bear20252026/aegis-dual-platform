@@ -118,13 +118,13 @@ public sealed class BrowserPolicyBroker : IBroker
         }
         // 审计第七轮（2026-10-04·R7-CS1-02）：下载 URL 同样是策略输入——此前这道门
         // 只看 kill-switch/会话/标签，从不看 URL，远程页面一个链接即可把
-        // http://169.254.169.254/latest/user-data 落盘（导航层已声明的隐私网络边界
-        // 在下载层不成立）。取不到绝对地址 = 无法判定 = 一并拒绝（与调用方
-        // 「读不到元数据即按危险处理」同口径）。
-        if (PrivateNetworkBoundary.DeniesRaw(origin))
+        // http://169.254.169.254/latest/user-data 落盘（导航层已声明的边界在下载层
+        // 不成立）。取不到绝对地址 = 无法判定 = 一并拒绝（与调用方「读不到
+        // 元数据即按危险处理」同口径）。
+        if (ReservedAddressBoundary.DeniesRaw(origin))
         {
-            RecordAudit("deny", "download", origin, PrivateNetworkBoundary.DenyCode);
-            SecurityLog.Write($"[network] 下载拒绝（本机/内网/链路本地地址或地址不可判定）: {UrlRedactor.Redact(origin)}");
+            RecordAudit("deny", "download", origin, ReservedAddressBoundary.DenyCode);
+            SecurityLog.Write($"[network] 下载拒绝（元数据/保留地址或地址不可判定）: {UrlRedactor.Redact(origin)}");
             return false;
         }
         lock (_sessionLock)
@@ -225,10 +225,10 @@ public sealed class BrowserPolicyBroker : IBroker
                     SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {UrlRedactor.Redact(rawUrl)}");
                     return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
                 }
-                // 审计第七轮（2026-10-03）：私有/回环拒绝在原生模式同样前置（托管
-                // 侧的强制面，与黑名单同源同理——Rust 核心不含本仓的隐私网络边界）
-                if (PrivateNetworkBoundary.Denies(nativeUri))
-                    return DenyNonPublicTarget(scope, rawUrl);
+                // 保留地址拒绝在原生模式同样前置（托管侧的强制面，与黑名单同源
+                // 同理——Rust 核心不含本仓的保留地址边界）
+                if (ReservedAddressBoundary.Denies(nativeUri))
+                    return DenyReservedAddress(scope, rawUrl);
             }
             if (_nativePolicyCoreBridge is null)
                 return NativeBridgeDenied(scope, "native_policy_core_bridge_unavailable");
@@ -253,10 +253,10 @@ public sealed class BrowserPolicyBroker : IBroker
             SecurityLog.Write($"[threat] 导航拒绝（黑名单命中）: {UrlRedactor.Redact(rawUrl)}");
             return new Decision.Deny(new DenyReason("threat_blocklist", "该地址在恶意站点黑名单中，已被拦截。"));
         }
-        // 审计第七轮（2026-10-03）：本机/内网/链路本地/元数据地址默认拒绝——
-        // 远程页的 SSRF/CSRF 原语（含 iframe 子文档，同一入口）
-        if (PrivateNetworkBoundary.Denies(uri))
-            return DenyNonPublicTarget(scope, rawUrl);
+        // 审计第七轮（2026-10-03）+ 2026-10-04 裁决：链路本地/云元数据/组播/保留
+        // 地址默认拒绝（本机与内网按裁决放行）——远程页读实例凭据的主路径
+        if (ReservedAddressBoundary.Denies(uri))
+            return DenyReservedAddress(scope, rawUrl);
         var origin = uri.GetLeftPart(UriPartial.Authority);
         var action = new AuthorizedAction(sessionId, tabId, generation, origin, "GET",
             uri.GetComponents(UriComponents.PathAndQuery, UriFormat.UriEscaped), scope, DateTime.UtcNow.Add(ActionLifetime),
@@ -355,9 +355,9 @@ public sealed class BrowserPolicyBroker : IBroker
         // EvaluateNavigation 签发（那里已拒），此处兜住"原生核心签发的内网授权"
         // 与调用方伪造动作（与 KillSwitch 在消费点复判同理）
         if (OriginPolicy.TryParseExternal(rawUrl, out var targetUri)
-            && PrivateNetworkBoundary.Denies(targetUri))
+            && ReservedAddressBoundary.Denies(targetUri))
         {
-            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), PrivateNetworkBoundary.DenyCode);
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), ReservedAddressBoundary.DenyCode);
             return false;
         }
         if (_nativePolicyCoreRequired)
@@ -505,13 +505,13 @@ public sealed class BrowserPolicyBroker : IBroker
         }
     }
 
-    /// <summary>隐私网络边界命中的拒绝留痕（谓词与文案在 PrivateNetworkBoundary 单源，
-    /// 四层出口共用——见该文件注释）。</summary>
-    private Decision.Deny DenyNonPublicTarget(string scope, string rawUrl)
+    /// <summary>保留地址边界命中的拒绝留痕（谓词与文案在 ReservedAddressBoundary
+    /// 单源，四类出口共用——见该文件注释）。</summary>
+    private Decision.Deny DenyReservedAddress(string scope, string rawUrl)
     {
-        RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), PrivateNetworkBoundary.DenyCode);
-        SecurityLog.Write($"[network] 导航拒绝（本机/内网/链路本地地址）: {UrlRedactor.Redact(rawUrl)}");
-        return new Decision.Deny(PrivateNetworkBoundary.Reason);
+        RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), ReservedAddressBoundary.DenyCode);
+        SecurityLog.Write($"[network] 导航拒绝（链路本地/元数据/保留地址）: {UrlRedactor.Redact(rawUrl)}");
+        return new Decision.Deny(ReservedAddressBoundary.Reason);
     }
 
     private bool HasCurrentSession(string sessionId, string tabId, ulong generation)
