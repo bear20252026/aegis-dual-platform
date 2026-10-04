@@ -116,7 +116,7 @@ README 原述"裁决逻辑收敛在无 I/O 的 Rust 策略核心（单一裁决�
 | IDN 非 ASCII 域名支持 | 现状拒绝（fail-closed），是常态可用性缺陷而非安全缺陷 | 用户已选"不做" |
 | Android 下载纳入 Broker + 禁明文 | 涉及跨进程（系统下载提供程序不受 `network_security_config` 约束）行为改造 | 用户已选"不做" |
 | Rust `update_manifest` 加固 | 小顺序/单位元公钥拒绝、`key_id` 绑定密钥字节、单调版本校验。该路径**生产零调用者**（仅测试消费），风险为潜伏 | 待策略更新通道真正上线时 |
-| 种子按顶层 eTLD+1 派生 | Android 注入脚本从 JS 侧拿不到主框架 origin，需宿主下发 | 与确认流改造同批 |
+- ~~Android 种子的顶层 eTLD+1 框定~~ **已闭合（R6-25，2026-10-04）**：原记"DOCUMENT_START 注入无顶层源可达通道、须宿主下发"不准确——Chromium/WebView 的 `location.ancestorOrigins` 即是该通道（祖先 origin 链跨源可见，[0] 为最顶层祖先）。种子现按顶层 eTLD+1 派生，取不到时保守退回本帧 hostname。此前按本帧 hostname 派生会让同一第三方跟踪帧在所有站点产出同一种子（画布哈希=跨站持久标识符，正好废掉该防护），与参照实现 per_site_seed.rs:15-21（引 Brave）的要求相反。4 条回归断言含 IPv6 端口剥离与"不得再按本帧 hostname 直接派生"的反向锚点。
 | required status checks | "必需检查永不出现"会永久卡死 merge box；须在门禁改动合入并观测到一次真实 PR 全量运行后再挂 | 本轮未开，ruleset 已开两项无上下文依赖的保护 |
 
 ## 四、前五轮台账复核（抽样 25 项）

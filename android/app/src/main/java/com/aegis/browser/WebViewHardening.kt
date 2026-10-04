@@ -305,10 +305,37 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
   // core/rust-policy-core/src/per_site_seed.rs:24-28（「站点种子按域派生
   // 后仅存在于闭包内」）：种子改闭包局部 const，Stage 3/3c 两处消费点
   // 下移进本闭包（嵌套块整体缩进两级以示作用域边界——边界见本闭包尾注）。
-  // 已知未完成半区：种子的 eTLD+1 框定仍取 location.hostname（本帧自身
-  // 主机名）而非顶层站点——DOCUMENT_START 注入无顶层源可达通道，宿主下发
-  // 前第三方帧在所有站点产出同一种子（跨站标识符），登记待办见审计报告。
-  const __AEGIS_SITE_SEED = deriveSeed('$sessionSeed', getETLD1(location.hostname));
+  // 顶层站点框定（审计第六轮延续 2026-10-04）：参照实现
+  // core/rust-policy-core/src/per_site_seed.rs:15-21（引 Brave）明确要求
+  // "第三方帧与脚本共享顶层 eTLD+1 的种子"。本帧自身 hostname 派生会让
+  // 同一第三方跟踪帧在所有站点产出**同一个**种子——画布哈希即成全平台
+  // 持久标识符，恰好绕过本防护。Chromium/WebView 提供
+  // location.ancestorOrigins（祖先 origin 链，跨源亦可见，[0] 为最顶层祖先），
+  // 即所需通道，无需宿主下发（此前台账记为"无顶层源可达通道"，不准确）。
+  // 不可用/为空（非 Chromium 内核、顶层文档）时保守退回本帧 hostname。
+  function aegisHostFromOrigin(o) {
+    var s = String(o || '');
+    var i = s.indexOf('://');
+    if (i >= 0) s = s.slice(i + 3);
+    s = s.split('/')[0].split('?')[0];
+    if (s.charAt(0) === '[') {           // IPv6 字面量：端口在 ] 之后
+      var j = s.indexOf(']');
+      return j >= 0 ? s.slice(0, j + 1) : s;
+    }
+    var k = s.lastIndexOf(':');
+    return k >= 0 ? s.slice(0, k) : s;
+  }
+  function aegisTopLevelHostname() {
+    try {
+      var anc = location.ancestorOrigins;
+      if (anc && anc.length > 0) {
+        var h = aegisHostFromOrigin(anc[0]).toLowerCase();
+        if (h) return h;
+      }
+    } catch (e) { /* 取不到即退回本帧口径——不得因顶层链失败而放弃噪声 */ }
+    return location.hostname;
+  }
+  const __AEGIS_SITE_SEED = deriveSeed('$sessionSeed', getETLD1(aegisTopLevelHostname()));
 
   // === Stage 3: Canvas 噪声 ===
   // AD-212（2026-09-26 审计）：噪声施加在**离屏副本**上（参照 Rust 侧 RS-025
