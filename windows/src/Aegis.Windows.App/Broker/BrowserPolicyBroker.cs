@@ -116,6 +116,17 @@ public sealed class BrowserPolicyBroker : IBroker
             RecordAudit("deny", "download", origin, "kill_switch_engaged");
             return false;
         }
+        // 审计第七轮（2026-10-04·R7-CS1-02）：下载 URL 同样是策略输入——此前这道门
+        // 只看 kill-switch/会话/标签，从不看 URL，远程页面一个链接即可把
+        // http://169.254.169.254/latest/user-data 落盘（导航层已声明的隐私网络边界
+        // 在下载层不成立）。取不到绝对地址 = 无法判定 = 一并拒绝（与调用方
+        // 「读不到元数据即按危险处理」同口径）。
+        if (PrivateNetworkBoundary.DeniesRaw(origin))
+        {
+            RecordAudit("deny", "download", origin, PrivateNetworkBoundary.DenyCode);
+            SecurityLog.Write($"[network] 下载拒绝（本机/内网/链路本地地址或地址不可判定）: {UrlRedactor.Redact(origin)}");
+            return false;
+        }
         lock (_sessionLock)
         {
             if (_disposed || !_sessions.TryGetValue(sessionId, out var session)
@@ -216,7 +227,7 @@ public sealed class BrowserPolicyBroker : IBroker
                 }
                 // 审计第七轮（2026-10-03）：私有/回环拒绝在原生模式同样前置（托管
                 // 侧的强制面，与黑名单同源同理——Rust 核心不含本仓的隐私网络边界）
-                if (IsNonPublicNavigationTarget(nativeUri))
+                if (PrivateNetworkBoundary.Denies(nativeUri))
                     return DenyNonPublicTarget(scope, rawUrl);
             }
             if (_nativePolicyCoreBridge is null)
@@ -244,7 +255,7 @@ public sealed class BrowserPolicyBroker : IBroker
         }
         // 审计第七轮（2026-10-03）：本机/内网/链路本地/元数据地址默认拒绝——
         // 远程页的 SSRF/CSRF 原语（含 iframe 子文档，同一入口）
-        if (IsNonPublicNavigationTarget(uri))
+        if (PrivateNetworkBoundary.Denies(uri))
             return DenyNonPublicTarget(scope, rawUrl);
         var origin = uri.GetLeftPart(UriPartial.Authority);
         var action = new AuthorizedAction(sessionId, tabId, generation, origin, "GET",
@@ -340,13 +351,13 @@ public sealed class BrowserPolicyBroker : IBroker
             RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "kill_switch_engaged");
             return false;
         }
-        // 审计第七轮（2026-10-03）：消费点同样强制隐私网络边界（两种模式共用）——
-        // 托管授权只能在 EvaluateNavigation 签发（那里已拒），此处兜住"原生核心
-        // 签发的内网授权"与调用方伪造动作（与 KillSwitch 在消费点复判同理）
+        // 审计第七轮（2026-10-03）：消费点复判隐私网络边界——托管授权只能在
+        // EvaluateNavigation 签发（那里已拒），此处兜住"原生核心签发的内网授权"
+        // 与调用方伪造动作（与 KillSwitch 在消费点复判同理）
         if (OriginPolicy.TryParseExternal(rawUrl, out var targetUri)
-            && IsNonPublicNavigationTarget(targetUri))
+            && PrivateNetworkBoundary.Denies(targetUri))
         {
-            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "private_network");
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), PrivateNetworkBoundary.DenyCode);
             return false;
         }
         if (_nativePolicyCoreRequired)
@@ -494,31 +505,13 @@ public sealed class BrowserPolicyBroker : IBroker
         }
     }
 
-    /// <summary>审计第七轮（2026-10-03·P2）：本机/内网/链路本地/元数据地址判定。
-    /// 此前 EvaluateNavigation 只看协议/主机语法 + 黑名单：
-    /// &lt;iframe src="http://127.0.0.1:6379/"&gt;、http://169.254.169.254/latest/
-    /// meta-data/（云元数据）、http://192.168.1.1/set_config 都带着用户 cookie 与
-    /// 内网位置直接加载，iframe 子文档与顶层同判（同一入口），构成远程页
-    /// SSRF/CSRF 原语；IsPublicHost 的既有豁免（HTTPS-only 升级例外、
-    /// NewWindowRequested）反而把明文内网请求放到最终。
-    /// 判定复用 UrlSafety.IsPublicHost 单源（覆盖 127.0.0.0/8、::1、0.0.0.0、
-    /// 169.254.0.0/16 含元数据 IP、10/8、172.16/12、192.168/16、fc00::/7、
-    /// CGNAT/组播/广播/保留段，以及十进制/十六进制/八进制/简写 IPv4 变体与
-    /// localhost/.local/.internal 主机名形态），不重解析第二套。
-    /// 唯一豁免：宿主自有虚拟主机（TrustedChromeUiOrigins——ntp/geo 本地资源页，
-    /// **不是**"所有 localhost"）。DNS 重bind（公网名解析到 127.0.0.1）属解析
-    /// 层问题：本层是纯语法判定，且 UI 线程同步 DNS 是 CS-339 已封的冻结面
-    ///（跟进项见交付报告）。</summary>
-    private static bool IsNonPublicNavigationTarget(Uri uri) =>
-        !TrustedChromeUiOrigins.IsLocalAssetDocument(uri)
-        && !Core.UrlSafety.IsPublicHost(uri.Host);
-
+    /// <summary>隐私网络边界命中的拒绝留痕（谓词与文案在 PrivateNetworkBoundary 单源，
+    /// 四层出口共用——见该文件注释）。</summary>
     private Decision.Deny DenyNonPublicTarget(string scope, string rawUrl)
     {
-        RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "private_network");
+        RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), PrivateNetworkBoundary.DenyCode);
         SecurityLog.Write($"[network] 导航拒绝（本机/内网/链路本地地址）: {UrlRedactor.Redact(rawUrl)}");
-        return new Decision.Deny(new DenyReason(
-            "private_network", "目标为本机、内网或链路本地地址（含云元数据服务），已按隐私网络边界拒绝。"));
+        return new Decision.Deny(PrivateNetworkBoundary.Reason);
     }
 
     private bool HasCurrentSession(string sessionId, string tabId, ulong generation)
