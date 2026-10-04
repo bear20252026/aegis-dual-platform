@@ -153,10 +153,7 @@ def _signed_manifest(manifest: dict, signers, key_ids: tuple[str, ...]) -> dict:
 class TestVerifyUpdateManifest:
     def _manifest(self, version: str = "2.2.0") -> dict:
         return {
-            "schema": 1,
-            "product": "Aegis",
-            "version": version,
-            "channel": "stable",
+            "schema": 1, "product": "Aegis", "version": version, "channel": "stable",
             "expires_at": "2099-01-01T00:00:00Z",
             "artifacts": [{"platform": "windows-x64", "url": "https://a/x.msix",
                            "sha256": "a" * 64, "size": 10}],
@@ -201,6 +198,28 @@ class TestVerifyUpdateManifest:
         manifest["signatures"] = [{"key_id": "k1", "sig": sig}, {"key_id": "k1", "sig": sig}]
         with pytest.raises(UpdateRejected, match="签名阈值未满足"):
             verify_update_manifest(manifest, keys, "1.0.0", NOW, threshold=2)
+
+    # ---------------------------------------- R7-TOOL-03（第七轮）：计票按公钥字节
+    def test_same_key_under_two_key_ids_counts_one_vote(self, tmp_path):
+        # R7-TOOL-03：R6-24 在 Rust `update_manifest::verify_threshold` 修掉的洞，
+        # 未回落到实际执行的本份（agent/broker.py 引用它）——同一把公钥以两个
+        # key_id 登记（两个信任锚槽位指向同一把密钥）各签一次，按 key_id 计票
+        # 即凑满 threshold=2，t-of-n 被单一密钥满足。票数是「多少把不同的密钥
+        # 签了」，不是「多少条署名记录存在」→ 必须按公钥字节去重。
+        keys, signers = _make_keys(("k1",))
+        keys["k2"] = keys["k1"]  # 第二个锚位 = 同一把公钥
+        manifest = self._manifest()
+        sig = base64.b64encode(signers["k1"].sign(canonical_unsigned(manifest))).decode()
+        manifest["signatures"] = [{"key_id": "k1", "sig": sig}, {"key_id": "k2", "sig": sig}]
+        with pytest.raises(UpdateRejected, match="签名阈值未满足"):
+            verify_update_manifest(manifest, keys, "1.0.0", NOW, threshold=2)
+
+    def test_two_distinct_keys_under_two_key_ids_meets_threshold(self, tmp_path):
+        # 反向对照（防「改成恒拒」式假修复）：与上例逐项同形——两条签名、两个
+        # key_id、threshold=2，唯一差别是两把**不同的**真钥 → 必须通过。
+        keys, signers = _make_keys(("k1", "k2"))
+        manifest = _signed_manifest(self._manifest(), signers, ("k1", "k2"))
+        verify_update_manifest(manifest, keys, "1.0.0", NOW, threshold=2)  # 不抛即通过
 
     def test_rollback_rejected(self, tmp_path):
         # PY-145：版本低于已接受最低版本 → 拒绝回滚清单
@@ -329,18 +348,15 @@ class TestVerifyModeRejects:
     def test_verify_detects_artifact_change(self, tmp_path, monkeypatch, capsys):
         root = _make_native_tree(tmp_path)
         output = tmp_path / "native-manifest.json"
-        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py",
-                                          "--root", str(root),
-                                          "--output", str(output),
-                                          "--require", "windows", "--require", "android"])
+        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py", "--root", str(root),
+                                          "--output", str(output), "--require", "windows",
+                                          "--require", "android"])
         assert nam.main() == 0
         # 制品被替换（重打包/投毒场景）→ --verify 必须拒绝
         (root / "windows" / "win-x64" / "aegis_policy_core.dll").write_bytes(b"tampered")
-        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py",
-                                          "--root", str(root),
-                                          "--output", str(output),
-                                          "--require", "windows", "--require", "android",
-                                          "--verify"])
+        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py", "--root", str(root),
+                                          "--output", str(output), "--require", "windows",
+                                          "--require", "android", "--verify"])
         assert nam.main() == 1
         assert "不一致" in capsys.readouterr().err
 
@@ -351,16 +367,13 @@ class TestVerifyModeRejects:
         # 相同必须通过（换序回归向量）
         root = _make_native_tree(tmp_path)
         output = tmp_path / "native-manifest.json"
-        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py",
-                                          "--root", str(root),
-                                          "--output", str(output),
-                                          "--require", "windows", "--require", "android"])
+        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py", "--root", str(root),
+                                          "--output", str(output), "--require", "windows",
+                                          "--require", "android"])
         assert nam.main() == 0  # 以 windows 在前的顺序生成
-        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py",
-                                          "--root", str(root),
-                                          "--output", str(output),
-                                          "--require", "android", "--require", "windows",
-                                          "--verify"])
+        monkeypatch.setattr(sys, "argv", ["native_artifact_manifest.py", "--root", str(root),
+                                          "--output", str(output), "--require", "android",
+                                          "--require", "windows", "--verify"])
         assert nam.main() == 0  # 反序复核——集合相同即通过
         assert "verified" in capsys.readouterr().out
 
@@ -372,8 +385,7 @@ class TestBuildMetadata:
         # 裸 FileNotFoundError traceback——前置 is_file 检查后干净报错 exit 2
         #（环境错误语义，区别于缺必需属性的 SystemExit 消息退出）
         monkeypatch.setattr(build_metadata, "ROOT", tmp_path)  # tmp 树无 shared/
-        monkeypatch.setattr(sys, "argv", ["build_metadata.py", "--platform", "windows",
-                                          "--output", str(tmp_path / "out.json")])
+        monkeypatch.setattr(sys, "argv", ["build_metadata.py", "--platform", "windows", "--output", str(tmp_path / "out.json")])
         with pytest.raises(SystemExit) as excinfo:
             build_metadata.main()
         assert excinfo.value.code == 2
@@ -385,8 +397,7 @@ class TestBuildMetadata:
         props = tmp_path / "shared" / "version.properties"
         props.write_text("PRODUCT=Aegis\n", encoding="utf-8")  # 缺其余 4 个必需键
         monkeypatch.setattr(build_metadata, "ROOT", tmp_path)
-        monkeypatch.setattr(sys, "argv", ["build_metadata.py", "--platform", "windows",
-                                          "--output", str(tmp_path / "out.json")])
+        monkeypatch.setattr(sys, "argv", ["build_metadata.py", "--platform", "windows", "--output", str(tmp_path / "out.json")])
         with pytest.raises(SystemExit, match="缺少共享版本属性"):
             build_metadata.main()
 
@@ -398,15 +409,11 @@ class TestBuildMetadata:
             monkeypatch.delenv(var, raising=False)
         (tmp_path / "shared").mkdir()
         props = tmp_path / "shared" / "version.properties"
-        props.write_text(
-            "PRODUCT=Aegis\nDISPLAY_NAME=Aegis WebView\nVERSION_NAME=2.2.0-beta.49\n"
-            "VERSION_CODE=20248\nWINDOWS_PACKAGE_VERSION=2.2.0.0\n",
-            encoding="utf-8",
-        )
+        props.write_text("PRODUCT=Aegis\nDISPLAY_NAME=Aegis WebView\nVERSION_NAME=2.2.0-beta.49\n"
+                         "VERSION_CODE=20248\nWINDOWS_PACKAGE_VERSION=2.2.0.0\n", encoding="utf-8")
         monkeypatch.setattr(build_metadata, "ROOT", tmp_path)
         out = tmp_path / "sub" / "build-metadata.json"
-        monkeypatch.setattr(sys, "argv", ["build_metadata.py", "--platform", "windows",
-                                          "--output", str(out)])
+        monkeypatch.setattr(sys, "argv", ["build_metadata.py", "--platform", "windows", "--output", str(out)])
         build_metadata.main()
         doc = json.loads(out.read_text(encoding="utf-8"))
         assert doc["version_name"] == "2.2.0-beta.49"
@@ -497,10 +504,8 @@ class TestVerifyManifestToolMain:
         trusted.write_text(json.dumps(
             {k: base64.b64encode(v).decode() for k, v in keys.items()}), encoding="utf-8")
         mpath = tmp_path / "manifest.json"
-        mpath.write_text(json.dumps(_signed_manifest(manifest, signers, key_ids)),
-                         encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(mpath), str(trusted), "1.0.0"])
+        mpath.write_text(json.dumps(_signed_manifest(manifest, signers, key_ids)), encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py", str(mpath), str(trusted), "1.0.0"])
         return vm
 
     def test_usage_error_exit_2(self, monkeypatch):
@@ -522,8 +527,7 @@ class TestVerifyManifestToolMain:
         trusted = tmp_path / "trusted_keys.json"
         trusted.write_text('{"k1": "' + base64.b64encode(b"x" * 32).decode() + '"}',
                            encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(manifest), str(trusted), "not-semver"])
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py", str(manifest), str(trusted), "not-semver"])
         assert vm.main() == 2
         out = capsys.readouterr().out
         assert "min_version 无效" in out and "not-semver" in out
@@ -535,8 +539,7 @@ class TestVerifyManifestToolMain:
         bad.write_text("{ nope", encoding="utf-8")
         trusted = tmp_path / "trusted_keys.json"
         trusted.write_text("{}", encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(bad), str(trusted), "1.0.0"])
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py", str(bad), str(trusted), "1.0.0"])
         assert vm.main() == 2
         assert "manifest-bad.json" in capsys.readouterr().out
 
@@ -547,8 +550,7 @@ class TestVerifyManifestToolMain:
         manifest.write_text("{}", encoding="utf-8")
         bad = tmp_path / "trusted-bad.json"
         bad.write_text("[", encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(manifest), str(bad), "1.0.0"])
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py", str(manifest), str(bad), "1.0.0"])
         assert vm.main() == 2
 
     def test_rejected_manifest_exit_1(self, tmp_path, monkeypatch):
@@ -591,8 +593,7 @@ class TestVerifyManifestToolMain:
         }, signers, ("k1", "k2"))
         mpath = tmp_path / "manifest.json"
         mpath.write_text(json.dumps(manifest), encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(mpath), str(trusted), "1.0.0"])
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py", str(mpath), str(trusted), "1.0.0"])
         assert vm.main() == 0
 
     def test_bad_key_encoding_exit_2(self, tmp_path, monkeypatch, capsys):
@@ -602,8 +603,7 @@ class TestVerifyManifestToolMain:
         manifest.write_text("{}", encoding="utf-8")
         trusted = tmp_path / "trusted_keys.json"
         trusted.write_text(json.dumps({"k1": "not-valid-encoding!!!"}), encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(manifest), str(trusted), "1.0.0"])
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py", str(manifest), str(trusted), "1.0.0"])
         assert vm.main() == 2
         assert "解码失败" in capsys.readouterr().out
 
@@ -615,6 +615,5 @@ class TestVerifyManifestToolMain:
         trusted = tmp_path / "trusted_keys.json"
         trusted.write_text(json.dumps(
             {"k1": base64.b64encode(b"short").decode()}), encoding="utf-8")
-        monkeypatch.setattr(sys, "argv", ["verify_manifest.py",
-                                          str(manifest), str(trusted), "1.0.0"])
+        monkeypatch.setattr(sys, "argv", ["verify_manifest.py", str(manifest), str(trusted), "1.0.0"])
         assert vm.main() == 2

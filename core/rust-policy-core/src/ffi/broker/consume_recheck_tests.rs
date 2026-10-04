@@ -34,6 +34,38 @@ fn blocklist_added_after_issue_is_enforced_at_consume() {
     }
 }
 
+/// 复判与 evaluate **同源**的父域证明（第七轮 R7-RS-01）：条目登记为父域
+/// `late-parent.example`，签发时 host 是其子域且尚未拉黑，注入后 consume 必须
+/// 沿同一条后缀链拒绝。若 consume 侧另写一份 `contains(host)` 精确匹配，本用例
+/// 即红——向量抓不到这条（evaluate 先拒，consume 分支根本不可达）。
+#[test]
+fn blocklist_parent_domain_entry_is_enforced_at_consume_by_suffix_chain() {
+    let broker = FfiBroker::new("1.0".into());
+    assert!(broker.create_session("s".into(), "t".into(), 0, 60));
+    let url = "https://cdn.late-parent.example/x";
+    let FfiDecision::Allow { action } =
+        broker.evaluate_navigation("s".into(), "t".into(), 0, url.into(), "navigation".into())
+    else {
+        panic!("注入前子域不在黑名单，应放行");
+    };
+
+    // 授权到手之后订阅源刷新，新增**父域**条目（精确匹配永远命中不了子域）
+    assert_eq!(
+        broker.update_host_denylist(vec!["late-parent.example".into()]),
+        1,
+        "父域条目形态合法应被接受"
+    );
+
+    match broker.consume_navigation(action, url.into(), "navigation".into()) {
+        FfiDecision::Deny { reason } => assert_eq!(
+            reason.code, "threat_blocklist",
+            "consume 复判应走同一条后缀链，实际 {}",
+            reason.code
+        ),
+        other => panic!("父域新增后 consume 不得放行子域，实际 {other:?}"),
+    }
+}
+
 /// 反向对照：同一 host 未被拉黑时，consume 仍正常放行——
 /// 防止复判实现退化为恒拒（恒拒同样是假闭环）。
 #[test]

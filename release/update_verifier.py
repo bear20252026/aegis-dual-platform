@@ -100,6 +100,8 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
     任意一项失败抛 UpdateRejected（失败闭合——绝不静默放行）。
     P0-04（专家审查）：SemVer 字符串比较/signatures[]/重复 key_id 只计
     一次/异常封装为 UpdateRejected（不再 TypeError）。
+    R7-TOOL-03（审计第七轮）：阈值计票按**公钥字节**去重（同 key_id 重复
+    仍只计一次），单一密钥不得以多 key_id 凑满 threshold。
     """
     try:
         if not isinstance(manifest, dict) or threshold < 1:
@@ -124,6 +126,13 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
         if not isinstance(signatures, list):
             raise UpdateRejected("签名结构无效")
         valid_key_ids: set[str] = set()
+        # 审计第七轮 R7-TOOL-03（2026-10-04）：**按公钥字节计票**。此前只按
+        # key_id 计票——同一把公钥以两个 key_id 登记（两个信任锚槽位指向同一
+        # 把密钥）即凑满 threshold=2，t-of-n 门槛被单一密钥满足。这是 R6-24 在
+        # Rust `update_manifest::verify_threshold` 修掉的同一缺陷；本份才是
+        # 实际执行的那一份（agent/broker.py 引用），修复必须回落到这里。
+        # 票数是"多少把不同的密钥签了"，不是"多少条署名记录存在"。
+        valid_key_bytes: set[bytes] = set()
         payload = canonical_unsigned(manifest)
         for item in signatures:
             if not isinstance(item, dict):
@@ -137,11 +146,14 @@ def verify_manifest(manifest: dict, trusted_keys: dict[str, bytes],
             try:
                 sig = base64.b64decode(item["sig"], validate=True)
                 Ed25519PublicKey.from_public_bytes(key).verify(sig, payload)
-                valid_key_ids.add(key_id)  # 重复 key_id 只计一次
             # 审计修复：补捕 InvalidSignature（坏签名此前以未捕获异常炸出，
             # 违背"所有异常封装为 UpdateRejected"的声明）
             except (KeyError, TypeError, ValueError, InvalidSignature):
                 continue
+            if key in valid_key_bytes:
+                continue  # 同一把密钥换名重复计票——只算一票（R7-TOOL-03）
+            valid_key_bytes.add(key)
+            valid_key_ids.add(key_id)  # 重复 key_id 只计一次
         if len(valid_key_ids) < threshold:
             raise UpdateRejected("签名阈值未满足")
     except UpdateRejected:

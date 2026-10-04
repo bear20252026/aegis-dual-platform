@@ -191,6 +191,228 @@
       "scope": "navigation",
       "expected_evaluate": "require_confirmation",
       "expected_origin": "https://127.0.0.1:6379"
+    },
+    {
+      "name": "R7_RS_01_parent_domain_denies_any_subdomain",
+      "register_session": true,
+      "generation": 0,
+      "deny_hosts": [
+        "bad.example"
+      ],
+      "url": "https://x.bad.example/",
+      "scope": "navigation",
+      "expected_evaluate": "deny",
+      "expected_deny_code": "threat_blocklist"
+    },
+    {
+      "name": "R7_RS_01_parent_domain_denies_deep_subdomain",
+      "register_session": true,
+      "generation": 0,
+      "deny_hosts": [
+        "bad.example"
+      ],
+      "url": "https://a.b.c.bad.example/payload",
+      "scope": "navigation",
+      "expected_evaluate": "deny",
+      "expected_deny_code": "threat_blocklist"
+    },
+    {
+      "name": "R7_RS_01_lookalike_prefix_host_is_not_blocked",
+      "register_session": true,
+      "generation": 0,
+      "deny_hosts": [
+        "bad.example"
+      ],
+      "url": "https://badexample.com/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://badexample.com",
+      "expected_parameters": "/",
+      "consume_url": "https://badexample.com/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R7_RS_01_lookalike_sibling_suffix_host_is_not_blocked",
+      "register_session": true,
+      "generation": 0,
+      "deny_hosts": [
+        "bad.example"
+      ],
+      "url": "https://notbad.example.other/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://notbad.example.other",
+      "expected_parameters": "/",
+      "consume_url": "https://notbad.example.other/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R7_RS_01_entry_ancestors_are_not_pre_expanded",
+      "register_session": true,
+      "generation": 0,
+      "deny_hosts": [
+        "evil.example.com"
+      ],
+      "url": "https://example.com/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://example.com",
+      "expected_parameters": "/",
+      "consume_url": "https://example.com/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R7_RS_05_cgnat_cloud_metadata_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://100.100.100.200/latest/meta-data/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://100.100.100.200"
+    },
+    {
+      "name": "R7_RS_05_cgnat_lower_boundary_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://100.64.0.1/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://100.64.0.1"
+    },
+    {
+      "name": "R7_RS_05_cgnat_upper_boundary_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://100.127.255.254/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://100.127.255.254"
+    },
+    {
+      "name": "R7_RS_05_test_net_1_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://192.0.2.1/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://192.0.2.1"
+    },
+    {
+      "name": "R7_RS_05_benchmark_lower_boundary_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://198.18.0.1/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://198.18.0.1"
+    },
+    {
+      "name": "R7_RS_05_benchmark_upper_boundary_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://198.19.255.254/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://198.19.255.254"
+    },
+    {
+      "name": "R7_RS_05_multicast_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://224.0.0.1/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://224.0.0.1"
+    },
+    {
+      "name": "R7_RS_05_broadcast_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://255.255.255.255/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://255.255.255.255"
+    },
+    {
+      "name": "R7_RS_05_public_ip_control_allows_without_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://93.184.216.34/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://93.184.216.34",
+      "expected_parameters": "/",
+      "consume_url": "https://93.184.216.34/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R7_RS_05_just_below_cgnat_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://100.63.255.254/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://100.63.255.254",
+      "expected_parameters": "/",
+      "consume_url": "https://100.63.255.254/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R7_RS_05_just_above_cgnat_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://100.128.0.1/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://100.128.0.1",
+      "expected_parameters": "/",
+      "consume_url": "https://100.128.0.1/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R7_RS_05_just_below_test_net_1_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://192.0.1.254/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://192.0.1.254",
+      "expected_parameters": "/",
+      "consume_url": "https://192.0.1.254/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R7_RS_05_just_above_benchmark_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://198.20.0.1/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://198.20.0.1",
+      "expected_parameters": "/",
+      "consume_url": "https://198.20.0.1/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R7_RS_05_just_below_multicast_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://223.255.255.254/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://223.255.255.254",
+      "expected_parameters": "/",
+      "consume_url": "https://223.255.255.254/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
     }
   ]
 }
