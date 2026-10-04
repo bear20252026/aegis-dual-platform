@@ -67,8 +67,10 @@ def read(path: pathlib.Path) -> str:
     if not path.is_file():
         raise SystemExit(f"❌ 门禁输入缺失：{path}")
     # newline=""：保留原文件换行符（本仓库工作副本是 CRLF——若归一成 LF 再写回，
-    # 自证流程会把整份文件的行尾改掉，等于门禁自己污染源文件）
-    return path.read_text(encoding="utf-8", newline="")
+    # 自证流程会把整份文件的行尾改掉，等于门禁自己污染源文件）。
+    # 用 open 而非 Path.read_text(newline=)：后者要 Python 3.13+，CI 钉 3.12。
+    with path.open(encoding="utf-8", newline="") as handle:
+        return handle.read()
 
 
 def authoritative_entries() -> list[str]:

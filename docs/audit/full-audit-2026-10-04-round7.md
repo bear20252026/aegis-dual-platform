@@ -281,6 +281,18 @@ WebViewHardening.kt 636 持平——表体 reflow 净零）；三端 JS 产物 n
 结构与纯函数量级的证据）；`ancestorOrigins[0]` 即最顶层祖先这一前提沿用 Android 侧
 既有口径，未另行在设备上复核。androidTest 仍不被 CI 执行（只 assemble），如实保留。
 
+**PR #82 首跑 CI 红（本地全绿）——已闭合并把成因做成常驻门禁**：`contract-source-of-truth`
+报 `TypeError: Path.read_text() got an unexpected keyword argument 'newline'`。
+根因是解释器版本面漂移：本地跑 3.14，workflow 钉 `python-version: 3.12`，而
+`Path.read_text` 的 `newline` 关键字是 3.13 才加的——同族缺陷（只在高版本成立的写法）
+此前无任何扫描。处置：两处改用 `open(path, newline="")`；新增
+`scripts/active_tree_gates.py compat`（与 ruff/bandit 同一目标面，扫 63 个文件，
+空扫描面判 exit 2，注释列不违规、3.12 已成立的 `write_text(newline=)`/`open(newline=)`
+不误报），挂进必需的 contracts job；`tests/python/py312_compat_test.py` 11 例钉
+「每条规则自带命中的违规样例」「规则数==样例数」「CI 钉版不得分叉（现为 3.12 单一值）」
+「植入违规必被检出」。这类「本地绿、CI 红」的代价本应由门禁承担，而不是由一次 PR 失败承担。
+
+
 
 ### B3 落地（隐私网络边界补到子资源与下载两层）
 

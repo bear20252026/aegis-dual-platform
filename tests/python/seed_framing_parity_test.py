@@ -15,7 +15,8 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 
 def _copy_with(monkeypatch, tmp_path, attr: str, mutate) -> None:
     src: pathlib.Path = getattr(vsp, attr)
-    text = src.read_text(encoding="utf-8", newline="")
+    with src.open(encoding="utf-8", newline="") as handle:   # read_text(newline=) 要 3.13+
+        text = handle.read()
     mutated = mutate(text)
     assert mutated != text, f"故障注入未改动 {attr}（锚点失配——用例自己会恒绿）"
     target = tmp_path / src.name          # pytest 托管目录，不污染工作树
