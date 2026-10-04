@@ -177,14 +177,22 @@ pub fn verify_threshold(
         return false;
     }
     let mut valid_key_ids: std::collections::HashSet<String> = Default::default();
+    // 审计第六轮延续（2026-10-04）：**按密钥字节去重**。此前只按 keyid 去重
+    // （TUF THRESHOLD counting 的字面口径），于是同一把公钥以两个 keyid 登记
+    // 即计两票——t-of-n 门槛可被单一密钥凑满。票数是"多少把不同的密钥签了"，
+    // 不是"多少条署名记录存在"，故必须按字节去重。
+    let mut valid_key_bytes: std::collections::HashSet<[u8; 32]> = Default::default();
     for sig in signatures {
         // RS-197（审计 2026-09-25）：逐签名验证链抽辅助——此前 8 层
         // continue 嵌套内联在循环体（结构/去重/密钥/形态/严格验证逐层
         // 跳过），控制流与验证序不可读。提取后主循环单一职责：
         // 验证成功 → 计入，失败 → 跳过
-        if let Some(key_id) =
+        if let Some((key_id, key_arr)) =
             try_verify_signature(sig, trusted_keys, canonical_payload, &valid_key_ids)
         {
+            if !valid_key_bytes.insert(key_arr) {
+                continue; // 同一把密钥换名重复计票——只算一票
+            }
             valid_key_ids.insert(key_id);
         }
     }
@@ -193,13 +201,14 @@ pub fn verify_threshold(
 
 /// RS-197：单签名验证链——结构 → 重复 keyid → 密钥存在 → 签名字段 →
 /// base64 → 密钥/签名长度 → 公钥解析 → 严格验证；任一环节失败返回 None。
-/// 重复 keyid 提前短路（TUF THRESHOLD counting——与 P0-04 一致，只计一次）。
+/// 重复 keyid 提前短路（TUF THRESHOLD counting——与 P0-04 一致，只计一次）；
+/// 返回 (keyid, 公钥字节) 以便调用方**另按字节去重**（审计第六轮延续）。
 fn try_verify_signature(
     sig: &serde_json::Value,
     trusted_keys: &std::collections::HashMap<String, Vec<u8>>,
     canonical_payload: &[u8],
     already_valid: &std::collections::HashSet<String>,
-) -> Option<String> {
+) -> Option<(String, [u8; 32])> {
     let obj = sig.as_object()?;
     let key_id = obj.get("key_id").and_then(|v| v.as_str())?.to_string();
     if already_valid.contains(&key_id) {
@@ -212,6 +221,10 @@ fn try_verify_signature(
     // E0308 修复——公钥/签名长度校验——try_into）
     let key_arr = <[u8; 32]>::try_from(key_bytes.as_slice()).ok()?;
     let sig_arr = <[u8; 64]>::try_from(sig_bytes.as_slice()).ok()?;
+    // 审计第六轮延续（2026-10-04）：显式拒退化信任锚（见 is_degenerate_public_key）
+    if is_degenerate_public_key(&key_arr) {
+        return None;
+    }
     // ed25519-dalek 2.x：VerifyingKey::from_bytes 返回 Result；Signature::
     // from_bytes 直接返回 Signature（非 Result——2.x API）
     let verifying_key = VerifyingKey::from_bytes(&key_arr).ok()?;
@@ -220,7 +233,43 @@ fn try_verify_signature(
     verifying_key
         .verify_strict(canonical_payload, &signature)
         .ok()?;
-    Some(key_id)
+    Some((key_id, key_arr))
+}
+
+/// 退化公钥筛除（审计第六轮延续 2026-10-04）——**限定口径，不假装全覆盖**。
+///
+/// 若 A 为单位元则验证方程 [s]B = R + [k]A 退化为 [s]B = R，攻击者可对任意
+/// 消息造出通过验证的"签名"；阶 2 点（y = p-1）同理使 [k]A 落在低阶子群里。
+/// 一个错配的信任锚槽位即可把 t-of-n 降为"无需 quorum"。
+///
+/// 实测：在本仓钉住的 ed25519-dalek 3.x 上，按上述构造的 forged 签名已被
+/// `verify_strict` 拒绝（见 degenerate_anchor_tests 的 tripwire），因此**这不是
+/// 在修一个已可利用的漏洞**，而是把"不依赖第三方内部行为"的判定显式落到核心：
+/// 换版/换 provider 时不该悄悄退化。
+///
+/// 只做无需曲线运算即可判定的三种编码（压缩格式 = 小端 y，byte31 高位为 x 符号）：
+///   · y = 1  → 01 00 … 00            （单位元）
+///   · y = 0  → 00 00 … 00            （不在曲线上，from_bytes 亦会拒，双保险）
+///   · y = p-1→ ec FF … FF 7F          （阶 2 点）
+/// 完整的 8 阶挠子筛除需要 cofactor 乘法（curve25519 点运算），而把
+/// curve25519-dalek 提为直接依赖会改动 Cargo.lock 供给面——不在本轮范围，
+/// 已作为残留登记（keyid 与密钥字节的绑定同理，需信任锚供给格式变更）。
+fn is_degenerate_public_key(key: &[u8; 32]) -> bool {
+    // 符号位（byte31 bit7）不影响 y 值，比较时一律掩掉
+    let y_top = key[31] & 0x7f;
+    // y = 1
+    if key[0] == 1 && key[1..31].iter().all(|&b| b == 0) && y_top == 0 {
+        return true;
+    }
+    // y = 0
+    if key[..31].iter().all(|&b| b == 0) && y_top == 0 {
+        return true;
+    }
+    // y = p - 1 = 2^255 - 20 → LE: EC 后接 29 个 FF，末字节 7F
+    if key[0] == 0xec && key[1..31].iter().all(|&b| b == 0xff) && y_top == 0x7f {
+        return true;
+    }
+    false
 }
 
 /// 更新清单版本守卫（审计第六轮 2026-10-03/04）。
@@ -569,6 +618,52 @@ mod tests {
         let tampered =
             canonical_unsigned(&serde_json::json!({"version": "1.0.0", "extra": 1})).unwrap();
         assert!(!verify_threshold(&keys, &sigs, &tampered, 2));
+    }
+
+    // —— 审计第六轮延续（2026-10-04）：按密钥字节去重 + 退化锚筛除 ——
+
+    #[test]
+    fn same_key_under_two_keyids_counts_as_one_vote() {
+        // 票数是"多少把不同的密钥签了"，不是"多少条署名记录存在"。
+        // 修复前只按 keyid 去重 → 同一把公钥挂两个 keyid 即凑满 threshold=2，
+        // t-of-n 被单钥满足。
+        let payload = canonical_unsigned(&serde_json::json!({"version": "1.0.0"})).unwrap();
+        let (kid_a, pub_a, sig_a) = make_signature([7u8; 32], "k1", &payload);
+        let (kid_b, pub_b, sig_b) = make_signature([7u8; 32], "k1-renamed", &payload);
+        assert_eq!(pub_a, pub_b, "同一把密钥的公钥字节必须相同（测试前提）");
+        let mut keys = std::collections::HashMap::new();
+        keys.insert(kid_a, pub_a);
+        keys.insert(kid_b, pub_b);
+        let sigs = vec![sig_a, sig_b];
+        assert!(
+            !verify_threshold(&keys, &sigs, &payload, 2),
+            "单钥换名重复计票不得凑满 threshold=2"
+        );
+        // threshold=1 仍可（确实有一把有效密钥）——防止修成恒拒
+        assert!(verify_threshold(&keys, &sigs, &payload, 1));
+    }
+
+    #[test]
+    fn degenerate_public_key_encodings_are_rejected_explicitly() {
+        // 单位元 / y=0 / 阶 2 点（y = p-1）——含符号位置变体
+        let mut identity = [0u8; 32];
+        identity[0] = 1;
+        assert!(is_degenerate_public_key(&identity));
+        let mut identity_signed = identity;
+        identity_signed[31] = 0x80; // x 符号位置位，y 不变
+        assert!(is_degenerate_public_key(&identity_signed));
+        assert!(is_degenerate_public_key(&[0u8; 32]));
+        let mut order2 = [0u8; 32];
+        order2[0] = 0xec;
+        order2[1..31].fill(0xff);
+        order2[31] = 0x7f;
+        assert!(is_degenerate_public_key(&order2));
+        // 正常公钥不得误伤（否则阈值判定恒假=另一种假闭环）
+        let sk = SigningKey::from_bytes(&[7u8; 32]);
+        assert!(
+            !is_degenerate_public_key(&sk.verifying_key().to_bytes()),
+            "真实公钥被误判为退化——筛选过宽会把 quorum 变成永不可达"
+        );
     }
 
     // —— RS-126/127（审计 2026-09-25）：canonical 遍历跳过 + 浮点拒绝——

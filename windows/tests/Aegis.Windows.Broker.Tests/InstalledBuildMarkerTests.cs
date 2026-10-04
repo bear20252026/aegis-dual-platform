@@ -202,10 +202,11 @@ public sealed class InstalledBuildMarkerTests : IDisposable
     {
         // 刻意不写确认门标记（完整理由见 InstalledBuildMarker 的
         // NavigationConfirmationValueName 注释）。真要出厂启用时本用例应
-        // **主动失败并被推翻**，而其成立的前提是：先给 C# 绑定
-        // aegis_policy_core_broker_update_host_denylist_json 并把
-        // ThreatFeedCoordinator 的快照喂进去（否则确认链不复判托管黑名单＝
-        // "批准即放行"的口子），而不是顺手加一行 [Registry]。
+        // **主动失败并被推翻**：其成立前提之一——给 C# 绑定
+        // aegis_policy_core_broker_update_host_denylist_json 并把订阅源快照喂进核心
+        // ——已由 CoreDenylistPublisher 达成（HostDenylistInjection… 与
+        // CoreDenylistPublisherTests 锁定），但"零安全增益"那条前提仍未消解，
+        // 故出厂态保持关闭；推翻它需要新的论证，而不是顺手加一行 [Registry]。
         var iss = File.ReadAllText(FindInstallerScriptPath());
 
         Assert.DoesNotContain(

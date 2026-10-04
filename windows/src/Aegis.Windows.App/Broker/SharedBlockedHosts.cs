@@ -21,8 +21,17 @@ public sealed class SharedBlockedHosts : IBlockedHosts
     private volatile IBlockedHosts _hosts = NoBlockedHosts.Instance;
 
     /// <summary>发布新快照（订阅源刷新完成时调用——原子换引用）。null 回退空名单，
-    /// 与 <see cref="BrowserPolicyBroker.UpdateBlockedHosts"/> 口径一致。</summary>
-    public void Publish(IBlockedHosts? hosts) => _hosts = hosts ?? NoBlockedHosts.Instance;
+    /// 与 <see cref="BrowserPolicyBroker.UpdateBlockedHosts"/> 口径一致。
+    /// 审计第六轮遗留缺口收口（2026-10-04）：换引用的同时把同一快照镜像进原生核心
+    ///（<see cref="CoreDenylistPublisher"/>）——本方法是全进程唯一的快照变更收敛点
+    ///（主窗与无痕窗的 broker 都注入同一持有者），在这里挂钩即"一次发布覆盖托管
+    /// 判定 + 原生核心 + 所有窗口"，不产生第二份会漂移的名单。</summary>
+    public void Publish(IBlockedHosts? hosts)
+    {
+        var snapshot = hosts ?? NoBlockedHosts.Instance;
+        _hosts = snapshot;
+        CoreDenylistPublisher.OnManagedSnapshotChanged(snapshot);
+    }
 
     public bool IsBlocked(string host) => _hosts.IsBlocked(host);
 }

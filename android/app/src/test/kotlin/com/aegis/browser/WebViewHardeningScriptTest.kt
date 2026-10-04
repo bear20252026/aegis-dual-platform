@@ -87,6 +87,25 @@ class WebViewHardeningScriptTest {
         )
         // 结构不变式：种子声明与最后一个消费点之间 Stage 2 闭包不得提前收口
         // （消费块整体缩进两级内嵌——列 0 的 })(); 只允许出现在消费点之后）
+        // 顶层站点框定回归（审计第六轮延续 2026-10-04）：种子必须按**顶层**
+        // eTLD+1 派生——按本帧 hostname 派生会让同一第三方跟踪帧在所有站点
+        // 产出同一种子（画布哈希=跨站持久标识符，正好废掉本防护）。
+        assertTrue(
+            "种子派生必须经 aegisTopLevelHostname（ancestorOrigins 通道）",
+            script.contains("getETLD1(aegisTopLevelHostname())"),
+        )
+        assertTrue(
+            "祖先链不可用时须保守退回本帧 hostname（不得因取不到顶层而放弃噪声）",
+            script.contains("return location.hostname;"),
+        )
+        assertFalse(
+            "不得再按本帧 hostname 直接派生种子（跨站标识符回归）",
+            script.contains("getETLD1(location.hostname)"),
+        )
+        assertTrue(
+            "IPv6 字面量 origin 的端口剥离须保留方括号（否则 hostFromOrigin 截半）",
+            script.contains("s.charAt(0) === '['"),
+        )
         val seedDecl = script.indexOf("const __AEGIS_SITE_SEED =")
         val lastConsumer = script.indexOf("parseInt(__AEGIS_SITE_SEED.slice(8, 16), 16)")
         assertTrue("种子声明必须先于消费点（seedDecl=$seedDecl, consumer=$lastConsumer）", seedDecl in 0 until lastConsumer)

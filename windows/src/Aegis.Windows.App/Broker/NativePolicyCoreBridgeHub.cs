@@ -31,18 +31,30 @@ public static class NativePolicyCoreBridgeHub
     public static NativePolicyCoreBridge? Acquire(
         string policyVersion, Func<NativePolicyCoreBridge?>? factory = null)
     {
+        NativePolicyCoreBridge? bridge;
+        var freshlyCreated = false;
         lock (Gate)
         {
             // 失败结果不入缓存：库文件可能随后就位（与 CS-323 门禁探测的
             // "失败按 TTL 重试"口径一致）——但同一进程内的成功结果恒复用，
             // 绝不再建第二个原生 broker
             if (_shared is null)
+            {
                 _shared = factory is not null ? factory() : Create(policyVersion);
+                freshlyCreated = _shared is not null;
+            }
             if (_shared is null)
                 return null;
             _references++;
-            return _shared;
+            bridge = _shared;
         }
+        // 审计第六轮遗留缺口收口（2026-10-04）：桥从无到有的那一刻必须把当前
+        // 威胁快照补推进核心——broker 可能在第一次订阅源加载完成之后才建桥，
+        // 不补推则核心整会话带空名单运行（托管侧拦得好好的，零痕迹）。
+        // 锁外通知：CoreDenylistPublisher 会回读本类的 Shared 探针。
+        if (freshlyCreated)
+            CoreDenylistPublisher.OnSharedBridgeCreated();
+        return bridge;
     }
 
     /// <summary>归还引用（broker.Dispose 路径）。引用归零才释放桥；释放后置空，
