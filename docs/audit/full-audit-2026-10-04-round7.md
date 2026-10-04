@@ -182,7 +182,10 @@ R7-CS1-09（`CoreDenylistPublisher` 注释承诺「每一次订阅源刷新」�
 | R7-CS2-05「三层测试互斥，用户必然踩分裂体验」定 P2 | **降级 P3** | 回读后发现三方并不全互斥：`MainWindowLogicTests.cs:59` 锁的是 `CanOpenNewWindowLink("http://192.168.1.1/admin") == false`（**与 broker 同侧拒绝**）。真实残余是 `WebViewPipelineTests.cs:106` 的 HTTPS 升级豁免与 `UrlNormalizer` 本机分支成为**不可达死路径** + `UrlSafety.cs:226-230` 注释仍称"用户明确要求能力"——按死路径/注释失实定 P3，产品裁决需求另列第八节 |
 | R7-CS2-06「`expected` 折叠使 C# 一条腿自证失效」定 P2 | **降级 P3** | `UrlOriginVectorTests.cs:58-60` 的折叠确为事实，但当前 url-origin 向量只有 `allow`/`deny` 两值，拼错的 `denyy` 折叠后仍要求 deny（判定结果不变）；真实风险面是**未来第四态**（`require_confirmation`）出现时才会静默。补测类，定 P3 |
 | R7-CS2-02「新增安全控制零测试」由代理定 P1 → **维持 P1** | 保留 | 与一般「补测」不同：`private_network` 是**纯托管层拒绝码**，核心向量里没有它，全仓零判定锚；且同一条边界已被 R7-CS1-01/02 证明在子资源与下载两层缺失。回归即静默移除 SSRF/CSRF 门禁，符合「门禁失效」口径 |
-| 「`dist/native-policy` 的预编译 DLL 已入库，早于新符号」 | **推翻（本轮由子代理提出，主代理证实）** | `git ls-files` 下 `dist/` 命中 **0**，`.gitignore:39` 全局忽略 `dist/`；全仓唯一受管二进制是 `gradle-wrapper.jar`（已钉 `distributionSha256Sum`）。CI 两条链均从 `core/` 现场构建。**故第六轮台账与本轮任务清单里「已入库 DLL 走降级路径」的表述在仓库层面不成立**——真实情形是「本机工作副本里有旧产物，本地跑走降级」。已按此修正条目 |
+| 「`dist/native-policy` 的预编译 DLL 已入库，早于新符号」 | **推翻（本轮由子代理提出，主代理证实）** | `git ls-files` 命中 **0**，`.gitignore:39` 全局忽略 `dist/`；全仓不跟踪任何可执行/库类二进制
+（`git ls-files` 下 dll/so/exe/a/lib/pdb **0 个**），受管二进制只有 10 个图片/字体资产与
+`android/gradle/wrapper/gradle-wrapper.jar`（后者已钉 `distributionSha256Sum` +
+`validateDistributionUrl=true`）。CI 两条链均从 `core/` 现场构建。**故第六轮台账与本轮任务清单里「已入库 DLL 走降级路径」的表述在仓库层面不成立**——真实情形是「本机工作副本里有旧产物，本地跑走降级」。已按此修正条目 |
 | 「BUG-006 通配规则回归有守护」 | **部分闭环（推翻其证据）** | `start_page.test.mjs:143` 的断言作用在 `allScripts = HOSTJS+MAINJS+SNAKE+IMPORT`（`shared/shell/*.js`，见 `:18-23`）上，而 `setOf("https://*", "http://*")` 是 **Kotlin 源**里的写法——正则扫的是永远不会出现该 token 的语料 ⇒ 断言恒真。Android 侧亦无 `allowedOriginRules` 断言。代码本身正确（`WebViewHardening.kt:39-44` 用 `setOf("*")`） |
 
 ## 八、本轮未覆盖 / 需下一轮或需用户裁决
