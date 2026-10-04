@@ -46,31 +46,31 @@ import time
 import uuid
 from collections import OrderedDict
 from collections.abc import Mapping
-from datetime import UTC, datetime
 from typing import Any, ClassVar
 
 import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 CATALOG_PATH = REPO_ROOT / "contracts" / "policy" / "action-catalog.yaml"
-ACTION_SCHEMA_PATH = REPO_ROOT / "contracts" / "schemas" / "action.schema.json"
 
-# PY-282（2026-10-02 审计）口径沿用：expires_at 解析复用发布链
-# update_verifier 的 RFC3339 锚定正则单源（两套判定面不得漂移）。
-_RELEASE_DIR = str(REPO_ROOT / "release")
-if _RELEASE_DIR not in sys.path:
-    sys.path.insert(0, _RELEASE_DIR)
-from update_verifier import _RFC3339
+# R7-TOOL-02（2026-10-04 审计）：冻结契约的**判定面**（required/enum/pattern/
+# minLength + expires_at 解析）单源在 action_contract.py——由它从
+# contracts/schemas/action.schema.json 现算，Python 侧不再手抄第二份字段表。
+_AGENT_DIR = str(pathlib.Path(__file__).resolve().parent)
+if _AGENT_DIR not in sys.path:
+    sys.path.insert(0, _AGENT_DIR)
+from action_contract import (
+    ACTION_SCHEMA_PATH,
+    CONTRACT,
+    CONTRACT_REQUIRED,
+    parse_expires_at,
+)
 
 __all__ = [
     "ACTION_SCHEMA_PATH",
     "CATALOG",
     "CATALOG_PATH",
-    # 审计第六轮（2026-10-03）：删除从未实现的 "CONTRACT_REQUIRED" 导出——
-    # __all__ 里的未定义名会让 from broker import CONTRACT_REQUIRED 抛
-    # ImportError（F822 捕获）。契约必填面的权威判定在 action.schema.json
-    # 与 redteam_e2e_test.test_field_set_matches_schema 的直接加载比对里，
-    # 不需要本模块再复制一份常量。
+    "CONTRACT_REQUIRED",
     "BrokerConfigError",
     "BrokerInputError",
     "Decision",
@@ -120,7 +120,8 @@ class Decision:
     DENY_CANONICAL = "deny_canonical"        # canonical_parameters 缺失/非法
     DENY_TAB = "deny_tab"                    # PY-252：session 已绑定其他 tab_id
     DENY_DESCRIPTION_HASH = "deny_description_hash"  # 工具描述哈希未批准/缺失
-    DENY_PAYLOAD = "deny_payload"            # 载荷无法构造（无法判定 ≠ 放行）
+    DENY_PAYLOAD = "deny_payload"          # 载荷无法构造（无法判定 ≠ 放行）
+    DENY_SCHEMA = "deny_schema"            # R7-TOOL-02：与冻结 action.schema.json 不符
 
 
 @dataclasses.dataclass
@@ -146,10 +147,10 @@ class ProposedAction:
     method: str                          # schema 必填（GET/POST/PUT/DELETE/NAVIGATE/DOWNLOAD）
     tool_description_hash: str | None = None
     session_id: str | None = None        # SP-140：默认 None 即 DENY_SESSION
-    expires_at: str | None = None        # SP-150：schema 口径 date-time 字符串；None = 不过期
+    expires_at: str | None = None        # 契约 required（R7-TOOL-02）：None/空 = deny_schema，无"不过期"
     max_bytes: int = 0                   # 本调用数据体字节声明——SP-149：broker 累计判定
     canonical_parameters: str | None = None  # 参数规范化串（STDIO 注入面）
-    policy_version: str | None = None    # None = 采用 broker 版本
+    policy_version: str | None = None    # 契约 required：None = deny_schema（不再回退 broker 版本）
 
 
 def load_catalog(path: pathlib.Path | str = CATALOG_PATH) -> dict[str, Any]:
@@ -196,25 +197,6 @@ def load_catalog(path: pathlib.Path | str = CATALOG_PATH) -> dict[str, Any]:
 CATALOG: dict[str, Any] = load_catalog()
 
 
-def parse_expires_at(value: str) -> datetime | None:
-    """SP-150（2026-09-26 审计）：expires_at 为 schema 口径 RFC3339 date-time
-    字符串——解析失败返回 None（调用方 fail-closed 拒绝）；无时区按 UTC。
-    PY-282（2026-10-02 审计）：与 update_verifier 口径对齐——先锚定
-    RFC3339 形态（复用其 _RFC3339 正则单源），再 fromisoformat；裸日期/
-    空格分隔等宽松形态不再被裸 fromisoformat 悄悄放行（两套判定面归一）。"""
-    if not isinstance(value, str) or not _RFC3339.fullmatch(value):
-        return None
-    # 小写 t/z 分隔符归一（正则放行、fromisoformat 拒绝——PY-262 同款归一）
-    normalized = value.replace("t", "T").replace("z", "Z")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed
-
-
 def proposed_action_from_dict(data: Mapping[str, Any]) -> ProposedAction:
     """反序列化 ProposedAction（不可信输入的构造边界——审计第六轮）。
 
@@ -222,7 +204,8 @@ def proposed_action_from_dict(data: Mapping[str, Any]) -> ProposedAction:
     任一不满足即 BrokerInputError（显式抛出，不用 assert——PY-187）：
     ① 未知字段拒绝（additionalProperties:false——拼错/多余字段不得静默
        丢弃：漏一个 `canonical_parameters` 键就等于漏一道参数规范化门）；
-    ② 必填字段缺失拒绝（dataclass 无默认值字段 = broker 必填面）；
+    ② 必填字段缺失拒绝（dataclass 无默认值字段 ∪ 冻结 schema required——
+       R7-TOOL-02：省掉 expires_at/policy_version 不再等于拿到永久授权）；
     ③ 字段类型逐个校验（int 字段排除 bool——PY-251 同口径）。
     """
     if not isinstance(data, Mapping):
@@ -231,8 +214,12 @@ def proposed_action_from_dict(data: Mapping[str, Any]) -> ProposedAction:
     unknown = sorted(set(data) - set(fields))
     if unknown:
         raise BrokerInputError(f"action 载荷含未知字段（additionalProperties:false）: {unknown}")
-    absent = sorted(name for name, field in fields.items()
-                    if field.default is dataclasses.MISSING and name not in data)
+    # R7-TOOL-02（2026-10-04 审计）：必填面取「dataclass 无默认字段 ∪ 冻结 schema
+    # required」——此前只取前者，省掉 expires_at/policy_version 的载荷照样构造成功，
+    # 而 evaluate 对 None 一律跳过判定 = 省略即永久有效授权。
+    mandatory = {name for name, field in fields.items()
+                 if field.default is dataclasses.MISSING} | set(CONTRACT_REQUIRED)
+    absent = sorted(mandatory - set(data))
     if absent:
         raise BrokerInputError(f"action 载荷缺必填字段: {absent}")
     for name, value in data.items():
@@ -271,6 +258,11 @@ def well_formed_action(intent: str = "get_current_title",
         "method": "GET",
         "session_id": "session-default",
         "canonical_parameters": "{}",
+        # R7-TOOL-02（2026-10-04 审计）：契约 required 字段给全才算 well-formed——
+        # 此前工厂自身就省略 expires_at/policy_version，而 evaluate 对 None 跳过
+        # 判定，于是"正路径基准"实际是"永久有效授权"（夹具把该形态钉成 allow 对照）
+        "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 60)),
+        "policy_version": str(CATALOG["policy_version"]),
     }
     base.update(overrides)
     return ProposedAction(**base)
@@ -387,6 +379,13 @@ class PolicyBroker:
             return Decision.DENY_REVOKED
         if action.canonical_parameters is None:
             return Decision.DENY_CANONICAL  # STDIO 参数注入面——参数必须规范化
+        # R7-TOOL-02（2026-10-04 审计）：载荷必须符合冻结 action.schema.json——
+        # required 非空、origin 合 ^https?://、method 在 enum 内、int 字段不冒充。
+        # 此前这些一律不查：省略 expires_at 即永久有效授权，file:///C:/secrets、
+        # javascript:alert(1)、method=ARBITRARY 全部 allow。刻意放在具体码之后
+        # （deny_policy/deny_expired/deny_scope 等口径不变，只补未覆盖的形状面）。
+        if CONTRACT.violation(action) is not None:
+            return Decision.DENY_SCHEMA
         limit_actions, limit_bytes = self._limits(action.intent)
         if action.budget_used > limit_actions:
             # SP-149：自报值本身超限——冗余拒绝路径（真实判定以 broker 计数为准）

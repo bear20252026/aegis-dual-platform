@@ -22,12 +22,19 @@
     },
     {
       "id": "forged-expiry-unparsable",
-      "note": "expires_at 伪造面：解析失败必须等同过期（fail-closed）；远未来时间戳不得等同「永久有效」（SP-157 max_ttl）",
+      "note": "expires_at 伪造面：解析失败必须等同过期（fail-closed）；远未来时间戳不得等同「永久有效」（SP-157 max_ttl）；省略不得等于「不过期」（R7-TOOL-02——契约 required）",
       "steps": [
         {
-          "desc": "对照：不带 expires_at（缺省不过期）放行",
+          "desc": "对照：well-formed 工厂补全的 expires_at 放行",
           "overrides": {},
           "expect": "allow"
+        },
+        {
+          "desc": "显式省略 expires_at（null）——R7-TOOL-02 前这等于永久有效授权",
+          "overrides": {
+            "expires_at": null
+          },
+          "expect": "deny_schema"
         },
         {
           "desc": "已过去的合法 RFC3339——必须拒",
@@ -69,6 +76,60 @@
             "policy_version": "9.9.9"
           },
           "expect": "deny_policy"
+        },
+        {
+          "desc": "省略 policy_version（契约 required）——不得静默回退 broker 版本",
+          "overrides": {
+            "policy_version": null
+          },
+          "expect": "deny_schema"
+        }
+      ]
+    },
+    {
+      "id": "spoofed-origin-and-method",
+      "note": "R7-TOOL-02：action.schema.json 的 origin pattern 与 method enum 此前一律不查——file:///C:/secrets、javascript:alert(1)、method=ARBITRARY、空 nonce 全部 allow",
+      "steps": [
+        {
+          "desc": "对照：契约内 origin + method 放行",
+          "overrides": {},
+          "expect": "allow"
+        },
+        {
+          "desc": "origin 改 file:// 指本地秘密文件",
+          "overrides": {
+            "origin": "file:///C:/secrets"
+          },
+          "expect": "deny_schema"
+        },
+        {
+          "desc": "origin 改 javascript: 载荷",
+          "overrides": {
+            "origin": "javascript:alert(1)"
+          },
+          "expect": "deny_schema"
+        },
+        {
+          "desc": "method 伪报 enum 外的动词",
+          "overrides": {
+            "method": "ARBITRARY"
+          },
+          "expect": "deny_schema"
+        },
+        {
+          "desc": "nonce 空串（schema minLength 1）——空串不得充当一次性凭据",
+          "overrides": {
+            "nonce": ""
+          },
+          "expect": "deny_schema"
+        },
+        {
+          "desc": "tab_id 空串（schema minLength 1）——会话-tab 绑定不得绑空（换新会话避开前序已落绑定，让契约门成为唯一判定点）",
+          "overrides": {
+            "session_id": "session-empty-tab",
+            "tab_id": ""
+          },
+          "expect": "deny_schema"
         }
       ]
     }
