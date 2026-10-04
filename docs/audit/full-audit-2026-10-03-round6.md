@@ -32,15 +32,17 @@ CI-供应链 / Python+文档核验），覆盖 649 个跟踪文件、约 70K LOC
 
 ### 一之二、延续轮（2026-10-04）新增闭环——架构主轴的两条断链
 
-> **本轮不自证的限定**：R6-20 交付的是核心侧**接入面**，目前**没有任何一端调用它**。
-> Android 全树没有威胁订阅源实现（无可喂数据）；Windows 的黑名单仍在端侧
-> `BrowserPolicyBroker._blockedHosts` 里判定。因此"FFI 通路无内容判定"这条断链
-> 在**核心层**已闭合（可注入、可拒、有向量钉住），但在**出货行为层**尚未闭合——
-> 恶意 host 在两端仍按各自既有的方式处理。把它写成"黑名单已统一"就是又一次
-> 虚闭环，故此处显式标注。后续动作（Windows 侧）：在
-> `ThreatFeedCoordinator.applyHosts` 回调里把同一快照同时喂给
-> `aegis_policy_core_broker_update_host_denylist_json`，使 native 模式与托管模式
-> 共用一份 denylist；Android 侧则要先有订阅源实现。
+> **R6-20 的限定已解除（2026-10-04 续，R6-26）**：Windows 侧现已把托管快照发布进
+> 核心——`SharedBlockedHosts.Publish`（全进程唯一快照收敛点，主窗与无痕窗都经它）
+> 挂钩 `CoreDenylistPublisher`，`NativePolicyCoreBridgeHub.Acquire` 在桥新建时补推
+> 一次，避免"启动后才加载订阅源"或"核心先于快照创建"造成的空名单整会话失守。
+> 枚举面 `BlockedHosts.Hosts` 返回 `IsBlocked` 正在用的那个集合的只读包装，
+> 托管判定与核心发布因此是同一份权威快照、不存在会漂移的第二份名单；
+> 不可枚举的 `IBlockedHosts` 实现**不猜测**，保留前一份快照并留痕。
+> 仍未闭合的两点：① **Android 侧无订阅源实现**，该端核心黑名单恒空；
+> ② 已入库的 `dist/native-policy` DLL（9-28 构建）不含新符号，实测本地走
+> 降级路径（记一次日志、不影响导航），CI 的 native job 从 `core/` 重建后
+> 才吃到真拒绝。
 
 
 | 编号 | 级别 | 缺陷 | 修复 | 验证 |
@@ -51,6 +53,8 @@ CI-供应链 / Python+文档核验），覆盖 649 个跟踪文件、约 70K LOC
 | R6-22 | P1 | **出货 Windows 从不咨询 Rust 核心**（第一节断链之一）：`NativePolicyCoreGate.IsRequired` 只读环境变量，而全仓唯一赋值点在 CI 构建步 shell 里（不随安装包交付）→ 运行时恒 `Disabled()`，`aegis_policy_core.dll` 随包发布却零调用，"单一裁决源"对唯一发布制品不成立 | 新增 `InstalledBuildMarker`（`HKCU\Software\Aegis Browser\RequireNativePolicyCore=1`）作为门禁第二来源，`AegisSetup-CSharp.iss` 安装期写入、卸载删除；`App.xaml.cs` 启动记 `[adjudication]` 留痕（只写布尔与拒绝码，不落绝对路径） | **真实安装往返实测**：ISCC 编译现有 .iss 通过（128.7s）；探针安装包（同一 `[Registry]` 行 + `PrivilegesRequired=lowest` + 64 位模式）静默安装后确实写入该键值，随货门禁代码翻为 native-required（锚点测试 exit 1）；静默卸载后键值同删、测试复绿。**开发工作流未被破坏**：无环境变量且无标记的 `dotnet build` 恒 `Disabled()`（未加任何无条件置位）。17 例新测试含"安装器字符串 ↔ C# 常量"对账（直接读 .iss 比对，任一侧改名即红）；Broker.Tests 67、Core.Tests 708、构建 0 警告 |
 | R6-23 | P2 | **黑名单只在签发点判定**（R6-20 遗留的 TOCTOU，由 R6-22 执行方复核时反推发现）：evaluate 与 consume 之间隔着一次用户批准与一次网络往返，若订阅源在该窗口内新增 host，则 60s 有效期内已签发授权一律照放——黑名单更新对在手授权不生效 | `consume_navigation` 在归一后复判黑名单（命中即 `threat_blocklist`）；**有意不复判高危**——高危目标从不进 issued 账本，此处再拦会把用户刚批准的本机导航自我否决、使确认流变死路径 | 3 例直接测试：签发后拉黑 → consume 拒；未拉黑 → 仍可消费（防恒拒假闭环）；本机目标经批准 → 可消费（防确认流被自毁） |
 | R6-24 | P2 | **阈值可按 keyid 重复计票**：`verify_threshold` 只按 `key_id` 去重（TUF THRESHOLD counting 的字面口径），于是**同一把公钥以两个 keyid 登记即凑满 threshold=2**——t-of-n 可被单一密钥满足。另有退化信任锚（单位元/阶 2 点）无显式筛除 | ① 按**公钥字节**去重，票数的语义改为"多少把不同密钥签了"；②`is_degenerate_public_key` 显式拒 y=1（单位元，含符号位变体）、y=0、y=p-1（阶 2 点）三种编码 | `same_key_under_two_keyids_counts_as_one_vote`（修复前该断言必红；同时断 threshold=1 仍可，防止修成恒拒）+ `degenerate_public_key_encodings_are_rejected_explicitly`（含"真实公钥不得误伤"反例）。cargo test 556+10+4 全绿、clippy -D warnings 0 |
+
+| R6-26 | P2 | **核心黑名单接入面零调用者**（R6-20 遗留）：Windows 托管侧有名单但不喂核心，故原生判定路径仍只看 URL 形状——接入面沦为死能力 | `CoreDenylistPublisher` 统一发布（快照变更 + 桥新建两路），挂在进程唯一收敛点 `SharedBlockedHosts.Publish`；`ThreatFeed.BlockedHosts.Hosts` 提供同源只读视图；P/Invoke 绑定按**可选导出**解析（ABI 版本未变，版本探测帮不上） | 实测：PE 导出表解析确认入库 DLL **无**该符号 → 降级分支被真实执行并断言（`ExportMissing`、未发布、同桥 `CreateSession`+`EvaluateNavigation` 往返仍 Allow），导出缺失**不抛不炸导航**；正向端到端 deny 仅在 CI native job 执行（本地 DLL 陈旧）。Broker.Tests 67 → **87 通过 0 跳过**、Core.Tests 708、build 0 警告；反静默跳过负对照：故意给坏 DLL → 3 例响亮失败 |
 
 > R6-24 的诚实边界：完整 8 阶挠子筛除需 cofactor 乘法，而把 curve25519-dalek 提为
 > 直接依赖会动 Cargo.lock 供给面；keyid 与密钥字节的**派生绑定**（TUF 式
