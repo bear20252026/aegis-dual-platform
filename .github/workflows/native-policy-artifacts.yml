@@ -94,6 +94,12 @@ jobs:
           # P/Invoke 往返的作业，其判定不得被后面的 dotnet publish 吞掉退出码。
           dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
           if ($LASTEXITCODE -ne 0) { throw "原生模式 Broker.Tests 失败（exit $LASTEXITCODE）——P/Invoke 面未通过" }
+          # R7-CS1-15（第七轮）：Core.Tests 也必须以原生模式真跑——它是必需检查里
+          # windows-contract-build 的唯一大测试面，此前只在**托管模式**下跑过，
+          # 于是原生跨界缺陷（0xC0000005）在该路径上零门禁：修复前的实测是
+          # 「通过 403/667 后测试主机崩溃」。放在本 job 是因为这里才有现建的 DLL。
+          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          if ($LASTEXITCODE -ne 0) { throw "原生模式 Core.Tests 失败（exit $LASTEXITCODE）——托管面与跨界面判定不一致" }
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
