@@ -41,7 +41,7 @@
 Windows 契约/测试区**没有任何运行态证据**（`dotnet test` 因 `-r win-x64` 锁约束未跑通，
 陈旧产物 177 例与台账 708 例不可比，故该区全部为静态判定）。
 
-## 三、本轮 P1（7 条，全部经主代理回读或实跑证实）
+## 三、本轮 P1（8 条，全部经主代理回读或实跑证实）
 
 | ID | 位置 | 现象 → 修复方向 | 证据 |
 | --- | --- | --- | --- |
@@ -51,6 +51,7 @@ Windows 契约/测试区**没有任何运行态证据**（`dotnet test` 因 `-r 
 | R7-CS1-01 | `windows/.../WebView/HostWebView.cs:350-404`（对照 `Broker/BrowserPolicyBroker.cs:504-514`） | 本轮建立的隐私网络边界（`IsNonPublicNavigationTarget` = `!IsLocalAssetDocument && !IsPublicHost`）只作用于导航；`OnWebResourceRequested` 只做 DNT 注入、黑名单 403、跟踪分级——远程页面改发 `<img src="http://169.254.169.254/…">`、`fetch("http://192.168.1.1/…")`、XHR 时该处理器一律放行 → 声明的「远程页 SSRF/CSRF 原语已拦」仅在导航层成立 | 处理器全量回读：三条判定齐备、私网判定缺席；谓词本就存在且本类 `:242` 已在用（改动约 3 行） |
 | R7-CS1-05 ≡ R7-CS2-01 | `windows/.../WebView/FingerprintShield.cs:115` + `core/rust-policy-core/src/shield.rs:82-84,123`（对照 `android/.../WebViewHardening.kt:328-338`） | R6-25 的顶层站框定**只落了 Android**：Windows 与 Rust 参考实现都仍按**本帧** host 派生（`getETLD1(location.hostname)` / `aegisEtldPlus1(location.hostname \|\| '')`），而 `per_site_seed.rs:17-19` 引 Brave 原文正是「Third party frames and script share the seed value of the **top level** eTLD+1 domain」→ 第三方跟踪帧在所有宿主站点拿到同一噪声，加噪画布哈希本身即跨站持久标识符（该机制要消除的东西）。两处测试还**正向断言缺陷字串**（`FingerprintShieldTests.cs:117`、`shield.rs:379-380` `assert!(script.contains("location.hostname"))`）＝把未修形态钉成契约（与 25a88bf 推翻的「锚点钉住缺陷」同型）；`shield.rs:82-84` 的「与 Android 孪生同口径」注记现已失实 | 三处行号直读；C# 全文件 `ancestorOrigins`/`window.top` grep 零命中；Android 侧该通道存在 |
 | R7-CS2-02 | `windows/.../Broker/BrowserPolicyBroker.cs:219-220,247-248,346-350,512-522` + `Broker/TrustedChromeUiOrigins.cs:38` | 本轮新增的隐私网络边界（`private_network` 拒绝码，覆盖托管+原生两条求值路径与消费点）在 `windows/tests/**` **零断言**——`git grep private_network/IsNonPublicNavigationTarget/DenyNonPublicTarget -- windows/tests` 命中 0。它不像导航主链那样有 `native-navigation-*.json` 向量兜底：`private_network` 是**纯托管层拒绝码**，核心向量里没有它。任何人把该检查挪到 `HasCurrentSession` 之后、或在桥缺失分支提前 return，708 例仍全绿（与 R6-26「接入面零调用者藏了五轮」同一失效模式）。修：按向量口径补 127.0.0.1/`localhost`/192.168.1.1/169.254.169.254/`::1`/`0177.0.0.1` 精确拒绝码 + 公网对照 + `ntp/geo.aegis.local` 豁免仍放行 + 非默认端口 `.local` 不豁免 | 上列 grep 零命中（仅 `windows/src` 有 10 处）；测试区由 CS2 代理全文核 22 文件后同样报告零覆盖 |
+| R7-CS1-15 | P1 | 问题/安全（原生跨界 use-after-free，**本轮已复现**） | `windows/src/Aegis.Windows.App/Broker/NativePolicyCoreBridge.cs:35`、`:164-251` （八个入口）→ 全部改走 `TryAcquireLease/ReleaseLease` 并入口检 `_disposed` | 现象：`AEGIS_REQUIRE_NATIVE_POLICY_CORE=1` 下跑 `Core.Tests`，测试主机进程崩溃 `0xC0000005`，栈顶是 `NativePolicyCoreBridge.CreateSession → InvokeTwoStrings → 跨界 trampoline`；崩溃前通过的用例数不稳定（667 / 403 两次），是终结器与调用竞态的典型签名。即 R7-CS1-04 记的「八个入口裸 DangerousGetHandle、不检 _disposed」不是潜在问题而是已可复现的原生越权访问。 | 影响/可利用场景：任何 GC 压力时点都可能让已释放的原生 broker 句柄被再次传给 DLL——正典 Windows 制品内的崩溃（含浏览器进程整体退出），且**没有任何门禁跑过这条路径**：required 的 `windows-contract-build` 跑 Core.Tests 时不设 `AEGIS_*` 环境变量（托管路径），唯一置位的 `native-policy-artifacts` job 只跑 Broker.Tests。 | 与既往关系：**R7-CS1-04 的实证升级**（同一缺陷从「注释失实 + 潜在」升为「已复现崩溃」）；并给 R7-CI-01「原生作业不在必需检查里」补了一条具体代价 |
 | R7-TOOL-01 | `.github/workflows/release-windows.yml:91-99,108-131`、`native-policy-artifacts.yml:85-101` | `shell: pwsh` 步骤把**测试命令放在步骤中间**：`cargo test` 后接 `cargo build`+`Copy-Item`；两个 `dotnet test` 后接 `dotnet publish`。pwsh 包装只设 `$ErrorActionPreference='Stop'`，而原生命令非零不产生 PowerShell 错误 → 步骤退出码取末条原生命令 ⇒ **测试红、构建绿 ⇒ 步骤绿 ⇒ 唯一正典制品照常打包签名** | 本地 Windows PowerShell 5.1 实测：`$ErrorActionPreference='Stop'; cmd /c exit 3; Write-Host 'STILL-RUNNING'` → 打印 STILL-RUNNING 继续执行；PS 7.3 的 `$PSNativeCommandUseErrorActionPreference` 当时仍标注 experimental（默认 `$false`），Actions 包装脚本不设置它；同文件 `:149/:173/:175` 自己就用 `if ($LASTEXITCODE -ne 0) { throw }`——作者口径即不依赖自动失败。**残余不确定：需在 runner 上做一次故障注入定论；修复（逐条显式断言 `$LASTEXITCODE`）在两种语义下都正确** |
 
 ## 四、本轮 P2（31 条，已复核）
@@ -240,3 +241,7 @@ fail-closed；服务端 `strict`/`enforce_admins`/评审要求；本机与局域
 
 处置：用例按既定口径改用 `http://127.0.0.1:8080/…` 触发确认域，并新增**公网 host 不得触发确认**的对照断言（此前 C# 侧对 R6-21 的收窄零锚点，正是 R7-CS2-02 指出的空洞）；本地以现建 DLL 实跑 87/87 通过，并用假路径做反证（该用例转红）以证明它真走了跨界路径。
 
+### B5 落地（PR 见提交历史）
+
+R7-RS-01 父域后缀链（展开只在查询侧，向量含两条近似 host 对照与一条「条目祖先域不得预展开」）、R7-RS-05 补齐 CGNAT/TEST-NET/基准/组播四段（14 条向量，每段左右两侧都有公网对照，防过度收紧；IPv6 如实记为归一层之外而非假称已补）、R7-RS-02 注入改 `clear` 两阶段 + C# 按 60KiB 切批（就地加参不改符号名与 ABI v3，故以应答 `clear` 回显为唯一探针，缺回显即中止并记前缀规模）、R7-TOOL-03 把「按公钥字节计票」回落到**真正执行的那份** Python 验签器、R7-RS-04 导出面 13/13、R7-RS-09 注释版本改述。
+**过程收获**：B1 的退出码断言让原生模式的真实红灯第一次可见，顺带复现出 R7-CS1-15（`0xC0000005`，见 §三）。新增 `NativeDenylistChunkingTests` 8 条纯函数用例补上「C# 分块无入库测试」的空洞；`release_tools_test.py` 的 13 处 reflow 用 token 级 difflib 逐处核对为纯换行（语义零变化）。
