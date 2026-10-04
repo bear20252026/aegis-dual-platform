@@ -31,7 +31,7 @@ FIXTURE_DIRS = [
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from broker import PolicyBroker, well_formed_action
+from broker import Decision, PolicyBroker, well_formed_action
 
 
 def _expected_values(text: str) -> list[str]:
@@ -133,12 +133,11 @@ def test_kill_switch_revocation_documented():
 # 断言必须钉到具体拒绝码，否则拒绝原因漂移（如 deny_replay 退化成
 # deny_unknown）不会被发现。
 ALLOW_EXPECT = "allow"
-DENY_EXPECTS = frozenset({
-    "deny_unknown", "deny_session", "deny_expired", "deny_max_ttl",
-    "deny_policy", "deny_scope", "deny_generation", "deny_revoked",
-    "deny_replay", "deny_budget", "deny_budget_bytes", "deny_canonical",
-    "deny_tab", "deny_description_hash", "deny_payload",
-})
+# 具名拒绝码从出厂 Decision 现算（不手抄第二份清单——手抄清单会随 broker 新增
+# 拒绝码静默失配，R7-TOOL-02 新增 deny_schema 时正是这个面）；仍禁止笼统 "deny"。
+DENY_EXPECTS = frozenset(
+    value for name, value in vars(Decision).items()
+    if name.startswith("DENY_") and isinstance(value, str))
 
 
 def _fixture_files() -> list[tuple[str, pathlib.Path]]:
@@ -150,7 +149,12 @@ def _run_step(broker, step: dict) -> str:
     if step.get("revoke"):
         broker.revoke()
     if "raw_payload" in step:
-        return broker.decide(step["raw_payload"])
+        payload = dict(step["raw_payload"])
+        # 夹具是静态 JSON，时间戳不能写死：远期值会被 max_ttl 拒、过期值随时间
+        # 失效。"<factory>" 由出厂 well-formed 的相对时效填充（与对照步骤同源）。
+        if payload.get("expires_at") == "<factory>":
+            payload["expires_at"] = well_formed_action().expires_at
+        return broker.decide(payload)
     return broker.evaluate(well_formed_action(**(step.get("overrides") or {})))
 
 

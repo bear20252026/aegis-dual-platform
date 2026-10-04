@@ -5,7 +5,7 @@
     "重建规程：python scripts/check_file_sizes.py --write-baseline，人工 diff 核对后入库。"
   ],
   "files": {
-    "agent/broker.py": 446,
+    "agent/broker.py": 445,
     "agent/tests/redteam_e2e_test.py": 503,
     "android/app/build.gradle.kts": 316,
     "android/app/src/main/java/com/aegis/browser/BrowserViewModel.kt": 434,

@@ -26,7 +26,8 @@
 }
 ```
 
-> **WB-063（审计 2026-09-23 清单·W5 批）**：本目录当前仅含本设计说明——
-> 注入/重放/预算向量为**内联用例**，落在 `agent/tests/redteam_e2e_test.py`
->（SP-A1 批起的可执行红队面）；本 README 保留攻击链依据与设计意图，
-> 独立 fixture 数据文件待测试规模外置时再落盘。
+> **WB-063（审计 2026-09-23 清单·W5 批）**：本目录另有 `fixtures.json`——
+> 每一步由出厂 `agent/broker.py` 的 `PolicyBroker` 真实判定（第七轮 R7-TOOL-06
+> 起唯一入口为 pytest，见 `agent/tests/redteam_test.py`），上方散文保留攻击链
+> 依据与设计意图。上面两段 `"expected": "deny"` 是设计期笼统写法，可执行夹具
+> 一律用**精确决策串**（禁止笼统 "deny"——假保证形态）。

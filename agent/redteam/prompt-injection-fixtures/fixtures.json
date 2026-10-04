@@ -55,9 +55,28 @@
             "origin": "https://example.test",
             "method": "GET",
             "session_id": "session-default",
-            "canonical_parameters": "{}"
+            "canonical_parameters": "{}",
+            "expires_at": "<factory>",
+            "policy_version": "1.0"
           },
           "expect": "allow"
+        },
+        {
+          "desc": "其余齐全、只省 expires_at——R7-TOOL-02 前这是「省略即永久有效授权」，现构造层拒",
+          "raw_payload": {
+            "intent": "get_current_title",
+            "scope": "tabs:read",
+            "budget_used": 1,
+            "nonce": "ctrl-trunc-2",
+            "document_generation": 0,
+            "tab_id": "tab-1",
+            "origin": "https://example.test",
+            "method": "GET",
+            "session_id": "session-default",
+            "canonical_parameters": "{}",
+            "policy_version": "1.0"
+          },
+          "expect": "deny_payload"
         },
         {
           "desc": "只给 intent——构造边界拒（DENY_PAYLOAD）",

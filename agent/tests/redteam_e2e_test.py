@@ -229,14 +229,15 @@ def test_omitted_session_id_rejected():
 def test_expiry_enforced():
     """SP-017：expires_at 过期——deny_expired；未过期——放行。
     SP-150：expires_at 为 schema 口径 RFC3339 date-time 字符串。
-    SP-157：解析失败 fail-closed 视同过期（无宽限）。"""
+    SP-157：解析失败 fail-closed 视同过期（无宽限）。
+    R7-TOOL-02：契约把 expires_at 列为 required——省略曾是"永久有效授权"，现判 deny_schema。"""
     broker = PolicyBroker()
     now = datetime.now(UTC)
     assert broker.evaluate(_ok(
         nonce="e1", expires_at=(now - timedelta(seconds=10)).isoformat())) == Decision.DENY_EXPIRED
     assert broker.evaluate(_ok(
         nonce="e2", expires_at=(now + timedelta(seconds=10)).isoformat())) == Decision.ALLOW
-    assert broker.evaluate(_ok(nonce="e3", expires_at=None)) == Decision.ALLOW  # 不过期显式
+    assert broker.evaluate(_ok(nonce="e3", expires_at=None)) == Decision.DENY_SCHEMA  # 缺 required
     assert broker.evaluate(_ok(nonce="e4", expires_at="not-a-timestamp")) == Decision.DENY_EXPIRED
 
 
@@ -455,24 +456,26 @@ def test_broker_is_shipped_code_not_test_local():
 
 
 def test_payload_construction_is_fail_closed():
-    """审计第六轮（2026-10-03）：不可信载荷的构造边界（proposed_action_from_dict）
-    ——未知字段/缺必填/bool 冒充 int 三类都必须拒绝，且 broker.decide 对无法
-    构造的载荷返回 deny（"无法判定"绝不等于放行）。"""
+    """审计第六轮（2026-10-03）：构造边界（proposed_action_from_dict）——未知字段/缺必填/
+    bool 冒充 int 都拒，decide 对无法构造的载荷返回 deny（"无法判定"绝不等于放行）。
+    R7-TOOL-02：必填面改取 dataclass 无默认字段 ∪ 冻结 schema required。"""
     from broker import BrokerInputError, proposed_action_from_dict
 
     valid = {"intent": "get_current_title", "scope": "tabs:read", "budget_used": 1,
              "nonce": "pc1", "document_generation": 0, "tab_id": "tab-1",
-             "origin": "https://example.test", "method": "GET",
-             "session_id": "session-default", "canonical_parameters": "{}"}
+             "origin": "https://example.test", "method": "GET", "policy_version": "1.0",
+             "session_id": "session-default", "canonical_parameters": "{}",
+             "expires_at": (datetime.now(UTC) + timedelta(seconds=60)).isoformat()}  # 写死远期值会被 max_ttl 拒
     assert proposed_action_from_dict(valid).intent == "get_current_title"
     for label, mutation in (
         ("未知字段", {"descriptions_hash": "x"}),           # 拼错的字段被静默吞掉=守卫消失
-        ("缺构造必填", None),                                # 删掉 nonce（dataclass 无默认值字段）
+        ("缺构造必填", "nonce"),                             # 删掉 nonce（dataclass 无默认值字段）
+        ("缺契约必填", "expires_at"),                        # R7-TOOL-02：省 expires_at ≠ 永久授权
         ("bool 冒充 int", {"budget_used": True}),            # PY-251 口径
     ):
         payload = dict(valid)
-        if mutation is None:
-            payload.pop("nonce")
+        if isinstance(mutation, str):
+            payload.pop(mutation)
         else:
             payload.update(mutation)
         try:
@@ -480,12 +483,9 @@ def test_payload_construction_is_fail_closed():
         except BrokerInputError:
             continue
         raise AssertionError(f"载荷构造未拒绝（{label}）: {payload}")
-    # canonical_parameters 虽为 schema 必填，但 dataclass 允许 None 进入构造——
-    # 门在判定层（test_canonical_parameters_required 锁 DENY_CANONICAL），
-    # 不在构造层；构造层放宽不等于放行。
-    no_canon = dict(valid)
-    no_canon.pop("canonical_parameters")
-    assert proposed_action_from_dict(no_canon).canonical_parameters is None
+    # schema required 的键**缺失**在构造层即拒（R7-TOOL-02）；显式 null 仍可构造，门在
+    # 判定层——canonical_parameters 走 DENY_CANONICAL（比 deny_schema 更具体，口径不变）。
+    no_canon = dict(valid, canonical_parameters=None)
     assert PolicyBroker().evaluate(proposed_action_from_dict(no_canon)) == Decision.DENY_CANONICAL
     # decide 入口对畸形载荷同样拒绝（不抛、不放行）
     assert PolicyBroker().decide({"intent": "get_current_title"}) == Decision.DENY_PAYLOAD

@@ -30,10 +30,10 @@ def main() -> int:
         # 它们以裸 `assert` 表达断言，`python -O <file>.py` 下断言被整体剥离却
         # 打印 ALL OK、exit 0。唯一安全入口是 pytest（重写器使断言在 -O 下仍红，
         # 实测 `-O -m pytest` 照样 failed），故本入口驱动 pytest 而非脚本自身。
-        (["-m", "pytest", "-q", "agent/tests/redteam_test.py"],
-         "Agent 红队测试（阶段 G）"),
-        (["-m", "pytest", "-q", "agent/tests/redteam_e2e_test.py"],
-         "Agent 红队 e2e（阶段 G 完成标准）"),
+        # R7-TOOL-02（同轮）：改驱动整个 agent/tests 目录——逐文件列举会让新增
+        # 套件（action_contract_test.py 这类）静默地不被安全 e2e 跑到。
+        (["-m", "pytest", "-q", "agent/tests"],
+         "Agent 红队 + 契约判定面回归（阶段 G）"),
     ]
     for argv_tail, note in steps:
         print(f"--- {note} ---")

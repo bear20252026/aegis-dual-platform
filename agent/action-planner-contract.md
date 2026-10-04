@@ -8,6 +8,9 @@
 > 以下示例严格符合冻结契约 `contracts/schemas/action.schema.json`
 > （required 十字段、additionalProperties: false——SP-001 整改：
 > 此前示例含 schema 外字段 intent/target_origin/budget，与之冲突）。
+> 十字段**全部为判定必填**（第七轮 R7-TOOL-02：省略任一即拒，`expires_at`
+> 缺席不再等于永久有效）；示例里的 `expires_at` 只示意字段形态——broker 另有
+> `max_ttl`（默认 300s）上限，真实载荷必须是短期时效，否则 `deny_max_ttl`。
 
 ```json
 {

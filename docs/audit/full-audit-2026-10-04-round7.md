@@ -238,6 +238,7 @@ fail-closed；服务端 `strict`/`enforce_admins`/评审要求；本机与局域
 | **B2** | **已落地** | 六项全部收口：R7-SH-01（`check_real_models` / `check_mirror_consumption` 真正接进 `main()`，capability 误接映射按实测删除并留注释，17 条新用例逐个钉失败分支）；R7-SH-03（zip-slip 改**行为级**回归——真跑恶意 zip，另加一条对照用例证明「把判定掏空后旧 token 锚仍全绿」）；R7-SH-04（`` 正则覆盖 `assert(x)`；活跃树非测试 Python 全面禁令，实测当下 0 命中 ⇒ 是防腐而非补票）；R7-SH-07（invalid 向量缺失改无条件 fail-closed + `expected` 取值白名单 + 反向对照）；R7-TOOL-04（三门禁加空扫描面非零退出 + 锚点去文件名化）；R7-TOOL-05（基线未同步收窄即判失败——新规则当场抓出 3 处 stale，实降 507→503 / 692→691 / 477→450）；R7-TOOL-06（**删除两份红队套件的手工运行器**：`-O` 全绿的根因是「手工收集裸 assert」这个形态本身，唯一入口改 pytest，`run-security-e2e` 相应改为驱动 pytest 并拒绝 `-O`）。 |
 | B3 | **已落地** | 见本节「B3 落地」。 |
 | B5 | **已落地** | 见本节「B5 落地」。 |
+| R7-TOOL-02 | **已落地** | 见本节「R7-TOOL-02 落地」——第九节批次表漏排的 P1，B3/B5 之后仍红，故未等排期直接补做。 |
 | B4/B6/B7 | 未动 | 见第九节。B6 的三项与 B7 的部分需先取得用户裁决（第八节 4）；B4 与 B6 同改 `WebViewHardening.kt`、B6 与 B3 同改 `HostWebView.cs`，须串行。 |
 
 ### B3 落地（隐私网络边界补到子资源与下载两层）
@@ -263,6 +264,38 @@ Core.Tests 708/708 首次取得运行态证据；代价是构建会剥掉 `packa
 行数红线同 PR 收窄 556→549 / 604→584，为此把 `HostWebView` 的拦截落盘接线（CS-308/CS-363）
 拆出 `HostWebView.TrackerBlocks.cs`（partial，逻辑零改动）。子资源层的 403 与下载层的
 落盘抑制仍只能静态判定（需真实 CoreWebView2 COM 环境），如实登记。
+
+### R7-TOOL-02 落地（第九节批次表漏排的唯一 P1）
+
+第九节的批次表把 R7-TOOL-02 漏了——B1 收 TOOL-01、B2 收 SH/TOOL 四项、B5 收 RS/TOOL-03，
+`agent/broker.py` 的契约必填面不在任何一批里，因此在 B3/B5 落地后它仍是红的。本条按
+「可执行项不等排期」直接补做：
+
+- 新增 `agent/action_contract.py`：required 集、method enum、origin pattern、minLength
+  **全部从冻结 `action.schema.json` 现算**（手抄第二份字段表就是新的漂移面）；schema
+  读不到或结构不合预期即 `ActionContractError`，broker 拒绝构造。`ACTION_SCHEMA_PATH`
+  此前是**导出却零引用**的死常量（与 B2 抓到的两张死契约表同型），现由本模块真正读取。
+- `evaluate()` 增 `deny_schema`（与 `contracts/vectors` 既有词汇一致）；刻意放在
+  `deny_session/scope/canonical/generation` 之后——具体码优先，既有口径一字不改，只补
+  从未覆盖的形状面。`proposed_action_from_dict` 的必填面改取
+  「dataclass 无默认字段 ∪ schema required」，于是省略 `expires_at` 的载荷在构造层就拒。
+- `well_formed_action` 工厂补上 `expires_at`/`policy_version`：此前"well-formed 底座"
+  自身就不合契约，红队夹具把「不带 expires_at」钉成 **allow 对照**——门禁反向保护缺陷
+  的原始形态，现改钉 `deny_schema`，并新增 origin（`file:///C:/secrets`、
+  `javascript:alert(1)`）、method（`ARBITRARY`）、空 nonce/空 tab_id 的伪造型。
+- `redteam_test.py` 的 `DENY_EXPECTS` 由手抄 15 码改为从 `Decision` 现算——否则新增拒绝码
+  会静默不被夹具承认（本次就是撞上这一点才发现的）。
+- `scripts/run-security-e2e/run.py` 由逐文件驱动两份红队套件改为驱动整个 `agent/tests`
+  目录：逐文件列举会让新增套件静默地不被安全 e2e 跑到。
+- 新锚 `agent/tests/action_contract_test.py`（38 例）：判定面逐字等于 schema、
+  **改写 schema 副本可移动门禁**（反证非硬编码）、逐个 required 字段省略/置空绝不放行、
+  bool 冒充 integer、五种坏 schema 结构 fail-closed、以及「broker 真的调用了门禁」的
+  静态锚。**可失败性实证**：把门禁改成 `... and False` 并把构造层必填面退回旧形态 →
+  78 例中 58 例转红，随后逐项还原。
+- 顺带闭合四处文档失真：三个 fixture README 自称「本目录仅含设计说明、独立 fixture
+  待外置」（实际 `fixtures.json` 四个都在且由 broker 真判）、`action-planner-contract.md`
+  的示例 `expires_at` 是 2027 年（超 `max_ttl` 必被拒——已注明"仅示意形态"）。
+  `agent/broker.py` 红线 446→445。
 
 ### B1 落地当天即抓到一个被吞掉的真实失败
 
