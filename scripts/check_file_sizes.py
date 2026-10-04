@@ -123,10 +123,25 @@ def run_check() -> int:
                 violations.append(
                     f"{rel}: {lines} 行 > 基线 {limit} 行"
                     "（ratchet：基线文件只许减不许增）")
+            elif lines < limit:
+                # R7-TOOL-05（第七轮 2026-10-04）：基线记的是**最后一次人工快照**而非
+                # 历史最小值——文件缩到红线以下却不收窄基线，其后涨回原额度仍然绿，
+                # 等于每次重构都给后续 PR 留下越线额度。收窄必须是同 PR 的动作。
+                violations.append(
+                    f"{rel}: {lines} 行 < 基线 {limit} 行——基线未同步收窄"
+                    "（运行 python scripts/check_file_sizes.py --write-baseline "
+                    "并把收窄结果一并提交；否则该文件可在额度内自由回涨）")
         elif lines > LINE_LIMIT:
             violations.append(
                 f"{rel}: {lines} 行 > {LINE_LIMIT} 行红线（基线外文件——新文件"
                 "按红线拆分；确属存量超限走 --write-baseline 重建并说明）")
+    if checked == 0:
+        # R7-TOOL-04（第七轮）：扫描面为空 = 没有任何文件被判定，此前恒绿——
+        # git 索引异常、在错误目录执行、或受管源被整体移出面都会静默通过。
+        # 与 check_workflow_shells/verify_vectors 同口径：空面属环境错误（2）。
+        print("❌ 扫描面为空（0 个受管源文件）——git ls-files 或执行目录异常，"
+              "不作通过判定", file=sys.stderr)
+        return 2
     if violations:
         print(f"❌ 行数红线门禁失败（{len(violations)} 处）：")
         for item in sorted(violations):

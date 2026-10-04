@@ -27,29 +27,37 @@ MULTI_STEP_ACCEPTED = {'allow', 'deny', 'require_confirmation'}
 MULTI_STEP_PREFIXES = ('expected_request', 'expected_approve',
                        'expected_consume', 'expected_evaluate')
 
-# PY-078：超长 URL 占位向量锚点——url-origin-invalid.json 必须恰好含一处，
-# 且锚点向量自身必须保持短（占位语义）；真实超长样本由消费端 vectors.rs 物化
-# （https://example.org/ + 'a'×9000）。锚点丢失会导致 Rust 差分静默跳过该用例。
+# PY-078：超长 URL 占位向量锚点——全树必须恰好含一处，且锚点向量自身必须保持短
+#（占位语义）；真实超长样本由消费端 vectors.rs 物化
+#（https://example.org/ + 'a'×9000）。锚点丢失会导致 Rust 差分静默跳过该用例。
+# R7-TOOL-04（第七轮）：判定不再绑定文件名——改名/移动向量文件不得静默摘掉锚点。
 OVERSIZE_ANCHOR = 'oversize-url-limit-test'
-OVERSIZE_VECTOR_FILE = 'url-origin-invalid.json'
+
+# R7-TOOL-04（第七轮）：契约面数量下界（实测 schemas 7 份 / vectors 15 份）。
+# 目录缺失或整体清空此前是静默通过——「删掉一个目录名」即可让本门禁零判定。
+# 下界不是「越多越好」，它只保证减面必须是**有意识**的动作。
+MIN_FILES = {'schemas': 7, 'vectors': 15}
 
 
-def check_oversize_anchor(data: dict, path: Path, failures: list[str]) -> None:
-    """url-origin-invalid.json 的物化锚点守卫（fail-closed）。"""
-    if path.name != OVERSIZE_VECTOR_FILE:
-        return
+def check_oversize_anchor(data: dict, path: Path, failures: list[str]) -> int:
+    """统计本文件内的超长 URL 物化锚点命中数（fail-closed）。
+
+    R7-TOOL-04（第七轮）：本守卫此前按**文件名**（`url-origin-invalid.json`）
+    早退——同内容改名/移动到别的向量文件即静默摘掉锚点（实测 exit 0）。
+    现改为内容驱动 + 全树汇总：命中数由 main() 累加，跨文件恰好 1 次才算存在。
+    """
     hits = [v for v in data.get('vectors', [])
             if OVERSIZE_ANCHOR in str(v.get('url', ''))]
-    if len(hits) != 1:
+    if len(hits) > 1:
         failures.append(
-            f'{path.name}: 超长 URL 物化锚点 {OVERSIZE_ANCHOR!r} '
-            f'应恰好出现 1 次，实际 {len(hits)} 次（锚点丢失 = vectors.rs '
-            f'物化分支静默失效）')
-        return
-    if len(hits[0].get('url', '')) > 256:
-        failures.append(
-            f'{path.name}: 锚点向量应为短占位 URL（真实样本由消费端物化），'
-            f'当前长度 {len(hits[0]["url"])}')
+            f'{path.name}: 超长 URL 物化锚点 {OVERSIZE_ANCHOR!r} 在本文件出现 '
+            f'{len(hits)} 次（应全树恰好 1 次）')
+    for hit in hits:
+        if len(hit.get('url', '')) > 256:
+            failures.append(
+                f'{path.name}: 锚点向量应为短占位 URL（真实样本由消费端物化），'
+                f'当前长度 {len(hit["url"])}')
+    return len(hits)
 
 
 def validate_vector(vector: dict, path: str, failures: list[str]) -> None:
@@ -84,8 +92,18 @@ def validate_vector(vector: dict, path: str, failures: list[str]) -> None:
 def main() -> int:
     failures: list[str] = []
     pattern = [ROOT / 'contracts' / 'schemas', ROOT / 'contracts' / 'vectors']
+    anchor_hits = 0
     for directory in pattern:
-        for path in sorted(directory.glob('*.json')):
+        if not directory.is_dir():
+            failures.append(f'契约目录缺失：{directory.relative_to(ROOT)}（空扫描面不放行）')
+            continue
+        files = sorted(directory.glob('*.json'))
+        floor = MIN_FILES.get(directory.name, 1)
+        if len(files) < floor:
+            failures.append(
+                f'契约目录 {directory.name}/ 仅 {len(files)} 个 JSON，低于下界 {floor}'
+                '——契约面被缩减须显式核减本下界并说明理由')
+        for path in files:
             try:
                 data = json.loads(path.read_text(encoding='utf-8'))
             except (json.JSONDecodeError, OSError) as exc:
@@ -96,9 +114,16 @@ def main() -> int:
                 # assert 被剥离会导致校验整体失效）
                 validate_vector(vector, str(path.relative_to(ROOT)), failures)
             try:
-                check_oversize_anchor(data, path, failures)
+                anchor_hits += check_oversize_anchor(data, path, failures)
             except OSError as exc:
                 failures.append(f'{path.name}: 锚点检查失败（{exc}）')
+    # 全树汇总判定：锚点丢失即 vectors.rs / Kotlin / C# 三端的超长 URL 物化分支
+    # 失去输入（改名、删除、移动向量文件都不得静默摘掉它）。
+    if anchor_hits != 1:
+        failures.append(
+            f'超长 URL 物化锚点 {OVERSIZE_ANCHOR!r} 全树命中 {anchor_hits} 次'
+            '（应恰好 1 次；0 次 = vectors.rs 物化分支静默失效，'
+            '>1 次 = 物化目标不唯一）')
     if failures:
         print('❌ contracts 向量断言无效：')
         for failure in failures:

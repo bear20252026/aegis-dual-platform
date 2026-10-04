@@ -79,21 +79,38 @@ def test_new_file_over_limit_fails_under_limit_passes(tmp_repo):
     assert result == 1
 
 
-def test_baseline_ratchet_blocks_growth_allows_shrink(tmp_repo):
+def test_baseline_ratchet_blocks_growth_and_stale_baseline(tmp_repo):
     _add(tmp_repo, "src/legacy.py", "\n" * 305)
     cfs.BASELINE_PATH.write_text(
         json.dumps({"files": {"src/legacy.py": 305}}), encoding="utf-8")
     _add(tmp_repo, "src/legacy.py", "\n" * 400)
     assert cfs.run_check() == 1  # 基线内增长 → 红
+    # R7-TOOL-05（第七轮 2026-10-04）：原实现在此断言「缩减 → 绿」，而那正是缺陷
+    # 本身——基线记的是最后一次人工快照，文件缩到 250 行却不收窄基线，其后涨回
+    # 305 行仍绿（实测），等于每次重构都给后续 PR 留下越线额度。
+    # 现语义：缩减必须同 PR 重跑 --write-baseline，否则判「基线未同步收窄」。
     _add(tmp_repo, "src/legacy.py", "\n" * 250)
-    assert cfs.run_check() == 0  # 基线内缩减 → 绿（ratchet 单向）
+    assert cfs.run_check() == 1
+    assert cfs.write_baseline() == 0
+    assert json.loads(cfs.BASELINE_PATH.read_text(encoding="utf-8"))["files"] == {}
+    assert cfs.run_check() == 0  # 已收窄到红线下 → 基线项被移除
+    _add(tmp_repo, "src/legacy.py", "\n" * 301)
+    assert cfs.run_check() == 1  # 回涨越过 300 红线 → 红（额度不再来自旧快照）
+
+
+def test_empty_scan_surface_is_env_error(tmp_repo):
+    """R7-TOOL-04：受管源为空面时不得「扫描 0 个文件 ✅」——那是恒绿门禁。"""
+    assert cfs.run_check() == 2
 
 
 def test_generated_prefix_excluded_from_face(tmp_repo):
     _add(tmp_repo, "windows/src/Aegis.Windows.App/Contracts/Generated/g.cs", "\n" * 500)
     _add(tmp_repo, "android/contracts/src/main/kotlin/com/aegis/contracts/generated/g.kt",
          "\n" * 500)
-    assert cfs.run_check() == 0  # 生成物目录不入红线面
+    # R7-TOOL-04 之后，空面本身是环境错误（exit 2）——所以要留一个受红线面
+    # 管辖的真实源文件，才能证明「生成物被排除、其余仍在判定」。
+    _add(tmp_repo, "src/real.py", "\n" * 100)
+    assert cfs.run_check() == 0  # 生成物目录不入红线面；剩余面非空且未超限
 
 
 def test_write_baseline_snapshots_then_check_passes(tmp_repo):

@@ -174,4 +174,59 @@ public sealed class BrowserPolicyBrokerNativeGateTests : IDisposable
 
         Assert.Equal(1, fired);
     }
+    /// <summary>审计第七轮（2026-10-04·自 BrowserPolicyBrokerTests 拆入本文件）：
+    /// 原生核心的「确认域」端到端语义——高危目标须先批准方可兑换，重放必拒，
+    /// 撤销后不得再批。
+    ///
+    /// 为什么原来它是红的：本用例曾用 https://example.com/… 断言
+    /// RequireConfirmation，而 R6-21 把确认域收窄为**仅高危目标**（本机/私网/
+    /// 链路本地）后，公网 host 直接 Allow。该测试在 master 上一直失败，只是
+    /// `shell: pwsh` 步骤的退出码取自末条原生命令（测试红 + 后续 dotnet publish
+    /// 绿 ⇒ 步骤绿），而该 job 又不在必需检查里——红了若干轮无人见
+    /// （R7-TOOL-01 的活样本；断言补上后当场暴露）。
+    ///
+    /// 现按既定口径改用回环地址触发确认域，并补一条**公网不得触发确认**的对照，
+    /// 使「只对高危目标确认」这一决策在 C# 侧也有锚点（此前无任何用例）。</summary>
+    [Fact]
+    public void NativePolicyCoreBridgeRequiresApprovalOnlyForHighRiskTargetsAndThenOnce()
+    {
+        var libraryPath = Environment.GetEnvironmentVariable("AEGIS_NATIVE_POLICY_CORE_TEST_PATH");
+        if (string.IsNullOrWhiteSpace(libraryPath))
+        {
+            // 与本文件其余原生用例同口径：未声明原生模式时早退（xunit 2.9.3 无
+            // Assert.Skip，本仓不为此加包）。"声明了却空转"由 R6-13 的反假绿锚点
+            // DeclaredNativeModeMustActuallyRoundTripAndSupportTwoCoexistingBrokers
+            // 收口——它在 NativePolicyCoreGate.IsRequired 为真时强制真跑往返。
+            return;
+        }
+
+        Assert.True(NativePolicyCoreBridge.TryCreate("1.0", libraryPath, out var bridge));
+        using var nativeBridge = Assert.IsType<NativePolicyCoreBridge>(bridge);
+
+        const string highRiskUrl = "http://127.0.0.1:8080/confirmation?flow=1";
+        const string publicUrl = "https://example.com/confirmation?flow=1";
+        Assert.True(nativeBridge.CreateSession("confirmation-session", "confirmation-tab", 0, 120));
+
+        // 对照：公网 host 不进入确认域（R6-21 的收窄口径本身）
+        Assert.IsType<Decision.Allow>(nativeBridge.RequestNavigationConfirmation(
+            "confirmation-session", "confirmation-tab", 0, publicUrl, "navigation"));
+
+        var pending = Assert.IsType<Decision.RequireConfirmation>(
+            nativeBridge.RequestNavigationConfirmation(
+                "confirmation-session", "confirmation-tab", 0, highRiskUrl, "navigation"));
+
+        var approved = Assert.IsType<Decision.Allow>(
+            nativeBridge.ApproveNavigationConfirmation(pending.Request, highRiskUrl, "navigation"));
+        Assert.True(nativeBridge.TryConsumeNavigation(approved.Action, highRiskUrl, "navigation"));
+        Assert.False(nativeBridge.TryConsumeNavigation(approved.Action, highRiskUrl, "navigation"));
+
+        var rejected = Assert.IsType<Decision.RequireConfirmation>(
+            nativeBridge.RequestNavigationConfirmation(
+                "confirmation-session", "confirmation-tab", 0, highRiskUrl, "navigation"));
+        Assert.True(nativeBridge.RejectNavigationConfirmation(rejected.Request));
+        var afterRejection = Assert.IsType<Decision.Deny>(
+            nativeBridge.ApproveNavigationConfirmation(rejected.Request, highRiskUrl, "navigation"));
+        Assert.Equal("approval_not_pending", afterRejection.Reason.Code);
+    }
+
 }

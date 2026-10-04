@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sys
 
 # PY-042：需要重生成内容做 diff——平铺导入同目录生成器模块
@@ -23,33 +24,43 @@ from generate_kotlin import generate as generate_kt_model
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "schemas"
 VECTORS = ROOT / "vectors"
-# 审计第六轮（2026-10-03）：仓库根——真实手写模型对账的锚定根（不经 ROOT，
-# 因单测把 ROOT/SCHEMAS/VECTORS 重定向到合成契约树，真实模型仍在仓库原位）。
-REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 
 # 审计第六轮（2026-10-03）：schema ↔ 真实手写模型对账映射。
 # 此前 check_generated_models 只把 schema 与其自身生成镜像比对——「契约兼容性 =
 # 跨语言一致」在 schema 与自己镜像之间自证，从不触及两端实际运行的手写类型
-#（AD-244 已坦白）。本表把每条冻结契约对到其消费端手写实现，缺失/可选性漂移即红。
+#（AD-244 已坦白）。本表把每条冻结契约对到其消费端手写实现，缺失/字段漂移即红。
 # 值 = (模型文件, 语言, 类型名)。只读这些文件，绝不写。
-REAL_MODEL_CONTRACTS: dict[str, tuple[pathlib.Path, str, str]] = {
+#
+# 审计第七轮（2026-10-04·R7-SH-01 整改）：本表于第六轮建好但**从未被调用**——
+# 当时注释宣称的 check_mirror_consumption 也不存在，门禁仍是 schema↔自身镜像自证。
+# 现按实测消费面重写：
+#   · approval / audit-event 两条经回读确认存在真实手写对应类型（C# record 参数
+#     与 schema required 逐项对应），纳入 check_real_models 硬对账；
+#   · capability 一条**已删除**——Rust `capability.rs:54` 的 `pub struct Capability`
+#     是运行时能力对象（name/scope/allowed_origins/max_uses/uses_count），与
+#     `capability.schema.json` 的 required（scope/actions/resources）不是同一事物，
+#     全仓亦无任何手写类型含 `requires_confirmation`（仅生成物含）。capability
+#     契约的跨语言面由生成镜像 + 向量结构校验承担，如实登记，不假称有手写消费方。
+#
+# 路径一律写**相对仓库根的 posix 串**并在函数内按 `ROOT.parent` 解析——与
+# check_generated_models 的 `ROOT / ".."` 同口径，使单测把 ROOT 重定向到合成契约树
+# 时这两个检查也随之指向合成树（不会一半读合成、一半读真实仓库）。
+REAL_MODEL_CONTRACTS: dict[str, tuple[str, str, str]] = {
     "approval.schema.json": (
-        REPO_ROOT / "windows" / "src" / "Aegis.Windows.App" / "Broker" / "Decision.cs",
-        "cs", "ApprovalRequest"),
+        "windows/src/Aegis.Windows.App/Broker/Decision.cs", "cs", "ApprovalRequest"),
     "audit-event.schema.json": (
-        REPO_ROOT / "windows" / "src" / "Aegis.Windows.App" / "Broker" / "Audit" / "AuditEvent.cs",
-        "cs", "AuditEvent"),
-    "capability.schema.json": (
-        REPO_ROOT / "core" / "rust-policy-core" / "src" / "capability.rs",
-        "rust", "Capability"),
+        "windows/src/Aegis.Windows.App/Broker/Audit/AuditEvent.cs", "cs", "AuditEvent"),
 }
 
 # 审计第六轮：已声明为「设计标注镜像」的生成物——AD-244：当前零消费方，保留仅为
 # 跨语言契约镜像完整性。列于此显式承认为非承重镜像；此集外的任何镜像若无真实
 # 消费方则 check_mirror_consumption 计入 failures（防镜像悄悄沦为无人消费的假保证）。
+# 审计第七轮（R7-SH-01）：补齐此前漏登记的 ActionContract（生成物存在但不在豁免
+# 清单内＝清单本身在漂移），并把「豁免项必须有对应生成文件」做成反向断言，
+# 使本清单不能靠堆积历史条目蒙混。
 DESIGN_NOTATION_MIRRORS = {
-    "ApprovalContract", "AuditEventContract", "CapabilityContract",
+    "ActionContract", "ApprovalContract", "AuditEventContract", "CapabilityContract",
     "UpdateManifestContract", "VersionContract",
 }
 
@@ -130,14 +141,142 @@ def check_generated_models() -> list[str]:
     return failures
 
 
+def _decl_body(text: str, type_name: str) -> str | None:
+    """取 `record|class|struct NAME` 声明后的首个配对括号/花括号体。
+
+    C# 位置式 record 的参数表在圆括号内、class/struct 体在花括号内——两者都取，
+    取不到配对即返回 None（调用方计 failure，不静默放行）。
+    """
+    decl = re.search(rf"\b(?:record|class|struct)\s+{re.escape(type_name)}\b", text)
+    if decl is None:
+        return None
+    opens = [(text.find("(", decl.end()), "(", ")"), (text.find("{", decl.end()), "{", "}")]
+    valid = [(i, o, c) for i, o, c in opens if i >= 0]
+    if not valid:
+        return None
+    start, open_c, close_c = min(valid)
+    depth = 0
+    for k in range(start, len(text)):
+        if text[k] == open_c:
+            depth += 1
+        elif text[k] == close_c:
+            depth -= 1
+            if depth == 0:
+                return text[start + 1:k]
+    return None
+
+
+def check_real_models() -> list[str]:
+    """冻结 schema ↔ 端侧**手写**模型对账（R7-SH-01 收口第六轮建而未用的表）。
+
+    口径与限制如实声明：比对 schema `required` 的属性名是否作为标识符出现在该类型
+    的参数表/体内——即**名实对账**，不比对类型与可空性（那需要真正的 C#/Rust 解析器，
+    本仓无此依赖，宁可如实弱一档也不写假的强断言）。字段被改名/删除即红。
+    """
+    failures: list[str] = []
+    repo = ROOT.parent
+    for schema_name, (rel_model, lang, type_name) in sorted(REAL_MODEL_CONTRACTS.items()):
+        try:
+            schema = json.loads((SCHEMAS / schema_name).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            failures.append(f"真实模型对账无法进行：schema 不可读 {schema_name}（{exc}）")
+            continue
+        model = repo / rel_model
+        try:
+            text = model.read_text(encoding="utf-8")
+        except OSError as exc:
+            failures.append(f"真实模型缺失：{schema_name} → {rel_model}::{type_name}（{exc}）")
+            continue
+        body = _decl_body(text, type_name)
+        if body is None:
+            failures.append(f"真实模型类型未找到：{rel_model} 内无 {type_name} 声明")
+            continue
+        for prop in schema.get("required", []) or []:
+            want = ("".join(p.capitalize() for p in prop.split("_"))
+                    if lang == "cs" else prop)
+            flags = re.IGNORECASE if lang == "cs" else 0
+            if re.search(rf"\b{re.escape(want)}\b", body, flags) is None:
+                failures.append(
+                    f"字段漂移：{schema_name} required '{prop}' 未在 "
+                    f"{type_name}（{rel_model}）出现")
+    return failures
+
+
+def _mirror_dirs() -> list[tuple[str, pathlib.Path]]:
+    """生成镜像目录（随 ROOT 重定向，与 check_generated_models 同一表达式口径）。"""
+    return [
+        ("cs", ROOT / ".." / "windows" / "src" / "Aegis.Windows.App" / "Contracts" / "Generated"),
+        ("kt", ROOT / ".." / "android" / "contracts" / "src" / "main" / "kotlin"
+              / "com" / "aegis" / "contracts" / "generated"),
+    ]
+
+
+def _has_real_consumer(type_name: str) -> bool:
+    """在**非生成物、非测试、非本门禁自身**的源码里找该类型的真实引用。
+
+    口径（AD-244）：镜像引用镜像、测试引用镜像都不算「消费」——只有端侧应用代码
+    真的用它，跨语言契约才算有承重方。
+    """
+    for path in sorted((ROOT / "..").rglob("*")):
+        if not path.is_file() or path.suffix not in (".cs", ".kt", ".rs", ".py"):
+            continue
+        lowered = str(path).replace("\\", "/").lower()
+        if "/generated/" in lowered:
+            continue
+        if "/tests/" in lowered or "/test/" in lowered or "_test" in path.name.lower():
+            continue
+        if "verify_contract_compatibility" in path.name:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if re.search(rf"\b{re.escape(type_name)}\b", text):
+            return True
+    return False
+
+
+def check_mirror_consumption() -> list[str]:
+    """每个生成镜像必须「有真实消费方」或「在 DESIGN_NOTATION_MIRRORS 里显式承认」。
+
+    双向：①未登记且无消费方的镜像 → 红（防镜像沦为无人消费的假保证）；
+    ②登记了但生成目录里已无该镜像 → 红（防豁免清单堆积死条目）；
+    ③镜像目录缺失 → 红（空扫描面不得恒绿）。
+    ②仅在已有镜像面时判定——整棵树不存在时 ③ 已给出更准确的失败原因，
+    再叠 6 条「死条目」只是把同一个根因伪装成多个缺陷。
+    """
+    failures: list[str] = []
+    seen: set[str] = set()
+    for lang, directory in _mirror_dirs():
+        if not directory.is_dir():
+            failures.append(f"生成镜像目录缺失：{directory}（扫描面为空不放行）")
+            continue
+        pattern = "*.cs" if lang == "cs" else "*.kt"
+        for path in sorted(directory.glob(pattern)):
+            seen.add(path.stem)
+            if path.stem in DESIGN_NOTATION_MIRRORS:
+                continue
+            if not _has_real_consumer(path.stem):
+                failures.append(
+                    f"生成镜像无真实消费方：{path.stem}（{path.name}）——要么接进端侧消费方，"
+                    "要么显式登记进 DESIGN_NOTATION_MIRRORS 并说明保留理由（AD-244 口径）")
+    for declared in sorted(DESIGN_NOTATION_MIRRORS):
+        if seen and declared not in seen:
+            failures.append(
+                f"豁免清单死条目：DESIGN_NOTATION_MIRRORS 含 {declared}，"
+                "但生成目录中已无该镜像（清单须与生成面同步收窄）")
+    return failures
+
+
 def main() -> int:
-    failures = check_schemas() + check_vectors() + check_generated_models()
+    failures = (check_schemas() + check_vectors() + check_generated_models()
+                + check_real_models() + check_mirror_consumption())
     if failures:
         for f in failures:
             print(f"❌ {f}")
         return 1
-    print("✅ 契约兼容性验证通过（schemas/vectors JSON 有效 + C#/Kotlin 模型与 "
-          "schema 一致——跨语言一致——阶段 B 完成标准）")
+    print("✅ 契约兼容性验证通过（schemas/vectors JSON 有效 + C#/Kotlin 生成模型与 "
+          "schema 一致 + 手写模型名实对账 + 生成镜像消费面已登记——阶段 B 完成标准）")
     return 0
 
 

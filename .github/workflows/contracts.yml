@@ -50,6 +50,13 @@ jobs:
       # cron（legacy-python-guard）跑——tag 发布窗口零 pytest，工具回归不可
       # 见。接线到常跑契约门禁（PY-221 同批为锁补 cryptography——本步骤
       # 经 requirements-ci.txt hash 锁一并安装）。
+      - name: pwsh step exit-code gate (R7-TOOL-01——含故障注入自证)
+        # 审计第七轮：`shell: pwsh` 下原生命令非零不中断脚本，步骤退出码取末条
+        # 原生命令——发布链曾因此「测试红 + 构建绿 ⇒ 步骤绿」。本步骤核全部 workflow
+        # 的 pwsh 步骤，并植入一个违规样本自证它能红（--self-test）。
+        # 注：本步骤属既有 job（contract-source-of-truth，已是必需检查），
+        # 不新增 context 名 → 不影响 merge box。
+        run: python scripts/check_workflow_shells.py --self-test
       - name: Release-chain unit tests (PY-222——tests/python 常跑)
         # SP-258（2026-10-02 审计）：--cov 出覆盖率报告（不设阈值，供补测排序）。
         # coverage 的 source 面只接受包/目录——validate_release.py 根级单文件

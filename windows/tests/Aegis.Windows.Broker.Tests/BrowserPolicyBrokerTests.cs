@@ -219,37 +219,6 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     }
 
     [Fact]
-    public void NativePolicyCoreBridgeRequiresApprovalBeforeConfirmationNavigationCanConsume()
-    {
-        var libraryPath = Environment.GetEnvironmentVariable("AEGIS_NATIVE_POLICY_CORE_TEST_PATH");
-        if (string.IsNullOrWhiteSpace(libraryPath))
-            return;
-
-        Assert.True(NativePolicyCoreBridge.TryCreate("1.0", libraryPath, out var bridge));
-        using (var nativeBridge = Assert.IsType<NativePolicyCoreBridge>(bridge))
-        {
-            const string url = "https://example.com/confirmation?flow=1";
-            Assert.True(nativeBridge.CreateSession("confirmation-session", "confirmation-tab", 0, 120));
-            var pending = Assert.IsType<Decision.RequireConfirmation>(
-                nativeBridge.RequestNavigationConfirmation(
-                    "confirmation-session", "confirmation-tab", 0, url, "navigation"));
-
-            var approved = Assert.IsType<Decision.Allow>(
-                nativeBridge.ApproveNavigationConfirmation(pending.Request, url, "navigation"));
-            Assert.True(nativeBridge.TryConsumeNavigation(approved.Action, url, "navigation"));
-            Assert.False(nativeBridge.TryConsumeNavigation(approved.Action, url, "navigation"));
-
-            var rejected = Assert.IsType<Decision.RequireConfirmation>(
-                nativeBridge.RequestNavigationConfirmation(
-                    "confirmation-session", "confirmation-tab", 0, url, "navigation"));
-            Assert.True(nativeBridge.RejectNavigationConfirmation(rejected.Request));
-            var afterRejection = Assert.IsType<Decision.Deny>(
-                nativeBridge.ApproveNavigationConfirmation(rejected.Request, url, "navigation"));
-            Assert.Equal("approval_not_pending", afterRejection.Reason.Code);
-        }
-    }
-
-    [Fact]
     public void NativePolicyCoreBridgeRejectsPreviousAbiResponse()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>

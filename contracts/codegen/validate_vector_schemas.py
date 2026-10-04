@@ -36,6 +36,16 @@ SCHEMAS = ROOT / "contracts" / "schemas"
 VECTORS = ROOT / "contracts" / "vectors"
 
 # PY-094..096：向量文件 → 实例键 → schema 文件映射
+# R7-SH-07（第七轮 2026-10-04）：update-manifest-invalid.json 的 expected 取值白名单。
+# "deny_schema" = schema 级失效（必须被 schema 拒）；其余三个属语义层失效
+#（rollback 门/阈值门/过期门——schema 通过是合法设计，判定在 update_verifier）。
+# 取值集合 = 本轮实测面（9 deny_schema / 1 deny_rollback / 1 deny_expired /
+# 3 deny_threshold，合计 14 条）。新增拒绝理由必须同时在这里登记，避免
+# 「改个 expected 字符串就静默摘掉一条断言」。
+KNOWN_DENY_EXPECTED = frozenset({
+    "deny_schema", "deny_rollback", "deny_threshold", "deny_expired",
+})
+
 SCHEMA_VECTOR_FILES = {
     "action-valid.json": "action",
     "action-invalid.json": "action",
@@ -77,9 +87,12 @@ def main() -> int:
         valid_vectors = _load(VECTORS / "update-manifest-valid.json").get("vectors", [])
     except (OSError, json.JSONDecodeError) as exc:
         return _fail_load(VECTORS / "update-manifest-valid.json", exc)
+    # R7-SH-07（第七轮 2026-10-04）：invalid 向量此前是「文件不存在→空列表→
+    # 双向断言整段消失且 exit 0」，而同文件对 action/capability/audit-event 六个
+    # 向量却是「缺失计入 failures」——同文件两套口径。删/改名一个向量文件即可
+    # 在 CI 绿灯下摘掉 schema 削弱检测。现与 schema/valid 同走无条件 _load。
     try:
-        invalid_vectors = (_load(invalid_path).get("vectors", [])
-                           if invalid_path.exists() else [])
+        invalid_vectors = _load(invalid_path).get("vectors", [])
     except (OSError, json.JSONDecodeError) as exc:
         return _fail_load(invalid_path, exc)
     validator = jsonschema.Draft202012Validator(
@@ -107,7 +120,18 @@ def main() -> int:
         manifest = vector.get("manifest")
         if not isinstance(manifest, dict):
             continue
-        schema_level = vector.get("expected") == "deny_schema"
+        # R7-SH-07：语义级豁免的**取值**必须有界。此前任何非 "deny_schema" 的
+        # expected 都降级为 info——把值改成 "whatever" 即可把一条本该被 schema
+        # 拒绝的失效向量变成零断言。现只接受实测在用的四个拒绝理由，
+        # 新理由须显式登记（同时意味着要有人核对它确实属语义层失效）。
+        expected_value = vector.get("expected")
+        if expected_value not in KNOWN_DENY_EXPECTED:
+            failures.append(
+                f"invalid 向量 #{i}（{vector.get('case', '?')}）expected 取值未知："
+                f"{expected_value!r}——语义级豁免不得由条目自述任意字符串，"
+                f"须先登记进 KNOWN_DENY_EXPECTED（{sorted(KNOWN_DENY_EXPECTED)}）")
+            continue
+        schema_level = expected_value == "deny_schema"
         is_valid = validator.is_valid(manifest)
         if schema_level and is_valid:
             failures.append(
