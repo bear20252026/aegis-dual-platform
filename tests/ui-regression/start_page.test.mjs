@@ -122,7 +122,19 @@ test('BUG-005 离线画板：按钮 + 桥调用 + 双端打包配置必须齐备
     'Android 构建必须引用 prepare-geogebra 复合 action（此前内联步骤静默缺失导致按钮失效）');
   assert.match(wf, /dest-dir: android\/app\/src\/main\/assets\/geogebra/, 'dest-dir 必须指向 APK assets');
   const action = readFileSync(join(ROOT, '.github', 'actions', 'prepare-geogebra', 'action.yml'), 'utf8');
-  assert.match(action, /GeoGebra\.html'; assert/, '复合 action 入口断言必须存在（fail-closed）');
+  // 审计第六轮延续（2026-10-04）：此处的锚点原为 /GeoGebra\.html'; assert/ ——
+  // 锚的是"入口检查用 assert 写"这个**实现细节**，而 assert 恰是必须去掉的东西
+  //（PYTHONOPTIMIZE=1/-O 在字节码编译期整体剥离断言，SP-209 的 zip-slip 防护
+  // 因此形同虚设，与 PY-187 同型）。锚在字面 assert 上等于把安全缺陷钉成契约：
+  // 把它修好反而会让本门禁变红。现改为断**性质**——①入口存在性检查在且失败即
+  // 退出；②containment 检查失败即退出；③全文件不得再用裸 assert 做防护。
+  assert.match(action, /os\.path\.isfile\(p\)[\s\S]{0,140}sys\.exit\(1\)/,
+    '复合 action 必须检查画板入口文件存在且失败即退出（fail-closed）');
+  assert.match(action, /zip-slip[\s\S]{0,220}sys\.exit\(1\)/,
+    'zip-slip containment 检查失败必须显式退出（不得依赖 assert）');
+  assert.equal(
+    /^\s*assert\s+\S/m.test(action), false,
+    'prepare-geogebra 内不得保留裸 assert 防护——-O 下被剥离即失去防护（PY-187/SP-209 口径）');
   const wfw = readFileSync(join(ROOT, '.github', 'workflows', 'release-windows.yml'), 'utf8');
   assert.match(wfw, /uses: \.\/\.github\/actions\/prepare-geogebra/, 'Windows 构建同样必须引用复合 action');
 });
