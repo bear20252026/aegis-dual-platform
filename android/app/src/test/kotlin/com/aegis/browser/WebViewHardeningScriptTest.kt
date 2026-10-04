@@ -86,7 +86,7 @@ class WebViewHardeningScriptTest {
             script.contains("parseInt(__AEGIS_SITE_SEED.slice(8, 16), 16)"),
         )
         // 结构不变式：种子声明与最后一个消费点之间 Stage 2 闭包不得提前收口
-        //（消费块整体缩进两级内嵌——列 0 的 })(); 只允许出现在消费点之后）
+        // （消费块整体缩进两级内嵌——列 0 的 })(); 只允许出现在消费点之后）
         val seedDecl = script.indexOf("const __AEGIS_SITE_SEED =")
         val lastConsumer = script.indexOf("parseInt(__AEGIS_SITE_SEED.slice(8, 16), 16)")
         assertTrue("种子声明必须先于消费点（seedDecl=$seedDecl, consumer=$lastConsumer）", seedDecl in 0 until lastConsumer)
