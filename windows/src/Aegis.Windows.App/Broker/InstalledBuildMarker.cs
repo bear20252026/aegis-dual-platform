@@ -39,12 +39,15 @@ public static class InstalledBuildMarker
     ///   TryConsumeNavigation 两点都已硬拒这类 host → 标记置位只会得到"弹确认面板
     ///   后被同一边界再拒"的死路径，零安全增益；
     /// ②确认链（RequestNavigationConfirmation → RequireConfirmation → Approve →
-    ///   TryConsumeNavigation）不复判托管黑名单 _blockedHosts，而核心新增的黑名单
-    ///   注入入口 aegis_policy_core_broker_update_host_denylist_json 尚无 C# 绑定、
-    ///   零调用点 → 此刻出厂启用等于给黑名单 host 开一条"用户点一次批准即放行"的面。
-    /// 顺序要求：先把 ThreatFeedCoordinator 的快照喂给核心（黑名单单源化），再评估
-    /// 出厂启用。机制与本类另一个标记完全对称，只是出厂态关闭；该开关仍只由
-    /// 环境变量在受控构建/测试里置位。</summary>
+    ///   TryConsumeNavigation）不复判托管黑名单 _blockedHosts。核心侧的注入入口
+    ///   aegis_policy_core_broker_update_host_denylist_json 现已有 C# 绑定与调用点
+    ///  （订阅源快照经 CoreDenylistPublisher 从进程级唯一持有者单源注入，核心的
+    ///   consume_navigation 会复判）——因此这条口子**只在所发布的核心 DLL 确实导出
+    ///   该入口时**才闭合：对着缺该导出的旧 DLL 出厂启用，仍等于给黑名单 host 开一条
+    ///   "用户点一次批准即放行"的面。
+    /// 顺序要求：其②（先把 ThreatFeedCoordinator 的快照喂给核心、黑名单单源化）已
+    /// 达成；其①（零安全增益）未消解，故出厂态仍为关闭。机制与本类另一个标记完全
+    /// 对称，该开关仍只由环境变量在受控构建/测试里置位。</summary>
     public const string NavigationConfirmationValueName = "RequireNavigationConfirmation";
 
     /// <summary>审计第六轮（2026-10-04）：值读取注入缝（与 CS-364 租约工厂缝

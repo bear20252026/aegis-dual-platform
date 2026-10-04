@@ -31,7 +31,14 @@ public sealed class BlockedHosts : IBlockedHosts
         }
         _hosts = set;
         _lookup = set.GetAlternateLookup<ReadOnlySpan<char>>();
+        Hosts = set.AsReadOnly();
     }
+
+    /// <summary>黑名单集合本身（审计第六轮遗留缺口收口 2026-10-04）——原生核心
+    /// 注入需要 host 清单，而 <see cref="IBlockedHosts"/> 只有 IsBlocked。
+    /// 返回的是 IsBlocked 正在用的那个集合的**只读包装**（不复制、不分叉）：
+    /// 托管判定与核心发布因此是同一份权威快照，不存在会漂移的第二份名单。</summary>
+    public IReadOnlyCollection<string> Hosts { get; }
 
     // CS-068（审计 2026-09-25）：热路径零分配——查询 host 的每个祖先域后缀
     // 用 span 备用查找裁决（不再 string.Join 切片分配）。注意：预展开只能做在

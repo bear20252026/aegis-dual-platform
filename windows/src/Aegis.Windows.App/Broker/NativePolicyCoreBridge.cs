@@ -8,7 +8,7 @@ using System.Text.Json;
 /// 受控 Rust 策略核心桥接。它只使用明确的 C ABI 导出和 UTF-8 JSON，不向托管端暴露 Rust 内存布局。
 /// 所有加载、解析或 ABI 异常均被调用方转换为拒绝，禁止退回到另一套策略实现。
 /// </summary>
-public sealed class NativePolicyCoreBridge : IDisposable
+public sealed partial class NativePolicyCoreBridge : IDisposable
 {
     private const uint ExpectedAbiVersion = NativePolicyCoreGate.ExpectedAbiVersion;
     // CS-207：裸 IntPtr 换 SafeHandle——关键终结兜底释放（Dispose 遗漏时
