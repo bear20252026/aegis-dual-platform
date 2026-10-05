@@ -48,7 +48,9 @@
 
 ## 已知缺口（诚实清单——2026-09-24 对齐 parity 清单）
 
-- parity 代码项已 100% 勾验（`docs/product/feature-parity-checklist.md`）；
-  残余缺口为 3 项**真机验收**（M2 数据闭环 / M3 下载画板 NTP / M4 全新机器
+- parity 代码项**除 1 项外**全部勾验（`docs/product/feature-parity-checklist.md`）——
+  未落地项：WebView2 `NewBrowserVersionAvailable` Runtime 更新事件（正典树零订阅、无
+  `RuntimeUpdater.cs`，第八轮 B8 登记，`device-validation` 第 10 步因此暂无执行对象）；
+  残余缺口另有 3 项**真机验收**（M2 数据闭环 / M3 下载画板 NTP / M4 全新机器
   全功能走查——随 2.2.0 发布流程执行，ADR-009 D5）
 - 地址栏联想等蓝图"先不做"项见上节

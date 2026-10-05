@@ -9,7 +9,9 @@ Aegis 双端安全浏览器：Windows（C#/.NET 10 + 原生 WebView2——唯一
 **Windows 终局口径（ADR-009；M1-M4 已全部落地——取代「迁移中」悬置）**：
 - **C#/.NET 10（`windows/`）= 唯一 Windows 正典栈与唯一发布制品**（发布链
   单轨——PyInstaller 包已移除）；迁移路线图 M1-M4 完成，parity 清单
-  （`docs/product/feature-parity-checklist.md`）代码项 100% 勾验；
+  （`docs/product/feature-parity-checklist.md`）代码项**除 1 项外**全部勾验——未落地项
+  = WebView2 `NewBrowserVersionAvailable` Runtime 更新事件处理（无 `RuntimeUpdater.cs`，
+  第八轮 B8 登记；「100%」曾是需要用户裁决的口径，现按实树更正）；
 - **`legacy/windows-pywebview/` = 只读归档**：**功能与安全修复一律不在该栈
   进行**；P0 安全缺陷仅经安全披露通道评估（ADR-009 D4 冻结纪律的归档终态）；
 - `legacy/` 下的 Qt 与 `legacy/ui/` 为已归档死代码，禁止 import。
