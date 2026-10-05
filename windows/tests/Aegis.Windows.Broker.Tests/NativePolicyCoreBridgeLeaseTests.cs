@@ -75,12 +75,8 @@ public sealed class NativePolicyCoreBridgeLeaseTests
         // 行尾判据不得依赖运行平台：仓库加了 .gitattributes（* text=auto eol=lf）后，
         // 源文件在 Windows runner 上也是 LF，而 Environment.NewLine 是 CRLF——用它切分
         // 会把整份文件当成一行，注释过滤静默失效，本锚点从 1 变 2（第八轮 B6 由 CI 暴露）。
-        var code = string.Join("
-",
-            BridgeSource.Replace("
-", "
-").Split('
-', StringSplitOptions.None))
+        var code = string.Join("\n",
+            BridgeSource.Replace("\r\n", "\n").Split('\n', StringSplitOptions.None)
                 .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
         Assert.Equal(1, CountOf(code, "_brokerHandle.DangerousGetHandle()"));
         var take = code.IndexOf("return operation(Broker);", StringComparison.Ordinal);
