@@ -36,14 +36,19 @@ fn local_and_private_hosts_are_recognized() {
         "100.64.0.1",      // CGNAT 下边界
         "100.127.255.254", // CGNAT 上边界
         "192.0.2.1",       // TEST-NET-1
+        // 第八轮 B9：TEST-NET-2/3——C# 孪生 ReservedAddressBoundary 早已覆盖
+        //（:129/:131），核心缺这两段即段集跨端不一致
+        "198.51.100.1",
+        "198.51.100.254",
+        "203.0.113.7",
         "198.18.0.1",      // 基准段下边界
         "198.19.255.254",  // 基准段上边界
         "224.0.0.1",       // 组播
         "255.255.255.255", // 受限广播
     ] {
         assert!(
-            SecurityPolicy::is_local_or_private_host(host),
-            "{host} 必须判为本机/私网"
+            SecurityPolicy::is_high_risk_host(host),
+            "{host} 必须判为高危主机"
         );
     }
 }
@@ -65,6 +70,11 @@ fn public_and_lookalike_hosts_are_not_flagged() {
         "100.128.0.1",     // CGNAT 上界之外
         "192.0.1.254",     // TEST-NET-1 前邻
         "192.0.3.1",       // TEST-NET-1 后邻（第三段必须精确为 2）
+        // TEST-NET-2/3 的逐段左右邻（第三段必须精确，缺一即过度收紧无人可抓）
+        "198.51.99.254",
+        "198.51.101.1",
+        "203.0.112.254",
+        "203.0.114.1",
         "198.17.255.254",  // 基准段前邻
         "198.20.0.1",      // 基准段后邻
         "223.255.255.254", // 组播段前邻
@@ -74,8 +84,8 @@ fn public_and_lookalike_hosts_are_not_flagged() {
         "1.2.3.4.5", // 段数过多
     ] {
         assert!(
-            !SecurityPolicy::is_local_or_private_host(host),
-            "{host} 不应被判为本机/私网"
+            !SecurityPolicy::is_high_risk_host(host),
+            "{host} 不应被判为高危主机"
         );
     }
 }
@@ -86,8 +96,8 @@ fn predicate_requires_pre_lowered_host_and_no_port() {
     // 两条前提不成立即漏判——RS-227 口径下 CanonicalExternalUrl.host 保留
     // 非默认端口，直接传 "127.0.0.1:8080" 会因末段 "1:8080" 解析失败而
     // 判为非本机（第六轮开发期实测到的绕过，调用方必须先 split(':') 取首段）。
-    assert!(!SecurityPolicy::is_local_or_private_host("LOCALHOST"));
-    assert!(!SecurityPolicy::is_local_or_private_host("127.0.0.1:8080"));
-    assert!(SecurityPolicy::is_local_or_private_host("localhost"));
-    assert!(SecurityPolicy::is_local_or_private_host("127.0.0.1"));
+    assert!(!SecurityPolicy::is_high_risk_host("LOCALHOST"));
+    assert!(!SecurityPolicy::is_high_risk_host("127.0.0.1:8080"));
+    assert!(SecurityPolicy::is_high_risk_host("localhost"));
+    assert!(SecurityPolicy::is_high_risk_host("127.0.0.1"));
 }

@@ -41,7 +41,7 @@ MIN_FILES = {'schemas': 7, 'vectors': 15}
 # R8-PY-02（第八轮审计 2026-10-04）：MIN_FILES 只数**文件**，把任一 vectors 数组
 # 清空（文件在场）即可让全部循环零次执行、门禁仍绿——「删文件」被堵住了，「改内容
 # 清空」这条路还通。现同时钉全树条目总数下界与逐文件非空。
-MIN_VECTOR_ENTRIES = 166
+MIN_VECTOR_ENTRIES = 174
 
 
 def check_oversize_anchor(data: dict, path: Path, failures: list[str]) -> int:
