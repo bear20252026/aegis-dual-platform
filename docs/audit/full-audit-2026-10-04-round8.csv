@@ -9,7 +9,7 @@ R8-CI-02,P1,问题/门禁可失败性,.github/workflows/legacy-python-guard.yml:
 R8-DOC-01,P1,问题/声明滞后,README.md:24-26,『两端均未生效』对beta.52成立、对HEAD失实（Android确认门已启用）,yes,B8
 R8-CI-03,P2,问题/门禁自身覆盖,scripts/check_workflow_shells.py:83,87-92,四类结构盲区(job.shell错键/windows隐式pwsh/&调用符/composite)+空面恒绿,yes,B1
 R8-SH-10,P2,问题/门禁有效性,.github/workflows/ci.yml:17-25,SP-235新加push.paths而断言语料9处不在清单内（R7-SH-02回潮）,yes,B5
-R8-PY-02,P2,问题/fail-closed,contracts/codegen/validate_vector_schemas.py:118-121,invalid侧缺manifest静默continue；MIN_FILES数文件不数条目⇒清空即绿,yes,B5
+R8-PY-02,P2,问题/fail-closed,contracts/codegen/validate_vector_schemas.py:118-121,invalid侧缺manifest静默continue；MIN_FILES数文件不数条目⇒清空即绿（B5落地：改为有界登记集SCENARIO_ONLY_CASES，并证出singular_signature_field自称deny_schema却无实例=两侧零判定，已补待拒实例）,yes,B5
 R8-PY-08,P2,问题/脚本健壮性,scripts/check_markdown_links.py:79-85,122-135,链接解析无仓库根包含性判定；扫描0个md也exit0,yes,B5
 R8-RS-02,P2,问题/种子退化,core/rust-policy-core/src/shield.rs:160-181,空站点键⇒与会话无关的常量噪声；worker出口退回本帧host,yes,B2
 R8-RS-13,P2,问题/FFI安全,core/rust-policy-core/src/ffi/mod.rs:219-228,session_seed未做长度前置⇒1GiB十六进制串触发512MiB分配,yes,B7

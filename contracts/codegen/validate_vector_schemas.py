@@ -46,6 +46,16 @@ KNOWN_DENY_EXPECTED = frozenset({
     "deny_schema", "deny_rollback", "deny_threshold", "deny_expired",
 })
 
+# R8-PY-02（第八轮审计 2026-10-04）：**无 manifest 的场景型条目**登记集。
+# 这几条不给 schema 出实例，只把语义场景（version/min_version、threshold/
+# signatures_count、expires_at）交给 core/rust-policy-core/tests/vectors.rs 的
+# update_manifest_invalid_vectors_semantic_rules 消费——所以「缺 manifest」对它们是
+# 合法形态。登记集的用途是把这个合法性变成**有界声明**：条目改名/新增缺 manifest
+# 形态不再自动获得豁免（原实现这里静默 continue，把任一 manifest 键改名即零判定）。
+SCENARIO_ONLY_CASES = frozenset({
+    "rollback", "threshold_insufficient", "duplicate_key", "expired",
+})
+
 SCHEMA_VECTOR_FILES = {
     "action-valid.json": "action",
     "action-invalid.json": "action",
@@ -118,8 +128,7 @@ def main() -> int:
     # 打 info 不误报
     for i, vector in enumerate(invalid_vectors):
         manifest = vector.get("manifest")
-        if not isinstance(manifest, dict):
-            continue
+        case = vector.get("case", "?")
         # R7-SH-07：语义级豁免的**取值**必须有界。此前任何非 "deny_schema" 的
         # expected 都降级为 info——把值改成 "whatever" 即可把一条本该被 schema
         # 拒绝的失效向量变成零断言。现只接受实测在用的四个拒绝理由，
@@ -127,9 +136,24 @@ def main() -> int:
         expected_value = vector.get("expected")
         if expected_value not in KNOWN_DENY_EXPECTED:
             failures.append(
-                f"invalid 向量 #{i}（{vector.get('case', '?')}）expected 取值未知："
+                f"invalid 向量 #{i}（{case}）expected 取值未知："
                 f"{expected_value!r}——语义级豁免不得由条目自述任意字符串，"
                 f"须先登记进 KNOWN_DENY_EXPECTED（{sorted(KNOWN_DENY_EXPECTED)}）")
+            continue
+        if not isinstance(manifest, dict):
+            # R8-PY-02：此前这里静默 continue——把 invalid 向量的 manifest 键改名
+            # 或删掉，该条即零判定（而同文件 valid 侧对同一形态记 failure，一个
+            # 文件两套口径）。现按「有界登记」裁决，而不是一律拒绝：真实树里
+            # 4 条场景型向量本就没有 manifest（语义面在 vectors.rs），一律拒绝
+            # 会把它们误杀——本仓的口径是检查必须能红，但不能靠噪声证明。
+            if expected_value == "deny_schema":
+                failures.append(
+                    f"invalid 向量 #{i}（{case}）声明 deny_schema 却无 manifest 实例"
+                    f"——schema 级失效必须给出待拒实例，否则该条零判定")
+            elif case not in SCENARIO_ONLY_CASES:
+                failures.append(
+                    f"invalid 向量 #{i}（{case}）缺 manifest 且未登记为场景型——"
+                    f"须显式加入 SCENARIO_ONLY_CASES，并确认 vectors.rs 侧有对应语义断言")
             continue
         schema_level = expected_value == "deny_schema"
         is_valid = validator.is_valid(manifest)

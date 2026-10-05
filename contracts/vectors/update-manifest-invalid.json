@@ -29,8 +29,27 @@
     },
     {
       "case": "singular_signature_field",
-      "uses_singular_signature": true,
-      "expected": "deny_schema"
+      "expected": "deny_schema",
+      "manifest": {
+        "schema": 1,
+        "product": "Aegis",
+        "version": "1.2.3",
+        "channel": "stable",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "artifacts": [
+          {
+            "platform": "windows-x64",
+            "format": "msix",
+            "url": "https://a.gov.cn/x.msix",
+            "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "size": 10
+          }
+        ],
+        "signature": {
+          "key_id": "k1",
+          "sig": "AAAA"
+        }
+      }
     },
     {
       "case": "invalid_base64_signature",

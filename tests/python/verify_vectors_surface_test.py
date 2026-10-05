@@ -81,6 +81,8 @@ def test_anchor_survives_rename(tmp_path, monkeypatch):
     first.rename(tmp_path / "contracts" / "vectors" / "renamed-to-something-else.json")
     monkeypatch.setattr(vv, "ROOT", tmp_path)
     monkeypatch.setattr(vv, "MIN_FILES", {"schemas": 1, "vectors": 1})
+    # R8-PY-02 的总条目下界按真实面写死，合成树（2 条）须显式核减才可比。
+    monkeypatch.setattr(vv, "MIN_VECTOR_ENTRIES", 2)
     assert vv.main() == 0
 
 
@@ -149,6 +151,7 @@ def test_main_accepts_synthetic_good_tree(tmp_path, monkeypatch):
         encoding="utf-8")
     monkeypatch.setattr(vv, "ROOT", tmp_path)
     monkeypatch.setattr(vv, "MIN_FILES", {"schemas": 1, "vectors": 1})
+    monkeypatch.setattr(vv, "MIN_VECTOR_ENTRIES", 3)
     assert vv.main() == 0
 
 

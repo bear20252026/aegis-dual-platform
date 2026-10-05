@@ -47,6 +47,10 @@ def check_active_lock_file(root: Path) -> list[str]:
     text = lock_file.read_text(encoding='utf-8')
     if '--hash=' not in text:
         problems.append('requirements-ci.txt 无 hash（pip-compile --generate-hashes 重新生成）')
+    # R8-PY-11（第八轮审计 2026-10-04）：上一条只是「文本里出现过一次 --hash=」的布尔
+    # 判定——53 条里只剩 1 条带 hash 也算通过，手改某个传递依赖版本可以长期绿灯。
+    # 现升级为结构判定：逐条 `==` 钉版必须带 hash，且 .in 的顶层 pin 必须逐字出现在锁里。
+    problems.extend(check_lock_structure(text, root / 'requirements-ci.in'))
     # 源清单存在性——锁由 .in 编译而来，二者须同批演进
     source = root / 'requirements-ci.in'
     if not source.is_file():
@@ -56,6 +60,47 @@ def check_active_lock_file(root: Path) -> list[str]:
 
 # PY-124（审计 2026-09-25）：C# 关键文件断言抽函数化——单测可直接对
 # 合成目录树断言，不必依赖真实仓库布局
+def _pkg_canon(name: str) -> str:
+    """PEP 503 包名归一——锁与 .in 的大小写/下划线差异不是漂移。"""
+    return re.sub(r'[-_.]+', '-', name).lower()
+
+
+def check_lock_structure(lock_text: str, source_path: Path) -> list[str]:
+    """锁文件结构判定：逐条钉版带 hash + `.in` 顶层 pin 与锁内版本逐字一致。
+
+    存在性/单次出现 '--hash=' 不足以证明「装的就是声明的那套」（R8-PY-11）。
+    """
+    problems: list[str] = []
+    pinned: list[str] = []
+    hashed: set[str] = set()
+    for raw in lock_text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith('#'):
+            continue
+        if line.startswith('--hash='):
+            if pinned:
+                hashed.add(_pkg_canon(pinned[-1]))
+            continue
+        if '==' in line and not line.startswith('-'):
+            name = line.split('==')[0].strip()
+            if name:
+                pinned.append(name)
+                if '--hash=' in raw:
+                    hashed.add(_pkg_canon(name))
+    unhashed = [name for name in pinned if _pkg_canon(name) not in hashed]
+    if unhashed:
+        problems.append('requirements-ci.txt 有钉版条目缺 hash：' + ', '.join(unhashed[:5]))
+    if not source_path.is_file():
+        problems.append('缺 requirements-ci.in，无法核对锁的来源')
+        return problems
+    for raw in source_path.read_text(encoding='utf-8').splitlines():
+        line = raw.split('#')[0].strip()
+        if not line or '==' not in line:
+            continue
+        if _pkg_canon(line.split('==')[0]) not in _pkg_canon(lock_text):
+            problems.append(f'requirements-ci.in 的 {line} 未逐字出现在锁内（须重编译）')
+    return problems
+
 def check_required_cs_files(csproj: Path) -> list[str]:
     problems: list[str] = []
     if not csproj.is_file():
