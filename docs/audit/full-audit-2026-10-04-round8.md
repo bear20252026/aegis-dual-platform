@@ -136,7 +136,7 @@ YAML 4/195、TOML 4/306。
    （AGP 9.4.1 / Gradle 9.8.0 / Compose 插件 2.4.20 / BOM 2026.09.00）经上游逐个查证
    **均为最新稳定线**，本分区唯一可动的是 androidx.webkit 与 lifecycle 两格。这条
    「没有升级面」的结论按原样登记，避免下一轮重复报「AGP 落后」。
-4. **未采信为缺陷的观察**（写下来防下一轮重复报）：SQL 全参数化无拼接；
+5. **未采信为缺陷的观察**（写下来防下一轮重复报）：SQL 全参数化无拼接；
    `allowFileAccess=false` 不影响 `file:///android_asset` 首页；Android 并发面干净
    （无 GlobalScope/runBlocking，launch 三点均显式 Dispatchers）；StateFlow 原地改
    陷阱现存零例；xunit 空数据源不可达；红线「每个 WebView 经 SecureWebViewFactory」
