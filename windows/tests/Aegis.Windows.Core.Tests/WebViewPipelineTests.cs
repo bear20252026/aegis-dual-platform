@@ -178,3 +178,106 @@ public sealed class WebViewEnvironmentCleanupTests
         Assert.Equal(0, WebViewEnvironment.CleanupOrphanInPrivateDirs(missing));
     }
 }
+
+/// <summary>R8-CS-SEC-02（第八轮 2026-10-05，B4 余量）：导航授权链的失败闭合边界。
+///
+/// 原形态 `e.Cancel = !TryAuthorizeNavigation(...)` 没有异常边界——求值期任何抛出
+/// （桥租约、确认面板/拒绝提示的事件订阅方、URL 解析）都让整句赋值作废，`e.Cancel`
+/// 停在默认 false ⇒ WebView2 照常导航。这与「导航默认拒绝」红线相反，属第八轮
+/// §十一 队列里最值得先复核的那条（本轮逐行回读后确证为 P1 形态的门禁失效）。
+/// handler 本体要 COM 对象，故把判定核抽成 internal 纯函数在此直测。</summary>
+public sealed class NavigationFailClosedBoundaryTests : IDisposable
+{
+    private readonly string _logDir =
+        Path.Combine(Path.GetTempPath(), $"aegis_navfail_{Guid.NewGuid():N}");
+
+    public NavigationFailClosedBoundaryTests()
+    {
+        Directory.CreateDirectory(_logDir);
+        Aegis.Windows.Core.Security.SecurityLog.SecurityLogDirOverride = _logDir;
+    }
+
+    public void Dispose()
+    {
+        Aegis.Windows.Core.Security.SecurityLog.SecurityLogDirOverride = null;
+        try { Directory.Delete(_logDir, true); } catch (IOException) { }
+    }
+
+    [Fact]
+    public void Authorized_predicateResultPassesThrough() =>
+        Assert.True(HostWebView.IsAuthorizedFailClosed(() => true, "顶层导航"));
+
+    [Fact]
+    public void Unauthorized_returnsFalseSoHandlerCancels() =>
+        Assert.False(HostWebView.IsAuthorizedFailClosed(() => false, "顶层导航"));
+
+    /// <summary>本条就是这个修复的全部意义：求值期抛出不得等于「放行」。
+    /// 取真实出现过的四类抛出面（桥租约/COM/会话/dispose 竞态），不用
+    /// AccessViolationException——.NET Core 默认不可捕获，会把测试宿主一起带走。</summary>
+    [Fact]
+    public void AnyExceptionDuringAuthorization_IsTreatedAsUnauthorized()
+    {
+        Assert.False(HostWebView.IsAuthorizedFailClosed(
+            () => throw new InvalidOperationException("原生桥租约已失效"), "顶层导航"));
+        Assert.False(HostWebView.IsAuthorizedFailClosed(
+            () => throw new NullReferenceException(), "子帧"));
+        Assert.False(HostWebView.IsAuthorizedFailClosed(
+            () => throw new ObjectDisposedException("CoreWebView2"), "顶层导航"));
+        Assert.False(HostWebView.IsAuthorizedFailClosed(
+            // COMException(string, int hr) 是公开构造；ExternalException 的
+            // (int, string) 形态不存在（会绑到 (string?, Exception?) 上→CS1503）
+            () => throw new System.Runtime.InteropServices.COMException(
+                "COM 拒绝", unchecked((int)0x80070005)), "子帧"));
+    }
+
+    [Fact]
+    public void AuthorizationException_IsRecordedNotSwallowedSilently()
+    {
+        // 留痕面：抛出必须落安全日志（含位置与异常类型），否则线上无从归因
+        _ = HostWebView.IsAuthorizedFailClosed(
+            () => throw new InvalidOperationException("桥租约失效"), "顶层导航");
+        var written = Directory.GetFiles(_logDir);
+        Assert.NotEmpty(written);
+        var text = string.Concat(written.Select(f => File.ReadAllText(f)));
+        Assert.Contains("顶层导航", text);
+        Assert.Contains("InvalidOperationException", text);
+    }
+
+    [Fact]
+    public void HandlersAssignCancelBeforeEvaluatingThePolicy()
+    {
+        // 文本锚——handler 要 COM 对象跑不了，这里只钉「取消先行」的结构形态；
+        // 行为面由上面四条钉住（文本证明不了数学，这一点本仓已被证过多次）。
+        var root = FindRepoRoot();
+        var top = File.ReadAllText(Path.Combine(
+            root, "windows/src/Aegis.Windows.App/WebView/HostWebView.NavigationGuards.cs"));
+        var frame = File.ReadAllText(Path.Combine(
+            root, "windows/src/Aegis.Windows.App/WebView/HostWebView.cs"));
+
+        // 顶层导航（HostWebView.NavigationGuards.cs）与子帧 lambda（HostWebView.cs）两处
+        // 都必须带取消先行；xunit 的 string-Contains 没有 userMessage 重载
+        foreach (var text in new[] { top, frame })
+        {
+            // Substring 而非 .. 区间——避免 Range 索引在不同 LangVersion 下的差异；
+            // 再剔除注释行：本锚判的是**代码形态**，而修复说明里就写着旧形态原文，
+            // 不剔注释的话这条断言会被自己的注释打红（第八轮实测撞到）。
+            var code = text.Substring(
+                    text.IndexOf("OnNavigationStarting", StringComparison.Ordinal))
+                .Replace("\r\n", "\n")
+                .Split("\n")
+                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal));
+            var handler = string.Join("\n", code);
+            Assert.Contains("e.Cancel = true;", handler);
+            Assert.DoesNotContain("e.Cancel = !TryAuthorizeNavigation", handler);
+        }
+    }
+
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "CLAUDE.md")))
+            dir = dir.Parent;
+        return dir?.FullName ?? throw new DirectoryNotFoundException("未找到仓库根（CLAUDE.md）");
+    }
+}
+
