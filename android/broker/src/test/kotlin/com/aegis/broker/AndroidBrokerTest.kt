@@ -187,8 +187,7 @@ class AndroidBrokerTest {
             ?: error("未找到 .github/workflows/release-android.yml（请在仓库内运行测试）")
         val text = Files.readString(workflow)
         val assemble = text.substring(text.indexOf(":app:assembleRelease"))
-        val block = assemble.substringBefore("
-      - name:")
+        val block = assemble.lines().takeWhile { !it.startsWith("      - name:") }.joinToString(" ")
         assertTrue(
             "assembleRelease 未传 -PrequireNativePolicyCore=true",
             block.contains("-PrequireNativePolicyCore=true"),
