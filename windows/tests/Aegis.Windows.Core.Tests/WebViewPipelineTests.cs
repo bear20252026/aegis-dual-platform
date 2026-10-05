@@ -224,8 +224,10 @@ public sealed class NavigationFailClosedBoundaryTests : IDisposable
         Assert.False(HostWebView.IsAuthorizedFailClosed(
             () => throw new ObjectDisposedException("CoreWebView2"), "顶层导航"));
         Assert.False(HostWebView.IsAuthorizedFailClosed(
-            () => throw new System.Runtime.InteropServices.ExternalException(
-                unchecked((int)0x80070005), "COM 拒绝"), "子帧"));
+            // COMException(string, int hr) 是公开构造；ExternalException 的
+            // (int, string) 形态不存在（会绑到 (string?, Exception?) 上→CS1503）
+            () => throw new System.Runtime.InteropServices.COMException(
+                "COM 拒绝", unchecked((int)0x80070005)), "子帧"));
     }
 
     [Fact]
