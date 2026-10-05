@@ -47,7 +47,7 @@
     "core/rust-policy-core/src/protection_mode.rs": 555,
     "core/rust-policy-core/src/query_strip.rs": 538,
     "core/rust-policy-core/src/session_state.rs": 566,
-    "core/rust-policy-core/src/shield.rs": 351,
+    "core/rust-policy-core/src/shield.rs": 352,
     "core/rust-policy-core/src/space_routing.rs": 701,
     "core/rust-policy-core/src/timer_prec.rs": 577,
     "core/rust-policy-core/src/update_manifest.rs": 406,
