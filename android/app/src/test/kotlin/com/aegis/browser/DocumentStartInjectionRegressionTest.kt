@@ -49,9 +49,7 @@ class DocumentStartInjectionRegressionTest {
         val out = mutableListOf<String>()
         for (line in raw.split("\n")) {
             val trimmed = line.trim()
-            val isComment = trimmed.startsWith("//") ||
-                trimmed.startsWith("/*") ||
-                trimmed.startsWith("*")
+            val isComment = trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")
             if (!isComment) {
                 out += trimmed
             }
