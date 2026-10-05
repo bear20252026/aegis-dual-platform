@@ -63,8 +63,8 @@ class ProguardKeepCoverageTest {
     }
 
     @Test
-    fun everyJnaLibraryInterfaceIsKept\yName() {
-        val names = libraryInterface\inaryNames()
+    fun everyJnaLibraryInterfaceIsKeptByName() {
+        val names = libraryInterfaceBinaryNames()
         val missing = missingKeepRules(proguardText(), names)
         assertTrue(
             "以下 JNA 接口缺少与之匹配的 -keep 规则（规则名与声明位置不符即属此列）：$missing",
@@ -81,13 +81,13 @@ class ProguardKeepCoverageTest {
         for (file in mainSourceFiles()) {
             declared += file.readLines().count { it.trim().contains(": Library") }
         }
-        val derived = libraryInterface\inaryNames().size
+        val derived = libraryInterfaceBinaryNames().size
         assertTrue("声明面 $declared 行与推导面 $derived 个名字不一致——扫描判据漏面", declared == derived)
     }
 
     @Test
     fun gateTopLevelAbiIsDerivedAndKept() {
-        val names = libraryInterface\inaryNames()
+        val names = libraryInterfaceBinaryNames()
         assertTrue("顶层 JNA 接口不在推导面内：$names", names.contains(topLevelAbi))
         assertTrue(
             "推导出的顶层接口在 proguard 里没有对应 -keep：$names",
@@ -99,7 +99,7 @@ class ProguardKeepCoverageTest {
     fun gateFailsWhenAKeepRuleIsMissing() {
         // 能失败：删掉那条真实 keep 规则必须让门禁报出它——否则「加了断言却写不出失败
         // 用例」这个第七轮点名的形态在此复现。
-        val names = libraryInterface\inaryNames()
+        val names = libraryInterfaceBinaryNames()
         assertTrue(missingKeepRules(proguardText(), names).isEmpty())
         val kept = proguardText().lines().filterNot { it.contains("-keep interface $topLevelAbi ") }
         val missing = missingKeepRules(kept.joinToString(" "), names)
@@ -117,7 +117,7 @@ class ProguardKeepCoverageTest {
      * 缩进判据把外层重置为空（第八轮 CI 就是这样把 Bridge 的接口推成顶层名的）。三引号
      * 原始串整段跳过。
      */
-    private fun libraryInterface\inaryNames(): List<String> {
+    private fun libraryInterfaceBinaryNames(): List<String> {
         val out = mutableListOf<String>()
         for (file in mainSourceFiles()) {
             out += parseLibraryNames(file.readText())
