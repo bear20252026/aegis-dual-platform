@@ -69,6 +69,12 @@ jobs:
         # pytest）安装期完整性依赖 TLS+PyPI；该锁不随制品发布、仅在 CI
         # 短暂运行。PY-220 同批对齐其与 requirements-ci.in 的版本口径；
         # 若日后归档纪律放宽再补 hash 锁（登记在案，非静默接受）。
+        # R8-CI-02（第八轮审计 2026-10-04）：windows-latest 上未写 shell 的步骤默认就是 pwsh，
+        # 而 pwsh 的步骤退出码只取**末条**原生命令——hash 锁安装失败会被随后的 dev 锁安装覆盖，
+        # 环境已坏仍判绿，下方 ruff/bandit/mypy 全跑在错工具链上。改 bash（Actions 包装带
+        # set -eo pipefail，任一条失败即整步骤红）——R7-TOOL-01 既定的两种修法之一，与同 job
+        # 的 mypy 步骤口径一致。
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           # PY-010：运行依赖走 hash 锁文件（此前装无 hash 的 requirements.txt，
@@ -126,6 +132,9 @@ jobs:
         # SP-151（2026-09-26 审计）：随 job 迁移改为低频归档守护——原 ci.yml
         # 注释"门禁全量常跑（ADR-007）"已随迁移失效，现语义为守护归档栈
         # 自检基线不腐化
+        # R8-CI-02：同上一条——八条 selftest 此前跑在隐式 pwsh 下，前七条任一失败都会被
+        # 第八条 selftest_native_core.py 的成功盖掉，归档栈守护对 7/8 的自检对象零判定能力。
+        shell: bash
         run: |
           python selftest_session_store.py
           python selftest_api_bridge.py
