@@ -32,3 +32,20 @@ Windows 不接入未审计的第三方 UniFFI C# 生成器。Windows 后续仅�
 [2] [UniFFI README：官方与第三方语言绑定范围](https://github.com/mozilla/uniffi-rs/blob/main/README.md)
 
 [3] [UniFFI 用户指南：Kotlin Gradle 集成与 JNA 依赖](https://mozilla.github.io/uniffi-rs/latest/kotlin/gradle.html)
+
+---
+
+## 现状注记（第八轮 B8，2026-10-05）——渐进发布走到哪一步
+
+- **Windows C ABI 分支：已落地**。最小、版本化、panic-guarded 的 C ABI + P/Invoke
+  包装（`NativeInterop.cs` / `NativePolicyCoreBridge.cs`）已在发布物内，
+  导出面由 RS-310 冻结集对账；「不得静默回退到另一套策略实现」由安装器写入的
+  按用户注册表标记 `HKCU\Software\Aegis Browser\RequireNativePolicyCore` 驱动
+  （第六轮改掉「只在 CI shell 里赋值、安装包读不到的环境变量」）。
+- **开关默认值与本 ADR 已不同**：本 ADR 写「开关默认关闭」；发布链现为
+  **要求置位**——Windows 安装器写标记，Android 发布链传
+  `-PrequireNativePolicyCore=true` 与 `-PrequireNavigationConfirmation=true`
+  （后者自第八轮 B3 起被 `NativeGateWiringAnchorTest` 静态钉住，删参数即红）。
+- **最后一步未走**：核心的 `PolicyEngine` / `CapabilityRegistry` 至今不参与
+  `evaluate`（H-7 未撤）——即「绑定发布」完成、「裁决收敛」只覆盖导航面。
+  与本 ADR 关联的 ADR-008 因此加了范围限定语。

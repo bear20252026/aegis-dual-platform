@@ -20,7 +20,7 @@
 | 7 | 重复确认 | 高风险动作重复确认 | 确认流经 C# Broker（BrowserPolicyBroker）→ Rust 策略核心裁决，确认面板 pending 态唯一持有（NavigationConfirmationGate）——重复/重放请求按代际与 pending 唯一性拒绝（WB-122，2026-09-26 审计——ApprovalManager 已删除） |
 | 8 | 标签代际竞态 | 快速切标签后旧导航尝试执行 | AuthorizedAction 代际变化失效 |
 | 9 | renderer crash | WebView 渲染进程崩溃 | 错误页可见（WebErrorStatus）——恢复不自动放行 |
-| 10 | Runtime 更新重启 | NewBrowserVersionAvailable | 保存状态/通知/受控重启（runtime-update-restart） |
+| 10 | Runtime 更新重启 | NewBrowserVersionAvailable | **本步暂无执行对象**——正典树未订阅该事件（无 `RuntimeUpdater.cs`，`windows/` 全树零命中），「保存状态/通知/受控重启」为 ADR-001 后果段的设计要求；缺口已登记在 parity 清单，实现前此步记 N/A 而非通过 |
 
 ## 二、Android 真机验证（蓝图阶段 D 退出条件）
 

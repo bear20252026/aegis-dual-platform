@@ -97,10 +97,12 @@
   Windows C# 安装包 + Android APK，PyInstaller 包已移除）。
 - 发布流程：提交 → 打 `v*` 标签 → **release.yml 自动触发**（6 job fail-closed：
   构建/签名/逐工件闭合验证——不再是早期"提交 → 打标签 → gh release create"手工流）。
-- GitHub 仓库：`bear20252026/aegis-dual-platform`（私有）；CI 为 **13 workflow
+- GitHub 仓库：`bear20252026/aegis-dual-platform`（私有）；CI 为 **15 workflow
   分层**（WB-167，2026-10-01 审计更正：原「CI 已在 ci.yml 配置」为单文件
-  时代口径——ci.yml 现仅剩 ui-regression，常跑门禁 6 + 组合冒烟 1 +
-  周定时 2 + 发布链 4，详见 architecture-overview.md 1.5 节）。
+  时代口径——ci.yml 现仅剩 ui-regression；第八轮 B8 把 13 更正为 15：WB-160 对齐
+  之后又新增 gradle-dependency-graph / gradle-dependency-insight 两个，计数再次
+  静默漂移。该数现由 `scripts/check_doc_claims.py` 与实树逐处对账，不再靠人记得
+  回头改；分解见 architecture-overview.md 1.5 节）。
 
 ## 6. 待办与方向（源自壳浏览器研读，2026-08-15）
 

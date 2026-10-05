@@ -48,3 +48,23 @@
 
 - 审计记录：会话工作日志 2026-09-02（三路并行审计 + 人工复核）。
 - 实锤文件行号见该日志；本文不重复引用易漂移的行号。
+
+---
+
+## 现状注记（第八轮 B8，2026-10-05）——「唯一裁决源」的范围限定
+
+本 ADR 立的是 **URL 校验单源**（长度/控制字符/userinfo/scheme/端口），这一面确实
+收敛了。但 README/CLAUDE/SECURITY/architecture-overview/supported-features 长期把它
+转述为无限定语的「唯一裁决者」，与实树不符：
+
+- FFI 通路实际承载：URL 归一 + 黑名单 + 高危判定 + nonce 兑换；
+- `PolicyEngine::default()` 与 `CapabilityRegistry::new()` 在 `ffi/broker.rs` 里被
+  构造却从不参与 `evaluate`（核心自述 H-7 未撤）——**能力评估裁决仍在各端托管
+  Broker**，没有单一裁决源；
+- 跨端对账也不齐：`bridge_guard` 单源只覆盖 Rust（`include_str!`）与 Android
+  （手抄 + 逐行比对），C# 的文档创建前注入面不在范围内；向量覆盖 C# 只链 2 份、
+  Kotlin 只消费 `url-origin-*`。
+
+因此上述五处文档的措辞统一改为「**导航**裁决单源」并注明 H-7。本 ADR 的正文与
+状态不改写（决策仍成立），只是转述层不得再省略限定语。证据行号见
+`docs/audit/full-audit-2026-10-04-round8.md` §5.2。

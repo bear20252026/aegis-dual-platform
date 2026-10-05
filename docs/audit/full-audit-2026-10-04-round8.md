@@ -80,6 +80,7 @@ YAML 4/195、TOML 4/306。
 | R8-CS-SEC-08 | `HostWebView.cs:493,506-512,527-533`；`BrowserPolicyBroker.cs:343-346,364-366` | 6 条 `return false` 静默出口（consume 失败、代际推进失败、ProbeGate 失败、桥为 null）既不发 `NavigationDenied` 也不写审计码——这些恰是授权链内部不一致（nonce 重放/代际漂移/会话销毁）的唯一信号，全部表现为「导航无反应」；另 `:366` 有 `return false;            lock (…)` 行合并排版 | 保留 P2（待回读补全其余出口清单后实施） |
 | R8-CS-CORE-1 | `windows/tests/**` ↔ `BrowserPolicyBroker.cs:135,241,286,303,317` | 5 个生产拒绝码在测试全树零字串锚点（`session_context`/`download_session_context`/`native_confirmation_core_required`/`confirmation_rejected`/`native_policy_core_disposed`），现有用例只断 `is Type<Decision.Deny>` ⇒ 改码不红 | 保留 P2 |
 | R8-RS-13 | `core/.../src/ffi/mod.rs:219-228`、`src/util.rs:160-172` | FFI 尺寸防线覆盖 URL/scope/domain 却**漏 `session_seed`**：`hex_seed_to_bytes` 先 `hex_decode`（对任意长度 `with_capacity(len/2)` + 全量扫描）再判长度 ⇒ 宿主传 1 GiB 十六进制串即拿到一次 512 MiB 分配；uniffi 面 `update_host_denylist(Vec<String>)` 无条目数/单条长度上限 | 保留 P2（C ABI 面有 64KiB `read_utf8` 兜住，uniffi 面兜不住） |
+| R8-DOC-15/16/17 | `agent/broker.py:29-33`；`docs/runbooks/device-validation.md:23`；`android/README.md:9` | **B8 实施中新证的同族三条**：文档「自述现状」与「验证步骤」指向正典树里不存在之物——①broker.py 自称 local-ipc/*.md 记有现状注记（实测零注记，`identity.md:19` 还指向第六轮已连类删除的 `E2EBroker`），而阶段 G 的 OS ACL/进程身份/IPC 传输/撤销四件套确实无人实现；②device-validation 第 10 步要验 `NewBrowserVersionAvailable` 的保存状态/受控重启，正典树无该事件订阅亦无 `RuntimeUpdater.cs` ⇒ 步骤永远无法真实执行；③android/README 把零引用的 `clearPrivateData` 列为「发布前强制控制（不以路线图代替实现）」——该行违反它自己宣称的纪律 | 保留（15=P2，16/17=P3）；三条均已随 B8 就地更正 |
 
 ## 五、既往声明核验结论（本轮第二产出）
 
@@ -227,7 +228,11 @@ mypy `2.3.1 → 2.4.0` 须 pip-compile 整树重算 hash；Test.Sdk `17.14.1 →
 | B5 | R8-CI-03 残余 + R8-PY-02/08/11 + R8-SH-10：`validate_vector_schemas` invalid 侧缺 manifest 改**有界登记**、按条目下界、`check_markdown_links` 包含性 + 空面 exit 2、`ci.yml` paths 补齐输入闭包、requirements 锁结构门禁（逐条 `==`+hash、`.in↔.txt` 对账） | `contracts/codegen/validate_vector_schemas.py`、`contracts/vectors/update-manifest-invalid.json`、`scripts/{verify_vectors,check_markdown_links}.py`、`validate_release.py`、`.github/workflows/ci.yml`、`tests/python/**` | 每项须先注入失效证据再声称修好 | 已落地（PR #92） |
 | B6 | 无破坏升级：androidx.webkit 1.17.1、lifecycle 2.11.0、xunit.runner.visualstudio 3.1.5、sbom-action v0.24.3、ruff 0.16.10、`.gitattributes` + `android/.editorconfig` 行尾口径、发布链 `windows-2025` | `android/gradle/libs.versions.toml`、`windows/tests/*.csproj`、4 个 workflow、仓库根新文件 | CI 全量（gradle/NuGet 侧无需重锁即可验） | 未动 |
 | B7 | 需重锁升级：WebView2 SDK + Microsoft.Data.Sqlite + `bundle_e_sqlite3` 补钉（按第八节 B 的五步 SOP）、`AnalysisLevel=Recommended` + `Deterministic`、mypy 2.4.0 整链重锁、rust-toolchain pin + `cargo deny`（或按实改注释）、Dependabot 9 条告警的显式 dismiss/处置 | `windows/*.csproj`、`windows/**/packages.lock.json`、`Directory.Build.props`、`requirements-ci.*`、`.github/workflows/*` | CI；锁文件改写后须回读确认 RID 块仍在 | 未动 |
-| B8 | 文档真相（第七轮 B7 未完 + 本轮 R8-DOC 全部）：13→15 workflow 七处、单一裁决源限定语、三端守卫→两端、KillSwitch/无痕端别、parity 补 `NewBrowserVersionAvailable`、legacy 冻结口径合一、`identity.md` E2EBroker 死指针、README 确认流域口径、ADR-003/006 取代注记、4 份历史稿时代横幅 | `README.md`、`CLAUDE.md`、`SECURITY.md`、`CONTRIBUTING.md`、`docs/**`、`agent/local-ipc/**` | `check_markdown_links` + 新增 workflow 计数对账锚 | 未动 |
+| B8 | 文档真相（第七轮 B7 未完 + 本轮 R8-DOC 全部）：13→15 workflow 七处、单一裁决源限定语、三端守卫→两端、KillSwitch/无痕端别、parity 补 `NewBrowserVersionAvailable`、legacy 冻结口径合一、`identity.md` E2EBroker 死指针、README 确认流域口径、ADR-003/006 取代注记、4 份历史稿时代横幅 | `README.md`、`CLAUDE.md`、`SECURITY.md`、`docs/**`、`agent/local-ipc/**`、新增
+`scripts/check_doc_claims.py` + `tests/python/doc_claims_test.py` + `contracts.yml` |
+`check_markdown_links` + **新增 workflow 计数对账门禁**（可失败：注入 13/空面/正则失配
+三类反证用例） | 已落地（PR #93）——⚠ `CONTRIBUTING.md` 未改：其唯一相关条目
+（:144 提到「Rust 单一裁决」）是**历史整改记录**而非现行陈述，改它等于篡改历史 |
 | B9 | 一致性升级（结构级，须先补向量再改码）：拒绝码词表入 `contracts/schemas` + `contracts/vectors/deny-codes.json` 三端生成常量；`reserved_address` 与元数据段进核心；Rust `is_local_or_private_host` 改名 `is_high_risk_host` 并补 TEST-NET-2/3；三端脚本与核心生成物逐字节对账门禁 | `contracts/**`、`core/.../security_policy.rs`、`windows/**`、`android/**`、`contracts/codegen/**` | 向量三端 + cargo + dotnet + gradle | 未动 |
 
 **串行约束**：B4 与 B6/B7 同改 `windows/**` csproj/`HostWebView.cs`；B8 与 B9 同改
@@ -276,4 +281,23 @@ R8-CS-CORE-2。计数列取子代理自报口径，可能包含上述已确证�
 | B4 静默拒绝改可见 | **部分落地**（本批） | `HostWebView.TryAuthorizeNavigation` 三条静默出口（RequireConfirmation 且确认门未启用、裁决非 Allow 的非预期形态、授权兑换失败）全部上抛 `NavigationDenied` 用户可见文案；`BrowserPolicyBroker.TryConsumeNavigation` 六条静默 `return false` 补审计码（`native_policy_core_unavailable` / `authorization_missing` / `native_policy_core_disposed` / `session_context` / `native_consume_rejected` / `nonce_replay`），并修掉 `return false;            lock (…)` 的行合并排版。**只改可见性，不改放行/阻断方向**（方向属第七节待裁决 1）。R8-CS-CORE-1 的「5 个拒绝码零行为断言」与 R8-CS-CORE-2 的原生前置分支断言留下一批，与本批的审计码一并钉成用例 |
 | B5 门禁掏空面 | **已落地（PR #92）** | 四项：①`verify_vectors` 加**条目级**下界 `MIN_VECTOR_ENTRIES=166`（`MIN_FILES` 只数文件，清空任一 vectors 数组即零判定）+ 每文件 `vectors` 非空；②`check_markdown_links` 补仓库根包含性判定（`](/../../Windows/win.ini)` 不再由构建机文件系统裁决）+ 扫描面为空 exit 2；③`validate_release` 锁结构门禁：逐条 `==` 钉版必带 `--hash=`、`.in` 与 `.txt` 双向对账（原判定只断「文本里出现过一次 --hash=」，删掉其余条目仍绿）；④`ci.yml` `push.paths` 4→8 条，补齐该 job 断言语料的全部输入（含它亲自守护的 `prepare-geogebra/action.yml`）。**落地过程证出两条**：(a) 「invalid 侧缺 manifest 一律记 failure」在真实树上误杀 4 条场景型向量——`rollback`/`threshold_insufficient`/`duplicate_key`/`expired` 本就不给 schema 出实例，语义判定在 `core/rust-policy-core/tests/vectors.rs:155`（CI 当场打红，是本地「零检验」纪律想要的效果）；改为有界登记集 `SCENARIO_ONLY_CASES`，并用「与真实面逐字相等」的用例钉住，登记集因此不会变成长期豁免洞。(b) 同一路径查出 `singular_signature_field`：自称 `deny_schema` 却无 `manifest` 实例 ⇒ Python 侧跳过、Rust 侧 match 无该臂，**两侧零判定**（台账原计的「9 条 deny_schema 断言」实为 8 条）。已补真实待拒实例（单数 `signature` 且缺必填 `signatures`，`additionalProperties:false` 双重拒绝），并把「场景型条目自称 deny_schema」也钉成可失败分支。新增 10 条掏空反证用例（`tests/python/gate_hollowness_test.py` + `vector_schema_input_guard_test.py` 五节），全部为「先证明掏空它会红，再声称修好」 |
 | B7 / B9 | 未动 | 见第九节；B7 需先定「重锁在哪做」（第七节 4） |
-| B8 文档真相 | 进行中 | 见第九节 B8 行 |
+| B8 文档真相 | **已落地（PR #93）** | ①**新门禁 `scripts/check_doc_claims.py`**（挂
+`contract-source-of-truth`）：文档里的 workflow 数是陈述，实树变化后没人回头改——同一
+件事三轮复发（WB-214 对齐 13 → R6 记「闭环即回归」→ 本轮实测 8 处与实树不符，实树 15）。
+判据三条：实树数由目录**现算**；「N（个/条）workflow」逐条比对；标题链含 `YYYY-MM-DD`
+的段落按当日快照豁免。**豁免判据只认标题链，不认行内日期**——实测那样会放过
+`architecture-overview.md:85`（「**13 workflow 分层**（WB-160，2026-10-01 审计对齐实树）」）
+与 `b4-enable-notes.md:2` 两条用「现发布链已演进为…」措辞的现行陈述，而它们是本轮要修
+的那一类。空面/提取到 0 条非历史性声明 ⇒ exit 2。②8 处计数更正为 15，并把 README 的
+7+2+2+4 分解补上此前无人归类的 `gradle-dependency-graph` / `gradle-dependency-insight`。
+③§5.2 的失实声明逐条就地更正（唯一裁决源→**导航**裁决单源 + H-7 限定语，六处文档 +
+ADR-008 注记；三端守卫→两端并点名 C# `WebView2Hardening.cs:70` 缺口；订阅制刷新→启动
+一次性；KillSwitch/无痕补端别与覆盖面；README「两端均未生效」的确认流域按 B3/B4 落地后
+现实改写为「Android 生效、Windows 可见拒绝」）。④三处「文档指向不存在之物」：
+`identity.md` 的 E2EBroker 死指针（第六轮连类删除）+ 三个 `agent/local-ipc/*.md` 统一
+补「交付面零实现」现状注记（`agent/broker.py:29-33` 一直自称这三个文件记有注记，实测
+并不存在）；parity 清单补 `NewBrowserVersionAvailable` 未勾验行并据此更正 README
+「100% 勾验」；`device-validation` 第 10 步标注「暂无执行对象，记 N/A 而非通过」。
+⑤ADR-003/006 加现状注记，区分「实现细节过期」与「原则仍生效」。
+**未做**：第十一节队列里 12 条 R8-DOC-03..14 未经逐条回读，按 skill 口径不入批次、
+不顺手改；`CONTRIBUTING.md` 属历史记录不改 |
