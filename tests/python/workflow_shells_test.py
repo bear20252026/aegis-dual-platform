@@ -77,7 +77,7 @@ def test_call_operator_native_is_in_scope(tmp_path):
     """R8-CI-03 第 3 项：`& \"C:\\...\\signtool.exe\"` 首 token 是 `&`，命令表须认得。"""
     _write_workflow(tmp_path, "callop.yml", {"jobs": {"b": {"steps": [
         {"name": "n", "shell": "pwsh",
-         "run": "& \"C:\\Program Files\\signtool.exe\" sign a.pfx\nWrite-Host done\n"},
+         "run": "& \"C:\\Program Files\\signtool.exe\" sign a.pfx\niscc installer.iss\n"},
     ]}}})
     assert len(cws.violations(tmp_path)) == 1
 

@@ -257,11 +257,11 @@ def _planted_cases() -> list[tuple[str, dict, int]]:
             1,
         ),
         (
-            "调用运算符 & \"tool.exe\"",
+            "调用运算符 & \"tool.exe\"（后接另一条原生命令）",
             {"jobs": {"b": {"steps": [
                 {"name": "n", "shell": "pwsh",
                  "run": "& \"C:\\Program Files\\signtool.exe\" sign a.pfx\n"
-                        "Write-Host done\n"}]}}},
+                        "iscc installer.iss\n"}]}}},
             1,
         ),
         (
