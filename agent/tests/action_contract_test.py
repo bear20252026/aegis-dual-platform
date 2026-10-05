@@ -75,7 +75,6 @@ def test_widened_schema_copy_moves_the_gate(tmp_path):
     assert PolicyBroker().evaluate(action) == Decision.DENY_SCHEMA
 
 
-@pytest.mark.parametrize("field", sorted(CONTRACT_REQUIRED))
 def _schema_copy(tmp_path, mutate):
     """出厂 schema 的改写副本（判定面来源单源，测试不另抄一份字段表）。"""
     doc = json.loads(json.dumps(SCHEMA))
@@ -135,6 +134,7 @@ def test_judgment_surface_is_a_pinned_bounded_set():
         SCHEMA["properties"])
 
 
+@pytest.mark.parametrize("field", sorted(CONTRACT_REQUIRED))
 def test_omitting_any_required_field_never_allows(field):
     """契约 required 的字段被省略（None）——绝不放行。
 
