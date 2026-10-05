@@ -1,0 +1,32 @@
+ID,priority,type,location,finding,primary_reviewed,batch
+R8-CS-SEC-01,P1,问题/门禁可达,windows/src/Aegis.Windows.App/WebView/HostWebView.cs:498-508,出货态 require_confirmation 被静默丢弃⇒本机/内网导航无提示取消（违背B8裁决）,yes,B4
+R8-DOC-02,P1,问题/声明失实,docs/audit/full-audit-2026-10-04-round7.md:457,B8落地段称『需用户点一次确认』与两端实际行为均不符,yes,B8
+R8-AD-01,P1,问题/一致性,android/webview-adapter/src/main/kotlin/com/aegis/webviewadapter/AegisWebViewClient.kt:446-461,http无条件升https+NSC全局禁明文⇒Android打不开本机/内网,yes,待裁决
+R8-RS-01,P1,问题/欺骗强度,core/rust-policy-core/src/shield.rs:209-220,canvas噪声恒退化：奇数常数×4步进⇒每像素每通道同位，有效熵1bit,yes,B2
+R8-AD-02,P1,问题/R8,android/app/proguard-rules.pro:38,keep规则名含$嵌套但接口为顶层⇒命中0类⇒发布APK可能全导航拒绝（运行态未取证）,yes,B3
+R8-CI-01,P1,问题/制品完整性,"release.yml:9,200 + GET /environments/release",release环境protection_rules为空而文档称受保护环境审批,yes,待裁决
+R8-CI-02,P1,问题/门禁可失败性,".github/workflows/legacy-python-guard.yml:72-82,129-137",隐式pwsh多命令步骤吞退出码：安装失败与7/8自检失败不可见,yes,B1
+R8-DOC-01,P1,问题/声明滞后,README.md:24-26,『两端均未生效』对beta.52成立、对HEAD失实（Android确认门已启用）,yes,B8
+R8-CI-03,P2,问题/门禁自身覆盖,"scripts/check_workflow_shells.py:83,87-92",四类结构盲区(job.shell错键/windows隐式pwsh/&调用符/composite)+空面恒绿,yes,B1
+R8-SH-10,P2,问题/门禁有效性,.github/workflows/ci.yml:17-25,SP-235新加push.paths而断言语料9处不在清单内（R7-SH-02回潮）,yes,B5
+R8-PY-02,P2,问题/fail-closed,contracts/codegen/validate_vector_schemas.py:118-121,invalid侧缺manifest静默continue；MIN_FILES数文件不数条目⇒清空即绿,yes,B5
+R8-PY-08,P2,问题/脚本健壮性,"scripts/check_markdown_links.py:79-85,122-135",链接解析无仓库根包含性判定；扫描0个md也exit0,yes,B5
+R8-RS-02,P2,问题/种子退化,core/rust-policy-core/src/shield.rs:160-181,空站点键⇒与会话无关的常量噪声；worker出口退回本帧host,yes,B2
+R8-RS-13,P2,问题/FFI安全,core/rust-policy-core/src/ffi/mod.rs:219-228,session_seed未做长度前置⇒1GiB十六进制串触发512MiB分配,yes,B7
+R8-AD-09,P2,问题/测试恒绿,android/broker/src/test/kotlin/com/aegis/broker/AndroidBrokerTest.kt:159-170,if(BuildConfig)双分支都记通过，CI不带标志⇒恒走else⇒不可能失败,yes,B3
+R8-CS-SEC-04,P2,问题/性能+一致性,windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:155-162,&0xff回绕(0→254/255→1)+无像素上限⇒可被页面冻结渲染进程,yes,B2
+R8-CS-SEC-08,P2,问题/可观测性,"windows/src/Aegis.Windows.App/WebView/HostWebView.cs:493,506-512",6条静默return false出口无审计无提示（授权链不一致的唯一信号）,yes,B4
+R8-CS-CORE-1,P2,问题/测试空洞,"windows/tests/** ↔ BrowserPolicyBroker.cs:135,241,286,303,317",5个生产拒绝码零字串锚点，改码不红,yes,B4
+R8-CS-CORE-2,P2,问题/测试空洞,windows/tests/Aegis.Windows.Broker.Tests/ReservedAddressBoundaryTests.cs:37-44,全部断言走ManagedBroker，原生前置分支零行为断言,yes,B4
+R8-DEPS-1,P2,提升/依赖落后,windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj:30,WebView2 SDK落后22个月；且注释称升级即得ESM为假（stable未含该属性）,no,B7
+R8-DEPS-2,P2,问题/工具链pin,core/rust-policy-core/Cargo.toml:32 + 9处toolchain,声明『固定toolchain+cargo deny』未兑现：无rust-toolchain.toml、无deny.toml、stable浮动,no,B7
+R8-DEPS-3,P2,问题/依赖锁定,windows/src/Aegis.Windows.App/packages.lock.json:51-57,NU1903修复只做3/4：bundle_e_sqlite3仍解析2.1.11,no,B7
+R8-DEPS-4,P2,问题/被上游阻塞,core/rust-policy-core/Cargo.toml:4-9,uniffi 0.33不存在(最新0.32.2)⇒edition2024暂缓仍成立且无ETA,no,B7
+R8-DEPS-5,P2,问题/可复现性,.github/workflows/release-windows.yml:39,windows-latest现映射windows-2025-vs2026；发布链应pin windows-2025,no,B6
+R8-DEPS-7,P2,提升/能力未用,android/gradle/libs.versions.toml:14,androidx.webkit 1.15→1.17.1（Isolated Worlds/setDownloadFaviconsEnabled）,no,B6
+R8-DEPS-8,P2,问题/依赖锁定,android/settings.gradle.kts:17-28,AD-155禁dependencyLocking的理由只覆盖直接依赖，传递树每次解析取最新,no,待裁决
+R8-CS-SEC-02,P2,问题/fail-open,"windows/src/Aegis.Windows.App/WebView/HostWebView.cs:234,395-409",策略链无异常边界：求值期异常⇒e.Cancel保持false⇒放行,no,B4
+R8-RS-15,P2,提升/一致性根因,core/rust-policy-core/src/lib.rs:43-56,13个C ABI导出无任何JS生成入口⇒三端手抄同一份JS,no,B9
+R8-SH-15,P2,问题/测试弱断言,"tests/ui-regression/start_page.test.mjs:36,143",BUG-001/006回归锁语料语言错配（setTag是Java/setOf是Kotlin）⇒两条恒真,no,B5
+R8-CI-06,P2,问题/供应链,.github/dependabot.yml ↔ dependabot/alerts,triage文档称已dismissing而实测open=9含1条critical,no,B7
+R8-PY-03,P2,问题/红队,agent/action_contract.py:139,判定面只遍历required：从required摘掉origin即pattern门禁整段消失,no,B5
