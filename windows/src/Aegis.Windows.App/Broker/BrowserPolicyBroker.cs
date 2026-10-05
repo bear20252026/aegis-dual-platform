@@ -340,10 +340,19 @@ public sealed class BrowserPolicyBroker : IBroker
     public bool TryConsumeNavigation(AuthorizedAction? action, string sessionId, string tabId,
         ulong currentGeneration, string rawUrl, string scope)
     {
+        // R8-CS-SEC-08（第八轮审计 2026-10-04）：本方法每条 `return false` 都是
+        // 「导航被取消」的唯一信号，此前一律静默——用户只见地址栏回车无反应，
+        // 事后既无审计码也无从归因（nonce 重放、代际漂移、桥被释放全都长得一样）。
         if (!ProbeGate().AllowsPlatformBroker)
+        {
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "native_policy_core_unavailable");
             return false;
+        }
         if (action is null)
+        {
+            RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "authorization_missing");
             return false;
+        }
         // 消费点强制 KillSwitch（evaluate 与 consume 之间触发时撤销已签发授权——
         // 与 KillSwitch "撤销已发出但未执行的授权" 语义对齐）
         if (KillSwitch.IsEngaged)
@@ -363,18 +372,35 @@ public sealed class BrowserPolicyBroker : IBroker
         if (_nativePolicyCoreRequired)
         {
             if (_nativePolicyCoreBridge is null)
-                return false;            lock (_sessionLock)
+            {
+                RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "native_policy_core_disposed");
+                return false;
+            }
+
+            lock (_sessionLock)
             {
                 if (!IsValidInCurrentSession(action, currentGeneration)
                     || action.SessionId != sessionId || action.TabId != tabId)
+                {
+                    RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "session_context");
                     return false;
+                }
                 if (!_nativePolicyCoreBridge.TryConsumeNavigation(action, rawUrl, scope))
+                {
+                    RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "native_consume_rejected");
                     return false;
+                }
                 // 原生 nonce 是裸的（无前缀），须加 sessionId 前缀与托管路径一致，
                 // 否则 DestroySession 的 RemoveWhere("sessionId:") 清不掉 →
                 // _consumedNonces 永不清理，满 MAX 后 TryRecordConsumedNonce 恒
                 // false → 该 broker 全站导航永久锁死（自 DoS，审计发现 F）。
-                return TryRecordConsumedNonce($"{sessionId}:{action.Nonce}");
+                if (!TryRecordConsumedNonce("${sessionId}:${action.Nonce}"))
+                {
+                    // 账本已满或该 nonce 已兑换过——两种情形都必须与「核心拒绝」区分留痕
+                    RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "nonce_replay");
+                    return false;
+                }
+                return true;
             }
         }
         if (!OriginPolicy.TryParseExternal(rawUrl, out var uri))
