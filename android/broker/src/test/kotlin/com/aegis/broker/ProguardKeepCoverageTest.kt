@@ -65,8 +65,13 @@ class ProguardKeepCoverageTest {
             val abi = JNA_INTERFACE.find(line)
             if (abi != null) {
                 val simple = abi.groupValues[1]
-                val nestedIn = if (columnZero) null else owner
-                out += qualifiedName(packageName, nestedIn, simple)
+                val binary =
+                    if (columnZero || owner == null) {
+                        "$packageName.$simple"
+                    } else {
+                        "$packageName.$owner$NESTED_SEPARATOR$simple"
+                    }
+                out += binary
                 continue
             }
             // 非 ABI 行：列 0 的顶层声明更新「当前外部名」——它是嵌套接口二进制名的
@@ -77,14 +82,6 @@ class ProguardKeepCoverageTest {
             }
         }
         return out
-    }
-
-    private fun qualifiedName(packageName: String, owner: String?, simple: String): String {
-        return if (owner == null) {
-            "$packageName.$simple"
-        } else {
-            "$packageName.$owner$NESTED_SEPARATOR$simple"
-        }
     }
 
     private fun derivedFromSources(root: File): List<String> {
