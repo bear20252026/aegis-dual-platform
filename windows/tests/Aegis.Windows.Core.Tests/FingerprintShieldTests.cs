@@ -1,5 +1,6 @@
 namespace Aegis.Windows.Core.Tests;
 
+using System.Linq;
 using Aegis.Windows.WebView;
 using Xunit;
 
@@ -85,12 +86,12 @@ public sealed class FingerprintShieldTests
     // ===== CS-335/336（2026-10-01 审计）：canvas 噪声门禁删除 + per-site 种子 =====
     // ===== CS-379/380（2026-10-02 审计）：逐像素 PRNG + 三出口噪声代理 =====
 
-    /// <summary>截取 canvas 噪声机具段（mulberry32/buildNoisedCopy 到
+    /// <summary>截取 canvas 噪声机具段（aegisNoiseMix/buildNoisedCopy 到
     /// toDataURL 代理注册行——段内含噪声副本构造与首个代理出口）。</summary>
     private string SliceCanvasProxy()
     {
         var script = FingerprintShield.BuildScript(SeedA);
-        var slice = script[script.IndexOf("function mulberry32", StringComparison.Ordinal)..];
+        var slice = script[script.IndexOf("function aegisNoiseMix", StringComparison.Ordinal)..];
         return slice[..slice.IndexOf("HTMLCanvasElement.prototype.toDataURL = canvasProxy;", StringComparison.Ordinal)];
     }
 
@@ -124,18 +125,75 @@ public sealed class FingerprintShieldTests
     // ===== CS-379（2026-10-02 审计）：canvas 噪声逐像素 PRNG =====
 
     [Fact]
-    public void CanvasNoise_PerPixelPrng_AdjacentPixelsDiffer()
+    public void CanvasNoise_SharesSingleFormulaWithTwinEnds_AndIsBounded()
     {
-        // CS-379：mulberry32 逐像素独立流（seed ^ 像素字节偏移）——此前
-        // (seed+i)%2 的扰动对整图退化为同一常量偏移（Rust/Android 孪生已修）；
-        // R/G/B 三通道独立扰动（单通道常量偏移可被通道差分抵消）
+        // R8-CS-SEC-04（第八轮审计 2026-10-04）取代 CS-379 口径：噪声算法三端统一为
+        // murmur3 fmix32 终混 + R/G/B 取 bit0/bit8/bit16；同时补齐像素上限与
+        // 边界不外溢（& 0xff 会把黑变 254/白变 1）。mulberry32 每像素新建闭包删除。
         var noise = SliceCanvasProxy();
 
-        Assert.Contains("function mulberry32", noise);
-        Assert.Contains("mulberry32((seed ^ i) | 0)", noise);
+        Assert.Contains("function aegisNoiseMix", noise);
+        Assert.Contains("function aegisNudge", noise);
+        Assert.Contains("AEGIS_MAX_NOISE_PIXELS", noise);
+        Assert.Contains("Math.imul(m ^ (m >>> 16), 0x85ebca6b)", noise);
+        Assert.Contains("Math.imul(m ^ (m >>> 13), 0xc2b2ae35)", noise);
+        Assert.DoesNotContain("mulberry32", noise);
+        Assert.DoesNotContain("& 0xff", noise);            // 回绕形态必须消失
         Assert.DoesNotContain("(seed + i) % 2", noise);
-        Assert.Contains("imageData.data[i + 1]", noise);   // G 通道独立扰动
-        Assert.Contains("imageData.data[i + 2]", noise);   // B 通道独立扰动
+        Assert.Contains("aegisNudge(imageData.data[i + 1]", noise);   // G 通道独立位段
+        Assert.Contains("aegisNudge(imageData.data[i + 2]", noise);   // B 通道独立位段
+    }
+
+    [Fact]
+    public void CanvasNoise_FormulaReplicaIsNonDegenerate()
+    {
+        // 性质断言（与 Rust canvas_noise_formula_is_actually_non_degenerate、
+        // Kotlin stage3CanvasNoiseFormulaReplicaIsNonDegenerate 三端同口径）：
+        // 字符串锚只能证明「文本长这样」，而第七轮的 RS-249 恰恰是文本看着对、
+        // 数学上恒退化。这里在 C# 侧复刻同一公式（murmur3 fmix32）并断言扰动宽度。
+        static uint Fmix(uint seed, uint px)
+        {
+            unchecked
+            {
+                uint m = seed ^ px;
+                m = (m ^ (m >> 16)) * 0x85ebca6bu;
+                m = (m ^ (m >> 13)) * 0xc2b2ae35u;
+                return m ^ (m >> 16);
+            }
+        }
+
+        // 旧形态（奇数常数 x 4 的倍数步进，取最低位）必为全等序列——回归证据
+        const uint anchorSeed = 0x1234_5678;
+        var oldBits = Enumerable.Range(0, 64)
+            .Select(px => unchecked((anchorSeed ^ ((uint)(px * 4) * 0x9E37_79B1u)) & 1))
+            .ToList();
+        Assert.True(
+            oldBits.All(b => b == oldBits[0]),
+            "旧公式在 4 步进下必须恒为同一位（1 bit 熵的可复现证明）");
+
+        var triples = Enumerable.Range(0, 64)
+            .Select(px =>
+            {
+                uint m = Fmix(anchorSeed, (uint)px);
+                return ((m >> 0) & 1, (m >> 8) & 1, (m >> 16) & 1);
+            })
+            .ToList();
+        Assert.True(
+            triples.Distinct().Count() >= 4,
+            $"噪声位组合过少（{triples.Distinct().Count()}）——扰动宽度不足，跨站仍可能归一");
+        Assert.True(
+            triples.Count(x => x.Item1 == x.Item2 && x.Item2 == x.Item3) < 40,
+            "三通道恒等的像素过多（恒等＝单通道扰动，可被通道差分抵消）");
+
+        // 不同种子必须给出不同序列（per-site 隔离的有效性）
+        var a = Enumerable.Range(0, 32).Select(px => unchecked(Fmix(0xAAAA_AAAAu, (uint)px) & 1)).ToList();
+        var b = Enumerable.Range(0, 32).Select(px => unchecked(Fmix(0x5555_5555u, (uint)px) & 1)).ToList();
+        Assert.NotEqual(a, b);
+
+        // 站点键为空时噪声仍须随会话种子变化（R8-RS-02 的退化出口）
+        Assert.NotEqual(
+            Enumerable.Range(0, 32).Select(px => unchecked(Fmix(0u, (uint)px) & 1)).ToList(),
+            Enumerable.Range(0, 32).Select(px => unchecked(Fmix(0xFFFF_FFFFu, (uint)px) & 1)).ToList());
     }
 
     // ===== CS-380（2026-10-02 审计）：toBlob / convertToBlob 出口噪声 =====

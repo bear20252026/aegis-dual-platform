@@ -360,19 +360,26 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
       if (current === 255) return 254;
       return noiseBit ? current + 1 : current - 1;
     }
-    // AD-253（2026-10-01 审计）：逐像素确定性 PRNG——原 `(seed+i)%2` 在
-    // i+=4 步进下退化为每通道全图常量偏移（共 8 种组合，减法即可还原
-    // 原图）。现以像素索引乘黄金比例常数（0x9E3779B1）与 seed 异或后
-    // 取最低位；三通道用不同混合常数（0x85EBCA6B / 0x27D4EB2F，
-    // murmur3 finalizer 常数）——同 seed 相邻像素噪声不一致，且无
-    // 通道间常量偏置。口径与 Rust 侧 RS-249 等价（不要求字节级一致）。
-    // alpha 不动——不破坏合成透明度。三通道（toDataURL/toBlob/
-    // convertToBlob）共用同一噪声形态（AD-298）。
+    // R8-RS-01/R8-CS-SEC-04（第八轮审计 2026-10-04）取代 AD-253 口径：三端统一为
+    // murmur3 fmix32 终混 + R/G/B 取 bit0/bit8/bit16 三个互不相交位段。
+    // AD-253 那版仍偏窄——`(seed ^ Math.imul(px, K)) & 1` 里三枚常数全为奇数，
+    // 乘积最低位＝px 最低位，所以噪声位只由像素序号奇偶决定（2 个相位），且三通道
+    // 恒等（正是「通道差分即抵消」的形态）。fmix32 把输入每一位都搅进输出，
+    // bit0 不再由奇偶决定，通道间取不同位段因而互相独立。Rust shield.rs 与
+    // Windows FingerprintShield.cs 用同一公式——三端各持一种算法本身就是指纹差异面。
+    // alpha 不动——不破坏合成透明度。三出口共用（AD-298）。
+    function aegisNoiseMix(seed, px) {
+      var m = (seed ^ px) >>> 0;
+      m = Math.imul(m ^ (m >>> 16), 0x85ebca6b) >>> 0;
+      m = Math.imul(m ^ (m >>> 13), 0xc2b2ae35) >>> 0;
+      return (m ^ (m >>> 16)) >>> 0;
+    }
     function applyNoise(imageData, seed) {
       for (let px = 0, i = 0; i < imageData.data.length; px++, i += 4) {
-        imageData.data[i] = aegisNudge(imageData.data[i], ((seed ^ Math.imul(px, 0x9E3779B1)) >>> 0) & 1);
-        imageData.data[i + 1] = aegisNudge(imageData.data[i + 1], ((seed ^ Math.imul(px, 0x85EBCA6B)) >>> 0) & 1);
-        imageData.data[i + 2] = aegisNudge(imageData.data[i + 2], ((seed ^ Math.imul(px, 0x27D4EB2F)) >>> 0) & 1);
+        var m = aegisNoiseMix(seed, px);
+        imageData.data[i] = aegisNudge(imageData.data[i], (m & 1) !== 0);
+        imageData.data[i + 1] = aegisNudge(imageData.data[i + 1], ((m >>> 8) & 1) !== 0);
+        imageData.data[i + 2] = aegisNudge(imageData.data[i + 2], ((m >>> 16) & 1) !== 0);
       }
     }
     // 审计第六轮（2026-10-03）：裸标识符取外层 Stage 2 闭包常量（种子

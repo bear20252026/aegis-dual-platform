@@ -118,13 +118,44 @@ class WebViewHardeningScriptTest {
     // ------------------------------------------------------------- Stage 3
 
     @Test
-    fun stage3CanvasNoiseUsesPerPixelPrng() {
-        // AD-253：逐像素确定性 PRNG——像素索引乘黄金比例常数与 seed 异或取 LSB；
-        // 退化形态 `(seed + i) % 2`（i+=4 步进下每通道全图常量偏移）必须不存在
-        assertTrue("Stage 3 缺少逐像素 imul 混合", script.contains("Math.imul(px, 0x9E3779B1)"))
-        assertTrue("Stage 3 缺少三通道混合常数（G 通道）", script.contains("Math.imul(px, 0x85EBCA6B)"))
-        assertTrue("Stage 3 缺少三通道混合常数（B 通道）", script.contains("Math.imul(px, 0x27D4EB2F)"))
-        assertFalse("退化常量偏移噪声 `(seed + i)` 仍在（AD-253 回退）", script.contains("(seed + i)"))
+    fun stage3CanvasNoiseUsesSharedFmixFormula() {
+        // R8-RS-01/R8-CS-SEC-04（第八轮）取代 AD-253 口径：三端（Rust shield.rs、
+        // Windows FingerprintShield.cs、本端）统一为 murmur3 fmix32 终混 + R/G/B
+        // 取 bit0/bit8/bit16。AD-253 那版 `Math.imul(px, 奇数常数) & 1` 的噪声位只由
+        // 像素序号奇偶决定（2 个相位）且三通道恒等——扰动宽度不足。
+        assertTrue("Stage 3 缺少 fmix32 混合函数", script.contains("function aegisNoiseMix"))
+        assertTrue("Stage 3 缺少 fmix32 第一常数", script.contains("Math.imul(m ^ (m >>> 16), 0x85ebca6b)"))
+        assertTrue("Stage 3 缺少 fmix32 第二常数", script.contains("Math.imul(m ^ (m >>> 13), 0xc2b2ae35)"))
+        assertTrue("Stage 3 缺少 G 通道独立位段", script.contains("((m >>> 8) & 1) !== 0"))
+        assertTrue("Stage 3 缺少 B 通道独立位段", script.contains("((m >>> 16) & 1) !== 0"))
+        assertFalse("奇数常数 x 像素序号的窄扰动形态仍在", script.contains("Math.imul(px, 0x9E3779B1)"))
+        assertFalse("退化常量偏移噪声 (seed + i) 仍在（AD-253 回退）", script.contains("(seed + i)"))
+    }
+
+    @Test
+    fun stage3CanvasNoiseFormulaReplicaIsNonDegenerate() {
+        // 性质断言（与 Rust canvas_noise_formula_is_actually_non_degenerate、
+        // C# CanvasNoise_FormulaReplicaIsNonDegenerate 三端同口径）：字符串锚只能
+        // 证明「文本长这样」，而第七轮的 RS-249 正是文本看着对、数学上恒退化。
+        fun fmix(seed: Int, px: Int): Int {
+            var m = seed xor px
+            m = (m.xor(m ushr 16)).times(0x85ebca6bL.toInt())
+            m = (m.xor(m ushr 13)).times(0xc2b2ae35L.toInt())
+            return m.xor(m ushr 16)
+        }
+        val seed = 0x12345678
+        // 旧形态（奇数常数 x px 取 LSB）在 4 步进下只有 2 个相位
+        // AD-253 那版乘的是**像素序号**（非 4 步进字节偏移）⇒ 相位只有 2 个
+        val phases = (0 until 64).map { (seed xor it.times(0x9E37_79B1L.toInt())) and 1 }.toSet()
+        assertEquals("旧公式只有 2 个相位——扰动宽度不足的可复现证明", 2, phases.size)
+
+        val triples = (0 until 64).map { px ->
+            val m = fmix(seed, px)
+            Triple(m and 1, (m ushr 8) and 1, (m ushr 16) and 1)
+        }
+        assertTrue("噪声位组合过少：${triples.toSet().size}", triples.toSet().size >= 4)
+        val identical = triples.count { it.first == it.second && it.second == it.third }
+        assertTrue("三通道恒等的像素过多：$identical", identical < 40)
     }
 
     @Test
