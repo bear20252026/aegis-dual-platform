@@ -119,6 +119,11 @@ def main() -> int:
     for i, vector in enumerate(invalid_vectors):
         manifest = vector.get("manifest")
         if not isinstance(manifest, dict):
+            # R8-PY-02（第八轮审计 2026-10-04）：此前这里静默 continue——把
+            # invalid 向量的 manifest 键改名或删掉，该条即零判定；而同文件
+            # valid 侧对同一形态记 failure，一个文件两套口径。现统一 fail-closed。
+            failures.append(
+                f"invalid 向量 #{i}（{vector.get('case', '?')}）缺 manifest 对象")
             continue
         # R7-SH-07：语义级豁免的**取值**必须有界。此前任何非 "deny_schema" 的
         # expected 都降级为 info——把值改成 "whatever" 即可把一条本该被 schema

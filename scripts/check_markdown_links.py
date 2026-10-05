@@ -85,6 +85,17 @@ def resolve_target(md_path: Path, target: str) -> Path:
     return (md_path.parent / target).resolve()
 
 
+# R8-PY-08：解析后的目标必须仍在仓库根内——否则门禁变成对运行环境
+# 文件系统的一次探测（`](/../../Windows/win.ini)` 只要构建机恰好有该路径就判「可达」；
+# 同仓 verify_checksum_json.py 早有 is_relative_to 口径，此处漏接）。
+def target_outside_repo(md_path: Path, target: str) -> bool:
+    try:
+        resolve_target(md_path, target).relative_to(ROOT)
+    except ValueError:
+        return True
+    return False
+
+
 def check_file(md_path: Path) -> list[str]:
     """单文件死链检查——返回 "文件:行号" 违规描述列表。"""
     rel = md_path.relative_to(ROOT).as_posix()
@@ -109,6 +120,10 @@ def check_file(md_path: Path) -> list[str]:
             target = extract_target(raw)
             if is_skippable(target):
                 continue
+            if target_outside_repo(md_path, target):
+                # R8-PY-08：指向仓外的目标一律记违规，不再交给文件系统裁决
+                dead.append(f"{rel}:{lineno} 链接目标解析到仓库根之外：{target}")
+                continue
             resolved = resolve_target(md_path, target)
             if not resolved.exists():
                 dead.append(f"{rel}:{lineno}: 死链 → ({raw.strip()})")
@@ -126,6 +141,12 @@ def main(argv: list[str] | None = None) -> int:
             continue
         checked += 1
         dead.extend(check_file(md_path))
+    if checked == 0:
+        # R8-PY-08（同 R7-TOOL-04 家族）：扫描面为空 = 没有任何文件被判定，
+        # 此前打印「扫描 0 个 .md」仍 exit 0——git 索引异常或在错误目录执行会静默通过。
+        print("❌ Markdown 链接门禁扫描面为空（0 个 .md）——不作通过判定", file=sys.stderr)
+        return 2
+
     if dead:
         print(f"❌ Markdown 链接门禁失败（{len(dead)} 处死链）：")
         for item in sorted(dead):

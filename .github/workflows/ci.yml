@@ -19,10 +19,19 @@ on:
     # SP-235（2026-10-02 审计·S-20）：push 补 paths 过滤——触发面按测试输入
     # 圈定（snake.test.js 属 shared/shell/**；PR 触发面保持不过滤）
     paths:
+      # R8-SH-10（第八轮审计 2026-10-04）：清单此前只有 4 项，而本 job 的断言语料
+      # 实际 readFileSync 9 处、其中 4 处在清单之外（含它亲自守护的 prepare-geogebra
+      # action.yml 与它断言过的 csproj/spec/release-android.yml）——「只改了 action.yml」
+      # 这类直推 master 不触发唯一守它的 UI 门禁。现按真实输入闭包补齐（PR 触发面
+      # 本来不过滤，故影响限于直推路径）。
       - 'tests/ui-regression/**'
       - 'tests/KNOWN_DEFECTS.md'
       - 'shared/shell/**'
       - '.github/workflows/ci.yml'
+      - '.github/workflows/release-android.yml'
+      - '.github/actions/prepare-geogebra/action.yml'
+      - 'windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj'
+      - 'legacy/windows-pywebview/aegis_webview.spec'
   pull_request:
     branches: [master]
   workflow_dispatch: {}          # 手动触发（SP-235：此前缺，改动即跑不可控）

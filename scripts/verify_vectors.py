@@ -38,6 +38,11 @@ OVERSIZE_ANCHOR = 'oversize-url-limit-test'
 # 下界不是「越多越好」，它只保证减面必须是**有意识**的动作。
 MIN_FILES = {'schemas': 7, 'vectors': 15}
 
+# R8-PY-02（第八轮审计 2026-10-04）：MIN_FILES 只数**文件**，把任一 vectors 数组
+# 清空（文件在场）即可让全部循环零次执行、门禁仍绿——「删文件」被堵住了，「改内容
+# 清空」这条路还通。现同时钉全树条目总数下界与逐文件非空。
+MIN_VECTOR_ENTRIES = 166
+
 
 def check_oversize_anchor(data: dict, path: Path, failures: list[str]) -> int:
     """统计本文件内的超长 URL 物化锚点命中数（fail-closed）。
@@ -91,6 +96,7 @@ def validate_vector(vector: dict, path: str, failures: list[str]) -> None:
 
 def main() -> int:
     failures: list[str] = []
+    vector_entries = 0
     pattern = [ROOT / 'contracts' / 'schemas', ROOT / 'contracts' / 'vectors']
     anchor_hits = 0
     for directory in pattern:
@@ -109,7 +115,14 @@ def main() -> int:
             except (json.JSONDecodeError, OSError) as exc:
                 failures.append(f'{path.name}: JSON 无效（{exc}）')
                 continue
-            for vector in data.get('vectors', []):
+            entries = data.get('vectors', [])
+            if directory.name == 'vectors':
+                vector_entries += len(entries)
+                if not entries:
+                    failures.append(
+                        f'{path.name}: vectors 数组为空——文件在场而零判定'
+                        '（R8-PY-02：清空内容即可摘掉门禁）')
+            for vector in entries:
                 # PY-187：显式收集（不再依赖 AssertionError 捕获——-O 下
                 # assert 被剥离会导致校验整体失效）
                 validate_vector(vector, str(path.relative_to(ROOT)), failures)
@@ -119,6 +132,10 @@ def main() -> int:
                 failures.append(f'{path.name}: 锚点检查失败（{exc}）')
     # 全树汇总判定：锚点丢失即 vectors.rs / Kotlin / C# 三端的超长 URL 物化分支
     # 失去输入（改名、删除、移动向量文件都不得静默摘掉它）。
+    if vector_entries < MIN_VECTOR_ENTRIES:
+        failures.append(
+            f'契约向量总条目 {vector_entries} 条，低于下界 {MIN_VECTOR_ENTRIES}'
+            '——清空或摘除条目须显式核减本下界并说明理由')
     if anchor_hits != 1:
         failures.append(
             f'超长 URL 物化锚点 {OVERSIZE_ANCHOR!r} 全树命中 {anchor_hits} 次'
