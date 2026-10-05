@@ -131,7 +131,11 @@ class ProguardKeepCoverageTest {
     }
 
     private fun parseLibraryNames(source: String): List<String> {
-        val pkg = packageRegex.find(source)?.groupValues?.get(1).orEmpty()
+        val packageFound = packageRegex.find(source)
+        var pkg = ""
+        if (packageFound != null) {
+            pkg = packageFound.groupValues[1]
+        }
         val found = mutableListOf<String>()
         val stack = ArrayDeque<Pair<String, Int>>()
         var depth = 0
@@ -165,7 +169,11 @@ class ProguardKeepCoverageTest {
         depth: Int,
     ): String? {
         val wanted = trimmed.contains(": Library")
-        val simple = if (wanted) interfaceNameRegex.find(trimmed)?.groupValues?.get(1) else null
+        val matched = if (wanted) interfaceNameRegex.find(trimmed) else null
+        if (matched == null) {
+            return null
+        }
+        val simple = matched.groupValues[1]
         if (simple == null) {
             return null
         }
@@ -182,7 +190,11 @@ class ProguardKeepCoverageTest {
         stack: ArrayDeque<Pair<String, Int>>,
         depth: Int,
     ) {
-        val name = declarationRegex.find(trimmed)?.groupValues?.get(1) ?: return
+        val declarationFound = declarationRegex.find(trimmed)
+        if (declarationFound == null) {
+            return
+        }
+        val name = declarationFound.groupValues[1]
         while (stack.isNotEmpty() && stack.last().second >= depth) {
             stack.removeLast()
         }
@@ -200,6 +212,18 @@ class ProguardKeepCoverageTest {
         return out
     }
 
-    private fun isManagedSource(file: File): Boolean =
-        file.isFile && file.extension == "kt" && !file.invariantSeparatorsPath.contains("/generated/")
+    private fun isManagedSource(file: File): Boolean {
+        val path = file.invariantSeparatorsPath
+        val isKotlinSource = file.isFile && file.extension == "kt"
+        return isKotlinSource && !path.contains("/generated/")
+    }
+
+    private companion object {
+        const val NESTED_SEP = "\$"
+        val modules = listOf("broker", "app", "webview-adapter", "contracts")
+        val packageRegex = Regex("^package\\s+([\\w.]+)", RegexOption.MULTILINE)
+        val declarationRegex = Regex("^(?!\s*fun\b)(?:\w+\s+)*(?:class|object|interface)\s+(\w+)")
+        val interfaceNameRegex = Regex("interface\\s+(\\w+)")
+        val rawQuote = Regex("\"\"\"")
+    }
 }
