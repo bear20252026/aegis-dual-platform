@@ -64,6 +64,7 @@
     "legacy/windows-pywebview/main_webview.py": 359,
     "legacy/windows-pywebview/selftest_api_bridge.py": 371,
     "scripts/build_review_package.py": 392,
+    "scripts/check_workflow_shells.py": 357,
     "shared/shell/snake.test.js": 654,
     "shared/shell/start.import.js": 338,
     "shared/shell/start.main.js": 475,
