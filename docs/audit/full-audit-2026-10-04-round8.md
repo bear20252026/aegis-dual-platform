@@ -238,7 +238,7 @@ mypy `2.3.1 → 2.4.0` 须 pip-compile 整树重算 hash；Test.Sdk `17.14.1 →
 `check_markdown_links` + **新增 workflow 计数对账门禁**（可失败：注入 13/空面/正则失配
 三类反证用例） | 已落地（PR #93）——⚠ `CONTRIBUTING.md` 未改：其唯一相关条目
 （:144 提到「Rust 单一裁决」）是**历史整改记录**而非现行陈述，改它等于篡改历史 |
-| B9 | 一致性升级（结构级，须先补向量再改码）：拒绝码词表入 `contracts/schemas` + `contracts/vectors/deny-codes.json` 三端生成常量；`reserved_address` 与元数据段进核心；Rust `is_local_or_private_host` 改名 `is_high_risk_host` 并补 TEST-NET-2/3；三端脚本与核心生成物逐字节对账门禁 | `contracts/**`、`core/.../security_policy.rs`、`windows/**`、`android/**`、`contracts/codegen/**` | 向量三端 + cargo + dotnet + gradle | 未动 |
+| B9 | 一致性升级（结构级，须先补向量再改码）：拒绝码词表入 `contracts/schemas` + `contracts/vectors/deny-codes.json` 三端生成常量；`reserved_address` 与元数据段进核心；Rust `is_local_or_private_host` 改名 `is_high_risk_host` 并补 TEST-NET-2/3；三端脚本与核心生成物逐字节对账门禁 | `contracts/**`、`core/.../security_policy.rs`、`windows/**`、`android/**`、`contracts/codegen/**` | 向量三端 + cargo + dotnet + gradle | **第一片已落地（PR #101）**：`is_local_or_private_host` 改名 `is_high_risk_host` + 补 TEST-NET-2/3 + 8 条向量 + `MIN_VECTOR_ENTRIES` 同步；剩余：拒绝码词表入 `contracts/schemas` + `deny-codes.json` 三端生成常量、`reserved_address` 入核心语义（目前只有托管层有该码）、三端脚本逐字节对账门禁 |
 
 **串行约束**：B4 与 B6/B7 同改 `windows/**` csproj/`HostWebView.cs`；B8 与 B9 同改
 `contracts/**` 与 README；B3 与 B6 同改 `android/`。按表内序号串行派发，同文件不并行。
@@ -291,6 +291,7 @@ R8-CS-CORE-2。计数列取子代理自报口径，可能包含上述已确证�
 | B4 余量（第二批）：导航链异常边界 | **已落地（PR #97）** | 顶层导航与子帧导航改为「取消先行」：先落 `e.Cancel = true`，策略判定通过才放行；授权求值抽成 `HostWebView.IsAuthorizedFailClosed(Func<bool>, where)`（internal 纯函数）——handler 本体要 COM 对象，没有这层就没有可常跑断言的判定面。用例四条：正/负结果透传、四类真实抛出面（InvalidOperationException/NullReferenceException/ObjectDisposedException/ExternalException）一律按未授权、异常必须落安全日志（含 where 与异常类型）、以及一条结构锚钉住两个 handler 不得回到无边界的赋值形态。**子资源链的 `catch` 不改**：CS-310 把它写成有意取舍（单请求异常不影响其他请求，保持原始响应路径），把它翻成 403-on-exception 是产品可见的可用性权衡（策略层一个 bug 会 403 掉整页子资源），已登记为待裁决第 5 项。行数基线：`HostWebView.cs` 604 → 593（守卫段拆入 partial 新文件 `HostWebView.NavigationGuards.cs`，59 行）——同 PR 收窄已入库 |
 | R8-SH-15 回归锁语料搬迁 | **已落地（PR #99）** | 见第四节该行。附带修正 `start_page.test.mjs:22` 的注释口径（原文称 BUG-001/006/008 的无残留断言覆盖四个文件——前两条已迁出，注释不改就是新的文档假账）；行数 490 → 488 → 注释回写后 490，与基线逐字相等 |
 | R8-CI-06 分诊文档状态更正 | **已落地（PR #100）** | 见第四节该行。同批未做：dismiss 本身（服务器端写，需确认）；B7 的重锁才是真正消除这批告警的路径 |
+| B9 第一片：高危主机段集跨端对齐 | **已落地（PR #101）** | Rust 核心 `is_local_or_private_host` 的段集早已含 TEST-NET-1、198.18/15 基准段、组播/广播——既非 local 也非 private，**名称与实际语义相反**；且 C# 孪生 `ReservedAddressBoundary` 覆盖 TEST-NET-2（`ReservedAddressBoundary.cs:129`）/TEST-NET-3（`:131`）而核心不覆盖 ⇒ 同一段地址在托管层判高危、在核心判公网。本片：核心改名 `is_high_risk_host` 并补两段（`198.51.100.0/24`、`203.0.113.0/24`）、Rust 逐段左右邻对照补 8 例、`native-navigation-decision.json` 补 8 条向量（4 条 require_confirmation + 4 条逐段公网对照）、`MIN_VECTOR_ENTRIES` 166→174 同步（#92 门禁要求与真实面逐字相等）。**不动本机/私网段**（127/10/192.168/172.16-31 等）——「本机与内网必须能打开」这条裁决不受影响；文档与台账里的旧名保留（当日记录不回改），§九 B9 行已注明改名 |
 | B7 / B9 | 未动 | 见第九节；B7 需先定「重锁在哪做」（第七节 4） |
 | B8 文档真相 | **已落地（PR #93）** | ①**新门禁 `scripts/check_doc_claims.py`**（挂
 `contract-source-of-truth`）：文档里的 workflow 数是陈述，实树变化后没人回头改——同一

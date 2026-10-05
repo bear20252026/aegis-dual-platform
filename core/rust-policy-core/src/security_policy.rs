@@ -202,7 +202,9 @@ impl SecurityPolicy {
         }
     }
 
-    /// 本机/私网主机判定（审计第六轮 2026-10-03/04）——纯函数，不做 DNS。
+    /// 高危主机判定（审计第六轮 2026-10-03/04；第八轮 B9 由
+    /// `is_local_or_private_host` 改名——段集早已含文档段/基准测试段/组播广播，
+    /// 既非 local 也非 private，旧名与实际语义相反）——纯函数，不做 DNS。
     ///
     /// 只判定**已规范化后的 host**（`origin::canonicalize_external` 之后）。
     /// 归一层的既有收紧使本函数无需处理任何混淆编码：非点分 IPv4
@@ -224,7 +226,7 @@ impl SecurityPolicy {
     ///（`UrlSafety.IsPublicIp`）按 IPAddress 字节判的 IPv6 ULA `fc00::/7`、
     /// 组播 `ff00::/8`、site-local `fec0::/10` 在本函数**取不到入参**，
     /// 不是"漏判"而是"无从判定"；要覆盖须先动归一层的 IPv6 支持，属另一批次。
-    pub fn is_local_or_private_host(host: &str) -> bool {
+    pub fn is_high_risk_host(host: &str) -> bool {
         if host == "localhost" {
             return true;
         }
@@ -262,6 +264,10 @@ impl SecurityPolicy {
             || (a == 100 && (64..=127).contains(&b))
             // 192.0.2.0/24 TEST-NET-1（文档示例段，不可路由）
             || (a == 192 && b == 0 && octets[2] == 2)
+            // 第八轮 B9：补齐 TEST-NET-2/3——C# 孪生 ReservedAddressBoundary
+            // 早已覆盖这两段（:129/:131），核心缺即段集跨端不一致
+            || (a == 198 && b == 51 && octets[2] == 100)
+            || (a == 203 && b == 0 && octets[2] == 113)
             // 198.18.0.0/15 基准测试段
             || (a == 198 && (b == 18 || b == 19))
             // 224.0.0.0/4 组播（含 239.*/255.255.255.255 广播——孪生同段收口）

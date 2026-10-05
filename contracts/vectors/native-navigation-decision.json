@@ -413,6 +413,94 @@
       "consume_url": "https://223.255.255.254/",
       "consume_scope": "navigation",
       "expected_consume": "allow"
+    },
+    {
+      "name": "R8_B9_test_net_2_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://198.51.100.1/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://198.51.100.1"
+    },
+    {
+      "name": "R8_B9_test_net_2_upper_boundary_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://198.51.100.254/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://198.51.100.254"
+    },
+    {
+      "name": "R8_B9_test_net_3_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://203.0.113.7/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://203.0.113.7"
+    },
+    {
+      "name": "R8_B9_test_net_3_upper_boundary_requires_confirmation",
+      "register_session": true,
+      "generation": 0,
+      "url": "http://203.0.113.254/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://203.0.113.254"
+    },
+    {
+      "name": "R8_B9_just_below_test_net_2_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://198.51.99.254/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://198.51.99.254",
+      "expected_parameters": "/",
+      "consume_url": "https://198.51.99.254/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R8_B9_just_above_test_net_2_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://198.51.101.1/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://198.51.101.1",
+      "expected_parameters": "/",
+      "consume_url": "https://198.51.101.1/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R8_B9_just_below_test_net_3_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://203.0.112.254/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://203.0.112.254",
+      "expected_parameters": "/",
+      "consume_url": "https://203.0.112.254/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
+    },
+    {
+      "name": "R8_B9_just_above_test_net_3_is_public",
+      "register_session": true,
+      "generation": 0,
+      "url": "https://203.0.114.1/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "https://203.0.114.1",
+      "expected_parameters": "/",
+      "consume_url": "https://203.0.114.1/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow"
     }
   ]
 }
