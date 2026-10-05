@@ -137,22 +137,25 @@ class WebViewHardeningScriptTest {
         // 性质断言（与 Rust canvas_noise_formula_is_actually_non_degenerate、
         // C# CanvasNoise_FormulaReplicaIsNonDegenerate 三端同口径）：字符串锚只能
         // 证明「文本长这样」，而第七轮的 RS-249 正是文本看着对、数学上恒退化。
-        fun fmix(seed: Int, px: Int): Int {
+        fun fmix(
+            seed: Int,
+            px: Int,
+        ): Int {
             var m = seed xor px
             m = (m.xor(m ushr 16)).times(0x85ebca6bL.toInt())
             m = (m.xor(m ushr 13)).times(0xc2b2ae35L.toInt())
             return m.xor(m ushr 16)
         }
         val seed = 0x12345678
-        // 旧形态（奇数常数 x px 取 LSB）在 4 步进下只有 2 个相位
-        // AD-253 那版乘的是**像素序号**（非 4 步进字节偏移）⇒ 相位只有 2 个
+        // 旧形态：AD-253 乘像素序号（非 4 步进字节偏移）⇒ 噪声位只由奇偶决定，2 个相位
         val phases = (0 until 64).map { (seed xor it.times(0x9E37_79B1L.toInt())) and 1 }.toSet()
         assertEquals("旧公式只有 2 个相位——扰动宽度不足的可复现证明", 2, phases.size)
 
-        val triples = (0 until 64).map { px ->
-            val m = fmix(seed, px)
-            Triple(m and 1, (m ushr 8) and 1, (m ushr 16) and 1)
-        }
+        val triples =
+            (0 until 64).map { px ->
+                val m = fmix(seed, px)
+                Triple(m and 1, (m ushr 8) and 1, (m ushr 16) and 1)
+            }
         assertTrue("噪声位组合过少：${triples.toSet().size}", triples.toSet().size >= 4)
         val identical = triples.count { it.first == it.second && it.second == it.third }
         assertTrue("三通道恒等的像素过多：$identical", identical < 40)

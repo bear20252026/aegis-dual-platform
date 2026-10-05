@@ -347,4 +347,5 @@ impl Default for FingerprintShield {
 }
 
 #[cfg(test)]
+mod noise_tests;
 mod tests;
