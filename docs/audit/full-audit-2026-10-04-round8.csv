@@ -33,3 +33,7 @@ R8-PY-03,P2,问题/红队,agent/action_contract.py:139,判定面只遍历require
 R8-DOC-15,P2,问题/文档自述失实,agent/broker.py:29-33,模块 docstring 称「local-ipc/*.md 记有现状注记」——实测三个文件零注记，且 identity.md:19 仍把第六轮连类删除的 E2EBroker 称作现役等价实现 ⇒ 阶段 G 的交付面（OS ACL/进程身份/传输/撤销）在正典树无人实现,yes,B8
 R8-DOC-16,P3,问题/验证步指向不存在实现,docs/runbooks/device-validation.md:23,第 10 步要求验证 NewBrowserVersionAvailable 的「保存状态/通知/受控重启」，正典树既无该事件订阅也无 RuntimeUpdater.cs ⇒ 该步永远无法真实执行，却以可勾验步骤存在,yes,B8
 R8-DOC-17,P3,问题/以清单代替实现,android/README.md:9,clearPrivateData（无痕 profile 清理）被列为「发布前强制控制（不可绕过门禁——不以路线图代替实现）」，而全树零引用——该行自身违反它宣称的纪律,yes,B8
+R8-CS-REG-01,P1,问题/回归（本轮修复自引入）,windows/src/Aegis.Windows.App/Broker/BrowserPolicyBroker.cs:397,"B4把账本键写成""${sessionId}:${action.Nonce}""（无$前缀即非内插串）⇒原生模式每次导航记同一常量，第二次起恒nonce_replay；装机配置即出货配置⇒第一次导航后浏览器锁死。已抽纯函数+真桥双消费用例",yes,B4余量
+R8-CI-18,P2,问题/门禁覆盖错觉,.github/workflows/native-policy-artifacts.yml:88 ↔ release-windows.yml:127 ↔ windows-contract-build,真桥用例全部依赖AEGIS_NATIVE_POLICY_CORE_TEST_PATH，而该变量只在非必需的native-policy-artifacts与发布job里赋值⇒必需检查跑dotnet test时原生分支零行为覆盖，R8-CS-REG-01因此绿灯进master（处置方案待裁：必需job内建DLL，或常跑断言早退条数上界）,yes,B4余量
+R8-CS-CORE-8,P2,问题/fail-closed可见性,windows/src/Aegis.Windows.App/Broker/BrowserPolicyBroker.cs:406-416,托管消费路径6条不一致出口仍静默return false无审计码——#91只修了原生侧与前置出口（「只修一条出口」虚闭环形态）；本批以用例钉住现状未改码（575行零余量基线，需与拆文件同批做）,yes,B4余量
+R8-CS-CORE-9,P3,问题/口径不一致,windows/src/Aegis.Windows.App/Broker/BrowserPolicyBroker.cs:346-349 ↔ :508-513,同一「桥不可得」事件：消费点写死native_policy_core_unavailable，评估点带出gate自己的DenialCode⇒审计码词表在同一事件两样，跨端/查询侧对账困难。已用两条用例分别钉死,yes,B4余量
