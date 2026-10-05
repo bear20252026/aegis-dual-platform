@@ -229,4 +229,49 @@ public sealed class BrowserPolicyBrokerNativeGateTests : IDisposable
         Assert.Equal("approval_not_pending", afterRejection.Reason.Code);
     }
 
+    /// <summary>R8-CS-REG-01（第八轮 2026-10-05）：原生模式下**连续两次不同导航**都必须能兑换。
+    ///
+    /// 回归本体：B4 把 nonce 账本键写成 `"${sessionId}:${action.Nonce}"`（C# 里前导没有
+    /// `$` 就不是内插串），于是每条原生导航都往账本记同一个常量——第一次放行，之后恒
+    /// `nonce_replay`。装机注册表标记使原生模式正是出货配置，等价于「第一次导航后浏览器锁死」。
+    ///
+    /// 为什么必需检查里看不见它：本类所有真桥用例都在 `AEGIS_NATIVE_POLICY_CORE_TEST_PATH`
+    /// 未设置时早退，而该变量只在 native-policy-artifacts（master push + paths 过滤）与
+    /// release-windows（发布）里赋值，两者都不是 PR 的必需检查——PR 上
+    /// windows-contract-build 跑 `dotnet test` 时原生分支零行为覆盖（R8-CS-CORE-2 根因）。
+    /// 因此同轮另在 `BrokerDenialCodeBehaviorTests` 补了**不依赖原生库**的键格式用例；
+    /// 本条的作用是证明调用点确实走那个函数（文本锚证明不了这一点）。</summary>
+    [Fact]
+    public void NativeMode_TwoDistinctNavigations_BothConsumeWithoutLedgerLockout()
+    {
+        var libraryPath = Environment.GetEnvironmentVariable("AEGIS_NATIVE_POLICY_CORE_TEST_PATH");
+        if (string.IsNullOrWhiteSpace(libraryPath)) return;  // 与本文件其余原生用例同口径
+
+        Assert.True(NativePolicyCoreBridge.TryCreate("1.0", libraryPath, out var created));
+        using var bridge = Assert.IsType<NativePolicyCoreBridge>(created);
+        using var broker = new BrowserPolicyBroker(
+            nativePolicyCoreGate: () => NativePolicyCoreGateResult.Enabled(),
+            nativePolicyCoreBridge: bridge,
+            nativePolicyCoreRequiredForTests: true);
+        Assert.True(broker.RegisterSession("ledger-session", "ledger-tab"));
+
+        // 公网 https + 已注册会话 ⇒ 核心判 allow（native-navigation-decision 向量同口径）
+        var first = Assert.IsType<Decision.Allow>(broker.EvaluateNavigation(
+            "ledger-session", "ledger-tab", 0, "https://example.com/one", "navigation"));
+        Assert.True(broker.TryConsumeNavigation(first.Action, "ledger-session", "ledger-tab",
+            0, "https://example.com/one", "navigation"));
+
+        var second = Assert.IsType<Decision.Allow>(broker.EvaluateNavigation(
+            "ledger-session", "ledger-tab", 0, "https://example.com/two", "navigation"));
+        Assert.True(
+            broker.TryConsumeNavigation(second.Action, "ledger-session", "ledger-tab",
+                0, "https://example.com/two", "navigation"),
+            "第二次不同导航被拒——nonce 账本键退化成常量的可复现证据（R8-CS-REG-01）");
+        Assert.DoesNotContain(broker.AuditLog, e => e.Reason == "nonce_replay");
+
+        // 修键不得顺手放开一次性语义：同一授权重放仍必拒
+        Assert.False(broker.TryConsumeNavigation(second.Action, "ledger-session", "ledger-tab",
+            0, "https://example.com/two", "navigation"));
+    }
+
 }
