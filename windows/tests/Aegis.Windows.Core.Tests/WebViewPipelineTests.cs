@@ -254,9 +254,10 @@ public sealed class NavigationFailClosedBoundaryTests : IDisposable
         var frame = File.ReadAllText(Path.Combine(
             root, "windows/src/Aegis.Windows.App/WebView/HostWebView.cs"));
 
-        foreach (var (label, text) in new[] { ("顶层", top), ("子帧", frame) })
+        // 顶层导航（HostWebView.NavigationGuards.cs）与子帧 lambda（HostWebView.cs）两处
+        // 都必须带取消先行；xunit 的 string-Contains 没有 userMessage 重载
+        foreach (var text in new[] { top, frame })
         {
-            // xunit 的 string-Contains 没有 userMessage 重载，标签直接进语句里
             // Substring 而非 .. 区间——避免 Range 索引在不同 LangVersion 下的差异
             var handler = text.Substring(
                     text.IndexOf("OnNavigationStarting", StringComparison.Ordinal))
