@@ -2,8 +2,11 @@
 
 Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"替代传统"补丁式加固"：
 所有高危副作用（导航/下载/命令）必经**唯一能力代理（Capability Broker）**裁决，
-裁决逻辑收敛在**无 I/O 的 Rust 策略核心**（单一裁决源），跨端行为由**冻结契约
-（contracts）**驱动并以跨语言向量逐条锁定。
+裁决逻辑收敛在**无 I/O 的 Rust 策略核心**（**导航**裁决单源——能力评估层
+`policy.evaluate` / `capability.validate` 尚未接入 FFI 通路（核心自述 H-7），
+故「单一裁决源」不覆盖能力评估面），跨端行为由**冻结契约（contracts）**驱动并以
+跨语言向量锁定（向量覆盖并不均齐：C# 侧只链 2 份、Kotlin 侧只消费
+`url-origin-*`——第八轮 §5.2 实测）。
 
 | 端 | 技术栈 | 状态 |
 |---|---|---|
@@ -21,23 +24,37 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
   原生门禁此前依赖永不置位的环境变量，第六轮已改由安装器写入的按用户注册表标记
   （`HKCU\Software\Aegis Browser\RequireNativePolicyCore`）驱动，故安装包内导航
   确实经 Rust 核心裁决（启动留痕见安全日志 `[adjudication]` 行）；Android 发布 APK
-  把确认开关关闭后由客户端**自行兑换**一次性 nonce，故"高危目标触发用户确认流"
-  目前两端均未生效
-  （详见 [第六轮台账](docs/audit/full-audit-2026-10-03-round6.md) 第二节）
+  由发布链置位 `-PrequireNavigationConfirmation=true`（该置位自第八轮 B3 起被静态锚
+  钉住，删参数即红），故「高危目标触发用户确认流」在 **Android 生效**；Windows 出货
+  构建**未启用**导航确认门，核心判「需显式确认」的目标自第八轮 B4 起改为用户可见
+  拒绝并取消导航（不再是无反馈的静默 false）——**两端行为不同：Android 问一次，
+  Windows 直接拒**。本机/内网 http 目标因此分端表现不一致，属待用户裁决的产品行为
+  （第八轮台账 §七 1）
+  （详见 [第六轮台账](docs/audit/full-audit-2026-10-03-round6.md) 第二节、
+  [第八轮台账](docs/audit/full-audit-2026-10-04-round8.md) §三与§五）
 - **指纹防护**：Canvas/WebGL/AudioBuffer/字体/计时器/屏幕多维欺骗，噪声按
-  **per-site 种子**隔离（跨站不可关联），注入脚本经三端守卫单源（bridge_guard）对账
+  **per-site 种子**隔离（跨站不可关联）；文档创建前注入脚本的对账是**两端**而非三端——
+  `bridge_guard.template.js` 单源覆盖 Rust（`include_str!`）与 Android（手抄 + 逐行比对），
+  Windows C# 的注入面（`WebView2Hardening.cs:70`）**不在该单源对账范围内**（第八轮实测）
 - **HTTPS-only 升级** + **DNT** + **追踪参数剥离**
-- **威胁黑名单**（订阅制刷新 + 导航门禁）——**仅 Windows 端实现**；Android 全树
+- **威胁黑名单**（导航门禁）——**仅 Windows 端实现**；刷新实为**启动一次性**
+  （`ThreatFeedCoordinator` 只在 `Start()` 内调一次，全仓无周期计时器——「订阅制刷新」
+  的旧口径已撤）；Android 全树
   无任何黑名单代码，其导航拒绝条件只有"URL 是否良构"（第六轮 R6 登记，见下方
   「分端裁决现状」）
-- **KillSwitch**：进程级紧急终止——触发后全部导航/下载/审批链即刻冻结
-- **无痕窗口**：独立 WebView 环境 + 临时目录，favicon/缓存/历史按持久化语义分面隔离
+- **KillSwitch**（**仅 Windows**；Android 全树零实现，README 旧版未标端别）——触发后
+  主窗口的导航/下载/审批链冻结；**已知缺口**：NTP 宿主桥（`importBookmarks` /
+  `importHistory` / `restoreSession`）与前进/后退/重载等 6 个导航入口不查该开关
+- **无痕窗口**（**仅 Windows**）：独立 WebView 环境 + 临时目录，favicon/缓存/历史按
+  持久化语义分面隔离；Android 侧无对应实现（`android/README.md` 的 `clearPrivateData`
+  条目已就地更正为「未落地」）
 - **下载防护**：危险扩展多级判定（含 URL 编码/路径段混淆形态）+ 二次确认
 - **Agent/MCP 复开面**：action-catalog 单源 + 红队 fixtures——提示注入/重放/预算
   超限逐项测试（deny by default）
 
-> **Windows 终局（ADR-009，M1-M4 全部落地）**：全功能迁移完成（parity 清单 100%
-> 代码项勾验：[feature-parity-checklist](docs/product/feature-parity-checklist.md)）；
+> **Windows 终局（ADR-009，M1-M4 全部落地）**：全功能迁移完成（parity 清单代码项
+> 勾验——第八轮 B8 复核后为 **除 1 项外全部勾验**：`NewBrowserVersionAvailable`
+> Runtime 更新事件未实现，见 [feature-parity-checklist](docs/product/feature-parity-checklist.md)）；
 > `legacy/windows-pywebview/` 为**只读冻结归档**——仅 P0 安全缺陷经安全通道评估，
 > 功能 PR 一律拒绝。
 
@@ -45,7 +62,7 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
 
 ```
 contracts/  唯一安全协议事实来源（schemas/vectors/codegen——六类对象冻结；
-            bridge_guard.template.js 为三端守卫 JS 单一事实源——ADR-007）
+            bridge_guard.template.js 为守卫 JS 单源（Rust+Android 两端对账，C# 未纳入——ADR-007）
 core/       Rust 纯策略核心（canonicalization + Ed25519 阈值验证——无 I/O）
 windows/    C#/.NET 10 + 原生 WebView2（App/Chrome/WebView/Broker——能力代理）
 android/    Kotlin/Compose（app/broker/webview-adapter/contracts——分层单源）
@@ -122,7 +139,10 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
     （OSV 实测在用版本无一命中 CVE）
 - 测试规模：cargo 450+ / dotnet 650+ / gradle JVM 280+ / pytest 230+ / node 80+ 用例，
   五门禁（validate_release / verify_versions / bridge_guard / contract_compatibility /
-  cross_end_lists）常绿
+  cross_end_lists）常绿——「常绿」限定为**本轮 CI 实测绿且各门禁确有失败能力**：
+  B1 之前 pwsh 吞退出码曾使红灯长期呈绿，故「绿」本身不是结论，能红才是
+  （文档计数与实树对账另有 `scripts/check_doc_claims.py`，workflow 脚本壳口径另有
+  `scripts/check_workflow_shells.py`）
   （SP-198，2026-10-01 审计补口径：pytest 230+ 为**合计口径**——`tests/python`
   发布链验证器 195+ 用例 + `agent/tests` 红队 30 用例；CHANGELOG 各版本条目中的
   "pytest 30" 为当批 agent 红队单列口径，两者不矛盾）
@@ -132,11 +152,18 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
 
 ## 蓝图状态（蓝图文档已并入 docs/architecture-overview.md）
 
-- 阶段 A（ADR 决策）→ G（Agent 复开）**全部完成** ✅；发布门禁 13 workflow 分层 ✅
+- 阶段 A（ADR 决策）→ F **全部完成** ✅；**阶段 G（Agent 本地受控 IPC）只有设计文档
+  与裁决/红队夹具，交付面（OS ACL / 进程身份核验 / IPC 传输 / 撤销）零实现**——
+  `agent/broker.py` 自述不承担这些 OS 能力，`agent/local-ipc/*.md` 已就地标注现状；
+  发布门禁 15 workflow 分层 ✅
   （SP-199，2026-10-01 审计如实口径：**常跑（push/PR 触发）7 个**——ci / contracts /
   core-rust / android-quality / supply-chain / agent-redteam / native-policy-artifacts；
-  低频定时 2 个——compat（周一）/ legacy-python-guard（周六）；tag/编排触发 4 个——
-  release 编排器 + release-{windows,android,core} 三平台链）
+  低频定时 2 个——compat（周一）/ legacy-python-guard（周六）；依赖面 2 个——
+  gradle-dependency-graph（Dependency Graph 上传：周一 + push:android/** + dispatch）/
+  gradle-dependency-insight（仅 dispatch）；tag/编排触发 4 个——release 编排器 +
+  release-{windows,android,core} 三平台链。7+2+2+4=15，与
+  `scripts/check_doc_claims.py` 的实树现算同源——WB-214 起这类「文档数 = 实树数」的
+  陈述已三次漂移，现由门禁逐处对账）
 - 剩余（需真实设备/用户操作）：真机验证（[device-validation.md](docs/runbooks/device-validation.md)）｜
   正式发布（[release-checklist.md](docs/runbooks/release-checklist.md)——受保护环境 + 门禁全绿后 tag）
 

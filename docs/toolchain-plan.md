@@ -1,7 +1,8 @@
 > **历史文档（WB-171，2026-10-01 审计）时代横幅**：本文为 2026-08-15
 > 双栈期工具链调研——其中 Python 栈工具（Nuitka/PyArmor/PyInstaller 等）
 > 已随 ADR-009 归档失效（PyInstaller 管线已删，PY-160）。现行工具链口径
-> 见 KNOWLEDGE_BASE 第 4 节与 CI 13 workflow 分层；本文保留作选型溯源。
+> 见 KNOWLEDGE_BASE 第 4 节与 CI 15 workflow 分层（计数由 `scripts/check_doc_claims.py`
+> 与实树对账）；本文保留作选型溯源。
 
 # Aegis 工具链适配建议（toolchain-plan）
 

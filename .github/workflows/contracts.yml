@@ -83,6 +83,11 @@ jobs:
       # 死链 fail-closed（http/mailto/锚点/代码块内链接不在校验面）
       - name: Markdown relative link gate (SP-256——死链 fail-closed)
         run: python scripts/check_markdown_links.py
+      # B8（第八轮 2026-10-04）：文档里的 workflow 数量是**陈述**，实树变化后没人回头
+      # 改——同一件事三轮复发（WB-214 对齐为 13 → 第六轮记「闭环即回归」→ 第八轮实测
+      # 仍有 8 处与实树不符）。本门禁把「文档说的数 = 实树的数」变成可失败检查。
+      - name: Doc claim reconciliation gate (B8——计数声明与实树对账)
+        run: python scripts/check_doc_claims.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)

@@ -6,6 +6,9 @@
 
 A-06 整改（国防级审查）：以下为发布前强制控制（不可绕过门禁——不以路线图代替实现）：
 - Room 历史/书签存储、Android Keystore 密钥存储、下载管理器（DownloadPolicy 已接入——A-02）、
-  权限请求 UI（默认拒绝——A-02）、无痕 profile 清理（clearPrivateData——A-03）、
+  权限请求 UI（默认拒绝——A-02）、无痕 profile 清理（**A-03 未落地**：全树零
+  `clearPrivateData` 引用，Android 无无痕实现——第八轮 B8 实测；此前本行把它列为
+  「发布前强制控制」，等于用清单代替实现，正是本节明令禁止的写法。主 README 与
+  `docs/product/supported-features.md` 的「无痕窗口」条已标为仅 Windows）、
   崩溃诊断、同步协议、签名发布流程（B0-S——SHA-256/SBOM/provenance 独立验证）
 Google Play 发布使用 AAB；自由传播使用同一签名身份生成的 universal APK，并为每个发布文件生成 SHA-256 校验值。

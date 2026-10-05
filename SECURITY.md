@@ -31,7 +31,7 @@
 | C# | Process.Start（WB-070，审计 2026-09-23 清单·W5 批补行） | 受限（现役仅 DownloadsWindow 以系统默认程序打开用户显式下载完成的文件——无任意命令/参数注入面；新增调用点须评审目标来源） |
 | C# | 原生 FFI（NativeLibrary C-ABI——Rust 策略核心，同批补行） | 受限（仅固定导出集委托绑定 + UTF-8 JSON 协议；解析/ABI 异常一律 fail-closed 拒绝——绝不回退第二套策略实现；NativePolicyCoreBridge SafeHandle 生命周期管理） |
 | Kotlin | 反射（KClass 动态调用） | 受限（webview-adapter 只事件转换——无动态命令） |
-| JS（单源首页 shared/shell） | postMessage/桥消息、动态注入脚本（WB-173，2026-10-01 审计补行） | 受限（首页经 NTP 虚拟主机白名单 origin 服务（NtpBridgeFactory 显式登记 + IsTopLevelNtpDocument 顶层文档门禁）；远程页面 WebMessage 按来源关闭——无动态 eval/Function 注入面；注入脚本三端守卫单源 bridge_guard 对账（ADR-007）） |
+| JS（单源首页 shared/shell） | postMessage/桥消息、动态注入脚本（WB-173，2026-10-01 审计补行） | 受限（首页经 NTP 虚拟主机白名单 origin 服务（NtpBridgeFactory 显式登记 + IsTopLevelNtpDocument 顶层文档门禁）；远程页面 WebMessage 按来源关闭——无动态 eval/Function 注入面；注入脚本守卫单源 bridge_guard 仅**两端**对账（Rust `include_str!` + Android 手抄逐行比对；C# 的文档创建前注入面 `WebView2Hardening.cs:70` 不在该单源范围内——第八轮实测，ADR-007 的「三端」口径已撤）） |
 
 ## 依赖与发布安全
 

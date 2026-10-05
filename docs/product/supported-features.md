@@ -13,10 +13,13 @@
   地址栏导航（经 Broker 决策 + 审计脱敏）、后退/前进/刷新/停止
 - 书签（BookmarkBar 胶囊栏 + 收藏当前页）、历史（History 存储 + 搜索）、
   下载管理器（M3——经 broker 审计 + 危险拦截）、新标签页（导入向导已迁移至 NTP）
-- KillSwitch 全链接线、设置窗口（威胁订阅源 URL 配置）、主题配色、缩放策略（ZoomPolicy 0.25–3.0）
+- KillSwitch（主窗口导航/下载/审批链；**NTP 宿主桥与前进/后退/重载等 6 个导航入口
+  不查该开关**——第八轮实测）、设置窗口（威胁订阅源 URL 配置——刷新为启动一次性，无
+  周期计时器）、主题配色、缩放策略（ZoomPolicy 0.25–3.0）
 - 安全：导航确认审批、新窗口禁弹、权限默认拒绝、下载 fail-closed、
   URL 门禁（UrlSafety）、FingerprintShield 指纹防护、崩溃报告
-- 策略裁决：Rust 原生策略核心（NativePolicyCoreBridge——唯一裁决者，ADR-008）
+- 策略裁决：Rust 原生策略核心（NativePolicyCoreBridge——**导航**裁决单源，ADR-008；
+  能力评估层未接入 FFI 通路（H-7），动作裁决仍由 C# Broker 承担）
 
 ### Android（Kotlin/Compose——阶段 D）
 

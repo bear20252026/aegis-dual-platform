@@ -4,7 +4,8 @@
 > 权威汇入点。2026-09-24 全面审计 WB-009 整改重写——旧版仅描述 Python
 > 27 文件视图，已与「C# 唯一正典栈」终局（ADR-007/009）严重漂移。
 > 编制日期：2026-09-24 ｜ 终局口径：ADR-007（单一正典）+ ADR-008
-> （Rust 唯一裁决者）+ ADR-009（C# 全面迁移完成）
+> （Rust 为**导航裁决**单源——能力评估层未接入 FFI 通路，核心自述 H-7）
+> + ADR-009（C# 全面迁移完成）
 
 ---
 
@@ -33,7 +34,12 @@ windows/
 > Inno Setup 发布脚本实际位于仓库根 `docs/release/`（AegisSetup-CSharp.iss，
 > 版本运行时注入；WB-120，2026-09-26 审计——原树形图误挂 windows/ 下）
 
-### 1.2 Rust 策略核心（唯一裁决者——ADR-008）
+### 1.2 Rust 策略核心（导航裁决单源——ADR-008）
+
+> **范围限定（第八轮实测，撤「唯一裁决者」无限定语）**：FFI 通路实际只承载
+> URL 归一 / 黑名单 / 高危判定 / nonce 兑换；`PolicyEngine::default()` 与
+> `CapabilityRegistry::new()` 被构造却从不参与 `evaluate`（核心自述 H-7 未撤）——
+> 能力评估裁决仍在各端托管 Broker，未收敛进核心。
 
 ```
 core/rust-policy-core/                c_abi FFI + matcher + action_policy +
@@ -82,11 +88,15 @@ shared/release.json                   版本/分发单源（verify_versions 校�
 
 - 更新验证：update_verifier（SemVer precedence 防回滚）+ verify_manifest
   （签名阈值单源读 signing-policy.yaml）
-- CI：**13 workflow 分层**（WB-160，2026-10-01 审计对齐实树——原「五门禁」
-  漏计 ci/legacy-python-guard 等）。常跑门禁 6（push/PR：ci UI 回归 /
-  core-rust / contracts / android-quality / supply-chain / agent-redteam）
-  + 组合冒烟 1（native-policy-artifacts，master+paths）+ 周定时 2
-  （compat WebView2 探测 / legacy-python-guard 归档守护）+ 发布链 4
+- CI：**15 workflow 分层**（WB-160，2026-10-01 审计对齐实树——原「五门禁」
+  漏计 ci/legacy-python-guard 等；第八轮 B8 由 13 更正为 15——其后新增
+  gradle-dependency-graph / gradle-dependency-insight 两个而计数静默漂移，
+  现由 `scripts/check_doc_claims.py` 逐处与实树对账）。常跑门禁 6（push/PR：
+  ci UI 回归 / core-rust / contracts / android-quality / supply-chain /
+  agent-redteam）+ 组合冒烟 1（native-policy-artifacts，master+paths）+ 周定时 2
+  （compat WebView2 探测 / legacy-python-guard 归档守护）+ 依赖面 2
+  （gradle-dependency-graph：push:android/** + 周一 + dispatch；
+  gradle-dependency-insight：仅 dispatch）+ 发布链 4
   （release.yml 编排 v* 标签 + release-windows/android/core 三平台子流）
 
 ### 1.6 归档（只读——禁止修复）
@@ -101,7 +111,8 @@ legacy/（Qt、ui/）                    死代码
 
 ```
 用户/页面 → Host/地址栏 → C# Broker（Android 对应 AegisWebViewClient）
-  → Rust 策略核心（唯一裁决——safe_url/指纹/动作策略）
+  → Rust 策略核心（导航裁决——safe_url/黑名单/高危判定/nonce；
+     动作与能力评估层不在该通路（H-7），由托管 Broker 判定）
   → 授权放行 → WebView2 / System WebView 加载
   → 全程审计脱敏 + KillSwitch 强制检查
 ```
@@ -131,10 +142,10 @@ legacy/（Qt、ui/）                    死代码
 
 Qt 旧栈 → PyWebview 分层（白名单/NavQueue）→ 安全纵深 → 契约治理
 （import-linter/bridge_guard）→ Android 双端扩展 → **C# 全面迁移终局**
-（M1-M4 落地，Python 栈冻结归档，Rust 升格唯一裁决者）
+（M1-M4 落地，Python 栈冻结归档，Rust 升格导航裁决单源）
 
 ## 五、结论
 
-**Aegis = C# 正典壳 + Rust 唯一裁决 + Kotlin 双端 + 单源 UI/契约 +
-分层 CI（13 workflow——WB-160 口径）的双端安全浏览器**——安全不变量跨端
-一致，演进以 ADR 治理。
+**Aegis = C# 正典壳 + Rust 导航裁决单源 + Kotlin 双端 + 单源 UI/契约 +
+分层 CI（15 workflow——第八轮 B8 按实树更正）的双端安全浏览器**——安全不变量
+跨端一致，演进以 ADR 治理。

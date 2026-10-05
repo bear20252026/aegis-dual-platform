@@ -378,7 +378,7 @@ elif decision.is_deny():
 | 步骤 | 内容 | 产出 |
 |------|------|------|
 | 4.1 | contracts/vectors 跨语言一致性验证 | 测试通过 |
-| 4.2 | CI 全绿（6 个 workflow） | 门禁通过 |
+| 4.2 | CI 全绿（当时全量 workflow——现行清单见 README「.github/」一节） | 门禁通过 |
 | 4.3 | 编译安装 + 真机验证 | 功能验证 |
 
 ---
