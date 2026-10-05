@@ -71,8 +71,12 @@ class ProguardKeepCoverageTest {
         assertEquals("删掉一条 keep 规则后必须报缺失：$missing", listOf(topLevelAbi), missing)
     }
 
-    private fun missingKeepRules(rules: String, names: List<String>): List<String> =
-        names.filter { name -> !rules.contains("-keep interface $name ") }
+    private fun missingKeepRules(
+        rules: String,
+        names: List<String>,
+    ): List<String> {
+        return names.filter { name -> !rules.contains("-keep interface $name ") }
+    }
 
     /**
      * 扫四模块主源集，返回由声明位置推导出的 `: Library` 接口二进制名。
@@ -106,7 +110,11 @@ class ProguardKeepCoverageTest {
     }
 
     private fun parseLibraryNames(source: String): List<String> {
-        val pkg = packageRegex.find(source)?.groupValues?.get(1).orEmpty()
+        var pkg = ""
+        val packageFound = packageRegex.find(source)
+        if (packageFound != null) {
+            pkg = packageFound.groupValues[1]
+        }
         val found = mutableListOf<String>()
         var inRawString = false
         var lastTopLevel = ""
@@ -123,12 +131,17 @@ class ProguardKeepCoverageTest {
                 continue
             }
             if (indent.isEmpty()) {
-                lastTopLevel = declarationRegex.find(trimmed)?.groupValues?.get(1).orEmpty()
+                val declarationFound = declarationRegex.find(trimmed)
+                lastTopLevel = if (declarationFound == null) "" else declarationFound.groupValues[1]
             }
             if (!trimmed.contains(": Library")) {
                 continue
             }
-            val name = interfaceNameRegex.find(trimmed)?.groupValues?.get(1) ?: continue
+            val interfaceFound = interfaceNameRegex.find(trimmed)
+            if (interfaceFound == null) {
+                continue
+            }
+            val name = interfaceFound.groupValues[1]
             val nested = indent.isNotEmpty() && lastTopLevel.isNotEmpty()
             found += if (nested) "$pkg.$lastTopLevel" + NESTED_SEP + name else "$pkg.$name"
         }
@@ -140,9 +153,11 @@ class ProguardKeepCoverageTest {
         val modules = listOf("broker", "app", "webview-adapter", "contracts")
         val packageRegex = Regex("^package\\s+([\\w.]+)", RegexOption.MULTILINE)
         val declarationRegex = Regex(
-            "^(?:public\\s+|internal\\s+|private\\s+|abstract\\s+|open\\s+|sealed\\s+|data\\s+|enum\\s+)*(?:class|object|interface)\\s+(\\w+)",
+            "^(?:public\\s+|internal\\s+|private\\s+|abstract\\s+" +
+                "|open\\s+|sealed\\s+|data\\s+|enum\\s+)*"
+                + "(?:class|object|interface)\\s+(\\w+)",
         )
-        val interfaceNameRegex = Regex("interface\s+(\w+)")
+        val interfaceNameRegex = Regex("interface\\s+(\\w+)")
         val rawQuote = Regex("\"\"\"")
     }
 }
