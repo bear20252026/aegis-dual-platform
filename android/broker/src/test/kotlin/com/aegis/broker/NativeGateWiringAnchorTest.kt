@@ -43,7 +43,11 @@ class NativeGateWiringAnchorTest {
         assertTrue("${path.name} 里没有 :app:assembleRelease 步骤", start >= 0)
         val tail = text.substring(start).lines()
         val stepStart = tail.drop(1).indexOfFirst { it.startsWith("      - name:") }
-        return if (stepStart < 0) tail.joinToString(" ") else tail.take(stepStart + 1).joinToString(" ")
+        return if (stepStart < 0) {
+            tail.joinToString(" ")
+        } else {
+            tail.take(stepStart + 1).joinToString(" ")
+        }
     }
 
     @Test
@@ -52,7 +56,10 @@ class NativeGateWiringAnchorTest {
         // 而所有 JVM 用例照常全绿——这正是本轮要钉住的失效形态。
         val workflow = File(repoRoot(), ".github/workflows/release-android.yml")
         val block = assembleReleaseBlock(workflow)
-        assertTrue("assembleRelease 未传 -PrequireNativePolicyCore=true", block.contains("-PrequireNativePolicyCore=true"))
+        assertTrue(
+            "assembleRelease 未传 -PrequireNativePolicyCore=true",
+            block.contains("-PrequireNativePolicyCore=true"),
+        )
         assertTrue(
             "assembleRelease 未传 -PrequireNavigationConfirmation=true（确认流在发布物里静默关闭）",
             block.contains("-PrequireNavigationConfirmation=true"),
