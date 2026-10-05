@@ -9,10 +9,11 @@
 # （R7-TOOL-04/R7-SH-03 同一口径），否则门禁自身就是下一个假绿源。
 from __future__ import annotations
 
+import json
+
 import check_markdown_links as cml
 import validate_release as vr
 import verify_vectors as vv
-import json
 
 
 # ---------------------------------------------------------------- verify_vectors
