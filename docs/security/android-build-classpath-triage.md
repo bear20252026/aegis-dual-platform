@@ -46,9 +46,22 @@ AGP 插件 detached 配置的独立解析域，用户侧无法对插件内部传
 版本选择（jose4j/jdom2 之所以能消除，是其脆弱节点仅存在于已修的
 classpath 域）。
 
-**处置：tolerable_risk（构建机侧暴露、产品运行时零命中、上游无稳定修复），
-附证据 dismissing。** 解除条件：AGP 9.5 stable 发布（当前 alpha——9.5 内
-tools/bundletool 预期携带修复版传递依赖）→ 重开评估，届时地板可整体退役。
+**判定：tolerable_risk**（构建机侧暴露、产品运行时零命中、上游无稳定修复）。
+
+> ⚠ **R8-CI-06 更正（第八轮 2026-10-05）**：本段原文写作「处置：tolerable_risk……
+> 附证据 **dismissing**」，把「判定」表述成了「已在 GitHub 上执行的操作」。
+> 只读复核实测：9 条告警全部 `state=open`、`dismissed_at` 为 null，`dismissed`
+> 计数 0（#11 critical bcprov / #12 high bcprov / #8 #7 #3 #2 medium /
+> #10 #9 #6 low）——即这批告警**一条都没有被 dismiss**，只是被分诊过。
+> 本表的严重度列与实况一致，问题只在这句状态描述。
+>
+> dismiss 一条 Dependabot 告警是对该仓安全姿态的正式处置声明（影响所有读该仓
+> 告警面的人，且默认不在任何 CI 门禁里留痕），属仓库所有者操作，需你确认后执行。
+> 本轮只更正陈述、不代做操作。若确认按「tolerable_risk」正式 dismiss，
+> 需要连证据一起写进 dismiss comment，并保留下面的解除条件。
+
+解除条件：AGP 9.5 stable 发布（当前 alpha——9.5 内 tools/bundletool 预期携带
+修复版传递依赖）→ 重开评估，届时地板可整体退役。
 
 | 告警 | 严重度 | 包 | 脆弱版本 → 修复版 |
 |---|---|---|---|

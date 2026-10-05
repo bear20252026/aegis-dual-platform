@@ -28,7 +28,7 @@ R8-DEPS-8,P2,问题/依赖锁定,android/settings.gradle.kts:17-28,AD-155禁depe
 R8-CS-SEC-02,P1,问题/fail-open,"windows/src/Aegis.Windows.App/WebView/HostWebView.cs:234,395-409",e.Cancel=!TryAuthorizeNavigation(...) 无异常边界：求值期抛出（桥租约/COM/确认面板事件订阅方）即整句作废，e.Cancel 停在默认 false ⇒ 未授权导航照常放行=门禁失效。逐行回读后由 P2 升 P1；B4 余量第二批已闭（取消先行 + internal 纯函数判定核 + 行为用例）,yes,B4余量
 R8-RS-15,P2,提升/一致性根因,core/rust-policy-core/src/lib.rs:43-56,13个C ABI导出无任何JS生成入口⇒三端手抄同一份JS,no,B9
 R8-SH-15,P2,问题/测试弱断言,"tests/ui-regression/start_page.test.mjs:36,143",BUG-001/006回归锁语料语言错配（setTag是Java/setOf是Kotlin）⇒两条恒真（已闭：锁迁至 android/app DocumentStartInjectionRegressionTest，判代码行并剔注释，另加正面控制用例证明被观察结构确在语料里）,yes,B5余量
-R8-CI-06,P2,问题/供应链,.github/dependabot.yml ↔ dependabot/alerts,triage文档称已dismissing而实测open=9含1条critical,no,B7
+R8-CI-06,P2,问题/供应链,docs/security/android-build-classpath-triage.md:49-51 ↔ dependabot/alerts,triage 文档称「附证据 dismissing」而实测 9 条 state=open、dismissed 计数 0（含 1 critical）（已闭：文档改为「判定 tolerable_risk，未执行 dismiss」；dismiss 需所有者确认，未代做）,yes,B7
 R8-PY-03,P2,问题/红队,agent/action_contract.py:139,判定面只遍历required：从required摘掉origin即pattern门禁整段消失（B5余量已闭：判定面改取required∪带约束字段集，并钉有界常量集+双向反证用例）,yes,B5
 R8-DOC-15,P2,问题/文档自述失实,agent/broker.py:29-33,模块 docstring 称「local-ipc/*.md 记有现状注记」——实测三个文件零注记，且 identity.md:19 仍把第六轮连类删除的 E2EBroker 称作现役等价实现 ⇒ 阶段 G 的交付面（OS ACL/进程身份/传输/撤销）在正典树无人实现,yes,B8
 R8-DOC-16,P3,问题/验证步指向不存在实现,docs/runbooks/device-validation.md:23,第 10 步要求验证 NewBrowserVersionAvailable 的「保存状态/通知/受控重启」，正典树既无该事件订阅也无 RuntimeUpdater.cs ⇒ 该步永远无法真实执行，却以可勾验步骤存在,yes,B8
