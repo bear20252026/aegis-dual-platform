@@ -9,20 +9,22 @@ import java.io.File
  * BUG-001 / BUG-006 回归锁的正身（R8-SH-15，第八轮审计 2026-10-05）。
  *
  * 这两条回归锁原本写在 `tests/ui-regression/start_page.test.mjs` 里，判的是
- * **首页 shell 脚本**（`shared/shell/*.js`）：
- * - BUG-001：`assert.ok(!/setTag\(/.test(allScripts))`——`setTag` 是 Android
- *   View API，JS 里永远不会出现 ⇒ 断言恒真；
- * - BUG-006：`!/setOf\("https://\*", "http://\*"\)/.test(allScripts)`——
- *   `setOf` 是 Kotlin 字面量，同样恒真。
- * 于是这两个「回归锁」对 BUG-001/BUG-006 **零保护**，而台账一直记着它们绿。
+ * **首页 shell 脚本**（`shared/shell/` 下四个 JS 文件）：
+ * - BUG-001：正则判 shell JS 里不出现 Android 的 `setTag` 调用——JS 里永远不会
+ *   出现这个 API 名 ⇒ 断言恒真；
+ * - BUG-006：正则判 shell JS 里不出现 Kotlin 的 `setOf` 通配写法——同理恒真。
+ * 于是这两个「回归锁」对 BUG-001/BUG-006 零保护，而台账一直记着它们绿。
  *
  * 本文件把锁搬到真正的语料上：被保护的代码在 `android/app`，判据也必须读那里。
  * 两条防自己失效的锚：
  * 1. [corpusContainsTheConstructsTheLocksClaimToWatch]——正面控制。语料里没有
  *    被观察的结构时，「不含禁止形态」这类断言会永远为真，所以先断它「在」；
- * 2. 所有禁止形态都只在**剔除注释后的代码行**上判——`SecureWebViewFactory.kt:26`
- *    与 `WebViewHardening.kt:39` 的历史教训注释里就写着 `generateViewId()` 和
- *    `"https://*"` 原文，不剔注释会被自己的注释打红（第八轮 #97 同款事故）。
+ * 2. 禁止形态只在**剔除注释后的代码行**上判——SecureWebViewFactory 第 26 行与
+ *    WebViewHardening 第 39 行的历史教训注释里就写着 framework 生成的 view id
+ *    与 https 全域通配原文，不剔注释会被自己的注释打红（第八轮 #97 同款事故）。
+ *
+ * （KDoc 正文里刻意不复现那两条 JS 正则原文：里面的转义星号加斜杠会提前闭合
+ * 块注释——本文件第一版就是被 KtLint「failed to parse」当场拒绝的。）
  */
 class DocumentStartInjectionRegressionTest {
     private fun repoRoot(): File {
