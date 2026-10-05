@@ -35,7 +35,20 @@
 # AD-219（2026-09-26 审计）：probe 门禁的 JNA 接口（NativePolicyCoreGate 持有）
 # 与 Bridge 的 Abi 同为按名映射接口——漏 keep 时方法名被混淆，
 # Native.load 符号查找失败 → 门禁 block → 全部导航 fail-closed 拒绝。
--keep interface com.aegis.broker.NativePolicyCoreGate$NativePolicyCoreAbi { *; }
+#
+# R8-AD-02（第八轮审计 2026-10-04）：AD-219 把规则写成 `NativePolicyCoreGate$…`
+# （嵌套形态），但该接口在源文件里是**顶层 private interface**——NativePolicyCoreGate.kt
+# 的 object 在 :105 已闭合，:117 的 `private interface NativePolicyCoreAbi : Library`
+# 缩进为 0，其二进制名是 com.aegis.broker.NativePolicyCoreAbi（无 `$`）。带 `$` 的
+# 规则命中 0 个类 ⇒ 方法名照旧被 R8 改名 ⇒ JNA 按名查符号失败 ⇒ LinkageError 折叠为
+# Unavailable ⇒ 门禁 block ⇒ 出货 APK 每次远程导航都拒 native_policy_core_unavailable
+# （首页是 file:// 不经 broker，故表现为「进程存活、首页正常、所有网站打不开」——
+# 恰与 beta.51/beta.52 的「进程存活 + UI 完整渲染」验证口径互补，那类冒烟抓不到）。
+# 同仓自证：broker/detekt-baseline.xml 对 Bridge 记作 `NativePolicyCoreBridge.NativePolicyCoreAbi`
+# （嵌套，带点号），对 Gate 记作裸名 `NativePolicyCoreAbi`。
+# 常驻门禁：ProguardKeepCoverageTest 逐个断言「源码里所有 `: Library` 接口的真实二进制名
+# 都出现在本文件的 keep 规则里」——AD-219/AD-294 这一族缺陷从此不靠人工记忆。
+-keep interface com.aegis.broker.NativePolicyCoreAbi { *; }
 
 # ---- androidx.webkit：document-start 注入用 View.setTag(key=R$id) ——
 # R8 优化掉未引用的 R$id 字段后 key=0 → IllegalArgumentException 启动崩
