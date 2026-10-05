@@ -84,7 +84,8 @@ public sealed class BrokerDenialCodeBehaviorTests : IDisposable
         // 键不带该前缀时原生条目永不清退 → _consumedNonces 满 MAX 后全站导航永久锁死
         //（审计发现 F 的原始形态）。
         var key = BrowserPolicyBroker.NativeNonceLedgerKey("session-9", "raw-native-nonce");
-        Assert.True(key.StartsWith("session-9:", StringComparison.Ordinal));
+        // xUnit2009：前缀判定用 Assert.StartsWith，不用 Assert.True(...StartsWith(...))
+        Assert.StartsWith("session-9:", key);
     }
 
     // ═══ ② 拒绝码逐条行为（R8-CS-CORE-1）═══
