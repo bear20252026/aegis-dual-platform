@@ -7,13 +7,17 @@
 #   * validate_release 的锁门禁只断「文本里出现过一次 --hash=」。
 # 本文件不验证「现在绿」，只验证「掏空它会红」——这是本仓对每个新门禁的固定要求
 # （R7-TOOL-04/R7-SH-03 同一口径），否则门禁自身就是下一个假绿源。
+#
+# 导入面：validate_release.py 在仓库根，ruff（src=.）判 first-party，须与
+# scripts/ 下两个门禁（判 third-party）分段——I001 实测口径。
 from __future__ import annotations
 
 import json
 
 import check_markdown_links as cml
-import validate_release as vr
 import verify_vectors as vv
+
+import validate_release as vr
 
 
 # ---------------------------------------------------------------- verify_vectors
