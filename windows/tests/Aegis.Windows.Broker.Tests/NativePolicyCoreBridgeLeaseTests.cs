@@ -72,8 +72,15 @@ public sealed class NativePolicyCoreBridgeLeaseTests
         // 裸指针获取点必须只有一处，且就在租约里——入口自己 DangerousGetHandle
         // 就绕过引用计数（use-after-free 的入口）。只数代码行：注释里的历史记述
         // 不算读取点（把注释也数进去，锚点会因写解释而变红，最终被人删掉）。
-        var code = string.Join(Environment.NewLine,
-            BridgeSource.Split(Environment.NewLine, StringSplitOptions.None)
+        // 行尾判据不得依赖运行平台：仓库加了 .gitattributes（* text=auto eol=lf）后，
+        // 源文件在 Windows runner 上也是 LF，而 Environment.NewLine 是 CRLF——用它切分
+        // 会把整份文件当成一行，注释过滤静默失效，本锚点从 1 变 2（第八轮 B6 由 CI 暴露）。
+        var code = string.Join("
+",
+            BridgeSource.Replace("
+", "
+").Split('
+', StringSplitOptions.None))
                 .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
         Assert.Equal(1, CountOf(code, "_brokerHandle.DangerousGetHandle()"));
         var take = code.IndexOf("return operation(Broker);", StringComparison.Ordinal);
