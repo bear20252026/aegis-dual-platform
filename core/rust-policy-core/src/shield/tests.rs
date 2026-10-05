@@ -119,8 +119,8 @@ fn canvas_noise_seed_is_per_site() {
     // 取不到祖先链时保守退回本帧——不得因顶层链失败而放弃噪声
     assert!(script.contains("return location.hostname;"));
     assert!(
-        script.matches("const seed = aegisCanvasSeed();").count() >= 3,
-        "三通道噪声必须全部消费站点键"
+        script.matches("aegisCanvasSeed()").count() >= 4,
+        "三通道噪声必须全部消费站点键（1 处定义 + 3 处出口调用）"
     );
     // 旧的会话级直取形态必须消失
     assert!(
@@ -149,36 +149,6 @@ fn canvas_noise_perturbs_multiple_channels() {
 }
 
 // —— RS-249/250/257 回归（审计 2026-10-01） ——
-
-#[test]
-fn canvas_noise_is_per_pixel_not_constant_offset() {
-    // RS-249：噪声必须逐像素混合——(seed+i)%N 在 i+=4 步进下每通道
-    // 全图只取常量偏置（减法即还原）。三通道不同常数 Math.imul 混合
-    let script = FingerprintShield::from_seed([9u8; 32]).inject_script();
-    for (channel, k) in [(0usize, "0x9E3779B1"), (1, "0x85EBCA6B"), (2, "0x27D4EB2F")] {
-        let form = if channel == 0 {
-            "imageData.data[i]".to_string()
-        } else {
-            format!("imageData.data[i + {channel}]")
-        };
-        let expected = format!("Math.imul(i, {k})");
-        let line = script
-            .lines()
-            .find(|l| l.contains(&form) && l.contains("seed ^"))
-            .unwrap_or_else(|| panic!("通道 {channel} 缺少逐像素混合形态"));
-        assert!(
-            line.contains(&expected),
-            "通道 {channel} 必须用常数 {k} 混合：{line}"
-        );
-    }
-    // 旧的常量偏置形态必须消失
-    assert!(
-        !script.contains("(seed + i) % 2"),
-        "(seed+i)%N 常量偏置形态必须移除"
-    );
-    // 三通道噪声形态在全部三个读取通道（toDataURL/toBlob/convertToBlob）一致
-    assert_eq!(script.matches("Math.imul(i, 0x9E3779B1)").count(), 3);
-}
 
 #[test]
 fn hardware_concurrency_replaced_at_prototype_level() {

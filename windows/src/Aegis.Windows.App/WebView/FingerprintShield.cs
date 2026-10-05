@@ -125,18 +125,32 @@ public static partial class FingerprintShield
           // CS-380（2026-10-02 审计）：噪声出口补齐 toBlob 与
           // OffscreenCanvas.convertToBlob（对齐 Rust shield.rs RS-206/RS-082
           // 覆盖面）——此前只包裹 toDataURL，另两出口原样读出无噪声。
-          // CS-379（2026-10-02 审计）：逐像素 PRNG（mulberry32）——此前
-          // (seed+i)%2 的扰动对整图退化为同一常量偏移（孪生 Rust/Android 已修）。
-          function mulberry32(a) {
-            return function() {
-              a |= 0; a = (a + 0x6D2B79F5) | 0;
-              var t = Math.imul(a ^ (a >>> 15), 1 | a);
-              t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-              return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-            };
+          // R8-CS-SEC-04（第八轮审计 2026-10-04）取代 CS-379 的 mulberry32：
+          // ① 公式与 Rust shield.rs / Android WebViewHardening 收敛为同一条
+          //   （murmur3 fmix32 终混 + R/G/B 取 bit0/bit8/bit16 三个互不相交位段）——
+          //   三端各持一种噪声算法本身就是指纹差异面，也是三端漂移的来源；
+          // ② 每像素新建一个 mulberry32 闭包再调三次是纯浪费（8K×8K 画布即
+          //   6.7×10^7 次闭包分配），整数混合免去分配；
+          // ③ 扰动不再 `& 0xff` 回绕——0 变 254、255 变 1，既留视觉伪影又给页面
+          //   「一行取模即检出防护」的判据；改边界取离岸方向。
+          function aegisNoiseMix(seed, px) {
+            var m = (seed ^ px) >>> 0;
+            m = Math.imul(m ^ (m >>> 16), 0x85ebca6b) >>> 0;
+            m = Math.imul(m ^ (m >>> 13), 0xc2b2ae35) >>> 0;
+            return (m ^ (m >>> 16)) >>> 0;
           }
+          function aegisNudge(current, up) {
+            if (current === 0) return 1;
+            if (current === 255) return 254;
+            return up ? current + 1 : current - 1;
+          }
+          // R8-CS-SEC-04：像素上限——超限画布直接走原实现（孪生 Android
+          // AD-270 同口径）。8K×8K 的离屏副本 + getImageData 是页面可低成本
+          // 触发的渲染进程冻结面，本端此前无守卫。
+          var AEGIS_MAX_NOISE_PIXELS = 4096 * 4096;
           function buildNoisedCopy(source) {
             if (!source.width || !source.height) return null;
+            if (source.width * source.height > AEGIS_MAX_NOISE_PIXELS) return null;
             var tmp, tmpCtx;
             if (typeof document !== 'undefined') {
               tmp = document.createElement('canvas');
@@ -152,13 +166,11 @@ public static partial class FingerprintShield
             tmpCtx.drawImage(source, 0, 0);  // 离屏副本取像素——WebGL 画布同路径
             var imageData = tmpCtx.getImageData(0, 0, source.width, source.height);
             var seed = parseInt(siteSeed.slice(0, 8), 16);
-            for (var i = 0; i < imageData.data.length; i += 4) {
-              // 逐像素独立流（seed ^ 像素字节偏移）——相邻像素扰动不一致；
-              // R/G/B 三通道独立扰动（单通道偏移可被通道差分抵消）
-              var rng = mulberry32((seed ^ i) | 0);
-              imageData.data[i] = (imageData.data[i] + (((rng() * 5) | 0) - 2)) & 0xff;
-              imageData.data[i + 1] = (imageData.data[i + 1] + (((rng() * 5) | 0) - 2)) & 0xff;
-              imageData.data[i + 2] = (imageData.data[i + 2] + (((rng() * 5) | 0) - 2)) & 0xff;
+            for (var px = 0, i = 0; i < imageData.data.length; px++, i += 4) {
+              var m = aegisNoiseMix(seed, px);
+              imageData.data[i] = aegisNudge(imageData.data[i], (m & 1) !== 0);
+              imageData.data[i + 1] = aegisNudge(imageData.data[i + 1], ((m >>> 8) & 1) !== 0);
+              imageData.data[i + 2] = aegisNudge(imageData.data[i + 2], ((m >>> 16) & 1) !== 0);
             }
             tmpCtx.putImageData(imageData, 0, 0);
             return tmp;
