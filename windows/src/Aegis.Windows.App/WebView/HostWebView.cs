@@ -102,16 +102,31 @@ public sealed partial class HostWebView : IDisposable
         // 取消 + 后台预热（下次加载命中缓存即恢复 hosts 本地域名放行）。
         _onFrameNavigationStarting = (sender, e) =>
         {
-            if (_privacy.HttpsOnly
-                && Uri.TryCreate(e.Uri, UriKind.Absolute, out var frameUri)
-                && frameUri.Scheme == Uri.UriSchemeHttp
-                && !TryClassifyFrameHostAsLocal(frameUri.Host))
+            // R8-CS-SEC-02（第八轮 2026-10-05）：取消先行。原写法末句
+            // e.Cancel = !TryAuthorizeNavigation(...) 在求值期抛出时整句作废，
+            // e.Cancel 停在默认 false —— 子帧照常加载，即 fail-open；条件求值本身
+            // （Uri 解析/本机判定）也一样能抛。现先落 fail-closed 默认，判定通过才放行。
+            e.Cancel = true;
+            try
             {
-                e.Cancel = true;
-                SecurityLog.Write($"[https] 明文 iframe 导航已取消: {RedactUrl(e.Uri)}");
-                return;
+                if (_privacy.HttpsOnly
+                    && Uri.TryCreate(e.Uri, UriKind.Absolute, out var frameUri)
+                    && frameUri.Scheme == Uri.UriSchemeHttp
+                    && !TryClassifyFrameHostAsLocal(frameUri.Host))
+                {
+                    SecurityLog.Write($"[https] 明文 iframe 导航已取消: {RedactUrl(e.Uri)}");
+                    return;
+                }
+                e.Cancel = !IsAuthorizedFailClosed(
+                    () => TryAuthorizeNavigation(
+                        webView, e.Uri, advancesDocumentGeneration: false), "子帧");
             }
-            e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: false);
+            catch (Exception ex)
+            {
+                SecurityLog.Write(
+                    $"[nav] 子帧策略链外层异常——维持取消: {ex.GetType().Name}: {ex.Message}");
+                e.Cancel = true;
+            }
         };
         _onNewWindowRequested = (sender, e) =>
         {
@@ -206,32 +221,6 @@ public sealed partial class HostWebView : IDisposable
         lock (_downloadsLock)
             _trackedDownloads.Clear();
         _wired = null;
-    }
-
-    /// <summary>导航决策（NavigationStarting 可 disallow——Microsoft 官方——真实取消语义）。</summary>
-    private void OnNavigationStarting(CoreWebView2 webView, CoreWebView2NavigationStartingEventArgs e)
-    {
-        // HTTPS-only：http 主动升级为 https（Edge 同款——加密优先）。
-        // 站点若无 https，升级后加载失败会走到错误页，绝不降级回明文。
-        // 例外（豁免升级）：本机/回环/hosts 映射到本机的域名**不升级**——本地
-        // 开发服务器通常只跑 http，升级到 https 必然失败（"开屏纯文字"根因）。
-        // CS-382（2026-10-02 审计）：顶层路径本机判定同帧路径口径（CS-339）——
-        // 此前冷缓存仍在 UI 线程同步 DNS（恶意页连开数个 hosts 域 http 链接即
-        // 冻结 UI）；改只读缓存，未命中按非本机 fail-closed 升级 + 后台预热。
-        // CS-388（2026-10-02 审计）：豁免扩展到非公网主机（内网/保留 IP 字面量
-        // 及 .local/.internal 等内网域名后缀）——UrlNormalizer 对裸内网 IP
-        //（如 192.168.1.1）补 http://，此前又被本升级路径改写 https 必失败
-        //（两端口径互斥）；复用 UrlSafety.IsPublicHost 判定取反。
-        if (_privacy.HttpsOnly
-            && Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)
-            && uri.Scheme == Uri.UriSchemeHttp
-            && !IsExemptFromHttpsUpgrade(uri.Host))
-        {
-            e.Cancel = true;
-            webView.Navigate(BuildHttpsUpgradeUrl(uri));
-            return;
-        }
-        e.Cancel = !TryAuthorizeNavigation(webView, e.Uri, advancesDocumentGeneration: true);
     }
 
     /// <summary>CS-382/388：HTTPS-only 升级豁免判定（纯同步——绝不在 UI 线程

@@ -12,7 +12,9 @@
 # scripts/ 下两个门禁（判 third-party）分段——I001 实测口径。
 from __future__ import annotations
 
+import csv
 import json
+from pathlib import Path
 
 import check_markdown_links as cml
 import verify_vectors as vv
@@ -120,3 +122,31 @@ def test_real_lock_passes_the_structural_check():
     text = (root / "requirements-ci.txt").read_text(encoding="utf-8")
     problems = vr.check_lock_structure(text, root / "requirements-ci.in")
     assert problems == [], f"真实锁未通过结构判定：{problems}"
+
+# ------------------------------------------------------------------ 台账机器可读索引
+def test_ledger_csv_files_are_straight_rectangles():
+    """docs/audit/*.csv 是「机器可读索引」——本轮实测 8/38 行的 location 里有裸逗号，
+    列全部右移（ID 对、priority 对，finding 落进 primary_reviewed 位），任何按列解析的
+    脚本都会读到错位数据。「有一份 CSV」不等于「CSV 可解析」。"""
+    root = Path(__file__).resolve().parents[2]
+    ledgers = sorted((root / "docs" / "audit").glob("*.csv"))
+    assert ledgers, "未找到任何台账 CSV——索引面消失，不作通过判定"
+    for path in ledgers:
+        rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
+        width = len(rows[0])
+        assert width >= 4, f"{path.name} 表头列数异常：{width}"
+        bad = [(i + 1, len(r)) for i, r in enumerate(rows) if r and len(r) != width]
+        assert not bad, f"{path.name} 列数不一致（表头 {width} 列）：{bad[:5]}"
+
+
+def test_ledger_csv_has_no_empty_key_columns():
+    """每行的 ID/优先级/批次不得为空——空值让「按批次过滤」静默少一条。"""
+    root = Path(__file__).resolve().parents[2]
+    path = root / "docs" / "audit" / "full-audit-2026-10-04-round8.csv"
+    rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
+    header, body = rows[0], [r for r in rows[1:] if r]
+    for idx, name in ((0, "ID"), (1, "priority"), (6, "batch")):
+        empties = [r[0] for r in body if not r[idx].strip()]
+        assert not empties, f"{name} 列存在空值：{empties[:5]}"
+    assert header == ["ID", "priority", "type", "location", "finding",
+                      "primary_reviewed", "batch"]
