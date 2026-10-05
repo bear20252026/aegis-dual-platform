@@ -22,7 +22,6 @@ import java.io.File
  *    （minified release 的运行时冒烟门禁缺口另记 R8-AD-06，属发布链基建。）
  */
 class NativeGateWiringAnchorTest {
-    
     private fun repoRoot(): File {
         var dir: File? = File(System.getProperty("user.dir")).absoluteFile
         repeat(8) {
