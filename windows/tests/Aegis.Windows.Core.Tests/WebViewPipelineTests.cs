@@ -258,10 +258,15 @@ public sealed class NavigationFailClosedBoundaryTests : IDisposable
         // 都必须带取消先行；xunit 的 string-Contains 没有 userMessage 重载
         foreach (var text in new[] { top, frame })
         {
-            // Substring 而非 .. 区间——避免 Range 索引在不同 LangVersion 下的差异
-            var handler = text.Substring(
+            // Substring 而非 .. 区间——避免 Range 索引在不同 LangVersion 下的差异；
+            // 再剔除注释行：本锚判的是**代码形态**，而修复说明里就写着旧形态原文，
+            // 不剔注释的话这条断言会被自己的注释打红（第八轮实测撞到）。
+            var code = text.Substring(
                     text.IndexOf("OnNavigationStarting", StringComparison.Ordinal))
-                .Replace("\r\n", "\n");
+                .Replace("\r\n", "\n")
+                .Split("\n")
+                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal));
+            var handler = string.Join("\n", code);
             Assert.Contains("e.Cancel = true;", handler);
             Assert.DoesNotContain("e.Cancel = !TryAuthorizeNavigation", handler);
         }
