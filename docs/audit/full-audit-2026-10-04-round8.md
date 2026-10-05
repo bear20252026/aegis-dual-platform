@@ -75,7 +75,7 @@ YAML 4/195、TOML 4/306。
 | R8-PY-02 | `contracts/codegen/validate_vector_schemas.py:118-121`；`scripts/verify_vectors.py:39` | 「空面即绿」的第二形态：invalid 侧缺 `manifest` 键 `continue` 静默跳过（同文件 valid 侧 `:104-106` 却记 failure，两套口径）；`MIN_FILES` 数**文件**不数**条目**，把任一 vectors 数组清空 ⇒ 循环 0 次、exit 0 | 保留 P2 |
 | R8-PY-08 | `scripts/check_markdown_links.py:79-85,122-135` | `resolve_target` 不做仓库根包含性判定（`](/../../Windows/win.ini)` 解析到仓外、本机存在即判可达）；`main()` 无 `checked == 0` 判定（扫描 0 个 .md 也打 ✅） | 保留 P2 |
 | R8-RS-02 | `core/rust-policy-core/src/shield.rs:160-181` | `aegisCanvasSeed()` 的会话种子混入循环以 `etld1.length` 为界 ⇒ hostname 取不到（`about:srcdoc` 派生 worker、opaque origin）时循环零次执行，种子退化为**与会话无关的常量**（跨用户跨站同噪声，反成「Aegis 用户」共享标识符）；另 worker 内 `WorkerLocation` 无 `ancestorOrigins` ⇒ 第三方帧的 worker 退回本帧 host（R7-CS1-05 的缺陷形态从 worker 出口复活） | 保留 P2；常量退化已随 B2 修，worker 顶层域下发属核心接口缺口（R8-RS-15） |
-| R8-AD-09 | `android/broker/src/test/.../AndroidBrokerTest.kt:159-170` | `if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {assertFalse} else {assertTrue}` 两分支都记通过，而 CI 的 `:broker:testDebugUnitTest` 不带该标志 ⇒ 恒走 else ⇒ **常规门禁里不可能失败**（R7-CS2-04 同型）；发布链带标志跑时 JVM 宿主加载的是 arm64 `.so`，验的其实是「JVM 加载不了这个 ELF」 | 保留 P2，已随 B3 改为可失败断言 + 发布链置位静态锚 |
+| R8-AD-09 | `android/broker/src/test/.../AndroidBrokerTest.kt:159-170` | 子代理判「`if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {assertFalse} else {assertTrue}` 两分支都记通过 ⇒ 常规门禁里不可能失败」。**主代理回读后降级**：那是**变体自适应**断言——默认变体断「放行托管 Broker」、置位变体断「block + 拒绝码」，任一侧被破坏都会红。真剩下的缺口只有两条，且都属接线/语义边界：①「置位变体确实被跑过」只由两个 workflow 的 `--tests` 字符串撑着，删参数即整套原生门禁语义在发布链里静默消失而 JVM 用例全绿；②置位变体跑在 JVM 宿主（x86_64 Linux）加载 arm64 `.so`，验的是「核心不可得即关闭」而非「核心缺失/ABI 失配」 | **降级 P2→P3**：接线缺口由 B3 的 `NativeGateWiringAnchorTest` 静态钉住；运行态覆盖缺口并入 R8-AD-06。附带教训见第六节第 2 条 |
 | R8-CS-SEC-04 | `windows/.../WebView/FingerprintShield.cs:155-162` | 三端唯一使用 `& 0xff` 回绕（0→254、255→1：视觉伪影 + 一行检出判据）、且无 Android AD-270 那条像素上限守卫（8K×8K ⇒ 6.7×10⁷ 次闭包分配 + 268MB ImageData 复制，页面可低成本冻结渲染进程） | 保留 P2，已随 B2 与双端同公式 |
 | R8-CS-SEC-08 | `HostWebView.cs:493,506-512,527-533`；`BrowserPolicyBroker.cs:343-346,364-366` | 6 条 `return false` 静默出口（consume 失败、代际推进失败、ProbeGate 失败、桥为 null）既不发 `NavigationDenied` 也不写审计码——这些恰是授权链内部不一致（nonce 重放/代际漂移/会话销毁）的唯一信号，全部表现为「导航无反应」；另 `:366` 有 `return false;            lock (…)` 行合并排版 | 保留 P2（待回读补全其余出口清单后实施） |
 | R8-CS-CORE-1 | `windows/tests/**` ↔ `BrowserPolicyBroker.cs:135,241,286,303,317` | 5 个生产拒绝码在测试全树零字串锚点（`session_context`/`download_session_context`/`native_confirmation_core_required`/`confirmation_rejected`/`native_policy_core_disposed`），现有用例只断 `is Type<Decision.Deny>` ⇒ 改码不红 | 保留 P2 |
@@ -122,11 +122,17 @@ YAML 4/195、TOML 4/306。
    主代理回读 `WebViewHardening.kt:371-377` 确认它乘的是**像素序号**（`px`，步进 1），
    故噪声位 = `seed&1 XOR px&1`——有逐像素性（2 个相位、三通道恒等），属「扰动宽度
    不足」的 P2，不属「恒退化」的 P1。Rust 用的才是 `i`（字节偏移，恒偶）。
-2. **R8-DOC-01 的时间指代被修正**：子代理写「Android 确认门早已启用，README 从来就
+2. **B3 首轮改名撞出的耦合（CI 实证）**：`release-android.yml:192` 与
+   `native-policy-artifacts.yml:236` 用 `--tests` **逐字**指名
+   `AndroidBrokerTest.defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore`。
+   主代理首轮把它改名并断言默认变体，Gradle 当场报 `No tests found for given includes`
+   把发布链打红。据此恢复原名、锚点独立成新文件，并加「两处过滤器与用例名必须对齐」的
+   常驻断言。**凡重命名被 workflow `--tests` 指名的用例，必须同批改过滤器。**
+3. **R8-DOC-01 的时间指代被修正**
    是错的」。主代理 `git show v2.2.0-beta.52:.github/workflows/release-android.yml`
    查证：该 tag 的 `assembleRelease` 只有 `requireNativePolicyCore=true`，第二个标志是
    第六轮之后才加的 ⇒ 对**已发布制品**该句仍成立，定性质改为「文档滞后」。
-3. **R8-DEPS-11 的否定式结论被采纳并保留**：Android 工具链四元组
+4. **R8-DEPS-11 的否定式结论被采纳并保留**
    （AGP 9.4.1 / Gradle 9.8.0 / Compose 插件 2.4.20 / BOM 2026.09.00）经上游逐个查证
    **均为最新稳定线**，本分区唯一可动的是 androidx.webkit 与 lifecycle 两格。这条
    「没有升级面」的结论按原样登记，避免下一轮重复报「AGP 落后」。
