@@ -169,9 +169,15 @@ fn canvas_noise_is_per_pixel_not_constant_offset() {
     );
     // 退化形态（最低位由偶数步进决定）必须整体消失
     assert!(!script.contains("Math.imul(i, "), "退化混合形态必须移除");
-    assert!(!script.contains("(seed + i) % 2"), "(seed+i)%N 常量偏置形态必须移除");
+    assert!(
+        !script.contains("(seed + i) % 2"),
+        "(seed+i)%N 常量偏置形态必须移除"
+    );
     // 边界不外溢 + 像素上限：nudge 定义一处、上限声明 1 次 + 三出口各判 1 次
-    assert_eq!(script.matches("if (current === 255) return 254;").count(), 1);
+    assert_eq!(
+        script.matches("if (current === 255) return 254;").count(),
+        1
+    );
     assert_eq!(script.matches("AEGIS_MAX_NOISE_PIXELS").count(), 4);
     // 噪声函数只有一处定义（防再被逐出口复制成三份各自漂移）
     assert_eq!(script.matches("function aegisApplyCanvasNoise").count(), 1);
