@@ -5,8 +5,9 @@
 # 默认，android/.editorconfig 同款）、JS/MJS 2（shared/shell 与
 # tests/ui-regression 既有 2 空格风格）、Python 4（PEP 8，全仓一致）、
 # Markdown 2。
-# 注意：android/ 面由 android/.editorconfig（root=true）独立管辖——其 CRLF
-# 与 [*.{kt,kts}] ktlint 微调保持现状、继续生效，本文件不重复、不覆盖。
+# 注意：android/ 面由 android/.editorconfig（root=true）独立管辖——其
+# [*.{kt,kts}] ktlint 微调继续生效，本文件不重复、不覆盖；行尾口径已于第八轮
+# 统一为 LF（R8-CI-09，原先该文件声明 crlf 而 blob 全是 LF）。
 # Windows 批处理必须 CRLF（cmd 解析器对 LF 兼容性差），其余文本统一 LF。
 
 root = true

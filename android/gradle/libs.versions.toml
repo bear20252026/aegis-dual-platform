@@ -13,7 +13,9 @@ detektPlugin = "1.23.8"
 # AndroidX
 androidx-webview = "1.15.0"
 androidx-activityCompose = "1.13.0"
-androidx-lifecycleRuntimeCompose = "2.10.0"
+# R8-DEPS-10（第八轮）：2.10.0 → 2.11.0（Google Maven maven-metadata 实测稳定线）
+# Compose BOM 不管辖 lifecycle，此处为显式版本，落后须手动 bump。
+androidx-lifecycleRuntimeCompose = "2.11.0"
 composeBom = "2026.09.00"
 # 工具链
 ktlint = "1.8.0"

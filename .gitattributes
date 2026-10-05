@@ -1,0 +1,31 @@
+# R8-CI-09（第八轮审计 2026-10-04）：行尾单源。此前仓库无 .gitattributes，检出后的
+# 行尾完全交给客户端 core.autocrlf——本机实测 667 个受管文件 i/lf w/crlf，于是
+# 「同一 commit 重跑得到同产物」对源码交付包不成立（评审包 .sha256 由 SP-249 随发布物
+# 公布，在 Windows 工作副本上重构建即字节不同）。第七轮 B4 已为此付过一次代价。
+# 仓库 blob 现状已是 LF，本文件只是把「靠客户端配置」换成「靠仓库声明」。
+
+* text=auto eol=lf
+
+# Windows 批处理：cmd 解析器对 LF 兼容性差，保持 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制与产物不参与换行归一化
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.bmp binary
+*.ico binary
+*.gif binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
+*.dll binary
+*.so binary
+*.a binary
+*.exe binary
+*.apk binary
+*.zip binary
+*.jks binary
+*.pdf binary

@@ -7,7 +7,12 @@ root = true
 
 [*]
 charset = utf-8
-end_of_line = crlf
+# R8-CI-09（第八轮审计 2026-10-04）：此处原写 crlf，而仓库 blob 全部是 LF
+# （`git ls-files` 实测受管文本 i/lf），即「配置与其管辖对象现状相反」——一旦有人跑
+# ktlint --format/spotless 就整树换行重写。第七轮 B4 已为行尾付过一次代价
+#（门禁自身把 CRLF 工作副本写成 LF＝「门禁自己污染源文件」）。现与仓库根 .editorconfig
+# 及新增的 .gitattributes 同口径。
+end_of_line = lf
 indent_size = 4
 indent_style = space
 insert_final_newline = true
