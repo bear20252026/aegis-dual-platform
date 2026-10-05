@@ -104,6 +104,7 @@ class ActionContract:
     """从 schema 派生的载荷判定面（单源，不含任何手抄字段名）。"""
 
     required: frozenset[str]
+    constrained_fields: frozenset[str]
     string_fields: frozenset[str]
     integer_fields: frozenset[str]
     min_lengths: frozenset[str]
@@ -113,8 +114,20 @@ class ActionContract:
     @classmethod
     def from_schema(cls, doc: dict[str, Any]) -> ActionContract:
         properties: dict[str, Any] = doc["properties"]
+        # R8-PY-03（第八轮 2026-10-04）：**带约束的字段集**要单独算，不能拿 required
+        # 当判定面——原实现只遍历 required，于是「把 origin 从 required 摘掉（pattern
+        # 原地保留）」就让 origin 的 pattern 判定整段消失，而全部红队夹具与门禁仍绿：
+        # 被证明物自己决定了证明面。现判定面取 required ∪ constrained_fields，
+        # 摘 required 只是把「缺失即违规」降成「出现即校验」，校验本身不再可摘。
+        constrained = frozenset(
+            name for name, spec in properties.items()
+            if spec.get("type") in ("string", "integer")
+            or (isinstance(spec.get("minLength"), int) and spec["minLength"] > 0)
+            or isinstance(spec.get("pattern"), str)
+            or isinstance(spec.get("enum"), list))
         return cls(
             required=frozenset(doc["required"]),
+            constrained_fields=constrained,
             string_fields=frozenset(
                 name for name, spec in properties.items() if spec.get("type") == "string"),
             integer_fields=frozenset(
@@ -136,12 +149,16 @@ class ActionContract:
         只判 schema 声明的形状（必填/类型/长度/pattern/enum）——语义门禁
         （scope 配对、代际、预算、nonce 一次性）仍归 broker，两条面不互相顶替。
         """
-        for name in sorted(self.required):
+        for name in sorted(self.required | self.constrained_fields):
             if not hasattr(action, name):
-                return f"契约必填字段在模型上不存在: {name}"
+                if name in self.required:
+                    return f"契约必填字段在模型上不存在: {name}"
+                continue   # 非 required 且模型无此属性——schema 允许的形状，不编造违背
             value = getattr(action, name)
             if value is None:
-                return f"缺必填字段: {name}"
+                if name in self.required:
+                    return f"缺必填字段: {name}"
+                continue
             if name in self.string_fields and not isinstance(value, str):
                 return f"字段 {name} 必须为字符串"
             if name in self.integer_fields and type(value) is not int:
