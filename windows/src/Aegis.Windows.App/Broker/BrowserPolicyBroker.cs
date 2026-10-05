@@ -7,7 +7,7 @@ using Aegis.Windows.Core.Security;
 /// <summary>Capability Broker——唯一允许产生本地副作用的边界（ADR-002/蓝图阶段 C）。
 /// 验证来源/会话/标签代际/scope/参数/预算/批准/nonce——没有 AuthorizedAction
 /// 不能导航/下载/导出/改策略。默认拒绝（fail-closed）。</summary>
-public sealed class BrowserPolicyBroker : IBroker
+public sealed partial class BrowserPolicyBroker : IBroker
 {
     public string PolicyVersion { get; } = "1.0";
     // 与 Rust 侧 broker.rs 的 MAX_CONSUMED_NONCES 保持对等：达到上限即 fail-closed 拒绝，
@@ -390,11 +390,11 @@ public sealed class BrowserPolicyBroker : IBroker
                     RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "native_consume_rejected");
                     return false;
                 }
-                // 原生 nonce 是裸的（无前缀），须加 sessionId 前缀与托管路径一致，
-                // 否则 DestroySession 的 RemoveWhere("sessionId:") 清不掉 →
-                // _consumedNonces 永不清理，满 MAX 后 TryRecordConsumedNonce 恒
-                // false → 该 broker 全站导航永久锁死（自 DoS，审计发现 F）。
-                if (!TryRecordConsumedNonce("${sessionId}:${action.Nonce}"))
+                // 原生 nonce 是裸的（无前缀），须加 sessionId 前缀与托管路径一致，否则
+                // DestroySession 的 RemoveWhere("sessionId:") 清不掉 → _consumedNonces
+                // 永不清理，满 MAX 后 TryRecordConsumedNonce 恒 false → 全站导航永久锁死
+                //（自 DoS，审计发现 F）。键推导抽入 NativeNonceLedger.cs（R8 回归）。
+                if (!TryRecordConsumedNonce(NativeNonceLedgerKey(sessionId, action.Nonce)))
                 {
                     // 账本已满或该 nonce 已兑换过——两种情形都必须与「核心拒绝」区分留痕
                     RecordAudit("deny", scope, UrlRedactor.Redact(rawUrl), "nonce_replay");
