@@ -3,7 +3,7 @@ R8-CS-SEC-01,P1,问题/门禁可达,windows/src/Aegis.Windows.App/WebView/HostWe
 R8-DOC-02,P1,问题/声明失实,docs/audit/full-audit-2026-10-04-round7.md:457,B8落地段称『需用户点一次确认』与两端实际行为均不符,yes,B8
 R8-AD-01,P1,问题/一致性,android/webview-adapter/src/main/kotlin/com/aegis/webviewadapter/AegisWebViewClient.kt:446-461,http无条件升https+NSC全局禁明文⇒Android打不开本机/内网,yes,待裁决
 R8-RS-01,P1,问题/欺骗强度,core/rust-policy-core/src/shield.rs:209-220,canvas噪声恒退化：奇数常数×4步进⇒每像素每通道同位，有效熵1bit,yes,B2
-R8-AD-02,P1,问题/R8,android/app/proguard-rules.pro:38,keep规则名含$嵌套但接口为顶层⇒命中0类⇒发布APK可能全导航拒绝（运行态未取证）,yes,B3
+R8-AD-02,P1,问题/R8,android/app/proguard-rules.pro:38,keep规则名含$嵌套但接口为顶层⇒命中0类⇒发布APK可能全导航拒绝（运行态未取证）（#98 补常驻门禁 ProguardKeepCoverageTest：源码推导二进制名逐个断言被 -keep，AD-219 嵌套形态反向锚为不出现）,yes,B3
 R8-CI-01,P1,问题/制品完整性,"release.yml:9,200 + GET /environments/release",release环境protection_rules为空而文档称受保护环境审批,yes,待裁决
 R8-CI-02,P1,问题/门禁可失败性,".github/workflows/legacy-python-guard.yml:72-82,129-137",隐式pwsh多命令步骤吞退出码：安装失败与7/8自检失败不可见,yes,B1
 R8-DOC-01,P1,问题/声明滞后,README.md:24-26,『两端均未生效』对beta.52成立、对HEAD失实（Android确认门已启用）,yes,B8
