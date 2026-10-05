@@ -111,7 +111,7 @@ def test_consistent_lock_yields_no_problems(tmp_path):
 
 
 def test_real_lock_passes_the_structural_check():
-    root = vr.Path(__file__).resolve().parents[1]
+    root = vr.Path(__file__).resolve().parents[2]
     text = (root / "requirements-ci.txt").read_text(encoding="utf-8")
     problems = vr.check_lock_structure(text, root / "requirements-ci.in")
     assert problems == [], f"真实锁未通过结构判定：{problems}"
