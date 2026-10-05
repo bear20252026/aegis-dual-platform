@@ -210,8 +210,7 @@ impl FfiBroker {
             };
         }
         // 高危目标判定（本机/私网）——纯函数，见 security_policy 文档
-        let high_risk =
-            crate::security_policy::SecurityPolicy::is_high_risk_host(policy_host);
+        let high_risk = crate::security_policy::SecurityPolicy::is_high_risk_host(policy_host);
         let nonce = match generate_nonce() {
             Ok(value) => value,
             Err(reason) => return FfiDecision::Deny { reason },
