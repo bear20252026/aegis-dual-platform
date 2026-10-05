@@ -29,7 +29,7 @@ R8-CS-SEC-02,P2,问题/fail-open,windows/src/Aegis.Windows.App/WebView/HostWebVi
 R8-RS-15,P2,提升/一致性根因,core/rust-policy-core/src/lib.rs:43-56,13个C ABI导出无任何JS生成入口⇒三端手抄同一份JS,no,B9
 R8-SH-15,P2,问题/测试弱断言,tests/ui-regression/start_page.test.mjs:36,143,BUG-001/006回归锁语料语言错配（setTag是Java/setOf是Kotlin）⇒两条恒真,no,B5
 R8-CI-06,P2,问题/供应链,.github/dependabot.yml ↔ dependabot/alerts,triage文档称已dismissing而实测open=9含1条critical,no,B7
-R8-PY-03,P2,问题/红队,agent/action_contract.py:139,判定面只遍历required：从required摘掉origin即pattern门禁整段消失,no,B5
+R8-PY-03,P2,问题/红队,agent/action_contract.py:139,判定面只遍历required：从required摘掉origin即pattern门禁整段消失（B5余量已闭：判定面改取required∪带约束字段集，并钉有界常量集+双向反证用例）,yes,B5
 R8-DOC-15,P2,问题/文档自述失实,agent/broker.py:29-33,模块 docstring 称「local-ipc/*.md 记有现状注记」——实测三个文件零注记，且 identity.md:19 仍把第六轮连类删除的 E2EBroker 称作现役等价实现 ⇒ 阶段 G 的交付面（OS ACL/进程身份/传输/撤销）在正典树无人实现,yes,B8
 R8-DOC-16,P3,问题/验证步指向不存在实现,docs/runbooks/device-validation.md:23,第 10 步要求验证 NewBrowserVersionAvailable 的「保存状态/通知/受控重启」，正典树既无该事件订阅也无 RuntimeUpdater.cs ⇒ 该步永远无法真实执行，却以可勾验步骤存在,yes,B8
 R8-DOC-17,P3,问题/以清单代替实现,android/README.md:9,clearPrivateData（无痕 profile 清理）被列为「发布前强制控制（不可绕过门禁——不以路线图代替实现）」，而全树零引用——该行自身违反它宣称的纪律,yes,B8

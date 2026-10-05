@@ -8,9 +8,11 @@ expires_at」= 永久有效授权，`file:///C:/secrets`、`javascript:alert(1)`
 `method=ARBITRARY` 全部 allow。同仓 `test_field_set_matches_schema` 只比对
 字段名集合，所以这块缺口一直显示为「契约已对齐」。
 
-本文件锚三件事：① 判定面确实**取自** schema（并可用改写副本反证不是硬编码）；
+本文件锚四件事：① 判定面确实**取自** schema（并可用改写副本反证不是硬编码）；
 ② 省略/置空任一必填字段绝不放行；③ schema 读不到或结构不合预期时 broker
-拒绝构造（"读不到就算通过" 是本项目已封的失效形态）。
+拒绝构造（"读不到就算通过" 是本项目已封的失效形态）；④ R8-PY-03——判定面**不得
+由被证明物自己决定**：原实现只遍历 `required`，把 `origin` 从 required 摘掉（pattern
+原地保留）就让 origin 校验整段消失，而红队夹具与五门禁全部仍绿。
 """
 
 from __future__ import annotations
@@ -71,6 +73,65 @@ def test_widened_schema_copy_moves_the_gate(tmp_path):
     assert widened.violation(action) is None
     assert CONTRACT.violation(action) is not None
     assert PolicyBroker().evaluate(action) == Decision.DENY_SCHEMA
+
+
+def _schema_copy(tmp_path, mutate):
+    """出厂 schema 的改写副本（判定面来源单源，测试不另抄一份字段表）。"""
+    doc = json.loads(json.dumps(SCHEMA))
+    mutate(doc)
+    path = tmp_path / "action.schema.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    return load_action_schema(path)
+
+
+def test_narrowing_required_does_not_shrink_the_judgment_surface(tmp_path):
+    """R8-PY-03 的核心反证：摘掉 required 里的 origin 之后，坏 origin 仍必须被拒。
+
+    修复前这里是绿的——`violation()` 只遍历 required，pattern 声明还在 schema 里
+    却再无人执行；等价于把「证明面」交给被证明的对象自己签字。
+    """
+    narrowed = ActionContract.from_schema(
+        _schema_copy(tmp_path, lambda doc: doc["required"].remove("origin")))
+    assert "origin" not in narrowed.required
+    assert "origin" in narrowed.constrained_fields
+
+    bad = narrowed.violation(_fresh(origin="javascript:alert(1)"))
+    assert bad is not None and "origin" in bad, (
+        f"required 摘掉 origin 后 pattern 判定整段消失：{bad!r}")
+
+    # 枚举同理：method 摘出 required 后仍不得接受词表外的值
+    m_narrowed = ActionContract.from_schema(
+        _schema_copy(tmp_path, lambda doc: doc["required"].remove("method")))
+    assert m_narrowed.violation(_fresh(method="TELEPORT")) is not None
+
+
+def test_optional_absent_constrained_field_is_not_invented_as_violation(tmp_path):
+    """反向对照（防「一律拒绝」式假修复）：非 required 且确实缺席的字段不是违背。
+
+    收紧判定面的正当边界是「出现即校验」，不是「缺席即有罪」——否则同一改动会
+    把 schema 允许的可选形态判成攻击样例。
+    """
+    narrowed = ActionContract.from_schema(
+        _schema_copy(tmp_path, lambda doc: doc["required"].remove("origin")))
+    assert narrowed.violation(_fresh(origin=None)) is None
+    # 出厂面（origin 属 required）同形态必须照旧拒绝
+    assert CONTRACT.violation(_fresh(origin=None)) is not None
+
+
+def test_judgment_surface_is_a_pinned_bounded_set():
+    """判定面是有界常量集：扩/缩 required 或约束集都要显式改这里（同 KNOWN_* 口径）。
+
+    写死这 10 个名字是刻意的——它与 `contracts/schemas/action.schema.json` 的
+    required 逐字相等（上一条用例已锚定派生关系），任何"少判一个字段"的改动
+    都会撞在这里，而不是静默少一条断言。
+    """
+    assert CONTRACT.required == frozenset({
+        "session_id", "tab_id", "document_generation", "origin", "method",
+        "canonical_parameters", "scope", "expires_at", "nonce", "policy_version",
+    })
+    assert CONTRACT.constrained_fields == CONTRACT.required
+    assert sorted(CONTRACT.required | CONTRACT.constrained_fields) == sorted(
+        SCHEMA["properties"])
 
 
 @pytest.mark.parametrize("field", sorted(CONTRACT_REQUIRED))
