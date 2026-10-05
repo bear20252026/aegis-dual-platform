@@ -19,7 +19,9 @@ const HOSTJS = readFileSync(join(SHELL, 'start.js'), 'utf8');
 const MAINJS = readFileSync(join(SHELL, 'start.main.js'), 'utf8');
 const SNAKE = readFileSync(join(SHELL, 'start.snake.js'), 'utf8');
 const IMPORT = readFileSync(join(SHELL, 'start.import.js'), 'utf8');
-// 全部脚本源（内联块已外置——BUG-001/006/008 的"无残留"断言覆盖四个文件）
+// 全部脚本源（内联块已外置——BUG-008 的「无残留」断言覆盖四个文件）。
+// BUG-001/BUG-006 不在此面：被保护的代码是 Android Kotlin/Java，判在 JS 上恒真
+//（R8-SH-15），锁已迁至 android/app 的 DocumentStartInjectionRegressionTest。
 const allScripts = HOSTJS + '\n' + MAINJS + '\n' + SNAKE + '\n' + IMPORT;
 
 function syntaxOk(body) {
@@ -32,9 +34,9 @@ function syntaxOk(body) {
   return true;
 }
 
-test('BUG-001 启动闪退：不得用 generateViewId 作 setTag key（WeakHashMap 注册表）', () => {
-  assert.ok(!/setTag\(/.test(allScripts), 'shell 脚本不应包含 setTag 调用');
-});
+// BUG-001 的回归锁已迁出本文件（R8-SH-15，第八轮 2026-10-05）：
+// setTag 是 Android View API，首页 JS 里永远不会出现——原判据恒真、零保护。
+// 正身见 android/app/src/test/kotlin/com/aegis/browser/DocumentStartInjectionRegressionTest.kt
 
 test('BUG-002 搜索 IME 失效：form submit + type=search + enterkeyhint 必须存在', () => {
   assert.match(HTML, /<form id="searchForm"/, '搜索框必须有 form 容器（IME action 触发路径）');
@@ -139,9 +141,7 @@ test('BUG-005 离线画板：按钮 + 桥调用 + 双端打包配置必须齐备
   assert.match(wfw, /uses: \.\/\.github\/actions\/prepare-geogebra/, 'Windows 构建同样必须引用复合 action');
 });
 
-test('BUG-006 allowedOriginRules 全域通配崩溃：不得出现 "https://*" 规则', () => {
-  assert.ok(!/setOf\("https:\/\/\*", "http:\/\/\*"\)/.test(allScripts), '通配规则回归');
-});
+// BUG-006 同上迁移：setOf 是 Kotlin 字面量，判在 shell JS 上恒真（R8-SH-15）。
 
 test('BUG-007 移动端布局：viewport meta 必须存在', () => {
   assert.match(HTML, /<meta name="viewport" content="width=device-width/);
