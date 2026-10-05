@@ -81,7 +81,7 @@ fn canvas_noise_formula_is_actually_non_degenerate() {
     assert_ne!(a, b, "跨站点种子必须给出不同噪声序列");
 
     // 站点键为空时仍须随会话种子变化（R8-RS-02 的退化出口）
-    let empty_a: u32 = (0..64u32).map(|s| js_fmix(0, s)).sum();
-    let empty_b: u32 = (0..64u32).map(|s| js_fmix(0xFFFF_FFFF, s)).sum();
+    let empty_a: Vec<u32> = (0..64u32).map(|s| js_fmix(0, s) & 1).collect();
+    let empty_b: Vec<u32> = (0..64u32).map(|s| js_fmix(0xFFFF_FFFF, s) & 1).collect();
     assert_ne!(empty_a, empty_b, "站点键为空时噪声仍须随会话种子变化");
 }
