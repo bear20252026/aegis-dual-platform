@@ -264,3 +264,14 @@ mypy `2.3.1 → 2.4.0` 须 pip-compile 整树重算 hash；Test.Sdk `17.14.1 →
 **已在复核中确证并升入第四节的条目**（共 11 条）：R8-CI-03、R8-SH-10、R8-PY-02、
 R8-PY-08、R8-RS-02、R8-RS-13、R8-AD-09、R8-CS-SEC-04、R8-CS-SEC-08、R8-CS-CORE-1、
 R8-CS-CORE-2。计数列取子代理自报口径，可能包含上述已确证者，故为**上界**而非精确值。
+
+## 十二、落地状态（同轮续）
+
+| 批 | 状态 | 说明 |
+| --- | --- | --- |
+| B1 门禁扫描面 | **已落地并合并（PR #86）** | 四类盲区补齐 + 空扫描面 fail-closed + 7 种形态故障注入；CI 全绿后并入。过程中门禁自己的 `--self-test` 有一条期望值写错（`& tool` 后仅跟 `Write-Host` 时它就是末条原生命令，不该判违规），被自家门禁拒绝假绿——属预期作用 |
+| B2 canvas 噪声三端统一 | **已落地并合并（PR #87）** | fmix32 + 位段分离 + 边界离岸 + 像素上限 + 空站点键混入会话种子；三端各一条性质断言。cargo/clippy、dotnet、gradle 四门禁全绿 |
+| B3 Android keep 规则 | **部分落地并合并（PR #88）** | 规则名改正 + `NativeGateWiringAnchorTest`（发布链两个 `-P` 标志、两处 `--tests` 过滤器与用例名对齐、BuildConfig 字段同源）。**`ProguardKeepCoverageTest`（按声明位置推导二进制名的常驻覆盖门禁）本批摘出**：连续 4 轮被自家 ktlint/detekt 与我的行区间替换自伤打回，不该让 P1 修复继续排队；推导逻辑已在本地孪生脚本上证好（两个二进制名正确、改回 AD-219 形态必报缺失），留下一批单独落 |
+| B6 行尾单源 + 无重锁 bump | **已落地并合并（PR #90）** | `.gitattributes` + `android/.editorconfig` 归一 + lifecycle 2.11.0 + sbom-action v0.24.3。**顺带证出一条新缺陷**：静态锚测试用 `Environment.NewLine` 切源码，在检出改 LF 后整份文件被当成一行、注释过滤静默失效（锚点计数 1→2，CI 当场打红）——已把该锚改为平台无关切分；同型风险面为 `WindowLogicTests`（切的是运行时日志，不受影响）|
+| B4 静默拒绝改可见 | **部分落地**（本批） | `HostWebView.TryAuthorizeNavigation` 三条静默出口（RequireConfirmation 且确认门未启用、裁决非 Allow 的非预期形态、授权兑换失败）全部上抛 `NavigationDenied` 用户可见文案；`BrowserPolicyBroker.TryConsumeNavigation` 六条静默 `return false` 补审计码（`native_policy_core_unavailable` / `authorization_missing` / `native_policy_core_disposed` / `session_context` / `native_consume_rejected` / `nonce_replay`），并修掉 `return false;            lock (…)` 的行合并排版。**只改可见性，不改放行/阻断方向**（方向属第七节待裁决 1）。R8-CS-CORE-1 的「5 个拒绝码零行为断言」与 R8-CS-CORE-2 的原生前置分支断言留下一批，与本批的审计码一并钉成用例 |
+| B5 / B7 / B8 / B9 | 未动 | 见第九节；B7 需先定「重锁在哪做」（第七节 4），B8 是纯文档批次 |

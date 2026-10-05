@@ -503,9 +503,29 @@ public sealed partial class HostWebView : IDisposable
             NavigationDenied?.Invoke(deny.Reason.Detail);
             return false;
         }
-        if (decision is not Broker.Decision.Allow allow
-            || !_broker.TryConsumeNavigation(allow.Action, _sessionId, _tabId, _documentGeneration, rawUrl, "navigation"))
+        // R8-CS-SEC-01（第八轮审计 2026-10-04，P1）：核心返回 RequireConfirmation 时，
+        // 出货构建（安装器刻意不写 RequireNavigationConfirmation）此前落到
+        // 「非 Allow 即 return false」——不发 NavigationDenied、不弹面板，用户按回车后
+        // 浏览器毫无反应。第七轮 B8「本机与内网必须能打开」因此在唯一正典制品上
+        // 不可观测。本处只补可见性，不改放行/阻断方向——「出厂启用确认门」还是
+        // 「核心不再把本机与内网判高危」属产品决策，见第八轮台账第七节待裁决。
+        if (decision is Broker.Decision.RequireConfirmation)
+        {
+            NavigationDenied?.Invoke(
+                "该目标被原生策略核心判为需显式确认，但本构建未启用导航确认门——已按失败闭合取消。");
             return false;
+        }
+        if (decision is not Broker.Decision.Allow allow)
+        {
+            NavigationDenied?.Invoke("导航裁决无法解析——已按失败闭合取消。");
+            return false;
+        }
+        if (!_broker.TryConsumeNavigation(allow.Action, _sessionId, _tabId, _documentGeneration, rawUrl, "navigation"))
+        {
+            // 失效的具体原因（会话/代际、nonce 重放、桥不可用）由 broker 侧以审计码留痕
+            NavigationDenied?.Invoke("授权已失效或无法兑换（会话变化、重放或策略更新）——导航被取消。");
+            return false;
+        }
 
         if (!advancesDocumentGeneration)
             return true;
