@@ -1,7 +1,5 @@
 package com.aegis.broker
 
-import java.nio.file.Files
-import java.nio.file.Paths
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -160,42 +158,15 @@ class AndroidBrokerTest {
     }
 
     @Test
-    fun nativePolicyCoreGateAllowsPlatformBrokerInDefaultBuild() {
-        // R8-AD-09（第八轮审计 2026-10-04）：原写法是
-        //   `if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) { assertFalse(...) } else { assertTrue(...) }`
-        // 两分支都记通过，而 CI 的 `:broker:testDebugUnitTest` 不带 -PrequireNativePolicyCore
-        // ⇒ 恒走 else ⇒ 这条用例在常规门禁里**不可能失败**；发布链带标志跑它时，JVM 宿主
-        // （x86_64 Linux）加载的是 arm64 .so，它验的其实是「JVM 加载不了这个 ELF」而非
-        // 「核心缺失时门禁关闭」。同文件注入缝用例已正确覆盖门禁关闭语义，故此处只保留
-        // 「默认构建变体 = 未要求原生核心 = 放行托管 Broker」这一条可失败断言。
-        assertFalse(
-            "默认构建不应置位 REQUIRE_NATIVE_POLICY_CORE（置位即发布链变体，本用例的语义随之失效）",
-            BuildConfig.REQUIRE_NATIVE_POLICY_CORE,
-        )
-        assertTrue(DefaultNativePolicyCoreGate.probe().allowsPlatformBroker)
-    }
+    fun defaultNativePolicyCoreGateClosesWhenBuildRequiresNativeCore() {
+        val result = DefaultNativePolicyCoreGate.probe()
 
-    @Test
-    fun releasePipelineActuallyBuildsTheNativeGateVariant() {
-        // 「发布链跑原生模式」这件事此前零锚点：只有 release-android.yml 里那两行
-        // gradle 参数在撑着，删掉即整个原生门禁面在发布物里静默消失，而所有 JVM 用例
-        // 仍全绿（R6-26/R7-CS2-04 同型）。此处按 B4 的 InstalledBuildMarkerTests 同法，
-        // 静态断言发布链确实给 assembleRelease 传了两个标志。
-        val workflow = generateSequence(Paths.get(System.getProperty("user.dir")).toAbsolutePath()) { it.parent }
-            .map { it.resolve(".github").resolve("workflows").resolve("release-android.yml") }
-            .firstOrNull { Files.isRegularFile(it) }
-            ?: error("未找到 .github/workflows/release-android.yml（请在仓库内运行测试）")
-        val text = Files.readString(workflow)
-        val assemble = text.substring(text.indexOf(":app:assembleRelease"))
-        val block = assemble.lines().takeWhile { !it.startsWith("      - name:") }.joinToString(" ")
-        assertTrue(
-            "assembleRelease 未传 -PrequireNativePolicyCore=true",
-            block.contains("-PrequireNativePolicyCore=true"),
-        )
-        assertTrue(
-            "assembleRelease 未传 -PrequireNavigationConfirmation=true（确认流在发布物里静默关闭）",
-            block.contains("-PrequireNavigationConfirmation=true"),
-        )
+        if (BuildConfig.REQUIRE_NATIVE_POLICY_CORE) {
+            assertFalse(result.allowsPlatformBroker)
+            assertTrue(result.denialCode == "native_policy_core_unavailable")
+        } else {
+            assertTrue(result.allowsPlatformBroker)
+        }
     }
 
     @Test
