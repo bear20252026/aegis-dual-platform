@@ -38,7 +38,11 @@ concurrency:
 jobs:
   build-windows:
     name: Build Windows x64 policy DLL
-    runs-on: windows-latest
+    # R8-DEPS-11（第八轮 B6）：出货链钉 windows-2025，不用浮动的 windows-latest——
+    # 同一 commit 在浮动镜像上可能落到不同 VS/SDK/WebView2 Runtime 小版本，
+    # 「可复现构建」的声明就只剩理论。标签有效性由必需检查 windows-contract-build
+    # 在每个 PR 上实测（不存在的标签会停在 waiting，合不进去即回退本行）。
+    runs-on: windows-2025
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)

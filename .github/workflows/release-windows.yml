@@ -36,7 +36,9 @@ jobs:
 
   build:
     needs: pin-check
-    runs-on: windows-latest
+    # R8-DEPS-11（第八轮 B6）：出货链钉 windows-2025（理由见 native-policy-
+    # artifacts.yml 的 build-windows job 同一注释）。
+    runs-on: windows-2025
     timeout-minutes: 60
     permissions:
       id-token: write
