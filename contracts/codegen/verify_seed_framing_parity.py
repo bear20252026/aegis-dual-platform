@@ -32,7 +32,11 @@ LIST_PATH = ROOT / "contracts" / "policy" / "public-suffix-list.txt"
 
 CS_SEED = ROOT / "windows/src/Aegis.Windows.App/WebView/FingerprintShield.Seed.cs"
 CS_MAIN = ROOT / "windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs"
-KT = ROOT / "android/app/src/main/java/com/aegis/browser/WebViewHardening.kt"
+# R8-CS-SEC-14（第八轮）：WebViewHardening 的 9 阶段注入文本按 Stage 边界外迁成两个文件，
+# `KT` 因此指代表体所在的**种子段**（Stage 1-3），框定要件横跨三段 ⇒ 下面按三段之和判定。
+KT_MAIN = ROOT / "android/app/src/main/java/com/aegis/browser/WebViewHardening.kt"
+KT = ROOT / "android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesSeed.kt"
+KT_TAIL = ROOT / "android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt"
 RS = ROOT / "core/rust-policy-core/src/shield.rs"
 
 # 表体下限：权威清单条目数低于此值即视为「解析塌陷/清单被清空」，判环境错误
@@ -54,7 +58,7 @@ def framing_specs() -> dict[str, tuple[list[pathlib.Path], tuple[str, ...], tupl
         "C#": ([CS_MAIN, CS_SEED],
                ("getETLD1(aegisTopLevelHostname())",) + REQUIRED_CHANNEL,
                FORBIDDEN_FRAME_ONLY),
-        "Kotlin": ([KT],
+        "Kotlin": ([KT_MAIN, KT, KT_TAIL],
                    ("getETLD1(aegisTopLevelHostname())",) + REQUIRED_CHANNEL,
                    FORBIDDEN_FRAME_ONLY),
         "Rust": ([RS],

@@ -77,8 +77,10 @@ fn all_three_ends_share_the_same_clamp_form() {
             repo_file("../../windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs"),
         ),
         (
-            "Android WebViewHardening",
-            repo_file("../../android/app/src/main/java/com/aegis/browser/WebViewHardening.kt"),
+            "Android WebViewHardening Stage 8",
+            repo_file(
+                "../../android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt",
+            ),
         ),
     ];
     for (name, text) in ends {

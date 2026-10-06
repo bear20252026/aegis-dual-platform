@@ -30,8 +30,14 @@ fn pipeline(mode: ProtectionMode) -> String {
 const REGISTER: &str = "proxy.register.v1";
 const CLOSE: &str = "proxy.register.close.v1";
 
-/// Android 侧注入脚本（WebViewHardening.kt 里的 9 阶段字符串）。
-const KOTLIN_SHIELD: &str = "../../android/app/src/main/java/com/aegis/browser/WebViewHardening.kt";
+/// Android 侧注入脚本。R8-CS-SEC-14 把 9 阶段文本按 Stage 边界拆成两个文件：
+/// 注册接口在 Seed 段（Stage 1），撤销行在 Shield 段（blob 末尾）——**分处两段**
+/// 正是 R8-RS-09 的语义，所以对账必须读两段之和，否则「撤销行没跟着搬」这种
+/// 漂移正好落在盲区里。
+const KOTLIN_SEED: &str =
+    "../../android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesSeed.kt";
+const KOTLIN_TAIL: &str =
+    "../../android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt";
 
 fn repo_file(rel: &str) -> String {
     let manifest = env!("CARGO_MANIFEST_DIR");
@@ -120,7 +126,7 @@ fn android_shield_shares_the_same_register_discipline() {
     // `configurable: false`——零校验、且因为不可替换而**永不撤销** ⇒ 任意页面脚本
     // 在任意时刻都能登记伪造映射（比我方 Rust 侧的 RS-252 校验更弱）。
     // 三端不一致本身就是缺陷，故在此对账而不是只在 Kotlin 用例里自说自话。
-    let kt = repo_file(KOTLIN_SHIELD);
+    let kt = repo_file(KOTLIN_SEED) + &repo_file(KOTLIN_TAIL);
     assert!(kt.contains("var open = true;"), "Android 缺闭包内窗口标志");
     assert!(
         kt.contains("if (!open) return;"),
