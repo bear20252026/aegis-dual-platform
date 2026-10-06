@@ -379,6 +379,10 @@ class WebViewHardeningScriptTest {
         assertTrue("Stage 8 缺少 performance.now 包装", script.contains("Object.defineProperty(performance, 'now'"))
         // AD-108：Date.now 只做整数网格取整（无随机分量）——入口必须存在
         assertTrue("Stage 8 缺少 Date.now 整数网格", script.contains("reduceIntegral"))
+        // R8-RS-04：单调高水位三件套齐在；断**次数**而非「标识符在场」——
+        // 只声明却不在读回路径上比较/回填，等于没有钳位（恒绿的另一种形态）。
+        assertTrue("Stage 8 缺单调高水位声明", script.contains("var lastPerf = -Infinity;"))
+        assertEquals("Stage 8 钳位形态不完整", 4, "lastPerf".toRegex().findAll(script).count())
     }
 
     // ------------------------------------------------------------- Stage 9

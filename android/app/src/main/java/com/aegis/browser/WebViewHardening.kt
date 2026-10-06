@@ -615,7 +615,16 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
   var __aegisReg = window[Symbol.for('proxy.register.v1')];
   try {
     var o = performance.now.bind(performance);
-    var nowWrapper = function() { return reduce(o()); };
+    // R8-RS-04（第八轮）：圆整后叠加**无状态**随机抖动 ⇒ 相邻两次读数可回退（t2 < t1），
+    // 违反规范的单调非递减；回退既是一行即检的防护信号也打乱页内动画。钳高水位——
+    // 与 C# 孪生 Stage 8 同形态同命名（注记里不写那个变量名：用例按出现次数判定）。
+    var lastPerf = -Infinity;
+    var nowWrapper = function() {
+      var v = reduce(o());
+      if (v < lastPerf) v = lastPerf;
+      lastPerf = v;
+      return v;
+    };
     Object.defineProperty(performance, 'now', { value: nowWrapper, writable: false, configurable: false });
     if (__aegisReg) __aegisReg(nowWrapper, o);
   } catch(e) {}
