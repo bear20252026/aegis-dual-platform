@@ -50,6 +50,17 @@ class WebViewHardeningScriptTest {
             "桥守卫读取键必须一致（同源契约）",
             WebViewHardening.BRIDGE_GUARD_JS.contains("window[Symbol.for('proxy.register.v1')]"),
         )
+        // R8-RS-09（第八轮）：注册资格由闭包窗口标志控制 + 双侧重复登记拒绝 +
+        // blob 末尾同步关窗。AD-297 版是裸 set 且 configurable:false ⇒ 零校验且
+        // 永不撤销（不可替换就没有关闭通道），比 Rust 侧的 RS-252 更弱。
+        // 跨端对账另见 core/rust-policy-core/tests/tostring_window.rs。
+        assertTrue("Stage 1 缺闭包内窗口标志", script.contains("var open = true;"))
+        assertTrue("注册函数未检查窗口标志", script.contains("if (!open) return;"))
+        assertTrue(
+            "注册必须拒绝重复的 original 或 proxy",
+            script.contains("if (proxyMap.has(original) || proxyMap.has(proxy)) return;"),
+        )
+        assertTrue("缺 blob 末尾的同步撤销调用", script.contains("if (c) c();"))
     }
 
     // ------------------------------------------------------------- Stage 2

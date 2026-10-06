@@ -50,6 +50,10 @@ impl ToStringGuard {
     /// 前缀）——Symbol 描述本身即探测信号，品牌名直指防护存在。
     pub const REGISTER_SYMBOL: &'static str = "proxy.register.v1";
 
+    /// R8-RS-09：注册窗口关闭入口的 Symbol 键。与 `REGISTER_SYMBOL` 互不为
+    /// 子串——既有计数类用例按 `Symbol.for('proxy.register.v1')` 统计，不能被本键误命中。
+    pub const CLOSE_SYMBOL: &'static str = "proxy.register.close.v1";
+
     /// 生成 toString 欺骗 JS 注入脚本。
     ///
     /// 覆盖 Function.prototype.toString 和 Function.prototype.toLocaleString，
@@ -97,40 +101,62 @@ impl ToStringGuard {
   // RS-218（2026-09-26 审计）：Symbol 键仍可被 getOwnPropertySymbols 列出
   //（非不可发现）——收益是具名字符串探测落空；描述串已去品牌化
   var KEY = Symbol.for('{sym}');
+  var CLOSE_KEY = Symbol.for('{close_sym}');
+  // R8-RS-09（第八轮 2026-10-06）：注册资格改由**闭包内的 open 标志**决定。
+  // RS-252 原设计是「窗口期结束后把 window 上的属性替换成惰性函数」——那挡不住
+  // 替换之前已拿到引用的调用方，且撤销排在注入脚本之后的宏任务里，而
+  // document-start 注入与后续 HTML 解析在**同一个任务**内完成 ⇒ 头部内联脚本
+  // 在撤销之前就能注册。现由管线末尾同步关掉标志（`close_script()`），页面脚本
+  // 在此之后才有执行机会 ⇒ 窗口为零；引用被捕获也无用（函数体自己失效）。
+  var open = true;
   Object.defineProperty(window, KEY, {{
     value: function(proxy, original) {{
+      if (!open) return;
       // RS-252（2026-10-01 审计）：注册接口参数防御——页面拿到注册函数后
       // 可注入伪造映射（自身钩子伪装成原生实现）。双函数校验 + original
       // 不得是已注册代理（链式注册 proxy→proxy 会让包装源码经 toString
       // 泄漏给任意后续注册者）
       if (typeof proxy !== 'function' || typeof original !== 'function') return;
-      if (proxyMap.has(original)) return;
+      // R8-RS-09：proxy 侧同样要断。此前只查 original，于是可以把**我方包装函数**
+      // 重新登记到另一个原生上——同一函数在不同读取通道给出不同 toString，
+      // 不一致本身就是检测信号，且把我方防护变成攻击者的伪装件。
+      if (proxyMap.has(original) || proxyMap.has(proxy)) return;
       proxyMap.set(proxy, original);
     }},
-    // RS-252：configurable: true 仅限注入窗口期（撤销通道）——注入窗口后
-    // 统一替换为惰性函数并锁死 configurable: false（见下方 setTimeout）
+    // 不可替换：撤销只靠标志，不留「把属性换成别的函数」这条路
     writable: false,
-    configurable: true
+    configurable: false
   }});
-
-  // RS-252：注入窗口后撤销——各防护阶段脚本经 document-start 同步注入完毕
-  // 后（setTimeout(0) 宏任务），注册接口替换为惰性函数并锁死。页面脚本
-  // 无法在本任务内先行执行（document-start 先于页面脚本），窗口闭合后
-  // 伪造映射不再可注入；窗口期内页面仍可调用是残余面（original 未注册
-  // 校验限制其只能注册真原生函数对）。
-  setTimeout(function() {{
-    try {{
-      Object.defineProperty(window, KEY, {{
-        value: function() {{}},
-        writable: false,
-        configurable: false
-      }});
-    }} catch (e) {{}}
-  }}, 0);
+  // 关闭入口：幂等、不可替换。页面唯一能用它做的事是**提前**关窗，
+  // 那只缩小攻击面（fail-closed 方向），所以不必hid 它。
+  Object.defineProperty(window, CLOSE_KEY, {{
+    value: function() {{
+      open = false;
+    }},
+    writable: false,
+    configurable: false
+  }});
 }})();
 "#,
-            sym = Self::REGISTER_SYMBOL
+            sym = Self::REGISTER_SYMBOL,
+            close_sym = Self::CLOSE_SYMBOL
         )
+    }
+}
+
+impl ToStringGuard {
+    /// 管线**末尾**追加的一行：关掉本 blob 的注册窗口（R8-RS-09）。
+    ///
+    /// 由 `protection_mode::fingerprint_pipeline_with_mode` 在所有阶段之后发射：
+    /// document-start 注入先于页面脚本执行，各阶段登记完成后窗口即闭合，页面从未
+    /// 获得过一次注册机会。RS-252 的 `setTimeout(0)` 撤销做不到——宏任务排在解析
+    /// 任务之后，头部内联脚本在那之前仍可注册伪造映射。
+    #[must_use]
+    pub fn close_script() -> String {
+        let mut s = String::from("(function() { var c = window[Symbol.for('");
+        s.push_str(Self::CLOSE_SYMBOL);
+        s.push_str("'); if (c) c(); })();");
+        s
     }
 }
 
@@ -141,124 +167,4 @@ impl Default for ToStringGuard {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn script_contains_proxy_map() {
-        let guard = ToStringGuard::new();
-        let script = guard.inject_script();
-        assert!(script.contains("WeakMap"));
-        assert!(script.contains("Symbol.for"));
-        assert!(script.contains("Function.prototype.toString"));
-    }
-
-    #[test]
-    fn script_exposes_register_interface() {
-        let guard = ToStringGuard::new();
-        let script = guard.inject_script();
-        assert!(script.contains("proxyMap.set(proxy, original)"));
-    }
-
-    #[test]
-    fn script_self_registers_own_overrides() {
-        // RS-007 回归：guard 覆盖的 toString/toLocaleString 必须自注册进
-        // proxyMap——否则映射恒空、欺骗防护为零
-        let script = guard_script();
-        assert!(script.contains("proxyMap.set(Function.prototype.toString, origToString)"));
-        assert!(script.contains("proxyMap.set(Function.prototype.toLocaleString, origToLocale)"));
-    }
-
-    #[test]
-    fn register_interface_symbol_keyed_not_named_global() {
-        // RS-027 回归：注册接口收敛到 Symbol 键——不再有具名全局常量
-        let script = guard_script();
-        assert!(script.contains(&format!("Symbol.for('{}')", ToStringGuard::REGISTER_SYMBOL)));
-        assert!(
-            !script.contains("__AEGIS_REGISTER_PROXY"),
-            "具名全局注册接口必须移除"
-        );
-    }
-
-    fn guard_script() -> String {
-        ToStringGuard::new().inject_script()
-    }
-
-    // —— RS-080 回归（审计 2026-09-25） ——
-
-    #[test]
-    fn to_locale_string_coverage_independent() {
-        // RS-080：toLocaleString 与 toString 是两条独立欺骗通道——检测
-        // 方可走任一路径，二者必须都进 proxyMap
-        let script = guard_script();
-        assert!(
-            script.contains("Function.prototype.toLocaleString = function()"),
-            "toLocaleString 独立覆盖"
-        );
-        assert!(
-            script.contains("origToLocale.call(proxyMap.get(this))"),
-            "toLocaleString 代理欺骗路径"
-        );
-        assert!(script.contains("proxyMap.set(Function.prototype.toLocaleString, origToLocale)"));
-    }
-
-    #[test]
-    fn register_interface_tamper_proofed() {
-        // RS-080/RS-252：注册接口防篡改——writable: false（页面不可偷换注册
-        // 函数为收集代理的陷阱）；configurable 在注入窗口期为 true（撤销
-        // 通道），窗口期后经 setTimeout 锁死为 false（见下方专项测试）
-        let script = guard_script();
-        assert!(
-            script.contains("writable: false,\n    configurable: true"),
-            "注入窗口期：只读但可撤销（RS-252 撤销通道）"
-        );
-        assert!(
-            script.contains("writable: false,\n        configurable: false"),
-            "窗口期后：惰性函数 + 双 false 锁死"
-        );
-        assert!(
-            !script.contains("enumerable: true"),
-            "注册接口不得可枚举（泄漏进 Object.keys）"
-        );
-    }
-
-    // —— RS-252 回归（审计 2026-10-01）：注册接口参数防御 + 注入窗口撤销 ——
-
-    #[test]
-    fn register_interface_validates_arguments() {
-        // RS-252：注册函数必须校验双函数入参 + original 未注册——页面拿到
-        // 注册接口后不得注入伪造映射（非函数对/链式 proxy→proxy 注册）
-        let script = guard_script();
-        assert!(
-            script.contains("typeof proxy !== 'function' || typeof original !== 'function'"),
-            "双函数类型校验"
-        );
-        assert!(
-            script.contains("if (proxyMap.has(original)) return;"),
-            "original 不得是已注册代理（链式注册泄漏包装源码）"
-        );
-        // 校验先于登记
-        let check = script
-            .find("if (proxyMap.has(original)) return;")
-            .expect("校验存在");
-        let set = script
-            .find("proxyMap.set(proxy, original);")
-            .expect("登记存在");
-        assert!(check < set, "校验必须先于登记");
-    }
-
-    #[test]
-    fn register_interface_revoked_after_injection_window() {
-        // RS-252：注入窗口后撤销——setTimeout(0) 宏任务把注册接口替换为
-        // 惰性函数并锁死（document-start 阶段脚本全部同步完成后窗口闭合）
-        let script = guard_script();
-        assert!(
-            script.contains("setTimeout(function() {"),
-            "撤销必须经宏任务延迟（等 document-start 注入完成）"
-        );
-        assert!(
-            script.contains("value: function() {},"),
-            "撤销后替换为惰性函数（不再接受注册）"
-        );
-    }
-}
+mod tests;

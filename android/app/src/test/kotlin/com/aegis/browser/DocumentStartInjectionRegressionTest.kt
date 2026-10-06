@@ -59,10 +59,17 @@ class DocumentStartInjectionRegressionTest {
         return out.joinToString("\n")
     }
 
+    /** R8-CS-SEC-14：注入文本按 Stage 边界拆到三个文件——锚必须读三段之和，
+     *  否则「wildcard 随脚本搬进子文件」这类回归正好落在盲区里。 */
+    private fun hardeningCode(): String =
+        codeOnly(HARDENING_PATH) +
+            codeOnly(HARDENING_SEED_PATH) +
+            codeOnly(HARDENING_TAIL_PATH)
+
     @Test
     fun corpusContainsTheConstructsTheLocksClaimToWatch() {
         // 正面控制：先证明「被观察的东西确实在语料里」，否则下面的恒真断言毫无意义
-        val hardening = codeOnly(HARDENING_PATH)
+        val hardening = hardeningCode()
         assertTrue(hardening.contains("val allowedOrigins = setOf("))
         assertTrue(hardening.contains("WebViewFeature.DOCUMENT_START_SCRIPT"))
         val factory = codeOnly(FACTORY_PATH)
@@ -77,7 +84,7 @@ class DocumentStartInjectionRegressionTest {
         // package id 落在 0x01（framework 区段），而 setTag(int, ...) 要求
         // ≥0x02 的应用资源 id，真机启动必崩。
         assertFalse(codeOnly(FACTORY_PATH).contains("generateViewId"))
-        assertFalse(codeOnly(HARDENING_PATH).contains("generateViewId"))
+        assertFalse(hardeningCode().contains("generateViewId"))
         assertFalse(codeOnly(FACTORY_PATH).contains("View.generateViewId"))
         // 历史教训二（H-4）：WeakHashMap 存导航器——值强引用键（WebView），
         // 键永不可达、条目永不回收，每开一个标签泄漏一个 WebView。
@@ -88,15 +95,20 @@ class DocumentStartInjectionRegressionTest {
     fun bug006AllowedOriginRulesDoesNotUseSchemeWildcard() {
         // 历史教训：AndroidX 对 "https://*" 形态直接 IllegalArgumentException，
         // document-start 注入整条链失效。合法的全源写法只有单星号 "*"。
-        val hardening = codeOnly(HARDENING_PATH)
+        val hardening = hardeningCode()
         val schemeWildcard = "\"https://*\""
         assertFalse(hardening.contains(schemeWildcard))
         assertFalse(hardening.contains("\"http://*\""))
     }
 
     companion object {
+        // R8-CS-SEC-14：注入文本拆到三个文件（主文件 + Stage 1-3 + Stage 4-9）。
         private const val HARDENING_PATH =
             "android/app/src/main/java/com/aegis/browser/WebViewHardening.kt"
+        private const val HARDENING_SEED_PATH =
+            "android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesSeed.kt"
+        private const val HARDENING_TAIL_PATH =
+            "android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt"
         private const val FACTORY_PATH =
             "android/app/src/main/java/com/aegis/browser/SecureWebViewFactory.kt"
         private const val PROGUARD_PATH = "android/app/proguard-rules.pro"
