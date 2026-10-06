@@ -94,7 +94,7 @@ fn unblocklisted_host_still_consumes() {
 fn approved_loopback_navigation_can_consume() {
     let broker = FfiBroker::new("1.0".into());
     assert!(broker.create_session("s".into(), "t".into(), 0, 60));
-    let url = "https://127.0.0.1:8080/admin";
+    let url = "https://169.254.169.254:8080/admin";
     let FfiDecision::RequireConfirmation { request } = broker.request_navigation_confirmation(
         "s".into(),
         "t".into(),

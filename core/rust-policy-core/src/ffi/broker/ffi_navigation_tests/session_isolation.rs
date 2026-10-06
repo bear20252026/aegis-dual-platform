@@ -21,7 +21,7 @@ fn destroy_session_clears_issued_and_pending_ledgers() {
         "s1".into(),
         "t1".into(),
         0,
-        "https://127.0.0.1/b".into(),
+        "https://169.254.169.254/b".into(),
         "navigation".into(),
     ) else {
         panic!("expected pending");
@@ -37,7 +37,7 @@ fn destroy_session_clears_issued_and_pending_ledgers() {
     // 待审批请求随销毁清理
     match broker.approve_navigation_confirmation(
         request.nonce,
-        "https://127.0.0.1/b".into(),
+        "https://169.254.169.254/b".into(),
         "navigation".into(),
     ) {
         FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
@@ -56,7 +56,7 @@ fn reject_and_empty_nonce_are_fail_closed() {
         "s1".into(),
         "t1".into(),
         0,
-        "https://127.0.0.1/c".into(),
+        "https://169.254.169.254/c".into(),
         "navigation".into(),
     ) else {
         panic!("expected pending");
@@ -69,7 +69,7 @@ fn reject_and_empty_nonce_are_fail_closed() {
     // 空 nonce 的审批入口同样 fail-closed
     match broker.approve_navigation_confirmation(
         String::new(),
-        "https://127.0.0.1/c".into(),
+        "https://169.254.169.254/c".into(),
         "navigation".into(),
     ) {
         FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
@@ -84,7 +84,7 @@ fn pending_approval_capacity_is_fail_closed() {
     let broker = FfiBroker::new(POLICY_VERSION.into());
     assert!(broker.create_session("s1".into(), "t1".into(), 0, 60));
     for i in 0..MAX_PENDING_APPROVALS {
-        let url = format!("https://127.0.0.1/pending/{i}");
+        let url = format!("https://169.254.169.254/pending/{i}");
         let decision = broker.request_navigation_confirmation(
             "s1".into(),
             "t1".into(),
@@ -101,7 +101,7 @@ fn pending_approval_capacity_is_fail_closed() {
         "s1".into(),
         "t1".into(),
         0,
-        "https://127.0.0.1/overflow".into(),
+        "https://169.254.169.254/overflow".into(),
         "navigation".into(),
     );
     match overflow {

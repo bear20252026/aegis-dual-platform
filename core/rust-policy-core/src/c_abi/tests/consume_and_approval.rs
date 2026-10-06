@@ -102,8 +102,8 @@ fn c_abi_requires_explicit_approval_before_issuing_navigation_action() {
     let broker = aegis_policy_core_broker_new(version.as_ptr());
     let session = c_string("confirmation-session");
     let tab = c_string("confirmation-tab");
-    let url = c_string("https://127.0.0.1/confirm?transfer=1");
-    let mismatched_url = c_string("https://127.0.0.1/confirm?transfer=2");
+    let url = c_string("https://169.254.169.254/confirm?transfer=1");
+    let mismatched_url = c_string("https://169.254.169.254/confirm?transfer=2");
     let scope = c_string("navigation");
     assert_eq!(
         aegis_policy_core_broker_create_session(broker, session.as_ptr(), tab.as_ptr(), 0, 60),

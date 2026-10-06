@@ -117,8 +117,8 @@ impl IssuedAuthorization {
 /// CanonicalExternalUrl.host 依 RS-227 口径保留非默认端口（:8080 形态实证在
 /// host 内），直接拿它比对会同时制造两个绕过：
 ///   ① 黑名单条目 `bad.example` 匹配不上 `bad.example:8443`；
-///   ② 高危判定把 `127.0.0.1:8080` 当成非本机（split('.') 末段
-///      "8080" 之外的 "1:8080" 解析失败）而放行。
+///   ② 高危判定把 `169.254.169.254:8080` 当成非高危（split('.') 末段
+///      "254:8080" 解析失败）而放行。
 /// IPv6 字面量（方括号形态）已在归一层被拒（PY-069/070），此处
 /// split(':') 取首段无歧义。host 永不为空（归一层已拒空）。
 fn policy_host_of(canonical: &crate::origin::CanonicalExternalUrl) -> &str {
@@ -262,15 +262,18 @@ impl FfiBroker {
             }),
         };
         match verdict {
-            // 审计第六轮（2026-10-03/04）：高危目标（本机/私网）不直发放行授权，
+            // 审计第六轮（2026-10-03/04）：高危目标（元数据/链路本地/文档段/基准段/组播）
+            // 不直发放行授权，
             // 改登记为待审批。确认流自此**只对高危目标触发**，普通公网导航直接
             // Allow——此前 request_navigation_confirmation 把每一个 Allow 无条件转成
             // RequireConfirmation，等价于"每次导航都弹确认"，因而该开关在
             // 2026-08-30 被实测定案关闭、整套确认域（pendingConfirmation/防孤儿
             // nonce/受信兑换）沦为死代码。收窄到高危及开关可重新启用。
             // 副带收益：子框架轻量路径只调 evaluate_navigation，收到
-            // RequireConfirmation 即按既有语义 fail-closed 阻断——远程页嵌
-            // iframe 打 127.0.0.1/私网的 SSRF 面自此在核心层被拦，不依赖端侧实现。
+            // RequireConfirmation 即按既有语义 fail-closed 阻断——远程页嵌 iframe
+            // 打云元数据/链路本地/文档段的 SSRF 面自此在核心层被拦。注意边界：
+            // 回环与 RFC1918 按第七轮 B8 裁决（本机与内网必须能打开）不在此列，
+            // 那两段的拦截只在托管层的白名单语义里，别指望核心挡。
             Ok(()) if high_risk => self.register_pending_approval(action),
             Ok(()) => match self.issued_actions.lock() {
                 Ok(mut issued_actions) => {

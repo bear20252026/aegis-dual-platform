@@ -684,7 +684,7 @@ mod tests {
             "s1".into(),
             "t1".into(),
             0,
-            "https://127.0.0.1/confirm?flow=1".into(),
+            "https://169.254.169.254/confirm?flow=1".into(),
             "navigation".into(),
         );
         let FfiDecision::RequireConfirmation { request } = confirmation else {
@@ -693,7 +693,7 @@ mod tests {
         assert_eq!(request.path, "/confirm?flow=1");
         let approved = broker.approve_navigation_confirmation(
             request.nonce,
-            "https://127.0.0.1/confirm?flow=1#approved".into(),
+            "https://169.254.169.254/confirm?flow=1#approved".into(),
             "navigation".into(),
         );
         let FfiDecision::Allow { action } = approved else {
@@ -702,7 +702,7 @@ mod tests {
         assert!(matches!(
             broker.consume_navigation(
                 action,
-                "https://127.0.0.1/confirm?flow=1".into(),
+                "https://169.254.169.254/confirm?flow=1".into(),
                 "navigation".into(),
             ),
             FfiDecision::Allow { .. }
@@ -717,7 +717,7 @@ mod tests {
             "s1".into(),
             "t1".into(),
             0,
-            "https://127.0.0.1/reject".into(),
+            "https://169.254.169.254/reject".into(),
             "navigation".into(),
         ) else {
             panic!("valid navigation must be pending");
@@ -725,7 +725,7 @@ mod tests {
         assert!(broker.reject_navigation_confirmation(request.nonce.clone()));
         match broker.approve_navigation_confirmation(
             request.nonce,
-            "https://127.0.0.1/reject".into(),
+            "https://169.254.169.254/reject".into(),
             "navigation".into(),
         ) {
             FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),
@@ -736,7 +736,7 @@ mod tests {
             "s1".into(),
             "t1".into(),
             0,
-            "https://127.0.0.1/stale".into(),
+            "https://169.254.169.254/stale".into(),
             "navigation".into(),
         ) else {
             panic!("valid navigation must be pending");
@@ -744,7 +744,7 @@ mod tests {
         assert!(broker.advance_document_generation("s1".into(), "t1".into(), 1));
         match broker.approve_navigation_confirmation(
             request.nonce,
-            "https://127.0.0.1/stale".into(),
+            "https://169.254.169.254/stale".into(),
             "navigation".into(),
         ) {
             FfiDecision::Deny { reason } => assert_eq!(reason.code, "approval_not_pending"),

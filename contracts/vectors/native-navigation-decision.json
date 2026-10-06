@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Rust 原生导航决策 C ABI 的跨端语义向量；每项均绑定 session/tab/generation/origin/path+query/scope/nonce。 审计第六轮（2026-10-03/04）补入 deny-by-content 与高危目标（本机/私网）require_confirmation 向量——此前本文件只覆盖 url_policy/session_not_found 两类拒绝，\"黑名单匹配\"与\"确认只对高危触发\"均无跨端锁定。",
+  "description": "Rust 原生导航决策 C ABI 的跨端语义向量；每项均绑定 session/tab/generation/origin/path+query/scope/nonce。 审计第六轮（2026-10-03/04）补入 deny-by-content 与高危目标（本机/私网）require_confirmation 向量——此前本文件只覆盖 url_policy/session_not_found 两类拒绝，\"黑名单匹配\"与\"确认只对高危触发\"均无跨端锁定。 第八轮 B9（2026-10-06）：回环/RFC1918/localhost 由 require_confirmation 改为 allow——第七轮 B8 裁决落进核心；确认流域示例改挂云元数据/链路本地/文档段。",
   "vectors": [
     {
       "name": "canonical_url_fragment_and_replay",
@@ -95,31 +95,49 @@
       "expected_replay_code": "nonce_replay"
     },
     {
-      "name": "loopback_ip_requires_confirmation",
+      "name": "loopback_ip_allowed_by_local_and_lan_ruling",
       "register_session": true,
       "generation": 0,
       "url": "https://127.0.0.1:8080/admin",
       "scope": "navigation",
-      "expected_evaluate": "require_confirmation",
-      "expected_origin": "https://127.0.0.1:8080"
+      "expected_evaluate": "allow",
+      "expected_origin": "https://127.0.0.1:8080",
+      "expected_parameters": "/admin",
+      "consume_url": "https://127.0.0.1:8080/admin",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "expected_replay_code": "nonce_replay",
+      "note": "第七轮 B8 裁决（本机与内网必须能打开）经第八轮 B9 落进核心：回环不再判高危（回归此断言即红）"
     },
     {
-      "name": "localhost_name_requires_confirmation",
+      "name": "localhost_name_allowed_by_local_and_lan_ruling",
       "register_session": true,
       "generation": 0,
       "url": "https://localhost/panel",
       "scope": "navigation",
-      "expected_evaluate": "require_confirmation",
-      "expected_origin": "https://localhost"
+      "expected_evaluate": "allow",
+      "expected_origin": "https://localhost",
+      "expected_parameters": "/panel",
+      "consume_url": "https://localhost/panel",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "expected_replay_code": "nonce_replay",
+      "note": "第七轮 B8 裁决（本机与内网必须能打开）经第八轮 B9 落进核心：localhost 名与回环 IP 同权"
     },
     {
-      "name": "private_rfc1918_requires_confirmation",
+      "name": "private_rfc1918_allowed_by_local_and_lan_ruling",
       "register_session": true,
       "generation": 0,
       "url": "http://192.168.1.1/set_config",
       "scope": "navigation",
-      "expected_evaluate": "require_confirmation",
-      "expected_origin": "http://192.168.1.1"
+      "expected_evaluate": "allow",
+      "expected_origin": "http://192.168.1.1",
+      "expected_parameters": "/set_config",
+      "consume_url": "http://192.168.1.1/set_config",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "expected_replay_code": "nonce_replay",
+      "note": "第七轮 B8 裁决（本机与内网必须能打开）经第八轮 B9 落进核心：RFC1918 三段放行；元数据/链路本地/文档段仍高危"
     },
     {
       "name": "link_local_metadata_requires_confirmation",
@@ -184,13 +202,19 @@
       "expected_deny_code": "threat_blocklist"
     },
     {
-      "name": "loopback_with_nondefault_port_requires_confirmation",
+      "name": "loopback_nondefault_port_allowed_by_ruling",
       "register_session": true,
       "generation": 0,
       "url": "https://127.0.0.1:6379/",
       "scope": "navigation",
-      "expected_evaluate": "require_confirmation",
-      "expected_origin": "https://127.0.0.1:6379"
+      "expected_evaluate": "allow",
+      "expected_origin": "https://127.0.0.1:6379",
+      "expected_parameters": "/",
+      "consume_url": "https://127.0.0.1:6379/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "expected_replay_code": "nonce_replay",
+      "note": "非默认端口保留在 origin 内（RS-227 口径），按裁决一样放行"
     },
     {
       "name": "R7_RS_01_parent_domain_denies_any_subdomain",

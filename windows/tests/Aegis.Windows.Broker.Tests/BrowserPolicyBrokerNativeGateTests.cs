@@ -203,7 +203,9 @@ public sealed class BrowserPolicyBrokerNativeGateTests : IDisposable
         Assert.True(NativePolicyCoreBridge.TryCreate("1.0", libraryPath, out var bridge));
         using var nativeBridge = Assert.IsType<NativePolicyCoreBridge>(bridge);
 
-        const string highRiskUrl = "http://127.0.0.1:8080/confirmation?flow=1";
+        // 第八轮 B9：确认流域示例宿主由 127.0.0.1 改挂 169.254.169.254——回环按
+        // 第七轮 B8 裁决已不属高危，拿它做"高危目标"的前提不成立了。
+        const string highRiskUrl = "http://169.254.169.254/confirmation?flow=1";
         const string publicUrl = "https://example.com/confirmation?flow=1";
         Assert.True(nativeBridge.CreateSession("confirmation-session", "confirmation-tab", 0, 120));
 

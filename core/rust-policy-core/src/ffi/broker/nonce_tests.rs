@@ -47,7 +47,7 @@ fn approve_navigation_rejects_unparseable_url() {
         "s".into(),
         "t".into(),
         1,
-        "https://127.0.0.1/confirm".into(),
+        "https://169.254.169.254/confirm".into(),
         "navigation".into(),
     );
     let FfiDecision::RequireConfirmation { request } = decision else {
@@ -68,7 +68,7 @@ fn approve_navigation_rejects_unparseable_url() {
     // pending 已被移除（一次性语义）：同 nonce 重试 → approval_not_pending
     let retry = broker.approve_navigation_confirmation(
         request.nonce,
-        "https://127.0.0.1/confirm".into(),
+        "https://169.254.169.254/confirm".into(),
         "navigation".into(),
     );
     match retry {

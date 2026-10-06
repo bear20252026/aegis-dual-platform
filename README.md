@@ -28,8 +28,13 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
   钉住，删参数即红），故「高危目标触发用户确认流」在 **Android 生效**；Windows 出货
   构建**未启用**导航确认门，核心判「需显式确认」的目标自第八轮 B4 起改为用户可见
   拒绝并取消导航（不再是无反馈的静默 false）——**两端行为不同：Android 问一次，
-  Windows 直接拒**。本机/内网 http 目标因此分端表现不一致，属待用户裁决的产品行为
-  （第八轮台账 §七 1）
+  Windows 直接拒**。**第七轮 B8 的「本机与内网必须能打开」裁决已自第八轮 B9 落进
+  核心**：`is_high_risk_host` 不再把回环、RFC1918 与 `localhost` 名判为高危（云元数据 /
+  链路本地 / TEST-NET / 基准段 / 组播广播仍是），两端打开本机与内网目标因此都不再需要
+  确认——托管层 `ReservedAddressBoundary` 与核心的段集自此一致。
+  **仍待裁决**：Android 侧 http 一律升 https 且 `cleartextTrafficPermitted=false`，
+  内网 IP 字面量（`http://192.168.1.1`）实际仍不可达（第八轮台账 §七 2）；
+  子资源策略链异常时的失败闭合方向（§七 5）
   （详见 [第六轮台账](docs/audit/full-audit-2026-10-03-round6.md) 第二节、
   [第八轮台账](docs/audit/full-audit-2026-10-04-round8.md) §三与§五）
 - **指纹防护**：Canvas/WebGL/AudioBuffer/字体/计时器/屏幕多维欺骗，噪声按

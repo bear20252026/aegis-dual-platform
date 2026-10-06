@@ -206,6 +206,10 @@ impl SecurityPolicy {
     /// `is_local_or_private_host` 改名——段集早已含文档段/基准测试段/组播广播，
     /// 既非 local 也非 private，旧名与实际语义相反）——纯函数，不做 DNS。
     ///
+    /// 高危 = 「不是任何设备 / 会自我折叠到元数据 / 不可路由」：0/8、169.254/16、
+    /// 100.64/10 CGNAT（含阿里云 100.100.100.200）、TEST-NET-1/2/3、198.18/15
+    /// 基准段、224/4 组播与受限广播。**不含**回环与 RFC1918——第七轮 B8 裁决。
+    ///
     /// 只判定**已规范化后的 host**（`origin::canonicalize_external` 之后）。
     /// 归一层的既有收紧使本函数无需处理任何混淆编码：非点分 IPv4
     ///（2130706433 / 0x7f000001 / 127.1）、逐段前导零八进制（0177.0.0.1 =
@@ -227,9 +231,6 @@ impl SecurityPolicy {
     /// 组播 `ff00::/8`、site-local `fec0::/10` 在本函数**取不到入参**，
     /// 不是"漏判"而是"无从判定"；要覆盖须先动归一层的 IPv6 支持，属另一批次。
     pub fn is_high_risk_host(host: &str) -> bool {
-        if host == "localhost" {
-            return true;
-        }
         let mut octets = [0u8; 4];
         let mut count = 0usize;
         for segment in host.split('.') {
@@ -247,13 +248,12 @@ impl SecurityPolicy {
             return false;
         }
         let (a, b) = (octets[0], octets[1]);
-        // 0/8 与 127/8：WHATWG 把 0.0.0.0 按环回处理，整段保守判本机
-        a == 0 || a == 127 || a == 10
+        // 第七轮 B8 裁决（不可回退：本机与内网必须能打开）落进核心——127/8、10/8、
+        // 172.16/12、192.168/16 与 localhost 名不再判高危，与托管孪生
+        // ReservedAddressBoundary 段集一致（别再"顺手"加回来）。0/8：整段不可路由。
+        a == 0
         // 链路本地含云元数据地址 169.254.169.254
             || (a == 169 && b == 254)
-            // 172.16.0.0/12
-            || (a == 172 && (16..=31).contains(&b))
-            || (a == 192 && b == 168)
             // 审计第七轮 R7-RS-05（2026-10-04）：补齐至 C# 孪生
             // `UrlSafety.IsPublicIp`（windows/.../Core/UrlSafety.cs:183-200）
             // 的高危段集——以下四段此前核心判"公网"，R6-21 声称的「SSRF 面在

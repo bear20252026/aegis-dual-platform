@@ -24,7 +24,7 @@ fn url_entries_reject_oversized_raw_url_before_parsing() {
         "s".into(),
         "t".into(),
         1,
-        "https://127.0.0.1/ok".into(),
+        "https://169.254.169.254/ok".into(),
         "navigation".into(),
     ) else {
         panic!("正常请求必须登记")
@@ -41,7 +41,7 @@ fn url_entries_reject_oversized_raw_url_before_parsing() {
     assert!(matches!(
         broker.approve_navigation_confirmation(
             request.nonce,
-            "https://127.0.0.1/ok".into(),
+            "https://169.254.169.254/ok".into(),
             "navigation".into()
         ),
         FfiDecision::Allow { .. }

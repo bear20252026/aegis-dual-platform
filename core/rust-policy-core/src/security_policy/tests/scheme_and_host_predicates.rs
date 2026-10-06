@@ -19,16 +19,9 @@ fn missing_or_empty_scheme_is_not_valid() {
 // —— 审计第六轮（2026-10-03/04）：本机/私网主机判定 ——
 
 #[test]
-fn local_and_private_hosts_are_recognized() {
+fn high_risk_hosts_are_recognized() {
     for host in [
-        "localhost",
-        "127.0.0.1",
-        "127.2.3.4", // 127/8 整段环回
         "0.0.0.0",
-        "10.1.2.3",
-        "172.16.0.1",
-        "172.31.255.255",
-        "192.168.1.1",
         "169.254.169.254", // 云元数据地址
         // 审计第七轮 R7-RS-05（2026-10-04）：补齐至 C# 孪生 UrlSafety.IsPublicIp
         // 的四段——纯函数级边界锚（端到端断言在 native-navigation-decision 向量）
@@ -54,6 +47,16 @@ fn local_and_private_hosts_are_recognized() {
 #[test]
 fn public_and_lookalike_hosts_are_not_flagged() {
     for host in [
+        // 第七轮 B8 裁决（本机与内网必须能打开）第八轮 B9 落进核心：以下形态
+        // 曾在高危集里，现在必须判非高危——回归此断言即红
+        "localhost",
+        "127.0.0.1",
+        "127.2.3.4",
+        "10.1.2.3",
+        "172.16.0.1",
+        "172.31.255.255",
+        "192.168.1.1",
+        "192.168.1.1:8080",
         "172.15.0.1", // 172.16/12 边界外
         "172.32.0.1",
         "169.253.1.1", // 非链路本地
@@ -91,10 +94,12 @@ fn public_and_lookalike_hosts_are_not_flagged() {
 fn predicate_requires_pre_lowered_host_and_no_port() {
     // 本函数入参必须是 canonicalize_external 产出的**小写、已剥端口** host。
     // 两条前提不成立即漏判——RS-227 口径下 CanonicalExternalUrl.host 保留
-    // 非默认端口，直接传 "127.0.0.1:8080" 会因末段 "1:8080" 解析失败而
-    // 判为非本机（第六轮开发期实测到的绕过，调用方必须先 split(':') 取首段）。
+    // 非默认端口，直接传 "169.254.169.254:8080" 会因末段 "254:8080" 解析失败
+    // 而判为非高危（第六轮开发期实测到的绕过，调用方必须先 split(':') 取首段，
+    // 见 ffi/broker.rs 的 policy_host_of）。示例宿主改用元数据地址：回环与
+    // localhost 名按第七轮 B8 裁决本就不判高危，拿它们证不了这条警示。
+    assert!(!SecurityPolicy::is_high_risk_host("169.254.169.254:8080"));
+    assert!(SecurityPolicy::is_high_risk_host("169.254.169.254"));
     assert!(!SecurityPolicy::is_high_risk_host("LOCALHOST"));
-    assert!(!SecurityPolicy::is_high_risk_host("127.0.0.1:8080"));
-    assert!(SecurityPolicy::is_high_risk_host("localhost"));
-    assert!(SecurityPolicy::is_high_risk_host("127.0.0.1"));
+    assert!(!SecurityPolicy::is_high_risk_host("localhost"));
 }
