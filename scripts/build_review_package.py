@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 """Aegis 专家评审包生成器 —— 从规范源码（single source of truth）可复现地组装评审包。
 
-背景 / 结构缺陷
---------------
-`aegis-专家评审包/` 过去是"手工维护的复制快照"，会随主仓库推进而**漂移变旧**
-（曾停在 e66d36e，未包含后续的安全加固：bridge_guard 调用方来源模型、
-非码本上限 MAX_CONSUMED_NONCES 等）。这是典型的"重复源码 / 单点事实源被破坏"。
+背景：`aegis-专家评审包/` 过去是"手工维护的复制快照"，会随主仓库推进而**漂移变旧**
+（曾停在 e66d36e，缺后续安全加固：bridge_guard 调用方来源模型、非码本上限 MAX_CONSUMED_NONCES 等）——典型的"重复源码 / 单点事实源被破坏"。本脚本改为
+**从规范源码自动生成**：读版本/提交/时间戳，按清单复制源码（排除构建产物/缓存），
+生成 README 头部戳记 + manifest.json（含每文件 SHA-256 校验）。
 
-本脚本把评审包改为**从规范源码自动生成**：读入版本/提交/时间戳，按清单复制
-规范目录中的源码（并排除构建产物/缓存），生成 README 头部戳记 + manifest.json
-（含每文件 SHA-256 校验），并在 release 时用 `--check` 保证与当前源码同步。
+R8-PY-04②（第八轮审计 2026-10-06）更正旧口径「release 时用 --check 保证与当前源码
+同步」：快照自 A-4 起不入库（`aegis-专家评审包` 在 `git ls-files` 命中 0），CI 里
+`--build` 到临时目录再 `--check` 同一目录＝同 commit 两次生成相比 ⇒ 恒真。该步骤
+**实际**证明的是生成器确定性（无时间戳/顺序抖动混入 manifest），与"同步"无关。
 
-用法
-----
-    python scripts/build_review_package.py --build        # 在 aegis-专家评审包/ 就地生成
-    python scripts/build_review_package.py --check        # 校验已提交评审包是否与规范源码同步（CI 用）
+用法：
+    python scripts/build_review_package.py --build        # 就地生成到 aegis-专家评审包/
+    python scripts/build_review_package.py --check        # 重新生成并比对＝确定性自检（CI 用）
     python scripts/build_review_package.py --build --out /tmp/review-build   # 输出到指定目录
 
 本脚本仅依赖 Python 标准库。
@@ -41,7 +40,6 @@ TREE_COPY: list[tuple[str, str]] = [
     ("android", "android"),
     ("windows/src", "windows/src"),
     ("windows/tests", "windows/tests"),
-    ("windows/packaging", "windows/packaging"),
     ("legacy/windows-pywebview", "legacy/windows-pywebview"),
     ("contracts", "contracts"),
     ("shared", "shared"),
@@ -154,8 +152,9 @@ def collect_sources() -> list[Path]:
     out: list[Path] = []
     for canonical, pkg in TREE_COPY:
         src = ROOT / canonical
-        if not src.exists():
-            continue
+        # R8-PY-04①：根缺席＝整棵评审面静默缺席而包看上去仍完整——硬失败。
+        if not src.is_dir():
+            raise SystemExit(f"INPUT-FAIL: 评审包清单根不存在: {canonical}")
         # PY-205（2026-09-26 审计）：src.rglob("*") 全遍历后再逐文件过滤——
         # android/build、target 等目录数千中间产物全走一遍 IO。改
         # os.walk(topdown=True) 在 dirs 层剪枝（EXCLUDE_DIRS / EXCLUDE_SUBTREES
@@ -179,8 +178,9 @@ def collect_sources() -> list[Path]:
                     continue
                 out.append(Path(pkg) / rel)
     for f in FILE_COPY:
-        fp = ROOT / f
-        if fp.exists() and not _match_excluded(Path(f)):
+        if not (ROOT / f).is_file():
+            raise SystemExit(f"INPUT-FAIL: 评审包清单文件不存在: {f}")
+        if not _match_excluded(Path(f)):
             out.append(Path(f))
     # 去重并排序，保证确定性
     seen: set[str] = set()
@@ -364,7 +364,7 @@ def main() -> int:
     # argparse 直接报错 exit 2（用法错误语义）
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--build", action="store_true", help="Assemble the review package in place.")
-    g.add_argument("--check", action="store_true", help="Verify the committed package is in sync.")
+    g.add_argument("--check", action="store_true", help="Rebuild and compare = determinism check (R8-PY-04②).")
     ap.add_argument("--out", type=Path, default=DEFAULT_PKG, help="Output directory.")
     args = ap.parse_args()
 
