@@ -75,6 +75,13 @@ public sealed class AuditRegressionTests : IDisposable
     [InlineData("https://example.com./x", false)]   // 尾点 host
     [InlineData("https://exa mple.com/", false)]    // 空白（控制字符路径之外）
     [InlineData("https://example.com:99999/", false)] // 非法端口
+    // R8-CS-SEC-10 实测钉（.NET 10）：special scheme 缺 "//" 时 Uri.TryCreate
+    // 一律 false ⇒ 「raw 无 :// 却走到 authority 切片」这条路今天不可达，原缺陷
+    // 判 P3（不可达的防御缺口，非可用缺陷）。保留这两例是为了：**平台一旦改成
+    // 接受这些形态**（CS-348 记录过 .NET 对 IP 编码的解释随版本/平台变），
+    // 本处即红，提醒去复核 raw 层防线（前导零/备用 IPv4 编码/userinfo）。
+    [InlineData("http:example.com", false)]           // 无 :// 的 http 形态
+    [InlineData("http:\0x7f000001\\", false)]        // 反斜杠 authority（Chromium 侧＝127.0.0.1）
     public void OriginPolicyHostValidation(string url, bool expected)
     {
         var ok = OriginPolicy.TryParseExternal(url, out _);

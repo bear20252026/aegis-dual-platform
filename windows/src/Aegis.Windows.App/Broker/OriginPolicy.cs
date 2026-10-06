@@ -38,6 +38,12 @@ public static class OriginPolicy
         // 解析后 UserInfo 为空串，u.UserInfo 检查不可见）一律拒绝——与 Rust
         // origin.rs / Kotlin rawUserInfo 口径一致
         var schemeEnd = raw.IndexOf("://", StringComparison.Ordinal);
+        // R8-CS-SEC-10：无 "://" 的形态（"http:example.com"——Uri.TryCreate
+        // 判绝对且 scheme 为 http）此前落到 raw[2..]，authority 成了含 scheme
+        // 残片的垃圾串，下方 raw 层防线全部空转。孪生谓词
+        // ReservedAddressBoundary.HasNumericAuthority 对同一形态显式拒绝，此处补齐。
+        if (schemeEnd < 0)
+            return false;
         var authority = raw[(schemeEnd + 3)..];
         var authorityEnd = authority.IndexOfAny(new[] { '/', '?', '#' });
         if (authorityEnd >= 0)
