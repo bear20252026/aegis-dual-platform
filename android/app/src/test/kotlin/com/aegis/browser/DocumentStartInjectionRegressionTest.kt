@@ -62,9 +62,9 @@ class DocumentStartInjectionRegressionTest {
     /** R8-CS-SEC-14：注入文本按 Stage 边界拆到三个文件——锚必须读三段之和，
      *  否则「wildcard 随脚本搬进子文件」这类回归正好落在盲区里。 */
     private fun hardeningCode(): String =
-        codeOnly(HARDENING_PATH) +
-        codeOnly(HARDENING_SEED_PATH) +
-        codeOnly(HARDENING_TAIL_PATH)
+            codeOnly(HARDENING_PATH) +
+            codeOnly(HARDENING_SEED_PATH) +
+            codeOnly(HARDENING_TAIL_PATH)
 
     @Test
     fun corpusContainsTheConstructsTheLocksClaimToWatch() {
