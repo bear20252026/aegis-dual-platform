@@ -149,8 +149,10 @@ YAML 4/195、TOML 4/306。
    （无 GlobalScope/runBlocking，launch 三点均显式 Dispatchers）；StateFlow 原地改
    陷阱现存零例；xunit 空数据源不可达；红线「每个 WebView 经 SecureWebViewFactory」
    实测成立；`Contracts/Generated` 六 record 不作桩实现缺陷（沿用第七轮 §六之二）。
+6. **R8-CS-SEC-10 由「潜在崩溃/fail-open」降为 P3（实测驱动）**：子代理称 `OriginPolicy.cs:40-41` 的 `raw[(schemeEnd + 3)..]` 未校验 `IndexOf` 结果即切片。主代理写了一次性探针用例实测 .NET 10：`http:example.com`、`http:\0x7f000001\`、`http:\@evil.com/`、`https:\a.com/` 四种形态 **`Uri.TryCreate(…, Absolute)` 全部返回 false**（special scheme 缺 `//` 即不成立）⇒ 切片根本走不到，既无越界崩溃也无「垃圾 authority 让 raw 层防线空转」的实际后果。补 `schemeEnd < 0 → return false` 作为与孪生 `ReservedAddressBoundary.HasNumericAuthority` 的口径对齐（该结论属平台实现细节，CS-348 已记录 .NET 对 IP 编码的解释随版本/平台变），并留两条 InlineData 把「今天不可达」钉成可失败断言：平台一旦改成接受这些形态，用例即红，提醒复核 raw 层三道防线。
+7. **R8-CI-04 的 legacy 面不成立（已随 #86 闭）**：队列记「`legacy-python-guard.yml:72-82` 三条 pip 安装只看第 3 条、`:129-137` 八条 selftest 只看第 8 条」——B1（PR #86）已把这两步改 `shell: bash`（Actions 包装带 `set -eo pipefail`），本批复读确认两条 `永不红` 均已消除。该条目余下的面只有「Authenticode 缺证书 `Write-Warning; exit 0`」——那是第七节 3 的待裁决项，不在本批范围。
 
-## 七、需用户裁决（**① 已于 2026-10-06 定稿并实施**——按推荐方案改核心语义与向量，见第十二节 B9 第二片；其余 4 项仍待裁决；第 5 项见第十二节 B4 余量第二批）
+## 七、需用户裁决（**① 已于 2026-10-06 定稿并实施**——按推荐方案改核心语义与向量，见第十二节 B9 第二片；②③④⑤ 仍待裁决；⑥⑦ 系本批复读队列时新增）
 
 1. **【新增·最高优先】出货 Windows 在本机/内网导航上的期望行为**（R8-CS-SEC-01 的
    修复方向）：(a) 安装器同时写 `RequireNavigationConfirmation=1`——用户点一次确认即
@@ -166,6 +168,21 @@ YAML 4/195、TOML 4/306。
    现为 `Write-Warning; exit 0`，而 `signing-policy.yaml` 声明 `fail_closed: true`）；
    `enforce_admins` / 强制评审是否开启（单人仓库下等于自锁）。
    此前已否决项维持否决：FLAG_SECURE、退出清 Cookie、IDN、Android 下载走 broker。
+6. **HistoryStore 的 8 个零生产调用方查询面怎么办**（R8-CS-CORE-4，本批复读确证）：
+   `Recent`/`Search`/`ByDate`/`Dates`/`SearchRange`/`RecentPage`/`SearchRangePaged`/
+   `RecentPaged` 在 `windows/src` 全树**零调用方**（生产只用到 `Add`/`ImportBatch`/
+   `SearchByUrl`/`SearchRangePage`/`Count`/`Delete`/`Clear` 七条），却占着该区最大的
+   一块用例预算（约 56 例）。**推荐**：删（连同其专属用例）——「Core 730 例」这类数字里
+   有近一成钉在生产不可达路径上，是覆盖率的假账。**代价**：历史窗口若要做「按日分组」
+   视图，`Dates`/`ByDate` 是现成的——那是产品排期问题，故本批不擅删。
+7. **canvas 噪声是否扩到像素直读出口**（R8-RS-03，本批复读确证）：现覆盖的是三条
+   **编码**出口（`toDataURL`/`toBlob`/`OffscreenCanvas.convertToBlob`），而
+   `getImageData`（含 OffscreenCanvas 2d 同名方法）与 `WebGLRenderingContext.readPixels`
+   未加噪 ⇒ 页面直读拿无噪原文，与编码出口逐像素比对即 100% 检出防护存在。**推荐**：扩，
+   且必须与编码出口同一 `aegisNudge`、同一 seed（否则双通道不一致本身就成了指纹）。
+   **代价**：这会改变正当使用像素读回的站点（图像编辑器、图表命中测试、游戏逻辑）所见
+   的数据——用户可见的产品行为变更，故本批只把名为 `canvas_read_channels_all_covered`
+   的用例与注释**如实收窄**为 `canvas_encoding_channels_covered`，不改判。
 
 ## 八、升级面清单（本轮主诉求）
 
@@ -274,9 +291,9 @@ mypy `2.3.1 → 2.4.0` 须 pip-compile 整树重算 hash；Test.Sdk `17.14.1 →
 
 | 分区 | 未复核 P2（上界） | 未复核 P3（上界） | 最值得先复核 |
 | --- | --- | --- | --- |
-| R8-CS-SEC | 9（03/05/07/09/10/11/12/13/14）——02 已随 #97 闭、04 已随 B4 闭、**06 本批复读确证并升 P1 后落地** | — | R8-CS-SEC-03（后退/前进/重载等 6 个真实导航入口直取 `Control.GoBack/GoForward/Reload()`：是否绕过策略链，取决于 WebView2 对程序化历史导航是否照样发 `NavigationStarting` 这一**平台事实**，本仓无实测即不登记方向） |
-| R8-CS-CORE | 6（02/03/04/05/06/07 及 P3 10 条） | 10 | R8-CS-CORE-4（`HistoryStore` 8 个公共查询方法零生产调用方，却占了该区最大一块用例预算——「711 例」里相当比例钉在生产不可达路径上） |
-| R8-RS | 8（03/04/05/09/10/14/16/21） | 9 | R8-RS-15（核心缺 JS 生成导出接口＝三端手抄的共同根因；若属实则第八节的一致性升级 B9 是正解） |
+| R8-CS-SEC | 9（03/05/07/09/10/11/12/13/14）——02 已随 #97 闭、04 已随 B4 闭、**06 本批复读确证并升 P1 后落地** | — | R8-CS-SEC-03（后退/前进/重载等 6 个真实导航入口直取 `Control.GoBack/GoForward/Reload()`：是否绕过策略链，取决于 WebView2 对程序化历史导航是否照样发 `NavigationStarting` 这一**平台事实**，本仓无实测即不登记方向）。**本批已把它转为可执行的实测项**：`docs/runbooks/device-validation.md` Windows 表新增第 11 步（四个入口各跑一次，数 `NavigationStarting` 与授权尝试条数），两种结果各自的后续动作都写在表里 |
+| R8-CS-CORE | 5（02/03/05/06/07 及 P3 10 条）——**04 本批复读确证**（8 个零调用方查询面 + 约 56 例挂在生产不可达路径），结论入第七节 6 | 10 | R8-CS-CORE-4（`HistoryStore` 8 个公共查询方法零生产调用方，却占了该区最大一块用例预算——「711 例」里相当比例钉在生产不可达路径上） |
+| R8-RS | 7（04/05/09/10/14/16/21）——**03 本批复读确证**：编码出口之外的像素直读三条未加噪属实；「注释与用例名声称全覆盖」另记声明失实，扩面入第七节 7 | 9 | R8-RS-15（核心缺 JS 生成导出接口＝三端手抄的共同根因；若属实则第八节的一致性升级 B9 是正解） |
 | R8-AD | 4（03/04/05/06/07） | 11 | R8-AD-02 分区记录的 `allowedOriginRules=setOf("*")` + fetch 三重包裹 ⇒「`fetch.toString()` 默认即返回注入脚本文本」——若回读成立应从 P2 升 P1 |
 | R8-PY | 1（05）——03 已随 #95 闭、**04 本批复读确证并落地** | 11 | 余下 R8-PY-05 是第七轮条目的闭环状态复核，不是新缺陷 |
 | R8-SH | 6（01/02/03/08/13/14/15/16） | 6 | R8-SH-15（两条「回归锁」语料语言错了：`setTag` 是 Android API、`setOf` 是 Kotlin 字面量，而 `allScripts` 是 shell JS ⇒ 两条恒真，BUG-001/006 实际零保护） |
@@ -314,6 +331,7 @@ Native-Policy-Artifacts、Agent-Redteam 的 push 触发，加上 `Build Windows 
 万一需要回退不必丢工作；③**不改写 master**（不 force-push、不 reset），若有后续问题
 一律正向 `git revert`；④本行原先写作「PR #102」——该编号在本仓根本不存在，是我在
 推送前预填的占位，属本轮自己犯的「文档说的和实树不一样」，与 B8 修的是同一类账。 |
+| B4/B2 余量（复核收口）：CS-SEC-10 降级 + RS-03 声明收窄 | **本批** | **R8-CS-SEC-10**：`OriginPolicy.cs` 的 `raw[(schemeEnd + 3)..]` 未校验 `IndexOf` ——一次性探针用例实测 .NET 10 下四种无 `://` 形态（`http:example.com`、`http:\0x7f000001\`、`http:\@evil.com/`、`https:\a.com/`）`Uri.TryCreate(Absolute)` 全为 false ⇒ 该切片今天不可达，**降为 P3**；仍补 `schemeEnd < 0 → return false` 与孪生 `ReservedAddressBoundary.HasNumericAuthority` 对齐，并把「平台不接受无 // 的 special scheme」这个前提本身钉成两条 InlineData（CS-348 记录过 .NET 对 IP 编码的解释随版本/平台变，前提一旦翻转用例先红）。Core.Tests 730→732。**R8-RS-03**：用例名 `canvas_read_channels_all_covered` 与注释「canvas 读取三通道全覆盖」把**编码出口**写成了**读取面全覆盖**——像素直读三条出口并未加噪，属第四类「文档说的和实树不一样」。本批只如实收窄命名并在注释里点名未覆盖出口，扩面属第七节 7 待裁决 |
 | R8-PY-04 评审包输入面 fail-closed | **已落地（本地 `pytest tests/python` 442 passed / 1 skipped）** | 见第四节该行。**过程即门禁的一次自证**：新增的现树对账用例在改脚本之前跑，直接报出 `TREE_COPY 指向不存在的根：['windows/packaging']`——这正是修复要抓的东西，先红后绿。`--check` 的声明按实况改写成「确定性自检」，并留一条锚断言旧的「保证与当前源码同步」表述不得复活。脚本行数 392（基线零余量，本轮靠压缩 docstring 冗行持平，未放宽基线） |
 | B4 余量（第三批）：R8-CS-SEC-06 新窗口通道与 B8 裁决合一 | **已落地（本地两套件全绿：Core 730/730、Broker 178/178）** | `UrlSafety.CanOpenHttpUrl` 是页面可驱动的 `target=_blank` / `window.open` 通道裁决点，此前判「公网 **或** 本机」：内网设备（`192.168.1.1`、`10.0.0.5`、`172.20/12`、`my-nas.local`、`printer.internal`）在该通道一律被拒——**第七轮 B8 裁决在导航侧已落地、在这一类出口没落地**，属虚闭环；两份测试还把旧口径写成期望值（`192.168.1.1 → false`、注释「私有非本机仍拒」「内网拒绝」），即改动会被测试反咬。同文件另一半：主机名不在 60s 缓存内即 `Dns.GetHostAddresses` 同步解析，跑在 UI 线程（CS-382 在导航侧修过的同一形态，`_blank` 是其第二条出口）。改为复用 `ReservedAddressBoundary.DeniesRaw`——保留地址边界是四类出口的单一谓词源，新窗口通道是第五类；拒绝面因此不变窄（元数据/链路本地/TEST-NET-1/2/3/数字 authority/组播/广播/`0.0.0.0` 仍拒），放行面与裁决合一且不再触 DNS。UI 文案与两处注释同批改口径。`UrlSafety.cs` 仍 301 行（基线零余量，未增行） |
 | B6 余量：webkit 1.17.1 + Windows job 钉版 | **本批** | `androidx.webkit 1.15.0 → 1.17.1`（Google Maven maven-metadata 实测最新稳定线，1.18.0 仅 alpha；本仓只用 3 个 API，1.16/1.17 破坏性删项零命中）；**7 个 Windows job 从浮动 `windows-latest` 改钉 `windows-2025`**（contracts.yml×2、compat.yml×2、release-windows.yml、native-policy-artifacts.yml、legacy-python-guard.yml）——出货 DLL 与签名链所在的镜像小版本此前每天可能不同，与本仓「固定 toolchain / 可复现构建」的自述口径相反。标签有效性由必需检查 `windows-contract-build` 在本 PR 上实测：不存在的标签会停在 waiting，合不进去即回退。**同批改口径**：B6 原先把 `xunit.runner.visualstudio 3.1.5` 与 `ruff 0.16.10` 记为「无需重锁」，实测两者分别被两份 `packages.lock.json`（RID 块）与 `requirements-ci.txt` 的逐条 `--hash=` 钉住 ⇒ 移入 B7（见第八节 A 类更正段） |

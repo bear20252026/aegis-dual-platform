@@ -61,9 +61,16 @@ fn seed_bytes_roundtrip_matches_hex() {
 // —— RS-082 回归（审计 2026-09-25） ——
 
 #[test]
-fn canvas_read_channels_all_covered() {
-    // RS-082：canvas 读取三通道全覆盖——toDataURL/toBlob/
-    // OffscreenCanvas.convertToBlob（漏任一通道 = 噪声绕过）
+fn canvas_encoding_channels_covered() {
+    // RS-082：**编码出口**三条全覆盖——toDataURL/toBlob/
+    // OffscreenCanvas.convertToBlob（漏任一条 = 噪声绕过）。
+    // 第八轮 R8-RS-03 如实收窄本用例名与注释的原口径（原名
+    // `canvas_read_channels_all_covered` 读作"canvas 读取面全覆盖"，
+    // 而**像素直读出口** `CanvasRenderingContext2D.prototype.getImageData`、
+    // `OffscreenCanvas` 2d 同名方法、`WebGLRenderingContext.readPixels` 并未
+    // 加噪：页面读到的仍是无噪原文，与编码出口逐像素比对即 100% 检出防护
+    // 存在。要不要把噪声扩到这三条出口属产品取舍（会改变正当使用
+    // getImageData 的站点所见像素）——记第七节 7 待裁决，不改名不改判。
     let script = FingerprintShield::from_seed([9u8; 32]).inject_script();
     assert!(script.contains("HTMLCanvasElement.prototype.toDataURL"));
     assert!(
