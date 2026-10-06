@@ -149,6 +149,8 @@ YAML 4/195、TOML 4/306。
    （无 GlobalScope/runBlocking，launch 三点均显式 Dispatchers）；StateFlow 原地改
    陷阱现存零例；xunit 空数据源不可达；红线「每个 WebView 经 SecureWebViewFactory」
    实测成立；`Contracts/Generated` 六 record 不作桩实现缺陷（沿用第七轮 §六之二）。
+6. **R8-CS-SEC-10 由「潜在崩溃/fail-open」降为 P3（实测驱动）**：子代理称 `OriginPolicy.cs:40-41` 的 `raw[(schemeEnd + 3)..]` 未校验 `IndexOf` 结果即切片。主代理写了一次性探针用例实测 .NET 10：`http:example.com`、`http: x7f000001\`、`http:\@evil.com/`、`https:.com/` 四种形态 **`Uri.TryCreate(…, Absolute)` 全部返回 false**（special scheme 缺 `//` 即不成立）⇒ 切片根本走不到，既无越界崩溃也无「垃圾 authority 让 raw 层防线空转」的实际后果。补 `schemeEnd < 0 → return false` 作为与孪生 `ReservedAddressBoundary.HasNumericAuthority` 的口径对齐（该结论属平台实现细节，CS-348 已记录 .NET 对 IP 编码的解释随版本/平台变），并留两条 InlineData 把「今天不可达」钉成可失败断言：平台一旦改成接受这些形态，用例即红，提醒复核 raw 层三道防线。
+7. **R8-CI-04 的 legacy 面不成立（已随 #86 闭）**：队列记「`legacy-python-guard.yml:72-82` 三条 pip 安装只看第 3 条、`:129-137` 八条 selftest 只看第 8 条」——B1（PR #86）已把这两步改 `shell: bash`（Actions 包装带 `set -eo pipefail`），本批复读确认两条 `永不红` 均已消除。该条目余下的面只有「Authenticode 缺证书 `Write-Warning; exit 0`」——那是第七节 3 的待裁决项，不在本批范围。
 
 ## 七、需用户裁决（**① 已于 2026-10-06 定稿并实施**——按推荐方案改核心语义与向量，见第十二节 B9 第二片；其余 4 项仍待裁决；第 5 项见第十二节 B4 余量第二批）
 
