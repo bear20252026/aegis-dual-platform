@@ -44,7 +44,11 @@ public sealed class UrlSafetyTests
     public void RejectsLoopbackAndPrivateAndReserved(string url, bool expected) =>
         Assert.Equal(expected, UrlSafety.IsPublicHttpUrl(url));
 
-    // ── 本地开发访问放开：CanOpenHttpUrl 允许公网 + 本机/回环/hosts 域名 ──
+    // ── R8-CS-SEC-06（第八轮）：新窗口通道的放行面 = 保留地址边界之外一律放行。
+    // 第七轮 B8 裁决「本机与内网必须能打开」在导航侧已落地，但该通道当时仍用
+    // 「公网 或 本机」双条件 ⇒ 192.168/10/172.16 与 my-nas.local 一律被拒，
+    // 且主机名缓存未命中时在 UI 线程同步 DNS（CS-382 同型）。
+    // 本面因此与 ReservedAddressBoundary 同源：两侧任何一侧改口径，这里就红。──
     [Theory]
     [InlineData("https://www.baidu.com/", true)]
     [InlineData("https://example.com", true)]
@@ -54,15 +58,27 @@ public sealed class UrlSafetyTests
     [InlineData("http://127.0.0.1/x", true)]           // 回环放行
     [InlineData("http://127.0.0.1:8080", true)]
     [InlineData("http://[::1]/", true)]                // IPv6 回环放行
-    [InlineData("http://192.168.1.1", false)]          // 私有非本机仍拒
-    [InlineData("http://10.0.0.5", false)]
-    [InlineData("http://169.254.169.254/x", false)]    // 链路本地仍拒
+    [InlineData("http://192.168.1.1", true)]           // 内网设备——裁决要求能打开
+    [InlineData("http://10.0.0.5", true)]
+    [InlineData("http://172.20.3.4/x", true)]
+    [InlineData("http://[fd00::1]/", true)]            // IPv6 ULA
+    [InlineData("http://100.64.1.2/", true)]           // CGNAT/Tailscale
+    [InlineData("http://my-nas.local/", true)]         // 内网域名后缀：交 DNS 定权威
+    [InlineData("http://printer.internal/", true)]
+    [InlineData("http://169.254.169.254/x", false)]    // 链路本地 + 云元数据仍拒
+    [InlineData("http://0.0.0.0/", false)]
+    [InlineData("http://192.0.2.1/", false)]           // TEST-NET-1
+    [InlineData("http://198.51.100.7/", false)]        // TEST-NET-2
+    [InlineData("http://203.0.113.9/", false)]         // TEST-NET-3
+    [InlineData("http://2852168190/", false)]          // 数字 authority（Chromium 侧＝元数据端点）
+    [InlineData("http://224.0.0.1", false)]            // 组播
+    [InlineData("http://255.255.255.255", false)]      // 广播
     [InlineData("javascript:void(0)", false)]
     [InlineData("file:///C:/x.html", false)]
     [InlineData("data:text/html,hi", false)]
     [InlineData(null, false)]
     [InlineData("not a url", false)]
-    public void CanOpenHttpUrlAllowsPublicAndLocalHosts(string? url, bool expected) =>
+    public void CanOpenHttpUrlFollowsReservedAddressBoundary(string? url, bool expected) =>
         Assert.Equal(expected, UrlSafety.CanOpenHttpUrl(url));
 
     [Theory]
@@ -131,8 +147,8 @@ public sealed class UrlSafetyTests
     [InlineData("nas.internal")]
     public void IsPublicHttpUrlRejectsIntranetSuffixHosts(string host)
     {
-        // 外部打开通道（IsPublicHttpUrl）对内网保留后缀一律拒绝——
-        // 本机放开只走 CanOpenHttpUrl 的本地开发分支
+        // 纯公网口径（IsPublicHttpUrl）对内网保留后缀一律拒绝——R8-CS-SEC-06 后
+        // 新窗口通道不再取该口径（改走保留地址边界），本方法只剩断言纯公网语义
         Assert.False(UrlSafety.IsPublicHttpUrl($"https://{host}/"));
     }
 }

@@ -14,8 +14,8 @@ public static class UrlSafety
     private static readonly ConcurrentDictionary<string, (bool IsLocal, long StampMs)> LocalHostCache = new();
     private static readonly TimeSpan LocalHostCacheTtl = TimeSpan.FromSeconds(60);
 
-    /// <summary>是否为可安全打开的外部 http/https URL（公网 host，或本机/回环/
-    /// hosts 映射到本机的域名——后者为本地开发访问开放）。</summary>
+    /// <summary>页面可驱动的新窗口通道（target=_blank / window.open）放行判定：
+    /// 协议合法 + 不在保留地址边界内（R8-CS-SEC-06，与 B8 裁决同一条边界）。</summary>
     public static bool CanOpenHttpUrl(string? url)
     {
         if (string.IsNullOrWhiteSpace(url))
@@ -26,7 +26,7 @@ public static class UrlSafety
             return false;
         if (string.IsNullOrEmpty(uri.Host))
             return false;
-        return IsPublicHost(uri.Host) || IsLocalHostOrResolvesLocalHost(uri.Host);
+        return !Broker.ReservedAddressBoundary.DeniesRaw(url);
     }
 
     /// <summary>是否为可安全打开的外部 http/https URL（公网 host）。

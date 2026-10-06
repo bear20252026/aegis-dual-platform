@@ -187,7 +187,7 @@ public partial class InPrivateWindow : Window
                 if (!CanOpenNewWindowLink(targetUrl))
                 {
                     Core.Security.SecurityLog.Write(
-                        $"[inprivate] 已拒绝打开新窗口链接（非公网/本机地址）: {Core.Security.UrlRedactor.Redact(targetUrl)}");
+                        $"[inprivate] 已拒绝打开新窗口链接（链路本地/云元数据/保留地址）: {Core.Security.UrlRedactor.Redact(targetUrl)}");
                     return;
                 }
                 _tabs.NewTab(targetUrl);
@@ -354,8 +354,8 @@ public partial class InPrivateWindow : Window
     private void CloseWindow_Click(object sender, RoutedEventArgs e) => Close();
 
     /// <summary>CS-292：新窗口链接放行判定（与主窗 NewWindowRequested 同口径）。
-    /// 提纯 internal 直测——公网 host 或本机/hosts 映射到本机的域名放行，
-    /// 非法协议/内网/环回拒绝（安全约束——本机除外）。</summary>
+    /// 提纯 internal 直测——协议合法且不在保留地址边界内即放行（R8-CS-SEC-06：
+    /// 此前判「公网或本机」，把 B8 裁决要求能打开的内网设备一律拒掉）。</summary>
     internal static bool CanOpenNewWindowLink(string? url) =>
         Core.UrlSafety.CanOpenHttpUrl(url);
 

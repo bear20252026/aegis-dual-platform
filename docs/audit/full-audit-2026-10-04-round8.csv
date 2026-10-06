@@ -39,3 +39,4 @@ R8-CS-CORE-8,P2,问题/fail-closed可见性,windows/src/Aegis.Windows.App/Broker
 R8-CS-CORE-9,P3,问题/口径不一致,windows/src/Aegis.Windows.App/Broker/BrowserPolicyBroker.cs:346-349 ↔ :508-513,同一「桥不可得」事件：消费点写死native_policy_core_unavailable，评估点带出gate自己的DenialCode⇒审计码词表在同一事件两样，跨端/查询侧对账困难。已用两条用例分别钉死,yes,B4余量
 R8-DOC-18,P3,问题/机器可读索引不可解析,docs/audit/full-audit-2026-10-04-round8.csv（6-29 行）,8/38 行的 location 含裸逗号未加引号，列全部右移（finding 落进 primary_reviewed 位）——按列解析的脚本读到错位数据，「已产出机器可读索引」的声明不成立。已用 csv.writer 重写该行集并补可解析性用例,yes,B4余量
 R8-CS-SEC-09,P2,问题/fail-open（有意取舍，待裁决）,windows/src/Aegis.Windows.App/WebView/HostWebView.cs:395-409,子资源策略链的 catch 吞异常后不设响应＝原始请求放行（CS-310 为「单请求失败不影响其他请求」明示的选择）。翻成 403-on-exception 会让策略层一个 bug 403 掉整页子资源，属可用性权衡 → 登记为待裁决第 5 项，本批不改,yes,待裁决
+R8-CS-SEC-06,P1,问题/裁决未收敛+UI 线程同步 DNS,windows/src/Aegis.Windows.App/Core/UrlSafety.cs:19-30,新窗口通道（target=_blank/window.open）用「公网 或 本机」双条件：B8 裁决要求能打开的内网目标一律被拒，且主机名缓存未命中时在 UI 线程同步 DNS（CS-382 同型）→ 改判保留地址边界,yes,B4
