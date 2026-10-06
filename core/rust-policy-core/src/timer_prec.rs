@@ -110,7 +110,15 @@ impl TimerPrecision {
   // 覆盖 performance.now()
   try {{
     var origPerfNow = performance.now.bind(performance);
-    var wrappedPerfNow = function() {{ return reducePrecision(origPerfNow()); }};
+    // R8-RS-04（第八轮）：圆整后叠加的是**无状态**随机抖动 ⇒ 相邻两次读数可回退
+    //（t2 < t1），违反规范的单调非递减——回退既是一行即检的防护信号也打乱页内动画。
+    var lastPerf = -Infinity;
+    var wrappedPerfNow = function() {{
+      var v = reducePrecision(origPerfNow());
+      if (v < lastPerf) v = lastPerf;
+      lastPerf = v;
+      return v;
+    }};
     // RS-216（2026-09-26 审计）：属性描述符对齐原生——双 false 形态可被
     // getOwnPropertyDescriptor 一查即破。
     // RS-250（2026-10-01 审计）：原型级替换（保留原 descriptor 属性）——
@@ -335,7 +343,6 @@ mod tests {
         assert!(script.contains("Date.now"));
         assert!(script.contains("reducePrecision"));
     }
-
     #[test]
     fn custom_config_reflected() {
         let config = TimerPrecisionConfig {
