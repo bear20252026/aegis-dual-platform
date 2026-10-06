@@ -11,7 +11,9 @@ kotlinComposePlugin = "2.4.20"
 gradleKtlintPlugin = "14.2.0"
 detektPlugin = "1.23.8"
 # AndroidX
-androidx-webview = "1.15.0"
+# R8-DEPS-1（第八轮）：1.15.0 → 1.17.1（Google Maven maven-metadata 实测稳定线，
+# 1.18.0 仅 alpha 不计）。本仓经 WebViewFeature/VersionCompat 消费，无 API 断裂面。
+androidx-webview = "1.17.1"
 androidx-activityCompose = "1.13.0"
 # R8-DEPS-10（第八轮）：2.10.0 → 2.11.0（Google Maven maven-metadata 实测稳定线）
 # Compose BOM 不管辖 lifecycle，此处为显式版本，落后须手动 bump。

@@ -28,7 +28,7 @@ concurrency:
 jobs:
   webview2-regression:
     name: WebView2 兼容性回归（自检 + 探测报告）
-    runs-on: windows-latest      # GitHub 官方镜像自带 WebView2 Runtime
+    runs-on: windows-2025      # GitHub 官方镜像自带 WebView2 Runtime
     timeout-minutes: 20
     env:
       PYTHONUTF8: "1"            # Windows runner 控制台默认 cp1252，probe 中文输出会 UnicodeEncodeError
@@ -93,7 +93,7 @@ jobs:
   # 门禁；归档栈探测 job 保留不动。
   windows-canonical-stack:
     name: Windows 正典 C# 栈兼容门禁（build + 双测试套件——正典栈基线）
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)

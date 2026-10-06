@@ -181,6 +181,17 @@ ruff `0.16.9 → 0.16.10`。**否定式结论**：AGP/Gradle/Compose 插件/BOM�
 jna、org.json、junit、mockito、robolectric、androidx-test、SQLitePCLRaw core/provider/lib、
 xunit 本体、bandit/pytest/pyyaml/jsonschema/pip-audit/cryptography **均已是上游最新稳定线**。
 
+> **A 类口径更正（B6 落地时实测，2026-10-06）**：上列 `xunit.runner.visualstudio` 与
+> `ruff` 两项**不在「无需重锁」面**——前者被 `windows/tests/*/packages.lock.json` 两份锁
+> 文件钉住（LockedMode 下改 csproj 版本必 NU1004），后者被 `requirements-ci.txt` 的
+> 逐条 `--hash=` 钉住（B5 刚把这条锁结构做成门禁）。二者已并入 B7 重锁面。
+> 真正无锁可升的只有 webkit / lifecycle / sbom-action 三项，加上一条本轮新发现：
+> **7 个 Windows job 全部跑在浮动的 `windows-latest`**——「可复现构建」在本仓是
+> 声明（ADR-005、Cargo.toml 的固定 toolchain 口径），但出货 DLL 与签名链所在镜像
+> 的小版本（VS/SDK/WebView2 Runtime）每天可能不同。现已一律钉 `windows-2025`
+> （ubuntu 侧 27 处未钉：Linux 镜像漂移面与出货件无关，且一次改 27 处的验证收益
+> 不匹配本批范围）。
+
 **B. 需重锁或需配套改动**：Microsoft.Data.Sqlite `10.0.0 → 10.0.12` 与 WebView2 SDK
 `1.0.2903.40 → 1.0.4258.31`（落后约 22 个月）须按「改 csproj → `dotnet restore -r win-x64
 -p:RestoreLockedMode=false` → 回读锁确认 `net10.0-windows7.0/win-x64` RID 块仍在 → 再跑
@@ -231,7 +242,7 @@ mypy `2.3.1 → 2.4.0` 须 pip-compile 整树重算 hash；Test.Sdk `17.14.1 →
 | **B3** | R8-AD-02/09：JNA keep 规则名改正 + 常驻 `ProguardKeepCoverageTest`（按声明位置推导二进制名逐个断言被 keep）+ 恒绿用例改可失败断言 + 发布链置位静态锚 | `android/app/proguard-rules.pro`、`android/broker/src/test/**` | `:broker:ktlintCheck/detekt/testDebugUnitTest`（CI 实跑） | **已推 PR #88（首轮 ktlint 解析事故已修，重跑中）** |
 | B4 | R8-CS-SEC-01/08 + R8-CS-CORE-1/2：把「核心要求确认」与 6 条静默出口收敛为**用户可见拒绝 + 审计留码**；补 5 个拒绝码的行为断言与原生前置分支断言。⚠ 只改可见性，不改放行/阻断方向（方向属第七节 1） | `HostWebView.cs`、`BrowserPolicyBroker.cs`、`windows/tests/**` | `dotnet test` 两套件（CI） | 未动 |
 | B5 | R8-CI-03 残余 + R8-PY-02/08/11 + R8-SH-10：`validate_vector_schemas` invalid 侧缺 manifest 改**有界登记**、按条目下界、`check_markdown_links` 包含性 + 空面 exit 2、`ci.yml` paths 补齐输入闭包、requirements 锁结构门禁（逐条 `==`+hash、`.in↔.txt` 对账） | `contracts/codegen/validate_vector_schemas.py`、`contracts/vectors/update-manifest-invalid.json`、`scripts/{verify_vectors,check_markdown_links}.py`、`validate_release.py`、`.github/workflows/ci.yml`、`tests/python/**` | 每项须先注入失效证据再声称修好 | 已落地（PR #92） |
-| B6 | 无破坏升级：androidx.webkit 1.17.1、lifecycle 2.11.0、xunit.runner.visualstudio 3.1.5、sbom-action v0.24.3、ruff 0.16.10、`.gitattributes` + `android/.editorconfig` 行尾口径、发布链 `windows-2025` | `android/gradle/libs.versions.toml`、`windows/tests/*.csproj`、4 个 workflow、仓库根新文件 | CI 全量（gradle/NuGet 侧无需重锁即可验） | 未动 |
+| B6 | 无破坏升级：androidx.webkit 1.17.1、lifecycle 2.11.0、xunit.runner.visualstudio 3.1.5、sbom-action v0.24.3、ruff 0.16.10、`.gitattributes` + `android/.editorconfig` 行尾口径、发布链 `windows-2025` | `android/gradle/libs.versions.toml`、`windows/tests/*.csproj`、4 个 workflow、仓库根新文件 | CI 全量（gradle 侧无需重锁即可验；NuGet 侧实测**不在**该面） | **已落地（PR #90：行尾单源 + lifecycle + sbom-action）**；**本批：webkit 1.17.1 + 7 个 Windows job 钉 windows-2025**；xunit.runner.visualstudio 与 ruff 两项按第八节 A 类更正移入 B7（受锁） |
 | B7 | 需重锁升级：WebView2 SDK + Microsoft.Data.Sqlite + `bundle_e_sqlite3` 补钉（按第八节 B 的五步 SOP）、`AnalysisLevel=Recommended` + `Deterministic`、mypy 2.4.0 整链重锁、rust-toolchain pin + `cargo deny`（或按实改注释）、Dependabot 9 条告警的显式 dismiss/处置 | `windows/*.csproj`、`windows/**/packages.lock.json`、`Directory.Build.props`、`requirements-ci.*`、`.github/workflows/*` | CI；锁文件改写后须回读确认 RID 块仍在 | 未动 |
 | B8 | 文档真相（第七轮 B7 未完 + 本轮 R8-DOC 全部）：13→15 workflow 七处、单一裁决源限定语、三端守卫→两端、KillSwitch/无痕端别、parity 补 `NewBrowserVersionAvailable`、legacy 冻结口径合一、`identity.md` E2EBroker 死指针、README 确认流域口径、ADR-003/006 取代注记、4 份历史稿时代横幅 | `README.md`、`CLAUDE.md`、`SECURITY.md`、`docs/**`、`agent/local-ipc/**`、新增
 `scripts/check_doc_claims.py` + `tests/python/doc_claims_test.py` + `contracts.yml` |
@@ -301,7 +312,8 @@ Native-Policy-Artifacts、Agent-Redteam 的 push 触发，加上 `Build Windows 
 万一需要回退不必丢工作；③**不改写 master**（不 force-push、不 reset），若有后续问题
 一律正向 `git revert`；④本行原先写作「PR #102」——该编号在本仓根本不存在，是我在
 推送前预填的占位，属本轮自己犯的「文档说的和实树不一样」，与 B8 修的是同一类账。 |
-| B7 / B9 | 未动 | 见第九节；B7 需先定「重锁在哪做」（第七节 4） |
+| B6 余量：webkit 1.17.1 + Windows job 钉版 | **本批** | `androidx.webkit 1.15.0 → 1.17.1`（Google Maven maven-metadata 实测最新稳定线，1.18.0 仅 alpha；本仓只用 3 个 API，1.16/1.17 破坏性删项零命中）；**7 个 Windows job 从浮动 `windows-latest` 改钉 `windows-2025`**（contracts.yml×2、compat.yml×2、release-windows.yml、native-policy-artifacts.yml、legacy-python-guard.yml）——出货 DLL 与签名链所在的镜像小版本此前每天可能不同，与本仓「固定 toolchain / 可复现构建」的自述口径相反。标签有效性由必需检查 `windows-contract-build` 在本 PR 上实测：不存在的标签会停在 waiting，合不进去即回退。**同批改口径**：B6 原先把 `xunit.runner.visualstudio 3.1.5` 与 `ruff 0.16.10` 记为「无需重锁」，实测两者分别被两份 `packages.lock.json`（RID 块）与 `requirements-ci.txt` 的逐条 `--hash=` 钉住 ⇒ 移入 B7（见第八节 A 类更正段） |
+| B7 / B9 | 未动 | 见第九节；B7 需先定「重锁在哪做」（第七节 4）。**B6 移入两项**：xunit.runner.visualstudio 3.1.5、ruff 0.16.10 |
 | B8 文档真相 | **已落地（PR #93）** | ①**新门禁 `scripts/check_doc_claims.py`**（挂
 `contract-source-of-truth`）：文档里的 workflow 数是陈述，实树变化后没人回头改——同一
 件事三轮复发（WB-214 对齐 13 → R6 记「闭环即回归」→ 本轮实测 8 处与实树不符，实树 15）。
