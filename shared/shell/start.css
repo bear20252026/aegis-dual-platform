@@ -242,7 +242,14 @@
   }
   /* 触摸目标保底（移动端可用性） */
   @media (pointer: coarse) {
-    .wp, .quick-btn, .search button, .engine-pill { min-height:40px; }
+    /* R8-SH-13（第八轮）：原写法只抬 min-height 到 40、且不含宽度——.wp 在
+       ≤640px 仍是 28px 宽（高被拉到 40 也只是 28×40），.engine-item 菜单行
+       压根不在面内。触控目标按 WCAG 2.5.5 取 **44×44 双向**保底 */
+    .wp, .quick-btn, .search button, .engine-pill, .engine-item, .veil-btn {
+      min-height:44px;
+    }
+    .wp { width:44px; height:44px; }
+    .quick-btn, .engine-pill, .search button { min-width:44px; }
     /* WB-142（2026-10-01 审计）：触控目标保底补齐——.link-btn（导入入口）
        与 .snake-sound/.snake-close（30×30 圆钮）此前 <44px，低于
        WCAG 2.5.5 / 平台 44×44 建议 */
@@ -389,5 +396,8 @@
     .snake-head .title, .veil-title, .veil-sub { color: CanvasText; text-shadow: none; }
     .wp { border: 2px solid ButtonText; }
     .wp.active { border-color: Highlight; }
+    /* R8-SH-14（第八轮）：此前只关掉压暗遮罩，壁纸**照片本身**仍在文字底下
+       ——高对比模式把 CanvasText 压在任意亮度照片上，等于不可读。整面交还系统画布色 */
+    #wallpaper { background: Canvas; }
     #wallpaper::after { background: none; }
   }
