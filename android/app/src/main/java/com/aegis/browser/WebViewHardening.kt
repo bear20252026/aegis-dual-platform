@@ -192,8 +192,26 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
   //（fetch.toString() 一行暴露包装源码）。对齐 Rust ToStringGuard（RS-027）
   // 与本脚本 Stage 3-9 各包装点的注册读取键：Symbol 键按具名字符串探测落空、
   // 不出现在 Object.keys/getOwnPropertyNames 字符串枚举通道。
+  // R8-RS-09（第八轮 2026-10-06）：注册接口与 Rust 的 ToStringGuard 对齐。
+  // AD-297 版只有裸 set，且 configurable: false ⇒ 既无参数校验（页面可把任意
+  // 自己的钩子登记成任一原生函数的替身），也**永不撤销**（不可替换就没有关闭
+  // 通道）——比我方 Rust 侧的 RS-252 校验更弱。现在：闭包内窗口标志 + 双函数
+  // 校验 + original/proxy 两侧都不得已登记，并在本 blob 末尾同步关窗
+  //（页面脚本只可能在 blob 之后执行 ⇒ 伪造映射窗口为零；引用被捕获也无用，
+  // 因为失效发生在函数体内部而不是属性替换上）。
+  var open = true;
   Object.defineProperty(window, Symbol.for('proxy.register.v1'), {
-    value: function(proxy, original) { proxyMap.set(proxy, original); },
+    value: function(proxy, original) {
+      if (!open) return;
+      if (typeof proxy !== 'function' || typeof original !== 'function') return;
+      if (proxyMap.has(original) || proxyMap.has(proxy)) return;
+      proxyMap.set(proxy, original);
+    },
+    writable: false, configurable: false
+  });
+  // 撤销键：幂等且不可替换——页面能用它做的只有**提前**关窗（fail-closed 方向）。
+  Object.defineProperty(window, Symbol.for('proxy.register.close.v1'), {
+    value: function() { open = false; },
     writable: false, configurable: false
   });
 })();
@@ -647,6 +665,12 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
     var __aegisReg = window[Symbol.for('proxy.register.v1')];
     if (__aegisReg) __aegisReg(window.fetch, origFetch);
   } catch(e) {}
+})();
+
+// === R8-RS-09：注册窗口在本 blob 末尾同步关闭（Stage 1 的撤销键）===
+(function() {
+  var c = window[Symbol.for('proxy.register.close.v1')];
+  if (c) c();
 })();
         """.trimIndent()
 }

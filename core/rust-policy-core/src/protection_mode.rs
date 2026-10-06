@@ -225,6 +225,15 @@ pub fn fingerprint_pipeline_with_mode(
         parts.push(crate::ext_proxy::ExtProxy::new().inject_script());
     }
 
+    // R8-RS-09：注册窗口在本 blob **末尾同步关闭**。RS-252 原先把撤销排进宏任务，
+    // 而宏任务排在文档解析任务之后 ⇒ 头部内联脚本在撤销前仍可把「自己的钩子 →
+    // 某个未登记的原生函数」注册进 ToStringGuard，让钩子的 toString() 报 native。
+    // 各阶段的登记都在同一脚本内同步完成，脚本末尾关窗后页面脚本才可能执行
+    // ⇒ 伪造映射的窗口为零。仅在启用注册接口时发射（未启用时不必留个空函数）。
+    if mode.enable_tostring_guard() {
+        parts.push(crate::tostring_guard::ToStringGuard::close_script());
+    }
+
     parts.join("\n")
 }
 
