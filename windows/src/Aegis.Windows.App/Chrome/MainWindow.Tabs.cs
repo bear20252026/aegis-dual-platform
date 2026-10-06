@@ -143,14 +143,14 @@ public partial class MainWindow
                 ShowRejection(message);
         };
         // target=_blank / window.open 链接：不再静默丢弃，改为验证地址后
-        // 在当前窗口新建标签打开（对齐主流浏览器）。公网地址或本机/hosts
-        // 映射到本机的域名放行（本地开发访问）；非法协议/内网/环回地址仍拒
-        //（安全约束——本机除外）。
+        // 在当前窗口新建标签打开（对齐主流浏览器）。放行面 = 保留地址边界
+        // 之外（R8-CS-SEC-06 与第七轮 B8 裁决合一：本机与内网必须能打开，
+        // 故 192.168/10/172.16 与 my-nas.local 这类目标不再被该通道拒）。
         runtime.NewWindowRequested += targetUrl =>
         {
             if (!Core.UrlSafety.CanOpenHttpUrl(targetUrl))
             {
-                ShowFeedback("已拒绝打开该链接（非公网/本机地址）", isWarning: true);
+                ShowFeedback("已拒绝打开该链接（链路本地/云元数据/保留地址）", isWarning: true);
                 return;
             }
             _tabs.NewTab(targetUrl);

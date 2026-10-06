@@ -86,6 +86,7 @@ YAML 4/195、TOML 4/306。
 | R8-SH-15 | `tests/ui-regression/start_page.test.mjs:36,143` | 两条「回归锁」语料语言错了：BUG-001 判 `!/setTag\(/.test(allScripts)`——`setTag` 是 Android View API，首页 JS 里永不出现；BUG-006 判 `!/setOf\("https://\*", …"\)/.test(allScripts)`——`setOf` 是 Kotlin 字面量。⇒ 两条**恒真**，BUG-001/BUG-006 实际零保护，而台账一直记它们绿 | 保留 P2；处置=锁搬到真语料（`android/app` 新 `DocumentStartInjectionRegressionTest`，读 WebViewHardening/SecureWebViewFactory/proguard 三处），禁止形态只在**剔除注释后的代码行**上判——历史教训注释里就写着 `generateViewId()` 与 `"https://*"` 原文；再加一条正面控制用例断言「被观察结构确实在语料里」，否则恒真断言换了语言也一样空洞。node 侧留迁移指针 |
 | R8-CI-06 | `docs/security/android-build-classpath-triage.md:49-51` ↔ `GET /dependabot/alerts`（只读实测） | 文档写「处置：tolerable_risk……**附证据 dismissing**」，把判定说成已执行的操作；实测 9 条全部 `state=open`、`dismissed_at=null`、dismissed 计数 0（含 #11 critical、#12 high）。表格里的严重度与包名和实况一致，失实的只有那句状态。→ 改为「判定=tolerable_risk，未执行 dismiss」并写明 dismiss 属仓库所有者操作、需确认后带证据执行；**本轮不代做服务器端写操作** | 保留 P2（文档面），已落地 |
 | R8-PY-03 | `agent/action_contract.py:139`（修复见同文件 `constrained_fields`） | **判定面由被证明物自己决定**：`violation()` 只遍历 `sorted(self.required)`——把 `origin` 从 `contracts/schemas/action.schema.json` 的 `required` 里摘掉（`pattern` 原地保留），origin 的 pattern 校验就整段消失，而红队夹具、`validate_vector_schemas`、五门禁全部仍绿。第七轮 R7-TOOL-02 把判定面从手抄字段表改成「从 schema 派生」，方向对了，但派生的**入口**仍是那个可被单方改写的清单 | 保留 P2；处置=判定面取 `required ∪ constrained_fields`（约束存在即生效，摘 required 只把「缺失即违规」降为「出现即校验」），并加有界常量集用例 + 双向反证用例 |
+| R8-CS-SEC-06 | `windows/src/.../Core/UrlSafety.cs:19-30` ← `Chrome/MainWindow.Tabs.cs:151`、`Chrome/InPrivateWindow.xaml.cs:360` | `CanOpenHttpUrl` 用「`IsPublicHost` 或 本机」双条件裁决页面可驱动的 `target=_blank` / `window.open` 通道 ⇒ 第七轮 B8 裁决要求能打开的内网目标（`192.168.1.1`、`10.0.0.5`、`172.20/12`、`my-nas.local`、`printer.internal`）在该通道**一律被拒**（提示文案还写「非公网/本机地址」），与导航侧的 `ReservedAddressBoundary` 口径互斥；另一半是同文件的 UI 线程同步 DNS：主机名不在 60s 缓存里即 `Dns.GetHostAddresses`（CS-382 在导航侧已修过的同一形态，恶意页连开几个 `_blank` 链接即可冻结 UI）。**→ 处置**：该通道改判「协议合法 ∧ 不在保留地址边界内」，与其余四类出口同源；两份测试里钉住旧口径的 LAN 拒绝行按裁决翻成放行，并补拒绝面（元数据/TEST-NET-1/2/3/数字 authority/组播/广播）。**升 P1 的理由**：这是「裁决已定但某一类出口未收敛」的虚闭环形态，且用户可直接观测（点内网设备上的链接打不开） | 保留（子代理原文为 P2，按可观测性升 P1） |
 
 ## 五、既往声明核验结论（本轮第二产出）
 
@@ -272,7 +273,7 @@ mypy `2.3.1 → 2.4.0` 须 pip-compile 整树重算 hash；Test.Sdk `17.14.1 →
 
 | 分区 | 未复核 P2（上界） | 未复核 P3（上界） | 最值得先复核 |
 | --- | --- | --- | --- |
-| R8-CS-SEC | 11（02/03/05/06/07/09/10/11/12/13/14） | — | R8-CS-SEC-02（导航与子资源策略链**没有异常边界**：`e.Cancel = !TryAuthorizeNavigation(...)` 求值期抛异常即 `e.Cancel` 保持 false ⇒ 放行，与红线 fail-closed 相反） |
+| R8-CS-SEC | 9（03/05/07/09/10/11/12/13/14）——02 已随 #97 闭、04 已随 B4 闭、**06 本批复读确证并升 P1 后落地** | — | R8-CS-SEC-03（后退/前进/重载等 6 个真实导航入口直取 `Control.GoBack/GoForward/Reload()`：是否绕过策略链，取决于 WebView2 对程序化历史导航是否照样发 `NavigationStarting` 这一**平台事实**，本仓无实测即不登记方向） |
 | R8-CS-CORE | 6（02/03/04/05/06/07 及 P3 10 条） | 10 | R8-CS-CORE-4（`HistoryStore` 8 个公共查询方法零生产调用方，却占了该区最大一块用例预算——「711 例」里相当比例钉在生产不可达路径上） |
 | R8-RS | 8（03/04/05/09/10/14/16/21） | 9 | R8-RS-15（核心缺 JS 生成导出接口＝三端手抄的共同根因；若属实则第八节的一致性升级 B9 是正解） |
 | R8-AD | 4（03/04/05/06/07） | 11 | R8-AD-02 分区记录的 `allowedOriginRules=setOf("*")` + fetch 三重包裹 ⇒「`fetch.toString()` 默认即返回注入脚本文本」——若回读成立应从 P2 升 P1 |
@@ -312,6 +313,7 @@ Native-Policy-Artifacts、Agent-Redteam 的 push 触发，加上 `Build Windows 
 万一需要回退不必丢工作；③**不改写 master**（不 force-push、不 reset），若有后续问题
 一律正向 `git revert`；④本行原先写作「PR #102」——该编号在本仓根本不存在，是我在
 推送前预填的占位，属本轮自己犯的「文档说的和实树不一样」，与 B8 修的是同一类账。 |
+| B4 余量（第三批）：R8-CS-SEC-06 新窗口通道与 B8 裁决合一 | **已落地（本地两套件全绿：Core 730/730、Broker 178/178）** | `UrlSafety.CanOpenHttpUrl` 是页面可驱动的 `target=_blank` / `window.open` 通道裁决点，此前判「公网 **或** 本机」：内网设备（`192.168.1.1`、`10.0.0.5`、`172.20/12`、`my-nas.local`、`printer.internal`）在该通道一律被拒——**第七轮 B8 裁决在导航侧已落地、在这一类出口没落地**，属虚闭环；两份测试还把旧口径写成期望值（`192.168.1.1 → false`、注释「私有非本机仍拒」「内网拒绝」），即改动会被测试反咬。同文件另一半：主机名不在 60s 缓存内即 `Dns.GetHostAddresses` 同步解析，跑在 UI 线程（CS-382 在导航侧修过的同一形态，`_blank` 是其第二条出口）。改为复用 `ReservedAddressBoundary.DeniesRaw`——保留地址边界是四类出口的单一谓词源，新窗口通道是第五类；拒绝面因此不变窄（元数据/链路本地/TEST-NET-1/2/3/数字 authority/组播/广播/`0.0.0.0` 仍拒），放行面与裁决合一且不再触 DNS。UI 文案与两处注释同批改口径。`UrlSafety.cs` 仍 301 行（基线零余量，未增行） |
 | B6 余量：webkit 1.17.1 + Windows job 钉版 | **本批** | `androidx.webkit 1.15.0 → 1.17.1`（Google Maven maven-metadata 实测最新稳定线，1.18.0 仅 alpha；本仓只用 3 个 API，1.16/1.17 破坏性删项零命中）；**7 个 Windows job 从浮动 `windows-latest` 改钉 `windows-2025`**（contracts.yml×2、compat.yml×2、release-windows.yml、native-policy-artifacts.yml、legacy-python-guard.yml）——出货 DLL 与签名链所在的镜像小版本此前每天可能不同，与本仓「固定 toolchain / 可复现构建」的自述口径相反。标签有效性由必需检查 `windows-contract-build` 在本 PR 上实测：不存在的标签会停在 waiting，合不进去即回退。**同批改口径**：B6 原先把 `xunit.runner.visualstudio 3.1.5` 与 `ruff 0.16.10` 记为「无需重锁」，实测两者分别被两份 `packages.lock.json`（RID 块）与 `requirements-ci.txt` 的逐条 `--hash=` 钉住 ⇒ 移入 B7（见第八节 A 类更正段） |
 | B7 / B9 | 未动 | 见第九节；B7 需先定「重锁在哪做」（第七节 4）。**B6 移入两项**：xunit.runner.visualstudio 3.1.5、ruff 0.16.10 |
 | B8 文档真相 | **已落地（PR #93）** | ①**新门禁 `scripts/check_doc_claims.py`**（挂

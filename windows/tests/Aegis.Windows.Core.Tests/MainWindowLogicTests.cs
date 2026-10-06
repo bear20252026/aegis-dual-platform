@@ -56,7 +56,8 @@ public sealed class MainWindowLogicTests
     [InlineData("http://localhost/x", true)]           // 本机域名放行
     [InlineData("file:///C:/Windows/system32", false)] // 非导航协议拒绝
     [InlineData("javascript:alert(1)", false)]        // 脚本协议拒绝
-    [InlineData("http://192.168.1.1/admin", false)]    // 内网拒绝
+    [InlineData("http://192.168.1.1/admin", true)]     // 内网设备放行（B8 裁决）
+    [InlineData("http://169.254.169.254/latest/meta-data/", false)] // 元数据拒绝
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("not a url", false)]
