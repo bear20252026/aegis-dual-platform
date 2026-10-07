@@ -110,6 +110,7 @@ class DocumentStartInjectionRegressionTest {
             "android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesSeed.kt"
         private const val HARDENING_TAIL_PATH =
             "android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt"
+
         // ⑦（第八轮）：Stage 3 的 canvas 文本再外迁一份，语料面必须跟着长
         private const val HARDENING_CANVAS_PATH =
             "android/app/src/main/java/com/aegis/browser/WebViewHardeningCanvas.kt"
