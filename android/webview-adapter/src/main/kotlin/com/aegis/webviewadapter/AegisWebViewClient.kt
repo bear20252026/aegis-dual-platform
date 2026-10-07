@@ -12,6 +12,7 @@ import com.aegis.broker.AndroidBroker
 import com.aegis.broker.ApprovalRequest
 import com.aegis.broker.Decision
 import com.aegis.broker.DenyReason
+import com.aegis.broker.LocalTargetHosts
 
 /**
  * 阶段 D（蓝图 android/webview-adapter）：WebViewClient 封装——只把 WebView 回调
@@ -166,11 +167,11 @@ class AegisWebViewClient(
      * 原始子框架请求（返回 false，不接管）。
      * AD-309 想解决的「子框架 HTTPS 升级」在本回调内没有正确解，逐方案
      * 排除后取①：
-     * ① 交回 WebView + 网络层硬禁明文——network_security_config base-config
+     * ① 交回 WebView + 网络层禁明文——network_security_config base-config
      *    cleartextTrafficPermitted="false" + manifest usesCleartextTraffic=
-     *    "false"（NetworkSecurityConfigGuardTest 三层联防守护）已保证原始
-     *    http 子框架请求由 Chromium 直接 ERR_CLEARTEXT_NOT_PERMITTED 失败，
-     *    不存在明文漏发；策略判定仍按升级后 https URL 评估（与主框架同口径）。
+     *    "false"（NetworkSecurityConfigGuardTest 四层守护）挡住原始 http 子框架
+     *    请求（ERR_CLEARTEXT_NOT_PERMITTED）；第八轮 ② 的有界例外白名单同样适用
+     *    于子框架。策略判定仍按升级后 https URL 评估（与主框架同口径）。
      * ② shouldInterceptRequest 无「改写请求」语义——要返回升级后的响应必须
      *    自建网络栈代抓（脱离 Chromium 缓存/Cookie/重定向/编码语义，且回调
      *    线程不得做网络阻塞），代价与风险远超收益。本类不实现该回调。
@@ -443,15 +444,14 @@ class AegisWebViewClient(
             .takeIf { it.isNotEmpty() && it.all { c -> c.isLetterOrDigit() || c == '+' || c == '-' || c == '.' } }
             .orEmpty()
 
-    private fun upgradeToHttpsIfNeeded(url: String): String {
-        if (schemePrefixOf(url) == "http") {
-            // T3 修复（全面审计批次2 2026-09-04）：原 replaceFirst("http://")
-            // 大小写敏感——`HTTP://EXAMPLE.com` 原样放行明文（scheme 判定处
-            // 已 lowercase 但升级未同步）。改忽略大小写替换前缀。
+    // ②（第八轮 2026-10-07 定稿）：本机/内网免升级——判据单源 LocalTargetHosts，宽窄差异与 internal 的理由见 AegisWebViewClientHttpsUpgradeTest 头注。
+    internal fun upgradeToHttpsIfNeeded(url: String): String {
+        if (schemePrefixOf(url) == "http" && !LocalTargetHosts.isExemptFromHttpsUpgrade(url)) {
+            // T3 修复（全面审计批次2 2026-09-04）：原 replaceFirst("http://") 大小写敏感
+            // ⇒ `HTTP://EXAMPLE.com` 原样放行明文（scheme 判定已 lowercase，升级须同步）。
             val upgraded = url.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
-            // AD-233（2026-09-26 审计）：升级日志对每条 http 资源（含全部子
-            // 框架）各打一条——降为 isLoggable(DEBUG) 门控（开发期 setprop
-            // 可开启，release 默认静默）。
+            // AD-233（2026-09-26 审计）：升级日志对每条 http 资源（含全部子框架）各打一条
+            // ⇒ 降为 isLoggable(DEBUG) 门控（开发期 setprop 可开启，release 默认静默）。
             if (android.util.Log.isLoggable(TAG, android.util.Log.DEBUG)) {
                 android.util.Log.d(TAG, "HTTPS-only: 升级 ${LogRedact.redact(url)} → ${LogRedact.redact(upgraded)}")
             }

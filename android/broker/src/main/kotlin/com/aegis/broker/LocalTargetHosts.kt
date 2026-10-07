@@ -1,0 +1,112 @@
+package com.aegis.broker
+
+/**
+ * 本机与内网目标判定（②，第八轮 2026-10-07；裁决源是第七轮 B8「本机与内网必须能打开」）。
+ *
+ * 三条契约写在这里，因为破坏它们的代价本仓都付过：
+ * 1. **纯字符串、零 DNS**。它同时被输入分类（UI 线程）与 WebView 的升级判定调用，
+ *    一次同步解析就是 CS-382 的冻结面——「恶意页连开数个 hosts 域链接即冻结 UI」。
+ * 2. **JVM 可测**（不 import 任何 Android 类型）：webview-adapter 的判定面此前只能靠
+ *    真机，等于没有回归保护。
+ * 3. **段集与孪生同侧**：Rust `security_policy::is_high_risk_host` 与 Windows
+ *    `ReservedAddressBoundary` 放行回环 / RFC1918 / CGNAT(100.64/10) / ULA(fc00::/7)，
+ *    不豁免链路本地（含云元数据 `169.254.169.254`）、`0/8`、TEST-NET-1/2/3、
+ *    `198.18/15`、组播与广播；`localhost`/`.localhost`/`.local`/`.internal` 这类
+ *    **名字后缀**在 Windows 由 `UrlSafety.IsPublicHost` 判（本仓无第三个名字判据）。
+ *
+ * 与 Windows 的**输入层补 scheme**（`Chrome/UrlNormalizer.SchemeForLocal`）并不同口径：
+ * 那边对**任意** IP 字面量（含 `169.254.169.254`、公网 IP）补 http，且只认 localhost
+ * 家族（`.local`/`.internal` 补 https）。本端按段集判定，因此同一份裁决在两端的
+ * 「猜 scheme」这一步结论可以相反——差异已登记台账（R8-CS-SEC-15），归下一批收敛，
+ * 本批不把单端改动伪装成三端一致。
+ *
+ * 两处刻意不豁免，都写清理由，免得下轮当缺陷「顺手修」：
+ * • **单标签主机名**（`nas`、`printer`）：判它是不是内网要问 DNS，本函数的契约是零 DNS
+ *   ——Windows 的公网判定同口径（`IsPublicHost("nas")` 为真 ⇒ 升级层不豁免）。请用 IP
+ *   或 `.local`。
+ * • **前导零八进制 / 整数 / 十六进制 / 简写等非常规 IPv4 编码**（`0251.0376…`、
+ *   `2852168190`、`127.1`）：Chromium 按 inet_aton 解释、.NET 与本机解释不一致，
+ *   两侧口径不同就是绕过面（CS-348/CS-418 记过），因此一律不豁免。方向是**宁可多升
+ *   一次 https**（打不开比走明文安全）；Windows 侧则把这些形态归一后交给
+ *   `ReservedAddressBoundary` 判（`0177.0.0.1` 归一成 127.0.0.1 ⇒ 被豁免），
+ *   两端在此不完全一致，同上归 R8-CS-SEC-15 收敛。
+ */
+object LocalTargetHosts {
+    private val LOCAL_SUFFIXES = listOf(".localhost", ".local", ".internal")
+
+    /** 取 URL/authority 的 host：小写、剥 scheme、userinfo、端口与 IPv6 方括号。 */
+    fun hostOf(url: String): String {
+        var rest = url.trim().lowercase()
+        val schemeEnd = rest.indexOf("://")
+        if (schemeEnd >= 0) {
+            rest = rest.substring(schemeEnd + 3)
+        }
+        val boundary = rest.indexOfAny(charArrayOf('/', '?', '#'))
+        if (boundary >= 0) {
+            rest = rest.substring(0, boundary)
+        }
+        val at = rest.lastIndexOf('@')
+        if (at >= 0) {
+            rest = rest.substring(at + 1)
+        }
+        val close = rest.indexOf(']')
+        // 带括号的 IPv6 字面量：方括号内不含端口，剥括号即为 host；
+        // 其余形态按 host:port 剥末段冒号（无冒号时原样返回）。
+        return if (rest.startsWith("[") && close > 0) {
+            rest.substring(1, close)
+        } else {
+            rest.substringBeforeLast(':', rest)
+        }
+    }
+
+    /** host 是否属「本机或内网」目标（② 的放行面）。 */
+    fun isLocalTarget(host: String): Boolean {
+        val h = host.trim().lowercase().trimEnd('.')
+        return when {
+            h.isEmpty() -> false
+            h == "localhost" || LOCAL_SUFFIXES.any { h.endsWith(it) } -> true
+            // zone-id 需要接口知识（不在零 DNS 契约内）、方括号残留属形态不合法
+            h.contains('%') || h.startsWith("[") || h.endsWith("]") -> false
+            h.contains(':') -> isExemptIpv6(h)
+            else -> isExemptIpv4(h)
+        }
+    }
+
+    /** http URL 是否免于升 https（调用方负责确认 scheme 确为 http）。 */
+    fun isExemptFromHttpsUpgrade(url: String): Boolean = isLocalTarget(hostOf(url))
+
+    private fun isExemptIpv4(host: String): Boolean {
+        val values = host.split('.').map { text -> octetValueOrMinusOne(text) }
+        // 段数不是 4（含单标签名）、任一段畸形 ⇒ 不豁免
+        if (values.size != 4 || values.any { it < 0 }) {
+            return false
+        }
+        return isExemptRange(values[0], values[1])
+    }
+
+    /** 单个点分段的合法形态：1-3 位纯数字、无前导零（`0` 本身除外）。 */
+    private fun isDecimalOctet(text: String): Boolean =
+        text.length in 1..3 && text.all { it.isDigit() } && (text == "0" || !text.startsWith("0"))
+
+    /** 合法段 → 0..255，否则 -1。前导零八进制（`0177`）走 -1：见对象注释。 */
+    private fun octetValueOrMinusOne(text: String): Int =
+        if (isDecimalOctet(text)) (text.toInt().takeIf { it <= 255 } ?: -1) else -1
+
+    /** 放行面（第七轮 B8 裁决）：回环、RFC1918、CGNAT。 */
+    private fun isExemptRange(a: Int, b: Int): Boolean =
+        when (a) {
+            127, 10 -> true // 回环 / RFC1918
+            172 -> b in 16..31 // RFC1918
+            192 -> b == 168 // RFC1918
+            100 -> b in 64..127 // CGNAT/Tailscale（裁决放行，残余见台账）
+            // 其余一律不豁免：169.254/16 链路本地含云元数据、0/8、TEST-NET-1/2/3、
+            // 198.18/15 基准段、224/4 组播、240/4 保留，以及公网。
+            else -> false
+        }
+
+    private fun isExemptIpv6(host: String): Boolean = host == "::1" || isUla(host.substringBefore(':'))
+
+    /** ULA fc00::/7（首字节 0xfc/0xfd）——裁决放行的内网单播；fe80 链路本地、ff02 组播不在面内。 */
+    private fun isUla(firstGroup: String): Boolean =
+        firstGroup.length >= 2 && firstGroup[0] == 'f' && firstGroup[1] in 'c'..'d'
+}

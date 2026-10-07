@@ -53,6 +53,8 @@ class BrowserEngineTest {
 
     @Test
     fun hostWithPortClassifiesAsDomain() {
-        assertEquals("https://localhost:8000", BrowserEngine.normalizeExternal("localhost:8000"))
+        // ②（第八轮 2026-10-07 定稿）：本机/内网补 http——第七轮 B8「本机与内网必须
+        // 能打开」。此前钉成 https，等于在输入框这一步就把裁决关掉（同口径见向量文件）。
+        assertEquals("http://localhost:8000", BrowserEngine.normalizeExternal("localhost:8000"))
     }
 }
