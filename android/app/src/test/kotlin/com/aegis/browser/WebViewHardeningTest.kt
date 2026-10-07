@@ -136,10 +136,12 @@ class WebViewHardeningTest {
         // AD-175：原噪声只扰动 R 通道——G/B 逐像素原样返回，2/3 的读回信息
         // 未覆盖（通道差分即可高置信还原）。三通道必须各有独立抖动写入。
         val js = WebViewHardening.fingerprintShieldScript(testSeed)
-        // AD-311 起噪声写回为 aegisNudge 离岸形态（0/255 clamp 吸收面修复）
-        assertTrue("R 通道抖动缺失", js.contains("imageData.data[i] = aegisNudge("))
-        assertTrue("G 通道抖动缺失（仅 R 通道混淆不充分）", js.contains("imageData.data[i + 1] = aegisNudge("))
-        assertTrue("B 通道抖动缺失（仅 R 通道混淆不充分）", js.contains("imageData.data[i + 2] = aegisNudge("))
+        // AD-311 起噪声写回为 aegisNudge 离岸形态（0/255 clamp 吸收面修复）；
+        // ⑦ 起写回点收敛到唯一的 aegisNoiseRectangle 循环（编码与直读五个出口共用）
+        assertTrue("R 通道抖动缺失", js.contains("data[i] = aegisNudge("))
+        assertTrue("G 通道抖动缺失（仅 R 通道混淆不充分）", js.contains("data[i + 1] = aegisNudge("))
+        assertTrue("B 通道抖动缺失（仅 R 通道混淆不充分）", js.contains("data[i + 2] = aegisNudge("))
+        assertTrue("alpha 不得被扰动（透明度变化视觉可察）", !js.contains("data[i + 3] = aegisNudge("))
     }
 
     @Test

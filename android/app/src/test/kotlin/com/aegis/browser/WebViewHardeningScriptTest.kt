@@ -189,8 +189,8 @@ class WebViewHardeningScriptTest {
         assertTrue("toBlob 第二通道必须覆盖", script.contains("HTMLCanvasElement.prototype.toBlob"))
         assertTrue("convertToBlob 第三通道必须覆盖", script.contains("OffscreenCanvas.prototype.convertToBlob"))
         assertTrue("OffscreenCanvas 缺失环境须空转守卫", script.contains("typeof OffscreenCanvas !== 'undefined'"))
-        // 三通道共用同一噪声实现（形态一致——不出现第二份噪声循环）
-        assertEquals("噪声循环必须单源共享（三通道同构）", 1, Regex("for \\(let px = 0, i = 0").findAll(script).count())
+        // ⑦ 起五个出口共用同一噪声循环（形态一致——不出现第二份噪声循环）
+        assertEquals("噪声循环必须单源共享（编码三出口 + 直读两出口同构）", 1, Regex("function aegisNoiseRectangle").findAll(script).count())
     }
 
     /** AD-311（2026-10-02 审计）：aegisNudge 的 Kotlin 镜像（0/255 边界离岸）。 */

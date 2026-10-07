@@ -32,7 +32,8 @@ fn canvas_noise_is_per_pixel_not_constant_offset() {
         script.matches("if (current === 255) return 254;").count(),
         1
     );
-    assert_eq!(script.matches("AEGIS_MAX_NOISE_PIXELS").count(), 4);
+    // 上限判据：1 处声明 + 三处编码出口 + ⑦ 的两处直读出口
+    assert_eq!(script.matches("AEGIS_MAX_NOISE_PIXELS").count(), 6);
     // 噪声函数只有一处定义（防再被逐出口复制成三份各自漂移）
     assert_eq!(script.matches("function aegisApplyCanvasNoise").count(), 1);
 }
