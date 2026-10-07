@@ -241,12 +241,17 @@ public sealed class ReservedAddressBoundaryTests : IDisposable
         const string needle = "ReservedAddressBoundary.Denies";
         var calls = CountOccurrences(brokerSource, needle);
         Assert.True(calls >= 4, $"BrowserPolicyBroker.cs 只出现 {calls} 次边界调用");
-        // 子资源层：OnWebResourceRequested 内必须调用同一谓词
-        var handler = SliceMethod(webViewSource, "private void OnWebResourceRequested");
+        // 子资源层：判定必须调用同一谓词。⑤（第八轮 2026-10-07）把子资源链搬进
+        // HostWebView.WebResourceGuards.cs 分片，且 OnWebResourceRequested 只剩
+        // 「取处置 → 落响应」，谓词判定在 EvaluateSubresource 里——锚点跟着搬。
+        // （不搬锚点的后果就是本仓反复登记的那一类：门禁改读残缺面仍恒绿。）
+        var subresourceSource = File.ReadAllText(
+            Path.Combine(appDir, "WebView", "HostWebView.WebResourceGuards.cs"));
+        var handler = SliceMethod(subresourceSource, "private WebResourceDenial? EvaluateSubresource");
         Assert.Contains("ReservedAddressBoundary.DeniesRaw(", handler);
         // 旧口径不得复活：拒绝码改名后若仍有 "private_network" 字面量，说明两条面分叉
         Assert.DoesNotContain("private_network", brokerSource);
-        Assert.DoesNotContain("PrivateNetworkBoundary", brokerSource + webViewSource);
+        Assert.DoesNotContain("PrivateNetworkBoundary", brokerSource + webViewSource + subresourceSource);
     }
 
     private static int CountOccurrences(string haystack, string needle)

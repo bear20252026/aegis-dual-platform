@@ -12,7 +12,8 @@ using Microsoft.Web.WebView2.Core;
 /// <summary>WebView2 封装（阶段 C——蓝图 windows/src/Aegis.Windows.WebView）。
 /// 只负责 WebView2 API 与事件转换——不拥有安全策略（ADR-002）。
 /// 远程页面无 native bridge——不注入 host object（ADR-003）。
-/// 分片：拦截事件落盘接线见 HostWebView.TrackerBlocks.cs。</summary>
+/// 分片：拦截事件落盘接线见 HostWebView.TrackerBlocks.cs，
+/// 导航守卫见 HostWebView.NavigationGuards.cs，子资源守卫见 HostWebView.WebResourceGuards.cs。</summary>
 public sealed partial class HostWebView : IDisposable
 {
     private readonly IBroker _broker;
@@ -332,69 +333,6 @@ public sealed partial class HostWebView : IDisposable
         {
             lock (_downloadsLock)
                 _trackedDownloads.Add(operation);
-        }
-    }
-
-    /// <summary>DNT 注入 + 子资源真拦截（WebResourceRequested 原生返回 403——
-    /// pywebview 时代只能标记不能拦截的缺口，原生 API 直接闭合）。拦截面两条：
-    /// 威胁黑名单，以及保留地址边界（R7-CS1-01——链路本地/云元数据/组播/保留段，
-    /// 与导航层同一谓词单源 ReservedAddressBoundary）。</summary>
-    private void OnWebResourceRequested(CoreWebView2 webView, CoreWebView2WebResourceRequestedEventArgs e)
-    {
-        try
-        {
-            e.Request.Headers.SetHeader("DNT", "1");
-            if (!Uri.TryCreate(e.Request.Uri, UriKind.Absolute, out var uri)
-                || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-                return;
-            // 威胁黑名单 + 保留地址边界（远程页把元数据/链路本地目标改写成
-            // <img>/fetch 时，导航层的边界管不到这里——子资源层必须自己判一次）
-            var deniedBy = _broker.IsHostBlocked(uri.Host) ? "黑名单"
-                : ReservedAddressBoundary.DeniesRaw(e.Request.Uri) ? "保留地址边界" : null;
-            if (deniedBy is not null)
-            {
-                Core.Security.SecurityLog.Write(
-                    $"[threat] 子资源拦截（{deniedBy}命中）: {RedactUrl(e.Request.Uri)}");
-                e.Response = webView.Environment.CreateWebResourceResponse(
-                    null, 403, "Blocked", "Content-Type: text/plain");
-                return;
-            }
-            // 跟踪防护分级（P1——对齐 Edge 基础/均衡/严格）
-            var level = _privacy.ProtectionLevel;
-            if (level <= 0)
-                return;
-            var pageHost = ResolvePageHost(webView.Source);
-            // 受信虚拟主机（NTP/GeoGebra）子资源：黑名单仍拦截（上文已处理），
-            // 但跳过第三方/跟踪判定——严格模式 + 跨站导航过渡期会把自带页的
-            // JS/WASM 误判为第三方而 403（pageHost 仍是旧的远程 host）。
-            var isVirtualHostAsset = NtpAssets.IsVirtualHostUrl(e.Request.Uri);
-            var isTracker = Core.Privacy.TrackerList.IsTracker(uri.Host);
-            var blockContext = e.ResourceContext is CoreWebView2WebResourceContext.Script
-                or CoreWebView2WebResourceContext.Fetch
-                or CoreWebView2WebResourceContext.Image;
-            if (isTracker
-                || (level >= 2 && blockContext && !isVirtualHostAsset
-                    && !Core.Privacy.TrackerList.IsSameSite(uri.Host, pageHost)))
-            {
-                RecordTrackerBlock(uri, level, e.ResourceContext);
-                e.Response = webView.Environment.CreateWebResourceResponse(
-                    null, 403, "Blocked", "Content-Type: text/plain");
-            }
-        }
-        catch (Exception ex)
-        {
-            // CS-310（2026-09-26 审计）：兜底不再完全静默——策略管线异常留痕
-            //（含 ResourceContext 与脱敏 URL），维持不 rethrow（单请求处理
-            // 失败不影响其他请求，保持原始响应路径）
-            try
-            {
-                SecurityLog.Write(
-                    $"[webresource] 处理异常: {ex.GetType().Name}: {ex.Message} ctx={e.ResourceContext} url={RedactUrl(e.Request.Uri)}");
-            }
-            catch (Exception)
-            {
-                // 异常参数本身不可读——尽力留痕即止
-            }
         }
     }
 
