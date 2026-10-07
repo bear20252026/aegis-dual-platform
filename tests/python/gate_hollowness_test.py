@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
 from pathlib import Path
 
 import check_markdown_links as cml
@@ -150,3 +151,18 @@ def test_ledger_csv_has_no_empty_key_columns():
         assert not empties, f"{name} 列存在空值：{empties[:5]}"
     assert header == ["ID", "priority", "type", "location", "finding",
                       "primary_reviewed", "batch"]
+
+
+def test_ledger_csv_ids_are_unique():
+    """「每行都有 ID」不等于「ID 唯一」——第八轮实测两处重号：R8-CS-SEC-09 同时被
+    「黑名单推送单飞」和「子资源链 catch 吞异常」占用；⑥ 落地时又**另起一行**写
+    R8-CS-CORE-4 而不是回写原行，于是同一 ID 有两行、内容互相矛盾。重号让下一轮
+    的「按 ID 前缀 + 位置 + 现象去重」把第二条当成已登记直接跳过（这正是 skill
+    Step 4 要求登记前去重的原因），台账规模也随之虚高。"""
+    root = Path(__file__).resolve().parents[2]
+    ledgers = sorted((root / "docs" / "audit").glob("full-audit-*.csv"))
+    assert ledgers, "未找到任何台账 CSV——索引面消失，不作通过判定"
+    for path in ledgers:
+        rows = [r for r in csv.reader(path.read_text(encoding="utf-8").splitlines()) if r]
+        dupes = {key: n for key, n in Counter(r[0] for r in rows[1:]).items() if n > 1}
+        assert not dupes, f"{path.name} 有重号 ID（去重会把其中一条当已登记跳过）：{dupes}"
