@@ -32,17 +32,36 @@ package com.aegis.broker
  *   两端在此不完全一致，同上归 R8-CS-SEC-15 收敛。
  */
 object LocalTargetHosts {
+    private const val SCHEME_SEPARATOR = "://"
     private val LOCAL_SUFFIXES = listOf(".localhost", ".local", ".internal")
 
     /** ULA 首字节前缀（fc00::/7 的 0xfc/0xfd）。 */
     private val ULA_PREFIXES = setOf("fc", "fd")
 
+    /** 点分十进制的段数与单段上限。 */
+    private const val IPV4_OCTETS = 4
+    private const val OCTET_MAX_DIGITS = 3
+    private const val OCTET_MAX = 255
+
+    /**
+     * 放行段表（第七轮 B8 裁决）。命名而不是就地写数字：这张表就是本函数的语义，
+     * 而 detekt 的 MagicNumber 也只认命名后的形态。
+     */
+    private const val LOOPBACK_FIRST = 127
+    private const val PRIVATE_A_FULL = 10
+    private const val PRIVATE_B_FIRST = 172
+    private val PRIVATE_B_SECOND = 16..31
+    private const val PRIVATE_C_FIRST = 192
+    private const val PRIVATE_C_SECOND = 168
+    private const val CGNAT_FIRST = 100
+    private val CGNAT_SECOND = 64..127
+
     /** 取 URL/authority 的 host：小写、剥 scheme、userinfo、端口与 IPv6 方括号。 */
     fun hostOf(url: String): String {
         var rest = url.trim().lowercase()
-        val schemeEnd = rest.indexOf("://")
+        val schemeEnd = rest.indexOf(SCHEME_SEPARATOR)
         if (schemeEnd >= 0) {
-            rest = rest.substring(schemeEnd + 3)
+            rest = rest.substring(schemeEnd + SCHEME_SEPARATOR.length)
         }
         val boundary = rest.indexOfAny(charArrayOf('/', '?', '#'))
         if (boundary >= 0) {
@@ -93,21 +112,21 @@ object LocalTargetHosts {
      */
     private fun isExemptIpv4(host: String): Boolean {
         val values = host.split('.').map { text -> octetValueOrMinusOne(text) }
-        if (values.size != 4 || values.any { it < 0 }) {
+        if (values.size != IPV4_OCTETS || values.any { it < 0 }) {
             return false
         }
         return when (values[0]) {
-            127, 10 -> true
-            172 -> values[1] in 16..31
-            192 -> values[1] == 168
-            100 -> values[1] in 64..127
+            LOOPBACK_FIRST, PRIVATE_A_FULL -> true
+            PRIVATE_B_FIRST -> values[1] in PRIVATE_B_SECOND
+            PRIVATE_C_FIRST -> values[1] == PRIVATE_C_SECOND
+            CGNAT_FIRST -> values[1] in CGNAT_SECOND
             else -> false
         }
     }
 
     /** 单个点分段的合法形态：1-3 位纯数字、无前导零（`0` 本身除外）。 */
     private fun isDecimalOctet(text: String): Boolean =
-        text.length in 1..3 && text.all { it.isDigit() } && (text == "0" || !text.startsWith("0"))
+        text.length in 1..OCTET_MAX_DIGITS && text.all { it.isDigit() } && (text == "0" || !text.startsWith("0"))
 
     /** 合法段 → 0..255，否则 -1。前导零八进制（`0177`）走 -1：见对象注释。 */
     private fun octetValueOrMinusOne(text: String): Int {
@@ -115,7 +134,7 @@ object LocalTargetHosts {
             return -1
         }
         val value = text.toInt()
-        return if (value in 0..255) value else -1
+        return if (value in 0..OCTET_MAX) value else -1
     }
 
     private fun isExemptIpv6(host: String): Boolean = host == "::1" || isUla(host.substringBefore(':'))
