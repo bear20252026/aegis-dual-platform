@@ -61,6 +61,7 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         var applied = h.Applied.First(b => b is BlockedHosts blk && blk.IsBlocked("doubleclick.net"));
         Assert.True(applied.IsBlocked("sub.tracker.example"));
         Assert.False(applied.IsBlocked("example.com"));
+            await SettleAsync(c);  // 等后台链收工，别与 Dispose 抢缓存文件
     }
 
     [Fact]
@@ -72,6 +73,7 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         Assert.False(started);
         await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any());
         Assert.Single(h.Applied); // 仅快照，无刷新替换
+            await SettleAsync(c);  // 等后台链收工，别与 Dispose 抢缓存文件
     }
 
     [Fact]
@@ -84,6 +86,7 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         Assert.Contains(h.Logs, l => l.Contains("订阅源非法"));
         await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any());
         Assert.Single(h.Applied);
+            await SettleAsync(c);  // 等后台链收工，别与 Dispose 抢缓存文件
     }
 
     [Fact]
@@ -98,6 +101,7 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         Assert.True(final.IsBlocked("refreshed.example"));
         Assert.False(final.IsBlocked("doubleclick.net")); // 旧快照被替换
         Assert.Contains(h.Logs, l => l.Contains("订阅源刷新完成"));
+            await SettleAsync(c);  // 等后台链收工，别与 Dispose 抢缓存文件
     }
 
     [Fact]
@@ -116,6 +120,7 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any());
         Assert.Single(h.Applied);
         Assert.True(LastApplied(h).IsBlocked("doubleclick.net"));
+            await SettleAsync(c);  // 等后台链收工，别与 Dispose 抢缓存文件
     }
 
     [Fact]
@@ -127,6 +132,22 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         Assert.False(c.Start());
         await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any());
         Assert.Single(h.Applied);
+            await SettleAsync(c);  // 等后台链收工，别与 Dispose 抢缓存文件
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task BackgroundTask_CoversBothSnapshotApplyAndRefresh()
+    {
+        // R8-CS-CORE-12：句柄必须罩住整条后台链（快照应用 → 刷新），只交回前半段
+        // 等于没修——Dispose 仍会与刷新写盘抢句柄。断言在 await 之后：Applied 两次、
+        // 刷新日志已落，缺一不可。
+        var h = new Harness { FetchedCacheContents = ["refreshed.example"] };
+        var c = h.Build(_cachePath);
+        c.Start();
+        Assert.NotNull(c.BackgroundTask);
+        await c.BackgroundTask!;
+        Assert.Equal(2, h.Applied.Count);
+        Assert.Contains(h.Logs, l => l.Contains("订阅源刷新完成"));
     }
 
     [Fact]
@@ -150,6 +171,7 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         var final = LastApplied(h);
         Assert.True(final.IsBlocked("fresh-from-fetch.example"));
         Assert.False(final.IsBlocked("stale-from-disk.example"));
+            await SettleAsync(c);  // 等后台链收工，别与 Dispose 抢缓存文件
     }
 
     private static async System.Threading.Tasks.Task SpinUntil(Func<bool> condition, int timeoutMs = 3000)
@@ -163,9 +185,25 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         }
     }
 
+    /// <summary>等 Start() 投递的那条后台链（快照应用 → 刷新）收工。不等的话，
+    /// Dispose 删缓存文件与后台写盘之间没有 happens-before——第八轮实测把必需检查
+    /// windows-contract-build 打红（IOException "...being used by another process"）。
+    /// 句柄来自 ThreatFeedCoordinator.BackgroundTask：CS-350 把 LoadCached 移出 UI 线程时
+    /// 没留下任何可等待的东西，调用方只能轮询副作用。</summary>
+    private static async System.Threading.Tasks.Task SettleAsync(ThreatFeedCoordinator coordinator) =>
+        await (coordinator.BackgroundTask ?? System.Threading.Tasks.Task.CompletedTask);
+
     public void Dispose()
     {
-        if (File.Exists(_cachePath))
-            File.Delete(_cachePath);
+        try
+        {
+            if (File.Exists(_cachePath))
+                File.Delete(_cachePath);
+        }
+        catch (IOException)
+        {
+            // 后台句柄仍未释放：留一个 GUID 命名的临时文件不影响判定，
+            // 也不让清理动作把已经通过的用例反手打红。
+        }
     }
 }

@@ -35,6 +35,14 @@ public sealed class ThreatFeedCoordinator
             ?? ((url, cache) => ThreatFeedUpdater.FetchAndStore(url, cache));
     }
 
+    /// <summary>Start() 投递的那条后台任务（缓存快照应用 → 订阅源刷新）。
+    /// CS-350 把 LoadCached 移出 UI 线程时没留下任何句柄，调用方只能靠轮询副作用
+    /// 观测——「用例断言完成」与「后台仍在写缓存文件」之间因此没有 happens-before，
+    /// 第八轮实测把必需检查 windows-contract-build 打红（Dispose 删缓存撞
+    /// IOException "used by another process"）。句柄交还调用方就能等待。
+    /// 它**不**代表可取消（本类没有 CancellationToken），那一条如实留给后续面。</summary>
+    internal Task? BackgroundTask { get; private set; }
+
     /// <summary>启动：后台线程加载缓存快照并应用，再（源有效时）后台刷新。
     /// CS-350（2026-10-01 审计）：LoadCached（≤5MB 读盘）此前在启动链 UI 线程
     /// 同步执行——改空快照启动（broker 保持默认空名单，fail-safe 放行）+
@@ -50,7 +58,7 @@ public sealed class ThreatFeedCoordinator
             if (validated is null)
                 _log("[threat] 订阅源非法（仅支持 https）——保持旧快照");
         }
-        Task.Run(async () =>
+        BackgroundTask = Task.Run(async () =>
         {
             try
             {

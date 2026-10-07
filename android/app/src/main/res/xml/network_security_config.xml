@@ -11,6 +11,17 @@
         （双重保险：API<24 设备与部分 WebView 路径不读 network_security_config）；
      ③ 本文件 base-config 必须保持 cleartextTrafficPermitted="false"（明文主闸）。
      修改本文件或 manifest 任一处前，先同步更新守护测试的断言矩阵并说明理由。 -->
+<!-- ②（第八轮 2026-10-07，用户定稿）：在三层联防之上加**有界**明文例外，落实第七轮
+     B8 裁决「本机与内网必须能打开」。三点如实写明，避免被读成「网段级放宽」：
+     • Android NSC **不支持 CIDR/网段**——`10/8`、`192.168/16` 这种范围表达不了。
+       所以下面是**逐条清单**，你自己的 NAS/打印机/内网服务 IP 要按行加进来；
+       没列出的私网地址仍按明文拒绝（表现为 ERR_CLEARTEXT_NOT_PERMITTED）。
+     • scheme 侧（SearchEngines 补 http、AegisWebViewClient 免升级）用的是
+       broker 的 LocalTargetHosts，覆盖整个 RFC1918/CGNAT/`.local` 族——
+       **两层不对称是有意的**：网络层闸门保持保守，不因裁决变成全网明文。
+     • 守护测试断言的是「domain-config 只能出现这一个块、域名必须逐条落在这份
+       白名单里、且必须自带 cleartextTrafficPermitted="true"」——新增条目要改
+       代码里的清单，改代码即过 CI，不靠人记得。 -->
 <network-security-config>
     <!-- 默认全部域禁用明文（HTTP）——仅 HTTPS 允许 -->
     <base-config cleartextTrafficPermitted="false">
@@ -18,6 +29,16 @@
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+    <!-- 本机与内网明文例外（裁决源：第七轮 B8）。IPv6 回环（::1）NSC 不支持按
+         域匹配，需要时用 127.0.0.1 或把服务绑到 IPv4。 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="true">local</domain>
+        <domain includeSubdomains="true">internal</domain>
+        <!-- 向量与文档里作为示例的家庭网关地址；按自己的拓扑增删 -->
+        <domain includeSubdomains="false">192.168.1.1</domain>
+    </domain-config>
     <!-- 调试期允许用户安装证书（仅 debug 构建生效——不影响 release） -->
     <debug-overrides>
         <trust-anchors>
