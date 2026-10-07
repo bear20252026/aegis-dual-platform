@@ -1,5 +1,5 @@
 {
-  "description": "AD-207（审计 2026-09-23 清单·A7 批）：搜索归一「搜索词 vs 网址」判定跨端共享向量——与 Windows 端 url_utils.normalize_url 的跨端契约（SearchEngines.classifyInput/normalizeInput 语义：空输入拒绝、about:blank 直通、非导航 scheme fail-closed、host:port 域名、含空格/无点号转搜索词、绝对 URL 归一）。文件随 Android 测试资源分发；Windows 测试面可直接引用同一 JSON（跨端单源——字段仅 input/expected_kind/expected_url/note，无平台耦合）。",
+  "description": "AD-207（审计 2026-09-23 清单·A7 批）：搜索归一「搜索词 vs 网址」判定跨端共享向量——与 Windows 端 url_utils.normalize_url 的跨端契约（SearchEngines.classifyInput/normalizeInput 语义：空输入拒绝、about:blank 直通、非导航 scheme fail-closed、host:port 域名、含空格/无点号转搜索词、绝对 URL 归一）。文件随 Android 测试资源分发；**当前只有 Android 侧消费**——Windows 端输入层补 scheme 的判据（Chrome/UrlNormalizer.SchemeForLocal）与本文件不同口径（见 R8-CS-SEC-15），收敛之前把它当跨端单源会记假账。",
   "vectors": [
     { "input": "", "expected_kind": "EMPTY", "expected_url": null },
     { "input": "   ", "expected_kind": "EMPTY", "expected_url": null },
@@ -17,8 +17,12 @@
     { "input": "weather.", "expected_kind": "SEARCH", "expected_url": null, "note": "尾点降级为搜索词（URL 值按引擎拼接，跨端不锁具体引擎）" },
     { "input": "rust uniffi", "expected_kind": "SEARCH", "expected_url": null, "note": "含空格 → 搜索词" },
     { "input": "今天天气", "expected_kind": "SEARCH", "expected_url": null, "note": "无点号非 ASCII → 搜索词" },
-    { "input": "localhost:8000", "expected_kind": "DOMAIN", "expected_url": "https://localhost:8000", "note": "T1：host:port 不误判 scheme" },
-    { "input": "192.168.1.1:8080", "expected_kind": "DOMAIN", "expected_url": "https://192.168.1.1:8080" },
+    { "input": "localhost:8000", "expected_kind": "DOMAIN", "expected_url": "http://localhost:8000", "note": "T1：host:port 不误判 scheme；② 第八轮起本机补 http（第七轮 B8 裁决）。⚠ 与 Windows 的输入层补 scheme 不同口径（那边任意 IP 字面量都补 http、.local/.internal 反而补 https），差异已登记台账 R8-CS-SEC-15" },
+    { "input": "192.168.1.1:8080", "expected_kind": "DOMAIN", "expected_url": "http://192.168.1.1:8080", "note": "② 第八轮：RFC1918 补 http——此前钉成 https，等于把裁决在输入框这一步关掉" },
+    { "input": "my-nas.local", "expected_kind": "DOMAIN", "expected_url": "http://my-nas.local", "note": "② 第八轮：mDNS 内网名补 http" },
+    { "input": "printer.example.internal", "expected_kind": "DOMAIN", "expected_url": "http://printer.example.internal", "note": "② 第八轮：.internal 后缀同上" },
+    { "input": "0177.0.0.1", "expected_kind": "DOMAIN", "expected_url": null, "note": "前导零八进制 IPv4：判为网址但整条被 OriginPolicy 拒（AD-213 inet_aton 双重解释），轮不到 scheme 判定；本端 LocalTargetHosts 同样不豁免它（CI 实测归一输出为 null，原写 https 是把两层顺序读反了）" },
+    { "input": "100.64.1.2", "expected_kind": "DOMAIN", "expected_url": "http://100.64.1.2", "note": "CGNAT/Tailscale 段按裁决放行（残余：阿里云元数据 100.100.100.200 落在本段内，见台账第七轮 B8）" },
     { "input": "example.com:8080/path", "expected_kind": "DOMAIN", "expected_url": "https://example.com:8080/path" },
     { "input": "localhost:abc", "expected_kind": "FORBIDDEN_SCHEME", "expected_url": null, "note": "字母端口段非 host:port 形态" },
     { "input": "example com", "expected_kind": "SEARCH", "expected_url": null, "note": "空格优先于点号判定" }

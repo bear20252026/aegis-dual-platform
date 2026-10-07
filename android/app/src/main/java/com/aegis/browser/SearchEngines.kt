@@ -1,5 +1,6 @@
 package com.aegis.browser
 
+import com.aegis.broker.LocalTargetHosts
 import com.aegis.broker.OriginPolicy
 
 /**
@@ -14,7 +15,8 @@ import com.aegis.broker.OriginPolicy
  * ③ 带 scheme 前缀：仅 http/https 走 OriginPolicy 校验；file:/javascript:/
  *    data: 等非导航 scheme 一律 null（fail-closed——对齐 Windows P0-1
  *    补丁，杜绝 `https://file:///...` 类 urlparse 盲区）
- * ④ 无 scheme：含空格或不含点号 → 搜索词拼引擎 URL；否则当域名补 https
+ * ④ 无 scheme：含空格或不含点号 → 搜索词拼引擎 URL；否则当域名补 scheme——
+ *    本机/内网目标补 http、其余补 https（② 第八轮；裁决源见 LocalTargetHosts）
  * ⑤ 完整 URL 内的空格编码为 %20（浏览器惯例，对齐 Windows D-1 修复）
  *
  * 单源约束：地址栏（SecureNavigator.navigateExternal）与首页搜索框
@@ -147,7 +149,10 @@ object SearchEngines {
             // canonicalizeExternal 内部已做 %20 编码（此前双处连续 replace）
             InputKind.ABSOLUTE_URL -> canonicalizeExternal(input.trim())
 
-            InputKind.DOMAIN -> canonicalizeExternal("https://" + input.trim())
+            // ②（第八轮 2026-10-07）：本机/内网目标补 http——dev server、NAS、打印机
+            // 多数只跑 http，一律补 https 会让第七轮 B8「本机与内网必须能打开」在输入框
+            // 这一步就失效（T1 注记所说的「开发/内网最高频输入形态」正是这一类）。
+            InputKind.DOMAIN -> canonicalizeExternal(schemeForDomainInput(input.trim()) + input.trim())
 
             InputKind.SEARCH -> searchUrl(input.trim(), engineKey)
         }
@@ -191,6 +196,12 @@ object SearchEngines {
             isPortSegment(trimmed.substring(matched.length + 1)) -> InputKind.DOMAIN
             else -> if (matched.lowercase() in NAV_SCHEMES) InputKind.ABSOLUTE_URL else InputKind.FORBIDDEN_SCHEME
         }
+    }
+
+    /** DOMAIN 输入的 scheme：本机/内网 → http，其余 → https（判据单源 LocalTargetHosts）。 */
+    private fun schemeForDomainInput(authority: String): String {
+        val host = LocalTargetHosts.hostOf(authority)
+        return if (LocalTargetHosts.isLocalTarget(host)) "http://" else "https://"
     }
 
     /** T1：host:port 判定——首个 '/' 前为 1-5 位纯数字端口段。 */
