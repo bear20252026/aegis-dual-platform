@@ -76,6 +76,10 @@ object LocalTargetHosts {
         // 其余形态按 host:port 剥末段冒号（无冒号时原样返回）。
         return if (rest.startsWith("[") && close > 0) {
             rest.substring(1, close)
+        } else if (rest.count { it == ':' } > 1) {
+            // 裸 IPv6 authority（缺方括号）不是 host:port 形态：按最后一个冒号切会切出
+            // 「fd12:」这类假 host，反而把 ULA 判进来。返回空串 ⇒ 交回不豁免（fail-closed）。
+            ""
         } else {
             rest.substringBeforeLast(':', rest)
         }

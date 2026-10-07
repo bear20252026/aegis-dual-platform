@@ -21,7 +21,7 @@
     { "input": "192.168.1.1:8080", "expected_kind": "DOMAIN", "expected_url": "http://192.168.1.1:8080", "note": "② 第八轮：RFC1918 补 http——此前钉成 https，等于把裁决在输入框这一步关掉" },
     { "input": "my-nas.local", "expected_kind": "DOMAIN", "expected_url": "http://my-nas.local", "note": "② 第八轮：mDNS 内网名补 http" },
     { "input": "printer.example.internal", "expected_kind": "DOMAIN", "expected_url": "http://printer.example.internal", "note": "② 第八轮：.internal 后缀同上" },
-    { "input": "0177.0.0.1", "expected_kind": "DOMAIN", "expected_url": "https://0177.0.0.1", "note": "前导零八进制 IPv4 **不**豁免：两侧解析口径不同（CS-348/CS-418 记过），宁可照常升 https" },
+    { "input": "0177.0.0.1", "expected_kind": "DOMAIN", "expected_url": null, "note": "前导零八进制 IPv4：判为网址但整条被 OriginPolicy 拒（AD-213 inet_aton 双重解释），轮不到 scheme 判定；本端 LocalTargetHosts 同样不豁免它（CI 实测归一输出为 null，原写 https 是把两层顺序读反了）" },
     { "input": "100.64.1.2", "expected_kind": "DOMAIN", "expected_url": "http://100.64.1.2", "note": "CGNAT/Tailscale 段按裁决放行（残余：阿里云元数据 100.100.100.200 落在本段内，见台账第七轮 B8）" },
     { "input": "example.com:8080/path", "expected_kind": "DOMAIN", "expected_url": "https://example.com:8080/path" },
     { "input": "localhost:abc", "expected_kind": "FORBIDDEN_SCHEME", "expected_url": null, "note": "字母端口段非 host:port 形态" },
