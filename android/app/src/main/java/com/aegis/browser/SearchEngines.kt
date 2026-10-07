@@ -152,8 +152,7 @@ object SearchEngines {
             // ②（第八轮 2026-10-07）：本机/内网目标补 http——dev server、NAS、打印机
             // 多数只跑 http，一律补 https 会让第七轮 B8「本机与内网必须能打开」在输入框
             // 这一步就失效（T1 注记所说的「开发/内网最高频输入形态」正是这一类）。
-            InputKind.DOMAIN ->
-                canonicalizeExternal(schemeForDomainInput(input.trim()) + input.trim())
+            InputKind.DOMAIN -> canonicalizeExternal(schemeForDomainInput(input.trim()) + input.trim())
 
             InputKind.SEARCH -> searchUrl(input.trim(), engineKey)
         }

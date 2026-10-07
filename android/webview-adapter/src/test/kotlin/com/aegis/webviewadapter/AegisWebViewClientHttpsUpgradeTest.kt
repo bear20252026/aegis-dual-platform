@@ -46,17 +46,18 @@ class AegisWebViewClientHttpsUpgradeTest {
     @Test
     fun localAndLanTargetsStayOnHttp() {
         val c = client()
-        val exempt = listOf(
-            "http://localhost:8000/",
-            "http://127.0.0.1:9/",
-            "http://my-nas.local/",
-            "http://printer.internal/",
-            "http://192.168.1.1:8080/admin",
-            "http://10.0.0.5/",
-            "http://[::1]/",
-            "http://[fd12::3]/",
-            "http://[fc00::1]:8080/x",
-        )
+        val exempt =
+            listOf(
+                "http://localhost:8000/",
+                "http://127.0.0.1:9/",
+                "http://my-nas.local/",
+                "http://printer.internal/",
+                "http://192.168.1.1:8080/admin",
+                "http://10.0.0.5/",
+                "http://[::1]/",
+                "http://[fd12::3]/",
+                "http://[fc00::1]:8080/x",
+            )
         for (url in exempt) {
             assertEquals("本机/内网目标不得被升级拦死：$url", url, c.upgradeToHttpsIfNeeded(url))
         }

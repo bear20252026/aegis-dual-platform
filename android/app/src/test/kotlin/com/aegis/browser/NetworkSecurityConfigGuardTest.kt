@@ -117,12 +117,19 @@ class NetworkSecurityConfigGuardTest {
         // 关键负向：白名单里绝不允许出现云元数据/链路本地/未指定地址——它们不是任何
         // 可访问设备，放行明文只会把 SSRF 面从 https 扩到 http。
         val doc = parse(requireMainDir().resolve("res").resolve("xml").resolve("network_security_config.xml"))
-        val domains = doc.getElementsByTagName("domain-config").let { nodes ->
-            if (nodes.length == 0) emptyList() else domainNames(nodes.item(0) as Element)
-        }
+        val domains = exceptionDomainNames(doc)
         for (forbidden in listOf("169.254.169.254", "169.254.1.1", "0.0.0.0", "metadata.google.internal")) {
             assertFalse("$forbidden 不得进入明文例外", forbidden in domains)
         }
+    }
+
+    /** 例外块里的域名清单；一个例外块都没有时返回空面（块数由上一条用例判红）。 */
+    private fun exceptionDomainNames(doc: Document): List<String> {
+        val blocks = doc.getElementsByTagName("domain-config")
+        if (blocks.length == 0) {
+            return emptyList()
+        }
+        return domainNames(blocks.item(0) as Element)
     }
 
     private fun domainNames(block: Element): List<String> {
@@ -130,13 +137,15 @@ class NetworkSecurityConfigGuardTest {
         return (0 until nodes.length).map { nodes.item(it).textContent.trim() }
     }
 
-    /** 域名 → includeSubdomains 字面量（判重复用 domainNames，不用 Map 折叠）。 */
+    /** 域名 → includeSubdomains 字面量（判重复用 domainNames 的数量，不用 Map 折叠）。 */
     private fun linkedExceptions(block: Element): Map<String, String> {
         val nodes = block.getElementsByTagName("domain")
-        return (0 until nodes.length).associate {
-            val element = nodes.item(it) as Element
-            element.textContent.trim() to element.getAttribute("includeSubdomains")
-        }
+        val linked =
+            (0 until nodes.length).associate { index ->
+                val element = nodes.item(index) as Element
+                element.textContent.trim() to element.getAttribute("includeSubdomains")
+            }
+        return linked
     }
 
     companion object {
