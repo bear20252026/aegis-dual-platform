@@ -34,6 +34,9 @@ package com.aegis.broker
 object LocalTargetHosts {
     private val LOCAL_SUFFIXES = listOf(".localhost", ".local", ".internal")
 
+    /** ULA 首字节前缀（fc00::/7 的 0xfc/0xfd）。 */
+    private val ULA_PREFIXES = setOf("fc", "fd")
+
     /** 取 URL/authority 的 host：小写、剥 scheme、userinfo、端口与 IPv6 方括号。 */
     fun hostOf(url: String): String {
         var rest = url.trim().lowercase()
@@ -117,8 +120,9 @@ object LocalTargetHosts {
 
     private fun isExemptIpv6(host: String): Boolean = host == "::1" || isUla(host.substringBefore(':'))
 
-    /** ULA fc00::/7（首字节 0xfc/0xfd）——裁决放行的内网单播；fe80 链路本地、ff02 组播不在面内。 */
-    private fun isUla(firstGroup: String): Boolean {
-        return firstGroup.length >= 2 && firstGroup[0] == 'f' && firstGroup[1] in 'c'..'d'
-    }
+    /**
+     * ULA fc00::/7——首字节 0xfc/0xfd，裁决放行的内网单播；
+     * fe80 链路本地、ff02 组播都不在面内。
+     */
+    private fun isUla(firstGroup: String): Boolean = firstGroup.take(2) in ULA_PREFIXES
 }
