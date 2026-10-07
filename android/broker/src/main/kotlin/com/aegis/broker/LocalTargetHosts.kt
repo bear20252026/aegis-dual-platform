@@ -59,13 +59,17 @@ object LocalTargetHosts {
         }
     }
 
-    /** host 是否属「本机或内网」目标（② 的放行面）。 */
+    /**
+     * host 是否属「本机或内网」目标（② 的放行面）。
+     *
+     * 三条不豁免的形态各有理由：zone-id（`fe80::1%eth0`）要接口知识、不在零 DNS 契约内；
+     * 方括号残留属形态不合法；段数不是 4 的点分串（含 `nas` 这类单标签名）要问 DNS。
+     */
     fun isLocalTarget(host: String): Boolean {
         val h = host.trim().lowercase().trimEnd('.')
         return when {
             h.isEmpty() -> false
             h == "localhost" || LOCAL_SUFFIXES.any { h.endsWith(it) } -> true
-            // zone-id 需要接口知识（不在零 DNS 契约内）、方括号残留属形态不合法
             h.contains('%') || h.startsWith("[") || h.endsWith("]") -> false
             h.contains(':') -> isExemptIpv6(h)
             else -> isExemptIpv4(h)
@@ -77,7 +81,6 @@ object LocalTargetHosts {
 
     private fun isExemptIpv4(host: String): Boolean {
         val values = host.split('.').map { text -> octetValueOrMinusOne(text) }
-        // 段数不是 4（含单标签名）、任一段畸形 ⇒ 不豁免
         if (values.size != 4 || values.any { it < 0 }) {
             return false
         }
@@ -89,24 +92,33 @@ object LocalTargetHosts {
         text.length in 1..3 && text.all { it.isDigit() } && (text == "0" || !text.startsWith("0"))
 
     /** 合法段 → 0..255，否则 -1。前导零八进制（`0177`）走 -1：见对象注释。 */
-    private fun octetValueOrMinusOne(text: String): Int =
-        if (isDecimalOctet(text)) (text.toInt().takeIf { it <= 255 } ?: -1) else -1
+    private fun octetValueOrMinusOne(text: String): Int {
+        if (!isDecimalOctet(text)) {
+            return -1
+        }
+        val value = text.toInt()
+        return if (value in 0..255) value else -1
+    }
 
-    /** 放行面（第七轮 B8 裁决）：回环、RFC1918、CGNAT。 */
-    private fun isExemptRange(a: Int, b: Int): Boolean =
-        when (a) {
-            127, 10 -> true // 回环 / RFC1918
-            172 -> b in 16..31 // RFC1918
-            192 -> b == 168 // RFC1918
-            100 -> b in 64..127 // CGNAT/Tailscale（裁决放行，残余见台账）
-            // 其余一律不豁免：169.254/16 链路本地含云元数据、0/8、TEST-NET-1/2/3、
-            // 198.18/15 基准段、224/4 组播、240/4 保留，以及公网。
+    /**
+     * 放行面（第七轮 B8 裁决）：回环 127/8、RFC1918、CGNAT 100.64/10。
+     * 其余一律不豁免——含 169.254/16 链路本地（云元数据在其内）、0/8、TEST-NET-1/2/3、
+     * 198.18/15 基准段、224/4 组播、240/4 保留，以及公网。
+     */
+    private fun isExemptRange(a: Int, b: Int): Boolean {
+        return when (a) {
+            127, 10 -> true
+            172 -> b in 16..31
+            192 -> b == 168
+            100 -> b in 64..127
             else -> false
         }
+    }
 
     private fun isExemptIpv6(host: String): Boolean = host == "::1" || isUla(host.substringBefore(':'))
 
     /** ULA fc00::/7（首字节 0xfc/0xfd）——裁决放行的内网单播；fe80 链路本地、ff02 组播不在面内。 */
-    private fun isUla(firstGroup: String): Boolean =
-        firstGroup.length >= 2 && firstGroup[0] == 'f' && firstGroup[1] in 'c'..'d'
+    private fun isUla(firstGroup: String): Boolean {
+        return firstGroup.length >= 2 && firstGroup[0] == 'f' && firstGroup[1] in 'c'..'d'
+    }
 }
