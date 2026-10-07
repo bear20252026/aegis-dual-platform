@@ -1,0 +1,143 @@
+# 依赖重锁执行面（第八轮 B7 前置——用户 2026-10-07 定稿「重锁在哪做」）
+#
+# 为什么要有这个 workflow：B7 那批升级（WebView2 SDK 落后约 22 个月、
+# Microsoft.Data.Sqlite 10.0.0→10.0.12、`SQLitePCLRaw.bundle_e_sqlite3` 在锁内仍是
+# 被点名的 2.1.11（NU1903/GHSA-2m69-gcr7-jv3q 只修了 3/4）、mypy 2.4.0 整链、
+# Test.Sdk 跨 major）**全部卡在同一个问题上：锁由谁、在哪重算**。让它在 CI 里
+# 可复现、可审计，比每次由本地手工改锁稳——本地 `dotnet restore -r win-x64` 会把
+# `net10.0-windows7.0/win-x64` 整块删掉（只删不增，diff 看着像空白改动），
+# 那次事故就差点进了主干。因此本 workflow 的重锁步骤后面**必须**跟
+# `scripts/verify_lock_rids.py`，且它判红即终止。
+#
+# 三条硬边界（不是风格，是防呆）：
+# ① 只允许 `workflow_dispatch` 触发——不挂 push/PR/schedule，也不进必需检查
+#    （依赖图类 job 一旦成为必需项，不匹配路径的 PR 会永久停在 waiting）；
+# ② 目标分支必须以 `deps/` 开头，脚本层再兜一次：解析 HEAD 不是 `deps/*` 就终止——
+#    本 job 持 `contents: write`，写回目标是它唯一能造成的越界面；
+# ③ 永不写 master：推分支后由人来开 PR 审 diff（`--require-hashes` 能装上才算成功）。
+name: Dependency-Retlock
+
+"on":
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "写回目标分支（必须 deps/ 前缀；本 workflow 永不写 master）"
+        required: true
+        default: "deps/relock-round8"
+      ecosystem:
+        description: "重算面"
+        required: false
+        type: choice
+        options: ["all", "dotnet", "python"]
+        default: "all"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dependency-relock-${{ github.event.inputs.branch }}
+  cancel-in-progress: false
+
+jobs:
+  relock:
+    name: 重算并写回依赖锁（RID 块回读门禁把关）
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - name: 校验目标分支（拒绝写回主干）
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${{ github.event.inputs.branch }}"
+          case "$target" in
+            deps/*) ;;
+            *) echo "❌ branch 必须以 deps/ 开头（当前：$target）——本 job 有写权限"; exit 1 ;;
+          esac
+
+      - name: 检出目标分支
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          fetch-depth: 1
+
+      - name: 设置 .NET 10 SDK
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: .NET 重锁（RestoreLockedMode=false，三处工程一致）
+        shell: bash
+        # 只删不增的 RID 块事故就发生在这一步之后——所以下一步是回读门禁，不是构建
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.ecosystem }}" = "python" ]; then
+            echo "跳过（ecosystem=python）"; exit 0
+          fi
+          dotnet restore windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64 -p:RestoreLockedMode=false
+          dotnet restore windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj -r win-x64 -p:RestoreLockedMode=false
+          dotnet restore windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj -r win-x64 -p:RestoreLockedMode=false
+
+      - name: 安装 Python 工具链（重锁输入用）
+        if: ${{ github.event.inputs.ecosystem != 'dotnet' }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Python 重锁（pip-compile，头注块原样保留）
+        if: ${{ github.event.inputs.ecosystem != 'dotnet' }}
+        shell: bash
+        # requirements-ci.in 头注记载的 SOP：复用既有 pin 做增量（最小 diff）、
+        # --generate-hashes、--no-header。--no-header 会抹掉本仓手写的头注块
+        #（PY-178/221/258 的判据都在里面），故重算后把原头注块拼回文件顶部——
+        # 这一步以前是「人工补回」，是漏补即静默丢文档的活面。
+        run: |
+          set -euo pipefail
+          python -m venv .relock-venv
+          if [ -d .relock-venv/Scripts ]; then VENVBIN=.relock-venv/Scripts; else VENVBIN=.relock-venv/bin; fi
+          "$VENVBIN/pip" install --quiet pip-tools==7.4.1
+          cp requirements-ci.txt .relock-staging.txt
+          "$VENVBIN/pip-compile" --quiet --generate-hashes --no-header \
+            --output-file .relock-body.txt requirements-ci.in
+          python - <<'PY'
+          from pathlib import Path
+          old = Path("requirements-ci.txt").read_text(encoding="utf-8").replace("\r\n", "\n").split("\n")
+          header: list[str] = []
+          for line in old:
+              if line.startswith("#"):
+                  header.append(line)
+              else:
+                  break
+          body = Path(".relock-body.txt").read_text(encoding="utf-8").replace("\r\n", "\n")
+          if not header:
+              raise SystemExit("❌ 原锁没有头注块——先确认 requirements-ci.txt 形态")
+          Path("requirements-ci.txt").write_text("\n".join(header) + "\n" + body, encoding="utf-8", newline="")
+          print(f"头注块已保留（{len(header)} 行）")
+          PY
+          cp .relock-body.txt .relock-keep.txt
+
+      - name: 回读门禁：锁必须仍然完整（RID 块 + 出货依赖 + hash 覆盖）
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/verify_lock_rids.py
+          if [ "${{ github.event.inputs.ecosystem }}" != "dotnet" ]; then
+            python validate_release.py            # 内含锁结构门禁：逐条 == 钉版必带 --hash=、.in↔.txt 对账
+            python -m pip install --quiet --require-hashes -r requirements-ci.txt
+          fi
+
+      - name: 写回分支（无改动即空跑成功）
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name  "aegis-relock-bot"
+          git config user.email "relock@localhost"
+          git add -A windows packages.lock.json requirements-ci.txt requirements-ci.in || true
+          if git diff --cached --quiet; then
+            echo "✅ 重锁无差异——当前锁已是最新解析结果（这本身就是个结论，不是失败）"
+            exit 0
+          fi
+          git diff --cached --stat
+          git commit -m "chore(deps): 重算依赖锁（Dependency-Retlock dispatch，run ${{ github.run_id }}）" -q
+          git push origin "HEAD:${{ github.event.inputs.branch }}"
+          echo "⚠️ 锁已写入 ${{ github.event.inputs.branch }}——请开 PR 人工审 diff 后再合并；"
+          echo "   审点：win-x64 RID 块仍在、每行 == 钉版带 --hash=、被删条目是否本就该删。"

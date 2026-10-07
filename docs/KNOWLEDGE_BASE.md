@@ -97,7 +97,9 @@
   Windows C# 安装包 + Android APK，PyInstaller 包已移除）。
 - 发布流程：提交 → 打 `v*` 标签 → **release.yml 自动触发**（6 job fail-closed：
   构建/签名/逐工件闭合验证——不再是早期"提交 → 打标签 → gh release create"手工流）。
-- GitHub 仓库：`bear20252026/aegis-dual-platform`（私有）；CI 为 **15 workflow
+- GitHub 仓库：`bear20252026/aegis-dual-platform`（**公开**——`gh api repos/... ` 实测
+  `private:false`；此处原写「私有」是第八轮 B8 未穷尽的同型失实，随本次计数更正一并改）；
+  CI 为 **16 workflow
   分层**（WB-167，2026-10-01 审计更正：原「CI 已在 ci.yml 配置」为单文件
   时代口径——ci.yml 现仅剩 ui-regression；第八轮 B8 把 13 更正为 15：WB-160 对齐
   之后又新增 gradle-dependency-graph / gradle-dependency-insight 两个，计数再次

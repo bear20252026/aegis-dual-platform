@@ -88,7 +88,7 @@ shared/release.json                   版本/分发单源（verify_versions 校�
 
 - 更新验证：update_verifier（SemVer precedence 防回滚）+ verify_manifest
   （签名阈值单源读 signing-policy.yaml）
-- CI：**15 workflow 分层**（WB-160，2026-10-01 审计对齐实树——原「五门禁」
+- CI：**16 workflow 分层**（WB-160，2026-10-01 审计对齐实树——原「五门禁」
   漏计 ci/legacy-python-guard 等；第八轮 B8 由 13 更正为 15——其后新增
   gradle-dependency-graph / gradle-dependency-insight 两个而计数静默漂移，
   现由 `scripts/check_doc_claims.py` 逐处与实树对账）。常跑门禁 6（push/PR：
@@ -147,5 +147,5 @@ Qt 旧栈 → PyWebview 分层（白名单/NavQueue）→ 安全纵深 → 契�
 ## 五、结论
 
 **Aegis = C# 正典壳 + Rust 导航裁决单源 + Kotlin 双端 + 单源 UI/契约 +
-分层 CI（15 workflow——第八轮 B8 按实树更正）的双端安全浏览器**——安全不变量
+分层 CI（16 workflow——第八轮 B8 起按实树更正，B7 重锁面入列后为 16）的双端安全浏览器**——安全不变量
 跨端一致，演进以 ADR 治理。

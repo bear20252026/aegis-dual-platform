@@ -1,5 +1,5 @@
 > **历史文档（SP-107，审计 2026-09-23 清单·SP1 批）时代横幅**：本文编制于
-> 2026-08-15（release.yml 初版期）——现发布链已演进为 15 workflow 分层（计数由 `scripts/check_doc_claims.py` 与实树对账）
+> 2026-08-15（release.yml 初版期）——现发布链已演进为 16 workflow 分层（计数由 `scripts/check_doc_claims.py` 与实树对账）
 >（release.yml 编排 + 三平台子流 + verify-gate/publish——见 WB-123 核对），
 > 本文保留作发布门禁选型溯源。
 
