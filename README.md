@@ -74,7 +74,7 @@ android/    Kotlin/Compose（app/broker/webview-adapter/contracts——分层单
 agent/      Agent/MCP 逐项复开（action-catalog——红队 fixtures——测试优先）
 release/    发布链独立验证产品（逐工件闭合——fail-closed）
 docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审计台账）
-.github/    CI 分层门禁（15 个 workflow——WB-214 曾对齐为 13，其后新增
+.github/    CI 分层门禁（16 个 workflow——WB-214 曾对齐为 13，其后新增
             gradle-dependency-graph / gradle-dependency-insight 两个而计数静默漂移
             （第六轮 R6 记为"闭环即回归"实证）：
             ci / contracts / core-rust / android-quality / supply-chain /
@@ -160,13 +160,14 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
 - 阶段 A（ADR 决策）→ F **全部完成** ✅；**阶段 G（Agent 本地受控 IPC）只有设计文档
   与裁决/红队夹具，交付面（OS ACL / 进程身份核验 / IPC 传输 / 撤销）零实现**——
   `agent/broker.py` 自述不承担这些 OS 能力，`agent/local-ipc/*.md` 已就地标注现状；
-  发布门禁 15 workflow 分层 ✅
+  发布门禁 16 workflow 分层 ✅
   （SP-199，2026-10-01 审计如实口径：**常跑（push/PR 触发）7 个**——ci / contracts /
   core-rust / android-quality / supply-chain / agent-redteam / native-policy-artifacts；
-  低频定时 2 个——compat（周一）/ legacy-python-guard（周六）；依赖面 2 个——
+  低频定时 2 个——compat（周一）/ legacy-python-guard（周六）；依赖面 3 个——
   gradle-dependency-graph（Dependency Graph 上传：周一 + push:android/** + dispatch）/
-  gradle-dependency-insight（仅 dispatch）；tag/编排触发 4 个——release 编排器 +
-  release-{windows,android,core} 三平台链。7+2+2+4=15，与
+  gradle-dependency-insight（仅 dispatch）/ dependency-relock（仅 dispatch，写回 deps/* 
+  分支的锁重算面——第八轮 B7 定稿）；tag/编排触发 4 个——release 编排器 +
+  release-{windows,android,core} 三平台链。7+2+3+4=16，与
   `scripts/check_doc_claims.py` 的实树现算同源——WB-214 起这类「文档数 = 实树数」的
   陈述已三次漂移，现由门禁逐处对账）
 - 剩余（需真实设备/用户操作）：真机验证（[device-validation.md](docs/runbooks/device-validation.md)）｜

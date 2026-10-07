@@ -4,7 +4,7 @@
 >（release.yml 初版设计期），与孪生说明文档
 > [release/b4-enable-notes.md](release/b4-enable-notes.md) 同批——后者已加
 > SP-107 横幅，本文件漏挂，现同口径补齐。文中三 job 线性化、PyInstaller/
-> Nuitka/PyArmor 构建描述均为设计时草案；现发布链已演进为 15 workflow 分层（计数由 `scripts/check_doc_claims.py` 与实树对账）
+> Nuitka/PyArmor 构建描述均为设计时草案；现发布链已演进为 16 workflow 分层（计数由 `scripts/check_doc_claims.py` 与实树对账）
 >（release.yml 编排 v* 标签 + 三平台独立子流 + verify-gate/publish——
 > 见 architecture-overview.md 1.5 节），Windows 制品为 C#/.NET 安装包。
 > 本文保留作发布门禁选型溯源，勿作现行配置依据。

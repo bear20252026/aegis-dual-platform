@@ -200,6 +200,17 @@ YAML 4/195、TOML 4/306。
    `.github/ISSUE_TEMPLATE/config.yml` 指向的 `/security/advisories/new` 自本日起是真实
    可用通道——这条不再属「文档说的和实树不一样」。
 9. **是否改冻结的 FFI 契约，给黑名单注入加「完成」信号**（R8-RS-14，本批复读确证）：核心侧 `apply(clear=true)` 立即生效 ⇒ 约 85 批推送期间判定读的是**不完整快照**（未推到的恶意 host 直接 Allow）；任一批失败则核心**永久保留前缀**，而 `accepted` 只回显本批，判定侧无从分辨「完整快照」与「残缺前缀」。**推荐**：核心侧改 staging + 原子换（推送期间继续服务**上一份完整快照**），完成信号用现有 `clear` 参数的第三种取值，并**递增 `POLICY_CORE_ABI_VERSION`**（v3→v4）让宿主能判据；旧核心 + 新宿主则退回「分批 + 现状」并保持既有 `clear` 回显探针。**代价**：动的是 `contracts/` 冻结契约与三端调用者（Rust/C#/Android）+ 向量，属跨端协议变更，不是我能替你定的默认值。**不做的替代方案**：把核心单载荷上限从 64KiB 抬到能一口吃下 5MiB——那会同时抬高所有 FFI 入口的无界读风险面，且`read_utf8` 的上限本是为防异常宿主传入无终止缓冲而设，不是为吞吐而设。
+10. **依赖重锁在哪做（会话内编号 ④）——已定稿并执行（2026-10-07）**。用户批准「按推荐
+    顺序全执行」后落地为 **dispatch-only 的 `.github/workflows/dependency-relock.yml`**：
+    只手动触发、只写 `deps/` 前缀分支（脚本层再兜一次，绝不写 master）、`dotnet restore
+    -p:RestoreLockedMode=false` 之后**必须**过新增门禁 `scripts/verify_lock_rids.py`
+    （RID 块在否、按 RID 解析的原生件在否、出货依赖在不在锁里）与 `--require-hashes`
+    实装验证，再推分支由人审 diff。为什么不放本地：项目记忆里记过本地 restore 会把
+    `net10.0-windows7.0/win-x64` **整块删掉**且看着像空白改动，一次差点进主干；门禁必须
+    跑在同一台做重锁的机器上、且在推分支之前。B7 的实际 bump（WebView2 SDK、
+    Microsoft.Data.Sqlite、`bundle_e_sqlite3` 2.1.11→修复版、mypy、Test.Sdk）随后按此面走。
+    附带：workflow 总数 15→16，8 处文档计数同批改（`check_doc_claims` 逐处对账），
+    并顺手修掉 `docs/KNOWLEDGE_BASE.md` 里「仓库（私有）」的失实陈述（实测 `private:false`）。
 
 ## 八、升级面清单（本轮主诉求）
 
@@ -279,7 +290,7 @@ mypy `2.3.1 → 2.4.0` 须 pip-compile 整树重算 hash；Test.Sdk `17.14.1 →
 | B4 | R8-CS-SEC-01/08 + R8-CS-CORE-1/2：把「核心要求确认」与 6 条静默出口收敛为**用户可见拒绝 + 审计留码**；补 5 个拒绝码的行为断言与原生前置分支断言。⚠ 只改可见性，不改放行/阻断方向（方向属第七节 1） | `HostWebView.cs`、`BrowserPolicyBroker.cs`、`windows/tests/**` | `dotnet test` 两套件（CI） | 未动 |
 | B5 | R8-CI-03 残余 + R8-PY-02/08/11 + R8-SH-10：`validate_vector_schemas` invalid 侧缺 manifest 改**有界登记**、按条目下界、`check_markdown_links` 包含性 + 空面 exit 2、`ci.yml` paths 补齐输入闭包、requirements 锁结构门禁（逐条 `==`+hash、`.in↔.txt` 对账） | `contracts/codegen/validate_vector_schemas.py`、`contracts/vectors/update-manifest-invalid.json`、`scripts/{verify_vectors,check_markdown_links}.py`、`validate_release.py`、`.github/workflows/ci.yml`、`tests/python/**` | 每项须先注入失效证据再声称修好 | 已落地（PR #92） |
 | B6 | 无破坏升级：androidx.webkit 1.17.1、lifecycle 2.11.0、xunit.runner.visualstudio 3.1.5、sbom-action v0.24.3、ruff 0.16.10、`.gitattributes` + `android/.editorconfig` 行尾口径、发布链 `windows-2025` | `android/gradle/libs.versions.toml`、`windows/tests/*.csproj`、4 个 workflow、仓库根新文件 | CI 全量（gradle 侧无需重锁即可验；NuGet 侧实测**不在**该面） | **已落地（PR #90：行尾单源 + lifecycle + sbom-action）**；**本批：webkit 1.17.1 + 7 个 Windows job 钉 windows-2025**；xunit.runner.visualstudio 与 ruff 两项按第八节 A 类更正移入 B7（受锁） |
-| B7 | 需重锁升级：WebView2 SDK + Microsoft.Data.Sqlite + `bundle_e_sqlite3` 补钉（按第八节 B 的五步 SOP）、`AnalysisLevel=Recommended` + `Deterministic`、mypy 2.4.0 整链重锁、rust-toolchain pin + `cargo deny`（或按实改注释）、Dependabot 9 条告警的显式 dismiss/处置 | `windows/*.csproj`、`windows/**/packages.lock.json`、`Directory.Build.props`、`requirements-ci.*`、`.github/workflows/*` | CI；锁文件改写后须回读确认 RID 块仍在 | 未动 |
+| B7 | 需重锁升级：WebView2 SDK + Microsoft.Data.Sqlite + `bundle_e_sqlite3` 补钉（按第八节 B 的五步 SOP）、`AnalysisLevel=Recommended` + `Deterministic`、mypy 2.4.0 整链重锁、rust-toolchain pin + `cargo deny`（或按实改注释）、Dependabot 9 条告警的显式 dismiss/处置 | `windows/*.csproj`、`windows/**/packages.lock.json`、`Directory.Build.props`、`requirements-ci.*`、`.github/workflows/*` | CI；锁文件改写后须回读确认 RID 块仍在（**该回读已做成门禁 `scripts/verify_lock_rids.py`**） | **前置已就绪**：重锁执行面 = 第七节 10 / 第十二节 ③④ 行；B7 的实际 bump 按该面走 |
 | B8 | 文档真相（第七轮 B7 未完 + 本轮 R8-DOC 全部）：13→15 workflow 七处、单一裁决源限定语、三端守卫→两端、KillSwitch/无痕端别、parity 补 `NewBrowserVersionAvailable`、legacy 冻结口径合一、`identity.md` E2EBroker 死指针、README 确认流域口径、ADR-003/006 取代注记、4 份历史稿时代横幅 | `README.md`、`CLAUDE.md`、`SECURITY.md`、`docs/**`、`agent/local-ipc/**`、新增
 `scripts/check_doc_claims.py` + `tests/python/doc_claims_test.py` + `contracts.yml` |
 `check_markdown_links` + **新增 workflow 计数对账门禁**（可失败：注入 13/空面/正则失配
@@ -348,6 +359,7 @@ Native-Policy-Artifacts、Agent-Redteam 的 push 触发，加上 `Build Windows 
 万一需要回退不必丢工作；③**不改写 master**（不 force-push、不 reset），若有后续问题
 一律正向 `git revert`；④本行原先写作「PR #102」——该编号在本仓根本不存在，是我在
 推送前预填的占位，属本轮自己犯的「文档说的和实树不一样」，与 B8 修的是同一类账。 |
+| ③ release 环境保护 + ④ 重锁执行面（B7 前置） | **本批** | ③ **服务端写**：`release` 环境此前 `protection_rules: []`（tag 一打即刻出货、零反悔窗口），现加 `wait_timer: 300` 且**不设 deploy reviewer**（单人仓库设 reviewer 等于自锁发版）。两条 API 口径记进项目记忆：`deploy_reviewers` 键在本版 API 被 422 拒收，只能单独 PUT `wait_timer`；返回体顶层 `wait_timer` 仍为 null，**判据是 `protection_rules[].wait_timer`**（与 PVR 那条同一课：便利字段不是事实源）。④ 见第七节 10。新增门禁 `scripts/verify_lock_rids.py` + `tests/python/lock_rids_test.py` 12 例，含四条**注入即红**（缺 RID 块 / RID 块空 / 原生件被 RID 图漏掉 / 扫描面为空判 exit 2）；写门禁时实树反报「RID 块包集合为空」——**我按记忆猜了锁格式**（以为有 `packages` 包装层），读实树才知 NuGet lock v1 的图值直接是包映射：又一次「先看实树再写判据」的教训。测试还抓到门禁自己的一个脆皮：`relative_to(ROOT)` 在单测喂 tmp_path 时抛 ValueError，改为可降级报告。pytest 442→454 例全绿 |
 | B4 余量（第五批）：`_wired` 置位顺序（R8-CS-SEC-11） | **本批** | 见第四节该行。两条方法论记在一处：①**行为不可达就钉结构**——COM 依赖使得「中途抛出」这条性质无法在 CI 里跑，那就把顺序做成带正面控制的静态锚，并把「锚点失配」本身写成失败而不是跳过；②**结构锚必须先剔注释行**，本仓的修复注记里经常抄着被禁的旧形态原文（第八轮已两次因此自我打红）。零行增长：置位语句从位置 A 移到位置 B，解释写进既有 summary，细节留给测试文件——`HostWebView.cs` 仍是 593 行基线，没有为注释放宽 ratchet |
 | B4 余量（第四批）：黑名单推送单飞（R8-CS-SEC-09）+ RS-14 确证 | **本批** | 见第四节两行。测试口径注意三处：① 用例走 `CorePushForTests` 缝，**不依赖原生 DLL**，任何机器真跑（R8-CI-18 那类「原生用例集体早退」的错觉不能再拿来当证据）；② xunit 分析器在 `TreatWarningsAsErrors` 下把 `Task.WaitAll` 记 **xUnit1031**（须 `async Task` + `WaitAsync`）、把 `Assert.Equal(1, xs.Count)` 记 **xUnit2013**（须 `Assert.Single`）；③ 单飞这类「并发正确性」断言必须**反向证红**——把 `lock (PushGate)` 换成 `if (true)` 跑一遍，实测报红（collection contained 2 items）才算它真的在管。Broker 179 例、Core 732 例全绿；两文件仍在 300 行红线内（136 / 295），未新增基线条目 |
 | R8-CS-SEC-14（Android 一半）：WebViewHardening 净减拆分 | **本批（由 detekt 逼出）** | 见第四节该行。补记一条**判据**：`android/app/detekt-baseline.xml` 条目数为 0，所以这个仓**没有**「把新违规塞进基线」这条退路——`--write-baseline` 只用于同步行数 ratchet 的数值，detekt 侧只能真的拆。拆分脚本自带等价性断言，跑一次即证「拼接 == 原文」；三处按路径读脚本的门禁同批改路径（不改就会变成「读残缺面仍恒绿」的新盲区——这正是本仓反复登记的 Hollow 形态） |
@@ -358,7 +370,7 @@ Native-Policy-Artifacts、Agent-Redteam 的 push 触发，加上 `Build Windows 
 | R8-PY-04 评审包输入面 fail-closed | **已落地（本地 `pytest tests/python` 442 passed / 1 skipped）** | 见第四节该行。**过程即门禁的一次自证**：新增的现树对账用例在改脚本之前跑，直接报出 `TREE_COPY 指向不存在的根：['windows/packaging']`——这正是修复要抓的东西，先红后绿。`--check` 的声明按实况改写成「确定性自检」，并留一条锚断言旧的「保证与当前源码同步」表述不得复活。脚本行数 392（基线零余量，本轮靠压缩 docstring 冗行持平，未放宽基线） |
 | B4 余量（第三批）：R8-CS-SEC-06 新窗口通道与 B8 裁决合一 | **已落地（本地两套件全绿：Core 730/730、Broker 178/178）** | `UrlSafety.CanOpenHttpUrl` 是页面可驱动的 `target=_blank` / `window.open` 通道裁决点，此前判「公网 **或** 本机」：内网设备（`192.168.1.1`、`10.0.0.5`、`172.20/12`、`my-nas.local`、`printer.internal`）在该通道一律被拒——**第七轮 B8 裁决在导航侧已落地、在这一类出口没落地**，属虚闭环；两份测试还把旧口径写成期望值（`192.168.1.1 → false`、注释「私有非本机仍拒」「内网拒绝」），即改动会被测试反咬。同文件另一半：主机名不在 60s 缓存内即 `Dns.GetHostAddresses` 同步解析，跑在 UI 线程（CS-382 在导航侧修过的同一形态，`_blank` 是其第二条出口）。改为复用 `ReservedAddressBoundary.DeniesRaw`——保留地址边界是四类出口的单一谓词源，新窗口通道是第五类；拒绝面因此不变窄（元数据/链路本地/TEST-NET-1/2/3/数字 authority/组播/广播/`0.0.0.0` 仍拒），放行面与裁决合一且不再触 DNS。UI 文案与两处注释同批改口径。`UrlSafety.cs` 仍 301 行（基线零余量，未增行） |
 | B6 余量：webkit 1.17.1 + Windows job 钉版 | **本批** | `androidx.webkit 1.15.0 → 1.17.1`（Google Maven maven-metadata 实测最新稳定线，1.18.0 仅 alpha；本仓只用 3 个 API，1.16/1.17 破坏性删项零命中）；**7 个 Windows job 从浮动 `windows-latest` 改钉 `windows-2025`**（contracts.yml×2、compat.yml×2、release-windows.yml、native-policy-artifacts.yml、legacy-python-guard.yml）——出货 DLL 与签名链所在的镜像小版本此前每天可能不同，与本仓「固定 toolchain / 可复现构建」的自述口径相反。标签有效性由必需检查 `windows-contract-build` 在本 PR 上实测：不存在的标签会停在 waiting，合不进去即回退。**同批改口径**：B6 原先把 `xunit.runner.visualstudio 3.1.5` 与 `ruff 0.16.10` 记为「无需重锁」，实测两者分别被两份 `packages.lock.json`（RID 块）与 `requirements-ci.txt` 的逐条 `--hash=` 钉住 ⇒ 移入 B7（见第八节 A 类更正段） |
-| B7 / B9 | 未动 | 见第九节；B7 需先定「重锁在哪做」（第七节 4）。**B6 移入两项**：xunit.runner.visualstudio 3.1.5、ruff 0.16.10 |
+| B7 / B9 | B7 前置已就绪、B9 余量未动 | 「重锁在哪做」已定稿并落地（第七节 10）。**B6 移入两项**：xunit.runner.visualstudio 3.1.5、ruff 0.16.10 |
 | B8 文档真相 | **已落地（PR #93）** | ①**新门禁 `scripts/check_doc_claims.py`**（挂
 `contract-source-of-truth`）：文档里的 workflow 数是陈述，实树变化后没人回头改——同一
 件事三轮复发（WB-214 对齐 13 → R6 记「闭环即回归」→ 本轮实测 8 处与实树不符，实树 15）。
