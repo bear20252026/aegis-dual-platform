@@ -8,6 +8,8 @@
 
 use std::fmt;
 
+mod canvas;
+
 /// 指纹防护种子（32 字节加密随机）。
 #[derive(Clone)]
 pub struct FingerprintShield {
@@ -116,6 +118,8 @@ impl FingerprintShield {
         // RS-218（2026-09-26 审计）：代理注册接口 Symbol 键单源引用
         //（描述串去品牌化——详见 ToStringGuard::REGISTER_SYMBOL）
         let reg_sym = crate::tostring_guard::ToStringGuard::REGISTER_SYMBOL;
+        // ⑦：canvas 段外迁 shield/canvas.rs（本文件在零余量基线上），按原位置插回
+        let canvas = canvas::canvas_js(reg_sym);
         format!(
             r#"
 // Aegis FingerprintShield — 每会话确定性噪声种子（闭包封装——不进全局作用域）
@@ -190,127 +194,7 @@ impl FingerprintShield {
     return h >>> 0;
   }}
 
-  // R8-RS-01（第八轮审计 2026-10-04）：噪声混合函数单源——三端（Rust/Android
-  // WebViewHardening.aegisNudge·applyNoise / Windows FingerprintShield）共用同一
-  // 公式：murmur3 fmix32 终混 + R/G/B 取互不相交的位段（bit0 / bit8 / bit16）。
-  // 此前 RS-249 用「字节偏移 x 奇数常数取最低位」的形态，数学上恒退化：三枚常数全为奇数，
-  // 乘积最低位＝操作数最低位，而 i+=4 步进使字节偏移恒为偶 ⇒ 每像素每通道的扰动
-  // 都等于 `seed & 1`——全图同一 ±1 偏移，有效熵 1 bit，家只需试 2 个候选即可确定
-  // 性还原真画布，canvas 哈希仍是可归一的稳定标识符（正是该机制要消除的东西）。
-  // fmix32 把输入的每一位都搅进输出，bit0 不再由像素序号奇偶决定，通道间取不同
-  // 位段因而互相独立。Android 侧 AD-253 用像素序号（2 个相位）同样偏窄，同批收口。
-  function aegisNoiseMix(seed, px) {{
-    var m = (seed ^ px) >>> 0;
-    m = Math.imul(m ^ (m >>> 16), 0x85ebca6b) >>> 0;
-    m = Math.imul(m ^ (m >>> 13), 0xc2b2ae35) >>> 0;
-    return (m ^ (m >>> 16)) >>> 0;
-  }}
-  // 边界不外溢：0 只能升、255 只能降。(x + d) & 0xff 会把黑变 254、白变 1——
-  // 既留视觉伪影，又给页面「一行取模即检出防护」的判据（R8-CS-SEC-04 同型修于三端）。
-  function aegisNudge(current, up) {{
-    if (current === 0) return 1;
-    if (current === 255) return 254;
-    return up ? current + 1 : current - 1;
-  }}
-  // R8-RS-01：三出口（toDataURL/toBlob/convertToBlob）共用的单源噪声施加函数
-  function aegisApplyCanvasNoise(imageData, seed) {{
-    for (var px = 0, i = 0; i < imageData.data.length; px++, i += 4) {{
-      var m = aegisNoiseMix(seed, px);
-      imageData.data[i] = aegisNudge(imageData.data[i], (m & 1) !== 0);
-      imageData.data[i + 1] = aegisNudge(imageData.data[i + 1], ((m >>> 8) & 1) !== 0);
-      imageData.data[i + 2] = aegisNudge(imageData.data[i + 2], ((m >>> 16) & 1) !== 0);
-    }}
-  }}
-  // R8-CS-SEC-04：像素上限——超限画布直接走原实现（16K×16K 的离屏副本 +
-  // getImageData 峰值约 1GB，是远程页可低成本触发的标签页冻结面）。
-  var AEGIS_MAX_NOISE_PIXELS = 4096 * 4096;
-
-  // Canvas 噪声（每个像素 ±1 随机偏移——视觉不可察觉）
-  // RS-025（审计 2026-09-24）：噪声施加在**离屏副本**上——此前就地
-  // putImageData 把噪声写回原画布，页面双读（toDataURL 前后各 getImageData
-  // 一次）即可检测像素漂移
-  // RS-206（2026-09-26 审计）：删除源画布的 getContext('2d')
-  // 前置门禁——①画布已持 WebGL 上下文时 getContext('2d') 返回 null，
-  // 噪声被整体绕过（WebGL 画布恰是主流指纹向量）；②画布尚无上下文时
-  // 该调用会把画布永久锁定为 2d（页面随后 getContext('webgl') 得 null，
-  // 渲染被破坏）。drawImage(this) 对任意上下文类型的源画布均可用，
-  // 离屏副本自取 2d 上下文即可
-  (function() {{
-    // RS-292（2026-10-02 审计）：worker 作用域守卫——HTMLCanvasElement 在
-    // worker 未定义，裸引用即抛未捕获 ReferenceError（脚本整体中断，后续
-    // 阶段全部失效）；注册行 try 包（worker 无 window，对齐 per_site_seed
-    // 全 try 口径）
-    if (typeof HTMLCanvasElement === 'undefined') return;
-    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    HTMLCanvasElement.prototype.toDataURL = function(type) {{
-      try {{
-        if (this.width * this.height > AEGIS_MAX_NOISE_PIXELS) {{
-          return origToDataURL.apply(this, arguments);
-        }}
-        const off = document.createElement('canvas');
-        off.width = this.width;
-        off.height = this.height;
-        const octx = off.getContext('2d');
-        octx.drawImage(this, 0, 0);
-        const imageData = octx.getImageData(0, 0, off.width, off.height);
-        aegisApplyCanvasNoise(imageData, aegisCanvasSeed());
-        octx.putImageData(imageData, 0, 0);
-        return origToDataURL.apply(off, arguments);
-      }} catch (e) {{}}
-      return origToDataURL.apply(this, arguments);
-    }};
-  try {{ if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](HTMLCanvasElement.prototype.toDataURL, origToDataURL); }} catch (e) {{}}
-}})();
-
-// RS-082（审计 2026-09-25）：toBlob 是 canvas 读取的第二通道——仅覆盖
-// toDataURL 时页面走 toBlob 拿到无噪声原图。同型离屏副本 + 噪声
-//（RS-206/207/215 口径与 toDataURL 通道一致）
-(function() {{
-  // RS-292：worker 作用域守卫 + 注册行 try 包（同 toDataURL 块口径）
-  if (typeof HTMLCanvasElement === 'undefined') return;
-  const origToBlob = HTMLCanvasElement.prototype.toBlob;
-  HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {{
-    try {{
-      if (this.width * this.height > AEGIS_MAX_NOISE_PIXELS) {{
-        return origToBlob.call(this, callback, type, quality);
-      }}
-      const off = document.createElement('canvas');
-      off.width = this.width;
-      off.height = this.height;
-      const octx = off.getContext('2d');
-      octx.drawImage(this, 0, 0);
-      const imageData = octx.getImageData(0, 0, off.width, off.height);
-      aegisApplyCanvasNoise(imageData, aegisCanvasSeed());
-      octx.putImageData(imageData, 0, 0);
-      return origToBlob.call(off, callback, type, quality);
-    }} catch (e) {{}}
-    return origToBlob.call(this, callback, type, quality);
-  }};
-  try {{ if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](HTMLCanvasElement.prototype.toBlob, origToBlob); }} catch (e) {{}}
-}})();
-
-// RS-082：OffscreenCanvas.convertToBlob 是 worker 侧第三通道——同型防护
-//（RS-206/207/215 口径与 toDataURL 通道一致）
-(function() {{
-  if (typeof OffscreenCanvas === 'undefined') return;
-  const origConvert = OffscreenCanvas.prototype.convertToBlob;
-  OffscreenCanvas.prototype.convertToBlob = function(options) {{
-    try {{
-      if (this.width * this.height > AEGIS_MAX_NOISE_PIXELS) {{
-        return origConvert.call(this, options);
-      }}
-      const off = new OffscreenCanvas(this.width, this.height);
-      const octx = off.getContext('2d');
-      octx.drawImage(this, 0, 0);
-      const imageData = octx.getImageData(0, 0, off.width, off.height);
-      aegisApplyCanvasNoise(imageData, aegisCanvasSeed());
-      octx.putImageData(imageData, 0, 0);
-      return origConvert.call(off, options);
-    }} catch (e) {{}}
-    return origConvert.call(this, options);
-  }};
-  try {{ if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](OffscreenCanvas.prototype.convertToBlob, origConvert); }} catch (e) {{}}
-}})();
+{canvas}
 
 // 音频指纹噪声由 PerSiteSeed（RS-028）负责——按站点隔离，不在此模块重复
 

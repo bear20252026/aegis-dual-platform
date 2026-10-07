@@ -37,7 +37,12 @@ CS_MAIN = ROOT / "windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs"
 KT_MAIN = ROOT / "android/app/src/main/java/com/aegis/browser/WebViewHardening.kt"
 KT = ROOT / "android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesSeed.kt"
 KT_TAIL = ROOT / "android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt"
+# ⑦（第八轮）：Kotlin 的 Stage 3 canvas 文本、Rust/C# 的 canvas 段各自再外迁一份，
+# 要件横跨这些文件 ⇒ 面必须跟着长，少读一份就是「读残缺面仍恒绿」。
+KT_CANVAS = ROOT / "android/app/src/main/java/com/aegis/browser/WebViewHardeningCanvas.kt"
 RS = ROOT / "core/rust-policy-core/src/shield.rs"
+RS_CANVAS = ROOT / "core/rust-policy-core/src/shield/canvas.rs"
+CS_CANVAS = ROOT / "windows/src/Aegis.Windows.App/WebView/FingerprintShield.Canvas.cs"
 
 # 表体下限：权威清单条目数低于此值即视为「解析塌陷/清单被清空」，判环境错误
 MIN_ENTRIES = 40
@@ -55,13 +60,13 @@ FORBIDDEN_FRAME_ONLY = ("getETLD1(location.hostname)", "aegisEtldPlus1(location.
 
 def framing_specs() -> dict[str, tuple[list[pathlib.Path], tuple[str, ...], tuple[str, ...]]]:
     return {
-        "C#": ([CS_MAIN, CS_SEED],
+        "C#": ([CS_MAIN, CS_SEED, CS_CANVAS],
                ("getETLD1(aegisTopLevelHostname())",) + REQUIRED_CHANNEL,
                FORBIDDEN_FRAME_ONLY),
-        "Kotlin": ([KT_MAIN, KT, KT_TAIL],
+        "Kotlin": ([KT_MAIN, KT, KT_TAIL, KT_CANVAS],
                    ("getETLD1(aegisTopLevelHostname())",) + REQUIRED_CHANNEL,
                    FORBIDDEN_FRAME_ONLY),
-        "Rust": ([RS],
+        "Rust": ([RS, RS_CANVAS],
                  ("aegisEtldPlus1(aegisTopLevelHostname() || '')",) + REQUIRED_CHANNEL,
                  FORBIDDEN_FRAME_ONLY),
     }

@@ -143,16 +143,18 @@ fn canvas_noise_perturbs_multiple_channels() {
     // RS-215：R/G/B 三通道扰动——单 R 通道噪声形态与 Android 孪生
     //（AD-175 多通道口径）不一致，跨端噪声形态差异本身即指纹差异面
     let script = FingerprintShield::from_seed([9u8; 32]).inject_script();
+    // ⑦ 起扰动只有一处循环体（aegisNoiseRectangle）——三端与两条出口共用它，
+    // 因此这里判的就是唯一的噪声施加形态。
     assert!(
-        script.contains("imageData.data[i + 1]"),
+        script.contains("data[i + 1] = aegisNudge("),
         "G 通道必须参与扰动"
     );
     assert!(
-        script.contains("imageData.data[i + 2]"),
+        script.contains("data[i + 2] = aegisNudge("),
         "B 通道必须参与扰动"
     );
     // alpha（i + 3）不动——透明度变化视觉可察
-    assert!(!script.contains("imageData.data[i + 3]"));
+    assert!(!script.contains("data[i + 3]"));
 }
 
 // —— RS-249/250/257 回归（审计 2026-10-01） ——
@@ -253,7 +255,8 @@ fn worker_scope_guards_on_all_blocks() {
         .lines()
         .filter(|l| l.contains("try { if (window[Symbol.for("))
         .count();
-    assert_eq!(reg_count, 3, "三处注册行全部 try 包裹");
+    // ⑦ 起有五条注册行：三个编码出口 + getImageData 包裹 + readPixels 包裹（各包裹函数只写一次注册）。
+    assert_eq!(reg_count, 5, "五处注册行全部 try 包裹");
 }
 
 #[test]

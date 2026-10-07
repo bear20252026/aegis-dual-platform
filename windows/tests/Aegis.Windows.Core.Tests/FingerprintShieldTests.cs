@@ -140,8 +140,8 @@ public sealed class FingerprintShieldTests
         Assert.DoesNotContain("mulberry32", noise);
         Assert.DoesNotContain("& 0xff", noise);            // 回绕形态必须消失
         Assert.DoesNotContain("(seed + i) % 2", noise);
-        Assert.Contains("aegisNudge(imageData.data[i + 1]", noise);   // G 通道独立位段
-        Assert.Contains("aegisNudge(imageData.data[i + 2]", noise);   // B 通道独立位段
+        Assert.Contains("data[i + 1] = aegisNudge(", noise);   // G 通道（⑦ 起单源循环）
+        Assert.Contains("data[i + 2] = aegisNudge(", noise);   // B 通道
     }
 
     [Fact]
