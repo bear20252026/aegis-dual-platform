@@ -7,7 +7,10 @@ package com.aegis.browser
 // IIFE，宿主在原位置插回 WebViewHardeningCanvas.js，拼接后与拆分前逐字节一致。
 // 跨端对账门禁 core/rust-policy-core/tests/canvas_read_channels.rs 按这个边界读三份源码。
 internal object WebViewHardeningCanvas {
-    internal val js: String = """  (function() {
+    // ktlint multiline-expression-wrapping：多行表达式要从新行起——把开引号单独成行，
+    // 首行内容仍紧跟其后，值与写法调整前逐字节一致。
+    internal val js: String =
+        """  (function() {
     // AD-314（2026-10-02 审计）：各包装点补注册调用——AD-297 修好 Symbol 键后，
     // Stage 1 的 ToStringGuard 才真正可达；本阶段三个 canvas 包装同样注册，
     // 防止 toDataURL.toString() 暴露包装源码。
