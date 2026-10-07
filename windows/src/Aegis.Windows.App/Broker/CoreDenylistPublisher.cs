@@ -26,6 +26,15 @@ using Aegis.Windows.Core.Security;
 public static class CoreDenylistPublisher
 {
     private static readonly object Gate = new();
+
+    /// <summary>R8-CS-SEC-09（第八轮）：推送序列的单飞门。
+    /// `UpdateHostDenylist` 内部不是一次调用，而是「首批 clear=1 + 其余 clear=0」的
+    /// 多批序列（核心单载荷 64KiB 上限遇上托管侧 5MiB 订阅源）。两次推送交错时，核心
+    /// 最终拿到的是两份快照的混合，而任一方后续的 clear=1 还会抹掉对方已追加的条目——
+    /// 托管侧拦得好好的，核心侧却是一份谁都没见过的名单（零痕迹，除非逐批复判）。
+    /// 只锁这一条链，不锁 Gate：Gate 的每处临界都是单语句，不存在 Gate→PushGate 嵌套，
+    /// 因此本处 PushGate→Gate 的取值顺序不会成环。</summary>
+    private static readonly object PushGate = new();
     private static IReadOnlyCollection<string>? _latest;
     private static int _missingExportLogged;
 
@@ -81,15 +90,20 @@ public static class CoreDenylistPublisher
 
     private static void Push(string trigger)
     {
-        IReadOnlyCollection<string>? hosts;
-        lock (Gate) hosts = _latest;
-        if (hosts is null)
-            return;  // 还没有任何快照——核心保持默认空名单（放行），与既往一致
-        var bridge = BridgeProviderForTests is null ? NativePolicyCoreBridgeHub.Shared : BridgeProviderForTests();
-        var simulated = CorePushForTests;
-        if (bridge is null && simulated is null)
-            return;  // 原生核心未接入（无桥）——无操作，不是错误
-        Report(simulated is not null ? simulated(hosts) : bridge!.UpdateHostDenylist(hosts), trigger, hosts.Count);
+        lock (PushGate)
+        {
+            // 门内**重读**快照：排队的旧推送因此自动带上此刻最新的名单，
+            // 不会出现「按 v1 推完、v2 又被 v1 覆盖」这种回退。
+            IReadOnlyCollection<string>? hosts;
+            lock (Gate) hosts = _latest;
+            if (hosts is null)
+                return;  // 还没有任何快照——核心保持默认空名单（放行），与既往一致
+            var bridge = BridgeProviderForTests is null ? NativePolicyCoreBridgeHub.Shared : BridgeProviderForTests();
+            var simulated = CorePushForTests;
+            if (bridge is null && simulated is null)
+                return;  // 原生核心未接入（无桥）——无操作，不是错误
+            Report(simulated is not null ? simulated(hosts) : bridge!.UpdateHostDenylist(hosts), trigger, hosts.Count);
+        }
     }
 
     private static void Report(CoreDenylistUpdateResult result, string trigger, int offered)

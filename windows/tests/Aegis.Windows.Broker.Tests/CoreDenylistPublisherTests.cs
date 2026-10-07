@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Aegis.Windows.Core.Security;
 using Xunit;
@@ -55,6 +56,51 @@ public sealed class CoreDenylistPublisherTests : IDisposable
     }
 
     // ===== 单一权威源：推出去的就是托管侧在用的那个集合 =====
+    // ===== R8-CS-SEC-09（第八轮）：多批推送序列必须单飞 =====
+
+    [Fact]
+    public async Task ConcurrentPushes_AreSingleFlight_AndTheQueuedOneCarriesTheLatestSnapshot()
+    {
+        // UpdateHostDenylist 一次调用=「首批 clear=1 + 其余 clear=0」的**序列**
+        //（核心单载荷 64KiB vs 托管 5MiB 订阅源）。两次推送交错 ⇒ 核心最终是
+        // 两份快照的混合，且后到的 clear=1 会抹掉对方已追加的条目。
+        var inFlight = 0;
+        var overlapped = false;
+        var firstEntered = new ManualResetEventSlim(false);
+        var releaseFirst = new ManualResetEventSlim(false);
+        CoreDenylistPublisher.CorePushForTests = hosts =>
+        {
+            if (Interlocked.Increment(ref inFlight) != 1)
+                overlapped = true;
+            _pushed.Add(hosts);
+            if (hosts.Count == 1)  // 第一份快照在门内等第二份排队，好把交错做实
+            {
+                firstEntered.Set();
+                releaseFirst.Wait(TimeSpan.FromSeconds(10));
+            }
+
+            Interlocked.Decrement(ref inFlight);
+            return CoreDenylistUpdateResult.Apply(hosts.Count, hosts.Count);
+        };
+
+        var first = Task.Run(() => new SharedBlockedHosts().Publish(new BlockedHosts(["a.example"])));
+        Assert.True(firstEntered.Wait(TimeSpan.FromSeconds(10)), "第一次推送未进入");
+
+        var second = Task.Run(
+            () => new SharedBlockedHosts().Publish(new BlockedHosts(["b.example", "c.example"])));
+        SpinWait.SpinUntil(() => Volatile.Read(ref inFlight) >= 0, TimeSpan.FromMilliseconds(200));
+        Assert.Single(_pushed);  // 第二份还堵在门外——单飞成立
+
+        releaseFirst.Set();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.False(overlapped, "两次推送序列重叠进入了核心");
+        Assert.Collection(
+            _pushed,
+            pushed => Assert.Single(pushed),
+            pushed => Assert.Equal(2, pushed.Count));  // 门内重读 ⇒ 排队的推送带的是最新快照
+    }
+
 
     [Fact]
     public void SnapshotChange_PushesTheManagedSetItself_NotADriftingCopy()
