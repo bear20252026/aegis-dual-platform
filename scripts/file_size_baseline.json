@@ -86,7 +86,7 @@
     "windows/src/Aegis.Windows.App/Chrome/MainWindow.Shortcuts.cs": 335,
     "windows/src/Aegis.Windows.App/Chrome/MainWindow.Tabs.cs": 423,
     "windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml.cs": 435,
-    "windows/src/Aegis.Windows.App/Core/History/HistoryStore.cs": 532,
+    "windows/src/Aegis.Windows.App/Core/History/HistoryStore.cs": 397,
     "windows/src/Aegis.Windows.App/Core/UrlSafety.cs": 301,
     "windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs": 411,
     "windows/src/Aegis.Windows.App/WebView/HostWebView.cs": 593,

@@ -168,7 +168,7 @@ public sealed class HistoryStore
     /// <summary>最近访问（时间倒序）。
     /// CS-301（2026-09-26 审计）：补 id 决胜列——分页查询均有 ", id DESC" 而
     /// 此处没有：同一秒多条记录时列表与分页顺序不一致（可能重复跳行）。</summary>
-    public IReadOnlyList<HistoryEntry> Recent(int limit = 200)
+    internal IReadOnlyList<HistoryEntry> Recent(int limit = 200)
     {
         using var connection = Open();
         using var select = connection.CreateCommand();
@@ -177,32 +177,6 @@ public sealed class HistoryStore
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
     }
-
-    /// <summary>按文本搜索（url/title 子串），可限定某日（date=yyyy-MM-dd 或 null 不限）。
-    /// 全部参数绑定——LIKE 通配在绑定值中，不参与 SQL 拼接。
-    /// 大小写口径（CS-259）：SQLite LIKE 仅对 ASCII 不区分大小写；非 ASCII
-    /// （中文/带变音符拉丁文）为精确匹配——与多数 SQLite 应用一致的既定行为，
-    /// 此处显式文档化（冗余小写列方案收益不抵写入开销）。</summary>
-    public IReadOnlyList<HistoryEntry> Search(string query, string? date = null, int limit = 200)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-            return date is null ? Recent(limit) : ByDate(date, limit);
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        var filter = HistoryFilter.Build(query, null, null);
-        var hasDate = !string.IsNullOrEmpty(date);  // CS-282：判一次复用
-        // CS-301：id 决胜列（与分页口径一致——同秒多条顺序锁定）
-        select.CommandText = hasDate
-            ? $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} AND visited_date = $d ORDER BY visited_at DESC, id DESC LIMIT $lim"
-            : $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC, id DESC LIMIT $lim";
-        filter.Bind(select, query, null, null);
-        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
-        if (hasDate)
-            select.Parameters.AddWithValue("$d", date);
-        using var reader = select.ExecuteReader();
-        return ReadEntries(reader);
-    }
-
     /// <summary>按 URL 子串查询（时间倒序）。
     /// CS-401（2026-10-02 审计）：建议控制器消费口径单源——此前其 SQL 侧用
     /// Search（url OR title 双列命中），MergeRows 又只保留 URL 命中行，标题
@@ -224,61 +198,6 @@ public sealed class HistoryStore
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
     }
-
-    /// <summary>指定日期（yyyy-MM-dd，本地时区）的访问，时间倒序。</summary>
-    public IReadOnlyList<HistoryEntry> ByDate(string date, int limit = 500)
-    {
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        select.CommandText = """
-            SELECT id, url, title, visited_at, visited_date
-            FROM visits WHERE visited_date = $d ORDER BY visited_at DESC, id DESC LIMIT $lim
-            """;
-        select.Parameters.AddWithValue("$d", date);
-        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
-        using var reader = select.ExecuteReader();
-        return ReadEntries(reader);
-    }
-
-    /// <summary>全部有记录的日期（yyyy-MM-dd，倒序）——供 UI 日期筛选下拉。
-    /// CS-397（2026-10-02 审计）：生产零调用（历史窗口改为页码式分页后本
-    /// 方法不再被 UI 消费）——保留原因与 CS-313 口径一致：作为库层日期
-    /// 聚合查询的既有公共面，删除属 API 收窄，须与消费方一起决策；注明
-    /// 保留避免误判为遗漏清理。</summary>
-    public IReadOnlyList<string> Dates(int limit = 90)
-    {
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        select.CommandText = "SELECT DISTINCT visited_date FROM visits ORDER BY visited_date DESC LIMIT $lim";
-        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
-        using var reader = select.ExecuteReader();
-        var list = new List<string>();
-        while (reader.Read())
-        {
-            if (!reader.IsDBNull(0))
-                list.Add(reader.GetString(0));
-        }
-        return list;
-    }
-
-    /// <summary>按日期区间查询（from/to=yyyy-MM-dd，可为空不限一端），可叠加文本。
-    /// 全部参数绑定。空文本+空区间回退 Recent。</summary>
-    public IReadOnlyList<HistoryEntry> SearchRange(string query, string? from, string? to, int limit = 1000)
-    {
-        var filter = HistoryFilter.Build(query, from, to);
-        if (filter.IsEmpty)
-            return Recent(limit);
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        // CS-301（2026-09-26 审计）：补 id 决胜列——同一秒多条记录时与分页
-        // 查询（均有 , id DESC）顺序一致，防列表/翻页重复或跳行。
-        select.CommandText = $"SELECT id, url, title, visited_at, visited_date FROM visits WHERE {filter.WhereSql} ORDER BY visited_at DESC, id DESC LIMIT $lim";
-        filter.Bind(select, query, from, to);
-        select.Parameters.AddWithValue("$lim", ClampLimit(limit));
-        using var reader = select.ExecuteReader();
-        return ReadEntries(reader);
-    }
-
     /// <summary>统计匹配筛选的访问总数（页码分页用——分页条显示总页数）。</summary>
     public long Count(string? query, string? from, string? to)
     {
@@ -312,7 +231,7 @@ public sealed class HistoryStore
     }
 
     /// <summary>最近访问按页查询（页码分页空筛选路径）。</summary>
-    public IReadOnlyList<HistoryEntry> RecentPage(int pageSize, int offset)
+    internal IReadOnlyList<HistoryEntry> RecentPage(int pageSize, int offset)
     {
         using var connection = Open();
         using var select = connection.CreateCommand();
@@ -322,54 +241,6 @@ public sealed class HistoryStore
         using var reader = select.ExecuteReader();
         return ReadEntries(reader);
     }
-
-    /// <summary>游标分页（键集分页——比 OFFSET 稳，翻页期间新增不重不漏）。
-    /// 按 (visited_at, id) 倒序；after 为上一页末条游标。返回 HasMore 提示是否还有下一页。
-    /// 为空查询+空区间时回退 RecentPaged。</summary>
-    public PageResult SearchRangePaged(string query, string? from, string? to,
-        int pageSize = 100, PageCursor? after = null)
-    {
-        var filter = HistoryFilter.Build(query, from, to);
-        if (filter.IsEmpty)
-            return RecentPaged(pageSize, after);
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        var cursorClause = after is not null ? " AND (visited_at, id) < ($ca, $cid)" : "";
-        select.CommandText =
-            "SELECT id, url, title, visited_at, visited_date FROM visits WHERE " +
-            filter.WhereSql + cursorClause +
-            " ORDER BY visited_at DESC, id DESC LIMIT $lim";
-        filter.Bind(select, query, from, to);
-        if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
-        select.Parameters.AddWithValue("$lim", ClampLimit(pageSize) + 1);
-        return ReadPage(select, pageSize);
-    }
-
-    /// <summary>最近访问游标分页（记录倒序；after=翻页游标）。</summary>
-    public PageResult RecentPaged(int pageSize = 100, PageCursor? after = null)
-    {
-        using var connection = Open();
-        using var select = connection.CreateCommand();
-        select.CommandText = after is null
-            ? "SELECT id, url, title, visited_at, visited_date FROM visits ORDER BY visited_at DESC, id DESC LIMIT $lim"
-            : "SELECT id, url, title, visited_at, visited_date FROM visits WHERE (visited_at, id) < ($ca, $cid) ORDER BY visited_at DESC, id DESC LIMIT $lim";
-        if (after is not null) { select.Parameters.AddWithValue("$ca", after.VisitedAt); select.Parameters.AddWithValue("$cid", after.Id); }
-        select.Parameters.AddWithValue("$lim", ClampLimit(pageSize) + 1);
-        return ReadPage(select, pageSize);
-    }
-
-    private static PageResult ReadPage(SqliteCommand select, int pageSize)
-    {
-        using var reader = select.ExecuteReader();
-        var entries = ReadEntries(reader);
-        var hasMore = entries.Count > pageSize;
-        var page = hasMore ? entries.Take(pageSize).ToList() : entries;
-        PageCursor? next = null;
-        if (hasMore && page.Count > 0)
-            next = new PageCursor(page[^1].VisitedAt, page[^1].Id);
-        return new PageResult(page, hasMore, next);
-    }
-
     /// <summary>删除单条历史（不可恢复——UI 层负责确认）。</summary>
 
     public bool Delete(long id)
@@ -524,9 +395,3 @@ public sealed class HistoryStore
 
 /// <summary>历史条目（含本地日期 yyyy-MM-dd 与 ISO 时刻——UI 分组/按日查询用）。</summary>
 public sealed record HistoryEntry(long Id, string Url, string Title, string VisitedAt, string VisitedDate);
-/// <summary>分页游标（上一页末条的 (visited_at, id)——键集分页定位）。</summary>
-public sealed record PageCursor(string VisitedAt, long Id);
-
-/// <summary>一页结果：条目 + 是否还有下一页 + 下一页游标。</summary>
-public sealed record PageResult(
-    IReadOnlyList<HistoryEntry> Entries, bool HasMore, PageCursor? NextCursor);
