@@ -82,15 +82,14 @@ public sealed partial class HostWebView : IDisposable
         _tabId = tabId ?? $"tab-{sessionId}";
     }
 
-    /// <summary>接线（幂等防护：同一 WebView 只允许接线一次——重复接线会双重
-    /// 订阅导致每导航双重决策/双重消费，直接拒绝）。</summary>
+    /// <summary>接线（幂等防护：同一 WebView 只允许接线一次——重复接线会双重订阅导致
+    /// 每导航双重决策/双重消费）。R8-CS-SEC-11：`_wired` 只在本方法**末尾**置位。</summary>
     public void WireEvents(CoreWebView2 webView)
     {
         if (_wired is not null)
             throw new InvalidOperationException("HostWebView 已接线（重复 Wire 禁止）。");
         if (!_broker.RegisterSession(_sessionId, _tabId, _documentGeneration))
             throw new InvalidOperationException("无法注册安全浏览会话。");
-        _wired = webView;
 
         _onNavigationStarting = (sender, e) => OnNavigationStarting(webView, e);
         // CS-317（2026-09-26 审计）：HTTPS-only 对 iframe 子文档同判——顶层
@@ -168,6 +167,7 @@ public sealed partial class HostWebView : IDisposable
         // RegisterProcessReaction 立即执行（新建标签同样被冻结——fail-closed）。
         // Engage 与本接线同在 UI 线程（WPF），CoreWebView2.Stop 的线程要求满足。
         _killSwitchReaction = _broker.KillSwitch.RegisterProcessReaction(StopLiveTraffic);
+        _wired = webView;
     }
 
     /// <summary>审计第六轮（2026-10-03）：紧急终止的进程级反应——中止本 WebView
