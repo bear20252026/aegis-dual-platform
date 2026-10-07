@@ -182,7 +182,7 @@ YAML 4/195、TOML 4/306。
    比它宽——**两层不对称是有意保守**，不是漏配。原条目文本：需要 `http` 不升 https +
    `network_security_config.xml` 加 `domain-config` 明文例外，属明文策略放宽，
    且要同步改 `NetworkSecurityConfigGuardTest` 断言矩阵。
-5. **已定稿（2026-10-07，随「按推荐顺序全执行」）、实施中：子资源请求链的异常处置**
+5. **已定稿并执行（2026-10-07，随「按推荐顺序全执行」）：子资源请求链的异常处置**——落地为 §四 的 R8-CS-SEC-16。执行时更正一条口径：本项原写「只取消该一个请求（`e.Cancel = true`）」，而 `CoreWebView2WebResourceRequestedEventArgs` 根本没有 Cancel 成员（SDK 1.0.2903.40 实测只有 Request/Response/ResourceContext/GetDeferral/RequestedSourceKind），取消单请求的唯一手段是给 Response 填一份 403。
    （第八轮 B4 第二批登记的那一项，见第十二节该行——原清单缺该条，本轮补上）。
    `HostWebView` 的 `WebResourceRequested` 链按 CS-310 的取舍把策略层异常原样透传（单请求
    异常不影响其他请求、保持原始响应路径），代价是异常发生时**没有任何审计痕迹**，而
@@ -426,6 +426,7 @@ ADR-008 注记；三端守卫→两端并点名 C# `WebView2Hardening.cs:70` 缺
 **未做**：第十一节队列里 12 条 R8-DOC-03..14 未经逐条回读，按 skill 口径不入批次、
 不顺手改；`CONTRIBUTING.md` 属历史记录不改 |
 | 必需检查竞态红：ThreatFeed 后台任务交回句柄（R8-CS-CORE-12） | **本批** | 起因是 ② 的 PR #114 上 `windows-contract-build` 报红，而该分支一个 C# 字节都没改——红的是**既有**缺陷，不是本次改动。根因层级要说清：不是「测试睡不够」，是 CS-350 把 `LoadCached` 移出 UI 线程时投了 fire-and-forget 任务、**没留下任何可等待的句柄**，测试只能轮询副作用，于是「断言完成」与「后台写同一份缓存文件」之间没有 happens-before，Dispose 删文件当场撞 `IOException`。修法是把句柄交回调用方（`internal Task? BackgroundTask`）+ 7 个用例退出前 await + Dispose 尽力清理。新用例钉「句柄必须罩住整条链（快照→刷新），只交回前半段等于没修」，并用「删掉赋值 ⇒ `Assert.NotNull() Failure`」证明它不是恒绿。**留下一条不假装做到**：本类仍无 CancellationToken，「可等待」≠「可停止」，进程退出前那条后台刷新照旧跑到底。Core 720→721、Broker 181 全绿；两文件都远低于 300 行红线，无基线改动 |
+| ⑤ 子资源链异常改单请求失败闭合（R8-CS-SEC-16，第七节 5 定稿） | **本批** | 见第四节该行。三条值得留：① **裁决文本也要被执行时更正**——「取消该请求（e.Cancel）」这句在推荐方案里写得很自然，但该事件参数压根没有 Cancel 成员，照抄就是一次编译失败＋一个不存在的机制；凡是「换个 setter 就好」的建议，先回读 SDK/契约面再落笔。② **搬移会打断「按路径读源码」的门禁**：`ReservedAddressBoundaryTests` 的静态锚要从 `HostWebView.cs` 的 `OnWebResourceRequested` 改读新分片里的 `EvaluateSubresource`——不改不报错，只是从此读一份残缺面恒绿（本仓反复登记的 Hollow 形态，这次是自己在搬移中差点犯）。③ 判定核收 `Func<string>` 而不是字符串：取 URL 本身也可能抛，「连日志输入都取不到」不该升级成「连回绝都做不到」；而错误响应都造不出时（COM 已退休）如实留痕、保留默认路径，不假装拦住。12 例新测试全部先证红（判定核改回「只写日志、返回 null」并复原整段 try/catch ⇒ 9 例红，含两条结构锚），Core 720→732、Broker 181 全绿；`HostWebView.cs` 593→531 同批收窄，新分片 142 行、测试 238 行，均在 300 行红线内 |
 
 ## 十三、B8 追加更正（同轮续，PR #96）
 
