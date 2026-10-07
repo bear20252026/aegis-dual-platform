@@ -29,8 +29,8 @@ class LocalTargetHostsTest {
                 "https://example.com/a?b=#c" to "example.com",
                 "192.168.1.1:8080" to "192.168.1.1",
                 "http:example.com" to "http", // 无 "//" 的畸形形态：剥不到 host，交回不豁免
-            "http://fd12::3/" to "", // 裸 IPv6（缺方括号）：空串＝判不出 host，交回不豁免
-            "http://fe80::1:8080/" to "",
+                "http://fd12::3/" to "", // 裸 IPv6（缺方括号）：空串＝判不出 host，交回不豁免
+                "http://fe80::1:8080/" to "",
             )
         for ((url, expected) in cases) {
             assertEquals("hostOf($url)", expected, LocalTargetHosts.hostOf(url))
