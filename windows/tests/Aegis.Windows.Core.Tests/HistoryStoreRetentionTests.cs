@@ -103,7 +103,7 @@ public sealed class HistoryFilterTests : IDisposable
         store.Add("https://example.com/100%.html", "百分号页");
         store.Add("https://example.com/100x.html", "普通页");
 
-        var hits = store.Search("100%");
+        var hits = store.SearchByUrl("100%");
 
         Assert.Single(hits);
         Assert.Contains("100%.html", hits[0].Url);

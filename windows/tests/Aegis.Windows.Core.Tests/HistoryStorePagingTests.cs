@@ -3,140 +3,18 @@ namespace Aegis.Windows.Core.Tests;
 using Aegis.Windows.Core.History;
 using Xunit;
 
-/// <summary>历史游标分页单测：跨页不重不漏、HasMore 边界、游标推进、筛选+游标组合。
-/// 全部参数绑定（不拼接 SQL）。</summary>
+/// <summary>历史查询的顺序与钳制不变量单测：同秒并列项按 id 倒序、`Recent` 与
+/// offset 分页（<c>RecentPage</c>）口径一致、URL/标题写入钳制的库层边界、代理对安全截断。
+/// 全部参数绑定（不拼接 SQL）。
+///
+/// ⑥（第八轮 2026-10-07）：本文件原有 7 例是 **keyset 游标分页**
+///（`SearchRangePaged`/`RecentPaged`/`PageCursor`/`HasMore`）的断言——那两个方法是
+/// 零生产调用方的死面（生产分页走 `SearchRangePage` 的 OFFSET 口径），随方法一并删除。
+/// 两套并存的键集分页不是"未被使用的资产"，而是"未有人验证过的第二套排序口径"：
+/// 它自己的 <c>TieBreak</c> 用例正好需要拿 <c>Recent</c> 与 <c>RecentPage</c> 对齐才成立，
+/// 说明一致性本该由单源保证而不是靠第二套实现互相盖章。</summary>
 public sealed class HistoryStorePagingTests
 {
-    [Fact]
-    public void PagesOverAllEntriesWithoutDupOrSkip()
-    {
-        var store = NewStore();
-        for (var i = 0; i < 250; i++)
-            store.Add($"https://a.example/{i}", $"页{i}");
-
-        var seen = new List<long>();
-        PageCursor? cursor = null;
-        var pages = 0;
-        while (true)
-        {
-            var page = store.SearchRangePaged("", null, null, 100, cursor);
-            foreach (var e in page.Entries)
-                seen.Add(e.Id);
-            pages++;
-            if (!page.HasMore)
-                break;
-            Assert.NotNull(page.NextCursor);
-            cursor = page.NextCursor;
-        }
-
-        Assert.Equal(250, seen.Count);
-        Assert.Equal(3, pages);            // 100 + 100 + 50
-        Assert.Equal(seen.Count, seen.Distinct().Count());  // 无重复
-        Assert.Equal(250, store.Recent(1000).Count);         // 全部仍在库
-    }
-
-    [Fact]
-    public void SinglePageWhenLessThanPageSize()
-    {
-        var store = NewStore();
-        store.Add("https://a", "A");
-
-        var page = store.SearchRangePaged("", null, null, 100, null);
-
-        Assert.Single(page.Entries);
-        Assert.False(page.HasMore);
-        Assert.Null(page.NextCursor);
-    }
-
-    [Fact]
-    public void FilteredPagingRespectsDateRangeAndCursor()
-    {
-        var store = NewStore();
-        for (var i = 0; i < 20; i++)
-            store.Add($"https://b.example/{i}", $"B{i}");
-
-        var today = DateTime.Today.ToString("yyyy-MM-dd");
-        var page1 = store.SearchRangePaged("", today, today, 5, null);
-        Assert.Equal(5, page1.Entries.Count);
-        Assert.True(page1.HasMore);
-
-        var page2 = store.SearchRangePaged("", today, today, 5, page1.NextCursor);
-        Assert.Equal(5, page2.Entries.Count);
-
-        // 两页不重叠
-        var ids = page1.Entries.Select(e => e.Id).Concat(page2.Entries.Select(e => e.Id)).ToList();
-        Assert.Equal(ids.Count, ids.Distinct().Count());
-
-        // 不匹配日期 → 空且无更多
-        var none = store.SearchRangePaged("", "1999-01-01", "1999-01-01", 5, null);
-        Assert.Empty(none.Entries);
-        Assert.False(none.HasMore);
-    }
-
-    [Fact]
-    public void TextFilterCombinesWithPaging()
-    {
-        var store = NewStore();
-        for (var i = 0; i < 30; i++)
-            store.Add($"https://c.example/{i}", $"目标{i}");
-        store.Add("https://d.example", "无关页面");
-
-        var page = store.SearchRangePaged("目标", null, null, 10, null);
-        Assert.All(page.Entries, e => Assert.Contains("目标", e.Title));
-        Assert.True(page.HasMore);
-    }
-
-    [Fact]
-    public void RecentPagedMatchesSearchRangeEmpty()
-    {
-        var store = NewStore();
-        for (var i = 0; i < 12; i++)
-            store.Add($"https://e.example/{i}", $"E{i}");
-
-        var viaSearch = store.SearchRangePaged("", null, null, 5, null);
-        var viaRecent = store.RecentPaged(5, null);
-
-        Assert.Equal(viaSearch.Entries.Select(e => e.Id),
-            viaRecent.Entries.Select(e => e.Id));
-    }
-
-    [Fact]
-    public void SingleEndedRangeCombinationsFilterCorrectly()
-    {
-        // CS-027：单端区间组合（仅 from / 仅 to）各自独立生效
-        var store = NewStore();
-        store.Add("https://a.example", "A");
-        var today = DateTime.Now.ToString("yyyy-MM-dd");
-
-        // 仅 from：未来下界 → 空；今天下界 → 命中
-        Assert.Empty(store.SearchRangePaged("", "2099-01-01", null).Entries);
-        Assert.Single(store.SearchRangePaged("", today, null).Entries);
-        // 仅 to：过去上界 → 空；今天上界 → 命中
-        Assert.Empty(store.SearchRangePaged("", null, "1999-01-01").Entries);
-        Assert.Single(store.SearchRangePaged("", null, today).Entries);
-        // 双端夹today → 命中
-        Assert.Single(store.SearchRangePaged("", "1999-01-01", "2099-01-01").Entries);
-    }
-
-    [Fact]
-    public void LastPageHasMoreIsFalse()
-    {
-        // CS-255：恰在末页（剩余数 ≤ pageSize）HasMore=false 且无下一页游标
-        var store = NewStore();
-        for (var i = 0; i < 7; i++)
-            store.Add($"https://e.example/{i}", $"E{i}");
-
-        var page = store.SearchRangePaged("", null, null, 5, null);
-        Assert.Equal(5, page.Entries.Count);
-        Assert.True(page.HasMore);
-        Assert.NotNull(page.NextCursor);
-
-        var lastPage = store.SearchRangePaged("", null, null, 5, page.NextCursor);
-        Assert.Equal(2, lastPage.Entries.Count);
-        Assert.False(lastPage.HasMore);
-        Assert.Null(lastPage.NextCursor);
-    }
-
     private static HistoryStore NewStore() =>
         new(Path.Combine(Path.GetTempPath(), Path.GetRandomFileName()));
 
@@ -182,7 +60,7 @@ public sealed class HistoryStorePagingTests
     }
 
     [Fact]
-    public void RecentAndSearch_TieBreakByIdDesc_MatchPagingOrder()
+    public void RecentAndSearchByUrl_TieBreakByIdDesc_MatchPagingOrder()
     {
         // CS-301：Recent/Search 此前仅 ORDER BY visited_at DESC（无 id 决胜），
         // 同一时刻多条记录时与分页查询（visited_at DESC, id DESC）顺序不一致。
@@ -211,8 +89,8 @@ public sealed class HistoryStorePagingTests
         var paged = store.RecentPage(2, 0).Select(e => e.Url).ToList();
         Assert.Equal(ties.Take(2).Select(e => e.Url), paged);
 
-        // Search 同口径（子串命中全部并列项）
-        var searched = store.Search("tie.example")
+        // SearchByUrl（生产在用的查询面）同口径：子串命中全部并列项
+        var searched = store.SearchByUrl("tie.example")
             .Where(e => e.Url.StartsWith("https://tie.example", StringComparison.Ordinal)).ToList();
         Assert.Equal(ties.Select(e => e.Url), searched.Select(e => e.Url));
     }

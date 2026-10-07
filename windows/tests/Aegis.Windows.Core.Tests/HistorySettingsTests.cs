@@ -24,30 +24,6 @@ public sealed class HistoryStoreTests : IDisposable
         Assert.Equal(2, recent.Count);
         Assert.Equal("https://second.example", recent[0].Url);
     }
-
-    [Fact]
-    public void FullTextSearchMatchesTitleAndUrl()
-    {
-        _store.Add("https://animals.example/zoo", "国家动物博物馆");
-        _store.Add("https://plants.example", "植物园");
-
-        var hits = _store.Search("动物");
-        Assert.Single(hits);
-        Assert.Equal("https://animals.example/zoo", hits[0].Url);
-
-        var urlHits = _store.Search("plants");
-        Assert.Single(urlHits);
-    }
-
-    [Fact]
-    public void SearchMalformedQueryFallsBackToLike()
-    {
-        // FTS5 MATCH 语法错误（裸引号等）→ LIKE 回退，不抛异常（fail-safe）
-        _store.Add("https://weird.example", "带\"引号\"的页");
-        var hits = _store.Search("\"引号");
-        Assert.NotEmpty(hits);
-    }
-
     [Fact]
     public void ClearRemovesEverything()
     {
@@ -68,19 +44,20 @@ public sealed class HistoryStoreTests : IDisposable
     public void SearchMultiWordQueryTreatedAsLiteralSubstring()
     {
         // CS-019：多词查询按整串子串语义（空格不切词）——锁定 LIKE 回退路径的口径
-        _store.Add("https://zoo.example", "国家动物博物馆");
+        _store.Add("https://zoo.example/国家动物博物馆", "标题");
 
-        Assert.Single(_store.Search("国家动物"));
-        Assert.Empty(_store.Search("国家 动物"));  // 带空格整串不命中
+        Assert.Single(_store.SearchByUrl("国家动物"));
+        Assert.Empty(_store.SearchByUrl("国家 动物"));  // 带空格整串不命中
     }
 
     [Fact]
     public void SearchCaseInsensitiveForAscii()
     {
-        // CS-020：ASCII 大小写不敏感（SQLite LIKE 默认语义锁定）
+        // CS-020：ASCII 大小写不敏感（SQLite LIKE 默认语义锁定）。
+        // 观测口径走生产在用的 SearchByUrl——原 Search 的标题列匹配随死面一并移除。
         _store.Add("https://GitHub.Example/Repo", "MyPage");
-        Assert.Single(_store.Search("github"));
-        Assert.Single(_store.Search("mypage"));
+        Assert.Single(_store.SearchByUrl("github"));
+        Assert.Single(_store.SearchByUrl("GITHUB.Example"));
     }
 
     [Fact]

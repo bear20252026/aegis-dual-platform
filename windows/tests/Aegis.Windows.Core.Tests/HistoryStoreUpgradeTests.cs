@@ -4,8 +4,9 @@ using Aegis.Windows.Core.History;
 using Microsoft.Data.Sqlite;
 using Xunit;
 
-/// <summary>历史升级（按日期查询/日期列表/单条删除/迁移补列）单测——
-/// 验证全部参数绑定路径与按日期分组查询语义。</summary>
+/// <summary>历史库存储层不变量单测（写入归一日期、参数绑定、旧 schema 迁移补列、
+/// 删除与 limit 钳制）。⑥（第八轮）把观测口径从零调用方的查询面（Search/ByDate/Dates，
+/// 已删）移到生产真正在用的 Recent / SearchByUrl / SearchRangePage。</summary>
 public sealed class HistoryStoreUpgradeTests
 {
     [Fact]
@@ -15,7 +16,8 @@ public sealed class HistoryStoreUpgradeTests
         store.Add("https://a.example/x", "A页");
 
         var today = DateTime.Now.ToString("yyyy-MM-dd");
-        var rows = store.ByDate(today, 50);
+        var rows = store.Recent(50)
+            .Where(e => e.VisitedDate == today).ToList();
 
         Assert.Single(rows);
         Assert.Equal("https://a.example/x", rows[0].Url);
@@ -23,36 +25,6 @@ public sealed class HistoryStoreUpgradeTests
         Assert.Equal(today, rows[0].VisitedDate);
         Assert.Contains("T", rows[0].VisitedAt);  // ISO 含时刻
     }
-
-    [Fact]
-    public void ByDateOnlyReturnsThatDay()
-    {
-        var store = NewStore();
-        store.Add("https://a.example", "A");
-        store.Add("https://b.example", "B");
-
-        var today = DateTime.Now.ToString("yyyy-MM-dd");
-        var rows = store.ByDate(today, 50);
-
-        Assert.Equal(2, rows.Count);
-        // 构造一个绝不存在的日期 → 空
-        Assert.Empty(store.ByDate("1999-01-01", 50));
-    }
-
-    [Fact]
-    public void DatesListsDistinctRecentDays()
-    {
-        var store = NewStore();
-        store.Add("https://a.example", "A");
-        store.Add("https://b.example", "B");
-
-        var today = DateTime.Now.ToString("yyyy-MM-dd");
-        var dates = store.Dates(90);
-
-        Assert.Contains(today, dates);
-        Assert.Equal(dates.Count, dates.Distinct().Count());
-    }
-
     [Fact]
     public void SearchWithDateFiltersToThatDay()
     {
@@ -61,11 +33,14 @@ public sealed class HistoryStoreUpgradeTests
         store.Add("https://a.example/two", "次项");
 
         var today = DateTime.Now.ToString("yyyy-MM-dd");
-        // 文本命中 + 日期命中
-        Assert.Equal(2, store.Search("example", today, 50).Count);
-        Assert.Single(store.Search("首项", today, 50));
-        // 文本命中但日期不匹配 → 空
-        Assert.Empty(store.Search("example", "1999-01-01", 50));
+        // 文本命中 + 日期命中（观测口径改走生产在用的 SearchRangePage/Count：
+        // 原断言走的 Search 是零调用方的死面，标题列匹配随之一并退出——
+        // 「历史仅 URL 命中」的口径本就由 CS-401 定在 SearchByUrl 侧）
+        Assert.Equal(2, store.SearchRangePage("example", today, today, 50, 0).Count);
+        Assert.Equal(2, store.Count("example", today, today));
+        // 文本命中但日期不匹配 → 空（CS-021：未知日期空结果，不抛）
+        Assert.Empty(store.SearchRangePage("example", "1999-01-01", "1999-01-01", 50, 0));
+        Assert.Equal(0, store.Count("example", "1999-01-01", "1999-01-01"));
     }
 
     [Fact]
@@ -113,7 +88,8 @@ public sealed class HistoryStoreUpgradeTests
 
             var store = new HistoryStore(path);
             var today = DateTime.Now.ToString("yyyy-MM-dd");
-            var rows = store.ByDate(today, 50);
+            var rows = store.Recent(50)
+            .Where(e => e.VisitedDate == today).ToList();
 
             Assert.Single(rows);
             Assert.Equal(today, rows[0].VisitedDate);
@@ -124,26 +100,17 @@ public sealed class HistoryStoreUpgradeTests
             catch (IOException) { /* 清理失败不影响 */ }
         }
     }
-
     [Fact]
-    public void ByDateUnknownDateReturnsEmpty()
+    public void LimitClampsAndBounds()
     {
-        // CS-021：未知日期空结果，不抛
+        // CS-022：limit 边界——0/负值不得触发 SQLite 的「负 LIMIT = 无上限」语义
+        //（CS-028 钳制后 limit<=0 等价 1）。观测口径改走生产在用的 Recent：
+        // 原断言的 Dates 是零调用方死面，钳制逻辑同为 ClampLimit 单源。
         var store = NewStore();
         store.Add("https://a.example", "A");
-        Assert.Empty(store.ByDate("1999-01-01", 50));
-    }
-
-    [Fact]
-    public void DatesLimitClampsAndBounds()
-    {
-        // CS-022：Dates limit 边界——0/负值不再触发 SQLite 负 LIMIT=无上限语义
-        //（CS-028 钳制后 limit<=0 等价 1）
-        var store = NewStore();
-        store.Add("https://a.example", "A");
-        Assert.Single(store.Dates(0));
-        Assert.Single(store.Dates(-5));
-        Assert.Single(store.Dates(90));
+        Assert.Single(store.Recent(0));
+        Assert.Single(store.Recent(-5));
+        Assert.Single(store.Recent(90));
     }
 
     [Fact]
