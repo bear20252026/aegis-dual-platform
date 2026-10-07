@@ -79,12 +79,27 @@ object LocalTargetHosts {
     /** http URL 是否免于升 https（调用方负责确认 scheme 确为 http）。 */
     fun isExemptFromHttpsUpgrade(url: String): Boolean = isLocalTarget(hostOf(url))
 
+    /**
+     * 点分十进制的放行面（第七轮 B8 裁决）：回环 127/8、RFC1918、CGNAT 100.64/10。
+     * 其余一律不豁免——含 169.254/16 链路本地（云元数据在其内）、0/8、TEST-NET-1/2/3、
+     * 198.18/15 基准段、224/4 组播、240/4 保留，以及公网。
+     *
+     * 段判定就地写在 `when (values[0])` 上，不拆成 `(a, b)` 两参私有函数：本仓
+     * ktlint_official 的 function-signature 对「两参数 + 多行体」要求逐参数换行
+     * （第八轮三轮红灯里第三轮就是这个），而那样只是把格式争论搬进签名行。
+     */
     private fun isExemptIpv4(host: String): Boolean {
         val values = host.split('.').map { text -> octetValueOrMinusOne(text) }
         if (values.size != 4 || values.any { it < 0 }) {
             return false
         }
-        return isExemptRange(values[0], values[1])
+        return when (values[0]) {
+            127, 10 -> true
+            172 -> values[1] in 16..31
+            192 -> values[1] == 168
+            100 -> values[1] in 64..127
+            else -> false
+        }
     }
 
     /** 单个点分段的合法形态：1-3 位纯数字、无前导零（`0` 本身除外）。 */
@@ -98,21 +113,6 @@ object LocalTargetHosts {
         }
         val value = text.toInt()
         return if (value in 0..255) value else -1
-    }
-
-    /**
-     * 放行面（第七轮 B8 裁决）：回环 127/8、RFC1918、CGNAT 100.64/10。
-     * 其余一律不豁免——含 169.254/16 链路本地（云元数据在其内）、0/8、TEST-NET-1/2/3、
-     * 198.18/15 基准段、224/4 组播、240/4 保留，以及公网。
-     */
-    private fun isExemptRange(a: Int, b: Int): Boolean {
-        return when (a) {
-            127, 10 -> true
-            172 -> b in 16..31
-            192 -> b == 168
-            100 -> b in 64..127
-            else -> false
-        }
     }
 
     private fun isExemptIpv6(host: String): Boolean = host == "::1" || isUla(host.substringBefore(':'))
