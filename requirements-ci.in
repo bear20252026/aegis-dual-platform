@@ -16,9 +16,13 @@
 # cyclonedx-python-lib / py-serializable 不在此列——它们是 pip-audit 的传递
 # 依赖（CycloneDX 输出格式），随 pip-audit 树解算，勿单独 bump（#27/#35/#39
 # 三连坏 PR 根因：Dependabot 对 hash 锁文件只改被 bump 包自身，不重算传递树）。
-ruff==0.16.9
+# B7（第八轮 2026-10-08 重锁）：ruff 0.16.9→0.16.10、mypy 2.3.1→2.4.0 都属「落后但
+# 无 CVE」的版本跟进，二者都被本锁逐条 --hash= 钉住 ⇒ 改 pin 必整链重算，由
+# Dependency-Retlock（dispatch-only，ecosystem=python）承接；增量口径见该 workflow
+# 的「Python 重锁」步骤注记与 tests/python/relock_sop_test.py。
+ruff==0.16.10
 bandit==1.9.4
-mypy==2.3.1
+mypy==2.4.0
 pytest==9.1.1
 # SP-258（2026-10-02 审计）：覆盖率度量——contracts.yml/agent-redteam.yml 的
 # pytest 步骤带 --cov 出报告（不设阈值，供补测排序）；coverage 随 pytest-cov

@@ -90,6 +90,13 @@ jobs:
         # --generate-hashes、--no-header。--no-header 会抹掉本仓手写的头注块
         #（PY-178/221/258 的判据都在里面），故重算后把原头注块拼回文件顶部——
         # 这一步以前是「人工补回」，是漏补即静默丢文档的活面。
+        # 「增量」靠的是 pip-compile 的机制本身：它从 **--output-file 指向的既有文件**
+        # 读回现有 pin。所以必须先 `cp requirements-ci.txt .relock-staging.txt`、再把
+        # output-file 指向那个 staging 副本。本步骤初版把输出写到全新的
+        # .relock-body.txt（且 cp 出来的 staging 无人使用）——pip-compile 看不到任何
+        # 既有 pin，于是整棵传递依赖树按「当前最新」重解：一次 mypy/ruff 的两行 bump
+        # 会连带换掉 cyclonedx 系等一片无关包，正是 .in 注释里 #27/#35/#39 三连坏 PR
+        # 的形态。锚点在 tests/python/relock_sop_test.py（判「输出面==staging 面」）。
         run: |
           set -euo pipefail
           python -m venv .relock-venv
@@ -97,7 +104,7 @@ jobs:
           "$VENVBIN/pip" install --quiet pip-tools==7.4.1
           cp requirements-ci.txt .relock-staging.txt
           "$VENVBIN/pip-compile" --quiet --generate-hashes --no-header \
-            --output-file .relock-body.txt requirements-ci.in
+            --output-file .relock-staging.txt requirements-ci.in
           python - <<'PY'
           from pathlib import Path
           old = Path("requirements-ci.txt").read_text(encoding="utf-8").replace("\r\n", "\n").split("\n")
@@ -107,13 +114,12 @@ jobs:
                   header.append(line)
               else:
                   break
-          body = Path(".relock-body.txt").read_text(encoding="utf-8").replace("\r\n", "\n")
+          body = Path(".relock-staging.txt").read_text(encoding="utf-8").replace("\r\n", "\n")
           if not header:
               raise SystemExit("❌ 原锁没有头注块——先确认 requirements-ci.txt 形态")
           Path("requirements-ci.txt").write_text("\n".join(header) + "\n" + body, encoding="utf-8", newline="")
           print(f"头注块已保留（{len(header)} 行）")
           PY
-          cp .relock-body.txt .relock-keep.txt
 
       - name: 回读门禁：锁必须仍然完整（RID 块 + 出货依赖 + hash 覆盖）
         shell: bash
