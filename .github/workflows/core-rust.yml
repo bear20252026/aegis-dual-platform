@@ -40,7 +40,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
         with:
-          toolchain: stable
+          toolchain: 1.99.0
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-053)
         with:
@@ -79,6 +79,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     continue-on-error: false
+    # cargo-fuzz 的 sanitizer 插桩要 nightly。rust-toolchain.toml 是**目录级** override，
+    # 优先级高于 action 设的 default ⇒ 只有 env 能确定压住它（rustup 顺序：+toolchain 参数
+    # > RUSTUP_TOOLCHAIN > 文件 override > default）。不写这行，本 job 会拿 1.99.0 去编 fuzz。
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     defaults:
       run:
         working-directory: core/rust-policy-core

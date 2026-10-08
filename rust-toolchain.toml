@@ -1,0 +1,22 @@
+# rust-toolchain.toml —— Rust toolchain 单源（第八轮 B7，收口 R8-DEPS-2）
+#
+# 「固定 toolchain」一直是书面口径（`core/rust-policy-core/Cargo.toml` 的依赖注、
+# `docs/adr/ADR-005-rust-policy-core-pilot.md` 的决策条），但这个文件此前**不存在**，
+# 9 处 workflow 全写 `toolchain: stable` ⇒ 同一 commit 隔月重跑出来的
+# `aegis_policy_core.dll` 字节可变：自建哈希基线与 release 台账会周期性对账失配，
+# 「可复现构建」就成了声明而不是事实。
+#
+# 为什么 workflow 里还要写同值字面量：`dtolnay/rust-toolchain` 没有 `toolchain: file`
+# 这个输入（README 只列 rustup 工具链说明符，例如 `stable`/`nightly`/`1.89.0`），
+# 它也不承诺读本文件。所以单源 = 本文件的 channel + 9 处字面量**同值**，
+# 漂移由 `tests/python/rust_toolchain_pin_test.py` 判红（它同时禁止再出现
+# `toolchain: stable`，并只允许 fuzz 那一个 `nightly` 例外——那个 job 的 sanitizer
+# 插桩依赖 nightly 编译器能力，并在 job 级钉 `RUSTUP_TOOLCHAIN: nightly`，
+# 否则 rustup 的目录级 override（= 本文件）会优先于 action 设置的 default）。
+#
+# 升级动作：改本文件的 channel → 改 9 处字面量 → 让门禁和 CI 告诉你还有谁没跟上。
+# 代价如实记在这里：钉版之后，下一次发布的 DLL 字节可能与上一次不同（这正是
+# 「可复现」要付的一次性账，此后同版本重跑应逐字节一致）。
+[toolchain]
+channel = "1.99.0"
+components = ["rustfmt", "clippy"]
