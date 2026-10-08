@@ -107,11 +107,17 @@ def compat_violations(files: list[Path]) -> list[str]:
 
 
 def run_compat() -> int:
-    """3.12 兼容门禁（口径与 ruff/bandit 同面——同一 TARGETS，不另立范围）。"""
+    """3.12 兼容门禁（口径与 ruff/bandit 同面——同一 TARGETS，不另立范围）。
+
+    额外把 `.github/workflows/*.yml` 一起扫：workflow 里内嵌的 python（heredoc）是同一条
+    判据的第二处落点，而它天然不在 `*.py` 扫描面里。这不是假设——PR #82 与
+    run 37800016632 是**同一个缺陷的两次发生**：第一次在 tests/python，第二次就藏在
+    Dependency-Retlock 的 heredoc 里，本地 3.14 全绿、CI 3.12 直接 TypeError。"""
     files = _python_files(RUFF_TARGETS)
-    problems = compat_violations(files)
-    print(f"[gate] py312-compat: 扫描 {len(files)} 个文件")
-    if not files:
+    workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
+    problems = compat_violations(files) + compat_violations(workflows)
+    print(f"[gate] py312-compat: 扫描 {len(files)} 个 py 文件 + {len(workflows)} 个 workflow")
+    if not files or not workflows:
         print("[gate] py312-compat: FAILED（扫描面为空——空面即恒绿）")
         return 2
     if problems:

@@ -115,26 +115,27 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           path = Path("requirements-ci.txt")
-          # newline=""：不让 Python 的通用换行翻译把 "\r\n" 折成 "\n"。本锁的 blob 里
-          # 是 CRLF、还夹着 16 处 "\r\r\n"（git 把该文件判成 -text，.gitattributes 的
-          # eol=lf 对它不成立——台账 R8-CI-19），通用换行会在每个头注行后凭空造出
-          # 一行空行 ⇒ 头注提取在第 2 行就断，重写时**静默丢掉整段来源注记**
-          #（PY-178/221/258 的判据都在里面；run 37796042636 实测「头注块已保留（1 行）」）。
-          raw = path.read_text(encoding="utf-8", newline="")
-          header: list[str] = []
+          # 按字节行读（open(newline="")）：`Path.read_text(newline=)` 是 3.13+ 才有的
+          # 关键字，CI 钉 3.12——PR #82 就为同一写法红过一次（run 37800016632 是第二次，
+          # 差别只在它藏在 workflow 的内嵌 python 里、门禁扫不到，见 py312-compat 补面）。
+          with path.open(encoding="utf-8", newline="") as handle:
+              raw = handle.read()
+          header = []
           for line in (ln.rstrip("\r") for ln in raw.split("\n")):
               if line.startswith("#"):
                   header.append(line)
               else:
                   break
-          body = Path(".relock-staging.txt").read_text(encoding="utf-8", newline="")
+          with Path(".relock-staging.txt").open(encoding="utf-8", newline="") as handle:
+              body = handle.read()
           body_lines = [ln.rstrip("\r") for ln in body.split("\n")]
           if not header:
               raise SystemExit("❌ 原锁没有头注块——先确认 requirements-ci.txt 形态")
           rebuilt = "\n".join(header + body_lines)
           path.write_text(rebuilt, encoding="utf-8", newline="")
           # 回写后逐行核对头注仍在：丢了就是文档假账，绝不允许「看着成功」。
-          written = path.read_text(encoding="utf-8", newline="").split("\n")
+          with path.open(encoding="utf-8", newline="") as handle:
+              written = handle.read().split("\n")
           missing = [line for line in header if line not in written]
           if missing:
               raise SystemExit(f"❌ 头注回写缺 {len(missing)} 行，首条：{missing[0][:60]}")

@@ -71,7 +71,7 @@ def test_every_intermediate_lock_file_is_both_written_and_read() -> None:
 def test_header_block_is_reattached_from_the_recomputed_file() -> None:
     run = relock_step_run()
     seeded = re.findall(r"cp\s+requirements-ci\.txt\s+(\S+)", run)[0]
-    reads = re.findall(r'Path\("([^"]+)"\)\.read_text', run)
+    reads = re.findall(r'Path\("([^"]+)"\)\.(?:read_text|open)', run)
     assert seeded in reads, f"头注回贴读的不是重算后的文件（reads={reads}）"
     assert 'Path("requirements-ci.txt")' in run, "头注来源必须是原锁文件的头注块"
 
