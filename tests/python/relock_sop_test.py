@@ -72,3 +72,41 @@ def test_input_source_still_documents_the_incremental_procedure() -> None:
     # .in 被改成别的口径（例如故意要整树升级）时本用例报红，逼着两边一起想清楚。
     text = INPUT_SOURCE.read_text(encoding="utf-8")
     assert "复用既有 pin" in text, "requirements-ci.in 的 SOP 记载缺失——判据来源没了"
+
+
+def _jobs(doc: dict) -> list[tuple[str, dict]]:
+    return [(str(name), job) for name, job in (doc.get("jobs") or {}).items()]
+
+
+def test_inline_python_heredoc_on_windows_declares_utf8_stdio() -> None:
+    """Windows runner 上 Python 的 stdout 被重定向进日志管道时按 ANSI 代码页编码
+    （实测 cp1252）。含中文/✅❌ 的 print 直接抛 UnicodeEncodeError——本 workflow
+    的「Python 重锁」步骤就在首次 dispatch 时死在 `print("头注块已保留（…）")`
+    上（run 37793334416），而报错发生在**文件已经写好之后**，看上去像「随机失败」。
+    判据：任何在 windows runner 上内嵌 python heredoc 且正文含非 ASCII 的 job，
+    必须显式声明 PYTHONIOENCODING=utf-8（job 级或 step 级都算）。"""
+    offenders: list[str] = []
+    for workflow in sorted(WORKFLOW.parent.glob("*.yml")):
+        doc = yaml.safe_load(workflow.read_text(encoding="utf-8"))
+        for job_name, job in _jobs(doc):
+            if "windows" not in str(job.get("runs-on", "")).lower():
+                continue
+            runs = [str(step.get("run", "")) for step in job.get("steps", []) or []]
+            heredocs = [run for run in runs if "<<'PY'" in run or "<<PY" in run]
+            if not heredocs or not any(ord(ch) > 127 for run in heredocs for ch in run):
+                continue
+            declared = {"PYTHONIOENCODING"} <= set(job.get("env") or {}) or any(
+                "PYTHONIOENCODING" in (step.get("env") or {}) for step in job.get("steps", []) or []
+            )
+            if not declared:
+                offenders.append(f"{workflow.name}::{job_name}")
+    assert not offenders, f"内嵌 python heredoc 含非 ASCII 却未声明 PYTHONIOENCODING: {offenders}"
+
+
+def test_relock_job_sets_io_encoding_for_whole_job() -> None:
+    # 不只 heredoc：本 job 还跑 scripts/verify_lock_rids.py（4 处中文 print）。
+    # 逐步加 env 会漏，所以要求 job 级一次性声明，且值必须是 utf-8。
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    job = doc["jobs"]["relock"]
+    env = job.get("env") or {}
+    assert env.get("PYTHONIOENCODING") == "utf-8", f"relock job 缺 PYTHONIOENCODING（env={env}）"

@@ -43,6 +43,13 @@ jobs:
     name: 重算并写回依赖锁（RID 块回读门禁把关）
     runs-on: windows-2025
     timeout-minutes: 45
+    # Windows runner 上 Python 的 stdout 被重定向到日志管道时按 ANSI 代码页（实测
+    # cp1252）编码——本 job 的 heredoc 与 verify_lock_rids.py 都带中文与 ✅❌，
+    # 2026-10-08 首次 dispatch 就死在 `print("头注块已保留（…）")` 抛
+    # UnicodeEncodeError（run 37793334416），而且报在文件写好**之后**——看着像随机失败。
+    # job 级统一 UTF-8；判定面见 tests/python/relock_sop_test.py。
+    env:
+      PYTHONIOENCODING: utf-8
     steps:
       - name: 校验目标分支（拒绝写回主干）
         shell: bash
