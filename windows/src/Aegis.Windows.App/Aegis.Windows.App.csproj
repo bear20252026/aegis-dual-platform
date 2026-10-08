@@ -29,11 +29,15 @@
          官方支持 + 中文实测性能略胜 + 成熟简单——ADR-001） -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
     <!-- ADR-009 D2：数据层统一 SQLite（标签会话/书签/历史——FTS5 后续里程碑） -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
-    <!-- NU1903 修复：显式升级 SQLitePCLRaw 传递依赖（2.1.11 高危漏洞 GHSA-2m69-gcr7-jv3q） -->
-    <PackageReference Include="SQLitePCLRaw.core" Version="2.1.12" />
-    <PackageReference Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.12" />
-    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.12" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <!-- NU1903（GHSA-2m69-gcr7-jv3q）补钉：此前只钉了 core/provider/lib 三件，
+         `bundle_e_sqlite3` 由 Microsoft.Data.Sqlite 的传递依赖决定 ⇒ 锁里长期停在被点名的
+         2.1.11（第八轮 R8-DEPS-3）。四件一起显式钉住，锁的 SQLitePCLRaw 家族单源归本文件；
+         版本下界另有门禁 scripts/check_package_floors.py。 -->
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
+    <PackageReference Include="SQLitePCLRaw.core" Version="2.1.13" />
+    <PackageReference Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.13" />
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
   </ItemGroup>
   <ItemGroup Condition="Exists('$(NativePolicyCorePath)')">
     <None Include="$(NativePolicyCorePath)"

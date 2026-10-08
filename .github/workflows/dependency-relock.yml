@@ -147,6 +147,7 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/verify_lock_rids.py
+          python scripts/check_package_floors.py
           if [ "${{ github.event.inputs.ecosystem }}" != "dotnet" ]; then
             python validate_release.py            # 内含锁结构门禁：逐条 == 钉版必带 --hash=、.in↔.txt 对账
             python -m pip install --quiet --require-hashes -r requirements-ci.txt
