@@ -108,9 +108,11 @@ object DefaultNativePolicyCoreGate : NativePolicyCoreGate {
  * C ABI 版本单源（全库审计 2026-09-02 收敛）：此前 EXPECTED_ABI_VERSION 在
  * NativePolicyCoreGate 与 NativePolicyCoreBridge 双份定义——ABI 升级时漏改
  * 任一处即出现「门禁通过、桥接失配」（或反之）的静默漂移。v3 新增 Rust
- * 托管的确认登记、批准兑换与拒绝接口。
+ * 托管的确认登记、批准兑换与拒绝接口；v4（第八轮 ⑨，R8-RS-14）把黑名单注入的
+ * clear 参数扩成档位（0 追加 / 1 整批替换 / 2 开暂存会话 / 3 提交），消除
+ * 「约 85 批推送期间判定读不完整名单」的窗口。探测不一致即拒绝加载（不降级）。
  */
-internal const val EXPECTED_C_ABI_VERSION = 3
+internal const val EXPECTED_C_ABI_VERSION = 4
 
 // JNI 绑定函数名必须与 C ABI 符号逐字一致（snake_case）——豁免命名规范
 @Suppress("ktlint:standard:function-naming")

@@ -28,7 +28,7 @@ public static class CoreDenylistPublisher
     private static readonly object Gate = new();
 
     /// <summary>R8-CS-SEC-09（第八轮）：推送序列的单飞门。
-    /// `UpdateHostDenylist` 内部不是一次调用，而是「首批 clear=1 + 其余 clear=0」的
+    /// `UpdateHostDenylist` 内部不是一次调用，而是「开暂存会话 + 逐批追加 + 提交」的
     /// 多批序列（核心单载荷 64KiB 上限遇上托管侧 5MiB 订阅源）。两次推送交错时，核心
     /// 最终拿到的是两份快照的混合，而任一方后续的 clear=1 还会抹掉对方已追加的条目——
     /// 托管侧拦得好好的，核心侧却是一份谁都没见过的名单（零痕迹，除非逐批复判）。

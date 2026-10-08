@@ -174,7 +174,7 @@ class AndroidBrokerTest {
         val allow =
             NativePolicyCoreBridge.parseDecisionJson(
                 """{
-                "abi_version":3,"decision":"allow","action":{
+                "abi_version":4,"decision":"allow","action":{
                 "session_id":"native-session","tab_id":"native-tab","document_generation":2,
                 "origin":"https://example.com","method":"GET","canonical_parameters":"/path?x=1",
                 "scope":"navigation","expires_at":1700000000,"nonce":"nonce-1","policy_version":"1.0",
@@ -189,14 +189,14 @@ class AndroidBrokerTest {
 
         val deny =
             NativePolicyCoreBridge.parseDecisionJson(
-                """{"abi_version":3,"decision":"deny","reason":{
+                """{"abi_version":4,"decision":"deny","reason":{
                 "code":"nonce_replay","detail":"nonce already consumed","explanation":"denied"}}""",
             ) as Decision.Deny
         assertEquals("nonce_replay", deny.reason.code)
 
         val confirmation =
             NativePolicyCoreBridge.parseDecisionJson(
-                """{"abi_version":3,"decision":"require_confirmation","request":{
+                """{"abi_version":4,"decision":"require_confirmation","request":{
                 "origin":"https://payments.example","method":"POST","path":"/transfers",
                 "scope":"payment:create","expires_at":1700000000,"nonce":"approval-nonce"}}""",
             ) as Decision.RequireConfirmation
@@ -430,7 +430,7 @@ class AndroidBrokerTest {
         // 解析抛异常转 null（那会折叠成 native_policy_core_protocol 拒绝）
         val allow =
             NativePolicyCoreBridge.parseDecisionJson(
-                """{"abi_version":3,"decision":"allow","action":{
+                """{"abi_version":4,"decision":"allow","action":{
                 "session_id":"s","tab_id":"t","document_generation":0,
                 "origin":"https://example.com","method":"GET","canonical_parameters":"/",
                 "scope":"navigation","expires_at":1700000000,"nonce":"n","policy_version":"1.0"}}""",
@@ -439,7 +439,7 @@ class AndroidBrokerTest {
 
         val deny =
             NativePolicyCoreBridge.parseDecisionJson(
-                """{"abi_version":3,"decision":"deny","reason":{
+                """{"abi_version":4,"decision":"deny","reason":{
                 "code":"url_policy","detail":"denied"}}""",
             ) as Decision.Deny
         assertEquals("", deny.reason.explanation)
@@ -453,7 +453,7 @@ class AndroidBrokerTest {
         val exception =
             runCatching {
                 NativePolicyCoreBridge.parseDecisionJson(
-                    """{"abi_version":3,"decision":"quantum_redirect","reason":{
+                    """{"abi_version":4,"decision":"quantum_redirect","reason":{
                     "code":"x","detail":"y"}}""",
                 )
             }.exceptionOrNull()
