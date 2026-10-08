@@ -114,17 +114,30 @@ jobs:
             --output-file .relock-staging.txt requirements-ci.in
           python - <<'PY'
           from pathlib import Path
-          old = Path("requirements-ci.txt").read_text(encoding="utf-8").replace("\r\n", "\n").split("\n")
+          path = Path("requirements-ci.txt")
+          # newline=""：不让 Python 的通用换行翻译把 "\r\n" 折成 "\n"。本锁的 blob 里
+          # 是 CRLF、还夹着 16 处 "\r\r\n"（git 把该文件判成 -text，.gitattributes 的
+          # eol=lf 对它不成立——台账 R8-CI-19），通用换行会在每个头注行后凭空造出
+          # 一行空行 ⇒ 头注提取在第 2 行就断，重写时**静默丢掉整段来源注记**
+          #（PY-178/221/258 的判据都在里面；run 37796042636 实测「头注块已保留（1 行）」）。
+          raw = path.read_text(encoding="utf-8", newline="")
           header: list[str] = []
-          for line in old:
+          for line in (ln.rstrip("\r") for ln in raw.split("\n")):
               if line.startswith("#"):
                   header.append(line)
               else:
                   break
-          body = Path(".relock-staging.txt").read_text(encoding="utf-8").replace("\r\n", "\n")
+          body = Path(".relock-staging.txt").read_text(encoding="utf-8", newline="")
+          body_lines = [ln.rstrip("\r") for ln in body.split("\n")]
           if not header:
               raise SystemExit("❌ 原锁没有头注块——先确认 requirements-ci.txt 形态")
-          Path("requirements-ci.txt").write_text("\n".join(header) + "\n" + body, encoding="utf-8", newline="")
+          rebuilt = "\n".join(header + body_lines)
+          path.write_text(rebuilt, encoding="utf-8", newline="")
+          # 回写后逐行核对头注仍在：丢了就是文档假账，绝不允许「看着成功」。
+          written = path.read_text(encoding="utf-8", newline="").split("\n")
+          missing = [line for line in header if line not in written]
+          if missing:
+              raise SystemExit(f"❌ 头注回写缺 {len(missing)} 行，首条：{missing[0][:60]}")
           print(f"头注块已保留（{len(header)} 行）")
           PY
 
@@ -144,7 +157,20 @@ jobs:
           set -euo pipefail
           git config user.name  "aegis-relock-bot"
           git config user.email "relock@localhost"
-          git add -A windows packages.lock.json requirements-ci.txt requirements-ci.in || true
+          # 逐路径 add，且 pathspec 必须真实存在。初版这里是一行
+          #   git add -A windows packages.lock.json requirements-ci.txt requirements-ci.in || true
+          # 而仓库根**没有** packages.lock.json（三把锁在 windows/**/ 下）——git 对不存在
+          # 的 pathspec 直接 fatal 并放弃整条命令，`|| true` 又把退出码吞掉，于是
+          # 重算好的锁一条都没进 index、`git diff --cached --quiet` 恒真，job 打印
+          # 「✅ 重锁无差异」正常收工（run 37796042636 实测）。本 job 唯一能造成的
+          # 副作用就是写回分支，写不回等于整个执行面是空的。
+          for pathspec in windows requirements-ci.txt requirements-ci.in; do
+            if [ ! -e "$pathspec" ]; then
+              echo "❌ pathspec 不存在：$pathspec——布局变了就改这里，不要静默跳过"
+              exit 1
+            fi
+            git add -A -- "$pathspec"
+          done
           if git diff --cached --quiet; then
             echo "✅ 重锁无差异——当前锁已是最新解析结果（这本身就是个结论，不是失败）"
             exit 0

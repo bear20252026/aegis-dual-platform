@@ -23,6 +23,15 @@ WORKFLOW = ROOT / ".github" / "workflows" / "dependency-relock.yml"
 INPUT_SOURCE = ROOT / "requirements-ci.in"
 
 
+def code_only(text: str) -> str:
+    """只留代码行。本仓的注记里会**逐字抄着**被禁的旧形态（`|| true`、
+    `.relock-body.txt`……），不剔注释，锚判的就是自己的说明而不是代码——
+    这个坑第八轮撞过两次，这里统一在入口剔掉。"""
+    return "\n".join(
+        line for line in text.splitlines() if not line.strip().startswith("#")
+    )
+
+
 def relock_step_run() -> str:
     """取「Python 重锁」步骤的 bash 正文（步骤改名或删掉都必须报红，不是静默跳过）。"""
     doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
@@ -31,7 +40,7 @@ def relock_step_run() -> str:
     assert len(matches) == 1, f"Python 重锁步骤必须恰好一个，实得 {len(matches)}"
     run = matches[0]["run"]
     assert isinstance(run, str) and run.strip(), "Python 重锁步骤没有 run 正文"
-    return run
+    return code_only(run)
 
 
 def test_pip_compile_writes_into_the_copy_of_the_current_lock() -> None:
@@ -64,7 +73,50 @@ def test_header_block_is_reattached_from_the_recomputed_file() -> None:
     seeded = re.findall(r"cp\s+requirements-ci\.txt\s+(\S+)", run)[0]
     reads = re.findall(r'Path\("([^"]+)"\)\.read_text', run)
     assert seeded in reads, f"头注回贴读的不是重算后的文件（reads={reads}）"
-    assert 'Path("requirements-ci.txt").read_text' in run, "头注来源必须是原锁文件的头注块"
+    assert 'Path("requirements-ci.txt")' in run, "头注来源必须是原锁文件的头注块"
+
+
+def test_writeback_step_cannot_swallow_a_failed_git_add() -> None:
+    """写回是本 job 唯一能造成的副作用——它静默失败就等于整个执行面是空的。
+
+    初版这里写 `git add -A windows packages.lock.json ... || true`，而仓库根没有
+    `packages.lock.json`（三把锁在 windows/**/ 下）：git 对不存在的 pathspec 直接
+    fatal 并放弃**整条**命令，`|| true` 吞掉退出码 ⇒ index 全空 ⇒
+    `git diff --cached --quiet` 恒真 ⇒ job 高高兴兴打印「✅ 重锁无差异」收工
+    （run 37796042636 实测）。所以这里判两条：一步都不许 `|| true`，
+    且逐字列出的 pathspec 必须真实存在。"""
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = doc["jobs"]["relock"]["steps"]
+    matches = [s for s in steps if "写回分支" in str(s.get("name", ""))]
+    assert len(matches) == 1, f"写回步骤必须恰好一个，实得 {len(matches)}"
+    # 判代码不判注释：这一步的注记里逐字抄着被禁的旧命令行（含 `|| true`）
+    code = code_only(str(matches[0]["run"]))
+    assert "|| true" not in code, "写回步骤里出现 `|| true`——git add 失败会被静默吞掉"
+    loops = re.findall(r"for pathspec in ([^;]+); do", code)
+    assert len(loops) == 1, f"应恰好一个 pathspec 清单，实得 {len(loops)}"
+    listed = loops[0].split()
+    assert listed, "pathspec 清单为空"
+    missing = [name for name in listed if not (ROOT / name).exists()]
+    assert not missing, f"清单里的 pathspec 在仓库里不存在（git 会 fatal 并放弃整条 add）: {missing}"
+    assert "git add" in code and 'add -A -- "$pathspec"' in code, "必须逐 pathspec 调用 git add -A --"
+
+
+def test_header_preservation_is_newline_robust_and_verified_after_write() -> None:
+    """头注回贴必须按**字节行**读，且写完要回读核对。
+
+    `requirements-ci.txt` 的 blob 是 CRLF 并夹 16 处 `\\r\\r\\n`（git 把它判成 -text，
+    `.gitattributes` 的 `eol=lf` 对它不成立——台账 R8-CI-19）。Python 的通用换行会在
+    每个头注行后凭空造出一行空行，于是「取头部连续注释块」的循环第 2 行就断：
+    run 37796042636 实测打出「头注块已保留（1 行）」——真按它写回去，PY-178/221/258
+    那三段来源注记就静默没了。判三条：读必须 `newline=""`、不许再用
+    `.replace("\\r\\n", "\\n")` 这种把 `\\r\\r\\n` 当 `\\n` 的口径、写完必须回读核对。
+    """
+    code = relock_step_run()
+    assert 'newline=""' in code, "头注来源按通用换行读——\\r\\r\\n 会被折成空行"
+    assert '.replace("\\r\\n", "\\n")' not in code, (
+        "又用 replace 折 CRLF 的旧口径：它对 `\\r\\r\\n` 恰好留一个空行，正是要禁的形态"
+    )
+    assert "written =" in code and "missing" in code, "写完没有回读核对——丢头注会静默成功"
 
 
 def test_input_source_still_documents_the_incremental_procedure() -> None:
@@ -91,7 +143,7 @@ def test_inline_python_heredoc_on_windows_declares_utf8_stdio() -> None:
         for job_name, job in _jobs(doc):
             if "windows" not in str(job.get("runs-on", "")).lower():
                 continue
-            runs = [str(step.get("run", "")) for step in job.get("steps", []) or []]
+            runs = [code_only(str(step.get("run", ""))) for step in job.get("steps", []) or []]
             heredocs = [run for run in runs if "<<'PY'" in run or "<<PY" in run]
             if not heredocs or not any(ord(ch) > 127 for run in heredocs for ch in run):
                 continue
