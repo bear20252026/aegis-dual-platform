@@ -6,8 +6,11 @@
 # legacy-python-guard 用本锁装工具却跑活跃树门禁（scripts/release/contracts/
 # agent），双源版本漂移即两套规则口径——对齐后 guard 与根锁同版本。
 # （pyinstaller/Pillow 是归档应用打包专用，根锁无对应面，维持原 pin。）
-ruff==0.16.9
-mypy==2.3.1
+# B7（第八轮 2026-10-08）：ruff 0.16.9→0.16.10 / mypy 2.3.1→2.4.0 随根
+# requirements-ci.in 同批 bump（PY-220 的对齐口径——两把锁必须同版本，否则
+# legacy-python-guard 与活跃树门禁跑的是两套规则）。
+ruff==0.16.10
+mypy==2.4.0
 bandit==1.9.4
 pyinstaller==6.22.0
 Pillow==12.3.0
