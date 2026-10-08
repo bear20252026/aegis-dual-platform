@@ -75,6 +75,14 @@ jobs:
       # CI 钉版扫描才看得见，故与 ruff/bandit 同面常跑。
       - name: Active-tree Python 3.12 compat gate (CI 钉版 vs 本地高版本漂移面)
         run: python scripts/active_tree_gates.py compat
+      # B7（第八轮 2026-10-08）：这两条此前**只**在 Dependency-Retlock 的 dispatch job 里
+      # 跑，也就是说「锁被改坏」要等某次有人手动重锁才看得见——PR 面从不检查锁的内容。
+      # RID 块完整性（④ 建的那半）与包版本下界（NU1903 的 4/4 补钉由承诺变成事实）
+      # 一起进常跑门禁；两者都是空面即 exit 2 的形态，不会「没东西可查」被读成「查过了」。
+      - name: .NET lock integrity gates (B7——RID 块 + 包版本下界)
+        run: |
+          python scripts/verify_lock_rids.py
+          python scripts/check_package_floors.py
       # SP-255（2026-10-02 审计·I-03）：行数红线（新文件 ≤300 / 改造后 ≤500）
       # + 基线 ratchet——基线外文件按 300 红线，基线内文件只许减不许增
       - name: File size red line gate (SP-255——行数红线 + 基线 ratchet)
