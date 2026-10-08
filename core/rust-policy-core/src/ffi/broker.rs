@@ -316,13 +316,8 @@ impl FfiBroker {
 // #[uniffi::export] 的 impl 会把其中所有方法计入 FFI 面
 //（内部类型 AuthorizedAction 未导出，被引用即编译失败）。
 impl FfiBroker {
-    /// 黑名单快照注入的 Rust 侧单点（R7-RS-02 清空/追加两阶段）。本入口的
-    /// 跨语言面只在 C ABI（`c_abi::navigation`）——UniFFI 绑定面维持下方
-    /// `update_host_denylist`（整批替换）不变、不新增导出项（生成绑定的滞后另有
-    /// 第七轮 R7-RS-03 登记）。
-    pub(crate) fn apply_host_denylist(&self, hosts: Vec<String>, clear: bool) -> u32 {
-        self.deny_hosts.apply(hosts, clear)
-    }
+    // 黑名单注入的 Rust 侧单点在 denylist.rs——本文件在 940 行零余量基线上，
+    // 而 ⑨ 的档位入口与 bool 兼容映射同快照状态本就是一体。
 }
 
 #[uniffi::export]

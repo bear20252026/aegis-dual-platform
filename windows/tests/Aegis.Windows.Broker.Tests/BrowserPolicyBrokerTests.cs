@@ -204,7 +204,7 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     public void NativePolicyCoreBridgeMapsCompleteConfirmationRequest()
     {
         var decision = NativePolicyCoreBridge.ParseDecisionPayload("""
-            {"abi_version":3,"decision":"require_confirmation","request":{
+            {"abi_version":4,"decision":"require_confirmation","request":{
               "origin":"https://payments.example","method":"POST","path":"/transfers",
               "scope":"payment:create","expires_at":1700000000,"nonce":"approval-nonce"}}
             """);
@@ -475,7 +475,7 @@ public sealed class BrowserPolicyBrokerTests : IDisposable
     {
         // CS-208：未知决策保留为拒绝（协议升级时不意外放行）
         var decision = NativePolicyCoreBridge.ParseDecisionPayload(
-            "{\"abi_version\":3,\"decision\":\"teleport\"}");
+            "{\"abi_version\":4,\"decision\":\"teleport\"}");
         var deny = Assert.IsType<Decision.Deny>(decision);
         Assert.Equal("native_policy_core_decision_invalid", deny.Reason.Code);
     }

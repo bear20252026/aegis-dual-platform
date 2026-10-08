@@ -12,8 +12,12 @@ public static class NativePolicyCoreGate
 {
     public const string EnableEnvironmentVariable = "AEGIS_REQUIRE_NATIVE_POLICY_CORE";
     public const string LibraryPathEnvironmentVariable = "AEGIS_NATIVE_POLICY_CORE_PATH";
-    /// <summary>C ABI v3 提供策略核心托管的确认登记、批准和拒绝入口。</summary>
-    public const uint ExpectedAbiVersion = 3;
+    /// <summary>C ABI v3 提供策略核心托管的确认登记、批准和拒绝入口；
+    /// <b>v4</b>（第八轮 ⑨，R8-RS-14）把黑名单注入的 <c>clear</c> 参数扩成档位
+    /// （0 追加 / 1 整批替换 / 2 开暂存会话 / 3 提交），消除「约 85 批推送期间
+    /// 判定读的是不完整名单」这一窗口。宿主与核心必须同版：探测不一致时门禁
+    /// fail-closed 拒绝加载，绝不静默换另一套策略实现。</summary>
+    public const uint ExpectedAbiVersion = 4;
 
     public static bool IsRequired =>
         string.Equals(Environment.GetEnvironmentVariable(EnableEnvironmentVariable), "1", StringComparison.Ordinal)

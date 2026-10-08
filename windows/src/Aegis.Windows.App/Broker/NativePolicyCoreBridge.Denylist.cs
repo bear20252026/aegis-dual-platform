@@ -23,7 +23,7 @@ using System.Text.Json;
 /// 参数是就地加的（符号名未变、ABI 版本仍为 v3），因此符号名探测区分不了
 /// "2 参旧核心"与"3 参新核心"：对着 2 参旧核心调用时多传的实参被忽略，
 /// 行为退化为既往的整批替换（内存安全，x64 cdecl 下多余参数不被解引用），
-/// 但分批会各自整批替换 → 最终快照只剩最后一批。应答信封里的 <c>clear</c>
+/// 但分批会各自整批替换 → 最终快照只剩最后一批（⑨ 已由「暂存 + 提交」消除，见
 /// 回显是本类唯一的"核心是否真带该参数"探针（信封不含 abi_version）：多批
 /// 推送时首批不回显即中止并记 <c>core_lacks_clear_parameter</c>，核心侧留下的
 /// 前缀规模如实写进 Detail——绝不静默推完 86 批换回一个残缺名单。单批推送
@@ -127,28 +127,18 @@ public sealed partial class NativePolicyCoreBridge
     /// 前缀**而非上一份快照（首批即带清空），故 Detail 如实带出前缀规模与停在哪一批，
     /// 绝不写成"完好无损"。形态拒收（accepted &lt; input）不中止：托管侧仍在拦那些
     /// 条目，与既往单批口径一致，汇总后以 PartiallyPublished 呈现。</summary>
+    // ⑨（第八轮 R8-RS-14）：档位协议（暂存 + 提交，混版三态）在
+    // NativePolicyCoreBridge.DenylistPush.cs——那里是纯逻辑，可在无原生 DLL 的
+    // 常跑门禁里直测；本类只负责编组与租约。
     private CoreDenylistUpdateResult PushInChunks(
         UpdateHostDenylistDelegate entry, IReadOnlyCollection<string> hosts, int input)
     {
         var batches = EnumerateBatches(hosts);
-        var accepted = 0;
-        for (var batchIndex = 0; batchIndex < batches.Count; batchIndex++)
-        {
-            var batch = batches[batchIndex];
-            var result = InvokeHostDenylist(entry, batch, batchIndex == 0, batch.Count);
-            if (!result.Published)
-                return ChunkFailed(batchIndex, accepted, input, "denylist_chunk_failed");
-            accepted += result.Accepted;
-            if (batchIndex == 0 && batches.Count > 1 && !result.CoreEchoesClear)
-                return ChunkFailed(batchIndex, accepted, input, "core_lacks_clear_parameter");
-        }
-        return CoreDenylistUpdateResult.Apply(accepted, input);
+        return DriveDenylistPush(
+            batches,
+            (batch, mode) => InvokeHostDenylist(entry, batch, mode),
+            input);
     }
-
-    private static CoreDenylistUpdateResult ChunkFailed(
-        int batchIndex, int accepted, int input, string detail) => new(
-        CoreDenylistOutcome.NotPublished, accepted, input,
-        $"{detail}@{batchIndex}（核心侧保留已推送前缀 {accepted} 条）");
 
     /// <summary>按核心单载荷上限切批（逐元素 UTF-8 字节计费，+1 为元素间逗号）。
     /// 空快照也必须产出一个空批——"清空核心名单"正是靠 clear=true 的空批表达，
@@ -175,12 +165,12 @@ public sealed partial class NativePolicyCoreBridge
         return batches;
     }
 
-    private CoreDenylistUpdateResult InvokeHostDenylist(
+    private DenylistAck InvokeHostDenylist(
         UpdateHostDenylistDelegate entry,
         List<string> hosts,
-        bool clear,
-        int input)
+        int mode)
     {
+        var input = hosts.Count;
         // 入参形态是 JSON 字符串数组（核心侧 serde 反序列化为 Vec<String>）；
         // host 已由 BlockedHosts 归一（小写、去尾点），此处不再加工。
         var payload = JsonSerializer.Serialize(hosts);
@@ -188,20 +178,22 @@ public sealed partial class NativePolicyCoreBridge
         IntPtr response;
         try
         {
-            response = entry(Broker, hostsPointer, clear ? 1 : 0);
+            response = entry(Broker, hostsPointer, mode);
         }
         finally
         {
             Marshal.FreeCoTaskMem(hostsPointer);
         }
         if (response == IntPtr.Zero)
-            return CoreDenylistUpdateResult.NotPublished(input, "native_response_pointer_null");
+            return new DenylistAck(false, 0, input, false, false, false, -1,
+                "native_response_pointer_null");
         try
         {
             var text = Marshal.PtrToStringUTF8(response);
             return text is null
-                ? CoreDenylistUpdateResult.NotPublished(input, "native_response_not_utf8")
-                : ParseUpdateResponse(text, input);
+                ? new DenylistAck(false, 0, input, false, false, false, -1,
+                    "native_response_not_utf8")
+                : ParseDenylistAck(text, input);
         }
         finally
         {
@@ -211,41 +203,17 @@ public sealed partial class NativePolicyCoreBridge
 
     /// <summary>解析注入应答 <c>{"decision":"ok","accepted":N,"input":M}</c>。
     /// 注意该信封不带 abi_version（与决策信封不同），故不能复用
-    /// <see cref="ParseDecisionPayload"/>。非 ok 应答（含核心侧分配失败的
-    /// FALLBACK deny 信封）一律如实回报未发布并带出 reason.code；
-    /// accepted &lt; input 原样保留给调用方留痕——被拒条目在核心侧是
-    /// "看起来在工作的黑名单里的永久死条目"，静默吞掉正是本缺口藏五轮的原因。</summary>
+    /// <see cref="ParseDecisionPayload"/>；能力探测靠 <c>clear</c>/<c>mode</c> 字段自身
+    ///（见 <see cref="ParseDenylistAck"/>）。本方法只保留既有对外语义：非 ok 一律
+    /// 如实回报未发布并带出 reason.code，accepted &lt; input 原样留给调用方——被拒条目
+    /// 在核心侧是"看起来在工作的黑名单里的永久死条目"，静默吞掉正是本缺口藏五轮的原因。</summary>
     internal static CoreDenylistUpdateResult ParseUpdateResponse(string payload, int input)
     {
-        try
-        {
-            using var document = JsonDocument.Parse(payload);
-            var root = document.RootElement;
-            var decision = root.TryGetProperty("decision", out var value) ? value.GetString() : null;
-            if (decision != "ok")
-                return CoreDenylistUpdateResult.NotPublished(
-                    input,
-                    root.TryGetProperty("reason", out var reason) &&
-                    reason.TryGetProperty("code", out var code)
-                        ? code.GetString() ?? "native_denylist_denied"
-                        : "native_denylist_response_not_ok");
-            var accepted = ReadCount(root, "accepted");
-            // 核心如实回报 input；应答缺失时退回本地 offered 数（不虚报成功）
-            var offered = root.TryGetProperty("input", out _) ? ReadCount(root, "input") : input;
-            // clear 回显只用于"所加载核心是否真带第三参"判据（见 PushInChunks）
-            return CoreDenylistUpdateResult.Apply(
-                accepted, offered, root.TryGetProperty("clear", out _));
-        }
-        catch (Exception)
-        {
-            return CoreDenylistUpdateResult.NotPublished(input, "native_denylist_response_unparsable");
-        }
+        var ack = ParseDenylistAck(payload, input);
+        return ack.Published
+            ? CoreDenylistUpdateResult.Apply(ack.Accepted, ack.Input, ack.EchoesClear)
+            : CoreDenylistUpdateResult.NotPublished(input, ack.Detail);
     }
-
-    private static int ReadCount(JsonElement root, string name) =>
-        root.TryGetProperty(name, out var value) && value.TryGetInt32(out var number) && number >= 0
-            ? number
-            : 0;
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate IntPtr UpdateHostDenylistDelegate(IntPtr broker, IntPtr hostsJson, int clear);
