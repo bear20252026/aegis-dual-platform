@@ -11,7 +11,8 @@ using System.Text.RegularExpressions;
 /// ② about:blank → 原样放行
 /// ③ 带 scheme：仅 http/https 放行；其余（file:/javascript:/data: 等）
 ///    → null（fail-closed——杜绝补 https:// 拼接盲区）
-/// ④ 无 scheme：含空格或不含点号 → 搜索词拼引擎 URL；否则当域名补 https
+/// ④ 无 scheme：含空格或不含点号 → 搜索词拼引擎 URL；否则按公网判定补 scheme
+///    （非公网 http／公网 https——判据与 HTTPS-only 升级豁免层同一个，R8-CS-SEC-15）
 /// ⑤ 完整 URL 内空格编码为 %20（浏览器惯例）
 /// 最终导航仍经 NavigationStarting → Broker 决策——本类只做输入归一，不做授权。
 /// </summary>
@@ -184,10 +185,20 @@ public static class UrlNormalizer
             || host.EndsWith(".localhost", StringComparison.Ordinal);
     }
 
-    /// <summary>无 scheme 的裸主机名默认补协议。本机名（localhost/.localhost/回环
-    /// 及任意 IP 字面量）补 http——本地/内网服务器通常只跑 http，对标 Chrome 对
-    /// localhost 与裸 IP 的行为；其它域名补 https。</summary>
-    private static string SchemeForLocal(string input)
+    /// <summary>无 scheme 的裸主机名默认补协议。判据**只有升级豁免层那一个**
+    /// （R8-CS-SEC-15，2026-10-08）：复用 `UrlSafety.IsPublicHost`——非公网
+    /// （回环/RFC1918/CGNAT/`.localhost`/`.local`/`.internal` 与各类 IPv4 变体编码）
+    /// 补 http，公网补 https。此前本层自写一套（任意 IP 字面量都补 http、只认
+    /// localhost 家族），同一个 host 在同一次导航里被两层读出相反结论：地址栏敲
+    /// `my-nas.local` 补出 https，而 `IsExemptFromHttpsUpgrade` 认它是内网名——
+    /// 只跑 http 的 NAS 因此打不开（违反第七轮 B8 裁决）；反方向裸公网 IP 补 http
+    /// 又被升级层改写 https（补错了等于白补）。两端共用向量文件
+    /// `android/app/src/test/resources/search-normalize-vectors.json` 逐条钉住。</summary>
+    private static string SchemeForLocal(string input) =>
+        Core.UrlSafety.IsPublicHost(BareHostOf(input)) ? "https://" : "http://";
+
+    /// <summary>取裸主机名：去路径、去端口、去尾点并小写（host 级判定的入参清洗）。</summary>
+    private static string BareHostOf(string input)
     {
         var host = input;
         var slash = host.IndexOf('/');
@@ -196,12 +207,7 @@ public static class UrlNormalizer
         var colon = host.IndexOf(':');
         if (colon >= 0)
             host = host[..colon];  // 剥离端口，如 localhost:8080 / 127.0.0.1:8080
-        host = host.TrimEnd('.').ToLowerInvariant();
-        if (System.Net.IPAddress.TryParse(host, out _))
-            return "http://";  // IP 字面量（含 127.0.0.1 回环）
-        if (host.Equals("localhost", StringComparison.Ordinal) || host.EndsWith(".localhost", StringComparison.Ordinal))
-            return "http://";
-        return "https://";
+        return host.TrimEnd('.').ToLowerInvariant();
     }
 
     /// <summary>EscapeDataString 后保留 "/"（对齐 Android Uri.encode(text, "/") 语义）。</summary>

@@ -15,7 +15,9 @@ import java.nio.file.Path
  * normalize_url 与 Android SearchEngines 各写各的用例，跨端语义漂移无
  * 单一锚点）。现以 JSON 向量文件为单一事实源：
  * - 文件位于 app/src/test/resources/search-normalize-vectors.json
- *   （当前仅 Android 侧消费——Windows 输入层补 scheme 的判据不同口径，R8-CS-SEC-15）；
+ *   （两端各自消费：本类驱动 Android 判定链，Windows 侧
+ *   `SearchNormalizeVectorTests` 按同一仓库相对路径驱动 `UrlNormalizer.Normalize`
+ *   ——R8-CS-SEC-15 把输入层判据合一之后，这条共享才从声明变成事实）；
  * - 本测试逐条驱动 classifyInput（判定）与 normalizeInput（归一链），
  *   expected_url=null 的条目只断言判定类（URL 值依赖引擎选择，跨端不锁）。
  */

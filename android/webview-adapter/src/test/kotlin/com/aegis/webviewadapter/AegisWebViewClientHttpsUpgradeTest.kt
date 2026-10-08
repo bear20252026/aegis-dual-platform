@@ -17,7 +17,8 @@ import org.mockito.Mockito.mock
  * 只有能被机器拦住才算被拦住。`upgradeToHttpsIfNeeded` 为此从 private 提为
  * internal：这条判定此前只能靠真机验证，等于没有回归保护。
  *
- * **与 Windows 的豁免面不等宽，且两端都到不了云元数据**（差异登记台账 R8-CS-SEC-15）：
+ * **与 Windows 的豁免面不等宽，且两端都到不了云元数据**（残余差异登记 R8-CS-SEC-17；
+ * Windows 的**输入层**已在 R8-CS-SEC-15 与本端合一，两处都问同一个判据）：
  * Windows 的 `IsExemptFromHttpsUpgrade` 判据是 `!UrlSafety.IsPublicHost(host)`，
  * 链路本地（含 `169.254.169.254`）属「非公网」⇒ 在 Windows **不升级**，改由导航层
  * `ReservedAddressBoundary.Denies` 拒绝；Android 没有那一层托管判据，就在升级层把它

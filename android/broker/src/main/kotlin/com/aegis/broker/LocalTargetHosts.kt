@@ -14,11 +14,18 @@ package com.aegis.broker
  *    `198.18/15`、组播与广播；`localhost`/`.localhost`/`.local`/`.internal` 这类
  *    **名字后缀**在 Windows 由 `UrlSafety.IsPublicHost` 判（本仓无第三个名字判据）。
  *
- * 与 Windows 的**输入层补 scheme**（`Chrome/UrlNormalizer.SchemeForLocal`）并不同口径：
- * 那边对**任意** IP 字面量（含 `169.254.169.254`、公网 IP）补 http，且只认 localhost
- * 家族（`.local`/`.internal` 补 https）。本端按段集判定，因此同一份裁决在两端的
- * 「猜 scheme」这一步结论可以相反——差异已登记台账（R8-CS-SEC-15），归下一批收敛，
- * 本批不把单端改动伪装成三端一致。
+ * Windows 的**输入层补 scheme**（`Chrome/UrlNormalizer.SchemeForLocal`）自 R8-CS-SEC-15
+ * （2026-10-08）起与本端同构：两端都不再各自写一套「猜 scheme」规则，而是各问一次自己的
+ * 「这是本机/内网目标吗」（本端 = 下面的段集；Windows = `UrlSafety.IsPublicHost` 取反，
+ * 与它的 HTTPS-only 升级豁免层同一个判据），并由**共享向量文件**
+ * `app/src/test/resources/search-normalize-vectors.json` 两端各自逐条消费钉住。
+ *
+ * 残余不等宽（转登 R8-CS-SEC-17）：Windows 的「非公网」比本端段集**宽**——链路本地
+ * （`169.254/16`）、TEST-NET、`198.18/15`、组播/广播，以及八进制/整数/简写编码归一后
+ * 落进保留段的形态，在 Windows 补 http、在本端补 https。终态两端一致（这些地址都在
+ * 导航边界被拒，云元数据谁都打不开），差的只是处置动作：Windows 给 denied 码、
+ * Android 是连接失败或 https 报错。**不要**把这条差异当 SSRF 缺陷去「收紧」Windows——
+ * 裁决是「本机与内网必须能打开」，方向只有放宽本机可达，不是反过来。
  *
  * 两处刻意不豁免，都写清理由，免得下轮当缺陷「顺手修」：
  * • **单标签主机名**（`nas`、`printer`）：判它是不是内网要问 DNS，本函数的契约是零 DNS
@@ -27,9 +34,11 @@ package com.aegis.broker
  * • **前导零八进制 / 整数 / 十六进制 / 简写等非常规 IPv4 编码**（`0251.0376…`、
  *   `2852168190`、`127.1`）：Chromium 按 inet_aton 解释、.NET 与本机解释不一致，
  *   两侧口径不同就是绕过面（CS-348/CS-418 记过），因此一律不豁免。方向是**宁可多升
- *   一次 https**（打不开比走明文安全）；Windows 侧则把这些形态归一后交给
- *   `ReservedAddressBoundary` 判（`0177.0.0.1` 归一成 127.0.0.1 ⇒ 被豁免），
- *   两端在此不完全一致，同上归 R8-CS-SEC-15 收敛。
+ *   一次 https**（打不开比走明文安全）；Windows 侧则把这些形态归一后判——`0177.0.0.1`
+ *   归一成 127.0.0.1 ⇒ 输入层补 http、升级层豁免，但 `OriginPolicy` 在导航层按 raw
+ *   authority 同判拒绝（AD-213 孪生）。Android 在 normalize 链内就返回 null，Windows 到
+ *   导航层才拒：**层序不同、终态相同**，此差异归 R8-CS-SEC-17（共享向量的
+ *   `windows_url` 覆盖 + Windows 消费端两条断言把「两条都成立」钉住）。
  */
 object LocalTargetHosts {
     private const val SCHEME_SEPARATOR = "://"
