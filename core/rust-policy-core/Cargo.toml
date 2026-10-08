@@ -29,7 +29,10 @@ path = "src/bin/aegis_uniffi_bindgen.rs"
 required-features = ["uniffi-bindgen"]
 
 [dependencies]
-# 最小 crate 依赖（蓝图：最小依赖 + 固定 toolchain + cargo audit/deny——CI 门禁）
+# 最小 crate 依赖（蓝图口径实况：最小依赖 ✓、固定 toolchain ✓（仓库根
+# rust-toolchain.toml + workflow 同值字面量，漂移由 tests/python/
+# rust_toolchain_pin_test.py 判红）、cargo audit ✓（.github/actions/cargo-audit）、
+# cargo deny ✗ 仍未接——没有 deny.toml，本行此前把它写成「CI 门禁」是假账。）
 ed25519-dalek = { version = "3", features = ["rand_core", "zeroize"] }
 # RS-153（审计 2026-09-25）：getrandom 0.2 → 0.3——0.2 线已进入维护模式，
 # 0.3 为当前主线（API：getrandom() 更名 fill()，错误类型重构）。ed25519-dalek

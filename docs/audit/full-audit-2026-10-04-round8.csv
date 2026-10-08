@@ -19,7 +19,7 @@ R8-CS-SEC-08,P2,问题/可观测性,"windows/src/Aegis.Windows.App/WebView/HostW
 R8-CS-CORE-1,P2,问题/测试空洞,"windows/tests/** ↔ BrowserPolicyBroker.cs:135,241,286,303,317",5个生产拒绝码零字串锚点，改码不红,yes,B4
 R8-CS-CORE-2,P2,问题/测试空洞,windows/tests/Aegis.Windows.Broker.Tests/ReservedAddressBoundaryTests.cs:37-44,全部断言走ManagedBroker，原生前置分支零行为断言,yes,B4
 R8-DEPS-1,P2,提升/依赖落后,windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj:30,WebView2 SDK落后22个月；且注释称升级即得ESM为假（stable未含该属性）,no,B7
-R8-DEPS-2,P2,问题/工具链pin,core/rust-policy-core/Cargo.toml:32 + 9处toolchain,声明『固定toolchain+cargo deny』未兑现：无rust-toolchain.toml、无deny.toml、stable浮动,no,B7
+R8-DEPS-2,P2,问题/工具链pin,core/rust-policy-core/Cargo.toml:32 + 9处toolchain,声明『固定toolchain+cargo deny』未兑现：无rust-toolchain.toml、无deny.toml、stable浮动,yes,B7
 R8-DEPS-3,P2,问题/依赖锁定,windows/src/Aegis.Windows.App/packages.lock.json:51-57,NU1903修复只做3/4：bundle_e_sqlite3仍解析2.1.11,yes,B7
 R8-DEPS-4,P2,问题/被上游阻塞,core/rust-policy-core/Cargo.toml:4-9,uniffi 0.33不存在(最新0.32.2)⇒edition2024暂缓仍成立且无ETA,no,B7
 R8-DEPS-5,P2,问题/可复现性,.github/workflows/release-windows.yml:39,windows-latest现映射windows-2025-vs2026；发布链应pin windows-2025,no,B6
