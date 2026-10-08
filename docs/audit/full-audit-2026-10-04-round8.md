@@ -366,12 +366,30 @@ mypy `2.3.1 → 2.4.0` 须 pip-compile 整树重算 hash；Test.Sdk `17.14.1 →
 | R8-PY | 1（05）——03 已随 #95 闭、**04 本批复读确证并落地** | 11 | 余下 R8-PY-05 是第七轮条目的闭环状态复核，不是新缺陷 |
 | R8-SH | 4（01/02/03/08/16）——**13/14 本批复读确证并落地**、15 已随 #99 闭 | 6 | R8-SH-15（两条「回归锁」语料语言错了：`setTag` 是 Android API、`setOf` 是 Kotlin 字面量，而 `allScripts` 是 shell JS ⇒ 两条恒真，BUG-001/006 实际零保护） |
 | R8-CI | 5（04/05/06/07/17） | 12 | R8-CI-06（triage 文档写「附证据 dismissing」而实测 `state=dismissed` 为 0，含一条 critical） |
-| R8-DEPS | 8（01/04/05/06/07/08）——**03、02 本批逐行回读确证并落地**（02 = Rust toolchain 钉版 + `deny.toml` 仍缺的实况更正）（四件显式钉 2.1.13 补齐 NU1903 的 4/4，另加版本下界门禁） | 14 | R8-DEPS-3（NU1903 修复只做 3/4：`bundle_e_sqlite3` 仍解析为被点名的 2.1.11） |
+| R8-DEPS | 8（01/04/05/06/07/08）——**01/02/03/04/05/07 本批已逐条回读**（裁决见 11.1：
+| 其中 02/03 落地、04/05 注记与结案、01 拆半修注释）（02 = Rust toolchain 钉版 + `deny.toml` 仍缺的实况更正）（四件显式钉 2.1.13 补齐 NU1903 的 4/4，另加版本下界门禁） | 14 | R8-DEPS-3（NU1903 修复只做 3/4：`bundle_e_sqlite3` 仍解析为被点名的 2.1.11） |
 | R8-DOC | 12（03–14） | 8 | R8-DOC-09（「唯一裁决者」的四文档同述 + supported-features 无限定语） |
 
 **已在复核中确证并升入第四节的条目**（共 11 条）：R8-CI-03、R8-SH-10、R8-PY-02、
 R8-PY-08、R8-RS-02、R8-RS-13、R8-AD-09、R8-CS-SEC-04、R8-CS-SEC-08、R8-CS-CORE-1、
 R8-CS-CORE-2。计数列取子代理自报口径，可能包含上述已确证者，故为**上界**而非精确值。
+
+### 11.1 DEPS 分区逐条回读裁决（2026-10-08，本批）
+
+四条全部由主代理逐行回读或实测后裁决；机器索引里这四条的 `primary_reviewed` 同批改 yes。
+
+| ID | 裁决 | 依据（本批实测，不是引用子代理） |
+| --- | --- | --- |
+| R8-DEPS-1 | **拆两半，各判不同**：①「WebView2 SDK 落后约 22 个月」成立；②「注释称『升级 SDK 后自动生效』」失实——**本批已改掉这条注释**；SDK 是否 bump 单独定稿 | NuGet flatcontainer 实测最新 stable = `1.0.4258.31`（现用 `1.0.2903.40`）。为判②把两个包的 `lib_manual/netcoreapp3.0/Microsoft.Web.WebView2.Core.dll` 都抓下来搜字符串：**两版对 `EnhancedSecurityModeState`/`Level` 都是 0 次命中**，对照项 `IsInPrivateModeEnabled` 两版各 2 次命中（证明搜法有效、不是取错文件）；`SetOriginFeatures` 也仍是 0。⇒ ESM 至今只在 `-prerelease` moniker 里，注释那句「升级即自动生效」永远不会自动兑现。**顺带纠正一条本会话早先的判断**：我一度把「bump 会让 ESM 反射探测从拿不到变拿得到」当成产品行为风险报给用户，实测否证了它——bump 在 ESM 这条上是零行为变化；新暴露的 stable 面是 `ServiceWorkerManager`/`SharedWorkerManager`，本仓没用 |
+| R8-DEPS-4 | **确证且注记失实**：`Cargo.toml` 原写「uniffi 0.33+ 官方支持 edition 2024」，是对一个不存在版本的断言 ⇒ 已按可执行重启条件改写；「暂缓」结论本身不变 | crates.io API 实测 `max_stable_version = 0.32.2`，版本序列里无 0.33；且 mozilla/uniffi-rs 不发 GitHub Releases ⇒ 原句不可验证也无 ETA。新条件=「出现 uniffi ≥0.33 的 stable 发布」且「本仓加一条 CI 侧 edition-2024 试建冒烟跑绿」，缺一不算重启 |
+| R8-DEPS-5 | **已随 #103 落地**，本批只做结案确证（此前漏标，属于台账自己的账没对上） | `grep runs-on` 全仓 workflow 实测：`windows-2025` 8 处、`windows-latest` **0 处**（残留命中全在注释行里，且都在讲「为什么不用 latest」）；`check_workflow_shells.py` 报「8 个 windows job」与此对账一致 |
+| R8-DEPS-7 | **已随 #103 落地**，结案确证 | `android/gradle/libs.versions.toml:16` 实读 `androidx-webview = "1.17.1"` |
+
+**仍留在队列、本批不动的两条**，都不是可以默认的技术项：R8-DEPS-8（Android 侧
+`dependencyLocking` 只覆盖直接依赖，传递树每次解析取最新——要不要给整棵树加锁是**构建流程裁定**，
+且会牵动 AGP 的 vendor/插件依赖面）；R8-RS-15（核心 13 个 C ABI 导出里没有任何脚本生成入口
+⇒ 三端各自手抄同一份 JS，这是 R7/R8 一串跨端漂移的共同根因——动它等于改注入流水线三端的
+交付形态，属**架构批次**，需要先把范围定下来）。两条都已向用户报待裁决，不擅自实施。
 
 ## 十二、落地状态（同轮续）
 
@@ -441,6 +459,7 @@ ADR-008 注记；三端守卫→两端并点名 C# `WebView2Hardening.cs:70` 缺
 | B7-python：mypy 2.4.0 + ruff 0.16.10（顺带把重锁执行面本身修对——R8-CI-19/20/21） | **本批** | 「两行 pin 的跟进」连吃四次 dispatch 才落地，每一次都暴露执行面自己的洞，而这些洞比 bump 本身值钱得多：**① Windows runner 的 cp1252**：heredoc 里 `print("头注块已保留（…）")` 抛 UnicodeEncodeError（run 37793334416），且抛在文件写好之后，看着像随机失败 ⇒ job 级 `PYTHONIOENCODING: utf-8`（`verify_lock_rids.py` 也有 4 处中文 print，同样只在这条 job 里被执行过）。静态锚：windows runner 上含非 ASCII 的内嵌 python heredoc 必须声明该变量（注入证红）。**② 双锁对齐门禁按设计报红**：PY-220 要求 `legacy/windows-pywebview/requirements-dev.txt` 与根 `requirements-ci.in` 的共同工具同版本 ⇒ bump 必须两把锁一起改，否则 legacy-python-guard 与活跃树门禁跑的是两套规则（本地跑 pytest 当场抓到，没消耗 CI 轮次）。**③ 写回步骤静默空转（R8-CI-20）**：`git add -A windows packages.lock.json … || true` 里仓库根根本没有 `packages.lock.json` ⇒ git fatal 并放弃整条命令，`|| true` 吞掉退出码 ⇒ index 全空 ⇒ `git diff --cached --quiet` 恒真 ⇒ job 打印「✅ 重锁无差异」并 success 收工（run 37796042636）。本仓反复登记的是门禁「读残缺面仍恒绿」，这次同一形态落在**执行面**：照那样任何 B7 升级都会「重锁成功、锁没变」。改为逐 pathspec `git add -A --` + pathspec 不存在即终止 + 整步禁止 `|| true`。**④ 头注提取被混合行尾折断（R8-CI-19）**：`requirements-ci.txt` 的 blob 是 CRLF 且夹 16 处 `\r\r\n`，git 因此判它 `-text`（`i/-text w/-text`），`.gitattributes` 的 `eol=lf` 对它完全不生效——分离实验做过：同一临时仓同一 `.gitattributes` 下，纯 LF 副本得 `i/lf`、把 `\r\r\n` 折回 `\r\n` 的副本也得 `i/lf`，只有现文件得 `-text` ⇒ 罪魁是混合行尾，不是 NUL（全文件 0 个），`git add --renormalize` 也救不回（实测）。Python 通用换行把 `\r\r\n` 读成「一行内容 + 一行空行」⇒「取头部连续注释块」的循环第 2 行就断，日志因此打出「头注块已保留（1 行）」；真按它写回，PY-178/221/258 三段来源注记会静默没了——而这正是本步骤注释自己警告的那个面。改为 `open(newline="")` 按字节行读 + 写完回读逐行核对，并按 LF 重建锁（写回后 `git ls-files --eol` 已是 `i/lf w/lf`：这个文件第一次真正回到仓库声明的行尾口径）。**⑤ 同一个缺陷的第二次发生（R8-CI-21）**：`Path.read_text(newline=)` 是 3.13+ 关键字，PR #82 就为它红过、py312-compat 门禁的注释里就写着这条教训——但门禁的面只收 `*.py`，这次它藏在 workflow 的 heredoc 里，本地 3.14 全绿、CI 3.12 TypeError（run 37800016632）。`run_compat()` 追加 `.github/workflows/*.yml` 同面扫描（70 py + 16 workflow，任一为空 exit 2），并补两条锚：植入 yml 内嵌 python 必须被抓出、输出必须报出 workflow 一栏。**结果面**：整树 51 个 pin 里只有 2 个动（mypy 2.3.1→2.4.0、ruff 0.16.9→0.16.10）——增量口径成立是靠把 pip-compile 的输出面改回「当前锁的副本」拿到的：初版把输出写进全新文件、`cp` 出来的副本无人使用，等于整棵传递树按最新重解（cyclonedx 系就在那片里，`.in` 注释记过 #27/#35/#39 三连坏 PR）。本地门禁全绿：tests/python 465 passed/1 skipped、validate_release.py 98 文件 0 failures、ruff/compat/markdown-links/file-sizes/lock-rids 全过。**未做**：Test.Sdk 17.14.1→18.10.1（跨 major、动的是测试宿主，单独一批走更稳）与 WebView2 SDK 1.0.2903.40→1.0.4258.31（可能让 `WebView2Hardening.cs:34` 的 ESM 反射探测从「拿不到」变「拿得到」＝产品行为变更）都留给用户定稿，不顺手升 |
 | B7-dotnet：Data.Sqlite 10.0.12 + SQLitePCLRaw 四件 2.1.13 + xunit.runner.visualstudio 3.1.5（R8-DEPS-3 收口、R8-CI-22 新登记） | **本批** | pin 与整把锁分开审：csproj 改版本 → Dependency-Retlock（ecosystem=dotnet）在 CI 里重算三把 `packages.lock.json`（run 37810937359，写回 commit `b6ff37f`）→ 人审 diff → PR。**为什么必须在 CI 重锁**：本地 `dotnet restore -r win-x64` 会把 `net10.0-windows7.0/win-x64` 整块删掉（④ 的成因，本会话又被撞一次：不带 `-r` 的 `dotnet test` 同样删块，跑完必须 `git checkout -- '*packages.lock.json'`）。**到货判据三条都实测过**：`verify_lock_rids` exit 0（RID 图与中性图都在、两件原生件仍钉）、`check_package_floors` 由红转绿（bundle 2.1.11 → 2.1.13）、LockedMode 下 Core.Tests 771 全绿 / Broker.Tests 189 全绿 / App 项目 0 警告构建通过。**没有夹带两项**：`xunit.runner.visualstudio` 上游已有 4.0.0（跨 major、动测试宿主）、`Microsoft.NET.Test.Sdk` 18.10.1（跨 major）——都留给单独一批；WebView2 SDK 1.0.2903.40 → 1.0.4258.31 **需用户定稿**：升 stable 可能让 `WebView2Hardening.cs:34` 的 ESM 反射探测从「拿不到」变「拿得到」，那是产品行为变更，不是依赖跟进；本批只在锁里给它钉版本下界。顺带更正一条 B6 口径：彼处记「SQLitePCLRaw core/provider/lib 均已是上游最新稳定线」，现已另有 2.1.13 |
 | B7-C 类：Rust toolchain 钉版（R8-DEPS-2 收口） | **本批** | 新增仓库根 `rust-toolchain.toml`（`channel = "1.99.0"`，components rustfmt/clippy），把 7 个文件里的 9 处 `toolchain: stable` 改成同值字面量（contracts/core-rust/native-policy-artifacts×2/release-android/release-core×2/release-windows/supply-chain），`core-rust.yml` 的 `fuzz-build-smoke` job 加 job 级 `RUSTUP_TOOLCHAIN: nightly`。诚实记两条代价与两条边界：①钉版之后**下一次发布的 DLL 字节可能与上一次不同**（这是「可复现」要付的一次性账，此后同版本重跑才逐字节一致）；②`deny.toml` 仍缺——Cargo.toml 那行把 cargo deny 写成 CI 门禁是假账，已按实况改成「audit ✓ / deny ✗」并把 deny 留作后续独立一项（license  AllowList 是新裁定面，不在本批顺手加）；③升级 toolchain 现在是「改文件 + 改 9 处」两笔，门禁会数给你谁没跟上；④fuzz 的 nightly 例外被钉成**恰好一个**且必须有 env 支撑，往别的 job 加 nightly 会直接判红。本地实测：4 条用例全绿，注入 `toolchain: stable` 与删掉 env 分别打红两条；workflow YAML 仍可解析（`check_workflow_shells`）、ruff/compat/file-sizes 全过。CI 侧判据是 Core-Rust / Contracts / Native-Policy-Artifacts 三个 job 用 1.99.0 真跑一遍 |
+| §十一 队列回读第一批（DEPS 分区四条裁决，见 11.1） | **本批** | 两条注记失实就地改掉（`WebView2Hardening.cs` 的「升级 SDK 后自动生效」、`Cargo.toml` 的「uniffi 0.33+ 官方支持」），两条结案（R8-DEPS-5/7 其实早已随 #103 落地，是台账没对上账）。实测过程里**推翻了我自己在本会话早前的一个判断**：原以为 bump WebView2 会让 ESM 反射探测生效，DLL 字符串对照（含 `IsInPrivateModeEnabled` 正面控制）证明最新 stable 里根本没有那两个成员 ⇒ 风险不在 ESM，而在「唯一发布制品的 API 层跨 22 个月」本身，bump 仍需单独一批。剩下两条（gradle dependencyLocking、核心 JS 生成导出接口）都不是可默认项，已报待裁决 |
 
 
 

@@ -31,8 +31,15 @@ public static class WebView2Hardening
         applied++;
         SecurityLog.Write($"[security] 标签 {tabId}: 功能收紧已应用（宿主对象/原生弹窗关闭，WebMessage per-origin）");
 
-        // ESM：SDK 1.0.2903.40 未暴露 EnhancedSecurityModeState（反射探测——
-        // 升级 SDK 后自动生效；当前显式留痕跳过，绝不伪装生效）
+        // ESM：SDK 1.0.2903.40 未暴露 EnhancedSecurityModeState ⇒ 反射探测不到就留痕
+        // 跳过，绝不伪装生效。**但「升级 SDK 后自动生效」这句是错的**（R8-DEPS-1 复读，
+        // 2026-10-08 实测）：取两个 stable 包的
+        // lib_manual/netcoreapp3.0/Microsoft.Web.WebView2.Core.dll 直接搜字符串，
+        // 1.0.2903.40 与当时最新的 1.0.4258.31 **都是 0 次命中**
+        // （对照项 `IsInPrivateModeEnabled` 两版各 2 次命中，证明搜法本身有效）——
+        // ESM 至今只存在于 `-prerelease` moniker。所以这条不是「等升级就到位」，
+        // 而是要等微软把 ESM 放进 stable SDK；重启判据写在台账第八节 C 类，
+        // 别把本行当成待办清单里的一条自动兑现项。
         try
         {
             var profile = core.Profile;

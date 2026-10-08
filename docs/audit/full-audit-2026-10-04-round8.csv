@@ -18,12 +18,12 @@ R8-CS-SEC-04,P2,问题/性能+一致性,windows/src/Aegis.Windows.App/WebView/Fi
 R8-CS-SEC-08,P2,问题/可观测性,"windows/src/Aegis.Windows.App/WebView/HostWebView.cs:493,506-512,527-533",6条静默return false出口无审计无提示（授权链不一致的唯一信号）,yes,B4
 R8-CS-CORE-1,P2,问题/测试空洞,"windows/tests/** ↔ BrowserPolicyBroker.cs:135,241,286,303,317",5个生产拒绝码零字串锚点，改码不红,yes,B4
 R8-CS-CORE-2,P2,问题/测试空洞,windows/tests/Aegis.Windows.Broker.Tests/ReservedAddressBoundaryTests.cs:37-44,全部断言走ManagedBroker，原生前置分支零行为断言,yes,B4
-R8-DEPS-1,P2,提升/依赖落后,windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj:30,WebView2 SDK落后22个月；且注释称升级即得ESM为假（stable未含该属性）,no,B7
+R8-DEPS-1,P2,提升/依赖落后,windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj:30,WebView2 SDK落后22个月；且注释称升级即得ESM为假（stable未含该属性）,yes,B7
 R8-DEPS-2,P2,问题/工具链pin,core/rust-policy-core/Cargo.toml:32 + 9处toolchain,声明『固定toolchain+cargo deny』未兑现：无rust-toolchain.toml、无deny.toml、stable浮动,yes,B7
 R8-DEPS-3,P2,问题/依赖锁定,windows/src/Aegis.Windows.App/packages.lock.json:51-57,NU1903修复只做3/4：bundle_e_sqlite3仍解析2.1.11,yes,B7
-R8-DEPS-4,P2,问题/被上游阻塞,core/rust-policy-core/Cargo.toml:4-9,uniffi 0.33不存在(最新0.32.2)⇒edition2024暂缓仍成立且无ETA,no,B7
-R8-DEPS-5,P2,问题/可复现性,.github/workflows/release-windows.yml:39,windows-latest现映射windows-2025-vs2026；发布链应pin windows-2025,no,B6
-R8-DEPS-7,P2,提升/能力未用,android/gradle/libs.versions.toml:14,androidx.webkit 1.15→1.17.1（Isolated Worlds/setDownloadFaviconsEnabled）,no,B6
+R8-DEPS-4,P2,问题/被上游阻塞,core/rust-policy-core/Cargo.toml:4-9,uniffi 0.33不存在(最新0.32.2)⇒edition2024暂缓仍成立且无ETA,yes,B7
+R8-DEPS-5,P2,问题/可复现性,.github/workflows/release-windows.yml:39,windows-latest现映射windows-2025-vs2026；发布链应pin windows-2025,yes,B6
+R8-DEPS-7,P2,提升/能力未用,android/gradle/libs.versions.toml:14,androidx.webkit 1.15→1.17.1（Isolated Worlds/setDownloadFaviconsEnabled）,yes,B6
 R8-DEPS-8,P2,问题/依赖锁定,android/settings.gradle.kts:17-28,AD-155禁dependencyLocking的理由只覆盖直接依赖，传递树每次解析取最新,no,待裁决
 R8-CS-SEC-02,P1,问题/fail-open,"windows/src/Aegis.Windows.App/WebView/HostWebView.cs:234,395-409",e.Cancel=!TryAuthorizeNavigation(...) 无异常边界：求值期抛出（桥租约/COM/确认面板事件订阅方）即整句作废，e.Cancel 停在默认 false ⇒ 未授权导航照常放行=门禁失效。逐行回读后由 P2 升 P1；B4 余量第二批已闭（取消先行 + internal 纯函数判定核 + 行为用例）,yes,B4余量
 R8-RS-15,P2,提升/一致性根因,core/rust-policy-core/src/lib.rs:43-56,13个C ABI导出无任何JS生成入口⇒三端手抄同一份JS,no,B9
