@@ -162,10 +162,13 @@ public partial class InPrivateWindow : Window
                     TabRuntime.Navigate(runtime, tab.Url);
                 }
             };
-            runtime.NavigationCompleted += (_, _) => Dispatcher.BeginInvoke(() =>
+            runtime.NavigationCompleted += (ok, _) => Dispatcher.BeginInvoke(() =>
             {
                 // CS-349（2026-10-01 审计）：加载指示收起（主窗同款 LoadingBar）
                 LoadingBar.Visibility = Visibility.Collapsed;
+                // R8-CS-SEC-05：拒绝/错误横幅此前永不收起——本文件只有置 Visible 的
+                // 写点（主窗有 Collapsed 路径），用户被拒一次后横幅就常驻。同款条件收束。
+                DismissRejectionOnceNavigated(ok);
                 SyncAddressBar(tab);
             });
             // CS-349：导航开始显示不定态加载条（主窗有加载指示——无痕窗此前零反馈）
@@ -365,19 +368,6 @@ public partial class InPrivateWindow : Window
 
     private void ApprovalDeny_Click(object sender, RoutedEventArgs e) => _approval.Deny();
 
-    private void SetNavigationControlsEnabled(bool isEnabled)
-    {
-        AddressBar.IsEnabled = isEnabled;
-        BackButton.IsEnabled = isEnabled;
-        ForwardButton.IsEnabled = isEnabled;
-        RefreshButton.IsEnabled = isEnabled;
-    }
-
-    private void ShowRejection(string message)
-    {
-        ErrorPage.Text = message;
-        ErrorPagePanel.Visibility = Visibility.Visible;
-    }
 
     private void Window_PreviewKeyDown(object sender, KeyEventArgs e)
     {
