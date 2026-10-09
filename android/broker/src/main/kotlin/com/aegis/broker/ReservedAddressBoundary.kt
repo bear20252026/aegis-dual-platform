@@ -70,12 +70,19 @@ object ReservedAddressBoundary {
         val host = rawHost.trim().lowercase().trimEnd('.')
         return when {
             host.isEmpty() -> true // 切不出 host ⇒ 不可判定 ⇒ 不放行
+
             host.contains('%') || host.contains('[') || host.contains(']') -> true // zone-id/括号残留
+
             host.contains(':') -> deniesIpv6(host)
+
             host.all { it.isDigit() } -> true // 纯十进制整数形态（inet_aton 与 OS 分歧）
+
             host.startsWith(HEX_PREFIX) -> true // 0x 十六进制形态
+
             isDecimalIpv4(host) -> deniesIpv4(octetsOf(host))
+
             hasNumericAuthority(host) -> true // 点分但形态不规范（段数≠4、前导零八进制、空段）
+
             else -> false // 其余是主机名 ⇒ 零 DNS，权威交 DNS
         }
     }
@@ -91,10 +98,14 @@ object ReservedAddressBoundary {
         val firstGroup = firstGroupOf(host)
         return when {
             host.startsWith(IPV4_MAPPED_PREFIX) -> !mappedIsIpv4 || deniesIpv4(octetsOf(embedded))
+
             host == UNSPECIFIED_IPV6 -> true // :: 未指定
+
             firstGroup == null -> true // 首组不是合法十六进制 ⇒ 不可判定
-            else -> (firstGroup and LINK_LOCAL_MASK) == LINK_LOCAL_BITS ||
-                (firstGroup and MULTICAST_MASK) == MULTICAST_BITS
+
+            else ->
+                (firstGroup and LINK_LOCAL_MASK) == LINK_LOCAL_BITS ||
+                    (firstGroup and MULTICAST_MASK) == MULTICAST_BITS
         }
     }
 
@@ -108,8 +119,10 @@ object ReservedAddressBoundary {
         }
     }
 
-    private fun isDecimalIpv4(host: String): Boolean =
-        host.split('.').size == IPV4_OCTETS && host.split('.').all { isDecimalOctet(it) }
+    private fun isDecimalIpv4(host: String): Boolean {
+        val parts = host.split('.')
+        return parts.size == IPV4_OCTETS && parts.all { isDecimalOctet(it) }
+    }
 
     private fun octetsOf(host: String): IntArray = host.split('.').map { it.toInt() }.toIntArray()
 
@@ -121,21 +134,30 @@ object ReservedAddressBoundary {
      * 点分但形态不规范（段数≠4、前导零八进制、空段、`0x` 混写）：OS/Java 与
      * Chromium 的 inet_aton 解释不同（CS-348/AD-213 记过）⇒ 宁可拒下载。
      */
-    private fun hasNumericAuthority(host: String): Boolean =
-        host.contains('.') && host.split('.').all(::looksLikeOctetFragment)
+    private fun hasNumericAuthority(host: String): Boolean {
+        val parts = host.split('.')
+        return host.contains('.') && parts.all(::looksLikeOctetFragment)
+    }
 
-    private fun looksLikeOctetFragment(text: String): Boolean =
-        text.isEmpty() || text.all { it.isDigit() } || text.startsWith(HEX_PREFIX)
+    private fun looksLikeOctetFragment(text: String): Boolean {
+        return text.isEmpty() || text.all { it.isDigit() } || text.startsWith(HEX_PREFIX)
+    }
 
     private fun deniesIpv4(octets: IntArray): Boolean {
         val b0 = octets[0]
         return when {
             b0 == UNSPECIFIED_FIRST -> true // 0/8 未指定
+
             b0 == LINK_LOCAL_FIRST && octets[1] == LINK_LOCAL_SECOND -> true // 链路本地含云元数据
+
             b0 == TEST_NET_1_FIRST && octets[1] == TEST_NET_1_SECOND && octets[2] == TEST_NET_1_THIRD -> true
+
             b0 == TEST_NET_2_FIRST && octets[1] == TEST_NET_2_SECOND && octets[2] == TEST_NET_2_THIRD -> true
+
             b0 == TEST_NET_3_FIRST && octets[1] == TEST_NET_3_SECOND && octets[2] == TEST_NET_3_THIRD -> true
+
             b0 == BENCHMARK_FIRST && octets[1] in BENCHMARK_SECOND -> true // 基准测试段
+
             else -> b0 >= MULTICAST_FROM // 组播/保留/广播
         }
     }
