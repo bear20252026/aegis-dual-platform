@@ -54,7 +54,8 @@ object ReservedAddressBoundary {
     private const val TEST_NET_3_SECOND = 0
     private const val TEST_NET_3_THIRD = 113
     private const val BENCHMARK_FIRST = 198
-    private val BENCHMARK_SECOND = 18..19
+    private const val BENCHMARK_SECOND_FIRST = 18
+    private const val BENCHMARK_SECOND_LAST = 19
     private const val MULTICAST_FROM = 224
     private const val HEX_PREFIX = "0x"
     private const val IPV4_MAPPED_PREFIX = "::ffff:"
@@ -67,6 +68,31 @@ object ReservedAddressBoundary {
     private const val MULTICAST_BITS = 0xFF00
     private const val HEX_DIGITS = "0123456789abcdef"
 
+    /** 段表第三段的「任意」通配位（`/24` 的段写实际值，`/16`·`/15` 写它）。 */
+    private const val ANY_THIRD_OCTET = -1
+
+    /**
+     * 保留段表（口径与 C#/Rust 孪生同侧）：`169.254/16` 链路本地（云元数据
+     * `169.254.169.254` 在其内）、TEST-NET-1/2/3 文档段、`198.18.0.0/15` 基准测试段
+     * （拆成 18 与 19 两行——`/15` 用位掩码写得下，但那是为省一行而牺牲可核对性）。
+     * `0/8` 与 `b0 >= 224`（组播 `224/4`、`240/4` 保留、广播）只看首段，不进入表。
+     *
+     * 为什么是「一张表 + 一次 `any`」而不是 `when` 的六条分支：detekt 的
+     * `CyclomaticComplexMethod` 阈值 15 被六条分支打到 16、`TooManyFunctions` 在
+     * object 上是 11——第八轮 CI 同时撞过这两条，形状是阈值管出来的，不是风格选的。
+     * 表里全部是命名十进制常量，与注释口径逐字对得上；改错一位由逐段用例（含
+     * 左右邻 `169.253.255.254`/`223.255.255.254`/`198.17.255.255`）判红。
+     */
+    private val RESERVED_IPV4_SEGMENTS =
+        listOf(
+            intArrayOf(LINK_LOCAL_FIRST, LINK_LOCAL_SECOND, ANY_THIRD_OCTET),
+            intArrayOf(TEST_NET_1_FIRST, TEST_NET_1_SECOND, TEST_NET_1_THIRD),
+            intArrayOf(TEST_NET_2_FIRST, TEST_NET_2_SECOND, TEST_NET_2_THIRD),
+            intArrayOf(TEST_NET_3_FIRST, TEST_NET_3_SECOND, TEST_NET_3_THIRD),
+            intArrayOf(BENCHMARK_FIRST, BENCHMARK_SECOND_FIRST, ANY_THIRD_OCTET),
+            intArrayOf(BENCHMARK_FIRST, BENCHMARK_SECOND_LAST, ANY_THIRD_OCTET),
+        )
+
     /** URL 形态的入口（下载直链、`setDownloadListener` 给的就是它）。 */
     fun denies(url: String): Boolean = deniesHost(LocalTargetHosts.hostOf(url))
 
@@ -76,6 +102,10 @@ object ReservedAddressBoundary {
      * ③含冒号交 [deniesIpv6]；④纯十进制整数、⑤`0x` 前缀——与 OS 解释分歧；
      * ⑥规范点分十进制交 [deniesIpv4]；⑦点分但形态不规范（段数≠4、前导零八进制、
      * 空段）同属分歧面；⑧其余是主机名 ⇒ 零 DNS，权威交 DNS。
+     *
+     * ⑥ 与 ⑦ 必须是两条分支而不是合成 `(⑥…) || ⑦`：后者会让 `8.8.8.8`、`10.0.0.5`
+     * 这类「四段纯数字、但不在保留段」的合法地址被 ⑦ 的分歧面判据顺手拒掉
+     * ——放行组用例（本机/内网/公网）正钉着这条，写下的时候想过合并。
      */
     fun deniesHost(rawHost: String): Boolean {
         val host = rawHost.trim().lowercase().trimEnd('.')
@@ -94,25 +124,21 @@ object ReservedAddressBoundary {
     /**
      * IPv6 侧只拦三类：未指定 `::`、链路本地 `fe80::/10`、组播 `ff00::/8`。
      * `::ffff:x.y.z.w` 按内嵌 IPv4 递归判，内嵌段不合点分十进制同样拒（不可判定）；
-     * 首组切不出来也拒。其余——回环 `::1`、ULA `fc00::/7`、全局单播——一律放行：
-     * B8 裁决与 Windows 同口径。
+     * 首组（第一个 16 位段 `head16`）切不出来也拒。其余——回环 `::1`、ULA `fc00::/7`、
+     * 全局单播——一律放行：
+     * B8 裁决与 Windows 同口径。两条掩码判定写成一行：`when` 条目体另起一行即被判
+     * 为多行体，届时全块每条都得加花括号（含 `else -> { null }`），第八轮实测过。
      */
     private fun deniesIpv6(host: String): Boolean {
-        val mapped = host.startsWith(IPV4_MAPPED_PREFIX)
         val embedded = host.removePrefix(IPV4_MAPPED_PREFIX)
-        val firstGroup = firstGroupOf(host)
+        val head16 = firstGroupOf(host)
         return when {
-            mapped -> !isDecimalIpv4(embedded) || deniesIpv4(octetsOf(embedded))
+            host.startsWith(IPV4_MAPPED_PREFIX) -> !isDecimalIpv4(embedded) || deniesIpv4(octetsOf(embedded))
             host == UNSPECIFIED_IPV6 -> true
-            firstGroup == null -> true
-            else -> isReservedIpv6Head(firstGroup)
+            head16 == null -> true
+            else -> (head16 and LINK_LOCAL_MASK) == LINK_LOCAL_BITS || (head16 and MULTICAST_MASK) == MULTICAST_BITS
         }
     }
-
-    /** `fe80::/10` 与 `ff00::/8` 都只落在首组的高位段上，不必解析整串。 */
-    private fun isReservedIpv6Head(firstGroup: Int): Boolean =
-        (firstGroup and LINK_LOCAL_MASK) == LINK_LOCAL_BITS ||
-            (firstGroup and MULTICAST_MASK) == MULTICAST_BITS
 
     /** 首组数值（`::1` 这类省略前导零的写法按 0 算）；形态不合返回 null。 */
     private fun firstGroupOf(host: String): Int? {
@@ -124,20 +150,21 @@ object ReservedAddressBoundary {
         }
     }
 
+    private fun octetsOf(host: String): IntArray = host.split('.').map { it.toInt() }.toIntArray()
+
+    /** 规范点分十进制：恰好 4 段且每段都是合法十进制段（⑥ 的前置判据）。 */
     private fun isDecimalIpv4(host: String): Boolean {
         val parts = host.split('.')
         return parts.size == IPV4_OCTETS && parts.all { isDecimalOctet(it) }
     }
 
-    private fun octetsOf(host: String): IntArray = host.split('.').map { it.toInt() }.toIntArray()
-
-    /** 前导零（`0177`）是八进制形态，不当十进制接受——交 [hasNumericAuthority] 的分歧面拒。 */
+    /** 单个点分段的合法十进制形态：1-3 位纯数字、无前导零（`0` 本身除外）。 */
     private fun isDecimalOctet(text: String): Boolean =
         text.isNotEmpty() && text.length <= OCTET_MAX_DIGITS && text.all { it.isDigit() } &&
-            (text == "0" || !text.startsWith("0"))
+            (text == "0" || !text.startsWith("0")) // 前导零＝八进制形态，交 ⑦ 拒
 
     /**
-     * 点分但形态不规范（段数≠4、前导零八进制、空段、`0x` 混写）：OS/Java 与
+     * ⑦ 点分但形态不规范（段数≠4、前导零八进制、空段、`0x` 混写）：OS/Java 与
      * Chromium 的 inet_aton 解释不同（CS-348/AD-213 记过）⇒ 宁可拒下载。
      */
     private fun hasNumericAuthority(host: String): Boolean {
@@ -151,20 +178,13 @@ object ReservedAddressBoundary {
     }
 
     /**
-     * 保留段表（条目顺序即口径）：`0/8` 未指定；`169.254/16` 链路本地（云元数据
-     * `169.254.169.254` 在其内）；TEST-NET-1/2/3 文档段；`198.18.0.0/15` 基准测试段；
-     * 末条 `b0 >= 224` 覆盖组播 `224/4`、`240/4` 保留与广播。
+     * 首段两条（`0/8`、`>= 224`）就地判，其余按 [RESERVED_IPV4_SEGMENTS] 逐段查表。
+     * `any` 的 lambda 里是「前三段逐个对齐」，第三段为 [ANY_THIRD_OCTET] 时通配。
      */
-    private fun deniesIpv4(octets: IntArray): Boolean {
-        val b0 = octets[0]
-        return when {
-            b0 == UNSPECIFIED_FIRST -> true
-            b0 == LINK_LOCAL_FIRST && octets[1] == LINK_LOCAL_SECOND -> true
-            b0 == TEST_NET_1_FIRST && octets[1] == TEST_NET_1_SECOND && octets[2] == TEST_NET_1_THIRD -> true
-            b0 == TEST_NET_2_FIRST && octets[1] == TEST_NET_2_SECOND && octets[2] == TEST_NET_2_THIRD -> true
-            b0 == TEST_NET_3_FIRST && octets[1] == TEST_NET_3_SECOND && octets[2] == TEST_NET_3_THIRD -> true
-            b0 == BENCHMARK_FIRST && octets[1] in BENCHMARK_SECOND -> true
-            else -> b0 >= MULTICAST_FROM
-        }
-    }
+    private fun deniesIpv4(octets: IntArray): Boolean =
+        octets[0] == UNSPECIFIED_FIRST || octets[0] >= MULTICAST_FROM ||
+            RESERVED_IPV4_SEGMENTS.any { segment ->
+                segment[0] == octets[0] && segment[1] == octets[1] &&
+                    (segment[2] == ANY_THIRD_OCTET || segment[2] == octets[2])
+            }
 }
