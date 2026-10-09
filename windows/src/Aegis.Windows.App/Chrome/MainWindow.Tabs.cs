@@ -36,76 +36,9 @@ public partial class MainWindow
         Core.Security.SecurityLog.Write(
             $"[tab] 创建标签 {tab.TabId} url={Core.Security.UrlRedactor.Redact(initialUrl)}");
         var runtime = _runtimeCoordinator.Create(_broker, tab).Runtime;
-        runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
-        {
-            if (!e.IsSuccess)
-            {
-                Core.Security.SecurityLog.Write(
-                    $"[init] 标签 {tab.TabId} 初始化失败: {e.InitializationException?.Message ?? "e.IsSuccess=false（未知原因）"}");
-                return;
-            }
-            var core = runtime.Control.CoreWebView2;
-            Ntp.NtpAssets.BindVirtualHosts(core);
-            runtime.OnCoreReady(core);
-            // 虚拟主机地址（NTP/画板）：映射就绪后才导航，且**推迟到下一
-            // Dispatcher 周期**——同一调用栈里 SetVirtualHostNameToFolderMapping
-            // 后立即导航会因映射尚未传播到渲染进程而 ConnectionAborted
-            //（实机复现：点主页能渲染、初始化时同步导航即 abort）。推迟后
-            // 与「点主页成功」路径一致。
-            if (Chrome.Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
-            {
-                // 经协调器延迟导航：执行前重新校验 runtime 引用/令牌/窗口状态，
-                // 避免在已释放控件上设 Source 抛异常（「新建标签删不掉」防护）。
-                _runtimeCoordinator.PostDelayedNavigation(tab.TabId, tab.Url, () => IsLoaded);
-            }
-            else
-            {
-                // 普通站点：初始化（含虚拟主机映射）就绪后立即导航。
-                // 修复：此前用 else if (!_restoring) 导致会话恢复时普通标签
-                // 初始化后不导航（停留在空标签）——恢复与否都应导航。
-                TabRuntime.Navigate(runtime, tab.Url);
-            }
-            // M3 新标签页宿主桥：通道绑定到受信 NTP **顶层文档**——远程页面
-            // per-origin 关闭 WebMessage，且本桥要求顶层来源就是 ntp.aegis.local
-            //（内嵌 iframe 伪装 ntp 来源的请求在顶层门禁处拒绝——ADR-003 无桥
-            // 保证的纵深防御）；导航意图回归 NavigationStarting→broker 唯一路径
-            var ntp = CreateNtpBridge(runtime);
-            core.WebMessageReceived += (_, ev) =>
-            {
-                // 顶层文档（core.Source）必须是 NTP 虚拟主机；发送来源（ev.Source）
-                // 由 NtpBridge 二次校验。二者任一不符即静默忽略——帧内嵌不可达。
-                if (!Ntp.NtpAssets.IsTopLevelNtpDocument(core))
-                    return;
-                try
-                {
-                    ntp.TryHandle(
-                        ev.Source, ev.WebMessageAsJson,
-                        result =>
-                        {
-                            // restoreSession 会同步拆除当前标签（含发送标签）——
-                            // core 可能已被释放；响应注入必须容错，绝不抛未处理异常
-                            try
-                            {
-                                core.PostWebMessageAsJson(
-                                    System.Text.Json.JsonSerializer.Serialize(result));
-                            }
-                            catch (Exception)
-                            {
-                                // 发送标签已随会话重建销毁——响应无处可达，静默丢弃
-                            }
-                        },
-                        // CS-031：导入 I/O 移出 UI 线程，完成后回投 UI 线程注入响应
-                        action => Dispatcher.BeginInvoke(action));
-                }
-                catch (Exception ex)
-                {
-                    // 桥内服务（书签/历史 SQLite、导入）异常不得沿 WebMessageReceived
-                    // 冒泡成全局未处理异常弹窗——记录后吞掉
-                    Core.Security.SecurityLog.Write(
-                        $"[ntp] 桥处理异常: {ex.GetType().Name}: {ex.Message}");
-                }
-            };
-        };
+        // R8-CS-SEC-07（第八轮 2026-10-08）：接线段整段外迁到 MainWindow.Tabs.CoreReady.cs
+        // 并包上失败闭合——此前这条回调的抛出没有观察方，现场只留一个未接线的标签。
+        runtime.Control.CoreWebView2InitializationCompleted += (_, e) => OnCoreReady(e, runtime, tab);
         runtime.NavigationCompleted += (ok, status) => OnTabNavigationCompleted(tab.TabId, ok, status);
         // M4 下载管理面板：授权通过的 DownloadOperation 注入共享数据源
         // CS-260：与初始化/导入路径统一为 BeginInvoke——WebView2 事件线程
