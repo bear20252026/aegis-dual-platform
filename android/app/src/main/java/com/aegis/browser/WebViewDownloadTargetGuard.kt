@@ -29,21 +29,26 @@ import com.aegis.webviewadapter.LogRedact
 internal object WebViewDownloadTargetGuard {
     /**
      * 纯判定（零 Android 类型 ⇒ JVM 可测）：命中拦截 ⇒ 返回「脱敏留痕文本 to 文案资源
-     * id」，放行 ⇒ null。scheme 由调用方给出（`android.net.Uri` 只出现在 UI 侧，
-     * 不进这条判据——本仓不欢迎第二个 URL 解析器）。
+     * id」，放行 ⇒ null。两条判据的顺序即优先级：scheme 不支持时不得说成「保留地址」。
+     * 写成两段而不是一个 `when`——ktlint 把条目体另起行判为多行体并要求全块加花括号
+     * （`:app` 红灯实测）；`scheme` 由调用方给出，`android.net.Uri` 只出现在 UI 侧，
+     * 不进这条判据——本仓不欢迎第二个 URL 解析器。
      */
     fun rejectionOf(
         url: String,
         scheme: String?,
-    ): Pair<String, Int>? =
-        when {
-            scheme != "http" && scheme != "https" ->
-                "拦截非 http(s) 下载: $scheme" to R.string.download_blocked_type
-            ReservedAddressBoundary.denies(url) ->
-                "拦截指向保留地址的下载: ${LogRedact.redact(url)} code=${ReservedAddressBoundary.DENY_CODE}" to
-                    R.string.download_blocked_reserved
-            else -> null
-        }
+    ): Pair<String, Int>? = unsupportedScheme(scheme) ?: reservedAddress(url)
+
+    private fun unsupportedScheme(scheme: String?): Pair<String, Int>? {
+        if (scheme == "http" || scheme == "https") return null
+        return "拦截非 http(s) 下载: $scheme" to R.string.download_blocked_type
+    }
+
+    private fun reservedAddress(url: String): Pair<String, Int>? {
+        if (!ReservedAddressBoundary.denies(url)) return null
+        val reason = "拦截指向保留地址的下载: ${LogRedact.redact(url)} code=${ReservedAddressBoundary.DENY_CODE}"
+        return reason to R.string.download_blocked_reserved
+    }
 
     /** 接线：命中即脱敏留痕 + Toast 明示用户，绝不静默放行（true = 已拦，不得入队）。 */
     fun interceptIfRejected(
