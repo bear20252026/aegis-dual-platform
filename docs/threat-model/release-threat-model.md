@@ -13,7 +13,7 @@
 | 工件缺失/哈希不符/未列明 | verify_artifact_set（逐工件闭合——双向集合相等——fail-closed）。PY-167（2026-09-23 审计·V1 核验批）如实更正：**部署侧手动步骤**——依赖发布后由部署清单核对产出的 manifest，CI verify-gate 阶段（发布前）无输入，见 release.yml publish 前注记 |
 | provenance 缺失/伪造 | verify_provenance（gh attestation verify 逐工件——固定 signer 身份） |
 | 版本回滚 | 防回滚（SemVer 单调——P0-04）+ 防回滚计数器（BAUER） |
-| 验证跳过/截断（|| true/head -200） | 发布门禁（无截断扫描/无忽略失败/无人工覆盖——阶段 E + P0-06） |
+| 验证跳过/截断（\|\| true/head -200） | 发布门禁（无截断扫描/无忽略失败/无人工覆盖——阶段 E + P0-06） |
 
 ## 完成标准（蓝图阶段 E）
 

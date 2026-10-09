@@ -270,7 +270,7 @@
 | I89 | pin 完整性 | pin-check 覆盖 .github/actions/**（composite）+ 拦截 @latest/@dev 浮动引用 | --include + 正则 |
 | I90 | 失败可见 | release-windows gh release create 不再吞 stderr；回落 upload 也失败即中止 | pwsh 修正 |
 | I91 | 锁定构建 | release-core clippy/test 加 --locked（防 Cargo.lock 漂移构建） | 补参数 |
-| I92 | 复制容错 | release-core `cp …|| true` 三连吞错改直赋值（缺产物即失败） | 移除 || true |
+| I92 | 复制容错 | release-core `cp …\|\| true` 三连吞错改直赋值（缺产物即失败） | 移除 \|\| true |
 | I93 | 测试接入 | 红队 e2e（redteam_e2e_test.py）接入 agent-redteam（README/runbook 声称的口径兑现） | 新 step |
 | I94 | lint 覆盖 | CI ruff 扩展至 scripts/release/contracts/agent（pyproject 声称范围内此前从未跑） | 新 step |
 | I95 | 工具锁版 | pip-audit 锁定 2.7.0（审计工具自身受供应链约束） | 版本 pin |
