@@ -29,6 +29,11 @@ package com.aegis.broker
  *   （CS-348/AD-213 记过），两侧口径不同就是绕过面；真实主机名不会长这样，误伤面为零。
  *
  * host 的切分复用 [LocalTargetHosts.hostOf]——本仓不欢迎第二个 URL 解析器。
+ *
+ * 格式注记（不是审美问题）：下面三个 `when` 的条目都不带尾注。ktlint 把条目尾注算进
+ * **下一条** condition 的前导注释，整块因此被判为「含多行 when-condition」并要求条目间
+ * 加空行——第八轮两次红灯：先在条目后写注记被打红，改成条目间空行**仍**打红（注释照旧
+ * 附着）。口径一律写在 KDoc 里，代码只承载判定。
  */
 object ReservedAddressBoundary {
     /** 拒绝码单源（与 Windows `ReservedAddressBoundary.DenyCode` 同字面量）。 */
@@ -58,56 +63,56 @@ object ReservedAddressBoundary {
     private const val IPV6_GROUP_MAX_DIGITS = 4
     private const val LINK_LOCAL_MASK = 0xFFC0 // fe80::/10 的前 10 位
     private const val LINK_LOCAL_BITS = 0xFE80
-    private const val MULTICAST_MASK = 0xFF00 // ff00::/12 段前缀（IPv6 组播是 ff00::/8）
+    private const val MULTICAST_MASK = 0xFF00 // ff00::/8 的前 8 位
     private const val MULTICAST_BITS = 0xFF00
     private const val HEX_DIGITS = "0123456789abcdef"
 
     /** URL 形态的入口（下载直链、`setDownloadListener` 给的就是它）。 */
     fun denies(url: String): Boolean = deniesHost(LocalTargetHosts.hostOf(url))
 
-    /** host 是否属"永不作为浏览/下载目标"的保留地址形态。 */
+    /**
+     * host 是否属"永不作为浏览/下载目标"的保留地址形态。条目顺序即口径：
+     * ①切不出 host ⇒ 不可判定 ⇒ 不放行；②zone-id / 方括号残留不是设备地址；
+     * ③含冒号交 [deniesIpv6]；④纯十进制整数、⑤`0x` 前缀——与 OS 解释分歧；
+     * ⑥规范点分十进制交 [deniesIpv4]；⑦点分但形态不规范（段数≠4、前导零八进制、
+     * 空段）同属分歧面；⑧其余是主机名 ⇒ 零 DNS，权威交 DNS。
+     */
     fun deniesHost(rawHost: String): Boolean {
         val host = rawHost.trim().lowercase().trimEnd('.')
         return when {
-            host.isEmpty() -> true // 切不出 host ⇒ 不可判定 ⇒ 不放行
-
-            host.contains('%') || host.contains('[') || host.contains(']') -> true // zone-id/括号残留
-
+            host.isEmpty() -> true
+            host.contains('%') || host.contains('[') || host.contains(']') -> true
             host.contains(':') -> deniesIpv6(host)
-
-            host.all { it.isDigit() } -> true // 纯十进制整数形态（inet_aton 与 OS 分歧）
-
-            host.startsWith(HEX_PREFIX) -> true // 0x 十六进制形态
-
+            host.all { it.isDigit() } -> true
+            host.startsWith(HEX_PREFIX) -> true
             isDecimalIpv4(host) -> deniesIpv4(octetsOf(host))
-
-            hasNumericAuthority(host) -> true // 点分但形态不规范（段数≠4、前导零八进制、空段）
-
-            else -> false // 其余是主机名 ⇒ 零 DNS，权威交 DNS
+            hasNumericAuthority(host) -> true
+            else -> false
         }
     }
 
     /**
-     * IPv6 侧只拦三类：未指定 `::`、链路本地 `fe80::/10`、组播 `ff00::/8`；
-     * ULA(`fc00::/7`) 与回环 `::1` 按裁决放行；`::ffff:x.y.z.w` 按内嵌 IPv4 递归判。
-     * 其余（全局单播、`::1`、ULA）一律放行——B8 裁决与 Windows 同口径。
+     * IPv6 侧只拦三类：未指定 `::`、链路本地 `fe80::/10`、组播 `ff00::/8`。
+     * `::ffff:x.y.z.w` 按内嵌 IPv4 递归判，内嵌段不合点分十进制同样拒（不可判定）；
+     * 首组切不出来也拒。其余——回环 `::1`、ULA `fc00::/7`、全局单播——一律放行：
+     * B8 裁决与 Windows 同口径。
      */
     private fun deniesIpv6(host: String): Boolean {
+        val mapped = host.startsWith(IPV4_MAPPED_PREFIX)
         val embedded = host.removePrefix(IPV4_MAPPED_PREFIX)
-        val mappedIsIpv4 = isDecimalIpv4(embedded)
         val firstGroup = firstGroupOf(host)
         return when {
-            host.startsWith(IPV4_MAPPED_PREFIX) -> !mappedIsIpv4 || deniesIpv4(octetsOf(embedded))
-
-            host == UNSPECIFIED_IPV6 -> true // :: 未指定
-
-            firstGroup == null -> true // 首组不是合法十六进制 ⇒ 不可判定
-
-            else ->
-                (firstGroup and LINK_LOCAL_MASK) == LINK_LOCAL_BITS ||
-                    (firstGroup and MULTICAST_MASK) == MULTICAST_BITS
+            mapped -> !isDecimalIpv4(embedded) || deniesIpv4(octetsOf(embedded))
+            host == UNSPECIFIED_IPV6 -> true
+            firstGroup == null -> true
+            else -> isReservedIpv6Head(firstGroup)
         }
     }
+
+    /** `fe80::/10` 与 `ff00::/8` 都只落在首组的高位段上，不必解析整串。 */
+    private fun isReservedIpv6Head(firstGroup: Int): Boolean =
+        (firstGroup and LINK_LOCAL_MASK) == LINK_LOCAL_BITS ||
+            (firstGroup and MULTICAST_MASK) == MULTICAST_BITS
 
     /** 首组数值（`::1` 这类省略前导零的写法按 0 算）；形态不合返回 null。 */
     private fun firstGroupOf(host: String): Int? {
@@ -126,9 +131,10 @@ object ReservedAddressBoundary {
 
     private fun octetsOf(host: String): IntArray = host.split('.').map { it.toInt() }.toIntArray()
 
+    /** 前导零（`0177`）是八进制形态，不当十进制接受——交 [hasNumericAuthority] 的分歧面拒。 */
     private fun isDecimalOctet(text: String): Boolean =
         text.isNotEmpty() && text.length <= OCTET_MAX_DIGITS && text.all { it.isDigit() } &&
-            (text == "0" || !text.startsWith("0")) // 前导零＝八进制形态，不当十进制接受
+            (text == "0" || !text.startsWith("0"))
 
     /**
      * 点分但形态不规范（段数≠4、前导零八进制、空段、`0x` 混写）：OS/Java 与
@@ -140,25 +146,25 @@ object ReservedAddressBoundary {
     }
 
     private fun looksLikeOctetFragment(text: String): Boolean {
-        return text.isEmpty() || text.all { it.isDigit() } || text.startsWith(HEX_PREFIX)
+        if (text.isEmpty()) return true
+        return text.all { it.isDigit() } || text.startsWith(HEX_PREFIX)
     }
 
+    /**
+     * 保留段表（条目顺序即口径）：`0/8` 未指定；`169.254/16` 链路本地（云元数据
+     * `169.254.169.254` 在其内）；TEST-NET-1/2/3 文档段；`198.18.0.0/15` 基准测试段；
+     * 末条 `b0 >= 224` 覆盖组播 `224/4`、`240/4` 保留与广播。
+     */
     private fun deniesIpv4(octets: IntArray): Boolean {
         val b0 = octets[0]
         return when {
-            b0 == UNSPECIFIED_FIRST -> true // 0/8 未指定
-
-            b0 == LINK_LOCAL_FIRST && octets[1] == LINK_LOCAL_SECOND -> true // 链路本地含云元数据
-
+            b0 == UNSPECIFIED_FIRST -> true
+            b0 == LINK_LOCAL_FIRST && octets[1] == LINK_LOCAL_SECOND -> true
             b0 == TEST_NET_1_FIRST && octets[1] == TEST_NET_1_SECOND && octets[2] == TEST_NET_1_THIRD -> true
-
             b0 == TEST_NET_2_FIRST && octets[1] == TEST_NET_2_SECOND && octets[2] == TEST_NET_2_THIRD -> true
-
             b0 == TEST_NET_3_FIRST && octets[1] == TEST_NET_3_SECOND && octets[2] == TEST_NET_3_THIRD -> true
-
-            b0 == BENCHMARK_FIRST && octets[1] in BENCHMARK_SECOND -> true // 基准测试段
-
-            else -> b0 >= MULTICAST_FROM // 组播/保留/广播
+            b0 == BENCHMARK_FIRST && octets[1] in BENCHMARK_SECOND -> true
+            else -> b0 >= MULTICAST_FROM
         }
     }
 }
