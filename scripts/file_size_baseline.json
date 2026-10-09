@@ -11,7 +11,7 @@
     "android/app/src/main/java/com/aegis/browser/BrowserViewModel.kt": 434,
     "android/app/src/main/java/com/aegis/browser/MainActivity.kt": 403,
     "android/app/src/main/java/com/aegis/browser/MainDialogs.kt": 315,
-    "android/app/src/main/java/com/aegis/browser/WebViewDownloadHandler.kt": 418,
+    "android/app/src/main/java/com/aegis/browser/WebViewDownloadHandler.kt": 414,
     "android/app/src/test/kotlin/com/aegis/browser/BrowserViewModelBehaviorTest.kt": 352,
     "android/app/src/test/kotlin/com/aegis/browser/SearchEnginesTest.kt": 303,
     "android/app/src/test/kotlin/com/aegis/browser/TabManagerTest.kt": 439,

@@ -12,7 +12,8 @@ import com.aegis.webviewadapter.LogRedact
 /**
  * WebView 下载统一处理（单文件单职责：从 SecureWebViewFactory 拆出——H-6）。
  *
- * - 仅放行 http/https（DownloadManager 不支持 blob/data 等 scheme）；
+ * - 仅放行 http/https，且目标不得是**保留地址**（链路本地含云元数据、0/8、组播、
+ *   广播、TEST-NET、基准段）——形态闸门单源见 [WebViewDownloadTargetGuard]；
  * - 危险扩展（exe/bat/apk 等——DownloadPolicy 白名单反查）直接拦截
  *   并以 Toast 明示用户，绝不静默放行；
  * - 其余交系统 DownloadManager（带会话 Cookie）。
@@ -109,13 +110,8 @@ internal object WebViewDownloadHandler {
                 .parse(url)
                 .scheme
                 ?.lowercase()
-        if (scheme != "http" && scheme != "https") {
-            android.util.Log.w("AegisDownload", "拦截非 http(s) 下载: $scheme")
-            android.widget.Toast
-                .makeText(context, context.getString(R.string.download_blocked_type), android.widget.Toast.LENGTH_SHORT)
-                .show()
-            return
-        }
+        // 目标形态闸门（scheme / 保留地址，R8-AD-03）：命中即脱敏留痕 + Toast 明示，此处停止入队。
+        if (WebViewDownloadTargetGuard.interceptIfRejected(context, url, scheme)) return
         // P2-5 修复：文件名先解析（净化后）再判定危险扩展——`/download?file=x.exe` 类直链的文件名在 Content-Disposition，判定需净化后文件名。
         val fileName = resolveDownloadFileName(url, mimeType, contentDisposition)
         // detekt-修复（2026-10-02 审计云端实证）：ReturnCount(3>2)——AD-331 两级拦截分型收敛为 when（顺序/副作用不变）。
