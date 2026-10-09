@@ -47,7 +47,7 @@ jobs:
           java-version: "21"
 
       - name: 提交依赖图（generate-and-submit——失败即红，fail-closed）
-        uses: gradle/actions/dependency-submission@da187c8e6ffbd3802e00f2477aa5a822b25f2dda # v4.4.4
+        uses: gradle/actions/dependency-submission@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
         with:
           build-root-directory: android
           dependency-graph: generate-and-submit
