@@ -258,15 +258,39 @@ Q16（R9-SH-6）报的是**表本身**不完备，而不是副本漂移——原
 属第九轮 §四 已列的用户决定，本批不顺手改。
 
 
+### 3.7 R9-B8（2026-10-10，定稿项 13(b)）：可直跑的交付链补 concurrency，禁止取消在跑的运行
+
+`release-core/android/windows` 三条链都是 `workflow_call` + `workflow_dispatch` 双入口
+⇒ 编排器一次、手动 dispatch 一次就是**两个并发 run 在同一个版本号上**做 build → sbom →
+attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编排器」双触发，dispatch
+这条侧门一直没关。
+
+1. 三个 workflow 补顶层 `concurrency`（`group: <workflow 名>-${{ github.ref }}`，
+   `cancel-in-progress: false`）——发布中途取消留下的是半截制品 + 已签 attestation，
+   比排队糟；判据是「必须排队」不是「允许抢占」。
+2. **边界写进注记**：GitHub 的 concurrency 组是 per-workflow 的，跨 workflow 不互斥 ⇒
+   这条只保证「同一条交付链不自我重叠」，父级排队仍由 `release.yml` 的组负责。
+   不这么写，下一轮很容易把它当成整条发布链的串行锁。
+3. 新常驻测试 `tests/python/release_concurrency_test.py`（3 条）：实树在判定面 ≥3 份
+   `workflow_call` 交付链且 0 违规；正反锚（缺 concurrency 判得出、
+   `cancel-in-progress: true` 判得出、字符串简写形态不误判、只可被调用与不可被调用的
+   都不在判定面）；外加四条 group 名逐字钉。
+4. 踩到并当场改掉一处自伤：模板用 `str.format()` 渲染含 `${{ github.ref }}` 的注释块，
+   `{{`/`}}` 被 format 当转义吃掉 ⇒ 写出来的表达式变成 `${ github.ref }`（Actions 会当
+   普通字符串，group 名就此失去 ref 维度）。由 py-yaml **复读实际值**发现，不是靠肉眼看 diff。
+5. **同批未做**：13(a)（把八处 dotnet 命令抽 composite）与 13(c)（出货 builder 钉
+   `ubuntu-24.04`）——前者要动四条 workflow 的命令面且与 R9-CI-9 的接线锚耦合，后者
+   属用户待定稿面。
+
+
 ## 四、待用户定稿（本轮新增两项，其余沿用第八轮 §七）
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
   保存默认——关闭改变调试与默认 UX，属产品行为变更。
-- **R9-SH-5 / R9-SH-6 的一半**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在
-  `agent/broker.py` 裁决路径零消费（要么 broker 消费、要么 catalog 删列并在文档写明
-  「治理元数据非判定面」）；`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会
-  改变同站多子域共享种子的产品语义（该表**补条目 + 收录口径 + 只增不减门禁**已落地，见 §3.6；
-  只剩这一半未决）。
+- **R9-SH-5**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在 `agent/broker.py` 零消费。
+- **R9-SH-6 的一半**：`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会改变
+  同站多子域共享种子的产品语义。该表的**补条目 + 收录口径 + 只增不减门禁**已落地（§3.6），
+  只剩这一半未决。
 - **本节写作后已推进（2026-10-10 划账）**：`Microsoft.NET.Test.Sdk` 18.10.1 已并 #136；
   `xunit.runner.visualstudio` 4.0.1 走 #138（锁 diff 实测只有那一个包的三字段，零传递漂移）；
   `NewTab` 洪水上限已定稿并落地（§3.4）；Dependabot #125/#126/#127/#133 已全部并完（§3.0）。
