@@ -64,6 +64,46 @@ class TranslateEntryPrivacyTest {
         )
     }
 
+    // ---------------- R9-AD-2（第九轮 2026-10-10）：凭据的**词干**形态 ----------------
+    // AD-313 只有精确名单 {code,state,token}——真实世界最常见的写法都不等于它：
+    // access_token / refresh_token / id_token / api_key / sessionid。它们此前原样
+    // 编码外发翻译服务（`?a=` 参数值里），是凭据泄漏面。
+
+    @Test
+    fun credentialStemsAreStrippedNotJustExactNames() {
+        val credentials =
+            listOf("access_token", "refresh_token", "id_token", "csrf_token", "api_key")
+        val alsoSensitive =
+            listOf("apikey", "sessionid", "jsessionid", "x-secret", "Signature", "password")
+        for (name in credentials + alsoSensitive) {
+            val url = TranslateEntry.buildUrl("https://a.gov.cn/cb?$name=LEAKME")!!
+            assertFalse("$name 必须按凭据形态剥离", url.contains("LEAKME"))
+        }
+    }
+
+    @Test
+    fun benignLookalikeParamsAreKept() {
+        // 词干表刻意不含 key/id/code：`keywords` 被误剥会让翻译页取错内容——
+        // 良性参数保留与凭据剥离同样重要，这条钉住不过界。
+        val benign = listOf("keywords", "keyboard", "category", "lang", "id", "codes")
+        for (name in benign) {
+            val url = TranslateEntry.buildUrl("https://a.gov.cn/page?$name=keepme")!!
+            assertTrue("$name 不是凭据，必须保留", url.contains("keepme"))
+        }
+    }
+
+    @Test
+    fun sensitivePredicateNormalisesCaseAndSeparators() {
+        // 纯函数直测（不依赖 android.net.Uri）：大小写与 -/_ 分隔都不敏感。
+        assertTrue(TranslateEntry.isSensitiveParam("Access-Token"))
+        assertTrue(TranslateEntry.isSensitiveParam("API_KEY"))
+        assertTrue(TranslateEntry.isSensitiveParam("STATE"))
+        assertTrue(TranslateEntry.isSensitiveParam("sig"))
+        assertFalse(TranslateEntry.isSensitiveParam("keywords"))
+        assertFalse(TranslateEntry.isSensitiveParam("keyboard"))
+        assertFalse(TranslateEntry.isSensitiveParam("page"))
+    }
+
     @Test
     fun fragmentlessUrlsAreUnchangedByStripping() {
         val url = TranslateEntry.buildUrl("https://a.gov.cn/plain")!!

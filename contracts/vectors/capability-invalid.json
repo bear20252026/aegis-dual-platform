@@ -16,7 +16,7 @@
       }
     },
     {
-      "note": "actions 空数组（空能力声明 = 无能力，且 schema minItems 未设——本向量按用户语义拒绝：无动作声明应整条删除而非空挂）",
+      "note": "actions 空数组——schema `minItems: 1`（PY-097 口径：空能力声明在 default-deny 下无意义）直接拒绝。第九轮 R9-SH-10 改真：此条最初记下（PY-095，2026-09-25）时 minItems 尚未设、靠用户语义拒绝，注记一直停在当时的口径上；现在拒绝理由就是 minItems。",
       "expected": "deny_schema",
       "capability": {
         "scope": "net.example.org",
