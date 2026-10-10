@@ -31,6 +31,8 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-CI-10 | P2 | 保留并落地 | PR #137 的 CI 实证：`windows-contract-build` 里 `dotnet test` 782/782 通过、发现数下界也达成，`scripts/assert_test_counts.py` 却在打印 ✅ 那一行抛 `UnicodeEncodeError: charmap codec can't encode` ⇒ 脚本 exit 1 ⇒ **门禁把成功报成失败**。同形态 2026-10-08 已死过一次（Dependency-Retlock 首跑 run 37793334416，heredoc 里的中文 print），当时只在**那一个 job** 修（job 级 `PYTHONIOENCODING`）⇒ 判定面从未扩展：py-yaml 扫 16 个 workflow，7 个「windows runner + 调 python」job 里 4 个既无 `PYTHONUTF8`/`PYTHONIOENCODING`、脚本侧也没有 reconfigure。方向不是掩盖问题：假红与假绿同等致命，而它正是「把 emoji 删掉就绿了」这种削弱断言的诱因 |
 | R9-CS-6 | P3 | 保留并登记（本批未修） | 登记时与本表 §五 Q24 的 `R9-CS-4` **撞号**——被常驻门禁 `gate_hollowness_test.py::test_ledger_csv_ids_are_unique` 在 CI 打红（本会话第二次撞同类：取号必须按 CSV 解析求 max，不能靠 grep 抽文本再排序）。内容：落地项 5 时自读新证：`Core/UrlSafety.cs:20-30` 的 `CanOpenHttpUrl` 把「协议不合」（`file:`/`javascript:`）与「保留地址」并成一个 false，`NewTabGate` 只能给一种拒绝码与一条文案 ⇒ 用户点 `javascript:` 链接时被告诉「链路本地/云元数据/保留地址」。这不是本批引入的（主窗原文案同形，只是此前没有拒绝码），修它要把协议判定从 `CanOpenHttpUrl` 里拆出来——该文件在零余量基线上（301/301），拆面另批处理，**不得**顺手在 `NewTabGate` 里复刻一份协议白名单（那就是第二个判据源） |
 | R9-CS-5 | P3 | 保留并登记（方向保守，未修） | `App.xaml.cs:11-32` 的 `PopupRateLimiter` 槽位数组以 **0** 起步，而判定是 `now - _ticks[i] >= windowMs` ⇒ 开机后第一个 30 秒内 `now` 本身 < 30000，三槽全判「未过期」⇒ **这段时间里所有崩溃弹窗被静默拒**（只记日志）。它管的是异常提示，方向保守所以从未被当成缺陷暴露；风险是**形状被抄走**：同形状用在「拒绝用户可达的功能」上就是打开即失效。新建的 `Core/NewTabGate.cs` 刻意用「从未占用」哨兵避开这个坑，并有冷启动用例 `ColdStart_AllowsFullQuotaInsideOneWindow` 钉住；旧那台零测试引用，另批收口 |
+| R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
+| R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
 | R9-AD-4 | P2 | 保留并按**第四节处方**落地（不收紧段集） | 逐行回读 Q4 的三处位置：`OriginPolicy.kt:104-110` 的 `!host.contains("[")` 是 AD-299 刻意与 Rust `origin/tests/host_grammar.rs:183-184`（`try_parse_external("https://[::1]:8080/x") == None`）及 contracts 的 url-origin-invalid 向量对齐的**导航入口**判定；而 `LocalTargetHosts.hostOf:83-88` 反过来**剥掉**方括号（P74 那笔账的产物）⇒ `::1`/ULA 在升级豁免层与下载层确是放行形态。两侧都对，缺的只是把关系写下来：对象 KDoc 补该分层事实，新跨层锚用例把「导航拒 / 剥出 `::1` / 下载不拒」三侧各钉一次。用户可见后果如实记：地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 能。打通它需解冻核心 host grammar 并增补向量 ⇒ 留在第四节待定稿，**本批零判定改动** |
 
 
@@ -282,6 +284,39 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
    `ubuntu-24.04`）——前者要动四条 workflow 的命令面且与 R9-CI-9 的接线锚耦合，后者
    属用户待定稿面。
 
+### 3.8 R9-B9（2026-10-10，定稿项 9 步 1）：三端注入 JS 逐 token 同形对账入门禁
+
+1. 新门禁 `contracts/codegen/verify_injected_js_parity.py`（判据层，241 行）+
+   `contracts/codegen/injected_js_text.py`（解释层，135 行）。拆两层不只是因为新文件
+   ≤300 红线：解释层要讲的「宿主引号与 JS 串不是一回事」和判据要讲的「豁免表必须仍然
+   失真」是两件事，混写的第一版 363 行且读起来像一份工具手册。
+2. **口径逐 token 而非逐字节**：注释、缩进、标点旁空白不参与；字符串内容与标识符参与。
+   逐字节今天做不到——Rust 的 `format!` 把 `{` 写成 `{{`，C# 的原语串缩进 12 空格，
+   Kotlin 缩进 6 空格；真要逐字节得有一端出**生成物**，那是定稿项 9 步 2（待定稿）。
+3. 两条刻意的「不判」都写了理由：声明关键字 `var/let/const` 归一（三端确有分歧且无行为差，
+   判它的净效果是诱导下次把门禁调松）；种子访问器 `aegisCanvasSeed()` / `noiseSeed()`
+   归一（各端自己的宿主接线，不属于共享逻辑）。
+4. `DIVERGENT_REGISTERED` 是**带真实性核对的**挂起表：`violations()` 要求表里每一条确实
+   仍然不同形，修齐却不收编就判红。`--self-test` 第四条注入用例专门证这条判得出——
+   豁免悄悄长大是所有白名单式门禁的通用失效形态（本仓 B3 keep 规则与覆盖门禁同族）。
+5. 本批实际消掉的漂移：Kotlin 的 `aegisNudge` 参数名 `noiseBit`→`up`、上限常量
+   `MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`（三端值本就都是 `4096 * 4096`，只是名字
+   不同）；其余 5 个共有函数从此进入可判状态（现树 ✅ 通过），剩下 2 个登记为 R9-RS-9。
+6. 解释层踩到的两个坑都写进注释防回归：整份宿主文件按 JS 串语义扫会把 Kotlin 三引号当
+   串起点（`aegisHostFromOrigin` 因此被读丢，配对只在函数体内部走）；以及注释里写下
+   `Path.read_text(newline=)` 会被 py312-compat 判红——第十节第 17 条「静态文本锚被自己的
+   注释打红」在本轮的第二次实证。
+7. 接线与自证：挂进 `contracts.yml` 的 `contract-source-of-truth`（常跑且已是必需项，
+   不新增必需 context ⇒ 不会把 merge box 卡在 waiting）；`--self-test` 四条（改分支 /
+   改顶层框定 / 核心函数改名 / 豁免表失真）全部检出且逐字节还原工作树；pytest 侧 13 条锚
+   （含「这条门禁必须真被 workflow 接上」）。
+8. 本地验证：`cargo test --locked --all-features` 568 + 3 + 3 + 5 + 10 + 4 全绿（Rust 侧
+   读 Kotlin/C# 文本的同形用例未受影响）、`pytest tests/python` 538 passed / 1 skipped、
+   `ruff` / `py312-compat` / `check_file_sizes`（486 源文件）绿。**Android ktlint/detekt
+   本地不可跑**（独立 CLI jar 不在本地、Gradle 无 AGP 产物），已核对改动行均 ≤118 字符且
+   命名沿用仓内既有形态，格式判据交 CI。
+
+
 
 ## 四、待用户定稿（本轮新增两项，其余沿用第八轮 §七）
 
@@ -294,7 +329,7 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
 - **本节写作后已推进（2026-10-10 划账）**：`Microsoft.NET.Test.Sdk` 18.10.1 已并 #136；
   `xunit.runner.visualstudio` 4.0.1 走 #138（锁 diff 实测只有那一个包的三字段，零传递漂移）；
   `NewTab` 洪水上限已定稿并落地（§3.4）；Dependabot #125/#126/#127/#133 已全部并完（§3.0）。
-  这四项从待裁决面划掉。
+  这四项从待裁决面划掉；13(b) 发布子链 concurrency 已落地（§3.7）；定稿项 9 步 1（三端注入 JS 同形门禁）已落地（§3.8），步 2「三端改用它」仍待定稿。
 - **真未决**：WebView2 SDK bump（产品行为变更）、子资源 `shouldInterceptRequest`、
   Android `dependencyLocking`、核心 JS 生成导出（R8-RS-15）、
   `action-catalog.yaml` 三列（`confirmation/risk/audit`）到底由 broker 消费还是删列并写明

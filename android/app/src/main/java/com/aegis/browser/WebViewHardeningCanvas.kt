@@ -18,14 +18,14 @@ internal object WebViewHardeningCanvas {
     // AD-270（2026-10-01 审计）：尺寸上限——16K×16K 画布的离屏副本 +
     // getImageData 峰值约 1GB（OOM 面）。超阈值直接走原实现降级（该形态
     // 画布本身已极难作为指纹载体，资源安全优先）。
-    var MAX_NOISE_PIXELS = 4096 * 4096;
+    var AEGIS_MAX_NOISE_PIXELS = 4096 * 4096;
     // AD-311（2026-10-02 审计）：Uint8ClampedArray 在 0/255 边界吸收 ±1 噪声
     //（0-1 → 0、255+1 → 255，边界像素噪声不可见=指纹可分离）。边界像素噪声
     // 取离岸方向（0→+1、255→-1），中间值按噪声位 ±1。
-    function aegisNudge(current, noiseBit) {
+    function aegisNudge(current, up) {
       if (current === 0) return 1;
       if (current === 255) return 254;
-      return noiseBit ? current + 1 : current - 1;
+      return up ? current + 1 : current - 1;
     }
     // R8-RS-01/R8-CS-SEC-04（第八轮审计 2026-10-04）取代 AD-253 口径：三端统一为
     // murmur3 fmix32 终混 + R/G/B 取 bit0/bit8/bit16 三个互不相交位段。
@@ -77,7 +77,7 @@ internal object WebViewHardeningCanvas {
       owner.getImageData = function(sx, sy, sw, sh) {
         try {
           var canvas = this.canvas;
-          if (!canvas || sw <= 0 || sh <= 0 || sw * sh > MAX_NOISE_PIXELS) {
+          if (!canvas || sw <= 0 || sh <= 0 || sw * sh > AEGIS_MAX_NOISE_PIXELS) {
             return orig.apply(this, arguments);
           }
           var imageData = orig.apply(this, arguments);
@@ -109,7 +109,7 @@ internal object WebViewHardeningCanvas {
           var byteRgba = !!pixels && format === this.RGBA &&
             pixels.length === width * height * 4;
           if (byteRgba && stride && width > 0 && height > 0 &&
-              width * height <= MAX_NOISE_PIXELS) {
+              width * height <= AEGIS_MAX_NOISE_PIXELS) {
             orig.apply(this, arguments);
             aegisNoiseRectangle(pixels, noiseSeed(), x, y, width, height, stride);
             return;
@@ -128,7 +128,7 @@ internal object WebViewHardeningCanvas {
     var origToDataURL = HTMLCanvasElement.prototype.toDataURL;
     HTMLCanvasElement.prototype.toDataURL = function(type) {
       try {
-        if (this.width * this.height > MAX_NOISE_PIXELS) {
+        if (this.width * this.height > AEGIS_MAX_NOISE_PIXELS) {
           return origToDataURL.apply(this, arguments);
         }
         const off = document.createElement('canvas');
@@ -151,7 +151,7 @@ internal object WebViewHardeningCanvas {
     var origToBlob = HTMLCanvasElement.prototype.toBlob;
     HTMLCanvasElement.prototype.toBlob = function(callback, type, quality) {
       try {
-        if (this.width * this.height > MAX_NOISE_PIXELS) {
+        if (this.width * this.height > AEGIS_MAX_NOISE_PIXELS) {
           return origToBlob.call(this, callback, type, quality);
         }
         const off = document.createElement('canvas');
@@ -174,7 +174,7 @@ internal object WebViewHardeningCanvas {
       const origConvert = OffscreenCanvas.prototype.convertToBlob;
       OffscreenCanvas.prototype.convertToBlob = function(options) {
         try {
-          if (this.width * this.height > MAX_NOISE_PIXELS) {
+          if (this.width * this.height > AEGIS_MAX_NOISE_PIXELS) {
             return origConvert.call(this, options);
           }
           const off = new OffscreenCanvas(this.width, this.height);
