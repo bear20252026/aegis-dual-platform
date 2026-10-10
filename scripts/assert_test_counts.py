@@ -104,7 +104,18 @@ def check(results_dir: Path, minimum: int, label: str) -> int:
     return 0
 
 
+def _force_utf8_output() -> None:
+    """GitHub Actions 的 Windows 控制台代码页不是 UTF-8（第九轮 PR #137 实测：`dotnet test`
+    782/782 全绿、下界达成，脚本却在打印 ✅ 时抛 UnicodeEncodeError ⇒ 退出码 1 ⇒ 门禁在
+    **通过**路径上把 job 打红）。与 verify_xaml_resources.py 同口径在入口重配两个流；
+    `errors="replace"` 而不是 strict：判定结果绝不能由控制台编码决定。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_output()
     parser = argparse.ArgumentParser(description="TRX 汇总的测试数下界门禁（R9-CI-9）")
     parser.add_argument("--results-dir", required=True, help="含 *.trx 的目录（相对仓库根或绝对路径）")
     parser.add_argument("--minimum", type=int, required=True, help="发现测试数下界（含）")

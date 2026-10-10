@@ -40,6 +40,11 @@ jobs:
     # artifacts.yml 的 build-windows job 同一注释）。
     runs-on: windows-2025
     timeout-minutes: 60
+    # R9-CI-10（第九轮 2026-10-10，PR #137 实证）：本 job 有 7 处 python 调用，Windows
+    # runner 的控制台代码页非 UTF-8 ⇒ 非 ASCII 输出抛 UnicodeEncodeError 会把「通过」
+    # 报成失败，且可能在制品已写好之后。job 级统一 UTF-8。
+    env:
+      PYTHONUTF8: "1"
     permissions:
       id-token: write
       attestations: write

@@ -12,7 +12,9 @@
 # 并证「不误红」（健康 TRX 必须过）。静态锚防的是第四种失效：门禁写好了但没接线。
 from __future__ import annotations
 
+import io
 import re
+import sys
 from pathlib import Path
 
 import assert_test_counts as atc
@@ -164,6 +166,35 @@ def test_main_resolves_relative_results_dir_against_repo_root(tmp_path, monkeypa
     rc = atc.main(["--results-dir", "TestResults/core", "--minimum", "700", "--label", "Core"])
     assert rc == 0
     assert "[Core]" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- 控制台编码不得决定判定
+# 第九轮 PR #137 的 CI 实证：`dotnet test` 782/782 全绿、下界达成，但 Actions 的
+# Windows 控制台代码页不是 UTF-8 ⇒ print("✅ …") 抛 UnicodeEncodeError ⇒ 脚本退出 1 ⇒
+# **通过路径**把 job 打红。门禁的输出编码必须是实现的一部分，否则它永远只会在
+# 「测试其实通过了」那一条分支上失败。
+def _cp1252_streams(monkeypatch):
+    out, err = io.TextIOWrapper(io.BytesIO(), encoding="cp1252"), io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    return out, err
+
+
+def test_success_message_survives_a_cp1252_console(tmp_path, monkeypatch):
+    out, _err = _cp1252_streams(monkeypatch)
+    _write_trx(tmp_path, _healthy(782))
+    rc = atc.main(["--results-dir", str(tmp_path), "--minimum", "700", "--label", "Core"])
+    out.flush()
+    assert rc == 0, "非 ASCII 输出在 cp1252 控制台上抛异常 ⇒ 门禁在通过路径判红"
+    assert b"782" in out.buffer.getvalue()
+
+
+def test_environment_error_message_survives_a_cp1252_console(tmp_path, monkeypatch):
+    _out, err = _cp1252_streams(monkeypatch)
+    rc = atc.main(["--results-dir", str(tmp_path / "absent"), "--minimum", "700", "--label", "Core"])
+    err.flush()
+    assert rc == 2
+    assert b"Core" in err.buffer.getvalue(), "exit 2 的说明必须打得出来，否则排查者只看到 traceback"
 
 
 # ---------------------------------------------------------------- 接线锚

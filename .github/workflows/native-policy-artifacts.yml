@@ -44,6 +44,11 @@ jobs:
     # 在每个 PR 上实测（不存在的标签会停在 waiting，合不进去即回退本行）。
     runs-on: windows-2025
     timeout-minutes: 40
+    # R9-CI-10（第九轮 2026-10-10，PR #137 实证）：Windows runner 控制台代码页非 UTF-8
+    # ⇒ 本 job 的三个 python 调用（含 assert_test_counts.py 的 ✅/❌ 输出）会把「判定成功」
+    # 变成「UnicodeEncodeError ⇒ exit 1」。声明 job 级 UTF-8，与 compat/legacy 同口径。
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-196（2026-10-01 审计）：native_artifact_manifest.py 依赖镜像预装

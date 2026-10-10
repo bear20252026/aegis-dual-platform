@@ -95,6 +95,11 @@ jobs:
     name: Windows 正典 C# 栈兼容门禁（build + 双测试套件——正典栈基线）
     runs-on: windows-2025
     timeout-minutes: 40
+    # R9-CI-10（第九轮 2026-10-10，PR #137 实证）：Windows runner 的控制台代码页不是
+    # UTF-8，门禁脚本打印中文/✅❌ 时抛 UnicodeEncodeError ⇒ 「判定结果由编码决定」。
+    # 与本文件 webview2-regression、legacy-python-guard.yml 同口径声明 job 级 UTF-8。
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
