@@ -10,9 +10,10 @@ ratchet（scripts/file_size_baseline.json）：
 - 基线外文件一律按 ≤300 行红线（新文件无 500 行豁免）——存量 301..500
   行文件已登记在基线内，其增长同样被 ratchet 拦截。
 
-扫描面：git ls-files 收口的受管源文件（*.py *.cs *.kt *.kts *.rs *.js
-*.mjs），排除生成物目录（契约生成代码随生成器产出、行数不受人控——其
-漂移由 contracts.yml 的 stale-binding 门禁兜底，不入本红线面）。
+扫描面：git ls-files 收口受管源文件（*.py *.cs *.kt *.kts *.rs *.js
+*.mjs），排除生成物目录（契约生成代码随生成器产出、行数不受人控——契约镜像由
+contracts.yml 的「Regenerate + git diff --exit-code」兜，UniFFI 绑定由
+scripts/verify_uniffi_binding_surface.py 兜，都不入本红线面）。
 行数口径与 wc -l 一致（按换行符计数，CRLF/LF 均可），与基线快照同口径。
 
 用法：
@@ -41,6 +42,11 @@ SOURCE_EXTENSIONS = ("*.py", "*.cs", "*.kt", "*.kts", "*.rs", "*.js", "*.mjs")
 GENERATED_PREFIXES = (
     "windows/src/Aegis.Windows.App/Contracts/Generated/",
     "android/contracts/src/main/kotlin/com/aegis/contracts/generated/",
+    # R9-RS-2：UniFFI 绑定的行数由 uniffi 版本 + 导出面决定，不受人控——把
+    # `#[uniffi::export]` 加一个方法就涨 95 行，按 ratchet 反而会拦住「把入库件
+    # 重 derive 成当前真相」这个正确动作。它不在红线面不等于无人看管：
+    # 漂移由 scripts/verify_uniffi_binding_surface.py 判红（名字集合双向对账）。
+    "core/rust-policy-core/bindings/",
 )
 
 # 基线外文件红线（新文件同口径）

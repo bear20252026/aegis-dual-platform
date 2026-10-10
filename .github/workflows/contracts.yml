@@ -149,6 +149,12 @@ jobs:
           git diff --exit-code -- \
             windows/src/Aegis.Windows.App/Contracts/Generated \
             android/contracts/src/main/kotlin/com/aegis/contracts/generated
+      # R9-RS-2（第九轮 2026-10-10）：上面那步只管两个**契约**镜像；UniFFI 那份入库
+      # Python 绑定（core/rust-policy-core/bindings/）此前无人核验——`update_host_denylist`
+      # 进 `#[uniffi::export]` 六天，入库件里没有它，零门禁红。本步在 PR 面做导出面
+      # 双向对账（少导出/多残留都判红）；权威生成结果的同款比对在 core-rust.yml。
+      - name: UniFFI binding export surface gate (R9-RS-2——导出面与入库绑定对账)
+        run: python scripts/verify_uniffi_binding_surface.py
 
   rust-conformance:
     runs-on: ubuntu-latest
