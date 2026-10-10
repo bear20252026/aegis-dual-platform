@@ -95,11 +95,21 @@ jobs:
     name: Windows 正典 C# 栈兼容门禁（build + 双测试套件——正典栈基线）
     runs-on: windows-2025
     timeout-minutes: 40
+    # R9-CI-10（第九轮 2026-10-10，PR #137 实证）：Windows runner 的控制台代码页不是
+    # UTF-8，门禁脚本打印中文/✅❌ 时抛 UnicodeEncodeError ⇒ 「判定结果由编码决定」。
+    # 与本文件 webview2-regression、legacy-python-guard.yml 同口径声明 job 级 UTF-8。
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.x'
+      # R9-CI-9：本 job 的测试步骤要调 scripts/assert_test_counts.py —— 不依赖镜像自带
+      # 解释器，与 webview2-regression/contracts.yml 显式钉 3.12 同口径。
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0 (SP-244 单版本统一)
         with:
           path: ~/.nuget/packages
@@ -108,7 +118,18 @@ jobs:
           restore-keys: nuget-${{ runner.os }}-
       - name: 正典栈构建门禁（与 contracts.yml windows-contract-build 同口径）
         run: dotnet build windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
-      - name: 正典栈测试门禁（Core 领域层）
-        run: dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
-      - name: 正典栈测试门禁（Broker 授权生命周期）
-        run: dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+      # R9-CI-9（第九轮 2026-10-10）：退出码只说明「跑到的都没失败」——零发现同样退 0。
+      # 测试宿主（xunit.runner.visualstudio）跨 major 升级正是静默归零的高发形态，
+      # 所以每条 dotnet test 必须落 TRX 并断言发现数下界（下界余量取自本轮实测 Core 782 / Broker 189）。
+      - name: 正典栈测试门禁（Core 领域层，发现数下界 R9-CI-9）
+        run: |
+          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/core --logger "trx;LogFileName=core-tests.trx"
+          if ($LASTEXITCODE -ne 0) { throw "dotnet test（Core）失败：exit $LASTEXITCODE" }
+          python scripts/assert_test_counts.py --results-dir TestResults/core --minimum 700 --label Core
+          if ($LASTEXITCODE -ne 0) { throw "测试发现数下界门禁（Core）失败：exit $LASTEXITCODE" }
+      - name: 正典栈测试门禁（Broker 授权生命周期，发现数下界 R9-CI-9）
+        run: |
+          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/broker --logger "trx;LogFileName=broker-tests.trx"
+          if ($LASTEXITCODE -ne 0) { throw "dotnet test（Broker）失败：exit $LASTEXITCODE" }
+          python scripts/assert_test_counts.py --results-dir TestResults/broker --minimum 160 --label Broker
+          if ($LASTEXITCODE -ne 0) { throw "测试发现数下界门禁（Broker）失败：exit $LASTEXITCODE" }

@@ -23,4 +23,8 @@
 # 工具里出现 shell=True 或路径拼接调用将不被任何门禁看到。改为逐位点行级 # nosec
 # 注记（现存无 B603/B607 位点，故无需新增注记）。
 # B404(import subprocess) 保留豁免：活跃树多处受控调用构建工具链，纯 import 级噪音。
+# R9-CI-9（第九轮 2026-10-10）：PY-270 那句「活跃树零 ElementTree 使用」自此**不再成立**——
+# scripts/assert_test_counts.py 解析 dotnet test 自己写出的 .trx，是该面第一处 ET.parse，
+# 实测 B314（Medium/High-confidence）在 -ll 下即门禁失败。处置同上口径：**行级** # nosec B314
+# 注记（附信任边界），不把 B314 加回 skips——全局豁免会连带放过未来任何外来 XML 输入。
 skips: ["B101", "B404"]

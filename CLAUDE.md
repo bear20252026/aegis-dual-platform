@@ -53,6 +53,9 @@ python scripts/check_workflow_shells.py           # workflow 步骤 shell 与退
 python scripts/check_doc_claims.py                # 文档计数声明与实树对账（「N workflow」类陈述）
 python scripts/check_markdown_links.py            # Markdown 相对链接死链 fail-closed
 python scripts/check_markdown_tables.py           # Markdown 表格逐行列数与表头一致（R8-DOC-19）
+# R9-CI-9：dotnet test 的退出码不含「发现了几个测试」——CI 八处调用都追加本断言。
+# 本地复现须先给 dotnet test 补 --results-directory 与 --logger "trx;LogFileName=…"。
+python scripts/assert_test_counts.py --results-dir TestResults/core --minimum 700 --label Core
 # SP-163（2026-09-26 审计）：node 21+ glob 展开（引号防 shell 抢先展开，
 # Windows 本地与 CI 一致）——新增测试文件入目录即入门禁
 node --test "tests/ui-regression/*.test.mjs"      # UI 回归
