@@ -70,6 +70,20 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 的取值、不作现行陈述」的日期更正，顺带把 R9-AD-8 的注记失实闭合）。logback 3×low 维持
 「不在解析树」原判。
 
+### 3.2 R9-B3（2026-10-10，定稿项 4 的第一子批）：`Microsoft.NET.Test.Sdk` 17.14.1 → 18.10.1
+
+两个测试工程同步抬版，锁由 `Dependency-Retlock`（dispatch-only，run 38019892345）在 CI 里重算后写回，
+人审 diff 结论：**图变化全部可解释**——Test.Sdk 自身的 transitive 集合
+（`Microsoft.CodeCoverage` / `Microsoft.TestPlatform.TestHost` / `…ObjectModel`）整体随
+17.14.1→18.10.1，而 **`Newtonsoft.Json 13.0.3` 从测试锁里消失**（新 TestPlatform 不再依赖它）。
+测试面自查 `grep Newtonsoft windows/tests --include=*.cs` **零命中** ⇒ 没有「靠传递依赖直接用
+Newtonsoft」的隐式绑定，去掉是安全的。`verify_lock_rids`（3 把锁、RID 图与中性图都在、
+原生件仍钉）与 `check_package_floors`（5 条下界）本地复跑绿；出货 App 项目的锁**未变动**
+（diff 只落在两个测试锁上）。
+
+追加核对：NuGet flatcontainer 实测 `xunit.runner.visualstudio` 最新已是 **4.0.1**（不是台账里记
+的 4.0.0）——下一子批按 4.0.1 走，不照抄旧记录。
+
 ### 3.1 R9-B2（同轮续）：R9-AD-1 的三端修法
 
 1. **Android 合成单条 blob**：`fingerprintShieldScript = StagesSeed + StagesShield +
