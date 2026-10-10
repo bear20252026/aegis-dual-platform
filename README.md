@@ -32,15 +32,18 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
   核心**：`is_high_risk_host` 不再把回环、RFC1918 与 `localhost` 名判为高危（云元数据 /
   链路本地 / TEST-NET / 基准段 / 组播广播仍是），两端打开本机与内网目标因此都不再需要
   确认——托管层 `ReservedAddressBoundary` 与核心的段集自此一致。
-  **仍待裁决**：Android 侧 http 一律升 https 且 `cleartextTrafficPermitted=false`，
-  内网 IP 字面量（`http://192.168.1.1`）实际仍不可达（第八轮台账 §七 2）；
-  子资源策略链异常时的失败闭合方向（§七 5）
+  **上面两项已定稿并落地（第九轮 R9-DOC-01 更正——此前挂着「仍待裁决」是失实陈述）**：
+  Android 本机/内网目标经 `LocalTargetHosts` + `network_security_config.xml` 的**有界**
+  `cleartextTrafficPermitted="true"`（显式列内网段与 `192.168.1.1`，base-config 仍是 false）
+  放行；子资源策略链异常走 `HostWebView.WebResourceGuards.cs` 的 `SubresourceDenialFailClosed`
+  （异常方向＝闭合拒绝）。仍待裁决的只剩 IPv6 字面量的导航面（`http://[::1]:9000/` 在
+  Android 打不开、Windows 能——见第九轮台账 §四）
   （详见 [第六轮台账](docs/audit/full-audit-2026-10-03-round6.md) 第二节、
   [第八轮台账](docs/audit/full-audit-2026-10-04-round8.md) §三与§五）
 - **指纹防护**：Canvas/WebGL/AudioBuffer/字体/计时器/屏幕多维欺骗，噪声按
   **per-site 种子**隔离（跨站不可关联）；文档创建前注入脚本的对账是**两端**而非三端——
   `bridge_guard.template.js` 单源覆盖 Rust（`include_str!`）与 Android（手抄 + 逐行比对），
-  Windows C# 的注入面（`WebView2Hardening.cs:70`）**不在该单源对账范围内**（第八轮实测）
+  Windows C# 的注入面（`WebView2Hardening.cs:77`）**不在该单源对账范围内**（第八轮实测）
 - **HTTPS-only 升级** + **DNT** + **追踪参数剥离**
 - **威胁黑名单**（导航门禁）——**仅 Windows 端实现**；刷新实为**启动一次性**
   （`ThreatFeedCoordinator` 只在 `Start()` 内调一次，全仓无周期计时器——「订阅制刷新」

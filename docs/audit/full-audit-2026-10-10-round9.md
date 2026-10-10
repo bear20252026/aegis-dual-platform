@@ -34,6 +34,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-CS-5 **收编** | P3 | 保留并落地（R9-B18，上一条登记行的后半） | 登记时写的是「方向保守所以未修」——回读把范围说得更准一点：调用方传的是 `Environment.TickCount64`（自**开机**起毫秒）而窗口是 30_000，所以静默区间是「开机后前 30 秒」，不是「应用启动后前 30 秒」；这段时间里 `UnihandledException` 的可见信号（MessageBox）全部被吞，只留日志——排查者看到的正是「应用无声退出/无提示」。修法不是调窗口，而是把槽位哨兵改成「从未占用」`long.MinValue`，与 `Core/NewTabGate.cs` 的 `SlotWindow` **同一个形状**（那边有 `ColdStart_AllowsFullQuotaInsideOneWindow` 钉住，减法还会溢出 ⇒ 必须先判哨兵）。新常驻 `PopupRateLimiterTests` 5 条（冷启动满配额、`now=0` 那一拍、到期只放一槽、长期滚动、开机数日的常态路径没被改坏）。反向锚实测：把哨兵判定撤掉（回到 `nowTicks - _ticks[i] >= windowMs`）⇒ 5 条全部判红；还原后 Core **801/801**（796 + 本批 5）。此前该类全仓零测试引用——这也是它能活到第九轮的原因，CS-196 提纯成类的时候没配冷启动用例 |
 | R9-SH-8 | P3 | 保留并落地（R9-B19） | 回读确证症状与两条可达路径：init 的 `Host.getEngine(function (data) { if (!data) return; …})` 对 null 回包**静默退出**，胶囊停在 `start.html:38` 硬编码的「百度」上零痕迹——而 null 是真分支：桥未挂接时 `csCall` 直接 `cb(null)`，宿主永不回包时 WB-037 的 TTL 清扫也 `cb(null)` 兜底。对照 WB-138 早已为书签做 null/[] 分流，这条只是漏了。修法刻意**不猜默认引擎**（真实默认可能是 bing，猜错会把搜索发去错引擎）：`renderEngine(unknown)` 在 unknown 或 `ENGINES` 为空时写「未知」，init 的 null 分支改成 `bridgeError('getEngine:init', 'null') + renderEngine(true)`；顺带把「有 data 但引擎表为空」这一支也接上同一判据 （旧行为同样是「什么都不写」＝继续谎报当前引擎）。**零增行落地**：`start.main.js` 停在 475 行零余量基线上，为此把 WB-013/WB-180 两段注释各重排一行（文字不改）并回收 `// 搜索引擎状态` 独立注释行。装载器同批下沉单源（`loadMain`/`makeHost`/`MAINJS` 移入 `tests/ui-regression/helpers.mjs`，并加 source/elementOverrides 扩展点）——否则第二个用例文件要再抄一份 DOM 桩（两处解析漂移＝第二个假绿源，WB-206 同一课）；`start_main.test.mjs` 578→519 行、基线同批收窄。新用例 4 条含一条**内存态反向锚**：把 null 分支改回 `if (!data) return;` 后，「未知」不再出现、留痕归零——症状原样重现，证明前两条判据真的在判它 |
 | R9-SH-9 | P3 | 保留并落地（R9-B20） | 回读确证：`scripts/verify_cross_end_lists.py` 的引擎对账只比 **key 集合**，两份元数据各抄多处而零判据——展示名 4 处（legacy `SEARCH_ENGINES` 元组第 0 位 / Kotlin `ENGINE_NAMES` / C# `EngineNames` / 壳层 `engineFallback` 的 `name`），默认引擎 5 处（legacy `DEFAULT_ENGINE`、Kotlin `DEFAULT_ENGINE`、C# `DefaultEngine`、壳层 `engineFallback` 的 `engine`、`start.html` 胶囊初始文字）。改一个中文名或换一次默认值只落一处不会红；而默认值漏改的后果是**两窗行为分叉**（首页胶囊显示旧引擎、Android 搜索走旧引擎）。落地＝新增 `scripts/engine_metadata.py`（154 行，判据面拆出来是因为门禁本体已在 300 行红线上，同 `mirror_consumers.py` 的处理），四端 key→名逐字比对 + 默认值同源 + 「默认值必须 ∈ 核心集」+「start.html 初始文字＝默认引擎的展示名」（这一条把 R9-SH-8 留下的硬编码占位也接进判据：写错就红，而不是靠人记）。范围如实收窄：只比核心引擎集，C# 的六个扩展引擎名不进面——壳层回退表刻意只覆盖核心四引擎，逼它抄满十个只会让它猜没登记过的名字（扩展 key 集仍由 `CS_ENGINE_EXTENSIONS` 双向判）。SP-154 边界照抄：legacy 归档端文件缺失 ⇒ 告警 + 降级为现役三端，文件在但表解析不出 ⇒ fail；`core` 为空 ⇒ 单条告警（对面门禁此时已因 key 集为空而 fail，不叠三条噪声把一次失败伪装成多个缺陷）。新常驻测试 17 条（含现树 0 违规、现树扫描面非空、槽表路径存在、四类漂移各判得出、legacy 两态、空 core 降级、四端逐端可解析）|
+| R9-DOC-01..09 | P2×7 + P3×2 | 保留并落地（R9-B21） | 九条「文档说的 ≠ 实树的」逐条回读到具体行后改真：① README 挂着「仍待裁决」的两项其实早已落地（`LocalTargetHosts` + `network_security_config.xml` 的有界 `cleartextTrafficPermitted` + `HostWebView.WebResourceGuards.cs` 的 `SubresourceDenialFailClosed`），改写成事实并把**真未决**（IPv6 导航面）单列；② ADR-007 写「C# 无注入 JS」而 `WebView2Hardening.cs:77` 就在调 `AddScriptToExecuteOnDocumentCreatedAsync(FingerprintShield.BuildScript(…))`；③ ADR-007 写「门禁型 workflow 已全部移除 `paths:`」，py-yaml 实测只有 `android-quality`/`contracts` 两处真无过滤（`ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11）；④ architecture-overview 的「16 workflow」分解算出来是 15（漏 `dependency-relock`），而 `check_doc_claims.py` 只比裸数字所以它一直全绿；⑤ parity-checklist 的 ESM「升级自动生效」被第八轮 B6 实测反证（两版 stable loader 对 `EnhancedSecurityModeState` 均 0 命中）；⑥ device-validation Android 第 4 步写「经 broker 判 MIME/最终 URL/size/目录」，实测链是 `WebViewDownloadHandler.kt:113-114` 的 `WebViewDownloadTargetGuard`（scheme/保留地址）+ `DownloadPolicy` 扩展名，不经 broker 也不判 MIME/size；⑦ 同文件 Windows 第 7 步补上「发布制品默认不出现确认面板」的启用前置（安装器刻意不写那个注册表值）；⑧ run-guide「真机验证 10 项」实为 11 项，漏的正是 R8-CS-SEC-03 的唯一实测出口；⑨ README/SECURITY 引的 `:70` 是空行、实调在 `:77`。**一条被推翻的动作**：③ 一度想直接删掉四处 `paths:` 去「兑现」ADR——那属 CI 触发面变更（每次 PR 时长上升、且必需检查与触发条件必须同批核对），故本批只把陈述改真，余下收口另登 Q48 |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
 | R9-RS-9 **收编** | P2 | 保留并落地（R9-B15，上一条登记行的后半） | 两条像素直读包装的注册尾现在三端同形：C# 此前**裸调** `registerProxy(...)`、Kotlin 此前**裸调** `if (__aegisReg) ...`，两端都补成与 Rust 同款 `try { if (REG) REG(proxy, orig); } catch (e) {}`——这不是排版：注册器一旦抛异常，裸调会让整个包裹安装中断，等于把「不加噪的原文直读」重新放出来（catch 体本身三端行为早已同形：空 catch + 落到统一 `return orig.apply(...)`，只有 Kotlin rect-read 把 return 写在 catch 体内，现改成同形写法）。剩余唯一分歧是**注册器取用路径**（Windows＝ToStringGuard 闭包内的本地 `registerProxy`，Rust/Android＝`window[Symbol.for('proxy.register.v1')]`），由 `injected_js_text._REGISTER_ACCESSOR` 按别名表归一，因此 `DIVERGENT_REGISTERED` 从 2 条收成 **0 条**、比较面从 5 个函数扩到 7 个。别名表**只认登记的键名**（`proxy.register.v1` 与 Rust 的 `{reg_sym}` 占位），故意不写成通配 `window[Symbol.for(…)]`——否则 close 键 `proxy.register.close.v1` 能冒充注册器通过；这条边界有常驻用例与 `--self-test` 用例各钉一次。没有把 Windows 也改成 window 键入口：那会把注册句柄从闭包暴露到页面可达的 window 空间，是**放宽出货安全面**，已列第四节待裁决 |
@@ -809,43 +810,50 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 ### 5.5 DOC（文档 vs 实树）
 
-- Q32 R9-DOC-01 | P2 | `README.md:35-37` 仍写「**仍待裁决**：Android 侧 http 一律升 https
+- ~~Q32 R9-DOC-01~~ **R9-B21 已落地**（§3.20）｜原记录 ↓
+  Q32 R9-DOC-01 | P2 | `README.md:35-37` 仍写「**仍待裁决**：Android 侧 http 一律升 https
   且 `cleartextTrafficPermitted=false`，内网 IP 字面量实际仍不可达（§七 2）；子资源策略链
   异常时的失败闭合方向（§七 5）」——两项均已定稿并落地：`LocalTargetHosts.kt` 存在、
   `android/app/src/main/res/xml/network_security_config.xml:34-41` 有有界
   `cleartextTrafficPermitted="true"` 且显式列 `192.168.1.1`、Windows 侧
   `WebView/HostWebView.WebResourceGuards.cs:37,102` 有 `SubresourceDenialFailClosed`。
-- Q33 R9-DOC-02 | P2 | `docs/adr/ADR-007-canonical-stack-and-single-source-guards.md:50`
+- ~~Q33 R9-DOC-02~~ **R9-B21 已落地**（§3.20）｜原记录 ↓
+  Q33 R9-DOC-02 | P2 | `docs/adr/ADR-007-canonical-stack-and-single-source-guards.md:50`
   写「**C#**：无注入 JS（走 WebView2 Settings 收紧），不在本门禁范围」，实测
   `windows/src/Aegis.Windows.App/WebView/WebView2Hardening.cs:77` 调
   `AddScriptToExecuteOnDocumentCreatedAsync(FingerprintShield.BuildScript(…))`；
   `README.md:43`、`SECURITY.md:34` 均已改称「C# 的文档创建前注入面」。缺的是**该面未纳入
   bridge_guard 对账**，不是「无注入面」。
-- Q34 R9-DOC-03 | P2 | 同文件 `:57-58` 写「门禁型 workflow（android-quality/contracts/
+- ~~Q34 R9-DOC-03~~ **R9-B21 已落地（只改陈述；四处 `paths:` 收口另登 Q48）**（§3.20）｜原记录 ↓
+  Q34 R9-DOC-03 | P2 | 同文件 `:57-58` 写「门禁型 workflow（android-quality/contracts/
   core-rust/agent-redteam/supply-chain/ci）移除全部 `paths:` 过滤」，py-yaml 实测
   `push.paths`：`ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11，只有
   `android-quality`/`contracts` 真无过滤 ⇒ 未列路径的改动静默不触发即被判「门禁已过」
   （R8-SH-10 只处理了 `ci.yml` 一处）。
-- Q35 R9-DOC-04 | P2 | `docs/architecture-overview.md:91-100` 声明「16 workflow 分层」但
+- ~~Q35 R9-DOC-04~~ **R9-B21 已落地**（§3.20）｜原记录 ↓
+  Q35 R9-DOC-04 | P2 | `docs/architecture-overview.md:91-100` 声明「16 workflow 分层」但
   分解为 6+1+2+2+4=**15**，依赖面只列 `gradle-dependency-graph`/`gradle-dependency-insight`、
   漏 `dependency-relock.yml`（`:151` 又说 16）⇒ `check_doc_claims.py` 只比裸数字
   （正则 `N workflow`），本条全绿而清单少一整面。
-- Q36 R9-DOC-05 | P2 | `docs/product/feature-parity-checklist.md:22` M1 行「ESM（探测启用）…
+- ~~Q36 R9-DOC-05~~ **R9-B21 已落地**（§3.20）｜原记录 ↓
+  Q36 R9-DOC-05 | P2 | `docs/product/feature-parity-checklist.md:22` M1 行「ESM（探测启用）…
   ☑（SDK 未暴露 API——反射探测，**升级自动生效**）」已被
   `windows/src/Aegis.Windows.App/WebView/WebView2Hardening.cs:34-42` 就地反证（R8-DEPS-1：
   两版 stable DLL 对 `EnhancedSecurityModeState` 均 0 命中，ESM 只在 `-prerelease`）。
-- Q37 R9-DOC-06 | P2 | `docs/runbooks/device-validation.md:33` Android 第 4 步预期写
+- ~~Q37 R9-DOC-06~~ **R9-B21 已落地**（§3.20）｜原记录 ↓
+  Q37 R9-DOC-06 | P2 | `docs/runbooks/device-validation.md:33` Android 第 4 步预期写
   「经 **broker** 判定（MIME/最终 URL/size/目录）」，实测链是
   `WebViewDownloadHandler.kt:113-114` 的 `WebViewDownloadTargetGuard`（scheme/保留地址）
   + `DownloadPolicy` 扩展名判定（grep mime|size 零命中、不经 `AndroidBroker`）⇒ 按现文
   执行会把「无 size/目录门禁」记成通过；而**已落地**的 #130 下载层保留地址硬拒反而没有任何
   真机步骤。
-- Q38 R9-DOC-07 | P2 | 同文件 `:20` Windows 第 7 步未写启用前置：
+- ~~Q38 R9-DOC-07~~ **R9-B21 已落地**（§3.20）｜原记录 ↓
+  Q38 R9-DOC-07 | P2 | 同文件 `:20` Windows 第 7 步未写启用前置：
   `WebView/NavigationConfirmationGate.cs:14-22` 只认 `AEGIS_REQUIRE_NAVIGATION_CONFIRMATION=1`
   或注册表，而 `docs/release/AegisSetup-CSharp.iss:73` 注明该标记**刻意不写**（只写
   `RequireNativePolicyCore`，:79）⇒ 唯一发布制品上面板永不出现，验证人会「看不到面板」
   而误判缺陷，或凭 UI 存在与否签一个无证据的通过（§十一 第 5 类「结论无证据」）。
-- Q39-Q46 R9-DOC-08..15 | P3 | 八条：`docs/runbooks/windows-run-guide.md:63-66` 写「真机验证
+- Q39-Q46 R9-DOC-08..15 | P3 | 八条（**R9-B21 已落地 DOC-08/09**：「10 项」改 11 项并点名漏掉的第 11 步；README/SECURITY 的 `:70` → 实调行 `:77`。余六条 DOC-10..15 仍在队列）：`docs/runbooks/windows-run-guide.md:63-66` 写「真机验证
   **10 项**」并枚举 10 个名称，漏第 11 步（R8-CS-SEC-03 的唯一实测出口）；`README.md:43` 与
   `SECURITY.md:34` 引 `WebView2Hardening.cs:70` 而该行是空行（实调在 :77）；
   `README.md:146-147`「五门禁常绿」vs `contract-source-of-truth` 约 17 个步骤，且
@@ -861,6 +869,39 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   测试计数「cargo 450+ / dotnet 650+ / pytest 230+」与实测
   （`grep '#\[test\]'`=589、Core.Tests `[Fact]+[InlineData]`=718、
   `grep -c 'def test_'` 461+53、UI 回归 138）双向失真。
+
+- Q48 R9-CI-13 | P3 | `.github/workflows/ci.yml`（`on.push.paths` 8 项）、`core-rust.yml`（3 项）、
+  `agent-redteam.yml`（5 项）、`supply-chain.yml`（11 项）：ADR-007 声称「门禁型 workflow 已全部移除
+  `paths:` 过滤」而实测这四处仍在过滤 ⇒ 未列路径的改动在这些面上静默不触发、检查名看起来「已过」
+  （R8-SH-10 当年只处理了 `ci.yml`）。收口属 CI 触发面变更：runner 时长上升，且若某处 job 已列进必需
+  检查，触发条件与 required 集合必须同批核对（R8-CI-01 的「Expected — Waiting for status」教训）⇒ 需用户
+  点头后另批做。**R9-B21 只把 ADR 的陈述改真。**
+- Q49 R9-DOC-20 | P3 | `docs/runbooks/device-validation.md:19`（Windows 第 6 步「下载 MIME 混淆」预期写
+  「下载经 broker 判定（MIME/最终 URL/size）」）：本批只确证了 Android 那一行（Q37→R9-DOC-06），
+  **C# 侧未验**——Windows 下载链是否真判 MIME/最终 URL/size 没有实测支撑，故该行仍是一条未核验陈述
+  （下一批读 `windows/.../Downloads/` 后改真或续登）。
+
+### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
+
+**共同主题：文档说「已做」而实树没做，比文档空白更危险。** 本批九条全是 P2/P3 的
+「陈述 vs 实树」失配，逐条回读到具体行后才动文字；两处**故意没做**（见末尾）。
+
+1. 落地（改文字）：`README.md`（「仍待裁决」两项 → 事实 + 真未决项；`WebView2Hardening.cs:70`→`:77`）、
+   `SECURITY.md`（同行号）、`docs/adr/ADR-007`（C# 注入面、`paths:` 过滤实况）、
+   `docs/architecture-overview.md`（16 的分解补 `dependency-relock`，并写明
+   `check_doc_claims.py` 只比裸数字 ⇒ 这类「分解少一面」门禁看不见）、
+   `docs/product/feature-parity-checklist.md`（ESM「升级自动生效」→ 恒为拿不到 + SDK bump 待裁决）、
+   `docs/runbooks/device-validation.md`（Android 第 4 步按实测链改写；Windows 第 7 步补确认门启用前置）、
+   `docs/runbooks/windows-run-guide.md`（10 项 → 11 项，点名第 11 步＝R8-CS-SEC-03 唯一实测出口，
+   并互相指认第 7 步的前置）。
+2. 新登记两条（同口径带 file:line）：**Q48 R9-CI-13** = 四个 workflow 的 `paths:` 收口
+   （ADR 声称已移除，实测 ci=8/core-rust=3/agent-redteam=5/supply-chain=11）——扩 CI 触发面
+   是 runner 时长与必需检查集合的决策，不顺手做；**Q49 R9-DOC-20** = device-validation 的
+   Windows 第 6 步「下载经 broker 判 MIME/size」**未经验证**，本批只改了确证过的 Android 那一行。
+3. 刻意没做的两件事都记在案：把四处 `paths:` 删掉「兑现 ADR」（Q48）、把未核验的 Windows 下载
+   行按 Android 的样子改写成另一条断言（Q49）。
+4. 本地验证：`check_markdown_tables` / `check_markdown_links` / `check_doc_claims` ✅（纯文档批，
+   代码与门禁零改动；`git status` 只含 7 个 .md + 台账 + CSV）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

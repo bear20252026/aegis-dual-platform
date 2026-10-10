@@ -67,10 +67,18 @@ cargo test                     # 策略核心单测全绿
 
 ## 四、真机验证（运行门禁——device-validation.md 清单）
 
-按 docs/runbooks/device-validation.md 执行 Windows WebView2 真机验证（10 项）：
-远程 bridge 探测/跨源 iframe/重定向/javascript:/data:/file:/自定义协议/下载 MIME
-混淆/重复确认/标签代际竞态/renderer crash/Runtime 更新重启——每项记录结果——
+按 docs/runbooks/device-validation.md 执行 Windows WebView2 真机验证（**11 项**——
+R9-DOC-08 更正：此前写「10 项」并把 `javascript:/data:/file:` 拆成三个名称计，
+实际漏的是**第 11 步**）：
+远程页面 bridge 探测 / 跨源 iframe / 重定向 / `javascript:`·`data:`·`file:` /
+自定义协议 / 下载 MIME 混淆 / 重复确认 / 标签代际竞态 / renderer crash /
+Runtime 更新重启 / **历史导航是否经策略链（R8-CS-SEC-03）**——每项记录结果——
 失败项修复后重验（运行门禁 fail-closed）。
+
+第 11 步是那条修复的**唯一实测出口**（单测只能证明判定函数，证明不了历史列表回填
+时没有绕过策略链），漏计的后果是该判据长期没有验证入口；另注意第 7 步「重复确认」
+在唯一发布制品上默认不出现面板，须先设 `AEGIS_REQUIRE_NAVIGATION_CONFIRMATION=1`
+（前置与理由见 device-validation.md 第 7 步——R9-DOC-07）。
 
 ## 五、Android 真机
 

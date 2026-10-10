@@ -47,7 +47,7 @@
 - **Rust**：`bridge_guard.rs` 经 `include_str!` 编译期嵌入规范文件——消费即事实；
 - **Kotlin**：内嵌副本 + 占位符插值，由
   `contracts/codegen/verify_bridge_guard.py` 做归一化逐行比对；
-- **C#**：无注入 JS（走 WebView2 Settings 收紧），不在本门禁范围；
+- **C#**：**有**文档创建前注入面——`WebView/WebView2Hardening.cs:77` 调 `AddScriptToExecuteOnDocumentCreatedAsync(FingerprintShield.BuildScript(...))`；第九轮 R9-DOC-02 更正：本行此前写「无注入 JS」是失实陈述。它不在本门禁的逐行对账范围内（缺的是**把该面纳入 bridge_guard 对账**，不是「无注入面」——README/SECURITY 已改称「C# 的文档创建前注入面」），三端注入 JS 的 token 级同形另见 `contracts/codegen/verify_injected_js_parity.py`；
 - CI（contracts.yml）运行 verify 门禁——**守卫漂移在合入前失败**，
   fail-open 类 bug（手工拷贝的产物）结构性消除；
 - 规则：改动守卫语义 = 只改规范模板 + 同步 Kotlin 副本 + verify 全绿。
@@ -55,8 +55,13 @@
 ### D3：门禁全量常跑（区分门禁型与构建型）
 
 - **门禁型 workflow**（android-quality / contracts / core-rust / agent-redteam /
-  supply-chain / ci）移除全部 `paths:` 过滤——每次 push/PR 全量执行；
+  supply-chain / ci）**应当**移除全部 `paths:` 过滤——每次 push/PR 全量执行；
   理由：`paths:` 过滤的省时收益 << 漏检成本（ktlint 长期 FAIL 未被发现即实证）；
+  **实树现状（第九轮 R9-DOC-03 实测，py-yaml 读 `on.push.paths`）**：只有
+  `android-quality` 与 `contracts` 真无过滤；`ci`=8、`core-rust`=3、`agent-redteam`=5、
+  `supply-chain`=11 仍在过滤 ⇒ 未列路径的改动在这些面上**静默不触发**，而检查名看起来
+  「已过」。R8-SH-10 当年只处理了 `ci.yml` 一处，本条一直是陈述而非事实；
+  收口剩余四处属 CI 触发面变更（每次 PR 的 runner 时长上升），已登记队列，不顺手改；
 - **构建型 workflow**（native-policy-artifacts / release-*）保留触发过滤
   ——它们产生产物而非判定质量，按需触发合理；
 - **自检入 CI**：CLAUDE.md 要求的 5 个离线自检（session_store / api_bridge /

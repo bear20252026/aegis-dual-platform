@@ -19,7 +19,7 @@
 | 会话恢复（自动+手动） | 恢复 URL 过 safe_url | session_store.py/tab_ops.seed | ☑ M3 全量（自动恢复 M1-T1；手动入口=NTP 恢复按钮——恢复期抑制落盘，URL 仍逐条过 broker） |
 | NewWindowRequested 门禁 | 白名单 fail-closed + 审计 | 批次1 native_interception | ☑（HostWebView Handled——既有语义保持） |
 | WebView2 功能收紧 | AreHostObjects/ScriptDialogs=false | 批次1 hardening | ☑（原生直写+留痕） |
-| ESM（探测启用） | 显式留痕 | 批次1 enhanced_security | ☑（SDK 未暴露 API——反射探测，升级自动生效） |
+| ESM（探测启用） | 显式留痕 | 批次1 enhanced_security | ☑（SDK 未暴露 API——反射探测；**「升级自动生效」是旧的乐观陈述**：第八轮 B6 实测两个 stable 版 WebView2 loader （1.0.2903.40 与 1.0.4258.31）对 `EnhancedSecurityModeState` 均 0 命中，该属性只存在于 `-prerelease` ⇒ 反射探测在现行钉版下**恒为拿不到**，升 SDK 才会变——而 SDK bump 本身属产品行为变更、待用户定稿） |
 | ProcessFailed 崩溃监听 | 崩溃落盘 | 批次1 crash_listener | ☑（SecurityLog） |
 | WebView2 Runtime 更新事件 `NewBrowserVersionAvailable` | 重启前保存状态 + 通知 + 受控重启（runtime-update-restart） | ADR-001 后果段 / refactor-final-route `RuntimeUpdater.cs` | **☐ 未实现**（第八轮 B8 实测：`windows/` 全树零该事件订阅，也无 `RuntimeUpdater.cs`；device-validation 第 10 步因此无执行对象——本清单唯一未勾验的代码项，「100% 勾验」的旧口径据此更正） |
 | 指纹防护（文档创建前注入） | 会话种子/管道移植 | fingerprint_pipeline | ☑ 最小有效集（canvas 离屏扰动修 Python 污染缺陷/时间精度）；全量随 M3 |
