@@ -134,36 +134,10 @@ public partial class InPrivateWindow : Window
             var runtime = _runtimeCoordinator
                 .Create(_broker, tab, lease.Environment, isPrivate: true)
                 .Runtime;
-            runtime.Control.CoreWebView2InitializationCompleted += (_, e) =>
-            {
-                // CS-358（2026-10-01 审计）：初始化失败留痕（主窗同分支有
-                // SecurityLog——此前无痕窗口静默空白不可诊断）
-                if (!e.IsSuccess)
-                {
-                    Core.Security.SecurityLog.Write(
-                        $"[inprivate] 标签 {tab.TabId} WebView2 初始化失败: {e.InitializationException?.Message ?? "e.IsSuccess=false（未知原因）"}");
-                    return;
-                }
-                if (_closed || !_runtimes.ContainsKey(tab.TabId))
-                    return;
-                var core = runtime.Control.CoreWebView2;
-                Ntp.NtpAssets.BindVirtualHosts(core);
-                runtime.OnCoreReady(core);
-                // CS-281：此订阅为每标签一次性初始化回调，生命周期与 runtime
-                // 对象一致（随 runtime 释放整体回收）——无需显式退订
-                WireNtpBridge(runtime, core);
-                if (Ntp.NtpAssets.IsVirtualHostUrl(tab.Url))
-                {
-                    // 延迟导航（映射传播等待+失败重试）同样复用协调器——
-                    // 执行前重新校验 runtime 引用/令牌/窗口存活
-                    _runtimeCoordinator.PostDelayedNavigation(
-                        tab.TabId, tab.Url, () => !_closed && IsLoaded);
-                }
-                else
-                {
-                    TabRuntime.Navigate(runtime, tab.Url);
-                }
-            };
+            // R9-CS-1（第九轮 2026-10-10）：接线整段外迁到 InPrivateWindow.CoreReady.cs
+            // 并包上主窗同款的 RunCoreReadyFailClosed——此前这段抛出没有观察方，
+            // 会留下「已挂载可见、却没接上策略处理器」的标签（会话还在池里）。
+            runtime.Control.CoreWebView2InitializationCompleted += (_, e) => OnCoreReady(e, runtime, tab);
             runtime.NavigationCompleted += (ok, _) => Dispatcher.BeginInvoke(() =>
             {
                 // CS-349（2026-10-01 审计）：加载指示收起（主窗同款 LoadingBar）

@@ -1,11 +1,9 @@
 // start_main.test.mjs —— start.main.js 主逻辑回归（node --test）
-// WB-025：未知壁纸必须整体 no-op（不得污染当前壁纸/样式/桥调用）；
-// WB-026：背景 url('...') 单引号必须 %27 编码（style 注入防护）；
-// WB-013：桥调用失败必须经 jsError 留痕且不阻断首屏装配。
-// WB-044/045/048/051/057/082..089/096（审计 2026-09-23 清单·W5 批）：
-// 引擎菜单方向键/Escape、☆ 文案平台差异、原生按钮圆点、时序常量单源、
-// 菜单选中态/空表分支、go 空输入/防抖、host 回退/前 8 截断/有界重试/
-// parseInt 归一、双路径防重放——此前零测试面。
+// WB-025：未知壁纸必须整体 no-op（不得污染当前壁纸/样式/桥调用）；WB-026：背景
+// url('...') 单引号必须 %27 编码（style 注入防护）；WB-013：桥调用失败必须经 jsError 留痕且不阻断首屏装配。
+// WB-044/045/048/051/057/082..089/096（审计 2026-09-23 清单·W5 批）：引擎菜单方向键/Escape、
+// ☆ 文案平台差异、原生按钮圆点、时序常量单源、菜单选中态/空表分支、go 空输入/防抖、
+// host 回退/前 8 截断/有界重试/parseInt 归一、双路径防重放——此前零测试面。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -279,8 +277,7 @@ test('WB-082 renderEngineMenu 选中态：aria-checked/✓/active 对齐 data.en
   assert.equal(items[0].children[1].textContent, '', '未选项无标记');
 });
 
-// WB-083（审计 2026-09-23 清单·W5 批）：空引擎表隐藏分支——菜单不得以
-// 空壳展开
+// WB-083（审计 2026-09-23 清单·W5 批）：空引擎表隐藏分支——菜单不得以空壳展开
 test('WB-083 空引擎表隐藏分支：engines 空时菜单保持隐藏', () => {
   const { host } = makeHost();
   host.getEngine = (cb) => cb({ engine: 'baidu', engines: [] });
@@ -310,7 +307,9 @@ test('WB-044 引擎菜单方向键导航：↓ 到下一项、↑ 环绕到末�
   items[0].onkeydown({ key: 'ArrowUp', preventDefault() {}, stopPropagation() {} });
   assert.equal(items[2]._focused, true, '↑ 从首项必须环绕到末项');
   // R9-SH-3：这里原本是一行 assert.ok(true)——注释写着判据、实体是零判定。
-  assert.deepEqual(state.engineCalls, [], '方向键导航不得下发 setEngine（仅 Enter/Space 选中）');
+  assert.deepEqual(state.engineCalls, [], '方向键导航不得下发 setEngine（R9-SH-3 反向判据）');
+  for (const key of ['Enter', ' ']) { items[1].onkeydown({ key, preventDefault() {}, stopPropagation() {} });
+    assert.deepEqual(state.engineCalls.slice(-1), ['bing'], `${key} 必须选中当前项（R9-SH-12 正向判据）`); }
 });
 
 // WB-045（审计 2026-09-23 清单·W5 批）：Escape 关闭菜单——菜单项内与文档级
