@@ -11,6 +11,16 @@ on:
   workflow_dispatch: {}
   workflow_call: {}
 
+# 13(b)（第九轮 2026-10-10 定稿项 13）：本流既可被编排器 workflow_call，也可
+# workflow_dispatch 直跑 ⇒ 两条路可同时存在，两个 run 抢同一批 Release 资产名与
+# 同一版本号的 attestations（PY-007/008 消掉的是 tag 双触发，没管这条）。
+# concurrency 组是 **per-workflow** 的（GitHub 不做跨 workflow 互斥），所以这条
+# 只保证「本交付链不自我重叠」，父级排队仍由 release.yml 的组负责——别把它读成
+# 整条发布链的串行锁。cancel-in-progress: false：发布中途绝不取消，半截制品比排队糟。
+concurrency:
+  group: release-core-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
