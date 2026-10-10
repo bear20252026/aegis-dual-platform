@@ -33,6 +33,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-CS-5 | P3 | 保留并登记（方向保守，未修） | `App.xaml.cs:11-32` 的 `PopupRateLimiter` 槽位数组以 **0** 起步，而判定是 `now - _ticks[i] >= windowMs` ⇒ 开机后第一个 30 秒内 `now` 本身 < 30000，三槽全判「未过期」⇒ **这段时间里所有崩溃弹窗被静默拒**（只记日志）。它管的是异常提示，方向保守所以从未被当成缺陷暴露；风险是**形状被抄走**：同形状用在「拒绝用户可达的功能」上就是打开即失效。新建的 `Core/NewTabGate.cs` 刻意用「从未占用」哨兵避开这个坑，并有冷启动用例 `ColdStart_AllowsFullQuotaInsideOneWindow` 钉住；旧那台零测试引用，另批收口 |
 | R9-CS-5 **收编** | P3 | 保留并落地（R9-B18，上一条登记行的后半） | 登记时写的是「方向保守所以未修」——回读把范围说得更准一点：调用方传的是 `Environment.TickCount64`（自**开机**起毫秒）而窗口是 30_000，所以静默区间是「开机后前 30 秒」，不是「应用启动后前 30 秒」；这段时间里 `UnihandledException` 的可见信号（MessageBox）全部被吞，只留日志——排查者看到的正是「应用无声退出/无提示」。修法不是调窗口，而是把槽位哨兵改成「从未占用」`long.MinValue`，与 `Core/NewTabGate.cs` 的 `SlotWindow` **同一个形状**（那边有 `ColdStart_AllowsFullQuotaInsideOneWindow` 钉住，减法还会溢出 ⇒ 必须先判哨兵）。新常驻 `PopupRateLimiterTests` 5 条（冷启动满配额、`now=0` 那一拍、到期只放一槽、长期滚动、开机数日的常态路径没被改坏）。反向锚实测：把哨兵判定撤掉（回到 `nowTicks - _ticks[i] >= windowMs`）⇒ 5 条全部判红；还原后 Core **801/801**（796 + 本批 5）。此前该类全仓零测试引用——这也是它能活到第九轮的原因，CS-196 提纯成类的时候没配冷启动用例 |
 | R9-SH-8 | P3 | 保留并落地（R9-B19） | 回读确证症状与两条可达路径：init 的 `Host.getEngine(function (data) { if (!data) return; …})` 对 null 回包**静默退出**，胶囊停在 `start.html:38` 硬编码的「百度」上零痕迹——而 null 是真分支：桥未挂接时 `csCall` 直接 `cb(null)`，宿主永不回包时 WB-037 的 TTL 清扫也 `cb(null)` 兜底。对照 WB-138 早已为书签做 null/[] 分流，这条只是漏了。修法刻意**不猜默认引擎**（真实默认可能是 bing，猜错会把搜索发去错引擎）：`renderEngine(unknown)` 在 unknown 或 `ENGINES` 为空时写「未知」，init 的 null 分支改成 `bridgeError('getEngine:init', 'null') + renderEngine(true)`；顺带把「有 data 但引擎表为空」这一支也接上同一判据 （旧行为同样是「什么都不写」＝继续谎报当前引擎）。**零增行落地**：`start.main.js` 停在 475 行零余量基线上，为此把 WB-013/WB-180 两段注释各重排一行（文字不改）并回收 `// 搜索引擎状态` 独立注释行。装载器同批下沉单源（`loadMain`/`makeHost`/`MAINJS` 移入 `tests/ui-regression/helpers.mjs`，并加 source/elementOverrides 扩展点）——否则第二个用例文件要再抄一份 DOM 桩（两处解析漂移＝第二个假绿源，WB-206 同一课）；`start_main.test.mjs` 578→519 行、基线同批收窄。新用例 4 条含一条**内存态反向锚**：把 null 分支改回 `if (!data) return;` 后，「未知」不再出现、留痕归零——症状原样重现，证明前两条判据真的在判它 |
+| R9-SH-9 | P3 | 保留并落地（R9-B20） | 回读确证：`scripts/verify_cross_end_lists.py` 的引擎对账只比 **key 集合**，两份元数据各抄多处而零判据——展示名 4 处（legacy `SEARCH_ENGINES` 元组第 0 位 / Kotlin `ENGINE_NAMES` / C# `EngineNames` / 壳层 `engineFallback` 的 `name`），默认引擎 5 处（legacy `DEFAULT_ENGINE`、Kotlin `DEFAULT_ENGINE`、C# `DefaultEngine`、壳层 `engineFallback` 的 `engine`、`start.html` 胶囊初始文字）。改一个中文名或换一次默认值只落一处不会红；而默认值漏改的后果是**两窗行为分叉**（首页胶囊显示旧引擎、Android 搜索走旧引擎）。落地＝新增 `scripts/engine_metadata.py`（154 行，判据面拆出来是因为门禁本体已在 300 行红线上，同 `mirror_consumers.py` 的处理），四端 key→名逐字比对 + 默认值同源 + 「默认值必须 ∈ 核心集」+「start.html 初始文字＝默认引擎的展示名」（这一条把 R9-SH-8 留下的硬编码占位也接进判据：写错就红，而不是靠人记）。范围如实收窄：只比核心引擎集，C# 的六个扩展引擎名不进面——壳层回退表刻意只覆盖核心四引擎，逼它抄满十个只会让它猜没登记过的名字（扩展 key 集仍由 `CS_ENGINE_EXTENSIONS` 双向判）。SP-154 边界照抄：legacy 归档端文件缺失 ⇒ 告警 + 降级为现役三端，文件在但表解析不出 ⇒ fail；`core` 为空 ⇒ 单条告警（对面门禁此时已因 key 集为空而 fail，不叠三条噪声把一次失败伪装成多个缺陷）。新常驻测试 17 条（含现树 0 违规、现树扫描面非空、槽表路径存在、四类漂移各判得出、legacy 两态、空 core 降级、四端逐端可解析）|
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
 | R9-RS-9 **收编** | P2 | 保留并落地（R9-B15，上一条登记行的后半） | 两条像素直读包装的注册尾现在三端同形：C# 此前**裸调** `registerProxy(...)`、Kotlin 此前**裸调** `if (__aegisReg) ...`，两端都补成与 Rust 同款 `try { if (REG) REG(proxy, orig); } catch (e) {}`——这不是排版：注册器一旦抛异常，裸调会让整个包裹安装中断，等于把「不加噪的原文直读」重新放出来（catch 体本身三端行为早已同形：空 catch + 落到统一 `return orig.apply(...)`，只有 Kotlin rect-read 把 return 写在 catch 体内，现改成同形写法）。剩余唯一分歧是**注册器取用路径**（Windows＝ToStringGuard 闭包内的本地 `registerProxy`，Rust/Android＝`window[Symbol.for('proxy.register.v1')]`），由 `injected_js_text._REGISTER_ACCESSOR` 按别名表归一，因此 `DIVERGENT_REGISTERED` 从 2 条收成 **0 条**、比较面从 5 个函数扩到 7 个。别名表**只认登记的键名**（`proxy.register.v1` 与 Rust 的 `{reg_sym}` 占位），故意不写成通配 `window[Symbol.for(…)]`——否则 close 键 `proxy.register.close.v1` 能冒充注册器通过；这条边界有常驻用例与 `--self-test` 用例各钉一次。没有把 Windows 也改成 window 键入口：那会把注册句柄从闭包暴露到页面可达的 window 空间，是**放宽出货安全面**，已列第四节待裁决 |
@@ -580,6 +581,30 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `pytest tests/python` 全绿、`check_file_sizes`（494 文件 / 基线 86）/ `check_doc_claims` /
    `check_markdown_tables` ✅。C#/Kotlin/Rust 三端运行时代码零改动。
 
+### 3.19 R9-B20（2026-10-10，队列批次 C 第三子批）：引擎「展示名 + 默认值」进跨端门禁
+
+**共同主题：key 集合对齐了，元数据还是会各说各话。** 五端引擎表的 key 早已双向对账，
+但同一个引擎在两窗显示不同名字、换了默认值只落一处，这类事实在门禁里没有任何判据
+——`verify_cross_end_lists.py` 从来没看过 key 之外的任何一列。
+
+1. 新增 `scripts/engine_metadata.py`（154 行）：四端 key→展示名逐字比对、五处默认引擎同源、
+   「默认值必须 ∈ 核心集」、`start.html` 的胶囊初始文字必须等于默认引擎的展示名
+   （这一条把 R9-SH-8 留下的硬编码占位接进判据——写错就红，不靠人记）。
+   判据面拆成独立模块的原因与 `mirror_consumers.py` 相同：门禁本体已在 300 行红线上。
+2. 范围如实收窄并写进注释：只比**核心引擎集**，C# 的六个扩展引擎名不进面（壳层回退表刻意
+   只覆盖核心四引擎）；扩展 key 集仍由既有 `CS_ENGINE_EXTENSIONS` 白名单双向判。
+3. SP-154 边界照抄：legacy 归档端文件**缺失** ⇒ 一条告警 + 降级为现役三端；文件在而表解析
+   不出 ⇒ fail；`core` 为空 ⇒ 单条告警（对面门禁此时已因 key 集为空而 fail，不叠三条噪声
+   把一次失败伪装成多个缺陷）。
+4. 新常驻测试 `tests/python/engine_metadata_test.py` 17 条：现树 0 违规、现树扫描面非空
+   （四端各 ≥4 名、四端默认值都取到、html 标签取到）、`_NAME_SLOTS`/`_DEFAULT_SLOTS` 指向的
+   路径必须仍在库里（防「锚指向已挪走的文件」）、改一端名字 / 改一端默认值 / 默认值不在核心集 /
+   html 标签不符 / 表被删 / 四端全空 / legacy 两态 / 空 core 各判得出，末条按端参数化。
+5. `CLAUDE.md` 的门禁行同步注明「引擎 key 集/展示名/默认值/壁纸」与新模块位置。
+6. 本地验证：`verify_cross_end_lists.py` ✅（现树四端一致）、`pytest tests/python`
+   **579 passed / 1 skipped**、ruff / bandit / py312-compat / `check_file_sizes`（496 文件）/
+   三条文档门禁 ✅。三端运行时代码零改动（纯门禁 + 测试）。
+
 ## 四、待用户定稿（本轮新增四项，其余沿用第八轮 §七）
 
 - **R9-RS-9 的一半（机制对齐）**：Windows 的 ToStringGuard 注册器是**闭包内的本地函数**，
@@ -695,10 +720,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   仍在（豁免表内的合法条目，不是缺陷）。**第八轮 R8-SH-08 重 derive 成功且那时仍未闭**
   （该轮只留了计数）——本批是真闭。
 - ~~Q18 R9-SH-8~~ **本批已确证并落地**（§二 裁决行 + §3.18）：init 的 null 回包不再静默——`bridgeError('getEngine:init', 'null')` 留痕 + `renderEngine(true)` 把胶囊显式改成「未知」，空引擎表同分支一并接上；刻意不猜默认引擎（猜错会把搜索发去错引擎）。装载器下沉 helpers.mjs 单源，`start_engine_unknown.test.mjs` 4 条含内存态反向锚（还原旧写法 ⇒ 症状原样重现）。`start.main.js` 零增行（475 行零余量基线，靠两处注释重排 + 一处注释并行换出空间）。
-- Q19 R9-SH-9 | P3 | `shared/shell/start.js:93-98`、`shared/shell/start.html:38`、
-  `android/.../SearchEngines.kt:36,45`、`windows/.../UrlNormalizer.cs:21,50` ↔
-  `scripts/verify_cross_end_lists.py`：引擎 **key 集合**已五端对账，但「默认引擎值」与
-  「展示名」两份元数据 4 处手抄零判据 ⇒ 换默认值/改中文名只落一处不会红。
+- ~~Q19 R9-SH-9~~ **本批已确证并落地**（§二 裁决行 + §3.19）：展示名四端逐字比对 + 默认值五处同源（含 `start.html` 初始文字＝默认引擎展示名）已进 `scripts/verify_cross_end_lists.py`，判据面在 `scripts/engine_metadata.py`；只比核心集、C# 六个扩展引擎名不进面，SP-154 的 legacy 降级照抄，新常驻测试 17 条。
 - ~~Q20 R9-SH-10~~ **本批已确证并落地**（§二 + §3.16）：note 改成当前实况（拒绝理由就是
   `minItems: 1`）并保留来历（PY-095 记下时确实未设）。`validate_vector_schemas.py` 复跑 ✅，
   向量内容与期望零改动——纯注记改真。

@@ -19,6 +19,9 @@
      契约口径：三端核心引擎完全一致；C# 扩展引擎须在
      CS_ENGINE_EXTENSIONS 白名单显式登记，防双向静默漂移）
 
+第九轮 R9-SH-9（2026-10-10）：引擎的**展示名**与**默认值**并进同一门禁（此前只比
+key 集合）——判据面在 scripts/engine_metadata.py，本文件负责汇总与退出码。
+
 SP-154（2026-09-26 审计）：legacy 归档栈对账端（asset_scheme.py /
 url_utils.py）降级为可选——文件缺失仅告警并跳过该端对账（归档栈被
 删除/移动时现役门禁不得断链）；现役 C#/Android/start.main.js 端缺失
@@ -29,6 +32,10 @@ from __future__ import annotations
 import re
 import sys
 from pathlib import Path
+
+# R9-SH-9：引擎「展示名 + 默认值」两份元数据的提取与判据在 engine_metadata.py——
+# 本文件已在 300 行红线上（判据面拆开，fail-closed 汇总与退出码留在这里）。
+from engine_metadata import check as engine_metadata_check
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -199,6 +206,11 @@ def main() -> int:
         fail(f"搜索引擎: UrlNormalizer.cs 扩展引擎 {extra} 未在 CS_ENGINE_EXTENSIONS 登记（防漂移白名单）")
     for ghost in sorted(CS_ENGINE_EXTENSIONS - cs_eng):
         fail(f"搜索引擎: UrlNormalizer.cs 缺少已登记扩展引擎 {ghost}")
+
+    # exists：SP-154 的降级判据——legacy 归档端不在 ⇒ 告警并跳过该端，
+    # 而不是让对面 `_read` 的「文件缺失」把现役门禁一起断掉。
+    for msg, kind in engine_metadata_check(core, _read, lambda rel: (ROOT / rel).is_file()):
+        (failures if kind == "fail" else warnings).append(msg)
 
     if failures:
         print("❌ 跨端清单不一致：")

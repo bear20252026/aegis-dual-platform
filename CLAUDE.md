@@ -54,7 +54,8 @@ python contracts/codegen/verify_injected_js_parity.py   # 三端注入 JS 逐 to
 #   cargo run --locked --features uniffi-bindgen --bin aegis-uniffi-bindgen -- generate \
 #     target/release/<cdylib> --language python --out-dir <目录> --no-format
 python scripts/verify_uniffi_binding_surface.py         # 上述绑定与 Rust 导出面双向对账
-python scripts/verify_cross_end_lists.py          # 跨端清单对账（引擎/壁纸）
+python scripts/verify_cross_end_lists.py          # 跨端清单对账（引擎 key 集/展示名/默认值/壁纸）
+#   ↑ 引擎「展示名 + 默认值」的判据面在 scripts/engine_metadata.py（R9-SH-9：四端各抄一遍、此前零判据）
 # —— 文档/CI 形态门禁（第八轮 B1/B8 接入 contract-source-of-truth）——
 python scripts/check_workflow_shells.py           # workflow 步骤 shell 与退出码口径
 python scripts/check_doc_claims.py                # 文档计数声明与实树对账（「N workflow」类陈述）
