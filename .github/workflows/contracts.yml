@@ -136,6 +136,10 @@ jobs:
         run: python contracts/codegen/verify_bridge_guard.py
       - name: Verify seed framing parity (R7-CS1-05/R7-CS2-10——顶层框定 + 后缀清单单源)
         run: python contracts/codegen/verify_seed_framing_parity.py
+      # 定稿项 9 步 1（第九轮 2026-10-10）：三端各自抄写的那段共享 JS 必须同形。
+      # 上面那道只查要件 token 在不在——有人改算法它照样绿，这条查逻辑序列。
+      - name: Verify injected JS parity across three ends (R9 项 9-1——逐 token 同形对账)
+        run: python contracts/codegen/verify_injected_js_parity.py
       - name: Regenerate jsapi schema and fail on drift (PY-014——生成器接入门禁)
         run: |
           python scripts/gen_jsapi_schema.py
