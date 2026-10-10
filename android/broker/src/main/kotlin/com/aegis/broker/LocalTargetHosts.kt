@@ -39,6 +39,16 @@ package com.aegis.broker
  *   authority 同判拒绝（AD-213 孪生）。Android 在 normalize 链内就返回 null，Windows 到
  *   导航层才拒：**层序不同、终态相同**，此差异归 R8-CS-SEC-17（共享向量的
  *   `windows_url` 覆盖 + Windows 消费端两条断言把「两条都成立」钉住）。
+ *
+ * • **方括号 IPv6 字面量在导航层就到不了本函数**（R9-AD-4，第九轮 2026-10-10）：
+ *   `OriginPolicy` 对 authority 里的 `[` 一律拒（AD-299，与 Rust `origin/host_grammar`
+ *   及 contracts 的 url-origin-invalid 向量同口径——java.net.URI 保留括号而 Chromium 剥，
+ *   双重解释面宁可不放行）。所以本函数对 `::1`/ULA 的豁免**实际覆盖的是已剥括号的 host
+ *   形态**：HTTPS 升级豁免层（`hostOf` 之后）与下载层（`ReservedAddressBoundary`）。
+ *   用户可见后果：地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 却能——
+ *   这条差异要消掉得解冻核心 host grammar 并增补向量（三端解析器语义变更），已报待定稿。
+ *   由 `LocalTargetHostsTest.bracketedIpv6IsRejectedForNavigation_ButExemptOnceHostIsStripped`
+ *   钉住三侧结果，**不得**反向收紧段集来「对齐」。
  */
 object LocalTargetHosts {
     private const val SCHEME_SEPARATOR = "://"

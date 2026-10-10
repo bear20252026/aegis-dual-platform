@@ -56,6 +56,9 @@ class ReservedAddressBoundaryTest {
     fun loopbackPrivateAndCgnatStayOpenableByRuling() {
         // 第七轮 B8「本机与内网必须能打开」——这一组是这条裁决在下载层的下界，
         // 谁把它们收紧了，本用例就是那条反向证。
+        // 分层事实（R9-AD-4）：本层的 host 由 hostOf 剥过方括号 ⇒ `[::1]` 在这里可下载，
+        // 而同一条 URL 在**导航层**被 OriginPolicy 拒（三端与 url-origin-* 向量同口径）。
+        // 完整口径见 LocalTargetHosts 的对象 KDoc 与跨层锚用例。
         val allowed =
             listOf(
                 "http://127.0.0.1:8000/",
