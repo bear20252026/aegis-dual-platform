@@ -233,6 +233,31 @@ permission/fileChooser/progress/title），平台默认 `onCreateWindow` 返回 
 **残余（不假称已闭）**：真实设备上「页面能否读到包装源码」只能靠真机/WebView 冒烟确证，
 本轮全部是静态与单元层证据；`REGISTER_CLOSE_JS` 仍依赖 document-start 早于任何页面脚本，
 这条前提第八轮已由「撤销排在宏任务之外」的写法闭合。
+### 3.6 R9-B7（2026-10-10，定稿项 12）：公共后缀表补齐 + 收录口径 + 「只增不减」入门禁
+
+Q16（R9-SH-6）报的是**表本身**不完备，而不是副本漂移——原对账门禁只比三端副本与表，
+永不判表。本批做三件事，第三件是把「以后别再退化」搬进门禁：
+
+1. **补齐 13 条**（79 → 92）：Q16 点名的 `com.jp`（表里 co/ne/or/go/ac.jp 全有，独缺
+   `com.jp`）、`web.app`、`firebaseapp.com`、`workers.dev`、`wordpress.com`、
+   `squarespace.com`、`bitbucket.io`；按同一判据另补 `myshopify.com`、`tumblr.com`、
+   `storage.googleapis.com` 与动态 DNS 三条 `ddns.net`/`no-ip.com`/`duckdns.org`。
+   Rust 侧经 `include_str!` 自动同步，C#/Kotlin 两份内嵌副本同批改。
+2. **收录口径写进清单头注**（三条判据 + 两条不收录）：ccTLD 的 NIC 分层段；
+   **托管域**——判据是「子域归谁」而不是「服务有多出名」；**动态 DNS**。不收录公共 CDN
+   的边缘名与单标签 LAN 名（后者由 `LocalTargetHosts` / `IsPublicHost` 判，往这里加
+   它们就是造第二个名字判据）。同时写明代价：加条目会把该后缀下已有站点的种子**重排
+   一次**（隔离变细），这是修正归属的一次性账。
+3. **新增 `PINNED_SUFFIXES` 门禁**（22 条）：完备性要外部知识、判不了，但「已按判据收
+   进来的托管域被后来者顺手摘掉」判得了 ⇒ 头注那句「只增不减」现在可执行。
+   门禁自带第五条故障注入（从权威清单删掉 `web.app` 必须判红），pytest 侧三条锚：
+   现树钉全、pin ⊆ 表且三份副本都含、摘一条即红。
+
+**未做（保持待定稿）**：Q16 的另一半——「未命中回退两段」改成「回退整主机名」会改变
+同站多子域共享种子的产品语义（`a.example.com` 与 `b.example.com` 从同键变异键），
+属第九轮 §四 已列的用户决定，本批不顺手改。
+
+
 ## 四、待用户定稿（本轮新增两项，其余沿用第八轮 §七）
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
@@ -240,7 +265,8 @@ permission/fileChooser/progress/title），平台默认 `onCreateWindow` 返回 
 - **R9-SH-5 / R9-SH-6 的一半**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在
   `agent/broker.py` 裁决路径零消费（要么 broker 消费、要么 catalog 删列并在文档写明
   「治理元数据非判定面」）；`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会
-  改变同站多子域共享种子的产品语义。
+  改变同站多子域共享种子的产品语义（该表**补条目 + 收录口径 + 只增不减门禁**已落地，见 §3.6；
+  只剩这一半未决）。
 - **本节写作后已推进（2026-10-10 划账）**：`Microsoft.NET.Test.Sdk` 18.10.1 已并 #136；
   `xunit.runner.visualstudio` 4.0.1 走 #138（锁 diff 实测只有那一个包的三字段，零传递漂移）；
   `NewTab` 洪水上限已定稿并落地（§3.4）；Dependabot #125/#126/#127/#133 已全部并完（§3.0）。
@@ -327,7 +353,8 @@ permission/fileChooser/progress/title），平台默认 `onCreateWindow` 返回 
   缺 `com.jp`（而 co/ne/or/go/ac.jp 都在）、`web.app`、`firebaseapp.com`、`workers.dev`、
   `wordpress.com`、`squarespace.com`、`bitbucket.io`；`core/rust-policy-core/src/shield.rs:139-147`
   未命中即返回后两段 ⇒ 表外托管域整域共享站点键（`a.web.app` 与 `b.web.app` 同键）。
-  对账门禁只比三副本与表，**永不判表本身完备**。
+  对账门禁只比三副本与表，**永不判表本身完备**。——**条目半边与「只增不减」门禁已落地**（§3.6，79→92 条 + PINNED_SUFFIXES）；
+  「未命中回退整主机名」那半仍在第四节待定稿。
 - Q17 R9-SH-7 | P2 | `contracts/codegen/verify_contract_compatibility.py:62-64,257-259,214`：
   `DESIGN_NOTATION_MIRRORS` 的 6 个名字恰等于生成镜像全集（两目录各 6 份）⇒ `:257` 一律
   continue、`:259` 的 `_has_real_consumer` 现树不可达；实测 ApprovalContract /
