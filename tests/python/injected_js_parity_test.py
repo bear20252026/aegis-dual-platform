@@ -2,9 +2,11 @@
 # 对账门禁自己的回归面。
 #
 # 两道既有门禁都不判「三端抄的同一段 JS 是否还是同一段」：verify_seed_framing_parity 只
-# 查要件 token 在不在，canvas_read_channels.rs 只查 5 段片段（R9-RS-7）。本文件钉新门禁
-# 的四件事：现树真的对齐、钉表是下界、**豁免表必须仍然失真**（这条是白名单式门禁的
-# 通用失效口）、解释层不被宿主引号带偏。
+# 查要件 token 在不在，canvas_read_channels.rs 当时只查 5 段片段（R9-RS-7 已在 R9-B14
+# 补到 8 段——本文件的现树锚与那条 Rust 用例是同一条判据的两个语言面）。
+# 本文件钉门禁的几件事：现树真的对齐、钉表是下界、**豁免表必须仍然失真**（这条是
+# 白名单式门禁的通用失效口）、收编后的两条 read 包装确实在比较面、注册器别名表按键名
+# 收口不被 close 键冒充、解释层不被宿主引号带偏。
 from __future__ import annotations
 
 import pathlib
@@ -41,6 +43,30 @@ def test_registered_divergences_are_really_divergent():
         f"登记项已同形但未收编：{sorted(set(vip.DIVERGENT_REGISTERED) - diverging)}")
 
 
+def test_pixel_read_wrappers_are_collected_after_r9_rs_9():
+    """R9-RS-9 收编锚：两条像素直读包装曾挂豁免表（注册尾三端不同形），
+    现在必须**不在**豁免表且**确实**同形——退化回原写法本条与门禁一起判红。"""
+    tables = vip.per_end_tables()
+    diverging = vip.divergent_shared_names(tables)
+    for name in ("aegisWrapReadPixels", "aegisWrapRectRead"):
+        assert name not in vip.DIVERGENT_REGISTERED, name
+        assert name not in diverging, f"{name} 又分叉了：{sorted(diverging)}"
+
+
+def test_register_accessor_alias_is_key_bounded():
+    """别名表只认登记过的取用路径；未登记的 Symbol 键（close 键）不得被归一冒充注册器。"""
+    forms = [
+        "try { if (window[Symbol.for('proxy.register.v1')]) window[Symbol.for('proxy.register.v1')](a, b); } catch (e) {}",
+        "try { if (window[Symbol.for('{reg_sym}')]) window[Symbol.for('{reg_sym}')](a, b); } catch (e) {}",
+        "try { if (registerProxy) registerProxy(a, b); } catch (e) {}",
+        "try { if (__aegisReg) __aegisReg(a, b); } catch (e) {}",
+    ]
+    canonical = {ijt.canonicalize(form, "Rust") for form in forms}
+    assert len(canonical) == 1 and "__REG__" in canonical.pop(), canonical
+    assert "__REG__" not in ijt.canonicalize(
+        "window[Symbol.for('proxy.register.close.v1')](a, b)", "Rust")
+
+
 def test_shared_core_is_a_floor_not_a_ceiling():
     """钉表条目必须都在现树共有面里（有人改名/删除时本条与门禁一起响）。"""
     assert set(vip.SHARED_CORE) <= vip.shared_names(vip.per_end_tables())
@@ -70,8 +96,13 @@ def test_missing_core_function_is_reported(monkeypatch):
 
 
 def test_exemption_that_stops_being_divergent_is_flagged(monkeypatch):
-    """把已同形的函数留在豁免表里 ⇒ 必须判红（否则豁免会悄悄长成了永久盲区）。"""
+    """把已同形的函数留在豁免表里 ⇒ 必须判红（否则豁免会悄悄长成了永久盲区）。
+
+    R9-RS-9 之后现树登记表为空（两条 read 包装已收编），所以这里显式注入一个**已同形**
+    的名字来驱动那条反向判据——不能因为表现在是空的就跳过它。
+    """
     monkeypatch.setattr(vip, "per_end_tables", lambda: _tables())
+    monkeypatch.setattr(vip, "DIVERGENT_REGISTERED", ("aegisNudge",))
     assert any("已登记的不同形项现在已同形" in p for p in vip.violations())
 
 

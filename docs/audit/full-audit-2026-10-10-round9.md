@@ -33,6 +33,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-CS-5 | P3 | 保留并登记（方向保守，未修） | `App.xaml.cs:11-32` 的 `PopupRateLimiter` 槽位数组以 **0** 起步，而判定是 `now - _ticks[i] >= windowMs` ⇒ 开机后第一个 30 秒内 `now` 本身 < 30000，三槽全判「未过期」⇒ **这段时间里所有崩溃弹窗被静默拒**（只记日志）。它管的是异常提示，方向保守所以从未被当成缺陷暴露；风险是**形状被抄走**：同形状用在「拒绝用户可达的功能」上就是打开即失效。新建的 `Core/NewTabGate.cs` 刻意用「从未占用」哨兵避开这个坑，并有冷启动用例 `ColdStart_AllowsFullQuotaInsideOneWindow` 钉住；旧那台零测试引用，另批收口 |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
+| R9-RS-9 **收编** | P2 | 保留并落地（R9-B15，上一条登记行的后半） | 两条像素直读包装的注册尾现在三端同形：C# 此前**裸调** `registerProxy(...)`、Kotlin 此前**裸调** `if (__aegisReg) ...`，两端都补成与 Rust 同款 `try { if (REG) REG(proxy, orig); } catch (e) {}`——这不是排版：注册器一旦抛异常，裸调会让整个包裹安装中断，等于把「不加噪的原文直读」重新放出来（catch 体本身三端行为早已同形：空 catch + 落到统一 `return orig.apply(...)`，只有 Kotlin rect-read 把 return 写在 catch 体内，现改成同形写法）。剩余唯一分歧是**注册器取用路径**（Windows＝ToStringGuard 闭包内的本地 `registerProxy`，Rust/Android＝`window[Symbol.for('proxy.register.v1')]`），由 `injected_js_text._REGISTER_ACCESSOR` 按别名表归一，因此 `DIVERGENT_REGISTERED` 从 2 条收成 **0 条**、比较面从 5 个函数扩到 7 个。别名表**只认登记的键名**（`proxy.register.v1` 与 Rust 的 `{reg_sym}` 占位），故意不写成通配 `window[Symbol.for(…)]`——否则 close 键 `proxy.register.close.v1` 能冒充注册器通过；这条边界有常驻用例与 `--self-test` 用例各钉一次。没有把 Windows 也改成 window 键入口：那会把注册句柄从闭包暴露到页面可达的 window 空间，是**放宽出货安全面**，已列第四节待裁决 |
 | R9-CS-1 | P2 | 保留并落地 | 逐行回读确证：主窗 core-ready 段在 R8-CS-SEC-07 已包 `TabRuntimeLifetime.RunCoreReadyFailClosed`，无痕窗 `InPrivateWindow.xaml.cs:137-166` 仍是裸 lambda，且该回调经 Dispatcher 派发（**抛出没有观察方**）—— `runtime.OnCoreReady` 内的 broker `RegisterSession`（会话池 1024 满即抛）一旦抛出，就留下「已挂载可见、却没接上策略处理器」的标签，且会话在池里泄漏。修法与主窗同形，但**保住两条既有早退语义**（`!e.IsSuccess` 只留痕、`_closed\|\| !_runtimes.ContainsKey` 直接返回），接线体外迁成 `InPrivateWindow.CoreReady.cs`（宿主文件在零余量基线上），宿主侧只剩一行订阅；420\→394 行、基线同批改。**这道缺口两轮全绿存在的直接原因是测试只有主窗锚**——新对偶锚 `InPrivateCoreReadyWiringTests`（5 条，含三条内存态反向锚：删包装 / 接线体长回宿主 / 拆除换成只收协调器，都必须判红） |
 | R9-SH-12 | P3 | 保留并落地（#144 落地时新证） | `start.main.js:83` 的 `Enter`/空格 选中分支全仓零用例驱动——#144 只补上了方向键那侧的反向判据，所以把整条 Enter 分支删掉仍 117/117 绿。补正向锚（对 `items[1]` 分别触发两种按键，断 `state.engineCalls.slice(-1)` 为 `['bing']`），并把「删掉 Enter 分支」真的做一遍：改 `start.main.js` 后该用例立刻判红并打出 `Enter 必须选中当前项（R9-SH-12 正向判据）`，还原后全绿。该文件在 579 行零余量基线上，故同批重排文件头与 WB-083 注释（原文不改），581\→578 行、基线同批改 |
 | R9-SH-2 | P2 | 保留并落地（锁自身失效） | 逐行回读 Q12 并复现：`start_a11y.test.mjs:25-30` 的 `mediaBlock()` 把「媒体块」切成「本 at-rule 到下一个 `@media`」——coarse 块实际 244-259 行，旧切片却一路带到 :364（19189 字符），块外的 `.veil-btn {`（:324）与 `.engine-item:focus-visible`（:353）都算块内命中，且不剔注释（:245-247 的注记原文就写着 `.engine-item`）。**内存态实证**：从 :248 的保底选择器列表摘掉 `.engine-item, .veil-btn`（即回退 R8-SH-13 半个修复），这把新锁与旧的 WB-142 双双仍绿。→ 改成「去注释 + 花括号配对切闭合块 + 边界自证」，并把判据抽成 `touchProblems(css)` 做反向锚（摘保底、把宽度改回 28px 都必须判红） |
@@ -435,7 +436,42 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
    **568 条 lib + canvas 3 / vectors 10 / tostring_window 5 / timer_parity 3 全绿**；
    C#/Kotlin 侧零改动（孪生不收带端口入参，见 §二 R9-RS-6 行末）。
 
-## 四、待用户定稿（本轮新增三项，其余沿用第八轮 §七）
+### 3.14 R9-B15（2026-10-10）：两条像素直读包装的注册尾三端收编（R9-RS-9）
+
+**共同主题：豁免表能收编才算修完。** 上一批立门禁时把 `aegisWrapReadPixels` /
+`aegisWrapRectRead` 显式挂起，并要求「修齐当天门禁判红一次要求收编」——本批就是那次收编。
+
+1. `windows/.../FingerprintShield.Canvas.cs`（2 处）、`android/.../WebViewHardeningCanvas.kt`
+   （2 处）：注册尾补 try 包裹并与 Rust 逐 token 同形。这不是排版差异——注册器抛异常时
+   裸调会中断整个包裹安装，等于把「不加噪的原文直读」重新放出来（⑦ 要消除的正是它）。
+2. Kotlin `aegisWrapRectRead` 的 catch 体从「体内 return」改成「空 catch + 落到统一
+   return」：两条写法行为相同（都是再读一次原像素并返回），但只有后者能与三端对账。
+3. `contracts/codegen/injected_js_text.py`：新增 `_REGISTER_ACCESSOR` 别名表，把三端的
+   注册器**取用路径**归一成 `__REG__`；只认 `registerProxy` / `__aegisReg` /
+   `window[Symbol.for('proxy.register.v1')]` / Rust 模板占位 `{reg_sym}` 四个登记项，
+   **刻意不用通配**（否则 close 键可冒充注册器）。理由与三端机制差异写在注释里。
+4. `contracts/codegen/verify_injected_js_parity.py`：`DIVERGENT_REGISTERED` 2 条 → 空，
+   比较面 5 → 7 个共有函数；`--self-test` 从 4 条扩到 6 条，新增「C# 注册尾丢掉 try 必须
+   判红」「Rust 换成未登记的 Symbol 键必须判红」两条——别名表本身也被反向锚住。
+5. 常驻测试 +2 条（`tests/python/injected_js_parity_test.py`，现 15 条）：两条包装确实
+   不在豁免表且确实同形；别名表按键名收口。原「豁免表必须仍然失真」那条改用注入名字驱动
+   （表现在是空的，判据不能跟着失效）。
+6. 三端机制未强求一致：Windows 的注册器是 ToStringGuard **闭包内的本地函数**，比
+   Rust/Android 发布到 `window` Symbol 键更严（页面脚本拿不到注册句柄）。统一到 window 键
+   ＝放宽出货面 ⇒ 进第四节待裁决，不在本批顺手做。
+7. 本地验证：`verify_injected_js_parity.py`（7 个共有函数全比对）+ `--self-test` 6 条 ✅、
+   `verify_seed_framing_parity.py --self-test` ✅、`cargo test --locked --all-features`
+   568 + 集成 ✅、`dotnet test` Core **796/796**（发现数下界门禁同时跑过）、
+   `pytest tests/python` **556 passed / 1 skipped**、ruff/bandit/compat/file sizes ✅。
+   Android 侧本批只改注入文本，未跑 Gradle（ktlint/detekt 由 CI 判）。
+
+## 四、待用户定稿（本轮新增四项，其余沿用第八轮 §七）
+
+- **R9-RS-9 的一半（机制对齐）**：Windows 的 ToStringGuard 注册器是**闭包内的本地函数**，
+  Rust/Android 则把同一个注册器发布到 `window[Symbol.for('proxy.register.v1')]` 供各段取用。
+  本批已把三端注册尾的**写法**收编同形（try + 真值判定），并把取用路径作为已核等价项在
+  同形门禁里显式别名；把 Windows 也改成 window 键入口＝把注册句柄暴露到页面可达的
+  window 空间（要靠 R8-RS-09 那套「窗口关闭」标志兜着），属**放宽出货安全面**，不默认执行。
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
   保存默认——关闭改变调试与默认 UX，属产品行为变更。

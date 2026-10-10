@@ -18,8 +18,20 @@ _FUNCTION_HEAD = re.compile(r"function\s+([A-Za-z_$][\w$]*)\s*\(")
 _DECLARATION = re.compile(r"\b(?:var|let|const)\s+")
 # 种子访问器是各端自己的宿主接线（种子由宿主下发），不属于共享逻辑：
 # C#/Rust 叫 aegisCanvasSeed()、Kotlin 叫 noiseSeed()，比较时归一成一个记号。
-# 这条命名分歧登记在 R9-RS-9（与两条 read 包装的注册尾同批处理），改名不在本批顺手做。
 _SEED_ACCESSOR = re.compile(r"\b(?:aegisCanvasSeed|noiseSeed)\(\)")
+# R9-RS-9（第九轮 2026-10-10）：注册器**取用路径**同理归一——三端各用自己的名字，
+# 而注册逻辑本身在三处已对齐（链式包装传递解析 + hops 上限，见 R9-AD-1）：
+#   Windows `registerProxy`＝ToStringGuard 闭包内的**本地函数**（有意不发布到 window：
+#             比 Rust/Android 的 Symbol 键入口更严，页面脚本拿不到注册句柄）；
+#   Android  `__aegisReg` ＝段首缓存的 `window[Symbol.for('proxy.register.v1')]`；
+#   Rust     内联读同一 Symbol 键，源码里键名还是 format! 占位符 `{reg_sym}`
+#             （实例化值由 tostring_guard::REGISTER_SYMBOL 钉为同名，且
+#              shield/tests.rs 常驻钉「五处注册行全部 try 包裹」）。
+# **刻意不用通配 `window[Symbol.for(…)]`**：那会让 close 键 `proxy.register.close.v1`
+# 被静默当成注册器通过。别名表只认这两个键名，新增键名必须显式加进来并说明理由。
+_REGISTER_ACCESSOR = re.compile(
+    r"\b(?:registerProxy|__aegisReg)\b"
+    r"|window\[Symbol\.for\('(?:proxy\.register\.v1|\{reg_sym\})'\)\]")
 _PUNCT_BEFORE = re.compile(r"\s+([)}\];,])")
 _PUNCT_AFTER = re.compile(r"([({[;,])\s+")
 
@@ -129,6 +141,7 @@ def canonicalize(body: str, end: str) -> str:
     if end == "Rust":
         body = body.replace("{{", "{").replace("}}", "}")
     body = _SEED_ACCESSOR.sub("__SEED__()", strip_comments(body))
+    body = _REGISTER_ACCESSOR.sub("__REG__", body)
     body = _DECLARATION.sub("var ", body)
     body = " ".join(body.split())
     body = _PUNCT_BEFORE.sub(r"\1", body)

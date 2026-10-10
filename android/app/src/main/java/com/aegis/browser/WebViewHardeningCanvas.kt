@@ -83,11 +83,16 @@ internal object WebViewHardeningCanvas {
           var imageData = orig.apply(this, arguments);
           aegisNoiseRectangle(imageData.data, noiseSeed(), sx, sy, sw, sh, canvas.width);
           return imageData;
-        } catch (e) {
-          return orig.apply(this, arguments);
-        }
+        } catch (e) { /* tainted canvas 等——跳过扰动走原路径 */ }
+        // R9-RS-9：失败出口改成与 Rust/C# 同形的「catch 空体 + 落到统一 return」。
+        // 行为逐字不变（两条路径此前也都是再读一次原像素并返回），只是不再让
+        // catch 体自带 return——那样写会让三端逐 token 对账永远分叉。
+        return orig.apply(this, arguments);
       };
-      if (__aegisReg) __aegisReg(owner.getImageData, orig);
+      // R9-RS-9：注册尾三端同形——try 包裹 + 真值判定后再调（与 Rust canvas.rs、
+      // C# FingerprintShield.Canvas.cs 逐 token 一致）。此前本端裸调：注册器抛异常会
+      // 中断整个包裹安装（＝不加噪的原文直读重新可用），try 后只剩注册失败本身。
+      try { if (__aegisReg) __aegisReg(owner.getImageData, orig); } catch (e) {}
       return orig;
     }
     if (typeof CanvasRenderingContext2D !== 'undefined') {
@@ -117,7 +122,7 @@ internal object WebViewHardeningCanvas {
         } catch (e) { /* 上下文已退休等——不阻断原读回 */ }
         return orig.apply(this, arguments);
       };
-      if (__aegisReg) __aegisReg(owner.readPixels, orig);
+      try { if (__aegisReg) __aegisReg(owner.readPixels, orig); } catch (e) {}
     }
     if (typeof WebGLRenderingContext !== 'undefined') {
       aegisWrapReadPixels(WebGLRenderingContext.prototype);
