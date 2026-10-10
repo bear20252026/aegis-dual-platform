@@ -64,11 +64,11 @@ public partial class MainWindow : Window
     private Action? _zoomChangedHandler;
     // CS-299：后台历史写入链尾——串行化保证先后序（详见 OnTabNavigationCompleted）
     private Task _historyWriteTail = Task.CompletedTask;
-    // CS-355（2026-10-01 审计）：最近一次策略拒绝的用户可读原因（供
-    // NavigationCompleted 的 OperationCanceled 分支呈现）
-    // CS-386（2026-10-02 审计）：窗口级单槽改按 tabId 存取——此前任一标签的
-    // 拒绝都可能被另一标签的 NavigationCompleted 呈现/清除（多标签串扰）
+    // CS-355/CS-386（2026-10-01/02 审计）：按 tabId 存策略拒绝的用户可读原因，
+    // 供 NavigationCompleted 的 OperationCanceled 分支呈现（单槽会跨标签串扰）
     private readonly Dictionary<string, string> _pendingDenyMessages = new();
+    // 第九轮定稿项 5：页面发起的新窗口走单源闸门（地址边界 + 同源标签洪水限流）
+    private readonly Core.NewTabGate _newTabGate = new();
     // CS-367（2026-10-01 审计）：KillSwitch 常驻横幅订阅句柄（OnClosed 解绑）
     private readonly Action _killSwitchEngagedHandler;
     // CS-393（2026-10-02 审计）：会话重建期抑制「集合清空即关窗」——
