@@ -9,74 +9,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-// WB-206（2026-10-02 审计）：DOM 节点桩下沉 helpers.mjs 单源——本文件只留
-// 元素表、装载器与用例（此前与 start_import.test.mjs 双份维护、语义易漂移）
-import { makeEl } from './helpers.mjs';
+// R9-SH-8 批（第九轮 2026-10-10）：装载器（元素表 + document/window/timers 桩 +
+// __take 导出）与 MAINJS 源码一起下沉 helpers.mjs 单源——此前它只在本地可用，
+// 第二个用例文件想驱动同一入口就得再抄一份桩（两处解析漂移＝第二个假绿源，WB-206 同课）。
+import { MAINJS, loadMain, makeHost } from './helpers.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const MAINJS = readFileSync(join(ROOT, 'shared', 'shell', 'start.main.js'), 'utf8');
 
-// —— DOM 桩：共享 makeEl（见 helpers.mjs WB-206 注记） ——
-const el = makeEl;
 
-function makeHost() {
-  const state = { setCalls: [], errors: [], getWallpaperCb: null, hasSavedN: 0, hasSavedRaw: undefined, navigateCalls: 0, restoreCalls: 0, engineCalls: [], geoFailCalls: 0 };
-  const host = {
-    kind: () => 'cs',
-    has: (f) => f === 'navigate' || f === 'geo',   // bookmarks=false → 书签宫格早退
-    getEngine: (cb) => cb({ engine: 'baidu', engines: [{ key: 'baidu', name: '百度' }] }),
-    setEngine: (key) => state.engineCalls.push(key),
-    getWallpaper: (cb) => { state.getWallpaperCb = cb; },
-    hasSaved: (cb) => cb(state.hasSavedRaw !== undefined ? state.hasSavedRaw : state.hasSavedN),
-    restoreSession: () => { state.restoreCalls += 1; },
-    setWallpaper: (name) => state.setCalls.push(name),
-    jsError: (...a) => state.errors.push(a.join(' ')),
-    navigate: () => { state.navigateCalls += 1; },
-    // WB-147：openGeo 的回调即 onFail——默认成功形态（不触发降级）
-    openGeo: (onFail) => { state.geoCalls = (state.geoCalls || 0) + 1; return undefined; },
-  };
-  return { host, state };
-}
 
-function loadMain(host, winExtras) {
-  const elements = {
-    q: el('input'),
-    searchForm: el('form'),
-    searchBtn: el('button'),
-    enginePill: el('div'),
-    engineName: el('span'),
-    engineMenu: el('div'),
-    wallpaper: el('div'),
-    wpList: el('div'),
-    bm: el('div'),
-    restoreBox: el('div'),
-    restoreBtn: el('button'),
-    geoBtn: el('button'),
-  };
-  const docHandlers = {};
-  const document = {
-    getElementById: (id) => elements[id] || null,
-    createElement: (tag) => el(tag),
-    // WB-107：书签整段构建走 DocumentFragment
-    createDocumentFragment: () => ({ children: [], appendChild(c) { this.children.push(c); } }),
-    addEventListener(type, fn) { (docHandlers[type] = docHandlers[type] || []).push(fn); },
-    activeElement: null,
-  };
-  const win = Object.assign({ addEventListener() {} }, winExtras);
-  const timers = { fired: [], setTimeout(fn, ms) { timers.fired.push({ fn, ms }); return timers.fired.length; } };
-  let exported = null;
-  // 模块级 var/函数声明是 Function 体局部——尾部追加 __take 导出待测面。
-  // W5 批：setTimeout 桩注入（go 复原/书签有界重试不再依赖真实 1.2s/200ms）
-  new Function('document', 'window', 'Host', '__take', 'setTimeout',
-    MAINJS + '\n;__take({ setWallpaper: setWallpaper, WALLPAPERS: WALLPAPERS, ' +
-    'current: function () { return current; }, go: go, ' +
-    'renderEngineMenu: renderEngineMenu, toggleEngineMenu: toggleEngineMenu, ' +
-    'selectEngine: selectEngine, renderBookmarks: renderBookmarks, ' +
-    'renderBookmarksWithRetry: renderBookmarksWithRetry, ' +
-    'timing: function () { return TIMING; } });')(
-    document, win, host, (x) => { exported = x; }, timers.setTimeout);
-  return { elements, exported, timers, docHandlers };
-}
 
 test('WB-025 未知壁纸整体 no-op：状态/样式/桥调用全不动', () => {
   const { host, state } = makeHost();
