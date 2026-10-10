@@ -33,6 +33,9 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-CS-5 | P3 | 保留并登记（方向保守，未修） | `App.xaml.cs:11-32` 的 `PopupRateLimiter` 槽位数组以 **0** 起步，而判定是 `now - _ticks[i] >= windowMs` ⇒ 开机后第一个 30 秒内 `now` 本身 < 30000，三槽全判「未过期」⇒ **这段时间里所有崩溃弹窗被静默拒**（只记日志）。它管的是异常提示，方向保守所以从未被当成缺陷暴露；风险是**形状被抄走**：同形状用在「拒绝用户可达的功能」上就是打开即失效。新建的 `Core/NewTabGate.cs` 刻意用「从未占用」哨兵避开这个坑，并有冷启动用例 `ColdStart_AllowsFullQuotaInsideOneWindow` 钉住；旧那台零测试引用，另批收口 |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
+| R9-SH-2 | P2 | 保留并落地（锁自身失效） | 逐行回读 Q12 并复现：`start_a11y.test.mjs:25-30` 的 `mediaBlock()` 把「媒体块」切成「本 at-rule 到下一个 `@media`」——coarse 块实际 244-259 行，旧切片却一路带到 :364（19189 字符），块外的 `.veil-btn {`（:324）与 `.engine-item:focus-visible`（:353）都算块内命中，且不剔注释（:245-247 的注记原文就写着 `.engine-item`）。**内存态实证**：从 :248 的保底选择器列表摘掉 `.engine-item, .veil-btn`（即回退 R8-SH-13 半个修复），这把新锁与旧的 WB-142 双双仍绿。→ 改成「去注释 + 花括号配对切闭合块 + 边界自证」，并把判据抽成 `touchProblems(css)` 做反向锚（摘保底、把宽度改回 28px 都必须判红） |
+| R9-SH-3 | P2 | 保留并落地（零判定） | Q13 确证：`start_main.test.mjs:313` 注释写「触发按键不得选中引擎（仅 Enter/Space）」，实体是一行 `assert.ok(true)`，而同一 `makeHost()` 已把 `setEngine` 记进 `state.engineCalls` 却没用。→ 换成 `assert.deepEqual(state.engineCalls, [], …)`（该文件是 579 行零余量基线，故净零行：改一行注释 + 一行断言、解构多取一个 `state`）。**故障注入自证**：给 `start.main.js` 的 ArrowDown/ArrowUp 分支加一句 `selectEngine(idx)` ⇒ 该用例立刻判红并打出正确消息；还原后 114/114 绿。Enter/Space 的正向面全仓仍零覆盖，另登 R9-SH-12（队列新增 Q47） |
+| R9-SH-4 | P3 | 保留并落地（切片无界） | Q14 确证：`start_page.test.mjs:403-405` 用 `SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"))`——`indexOf` 失配返回 -1 时 `substring(-1)` 按 0 处理 ⇒ 退化全文扫描；命中后又一路读到文末。而 `if (!isOpen) return;` 在 `start.snake.js` 出现两次（键盘 :453、触摸 :472）⇒ 实测删掉键盘那一处仍绿。→ 外迁成新文件 `snake_guard_slice.test.mjs`（原文件 490 行零余量，加边界断言必增行）：有界切片 + 剔注释 + 两条反向锚，其中一条**把旧口径的漏判本身钉成文字**（同一删改下旧写法必须仍“通过”） |
 | R9-AD-4 | P2 | 保留并按**第四节处方**落地（不收紧段集） | 逐行回读 Q4 的三处位置：`OriginPolicy.kt:104-110` 的 `!host.contains("[")` 是 AD-299 刻意与 Rust `origin/tests/host_grammar.rs:183-184`（`try_parse_external("https://[::1]:8080/x") == None`）及 contracts 的 url-origin-invalid 向量对齐的**导航入口**判定；而 `LocalTargetHosts.hostOf:83-88` 反过来**剥掉**方括号（P74 那笔账的产物）⇒ `::1`/ULA 在升级豁免层与下载层确是放行形态。两侧都对，缺的只是把关系写下来：对象 KDoc 补该分层事实，新跨层锚用例把「导航拒 / 剥出 `::1` / 下载不拒」三侧各钉一次。用户可见后果如实记：地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 能。打通它需解冻核心 host grammar 并增补向量 ⇒ 留在第四节待定稿，**本批零判定改动** |
 
 
@@ -394,16 +397,15 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
   5313/19189 字符，含块外的 `.veil-btn {`（:324）与 `.engine-item:focus-visible`（:353），
   且不剔注释（块内注记 :245-247 原文就写着 `.engine-item`）。**内存态注入实证**：从
   `start.css:248` 的选择器列表摘掉 `.engine-item, .veil-btn`（即回退 R8-SH-13 半个修复），
-  新锁与旧锁 WB-142 双双仍绿；整块退回 40px 形态才红。
+  新锁与旧锁 WB-142 双双仍绿；整块退回 40px 形态才红。——**本批已回读确证并落地**（§二 R9-SH-2）。
 - Q13 R9-SH-3 | P2 | `tests/ui-regression/start_main.test.mjs:313`：注释写「触发按键不得
   选中引擎（仅 Enter/Space）」，实体是一行 `assert.ok(true)`——零判定，而 `makeHost()`
-  已提供 `state.engineCalls` 却未取用。
+  已提供 `state.engineCalls` 却未取用。**本批已回读确证并落地**（§二 R9-SH-3）；Enter/Space 正向面零覆盖另记为 R9-SH-12（队列新增 Q47）。
 - Q14 R9-SH-4 | P3 | `tests/ui-regression/start_page.test.mjs:403-405`：
   `SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"))` 在 indexOf 返
   `-1` 时退化为全文扫描，而 `if (!isOpen) return;` 在 `shared/shell/start.snake.js`
   出现 2 次（:449 keydown 与触摸处理器）⇒ 实测删除全部 document keydown 注册后仍绿
-  （WB-133 的锁）。
-- Q15 R9-SH-5 | P2 | `contracts/policy/action-catalog.yaml:14-35` 声明
+  （WB-133 的锁）。——**本批已回读确证并落地**（§二 R9-SH-4：外迁成新文件 `tests/ui-regression/snake_guard_slice.test.mjs`，原文件在零余量基线上）。- Q15 R9-SH-5 | P2 | `contracts/policy/action-catalog.yaml:14-35` 声明
   `risk/read_only/confirmation/audit/redteam_fixtures`，而 `agent/broker.py:178-190,278-283,366`
   裁决只读 `name/scope/budget(+default_deny/policy_version)` ⇒ `confirmation` 一列是装饰；
   `contracts/codegen/analyze_action_catalog.py:93-95` 只断 `redteam_fixtures` 非空。
@@ -510,6 +512,9 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
   只查 5 段片段，不查 `pixels.length === width*height*4` 与两条 `aegisNoiseRectangle`
   调用行 ⇒ 端上删掉 8 位 RGBA 守卫不会红（B2/⑦ 本体一致，此为测试余量）。
 
+### 5.2.1 本批落地时新增队列（同口径：必须带 file:line）
+
+- Q47 R9-SH-12 | P3 | `shared/shell/start.main.js:83` ↔ `tests/ui-regression/start_main.test.mjs:307-313`：`Enter`/`空格` 选中引擎这条**正向**判据全仓零覆盖（:83 的 `if (ev.key === 'Enter' || ev.key === ' ')` 无任何用例驱动），而 :87 的方向键分支刚被 R9-SH-3 补上反向判据——只锁一侧意味着「把 Enter 整条删掉」仍全绿。补法：在同一用例里对 `items[1]` 触发 Enter 并断 `state.engineCalls` 增长（`start_main.test.mjs` 在 579 行零余量基线上，需先净减）。
 ### 5.5 DOC（文档 vs 实树）
 
 - Q32 R9-DOC-01 | P2 | `README.md:35-37` 仍写「**仍待裁决**：Android 侧 http 一律升 https

@@ -292,7 +292,7 @@ test('WB-083 空引擎表隐藏分支：engines 空时菜单保持隐藏', () =>
 
 // WB-044（审计 2026-09-23 清单·W5 批）：菜单方向键导航——↑/↓ 移动焦点并环绕
 test('WB-044 引擎菜单方向键导航：↓ 到下一项、↑ 环绕到末项', () => {
-  const { host } = makeHost();
+  const { host, state } = makeHost();
   host.getEngine = (cb) => cb({
     engine: 'baidu',
     engines: [
@@ -309,8 +309,8 @@ test('WB-044 引擎菜单方向键导航：↓ 到下一项、↑ 环绕到末�
   items[1]._focused = false;
   items[0].onkeydown({ key: 'ArrowUp', preventDefault() {}, stopPropagation() {} });
   assert.equal(items[2]._focused, true, '↑ 从首项必须环绕到末项');
-  // 触发按键不得选中引擎（仅 Enter/Space 选中）
-  assert.ok(true);
+  // R9-SH-3：这里原本是一行 assert.ok(true)——注释写着判据、实体是零判定。
+  assert.deepEqual(state.engineCalls, [], '方向键导航不得下发 setEngine（仅 Enter/Space 选中）');
 });
 
 // WB-045（审计 2026-09-23 清单·W5 批）：Escape 关闭菜单——菜单项内与文档级
