@@ -40,6 +40,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-SH-4 | P3 | 保留并落地（切片无界） | Q14 确证：`start_page.test.mjs:403-405` 用 `SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"))`——`indexOf` 失配返回 -1 时 `substring(-1)` 按 0 处理 ⇒ 退化全文扫描；命中后又一路读到文末。而 `if (!isOpen) return;` 在 `start.snake.js` 出现两次（键盘 :453、触摸 :472）⇒ 实测删掉键盘那一处仍绿。→ 外迁成新文件 `snake_guard_slice.test.mjs`（原文件 490 行零余量，加边界断言必增行）：有界切片 + 剔注释 + 两条反向锚，其中一条**把旧口径的漏判本身钉成文字**（同一删改下旧写法必须仍“通过”） |
 | R9-AD-4 | P2 | 保留并按**第四节处方**落地（不收紧段集） | 逐行回读 Q4 的三处位置：`OriginPolicy.kt:104-110` 的 `!host.contains("[")` 是 AD-299 刻意与 Rust `origin/tests/host_grammar.rs:183-184`（`try_parse_external("https://[::1]:8080/x") == None`）及 contracts 的 url-origin-invalid 向量对齐的**导航入口**判定；而 `LocalTargetHosts.hostOf:83-88` 反过来**剥掉**方括号（P74 那笔账的产物）⇒ `::1`/ULA 在升级豁免层与下载层确是放行形态。两侧都对，缺的只是把关系写下来：对象 KDoc 补该分层事实，新跨层锚用例把「导航拒 / 剥出 `::1` / 下载不拒」三侧各钉一次。用户可见后果如实记：地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 能。打通它需解冻核心 host grammar 并增补向量 ⇒ 留在第四节待定稿，**本批零判定改动** |
 | R9-SH-7 | P2 | 保留并落地（判据曾不可达） | 回读确证三件事：①`DESIGN_NOTATION_MIRRORS`（6 名）恰等于两个生成目录的全集（各 6 份）⇒ 旧 `check_mirror_consumption` 每条都在 `continue` 处跳过，「镜像有没有人消费」这条判据在现树里**从没执行过**；②旧 `_has_real_consumer` 从仓库根 `rglob("*")`，连 `core/rust-policy-core/target`、`obj/`、`bin/`、`node_modules/` 一起爬——本机实测 20,467 个条目、641 个候选源文件、单次调用 ≈5.6s 且每个未豁免镜像各调一次（全表 ≈34s），这个代价本身就让它进不了 PR 面；③扫描口径三处失实：跨语言同名算消费（`agent/action_contract.py` 的 `class ActionContract` 会让 C# 镜像「有消费方」）、测试引用算消费、构建产物里的副本算消费。落地＝扫描面收窄到各端同语言源码根（`windows/src`、`android`）并排除 generated/tests/obj/bin/build/target/node_modules/dist（拆成 `mirror_consumers.py`，门禁本体 280 行、整条 ≈0.5s）；**并加第二条反向不变量**：登记了却已被端侧真实消费同样判红——豁免的前提是「零消费方的设计标注」，前提没了就必须从表里删掉，否则字段漂移与兼容性检查被一句过期声明悄悄跳过。现树实测 6 个镜像在两端 main 源码同语言引用全为 0 ⇒ 豁免仍成立，但从此**要自证**。接线面已核：`contracts.yml:134` 在 `contract-source-of-truth`（ubuntu-latest、`pull_request` 触发）常跑，新常驻 pytest 锚含「跨语言同名不算 / 构建目录不算 / 被消费的豁免项判红」三条故障注入 |
+| R9-RS-2 | P2 | 保留并落地（生成物无人核验） | 逐条回读确证：全仓 `import aegis_policy_core` **零命中**（Python 侧无消费者；命中的 `aegis_policy_core` 都是原生库名），而这份 1,910 行入库件的漂移**没有任何门禁在看**——`core-rust.yml:63` 的 `test -s` 判的是同一步里刚生成的 **Kotlin** 文件非空（那是 APK 真正消费的绑定，随构建产出、不入库），`contracts.yml:147`「Fail if generated bindings are stale」只 `git diff` 两个**契约**生成目录；三个 workflow 里 uniffi-bindgen 出现 3 次、`--language` 全是 kotlin ⇒ 这份 Python 镜像只能手跑生成，也就只能手漂。实测漂移内容：`607d7a1`（2026-10-04）加的 `#[uniffi::export] FfiBroker::update_host_denylist`（`src/ffi/broker.rs:323-333`）在入库件里零出现。落地＝用钉住的 1.99.0 + uniffi 0.32.2 本地重 derive 并入库（1,910→2,005 行；diff 恰为该方法的整套 FFI plumbing + 第六轮语义收窄后的 docstring，零第三方漂移）；新常驻门禁 `scripts/verify_uniffi_binding_surface.py` 做**导出名双向对账**（少导出判「绑定缺方法」、删了没重生成判「绑定多方法」；对象键须按 uniffi 的小写拼接归一 `FfiBroker`↔`ffibroker`——首轮实测就是没归一，9 个方法各报两遍）；两处接线：`contracts.yml` PR 面跑 src↔入库件，`core-rust.yml` 同一次构建里补 `--language python` 权威生成后跑生成↔入库件。红线面同步：入库生成物行数不受人控，`bindings/` 入 `GENERATED_PREFIXES`（基线少一条），漂移改由本门禁兜。**没有**采纳「删掉这份无人消费的入库件」——台账给的两条路里删除是产品/架构裁决（该件自 2026-08-22 的原生 UniFFI 集成即在库），本轮只把「静默落后」变成「落后即红」 |
 
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
@@ -375,7 +376,40 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
    diff 无新抬基线）、`active_tree_gates ruff|bandit|compat` ✅、`tests/python` 全量绿。
    本批只动 Python 门禁面，未触及三端运行时代码。
 
-## 四、待用户定稿（本轮新增两项，其余沿用第八轮 §七）
+### 3.12 R9-B13（2026-10-10，队列批次 B 第二子批）：UniFFI 入库绑定重 derive + 导出面双向对账入门禁
+
+**共同主题：无人生成的入库件，就会无人核验。** 本轮实测的形态是「镜像存在、门禁存在、
+两者不相连」：`core-rust.yml` 有一条生成绑定步骤、`contracts.yml` 有一条「stale bindings
+即失败」步骤，看起来这条面被管着——实际上前者只生成 Kotlin（不入库）、后者只 diff 两个契约
+目录，那份 1,910 行的 Python 绑定自 2026-10-03 起再没被任何机器生成过，于是 2026-10-04
+新增的 `update_host_denylist` 落后至今、零红。
+
+1. `core/rust-policy-core/bindings/aegis_policy_core.py`：用钉住的 1.99.0 toolchain +
+   uniffi 0.32.2 本地重 derive 入库（`cargo build --release --locked` →
+   `aegis-uniffi-bindgen generate … --language python --no-format`），1,910→2,005 行；
+   diff 只有两类内容：该方法的 FFI plumbing（符号声明、checksum、`Vec<String>`/u32 转换器）
+   与第六轮语义收窄后的 docstring 文本。
+2. `scripts/verify_uniffi_binding_surface.py`（新，201 行）：解析 Rust 侧
+   `#[uniffi::export]`（impl 上的属性把该 impl 内全部 `pub fn` 计入 FFI 面，
+   `#[uniffi::constructor]` 另计一组）与绑定侧 `fn_method_/fn_constructor_/fn_func_` 符号，
+   双向差集即漂移；注释行先剔（`ffi/mod.rs:253` 的注记原文就写着「未做 `#[uniffi::export]`」，
+   不剔会把文档反例算进导出面）；任一侧零符号 ⇒ exit 2（空面不作通过判定）。
+3. 两处接线：`contracts.yml` 新增常跑步骤（PR 面，src↔入库件）；`core-rust.yml` 的生成步骤
+   改名并补 `--language python`，用**同一次构建**的权威产物跑生成↔入库件（该 job 补
+   setup-python 3.12——PY-065 同口径，不赌 runner 预装）。
+4. `scripts/check_file_sizes.py`：`core/rust-policy-core/bindings/` 入 `GENERATED_PREFIXES`
+   并把理由写进注释（加一个导出就涨 95 行，按 ratchet 反倒会拦住「把入库件重 derive 成
+   当前真相」这个正确动作；不在红线面 ≠ 无人看管，漂移由本门禁兜）。基线同批重建，
+   diff 只有那一条登记项被移除（87→86）。
+5. 新常驻测试 13 条（`tests/python/uniffi_binding_surface_test.py`）：现树对账为空、
+   导出面形状、注释不算导出、对象名大小写归一不误报、缺方法/多方法/缺构造子/缺自由函数
+   四类故障注入、`--generated` 模式的前缀与判定、四种空面 exit 2、exit code 1。
+6. 本地验证：`verify_uniffi_binding_surface.py` ✅（含 `--generated` 自证）、
+   `pytest tests/python` **554 passed / 1 skipped**、`ruff`/`bandit`/`py312-compat` ✅、
+   `check_workflow_shells --self-test`（27 个 pwsh 步骤零违规）✅、`check_file_sizes`
+   （491 文件）✅、`check_doc_claims` ✅。三端运行时代码零改动。
+
+## 四、待用户定稿（本轮新增三项，其余沿用第八轮 §七）
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
   保存默认——关闭改变调试与默认 UX，属产品行为变更。
@@ -388,6 +422,9 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
   `NewTab` 洪水上限已定稿并落地（§3.4）；Dependabot #125/#126/#127/#133 已全部并完（§3.0）。
   这四项从待裁决面划掉；13(b) 发布子链 concurrency 已落地（§3.7）；定稿项 9 步 1（三端注入 JS 同形门禁）已落地（§3.8），步 2「三端改用它」仍待定稿。
 - **真未决**：WebView2 SDK bump（产品行为变更）、子资源 `shouldInterceptRequest`、
+  **入库 UniFFI Python 绑定要不要删**（R9-RS-2 的另一条处方：该件全仓零 Python 消费者，
+  本轮已把它重 derive 成当前真相并加双向对账门禁，但「留一份无人消费的跨语言镜像」本身
+  是架构取舍——删除属产品/架构裁决，不默认执行）、
   Android `dependencyLocking`、核心 JS 生成导出（R8-RS-15）、
   `action-catalog.yaml` 三列（`confirmation/risk/audit`）到底由 broker 消费还是删列并写明
   「治理元数据非判定面」（R9-SH-5，方向是「默认放行改默认需确认」，不默认执行）、
@@ -533,13 +570,13 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
   `hasOwnProperty.call(performance,'now')` 即检出防护存在；且 mark/measure/getEntries*/
   rAF/`Event.timeStamp`/`timeOrigin` 六条高解析通道两端零包裹（核心全裹，
   `getEntriesByType` 在两端主源码零命中）。第十二节 B2 余量段「三端一致地如此」在此出口为假。
-- Q26 R9-RS-2 | P2 | `core/rust-policy-core/bindings/aegis_policy_core.py:1399`（入库生成物
-  由 2026-10-03 `495a49c` 产出，不含 2026-10-04 `607d7a1` 新增的 `#[uniffi::export]
-  update_host_denylist`）↔ `core/rust-policy-core/src/ffi/broker.rs:331` ↔
-  `.github/workflows/core-rust.yml:57-63`：「绑定由锁定 toolchain 单源生成」目前只由一个
-  `test -s` 非空断言守着，判的是刚写出的文件、不比漂移 ⇒ 导出面少一个方法在任何门禁里
-  都不红；且该 `.py` 全仓零消费者。建议：删这份无人消费的入库件，或把 `test -s` 换成
-  「重生成 + 与入库件 diff」。
+- ~~Q26 R9-RS-2~~ **本批已确证并落地**（§二 裁决行 + §3.12）：两条处方里选了第二条
+  ——入库件已按钉住的 1.99.0 + uniffi 0.32.2 重 derive（1,910→2,005 行，diff 只有
+  `update_host_denylist` 的 FFI plumbing 与语义收窄后的 docstring），`test -s` 那条空断言
+  之外新增 `scripts/verify_uniffi_binding_surface.py` 双向对账，`contracts.yml`（PR 面
+  src↔入库件）与 `core-rust.yml`（同一次构建的权威 python 产物↔入库件）两处接线。
+  「删这份无人消费的入库件」这条**没走**：删除是产品/架构裁决（该件自 2026-08-22 原生
+  UniFFI 集成即在库），留作定稿项（见第四节）。
 - Q27 R9-RS-3 | P3 | `core/rust-policy-core/Cargo.toml:41-44`：注记写「getrandom 0.2→0.3，
   0.3 为当前主线」而实际 pin 是 `getrandom = "0.4"`；又写「ed25519-dalek 经 rand_core 0.6
   仍消费 getrandom 0.2」，`Cargo.lock` 实为 rand_core 0.9.5 + getrandom 0.3.4

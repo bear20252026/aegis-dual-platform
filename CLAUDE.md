@@ -49,6 +49,11 @@ python scripts/verify_versions.py      # 版本单源一致性
 python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
 python contracts/codegen/verify_seed_framing_parity.py  # 三端顶层框定 + 公共后缀清单单源（R7-CS1-05/CS2-10）
 python contracts/codegen/verify_injected_js_parity.py   # 三端注入 JS 逐 token 同形对账（第九轮项 9 步 1；豁免表必须仍失真）
+# R9-RS-2：core/rust-policy-core/bindings/aegis_policy_core.py 是入库生成物，改过
+# `#[uniffi::export]` 后重 derive 它：
+#   cargo run --locked --features uniffi-bindgen --bin aegis-uniffi-bindgen -- generate \
+#     target/release/<cdylib> --language python --out-dir <目录> --no-format
+python scripts/verify_uniffi_binding_surface.py         # 上述绑定与 Rust 导出面双向对账
 python scripts/verify_cross_end_lists.py          # 跨端清单对账（引擎/壁纸）
 # —— 文档/CI 形态门禁（第八轮 B1/B8 接入 contract-source-of-truth）——
 python scripts/check_workflow_shells.py           # workflow 步骤 shell 与退出码口径

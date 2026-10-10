@@ -54,13 +54,26 @@ jobs:
         run: cargo clippy --locked --all-features --all-targets -- -D warnings
       - name: cargo test (vectors 差分——与 C#/Kotlin reference 一致)
         run: cargo test --locked --all-features
-      - name: Generate Kotlin bindings from locked UniFFI toolchain
+      # PY-065 同口径：不依赖 runner 预装 python（下一步只跑 stdlib 门禁脚本）
+      - name: 安装 Python（UniFFI 绑定面对账用——R9-RS-2）
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Generate Kotlin and Python bindings from locked UniFFI toolchain
         run: |
           cargo build --release --locked
           cargo run --locked --features uniffi-bindgen --bin aegis-uniffi-bindgen -- \
             generate target/release/libaegis_policy_core.so --language kotlin \
             --out-dir target/uniffi-kotlin --no-format
           test -s target/uniffi-kotlin/uniffi/aegis_policy_core/aegis_policy_core.kt
+          # R9-RS-2：入库的 Python 绑定此前**没有任何生成面产出它**——只能手跑，
+          # 于是 `#[uniffi::export]` 加方法后它静默落后（update_host_denylist 落后六天、
+          # 期间零门禁红）。现在同一次构建里权威生成，再拿它跟入库件做导出名对账。
+          cargo run --locked --features uniffi-bindgen --bin aegis-uniffi-bindgen -- \
+            generate target/release/libaegis_policy_core.so --language python \
+            --out-dir target/uniffi-python --no-format
+          python ../../scripts/verify_uniffi_binding_surface.py \
+            --repo-root ../.. --generated target/uniffi-python/aegis_policy_core.py
       - name: Verify native ABI export
         run: |
           nm -D target/release/libaegis_policy_core.so | grep -F ' T aegis_policy_core_abi_version'

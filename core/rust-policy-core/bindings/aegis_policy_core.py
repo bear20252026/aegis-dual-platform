@@ -548,7 +548,9 @@ def _uniffi_check_api_checksums(lib):
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_reject_navigation_confirmation() != 15910:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_request_navigation_confirmation() != 39993:
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_request_navigation_confirmation() != 950:
+        raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    if lib.uniffi_aegis_policy_core_checksum_method_ffibroker_update_host_denylist() != 9304:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     if lib.uniffi_aegis_policy_core_checksum_constructor_ffibroker_new() != 22735:
         raise InternalError("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
@@ -620,6 +622,9 @@ _UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_reject_navigation_
 _UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_request_navigation_confirmation.argtypes = (
 )
 _UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_request_navigation_confirmation.restype = ctypes.c_uint16
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_update_host_denylist.argtypes = (
+)
+_UniffiLib.uniffi_aegis_policy_core_checksum_method_ffibroker_update_host_denylist.restype = ctypes.c_uint16
 _UniffiLib.uniffi_aegis_policy_core_checksum_constructor_ffibroker_new.argtypes = (
 )
 _UniffiLib.uniffi_aegis_policy_core_checksum_constructor_ffibroker_new.restype = ctypes.c_uint16
@@ -715,6 +720,12 @@ _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_request_navigation_confi
     ctypes.POINTER(_UniffiRustCallStatus),
 )
 _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_request_navigation_confirmation.restype = _UniffiRustBuffer
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_update_host_denylist.argtypes = (
+    ctypes.c_uint64,
+    _UniffiRustBuffer,
+    ctypes.POINTER(_UniffiRustCallStatus),
+)
+_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_update_host_denylist.restype = ctypes.c_uint32
 _UniffiLib.uniffi_aegis_policy_core_fn_constructor_ffibroker_new.argtypes = (
     _UniffiRustBuffer,
     ctypes.POINTER(_UniffiRustCallStatus),
@@ -1320,6 +1331,42 @@ class _UniffiFfiConverterBoolean:
     def write(cls, value, buf):
         buf.write_u8(value)
 
+class _UniffiFfiConverterSequenceString(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        for item in value:
+            _UniffiFfiConverterString.check_lower(item)
+
+    @classmethod
+    def write(cls, value, buf):
+        items = len(value)
+        buf.write_i32(items)
+        for item in value:
+            _UniffiFfiConverterString.write(item, buf)
+
+    @classmethod
+    def read(cls, buf):
+        count = buf.read_i32()
+        if count < 0:
+            raise InternalError("Unexpected negative sequence length")
+
+        return [
+            _UniffiFfiConverterString.read(buf) for i in range(count)
+        ]
+
+class _UniffiFfiConverterUInt32(_UniffiConverterPrimitiveInt):
+    CLASS_NAME = "u32"
+    VALUE_MIN = 0
+    VALUE_MAX = 2**32
+
+    @staticmethod
+    def read(buf):
+        return buf.read_u32()
+
+    @staticmethod
+    def write(value, buf):
+        buf.write_u32(value)
+
 
 class FfiBrokerProtocol(typing.Protocol):
     """
@@ -1391,8 +1438,25 @@ class FfiBrokerProtocol(typing.Protocol):
         raise NotImplementedError
     def request_navigation_confirmation(self, session_id: str,tab_id: str,generation: int,raw_url: str,scope: str) -> FfiDecision:
         """
-        将当前导航登记为待审批请求。它复用完整的策略评估和会话验证，
-        但不会向宿主发放可消费授权；只有同一 Broker 的显式批准才能兑换原始动作。
+        将当前导航登记为待审批请求（仅当其确属高危目标）。
+
+        审计第六轮（2026-10-03/04）：**语义收窄**。本函数不再把每一个可放行导航
+        一律转成 RequireConfirmation——高危判定（本机/私网）与黑名单拦截都已在
+        evaluate_navigation 内完成，这里只作委托：Allow 原样返回（宿主可直接消费），
+        RequireConfirmation / Deny 原样返回。
+        旧口径「每次导航都要确认」是使用方于 2026-08-30 关闭确认开关、进而使整套
+        确认域（pendingConfirmation / 防孤儿 nonce / 受信兑换入口）退化为死代码的
+        直接根因；收窄后确认只对少数目标触发，开关可重新启用而不牺牲可用性。
+"""
+        raise NotImplementedError
+    def update_host_denylist(self, hosts: typing.List[str]) -> int:
+        """
+        注入/替换威胁 host 黑名单快照（整批替换，即两阶段的 `clear=true` 特例）。
+
+        返回**被接受**的条目数：调用方可用 `输入数 - 返回值` 发现有一批条目
+        被形态校验拒收，而不是静默变成死条目。空输入 = 清空（**不** deny-all）——
+        未接入订阅源的端行为与既往完全一致，这是本改动能安全落地的前提。
+        匹配口径（精确 + 父域后缀链）见 `ffi::broker::denylist`。
 """
         raise NotImplementedError
 
@@ -1638,8 +1702,15 @@ class FfiBroker(FfiBrokerProtocol):
         return _uniffi_lift_return(_uniffi_ffi_result)
     def request_navigation_confirmation(self, session_id: str,tab_id: str,generation: int,raw_url: str,scope: str) -> FfiDecision:
         """
-        将当前导航登记为待审批请求。它复用完整的策略评估和会话验证，
-        但不会向宿主发放可消费授权；只有同一 Broker 的显式批准才能兑换原始动作。
+        将当前导航登记为待审批请求（仅当其确属高危目标）。
+
+        审计第六轮（2026-10-03/04）：**语义收窄**。本函数不再把每一个可放行导航
+        一律转成 RequireConfirmation——高危判定（本机/私网）与黑名单拦截都已在
+        evaluate_navigation 内完成，这里只作委托：Allow 原样返回（宿主可直接消费），
+        RequireConfirmation / Deny 原样返回。
+        旧口径「每次导航都要确认」是使用方于 2026-08-30 关闭确认开关、进而使整套
+        确认域（pendingConfirmation / 防孤儿 nonce / 受信兑换入口）退化为死代码的
+        直接根因；收窄后确认只对少数目标触发，开关可重新启用而不牺牲可用性。
 """
         
         _UniffiFfiConverterString.check_lower(session_id)
@@ -1664,6 +1735,29 @@ class FfiBroker(FfiBrokerProtocol):
         _uniffi_ffi_result = _uniffi_rust_call_with_error(
             _uniffi_error_converter,
             _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_request_navigation_confirmation,
+            *_uniffi_lowered_args,
+        )
+        return _uniffi_lift_return(_uniffi_ffi_result)
+    def update_host_denylist(self, hosts: typing.List[str]) -> int:
+        """
+        注入/替换威胁 host 黑名单快照（整批替换，即两阶段的 `clear=true` 特例）。
+
+        返回**被接受**的条目数：调用方可用 `输入数 - 返回值` 发现有一批条目
+        被形态校验拒收，而不是静默变成死条目。空输入 = 清空（**不** deny-all）——
+        未接入订阅源的端行为与既往完全一致，这是本改动能安全落地的前提。
+        匹配口径（精确 + 父域后缀链）见 `ffi::broker::denylist`。
+"""
+        
+        _UniffiFfiConverterSequenceString.check_lower(hosts)
+        _uniffi_lowered_args = (
+            self._uniffi_clone_handle(),
+            _UniffiFfiConverterSequenceString.lower(hosts),
+        )
+        _uniffi_lift_return = _UniffiFfiConverterUInt32.lift
+        _uniffi_error_converter = None
+        _uniffi_ffi_result = _uniffi_rust_call_with_error(
+            _uniffi_error_converter,
+            _UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_update_host_denylist,
             *_uniffi_lowered_args,
         )
         return _uniffi_lift_return(_uniffi_ffi_result)
