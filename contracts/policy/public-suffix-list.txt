@@ -18,12 +18,30 @@
 # 必需 job 里）：三端内嵌表与本表逐项对账，且三端种子都必须经顶层框定函数取值。
 # 本表是**对账权威**，三端各持一份内嵌副本（构建期注入，运行期零 I/O——
 # Rust 核心无文件访问、Windows 制品不额外发布数据文件）。
+# 收录口径（第九轮 2026-10-10，定稿项 12）——按这三条判据增补，而不是凭喜好：
+# ① ccTLD 下由 NIC 分层管理的二级段（co.uk / com.au / ne.jp …）：不加就把 a.co.uk 与
+#    b.co.uk 当成同一个站点。
+# ② **托管域**：同一后缀下互不相关的各方各持一个子域（github.io、gitlab.io、pages.dev、
+#    vercel.app、netlify.app、herokuapp.com、azurewebsites.net、cloudfront.net、
+#    appspot.com、blogspot.com，以及第九轮补的 web.app、firebaseapp.com、workers.dev、
+#    myshopify.com、tumblr.com、wordpress.com、storage.googleapis.com）。判据是
+#    「子域归谁」而不是「服务有多出名」——漏一条就把成百上千个互不相关的站点折进
+#    同一个种子，正是本表要消除的跨站关联面从侧门回来。
+# ③ **动态 DNS 提供商**（第九轮补 ddns.net、no-ip.com、duckdns.org）：一个后缀下每个
+#    账户一个主机名，性质同 ②，只因常被当成「个人站点」而历来漏收。
+# 不收录：公共 CDN 的边缘名（子域不归属用户，如 cdn.jsdelivr.net），以及单标签 LAN 名
+# （.local / .internal / localhost 由 LocalTargetHosts / UrlSafety.IsPublicHost 判，
+# 不在本表面——往这里加它们只会造出第二个名字判据）。
+# 代价照记：往表里加条目会把该后缀下已有站点的种子**重排一次**（隔离变细），这是修正
+# 归属必须付的一次性账；因此本表只增不减，减条目须同批说明为什么那些子域不再互不相关。
+
 ac.cn
 ac.jp
 ac.th
 ac.uk
 appspot.com
 azurewebsites.net
+bitbucket.io
 blogspot.com
 cloudfront.net
 co.id
@@ -43,6 +61,7 @@ com.co
 com.ec
 com.gr
 com.hk
+com.jp
 com.mx
 com.my
 com.pe
@@ -61,9 +80,12 @@ com.ua
 com.uy
 com.ve
 com.vn
+ddns.net
+duckdns.org
 edu.au
 edu.cn
 edu.hk
+firebaseapp.com
 github.io
 gitlab.io
 go.id
@@ -73,6 +95,7 @@ gov.au
 gov.cn
 gov.uk
 herokuapp.com
+myshopify.com
 ne.jp
 ne.kr
 net.au
@@ -82,6 +105,7 @@ net.nz
 net.sg
 net.uk
 netlify.app
+no-ip.com
 or.jp
 or.kr
 or.th
@@ -96,4 +120,10 @@ org.sg
 org.tw
 org.uk
 pages.dev
+squarespace.com
+storage.googleapis.com
+tumblr.com
 vercel.app
+web.app
+wordpress.com
+workers.dev

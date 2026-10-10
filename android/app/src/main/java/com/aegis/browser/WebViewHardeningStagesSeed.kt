@@ -86,7 +86,11 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
     'edu.hk','github.io','gitlab.io','go.id','go.jp','gob.mx','gov.au','gov.cn','gov.uk',
     'herokuapp.com','ne.jp','ne.kr','net.au','net.cn','net.in','net.nz','net.sg','net.uk',
     'netlify.app','or.jp','or.kr','or.th','org.au','org.cn','org.hk','org.il','org.in',
-    'org.nz','org.ru','org.sg','org.tw','org.uk','pages.dev','vercel.app'];
+    'org.nz','org.ru','org.sg','org.tw','org.uk','pages.dev','vercel.app',
+    // 定稿项 12（第九轮 2026-10-10）：托管域与动态 DNS 补齐——判据见单源表头注。
+    'ddns.net','duckdns.org','firebaseapp.com','myshopify.com','no-ip.com',
+    'storage.googleapis.com','tumblr.com','web.app','wordpress.com','workers.dev',
+    'bitbucket.io','com.jp','squarespace.com'];
   function isPublicSuffix(tail) { return PUBLIC_SUFFIXES.indexOf(tail) >= 0; }
   function getETLD1(h) {
     var p = h.split('.');

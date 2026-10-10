@@ -27,6 +27,10 @@ public static partial class FingerprintShield
         "net.uk", "netlify.app", "or.jp", "or.kr", "or.th", "org.au", "org.cn",
         "org.hk", "org.il", "org.in", "org.nz", "org.ru", "org.sg", "org.tw",
         "org.uk", "pages.dev", "vercel.app",
+        // 定稿项 12（第九轮 2026-10-10）：托管域与动态 DNS 补齐——判据见单源表头注。
+        "ddns.net", "duckdns.org", "firebaseapp.com", "myshopify.com", "no-ip.com",
+        "storage.googleapis.com", "tumblr.com", "web.app", "wordpress.com", "workers.dev",
+        "bitbucket.io", "com.jp", "squarespace.com",
     ];
 
     /// <summary>把清单渲染成 JS 对象字面量（键存在性判定——比 indexOf 数组快，

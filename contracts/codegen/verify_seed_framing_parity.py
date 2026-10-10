@@ -10,6 +10,10 @@
    加噪后的画布哈希本身就成了跨站持久标识符。三端（C#/Kotlin/Rust）都必须经
    aegisTopLevelHostname + ancestorOrigins 通道，且缺陷调用形态不得回归。
 
+3. **托管域钉条目不得被摘**（第九轮 2026-10-10 定稿项 12）：`PINNED_SUFFIXES` 里的每一条
+   都必须在权威清单里——「表本身完不完备」要外部知识、判不了，但「已按判据收进来的托管域
+   被后来者顺手删掉」判得了。收录判据写在清单头注，本表只增不减。
+
 2. **公共后缀清单单源**：`contracts/policy/public-suffix-list.txt` 是唯一权威。
    Rust 端 `include_str!` 直接生成（零手抄）；C#/Kotlin 各持一份内嵌副本
    （运行期零 I/O 的代价），本门禁把两份副本与权威清单逐项对账。第七轮实测
@@ -46,6 +50,17 @@ CS_CANVAS = ROOT / "windows/src/Aegis.Windows.App/WebView/FingerprintShield.Canv
 
 # 表体下限：权威清单条目数低于此值即视为「解析塌陷/清单被清空」，判环境错误
 MIN_ENTRIES = 40
+
+# 托管域 / 动态 DNS 钉条目（第九轮定稿项 12）：这些后缀下**互不相关的各方各持一个子域**，
+# 摘掉任何一条就把成百上千个站点折进同一个种子键（a.web.app 与 b.web.app 同键）。
+# 判据全文在 contracts/policy/public-suffix-list.txt 头注；这里只钉「不得回退」。
+PINNED_SUFFIXES = (
+    "appspot.com", "azurewebsites.net", "bitbucket.io", "blogspot.com", "cloudfront.net",
+    "ddns.net", "duckdns.org", "firebaseapp.com", "github.io", "gitlab.io", "herokuapp.com",
+    "myshopify.com", "netlify.app", "no-ip.com", "pages.dev", "squarespace.com",
+    "storage.googleapis.com", "tumblr.com", "vercel.app", "web.app", "workers.dev",
+    "wordpress.com",
+)
 
 # 每端的顶层框定要求：必须出现的通道 + 不得回归的缺陷调用形态。
 # C# 的模板分两爿（主体 + Seed.cs 的注入片段），产出的脚本是两者拼接结果，
@@ -153,6 +168,10 @@ def _diff(label: str, mine: list[str], authoritative: list[str]) -> list[str]:
 def violations() -> list[str]:
     authoritative = authoritative_entries()
     problems: list[str] = []
+    table = set(authoritative)
+    unpinned = sorted(pin for pin in PINNED_SUFFIXES if pin not in table)
+    if unpinned:
+        problems.append(f"权威清单缺托管域钉条目 {len(unpinned)} 条：{unpinned}")
     problems += _diff("Kotlin", kotlin_entries(read(KT)), authoritative)
     problems += _diff("C#", csharp_entries(read(CS_SEED)), authoritative)
     problems += rust_uses_single_source(read(RS))
@@ -178,10 +197,15 @@ def self_test() -> int:
         ("C# 退回本帧口径", lambda s: s.replace("getETLD1(aegisTopLevelHostname())",
                                                 "getETLD1(location.hostname)", 1),
          ["残留本帧口径缺陷形态"]),
+        ("权威清单被摘掉托管域钉条目", lambda s: "\n".join(
+            line for line in s.splitlines() if line.strip() != "web.app"),
+         ["权威清单缺托管域钉条目", "web.app"]),
     ]
     planted = 0
     for name, mutate, expect in cases:
-        if name.startswith("Kotlin"):
+        if name.startswith("权威清单"):
+            target, text = LIST_PATH, read(LIST_PATH)
+        elif name.startswith("Kotlin"):
             target, text = KT, read(KT)
         elif name.startswith("C# 多"):
             target, text = CS_SEED, read(CS_SEED)

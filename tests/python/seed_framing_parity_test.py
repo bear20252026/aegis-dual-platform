@@ -95,6 +95,38 @@ def test_missing_input_file_is_environment_error(monkeypatch, tmp_path):
     assert "门禁输入缺失" in str(exc.value)
 
 
+# ===== 托管域钉条目（第九轮 2026-10-10 定稿项 12）=====
+# 「表本身完不完备」要外部知识，判不了——但「已按判据收进来的托管域被后来者摘掉」判得了。
+# 这组用例把清单头注里那句「只增不减」搬成可执行判据。
+
+
+def test_pinned_hosting_domains_are_all_in_the_authoritative_table():
+    entries = set(vsp.authoritative_entries())
+    missing = sorted(pin for pin in vsp.PINNED_SUFFIXES if pin not in entries)
+    assert not missing, f"钉条目被摘：{missing}"
+
+
+def test_pinned_domains_are_also_present_in_both_embedded_copies():
+    # 单源表里有、内嵌副本没有 ⇒ 对账门禁本来就会红；这条钉的是「pin 集合与三端一致」，
+    # 防的是有一天有人只加 pin 不加表（那等于把判据从清单搬进了门禁自己）。
+    table = set(vsp.authoritative_entries())
+    assert set(vsp.PINNED_SUFFIXES) <= table
+    kotlin = set(vsp.kotlin_entries(vsp.read(vsp.KT)))
+    csharp = set(vsp.csharp_entries(vsp.read(vsp.CS_SEED)))
+    for pin in vsp.PINNED_SUFFIXES:
+        assert pin in kotlin and pin in csharp, pin
+
+
+def test_removing_a_pinned_domain_from_the_list_is_flagged(monkeypatch, tmp_path):
+    _copy_with(
+        monkeypatch,
+        tmp_path,
+        "LIST_PATH",
+        lambda s: chr(10).join(line for line in s.splitlines() if line.strip() != "web.app"),
+    )
+    assert any("缺托管域钉条目" in p and "web.app" in p for p in vsp.violations())
+
+
 def test_authoritative_entries_are_well_formed():
     entries = vsp.authoritative_entries()
     assert len(entries) >= vsp.MIN_ENTRIES
