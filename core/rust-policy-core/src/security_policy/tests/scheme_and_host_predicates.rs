@@ -91,15 +91,19 @@ fn public_and_lookalike_hosts_are_not_flagged() {
 }
 
 #[test]
-fn predicate_requires_pre_lowered_host_and_no_port() {
-    // 本函数入参必须是 canonicalize_external 产出的**小写、已剥端口** host。
-    // 两条前提不成立即漏判——RS-227 口径下 CanonicalExternalUrl.host 保留
-    // 非默认端口，直接传 "169.254.169.254:8080" 会因末段 "254:8080" 解析失败
-    // 而判为非高危（第六轮开发期实测到的绕过，调用方必须先 split(':') 取首段，
-    // 见 ffi/broker.rs 的 policy_host_of）。示例宿主改用元数据地址：回环与
-    // localhost 名按第七轮 B8 裁决本就不判高危，拿它们证不了这条警示。
-    assert!(!SecurityPolicy::is_high_risk_host("169.254.169.254:8080"));
+fn predicate_requires_pre_lowered_host_and_strips_port_itself() {
+    // 本函数入参必须是 canonicalize_external 产出的**小写** host；端口依 RS-227
+    // 可能仍留在 CanonicalExternalUrl.host 内，第九轮 R9-RS-6 把「已剥端口」这条
+    // 不变量改成函数自证：内部先取 `:` 前段再判。此前直接传
+    // "169.254.169.254:8080" 会因末段 "254:8080" parse 失败判成非高危（第六轮开发期
+    // 实测到的绕过），现在判高危。已剥端口的调用方（ffi/broker.rs 的 policy_host_of）
+    // 结果逐字不变。IPv6 字面量依 PY-069/070 在归一层就被拒，本函数取不到那种入参。
+    assert!(SecurityPolicy::is_high_risk_host("169.254.169.254:8080"));
     assert!(SecurityPolicy::is_high_risk_host("169.254.169.254"));
+    // 域名带端口不受影响（首个非数字段即判非 IP 形态）——那是合法 host
+    assert!(!SecurityPolicy::is_high_risk_host("bad.example:8443"));
+    // 第七轮 B8 裁决（本机与内网必须能打开）在带端口形态上同样成立，不可回退
+    assert!(!SecurityPolicy::is_high_risk_host("192.168.1.1:8080"));
     assert!(!SecurityPolicy::is_high_risk_host("LOCALHOST"));
     assert!(!SecurityPolicy::is_high_risk_host("localhost"));
 }

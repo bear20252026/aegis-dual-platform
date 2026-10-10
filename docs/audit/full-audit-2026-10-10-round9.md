@@ -41,6 +41,8 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-AD-4 | P2 | 保留并按**第四节处方**落地（不收紧段集） | 逐行回读 Q4 的三处位置：`OriginPolicy.kt:104-110` 的 `!host.contains("[")` 是 AD-299 刻意与 Rust `origin/tests/host_grammar.rs:183-184`（`try_parse_external("https://[::1]:8080/x") == None`）及 contracts 的 url-origin-invalid 向量对齐的**导航入口**判定；而 `LocalTargetHosts.hostOf:83-88` 反过来**剥掉**方括号（P74 那笔账的产物）⇒ `::1`/ULA 在升级豁免层与下载层确是放行形态。两侧都对，缺的只是把关系写下来：对象 KDoc 补该分层事实，新跨层锚用例把「导航拒 / 剥出 `::1` / 下载不拒」三侧各钉一次。用户可见后果如实记：地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 能。打通它需解冻核心 host grammar 并增补向量 ⇒ 留在第四节待定稿，**本批零判定改动** |
 | R9-SH-7 | P2 | 保留并落地（判据曾不可达） | 回读确证三件事：①`DESIGN_NOTATION_MIRRORS`（6 名）恰等于两个生成目录的全集（各 6 份）⇒ 旧 `check_mirror_consumption` 每条都在 `continue` 处跳过，「镜像有没有人消费」这条判据在现树里**从没执行过**；②旧 `_has_real_consumer` 从仓库根 `rglob("*")`，连 `core/rust-policy-core/target`、`obj/`、`bin/`、`node_modules/` 一起爬——本机实测 20,467 个条目、641 个候选源文件、单次调用 ≈5.6s 且每个未豁免镜像各调一次（全表 ≈34s），这个代价本身就让它进不了 PR 面；③扫描口径三处失实：跨语言同名算消费（`agent/action_contract.py` 的 `class ActionContract` 会让 C# 镜像「有消费方」）、测试引用算消费、构建产物里的副本算消费。落地＝扫描面收窄到各端同语言源码根（`windows/src`、`android`）并排除 generated/tests/obj/bin/build/target/node_modules/dist（拆成 `mirror_consumers.py`，门禁本体 280 行、整条 ≈0.5s）；**并加第二条反向不变量**：登记了却已被端侧真实消费同样判红——豁免的前提是「零消费方的设计标注」，前提没了就必须从表里删掉，否则字段漂移与兼容性检查被一句过期声明悄悄跳过。现树实测 6 个镜像在两端 main 源码同语言引用全为 0 ⇒ 豁免仍成立，但从此**要自证**。接线面已核：`contracts.yml:134` 在 `contract-source-of-truth`（ubuntu-latest、`pull_request` 触发）常跑，新常驻 pytest 锚含「跨语言同名不算 / 构建目录不算 / 被消费的豁免项判红」三条故障注入 |
 | R9-RS-2 | P2 | 保留并落地（生成物无人核验） | 逐条回读确证：全仓 `import aegis_policy_core` **零命中**（Python 侧无消费者；命中的 `aegis_policy_core` 都是原生库名），而这份 1,910 行入库件的漂移**没有任何门禁在看**——`core-rust.yml:63` 的 `test -s` 判的是同一步里刚生成的 **Kotlin** 文件非空（那是 APK 真正消费的绑定，随构建产出、不入库），`contracts.yml:147`「Fail if generated bindings are stale」只 `git diff` 两个**契约**生成目录；三个 workflow 里 uniffi-bindgen 出现 3 次、`--language` 全是 kotlin ⇒ 这份 Python 镜像只能手跑生成，也就只能手漂。实测漂移内容：`607d7a1`（2026-10-04）加的 `#[uniffi::export] FfiBroker::update_host_denylist`（`src/ffi/broker.rs:323-333`）在入库件里零出现。落地＝用钉住的 1.99.0 + uniffi 0.32.2 本地重 derive 并入库（1,910→2,005 行；diff 恰为该方法的整套 FFI plumbing + 第六轮语义收窄后的 docstring，零第三方漂移）；新常驻门禁 `scripts/verify_uniffi_binding_surface.py` 做**导出名双向对账**（少导出判「绑定缺方法」、删了没重生成判「绑定多方法」；对象键须按 uniffi 的小写拼接归一 `FfiBroker`↔`ffibroker`——首轮实测就是没归一，9 个方法各报两遍）；两处接线：`contracts.yml` PR 面跑 src↔入库件，`core-rust.yml` 同一次构建里补 `--language python` 权威生成后跑生成↔入库件。红线面同步：入库生成物行数不受人控，`bindings/` 入 `GENERATED_PREFIXES`（基线少一条），漂移改由本门禁兜。**没有**采纳「删掉这份无人消费的入库件」——台账给的两条路里删除是产品/架构裁决（该件自 2026-08-22 的原生 UniFFI 集成即在库），本轮只把「静默落后」变成「落后即红」 |
+| R9-RS-6 | P3 | 保留并落地（**修法与队列处方不同**，理由见实测） | 回读确证：`security_policy.rs:233` 的 `is_high_risk_host` 对未剥端口的入参判**非高危**（`169.254.169.254:8080` 的末段 `254:8080` parse 失败即 false），而「入参须已剥端口」这条硬不变量只活在两处文档里（`ffi/broker.rs:114-121` 的 `policy_host_of` KDoc、用例 `predicate_requires_pre_lowered_host_and_no_port`），后者还把绕过**钉成期望值**。队列原处方是「让签名体现不变量」（newtype 或收窄可见性），照做要动 3 处调用点，而 `security_policy.rs` 恰在 300 行零余量红线上。实测过程先试了另一条直觉修法——「段内含 `:` 即 fail-closed 判高危」——`cargo test` 立刻打出 `192.168.1.1:8080 不应被判为高危主机`：那条既有期望正是第七轮 B8 裁决的钉，说明**惩罚漏剥端口的调用方**会把私网带端口形态判错。最终改法更强也更小：函数内部先取 `:` 前段再判，把不变量从「调用方纪律」换成「函数自证」——漏剥与不漏剥得到同一个答案，绕过形态消失且不需要新类型。B8 面逐字保住（新增 `192.168.1.1:8080` 仍判非高危的断言），IPv6 边界段原样保留（依 PY-069/070 在归一层即被拒，本函数取不到那种入参）。同形绕过在两端孪生里**不存在**：C# `UrlSafety.IsPublicIp` 收 `IPAddress`、Kotlin `ReservedAddressBoundary.denies(url)` 经 `LocalTargetHosts.hostOf` 自己剥端口 ⇒ 只有核心这一侧要修 |
+| R9-RS-7 | P3 | 保留并落地（测试余量接上） | 回读确证：`canvas_read_channels.rs:101-114` 的三端对账只查 5 段片段（噪声函数头 / px 绝对序号 / 未包裹捕获 / 两个 wrapper 名），**不查** 8 位 RGBA 守卫与两条 `aegisNoiseRectangle` 调用行——而同文件对 Rust 生成脚本查的是 8 段。两次内存态注入各自实证旧口径零红：把 Android 端 `pixels.length === width * height * 4` 退成 `=== width * height`、把 C# 端 `aegisNoiseRectangle(pixels,` 改掉名字；新口径分别打出 `Android 端缺直读段判据：pixels.length === width * height * 4` 与 `C# 端缺直读段判据：aegisNoiseRectangle(pixels,`。两条调用行按**前缀**钉而不是整行：种子访问器名三端本就不同（Rust/C# 用 `aegisCanvasSeed()`、Kotlin 用 `noiseSeed()`），那是 R9-RS-8 逐 token 门禁里显式登记的分歧面（DIVERGENT_REGISTERED），整行钉会把一条已登记的口径差异误判成缺失 |
 
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
@@ -409,6 +411,30 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
    `check_workflow_shells --self-test`（27 个 pwsh 步骤零违规）✅、`check_file_sizes`
    （491 文件）✅、`check_doc_claims` ✅。三端运行时代码零改动。
 
+### 3.13 R9-B14（2026-10-10，队列批次 B 第三子批）：核心主机判据自证端口 + 三端 canvas 余量接上
+
+**共同主题：把「靠纪律」换成「靠形状」。** 一条只在文档里写的入参前提（须已剥端口）和
+一份只查一半片段的跨端对账，都不会在缺陷出现时报警——前者被 `cargo test` 里已有的
+期望值反过来钉住了绕过，后者删掉端上的 8 位 RGBA 守卫照样绿。
+
+1. `core/rust-policy-core/src/security_policy.rs`（R9-RS-6）：`is_high_risk_host` 入口
+   `let host = host.split(':').next().unwrap_or(host);`——「已剥端口」从调用方纪律变成函数
+   自证；`169.254.169.254:8080` 判高危、`192.168.1.1:8080` 仍判非高危（B8 裁决不可回退）。
+   doc 块同步重排（端口自处段新增、IPv6 边界段事实不变），文件停在 300 行零余量红线上。
+   先试过的「段内含 `:` 即 fail-closed」被既有 B8 用例打回，这条实测过程记进 §二。
+2. `security_policy/tests/scheme_and_host_predicates.rs`：用例改名
+   `predicate_requires_pre_lowered_host_and_strips_port_itself`，断言从 2 条扩到 6 条
+   （元数据地址带/不带端口、域名带端口、私网带端口、localhost 两种大小写）。
+3. `core/rust-policy-core/tests/canvas_read_channels.rs`（R9-RS-7 余量）：三端片段表从 5 段
+   扩到 8 段——`BYTE_RGBA_GUARD` 整行 + 两条 `aegisNoiseRectangle` 调用**前缀**（前缀而非
+   整行的理由见 §二：种子访问器名是 R9-RS-8 已登记的三端分歧面）。
+4. 反向锚实测两次并原样还原：Android 端守卫退化 ⇒ `Android 端缺直读段判据：pixels.length
+   === width * height * 4`；C# 端调用改名 ⇒ `C# 端缺直读段判据：aegisNoiseRectangle(pixels,`。
+5. 本地验证：`cargo fmt --all -- --check` ✅、`cargo clippy --locked --all-features
+   --all-targets -- -D warnings` ✅（0 警告）、`cargo test --locked --all-features`
+   **568 条 lib + canvas 3 / vectors 10 / tostring_window 5 / timer_parity 3 全绿**；
+   C#/Kotlin 侧零改动（孪生不收带端口入参，见 §二 R9-RS-6 行末）。
+
 ## 四、待用户定稿（本轮新增三项，其余沿用第八轮 §七）
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
@@ -594,14 +620,14 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
   层用例；而 C# 的提交判定正依赖这三字段（`commit.Staged/Accepted` →
   `denylist_commit_refused`），且那 8 例跑在假核心上、真 DLL 用例不在必需检查（R8-CI-18）
   ⇒ 核心改名/丢字段在 PR 面永不红。
-- Q30 R9-RS-6 | P3 | `core/rust-policy-core/src/security_policy.rs:233-275` +
-  `src/security_policy/tests/scheme_and_host_predicates.rs:94-105`：`is_high_risk_host` 是
-  `pub` 且签名不体现「入参须已剥端口」这条硬不变量，`169.254.169.254:8080` 判**低危**
-  并被 `:101` 钉成期望值，安全全靠 `policy_host_of` 单点纪律（`src/ffi/broker.rs:124`）
-  ⇒ 未来任一新增调用点忘记剥端口即静默放行元数据端口的非默认端口形态，且无红可看。
-- Q31 R9-RS-7 | P3 | `core/rust-policy-core/tests/canvas_read_channels.rs:101-114`：对两端
-  只查 5 段片段，不查 `pixels.length === width*height*4` 与两条 `aegisNoiseRectangle`
-  调用行 ⇒ 端上删掉 8 位 RGBA 守卫不会红（B2/⑦ 本体一致，此为测试余量）。
+- ~~Q30 R9-RS-6~~ **本批已确证并落地**（§二 裁决行 + §3.13）：修法没走「签名体现不变量」，
+  而是让 `is_high_risk_host` 自己取 `:` 前段（函数自证 > 调用方纪律），绕过形态直接消失；
+  `169.254.169.254:8080` 判高危、`192.168.1.1:8080` 仍判非高危（B8 裁决保住——先试的
+  「段内含 `:` 即判高危」正是被这条既有期望打回的，实测过程记在 §二）。同形绕过在 C#/Kotlin
+  孪生里不存在（不收带端口入参），故本批零跨端判定改动。
+- ~~Q31 R9-RS-7~~ **本批已确证并落地**（§二 裁决行 + §3.13）：三端片段表 5 段 → 8 段，
+  补 `pixels.length === width * height * 4` 与两条 `aegisNoiseRectangle` 调用前缀。
+  两次内存态注入（Android 守卫退化、C# 调用改名）旧口径零红、新口径各自判红并已还原。
 
 ### 5.2.1 本批落地时新增队列（同口径：必须带 file:line）
 
