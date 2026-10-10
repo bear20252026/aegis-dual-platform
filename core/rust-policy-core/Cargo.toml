@@ -38,9 +38,14 @@ required-features = ["uniffi-bindgen"]
 # rust_toolchain_pin_test.py 判红）、cargo audit ✓（.github/actions/cargo-audit）、
 # cargo deny ✗ 仍未接——没有 deny.toml，本行此前把它写成「CI 门禁」是假账。）
 ed25519-dalek = { version = "3", features = ["rand_core", "zeroize"] }
-# RS-153（审计 2026-09-25）：getrandom 0.2 → 0.3——0.2 线已进入维护模式，
-# 0.3 为当前主线（API：getrandom() 更名 fill()，错误类型重构）。ed25519-dalek
-# 经 rand_core 0.6 仍消费 getrandom 0.2——cargo 语义化版本共存，无冲突
+# RS-153（审计 2026-09-25）写下时是 0.2 → 0.3 那一步；**当前实况**由第九轮
+# R9-RS-3 按 `cargo tree --offline -i getrandom@…` 与 Cargo.lock 实测改真（此前
+# 注记写「0.3 为当前主线」而下面钉的是 "0.4"，还写「ed25519-dalek 经 rand_core 0.6
+# 仍消费 getrandom 0.2」——锁里既无 0.2 也无 0.6，按注记推断会取错升级对象）：
+#   · 直接依赖 getrandom = "0.4" ⇒ 解析到 0.4.3（本 crate 与 tempfile 消费）；
+#   · 树里另有 getrandom 0.3.4，由 rand_core 0.9.5 带入（ed25519-dalek 3.0 /
+#     curve25519-dalek 5.0 一侧）——语义化版本共存，无冲突，也不是 0.2 维护线；
+#   · rand_core 在锁里是 0.9.5 与 0.10.1，0.6 已不在树内。
 getrandom = "0.4"
 sha2 = "0.11"
 serde_json = "1"

@@ -44,6 +44,9 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-RS-2 | P2 | 保留并落地（生成物无人核验） | 逐条回读确证：全仓 `import aegis_policy_core` **零命中**（Python 侧无消费者；命中的 `aegis_policy_core` 都是原生库名），而这份 1,910 行入库件的漂移**没有任何门禁在看**——`core-rust.yml:63` 的 `test -s` 判的是同一步里刚生成的 **Kotlin** 文件非空（那是 APK 真正消费的绑定，随构建产出、不入库），`contracts.yml:147`「Fail if generated bindings are stale」只 `git diff` 两个**契约**生成目录；三个 workflow 里 uniffi-bindgen 出现 3 次、`--language` 全是 kotlin ⇒ 这份 Python 镜像只能手跑生成，也就只能手漂。实测漂移内容：`607d7a1`（2026-10-04）加的 `#[uniffi::export] FfiBroker::update_host_denylist`（`src/ffi/broker.rs:323-333`）在入库件里零出现。落地＝用钉住的 1.99.0 + uniffi 0.32.2 本地重 derive 并入库（1,910→2,005 行；diff 恰为该方法的整套 FFI plumbing + 第六轮语义收窄后的 docstring，零第三方漂移）；新常驻门禁 `scripts/verify_uniffi_binding_surface.py` 做**导出名双向对账**（少导出判「绑定缺方法」、删了没重生成判「绑定多方法」；对象键须按 uniffi 的小写拼接归一 `FfiBroker`↔`ffibroker`——首轮实测就是没归一，9 个方法各报两遍）；两处接线：`contracts.yml` PR 面跑 src↔入库件，`core-rust.yml` 同一次构建里补 `--language python` 权威生成后跑生成↔入库件。红线面同步：入库生成物行数不受人控，`bindings/` 入 `GENERATED_PREFIXES`（基线少一条），漂移改由本门禁兜。**没有**采纳「删掉这份无人消费的入库件」——台账给的两条路里删除是产品/架构裁决（该件自 2026-08-22 的原生 UniFFI 集成即在库），本轮只把「静默落后」变成「落后即红」 |
 | R9-RS-6 | P3 | 保留并落地（**修法与队列处方不同**，理由见实测） | 回读确证：`security_policy.rs:233` 的 `is_high_risk_host` 对未剥端口的入参判**非高危**（`169.254.169.254:8080` 的末段 `254:8080` parse 失败即 false），而「入参须已剥端口」这条硬不变量只活在两处文档里（`ffi/broker.rs:114-121` 的 `policy_host_of` KDoc、用例 `predicate_requires_pre_lowered_host_and_no_port`），后者还把绕过**钉成期望值**。队列原处方是「让签名体现不变量」（newtype 或收窄可见性），照做要动 3 处调用点，而 `security_policy.rs` 恰在 300 行零余量红线上。实测过程先试了另一条直觉修法——「段内含 `:` 即 fail-closed 判高危」——`cargo test` 立刻打出 `192.168.1.1:8080 不应被判为高危主机`：那条既有期望正是第七轮 B8 裁决的钉，说明**惩罚漏剥端口的调用方**会把私网带端口形态判错。最终改法更强也更小：函数内部先取 `:` 前段再判，把不变量从「调用方纪律」换成「函数自证」——漏剥与不漏剥得到同一个答案，绕过形态消失且不需要新类型。B8 面逐字保住（新增 `192.168.1.1:8080` 仍判非高危的断言），IPv6 边界段原样保留（依 PY-069/070 在归一层即被拒，本函数取不到那种入参）。同形绕过在两端孪生里**不存在**：C# `UrlSafety.IsPublicIp` 收 `IPAddress`、Kotlin `ReservedAddressBoundary.denies(url)` 经 `LocalTargetHosts.hostOf` 自己剥端口 ⇒ 只有核心这一侧要修 |
 | R9-RS-7 | P3 | 保留并落地（测试余量接上） | 回读确证：`canvas_read_channels.rs:101-114` 的三端对账只查 5 段片段（噪声函数头 / px 绝对序号 / 未包裹捕获 / 两个 wrapper 名），**不查** 8 位 RGBA 守卫与两条 `aegisNoiseRectangle` 调用行——而同文件对 Rust 生成脚本查的是 8 段。两次内存态注入各自实证旧口径零红：把 Android 端 `pixels.length === width * height * 4` 退成 `=== width * height`、把 C# 端 `aegisNoiseRectangle(pixels,` 改掉名字；新口径分别打出 `Android 端缺直读段判据：pixels.length === width * height * 4` 与 `C# 端缺直读段判据：aegisNoiseRectangle(pixels,`。两条调用行按**前缀**钉而不是整行：种子访问器名三端本就不同（Rust/C# 用 `aegisCanvasSeed()`、Kotlin 用 `noiseSeed()`），那是 R9-RS-8 逐 token 门禁里显式登记的分歧面（DIVERGENT_REGISTERED），整行钉会把一条已登记的口径差异误判成缺失 |
+| R9-AD-2 | P2 | **一半推翻、一半保留并落地** | 队列给的两个判据里，「`Uri.encode` 缺省保留 `:/?&=` ⇒ 带多参页被截成错目标」**不成立**：本仓自己的实测记录 `docs/audit/audit-search-2026-08-31.md` D-2 写着「Android 用 `Uri.encode`（`/` 编码）」——1 参形态连 `/` 都编，`&`/`=` 更不可能保留；若它保留 `/`，AD-057 就不需要另写等价于 `Uri.encode(text, "/")` 的 `uriEncode` 了。参数值因此不会被外层 query 截断，症状描述是误读（登记时未回读这条记录）。**保留的那一半是真的**：`SENSITIVE_QUERY_PARAMS` 只有精确名 {code,state,token}，真实世界最常见的凭据形态 `access_token`/`refresh_token`/`id_token`/`csrf_token`/`api_key`/`sessionid` 都不等于 `token`/`key`，此前整串编码外发翻译服务 ⇒ 凭据泄漏面（AD-313 自己承认「OAuth Code/State 实际经 query 流转」，名单却只收了裸名）。落地＝`isSensitiveParam`：名字小写并去掉 `-`/`_` 后①命中精确名单（补 key/auth/sid/sig/nonce）或②命中词干表（token/secret/password/passwd/credential/apikey/session/authorization/signature/csrf/xsrf）即剥离；**刻意不把 `key`/`id`/`code` 放进词干**——`keywords`/`keyboard`/`category` 被误剥会让翻译页取错内容，这条界有专门用例钉住。同时**没有**换编码器：`TranslateEntryPrivacyTest` 已用 Robolectric 拿真实 `android.net.Uri.encode`，队列建议的「改用 `SearchEngines.uriEncode`」会把 `/` 从 `%2F` 变成明文（线上形态变更）却换不到任何可测性收益 |
+| R9-SH-10 | P3 | 保留并落地（注记失实） | 回读确证：`contracts/vectors/capability-invalid.json` 第 2 条 note 写「schema minItems **未设**——本向量按用户语义拒绝」，而 `capability.schema.json` 的 `actions` 实测已含 `minItems: 1`（PY-097 同口径）⇒ 拒绝理由就是 minItems，注记是失实陈述（读者会以为空数组形态只靠约定保护）。落地＝note 改成当前实况并保留来历（PY-095 记下时 minItems 确实未设），`validate_vector_schemas.py` 复跑 ✅。零判定改动，纯注记改真 |
+| R9-RS-3 | P3 | 保留并落地（依赖注记失实） | 回读确证两处：`Cargo.toml` 注记写「getrandom 0.3 为当前主线」而下面钉的是 `getrandom = "0.4"`；又写「ed25519-dalek 经 rand_core 0.6 仍消费 getrandom 0.2」，`cargo tree --offline -i` 实测锁里既无 getrandom 0.2 也无 rand_core 0.6——实况是直接依赖解析到 **0.4.3**（本 crate + tempfile 消费），另有 0.3.4 由 rand_core **0.9.5** 带入（ed25519-dalek 3.0 / curve25519-dalek 5.0 一侧），rand_core 为 0.9.5 + 0.10.1。下一批依赖决策若按注记推断会取错对象。落地＝把实测来源与解析结果写进注记（依赖本身零改动、`cargo metadata --locked` 复跑 ✅）|
 
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
@@ -519,6 +522,36 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    若 `${{ inputs.* }}` 在 composite 步骤的 `env:` 层不受支持，Actions 会直接报 context
    错误而不是静默变空——CI 当场可辨。
 
+### 3.16 R9-B17（2026-10-10，队列批次 C 第一子批）：翻译入口凭据词干 + 两处注记失实改真
+
+**共同主题：注记也是一种断言，失实的注记会把下一批引到错对象上。** 本批三条里有一条是
+真泄漏面（P2），两条是「文字与实树不符」（P3），还有一条**队列自己的判据被推翻**。
+
+1. R9-AD-2（P2，Android `TranslateEntry`）：一半推翻——「`Uri.encode` 缺省保留 `:/?&=`」
+   与本仓 D-2 实测记录（`audit-search-2026-08-31.md`：Android 侧 `/` 是编码的）矛盾，
+   截断症状不存在；一半落地——敏感参数名单只有裸名 `{code,state,token}`，
+   `access_token`/`refresh_token`/`id_token`/`api_key`/`sessionid` 全部漏过，整串编码
+   外发翻译服务。新增 `isSensitiveParam`（小写 + 去 `-`/`_` 后：精确名单补
+   key/auth/sid/sig/nonce，另加词干表 token/secret/password/passwd/credential/apikey/
+   session/authorization/signature/csrf/xsrf）；**词干刻意不含 `key`/`id`/`code`**，
+   并有 `benignLookalikeParamsAreKept` 用例钉住不过界。没换编码器（Robolectric 已能
+   拿到真实 `Uri.encode`，改用 `SearchEngines.uriEncode` 只会把 `%2F` 变明文 `/`）。
+2. R9-SH-10（P3，`contracts/vectors/capability-invalid.json`）：note 写「schema minItems
+   未设」而 `capability.schema.json` 实测已含 `minItems: 1` ⇒ 拒绝理由就是 minItems；
+   note 改成当前实况并保留来历。`validate_vector_schemas.py` 复跑 ✅，零判定改动。
+3. R9-RS-3（P3，`core/rust-policy-core/Cargo.toml`）：注记写「getrandom 0.3 主线」而钉的是
+   `"0.4"`；写「ed25519-dalek 经 rand_core 0.6 消费 getrandom 0.2」而 `cargo tree -i` 实测
+   锁里没有 0.2 也没有 0.6（实况：直接依赖解析 0.4.3，0.3.4 由 rand_core 0.9.5 带入，
+   rand_core 为 0.9.5 + 0.10.1）。注记改成带实测来源的事实，依赖零改动、
+   `cargo metadata --locked` ✅。
+4. 新常驻用例 3 条（`TranslateEntryPrivacyTest`）：12 个凭据名各剥一次、6 个良性相似名
+   各保留一次、`isSensitiveParam` 直测大小写与分隔符不敏感。
+5. **本机不可证（如实记）**：Android 侧 Gradle/AGP 产物不在本机 ⇒ Kotlin 编译与
+   ktlint/detekt/Robolectric 只有 CI 一条路；已按仓内 CI-green 写法收敛格式
+   （多参列表一行一项、赋值换行、行长 ≤120），风险剩「CI 一次跑绿」这一件，由本 PR 现场判定。
+   Python/文档面本地全绿：`pytest tests/python` **562 passed / 1 skipped**、ruff ✅、
+   `check_file_sizes`（492 文件 / 基线 86）✅、三条文档门禁 ✅。
+
 ## 四、待用户定稿（本轮新增四项，其余沿用第八轮 §七）
 
 - **R9-RS-9 的一半（机制对齐）**：Windows 的 ToStringGuard 注册器是**闭包内的本地函数**，
@@ -554,11 +587,15 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 ### 5.1 AD（Android）
 
 - ~~Q1 R9-AD-1~~ **本批已确证并落地**（升 P1）：见 §二 裁决表与 §3.1。修法：Android 合成单条 blob 且撤销为最后一句 + 三处 register 改传递解析（hops 上限防环）。同族的 **R9-AD-3**（下载 3xx 旁路）仍在队列里，未被本批覆盖。
-- Q2 R9-AD-2 | P2 | `TranslateEntry.kt:50`（`Uri.encode` 缺省保留 `:/?&=`）+ `:28`
-  （`SENSITIVE_QUERY_PARAMS` 只精确匹配 code/state/token）⇒ 带多参页被截成错目标、
-  `access_token`/`api_key` 原样外发；`TranslateEntryPrivacyTest.kt:41-47` 把 `keep=me`
-  留在全码当期望值。建议改用仓内严格编码器 `SearchEngines.uriEncode`（纯 Kotlin 单源，
-  已对 AOSP `Uri.encode` 做过 instrumented 对照矩阵）。
+- ~~Q2 R9-AD-2~~ **回读后一半推翻、一半落地**（§二 裁决行 + §3.16）：
+  「`Uri.encode` 缺省保留 `:/?&=` ⇒ 截成错目标」与本仓 D-2 实测记录矛盾
+  （`audit-search-2026-08-31.md`：Android 侧连 `/` 都编码；若它保留 `/`，AD-057 就不必
+  另写等价于 `Uri.encode(text, "/")` 的 `uriEncode`），症状是误读。
+  **真的一半**是名单只有裸名 {code,state,token} ⇒ `access_token`/`api_key`/`sessionid`
+  原样外发：已加 `isSensitiveParam`（小写 + 去 `-`/`_`，精确名单补 key/auth/sid/sig/nonce，
+  另加凭据词干表），并有用例钉住「不过界」（`keywords`/`keyboard`/`category` 保留）。
+  「改用 `SearchEngines.uriEncode`」**没做**：Robolectric 已提供真实 `Uri.encode`，
+  换了只把 `%2F` 变明文 `/`（线上形态变更），换不到可测性收益。
 - Q3 R9-AD-3 | P2 | `WebViewDownloadHandler.kt:139-169` 全树零 `setRedirectsAllowed`：
   闸门只判**入队** URL，DownloadProvider 默认跟随重定向 ⇒ `302 → 169.254.169.254` 仍
   落盘公共目录（PR #130 消除的后果复活路径）。建议完成后用 `COLUMN_URI` 对最终地址复判
@@ -637,10 +674,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `android/.../SearchEngines.kt:36,45`、`windows/.../UrlNormalizer.cs:21,50` ↔
   `scripts/verify_cross_end_lists.py`：引擎 **key 集合**已五端对账，但「默认引擎值」与
   「展示名」两份元数据 4 处手抄零判据 ⇒ 换默认值/改中文名只落一处不会红。
-- Q20 R9-SH-10 | P3 | `contracts/vectors/capability-invalid.json` 第 2 条 note 称「schema
-  minItems 未设——本向量按用户语义拒绝」，而 `contracts/schemas/capability.schema.json`
-  已设 `minItems: 1`（`validate_vector_schemas.py:170-171` 对该文件不设语义豁免）⇒
-  拒绝理由就是 minItems，注记是失实陈述。
+- ~~Q20 R9-SH-10~~ **本批已确证并落地**（§二 + §3.16）：note 改成当前实况（拒绝理由就是
+  `minItems: 1`）并保留来历（PY-095 记下时确实未设）。`validate_vector_schemas.py` 复跑 ✅，
+  向量内容与期望零改动——纯注记改真。
 - Q21 R9-SH-11 | P3 | `contracts/vectors/native-navigation-confirmation.json:2,12-15` ↔
   `native-navigation-decision.json:2-3`：同一原生 ABI 的两份向量信封不一致（前者只有
   `protocol`、无 `version/description`；期望字段名 `expected_request` /
@@ -693,10 +729,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   src↔入库件）与 `core-rust.yml`（同一次构建的权威 python 产物↔入库件）两处接线。
   「删这份无人消费的入库件」这条**没走**：删除是产品/架构裁决（该件自 2026-08-22 原生
   UniFFI 集成即在库），留作定稿项（见第四节）。
-- Q27 R9-RS-3 | P3 | `core/rust-policy-core/Cargo.toml:41-44`：注记写「getrandom 0.2→0.3，
-  0.3 为当前主线」而实际 pin 是 `getrandom = "0.4"`；又写「ed25519-dalek 经 rand_core 0.6
-  仍消费 getrandom 0.2」，`Cargo.lock` 实为 rand_core 0.9.5 + getrandom 0.3.4
-  （ed25519-dalek 3.0 / curve25519-dalek 5.0）⇒ 下一批依赖决策按注记推断会取错对象。
+- ~~Q27 R9-RS-3~~ **本批已确证并落地**（§二 + §3.16）：`cargo tree --offline -i` 实测补一条
+  ——锁里既无 getrandom 0.2 也无 rand_core 0.6；实况是直接依赖解析 0.4.3（本 crate + tempfile），
+  0.3.4 由 rand_core 0.9.5 带入（ed25519-dalek 3.0 / curve25519-dalek 5.0 一侧）。注记已改成
+  带实测来源的事实，依赖零改动、`cargo metadata --locked` ✅。
 - Q28 R9-RS-4 | P3 | `core/rust-policy-core/src/https_only.rs:89-125`、
   `src/update_manifest.rs:170-309`、`BridgeGuard::inject_script`：三个策略面在 13 个冻结
   导出符号里**零入口**、两端零消费，而 `README.md:15,71` 仍把「Ed25519 阈值验证」列为
