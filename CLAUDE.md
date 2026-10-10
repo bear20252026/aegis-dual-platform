@@ -61,6 +61,8 @@ python scripts/check_doc_claims.py                # 文档计数声明与实树�
 python scripts/check_markdown_links.py            # Markdown 相对链接死链 fail-closed
 python scripts/check_markdown_tables.py           # Markdown 表格逐行列数与表头一致（R8-DOC-19）
 # R9-CI-9：dotnet test 的退出码不含「发现了几个测试」——CI 八处调用都追加本断言。
+# 项 13(a)（R9-B16）：这八处的命令行单源在 .github/actions/dotnet-test-suite，
+# workflow 里的调用点只声明工程/目录/标签/下界（漂移由 dotnet_suite_composite_wiring_test.py 判红）。
 # 本地复现须先给 dotnet test 补 --results-directory 与 --logger "trx;LogFileName=…"。
 python scripts/assert_test_counts.py --results-dir TestResults/core --minimum 700 --label Core
 # SP-163（2026-09-26 审计）：node 21+ glob 展开（引号防 shell 抢先展开，

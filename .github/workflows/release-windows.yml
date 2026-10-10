@@ -134,28 +134,38 @@ jobs:
           # 与 windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj 的
           # Content Include 路径同步修改
           dest-dir: dist/geogebra-cache
-      - name: Verify native bridge and build current Windows application
+      - name: Export the native bridge test environment
         shell: pwsh
         run: |
+          # 与 native-policy-artifacts.yml 同口径：DLL 路径导出一次，composite 测试步骤
+          # 与后面的 publish 读同一份（值来自当次下载的受控原生工件）。
           $policyDll = (Resolve-Path dist/native-policy/windows/win-x64/aegis_policy_core.dll).Path
-          $env:AEGIS_REQUIRE_NATIVE_POLICY_CORE = "1"
-          $env:AEGIS_REQUIRE_NAVIGATION_CONFIRMATION = "1"
-          $env:AEGIS_NATIVE_POLICY_CORE_PATH = $policyDll
-          $env:AEGIS_NATIVE_POLICY_CORE_TEST_PATH = $policyDll
-          # 全量 C# 测试门禁（Core 领域层 + Broker 授权链——此前仅 Broker）；
-          # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
-          # R7-TOOL-01：两条 dotnet test 必须各自断退出码——它们原先被后面的
-          # `dotnet publish` 吞掉（步骤退出码取末条原生命令）。
-          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/core-release --logger "trx;LogFileName=core-release.trx"
-          if ($LASTEXITCODE -ne 0) { throw "Core.Tests 失败（exit $LASTEXITCODE）——禁止在未通过测试上发布正典制品" }
-          # R9-CI-9（第九轮 2026-10-10）：同一判据在发布链上也要成立——正典制品
-          # 不能建立在「零发现的全绿」上。
-          python scripts/assert_test_counts.py --results-dir TestResults/core-release --minimum 700 --label Core-release
-          if ($LASTEXITCODE -ne 0) { throw "Core.Tests 发现数下界未达成（exit $LASTEXITCODE）——禁止发布" }
-          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/broker-release --logger "trx;LogFileName=broker-release.trx"
-          if ($LASTEXITCODE -ne 0) { throw "Broker.Tests（授权链/原生桥面）失败（exit $LASTEXITCODE）" }
-          python scripts/assert_test_counts.py --results-dir TestResults/broker-release --minimum 160 --label Broker-release
-          if ($LASTEXITCODE -ne 0) { throw "Broker.Tests 发现数下界未达成（exit $LASTEXITCODE）——禁止发布" }
+          "AEGIS_NATIVE_POLICY_CORE_TEST_PATH=$policyDll" >> $env:GITHUB_ENV
+          "AEGIS_NATIVE_POLICY_CORE_PATH=$policyDll" >> $env:GITHUB_ENV
+          "AEGIS_REQUIRE_NATIVE_POLICY_CORE=1" >> $env:GITHUB_ENV
+          "AEGIS_REQUIRE_NAVIGATION_CONFIRMATION=1" >> $env:GITHUB_ENV
+      # R9-CI-9 + 定稿项 13(a)：命令面与发现数下界单源在 .github/actions/dotnet-test-suite；
+      # 正典制品不能建立在「零发现的全绿」上，所以发布链同样要断下界。
+      - name: 正典制品前置：Core.Tests（发现数 ≥700，R9-CI-9）
+        uses: ./.github/actions/dotnet-test-suite
+        with:
+          project: windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj
+          results-dir: TestResults/core-release
+          trx-name: core-release.trx
+          label: Core-release
+          minimum: 700
+      - name: 正典制品前置：Broker.Tests 授权链/原生桥面（发现数 ≥160，R9-CI-9）
+        uses: ./.github/actions/dotnet-test-suite
+        with:
+          project: windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj
+          results-dir: TestResults/broker-release
+          trx-name: broker-release.trx
+          label: Broker-release
+          minimum: 160
+      - name: Publish and stage the Windows release archive
+        shell: pwsh
+        # R7-TOOL-01：两条测试已各自成步——判定不再被同一步里的 `dotnet publish` 吞掉退出码。
+        run: |
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
@@ -163,7 +173,8 @@ jobs:
             --output dist/aegis-windows `
             -p:RestoreLockedMode=true `
             -p:RequireNativePolicyCore=true `
-            -p:NativePolicyCorePath=$policyDll
+            -p:NativePolicyCorePath="$env:AEGIS_NATIVE_POLICY_CORE_PATH"
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败：exit $LASTEXITCODE" }
           if (-not (Test-Path dist/aegis-windows/aegis_policy_core.dll)) {
             throw "Windows 发布目录缺少 Rust 原生策略核心 DLL"
           }

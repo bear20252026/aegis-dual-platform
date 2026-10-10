@@ -290,9 +290,8 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
 4. 踩到并当场改掉一处自伤：模板用 `str.format()` 渲染含 `${{ github.ref }}` 的注释块，
    `{{`/`}}` 被 format 当转义吃掉 ⇒ 写出来的表达式变成 `${ github.ref }`（Actions 会当
    普通字符串，group 名就此失去 ref 维度）。由 py-yaml **复读实际值**发现，不是靠肉眼看 diff。
-5. **同批未做**：13(a)（把八处 dotnet 命令抽 composite）与 13(c)（出货 builder 钉
-   `ubuntu-24.04`）——前者要动四条 workflow 的命令面且与 R9-CI-9 的接线锚耦合，后者
-   属用户待定稿面。
+5. **同批未做**：13(a)（把八处 dotnet 命令抽 composite——**已在 R9-B16 落地，见 §3.15**）
+   与 13(c)（出货 builder 钉 `ubuntu-24.04`，属用户待定稿面）。
 
 ### 3.8 R9-B9（2026-10-10，定稿项 9 步 1）：三端注入 JS 逐 token 同形对账入门禁
 
@@ -464,6 +463,47 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
    568 + 集成 ✅、`dotnet test` Core **796/796**（发现数下界门禁同时跑过）、
    `pytest tests/python` **556 passed / 1 skipped**、ruff/bandit/compat/file sizes ✅。
    Android 侧本批只改注入文本，未跑 Gradle（ktlint/detekt 由 CI 判）。
+
+### 3.15 R9-B16（2026-10-10，定稿项 13(a)）：八处 dotnet test 的命令面抽 composite 单源
+
+**共同主题：复制八份的判定面，改一处就是制造分歧。** compat / contracts /
+native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r win-x64
+-p:RestoreLockedMode=true --results-directory … --logger "trx;…"` 再各跟一条
+`assert_test_counts.py`。给其中一份补参数（`--no-build`、新 logger 设置）其余七份不会红
+——本仓记了整轮的「部分闭环」正是这一类。
+
+1. 新增 `.github/actions/dotnet-test-suite/action.yml`（54 行）：五个必填输入
+   （project / results-dir / trx-name / label / minimum），命令面与发现数下界断言、
+   两条 `$LASTEXITCODE` 处置各只有一份。输入**全部经 step `env:` 中转**，不写进 run 正文
+   （R9-CI-2 口径：`${{ }}` 在 shell 解析之前完成文本替换）。
+2. **八个调用点**改为 `uses:`（四个 workflow × 2 步），只声明工程/目录/标签/下界；
+   workflow 正文里 `dotnet test` 归零（第 8 条锚判「只做一半」）。
+3. native-policy-artifacts 与 release-windows 两条 job 各拆出一个「导出原生判定环境」步骤
+   （`Resolve-Path` 一次 → 四个变量写 `GITHUB_ENV`），composite 步骤与后面的 publish 读
+   同一份路径。**这一步是本次重构的真正风险**：`AEGIS_REQUIRE_NATIVE_POLICY_CORE=1` 一旦
+   漏导出，那两个调用点会退化成「托管模式再跑一遍」，而发现数下界照样达标、看不出来。
+   因此新锚第 6 条按**步骤顺序**判「导出必须在调用点之前」，并用删掉导出步的内存态注入
+   自证它能判红。
+4. 接线锚随抽取迁出成 `tests/python/dotnet_suite_composite_wiring_test.py`（12 条）：
+   调用点数量与分布、输入齐全、下界与登记值一致、project 与 label 同套件、results-dir
+   在 job 内不复用、原生导出在前、composite 正文含全套参数、`${{ }}` 不进 run 正文、
+   workflow 里不留 dotnet test；另有四条内存态反向锚（调松下界 / 缺输入 / 工程与标签
+   不匹配 / 删掉原生导出）。原 `dotnet_test_count_gate_test.py` 收窄成「脚本判定面」20 条。
+5. **判定面缩水也被抓出来了**：`windows_python_encoding_test.py`（R9-CI-10 的锚）在抽取后
+   从 7 个「windows + python」job 塌到 5 个——因为它只解析 workflow 正文里的 `python`，
+   调用搬进 composite 就等于把这条 UTF-8 判定的覆盖面自己削掉。已扩成
+   「含经本地 composite 转发的调用」，并加一条反向锚（只经 action 调 python 的 windows
+   job 必须被计入）。这正是本仓反复记的「扫描面悄悄变小 = 看起来更安全」。
+6. `dotnet build`（2 处）与 `dotnet publish`（2 处，参数与产物校验各不同）**没有**抽进来：
+   没有可合并的重复面，硬抽只会造出条件分支——边界写在 action 头注里，别让下轮以为
+   「所有 dotnet 都单源了」。
+7. 本地验证：`pytest tests/python` **562 passed / 1 skipped**、ruff / bandit / py312-compat /
+   `check_workflow_shells --self-test`（26 个 pwsh 步骤）/ `check_file_sizes` / 三条文档门禁 ✅。
+   **composite 的 pwsh 正文本机不可证**（本机无 pwsh、无 act）：compat / contracts /
+   native-policy 三个 job 都在 PR 面实跑，即 8 个调用点里 6 个由 CI 现场验证；
+   release-windows 的 2 个只由静态锚判（该 workflow 仅 tag/dispatch 触发）。
+   若 `${{ inputs.* }}` 在 composite 步骤的 `env:` 层不受支持，Actions 会直接报 context
+   错误而不是静默变空——CI 当场可辨。
 
 ## 四、待用户定稿（本轮新增四项，其余沿用第八轮 §七）
 
