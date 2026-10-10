@@ -1,0 +1,54 @@
+# 定稿项 13(a)（第九轮 2026-10-10，R9-B16）：正典栈测试执行面单源。
+#
+# 此前八条 dotnet test 在四个 workflow（compat / contracts / native-policy-artifacts /
+# release-windows）里各抄一整行命令，参数一字不差：`--configuration Release -r win-x64
+# -p:RestoreLockedMode=true --results-directory … --logger "trx;…"`，后面各跟一条
+# scripts/assert_test_counts.py 的发现数下界断言（R9-CI-9——`dotnet test` 零发现也退 0）。
+# 八份抄写的失败形态很具体：给其中一份补参数（比如 `--no-build` 或新的 logger 设置），
+# 其余七份静默保持旧口径，于是「同一个门禁在四张必需检查里跑的是不同命令」——本仓
+# 反复记到「部分闭环」正是这一类。
+#
+# 边界（如实写，别把这里读成"所有 dotnet 都单源了"）：
+# · `dotnet build`（compat/contracts 各一条）与 `dotnet publish`（native/release 各一条，
+#   参数与产物校验各不相同）**不**在本 action 内——它们没有可合并的重复面，硬抽只会
+#   造出一堆条件分支；
+# · 原生模式判定所需的四个环境变量（`AEGIS_REQUIRE_NATIVE_POLICY_CORE` 等）由**调用方**
+#   提供（值来自当次构建的 DLL 绝对路径，action 里取不到）。action 不代替它们生效，
+#   所以「P/Invoke 面是否真跑」这条判据仍在调用方，由
+#   tests/python/dotnet_test_count_gate_test.py 逐调用点核对。
+name: '正典栈测试套件（dotnet test + 发现数下界——R9-CI-9 / 项 13(a)）'
+description: 'Run one Aegis .NET test suite with a TRX file, then assert the discovery-count floor'
+inputs:
+  project:
+    description: '测试工程路径（相对仓库根）'
+    required: true
+  results-dir:
+    description: 'TRX 落点目录——每套件独立，防不同调用点之间计数互相污染'
+    required: true
+  trx-name:
+    description: 'TRX 文件名'
+    required: true
+  label:
+    description: '套件标签（Core / Broker；原生面 -native、发布链 -release 后缀）'
+    required: true
+  minimum:
+    description: '发现数下界——必须与登记值一致（漂移由常驻测试判红）'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: dotnet test 与发现数下界断言
+      shell: pwsh
+      # 输入一律经 env 中转，不写进 run 正文（R9-CI-2 口径：`${{ }}` 在 shell 解析之前
+      # 完成文本替换，落到 run 里就是注入面）。
+      env:
+        AEGIS_TEST_PROJECT: ${{ inputs.project }}
+        AEGIS_RESULTS_DIR: ${{ inputs.results-dir }}
+        AEGIS_TRX_NAME: ${{ inputs.trx-name }}
+        AEGIS_SUITE_LABEL: ${{ inputs.label }}
+        AEGIS_MINIMUM: ${{ inputs.minimum }}
+      run: |
+        dotnet test "$env:AEGIS_TEST_PROJECT" --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory "$env:AEGIS_RESULTS_DIR" --logger "trx;LogFileName=$env:AEGIS_TRX_NAME"
+        if ($LASTEXITCODE -ne 0) { throw "dotnet test（$env:AEGIS_SUITE_LABEL）失败：exit $LASTEXITCODE" }
+        python scripts/assert_test_counts.py --results-dir "$env:AEGIS_RESULTS_DIR" --minimum "$env:AEGIS_MINIMUM" --label "$env:AEGIS_SUITE_LABEL"
+        if ($LASTEXITCODE -ne 0) { throw "测试发现数下界门禁（$env:AEGIS_SUITE_LABEL）失败：exit $LASTEXITCODE" }

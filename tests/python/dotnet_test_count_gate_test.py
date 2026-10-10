@@ -1,5 +1,5 @@
 # dotnet_test_count_gate_test.py —— R9-CI-9（第九轮 2026-10-10）：测试**发现数**下界
-# 门禁的自证 + 「八处 dotnet test 全部接线」的静态锚。
+# 门禁脚本自身的判定面（掏空它会红 + 健康 TRX 不误红 + 控制台编码不决定判定）。
 #
 # 失效模式：`dotnet test` 的退出码只表达「跑到的都没失败」，零发现同样退 0。本仓 CI
 # 的八处调用（compat / contracts / native-policy-artifacts / release-windows）此前只看
@@ -9,21 +9,15 @@
 # 零发现全绿，而 PR 里没有任何人会察觉。
 #
 # 按本仓固定口径（R7-TOOL-04 / R8-PY-02）：不光证「现在绿」，必须证「掏空它会红」，
-# 并证「不误红」（健康 TRX 必须过）。静态锚防的是第四种失效：门禁写好了但没接线。
+# 并证「不误红」（健康 TRX 必须过）。「门禁写好了但没接线」那第四种失效由
+# tests/python/dotnet_suite_composite_wiring_test.py 判（项 13(a) 之后判定面在那边）。
 from __future__ import annotations
 
 import io
-import re
 import sys
 from pathlib import Path
 
 import assert_test_counts as atc
-import pytest
-import yaml
-
-# _run_blocks 已在 workflow_exit_code_test 里把 job/composite 两种 steps 形态收敛好，
-# 这里复用而不是再写一遍解析（两处解析漂移 = 第二个假绿源）。
-from workflow_exit_code_test import _run_blocks
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -32,21 +26,6 @@ TRX_NS = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
 
 # 套件 → 登记下界（本轮实测 Core 782、Broker 189，下界取有界余量）。workflow 里的数字与本表
 # 不一致即红——防「某一处被人顺手调松」。
-EXPECTED_FLOORS = {"core": 700, "broker": 160}
-
-MINIMUM_RE = re.compile(r"--minimum (\d+)")
-LABEL_RE = re.compile(r"--label (\S+)")
-RESULTS_DIR_RE = re.compile(r"--results-dir (\S+)")
-
-
-def _suite_of(token: str) -> str:
-    lowered = token.lower()
-    for suite in EXPECTED_FLOORS:
-        if suite in lowered:
-            return suite
-    return "?"
-
-
 def _write_trx(
     directory: Path,
     counters: dict[str, int] | None,
@@ -198,69 +177,8 @@ def test_environment_error_message_survives_a_cp1252_console(tmp_path, monkeypat
 
 
 # ---------------------------------------------------------------- 接线锚
-def _dotnet_test_blocks() -> list[tuple[str, str]]:
-    """(位置标识, run 文本)——只收含 `dotnet test` 的步骤，含复合 action。"""
-    files = sorted(WORKFLOWS.glob("*.yml")) + sorted(WORKFLOWS.glob("*.yaml"))
-    actions = ROOT / ".github" / "actions"
-    if actions.is_dir():
-        files += sorted(actions.glob("*/action.yml"))
-    found: list[tuple[str, str]] = []
-    for path in files:
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-        for where, _name, run in _run_blocks(doc or {}):
-            if "dotnet test" in run:
-                found.append((path.name, run))
-    return found
-
-
-def test_scan_surface_is_not_empty():
-    """扫描面为空＝锚自身失灵（R7-TOOL-04 同口径）。台账实测：4 个 workflow / 6 个步骤
-    / 8 条 dotnet test（compat 与 contracts 各两步，native-policy 与 release 各一步两步）。
-    数量对不上说明解析面漏了形态（复合 action、matrix、job 级 defaults）。"""
-    blocks = _dotnet_test_blocks()
-    assert len({name for name, _ in blocks}) == 4, "dotnet test 应分布在 compat/contracts/native-policy/release 四个 workflow"
-    calls = sum(1 for _name, run in blocks for line in run.splitlines() if line.strip().startswith("dotnet test"))
-    assert calls == 8, f"实见 {calls} 条 dotnet test 调用，与台账 8 条不符"
-
-
-BLOCKS = _dotnet_test_blocks()
-BLOCK_IDS = [f"{index}-{name.replace('.yml', '')}" for index, (name, _run) in enumerate(BLOCKS)]
-
-
-@pytest.mark.parametrize("where,run", BLOCKS, ids=BLOCK_IDS)
-def test_every_dotnet_test_is_followed_by_a_discovery_floor(where: str, run: str):
-    problems: list[str] = []
-    test_lines = [line.strip() for line in run.splitlines() if line.strip().startswith("dotnet test")]
-    gate_lines = [
-        line.strip()
-        for line in run.splitlines()
-        if "assert_test_counts.py" in line and not line.strip().startswith("#")
-    ]
-    if len(gate_lines) != len(test_lines):
-        problems.append(f"{len(test_lines)} 条 dotnet test 只配到 {len(gate_lines)} 条发现数断言")
-
-    for line in test_lines:
-        if "--results-directory" not in line:
-            problems.append("缺 --results-directory：TRX 落点随 SDK 版本漂，门禁无从定位")
-        if "trx;" not in line:
-            problems.append("缺 trx logger：没有结果文件就只看退出码＝原缺陷未闭合")
-
-    seen_dirs: list[str] = []
-    for line in gate_lines:
-        minimum, label, results_dir = MINIMUM_RE.search(line), LABEL_RE.search(line), RESULTS_DIR_RE.search(line)
-        if minimum is None or label is None:
-            problems.append("断言行缺 --minimum 或 --label")
-            continue
-        suite = _suite_of(label.group(1))
-        if suite == "?":
-            problems.append(f"--label {label.group(1)} 认不出套件")
-        elif int(minimum.group(1)) != EXPECTED_FLOORS[suite]:
-            problems.append(f"{suite} 下界 {minimum.group(1)} 与登记值 {EXPECTED_FLOORS[suite]} 漂移")
-        if results_dir is None:
-            problems.append("断言行缺 --results-dir")
-        else:
-            seen_dirs.append(results_dir.group(1))
-    if len(set(seen_dirs)) != len(seen_dirs):
-        problems.append("同一步骤内两个套件共用 results 目录 ⇒ 计数互相污染")
-
-    assert not problems, f"{where}: " + "；".join(problems)
+# 定稿项 13(a)（R9-B16）把八条 dotnet test 的命令面抽进
+# .github/actions/dotnet-test-suite，调用点只剩「测哪个工程、落在哪个目录、下界多少」。
+# 「接线是否还在」这条锚因此改判 uses: 调用点与本 action 正文，见
+# tests/python/dotnet_suite_composite_wiring_test.py（同批随抽取迁出，避免两个判定面
+# 挤在同一份 300 行里各改一半）。

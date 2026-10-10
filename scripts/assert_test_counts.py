@@ -5,7 +5,9 @@
 （适配器版本不匹配、runner 与框架不同代、发现阶段静默零结果），它同样退出 0。
 本仓 CI 的八处 `dotnet test`（compat.yml / contracts.yml / native-policy-artifacts.yml /
 release-windows.yml）此前都只看退出码 ⇒「绿」的含义是「没有失败的测试」，
-不是「跑过 782 个测试（本轮实测）」。
+不是「跑过 782 个测试（本轮实测）」。（项 13(a)/R9-B16 之后，这八处的命令面与对本脚本的
+调用都收进 `.github/actions/dotnet-test-suite`——八处**调用点**仍在四个 workflow 里，
+参数不再各抄八份。）
 
 触发点是真实的：把 `xunit.runner.visualstudio` 从 3.1.5 抬到 4.0.1 这类跨 major 的
 **测试宿主**升级，一旦发现器与 `xunit` 框架不同代，最坏结果就是零发现全绿——

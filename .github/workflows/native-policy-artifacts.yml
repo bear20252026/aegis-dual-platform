@@ -90,31 +90,42 @@ jobs:
             dist/native-policy/windows/win-x64/aegis_policy_core.dll
           python release/native_artifact_manifest.py --root dist/native-policy `
             --output dist/native-policy/windows-manifest.json --require windows
-      - name: Probe DLL ABI and verify WPF publish contains the controlled library
+      - name: Resolve native DLL and export the P/Invoke test environment
         shell: pwsh
         run: |
+          # R7-TOOL-01 前提：本 job 是**唯一**以 AEGIS_REQUIRE_NATIVE_POLICY_CORE=1 真跑
+          # P/Invoke 往返的必需检查。DLL 路径经 GITHUB_ENV 导出一次，测试调用点（composite
+          # 步骤继承 job env）与后面的 publish 读同一份——不再三处各自 Resolve-Path。
           $policyDll = (Resolve-Path dist/native-policy/windows/win-x64/aegis_policy_core.dll).Path
-          $env:AEGIS_NATIVE_POLICY_CORE_TEST_PATH = $policyDll
-          $env:AEGIS_NATIVE_POLICY_CORE_PATH = $policyDll
-          $env:AEGIS_REQUIRE_NATIVE_POLICY_CORE = "1"
-          $env:AEGIS_REQUIRE_NAVIGATION_CONFIRMATION = "1"
-          # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
-          # R7-TOOL-01：本 job 是**唯一**以 AEGIS_REQUIRE_NATIVE_POLICY_CORE=1 真跑
-          # P/Invoke 往返的作业，其判定不得被后面的 dotnet publish 吞掉退出码。
-          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/broker-native --logger "trx;LogFileName=broker-native.trx"
-          if ($LASTEXITCODE -ne 0) { throw "原生模式 Broker.Tests 失败（exit $LASTEXITCODE）——P/Invoke 面未通过" }
-          # R9-CI-9（第九轮 2026-10-10）：原生模式下同样要断**发现数**——零发现也退 0，
-          # 而本 job 是必需检查里唯一真跑 P/Invoke 往返的判定面。
-          python scripts/assert_test_counts.py --results-dir TestResults/broker-native --minimum 160 --label Broker-native
-          if ($LASTEXITCODE -ne 0) { throw "原生模式 Broker.Tests 发现数下界未达成（exit $LASTEXITCODE）" }
-          # R7-CS1-15（第七轮）：Core.Tests 也必须以原生模式真跑——它是必需检查里
-          # windows-contract-build 的唯一大测试面，此前只在**托管模式**下跑过，
-          # 于是原生跨界缺陷（0xC0000005）在该路径上零门禁：修复前的实测是
-          # 「通过 403/667 后测试主机崩溃」。放在本 job 是因为这里才有现建的 DLL。
-          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/core-native --logger "trx;LogFileName=core-native.trx"
-          if ($LASTEXITCODE -ne 0) { throw "原生模式 Core.Tests 失败（exit $LASTEXITCODE）——托管面与跨界面判定不一致" }
-          python scripts/assert_test_counts.py --results-dir TestResults/core-native --minimum 700 --label Core-native
-          if ($LASTEXITCODE -ne 0) { throw "原生模式 Core.Tests 发现数下界未达成（exit $LASTEXITCODE）" }
+          "AEGIS_NATIVE_POLICY_CORE_TEST_PATH=$policyDll" >> $env:GITHUB_ENV
+          "AEGIS_NATIVE_POLICY_CORE_PATH=$policyDll" >> $env:GITHUB_ENV
+          "AEGIS_REQUIRE_NATIVE_POLICY_CORE=1" >> $env:GITHUB_ENV
+          "AEGIS_REQUIRE_NAVIGATION_CONFIRMATION=1" >> $env:GITHUB_ENV
+      # R9-CI-9 + 定稿项 13(a)：命令面与发现数下界断言单源在
+      # .github/actions/dotnet-test-suite。原生判定依赖上一步导出的 env；「是否真跑
+      # P/Invoke 往返」这条判据因此留在调用方，由 dotnet_test_count_gate_test.py 逐调用点核对。
+      - name: Native-mode Broker.Tests（发现数 ≥160，R9-CI-9）
+        uses: ./.github/actions/dotnet-test-suite
+        with:
+          project: windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj
+          results-dir: TestResults/broker-native
+          trx-name: broker-native.trx
+          label: Broker-native
+          minimum: 160
+      - name: Native-mode Core.Tests（发现数 ≥700，R9-CI-9 / R7-CS1-15）
+        uses: ./.github/actions/dotnet-test-suite
+        with:
+          project: windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj
+          results-dir: TestResults/core-native
+          trx-name: core-native.trx
+          label: Core-native
+          minimum: 700
+      - name: WPF publish with the controlled native library
+        shell: pwsh
+        # R7-CS1-15（第七轮）：Core.Tests 也必须以原生模式真跑——此前只在托管模式跑过，
+        # 于是原生跨界缺陷（0xC0000005）零门禁；修复前实测「通过 403/667 后测试主机崩溃」。
+        # publish 复用同一条导出路径，避免「测的 DLL 与发布的 DLL 不是同一份」这种分叉。
+        run: |
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
@@ -122,7 +133,8 @@ jobs:
             --output dist/native-policy/windows/wpf-publish `
             -p:RestoreLockedMode=true `
             -p:RequireNativePolicyCore=true `
-            -p:NativePolicyCorePath=$policyDll
+            -p:NativePolicyCorePath="$env:AEGIS_NATIVE_POLICY_CORE_PATH"
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish 失败：exit $LASTEXITCODE" }
           if (-not (Test-Path dist/native-policy/windows/wpf-publish/aegis_policy_core.dll)) {
             throw "WPF 发布目录缺少受控原生策略 DLL"
           }

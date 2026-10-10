@@ -125,15 +125,26 @@ public sealed class NativePolicyCoreBridgeLeaseTests
     {
         // 缺口本身也要钉住：此前唯一以 AEGIS_REQUIRE_NATIVE_POLICY_CORE=1 真跑的
         // 作业只跑 Broker.Tests，Core.Tests 从未走过跨界路径——所以崩溃藏了五轮。
+        // 项 13(a)/R9-B16 把测试命令面抽进 composite，本锚跟着改判「形状变了、判定没变」，
+        // 而且必须比原来更严：composite 步骤只继承 **job/step env**，同一步里的
+        // `$env:X = "1"` 传不到下一个步骤——所以开关必须以 GITHUB_ENV 导出，
+        // 否则那两个调用点会静默退回托管模式（下界照样达标，没人看得出来）。
         var workflow = Path.Combine(FindRepoRoot(), ".github", "workflows", "native-policy-artifacts.yml");
         var text = File.ReadAllText(workflow);
-        var native = text.IndexOf("AEGIS_REQUIRE_NATIVE_POLICY_CORE = \"1\"", StringComparison.Ordinal);
-        Assert.True(native >= 0, "原生模式开关不再在作业里置位");
+        var native = text.IndexOf(
+            "\"AEGIS_REQUIRE_NATIVE_POLICY_CORE=1\" >> $env:GITHUB_ENV", StringComparison.Ordinal);
+        Assert.True(native >= 0, "原生模式开关不再导出到 GITHUB_ENV——composite 测试步骤会静默退回托管模式");
+        var firstCall = text.IndexOf("./.github/actions/dotnet-test-suite", StringComparison.Ordinal);
+        Assert.True(firstCall > native, "测试调用点排在导出之前（该调用点实为托管模式重跑）");
         var core = text.IndexOf("Aegis.Windows.Core.Tests", native, StringComparison.Ordinal);
         Assert.True(core > native, "原生模式下没有跑 Core.Tests");
         var publish = text.IndexOf("dotnet publish", core, StringComparison.Ordinal);
         Assert.True(publish > core, "Core.Tests 之后缺少 publish 步（判定被吞退出码的老形态）");
-        Assert.Contains("原生模式 Core.Tests 失败", text);  // $LASTEXITCODE 显式断言在位
+        Assert.Contains("dotnet publish 失败", text);  // publish 自己断退出码
+        // 发现数下界（R9-CI-9）随每次测试调用——文案单源在 action 正文里。
+        var action = File.ReadAllText(Path.Combine(FindRepoRoot(), ".github", "actions",
+            "dotnet-test-suite", "action.yml"));
+        Assert.Contains("assert_test_counts.py", action);
     }
 
     private static string FindRepoRoot()

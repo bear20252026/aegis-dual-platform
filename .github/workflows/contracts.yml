@@ -209,17 +209,21 @@ jobs:
       # 一个都没发现时同样退 0。windows-contract-build 是必需检查里的最大 C# 测试面，
       # 一旦发现器静默归零，「绿」就只剩「没有失败」而不是「782 个判定都跑过」。
       - name: Test Windows Core domain layer（发现数 ≥700，R9-CI-9）
-        run: |
-          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/core --logger "trx;LogFileName=core-tests.trx"
-          if ($LASTEXITCODE -ne 0) { throw "dotnet test（Core）失败：exit $LASTEXITCODE" }
-          python scripts/assert_test_counts.py --results-dir TestResults/core --minimum 700 --label Core
-          if ($LASTEXITCODE -ne 0) { throw "测试发现数下界门禁（Core）失败：exit $LASTEXITCODE" }
+        uses: ./.github/actions/dotnet-test-suite
+        with:
+          project: windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj
+          results-dir: TestResults/core
+          trx-name: core-tests.trx
+          label: Core
+          minimum: 700
       - name: Test Windows broker authorization lifecycle（发现数 ≥160，R9-CI-9）
-        run: |
-          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/broker --logger "trx;LogFileName=broker-tests.trx"
-          if ($LASTEXITCODE -ne 0) { throw "dotnet test（Broker）失败：exit $LASTEXITCODE" }
-          python scripts/assert_test_counts.py --results-dir TestResults/broker --minimum 160 --label Broker
-          if ($LASTEXITCODE -ne 0) { throw "测试发现数下界门禁（Broker）失败：exit $LASTEXITCODE" }
+        uses: ./.github/actions/dotnet-test-suite
+        with:
+          project: windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj
+          results-dir: TestResults/broker
+          trx-name: broker-tests.trx
+          label: Broker
+          minimum: 160
 
   android-contract-build:
     runs-on: windows-2025
