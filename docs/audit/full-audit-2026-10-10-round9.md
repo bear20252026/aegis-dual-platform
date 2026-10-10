@@ -497,10 +497,24 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. `dotnet build`（2 处）与 `dotnet publish`（2 处，参数与产物校验各不同）**没有**抽进来：
    没有可合并的重复面，硬抽只会造出条件分支——边界写在 action 头注里，别让下轮以为
    「所有 dotnet 都单源了」。
-7. 本地验证：`pytest tests/python` **562 passed / 1 skipped**、ruff / bandit / py312-compat /
-   `check_workflow_shells --self-test`（26 个 pwsh 步骤）/ `check_file_sizes` / 三条文档门禁 ✅。
-   **composite 的 pwsh 正文本机不可证**（本机无 pwsh、无 act）：compat / contracts /
-   native-policy 三个 job 都在 PR 面实跑，即 8 个调用点里 6 个由 CI 现场验证；
+7. **CI 现场抓出第二条被旧形状钉住的锚**（这正是抽取该付出的账）：
+   `windows/tests/Aegis.Windows.Broker.Tests/NativePolicyCoreBridgeLeaseTests.cs` 的
+   `NativeModeCoreTestsAreGatedInCi`（R7-CS1-15 的常驻锚）用字面量
+   `AEGIS_REQUIRE_NATIVE_POLICY_CORE = "1"` 判「原生开关在作业里置位」——导出改写成
+   `"…=1" >> $env:GITHUB_ENV` 后它判红，三张必需检查一起红。锚的**意图**（开关必须在
+   Core.Tests 之前生效、publish 在后、判定不被吞）依然成立，所以把锚改成更严的口径：
+   ①开关必须是 **GITHUB_ENV 导出**（composite 步骤只继承 job/step env，同一步里的
+   `$env:X=` 传不到下一步——旧写法在新结构下会静默退回托管模式，而这恰是抽取引入的
+   新风险）；②第一个测试调用点必须排在导出之后；③publish 在 Core 之后且自断退出码；
+   ④发现数下界断言随每次测试（文案单源在 action 正文）。**反向锚实测**：把导出改回
+   `$env:X = "1"` ⇒ 该用例判红（`失败: 1`），还原后 Broker **189/189** 全绿——不是把
+   锚改到「怎么都过」，而是改到「判定更严且仍然会红」。
+8. 本地验证：`pytest tests/python` **562 passed / 1 skipped**、ruff / bandit / py312-compat /
+   `check_workflow_shells --self-test`（26 个 pwsh 步骤）/ `check_file_sizes` / 三条文档门禁 ✅、
+   `dotnet test` Broker **189/189**（含改造后的常驻锚）+ Core 796/796 已在前批同口径跑过。
+   **composite 的 pwsh 正文本机不可证**（本机无 pwsh、无 act）：本次 CI 首跑已证明
+   inputs→env→run 的解析与判定文案都正确（失败信息打出 `dotnet test（Broker）失败：exit 1`，
+   即 label/trx/目录三项输入都到位），8 个调用点里 6 个由 PR 面现场验证；
    release-windows 的 2 个只由静态锚判（该 workflow 仅 tag/dispatch 触发）。
    若 `${{ inputs.* }}` 在 composite 步骤的 `env:` 层不受支持，Actions 会直接报 context
    错误而不是静默变空——CI 当场可辨。
