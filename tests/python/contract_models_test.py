@@ -148,6 +148,44 @@ def test_test_only_reference_is_not_a_consumer(tree, monkeypatch):
     assert any("无真实消费方" in f for f in vcc.check_mirror_consumption())
 
 
+def test_exempted_mirror_that_got_consumed_is_flagged(tree, monkeypatch):
+    """豁免的前提是「零消费方的设计标注镜像」——一旦被端侧真用起来，就必须从表里删掉。
+
+    这条是 R9-SH-7 的正解：豁免集恰等于镜像全集时，旧实现每条都 `continue`，
+    消费面检查在整个现树里从没真正跑过。加了反向不变式之后，即便豁免覆盖全集，
+    每个镜像仍然被检一次（检的是「它确实还没人消费」）。
+    """
+    vcc, repo, _contracts, cs, _kt = tree
+    monkeypatch.setattr(vcc, "DESIGN_NOTATION_MIRRORS", {"ApprovalContract"})
+    _write(cs / "ApprovalContract.cs", "public sealed record ApprovalContract(string N);")
+    _write(repo / "windows/src/Aegis.Windows.App/Chrome/Uses.cs", 'var x = new ApprovalContract("n");')
+    found = vcc.check_mirror_consumption()
+    assert any("豁免已不成立" in f and "ApprovalContract" in f for f in found), found
+
+
+def test_cross_language_name_is_not_a_consumer(tree, monkeypatch):
+    """同名类出现在别的语言里不算消费——那是同一 schema 的另一份实现。
+
+    现树实例：`agent/action_contract.py` 里有 `class ActionContract`，而 C#/Kotlin 的
+    ActionContract 镜像零端侧引用；旧实现把 .py/.rs 混在一起扫，会把它读成「有消费方」。
+    """
+    vcc, repo, _contracts, cs, _kt = tree
+    monkeypatch.setattr(vcc, "DESIGN_NOTATION_MIRRORS", set())
+    _write(cs / "ApprovalContract.cs", "public sealed record ApprovalContract(string N);")
+    _write(repo / "agent/approval_contract.py", "class ApprovalContract:" + chr(10) + "    pass" + chr(10))
+    assert any("无真实消费方" in f for f in vcc.check_mirror_consumption())
+
+
+def test_build_and_generated_directories_are_not_consumers(tree, monkeypatch):
+    """构建产物与生成物目录里的引用一律不算——同一条口径也让扫描便宜到真能每次跑。"""
+    vcc, repo, _contracts, cs, _kt = tree
+    monkeypatch.setattr(vcc, "DESIGN_NOTATION_MIRRORS", set())
+    _write(cs / "ApprovalContract.cs", "public sealed record ApprovalContract(string N);")
+    _write(repo / "windows/src/Aegis.Windows.App/obj/Generated/Uses.cs", 'new ApprovalContract("n");')
+    _write(cs / "Other.cs", "class Other { ApprovalContract Field; }")
+    assert any("无真实消费方" in f for f in vcc.check_mirror_consumption())
+
+
 def test_dead_exemption_entry_is_detected(tree, monkeypatch):
     """豁免清单里残留已不存在的镜像必须红（清单不得堆积死条目）。
 

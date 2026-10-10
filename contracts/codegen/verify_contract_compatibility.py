@@ -20,6 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from generate_csharp import SKIP_SCHEMAS
 from generate_csharp import generate as generate_cs_model
 from generate_kotlin import generate as generate_kt_model
+from mirror_consumers import consumed_names
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "schemas"
@@ -59,6 +60,12 @@ REAL_MODEL_CONTRACTS: dict[str, tuple[str, str, str]] = {
 # 审计第七轮（R7-SH-01）：补齐此前漏登记的 ActionContract（生成物存在但不在豁免
 # 清单内＝清单本身在漂移），并把「豁免项必须有对应生成文件」做成反向断言，
 # 使本清单不能靠堆积历史条目蒙混。
+# 第九轮 R9-SH-7：本表曾**恰好等于**镜像全集（两目录各 6 份），于是每条都在
+# `continue` 处被跳过、消费面检查在现树里从没真正跑过；而旧扫描从仓库根
+# `rglob("*")` 连 target/obj/node_modules 一起爬，贵到进不了「每次 PR 都跑」的面
+#（实测口径与收窄后的扫描面在 `mirror_consumers.py`）。
+# 现在的口径把豁免变成**要自证的声明**：登记项必须①仍在生成面上（R7-SH-01）
+# 且②确实无人消费（本轮新增）——被端侧用起来却没删登记，同样判红。
 DESIGN_NOTATION_MIRRORS = {
     "ActionContract", "ApprovalContract", "AuditEventContract", "CapabilityContract",
     "UpdateManifestContract", "VersionContract",
@@ -211,39 +218,23 @@ def _mirror_dirs() -> list[tuple[str, pathlib.Path]]:
     ]
 
 
-def _has_real_consumer(type_name: str) -> bool:
-    """在**非生成物、非测试、非本门禁自身**的源码里找该类型的真实引用。
-
-    口径（AD-244）：镜像引用镜像、测试引用镜像都不算「消费」——只有端侧应用代码
-    真的用它，跨语言契约才算有承重方。
-    """
-    for path in sorted((ROOT / "..").rglob("*")):
-        if not path.is_file() or path.suffix not in (".cs", ".kt", ".rs", ".py"):
-            continue
-        lowered = str(path).replace("\\", "/").lower()
-        if "/generated/" in lowered:
-            continue
-        if "/tests/" in lowered or "/test/" in lowered or "_test" in path.name.lower():
-            continue
-        if "verify_contract_compatibility" in path.name:
-            continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
-            continue
-        if re.search(rf"\b{re.escape(type_name)}\b", text):
-            return True
-    return False
+# 「消费」的扫描面与三条边界（跨语言同名不算 / 测试引用不算 / 构建产物不算）写在
+# `mirror_consumers.py`——本文件已在 300 行红线上，那套口径放不下，见 R9-SH-7。
+def _consumed_names(lang: str, names: set[str]) -> set[str]:
+    return consumed_names(ROOT / "..", lang, names)
 
 
 def check_mirror_consumption() -> list[str]:
-    """每个生成镜像必须「有真实消费方」或「在 DESIGN_NOTATION_MIRRORS 里显式承认」。
+    """每个生成镜像必须「有同语言真实消费方」或「在 DESIGN_NOTATION_MIRRORS 里显式承认」。
 
-    双向：①未登记且无消费方的镜像 → 红（防镜像沦为无人消费的假保证）；
-    ②登记了但生成目录里已无该镜像 → 红（防豁免清单堆积死条目）；
-    ③镜像目录缺失 → 红（空扫描面不得恒绿）。
-    ②仅在已有镜像面时判定——整棵树不存在时 ③ 已给出更准确的失败原因，
-    再叠 6 条「死条目」只是把同一个根因伪装成多个缺陷。
+    四条判据（R9-SH-7 之后，豁免不再是免检）：
+    ①未登记且无消费方的镜像 → 红（防镜像沦为无人消费的假保证）；
+    ②登记了但**已经有人消费** → 红（豁免的前提是「零消费方的设计标注」，前提没了就必须
+      从表里删掉；否则字段漂移与兼容性检查被一句过期的声明悄悄跳过）；
+    ③登记了但生成目录里已无该镜像 → 红（防清单堆积死条目）；
+    ④镜像目录缺失 → 红（空扫描面不得恒绿）。
+    ②③仅在已有镜像面时判定——整棵树不存在时 ④ 已给出更准确的根因，再叠一堆只是把同一个
+    缺陷伪装成多个。
     """
     failures: list[str] = []
     seen: set[str] = set()
@@ -252,11 +243,17 @@ def check_mirror_consumption() -> list[str]:
             failures.append(f"生成镜像目录缺失：{directory}（扫描面为空不放行）")
             continue
         pattern = "*.cs" if lang == "cs" else "*.kt"
+        stems = {path.stem for path in sorted(directory.glob(pattern))}
+        seen |= stems
+        consumed = _consumed_names(lang, stems)
         for path in sorted(directory.glob(pattern)):
-            seen.add(path.stem)
             if path.stem in DESIGN_NOTATION_MIRRORS:
+                if path.stem in consumed:
+                    failures.append(
+                        f"豁免已不成立：{path.stem}（{lang}）已被端侧真实消费——必须从 "
+                        "DESIGN_NOTATION_MIRRORS 删掉（该表的口径是「零消费方的设计标注镜像」）")
                 continue
-            if not _has_real_consumer(path.stem):
+            if path.stem not in consumed:
                 failures.append(
                     f"生成镜像无真实消费方：{path.stem}（{path.name}）——要么接进端侧消费方，"
                     "要么显式登记进 DESIGN_NOTATION_MIRRORS 并说明保留理由（AD-244 口径）")

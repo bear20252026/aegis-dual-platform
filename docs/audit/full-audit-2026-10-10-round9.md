@@ -39,6 +39,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-SH-3 | P2 | 保留并落地（零判定） | Q13 确证：`start_main.test.mjs:313` 注释写「触发按键不得选中引擎（仅 Enter/Space）」，实体是一行 `assert.ok(true)`，而同一 `makeHost()` 已把 `setEngine` 记进 `state.engineCalls` 却没用。→ 换成 `assert.deepEqual(state.engineCalls, [], …)`（该文件是 579 行零余量基线，故净零行：改一行注释 + 一行断言、解构多取一个 `state`）。**故障注入自证**：给 `start.main.js` 的 ArrowDown/ArrowUp 分支加一句 `selectEngine(idx)` ⇒ 该用例立刻判红并打出正确消息；还原后 114/114 绿。Enter/Space 的正向面全仓仍零覆盖，另登 R9-SH-12（队列新增 Q47） |
 | R9-SH-4 | P3 | 保留并落地（切片无界） | Q14 确证：`start_page.test.mjs:403-405` 用 `SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"))`——`indexOf` 失配返回 -1 时 `substring(-1)` 按 0 处理 ⇒ 退化全文扫描；命中后又一路读到文末。而 `if (!isOpen) return;` 在 `start.snake.js` 出现两次（键盘 :453、触摸 :472）⇒ 实测删掉键盘那一处仍绿。→ 外迁成新文件 `snake_guard_slice.test.mjs`（原文件 490 行零余量，加边界断言必增行）：有界切片 + 剔注释 + 两条反向锚，其中一条**把旧口径的漏判本身钉成文字**（同一删改下旧写法必须仍“通过”） |
 | R9-AD-4 | P2 | 保留并按**第四节处方**落地（不收紧段集） | 逐行回读 Q4 的三处位置：`OriginPolicy.kt:104-110` 的 `!host.contains("[")` 是 AD-299 刻意与 Rust `origin/tests/host_grammar.rs:183-184`（`try_parse_external("https://[::1]:8080/x") == None`）及 contracts 的 url-origin-invalid 向量对齐的**导航入口**判定；而 `LocalTargetHosts.hostOf:83-88` 反过来**剥掉**方括号（P74 那笔账的产物）⇒ `::1`/ULA 在升级豁免层与下载层确是放行形态。两侧都对，缺的只是把关系写下来：对象 KDoc 补该分层事实，新跨层锚用例把「导航拒 / 剥出 `::1` / 下载不拒」三侧各钉一次。用户可见后果如实记：地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 能。打通它需解冻核心 host grammar 并增补向量 ⇒ 留在第四节待定稿，**本批零判定改动** |
+| R9-SH-7 | P2 | 保留并落地（判据曾不可达） | 回读确证三件事：①`DESIGN_NOTATION_MIRRORS`（6 名）恰等于两个生成目录的全集（各 6 份）⇒ 旧 `check_mirror_consumption` 每条都在 `continue` 处跳过，「镜像有没有人消费」这条判据在现树里**从没执行过**；②旧 `_has_real_consumer` 从仓库根 `rglob("*")`，连 `core/rust-policy-core/target`、`obj/`、`bin/`、`node_modules/` 一起爬——本机实测 20,467 个条目、641 个候选源文件、单次调用 ≈5.6s 且每个未豁免镜像各调一次（全表 ≈34s），这个代价本身就让它进不了 PR 面；③扫描口径三处失实：跨语言同名算消费（`agent/action_contract.py` 的 `class ActionContract` 会让 C# 镜像「有消费方」）、测试引用算消费、构建产物里的副本算消费。落地＝扫描面收窄到各端同语言源码根（`windows/src`、`android`）并排除 generated/tests/obj/bin/build/target/node_modules/dist（拆成 `mirror_consumers.py`，门禁本体 280 行、整条 ≈0.5s）；**并加第二条反向不变量**：登记了却已被端侧真实消费同样判红——豁免的前提是「零消费方的设计标注」，前提没了就必须从表里删掉，否则字段漂移与兼容性检查被一句过期声明悄悄跳过。现树实测 6 个镜像在两端 main 源码同语言引用全为 0 ⇒ 豁免仍成立，但从此**要自证**。接线面已核：`contracts.yml:134` 在 `contract-source-of-truth`（ubuntu-latest、`pull_request` 触发）常跑，新常驻 pytest 锚含「跨语言同名不算 / 构建目录不算 / 被消费的豁免项判红」三条故障注入 |
 
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
@@ -350,6 +351,30 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
    `node --test` **117/117**；`py312-compat` / `check_doc_claims` / `check_workflow_shells` /
    `check_file_sizes` 绿。Android 侧本批未触及。
 
+### 3.11 R9-B12（2026-10-10，队列批次 B 第一子批）：镜像消费面判据从「不可达」改成「每次 PR 都跑」
+
+**共同主题：跑不动的判据等于没有判据。** R7-SH-01 把这条判据补进门禁时，扫描面写成了
+「仓库根全量 `rglob`」——于是它同时输在两点：贵（单次 ≈5.6s、全表 ≈34s，进不了 PR 面）
+和宽（跨语言同名、测试引用、`target/`/`obj/` 副本都算消费）。更糟的是豁免表恰好等于镜像
+全集，每条都在 `continue` 处跳过，所以现树里那条判据**一次都没执行过**，而文档写着「镜像
+消费面已登记」。
+
+1. `contracts/codegen/mirror_consumers.py`（新，62 行）：只管**怎么扫**——各端同语言源码根
+   （`windows/src`、`android`）+ 排除 generated/tests/test/obj/bin/build/target/node_modules/
+   dist/.git，单遍遍历、命中集齐即提前退出。三条边界各挡一种蒙混，文件头逐条写明。
+2. `verify_contract_compatibility.py`：删掉旧的 `_has_real_consumer`（全仓混扫）与内联扫描器，
+   改为委托；`check_mirror_consumption` 由三条判据扩成**四条**，新增 ②「登记了却已被真实消费
+   ⇒ 判红，必须删登记」。313→280 行（新文件按 ≤300 红线拆分，不抬基线）。
+3. 现树实测：6 个镜像在两端的同语言 main 源码引用数全为 0 ⇒ 豁免**仍然成立**，但从此是
+   要自证的声明；整条门禁 ≈0.5s（旧口径光扫描就 ≈5.6s/次），已在 `contracts.yml:134`
+   的 `contract-source-of-truth`（ubuntu-latest、pull_request）常跑面上。
+4. 新常驻锚 3 条（`tests/python/contract_models_test.py`，20 条全绿）：被消费的豁免项必须判红、
+   跨语言同名不得算消费、`build/`/`obj/`/`generated/` 里的引用不得算消费。加上既有「未登记且
+   无消费方判红」「死条目判红」「目录缺失不放行」三条，豁免表两头都收紧。
+5. 本地验证：`verify_contract_compatibility.py` ✅、`check_file_sizes` ✅（489 文件 / 基线 87 项，
+   diff 无新抬基线）、`active_tree_gates ruff|bandit|compat` ✅、`tests/python` 全量绿。
+   本批只动 Python 门禁面，未触及三端运行时代码。
+
 ## 四、待用户定稿（本轮新增两项，其余沿用第八轮 §七）
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
@@ -445,12 +470,12 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
   未命中即返回后两段 ⇒ 表外托管域整域共享站点键（`a.web.app` 与 `b.web.app` 同键）。
   对账门禁只比三副本与表，**永不判表本身完备**。——**条目半边与「只增不减」门禁已落地**（§3.6，79→92 条 + PINNED_SUFFIXES）；
   「未命中回退整主机名」那半仍在第四节待定稿。
-- Q17 R9-SH-7 | P2 | `contracts/codegen/verify_contract_compatibility.py:62-64,257-259,214`：
-  `DESIGN_NOTATION_MIRRORS` 的 6 个名字恰等于生成镜像全集（两目录各 6 份）⇒ `:257` 一律
-  continue、`:259` 的 `_has_real_consumer` 现树不可达；实测 ApprovalContract /
-  AuditEventContract / CapabilityContract / UpdateManifestContract / VersionContract 在
-  main 源码零真实引用（`VersionContract` 全树零引用）。**第八轮 R8-SH-08 重 derive 成功
-  且仍未闭**（该轮只留了计数）。
+- ~~Q17 R9-SH-7~~ **本批已确证并落地**（§二 裁决行 + §3.11）：判据曾不可达（豁免集＝镜像全集
+  ⇒ 每条 `continue`；旧扫描单次 ≈5.6s 且把跨语言同名/测试/构建产物都算消费）。现收窄成
+  同语言源码根单遍扫（整条门禁 ≈0.5s）并加「被真实消费的豁免项判红」反向不变量；现树 6 个
+  镜像同语言引用实测为 0 ⇒ 豁免仍成立但改为要自证。`VersionContract` 全树零引用这一事实
+  仍在（豁免表内的合法条目，不是缺陷）。**第八轮 R8-SH-08 重 derive 成功且那时仍未闭**
+  （该轮只留了计数）——本批是真闭。
 - Q18 R9-SH-8 | P3 | `shared/shell/start.main.js:165-167` ↔ `shared/shell/start.js:41-49`：
   init 路径的 `getEngine` null 回包既不渲染也不 `bridgeError`（csCall 的惰性 TTL 清扫只在
   下一个请求时触发）⇒ 引擎胶囊永停在 `start.html:38` 硬编码「百度」且零痕迹；对照 WB-138
