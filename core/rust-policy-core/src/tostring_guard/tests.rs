@@ -16,7 +16,10 @@ fn script_contains_proxy_map() {
 fn script_exposes_register_interface() {
     let guard = ToStringGuard::new();
     let script = guard.inject_script();
-    assert!(script.contains("proxyMap.set(proxy, original)"));
+    assert!(
+        script.contains("proxyMap.set(proxy, target)"),
+        "链式包装必须登记传递解析后的最底层原生（R9-AD-1）"
+    );
 }
 
 #[test]
@@ -74,15 +77,19 @@ fn register_interface_validates_arguments() {
         "双函数类型校验"
     );
     assert!(
-        script.contains("if (proxyMap.has(original) || proxyMap.has(proxy)) return;"),
-        "original 与 proxy 两侧都要拒重复登记"
+        !script.contains("if (proxyMap.has(original) || proxyMap.has(proxy)) return;"),
+        "旧的「original 已在表里就拒绝登记」必须被传递解析取代——留着它，链式包装的最外层仍在表外"
+    );
+    assert!(
+        script.contains("while (proxyMap.has(target) && hops < 8) {"),
+        "链式包装必须传递解析到最底层原生（R9-AD-1：原写法拒绝登记 ⇒ 最外层永不在表内）"
     );
     // 校验先于登记
     let check = script
-        .find("if (proxyMap.has(original) || proxyMap.has(proxy)) return;")
+        .find("while (proxyMap.has(target) && hops < 8) {")
         .expect("校验存在");
     let set = script
-        .find("proxyMap.set(proxy, original);")
+        .find("proxyMap.set(proxy, target);")
         .expect("登记存在");
     assert!(check < set, "校验必须先于登记");
 }

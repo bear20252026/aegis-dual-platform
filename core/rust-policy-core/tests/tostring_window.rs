@@ -30,6 +30,10 @@ fn pipeline(mode: ProtectionMode) -> String {
 const REGISTER: &str = "proxy.register.v1";
 const CLOSE: &str = "proxy.register.close.v1";
 
+/// R9-AD-1：桥守卫与撤销的**相对顺序**只能从装配处读——三段 Kotlin 文件里
+/// 装配点（WebViewHardening.kt）持有 BRIDGE_GUARD_JS 与 REGISTER_CLOSE_JS。
+const KOTLIN_GUARD: &str = "../../android/app/src/main/java/com/aegis/browser/WebViewHardening.kt";
+
 /// Android 侧注入脚本。R8-CS-SEC-14 把 9 阶段文本按 Stage 边界拆成两个文件：
 /// 注册接口在 Seed 段（Stage 1），撤销行在 Shield 段（blob 末尾）——**分处两段**
 /// 正是 R8-RS-09 的语义，所以对账必须读两段之和，否则「撤销行没跟着搬」这种
@@ -86,7 +90,7 @@ fn register_interface_is_flag_gated_and_immutable() {
         "注册函数必须先看窗口标志（捕获的引用也不例外）"
     );
     assert!(
-        script.contains("if (proxyMap.has(original) || proxyMap.has(proxy)) return;"),
+        script.contains("while (proxyMap.has(target) && hops < 8) {"),
         "original 与 proxy 两侧都要拒重复登记"
     );
     assert_eq!(
@@ -133,11 +137,25 @@ fn android_shield_shares_the_same_register_discipline() {
         "Android 注册函数未检查窗口标志"
     );
     assert!(
-        kt.contains("if (proxyMap.has(original) || proxyMap.has(proxy)) return;"),
-        "Android 未做双函数/双侧重复校验"
+        kt.contains("while (proxyMap.has(target) && hops < 8) {"),
+        "Android 未做链式包装的传递解析（R9-AD-1，与 Rust/C# 三处同口径）"
     );
     assert!(
-        kt.contains(CLOSE) && kt.contains("if (c) c();"),
-        "Android 缺 blob 末尾的同步撤销调用"
+        !kt.contains("if (c) c();"),
+        "撤销不得留在 shield blob 末尾——那正是 R9-AD-1 的 P1 成因（桥守卫是第二条注入，\
+        四处注册在任何顺序下都被拒）"
+    );
+    // R9-AD-1 的核心形状：撤销必须排在桥守卫四处注册**之后**，且桥守卫与 shield
+    // 在同一条注入脚本里（分两条注入就是本轮 P1 的成因）。
+    let assembled = repo_file(KOTLIN_GUARD);
+    let reg_at = assembled
+        .find("__aegisReg(window.fetch, fetch0)")
+        .expect("Android 桥守卫缺 fetch 出口注册");
+    let close_at = assembled
+        .find("if (c) c();")
+        .expect("Android 缺注册窗口关闭");
+    assert!(
+        close_at > reg_at,
+        "撤销必须排在桥守卫注册之后（close_at={close_at} reg_at={reg_at}）"
     );
 }
