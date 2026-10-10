@@ -193,8 +193,8 @@ jobs:
       # manifest 在 Release 发布后由部署侧核对产出，CI verify-gate 阶段（发布前）
       # 不存在可校验的输入，故明确标注为【部署侧手动步骤】：
       #   python release/tools/verify_artifact_set/verify_artifact_set.py <本地 dist 目录> <release-manifest.json>
-      - name: Fail-closed gate
-        run: echo "✅ 三平台验证通过——允许发布（任一失败此处不会到达）"
+      # R9-CI-7：删去纯 echo 的「Fail-closed gate」步骤——名字声称判定、结构上
+      # 不可能失败（判定由各步的真断言承担）。SP-231「零信息量步骤」同口径。
 
   # ──────────────────────────────────────────────
   # Stage 4: 发布（tag-gated + 受保护环境审批）

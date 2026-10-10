@@ -214,10 +214,20 @@ jobs:
             -PrequireNativePolicyCore=true \
             -PrequireNavigationConfirmation=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
-          # zipalign 校验（ADR-009）：4K + 16K 页对齐双验证，不对齐即失败
+          # zipalign 校验（ADR-009）：4K + 16K 页对齐双验证，不对齐即失败。
+          # R9-CI-3（第九轮 2026-10-10，P1）：原写法 `zipalign … && echo OK` 在
+          # Actions 的 `bash --noprofile --norc -eo pipefail` 下**永不失败**——
+          # `set -e` 对 `&&` 列表中「非最后一条」的失败豁免（本地实证
+          # `bash -ec 'false && echo hi; echo done'` ⇒ exit 0），而本步末条是必过的
+          # grep ⇒ 非对齐 APK 全绿出厂，16KB 页设备（Android 15+）装不上去。
+          # 判据由 tests/python/workflow_exit_code_test.py 钉住（bash 侧 && echo 断言形态）。
           BT=$(ls -d "$ANDROID_HOME/build-tools/"*/ | sort -V | tail -1)
           APK_FILE=$(ls app/build/outputs/apk/release/*.apk)
-          "$BT/zipalign" -c -P 16 4 "$APK_FILE" && echo "[zipalign] 16K 对齐 OK"
+          if ! "$BT/zipalign" -c -P 16 4 "$APK_FILE"; then
+            echo "::error::zipalign 16K 页对齐校验失败——出货 APK 在 16KB 页设备不可安装"
+            exit 1
+          fi
+          echo "[zipalign] 16K 对齐 OK"
           apk_entries="$(unzip -Z1 app/build/outputs/apk/release/*.apk)"
           # 单架构分发规则（用户决策 2026-08-30 永久生效，ADR-008）：
           # lib/ 白名单 = arm64-v8a——正向断言必须存在，反向断言禁止
@@ -389,5 +399,6 @@ jobs:
           signer-workflow: ${{ github.repository }}/.github/workflows/release-android.yml@${{ github.ref }}
       - name: Checksum reconciliation
         run: python release/verify_checksum_json.py --root dist --manifest dist/SHA256SUMS.json
-      - name: Fail-closed gate
-        run: echo "✅ Android 平台验证通过"
+      # R9-CI-7：纯 echo 的「Fail-closed gate」结构上不可能失败，日志里的「门禁」
+      # 字样会被后续人当判定证据（SP-231 删零信息量步骤同口径）——本步的判定已由
+      # 上方 zipalign/ABI 白名单/geogebra 资产三条承担，故删除。

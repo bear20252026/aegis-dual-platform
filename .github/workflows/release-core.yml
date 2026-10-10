@@ -192,5 +192,5 @@ jobs:
           cd dist
           sha256sum -c SHA256SUMS.txt
           echo "✅ Rust Core 产物 SHA-256 对账一致"
-      - name: Fail-closed gate
-        run: echo "✅ Rust Core 平台验证通过"
+      # R9-CI-7：删去纯 echo 的「Fail-closed gate」步骤——名字声称判定、结构上
+      # 不可能失败（判定由各步的真断言承担）。SP-231「零信息量步骤」同口径。
