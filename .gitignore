@@ -69,6 +69,10 @@ legacy/crash_reports/
 **/obj/
 **/tests/**/bin/
 
+# R9-CI-9（第九轮 2026-10-10）：dotnet test 的 TRX 落点（--results-directory 指向
+# 工作区内 TestResults/<套件>）——一次运行的瞬态判定输入，不是产物归档面
+**/TestResults/
+
 # Android 构建产物（含评审包镜像）
 **/build/
 

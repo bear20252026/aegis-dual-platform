@@ -44,6 +44,11 @@ jobs:
     # 在每个 PR 上实测（不存在的标签会停在 waiting，合不进去即回退本行）。
     runs-on: windows-2025
     timeout-minutes: 40
+    # R9-CI-10（第九轮 2026-10-10，PR #137 实证）：Windows runner 控制台代码页非 UTF-8
+    # ⇒ 本 job 的三个 python 调用（含 assert_test_counts.py 的 ✅/❌ 输出）会把「判定成功」
+    # 变成「UnicodeEncodeError ⇒ exit 1」。声明 job 级 UTF-8，与 compat/legacy 同口径。
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-196（2026-10-01 审计）：native_artifact_manifest.py 依赖镜像预装
@@ -96,14 +101,20 @@ jobs:
           # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
           # R7-TOOL-01：本 job 是**唯一**以 AEGIS_REQUIRE_NATIVE_POLICY_CORE=1 真跑
           # P/Invoke 往返的作业，其判定不得被后面的 dotnet publish 吞掉退出码。
-          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/broker-native --logger "trx;LogFileName=broker-native.trx"
           if ($LASTEXITCODE -ne 0) { throw "原生模式 Broker.Tests 失败（exit $LASTEXITCODE）——P/Invoke 面未通过" }
+          # R9-CI-9（第九轮 2026-10-10）：原生模式下同样要断**发现数**——零发现也退 0，
+          # 而本 job 是必需检查里唯一真跑 P/Invoke 往返的判定面。
+          python scripts/assert_test_counts.py --results-dir TestResults/broker-native --minimum 160 --label Broker-native
+          if ($LASTEXITCODE -ne 0) { throw "原生模式 Broker.Tests 发现数下界未达成（exit $LASTEXITCODE）" }
           # R7-CS1-15（第七轮）：Core.Tests 也必须以原生模式真跑——它是必需检查里
           # windows-contract-build 的唯一大测试面，此前只在**托管模式**下跑过，
           # 于是原生跨界缺陷（0xC0000005）在该路径上零门禁：修复前的实测是
           # 「通过 403/667 后测试主机崩溃」。放在本 job 是因为这里才有现建的 DLL。
-          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/core-native --logger "trx;LogFileName=core-native.trx"
           if ($LASTEXITCODE -ne 0) { throw "原生模式 Core.Tests 失败（exit $LASTEXITCODE）——托管面与跨界面判定不一致" }
+          python scripts/assert_test_counts.py --results-dir TestResults/core-native --minimum 700 --label Core-native
+          if ($LASTEXITCODE -ne 0) { throw "原生模式 Core.Tests 发现数下界未达成（exit $LASTEXITCODE）" }
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
