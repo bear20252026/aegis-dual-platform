@@ -31,6 +31,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-CI-10 | P2 | 保留并落地 | PR #137 的 CI 实证：`windows-contract-build` 里 `dotnet test` 782/782 通过、发现数下界也达成，`scripts/assert_test_counts.py` 却在打印 ✅ 那一行抛 `UnicodeEncodeError: charmap codec can't encode` ⇒ 脚本 exit 1 ⇒ **门禁把成功报成失败**。同形态 2026-10-08 已死过一次（Dependency-Retlock 首跑 run 37793334416，heredoc 里的中文 print），当时只在**那一个 job** 修（job 级 `PYTHONIOENCODING`）⇒ 判定面从未扩展：py-yaml 扫 16 个 workflow，7 个「windows runner + 调 python」job 里 4 个既无 `PYTHONUTF8`/`PYTHONIOENCODING`、脚本侧也没有 reconfigure。方向不是掩盖问题：假红与假绿同等致命，而它正是「把 emoji 删掉就绿了」这种削弱断言的诱因 |
 | R9-CS-6 | P3 | 保留并登记（本批未修） | 登记时与本表 §五 Q24 的 `R9-CS-4` **撞号**——被常驻门禁 `gate_hollowness_test.py::test_ledger_csv_ids_are_unique` 在 CI 打红（本会话第二次撞同类：取号必须按 CSV 解析求 max，不能靠 grep 抽文本再排序）。内容：落地项 5 时自读新证：`Core/UrlSafety.cs:20-30` 的 `CanOpenHttpUrl` 把「协议不合」（`file:`/`javascript:`）与「保留地址」并成一个 false，`NewTabGate` 只能给一种拒绝码与一条文案 ⇒ 用户点 `javascript:` 链接时被告诉「链路本地/云元数据/保留地址」。这不是本批引入的（主窗原文案同形，只是此前没有拒绝码），修它要把协议判定从 `CanOpenHttpUrl` 里拆出来——该文件在零余量基线上（301/301），拆面另批处理，**不得**顺手在 `NewTabGate` 里复刻一份协议白名单（那就是第二个判据源） |
 | R9-CS-5 | P3 | 保留并登记（方向保守，未修） | `App.xaml.cs:11-32` 的 `PopupRateLimiter` 槽位数组以 **0** 起步，而判定是 `now - _ticks[i] >= windowMs` ⇒ 开机后第一个 30 秒内 `now` 本身 < 30000，三槽全判「未过期」⇒ **这段时间里所有崩溃弹窗被静默拒**（只记日志）。它管的是异常提示，方向保守所以从未被当成缺陷暴露；风险是**形状被抄走**：同形状用在「拒绝用户可达的功能」上就是打开即失效。新建的 `Core/NewTabGate.cs` 刻意用「从未占用」哨兵避开这个坑，并有冷启动用例 `ColdStart_AllowsFullQuotaInsideOneWindow` 钉住；旧那台零测试引用，另批收口 |
+| R9-AD-4 | P2 | 保留并按**第四节处方**落地（不收紧段集） | 逐行回读 Q4 的三处位置：`OriginPolicy.kt:104-110` 的 `!host.contains("[")` 是 AD-299 刻意与 Rust `origin/tests/host_grammar.rs:183-184`（`try_parse_external("https://[::1]:8080/x") == None`）及 contracts 的 url-origin-invalid 向量对齐的**导航入口**判定；而 `LocalTargetHosts.hostOf:83-88` 反过来**剥掉**方括号（P74 那笔账的产物）⇒ `::1`/ULA 在升级豁免层与下载层确是放行形态。两侧都对，缺的只是把关系写下来：对象 KDoc 补该分层事实，新跨层锚用例把「导航拒 / 剥出 `::1` / 下载不拒」三侧各钉一次。用户可见后果如实记：地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 能。打通它需解冻核心 host grammar 并增补向量 ⇒ 留在第四节待定稿，**本批零判定改动** |
 
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
@@ -192,6 +193,24 @@ permission/fileChooser/progress/title），平台默认 `onCreateWindow` 返回 
 `assertFalse(s.supportMultipleWindows())` 钉着。所以这不是「Android 漏了上限」而是「Android
 没有这个面」——若哪天开多窗口支持，必须先接同一个闸门（已记入第六节防下轮重复上报）。
 
+### 3.5 R9-B6（2026-10-10）：R9-AD-4 的分层事实写进 KDoc 与测试（判定零改动）
+
+1. `LocalTargetHosts` 对象 KDoc 补一条「方括号 IPv6 字面量在导航层就到不了本函数」，并写清
+   后果：**地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 能**；要消掉这条差异得解冻
+   核心 host grammar 并增补 `url-origin-*` 向量（三端解析器语义变更），不在本批顺手做。
+2. 新跨层锚用例 `LocalTargetHostsTest.bracketedIpv6IsRejectedForNavigation_ButExemptOnceHostIsStripped`：
+   同一条 URL 三侧结果各钉一次（`OriginPolicy.tryParseExternal` 拒 / `hostOf` 剥出 `::1` /
+   `ReservedAddressBoundary.denies` 不拒）。作用域是**双向**的——既防下轮把「段集放行」误读成
+   「IPv6 本机可打开」（Q4 报的正是这种误读），也防有人为了「对齐 Windows」把段集收紧。
+3. `ReservedAddressBoundaryTest.loopbackPrivateAndCgnatStayOpenableByRuling` 的原注释本就写明
+   「下载层」，本批只补一句分层指针。
+4. **验证边界如实说**：ktlint/detekt 的独立 CLI jar 本会话已不在本地（`.audit-tmp/` 只剩脚本），
+   Gradle 也跑不起来（`~/.gradle` 无 AGP 产物）⇒ 这三处改动（两段注释 + 一条用例）的格式判据
+   只有 CI 的 `ktlint + detekt 质量门禁`。已把红灯概率压到最低：新增行全部 ≤110 字符（detekt
+   MaxLineLength 120）、测试命名沿用仓内既有下划线形态（`DownloadPolicyTest.kt:19` 等已在 CI 绿过）、
+   用例只用该模块已有的断言 import。但**不能声称本地已证**。
+
+
 ### 3.1 R9-B2（同轮续）：R9-AD-1 的三端修法
 
 1. **Android 合成单条 blob**：`fingerprintShieldScript = StagesSeed + StagesShield +
@@ -233,7 +252,7 @@ permission/fileChooser/progress/title），平台默认 `onCreateWindow` 返回 
   **IPv6 字面量在导航面**（R9-AD-4 的一半：`[::1]:9000` 这类 authority 被
   `OriginPolicy.kt:104-110` 与 Rust `origin/host_grammar` 一致拒，Windows 反而放行 ⇒
   要打通得解冻核心 host grammar 并增补 `url-origin-*` 向量，是跨三端的解析器语义变更，
-  不是「剥个括号」的小改；本批未动它，只按下批的处方把**测试与 KDoc 的口径**改真（R9-AD-4）。
+  不是「剥个括号」的小改。R9-AD-4 的**口径改真**半边已按第四节处方落地（§3.5：KDoc + 跨层锚用例，判定零改动），剩下的「打通导航面」仍是待定稿项。
 
 ## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
 
@@ -253,7 +272,7 @@ permission/fileChooser/progress/title），平台默认 `onCreateWindow` 返回 
   IPv6 authority 在导航层一律拒 ⇒ `::1`/ULA 的「放行」永不被判定，而
   `LocalTargetHostsTest.kt:26-28`、`ReservedAddressBoundaryTest.kt:62,68` 用
   `http://[::1]:9000/` 当放行样本，读起来像「IPv6 本机可打开」。建议如实写进 KDoc 与
-  测试注释（**不得反向收紧段集**，与 B8 相反）。
+  测试注释（**不得反向收紧段集**，与 B8 相反）。——**本批已逐行回读并按该处方落地**（§3.5），判定零改动。
 - Q5 R9-AD-5 | P3 | `AndroidBroker.kt:189` ↔ `:368`：原生变体进账本的是 64 位裸 hex nonce
   （无 `sessionId:` 前缀）⇒ 关标签的 `removeIf startsWith` 一条都摘不掉，而注释称
   「销毁会话并移除其已消费 nonce」；`AndroidBrokerTest.kt:414-417` 只钉托管路径形态。
