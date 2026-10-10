@@ -96,7 +96,10 @@ shared/release.json                   版本/分发单源（verify_versions 校�
   agent-redteam）+ 组合冒烟 1（native-policy-artifacts，master+paths）+ 周定时 2
   （compat WebView2 探测 / legacy-python-guard 归档守护）+ 依赖面 2
   （gradle-dependency-graph：push:android/** + 周一 + dispatch；
-  gradle-dependency-insight：仅 dispatch）+ 发布链 4
+  gradle-dependency-insight：仅 dispatch；dependency-relock：dispatch 重锁执行面——
+  第九轮 R9-DOC-04 补：分解此前只列前两个，6+1+2+2+4=15 与标题的 16 差一整面，
+  而 `check_doc_claims.py` 只比裸数字（正则 `N workflow`），所以它全绿、清单少一面）
+  + 发布链 4
   （release.yml 编排 v* 标签 + release-windows/android/core 三平台子流）
 
 ### 1.6 归档（只读——禁止修复）
