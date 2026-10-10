@@ -32,8 +32,7 @@ const CLOSE: &str = "proxy.register.close.v1";
 
 /// R9-AD-1：桥守卫与撤销的**相对顺序**只能从装配处读——三段 Kotlin 文件里
 /// 装配点（WebViewHardening.kt）持有 BRIDGE_GUARD_JS 与 REGISTER_CLOSE_JS。
-const KOTLIN_GUARD: &str =
-    "../../android/app/src/main/java/com/aegis/browser/WebViewHardening.kt";
+const KOTLIN_GUARD: &str = "../../android/app/src/main/java/com/aegis/browser/WebViewHardening.kt";
 
 /// Android 侧注入脚本。R8-CS-SEC-14 把 9 阶段文本按 Stage 边界拆成两个文件：
 /// 注册接口在 Seed 段（Stage 1），撤销行在 Shield 段（blob 末尾）——**分处两段**
