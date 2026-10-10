@@ -10,17 +10,35 @@ using Aegis.Windows.Core.Security;
 ///（此前逻辑内联在 App 静态数组上不可直测）。</summary>
 internal sealed class PopupRateLimiter(int slots)
 {
-    private readonly long[] _ticks = new long[slots];
+    /// <summary>「从未占用」哨兵（与 Core/NewTabGate.cs 的 SlotWindow 同形）。</summary>
+    private const long NeverUsed = long.MinValue;
+
+    private readonly long[] _ticks = CreateUnused(slots);
     private readonly object _lock = new();
 
-    /// <summary>到期槽位被当前时刻占用并放行；全部槽位都在窗口期内则拒绝。</summary>
+    private static long[] CreateUnused(int slots)
+    {
+        var ticks = new long[slots];
+        Array.Fill(ticks, NeverUsed);
+        return ticks;
+    }
+
+    /// <summary>到期槽位被当前时刻占用并放行；全部槽位都在窗口期内则拒绝。
+    /// R9-CS-5（第九轮 2026-10-10）：槽位此前以 **0** 起步，而判定是
+    /// `nowTicks - _ticks[i] >= windowMs`，调用方传的是 `Environment.TickCount64`
+    /// （自开机起毫秒）⇒ 开机后第一个 30 秒窗口里 `nowTicks` 本身就小于 windowMs，
+    /// 三槽全判「未到期」⇒ 这段时间里所有崩溃弹窗被静默拒（只记日志）。它管的是
+    /// 异常提示、方向保守所以从未被当成缺陷暴露，真正的风险是**形状被抄走**：同形状
+    /// 用在「拒绝用户可达的功能」上就是打开即失效。哨兵改成「从未占用」后冷启动
+    /// 放行满配额，由冷启动用例钉住（`nowTicks - NeverUsed` 会溢出，故先判哨兵——
+    /// 与 NewTabGate 同一个次序，那边的 `ColdStart_AllowsFullQuotaInsideOneWindow` 已在绿）。</summary>
     public bool ShouldShow(long nowTicks, long windowMs)
     {
         lock (_lock)
         {
             for (var i = 0; i < _ticks.Length; i++)
             {
-                if (nowTicks - _ticks[i] >= windowMs)
+                if (_ticks[i] == NeverUsed || nowTicks - _ticks[i] >= windowMs)
                 {
                     _ticks[i] = nowTicks;
                     return true;
