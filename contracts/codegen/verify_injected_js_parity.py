@@ -17,13 +17,14 @@
    逻辑序列」：注释、缩进、标点旁空白不参与，**字符串字面量与标识符参与比较**。
 2. 声明关键字 var/let/const 归一后再比（三端确有 `const orig` vs `var orig` 的分歧，
    无行为差，判它只会让人调松门禁）；种子访问器 `aegisCanvasSeed()` / `noiseSeed()`
-   同理归一——那是各端的宿主接线，不是共享逻辑。
+   与**注册器取用路径** `registerProxy` / `__aegisReg` / `window[Symbol.for('…')]`
+   同理归一——那是各端的宿主接线（别名表逐条写明并限定键名，见 `injected_js_text`）。
 3. 只比**三端共有**的函数名。单端独有的（实测 Kotlin 15 个、C# 5 个、Rust 2 个，
    各自宿主接口不同）不在判定面，写在这里是为了下轮别把它们当漂移。
 4. `SHARED_CORE` 是**下界钉表**：三端少掉任何一个 ⇒ 判「共有面塌缩」而不是「通过」。
    这与本仓所有门禁的「扫到 0 项即环境错误」同口径。
-5. `DIVERGENT_REGISTERED` 是显式挂起表（当前 2 条，实测语义分歧，见下面注释）。
-   它**不是**普通白名单：`violations()` 会核对表里每一条**确实仍然不同形**——
+5. `DIVERGENT_REGISTERED` 是显式挂起表（R9-RS-9 之后**为空**——两条 read 包装已收编，
+   见下面注释）。它**不是**普通白名单：`violations()` 会核对表里每一条**确实仍然不同形**——
    哪天被修齐，本门禁就判红一次并要求收编。豁免悄悄长大是所有白名单式门禁的
    通用失效形态，`--self-test` 里专门有一条注入用例证这件事判得出。
 
@@ -72,19 +73,20 @@ SHARED_CORE = (
     "aegisWrapRectRead",
 )
 
-# 已登记、本批不修的两条（台账 R9-RS-9）。它们不是宿主排版差异，而是三条**语义不同**的
-# 分支——把 proxy/orig 交给 ToStringGuard 的写法与失败口径都不一致：
-#   Rust   try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); } catch (e) {}  ← 静默
-#   C#     registerProxy(owner.readPixels, orig);
-#   Kotlin if (__aegisReg) __aegisReg(owner.readPixels, orig); 且其 catch 体是
-#          `return orig.apply(...)`  ← 与 Rust 的空 catch 行为不同
-# 统一它要动 R8-RS-09 / R9-AD-1 那条「注册窗口」的三端装配，是带测试的另批改动。
-# 本批先把两条 Kotlin 与 Rust/C# 之间的**命名与措辞**漂移消掉（noiseBit→up、
-# MAX_NOISE_PIXELS→AEGIS_MAX_NOISE_PIXELS），让其余 5 个函数进入可判状态。
-DIVERGENT_REGISTERED = (
-    "aegisWrapReadPixels",
-    "aegisWrapRectRead",
-)
+# 显式挂起表。**R9-RS-9 之后为空**——两条像素直读包装已在第九轮收编：
+#   · 注册尾三端同形：`try { if (REG) REG(proxy, orig); } catch (e) {}`
+#     （C# 此前裸调 registerProxy、Kotlin 此前裸调 __aegisReg——注册器抛异常会中断整个
+#      包裹安装，那等于把「不加噪的原文直读」重新放出来；现在两端都补了 try）；
+#   · Kotlin rect-read 的 catch 体此前自带 `return orig.apply(...)`，与 Rust/C# 的
+#     「空 catch + 落到统一 return」行为相同而写法不同，现改成同形写法；
+#   · 三端**注册器取用路径**仍各自不同，由 `injected_js_text._REGISTER_ACCESSOR` 归一
+#     （Windows 用 ToStringGuard 闭包内的本地 `registerProxy`，有意不发布到 window——
+#      比 Rust/Android 的 `Symbol.for('proxy.register.v1')` 入口更严，页面脚本拿不到
+#      注册句柄。把 Windows 也统一到 window 键上是**放宽出货面**，属安全姿态变更，
+#      已列台账第四节待用户定稿，不在本批顺手做）。
+# 本表若非空，`violations()` 会核对每一条**确实仍然不同形**——哪天修齐就判红并要求
+# 收编（豁免悄悄长大是所有白名单式门禁的通用失效形态，`--self-test` 有专门用例）。
+DIVERGENT_REGISTERED: tuple[str, ...] = ()
 
 
 def ends_specs() -> dict[str, tuple[pathlib.Path, ...]]:
@@ -179,6 +181,15 @@ def self_test() -> int:
         ("Kotlin 核心函数改名", "Kotlin", lambda s: s.replace("function aegisNoiseMix(",
                                                               "function aegisNoiseMixKt("),
          "缺核心函数"),
+        # R9-RS-9 收编后的两条正向判据：注册尾**形状**与别名表**键名边界**。
+        ("C# 注册尾丢掉 try", "C#", lambda s: s.replace(
+            "try { if (registerProxy) registerProxy(owner.readPixels, orig); } catch (e) {}",
+            "registerProxy(owner.readPixels, orig);", 1),
+         "aegisWrapReadPixels"),
+        ("Rust 换成未登记的 Symbol 键", "Rust", lambda s: s.replace(
+            "window[Symbol.for('{reg_sym}')](owner.readPixels, orig)",
+            "window[Symbol.for('{close_sym}')](owner.readPixels, orig)", 1),
+         "aegisWrapReadPixels"),
     ]
     failures = 0
     # 反「豁免悄悄长大」：把一条**实际已同形**的函数塞进登记豁免表，必须被判出。
@@ -230,9 +241,11 @@ def main(argv: list[str]) -> int:
             print("   -", problem)
         return 1
     compared = sorted(shared - set(DIVERGENT_REGISTERED))
+    exempt = (f"；另有 {len(DIVERGENT_REGISTERED)} 个已登记不同形、不在比较面"
+              f"（{' '.join(DIVERGENT_REGISTERED)}）") if DIVERGENT_REGISTERED else ""
     print(
-        f"✅ 三端注入 JS 同形对账通过：比较 {len(compared)} 个共有函数（{' '.join(compared)}）；"
-        f"另有 {len(DIVERGENT_REGISTERED)} 个已登记不同形、不在比较面（{' '.join(DIVERGENT_REGISTERED)}）"
+        f"✅ 三端注入 JS 同形对账通过：比较 {len(compared)} 个共有函数（{' '.join(compared)}）"
+        f"{exempt}"
     )
     return 0
 

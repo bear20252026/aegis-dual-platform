@@ -83,7 +83,10 @@ public static partial class FingerprintShield
               } catch (e) { /* tainted canvas 等——跳过扰动走原路径 */ }
               return orig.apply(this, arguments);
             };
-            registerProxy(owner.getImageData, orig);
+            // R9-RS-9：注册尾三端同形——try 包裹 + 真值判定后再调（与 Rust
+            // canvas.rs、Android WebViewHardeningCanvas.kt 逐 token 一致；本端注册器是
+            // ToStringGuard 闭包内的 registerProxy，不对外发布到 window）。
+            try { if (registerProxy) registerProxy(owner.getImageData, orig); } catch (e) {}
             return orig;
           }
           if (typeof CanvasRenderingContext2D !== 'undefined') {
@@ -113,7 +116,7 @@ public static partial class FingerprintShield
               } catch (e) { /* 上下文已退休等——不阻断原读回 */ }
               return orig.apply(this, arguments);
             };
-            registerProxy(owner.readPixels, orig);
+            try { if (registerProxy) registerProxy(owner.readPixels, orig); } catch (e) {}
           }
           if (typeof WebGLRenderingContext !== 'undefined') {
             aegisWrapReadPixels(WebGLRenderingContext.prototype);
