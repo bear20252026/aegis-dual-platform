@@ -195,10 +195,8 @@ internal object WebViewHardeningStagesShield {
   } catch(e) {}
 })();
 
-// === R8-RS-09：注册窗口在本 blob 末尾同步关闭（Stage 1 的撤销键）===
-(function() {
-  var c = window[Symbol.for('proxy.register.close.v1')];
-  if (c) c();
-})();
+// 注册窗口的关闭不在本 blob 末尾——见 WebViewHardening.REGISTER_CLOSE_JS：
+// R9-AD-1 要求它排在桥守卫（BRIDGE_GUARD_JS）之后，否则桥守卫四处注册全被拒。
+
         """.trimIndent()
 }

@@ -7,7 +7,9 @@ import androidx.webkit.WebViewFeature
 /**
  * WebView 硬化脚本注入（单文件单职责：从 SecureWebViewFactory 拆出）。
  *
- * 包含两类 document-start 注入：
+ * 包含两类保护，但**合成为一条** document-start 脚本注入（R9-AD-1，第九轮 2026-10-10：
+ * 分两条注入时注册窗口的关闭排在第一条末尾 ⇒ 第二条的四处 `__aegisReg` 注册在任何
+ * 顺序下都被拒，`fetch.toString()` 直接吐注入源码；合成一条后顺序由构造保证）：
  * 1. bridge-guard：Bridge 硬化 JS（fetch/XHR/sendBeacon/WebSocket 未授权调用拒绝）
  *    ——单一事实源（ADR-007）：模板与 `contracts/schemas/bridge_guard.template.js`
  *    逐行一致，由 `contracts/codegen/verify_bridge_guard.py` 门禁校验。
@@ -42,11 +44,12 @@ internal object WebViewHardening {
         // 降级原则：注入失败（WebView provider 异常等）只警告不崩——
         // 防护可降级、浏览器不可崩（配套 proguard keep androidx.webkit.R$id）。
         val allowedOrigins = setOf("*")
+        // R9-AD-1（第九轮 2026-10-10）：**一条** document-start 脚本——原先
+        // fingerprint-shield 与 bridge-guard 分两条注入，而注册窗口的关闭排在第一条末尾
+        // ⇒ 桥守卫的四处注册在任何顺序下都被拒（详见 fingerprintShieldScript 的 KDoc）。
+        // 合并同时消掉「部分注入」状态：此前第二条失败会留下有 shield 无 guard 的页面。
         val hardenedScripts =
-            listOf(
-                "fingerprint-shield" to fingerprintShieldScript(sessionSeed),
-                "bridge-guard" to BRIDGE_GUARD_JS,
-            )
+            listOf("aegis-hardening" to fingerprintShieldScript(sessionSeed))
         hardenedScripts.forEach { (name, script) ->
             try {
                 WebViewCompat.addDocumentStartJavaScript(webView, script, allowedOrigins)
@@ -173,5 +176,29 @@ internal object WebViewHardening {
      * ...Shield 两个文件，这里只保留**注入入口与顺序**——顺序是安全语义的一部分。
      */
     internal fun fingerprintShieldScript(sessionSeed: String): String =
-        WebViewHardeningStagesSeed.script(sessionSeed) + "\n" + WebViewHardeningStagesShield.script()
+        WebViewHardeningStagesSeed.script(sessionSeed) +
+            "\n" +
+            WebViewHardeningStagesShield.script() +
+            "\n" +
+            BRIDGE_GUARD_JS +
+            "\n" +
+            REGISTER_CLOSE_JS
+
+    /**
+     * 注册窗口关闭（R8-RS-09 的键、R9-AD-1 改位置）：**必须**是整段注入的最后一句。
+     *
+     * 第八轮把它放在 shield blob 末尾，而桥守卫是**第二条** `addDocumentStartJavaScript`
+     * ⇒ 无论 runner 先跑哪一条，四处 `__aegisReg(...)` 都空转：先 shield 则
+     * `open=false`，先 bridge 则 Symbol 尚未定义。后果是页面一行 `fetch.toString()`
+     * 就能读到含 `Aegis: bridge blocked` 与主机白名单的注入源码——正是 R9-AD-1 的 P1。
+     * 合成单条 blob 后顺序由构造保证（不再有「两条脚本谁先」这个不可控变量）。
+     */
+    internal val REGISTER_CLOSE_JS: String =
+        """
+// === R9-AD-1：整段注入末尾同步关闭注册窗口（Stage 1 的撤销键）===
+(function() {
+  var c = window[Symbol.for('proxy.register.close.v1')];
+  if (c) c();
+})();
+        """.trimIndent()
 }

@@ -20,6 +20,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 
 | ID | 级别 | 裁决 | 依据（本批实测，不引用子代理） |
 | --- | --- | --- | --- |
+| R9-AD-1 | **P1**（子代理声称，主代理独立确证后落地） | 保留并落地 | 读装配链而非引用结论：`WebViewHardening.kt:45-52` 把 fingerprint-shield 与 bridge-guard 作**两条** `addDocumentStartJavaScript` 注入，而 R8-RS-09 的撤销 IIFE 原先排在第一条 blob 末尾（`WebViewHardeningStagesShield.kt:198-201`）⇒ 无论 runner 先跑哪一条，桥守卫四处 `__aegisReg` 都空转（先 shield 则 `open=false`，先 bridge 则 Symbol 未定义）。另有**同族第二因**：三处 guard 的 register 都写成「`original` 已在表里 ⇒ 拒绝登记」，被拒的正是链式包装的最外层 ⇒ 它根本不在表内，`outer.toString()` 直接返回我方源码。`core/rust-policy-core/tests/tostring_window.rs` 此前把「撤销在 shield 段末尾」钉成断言，即门禁钉住缺陷形态（同文件已改）。第八轮 §六.8 的推翻就地更正 |
 | R9-CI-3 | **P1**（子代理报 P2，升） | 保留并落地 | 本地 `bash -ec` 实测「`false && echo hi; echo done` ⇒ exit 0」：Actions 的 bash 包装是 `-eo pipefail`，`set -e` 对 `&&` 列表中非末位命令的失败豁免 ⇒ `release-android.yml:219` 的 `zipalign -c -P 16 4 … && echo OK` 永不失败，而该步末条是必过的 `grep -Fx`；上方注释却写「不对齐即失败」。后果：非 16K 对齐 APK 全绿出厂，Android 15+ 16KB 页设备装不上 |
 | R9-CI-2 | P2 | 保留并落地 | py-yaml 解析各步 `run:` 正文：`dependency-relock.yml` 有 6 处 in-run `${{ }}`（branch/ecosystem/run_id），`gradle-dependency-insight.yml` 为 0 处——而后者头注声称「全量扫描后本行是唯一残留 in-run 表达式」。`${{ }}` 在 shell 解析之前完成文本替换 ⇒ `branch=x"; git push origin HEAD:master; #` 能打断同文件里的 `deps/*` 守卫；本 job 是全仓唯一持 `contents: write` 的手工触发面 |
 | R9-CI-4 | P2 | 保留并落地 | 全仓 grep：`verify_xaml_resources.py` 唯一调用点在 `release-windows.yml:219`，而该 workflow 只由 tag 的 `workflow_call`/`workflow_dispatch` 触发 ⇒ XAML `FindResource`↔`x:Key` 对账（V3 启动崩溃类）在 PR/push 面零执行；其 4 条 pytest 用例全部 `monkeypatch.setattr(vxr,"SRC",tmp_path)`，常跑面只证明机制不证明现树 |
@@ -47,6 +48,28 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 `py312-compat（76 py + 16 workflow + 4 composite）`、`check_workflow_shells`、
 `check_file_sizes`、`check_markdown_tables`、`check_markdown_links`、`check_doc_claims`。
 
+### 3.1 R9-B2（同轮续）：R9-AD-1 的三端修法
+
+1. **Android 合成单条 blob**：`fingerprintShieldScript = StagesSeed + StagesShield +
+   BRIDGE_GUARD_JS + REGISTER_CLOSE_JS`，`install()` 只注册一条脚本。撤销行从
+   `WebViewHardeningStagesShield.kt` 移到装配点并**永远是最后一句**——顺序由构造保证，
+   不再有「两条脚本谁先」这个不可控变量；顺带消掉「第一条成功、第二条失败」的部分注入态。
+2. **三处 register 改传递解析**（Rust `tostring_guard.rs`、Kotlin `StagesSeed.kt`、
+   C# `FingerprintShield.cs`）：`while (proxyMap.has(target) && hops < 8) target =
+   proxyMap.get(target)`，登记 `proxy → 最底层原生`。RS-252 拒绝 `proxy→proxy` 的动机是对的
+  （那会把内层包装源码经 `origToString.call(内层)` 吐出去），但结论应是**解析**而不是拒绝登记；
+   `hops < 8` 防环。
+3. **测试同步**：`tostring_guard/tests.rs`（含一条「旧拒绝式必须消失」的反向锚）、
+   `tests/tostring_window.rs`（Android 面改为断言「撤销不在 shield 段末尾」+「撤销排在桥守卫
+   四处注册之后」，读装配文件）、`WebViewHardeningScriptTest.kt`。
+4. 本地验证：`cargo test`（lib 568 + tostring_window 5 + vectors/canvas 10 全绿）、
+   独立 ktlint CLI 对整个 Android 面 0 违规、独立 detekt CLI 按模块基线 0 问题、
+   `dotnet build -r win-x64` 0 警告 0 错误且未改写三把 `packages.lock.json`、
+   `verify_bridge_guard.py` 与 `verify_seed_framing_parity.py` 通过、`pytest tests/python` 494。
+
+**残余（不假称已闭）**：真实设备上「页面能否读到包装源码」只能靠真机/WebView 冒烟确证，
+本轮全部是静态与单元层证据；`REGISTER_CLOSE_JS` 仍依赖 document-start 早于任何页面脚本，
+这条前提第八轮已由「撤销排在宏任务之外」的写法闭合。
 ## 四、待用户定稿（本轮新增两项，其余沿用第八轮 §七）
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
@@ -63,17 +86,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 
 ### 5.1 AD（Android）
 
-- **Q1 R9-AD-1 | P1（子代理声称，已用 node 复现，主代理未独立复现）**
-  `android/app/src/main/java/com/aegis/browser/WebViewHardening.kt:45-52`（注入两条
-  document-start 脚本：先 `fingerprint-shield` 后 `bridge-guard`）↔
-  `WebViewHardeningStagesShield.kt:200`（关窗行位于第一条 blob 末尾）↔
-  `WebViewHardening.kt:132,138,147,161`（桥守卫四处 `__aegisReg(...)` 注册）。
-  两种执行顺序都空转：shield 先 ⇒ `open=false` 后注册被拒；bridge 先 ⇒ Symbol 尚未定义。
-  后果：页面一行 `fetch.toString()` 即读到含 `Aegis: bridge blocked` 的注入源文与白名单
-  ——**第八轮 §六.8 据「注册已在位」推翻子代理的结论可能不成立**。
-  `core/rust-policy-core/tests/tostring_window.rs:123-142` 现把「close 在 shield blob 末尾」
-  钉成断言（门禁钉住缺陷形态）。待我独立复现后定方案（合成单条 blob，或把 close 放到
-  末条脚本尾部并去掉对顺序的依赖）。
+- ~~Q1 R9-AD-1~~ **本批已确证并落地**（升 P1）：见 §二 裁决表与 §3.1。修法：Android 合成单条 blob 且撤销为最后一句 + 三处 register 改传递解析（hops 上限防环）。同族的 **R9-AD-3**（下载 3xx 旁路）仍在队列里，未被本批覆盖。
 - Q2 R9-AD-2 | P2 | `TranslateEntry.kt:50`（`Uri.encode` 缺省保留 `:/?&=`）+ `:28`
   （`SENSITIVE_QUERY_PARAMS` 只精确匹配 code/state/token）⇒ 带多参页被截成错目标、
   `access_token`/`api_key` 原样外发；`TranslateEntryPrivacyTest.kt:41-47` 把 `keep=me`

@@ -58,7 +58,7 @@ class WebViewHardeningScriptTest {
         assertTrue("注册函数未检查窗口标志", script.contains("if (!open) return;"))
         assertTrue(
             "注册必须拒绝重复的 original 或 proxy",
-            script.contains("if (proxyMap.has(original) || proxyMap.has(proxy)) return;"),
+            script.contains("while (proxyMap.has(target) && hops < 8) {"),
         )
         assertTrue("缺 blob 末尾的同步撤销调用", script.contains("if (c) c();"))
     }

@@ -50,7 +50,13 @@ public static partial class FingerprintShield
           var origMap = new WeakMap();
 
           function registerProxy(proxy, original) {
-            proxyMap.set(proxy, original);
+            // R9-AD-1（第九轮 2026-10-10）：链式包装传递解析到最底层原生（与 Rust
+            // tostring_guard.rs、Android StagesSeed 三处同口径）——被拒登记的最外层
+            // 不在表内时，它的 toString 会把我方包装源码吐出去。
+            var target = original;
+            var hops = 0;
+            while (proxyMap.has(target) && hops < 8) { target = proxyMap.get(target); hops = hops + 1; }
+            proxyMap.set(proxy, target);
             origMap.set(original, proxy);
           }
 

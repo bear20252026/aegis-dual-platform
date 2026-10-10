@@ -45,8 +45,17 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
     value: function(proxy, original) {
       if (!open) return;
       if (typeof proxy !== 'function' || typeof original !== 'function') return;
-      if (proxyMap.has(original) || proxyMap.has(proxy)) return;
-      proxyMap.set(proxy, original);
+      if (proxyMap.has(proxy)) return;
+      // R9-AD-1（第九轮 2026-10-10）：链式包装传递解析到最底层原生——
+      // 原先「original 已在表里就拒绝登记」让最外层永不在表内 ⇒ outer.toString()
+      // 直接吐我方包装源码（本文件与 Rust/C# 三处同改，键名与 hops 上限一致）。
+      var target = original;
+      var hops = 0;
+      while (proxyMap.has(target) && hops < 8) {
+        target = proxyMap.get(target);
+        hops = hops + 1;
+      }
+      proxyMap.set(proxy, target);
     },
     writable: false, configurable: false
   });

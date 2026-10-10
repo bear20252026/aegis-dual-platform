@@ -120,8 +120,20 @@ impl ToStringGuard {
       // R8-RS-09：proxy 侧同样要断。此前只查 original，于是可以把**我方包装函数**
       // 重新登记到另一个原生上——同一函数在不同读取通道给出不同 toString，
       // 不一致本身就是检测信号，且把我方防护变成攻击者的伪装件。
-      if (proxyMap.has(original) || proxyMap.has(proxy)) return;
-      proxyMap.set(proxy, original);
+      if (proxyMap.has(proxy)) return;
+      // R9-AD-1（第九轮 2026-10-10）：链式包装必须**传递解析**到最底层原生。
+      // RS-252 原写法是「original 已在表里就拒绝登记」——拒绝的动机对（登记
+      // proxy→proxy 会让 origToString.call(内层包装) 把包装源码吐出去），但结论错：
+      // 被拒的是**最外层**，它永不在表里 ⇒ outer.toString() 直接返回我方包装源码，
+      // 比登记更糟。解析后 outer→native，toString 得 `function {{}} [native code]` 形态。
+      // hops 上限防环（登记只发生在闭包窗口内、由我方代码执行，但成环代价是死循环）。
+      var target = original;
+      var hops = 0;
+      while (proxyMap.has(target) && hops < 8) {{
+        target = proxyMap.get(target);
+        hops = hops + 1;
+      }}
+      proxyMap.set(proxy, target);
     }},
     // 不可替换：撤销只靠标志，不留「把属性换成别的函数」这条路
     writable: false,
