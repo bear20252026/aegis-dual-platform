@@ -74,7 +74,7 @@ jobs:
           echo "快照已生成: probe-$stamp.json（仅 CI artifact，不回仓）"
 
       - name: 上传报告为 CI 制品（便于下载核对——含 PY-067 stderr 排障日志）
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: webview2-probe-report
           path: |
