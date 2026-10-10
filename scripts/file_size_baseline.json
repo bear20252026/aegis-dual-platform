@@ -74,7 +74,7 @@
     "tests/python/sync_and_verify_test.py": 464,
     "tests/python/verify_lists_and_release_test.py": 321,
     "tests/ui-regression/start_import.test.mjs": 458,
-    "tests/ui-regression/start_main.test.mjs": 578,
+    "tests/ui-regression/start_main.test.mjs": 519,
     "tests/ui-regression/start_page.test.mjs": 490,
     "windows/src/Aegis.Windows.App/Broker/BrowserPolicyBroker.cs": 575,
     "windows/src/Aegis.Windows.App/Broker/NativePolicyCoreBridge.cs": 433,

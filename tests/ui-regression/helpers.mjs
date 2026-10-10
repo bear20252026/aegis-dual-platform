@@ -134,3 +134,75 @@ export function makeEl(tag, overrides) {
   });
   return Object.assign(node, overrides || {});
 }
+
+// R9-SH-8 批（第九轮 2026-10-10）：start.main.js 的装载器下沉单源——此前只有
+// start_main.test.mjs 本地持有，第二个用例文件要驱动同一入口就得再抄一份元素表与
+// document/window/timers 桩（两处解析漂移＝第二个假绿源，WB-206 的同一课）。
+export const MAINJS = readFileSync(join(ROOT, 'shared', 'shell', 'start.main.js'), 'utf8');
+
+export function loadMain(host, winExtras, elementOverrides, source) {
+  const el = makeEl;
+  const elements = {
+    q: el('input'),
+    searchForm: el('form'),
+    searchBtn: el('button'),
+    enginePill: el('div'),
+    engineName: el('span'),
+    engineMenu: el('div'),
+    wallpaper: el('div'),
+    wpList: el('div'),
+    bm: el('div'),
+    restoreBox: el('div'),
+    restoreBtn: el('button'),
+    geoBtn: el('button'),
+  };
+  // R9-SH-8：elementOverrides 按 id 覆写初值——「宿主未回包」用例要把
+  // engineName 预置成 start.html 硬编码的那个标签，才能证它被换掉了。
+  Object.keys(elementOverrides || {}).forEach((id) => {
+    elements[id] = el('span', elementOverrides[id]);
+  });
+  const docHandlers = {};
+  const document = {
+    getElementById: (id) => elements[id] || null,
+    createElement: (tag) => el(tag),
+    // WB-107：书签整段构建走 DocumentFragment
+    createDocumentFragment: () => ({ children: [], appendChild(c) { this.children.push(c); } }),
+    addEventListener(type, fn) { (docHandlers[type] = docHandlers[type] || []).push(fn); },
+    activeElement: null,
+  };
+  const win = Object.assign({ addEventListener() {} }, winExtras);
+  const timers = { fired: [], setTimeout(fn, ms) { timers.fired.push({ fn, ms }); return timers.fired.length; } };
+  let exported = null;
+  // 模块级 var/函数声明是 Function 体局部——尾部追加 __take 导出待测面。
+  // W5 批：setTimeout 桩注入（go 复原/书签有界重试不再依赖真实 1.2s/200ms）
+  new Function('document', 'window', 'Host', '__take', 'setTimeout',
+    (source || MAINJS) + '\n;__take({ setWallpaper: setWallpaper, WALLPAPERS: WALLPAPERS, ' +
+    'current: function () { return current; }, go: go, ' +
+    'renderEngineMenu: renderEngineMenu, toggleEngineMenu: toggleEngineMenu, ' +
+    'selectEngine: selectEngine, renderBookmarks: renderBookmarks, ' +
+    'renderBookmarksWithRetry: renderBookmarksWithRetry, ' +
+    'timing: function () { return TIMING; } });')(
+    document, win, host, (x) => { exported = x; }, timers.setTimeout);
+  return { elements, exported, timers, docHandlers };
+}
+
+// start.main.js 用例的宿主桩（R9-SH-8 批下沉单源）：桥调用记录进 state，
+// 用例按 id 覆写个别方法即可（如 getEngine 回 null 驱动「宿主未回包」分支）。
+export function makeHost() {
+  const state = { setCalls: [], errors: [], getWallpaperCb: null, hasSavedN: 0, hasSavedRaw: undefined, navigateCalls: 0, restoreCalls: 0, engineCalls: [], geoFailCalls: 0 };
+  const host = {
+    kind: () => 'cs',
+    has: (f) => f === 'navigate' || f === 'geo',   // bookmarks=false → 书签宫格早退
+    getEngine: (cb) => cb({ engine: 'baidu', engines: [{ key: 'baidu', name: '百度' }] }),
+    setEngine: (key) => state.engineCalls.push(key),
+    getWallpaper: (cb) => { state.getWallpaperCb = cb; },
+    hasSaved: (cb) => cb(state.hasSavedRaw !== undefined ? state.hasSavedRaw : state.hasSavedN),
+    restoreSession: () => { state.restoreCalls += 1; },
+    setWallpaper: (name) => state.setCalls.push(name),
+    jsError: (...a) => state.errors.push(a.join(' ')),
+    navigate: () => { state.navigateCalls += 1; },
+    // WB-147：openGeo 的回调即 onFail——默认成功形态（不触发降级）
+    openGeo: (onFail) => { state.geoCalls = (state.geoCalls || 0) + 1; return undefined; },
+  };
+  return { host, state };
+}

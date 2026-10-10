@@ -19,24 +19,21 @@ var WALLPAPERS = [
   {name:'aurora-violet.jpg',  label:'星紫',   url:'wallpapers/aurora-violet.jpg'}
 ];
 var current = 'aurora-twilight.jpg';
-// 搜索引擎状态
-var ENGINES = [];           // [{key,name}]
+var ENGINES = [];           // 搜索引擎状态：[{key,name}]
 var engineIdx = 0;
 
-// WB-013：桥调用失败的统一留痕点（此前 7 处空 catch 全吞——桥未挂接/
-// 序列化失败无任何痕迹，排查只能靠盲猜）。jsError 自身再失败则放弃
-//（防上报通道异常递归）。
+// WB-013：桥调用失败的统一留痕点（此前 7 处空 catch 全吞——桥未挂接/序列化失败无任何痕迹，排查只能靠盲猜）。
+// jsError 自身再失败则放弃（防上报通道异常递归）。
 function bridgeError(where, e) {
   try { Host.jsError('ntp main: ' + where + ': ' + e); } catch (e2) {}
 }
 
-function renderEngine() {
+function renderEngine(unknown) {
   var el = document.getElementById('engineName');
-  if (el && ENGINES.length) el.textContent = ENGINES[engineIdx].name;
+  if (el) el.textContent = (unknown || !ENGINES.length) ? '未知' : ENGINES[engineIdx].name;
 }
-// WB-180（2026-10-02 审计）：引擎菜单代次 token——toggle 意图与迟到的
-// getEngine 完成回调解耦：任何收起路径都使未决回调失效，仅最新一次
-// toggle 的完成回调可展开（迟到回调此前会把已收起的菜单重新打开）
+// WB-180（2026-10-02 审计）：引擎菜单代次 token——toggle 意图与迟到的 getEngine 完成回调解耦：
+// 任何收起路径都使未决回调失效，仅最新一次 toggle 的完成回调可展开（迟到回调此前会把已收起的菜单重新打开）
 var engineMenuGen = 0;
 function invalidateEngineMenu() { engineMenuGen += 1; }
 function toggleEngineMenu(ev) {
@@ -163,7 +160,10 @@ document.addEventListener('click', function () {
 {
   try {
     Host.getEngine(function (data) {
-      if (!data) return;
+      // R9-SH-8（第九轮 2026-10-10）：null 回包（桥未挂接 / csCall TTL 兜底 cb(null)）
+      // 此前静默 return——胶囊停在 start.html 的硬编码标签上且零痕迹，用户以为设置生效。
+      // 刻意不猜默认引擎（真实默认可能是 bing，猜错会把搜索发去错引擎）：只显式「未知」+ 留痕。
+      if (!data) { bridgeError('getEngine:init', 'null'); renderEngine(true); return; }
       ENGINES = data.engines || [];
       for (var i = 0; i < ENGINES.length; i++) {
         if (ENGINES[i].key === data.engine) { engineIdx = i; break; }
