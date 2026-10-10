@@ -33,6 +33,8 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-CS-5 | P3 | 保留并登记（方向保守，未修） | `App.xaml.cs:11-32` 的 `PopupRateLimiter` 槽位数组以 **0** 起步，而判定是 `now - _ticks[i] >= windowMs` ⇒ 开机后第一个 30 秒内 `now` 本身 < 30000，三槽全判「未过期」⇒ **这段时间里所有崩溃弹窗被静默拒**（只记日志）。它管的是异常提示，方向保守所以从未被当成缺陷暴露；风险是**形状被抄走**：同形状用在「拒绝用户可达的功能」上就是打开即失效。新建的 `Core/NewTabGate.cs` 刻意用「从未占用」哨兵避开这个坑，并有冷启动用例 `ColdStart_AllowsFullQuotaInsideOneWindow` 钉住；旧那台零测试引用，另批收口 |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
+| R9-CS-1 | P2 | 保留并落地 | 逐行回读确证：主窗 core-ready 段在 R8-CS-SEC-07 已包 `TabRuntimeLifetime.RunCoreReadyFailClosed`，无痕窗 `InPrivateWindow.xaml.cs:137-166` 仍是裸 lambda，且该回调经 Dispatcher 派发（**抛出没有观察方**）—— `runtime.OnCoreReady` 内的 broker `RegisterSession`（会话池 1024 满即抛）一旦抛出，就留下「已挂载可见、却没接上策略处理器」的标签，且会话在池里泄漏。修法与主窗同形，但**保住两条既有早退语义**（`!e.IsSuccess` 只留痕、`_closed\|\| !_runtimes.ContainsKey` 直接返回），接线体外迁成 `InPrivateWindow.CoreReady.cs`（宿主文件在零余量基线上），宿主侧只剩一行订阅；420\→394 行、基线同批改。**这道缺口两轮全绿存在的直接原因是测试只有主窗锚**——新对偶锚 `InPrivateCoreReadyWiringTests`（5 条，含三条内存态反向锚：删包装 / 接线体长回宿主 / 拆除换成只收协调器，都必须判红） |
+| R9-SH-12 | P3 | 保留并落地（#144 落地时新证） | `start.main.js:83` 的 `Enter`/空格 选中分支全仓零用例驱动——#144 只补上了方向键那侧的反向判据，所以把整条 Enter 分支删掉仍 117/117 绿。补正向锚（对 `items[1]` 分别触发两种按键，断 `state.engineCalls.slice(-1)` 为 `['bing']`），并把「删掉 Enter 分支」真的做一遍：改 `start.main.js` 后该用例立刻判红并打出 `Enter 必须选中当前项（R9-SH-12 正向判据）`，还原后全绿。该文件在 579 行零余量基线上，故同批重排文件头与 WB-083 注释（原文不改），581\→578 行、基线同批改 |
 | R9-SH-2 | P2 | 保留并落地（锁自身失效） | 逐行回读 Q12 并复现：`start_a11y.test.mjs:25-30` 的 `mediaBlock()` 把「媒体块」切成「本 at-rule 到下一个 `@media`」——coarse 块实际 244-259 行，旧切片却一路带到 :364（19189 字符），块外的 `.veil-btn {`（:324）与 `.engine-item:focus-visible`（:353）都算块内命中，且不剔注释（:245-247 的注记原文就写着 `.engine-item`）。**内存态实证**：从 :248 的保底选择器列表摘掉 `.engine-item, .veil-btn`（即回退 R8-SH-13 半个修复），这把新锁与旧的 WB-142 双双仍绿。→ 改成「去注释 + 花括号配对切闭合块 + 边界自证」，并把判据抽成 `touchProblems(css)` 做反向锚（摘保底、把宽度改回 28px 都必须判红） |
 | R9-SH-3 | P2 | 保留并落地（零判定） | Q13 确证：`start_main.test.mjs:313` 注释写「触发按键不得选中引擎（仅 Enter/Space）」，实体是一行 `assert.ok(true)`，而同一 `makeHost()` 已把 `setEngine` 记进 `state.engineCalls` 却没用。→ 换成 `assert.deepEqual(state.engineCalls, [], …)`（该文件是 579 行零余量基线，故净零行：改一行注释 + 一行断言、解构多取一个 `state`）。**故障注入自证**：给 `start.main.js` 的 ArrowDown/ArrowUp 分支加一句 `selectEngine(idx)` ⇒ 该用例立刻判红并打出正确消息；还原后 114/114 绿。Enter/Space 的正向面全仓仍零覆盖，另登 R9-SH-12（队列新增 Q47） |
 | R9-SH-4 | P3 | 保留并落地（切片无界） | Q14 确证：`start_page.test.mjs:403-405` 用 `SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"))`——`indexOf` 失配返回 -1 时 `substring(-1)` 按 0 处理 ⇒ 退化全文扫描；命中后又一路读到文末。而 `if (!isOpen) return;` 在 `start.snake.js` 出现两次（键盘 :453、触摸 :472）⇒ 实测删掉键盘那一处仍绿。→ 外迁成新文件 `snake_guard_slice.test.mjs`（原文件 490 行零余量，加边界断言必增行）：有界切片 + 剔注释 + 两条反向锚，其中一条**把旧口径的漏判本身钉成文字**（同一删改下旧写法必须仍“通过”） |
@@ -321,6 +323,33 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
 
 
 
+### 3.9 R9-B10（2026-10-10，PR #144）：三把恒真的前端回归锁改真（R9-SH-2 / -3 / -4）
+
+同一族失效：**源码里字句俱在、判定其实没发生**。三条都逐行回读 + 故障注入确证后才动，
+并把「静态文本断言」的自检三件套写进代码注释：① 切片有没有边界（`substring(indexOf(...))` 在 -1 时按 0 处理 = 全文扫描）；② 注释剔了没有（修复注记里
+常常原文写着被禁的旧写法与被保的选择器名）；③ 把修复回退半个必须判红。
+详见 §二 三行裁决与 §5.2 三条结案标注。
+
+### 3.10 R9-B11（2026-10-10）：无痕窗 core-ready 失败闭合（R9-CS-1）+ 引擎键正向锚（R9-SH-12）
+
+**共同主题：一半的覆盖面不算覆盖。** 主窗那段包了失败闭合、无痕窗没包，而测试只有主窗锚
+⇒ 缺陷全绿活过两轮；方向键「不选中」有判据、Enter「必须选中」没有 ⇒ 删掉整条 Enter 分支全绿。
+
+1. `InPrivateWindow.CoreReady.cs`（新）：入口保两条早退（`!e.IsSuccess` 只留痕；窗口已关或
+   标签已不在直接返回），接线体 `WireCoreReady` 整体交给 `RunCoreReadyFailClosed`，拆除走
+   `TabManager.CloseTab` 完整路径（只收协调器会留「runtime 已销毁、标签还在条上」的死条目）。
+   宿主文件 420→394 行。
+2. `InPrivateCoreReadyWiringTests.cs`（新，5 条）：形状对偶锚 + 三条内存态反向锚（删包装 /
+   接线体长回宿主 / 拆除换成只收协调器）。行为面仍由 `CoreReadyFailClosedTests` 对纯函数核直测
+   ——两窗共用同一个核，「同款」由单源保证而不是两处各抄一份再靠测试比对。
+3. `start_main.test.mjs`：正向锚（`Enter` 与空格各驱动一次选中），并把「停用 Enter 分支」真的
+   做一遍：改 `start.main.js` ⇒ 该用例判红并打出带 R9-SH-12 的消息；还原 ⇒ 117/117。
+4. 两个零余量基线文件同批收窄：`InPrivateWindow.xaml.cs` 420→394、`start_main.test.mjs`
+   579→578（`file_size_baseline.json` 的 diff 只有这两项）。
+5. 本地验证：`dotnet build` 0 警告 0 错误；Core **796/796**（791 + 本批 5 条）、Broker **189/189**；
+   `node --test` **117/117**；`py312-compat` / `check_doc_claims` / `check_workflow_shells` /
+   `check_file_sizes` 绿。Android 侧本批未触及。
+
 ## 四、待用户定稿（本轮新增两项，其余沿用第八轮 §七）
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
@@ -453,7 +482,7 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
   执行 ⇒ 抛出无观察方，冒到 `App.xaml.cs` 全局弹窗（3/30s 后静默）并留下一个已挂载可见
   但未接线的标签；`RegisterSession` 成功后任一步抛出还会让会话在池中泄漏（拆除只在主窗
   `CloseTab` 里）。`CoreReadyFailClosedTests` 仅锚 MainWindow，无 InPrivate 对偶锚。
-  非策略 fail-open（`_wired` 末位置位 + `IsWired` 仍挡后续导航）。
+  非策略 fail-open（`_wired` 末位置位 + `IsWired` 仍挡后续导航）。  **本条所指缺口已逐行回读确证并落地**（§3.10 / §二 R9-CS-1：无痕窗接线体外迁 + 包失败闭合 + 对偶锚 5 条）。
 - Q23 R9-CS-2 | P2 | `windows/src/Aegis.Windows.App/Chrome/MainWindow.SourceViewer.cs:29-38,71-75`：
   查看源码（Ctrl+U）的带外抓取 ①不设 `AllowAutoRedirect=false`、落地也不对**最终** URI
   复查 `ReservedAddressBoundary` ⇒ 敌意页 302 跳 `169.254.169.254` 照跟（同仓
@@ -515,6 +544,8 @@ attestations → 发布资产。PY-007/008 当年消掉的是「tag 直推 + 编
 ### 5.2.1 本批落地时新增队列（同口径：必须带 file:line）
 
 - Q47 R9-SH-12 | P3 | `shared/shell/start.main.js:83` ↔ `tests/ui-regression/start_main.test.mjs:307-313`：`Enter`/`空格` 选中引擎这条**正向**判据全仓零覆盖（:83 的 `if (ev.key === 'Enter' || ev.key === ' ')` 无任何用例驱动），而 :87 的方向键分支刚被 R9-SH-3 补上反向判据——只锁一侧意味着「把 Enter 整条删掉」仍全绿。补法：在同一用例里对 `items[1]` 触发 Enter 并断 `state.engineCalls` 增长（`start_main.test.mjs` 在 579 行零余量基线上，需先净减）。
+  **本批已落地**（§二 R9-SH-12 / §3.10：正向锚 + 故障注入自证）。
+
 ### 5.5 DOC（文档 vs 实树）
 
 - Q32 R9-DOC-01 | P2 | `README.md:35-37` 仍写「**仍待裁决**：Android 侧 http 一律升 https
