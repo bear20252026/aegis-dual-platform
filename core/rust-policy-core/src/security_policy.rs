@@ -210,27 +210,27 @@ impl SecurityPolicy {
     /// 100.64/10 CGNAT（含阿里云 100.100.100.200）、TEST-NET-1/2/3、198.18/15
     /// 基准段、224/4 组播与受限广播。**不含**回环与 RFC1918——第七轮 B8 裁决。
     ///
-    /// 只判定**已规范化后的 host**（`origin::canonicalize_external` 之后）。
-    /// 归一层的既有收紧使本函数无需处理任何混淆编码：非点分 IPv4
-    ///（2130706433 / 0x7f000001 / 127.1）、逐段前导零八进制（0177.0.0.1 =
-    /// inet_aton 解释成 127.0.0.1）、`0x` 混合段与 IPv6 字面量方括号形态
-    /// 均已在归一层被拒（PY-071/072、RS-228、RS-238），残余形态只有标准
-    /// 点分四段与域名。
+    /// 只判定**已规范化后的 host**（`origin::canonicalize_external` 之后）。归一层的既有
+    /// 收紧使本函数无需处理任何混淆编码：非点分 IPv4（2130706433 / 0x7f000001 / 127.1）、
+    /// 逐段前导零八进制（0177.0.0.1 = inet_aton 解释成 127.0.0.1）、`0x` 混合段与 IPv6
+    /// 字面量方括号形态均已在归一层被拒（PY-071/072、RS-228、RS-238），残余只有点分四段与域名。
     ///
-    /// 有意**不**按 `.local`/`.internal` 等后缀名判定：宿主自有资产虚拟主机
-    ///（Windows `ntp.aegis.local` / `geo.aegis.local`）正是该形态，按名匹配会
-    /// 把 chrome UI 自身拖进高危集。域名经 DNS 指向环回（rebinding）超出纯
-    /// 函数能力，属宿主侧判定面——此处不为不可判定的形态假装全覆盖。
+    /// 有意**不**按 `.local`/`.internal` 等后缀名判定：宿主自有资产虚拟主机（Windows
+    /// `ntp.aegis.local` / `geo.aegis.local`）正是该形态，按名匹配会把 chrome UI 自身拖进
+    /// 高危集。域名经 DNS 指向环回（rebinding）超出纯函数能力，属宿主侧判定面——不为不可判定的形态假装全覆盖。
     ///
-    /// **IPv6 不在本函数覆盖面内**（如实记边界，第七轮 R7-RS-05）：入参是归一
-    /// 后的 host，而 `origin::try_parse_external` 的字符集闸门只允许
-    /// `[A-Za-z0-9.-]`——`:`/`[` 形态的 IPv6 字面量在归一层即被拒（RS-177/
-    /// PY-069/070，见 origin/tests/host_grammar.rs 的
-    /// bracketed_ipv6_authority_rejected）。故 C# 孪生
-    ///（`UrlSafety.IsPublicIp`）按 IPAddress 字节判的 IPv6 ULA `fc00::/7`、
-    /// 组播 `ff00::/8`、site-local `fec0::/10` 在本函数**取不到入参**，
-    /// 不是"漏判"而是"无从判定"；要覆盖须先动归一层的 IPv6 支持，属另一批次。
+    /// 端口由本函数自处（第九轮 R9-RS-6）：先取 `:` 前段再判。旧口径要求调用方先剥端口
+    ///（`ffi/broker.rs` 的 `policy_host_of`），漏剥即把 `169.254.169.254:8080` 判成非高危
+    ///（末段 "254:8080" parse 失败）——不变量从「调用方纪律」换成「函数自证」；私网带端口仍判
+    /// 非高危（第七轮 B8 裁决「本机与内网必须能打开」不可回退），用例见 scheme_and_host_predicates.rs。
+    ///
+    /// **IPv6 不在本函数覆盖面内**（如实记边界，第七轮 R7-RS-05）：入参是归一后的 host，而
+    /// `origin::try_parse_external` 的字符集闸门只允许 `[A-Za-z0-9.-]`——`:`/`[` 形态的 IPv6 字面量
+    /// 在归一层即被拒（RS-177/PY-069/070，见 origin/tests/host_grammar.rs 的
+    /// bracketed_ipv6_authority_rejected）。故 C# 孪生（`UrlSafety.IsPublicIp`）按 IPAddress 字节判的
+    /// IPv6 ULA `fc00::/7`、组播 `ff00::/8`、site-local `fec0::/10` 在本函数**取不到入参**，不是"漏判"而是"无从判定"；要覆盖须先动归一层的 IPv6 支持，属另一批次。
     pub fn is_high_risk_host(host: &str) -> bool {
+        let host = host.split(':').next().unwrap_or(host);
         let mut octets = [0u8; 4];
         let mut count = 0usize;
         for segment in host.split('.') {

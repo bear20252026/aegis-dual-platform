@@ -32,6 +32,12 @@ const READ_NOISE_CALL: &str =
 const WEBGL_NOISE_CALL: &str =
     "aegisNoiseRectangle(pixels, aegisCanvasSeed(), x, y, width, height, stride)";
 const INTERNAL_RAW_CALL: &str = "AEGIS_RAW_GET_IMAGE_DATA.call(octx, 0, 0, off.width, off.height)";
+/// 两条直读出口的**调用**（只钉「确实调了噪声函数」这件事）。为什么不像上面两个常量
+/// 那样写整行：种子访问器名三端本就不同——Rust/C# 用 `aegisCanvasSeed()`、Kotlin 用
+/// `noiseSeed()`，那是 R9-RS-8 逐 token 门禁里显式登记的分歧面（DIVERGENT_REGISTERED），
+/// 在本文件里按整行钉会把一条已登记的口径差异误判成缺失。
+const READ_NOISE_CALL_HEAD: &str = "aegisNoiseRectangle(imageData.data,";
+const WEBGL_NOISE_CALL_HEAD: &str = "aegisNoiseRectangle(pixels,";
 /// 编码路径里残留的「已包裹」读法——出现即双重加噪。
 const INTERNAL_WRAPPED_CALL: &str = "octx.getImageData(0, 0, off.width, off.height)";
 
@@ -106,6 +112,12 @@ fn three_ends_share_the_pixel_readback_shape() {
             RAW_CAPTURE,
             RECT_WRAPPER,
             READ_PIXELS_WRAPPER,
+            // R9-RS-7 的余量：上面 5 段只钉住「函数存在 + 序号同形」，钉不到
+            // 「8 位 RGBA 守卫还在」和「两条出口真的调了噪声」——端上删掉
+            // `pixels.length === width*height*4` 或删掉整条调用，此前都不会红。
+            BYTE_RGBA_GUARD,
+            READ_NOISE_CALL_HEAD,
+            WEBGL_NOISE_CALL_HEAD,
         ] {
             assert!(
                 source.contains(fragment),
