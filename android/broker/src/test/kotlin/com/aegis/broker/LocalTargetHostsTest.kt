@@ -2,6 +2,7 @@ package com.aegis.broker
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -35,6 +36,27 @@ class LocalTargetHostsTest {
         for ((url, expected) in cases) {
             assertEquals("hostOf($url)", expected, LocalTargetHosts.hostOf(url))
         }
+    }
+
+    /**
+     * R9-AD-4（第九轮 2026-10-10）：三处判定对方括号 IPv6 字面量的结果**故意不同**，
+     * 这条用例把差异钉住，防止任何一侧被当成缺陷顺手改。
+     *
+     * • 导航入口 [OriginPolicy] 拒（AD-299：与 Rust origin/host_grammar 及 contracts 的
+     *   url-origin-invalid 向量同口径——java.net.URI 保留方括号而 Chromium 剥，
+     *   双重解释面宁可不放行）；
+     * • host 一旦剥了括号（[LocalTargetHosts.hostOf] 的职责），::1/ULA 就落在第七轮 B8
+     *   裁决的放行段里——HTTPS 升级豁免层与下载层看到的正是这个形态。
+     *
+     * 代价如实记：地址栏输 `http://[::1]:9000/` 在 Android 打不开，而 Windows 能。
+     * 要打通它得解冻核心 host grammar 并增补 url-origin-* 向量（三端解析器语义变更），
+     * 已报待用户定稿；**不得**用「收紧段集」来消除这条差异——裁决是本机与内网必须能打开。
+     */
+    @Test
+    fun bracketedIpv6IsRejectedForNavigation_ButExemptOnceHostIsStripped() {
+        assertNull(OriginPolicy.tryParseExternal("http://[::1]:9000/"))
+        assertTrue(LocalTargetHosts.isLocalTarget(LocalTargetHosts.hostOf("http://[::1]:9000/")))
+        assertFalse(ReservedAddressBoundary.denies("http://[::1]:9000/"))
     }
 
     @Test
