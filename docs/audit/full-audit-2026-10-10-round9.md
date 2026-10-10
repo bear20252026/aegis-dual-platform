@@ -48,6 +48,28 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 `py312-compat（76 py + 16 workflow + 4 composite）`、`check_workflow_shells`、
 `check_file_sizes`、`check_markdown_tables`、`check_markdown_links`、`check_doc_claims`。
 
+### 3.0 依赖面前批（2026-10-10，用户定稿「按推荐全执行」项 1 / 2）
+
+四条 Dependabot PR 全部并完（串行并，每次并完等 GitHub 重算 mergeable 再推下一条）：
+#126 dtolnay/rust-toolchain、#127 gradle/actions、#133 actions 小版本组、#125 cryptography。
+
+并前逐条做了 **tag↔SHA 核对**（SP-178 口径），不是一路点绿就并：
+
+| PR | 核对结果 |
+| --- | --- |
+| #126 / #127 / #133 的 upload-artifact 与 setup-node | SHA 与 tag 完全对应 ✓（`gradle/actions@748248d` 需先 peel 注解 tag 才对得上） |
+| #133 的 download-artifact | SHA `9000827c` 是 **v8.0.2** 的准备提交，而 Dependabot 保留了我们原来的注释文本 ⇒ 4 处 `# v8.0.1` 变失实。SHA 对、标签错 ⇒ 先并（发布链拿包动作前进一个 patch，行为风险为零），本批把标签改回 `v8.0.2` |
+| #125（pip，cryptography 50.0.1→50.0.2） | 审过 diff：包版本变化只有 cryptography 一处，另有 **`colorama==0.4.6` 被重算锁时摘除**。不当噪声放过——`pip install --require-hashes` 在 windows-2025 上跑绿（bandit/pytest/rich 的当前闭包确实不再要求它），故判「锁重算的正常结果」而非丢依赖 |
+
+**项 1（九条 Maven 告警）判定为无可升版并结案**：`bcprov/bcutil/bcpkix 1.86`、`jose4j 0.9.7`、
+`jdom2 2.0.6.1`、`commons-lang3 3.21.0`、`httpclient 4.5.14` 逐包查
+`repo1.maven.org/.../maven-metadata.xml`，**当前钉版即最新已发布版**；Dependabot 也没为它们
+开 PR，与此一致。所以 critical（BC name-constraints 绕过）与 high（BC ASN.1 强制解析）
+在构建机上仍开放，等上游发版后复检；产品 APK 不受影响（`debugRuntimeClasspath` 闭包零命中）。
+`android/build.gradle.kts` 的头注就地补这一段（含「1.85/0.9.6/3.18.0 是 2026-10-03 首次设地板时
+的取值、不作现行陈述」的日期更正，顺带把 R9-AD-8 的注记失实闭合）。logback 3×low 维持
+「不在解析树」原判。
+
 ### 3.1 R9-B2（同轮续）：R9-AD-1 的三端修法
 
 1. **Android 合成单条 blob**：`fingerprintShieldScript = StagesSeed + StagesShield +
@@ -110,7 +132,8 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
   pending 下载确认 ⇒ 后台标签的危险扩展确认可顶到前台标签被批准。
 - Q7 R9-AD-7 | P3 | `TabManager.kt:109-130`：`closeTab` 三条 when 分支的行内注释整体错位
   一条（与类 KDoc AD-254 段的正确对应相反）——按注释读会得出与实现相反的激活位语义。
-- Q8 R9-AD-8 | P3 | `android/build.gradle.kts:13-19` 头注声明「1.85 / 0.9.6 / 3.18.0」，
+- ~~Q8 R9-AD-8~~ **本批已闭**（见 §3.0 与 R9-DEPS-1：就地补日期更正注记，不改写历史）。
+  原条目：Q8 R9-AD-8 | P3 | `android/build.gradle.kts:13-19` 头注声明「1.85 / 0.9.6 / 3.18.0」，
   `:26-32` 实钉 BC 1.86（且拆三条）、jose4j 0.9.7、commons-lang3 3.21.0 ⇒ 按头注做构建
   类路径分诊会与实树对不上账（`docs/security/android-build-classpath-triage.md` 同账本）。
 - Q9 R9-AD-9 | P3 | `DownloadPolicy.kt:96`（`URLDecoder`，`+`→空格）↔

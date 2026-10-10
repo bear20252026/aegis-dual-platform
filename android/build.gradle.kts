@@ -14,6 +14,16 @@
 // jdom2 2.0.6→2.0.6.1 / lang3 3.16→3.18.0 / httpclient 钉 4.5.14）。
 // 范围取舍：logback 3×low 不在本树（依赖图另一节点，疑为插件自有类路径），
 // 留给 AGP/工具链升级承接——不对不在解析树内的包盲加地板。
+// 第九轮复验（2026-10-10，R9-DEPS-1）：上方 1.85 / 0.9.6 / 3.18.0 是 **2026-10-03 首次
+// 设地板时**的取值（历史记录，不作现行陈述）；实钉已随上游推进到 BC 1.86（bcprov/bcutil/
+// bcpkix 三件）、jose4j 0.9.7、jdom2 2.0.6.1、lang3 3.21.0、httpclient 4.5.14。
+// 当日仍开的 9 条 Maven 告警**全部没有 patched 版本可升**——逐包以
+// repo1.maven.org/…/maven-metadata.xml 实测：七包当前钉版即最新已发布版
+// （bcprov/bcutil/bcpkix 1.86、jose4j 0.9.7、jdom2 2.0.6.1、lang3 3.21.0、httpclient 4.5.14），
+// Dependabot 也未为它们开 PR，与此一致。故本轮处置是「结案 + 等上游发版后复检」，
+// 不是「已修复」：critical（BC name-constraints 绕过）与 high（BC ASN.1 强制解析）
+// 在构建机上仍开放，产品 APK 不受影响（runtime 闭包零命中，实证见分诊文档）。
+// logback 3×low 维持原判：不在本树解析闭包内。
 // 分诊全文（暴露面证据/剩余告警处置/复检规程）：docs/security/android-build-classpath-triage.md
 // 版本来源：各告警的 first_patched_version（11/12→1.85、7→1.84、5→0.9.6、
 // 4→2.0.6.1、3→3.18.0、2→4.5.13 已被树解析超集 4.5.14 覆盖——显式钉版防回退）。
