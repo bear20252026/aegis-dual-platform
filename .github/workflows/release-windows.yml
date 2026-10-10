@@ -71,7 +71,7 @@ jobs:
           # 入库后再补 --locked-mode（盲目先加会在无锁文件时直接构建失败）。
           key: nuget-${{ runner.os }}-${{ hashFiles('windows/**/*.csproj', 'windows/**/packages.lock.json') }}
           restore-keys: nuget-${{ runner.os }}-
-      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
+      - uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
           toolchain: 1.99.0
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-055)
