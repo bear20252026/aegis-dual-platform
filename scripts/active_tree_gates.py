@@ -115,9 +115,15 @@ def run_compat() -> int:
     Dependency-Retlock 的 heredoc 里，本地 3.14 全绿、CI 3.12 直接 TypeError。"""
     files = _python_files(RUFF_TARGETS)
     workflows = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
-    problems = compat_violations(files) + compat_violations(workflows)
-    print(f"[gate] py312-compat: 扫描 {len(files)} 个 py 文件 + {len(workflows)} 个 workflow")
-    if not files or not workflows:
+    # R9-CI-5（第九轮 2026-10-10）：`.github/actions/*/action.yml` 里同样有内嵌 python
+    # heredoc（prepare-geogebra 的 zip-slip 断言与入口存在性检查），而
+    # check_workflow_shells.py 早已把 actions 目录纳入 pwsh 面——两个「workflow 结构类」
+    # 门禁覆盖面不一致，R8-CI-21 那个「同一缺陷第二次发生」的第三次落点就在这里。
+    actions = sorted((ROOT / ".github" / "actions").glob("*/action.yml"))
+    problems = compat_violations(files) + compat_violations(workflows) + compat_violations(actions)
+    print(f"[gate] py312-compat: 扫描 {len(files)} 个 py 文件 + {len(workflows)} 个 workflow"
+          f" + {len(actions)} 个 composite action")
+    if not files or not workflows or (ROOT / ".github" / "actions").is_dir() and not actions:
         print("[gate] py312-compat: FAILED（扫描面为空——空面即恒绿）")
         return 2
     if problems:

@@ -51,11 +51,19 @@ jobs:
     env:
       PYTHONIOENCODING: utf-8
     steps:
+      # R9-CI-2：dispatch 输入一律经 env 中转，`run:` 文本里不再出现 `${{ }}`。
+      # `${{ }}` 在 shell 解析**之前**做文本替换，`branch=x"; git push origin HEAD:master; #`
+      # 会把下面这道 deps/* 守卫自身打断——本 job 是全仓唯一持 `contents: write` 的
+      # 手工触发面，「永不写 master」此前只是脚本约定。判据见
+      # tests/python/workflow_exit_code_test.py（relock 的 run 块内零 in-run 表达式 +
+      # 写回步骤自带二次守卫）。
       - name: 校验目标分支（拒绝写回主干）
         shell: bash
+        env:
+          RELOCK_BRANCH: ${{ github.event.inputs.branch }}
         run: |
           set -euo pipefail
-          target="${{ github.event.inputs.branch }}"
+          target="$RELOCK_BRANCH"
           case "$target" in
             deps/*) ;;
             *) echo "❌ branch 必须以 deps/ 开头（当前：$target）——本 job 有写权限"; exit 1 ;;
@@ -75,9 +83,11 @@ jobs:
       - name: .NET 重锁（RestoreLockedMode=false，三处工程一致）
         shell: bash
         # 只删不增的 RID 块事故就发生在这一步之后——所以下一步是回读门禁，不是构建
+        env:
+          RELOCK_ECOSYSTEM: ${{ github.event.inputs.ecosystem }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event.inputs.ecosystem }}" = "python" ]; then
+          if [ "$RELOCK_ECOSYSTEM" = "python" ]; then
             echo "跳过（ecosystem=python）"; exit 0
           fi
           dotnet restore windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj -r win-x64 -p:RestoreLockedMode=false
@@ -144,18 +154,29 @@ jobs:
 
       - name: 回读门禁：锁必须仍然完整（RID 块 + 出货依赖 + hash 覆盖）
         shell: bash
+        env:
+          RELOCK_ECOSYSTEM: ${{ github.event.inputs.ecosystem }}
         run: |
           set -euo pipefail
           python scripts/verify_lock_rids.py
           python scripts/check_package_floors.py
-          if [ "${{ github.event.inputs.ecosystem }}" != "dotnet" ]; then
+          if [ "$RELOCK_ECOSYSTEM" != "dotnet" ]; then
             python validate_release.py            # 内含锁结构门禁：逐条 == 钉版必带 --hash=、.in↔.txt 对账
             python -m pip install --quiet --require-hashes -r requirements-ci.txt
           fi
 
       - name: 写回分支（无改动即空跑成功）
         shell: bash
+        env:
+          RELOCK_BRANCH: ${{ github.event.inputs.branch }}
+          RELOCK_RUN_ID: ${{ github.run_id }}
         run: |
+          # 二次守卫（R9-CI-2）：不依赖第一步的存在——分支不是 deps/* 就不推
+          case "$RELOCK_BRANCH" in
+            deps/*) ;;
+            *) echo "❌ 写回目标必须以 deps/ 开头（当前：$RELOCK_BRANCH）"; exit 1 ;;
+          esac
+
           set -euo pipefail
           git config user.name  "aegis-relock-bot"
           git config user.email "relock@localhost"
@@ -178,7 +199,7 @@ jobs:
             exit 0
           fi
           git diff --cached --stat
-          git commit -m "chore(deps): 重算依赖锁（Dependency-Retlock dispatch，run ${{ github.run_id }}）" -q
-          git push origin "HEAD:${{ github.event.inputs.branch }}"
-          echo "⚠️ 锁已写入 ${{ github.event.inputs.branch }}——请开 PR 人工审 diff 后再合并；"
+          git commit -m "chore(deps): 重算依赖锁（Dependency-Retlock dispatch，run $RELOCK_RUN_ID）" -q
+          git push origin "HEAD:$RELOCK_BRANCH"
+          echo "⚠️ 锁已写入 $RELOCK_BRANCH——请开 PR 人工审 diff 后再合并；"
           echo "   审点：win-x64 RID 块仍在、每行 == 钉版带 --hash=、被删条目是否本就该删。"

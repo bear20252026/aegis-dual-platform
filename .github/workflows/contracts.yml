@@ -96,6 +96,13 @@ jobs:
       # （源码里字句俱在、渲染后内容消失）。本轮实测 12 处，含两处是被脚本追加坏的行。
       - name: Markdown table shape gate (R8-DOC-19——逐行列数与表头一致)
         run: python scripts/check_markdown_tables.py
+      # R9-CI-4（第九轮 2026-10-10）：verify_xaml_resources.py 此前**唯一**调用点在
+      # release-windows.yml，而该 workflow 只由 tag/workflow_dispatch 触发 ⇒ XAML
+      # `FindResource`↔`x:Key` 对账（V3 启动崩溃类）在 PR 面零执行；它的四条 pytest
+      # 用例又全部 monkeypatch 到 tmp 树，常跑面只证明机制不证明现树。并入常跑且
+      # 已是必需项的本 job（不新增必需 context，R8-CI-01 口径）。
+      - name: XAML resource key reconciliation (R9-CI-4——FindResource↔x:Key)
+        run: python scripts/verify_xaml_resources.py
       # B8（第八轮 2026-10-04）：文档里的 workflow 数量是**陈述**，实树变化后没人回头
       # 改——同一件事三轮复发（WB-214 对齐为 13 → 第六轮记「闭环即回归」→ 第八轮实测
       # 仍有 8 处与实树不符）。本门禁把「文档说的数 = 实树的数」变成可失败检查。

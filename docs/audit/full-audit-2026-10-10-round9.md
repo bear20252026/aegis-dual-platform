@@ -1,0 +1,343 @@
+# 全仓第九轮补充审计（2026-10-10）
+
+## 一、方法与规模
+
+**触发原因**：第八轮 §十一 队列里若干条目在增量追加时只落了 ID 与计数、没有
+`文件:行号 → 现象` 文本；当轮子代理原文只存在于会话里，会话压缩后即失（第八轮
+§十 第 6 条已把这定为失账根因）。本轮**重派六个只读分区**重新 derive：
+AD（Android）、CI（workflow 与门禁脚本）、SH（shared 壳层与契约数据面）、
+DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
+
+**输出契约**沿用第八轮：`ID | 严重级 | 类型 | 文件:行号 | 现象 → 方案 | 影响 |
+与既往关系`，末行强制 `COVERAGE: 全文读 / 略读 / 未读`。六个分区全部返回并给出了
+诚实的未读清单，因此**本轮所有结论的置信边界以各自 COVERAGE 为准**，不写「全仓 100%」。
+
+**登记纪律（本轮起强制）**：未回读的条目必须把 `文件:行号 → 现象` 原样写进第五节
+队列，不得只留计数。规模基线沿用第八轮实测（≈474 个受管源文件；本轮 +4：
+#130 的两个 Kotlin 文件与 #131 的门禁+测试），未重算。
+
+## 二、主代理回读裁决（已复核，可作登记结论）
+
+| ID | 级别 | 裁决 | 依据（本批实测，不引用子代理） |
+| --- | --- | --- | --- |
+| R9-CI-3 | **P1**（子代理报 P2，升） | 保留并落地 | 本地 `bash -ec` 实测「`false && echo hi; echo done` ⇒ exit 0」：Actions 的 bash 包装是 `-eo pipefail`，`set -e` 对 `&&` 列表中非末位命令的失败豁免 ⇒ `release-android.yml:219` 的 `zipalign -c -P 16 4 … && echo OK` 永不失败，而该步末条是必过的 `grep -Fx`；上方注释却写「不对齐即失败」。后果：非 16K 对齐 APK 全绿出厂，Android 15+ 16KB 页设备装不上 |
+| R9-CI-2 | P2 | 保留并落地 | py-yaml 解析各步 `run:` 正文：`dependency-relock.yml` 有 6 处 in-run `${{ }}`（branch/ecosystem/run_id），`gradle-dependency-insight.yml` 为 0 处——而后者头注声称「全量扫描后本行是唯一残留 in-run 表达式」。`${{ }}` 在 shell 解析之前完成文本替换 ⇒ `branch=x"; git push origin HEAD:master; #` 能打断同文件里的 `deps/*` 守卫；本 job 是全仓唯一持 `contents: write` 的手工触发面 |
+| R9-CI-4 | P2 | 保留并落地 | 全仓 grep：`verify_xaml_resources.py` 唯一调用点在 `release-windows.yml:219`，而该 workflow 只由 tag 的 `workflow_call`/`workflow_dispatch` 触发 ⇒ XAML `FindResource`↔`x:Key` 对账（V3 启动崩溃类）在 PR/push 面零执行；其 4 条 pytest 用例全部 `monkeypatch.setattr(vxr,"SRC",tmp_path)`，常跑面只证明机制不证明现树 |
+| R9-CI-5 | P3 | 保留并落地 | `run_compat()` 面是 `*.py` + `.github/workflows/*.yml`；同仓 `check_workflow_shells.py` 早已把 `.github/actions/*/action.yml` 纳入 pwsh 面 ⇒ 两个「workflow 结构类」门禁面不一致，`prepare-geogebra` 的两个内嵌 python heredoc 在 compat 面外（R8-CI-21 的第三次落点） |
+| R9-CI-7 | P3 | 保留并落地 | `release.yml:196`、`release-core.yml:195`、`release-android.yml:392` 三步名为 `Fail-closed gate`、正文只有 `echo "✅ …"`——结构上不可能失败，日志里的「门禁」字样会被后续人当判定证据（SP-231 删零信息量步骤同口径） |
+| R9-CI-6 | P3 | 部分确证 | `.github/dependabot.yml:2` 写「13 workflow 全 SHA pin」而实树 16 ⇒ 计数失实属实，本批改声明；「把 `.github/**/*.yml` 纳入 `check_doc_claims` 面」的建议本批**未做**（先改声明，面扩展单独定） |
+
+## 三、本批落地（R9-B1：CI / 门禁面）
+
+1. `release-android.yml`：zipalign 改 `if ! …; then ::error + exit 1; fi`，删尾部纯 echo 门禁步。
+2. `dependency-relock.yml`：6 处 in-run `${{ }}` 全部改经 step `env:` 中转
+   （`RELOCK_BRANCH` / `RELOCK_ECOSYSTEM` / `RELOCK_RUN_ID`），并在**写回步骤内**加二次
+   `deps/*` 守卫（不依赖第一步存在）。
+3. `contracts.yml`：`verify_xaml_resources.py` 接入 `contract-source-of-truth`（常跑且已是
+   必需项，不新增必需 context ⇒ 不会把 merge box 卡在 waiting，R8-CI-01 口径）。
+4. `active_tree_gates.py`：`run_compat()` 面追加 `.github/actions/*/action.yml`，打印
+   「N py + M workflow + K composite action」，actions 目录存在却扫不到 ⇒ exit 2。
+5. 新常驻门禁 `tests/python/workflow_exit_code_test.py`（9 条）：bash 侧 `X && echo` 断言
+   形态判红、名为 gate 却只有 echo 判红、`if ! …` 形态不误红、relock 的 run 块内零
+   `${{` + 写回步骤二次守卫在场、XAML 门禁必须在 PR 面、zipalign 必须是真断言。
+6. `tests/python/py312_compat_test.py` 补两条：composite action 在面内 + 植入 3.13 API 必判出。
+7. `.github/dependabot.yml:2` 的「13 workflow」按实树改 16。
+
+本地门禁全绿：`pytest tests/python` 494 passed / 1 skipped、`ruff`、`bandit`、
+`py312-compat（76 py + 16 workflow + 4 composite）`、`check_workflow_shells`、
+`check_file_sizes`、`check_markdown_tables`、`check_markdown_links`、`check_doc_claims`。
+
+## 四、待用户定稿（本轮新增两项，其余沿用第八轮 §七）
+
+- **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
+  保存默认——关闭改变调试与默认 UX，属产品行为变更。
+- **R9-SH-5 / R9-SH-6 的一半**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在
+  `agent/broker.py` 裁决路径零消费（要么 broker 消费、要么 catalog 删列并在文档写明
+  「治理元数据非判定面」）；`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会
+  改变同站多子域共享种子的产品语义。
+- 沿用：WebView2 SDK bump、Test.Sdk/xunit 跨 major、`NewTab` 洪水上限、子资源
+  `shouldInterceptRequest`、Android `dependencyLocking`、核心 JS 生成导出（R8-RS-15）、
+  Dependabot 三条 open PR（#125/#126/#127）。
+
+## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
+
+### 5.1 AD（Android）
+
+- **Q1 R9-AD-1 | P1（子代理声称，已用 node 复现，主代理未独立复现）**
+  `android/app/src/main/java/com/aegis/browser/WebViewHardening.kt:45-52`（注入两条
+  document-start 脚本：先 `fingerprint-shield` 后 `bridge-guard`）↔
+  `WebViewHardeningStagesShield.kt:200`（关窗行位于第一条 blob 末尾）↔
+  `WebViewHardening.kt:132,138,147,161`（桥守卫四处 `__aegisReg(...)` 注册）。
+  两种执行顺序都空转：shield 先 ⇒ `open=false` 后注册被拒；bridge 先 ⇒ Symbol 尚未定义。
+  后果：页面一行 `fetch.toString()` 即读到含 `Aegis: bridge blocked` 的注入源文与白名单
+  ——**第八轮 §六.8 据「注册已在位」推翻子代理的结论可能不成立**。
+  `core/rust-policy-core/tests/tostring_window.rs:123-142` 现把「close 在 shield blob 末尾」
+  钉成断言（门禁钉住缺陷形态）。待我独立复现后定方案（合成单条 blob，或把 close 放到
+  末条脚本尾部并去掉对顺序的依赖）。
+- Q2 R9-AD-2 | P2 | `TranslateEntry.kt:50`（`Uri.encode` 缺省保留 `:/?&=`）+ `:28`
+  （`SENSITIVE_QUERY_PARAMS` 只精确匹配 code/state/token）⇒ 带多参页被截成错目标、
+  `access_token`/`api_key` 原样外发；`TranslateEntryPrivacyTest.kt:41-47` 把 `keep=me`
+  留在全码当期望值。建议改用仓内严格编码器 `SearchEngines.uriEncode`（纯 Kotlin 单源，
+  已对 AOSP `Uri.encode` 做过 instrumented 对照矩阵）。
+- Q3 R9-AD-3 | P2 | `WebViewDownloadHandler.kt:139-169` 全树零 `setRedirectsAllowed`：
+  闸门只判**入队** URL，DownloadProvider 默认跟随重定向 ⇒ `302 → 169.254.169.254` 仍
+  落盘公共目录（PR #130 消除的后果复活路径）。建议完成后用 `COLUMN_URI` 对最终地址复判
+  + `remove()` + 留痕；`setRedirectsAllowed(false)` 会打断正当 CDN 重定向（产品代价，不推荐）。
+- Q4 R9-AD-4 | P2 | `OriginPolicy.kt:104-110` ↔ `LocalTargetHosts.kt:153-159`：方括号
+  IPv6 authority 在导航层一律拒 ⇒ `::1`/ULA 的「放行」永不被判定，而
+  `LocalTargetHostsTest.kt:26-28`、`ReservedAddressBoundaryTest.kt:62,68` 用
+  `http://[::1]:9000/` 当放行样本，读起来像「IPv6 本机可打开」。建议如实写进 KDoc 与
+  测试注释（**不得反向收紧段集**，与 B8 相反）。
+- Q5 R9-AD-5 | P3 | `AndroidBroker.kt:189` ↔ `:368`：原生变体进账本的是 64 位裸 hex nonce
+  （无 `sessionId:` 前缀）⇒ 关标签的 `removeIf startsWith` 一条都摘不掉，而注释称
+  「销毁会话并移除其已消费 nonce」；`AndroidBrokerTest.kt:414-417` 只钉托管路径形态。
+  孪生形态见 `BrowserPolicyBroker.NativeNonceLedger`（R8-CS-REG-01 同源，后果轻得多）。
+- Q6 R9-AD-6 | P3 | `BrowserViewModelConfirmations.kt:104-108`：下载确认缺「仅当前活动标签
+  可消费」的归属校验（导航确认有，AD-158），且 `switchTo` 撤销 pending 导航确认却不撤销
+  pending 下载确认 ⇒ 后台标签的危险扩展确认可顶到前台标签被批准。
+- Q7 R9-AD-7 | P3 | `TabManager.kt:109-130`：`closeTab` 三条 when 分支的行内注释整体错位
+  一条（与类 KDoc AD-254 段的正确对应相反）——按注释读会得出与实现相反的激活位语义。
+- Q8 R9-AD-8 | P3 | `android/build.gradle.kts:13-19` 头注声明「1.85 / 0.9.6 / 3.18.0」，
+  `:26-32` 实钉 BC 1.86（且拆三条）、jose4j 0.9.7、commons-lang3 3.21.0 ⇒ 按头注做构建
+  类路径分诊会与实树对不上账（`docs/security/android-build-classpath-triage.md` 同账本）。
+- Q9 R9-AD-9 | P3 | `DownloadPolicy.kt:96`（`URLDecoder`，`+`→空格）↔
+  `WebViewDownloadHandler.kt:210,338-364`（`decodePercentStrict`，`+` 字面）：同一「URL
+  路径段」两套解码器，而后者注释正是前者的反驳理由；本仓两处自写纪律「不欢迎第二个解析器」。
+- Q10 R9-AD-10 | P3 | `AegisHomeBridge.kt:95-121` + `SecureWebViewFactory.kt:127-132`：
+  `addJavascriptInterface` 对象对所有帧可见（本类 KDoc 自述）而判据只取 `webView.url`
+  （主框架），受信面是整个 `file:///android_asset/` 前缀（首页 + GeoGebra）⇒ 壳页内跨源
+  iframe 可驱动 `navigate/setEngine/setWallpaper/goBack`。实测 `shared/shell` 现零 iframe
+  ⇒ 今日无落点，属一次性加固窗口（androidx.webkit 1.17 的 origin-scoped 重载）。
+
+### 5.2 SH（shared 壳层与契约）
+
+- Q11 R9-SH-1 | P2 | `contracts/schemas/release.schema.json:12` 与
+  `contracts/schemas/version.schema.json:12` 的 SemVer pattern 仍是旧宽松式（接受
+  `2.2.0-01`、`2.2.0-beta.`、`2.2.0-..`），PY-279 只收紧了
+  `contracts/schemas/update-manifest.schema.json:26`；而 `release/update_verifier.py:44-53`
+  对这些抛 UpdateRejected ⇒ 发布声明说合法、客户端验证器判非法。两张 schema 零向量
+  （PY-013 的向量面只覆盖 4/7）。
+- Q12 R9-SH-2 | P2 | `tests/ui-regression/start_a11y.test.mjs:25-30` ↔
+  `tests/ui-regression/start_page.test.mjs:443-453` ↔ `shared/shell/start.css:244-258,324,353`：
+  `mediaBlock()` 把「媒体块」切成「本 at-rule 到下一个 `@media`」而非闭合 `}`，切片
+  5313/19189 字符，含块外的 `.veil-btn {`（:324）与 `.engine-item:focus-visible`（:353），
+  且不剔注释（块内注记 :245-247 原文就写着 `.engine-item`）。**内存态注入实证**：从
+  `start.css:248` 的选择器列表摘掉 `.engine-item, .veil-btn`（即回退 R8-SH-13 半个修复），
+  新锁与旧锁 WB-142 双双仍绿；整块退回 40px 形态才红。
+- Q13 R9-SH-3 | P2 | `tests/ui-regression/start_main.test.mjs:313`：注释写「触发按键不得
+  选中引擎（仅 Enter/Space）」，实体是一行 `assert.ok(true)`——零判定，而 `makeHost()`
+  已提供 `state.engineCalls` 却未取用。
+- Q14 R9-SH-4 | P3 | `tests/ui-regression/start_page.test.mjs:403-405`：
+  `SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"))` 在 indexOf 返
+  `-1` 时退化为全文扫描，而 `if (!isOpen) return;` 在 `shared/shell/start.snake.js`
+  出现 2 次（:449 keydown 与触摸处理器）⇒ 实测删除全部 document keydown 注册后仍绿
+  （WB-133 的锁）。
+- Q15 R9-SH-5 | P2 | `contracts/policy/action-catalog.yaml:14-35` 声明
+  `risk/read_only/confirmation/audit/redteam_fixtures`，而 `agent/broker.py:178-190,278-283,366`
+  裁决只读 `name/scope/budget(+default_deny/policy_version)` ⇒ `confirmation` 一列是装饰；
+  `contracts/codegen/analyze_action_catalog.py:93-95` 只断 `redteam_fixtures` 非空。
+  出厂两条 action 皆只读 ⇒ 今日零行为变化（如实写明）。
+- Q16 R9-SH-6 | P2 | `contracts/policy/public-suffix-list.txt`（79 条，自述「三端唯一权威」）
+  缺 `com.jp`（而 co/ne/or/go/ac.jp 都在）、`web.app`、`firebaseapp.com`、`workers.dev`、
+  `wordpress.com`、`squarespace.com`、`bitbucket.io`；`core/rust-policy-core/src/shield.rs:139-147`
+  未命中即返回后两段 ⇒ 表外托管域整域共享站点键（`a.web.app` 与 `b.web.app` 同键）。
+  对账门禁只比三副本与表，**永不判表本身完备**。
+- Q17 R9-SH-7 | P2 | `contracts/codegen/verify_contract_compatibility.py:62-64,257-259,214`：
+  `DESIGN_NOTATION_MIRRORS` 的 6 个名字恰等于生成镜像全集（两目录各 6 份）⇒ `:257` 一律
+  continue、`:259` 的 `_has_real_consumer` 现树不可达；实测 ApprovalContract /
+  AuditEventContract / CapabilityContract / UpdateManifestContract / VersionContract 在
+  main 源码零真实引用（`VersionContract` 全树零引用）。**第八轮 R8-SH-08 重 derive 成功
+  且仍未闭**（该轮只留了计数）。
+- Q18 R9-SH-8 | P3 | `shared/shell/start.main.js:165-167` ↔ `shared/shell/start.js:41-49`：
+  init 路径的 `getEngine` null 回包既不渲染也不 `bridgeError`（csCall 的惰性 TTL 清扫只在
+  下一个请求时触发）⇒ 引擎胶囊永停在 `start.html:38` 硬编码「百度」且零痕迹；对照 WB-138
+  已为书签做了 null/[] 分流。
+- Q19 R9-SH-9 | P3 | `shared/shell/start.js:93-98`、`shared/shell/start.html:38`、
+  `android/.../SearchEngines.kt:36,45`、`windows/.../UrlNormalizer.cs:21,50` ↔
+  `scripts/verify_cross_end_lists.py`：引擎 **key 集合**已五端对账，但「默认引擎值」与
+  「展示名」两份元数据 4 处手抄零判据 ⇒ 换默认值/改中文名只落一处不会红。
+- Q20 R9-SH-10 | P3 | `contracts/vectors/capability-invalid.json` 第 2 条 note 称「schema
+  minItems 未设——本向量按用户语义拒绝」，而 `contracts/schemas/capability.schema.json`
+  已设 `minItems: 1`（`validate_vector_schemas.py:170-171` 对该文件不设语义豁免）⇒
+  拒绝理由就是 minItems，注记是失实陈述。
+- Q21 R9-SH-11 | P3 | `contracts/vectors/native-navigation-confirmation.json:2,12-15` ↔
+  `native-navigation-decision.json:2-3`：同一原生 ABI 的两份向量信封不一致（前者只有
+  `protocol`、无 `version/description`；期望字段名 `expected_request` /
+  `expected_request_code` vs `expected_evaluate` / `expected_deny_code`），且仅
+  `core/rust-policy-core/src/c_abi/tests/vectors_confirmation.rs` 一份消费者（C#/Kotlin 零）
+  ⇒ 属 B9 词表入冻结面的余量，需定稿。
+
+### 5.3 CS（Windows 正典）
+
+- Q22 R9-CS-1 | P2 | `windows/src/Aegis.Windows.App/Chrome/InPrivateWindow.xaml.cs:135-164`：
+  无痕窗 `CoreWebView2InitializationCompleted` 回调体（`BindVirtualHosts`→`runtime.OnCoreReady`
+  （内含 `WireEvents`→`RegisterSession`：会话池 1024 满即抛 / `WebView2Hardening.Apply` /
+  `AddWebResourceRequestedFilter` COM）→`WireNtpBridge`→首次 `Navigate`）**未包**
+  `TabRuntimeLifetime.RunCoreReadyFailClosed`，而主窗同段已包
+  （`Chrome/MainWindow.Tabs.CoreReady.cs:40`、`Chrome/TabRuntimeLifetime.cs:57`，
+  R8-CS-SEC-07）。该回调在 `CreateRuntime` 的 try/catch **之外的独立 dispatcher 派发**中
+  执行 ⇒ 抛出无观察方，冒到 `App.xaml.cs` 全局弹窗（3/30s 后静默）并留下一个已挂载可见
+  但未接线的标签；`RegisterSession` 成功后任一步抛出还会让会话在池中泄漏（拆除只在主窗
+  `CloseTab` 里）。`CoreReadyFailClosedTests` 仅锚 MainWindow，无 InPrivate 对偶锚。
+  非策略 fail-open（`_wired` 末位置位 + `IsWired` 仍挡后续导航）。
+- Q23 R9-CS-2 | P2 | `windows/src/Aegis.Windows.App/Chrome/MainWindow.SourceViewer.cs:29-38,71-75`：
+  查看源码（Ctrl+U）的带外抓取 ①不设 `AllowAutoRedirect=false`、落地也不对**最终** URI
+  复查 `ReservedAddressBoundary` ⇒ 敌意页 302 跳 `169.254.169.254` 照跟（同仓
+  `Core/Favicons/FaviconService.cs:46` 显式关重定向、`Core/Security/ThreatFeed.cs` 复查
+  final-uri，唯此出口两者皆无——保留地址边界「四类出口单源」之外的第五类带外 fetch）；
+  ②`ReadAsByteArrayAsync` 先整读进内存再比 `SourceMaxBytes` ⇒ 无 Content-Length 预检的
+  大响应可 OOM。响应只回显给用户、页面读不到 ⇒ 非逃逸级，但「把内网/元数据内容递给被
+  诱导读源码的用户」不该发生。
+- Q24 R9-CS-4 | P3 | `windows/src/Aegis.Windows.App/WebView/HostWebView.cs:332-336`：
+  每个放行下载 `_trackedDownloads.Add(operation)`，完成**不移除**（仅 `UnwireEvents` 里
+  `Clear`）⇒ 长会话累积已完成 `CoreWebView2DownloadOperation` COM 引用，`StopLiveTraffic`
+  还对已结束项 `Cancel()`（抛→吞）。
+
+### 5.4 RS（Rust 核心）
+
+- Q25 R9-RS-1 | P2 | `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:207` +
+  `android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt:175` ↔
+  `core/rust-policy-core/src/timer_prec.rs:127-140`、`core/rust-policy-core/tests/timer_parity.rs:69-94`：
+  计时防护**挂载形态与通道集**三端不同口径——两端把包装装在 `performance` **实例**上且
+  descriptor 写死 `writable:false, configurable:false`，核心按 RS-216/RS-250 装在
+  `Performance.prototype` 并保留原生 descriptor。后果：出货的 Windows/Android 制品里
+  一行 `Performance.prototype.now.call(performance)` 即取**无降噪 µs 精度时钟**，一行
+  `hasOwnProperty.call(performance,'now')` 即检出防护存在；且 mark/measure/getEntries*/
+  rAF/`Event.timeStamp`/`timeOrigin` 六条高解析通道两端零包裹（核心全裹，
+  `getEntriesByType` 在两端主源码零命中）。第十二节 B2 余量段「三端一致地如此」在此出口为假。
+- Q26 R9-RS-2 | P2 | `core/rust-policy-core/bindings/aegis_policy_core.py:1399`（入库生成物
+  由 2026-10-03 `495a49c` 产出，不含 2026-10-04 `607d7a1` 新增的 `#[uniffi::export]
+  update_host_denylist`）↔ `core/rust-policy-core/src/ffi/broker.rs:331` ↔
+  `.github/workflows/core-rust.yml:57-63`：「绑定由锁定 toolchain 单源生成」目前只由一个
+  `test -s` 非空断言守着，判的是刚写出的文件、不比漂移 ⇒ 导出面少一个方法在任何门禁里
+  都不红；且该 `.py` 全仓零消费者。建议：删这份无人消费的入库件，或把 `test -s` 换成
+  「重生成 + 与入库件 diff」。
+- Q27 R9-RS-3 | P3 | `core/rust-policy-core/Cargo.toml:41-44`：注记写「getrandom 0.2→0.3，
+  0.3 为当前主线」而实际 pin 是 `getrandom = "0.4"`；又写「ed25519-dalek 经 rand_core 0.6
+  仍消费 getrandom 0.2」，`Cargo.lock` 实为 rand_core 0.9.5 + getrandom 0.3.4
+  （ed25519-dalek 3.0 / curve25519-dalek 5.0）⇒ 下一批依赖决策按注记推断会取错对象。
+- Q28 R9-RS-4 | P3 | `core/rust-policy-core/src/https_only.rs:89-125`、
+  `src/update_manifest.rs:170-309`、`BridgeGuard::inject_script`：三个策略面在 13 个冻结
+  导出符号里**零入口**、两端零消费，而 `README.md:15,71` 仍把「Ed25519 阈值验证」列为
+  核心裁决面；`HttpsOnlyState::upgrade` 判的是运营者手工白名单，**不含** B8 的回环/
+  RFC1918/CGNAT/`.local` 段豁免 ⇒ 一旦按「迁移到核心」接线，`http://192.168.1.1` 立刻被
+  升 https（R8-AD-01 原形态复现）。②建议模块头标「非 B8 判据载体」；①③补导出即改 ABI ⇒ 待定稿。
+- Q29 R9-RS-5 | P3 | `core/rust-policy-core/src/c_abi/tests/buffer_boundaries.rs:157-203` ↔
+  `windows/src/Aegis.Windows.App/Broker/NativePolicyCoreBridge.DenylistPush.cs:102-131`：
+  ⑨ 的四档位协议在 Rust 侧只端到端跑了 0/1，应答字段 `mode/staged/served` 在 Rust 全测试树
+  **零断言**（只产出，`src/c_abi/navigation.rs:288-297`），`denylist_mode_invalid` 亦无 ABI
+  层用例；而 C# 的提交判定正依赖这三字段（`commit.Staged/Accepted` →
+  `denylist_commit_refused`），且那 8 例跑在假核心上、真 DLL 用例不在必需检查（R8-CI-18）
+  ⇒ 核心改名/丢字段在 PR 面永不红。
+- Q30 R9-RS-6 | P3 | `core/rust-policy-core/src/security_policy.rs:233-275` +
+  `src/security_policy/tests/scheme_and_host_predicates.rs:94-105`：`is_high_risk_host` 是
+  `pub` 且签名不体现「入参须已剥端口」这条硬不变量，`169.254.169.254:8080` 判**低危**
+  并被 `:101` 钉成期望值，安全全靠 `policy_host_of` 单点纪律（`src/ffi/broker.rs:124`）
+  ⇒ 未来任一新增调用点忘记剥端口即静默放行元数据端口的非默认端口形态，且无红可看。
+- Q31 R9-RS-7 | P3 | `core/rust-policy-core/tests/canvas_read_channels.rs:101-114`：对两端
+  只查 5 段片段，不查 `pixels.length === width*height*4` 与两条 `aegisNoiseRectangle`
+  调用行 ⇒ 端上删掉 8 位 RGBA 守卫不会红（B2/⑦ 本体一致，此为测试余量）。
+
+### 5.5 DOC（文档 vs 实树）
+
+- Q32 R9-DOC-01 | P2 | `README.md:35-37` 仍写「**仍待裁决**：Android 侧 http 一律升 https
+  且 `cleartextTrafficPermitted=false`，内网 IP 字面量实际仍不可达（§七 2）；子资源策略链
+  异常时的失败闭合方向（§七 5）」——两项均已定稿并落地：`LocalTargetHosts.kt` 存在、
+  `android/app/src/main/res/xml/network_security_config.xml:34-41` 有有界
+  `cleartextTrafficPermitted="true"` 且显式列 `192.168.1.1`、Windows 侧
+  `WebView/HostWebView.WebResourceGuards.cs:37,102` 有 `SubresourceDenialFailClosed`。
+- Q33 R9-DOC-02 | P2 | `docs/adr/ADR-007-canonical-stack-and-single-source-guards.md:50`
+  写「**C#**：无注入 JS（走 WebView2 Settings 收紧），不在本门禁范围」，实测
+  `windows/src/Aegis.Windows.App/WebView/WebView2Hardening.cs:77` 调
+  `AddScriptToExecuteOnDocumentCreatedAsync(FingerprintShield.BuildScript(…))`；
+  `README.md:43`、`SECURITY.md:34` 均已改称「C# 的文档创建前注入面」。缺的是**该面未纳入
+  bridge_guard 对账**，不是「无注入面」。
+- Q34 R9-DOC-03 | P2 | 同文件 `:57-58` 写「门禁型 workflow（android-quality/contracts/
+  core-rust/agent-redteam/supply-chain/ci）移除全部 `paths:` 过滤」，py-yaml 实测
+  `push.paths`：`ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11，只有
+  `android-quality`/`contracts` 真无过滤 ⇒ 未列路径的改动静默不触发即被判「门禁已过」
+  （R8-SH-10 只处理了 `ci.yml` 一处）。
+- Q35 R9-DOC-04 | P2 | `docs/architecture-overview.md:91-100` 声明「16 workflow 分层」但
+  分解为 6+1+2+2+4=**15**，依赖面只列 `gradle-dependency-graph`/`gradle-dependency-insight`、
+  漏 `dependency-relock.yml`（`:151` 又说 16）⇒ `check_doc_claims.py` 只比裸数字
+  （正则 `N workflow`），本条全绿而清单少一整面。
+- Q36 R9-DOC-05 | P2 | `docs/product/feature-parity-checklist.md:22` M1 行「ESM（探测启用）…
+  ☑（SDK 未暴露 API——反射探测，**升级自动生效**）」已被
+  `windows/src/Aegis.Windows.App/WebView/WebView2Hardening.cs:34-42` 就地反证（R8-DEPS-1：
+  两版 stable DLL 对 `EnhancedSecurityModeState` 均 0 命中，ESM 只在 `-prerelease`）。
+- Q37 R9-DOC-06 | P2 | `docs/runbooks/device-validation.md:33` Android 第 4 步预期写
+  「经 **broker** 判定（MIME/最终 URL/size/目录）」，实测链是
+  `WebViewDownloadHandler.kt:113-114` 的 `WebViewDownloadTargetGuard`（scheme/保留地址）
+  + `DownloadPolicy` 扩展名判定（grep mime|size 零命中、不经 `AndroidBroker`）⇒ 按现文
+  执行会把「无 size/目录门禁」记成通过；而**已落地**的 #130 下载层保留地址硬拒反而没有任何
+  真机步骤。
+- Q38 R9-DOC-07 | P2 | 同文件 `:20` Windows 第 7 步未写启用前置：
+  `WebView/NavigationConfirmationGate.cs:14-22` 只认 `AEGIS_REQUIRE_NAVIGATION_CONFIRMATION=1`
+  或注册表，而 `docs/release/AegisSetup-CSharp.iss:73` 注明该标记**刻意不写**（只写
+  `RequireNativePolicyCore`，:79）⇒ 唯一发布制品上面板永不出现，验证人会「看不到面板」
+  而误判缺陷，或凭 UI 存在与否签一个无证据的通过（§十一 第 5 类「结论无证据」）。
+- Q39-Q46 R9-DOC-08..15 | P3 | 八条：`docs/runbooks/windows-run-guide.md:63-66` 写「真机验证
+  **10 项**」并枚举 10 个名称，漏第 11 步（R8-CS-SEC-03 的唯一实测出口）；`README.md:43` 与
+  `SECURITY.md:34` 引 `WebView2Hardening.cs:70` 而该行是空行（实调在 :77）；
+  `README.md:146-147`「五门禁常绿」vs `contract-source-of-truth` 约 17 个步骤，且
+  `CLAUDE.md:51-54` 是第三个子集；`docs/product/privacy-defaults.md:13` 引
+  `credential_guard`（只存在于 `legacy/windows-pywebview/app/`，正典全树
+  CredentialGuard/ProtectedData/DPAPI/KeyStore 零命中，:12 已诚实写「未落地」而 :13 未同步）；
+  `android/README.md:7-13` 把「Room 历史/书签、Android Keystore、同步协议」列为**发布前强制
+  控制**而实树零命中且 `supported-features.md:30-31,47` 明写「零 bookmark 引用 / 明确不做」；
+  `CONTRIBUTING.md:52`「master 受保护、禁止直接推送」与本仓历史直推（`d898677`、`3243397`）
+  及第八轮 §5.2 实测 `enforce_admins=false` 相反（**只改文档，不动服务端设置**）；
+  `docs/product/feature-parity-checklist.md:73`「本清单 100%」与同文件 `:24` 唯一未勾验项
+  自相矛盾（§十三 只改了 CLAUDE/README/supported-features 三处）；`README.md:145,151-153`
+  测试计数「cargo 450+ / dotnet 650+ / pytest 230+」与实测
+  （`grep '#\[test\]'`=589、Core.Tests `[Fact]+[InlineData]`=718、
+  `grep -c 'def test_'` 461+53、UI 回归 138）双向失真。
+
+## 六、复核后判定为不成立（留此防重复上报）
+
+- pwsh 步骤「`python` 之后接 `echo` 即吞失败」**不成立**：`$ErrorActionPreference='stop'` +
+  末行 `exit $LASTEXITCODE` 形态下原生命令失败仍返回非零（实测），故
+  `compat.yml:64-67`、`release-windows.yml:138-149,219-221` 均正确失败，
+  `check_workflow_shells.py:123` 的「末条原生命令」前提成立。
+- `git diff --exit-code -- <path>` 在 pathspec 不存在时恒返回 0（实测）——但
+  `contracts.yml:135,138-141` 三处路径实树均存在，非现行缺陷。
+- `shared/shell/manifest.txt` 被清空/缺文件的担忧不成立：`validate_release.py:127-152`
+  双向差集已在常跑面兜住，pwsh 侧 `ErrorActionPreference=stop`。
+- `release-core.yml:94-95` 的 `cp … || true` 是已注明的非本平台产物 best-effort；
+  `gradle-dependency-insight.yml:87` 的 `|| true` 属 dispatch-only 诊断工具（头注声明不进门禁）。
+- 27 处 `ubuntu-latest` 未钉本身是第八轮 §八 已接受项；R9-CI-8 只反证其**豁免理由**
+  （出货 Android 的 `.so`+APK 恰在未钉版 ubuntu runner 构建，`release-android.yml:47`、
+  `release-core.yml:62`），该条本批未实施（改钉版属构建面变更，单独定）。
+- SH 分区正面核验（不报即闭环）：`shared/shell/*` 与宿主端**零逐字副本**（全树 md5 比对
+  命中 0；Android 经 `android/app/build.gradle.kts:218` 的 `srcDir(../shared/shell)` 直取，
+  Windows `dist/` 未入库、`git ls-files dist`=0）；版本四处字面量由
+  `scripts/verify_versions.py:37-43` 对账；`contracts/policy/bridge-sinks.yaml` 的 sink
+  权威迁移是真的（含模板与 Kotlin 副本双向锚）；node UI 回归 110 例 + snake 30 例本机实测全绿。
+- CS 分区交叉核对：csproj ↔ 三把 `packages.lock.json` 的 `resolved` 全部 = 显式钉的 2.1.13
+  （锁里 `2.1.12` 只出现在 `Microsoft.Data.Sqlite` 的 dependencies 声明段=上游自述下限）
+  ⇒ **R8-DEPS-3 确为真闭环**；同步 DNS/`GetAwaiter().GetResult()` 均在后台线程，UI 线程
+  无阻塞；`RejectNavigationConfirmation` 无 KillSwitch 前置属方向正确的 fail-closed，非缺陷。
+- RS 分区交叉核对：`rust-toolchain.toml` 1.99.0 与 9 处 workflow 字面量逐处对齐、nightly
+  例外恰好一处（#124 一族成立）；canvas 三端 `aegisNoiseMix`/绝对序号/`BYTE_RGBA_GUARD`
+  实质一致（B2/⑦ 成立），余量见 Q31；R8-RS-13（`hex_seed_to_bytes` 先 `with_capacity(len/2)`
+  后判长度、uniffi 面 `update_host_denylist(Vec<String>)` 无条目数上限）**仍未修**，
+  同于第八轮登记，不另立 ID。
+
+## 七、COVERAGE 汇总（置信边界）
+
+六个分区全部返回并各自给出未读清单，共同形态是：**主源集全读、测试面按抽样、生成物与
+归档栈不入面**。因此本轮结论的适用范围以各条 `文件:行号` 为限：
+
+- AD：`android/broker/src/main/**` 与 `app/src/main/java` 策略面全读；24 个 `app|broker/src/test`
+  文件未逐行 → 凡依赖「某路径全树无测试」的判断（Q1/Q5/Q6）已改写为「已读到的用例形态为 X」。
+- CI：16 个 workflow 与 4 个 composite action 全读；`scripts/` 余 11 个脚本正文、
+  `contracts/codegen/*.py`、`tests/python` 余 22 个测试文件未逐行（Python 门禁的逐行掏空面
+  本轮未展开，不声称全覆盖）。
+- SH：`shared/shell/*`、9 份 UI 回归、6 张 schema、3 份 policy 全读；codegen 脚本正文、
+  `contracts/vectors/*` 逐文件键与条目计数 + 3 份 invalid 全条目。
+- CS：`Chrome/`、`WebView/`、`Broker/`（判据文件）、`Core/UrlSafety` 等全读；
+  `Core/` 展示与存储层及多数 xunit 测试仅抽样。
+- RS：核心裁决链上的模块全读；`policy/capability/action_policy/…` 等 17 个模块按引用扫描
+  确认不在导航链上后让位给注入链取证。
+- DOC：四份根文档 + ADR 全量 + product/runbooks 全读；`docs/threat-model/*` 与 10 份设计/
+  调研稿未读（仅机扫其 `file:line` 与锚点）。

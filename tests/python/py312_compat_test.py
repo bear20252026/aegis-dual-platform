@@ -14,6 +14,7 @@ import active_tree_gates as atg
 import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
+ACTIONS_DIR = REPO / ".github" / "actions"
 
 
 def _write(tmp_path: pathlib.Path, name: str, body: str) -> pathlib.Path:
@@ -117,3 +118,22 @@ def test_ci_pinned_apis_are_not_false_positives():
     ]
     for body in allowed:
         assert not any(re.search(pattern, body) for _, pattern, _ in atg.HIGH_VERSION_APIS), body
+
+
+def test_compat_surface_includes_composite_actions(capsys):
+    """R9-CI-5：`.github/actions/*/action.yml` 里的内嵌 python 必须在面内。
+
+    `check_workflow_shells.py` 第七轮就把 composite action 纳进了 pwsh 面，而 compat
+    只到 `workflows/*.yml`——两个「workflow 结构类」门禁覆盖面不一致，R8-CI-21 记的
+    「同一缺陷的第二次发生」第三次就落在 prepare-geogebra 的两个 heredoc 上。"""
+    assert atg.run_compat() == 0
+    out = capsys.readouterr().out
+    assert "composite action" in out, f"扫描面里没有 composite action 一栏: {out}"
+    assert (ACTIONS_DIR / "prepare-geogebra" / "action.yml").is_file(), "本锚的前提已失效"
+
+
+def test_planted_313_api_inside_action_yml_is_detected(tmp_path):
+    body = '        x = p.re' + 'ad_text(encoding="utf-8", newline="")\n'
+    path = _write(tmp_path, "action.yml", body)
+    problems = atg.compat_violations([path])
+    assert any("需 3.13+" in p for p in problems), problems
