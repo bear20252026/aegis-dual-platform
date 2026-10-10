@@ -23,6 +23,13 @@ cd ../..
 > WB-065（审计 2026-09-23 清单·W5 批）：补 dotnet test——运行验证前两套件
 > 必须全绿（此前本指南只有 build，缺回归验证环节）。
 
+> R9-CI-9（第九轮 2026-10-10）：「全绿」在 CI 里还多一层含义——八处 `dotnet test`
+> 除退出码外都断**发现数下界**（Core ≥700、Broker ≥160）。退出码只说「跑到的都没失败」，
+> 一个都没发现时同样退 0，所以本地要复现同一判定得让命令落 TRX：给 `dotnet test` 补
+> `--results-directory TestResults/core --logger "trx;LogFileName=core-tests.trx"`，
+> 再回仓库根跑
+> `python scripts/assert_test_counts.py --results-dir TestResults/core --minimum 700 --label Core`。
+
 ## 二、运行（本地启动 Aegis.Windows.App——GUI，仓库根执行）
 
 ```bash

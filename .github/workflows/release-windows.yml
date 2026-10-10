@@ -131,10 +131,16 @@ jobs:
           # SP-177：RestoreLockedMode 消费 packages.lock.json（NuGet 传递依赖锁定）
           # R7-TOOL-01：两条 dotnet test 必须各自断退出码——它们原先被后面的
           # `dotnet publish` 吞掉（步骤退出码取末条原生命令）。
-          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          dotnet test windows/tests/Aegis.Windows.Core.Tests/Aegis.Windows.Core.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/core-release --logger "trx;LogFileName=core-release.trx"
           if ($LASTEXITCODE -ne 0) { throw "Core.Tests 失败（exit $LASTEXITCODE）——禁止在未通过测试上发布正典制品" }
-          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true
+          # R9-CI-9（第九轮 2026-10-10）：同一判据在发布链上也要成立——正典制品
+          # 不能建立在「零发现的全绿」上。
+          python scripts/assert_test_counts.py --results-dir TestResults/core-release --minimum 700 --label Core-release
+          if ($LASTEXITCODE -ne 0) { throw "Core.Tests 发现数下界未达成（exit $LASTEXITCODE）——禁止发布" }
+          dotnet test windows/tests/Aegis.Windows.Broker.Tests/Aegis.Windows.Broker.Tests.csproj --configuration Release -r win-x64 -p:RestoreLockedMode=true --results-directory TestResults/broker-release --logger "trx;LogFileName=broker-release.trx"
           if ($LASTEXITCODE -ne 0) { throw "Broker.Tests（授权链/原生桥面）失败（exit $LASTEXITCODE）" }
+          python scripts/assert_test_counts.py --results-dir TestResults/broker-release --minimum 160 --label Broker-release
+          if ($LASTEXITCODE -ne 0) { throw "Broker.Tests 发现数下界未达成（exit $LASTEXITCODE）——禁止发布" }
           dotnet publish windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj `
             --configuration Release `
             --runtime win-x64 `
