@@ -30,6 +30,8 @@ public partial class InPrivateWindow : Window
         killSwitch: KillSwitch.Shared);
     private readonly TabManager _tabs = new();
     private readonly Dictionary<string, TabRuntime> _runtimes = new();
+    // 第九轮定稿项 5：页面发起的新窗口走单源闸门（地址边界 + 同源标签洪水限流）
+    private readonly Core.NewTabGate _newTabGate = new();
     private TabRuntimeCoordinator _runtimeCoordinator = null!;
     // CS-295（2026-09-26 审计）：导航确认面板控制器（与主窗同款——确认门下
     // 此前本窗口零订阅 NavigationConfirmationRequested，导航被静默取消）
@@ -184,13 +186,15 @@ public partial class InPrivateWindow : Window
             runtime.NavigationDenied += msg => Dispatcher.BeginInvoke(() => ShowRejection(msg));
             // CS-292（2026-09-26 审计）：target=_blank/window.open 链接——主窗有
             // 订阅而无痕窗此前零订阅（HostWebView 一律 Handled 后转发，无人接
-            // 收即点击无任何反应）；与主窗同口径：公网/本机地址放行新建标签
+            // 收即点击无任何反应）。判定与文案单源 Core.NewTabGate（地址边界 +
+            // 同源标签洪水限流），与主窗共用同一实例类型——不再两处各写一份。
             runtime.NewWindowRequested += targetUrl =>
             {
-                if (!CanOpenNewWindowLink(targetUrl))
+                var decision = _newTabGate.Decide(tab.TabId, targetUrl, Environment.TickCount64);
+                if (decision != Core.NewTabGate.NewTabDecision.Open)
                 {
                     Core.Security.SecurityLog.Write(
-                        $"[inprivate] 已拒绝打开新窗口链接（链路本地/云元数据/保留地址）: {Core.Security.UrlRedactor.Redact(targetUrl)}");
+                        $"[inprivate] {Core.NewTabGate.RejectionFor(decision)}: {Core.Security.UrlRedactor.Redact(targetUrl)}");
                     return;
                 }
                 _tabs.NewTab(targetUrl);
@@ -355,12 +359,6 @@ public partial class InPrivateWindow : Window
     }
 
     private void CloseWindow_Click(object sender, RoutedEventArgs e) => Close();
-
-    /// <summary>CS-292：新窗口链接放行判定（与主窗 NewWindowRequested 同口径）。
-    /// 提纯 internal 直测——协议合法且不在保留地址边界内即放行（R8-CS-SEC-06：
-    /// 此前判「公网或本机」，把 B8 裁决要求能打开的内网设备一律拒掉）。</summary>
-    internal static bool CanOpenNewWindowLink(string? url) =>
-        Core.UrlSafety.CanOpenHttpUrl(url);
 
     // —— CS-295：导航确认面板（控制器逻辑与主窗共用单源） ——
 

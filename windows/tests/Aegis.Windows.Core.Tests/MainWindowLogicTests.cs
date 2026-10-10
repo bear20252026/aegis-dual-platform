@@ -48,23 +48,33 @@ public sealed class MainWindowLogicTests
     public void NextIndex_CyclesAndClamps(int current, int direction, int count, int expected) =>
         Assert.Equal(expected, Aegis.Windows.Chrome.MainWindow.NextIndex(current, direction, count));
 
-    // ===== C19b 批（审计 2026-09-26）：CS-292 无痕窗口新窗口链接判定 =====
+    // ===== C19b 批（审计 2026-09-26）：CS-292 新窗口链接判定 =====
+    // 第九轮定稿项 5：判定与文案单源 Core.NewTabGate——此前主窗内联一份、
+    // 无痕窗另有一份 CanOpenNewWindowLink（靠这条用例证明两者同口径）。
+    // 现在两窗调用同一个方法，"同口径"由构造保证，本用例改钉该单源的向量。
 
     [Theory]
     [InlineData("https://example.com/page", true)]     // 公网放行
     [InlineData("http://127.0.0.1:8080/dev", true)]    // 本机放行（本地开发）
     [InlineData("http://localhost/x", true)]           // 本机域名放行
     [InlineData("file:///C:/Windows/system32", false)] // 非导航协议拒绝
-    [InlineData("javascript:alert(1)", false)]        // 脚本协议拒绝
+    [InlineData("javascript:alert(1)", false)]         // 脚本协议拒绝
     [InlineData("http://192.168.1.1/admin", true)]     // 内网设备放行（B8 裁决）
     [InlineData("http://169.254.169.254/latest/meta-data/", false)] // 元数据拒绝
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("not a url", false)]
-    public void InPrivateCanOpenNewWindowLink_MatchesMainWindowPolicy(string? url, bool expected)
+    public void NewTabGate_AddressBoundaryVectors(string? url, bool expected)
     {
-        // CS-292：无痕窗口 target=_blank 订阅此前缺失（点击无反应）——放行
-        // 判定与主窗口 NewWindowRequested 同口径（UrlSafety.CanOpenHttpUrl）
-        Assert.Equal(expected, Aegis.Windows.Chrome.InPrivateWindow.CanOpenNewWindowLink(url));
+        var decision = new Aegis.Windows.Core.NewTabGate()
+            .Decide("tab-1", url, 1_000_000L);
+        Assert.Equal(expected, decision == Aegis.Windows.Core.NewTabGate.NewTabDecision.Open);
+        if (!expected)
+        {
+            // 边界拒绝的文案必须带 reserved_address（拒绝码单源，B4「可见拒绝」口径）
+            Assert.Contains(
+                Aegis.Windows.Broker.ReservedAddressBoundary.DenyCode,
+                Aegis.Windows.Core.NewTabGate.RejectionFor(decision));
+        }
     }
 }

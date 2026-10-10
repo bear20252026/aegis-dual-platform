@@ -75,15 +75,15 @@ public partial class MainWindow
             if (tab.TabId == _activeTabId)
                 ShowRejection(message);
         };
-        // target=_blank / window.open 链接：不再静默丢弃，改为验证地址后
-        // 在当前窗口新建标签打开（对齐主流浏览器）。放行面 = 保留地址边界
-        // 之外（R8-CS-SEC-06 与第七轮 B8 裁决合一：本机与内网必须能打开，
-        // 故 192.168/10/172.16 与 my-nas.local 这类目标不再被该通道拒）。
+        // target=_blank / window.open：验证地址后新建标签（CS-292）再过 NewTabGate 洪水
+        // 限流（同源标签 10 秒 ≤3 次）——此前 Windows 侧没有任何标签数上限，一句循环
+        // window.open 即可耗尽宿主。地址口径不变（R8-CS-SEC-06∩B8：内网必须能打开）。
         runtime.NewWindowRequested += targetUrl =>
         {
-            if (!Core.UrlSafety.CanOpenHttpUrl(targetUrl))
+            var decision = _newTabGate.Decide(tab.TabId, targetUrl, Environment.TickCount64);
+            if (decision != Core.NewTabGate.NewTabDecision.Open)
             {
-                ShowFeedback("已拒绝打开该链接（链路本地/云元数据/保留地址）", isWarning: true);
+                ShowFeedback(Core.NewTabGate.RejectionFor(decision), isWarning: true);
                 return;
             }
             _tabs.NewTab(targetUrl);
