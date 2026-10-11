@@ -962,7 +962,16 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 3. 本机验证：`dotnet test` Core **832/832**（下界 700）、Broker **189/189**（下界 160），
    `assert_test_counts.py` 两侧 ✅；`check_file_sizes.py` ✅（四个改动/新增文件均在 300 行内、
    基线无变动）；`packages.lock.json` 零漂移。
-4. 刻意**没有**照抄的审计处方，全部回述进第四节而不是静默丢弃：AX-02（把
+4. **三处故障注入实测**（新锁必须能判红，注入前已先提交，还原用 `git checkout --` 回到含修复的
+   提交而非 master）：① 把 `DeliverDenial` 改回「escalate 与 tryDeliver 同一个 try」的直觉写法 ⇒
+   `DeliveryThrowing_StopsTheNavigationToo` 判红（正是审计点名的形态：交付抛出后连升级都跳过）；
+   ② 把 handler 改回旧形态 `try { e.Response = CreateWebResourceResponse(...) } catch { 只写日志 }` ⇒
+   结构锚 `HandlerRoutesUndeliverableDenialsToAStopNotJustALog` 与既有
+   `SubresourceFailClosedTests.MoveDidNotNarrowTheExistingDenialSurface` 一起判红（后者因
+   `CreateWebResourceResponse(` 计数从 1 变 2）⇒ 两条锁互相补位；③ 把 `NtpBridge` 的开关读取
+   改成构造时快照 ⇒ `SameBridge_ReChecksAtExecutionTime_NotAtConstruction` 判红（21 绿 1 红，
+   说明这条锚只判它声称判的那一件事）。还原后 31/31 绿。
+5. 刻意**没有**照抄的审计处方，全部回述进第四节而不是静默丢弃：AX-02（把
    `policy.evaluate`/`capability.validate` 接进 FFI 通路——源码注释 `ffi/broker.rs:146-150`
    记的就是这条缺口，但接通它会把「Rust 判 Allow」在端侧放大成什么，是核心裁决语义变更）、
    AX-05/AX-06（原生核心强制启用脱离 HKCU/环境变量与 Android 构建参数——发布门禁与产品策略）、
