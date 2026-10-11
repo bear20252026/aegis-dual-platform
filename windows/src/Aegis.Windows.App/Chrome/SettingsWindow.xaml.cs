@@ -55,6 +55,10 @@ public partial class SettingsWindow : Window
         EngineBox.SelectedValue = _settings.SearchEngine;
         HistoryToggle.IsChecked = _settings.HistoryEnabled;
         ThreatFeedBox.Text = _settings.ThreatFeedUrl;
+        // Q52：打开时把「上次成功更新 / 是否过期」续接在 XAML 那句说明之后——
+        // 直接赋值会把说明抹掉（Join 在状态行为空时原样返回已有文案）。
+        ThreatFeedHint.Text = Core.Security.ThreatFeedCacheStatus.Join(
+            ThreatFeedHint.Text, ThreatFeedStatusLine());
         ThemeBox.SelectedIndex = string.Equals(_settings.Theme, "light", System.StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         SleepCombo.SelectedIndex = SleepIndex(_settings.SleepMinutes);
         ProtectionCombo.SelectedIndex = Clamp(_settings.ProtectionLevel);
@@ -108,8 +112,46 @@ public partial class SettingsWindow : Window
         }
         _settings.ThreatFeedUrl = raw;
         Save();
-        ThreatFeedHint.Text = "已保存；生效于下次启动（导航与子资源拦截）。";
+        // Q52（外部第三轮审计 AEG-008）：旧文案把「要重启才生效」当成既定行为，两件事上
+        // 已经不真——①刷新现在按节拍自己重取并按当前值重新解析源，②保存后这里就发起
+        // 一次立即刷新。保留诚实的一半：立即刷新是后台任务，成败要看日志与缓存时间，
+        // 所以提示只说「已按新源尝试刷新」，并把「上次成功更新」的事实摆出来。
+        // 措辞是静态锚判定的面（ThreatFeedCacheStatusTests 反向钉住旧说法不得回潮）。
+        var kicked = Core.Security.ThreatFeedCoordinator.Active?.RefreshNow() ?? false;
+        ThreatFeedHint.Text = Core.Security.ThreatFeedCacheStatus.Join(
+            raw.Length == 0
+                ? "已清空订阅源：此后不再自动重取，当前名单仍会继续拦截。"
+                : kicked
+                    ? "已保存；已按新源发起刷新。"
+                    : "已保存；将在下一个更新周期内生效。",
+            ThreatFeedStatusLine());
         ThreatFeedHint.Foreground = HintMutedBrush;
+    }
+
+    /// <summary>Q52：订阅源提示位的「上次成功更新 / 是否过期」一行。
+    /// 时间取缓存文件的写入时刻——`FetchAndStore` 只在抓取+校验+落盘全成功后原子替换，
+    /// 所以它就是「最后一次成功」的权威形态，不需要再加一份会漂移的进程内副本，
+    /// 也不必给 AppSettings 加字段（那要同步 SettingsService 快照与两个 XAML 锚）。
+    /// 读文件时间失败当作「无记录」：设置界面绝不因为一句提示崩掉。</summary>
+    private string ThreatFeedStatusLine()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.ThreatFeedUrl))
+            return string.Empty;
+        System.DateTime? written = null;
+        try
+        {
+            if (System.IO.File.Exists(Core.AppPaths.ThreatFeedCachePath))
+                written = System.IO.File.GetLastWriteTimeUtc(Core.AppPaths.ThreatFeedCachePath);
+        }
+        catch (System.Exception)
+        {
+            written = null;
+        }
+        return Core.Security.ThreatFeedCacheStatus.Describe(
+            written,
+            System.DateTimeOffset.UtcNow,
+            Core.Security.ThreatFeedCoordinator.DefaultRefreshInterval
+            * Core.Security.ThreatFeedCoordinator.StaleAfterFactor);
     }
 
     /// <summary>CS-169：提 internal 直测（分钟值 → 下拉索引，非法回退 30 分钟档）。</summary>

@@ -266,7 +266,11 @@ public sealed class CoreDenylistPublisherTests : IDisposable
             {
                 File.WriteAllLines(path, ["refreshed.example"]);
                 return new[] { "refreshed.example" };
-            });
+            },
+            // Q52：本用例只验「启动快照 + 一次刷新」两笔下推。留着默认节拍，
+            // 周期循环会在 broker 被 using 释放之后再 apply 一次——那时它落到的是
+            // 已释放对象，断言看不到，但进程里留下一条永生后台任务。
+            refreshInterval: TimeSpan.Zero);
 
         Assert.True(coordinator.Start());
         await WaitUntil(() => _pushed.Count >= 2);
