@@ -58,6 +58,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | AX-05 / AX-06 | **P1**（外部审计声称，回读确证后保留并落地） | 保留并落地 | 回读确认报告的机制描述属实且比描述更糟：`NativePolicyCoreGate.cs:23-29` 的判定源是「环境变量（只在 CI 那步 shell 里赋值，不随包交付）+ HKCU 标记（普通用户可清除）」，`InstalledBuildMarker.cs:21-25` 甚至自己写着「不能恒真，否则毁掉开发工作流」——于是「不得静默回退到另一套策略实现」这条承诺的实际承载物是一个可删的注册表值；Android 侧 `requireNativePolicyCore` 由构建参数决定，而发布链唯一的锚 （`NativeGateWiringAnchorTest.kt:52-66`）判的是 **workflow YAML 里含不含那行字**，不是编译结果。落地＝要求由**编译进产物**：csproj 的 `GenerateNativePolicyCoreBuildMarker` 目标按 `RequireNativePolicyCore` 生成 `NativePolicyCoreBuildMarker.RequiredByThisBuild`（两条分支都生成，开发构建=false），`Gate.IsRequired` 改三源合一且**构建常量排第一**（纯函数 `ResolveRequirement` 可单测，环境变量仍只认精确 "1"）；发布链改验终物——release-windows 在已发布 dll 的 UTF-16 元数据里找姿态串 `aegis.build.require-native-policy-core=1` 并断言 =0 不出现、并第一次真正打开发布 ZIP 断言 DLL 在里面；release-android 改读 AGP 生成的 BuildConfig（含「找不到生成物即失败」，否则 find 空结果会让后面的 grep 恒真）。**两条实测细节写进注释**：①未被引用的 `const string` 不进元数据（加引用前 grep 命中 0）⇒ App.xaml.cs 那处日志引用是验证手段成立的前提，由测试钉住；②字面量在元数据里是 UTF-16，按 ASCII 找永远 0 命中＝另一种假绿。本机实测两版产物姿态串正确区分。三处文档同步改真（README:23-28、ADR-006:41-45、windows-run-guide:57-68），不留「文档说的≠实树的」。15 例新测试 + Core 832/Broker 204 全绿 |
 | AX-02 / AEG-001 | **P1**（外部审计声称，回读后**属实但处方必须改写**）→ 已落地 | 保留并落地（惰性接入） | 缺口是真的：`ffi/broker.rs` 的 `evaluate_navigation` 只调 `validate_action`（第三层），`ContextBroker::evaluate`（broker.rs:247）才串三层，前两个层在 FFI 通路零调用（`broker.rs` 的 H-7 注记自述）。但**照处方直连会拒掉每一次导航**，两条实测事实：①生产构造是 `PolicyEngine::default()`＝空规则，`ActionPolicy::evaluate_opt` 在无规则匹配时返回 None（`action_policy.rs:110` 的 `let rule = best?;`，默认效果只作用于非 opt 的 `evaluate`）⇒ `PolicyEngine::evaluate` 落 `PolicySource::FailSafe` 的恒 Deny；②`CapabilityRegistry::validate` 对未注册 capability 恒拒绝（`capability.rs:156`）而生产注册表恒空。落地口径＝「该层**没有意见**时不改裁决；一旦配置即生效且其 Deny 不可被后面的 Allow 出口改回允许」（单调加严），接入点在会话验证**之前**。9 例新测试的三条关键：未配置时 FFI 拒绝码必须仍是 `session_not_found`（把 FailSafe 当拒绝直连的话这条第一个红）；同一入参配上 deny 规则后必须变 `policy_denied`（一条同时证明「配置生效」与「排在会话验证之前」）；空注册表必须是「未配置」而非「什么都拒」。`RequireConfirmation` 复用既有 `register_pending_approval`，不开第二份授权账；锁毒化仍 fail-closed。今天没有宿主入口注册规则/能力（`register()` 生产零调用）⇒ 出货行为零变更是**设计结果**，价值是把「裁决链不完整」变成「链已闭合、缺的是配置面」。五处文档撤 H-7 陈述（README×2、CLAUDE.md 模块表、ADR-006、ADR-008×2、ADR 索引）；ABI 面零变更（新增都在非导出 impl 块）；577 lib 测试全绿、clippy `-D warnings` 干净；三个零余量文件靠改写更短注记 + `impl Default` 换 derive 守住基线 |
 | AEG-006 | P1（外部审计声称，回读后**属实但范围改写**）→ 落地为门禁 + 扩面队列 | 保留并落地（判据化） | 报告说「C# 只连部分向量、Kotlin 主要消费 `url-origin-*`」——按 `git ls-files` 的受管源码面逐份实测（543 个文件，命中口径＝词干作为独立词或完整文件名，排除 markdown 与 `META_LEVEL`（按名遍历整个向量目录的工具面，含门禁自己与它的用例））：**15 份向量里只有 2 份真的两端都跑**（`url-origin-valid/invalid`，CS+AD+RS），11 份有端侧执行者，4 份（`capability-*`/`audit-event-*`）**没有任何端侧执行者**、只被 `validate_vector_schemas.py` 判形状/expected。其余单端事实逐条钉进 `scripts/verify_vector_consumers.py` 的 `CONSUMER_MANIFEST`。两点范围改写：①那四份不是「没人判」——它们的 expected 本就是 `valid`/`deny_schema`，schema 就是判据，不能按「契约件白做」处理；②**Agent 端对契约向量的消费为零**（`AG` 在实测分布里一次都没出现），与 R9-SH-5「`action-catalog.yaml` 的 confirmation/risk/audit 三列 broker 不读」是同一件事的两面。落地＝新常驻门禁（登记表双向不变量 + 跨端支点下界 + 端侧执行者下界 + 扫描面塌缩 exit 2）接进 `contracts.yml` 的 PR 面；注入式自证 8 条从 `--self-test` flag **搬进 pytest**（要人主动敲 flag 的自证＝跑不动的判据，R9-SH-7 同课）；扩面工作另登 §五 Q53 |
+| AEG-008 / R9-CS-15 | P3（我登记的原级）→ 用户对 §四 第 9 项说「全部完成」后**落地** | 保留并落地 | 回读确证「仅启动时取一次」属实且**不是**声明与行为不符（旧文案确实明示要重启），所以这是一次行为增强：`ThreatFeedCoordinator` 首刷后进入周期重取（默认 6 小时，节拍/上限/过期倍数三份数字单源在类常量上，界面按 `DefaultRefreshInterval × StaleAfterFactor` 算过期而不是抄一份 18 小时），失败按 2 的幂退避并封顶 24 小时（**只拉长不缩短**——「失败就更快重试」在订阅源 429 时就是自伤），每轮**重读**设置所以改源不需重启，未配置/改成非法值 ⇒ 那一轮零网络活动（原判据不变）。UI 半边把「上次成功更新 / 是否过期」贴上提示位，时间取**缓存文件写入时刻**（`FetchAndStore` 只在抓取+校验+落盘全成功后原子替换，所以它就是「最后一次成功」的权威形态；加字段要同步 SettingsService 快照与两个 XAML 锚，代价远大于收益），保存路径改走 `Active?.RefreshNow()`，旧「要重启才生效」文案连同 XAML 说明句一起撤下并由静态锚反向钉住不得回潮。两条**新出口带来的竞态**是这次改动的实质风险，都已处理并有故障注入锚：①周期循环与「保存即刷」并发 ⇒ 后**完成**的抓取决定最终名单（可能是先发出那个请求的旧结果），加 `_refreshGate` 串行化（改成「已在跑就跳过」会让手动刷新静默失效，不做）；②既有五个用例靠 `await BackgroundTask` 收口防 Dispose 抢缓存文件（CS-350 那笔账），周期化后该任务永不完成 ⇒ 它们必须显式传 `refreshInterval: TimeSpan.Zero`，本类只测启动那一次、周期行为归新用例。坑一条：`TimeSpan.Parse("24:00:00")` 是 **24 天**不是 24 小时（实测断言差值 `24.00:00:00` vs `1.00:00:00`），期望值改成小时数——字符串形态的时间期望值在这里会静默判错一个量级。`MainWindow.xaml.cs`（435 行零余量基线）零改动，调度全在协调器里。本地 Core 859/859、Broker 204/204 全绿（CI 为准）。**残余待裁决**：清空订阅源只停止重取，不解除已生效名单也不删缓存（放松防护的方向）⇒ 新登 §五 Q54 |
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
 
@@ -677,9 +678,16 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      出厂默认都是空名单放行，差别在 Android 连「让用户开启」的地方都没有。补齐＝新_fetch
      →校验→缓存→灌核心 denylist_整条链，要先定源从哪来、谁签、断网时是否保留最后一份
      已验证情报（审计建议保留，方向与 Windows 现实现一致）。属功能排期，不默认执行。
-  9. **Q52 R9-CS-15：威胁情报要不要周期刷新**（外部审计 AEG-008，属实但**已在设置 UI
-     明示**「生效于下次启动」）。改了就是新增后台网络活动，需一并定周期/退避/
-     「最后成功更新时间」上不上 UI。
+  9. ~~**Q52 R9-CS-15：威胁情报要不要周期刷新**~~ **已定稿并落地**（用户 2026-10-11 对
+     本项说「全部完成」；见 §二 裁决行与 §3.29）。定稿口径：默认 6 小时节拍 + 失败退避
+     封顶 24 小时 + 「上次成功更新 / 是否过期」上设置界面 + 保存即刷一次。
+     本项残余的「清空订阅源会不会解除已生效名单」**没有**顺手改（那是放松防护的方向）
+     ⇒ 新登 §五 Q54。
+  10. **Q54 R9-CS-16（本轮落地时新增）：清空订阅源到底应不应该解除已生效的黑名单**。
+     现状是「只停止重取，名单继续拦截到进程结束，重启后仍从缓存文件加载」（缓存文件不删）。
+     改成「清空即解除＋删缓存」更符合「把配置项清空＝关掉该功能」的用户心智，但它是
+     **放松防护**的方向，且要一并决定「误清一次怎么办」⇒ 需用户给话，不默认执行。
+     本轮只把提示文案写成事实。
 
 ## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
 
@@ -862,15 +870,23 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   补齐它是一项功能而非一次修补：要网络抓取、缓存原子替换、版本/签名/防回滚、失败降级
   可解释（审计 §AEG-003 的处方方向正确），且要先定「源从哪来、谁签」。⇒ §四 待裁决；
   验收按审计口径：同一威胁测试集在两端输出同一裁决，并能在真机上确认实际拦截。
-- Q52 R9-CS-15 | P3 | `windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml.cs:138`
-  （`StartThreatFeedRefresh()` 在启动链里调用**一次**）+ `SettingsWindow.xaml.cs:111`
-  （保存后提示「已保存；生效于下次启动（导航与子资源拦截）」）：
-  外部审计 AEG-008「威胁情报仅启动时刷新」**属实**——同文件里 `_feedbackTimer`/`_sleepTimer`
-  都有 DispatcherTimer，唯独订阅源没有周期重取；长时间不关窗的用户会一直用启动时那份缓存。
-  但要点是它**已在设置 UI 明示**（不是偷偷降级），所以这不是「声明与行为不符」而是「行为
-  偏弱」。改成周期抓取＝新增后台网络活动（默认订阅源为空时不产生流量，一旦用户配了源
-  就从「开窗取一次」变成「持续取」），属出货行为变更 ⇒ §四 待裁决，
-  一并定「刷新周期 / 退避 / 最后成功更新时间上 UI」。
+- ~~Q52 R9-CS-15~~ **本批已定稿并落地**（§二 裁决行 + §3.29）：外部审计 AEG-008「威胁情报
+  仅启动时刷新」属实——`StartThreatFeedRefresh()` 在启动链调用**一次**，同文件的
+  `_feedbackTimer`/`_sleepTimer` 都有 DispatcherTimer，唯独订阅源没有周期重取。登记时的
+  关键判断保留：它**已在设置 UI 明示**旧文案，所以不是「声明与行为不符」而是「行为偏弱」，
+  改它＝出货行为变更（用户配了源就从「开窗取一次」变「持续取」）⇒ 走 §四 第 9 项定稿，
+  定稿后落地为 6 小时节拍 + 退避封顶 24 小时 + 最后成功时间上 UI + 保存即刷。
+- Q54 R9-CS-16 | P3 | `windows/src/Aegis.Windows.App/Chrome/SettingsWindow.xaml.cs:103-129`
+  （`ThreatFeedBox_LostFocus` 的清空分支）↔ `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs:117-139`
+  （`Start()` 无条件 `LoadCached`）：用户在设置页**清空**订阅源只让周期循环不再取源，
+  已生效的 `BlockedHosts` 快照继续拦截到进程结束；重启后 `Start()` 仍无条件读缓存文件
+  `threat_feed.txt`（清空动作不删它），于是那份名单**无限期**留在拦截面里。出厂默认无缓存
+  时两端仍是「空名单放行」，所以这不是默认行为缺陷，而是「把配置项清空＝关掉该功能」这个
+  用户心智没有对应实现。没有顺手改的理由：清空即解除拦截＝**放松防护**的方向（与 §二 里
+  AX-02「只加严不加宽」同一条纪律），且要一并决定「删不删缓存文件、下次启动是否仍加载」——
+  属产品决策 ⇒ §四 待裁决。现网提示文案已按事实写成「已清空订阅源：此后不再自动重取，
+  当前名单仍会继续拦截」（不是「退回空表」），并由 `ThreatFeedRefreshScheduleTests.
+  Cleared_feed_means_no_further_network_activity_not_a_cleared_list` 钉住「清空不制造空窗」。
 
 ### 5.4 RS（Rust 核心）
 
@@ -1257,6 +1273,67 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    假，并且让将来任何配置面接入时**不可能绕过核心**（顺序与不可覆盖性已被测试钉住）。
    真正的配置面（谁注册规则、能力白名单从哪来）仍是 §四 第 1 项的产品决策，本批不替它决定。
 
+
+### 3.29 R9-B29（2026-10-11，Q52 = 外部审计 AEG-008 定稿后落地）：威胁订阅源周期重取 + 最后成功时间上设置界面
+
+1. 定稿口径（用户 2026-10-11 对 §四 第 9 项说「全部完成」）：**默认 6 小时节拍、失败退避
+   封顶 24 小时、「上次成功更新 / 是否过期」上 UI、保存后立刻刷一次**。三份数字单源在
+   `ThreatFeedCoordinator` 的类常量（`DefaultRefreshInterval`/`MaxRefreshDelay`/
+   `StaleAfterFactor`），界面算过期用 `DefaultRefreshInterval × StaleAfterFactor` 而不是
+   抄一份 18 小时——这条由 `Stale_threshold_comes_from_the_same_constant_as_the_cadence`
+   判（它同时断言界面源码里出现这两个常量名）。
+2. 周期与退避：`Start()` 仍做首刷（既有语义与既有用例都不变），之后 `RunPeriodicRefresh()`
+   **先等再取**。`NextDelay(interval, failures)` 是纯函数：无失败⇒节拍本身，此后每次失败
+   翻倍，封顶 24 小时，且**只拉长**（`interval <= 0` 时原样返回，关闭周期是显式语义）。
+   每轮**重读** `_resolveFeedUrl()` 并重新校验 ⇒ 改源不需重启，而未配置/改成非法值那一轮
+   零网络活动（「未配置源 ⇒ 零流量」这条既有判据在周期化之后仍然成立，且单独有用例钉）。
+3. 「最后一次成功」不新增字段：`ThreatFeedUpdater.FetchAndStore` 只在抓取+校验+落盘
+   全部成功后原子替换缓存文件（tmp+Move），所以**文件写入时刻就是权威值**。加
+   `AppSettings` 字段要同步 SettingsService 快照与两个 XAML 锚，代价远大于收益，且会多出
+   一份会漂移的进程内副本。文案是纯函数 `ThreatFeedCacheStatus.Describe`（相对时长而不是
+   绝对时刻，因此「按 UTC 取的文件时间」不进文案；时钟被回调 ⇒ 负 age 落进「刚刚」档而不是
+   显示「-3 分钟前」）。
+4. 两条**新出口带来的竞态**才是这次改动的实质风险，都有故障注入锚：
+   ① 周期循环与「保存即刷」并发 ⇒ 两个抓取各自 apply 一次，**后完成**的那个决定最终名单，
+   而它可能是先发出那个请求的旧结果。加 `SemaphoreSlim(1,1)` 串行化；刻意**不**做成
+   「已在跑就跳过」——那会让用户保存后的手动刷新静默失效。锚
+   `Concurrent_refreshes_are_serialised` 用进入计数重叠检测（撤闸门即红）。
+   ② 设置界面需要一个「当前在跑的协调器」才能刷——`Active` 单点（`KillSwitch.Shared` 同款），
+   由 `Start()` 赋值。它是一条真实的接线而不是一句文档：
+   `Start_registers_the_active_coordinator_for_the_settings_window` + 源码文本锚
+   `SettingsWindow_wires_the_saved_feed_to_an_immediate_refresh` 共同钉住（WPF 窗口起不来，
+   所以判定用静态锚，正向锚 + 反向锚成对：旧文案「生效于下次启动」从 `.xaml.cs` 与 `.xaml`
+   两个文件里都必须消失）。
+5. **既有五个用例必须显式关掉周期**（`ThreatFeedCoordinatorTests` 三处 +
+   `CoreDenylistPublisherTests` 一处传 `refreshInterval: TimeSpan.Zero`）：它们靠
+   `await BackgroundTask` 收口防 Dispose 与后台写盘抢缓存句柄（CS-350 那笔账），周期化后
+   那条任务永不完成 ⇒ 不改就是挂死。这不是「测试挡路」，而是**周期化的真实代价**：
+   后台链的生命周期从「一次」变成「与进程同寿」，凡等它收工的地方都要自己表态。
+6. 坑一条（已写进用例注释）：`TimeSpan.Parse("24:00:00")` 是 **24 天**而不是 24 小时
+   （实测差值 `Expected: 24.00:00:00 / Actual: 1.00:00:00`），首段 ≥24 被 .NET 按天解析。
+   期望值因此改成小时数（`TimeSpan.FromHours(expectedHours)`）——字符串形态的时间期望值在
+   这里会静默判错一个量级，而 `[Theory]` 的三行恰好只有封顶档踩到。
+7. 余量与验证：`MainWindow.xaml.cs`（435 行零余量基线）**零改动**，调度全部留在协调器里；
+   三个新文件 254/128/52 行都在 300 红线内，`check_file_sizes.py` 在 `git add` **之后**重跑
+   （扫描面按 `git ls-files` 收口，提交前跑等于没算新文件——R9-RS-2 同课）。本地
+   Core **859/859**、Broker **204/204**、`-r win-x64 -p:RestoreLockedMode=true` 下 0 警告 0 错误，
+   `packages.lock.json` 未被改写。以 CI 为唯一通过依据。
+8. 顺带把一个**不实声明**改成事实：清空订阅源那句原文写「黑名单退回空表（导航与子资源
+   不因此拦截）」，而现树清空后已生效快照继续拦截、缓存文件也不删、重启后仍加载——
+   改成「此后不再自动重取，当前名单仍会继续拦截」。「清空即解除」本身没做（放松防护方向）
+   ⇒ 新登 §五 Q54 / §四 第 10 项。
+9. **补 R9-B22 欠下的文档账**（改 README 的订阅源那句时发现两处已失实的陈述，都来自
+   本会话早先落地的批次，不是外部审计的新报）：`README.md` 与
+   `docs/product/supported-features.md` 都把「NTP 宿主桥」与「后退/重载入口」并列写成
+   KillSwitch 缺口，而 AX-04 已经在 `NtpBridge.Dispatch` 查闸——按 §二 那行的口径拆开写：
+   桥侧 6 项有副作用操作已查闸（拒绝码 `lockdown_engaged`），仍在的是
+   `MainWindow.Menus.cs:180`/`182`、`MainWindow.Shortcuts.cs:204`/`241`/`257`、
+   `InPrivateWindow.xaml.cs:322`/`332` 不在**入口处**查闸，其引发的导航由
+   `EvaluateNavigation` 以 `kill_switch_engaged` 拒绝（所以这条是「不早退、无即时反馈」
+   而不是绕过——后半句未经真机确证，如实标注）。`docs/product/feature-parity-checklist.md`
+   的订阅刷新行同步补上周期重取事实。**教训：落地一条判定面时，凡是把该缺口写进
+   「已知缺口」清单的文档都在失效面里，要同批扫一遍**（`check_doc_claims.py` 只判计数，
+   这类陈述性失实它抓不到）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

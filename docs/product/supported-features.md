@@ -13,9 +13,11 @@
   地址栏导航（经 Broker 决策 + 审计脱敏）、后退/前进/刷新/停止
 - 书签（BookmarkBar 胶囊栏 + 收藏当前页）、历史（History 存储 + 搜索）、
   下载管理器（M3——经 broker 审计 + 危险拦截）、新标签页（导入向导已迁移至 NTP）
-- KillSwitch（主窗口导航/下载/审批链；**NTP 宿主桥与前进/后退/重载等 6 个导航入口
-  不查该开关**——第八轮实测）、设置窗口（威胁订阅源 URL 配置——刷新为启动一次性，无
-  周期计时器）、主题配色、缩放策略（ZoomPolicy 0.25–3.0）
+- KillSwitch（主窗口导航/下载/审批链；NTP 宿主桥的 6 项有副作用操作已在 `NtpBridge.Dispatch`
+  查闸——AX-04/R9-B22；**后退/重载的按钮与快捷键仍不在入口处查闸**，其引发的导航由
+  `EvaluateNavigation` 以 `kill_switch_engaged` 拒绝）、设置窗口（威胁订阅源 URL 配置——
+  保存即刷一次，此后按 6 小时周期重取、失败退避封顶 24 小时，提示位显示「上次成功更新 /
+  是否过期」——Q52/R9-B29）、主题配色、缩放策略（ZoomPolicy 0.25–3.0）
 - 安全：导航确认审批、新窗口禁弹、权限默认拒绝、下载 fail-closed、
   URL 门禁（UrlSafety）、FingerprintShield 指纹防护、崩溃报告
 - 策略裁决：Rust 原生策略核心（NativePolicyCoreBridge——**导航**裁决单源，ADR-008；
