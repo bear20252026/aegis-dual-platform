@@ -59,6 +59,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | AX-02 / AEG-001 | **P1**（外部审计声称，回读后**属实但处方必须改写**）→ 已落地 | 保留并落地（惰性接入） | 缺口是真的：`ffi/broker.rs` 的 `evaluate_navigation` 只调 `validate_action`（第三层），`ContextBroker::evaluate`（broker.rs:247）才串三层，前两个层在 FFI 通路零调用（`broker.rs` 的 H-7 注记自述）。但**照处方直连会拒掉每一次导航**，两条实测事实：①生产构造是 `PolicyEngine::default()`＝空规则，`ActionPolicy::evaluate_opt` 在无规则匹配时返回 None（`action_policy.rs:110` 的 `let rule = best?;`，默认效果只作用于非 opt 的 `evaluate`）⇒ `PolicyEngine::evaluate` 落 `PolicySource::FailSafe` 的恒 Deny；②`CapabilityRegistry::validate` 对未注册 capability 恒拒绝（`capability.rs:156`）而生产注册表恒空。落地口径＝「该层**没有意见**时不改裁决；一旦配置即生效且其 Deny 不可被后面的 Allow 出口改回允许」（单调加严），接入点在会话验证**之前**。9 例新测试的三条关键：未配置时 FFI 拒绝码必须仍是 `session_not_found`（把 FailSafe 当拒绝直连的话这条第一个红）；同一入参配上 deny 规则后必须变 `policy_denied`（一条同时证明「配置生效」与「排在会话验证之前」）；空注册表必须是「未配置」而非「什么都拒」。`RequireConfirmation` 复用既有 `register_pending_approval`，不开第二份授权账；锁毒化仍 fail-closed。今天没有宿主入口注册规则/能力（`register()` 生产零调用）⇒ 出货行为零变更是**设计结果**，价值是把「裁决链不完整」变成「链已闭合、缺的是配置面」。五处文档撤 H-7 陈述（README×2、CLAUDE.md 模块表、ADR-006、ADR-008×2、ADR 索引）；ABI 面零变更（新增都在非导出 impl 块）；577 lib 测试全绿、clippy `-D warnings` 干净；三个零余量文件靠改写更短注记 + `impl Default` 换 derive 守住基线 |
 | AEG-006 | P1（外部审计声称，回读后**属实但范围改写**）→ 落地为门禁 + 扩面队列 | 保留并落地（判据化） | 报告说「C# 只连部分向量、Kotlin 主要消费 `url-origin-*`」——按 `git ls-files` 的受管源码面逐份实测（543 个文件，命中口径＝词干作为独立词或完整文件名，排除 markdown 与 `META_LEVEL`（按名遍历整个向量目录的工具面，含门禁自己与它的用例））：**15 份向量里只有 2 份真的两端都跑**（`url-origin-valid/invalid`，CS+AD+RS），11 份有端侧执行者，4 份（`capability-*`/`audit-event-*`）**没有任何端侧执行者**、只被 `validate_vector_schemas.py` 判形状/expected。其余单端事实逐条钉进 `scripts/verify_vector_consumers.py` 的 `CONSUMER_MANIFEST`。两点范围改写：①那四份不是「没人判」——它们的 expected 本就是 `valid`/`deny_schema`，schema 就是判据，不能按「契约件白做」处理；②**Agent 端对契约向量的消费为零**（`AG` 在实测分布里一次都没出现），与 R9-SH-5「`action-catalog.yaml` 的 confirmation/risk/audit 三列 broker 不读」是同一件事的两面。落地＝新常驻门禁（登记表双向不变量 + 跨端支点下界 + 端侧执行者下界 + 扫描面塌缩 exit 2）接进 `contracts.yml` 的 PR 面；注入式自证 8 条从 `--self-test` flag **搬进 pytest**（要人主动敲 flag 的自证＝跑不动的判据，R9-SH-7 同课）；扩面工作另登 §五 Q53 |
 | AEG-008 / R9-CS-15 | P3（我登记的原级）→ 用户对 §四 第 9 项说「全部完成」后**落地** | 保留并落地 | 回读确证「仅启动时取一次」属实且**不是**声明与行为不符（旧文案确实明示要重启），所以这是一次行为增强：`ThreatFeedCoordinator` 首刷后进入周期重取（默认 6 小时，节拍/上限/过期倍数三份数字单源在类常量上，界面按 `DefaultRefreshInterval × StaleAfterFactor` 算过期而不是抄一份 18 小时），失败按 2 的幂退避并封顶 24 小时（**只拉长不缩短**——「失败就更快重试」在订阅源 429 时就是自伤），每轮**重读**设置所以改源不需重启，未配置/改成非法值 ⇒ 那一轮零网络活动（原判据不变）。UI 半边把「上次成功更新 / 是否过期」贴上提示位，时间取**缓存文件写入时刻**（`FetchAndStore` 只在抓取+校验+落盘全成功后原子替换，所以它就是「最后一次成功」的权威形态；加字段要同步 SettingsService 快照与两个 XAML 锚，代价远大于收益），保存路径改走 `Active?.RefreshNow()`，旧「要重启才生效」文案连同 XAML 说明句一起撤下并由静态锚反向钉住不得回潮。两条**新出口带来的竞态**是这次改动的实质风险，都已处理并有故障注入锚：①周期循环与「保存即刷」并发 ⇒ 后**完成**的抓取决定最终名单（可能是先发出那个请求的旧结果），加 `_refreshGate` 串行化（改成「已在跑就跳过」会让手动刷新静默失效，不做）；②既有五个用例靠 `await BackgroundTask` 收口防 Dispose 抢缓存文件（CS-350 那笔账），周期化后该任务永不完成 ⇒ 它们必须显式传 `refreshInterval: TimeSpan.Zero`，本类只测启动那一次、周期行为归新用例。坑一条：`TimeSpan.Parse("24:00:00")` 是 **24 天**不是 24 小时（实测断言差值 `24.00:00:00` vs `1.00:00:00`），期望值改成小时数——字符串形态的时间期望值在这里会静默判错一个量级。`MainWindow.xaml.cs`（435 行零余量基线）零改动，调度全在协调器里。本地 Core 859/859、Broker 204/204 全绿（CI 为准）。**残余待裁决**：清空订阅源只停止重取，不解除已生效名单也不删缓存（放松防护的方向）⇒ 新登 §五 Q54 |
+| AEG-011 / R8-DEPS-8 | **P2**（外部审计声称 P1，回读后裁 P2：这是加固面缺失而非可利用缺陷）→ 落地 | 保留并落地 | 审计要的两件事里只做了一件半：`dependencyLocking` 已启用，dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55。回读把第八轮 R8-DEPS-8 的判据更正为「`lockAllConfigurations()` 覆盖的是项目全部**可解析配置**（含 AGP 变体、测试、lint、ktlint/detekt 工具面），不是只覆盖直接依赖」；AD-155 当年的否决理由「双源维护成本」在 STRICT 下翻转成门禁本身——catalog 改了而锁没重算，解析直接失败而不是静默漂移。**故障注入实证两次**：①删掉 `android/app/gradle.lockfile` ⇒ `Locking strict mode: Configuration ':app:debugCompileClasspath' is locked but does not have lock state`（EXIT=1）；②给模块加一条新依赖 `org.apache.commons:commons-text:1.15.0` ⇒ `Resolved '…commons-text:1.15.0' which is not part of the dependency lock state`（EXIT=1）——这条在**改成 root 单源之后又重跑了一次**（注入点 `:contracts:compileDebugKotlin`），证明单源形态下 enforcement 仍然生效，不是「写在模块脚本里才管用」。顺带抓到一个**判据陷阱**：`:app:dependencies` 报表任务把解析失败吞成 `FAILED` 文本并 EXIT=0——所以「锁是否可消费」绝不能用报表任务证明，必须用真正吃 classpath 的任务；这条决定了 dependency-relock 的 gradle 面怎么写。落地＝锁块**单源**写在 root `android/build.gradle.kts` 的 `subprojects` 作用域（模块脚本零副本；本来按「逐模块各写一份」做，是 `:app` 脚本停在 **316 行零余量基线**放不下第 5 行逼出了这个更好的形状——单源顺带把「新增第五个模块忘记加锁」从静默 fail-open 变成自动覆盖）+ 四把入库 `gradle.lockfile`（app 314 行/四把共 277 个唯一坐标）+ 新常驻 `tests/python/gradle_locking_test.py`（9 例：模块清单从 settings 现取、锁块同形、锁文件形态与精确版本、CI 解析的配置必须在锁里、ktlint/detekt 工具面也进锁、SECURITY.md 与 settings 决策记录对得上）+ `relock_sop_test.py` 的 gradle 半边（**重锁任务清单 ⊇ CI 各 workflow 的解析面**，删一条即判红）+ `dependency-relock.yml` 新增 `gradle-relock` job（ubuntu + 与 android-quality 同款 JDK/SDK 口径，只写 deps/* 分支）。本机限制如实登记：`:app:assembleRelease` 在本机 Windows 跑不动（AAPT2 windows daemon 缺 UCRT），release 面的锁覆盖是用 `:app:dependencies --configuration releaseRuntimeClasspath` + broker/adapter 的 release 配置条目实证到位，真正的 release 构建要等 CI 的 ubuntu runner。 |
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
 
@@ -660,8 +661,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      与用户 2026-10-07 定稿「**本机与内网必须能打开**」直接冲突，那条是不可回退裁决；
      Android 无痕模式需要独立数据生命周期设计（`clearCache()` 不等价），先前已否决过
      「退出清 Cookie」「FLAG_SECURE」两刀，同一族不重开。
-  4. **AEG-011（Android Gradle dependencyLocking + verification）**：即待办项 10，
-     本机无 Gradle 环境，启用后需真跑一次重锁才能入 `packages`/`gradle.lockfile` ⇒ 保持待定稿。
+  4. ~~**AEG-011（Android Gradle dependencyLocking + verification）**~~ **定稿并落地**
+     （用户 2026-10-11 说「全部完成」；见 §二 裁决行与 §3.30）。本项登记时写的
+     「本机无 Gradle 环境」在 2026-10-11 实测已失实（`~/.gradle/wrapper/dists` 里有
+     9.8.0、JDK 21 与 SDK 都在位 ⇒ 重锁本地真跑过一次并把锁入库）。
+     审计要的**两**件事只做了一件：`dependencyLocking`（版本锁定）落地，
+     dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55。
   5. **AEG-014（FFI 裸指针/panic 边界）与 §五 攻击面矩阵的十项动态测试**：属审计自述的
      「阶段 C 红队验证」，需要 WebView2 Runtime 与真机（会弹调试窗、写真实数据根）⇒ 需用户在场。
   6. **AEG-016（本地/内网目标风险分类过宽）**：报告自己标「待源码和动态测试确认」，
@@ -764,6 +769,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   的 origin-scoped `addWebMessageListener` 能给出帧的 Origin，但那是把整条桥传输从
   `@JavascriptInterface` 迁走（页面侧 `Host` 适配层三端共用，`shared/shell/start.js` 一起改），
   属跨端契约变更 ⇒ 入 §四 待裁决。外部第三轮审计 AX-03 的同源出处见 §二 与 §3.22。
+
+- Q55 R9-AD-12 | P2 | `android/settings.gradle.kts:9-15`（`dependencyResolutionManagement` 的两个仓库源）↔ `android/gradle/`（**无** `verification-metadata.xml`）：
+  项 10 落的是**版本锁定**（`gradle.lockfile` 记 group:name:version，**不含校验和**），  外部审计 AEG-011 处方里的另一半 **dependency verification**（`--write-verification-metadata  sha256` + `verification-metadata.xml` + 构建时 `--dependency-verification=strict`）没有做。  差别是可利用的：锁防住「今天解析到新版本」，防不住「同一个坐标的构件被换成别的字节」  （仓库被投毒 / 镜像与上游不一致 / 本地缓存被改写都落在锁的覆盖面外）。本批不顺手做的原因：  开启后**任何**新增依赖都要重算校验和，且 Gradle 默认对缺失条目 fail-closed ⇒ 与 Dependabot   的自动 bump 流是产品级流程变更（要先定「谁签、校验和从哪来、trusted artifacts 怎么豁免」）  ⇒ §四 待裁决。验收口径：CI 里 `--dependency-verification=strict` 跑通  `:app:assembleRelease`，且注入「改动某个 jar 的字节」必须判红。
 
 ### 5.2 SH（shared 壳层与契约）
 
@@ -1334,6 +1342,82 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    的订阅刷新行同步补上周期重取事实。**教训：落地一条判定面时，凡是把该缺口写进
    「已知缺口」清单的文档都在失效面里，要同批扫一遍**（`check_doc_claims.py` 只判计数，
    这类陈述性失实它抓不到）。
+
+### 3.30 R9-B30（2026-10-11，项 10 = 外部审计 AEG-011 / 第八轮 R8-DEPS-8）：Android 四模块启用 STRICT 版本锁 + 重锁执行面
+
+1. 先把判据读准（这条同时更正第八轮 R8-DEPS-8 的登记文本）：`dependencyLocking
+   .lockAllConfigurations()` 锁的是**全部可解析配置**，不是「只覆盖直接依赖」——实测锁文件里
+   有 `debugAndroidTestCompileClasspath`、`debugLintChecksClasspath`、`detektPlugins`、
+   `ktlintRuleset` 这些传递与工具面条目。当年 AD-155 据此给的第二条否决理由
+   （「双源维护成本：catalog 升级忘重锁就解析失败」）在 STRICT 下**翻转成门禁本身**：
+   版本漂移不再是静默发生，而是必红。真正剩下的代价只有「每次升级多跑一次重锁」，
+   而这条已被工具化（见第 5 点）。
+2. 落地形态：锁块**单源**一份，写在 root `android/build.gradle.kts` 的 `subprojects` 作用域里
+   （`lockAllConfigurations()` + 显式 `lockMode = LockMode.STRICT`——STRICT 虽是缺省，靠缺省就是
+   「缺省一变即静默放松」）。这个形状不是审美选择：`:app/build.gradle.kts` 停在 316 行的
+   **零余量基线**（行数红线：基线文件只许减不许增），逐模块各写一份第 5 行都塞不进去；而单源
+   恰好把覆盖面从「写脚本时存在的那四个模块」变成「全部现有与后续子模块」——fail-open 变
+   fail-closed。时序也有实义：root 脚本先于子模块脚本求值，所以 `lockAllConfigurations()` 注册在
+   AGP 创建变体配置与 ktlint/detekt 创建工具配置**之前**（实测锁里确有这些条目）。
+   判据/覆盖面/重锁 SOP 单源写在 `settings.gradle.kts` 的决策记录里（注记不散落防漂移）；
+   四把 `gradle.lockfile` 入库（`:app` 314 行，四把共 277 个唯一 `group:name:version`）。
+   **不覆盖的面**如实写进 settings 与 SECURITY.md：`buildscript {}` 与 plugins DSL 是
+   **脚本类路径**，不在项目配置锁内（那一路由 root 的七条显式 classpath 地板 +
+   `buildEnvironment` 回读承接）；锁里也**不含校验和**，整树哈希/签名验证是
+   dependency verification 那一刀 ⇒ §五 Q55。
+3. **门禁是实测的，不是推断的**，两次故障注入都判红：①删掉 `android/app/gradle.lockfile`
+   ⇒ `Locking strict mode: Configuration ':app:debugCompileClasspath' is locked but does not
+   have lock state`；②给 `:app` 加一条新依赖（`org.apache.commons:commons-text:1.15.0`）
+   ⇒ `Resolved '…' which is not part of the dependency lock state`。
+   ②在改成 root 单源**之后**又重跑过一次（注入点 `:contracts:compileDebugKotlin`，同样 EXIT=1），
+   所以 enforce 不依赖「写在模块脚本里」这个形状。
+   注入过程还抓到一个**判据陷阱**（本批最有普适价值的一条）：`:app:dependencies`
+   这类**报表任务**把解析失败吞成树里的 `FAILED` 文本并 **EXIT=0**——所以「锁是否可消费」
+   绝不能用报表任务证明，必须用真正吃 classpath 的任务（`compileDebugKotlin`/`assembleDebug`）。
+   dependency-relock 的 gradle 面因此写的是实任务清单，不是 `dependencies`。
+4. 覆盖面由两条常驻门禁判（都在 `contracts.yml` 的 `pytest tests/python` 面里，PR 必跑）：
+   ①新文件 `tests/python/gradle_locking_test.py`（9 例）——模块清单从 `settings.gradle.kts`
+   的 `include(...)` **现取**（不在测试里抄名单，抄了就判不到新增模块），判「root 有且只有一份
+   写在 `subprojects` 里的锁块」「模块脚本没有自己的副本」「每个模块目录里有 Gradle 形态的锁文件」
+   「CI 会解析的配置名确实在锁里」「ktlint/detekt 工具面也进锁」，并钉 settings 决策记录与
+   SECURITY.md 的口径（旧句「Gradle 依赖无 lock 文件」必须消失）。反向锚是**四条注入**：
+   拆掉 `subprojects` 包裹 / 删掉 `lockMode` 行 / 删掉整块 / 复制成两份，任一不被判红即报错；②`relock_sop_test.py` 的 gradle 半边（新增 4 例）——
+   **重锁任务清单 ⊇ CI 各 workflow 里会解析依赖的 gradle 任务**（`assemble*/test*/lint*/ktlint*/detekt*/compile*/bundle*`；
+   报表任务刻意排除，理由见第 3 点），删掉清单里任意一条即判红。
+5. 重锁执行面：`.github/workflows/dependency-relock.yml` 新增 `gradle-relock` job。
+   为什么是独立 job 而不是在 windows job 里加几步：AGP 要「JDK 21 + setup-android 基线包
+   （`platforms;android-36`/`build-tools;36.0.0`）+ compileSdk 37 由 AGP 构建期自动装配」
+   这套已在 ubuntu 实证过的组合（SP-238：显式 pin android-37 因未进 stable 渠道必失败），
+   搬到 windows 重验只会换来「重锁面与门禁面不同形」。守卫照 R9-CI-2 写在**每个**持
+   写权限的 job 里（dispatch 输入经 env 中转、run 正文零 `${{ }}`、push 前二次判 `deps/*`），
+   **坑一条**：Gradle 9.8 里根本没有 `writeLocks` 任务（实测
+   `Cannot locate tasks that match ':app:writeLocks' as task 'writeLocks' not found in project
+   ':app'`）——重锁只能是「跑任务 + `--write-locks`」，所以「跑哪些任务」本身就是判据（第 4 点
+   的覆盖关系锚判的就是它）。这条写进 settings 的决策记录，防下一轮又去找那个不存在的任务。
+   并新增「diff 里必须全是 `gradle.lockfile`」这条——纯重锁运行里冒出别的改动（顺手改了
+   版本目录）就不推。`ecosystem` 输入加 `gradle`，同时 windows 的 `relock` job 用
+   `if: ecosystem != 'gradle'` 排除自己（它没有 Android SDK，跑了就是「写不回任何东西的成功」）。
+6. Dependabot 的 gradle 生态早就在跑（`/android`，weekly）。启用锁定后的分诊口径写进
+   `.github/dependabot.yml` 注释：**Dependabot 是否会在同一 PR 里重写 `gradle.lockfile`
+   本仓未实证**，所以 PR 里只有 `libs.versions.toml` 两行而锁未变 ⇒ 在该分支 dispatch
+   `Dependency-Retlock(ecosystem=gradle)` 补锁再审；不许靠放宽 `lockMode` 变绿。
+   （未实证的事实在这里就不写成「Dependabot 会自动更新锁」。）
+7. `android/settings-gradle.lockfile` 被 `.gitignore` 单条忽略，理由写在注释里：它是
+   `--write-locks` 顺手生成的 settings 侧产物，恒为一行空条目（版本目录那条内部配置不解析
+   任何坐标）；实测删掉后 `./gradlew help` EXIT=0 且不重建。入库会让第 5 点的守卫每次误判红。
+   四把模块锁**绝不**用 `*.lockfile` 通配忽略——那等于把判定面自己忽略掉。
+8. 本机边界如实登记：`:app:assembleRelease` 在本机 Windows 跑不动（AAPT2 windows daemon
+   报「Please check if you installed the Windows Universal C Runtime」，与锁定无关）。
+   release 面的锁覆盖是用 `:app:dependencies --configuration releaseRuntimeClasspath`
+   与 broker/webview-adapter 锁里的 `release*Classpath` 条目实证到位，
+   真正的 release 构建要等 CI 的 ubuntu runner——这一条不在「本地已验」清单里。
+9. 验证：**同一条任务清单去掉 `--write-locks` 重跑两次都 BUILD SUCCESSFUL**——逐模块锁块
+   形态下 12m45s，改成 root 单源后 9m36s（236 个可执行任务：23 实执行 / 213 up-to-date），
+   覆盖 ktlint×4 / detekt×4 / assembleDebug / assembleDebugAndroidTest / lintDebug /
+   testDebugUnitTest×3 / contracts:assembleDebug / broker+adapter compileDebugKotlin；
+   `pytest tests/python` 新增 13 例全绿（9 + 4）。
+   `:app:assembleRelease` 本机未跑（第 8 点）——release 构建下的锁定由 CI 的 ubuntu 首次实证。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
