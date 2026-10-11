@@ -51,14 +51,20 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
   `bridge_guard.template.js` 单源覆盖 Rust（`include_str!`）与 Android（手抄 + 逐行比对），
   Windows C# 的注入面（`WebView2Hardening.cs:77`）**不在该单源对账范围内**（第八轮实测）
 - **HTTPS-only 升级** + **DNT** + **追踪参数剥离**
-- **威胁黑名单**（导航门禁）——**仅 Windows 端实现**；刷新实为**启动一次性**
-  （`ThreatFeedCoordinator` 只在 `Start()` 内调一次，全仓无周期计时器——「订阅制刷新」
-  的旧口径已撤）；Android 全树
+- **威胁黑名单**（导航门禁）——**仅 Windows 端实现**；刷新为**周期重取**
+  （`ThreatFeedCoordinator`：默认 6 小时节拍 + 失败按 2 的幂退避封顶 24 小时，设置页保存
+  即刷一次并在提示位显示「上次成功更新 / 是否过期」——第九轮 Q52/R9-B29 落地，此前是
+  「启动一次性」）；Android 全树
   无任何黑名单代码，其导航拒绝条件只有"URL 是否良构"（第六轮 R6 登记，见下方
   「分端裁决现状」）
 - **KillSwitch**（**仅 Windows**；Android 全树零实现，README 旧版未标端别）——触发后
-  主窗口的导航/下载/审批链冻结；**已知缺口**：NTP 宿主桥（`importBookmarks` /
-  `importHistory` / `restoreSession`）与前进/后退/重载等 6 个导航入口不查该开关
+  主窗口的导航/下载/审批链冻结；NTP 宿主桥的 6 项有副作用操作（`navigate`/`goBack`/
+  `openGeo`/`restoreSession`/`importBookmarks`/`importHistory`）**已**在
+  `NtpBridge.Dispatch` 查闸（拒绝码 `lockdown_engaged`，第九轮 AX-04/R9-B22）；
+  **仍在的缺口**＝后退/重载的按钮与快捷键（`MainWindow.Menus.cs:180`/`182`、
+  `MainWindow.Shortcuts.cs:204`/`241`/`257`、`InPrivateWindow.xaml.cs:322`/`332`）
+  不在入口处查该开关——它们引发的导航仍被 `EvaluateNavigation` 以 `kill_switch_engaged`
+  拒绝，所以这条是「不早退、无即时反馈」而非绕过（该差别未经真机确证）
 - **无痕窗口**（**仅 Windows**）：独立 WebView 环境 + 临时目录，favicon/缓存/历史按
   持久化语义分面隔离；Android 侧无对应实现（`android/README.md` 的 `clearPrivateData`
   条目已就地更正为「未落地」）

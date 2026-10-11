@@ -112,7 +112,7 @@
                  ToolTip="仅支持 https://（明文源可被投毒——拒绝）"/>
         <TextBlock x:Name="ThreatFeedHint" Foreground="{DynamicResource TextMutedBrush}" FontSize="11" Margin="2,8,0,0"
                    TextWrapping="Wrap"
-                   Text="每行一个域名的纯文本黑名单；生效于下次启动（导航与子资源拦截）。"/>
+                   Text="每行一个域名的纯文本黑名单；保存后会立即尝试刷新，此后按周期自动重取（导航与子资源拦截）。"/>
       </StackPanel>
     </Border>
 

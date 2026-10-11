@@ -23,7 +23,7 @@
 | ProcessFailed 崩溃监听 | 崩溃落盘 | 批次1 crash_listener | ☑（SecurityLog） |
 | WebView2 Runtime 更新事件 `NewBrowserVersionAvailable` | 重启前保存状态 + 通知 + 受控重启（runtime-update-restart） | ADR-001 后果段 / refactor-final-route `RuntimeUpdater.cs` | **☐ 未实现**（第八轮 B8 实测：`windows/` 全树零该事件订阅，也无 `RuntimeUpdater.cs`；device-validation 第 10 步因此无执行对象——本清单唯一未勾验的代码项，「100% 勾验」的旧口径据此更正） |
 | 指纹防护（文档创建前注入） | 会话种子/管道移植 | fingerprint_pipeline | ☑ 最小有效集（canvas 离屏扰动修 Python 污染缺陷/时间精度）；全量随 M3 |
-| 威胁黑名单：订阅刷新 | https 强制/5MB 上限/原子落盘 | threat_feed.py | ☑（AEGIS_THREAT_FEED_URL 环境变量；M4 移入设置） |
+| 威胁黑名单：订阅刷新 | https 强制/5MB 上限/原子落盘 | threat_feed.py | ☑（AEGIS_THREAT_FEED_URL 环境变量；M4 移入设置；Q52/R9-B29 起 6 小时周期重取 + 失败退避封顶 24 小时——仅 Windows，Android 整条链不存在见 Q51） |
 | 威胁黑名单：导航门禁 | 命中拒绝+审计 | url_utils/security.py | ☑（broker threat_blocklist + 子资源 403 真拦截▲） |
 | DNT 请求头 | request_sent 等价物（原生事件） | 批次1 request_policy | ☑（WebResourceRequested 原生注入） |
 | per-origin 设置翻转 | 远程页禁 WebMessage/弹窗 | 批次1 per-origin | ☑ M1-T2（SetPerOrigin 原生直翻——每次顶层/子框架导航） |

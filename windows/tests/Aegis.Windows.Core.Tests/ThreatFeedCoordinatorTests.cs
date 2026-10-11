@@ -10,7 +10,12 @@ using Xunit;
 /// <summary>威胁黑名单刷新编排单测（上帝对象拆分·第六批）：启动后台应用缓存
 /// 快照（CS-350：LoadCached 移出 UI 线程——空快照启动+后台加载）；订阅源
 /// 缺失/非法不启动刷新；合法源后台刷新替换快照；刷新失败保持旧快照。
-/// 全部副作用注入——离线可测。</summary>
+/// 全部副作用注入——离线可测。
+///
+/// 本类只覆盖**启动那一次**的链路，所以一律传 `refreshInterval: TimeSpan.Zero`
+/// 关掉 Q52 的周期重取：留着默认节拍，BackgroundTask 永不完成，下面的
+/// `await BackgroundTask`（= 等后台链收工，防 Dispose 与写盘抢句柄）会直接挂死。
+/// 周期/退避/立即刷这些新行为在 ThreatFeedRefreshScheduleTests 覆盖。</summary>
 public sealed class ThreatFeedCoordinatorTests : IDisposable
 {
     private readonly string _cachePath =
@@ -36,7 +41,8 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
                     Assert.StartsWith("https://", url);
                     File.WriteAllLines(cache, FetchedCacheContents);
                     return FetchedCacheContents;
-                });
+                },
+                refreshInterval: TimeSpan.Zero);   // 见类注释：本类只测启动那一次
     }
 
     public ThreatFeedCoordinatorTests()
@@ -113,7 +119,8 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
             _cachePath,
             () => h.FeedUrl,
             message => h.Logs.Add(message),
-            fetchAndStore: (_, _) => throw new InvalidOperationException("网络不可用"));
+            fetchAndStore: (_, _) => throw new InvalidOperationException("网络不可用"),
+            refreshInterval: TimeSpan.Zero);
         Assert.True(c.Start());
         await SpinUntil(() => h.Logs.Any(l => l.Contains("订阅源刷新失败")));
         // 快照未被替换（仍只有后台应用的一次），且内容保持缓存快照
@@ -165,7 +172,8 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
             {
                 File.WriteAllLines(cache, new[] { "stale-from-disk.example" });
                 return new[] { "fresh-from-fetch.example" };
-            });
+            },
+            refreshInterval: TimeSpan.Zero);
         Assert.True(c.Start());
         await SpinUntil(() => h.Applied.Count >= 2);
         var final = LastApplied(h);
