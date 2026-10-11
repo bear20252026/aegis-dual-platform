@@ -740,7 +740,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   批次 3 先做可直改面：壳页 CSP 把 `frame-src` 从「由 `default-src 'self'` 隐含」写成显式声明、
   来源判据拒空/异常 url、补用例；`addJavascriptInterface` 拿不到调用方 frame origin 这条
   残余属平台能力，迁 WebMessage 传输另行裁决。
-- Q50 R9-AD-11 | P2 | `android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt:55,95-99,109-121`
+- Q50 R9-AD-11 | **P2 → 第一半已闭（§3.26），第二半带理由挂起** | 收窄已落地：桥受信面从整个 `file:///android_asset/` 前缀改成壳页精确名单（名单由 `BrowserEngine.HOME_URL` 派生），依据是 dist/geogebra-cache 当前副本对桥零引用（grep AegisBridge/__aegis/android_asset/JavascriptInterface/navigate( 全 0）。第二半（迁 origin-scoped addWebMessageListener）在 frame-src 'none' + 精确名单之后已无「可区分的输入」，要动的却是三端共用的 start.js 两个通道选择点 ⇒ 不做，理由见 §3.26 第 5 项。以下为登记原文（事实仍有效，前缀语义已被替换）：
+  原条目 ↓
+  Q50 R9-AD-11 | P2 | `android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt:55,95-99,109-121`
   （`TRUSTED_SHELL_PREFIX = "file:///android_asset/"` + `isTrustedShellUrl` 前缀匹配）
   ↔ `android/app/src/main/java/com/aegis/browser/SecureWebViewFactory.kt:127-132`
   （`addJavascriptInterface(AegisHomeBridge…, "AegisBridge")` 对该 WebView 的**全部**文档与帧生效）：
@@ -1168,6 +1170,38 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. 扩面工作另登 §五 **Q53 R9-SH-13**（不顺手做：给 C#/Kotlin/Agent 各接一份向量执行面＝新增
    端侧裁决实现，与 §四 第 1 项 AX-02 是同一次改造）。
 
+### 3.26 R9-B26（2026-10-11，Q50 第一半）：Android 桥受信面收窄成壳页精确名单
+
+1. 依据是实测而不是猜测（`dist/geogebra-cache` 当前副本，436 文件 / 117MB）：
+   grep `AegisBridge`、`__aegis`、`android_asset`、`JavascriptInterface`、`navigate(` **全 0 命中**；
+   `aegis` 的 6 处命中都在 `*/deferredjs/*/*.cache.js` 的 base64/WASM 块里（不是标识符）；
+   `openGeo` 的 3 处是 GWT 自带的 `OpenGeoProver`。画板页在 `geogebra/` 子树、不加载
+   `start.js`（后者在 assets 根），从画板返回走 `MainActivity.kt:295` 原生
+   `navigateHistory(BACK)` 而不是桥的 `goBack`；桥的五个方法在原生侧都有等价路径
+   （`BrowserViewModel.kt:144,297,329,371`）⇒ **主页之外没有合法桥消费者，画板不受影响**。
+2. 改动（`AegisHomeBridge.kt:56-75,112-137`）：`isTrustedShellUrl` 从前缀匹配改成
+   「assets 根下的顶层资源名逐字等于登记名」，名单由 `BrowserEngine.HOME_URL` **派生**
+   （不在第二处抄字面量——首页改名会让桥自锁，而 `HomeUrlContractTest` 只钉 HOME_URL 那头）；
+   query/fragment 先剥（壳页确实可能带 `#片段` 被 `getUrl` 报告回来，不剥就是把自家首页拒了），
+   剥完不接受子路径。写成单个 `when` 表达式而非四段提前 return（detekt `ReturnCount` 上限 2，
+   本地 `:app:detekt` 首跑就是被这条打回的）。
+3. 测试（`AegisHomeBridgePrefsTest.kt:148-175`）：原 `:151-153` 那条 `assertTrue(geogebra…)`
+   改成 `assertFalse` 并写清理由（它是把前缀语义**举例枚举**成断言，不是功能需求——
+   挂在 AD-112「纯判定函数」标题下，无任何「画板需要桥」的注释）；新增
+   `sub/start.html`、`start.html.bak`、`start.htmlx` 三形态必须拒（后缀/子路径混淆），
+   `start.html#engine`、`start.html?v=2` 必须受信（防「收窄把合法首页一起砍了」），
+   以及 `isTrustedShellUrl(BrowserEngine.HOME_URL)` 把派生关系钉住。
+4. 本地验证：`:app:ktlintCheck` + `:app:detekt` + `:app:testDebugUnitTest` 全绿（首跑 detekt
+   判红一条，改完复跑通过——不是「跑不动就免检」）。
+5. **Q50 的第二半（迁 `androidx.webkit` origin-scoped `addWebMessageListener`）本批不做，
+   且理由不是「太难」**：那条路唯一多买到的能力是「拿到调用者所在 frame 的 Origin」。
+   而①`frame-src 'none'`（§3.22）已让壳页文档内不可能存在任何 frame；②本批之后
+   受信面又是精确名单。两者叠加后，「帧身份」这条判据没有可区分的输入了——迁移要动的
+   却是三端共用的 `shared/shell/start.js` 两个通道选择点（`:30-33`、`:50-66`）与
+   `start_host.test.mjs:119/134` 那种「Android 必须直调 `AegisBridge.goBack`」的常驻锚。
+   ⇒ 记为「在当前形态下无收益的跨端契约变更」，将来若放开 frame 或新增第二个壳页，
+   本条重新成立。Q50 就地标注第一半已闭、第二半带理由挂起。
+
 ### 3.27 R9-B27（2026-10-11，外部审计 AX-05/AX-06）：把「要求原生核心」编译进产物，发布链改验终物
 
 1. 判定源重排（`Broker/NativePolicyCoreGate.cs`）：`IsRequired` =  构建常量 ⇒ 环境变量
@@ -1196,6 +1230,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `docs/runbooks/windows-run-guide.md:57-68`——三处原文都写「由安装期标记驱动」，
    现在标记是第三来源。不留「文档说的 ≠ 实树的」这类账（R9-DOC 一整族就是这么来的）。
 
+>>>>>>> origin/master
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
