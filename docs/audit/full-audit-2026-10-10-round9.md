@@ -1416,7 +1416,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    覆盖 ktlint×4 / detekt×4 / assembleDebug / assembleDebugAndroidTest / lintDebug /
    testDebugUnitTest×3 / contracts:assembleDebug / broker+adapter compileDebugKotlin；
    `pytest tests/python` 新增 13 例全绿（9 + 4）。
-   `:app:assembleRelease` 本机未跑（第 8 点）——release 构建下的锁定由 CI 的 ubuntu 首次实证。
+   `:app:assembleRelease` 本机未跑（第 8 点），但 **release 的依赖解析面已单独实证**：
+   `./gradlew :app:compileReleaseKotlin` 在锁上跑通（BUILD SUCCESSFUL）——它解析
+   `releaseCompileClasspath`，而「锁不满足」只可能发生在解析阶段，不是打包阶段。
+   仍未跑的是 R8/aapt2 那半段（与锁定无关）。
 
 
 ## 六、复核后判定为不成立（留此防重复上报）
