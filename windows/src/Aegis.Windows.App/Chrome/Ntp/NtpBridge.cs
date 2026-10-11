@@ -31,7 +31,10 @@ public sealed class NtpBridge
         Func<bool> OpenGeo,
         Func<IReadOnlyList<ImportSourceSnapshot>> ImportSources,
         Func<string?, (int Imported, int Total, IReadOnlyList<ImportResult> Results)> ImportBookmarks,
-        Func<int, string?, (int Imported, int Total, IReadOnlyList<ImportResult> Results)> ImportHistory);
+        Func<int, string?, (int Imported, int Total, IReadOnlyList<ImportResult> Results)> ImportHistory,
+        /// <summary>紧急停止（KillSwitch）是否已触发——分发层在执行前读取，
+        /// 不是构造时快照（AX-04：排队中的导入操作在执行时也要重新验证）。</summary>
+        Func<bool> IsLockdownEngaged);
 
     public sealed record ImportSourceSnapshot(string Browser, bool Bookmarks, bool History);
 
@@ -39,6 +42,18 @@ public sealed class NtpBridge
 
     /// <summary>CS-276：历史导入默认上限（此前 500 字面量多地重复）。</summary>
     private const int DefaultImportHistoryLimit = 500;
+
+    /// <summary>AX-04（外部第三轮审计 2026-10-11）：紧急停止期间仍被拒的副作用操作集。
+    /// 只读操作（getEngine/getWallpaper/bookmarks/hasSaved/importScan/jsError）保持可用——
+    /// 冻结期间用户仍需看得到状态、上报异常；改设置（setEngine/setWallpaper）不产生网络或
+    /// 数据副作用，也保持可用。判定单点在此，不在按钮上。</summary>
+    private static readonly HashSet<string> SideEffectingOps = new(StringComparer.Ordinal)
+    {
+        "navigate", "goBack", "openGeo", "restoreSession", "importBookmarks", "importHistory",
+    };
+
+    /// <summary>拒绝码单源（页面与 SecurityLog 共用；同 ReservedAddressBoundary.DenyCode 口径）。</summary>
+    internal const string LockdownErrorCode = "lockdown_engaged";
 
     public NtpBridge(Services services) => _services = services;
 
@@ -130,6 +145,16 @@ public sealed class NtpBridge
     /// <summary>操作分发（纯函数——依赖经 Services 注入，全量可单测）。</summary>
     public object? Dispatch(string op, JsonElement args)
     {
+        // AX-04：KillSwitch 是「进程级紧急停止」，而此前分发层不查它——
+        // restoreSession/importBookmarks/importHistory/goBack/navigate/openGeo 经
+        // NTP 桥照样产生副作用（README 早期登记的覆盖面缺口，外部审计再次点名为准）。
+        // 判定点放在 Dispatch 而不是 TryHandle 的调度前：导入三操作走 Task.Run，
+        // **排队之后**才走到这里 ⇒ 「先排队、后排紧急停止」的操作会被重新验证。
+        if (SideEffectingOps.Contains(op) && _services.IsLockdownEngaged())
+        {
+            Core.Security.SecurityLog.Write($"[ntp] 紧急停止中拒绝宿主桥副作用操作: {op} code={LockdownErrorCode}");
+            return new { error = LockdownErrorCode };
+        }
         switch (op)
         {
             case "getEngine":

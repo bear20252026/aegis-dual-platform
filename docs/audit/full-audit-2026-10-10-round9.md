@@ -52,6 +52,9 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-SH-10 | P3 | 保留并落地（注记失实） | 回读确证：`contracts/vectors/capability-invalid.json` 第 2 条 note 写「schema minItems **未设**——本向量按用户语义拒绝」，而 `capability.schema.json` 的 `actions` 实测已含 `minItems: 1`（PY-097 同口径）⇒ 拒绝理由就是 minItems，注记是失实陈述（读者会以为空数组形态只靠约定保护）。落地＝note 改成当前实况并保留来历（PY-095 记下时 minItems 确实未设），`validate_vector_schemas.py` 复跑 ✅。零判定改动，纯注记改真 |
 | R9-RS-3 | P3 | 保留并落地（依赖注记失实） | 回读确证两处：`Cargo.toml` 注记写「getrandom 0.3 为当前主线」而下面钉的是 `getrandom = "0.4"`；又写「ed25519-dalek 经 rand_core 0.6 仍消费 getrandom 0.2」，`cargo tree --offline -i` 实测锁里既无 getrandom 0.2 也无 rand_core 0.6——实况是直接依赖解析到 **0.4.3**（本 crate + tempfile 消费），另有 0.3.4 由 rand_core **0.9.5** 带入（ed25519-dalek 3.0 / curve25519-dalek 5.0 一侧），rand_core 为 0.9.5 + 0.10.1。下一批依赖决策若按注记推断会取错对象。落地＝把实测来源与解析结果写进注记（依赖本身零改动、`cargo metadata --locked` 复跑 ✅）|
 
+| AX-01 | P1（外部第三轮审计 2026-10-11 声称，主代理回读后**降级为「一半保留并落地、一半早已成立」**） | 保留并落地（投递面） | 回读结论要分两段：①「策略链异常时保持原始请求路径」在第八轮 ⑤ 已闭（`HostWebView.WebResourceGuards.cs` 的 `SubresourceDenialFailClosed` 异常回 403 + `subresource_policy_error`），审计报告据此点名的仍是**拒绝之后**那一步：旧代码 `try { e.Response = CreateWebResourceResponse(...) } catch { 只写日志 }`——拒绝已经判出来，合成响应自己抛（COM 对象退休/Environment 释放）却把这条请求退回默认路径 ⇒ **留痕不是拦截**。落地＝两段各自收口：交付返回 false 与交付抛出是同一事实（拒绝没落地）⇒ 都升级到 `CoreWebView2.Stop()`（内核随当前导航一并停掉待发子资源），留重码 `subresource_denial_undeliverable`；不做「换一组参数再试一次」（失败原因是环境失效，换参数不改结局，只会把一次失败刷成两条互不相干的日志）。**关键实现细节**：`escalateStop()` 不能和 `tryDeliver()` 放同一个 try——照直觉写 `try{ if(deliver) return; escalate(); } catch{ log }` 时 tryDeliver 抛出会**跳过升级**，正是审计点名的形态，故拆两段并各自吞（`DeliverDenialNeverThrowsBackToTheEventShim` 用三个同时抛的注入面钉「永不抛出」，含留痕面）。不可达面按 R8-CS-SEC-11 同法补结构锚：handler 本体切片（有界、剔注释）必须含 `DeliverDenial(`/`TryStopWebView` 且**不含** `catch` 与 `e.Response =`，`TryStopWebView` 切片必须真有 `webView.Stop()`。WebView2 真实故障注入（本机无 Runtime）仍属第四节阶段 C，本批只有 JVM/CLR 侧判定面 |
+| AX-04 | P1（外部审计声称，主代理回读确证后**保留并落地**） | 保留并落地 | 回读确证：`KillSwitch` 此前只被 broker 的导航/下载/批准入口读取，而 `NtpBridge.Dispatch` 的 `restoreSession`/`importBookmarks`/`importHistory`/`goBack`/`openGeo`/`navigate` 经桥直达数据层与宿主，分发层零检查——README 早期就登记过这个覆盖面缺口，外部审计再次点名为准。落地＝判定单点放在 `Dispatch` 而不是按钮：`SideEffectingOps`（6 项）+ 拒绝码 `lockdown_engaged` + SecurityLog 留痕；**位置选择有实义**——`TryHandle` 对导入三操作走 `Task.Run`（CS-031），判在 `Dispatch` 才使「先排队、后排紧急停止」在执行时被重新验证，判在 `TryHandle` 就退化成入队时快照。判定边界如实登记而非一刀切：只读面（`getEngine`/`getWallpaper`/`bookmarks`/`hasSaved`/`importScan`/`jsError`）冻结期间必须可用（否则设置窗与异常上报一起废、用户看不到状态），`setEngine`/`setWallpaper` 是本机偏好、无网络与数据副作用，同样放行——各有用例钉住，防止下一轮把「统一门禁」误读成「桥里全部拒绝」。反向锚两条：同一批操作在未触发时必须照样落到宿主（证明拒绝来自开关而非「根本没接线」）、同一实例翻转闭包必须立刻生效（证明不是构造时快照）。NTP 桥本身有 `IsTrustedSource` 前置 ⇒ 这不构成远程页面可达路径，审计报告「不能直接认定远程网页能调用这些操作」的限定成立 |
+
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
 
@@ -636,7 +639,33 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   要打通得解冻核心 host grammar 并增补 `url-origin-*` 向量，是跨三端的解析器语义变更，
   不是「剥个括号」的小改。R9-AD-4 的**口径改真**半边已按第四节处方落地（§3.5：KDoc + 跨层锚用例，判定零改动），剩下的「打通导航面」仍是待定稿项。
 
+- **外部第三轮审计（2026-10-11）里不能照做的条目**——审计报告给的处方有几条会改变
+  「默认放行 vs 默认阻断」的语义或出货制品的强制方式，逐条列出而不是静默丢弃：
+  1. **AX-02 / AEG-001（`ffi/broker.rs:146-150` 的 `policy.evaluate` + `capability.validate`
+     未进 FFI 通路）**：源码注释确实记着这条缺口（既有台账 H-7），但「接通」不是补一行调用——
+     Windows/Android 现在各自解释 FFI 返回值，一旦把 capability 的许可面并入裁决，
+     端侧对 `Allow` 的放大行为要同时定义（本仓已实测过同类放大：某端桥把上游**每一个**
+     Allow 都转成 RequireConfirmation，照审计的「一律拒绝异常」写就会全导航需确认）。
+     这是核心裁决语义变更，要带三端契约向量另批设计，不当缺陷顺手改。
+  2. **AX-05 / AX-06（原生核心强制启用不能只靠 HKCU 标记或环境变量；Android 不能靠构建参数）**：
+     方向与本轮 §四既有项一致（发布制品的实际构建常量要由 CI 验终物而非验命令），但把
+     「正式构建默认要求原生核心」设成不可关，会让无 DLL 的开发机与本地 WPF 直接起不来；
+     且 Windows 侧强制开关从 HKCU 迁到受保护位置属安装/发布链决策 ⇒ 待定稿。
+  3. **AEG-009 / AEG-010（Android 局域网 HTTP 与 HTTPS-only 冲突、无痕与 KillSwitch 缺失）**：
+     与用户 2026-10-07 定稿「**本机与内网必须能打开**」直接冲突，那条是不可回退裁决；
+     Android 无痕模式需要独立数据生命周期设计（`clearCache()` 不等价），先前已否决过
+     「退出清 Cookie」「FLAG_SECURE」两刀，同一族不重开。
+  4. **AEG-011（Android Gradle dependencyLocking + verification）**：即待办项 10，
+     本机无 Gradle 环境，启用后需真跑一次重锁才能入 `packages`/`gradle.lockfile` ⇒ 保持待定稿。
+  5. **AEG-014（FFI 裸指针/panic 边界）与 §五 攻击面矩阵的十项动态测试**：属审计自述的
+     「阶段 C 红队验证」，需要 WebView2 Runtime 与真机（会弹调试窗、写真实数据根）⇒ 需用户在场。
+  6. **AEG-016（本地/内网目标风险分类过宽）**：报告自己标「待源码和动态测试确认」，
+     且现树 `is_high_risk_host` 的私网放行是第七轮 B8 裁决的钉（有专门用例保护
+     `192.168.1.1:8080` 不被判高危，见 R9-RS-6）。它建议的「按发起者信任分级」与
+     第 1 条是同一次改造，不单独收紧。
+
 ## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
+
 
 ### 5.1 AD（Android）
 
@@ -663,9 +692,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   （无 `sessionId:` 前缀）⇒ 关标签的 `removeIf startsWith` 一条都摘不掉，而注释称
   「销毁会话并移除其已消费 nonce」；`AndroidBrokerTest.kt:414-417` 只钉托管路径形态。
   孪生形态见 `BrowserPolicyBroker.NativeNonceLedger`（R8-CS-REG-01 同源，后果轻得多）。
-- Q6 R9-AD-6 | P3 | `BrowserViewModelConfirmations.kt:104-108`：下载确认缺「仅当前活动标签
+- Q6 R9-AD-6 | **P2**（外部审计 AX-07 同一处，由 P3 提级）| `BrowserViewModelConfirmations.kt:104-108`：下载确认缺「仅当前活动标签
   可消费」的归属校验（导航确认有，AD-158），且 `switchTo` 撤销 pending 导航确认却不撤销
-  pending 下载确认 ⇒ 后台标签的危险扩展确认可顶到前台标签被批准。
+  pending 下载确认 ⇒ 后台标签的危险扩展确认可顶到前台标签被批准。提级理由（本批回读）：
+  授权必须绑定具体操作与发起者，同一文件里导航确认已经做对（`BrowserViewModelConfirmations.kt:80`
+  的 `pending == null || currentWebView() !== pending.webView` ⇒ 拒），而 `approvePendingDownload`
+  （:104-108）取出 pending 即 `proceed()`＝用户批准的对象被换成了另一标签的目标 ⇒ 批次 2。
 - Q7 R9-AD-7 | P3 | `TabManager.kt:109-130`：`closeTab` 三条 when 分支的行内注释整体错位
   一条（与类 KDoc AD-254 段的正确对应相反）——按注释读会得出与实现相反的激活位语义。
 - ~~Q8 R9-AD-8~~ **本批已闭**（见 §3.0 与 R9-DEPS-1：就地补日期更正注记，不改写历史）。
@@ -680,6 +712,14 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   （主框架），受信面是整个 `file:///android_asset/` 前缀（首页 + GeoGebra）⇒ 壳页内跨源
   iframe 可驱动 `navigate/setEngine/setWallpaper/goBack`。实测 `shared/shell` 现零 iframe
   ⇒ 今日无落点，属一次性加固窗口（androidx.webkit 1.17 的 origin-scoped 重载）。
+  外部审计 AX-03 报**同一处为 P1**（理由「frame 身份未被鉴别」）⇒ 主代理裁决 **P1→P2**：
+  可达链要求「顶层已是壳页 + 壳页内有攻击者可控 frame」，而 `shared/shell` 全仓零 iframe
+  （本批 grep：`<iframe`/`createElement('iframe')` 在 `shared/` 与 Android assets 均 0 命中），
+  远程页面自己加载时 `webView.url` 就是那个远程 URL、判据本就拒 ⇒ 是提前封闭的信任边界，
+  不是现有绕过，与报告自己的限定一致（「不应声称已经存在远程代码执行漏洞」）。
+  批次 3 先做可直改面：壳页 CSP 把 `frame-src` 从「由 `default-src 'self'` 隐含」写成显式声明、
+  来源判据拒空/异常 url、补用例；`addJavascriptInterface` 拿不到调用方 frame origin 这条
+  残余属平台能力，迁 WebMessage 传输另行裁决。
 
 ### 5.2 SH（shared 壳层与契约）
 
@@ -902,6 +942,33 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    行按 Android 的样子改写成另一条断言（Q49）。
 4. 本地验证：`check_markdown_tables` / `check_markdown_links` / `check_doc_claims` ✅（纯文档批，
    代码与门禁零改动；`git status` 只含 7 个 .md + 台账 + CSV）。
+
+### 3.21 R9-B22（2026-10-11，外部第三轮审计驱动的 Windows P1 两则）：拒绝投递升级 + NTP 桥紧急停止门禁
+
+用户给出外部审计报告（`新建 文本文档 (7).txt`，基准即当时 master `eccc4c0`）并要
+「按审计意见完成修改」。先逐条回读代码再动手，其中两条 Windows P1 可直改，先落地。
+
+1. **AX-01 投递面**（`windows/src/Aegis.Windows.App/WebView/HostWebView.WebResourceGuards.cs`
+   227 行）：`OnWebResourceRequested` 改为 `DeliverDenial(denial, TryCreateDenialResponse,
+   TryStopWebView, TryWriteSecurityLog)`。判据核在纯函数里，四条行为用例 + 三条结构锚
+   （新文件 `SubresourceDenialDeliveryTests.cs`，206 行）。第八轮 ⑤ 的 `subresource_policy_error`
+   判据面留在 `SubresourceFailClosedTests`，两文件互不重叠。
+2. **AX-04 紧急停止覆盖面**（`Chrome/Ntp/NtpBridge.cs` 273 行 + `NtpBridgeFactory.cs`）：
+   `Services` 记录尾增 `Func<bool> IsLockdownEngaged`（工厂接 `Broker.KillSwitch.Shared.IsEngaged`，
+   两个装配点 `CreatePrivate`/`BuildServices` 都接），`Dispatch` 头部按 `SideEffectingOps` 拒绝。
+   新文件 `NtpBridgeLockdownTests.cs`（165 行）14 个用例面：6 项副作用操作拒 + 6 项未触发时
+   照样可达 + 6 项只读面冻结期可用 + 偏好面放行 + 执行时重验 + Task.Run 异步支路把拒绝**回给页面**
+   （否则前端只会把导入态复位成「成功但 0 条」）。
+3. 本机验证：`dotnet test` Core **832/832**（下界 700）、Broker **189/189**（下界 160），
+   `assert_test_counts.py` 两侧 ✅；`check_file_sizes.py` ✅（四个改动/新增文件均在 300 行内、
+   基线无变动）；`packages.lock.json` 零漂移。
+4. 刻意**没有**照抄的审计处方，全部回述进第四节而不是静默丢弃：AX-02（把
+   `policy.evaluate`/`capability.validate` 接进 FFI 通路——源码注释 `ffi/broker.rs:146-150`
+   记的就是这条缺口，但接通它会把「Rust 判 Allow」在端侧放大成什么，是核心裁决语义变更）、
+   AX-05/AX-06（原生核心强制启用脱离 HKCU/环境变量与 Android 构建参数——发布门禁与产品策略）、
+   AEG-009/AEG-010（与用户 2026-10-07「本机与内网必须能打开」定稿及既往否决冲突）、
+   AEG-011（等价待办项 10，本机无 Gradle 无法生成 lock）、AEG-014（FFI fuzzing 属阶段 C）。
+   去重两条：AX-07 ≡ §五 Q6（R9-AD-6）、AX-03 ≡ §五 Q10（R9-AD-10），均在原条目下续外部出处。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
