@@ -133,6 +133,12 @@ public partial class App : Application
             TryLog(
                 $"[adjudication] 原生策略核心要求={required}" +
                 $"（安装期标记={fromInstalledMarker}，" +
+                // AX-05：把编译进产物的构建姿态一起写出来。两个作用——①运维看日志
+                // 能分辨「谁要求了原生核心」（构建常量/环境变量/安装标记），
+                // ②发布链可在**已发布的 dll** 上按这条 ASCII 串验证终物真是
+                // require=1 那版（未被引用的 const 不进元数据，实测 grep 命中 0，
+                // 所以这条引用本身就是验证手段成立的前提）。
+                $"构建姿态={Broker.NativePolicyCoreBuildMarker.BuildPostureMarker}，" +
                 $"自定义库路径已配置={Broker.NativePolicyCoreGate.LibraryPath is not null}）；" +
                 $"探测结果={probeText}；" +
                 $"导航确认门要求={WebView.NavigationConfirmationGate.IsRequired}；{verdict}");

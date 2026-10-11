@@ -224,6 +224,27 @@ jobs:
             -PrequireNativePolicyCore=true \
             -PrequireNavigationConfirmation=true \
             -PnativePolicyCoreDir="$GITHUB_WORKSPACE/dist/native-policy/android"
+          # AX-06（外部第三轮审计 2026-10-11）：验**编译进 APK 的那个常量**，
+          # 不是验命令行里传了什么。上面 `-PrequireNativePolicyCore=true` 若因为
+          # 属性名漂移 / 被别处覆盖 / 新模块忘了接而没落到 buildConfigField 上，
+          # 产物就静默退回 Kotlin 本地实现——而 NativeGateWiringAnchorTest 那种
+          # 「workflow YAML 文本里含这行」的锚看不见编译结果，它只会跟着命令一起绿。
+          # 用 `if ! …; then ::error; exit 1; fi` 而不是 `grep && echo`：
+          # R9-CI-3 实测 Actions 的 bash 是 `-eo pipefail`，`&&` 列表非末位失败被豁免。
+          build_config="$(find app/build/generated -type f -name 'BuildConfig.*' -path '*release*' 2>/dev/null | head -1)"
+          if [ -z "$build_config" ]; then
+            echo "::error::找不到 release 变体的生成 BuildConfig——原生核心构建常量无法验证"
+            exit 1
+          fi
+          if ! grep -Eq 'REQUIRE_NATIVE_POLICY_CORE[[:space:]]*=[[:space:]]*true;' "$build_config"; then
+            echo "::error::生成的 BuildConfig 里 REQUIRE_NATIVE_POLICY_CORE 不是 true——发布 APK 会走 Kotlin 本地实现"
+            exit 1
+          fi
+          if grep -Eq 'REQUIRE_NATIVE_POLICY_CORE[[:space:]]*=[[:space:]]*false;' "$build_config"; then
+            echo "::error::BuildConfig 同时出现 false 形态（生成面异常，判定不可信）"
+            exit 1
+          fi
+          echo "[build-config] REQUIRE_NATIVE_POLICY_CORE=true 已确认：$build_config"
           # zipalign 校验（ADR-009）：4K + 16K 页对齐双验证，不对齐即失败。
           # R9-CI-3（第九轮 2026-10-10，P1）：原写法 `zipalign … && echo OK` 在
           # Actions 的 `bash --noprofile --norc -eo pipefail` 下**永不失败**——

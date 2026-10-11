@@ -55,6 +55,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | AX-01 | P1（外部第三轮审计 2026-10-11 声称，主代理回读后**降级为「一半保留并落地、一半早已成立」**） | 保留并落地（投递面） | 回读结论要分两段：①「策略链异常时保持原始请求路径」在第八轮 ⑤ 已闭（`HostWebView.WebResourceGuards.cs` 的 `SubresourceDenialFailClosed` 异常回 403 + `subresource_policy_error`），审计报告据此点名的仍是**拒绝之后**那一步：旧代码 `try { e.Response = CreateWebResourceResponse(...) } catch { 只写日志 }`——拒绝已经判出来，合成响应自己抛（COM 对象退休/Environment 释放）却把这条请求退回默认路径 ⇒ **留痕不是拦截**。落地＝两段各自收口：交付返回 false 与交付抛出是同一事实（拒绝没落地）⇒ 都升级到 `CoreWebView2.Stop()`（内核随当前导航一并停掉待发子资源），留重码 `subresource_denial_undeliverable`；不做「换一组参数再试一次」（失败原因是环境失效，换参数不改结局，只会把一次失败刷成两条互不相干的日志）。**关键实现细节**：`escalateStop()` 不能和 `tryDeliver()` 放同一个 try——照直觉写 `try{ if(deliver) return; escalate(); } catch{ log }` 时 tryDeliver 抛出会**跳过升级**，正是审计点名的形态，故拆两段并各自吞（`DeliverDenialNeverThrowsBackToTheEventShim` 用三个同时抛的注入面钉「永不抛出」，含留痕面）。不可达面按 R8-CS-SEC-11 同法补结构锚：handler 本体切片（有界、剔注释）必须含 `DeliverDenial(`/`TryStopWebView` 且**不含** `catch` 与 `e.Response =`，`TryStopWebView` 切片必须真有 `webView.Stop()`。WebView2 真实故障注入（本机无 Runtime）仍属第四节阶段 C，本批只有 JVM/CLR 侧判定面 |
 | AX-04 | P1（外部审计声称，主代理回读确证后**保留并落地**） | 保留并落地 | 回读确证：`KillSwitch` 此前只被 broker 的导航/下载/批准入口读取，而 `NtpBridge.Dispatch` 的 `restoreSession`/`importBookmarks`/`importHistory`/`goBack`/`openGeo`/`navigate` 经桥直达数据层与宿主，分发层零检查——README 早期就登记过这个覆盖面缺口，外部审计再次点名为准。落地＝判定单点放在 `Dispatch` 而不是按钮：`SideEffectingOps`（6 项）+ 拒绝码 `lockdown_engaged` + SecurityLog 留痕；**位置选择有实义**——`TryHandle` 对导入三操作走 `Task.Run`（CS-031），判在 `Dispatch` 才使「先排队、后排紧急停止」在执行时被重新验证，判在 `TryHandle` 就退化成入队时快照。判定边界如实登记而非一刀切：只读面（`getEngine`/`getWallpaper`/`bookmarks`/`hasSaved`/`importScan`/`jsError`）冻结期间必须可用（否则设置窗与异常上报一起废、用户看不到状态），`setEngine`/`setWallpaper` 是本机偏好、无网络与数据副作用，同样放行——各有用例钉住，防止下一轮把「统一门禁」误读成「桥里全部拒绝」。反向锚两条：同一批操作在未触发时必须照样落到宿主（证明拒绝来自开关而非「根本没接线」）、同一实例翻转闭包必须立刻生效（证明不是构造时快照）。NTP 桥本身有 `IsTrustedSource` 前置 ⇒ 这不构成远程页面可达路径，审计报告「不能直接认定远程网页能调用这些操作」的限定成立 |
 | AX-03 | P1（外部审计声称）→ **主代理裁 P2** | 保留并落地**可直改半边**（详见 §3.22） | 回读：`AegisHomeBridge.isTrustedShellPage()` 判的是顶层文档 URL，`@JavascriptInterface` 不提供调用者 frame 的 Origin——报告说的机制差异属实；但可达链要求「顶层已是壳页 + 壳页内有攻击者可控 frame」，实测 `shared/shell` 四段脚本 + HTML **零 iframe**（`<iframe`/`createElement('iframe')` 均 0 命中，GeoGebra 走 `openGeo` 顶层导航），远程页面自己作为顶层时该判据本就拒 ⇒ 属提前封闭的信任边界，按 P2 排。本批落 CSP 显式 `frame-src 'none'`（把「今天恰好没帧」换成「加帧必须改这行」）+ 5 例常驻锚（两条反向注入实测）；报告另一条处方「拒空/异常 URL」**本已成立**（`isTrustedShellUrl` 对 null/"" 返回 false、`runCatching` 异常按拒，`AegisHomeBridgePrefsTest.kt:149-159` 已钉），按原样登记不重做。迁 WebMessage 传输与「整个 `file:///android_asset/` 前缀受信」两面入 §五 Q50 与 §四 |
+| AX-05 / AX-06 | **P1**（外部审计声称，回读确证后保留并落地） | 保留并落地 | 回读确认报告的机制描述属实且比描述更糟：`NativePolicyCoreGate.cs:23-29` 的判定源是「环境变量（只在 CI 那步 shell 里赋值，不随包交付）+ HKCU 标记（普通用户可清除）」，`InstalledBuildMarker.cs:21-25` 甚至自己写着「不能恒真，否则毁掉开发工作流」——于是「不得静默回退到另一套策略实现」这条承诺的实际承载物是一个可删的注册表值；Android 侧 `requireNativePolicyCore` 由构建参数决定，而发布链唯一的锚 （`NativeGateWiringAnchorTest.kt:52-66`）判的是 **workflow YAML 里含不含那行字**，不是编译结果。落地＝要求由**编译进产物**：csproj 的 `GenerateNativePolicyCoreBuildMarker` 目标按 `RequireNativePolicyCore` 生成 `NativePolicyCoreBuildMarker.RequiredByThisBuild`（两条分支都生成，开发构建=false），`Gate.IsRequired` 改三源合一且**构建常量排第一**（纯函数 `ResolveRequirement` 可单测，环境变量仍只认精确 "1"）；发布链改验终物——release-windows 在已发布 dll 的 UTF-16 元数据里找姿态串 `aegis.build.require-native-policy-core=1` 并断言 =0 不出现、并第一次真正打开发布 ZIP 断言 DLL 在里面；release-android 改读 AGP 生成的 BuildConfig（含「找不到生成物即失败」，否则 find 空结果会让后面的 grep 恒真）。**两条实测细节写进注释**：①未被引用的 `const string` 不进元数据（加引用前 grep 命中 0）⇒ App.xaml.cs 那处日志引用是验证手段成立的前提，由测试钉住；②字面量在元数据里是 UTF-16，按 ASCII 找永远 0 命中＝另一种假绿。本机实测两版产物姿态串正确区分。三处文档同步改真（README:23-28、ADR-006:41-45、windows-run-guide:57-68），不留「文档说的≠实树的」。15 例新测试 + Core 832/Broker 204 全绿 |
 | AEG-006 | P1（外部审计声称，回读后**属实但范围改写**）→ 落地为门禁 + 扩面队列 | 保留并落地（判据化） | 报告说「C# 只连部分向量、Kotlin 主要消费 `url-origin-*`」——按 `git ls-files` 的受管源码面逐份实测（543 个文件，命中口径＝词干作为独立词或完整文件名，排除 markdown 与 `META_LEVEL`（按名遍历整个向量目录的工具面，含门禁自己与它的用例））：**15 份向量里只有 2 份真的两端都跑**（`url-origin-valid/invalid`，CS+AD+RS），11 份有端侧执行者，4 份（`capability-*`/`audit-event-*`）**没有任何端侧执行者**、只被 `validate_vector_schemas.py` 判形状/expected。其余单端事实逐条钉进 `scripts/verify_vector_consumers.py` 的 `CONSUMER_MANIFEST`。两点范围改写：①那四份不是「没人判」——它们的 expected 本就是 `valid`/`deny_schema`，schema 就是判据，不能按「契约件白做」处理；②**Agent 端对契约向量的消费为零**（`AG` 在实测分布里一次都没出现），与 R9-SH-5「`action-catalog.yaml` 的 confirmation/risk/audit 三列 broker 不读」是同一件事的两面。落地＝新常驻门禁（登记表双向不变量 + 跨端支点下界 + 端侧执行者下界 + 扫描面塌缩 exit 2）接进 `contracts.yml` 的 PR 面；注入式自证 8 条从 `--self-test` flag **搬进 pytest**（要人主动敲 flag 的自证＝跑不动的判据，R9-SH-7 同课）；扩面工作另登 §五 Q53 |
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
@@ -648,10 +649,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      端侧对 `Allow` 的放大行为要同时定义（本仓已实测过同类放大：某端桥把上游**每一个**
      Allow 都转成 RequireConfirmation，照审计的「一律拒绝异常」写就会全导航需确认）。
      这是核心裁决语义变更，要带三端契约向量另批设计，不当缺陷顺手改。
-  2. **AX-05 / AX-06（原生核心强制启用不能只靠 HKCU 标记或环境变量；Android 不能靠构建参数）**：
-     方向与本轮 §四既有项一致（发布制品的实际构建常量要由 CI 验终物而非验命令），但把
-     「正式构建默认要求原生核心」设成不可关，会让无 DLL 的开发机与本地 WPF 直接起不来；
-     且 Windows 侧强制开关从 HKCU 迁到受保护位置属安装/发布链决策 ⇒ 待定稿。
+  2. ~~**AX-05 / AX-06**~~ **已落地（§3.27；用户 2026-10-11 授权「全部完成」）**：
+     当时卡的是「设成不可关会让无 DLL 的开发机起不来」——解法不是恒真，而是**按构建属性
+     生成常量**：发布链传 `-p:RequireNativePolicyCore=true` ⇒ 产物里 `true`，开发机不传 ⇒
+     `false`，两条分支都生成文件所以「忘传参数」不会静默退化。HKCU 标记与环境变量保留为
+     第二/第三来源（旧安装升级、运维手工强制）。发布链同时改成验终物（dll 元数据姿态串 +
+     ZIP 内容 + Android 生成的 BuildConfig）。
   3. **AEG-009 / AEG-010（Android 局域网 HTTP 与 HTTPS-only 冲突、无痕与 KillSwitch 缺失）**：
      与用户 2026-10-07 定稿「**本机与内网必须能打开**」直接冲突，那条是不可回退裁决；
      Android 无痕模式需要独立数据生命周期设计（`clearCache()` 不等价），先前已否决过
@@ -1164,6 +1167,35 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    依赖 git 跟踪状态**——这条依赖现在写在脚本注释里，且用例必须在提交后重跑一遍才算验过。
 6. 扩面工作另登 §五 **Q53 R9-SH-13**（不顺手做：给 C#/Kotlin/Agent 各接一份向量执行面＝新增
    端侧裁决实现，与 §四 第 1 项 AX-02 是同一次改造）。
+
+### 3.27 R9-B27（2026-10-11，外部审计 AX-05/AX-06）：把「要求原生核心」编译进产物，发布链改验终物
+
+1. 判定源重排（`Broker/NativePolicyCoreGate.cs`）：`IsRequired` =  构建常量 ⇒ 环境变量
+   ⇒ 安装期标记，合一在纯函数 `ResolveRequirement(bool, string?, bool)`（注册表与环境变量
+   不可注入，纯判定面才有 8 组合可测）。构建常量排第一操作数是语义本身——若它排在最后，
+   「清注册表 + 清环境变量」就又能关掉要求。顺序由
+   `NativePolicyCoreBuildRequirementTests.GateIsRequiredActuallyReadsTheBuildConstant`
+   按「第一个实参」判，而不是只判「出现过」。
+2. 生成机制（`Aegis.Windows.App.csproj`）：`GenerateNativePolicyCoreBuildMarker`
+   `BeforeTargets="CoreCompile"` 写 `obj/generated/NativePolicyCoreBuildMarker.g.cs`，
+   **true/false 两条分支都生成**（缺 else 分支 ⇒ 开发构建直接编译不起来，那是最坏形态）。
+   两个 MSBuild 实测坑写进注释：裸 `;` 被当项分隔符（首版产物里留下
+   `RequiredByThisBuild = ;` ⇒ CS1525，须写 `%3B`）；属性展开里没有内联条件表达式
+   （`$(_X == '1')` 展开成空串 ⇒ CS1002）。开发机不传属性 ⇒ 恒 false，行为与以前一致。
+3. 发布链验终物：`release-windows.yml` 在 publish 后按 **UTF-16** 解码已发布
+   `Aegis.Windows.App.dll` 找姿态串（=1 必须在、=0 必须不在），并第一次打开
+   `Aegis.Windows.zip` 断言 `aegis_policy_core.dll` 在其中（此前只 `Test-Path` 发布目录）；
+   `release-android.yml` 改读 AGP 生成的 `BuildConfig`（`find` 空结果即失败）。
+   本机实测两个构建形态的产物确实可区分（`=0` 与 `=1` 各命中一次，UTF-16 解码）。
+4. **验证手段自身的依赖被钉住**：`const string` 没有任何引用点时不进元数据
+   （实测 grep 命中 0）⇒ `App.xaml.cs` 的 `[adjudication]` 日志引用姿态串是这条 CI
+   断言成立的前提，`PostureStringIsReferencedAtRuntime_OtherwiseNoArtifactCanProveIt`
+   判的就是这个引用；「未被引用的守卫是死代码」在同仓已有先例
+   （`NativePolicyCoreBridgeLeaseTests.IsUsableGuardIsActuallyConsumed`）。
+5. 文档同批改真三处：`README.md:23-28`、`docs/adr/ADR-006…:41-45`、
+   `docs/runbooks/windows-run-guide.md:57-68`——三处原文都写「由安装期标记驱动」，
+   现在标记是第三来源。不留「文档说的 ≠ 实树的」这类账（R9-DOC 一整族就是这么来的）。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

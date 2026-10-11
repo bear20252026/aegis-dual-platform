@@ -21,9 +21,12 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
 - **导航裁决链**：每次导航经 Broker 决策（fail-closed）。**注意分端差异**——
   Rust 核心的 FFI 入口 `evaluate_navigation` 内不含策略/能力/黑名单层（代码自述
   H-7：`policy.evaluate / capability.validate 未接入 FFI 通路`）；Windows 发布物的
-  原生门禁此前依赖永不置位的环境变量，第六轮已改由安装器写入的按用户注册表标记
-  （`HKCU\Software\Aegis Browser\RequireNativePolicyCore`）驱动，故安装包内导航
-  确实经 Rust 核心裁决（启动留痕见安全日志 `[adjudication]` 行）；Android 发布 APK
+  原生门禁自第十轮起由**编译进产物的构建常量**要求（`-p:RequireNativePolicyCore=true`
+  ⇒ `NativePolicyCoreBuildMarker`，发布链在已发布 dll 上验证该姿态串），
+  按用户注册表标记（`HKCU\Software\Aegis Browser\RequireNativePolicyCore`）与环境
+  变量退居第二/第三来源——清注册表或脱离安装器直接启动 EXE 都不再能把要求关掉；
+  故安装包内导航确实经 Rust 核心裁决（启动留痕见安全日志 `[adjudication]` 行，
+  该行现同时记构建姿态）；Android 发布 APK
   由发布链置位 `-PrequireNavigationConfirmation=true`（该置位自第八轮 B3 起被静态锚
   钉住，删参数即红），故「高危目标触发用户确认流」在 **Android 生效**；Windows 出货
   构建**未启用**导航确认门，核心判「需显式确认」的目标自第八轮 B4 起改为用户可见

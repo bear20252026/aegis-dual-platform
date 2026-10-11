@@ -18,11 +18,14 @@ using Microsoft.Win32;
 /// HKLM 写入需要管理员；HKCU 是安装器可写、应用可读、无需提升的落点。安装器在
 /// 64 位模式（ArchitecturesInstallIn64BitMode=x64compatible）下写的正是 x64 应用
 /// 默认读取的视图。
-/// 为什么不能把"必须原生核心"改成恒真：Aegis.Windows.App.csproj 仅在
+/// 为什么不是"改成恒真"（AX-05 更新，2026-10-11）：Aegis.Windows.App.csproj 仅在
 /// -p:RequireNativePolicyCore=true 且给定存在路径时才拷贝 DLL，普通 dotnet build
 /// 产物没有 DLL——恒真则每个开发构建启动即 ProbeLibrary 失败并全导航
-/// fail-closed（毁掉开发工作流）。因此该要求只由安装期标记或环境变量驱动，
-/// 开发机恒为 Disabled()。
+/// fail-closed（毁掉开发工作流）。现做法是把要求**编译进产物**
+/// （NativePolicyCoreBuildMarker，由 csproj 的生成目标按构建属性落 true/false），
+/// 发布构建因此不再依赖本标记；本标记退居第三来源，仍服务两类真实场景：
+/// 升级前装好的旧版本（产物里没有构建常量的那批），以及用户/运维手工强制打开。
+/// 开发机两者皆无 ⇒ 恒为 Disabled()。
 /// </summary>
 public static class InstalledBuildMarker
 {
