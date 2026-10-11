@@ -76,6 +76,15 @@ legacy/crash_reports/
 # Android 构建产物（含评审包镜像）
 **/build/
 
+# Gradle 版本锁（第九轮项 10 / AEG-011）：四个模块的 `android/<模块>/gradle.lockfile`
+# 是**入库**的判定面（STRICT 模式下缺它即解析失败），所以这里绝不写 `*.lockfile` 这种
+# 通配。本条只忽略 `--write-locks` 顺手生成的 settings 侧产物：它恒为一行
+# `empty=incomingCatalogForLibs0`——settings 摄入 gradle/libs.versions.toml 用的那条内部配置，本身
+# 不解析任何模块坐标，所以锁出来永远是空。删掉它构建照样通过（实测
+# `./gradlew help` EXIT=0 且不会被重建），入库只会让 Dependency-Retlock 的
+# 「diff 里必须全是 gradle.lockfile」守卫每次都误判红。
+android/settings-gradle.lockfile
+
 # 交付物（安装包 / 源码打包 zip）
 # SP-093（审计 2026-09-23 清单·SP1 批）：assets/ 目录全树不存在——
 # assets/fonts/*（5 条）与 assets/fonts/fonts-bundle.zip 死规则删除；

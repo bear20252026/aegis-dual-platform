@@ -24,7 +24,7 @@ R8-DEPS-3,P2,问题/依赖锁定,windows/src/Aegis.Windows.App/packages.lock.jso
 R8-DEPS-4,P2,问题/被上游阻塞,core/rust-policy-core/Cargo.toml:4-9,uniffi 0.33不存在(最新0.32.2)⇒edition2024暂缓仍成立且无ETA,yes,B7
 R8-DEPS-5,P2,问题/可复现性,.github/workflows/release-windows.yml:39,windows-latest现映射windows-2025-vs2026；发布链应pin windows-2025,yes,B6
 R8-DEPS-7,P2,提升/能力未用,android/gradle/libs.versions.toml:14,androidx.webkit 1.15→1.17.1（Isolated Worlds/setDownloadFaviconsEnabled）,yes,B6
-R8-DEPS-8,P2,问题/依赖锁定,android/settings.gradle.kts:17-28,AD-155禁dependencyLocking的理由只覆盖直接依赖，传递树每次解析取最新,no,待裁决
+R8-DEPS-8,P2,问题/依赖锁定,android/settings.gradle.kts:17-28,AD-155禁dependencyLocking的理由只覆盖直接依赖，传递树每次解析取最新｜落地更正（R9-B30，2026-10-11）：登记文本「只覆盖直接依赖」不准确——lockAllConfigurations() 锁全部可解析配置（含 androidTest/lint/detekt/ktlint 工具面）。已在四模块启用 STRICT 并入库四把 gradle.lockfile；AD-155 的「忘重锁即解析失败」在 STRICT 下就是门禁本身。另一半 dependency verification（校验和）未做 ⇒ 第九轮 Q55,yes,R9-B30
 R8-CS-SEC-02,P1,问题/fail-open,"windows/src/Aegis.Windows.App/WebView/HostWebView.cs:234,395-409",e.Cancel=!TryAuthorizeNavigation(...) 无异常边界：求值期抛出（桥租约/COM/确认面板事件订阅方）即整句作废，e.Cancel 停在默认 false ⇒ 未授权导航照常放行=门禁失效。逐行回读后由 P2 升 P1；B4 余量第二批已闭（取消先行 + internal 纯函数判定核 + 行为用例）,yes,B4余量
 R8-RS-15,P2,提升/一致性根因,core/rust-policy-core/src/lib.rs:43-56,13个C ABI导出无任何JS生成入口⇒三端手抄同一份JS,no,B9
 R8-SH-15,P2,问题/测试弱断言,"tests/ui-regression/start_page.test.mjs:36,143",BUG-001/006回归锁语料语言错配（setTag是Java/setOf是Kotlin）⇒两条恒真（已闭：锁迁至 android/app DocumentStartInjectionRegressionTest，判代码行并剔注释，另加正面控制用例证明被观察结构确在语料里）,yes,B5余量

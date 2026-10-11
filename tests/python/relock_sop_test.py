@@ -162,3 +162,112 @@ def test_relock_job_sets_io_encoding_for_whole_job() -> None:
     job = doc["jobs"]["relock"]
     env = job.get("env") or {}
     assert env.get("PYTHONIOENCODING") == "utf-8", f"relock job 缺 PYTHONIOENCODING（env={env}）"
+
+
+# ── Gradle 面（项 10 / AEG-011，2026-10-11 启用 STRICT 锁定）──────────────────────
+# 这一步同样只在 workflow_dispatch 里跑，PR 面永不执行 ⇒ 只能钉结构，
+# 且必须证明「注入会红」（把任务清单里任意一条删掉即判红）。
+
+GRADLE_JOB = "gradle-relock"
+
+# 只有「会解析依赖并产出/校验东西」的任务才要求进重锁面；`:app:dependencies`、
+# `buildEnvironment` 是报表任务（它们解析的配置本来已在锁里），不在此列。
+_RESOLVING_PREFIXES = ("assemble", "test", "lint", "ktlint", "detekt", "compile", "bundle")
+_TASK_TOKEN = re.compile(r":[\w\-]+:(?:" + "|".join(_RESOLVING_PREFIXES) + r")\w+")
+
+
+def gradle_job_doc() -> dict:
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    assert GRADLE_JOB in doc["jobs"], f"dependency-relock 缺 {GRADLE_JOB} job"
+    return doc["jobs"][GRADLE_JOB]
+
+
+def gradle_relock_run() -> str:
+    steps = gradle_job_doc().get("steps", []) or []
+    matches = [s for s in steps if "Gradle 重锁" in str(s.get("name", ""))]
+    assert len(matches) == 1, f"Gradle 重锁步骤必须恰好一个，实得 {len(matches)}"
+    # 判代码不判注释：这一步的注记里逐字写着其它 workflow 的文件名
+    return code_only(str(matches[0]["run"]))
+
+
+def ci_resolving_tasks() -> dict[str, set[str]]:
+    """其它 workflow 里出现的、会解析依赖的 gradle 任务（按文件分组，便于报红时点名）。"""
+    wanted: dict[str, set[str]] = {}
+    for workflow in sorted(WORKFLOW.parent.glob("*.yml")):
+        if workflow.name == WORKFLOW.name:
+            continue
+        text = workflow.read_text(encoding="utf-8")
+        if "gradlew" not in text:
+            continue
+        tasks = set(_TASK_TOKEN.findall(text))
+        if tasks:
+            wanted[workflow.name] = tasks
+    return wanted
+
+
+def missing_from_run(run_text: str) -> list[str]:
+    covered = set(_TASK_TOKEN.findall(run_text))
+    return [
+        f"{name} 的 {task}"
+        for name, tasks in sorted(ci_resolving_tasks().items())
+        for task in sorted(tasks)
+        if task not in covered
+    ]
+
+
+def test_gradle_surface_is_selected_only_when_asked() -> None:
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    options = doc["on"]["workflow_dispatch"]["inputs"]["ecosystem"]["options"]
+    assert "gradle" in options, f"ecosystem 输入里没有 gradle 选项（实有 {options}）"
+    gradle_if = str(gradle_job_doc().get("if", ""))
+    assert "gradle" in gradle_if and "all" in gradle_if, (
+        f"gradle-relock job 必须同时在 ecosystem=gradle 与 all 下运行（if={gradle_if}）"
+    )
+    # 另一半：windows 的 relock job 不能跟着跑 gradle 面——它没有 Android SDK，
+    # 且它的写回 pathspec 不含 android/，跑了就是「写不回任何东西的成功」。
+    relock_if = str(doc["jobs"]["relock"].get("if", ""))
+    assert "gradle" in relock_if, f"relock job 必须排除 ecosystem=gradle（if={relock_if}）"
+
+
+def test_gradle_relock_covers_every_resolving_task_ci_runs() -> None:
+    """重锁任务清单 ⊇ CI 各 workflow 里会解析依赖的 gradle 任务。
+
+    `--write-locks` 只写本次构建**解析过**的配置。清单少一条任务，那条任务用的配置
+    就没有锁状态，而 STRICT 是「没有锁状态就拒绝解析」——于是红的是下一个 PR，
+    不是这次 dispatch。本用例把这件事变成 dispatch 当场红。"""
+    run = gradle_relock_run()
+    covered = set(_TASK_TOKEN.findall(run))
+    assert covered, "重锁步骤里一个 gradle 任务都没解析到——多半是正则口径错了"
+    assert ci_resolving_tasks(), "没有任何 workflow 调用 gradlew——扫描面塌了"
+    missing = missing_from_run(run)
+    assert not missing, "重锁面必须覆盖 CI 解析面：" + "、".join(missing)
+
+
+def test_removing_one_task_from_the_relock_list_turns_the_gate_red() -> None:
+    """反向锚（内存态注入，不改工作树）：删掉清单里一条任务必须判红。"""
+    run = gradle_relock_run()
+    sample = sorted(set(_TASK_TOKEN.findall(run)))[0]
+    injected = "\n".join(line.replace(f" {sample}", "") for line in run.splitlines())
+    assert sample not in set(_TASK_TOKEN.findall(injected)), "注入没生效——这条锚会恒真"
+    missing = missing_from_run(injected)
+    assert missing, f"删掉 {sample} 后覆盖判据仍通过＝它在判空气"
+    # 判红必须恰好归因到被删的那条任务（同一个任务在多个 workflow 里出现时会有多条）
+    assert all(sample in entry for entry in missing), f"归因跑偏：{missing}"
+
+
+def test_gradle_writeback_still_needs_its_own_guard_and_lock_only_diff() -> None:
+    """写回步骤不许 `|| true`、必须自带 deps/* 守卫，且「有 diff 但没锁文件」要判红。"""
+    steps = gradle_job_doc().get("steps", []) or []
+    writeback = [s for s in steps if "写回分支" in str(s.get("name", ""))]
+    assert len(writeback) == 1, f"gradle 面写回步骤必须恰好一个，实得 {len(writeback)}"
+    code = code_only(str(writeback[0]["run"]))
+    assert "|| true" not in code, "写回步骤里出现 `|| true`——git add 失败会被静默吞掉"
+    assert "deps/*)" in code, "写回步骤必须自带 deps/* 二次守卫（不依赖前一步存在）"
+    assert "gradle.lockfile" in code, (
+        "必须校验「diff 里确实有一把锁文件」——否则顺手改了版本目录也会被推上去"
+    )
+    loops = re.findall(r"for pathspec in ([^;]+); do", code)
+    assert len(loops) == 1, f"应恰好一个 pathspec 清单，实得 {len(loops)}"
+    listed = loops[0].split()
+    absent = [name for name in listed if not (ROOT / name).exists()]
+    assert not absent, f"清单里的 pathspec 在仓库里不存在（git 会 fatal 并放弃整条 add）: {absent}"

@@ -45,6 +45,12 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # 项 10 / AEG-011（2026-10-11）：android/ 四模块自这批起启用 STRICT 版本锁
+    # （各模块 gradle.lockfile）。后果如实登记：版本目录被 bump 而锁没跟着重算时，
+    # **CI 必红**（这是设计，不是事故）。Dependabot 会不会在同一 PR 里重写
+    # gradle.lockfile 本仓未实证，所以分诊口径是：PR 里只有 libs.versions.toml 的
+    # 两行 diff 而 android/*/gradle.lockfile 未变 ⇒ 在该分支上 dispatch
+    # Dependency-Retlock（ecosystem=gradle）补锁，再审合并；绝不靠放宽 lockMode 变绿。
     # SP-245：同 github-actions 组口径
     groups:
       minor-and-patch:

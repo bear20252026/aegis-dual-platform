@@ -59,3 +59,20 @@ plugins {
     // 工具链 P0：Kotlin 静态分析/代码异味（detekt 官方 Gradle 插件）
     alias(libs.plugins.detekt) apply false
 }
+
+// ── 依赖锁定（第九轮项 10 / AEG-011，2026-10-11 启用）：单源在 root，不在四个模块脚本 ──
+// 为什么放这里而不是每个模块各写一份：①「新增第五个模块忘记加锁」没有任何机器会提醒
+// （fail-open），而 `subprojects` 作用域自动覆盖后来者（fail-closed）；②`:app` 的构建脚本
+// 停在 316 行的零余量基线上（行数红线：基线文件只许减不许增），第 5 行代码塞不进去——
+// 是它逼出了这个更好的形状。
+// 时序有实义：root 脚本先于子模块脚本求值，所以 `lockAllConfigurations()` 注册在 AGP 创建
+// 变体配置、ktlint/detekt 创建工具配置**之前**，这些后续配置一律进锁（实测锁里确有
+// debugAndroidTestCompileClasspath / ktlintRuleset / detektPlugins 这些传递与工具面条目）。
+// STRICT 虽是 Gradle 缺省值也显式写出——靠缺省就是「缺省一变即静默放松」。
+// 覆盖面（脚本类路径不在内）、锁不含校验和、重锁 SOP：单源决策记录在 settings.gradle.kts。
+subprojects {
+    dependencyLocking {
+        lockAllConfigurations()
+        lockMode = LockMode.STRICT
+    }
+}
