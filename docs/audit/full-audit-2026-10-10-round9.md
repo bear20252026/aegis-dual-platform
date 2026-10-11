@@ -56,6 +56,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | AX-04 | P1（外部审计声称，主代理回读确证后**保留并落地**） | 保留并落地 | 回读确证：`KillSwitch` 此前只被 broker 的导航/下载/批准入口读取，而 `NtpBridge.Dispatch` 的 `restoreSession`/`importBookmarks`/`importHistory`/`goBack`/`openGeo`/`navigate` 经桥直达数据层与宿主，分发层零检查——README 早期就登记过这个覆盖面缺口，外部审计再次点名为准。落地＝判定单点放在 `Dispatch` 而不是按钮：`SideEffectingOps`（6 项）+ 拒绝码 `lockdown_engaged` + SecurityLog 留痕；**位置选择有实义**——`TryHandle` 对导入三操作走 `Task.Run`（CS-031），判在 `Dispatch` 才使「先排队、后排紧急停止」在执行时被重新验证，判在 `TryHandle` 就退化成入队时快照。判定边界如实登记而非一刀切：只读面（`getEngine`/`getWallpaper`/`bookmarks`/`hasSaved`/`importScan`/`jsError`）冻结期间必须可用（否则设置窗与异常上报一起废、用户看不到状态），`setEngine`/`setWallpaper` 是本机偏好、无网络与数据副作用，同样放行——各有用例钉住，防止下一轮把「统一门禁」误读成「桥里全部拒绝」。反向锚两条：同一批操作在未触发时必须照样落到宿主（证明拒绝来自开关而非「根本没接线」）、同一实例翻转闭包必须立刻生效（证明不是构造时快照）。NTP 桥本身有 `IsTrustedSource` 前置 ⇒ 这不构成远程页面可达路径，审计报告「不能直接认定远程网页能调用这些操作」的限定成立 |
 | AX-03 | P1（外部审计声称）→ **主代理裁 P2** | 保留并落地**可直改半边**（详见 §3.22） | 回读：`AegisHomeBridge.isTrustedShellPage()` 判的是顶层文档 URL，`@JavascriptInterface` 不提供调用者 frame 的 Origin——报告说的机制差异属实；但可达链要求「顶层已是壳页 + 壳页内有攻击者可控 frame」，实测 `shared/shell` 四段脚本 + HTML **零 iframe**（`<iframe`/`createElement('iframe')` 均 0 命中，GeoGebra 走 `openGeo` 顶层导航），远程页面自己作为顶层时该判据本就拒 ⇒ 属提前封闭的信任边界，按 P2 排。本批落 CSP 显式 `frame-src 'none'`（把「今天恰好没帧」换成「加帧必须改这行」）+ 5 例常驻锚（两条反向注入实测）；报告另一条处方「拒空/异常 URL」**本已成立**（`isTrustedShellUrl` 对 null/"" 返回 false、`runCatching` 异常按拒，`AegisHomeBridgePrefsTest.kt:149-159` 已钉），按原样登记不重做。迁 WebMessage 传输与「整个 `file:///android_asset/` 前缀受信」两面入 §五 Q50 与 §四 |
 | AX-05 / AX-06 | **P1**（外部审计声称，回读确证后保留并落地） | 保留并落地 | 回读确认报告的机制描述属实且比描述更糟：`NativePolicyCoreGate.cs:23-29` 的判定源是「环境变量（只在 CI 那步 shell 里赋值，不随包交付）+ HKCU 标记（普通用户可清除）」，`InstalledBuildMarker.cs:21-25` 甚至自己写着「不能恒真，否则毁掉开发工作流」——于是「不得静默回退到另一套策略实现」这条承诺的实际承载物是一个可删的注册表值；Android 侧 `requireNativePolicyCore` 由构建参数决定，而发布链唯一的锚 （`NativeGateWiringAnchorTest.kt:52-66`）判的是 **workflow YAML 里含不含那行字**，不是编译结果。落地＝要求由**编译进产物**：csproj 的 `GenerateNativePolicyCoreBuildMarker` 目标按 `RequireNativePolicyCore` 生成 `NativePolicyCoreBuildMarker.RequiredByThisBuild`（两条分支都生成，开发构建=false），`Gate.IsRequired` 改三源合一且**构建常量排第一**（纯函数 `ResolveRequirement` 可单测，环境变量仍只认精确 "1"）；发布链改验终物——release-windows 在已发布 dll 的 UTF-16 元数据里找姿态串 `aegis.build.require-native-policy-core=1` 并断言 =0 不出现、并第一次真正打开发布 ZIP 断言 DLL 在里面；release-android 改读 AGP 生成的 BuildConfig（含「找不到生成物即失败」，否则 find 空结果会让后面的 grep 恒真）。**两条实测细节写进注释**：①未被引用的 `const string` 不进元数据（加引用前 grep 命中 0）⇒ App.xaml.cs 那处日志引用是验证手段成立的前提，由测试钉住；②字面量在元数据里是 UTF-16，按 ASCII 找永远 0 命中＝另一种假绿。本机实测两版产物姿态串正确区分。三处文档同步改真（README:23-28、ADR-006:41-45、windows-run-guide:57-68），不留「文档说的≠实树的」。15 例新测试 + Core 832/Broker 204 全绿 |
+| AX-02 / AEG-001 | **P1**（外部审计声称，回读后**属实但处方必须改写**）→ 已落地 | 保留并落地（惰性接入） | 缺口是真的：`ffi/broker.rs` 的 `evaluate_navigation` 只调 `validate_action`（第三层），`ContextBroker::evaluate`（broker.rs:247）才串三层，前两个层在 FFI 通路零调用（`broker.rs` 的 H-7 注记自述）。但**照处方直连会拒掉每一次导航**，两条实测事实：①生产构造是 `PolicyEngine::default()`＝空规则，`ActionPolicy::evaluate_opt` 在无规则匹配时返回 None（`action_policy.rs:110` 的 `let rule = best?;`，默认效果只作用于非 opt 的 `evaluate`）⇒ `PolicyEngine::evaluate` 落 `PolicySource::FailSafe` 的恒 Deny；②`CapabilityRegistry::validate` 对未注册 capability 恒拒绝（`capability.rs:156`）而生产注册表恒空。落地口径＝「该层**没有意见**时不改裁决；一旦配置即生效且其 Deny 不可被后面的 Allow 出口改回允许」（单调加严），接入点在会话验证**之前**。9 例新测试的三条关键：未配置时 FFI 拒绝码必须仍是 `session_not_found`（把 FailSafe 当拒绝直连的话这条第一个红）；同一入参配上 deny 规则后必须变 `policy_denied`（一条同时证明「配置生效」与「排在会话验证之前」）；空注册表必须是「未配置」而非「什么都拒」。`RequireConfirmation` 复用既有 `register_pending_approval`，不开第二份授权账；锁毒化仍 fail-closed。今天没有宿主入口注册规则/能力（`register()` 生产零调用）⇒ 出货行为零变更是**设计结果**，价值是把「裁决链不完整」变成「链已闭合、缺的是配置面」。五处文档撤 H-7 陈述（README×2、CLAUDE.md 模块表、ADR-006、ADR-008×2、ADR 索引）；ABI 面零变更（新增都在非导出 impl 块）；577 lib 测试全绿、clippy `-D warnings` 干净；三个零余量文件靠改写更短注记 + `impl Default` 换 derive 守住基线 |
 | AEG-006 | P1（外部审计声称，回读后**属实但范围改写**）→ 落地为门禁 + 扩面队列 | 保留并落地（判据化） | 报告说「C# 只连部分向量、Kotlin 主要消费 `url-origin-*`」——按 `git ls-files` 的受管源码面逐份实测（543 个文件，命中口径＝词干作为独立词或完整文件名，排除 markdown 与 `META_LEVEL`（按名遍历整个向量目录的工具面，含门禁自己与它的用例））：**15 份向量里只有 2 份真的两端都跑**（`url-origin-valid/invalid`，CS+AD+RS），11 份有端侧执行者，4 份（`capability-*`/`audit-event-*`）**没有任何端侧执行者**、只被 `validate_vector_schemas.py` 判形状/expected。其余单端事实逐条钉进 `scripts/verify_vector_consumers.py` 的 `CONSUMER_MANIFEST`。两点范围改写：①那四份不是「没人判」——它们的 expected 本就是 `valid`/`deny_schema`，schema 就是判据，不能按「契约件白做」处理；②**Agent 端对契约向量的消费为零**（`AG` 在实测分布里一次都没出现），与 R9-SH-5「`action-catalog.yaml` 的 confirmation/risk/audit 三列 broker 不读」是同一件事的两面。落地＝新常驻门禁（登记表双向不变量 + 跨端支点下界 + 端侧执行者下界 + 扫描面塌缩 exit 2）接进 `contracts.yml` 的 PR 面；注入式自证 8 条从 `--self-test` flag **搬进 pytest**（要人主动敲 flag 的自证＝跑不动的判据，R9-SH-7 同课）；扩面工作另登 §五 Q53 |
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
@@ -643,8 +644,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 - **外部第三轮审计（2026-10-11）里不能照做的条目**——审计报告给的处方有几条会改变
   「默认放行 vs 默认阻断」的语义或出货制品的强制方式，逐条列出而不是静默丢弃：
-  1. **AX-02 / AEG-001（`ffi/broker.rs:146-150` 的 `policy.evaluate` + `capability.validate`
-     未进 FFI 通路）**：源码注释确实记着这条缺口（既有台账 H-7），但「接通」不是补一行调用——
+  1. ~~**AX-02 / AEG-001**~~ **已落地（§3.28，用户 2026-10-11 授权「全部完成」）**：当时卡的是「按字面接线会拒掉全部导航」，解法是**「没有意见时不改裁决 + 单调加严」**而不是恒放或恒拒。剩下的只是配置面（谁注册规则/能力白名单从哪来）。原文：源码注释确实记着这条缺口（既有台账 H-7），但「接通」不是补一行调用——
      Windows/Android 现在各自解释 FFI 返回值，一旦把 capability 的许可面并入裁决，
      端侧对 `Allow` 的放大行为要同时定义（本仓已实测过同类放大：某端桥把上游**每一个**
      Allow 都转成 RequireConfirmation，照审计的「一律拒绝异常」写就会全导航需确认）。
@@ -1231,6 +1231,32 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    现在标记是第三来源。不留「文档说的 ≠ 实树的」这类账（R9-DOC 一整族就是这么来的）。
 
 >>>>>>> origin/master
+
+### 3.28 R9-B28（2026-10-11，外部审计 AX-02 / AEG-001）：策略层与能力层接入 FFI 通路
+
+1. 审计处方（「把 capability 纳入统一导航授权对象、异常一律拒」）方向对，但**字面照做会
+   拒掉全部导航**——生产构造是空规则 + 空注册表：`action_policy.rs:110` 的
+   `let rule = best?;` 让「无匹配」返回 None，`PolicyEngine` 于是落 `FailSafe` 恒 Deny；
+   `capability.rs:156` 让未注册 capability 恒 `Denied`。这两条是回读证据，不是推测。
+2. 采用的口径：**该层没有意见时不改裁决；一旦配置即生效，且它的 Deny 不可被后面的
+   Allow 出口改回允许**（单调加严）。接入点在会话验证**之前**——放在之后就成了
+   「会话结果覆盖策略裁决」。判定本体 `src/broker/pre_layers.rs`（`ContextBroker` 的子模块，
+   能读它的私有字段，因此不必给三层新增公共访问器）；FFI 侧映射
+   `src/ffi/broker/policy_layers.rs`，`RequireConfirmation` 走既有
+   `register_pending_approval`（第二份授权账不开），锁毒化返回 `broker_lock` 拒绝
+   而不是「当作没意见继续放行」。
+3. 测试两侧对称（6 + 3 例）：核心侧钉「空配置惰性 / 配置后终局 / Ask 不被吞 /
+   能力白名单内外 / Deny 单调」；FFI 侧钉「未配置时拒绝码仍来自会话层」与
+   「配 deny 规则后同一入参变 `policy_denied`」——后者一条同时证明接线**顺序**。
+4. 行数红线（三个零余量文件）：`broker.rs` 1115、`ffi/broker.rs` 935、`capability.rs` 543
+   全部守住——办法是把注记改写得更短（信息不丢，H-7 那段本就要重写）以及把
+   `impl Default for CapabilityRegistry` 换成 `#[derive(Default)]`（clippy
+   `derivable_impls` 本来就建议这个），新增逻辑全在两个新文件里。
+5. **今天没有任何宿主入口去注册规则或能力** ⇒ 这次接线在出货形态上必然零行为变更。
+   这不是「接了个永不响的钩子」：它把「策略/能力层不在 FFI 通路上」这条 P1 陈述变成
+   假，并且让将来任何配置面接入时**不可能绕过核心**（顺序与不可覆盖性已被测试钉住）。
+   真正的配置面（谁注册规则、能力白名单从哪来）仍是 §四 第 1 项的产品决策，本批不替它决定。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
