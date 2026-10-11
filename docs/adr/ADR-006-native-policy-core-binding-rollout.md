@@ -39,9 +39,12 @@ Windows 不接入未审计的第三方 UniFFI C# 生成器。Windows 后续仅�
 
 - **Windows C ABI 分支：已落地**。最小、版本化、panic-guarded 的 C ABI + P/Invoke
   包装（`NativeInterop.cs` / `NativePolicyCoreBridge.cs`）已在发布物内，
-  导出面由 RS-310 冻结集对账；「不得静默回退到另一套策略实现」由安装器写入的
-  按用户注册表标记 `HKCU\Software\Aegis Browser\RequireNativePolicyCore` 驱动
-  （第六轮改掉「只在 CI shell 里赋值、安装包读不到的环境变量」）。
+  导出面由 RS-310 冻结集对账；「不得静默回退到另一套策略实现」现由**编译进产物的
+  构建常量**保证（第十轮 AX-05：`-p:RequireNativePolicyCore=true` ⇒
+  `NativePolicyCoreBuildMarker.RequiredByThisBuild`，发布链在已发布 dll 上验该姿态），
+  安装器写入的按用户注册表标记 `HKCU\Software\Aegis Browser\RequireNativePolicyCore`
+  与环境变量降为第二/第三来源（第六轮先改掉「只在 CI shell 里赋值、安装包读不到的
+  环境变量」，第十轮再改掉「普通用户可清除的唯一标记」）。
 - **开关默认值与本 ADR 已不同**：本 ADR 写「开关默认关闭」；发布链现为
   **要求置位**——Windows 安装器写标记，Android 发布链传
   `-PrequireNativePolicyCore=true` 与 `-PrequireNavigationConfirmation=true`

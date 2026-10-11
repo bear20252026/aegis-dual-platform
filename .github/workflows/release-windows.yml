@@ -179,6 +179,31 @@ jobs:
             throw "Windows 发布目录缺少 Rust 原生策略核心 DLL"
           }
           Compress-Archive -Path dist/aegis-windows/* -DestinationPath dist/Aegis.Windows.zip -Force
+          # AX-05/AX-06（外部第三轮审计 2026-10-11）：验**终物**，不是验命令行。
+          # 上面那条 `-p:RequireNativePolicyCore=true` 只证明这一步传了参数；
+          # 参数没落到编译上（属性名打错、被别的 -p 覆盖、走了另一条 publish 线）
+          # 时产物照样能跑，只是运行时恒 Disabled()——那正是本仓记过的
+          # 「DLL 随包发布却从不被咨询」断链的形态。这里读已发布 dll 的元数据字符串
+          # （.NET 字面量存 UTF-16，按 ASCII 找永远 0 命中，那是另一种假绿）；
+          # 姿态串能被读到的前提是 App.xaml.cs 有引用点（无引用的 const 不进元数据），
+          # 该依赖由 NativePolicyCoreBuildRequirementTests 钉住。
+          Add-Type -AssemblyName System.IO.Compression
+          $appDll = (Resolve-Path dist/aegis-windows/Aegis.Windows.App.dll).Path
+          $posture = [System.Text.Encoding]::Unicode.GetString([System.IO.File]::ReadAllBytes($appDll))
+          if ($posture -notmatch 'aegis\.build\.require-native-policy-core=1') {
+            throw "require-native-policy-core-artifact：已发布产物不是「要求原生核心」那版构建"
+          }
+          if ($posture -match 'aegis\.build\.require-native-policy-core=0') {
+            throw "require-native-policy-core-artifact：产物里同时出现 require=0 姿态串（构建属性没传对）"
+          }
+          # 发布 ZIP 从没被打开过（此前只 Test-Path 发布目录）——压缩包里没有 DLL
+          # 就等于安装包里也没有，而这条链在合并前不会有任何信号。
+          $zipPath = (Resolve-Path dist/Aegis.Windows.zip).Path
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try { $zipEntries = @($zip.Entries | ForEach-Object { $_.Name }) } finally { $zip.Dispose() }
+          if ($zipEntries -notcontains 'aegis_policy_core.dll') {
+            throw "require-native-policy-core-artifact：发布 ZIP 缺少原生策略核心 DLL"
+          }
       - name: Ensure Inno Setup 6 (C# installer)
         # v2.2.0-beta.50 实测：runner 镜像现已预装 Inno Setup 6.7.1，固定
         # --version=6.4.3 的 choco install 会因"已存在更新版本"直接失败。

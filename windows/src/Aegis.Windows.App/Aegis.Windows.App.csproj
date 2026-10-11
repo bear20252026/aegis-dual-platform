@@ -24,6 +24,45 @@
     <Error Condition="!Exists('$(NativePolicyCorePath)')"
            Text="RequireNativePolicyCore=true 时必须提供存在的 NativePolicyCorePath。" />
   </Target>
+  <!-- AX-05（外部第三轮审计 2026-10-11，第九轮 §四）：把「本构建要求原生策略核心」
+       编译进产物，而不是只留一个用户可清除的 HKCU 标记、或一个只在 CI 那步 shell 里
+       存在的环境变量。两条分支都必须生成文件——缺文件即编译失败，所以「发布构建忘了
+       开开关」不可能静默退化成「产物里根本没有这个判定源」。开发构建仍生成 false
+       那份（不要求 ⇒ 走经验证的托管 broker），否则没 DLL 的机器直接编译不起来。
+       产物内另留一条可读的 ASCII 姿态串，供发布链在**已发布的 dll** 上验证终物
+       （不是验证命令行了什么参数）。 -->
+  <Target Name="GenerateNativePolicyCoreBuildMarker" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_NativeCorePosture Condition="'$(RequireNativePolicyCore)' == 'true'">1</_NativeCorePosture>
+      <_NativeCorePosture Condition="'$(_NativeCorePosture)' == ''">0</_NativeCorePosture>
+      <!-- C# 布尔字面量另走一条属性：MSBuild 的属性展开里没有内联条件表达式，
+           首版写的 `$(_NativeCorePosture == '1')` 展开成空串 ⇒ 产物里是
+           `RequiredByThisBuild = ;`（CS1525，本机 dotnet build 实测） -->
+      <_NativeCoreRequired Condition="'$(RequireNativePolicyCore)' == 'true'">true</_NativeCoreRequired>
+      <_NativeCoreRequired Condition="'$(_NativeCoreRequired)' == ''">false</_NativeCoreRequired>
+      <_NativeCoreMarkerFile>$(IntermediateOutputPath)generated/NativePolicyCoreBuildMarker.g.cs</_NativeCoreMarkerFile>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- 每个 Include 值里的分号必须写成 %3B：MSBuild 把裸 `;` 当项分隔符，
+           首版就是这么把 `namespace Aegis.Windows.Broker;` 截成半行、
+           产物里留下 CS1002（本机 dotnet build 实测） -->
+      <_NativeCoreMarkerLines Include="// &lt;auto-generated/&gt; 由 Aegis.Windows.App.csproj 的 GenerateNativePolicyCoreBuildMarker 目标生成。" />
+      <_NativeCoreMarkerLines Include="// 唯一读者是 NativePolicyCoreGate.IsRequired；改这里要先改那条判定与它的测试。" />
+      <_NativeCoreMarkerLines Include="namespace Aegis.Windows.Broker%3B" />
+      <_NativeCoreMarkerLines Include="internal static class NativePolicyCoreBuildMarker" />
+      <_NativeCoreMarkerLines Include="{" />
+      <_NativeCoreMarkerLines Include="    internal const bool RequiredByThisBuild = $(_NativeCoreRequired)%3B" />
+      <_NativeCoreMarkerLines Include="    internal const string BuildPostureMarker = &quot;aegis.build.require-native-policy-core=$(_NativeCorePosture)&quot;%3B" />
+      <_NativeCoreMarkerLines Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_NativeCoreMarkerFile)"
+                      Lines="@(_NativeCoreMarkerLines)"
+                      Overwrite="true"
+                      Encoding="utf-8" />
+  </Target>
+  <ItemGroup>
+    <Compile Include="$(IntermediateOutputPath)generated/NativePolicyCoreBuildMarker.g.cs" />
+  </ItemGroup>
   <ItemGroup>
     <!-- WebView2 SDK（阶段 C：WPF + 原生 WebView2——调研交叉比对选型：
          官方支持 + 中文实测性能略胜 + 成熟简单——ADR-001） -->
