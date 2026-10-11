@@ -1,13 +1,13 @@
 package com.aegis.browser
 
 import android.webkit.WebView
-import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.mockito.Mockito.mock
+import java.io.File
 
 /**
  * AX-07（外部第三轮审计 2026-10-11 = 第九轮 §五 Q6 / R9-AD-6）：危险下载确认的
@@ -164,7 +164,8 @@ class DownloadConfirmationOwnershipTest {
         fun codeOf(relative: String): String {
             val file = File(repoRoot(), relative)
             assertTrue("锚语料缺失：$relative", file.exists())
-            return file.readText()
+            return file
+                .readText()
                 .replace("\r\n", "\n")
                 .lines()
                 .filterNot { it.trimStart().startsWith("//") }
@@ -191,7 +192,7 @@ class DownloadConfirmationOwnershipTest {
                 if (File(dir, TABS_SOURCE).exists()) return dir
                 dir = dir.parentFile
             }
-            throw IllegalStateException("未在仓库内运行（找不到 $TABS_SOURCE）")
+            error("未在仓库内运行（找不到 $TABS_SOURCE）")
         }
     }
 }

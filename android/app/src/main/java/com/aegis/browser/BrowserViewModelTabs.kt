@@ -159,7 +159,8 @@ internal class BrowserViewModelTabs(
             // 回到原标签也需重新请求。
             if (index != tm.activeIndex) {
                 confirmations.rejectPendingNavigationConfirmation()
-                confirmations.rejectPendingDownload()   // AX-07：同导航，不跨标签存续
+                // AX-07：同导航，pending 下载不跨标签存续
+                confirmations.rejectPendingDownload()
                 // 切换标签 = 放弃未提交的地址栏草稿，地址栏显示目标标签 URL
                 clearDraft()
             }
