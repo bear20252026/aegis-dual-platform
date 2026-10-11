@@ -23,8 +23,9 @@ import com.aegis.webviewadapter.LogRedact
  *
  * P1-1 修复（全面审计 2026-09-04）：注入对象对任意远端页面可见且
  * `window.AegisBridge` 存在性是指纹探针——所有 @JavascriptInterface 方法
- * 入口先经 [isTrustedShellPage] 校验：宿主 WebView 当前 URL 仅允许本地壳页
- * （`file:///android_asset/` 前缀的内置资源）或 `about:blank`；远端页面
+ * 入口先经 [isTrustedShellPage] 校验：宿主 WebView 当前 URL 仅允许**壳页精确名单**
+ * （`file:///android_asset/start.html`，Q50 收窄——此前是整个 assets 前缀，
+ * 于是内置 GeoGebra 页也拿到桥）或 `about:blank`；远端页面
  * 调用一律拒绝执行并 Log.w 留痕（壳页调用频率低，校验无性能影响）。
  */
 class AegisHomeBridge(
@@ -51,8 +52,29 @@ class AegisHomeBridge(
                 "aurora-violet.jpg",
             )
 
-        /** P1-1 修复：受信壳页 URL 前缀（本地 assets 内置资源——首页/画板等）。 */
+        /** P1-1 修复：壳页资源的共同前缀（精确名单见 TRUSTED_SHELL_PAGES）。 */
         private const val TRUSTED_SHELL_PREFIX = "file:///android_asset/"
+
+        /**
+         * Q50（第九轮 §五 R9-AD-11 / 外部第三轮审计 AX-03）：桥的受信面从「整个
+         * `file:///android_asset/` 前缀」收窄成**壳页精确名单**。
+         *
+         * 前缀语义把内置离线 GeoGebra 页也算成受信调用者——那是一枚第三方 bundle，
+         * 经 `openGeo` 顶层导航后仍能在同一个 WebView 里调 `navigate/setEngine/
+         * setWallpaper/goBack/logError`。收窄的依据是实测零消费，不是猜测：
+         * `dist/geogebra-cache` 当前副本 grep `AegisBridge`/`__aegis`/`android_asset`/
+         * `JavascriptInterface`/`navigate(` **全 0 命中**（`openGeo` 的 3 处是 GWT 自带的
+         * `OpenGeoProver` 字符串），画板页也不加载 `start.js`（后者在 assets 根的
+         * `start.html`，画板在 `geogebra/` 子树），从画板返回走 `MainActivity` 原生
+         * `navigateHistory(BACK)` 而非桥的 `goBack`。⇒ 主页之外没有合法桥消费者。
+         *
+         * 只认**顶层资源名**（不含子路径）：新增壳页必须在这里显式登记，而不是
+         * 靠「它在 assets 目录下」自动获得桥。名单从 `BrowserEngine.HOME_URL` 派生
+         * 而不是另抄一份字面量——URL 的第二定义源会随首页改名而静默失配
+         * （`HomeUrlContractTest` 钉住 HOME_URL 本身）。
+         */
+        private val TRUSTED_SHELL_PAGES =
+            setOf(BrowserEngine.HOME_URL.removePrefix(TRUSTED_SHELL_PREFIX))
 
         /** AD-235：日志净化截断上限（与 BrowserViewModel 标题净化同口径 120）。 */
         private const val LOG_MESSAGE_MAX_LENGTH = 120
@@ -90,19 +112,35 @@ class AegisHomeBridge(
         /**
          * AD-112（审计 2026-09-23 清单·A6 批）：受信壳页 URL 判定抽纯函数——
          * 原判定内嵌在 isTrustedShellPage（依赖 WebView getUrl，不可 JVM 单测）。
-         * 纯字符串判定 single 判定点：about:blank 精确匹配或本地 assets 前缀。
+         * 纯字符串判定 single 判定点：about:blank 精确匹配，或 assets 根下的
+         * **壳页精确名单**成员（Q50 收窄，此前是整个前缀）。
+         * 写成单个 `when` 表达式而不是四段提前 return——detekt ReturnCount 的上限是 2，
+         * 而这里语义上就是「四条互斥分支」，用表达式比用一串守卫语句更贴合。
          */
-        internal fun isTrustedShellUrl(url: String?): Boolean {
-            val exact = url == "about:blank"
-            val prefixed = url?.startsWith(TRUSTED_SHELL_PREFIX) == true
-            return exact || prefixed
-        }
+        internal fun isTrustedShellUrl(url: String?): Boolean =
+            when {
+                url == null -> false
+                url == "about:blank" -> true
+                !url.startsWith(TRUSTED_SHELL_PREFIX) -> false
+                else -> shellPageOf(url) in TRUSTED_SHELL_PAGES
+            }
+
+        /**
+         * 剥掉 query/fragment 后的顶层资源名。这两个装饰不改变「是哪个文档」，
+         * 而壳页确实可能带着 `#片段` 被 getUrl 报告回来（不剥就会把自家首页拒了）；
+         * 剥完必须**逐字**等于登记名，不接受子路径。
+         */
+        private fun shellPageOf(url: String): String =
+            url
+                .removePrefix(TRUSTED_SHELL_PREFIX)
+                .substringBefore('#')
+                .substringBefore('?')
     }
 
     /**
      * P1-1 修复（全面审计 2026-09-04）：受信壳页校验（单一判定点）。宿主
-     * WebView 当前 URL 仅允许本地壳页前缀或 about:blank（判定逻辑单源在
-     * [Companion.isTrustedShellUrl]，AD-112）。@JavascriptInterface
+     * WebView 当前 URL 仅允许壳页精确名单或 about:blank（判定逻辑单源在
+     * [Companion.isTrustedShellUrl]，AD-112；名单收窄见 Q50）。@JavascriptInterface
      * 运行在 JS 后台线程，getUrl 以 runCatching 包裹——异常按拒绝处理
      * （fail-closed），不因跨线程读取崩溃放行。
      */

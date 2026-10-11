@@ -148,14 +148,28 @@ class AegisHomeBridgePrefsTest {
     fun trustedShellUrlPureJudge() {
         assertTrue(AegisHomeBridge.isTrustedShellUrl("about:blank"))
         assertTrue(AegisHomeBridge.isTrustedShellUrl("file:///android_asset/start.html"))
-        assertTrue(
+        // Q50（§五 R9-AD-11）：这条原本是 assertTrue——前缀语义把内置 GeoGebra 页
+        // （第三方 bundle）也当成受信桥调用者。收窄成壳页精确名单后必须拒。
+        // 依据是实测零消费：dist/geogebra-cache 当前副本 grep AegisBridge/__aegis/
+        // JavascriptInterface/navigate( 全 0 命中，画板页不加载 start.js，
+        // 从画板返回走 MainActivity 原生 navigateHistory(BACK)。
+        assertFalse(
             AegisHomeBridge.isTrustedShellUrl("file:///android_asset/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html"),
         )
+        assertFalse(AegisHomeBridge.isTrustedShellUrl("file:///android_asset/sub/start.html"))
+        assertFalse(AegisHomeBridge.isTrustedShellUrl("file:///android_asset/start.html.bak"))
+        assertFalse(AegisHomeBridge.isTrustedShellUrl("file:///android_asset/start.htmlx"))
+        // 同一文档的 query/fragment 装饰不改变「是谁在调」——仍受信（别把壳页自己拒了）。
+        assertTrue(AegisHomeBridge.isTrustedShellUrl("file:///android_asset/start.html#engine"))
+        assertTrue(AegisHomeBridge.isTrustedShellUrl("file:///android_asset/start.html?v=2"))
         // 远端页面 / 本地文件旁路 / 空值一律不受信（fail-closed）
         assertFalse(AegisHomeBridge.isTrustedShellUrl("https://evil.example/phish"))
         assertFalse(AegisHomeBridge.isTrustedShellUrl("file:///sdcard/evil.html"))
         assertFalse(AegisHomeBridge.isTrustedShellUrl("file://attacker/android_asset/start.html"))
         assertFalse(AegisHomeBridge.isTrustedShellUrl(null))
         assertFalse(AegisHomeBridge.isTrustedShellUrl(""))
+        // 名单由 HOME_URL 派生：首页改名而忘了同步，桥会在真实首页上自锁——
+        // 这条把它变成编译期就断言得到的关系（HomeUrlContractTest 钉另一头）。
+        assertTrue(AegisHomeBridge.isTrustedShellUrl(BrowserEngine.HOME_URL))
     }
 }
