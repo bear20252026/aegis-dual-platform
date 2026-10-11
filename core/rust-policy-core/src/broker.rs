@@ -14,12 +14,10 @@
 //!   policy.evaluate(scope, origin) → capability.validate(scope, origin) → session/nonce 验证
 //!   → 全查通过后统一消费（nonce 入账 + capability max_uses 推进，RS-240）
 //!
-//! ⚠️ H-7 审计注记（2026-08-31）：上述三层管线仅在嵌入式宿主直接调用
-//! `ContextBroker::evaluate` 时生效。FFI 导航通路（ffi/broker.rs 的
-//! evaluate_navigation）执行的是 validate_action——会话/代际/nonce 验证；
-//! 策略层与能力层未接入 FFI 通路（直接接线会以默认 deny-all 引擎拒绝
-//! 全部导航，属产品级变更）。该口径由 ffi/broker.rs 的
-//! ffi_navigation_tests 回归测试锁定。
+//! H-7 / AX-02（2026-10-11）：FFI 通路（`ffi/broker.rs` 的 evaluate_navigation）此前只跑
+//! 第三层，现前两层由 `broker/pre_layers.rs` 接入：该层**没有意见**（FailSafe /
+//! 空注册表）时不改裁决，一旦配置即生效且其 Deny 不可被后面的 Allow 出口改回允许
+//! （按字面直连会以默认 deny-all 引擎拒掉全部导航——这正是它此前没被接上的原因）。 两侧测试见 `pre_layers.rs` 与 `ffi/broker/policy_layers.rs`。
 //!
 //! 可拆卸：本模块不依赖 UI/网络/文件，纯内存数据结构。
 //! 可拼接：通过 `Decision` trait 与 broker/executor 层对接。
@@ -30,6 +28,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::capability::{CapabilityRegistry, CapabilityResult};
 use crate::decision::{AuthorizedAction, Decision, DenyReason};
 use crate::policy::PolicyEngine;
+
+pub(crate) mod pre_layers;
 
 /// 已消费 nonce 账本上限——防止长期会话下无界内存增长。
 /// fail-closed：达到上限后拒绝新的消费，绝不淘汰旧 nonce（以免削弱一次性/重放保护）。

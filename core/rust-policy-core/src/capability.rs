@@ -122,15 +122,9 @@ impl Capability {
 }
 
 /// capability 注册表（fail-closed——未知 capability 拒绝）。
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CapabilityRegistry {
     capabilities: HashMap<String, Capability>,
-}
-
-impl Default for CapabilityRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl CapabilityRegistry {
@@ -139,6 +133,12 @@ impl CapabilityRegistry {
         Self {
             capabilities: HashMap::new(),
         }
+    }
+
+    /// 该层是否被配置过（AX-02 用它区分「空注册表」与「注册表拒绝」）：`validate` 对未知
+    /// capability 恒 `Denied`，省掉这个判断直接接线会让生产构造（无人注册）拒掉全部导航。
+    pub fn is_empty(&self) -> bool {
+        self.capabilities.is_empty()
     }
 
     /// 注册 capability。

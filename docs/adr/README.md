@@ -12,5 +12,5 @@
 | [ADR-005](ADR-005-rust-policy-core-pilot.md) | Rust 仅纯策略核心试点 | Accepted（amended by ADR-006/008——SP-073） |
 | [ADR-006](ADR-006-native-policy-core-binding-rollout.md) | 策略核心 C ABI/UniFFI 绑定发布 | Accepted（外链核验 2026-09-27——SP-077；第八轮 B8 现状注记：绑定已落地且发布链改为要求置位，裁决收敛的最后一步未走） |
 | [ADR-007](ADR-007-canonical-stack-and-single-source-guards.md) | 正典栈与单源守卫 | Accepted（D1 被 ADR-009 取代——WB-059 注记） |
-| [ADR-008](ADR-008-rust-policy-core-as-single-adjudicator.md) | Rust 策略核心为唯一裁决源 | Accepted（SP-046/074 引用与冻结栈注记；**第八轮 B8 限定**：单源范围是 URL/导航面，能力评估层未接入 FFI——H-7，转述不得省略限定语） |
+| [ADR-008](ADR-008-rust-policy-core-as-single-adjudicator.md) | Rust 策略核心为唯一裁决源 | Accepted（SP-046/074 引用与冻结栈注记；**第八轮 B8 限定**：单源范围是 URL/导航面；**AX-02（2026-10-11）**：策略/能力层已接入 FFI，但未配置时按构造惰性——转述不得省略限定语） |
 | [ADR-009](ADR-009-full-migration-to-csharp.md) | **全功能迁移 C# 单轨（终局口径）** | Accepted，M1-M4 落地（SP-047/048 回写） |
