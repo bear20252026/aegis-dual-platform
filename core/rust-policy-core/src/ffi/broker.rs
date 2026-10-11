@@ -145,9 +145,9 @@ impl FfiBroker {
 
     /// 评估导航意图（URL 解析 + 会话验证 → FfiDecision——fail-closed）。
     ///
-    /// 职责边界（H-7）：本通路仅执行会话/代际/nonce 验证，policy.evaluate /
-    /// capability.validate 未接入 FFI 通路——单一事实源见 broker.rs 模块文档
-    /// H-7 审计注记，FFI 语义由本文件 ffi_navigation_tests 回归测试锁定。
+    /// 职责边界（H-7 已闭合，2026-10-11 AX-02）：本通路执行会话/代际/nonce 验证，并在其
+    /// 之前经 `broker/pre_layers.rs` 取策略层与能力层的否决权；未配置（默认引擎 /
+    /// 空注册表）时该前置给不出意见 ⇒ 出货行为逐字不变，FFI 语义仍由 ffi_navigation_tests 锁定。
     pub fn evaluate_navigation(
         &self,
         session_id: String,
@@ -248,7 +248,11 @@ impl FfiBroker {
                 canonical_url.origin, canonical_url.scheme, canonical_url.host
             ),
         };
-        // 会话验证（fail-closed）
+        // 会话验证（fail-closed）。AX-02：前两层在会话验证**之前**取否决权（未配置时
+        // 给不出意见）；放到 Allow 出口之后就变成「会话结果覆盖策略裁决」，不是接线语义。
+        if let Some(gated) = self.pre_layer_gate(&action) {
+            return gated;
+        }
         // RS-221（2026-09-26 审计）：validate_action 成功路径 Ok(())——
         // 此前 Decision::Allow(action.clone()) 每导航克隆整个授权结构
         //（12 个 String）；此处直接继续消费已持有的 action
@@ -312,13 +316,9 @@ impl FfiBroker {
     }
 }
 
-// 审计第六轮（2026-10-03/04）：内部判定/登记辅助——置于非导出 impl 块，
-// #[uniffi::export] 的 impl 会把其中所有方法计入 FFI 面
-//（内部类型 AuthorizedAction 未导出，被引用即编译失败）。
-impl FfiBroker {
-    // 黑名单注入的 Rust 侧单点在 denylist.rs——本文件在 940 行零余量基线上，
-    // 而 ⑨ 的档位入口与 bool 兼容映射同快照状态本就是一体。
-}
+// AX-02：前置否决的接入与映射在子模块（内部辅助一律待在**非导出** impl 块里——
+// #[uniffi::export] 的 impl 会把其中所有方法计入 FFI 面，内部类型被引用即编译失败）。
+pub(crate) mod policy_layers;
 
 #[uniffi::export]
 impl FfiBroker {

@@ -149,7 +149,7 @@ bandit -c bandit.yaml -r scripts release contracts agent -ll -q
 |---|---|
 | `windows/src/Aegis.Windows.App/` | **Windows 正典栈**（Chrome UI / Core 数据层 / Broker 安全层 / WebView 封装） |
 | `windows/tests/` | C# 两测试套件（Core.Tests / Broker.Tests） |
-| `core/rust-policy-core/` | Rust 策略核心（**导航**裁决单源——ADR-008；FFI/C ABI/UniFFI。范围限定：能力评估层 `policy.evaluate`/`capability.validate` 未接入 FFI 通路，核心自述 H-7——能力裁决仍在各端托管 Broker） |
+| `core/rust-policy-core/` | Rust 策略核心（**导航**裁决单源——ADR-008；FFI/C ABI/UniFFI。范围限定：`policy.evaluate`/`capability.validate` 已接入 FFI 通路（AX-02，2026-10-11），但未配置时按构造惰性——今天没有宿主入口注册规则/能力，能力裁决事实上仍在各端托管 Broker） |
 | `android/app/src/main/java/com/aegis/browser/` | Android 端（TabManager/SecureWebViewFactory/BrowserEngine） |
 | `android/broker/` + `android/webview-adapter/` | Android 授权 Broker 与导航状态机 |
 | `contracts/` | 契约单源（schemas/vectors/policy + codegen 生成器） |

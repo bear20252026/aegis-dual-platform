@@ -50,5 +50,5 @@ Windows 不接入未审计的第三方 UniFFI C# 生成器。Windows 后续仅�
   `-PrequireNativePolicyCore=true` 与 `-PrequireNavigationConfirmation=true`
   （后者自第八轮 B3 起被 `NativeGateWiringAnchorTest` 静态钉住，删参数即红）。
 - **最后一步未走**：核心的 `PolicyEngine` / `CapabilityRegistry` 至今不参与
-  `evaluate`（H-7 未撤）——即「绑定发布」完成、「裁决收敛」只覆盖导航面。
+  `evaluate`（H-7 已于 2026-10-11 AX-02 撤除：前两层接入 FFI，未配置时惰性）——即「绑定发布」完成、「裁决收敛」覆盖导航 + 策略/能力面（后者待宿主注入）。
   与本 ADR 关联的 ADR-008 因此加了范围限定语。

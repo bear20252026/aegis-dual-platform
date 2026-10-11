@@ -3,7 +3,7 @@
 Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"替代传统"补丁式加固"：
 所有高危副作用（导航/下载/命令）必经**唯一能力代理（Capability Broker）**裁决，
 裁决逻辑收敛在**无 I/O 的 Rust 策略核心**（**导航**裁决单源——能力评估层
-`policy.evaluate` / `capability.validate` 尚未接入 FFI 通路（核心自述 H-7），
+`policy.evaluate` / `capability.validate` 自 2026-10-11（AX-02）起接入 FFI 通路（未配置时按构造惰性，见核心 `broker/pre_layers.rs`），
 故「单一裁决源」不覆盖能力评估面），跨端行为由**冻结契约（contracts）**驱动并以
 跨语言向量锁定（向量覆盖并不均齐：C# 侧只链 2 份、Kotlin 侧只消费
 `url-origin-*`——第八轮 §5.2 实测）。
@@ -19,14 +19,17 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
 ## 核心安全能力
 
 - **导航裁决链**：每次导航经 Broker 决策（fail-closed）。**注意分端差异**——
-  Rust 核心的 FFI 入口 `evaluate_navigation` 内不含策略/能力/黑名单层（代码自述
-  H-7：`policy.evaluate / capability.validate 未接入 FFI 通路`）；Windows 发布物的
-  原生门禁自第十轮起由**编译进产物的构建常量**要求（`-p:RequireNativePolicyCore=true`
-  ⇒ `NativePolicyCoreBuildMarker`，发布链在已发布 dll 上验证该姿态串），
-  按用户注册表标记（`HKCU\Software\Aegis Browser\RequireNativePolicyCore`）与环境
-  变量退居第二/第三来源——清注册表或脱离安装器直接启动 EXE 都不再能把要求关掉；
-  故安装包内导航确实经 Rust 核心裁决（启动留痕见安全日志 `[adjudication]` 行，
-  该行现同时记构建姿态）；Android 发布 APK
+  Rust 核心的 FFI 入口 `evaluate_navigation` 现跑完整链（黑名单 + 策略层 + 能力层 +
+  会话/nonce）：AX-02（2026-10-11）把此前未接线的 `policy.evaluate` /
+  `capability.validate` 接在会话验证**之前**，口径是「该层没有意见（默认引擎的
+  FailSafe / 空 capability 注册表）时不改裁决，一旦宿主配置即生效且其 Deny 不可被后面的
+  Allow 出口改回允许」⇒ 出货形态逐字不变（今天没有任何宿主入口去注册规则或能力），
+  但「裁决链不完整」这条已不再成立。Windows 发布物的原生门禁自第十轮起由**编译进产物的
+  构建常量**要求（`-p:RequireNativePolicyCore=true` ⇒ `NativePolicyCoreBuildMarker`，
+  发布链在已发布 dll 上验证该姿态串），按用户注册表标记
+  （`HKCU\Software\Aegis Browser\RequireNativePolicyCore`）与环境变量退居第二/第三来源
+  ——清注册表或脱离安装器直接启动 EXE 都不再能把要求关掉；故安装包内导航确实经 Rust 核心
+  裁决（启动留痕见安全日志 `[adjudication]` 行，该行现同时记构建姿态）；Android 发布 APK
   由发布链置位 `-PrequireNavigationConfirmation=true`（该置位自第八轮 B3 起被静态锚
   钉住，删参数即红），故「高危目标触发用户确认流」在 **Android 生效**；Windows 出货
   构建**未启用**导航确认门，核心判「需显式确认」的目标自第八轮 B4 起改为用户可见
