@@ -28,7 +28,7 @@ name: Dependency-Retlock
         description: "重算面"
         required: false
         type: choice
-        options: ["all", "dotnet", "python"]
+        options: ["all", "dotnet", "python", "gradle"]
         default: "all"
 
 permissions:
@@ -43,6 +43,9 @@ jobs:
     name: 重算并写回依赖锁（RID 块回读门禁把关）
     runs-on: windows-2025
     timeout-minutes: 45
+    # gradle 面在下面的 gradle-relock job（ubuntu + AGP 所需 SDK/工具链与本 job 不同口径）。
+    # 本 job 只跳过自己——两个 job 各自都带 deps/* 守卫，不依赖对方存在。
+    if: ${{ github.event.inputs.ecosystem != 'gradle' }}
     # Windows runner 上 Python 的 stdout 被重定向到日志管道时按 ANSI 代码页（实测
     # cp1252）编码——本 job 的 heredoc 与 verify_lock_rids.py 都带中文与 ✅❌，
     # 2026-10-08 首次 dispatch 就死在 `print("头注块已保留（…）")` 抛
@@ -53,10 +56,11 @@ jobs:
     steps:
       # R9-CI-2：dispatch 输入一律经 env 中转，`run:` 文本里不再出现 `${{ }}`。
       # `${{ }}` 在 shell 解析**之前**做文本替换，`branch=x"; git push origin HEAD:master; #`
-      # 会把下面这道 deps/* 守卫自身打断——本 job 是全仓唯一持 `contents: write` 的
+      # 会把下面这道 deps/* 守卫自身打断——本 workflow 是全仓唯一持 `contents: write` 的
       # 手工触发面，「永不写 master」此前只是脚本约定。判据见
       # tests/python/workflow_exit_code_test.py（relock 的 run 块内零 in-run 表达式 +
-      # 写回步骤自带二次守卫）。
+      # 写回步骤自带二次守卫）。**新增 job 同样适用**：守卫写在每个 job 里，
+      # 不靠「另一个 job 也会检查」。
       - name: 校验目标分支（拒绝写回主干）
         shell: bash
         env:
@@ -203,3 +207,117 @@ jobs:
           git push origin "HEAD:$RELOCK_BRANCH"
           echo "⚠️ 锁已写入 $RELOCK_BRANCH——请开 PR 人工审 diff 后再合并；"
           echo "   审点：win-x64 RID 块仍在、每行 == 钉版带 --hash=、被删条目是否本就该删。"
+
+  # ── Gradle 面（android/ 四模块，项 10 / AEG-011，2026-10-11 启用 STRICT 锁定）─────
+  # 为什么是独立 job 而不是在上面的 windows job 里加几步：AGP 需要「JDK 21 +
+  # setup-android 基线包（platforms;android-36/build-tools;36.0.0）+ compileSdk 37 由
+  # AGP 构建期自动装配」这套口径——那是 android-quality / release-android 已在 ubuntu
+  # 上跑通并实证过的组合（SP-238：显式 pin android-37 会因未进 stable 渠道必失败）。
+  # 把它搬到 windows 上重验一遍，换来的只是「重锁面与门禁面不同形」的长期债。
+  gradle-relock:
+    name: Gradle 重锁（android/ 四模块，STRICT）
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: ${{ github.event.inputs.ecosystem == 'gradle' || github.event.inputs.ecosystem == 'all' }}
+    steps:
+      # 守卫写在**每个**持写权限的 job 里，不依赖另一个 job 存在（R9-CI-2 同口径：
+      # dispatch 输入经 env 中转，run 正文里不出现 `${{ }}`）。
+      - name: 校验目标分支（拒绝写回主干）
+        shell: bash
+        env:
+          GRADLE_RELOCK_BRANCH: ${{ github.event.inputs.branch }}
+        run: |
+          set -euo pipefail
+          target="$GRADLE_RELOCK_BRANCH"
+          case "$target" in
+            deps/*) ;;
+            *) echo "❌ branch 必须以 deps/ 开头（当前：$target）——本 job 有写权限"; exit 1 ;;
+          esac
+
+      - name: 检出目标分支
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          fetch-depth: 1
+
+      - name: 安装 JDK 21 + Gradle 缓存（与 android-quality 同口径）
+        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+        with:
+          distribution: temurin
+          java-version: "21"
+          # SP-215/AD-243 口径：Gradle 缓存单机制 + cache-dependency-path 必含版本目录
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/**
+            android/gradle/libs.versions.toml
+
+      - name: 设置 Android SDK（基线包 + AGP 构建期自动装配 compileSdk 37）
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
+        with:
+          packages: "platform-tools platforms;android-36 build-tools;36.0.0"
+
+      - name: Gradle 重锁（任务清单必须等于 CI 的解析面）
+        shell: bash
+        working-directory: android
+        run: |
+          set -euo pipefail
+          # `--write-locks` 只写「本次构建真正解析过的配置」。漏一条配置不是「少锁一个包」
+          # 而是那条配置从此没有锁状态 ⇒ STRICT 下第一个用到它的 PR 当场红。
+          # 所以清单以 android-quality.yml / release-android.yml / contracts.yml /
+          # native-policy-artifacts.yml 实际敲的 gradlew 任务为准，
+          # 覆盖关系由 tests/python/relock_sop_test.py 判（漏一条即判红）。
+          ./gradlew --no-daemon --write-locks \
+            :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck \
+            :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt \
+            :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:lintDebug \
+            :app:testDebugUnitTest :broker:testDebugUnitTest :webview-adapter:testDebugUnitTest \
+            :contracts:assembleDebug :broker:compileDebugKotlin :webview-adapter:compileDebugKotlin
+
+      - name: 写回分支（只写 android/，无改动即空跑成功）
+        shell: bash
+        env:
+          RELOCK_BRANCH: ${{ github.event.inputs.branch }}
+          RELOCK_RUN_ID: ${{ github.run_id }}
+        run: |
+          # 二次守卫：不依赖第一步的存在——分支不是 deps/* 就不推
+          case "$RELOCK_BRANCH" in
+            deps/*) ;;
+            *) echo "❌ 写回目标必须以 deps/ 开头（当前：$RELOCK_BRANCH）"; exit 1 ;;
+          esac
+
+          set -euo pipefail
+          git config user.name  "aegis-relock-bot"
+          git config user.email "relock@localhost"
+          # 逐路径 add 且 pathspec 必须真实存在（不用 `|| true`——那个形态第八轮实测过：
+          # git 对不存在的 pathspec 直接 fatal 并放弃整条命令，退出码被吞掉后
+          # `git diff --cached --quiet` 恒真，job 高高兴兴打印「无差异」收工）。
+          for pathspec in android; do
+            if [ ! -e "$pathspec" ]; then
+              echo "❌ pathspec 不存在：$pathspec——布局变了就改这里，不要静默跳过"
+              exit 1
+            fi
+            git add -A -- "$pathspec"
+          done
+          if git diff --cached --quiet; then
+            echo "✅ 重锁无差异——当前锁已是最新解析结果（这本身就是个结论，不是失败）"
+            exit 0
+          fi
+          # 「有 diff 却没有一把锁文件」＝写回面错了（比如顺手改了版本目录），不能推
+          locks=0
+          while IFS= read -r changed; do
+            case "$changed" in
+              */gradle.lockfile) locks=$((locks + 1)) ;;
+              *) echo "❌ 非锁文件出现在纯重锁运行里：$changed"; exit 1 ;;
+            esac
+          done < <(git diff --cached --name-only)
+          if [ "$locks" -eq 0 ]; then
+            echo "❌ 有 diff 却没有一把 gradle.lockfile——写回面错了"
+            exit 1
+          fi
+          git diff --cached --stat
+          git commit -m "chore(deps): 重算 Gradle 依赖锁（Dependency-Retlock dispatch，run $RELOCK_RUN_ID）" -q
+          git push origin "HEAD:$RELOCK_BRANCH"
+          echo "⚠️ 锁已写入 $RELOCK_BRANCH——请开 PR 人工审 diff 后再合并；"
+          echo "   审点：新增/删除的 group:name 是否都来自版本目录那一次变更；"
+          echo "   锁里只有版本没有校验和，别把「重锁成功」读成「依赖已验签」。"
