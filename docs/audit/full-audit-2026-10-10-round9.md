@@ -705,7 +705,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   （无 `sessionId:` 前缀）⇒ 关标签的 `removeIf startsWith` 一条都摘不掉，而注释称
   「销毁会话并移除其已消费 nonce」；`AndroidBrokerTest.kt:414-417` 只钉托管路径形态。
   孪生形态见 `BrowserPolicyBroker.NativeNonceLedger`（R8-CS-REG-01 同源，后果轻得多）。
-- Q6 R9-AD-6 | **P2**（外部审计 AX-07 同一处，由 P3 提级）| `BrowserViewModelConfirmations.kt:104-108`：下载确认缺「仅当前活动标签
+- ~~Q6 R9-AD-6~~ **R9-B24 已闭**（§3.24）：`approvePendingDownload` 补 `currentWebView()` 归属判定
+  （不符**不清槽**，与导航同口径），`newTab`/`switchTo` 各补 `rejectPendingDownload()`；
+  新常驻 `DownloadConfirmationOwnershipTest.kt` 7 例，本地 `:app:testDebugUnitTest` 315 例 0 失败。原条目 ↓
+  Q6 R9-AD-6 | **P2**（外部审计 AX-07 同一处，由 P3 提级）| `BrowserViewModelConfirmations.kt:104-108`：下载确认缺「仅当前活动标签
   可消费」的归属校验（导航确认有，AD-158），且 `switchTo` 撤销 pending 导航确认却不撤销
   pending 下载确认 ⇒ 后台标签的危险扩展确认可顶到前台标签被批准。提级理由（本批回读）：
   授权必须绑定具体操作与发起者，同一文件里导航确认已经做对（`BrowserViewModelConfirmations.kt:80`
@@ -1077,6 +1080,34 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 - **AEG-013 的「只修主窗未修无痕窗」这一类部分闭环在本项上不成立**——无痕窗走同一
   `NtpBridgeFactory.CreatePrivate` + 同一顶层门禁。⇒ 不登记缺陷；若要攻的是「导航中途
   旧页面残留消息」这类时序面，须按 §五 攻击面矩阵做动态测试再判，不靠静态读代码翻案。
+### 3.24 R9-B24（2026-10-11，外部审计 AX-07 = §五 Q6）：危险下载确认绑定发起标签
+
+1. 回读确证（不引用报告措辞）：`BrowserViewModelConfirmations.kt:104-108` 的
+   `approvePendingDownload` 取出 pending 即 `proceed()`，而同文件上面的
+   `approvePendingNavigationConfirmation`（:80）一直有
+   `pending == null || currentWebView() !== pending.webView ⇒ 拒 + 提示切回`。
+   `PendingDownloadConfirmation`（`BrowserModels.kt:36-45`）**本就带 `webView` 字段**
+   （装配时 `registerPendingDownload(webView, url, proceed)` 已传）⇒ 缺的不是信息，是判据。
+   另一半在 `BrowserViewModelTabs.kt`：`newTab`/`switchTo` 只撤销导航确认，pending 下载
+   跨标签存续（`closeTab` 走归属式撤销，只清被关闭那条）。
+2. 落地＝两处同导航口径：`approvePendingDownload` 先对 `currentWebView()`，不符**不清槽**
+   （回原标签仍可确认，与导航一致）只给 `confirm_switch_back` 提示；`newTab`/`switchTo`
+   各补一条 `confirmations.rejectPendingDownload()`。审计的第三条建议
+   （「下载目标状态变化时重新审核」）不在这刀里——它要动 `WebViewDownloadHandler` 的
+   Content-Disposition/重定向复核，另属 §五 既有队列，不顺手扩。
+3. 新常驻 `android/app/src/test/kotlin/com/aegis/browser/DownloadConfirmationOwnershipTest.kt`
+   （197 行，7 例）：5 例行为面（归属相符消费一次 / 不符不 proceed 且不清槽 / 回原标签仍可确认 /
+   拒绝仍清零——反向控制防「归属判定把拒绝变成保留」/ 关无关标签不误清），
+   2 例装配面文本锚（`newTab`/`switchTo` 切片必须同时看得见导航撤销与下载撤销——前者是
+   正向控制，证明切片取对了地方；`approvePendingDownload` 必须落在**同一个** `currentWebView`
+   缝上，另起一份「活动标签」定义就是第二个判据源）。
+4. 本地实测：`./gradlew :app:testDebugUnitTest` 全套 **315 例 0 失败**（新增 7 例在内），
+   ktlint/detekt 无新增违规；三处故障注入见下条。
+5. 反向锚实测：① 从 `switchTo` 删掉 `rejectPendingDownload()` ⇒ 装配锚判红；
+   ② 把 `approvePendingDownload` 改回旧形态（取出即 proceed）⇒ 跨标签那例判红；
+   ③ 把归属判据换成构造时快照……本例**不适用**（判据是每次调用的 lambda 缝，
+   不存在快照形态），故不写空锚——只登记「判据必须走 `currentWebView()` 单源」这一条。
+
 ## 六、复核后判定为不成立（留此防重复上报）
 
 - **「Android 也缺 window.open 洪水上限」不成立**（第九轮 2026-10-10，落地 Windows 侧上限时
