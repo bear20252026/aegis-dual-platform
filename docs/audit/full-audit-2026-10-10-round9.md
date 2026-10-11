@@ -669,6 +669,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      `@JavascriptInterface` 迁到 `androidx.webkit` 的 origin-scoped `addWebMessageListener`
      （唯一能拿到帧 Origin 的路），牵动三端共用的 `shared/shell/start.js` 适配层 ⇒ 跨端
      契约变更。本批只落了「不需要动这两处」的那一半：CSP 显式 `frame-src 'none'`。
+  8. **Q51 R9-CS-14：Android 要不要有威胁订阅源**（外部审计 AEG-003 的准确范围）。两端
+     出厂默认都是空名单放行，差别在 Android 连「让用户开启」的地方都没有。补齐＝新_fetch
+     →校验→缓存→灌核心 denylist_整条链，要先定源从哪来、谁签、断网时是否保留最后一份
+     已验证情报（审计建议保留，方向与 Windows 现实现一致）。属功能排期，不默认执行。
+  9. **Q52 R9-CS-15：威胁情报要不要周期刷新**（外部审计 AEG-008，属实但**已在设置 UI
+     明示**「生效于下次启动」）。改了就是新增后台网络活动，需一并定周期/退避/
+     「最后成功更新时间」上不上 UI。
 
 ## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
 
@@ -817,6 +824,28 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   每个放行下载 `_trackedDownloads.Add(operation)`，完成**不移除**（仅 `UnwireEvents` 里
   `Clear`）⇒ 长会话累积已完成 `CoreWebView2DownloadOperation` COM 引用，`StopLiveTraffic`
   还对已结束项 `Cancel()`（抛→吞）。
+
+- Q51 R9-CS-14 | P2 | `windows/src/Aegis.Windows.App/Core/Settings/SettingsService.cs:24`
+  （`ThreatFeedUrl { get; init; } = ""`）↔ `Chrome/MainWindow.xaml.cs:138,326-337`
+  ↔ `core/rust-policy-core/src/ffi/broker.rs:331`（`update_host_denylist`）↔ Android 全端
+  （grep `Denylist|ThreatFeed|blocklist|isHostBlocked` 在 `android/**` **0 命中**）：
+  外部第三轮审计 AEG-003「Android 缺少威胁黑名单防护」**范围要改准**——两端默认都是
+  **空名单即放行**（Windows 的订阅源是用户在设置页填 https URL 或
+  `AEGIS_THREAT_FEED_URL`，缺省空 ⇒ 出厂形态两端行为一致）。真实缺口是**能力面**：
+  Android 整条「取源 → 校验 → 缓存 → 灌进核心 denylist」的链不存在，Rust 侧
+  `apply_host_denylist` 在 Android 恒不被调用，所以用户即使想在 Android 上开黑名单也无处可开。
+  补齐它是一项功能而非一次修补：要网络抓取、缓存原子替换、版本/签名/防回滚、失败降级
+  可解释（审计 §AEG-003 的处方方向正确），且要先定「源从哪来、谁签」。⇒ §四 待裁决；
+  验收按审计口径：同一威胁测试集在两端输出同一裁决，并能在真机上确认实际拦截。
+- Q52 R9-CS-15 | P3 | `windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml.cs:138`
+  （`StartThreatFeedRefresh()` 在启动链里调用**一次**）+ `SettingsWindow.xaml.cs:111`
+  （保存后提示「已保存；生效于下次启动（导航与子资源拦截）」）：
+  外部审计 AEG-008「威胁情报仅启动时刷新」**属实**——同文件里 `_feedbackTimer`/`_sleepTimer`
+  都有 DispatcherTimer，唯独订阅源没有周期重取；长时间不关窗的用户会一直用启动时那份缓存。
+  但要点是它**已在设置 UI 明示**（不是偷偷降级），所以这不是「声明与行为不符」而是「行为
+  偏弱」。改成周期抓取＝新增后台网络活动（默认订阅源为空时不产生流量，一旦用户配了源
+  就从「开窗取一次」变成「持续取」），属出货行为变更 ⇒ §四 待裁决，
+  一并定「刷新周期 / 退避 / 最后成功更新时间上 UI」。
 
 ### 5.4 RS（Rust 核心）
 
@@ -1036,6 +1065,18 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    要么本地直接跑那条门禁（`pytest -k ledger`，秒级）。本行的 location 已重写成
    「:95-99 与 109-121」并把引号交回 writer。
 
+- **AEG-013「WebView2 消息桥与 Origin 验证」在当前代码上不成立**（外部第三轮审计标
+  「待验证」，本批按它给的四个 API 名逐个回读）：全仓 `AddHostObjectToScript` **零命中**
+  ⇒ 不存在 COM 宿主对象注入面；`WebMessageReceived` 只有两处订阅
+  （`Chrome/MainWindow.Tabs.CoreReady.cs:80-84`、`Chrome/InPrivateWindow.xaml.cs:215-221`），
+  **两处都是**先 `NtpAssets.IsTopLevelNtpDocument(core)`（顶层文档必须是 ntp 虚拟主机）
+  再把 `ev.Source` 交给 `NtpBridge.IsTrustedSource`（https + 固定 host + 默认端口）二次校验，
+  不符即静默忽略。per-origin 面不止写在注释里：`WebView/WebView2Hardening.cs:90` 的
+  `SetPerOrigin` 在每次顶层导航按来源翻转 `IsWebMessageEnabled`（远程页禁用），
+  `WebView/HostWebView.cs:142` 记着子框架形态的取舍理由。⇒ 本项「待验证」就地转成已核实。
+- **AEG-013 的「只修主窗未修无痕窗」这一类部分闭环在本项上不成立**——无痕窗走同一
+  `NtpBridgeFactory.CreatePrivate` + 同一顶层门禁。⇒ 不登记缺陷；若要攻的是「导航中途
+  旧页面残留消息」这类时序面，须按 §五 攻击面矩阵做动态测试再判，不靠静态读代码翻案。
 ## 六、复核后判定为不成立（留此防重复上报）
 
 - **「Android 也缺 window.open 洪水上限」不成立**（第九轮 2026-10-10，落地 Windows 侧上限时
