@@ -54,10 +54,10 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 
 | AX-01 | P1（外部第三轮审计 2026-10-11 声称，主代理回读后**降级为「一半保留并落地、一半早已成立」**） | 保留并落地（投递面） | 回读结论要分两段：①「策略链异常时保持原始请求路径」在第八轮 ⑤ 已闭（`HostWebView.WebResourceGuards.cs` 的 `SubresourceDenialFailClosed` 异常回 403 + `subresource_policy_error`），审计报告据此点名的仍是**拒绝之后**那一步：旧代码 `try { e.Response = CreateWebResourceResponse(...) } catch { 只写日志 }`——拒绝已经判出来，合成响应自己抛（COM 对象退休/Environment 释放）却把这条请求退回默认路径 ⇒ **留痕不是拦截**。落地＝两段各自收口：交付返回 false 与交付抛出是同一事实（拒绝没落地）⇒ 都升级到 `CoreWebView2.Stop()`（内核随当前导航一并停掉待发子资源），留重码 `subresource_denial_undeliverable`；不做「换一组参数再试一次」（失败原因是环境失效，换参数不改结局，只会把一次失败刷成两条互不相干的日志）。**关键实现细节**：`escalateStop()` 不能和 `tryDeliver()` 放同一个 try——照直觉写 `try{ if(deliver) return; escalate(); } catch{ log }` 时 tryDeliver 抛出会**跳过升级**，正是审计点名的形态，故拆两段并各自吞（`DeliverDenialNeverThrowsBackToTheEventShim` 用三个同时抛的注入面钉「永不抛出」，含留痕面）。不可达面按 R8-CS-SEC-11 同法补结构锚：handler 本体切片（有界、剔注释）必须含 `DeliverDenial(`/`TryStopWebView` 且**不含** `catch` 与 `e.Response =`，`TryStopWebView` 切片必须真有 `webView.Stop()`。WebView2 真实故障注入（本机无 Runtime）仍属第四节阶段 C，本批只有 JVM/CLR 侧判定面 |
 | AX-04 | P1（外部审计声称，主代理回读确证后**保留并落地**） | 保留并落地 | 回读确证：`KillSwitch` 此前只被 broker 的导航/下载/批准入口读取，而 `NtpBridge.Dispatch` 的 `restoreSession`/`importBookmarks`/`importHistory`/`goBack`/`openGeo`/`navigate` 经桥直达数据层与宿主，分发层零检查——README 早期就登记过这个覆盖面缺口，外部审计再次点名为准。落地＝判定单点放在 `Dispatch` 而不是按钮：`SideEffectingOps`（6 项）+ 拒绝码 `lockdown_engaged` + SecurityLog 留痕；**位置选择有实义**——`TryHandle` 对导入三操作走 `Task.Run`（CS-031），判在 `Dispatch` 才使「先排队、后排紧急停止」在执行时被重新验证，判在 `TryHandle` 就退化成入队时快照。判定边界如实登记而非一刀切：只读面（`getEngine`/`getWallpaper`/`bookmarks`/`hasSaved`/`importScan`/`jsError`）冻结期间必须可用（否则设置窗与异常上报一起废、用户看不到状态），`setEngine`/`setWallpaper` 是本机偏好、无网络与数据副作用，同样放行——各有用例钉住，防止下一轮把「统一门禁」误读成「桥里全部拒绝」。反向锚两条：同一批操作在未触发时必须照样落到宿主（证明拒绝来自开关而非「根本没接线」）、同一实例翻转闭包必须立刻生效（证明不是构造时快照）。NTP 桥本身有 `IsTrustedSource` 前置 ⇒ 这不构成远程页面可达路径，审计报告「不能直接认定远程网页能调用这些操作」的限定成立 |
+| AX-03 | P1（外部审计声称）→ **主代理裁 P2** | 保留并落地**可直改半边**（详见 §3.22） | 回读：`AegisHomeBridge.isTrustedShellPage()` 判的是顶层文档 URL，`@JavascriptInterface` 不提供调用者 frame 的 Origin——报告说的机制差异属实；但可达链要求「顶层已是壳页 + 壳页内有攻击者可控 frame」，实测 `shared/shell` 四段脚本 + HTML **零 iframe**（`<iframe`/`createElement('iframe')` 均 0 命中，GeoGebra 走 `openGeo` 顶层导航），远程页面自己作为顶层时该判据本就拒 ⇒ 属提前封闭的信任边界，按 P2 排。本批落 CSP 显式 `frame-src 'none'`（把「今天恰好没帧」换成「加帧必须改这行」）+ 5 例常驻锚（两条反向注入实测）；报告另一条处方「拒空/异常 URL」**本已成立**（`isTrustedShellUrl` 对 null/"" 返回 false、`runCatching` 异常按拒，`AegisHomeBridgePrefsTest.kt:149-159` 已钉），按原样登记不重做。迁 WebMessage 传输与「整个 `file:///android_asset/` 前缀受信」两面入 §五 Q50 与 §四 |
 
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
-
 1. `release-android.yml`：zipalign 改 `if ! …; then ::error + exit 1; fi`，删尾部纯 echo 门禁步。
 2. `dependency-relock.yml`：6 处 in-run `${{ }}` 全部改经 step `env:` 中转
    （`RELOCK_BRANCH` / `RELOCK_ECOSYSTEM` / `RELOCK_RUN_ID`），并在**写回步骤内**加二次
@@ -663,6 +663,19 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      且现树 `is_high_risk_host` 的私网放行是第七轮 B8 裁决的钉（有专门用例保护
      `192.168.1.1:8080` 不被判高危，见 R9-RS-6）。它建议的「按发起者信任分级」与
      第 1 条是同一次改造，不单独收紧。
+  7. **AX-03 的两半残余**（§五 Q50）：①把 Android 桥的受信面从「整个
+     `file:///android_asset/` 前缀」收窄成壳页精确名单——要先确证内置 GeoGebra 页不消费
+     该桥，而那份资源是构建期下载、不入库，本机 grep 只能对当前副本负责；②把桥传输从
+     `@JavascriptInterface` 迁到 `androidx.webkit` 的 origin-scoped `addWebMessageListener`
+     （唯一能拿到帧 Origin 的路），牵动三端共用的 `shared/shell/start.js` 适配层 ⇒ 跨端
+     契约变更。本批只落了「不需要动这两处」的那一半：CSP 显式 `frame-src 'none'`。
+  8. **Q51 R9-CS-14：Android 要不要有威胁订阅源**（外部审计 AEG-003 的准确范围）。两端
+     出厂默认都是空名单放行，差别在 Android 连「让用户开启」的地方都没有。补齐＝新_fetch
+     →校验→缓存→灌核心 denylist_整条链，要先定源从哪来、谁签、断网时是否保留最后一份
+     已验证情报（审计建议保留，方向与 Windows 现实现一致）。属功能排期，不默认执行。
+  9. **Q52 R9-CS-15：威胁情报要不要周期刷新**（外部审计 AEG-008，属实但**已在设置 UI
+     明示**「生效于下次启动」）。改了就是新增后台网络活动，需一并定周期/退避/
+     「最后成功更新时间」上不上 UI。
 
 ## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
 
@@ -720,6 +733,20 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   批次 3 先做可直改面：壳页 CSP 把 `frame-src` 从「由 `default-src 'self'` 隐含」写成显式声明、
   来源判据拒空/异常 url、补用例；`addJavascriptInterface` 拿不到调用方 frame origin 这条
   残余属平台能力，迁 WebMessage 传输另行裁决。
+- Q50 R9-AD-11 | P2 | `android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt:55,95-99,109-121`
+  （`TRUSTED_SHELL_PREFIX = "file:///android_asset/"` + `isTrustedShellUrl` 前缀匹配）
+  ↔ `android/app/src/main/java/com/aegis/browser/SecureWebViewFactory.kt:127-132`
+  （`addJavascriptInterface(AegisHomeBridge…, "AegisBridge")` 对该 WebView 的**全部**文档与帧生效）：
+  桥的受信面是整个 assets 前缀，而不只是首页——内置离线 GeoGebra 页
+  （`file:///android_asset/geogebra/GeoGebra/HTML5/5.0/GeoGebra.html`，
+  `AegisHomeBridgePrefsTest.kt:151-154` 现把它钉成**受信**）经 `openGeo` 顶层导航后，
+  那枚第三方大 bundle 仍能以 `AegisBridge` 调 `navigate/setEngine/setWallpaper/goBack/logError`。
+  两个方向都要判，且都必须带实证再动手：①收窄成「壳页精确名单」前要先确证 GeoGebra 页
+  自身不消费该桥（该资源由 `.github/actions/prepare-geogebra` 构建期下载、不入库 ⇒ 本机
+  只能对 `dist/geogebra-cache` 的当前副本 grep，结论不是对上游版本的保证）；②`androidx.webkit`
+  的 origin-scoped `addWebMessageListener` 能给出帧的 Origin，但那是把整条桥传输从
+  `@JavascriptInterface` 迁走（页面侧 `Host` 适配层三端共用，`shared/shell/start.js` 一起改），
+  属跨端契约变更 ⇒ 入 §四 待裁决。外部第三轮审计 AX-03 的同源出处见 §二 与 §3.22。
 
 ### 5.2 SH（shared 壳层与契约）
 
@@ -797,6 +824,28 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   每个放行下载 `_trackedDownloads.Add(operation)`，完成**不移除**（仅 `UnwireEvents` 里
   `Clear`）⇒ 长会话累积已完成 `CoreWebView2DownloadOperation` COM 引用，`StopLiveTraffic`
   还对已结束项 `Cancel()`（抛→吞）。
+
+- Q51 R9-CS-14 | P2 | `windows/src/Aegis.Windows.App/Core/Settings/SettingsService.cs:24`
+  （`ThreatFeedUrl { get; init; } = ""`）↔ `Chrome/MainWindow.xaml.cs:138,326-337`
+  ↔ `core/rust-policy-core/src/ffi/broker.rs:331`（`update_host_denylist`）↔ Android 全端
+  （grep `Denylist|ThreatFeed|blocklist|isHostBlocked` 在 `android/**` **0 命中**）：
+  外部第三轮审计 AEG-003「Android 缺少威胁黑名单防护」**范围要改准**——两端默认都是
+  **空名单即放行**（Windows 的订阅源是用户在设置页填 https URL 或
+  `AEGIS_THREAT_FEED_URL`，缺省空 ⇒ 出厂形态两端行为一致）。真实缺口是**能力面**：
+  Android 整条「取源 → 校验 → 缓存 → 灌进核心 denylist」的链不存在，Rust 侧
+  `apply_host_denylist` 在 Android 恒不被调用，所以用户即使想在 Android 上开黑名单也无处可开。
+  补齐它是一项功能而非一次修补：要网络抓取、缓存原子替换、版本/签名/防回滚、失败降级
+  可解释（审计 §AEG-003 的处方方向正确），且要先定「源从哪来、谁签」。⇒ §四 待裁决；
+  验收按审计口径：同一威胁测试集在两端输出同一裁决，并能在真机上确认实际拦截。
+- Q52 R9-CS-15 | P3 | `windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml.cs:138`
+  （`StartThreatFeedRefresh()` 在启动链里调用**一次**）+ `SettingsWindow.xaml.cs:111`
+  （保存后提示「已保存；生效于下次启动（导航与子资源拦截）」）：
+  外部审计 AEG-008「威胁情报仅启动时刷新」**属实**——同文件里 `_feedbackTimer`/`_sleepTimer`
+  都有 DispatcherTimer，唯独订阅源没有周期重取；长时间不关窗的用户会一直用启动时那份缓存。
+  但要点是它**已在设置 UI 明示**（不是偷偷降级），所以这不是「声明与行为不符」而是「行为
+  偏弱」。改成周期抓取＝新增后台网络活动（默认订阅源为空时不产生流量，一旦用户配了源
+  就从「开窗取一次」变成「持续取」），属出货行为变更 ⇒ §四 待裁决，
+  一并定「刷新周期 / 退避 / 最后成功更新时间上 UI」。
 
 ### 5.4 RS（Rust 核心）
 
@@ -979,6 +1028,55 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    AEG-011（等价待办项 10，本机无 Gradle 无法生成 lock）、AEG-014（FFI fuzzing 属阶段 C）。
    去重两条：AX-07 ≡ §五 Q6（R9-AD-6）、AX-03 ≡ §五 Q10（R9-AD-10），均在原条目下续外部出处。
 
+### 3.22 R9-B23（2026-10-11，外部审计 AX-03 可直改半边）：壳页 CSP 显式 `frame-src 'none'`
+
+1. 语料事实先回读（不改判定）：`shared/shell/` 四段脚本 + HTML 全仓**零** `<iframe>`
+   与 `createElement('iframe')`；`start.main.js` 的 GeoGebra 入口走宿主桥 `openGeo`
+   （顶层导航），不是嵌帧。⇒ 这一刀今日成本为零。
+2. 改动：`shared/shell/start.html` 的 meta CSP 追加 `frame-src 'none'`，与既有的
+   `object-src/media-src/connect-src 'none'` 同族。**为什么这是安全判据而非排版**：
+   Android 桥的归属判据是 `AegisHomeBridge.isTrustedShellPage()` 读 `webView.url`
+   （顶层文档），`@JavascriptInterface` 拿不到调用者所在 frame 的 Origin；今天
+   「顶层 URL ＝ 唯一可能的调用者」成立只是因为壳页没有帧。显式关帧把它从
+   「default-src 调宽时顺带放大」变成「必须改这行的显式评审点」。
+   与 WB-105 的关系写进注释：被移除的是 `frame-ancestors`（meta 中被忽略＝声明失真），
+   本批加的是 `frame-src`（取回类指令，meta 下确实生效）——两条并存才不被下一个人当矛盾。
+3. 新常驻 `tests/ui-regression/shell_frame_guard.test.mjs`（5 例，126/126 全套绿）：
+   正向控制是「解析到的 CSP 里必须同时看得见周围七条既有指令」（防空串恒真）；
+   两条反向锚**实测注入**——删 `frame-src 'none'` ⇒ 2 例判红，往 HTML 塞一个
+   `<iframe>` ⇒ 成本哨兵判红；另加一条装配锚判 `android/app/build.gradle.kts:218`
+   的 `assets.srcDir(rootProject.file("../shared/shell"))` 仍在（「共享壳层」≠「两端都吃到」）。
+4. **审计点名的第二半「reject null/empty url」本已成立**，不需要修：
+   `AegisHomeBridge.kt:95-99` 的 `isTrustedShellUrl` 对 `null`/`""` 返回 false，且
+   `runCatching { wv.url }` 异常也按拒绝处理；`AegisHomeBridgePrefsTest.kt:149-159` 已把
+   `null`/`""`/`file://attacker/android_asset/start.html`/`file:///sdcard/evil.html` 各钉一次。
+   登记而非重做，避免同一判据出现第二个来源。
+5. 残余两面另登新队列 **Q50**（`AegisHomeBridge.kt:55,95-99,109-121` 的整个
+   `file:///android_asset/` 前缀受信 ＝ 内置 GeoGebra 页也带着 `AegisBridge`；
+   以及 `@JavascriptInterface` 拿不到帧 Origin ⇒ 迁 WebMessage 传输），并在 §四
+   「外部第三轮审计里不能照做的条目」第 7 项挂成待裁决——两者都不是补一行判据。
+6. **本批自己踩的一次「本地绿、CI 红」记进方法面**（PR #157 首跑）：给台账 CSV 追加行后，
+   本地用 `csv.reader(open(path))` 判「列数全等于 7」是通过的，而常驻门禁
+   `gate_hollowness_test.py::test_ledger_csv_files_are_straight_rectangles` 判的是
+   `read_text().splitlines()` 再喂 reader——同一份文件两种读法对「未加引号的裸逗号」结果不同，
+   门禁把 AX-03 的 location 列（`…AegisHomeBridge.kt:95-99,109-121`，含逗号却未被引号包住）
+   读成 8 列。根因不是门禁过严：它正是为「按列解析会读到错位数据」而设；我的临场校验比门禁松。
+   ⇒ 从今天起改 CSV 只走两条路：要么让 csv.writer 自己决定加引号（不在写出后做文本替换），
+   要么本地直接跑那条门禁（`pytest -k ledger`，秒级）。本行的 location 已重写成
+   「:95-99 与 109-121」并把引号交回 writer。
+
+- **AEG-013「WebView2 消息桥与 Origin 验证」在当前代码上不成立**（外部第三轮审计标
+  「待验证」，本批按它给的四个 API 名逐个回读）：全仓 `AddHostObjectToScript` **零命中**
+  ⇒ 不存在 COM 宿主对象注入面；`WebMessageReceived` 只有两处订阅
+  （`Chrome/MainWindow.Tabs.CoreReady.cs:80-84`、`Chrome/InPrivateWindow.xaml.cs:215-221`），
+  **两处都是**先 `NtpAssets.IsTopLevelNtpDocument(core)`（顶层文档必须是 ntp 虚拟主机）
+  再把 `ev.Source` 交给 `NtpBridge.IsTrustedSource`（https + 固定 host + 默认端口）二次校验，
+  不符即静默忽略。per-origin 面不止写在注释里：`WebView/WebView2Hardening.cs:90` 的
+  `SetPerOrigin` 在每次顶层导航按来源翻转 `IsWebMessageEnabled`（远程页禁用），
+  `WebView/HostWebView.cs:142` 记着子框架形态的取舍理由。⇒ 本项「待验证」就地转成已核实。
+- **AEG-013 的「只修主窗未修无痕窗」这一类部分闭环在本项上不成立**——无痕窗走同一
+  `NtpBridgeFactory.CreatePrivate` + 同一顶层门禁。⇒ 不登记缺陷；若要攻的是「导航中途
+  旧页面残留消息」这类时序面，须按 §五 攻击面矩阵做动态测试再判，不靠静态读代码翻案。
 ## 六、复核后判定为不成立（留此防重复上报）
 
 - **「Android 也缺 window.open 洪水上限」不成立**（第九轮 2026-10-10，落地 Windows 侧上限时

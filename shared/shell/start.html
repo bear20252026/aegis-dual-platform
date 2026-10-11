@@ -17,8 +17,16 @@
      经 ntp.aegis.local 受信虚拟主机加载，宿主桥按顶层文档门禁
      （NtpAssets.IsTopLevelNtpDocument）拒绝帧内嵌复用；Android 为本地
      asset 页，无第三方嵌入面。 -->
+<!-- AX-03（外部第三轮审计 2026-10-11）：frame-src 从「由 default-src 'self' 隐含」
+     改成显式 'none'。这与上面被移除的 frame-ancestors 不是一回事——后者在 <meta>
+     中被忽略（本文件不声明它），而 frame-src 是取回类指令、meta CSP 下确实生效。
+     动机是 Android 侧的归属判据：AegisBridge 只能读顶层文档 URL（webView.getUrl），
+     证明不了调用者所在 frame 的 Origin。把「壳页可以嵌任何 frame」这件事在本页
+     生命周期内彻底关掉，顶层 URL 就与唯一可能的调用者同源同体，判据的适用范围
+     不再依赖「今天恰好没人用 iframe」。将来确有需要嵌 frame 时，改这行即是一次
+     显式评审点，而不是 default-src 调整时的顺带放大。 -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' file:; style-src 'self' file:; img-src 'self' file: data:; connect-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+      content="default-src 'self'; script-src 'self' file:; style-src 'self' file:; img-src 'self' file: data:; connect-src 'none'; media-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
     <!-- WB-131（2026-09-26 审计）：data: URI favicon——此前 head 无任何 icon
          声明且虚拟主机根无 favicon.ico，每开新标签产生一次 404 子资源请求
          （img-src 已放行 data:，meta CSP 下可加载） -->
