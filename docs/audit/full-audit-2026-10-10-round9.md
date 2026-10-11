@@ -1101,8 +1101,15 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    2 例装配面文本锚（`newTab`/`switchTo` 切片必须同时看得见导航撤销与下载撤销——前者是
    正向控制，证明切片取对了地方；`approvePendingDownload` 必须落在**同一个** `currentWebView`
    缝上，另起一份「活动标签」定义就是第二个判据源）。
-4. 本地实测：`./gradlew :app:testDebugUnitTest` 全套 **315 例 0 失败**（新增 7 例在内），
-   ktlint/detekt 无新增违规；三处故障注入见下条。
+4. 本地实测：`./gradlew :app:testDebugUnitTest` 全套 **315 例 0 失败**（新增 7 例在内）；
+   三处故障注入见下条。
+   **本批自己写的一句失实声明就地更正**：PR #158 首跑前我在台账与 CSV 里写
+   「ktlint/detekt 零新增违规」，而那两条门禁当时**从没在本地跑过**——CI 当场判红两条
+   （`BrowserViewModelTabs.kt:162` 行尾注释的三空格对齐＝`Unnecessary long whitespace`；
+   测试文件里 `throw IllegalStateException`＝detekt `UseCheckOrError`）。二者本地都能抓
+   （`./gradlew :app:ktlintCheck :app:detekt`，32s），修完复跑 `:app/:broker/:webview-adapter`
+   三个 `testDebugUnitTest` 全绿。教训与 §3.22 第 6 条同型：**能跑的判定面必须跑完再写结论**，
+   「看起来只是格式」不属于可免检的范围。
 5. 反向锚实测：① 从 `switchTo` 删掉 `rejectPendingDownload()` ⇒ 装配锚判红；
    ② 把 `approvePendingDownload` 改回旧形态（取出即 proceed）⇒ 跨标签那例判红；
    ③ 把归属判据换成构造时快照……本例**不适用**（判据是每次调用的 lambda 缝，
