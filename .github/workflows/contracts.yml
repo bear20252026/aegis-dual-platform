@@ -123,6 +123,10 @@ jobs:
         run: python scripts/verify_cross_end_lists.py
       - name: Validate contracts JSON and expected decisions (PY-064 抽脚本单源)
         run: python scripts/verify_vectors.py
+      # AEG-006（外部第三轮审计 2026-10-11）：向量的**消费面**——只被 schema 校验器
+      # 引用＝判形状不判裁决，改坏内容照样绿。零真实消费者的向量必须显式登记。
+      - name: Validate vector CONSUMER surface (AEG-006——有形状校验≠有人消费)
+        run: python scripts/verify_vector_consumers.py
       - name: Validate vectors against JSON Schema (PY-013——schema 不再纯装饰)
         run: python contracts/codegen/validate_vector_schemas.py
       - name: Analyze action catalog (PY-015——静态分析器接入门禁)
