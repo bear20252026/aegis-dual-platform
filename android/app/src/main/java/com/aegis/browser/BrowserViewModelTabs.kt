@@ -139,7 +139,9 @@ internal class BrowserViewModelTabs(
     fun newTab(context: android.content.Context) {
         withTabManager { tm ->
             // 新标签会切换当前 WebView；不能把旧标签的明确批准带入新上下文。
+            // AX-07：下载确认同槽同风险，一并撤销（审批归属＝发起标签）。
             confirmations.rejectPendingNavigationConfirmation()
+            confirmations.rejectPendingDownload()
             clearDraft()
             // AD-307：applicationContext 创建（Activity context 泄漏面——见 init 注记）
             val wv = createSecureWebView(context.applicationContext)
@@ -157,6 +159,8 @@ internal class BrowserViewModelTabs(
             // 回到原标签也需重新请求。
             if (index != tm.activeIndex) {
                 confirmations.rejectPendingNavigationConfirmation()
+                // AX-07：同导航，pending 下载不跨标签存续
+                confirmations.rejectPendingDownload()
                 // 切换标签 = 放弃未提交的地址栏草稿，地址栏显示目标标签 URL
                 clearDraft()
             }

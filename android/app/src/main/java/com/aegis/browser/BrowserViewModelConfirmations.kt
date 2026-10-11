@@ -100,9 +100,19 @@ internal class BrowserViewModelConfirmations(
     /**
      * AD-331（2026-10-02 审计）：下载确认对话框「仍要下载」——仅消费当前
      * 挂起项一次（批准后清除，续体单次调用；重复点击/dialog 复现均为 no-op）。
+     *
+     * AX-07（外部第三轮审计 2026-10-11 = §五 Q6）：授权必须绑定发起者。此前这里取出
+     * pending 即 `proceed()`，而上面的导航确认早就有 `currentWebView() !== pending.webView`
+     * 这一道——于是标签切换后，**后台标签**留下的危险扩展下载确认可被前台标签批准，
+     * 用户批准的对象被换成了另一标签的目标。归属不符时不清槽（与导航同口径：
+     * 回到原标签仍可确认），只提示切回。
      */
     fun approvePendingDownload() {
         val pending = _pendingDownloadConfirmation.value ?: return
+        if (currentWebView() !== pending.webView) {
+            setSecurityNotice(R.string.confirm_switch_back)
+            return
+        }
         _pendingDownloadConfirmation.value = null
         pending.proceed()
     }
