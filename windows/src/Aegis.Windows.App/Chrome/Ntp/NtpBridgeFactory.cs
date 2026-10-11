@@ -65,7 +65,9 @@ public sealed class NtpBridgeFactory
             OpenGeo: () => OpenGeoFor(runtime),
             ImportSources: () => Array.Empty<NtpBridge.ImportSourceSnapshot>(),
             ImportBookmarks: _ => (0, 0, new List<NtpBridge.ImportResult>()),
-            ImportHistory: (_, _) => (0, 0, new List<NtpBridge.ImportResult>())));
+            ImportHistory: (_, _) => (0, 0, new List<NtpBridge.ImportResult>()),
+            // AX-04：无痕窗与主窗共用同一把闸（KillSwitch.Shared，CS-291 语义）
+            IsLockdownEngaged: () => Broker.KillSwitch.Shared.IsEngaged));
 
     private NtpBridge.Services BuildServices(TabRuntime runtime) => new(
         SearchEngine: () => _settings.SearchEngine,
@@ -156,7 +158,9 @@ public sealed class NtpBridgeFactory
                 }
             }
             return (imported, total, results);
-        });
+        },
+        // AX-04：判定点在 NtpBridge.Dispatch 内（执行时读取，不是构造时快照）
+        IsLockdownEngaged: () => Broker.KillSwitch.Shared.IsEngaged);
 
     /// <summary>上一页（桥通用：Win/无痕共用——作用于 runtime 自己的 WebView）。</summary>
     private static bool GoBackFor(TabRuntime runtime)

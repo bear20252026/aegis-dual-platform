@@ -39,17 +39,102 @@ public sealed partial class HostWebView
             () => RedactUrl(e.Request.Uri));
         if (denial is null)
             return;
+        // AX-01（外部第三轮审计 2026-10-11）：拒绝已经产生，就不能因为「合成响应这一步
+        // 自己出 bug」而把请求退回默认路径。旧代码只记一行日志——如实留痕是对的，
+        // 但留痕不是拦截。现在两段收敛：①交付拒绝响应；②交付失败 ⇒ **升级**：Stop() 中止
+        // 该 WebView 当前导航（待发子资源随内核一并停止），并留下可判读的重码。
+        // 不做「换一组参数再试一次」：会失败的原因是 COM 对象/环境已失效，换参数不改变结局。
+        DeliverDenial(
+            denial.Value,
+            d => TryCreateDenialResponse(e, webView, d),
+            () => TryStopWebView(webView),
+            TryWriteSecurityLog);
+    }
+
+    /// <summary>拒绝投递的判定核（提 internal 纯函数：handler 本体要 COM 对象）。
+    /// 永不抛出——异常抛回 WebResourceRequested 的 shim 会炸掉进程，
+    /// 而「投不上拒绝」绝不允许变成「把异常甩给调用方」。</summary>
+    internal static void DeliverDenial(
+        WebResourceDenial denial,
+        Func<WebResourceDenial, bool> tryDeliver,
+        Action escalateStop,
+        Action<string> log)
+    {
+        // 两段各自独立收口：交付面**返回 false** 与 **抛出** 是同一个事实（拒绝没落地），
+        // 都必须升级。若把 escalate 写在同一个 try 里，tryDeliver 抛出会跳过升级——
+        // 而那正是外部审计点名的形态（CreateWebResourceResponse 自己抛）。
+        // 留痕面自己也不许抛：今天调用方传的是 TryWriteSecurityLog，但契约既然写「永不抛出」
+        // 就得连 log 参数一起兜住——换一个直接传 SecurityLog.Write 的调用方，
+        // 就会把「日志目录不可写」变成「异常抛回事件 shim ⇒ 进程当场崩」。
+        void Line(string text)
+        {
+            try
+            {
+                log(text);
+            }
+            catch (Exception)
+            {
+                // 尽力留痕即止
+            }
+        }
+
+        var delivered = false;
         try
         {
-            e.Response = webView.Environment.CreateWebResourceResponse(
-                null, denial.Value.Status, denial.Value.ReasonPhrase, "Content-Type: text/plain");
+            delivered = tryDeliver(denial);
         }
         catch (Exception ex)
         {
-            // 连错误响应都造不出（COM 已退休/环境已销毁）：这一条只能回到默认路径。
-            // 如实留痕而不是假装拦住，但绝不把异常抛回事件 shim（那会炸掉进程）。
+            Line($"[webresource] 拒绝响应合成异常: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        if (delivered)
+            return;
+        try
+        {
+            escalateStop();
+            Line($"[webresource] 拒绝响应无法交付，已升级中止该 WebView 当前导航: "
+                + $"status={denial.Status} code={DenialUndeliverableErrorCode}");
+        }
+        catch (Exception ex)
+        {
+            // 升级面自己也失效（COM 已退休）：只能留痕，绝不把异常甩回事件 shim
+            Line($"[webresource] 拒绝投递与升级均失败: {ex.GetType().Name}: {ex.Message} "
+                + $"code={DenialUndeliverableErrorCode}");
+        }
+    }
+
+    /// <summary>AX-01 的重码（与 `subresource_policy_error` 同一族：单条请求的失败闭合留痕）。</summary>
+    internal const string DenialUndeliverableErrorCode = "subresource_denial_undeliverable";
+
+    private static bool TryCreateDenialResponse(
+        CoreWebView2WebResourceRequestedEventArgs e, CoreWebView2 webView, WebResourceDenial denial)
+    {
+        try
+        {
+            e.Response = webView.Environment.CreateWebResourceResponse(
+                null, denial.Status, denial.ReasonPhrase, "Content-Type: text/plain");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            // 不在此处留痕：是否「已升级」由 DeliverDenial 统一记账，
+            // 免得一次失败刷出两条互不相干的日志。
+            _ = ex;
+            return false;
+        }
+    }
+
+    private static void TryStopWebView(CoreWebView2 webView)
+    {
+        try
+        {
+            webView.Stop();
+        }
+        catch (Exception ex)
+        {
             TryWriteSecurityLog(
-                $"[webresource] 拒绝响应构造失败，该请求保留默认路径: {ex.GetType().Name}: {ex.Message}");
+                $"[webresource] Stop() 亦失败（COM 可能已退休）: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

@@ -34,7 +34,7 @@ public sealed class NtpBridgeTests
             new("chrome", true, true),
         },
         ImportBookmarks: _ => (0, 0, new List<NtpBridge.ImportResult>()),
-        ImportHistory: onImportHistory ?? ((_, _) => (0, 0, new List<NtpBridge.ImportResult>())));
+        ImportHistory: onImportHistory ?? ((_, _) => (0, 0, new List<NtpBridge.ImportResult>())), IsLockdownEngaged: () => false);
 
     [Theory]
     [InlineData("https://ntp.aegis.local/start.html", true)]
