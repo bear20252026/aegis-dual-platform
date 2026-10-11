@@ -6,7 +6,8 @@ url-origin-*」。本脚本把这句话变成一个可判定的表：每份向�
 有意识的动作。两条口径，否则数字会被读成另一种意思：
 - 「消费者」＝受管源码面里以「完整文件名」或「词干作为独立词」命中，且落在会被编译/执行的
   路径下。markdown 里的提及是**声明**，不算消费（否则文档写一句就冒充「测试跑过」）。
-- `SCHEMA_LEVEL` 那两个文件判的是「实例对 Schema 的通过/拒绝＝向量自述的 expected」，对
+- `META_LEVEL`（按名遍历整个向量目录的工具面，含本门禁自己）判的是「实例对 Schema 的
+   通过/拒绝＝向量自述的 expected」，对
   capability/audit-event 那四位就是全部语义 ⇒ 记为「无端侧执行者」≠「没人判」，只等于
   「没有平台实现跑它」；而「跨端同一裁决」恰好只对后者有意义。
 
@@ -17,7 +18,7 @@ url-origin-*」。本脚本把这句话变成一个可判定的表：每份向�
 3. 至少 MIN_CROSS_END 份向量同时被 CS 与 AD 执行（今天＝url-origin-* 两份）；这条**不随
    登记表松动**，否则「把跨端两份改成单端登记」就能把 AEG-006 说反。
 4. 至少 MIN_EXECUTABLE 份有端侧执行者（今天 11 份）——防止整体退化成纯 schema 对账。
-5. SCHEMA_LEVEL 路径必须仍可解析：漂了会把真实端侧消费者误降成「只在 schema 层判」。
+5. META_LEVEL 路径必须仍可解析：漂了会把真实端侧消费者误降成「只在元层判」。
 
 退出码：0=通过 / 1=违规 / 2=环境或扫描面异常。
 """
@@ -39,16 +40,21 @@ MIN_CROSS_END, MIN_EXECUTABLE = 1, 10
 CODE_EXTENSIONS = (".cs", ".kt", ".kts", ".rs", ".py", ".js", ".mjs", ".yml", ".yaml")
 EXCLUDED_PARTS = ("/target/", "/obj/", "/bin/", "/node_modules/", "/build/", "/dist/")
 
-# schema 级判定面：命中这里只证明「形状/expected 被对账」，不证明「端侧实现跑过它」。
+# 元面（META_LEVEL）：按名遍历整个向量目录、只判「形状/expected/协议字段对不对」的工具文件，
+# 包括**本门禁自己与它的用例**——它们在源码里写出每一份向量的名字，若算消费者就会让 15 份
+# 全部「被 PY 执行」，把整张表读成假象（CI 首跑实测正是这样红的）。
 # 每一项都要能在实树里解析到（判据 5）。
-SCHEMA_LEVEL = (
+META_LEVEL = (
     "contracts/codegen/validate_vector_schemas.py",
     "tests/python/vector_schema_input_guard_test.py",
+    "scripts/verify_vectors.py",
+    "scripts/verify_vector_consumers.py",
+    "tests/python/vector_consumers_test.py",
 )
 
 # 实测登记（2026-10-11，扫描 541 个受管源文件）。空 frozenset＝没有端侧执行者，只有
 # schema 级判定。改任何一行的端集都要同批在台账写清为什么。两个易错点已被自己的门禁打回过：
-# update-manifest-invalid/valid 的 PY 命中**全部**来自 SCHEMA_LEVEL 那两个文件（不算端侧），
+# update-manifest-invalid/valid 的 PY 命中**全部**来自元层文件（不算端侧），
 # 而 canonical 的 PY 是 tests/python/release_tools_test.py（真实消费者，保留）。
 CONSUMER_MANIFEST: dict[str, frozenset[str]] = {
     "action-invalid.json": frozenset({"RS"}),
@@ -120,12 +126,12 @@ def _matcher(vectors: list[Path]) -> tuple[re.Pattern[str], dict[str, str]]:
 def collect_consumers(
     texts: dict[str, str], vectors: list[Path]
 ) -> dict[str, list[str]]:
-    """向量名 → 端侧消费者路径（SCHEMA_LEVEL 除外；同一文件命中词干与全名只计一次）。"""
+    """向量名 → 端侧消费者路径（元层除外；同一文件命中词干与全名只计一次）。"""
     pattern, tokens = _matcher(vectors)
-    schema_level = set(SCHEMA_LEVEL)
+    meta = set(META_LEVEL)
     found: dict[str, list[str]] = {p.name: [] for p in vectors}
     for rel, text in texts.items():
-        if rel in schema_level:
+        if rel in meta:
             continue
         for name in {tokens[t] for t in pattern.findall(text) if t in tokens}:
             found[name].append(rel)
@@ -165,7 +171,7 @@ def check(texts: dict[str, str], vectors: list[Path]) -> tuple[list[str], list[s
             cross_end += 1
         hits = consumers.get(name, [])
         report.append(
-            f"{name:42s} " + ("/".join(sorted(ends)) if ends else "仅 schema 级")
+            f"{name:42s} " + ("/".join(sorted(ends)) if ends else "仅元层（schema/协议）")
             + ("  " + ", ".join(hits[:2]) if hits else ""))
     for stale in sorted(set(CONSUMER_MANIFEST) - {p.name for p in vectors}):
         violations.append(f"CONSUMER_MANIFEST 里的 {stale} 在实树不存在——过期登记")
@@ -180,10 +186,10 @@ def check(texts: dict[str, str], vectors: list[Path]) -> tuple[list[str], list[s
     return violations, report
 
 
-def check_schema_level_paths_exist(files: list[str]) -> list[str]:
-    """SCHEMA_LEVEL 漂了会把真实端侧消费者误降成「只在 schema 层判」（判据 5）。"""
+def check_meta_paths_exist(files: list[str]) -> list[str]:
+    """元面漂了会把真实端侧消费者误降成「只在元层判」（判据 5）。"""
     tracked = set(files)
-    return [f"{p} 已不在受管面——SCHEMA_LEVEL 集合过期" for p in SCHEMA_LEVEL if p not in tracked]
+    return [f"{p} 已不在受管面——META_LEVEL 集合过期" for p in META_LEVEL if p not in tracked]
 
 
 def run() -> int:
@@ -201,7 +207,7 @@ def run() -> int:
         print("::error:: 受管源码面为空——本门禁没有判定面", file=sys.stderr)
         return 2
     violations, report = check(texts, vectors)
-    violations += check_schema_level_paths_exist(files)
+    violations += check_meta_paths_exist(files)
     if violations:
         for line in violations:
             print(f"::error:: {line}", file=sys.stderr)

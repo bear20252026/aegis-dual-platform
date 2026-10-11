@@ -6,8 +6,8 @@
 # ② 门禁的每条判据都在这里被注入证伪。这部分原本写在脚本的 `--self-test` 里，本批搬进
 #    pytest：一条要人主动敲 flag 的自证就是「跑不动的判据」（R9-SH-7 的同一课）。
 #
-# 「消费者」不包括 markdown 提及（那是声明），也不包括 SCHEMA_LEVEL 那两个文件——
-# 它们判的是「形状/expected 对不对」，不是「哪端实现了这个裁决」。
+# 「消费者」不包括 markdown 提及（那是声明），也不包括元层 META_LEVEL 那五个文件——
+# 它们（含本门禁自己与它的用例）按名遍历整个向量目录，判的是形状/expected，# 不是「哪端实现了这个裁决」。
 from __future__ import annotations
 
 import importlib.util
@@ -95,7 +95,7 @@ def test_single_pass_equals_the_naive_per_vector_scan(real):
     fast = {k: sorted(v) for k, v in vvc.collect_consumers(texts, vectors).items()}
     slow: dict[str, list[str]] = {p.name: [] for p in vectors}
     for rel, text in texts.items():
-        if rel in set(vvc.SCHEMA_LEVEL):
+        if rel in set(vvc.META_LEVEL):
             continue
         for path in vectors:
             if re.search(r"(?<![\w.-])" + re.escape(path.stem) + r"(?![\w-])", text):
@@ -138,9 +138,9 @@ END_SAMPLE = {
 
 def fake_corpus(vvc):
     """按登记表生成语料：正向用例要「按构造成立」，而不是碰巧凑出来。
-    额外塞一条 SCHEMA_LEVEL 命中——它必须被排除在端侧之外，否则 capability/audit-event
+    额外塞一条元层命中——它必须被排除在端侧之外，否则 capability/audit-event
     的空端集就不成立，正向用例会因别的原因报错。"""
-    texts = {vvc.SCHEMA_LEVEL[0]: 'capability-valid.json\naudit-event-valid.json'}
+    texts = {vvc.META_LEVEL[0]: 'capability-valid.json\naudit-event-valid.json'}
     for name, ends in vvc.CONSUMER_MANIFEST.items():
         for end in ends:
             path = END_SAMPLE[end]
@@ -214,12 +214,12 @@ def test_cross_end_pillar_floor_does_not_move_with_the_manifest():
         vvc.CONSUMER_MANIFEST = saved
 
 
-def test_schema_level_path_drift_is_reported():
+def test_meta_level_path_drift_is_reported():
     vvc = load()
-    assert vvc.check_schema_level_paths_exist(
-        list(vvc.CONSUMER_MANIFEST) + list(vvc.SCHEMA_LEVEL)) == []
-    assert any("SCHEMA_LEVEL 集合过期" in v
-               for v in vvc.check_schema_level_paths_exist(["scripts/other.py"]))
+    assert vvc.check_meta_paths_exist(
+        list(vvc.CONSUMER_MANIFEST) + list(vvc.META_LEVEL)) == []
+    assert any("META_LEVEL 集合过期" in v
+               for v in vvc.check_meta_paths_exist(["scripts/other.py"]))
 
 
 def test_gate_runs_on_the_pr_triggered_contract_surface():
