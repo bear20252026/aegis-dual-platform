@@ -1026,6 +1026,15 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `file:///android_asset/` 前缀受信 ＝ 内置 GeoGebra 页也带着 `AegisBridge`；
    以及 `@JavascriptInterface` 拿不到帧 Origin ⇒ 迁 WebMessage 传输），并在 §四
    「外部第三轮审计里不能照做的条目」第 7 项挂成待裁决——两者都不是补一行判据。
+6. **本批自己踩的一次「本地绿、CI 红」记进方法面**（PR #157 首跑）：给台账 CSV 追加行后，
+   本地用 `csv.reader(open(path))` 判「列数全等于 7」是通过的，而常驻门禁
+   `gate_hollowness_test.py::test_ledger_csv_files_are_straight_rectangles` 判的是
+   `read_text().splitlines()` 再喂 reader——同一份文件两种读法对「未加引号的裸逗号」结果不同，
+   门禁把 AX-03 的 location 列（`…AegisHomeBridge.kt:95-99,109-121`，含逗号却未被引号包住）
+   读成 8 列。根因不是门禁过严：它正是为「按列解析会读到错位数据」而设；我的临场校验比门禁松。
+   ⇒ 从今天起改 CSV 只走两条路：要么让 csv.writer 自己决定加引号（不在写出后做文本替换），
+   要么本地直接跑那条门禁（`pytest -k ledger`，秒级）。本行的 location 已重写成
+   「:95-99 与 109-121」并把引号交回 writer。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
