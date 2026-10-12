@@ -75,4 +75,68 @@ subprojects {
         lockAllConfigurations()
         lockMode = LockMode.STRICT
     }
+
+    // R9-B32（2026-10-12，master 实测红灯）：锁的**覆盖面**不能靠「手抄一份任务清单」。
+    // 第九轮批次的重锁面是照 CI 的 gradlew 任务列表抄的，而 `:app:androidTestUtil` 这类
+    // 配置**不属于任何任务的名称面**——它由 AGP 的 UTP 构建监听器在依赖图生成时解析。
+    // 后果实测：`gradle-dependency-graph.yml` 连续两次在 master 上红
+    // （`Locking strict mode: Configuration ':app:androidTestUtil' is locked but does not
+    // have lock state`），而所有 PR 门禁当时全绿——「清单抄对了」完全不等于「锁覆盖全了」。
+    // 这个任务把判据改成枚举模型里的真实集合：每个 `canBeResolved` 的配置都必须在锁里有
+    // 状态（坐标条目或 `empty=` 里出现过），缺一个就 fail-closed 列出全部缺口。
+    // 用**图解析**而非文件解析：锁记的是版本，`.files` 会连带要求本模块产物已构建，
+    // 那是构建执行面的事，不是锁完整性的事（实测库模块的 androidTest 文件解析会因此假失败）。
+    tasks.register("verifyDependencyLockCoverage") {
+        notCompatibleWithConfigurationCache("执行期枚举 configurations——新变体配置必须也能被看到")
+        doLast {
+            val lock = project.file("gradle.lockfile")
+            if (!lock.isFile) {
+                throw GradleException(
+                    "${project.path} 没有 gradle.lockfile——启用了依赖锁定却没有锁文件，" +
+                        "STRICT 下任何解析都会当场红"
+                )
+            }
+            val covered = mutableSetOf<String>()
+            lock.readLines().forEach { line ->
+                if (line.isBlank() || line.startsWith("#")) return@forEach
+                val idx = line.indexOf('=')
+                if (idx >= 0) {
+                    line.substring(idx + 1).split(',').forEach { name ->
+                        if (name.isNotBlank()) covered += name.trim()
+                    }
+                }
+            }
+            val resolvable = project.configurations
+                .filter { it.isCanBeResolved }
+                .mapTo(mutableSetOf()) { it.name }
+            val missing = resolvable - covered
+            if (missing.isNotEmpty()) {
+                throw GradleException(
+                    "${project.path} 有 ${missing.size} 个可解析配置在锁里没有状态：" +
+                        missing.sorted().joinToString(", ") +
+                        "——重锁面漏了它们（照任务清单抄必然漏掉监听器解析的配置）；" +
+                        "跑 dependency-relock.yml 的 gradle 面补齐：先 resolveAllConfigurations 全量解析写锁，再跑回本检查自证"
+                )
+            }
+            println("锁覆盖检查通过：${project.path} 的 ${resolvable.size} 个可解析配置全部有锁状态")
+        }
+    }
+
+    // 重锁用：把每个可解析配置的**依赖图**解析一遍，让 `--write-locks` 写全状态。
+    // 刻意不因单个配置解析失败而中断（监听器类配置在无设备环境下可能解析不动），
+    // 但最终由 verifyDependencyLockCoverage 判成败——解析是手段，覆盖是判据。
+    tasks.register("resolveAllConfigurations") {
+        notCompatibleWithConfigurationCache("执行期枚举并解析 configurations")
+        doLast {
+            project.configurations.filter { it.isCanBeResolved }.forEach { cfg ->
+                val outcome = try {
+                    cfg.incoming.resolutionResult.root
+                    "OK"
+                } catch (e: Exception) {
+                    "FAIL ${e.message?.lineSequence()?.firstOrNull()}"
+                }
+                println("解析 ${project.path}:${cfg.name} -> $outcome")
+            }
+        }
+    }
 }

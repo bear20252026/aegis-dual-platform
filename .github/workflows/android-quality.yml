@@ -78,6 +78,14 @@ jobs:
           # 36.0.0：与平台包同渠道约束），compileSdk=37 与基线包的差集即 AGP 自动装配面
           packages: "platform-tools platforms;android-36 build-tools;36.0.0"
 
+      # R9-B32（2026-10-12，master 实测红灯）：锁的**覆盖面**必须在 PR 面可失败。
+      # 第九轮的重锁面是照「CI 的 gradlew 任务清单」抄的，而 `:app:androidTestUtil` 这类
+      # 配置由 AGP 的 UTP 构建监听器解析、不属于任何任务名称面 ⇒ 依赖图生成作业在 master
+      # 连红两次（`is locked but does not have lock state`），同期所有 PR 门禁全绿。
+      # 这个检查改成枚举模型里真实的 `canBeResolved` 集合并与锁文件对账（秒级、不解析产物）。
+      - name: 依赖锁覆盖检查（R9-B32——每个可解析配置都要有锁状态）
+        run: ./gradlew verifyDependencyLockCoverage --no-daemon --no-configuration-cache
+
       - name: ktlint 检查（0 错误门禁）
         run: ./gradlew :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck --no-daemon
 

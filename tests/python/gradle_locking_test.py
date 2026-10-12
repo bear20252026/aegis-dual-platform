@@ -1,17 +1,17 @@
-"""项 10 / AEG-011（第九轮，2026-10-11 用户定稿「全部完成」）：Android 依赖锁定的结构门禁。
+"""项 10 / AEG-011（第九轮，2026-10-11 用户定稿「全部完成」）：Android 依赖锁定**声明侧**门禁。
 
-启用 `dependencyLocking` 之后，「谁被锁了」与「锁得住吗」这两件事都需要机器判：
+启用 `dependencyLocking` 之后，「谁被锁了」这件事需要机器判：
 
-- **覆盖面**：锁块单源写在 root `android/build.gradle.kts` 的 `subprojects` 作用域里
-  （声明一次即覆盖全部现有与后续子模块；逐模块各写一份的话，「新增第五个模块忘记加锁」
-  是静默的 fail-open）。这里两道都判：root 必须有那份锁块且只有一份，模块脚本必须
-  **没有**自己的副本；模块清单从 `settings.gradle.kts` 的 `include(...)` 现取
-  （不是脚本里再抄一份名单），逐个要求「目录里有锁文件」。
-- **锁的形态**：Gradle 的锁文件记的是「group:name:version=配置名」，**不含校验和**。
-  所以判据只能是形态级的（精确版本、无动态区间），哈希验证是 dependency verification
-  那一刀，本仓没做就不许在文档里声称做了。
-- **文本锚的口径**（本仓反复踩过的三件套）：判代码不判注释（注记里逐字抄着被禁形态）、
-  切片有边界、每条锚都配注入式反向锚（把锁块删掉必须判红）。
+- 锁块单源写在 root `android/build.gradle.kts` 的 `subprojects` 作用域里（声明一次即覆盖
+  全部现有与后续子模块；逐模块各写一份的话，「新增第五个模块忘记加锁」是静默的
+  fail-open）。所以两道都判：root 必须有那份锁块且**只有一份**，模块脚本必须**没有**
+  自己的副本（两份真相必然漂移）。模块清单从 `settings.gradle.kts` 的 `include(...)`
+  现取——在测试里再抄一份名单的话，新增模块就永远落在判据之外。
+- 同一处还注册了两个任务（PR 面的覆盖判据 + 重锁面的全量解析入口）。本文件判「它们存在」；
+  CI 是否真在 PR 面跑那条判据由 `relock_sop_test.py` 判，锁文件自身的形态与覆盖面在
+  `gradle_lockfile_shape_test.py`（本仓 300 行新文件红线也正好把两侧切开）。
+- 文本锚的口径（本仓反复踩过的三件套）：判代码不判注释（注记里逐字抄着被禁形态）、
+  切片有边界、每条锚都配注入式反向锚（把锁块拆开必须判红）。
 """
 
 from __future__ import annotations
@@ -25,10 +25,9 @@ SETTINGS = ANDROID / "settings.gradle.kts"
 ROOT_SCRIPT = ANDROID / "build.gradle.kts"
 
 # root 脚本里那份锁块（注释不参与比对——注记会各自措辞，代码形态漂移才是真问题：
-# 少了 lockMode 就退化成「靠缺省值」）。它写在 `subprojects` 作用域里，声明一次即覆盖
-# 全部现有与后续子模块；模块脚本里**不该**再有自己的副本（两份真相必然漂移）。
-# 比对按**去缩进**形态做：块在 `subprojects {}` 里必然带缩进，写死四空格就是比排版
-# 而不是比内容。注入也用同一正则（容忍任意缩进），否则「删掉某行」会删不掉⇒锚恒真。
+# 少了 lockMode 就退化成「靠缺省值」）。比对按**去缩进**形态做：块在 `subprojects {}`
+# 里必然带缩进，写死四空格就是比排版而不是比内容。注入用同一正则（容忍任意缩进），
+# 否则「删掉某行」会删不掉⇒锚恒真。
 LOCKING_BLOCK = """dependencyLocking {
     lockAllConfigurations()
     lockMode = LockMode.STRICT
@@ -40,52 +39,25 @@ _BLOCK_RE = re.compile(
     r"[ \t]*\}[ \t]*\n",
     re.MULTILINE)
 _MODE_RE = re.compile(r"\n[ \t]*lockMode = LockMode\.STRICT(?=\n)")
-# 比对用的去缩进形态（常量的排版和 `subprojects {}` 里的实际排版必然不同）
 LOCKING_BLOCK_FLAT = "\n".join(line.strip() for line in LOCKING_BLOCK.splitlines())
+
+# R9-B32（2026-10-12）：锁的覆盖面判据（PR 面跑）与全量解析入口（重锁面跑）
+COVERAGE_TASK = "verifyDependencyLockCoverage"
+RESOLVE_TASK = "resolveAllConfigurations"
+
+
+def kotlin_code(text: str) -> str:
+    """剔掉 `//` 行注释（口径见模块 docstring：注记里抄着被禁形态）。"""
+    return "\n".join(ln for ln in text.splitlines() if not ln.strip().startswith("//"))
 
 
 def dedent_code(text: str) -> str:
     """`kotlin_code` 之后再逐行去掉行首缩进（只用于块形态比对）。"""
     return "\n".join(line.strip() for line in kotlin_code(text).splitlines())
 
-# Gradle 自己写在锁文件头部的三行——它们缺失即「这不是机器生成的锁，是手抄的」。
-LOCK_HEADER_MARKERS = (
-    "# This is a Gradle generated file for dependency locking.",
-    "# Manual edits can break the build and are not advised.",
-    "# This file is expected to be part of source control.",
-)
-
-# 至少要有这些配置进锁：CI 的装配/测试/静态分析面都会解析它们（缺一条就是
-# 「重锁时没跑到那条配置」，STRICT 下当场红——宁可在这里红，也不要红在 PR 面）。
-# `:contracts` 只要求 debug 面：CI 对它只跑 `:contracts:assembleDebug`（contracts.yml），
-# 且它是零外部依赖的生成物模块——没有东西可锁到 release 面，硬要求 release 条目
-# 就是把判据写成永远过不了的样子。
-REQUIRED_CONFIGURATIONS = {
-    "app": ("debugRuntimeClasspath", "releaseRuntimeClasspath",
-            "debugUnitTestRuntimeClasspath", "debugAndroidTestCompileClasspath",
-            "debugLintChecksClasspath"),
-    "broker": ("debugRuntimeClasspath", "releaseRuntimeClasspath",
-               "debugUnitTestRuntimeClasspath"),
-    "webview-adapter": ("debugRuntimeClasspath", "releaseRuntimeClasspath",
-                        "debugUnitTestRuntimeClasspath"),
-    "contracts": ("debugCompileClasspath", "debugRuntimeClasspath"),
-}
-
-# 动态版本形态：Gradle 允许 `1.+` / `latest.release` / `+`，锁里出现即「钉了个没钉的」
-_DYNAMIC_VERSION = re.compile(r"(^|[.\-])(?:\+|latest\.release|latest\.integration)$")
-
-
-def kotlin_code(text: str) -> str:
-    """剔掉 `//` 行注释（口径见模块 docstring：注记里抄着被禁形态）。"""
-    kept: list[str] = []
-    for line in text.splitlines():
-        if line.strip().startswith("//"):
-            continue
-        kept.append(line)
-    return "\n".join(kept)
-
 
 def module_names() -> list[str]:
+    """模块清单从 settings 现取——抄一份名单进测试，判据就永远停在旧名单上。"""
     text = SETTINGS.read_text(encoding="utf-8")
     return sorted(set(re.findall(r'include\(":([A-Za-z0-9_\-]+)"\)', text)))
 
@@ -106,8 +78,8 @@ def locking_problems(root_text: str) -> list[str]:
     return problems
 
 
-def duplicate_locking_copies() -> list[str]:
-    """模块脚本里出现自己的 `dependencyLocking` 副本 ⇒ 判红（两份真相必然漂移）。"""
+def module_script_problems() -> list[str]:
+    """模块脚本面：脚本必须存在，且**不得**自带 `dependencyLocking` 副本。"""
     offenders: list[str] = []
     for name in module_names():
         script = ANDROID / name / "build.gradle.kts"
@@ -116,48 +88,6 @@ def duplicate_locking_copies() -> list[str]:
         elif "dependencyLocking" in kotlin_code(script.read_text(encoding="utf-8")):
             offenders.append(f":{name} 自带锁副本")
     return offenders
-
-
-def lockfile_problems(lock_text: str) -> list[str]:
-    """纯函数：锁文件形态判定（头注 + 每条版本都是精确版）。"""
-    problems: list[str] = []
-    lines = [ln for ln in lock_text.splitlines() if ln.strip()]
-    if not lines:
-        return ["锁文件为空"]
-    for marker in LOCK_HEADER_MARKERS:
-        if marker not in lock_text:
-            problems.append(f"缺 Gradle 生成头注行：{marker[:32]}…")
-    entries = [ln for ln in lines if not ln.startswith("#")]
-    if not entries:
-        return problems + ["锁文件里零条目"]
-    unpinned: list[str] = []
-    for line in entries:
-        if line.startswith("empty="):
-            continue  # Gradle 对「已锁但无依赖」的配置写 empty=，不是漂移
-        head, sep, configs = line.partition("=")
-        if not sep or not configs:
-            unpinned.append(f"形态异常：{line[:60]}")
-            continue
-        parts = head.split(":")
-        if len(parts) != 3:
-            unpinned.append(f"坐标段数不是 group:name:version：{head[:60]}")
-            continue
-        version = parts[2]
-        if _DYNAMIC_VERSION.search(version) or "," in version:
-            unpinned.append(f"版本不是精确值：{head}")
-    problems += [f"条目不可解析/未钉版：{u}" for u in unpinned]
-    return problems
-
-
-def locked_configurations(lock_text: str) -> set[str]:
-    configs: set[str] = set()
-    for line in lock_text.splitlines():
-        if line.startswith("#"):
-            continue
-        _, sep, tail = line.partition("=")
-        if sep:
-            configs.update(name for name in tail.split(",") if name)
-    return configs
 
 
 def test_module_list_comes_from_settings_not_a_hardcoded_copy() -> None:
@@ -173,7 +103,7 @@ def test_root_declares_locking_once_and_modules_carry_no_copies() -> None:
         "root 构建脚本里的锁块不合格（须在 subprojects 作用域内、"
         "含 lockAllConfigurations() 与 LockMode.STRICT、且只有一份）"
     )
-    dupes = [o for o in duplicate_locking_copies() if "自带锁副本" in o or "不存在" in o]
+    dupes = module_script_problems()
     assert not dupes, f"模块脚本面不干净（单源被破坏）：{dupes}"
 
 
@@ -196,61 +126,25 @@ def test_deleting_the_locking_block_turns_the_gate_red() -> None:
         assert locking_problems(injected), f"注入「{name}」后必须判红——否则这条锚恒真"
 
 
-def test_every_locked_module_has_a_gradle_shaped_lockfile() -> None:
-    offenders: list[str] = []
-    for name in module_names():
-        lock = ANDROID / name / "gradle.lockfile"
-        if not lock.exists():
-            offenders.append(f":{name} 无 gradle.lockfile（锁声明了但没落盘=不会有人红）")
-            continue
-        offenders += [f":{name} {p}" for p in lockfile_problems(lock.read_text(encoding="utf-8"))]
-    assert not offenders, f"锁文件形态不合格：{offenders}"
-
-
-def test_ci_resolved_configurations_are_present_in_the_locks() -> None:
-    missing: list[str] = []
-    for name, required in REQUIRED_CONFIGURATIONS.items():
-        lock = ANDROID / name / "gradle.lockfile"
-        if not lock.exists():
-            missing.append(f":{name} 无锁文件")
-            continue
-        have = locked_configurations(lock.read_text(encoding="utf-8"))
-        missing += [f":{name} 缺配置 {cfg}" for cfg in required if cfg not in have]
-    assert not missing, f"锁未覆盖 CI 会解析的配置（STRICT 下这些面会当场红）：{missing}"
-
-
-def test_locks_pin_exact_versions_not_ranges() -> None:
-    for name in module_names():
-        lock = ANDROID / name / "gradle.lockfile"
-        text = lock.read_text(encoding="utf-8")
-        assert "SNAPSHOT" not in text, f":{name} 锁里有 -SNAPSHOT 版本"
-        entries = [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
-        assert len(entries) >= 5, f":{name} 锁条目只有 {len(entries)} 条，不像完整解析结果"
-
-
-def test_quality_tool_configurations_are_locked_too() -> None:
-    """ktlint/detekt 的工具依赖也要进锁——它们每条 PR 都解析，最容易被当成「构建期的事」。
-
-    这两个插件把规则集当依赖解析（`ktlintRuleset`/`detektPlugins`）。不锁的话
-    「Android 依赖已锁版本」这句话的覆盖面就悄悄少了整条质量门禁链。"""
-    offenders: list[str] = []
-    for name in module_names():
-        have = locked_configurations(
-            (ANDROID / name / "gradle.lockfile").read_text(encoding="utf-8"))
-        offenders += [
-            f":{name} 缺 {cfg}" for cfg in ("ktlint", "ktlintRuleset", "detekt", "detektPlugins")
-            if cfg not in have
-        ]
-    assert not offenders, f"质量工具面未进锁：{offenders}"
+def test_root_script_registers_both_lock_tasks() -> None:
+    """覆盖判据与全量解析入口都必须真实存在——CI 那几步敲的就是这两个任务名。"""
+    code = kotlin_code(ROOT_SCRIPT.read_text(encoding="utf-8"))
+    for task in (COVERAGE_TASK, RESOLVE_TASK):
+        assert f'tasks.register("{task}")' in code, (
+            f"root 脚本里没有 {task}——判据/重锁入口没了，CI 那一步会报「任务不存在」"
+        )
+    # 定义判据的地方不能顺手写锁：那等于「自己写自己判」，恒绿
+    assert "--write-locks" not in code, "构建脚本定义判据，不调用重锁开关"
 
 
 def test_settings_records_the_relock_sop_and_the_uncovered_surface() -> None:
-    """决策记录必须写明两件容易被读错的事：锁不覆盖脚本类路径，锁里不含校验和。"""
+    """决策记录必须写明三件容易被读错的事：锁不覆盖脚本类路径、不含校验和、SOP 指向哪儿。"""
     text = SETTINGS.read_text(encoding="utf-8")
     assert "buildscript" in text, "settings 没登记 buildscript/plugins 类路径不在锁内"
     assert "校验和" in text, "settings 没登记锁不含校验和（哈希验证是另一刀）"
     assert "dependency-relock.yml" in text, "settings 没指回重锁执行面"
     assert "gradle.lockfile" in text, "settings 没说锁文件落在哪儿（重锁后要有人找它）"
+    assert RESOLVE_TASK in text, "settings 的重锁 SOP 必须指向全量解析入口，不是任务清单"
 
 
 def test_security_doc_matches_the_tree() -> None:

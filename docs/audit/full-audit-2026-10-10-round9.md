@@ -1395,9 +1395,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    写在 `subprojects` 里的锁块」「模块脚本没有自己的副本」「每个模块目录里有 Gradle 形态的锁文件」
    「CI 会解析的配置名确实在锁里」「ktlint/detekt 工具面也进锁」，并钉 settings 决策记录与
    SECURITY.md 的口径（旧句「Gradle 依赖无 lock 文件」必须消失）。反向锚是**四条注入**：
-   拆掉 `subprojects` 包裹 / 删掉 `lockMode` 行 / 删掉整块 / 复制成两份，任一不被判红即报错；②`relock_sop_test.py` 的 gradle 半边（新增 4 例）——
-   **重锁任务清单 ⊇ CI 各 workflow 里会解析依赖的 gradle 任务**（`assemble*/test*/lint*/ktlint*/detekt*/compile*/bundle*`；
-   报表任务刻意排除，理由见第 3 点），删掉清单里任意一条即判红。
+   拆掉 `subprojects` 包裹 / 删掉 `lockMode` 行 / 删掉整块 / 复制成两份，任一不被判红即报错；
+   ②`relock_sop_test.py` 的 gradle 半边——当时钉的是「重锁任务清单 ⊇ CI 各 workflow
+   里会解析依赖的 gradle 任务」。
+   【R9-B32 更正：这条锚判错了面。「清单 ⊇ 任务名」看着严格，实际漏掉了**不属于任何任务名**
+   的配置（AGP UTP 构建监听器解析的 `:app:androidTestUtil`），而它红在 master 而不是红在 PR。
+   判据已改成按模型枚举 `canBeResolved` 集合，见 §3.32。】
 5. 重锁执行面：`.github/workflows/dependency-relock.yml` 新增 `gradle-relock` job。
    为什么是独立 job 而不是在 windows job 里加几步：AGP 要「JDK 21 + setup-android 基线包
    （`platforms;android-36`/`build-tools;36.0.0`）+ compileSdk 37 由 AGP 构建期自动装配」
@@ -1470,6 +1473,40 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    那个动作 ⇒ 合并等于「未经运行的跨 major」。本批的处置是**先证后合**：合 #165 后立即
    看它自己触发的 push 运行与依赖图是否更新，失败即回滚。结构性修法（加 stale 检测）
    属 CI 面变更，等用户点头。
+
+### 3.32 R9-B32（2026-10-12，自查红灯）：锁的覆盖面从「抄任务清单」改成「按模型枚举」
+
+1. **这是本会话自己引入、且被自己引入的门禁漏掉的缺陷**（登记级别按事实定 P2：
+   不影响出货制品，影响 CI 的持续可用面）。现象：`Gradle-Dependency-Graph` 在 master 上
+   连红两次（`#164`、`#167` 两次合并各触发一次），报
+   `Locking strict mode: Configuration ':app:androidTestUtil' is locked but does not have lock state`
+   （另有 1 条同因失败）；而**同期每一条 PR 门禁全绿**。
+2. 归因不是「Gradle 有问题」，是我把覆盖判据写成了「重锁任务清单 ⊇ CI 里的 gradlew 任务名」。
+   `androidTestUtil` 由 AGP 的 UTP **构建监听器**在依赖图生成时解析——它不出现在任何任务名里，
+   所以那份清单可以「抄得完全正确」而仍然漏掉它。这正是本仓反复登记的形态：
+   **判据判的不是失效面，就等于没有判据**（R9-SH-7 同课，这次是我自己踩的）。
+3. 修法把集合定义拿回来，两侧同时改：
+   ①root 新增常驻任务 `verifyDependencyLockCoverage`——枚举本模块所有 `canBeResolved`
+     配置，与 `gradle.lockfile` 里出现过的配置名（坐标条目 + `empty=`）对账，缺一个就
+     fail-closed 列出全部缺口；接进 `android-quality.yml`（PR 面，一条命令判四个模块，
+     不解析产物、秒级）。②重锁面改成 `resolveAllConfigurations --write-locks`
+     （解析每个配置的**依赖图**）+ 紧接着跑一次 `verifyDependencyLockCoverage` 自证。
+     用图解析而不是 `.files`：锁记的是版本，文件解析会连带要求本模块产物已构建
+     （实测库模块的 androidTest 文件解析因此假失败 35 条）。
+   解析面 ⊇ 任何任务清单，从此是集合事实而不是纪律。
+4. 实测取证（本机 Gradle 9.8.1）：旧锁跑新门禁 ⇒ 判红并逐个点名（`:app` 8 个、
+   `:contracts` 15 个缺状态，第一条就是 `androidTestUtil`）；
+   `resolveAllConfigurations --write-locks` 补齐后 ⇒ 四模块 45/41/41/41 个可解析配置全部有状态，
+   检查通过。锁的变化是**纯增覆盖**：`-15 +15` 行里坐标三元组集合只动了
+   `org.jetbrains.kotlin:compose-group-mapping:2.4.20 → 2.4.21`（跟随 #167 的 catalog 值），
+   没有任何配置名从锁里消失。
+5. 反向锚三条（都在 PR 面跑）：从 app 锁里抹掉 `androidTestUtil` ⇒ `gradle_locking_test.py`
+   的监听器配置判据归因到它；从 workflow 里删掉 `--write-locks resolveAllConfigurations` 或
+   删掉覆盖自证 ⇒ `relock_sop_test.py` 两条 `pytest.raises` 判红；root 脚本里少注册任一任务 ⇒
+   `test_root_script_registers_both_lock_tasks` 判红。旧的那条「清单 ⊇ 任务名」锚随之删除
+   （留着它就是在保护一个错误设计）。
+6. 顺带修正一条口径：`#165`（`gradle/actions/dependency-submission` 跨 major）先前 dispatch
+   验证时被这个锁缺陷挡住，结论对它**不作数**；锁面补齐后重新 dispatch 才算证过 v6。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
