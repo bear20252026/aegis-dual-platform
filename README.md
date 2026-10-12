@@ -12,7 +12,7 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
 |---|---|---|
 | Windows | C#/.NET 10 + WPF + 原生 WebView2 | **唯一正典栈与唯一发布制品**（Inno Setup 安装包 + SBOM + SLSA attestation；ADR-009） |
 | Android | Kotlin + Jetpack Compose + System WebView | 直装 APK（`com.aegis.browser`） |
-| 策略核心 | Rust（FFI/C ABI + UniFFI） | 无 I/O 纯函数裁决——canonicalization / Ed25519 阈值验证 / 指纹防护管线 |
+| 策略核心 | Rust（FFI/C ABI + UniFFI） | 运行时裁决面＝13 个冻结导出符号背后的链路（URL/Origin canonicalization、导航与授权裁决、host 黑名单四档位、指纹防护管线）。**注意口径**：下列模块在核心里已实现并有单元测试，但无 C ABI/UniFFI 入口、运行时零调用：`adblock`、`bridge_guard`、`executor`、`https_only`、`js_inject`、`oracle`、`session_state`、`update_manifest`——**Ed25519 阈值验证的执行路径在发布链`release/update_verifier.py`，不在核心裁决面**；Windows 侧的 HTTPS 升级/无痕等隐私判定同样是端侧实现（不是核心的 `https_only`）。对账脚本 `scripts/verify_core_unwired_modules.py`：接线即判红，须同改本行 |
 
 > 许可证：MIT（[LICENSE](LICENSE)）｜ 漏洞报告：[SECURITY.md](SECURITY.md)
 
@@ -83,7 +83,7 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
 ```
 contracts/  唯一安全协议事实来源（schemas/vectors/codegen——六类对象冻结；
             bridge_guard.template.js 为守卫 JS 单源（Rust+Android 两端对账，C# 未纳入——ADR-007）
-core/       Rust 纯策略核心（canonicalization + Ed25519 阈值验证——无 I/O）
+core/       Rust 纯策略核心（canonicalization；Ed25519 阈值验证有实现但未接 ABI，运行时在 release/update_verifier.py）
 windows/    C#/.NET 10 + 原生 WebView2（App/Chrome/WebView/Broker——能力代理）
 android/    Kotlin/Compose（app/broker/webview-adapter/contracts——分层单源）
 agent/      Agent/MCP 逐项复开（action-catalog——红队 fixtures——测试优先）

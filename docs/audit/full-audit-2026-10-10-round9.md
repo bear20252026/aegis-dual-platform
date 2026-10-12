@@ -935,12 +935,19 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   ——锁里既无 getrandom 0.2 也无 rand_core 0.6；实况是直接依赖解析 0.4.3（本 crate + tempfile），
   0.3.4 由 rand_core 0.9.5 带入（ed25519-dalek 3.0 / curve25519-dalek 5.0 一侧）。注记已改成
   带实测来源的事实，依赖零改动、`cargo metadata --locked` ✅。
-- Q28 R9-RS-4 | P3 | `core/rust-policy-core/src/https_only.rs:89-125`、
+- ~~Q28 R9-RS-4~~ **本批已闭（范围按实测扩到 8 个模块）**（R9-B36 / §3.36：README 的「核心裁决面」陈述改真 + 新常驻门禁 `scripts/verify_core_unwired_modules.py`）。原条目：Q28 R9-RS-4 | P3 | `core/rust-policy-core/src/https_only.rs:89-125`、
   `src/update_manifest.rs:170-309`、`BridgeGuard::inject_script`：三个策略面在 13 个冻结
   导出符号里**零入口**、两端零消费，而 `README.md:15,71` 仍把「Ed25519 阈值验证」列为
   核心裁决面；`HttpsOnlyState::upgrade` 判的是运营者手工白名单，**不含** B8 的回环/
   RFC1918/CGNAT/`.local` 段豁免 ⇒ 一旦按「迁移到核心」接线，`http://192.168.1.1` 立刻被
   升 https（R8-AD-01 原形态复现）。②建议模块头标「非 B8 判据载体」；①③补导出即改 ABI ⇒ 待定稿。
+  **实测更正两点**：①「三个策略面」不止三个——`pub mod` 而除自身文件/自身测试外零引用、
+  且不在任何导出面上的顶层模块共 **8 个**：`adblock`、`bridge_guard`、`executor`、
+  `https_only`、`js_inject`、`oracle`、`session_state`、`update_manifest`；②「两端零消费」
+  不能用「宿主源码里出现同名标识符」来判——Windows 侧确有 `HttpsOnly` 隐私设置（端侧另一份
+  实现），按名字扫会把「未接线」误判成「已消费」。sound 的判据只剩两条：接入层
+  （`c_abi/**`、`ffi/**`）剔注释后不得出现模块名，且模块自身不得有导出属性。
+  ①③（补导出＝改 ABI）仍挂 §四 待定稿；「未接线即删除」也不是本批的建议。
 - ~~Q29 R9-RS-5~~ **本批已闭**（R9-B34 / §3.34：新增 `core/rust-policy-core/src/c_abi/tests/denylist_modes.rs`——5 条 ABI 层用例，四档位端到端 + `mode/staged/served` 字段面 + `denylist_mode_invalid` 拒绝码）。原条目：Q29 R9-RS-5 | P3 | `core/rust-policy-core/src/c_abi/tests/buffer_boundaries.rs:157-203` ↔
   `windows/src/Aegis.Windows.App/Broker/NativePolicyCoreBridge.DenylistPush.cs:102-131`：
   ⑨ 的四档位协议在 Rust 侧只端到端跑了 0/1，应答字段 `mode/staged/served` 在 Rust 全测试树
@@ -1665,6 +1672,46 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. 验证：`pytest tests/python` 620 passed（本批 +6）/ 1 skipped；`active_tree_gates all`
    （ruff/bandit/py312-compat）绿；`validate_vector_schemas.py` 与 `verify_vectors.py` 绿；
    `check_file_sizes` 绿（新测试 163 行 < 300 红线）。
+
+### 3.36 R9-B36（2026-10-12，队列 Q28）：核心「已实现但未接线」的面与 README 对账
+
+1. 这条 P3 的用户可见面是**文档过度声明**，而且有**两处**：`README.md:15` 的策略核心表行写「无 I/O 纯函数
+   裁决——canonicalization / **Ed25519 阈值验证** / 指纹防护管线」，把 `update_manifest` 摆在
+   运行时裁决面上。实测：`update_manifest` 只被 `tests/vectors.rs` 消费（与
+   `contracts/vectors/update-manifest-*.json` 做差分），`c_abi/**` 与 `ffi/**` 里一次都没出现；
+   同文件的目录树 `README.md:86` 又写「canonicalization + Ed25519 阈值验证」。出货路径上的清单验证
+   是 Python 发布链 `release/update_verifier.py`。代价不是措辞——
+   下一批会按「核心已经判了」去做接线取舍，或直接引用它当安全保证。
+2. **范围按实测扩**：登记说三个，实际 8 个（清单见 §五 Q28）。过程中两条弯路值得留着，
+   都是「判据看着像但不准」：①先写了个 BFS 推可达集，把注释里提到的 `crate::x` 当边、
+   又漏了目录型模块的 `super::` 引用，推出的集合是错的 ⇒ **自制静态可达性不作判据**，
+   只保留两条能 sound 化的负向检查；②用「宿主源码出现同名标识符」判消费——Windows 的
+   `HttpsOnly` 是端侧另一份实现，会把未接线误判成已消费。
+3. 落地：`scripts/verify_core_unwired_modules.py`（166 行）五条不变量——①登记表内每个模块
+   必须仍是 `pub mod`；②接入层剔注释后出现模块名即红（**双向**：登记了却已接线也要红，
+   必须删登记并同步 README，同 `verify_vector_consumers.py` 的口径）；③模块自身不得有
+   `#[no_mangle]`/`uniffi::export`；④README 那句必须逐字含由登记表生成的模块名清单。
+   ⑤凡提到「Ed25519 阈值验证」的那一条必须同时给出执行路径（这条一加，`README.md:86`
+   当场判红——两处失实陈述就是这么被扫出来的，不是靠人想起来去搜）；
+   接入层目录缺失 / `pub mod` 数异常小 ⇒ exit 2（面塌缩不是「变安全」）。
+   接进 `contracts.yml` 的 PR 面，紧跟 `check_doc_claims.py`。
+4. **接线者的坑写进门禁文档而不是模块头注记**：`HttpsOnlyState::upgrade()` 只判运营者手工
+   白名单，不含 B8 的回环/RFC1918/CGNAT/`.local` 豁免 ⇒ 直接接进导航链会把
+   `http://192.168.1.1` 升 https（R8-AD-01 原形态，且与「本机与内网必须能打开」的裁决冲突）。
+   原打算写进 `https_only.rs`/`update_manifest.rs` 的模块头，实测两文件都在
+   `check_file_sizes` 的零余量基线上（396/406 行），加 7 行注记当场判红 ⇒ 文本改放门禁
+   docstring（接线动作必然先过这道门禁），取舍在此记下。Rust 面最终**零改动**。
+5. 用例 `tests/python/core_unwired_modules_test.py`（8 条）：现树全绿 + 面未塌缩 +
+   四条反向锚（接入层注入 `use crate::update_manifest`、把 `pub mod oracle;` 注释掉、
+   README 少列一个模块、README 抹掉执行路径）各自判红并归因到点名对象；另有假目录下的「导出即接线」锚与
+   「接入层缺失 ⇒ exit 2」。**注入用例打回门禁自己的一个真 bug**：`export_attrs_in()` 用
+   `relative_to(ROOT)` 渲染路径，文件不在仓库根下时抛 `ValueError`——门禁应当报告而不是
+   抛栈，改为 `rel()` 兜底。同一批还从生成文本里清掉一个零宽字符（U+200B，写在 docstring 的
+   `` `.local` `` 里，肉眼不可见但会进库）。
+6. 验证：`pytest tests/python` 628 passed（本批 +8）/ 1 skipped；`active_tree_gates all`
+   （ruff/bandit/compat）绿；`check_file_sizes` / `check_markdown_tables` / `check_doc_claims`
+   / `check_workflow_shells` 绿；`cargo fmt --all -- --check` 0、`cargo test --locked
+   --all-features` 582 passed（Rust 零改动）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
