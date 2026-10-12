@@ -211,7 +211,27 @@ public static partial class FingerprintShield
               lastPerf = v;
               return v;
             };
-            origDefineProp(performance, 'now', { value: perfProxy, writable: false, configurable: false });
+            // R9-B38（第九轮 Q25）：挂载形态与描述符对齐核心（RS-216 / RS-250）——
+            // 此前把包装以 value 遮蔽在 performance **实例**上且写死双 false：
+            // ①`Performance.prototype.now.call(performance)` 一行即取无降噪 µs 时钟；
+            // ②`hasOwnProperty.call(performance,'now')` 或 descriptor 一查即检出防护。
+            // 现在装 Performance.prototype 并**原样保留原生描述符**（不是更强的冻结，
+            // 而是「不新增可检出差异」——冻结形态本身就是探针）。实例形态兜底：
+            // 引擎定义位不同（拿到不到原型描述符时退回遮蔽，绝不静默不装）。
+            var oPN = Object.getOwnPropertyDescriptor(Performance.prototype, 'now');
+            var tgtPN = Performance.prototype;
+            if (!oPN) {
+              oPN = Object.getOwnPropertyDescriptor(performance, 'now');
+              tgtPN = performance;
+            }
+            if (oPN) {
+              origDefineProp(tgtPN, 'now', {
+                value: perfProxy,
+                writable: oPN.writable,
+                enumerable: oPN.enumerable,
+                configurable: oPN.configurable
+              });
+            }
             registerProxy(perfProxy, origPerfNow);
           } catch(e) {}
           try {

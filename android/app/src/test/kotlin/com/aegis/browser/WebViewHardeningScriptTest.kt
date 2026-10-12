@@ -387,7 +387,7 @@ class WebViewHardeningScriptTest {
 
     @Test
     fun stage8TimerPrecisionRoundsNowAndDateNow() {
-        assertTrue("Stage 8 缺少 performance.now 包装", script.contains("Object.defineProperty(performance, 'now'"))
+        assertTrue("Stage 8 未按原型形态挂载 performance.now", script.contains("Object.defineProperty(tgtPN, 'now'"))
         // AD-108：Date.now 只做整数网格取整（无随机分量）——入口必须存在
         assertTrue("Stage 8 缺少 Date.now 整数网格", script.contains("reduceIntegral"))
         // R8-RS-04：单调高水位三件套齐在；断**次数**而非「标识符在场」——

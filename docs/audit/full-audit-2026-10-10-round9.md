@@ -915,7 +915,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 ### 5.4 RS（Rust 核心）
 
-- Q25 R9-RS-1 | P2 | `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:207` +
+- Q25 R9-RS-1 | P2 | **部分闭环（R9-B38 / §3.38）**：挂载形态与描述符这一半已三端合一（原型级挂载 + 保留原生描述符 + 实例兜底），三端同形判据落在 `core/rust-policy-core/tests/timer_parity.rs`；六条高解析通道两端零包裹的**剩余半边**续登为 Q57 R9-CS-17（不顺手做：rAF/getEntries*/Event.timeStamp 的包裹是站点可观察的行为变更，只能由真机冒烟证明）。原条目：Q25 R9-RS-1 | P2 | `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:207` +
   `android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt:175` ↔
   `core/rust-policy-core/src/timer_prec.rs:127-140`、`core/rust-policy-core/tests/timer_parity.rs:69-94`：
   计时防护**挂载形态与通道集**三端不同口径——两端把包装装在 `performance` **实例**上且
@@ -1062,6 +1062,20 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   仍待决的结构性修法（要用户点头）：给该 workflow 加一条「图形 stale 检测」——
   比如每周比对 `last dependency submission` 的时间戳，超过 N 天未提交即判红，
   否则这类「只在 master/schedule 跑的提交面」永远没有可失败的判据。
+
+- Q57 R9-CS-17 | P2 | **R9-B38 续登（Q25 的剩余半边）**：
+  ①`core/rust-policy-core/src/timer_prec.rs:170-244`（RS-279 一组：`mark`/`measure`/
+  `getEntries*`/`timeOrigin`/`Event.timeStamp` 的原型级 getter 与 entry 圆整）↔
+  `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs` Stage 8 与
+  `android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt` Stage 8：
+  **六条高解析通道两端零包裹**（`getEntriesByType` 在两端主源码零命中）。挂载形态那半边
+  已在 R9-B38 三端合一，这一半没做的原因是：rAF 与 `getEntries*` 的圆整是**站点可观察**的
+  行为变更（动画回调节奏、性能面板读数），只能由真机/桌面冒烟证明——那是需要用户给话的
+  验证面（见 §四），不在本批顺手改。②残余分歧一处：C# 用它提前捕获的
+  `origDefineProp`（`FingerprintShield.cs:66`，防页面前篡改 `Object.defineProperty`），
+  核心与 Android 直接引用 `Object.defineProperty`——三端「用哪一份定义器」不同形，
+  统一到 `origDefineProp` 形态才是完整收口（本批的三端同形判据只覆盖六个共用片段，
+  没有把这条差异算进去，`timer_parity.rs` 的负向锚也只判冻结实例描述符）。
 
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
 
@@ -1747,6 +1761,50 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    随收窄入库；`packages.lock.json` 零改动。
 7. 未做：`DownloadItem`（面板侧）对同一 operation 的引用另有其生命周期，
    由 `TrimDownloadItems()` 有界管理，本批不动它——Q24 报的是登记表这一份。
+
+### 3.38 R9-B38（2026-10-13，队列 Q25 的第一半）：计时包装的挂载形态三端合一
+
+1. 修的是「**装在哪里**」而不是「算了什么」：三端的圆整/抖动/钳位逻辑第八轮就齐了
+   （`timer_parity.rs` 的 `all_three_ends_share_the_same_clamp_form` 一直在判），
+   但 Windows（`FingerprintShield.cs` Stage 8）与 Android（`WebViewHardeningStagesShield.kt`
+   Stage 8）把包装用 `Object.defineProperty(performance,'now',{value:…, writable:false,
+   configurable:false})` **遮蔽在实例上**，而核心按 RS-216/RS-250 装在 `Performance.prototype`
+   并原样保留原生描述符。两个后果都在出货制品里成立：
+   `Performance.prototype.now.call(performance)` 一行取到无降噪的 µs 时钟（绕过），
+   `hasOwnProperty.call(performance,'now')` 或 `getOwnPropertyDescriptor` 一查即知防护存在
+   （检出——冻结描述符本身就是探针）。
+2. 落地：两端改成与核心同一形状——先取 `Performance.prototype` 的描述符，取不到才退回实例
+   （引擎定义位差异，绝不静默不装），写回时 `writable/enumerable/configurable`
+   **全部沿用原生描述符**。C# 侧仍用它那份提前捕获的 `origDefineProp`
+   （`:66`，防页面前篡改 `Object.defineProperty`）——「用哪一份 defineProperty」三端仍有分歧，
+   这条记在下面第 5 点的续登项里，不在本批顺手统一。
+3. **又一条「门禁把缺陷形态钉成期望值」**：`WebViewHardeningScriptTest.kt:390` 断言的正是
+   `script.contains("Object.defineProperty(performance, 'now'")`——旧形态被测试钉住了，
+   改对的第一现场就是这条用例判红。现改为钉「原型描述符查询 + `defineProperty(tgtPN,…)`」，
+   并把「为什么原来那条是错的」写在注释里（R9-RS-6 / R8-PY-02 同族，第四次）。
+4. 三端同形判据放哪儿：放 `core/rust-policy-core/tests/timer_parity.rs`（该文件的存在理由
+   就是「跨端对账需要同时看到三份源码」），新增两条——
+   `all_three_ends_mount_performance_now_on_the_prototype_preserving_the_native_descriptor`
+   （六个共用片段 + **负向**：任何一端再出现 `writable: false, configurable: false` 这个
+   冻结实例形态即判红）与 `mounting_shape_is_not_satisfied_by_mere_identifier_presence`
+   （内存态注入：把「原型」整体换成实例，两个原型片段必须同时消失——否则上面那组
+   断言等于在判「文件里有 oPN 三个字」）。**不新开 python 门禁**：
+   `verify_injected_js_parity.py` 判的是 7 个共有噪声函数的 token 序列，
+   与 Stage 8 挂载点不是同一张面，硬塞进去只会让那把门禁开始判它看不懂的东西。
+5. 续登 **Q57 R9-CS-17**（P2，剩余半边）：①六条高解析通道（`mark`/`measure`/`getEntries*`/
+   `requestAnimationFrame`/`Event.timeStamp`/`timeOrigin`）两端零包裹，核心全覆盖
+   （`timer_prec.rs:170-244` 的 RS-279 一组）——rAF 与 `getEntries*` 的包裹是**站点可观察**
+   的行为变更，只能由真机冒烟证明，本批按「不顺手做」处理；②「用哪一份 defineProperty」的
+   残余分歧（C# `origDefineProp` vs 核心/Kotlin 直接引用）。
+6. 验证：`cargo test --locked --all-features` 全绿（timer_parity 5 条，含本批新增 2 条）；
+   `dotnet test Aegis.Windows.Core.Tests` ⇒ 882 passed / 0 failed；
+   `./gradlew :app:ktlintCheck :app:detekt :app:testDebugUnitTest` ⇒ BUILD SUCCESSFUL，
+   app 面 320 条 0 失败；`check_file_sizes` 绿——三份改动文件都在 300 行红线内
+   （`FingerprintShield.cs` 236→256、`WebViewHardeningStagesShield.kt` 202→219、
+   `timer_parity.rs` 94→168），而 `WebViewHardeningScriptTest.kt` 是 421 行零余量基线 ⇒
+   那处改锚**净零增行**（注释放台账与核心注记里，不在基线文件里挤行数，第 3 点的说明因此
+   不在这个文件里）。**未跑真机/桌面冒烟**——本批改的正是
+   只能在真 WebView2/System WebView 里观测其行为的注入 JS，验证结论要等那一跑。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
