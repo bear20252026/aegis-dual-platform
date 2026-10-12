@@ -52,13 +52,6 @@ internal object WebViewDownloadHandler {
 
     private const val UTF8_4_BYTES = 4
 
-    private const val HEX_RADIX_OFFSET = 10
-
-    private const val HEX_NIBBLE_SHIFT = 4
-
-    /** `%XX` 转义全长（% + 两位十六进制）。 */
-    private const val PERCENT_ESCAPE_LENGTH = 3
-
     /**
      * AD-138（审计 2026-09-23 清单·A6 批）：mimetype → 扩展名白名单映射——
      * 原实现把 mime 子类型直接当扩展名（application/x-msdownload →
@@ -198,13 +191,14 @@ internal object WebViewDownloadHandler {
     ): String {
         // AD-217（2026-09-26 审计）：URL 路径段先百分号解码再取尾段（与
         // DownloadPolicy 判定口径一致——`/dl/malware%2Eexe` 此前不解码）。
-        // AD-305（2026-10-02 审计）：路径段改 [decodePercentStrict]——路径中
+        // AD-305（2026-10-02 审计）：路径段改严格解码——路径中
         // `+` 是字面加号（RFC 3986 path 不含 query 的 `+`→空格语义），原
         // URLDecoder 把 `a+b.pdf` 解成 `a b.pdf`（文件名字面失真；与 AD-263
-        // 的 RFC 5987 filename* 解码同口径）。
-        val urlPathSegment =
-            decodePercentStrict(url.substringBefore('#').substringBefore('?'))
-                .substringAfterLast('/')
+        // 的 RFC 5987 filename* 解码同口径）。R9-B33（Q9）：实现上收到
+        // [PercentEncoding.decodeStrict]——DownloadPolicy 的路径段此前另有一份
+        // URLDecoder，同一个「URL 路径段」两套解码器。
+        val decodedPath = PercentEncoding.decodeStrict(url.substringBefore('#').substringBefore('?'))
+        val urlPathSegment = decodedPath.substringAfterLast('/')
         val fromDisposition = resolveDispositionFileName(contentDisposition)
         val base =
             sanitizeFileName(fromDisposition)
@@ -301,7 +295,7 @@ internal object WebViewDownloadHandler {
      * AD-263（2026-10-01 审计）：①token 边界锚定——`(?:^|[;\\s])` 前置边界，
      * `xfilename=` 不再误匹配；②RFC 5987 解码不走 URLDecoder（其把 `+` 按
      * query 语义解成空格，filename* 里 `+` 是字面加号）——逐 %XX 严格解码
-     * （[decodePercentStrict]）。
+     * （[PercentEncoding.decodeStrict]）。
      */
     internal fun resolveDispositionFileName(contentDisposition: String): String {
         val starred =
@@ -314,7 +308,7 @@ internal object WebViewDownloadHandler {
             // RFC 5987 形如 `UTF-8''%E6%8A%A5.pdf`——剥 charset'' 前缀后解码；
             // 无前缀（裸百分号编码）按原串处理
             val encoded = starred.substringAfter("''", missingDelimiterValue = starred)
-            return decodePercentStrict(encoded)
+            return PercentEncoding.decodeStrict(encoded)
         }
         return Regex("(?:^|[;\\s])filename=([^;]+)", RegexOption.IGNORE_CASE)
             .find(contentDisposition)
@@ -323,68 +317,6 @@ internal object WebViewDownloadHandler {
             ?.trim(' ', '"', ';')
             .orEmpty()
     }
-
-    /**
-     * AD-263：RFC 5987 严格百分号解码——逐 %XX 还原字节流后整体按 UTF-8 解码
-     * （多字节字符的 %E6%8A%A5 序列不得按单字节劈开）；`+` 保持字面（不经
-     * URLDecoder 的 query 语义转换）；%XX 后不足两位十六进制按字面 `%` 处理；
-     * 解码出非法 UTF-8 序列原样返回（fail-closed）。AD-305：URL 路径段解码
-     * 自本函数单源（原 decodePercent 的 query 语义已随 AD-305 移除）。
-     */
-    private fun decodePercentStrict(raw: String): String {
-        // 字面字符按 UTF-8 展开最多 4 字节/字符——按上界分配
-        val bytes = ByteArray(raw.length * UTF8_4_BYTES)
-        var length = 0
-        var i = 0
-        while (i < raw.length) {
-            val escapedByte = hexEscapeByteAt(raw, i)
-            if (escapedByte != null) {
-                bytes[length++] = escapedByte
-                i += PERCENT_ESCAPE_LENGTH
-            } else {
-                val literal = raw[i].toString().toByteArray(Charsets.UTF_8)
-                literal.forEach { bytes[length++] = it }
-                i++
-            }
-        }
-        return try {
-            Charsets.UTF_8
-                .newDecoder()
-                .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-                .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-                .decode(java.nio.ByteBuffer.wrap(bytes, 0, length))
-                .toString()
-        } catch (_: java.nio.charset.CharacterCodingException) {
-            raw
-        }
-    }
-
-    /** AD-263：位置 [index] 起的 `%XX` 转义字节；非完整十六进制转义返回 null。 */
-    private fun hexEscapeByteAt(
-        raw: String,
-        index: Int,
-    ): Byte? {
-        val high = hexValue(raw.getOrNull(index + 1))
-        val low = hexValue(raw.getOrNull(index + 2))
-        return if (raw[index] == '%' && high != null && low != null) {
-            ((high shl HEX_NIBBLE_SHIFT) or low).toByte()
-        } else {
-            null
-        }
-    }
-
-    /** AD-263：单字符十六进制值；非十六进制返回 null。 */
-    private fun hexValue(c: Char?): Int? =
-        if (c == null) {
-            null
-        } else {
-            when (c) {
-                in '0'..'9' -> c - '0'
-                in 'a'..'f' -> c - 'a' + HEX_RADIX_OFFSET
-                in 'A'..'F' -> c - 'A' + HEX_RADIX_OFFSET
-                else -> null
-            }
-        }
 
     /**
      * P2-5 修复（全面审计 2026-09-04）：文件名净化——剥离路径分隔符（`/`

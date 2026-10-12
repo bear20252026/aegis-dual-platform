@@ -130,7 +130,8 @@ public static class ThreatFeedUpdater
 
     /// <summary>拉取订阅源并写入缓存文件（原子替换）。失败抛异常由调用方留痕。
     /// 降级防护：最终响应 URL 必须仍为 https（重定向到 http 即拒绝——
-    /// 明文可投毒）；响应先查 Content-Length 再限量缓冲（超大响应不进内存）。</summary>
+    /// 明文可投毒）；响应以流式读取（ResponseHeadersRead），先查 Content-Length
+    /// 再限量缓冲（超大响应不进内存）。</summary>
     public static IReadOnlyList<string> FetchAndStore(string feedUrl, string cachePath)
     {
         using var handler = new HttpClientHandler
@@ -140,15 +141,20 @@ public static class ThreatFeedUpdater
         };
         using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
         // 调用方已在后台线程（Task.Run）——同步等待可接受
-        using var response = http.GetAsync(feedUrl).GetAwaiter().GetResult();
+        // ResponseHeadersRead 才是「超大响应不进内存」的那一刀：默认的
+        // ResponseContentRead 会在本行返回前把整个响应体缓冲进内存，下面的
+        // 有界读取就退化成「先全部吃进来再量一遍」——CS-232 的上限形同虚设
+        //（无 Content-Length 的分块响应实测可把任意大的 body 灌进堆）。
+        using var response = http.GetAsync(
+            feedUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult();
         response.EnsureSuccessStatusCode();
         // 重定向降级检查：最终落在 http:// 上即拒绝（劫持/误配投毒面）
         if (response.RequestMessage?.RequestUri is { } finalUri
             && finalUri.Scheme != Uri.UriSchemeHttps)
             throw new InvalidOperationException("订阅源重定向降级为非 https——拒绝");
-        if (response.Content.Headers.ContentLength is long declared && declared > MaxBytes)
-            throw new InvalidOperationException("订阅源过大（超过 5MB 上限）");
-        var bytes = ReadBounded(response, MaxBytes);
+        // R9-B33：有界读取改与源码查看器共用同一份实现（HttpFetchGuard）——
+        // Content-Length 预筛也在那一份里，这里再写一遍就是第二个上限判定源。
+        var bytes = HttpFetchGuard.ReadBoundedAsync(response, MaxBytes).GetAwaiter().GetResult();
         if (bytes is null)
             throw new InvalidOperationException("订阅源过大（超过 5MB 上限）");
 
@@ -180,23 +186,8 @@ public static class ThreatFeedUpdater
         return domains;
     }
 
-    /// <summary>限量缓冲读取：声明缺失时按上限截断（此前先全量读入内存再检查
-    /// ——被劫持源可触发无界内存分配）。CS-132：超限返回 null 哨兵——此前
-    /// new byte[max+1] 分配 5MB 只为表达"超限"这一比特信息。</summary>
-    private static byte[]? ReadBounded(HttpResponseMessage response, long max)
-    {
-        using var stream = response.Content.ReadAsStream();
-        using var buffer = new MemoryStream();
-        var chunk = new byte[64 * 1024];
-        while (buffer.Length <= max)
-        {
-            var read = stream.Read(chunk, 0, chunk.Length);
-            if (read <= 0)
-                break;
-            buffer.Write(chunk, 0, read);
-        }
-        return buffer.Length > max ? null : buffer.ToArray();
-    }
+    // 限量缓冲读取已上收到 HttpFetchGuard.ReadBoundedAsync（R9-B33：与源码查看器共用
+    // 一份实现，CS-132/CS-232 的口径注记随实现一起搬过去）。
 
     /// <summary>加载缓存黑名单快照（文件缺失/损坏/无权限返回空——fail-safe）。
     /// CS-131：回放与拉取同口径——逐行套 ParseFeedLine（缓存文件被篡改或由

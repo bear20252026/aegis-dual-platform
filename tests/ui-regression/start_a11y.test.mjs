@@ -57,12 +57,15 @@ function mediaBlock(atRule, source = CSS) {
   return code.slice(start, end);
 }
 
-/** 触控面判据（返回问题清单，空 = 通过）。抽出来是为了能把「回退半个修复」喂进来判红。 */
+/** 触控面判据（返回问题清单，空 = 通过）。抽出来是为了能把「回退半个修复」喂进来判红。
+    选择器清单含 WB-142 的三个控件（`.link-btn`/`.snake-sound`/`.snake-close`）——
+    R9-B33 把那条旧锁并到这里：它判的是同一件事，但切片「本 at-rule 到下一个 @media」
+    会越块（R9-SH-2 实证），而本文件的块是按花括号配对切的。 */
 function touchProblems(css) {
   const coarse = mediaBlock('@media (pointer: coarse)', css);
   const problems = [];
   for (const sel of ['.wp', '.quick-btn', '.search button', '.engine-pill',
-    '.engine-item', '.veil-btn']) {
+    '.engine-item', '.veil-btn', '.link-btn', '.snake-sound', '.snake-close']) {
     if (!coarse.includes(sel)) {
       problems.push(`${sel} 不在 coarse 触控保底的选择器列表内`);
     }
@@ -76,13 +79,31 @@ function touchProblems(css) {
   if (!/min-width:44px/.test(coarse)) {
     problems.push('胶囊/按钮缺宽度保底');
   }
+  // WB-142 的三个控件：名字在场不等于达标——那一条声明本身要带 44px 保底
+  // （旧锁只判「切片里有这个名 + 有 min-height:44px」，把这条声明的宽度摘掉它照样绿）。
+  if (!/\.link-btn[^{]*\{[^}]*min-height:44px/.test(coarse)) {
+    problems.push('.link-btn 的 coarse 规则缺 44px 高度保底');
+  }
+  if (!/\.snake-sound[^{]*\{[^}]*min-height:44px/.test(coarse)) {
+    problems.push('.snake-sound/.snake-close 缺 44px 高度保底');
+  }
+  if (!/\.snake-sound[^{]*\{[^}]*min-width:44px/.test(coarse)) {
+    problems.push('.snake-sound/.snake-close 缺宽度保底（30×30 圆钮两个方向都不达标）');
+  }
   return problems;
 }
 
-/** 强制配色判据：壁纸照片本体必须交还系统色，只关遮罩不算修好。 */
+/** 强制配色判据：壁纸照片本体必须交还系统色，只关遮罩不算修好。
+    系统色三色清单承接 WB-141（R9-B33 并入）——那条旧锁从 `indexOf` 一路切到文末，
+    块外的文字也能替它顶过断言，本文件的块是按花括号配对切的。 */
 function forcedColorsProblems(css) {
   const fc = mediaBlock('@media (forced-colors: active)', css);
   const problems = [];
+  for (const sysColor of ['CanvasText', 'ButtonFace', 'ButtonText']) {
+    if (!fc.includes(sysColor)) {
+      problems.push(`高对比规则缺系统色 ${sysColor}（强制配色要靠系统色板才读得清）`);
+    }
+  }
   if (!/#wallpaper\s*(?:,[^{}]*)?\s*\{[^}]*background:\s*Canvas/.test(fc)) {
     problems.push('#wallpaper 本体未取 Canvas（仅关 ::after 遮罩不构成修复）');
   }
@@ -155,4 +176,44 @@ test('触控面把宽度改回 28px 时必须判红', () => {
     touchProblems(narrowed).some((p) => p.includes('宽度')),
     '宽度保底被摘掉后仍判通过',
   );
+});
+
+// ===== R9-B33：WB-141/WB-142 并进本文件后的反向锚（并证明「越块 / 含注释」的老切片
+// 口径为什么会放过它们——块外确实也有这些名字）
+
+/** 旧口径复现：从 at-rule 一路切到下一个 @media（不配对花括号、不剔注释）。 */
+function legacyMediaSlice(atRule, source) {
+  const start = source.indexOf(atRule);
+  const next = source.indexOf('@media', start + atRule.length);
+  return source.slice(start, next === -1 ? source.length : next);
+}
+
+test('R9-B33 反向锚：摘掉 coarse 块里的 min-width 保底必须判红', () => {
+  const stripped = CSS.replace(
+    '.snake-sound, .snake-close { min-height:44px; min-width:44px; }',
+    '.snake-sound, .snake-close { min-height:44px; }',
+  );
+  assert.notEqual(stripped, CSS, '注入锚点失配');
+  assert.ok(touchProblems(stripped).some((p) => p.includes('.snake-sound') && p.includes('宽度')),
+    `min-width 被摘掉后未归因到 .snake-sound：${touchProblems(stripped)}`);
+  // 同一份回退在旧 WB-142 口径下是绿的：它只判「名字在切片里 + 有 min-height:44px」，
+  // 而切片一路读到 :364 的下一个 @media，把块外 :299 的 .snake-sound 也算了进来。
+  const legacy = legacyMediaSlice('@media (pointer: coarse)', stripped);
+  assert.ok(legacy.includes('.snake-sound') && /min-height:44px/.test(legacy),
+    '旧口径本应仍然“通过”——这条断言是在钉住它的漏判形态');
+});
+
+test('R9-B33 反向锚：高对比块里换掉一个系统色必须判红', () => {
+  // 全量替换：ButtonFace 在块内出现两次（:389 与 :395），只换第一处不会让它消失——
+  // 那正是「名字在场」式断言的失效形态（同批 R9-SH-2 报的口径问题）。
+  const swapped = CSS.replace(/ButtonFace/g, 'Canvas');
+  assert.notEqual(swapped, CSS, '注入锚点失配');
+  const problems = forcedColorsProblems(swapped);
+  assert.ok(problems.some((p) => p.includes('ButtonFace')), `未归因到 ButtonFace：${problems}`);
+  assert.ok(!problems.some((p) => p.includes('ButtonText')),
+    `其余系统色被误判：${problems}`);
+  // 块前的注记原文就写着 `控件用 ButtonFace/ButtonText 标准对`——不剔注释的切片会被
+  // 它喂绿（这正是同批 R9-SH-2 报的失效形态），所以这里把「注释确已被剔掉」也钉住。
+  const beforeBlock = CODE.slice(0, CODE.indexOf('@media (forced-colors: active)'));
+  assert.ok(!beforeBlock.includes('ButtonFace'), '注记里的 ButtonFace 未被剔净——切片口径失效');
 });

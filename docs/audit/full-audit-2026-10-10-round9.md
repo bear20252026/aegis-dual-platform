@@ -60,6 +60,8 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | AEG-006 | P1（外部审计声称，回读后**属实但范围改写**）→ 落地为门禁 + 扩面队列 | 保留并落地（判据化） | 报告说「C# 只连部分向量、Kotlin 主要消费 `url-origin-*`」——按 `git ls-files` 的受管源码面逐份实测（543 个文件，命中口径＝词干作为独立词或完整文件名，排除 markdown 与 `META_LEVEL`（按名遍历整个向量目录的工具面，含门禁自己与它的用例））：**15 份向量里只有 2 份真的两端都跑**（`url-origin-valid/invalid`，CS+AD+RS），11 份有端侧执行者，4 份（`capability-*`/`audit-event-*`）**没有任何端侧执行者**、只被 `validate_vector_schemas.py` 判形状/expected。其余单端事实逐条钉进 `scripts/verify_vector_consumers.py` 的 `CONSUMER_MANIFEST`。两点范围改写：①那四份不是「没人判」——它们的 expected 本就是 `valid`/`deny_schema`，schema 就是判据，不能按「契约件白做」处理；②**Agent 端对契约向量的消费为零**（`AG` 在实测分布里一次都没出现），与 R9-SH-5「`action-catalog.yaml` 的 confirmation/risk/audit 三列 broker 不读」是同一件事的两面。落地＝新常驻门禁（登记表双向不变量 + 跨端支点下界 + 端侧执行者下界 + 扫描面塌缩 exit 2）接进 `contracts.yml` 的 PR 面；注入式自证 8 条从 `--self-test` flag **搬进 pytest**（要人主动敲 flag 的自证＝跑不动的判据，R9-SH-7 同课）；扩面工作另登 §五 Q53 |
 | AEG-008 / R9-CS-15 | P3（我登记的原级）→ 用户对 §四 第 9 项说「全部完成」后**落地** | 保留并落地 | 回读确证「仅启动时取一次」属实且**不是**声明与行为不符（旧文案确实明示要重启），所以这是一次行为增强：`ThreatFeedCoordinator` 首刷后进入周期重取（默认 6 小时，节拍/上限/过期倍数三份数字单源在类常量上，界面按 `DefaultRefreshInterval × StaleAfterFactor` 算过期而不是抄一份 18 小时），失败按 2 的幂退避并封顶 24 小时（**只拉长不缩短**——「失败就更快重试」在订阅源 429 时就是自伤），每轮**重读**设置所以改源不需重启，未配置/改成非法值 ⇒ 那一轮零网络活动（原判据不变）。UI 半边把「上次成功更新 / 是否过期」贴上提示位，时间取**缓存文件写入时刻**（`FetchAndStore` 只在抓取+校验+落盘全成功后原子替换，所以它就是「最后一次成功」的权威形态；加字段要同步 SettingsService 快照与两个 XAML 锚，代价远大于收益），保存路径改走 `Active?.RefreshNow()`，旧「要重启才生效」文案连同 XAML 说明句一起撤下并由静态锚反向钉住不得回潮。两条**新出口带来的竞态**是这次改动的实质风险，都已处理并有故障注入锚：①周期循环与「保存即刷」并发 ⇒ 后**完成**的抓取决定最终名单（可能是先发出那个请求的旧结果），加 `_refreshGate` 串行化（改成「已在跑就跳过」会让手动刷新静默失效，不做）；②既有五个用例靠 `await BackgroundTask` 收口防 Dispose 抢缓存文件（CS-350 那笔账），周期化后该任务永不完成 ⇒ 它们必须显式传 `refreshInterval: TimeSpan.Zero`，本类只测启动那一次、周期行为归新用例。坑一条：`TimeSpan.Parse("24:00:00")` 是 **24 天**不是 24 小时（实测断言差值 `24.00:00:00` vs `1.00:00:00`），期望值改成小时数——字符串形态的时间期望值在这里会静默判错一个量级。`MainWindow.xaml.cs`（435 行零余量基线）零改动，调度全在协调器里。本地 Core 859/859、Broker 204/204 全绿（CI 为准）。**残余待裁决**：清空订阅源只停止重取，不解除已生效名单也不删缓存（放松防护的方向）⇒ 新登 §五 Q54 |
 | AEG-011 / R8-DEPS-8 | **P2**（外部审计声称 P1，回读后裁 P2：这是加固面缺失而非可利用缺陷）→ 落地 | 保留并落地 | 审计要的两件事里只做了一件半：`dependencyLocking` 已启用，dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55。回读把第八轮 R8-DEPS-8 的判据更正为「`lockAllConfigurations()` 覆盖的是项目全部**可解析配置**（含 AGP 变体、测试、lint、ktlint/detekt 工具面），不是只覆盖直接依赖」；AD-155 当年的否决理由「双源维护成本」在 STRICT 下翻转成门禁本身——catalog 改了而锁没重算，解析直接失败而不是静默漂移。**故障注入实证两次**：①删掉 `android/app/gradle.lockfile` ⇒ `Locking strict mode: Configuration ':app:debugCompileClasspath' is locked but does not have lock state`（EXIT=1）；②给模块加一条新依赖 `org.apache.commons:commons-text:1.15.0` ⇒ `Resolved '…commons-text:1.15.0' which is not part of the dependency lock state`（EXIT=1）——这条在**改成 root 单源之后又重跑了一次**（注入点 `:contracts:compileDebugKotlin`），证明单源形态下 enforcement 仍然生效，不是「写在模块脚本里才管用」。顺带抓到一个**判据陷阱**：`:app:dependencies` 报表任务把解析失败吞成 `FAILED` 文本并 EXIT=0——所以「锁是否可消费」绝不能用报表任务证明，必须用真正吃 classpath 的任务；这条决定了 dependency-relock 的 gradle 面怎么写。落地＝锁块**单源**写在 root `android/build.gradle.kts` 的 `subprojects` 作用域（模块脚本零副本；本来按「逐模块各写一份」做，是 `:app` 脚本停在 **316 行零余量基线**放不下第 5 行逼出了这个更好的形状——单源顺带把「新增第五个模块忘记加锁」从静默 fail-open 变成自动覆盖）+ 四把入库 `gradle.lockfile`（app 314 行/四把共 277 个唯一坐标）+ 新常驻 `tests/python/gradle_locking_test.py`（9 例：模块清单从 settings 现取、锁块同形、锁文件形态与精确版本、CI 解析的配置必须在锁里、ktlint/detekt 工具面也进锁、SECURITY.md 与 settings 决策记录对得上）+ `relock_sop_test.py` 的 gradle 半边（**重锁任务清单 ⊇ CI 各 workflow 的解析面**，删一条即判红）+ `dependency-relock.yml` 新增 `gradle-relock` job（ubuntu + 与 android-quality 同款 JDK/SDK 口径，只写 deps/* 分支）。本机限制如实登记：`:app:assembleRelease` 在本机 Windows 跑不动（AAPT2 windows daemon 缺 UCRT），release 面的锁覆盖是用 `:app:dependencies --configuration releaseRuntimeClasspath` + broker/adapter 的 release 配置条目实证到位，真正的 release 构建要等 CI 的 ubuntu runner。 |
+| R9-CS-10 | **P2**（R9-B33 落地时发现，同批修掉） | 保留并落地 | 「有界读取」在 `HttpClient` 默认 `HttpCompletionOption.ResponseContentRead` 下**根本不成立**：`GetAsync` 返回前响应体已被整包缓冲，`ReadBounded` 只是「缓冲完再量一遍」。实测撞出来的形态不是「超限判定」而是异常：`SourceFetcherTests.cs:185 ChunkedOversizeStopsJustPastTheCap` 第一版跑出 `Cannot write more bytes to the buffer than the configured maximum buffer size: 2147483647`。受影响的两条既有路径 `Core/Security/ThreatFeed.cs:148`、`Core/Favicons/FaviconService.cs:187` 在 R9-CS-2 里是被当作**正例**引用的（它们确实有 Content-Length 预筛与上限常量，缺的正是「对方不声明长度时不缓冲」这一刀）⇒ 修法＝三条带外抓取路径统一 `ResponseHeadersRead`，并由 `windows/tests/Aegis.Windows.Core.Tests/OutOfBandFetchDisciplineTests.cs` 按「含 `GetAsync(` 的文件」现取扫描面钉住——第四条抓取路径出现时自动在判据内，而不是靠有人记得往白名单里加一行 |
+| R9-SH-14 | P3（R9-B33 回读 R9-B10 落地件时发现＝**部分闭环的残余**） | 保留并落地 | R9-SH-2/-4 当时把「旧锁恒真」写成证据（「把 R8-SH-13 的修复摘掉，这把新锁与旧的 WB-142 双双仍绿」），却只**新写了强锁**、没删被当场证伪的那三段：`tests/ui-regression/start_page.test.mjs:403-405`（`SNAKE.substring(indexOf(...))` 一路读到文末）、WB-141（`fcBlock` 从 `indexOf` 读到文末）、WB-142（「本 at-rule 到下一个 @media」）⇒ 台账那句「双双仍绿」在落地之后仍然成立。本批删掉三段（该文件 490→474 行），WB-142 的三个控件与 WB-141 的三个系统色并进按花括号配对切块的 `start_a11y.test.mjs`，各配反向锚。写反向锚时又撞出一条：`ButtonFace` 在 forced-colors 块内出现两次（`shared/shell/start.css:389,395`），只替换第一处的注入是**假锚**——改成全量替换后它才真的判红 |
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
 
@@ -737,9 +739,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   原条目：Q8 R9-AD-8 | P3 | `android/build.gradle.kts:13-19` 头注声明「1.85 / 0.9.6 / 3.18.0」，
   `:26-32` 实钉 BC 1.86（且拆三条）、jose4j 0.9.7、commons-lang3 3.21.0 ⇒ 按头注做构建
   类路径分诊会与实树对不上账（`docs/security/android-build-classpath-triage.md` 同账本）。
-- Q9 R9-AD-9 | P3 | `DownloadPolicy.kt:96`（`URLDecoder`，`+`→空格）↔
+- ~~Q9 R9-AD-9~~ **本批已闭**（R9-B33 / §3.33：解码器单源化成 `android/app/src/main/java/com/aegis/browser/PercentEncoding.kt:24`（`decodeStrict`），`DownloadPolicy.kt` 与 `WebViewDownloadHandler.kt` 两处调用点都改走它）。
+  原条目：Q9 R9-AD-9 | P3 | `DownloadPolicy.kt:96`（`URLDecoder`，`+`→空格）↔
   `WebViewDownloadHandler.kt:210,338-364`（`decodePercentStrict`，`+` 字面）：同一「URL
   路径段」两套解码器，而后者注释正是前者的反驳理由；本仓两处自写纪律「不欢迎第二个解析器」。
+  落地时把**查询值**也一并改严格（Windows 侧两处都是 `Uri.UnescapeDataString`，见
+  `Core/Downloads/DownloadPolicy.cs:65,130`）——两端对同一个 URL 从此解出同一个名字。
 - Q10 R9-AD-10 | P3 | `AegisHomeBridge.kt:95-121` + `SecureWebViewFactory.kt:127-132`：
   `addJavascriptInterface` 对象对所有帧可见（本类 KDoc 自述）而判据只取 `webView.url`
   （主框架），受信面是整个 `file:///android_asset/` 前缀（首页 + GeoGebra）⇒ 壳页内跨源
@@ -795,7 +800,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"))` 在 indexOf 返
   `-1` 时退化为全文扫描，而 `if (!isOpen) return;` 在 `shared/shell/start.snake.js`
   出现 2 次（:449 keydown 与触摸处理器）⇒ 实测删除全部 document keydown 注册后仍绿
-  （WB-133 的锁）。——**本批已回读确证并落地**（§二 R9-SH-4：外迁成新文件 `tests/ui-regression/snake_guard_slice.test.mjs`，原文件在零余量基线上）。- Q15 R9-SH-5 | P2 | `contracts/policy/action-catalog.yaml:14-35` 声明
+  （WB-133 的锁）。——**本批已回读确证并落地**（§二 R9-SH-4：外迁成新文件 `tests/ui-regression/snake_guard_slice.test.mjs`，原文件在零余量基线上）。
+  **R9-B33 补一刀（§3.33 第 7 条）**：那把恒绿的旧断言当时只是「另有一份强的」，本体仍留在
+  `start_page.test.mjs` 里——同批的 WB-141/WB-142 也是同一形态。三段已删（−16 行），其中
+  WB-142 的三个控件与 WB-141 的三个系统色并进 `start_a11y.test.mjs` 的按花括号配对切片，
+  各带反向锚。**留着的后果就是「新旧双双仍绿」这句话到今天还成立**——删掉才算闭。
+- Q15 R9-SH-5 | P2 | `contracts/policy/action-catalog.yaml:14-35` 声明
   `risk/read_only/confirmation/audit/redteam_fixtures`，而 `agent/broker.py:178-190,278-283,366`
   裁决只读 `name/scope/budget(+default_deny/policy_version)` ⇒ `confirmation` 一列是装饰；
   `contracts/codegen/analyze_action_catalog.py:93-95` 只断 `redteam_fixtures` 非空。
@@ -853,7 +863,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   但未接线的标签；`RegisterSession` 成功后任一步抛出还会让会话在池中泄漏（拆除只在主窗
   `CloseTab` 里）。`CoreReadyFailClosedTests` 仅锚 MainWindow，无 InPrivate 对偶锚。
   非策略 fail-open（`_wired` 末位置位 + `IsWired` 仍挡后续导航）。  **本条所指缺口已逐行回读确证并落地**（§3.10 / §二 R9-CS-1：无痕窗接线体外迁 + 包失败闭合 + 对偶锚 5 条）。
-- Q23 R9-CS-2 | P2 | `windows/src/Aegis.Windows.App/Chrome/MainWindow.SourceViewer.cs:29-38,71-75`：
+- ~~Q23 R9-CS-2~~ **本批已闭**（R9-B33 / §3.33：新增 `windows/src/Aegis.Windows.App/Core/Security/HttpFetchGuard.cs:29`（有界读取）与 `:48`（逐跳落点判定）、`Chrome/SourceFetcher.cs:32`（手动逐跳抓取编排），三条带外抓取路径（源码查看器 / 订阅源 / favicon）全部收口，并由 `windows/tests/Aegis.Windows.Core.Tests/OutOfBandFetchDisciplineTests.cs` 按扫描面现取钉住）。
+  原条目：Q23 R9-CS-2 | P2 | `windows/src/Aegis.Windows.App/Chrome/MainWindow.SourceViewer.cs:29-38,71-75`：
   查看源码（Ctrl+U）的带外抓取 ①不设 `AllowAutoRedirect=false`、落地也不对**最终** URI
   复查 `ReservedAddressBoundary` ⇒ 敌意页 302 跳 `169.254.169.254` 照跟（同仓
   `Core/Favicons/FaviconService.cs:46` 显式关重定向、`Core/Security/ThreatFeed.cs` 复查
@@ -861,6 +872,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   ②`ReadAsByteArrayAsync` 先整读进内存再比 `SourceMaxBytes` ⇒ 无 Content-Length 预检的
   大响应可 OOM。响应只回显给用户、页面读不到 ⇒ 非逃逸级，但「把内网/元数据内容递给被
   诱导读源码的用户」不该发生。
+  **登记时把 Favicon/ThreatFeed 当反例引用，回读发现它们的「有界读取」同样只在响应声明了
+  Content-Length 时成立**（`HttpClient` 默认 `ResponseContentRead` 先把整包缓冲进内存）——
+  见 §3.33 第 2 条，实测撞出来的那条红灯就是这件事。
 - Q24 R9-CS-4 | P3 | `windows/src/Aegis.Windows.App/WebView/HostWebView.cs:332-336`：
   每个放行下载 `_trackedDownloads.Add(operation)`，完成**不移除**（仅 `UnwireEvents` 里
   `Clear`）⇒ 长会话累积已完成 `CoreWebView2DownloadOperation` COM 引用，`StopLiveTraffic`
@@ -1014,10 +1028,15 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   （R8-SH-10 当年只处理了 `ci.yml`）。收口属 CI 触发面变更：runner 时长上升，且若某处 job 已列进必需
   检查，触发条件与 required 集合必须同批核对（R8-CI-01 的「Expected — Waiting for status」教训）⇒ 需用户
   点头后另批做。**R9-B21 只把 ADR 的陈述改真。**
-- Q49 R9-DOC-20 | P3 | `docs/runbooks/device-validation.md:19`（Windows 第 6 步「下载 MIME 混淆」预期写
+- ~~Q49 R9-DOC-20~~ **本批已闭**（R9-B33 / §3.33：`docs/runbooks/device-validation.md:19` 按代码改真，
+  读的是 `WebView/HostWebView.cs:268`、`Core/Downloads/DownloadPolicy.cs:46`、
+  `Broker/BrowserPolicyBroker.cs:111`、`Core/Downloads/DownloadItem.cs:114` 四处实际链）。
+  原条目：Q49 R9-DOC-20 | P3 | `docs/runbooks/device-validation.md:19`（Windows 第 6 步「下载 MIME 混淆」预期写
   「下载经 broker 判定（MIME/最终 URL/size）」）：本批只确证了 Android 那一行（Q37→R9-DOC-06），
   **C# 侧未验**——Windows 下载链是否真判 MIME/最终 URL/size 没有实测支撑，故该行仍是一条未核验陈述
   （下一批读 `windows/.../Downloads/` 后改真或续登）。
+  结论：**「判 MIME / 判 size」两句都不成立**（`TotalBytesToReceive` 只喂进度条），真实判定面是
+  危险扩展名三候选 + kill-switch + 保留地址 + 会话/标签上下文 + 无确认订阅者 fail-closed。
 
 - Q56 R9-CI-14 | P2 | `.github/workflows/gradle-dependency-graph.yml:14-25`（触发面只有
   `push.branches: master` + `paths:`、周 schedule 与 workflow_dispatch）↔ `:49`
@@ -1516,6 +1535,60 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    ②合并 #165 后由 push master 触发的真实运行 success。pin 也逐字对过上游：`3f5f9ad` 就是
    tag `v6.4.0` 指向的 commit（旧 pin `748248d` == `v4.4.4`）。之所以肯为它多跑两遍：
    这个 workflow 只在 master / schedule 上跑，PR 面那 18 张绿牌一张也不会执行它。
+
+### 3.33 R9-B33（2026-10-12，队列 Q23 / Q9 / Q49 + Q12·Q14 的残余）：带外抓取的读取口径单源化
+
+1. **Q23（R9-CS-2，P2）落地形态**：新增 `windows/src/Aegis.Windows.App/Core/Security/HttpFetchGuard.cs`
+   （`ReadBoundedAsync:29` 有界读取 + `RedirectProblem:48` 逐跳落点判定）与
+   `Chrome/SourceFetcher.cs:32`（手动逐跳抓取，上限 `MaxRedirectHops = 3`，相对 `Location` 按**当前跳**解析）；
+   `Chrome/MainWindow.SourceViewer.cs:38` 的抓取客户端从「默认自动跟随重定向」改成
+   `AllowAutoRedirect = false`，编排整体交给 SourceFetcher。裁决边界写进类型注释而不是只写在 PR 里：
+   **首跳不判保留地址**（2026-10-04「本机与内网必须能打开」是用户裁决），重定向落点判——
+   因为那一跳是页面选的，不是用户选的。
+2. **实测撞出来的第二层缺陷（另登 R9-CS-10，见 §二）**：`HttpClient` 默认
+   `HttpCompletionOption.ResponseContentRead` 会在 `GetAsync` 返回前把响应体整包缓冲 ⇒
+   此前 ThreatFeed 与 favicon 那两处「Content-Length 预筛 + 限量缓冲」对**不声明长度**的响应
+   根本不成立，CS-232 当年想挡的无界分配仍然在。三条路径统一改 `ResponseHeadersRead`。
+   证据形态值得记一句：新用例第一次跑报的不是「超过 5MB」而是
+   `Cannot write more bytes to the buffer than the configured maximum buffer size: 2147483647`
+   ——是那条用例把这件事暴露出来的，不是推理出来的。
+3. **门禁**（`OutOfBandFetchDisciplineTests`，3 条）：扫描面按「`windows/src` 下含 `GetAsync(` 的文件」
+   **现取**而不是写死名单，逐个要求 `HttpFetchGuard.ReadBoundedAsync` + `ResponseHeadersRead` +
+   不再出现 `ReadAsByteArrayAsync(`；第二条钉住扫描面确实认得出那三个文件（否则「零个输入」会让第一条
+   静静变绿）；第三条是内存态注入反向锚（照旧写法造一个抓取点，三处缺失都要被归因）。
+   剔 `//` 注释后才判——本批注记里逐字抄着被禁写法（同口径第三次使用）。
+4. **Q9（R9-AD-9，P3）**：解码器单源化成新文件 `android/app/src/main/java/com/aegis/browser/PercentEncoding.kt`
+   （`decodeStrict`），`DownloadPolicy.kt` 与 `WebViewDownloadHandler.kt` 两处调用点都改走它；
+   `WebViewDownloadHandler.kt` 随之 414→346 行（私有实现与三个十六进制常量搬走），零余量基线只减不增。
+   **一处行为变更按事实登记**：Android 的**查询值**解码也从 `URLDecoder`（`+`→空格）改成严格 `%XX`，
+   理由不是「更严」而是「与 canonical 端同一答案」——Windows 侧路径段与查询值都是
+   `Uri.UnescapeDataString`（`Core/Downloads/DownloadPolicy.cs:65,130`，严格、不动 `+`）。
+   两端实测差异只在 `x.exe+` 这类字面文件名：旧 Android 先解成 `x.exe ` 再被净化 trim，于是比
+   Windows 多拦一层；现在两端同判不拦（`exe+` 不在危险集）。该差异有专门用例钉住
+   （`PercentEncodingTest.downloadPolicyKeepsPlusLiteralAcrossPathAndQuery`）。
+   新增 `PercentEncodingTest`（5 条：`+` 字面、多字节序列整体按 UTF-8 解、孤立 `%`/半截转义/非法 UTF-8
+   都原样返回、DownloadPolicy 两端同判、以及一条「主源里不许再出现第二个百分号解码器」的树扫锚）。
+5. **Q49（R9-DOC-20，P3）**：`docs/runbooks/device-validation.md:19` 按代码改真，读的四点是
+   `WebView/HostWebView.cs:268`、`Core/Downloads/DownloadPolicy.cs:46`、
+   `Broker/BrowserPolicyBroker.cs:111`、`Core/Downloads/DownloadItem.cs:114`。结论：**「判 MIME」「判 size」
+   两句都不成立**（`TotalBytesToReceive` 只喂进度条）；真实判定面＝危险扩展名三候选（建议文件名 ∪ URL
+   路径末段 ∪ 各查询参数值）+ kill-switch + 保留地址 + 会话/标签上下文 + 无确认订阅者即 fail-closed。
+   行内另给验证人三条可执行判据（含「`Content-Type: text/plain` 而文件名 `.exe` 时仍按扩展名拦——
+   按 MIME 放行不是通过，那正是本行要防的类型混淆」）。与 R9-DOC-06 对 Android 那一行的更正成对。
+6. **Q12 / Q14 的残余（另登 R9-SH-14）**：R9-B10 把两把强锁写出来了，但被它当场证伪的三段旧断言
+   **一直留在** `start_page.test.mjs` 里——于是「新旧双双仍绿」这句话从落地那天起持续成立。
+   本批删掉三段并把它们的独有覆盖面（`.link-btn`/`.snake-sound`/`.snake-close` 的 44px 保底、
+   `CanvasText`/`ButtonFace`/`ButtonText` 三个系统色）并进按花括号配对切块的 `start_a11y.test.mjs:61,83`，
+   判据改成「那一条声明本身带 44px」而不只是「名字在切片里」。两条反向锚各自还附一句
+   「旧口径在同一份变异上应仍然放行」，把失效形态钉成文字。
+7. **验证（本机全跑，不靠 CI 兜）**：`dotnet test Aegis.Windows.Core.Tests -r win-x64 -p:RestoreLockedMode=true`
+   ⇒ 873 通过 / 0 失败（新增 SourceFetcherTests 11 条 + OutOfBandFetchDisciplineTests 3 条）；
+   `./gradlew :app:ktlintCheck :app:detekt :app:testDebugUnitTest` ⇒ BUILD SUCCESSFUL，
+   app 面 320 条单测 0 失败；`node --test tests/ui-regression/*.test.mjs` ⇒ 126 通过 / 0 失败；
+   python 门禁全套（file_sizes / markdown_tables / markdown_links / doc_claims / workflow_shells /
+   active_tree_gates all / pytest tests/python）复跑绿。ktlint 两轮红都是真形制问题：
+   限定名开头的链要么整条断行要么整条不断行（`chain-method-continuation`），多行表达式赋值必须换行起
+   （`multiline-expression-wrapping`）——与本仓既往「when 条目尾注/多行体」同一族，见 §二 R9-SH-2 的口径。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

@@ -9,9 +9,11 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using Aegis.Windows.Core.Security;
 
 /// <summary>站点 favicon 服务：懒取 + 磁盘缓存 + 内存缓存。
-/// - 尝试 https://<host>/favicon.ico（8s 超时，200KB 上限，Content-Length 预检）；
+/// - 尝试 https://&lt;host&gt;/favicon.ico（8s 超时，200KB 上限，Content-Length 预检
+///   + 流式有界读取）；
 /// - 命中内存缓存即时返回；磁盘读取与网络抓取全部在后台线程（UI 线程零 IO）；
 /// - 失败/未命中回退 null（UI 显示首字母占位，不阻塞）；失败负缓存避免
 ///   无 favicon 站点每次导航都重复打点；
@@ -180,15 +182,22 @@ public static class FaviconService
     {
         try
         {
-            using var response = await Http.GetAsync(BuildFaviconUrl(host)).ConfigureAwait(false);
+            // ResponseHeadersRead：默认的整包缓冲会让下面这行拿到的是「已经进内存的
+            // 全站响应」——R9-B33 同型：上限判定必须在读取之前，不是之后。
+            using var response = await Http.GetAsync(BuildFaviconUrl(host),
+                HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 return null;
-            // 先看声明长度再缓冲——超大响应不进内存
+            // 先看声明长度再缓冲——超大响应不进内存（declared<=0 仍按原口径拒绝：
+            // 零长/负长的声明本身就是坏响应）
             if (response.Content.Headers.ContentLength is long declared
                 && (declared <= 0 || declared > MaxFaviconBytes))
                 return null;
-            var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-            if (bytes.Length == 0 || bytes.Length > MaxFaviconBytes)
+            // 有界读取上收到 HttpFetchGuard（R9-B33）：源站是用户访问的任意 host，
+            // 不带 Content-Length 的分块响应此前会先被 ReadAsByteArrayAsync 整包读进内存。
+            var bytes = await HttpFetchGuard.ReadBoundedAsync(response, MaxFaviconBytes)
+                .ConfigureAwait(false);
+            if (bytes is null || bytes.Length == 0)
                 return null;
             return Decode(bytes);
         }

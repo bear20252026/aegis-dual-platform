@@ -400,9 +400,10 @@ test('WB-133 贪吃蛇输入守卫：模块级 isOpen，不得回退内联 displ
     'open() 必须置位 isOpen');
   assert.match(SNAKE, /isOpen = false;\s*\/\/ WB-133|isOpen = false;\s*$/,
     'close() 必须复位 isOpen');
-  const guardBody = SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"));
-  assert.match(guardBody, /if \(!isOpen\) return;/,
-    '键盘守卫必须以 isOpen 短路（浮层初始由 CSS 类隐藏——内联 display 为空串，display 判定在首开前放行 Escape 清零最高分）');
+  // 守卫本体的判定在 snake_guard_slice.test.mjs（R9-SH-4）：那里的切片按 `});`
+  // 收尾、且全程去注释。此处不再复述——旧写法 `SNAKE.substring(indexOf(...))`
+  // 一路读到文末，而 `if (!isOpen) return;` 在键盘 :453 与触摸 :472 各出现一次，
+  // 删掉键盘那一处照样绿（R9-B33 删掉的正是这条恒绿的断言）。
   // 断言剥掉注释——守卫注记中的历史表述不算回归
   const snakeCode = SNAKE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
   assert.ok(!/ov\.style\.display === 'none'/.test(snakeCode),
@@ -429,28 +430,11 @@ test('WB-140 全局错误监听前移：start.js 注册，start.main.js 不得�
     'start.main.js 不得残留 unhandledrejection 注册');
 });
 
-// WB-141：forced-colors 高对比模式规则
-test('WB-141 forced-colors 规则：高对比模式必须恢复系统配色', () => {
-  assert.match(CSS, /@media \(forced-colors: active\)/,
-    'start.css 必须有 forced-colors 媒体查询（此前全文件 0 处）');
-  const fcBlock = CSS.substring(CSS.indexOf('@media (forced-colors: active)'));
-  for (const sysColor of ['CanvasText', 'ButtonFace', 'ButtonText']) {
-    assert.ok(fcBlock.includes(sysColor), `高对比规则必须使用系统色 ${sysColor}`);
-  }
-});
-
-// WB-142：coarse pointer 触控目标补齐（.link-btn/.snake-sound/.snake-close ≥44px）
-test('WB-142 触控目标保底补齐：三个遗漏控件进入 coarse pointer 规则', () => {
-  const start = CSS.indexOf('@media (pointer: coarse)');
-  assert.ok(start > 0, 'coarse pointer 媒体查询必须存在');
-  // 媒体块整体范围：截到下一个 @media（或文末）——首条规则内的 } 不是块边界
-  const next = CSS.indexOf('@media', start + 10);
-  const coarse = CSS.substring(start, next === -1 ? CSS.length : next);
-  for (const sel of ['.link-btn', '.snake-sound', '.snake-close']) {
-    assert.ok(coarse.includes(sel), `${sel} 必须纳入触控目标保底（此前 <44px）`);
-  }
-  assert.match(coarse, /min-height:44px/, '保底尺寸必须达到 44px');
-});
+// WB-141（forced-colors 系统配色）与 WB-142（coarse 触控目标保底）已并入
+// start_a11y.test.mjs（R9-B33）：这两条旧锁的切片是「从 at-rule 一路读到文末 /
+// 切到下一个 @media」，块外文本（`.snake-sound` 在 :299、注记里逐字写着
+// `ButtonFace`）会替回退顶过断言——R9-SH-2 已把那个失效形态实证并写进台账。
+// 新锁按花括号配对切闭合块、全程去注释，并各带一条反向锚。
 
 // WB-143：placeholder 对比度 ≥4.5:1（#9aa1ad 实测 2.9:1 不得回归）
 test('WB-143 placeholder 对比度：不得回归低对比灰', () => {
