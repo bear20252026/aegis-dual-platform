@@ -47,8 +47,6 @@ public sealed partial class HostWebView : IDisposable
     // 下载照常完成，与"进程级紧急冻结"承诺不符。本实例接线期间登记反应，
     // 解绑时注销（开关不得持有已释放控件）。
     private IDisposable? _killSwitchReaction;
-    private readonly object _downloadsLock = new();
-    private readonly List<CoreWebView2DownloadOperation> _trackedDownloads = new();
 
     /// <summary>仅受信 WPF chrome 订阅；远程页面无法调用此事件或取得授权动作。</summary>
     public event EventHandler<NavigationConfirmationRequestedEventArgs>? NavigationConfirmationRequested;
@@ -186,20 +184,10 @@ public sealed partial class HostWebView : IDisposable
             // 内核可能已销毁——终止语义已由入口判定保证，不放大异常
             SecurityLog.Write($"[killswitch] tab={_tabId} 内核 Stop 未生效（可能已销毁）");
         }
-        CoreWebView2DownloadOperation[] snapshot;
-        lock (_downloadsLock)
-            snapshot = _trackedDownloads.ToArray();
-        foreach (var download in snapshot)
-        {
-            try
-            {
-                download.Cancel();
-            }
-            catch (Exception)
-            {
-                // 下载可能已完成——取消失败不改变拒绝语义
-            }
-        }
+        // R9-B37（Q24）：取消与在途登记表的收尾合进一个方法（见 HostWebView.Downloads.cs）——
+        // 旧实现在这里对**整张表**逐个 Cancel()，而已结束项必抛、被 catch 吞掉，
+        // 于是日志里的噪声与真在途的取消混在一起；登记表本身又从不摘除已完成项。
+        CancelInFlightDownloads();
     }
 
     /// <summary>显式解绑全部订阅（Dispose 调用；也可供宿主在复用 WebView 时手动
@@ -219,8 +207,7 @@ public sealed partial class HostWebView : IDisposable
         // 开关的注册表若继续持有已释放控件，Engage 时即对死对象调 Stop/Cancel
         _killSwitchReaction?.Dispose();
         _killSwitchReaction = null;
-        lock (_downloadsLock)
-            _trackedDownloads.Clear();
+        ReleaseTrackedDownloads();
         _wired = null;
     }
 
@@ -261,79 +248,6 @@ public sealed partial class HostWebView : IDisposable
         _ = System.Threading.Tasks.Task.Run(
             () => Core.UrlSafety.IsLocalHostOrResolvesLocalHost(captured));
         return false;
-    }
-
-    /// <summary>M3 下载管理（ADR-009）：全量经 broker 审计；危险扩展（对齐
-    /// Android DownloadPolicy）需用户显式确认——无确认订阅者时 fail-closed 拒绝。</summary>
-    private void OnDownloadStarting(CoreWebView2DownloadStartingEventArgs e)
-    {
-        var downloadUrl = string.Empty;
-        var suggested = string.Empty;
-        var metadataReadable = true;
-        try
-        {
-            downloadUrl = e.DownloadOperation?.Uri ?? string.Empty;
-            // SDK 1.0.2903.40 无 SuggestedFileName——从结果路径提取
-            suggested = Path.GetFileName(e.DownloadOperation?.ResultFilePath ?? string.Empty);
-        }
-        catch (Exception)
-        {
-            metadataReadable = false;
-        }
-        // 审计第六轮（2026-10-03）：元数据**就是**策略输入，不是可忽略的旁路。
-        // 此前读取失败被吞成空串——SanitizeFileName("") 得 benign 默认名、
-        // RequiresExplicitConfirmation("","aegis_download") 判非危险、
-        // AllowDownload(session,tab,"",…) 因会话仍在而返回 true，于是 COM 抖动
-        // 一次就让 Content-Disposition: evil.exe 静默落盘（fail-open）。
-        // 现口径：读不到 / 无 URL / 无操作对象 = 按危险处理，无确认订阅者即拒。
-        if (string.IsNullOrEmpty(downloadUrl))
-            metadataReadable = false;
-        var fileName = metadataReadable
-            ? Core.Downloads.DownloadPolicy.SanitizeFileName(suggested)
-            : string.Empty;
-        var dangerous = !metadataReadable
-            || Core.Downloads.DownloadPolicy.RequiresExplicitConfirmation(downloadUrl, fileName);
-        if (dangerous
-            && (DownloadConfirmationRequested is null
-                || !DownloadConfirmationRequested.Invoke(downloadUrl, fileName)))
-        {
-            e.Handled = true;
-            try
-            {
-                e.DownloadOperation?.Cancel();
-            }
-            catch (Exception)
-            {
-                // 操作可能尚未启动——拒绝语义已由 Handled 保证
-            }
-            _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
-            return;
-        }
-        // 下载门禁真正生效：AllowDownload 校验会话/标签/kill-switch，
-        // 返回值接入实际放行——此前被忽略（ADR-002 审计发现 G）。
-        // 非危险下载或危险已确认，都必须过这道门。
-        var allowed = _broker.AllowDownload(_sessionId, _tabId, downloadUrl, fileName, dangerous);
-        if (!allowed)
-        {
-            e.Handled = true;
-            try
-            {
-                e.DownloadOperation?.Cancel();
-            }
-            catch (Exception)
-            {
-                // 操作可能尚未启动——拒绝语义已由 Handled 保证
-            }
-            _broker.DenyDownload(_sessionId, _tabId, downloadUrl);
-            return;
-        }
-        // 审计第六轮（2026-10-03）：放行后登记在途下载，供紧急终止取消——
-        // 入口判定只能挡新的副作用请求，已开始的下载不会自行停下。
-        if (e.DownloadOperation is { } operation)
-        {
-            lock (_downloadsLock)
-                _trackedDownloads.Add(operation);
-        }
     }
 
     // CS-070（审计 2026-09-25）：脱敏单源——与 Broker 各持一份相同实现已收敛
