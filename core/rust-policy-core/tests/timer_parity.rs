@@ -65,6 +65,83 @@ fn clamp_is_not_gated_on_jitter_enabled() {
     );
 }
 
+/// R9-B38（第九轮 Q25）：三端共用的**挂载形态**片段（缩进不比对，只比对文本）。
+/// 核心按 RS-216/RS-250 早就是这个形状，两端此前是「实例 value 遮蔽 + 写死双 false」——
+/// 那一形态有两个后果：`Performance.prototype.now.call(performance)` 直取无降噪原实现，
+/// 而 `hasOwnProperty.call(performance,'now')` / `getOwnPropertyDescriptor` 一查即检出防护。
+const MOUNT_PROTO: &str =
+    "var oPN = Object.getOwnPropertyDescriptor(Performance.prototype, 'now');";
+const MOUNT_TARGET: &str = "var tgtPN = Performance.prototype;";
+const MOUNT_FALLBACK: &str = "oPN = Object.getOwnPropertyDescriptor(performance, 'now');";
+const MOUNT_PRESERVE: &str = "writable: oPN.writable,";
+const MOUNT_ENUMERABLE: &str = "enumerable: oPN.enumerable,";
+const MOUNT_CONFIGURABLE: &str = "configurable: oPN.configurable";
+/// 被禁止的旧形状（冻结的实例遮蔽）——出现即说明某一端漂移回去。
+const FROZEN_INSTANCE: &str = "writable: false, configurable: false";
+
+fn three_end_sources() -> [(&'static str, String); 3] {
+    [
+        (
+            "Rust 核心（生成脚本）",
+            TimerPrecision::new().inject_script(),
+        ),
+        (
+            "C# FingerprintShield",
+            repo_file("../../windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs"),
+        ),
+        (
+            "Android WebViewHardening Stage 8",
+            repo_file(
+                "../../android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt",
+            ),
+        ),
+    ]
+}
+
+#[test]
+fn all_three_ends_mount_performance_now_on_the_prototype_preserving_the_native_descriptor() {
+    for (name, text) in three_end_sources() {
+        for fragment in [
+            MOUNT_PROTO,
+            MOUNT_TARGET,
+            MOUNT_FALLBACK,
+            MOUNT_PRESERVE,
+            MOUNT_ENUMERABLE,
+            MOUNT_CONFIGURABLE,
+        ] {
+            assert!(
+                text.contains(fragment),
+                "{name} 的 performance.now 挂载形态与核心不同形：缺 {fragment}"
+            );
+        }
+        assert!(
+            !text.contains(FROZEN_INSTANCE),
+            "{name} 又出现「实例 value 遮蔽 + 冻结描述符」形态——那是可绕过也可检出的旧形状"
+        );
+    }
+}
+
+#[test]
+fn mounting_shape_is_not_satisfied_by_mere_identifier_presence() {
+    // 反向锚（内存态注入）：把「原型」这个来源整体换成实例，两个原型片段必须同时消失——
+    // 不写这条，上面那组断言会退化成「文件里有 oPN 三个字」。
+    let real = TimerPrecision::new().inject_script();
+    let mutated = real.replace("Performance.prototype", "performance");
+    assert_ne!(
+        mutated, real,
+        "注入锚点失配（核心脚本形态变了，本条会恒绿）"
+    );
+    let missing: Vec<&str> = [MOUNT_PROTO, MOUNT_TARGET]
+        .into_iter()
+        .filter(|f| !mutated.contains(f))
+        .collect();
+    assert_eq!(
+        missing.len(),
+        2,
+        "注入没生效：改过的脚本仍含原型挂载片段 ⇒ 判据恒真"
+    );
+}
+
 #[test]
 fn all_three_ends_share_the_same_clamp_form() {
     let ends: [(&str, String); 3] = [

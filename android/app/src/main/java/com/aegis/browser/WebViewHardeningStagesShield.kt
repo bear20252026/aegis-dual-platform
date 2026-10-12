@@ -171,7 +171,24 @@ internal object WebViewHardeningStagesShield {
       lastPerf = v;
       return v;
     };
-    Object.defineProperty(performance, 'now', { value: nowWrapper, writable: false, configurable: false });
+    // R9-B38（第九轮 Q25）：挂载形态与描述符对齐核心（RS-216 / RS-250）与 C# 孪生——
+    // 实例 value 遮蔽可被 `Performance.prototype.now.call(performance)` 绕过，
+    // 而写死的双 false 本身就是 getOwnPropertyDescriptor 一查即破的探针。
+    // 拿不到原型描述符时退回实例形态（绝不静默不装）。
+    var oPN = Object.getOwnPropertyDescriptor(Performance.prototype, 'now');
+    var tgtPN = Performance.prototype;
+    if (!oPN) {
+      oPN = Object.getOwnPropertyDescriptor(performance, 'now');
+      tgtPN = performance;
+    }
+    if (oPN) {
+      Object.defineProperty(tgtPN, 'now', {
+        value: nowWrapper,
+        writable: oPN.writable,
+        enumerable: oPN.enumerable,
+        configurable: oPN.configurable
+      });
+    }
     if (__aegisReg) __aegisReg(nowWrapper, o);
   } catch(e) {}
   try { var d = Date.now; var dateWrapper = function() { return reduceIntegral(d()); }; Date.now = dateWrapper; if (__aegisReg) __aegisReg(dateWrapper, d); } catch(e) {}
