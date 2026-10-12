@@ -3,8 +3,10 @@
 # 依 ADR-007 D3「门禁型 workflow 全量常跑」；原注释"对 android/** 的 push"
 # 随过滤一并失效）。JDK 21 由下方 setup-java 显式安装
 #（temurin——SP-252 注记：原注释"windows-latest 自带 JDK 21 兼容"已失实，
-# 工具链不再依赖镜像预装）。使用项目 Gradle 9.8.0 wrapper（SP-252 随手更正：
-# 原注释 9.7.0 已漂移）。ktlintCheck + detekt 作为合并门禁，detekt 基线文件
+# 工具链不再依赖镜像预装）。Gradle 版本**不写在这里**——单源是
+# android/gradle/wrapper/gradle-wrapper.properties 的 distributionUrl（此前此处逐轮
+# 抄版本号，SP-252 抄的 9.7.0→9.8.0 到 #167 的 9.8.1 又漂一次；抄数字的注释必然过期）。
+# ktlintCheck + detekt 作为合并门禁，detekt 基线文件
 # （detekt-baseline.xml）对遗留项目友好——仅新引入问题失败。
 # SP-252（2026-10-02 审计·S-29，2026-10-03 剩余项批落地）：ubuntu-latest 迁移——
 # 排队更快/费用减半（2×→1×）。迁移面：gradlew.bat → ./gradlew（android/gradlew
