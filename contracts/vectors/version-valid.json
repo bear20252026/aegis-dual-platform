@@ -1,0 +1,26 @@
+{
+  "description": "R9-B35（第九轮 Q11 / R9-SH-1）：Version 契约**实例级**合法向量——version.schema.json 此前零消费者（全树 grep 无一处引用）且零向量，PY-013 的 schema 向量面只覆盖 4/7。消费方：validate_vector_schemas.py （schema 必须接受）+ tests/python/semver_schema_parity_test.py。",
+  "vectors": [
+    {
+      "note": "三段核心",
+      "expected": "valid",
+      "version": {
+        "version": "1.2.3"
+      }
+    },
+    {
+      "note": "预发布（当前发布声明形态）",
+      "expected": "valid",
+      "version": {
+        "version": "2.2.0-beta.52"
+      }
+    },
+    {
+      "note": "构建元数据",
+      "expected": "valid",
+      "version": {
+        "version": "1.0.0+build.7"
+      }
+    }
+  ]
+}

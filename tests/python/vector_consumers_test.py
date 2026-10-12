@@ -1,7 +1,9 @@
 # vector_consumers_test.py —— AEG-006（外部第三轮审计 2026-10-11）向量**逐端消费分布**门禁的常驻锚。
 #
 # 两件事分开做：
-# ① 现树事实（15 份向量 / 11 份有端侧执行者 / 4 份只在 schema 层被判 / 2 份真两端同跑）
+# ① 现树事实（21 份向量 / 13 份有端侧执行者 / 8 份只在 schema 层被判 / 2 份真两端同跑）
+#    （R9-B35 加 6 份：release/version 四条为实例级、只由 schema 层判；
+#     semver-form 两条由 tests/python/semver_schema_parity_test.py 逐案执行）
 #    被钉成断言——数字漂了必须是有意识的动作，改登记表要同批在台账写理由；
 # ② 门禁的每条判据都在这里被注入证伪。这部分原本写在脚本的 `--self-test` 里，本批搬进
 #    pytest：一条要人主动敲 flag 的自证就是「跑不动的判据」（R9-SH-7 的同一课）。
@@ -62,13 +64,15 @@ def test_current_coverage_facts_are_11_4_2(real):
     schema_only = sorted(name for name, hits in consumers.items() if not hits)
     cross = sorted(name for name, hits in consumers.items()
                    if {"CS", "AD"} <= {vvc.end_of(h) for h in hits})
-    assert (executable, len(vectors)) == (11, 15), f"端侧执行面变了：{executable}/{len(vectors)}"
+    assert (executable, len(vectors)) == (13, 21), f"端侧执行面变了：{executable}/{len(vectors)}"
     assert schema_only == [
         "audit-event-invalid.json", "audit-event-valid.json",
-        "capability-invalid.json", "capability-valid.json"], f"仅 schema 级的集合变了：{schema_only}"
+        "capability-invalid.json", "capability-valid.json",
+        "release-invalid.json", "release-valid.json",
+        "version-invalid.json", "version-valid.json"], f"仅 schema 级的集合变了：{schema_only}"
     assert cross == ["url-origin-invalid.json", "url-origin-valid.json"], (
         f"两端同跑的向量变了：{cross}——这正是「跨端同一裁决」的全部支点")
-    assert len(report) == 15
+    assert len(report) == 21
 
 
 def test_url_origin_family_is_the_only_cross_end_pillar(real):

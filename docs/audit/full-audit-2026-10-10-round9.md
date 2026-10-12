@@ -780,12 +780,14 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 ### 5.2 SH（shared 壳层与契约）
 
-- Q11 R9-SH-1 | P2 | `contracts/schemas/release.schema.json:12` 与
+- ~~Q11 R9-SH-1~~ **本批已闭**（R9-B35 / §3.35：三张 schema 的 `version.pattern` 合一，并与 `release/update_verifier.py` 逐案等价；release/version 两张 schema 的向量面补齐，`version.schema.json` 从此有消费者）。原条目：Q11 R9-SH-1 | P2 | `contracts/schemas/release.schema.json:12` 与
   `contracts/schemas/version.schema.json:12` 的 SemVer pattern 仍是旧宽松式（接受
   `2.2.0-01`、`2.2.0-beta.`、`2.2.0-..`），PY-279 只收紧了
   `contracts/schemas/update-manifest.schema.json:26`；而 `release/update_verifier.py:44-53`
   对这些抛 UpdateRejected ⇒ 发布声明说合法、客户端验证器判非法。两张 schema 零向量
   （PY-013 的向量面只覆盖 4/7）。
+  **登记里有一处需要改准**：PY-279 收紧后的 update-manifest 式**仍放过** `2.2.0-01`
+  ——前导零规则不在正则里，而在客户端另一段 `_NUMERIC_ID`（PY-184）。所以本批把三张 schema 一起换成与验证器逐案等价的式子，而不是只把两张旧的改成 PY-279 那份。
 - Q12 R9-SH-2 | P2 | `tests/ui-regression/start_a11y.test.mjs:25-30` ↔
   `tests/ui-regression/start_page.test.mjs:443-453` ↔ `shared/shell/start.css:244-258,324,353`：
   `mediaBlock()` 把「媒体块」切成「本 at-rule 到下一个 `@media`」而非闭合 `}`，切片
@@ -1625,6 +1627,44 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    （`buffer_boundaries.rs` 203→166 行）。
 6. 验证：`cargo fmt --all -- --check` 0、`cargo clippy --locked --all-features --all-targets -- -D warnings` 0、
    `cargo test --locked --all-features` 582 passed / 0 failed（原 577 + 本批 5）。
+
+### 3.35 R9-B35（2026-10-12，队列 Q11）：SemVer 判据从「三份手抄」收成「一份 + 逐案等价」
+
+1. 现象是真的，但**登记时的处方不完整**。Q11 写「PY-279 只收紧了 update-manifest 一份」，
+   处方是「把 release/version 两张改成同一份」——照做会留下第三个分歧：PY-279 的式子
+   **仍放过** `2.2.0-01`，因为前导零规则不在那条正则里，而在客户端另一段
+   `_NUMERIC_ID`（PY-184：`int("01")==1` 会让 `2.2.0-01` 与 `2.2.0-1` 比较相等，防回滚有别名）。
+   实测把两条历史式与验证器摆在一起对 31 个形态逐案判：旧宽松式放过
+   `2.2.0-01` / `2.2.0-beta.` / `2.2.0-..` / `2.2.0+b..1`，PY-279 式只放过 `2.2.0-01` 一族。
+2. 落地：`release.schema.json:12`、`version.schema.json:12`、`update-manifest.schema.json:26`
+   三处 `properties.version.pattern` 换成同一条式子（数字标识符无前导零、标识符非空、
+   字符集显式 `[0-9A-Za-z-]` 不用 `\d`——避免 Python 与 ECMA 的 Unicode 数字差）。
+   实测该式与 `update_verifier._version_tuple` 的接受集在 31 个形态上**零分歧**。
+3. 向量面（Q11 的第二半：「两张 schema 零向量」）：新增 6 份文件、39 条
+   - `semver-form-valid.json`(16) / `semver-form-invalid.json`(15)：**形态电池**，
+     每条都带 note 写明它为什么在该侧（如 `2.2.0-0a.1` 合法：以数字开头但含字母，
+     不是数字标识符，无前导零问题；`2.2.0-alpha+001` 合法：构建段允许前导零）；
+   - `release-valid.json`(3) / `release-invalid.json`(6)、`version-valid.json`(3) /
+     `version-invalid.json`(5)：**实例级双向**，进 `validate_vector_schemas.py` 的
+     `SCHEMA_VECTOR_FILES`（valid 必过 / invalid 必拒，无 semantic 豁免）。release 侧
+     除版本串外还钉了 `architecture` 枚举与 `required`，失效面不只版本一处。
+   `verify_vector_consumers.py` 同步登记（21 份 / 13 份有执行者 / 8 份仅 schema 级）：
+   四条实例级向量记 `frozenset()`——**没有平台实现跑它们**，只由 schema 层判定，这是事实陈述；
+   `semver-form` 两条记 `{"PY"}`，因为 `tests/python/semver_schema_parity_test.py` 真的逐案执行。
+   登记时 gate 当场打回一条：本批的 parity 测试读取 `update-manifest-valid.json` 的首条
+   manifest 当宿主模板 ⇒ 它的 PY 消费面是真的，登记表照改而不是把测试塞进 META_LEVEL。
+4. 判据 `tests/python/semver_schema_parity_test.py`（6 条）：①三张 schema 同源（纯函数
+   `parity_problems`）；②反向锚——内存态只改一张必须**只点名那一张**（归因跑偏也判红）；
+   ③31 个形态过「客户端 × 三张 schema」四方对账；④电池判别力锚：把两条历史式喂进同一
+   判据，必须各自在 `2.2.0-01` 上与客户端分歧（否则「等价」可能只是「两边都松」的巧合）；
+   ⑤现役 `shared/release.json` 的 `2.2.0-beta.52` 三处都过（防「收紧到自伤」）；
+   ⑥扫描面对账：`contracts/schemas` 里凡带 `properties.version.pattern` 的 schema 都须在
+   登记表内——新增一张忘记登记即红。
+5. 实树证红（不只是纯函数）：把 `version.schema.json` 改回旧宽松式 ⇒ ①②③三条同时红，
+   还原后 6 条全绿。
+6. 验证：`pytest tests/python` 620 passed（本批 +6）/ 1 skipped；`active_tree_gates all`
+   （ruff/bandit/py312-compat）绿；`validate_vector_schemas.py` 与 `verify_vectors.py` 绿；
+   `check_file_sizes` 绿（新测试 163 行 < 300 红线）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

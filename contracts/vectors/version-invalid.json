@@ -1,0 +1,39 @@
+{
+  "description": "R9-B35（第九轮 Q11 / R9-SH-1）：Version 契约实例级非法向量——schema 必须拒绝。两条面分开：版本串的非法形态（与 semver-form-invalid 同一判据族）＋ 实例形状（多字段——additionalProperties false；缺字段——required）。",
+  "vectors": [
+    {
+      "note": "数字标识符前导零（客户端 _NUMERIC_ID 同口径）",
+      "expected": "deny",
+      "version": {
+        "version": "2.2.0-01"
+      }
+    },
+    {
+      "note": "尾点＝空标识符",
+      "expected": "deny",
+      "version": {
+        "version": "2.2.0-beta."
+      }
+    },
+    {
+      "note": "缺 patch 段",
+      "expected": "deny",
+      "version": {
+        "version": "2.2"
+      }
+    },
+    {
+      "note": "多一个字段（additionalProperties false）",
+      "expected": "deny",
+      "version": {
+        "version": "1.2.3",
+        "versionCode": 1
+      }
+    },
+    {
+      "note": "缺 version（required）",
+      "expected": "deny",
+      "version": {}
+    }
+  ]
+}

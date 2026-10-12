@@ -11,6 +11,10 @@
 - action-valid/invalid.json        → PY-094 双向（schema 级严格：valid 必过/invalid 必拒）
 - capability-valid/invalid.json    → PY-095 双向（同上）
 - audit-event-valid/invalid.json   → PY-096 双向（同上）
+- release-valid/invalid.json       → R9-B35 双向（发布事实声明：现役形态必须过、
+  「声明说合法而客户端验证器判非法」的版本形态必须拒）
+- version-valid/invalid.json       → R9-B35 双向（Version 契约第一次进向量面——
+  此前 version.schema.json 全树零消费者）
 
 其余向量文件（url-origin / native-navigation / approvals）为多步流
 协议脚本（step 脚本而非 schema 实例），不适用直接校验——由 Rust/
@@ -63,11 +67,19 @@ SCHEMA_VECTOR_FILES = {
     "capability-invalid.json": "capability",
     "audit-event-valid.json": "audit_event",
     "audit-event-invalid.json": "audit_event",
+    # R9-B35（第九轮 Q11）：release / version 两张 schema 此前零向量（PY-013 的
+    # 向量面只覆盖 4/7），而 version.schema.json 更是全树零消费者。
+    "release-valid.json": "release",
+    "release-invalid.json": "release",
+    "version-valid.json": "version",
+    "version-invalid.json": "version",
 }
 SCHEMA_FOR_KEY = {
     "action": "action.schema.json",
     "capability": "capability.schema.json",
     "audit_event": "audit-event.schema.json",
+    "release": "release.schema.json",
+    "version": "version.schema.json",
 }
 
 
@@ -204,7 +216,7 @@ def main() -> int:
         for f in failures:
             print(f"[fail] {f}", file=sys.stderr)
         return 1
-    print("[ok] 契约向量 JSON Schema 校验通过（update-manifest + action/capability/audit-event 双向）")
+    print("[ok] 契约向量 JSON Schema 校验通过（update-manifest + action/capability/audit-event/release/version 双向）")
     return 0
 
 

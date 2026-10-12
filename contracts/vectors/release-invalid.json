@@ -1,0 +1,191 @@
+{
+  "description": "R9-B35（第九轮 Q11 / R9-SH-1）：Release 契约非法向量——全部 schema 级失效。前三条就是 Q11 报的分歧本体：旧宽松式放过它们，而 release/update_verifier.py 对这些抛 UpdateRejected ⇒「发布声明说合法、客户端验证器判非法」。后三条钉 schema 其余判定面（枚举/架构/required），使本文件的失效面不只有版本串。",
+  "vectors": [
+    {
+      "note": "前导零数字标识符（旧式接受、客户端拒）",
+      "expected": "deny",
+      "release": {
+        "product": "Aegis",
+        "displayName": "Aegis WebView",
+        "version": "2.2.0-01",
+        "versionCode": 20251,
+        "windows": {
+          "packageIdentity": "Aegis.Project.AegisWebView",
+          "executable": "Aegis.Windows.App.exe",
+          "architecture": [
+            "x64"
+          ],
+          "distribution": "inno-setup-exe",
+          "runtime": "webview2-evergreen"
+        },
+        "android": {
+          "applicationId": "com.aegis.browser",
+          "distribution": [
+            "direct-apk"
+          ],
+          "engine": "android-webview-adapter"
+        },
+        "updateManifest": {
+          "schema": 1,
+          "signature": "ed25519",
+          "hash": "sha256",
+          "status": "planned"
+        }
+      }
+    },
+    {
+      "note": "尾点空标识符（旧式接受、客户端拒）",
+      "expected": "deny",
+      "release": {
+        "product": "Aegis",
+        "displayName": "Aegis WebView",
+        "version": "2.2.0-beta.",
+        "versionCode": 20251,
+        "windows": {
+          "packageIdentity": "Aegis.Project.AegisWebView",
+          "executable": "Aegis.Windows.App.exe",
+          "architecture": [
+            "x64"
+          ],
+          "distribution": "inno-setup-exe",
+          "runtime": "webview2-evergreen"
+        },
+        "android": {
+          "applicationId": "com.aegis.browser",
+          "distribution": [
+            "direct-apk"
+          ],
+          "engine": "android-webview-adapter"
+        },
+        "updateManifest": {
+          "schema": 1,
+          "signature": "ed25519",
+          "hash": "sha256",
+          "status": "planned"
+        }
+      }
+    },
+    {
+      "note": "连续点（旧式接受、客户端拒）",
+      "expected": "deny",
+      "release": {
+        "product": "Aegis",
+        "displayName": "Aegis WebView",
+        "version": "2.2.0-a..b",
+        "versionCode": 20251,
+        "windows": {
+          "packageIdentity": "Aegis.Project.AegisWebView",
+          "executable": "Aegis.Windows.App.exe",
+          "architecture": [
+            "x64"
+          ],
+          "distribution": "inno-setup-exe",
+          "runtime": "webview2-evergreen"
+        },
+        "android": {
+          "applicationId": "com.aegis.browser",
+          "distribution": [
+            "direct-apk"
+          ],
+          "engine": "android-webview-adapter"
+        },
+        "updateManifest": {
+          "schema": 1,
+          "signature": "ed25519",
+          "hash": "sha256",
+          "status": "planned"
+        }
+      }
+    },
+    {
+      "note": "架构枚举外的 arm64（PY-101：无构建产物不得声明）",
+      "expected": "deny",
+      "release": {
+        "product": "Aegis",
+        "displayName": "Aegis WebView",
+        "version": "2.2.0-beta.52",
+        "versionCode": 20251,
+        "windows": {
+          "packageIdentity": "Aegis.Project.AegisWebView",
+          "executable": "Aegis.Windows.App.exe",
+          "architecture": [
+            "arm64"
+          ],
+          "distribution": "inno-setup-exe",
+          "runtime": "webview2-evergreen"
+        },
+        "android": {
+          "applicationId": "com.aegis.browser",
+          "distribution": [
+            "direct-apk"
+          ],
+          "engine": "android-webview-adapter"
+        },
+        "updateManifest": {
+          "schema": 1,
+          "signature": "ed25519",
+          "hash": "sha256",
+          "status": "planned"
+        }
+      }
+    },
+    {
+      "note": "distribution 词表外",
+      "expected": "deny",
+      "release": {
+        "product": "Aegis",
+        "displayName": "Aegis WebView",
+        "version": "2.2.0-beta.52",
+        "versionCode": 20251,
+        "windows": {
+          "packageIdentity": "Aegis.Project.AegisWebView",
+          "executable": "Aegis.Windows.App.exe",
+          "architecture": [
+            "x64"
+          ],
+          "distribution": "snap",
+          "runtime": "webview2-evergreen"
+        },
+        "android": {
+          "applicationId": "com.aegis.browser",
+          "distribution": [
+            "direct-apk"
+          ],
+          "engine": "android-webview-adapter"
+        },
+        "updateManifest": {
+          "schema": 1,
+          "signature": "ed25519",
+          "hash": "sha256",
+          "status": "planned"
+        }
+      }
+    },
+    {
+      "note": "缺 updateManifest（required）",
+      "expected": "deny",
+      "release": {
+        "product": "Aegis",
+        "displayName": "Aegis WebView",
+        "version": "2.2.0-beta.52",
+        "versionCode": 20251,
+        "windows": {
+          "packageIdentity": "Aegis.Project.AegisWebView",
+          "executable": "Aegis.Windows.App.exe",
+          "architecture": [
+            "x64"
+          ],
+          "distribution": "inno-setup-exe",
+          "runtime": "webview2-evergreen"
+        },
+        "android": {
+          "applicationId": "com.aegis.browser",
+          "distribution": [
+            "direct-apk"
+          ],
+          "engine": "android-webview-adapter"
+        }
+      }
+    }
+  ]
+}
