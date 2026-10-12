@@ -3,6 +3,7 @@
 mod buffer_boundaries;
 mod common;
 mod consume_and_approval;
+mod denylist_modes;
 mod envelope_and_input_errors;
 mod export_surface;
 mod malformed_and_retired;

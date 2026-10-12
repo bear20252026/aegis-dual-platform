@@ -939,13 +939,14 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   核心裁决面；`HttpsOnlyState::upgrade` 判的是运营者手工白名单，**不含** B8 的回环/
   RFC1918/CGNAT/`.local` 段豁免 ⇒ 一旦按「迁移到核心」接线，`http://192.168.1.1` 立刻被
   升 https（R8-AD-01 原形态复现）。②建议模块头标「非 B8 判据载体」；①③补导出即改 ABI ⇒ 待定稿。
-- Q29 R9-RS-5 | P3 | `core/rust-policy-core/src/c_abi/tests/buffer_boundaries.rs:157-203` ↔
+- ~~Q29 R9-RS-5~~ **本批已闭**（R9-B34 / §3.34：新增 `core/rust-policy-core/src/c_abi/tests/denylist_modes.rs`——5 条 ABI 层用例，四档位端到端 + `mode/staged/served` 字段面 + `denylist_mode_invalid` 拒绝码）。原条目：Q29 R9-RS-5 | P3 | `core/rust-policy-core/src/c_abi/tests/buffer_boundaries.rs:157-203` ↔
   `windows/src/Aegis.Windows.App/Broker/NativePolicyCoreBridge.DenylistPush.cs:102-131`：
   ⑨ 的四档位协议在 Rust 侧只端到端跑了 0/1，应答字段 `mode/staged/served` 在 Rust 全测试树
   **零断言**（只产出，`src/c_abi/navigation.rs:288-297`），`denylist_mode_invalid` 亦无 ABI
   层用例；而 C# 的提交判定正依赖这三字段（`commit.Staged/Accepted` →
   `denylist_commit_refused`），且那 8 例跑在假核心上、真 DLL 用例不在必需检查（R8-CI-18）
   ⇒ 核心改名/丢字段在 PR 面永不红。
+  落地时另外把三个探针 helper（`denylist_payload`/`push_denylist`/`evaluate_code`）从 `buffer_boundaries.rs` 上收到 `common.rs`——档位面与规模面判的是同一个 ABI 入口，两份 helper 就是两份真相。
 - ~~Q30 R9-RS-6~~ **本批已确证并落地**（§二 裁决行 + §3.13）：修法没走「签名体现不变量」，
   而是让 `is_high_risk_host` 自己取 `:` 前段（函数自证 > 调用方纪律），绕过形态直接消失；
   `169.254.169.254:8080` 判高危、`192.168.1.1:8080` 仍判非高危（B8 裁决保住——先试的
@@ -1589,6 +1590,41 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    active_tree_gates all / pytest tests/python）复跑绿。ktlint 两轮红都是真形制问题：
    限定名开头的链要么整条断行要么整条不断行（`chain-method-continuation`），多行表达式赋值必须换行起
    （`multiline-expression-wrapping`）——与本仓既往「when 条目尾注/多行体」同一族，见 §二 R9-SH-2 的口径。
+
+### 3.34 R9-B34（2026-10-12，队列 Q29）：⑨ 四档位协议在 C ABI 层的行为面补齐
+
+1. 缺口按事实分两半：档位**状态机**在 `src/ffi/broker/denylist/tests.rs` 里早已跑全
+   （staged 不可见 / 弃会话 / 无会话提交 / 旧路径不变 / 未知档位拒收 / 空会话提交清空），
+   缺的是**线格式**——`aegis_policy_core_broker_update_host_denylist_json` 的应答里
+   `mode/staged/served` 三字段在 Rust 全测试树零断言，ABI 层只端到端跑过 0/1 两档，
+   `denylist_mode_invalid` 也没有 ABI 层用例。这条缺口不是学术问题：C# 提交判定
+   读的就是那三字段（`NativePolicyCoreBridge.DenylistPush.cs:70-74` 的 `echoesMode` 是
+   「字段不在就当作旧核心」的能力探测，`:130` 用 `commit.Staged/Accepted` 决定留
+   `denylist_commit_refused`），而 C# 那 8 例跑在假核心上、真 DLL 用例不在必需检查
+   （R8-CI-18）⇒ 核心改名/丢字段在 PR 面**一张牌都不会红**。
+2. 新增 `src/c_abi/tests/denylist_modes.rs`（262 行，5 条用例，全走真 ABI）：
+   ①`session_modes_travel_over_the_abi_and_stay_invisible_until_committed`——REPLACE(2)→BEGIN(3)→
+     APPEND(1)→COMMIT 全程，逐档核对 `accepted/input/mode/staged/served/clear` 六个字段，
+     并断言暂存条目在提交前**判定读不到**、提交后基线快照被整份换掉；
+   ②`commit_without_a_session_reports_no_swap_and_serves_the_previous_snapshot`；
+   ③`replace_discards_an_uncommitted_session_instead_of_landing_it_later`（丢弃是真丢弃：之后的提交换不出东西）；
+   ④`unknown_modes_are_refused_at_the_abi_with_their_own_code_and_change_nothing`（取 4/256/-1 三种形态，
+     拒绝后既有快照与被拒载荷都不留痕迹，且之后的 BEGIN/COMMIT 照常工作）；
+   ⑤`form_rejected_entries_are_visible_as_counts_on_the_abi`（`accepted < input` 是宿主唯一能发现
+     「死条目」的入口，四条形态非法条目不得进活动快照）。
+   `assert_envelope` 是共用的字段面判据（带 `#[track_caller]`，红了直接指到调用它的那一档）。
+3. **四条内存态变异各自证过红**（本仓对新锁的固定要求）：应答里删掉 `"mode"` 字段 ⇒ 5 条全红并
+   点名「档位 N 的应答缺字段 mode」；`mode_is_known` 放行 4 ⇒ 只有④红；`host_denied` 改成也读
+   暂存 ⇒ 只有①红（第 95 行，正是「暂存不得参与判定」那条断言）；COMMIT 的 `accepted` 改回报
+   条目数 ⇒ ①②④三条各自红。
+4. 顺带修掉一个会污染归因的测试脚手架问题：`broker_new` 是进程级单例（RS-140），用例 panic 时
+   没走到 `broker_free` 就会把单例位永久占住 ⇒ **一个真失败伪装成五条 `broker_new` 失败**
+   （第 3 条的变异实测就是这个形态）。改为 `LiveBroker` 在 `Drop` 里归还，红的时候只剩真红的那条。
+5. 三个探针 helper（`denylist_payload`/`push_denylist`/`evaluate_code`）从 `buffer_boundaries.rs`
+   上收到 `common.rs`：档位面与规模面判的是同一个入口，两份 helper 就是两份真相
+   （`buffer_boundaries.rs` 203→166 行）。
+6. 验证：`cargo fmt --all -- --check` 0、`cargo clippy --locked --all-features --all-targets -- -D warnings` 0、
+   `cargo test --locked --all-features` 582 passed / 0 failed（原 577 + 本批 5）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
