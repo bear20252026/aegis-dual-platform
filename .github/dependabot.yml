@@ -46,11 +46,14 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     # 项 10 / AEG-011（2026-10-11）：android/ 四模块自这批起启用 STRICT 版本锁
-    # （各模块 gradle.lockfile）。后果如实登记：版本目录被 bump 而锁没跟着重算时，
-    # **CI 必红**（这是设计，不是事故）。Dependabot 会不会在同一 PR 里重写
-    # gradle.lockfile 本仓未实证，所以分诊口径是：PR 里只有 libs.versions.toml 的
-    # 两行 diff 而 android/*/gradle.lockfile 未变 ⇒ 在该分支上 dispatch
-    # Dependency-Retlock（ecosystem=gradle）补锁，再审合并；绝不靠放宽 lockMode 变绿。
+    # （各模块 gradle.lockfile）。**已实证**（#167，2026-10-12，wrapper 9.8.0→9.8.1 +
+    # compose 插件 2.4.20→2.4.21）：Dependabot 的 gradle 生态会在同一个 PR 里重算
+    # 四把 gradle.lockfile（该 PR 的文件面就是「一把锁 + catalog + wrapper」），
+    # 所以常规 bump 不需要人工 dispatch 重锁；锁面比本仓 CI 任务清单更宽
+    # （它解析到的配置数只增不减），不构成风险。
+    # 仍要人看的是这两种形态：①PR 里只有 libs.versions.toml 而锁没动 ⇒ 在该分支
+    # dispatch Dependency-Retlock(ecosystem=gradle) 补锁再审；②锁里出现「整批坐标换版」
+    # 而不只那两行 ⇒ 顺带解析漂移，逐条审。绝不靠放宽 lockMode 变绿。
     # SP-245：同 github-actions 组口径
     groups:
       minor-and-patch:

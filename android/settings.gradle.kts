@@ -33,6 +33,9 @@ dependencyResolutionManagement {
 //    「带上 CI 会跑的那批任务 + `--write-locks`」——因为 `--write-locks` 只写本次构建
 //    **解析过**的配置，任务清单少一条就有一条配置没有锁状态（判据见
 //    tests/python/relock_sop_test.py 的覆盖关系锚）。
+//    常规升级不必人工重锁：**已实证** Dependabot 的 gradle 生态会在同一个 PR 里
+//    重算这四把锁（#167，2026-10-12：文件面是「四把 lockfile + libs.versions.toml +
+//    wrapper」，且它解析到的配置数只增不减）。
 // ③ 锁文件记的是「模块坐标 + 版本」，**不含校验和**。给整棵树做哈希/签名验证是
 //    dependency verification（`gradle/verification-metadata.xml`）那一刀，本批**不做**、
 //    文档也不声称做了（SECURITY.md 的哈希覆盖口径按实写）。

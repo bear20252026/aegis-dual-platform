@@ -1019,6 +1019,20 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   **C# 侧未验**——Windows 下载链是否真判 MIME/最终 URL/size 没有实测支撑，故该行仍是一条未核验陈述
   （下一批读 `windows/.../Downloads/` 后改真或续登）。
 
+- Q56 R9-CI-14 | P2 | `.github/workflows/gradle-dependency-graph.yml:14-25`（触发面只有
+  `push.branches: master` + `paths:`、周 schedule 与 workflow_dispatch）↔ `:49`
+  （`uses: gradle/actions/dependency-submission`）：这条 workflow 的**内容**在 PR 面上
+  一张牌都不跑—— Dependabot 给它开的跨 major bump（#165：4.4.4→6.4.0）在 15 张绿牌里
+  没有任何一张执行过那个动作，于是「合并 = 未经运行的跨 major」。而这个动作的产物是
+  Android 依赖图，直接决定 Dependabot alerts 对 Gradle 侧是否持续更新：**它静默坏掉时
+  全仓不会变红**（Android 漏扫面就此失效而无人知晓）。本批不擅自改触发面（给 PR 加
+  paths 会拖慢每条 android/** PR，且必需检查集合要同批核对——R8-CI-01 的
+  「Expected — Waiting for status」教训），采取的是「先运行一次证明它，再合」：
+  #165 合并后由 push 触发真跑，看结论与依赖图是否更新；失败即回滚。
+  仍待决的结构性修法（要用户点头）：给该 workflow 加一条「图形 stale 检测」——
+  比如每周比对 `last dependency submission` 的时间戳，超过 N 天未提交即判红，
+  否则这类「只在 master/schedule 跑的提交面」永远没有可失败的判据。
+
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
 
 **共同主题：文档说「已做」而实树没做，比文档空白更危险。** 本批九条全是 P2/P3 的
@@ -1398,10 +1412,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    版本目录）就不推。`ecosystem` 输入加 `gradle`，同时 windows 的 `relock` job 用
    `if: ecosystem != 'gradle'` 排除自己（它没有 Android SDK，跑了就是「写不回任何东西的成功」）。
 6. Dependabot 的 gradle 生态早就在跑（`/android`，weekly）。启用锁定后的分诊口径写进
-   `.github/dependabot.yml` 注释：**Dependabot 是否会在同一 PR 里重写 `gradle.lockfile`
-   本仓未实证**，所以 PR 里只有 `libs.versions.toml` 两行而锁未变 ⇒ 在该分支 dispatch
-   `Dependency-Retlock(ecosystem=gradle)` 补锁再审；不许靠放宽 `lockMode` 变绿。
-   （未实证的事实在这里就不写成「Dependabot 会自动更新锁」。）
+   `.github/dependabot.yml` 注释当时写的是「**Dependabot 是否会在同一 PR 里重写
+   `gradle.lockfile` 本仓未实证**」——这条在下一批就被 #167 证真了（见 §3.31：四把锁
+   在同一个 PR 里被重算）。登记时的处理是对的：没证据就不写成断言，只写「锁没动就要
+   人工补锁」的可执行 SOP；拿到证据后再把口径改真。
 7. `android/settings-gradle.lockfile` 被 `.gitignore` 单条忽略，理由写在注释里：它是
    `--write-locks` 顺手生成的 settings 侧产物，恒为一行空条目（版本目录那条内部配置不解析
    任何坐标）；实测删掉后 `./gradlew help` EXIT=0 且不重建。入库会让第 5 点的守卫每次误判红。
@@ -1421,6 +1435,41 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `releaseCompileClasspath`，而「锁不满足」只可能发生在解析阶段，不是打包阶段。
    仍未跑的是 R8/aapt2 那半段（与锁定无关）。
 
+
+### 3.31 R9-B31（2026-10-12，#167 分诊 + 版本锁下 Dependabot 行为的口径改真）
+
+1. **#167 是版本锁上线后第一次真实 bump**（gradle wrapper 9.8.0→9.8.1 +
+   compose 插件 2.4.20→2.4.21）。它给出的事实比它的 diff 更值钱：**Dependabot 的 gradle
+   生态会在同一个 PR 里重算四把 `gradle.lockfile`** ——该 PR 的文件面就是「四把锁 +
+   `libs.versions.toml` 一行 + wrapper properties/jar」。于是 §3.30 第 6 点当时写的
+   「未实证」就地改真（`dependabot.yml` 与 `settings.gradle.kts` 的决策记录同步），
+   常规 bump 从此**不需要**人工 dispatch 重锁。
+2. 锁面变化的方向核对过：坐标与配置**只增不减**（`:app` 309→328 坐标 / 33→38 配置，
+   `:contracts` 14→27 配置——它解析到的配置比本仓 CI 任务清单更宽）。这不构成风险：
+   `relock_sop_test.py` 的覆盖锚判的是「重锁清单 ⊇ CI 解析面」这个方向，宽一点只会多锁。
+   消失的坐标全是 kotlin 2.4.20 一族被 2.4.21 顶替（外加 AGP UTP 的 android-test-engine
+   几个新条目），没有「条目被删而无人解释」的形态。
+3. 分诊核对（照 Dependabot 既有 SOP 逐字查证，不采信 PR 自述）：`distributionSha256Sum`
+   与上游 `https://services.gradle.org/distributions/gradle-9.8.1-bin.zip.sha256`
+   **逐字一致**（AD-277 那条完整性校验因此仍然成立）；9.8.1 是修三个高危 advisories 的
+   patch（worker↔daemon 未认证反序列化两则 + 仓库禁用遇 SSL 失败可被投毒一则），
+   属「越并越安全」那一类；compose 插件是补丁级。
+4. CI 红灯归因：唯一红的是 `Automatic Dependency Submission (NuGet)` 的
+   `submit-dependency-snapshot`，日志是 `HttpError: Server Error` —— GitHub 依赖提交 API
+   的 5xx；`gh run rerun --failed` 后即全绿。**不改它**：给提交步骤加
+   `continue-on-error` 等于把这条判据关掉，而「第三方瞬时故障靠重跑收敛」是可以接受的噪声。
+5. 本批真正的改进是**消掉一个漂移类**而不是再抄一遍数字：`android-quality.yml:6` 与
+   `gradle-wrapper.properties:5` 两处注释此前把工具版本抄在散文里（SP-252 抄 9.7.0→9.8.0，
+   #167 又漂到 9.8.1，两轮都要人回头改注释）。现在改成指向单源——
+   「版本＝`gradle-wrapper.properties` 的 `distributionUrl`」「校验对象＝同 URL 追加
+   `.sha256`」。**凡是把版本号抄进注释的句子，下一次升级都会变成一句假话**；
+   要么不写数字，要么写「去哪里读」。
+6. 同批登记 **Q56 R9-CI-14**（§五 5.5）：`gradle-dependency-graph.yml` 只在 master push /
+   周 schedule 上跑，Dependabot 给它的**跨 major**（#165：`gradle/actions/dependency-submission`
+   4.4.4→6.4.0，SHA↔tag 已逐字核对为 v6.4.0 的 commit `3f5f9ad`）在 PR 面一张牌都没执行过
+   那个动作 ⇒ 合并等于「未经运行的跨 major」。本批的处置是**先证后合**：合 #165 后立即
+   看它自己触发的 push 运行与依赖图是否更新，失败即回滚。结构性修法（加 stale 检测）
+   属 CI 面变更，等用户点头。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
