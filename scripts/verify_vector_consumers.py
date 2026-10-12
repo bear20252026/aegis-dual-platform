@@ -32,8 +32,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS_DIR = ROOT / "contracts" / "vectors"
 
-# 实测面：15 份向量（2026-10-11）。下界只保证「减面必须是有意识的动作」。
-MIN_VECTORS = 15
+# 实测面：21 份向量（2026-10-12，R9-B35 加 release/version/semver-form 六份）。
+# 下界只保证「减面必须是有意识的动作」。
+MIN_VECTORS = 21
 # 判据 3/4 的下界：CS∧AD 同跑的最小份数、有端侧执行者的最小份数。
 MIN_CROSS_END, MIN_EXECUTABLE = 1, 10
 
@@ -61,7 +62,18 @@ CONSUMER_MANIFEST: dict[str, frozenset[str]] = {
     "action-valid.json": frozenset({"RS"}),
     "approvals-replay-and-expiry.json": frozenset({"RS"}),
     "audit-event-invalid.json": frozenset(),
+    # R9-B35（第九轮 Q11）：实例级四条只由 schema 层判定（validate_vector_schemas.py
+    # 在 META_LEVEL 里），没有平台实现跑它们——记空集是事实陈述，不是「没人判」。
+    # semver-form 两条不同：tests/python/semver_schema_parity_test.py 真的逐案执行它们
+    # （三张 schema × 客户端验证器 × 向量期望的三方对账），故登记 PY。
+    "release-invalid.json": frozenset(),
+    "release-valid.json": frozenset(),
+    "semver-form-invalid.json": frozenset({"PY"}),
+    "semver-form-valid.json": frozenset({"PY"}),
+
     "audit-event-valid.json": frozenset(),
+    "version-invalid.json": frozenset(),
+    "version-valid.json": frozenset(),
     "capability-invalid.json": frozenset(),
     "capability-valid.json": frozenset(),
     "glob-match.json": frozenset({"RS"}),
@@ -69,7 +81,9 @@ CONSUMER_MANIFEST: dict[str, frozenset[str]] = {
     "native-navigation-decision.json": frozenset({"CS", "RS"}),
     "update-manifest-canonical.json": frozenset({"RS", "PY"}),
     "update-manifest-invalid.json": frozenset({"RS"}),
-    "update-manifest-valid.json": frozenset({"CI", "RS"}),
+    # R9-B35 起 PY 也是它的消费者：semver_schema_parity_test.py 取其首条 manifest
+    # 当 update-manifest.schema.json 的宿主模板（逐案换 version 做三方对账）。
+    "update-manifest-valid.json": frozenset({"CI", "PY", "RS"}),
     "url-origin-invalid.json": frozenset({"AD", "CS", "PY", "RS"}),
     "url-origin-valid.json": frozenset({"AD", "CS", "RS"}),
 }

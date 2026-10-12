@@ -1,0 +1,82 @@
+{
+  "description": "R9-B35（第九轮 Q11 / R9-SH-1）：SemVer **合法形态**向量。消费方三处——tests/python/semver_schema_parity_test.py（三张 schema 的 version.pattern 与 release/update_verifier.py 的接受集必须与本草稿逐案一致）、contracts/codegen/validate_vector_schemas.py（schema 级双向）、scripts/verify_vectors.py（断言字段协议）。登记前 version.schema.json 零消费者、release/version 两张 schema 零向量（PY-013 的向量面只覆盖 4/7）。",
+  "vectors": [
+    {
+      "version": "2.2.0",
+      "expected": "valid",
+      "note": "三段核心，无预发布/构建"
+    },
+    {
+      "version": "2.2.0-beta.52",
+      "expected": "valid",
+      "note": "当前发布声明形态（shared/release.json 实测值）"
+    },
+    {
+      "version": "2.0.0-beta.1",
+      "expected": "valid",
+      "note": "update-manifest-valid 在用的预发布形态"
+    },
+    {
+      "version": "1.2.3",
+      "expected": "valid"
+    },
+    {
+      "version": "1.3.0",
+      "expected": "valid"
+    },
+    {
+      "version": "0.9.0",
+      "expected": "valid"
+    },
+    {
+      "version": "0.0.0",
+      "expected": "valid",
+      "note": "零版本合法（SemVer §6 初始草案可用 0.0.0）"
+    },
+    {
+      "version": "2.2.0+build.7",
+      "expected": "valid",
+      "note": "构建元数据（点分非空标识符）"
+    },
+    {
+      "version": "2.2.0-alpha.beta.1",
+      "expected": "valid",
+      "note": "字面+数字混合标识符序列"
+    },
+    {
+      "version": "2.2.0-0a.1",
+      "expected": "valid",
+      "note": "以数字开头但含字母的标识符（不是数字标识符，无前导零问题）"
+    },
+    {
+      "version": "2.2.0-1.2.3",
+      "expected": "valid",
+      "note": "全数字标识符序列"
+    },
+    {
+      "version": "2.2.0-alpha+001",
+      "expected": "valid",
+      "note": "构建段允许前导零（SemVer §10 只约束数字**标识符**的优先级比较）"
+    },
+    {
+      "version": "2.2.0-A.1",
+      "expected": "valid",
+      "note": "大写字母标识符"
+    },
+    {
+      "version": "2.2.0--",
+      "expected": "valid",
+      "note": "连字符是合法字面标识符"
+    },
+    {
+      "version": "2.2.0-1.0.0-beta",
+      "expected": "valid",
+      "note": "数字段后接字面段"
+    },
+    {
+      "version": "2.2.0-beta.52-x",
+      "expected": "valid",
+      "note": "段内含连字符"
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "description": "R9-B35（第九轮 Q11 / R9-SH-1）：SemVer **非法形态**向量——每条都是「发布声明说合法、客户端验证器判非法」这一分歧的实测样本。旧宽松式 `(?:-[0-9A-Za-z.-]+)?` 放过 2.2.0-01 / 2.2.0-beta. / 2.2.0-..；PY-279 收紧后的 update-manifest 式仍放过 2.2.0-01（前导零规则在客户端另有 _NUMERIC_ID 一段，不在正则里）。现三张 schema 统一成与 update_verifier 逐案等价的式子。",
+  "vectors": [
+    {
+      "version": "2.2.0-01",
+      "expected": "deny",
+      "note": "数字标识符带前导零——PY-184：int(\"01\")==1 会与 2.2.0-1 比较相等，防回滚存在别名"
+    },
+    {
+      "version": "2.2.0-00.1",
+      "expected": "deny",
+      "note": "同上（任一段带前导零即非法）"
+    },
+    {
+      "version": "2.2.0-beta.",
+      "expected": "deny",
+      "note": "尾点＝空标识符（PY-279 报的形态）"
+    },
+    {
+      "version": "2.2.0-..",
+      "expected": "deny",
+      "note": "连续点＝空标识符"
+    },
+    {
+      "version": "2.2.0-a..b",
+      "expected": "deny",
+      "note": "中间连续点"
+    },
+    {
+      "version": "2.2.0-",
+      "expected": "deny",
+      "note": "预发布段为空"
+    },
+    {
+      "version": "2.2.0+",
+      "expected": "deny",
+      "note": "构建段为空"
+    },
+    {
+      "version": "2.2.0+b..1",
+      "expected": "deny",
+      "note": "构建段含空标识符"
+    },
+    {
+      "version": "2.2.0-x_y",
+      "expected": "deny",
+      "note": "下划线不在 SemVer 字符集内"
+    },
+    {
+      "version": "01.2.3",
+      "expected": "deny",
+      "note": "核心段带前导零"
+    },
+    {
+      "version": "2.2",
+      "expected": "deny",
+      "note": "缺 patch 段"
+    },
+    {
+      "version": "2.2.3.4",
+      "expected": "deny",
+      "note": "四段不是 SemVer"
+    },
+    {
+      "version": "v2.2.0",
+      "expected": "deny",
+      "note": "前缀 v 不在语法内（比较器会把它当无效版本）"
+    },
+    {
+      "version": "2.2.0 ",
+      "expected": "deny",
+      "note": "尾随空白"
+    },
+    {
+      "version": "2.2.0-+x",
+      "expected": "deny",
+      "note": "空预发布段后接构建段"
+    }
+  ]
+}

@@ -33,15 +33,16 @@ MULTI_STEP_PREFIXES = ('expected_request', 'expected_approve',
 # R7-TOOL-04（第七轮）：判定不再绑定文件名——改名/移动向量文件不得静默摘掉锚点。
 OVERSIZE_ANCHOR = 'oversize-url-limit-test'
 
-# R7-TOOL-04（第七轮）：契约面数量下界（实测 schemas 7 份 / vectors 15 份）。
+# R7-TOOL-04（第七轮）：契约面数量下界（实测 schemas 7 份 / vectors 21 份——
+# R9-B35 加 release/version/semver-form 六份）。
 # 目录缺失或整体清空此前是静默通过——「删掉一个目录名」即可让本门禁零判定。
 # 下界不是「越多越好」，它只保证减面必须是**有意识**的动作。
-MIN_FILES = {'schemas': 7, 'vectors': 15}
+MIN_FILES = {'schemas': 7, 'vectors': 21}
 
 # R8-PY-02（第八轮审计 2026-10-04）：MIN_FILES 只数**文件**，把任一 vectors 数组
 # 清空（文件在场）即可让全部循环零次执行、门禁仍绿——「删文件」被堵住了，「改内容
 # 清空」这条路还通。现同时钉全树条目总数下界与逐文件非空。
-MIN_VECTOR_ENTRIES = 174
+MIN_VECTOR_ENTRIES = 222
 
 
 def check_oversize_anchor(data: dict, path: Path, failures: list[str]) -> int:
