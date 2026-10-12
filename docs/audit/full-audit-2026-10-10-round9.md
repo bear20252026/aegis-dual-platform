@@ -1505,8 +1505,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    删掉覆盖自证 ⇒ `relock_sop_test.py` 两条 `pytest.raises` 判红；root 脚本里少注册任一任务 ⇒
    `test_root_script_registers_both_lock_tasks` 判红。旧的那条「清单 ⊇ 任务名」锚随之删除
    （留着它就是在保护一个错误设计）。
-6. 顺带修正一条口径：`#165`（`gradle/actions/dependency-submission` 跨 major）先前 dispatch
-   验证时被这个锁缺陷挡住，结论对它**不作数**；锁面补齐后重新 dispatch 才算证过 v6。
+6. **红灯实为三次、同一因**：`#164`、`#167` 两次合并各触发一次 push 运行，加上周一那条
+   周 schedule 运行（三次都是 `Could not resolve all dependencies for configuration
+   ':app:androidTestUtil'`），全部发生在修复之前。修复合入（#169）后 master 的 push 运行
+   转绿——正证取的是「红灯消失在被修的那面」，不是把旧运行 rerun 洗白。
+7. `#165`（`gradle/actions/dependency-submission` 4.4.4→6.4.0 跨 major）先前那次 dispatch
+   验证被本缺陷挡住，结论对它**不作数**；本批改完后重做了两遍才算证过：①在一条临时分支上
+   打同一行 pin 后 dispatch，日志走到 `Submitted ...: The snapshot was accepted, but it is
+   not for the default branch.`（图生成 + 提交都成功，只是非默认分支不刷新仓库级结果）；
+   ②合并 #165 后由 push master 触发的真实运行 success。pin 也逐字对过上游：`3f5f9ad` 就是
+   tag `v6.4.0` 指向的 commit（旧 pin `748248d` == `v4.4.4`）。之所以肯为它多跑两遍：
+   这个 workflow 只在 master / schedule 上跑，PR 面那 18 张绿牌一张也不会执行它。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
