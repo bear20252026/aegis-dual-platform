@@ -257,22 +257,23 @@ jobs:
         with:
           packages: "platform-tools platforms;android-36 build-tools;36.0.0"
 
-      - name: Gradle 重锁（任务清单必须等于 CI 的解析面）
+      - name: Gradle 重锁（按模型枚举全部可解析配置，而不是抄一份任务清单）
         shell: bash
         working-directory: android
         run: |
           set -euo pipefail
-          # `--write-locks` 只写「本次构建真正解析过的配置」。漏一条配置不是「少锁一个包」
-          # 而是那条配置从此没有锁状态 ⇒ STRICT 下第一个用到它的 PR 当场红。
-          # 所以清单以 android-quality.yml / release-android.yml / contracts.yml /
-          # native-policy-artifacts.yml 实际敲的 gradlew 任务为准，
-          # 覆盖关系由 tests/python/relock_sop_test.py 判（漏一条即判红）。
-          ./gradlew --no-daemon --write-locks \
-            :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck \
-            :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt \
-            :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :app:lintDebug \
-            :app:testDebugUnitTest :broker:testDebugUnitTest :webview-adapter:testDebugUnitTest \
-            :contracts:assembleDebug :broker:compileDebugKotlin :webview-adapter:compileDebugKotlin
+          # R9-B32（2026-10-12）改掉的设计：本步骤原先抄「CI 各 workflow 的 gradlew 任务清单」，
+          # 而 `:app:androidTestUtil` 这类配置**不属于任何任务名称面**——它由 AGP 的 UTP 构建
+          # 监听器在依赖图生成时解析。后果实测：gradle-dependency-graph.yml 在 master 连红两次
+          # （`is locked but does not have lock state`），而同期每一条 PR 门禁全绿——
+          # 「清单抄对了」根本不等价于「锁覆盖全了」。
+          # `--write-locks` 只写本次解析过的配置，所以解析面必须按模型的集合定义：
+          # resolveAllConfigurations 解析每个 canBeResolved 配置的**依赖图**（锁记的是版本，
+          # 不是产物文件），这个集合天然 ⊇ 任何任务清单。
+          ./gradlew --no-daemon --no-configuration-cache --write-locks resolveAllConfigurations
+          # 写完必须自证：再判一遍「每个可解析配置都有锁状态」——这条与 PR 面用的是同一个任务，
+          # 省掉它，漏写的配置就会回到「下一个解析它的作业当场红」的老路上。
+          ./gradlew --no-daemon --no-configuration-cache verifyDependencyLockCoverage
 
       - name: 写回分支（只写 android/，无改动即空跑成功）
         shell: bash

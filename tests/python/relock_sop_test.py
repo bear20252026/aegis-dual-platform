@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -164,16 +165,16 @@ def test_relock_job_sets_io_encoding_for_whole_job() -> None:
     assert env.get("PYTHONIOENCODING") == "utf-8", f"relock job 缺 PYTHONIOENCODING（env={env}）"
 
 
-# ── Gradle 面（项 10 / AEG-011，2026-10-11 启用 STRICT 锁定）──────────────────────
-# 这一步同样只在 workflow_dispatch 里跑，PR 面永不执行 ⇒ 只能钉结构，
-# 且必须证明「注入会红」（把任务清单里任意一条删掉即判红）。
+# ── Gradle 面（项 10 / AEG-011，2026-10-11 启用 STRICT；R9-B32 改成按模型枚举覆盖面）──
+# 这些步骤只在 workflow_dispatch 里跑，PR 面永不执行 ⇒ 只能钉结构，
+# 且每条都必须证明「注入会红」。
 
 GRADLE_JOB = "gradle-relock"
-
-# 只有「会解析依赖并产出/校验东西」的任务才要求进重锁面；`:app:dependencies`、
-# `buildEnvironment` 是报表任务（它们解析的配置本来已在锁里），不在此列。
-_RESOLVING_PREFIXES = ("assemble", "test", "lint", "ktlint", "detekt", "compile", "bundle")
-_TASK_TOKEN = re.compile(r":[\w\-]+:(?:" + "|".join(_RESOLVING_PREFIXES) + r")\w+")
+QUALITY_WORKFLOW = ROOT / ".github" / "workflows" / "android-quality.yml"
+# 锁覆盖检查与全配置解析这两个任务名就是判据本身：写它们的地方只有 root 构建脚本，
+# 任何一处改名/删掉，本文件与 gradle_locking_test.py 都要判红。
+COVERAGE_TASK = "verifyDependencyLockCoverage"
+RESOLVE_TASK = "resolveAllConfigurations"
 
 
 def gradle_job_doc() -> dict:
@@ -183,36 +184,28 @@ def gradle_job_doc() -> dict:
 
 
 def gradle_relock_run() -> str:
+    """取「Gradle 重锁」步骤正文（剔注释——注记里逐字写着旧任务的形态）。"""
     steps = gradle_job_doc().get("steps", []) or []
     matches = [s for s in steps if "Gradle 重锁" in str(s.get("name", ""))]
     assert len(matches) == 1, f"Gradle 重锁步骤必须恰好一个，实得 {len(matches)}"
-    # 判代码不判注释：这一步的注记里逐字写着其它 workflow 的文件名
     return code_only(str(matches[0]["run"]))
 
 
-def ci_resolving_tasks() -> dict[str, set[str]]:
-    """其它 workflow 里出现的、会解析依赖的 gradle 任务（按文件分组，便于报红时点名）。"""
-    wanted: dict[str, set[str]] = {}
-    for workflow in sorted(WORKFLOW.parent.glob("*.yml")):
-        if workflow.name == WORKFLOW.name:
-            continue
-        text = workflow.read_text(encoding="utf-8")
-        if "gradlew" not in text:
-            continue
-        tasks = set(_TASK_TOKEN.findall(text))
-        if tasks:
-            wanted[workflow.name] = tasks
-    return wanted
+def write_locks_line(run_text: str) -> str:
+    """纯函数：取重锁正文里带 `--write-locks` 的那一条命令（恰好一条，否则判红）。"""
+    lines = [ln.strip() for ln in run_text.splitlines() if "--write-locks" in ln]
+    assert len(lines) == 1, f"必须恰好一条 --write-locks 命令，实得 {lines}"
+    return lines[0]
 
 
-def missing_from_run(run_text: str) -> list[str]:
-    covered = set(_TASK_TOKEN.findall(run_text))
-    return [
-        f"{name} 的 {task}"
-        for name, tasks in sorted(ci_resolving_tasks().items())
-        for task in sorted(tasks)
-        if task not in covered
+def coverage_line(run_text: str) -> str:
+    """纯函数：取跑覆盖检查的那一条（不带 --write-locks，带着就是自己写自己判）。"""
+    lines = [
+        ln.strip() for ln in run_text.splitlines()
+        if COVERAGE_TASK in ln and "--write-locks" not in ln
     ]
+    assert len(lines) == 1, f"覆盖检查必须恰好一条且不带 --write-locks，实得 {lines}"
+    return lines[0]
 
 
 def test_gradle_surface_is_selected_only_when_asked() -> None:
@@ -229,30 +222,51 @@ def test_gradle_surface_is_selected_only_when_asked() -> None:
     assert "gradle" in relock_if, f"relock job 必须排除 ecosystem=gradle（if={relock_if}）"
 
 
-def test_gradle_relock_covers_every_resolving_task_ci_runs() -> None:
-    """重锁任务清单 ⊇ CI 各 workflow 里会解析依赖的 gradle 任务。
+def test_gradle_relock_resolves_every_configuration_not_a_task_list() -> None:
+    """重锁面必须是「模型里全部可解析配置」，不能是手抄的任务清单。
 
-    `--write-locks` 只写本次构建**解析过**的配置。清单少一条任务，那条任务用的配置
-    就没有锁状态，而 STRICT 是「没有锁状态就拒绝解析」——于是红的是下一个 PR，
-    不是这次 dispatch。本用例把这件事变成 dispatch 当场红。"""
+    R9-B32 的实测教训：`:app:androidTestUtil` 由 AGP 的 UTP **构建监听器**解析，
+    不属于任何 gradlew 任务名称面。照任务清单抄必然漏它，而漏写的后果不在 PR 面上红，
+    是在 master 的依赖图生成作业上红（同期所有 PR 门禁全绿）。集合定义代替清单，
+    这一类失效就没有出口：解析面 ⊇ 任何任务清单是数学事实，不是纪律。"""
+    cmd = write_locks_line(gradle_relock_run())
+    assert RESOLVE_TASK in cmd, f"--write-locks 必须解析 {RESOLVE_TASK}（全配置枚举），实得 {cmd}"
+    assert " gradlew" in cmd or "./gradlew" in cmd, f"命令形态不对：{cmd}"
+    # 反向：旧设计（逐条列 assemble*/ktlint* 任务）必须被判掉
+    stale = [tok for tok in (":app:assembleRelease", ":app:lintDebug") if tok in cmd]
+    assert not stale, f"重锁面又回到抄任务清单了（{stale}）——清单必然漏监听器解析的配置"
+
+
+def test_written_locks_are_verified_before_writeback() -> None:
+    """写完锁必须在同一个 job 里自证覆盖，否则「重锁成功」只是「Gradle 没报错」。"""
+    cmd = coverage_line(gradle_relock_run())
+    assert COVERAGE_TASK in cmd, f"缺覆盖自证：{cmd}"
+
+
+def test_coverage_gate_is_wired_into_the_pr_face() -> None:
+    """覆盖判据还得在 PR 面跑——只在 dispatch 里跑的判据等于没有判据（R9-SH-7 同课）。"""
+    doc = yaml.safe_load(QUALITY_WORKFLOW.read_text(encoding="utf-8"))
+    steps = doc["jobs"]["android-quality"]["steps"]
+    runs = [code_only(str(s.get("run", ""))) for s in steps if s.get("run")]
+    hits = [r for r in runs if COVERAGE_TASK in r]
+    assert len(hits) == 1, f"android-quality 必须恰好一步跑 {COVERAGE_TASK}，实得 {len(hits)}"
+    assert "--write-locks" not in hits[0], (
+        "PR 面那一步绝不能带 --write-locks——带着就是「自己写自己判」，恒绿"
+    )
+
+
+def test_dropping_either_gradle_step_turns_the_gate_red() -> None:
+    """反向锚（内存态注入，不改工作树）：删掉解析步或自证步，判据必须判红。
+
+    判据抽成纯函数（`write_locks_line` / `coverage_line`）就是为了能做这种注入——
+    否则「步骤还在」这件事本身恒真，删掉内容也测不出来。"""
     run = gradle_relock_run()
-    covered = set(_TASK_TOKEN.findall(run))
-    assert covered, "重锁步骤里一个 gradle 任务都没解析到——多半是正则口径错了"
-    assert ci_resolving_tasks(), "没有任何 workflow 调用 gradlew——扫描面塌了"
-    missing = missing_from_run(run)
-    assert not missing, "重锁面必须覆盖 CI 解析面：" + "、".join(missing)
-
-
-def test_removing_one_task_from_the_relock_list_turns_the_gate_red() -> None:
-    """反向锚（内存态注入，不改工作树）：删掉清单里一条任务必须判红。"""
-    run = gradle_relock_run()
-    sample = sorted(set(_TASK_TOKEN.findall(run)))[0]
-    injected = "\n".join(line.replace(f" {sample}", "") for line in run.splitlines())
-    assert sample not in set(_TASK_TOKEN.findall(injected)), "注入没生效——这条锚会恒真"
-    missing = missing_from_run(injected)
-    assert missing, f"删掉 {sample} 后覆盖判据仍通过＝它在判空气"
-    # 判红必须恰好归因到被删的那条任务（同一个任务在多个 workflow 里出现时会有多条）
-    assert all(sample in entry for entry in missing), f"归因跑偏：{missing}"
+    without_resolve = chr(10).join(ln for ln in run.splitlines() if RESOLVE_TASK not in ln)
+    with pytest.raises(AssertionError):
+        write_locks_line(without_resolve)
+    without_verify = chr(10).join(ln for ln in run.splitlines() if COVERAGE_TASK not in ln)
+    with pytest.raises(AssertionError):
+        coverage_line(without_verify)
 
 
 def test_gradle_writeback_still_needs_its_own_guard_and_lock_only_diff() -> None:

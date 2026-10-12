@@ -30,9 +30,12 @@ dependencyResolutionManagement {
 //    `.github/workflows/dependency-relock.yml` 的 `gradle` 生态（仅 workflow_dispatch，
 //    只写 `deps/*` 分支，永不写 master）。本地等价命令**不是** `writeLocks` 任务
 //    （Gradle 9.8 实测：`Cannot locate tasks that match ':app:writeLocks'`），而是
-//    「带上 CI 会跑的那批任务 + `--write-locks`」——因为 `--write-locks` 只写本次构建
-//    **解析过**的配置，任务清单少一条就有一条配置没有锁状态（判据见
-//    tests/python/relock_sop_test.py 的覆盖关系锚）。
+//    「`./gradlew resolveAllConfigurations --write-locks`」——`--write-locks` 只写本次构建
+//    **解析过**的配置，所以解析面必须按模型的集合定义，不能照任务清单抄：R9-B32 实测
+//    `:app:androidTestUtil` 这类配置由 AGP 的 UTP 构建监听器解析，不属于任何 gradlew 任务
+//    名称面，照清单抄必然漏（漏掉的红不在 PR 面，在 master 的依赖图生成作业上）。
+//    判据是 root 里的 `verifyDependencyLockCoverage`（枚举 `canBeResolved` 集合与锁对账），
+//    PR 面由 android-quality 跑，重锁面写完锁后同判据自证。
 //    常规升级不必人工重锁：**已实证** Dependabot 的 gradle 生态会在同一个 PR 里
 //    重算这四把锁（#167，2026-10-12：文件面是「四把 lockfile + libs.versions.toml +
 //    wrapper」，且它解析到的配置数只增不减）。
