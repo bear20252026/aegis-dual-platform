@@ -877,11 +877,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   **登记时把 Favicon/ThreatFeed 当反例引用，回读发现它们的「有界读取」同样只在响应声明了
   Content-Length 时成立**（`HttpClient` 默认 `ResponseContentRead` 先把整包缓冲进内存）——
   见 §3.33 第 2 条，实测撞出来的那条红灯就是这件事。
-- Q24 R9-CS-4 | P3 | `windows/src/Aegis.Windows.App/WebView/HostWebView.cs:332-336`：
+- ~~Q24 R9-CS-4~~ **本批已闭**（R9-B37 / §3.37：下载生命周期外迁成 `windows/src/Aegis.Windows.App/WebView/HostWebView.Downloads.cs`，终态即退订并摘除；终止路径只 Cancel 在途项）。原条目：Q24 R9-CS-4 | P3 | `windows/src/Aegis.Windows.App/WebView/HostWebView.cs:332-336`：
   每个放行下载 `_trackedDownloads.Add(operation)`，完成**不移除**（仅 `UnwireEvents` 里
   `Clear`）⇒ 长会话累积已完成 `CoreWebView2DownloadOperation` COM 引用，`StopLiveTraffic`
   还对已结束项 `Cancel()`（抛→吞）。
 
+  **实测补一条登记时没写的**：本 SDK（WebView2 1.0.2903.40）的 `CoreWebView2DownloadOperation` **没有** `Completed` 事件——反射实测只有 BytesReceivedChanged / EstimatedEndTimeChanged / StateChanged（事件参数类型还是 `EventHandler<object>` 而不是强类型 args）。所以终态信号只能取 `StateChanged` + `State` 判定这条路，照 Win32 文档写 `Completed +=` 连编译都过不去。
 - Q51 R9-CS-14 | P2 | `windows/src/Aegis.Windows.App/Core/Settings/SettingsService.cs:24`
   （`ThreatFeedUrl { get; init; } = ""`）↔ `Chrome/MainWindow.xaml.cs:138,326-337`
   ↔ `core/rust-policy-core/src/ffi/broker.rs:331`（`update_host_denylist`）↔ Android 全端
@@ -1712,6 +1713,40 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    （ruff/bandit/compat）绿；`check_file_sizes` / `check_markdown_tables` / `check_doc_claims`
    / `check_workflow_shells` 绿；`cargo fmt --all -- --check` 0、`cargo test --locked
    --all-features` 582 passed（Rust 零改动）。
+
+### 3.37 R9-B37（2026-10-12，队列 Q24）：在途下载登记表的回收，与「事件面只有一个」的事实
+
+1. 现象（登记在 §五 Q24）：`HostWebView` 放行下载后 `_trackedDownloads.Add(operation)`，
+   **完成时从不移除**——只有 `UnwireEvents` 里一次 `Clear()`。长会话里已结束的
+   `CoreWebView2DownloadOperation` COM 引用（连同其内部指针）每标签每文件一个地堆着；
+   而 `StopLiveTraffic` 对整张表逐个 `Cancel()`，已结束项必抛、被 `catch` 吞掉，
+   于是「取消了几只真在途的」这件事在日志里不可见。
+2. 落地：下载生命周期整体外迁成 partial 分片 `HostWebView.Downloads.cs`（216 行），
+   里面做三件事——①登记时订阅 `StateChanged`，进终态（`Completed`/`Interrupted`）即
+   **退订 + 摘表**；②订阅之后立刻补判一次终态（快文件 + 慢接线的窗口，那种形态不再发事件）；
+   ③`CancelInFlightDownloads()` 只对非终态项 `Cancel()`，取消完一律摘表。
+   `HostWebView.cs` 531→445 行（基线同批收窄），`StopLiveTraffic` 与 `UnwireEvents`
+   各留一次调用——旧的那段自持取消循环被删掉，反向锚就是钉这一点。
+3. 保守方向选的是「**读不到状态按非终态处理**」而不是旧的「一律 Cancel 再吞异常」：
+   真在途的下载不能被 COM 抖动放过；重复 Cancel 一只已结束的项除了被吞掉的异常没有别的效果。
+   与 R9-B33 的「上限判定必须在读取之前」是同一类方向选择。
+4. SDK 事实（登记时不知道、写代码时撞上）：本 SDK 的
+   `CoreWebView2DownloadOperation` **没有 `Completed` 事件**，只有
+   `BytesReceivedChanged` / `EstimatedEndTimeChanged` / `StateChanged`，且事件参数类型是
+   `EventHandler<object>`（PowerShell 反射实证，成员表里就这些）。⇒ 终态信号必须走
+   `StateChanged` + `State` 判定；`sender` 是唯一回指操作对象的途径（args 里没有）。
+5. 测试面（`HostWebViewDownloadTrackingTests`，9 条）分两半：
+   终态判定提成 `internal static IsTerminalState(CoreWebView2DownloadState)` 纯函数直测
+   （含未知枚举值 999 按非终态——CS-329 同口径，`CoreWebView2DownloadOperation` 是
+   internal ctor 的 COM 包装件，单测造不出来）；订阅/退订/摘表/「Add 之后必须紧跟终态补判」/
+   「主文件不再自持取消循环」这几条判源码文本。**注入证红做过**：删掉
+   `operation.StateChanged -= _onDownloadStateChanged;` 一行 ⇒ 恰好 1 条判红且归因到
+   那条锚（其余 8 条不受影响），还原后 9 条全绿。
+6. 验证：`dotnet test Aegis.Windows.Core.Tests -r win-x64 -p:RestoreLockedMode=true`
+   ⇒ 882 passed / 0 failed；`dotnet build` 0 警告 0 错误；`check_file_sizes`
+   随收窄入库；`packages.lock.json` 零改动。
+7. 未做：`DownloadItem`（面板侧）对同一 operation 的引用另有其生命周期，
+   由 `TrimDownloadItems()` 有界管理，本批不动它——Q24 报的是登记表这一份。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

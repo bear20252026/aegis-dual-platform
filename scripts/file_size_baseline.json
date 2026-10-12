@@ -85,7 +85,7 @@
     "windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml.cs": 435,
     "windows/src/Aegis.Windows.App/Core/History/HistoryStore.cs": 397,
     "windows/src/Aegis.Windows.App/Core/UrlSafety.cs": 301,
-    "windows/src/Aegis.Windows.App/WebView/HostWebView.cs": 531,
+    "windows/src/Aegis.Windows.App/WebView/HostWebView.cs": 445,
     "windows/tests/Aegis.Windows.Broker.Tests/BrowserPolicyBrokerTests.cs": 520,
     "windows/tests/Aegis.Windows.Core.Tests/BookmarkTests.cs": 340,
     "windows/tests/Aegis.Windows.Core.Tests/FingerprintShieldTests.cs": 356,
