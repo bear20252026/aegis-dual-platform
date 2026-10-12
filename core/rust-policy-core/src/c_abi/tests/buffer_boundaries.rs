@@ -85,46 +85,9 @@ fn c_abi_broker_new_rejects_non_utf8_policy_version() {
 // 上面几条只直接测 `read_utf8`，而真实规模下必然越界的是**本入口**
 //（托管侧订阅源上限 5 MiB ≫ FFI_INPUT_MAX_BYTES 64KiB），注入失败即核心侧
 // `threat_blocklist` 分支整会话不执行——缺的不是上限，是分批通道。
-
-/// 生成 count 条形态合法、互不重复的 host 的 JSON 数组载荷。
-fn denylist_payload(prefix: &str, count: usize) -> String {
-    let hosts = (0..count)
-        .map(|index| format!("{prefix}-{index}.deny.example"))
-        .map(serde_json::Value::from)
-        .collect::<Vec<_>>();
-    serde_json::Value::Array(hosts).to_string()
-}
-
-/// 注入一批并取应答（`clear` 透传两阶段标志）。
-fn push_denylist(broker: *mut CAbiBroker, payload: &str, clear: i32) -> serde_json::Value {
-    let buffer = c_string(payload);
-    read_response(aegis_policy_core_broker_update_host_denylist_json(
-        broker,
-        buffer.as_ptr(),
-        clear,
-    ))
-}
-
-/// 导航裁决的拒绝码（黑名单命中的行为探针）。
-fn evaluate_code(broker: *mut CAbiBroker, url: &str) -> serde_json::Value {
-    let session = c_string("chunk-session");
-    let tab = c_string("chunk-tab");
-    assert_eq!(
-        aegis_policy_core_broker_create_session(broker, session.as_ptr(), tab.as_ptr(), 0, 60),
-        1,
-        "session registration"
-    );
-    let scope = c_string("navigation");
-    let target = c_string(url);
-    read_response(aegis_policy_core_broker_evaluate_navigation_json(
-        broker,
-        session.as_ptr(),
-        tab.as_ptr(),
-        0,
-        target.as_ptr(),
-        scope.as_ptr(),
-    ))
-}
+//
+// 本组用的三个探针（`denylist_payload` / `push_denylist` / `evaluate_code`）上收到
+// `common.rs`（R9-B34 / Q29）——档位面 `denylist_modes.rs` 判的是同一个 ABI 入口。
 
 #[test]
 fn host_denylist_entry_rejects_oversized_single_batch() {
