@@ -739,7 +739,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   原条目：Q8 R9-AD-8 | P3 | `android/build.gradle.kts:13-19` 头注声明「1.85 / 0.9.6 / 3.18.0」，
   `:26-32` 实钉 BC 1.86（且拆三条）、jose4j 0.9.7、commons-lang3 3.21.0 ⇒ 按头注做构建
   类路径分诊会与实树对不上账（`docs/security/android-build-classpath-triage.md` 同账本）。
-- ~~Q9 R9-AD-9~~ **本批已闭**（R9-B33 / §3.33：解码器单源化成 `android/app/src/main/java/com/aegis/browser/PercentEncoding.kt:24`（`decodeStrict`），`DownloadPolicy.kt` 与 `WebViewDownloadHandler.kt` 两处调用点都改走它）。
+- ~~Q9 R9-AD-9~~ **本批已闭**（R9-B33 / §3.33：解码器单源化成 `android/app/src/main/java/com/aegis/browser/PercentEncoding.kt:26`（`decodeStrict`），`DownloadPolicy.kt` 与 `WebViewDownloadHandler.kt` 两处调用点都改走它）。
   原条目：Q9 R9-AD-9 | P3 | `DownloadPolicy.kt:96`（`URLDecoder`，`+`→空格）↔
   `WebViewDownloadHandler.kt:210,338-364`（`decodePercentStrict`，`+` 字面）：同一「URL
   路径段」两套解码器，而后者注释正是前者的反驳理由；本仓两处自写纪律「不欢迎第二个解析器」。
@@ -1578,7 +1578,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. **Q12 / Q14 的残余（另登 R9-SH-14）**：R9-B10 把两把强锁写出来了，但被它当场证伪的三段旧断言
    **一直留在** `start_page.test.mjs` 里——于是「新旧双双仍绿」这句话从落地那天起持续成立。
    本批删掉三段并把它们的独有覆盖面（`.link-btn`/`.snake-sound`/`.snake-close` 的 44px 保底、
-   `CanvasText`/`ButtonFace`/`ButtonText` 三个系统色）并进按花括号配对切块的 `start_a11y.test.mjs:61,83`，
+   `CanvasText`/`ButtonFace`/`ButtonText` 三个系统色）并进按花括号配对切块的 `start_a11y.test.mjs:64,99`，
    判据改成「那一条声明本身带 44px」而不只是「名字在切片里」。两条反向锚各自还附一句
    「旧口径在同一份变异上应仍然放行」，把失效形态钉成文字。
 7. **验证（本机全跑，不靠 CI 兜）**：`dotnet test Aegis.Windows.Core.Tests -r win-x64 -p:RestoreLockedMode=true`
