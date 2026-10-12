@@ -29,7 +29,14 @@ public partial class MainWindow
     private static System.Net.Http.HttpClient CreateSourceFetchClient()
     {
         var client = new System.Net.Http.HttpClient(
-            new System.Net.Http.SocketsHttpHandler { PooledConnectionLifetime = TimeSpan.FromMinutes(5) })
+            new System.Net.Http.SocketsHttpHandler
+            {
+                PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+                // R9-B33（Q23）：不自动跟随重定向——跟随与否**由 SourceFetcher 逐跳决定**，
+                // 每一跳都要重新判协议与保留地址。默认 true 等于把「页面说了跳去哪」当成
+                // 用户自己的决定，而顶层导航链对同一跳是会取消并留痕的。
+                AllowAutoRedirect = false,
+            })
         {
             Timeout = TimeSpan.FromSeconds(SourceFetchTimeoutSec),
         };
@@ -64,40 +71,38 @@ public partial class MainWindow
         ShowFeedback("正在获取页面源代码…");
         Task.Run(async () =>
         {
+            // R9-B33（Q23）：抓取判定本体在 SourceFetcher（逐跳重定向 + 有界读取）；
+            // 这里只留 UI 编排与「窗口是否还活着」的守卫（CS-154/CS-064 口径不变）。
+            string reason;
+            string? text;
             try
             {
                 // CS-064（审计 2026-09-25）：静态共享客户端——此前每次查看源码
                 // new HttpClient（SocketException 端口耗尽经典面）
-                using var response = await SourceFetchClient.GetAsync(url);
-                response.EnsureSuccessStatusCode();
-                var bytes = await response.Content.ReadAsByteArrayAsync();
-                if (bytes.Length > SourceMaxBytes)
-                    throw new InvalidOperationException("源码超过 5MB 上限");
-                var text = System.Text.Encoding.UTF8.GetString(bytes);
-                Dispatcher.Invoke(() =>
-                {
-                    // 抓取期间主窗口可能已关闭——Owner=已关闭窗口会抛异常
-                    if (!IsLoaded)
-                        return;
-                    var viewer = new SourceViewerWindow(url, text) { Owner = this };
-                    viewer.ApplyTheme(_settings.Theme);
-                    _sourceViewerWindows.RemoveAll(w => !w.IsLoaded);
-                    _sourceViewerWindows.Add(viewer);
-                    viewer.Show();
-                    ShowFeedback("源码已加载（全转义，零脚本执行）");
-                });
+                var result = await SourceFetcher.FetchAsync(SourceFetchClient, url, SourceMaxBytes);
+                (text, reason) = (result.Text, result.Reason ?? "未知原因");
             }
             catch (Exception ex)
             {
-                // CS-154：失败分支同样守卫 IsLoaded——抓取期间窗口关闭时
-                // ShowFeedback 触碰已卸载控件会抛（成功分支已有守卫）
-                Dispatcher.Invoke(() =>
-                {
-                    if (!IsLoaded)
-                        return;
-                    ShowFeedback($"获取源码失败：{ex.Message}", isWarning: true);
-                });
+                (text, reason) = (null, ex.Message);   // 传输层失败（DNS/超时/连接重置）
             }
+            Dispatcher.Invoke(() =>
+            {
+                // 抓取期间主窗口可能已关闭——Owner=已关闭窗口会抛异常
+                if (!IsLoaded)
+                    return;
+                if (text is null)
+                {
+                    ShowFeedback($"获取源码失败：{reason}", isWarning: true);
+                    return;
+                }
+                var viewer = new SourceViewerWindow(url, text) { Owner = this };
+                viewer.ApplyTheme(_settings.Theme);
+                _sourceViewerWindows.RemoveAll(w => !w.IsLoaded);
+                _sourceViewerWindows.Add(viewer);
+                viewer.Show();
+                ShowFeedback("源码已加载（全转义，零脚本执行）");
+            });
         });
     }
 

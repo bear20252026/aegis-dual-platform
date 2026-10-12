@@ -1,7 +1,5 @@
 package com.aegis.browser
 
-import java.net.URLDecoder
-
 object DownloadPolicy {
     // AD-306（2026-10-02 审计）：危险扩展名集与 Windows 失衡补齐——口径：
     // ①Android 无执行意义可豁免（如 bat/cmd 在 Android 不经 shell 执行，但
@@ -80,7 +78,7 @@ object DownloadPolicy {
     /**
      * 危险扩展判定（P2-5 修复 + AD-002 补强——AD-331 拆两级后的共享内核）：
      * 候选净化（去控制字符/尾点 + 小写化）后取末段扩展名查危险集。
-     * 实现为纯字符串+URLDecoder——不依赖 android.net.Uri，JVM 单测可直测。
+     * 实现为纯字符串 + [PercentEncoding]——不依赖 android.net.Uri，JVM 单测可直测。
      */
     private fun hitDangerousExtension(candidates: Sequence<String>): Boolean =
         candidates
@@ -92,8 +90,8 @@ object DownloadPolicy {
     private fun pathSegmentOf(url: String): String =
         // AD-217（2026-09-26 审计）：路径段先百分号解码再取尾段——AD-002 只给
         // 查询值补了解码，`/dl/malware%2Eexe` 路径段归一后无字面 `.`，危险
-        // 扩展漏判（与 Windows 侧 Unescape 口径对齐）。
-        decodeQueryValue(url.substringBefore('#').substringBefore('?'))
+        // 扩展漏判（与 Windows 侧 UnescapeDataString 口径对齐）。
+        decodeCandidate(url.substringBefore('#').substringBefore('?'))
             .substringAfterLast('/')
 
     /** AD-331：查询参数值末段候选（逐值解码后取尾段）。 */
@@ -107,22 +105,21 @@ object DownloadPolicy {
                 // 取 '=' 后的参数值；无值条目（裸 flag 参数）不参与判定
                 if ('=' in entry) entry.substringAfter('=') else null
             }.filter { it.isNotEmpty() }
-            .map(::decodeQueryValue)
+            .map(::decodeCandidate)
             .map { it.substringAfterLast('/') }
 
     /**
-     * 查询参数值百分号解码；非法编码原样返回（fail-closed——仍参与判定）。
-     * AD-066 lint 门禁修复：Charset 重载是 API 33+（minSdk 26 会 NewApi 崩溃）
-     * ——改用 API 1 就有的 String charset 名重载（语义一致）。
+     * 候选百分号解码（R9-B33 / Q9）：改走 [PercentEncoding.decodeStrict] 单源。
+     * 此前这里用 `java.net.URLDecoder`——它按 form-query 语义把 `+` 解成空格，
+     * 于是 ①同仓的下载文件名的「URL 路径段」有两套解码器（`WebViewDownloadHandler`
+     * 那份自 AD-305 起已是严格解码，其 KDoc 正是本行的反驳理由）；②与 Windows 侧
+     * `Uri.UnescapeDataString`（严格 `%XX`、不动 `+`）给出不同结论——`/a+b%2Eexe`
+     * 在两端解出 `a+b.exe` 与 `a b.exe`，扩展名判定虽同为 exe，文件名本体与
+     * 「同一个 URL 两端同一判定」这条跨端不变式不是。非法编码原样返回
+     * （fail-closed——仍参与判定）。AD-066 的 `Charset` 重载 NewApi 顾虑随
+     * URLDecoder 一起消失：严格解码只用 API 1 的 `CharsetDecoder`。
      */
-    private fun decodeQueryValue(raw: String): String =
-        try {
-            URLDecoder.decode(raw, "UTF-8")
-        } catch (_: IllegalArgumentException) {
-            raw
-        } catch (_: java.io.UnsupportedEncodingException) {
-            raw
-        }
+    private fun decodeCandidate(raw: String): String = PercentEncoding.decodeStrict(raw)
 
     /**
      * P2-5 修复：判定前净化——去控制字符与首尾空白、去尾点（`x.exe.` →
