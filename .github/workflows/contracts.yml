@@ -108,6 +108,11 @@ jobs:
       # 仍有 8 处与实树不符）。本门禁把「文档说的数 = 实树的数」变成可失败检查。
       - name: Doc claim reconciliation gate (B8——计数声明与实树对账)
         run: python scripts/check_doc_claims.py
+      # R9-B36（第九轮 Q28）：README 把「Ed25519 阈值验证」等能力列进核心**运行时裁决面**，
+      # 而 update_manifest 这类模块没有 C ABI/UniFFI 入口、宿主零调用——文档失实会误导
+      # 下一批的接线取舍。本门禁把「未接线面登记表 = README 那句话」钉成可失败检查。
+      - name: Core unwired-module claim reconciliation (R9-B36——「已实现」不等于「在裁决面上」)
+        run: python scripts/verify_core_unwired_modules.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
