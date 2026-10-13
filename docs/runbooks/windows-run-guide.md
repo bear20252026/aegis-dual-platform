@@ -73,12 +73,14 @@ cargo test                     # 策略核心单测全绿
 
 ## 四、真机验证（运行门禁——device-validation.md 清单）
 
-按 docs/runbooks/device-validation.md 执行 Windows WebView2 真机验证（**11 项**——
-R9-DOC-08 更正：此前写「10 项」并把 `javascript:/data:/file:` 拆成三个名称计，
-实际漏的是**第 11 步**）：
-远程页面 bridge 探测 / 跨源 iframe / 重定向 / `javascript:`·`data:`·`file:` /
-自定义协议 / 下载 MIME 混淆 / 重复确认 / 标签代际竞态 / renderer crash /
-Runtime 更新重启 / **历史导航是否经策略链（R8-CS-SEC-03）**——每项记录结果——
+按 docs/runbooks/device-validation.md 执行 Windows WebView2 真机验证。
+**计数不在这里抄**（R9-B48：这一行曾经写「10 项」而实树 11 步，R9-DOC-08 把它改准后
+本批又长了第 12 步——把数量抄进第二份文档就是制造第二个会过期的事实）。
+现读口径：`grep -c '^| [0-9]' docs/runbooks/device-validation.md` 在「一、Windows」小节里的行数即项数。
+按名称核对（与上表逐条对应）：远程页面 bridge 探测 / 跨源 iframe / 重定向 /
+`javascript:`·`data:`·`file:` / 自定义协议 / 下载 MIME 混淆 / 重复确认 / 标签代际竞态 /
+renderer crash / Runtime 更新重启 / **历史导航是否经策略链（R8-CS-SEC-03）** /
+**WebView2 内核默认（DevTools 与自动填充，R9-B48）**——每项记录结果——
 失败项修复后重验（运行门禁 fail-closed）。
 
 第 11 步是那条修复的**唯一实测出口**（单测只能证明判定函数，证明不了历史列表回填

@@ -22,6 +22,7 @@
 | 9 | renderer crash | WebView 渲染进程崩溃 | 错误页可见（WebErrorStatus）——恢复不自动放行 |
 | 10 | Runtime 更新重启 | NewBrowserVersionAvailable | **本步暂无执行对象**——正典树未订阅该事件（无 `RuntimeUpdater.cs`，`windows/` 全树零命中），「保存状态/通知/受控重启」为 ADR-001 后果段的设计要求；缺口已登记在 parity 清单，实现前此步记 N/A 而非通过 |
 | 11 | 历史导航是否经策略链（R8-CS-SEC-03 **待实测**，不得凭猜登记） | 依次访问 A→B，然后点「后退」「前进」「重新加载」——菜单、快捷键、无痕窗、NTP 桥四个入口各跑一次，从审计日志数 `NavigationStarting` 与 broker 授权尝试的条数 | 官方 `ICoreWebView2` 参考对 `GoBack/GoForward/Reload` 是否触发 `NavigationStarting` **未置可否**（只写「main frame 请求导航到不同 URI 时运行」），两种结果都必须落地成后续动作：①**触发** ⇒ 那 6 个直取 `Control.GoBack()` 的入口无妨（策略链自然覆盖），但须同时确认历史重放不因 nonce 已消费而被拒（否则「后退」在出货态是坏的）；②**不触发** ⇒ 该 6 入口属未裁决的重导航面，须补 broker 侧「同源已授权」判定或改走 `Navigate()` 复用授权链。**本步未执行前，R8-CS-SEC-03 不登记为缺陷** （第八轮 §十一 同口径：无实测即不判定方向） |
+| 12 | WebView2 内核默认（R9-B48 / R9-CS-3 定稿） | ①在任意页面按 F12、并在右键菜单里找「检查」；②在登录/注册表单里输入姓名、地址与密码，观察是否弹出「保存密码/管理自动填充」类提示；③设 `AEGIS_ENABLE_DEVTOOLS=1` 重启一次 | ①②都**必须没有**：DevTools 打不开、不出现保存/自动填充建议；③此时 F12 可用（诊断逃生门生效）。同时读启动后安全日志，应有`DevTools=关` 与 `表单自动填充与密码保存已关闭（Profile 面）` 两条留痕；若日志出现 `自动填充收紧未应用（Profile 不可得）`，本步判不通过并按失败项重验（这三项默认值不在 SDK 的 fail-safe 一侧，`AreDevToolsEnabled`/`IsGeneralAutofillEnabled` 出厂默认都是 true） |
 
 ## 二、Android 真机验证（蓝图阶段 D 退出条件）
 
