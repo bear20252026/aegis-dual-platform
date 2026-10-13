@@ -1,6 +1,10 @@
 # 由账号2生成
 # 静态分析器（照搬 warden analysis.rs 精神——轻量版适配 Aegis action-catalog.yaml）。
-# 检查：①重复 action name ②同 scope 风险冲突 ③audit 缺失 ④redteam_fixtures 缺失。
+# 检查：①重复 action name ②同 scope 风险冲突 ③audit 缺失 ④redteam_fixtures 缺失
+#       ⑤confirmation 显式声明 + 词表 + 与 read_only 一致（R9-B46 / 台账 Q15）。
+#       ⑤ 的存在理由：`confirmation` 全仓零运行时消费者（Agent 侧没有确认 UI），
+#       「列存在但没人读」不能靠删列掩盖，也不能靠注记声明——它现在被当成
+#       **必填的意图声明**判：漏写、乱写、与 read_only 矛盾都判红。
 # 用法：python contracts/codegen/analyze_action_catalog.py
 # 退出码：0=通过 / 1=发现问题 / 2=解析错误
 
@@ -10,6 +14,10 @@ import sys
 import yaml
 
 CATALOG = pathlib.Path(__file__).resolve().parent.parent / "policy" / "action-catalog.yaml"
+
+# R9-B46 / Q15：`confirmation` 的词表。运行时不读它（Agent 无确认 UI），所以这里
+# 只允许「显式声明 + 与只读性一致」这一种用法；要新增取值=契约面变更，另批定稿。
+CONFIRMATION_VOCAB = frozenset({"none", "required"})
 
 # PY-195（2026-09-26 审计）：取 actions 列表各条目的真实 YAML 行号
 #（start_mark.line 为 0 基——报告 +1）。拿不到标记（理论不可达——safe_load
@@ -94,6 +102,21 @@ def analyze(src: str) -> list[str]:
         # ④ redteam_fixtures 缺失
         if not action.get("redteam_fixtures"):
             errors.append(f"'{name}' 缺少 redteam_fixtures（安全测试必须）")
+
+        # ⑤ confirmation：必填意图声明 + 词表 + 与 read_only 一致（判定面之外，见文件头）
+        confirmation = action.get("confirmation")
+        read_only = action.get("read_only") is True
+        if confirmation is None:
+            errors.append(
+                f"'{name}' 缺 confirmation（写 none 是「确认过：不需要」，不是漏写）")
+        elif confirmation not in CONFIRMATION_VOCAB:
+            errors.append(
+                f"'{name}' confirmation '{confirmation}' 不在词表 "
+                f"{sorted(CONFIRMATION_VOCAB)}（扩词表属契约面变更，另批定稿）")
+        elif read_only != (confirmation == "none"):
+            errors.append(
+                f"'{name}' read_only={read_only} 与 confirmation='{confirmation}' 矛盾"
+                "（只读免确认；非只读必须 required）")
 
     return errors
 

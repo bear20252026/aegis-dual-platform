@@ -66,7 +66,7 @@
     "shared/shell/start.import.js": 338,
     "shared/shell/start.main.js": 475,
     "shared/shell/start.snake.js": 570,
-    "tests/python/codegen_and_catalog_test.py": 636,
+    "tests/python/codegen_and_catalog_test.py": 635,
     "tests/python/gen_schema_and_review_test.py": 390,
     "tests/python/release_chain_test.py": 644,
     "tests/python/release_tools_test.py": 619,

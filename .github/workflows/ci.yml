@@ -16,22 +16,14 @@ name: CI
 on:
   push:
     branches: [master]
-    # SP-235（2026-10-02 审计·S-20）：push 补 paths 过滤——触发面按测试输入
-    # 圈定（snake.test.js 属 shared/shell/**；PR 触发面保持不过滤）
-    paths:
-      # R8-SH-10（第八轮审计 2026-10-04）：清单此前只有 4 项，而本 job 的断言语料
-      # 实际 readFileSync 9 处、其中 4 处在清单之外（含它亲自守护的 prepare-geogebra
-      # action.yml 与它断言过的 csproj/spec/release-android.yml）——「只改了 action.yml」
-      # 这类直推 master 不触发唯一守它的 UI 门禁。现按真实输入闭包补齐（PR 触发面
-      # 本来不过滤，故影响限于直推路径）。
-      - 'tests/ui-regression/**'
-      - 'tests/KNOWN_DEFECTS.md'
-      - 'shared/shell/**'
-      - '.github/workflows/ci.yml'
-      - '.github/workflows/release-android.yml'
-      - '.github/actions/prepare-geogebra/action.yml'
-      - 'windows/src/Aegis.Windows.App/Aegis.Windows.App.csproj'
-      - 'legacy/windows-pywebview/aegis_webview.spec'
+    # R9-B46（第九轮 2026-10-13，队列 Q48=R9-CI-13）：删除 SP-235/R8-SH-10 那套 paths 过滤，
+    # 回归 ADR-007 D3 的「门禁型全量常跑」。R8-SH-10 当年是把过滤清单**补全**（8 项）而不是删掉——
+    # 补全只解决了「清单少列输入」，没解决「清单外的改动静默不触发」：本 job 判的是
+    # shared/shell 与 start.html 的形态，而 shell 文本被 contracts/codegen 生成链、
+    # android 注入面、legacy spec 等消费，任何一处漏列都是一个不复验的洞。
+    # 分类与「谁许过滤」现在是机器可读的：contracts/ci/workflow-categories.yaml，
+    # 由 scripts/verify_ci_trigger_surface.py 双向对账（门禁型带过滤判红）。
+    # 分支面按原样保留（branches: [master] 是既成事实，不是本批新增的收窄）。
   pull_request:
     branches: [master]
   workflow_dispatch: {}          # 手动触发（SP-235：此前缺，改动即跑不可控）

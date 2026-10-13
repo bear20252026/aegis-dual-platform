@@ -4,26 +4,12 @@ name: Supply-Chain
   # push/PR 触发，无人改依赖文件则依赖审计永不重跑（新 CVE 零发现窗口）
   schedule:
     - cron: "0 4 * * 1"            # 每周一 04:00 UTC
-  # SP-200（2026-10-01 审计）：push 补 paths 过滤——此前 push: {} 使 docs 等
-  # 与依赖面无关的改动也全量跑审计。触发面按扫描输入圈定（PR 保持不过滤）
-  push:
-    paths:
-      - 'requirements-ci.in'
-      - 'requirements-ci.txt'
-      # 归档栈两份锁/需求（pip-audit 扫描输入）
-      - 'legacy/windows-pywebview/requirements-lock.txt'
-      - 'legacy/windows-pywebview/requirements-dev.txt'
-      # cargo audit / Cargo.lock 面
-      - 'core/rust-policy-core/Cargo.lock'
-      - 'core/rust-policy-core/Cargo.toml'
-      # SBOM 转换器冒烟输入
-      - 'release/tools/generate_sbom/**'
-      - 'contracts/vectors/update-manifest-valid.json'
-      # 审计第六轮（2026-10-03）：validate_release.py 本体入 push 过滤面——
-      # 下方 repo-integrity 门禁的脚本自身改动必须在直推路径上也重跑
-      - 'validate_release.py'
-      - '.github/workflows/supply-chain.yml'
-      - '.github/actions/cargo-audit/**'
+  # R9-B46（Q48）：删除 SP-200 的 11 项 paths 过滤，回归 ADR-007 D3。
+  # 这条面里除依赖扫描外还跑 validate_release.py 的仓库完整性门禁与 SBOM 转换冒烟，
+  # 11 项清单每补一次就暴露一次「清单靠人维持」的本质——清单外的改动在 master
+  # 复验面上不触发，而检查名看起来「已过」。过滤许可的判据现在是机器可读的
+  #（contracts/ci/workflow-categories.yaml + scripts/verify_ci_trigger_surface.py）。
+  push: {}
   pull_request: {}
   workflow_dispatch: {}
 

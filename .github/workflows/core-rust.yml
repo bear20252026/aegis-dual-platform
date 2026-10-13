@@ -1,15 +1,12 @@
 name: Core-Rust
 "on":
-  push:
-    # PY-206（2026-09-26 审计）：push 触发补 paths 过滤——docs 改动不再
-    # 全量跑 cargo 门禁（PR 触发面保持不过滤）
-    paths:
-      - 'core/**'
-      # SP-236（2026-10-02 审计·S-32）：cargo-audit composite action 是本
-      # workflow 的门禁组成部分——action 自身变更须回验（PR 面已覆盖，此处
-      # 补 push 触发面）
-      - '.github/actions/cargo-audit/**'
-      - '.github/workflows/core-rust.yml'
+  push: {}
+    # R9-B46（Q48）：删除 PY-206/SP-236 的 paths 过滤——ADR-007 D3 判定
+    # 「paths: 过滤的省时收益 << 漏检成本」，而 SP-236 自己就撞过一次：
+    # 清单要靠人补全才覆盖 composite action，补漏一项就是一个不复验的洞。
+    # 分类见 contracts/ci/workflow-categories.yaml，判据见
+    # scripts/verify_ci_trigger_surface.py（门禁型带过滤＝红）。
+    # 分支面保持原样（原 push 无 branches: 限定，不得新增收窄）。
   pull_request: {}
   workflow_dispatch: {}
   # SP-240（RS-309/I-05，2026-10-02 审计）：weekly schedule 供 fuzz-build-smoke

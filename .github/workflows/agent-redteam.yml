@@ -1,16 +1,11 @@
 name: Agent-Redteam
 "on":
-  # SP-200（2026-10-01 审计）：push 补 paths 过滤——此前 push: {} 使 docs 等
-  # 改动也全量跑红队测试。触发面按测试输入圈定（PR 保持不过滤）
-  push:
-    paths:
-      - 'agent/**'
-      # verify_agent_catalog 消费 action catalog 单源
-      - 'contracts/**'
-      # pytest 工具链经 requirements-ci.txt hash 锁安装
-      - 'requirements-ci.in'
-      - 'requirements-ci.txt'
-      - '.github/workflows/agent-redteam.yml'
+  # R9-B46（Q48）：删除 SP-200 的 paths 过滤，回归 ADR-007 D3「门禁型全量常跑」。
+  # 本 job 消费的不止 agent/** 与 contracts/**：红队夹具还读
+  # tests/KNOWN_DEFECTS.md 与 .github/actions/**（清单里没有），清单外的改动
+  # 在 master 复验面上零作业。分类与过滤许可见
+  # contracts/ci/workflow-categories.yaml + scripts/verify_ci_trigger_surface.py。
+  push: {}
   pull_request: {}
   workflow_dispatch: {}
 

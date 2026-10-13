@@ -1,0 +1,36 @@
+# workflow 分类登记表（R9-B46 / 台账 Q48=R9-CI-13 的定稿）——ADR-007 D3 的分类单源。
+#
+# 为什么要有这个文件：ADR-007 里「门禁型已全部移除 paths 过滤」曾是一句**陈述**，
+# 而实树有四处仍在过滤（第九轮 R9-DOC-03 实测）——文档抄错了没有任何东西会红。
+# 现在分类写在这里，由 `scripts/verify_ci_trigger_surface.py` 与 `.github/workflows/`
+# 双向对账：新增 workflow 没归类判红、归类里引用了不存在的文件判红、
+# 门禁型带触发过滤判红、探测型出现 PR 触发判红。
+#
+# 三类的判据（不是名字好看，是「谁在替这次改动作证」）：
+# - gates：判定质量面。PR 面必须**无条件**跑（否则「检查名看起来已过」是假的），
+#   master push 面也必须跑（否则合并后的 master 状态无人复验）。
+# - builds：产物链。按需触发合理（它产物而非判定），允许 paths/tags 过滤。
+# - probes：周检 / 手动维护面（兼容探测、依赖图提交、重锁执行面）。
+#   它们**不该**出现在 PR 判定面上——出现在那里只会把必需检查集合撑成跑不完的样子。
+
+gates:
+  - android-quality
+  - contracts
+  - core-rust
+  - agent-redteam
+  - supply-chain
+  - ci
+
+builds:
+  - native-policy-artifacts
+  - release
+  - release-android
+  - release-core
+  - release-windows
+
+probes:
+  - compat
+  - legacy-python-guard
+  - gradle-dependency-graph
+  - gradle-dependency-insight
+  - dependency-relock

@@ -41,6 +41,8 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 （不新增必需 context）。**收敛本身又撞出三条口径缺陷**，见 R9-SH-18 | 
 | R9-SH-18 | **P2**（R9-B45 收敛过程中被**自家套件判红**才发现＝既有剔注释实现的口径缺陷，不是新端缺功能） | 保留并落地 | 三条都有实测症状：①**`#` 整行无差别剔**会把 Rust `#[unsafe(no_mangle)]` 当注释删掉——`core_unwired_modules_test::test_export_inside_an_unwired_module_is_red` 由红变绿（过剔喂绿）；修法＝`strip_comments(text, path)` 按扩展名启用（`_HASH_COMMENT_SUFFIXES`），C#/Kotlin 那份不剔 `#`。②**块注释排在整行注释之前**：`WebViewHardening.kt:41` 的说明里写着 `"https://*"`，第二个 `/` 紧跟 `*` 构成假块起点，先匹配块就吃到下一个 `*/` 把 `:46` 的真语句删掉——端侧正面控制 `DocumentStartInjectionRegressionTest.kt:72` 当场判红；三份统一成 `//` → `#`（按语言）→ 块 → ` * `，各加一条顺序语料（星号续行必须在块匹配之后，否则删掉的是块的收尾）。③**docstring 不是注释**：我在单源文件的模块 docstring 里逐字写了那份原生决策向量的文件名，消费面门禁立刻报出「登记=[RS] → 实测=[PY,RS]」——说明文字冒充了消费者。④影响面可复核：新旧顺序在同一扫描面双跑，21 份向量的端集**0 处变化**（`collect_consumers` 求差），所以不需要重登记 |
 | R9-DOC-17 | P3（R9-B45 顺手现读发现，同批改真） | 保留并落地 | `docs/runbooks/device-validation.md:19` 说 Windows 下载入口是 `WebView/HostWebView.cs:268`（`DownloadStarting`），而 R9-B37 把下载生命周期外迁成 partial 之后 `:268` 已在 `Dispose()` 里（现读：订阅 `HostWebView.cs:158`、判定本体 `HostWebView.Downloads.cs:41`）⇒ 改成指向**文件+符号**而不是行号，并按第八轮那条口径记档：行号是引用不是事实，重构会把它变成第二条失实声明 |
+| R9-SH-5 | P2（R9-B46 回读时**把登记的处方本身纠正**） | 保留并落地（定稿，非「接进裁决链」也非「删列」） | 登记写「`confirmation/risk/audit` 三列在 `agent/broker.py` 零消费 ⇒ 要么被消费要么删列」。逐列现读消费者：`risk` → `contracts/codegen/analyze_action_catalog.py:81`（同 scope 风险冲突）、`audit` → 同文件 `:91`（必填）、`read_only` → `contracts/codegen/verify_agent_catalog.py:43` + `agent/tests/redteam_test.py:87`（首批只读门禁)——**三列里两列一直在被判定**，只有 `confirmation` 全仓零消费者；两个处方因此都不成立（删的是已被判的列，接的是「默认放行→默认需确认」那条 §四 明写不默认执行的方向）。定稿三件、运行时零行为变化：①catalog 头部写死「判定面 4 项 / 治理元数据 5 项」并逐项标谁判它；②analyzer 规则 ⑤ 把 `confirmation` 变成**必填的意图声明**（缺失/不在词表/与只读性矛盾都判红，出厂两条天然满足）；③`tests/python/codegen_and_catalog_test.py::TestCatalogGovernanceColumns` 反向钉住「运行时不读治理列」（用 R9-B45 的单源剔注释后断言四个治理列名在 `agent/broker.py` 零出现，并配判定面四列必须出现的正面控制）⇒ 将来真要接进裁决链会先撞红，逼出带契约向量的另批。夹具 `_action()` 同批补两行，否则「干净夹具」在新规则下判红会让每条专项用例失去诊断力 |
+| R9-CI-13 | P3（R9-B46 落地；R9-B21 当时只把 ADR 陈述改真，本批收口实树） | 保留并落地 | 四处 `push.paths`（`ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11）删除，理由不是「清单少列一项」而是**清单不可维护**：`ci.yml` 的清单 R8-SH-10 已从 4 项补到 8 项，仍覆盖不住该 job 真实读取的语料闭包。分类与「谁许过滤」从 ADR 的散文变成 `contracts/ci/workflow-categories.yaml`（gates 6 / builds 5 / probes 5）+ `scripts/verify_ci_trigger_surface.py` 的双向对账：未归类/登记不存在/门禁型带过滤/门禁型无 PR 触发/探测型进 PR 面五种都判红；`native-policy-artifacts` 是唯一 `pull_request` 也带过滤的，按 builds 类保留（它产物而非判定质量）。**先跑红灯实录**：删过滤前脚本准确报出四处，删完转绿。代价如实写进 ADR：三个原 `push` 无 branches 限定的 workflow 现在任意分支 push 全量跑 cargo/红队/审计 |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
 | R9-RS-9 **收编** | P2 | 保留并落地（R9-B15，上一条登记行的后半） | 两条像素直读包装的注册尾现在三端同形：C# 此前**裸调** `registerProxy(...)`、Kotlin 此前**裸调** `if (__aegisReg) ...`，两端都补成与 Rust 同款 `try { if (REG) REG(proxy, orig); } catch (e) {}`——这不是排版：注册器一旦抛异常，裸调会让整个包裹安装中断，等于把「不加噪的原文直读」重新放出来（catch 体本身三端行为早已同形：空 catch + 落到统一 `return orig.apply(...)`，只有 Kotlin rect-read 把 return 写在 catch 体内，现改成同形写法）。剩余唯一分歧是**注册器取用路径**（Windows＝ToStringGuard 闭包内的本地 `registerProxy`，Rust/Android＝`window[Symbol.for('proxy.register.v1')]`），由 `injected_js_text._REGISTER_ACCESSOR` 按别名表归一，因此 `DIVERGENT_REGISTERED` 从 2 条收成 **0 条**、比较面从 5 个函数扩到 7 个。别名表**只认登记的键名**（`proxy.register.v1` 与 Rust 的 `{reg_sym}` 占位），故意不写成通配 `window[Symbol.for(…)]`——否则 close 键 `proxy.register.close.v1` 能冒充注册器通过；这条边界有常驻用例与 `--self-test` 用例各钉一次。没有把 Windows 也改成 window 键入口：那会把注册句柄从闭包暴露到页面可达的 window 空间，是**放宽出货安全面**，已列第四节待裁决 |
@@ -633,7 +635,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 - **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
   保存默认——关闭改变调试与默认 UX，属产品行为变更。
-- **R9-SH-5**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在 `agent/broker.py` 零消费。
+- ~~**R9-SH-5**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在 `agent/broker.py` 零消费。~~ **已定稿并落地（R9-B46 / §3.46）**：逐列现读消费者后发现登记的处方本身不成立——`risk`/`audit`/`read_only` 一直各有静态消费者（`analyze_action_catalog.py:81,91`、`verify_agent_catalog.py:43`、`agent/tests/redteam_test.py:87`），只有 `confirmation` 全仓零消费者；而「接进裁决链」正是本节下面那句「默认放行改默认需确认，不默认执行」。定稿走第三条路：列身份写进 catalog 头部、`confirmation` 变成必填的意图声明（analyzer 规则 ⑤）、反向用例钉住运行时不读治理列。
 - **R9-SH-6 的一半**：`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会改变
   同站多子域共享种子的产品语义。该表的**补条目 + 收录口径 + 只增不减门禁**已落地（§3.6），
   只剩这一半未决。
@@ -646,8 +648,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   本轮已把它重 derive 成当前真相并加双向对账门禁，但「留一份无人消费的跨语言镜像」本身
   是架构取舍——删除属产品/架构裁决，不默认执行）、
   Android `dependencyLocking`、核心 JS 生成导出（R8-RS-15）、
-  `action-catalog.yaml` 三列（`confirmation/risk/audit`）到底由 broker 消费还是删列并写明
-  「治理元数据非判定面」（R9-SH-5，方向是「默认放行改默认需确认」，不默认执行）、
+  ~~`action-catalog.yaml` 三列（`confirmation/risk/audit`）到底由 broker 消费还是删列并写明
+  「治理元数据非判定面」（R9-SH-5，方向是「默认放行改默认需确认」，不默认执行）~~
+  **（R9-B46 已定稿：既不接进裁决链也不删列——见 §3.46）**、
   **IPv6 字面量在导航面**（R9-AD-4 的一半：`[::1]:9000` 这类 authority 被
   `OriginPolicy.kt:104-110` 与 Rust `origin/host_grammar` 一致拒，Windows 反而放行 ⇒
   要打通得解冻核心 host grammar 并增补 `url-origin-*` 向量，是跨三端的解析器语义变更，
@@ -855,7 +858,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `start_page.test.mjs` 里——同批的 WB-141/WB-142 也是同一形态。三段已删（−16 行），其中
   WB-142 的三个控件与 WB-141 的三个系统色并进 `start_a11y.test.mjs` 的按花括号配对切片，
   各带反向锚。**留着的后果就是「新旧双双仍绿」这句话到今天还成立**——删掉才算闭。
-- Q15 R9-SH-5 | P2 | `contracts/policy/action-catalog.yaml:14-35` 声明
+- ~~Q15 R9-SH-5~~ **本批已闭**（R9-B46 / §3.46）| P2 | 登记给的处方（「要么被消费、要么删列」）回读后**两条都不成立**：`risk`/`audit`/`read_only` 三列其实各有静态消费者（`analyze_action_catalog.py:81,91`、`verify_agent_catalog.py:43`、`agent/tests/redteam_test.py:87`），只有 `confirmation` 全仓零消费者；而把它接进裁决链是 §四 明写不默认执行的「默认放行→默认需确认」方向。定稿＝列身份写进 catalog 头部 + `confirmation` 变成必填的意图声明（analyzer 规则 ⑤）+反向钉住「运行时不读治理列」。以下为登记原文（事实部分仍有效）：
+  Q15 R9-SH-5 | P2 | `contracts/policy/action-catalog.yaml:14-35` 声明
   `risk/read_only/confirmation/audit/redteam_fixtures`，而 `agent/broker.py:178-190,278-283,366`
   裁决只读 `name/scope/budget(+default_deny/policy_version)` ⇒ `confirmation` 一列是装饰；
   `contracts/codegen/analyze_action_catalog.py:93-95` 只断 `redteam_fixtures` 非空。
@@ -1127,7 +1131,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `required_pull_request_reviews` 缺席）而不是引用第八轮那次数测——设置会变，引用旧实测
   就是第二条失实声明；本批只改文档表述，**没有动任何仓库设置**。
 
-- Q48 R9-CI-13 | P3 | `.github/workflows/ci.yml`（`on.push.paths` 8 项）、`core-rust.yml`（3 项）、
+- ~~Q48 R9-CI-13~~ **本批已闭**（R9-B46 / §3.46）| P3 | 四处 `push.paths` 已删除，分类与「谁许过滤」从 ADR 的陈述变成 `contracts/ci/workflow-categories.yaml` + `scripts/verify_ci_trigger_surface.py` 的双向对账（门禁型带过滤、门禁型无 PR 触发、新增 workflow 未归类、探测型混进 PR 面——四种都判红）。以下为登记原文：
+  Q48 R9-CI-13 | P3 | `.github/workflows/ci.yml`（`on.push.paths` 8 项）、`core-rust.yml`（3 项）、
   `agent-redteam.yml`（5 项）、`supply-chain.yml`（11 项）：ADR-007 声称「门禁型 workflow 已全部移除
   `paths:` 过滤」而实测这四处仍在过滤 ⇒ 未列路径的改动在这些面上静默不触发、检查名看起来「已过」
   （R8-SH-10 当年只处理了 `ci.yml`）。收口属 CI 触发面变更：runner 时长上升，且若某处 job 已列进必需
@@ -2271,6 +2276,63 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `scripts/assert_test_counts.py` 判）；Android ktlint+detekt+testDebugUnitTest 全绿
    （app **333** / broker **88** / webview-adapter 46，较上批 +1/+1）；三道 markdown 门禁 EXIT 0；
    `check_file_sizes` 在 `git add` 之后复跑绿；`git status -- '*packages.lock.json'` 空（没动依赖）。
+
+### 3.46 R9-B46（2026-10-13，队列 Q48=R9-CI-13 与 Q15=R9-SH-5）：CI 触发面收口 + action-catalog 的列身份定稿
+
+两条队列项是同一种病的两面——**「谁判什么」写在散文里就永远不会红**。一条把「门禁型不过滤」
+从陈述变成判据，另一条把「这列被谁读」从注释变成判据。
+
+1. **Q15 的回读先把登记本身纠正了**。登记（§四与 §五 Q15）写的处方是
+   「`confirmation/risk/audit` 三列在 `agent/broker.py` 零消费 ⇒ 要么被消费、要么删列并写明是治理元数据」。
+   逐列现读消费者的结果是：**只有 `confirmation` 真的全仓零消费者**——
+   `risk` 由 `contracts/codegen/analyze_action_catalog.py:81` 判「同 scope 不同 risk 冲突」，
+   `audit` 由同文件 `:91` 判必填，`read_only` 由 `contracts/codegen/verify_agent_catalog.py:43`
+   与 `agent/tests/redteam_test.py:87` 判「首批只读门禁」。
+   ⇒ 两个处方都不成立：列**已经在被判定**（判的是它自身的一致性，不是运行时行为），
+   而「接进裁决链」会把默认放行推向需要确认——那是 §四 明写不默认执行的方向。
+2. 定稿三件（零运行时行为变化）：
+   - `contracts/policy/action-catalog.yaml` 头部写死**列的两种身份**：判定面
+     （`name`/`scope`/`budget.*` + 顶层 `default_deny`/`policy_version`）与治理元数据
+     （`risk`/`audit`/`redteam_fixtures`/`read_only`/`confirmation`），逐项标出「谁判它」。
+   - `confirmation` 从装饰变成**必填的意图声明**：analyzer 新增规则 ⑤——缺失、
+     不在词表 `{none, required}`、与 `read_only` 矛盾（只读却要求确认 / 写操作却免确认）都判红。
+     出厂两条 action 天然满足 ⇒ 现树零变化；下一条 action 忘了想确认问题就判红。
+     词表扩值明确写成「属契约面变更，另批定稿」，不在门禁脚本里顺手加。
+   - **反向钉住「运行时不读治理列」**：`tests/python/codegen_and_catalog_test.py`
+     新增 `TestCatalogGovernanceColumns`（7 条）。其中
+     `test_broker_never_reads_the_governance_columns` 读 `agent/broker.py` 源码
+     **剔注释后**断言四个治理列名零出现（口径用 R9-B45 那份单源 `text_anchors.strip_comments`），
+     并配 `test_broker_really_reads_the_judgment_columns` 作正面控制——
+     判定面四列必须真的出现，否则反向锚在判空气。将来谁把 `confirmation` 接进裁决链，
+     这条用例先红，逼出的就是「带契约向量的裁决语义变更」而不是改一行读代码。
+   - 顺带修夹具：`_action()` 合成条目缺 `read_only/confirmation` ⇒ 加了规则 ⑤ 之后
+     「干净夹具」不干净，`test_clean_catalog_passes` 报的红读不出来自哪条规则。
+     夹具必须在全规则下干净，专项用例才有诊断力（本批实测撞出来的，不是设想）。
+3. **Q48：四处 `push.paths` 收口 + 分类变成机器可读登记表**。
+   现读触发面（pyyaml 解析 16 个 workflow）：`ci`=8、`core-rust`=3、`agent-redteam`=5、
+   `supply-chain`=11 四处带 `push.paths`，`native-policy-artifacts` 是**唯一一处
+   `pull_request` 也带过滤**的（它产生产物而非判定质量 ⇒ 按 builds 类保留），其余门禁型无过滤。
+   删过滤的理由不是「清单少列一项」而是**清单这件事不可维护**：`ci.yml` 的清单在 R8-SH-10
+   已经从 4 项补到 8 项，仍然覆盖不住该 job 真实读取的语料闭包——补一次就暴露一次
+   「下一个漏列的是谁」。ADR-007 D3 自己的判据是「省时收益 << 漏检成本」，本批把它执行完。
+4. 新常驻门禁 `scripts/verify_ci_trigger_surface.py`（+ `tests/python/ci_trigger_surface_test.py` 12 条）
+   把 ADR 的分类变成与 `.github/workflows/` 的**双向对账**：
+   ①每个 workflow 恰好归一类（新增未归类判红、登记了不存在的文件判红）；
+   ②gates 的任何触发不得带 `paths`/`paths-ignore`/`branches-ignore`；
+   ③gates 必须有 `pull_request` 触发（不在 PR 面上判的门禁等于不存在）；
+   ④probes 不得有 `pull_request` 触发（进了必需检查集合跑不完就卡 merge box，R8-CI-01 同族）。
+   分类数据在 `contracts/ci/workflow-categories.yaml`（gates 6 / builds 5 / probes 5），
+   ADR-007 D3 改成指向它而不是再抄一遍清单。
+   先跑一次「红灯实录」证明它能失败：删过滤之前它准确报出四处，删完转绿。
+5. 代价与保留的取舍（写下来免得被读成「免费的」）：`core-rust`/`agent-redteam`/`supply-chain`
+   原本 `push:` 没有 `branches:` 限定，删过滤后**任意分支的 push** 都会全量跑 cargo/红队/审计；
+   `ci.yml` 原有 `branches: [master]` 按原样保留（不是本批新增的收窄）。
+   runner 时长上升是 ADR-007 D3 已经认领的代价（「安全性优先，接受」），
+   正确的省法在合并流程侧（必需检查）而不是让门禁不跑。
+6. 验证：`pytest tests/python` **659 passed / 1 skipped**（本批 +19：治理列 7 条 + 触发面 12 条）；
+   `python contracts/codegen/analyze_action_catalog.py` 与 `verify_agent_catalog.py` 均 EXIT 0；
+   `python scripts/verify_ci_trigger_surface.py` EXIT 0；`check_doc_claims`（16 个 workflow 的计数
+   现算，本批没动 workflow 数量）与表形/链接两道 EXIT 0；4 个改动过的 workflow 全部 pyyaml 可解析。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

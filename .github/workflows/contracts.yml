@@ -119,6 +119,11 @@ jobs:
       # （双向不变量，R9-SH-7 同口径）。不新增必需 context：并入本 job（R8-CI-01 教训）。
       - name: Text-anchor helper single-source gate (R9-B45——注释不算证据，副本也不该有第二份)
         run: python scripts/verify_text_anchor_helpers.py
+      # R9-B46（第九轮 Q48=R9-CI-13 / Q15=R9-SH-5）：ADR-007 D3 那句「门禁型已移除 paths 过滤」
+      # 曾经是陈述而非事实（四处仍在过滤）。现在分类是登记表、这句话是判据：门禁型带过滤、
+      # 门禁型没有 PR 触发、新增 workflow 未归类、探测型混进 PR 面——四种都判红。
+      - name: CI trigger surface reconciliation (R9-B46——门禁型不过滤，分类双向对账)
+        run: python scripts/verify_ci_trigger_surface.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)

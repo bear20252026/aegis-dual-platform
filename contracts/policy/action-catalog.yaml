@@ -5,6 +5,22 @@
 # 权限 + 渐进式 scope 升级——第一批只恢复只读低风险工具）
 # 默认拒绝（default-deny）——未登记 action 不可用（蓝图）。
 
+# 列的两种身份（R9-B46 / 台账 Q15=R9-SH-5 的定稿口径，写在这里是因为「哪列被谁读」
+# 这类事实以前只散在读代码的人脑里，一旦说错就永远不变红）：
+# - **判定面**（`agent/broker.py` 运行时逐条读，读不到就拒）：
+#   `name`、`scope`、`budget.max_actions`、`budget.max_bytes`，加上顶层
+#   `default_deny`、`policy_version`。
+# - **治理元数据**（运行时**不读**，由静态门禁判它自身的存在与一致性）：
+#   `risk`、`audit`、`redteam_fixtures` → `contracts/codegen/analyze_action_catalog.py`；
+#   `read_only`、预算形态 → `contracts/codegen/verify_agent_catalog.py` 与
+#   `agent/tests/redteam_test.py`；
+#   `confirmation` → 只由 `analyze_action_catalog.py` 判「显式声明 + 与 read_only 一致」，
+#   **没有任何执行者真的去要确认**（Agent 侧没有确认 UI）。
+#   ⇒ 「confirmation: required」 today 只是**意图声明**，不是行为。将来要真判它，
+#   必须另批补契约向量 + 三端实现，而不是在这里把值改掉。
+# 「运行时不读治理列」这件事由 `tests/python/codegen_and_catalog_test.py` 反向钉住
+# （broker 源码里出现这三列的读取 ⇒ 判红）：改判定面必须是有意识的动作。
+
 default_deny: true
 policy_version: "1.0"
 

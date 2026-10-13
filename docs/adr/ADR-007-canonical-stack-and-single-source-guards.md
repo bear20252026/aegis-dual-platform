@@ -55,13 +55,21 @@
 ### D3：门禁全量常跑（区分门禁型与构建型）
 
 - **门禁型 workflow**（android-quality / contracts / core-rust / agent-redteam /
-  supply-chain / ci）**应当**移除全部 `paths:` 过滤——每次 push/PR 全量执行；
-  理由：`paths:` 过滤的省时收益 << 漏检成本（ktlint 长期 FAIL 未被发现即实证）；
-  **实树现状（第九轮 R9-DOC-03 实测，py-yaml 读 `on.push.paths`）**：只有
-  `android-quality` 与 `contracts` 真无过滤；`ci`=8、`core-rust`=3、`agent-redteam`=5、
-  `supply-chain`=11 仍在过滤 ⇒ 未列路径的改动在这些面上**静默不触发**，而检查名看起来
-  「已过」。R8-SH-10 当年只处理了 `ci.yml` 一处，本条一直是陈述而非事实；
-  收口剩余四处属 CI 触发面变更（每次 PR 的 runner 时长上升），已登记队列，不顺手改；
+  supply-chain / ci）**移除全部 `paths:` 过滤**——每次 push/PR 全量执行；
+  理由：`paths:` 过滤的省时收益 << 漏检成本（ktlint 长期 FAIL 未被发现即实证）。
+  **本条现在是事实而不是陈述（第九轮 R9-B46 / Q48，2026-10-13）**：
+  R9-DOC-03 实测时 `ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11 四处仍在过滤，
+  当时只把这段文字改真（陈述≠事实的另一半）；本批按上面的理由把四处收掉。
+  收口的不是「清单没列全」而是「清单这件事本身不可维护」——`ci.yml` 的过滤面在 R8-SH-10
+  已经从 4 项补到 8 项，仍然覆盖不住本 job 真实读取的语料闭包（它亲自守护
+  `prepare-geogebra/action.yml`、也断言 csproj/spec/release-android.yml），
+  补一次清单就暴露一次「下一个漏列的是谁」；
+  - 分类与「谁许过滤」不再写在本 ADR 里当陈述，而是机器可读的
+    `contracts/ci/workflow-categories.yaml`（gates / builds / probes 三类，16 个 workflow 逐一归类），
+    由 `scripts/verify_ci_trigger_surface.py` 与 `.github/workflows/` **双向对账**：
+    新增 workflow 没归类判红、登记了不存在的文件判红、门禁型带任何触发过滤判红、
+    门禁型没有 `pull_request` 触发判红（不在 PR 面上判的门禁等于不存在）、
+    探测/维护型出现在 PR 判定面上判红（它会进必需检查集合，跑不完就卡 merge box）；
 - **构建型 workflow**（native-policy-artifacts / release-*）保留触发过滤
   ——它们产生产物而非判定质量，按需触发合理；
 - **自检入 CI**：CLAUDE.md 要求的 5 个离线自检（session_store / api_bridge /
