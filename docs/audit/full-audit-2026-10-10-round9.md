@@ -2909,7 +2909,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    Q25-① 落地时必须先决定比较面扩到哪，否则三端会在没人的地方各自漂。本批不顺手扩：
    一扩就要当场判 30+10 处的同形，那是 Q25-① 的活，不是这条处方回读的活。
 5. 验证：`pytest tests/python` **752 passed / 1 skipped**（本批 +3）；`active_tree_gates all`
-   （ruff / bandit / py312-compat）OK；行数红线（`injected_js_parity_test.py` 210 行 ≤300）/
+   （ruff / bandit / py312-compat）OK；行数红线（`injected_js_parity_test.py` 221 行 ≤300）/
    表形 / 链接 / `check_doc_claims` / `check_workflow_shells` / `verify_ledger_queue_status`
    / `verify_text_anchor_helpers` 全 EXIT 0；`verify_injected_js_parity.py` 本体现跑仍绿
    （本批没动任何注入 JS 文本）。**零出货代码改动**。
