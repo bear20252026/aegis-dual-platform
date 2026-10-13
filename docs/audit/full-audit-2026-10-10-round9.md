@@ -848,7 +848,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   原条目：Q55 R9-AD-12 | P2 | `android/settings.gradle.kts:9-15`（`dependencyResolutionManagement` 的两个仓库源）↔ `android/gradle/`（**无** `verification-metadata.xml`）：
   项 10 落的是**版本锁定**（`gradle.lockfile` 记 group:name:version，**不含校验和**），  外部审计 AEG-011 处方里的另一半 **dependency verification**（`--write-verification-metadata  sha256` + `verification-metadata.xml` + 构建时 `--dependency-verification=strict`）没有做。  差别是可利用的：锁防住「今天解析到新版本」，防不住「同一个坐标的构件被换成别的字节」  （仓库被投毒 / 镜像与上游不一致 / 本地缓存被改写都落在锁的覆盖面外）。本批不顺手做的原因：  开启后**任何**新增依赖都要重算校验和，且 Gradle 默认对缺失条目 fail-closed ⇒ 与 Dependabot   的自动 bump 流是产品级流程变更（要先定「谁签、校验和从哪来、trusted artifacts 怎么豁免」）  ⇒ §四 待裁决。验收口径：CI 里 `--dependency-verification=strict` 跑通  `:app:assembleRelease`，且注入「改动某个 jar 的字节」必须判红。
 
-- Q60 R9-AD-13 | P2（R9-B50 落地时发现；登记即待裁决） |
+- Q60 R9-AD-14 | P2（R9-B50 落地时发现；登记即待裁决） |
   `.github/workflows/dependency-relock.yml:232`（`case "$target" in deps/*)` 的写回守卫）↔
   `android/gradle.properties:32`（`org.gradle.dependency.verification=strict`）：
   校验和启用后，一条 Gradle 版本 bump 的 PR 会红在「新坐标没有条目」，而**能补条目的那条命令
@@ -2493,21 +2493,37 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    - `android/gradle.properties` 加 `org.gradle.dependency.verification=strict`——**生效面是属性**。
      只在命令行加参数的那种做法等于没开：本仓 CI 与本地大量 gradlew 调用不带任何参数，
      它们一条都不校验；命令行参数于是只剩「重锁那一次的放宽」；
-   - `dependency-relock.yml` 的 gradle 面从「只写锁」改成「锁与字节同批」：图面那条
-     （`--write-locks --write-verification-metadata sha256 resolveAllConfigurations`）+ 文件面那条
-     （20 个任务 token）+ 原有的覆盖自证。写回守卫的合法面从「只有 `*/gradle.lockfile`」扩成
-     再加 `*/gradle/verification-metadata.xml`——不扩的话重锁作业会**红在自己的守卫上**；
+   - `dependency-relock.yml` 的 gradle 面从「只写锁」改成「锁与字节同批、两边都强制重取字节」：
+     图面那条（`--refresh-dependencies --write-locks --write-verification-metadata sha256
+     resolveAllConfigurations`）+ 文件面那条（新任务 `resolveAllConfigurationFiles` +
+     `buildEnvironment` + 工具任务清单）+ 原有的覆盖自证。写回守卫的合法面从「只有
+     `*/gradle.lockfile`」扩成再加 `*/gradle/verification-metadata.xml`——不扩的话重锁作业会
+     **红在自己的守卫上**；
    - 口径单源改真：`android/settings.gradle.kts` 决策记录 ③（原写「本批**不做**」）、
      SECURITY.md 的 Android 条（原写「本仓未做，不对外声称」）。
-3. 本批最容易读错的一件事：**为什么文件面只能列清单，而锁面按集合**。`--write-verification-metadata`
-   登记的是本次**真正落盘的构件字节**，而 `resolveAllConfigurations` 走
-   `incoming.resolutionResult.root`——图解析只下 `.pom`/`.module`，不下 `.jar`/`.aar`。
-   照 R9-B32 的集合口径「顺手统一」两面，结果是校验和静默漏项。清单会漂 ⇒ 判据从 workflow 原文
-   **现读** CI 的 gradle 任务面做子集对账（现值：CI 24 个 token，文件面 21 个，豁免 3 个是
-   不落文件的报表/对账类），并要求「提取到的 token 数 ≥20」——提取口径自己坏掉时这条必须红，
-   否则子集判据就成了空对空（本批真的红过一次：正则少写一层 `*`，24 个 token 静默只剩 5 个）。
-   失效方向也与 R9-B32 相反：漏条目的表现是下一个用到该构件的作业**当场红**，不是静默放松。
-4. 实测五条，全部现跑（不是设想）：
+3. 两面口径为什么不能并成一条（本批最容易读错的地方，也是 PR #189 那一轮红灯的根因）：
+   - **图 ≠ 文件**。`resolveAllConfigurations` 走 `incoming.resolutionResult.root`，只下
+     `.pom`/`.module`；`--write-verification-metadata` 登记的却是**本次真正落盘的字节**。
+     所以新增按文件的集合口径 `resolveAllConfigurationFiles`（解析每个 `canBeResolved` 配置的
+     `.files`），构建类任务（`assemble*`/`compile*`）从文件面**删掉**——它们的 classpath 文件
+     本来就在这些配置里，两处各写一份就是两份真相；
+   - **集合也覆盖不到工具面**。ktlint/detekt/lint/单元测试用的是任务执行时现建的
+     **detached 配置**，不在 `project.configurations` 里，只有跑那几个任务才会落盘 ⇒ 那一份
+     小清单不能省，它与 CI 的对应关系由 `tests/python/gradle_verification_test.py` 从 workflow
+     原文逐 token 判（现值：CI 24 个 token，重算面 + 两类豁免正好盖住）。豁免分两类且都必须
+     写理由：`NON_ARTIFACT_FILE_FACE`（不落文件的报表/对账类）与 `SET_COVERED_TASKS`
+     （文件来自项目配置，已由集合口径覆盖）。并要求「提取到的 token 数 ≥20」——提取口径自己
+     坏掉时这条必须红，否则子集判据就是空对空（本批真的红过一次：正则少写一层 `*`，
+     24 个 token 静默只剩 5 个）；
+   - **本地全绿不是证据**。这条是本批最贵的：校验和文档只能记录本次落盘的字节，而长命的
+     `~/.gradle` 元数据缓存能让一批 parent-pom/BOM 描述文件**永不落盘**。于是本地三条命令全绿、
+     入库那份「看起来完整」，CI 的干净 runner 当场红——见第 4 点的第 5 条；
+   - **字节面还跟平台走**。本机生成的文档里 `aapt2` 只有 `…-windows.jar`，`-linux` 形态零命中，
+     而 CI 的 android-quality/dependency-graph 跑在 ubuntu 上。⇒ 校验和必须在**每个会构建的平台**
+     上生成过才算全；本批的处置是把 gradle 重锁面（ubuntu dispatch）当作权威生成面跑一次，
+     windows 侧条目由本机那份带入（并集只增不减，Gradle 不剪未用到的条目，实测 466→495 与
+     幂等两轮都是这个行为）。**跨平台自动生成面缺一个是新登的口子，见 §五 Q61**。
+4. 实测七条，全部现跑（不是设想）：
    - **属性生效**：把 junit 那条 sha256 的末位 `3` 改成 `4`，`./gradlew :broker:testDebugUnitTest`
      不带任何校验参数 ⇒ EXIT=1，`Dependency verification failed for configuration
      ':broker:detachedConfiguration6'` + `One artifact failed verification: junit-4.13.2.jar
@@ -2516,13 +2532,26 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    - **缺条目不阻塞重锁**（Q55 原来担心的鸡生蛋）：删掉整个 junit `<component>` 块（等价于
      一次版本升级带来的新坐标没有条目），跑重锁那条命令 ⇒ EXIT=0 且条目被**补录**回来。
      生成模式对缺条目是补录不是判红，这就是「bump 之后靠重锁补字节」这条路能走的原因。
-   - **SOP 幂等**：按最终写法的三条命令连跑一遍 ⇒ 四把 `gradle.lockfile` 的 md5 逐条不变、
-     `verification-metadata.xml` 的 md5 不变。入库那份就是 SOP 的不动点，下次 dispatch 报
-     「无差异」是真无差异，不是没人跑。
+   - **SOP 幂等（按当轮三面写法）**：四把 `gradle.lockfile` 的 md5 逐条不变、
+     `verification-metadata.xml` 的 md5 不变（02cbcfaf…）⇒ 入库那份就是重锁面的不动点。
+     加上 `--refresh-dependencies` 与新任务之后的那一次不动点，由本批末尾的 dispatch 实证。
    - **改坏的文档不被静默接受**：把 `<configuration>` 里换成放错层级的 `<trust>` ⇒ EXIT=1，
      `Unable to read dependency verification metadata`（并点名 `<trust>` 必须在
      `<trusted-artifacts>` 之下），且文件未被改写 ⇒ 这一刀只有「红」和「拒读」两种表现，
      没有第三种「当没这回事继续构建」。
+   - **本地全绿挡不住 CI 红（PR #189 首轮，三个 gradle 作业同红）**：`android-quality`、
+     `contracts/android-contract-build`（windows runner）、`native-policy-artifacts` 报的都是同
+     6 个构件、同一个配置名 `classpath`——`guava-parent-33.4.0-jre.pom`、
+     `junit-bom-5.10.2.module`、`junit-bom-5.11.0-M2.module`、`junit-bom-5.14.4.module`、
+     `kotlin-gradle-plugins-bom-2.2.10.module` 与 `.pom`。入库那份里这些组件**存在但只登记了
+     另一半**（`junit-bom:5.10.2` 有 `.pom` 没 `.module`；`kotlin-gradle-plugins-bom` 只有本机
+     用得到的 2.4.21）。根因不是平台，是**缓存**：Gradle 只把本次落盘的字节写进文档，
+     而本机 `~/.gradle` 的元数据缓存让这些描述文件从来没被取过 ⇒ 生成面看不见它们，
+     干净 runner 一解析就红。处置＝生成面一律 `--refresh-dependencies`（强制重取），
+     并把权威生成面放到 CI 上跑一次（见第 10 点）。**两个附带事实**：①文档的字节面跟平台走
+     （本机文档里只有 `aapt2-…-windows.jar`，`-linux` 零命中），②`FileCollection` 没有 `size()`
+     ——写错成 `cfg.incoming.files.size()` 的表现是**脚本编译不过**而不是解析出 0 个文件，
+     而脚本编译结果有缓存，不加 `--refresh-dependencies` 的话这个错误形态能躲过本地三轮运行。
    - 覆盖面 466→495 组件那 29 条增量全部来自**参与冲突裁决但未被选中**的版本
      （lifecycle / savedstate / coroutines 的旧候选 + detekt 的 sarif4k、kotlin-logging），
      不是新依赖。这解释了「锁里 284 条坐标、文档里 495 个组件」：字节面按构件登记，

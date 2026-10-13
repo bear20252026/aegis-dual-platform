@@ -55,8 +55,11 @@
   `android/settings.gradle.kts` 决策记录 ③）；文档里
   `<verify-signatures>false</verify-signatures>` 是如实口径——仓内无受信 PGP 密钥，
   这一刀验的是「字节与登记的 sha256 一致」，不是「构件被谁签名」。
-  校验和的文件面只能按任务重算，其清单与 CI 任务面由
-  `tests/python/gradle_verification_test.py` 逐 token 对账。
+  重算面按**产物文件**（root 的 `resolveAllConfigurationFiles` 枚举每个可解析配置的 `.files`）
+  加**工具任务面**（ktlint/detekt/lint/测试的 detached 配置只在任务执行时落盘），两条生成命令
+  都带 `--refresh-dependencies`——缓存里不重新落盘的字节不会进文档（本地全绿而 CI 干净 runner
+  红 6 个构件的实测教训，PR #189）；那份任务清单与 CI 的对应关系由
+  `tests/python/gradle_verification_test.py` 从 workflow 原文逐 token 对账。
   两把刀都不覆盖的面如实登记：`buildscript {}` 与 plugins DSL 是**脚本类路径**，
   不在项目配置锁内（那一路由 root `build.gradle.kts` 的显式 classpath 地板 +
   `buildEnvironment` 回读承接）。catalog 升级必须**同批重锁+重算校验和**，漏任一面在

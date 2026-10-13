@@ -5,18 +5,18 @@
 
 1. **开关真的在属性面**。本批实测过另一种形态：只在命令行加 `--dependency-verification=strict`
    ——那个口径下任何一条**不带参数**的 gradlew 调用都不校验，而 CI 与本地大量调用正是这样。
-   属性把判据落到每一次解析，命令行参数于是只剩「重锁那一次的放宽」。
-2. **重算面真的能重算**。校验和的证据面**按文件**下载（图解析只取 .pom/.module，不下
-   .jar/.aar），所以它不能像版本锁那样靠 `resolveAllConfigurations` 的集合定义，只能列任务
-   清单。清单会漂，于是这里从 workflow 原文**现读** CI 任务面来对账，而不是再手抄一份。
-   它与 R9-B32 的失效方向相反：漏条目的表现是下一个用到该构件的作业当场红，不是静默放松。
+2. **重算面真的能重算**，而且重算的是**字节**：产物文件走 `resolveAllConfigurationFiles`
+   （图解析只下 `.pom`/`.module`，一个 `.jar`/`.aar` 都不落盘）；工具类路径是任务执行时现建的
+   detached 配置，不在 `project.configurations` 里，所以那一小份任务清单不能省（逐 token 判）；
+   两条生成面都带 `--refresh-dependencies`——本地长命的元数据缓存能让一批描述文件**永不落盘**，
+   PR #189 上本地三条命令全绿而 CI 两个平台的干净 runner 同红 6 个构件（配置名 `classpath`）。
 3. **文档口径跟得上实树**。启用前 SECURITY.md 写的是「本仓未做」；启用后还留着那句话，
    就是把对外声明的覆盖面写**小**了——那是 R9-DOC 那批失实的镜像面。
 
-为什么不是行为用例：真被校验的是 Maven 构件字节，端到端证伪需要一个可控的仓库镜像（基建批）。
+为什么不是行为用例：真被校验的是 Maven 构件字节，端到端证伪要一个可控的仓库镜像（基建批）。
 这里的证伪口径是「注入必红」，两侧都有实测记录（`android/settings.gradle.kts` 决策记录 ③）：
-把某条 sha256 末位改一个字符后，不带任何参数的 `:broker:testDebugUnitTest` 45s 内 BUILD FAILED
-并点名该构件；删掉整个组件块后跑重锁那条命令 BUILD SUCCESSFUL 并把条目补了回来。
+改一个 sha256 字符 ⇒ 不带参数的 `:broker:testDebugUnitTest` 45s 内 BUILD FAILED 并点名该构件；
+删掉整个组件块 ⇒ 重锁那条命令 BUILD SUCCESSFUL 并把条目补了回来。
 """
 
 from __future__ import annotations
@@ -37,22 +37,29 @@ from text_anchors import drop_line_comments
 
 ANDROID = ROOT / "android"
 PROPERTIES = ANDROID / "gradle.properties"
+ROOT_SCRIPT = ANDROID / "build.gradle.kts"
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
 RELOCK = WORKFLOW_DIR / "dependency-relock.yml"
 
 VERIFICATION_KEY = "org.gradle.dependency.verification"
 ALLOWED_VALUES = frozenset({"strict", "lenient", "off"})
-# 不落**构件文件**的调用：图解析的 .pom/.module 由重锁的图面那条覆盖，纯锁对账不下任何东西。
-# 加一条就要在台账里写清它为什么不落文件——这份豁免就是清单与集合之间的那道缝。
+FILES_TASK = "resolveAllConfigurationFiles"
+RESOLVE_GRAPH_TASK = "resolveAllConfigurations"
+# 不落**构件文件**的调用：图解析（.pom/.module）由重锁的图面那条覆盖，纯锁对账不下任何东西。
 NON_ARTIFACT_FILE_FACE = frozenset({"verifyDependencyLockCoverage", ":app:dependencies", ":app:dependencyInsight"})
+# 由**集合口径**覆盖的构建任务：它们吃的 classpath 文件就是本项目那些 canBeResolved 配置，
+# `resolveAllConfigurationFiles` 已经逐个解析过。这份豁免是清单与集合之间那道缝的另一半——
+# 加一条要在台账里写清「它的文件确实来自项目配置」，否则它就成了第二个「靠漏抄变绿」的洞。
+SET_COVERED_TASKS = frozenset({
+    "assemble", ":app:assembleDebug", ":app:assembleRelease", ":app:assembleDebugAndroidTest",
+    ":contracts:assembleDebug", ":broker:compileDebugKotlin", ":webview-adapter:compileDebugKotlin",
+})
 # shell 里的非任务词。名单是**保守的**：漏一个的后果是把工具名当任务要求进文件面，
 # 那条红灯会带着完整清单出现，不是静默放松。
 NON_TASK_WORDS = frozenset(
     "awk bash bat cat cd cut done echo else export false fi for gradlew grep head if python python3 "
-    "sed set sh sort tail tee then timeout true uniq".split()
-)
-# 带值的 gradle 选项：不跳过其值，`--write-verification-metadata sha256` 的 `sha256`
-# 与 `--configuration debugRuntimeClasspath` 的配置名都会被当成任务词。
+    "sed set sh sort tail tee then timeout true uniq".split())
+# 带值的 gradle 选项：其值必须跳过，否则 `sha256`、`debugRuntimeClasspath` 会被当成任务词。
 OPTION_WITH_VALUE = frozenset({"--configuration", "--dependency", "--tests", "--write-verification-metadata"})
 # `(?::[\w.-]+)*` 里的 `*` 是必须的：写成 `?` 时 `:app:ktlintCheck` 整体不匹配（少一层模块前缀
 # 的形态），于是所有带模块前缀的任务词**静默**消失，判据退化成只看得见 5 个裸任务——实测撞过。
@@ -194,30 +201,48 @@ def test_no_gradle_invocation_relaxes_verification_by_flag() -> None:
     assert not offenders, f"workflow 里出现了放宽校验的 gradlew 调用：{offenders}"
 
 
-def test_relock_regenerates_checksums_on_both_faces() -> None:
+def test_checksum_generation_faces_force_fresh_bytes_and_the_file_set() -> None:
+    """两条生成面都必须带 `--refresh-dependencies`，文件面必须走集合口径的那个新任务。
+
+    `--refresh-dependencies` 不是保守起见：PR #189 实测本地三条命令全绿而 CI 两个平台的
+    runner 同红 6 个构件（guava-parent、junit-bom×3、kotlin-gradle-plugins-bom×2，配置名
+    `classpath`）——本地那份元数据缓存让这些描述文件**永不落盘**，于是文档里根本没有条目，
+    而「没有条目」在生成模式下也不报错。不强制重取字节，「重算校验和」这句就是假账。
+    """
     run = step_body(relock_steps(), "Gradle 重锁")
-    surface = checksum_surface_lines(run)
-    if len(surface) != 2:
-        raise AssertionError(f"校验和的重算命令必须恰好两条（图面 + 文件面），实得 {len(surface)}")
-    graph = [line for line in surface if "--write-locks" in line]
-    if len(graph) != 1 or "resolveAllConfigurations" not in graph[0]:
+    lines = checksum_surface_lines(run)
+    if len(lines) != 2:
+        raise AssertionError(f"校验和的重算命令必须恰好两条（图面 + 文件面），实得 {len(lines)}")
+    for name, line in zip(("图面", "文件面"), lines, strict=True):
+        assert "--refresh-dependencies" in line, f"{name}没带 --refresh-dependencies——缓存里没落盘的那批字节不会进文档"
+    graph, file_face = lines
+    if "--write-locks" not in graph or RESOLVE_GRAPH_TASK not in graph:
         raise AssertionError(f"图面必须与 --write-locks 同条且走集合解析，实得 {graph}")
+    for needle in (FILES_TASK, "buildEnvironment"):
+        assert needle in file_face, f"文件面缺 {needle}——前者是产物文件的集合口径，后者是脚本类路径"
+    script = ROOT_SCRIPT.read_text(encoding="utf-8")
+    assert f'tasks.register("{FILES_TASK}")' in script, (
+        f"root 脚本里没有 {FILES_TASK}——重锁面敲一个不存在的任务，只会在那次 dispatch 里红"
+    )
 
 
-def test_file_face_checksum_surface_covers_every_ci_gradle_task() -> None:
+def test_tool_task_surface_covers_every_ci_gradle_task() -> None:
     run = step_body(relock_steps(), "Gradle 重锁")
     surface = task_tokens(checksum_surface_lines(run))
     ci = task_tokens(gradle_command_lines())
     if len(ci) < 20:
         raise AssertionError(f"从 workflow 只提出 {len(ci)} 个任务词——提取口径坏了，这条判据就是假绿：{sorted(ci)}")
-    missing = sorted(ci - surface - NON_ARTIFACT_FILE_FACE)
+    missing = sorted(ci - surface - NON_ARTIFACT_FILE_FACE - SET_COVERED_TASKS)
     assert not missing, (
-        f"CI 跑过这些任务而校验和的文件面没覆盖（{missing}）——它们解析到的构件字节可能根本不在文档里，"
-        "表现是下一个用到的作业当场红。补进 dependency-relock.yml 的文件面，"
-        "或加进 NON_ARTIFACT_FILE_FACE 并写清为什么不落文件"
+        f"CI 跑过这些任务而校验和的重算面没覆盖（{missing}）——工具类路径（ktlint/detekt/lint/测试）"
+        "是任务执行时现建的 detached 配置，不在 project.configurations 里，只有跑它们才落盘；"
+        "补进 dependency-relock.yml 的文件面，或说明它为什么属于 NON_ARTIFACT_FILE_FACE / SET_COVERED_TASKS"
     )
-    # dependency-submission 的隐式默认任务在 workflow 文本里看不见，只能显式钉住
-    assert "assemble" in surface, "文件面没有 bare `assemble`——那是 gradle-dependency-graph.yml 的隐式任务"
+    stale = sorted(task_tokens([file_face_line(run)]) & SET_COVERED_TASKS)
+    assert not stale, (
+        f"构建任务清单又回到文件面了（{stale}）——那一路的 classpath 文件归 {FILES_TASK} 的集合口径管；"
+        "两处各写一份就是两份真相，且清单必然漏（R9-B32 那条课的另一半）"
+    )
 
 
 def test_dropping_the_file_face_line_turns_the_gate_red() -> None:
@@ -260,7 +285,14 @@ def test_settings_decision_record_states_the_two_faces_differently() -> None:
     下一个人会照 ② 的集合口径去「顺手统一」两面，结果是校验和静默漏项。
     """
     record = (ANDROID / "settings.gradle.kts").read_text(encoding="utf-8")
-    for needle in ("verification-metadata.xml", "resolveAllConfigurations", "补录", "verify-signatures"):
+    for needle in (
+        "verification-metadata.xml",
+        RESOLVE_GRAPH_TASK,
+        FILES_TASK,
+        "--refresh-dependencies",
+        "detached 配置",
+        "补录",
+        "verify-signatures",
+    ):
         assert needle in record, f"settings.gradle.kts 的决策记录缺「{needle}」——单源没了，口径就会各写一份"
-    assert re.search(r"按\*{0,2}文件\*{0,2}重算", record), "决策记录缺「校验和按文件面重算」——两面不同的那句没了"
     assert "那一刀，本仓未做" not in record, "决策记录 ③ 还写着未做——与实树冲突"

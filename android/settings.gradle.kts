@@ -51,19 +51,29 @@ dependencyResolutionManagement {
 //    **不带任何校验参数**，45s 后 BUILD FAILED 并点名 `junit-4.13.2.jar (junit:junit:4.13.2)`
 //    （报的是 `:broker:detachedConfiguration6`——工具类 detached 配置也在判面内）。
 //    两把刀的重算口径**不同**，这是本条的重点：
-//    · 版本按**集合**重算（`resolveAllConfigurations` 解析每个 `canBeResolved` 的配置图，
+//    · 版本按**配置的图**重算（`resolveAllConfigurations` 解析每个 `canBeResolved` 的配置图，
 //      天然 ⊇ 任何任务清单，见 ②）；
-//    · 校验和按**文件**重算（`--write-verification-metadata sha256` 只登记本次真正落盘的
-//      构件字节；图解析只取 .pom/.module，不下 .jar/.aar，所以集合口径在这里够不着）。
-//    于是文件面只能列任务清单，漂移风险由 `tests/python/gradle_verification_test.py` 从
-//    workflow 原文逐 token 对账兜住。它与 ② 的失效方向相反，别照旧课推旧药：漏条目的表现是
-//    **响亮失败**（下一个用到该构件的作业当场红），不是静默放松——466→495 组件那批就是
-//    图解析里「未选中但参与冲突裁决」的候选版本补进来的，同一坐标的 pom/module 缺位同样会红。
+//    · 字节按**配置的文件**重算（新任务 `resolveAllConfigurationFiles` 解析每个
+//      `canBeResolved` 配置的 `.files`）。两者不能并成一条：图解析只取 `.pom`/`.module`，
+//      一个 `.jar`/`.aar` 都不落盘，而 `--write-verification-metadata` 登记的正是落盘的字节。
+//    · 只跑任务面也不行，只跑文件集合也不行：ktlint/detekt/lint/单元测试用的工具类路径是
+//      任务执行时现建的 **detached 配置**，不在 `project.configurations` 里，只有跑那几个任务
+//      才会落盘——所以重锁面留了这一小份任务清单，它与 CI 的对应关系由
+//      `tests/python/gradle_verification_test.py` 从 workflow 原文逐 token 判（构建类任务
+//      已从这一面删掉：它们的 classpath 文件归集合口径管，两处各写一份就是两份真相）。
+//    · 两条生成面都带 `--refresh-dependencies`。这是本条最贵的一课：校验和文档只能记录
+//      本次**真正落盘**的构件，而长命的 `~/.gradle` 元数据缓存可以让一批 parent-pom/BOM
+//      描述文件永不落盘——本地三条命令全绿，CI 的干净 runner 在两个平台同红 6 个构件
+//      （guava-parent、junit-bom×3、kotlin-gradle-plugins-bom×2，配置名 `classpath`，
+//      PR #189 实测）。不强制重取字节，「重算校验和」这句话就是假账。
+//    覆盖面还会随解析增长（466→495 组件那批是图解析里「参与冲突裁决但未被选中」的候选版本），
+//    且同一坐标的 `.pom`/`.module` 缺位同样会红——字节面按构件登记，不按「最终选了谁」登记。
 //    执行面与锁同批：`dependency-relock.yml` 的 gradle 生态里 `--write-locks` 那条同时带
 //    `--write-verification-metadata sha256`。**先有鸡还是先有蛋已经实证解开**：删掉整个 junit
 //    组件块（等于一次版本升级带来的「新坐标没有条目」）后跑同一条命令，BUILD SUCCESSFUL
-//    并把条目补了回来——生成模式对缺条目是**补录**不是判红，所以 Dependabot 的 gradle bump
-//    PR 红在 strict 上是流程的正确表现：跑一次重锁，让版本与字节同一批进来。
+//    并把条目补了回来——生成模式对缺条目是**补录**不是判红。Dependabot 的 gradle bump PR
+//    红在 strict 上是流程的正确表现：跑一次重锁让版本与字节同一批进来（重锁只写 `deps/*`
+//    分支，而 Dependabot 的分支名不是那个前缀 ⇒ 这一面的缺口登记在台账 §五 Q60，需裁决）。
 //    别把 `org.gradle.dependency.verification` 改成 off/lenient 绕红灯（用例判的就是这个）。
 // ④ AD-155 留的重开条件「若后续引入动态版本依赖」并未触发（现树仍零动态版本）；
 //    真正增量是传递依赖钉版 + 升级必须同批重锁这条流程约束。

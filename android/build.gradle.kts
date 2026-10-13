@@ -145,4 +145,30 @@ subprojects {
             }
         }
     }
+
+    // 校验和用（R9-B50）：把每个可解析配置的**产物文件**解析一遍。与上面那条的差别就是本行的
+    // 存在理由：`resolutionResult.root` 只走依赖图，Gradle 为此只取 `.pom`/`.module`；
+    // 而 `--write-verification-metadata` 登记的是本次**真正落盘的字节**，图解析一个
+    // `.jar`/`.aar` 都不下。用集合口径而不是抄任务清单，理由与 `resolveAllConfigurations`
+    // 同一条（R9-B32）：任何任务解析到的配置都在这个集合里。
+    // 逐配置 try/catch 是有意的：库模块的 androidTest 类配置在产物未构建时解析不动
+    // （② 里那条实测），这里要的是「尽可能多地下」，覆盖判据仍归 verifyDependencyLockCoverage。
+    // 不能只靠本行的一面：ktlint/detekt/lint/测试这些**工具 detached 配置**是任务执行时才创建的，
+    // 不在 `project.configurations` 里，所以重锁面仍要跑那几个任务（见 dependency-relock.yml）。
+    tasks.register("resolveAllConfigurationFiles") {
+        notCompatibleWithConfigurationCache("执行期枚举并解析 configurations 的产物文件")
+        doLast {
+            project.configurations.filter { it.isCanBeResolved }.forEach { cfg ->
+                val outcome = try {
+                    // FileCollection 没有 size()，`.files` 才是 Set<File>——写错一层的表现是
+                    // 脚本编译不过，而不是解析出零个文件（--refresh-dependencies 逼它真编译了一次才发现）。
+                    val resolved = cfg.incoming.files.files
+                    "OK (${resolved.size} 个文件)"
+                } catch (e: Exception) {
+                    "FAIL ${e.message?.lineSequence()?.firstOrNull()}"
+                }
+                println("解析文件 ${project.path}:${cfg.name} -> $outcome")
+            }
+        }
+    }
 }
