@@ -1236,7 +1236,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    会冒充「测试跑过」。`SCHEMA_LEVEL`（`validate_vector_schemas.py` + 它的输入守卫用例）
    也不算端侧消费者：它判的是「实例对 Schema 的通过/拒绝＝向量自述的 expected」。
 2. 实测结论（15 份）：`url-origin-valid/invalid` 是**仅有的两份 CS∧AD 同跑**；
-   `native-navigation-decision` 到 CS+RS；`action-*`/`glob-match`/`approvals-replay-and-expiry`/
+   `native-navigation-decision` 到 CS+RS（**这条 CS 已被 R9-B39 证伪**：唯一的命中是注释，
+   登记表已回到 `{"RS"}`，见 §3.39 / §二 R9-SH-15）；`action-*`/`glob-match`/`approvals-replay-and-expiry`/
    `native-navigation-confirmation`/`update-manifest-invalid` 只 RS；`update-manifest-canonical`
    RS+PY（`tests/python/release_tools_test.py`，真实消费者）；`update-manifest-valid` RS+CI
    （`supply-chain.yml`）；`capability-*` 与 `audit-event-*` 四份**零端侧执行者**。
