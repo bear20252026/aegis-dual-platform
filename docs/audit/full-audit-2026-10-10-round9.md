@@ -863,7 +863,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   同批未验的半边记在 §3.50 第 7 条：`release-android.yml:223` 的 `:app:assembleRelease`
   在本批只跑到**本机**，CI 侧要等下一次真实 dispatch/标签。
 
-- Q61 R9-AD-15 | P2（R9-B50 第二轮发现，登记不顺手做） |
+- Q61 R9-AD-15 | **P2 部分闭环（R9-B51 / §3.51）**：判据那半已常驻——`scripts/verify_gradle_platform_coverage.py` 的需求平台**从 workflow 的 `runs-on` 现取**，平台相关坐标缺任一形态即红（四条注入证伪，塌缩走 exit 2，豁免表自己也被判）。**仍开着的那半**：自动生成面只有 ubuntu 一个，补 windows 腿要先定「两个 job 不并发推同一份文件」的串行/合并口径 ⇒ 需给话。原条目 ↓
+  Q61 R9-AD-15 | P2（R9-B50 第二轮发现，登记不顺手做） |
   `.github/workflows/dependency-relock.yml:219`（`gradle-relock: runs-on: ubuntu-latest`）↔
   `.github/workflows/contracts.yml:278`（windows runner 上的 `./gradlew.bat`）↔
   `android/gradle/verification-metadata.xml`：
@@ -2633,6 +2634,45 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
     本机那份只有 `-windows.jar`，这条把第 3 点的「字节面跟平台走」从推断变成实测。
     入库那份因此是 windows（本机）+ ubuntu（dispatch）两轮并集，且这次是**按 SOP 的三面写法**
     （`--refresh-dependencies` + 集合文件面 + 工具任务面）产出的，重锁幂等性在这一轮才真的成立。
+
+### 3.51 R9-B51（2026-10-14，队列 Q61 = R9-AD-15）：把「字节面跟平台走」变成常跑判据
+
+1. 本批做 Q61 里**不需要任何人给话**的那一半，把另一半如实留在队列里。起因不是设想：
+   R9-B50 的 `verification-metadata.xml` 是在本机（windows）生成的，`com.android.tools.build:aapt2`
+   那一轮只落了 `aapt2-9.4.1-15978811-windows.jar`，`-linux` 形态**零命中**；而 CI 的
+   `android-quality` 与 `gradle-dependency-graph` 跑在 ubuntu 上。校验和只登记本次真正落盘的
+   字节，所以「一份文档服务两个 runner」这件事等价于要求「每个平台都生成过一次」——
+   而当时全仓没有任何东西在判它，缺的那一半要等到下一个用到该构件的 ubuntu 作业当场红才看见
+   （R9-B32 是同一个位置：master 面上的作业红，同期 PR 门禁全绿）。
+2. 新常驻门禁 `scripts/verify_gradle_platform_coverage.py`：
+   - 需求平台**从 workflow 的 `runs-on` 现取**（ubuntu→linux、windows→windows、macos→macos），
+     代码里没有 runner 名单——将来加一个 macos runner，这条判据会自动开始要求 macos 形态；
+   - 认「构件名带平台后缀」的坐标（`-linux`/`-windows`/`-macos`/`-osx`/`-darwin`，含
+     `osx-x86_64.exe`、`macos-aarch64-2.2.10.zip` 这类平台段后面还有版本号的真实命名），
+     要求它覆盖**需求集合本身**；
+   - **一条被用例钉住的弯路**：第一版判据写成「同坐标各版本取平台并集再比」，看着更聪明，
+     但真出事的那一次现场就是「只有一个版本、只在一台机器上重算过」——按版本并集比在这种
+     形状下恒绿。用例 `test_single_version_missing_a_platform_is_red` 专门把这条钉住；
+   - 判定面塌缩（文档里认不出任何平台后缀构件）⇒ 退出 2 而不是「通过」：AGP 必然拉 aapt2
+     的平台包，零命中只可能是解析口径坏了；
+   - 豁免表 `PLATFORM_EXCLUSIVE`（坐标→理由）**自己也被判**：无理由、或登记的坐标在文档里
+     已经找不到，都判红。当前是空表，用例正面控制着「不许有没理由的豁免」。
+3. 现树实况（现读，不是推断）：需要覆盖 `['linux','windows']`；平台相关坐标只有
+   `com.android.tools.build:aapt2[9.4.1-15978811←linux,windows]` ⇒ 判据 today 绿。
+   证伪四条：删掉 `-linux.jar` ⇒ 红并点名 `['linux']`；删掉 `-windows.jar` ⇒ 红；
+   只留一个版本且只有 linux ⇒ 红（旧写法在这里会绿）；把需求集合换成含 macos ⇒ 红。
+4. 接线：`contracts.yml` 既有 job（`contract-source-of-truth`）新增一步，**没有新开必需检查
+   上下文**（R8-CI-01 的教训口径）。用例 `tests/python/gradle_platform_coverage_test.py` 22 条
+   （含 runs-on 解析形态表驱动、平台后缀识别表驱动、塌缩/缺文件/坏文档三条 exit 2、
+   豁免表自我判据、以及「SECURITY.md 必须写着按平台是并集」的文档对账）。
+5. Q61 记**部分闭环**：判据这一半已常驻；「自动生成面只有 ubuntu」那一半仍在队列里，
+   因为补一个 windows 腿要么改 `gradle-relock` 的写入面（两个 job 并发推同一份文件必然互相
+   覆盖，得先设计串行或合并策略），要么在 PR 面加 `--refresh-dependencies` 的重下载成本——
+   两者都不是本批能顺手定的。
+6. 验证：`pytest tests/python` 735 passed / 1 skipped（本批 +22）；`active_tree_gates all`
+   （ruff / bandit / py312-compat）OK；行数红线、表形、链接、`check_doc_claims`、
+   `check_workflow_shells` 复跑见本节末；四把 `gradle.lockfile`、`packages.lock.json`、
+   `verification-metadata.xml` 均未改动（本批不抬任何版本，也不重算任何字节）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

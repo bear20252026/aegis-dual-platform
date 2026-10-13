@@ -130,6 +130,11 @@ jobs:
       # 反之坐标从四把锁里整体消失也判红（登记的载体没了，留着 dismiss 就是第二条失实陈述）。
       - name: Dismissed Gradle alerts scope gate (R9-B49——dismiss 的前提要每天被重判一次)
         run: python scripts/verify_gradle_alert_scope_boundary.py
+      # R9-B51（Q61）：校验和文档只能记录「本次真正落盘的字节」，而平台相关的构件在不同
+      # runner 上落的是不同文件（aapt2 的 -windows.jar 与 -linux.jar 是两个 sha256）。
+      # 需求平台从 workflow 的 runs-on 现取，所以加一个 macos runner 不需要改判据代码。
+      - name: Gradle checksum platform coverage gate (R9-B51——字节面跟平台走)
+        run: python scripts/verify_gradle_platform_coverage.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
