@@ -1,7 +1,9 @@
 > **历史文档（SP-061，审计 2026-09-23 清单·SP1 批）时代横幅**：本文编制于
 > 2026-08-22（pywebview 双栈期 v2.1.6）——版本/制品表（2.1.6/18MB/SHA）
 > 与「28 个 Python 文件」源码表均为**历史快照**（SP-061/052）；现行测试面：
-> pytest tests/python + agent/tests、五门禁、agent/ 红队、node ui-regression
+> pytest tests/python + agent/tests、`contract-source-of-truth` 的门禁集合（**清单以该 job
+> 的步骤为准**——R9-DOC-10 起本文不再抄「五门禁」这种固定个数的说法）、agent/ 红队、
+> node ui-regression
 >（SP-051：`docs/release/AegisSetup.iss` 已删除）。栈归属以 ADR-009 为准。
 
 # Aegis Browser 安全测试资料

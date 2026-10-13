@@ -157,15 +157,25 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
     三端只 Windows 改了托管侧拒绝面，出货 Windows 因确认门未启用而**静默取消**、
     Android 因 http 强升 https 而**不可达**；另含依赖与工具链升级面全清单
     （OSV 实测在用版本无一命中 CVE）
-- 测试规模：cargo 450+ / dotnet 650+ / gradle JVM 280+ / pytest 230+ / node 80+ 用例，
-  五门禁（validate_release / verify_versions / bridge_guard / contract_compatibility /
-  cross_end_lists）常绿——「常绿」限定为**本轮 CI 实测绿且各门禁确有失败能力**：
-  B1 之前 pwsh 吞退出码曾使红灯长期呈绿，故「绿」本身不是结论，能红才是
+- 测试规模：**这里不抄具体用例数**（R9-DOC-15，第九轮 2026-10-13）。原写「cargo 450+ /
+  dotnet 650+ / gradle JVM 280+ / pytest 230+ / node 80+」，而同一天的实树计数是
+  cargo 605 个 `#[test]`、dotnet 508 `[Fact]`+474 `[InlineData]`、JVM 450 个 `@Test`
+  （app 320 / broker 84 / webview-adapter 46）、`pytest --collect-only` 得 `tests/python` 630
+  ＋`agent/tests` 81、UI 回归 126 条 ⇒ 每一批落地
+  都在让这些数字过期，而它们从没被任何门禁判过（`check_doc_claims.py` 只判 workflow 计数）。
+  **机器判定的只有下界**：`scripts/assert_test_counts.py`（dotnet 发现数 Core ≥700 /
+  Broker ≥160）与 `scripts/verify_vectors.py`（向量 ≥21 份 / 条目 ≥222）；各端实际条数
+  看 CI 日志现算，跑法在 [CLAUDE.md](CLAUDE.md) 的本地验证段。
+  （CHANGELOG 各版本条目里的 "pytest 30" 是当批 agent 红队**单列**口径，不是合计——SP-198）
+- 门禁清单：单源是 `.github/workflows/contracts.yml` 的 `contract-source-of-truth` job，
+  **它有哪些步骤就是哪些门禁**（R9-DOC-10：原写「五门禁（validate_release / verify_versions /
+  bridge_guard / contract_compatibility / cross_end_lists）常绿」，那个五元组既不等于该 job
+  的判定面、也不等于 CLAUDE.md 列的第三个子集 ⇒ 新挂的门禁在文档面上隐形，正是 #131
+  表形门禁当时的遭遇）。CLAUDE.md 的清单只是**本地能跑的子集**，不随批次追抄。
+  「常绿」限定为**本轮 CI 实测绿且各门禁确有失败能力**：B1 之前 pwsh 吞退出码曾使红灯长期
+  呈绿，故「绿」本身不是结论，能红才是
   （文档计数与实树对账另有 `scripts/check_doc_claims.py`，workflow 脚本壳口径另有
   `scripts/check_workflow_shells.py`）
-  （SP-198，2026-10-01 审计补口径：pytest 230+ 为**合计口径**——`tests/python`
-  发布链验证器 195+ 用例 + `agent/tests` 红队 30 用例；CHANGELOG 各版本条目中的
-  "pytest 30" 为当批 agent 红队单列口径，两者不矛盾）
 - 当前版本：见 [shared/version.properties](shared/version.properties) **单源**
   （WB-178，2026-10-02 审计：本文不再硬编码具体版本号——逐版漂移即失实；
   发布记录见 [CHANGELOG.md](CHANGELOG.md)，记账规则见文件头）

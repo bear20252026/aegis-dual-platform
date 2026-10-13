@@ -70,5 +70,5 @@
 | 下载管理面板 | 原生 API 仅受信 chrome 可达 | （Python 不支持▲） | ☑ M4（#b95a4e8 DownloadsWindow——进度/暂停/继续/取消/打开所在文件夹） |
 | 发布链单轨 | 仅 C# 制品，PyInstaller 包移除 | release-windows.yml | ☑ M4（installer-pywebview job 删除——C# 安装包为唯一 Windows 制品，SBOM/SLSA 链不变） |
 | Python 栈归档（只读） | 归档声明 + 仅 P0 安全通道 | legacy/windows-pywebview | ☑ M4（归档声明入 README——功能/安全修复不再在该栈进行） |
-| 文档终版口径 | README/CLAUDE.md/本清单 100% | — | ☑ M4（终局口径：C# 唯一正典栈+唯一制品；ADR-009 执行状态注记） |
+| 文档终版口径 | README/CLAUDE.md/本清单的**终局口径**（**不是**「本清单 100% 勾验」——R9-DOC-14 第九轮 2026-10-13：旧写法与本文件 `:24` 的 ☐ 未实现项直接矛盾，第八轮 §十三 只改了 CLAUDE/README/supported-features 三处，漏了这一处） | — | ☑ M4（终局口径：C# 唯一正典栈+唯一制品；ADR-009 执行状态注记。未勾的两项＝`:24` WebView2 Runtime 更新事件（全树零订阅、无 `RuntimeUpdater.cs`）与末行 M4 真机验收） |
 | **M4 真机验收** | 安装包全新机器全功能走查 | — | ☐ 待真机（需安装包环境人工走查——CI 绿为必要非充分条件，ADR-009 D5） |

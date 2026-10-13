@@ -49,7 +49,21 @@
 
 ## 分支与工作流
 
-- 主分支：`master`（受保护，禁止直接推送）
+- 主分支：`master`。**「受保护」按服务端实测写**（R9-DOC-13，第九轮 2026-10-13 `gh api` 现读；
+  旧表述「受保护，禁止直接推送」与实况相反，故改成下面这份可核对的清单）：
+  - ruleset `R6-master-no-rewrite`（`enforcement=active`）只拦两件事——**删分支**与
+    **force-push**（rules＝`{deletion, non_fast_forward}`），且 `bypass_actors` 里
+    Administrator / Maintain 两个角色都是 `bypass_mode=always`（现读账号
+    `current_user_can_bypass=always`）；
+  - 经典分支保护挂了 **9 个必需状态检查**（`contract-source-of-truth`、`rust-conformance`、
+    `windows-contract-build`、`android-contract-build`、`UI Regression (start.html)`、
+    `cargo-gate`、`ktlint + detekt 质量门禁`、`audit`、`redteam`；`strict=false` ⇒
+    不要求分支先更新到最新），但**响应里没有 `required_pull_request_reviews`**（不要求走 PR，
+    也不要求评审），且 `enforce_admins.enabled=false`（管理员不受这些检查约束）；
+  - 历史里确有直推 master 的提交（`d898677`、`3243397`）。
+  ⇒ **服务端真正强制的只有「不许删分支 / 不许改写历史」**；「经 PR 且 Actions 全绿才并」是
+  本仓的**流程纪律**，不是技术约束。要给 master 加「必须经 PR、必需检查对管理员也生效」属
+  仓库设置变更（改了他人的门禁），需单独授权——见第九轮台账 §四 的待裁决项，本节不假装它已生效
 - 新功能/修复：从 `master` 切出 `feat/<name>` 或 `fix/<name>` 分支，通过 Pull Request 合并
 - 合并前必须通过全部质量门槛（见下）
 
