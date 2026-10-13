@@ -124,6 +124,12 @@ jobs:
       # 门禁型没有 PR 触发、新增 workflow 未归类、探测型混进 PR 面——四种都判红。
       - name: CI trigger surface reconciliation (R9-B46——门禁型不过滤，分类双向对账)
         run: python scripts/verify_ci_trigger_surface.py
+      # R9-B49：分诊文档对 9 条 Maven 告警下的 dismiss 判定，依赖一个会悄悄反转的事实——
+      # 「这些坐标只在构建/测试工具类路径里」。这条门禁判的就是那个事实：坐标一旦进
+      # 出货面（release/debug Runtime|Compile Classpath）或装机面（debugAndroidTest*）即判红；
+      # 反之坐标从四把锁里整体消失也判红（登记的载体没了，留着 dismiss 就是第二条失实陈述）。
+      - name: Dismissed Gradle alerts scope gate (R9-B49——dismiss 的前提要每天被重判一次)
+        run: python scripts/verify_gradle_alert_scope_boundary.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)

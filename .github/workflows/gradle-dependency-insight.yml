@@ -69,6 +69,22 @@ jobs:
           echo "=== test classpath（$CFG）命中 ==="
           grep -nE -B3 "$PKG_REGEX" /tmp/testcp.txt || echo "(零命中)"
 
+      # R9-B49：这条诊断流此前只扫三条面（buildEnvironment / debugRuntimeClasspath /
+      # debugUnitTestRuntimeClasspath），而分诊文档里那 9 条 Maven 告警的落点恰恰是
+      # **两条工具面**（AGP 的 androidLintTool、ktlint-cli 的 ktlint 配置）。
+      # 少扫这两条面，就让「logback 不在本仓任何解析树内」这句失实陈述活了下来
+      # （锁文件里 logback-core:1.3.16=ktlint 一直在）。补上，且按 STRICT 锁的口径
+      # 从锁文件现读，而不是再依赖一次 gradlew 解析（快，且与入库锁同源）。
+      - name: 工具类路径闭包（androidLintTool / ktlint——9 条告警的真实落点）
+        run: |
+          echo "=== 四把锁里命中工具的坐标 → configuration 归属 ==="
+          grep -HnE "$PKG_REGEX" android/*/gradle.lockfile || echo "(零命中)"
+          echo "=== 每条命中所在的 configuration（出货面判定依据）==="
+          grep -hE "$PKG_REGEX" android/*/gradle.lockfile \
+            | awk -F'[=,]' '{for (i = 3; i <= NF; i++) print $i}' | sort -u
+          echo "=== 出货/装机面（release|debug Runtime|Compile Classpath、androidTest）里有没有它们 ==="
+          python scripts/verify_gradle_alert_scope_boundary.py
+
       - name: 依赖链洞察（dependencyInsight——按需解析两条 classpath）
         env:
           # 审计第六轮（2026-10-03）：PY-181 同型残留——${{ }} 在 shell 解析

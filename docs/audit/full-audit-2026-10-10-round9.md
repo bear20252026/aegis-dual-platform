@@ -45,6 +45,10 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-CI-13 | P3（R9-B46 落地；R9-B21 当时只把 ADR 陈述改真，本批收口实树） | 保留并落地 | 四处 `push.paths`（`ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11）删除，理由不是「清单少列一项」而是**清单不可维护**：`ci.yml` 的清单 R8-SH-10 已从 4 项补到 8 项，仍覆盖不住该 job 真实读取的语料闭包。分类与「谁许过滤」从 ADR 的散文变成 `contracts/ci/workflow-categories.yaml`（gates 6 / builds 5 / probes 5）+ `scripts/verify_ci_trigger_surface.py` 的双向对账：未归类/登记不存在/门禁型带过滤/门禁型无 PR 触发/探测型进 PR 面五种都判红；`native-policy-artifacts` 是唯一 `pull_request` 也带过滤的，按 builds 类保留（它产物而非判定质量）。**先跑红灯实录**：删过滤前脚本准确报出四处，删完转绿。代价如实写进 ADR：三个原 `push` 无 branches 限定的 workflow 现在任意分支 push 全量跑 cargo/红队/审计 |
 | R9-CI-14 | **P2**（R9-B47 落地，处方与登记不同——理由写在 §3.47 第 2 点） | 保留并落地（换成内容对账） | 「Gradle 依赖图提交面静默坏掉时全仓没有一张牌会变红」这条洞，登记的处方是按墙钟比对最近提交时间；本批改成**内容对账**：依赖图必须包含当前 `android/*/gradle.lockfile` 的每一个 `group:name` 坐标。实测：现读 SBOM 695 个 package（Maven 形态 332），本地四把锁 284 条坐标**全部在册**（差集 0）；注入「少一条坐标」判红并点名该条，注入「图只剩 5 条」走面塌缩分支而不是「零个缺失」；取数失败/形状不对/锁面为空一律 exit 2（取不到图不等于图是新的）。落图是最终一致的 ⇒ `--attempts` 只延迟红、不掩红（`attempts=1` 时同一份迟到数据必须红，用例钉住） |
 | R9-SH-19 | P3（R9-B47 落地时新增） | 保留（写成判据设计规则，不改代码） | 任何「X 没跑」的判据若本身依赖一条不被监视的流水线，只是把洞往上挪一层。本轮已有三例同形：Q48 的 paths 过滤 → 登记表双向对账；Q28 的 README 未接线面 → 按 `lib.rs` 现算；Q56 的提交面 → 产物内容对账。后续「检测检测器」一律按这个形状做 |
+| R9-CS-3 | **P2**（R9-B48 定稿并落地；登记原文的事实部分先被回读改准） | 保留并落地（带显式逃生门，不改判定语义） | 三项出货默认显式关（`AreDevToolsEnabled`、`IsGeneralAutofillEnabled`、`IsPasswordAutosaveEnabled`）。登记的半句事实是错的：本机 SDK 1.0.2903.40 文档现读前两条 default true、第三条 default **false**；而第三条恰是最不能靠默认的——同一份文档写明「关掉之前已保存的密码仍会被自动填充」。落地理由不是审美而是「产品没有凭证管理界面也没有删除路径」：表单历史与密码提示会写进应用自己的 WebView2 Profile 目录，用户在设置里既看不到也删不掉。调试面保留成 `AEGIS_ENABLE_DEVTOOLS=1`（与确认门/原生核心门同形的 env 门，安装器不写）；状态一律留痕。落点唯一（`WebView2Hardening.Apply`，`HostWebView.cs:164` 调用，两窗口共用）。用例 10 条含反向锚`AreDevToolsEnabled = true` 判红（能红的前提是先剔注释——「SDK 默认 true」就写在紧邻注释里，R9-B45 的单源 helper 第一次被新用例直接用上）与 Profile 不可得必须留痕 |
+| R9-DOC-18 | P3（R9-B48 落地时新增） | 保留并落地（改成现读口径） | `docs/runbooks/windows-run-guide.md:76` 抄了「**11 项**」并枚举名称，而它前一次修正是从「10 项」改到「11 项」，本批给 Windows 表加第 12 步后它又过期一次。改成「计数不在此抄 + `grep -c '^| [0-9]'` 现读 + 按名称核对」。同类形状本轮已第三次出现（五门禁数、测试规模数、真机验证项数）：**凡把单源的值再抄一遍进散文，就要在改代码的同一批把它换成指针** |
+| R9-DEPS-2 | **P2**（R9-B49 现读发现＝三处文档共同的失实陈述） | 保留并落地（改真 + 补覆盖面 + 常驻判据） | 分诊文档 §三、`android/build.gradle.kts` 头注与本轮 §二 R9-DEPS-1 段都写「logback 3×low **不在本仓任何解析树内**」。四把 STRICT 锁现读：`ch.qos.logback:logback-core:1.3.16=ktlint`（及 `logback-classic`）在四个模块各一条（`android/app/gradle.lockfile:106-107`、`broker:5-6`、`contracts:5-6`、`webview-adapter:15-16`），父节点 `com.pinterest.ktlint:ktlint-cli:1.8.0` ⇒ 它在**工具类路径面**，不是不在树内。这句话能活三轮的原因很具体：`gradle-dependency-insight.yml` 只扫三条面，**从没扫过 `androidLintTool` 与 `ktlint`**——正是这 9 条告警的实际落点；诊断工具的覆盖面决定结论的可信度，而它自己没人判。处置：三处文字改真（不加地板的结论仍成立，理由换成「在 ktlint 工具面、抬它会改 linter 自身运行时、只在构建期存在」）；该 workflow 补「工具类路径闭包」步骤（从锁现读 configuration 归属并直接调新门禁） |
+| R9-CI-15 | P2（R9-B49 新增：dismiss 是可过期的决定，此前无判据） | 保留并落地 | 9 条 Maven 告警在用户授权后正式 dismiss（`tnt` + 逐条锁文件行号证据）。但 dismiss 依赖的事实是「这 5 个坐标只在工具/测试类路径」，一次普通 `implementation` 变更就能推翻，而推翻后 GitHub 不会再有任何提示（告警已被自己关掉）。新常驻门禁 `scripts/verify_gradle_alert_scope_boundary.py`：从四把锁现读坐标→configuration 全集，越界进 `release|debug Runtime|Compile Classpath` 或 `debugAndroidTest*Classpath`（装进设备那份算暴露面）判红并点名撤销 dismiss；坐标从锁里整体消失也判红（载体没了不能继续挂着 dismiss）；锁面为空 exit 2。20 条用例含 12 项配置分类表驱动 + 两条正面控制（登记表坐标必须仍在锁里、分诊文档必须逐条含包名）。接进 `contracts.yml` 既有 job |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
 | R9-RS-9 **收编** | P2 | 保留并落地（R9-B15，上一条登记行的后半） | 两条像素直读包装的注册尾现在三端同形：C# 此前**裸调** `registerProxy(...)`、Kotlin 此前**裸调** `if (__aegisReg) ...`，两端都补成与 Rust 同款 `try { if (REG) REG(proxy, orig); } catch (e) {}`——这不是排版：注册器一旦抛异常，裸调会让整个包裹安装中断，等于把「不加噪的原文直读」重新放出来（catch 体本身三端行为早已同形：空 catch + 落到统一 `return orig.apply(...)`，只有 Kotlin rect-read 把 return 写在 catch 体内，现改成同形写法）。剩余唯一分歧是**注册器取用路径**（Windows＝ToStringGuard 闭包内的本地 `registerProxy`，Rust/Android＝`window[Symbol.for('proxy.register.v1')]`），由 `injected_js_text._REGISTER_ACCESSOR` 按别名表归一，因此 `DIVERGENT_REGISTERED` 从 2 条收成 **0 条**、比较面从 5 个函数扩到 7 个。别名表**只认登记的键名**（`proxy.register.v1` 与 Rust 的 `{reg_sym}` 占位），故意不写成通配 `window[Symbol.for(…)]`——否则 close 键 `proxy.register.close.v1` 能冒充注册器通过；这条边界有常驻用例与 `--self-test` 用例各钉一次。没有把 Windows 也改成 window 键入口：那会把注册句柄从闭包暴露到页面可达的 window 空间，是**放宽出货安全面**，已列第四节待裁决 |
@@ -113,8 +117,14 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 开 PR，与此一致。所以 critical（BC name-constraints 绕过）与 high（BC ASN.1 强制解析）
 在构建机上仍开放，等上游发版后复检；产品 APK 不受影响（`debugRuntimeClasspath` 闭包零命中）。
 `android/build.gradle.kts` 的头注就地补这一段（含「1.85/0.9.6/3.18.0 是 2026-10-03 首次设地板时
-的取值、不作现行陈述」的日期更正，顺带把 R9-AD-8 的注记失实闭合）。logback 3×low 维持
-「不在解析树」原判。
+的取值、不作现行陈述」的日期更正，顺带把 R9-AD-8 的注记失实闭合）。
+   **但同段那句「logback 3×low 维持『不在解析树』原判」是错的，R9-B49 现读推翻**：四把入库锁里
+   `ch.qos.logback:logback-core:1.3.16=ktlint`（以及 `logback-classic`）各有一条，
+   父节点是 `com.pinterest.ktlint:ktlint-cli:1.8.0` 的传递依赖——它在**工具面**，不在出货面。
+   原判之所以活下来：`gradle-dependency-insight.yml` 只扫三条面，从没扫过 `androidLintTool` 与
+   `ktlint`（这 9 条告警的实际落点）。本节上方「当前钉版即最新已发布版」对 buildscript 地板成立、
+   对这两条 detached 配置不成立（那里仍是 1.80.2 / 3.16.0 / 4.5.6 / 1.3.16）。
+   更正、补面与常驻判据见 §3.49。
 
 ### 3.2 R9-B3（2026-10-10，定稿项 4 的第一子批）：`Microsoft.NET.Test.Sdk` 17.14.1 → 18.10.1
 
@@ -635,8 +645,11 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   同形门禁里显式别名；把 Windows 也改成 window 键入口＝把注册句柄暴露到页面可达的
   window 空间（要靠 R8-RS-09 那套「窗口关闭」标志兜着），属**放宽出货安全面**，不默认执行。
 
-- **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
-  保存默认——关闭改变调试与默认 UX，属产品行为变更。
+- ~~**R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
+  保存默认——关闭改变调试与默认 UX，属产品行为变更。~~ **已定稿并落地（R9-B48 / §3.48）**：
+  三项显式关 + `AEGIS_ENABLE_DEVTOOLS=1` 显式逃生门（安装器不写）；登记里「密码自动保存默认开着」
+  这半句被本机 SDK 文档现读推翻（default false），但它仍是三条里最不能靠默认的一条——
+  同一份文档写着「关掉之前已保存的密码仍会被自动填充」。
 - ~~**R9-SH-5**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在 `agent/broker.py` 零消费。~~ **已定稿并落地（R9-B46 / §3.46）**：逐列现读消费者后发现登记的处方本身不成立——`risk`/`audit`/`read_only` 一直各有静态消费者（`analyze_action_catalog.py:81,91`、`verify_agent_catalog.py:43`、`agent/tests/redteam_test.py:87`），只有 `confirmation` 全仓零消费者；而「接进裁决链」正是本节下面那句「默认放行改默认需确认，不默认执行」。定稿走第三条路：列身份写进 catalog 头部、`confirmation` 变成必填的意图声明（analyzer 规则 ⑤）、反向用例钉住运行时不读治理列。
 - **R9-SH-6 的一半**：`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会改变
   同站多子域共享种子的产品语义。该表的**补条目 + 收录口径 + 只增不减门禁**已落地（§3.6），
@@ -2368,6 +2381,58 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    用例 `tests/python/gradle_graph_freshness_test.py` 11 条（含一条正面控制
    `test_real_lock_surface_is_not_collapsed`：锁解析 ≥200 条且认得出 `androidx.webkit:webkit`，
    否则「全部在册」是空对空的恒真）。
+
+### 3.49 R9-B49（2026-10-13，仓库设置授权后的第一批）：9 条 Gradle 告警正式 dismiss，并把 dismiss 的前提变成常跑判据
+
+1. 用户 2026-10-13 授权「全部剩余项按你的意见完成」后，本批做的是**结掉一件挂了三轮的悬案**：
+   `docs/security/android-build-classpath-triage.md` 第三节那 9 条 Maven 告警
+   （bcprov×3 / bcpkix / commons-lang3 / httpclient / logback×3）自 2026-10-03 起判为
+   「AGP 插件 detached 配置、地板不可达面」，但第八轮 R8-CI-06 实测发现
+   **一条都没有 dismiss 过**（9 条全 `state=open`、`dismissed_at` 为 null），
+   当时只把「已在 GitHub 上执行」这句失实陈述改真，并注明「属仓库所有者操作，需确认」。
+   本批在授权下执行 dismiss，理由与证据写进 dismiss comment，逐条引用锁文件行号与配置名。
+2. **本批真正的产出不是那次点击，而是让那次点击不会过期**。dismiss 依赖的事实是
+   「这 5 个坐标只存在于工具/测试类路径」；一次普通的 `implementation` 变更就能推翻它，
+   而推翻之后 GitHub 上不会再有任何提示（告警已经被自己关掉了）。
+   所以新增常驻门禁 `scripts/verify_gradle_alert_scope_boundary.py`：
+   - 从四把 `android/*/gradle.lockfile` 现读每个坐标出现的 configuration 全集；
+   - 出货面 = `release|debug` 的 `Runtime|Compile Classpath` + `debugAndroidTest*Classpath`
+     （**装进设备跑的那份算暴露面**，不因「不是产品」放过）；
+   - 坐标越界进出货面 ⇒ 判红并指明要撤销 dismiss；坐标从四把锁里整体消失 ⇒ 也判红
+     （登记载体没了，继续挂着 dismiss 就是下一条失实陈述）；锁面为空 ⇒ exit 2；
+   - 接入 `contracts.yml` 既有 job（PR 面必跑；不新增必需 context）。
+   用例 20 条（`tests/python/gradle_alert_scope_test.py`），含 12 项 configuration 分类表驱动
+   与两条正面控制（登记表每个坐标都必须仍在锁里；文档 §三 表格里必须逐条找得到包名）。
+3. **顺手抓到一条三轮都没发现的失实陈述**（这条比 dismiss 更值钱）：分诊文档第三节、
+   `android/build.gradle.kts:15-16,26` 与 `docs/audit/full-audit-2026-10-10-round9.md:116` 都写着
+   「logback 3×low **不在本仓任何解析树内**」。现读四把锁：
+   `ch.qos.logback:logback-core:1.3.16=ktlint` 与 `logback-classic:1.3.16=ktlint`
+   在 app/broker/contracts/webview-adapter 四把锁里**各有一条**
+   （`android/app/gradle.lockfile:106-107`、`broker:5-6`、`contracts:5-6`、`webview-adapter:15-16`），
+   父节点是 `com.pinterest.ktlint:ktlint-cli:1.8.0` 的传递依赖。
+   这句话能活三轮的原因很具体：`gradle-dependency-insight.yml` 只扫
+   `buildEnvironment` + `debugRuntimeClasspath` + `debugUnitTestRuntimeClasspath` 三条面，
+   **从没扫过承载这 9 条告警的两条工具面**（`androidLintTool`、`ktlint`）——
+   诊断工具的覆盖面决定了结论的可信度，而它自己没人判。
+   处置：三处文字改真（不加地板的结论仍成立，但理由从「不在树内」换成
+   「在 ktlint 工具面、抬它会改 linter 自身运行时，且只在构建期存在」）；
+   该 workflow 补一条「工具类路径闭包」步骤（从锁文件现读 configuration 归属 + 直接调本门禁），
+   以后这两条面每次 dispatch 都在覆盖面里。
+4. 事实清单（现读，全部可复核）：`androidLintTool` 的父节点是 AGP 9.4.1 的 lint 工具链
+   （`com.android.tools.lint:lint-gradle:32.4.1` 等，`android/app/gradle.lockfile:109-137`）；
+   `bcprov-jdk18on` 在测试面已是修复版 **1.85**（`android/app/gradle.lockfile:230`），
+   脆弱版 1.80.2 只在 `androidLintTool`（`:229`）；`libs.versions.toml` 与四份
+   `build.gradle.kts` 里对这 5 个坐标**没有任何直接声明**，也没有 `constraints{}`/`resolutionStrategy`
+   ⇒ 抬版本只能是 AGP/ktlint 升级（`build.gradle.kts:30-42` 的 buildscript 地板管不到
+   插件 detached 配置的独立解析域，这一点 SECURITY.md:53-54 已写明）。
+5. 判据本身能失败的证据：`violations()` 注入「bcprov 进 releaseRuntimeClasspath」⇒ 红；
+   注入「httpclient 从锁里消失」⇒ 红（文案点名「已不存在」）；现树 ⇒ 绿并打印
+   5 个坐标各自的 configuration 归属（`logback-core←ktlint`、`commons-lang3←androidLintTool`、
+   `httpclient←androidLintTool`、`bcpkix←androidLintTool`、`bcprov←androidLintTool + 三条 UnitTest`）。
+6. 验证：`pytest tests/python` 690 passed / 1 skipped（本批 +20）；`check_file_sizes` 绿
+   （新脚本/新用例都在 300 行红线内）；表形 / 链接 / `check_doc_claims` 三道 EXIT 0；
+   `verify_gradle_alert_scope_boundary.py` 与两个被改 workflow pyyaml 可解析；
+   锁文件、`packages.lock.json`、`gradle.lockfile` 均未改动（本批不抬任何版本）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

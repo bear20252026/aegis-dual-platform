@@ -12,8 +12,11 @@
 // 机制：buildscript 类路径与 plugins DSL 类路径合并后冲突解析取最高版本——
 // 显式 classpath 地板把五包抬到修复版（BC 1.80→1.85 / jose4j 0.9.5→0.9.6 /
 // jdom2 2.0.6→2.0.6.1 / lang3 3.16→3.18.0 / httpclient 钉 4.5.14）。
-// 范围取舍：logback 3×low 不在本树（依赖图另一节点，疑为插件自有类路径），
-// 留给 AGP/工具链升级承接——不对不在解析树内的包盲加地板。
+// 范围取舍（R9-B49 现读更正）：logback 3×low 曾被判「不在本树」——四把入库锁里
+// logback-core/-classic:1.3.16=ktlint 各一条（ktlint-cli 1.8.0 的传递依赖，见
+// android/app/gradle.lockfile:106-107 等四处），所以「不在解析树内」不成立。
+// 仍不加地板：抬 linter 自身类路径的日志实现会改 ktlint 运行时，而这三个节点只在
+// 构建期存在。边界改由常驻门禁判定，不靠注释声明（见下面那条 verify_ 脚本）。
 // 第九轮复验（2026-10-10，R9-DEPS-1）：上方 1.85 / 0.9.6 / 3.18.0 是 **2026-10-03 首次
 // 设地板时**的取值（历史记录，不作现行陈述）；实钉已随上游推进到 BC 1.86（bcprov/bcutil/
 // bcpkix 三件）、jose4j 0.9.7、jdom2 2.0.6.1、lang3 3.21.0、httpclient 4.5.14。
@@ -23,7 +26,10 @@
 // Dependabot 也未为它们开 PR，与此一致。故本轮处置是「结案 + 等上游发版后复检」，
 // 不是「已修复」：critical（BC name-constraints 绕过）与 high（BC ASN.1 强制解析）
 // 在构建机上仍开放，产品 APK 不受影响（runtime 闭包零命中，实证见分诊文档）。
-// logback 3×low 维持原判：不在本树解析闭包内。
+// logback 3×low 的原判已被推翻（见上一段）：它在 ktlint 配置里，只是不在出货面。
+// 本地板达不到的两条工具面（androidLintTool / ktlint）才是这 9 条告警的落点，
+// 其边界由 scripts/verify_gradle_alert_scope_boundary.py 常跑判定：这 5 个坐标一旦
+// 进 release/debug Runtime|Compile Classpath 或 debugAndroidTest*（装进设备的那份）即判红。
 // 分诊全文（暴露面证据/剩余告警处置/复检规程）：docs/security/android-build-classpath-triage.md
 // 版本来源：各告警的 first_patched_version（11/12→1.85、7→1.84、5→0.9.6、
 // 4→2.0.6.1、3→3.18.0、2→4.5.13 已被树解析超集 4.5.14 覆盖——显式钉版防回退）。
