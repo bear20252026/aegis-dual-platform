@@ -15,7 +15,7 @@ class AndroidBroker(
     // 单测（此前 Clock.System 硬编码，过期行为不可测）。
     private val clock: kotlin.time.Clock = kotlin.time.Clock.System,
 ) {
-    private val consumedNonces =
+    internal val consumedNonces =
         java.util.LinkedHashSet<String>()
     private val sessions = java.util.concurrent.ConcurrentHashMap<String, SessionContext>()
     private val authorizationLock = Any()
@@ -186,7 +186,7 @@ class AndroidBroker(
                 nativePolicyCoreBridge?.destroySession(sessionId)
             }
             sessions.remove(sessionId)
-            consumedNonces.removeIf { nonce -> nonce.startsWith("$sessionId:") }
+            consumedNonces.removeIf { nonce -> nonce.belongsToNonceLedger(sessionId) }
         }
     }
 
@@ -365,7 +365,7 @@ class AndroidBroker(
                     isValid(nonNullAction, currentGeneration) &&
                     nonNullAction.sessionId == sessionId &&
                     nonNullAction.tabId == tabId &&
-                    trackConsumedNonce(nonNullAction.nonce)
+                    trackConsumedNonce(nonceLedgerKey(sessionId, nonNullAction.nonce))
             }
         }
         val uri = OriginPolicy.tryParseExternal(rawUrl) ?: return false
@@ -377,19 +377,19 @@ class AndroidBroker(
             ) {
                 return@synchronized false
             }
-            trackConsumedNonce(action.nonce)
+            trackConsumedNonce(nonceLedgerKey(sessionId, action.nonce))
         }
     }
 
     /**
-     * 登记已消费 nonce（调用方须持 authorizationLock）；超上限 FIFO 逐出最旧。
+     * 登记已消费账本键（＝nonceLedgerKey 折算过；调用方须持 authorizationLock），超上限 FIFO 逐出。
      *
      * AD-179（审计 2026-09-23 清单·A7 批）：批量移除——原 while 循环每轮
      * 经迭代器只移除一个最旧条目（超限 N 条时 N 轮 full-pass 语义重复）；
      * 现一次计算超额数并单次迭代成批移除。
      */
-    private fun trackConsumedNonce(nonce: String): Boolean {
-        val added = consumedNonces.add(nonce)
+    private fun trackConsumedNonce(ledgerKey: String): Boolean {
+        val added = consumedNonces.add(ledgerKey)
         val excess = consumedNonces.size - MAX_CONSUMED_NONCES
         if (excess > 0) {
             val iterator = consumedNonces.iterator()

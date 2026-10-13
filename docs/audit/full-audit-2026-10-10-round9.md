@@ -721,7 +721,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `LocalTargetHostsTest.kt:26-28`、`ReservedAddressBoundaryTest.kt:62,68` 用
   `http://[::1]:9000/` 当放行样本，读起来像「IPv6 本机可打开」。建议如实写进 KDoc 与
   测试注释（**不得反向收紧段集**，与 B8 相反）。——**本批已逐行回读并按该处方落地**（§3.5），判定零改动。
-- Q5 R9-AD-5 | P3 | `AndroidBroker.kt:189` ↔ `:368`：原生变体进账本的是 64 位裸 hex nonce
+- ~~Q5 R9-AD-5~~ **本批已闭**（R9-B40 / §3.40：新增 `android/broker/src/main/kotlin/com/aegis/broker/NonceLedger.kt`
+  把账本键与回收判据收成同一前缀约定（`nonceLedgerKey` 幂等折算 + `belongsToNonceLedger`），
+  两条消费点都经键折算，回收点改用它；新常驻 `ConsumedNonceLedgerTest.kt` 5 例含一条
+  「裸 nonce 入账 ⇒ 摘不掉」的反向锚。`:broker:testDebugUnitTest` 84 例 0 失败。
+  **端到端的原生消费路径在 JVM 里到不了**（要真实 `.so`），与 Windows 侧同一限制，故用纯函数＋接线锚）。
+  原条目：Q5 R9-AD-5 | P3 | `AndroidBroker.kt:189` ↔ `:368`：原生变体进账本的是 64 位裸 hex nonce
   （无 `sessionId:` 前缀）⇒ 关标签的 `removeIf startsWith` 一条都摘不掉，而注释称
   「销毁会话并移除其已消费 nonce」；`AndroidBrokerTest.kt:414-417` 只钉托管路径形态。
   孪生形态见 `BrowserPolicyBroker.NativeNonceLedger`（R8-CS-REG-01 同源，后果轻得多）。
@@ -734,7 +739,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   授权必须绑定具体操作与发起者，同一文件里导航确认已经做对（`BrowserViewModelConfirmations.kt:80`
   的 `pending == null || currentWebView() !== pending.webView` ⇒ 拒），而 `approvePendingDownload`
   （:104-108）取出 pending 即 `proceed()`＝用户批准的对象被换成了另一标签的目标 ⇒ 批次 2。
-- Q7 R9-AD-7 | P3 | `TabManager.kt:109-130`：`closeTab` 三条 when 分支的行内注释整体错位
+- ~~Q7 R9-AD-7~~ **本批已闭**（R9-B40 / §3.40 第 5 点：三条 when 分支的行内注释各归各位，
+  净零增行、行为零改动——三条分支的语义早就由 `TabManagerTest.kt:359/:380/:434` 钉住，
+  本批只让注释不再和它们相反）。
+  原条目：Q7 R9-AD-7 | P3 | `TabManager.kt:109-130`：`closeTab` 三条 when 分支的行内注释整体错位
   一条（与类 KDoc AD-254 段的正确对应相反）——按注释读会得出与实现相反的激活位语义。
 - ~~Q8 R9-AD-8~~ **本批已闭**（见 §3.0 与 R9-DEPS-1：就地补日期更正注记，不改写历史）。
   原条目：Q8 R9-AD-8 | P3 | `android/build.gradle.kts:13-19` 头注声明「1.85 / 0.9.6 / 3.18.0」，
@@ -1848,6 +1856,57 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. 验证：`python scripts/verify_vector_consumers.py` ⇒ **EXIT 0**（21 份 / 563 个受管源文件）；
    `pytest tests/python` ⇒ 629 passed / 1 skipped（本批 +1）；`ruff check` 干净；
    `check_file_sizes` 绿（该门禁 264 行、用例 270 行，均在基线内）。
+
+### 3.40 R9-B40（2026-10-13，队列 Q5 + Q7）：Android 账本回收与 closeTab 注释归位
+
+1. **Q5 R9-AD-5 是「出货配置里才成立」的那一类**：账本有两条写入路径——托管路径的 nonce
+   由 `AndroidBroker.newNonce` 生成为 `sessionId:token`，原生路径的 nonce 是 Rust 核心发的
+   64 位裸 hex（`NativePolicyCoreBridge` 原样取 `nonce` 字段，无前缀）。回收侧
+   `destroySession:189` 按 `startsWith("$sessionId:")` 摘 ⇒ 原生条目**一条也摘不掉**，而
+   `:180` 的 KDoc 写着「销毁会话并移除其已消费 nonce」。默认构建（`REQUIRE_NATIVE_POLICY_CORE=false`）
+   走托管路径，所以 JVM 用例全绿看不出；置位变体正是发布 APK 的形态（`release-android.yml`
+   传 `-PrequireNativePolicyCore=true`，这件事由 `NativeGateWiringAnchorTest.kt`（R8-AD-09）
+   钉成常驻断言）。后果不是重放被打开（裸 nonce
+   留在册只会更拒），而是账本被死会话条目长期挤占 `MAX_CONSUMED_NONCES=50_000` 的 FIFO 名额，
+   且那句 KDoc 是失实声明。
+2. 修法与 Windows 侧同源：`BrowserPolicyBroker.NativeNonceLedger.cs` 的
+   `NativeNonceLedgerKey(sessionId, nonce)`（R8-CS-REG-01，那条「满额后全站导航永久锁死」的
+   自 DoS 换来的教训是**把键推导抽成纯函数**，这样不需要原生库/真桥就能在常跑门禁里断言——
+   「文本锚证明不了数学」）。新增 `android/broker/src/main/kotlin/com/aegis/broker/NonceLedger.kt`：
+   `nonceLedgerPrefix` / `nonceLedgerKey`（幂等：托管形态已带前缀，不叠第二层）/
+   `String.belongsToNonceLedger`，写入与回收共用同一个前缀约定，两侧不可能再各抄一份。
+   `AndroidBroker.kt` 两个消费点改 `trackConsumedNonce(nonceLedgerKey(sessionId, …nonce))`，
+   回收点改 `removeIf { nonce -> nonce.belongsToNonceLedger(sessionId) }`，
+   `trackConsumedNonce(nonce)` → `trackConsumedNonce(ledgerKey)`（参数名字说出它收的是键）。
+3. **零余量文件的净零增行**：`AndroidBroker.kt` 基线 447＝实 447，所以本批全部改动是**同行替换**
+   （含把 `consumedNonces` 从 `private` 改 `internal` 作为常驻用例的读回缝，理由写在
+   `NonceLedger.kt` 的头注里而不是行内注释里）。第四处撞到的是 ktlint 而不是行数：
+   两个参数的单行签名被判三处 `function-signature` 违规（要求逐行断参），而按同一正则扫
+   四个 main 源集，**改之前的实树里这种形态是零处**——所以这不是我的写法偏好，是门禁口径；
+   另 `multiline-expression-wrapping`
+   要求 `val x = File(\n…)` 这种多行表达式整体另起一行——两处都按门禁口径改形，不改语义。
+4. 用例 5 条 `ConsumedNonceLedgerTest.kt`（新文件 93 行）：
+   ①原生形态键经 `destroySession` 真实现被摘掉（写入侧用生产键函数，回收侧是真代码）；
+   ②**反向锚**：把裸 nonce（旧形态）直接入账 ⇒ `destroySession` 后仍在册——这条为真才说明
+   ①判的确实是键形态，不是恒绿；③托管 nonce 折算幂等（不叠前缀）＋原生裸 hex 折算得
+   `sessionId:hex`；④前缀含冒号 ⇒ 销毁 `s1` 不得顺手摘掉 `s12` 的同名条目（跨会话错清是
+   另一种失配）；⑤接线锚：`trackConsumedNonce(nonceLedgerKey(` 恰好 2 处、回收点用
+   `belongsToNonceLedger`、且旧的字面前缀拆判据不得回潮。
+   局限如实写明：原生分支的**端到端**消费在 JVM 里到不了（要真实 `.so`），
+   与 Windows 侧 `AEGIS_NATIVE_POLICY_CORE_TEST_PATH` 那条限制同型，所以用「纯函数＋接线锚」
+   而不是假称跑过真桥。
+5. **Q7 R9-AD-7 是注释错位而不是行为错位**：`TabManager.closeTab:109-130` 三条 when 分支的
+   行内注释整体错了一位——「后方后台标签：激活位不变」贴在 `index < activeIndex`（它会移激活位）
+   上面，「前方移除：激活标签左移一位」贴在 `else`（关闭激活标签本身）上面，而第一条分支
+   `index > activeIndex` 裸着。类 KDoc（AD-254 段，`:95-100`）的三条对应是**对的**，
+   所以按注释读会读出与实现和 KDoc 都相反的语义。三条分支的行为早已有用例钉住
+   （`TabManagerTest.kt:359` 关后方、`:380` 关前方、`:434` 关激活本身），本批只把注释挪回
+   各自分支（+1 −1 行＝净零），行为零改动。
+6. 验证：`./gradlew :broker:ktlintCheck :broker:detekt :broker:testDebugUnitTest` ⇒ BUILD SUCCESSFUL
+   （broker 面 84 条 0 失败，含本批新增 5 条）；`:app:ktlintCheck :app:detekt :app:testDebugUnitTest`
+   同批跑（app 面 320 条）；`check_file_sizes` 绿（`AndroidBroker.kt` 仍 447＝基线，
+   `TabManager.kt` 仍 260）。**未跑真机**——原生分支的行为面只能由装机的置位 APK 证明，
+   那一跑仍列在待裁决清单里。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

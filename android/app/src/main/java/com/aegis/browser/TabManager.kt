@@ -107,18 +107,18 @@ class TabManager(
         // H-4 修复（审计 2026-08-31）：统一销毁序列（停载/摘除/注销/destroy 单源）
         SecureWebViewFactory.tearDown(removed.webView)
         when {
+            // 后方后台标签：激活位不动（对应 KDoc AD-254 的第一条）
             index > activeIndex -> {
                 Unit
             }
 
-            // 后方后台标签：激活位不变
+            // 前方移除：后续标签左移，激活位同移一位（仍是同一个标签）
             index < activeIndex -> {
                 activeIndex -= 1
             }
 
-            // 前方移除：激活标签左移一位
+            // 关闭激活标签本身：相邻标签接管（min），挂起态时 resume
             else -> {
-                // 关闭激活标签：相邻标签接管并恢复（挂起态时）
                 activeIndex = minOf(index, tabs.size - 1)
                 current()?.let { current ->
                     if (current.suspended) {
