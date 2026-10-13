@@ -160,18 +160,15 @@ class DownloadConfirmationOwnershipTest {
         const val CONFIRMATIONS_SOURCE =
             "android/app/src/main/java/com/aegis/browser/BrowserViewModelConfirmations.kt"
 
-        /** 剔注释后的源码：本仓注记常抄旧形态原文，不剔会被自己的注释打红。 */
+        /** 剔注释后的源码：口径单源在 `withoutComments()`（R9-B45 / 台账 Q59）——
+         *  本仓注记常抄旧形态原文，不剔会被自己的注释打红。 */
         fun codeOf(relative: String): String {
             val file = File(repoRoot(), relative)
             assertTrue("锚语料缺失：$relative", file.exists())
             return file
                 .readText()
                 .replace("\r\n", "\n")
-                .lines()
-                .filterNot { it.trimStart().startsWith("//") }
-                .filterNot { it.trimStart().startsWith("*") }
-                .filterNot { it.trimStart().startsWith("/*") }
-                .joinToString("\n")
+                .withoutComments()
         }
 
         /** 有界切片：从声明行到下一个同级 `fun `（越界即退化成全文扫描，那是旧锚的病）。 */

@@ -21,7 +21,7 @@ import verify_core_unwired_modules as g
 def real():
     lib_text = (g.CORE / "lib.rs").read_text(encoding="utf-8")
     readme = g.README.read_text(encoding="utf-8")
-    texts = {p: g.strip_comments(p.read_text(encoding="utf-8", errors="ignore"))
+    texts = {p: g.strip_comments(p.read_text(encoding="utf-8", errors="ignore"), p.name)
              for p in g.interface_sources()}
     return lib_text, texts, readme
 
@@ -90,7 +90,7 @@ def test_export_inside_an_unwired_module_is_red(tmp_path, monkeypatch):
     mod = fake_core / "adblock.rs"
     mod.write_text("#[unsafe(no_mangle)]\npub extern \"C\" fn aegis_adblock() {}\n", encoding="utf-8")
     monkeypatch.setattr(g, "CORE", fake_core)
-    texts = {p: g.strip_comments(p.read_text(encoding="utf-8")) for p in g.interface_sources()}
+    texts = {p: g.strip_comments(p.read_text(encoding="utf-8"), p.name) for p in g.interface_sources()}
     problems = g.check(lib, texts, g.expected_readme_fragment())
     assert any("导出即接线" in p for p in problems), problems
 

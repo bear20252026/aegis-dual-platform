@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using Xunit;
+using Aegis.Windows.TestSupport;
 
 /// <summary>AX-05/AX-06（外部第三轮审计 2026-10-11，第九轮 §四）：
 /// 「本构建要求原生策略核心」必须是**编译进产物**的事实，而不是一个普通用户可清除的
@@ -135,9 +136,8 @@ public sealed class NativePolicyCoreBuildRequirementTests
         var rest = text[start..];
         var end = rest.IndexOf("\n    }", StringComparison.Ordinal);
         Assert.True(end > 0, $"{fileName}:{anchor} 的定位没有收口——切片会一路读到文件末尾");
-        // 剔注释：本仓注记里常抄旧形态原文，不剔会自我打红
-        return string.Join("\n", rest[..end].Split('\n')
-            .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        // 剔注释：口径单源在 SourceTextAnchors（R9-B45 / 台账 Q59）
+        return SourceTextAnchors.CodeOnly(rest[..end]);
     }
 
     private static string SourceOf(string relative) =>

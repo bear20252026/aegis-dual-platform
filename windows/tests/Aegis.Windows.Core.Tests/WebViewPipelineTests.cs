@@ -6,6 +6,7 @@ using System.Linq;
 using Aegis.Windows.Core;
 using Aegis.Windows.WebView;
 using Xunit;
+using Aegis.Windows.TestSupport;
 
 /// <summary>C21 批（2026-10-01 审计）：WebView 封装层提纯逻辑直测——
 /// CS-362 HTTPS-only 升级 URL 构造、CS-363 拦截聚合（聚合/阈值/尾部清空）、
@@ -259,14 +260,11 @@ public sealed class NavigationFailClosedBoundaryTests : IDisposable
         foreach (var text in new[] { top, frame })
         {
             // Substring 而非 .. 区间——避免 Range 索引在不同 LangVersion 下的差异；
-            // 再剔除注释行：本锚判的是**代码形态**，而修复说明里就写着旧形态原文，
+            // 再剔除注释：本锚判的是**代码形态**，而修复说明里就写着旧形态原文，
             // 不剔注释的话这条断言会被自己的注释打红（第八轮实测撞到）。
-            var code = text.Substring(
-                    text.IndexOf("OnNavigationStarting", StringComparison.Ordinal))
-                .Replace("\r\n", "\n")
-                .Split("\n")
-                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal));
-            var handler = string.Join("\n", code);
+            // 剔注释与行尾切分的口径单源在 SourceTextAnchors（R9-B45 / 台账 Q59）。
+            var handler = SourceTextAnchors.CodeOnly(
+                text.Substring(text.IndexOf("OnNavigationStarting", StringComparison.Ordinal)));
             Assert.Contains("e.Cancel = true;", handler);
             Assert.DoesNotContain("e.Cancel = !TryAuthorizeNavigation", handler);
         }

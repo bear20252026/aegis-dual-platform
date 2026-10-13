@@ -221,14 +221,14 @@ def test_comment_only_citation_is_not_a_consumer():
         ("shared/s.mjs", "  * KDoc 续行 " + cited + nl + "const a = 1;"),
     )
     for path, body in cases:
-        stripped = vvc.strip_comments(body)
+        stripped = vvc.strip_comments(body, path)
         assert cited in body, f"语料本身没造出来：{path}"
         assert cited not in stripped, f"{path} 的注释形态没被剔净 ⇒ 它会冒充消费者"
         assert not vvc.collect_consumers({path: stripped}, vectors)[cited], path
     # 正面控制：同一文件名写进代码行必须算命中（否则上面全是恒真断言）。
     code = f'const v = load("{cited}");'
     assert vvc.collect_consumers(
-        {"shared/s.mjs": vvc.strip_comments(code)}, vectors)[cited] == ["shared/s.mjs"]
+        {"shared/s.mjs": vvc.strip_comments(code, "shared/s.mjs")}, vectors)[cited] == ["shared/s.mjs"]
 
 
 def test_cross_end_pillar_floor_does_not_move_with_the_manifest():

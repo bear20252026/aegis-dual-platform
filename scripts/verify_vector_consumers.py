@@ -32,6 +32,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# R9-B45 / Q59：剔注释口径单源（四种形态的原文说明在 text_anchors 的模块 docstring 里）。
+from text_anchors import strip_comments
+
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS_DIR = ROOT / "contracts" / "vectors"
 
@@ -117,25 +122,10 @@ def scan_surface(files: list[str]) -> dict[str, str]:
         if rel.startswith("contracts/vectors/"):
             continue
         try:
-            texts[rel] = strip_comments((ROOT / rel).read_text(encoding="utf-8", errors="ignore"))
+            texts[rel] = strip_comments((ROOT / rel).read_text(encoding="utf-8", errors="ignore"), rel)
         except OSError:
             continue
     return texts
-
-
-def strip_comments(text: str) -> str:
-    """注释里的文件名**不算消费**（R9-B39 / Q53）。
-
-    这条不是抽象洁癖：`native-navigation-decision.json` 此前被记成「CS 有执行者」，
-    而全部命中只来自 `BrowserPolicyBrokerNativeGateTests.cs` 里一句解释性注释——
-    注记把「读文件名并断言」的活儿说了一遍，却没有任何代码去读那份向量。
-    与本仓其余文本判据同口径：判代码不判注释（注记里逐字抄着被禁形态也是同一件事）。
-    """
-    text = re.sub(r"/\*[\s\S]*?\*/", "", text)      # C 系块注释（.cs/.kt/.js/.rs）
-    text = re.sub(r"(?m)^\s*//.*$", "", text)          # 行注释
-    text = re.sub(r"(?m)^\s*\*.*$", "", text)         # 块注释续行的对齐星号
-    text = re.sub(r"(?m)^\s*#.*$", "", text)           # .py / .yml 注释
-    return text
 
 
 def end_of(rel: str) -> str:

@@ -29,6 +29,15 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# R9-B45 / Q59：剔注释口径单源。本文件此前自己写的是「`//` 切到行尾」，那是**过剔**——
+# 字符串里的 `https://` 会连同后半行一起吃掉。换成整行形态后，与向量消费面门禁、
+# Kotlin 的 withoutComments()、C# 的 SourceTextAnchors.CodeOnly 同口径。
+# 传入文件路径：`#` 只在其语言的注释里剔，Rust 的 `#[unsafe(no_mangle)]` 是代码
+# （R9-B45 第一版无差别剔 `#`，把「接入层长出导出属性＝接线」的注入用例由红变绿）。
+from text_anchors import strip_comments
+
 ROOT = Path(__file__).resolve().parents[1]
 CORE = ROOT / "core" / "rust-policy-core" / "src"
 LIB_RS = CORE / "lib.rs"
@@ -61,12 +70,6 @@ def rel(path: Path) -> str:
         return path.relative_to(ROOT).as_posix()
     except ValueError:
         return path.as_posix()
-
-
-def strip_comments(text: str) -> str:
-    """剔块注释与行注释——历史注记里逐字写着模块名（本仓三件套口径之一）。"""
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-    return re.sub(r"//[^\n]*", "", text)
 
 
 def expected_readme_fragment() -> str:
@@ -104,7 +107,7 @@ def export_attrs_in(mod: str) -> list[str]:
     for f in files:
         if not f.is_file():
             continue
-        body = strip_comments(f.read_text(encoding="utf-8", errors="ignore"))
+        body = strip_comments(f.read_text(encoding="utf-8", errors="ignore"), f.name)
         if "#[no_mangle]" in body or "unsafe(no_mangle)" in body or "uniffi::export" in body:
             found.append(rel(f))
     return found
@@ -146,7 +149,7 @@ def main() -> int:
     lib_text = LIB_RS.read_text(encoding="utf-8", errors="ignore")
     readme_text = README.read_text(encoding="utf-8", errors="ignore")
     files = interface_sources()
-    interface_texts = {p: strip_comments(p.read_text(encoding="utf-8", errors="ignore")) for p in files}
+    interface_texts = {p: strip_comments(p.read_text(encoding="utf-8", errors="ignore"), p.name) for p in files}
     # 扫描面塌缩守卫：接入层空 / 模块声明面异常小 ⇒ 判据本身不可信（exit 2）
     if not files or len(declared_modules(lib_text)) < 10 or not UNWIRED:
         print(f"[fail] 扫描面塌缩：接入层 {len(files)} 文件、"
