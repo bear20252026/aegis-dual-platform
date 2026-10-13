@@ -427,11 +427,10 @@ class TestKotlinPlaceholderNormalizationEndToEnd:
 
 # ---------------------------------------------------------------- PY-135..138
 def _action(name: str, scope: str, risk: str = "low") -> str:
-    return (f"  - name: {name}\n"
-            f"    scope: {scope}\n"
-            f"    risk: {risk}\n"
-            f"    audit: true\n"
-            f"    redteam_fixtures: [x]\n")
+    # 夹具必须在全部规则下干净（R9-B46 规则 ⑤：confirmation 必填且与 read_only 一致）；专项说明见 catalog_governance_columns_test.py
+    return (f"  - name: {name}\n    scope: {scope}\n    risk: {risk}\n"
+            f"    read_only: true\n    confirmation: none\n"
+            f"    audit: true\n    redteam_fixtures: [x]\n")
 
 
 class TestAnalyzeActionCatalog:
