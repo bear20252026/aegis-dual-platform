@@ -62,7 +62,10 @@
   `tests/python/gradle_verification_test.py` 从 workflow 原文逐 token 对账。
   两把刀都不覆盖的面如实登记：`buildscript {}` 与 plugins DSL 是**脚本类路径**，
   不在项目配置锁内（那一路由 root `build.gradle.kts` 的显式 classpath 地板 +
-  `buildEnvironment` 回读承接）。catalog 升级必须**同批重锁+重算校验和**，漏任一面在
+  `buildEnvironment` 回读承接）。另一面如实登记：校验和文档按**平台**是并集——
+  本机（windows）与 `dependency-relock.yml` 的 gradle 面（ubuntu）各生成一次才盖住两个 runner
+  （`aapt2` 的 `-windows.jar` 与 `-linux.jar` 是两个不同构件），而自动生成面目前只有 ubuntu
+  一个（缺口登记在第九轮台账 §五 Q61）。catalog 升级必须**同批重锁+重算校验和**，漏任一面在
   STRICT/strict 下直接解析失败——这个失败就是门禁本身。重锁执行面：
   `dependency-relock.yml` 的 `gradle` 生态（仅 workflow_dispatch，只写 `deps/*` 分支，
   永不写 master）。APK 发布前经 apksigner 强制验签（release-android.yml fail-closed）不变

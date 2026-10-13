@@ -863,8 +863,23 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   同批未验的半边记在 §3.50 第 7 条：`release-android.yml:223` 的 `:app:assembleRelease`
   在本批只跑到**本机**，CI 侧要等下一次真实 dispatch/标签。
 
-### 5.2 SH（shared 壳层与契约）
+- Q61 R9-AD-15 | P2（R9-B50 第二轮发现，登记不顺手做） |
+  `.github/workflows/dependency-relock.yml:219`（`gradle-relock: runs-on: ubuntu-latest`）↔
+  `.github/workflows/contracts.yml:278`（windows runner 上的 `./gradlew.bat`）↔
+  `android/gradle/verification-metadata.xml`：
+  校验和的**字节面跟平台走**——本机生成的那份里 `aapt2` 只有 `aapt2-9.4.1-15978811-windows.jar`，
+  `-linux` 形态零命中；而 PR #189 的红是**两个平台的 runner 同报同 6 个构件**，可见「一份文档
+  服务两个 runner」要求「每个平台都生成过一次」。现在唯一的权威生成面是 ubuntu 那个 job ⇒
+  windows 侧新依赖的字节只能靠本机 Windows 手工跑（没人审 diff、也没门禁判它做过）。
+  这是覆盖面缺口而不是小瑕疵。两种形状都要动执行面 ⇒ 需裁决：①给 `gradle-relock` 加 windows 腿
+  （矩阵或第二个 job）——两个 job 若都往同一分支推同一份文件，**必须串行或先合并再推**，
+  并发推必然互相覆盖；②在 PR 面加一条便宜的「冷缓存解析」哨兵（例如 android-quality 里
+  `./gradlew --refresh-dependencies buildEnvironment` 跑一次），让「文档对干净 runner 不完整」
+  在合并前就红，代价是每条 PR 重下一次插件类路径。
+  验收口径：任一路落地后，一次真实的依赖 bump 必须让**两个平台**的 gradle 作业在同一份文档下绿；
+  只要还有一面靠本机手工生成，这条不闭。
 
+### 5.2 SH（shared 壳层与契约）
 - ~~Q11 R9-SH-1~~ **本批已闭**（R9-B35 / §3.35：三张 schema 的 `version.pattern` 合一，并与 `release/update_verifier.py` 逐案等价；release/version 两张 schema 的向量面补齐，`version.schema.json` 从此有消费者）。原条目：Q11 R9-SH-1 | P2 | `contracts/schemas/release.schema.json:12` 与
   `contracts/schemas/version.schema.json:12` 的 SemVer pattern 仍是旧宽松式（接受
   `2.2.0-01`、`2.2.0-beta.`、`2.2.0-..`），PY-279 只收紧了
@@ -2558,9 +2573,11 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      含解析过但没进最终图的 `.pom`/`.module`。
 5. 用例 22 条，拆两个文件（单文件超 300 行红线——`check_file_sizes` 判的，不是审美）：
    `tests/python/gradle_verification_test.py` 12 条（档位现读、三种改弱注入必红、注释行不当赋值、
-   workflow 里不许出现 `--dependency-verification=off|lenient`、图面/文件面各恰好一条、
-   文件面 ⊇ CI 现读任务面、删掉文件面必红、写回守卫放行 metadata 且继续拒绝版本目录/构建脚本/文档、
-   SECURITY.md 与 settings 决策记录的正反双向锚）+ `tests/python/gradle_verification_document_test.py`
+   workflow 里不许出现 `--dependency-verification=off|lenient`、两条生成面都必须
+   `--refresh-dependencies` 且文件面走集合口径、重算面 ⊇ CI 现读任务面（两类豁免都要写理由）、
+   构建任务退回清单即判红、root 脚本真的注册了那个任务、删掉文件面必红、
+   写回守卫放行 metadata 且继续拒绝版本目录/构建脚本/文档、SECURITY.md 与 settings 决策记录的
+   正反双向锚）+ `tests/python/gradle_verification_document_test.py`
    10 条（现树零问题 + 注入必报：两个开关翻转、摘要截断两位、摘要换算法名、空组件、
    artifact 无摘要、整块 `<configuration>` 缺失、命名空间错的同名文档、截断的标签）。
    接线走 `contracts.yml` 既有 job（`contract-source-of-truth`），**没有新开必需检查上下文**
@@ -2585,11 +2602,37 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 8. 未做的另一半（不外推）：PGP/trust-keys 治理、`--write-verification-metadata pgp` 档位；
    以及 `buildscript {}` / plugins DSL 的**脚本类路径**——它与版本锁一样不在项目配置面内，
    仍由 root 显式 classpath 地板 + `buildEnvironment` 回读承接（口径未变）。
-9. 验证：`pytest tests/python` **712 passed / 1 skipped**（本批 +22）；`active_tree_gates all`
+9. 验证：`pytest tests/python` **713 passed / 1 skipped**（本批 +23：配置面 12 + 文档面 10 + 索引形态 1）；`active_tree_gates all`
    （ruff / bandit / py312-compat）三面 OK——`ET.fromstring` 那处按 `assert_test_counts.py` 的
    既有口径用**行级** `# nosec B314` + 信任边界注记，没有把 B314 加回全局 skips；
    `check_file_sizes` 绿（两个新文件分别 264 / 113 行）；表形 / 链接 / `check_doc_claims` 见本节末
    复跑；四把 `gradle.lockfile` 与 `packages.lock.json` 未改动（本批不抬任何版本）。
+
+10. 第三轮才发现的**索引形态**问题（同一个 dispatch 第二次挡下，run 38445166117）：
+    `写回分支` 步骤报「❌ 非依赖证据文件出现在纯重锁运行里：android/gradlew.bat」而中止。
+    现读 `git ls-files --eol`：`android/gradlew.bat` 是全仓**唯一**一个 `i/crlf` 的入库文件，
+    而 `.gitattributes:10` 写着 `*.bat text eol=crlf`——`text` 意味着入库前该归一成 LF，
+    所以那个 CRLF blob 是属性生效之前留下的旧形态。后果不是排版：干净 runner 上任何让这个
+    文件 stat 变动的动作，都会使 `git add -A -- android` 重新套 clean 过滤器得到 LF ≠ 索引里的
+    CRLF ⇒ **每次 gradle 重锁都长出一个伪 diff**，被写回守卫判成杂项拒绝。
+    判定要说清方向：**守卫那次是对的**（它拒绝的确实不是依赖证据），坏的是索引；
+    修法是把索引归一（`git add --renormalize android/gradlew.bat`，签出形态不变，
+    Windows 上仍是 CRLF），而不是放松守卫或给守卫加白名单。
+    常驻判据：`tests/python/gradle_lockfile_shape_test.py::
+    test_no_tracked_file_fights_its_own_text_attribute`（全仓扫 `i/crlf` 且属性含 `text`
+    的位点，并配一条正面控制证明 `-text` 分支不是空判）。这条若不钉住，下一次 gradle
+    重锁会在同一个地方再红一次，而每个人的第一反应都是「守卫太严」——那是最坏的修法。
+
+11. **权威生成面在 CI 上跑通并回填**（第三次 dispatch，run 38446662535，
+    `deps/r9-b50-gradle-verification`）：重锁步与写回步都绿，产物是
+    `verification-metadata.xml` **+54 行、四把 `gradle.lockfile` 零改动**。新增内容正好补上
+    CI 报的那 6 个构件（`guava-parent-33.4.0-jre.pom`、`junit-bom` 5.10.2 / 5.11.0-M2 / 5.14.4
+    的 `.module`、`kotlin-gradle-plugins-bom-2.2.10` 的 module + pom），另加冷缓存解析才会碰到的
+    BOM 父描述文件（groovy-bom、bc-jdk18on-bom、kotlinx-coroutines-bom 1.6.4/1.7.3/1.8.0、
+    guava-parent 33.6.0-jre），以及**平台相关的那一个**：`aapt2-9.4.1-15978811-linux.jar`——
+    本机那份只有 `-windows.jar`，这条把第 3 点的「字节面跟平台走」从推断变成实测。
+    入库那份因此是 windows（本机）+ ubuntu（dispatch）两轮并集，且这次是**按 SOP 的三面写法**
+    （`--refresh-dependencies` + 集合文件面 + 工具任务面）产出的，重锁幂等性在这一轮才真的成立。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

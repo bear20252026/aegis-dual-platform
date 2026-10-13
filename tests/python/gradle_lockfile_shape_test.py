@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -179,3 +180,44 @@ def test_locks_pin_exact_versions_not_ranges() -> None:
         assert "SNAPSHOT" not in text, f":{name} 锁里有 -SNAPSHOT 版本"
         entries = [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
         assert len(entries) >= 5, f":{name} 锁条目只有 {len(entries)} 条，不像完整解析结果"
+
+
+def index_eol_state() -> list[tuple[str, str, str]]:
+    """`git ls-files --eol` 现读：(索引形态, 属性串, 路径)。
+
+    这不是排版洁癖。实测后果（run 38445166117）：`android/gradlew.bat` 曾是全仓唯一的
+    `i/crlf`，而 `.gitattributes:10` 写的是 `*.bat text eol=crlf`——`text` 意味着入库前该归一成
+    LF。干净 runner 上任何让该文件 stat 变动的动作都会让 `git add -A -- android` 重新套 clean
+    过滤器，得到 LF ≠ 索引里的 CRLF ⇒ **每次 gradle 重锁都产出一个「伪 diff」**，
+    并被写回守卫判成「非依赖证据文件」而中止。守卫那次是对的，坏的是索引形态。
+    """
+    out = subprocess.run(
+        ["git", "ls-files", "--eol"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    rows: list[tuple[str, str, str]] = []
+    for line in out.splitlines():
+        head, _, path = line.partition("\t")
+        cols = head.split()
+        if len(cols) >= 2 and path:
+            rows.append((cols[0], " ".join(cols[2:]).removeprefix("attr/"), path))
+    return rows
+
+
+def test_no_tracked_file_fights_its_own_text_attribute() -> None:
+    """属性说「这是文本」而索引里存着 CRLF ＝ 每次重新 add 都会长出一个伪 diff。"""
+    offenders = [
+        (path, attr)
+        for index_state, attr, path in index_eol_state()
+        if index_state == "i/crlf" and "text" in attr and "-text" not in attr
+    ]
+    assert not offenders, (
+        f"这些文件的索引形态与自己的属性冲突（{offenders[:5]}）——"
+        "修法：git add --renormalize <path>（签出形态不变，只把索引归一成 LF）"
+    )
+    # 正面控制：本仓确实有被显式当二进制的文件（`attr/-text`），它们不该被这条判据算进去
+    binaryish = [path for _, attr, path in index_eol_state() if "-text" in attr]
+    assert binaryish, "判据里的 `-text` 分支没被任何文件命中——那就是在判空气"
