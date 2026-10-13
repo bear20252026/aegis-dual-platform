@@ -98,7 +98,11 @@ def fetch_sbom(token: str, repository: str) -> object:
         "X-GitHub-Api-Version": "2022-11-28",
         "User-Agent": "aegis-graph-freshness",
     })
-    with urllib.request.urlopen(request, timeout=60) as response:
+    # 信任边界：基址是硬编码的 https://api.github.com，唯一变量 GITHUB_REPOSITORY 由 Actions
+    # 注入（本仓库自己的 slug），token 只从环境读取、不进 URL 也不打印——B310 关心的是
+    # file:/自定义 scheme 与外来 URL，两者在此都不成立。行级注记替代 bandit.yaml 的全局豁免
+    # （同 scripts/assert_test_counts.py:59 的 B314 口径：全局豁免会连带放过未来别处的 urlopen）。
+    with urllib.request.urlopen(request, timeout=60) as response:  # nosec B310
         return json.load(response)
 
 
