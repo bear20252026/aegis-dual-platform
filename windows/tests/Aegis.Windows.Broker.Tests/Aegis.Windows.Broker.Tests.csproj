@@ -25,5 +25,8 @@
          两份程序集各自编译一份，不新增工程引用）。 -->
     <Compile Include="..\Aegis.Windows.TestSupport\SourceTextAnchors.cs"
              Link="TestSupport\SourceTextAnchors.cs" />
+    <!-- R9-B54 / 台账 Q62：记录面线程安全（与 Core.Tests 链接同一份文件）。 -->
+    <Compile Include="..\Aegis.Windows.TestSupport\ThreadSafeRecorder.cs"
+             Link="TestSupport\ThreadSafeRecorder.cs" />
   </ItemGroup>
 </Project>

@@ -19,7 +19,7 @@ public sealed class CoreDenylistPublisherTests : IDisposable
     private readonly string _logDir =
         Path.Combine(Path.GetTempPath(), $"aegis_core_denylist_{Guid.NewGuid():N}");
 
-    private readonly List<IReadOnlyCollection<string>> _pushed = new();
+    private readonly Aegis.Windows.TestSupport.ThreadSafeRecorder<IReadOnlyCollection<string>> _pushed = new();
 
     private CoreDenylistOutcome _outcome = CoreDenylistOutcome.Published;
     private int _accepted;
@@ -32,7 +32,7 @@ public sealed class CoreDenylistPublisherTests : IDisposable
         CoreDenylistPublisher.ResetForTests();
         CoreDenylistPublisher.CorePushForTests = hosts =>
         {
-            _pushed.Add(hosts);
+            _pushed.Record(hosts);
             return _outcome switch
             {
                 CoreDenylistOutcome.Published => CoreDenylistUpdateResult.Apply(hosts.Count, hosts.Count),
@@ -72,7 +72,7 @@ public sealed class CoreDenylistPublisherTests : IDisposable
         {
             if (Interlocked.Increment(ref inFlight) != 1)
                 overlapped = true;
-            _pushed.Add(hosts);
+            _pushed.Record(hosts);
             if (hosts.Count == 1)  // 第一份快照在门内等第二份排队，好把交错做实
             {
                 firstEntered.Set();

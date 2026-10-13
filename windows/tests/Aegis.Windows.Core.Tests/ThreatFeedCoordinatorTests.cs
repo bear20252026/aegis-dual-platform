@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Aegis.Windows.Core.Security;
+using Aegis.Windows.TestSupport;
 using Xunit;
 
 /// <summary>威胁黑名单刷新编排单测（上帝对象拆分·第六批）：启动后台应用缓存
@@ -25,17 +26,20 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
 
     private sealed class Harness
     {
-        public readonly List<IBlockedHosts> Applied = new();
-        public readonly List<string> Logs = new();
+        // 记录面走 ThreadSafeRecorder：写侧是协调器的后台线程，读侧是本文件里每 10ms
+        // 一轮的 SpinUntil 枚举——普通 List 在这个读法下抛 Collection was modified
+        // （台账 §五 Q62 = R9-CS-19，CI 实测红在 :65 那一轮）。
+        public readonly ThreadSafeRecorder<IBlockedHosts> Applied = new();
+        public readonly ThreadSafeRecorder<string> Logs = new();
         public string? FeedUrl = "https://feeds.example/list.txt";
         public string[] FetchedCacheContents = Array.Empty<string>();
 
         public ThreatFeedCoordinator Build(string cachePath) =>
             new(
-                applyHosts: applied => Applied.Add(applied),
+                applyHosts: applied => Applied.Record(applied),
                 cachePath,
                 () => FeedUrl,
-                message => Logs.Add(message),
+                message => Logs.Record(message),
                 (url, cache) =>
                 {
                     Assert.StartsWith("https://", url);
@@ -115,10 +119,10 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
     {
         var h = new Harness();
         var c = new ThreatFeedCoordinator(
-            applyHosts: applied => h.Applied.Add(applied),
+            applyHosts: applied => h.Applied.Record(applied),
             _cachePath,
             () => h.FeedUrl,
-            message => h.Logs.Add(message),
+            message => h.Logs.Record(message),
             fetchAndStore: (_, _) => throw new InvalidOperationException("网络不可用"),
             refreshInterval: TimeSpan.Zero);
         Assert.True(c.Start());
@@ -164,10 +168,10 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
         // 缓存文件若此刻被第三方改写会应用非拉取内容（且多一次全量 IO）
         var h = new Harness();
         var c = new ThreatFeedCoordinator(
-            applyHosts: applied => h.Applied.Add(applied),
+            applyHosts: applied => h.Applied.Record(applied),
             _cachePath,
             () => h.FeedUrl,
-            message => h.Logs.Add(message),
+            message => h.Logs.Record(message),
             fetchAndStore: (_, cache) =>
             {
                 File.WriteAllLines(cache, new[] { "stale-from-disk.example" });

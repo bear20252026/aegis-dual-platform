@@ -37,5 +37,8 @@
          锁文件、发现数下界），链接源码没有这些代价，代价只是路径上溯一层。 -->
     <Compile Include="..\Aegis.Windows.TestSupport\SourceTextAnchors.cs"
              Link="TestSupport\SourceTextAnchors.cs" />
+    <!-- R9-B54 / 台账 Q62：后台线程写、测试线程读的记录面（同上一条的链接源码口径）。 -->
+    <Compile Include="..\Aegis.Windows.TestSupport\ThreadSafeRecorder.cs"
+             Link="TestSupport\ThreadSafeRecorder.cs" />
   </ItemGroup>
 </Project>
