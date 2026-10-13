@@ -1027,7 +1027,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   属产品决策 ⇒ §四 待裁决。现网提示文案已按事实写成「已清空订阅源：此后不再自动重取，
   当前名单仍会继续拦截」（不是「退回空表」），并由 `ThreatFeedRefreshScheduleTests.
   Cleared_feed_means_no_further_network_activity_not_a_cleared_list` 钉住「清空不制造空窗」。
-- Q62 R9-CS-19 | P2（R9-B53 的 CI 面现读发现，登记并在下一批修） |
+- ~~Q62 R9-CS-19~~ **本批已闭**（R9-B54 / §3.54：三处会并发枚举的记录面收成 `ThreadSafeRecorder<T>`（带锁 + 一次性快照，底层 `List` 不外露），行为层用例用 `CountdownEvent` 把读写重叠**协调出来**并断言它非空心，接线层钉住字段类型与「不得再出现 `.Add(`」；注入实测：删掉三处 `lock` ⇒ 同一条用例红在丢写入（3200 变 2563）。同批复读 `ThreatFeedRefreshScheduleTests` 判定**不是同形**（读都在 `await BackgroundTask` 之后）⇒ 不动。原条目 ↓
   `windows/tests/Aegis.Windows.Core.Tests/ThreatFeedCoordinatorTests.cs:28-29`（`Harness.Applied` /
   `Harness.Logs` 是普通 `List<>`）↔ 同文件 `:65-66`、`:80`、`:93`、`:105`、`:127`、`:140`、`:178`
   （`SpinUntil` 每 10ms 从测试线程枚举这两个表）↔ `:185-193`（`SpinUntil` 本体）：
@@ -2798,6 +2798,60 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    - 这条实证同时是 Q61 验收口径的前半（「两个平台的 gradle 作业在同一份文档下绿」）；
      后半「一次真实的依赖 bump」要等下一条 bump PR，与本批无关，记在 §3.50 第 7 条那一类
      「等下一次真实 dispatch/标签」的位置。
+
+### 3.54 R9-B54（2026-10-14，队列 Q62 = R9-CS-19）：红灯的红因在**用例自己**——测试记录面不再被并发枚举
+
+1. 触发点是 §3.53 那次 PR 的 CI 面：run **38461642255** 的 `windows-contract-build` 红一条
+   `Failed: 1, Passed: 900`，栈顶是 `ThreatFeedCoordinatorTests.cs:65`（观测时的行号）的
+   `SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any(...))`，异常是
+   `InvalidOperationException: Collection was modified; enumeration operation may not execute`。
+   同一个 commit 的另外两个触发面全绿——**这类红灯不挑改动内容，只挑时机**。
+2. 现读定位（不是猜）：写侧是 `ThreatFeedCoordinator.Start()` 的后台线程（`applyHosts` 与
+   `message` 两个回调往 `Harness.Applied` / `Harness.Logs` 里 `Add`），读侧是测试线程每 10ms
+   一轮的枚举——两边是同一个 `List<T>`。同批复读的另两处**不是同形，因此没动**：
+   `ThreatFeedRefreshScheduleTests` 的 `Delays`/`_logs` 全部在 `await c.BackgroundTask!` 之后才读
+   （或只轮询一个 `int` 计数），没有并发枚举；`FakeClock` 那条链本来就是单线程自排的。
+   泛化成「文件里有轮询helper + 有 `List<` 字段就判红」会误伤前一种安全形态，
+   所以本批只钉住**已知会并发**的三处，不造一个会误判的面。
+3. 形状选了**带锁 + 一次性快照**，而不是 `ConcurrentQueue<T>`：后者的枚举自己就写着
+   「不是快照、可能瞬时」，而这里的断言靠的正是顺序与整体一致（`_pushed[0]`、`[^1]`、
+   `Assert.Single(...)`、`OfType<>().Any()`）。`ThreadSafeRecorder<T>` 的读面只有
+   `Snapshot()` / 枚举 / 索引器 / `Count` 四个——**底层 `List` 不外露**，所以「新加一个读取点
+   直接碰表」这条回潮路径在类型上就不存在。
+4. 跨程序集共享走**链接同一份源文件**（`windows/tests/Aegis.Windows.TestSupport/`，
+   与 R9-B45 的 `SourceTextAnchors.cs` 同口径）：新建测试支撑工程要动构建面
+   （工程引用、锁文件、发现数下界），链接源码没有这些代价。
+5. 一条被红线门禁逼出来的取舍：`CoreDenylistPublisherTests.cs` 是 **299 行零余量**（300 是红线，
+   见 `check_file_sizes.py` 的 `lines > LINE_LIMIT`），所以那里**不加 `using`**，
+   改用全限定名做同长度替换——加一行注释都会把它推到 300。这不是风格偏好，是门禁的形状。
+6. 判据两层，各配实证：
+   - **行为层**（`ThreadSafeRecorderTests.Concurrent_record_and_enumerate_never_throw`）：
+     8 写线程 × 400 条、4 读线程各跑整条 LINQ 链 + `Count` + `foreach`。**重叠是协调出来的**
+     （读线程先用 `CountdownEvent` 报到，写线程才开工），否则这条用例可以在「根本没并发」时
+     跑完全绿——那就是 §3.39 记过的空心门禁；两个「读到了东西」的断言
+     （`nonEmptyReads > 0`、`enumeratedTotal > 0`）就是它不空心的证据。
+   - **接线层**：三处已知字段必须仍是 `ThreadSafeRecorder<…>`，且代码面（剔注释后）不得再出现
+     `Applied.Add(` / `Logs.Add(` / `_pushed.Add(`；判定是个纯函数，注入形态
+     `List<IBlockedHosts> Applied` + `Applied.Add(applied)` 必须被它认出（正面控制在
+     `An_injected_plain_list_recorder_is_red`）。选接线层而不是只留行为层的理由：改回 `List<T>`
+     最容易发生在**解合并冲突**的时候，而那时没人会把它和 CI 的偶发红联系起来。
+7. 注入必红（本机实测，不是推理）：把 `ThreadSafeRecorder` 里三处 `lock` 删掉再跑同一条用例
+   ⇒ 当场红 `Assert.Equal() Failure: Expected: 3200 Actual: 2563`——**丢写入**。这与 CI 上的
+   「枚举被打断」是同一个缺失同步的两个症状；本批**刻意不写**「普通 `List<T>` 在这种并发下必抛」
+   那种断言，因为它自己就是竞态（它可能不抛），写成用例等于再造一条偶发红灯。
+8. 一条编译坑值得单记：`Enumerable.Range(0, Readers).Select(_ => Task.Run(() => …))` 里
+   `_` 是**lambda 参数名**，内层写的 `_ = snapshot.Any(…)` 不是丢弃而是给那个参数赋值——
+   `bool` 赋给 `int` 时 CS0029 当场编译失败（运气好），同类型时就是**静默写真参数**。
+   改成具名 `slot` 之后，丢弃面才真的是丢弃。
+9. 验证：`dotnet test` Core **906 passed**（本批 +5）/ Broker **204 passed**（同一条发布链，
+   记录面换型后 0 失败）；`pytest tests/python` **749 passed / 1 skipped**（本批不加 PY 用例）；
+   `check_file_sizes`（现扫 553 个源文件，两份新 .cs 都要 `git add` 之后才进扫描面——它是
+   `git ls-files` 口径）、`verify_text_anchor_helpers`（实现点仍 5 处）、表形 / 链接 /
+   `check_doc_claims` / `check_workflow_shells` / `verify_ledger_queue_status` 全 EXIT 0。
+   跑过 dotnet 之后按红线复查 `git status -- '*packages.lock.json'`：**零改动**。
+10. 边界（如实）：本批消掉的是**已现读到的**三处并发枚举面，不是「C# 用例从此不会偶发红」。
+    下一次同型红灯若来自别的记录面，锚不会替它红——它会红在那条用例自己身上，
+    而那时的正确处置是照本条再收一处，而不是重跑一次当没事。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
