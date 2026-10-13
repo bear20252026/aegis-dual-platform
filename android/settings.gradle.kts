@@ -68,6 +68,10 @@ dependencyResolutionManagement {
 //      PR #189 实测）。不强制重取字节，「重算校验和」这句话就是假账。
 //    覆盖面还会随解析增长（466→495 组件那批是图解析里「参与冲突裁决但未被选中」的候选版本），
 //    且同一坐标的 `.pom`/`.module` 缺位同样会红——字节面按构件登记，不按「最终选了谁」登记。
+//    **字节面还跟平台走**（R9-B51 / Q61）：`aapt2` 在 windows 落 `-windows.jar`、在 ubuntu 落
+//    `-linux.jar`，两个不同 sha256，所以「一份文档服务两个 runner」要求每个平台都生成过一次。
+//    这条不靠记性：`scripts/verify_gradle_platform_coverage.py` 把需求平台从 workflow 的
+//    `runs-on` 现取（加一个 macos runner 不需要改判据代码），平台相关坐标缺任一形态即判红。
 //    执行面与锁同批：`dependency-relock.yml` 的 gradle 生态里 `--write-locks` 那条同时带
 //    `--write-verification-metadata sha256`。**先有鸡还是先有蛋已经实证解开**：删掉整个 junit
 //    组件块（等于一次版本升级带来的「新坐标没有条目」）后跑同一条命令，BUILD SUCCESSFUL
