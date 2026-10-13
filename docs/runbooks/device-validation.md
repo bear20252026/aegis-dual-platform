@@ -34,6 +34,7 @@
 | 5 | 重定向 | 导航重定向到拒绝 URL | broker 拒绝——错误页 |
 | 6 | 网络切换 | Wi-Fi↔移动网络切换 | 可审计原因 + 安全默认值 |
 | 7 | 存储恢复 | 进程重建后状态恢复 | 恢复经 broker 策略重验（不自动放行） |
+| 8 | 下载重定向落点复判（R9-AD-3 / R9-B43 **待实测，不得凭猜登记**） | 从一个**入队时合法**的地址触发下载，让服务端 302 跳到 `http://169.254.169.254/latest/meta-data/`（可用本机一台监听 8080 的重定向服务：`/redir` → 302 到该地址） | `WebViewDownloadCompletionReceiver` 在 `ACTION_DOWNLOAD_COMPLETE` 后读 `COLUMN_URI`，命中保留地址 ⇒ 调 `DownloadManager.remove()` 撤销文件、`adb logcat -s AegisDownload` 留痕带 `reserved_address` 拒绝码、Toast 明示用户。**这一步同时验两件事**：①`COLUMN_URI` 真的被 DownloadProvider 改写成跳转后的地址（本仓据 AOSP `AbstractDownloadThread.redirect()` 推断，无设备实证）；②该广播在 `exported="false"` 的 manifest receiver 上确实投递到位。两件事任一不成立，这条防护就是纸面能力——失败时如实记「机制在但收不到/读不到」，不得改判据口径 |
 
 ## 三、记录与门禁
 

@@ -89,5 +89,6 @@ Runtime 更新重启 / **历史导航是否经策略链（R8-CS-SEC-03）**—�
 ## 五、Android 真机
 
 Android 端需真实设备（Kotlin/Compose——阶段 D）——按 device-validation.md
-Android 清单（7 项——bridge absence/renderer crash/生命周期/下载/重定向/网络
-切换/存储恢复）执行。
+Android 清单（8 项——bridge absence/renderer crash/生命周期/下载/重定向/网络
+切换/存储恢复/下载重定向落点复判）执行。**8 是 R9-B43 加的**（R9-AD-3 的复判只能在真机
+上验，登记时按 R9-DOC-08 同一口径把数量与名称一起改准，不留「文档数 ≠ 实树数」的旧病）。

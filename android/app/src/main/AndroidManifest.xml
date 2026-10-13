@@ -31,5 +31,17 @@
                 <data android:scheme="https" />
             </intent-filter>
         </activity>
+        <!-- R9-AD-3（第九轮 2026-10-13）：下载完成后的最终地址复判。
+             DownloadProvider 在别的进程跟随重定向，入队闸门看不到落点 ⇒ 完成后查
+             COLUMN_URI 复判、命中即撤销落盘文件。系统把这条完成广播只投递给发起下载
+             的包，所以 exported=false 收得到；exported=true 反而允许任意应用伪造
+             download_id 让我们删除自己的下载项。 -->
+        <receiver
+            android:name=".WebViewDownloadCompletionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>
