@@ -36,6 +36,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-SH-9 | P3 | 保留并落地（R9-B20） | 回读确证：`scripts/verify_cross_end_lists.py` 的引擎对账只比 **key 集合**，两份元数据各抄多处而零判据——展示名 4 处（legacy `SEARCH_ENGINES` 元组第 0 位 / Kotlin `ENGINE_NAMES` / C# `EngineNames` / 壳层 `engineFallback` 的 `name`），默认引擎 5 处（legacy `DEFAULT_ENGINE`、Kotlin `DEFAULT_ENGINE`、C# `DefaultEngine`、壳层 `engineFallback` 的 `engine`、`start.html` 胶囊初始文字）。改一个中文名或换一次默认值只落一处不会红；而默认值漏改的后果是**两窗行为分叉**（首页胶囊显示旧引擎、Android 搜索走旧引擎）。落地＝新增 `scripts/engine_metadata.py`（154 行，判据面拆出来是因为门禁本体已在 300 行红线上，同 `mirror_consumers.py` 的处理），四端 key→名逐字比对 + 默认值同源 + 「默认值必须 ∈ 核心集」+「start.html 初始文字＝默认引擎的展示名」（这一条把 R9-SH-8 留下的硬编码占位也接进判据：写错就红，而不是靠人记）。范围如实收窄：只比核心引擎集，C# 的六个扩展引擎名不进面——壳层回退表刻意只覆盖核心四引擎，逼它抄满十个只会让它猜没登记过的名字（扩展 key 集仍由 `CS_ENGINE_EXTENSIONS` 双向判）。SP-154 边界照抄：legacy 归档端文件缺失 ⇒ 告警 + 降级为现役三端，文件在但表解析不出 ⇒ fail；`core` 为空 ⇒ 单条告警（对面门禁此时已因 key 集为空而 fail，不叠三条噪声把一次失败伪装成多个缺陷）。新常驻测试 17 条（含现树 0 违规、现树扫描面非空、槽表路径存在、四类漂移各判得出、legacy 两态、空 core 降级、四端逐端可解析）|
 | R9-DOC-01..09 | P2×7 + P3×2 | 保留并落地（R9-B21） | 九条「文档说的 ≠ 实树的」逐条回读到具体行后改真：① README 挂着「仍待裁决」的两项其实早已落地（`LocalTargetHosts` + `network_security_config.xml` 的有界 `cleartextTrafficPermitted` + `HostWebView.WebResourceGuards.cs` 的 `SubresourceDenialFailClosed`），改写成事实并把**真未决**（IPv6 导航面）单列；② ADR-007 写「C# 无注入 JS」而 `WebView2Hardening.cs:77` 就在调 `AddScriptToExecuteOnDocumentCreatedAsync(FingerprintShield.BuildScript(…))`；③ ADR-007 写「门禁型 workflow 已全部移除 `paths:`」，py-yaml 实测只有 `android-quality`/`contracts` 两处真无过滤（`ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11）；④ architecture-overview 的「16 workflow」分解算出来是 15（漏 `dependency-relock`），而 `check_doc_claims.py` 只比裸数字所以它一直全绿；⑤ parity-checklist 的 ESM「升级自动生效」被第八轮 B6 实测反证（两版 stable loader 对 `EnhancedSecurityModeState` 均 0 命中）；⑥ device-validation Android 第 4 步写「经 broker 判 MIME/最终 URL/size/目录」，实测链是 `WebViewDownloadHandler.kt:113-114` 的 `WebViewDownloadTargetGuard`（scheme/保留地址）+ `DownloadPolicy` 扩展名，不经 broker 也不判 MIME/size；⑦ 同文件 Windows 第 7 步补上「发布制品默认不出现确认面板」的启用前置（安装器刻意不写那个注册表值）；⑧ run-guide「真机验证 10 项」实为 11 项，漏的正是 R8-CS-SEC-03 的唯一实测出口；⑨ README/SECURITY 引的 `:70` 是空行、实调在 `:77`。**一条被推翻的动作**：③ 一度想直接删掉四处 `paths:` 去「兑现」ADR——那属 CI 触发面变更（每次 PR 时长上升、且必需检查与触发条件必须同批核对），故本批只把陈述改真，余下收口另登 Q48 |
 | R9-DOC-10..15 | P3×6（R9-B41 落地时的复核＝**六条全部属实**，但其中三条的修法不是「把数字改对」） | 保留并落地 | 六条「文档抄了实树自己会说的话」：①README/CLAUDE/security-testing-guide 的「五门禁」——`contracts.yml` 的 `contract-source-of-truth` 现读 **30 步**（27 步调 python、18 步是 `check_*`/`verify_*`；登记时那句「约 17 步」本身也是估错的），三处一起改成「判定面单源＝那个 job 有哪些步骤」，**不再抄新的步骤数**；②`privacy-defaults.md` 凭证行把 `credential_guard`（OS keystore/DPAPI）当正典能力写，而该模块只在 `legacy/windows-pywebview/app/`，正典全树 `CredentialGuard`/`ProtectedData`/`DPAPI`/`KeyStore` 现读 **0 命中**（同文件 :12 已诚实写「静态加密未落地」＝两行互相打脸），改成「保证只来自密码/令牌本就不落盘＋OS 沙箱」；③`android/README.md` 的「发布前强制控制」把未落地项与已落地项混排——按实树拆两栏（已落地：`DownloadPolicy`、权限**无条件 deny**（`BrowserEngine.kt:97`，不是授权 UI）、`AegisApplication` 的崩溃钩子、签名发布链；未落地：`androidx.room` 与 `bookmark` 各 **0 命中**、Keystore 0 命中、同步协议、无痕 A-03）；④`CONTRIBUTING.md`「master 受保护、禁止直接推送」——**本批重新现读服务端**而不是引用第八轮的数：ruleset `R6-master-no-rewrite` 只有 `{deletion, non_fast_forward}` 且 Administrator/Maintain `bypass_mode=always`（本账号 `current_user_can_bypass=always`），经典保护 9 个必需检查、`strict=false`、**无 `required_pull_request_reviews`**、`enforce_admins.enabled=false`，直推历史 `d898677`/`3243397` 仍在 ⇒ 改成「服务端只强制不许删分支/不许改写历史，经 PR 全绿是流程纪律」，**不动任何仓库设置**（加对管理员生效的 PR 要求留在 §四 待裁决）；⑤parity-checklist `:73`「本清单 100%」与同文件 `:24` 的 ☐ 直接矛盾（复测 `NewBrowserVersionAvailable` 仍 0 订阅、`RuntimeUpdater.cs` 仍不存在）；⑥README 测试计数与现读双向失真（cargo 605／dotnet 508+474／JVM 450＝app 320+broker 84+adapter 46／`tests/python` collect 630＋`agent/tests` 81／UI 回归 126），而这些数**没有任何门禁判过** ⇒ 撤掉聚合数、只保留机器判定的下界（`assert_test_counts.py` Core ≥700/Broker ≥160、`verify_vectors.py` ≥21 份/≥222 条）。共同判据：这一类缺陷永远不会自己变红——代码错了用例会红，文档抄错了没有任何东西会红，所以唯一的修法是**不抄** |
+| R9-SH-16 | **P2**（R9-B44 回扫**本会话自己刚写的用例**时发现＝R9-SH-15 同族，只是这次在端侧） | 保留并落地 | R9-B39 把「注释不算消费」装进了门禁，而**端侧那批源码文本锚用例没跟着改**——今天刚写的 `ConsumedNonceLedgerTest`/`WebViewDownloadCompletionGuardTest` 就是 `source.readText().contains("...")`：同一把尺子只磨了门禁那一头。两个方向都会坏：把 `trackConsumedNonce(nonceLedgerKey(` 从代码删掉、只在注记里留一句，接线锚仍然全绿（假绿）；反过来任何一句注记提到被禁形态，「不得回潮」的反向锚就判红，而为变绿最容易被做的是删注记（丢掉的是防回归的上下文）。落地＝`:broker`/`:app` 测试源集各一份 `withoutComments()`（与 `verify_vector_consumers.py:strip_comments` 同口径），加 `SourceTextAnchorSupportTest`（两副本除 package 行外逐字相同：同一组语料、代码行必须存活、四种注释必须剔净、每条语料的「原文确实含 token」恒真防呆、「剔完不是把整段清空」正面控制——跨模块共享要动 Gradle testFixtures，属构建面，改成用同料自证让「各漂各的」不可能悄悄发生），并把本批三处锚接上。**没有机械扫全仓**：还剩 22 个文件按原始文本匹配（14 个带反向锚），因为正则不认识字符串边界，`WebViewHardeningScriptTest` 那类判的是内嵌 JS 文本，照删会把判据删变形 ⇒ 逐条登记为 §五 Q59 R9-SH-17 |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
 | R9-RS-9 **收编** | P2 | 保留并落地（R9-B15，上一条登记行的后半） | 两条像素直读包装的注册尾现在三端同形：C# 此前**裸调** `registerProxy(...)`、Kotlin 此前**裸调** `if (__aegisReg) ...`，两端都补成与 Rust 同款 `try { if (REG) REG(proxy, orig); } catch (e) {}`——这不是排版：注册器一旦抛异常，裸调会让整个包裹安装中断，等于把「不加噪的原文直读」重新放出来（catch 体本身三端行为早已同形：空 catch + 落到统一 `return orig.apply(...)`，只有 Kotlin rect-read 把 return 写在 catch 体内，现改成同形写法）。剩余唯一分歧是**注册器取用路径**（Windows＝ToStringGuard 闭包内的本地 `registerProxy`，Rust/Android＝`window[Symbol.for('proxy.register.v1')]`），由 `injected_js_text._REGISTER_ACCESSOR` 按别名表归一，因此 `DIVERGENT_REGISTERED` 从 2 条收成 **0 条**、比较面从 5 个函数扩到 7 个。别名表**只认登记的键名**（`proxy.register.v1` 与 Rust 的 `{reg_sym}` 占位），故意不写成通配 `window[Symbol.for(…)]`——否则 close 键 `proxy.register.close.v1` 能冒充注册器通过；这条边界有常驻用例与 `--self-test` 用例各钉一次。没有把 Windows 也改成 window 键入口：那会把注册句柄从闭包暴露到页面可达的 window 空间，是**放宽出货安全面**，已列第四节待裁决 |
@@ -1026,6 +1027,24 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 - Q47 R9-SH-12 | P3 | `shared/shell/start.main.js:83` ↔ `tests/ui-regression/start_main.test.mjs:307-313`：`Enter`/`空格` 选中引擎这条**正向**判据全仓零覆盖（:83 的 `if (ev.key === 'Enter' || ev.key === ' ')` 无任何用例驱动），而 :87 的方向键分支刚被 R9-SH-3 补上反向判据——只锁一侧意味着「把 Enter 整条删掉」仍全绿。补法：在同一用例里对 `items[1]` 触发 Enter 并断 `state.engineCalls` 增长（`start_main.test.mjs` 在 579 行零余量基线上，需先净减）。
   **本批已落地**（§二 R9-SH-12 / §3.10：正向锚 + 故障注入自证）。
+- Q59 R9-SH-17 | P2 | 按文本判源码的常驻用例里，**仍有 22 个文件在原始文本上匹配**（不剔注释），
+  其中 **14 个带反向锚**（同一族里反向锚更贵：它会因为一句解释性注记判红，而为变绿最容易被
+  删掉的是注记而不是缺陷）：`ReservedAddressBoundaryTests.cs`(8 处反向锚)、
+  `WebViewPipelineTests.cs`(12)、`InstalledBuildMarkerTests.cs`(7)、
+  `DocumentStartInjectionRegressionTest.kt`(7)、`SettingsServiceTests.cs`(4)、
+  `HostWebViewDownloadTrackingTests.cs`(4)、`SubresourceDenialDeliveryTests.cs`(4)、
+  `ThreatFeedCacheStatusTests.cs`(4)、`CoreReadyFailClosedTests.cs`(3)、
+  `SearchNormalizeVectorTests.cs`(3)、`PercentEncodingTest.kt`(3)、`WindowLogicTests.cs`(3)、
+  `NativePolicyCoreBuildRequirementTests.cs`(2)、`NativePolicyCoreBridgeLeaseTests.cs`(1)；
+  另 8 个只有正向锚（`HostWebViewWiringOrderTests.cs`、`SubresourceFailClosedTests.cs`、
+  `UrlOriginVectorTests.cs`、`XamlBindingStaticAnchorTests.cs`、
+  `DownloadConfirmationOwnershipTest.kt`、`SearchNormalizeVectorsTest.kt`、
+  `NativeGateWiringAnchorTest.kt`、`ProguardKeepCoverageTest.kt`）。
+  共用件与自证用例已在 R9-B44 备好（`:broker`/`:app` 的 `withoutComments()` +
+  `SourceTextAnchorSupportTest`），**剩下的是逐条判断不是机械套用**：这条锚判的是代码，
+  还是字符串里的文本？后者要跳过——`WebViewHardeningScriptTest` 一类断言对象是内嵌 JS 文本，
+  而正则不认识字符串边界，JS 里合法的 `//` 会被当源码注释一起删掉，判据反而变形。
+  已改的三处见 §3.44 第 3 点。
 
 ### 5.5 DOC（文档 vs 实树）
 
@@ -2113,6 +2132,44 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `getElementsByTagName("action")` 在 manifest 上会连 activity 的 action 一起数（要限定到
    receiver 子树）。`check_file_sizes` 绿：`WebViewDownloadHandler.kt` 仍 346＝基线（本批没动它），
    新主文件 61 / 132 行、用例 186 行。
+
+### 3.44 R9-B44（2026-10-13，R9-B39 的同一条课推到端侧用例）：按文本判源码的用例必须先剔注释
+
+1. 触发方式是**回扫自己这几批的落地件**，不是新漏洞：R9-B39 刚把
+   `verify_vector_consumers.py` 的命中口径改成「注释不算消费」，理由写得很清楚——注记里
+   逐字抄着被禁形态是本仓的传统（`InstalledBuildMarkerTests`、`ReservedAddressBoundaryTests`
+   这些文件的断言消息里就原文写着历史写法）。而**端侧那批源码文本锚用例没跟着改**：
+   今天刚写的 `ConsumedNonceLedgerTest` 与 `WebViewDownloadCompletionGuardTest` 就是
+   `source.readText().contains("...")` ——同一把尺子只磨了门禁那一头。
+2. 两个方向的失败都会发生，且方向相反：
+   - **假绿**：把 `trackConsumedNonce(nonceLedgerKey(` 从代码里删掉、只在注记里留一句
+     「已改为 trackConsumedNonce(nonceLedgerKey(...)）」⇒ 接线锚仍然全绿；
+   - **假红**：反过来，任何一句解释性注记提到被禁形态（`nonce.startsWith("$sessionId:")`
+     这种），「不得回潮」的反向锚就判红——而为了让它变绿最容易被做的是**删注记**，
+     于是丢掉的正是防止回归的那段上下文。
+3. 落地：
+   - 新增 `withoutComments()`（`:broker` 与 `:app` 测试源集各一份，四种注释形态与
+     `verify_vector_consumers.py:strip_comments` 同口径）；跨模块共享要动 Gradle 的
+     `testFixtures`（构建面变更），本批不做，改成——
+   - 新增 `SourceTextAnchorSupportTest`（两模块各一份，**除 package 行外逐字相同**）：
+     同一组语料、同一批期望，含 ①代码行必须存活 ②四种注释形态必须剔净
+     ③每条语料的「原文里确实含 token」恒真防呆 ④「剔完不是把整段清空」的正面控制。
+     两副本一旦各漂各的，同一份语料就会在两个模块给出不同答案，而期望值是写死的。
+   - 把本批新写的三处锚改用 `withoutComments()`（账本写入点、receiver 接线、
+     `rejectionOf(` 出处扫描）。
+4. **没有做的部分及为什么**：全仓还有 **22 个**按文本判源码的用例文件未剔注释，其中
+   **14 个带反向锚**（`ReservedAddressBoundaryTests` 8 处、`InstalledBuildMarkerTests` 7 处、
+   `DocumentStartInjectionRegressionTest` 7 处…）。不机械套用同一个 helper 的原因是它会
+   **过剔**：正则不认识字符串边界，`WebViewHardeningScriptTest` 那类断言对象是**内嵌 JS 文本**
+   的用例，JS 里合法的 `//` 注释会被当源码注释一起删掉，判据反而变形。要一家一家看
+   「这条锚判的是代码还是字符串里的文本」——所以登记成 §五 **Q59**，不一次扫过去。
+5. 顺带一条本轮才看清的口径区别：`OutOfBandFetchDisciplineTests`（R9-B33 写）早就自带
+   `StripLineComments`，说明这纪律在仓里是**零散出现**而不是成体系的——本批的意义就在于
+   把它从「某个作者想到了」变成「有共用件 + 有自证用例 + 有清单和剩余账」。
+6. 验证：`:broker` 与 `:app` 的 ktlintCheck + detekt + testDebugUnitTest 全绿
+   （broker 87 条 / app 332 条，0 失败，较上批各 +3 条语料用例）。写锚时又撞两次
+   ktlint/detekt 互斥窗口（`multiline-expression-wrapping` 要求多行表达式整体另起行；
+   表达式体单行落进 121..140 就被两把尺子互相打不到 ⇒ 块体两句），都按已有形状改形。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
