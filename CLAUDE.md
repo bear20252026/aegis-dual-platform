@@ -44,6 +44,10 @@ cd core/rust-policy-core
 cargo test --locked --all-features && cargo clippy --locked --all-features --all-targets -- -D warnings && cargo fmt --check  # 全绿+0 警告——与 core-rust.yml 逐字同口径（SP-183/S-06）
 
 # —— 契约/版本门禁（仓库根）——
+# 注意：以下只是**本地能跑的子集**。PR 的判定面单源是 .github/workflows/contracts.yml 的
+# contract-source-of-truth job（它有哪些步骤就是哪些步骤），新挂门禁接进那个 job 即生效，
+# 不必回来抄一份固定清单（R9-DOC-10：README 曾写「五门禁」而该 job 远不止五个，
+# CLAUDE 这里又是第三个子集 ⇒ 新门禁在文档面上隐形）
 python validate_release.py             # AST/JSON/XML 静态验证（版本校验在 scripts/verify_versions.py）
 python scripts/verify_versions.py      # 版本单源一致性
 python contracts/codegen/verify_bridge_guard.py   # Bridge 守卫单一事实源（改动守卫 JS 后必跑——ADR-007）
