@@ -139,7 +139,7 @@ class WebViewDownloadCompletionGuardTest {
 
     @Test
     fun receiverWiringReadsTheLandingColumnAndRemovesTheFile() {
-        val text = mainDir().resolve("java/com/aegis/browser/WebViewDownloadCompletionReceiver.kt").toFile().readText()
+        val text = mainSource("WebViewDownloadCompletionReceiver.kt")
         assertTrue(text.contains("intent?.action != DownloadManager.ACTION_DOWNLOAD_COMPLETE"))
         assertTrue(text.contains("DownloadManager.COLUMN_URI"))
         assertTrue(text.contains("WebViewDownloadCompletionGuard.rowVerdict("))
@@ -157,7 +157,7 @@ class WebViewDownloadCompletionGuardTest {
             sources
                 .walkTopDown()
                 .filter { it.isFile && it.extension == "kt" }
-                .filter { "rejectionOf(" in it.readText() }
+                .filter { "rejectionOf(" in it.readText().withoutComments() } // R9-SH-16
                 .map { it.name }
                 .sorted()
                 .toList()
@@ -167,13 +167,23 @@ class WebViewDownloadCompletionGuardTest {
             callers,
         )
         // 入队侧那道闸门仍在原地——复判是补洞，不是替代。
-        val handler = mainDir().resolve("java/com/aegis/browser/WebViewDownloadHandler.kt").toFile().readText()
+        val handler = mainSource("WebViewDownloadHandler.kt")
         assertTrue(handler.contains("WebViewDownloadTargetGuard.interceptIfRejected("))
     }
 
     private fun parse(file: Path): org.w3c.dom.Document {
         val factory = DocumentBuilderFactory.newInstance()
         return factory.newDocumentBuilder().parse(file.toFile())
+    }
+
+    /**
+     * 读 app main 源面里的一个文件，**先剔注释再交给断言**（R9-SH-16）。
+     * 块体两句而不是表达式体：单行表达式体在 121..140 这一段会被 ktlint 要求合回签名行、
+     * 又被 detekt 的 120 列判红（两把尺子互相打不到）。
+     */
+    private fun mainSource(name: String): String {
+        val file = mainDir().resolve("java/com/aegis/browser/$name").toFile()
+        return file.readText().withoutComments()
     }
 
     /** 仓库内 android/app/src/main（与 NetworkSecurityConfigGuardTest 同法定位）。 */

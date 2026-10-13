@@ -75,7 +75,7 @@ class ConsumedNonceLedgerTest {
         // belongsToNonceLedger——两侧共用一个前缀约定，才不会再各抄一份而失配。
         val source = File(System.getProperty("user.dir"), "src/main/kotlin/com/aegis/broker/AndroidBroker.kt")
         assertTrue("用例 working dir 不对，读不到被测源文件：${source.absolutePath}", source.isFile)
-        val text = source.readText()
+        val text = source.readText().withoutComments() // R9-SH-16：注释里的历史写法不算代码在场
         assertEquals(
             "两个消费点都要经 nonceLedgerKey 折算",
             2,
