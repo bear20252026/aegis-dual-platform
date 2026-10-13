@@ -201,6 +201,36 @@ def test_stem_must_be_a_whole_word():
     )["url-origin-valid.json"] == ["agent/odd.py"]
 
 
+def test_comment_only_citation_is_not_a_consumer():
+    """R9-B39 / Q53：注释里写出向量文件名**不算消费者**。
+
+    起因是本仓自己的一次过度登记：`native-navigation-decision.json` 被记成
+    「CS+RS 都在跑」，而 CS 那一面只来自 `BrowserPolicyBrokerNativeGateTests.cs`
+    的一句解释性注释——没有任何代码读那份向量。覆盖面是靠「这端跑过」这句话立起来的，
+    让注记冒充执行者等于把门禁改成自我声明。
+    """
+    vvc = load()
+    vectors = fake_vectors(vvc)
+    cited = "url-origin-valid.json"
+    nl = chr(10)
+    cases = (
+        ("windows/src/A.cs", "    // 与 " + cited + " 同口径" + nl + "        Assert.True(true);"),
+        ("android/a/K.kt", "    /* 见 " + cited + " 的期望值 */" + nl + "    val x = 1"),
+        ("core/r/r.rs", "/* 注记" + nl + " * 提到 " + cited + nl + " */" + nl + "fn f() {}"),
+        ("agent/a.py", "# 参照 " + cited + nl + "x = 1"),
+        ("shared/s.mjs", "  * KDoc 续行 " + cited + nl + "const a = 1;"),
+    )
+    for path, body in cases:
+        stripped = vvc.strip_comments(body)
+        assert cited in body, f"语料本身没造出来：{path}"
+        assert cited not in stripped, f"{path} 的注释形态没被剔净 ⇒ 它会冒充消费者"
+        assert not vvc.collect_consumers({path: stripped}, vectors)[cited], path
+    # 正面控制：同一文件名写进代码行必须算命中（否则上面全是恒真断言）。
+    code = f'const v = load("{cited}");'
+    assert vvc.collect_consumers(
+        {"shared/s.mjs": vvc.strip_comments(code)}, vectors)[cited] == ["shared/s.mjs"]
+
+
 def test_cross_end_pillar_floor_does_not_move_with_the_manifest():
     """把跨端两份改成单端登记，支点下界仍要判红——否则 AEG-006 可以靠改表被说反。"""
     vvc = load()
