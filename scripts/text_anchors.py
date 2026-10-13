@@ -15,16 +15,18 @@
    `verify_vector_consumers` 立刻报出「该向量新增 PY 端消费者」。写这里的说明时
    **不要逐字写被观察的文件名/被禁形态**，那不是注记，是代码。
 
-为什么不并进来的只有 JS 文本面（`contracts/codegen/injected_js_text.py`）：那里的输入是
+为什么不并进来的面有两处：① JS 文本面（`contracts/codegen/injected_js_text.py`）——那里的输入是
 **注入用的 JS 文本**，正则不认识字符串边界，JS 自己的 `//` 与 `/* */` 就是它要处理的语料，
-套这份「源码锚」口径会把判据删变形。那一份是另一种模式（文本面），不是这条纪律的第 15 份副本。
+套这份「源码锚」口径会把判据删变形，那是另一种模式（文本面），不是这条纪律的第 15 份副本；
+② shell / `.properties` 面（`drop_line_comments`）——glob 正文里的 `/*` 与 `*/` 是合法形态，
+块注释匹配会删掉中间的真语句，理由与实测见那个函数自己的说明。
 """
 
 from __future__ import annotations
 
 import re
 
-__all__ = ["strip_comments"]
+__all__ = ["drop_line_comments", "strip_comments"]
 
 # 整行 `#` 只在这些扩展名里是注释；Rust 的属性行、C# 的预处理指令都不是。
 _HASH_COMMENT_SUFFIXES = (".py", ".pyi", ".yml", ".yaml", ".toml", ".sh", ".bash", ".cfg", ".conf")
@@ -54,4 +56,19 @@ def strip_comments(text: str, path: str = "") -> str:
     text = re.sub(r"/\*[\s\S]*?\*/", "", text)         # C 系块注释（.cs/.kt/.js/.rs）
     text = re.sub(r"(?m)^\s*\*.*$", "", text)          # 块注释续行的对齐星号
     return text
+
+
+def drop_line_comments(text: str, prefix: str = "#") -> str:
+    """只按**整行前缀**剔注释，不做块匹配——给「正文里合法出现 /* 与 */」的面用。
+
+    为什么单开一个函数而不是复用 `strip_comments`：shell 的 case/glob 正文里 `deps/*)` 与
+    `*/gradle.lockfile)` 是同一段文本里的两个合法形态，块注释正则会把它们当成一个块的起止，
+    **中间的真实语句一起删掉**——R9-B50 写 `tests/python/gradle_verification_test.py` 时实测
+    撞出来：写回守卫的 `case "$changed" in` 整段消失，判据于是改在判空气（而且是**静默**消失，
+    不报任何错）。那个面的语料里没有 C 系块注释，块匹配在这里只有破坏性。
+
+    分工：源码面（.cs/.kt/.js/.rs）块注释真实存在，用 `strip_comments`；workflow 的 run 正文、
+    `.properties` 这类只有「整行注释」一种形态，用本函数。两种口径各有唯一出处。
+    """
+    return "\n".join(line for line in text.splitlines() if not line.strip().startswith(prefix))
 

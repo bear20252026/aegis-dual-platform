@@ -41,21 +41,28 @@
   （**活跃工具链锁**——contracts/agent-redteam/supply-chain/发布链验证器经
   `--require-hashes` 消费，单源输入 `requirements-ci.in`）。hash 锁定仅限 Python
   requirements（WB-130，2026-09-26 审计——hash 表述不外推到其他端）+
-  Cargo.lock（版本锁定）+ gradle.lockfile（版本锁定，无 hash——见下条）+
-  supply-chain.yml（pip-audit/cargo audit/SBOM）
-- Android（WB-130，2026-09-26 审计；**2026-10-11 第九轮项 10 / AEG-011 起口径变更**）：
-  Gradle 依赖**已启用版本锁定**——`:app`/`:broker`/`:webview-adapter`/`:contracts`
-  各一把 `gradle.lockfile`；锁块单源写在 root `android/build.gradle.kts` 的
-  `subprojects` 作用域（`lockAllConfigurations()` + `LockMode.STRICT`，声明一次即覆盖
-  全部现有与后续子模块）。锁的是
-  「模块坐标 + 版本」，**不含校验和**（整棵树做哈希/签名验证是 dependency
-  verification `gradle/verification-metadata.xml` 那一刀，本仓未做，不对外声称）。
-  覆盖不到的面如实登记：`buildscript {}` 与 plugins DSL 是**脚本类路径**，不在项目配置锁内
-  （那一路由 root `build.gradle.kts` 的显式 classpath 地板 + `buildEnvironment` 回读承接）。
-  catalog 升级必须**同批重锁**，漏重锁在 STRICT 下直接解析失败——这个失败就是门禁本身。
-  重锁执行面：`dependency-relock.yml` 的 `gradle` 生态（仅 workflow_dispatch，
-  只写 `deps/*` 分支，永不写 master）。APK 发布前经 apksigner 强制验签
-  （release-android.yml fail-closed）不变
+  Cargo.lock（版本锁定）+ gradle.lockfile（版本锁定）+ Gradle dependency verification
+  （sha256，见下条）+ supply-chain.yml（pip-audit/cargo audit/SBOM）
+- Android（WB-130，2026-09-26 审计；**2026-10-11 第九轮项 10 / AEG-011 起版本锁定，
+  2026-10-13 R9-B50 / Q55 起校验和**）：Gradle 依赖有两把独立的刀。
+  ① **版本**——`:app`/`:broker`/`:webview-adapter`/`:contracts` 各一把 `gradle.lockfile`，
+  锁块单源写在 root `android/build.gradle.kts` 的 `subprojects` 作用域
+  （`lockAllConfigurations()` + `LockMode.STRICT`，声明一次即覆盖全部现有与后续子模块），
+  重锁面按**模型集合**（`resolveAllConfigurations`）而不是抄任务清单。
+  ② **字节**——`android/gradle/verification-metadata.xml`（sha256）+
+  `android/gradle.properties` 的 `org.gradle.dependency.verification=strict`，
+  生效面是属性而非命令行参数（不带参数的 gradlew 调用一样校验，实测见
+  `android/settings.gradle.kts` 决策记录 ③）；文档里
+  `<verify-signatures>false</verify-signatures>` 是如实口径——仓内无受信 PGP 密钥，
+  这一刀验的是「字节与登记的 sha256 一致」，不是「构件被谁签名」。
+  校验和的文件面只能按任务重算，其清单与 CI 任务面由
+  `tests/python/gradle_verification_test.py` 逐 token 对账。
+  两把刀都不覆盖的面如实登记：`buildscript {}` 与 plugins DSL 是**脚本类路径**，
+  不在项目配置锁内（那一路由 root `build.gradle.kts` 的显式 classpath 地板 +
+  `buildEnvironment` 回读承接）。catalog 升级必须**同批重锁+重算校验和**，漏任一面在
+  STRICT/strict 下直接解析失败——这个失败就是门禁本身。重锁执行面：
+  `dependency-relock.yml` 的 `gradle` 生态（仅 workflow_dispatch，只写 `deps/*` 分支，
+  永不写 master）。APK 发布前经 apksigner 强制验签（release-android.yml fail-closed）不变
 - C#/.NET（SP-177，2026-10-01 审计落地）：NuGet 依赖锁文件 `packages.lock.json`
   已随三个 csproj（`RestorePackagesWithLockFile`）入库——CI restore/publish 以
   `--locked-mode` 消费，传递依赖变更必须随批更新锁文件（contracts/release-windows/

@@ -14,6 +14,7 @@ mypy/ruff 两行 bump 会连带换掉一片无关包（cyclonedx 系就在那里
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,15 +23,21 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "dependency-relock.yml"
 INPUT_SOURCE = ROOT / "requirements-ci.in"
+sys.path.insert(0, str(ROOT / "scripts"))
+
+from text_anchors import drop_line_comments  # 整行注释剔法的唯一出处（R9-B45 / R9-B50）
 
 
 def code_only(text: str) -> str:
     """只留代码行。本仓的注记里会**逐字抄着**被禁的旧形态（`|| true`、
     `.relock-body.txt`……），不剔注释，锚判的就是自己的说明而不是代码——
-    这个坑第八轮撞过两次，这里统一在入口剔掉。"""
-    return "\n".join(
-        line for line in text.splitlines() if not line.strip().startswith("#")
-    )
+    这个坑第八轮撞过两次，这里统一在入口剔掉。
+
+    走 `drop_line_comments` 而不是 `strip_comments`：被判的是 workflow 的 shell 正文，
+    那里 `/*`（glob）与 `*/`（路径形态）都是合法字符，块注释匹配会把中间的真语句删掉
+    ——R9-B50 写 gradle_verification_test 时实测撞出来的，同一课两边共用一个口径。
+    """
+    return drop_line_comments(text)
 
 
 def relock_step_run() -> str:

@@ -257,7 +257,7 @@ jobs:
         with:
           packages: "platform-tools platforms;android-36 build-tools;36.0.0"
 
-      - name: Gradle 重锁（按模型枚举全部可解析配置，而不是抄一份任务清单）
+      - name: Gradle 重锁（版本按模型枚举全部可解析配置，校验和按 CI 的文件面）
         shell: bash
         working-directory: android
         run: |
@@ -270,7 +270,19 @@ jobs:
           # `--write-locks` 只写本次解析过的配置，所以解析面必须按模型的集合定义：
           # resolveAllConfigurations 解析每个 canBeResolved 配置的**依赖图**（锁记的是版本，
           # 不是产物文件），这个集合天然 ⊇ 任何任务清单。
-          ./gradlew --no-daemon --no-configuration-cache --write-locks resolveAllConfigurations
+          # R9-B50（台账 Q55）把校验和并进同一条命令：版本与字节是同一批依赖的两面，
+          # 分两次跑就是两次都可能只做一半；而 --write-verification-metadata 缺条目时
+          # 是**补录**不是判红，正好解开「新版本没有 sha256 ⇒ 所有 gradle 作业红 ⇒ 无人能重锁」
+          # 这个先有鸡还是先有蛋（实测形态见下条命令的注释与 android/settings.gradle.kts ③）。
+          ./gradlew --no-daemon --no-configuration-cache --write-locks --write-verification-metadata sha256 resolveAllConfigurations
+          # 校验和的证据面**按文件**下载：图解析只取 .pom/.module，不下 .jar/.aar，
+          # 所以这一面只能列任务清单，不能靠 resolveAllConfigurations——与上一条的锁面
+          # 口径不同是有意的（理由记在 android/settings.gradle.kts 决策记录 ③）。
+          # 清单必须 ⊇ CI 各作业实际跑过的 gradle 任务，tests/python/gradle_verification_test.py
+          # 从 workflow 原文逐 token 对账（漏一个的表现形式是下一个用到该构件的作业当场红）。
+          # `assemble` 是 gradle-dependency-graph.yml 里 dependency-submission 动作的隐式默认
+          # 任务——工作流文本里看不见它，别当多余项删掉。
+          ./gradlew --no-daemon --no-configuration-cache --write-verification-metadata sha256 assemble :app:assembleDebug :app:assembleRelease :app:assembleDebugAndroidTest :app:lintDebug :app:testDebugUnitTest :broker:testDebugUnitTest :webview-adapter:testDebugUnitTest :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt :contracts:assembleDebug :broker:compileDebugKotlin :webview-adapter:compileDebugKotlin buildEnvironment
           # 写完必须自证：再判一遍「每个可解析配置都有锁状态」——这条与 PR 面用的是同一个任务，
           # 省掉它，漏写的配置就会回到「下一个解析它的作业当场红」的老路上。
           ./gradlew --no-daemon --no-configuration-cache verifyDependencyLockCoverage
@@ -305,20 +317,30 @@ jobs:
             exit 0
           fi
           # 「有 diff 却没有一把锁文件」＝写回面错了（比如顺手改了版本目录），不能推
+          # 「有 diff 却没有一把依赖证据」＝写回面错了（比如顺手改了版本目录），不能推。
+          # 合法面两类，都是依赖证据：四把 `gradle.lockfile`（版本）与
+          # `gradle/verification-metadata.xml`（字节）——R9-B50 起后者与前者同批重算，
+          # 守卫只放前者会造出「重锁作业红在自己写回守卫上」的死路。
           locks=0
+          metas=0
           while IFS= read -r changed; do
             case "$changed" in
               */gradle.lockfile) locks=$((locks + 1)) ;;
-              *) echo "❌ 非锁文件出现在纯重锁运行里：$changed"; exit 1 ;;
+              */gradle/verification-metadata.xml) metas=$((metas + 1)) ;;
+              *) echo "❌ 非依赖证据文件出现在纯重锁运行里：$changed"; exit 1 ;;
             esac
           done < <(git diff --cached --name-only)
-          if [ "$locks" -eq 0 ]; then
-            echo "❌ 有 diff 却没有一把 gradle.lockfile——写回面错了"
+          if [ "$locks" -eq 0 ] && [ "$metas" -eq 0 ]; then
+            echo "❌ 有 diff 却既没有 gradle.lockfile 也没有 verification-metadata.xml——写回面错了"
             exit 1
           fi
+          if [ "$locks" -eq 0 ]; then
+            echo "ℹ️ 本次只重算了校验和（版本未变）——这仍是一次合法的依赖变更"
+          fi
           git diff --cached --stat
-          git commit -m "chore(deps): 重算 Gradle 依赖锁（Dependency-Retlock dispatch，run $RELOCK_RUN_ID）" -q
+          git commit -m "chore(deps): 重算 Gradle 依赖锁与校验和（Dependency-Retlock dispatch，run $RELOCK_RUN_ID）" -q
           git push origin "HEAD:$RELOCK_BRANCH"
-          echo "⚠️ 锁已写入 $RELOCK_BRANCH——请开 PR 人工审 diff 后再合并；"
+          echo "⚠️ 依赖证据已写入 $RELOCK_BRANCH——请开 PR 人工审 diff 后再合并；"
           echo "   审点：新增/删除的 group:name 是否都来自版本目录那一次变更；"
-          echo "   锁里只有版本没有校验和，别把「重锁成功」读成「依赖已验签」。"
+          echo "   verification-metadata.xml 里新增的 sha256 要能对上上游发布的构件——"
+          echo "   「重锁成功」说的是版本与字节都自洽，不是说某个构件被签名信任过。"
