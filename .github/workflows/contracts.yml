@@ -135,6 +135,11 @@ jobs:
       # 需求平台从 workflow 的 runs-on 现取，所以加一个 macos runner 不需要改判据代码。
       - name: Gradle checksum platform coverage gate (R9-B51——字节面跟平台走)
         run: python scripts/verify_gradle_platform_coverage.py
+      # R9-B52（第九轮自查）：台账 §五 是「还剩多少事」的唯一依据。两条都会静默发生：
+      # 划了线却没有能解析到的 §3.nn 指针（闭环声明不可回读），或写着「已落地」却没划线
+      # （规模虚高、下一轮把做完的事再派一遍）。这两条都由下面的门禁判。
+      - name: Ledger queue status gate (R9-B52——队列状态必须可读，指针必须落得下)
+        run: python scripts/verify_ledger_queue_status.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
