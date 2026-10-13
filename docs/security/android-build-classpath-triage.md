@@ -40,13 +40,28 @@ release-android dispatch 走真实 assembleRelease/打包/对齐链全绿（
 ## 三、剩余告警处置（9 项）
 
 地板后图重提交（08:05Z）仍有 9 项 open：bcprov×3、bcpkix、lang3、
-httpclient（AGP 传递）+ logback×3（低危，不在本仓任何解析树内，疑为
-插件自有类路径节点）。判定：**地板不可达面**——这些版本记录存在于
+httpclient（AGP 传递）+ logback×3（低危）
+——**logback 的「不在本仓任何解析树内」是失实陈述，R9-B49 现读更正**：四把入库锁里
+`ch.qos.logback:logback-core:1.3.16=ktlint` 与 `logback-classic:1.3.16=ktlint` 各出现一次
+（`android/app/gradle.lockfile:106-107`、`broker:5-6`、`contracts:5-6`、`webview-adapter:15-16`），
+父节点是 ktlint-cli 1.8.0 的传递依赖。这句话此前能活下来，是因为
+`gradle-dependency-insight.yml` 只扫 `buildEnvironment` + `debugRuntimeClasspath` + 
+`debugUnitTestRuntimeClasspath` 三条面，**从没扫过承载这 9 条告警的两条工具面**
+（`androidLintTool`、`ktlint`）——本批把这两条面补进该 workflow，并把结论钉成常驻门禁
+`scripts/verify_gradle_alert_scope_boundary.py`）。判定：**地板不可达面**——这些版本记录存在于
 AGP 插件 detached 配置的独立解析域，用户侧无法对插件内部传递依赖做
 版本选择（jose4j/jdom2 之所以能消除，是其脆弱节点仅存在于已修的
 classpath 域）。
 
 **判定：tolerable_risk**（构建机侧暴露、产品运行时零命中、上游无稳定修复）。
+
+> **R9-B49（2026-10-13）执行与留痕**：用户授权后，本文档列出的 9 条告警在 GitHub 上以
+> `dismissed_reason=tnt`（对项目不适用）正式 dismiss，dismiss comment 逐条引用本文的锁文件
+> 行号与配置名。**dismiss 不是终点**：它依赖的事实（这 5 个坐标只在工具/测试类路径里）
+> 现在由 `scripts/verify_gradle_alert_scope_boundary.py` 常跑判定——任何一条坐标进
+> `release/debug Runtime|Compile Classpath` 或 `debugAndroidTest*Classpath`（装进设备的那份）
+> 即判红；上游若把节点整体移除（锁里再也找不到该坐标），也判红——那时登记表与本文要同步，
+> 而不是继续挂着一条已无载体的 dismiss。解除条件仍是 AGP 9.5+ 携带修复版传递依赖。
 
 > ⚠ **R8-CI-06 更正（第八轮 2026-10-05）**：本段原文写作「处置：tolerable_risk……
 > 附证据 **dismissing**」，把「判定」表述成了「已在 GitHub 上执行的操作」。
