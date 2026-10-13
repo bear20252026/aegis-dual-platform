@@ -51,3 +51,27 @@ jobs:
         with:
           build-root-directory: android
           dependency-graph: generate-and-submit
+
+
+  # R9-B47（第九轮 2026-10-13，队列 Q56 = R9-CI-14）：给这条只在 master push / 周检 /
+  # 手动触发的提交面加一条**能红**的判据。
+  # 为什么不是登记建议的「比对最近一次提交的时间戳」：那要另一条常跑流水线去读运行历史，而那条
+  # 流水线本身又需要有人判它没跑——同一个洞换一层皮。内容对账直接得多：GitHub 依赖图必须包含
+  # 当前 `android/*/gradle.lockfile` 里的每一个 `group:name` 坐标；锁刚改而图里没有它，
+  # 只可能是「作业没跑成」或「跑了但没落图」，两种都要红。周检触发本身就是那只钟。
+  # 落图是最终一致的 ⇒ --attempts 复判到上限才红（把「慢」读成「坏」会教会人忽略红灯）。
+  # Dependabot 的 Gradle 漏扫面就建立在这张图上：它静默坏掉时全仓没有一张牌会变红（#165 那次
+  # 跨 major bump 是靠「先跑一次证明它」人工确认的，不是一次性动作换成常驻判据）。
+  verify-graph-freshness:
+    name: 依赖图与版本锁对账（R9-B47——提交面静默坏掉必须变红）
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: submit-dependency-graph
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: 现读依赖图并与 android/*/gradle.lockfile 对账
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/verify_gradle_graph_freshness.py --attempts 4 --delay 20

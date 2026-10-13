@@ -43,6 +43,8 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-DOC-17 | P3（R9-B45 顺手现读发现，同批改真） | 保留并落地 | `docs/runbooks/device-validation.md:19` 说 Windows 下载入口是 `WebView/HostWebView.cs:268`（`DownloadStarting`），而 R9-B37 把下载生命周期外迁成 partial 之后 `:268` 已在 `Dispose()` 里（现读：订阅 `HostWebView.cs:158`、判定本体 `HostWebView.Downloads.cs:41`）⇒ 改成指向**文件+符号**而不是行号，并按第八轮那条口径记档：行号是引用不是事实，重构会把它变成第二条失实声明 |
 | R9-SH-5 | P2（R9-B46 回读时**把登记的处方本身纠正**） | 保留并落地（定稿，非「接进裁决链」也非「删列」） | 登记写「`confirmation/risk/audit` 三列在 `agent/broker.py` 零消费 ⇒ 要么被消费要么删列」。逐列现读消费者：`risk` → `contracts/codegen/analyze_action_catalog.py:81`（同 scope 风险冲突）、`audit` → 同文件 `:91`（必填）、`read_only` → `contracts/codegen/verify_agent_catalog.py:43` + `agent/tests/redteam_test.py:87`（首批只读门禁)——**三列里两列一直在被判定**，只有 `confirmation` 全仓零消费者；两个处方因此都不成立（删的是已被判的列，接的是「默认放行→默认需确认」那条 §四 明写不默认执行的方向）。定稿三件、运行时零行为变化：①catalog 头部写死「判定面 4 项 / 治理元数据 5 项」并逐项标谁判它；②analyzer 规则 ⑤ 把 `confirmation` 变成**必填的意图声明**（缺失/不在词表/与只读性矛盾都判红，出厂两条天然满足）；③`tests/python/codegen_and_catalog_test.py::TestCatalogGovernanceColumns` 反向钉住「运行时不读治理列」（用 R9-B45 的单源剔注释后断言四个治理列名在 `agent/broker.py` 零出现，并配判定面四列必须出现的正面控制）⇒ 将来真要接进裁决链会先撞红，逼出带契约向量的另批。夹具 `_action()` 同批补两行，否则「干净夹具」在新规则下判红会让每条专项用例失去诊断力 |
 | R9-CI-13 | P3（R9-B46 落地；R9-B21 当时只把 ADR 陈述改真，本批收口实树） | 保留并落地 | 四处 `push.paths`（`ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11）删除，理由不是「清单少列一项」而是**清单不可维护**：`ci.yml` 的清单 R8-SH-10 已从 4 项补到 8 项，仍覆盖不住该 job 真实读取的语料闭包。分类与「谁许过滤」从 ADR 的散文变成 `contracts/ci/workflow-categories.yaml`（gates 6 / builds 5 / probes 5）+ `scripts/verify_ci_trigger_surface.py` 的双向对账：未归类/登记不存在/门禁型带过滤/门禁型无 PR 触发/探测型进 PR 面五种都判红；`native-policy-artifacts` 是唯一 `pull_request` 也带过滤的，按 builds 类保留（它产物而非判定质量）。**先跑红灯实录**：删过滤前脚本准确报出四处，删完转绿。代价如实写进 ADR：三个原 `push` 无 branches 限定的 workflow 现在任意分支 push 全量跑 cargo/红队/审计 |
+| R9-CI-14 | **P2**（R9-B47 落地，处方与登记不同——理由写在 §3.47 第 2 点） | 保留并落地（换成内容对账） | 「Gradle 依赖图提交面静默坏掉时全仓没有一张牌会变红」这条洞，登记的处方是按墙钟比对最近提交时间；本批改成**内容对账**：依赖图必须包含当前 `android/*/gradle.lockfile` 的每一个 `group:name` 坐标。实测：现读 SBOM 695 个 package（Maven 形态 332），本地四把锁 284 条坐标**全部在册**（差集 0）；注入「少一条坐标」判红并点名该条，注入「图只剩 5 条」走面塌缩分支而不是「零个缺失」；取数失败/形状不对/锁面为空一律 exit 2（取不到图不等于图是新的）。落图是最终一致的 ⇒ `--attempts` 只延迟红、不掩红（`attempts=1` 时同一份迟到数据必须红，用例钉住） |
+| R9-SH-19 | P3（R9-B47 落地时新增） | 保留（写成判据设计规则，不改代码） | 任何「X 没跑」的判据若本身依赖一条不被监视的流水线，只是把洞往上挪一层。本轮已有三例同形：Q48 的 paths 过滤 → 登记表双向对账；Q28 的 README 未接线面 → 按 `lib.rs` 现算；Q56 的提交面 → 产物内容对账。后续「检测检测器」一律按这个形状做 |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
 | R9-RS-9 **收编** | P2 | 保留并落地（R9-B15，上一条登记行的后半） | 两条像素直读包装的注册尾现在三端同形：C# 此前**裸调** `registerProxy(...)`、Kotlin 此前**裸调** `if (__aegisReg) ...`，两端都补成与 Rust 同款 `try { if (REG) REG(proxy, orig); } catch (e) {}`——这不是排版：注册器一旦抛异常，裸调会让整个包裹安装中断，等于把「不加噪的原文直读」重新放出来（catch 体本身三端行为早已同形：空 catch + 落到统一 `return orig.apply(...)`，只有 Kotlin rect-read 把 return 写在 catch 体内，现改成同形写法）。剩余唯一分歧是**注册器取用路径**（Windows＝ToStringGuard 闭包内的本地 `registerProxy`，Rust/Android＝`window[Symbol.for('proxy.register.v1')]`），由 `injected_js_text._REGISTER_ACCESSOR` 按别名表归一，因此 `DIVERGENT_REGISTERED` 从 2 条收成 **0 条**、比较面从 5 个函数扩到 7 个。别名表**只认登记的键名**（`proxy.register.v1` 与 Rust 的 `{reg_sym}` 占位），故意不写成通配 `window[Symbol.for(…)]`——否则 close 键 `proxy.register.close.v1` 能冒充注册器通过；这条边界有常驻用例与 `--self-test` 用例各钉一次。没有把 Windows 也改成 window 键入口：那会把注册句柄从闭包暴露到页面可达的 window 空间，是**放宽出货安全面**，已列第四节待裁决 |
@@ -1148,7 +1150,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   结论：**「判 MIME / 判 size」两句都不成立**（`TotalBytesToReceive` 只喂进度条），真实判定面是
   危险扩展名三候选 + kill-switch + 保留地址 + 会话/标签上下文 + 无确认订阅者 fail-closed。
 
-- Q56 R9-CI-14 | P2 | `.github/workflows/gradle-dependency-graph.yml:14-25`（触发面只有
+- ~~Q56 R9-CI-14~~ **本批已闭**（R9-B47 / §3.47）| P2 | 落地的是**内容对账**而不是登记建议的墙钟比对（理由写在 §3.47 第 2 点：墙钟判据要另一条常跑流水线读运行历史，而它自己也需要被判定）。新作业 `verify-graph-freshness` + `scripts/verify_gradle_graph_freshness.py`（11 条用例）。以下为登记原文：
+  Q56 R9-CI-14 | P2 | `.github/workflows/gradle-dependency-graph.yml:14-25`（触发面只有
   `push.branches: master` + `paths:`、周 schedule 与 workflow_dispatch）↔ `:49`
   （`uses: gradle/actions/dependency-submission`）：这条 workflow 的**内容**在 PR 面上
   一张牌都不跑—— Dependabot 给它开的跨 major bump（#165：4.4.4→6.4.0）在 15 张绿牌里
@@ -2333,6 +2336,38 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `python contracts/codegen/analyze_action_catalog.py` 与 `verify_agent_catalog.py` 均 EXIT 0；
    `python scripts/verify_ci_trigger_surface.py` EXIT 0；`check_doc_claims`（16 个 workflow 的计数
    现算，本批没动 workflow 数量）与表形/链接两道 EXIT 0；4 个改动过的 workflow 全部 pyyaml 可解析。
+
+### 3.47 R9-B47（2026-10-13，队列 Q56 = R9-CI-14）：给 Gradle 依赖图加一条能红的判据（内容对账，不是墙钟）
+
+1. 这条面坏掉的方式很特殊：`gradle-dependency-graph.yml` 只在 master push / 周检 / 手动触发，
+   PR 面零执行；它的产物（GitHub 依赖图）是 Dependabot 对 Android 依赖漏扫的**唯一输入**。
+   动作静默失败时全仓没有一张牌会变红——Android 漏扫面就此失效而无人知晓。
+   #165 那次跨 major bump（4.4.4→6.4.0）是靠「先跑一次证明它」人工确认的，一次性动作不是判据。
+2. **登记给的处方被换了**（要写明，不能悄悄改）：Q56 原文建议「每周比对 last dependency submission
+   的时间戳，超过 N 天未提交即判红」。不采纳的理由：墙钟判据要另一条常跑流水线去读运行历史，
+   而那条流水线本身又需要有人判它没跑——同一个洞换一层皮；而且「按时间算新鲜」在锁没变的周里
+   永远绿，在锁刚改的那一周又必须等新作业跑完才有信号。
+   改成**内容对账**：GitHub 依赖图必须包含当前 `android/*/gradle.lockfile` 里每一个 `group:name` 坐标。
+   锁刚改而图里没有它，只可能是「作业没跑成」或「跑了但没落图」，两种都判红；
+   而周检触发本身就是那只钟（图落后于锁，下一次周检必红）。
+3. 落地件：
+   - `scripts/verify_gradle_graph_freshness.py`：`lock_coordinates()`（四把锁并集）+
+     `graph_coordinates()`（SPDX `sbom.packages[].name` 里带 `:` 的 Maven 形态）+
+     纯判定 `verdict()`。四条判据里有下界（图内坐标 < 200 ⇒ 面塌缩判红，**不许读成「零个缺失」**）、
+     锁面为空 ⇒ 退出 2、取数失败/形状不对 ⇒ 退出 2（取不到图不等于图是新的）。
+   - GitHub 落图是最终一致的 ⇒ `--attempts/--delay` 允许在判红之前复判（默认 1，用例走确定路径）。
+     把「慢」读成「坏」的判据会教会人忽略红灯，所以重试只延迟红、不掩红：`attempts=1` 时
+     同一份迟到数据必须红（用例钉住这一侧）。
+   - 作业 `verify-graph-freshness` 接进该 workflow（`needs: submit-dependency-graph`，
+     `permissions: contents: read`，`--attempts 4 --delay 20`）。分类登记里它属于 probes，
+     本来就不许出现在 PR 面（R9-B46 的 `verify_ci_trigger_surface.py` 会判这条）。
+4. 实测（全部现读，不引用推断）：`gh api .../dependency-graph/sbom` 返回 695 个 package、
+   其中 Maven 形态 332 个；本地四把锁解析出 284 条 `group:name`，**全部在图里**（差集 0）⇒ 判据 today 绿。
+   反向实证：`--sbom` 喂一份「只少最后一条坐标」的图 ⇒ 判红并列出缺的那条；
+   喂「图里只有 5 条」⇒ 走面塌缩分支而不是「零个缺失」。
+   用例 `tests/python/gradle_graph_freshness_test.py` 11 条（含一条正面控制
+   `test_real_lock_surface_is_not_collapsed`：锁解析 ≥200 条且认得出 `androidx.webkit:webkit`，
+   否则「全部在册」是空对空的恒真）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
