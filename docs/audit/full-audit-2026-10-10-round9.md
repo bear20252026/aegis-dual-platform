@@ -1027,24 +1027,27 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 - Q47 R9-SH-12 | P3 | `shared/shell/start.main.js:83` ↔ `tests/ui-regression/start_main.test.mjs:307-313`：`Enter`/`空格` 选中引擎这条**正向**判据全仓零覆盖（:83 的 `if (ev.key === 'Enter' || ev.key === ' ')` 无任何用例驱动），而 :87 的方向键分支刚被 R9-SH-3 补上反向判据——只锁一侧意味着「把 Enter 整条删掉」仍全绿。补法：在同一用例里对 `items[1]` 触发 Enter 并断 `state.engineCalls` 增长（`start_main.test.mjs` 在 579 行零余量基线上，需先净减）。
   **本批已落地**（§二 R9-SH-12 / §3.10：正向锚 + 故障注入自证）。
-- Q59 R9-SH-17 | P2 | 按文本判源码的常驻用例里，**仍有 22 个文件在原始文本上匹配**（不剔注释），
-  其中 **14 个带反向锚**（同一族里反向锚更贵：它会因为一句解释性注记判红，而为变绿最容易被
-  删掉的是注记而不是缺陷）：`ReservedAddressBoundaryTests.cs`(8 处反向锚)、
-  `WebViewPipelineTests.cs`(12)、`InstalledBuildMarkerTests.cs`(7)、
-  `DocumentStartInjectionRegressionTest.kt`(7)、`SettingsServiceTests.cs`(4)、
-  `HostWebViewDownloadTrackingTests.cs`(4)、`SubresourceDenialDeliveryTests.cs`(4)、
-  `ThreatFeedCacheStatusTests.cs`(4)、`CoreReadyFailClosedTests.cs`(3)、
-  `SearchNormalizeVectorTests.cs`(3)、`PercentEncodingTest.kt`(3)、`WindowLogicTests.cs`(3)、
-  `NativePolicyCoreBuildRequirementTests.cs`(2)、`NativePolicyCoreBridgeLeaseTests.cs`(1)；
-  另 8 个只有正向锚（`HostWebViewWiringOrderTests.cs`、`SubresourceFailClosedTests.cs`、
-  `UrlOriginVectorTests.cs`、`XamlBindingStaticAnchorTests.cs`、
-  `DownloadConfirmationOwnershipTest.kt`、`SearchNormalizeVectorsTest.kt`、
-  `NativeGateWiringAnchorTest.kt`、`ProguardKeepCoverageTest.kt`）。
-  共用件与自证用例已在 R9-B44 备好（`:broker`/`:app` 的 `withoutComments()` +
-  `SourceTextAnchorSupportTest`），**剩下的是逐条判断不是机械套用**：这条锚判的是代码，
-  还是字符串里的文本？后者要跳过——`WebViewHardeningScriptTest` 一类断言对象是内嵌 JS 文本，
-  而正则不认识字符串边界，JS 里合法的 `//` 会被当源码注释一起删掉，判据反而变形。
-  已改的三处见 §3.44 第 3 点。
+- Q59 R9-SH-17 | P2 | 五种方言并存的「剔注释」实现（清点口径：按文本判源码的 54 个用例/门禁文件）：
+  `scripts/verify_vector_consumers.py:strip_comments`（四形态）↔
+  `scripts/verify_core_unwired_modules.py:strip_comments`（只 `//`）↔
+  `windows/tests/Aegis.Windows.Core.Tests/OutOfBandFetchDisciplineTests.cs` 的
+  `StripLineComments` ↔ `android/app/src/test/kotlin/com/aegis/browser/DocumentStartInjectionRegressionTest.kt:49`
+  的 `codeOnly` ↔ `windows/tests/Aegis.Windows.Core.Tests/WebViewPipelineTests.cs:265-268` 这类
+  **就地写的 `Where(line => !line.TrimStart().StartsWith("//"))`**，再加 R9-B44 新加的
+  `withoutComments`（`:broker`/`:app` 各一份）。
+  两个后果：①**连审计都答不出「谁剔了注释」**——按 helper 名 grep 会漏内联过滤，按 `//` grep
+  会把断言里的字符串算进来（本批第一次清点就得出「22 个未剔」这个错数，实际有 6 个是内联过滤、
+  23 个没有具名 helper）；②失败模式已经**活在仓里**：`WebViewPipelineTests.cs:271` 的
+  `DoesNotContain("e.Cancel = !TryAuthorizeNavigation")` 只因 `:265-268` 那段内联过滤才不判红，
+  而 `HostWebView.cs:104` 的注记里原文就写着那个被禁形态——**离失效只差一次重构**。
+  同类命中另有 `SubresourceDenialDeliveryTests.cs`(`SecurityLog`) 与
+  `DocumentStartInjectionRegressionTest.kt`(`generateViewId`)，共 3 处。
+  验收判据（不要写成「把所有文件换成共用件」）：**每种语言只剩 1 个 helper、0 处内联过滤**，
+  且清点脚本本身可复跑（按五种方言名 `grep -l` 的结果收敛）。**不能机械替换**的原因也写清：
+  正则不认识字符串边界，判「内嵌 JS 文本」的锚（`WebViewHardeningScriptTest`、
+  `contracts/codegen/injected_js_text.py`）里 JS 自己的 `//` 会被当源码注释删掉，判据反而变形；
+  C# 侧跨 `Core.Tests`/`Broker.Tests` 两个程序集共享还要动工程引用（构建面）。
+  共用件与自证语料已由 R9-B44 备好（§3.44 第 3 点）。
 
 ### 5.5 DOC（文档 vs 实树）
 
@@ -2157,16 +2160,34 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      两副本一旦各漂各的，同一份语料就会在两个模块给出不同答案，而期望值是写死的。
    - 把本批新写的三处锚改用 `withoutComments()`（账本写入点、receiver 接线、
      `rejectionOf(` 出处扫描）。
-4. **没有做的部分及为什么**：全仓还有 **22 个**按文本判源码的用例文件未剔注释，其中
-   **14 个带反向锚**（`ReservedAddressBoundaryTests` 8 处、`InstalledBuildMarkerTests` 7 处、
-   `DocumentStartInjectionRegressionTest` 7 处…）。不机械套用同一个 helper 的原因是它会
-   **过剔**：正则不认识字符串边界，`WebViewHardeningScriptTest` 那类断言对象是**内嵌 JS 文本**
-   的用例，JS 里合法的 `//` 注释会被当源码注释一起删掉，判据反而变形。要一家一家看
-   「这条锚判的是代码还是字符串里的文本」——所以登记成 §五 **Q59**，不一次扫过去。
-5. 顺带一条本轮才看清的口径区别：`OutOfBandFetchDisciplineTests`（R9-B33 写）早就自带
-   `StripLineComments`，说明这纪律在仓里是**零散出现**而不是成体系的——本批的意义就在于
-   把它从「某个作者想到了」变成「有共用件 + 有自证用例 + 有清单和剩余账」。
-6. 验证：`:broker` 与 `:app` 的 ktlintCheck + detekt + testDebugUnitTest 全绿
+4. **清点之后，结论比预想的更准**（这一条本身纠正了我第一版的错数）：按文本判源码这件事
+   在本仓是**五种方言并存**，而不是「有的文件剔了、有的没剔」：
+   ①`scripts/verify_vector_consumers.py:strip_comments`（四形态，唯一把块注释与续行星号
+   一起处理的 python 侧实现）；②`scripts/verify_core_unwired_modules.py:strip_comments`
+   （只 `re.sub("//[^
+]*")`，**顺带把行尾注释也吃掉**——所以它对 `"https://…"` 这类
+   字符串里的 `//` 会过剔）；③`OutOfBandFetchDisciplineTests.cs` 的具名
+   `StripLineComments`；④`DocumentStartInjectionRegressionTest.kt:49` 的具名 `codeOnly`
+   （管 `//`、`/*`、` *` 三种行首）；⑤**就地写的内联过滤**——
+   `WebViewPipelineTests.cs:265-268` 与 `SubresourceDenialDeliveryTests.cs:167-170` 都是
+   `Where(line => !line.TrimStart().StartsWith("//"))`，只服务自己那一条锚。
+   我第一版按 helper 名 grep 得出「22 个未剔」，**是错的**：那两处内联过滤没有名字，
+   按名字数不到；而按 `//` grep 又会把断言字符串本身算进来。**这个「清点做不准」本身就是
+   发现**：一条判据散成五种写法，下一次审计连「谁剔了注释」都答不出来。
+5. 失败模式不是理论，本批实测撞到两次：`WebViewPipelineTests.cs:271` 的
+   `DoesNotContain("e.Cancel = !TryAuthorizeNavigation")` 与
+   `SubresourceDenialDeliveryTests.cs:150` 的 `DoesNotContain("SecurityLog")`——
+   被禁形态**就原文写在源码注记里**（`HostWebView.cs:104` 的 R8-CS-SEC-02 历史说明等），
+   这两条锚今天不判红**只是因为作者顺手写了那段内联 `//` 过滤**。差一次重构（把过滤挪走、
+   或者换个人写下一条锚不抄这段），套件就会因为一句解释性注记红在不该红的地方。
+   两处内联过滤也都**不处理块注释与 ` * ` 续行**——那条路径上今天还没有护栏。
+6. **没有做的部分及为什么**：把五种方言一次收敛。①C# 侧跨 `Core.Tests`/`Broker.Tests`
+   两个程序集，共享要动工程引用（构建面）；②**过剔是真的风险**：正则不认识字符串边界，
+   判「内嵌 JS 文本」的锚（`WebViewHardeningScriptTest`、`contracts/codegen/injected_js_text.py`）
+   里 JS 自己的 `//` 会被当源码注释删掉，判据反而变形——②那一支现在就在过剔行尾注释。
+   所以登记成 §五 **Q59 R9-SH-17**，验收判据写成可复核的形态而不是「都换掉」：
+   **每种语言只剩一个 helper、内联过滤 0 处，且过剔行为要么修掉要么写明**。
+7. 验证：`:broker` 与 `:app` 的 ktlintCheck + detekt + testDebugUnitTest 全绿
    （broker 87 条 / app 332 条，0 失败，较上批各 +3 条语料用例）。写锚时又撞两次
    ktlint/detekt 互斥窗口（`multiline-expression-wrapping` 要求多行表达式整体另起行；
    表达式体单行落进 121..140 就被两把尺子互相打不到 ⇒ 块体两句），都按已有形状改形。
