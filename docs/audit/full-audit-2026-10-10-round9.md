@@ -697,6 +697,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      改成「清空即解除＋删缓存」更符合「把配置项清空＝关掉该功能」的用户心智，但它是
      **放松防护**的方向，且要一并决定「误清一次怎么办」⇒ 需用户给话，不默认执行。
      本轮只把提示文案写成事实。
+  11. **Q53 第②档要怎么闭**（§3.42 核查后新增，两个形状都要人点头）：给
+     `native-navigation-decision.json` 接平台执行者，**不是**加一份 C# / Kotlin 用例就能做的——
+     43 条里 13 条期望 `require_confirmation`，而两端在常跑（托管）配置下根本产不出这个分支
+     （Windows `BrowserPolicyBroker.cs:286` 直接 Deny `native_confirmation_core_required`；
+     Android `AndroidBroker.kt:284` 顺延到 `evaluateNavigation`）。可选形状：
+     **①把原生变体用例提升成 PR 必需检查**（要同批核对必需 context 集合，避免 R8-CI-01 的
+     `Expected — Waiting for status` 卡死 merge box，代价是每条 android/** 与 Windows PR 都要
+     跑一次带 `.so`/原生库的构建）；**②给向量加显式分区字段**（如每条 `platform_decidable`），
+     门禁判「两端只执行被标记的子集，确认面由核心独占」——这是冻结契约面的词表变更，与
+     Q21 R9-SH-11 是同一次定稿。**默认不执行任何一个**：在那之前 `CONSUMER_MANIFEST` 保持
+     `{"RS"}`（R9-B39 刚把它从虚记的 `{CS,RS}` 改回来）。
 
 ## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
 
@@ -857,6 +868,11 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   ②`action-valid/invalid`、`native-navigation-confirmation`、`native-navigation-decision`、
   `approvals-replay-and-expiry`、`glob-match`、`update-manifest-invalid` 只有 Rust 执行
   ⇒ 「Windows/Android 与核心同一裁决」对这些命题**未被验证**
+  （**这一档不能靠「补一份 C# 用例」闭**——§3.42 逐行实证：`native-navigation-decision`
+  的 43 条里 13 条期望 `require_confirmation`，而两端在常跑（托管）配置下都产不出该分支，
+  Windows 在 `BrowserPolicyBroker.cs:286` 直接拒、Android 在 `AndroidBroker.kt:284` 顺延到
+  evaluate；要么把原生变体用例提升成必需检查，要么给向量加 `platform_decidable` 分区
+  ⇒ 升入 §四 第 11 项待裁决，登记表在此之前保持 `{"RS"}`）
   （此处原写「`native-navigation-decision` 已有 C# 消费者 `BrowserPolicyBrokerNativeGateTests.cs`，
   可作为接法模板」——**已被 R9-B39 推翻**：该文件唯一的命中是 `:260` 的一句解释性注释，
   没有任何代码读这份向量，登记表已改回 `{"RS"}`；Windows 侧至今仍是零执行者）；
@@ -1978,6 +1994,41 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `pytest tests/python` 629 passed / 1 skipped（本批零代码改动）；`check_file_sizes` 绿
    （`.md` 不在扫描面）；所有新增断言逐条给出现读命令（`gh api`、`grep -c`、py-yaml 数步骤），
    不复用上轮台账的数字。
+
+### 3.42 R9-B42（2026-10-13，Q53 第②档的可执行性核查）：登记一条「加测试文件闭不掉」的结构性障碍
+
+1. 起因是 R9-B39 之后那条最自然的下一步假设：`native-navigation-decision.json` 既然被记回
+   `{"RS"}`，那就「给 Windows 接一份真执行者」——加个 C# 用例读向量逐条断言即可。本批按
+   真实调用方语义核这条路能不能走通（结论：**不能**，且照做会得到一个比现状更假的登记）。
+2. 向量现读（`contracts/vectors/native-navigation-decision.json`，43 条）：
+   `expected_evaluate` ＝ allow 23 / **require_confirmation 13** / deny 7；另有 `deny_hosts` 9 条、
+   `expected_replay_code` 7 条、`advance_generation` 1 条、`destroy_session` 1 条。
+3. **两端在常跑（托管）配置下都产不出 `require_confirmation`**，逐行实证：
+   - Windows：`Broker/BrowserPolicyBroker.cs:204` 的 `EvaluateNavigation` 托管分支只可能
+     `Decision.Allow` 或 `Decision.Deny`；确认面在 `:272` 的 `RequestNavigationConfirmation`，
+     而它 `:286` 写死 `if (!_nativePolicyCoreRequired || _nativePolicyCoreBridge is null)
+     return NativeBridgeDenied(scope, "native_confirmation_core_required")`——托管模式**直接拒**。
+     全仓 `new Decision.RequireConfirmation` 只有一处生产者：`NativePolicyCoreBridge.cs:324`
+     （解析核心返回的 `"require_confirmation"`）。
+   - Android：`AndroidBroker.kt:194` 的 `evaluateNavigation` 托管分支同样只 Allow/Deny；
+     `:254` 的 `requestNavigationConfirmation` 在非原生构建走 `:284` 的 `else -> evaluateNavigation(...)`
+     （注释写明是为了「默认产物不再每次导航都被拒」），`Decision.RequireConfirmation` 的唯一
+     生产者是 `NativePolicyCoreBridge.kt:314`。
+4. 所以第②档只有两种诚实形状，代价都**不是测试**：
+   ①让平台用例真的跑原生核心——Windows 要 `AEGIS_NATIVE_POLICY_CORE_TEST_PATH`、Android 要
+   置位变体 + 真实 `.so`，而这两者都**不是 PR 的必需检查**（`native-policy-artifacts.yml` 是
+   master push + paths 过滤，`release-*.yml` 是发布）。接上之后合并门禁里那张面仍零执行，
+   而 `CONSUMER_MANIFEST` 会把它读成「CS/AD 已覆盖」⇒ **登记表从「没人跑」升级成「有人跑但
+   PR 不看」**，正是 R8-CS-CORE-2 记过的盲区形态；
+   ②给向量加一个显式分区字段（如每条 `platform_decidable`），门禁判「两端各自执行且**只**执行
+   被标记的子集，13 条 `require_confirmation` 由核心面独占」——这是**冻结契约面的词表变更**，
+   与 Q21 R9-SH-11（两份原生向量信封字段本就不一致）是同一次定稿，不能由修 bug 的批次顺手做。
+5. 处置：本批**不动代码**，把上面两种形状升入 §四 待用户定稿；§五 Q53 的②档文字同步改准
+   （原写「只有 Rust 执行 ⇒ 未被验证」属实，但没写**为什么不能顺手补**，后来人会把这行读成
+   「补个 C# 测试就行」——那才是这批要防的错）。
+6. 这一条的价值判定：它不是「发现了个问题」，而是**否证了一个看起来最合理的修法**。
+   核查成本是一次读两端 `evaluateNavigation` + 两次 `grep RequireConfirmation`，
+   而照原假设动手会写出 43 条里 13 条永远断不真的用例，还要连带改登记表。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
