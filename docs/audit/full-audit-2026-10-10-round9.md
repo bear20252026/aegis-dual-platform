@@ -724,10 +724,32 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   另加凭据词干表），并有用例钉住「不过界」（`keywords`/`keyboard`/`category` 保留）。
   「改用 `SearchEngines.uriEncode`」**没做**：Robolectric 已提供真实 `Uri.encode`，
   换了只把 `%2F` 变明文 `/`（线上形态变更），换不到可测性收益。
-- Q3 R9-AD-3 | P2 | `WebViewDownloadHandler.kt:139-169` 全树零 `setRedirectsAllowed`：
+- ~~Q3 R9-AD-3~~ **本批已闭**（R9-B43 / §3.43：新增 `WebViewDownloadCompletionGuard.kt` +
+  `WebViewDownloadCompletionReceiver.kt` + manifest 里 `exported="false"` 的
+  `DOWNLOAD_COMPLETE` receiver；完成后读 `COLUMN_URI` 复判、命中即 `remove()` + 留痕 + Toast，
+  判据直接复用 `WebViewDownloadTargetGuard.rejectionOf`（一条新判据都没写，且有用例扫全 app
+  源面钉住「`rejectionOf(` 只能有两个出处」）；读不到 URI/scheme ⇒ 不撤销（删不可逆）。
+  用例 9 条含 B8 裁决的对偶锚、「状态判在地址判之前」的顺序锚与「scheme 取不出不豁免」的方向锚；`:app` 329 条 0 失败。
+  **三条平台事实未验**（广播是否投递到非导出 receiver、`COLUMN_URI` 是否真等于跳转后地址、
+  `remove()` 是否真删公共目录文件）⇒ 验收步写进 `docs/runbooks/device-validation.md` Android
+  第 8 步，`windows-run-guide.md:92` 的「7 项」同步改 8 项）。原条目 ↓
+  Q3 R9-AD-3 | P2 | `WebViewDownloadHandler.kt:139-169` 全树零 `setRedirectsAllowed`：
   闸门只判**入队** URL，DownloadProvider 默认跟随重定向 ⇒ `302 → 169.254.169.254` 仍
   落盘公共目录（PR #130 消除的后果复活路径）。建议完成后用 `COLUMN_URI` 对最终地址复判
   + `remove()` + 留痕；`setRedirectsAllowed(false)` 会打断正当 CDN 重定向（产品代价，不推荐）。
+- Q58 R9-CS-18 | P2 | `windows/src/Aegis.Windows.App/WebView/HostWebView.Downloads.cs:48` ↔
+  `:112-118`（R9-B43 落地 Android 侧复判时同批复读的新证）：Windows 的下载闸门同样只判
+  `DownloadOperation.Uri`（入队地址），R9-B37 加的 `StateChanged` 只做「终态退订 + 摘表」，
+  **不复判落点** ⇒ 与 Q3 同型的 `302 → 169.254.169.254` 缺口在正典 Windows 制品上仍在。
+  不能照抄 Android 修法的原因写清：Android 靠的是 DownloadProvider 会把 `COLUMN_URI` 改写成
+  跳转目标这一事实，而 WebView2 这边**反射只能给出名字**——本批复测
+  `CoreWebView2DownloadOperation` 的属性面是 EstimatedEndTime / TotalBytesToReceive / **Uri** /
+  ContentDisposition / MimeType / BytesReceived / **ResultFilePath** / State / InterruptReason /
+  CanResume（事件面仍是三个，与 R9-B37 一致），有 `Uri` 这个属性**不等于**它在跟随重定向后
+  报的是跳转后的地址。所以修它的第一步是拿一台真机/桌面实测那条属性的语义，再决定是
+  「完成后复判 + 删文件」还是「改用 `CoreWebView2` 请求侧自行解析跳转」。登记不顺手修：
+  前者要先做一次 SDK 语义实测（没有它就只能猜，而猜错的形态是「以为拦住了」），
+  后者要重做下载发起链（与 ADR-009 的制品形态牵连）。
 - Q4 R9-AD-4 | P2 | `OriginPolicy.kt:104-110` ↔ `LocalTargetHosts.kt:153-159`：方括号
   IPv6 authority 在导航层一律拒 ⇒ `::1`/ULA 的「放行」永不被判定，而
   `LocalTargetHostsTest.kt:26-28`、`ReservedAddressBoundaryTest.kt:62,68` 用
@@ -2029,6 +2051,68 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. 这一条的价值判定：它不是「发现了个问题」，而是**否证了一个看起来最合理的修法**。
    核查成本是一次读两端 `evaluateNavigation` + 两次 `grep RequireConfirmation`，
    而照原假设动手会写出 43 条里 13 条永远断不真的用例，还要连带改登记表。
+
+### 3.43 R9-B43（2026-10-13，队列 Q3）：下载重定向落点的完成后复判
+
+1. 洞的形状（回读确证，与登记时一致）：`WebViewDownloadHandler.kt:107` 的形态闸门判的是
+   **入队那个 URL**，而真正把字节写进公共下载目录的是**另一个进程**的系统 DownloadProvider，
+   它默认跟随重定向（全树零 `setRedirectsAllowed`）⇒ `https://ok.example/a` 一发 302 指到
+   `http://169.254.169.254/...`，闸门从未看到落点。这就是 PR #130（R8-AD-03）消过的后果
+   换了个入口复活——导航层被 broker 拒、子资源层被 NSC 挡的形态，下载层照旧放行。
+2. 处方按登记口径二选一，这里取**登记推荐的**那条：`setRedirectsAllowed(false)` 会打断
+   一切正当 CDN 重定向（产品代价，登记时已标「不推荐」），所以做「完成后复判 + 撤销 + 留痕」。
+   复判的输入来自 `COLUMN_URI`——AOSP `AbstractDownloadThread.redirect()` 会把这一列改写成
+   跳转目标，因此完成后查它就拿得到了闸门本该看到的地址。**这条依赖没有设备实证**（见第 6 点）。
+3. 新增三处，**判据一份都没多写**：
+   - `WebViewDownloadCompletionGuard.kt`：`verdict(finalUrl, finalScheme)` 直接调
+     `WebViewDownloadTargetGuard.rejectionOf`（同一段表、同一个 `reserved_address` 码、同一条
+     「本机与内网必须能打开」上界）；`rowVerdict(status, url, scheme)` 把「只复判
+     STATUS_SUCCESSFUL 的行」这条顺序判据也放进纯函数——状态判在地址判之前，否则一条
+     没成功的记录也会弹「已拦截指向保留地址的下载」，那是与实际不符的话。
+   - `WebViewDownloadCompletionReceiver.kt`：读行 → 判 → `manager.remove(id)` → 留痕 + Toast。
+     **撤销失败单独记 error 级日志**（「文件仍在公共目录，需人工删除」）——那种输入下
+     Toast 说「已拦截」就是假话，不能只报喜。
+   - `AndroidManifest.xml`：`<receiver ... android:exported="false">` + `DOWNLOAD_COMPLETE`。
+     为什么 exported 必须 false：这条广播由系统按归属定投，false 收得到；true 等于把
+     「任意应用伪造一个 download_id 让本 app 删自己的文件」开放出去——**这条判断写进了
+     用例**（`receiverIsDeclaredAndNotExported` 解析 DOM 断言），不是注释里说说。
+4. 「读不到就删」被明确否掉：`verdict(null/"")` 返回 null ⇒ 不撤销——判据没有输入时把
+   不可逆动作做掉，等于把平台抖动转嫁成用户的文件损失。**但「畸形 URI」不在豁免之列**：
+   URI 读到了而 scheme 取不出时照旧按闸门口径拦（入队侧对同样的输入就判「非 http(s) 拦」，
+   复判在这里改成放行就是第二套口径，而「落点看不出问题就先留着」等于把拦不住说成已处理）
+   ——这条方向差别单独写成用例 `schemelessLandingIsNotExempted`，免得后来人把两个
+   「读不到」当成同一件事合并掉。
+5. 用例 9 条 `WebViewDownloadCompletionGuardTest.kt`：元数据落点被撤（断言留痕含
+   `DENY_CODE`）、**B8 裁决的对偶锚**（`127.0.0.1` / `192.168.1.10` / `localhost` /
+   阿里云 `100.100.100.200` 照旧不撤）、复判与入队闸门在 6 条 URL 上**逐字同判**
+   （这条就是「不许有第二个判据源」的判据）、无从判断的行保留文件、状态优先、
+   `DOWNLOAD_STATUS_SUCCESSFUL == DownloadManager.STATUS_SUCCESSFUL`（那条常量不是手抄魔数，
+   有等式锚）、manifest DOM 断言、以及一条**全 app 源面扫描**：`rejectionOf(` 的出处
+   只能有两个文件（闸门自身 + 完成复判），第三处出现即红——这正是本次新增判据时
+   最容易长出的东西。
+6. **诚实边界（本批最该记住的一条）**：JVM 侧能验的是判据与接线形态，验不了的是
+   ①广播是否真投递到 `exported=false` 的 manifest receiver，②`COLUMN_URI` 在本机 ROM 上
+   是否真等于跳转后的地址，③`remove()` 是否真把公共目录里那个文件删掉。这三条任一不成立，
+   防护就是纸面能力——所以验收步写进 `docs/runbooks/device-validation.md` **Android 第 8 步**
+   （含怎么造这个 302），并同步把 `windows-run-guide.md:92` 那句「Android 清单（7 项……）」
+   改成 8 项与实名（R9-DOC-08 同一口径：文档数量与名称必须对上实树）。
+7. **同型缺口另登 Q58（Windows）**：`HostWebView.Downloads.cs:48` 判的也是
+   `DownloadOperation.Uri`（入队地址），R9-B37 加的 `StateChanged` 只做引用回收、不复判落点
+   ⇒ 同型缺口在正典 Windows 制品上仍在。**不照抄 Android 的原因写清**：Android 靠的是
+   DownloadProvider 会改写 `COLUMN_URI`，而本批反射复测 `CoreWebView2DownloadOperation`
+   只能给出**名字**——属性面 EstimatedEndTime / TotalBytesToReceive / **Uri** / ContentDisposition /
+   MimeType / BytesReceived / **ResultFilePath** / State / InterruptReason / CanResume，
+   事件面仍只有三个（与 R9-B37 一致）；有 `Uri` 这个属性不等于它在跟随重定向后报的是
+   跳转后的地址。第一步必须是拿真机/桌面实测那条属性的语义，否则改动的错法是「以为拦住了」
+   （登记在 §五 Q58，需设备授权）。
+8. 验证：`./gradlew :app:ktlintCheck :app:detekt :app:testDebugUnitTest` ⇒ BUILD SUCCESSFUL，
+   app 面 **329 条 0 失败**（320 + 本批 9）。四轮 ktlint/detekt 返工的形态都进了用例注释：
+   限定名接收者的链必须逐环断行（`android.net.Uri.parse(url).scheme` 那种写法在本仓必须
+   拆成 `.parse(url)` / `.scheme` / `?.lowercase()` 三行）、`ReturnCount ≤2`（入口守卫合并成
+   一个 `completedDownloadId()`）、`Path.readText()` 在本仓 stdlib 里不存在（要 `.toFile().readText()`）、
+   `getElementsByTagName("action")` 在 manifest 上会连 activity 的 action 一起数（要限定到
+   receiver 子树）。`check_file_sizes` 绿：`WebViewDownloadHandler.kt` 仍 346＝基线（本批没动它），
+   新主文件 61 / 132 行、用例 186 行。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
