@@ -1027,6 +1027,23 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   属产品决策 ⇒ §四 待裁决。现网提示文案已按事实写成「已清空订阅源：此后不再自动重取，
   当前名单仍会继续拦截」（不是「退回空表」），并由 `ThreatFeedRefreshScheduleTests.
   Cleared_feed_means_no_further_network_activity_not_a_cleared_list` 钉住「清空不制造空窗」。
+- Q62 R9-CS-19 | P2（R9-B53 的 CI 面现读发现，登记并在下一批修） |
+  `windows/tests/Aegis.Windows.Core.Tests/ThreatFeedCoordinatorTests.cs:28-29`（`Harness.Applied` /
+  `Harness.Logs` 是普通 `List<>`）↔ 同文件 `:65-66`、`:80`、`:93`、`:105`、`:127`、`:140`、`:178`
+  （`SpinUntil` 每 10ms 从测试线程枚举这两个表）↔ `:185-193`（`SpinUntil` 本体）：
+  `ThreatFeedCoordinator.Start()` 把快照应用与刷新放在**后台线程**，而那两个表就是后台线程的
+  回调写的（`applyHosts: applied => Applied.Add(applied)`、`message => Logs.Add(message)`）——
+  测试线程同时在枚举它。实测红灯（run 38461642255 的 `windows-contract-build`，
+  同一 commit 的 PR 面两次全绿）：`System.InvalidOperationException : Collection was modified`
+  at `ThreatFeedCoordinatorTests.cs:line 65`，`Failed: 1, Passed: 900`。
+  这不是「运气差的门禁」而是**用例自己的数据竞态**：它判的是后台链有没有把快照灌进来，
+  而它读的那份记录不是线程安全的。影响：`windows-contract-build` 会偶发红在一条与改动无关的
+  PR 上，而这类红灯的实际处置是「重跑一次」——每次都重跑就是门禁失信（R9-CI 那批反复记的形态）。
+  修法方向（下一批）：把两个记录表收成带锁的快照面（写侧 `Add` 入锁、读侧一次性 `Snapshot()`
+  出来再枚举），并把「`SpinUntil` 只碰快照」写成判据；同批回读 `ThreatFeedRefreshScheduleTests`
+  的 `Delays`/`_logs` 与 `CoreDenylistPublisherTests._pushed` 是否同一形态。
+  **不在本批顺手改**：B53 的主题是 Gradle 校验和的生成面，C# 测试面的并发修复放进去会让
+  两件事都对不上账。
 
 ### 5.4 RS（Rust 核心）
 
@@ -2763,6 +2780,24 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    pin-check 的 grep 口径本地同跑（含 `.github/actions/`）⇒ 全部 40 位 SHA。
    本批**不动任何出货行为**：四把 `gradle.lockfile`、`packages.lock.json`、
    `verification-metadata.xml` 零改动，`android/` 下只动了 `settings.gradle.kts` 的注记。
+10. **端到端实证**（`dependency-relock.yml` 两次 dispatch，`--ref fix/r9-b53-…`、
+   写回面 `deps/r9-b53-legs-evidence`；两次都跑通 ⇒ 结构判据之外还有真运行）：
+   - run **38461734317**（不动文档的那一次）：ubuntu 腿三条命令 `BUILD SUCCESSFUL`（57s / 2m2s / 7s）
+     ⇒「✅ 重锁无差异」；windows 腿（`C:\Program Files\Git\bin\git.exe` 那一台）文件面
+     `BUILD SUCCESSFUL in 3m 33s` ⇒「✅ windows 腿无差异」。**入库那份就是两条腿的不动点**——
+     这与 §3.50 记的 SOP 幂等是同一件事在两个平台上的版本。顺带证伪一条担心：
+     `./gradlew` 在 windows runner 的 Git Bash 下可用，不需要 `gradlew.bat` 的第二种命令行形态。
+   - run **38463296721**（**注入必红/必补**那一次）：先在 `deps/*` 分支上删掉
+     `aapt2-9.4.1-15978811-windows.jar` 的 `<artifact>` 块（3 行），再跑同一个作业。
+     ubuntu 腿三条命令全绿、**且没有把那一块补回来**（仍是「✅ 重锁无差异」，零推送）——
+     这就是「字节面跟平台走」的直接证据：不是「ubuntu 腿偷懒」，是它**下载不到**那个文件；
+     windows 腿随后 `BUILD SUCCESSFUL in 5m 12s`，产出 commit `02ee497b`，diff **恰好 +3 行**、
+     只动 `android/gradle/verification-metadata.xml`，补回的 sha256 与被删的那条逐字符相同
+     （`5fe3c8ee…`）——同一构件在两个平台上的字节一致，缺的是**登记**而不是内容。
+     写回守卫在只放校验和文档的那条腿上按预期放行。两次运行都没有出现并发推送。
+   - 这条实证同时是 Q61 验收口径的前半（「两个平台的 gradle 作业在同一份文档下绿」）；
+     后半「一次真实的依赖 bump」要等下一条 bump PR，与本批无关，记在 §3.50 第 7 条那一类
+     「等下一次真实 dispatch/标签」的位置。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
