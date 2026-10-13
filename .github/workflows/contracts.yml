@@ -113,6 +113,12 @@ jobs:
       # 下一批的接线取舍。本门禁把「未接线面登记表 = README 那句话」钉成可失败检查。
       - name: Core unwired-module claim reconciliation (R9-B36——「已实现」不等于「在裁决面上」)
         run: python scripts/verify_core_unwired_modules.py
+      # R9-B45（第九轮 Q59 / R9-SH-17）：「按文本判源码前先剔注释」这条纪律在收敛前散成 14 份、
+      # 三种覆盖等级（「太窄」＝只剔整行 `//` 与「过剔」＝切到行尾两种错法并存）。收成每语言一份后，
+      # 本门禁判「有没有人又写一份就地过滤」——多一处判红，白名单里的出处消失（改名/删掉）也判红
+      # （双向不变量，R9-SH-7 同口径）。不新增必需 context：并入本 job（R8-CI-01 教训）。
+      - name: Text-anchor helper single-source gate (R9-B45——注释不算证据，副本也不该有第二份)
+        run: python scripts/verify_text_anchor_helpers.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Xunit;
+using Aegis.Windows.TestSupport;
 
 /// <summary>R9-B33（第九轮队列 Q23）：带外抓取（out-of-band fetch）的读取口径必须单源。
 ///
@@ -34,12 +35,8 @@ public sealed class OutOfBandFetchDisciplineTests
         throw new InvalidOperationException("未从测试输出上溯到 windows/src");
     }
 
-    private static string StripLineComments(string text) => string.Join("\n",
-        text.Split('\n').Select(line =>
-        {
-            var trimmed = line.TrimStart();
-            return trimmed.StartsWith("//", StringComparison.Ordinal) ? "" : line;
-        }));
+    /// <summary>剔注释口径单源在 <c>SourceTextAnchors.CodeOnly</c>（R9-B45 / 台账 Q59）。</summary>
+    private static string StripLineComments(string text) => SourceTextAnchors.CodeOnly(text);
 
     /// <summary>纯函数：给定「一个抓取文件」的代码，返回它的读取口径问题。
     /// 内存态注入用同一份判定，反向锚才落在真逻辑上。</summary>

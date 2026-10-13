@@ -3,6 +3,7 @@ namespace Aegis.Windows.Broker.Tests;
 using System;
 using System.IO;
 using System.Linq;
+using Aegis.Windows.TestSupport;
 using Xunit;
 
 /// <summary>
@@ -40,17 +41,9 @@ public sealed class HostWebViewWiringOrderTests
         throw new DirectoryNotFoundException($"未找到 {RelativeSource}（请在仓库内运行测试）");
     }
 
-    /// <summary>只取代码行：注释行必须剔掉——本仓的注记里常常抄着被禁的旧形态原文，
-    /// 不剔就会自我打红（第八轮两次实测的同型事故）。行尾按平台无关方式切分
-    /// （`.gitattributes` 检出 LF、工作副本可能是 CRLF，按 Environment.NewLine 切会把
-    /// 整份文件当成一行，注释过滤静默失效）。</summary>
+    /// <summary>只取代码行：口径单源在 <c>SourceTextAnchors.CodeOnly</c>（R9-B45 / 台账 Q59）。</summary>
     private static string CodeOnly() =>
-        string.Join(
-            "\n",
-            File.ReadAllText(Path.Combine(RepoRoot(), RelativeSource))
-                .Replace("\r\n", "\n")
-                .Split('\n')
-                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+        SourceTextAnchors.ReadCodeOnly(RepoRoot(), RelativeSource);
 
     private static int RequiredIndex(string code, string anchor)
     {

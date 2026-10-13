@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Aegis.Windows.Chrome;
+using Aegis.Windows.TestSupport;
 using Xunit;
 
 /// <summary>R8-CS-SEC-05 / R8-CS-SEC-07（第八轮 2026-10-08）：
@@ -194,13 +195,8 @@ public sealed class CoreReadyFailClosedTests : IDisposable
         Assert.Contains("if (navigationSucceeded)", ui);
     }
 
-    /// <summary>读源码并剔注释行——修复说明里常逐字抄着被禁的旧形态，
-    /// 不剔就是自己的注记把自己打红（第八轮两次实测撞到）。</summary>
-    private static string CodeOnly(string relative) =>
-        string.Join(
-            "\n",
-            File.ReadAllLines(Path.Combine(RepoRoot(), relative))
-                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+    /// <summary>读源码并剔注释：口径单源在 <c>SourceTextAnchors</c>（R9-B45 / 台账 Q59）。</summary>
+    private static string CodeOnly(string relative) => SourceTextAnchors.ReadCodeOnly(RepoRoot(), relative);
 
     private static int RequiredIndex(string code, string anchor)
     {

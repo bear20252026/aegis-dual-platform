@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Linq;
 using Xunit;
+using Aegis.Windows.TestSupport;
 
 /// <summary>R9-CS-1（第九轮 2026-10-10）：无痕窗 core-ready 接线段的**对偶锚**。
 ///
@@ -37,13 +38,9 @@ public sealed class InPrivateCoreReadyWiringTests
         return dir?.FullName ?? throw new DirectoryNotFoundException("找不到仓库根（CLAUDE.md）");
     }
 
-    /// <summary>只取**非注释**行：形状锚不能把「注释里提到的旧写法」当成回归
-    /// （第八轮 R8-CS-SEC 系列的教训——注记里写着旧形态，锚就恒真）。</summary>
-    private static string Read(string relative) =>
-        string.Join(
-            '\n',
-            File.ReadAllLines(Path.Combine(RepoRoot(), relative))
-                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+    /// <summary>只取**非注释**行：口径单源在 <c>SourceTextAnchors.CodeOnly</c>
+    /// （R9-B45 / 台账 Q59——形状锚不能把「注释里提到的旧写法」当成回归）。</summary>
+    private static string Read(string relative) => SourceTextAnchors.ReadCodeOnly(RepoRoot(), relative);
 
     /// <summary>判据本体：返回形状问题清单，空 = 通过。</summary>
     private static string[] Problems(string host, string coreReady)

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using Aegis.Windows.WebView;
 using Xunit;
+using Aegis.Windows.TestSupport;
 
 /// <summary>⑤（第八轮，用户 2026-10-07 定稿）：子资源策略链的异常处置。
 ///
@@ -203,16 +204,9 @@ public sealed class SubresourceFailClosedTests : IDisposable
         return count;
     }
 
-    /// <summary>只取 handler 本体与拦截面所在段落：注释行剔掉——本仓注记里常抄旧形态
-    /// 原文，不剔就会自我打红（第八轮两次实测的同型事故）。行尾按平台无关方式切分
-    /// （检出 LF、工作副本可能 CRLF，按 Environment.NewLine 切会把整份文件当一行）。</summary>
-    private static string CodeOnly() =>
-        string.Join(
-            "\n",
-            File.ReadAllText(Path.Combine(RepoRoot(), RelativeSource))
-                .Replace("\r\n", "\n")
-                .Split('\n')
-                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+    /// <summary>只取 handler 本体与拦截面所在段落：剔注释口径单源在
+    /// <c>SourceTextAnchors.CodeOnly</c>（R9-B45 / 台账 Q59）。</summary>
+    private static string CodeOnly() => SourceTextAnchors.ReadCodeOnly(RepoRoot(), RelativeSource);
 
     private static int RequiredIndex(string code, string anchor)
     {

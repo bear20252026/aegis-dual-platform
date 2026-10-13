@@ -31,4 +31,11 @@
   <ItemGroup>
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- R9-B45 / 台账 Q59：文本锚剔注释口径单源。跨 Core.Tests/Broker.Tests 两个
+         程序集用「链接同一份源文件」共享——新建测试支撑工程会动构建面（工程引用、
+         锁文件、发现数下界），链接源码没有这些代价，代价只是路径上溯一层。 -->
+    <Compile Include="..\Aegis.Windows.TestSupport\SourceTextAnchors.cs"
+             Link="TestSupport\SourceTextAnchors.cs" />
+  </ItemGroup>
 </Project>

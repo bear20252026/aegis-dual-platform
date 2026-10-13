@@ -45,19 +45,17 @@ class DocumentStartInjectionRegressionTest {
         return file.readText()
     }
 
-    /** 剔除注释行后的代码文本——禁止形态只可能在代码里成立。 */
-    private fun codeOnly(relative: String): String {
-        val raw = read(relative).replace("\r\n", "\n")
-        val out = mutableListOf<String>()
-        for (line in raw.split("\n")) {
-            val trimmed = line.trim()
-            val isComment = trimmed.startsWith("//") || trimmed.startsWith("/*") || trimmed.startsWith("*")
-            if (!isComment) {
-                out += trimmed
-            }
-        }
-        return out.joinToString("\n")
-    }
+    /**
+     * 剔除注释后的代码文本——禁止形态只可能在代码里成立。
+     *
+     * 口径单源在 `SourceTextAnchorSupport.kt` 的 `withoutComments()`（R9-B45 / 台账 Q59）：
+     * 本仓注记里逐字抄着被禁形态是本文件第 22-24 行自己记下的教训，就地再写一份过滤
+     * 只会多出一种「太窄」的错法（旧写法不处理块注释整段，只逐行看 `*` 开头）。
+     */
+    private fun codeOnly(relative: String): String =
+        read(relative)
+            .replace("\r\n", "\n")
+            .withoutComments()
 
     /** R8-CS-SEC-14：注入文本按 Stage 边界拆到三个文件——锚必须读三段之和，
      *  否则「wildcard 随脚本搬进子文件」这类回归正好落在盲区里。 */

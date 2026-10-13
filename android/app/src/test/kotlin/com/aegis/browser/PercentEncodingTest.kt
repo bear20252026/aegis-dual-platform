@@ -79,13 +79,13 @@ class PercentEncodingTest {
         assertEquals(emptyList<String>(), offenders)
     }
 
-    /** 剔注释（`//` 行注释与 KDoc 正文行）——本批注记逐字抄着被禁写法。 */
+    /** 剔注释（口径单源 `withoutComments()`，R9-B45 / 台账 Q59）——本批注记逐字抄着被禁写法。 */
     private fun codeLines(text: String): List<String> =
         text
             .replace("\r\n", "\n")
-            .split("\n")
+            .withoutComments()
+            .lines()
             .map { it.trim() }
-            .filterNot { it.startsWith("//") || it.startsWith("/*") || it.startsWith("*") }
 
     private companion object {
         private const val MAIN_SOURCE_DIR = "android/app/src/main/java"

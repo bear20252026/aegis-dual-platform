@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using Aegis.Windows.WebView;
 using Xunit;
+using Aegis.Windows.TestSupport;
 
 /// <summary>AX-01（外部第三轮审计 2026-10-11）：拒绝已经产生之后，「合成/交付这份拒绝响应」
 /// 这一步自己失败，不能把请求退回默认路径。
@@ -159,15 +160,8 @@ public sealed class SubresourceDenialDeliveryTests
         return code[start..end];
     }
 
-    /// <summary>剔注释后再判结构：本仓注记里常抄旧形态原文，不剔就会自我打红
-    /// （第八轮两次实测的同型事故）。行尾按平台无关方式切分。</summary>
-    private static string CodeOnly() =>
-        string.Join(
-            "\n",
-            File.ReadAllText(Path.Combine(RepoRoot(), RelativeSource))
-                .Replace("\r\n", "\n")
-                .Split('\n')
-                .Where(line => !line.TrimStart().StartsWith("//", StringComparison.Ordinal)));
+    /// <summary>剔注释后再判结构：口径单源在 <c>SourceTextAnchors.CodeOnly</c>（R9-B45 / 台账 Q59）。</summary>
+    private static string CodeOnly() => SourceTextAnchors.ReadCodeOnly(RepoRoot(), RelativeSource);
 
     private static int RequiredIndex(string code, string anchor)
     {

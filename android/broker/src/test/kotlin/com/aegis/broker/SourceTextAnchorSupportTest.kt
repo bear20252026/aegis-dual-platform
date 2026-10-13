@@ -49,6 +49,19 @@ class SourceTextAnchorSupportTest {
     }
 
     @Test
+    fun lineCommentHoldingAFakeBlockOpenDoesNotEatFollowingCode() {
+        // 顺序判据（R9-B45 收敛时实测撞出来的那条）：整行注释里的 `"https://*"` 含一个
+        // `/`+`*` 的假块起点。先做块匹配就会一路吃到下一个 `*/`，把中间的真语句一起删掉；
+        // 先剔整行注释再匹配块，才是「判代码」而不是「判注释的形状」。
+        val corpus =
+            "        // allowedOriginRules 不接受 \"https://*\" 这种全域通配" +
+                "\n        val allowedOrigins = setOf(\"*\")" +
+                "\n        // 下一个块收尾 */ 只是文本"
+        assertTrue("语料本身没造出被吞的那一行", "val allowedOrigins" in corpus)
+        assertTrue("行注释里的假块起点吞掉了后面的代码行", "val allowedOrigins" in corpus.withoutComments())
+    }
+
+    @Test
     fun strippingIsNotJustDeletingTheWholeText() {
         // 正面控制的另一面：剔完必须还剩东西——否则上面两条可以由「把整个输入清空」这一
         // 实现同时满足（恒绿的第三种形态）。
