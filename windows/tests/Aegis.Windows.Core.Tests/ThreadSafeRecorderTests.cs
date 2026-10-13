@@ -25,68 +25,140 @@ using Xunit;
 ///   最容易发生在解合并冲突的时候，而那时没人会把它和 CI 的偶发红联系起来。
 ///
 /// **一条刻意没写的断言**：不判「普通 `List<T>` 在这种并发下必抛」。那个断言本身就是竞态
-/// （它可能不抛），把它写成用例等于再造一条偶发红灯。实测形态记在台账 §3.54。</summary>
+/// （它可能不抛），把它写成用例等于再造一条偶发红灯。实测形态记在台账 §3.54。
+///
+/// 本批自己也被这条判据教了一次：第一版用 `Task.Run` 起读线程 + 固定 2000 圈的自旋上限，
+/// CI（2 核 runner）上红在「与写侧根本没有重叠」——自旋读线程占着线程池 worker，写任务排在
+/// 后面，读线程却已经把圈数烧完退场了。**非空心断言当场把一件设计缺陷变成了红灯**，
+/// 这正是它存在的意义（第二版改用专用线程 + 「写侧真的结束」作为退出条件，见下面的注释）。</summary>
 public sealed class ThreadSafeRecorderTests
 {
     private const int Writers = 8;
     private const int PerWriter = 400;
     private const int Readers = 4;
-    private const int ReadSpins = 2_000;
+    private const int HandshakeSeconds = 30;
 
     [Fact]
-    public async Task Concurrent_record_and_enumerate_never_throw()
+    public void Concurrent_record_and_enumerate_never_throw()
     {
+        // 用专用线程而不是 Task.Run：读侧是自旋的，占着线程池 worker，而 8 个写任务排在
+        // 后面——2 核 runner 上实测就是这么红的（run 38469671504 先炸的是「与写侧根本没有
+        // 重叠」那条非空心断言）。重叠必须由**构造**保证，不能交给调度器的心情。
         var rec = new ThreadSafeRecorder<int>();
+        var failures = new List<Exception>();
         var reads = 0;
         var nonEmptyReads = 0;
-        var enumeratedTotal = 0;
+        var enumeratedItems = 0;
         var writersFinished = 0;
-        var readersReady = new CountdownEvent(Readers);
-        var writersDone = 0;
+        var seeded = 0;
+        using var readersReady = new CountdownEvent(Readers);
+        using var writersDone = new ManualResetEventSlim(false);
 
-        // 读侧三种形态都要跑到：整条 LINQ 链（CI 上真实的那一句）、Count、foreach。
-        // 任一环节抛 InvalidOperationException 都会从 await 里传出来。
-        var readTasks = Enumerable.Range(0, Readers).Select(slot => Task.Run(() =>
+        var readers = Enumerable.Range(0, Readers).Select(slot =>
         {
-            readersReady.Signal();
-            var spin = 0;
-            while (spin < ReadSpins && Volatile.Read(ref writersDone) == 0)
+            var thread = new Thread(() =>
             {
-                Interlocked.Increment(ref reads);
-                var snapshot = rec.Snapshot();
-                if (snapshot.Length > 0) Interlocked.Increment(ref nonEmptyReads);
-                _ = snapshot.Any(v => v % 7 == 0);          // LINQ 链：CI 上真实的那一句
-                _ = rec.Count;                                // 计数面
-                var sum = 0;
-                foreach (var value in rec) sum += value % 3;  // 直接枚举（xunit 断言走的就是这条）
-                Interlocked.Add(ref enumeratedTotal, sum);
-                spin++;
-            }
-        })).ToArray();
+                try
+                {
+                    readersReady.Signal();
+                    var deadline = Environment.TickCount64 + HandshakeSeconds * 1000;
+                    do
+                    {
+                        var snapshot = rec.Snapshot();
+                        Interlocked.Increment(ref reads);
+                        if (snapshot.Length > 0) Interlocked.Increment(ref nonEmptyReads);
+                        _ = snapshot.Any(v => v % 7 == 0);      // LINQ 链：CI 上真实那一句的形态
+                        _ = rec.Count;                            // 计数面
+                        var counted = 0;
+                        foreach (var _ in rec) counted++;          // 直接枚举（xunit 断言走这条）
+                        Interlocked.Add(ref enumeratedItems, counted);
+                    }
+                    // 收工条件是「写侧真的结束」，不是「我转了几千圈」：后者在慢 runner 上
+                    // 会先烧完，于是这条用例又变成空跑。
+                    while (!writersDone.IsSet && Environment.TickCount64 < deadline);
+                }
+                catch (Exception e)
+                {
+                    lock (failures) failures.Add(e);
+                }
+            })
+            { IsBackground = true };
+            thread.Start();
+            return thread;
+        }).ToArray();
 
-        // 重叠是协调出来的：写线程必须等读线程报到之后才开工——反过来这条用例就可能
-        // 在「没人并发」的时刻跑完，绿得毫无意义（空心门禁，R9-B39 同一课）。
-        var writeTasks = Enumerable.Range(0, Writers).Select(batch => Task.Run(() =>
+        var writers = Enumerable.Range(0, Writers).Select(batch =>
         {
-            if (!readersReady.Wait(TimeSpan.FromSeconds(30)))
-                throw new TimeoutException("读线程没报到——这条用例的并发面根本没建立起来");
-            for (var i = 0; i < PerWriter; i++) rec.Record(batch * PerWriter + i);
-            // 最后一名写线程收工才叫结束：读线程必须至少与一段写入真正重叠过。
-            if (Interlocked.Increment(ref writersFinished) == Writers) Volatile.Write(ref writersDone, 1);
-        })).ToArray();
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    if (!readersReady.Wait(TimeSpan.FromSeconds(HandshakeSeconds)))
+                        throw new TimeoutException("读线程没报到——这条用例的并发面根本没建立起来");
+                    var from = 0;
+                    if (batch == 0)
+                    {
+                        // 种子写 + 反向握手：先让记录面非空，再等**读线程确实读到过非空快照**，
+                        // 其余写入才开工。nonEmptyReads>0 因此是构造出来的事实，不是运气。
+                        rec.Record(0);
+                        from = 1;
+                        var deadline = Environment.TickCount64 + HandshakeSeconds * 1000;
+                        while (Volatile.Read(ref nonEmptyReads) == 0)
+                        {
+                            if (Environment.TickCount64 > deadline)
+                                throw new TimeoutException("种子写之后没有任何一次非空读取：读线程没在并发跑");
+                            Thread.SpinWait(64);
+                        }
+                        Volatile.Write(ref seeded, 1);
+                    }
+                    else
+                    {
+                        var deadline = Environment.TickCount64 + HandshakeSeconds * 1000;
+                        while (Volatile.Read(ref seeded) == 0)
+                        {
+                            if (Environment.TickCount64 > deadline)
+                                throw new TimeoutException("种子写线程没走完握手");
+                            Thread.SpinWait(64);
+                        }
+                    }
+                    for (var i = from; i < PerWriter; i++) rec.Record(batch * PerWriter + i);
+                    if (Interlocked.Increment(ref writersFinished) == Writers) writersDone.Set();
+                }
+                catch (Exception e)
+                {
+                    lock (failures) failures.Add(e);
+                    writersDone.Set();   // 别让读线程陪着挂
+                }
+            })
+            { IsBackground = true };
+            thread.Start();
+            return thread;
+        }).ToArray();
 
-        await Task.WhenAll(readTasks.Concat(writeTasks)).WaitAsync(TimeSpan.FromSeconds(60));
+        foreach (var thread in writers)
+        {
+            if (!thread.Join(TimeSpan.FromSeconds(HandshakeSeconds * 2)))
+                throw new TimeoutException("写线程没在时限内收工");
+        }
+        writersDone.Set();
+        foreach (var thread in readers)
+        {
+            if (!thread.Join(TimeSpan.FromSeconds(HandshakeSeconds)))
+                throw new TimeoutException("读线程没在时限内收工");
+        }
 
+        Assert.True(failures.Count == 0,
+            string.Join(" | ", failures.Select(f => $"{f.GetType().Name}: {f.Message}")));
         Assert.Equal(Writers, Volatile.Read(ref writersFinished));
         Assert.Equal(Writers * PerWriter, rec.Count);
         var all = rec.Snapshot();
         Assert.Equal(Writers * PerWriter, all.Length);
         Assert.Equal(all.Length, all.Distinct().Count());   // 没丢也没重复
-        Assert.True(reads > 0, "读线程一次都没跑到——判据在判空气");
+        Assert.True(reads >= Readers, $"读线程每人至少跑一轮：实得总轮数 {reads}");
         Assert.True(nonEmptyReads > 0, "读线程从没读到过任何内容：与写侧根本没有重叠");
-        Assert.True(enumeratedTotal > 0, "直接枚举一条内容都没产出：与写侧根本没有重叠");
-        readersReady.Dispose();
+        Assert.True(enumeratedItems > 0, "直接枚举一条内容都没产出：与写侧根本没有重叠");
     }
+
 
     [Fact]
     public void Snapshot_is_a_standalone_view_not_a_live_window()
