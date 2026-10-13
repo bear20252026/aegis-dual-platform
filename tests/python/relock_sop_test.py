@@ -191,11 +191,17 @@ def gradle_job_doc() -> dict:
 
 
 def gradle_relock_run() -> str:
-    """取「Gradle 重锁」步骤正文（剔注释——注记里逐字写着旧任务的形态）。"""
+    """取 gradle 面全部 bash 正文的拼接（剔注释——注记里逐字写着旧任务的形态）。
+
+    R9-B53 起这一步不再是一个大步骤：装配与「校验和文件面」抽进了 composite action
+    （两条平台的腿必须跑同一条命令），workflow 里剩图面与覆盖自证两条。判据要的只是
+    「这些命令合起来形态对」，所以按 job 收集，不认步骤名——认步骤名会让改名变成一条
+    无声的绕过（本文件其余判据也是同一个理由）。
+    """
     steps = gradle_job_doc().get("steps", []) or []
-    matches = [s for s in steps if "Gradle 重锁" in str(s.get("name", ""))]
-    assert len(matches) == 1, f"Gradle 重锁步骤必须恰好一个，实得 {len(matches)}"
-    return code_only(str(matches[0]["run"]))
+    bodies = [str(s["run"]) for s in steps if isinstance(s.get("run"), str)]
+    assert bodies, "gradle-relock job 一条 run 正文都没有——提取口径坏了"
+    return code_only(chr(10).join(bodies))
 
 
 def write_locks_line(run_text: str) -> str:

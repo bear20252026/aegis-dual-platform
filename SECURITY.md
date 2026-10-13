@@ -59,15 +59,19 @@
   加**工具任务面**（ktlint/detekt/lint/测试的 detached 配置只在任务执行时落盘），两条生成命令
   都带 `--refresh-dependencies`——缓存里不重新落盘的字节不会进文档（本地全绿而 CI 干净 runner
   红 6 个构件的实测教训，PR #189）；那份任务清单与 CI 的对应关系由
-  `tests/python/gradle_verification_test.py` 从 workflow 原文逐 token 对账。
+  `tests/python/gradle_relock_surface_test.py` 从 workflow 原文逐 token 对账。
   两把刀都不覆盖的面如实登记：`buildscript {}` 与 plugins DSL 是**脚本类路径**，
   不在项目配置锁内（那一路由 root `build.gradle.kts` 的显式 classpath 地板 +
   `buildEnvironment` 回读承接）。另一面如实登记：校验和文档按**平台**是并集——
-  本机（windows）与 `dependency-relock.yml` 的 gradle 面（ubuntu）各生成一次才盖住两个 runner
-  （`aapt2` 的 `-windows.jar` 与 `-linux.jar` 是两个不同构件、两个 sha256，因为文档只登记
-  本次真正落盘的字节）。这条现在是常跑判据：`scripts/verify_gradle_platform_coverage.py`
-  把需求平台**从 workflow 的 `runs-on` 现取**，平台相关坐标缺任一形态即判红（R9-B51）；
-  而自动生成面目前只有 ubuntu 一个（缺口登记在第九轮台账 §五 Q61，记**部分闭环**）。catalog 升级必须**同批重锁+重算校验和**，漏任一面在
+  `aapt2` 的 `-windows.jar` 与 `-linux.jar` 是两个不同构件、两个 sha256，因为文档只登记
+  本次真正落盘的字节，所以「一份文档服务两个 runner」要求**每个平台都生成过一次**。
+  这条不靠记性：`scripts/verify_gradle_platform_coverage.py` 把需求平台**从 workflow 的
+  `runs-on` 现取**，平台相关坐标缺任一形态即判红（R9-B51 / 台账 Q61）；生成面则做成了
+  **两条腿串行**——`gradle-relock`（ubuntu，重算版本锁 + 字节）之后 `gradle-checksum-windows`
+  （windows-2025，只重算字节、**不带** `--write-locks`；`needs:` 前一条，因为两个 job 并发推
+  同一份文件必然互相覆盖）。文件面命令是单源的 `.github/actions/gradle-checksum-file-face`，
+  两条腿各引用一次——抄两份的代价是两条腿会漂，而漂移表现为某平台的构件字节静默缺失（R9-B53）。
+  catalog 升级必须**同批重锁+重算校验和**，漏任一面在
   STRICT/strict 下直接解析失败——这个失败就是门禁本身。重锁执行面：
   `dependency-relock.yml` 的 `gradle` 生态（仅 workflow_dispatch，只写 `deps/*` 分支，
   永不写 master）。APK 发布前经 apksigner 强制验签（release-android.yml fail-closed）不变

@@ -863,7 +863,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   同批未验的半边记在 §3.50 第 7 条：`release-android.yml:223` 的 `:app:assembleRelease`
   在本批只跑到**本机**，CI 侧要等下一次真实 dispatch/标签。
 
-- Q61 R9-AD-15 | **P2 部分闭环（R9-B51 / §3.51）**：判据那半已常驻——`scripts/verify_gradle_platform_coverage.py` 的需求平台**从 workflow 的 `runs-on` 现取**，平台相关坐标缺任一形态即红（四条注入证伪，塌缩走 exit 2，豁免表自己也被判）。**仍开着的那半**：自动生成面只有 ubuntu 一个，补 windows 腿要先定「两个 job 不并发推同一份文件」的串行/合并口径 ⇒ 需给话。原条目 ↓
+- ~~Q61 R9-AD-15~~ **本批已闭**（R9-B53 / §3.53：队列里那两条形状选的是 ①，且做成了**串行**而非并发——`gradle-relock`（ubuntu，锁+字节）之后新 job `gradle-checksum-windows`（windows-2025，只字节、无 `--write-locks`），文件面命令收成 composite action `.github/actions/gradle-checksum-file-face` 供两条腿各 `uses:` 一次；windows 腿的写回守卫只放 `verification-metadata.xml`、锁文件出现在它面前就红。此前 R9-B51 / §3.51 的「部分闭环」说的是判据那一半，那一半不变；「还有一面靠本机手工生成」这半由本批消掉。原条目 ↓
   Q61 R9-AD-15 | P2（R9-B50 第二轮发现，登记不顺手做） |
   `.github/workflows/dependency-relock.yml:219`（`gradle-relock: runs-on: ubuntu-latest`）↔
   `.github/workflows/contracts.yml:278`（windows runner 上的 `./gradlew.bat`）↔
@@ -1027,6 +1027,23 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   属产品决策 ⇒ §四 待裁决。现网提示文案已按事实写成「已清空订阅源：此后不再自动重取，
   当前名单仍会继续拦截」（不是「退回空表」），并由 `ThreatFeedRefreshScheduleTests.
   Cleared_feed_means_no_further_network_activity_not_a_cleared_list` 钉住「清空不制造空窗」。
+- Q62 R9-CS-19 | P2（R9-B53 的 CI 面现读发现，登记并在下一批修） |
+  `windows/tests/Aegis.Windows.Core.Tests/ThreatFeedCoordinatorTests.cs:28-29`（`Harness.Applied` /
+  `Harness.Logs` 是普通 `List<>`）↔ 同文件 `:65-66`、`:80`、`:93`、`:105`、`:127`、`:140`、`:178`
+  （`SpinUntil` 每 10ms 从测试线程枚举这两个表）↔ `:185-193`（`SpinUntil` 本体）：
+  `ThreatFeedCoordinator.Start()` 把快照应用与刷新放在**后台线程**，而那两个表就是后台线程的
+  回调写的（`applyHosts: applied => Applied.Add(applied)`、`message => Logs.Add(message)`）——
+  测试线程同时在枚举它。实测红灯（run 38461642255 的 `windows-contract-build`，
+  同一 commit 的 PR 面两次全绿）：`System.InvalidOperationException : Collection was modified`
+  at `ThreatFeedCoordinatorTests.cs:line 65`，`Failed: 1, Passed: 900`。
+  这不是「运气差的门禁」而是**用例自己的数据竞态**：它判的是后台链有没有把快照灌进来，
+  而它读的那份记录不是线程安全的。影响：`windows-contract-build` 会偶发红在一条与改动无关的
+  PR 上，而这类红灯的实际处置是「重跑一次」——每次都重跑就是门禁失信（R9-CI 那批反复记的形态）。
+  修法方向（下一批）：把两个记录表收成带锁的快照面（写侧 `Add` 入锁、读侧一次性 `Snapshot()`
+  出来再枚举），并把「`SpinUntil` 只碰快照」写成判据；同批回读 `ThreatFeedRefreshScheduleTests`
+  的 `Delays`/`_logs` 与 `CoreDenylistPublisherTests._pushed` 是否同一形态。
+  **不在本批顺手改**：B53 的主题是 Gradle 校验和的生成面，C# 测试面的并发修复放进去会让
+  两件事都对不上账。
 
 ### 5.4 RS（Rust 核心）
 
@@ -2707,6 +2724,80 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `active_tree_gates all`（ruff / bandit / py312-compat）OK；行数红线 / 表形 / 链接 /
    `check_doc_claims` / `check_workflow_shells` 全 EXIT 0。本批**不动任何代码行为**：
    四把 `gradle.lockfile`、`packages.lock.json`、`verification-metadata.xml` 零改动。
+
+### 3.53 R9-B53（2026-10-14，队列 Q61 的另一半）：校验和的生成面从一条腿变成两条串行平台的腿
+
+1. 本批落的是 Q61 里那两条形状中的 **①**（给 `gradle-relock` 加 windows 腿），而不选 ②
+   （PR 面加一条 `--refresh-dependencies buildEnvironment` 的冷缓存哨兵）。理由是两条买到的
+   东西不同：② 只能让「文档不完整」在合并前变红，**补那半个平台仍然要人跑一次**；① 把
+   「补」这一步本身变成执行面。②的代价也要如实记：每条 PR 重下一次插件类路径。
+2. **两条腿必须串行**（`needs: gradle-relock`），这不是排版偏好。失效形态说清楚：两个 job 若并发，
+   它们各自 `actions/checkout` 到**同一个 base commit**（都是 `fetch-depth: 1`），
+   先推的那条成功、后推的那条被 non-fast-forward 拒红——那盏红灯读起来像「分支冲突」，
+   而真实原因是「腿没有串行」。所以这条不靠人解读红灯，做成**结构事实 + 判据**
+   （`test_windows_leg_is_serialized_after_the_ubuntu_leg_and_cannot_write_locks`）。
+3. 第二条腿**只重算字节、不重算锁**：版本锁记的是解析结果、跨平台一致（R9-B50 实测两条腿
+   同文档无哈希冲突），跟平台的只有字节面。所以 windows 腿不带 `--write-locks`、
+   不跑 `verifyDependencyLockCoverage`，**写回守卫也只放校验和文档**——
+   那条腿若出现 `*/gradle.lockfile` 的 diff，就是写回面错了（或被人为并发跑），当场拒推。
+   ubuntu 腿的守卫仍是两类都放（四把锁 + `verification-metadata.xml`，见 §3.50 第 5 条）。
+4. 抽了**两份** composite action，两份都是「两条腿必须同形」的地方：
+   · `.github/actions/gradle-checksum-file-face`：文件面那一条命令的唯一出处；
+   · `.github/actions/gradle-android-toolchain`：JDK 21 + Gradle 缓存（`cache-dependency-path`
+     含版本目录，SP-215/AD-243 口径）+ Android SDK 基线包。装配不同形 ⇒ 两条腿**落盘的构件集合**
+     就不可比，字节面差异里会掺进「SDK 包不一样」这种假信号。
+   为什么命令必须只有一份：抄两份的漂移形态很具体——一条带 `--refresh-dependencies`、
+   另一条不带；或任务清单少一项；表现都是「某平台的构件字节静默缺失」，也就是本批要根除的
+   那类失效本身（R9-CI-2 / R9-B16 抽公共执行面是同一课）。判据按**出现次数**判死：
+   `generation_corpus()` 把两条腿的 workflow 正文 + action 正文拼成一个语料再数
+   （分开数各数各的，合起来才数得出漂移），要求文件面命令恰好 1 处、每条腿对两个 action
+   各恰好消费 1 次。
+5. windows runner 上仍用 `./gradlew`（Actions 的 `shell: bash` 即 Git Bash）而不是 `gradlew.bat`：
+   同一条命令两个平台，不引入第二种命令行形态——那会让「两条腿跑同一份命令」这句判据
+   退化成两份文本锚。
+6. 判据口径跟着结构改：`tests/python/relock_sop_test.py` 的 `gradle_relock_run()` 原本按
+   **步骤名**取正文，而本批把那一步拆成了「图面 + action 消费 + 覆盖自证」几步 ⇒ 改成
+   **按 job 收集全部 bash 正文**。按名字取会让「给步骤改名」成为一条无声的绕过
+   （本文件其余判据当初就是这个理由不按名字取）。
+7. 自己撞的一条假阳性，值得记：第一次写「windows 腿不能写锁」时按「正文里不含 `--write-locks`」判，
+   当场红——因为那个词出现在 windows 腿写回步骤的**报错文案**里（`❌ …这条腿不带 --write-locks`）。
+   改成要求该行同时含 `gradlew` 才是命令面。这是「文本锚要认载体」的第三次实测
+   （R9-B39 注释喂绿、R9-B44 端侧源码、这一次是 prose 冒充命令行）。
+8. 300 行红线撞在自己身上：`gradle_verification_test.py` 加完两条腿的判据后 370 行 ⇒
+   按「**配置面与对外口径** / **重算面**」拆成两份（新文件 `gradle_relock_surface_test.py`），
+   共享词表与 gradle 命令提取口径留在原文件（`FILES_TASK` / `RESOLVE_GRAPH_TASK` /
+   `gradle_command_lines`，跨文件 import 走既有先例 `dotnet_suite_composite_wiring_test.py`）。
+   拆分不是免费的：三处引用了搬走判据的文件名（`android/settings.gradle.kts` ×2、
+   新 action.yml ×2、`gradle_verification_document_test.py` ×1）全部跟着改准——
+   留着一个指向**没那条判据的文件**的名字，就是 §3.52 那条「指向不存在的指针」的新形态。
+9. 验证（本地）：`pytest tests/python` **749 passed / 1 skipped**（本批 +2 条结构判据、
+   拆分不改变用例数口径）；`active_tree_gates all`（ruff / bandit / py312-compat）OK，
+   其中 py312-compat 现扫到 **7 个** composite action（新增两份都在判定面内，它是目录现取的）；
+   行数红线（新文件 260 行、原文件 155 行，都在 300 内）/ 表形 / 链接 / `check_doc_claims` / `check_workflow_shells`
+   （26 个 pwsh 步骤；两条腿的命令都固定 `shell: bash`）/ `verify_ledger_queue_status`
+   / `verify_gradle_platform_coverage`（需求平台现取仍为 `['linux','windows']`）
+   / `verify_text_anchor_helpers`（实现点仍 5 处）/ `verify_ci_trigger_surface` 全 EXIT 0；
+   pin-check 的 grep 口径本地同跑（含 `.github/actions/`）⇒ 全部 40 位 SHA。
+   本批**不动任何出货行为**：四把 `gradle.lockfile`、`packages.lock.json`、
+   `verification-metadata.xml` 零改动，`android/` 下只动了 `settings.gradle.kts` 的注记。
+10. **端到端实证**（`dependency-relock.yml` 两次 dispatch，`--ref fix/r9-b53-…`、
+   写回面 `deps/r9-b53-legs-evidence`；两次都跑通 ⇒ 结构判据之外还有真运行）：
+   - run **38461734317**（不动文档的那一次）：ubuntu 腿三条命令 `BUILD SUCCESSFUL`（57s / 2m2s / 7s）
+     ⇒「✅ 重锁无差异」；windows 腿（`C:\Program Files\Git\bin\git.exe` 那一台）文件面
+     `BUILD SUCCESSFUL in 3m 33s` ⇒「✅ windows 腿无差异」。**入库那份就是两条腿的不动点**——
+     这与 §3.50 记的 SOP 幂等是同一件事在两个平台上的版本。顺带证伪一条担心：
+     `./gradlew` 在 windows runner 的 Git Bash 下可用，不需要 `gradlew.bat` 的第二种命令行形态。
+   - run **38463296721**（**注入必红/必补**那一次）：先在 `deps/*` 分支上删掉
+     `aapt2-9.4.1-15978811-windows.jar` 的 `<artifact>` 块（3 行），再跑同一个作业。
+     ubuntu 腿三条命令全绿、**且没有把那一块补回来**（仍是「✅ 重锁无差异」，零推送）——
+     这就是「字节面跟平台走」的直接证据：不是「ubuntu 腿偷懒」，是它**下载不到**那个文件；
+     windows 腿随后 `BUILD SUCCESSFUL in 5m 12s`，产出 commit `02ee497b`，diff **恰好 +3 行**、
+     只动 `android/gradle/verification-metadata.xml`，补回的 sha256 与被删的那条逐字符相同
+     （`5fe3c8ee…`）——同一构件在两个平台上的字节一致，缺的是**登记**而不是内容。
+     写回守卫在只放校验和文档的那条腿上按预期放行。两次运行都没有出现并发推送。
+   - 这条实证同时是 Q61 验收口径的前半（「两个平台的 gradle 作业在同一份文档下绿」）；
+     后半「一次真实的依赖 bump」要等下一条 bump PR，与本批无关，记在 §3.50 第 7 条那一类
+     「等下一次真实 dispatch/标签」的位置。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
