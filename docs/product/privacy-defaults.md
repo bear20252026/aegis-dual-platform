@@ -13,3 +13,4 @@
 | 凭证 | 不记录/不读取给网页或 Agent。**这一行的保证不来自任何凭据保护模块**（R9-DOC-11，第九轮 2026-10-13 实测：`credential_guard`（OS keystore/DPAPI）只存在于 `legacy/windows-pywebview/app/`，正典全树 `CredentialGuard`/`ProtectedData`/`DPAPI`/`KeyStore` 零命中）⇒ 实际机制是「密码/令牌本就不落盘」（下一行）＋ OS 沙箱，与上一行「DPAPI/Keystore 静态加密未落地」同口径；此前把归档栈的模块名当成正典能力写 |
 | 恢复状态 | 不持久化密码/令牌/完整敏感页面内容（蓝图阶段 D——SavedStateHandle 安全上下文） |
 | 遥测 | 无默认遥测（非敏感健康/崩溃信息——脱敏——用户可审阅） |
+| WebView2 内核能力 | R9-B48（第九轮 2026-10-13 定稿）三项**显式**关：`AreDevToolsEnabled`（F12/右键打开开发者工具——SDK 文档默认 true）、`IsGeneralAutofillEnabled`（姓名/地址/表单历史——默认 true）、`IsPasswordAutosaveEnabled`（保存密码提示——默认 false，这里仍显式写住：SDK 文档同时说明「关掉之前已保存的密码仍会被自动填充」，靠默认值等于靠这台机器的历史）。落点 `windows/src/Aegis.Windows.App/WebView/WebView2Hardening.cs`（两个窗口的唯一初始化路径）+ 启动留痕 `[security] 标签 …: DevTools=关 / 表单自动填充与密码保存已关闭`；诊断需要时显式开 `AEGIS_ENABLE_DEVTOOLS=1`（安装器不写它，与确认门/原生核心门同形） |

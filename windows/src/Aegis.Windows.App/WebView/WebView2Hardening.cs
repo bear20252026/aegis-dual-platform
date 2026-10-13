@@ -31,6 +31,35 @@ public static class WebView2Hardening
         applied++;
         SecurityLog.Write($"[security] 标签 {tabId}: 功能收紧已应用（宿主对象/原生弹窗关闭，WebMessage per-origin）");
 
+        // R9-B48（第九轮 2026-10-13，台账 R9-CS-3 定稿）：DevTools 与表单自动填充的**出货默认**。
+        // 默认值取自本机 SDK 文档（1.0.2903.40，lib_manual/netcoreapp3.0/...Core.xml）：
+        //   CoreWebView2Settings.AreDevToolsEnabled   → default true
+        //   CoreWebView2Profile.IsGeneralAutofillEnabled   → default true
+        //   CoreWebView2Profile.IsPasswordAutosaveEnabled → default false
+        // 一个没有任何凭证管理界面、也没有删除路径的隐私浏览器，不该把表单历史与
+        // 密码保存提示写进自己的 Profile 目录；F12 则是任何拿到这台机器的人都能读的
+        // 会话内容出口。诊断需要时显式开：AEGIS_ENABLE_DEVTOOLS=1（与
+        // NavigationConfirmationGate / NativePolicyCoreGate 同形的 env 逃生门，
+        // 出厂安装包不写它）。状态一律留痕，不静默。
+        settings.AreDevToolsEnabled = DevToolsAllowed(
+            Environment.GetEnvironmentVariable(DevToolsEnvironmentVariable));
+        applied++;
+        SecurityLog.Write($"[security] 标签 {tabId}: DevTools={(settings.AreDevToolsEnabled ? "开" : "关")}"
+            + $"（诊断开关 {DevToolsEnvironmentVariable}=1 可临时开）");
+        if (core.Profile is { } hardeningProfile)
+        {
+            hardeningProfile.IsGeneralAutofillEnabled = false;
+            // SDK 默认已是 false，这里显式写住：文档同时说明「关掉之前已保存的密码仍会被自动填充」
+            // ⇒ 依赖默认值等于依赖这台机器的历史。
+            hardeningProfile.IsPasswordAutosaveEnabled = false;
+            applied++;
+            SecurityLog.Write($"[security] 标签 {tabId}: 表单自动填充与密码保存已关闭（Profile 面）");
+        }
+        else
+        {
+            SecurityLog.Write($"[security] 标签 {tabId}: 自动填充收紧未应用（Profile 不可得——不伪装已生效）");
+        }
+
         // ESM：SDK 1.0.2903.40 未暴露 EnhancedSecurityModeState ⇒ 反射探测不到就留痕
         // 跳过，绝不伪装生效。**但「升级 SDK 后自动生效」这句是错的**（R8-DEPS-1 复读，
         // 2026-10-08 实测）：取两个 stable 包的
@@ -86,6 +115,15 @@ public static class WebView2Hardening
         applied++;
         return applied;
     }
+
+    /// <summary>诊断逃生门的变量名（与 NavigationConfirmationGate、NativePolicyCoreGate 同形：
+    /// 值必须是 "1"，其它 anything 都算关；安装器不写它 ⇒ 出厂默认永远是关）。</summary>
+    public const string DevToolsEnvironmentVariable = "AEGIS_ENABLE_DEVTOOLS";
+
+    /// <summary>纯判定：DevTools 是否允许。写成单参数函数是为了让「只有 1 开、其它都关」
+    /// 这条口径能被用例直接证伪——照 SDK 默认值 true 出货的话，这一行永远不会被执行到。</summary>
+    public static bool DevToolsAllowed(string? devToolsEnvironmentValue) =>
+        string.Equals(devToolsEnvironmentValue, "1", StringComparison.Ordinal);
 
     /// <summary>按来源翻转 IsWebMessageEnabled（每次顶层导航时调用）。
     /// 审计第六轮（2026-10-03）：改**默认拒绝**——仅显式白名单的本地资产虚拟

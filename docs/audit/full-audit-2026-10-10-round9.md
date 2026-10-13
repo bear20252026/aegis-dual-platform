@@ -44,6 +44,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | R9-SH-5 | P2（R9-B46 回读时**把登记的处方本身纠正**） | 保留并落地（定稿，非「接进裁决链」也非「删列」） | 登记写「`confirmation/risk/audit` 三列在 `agent/broker.py` 零消费 ⇒ 要么被消费要么删列」。逐列现读消费者：`risk` → `contracts/codegen/analyze_action_catalog.py:81`（同 scope 风险冲突）、`audit` → 同文件 `:91`（必填）、`read_only` → `contracts/codegen/verify_agent_catalog.py:43` + `agent/tests/redteam_test.py:87`（首批只读门禁)——**三列里两列一直在被判定**，只有 `confirmation` 全仓零消费者；两个处方因此都不成立（删的是已被判的列，接的是「默认放行→默认需确认」那条 §四 明写不默认执行的方向）。定稿三件、运行时零行为变化：①catalog 头部写死「判定面 4 项 / 治理元数据 5 项」并逐项标谁判它；②analyzer 规则 ⑤ 把 `confirmation` 变成**必填的意图声明**（缺失/不在词表/与只读性矛盾都判红，出厂两条天然满足）；③`tests/python/codegen_and_catalog_test.py::TestCatalogGovernanceColumns` 反向钉住「运行时不读治理列」（用 R9-B45 的单源剔注释后断言四个治理列名在 `agent/broker.py` 零出现，并配判定面四列必须出现的正面控制）⇒ 将来真要接进裁决链会先撞红，逼出带契约向量的另批。夹具 `_action()` 同批补两行，否则「干净夹具」在新规则下判红会让每条专项用例失去诊断力 |
 | R9-CI-13 | P3（R9-B46 落地；R9-B21 当时只把 ADR 陈述改真，本批收口实树） | 保留并落地 | 四处 `push.paths`（`ci`=8、`core-rust`=3、`agent-redteam`=5、`supply-chain`=11）删除，理由不是「清单少列一项」而是**清单不可维护**：`ci.yml` 的清单 R8-SH-10 已从 4 项补到 8 项，仍覆盖不住该 job 真实读取的语料闭包。分类与「谁许过滤」从 ADR 的散文变成 `contracts/ci/workflow-categories.yaml`（gates 6 / builds 5 / probes 5）+ `scripts/verify_ci_trigger_surface.py` 的双向对账：未归类/登记不存在/门禁型带过滤/门禁型无 PR 触发/探测型进 PR 面五种都判红；`native-policy-artifacts` 是唯一 `pull_request` 也带过滤的，按 builds 类保留（它产物而非判定质量）。**先跑红灯实录**：删过滤前脚本准确报出四处，删完转绿。代价如实写进 ADR：三个原 `push` 无 branches 限定的 workflow 现在任意分支 push 全量跑 cargo/红队/审计 |
 | R9-CI-14 | **P2**（R9-B47 落地，处方与登记不同——理由写在 §3.47 第 2 点） | 保留并落地（换成内容对账） | 「Gradle 依赖图提交面静默坏掉时全仓没有一张牌会变红」这条洞，登记的处方是按墙钟比对最近提交时间；本批改成**内容对账**：依赖图必须包含当前 `android/*/gradle.lockfile` 的每一个 `group:name` 坐标。实测：现读 SBOM 695 个 package（Maven 形态 332），本地四把锁 284 条坐标**全部在册**（差集 0）；注入「少一条坐标」判红并点名该条，注入「图只剩 5 条」走面塌缩分支而不是「零个缺失」；取数失败/形状不对/锁面为空一律 exit 2（取不到图不等于图是新的）。落图是最终一致的 ⇒ `--attempts` 只延迟红、不掩红（`attempts=1` 时同一份迟到数据必须红，用例钉住） |
+| R9-CS-3 | P2（R9-B48 定稿并落地；登记原文的事实部分先被回读改准） | 保留并落地（带显式逃生门，不改判定语义） | 三项出货默认改为显式赋值：`AreDevToolsEnabled`、`IsGeneralAutofillEnabled`、`IsPasswordAutosaveEnabled` 全关。**登记的半句事实是错的**——本机 SDK 文档现读（1.0.2903.40 `lib_manual/netcoreapp3.0/Microsoft.Web.WebView2.Core.xml`）：前两条 default true，`IsPasswordAutosaveEnabled` default **false**；而同一份文档写着「关掉之前已保存的密码仍会被自动填充」⇒ 靠默认等于靠这台机器的历史，所以它虽然默认已关，仍然显式写住。落地的理由不是审美：这个产品没有凭证管理界面也没有删除路径，表单历史与密码提示会写进应用自己的 WebView2 Profile 目录，用户在设置里既看不到也删不掉。调试面保留为 `AEGIS_ENABLE_DEVTOOLS=1`（与确认门/原生核心门同形的 env 门，安装器不写）；状态全部留痕。落点唯一（`WebView2Hardening.Apply`，`HostWebView.cs:164` 调用，两窗口共用）。用例 10 条：`DevToolsAllowed` 六种输入钉「只有字面 1 开」、源码锚要求赋值恰好一次、反向锚 `AreDevToolsEnabled = true` 判红（这条能红的前提是先剔注释——「SDK 默认 true」那句话就写在紧邻注释里）、Profile 不可得必须留痕。文档同批跟上且不再抄计数：`privacy-defaults.md` 新增一行、`device-validation.md` Windows 表加第 12 步、`windows-run-guide.md:76` 的「11 项」改成现读命令 |
 | R9-SH-19 | P3（R9-B47 落地时新增） | 保留（写成判据设计规则，不改代码） | 任何「X 没跑」的判据若本身依赖一条不被监视的流水线，只是把洞往上挪一层。本轮已有三例同形：Q48 的 paths 过滤 → 登记表双向对账；Q28 的 README 未接线面 → 按 `lib.rs` 现算；Q56 的提交面 → 产物内容对账。后续「检测检测器」一律按这个形状做 |
 | R9-RS-8 | P2 | 提升/门禁缺失（已补门禁并落地） | 定稿项 9 步 1：三端各自抄写的那段共享 JS **没有任何门禁判它是否还同形**——`verify_seed_framing_parity.py` 只查要件 token 在不在（有人改算法它照样绿），`tests/canvas_read_channels.rs` 对两端只查 5 段片段（R9-RS-7 记的余量）。落地新门禁 `contracts/codegen/verify_injected_js_parity.py` + 解释层 `injected_js_text.py`，口径是**逐 token** 而非逐字节（逐字节要有一端出生成物＝定稿项 9 步 2，仍在待定稿面）；钉表 7 个共有函数为下界，少一个判「共有面塌缩」不放行 |
 | R9-RS-9 | P2 | 问题/三端语义分歧（本批登记不修） | `core/.../shield/canvas.rs:99,106` ↔ `windows/.../FingerprintShield.Canvas.cs:108` ↔ `android/.../WebViewHardeningCanvas.kt:80,112`：两条像素直读包装里「把 proxy/orig 交给 ToStringGuard」的写法三端各不相同——Rust 走 `try { if (window[Symbol.for(REG_SYM)]) …(proxy, orig); }` 配空 catch、C# 调 `registerProxy(...)`、Kotlin 用 `if (__aegisReg) __aegisReg(...)` 且其 **catch 体是 `return orig.apply(...)`**（与 Rust 的空 catch 行为不同）。同批实测还发现两处纯命名漂移已改掉（Kotlin `noiseBit`→`up`、`MAX_NOISE_PIXELS`→`AEGIS_MAX_NOISE_PIXELS`，值本就一致）。注册窗口这条牵动 R8-RS-09 / R9-AD-1 的三端装配，须带测试另批统一；新门禁先把它**显式挂起**并核对「登记项必须仍然不同形」，修齐当天门禁判红一次要求收编 |
@@ -635,8 +636,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   同形门禁里显式别名；把 Windows 也改成 window 键入口＝把注册句柄暴露到页面可达的
   window 空间（要靠 R8-RS-09 那套「窗口关闭」标志兜着），属**放宽出货安全面**，不默认执行。
 
-- **R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
-  保存默认——关闭改变调试与默认 UX，属产品行为变更。
+- ~~**R9-CS-3**：Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与 autofill/密码自动
+  保存默认——关闭改变调试与默认 UX，属产品行为变更。~~ **已定稿并落地（R9-B48 / §3.48）**：三项显式关 + `AEGIS_ENABLE_DEVTOOLS=1` 逃生门；登记里「密码自动保存默认」的半句事实被回读改准（SDK 文档 default false）。
 - ~~**R9-SH-5**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在 `agent/broker.py` 零消费。~~ **已定稿并落地（R9-B46 / §3.46）**：逐列现读消费者后发现登记的处方本身不成立——`risk`/`audit`/`read_only` 一直各有静态消费者（`analyze_action_catalog.py:81,91`、`verify_agent_catalog.py:43`、`agent/tests/redteam_test.py:87`），只有 `confirmation` 全仓零消费者；而「接进裁决链」正是本节下面那句「默认放行改默认需确认，不默认执行」。定稿走第三条路：列身份写进 catalog 头部、`confirmation` 变成必填的意图声明（analyzer 规则 ⑤）、反向用例钉住运行时不读治理列。
 - **R9-SH-6 的一半**：`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会改变
   同站多子域共享种子的产品语义。该表的**补条目 + 收录口径 + 只增不减门禁**已落地（§3.6），
@@ -2368,6 +2369,43 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    用例 `tests/python/gradle_graph_freshness_test.py` 11 条（含一条正面控制
    `test_real_lock_surface_is_not_collapsed`：锁解析 ≥200 条且认得出 `androidx.webkit:webkit`，
    否则「全部在册」是空对空的恒真）。
+
+### 3.48 R9-B48（2026-10-13，队列 R9-CS-3 定稿）：WebView2 的三项出货默认——DevTools 与自动填充显式关
+
+1. 登记的原文（§四 第三节）是「Windows 未关 `AreDevToolsEnabled`（WebView2 默认 true）与
+   autofill/密码自动保存默认——关闭改变调试与默认 UX，属产品行为变更」。**回读先改准了它自己的事实部分**：
+   默认值不靠记忆，取本机已还原的 SDK 文档
+   `~/.nuget/packages/microsoft.web.webview2/1.0.2903.40/lib_manual/netcoreapp3.0/Microsoft.Web.WebView2.Core.xml`
+   逐条现读——`CoreWebView2Settings.AreDevToolsEnabled` default **true**、
+   `CoreWebView2Profile.IsGeneralAutofillEnabled` default **true**、
+   `CoreWebView2Profile.IsPasswordAutosaveEnabled` default **false**。
+   ⇒ 「密码自动保存默认开着」这半句是错的；而它恰好是**最不能靠默认**的一条：同一份文档写明
+   「关掉之前已保存的密码仍会被自动填充」，也就是这台机器的历史能盖过意图。
+2. 定稿：**落地，并把「改变调试 UX」那一半做成显式逃生门而不是静默放宽**。
+   判据不是「隐私浏览器就该关 DevTools」这种审美，而是这个产品**没有任何凭证管理界面、也没有删除路径**：
+   表单历史与密码提示会写进应用自己的 WebView2 Profile 目录，而用户在设置界面里既看不到也删不掉。
+   `AEGIS_ENABLE_DEVTOOLS=1` 保留调试面（与 `NavigationConfirmationGate`、`NativePolicyCoreGate`
+   同形的 env 门，安装器不写它 ⇒ 出厂默认关闭），状态一律写进安全日志——**不留「以为关了」的状态**。
+3. 落点只有一个不是巧合：`WebView2Hardening.Apply` 是唯一初始化路径（`HostWebView.cs:164` 调用，
+   两个窗口共用），而 `TabRuntime.cs:243` 那段 fail-closed 守卫正是「未初始化控件被隐式重建 ⇒
+   SDK 默认值全部生效」的既有防线。新代码写在同一处，避免长出第二套默认。
+4. 用例（`windows/tests/Aegis.Windows.Core.Tests/WebView2HardeningDefaultsTests.cs`，10 条）：
+   - `DevToolsAllowed` 是单参数纯函数，六种输入钉住「只有字面 `1` 开」（`null`/`""`/`"0"`/`"true"`/`" 1"` 全关）；
+   - 源码锚（走 R9-B45 那份单源 `SourceTextAnchors.ReadCodeOnly`）：`settings.AreDevToolsEnabled = DevToolsAllowed(`
+     **出现恰好一次**、两项 Profile 赋 `false` 在代码里、env 名成串出现；
+   - 反向锚 `AreDevToolsEnabled = true` 不得出现——这条能红的条件是先把注释剔掉，
+     因为「SDK 默认 true」这句话就写在紧邻的注释里（R9-B44/B45 的纪律第一次在新增用例上生效）；
+   - 「Profile 不可得」分支必须留痕（`自动填充收紧未应用`），静默跳过＝日志声称收紧已应用而实际没有。
+5. 文档同批跟上，并按 R9-B41 的口径**不再抄第二份计数**：
+   `docs/product/privacy-defaults.md` 新增「WebView2 内核能力」一行（三项默认值 + 落点 + 逃生门）；
+   `docs/runbooks/device-validation.md` Windows 表新增第 12 步（F12 不开、不弹保存/自动填充建议、
+   设 env 后 F12 可用，并要求读两条留痕）；`docs/runbooks/windows-run-guide.md:76` 原来抄的「**11 项**」
+   改成现读口径（`grep -c '^| [0-9]' …`）+ 按名称核对——那行先从 10 漂移过到 11，本批又会长到 12，
+   抄数就是制造第二个会过期的事实。
+6. 验证：`dotnet build` App + Core.Tests 0 警告 0 错误（`TreatWarningsAsErrors` 基线）；
+   `dotnet test` Core **901**（本批 +10）/ Broker **204**，`-r win-x64 -p:RestoreLockedMode=true`，
+   `git status -- '*packages.lock.json'` 空；`pytest tests/python` 670 passed / 1 skipped（零代码改动面）；
+   表形/链接/`check_doc_claims` 三道 EXIT 0（Windows 表实测 12 行）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
