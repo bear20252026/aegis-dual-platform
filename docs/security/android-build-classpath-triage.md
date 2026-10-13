@@ -55,6 +55,17 @@ classpath 域）。
 
 **判定：tolerable_risk**（构建机侧暴露、产品运行时零命中、上游无稳定修复）。
 
+> **执行结果（2026-10-13 16:15Z 实测，API 回读）**：`open=0` / `dismissed=9` / `fixed=3`；
+> 每条 `dismissed_reason=tolerable_risk`、`dismissed_at` 均已写入，逐条
+> `dismissed_comment` 含该坐标的锁文件行号与 configuration 名。
+> 一个实测到的 API 约束值得记下：**`dismissed_comment` 上限 280 字符**（首次提交 566-763 字符
+> 被 422 拒），所以完整证据只能留在本文档，comment 里是指针 + 一行关键证据——
+> 这正好是「注释不能替代单源」的又一次实证：如果当初没写这份文档，dismiss 就只能凭记忆。
+> 另一次实测：`dismissed_reason` 的合法取值是
+> `fix_started / inaccurate / no_bandwidth / not_used / tolerable_risk`（422 报错列出的清单），
+> 本文判的是 `tolerable_risk`——**不是** `not_used`：这些坐标确实被构建用着，
+> 只是不在出货面上，选错这个枚举值本身就是一种失实陈述。
+
 > **R9-B49（2026-10-13）执行与留痕**：用户授权后，本文档列出的 9 条告警在 GitHub 上以
 > `dismissed_reason=tnt`（对项目不适用）正式 dismiss，dismiss comment 逐条引用本文的锁文件
 > 行号与配置名。**dismiss 不是终点**：它依赖的事实（这 5 个坐标只在工具/测试类路径里）
@@ -73,7 +84,7 @@ classpath 域）。
 > dismiss 一条 Dependabot 告警是对该仓安全姿态的正式处置声明（影响所有读该仓
 > 告警面的人，且默认不在任何 CI 门禁里留痕），属仓库所有者操作，需你确认后执行。
 > 本轮只更正陈述、不代做操作。若确认按「tolerable_risk」正式 dismiss，
-> 需要连证据一起写进 dismiss comment，并保留下面的解除条件。
+> 需要连证据一起写进 dismiss comment，并保留下面的解除条件。（→ 2026-10-13 已按此执行，见下一段）
 
 解除条件：AGP 9.5 stable 发布（当前 alpha——9.5 内 tools/bundletool 预期携带
 修复版传递依赖）→ 重开评估，届时地板可整体退役。

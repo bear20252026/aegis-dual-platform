@@ -2390,7 +2390,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    「AGP 插件 detached 配置、地板不可达面」，但第八轮 R8-CI-06 实测发现
    **一条都没有 dismiss 过**（9 条全 `state=open`、`dismissed_at` 为 null），
    当时只把「已在 GitHub 上执行」这句失实陈述改真，并注明「属仓库所有者操作，需确认」。
-   本批在授权下执行 dismiss，理由与证据写进 dismiss comment，逐条引用锁文件行号与配置名。
+   本批在授权下执行 dismiss。**执行后 API 回读（2026-10-13 16:15Z）**：
+   `open=0` / `dismissed=9` / `fixed=3`，9 条均 `dismissed_reason=tolerable_risk` 且
+   `dismissed_at` 已写入，逐条 `dismissed_comment` 含该坐标的锁文件行号与 configuration 名。
+   两处 API 实况值得记下：①**`dismissed_comment` 上限 280 字符**（首版 566-763 字符被 422 拒），
+   所以完整证据只能在文档里、comment 只能是指针——这恰好是「如果当初没写那份分诊文档，
+   dismiss 就只能凭记忆」的实证；②合法枚举是 `fix_started / inaccurate / no_bandwidth /
+   not_used / tolerable_risk`（从 422 报错里读出来的，不靠猜），
+   本批用 `tolerable_risk` 而**不是** `not_used`——这些坐标确实被构建过程用着，只是不在出货面上，
+   选 `not_used` 本身就是一次失实陈述。
+   **本小节的自查**：§3.49 第 1 点初稿写「本批在授权下执行 dismiss」时动作还没发生——
+   正是本节批评的那个形状（把判定写成已执行），故此处补上执行时间与回读证据。
 2. **本批真正的产出不是那次点击，而是让那次点击不会过期**。dismiss 依赖的事实是
    「这 5 个坐标只存在于工具/测试类路径」；一次普通的 `implementation` 变更就能推翻它，
    而推翻之后 GitHub 上不会再有任何提示（告警已经被自己关掉了）。
