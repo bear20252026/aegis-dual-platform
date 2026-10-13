@@ -73,7 +73,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | AX-02 / AEG-001 | **P1**（外部审计声称，回读后**属实但处方必须改写**）→ 已落地 | 保留并落地（惰性接入） | 缺口是真的：`ffi/broker.rs` 的 `evaluate_navigation` 只调 `validate_action`（第三层），`ContextBroker::evaluate`（broker.rs:247）才串三层，前两个层在 FFI 通路零调用（`broker.rs` 的 H-7 注记自述）。但**照处方直连会拒掉每一次导航**，两条实测事实：①生产构造是 `PolicyEngine::default()`＝空规则，`ActionPolicy::evaluate_opt` 在无规则匹配时返回 None（`action_policy.rs:110` 的 `let rule = best?;`，默认效果只作用于非 opt 的 `evaluate`）⇒ `PolicyEngine::evaluate` 落 `PolicySource::FailSafe` 的恒 Deny；②`CapabilityRegistry::validate` 对未注册 capability 恒拒绝（`capability.rs:156`）而生产注册表恒空。落地口径＝「该层**没有意见**时不改裁决；一旦配置即生效且其 Deny 不可被后面的 Allow 出口改回允许」（单调加严），接入点在会话验证**之前**。9 例新测试的三条关键：未配置时 FFI 拒绝码必须仍是 `session_not_found`（把 FailSafe 当拒绝直连的话这条第一个红）；同一入参配上 deny 规则后必须变 `policy_denied`（一条同时证明「配置生效」与「排在会话验证之前」）；空注册表必须是「未配置」而非「什么都拒」。`RequireConfirmation` 复用既有 `register_pending_approval`，不开第二份授权账；锁毒化仍 fail-closed。今天没有宿主入口注册规则/能力（`register()` 生产零调用）⇒ 出货行为零变更是**设计结果**，价值是把「裁决链不完整」变成「链已闭合、缺的是配置面」。五处文档撤 H-7 陈述（README×2、CLAUDE.md 模块表、ADR-006、ADR-008×2、ADR 索引）；ABI 面零变更（新增都在非导出 impl 块）；577 lib 测试全绿、clippy `-D warnings` 干净；三个零余量文件靠改写更短注记 + `impl Default` 换 derive 守住基线 |
 | AEG-006 | P1（外部审计声称，回读后**属实但范围改写**）→ 落地为门禁 + 扩面队列 | 保留并落地（判据化） | 报告说「C# 只连部分向量、Kotlin 主要消费 `url-origin-*`」——按 `git ls-files` 的受管源码面逐份实测（543 个文件，命中口径＝词干作为独立词或完整文件名，排除 markdown 与 `META_LEVEL`（按名遍历整个向量目录的工具面，含门禁自己与它的用例））：**15 份向量里只有 2 份真的两端都跑**（`url-origin-valid/invalid`，CS+AD+RS），11 份有端侧执行者，4 份（`capability-*`/`audit-event-*`）**没有任何端侧执行者**、只被 `validate_vector_schemas.py` 判形状/expected。其余单端事实逐条钉进 `scripts/verify_vector_consumers.py` 的 `CONSUMER_MANIFEST`。两点范围改写：①那四份不是「没人判」——它们的 expected 本就是 `valid`/`deny_schema`，schema 就是判据，不能按「契约件白做」处理；②**Agent 端对契约向量的消费为零**（`AG` 在实测分布里一次都没出现），与 R9-SH-5「`action-catalog.yaml` 的 confirmation/risk/audit 三列 broker 不读」是同一件事的两面。落地＝新常驻门禁（登记表双向不变量 + 跨端支点下界 + 端侧执行者下界 + 扫描面塌缩 exit 2）接进 `contracts.yml` 的 PR 面；注入式自证 8 条从 `--self-test` flag **搬进 pytest**（要人主动敲 flag 的自证＝跑不动的判据，R9-SH-7 同课）；扩面工作另登 §五 Q53 |
 | AEG-008 / R9-CS-15 | P3（我登记的原级）→ 用户对 §四 第 9 项说「全部完成」后**落地** | 保留并落地 | 回读确证「仅启动时取一次」属实且**不是**声明与行为不符（旧文案确实明示要重启），所以这是一次行为增强：`ThreatFeedCoordinator` 首刷后进入周期重取（默认 6 小时，节拍/上限/过期倍数三份数字单源在类常量上，界面按 `DefaultRefreshInterval × StaleAfterFactor` 算过期而不是抄一份 18 小时），失败按 2 的幂退避并封顶 24 小时（**只拉长不缩短**——「失败就更快重试」在订阅源 429 时就是自伤），每轮**重读**设置所以改源不需重启，未配置/改成非法值 ⇒ 那一轮零网络活动（原判据不变）。UI 半边把「上次成功更新 / 是否过期」贴上提示位，时间取**缓存文件写入时刻**（`FetchAndStore` 只在抓取+校验+落盘全成功后原子替换，所以它就是「最后一次成功」的权威形态；加字段要同步 SettingsService 快照与两个 XAML 锚，代价远大于收益），保存路径改走 `Active?.RefreshNow()`，旧「要重启才生效」文案连同 XAML 说明句一起撤下并由静态锚反向钉住不得回潮。两条**新出口带来的竞态**是这次改动的实质风险，都已处理并有故障注入锚：①周期循环与「保存即刷」并发 ⇒ 后**完成**的抓取决定最终名单（可能是先发出那个请求的旧结果），加 `_refreshGate` 串行化（改成「已在跑就跳过」会让手动刷新静默失效，不做）；②既有五个用例靠 `await BackgroundTask` 收口防 Dispose 抢缓存文件（CS-350 那笔账），周期化后该任务永不完成 ⇒ 它们必须显式传 `refreshInterval: TimeSpan.Zero`，本类只测启动那一次、周期行为归新用例。坑一条：`TimeSpan.Parse("24:00:00")` 是 **24 天**不是 24 小时（实测断言差值 `24.00:00:00` vs `1.00:00:00`），期望值改成小时数——字符串形态的时间期望值在这里会静默判错一个量级。`MainWindow.xaml.cs`（435 行零余量基线）零改动，调度全在协调器里。本地 Core 859/859、Broker 204/204 全绿（CI 为准）。**残余待裁决**：清空订阅源只停止重取，不解除已生效名单也不删缓存（放松防护的方向）⇒ 新登 §五 Q54 |
-| AEG-011 / R8-DEPS-8 | **P2**（外部审计声称 P1，回读后裁 P2：这是加固面缺失而非可利用缺陷）→ 落地 | 保留并落地 | 审计要的两件事里只做了一件半：`dependencyLocking` 已启用，dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55。回读把第八轮 R8-DEPS-8 的判据更正为「`lockAllConfigurations()` 覆盖的是项目全部**可解析配置**（含 AGP 变体、测试、lint、ktlint/detekt 工具面），不是只覆盖直接依赖」；AD-155 当年的否决理由「双源维护成本」在 STRICT 下翻转成门禁本身——catalog 改了而锁没重算，解析直接失败而不是静默漂移。**故障注入实证两次**：①删掉 `android/app/gradle.lockfile` ⇒ `Locking strict mode: Configuration ':app:debugCompileClasspath' is locked but does not have lock state`（EXIT=1）；②给模块加一条新依赖 `org.apache.commons:commons-text:1.15.0` ⇒ `Resolved '…commons-text:1.15.0' which is not part of the dependency lock state`（EXIT=1）——这条在**改成 root 单源之后又重跑了一次**（注入点 `:contracts:compileDebugKotlin`），证明单源形态下 enforcement 仍然生效，不是「写在模块脚本里才管用」。顺带抓到一个**判据陷阱**：`:app:dependencies` 报表任务把解析失败吞成 `FAILED` 文本并 EXIT=0——所以「锁是否可消费」绝不能用报表任务证明，必须用真正吃 classpath 的任务；这条决定了 dependency-relock 的 gradle 面怎么写。落地＝锁块**单源**写在 root `android/build.gradle.kts` 的 `subprojects` 作用域（模块脚本零副本；本来按「逐模块各写一份」做，是 `:app` 脚本停在 **316 行零余量基线**放不下第 5 行逼出了这个更好的形状——单源顺带把「新增第五个模块忘记加锁」从静默 fail-open 变成自动覆盖）+ 四把入库 `gradle.lockfile`（app 314 行/四把共 277 个唯一坐标）+ 新常驻 `tests/python/gradle_locking_test.py`（9 例：模块清单从 settings 现取、锁块同形、锁文件形态与精确版本、CI 解析的配置必须在锁里、ktlint/detekt 工具面也进锁、SECURITY.md 与 settings 决策记录对得上）+ `relock_sop_test.py` 的 gradle 半边（**重锁任务清单 ⊇ CI 各 workflow 的解析面**，删一条即判红）+ `dependency-relock.yml` 新增 `gradle-relock` job（ubuntu + 与 android-quality 同款 JDK/SDK 口径，只写 deps/* 分支）。本机限制如实登记：`:app:assembleRelease` 在本机 Windows 跑不动（AAPT2 windows daemon 缺 UCRT），release 面的锁覆盖是用 `:app:dependencies --configuration releaseRuntimeClasspath` + broker/adapter 的 release 配置条目实证到位，真正的 release 构建要等 CI 的 ubuntu runner。 |
+| AEG-011 / R8-DEPS-8 | **P2**（外部审计声称 P1，回读后裁 P2：这是加固面缺失而非可利用缺陷）→ 落地 | 保留并落地 | 审计要的两件事里只做了一件半：`dependencyLocking` 已启用，dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55（**Q55 已由 R9-B50 / §3.50 落地**，2026-10-14）。回读把第八轮 R8-DEPS-8 的判据更正为「`lockAllConfigurations()` 覆盖的是项目全部**可解析配置**（含 AGP 变体、测试、lint、ktlint/detekt 工具面），不是只覆盖直接依赖」；AD-155 当年的否决理由「双源维护成本」在 STRICT 下翻转成门禁本身——catalog 改了而锁没重算，解析直接失败而不是静默漂移。**故障注入实证两次**：①删掉 `android/app/gradle.lockfile` ⇒ `Locking strict mode: Configuration ':app:debugCompileClasspath' is locked but does not have lock state`（EXIT=1）；②给模块加一条新依赖 `org.apache.commons:commons-text:1.15.0` ⇒ `Resolved '…commons-text:1.15.0' which is not part of the dependency lock state`（EXIT=1）——这条在**改成 root 单源之后又重跑了一次**（注入点 `:contracts:compileDebugKotlin`），证明单源形态下 enforcement 仍然生效，不是「写在模块脚本里才管用」。顺带抓到一个**判据陷阱**：`:app:dependencies` 报表任务把解析失败吞成 `FAILED` 文本并 EXIT=0——所以「锁是否可消费」绝不能用报表任务证明，必须用真正吃 classpath 的任务；这条决定了 dependency-relock 的 gradle 面怎么写。落地＝锁块**单源**写在 root `android/build.gradle.kts` 的 `subprojects` 作用域（模块脚本零副本；本来按「逐模块各写一份」做，是 `:app` 脚本停在 **316 行零余量基线**放不下第 5 行逼出了这个更好的形状——单源顺带把「新增第五个模块忘记加锁」从静默 fail-open 变成自动覆盖）+ 四把入库 `gradle.lockfile`（app 314 行/四把共 277 个唯一坐标）+ 新常驻 `tests/python/gradle_locking_test.py`（9 例：模块清单从 settings 现取、锁块同形、锁文件形态与精确版本、CI 解析的配置必须在锁里、ktlint/detekt 工具面也进锁、SECURITY.md 与 settings 决策记录对得上）+ `relock_sop_test.py` 的 gradle 半边（**重锁任务清单 ⊇ CI 各 workflow 的解析面**，删一条即判红）+ `dependency-relock.yml` 新增 `gradle-relock` job（ubuntu + 与 android-quality 同款 JDK/SDK 口径，只写 deps/* 分支）。本机限制如实登记：`:app:assembleRelease` 在本机 Windows 跑不动（AAPT2 windows daemon 缺 UCRT），release 面的锁覆盖是用 `:app:dependencies --configuration releaseRuntimeClasspath` + broker/adapter 的 release 配置条目实证到位，真正的 release 构建要等 CI 的 ubuntu runner。 |
 | R9-CS-10 | **P2**（R9-B33 落地时发现，同批修掉） | 保留并落地 | 「有界读取」在 `HttpClient` 默认 `HttpCompletionOption.ResponseContentRead` 下**根本不成立**：`GetAsync` 返回前响应体已被整包缓冲，`ReadBounded` 只是「缓冲完再量一遍」。实测撞出来的形态不是「超限判定」而是异常：`SourceFetcherTests.cs:185 ChunkedOversizeStopsJustPastTheCap` 第一版跑出 `Cannot write more bytes to the buffer than the configured maximum buffer size: 2147483647`。受影响的两条既有路径 `Core/Security/ThreatFeed.cs:148`、`Core/Favicons/FaviconService.cs:187` 在 R9-CS-2 里是被当作**正例**引用的（它们确实有 Content-Length 预筛与上限常量，缺的正是「对方不声明长度时不缓冲」这一刀）⇒ 修法＝三条带外抓取路径统一 `ResponseHeadersRead`，并由 `windows/tests/Aegis.Windows.Core.Tests/OutOfBandFetchDisciplineTests.cs` 按「含 `GetAsync(` 的文件」现取扫描面钉住——第四条抓取路径出现时自动在判据内，而不是靠有人记得往白名单里加一行 |
 | R9-SH-14 | P3（R9-B33 回读 R9-B10 落地件时发现＝**部分闭环的残余**） | 保留并落地 | R9-SH-2/-4 当时把「旧锁恒真」写成证据（「把 R8-SH-13 的修复摘掉，这把新锁与旧的 WB-142 双双仍绿」），却只**新写了强锁**、没删被当场证伪的那三段：`tests/ui-regression/start_page.test.mjs:403-405`（`SNAKE.substring(indexOf(...))` 一路读到文末）、WB-141（`fcBlock` 从 `indexOf` 读到文末）、WB-142（「本 at-rule 到下一个 @media」）⇒ 台账那句「双双仍绿」在落地之后仍然成立。本批删掉三段（该文件 490→474 行），WB-142 的三个控件与 WB-141 的三个系统色并进按花括号配对切块的 `start_a11y.test.mjs`，各配反向锚。写反向锚时又撞出一条：`ButtonFace` 在 forced-colors 块内出现两次（`shared/shell/start.css:389,395`），只替换第一处的注入是**假锚**——改成全量替换后它才真的判红 |
 | R9-SH-15 | **P2**（R9-B39 复查**本仓自己的登记表**时发现＝门禁自身判据失实，不是某端缺功能） | 保留并落地 | AEG-006 那张消费面表把「命中」定义为文件名出现在受管源码里，而**注释也算命中**——于是注记可以冒充执行者。实测坐实一份：`native-navigation-decision.json` 登记为 `{CS,RS}`，但 CS 那一面的唯一来源是 `windows/tests/Aegis.Windows.Broker.Tests/BrowserPolicyBrokerNativeGateTests.cs:260` 的一句解释性注释（期望值是手写的，零代码读那份向量），登记表把它改回 `{RS}`，§五 Q53 里那句「已有 C# 消费者……可作为接法模板」同时作废。**这不是个别笔误而是口径缺陷**：覆盖面声明的全部根据就是「这端跑过」，让注记充当证据＝门禁被自己喂绿。修法＝命中前剔注释（C 系块注释 / 行注释 / 块注释续行星号 / `#` 四种形态），并跑「剔前剔后各一遍」求 delta 证明**只有这一份**端集受影响（21 份里 1 变 20 不变；若不是 1 份就说明整张表是注记堆的，要整体重登记）。用例 `test_comment_only_citation_is_not_a_consumer` 带一条**正面控制**（同名写进代码行必须算命中），否则「注释被删干净」会让五条断言全部恒真——R9-SH-7 同课。三档扩面缺口一条没动，本批只把「消费」这个词判干净 |
@@ -693,7 +693,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      「本机无 Gradle 环境」在 2026-10-11 实测已失实（`~/.gradle/wrapper/dists` 里有
      9.8.0、JDK 21 与 SDK 都在位 ⇒ 重锁本地真跑过一次并把锁入库）。
      审计要的**两**件事只做了一件：`dependencyLocking`（版本锁定）落地，
-     dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55。
+     dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55（**Q55 已由 R9-B50 / §3.50 落地**，2026-10-14）。
   5. **AEG-014（FFI 裸指针/panic 边界）与 §五 攻击面矩阵的十项动态测试**：属审计自述的
      「阶段 C 红队验证」，需要 WebView2 Runtime 与真机（会弹调试窗、写真实数据根）⇒ 需用户在场。
   6. **AEG-016（本地/内网目标风险分类过宽）**：报告自己标「待源码和动态测试确认」，
@@ -841,11 +841,45 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `@JavascriptInterface` 迁走（页面侧 `Host` 适配层三端共用，`shared/shell/start.js` 一起改），
   属跨端契约变更 ⇒ 入 §四 待裁决。外部第三轮审计 AX-03 的同源出处见 §二 与 §3.22。
 
-- Q55 R9-AD-12 | P2 | `android/settings.gradle.kts:9-15`（`dependencyResolutionManagement` 的两个仓库源）↔ `android/gradle/`（**无** `verification-metadata.xml`）：
+- ~~Q55 R9-AD-12~~ **本批已闭（R9-B50 / §3.50）**：档位落在 `android/gradle.properties` 的
+  `org.gradle.dependency.verification=strict`（**属性面**生效，不是命令行参数——注入改一个字符
+  即 BUILD FAILED 实测过），文档面 495 组件 / 842 条 sha256 / 零豁免，重锁与版本同批补录。
+  原登记的三条待定稿按 §3.50 第 1 条定死（不引 PGP、只由授权的 dispatch 重算、零 trusted artifacts）。
+  原条目：Q55 R9-AD-12 | P2 | `android/settings.gradle.kts:9-15`（`dependencyResolutionManagement` 的两个仓库源）↔ `android/gradle/`（**无** `verification-metadata.xml`）：
   项 10 落的是**版本锁定**（`gradle.lockfile` 记 group:name:version，**不含校验和**），  外部审计 AEG-011 处方里的另一半 **dependency verification**（`--write-verification-metadata  sha256` + `verification-metadata.xml` + 构建时 `--dependency-verification=strict`）没有做。  差别是可利用的：锁防住「今天解析到新版本」，防不住「同一个坐标的构件被换成别的字节」  （仓库被投毒 / 镜像与上游不一致 / 本地缓存被改写都落在锁的覆盖面外）。本批不顺手做的原因：  开启后**任何**新增依赖都要重算校验和，且 Gradle 默认对缺失条目 fail-closed ⇒ 与 Dependabot   的自动 bump 流是产品级流程变更（要先定「谁签、校验和从哪来、trusted artifacts 怎么豁免」）  ⇒ §四 待裁决。验收口径：CI 里 `--dependency-verification=strict` 跑通  `:app:assembleRelease`，且注入「改动某个 jar 的字节」必须判红。
 
-### 5.2 SH（shared 壳层与契约）
+- Q60 R9-AD-14 | P2（R9-B50 落地时发现；登记即待裁决） |
+  `.github/workflows/dependency-relock.yml:232`（`case "$target" in deps/*)` 的写回守卫）↔
+  `android/gradle.properties:32`（`org.gradle.dependency.verification=strict`）：
+  校验和启用后，一条 Gradle 版本 bump 的 PR 会红在「新坐标没有条目」，而**能补条目的那条命令
+  只允许写 `deps/*` 分支**（`gradle-relock` job 的二次守卫，`relock_sop_test.py` 判着）。
+  Dependabot 的分支名是 `dependabot/…`，于是它的 PR 在 strict 下没有自动补字节的路径。
+  当前两条人工路：①把该分支内容 fast-forward 进一条 `deps/*` 分支再 dispatch；②本地跑
+  图面 + 文件面那两条命令并把 diff 附进 PR。改成「重锁作业也可写 `dependabot/*`」就是放松一条
+  **已被用例钉住的**安全不变量（有写权限的 job 的写入面）⇒ 属需用户裁决的流程变更，不顺手做。
+  验收口径：任一路径落地之后，一条真实的 Dependabot gradle bump PR 必须在**同一个 PR**里同时
+  带来四把 `gradle.lockfile` 与 `verification-metadata.xml` 的 diff 且 CI 全绿；
+  只要还需要人手动补字节，这条就仍然开着。
+  同批未验的半边记在 §3.50 第 7 条：`release-android.yml:223` 的 `:app:assembleRelease`
+  在本批只跑到**本机**，CI 侧要等下一次真实 dispatch/标签。
 
+- Q61 R9-AD-15 | P2（R9-B50 第二轮发现，登记不顺手做） |
+  `.github/workflows/dependency-relock.yml:219`（`gradle-relock: runs-on: ubuntu-latest`）↔
+  `.github/workflows/contracts.yml:278`（windows runner 上的 `./gradlew.bat`）↔
+  `android/gradle/verification-metadata.xml`：
+  校验和的**字节面跟平台走**——本机生成的那份里 `aapt2` 只有 `aapt2-9.4.1-15978811-windows.jar`，
+  `-linux` 形态零命中；而 PR #189 的红是**两个平台的 runner 同报同 6 个构件**，可见「一份文档
+  服务两个 runner」要求「每个平台都生成过一次」。现在唯一的权威生成面是 ubuntu 那个 job ⇒
+  windows 侧新依赖的字节只能靠本机 Windows 手工跑（没人审 diff、也没门禁判它做过）。
+  这是覆盖面缺口而不是小瑕疵。两种形状都要动执行面 ⇒ 需裁决：①给 `gradle-relock` 加 windows 腿
+  （矩阵或第二个 job）——两个 job 若都往同一分支推同一份文件，**必须串行或先合并再推**，
+  并发推必然互相覆盖；②在 PR 面加一条便宜的「冷缓存解析」哨兵（例如 android-quality 里
+  `./gradlew --refresh-dependencies buildEnvironment` 跑一次），让「文档对干净 runner 不完整」
+  在合并前就红，代价是每条 PR 重下一次插件类路径。
+  验收口径：任一路落地后，一次真实的依赖 bump 必须让**两个平台**的 gradle 作业在同一份文档下绿；
+  只要还有一面靠本机手工生成，这条不闭。
+
+### 5.2 SH（shared 壳层与契约）
 - ~~Q11 R9-SH-1~~ **本批已闭**（R9-B35 / §3.35：三张 schema 的 `version.pattern` 合一，并与 `release/update_verifier.py` 逐案等价；release/version 两张 schema 的向量面补齐，`version.schema.json` 从此有消费者）。原条目：Q11 R9-SH-1 | P2 | `contracts/schemas/release.schema.json:12` 与
   `contracts/schemas/version.schema.json:12` 的 SemVer pattern 仍是旧宽松式（接受
   `2.2.0-01`、`2.2.0-beta.`、`2.2.0-..`），PY-279 只收紧了
@@ -1538,7 +1572,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    **不覆盖的面**如实写进 settings 与 SECURITY.md：`buildscript {}` 与 plugins DSL 是
    **脚本类路径**，不在项目配置锁内（那一路由 root 的七条显式 classpath 地板 +
    `buildEnvironment` 回读承接）；锁里也**不含校验和**，整树哈希/签名验证是
-   dependency verification 那一刀 ⇒ §五 Q55。
+   dependency verification 那一刀 ⇒ §五 Q55【已由 R9-B50 / §3.50 落地：`gradle.properties` 的
+   strict 档位 + 文档 495 组件 / 842 条 sha256，重锁同批补录】。
 3. **门禁是实测的，不是推断的**，两次故障注入都判红：①删掉 `android/app/gradle.lockfile`
    ⇒ `Locking strict mode: Configuration ':app:debugCompileClasspath' is locked but does not
    have lock state`；②给 `:app` 加一条新依赖（`org.apache.commons:commons-text:1.15.0`）
@@ -2382,6 +2417,20 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `test_real_lock_surface_is_not_collapsed`：锁解析 ≥200 条且认得出 `androidx.webkit:webkit`，
    否则「全部在册」是空对空的恒真）。
 
+### 3.48 R9-B48（2026-10-13，§四 定稿项 R9-CS-3）：WebView2 三项出货默认改显式赋值（PR #186）
+
+裁决与事实全在 §二 的 R9-CS-3 行与 §四 的定稿段——本小节只补**落点索引**。此前引用 §3.48 的
+三处指针是空指针：落地时把正文写进了 §二 的行内而漏开 3.x 小节（「把单源的值再抄一遍就会过期」
+这条在台账自己身上第三次出现，同型的前两次是 R9-DOC-18 的计数与五门禁数）。
+
+落点：`windows/src/Aegis.Windows.App/WebView/WebView2Hardening.cs` 的 `Apply(core, tabId)` 里
+`AreDevToolsEnabled`（env 门 `AEGIS_ENABLE_DEVTOOLS`，只认字面 `1`）、`IsGeneralAutofillEnabled`、
+`IsPasswordAutosaveEnabled` 各一处显式赋值 + 状态留痕；Profile 不可得时必须留痕而不是伪装已生效。
+用例 10 条在 `windows/tests/Aegis.Windows.Core.Tests/WebView2HardeningDefaultsTests.cs`
+（含「赋值恰好一次」源码锚与 `AreDevToolsEnabled = true` 反向锚，两者都先剔注释再判）。
+文档同批：`privacy-defaults.md` 新增一行、`device-validation.md` Windows 表加第 12 步、
+`windows-run-guide.md:76` 的计数改成现读命令。
+
 ### 3.49 R9-B49（2026-10-13，仓库设置授权后的第一批）：9 条 Gradle 告警正式 dismiss，并把 dismiss 的前提变成常跑判据
 
 1. 用户 2026-10-13 授权「全部剩余项按你的意见完成」后，本批做的是**结掉一件挂了三轮的悬案**：
@@ -2443,6 +2492,147 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    （新脚本/新用例都在 300 行红线内）；表形 / 链接 / `check_doc_claims` 三道 EXIT 0；
    `verify_gradle_alert_scope_boundary.py` 与两个被改 workflow pyyaml 可解析；
    锁文件、`packages.lock.json`、`gradle.lockfile` 均未改动（本批不抬任何版本）。
+
+### 3.50 R9-B50（2026-10-14，队列 Q55 = R9-AD-12）：Gradle 的「字节」那一刀启用——版本与校验和各有重算面
+
+1. Q55 原来挂在 §四 待裁决，是因为它要先定三件事。用户 2026-10-13「全部授权，剩下的按你的意见
+   完成」之后按本仓既有口径定死：①**谁签**——不引 PGP（仓内无受信密钥），文档里
+   `<verify-signatures>false</verify-signatures>`，所以这一刀说的是「字节与登记的 sha256 一致」，
+   不是「构件被谁签名」，SECURITY.md 照这句写；②**校验和从哪来**——只由 `dependency-relock.yml`
+   的 gradle 生态在被授权的 dispatch 里按当前解析面重算，只写 `deps/*` 分支，PR 人工审 diff 后合并；
+   ③**trusted artifacts 怎么豁免**——**零豁免**：文档里没有 `<ignored-keys>`、`<trusted-artifacts>`、
+   `<suppress>`，842 个 artifact 每个都带一条 sha256（这条由用例判，不靠肉眼看）。
+2. 落地面四件，缺一件就只是「看起来启用了」：
+   - `android/gradle/verification-metadata.xml` 入库：495 组件 / 842 artifact / 842 条 sha256
+     （238 `.module` + 258 `.pom` + 346 `.jar`/`.aar`），224 KB / 3526 行；
+   - `android/gradle.properties` 加 `org.gradle.dependency.verification=strict`——**生效面是属性**。
+     只在命令行加参数的那种做法等于没开：本仓 CI 与本地大量 gradlew 调用不带任何参数，
+     它们一条都不校验；命令行参数于是只剩「重锁那一次的放宽」；
+   - `dependency-relock.yml` 的 gradle 面从「只写锁」改成「锁与字节同批、两边都强制重取字节」：
+     图面那条（`--refresh-dependencies --write-locks --write-verification-metadata sha256
+     resolveAllConfigurations`）+ 文件面那条（新任务 `resolveAllConfigurationFiles` +
+     `buildEnvironment` + 工具任务清单）+ 原有的覆盖自证。写回守卫的合法面从「只有
+     `*/gradle.lockfile`」扩成再加 `*/gradle/verification-metadata.xml`——不扩的话重锁作业会
+     **红在自己的守卫上**；
+   - 口径单源改真：`android/settings.gradle.kts` 决策记录 ③（原写「本批**不做**」）、
+     SECURITY.md 的 Android 条（原写「本仓未做，不对外声称」）。
+3. 两面口径为什么不能并成一条（本批最容易读错的地方，也是 PR #189 那一轮红灯的根因）：
+   - **图 ≠ 文件**。`resolveAllConfigurations` 走 `incoming.resolutionResult.root`，只下
+     `.pom`/`.module`；`--write-verification-metadata` 登记的却是**本次真正落盘的字节**。
+     所以新增按文件的集合口径 `resolveAllConfigurationFiles`（解析每个 `canBeResolved` 配置的
+     `.files`），构建类任务（`assemble*`/`compile*`）从文件面**删掉**——它们的 classpath 文件
+     本来就在这些配置里，两处各写一份就是两份真相；
+   - **集合也覆盖不到工具面**。ktlint/detekt/lint/单元测试用的是任务执行时现建的
+     **detached 配置**，不在 `project.configurations` 里，只有跑那几个任务才会落盘 ⇒ 那一份
+     小清单不能省，它与 CI 的对应关系由 `tests/python/gradle_verification_test.py` 从 workflow
+     原文逐 token 判（现值：CI 24 个 token，重算面 + 两类豁免正好盖住）。豁免分两类且都必须
+     写理由：`NON_ARTIFACT_FILE_FACE`（不落文件的报表/对账类）与 `SET_COVERED_TASKS`
+     （文件来自项目配置，已由集合口径覆盖）。并要求「提取到的 token 数 ≥20」——提取口径自己
+     坏掉时这条必须红，否则子集判据就是空对空（本批真的红过一次：正则少写一层 `*`，
+     24 个 token 静默只剩 5 个）；
+   - **本地全绿不是证据**。这条是本批最贵的：校验和文档只能记录本次落盘的字节，而长命的
+     `~/.gradle` 元数据缓存能让一批 parent-pom/BOM 描述文件**永不落盘**。于是本地三条命令全绿、
+     入库那份「看起来完整」，CI 的干净 runner 当场红——见第 4 点的第 5 条；
+   - **字节面还跟平台走**。本机生成的文档里 `aapt2` 只有 `…-windows.jar`，`-linux` 形态零命中，
+     而 CI 的 android-quality/dependency-graph 跑在 ubuntu 上。⇒ 校验和必须在**每个会构建的平台**
+     上生成过才算全；本批的处置是把 gradle 重锁面（ubuntu dispatch）当作权威生成面跑一次，
+     windows 侧条目由本机那份带入（并集只增不减，Gradle 不剪未用到的条目，实测 466→495 与
+     幂等两轮都是这个行为）。**跨平台自动生成面缺一个是新登的口子，见 §五 Q61**。
+4. 实测七条，全部现跑（不是设想）：
+   - **属性生效**：把 junit 那条 sha256 的末位 `3` 改成 `4`，`./gradlew :broker:testDebugUnitTest`
+     不带任何校验参数 ⇒ EXIT=1，`Dependency verification failed for configuration
+     ':broker:detachedConfiguration6'` + `One artifact failed verification: junit-4.13.2.jar
+     (junit:junit:4.13.2) from repository MavenRepo` + 「This can indicate that a dependency has
+     been compromised」，45s。顺带一条事实：报错落在 **detached 配置**上——工具面也在判面内。
+   - **缺条目不阻塞重锁**（Q55 原来担心的鸡生蛋）：删掉整个 junit `<component>` 块（等价于
+     一次版本升级带来的新坐标没有条目），跑重锁那条命令 ⇒ EXIT=0 且条目被**补录**回来。
+     生成模式对缺条目是补录不是判红，这就是「bump 之后靠重锁补字节」这条路能走的原因。
+   - **SOP 幂等（按当轮三面写法）**：四把 `gradle.lockfile` 的 md5 逐条不变、
+     `verification-metadata.xml` 的 md5 不变（02cbcfaf…）⇒ 入库那份就是重锁面的不动点。
+     加上 `--refresh-dependencies` 与新任务之后的那一次不动点，由本批末尾的 dispatch 实证。
+   - **改坏的文档不被静默接受**：把 `<configuration>` 里换成放错层级的 `<trust>` ⇒ EXIT=1，
+     `Unable to read dependency verification metadata`（并点名 `<trust>` 必须在
+     `<trusted-artifacts>` 之下），且文件未被改写 ⇒ 这一刀只有「红」和「拒读」两种表现，
+     没有第三种「当没这回事继续构建」。
+   - **本地全绿挡不住 CI 红（PR #189 首轮，三个 gradle 作业同红）**：`android-quality`、
+     `contracts/android-contract-build`（windows runner）、`native-policy-artifacts` 报的都是同
+     6 个构件、同一个配置名 `classpath`——`guava-parent-33.4.0-jre.pom`、
+     `junit-bom-5.10.2.module`、`junit-bom-5.11.0-M2.module`、`junit-bom-5.14.4.module`、
+     `kotlin-gradle-plugins-bom-2.2.10.module` 与 `.pom`。入库那份里这些组件**存在但只登记了
+     另一半**（`junit-bom:5.10.2` 有 `.pom` 没 `.module`；`kotlin-gradle-plugins-bom` 只有本机
+     用得到的 2.4.21）。根因不是平台，是**缓存**：Gradle 只把本次落盘的字节写进文档，
+     而本机 `~/.gradle` 的元数据缓存让这些描述文件从来没被取过 ⇒ 生成面看不见它们，
+     干净 runner 一解析就红。处置＝生成面一律 `--refresh-dependencies`（强制重取），
+     并把权威生成面放到 CI 上跑一次（见第 10 点）。**两个附带事实**：①文档的字节面跟平台走
+     （本机文档里只有 `aapt2-…-windows.jar`，`-linux` 零命中），②`FileCollection` 没有 `size()`
+     ——写错成 `cfg.incoming.files.size()` 的表现是**脚本编译不过**而不是解析出 0 个文件，
+     而脚本编译结果有缓存，不加 `--refresh-dependencies` 的话这个错误形态能躲过本地三轮运行。
+   - 覆盖面 466→495 组件那 29 条增量全部来自**参与冲突裁决但未被选中**的版本
+     （lifecycle / savedstate / coroutines 的旧候选 + detekt 的 sarif4k、kotlin-logging），
+     不是新依赖。这解释了「锁里 284 条坐标、文档里 495 个组件」：字节面按构件登记，
+     含解析过但没进最终图的 `.pom`/`.module`。
+5. 用例 22 条，拆两个文件（单文件超 300 行红线——`check_file_sizes` 判的，不是审美）：
+   `tests/python/gradle_verification_test.py` 12 条（档位现读、三种改弱注入必红、注释行不当赋值、
+   workflow 里不许出现 `--dependency-verification=off|lenient`、两条生成面都必须
+   `--refresh-dependencies` 且文件面走集合口径、重算面 ⊇ CI 现读任务面（两类豁免都要写理由）、
+   构建任务退回清单即判红、root 脚本真的注册了那个任务、删掉文件面必红、
+   写回守卫放行 metadata 且继续拒绝版本目录/构建脚本/文档、SECURITY.md 与 settings 决策记录的
+   正反双向锚）+ `tests/python/gradle_verification_document_test.py`
+   10 条（现树零问题 + 注入必报：两个开关翻转、摘要截断两位、摘要换算法名、空组件、
+   artifact 无摘要、整块 `<configuration>` 缺失、命名空间错的同名文档、截断的标签）。
+   接线走 `contracts.yml` 既有 job（`contract-source-of-truth`），**没有新开必需检查上下文**
+   ——R8-CI-01 那条「Expected — Waiting for status」的教训要求新 context 先在真实运行里见到才能加。
+6. 收敛过程自己撞出来的第二条口径缺陷（记在 §3.45 的同型账后面）：把
+   `scripts/text_anchors.py:strip_comments` 复用到 workflow 的 **shell 正文**时，`deps/*)` 与
+   `*/gradle.lockfile)` 里合法的 `/*`…`*/` 被当成一个 C 系块注释，**中间的真实语句整段消失**——
+   写回守卫的 `case "$changed" in` 没了，判据安静地改判空气。处置：单源里增一个具名口径
+   `drop_line_comments(text, prefix)`（只按整行前缀剔注释），shell / `.properties` 面用它，
+   源码面继续用 `strip_comments`；`tests/python/relock_sop_test.py` 的 `code_only()` 同批改调它
+   （不留第十六份副本），`text_anchors.py` 的模块 docstring 把「不并进来的面」从一处如实改成两处。
+   教训形状与前两次同型：**口径有单源不等于万能**——一套剔注释规则覆盖不了 glob 面，
+   而覆盖不了的表现是**静默少判**，不是报错。
+7. 验收口径的差额如实登记：Q55 写的是「CI 里 strict 跑通 `:app:assembleRelease`」。
+   本批在**本机**跑通（`:app:assembleRelease` 全量解析，R8 + lintVitalRelease 都过，
+   native 门按默认关；`buildEnvironment`、`:app:dependencies --configuration
+   debugRuntimeClasspath`、`:app:dependencyInsight --configuration ktlint` 三条图面也都 EXIT=0）。
+   CI 侧本批能保证的是 `android-quality`（含 lintDebug/assembleDebugAndroidTest/ktlint/detekt/test）
+   与 `contracts.yml` 的 `:app:assembleDebug` 在 strict 下跑，`gradle-dependency-graph.yml` 的
+   `assemble`（dependency-submission 的隐式默认任务）在 master push 上跑；
+   **`release-android.yml` 的 release 构建要等下一次真实 dispatch/标签**——本批不放行未验的闭环声明。
+8. 未做的另一半（不外推）：PGP/trust-keys 治理、`--write-verification-metadata pgp` 档位；
+   以及 `buildscript {}` / plugins DSL 的**脚本类路径**——它与版本锁一样不在项目配置面内，
+   仍由 root 显式 classpath 地板 + `buildEnvironment` 回读承接（口径未变）。
+9. 验证：`pytest tests/python` **713 passed / 1 skipped**（本批 +23：配置面 12 + 文档面 10 + 索引形态 1）；`active_tree_gates all`
+   （ruff / bandit / py312-compat）三面 OK——`ET.fromstring` 那处按 `assert_test_counts.py` 的
+   既有口径用**行级** `# nosec B314` + 信任边界注记，没有把 B314 加回全局 skips；
+   `check_file_sizes` 绿（两个新文件分别 264 / 113 行）；表形 / 链接 / `check_doc_claims` 见本节末
+   复跑；四把 `gradle.lockfile` 与 `packages.lock.json` 未改动（本批不抬任何版本）。
+
+10. 第三轮才发现的**索引形态**问题（同一个 dispatch 第二次挡下，run 38445166117）：
+    `写回分支` 步骤报「❌ 非依赖证据文件出现在纯重锁运行里：android/gradlew.bat」而中止。
+    现读 `git ls-files --eol`：`android/gradlew.bat` 是全仓**唯一**一个 `i/crlf` 的入库文件，
+    而 `.gitattributes:10` 写着 `*.bat text eol=crlf`——`text` 意味着入库前该归一成 LF，
+    所以那个 CRLF blob 是属性生效之前留下的旧形态。后果不是排版：干净 runner 上任何让这个
+    文件 stat 变动的动作，都会使 `git add -A -- android` 重新套 clean 过滤器得到 LF ≠ 索引里的
+    CRLF ⇒ **每次 gradle 重锁都长出一个伪 diff**，被写回守卫判成杂项拒绝。
+    判定要说清方向：**守卫那次是对的**（它拒绝的确实不是依赖证据），坏的是索引；
+    修法是把索引归一（`git add --renormalize android/gradlew.bat`，签出形态不变，
+    Windows 上仍是 CRLF），而不是放松守卫或给守卫加白名单。
+    常驻判据：`tests/python/gradle_lockfile_shape_test.py::
+    test_no_tracked_file_fights_its_own_text_attribute`（全仓扫 `i/crlf` 且属性含 `text`
+    的位点，并配一条正面控制证明 `-text` 分支不是空判）。这条若不钉住，下一次 gradle
+    重锁会在同一个地方再红一次，而每个人的第一反应都是「守卫太严」——那是最坏的修法。
+
+11. **权威生成面在 CI 上跑通并回填**（第三次 dispatch，run 38446662535，
+    `deps/r9-b50-gradle-verification`）：重锁步与写回步都绿，产物是
+    `verification-metadata.xml` **+54 行、四把 `gradle.lockfile` 零改动**。新增内容正好补上
+    CI 报的那 6 个构件（`guava-parent-33.4.0-jre.pom`、`junit-bom` 5.10.2 / 5.11.0-M2 / 5.14.4
+    的 `.module`、`kotlin-gradle-plugins-bom-2.2.10` 的 module + pom），另加冷缓存解析才会碰到的
+    BOM 父描述文件（groovy-bom、bc-jdk18on-bom、kotlinx-coroutines-bom 1.6.4/1.7.3/1.8.0、
+    guava-parent 33.6.0-jre），以及**平台相关的那一个**：`aapt2-9.4.1-15978811-linux.jar`——
+    本机那份只有 `-windows.jar`，这条把第 3 点的「字节面跟平台走」从推断变成实测。
+    入库那份因此是 windows（本机）+ ubuntu（dispatch）两轮并集，且这次是**按 SOP 的三面写法**
+    （`--refresh-dependencies` + 集合文件面 + 工具任务面）产出的，重锁幂等性在这一轮才真的成立。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

@@ -151,4 +151,11 @@ def test_security_doc_matches_the_tree() -> None:
     text = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
     assert "Gradle 依赖无 lock 文件" not in text, "SECURITY.md 仍声称 Android 无锁文件"
     assert "gradle.lockfile" in text, "SECURITY.md 没登记四把 gradle 锁"
-    assert "不含校验和" in text, "SECURITY.md 必须如实写「版本锁定不含 hash」"
+    # 这一句在 R9-B50（台账 Q55）之前是 `assert "不含校验和" in text`——校验和启用后它自己
+    # 就成了失实声明。判据跟着换成正向面（反向那句判在 gradle_verification_test.py 的
+    # test_security_md_no_longer_declares_verification_absent）：**两面都判**才叫对账，
+    # 只判「还没做时不许说做了」会留下「做了还说不做」这条没人看的缝。
+    assert "verification-metadata.xml" in text, "SECURITY.md 没登记校验和面（R9-B50 起它是第二把刀）"
+    assert "org.gradle.dependency.verification=strict" in text, (
+        "SECURITY.md 没写档位——「启用了校验」与「启用且 strict」是两句不同的话"
+    )
