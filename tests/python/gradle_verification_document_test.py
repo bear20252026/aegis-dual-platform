@@ -1,6 +1,7 @@
 """Gradle 校验和文档**本体**的判据（第九轮 R9-B50 / 台账 Q55 的另一半）。
 
-配置面（属性档位、重算命令、写回守卫、文档口径）判在 `gradle_verification_test.py`；
+配置面（属性档位、命令行不得放宽、文档口径）判在 `gradle_verification_test.py`，
+重算面（两条生成命令、两条平台的腿、写回守卫）判在 `gradle_relock_surface_test.py`；
 这里只判 `android/gradle/verification-metadata.xml` 这份文档自己：它是「字节已验」这句话
 的唯一证据，而它有四种会被悄悄做坏的形状——
 

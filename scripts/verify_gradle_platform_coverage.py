@@ -7,10 +7,13 @@
 在 ubuntu 上落 `aapt2-9.4.1-15978811-linux.jar`，两者是**两个不同的 sha256**。
 本机那一轮只产出了 `-windows.jar`（`-linux` 零命中），而 CI 的 android-quality /
 dependency-graph 跑在 ubuntu ⇒ 那一半字节根本不在文档里。
-本批靠 `dependency-relock.yml` 的 gradle 面（ubuntu）再跑一次补齐，但那是**人工动作**：
+本批先靠 `dependency-relock.yml` 的 gradle 面（ubuntu）再跑一次补齐，但那一次是**人工动作**：
 下一次版本 bump 时，谁在 windows 上重算就只补 windows，谁在 ubuntu 上重算就只补 linux，
 而缺的那一半不会在任何 PR 面变红——它是「下一个用到该构件的作业当场红」，
 那可能是 master push 上的依赖图作业（R9-B32 的同一位置）。**缺一个能红的判据，就得再撞一次。**
+R9-B53 把生成面也做成了双腿（ubuntu 锁+字节 → windows 只字节，`needs:` 串行），本判据
+因此从「事后追着人补」变成「生成面本身按 `runs-on` 的要求铺满平台」；两条腿的写回面
+各自受限（windows 腿不允许写 `gradle.lockfile`），所以补字节不会顺手改动版本真相。
 
 判据（每条都在 tests/python/gradle_platform_coverage_test.py 里以内存注入证伪）：
 1. 需要的平台集合**从 workflow 的 `runs-on` 现取**（ubuntu→linux、windows→windows、

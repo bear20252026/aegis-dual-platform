@@ -1,0 +1,35 @@
+# Gradle 校验和的**文件面**重算命令单源（R9-B53 / 台账 Q61 的windows腿）。
+#
+# 一句话的来历：`verification-metadata.xml` 只能登记**本次真正落盘**的构件字节，而平台相关的
+# 构件在不同 runner 上落的是不同文件（`com.android.tools.build:aapt2` 的 `-windows.jar` 与
+# `-linux.jar` 是两个不同 sha256；R9-B51 现读实测）。所以「一份文档服务两个平台」要求
+# **每个平台都把这条命令跑过一次**。此前只有 ubuntu 一条腿，windows 侧的新构件字节只能靠
+# 某个本机开发者恰好跑过重算——那是覆盖面缺口，不是小瑕疵。
+#
+# 为什么抽成 action 而不是在两个 job 里各抄一遍：命令一抄，两条腿就会漂（一条加了
+# `--refresh-dependencies`、另一条没加；或者任务清单少一项）——而漂移的表现恰好是
+# 「某个平台的字节静默缺失」，正是本批要根除的那类失效（R9-CI-2 / R9-B16 同一课）。
+# 单一修改点在这里不是审美：它让「两个平台跑的是同一条重算命令」成为结构事实。
+#
+# 三条口径写在这里一次，别在调用方重复：
+# · `--refresh-dependencies`：不强制重取字节，本机/缓存里从没落过盘的描述文件就永远不进文档
+#   （PR #189 实测：本地三条命令全绿、CI 两个平台同红 6 个构件）；
+# · `resolveAllConfigurationFiles`（root 脚本注册的按文件集合口径）：图解析只取 .pom/.module，
+#   一个 .jar/.aar 都不落盘，校验和登记的正是落盘的那些；
+# · 后面那份 ktlint/detekt/lint/测试的任务清单**不能省**：工具类路径是任务执行时现建的
+#   detached 配置，不在 `project.configurations` 里，只有跑那几个任务才会落盘。
+#   这份清单与 CI 任务面的对应关系由 tests/python/gradle_relock_surface_test.py 逐 token 判。
+#
+# shell 固定 bash：两条腿同一条命令。windows runner 上 Git Bash 直接跑 `./gradlew`（与本机
+# 同一个入口），不引入 `gradlew.bat` 的第二种命令行形态。
+name: 'Gradle 校验和文件面重算（按产物文件的集合口径 + 工具任务面）'
+description: 'Regenerate the sha256 file face of android/gradle/verification-metadata.xml (identical command on both platform legs)'
+runs:
+  using: 'composite'
+  steps:
+    - name: Gradle 校验和重算（文件面：产物文件集合 + 工具任务面，强制重取字节）
+      shell: bash
+      working-directory: android
+      # 整条命令写成一行是有意的：判据按「含 --write-verification-metadata 的那一条」现读任务清单
+      # （tests/python/gradle_relock_surface_test.py），折行会让它数到半条命令。
+      run: ./gradlew --no-daemon --no-configuration-cache --refresh-dependencies --write-verification-metadata sha256 resolveAllConfigurationFiles buildEnvironment :app:ktlintCheck :broker:ktlintCheck :webview-adapter:ktlintCheck :contracts:ktlintCheck :app:detekt :broker:detekt :webview-adapter:detekt :contracts:detekt :app:lintDebug :app:testDebugUnitTest :broker:testDebugUnitTest :webview-adapter:testDebugUnitTest

@@ -1,17 +1,10 @@
-"""Gradle 依赖校验（dependency verification）的**配置面**判据（第九轮 R9-B50 / 台账 Q55）。
+"""Gradle 依赖校验（dependency verification）的**配置面与对外口径**判据（R9-B50 / 台账 Q55）。
 
-文档本体（`android/gradle/verification-metadata.xml` 的形状与摘要）判在
-`gradle_verification_document_test.py`；这里只管三件会被单独做坏的事：
-
-1. **开关真的在属性面**。本批实测过另一种形态：只在命令行加 `--dependency-verification=strict`
-   ——那个口径下任何一条**不带参数**的 gradlew 调用都不校验，而 CI 与本地大量调用正是这样。
-2. **重算面真的能重算**，而且重算的是**字节**：产物文件走 `resolveAllConfigurationFiles`
-   （图解析只下 `.pom`/`.module`，一个 `.jar`/`.aar` 都不落盘）；工具类路径是任务执行时现建的
-   detached 配置，不在 `project.configurations` 里，所以那一小份任务清单不能省（逐 token 判）；
-   两条生成面都带 `--refresh-dependencies`——本地长命的元数据缓存能让一批描述文件**永不落盘**，
-   PR #189 上本地三条命令全绿而 CI 两个平台的干净 runner 同红 6 个构件（配置名 `classpath`）。
-3. **文档口径跟得上实树**。启用前 SECURITY.md 写的是「本仓未做」；启用后还留着那句话，
-   就是把对外声明的覆盖面写**小**了——那是 R9-DOC 那批失实的镜像面。
+本文件只管「这一刀到底有没有落下」：档位落在属性面还是命令行、有没有第二条悄悄放宽的路、
+以及对外文档跟不跟得上实树。**重算面**（校验和的那两条 gradle 命令、两条平台的腿、写回守卫）
+判在 `gradle_relock_surface_test.py`，**文档本体**（`verification-metadata.xml` 的形状与摘要）
+判在 `gradle_verification_document_test.py`。三份各判各的，是因为它们会被分别做坏：
+开关能被命令行绕过，生成面能少一条腿或抄两份命令，文档能被换成一个不像它的文件。
 
 为什么不是行为用例：真被校验的是 Maven 构件字节，端到端证伪要一个可控的仓库镜像（基建批）。
 这里的证伪口径是「注入必红」，两侧都有实测记录（`android/settings.gradle.kts` 决策记录 ③）：
@@ -37,33 +30,14 @@ from text_anchors import drop_line_comments
 
 ANDROID = ROOT / "android"
 PROPERTIES = ANDROID / "gradle.properties"
-ROOT_SCRIPT = ANDROID / "build.gradle.kts"
 WORKFLOW_DIR = ROOT / ".github" / "workflows"
-RELOCK = WORKFLOW_DIR / "dependency-relock.yml"
 
 VERIFICATION_KEY = "org.gradle.dependency.verification"
 ALLOWED_VALUES = frozenset({"strict", "lenient", "off"})
+# 两面口径的任务名：版本按**图**、字节按**文件**。词表放这里是因为「两面不同」这句话的
+# 单源就在 settings.gradle.kts 的决策记录里，本文件末尾那条判据正是判它的。
 FILES_TASK = "resolveAllConfigurationFiles"
 RESOLVE_GRAPH_TASK = "resolveAllConfigurations"
-# 不落**构件文件**的调用：图解析（.pom/.module）由重锁的图面那条覆盖，纯锁对账不下任何东西。
-NON_ARTIFACT_FILE_FACE = frozenset({"verifyDependencyLockCoverage", ":app:dependencies", ":app:dependencyInsight"})
-# 由**集合口径**覆盖的构建任务：它们吃的 classpath 文件就是本项目那些 canBeResolved 配置，
-# `resolveAllConfigurationFiles` 已经逐个解析过。这份豁免是清单与集合之间那道缝的另一半——
-# 加一条要在台账里写清「它的文件确实来自项目配置」，否则它就成了第二个「靠漏抄变绿」的洞。
-SET_COVERED_TASKS = frozenset({
-    "assemble", ":app:assembleDebug", ":app:assembleRelease", ":app:assembleDebugAndroidTest",
-    ":contracts:assembleDebug", ":broker:compileDebugKotlin", ":webview-adapter:compileDebugKotlin",
-})
-# shell 里的非任务词。名单是**保守的**：漏一个的后果是把工具名当任务要求进文件面，
-# 那条红灯会带着完整清单出现，不是静默放松。
-NON_TASK_WORDS = frozenset(
-    "awk bash bat cat cd cut done echo else export false fi for gradlew grep head if python python3 "
-    "sed set sh sort tail tee then timeout true uniq".split())
-# 带值的 gradle 选项：其值必须跳过，否则 `sha256`、`debugRuntimeClasspath` 会被当成任务词。
-OPTION_WITH_VALUE = frozenset({"--configuration", "--dependency", "--tests", "--write-verification-metadata"})
-# `(?::[\w.-]+)*` 里的 `*` 是必须的：写成 `?` 时 `:app:ktlintCheck` 整体不匹配（少一层模块前缀
-# 的形态），于是所有带模块前缀的任务词**静默**消失，判据退化成只看得见 5 个裸任务——实测撞过。
-TASK_TOKEN = re.compile(r"(?::[\w.-]+)*[A-Za-z]\w*")
 
 
 def property_assignments(text: str) -> list[tuple[str, str]]:
@@ -115,61 +89,6 @@ def gradle_command_lines() -> list[str]:
     return commands
 
 
-def task_tokens(lines: list[str]) -> set[str]:
-    """命令行里的 gradle **任务**词（选项、选项值、shell 关键字、路径形态都不算）。"""
-    found: set[str] = set()
-    for line in lines:
-        previous = ""
-        for token in line.split():
-            skip = previous in OPTION_WITH_VALUE or token.startswith("-") or token in NON_TASK_WORDS
-            if not skip and TASK_TOKEN.fullmatch(token):
-                found.add(token)
-            previous = token
-    return found
-
-
-def relock_steps() -> list[dict]:
-    return yaml.safe_load(RELOCK.read_text(encoding="utf-8"))["jobs"]["gradle-relock"]["steps"]
-
-
-def step_body(steps: list[dict], marker: str) -> str:
-    """按步骤名取 run 正文（改名或删掉都必须判红，不是静默跳过）。"""
-    hits = [str(s.get("run", "")) for s in steps if marker in str(s.get("name", ""))]
-    if len(hits) != 1:
-        raise AssertionError(f"名为「{marker}」的步骤必须恰好一个，实得 {len(hits)}")
-    return drop_line_comments(hits[0])
-
-
-def checksum_surface_lines(run: str) -> list[str]:
-    return [line.strip() for line in run.splitlines() if "--write-verification-metadata" in line]
-
-
-def file_face_line(run: str) -> str:
-    """文件面那一条：带 `--write-verification-metadata` 而不带 `--write-locks`（后者归图面）。"""
-    lines = [line for line in checksum_surface_lines(run) if "--write-locks" not in line]
-    if len(lines) != 1:
-        raise AssertionError(f"校验和的文件面命令必须恰好一条，实得 {len(lines)} 条：{lines}")
-    return lines[0]
-
-
-def case_patterns(run: str) -> list[str]:
-    """写回守卫 `case "$changed" in … esac` 里逐条列出的路径形态（顺序即语义，`*` 是拒绝支）。"""
-    block = re.search(r'case "\$changed" in(.*?)esac', run, re.S)
-    if not block:
-        raise AssertionError('写回步骤里没有 `case "$changed" in … esac`——守卫形态变了，这里必须同步改')
-    return [m.group(1) for m in re.finditer(r"^\s*(\S+)\)\s", block.group(1), re.M)]
-
-
-def accepted_by_guard(patterns: list[str], path: str) -> bool:
-    """按 shell case 的 glob 语义判断路径会不会被放行（默认支 `*` 是拒绝，不是放行）。"""
-    for pattern in patterns:
-        if pattern == "*":
-            return False
-        if re.fullmatch(pattern.replace(".", r"\.").replace("*", ".*"), path):
-            return True
-    return False
-
-
 def test_verification_is_strict_at_the_properties_face() -> None:
     assert verification_directive(property_assignments(PROPERTIES.read_text(encoding="utf-8"))) == "strict"
 
@@ -196,75 +115,13 @@ def test_a_commented_assignment_is_not_counted_and_a_duplicate_is_red() -> None:
 
 
 def test_no_gradle_invocation_relaxes_verification_by_flag() -> None:
-    """属性面生效之后，命令行再单独放宽就是「谁都能悄悄关掉」的第二条路。"""
+    """属性面生效之后，命令行再单独放宽就是「谁都能悄悄关掉」的第二条路。
+
+    另一种做坏的形态是本批启用前实测过的：只在命令行加 `--dependency-verification=strict`——
+    那个口径下任何一条**不带参数**的 gradlew 调用都不校验，而 CI 与本地大量调用正是这样。
+    """
     offenders = [line for line in gradle_command_lines() if re.search(r"--dependency-verification\s*=\s*(lenient|off)", line)]
     assert not offenders, f"workflow 里出现了放宽校验的 gradlew 调用：{offenders}"
-
-
-def test_checksum_generation_faces_force_fresh_bytes_and_the_file_set() -> None:
-    """两条生成面都必须带 `--refresh-dependencies`，文件面必须走集合口径的那个新任务。
-
-    `--refresh-dependencies` 不是保守起见：PR #189 实测本地三条命令全绿而 CI 两个平台的
-    runner 同红 6 个构件（guava-parent、junit-bom×3、kotlin-gradle-plugins-bom×2，配置名
-    `classpath`）——本地那份元数据缓存让这些描述文件**永不落盘**，于是文档里根本没有条目，
-    而「没有条目」在生成模式下也不报错。不强制重取字节，「重算校验和」这句就是假账。
-    """
-    run = step_body(relock_steps(), "Gradle 重锁")
-    lines = checksum_surface_lines(run)
-    if len(lines) != 2:
-        raise AssertionError(f"校验和的重算命令必须恰好两条（图面 + 文件面），实得 {len(lines)}")
-    for name, line in zip(("图面", "文件面"), lines, strict=True):
-        assert "--refresh-dependencies" in line, f"{name}没带 --refresh-dependencies——缓存里没落盘的那批字节不会进文档"
-    graph, file_face = lines
-    if "--write-locks" not in graph or RESOLVE_GRAPH_TASK not in graph:
-        raise AssertionError(f"图面必须与 --write-locks 同条且走集合解析，实得 {graph}")
-    for needle in (FILES_TASK, "buildEnvironment"):
-        assert needle in file_face, f"文件面缺 {needle}——前者是产物文件的集合口径，后者是脚本类路径"
-    script = ROOT_SCRIPT.read_text(encoding="utf-8")
-    assert f'tasks.register("{FILES_TASK}")' in script, (
-        f"root 脚本里没有 {FILES_TASK}——重锁面敲一个不存在的任务，只会在那次 dispatch 里红"
-    )
-
-
-def test_tool_task_surface_covers_every_ci_gradle_task() -> None:
-    run = step_body(relock_steps(), "Gradle 重锁")
-    surface = task_tokens(checksum_surface_lines(run))
-    ci = task_tokens(gradle_command_lines())
-    if len(ci) < 20:
-        raise AssertionError(f"从 workflow 只提出 {len(ci)} 个任务词——提取口径坏了，这条判据就是假绿：{sorted(ci)}")
-    missing = sorted(ci - surface - NON_ARTIFACT_FILE_FACE - SET_COVERED_TASKS)
-    assert not missing, (
-        f"CI 跑过这些任务而校验和的重算面没覆盖（{missing}）——工具类路径（ktlint/detekt/lint/测试）"
-        "是任务执行时现建的 detached 配置，不在 project.configurations 里，只有跑它们才落盘；"
-        "补进 dependency-relock.yml 的文件面，或说明它为什么属于 NON_ARTIFACT_FILE_FACE / SET_COVERED_TASKS"
-    )
-    stale = sorted(task_tokens([file_face_line(run)]) & SET_COVERED_TASKS)
-    assert not stale, (
-        f"构建任务清单又回到文件面了（{stale}）——那一路的 classpath 文件归 {FILES_TASK} 的集合口径管；"
-        "两处各写一份就是两份真相，且清单必然漏（R9-B32 那条课的另一半）"
-    )
-
-
-def test_dropping_the_file_face_line_turns_the_gate_red() -> None:
-    """内存态注入：删掉文件面那条，判据必须判红而不是「少一条也算过」。"""
-    run = step_body(relock_steps(), "Gradle 重锁")
-    without = "\n".join(line for line in run.splitlines() if "--write-verification-metadata" not in line or "--write-locks" in line)
-    with pytest.raises(AssertionError):
-        file_face_line(without)
-    assert len(checksum_surface_lines(without)) == 1, "注入后剩下的应当只有图面那一条"
-
-
-def test_writeback_guard_accepts_metadata_and_still_rejects_strays() -> None:
-    """写回守卫必须放行校验和文档，否则重锁作业红在自己的守卫上；同时继续拒绝杂项。"""
-    patterns = case_patterns(step_body(relock_steps(), "写回分支"))
-    assert accepted_by_guard(patterns, "android/gradle.lockfile"), "四把版本锁被守卫拒了"
-    assert accepted_by_guard(patterns, "android/gradle/verification-metadata.xml"), (
-        "校验和文档不在写回合法面里——R9-B50 之后同一次重锁必然同时产出它，守卫会把合法重锁判成「写回面错了」"
-    )
-    for stray in ("android/gradle/libs.versions.toml", "android/app/build.gradle.kts", "docs/README.md"):
-        assert not accepted_by_guard(patterns, stray), f"守卫放行了非依赖证据文件：{stray}"
-    without = [p for p in patterns if "verification-metadata" not in p]
-    assert not accepted_by_guard(without, "android/gradle/verification-metadata.xml"), "注入形态本身没被拒绝——判据在判空气"
 
 
 def test_security_md_no_longer_declares_verification_absent() -> None:

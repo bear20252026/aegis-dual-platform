@@ -1,0 +1,37 @@
+# Gradle 侧的「JDK 21 + Gradle 缓存 + Android SDK」装配单源（R9-B53 / 台账 Q61）。
+#
+# 为什么要抽：`gradle-relock` 从此有**两条腿**（ubuntu 与 windows 各一条），两条都要同一套
+# 装配口径才有意义——此前 android-quality / release-android / contracts 与重锁面各自维护
+# setup-java + setup-android 的参数（`platforms;android-36 build-tools;36.0.0` 与
+# cache-dependency-path 三项），一份改了其余静默保持旧口径就是「同一个门禁在不同作业里跑在
+# 不同工具链上」——本仓把这一类反复记到「部分闭环」（R9-CI-2 / R9-B16 的同一课）。
+#
+# 边界（如实写）：
+# · 只抽**装配**，不抽任务命令：android-quality 跑 ktlint/detekt/lint/test 六步、
+#   release-android 跑带签名与 native 制品的 assembleRelease、contracts 用 `gradlew.bat`，
+#   它们的命令面各不相同，硬合并只会造出条件分支（dotnet-test-suite 同款取舍）；
+# · `compileSdk 37` 由 AGP 构建期自动装配，SDK 只装基线包——SP-238 实测显式 pin
+#   `platforms;android-37` 会因未进 stable 渠道必失败，别在这里"顺手补上"。
+name: 'Gradle Android 工具链装配（JDK 21 + Gradle 缓存 + Android SDK 基线包）'
+description: 'Set up the pinned JDK/SDK combination the Aegis Gradle faces are proven against (ubuntu and windows legs identical)'
+runs:
+  using: 'composite'
+  steps:
+    - name: 安装 JDK 21 + Gradle 缓存（与 android-quality 同口径）
+      uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+      with:
+        distribution: temurin
+        java-version: "21"
+        # SP-215/AD-243 口径：Gradle 缓存单机制 + cache-dependency-path 必含版本目录。
+        # 这里刻意**不发明**任何缓存键参数（setup-java 没有 `cache-suffix` 这类输入，
+        # 写了只会被静默忽略＝一条假配置）；缓存键由 action 自己组成，两条腿各自命中。
+        cache: gradle
+        cache-dependency-path: |
+          android/**/*.gradle.kts
+          android/gradle/**
+          android/gradle/libs.versions.toml
+
+    - name: 设置 Android SDK（基线包 + AGP 构建期自动装配 compileSdk 37）
+      uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
+      with:
+        packages: "platform-tools platforms;android-36 build-tools;36.0.0"

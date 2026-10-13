@@ -59,7 +59,7 @@ dependencyResolutionManagement {
 //    · 只跑任务面也不行，只跑文件集合也不行：ktlint/detekt/lint/单元测试用的工具类路径是
 //      任务执行时现建的 **detached 配置**，不在 `project.configurations` 里，只有跑那几个任务
 //      才会落盘——所以重锁面留了这一小份任务清单，它与 CI 的对应关系由
-//      `tests/python/gradle_verification_test.py` 从 workflow 原文逐 token 判（构建类任务
+//      `tests/python/gradle_relock_surface_test.py` 从 workflow 原文逐 token 判（构建类任务
 //      已从这一面删掉：它们的 classpath 文件归集合口径管，两处各写一份就是两份真相）。
 //    · 两条生成面都带 `--refresh-dependencies`。这是本条最贵的一课：校验和文档只能记录
 //      本次**真正落盘**的构件，而长命的 `~/.gradle` 元数据缓存可以让一批 parent-pom/BOM
@@ -72,6 +72,13 @@ dependencyResolutionManagement {
 //    `-linux.jar`，两个不同 sha256，所以「一份文档服务两个 runner」要求每个平台都生成过一次。
 //    这条不靠记性：`scripts/verify_gradle_platform_coverage.py` 把需求平台从 workflow 的
 //    `runs-on` 现取（加一个 macos runner 不需要改判据代码），平台相关坐标缺任一形态即判红。
+//    R9-B53（台账 Q61 的另一半）把「每个平台都生成过一次」从人的记性挪进了作业面：
+//    `dependency-relock.yml` 的 gradle 生态是**两条腿串行**——`gradle-relock`（ubuntu，版本锁
+//    + 字节）之后 `gradle-checksum-windows`（windows-2025，只重算字节、**不带** `--write-locks`）。
+//    串行不是排版偏好：两个 job 并发推同一份 `verification-metadata.xml` 会互相覆盖，
+//    后推的那一次带着旧检出重算，前一次的增补条目就地消失。文件面命令是**单源**的
+//    `.github/actions/gradle-checksum-file-face`，两条腿各 `uses:` 一次——写两遍就是两份真相，
+//    改一处漏一处的那类债（`tests/python/gradle_relock_surface_test.py` 按出现次数判死）。
 //    执行面与锁同批：`dependency-relock.yml` 的 gradle 生态里 `--write-locks` 那条同时带
 //    `--write-verification-metadata sha256`。**先有鸡还是先有蛋已经实证解开**：删掉整个 junit
 //    组件块（等于一次版本升级带来的「新坐标没有条目」）后跑同一条命令，BUILD SUCCESSFUL
