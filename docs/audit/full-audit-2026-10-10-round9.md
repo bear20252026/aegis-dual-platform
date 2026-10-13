@@ -62,6 +62,7 @@ DOC（文档 vs 实树）、CS（Windows 正典）、RS（Rust 核心）。
 | AEG-011 / R8-DEPS-8 | **P2**（外部审计声称 P1，回读后裁 P2：这是加固面缺失而非可利用缺陷）→ 落地 | 保留并落地 | 审计要的两件事里只做了一件半：`dependencyLocking` 已启用，dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55。回读把第八轮 R8-DEPS-8 的判据更正为「`lockAllConfigurations()` 覆盖的是项目全部**可解析配置**（含 AGP 变体、测试、lint、ktlint/detekt 工具面），不是只覆盖直接依赖」；AD-155 当年的否决理由「双源维护成本」在 STRICT 下翻转成门禁本身——catalog 改了而锁没重算，解析直接失败而不是静默漂移。**故障注入实证两次**：①删掉 `android/app/gradle.lockfile` ⇒ `Locking strict mode: Configuration ':app:debugCompileClasspath' is locked but does not have lock state`（EXIT=1）；②给模块加一条新依赖 `org.apache.commons:commons-text:1.15.0` ⇒ `Resolved '…commons-text:1.15.0' which is not part of the dependency lock state`（EXIT=1）——这条在**改成 root 单源之后又重跑了一次**（注入点 `:contracts:compileDebugKotlin`），证明单源形态下 enforcement 仍然生效，不是「写在模块脚本里才管用」。顺带抓到一个**判据陷阱**：`:app:dependencies` 报表任务把解析失败吞成 `FAILED` 文本并 EXIT=0——所以「锁是否可消费」绝不能用报表任务证明，必须用真正吃 classpath 的任务；这条决定了 dependency-relock 的 gradle 面怎么写。落地＝锁块**单源**写在 root `android/build.gradle.kts` 的 `subprojects` 作用域（模块脚本零副本；本来按「逐模块各写一份」做，是 `:app` 脚本停在 **316 行零余量基线**放不下第 5 行逼出了这个更好的形状——单源顺带把「新增第五个模块忘记加锁」从静默 fail-open 变成自动覆盖）+ 四把入库 `gradle.lockfile`（app 314 行/四把共 277 个唯一坐标）+ 新常驻 `tests/python/gradle_locking_test.py`（9 例：模块清单从 settings 现取、锁块同形、锁文件形态与精确版本、CI 解析的配置必须在锁里、ktlint/detekt 工具面也进锁、SECURITY.md 与 settings 决策记录对得上）+ `relock_sop_test.py` 的 gradle 半边（**重锁任务清单 ⊇ CI 各 workflow 的解析面**，删一条即判红）+ `dependency-relock.yml` 新增 `gradle-relock` job（ubuntu + 与 android-quality 同款 JDK/SDK 口径，只写 deps/* 分支）。本机限制如实登记：`:app:assembleRelease` 在本机 Windows 跑不动（AAPT2 windows daemon 缺 UCRT），release 面的锁覆盖是用 `:app:dependencies --configuration releaseRuntimeClasspath` + broker/adapter 的 release 配置条目实证到位，真正的 release 构建要等 CI 的 ubuntu runner。 |
 | R9-CS-10 | **P2**（R9-B33 落地时发现，同批修掉） | 保留并落地 | 「有界读取」在 `HttpClient` 默认 `HttpCompletionOption.ResponseContentRead` 下**根本不成立**：`GetAsync` 返回前响应体已被整包缓冲，`ReadBounded` 只是「缓冲完再量一遍」。实测撞出来的形态不是「超限判定」而是异常：`SourceFetcherTests.cs:185 ChunkedOversizeStopsJustPastTheCap` 第一版跑出 `Cannot write more bytes to the buffer than the configured maximum buffer size: 2147483647`。受影响的两条既有路径 `Core/Security/ThreatFeed.cs:148`、`Core/Favicons/FaviconService.cs:187` 在 R9-CS-2 里是被当作**正例**引用的（它们确实有 Content-Length 预筛与上限常量，缺的正是「对方不声明长度时不缓冲」这一刀）⇒ 修法＝三条带外抓取路径统一 `ResponseHeadersRead`，并由 `windows/tests/Aegis.Windows.Core.Tests/OutOfBandFetchDisciplineTests.cs` 按「含 `GetAsync(` 的文件」现取扫描面钉住——第四条抓取路径出现时自动在判据内，而不是靠有人记得往白名单里加一行 |
 | R9-SH-14 | P3（R9-B33 回读 R9-B10 落地件时发现＝**部分闭环的残余**） | 保留并落地 | R9-SH-2/-4 当时把「旧锁恒真」写成证据（「把 R8-SH-13 的修复摘掉，这把新锁与旧的 WB-142 双双仍绿」），却只**新写了强锁**、没删被当场证伪的那三段：`tests/ui-regression/start_page.test.mjs:403-405`（`SNAKE.substring(indexOf(...))` 一路读到文末）、WB-141（`fcBlock` 从 `indexOf` 读到文末）、WB-142（「本 at-rule 到下一个 @media」）⇒ 台账那句「双双仍绿」在落地之后仍然成立。本批删掉三段（该文件 490→474 行），WB-142 的三个控件与 WB-141 的三个系统色并进按花括号配对切块的 `start_a11y.test.mjs`，各配反向锚。写反向锚时又撞出一条：`ButtonFace` 在 forced-colors 块内出现两次（`shared/shell/start.css:389,395`），只替换第一处的注入是**假锚**——改成全量替换后它才真的判红 |
+| R9-SH-15 | **P2**（R9-B39 复查**本仓自己的登记表**时发现＝门禁自身判据失实，不是某端缺功能） | 保留并落地 | AEG-006 那张消费面表把「命中」定义为文件名出现在受管源码里，而**注释也算命中**——于是注记可以冒充执行者。实测坐实一份：`native-navigation-decision.json` 登记为 `{CS,RS}`，但 CS 那一面的唯一来源是 `windows/tests/Aegis.Windows.Broker.Tests/BrowserPolicyBrokerNativeGateTests.cs:260` 的一句解释性注释（期望值是手写的，零代码读那份向量），登记表把它改回 `{RS}`，§五 Q53 里那句「已有 C# 消费者……可作为接法模板」同时作废。**这不是个别笔误而是口径缺陷**：覆盖面声明的全部根据就是「这端跑过」，让注记充当证据＝门禁被自己喂绿。修法＝命中前剔注释（C 系块注释 / 行注释 / 块注释续行星号 / `#` 四种形态），并跑「剔前剔后各一遍」求 delta 证明**只有这一份**端集受影响（21 份里 1 变 20 不变；若不是 1 份就说明整张表是注记堆的，要整体重登记）。用例 `test_comment_only_citation_is_not_a_consumer` 带一条**正面控制**（同名写进代码行必须算命中），否则「注释被删干净」会让五条断言全部恒真——R9-SH-7 同课。三档扩面缺口一条没动，本批只把「消费」这个词判干净 |
 
 ## 三、本批落地（R9-B1：CI / 门禁面）
 
@@ -836,21 +837,29 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `core/rust-policy-core/src/c_abi/tests/vectors_confirmation.rs` 一份消费者（C#/Kotlin 零）
   ⇒ 属 B9 词表入冻结面的余量，需定稿。
 
-- Q53 R9-SH-13 | P2 | `contracts/vectors/`（15 份）↔ `scripts/verify_vector_consumers.py`
+- Q53 R9-SH-13 | P2 | `contracts/vectors/`（登记时 15 份，R9-B35 起 **21 份**）↔
+  `scripts/verify_vector_consumers.py`
   的 `CONSUMER_MANIFEST`（实测端集）↔ `agent/broker.py`（`AG` 零命中）：
   AEG-006 的**扩面**那一半，本批只把它变成可判定的表，没有替任何端新增执行面。三档缺口按代价排序：
-  ①`capability-*` / `audit-event-*` 四份零端侧执行者（它们的 expected 是 schema 级的，
+  ①`capability-*` / `audit-event-*` / `release-*` / `version-*` **八份**零端侧执行者
+  （它们的 expected 是 schema 级的，
   所以「补消费」要先定**由谁判**——C# 的 capability 校验面与 FFI 的 `capability.validate`
   尚未接线是同一件事，见 §四 第 1 项 AX-02）；
-  ②`action-valid/invalid`、`native-navigation-confirmation`、`approvals-replay-and-expiry`、
-  `glob-match` 只有 Rust 执行 ⇒ 「Windows/Android 与核心同一裁决」对这些命题**未被验证**
-  （`native-navigation-decision` 已有 C# 消费者 `BrowserPolicyBrokerNativeGateTests.cs`，
-  可作为接法模板）；
+  ②`action-valid/invalid`、`native-navigation-confirmation`、`native-navigation-decision`、
+  `approvals-replay-and-expiry`、`glob-match`、`update-manifest-invalid` 只有 Rust 执行
+  ⇒ 「Windows/Android 与核心同一裁决」对这些命题**未被验证**
+  （此处原写「`native-navigation-decision` 已有 C# 消费者 `BrowserPolicyBrokerNativeGateTests.cs`，
+  可作为接法模板」——**已被 R9-B39 推翻**：该文件唯一的命中是 `:260` 的一句解释性注释，
+  没有任何代码读这份向量，登记表已改回 `{"RS"}`；Windows 侧至今仍是零执行者）；
   ③Agent 端不消费任何契约向量，而 `action-catalog.yaml` 的 `confirmation/risk/audit` 三列
   也不被 broker 读（R9-SH-5）⇒ 两端各说各话。
   不顺手做的原因：每一档都要在端侧新增/改写裁决实现（不是加测试文件就有数），且第①档与
   AX-02 是同一次改造。门禁已把当前事实钉住：**将来任何一端接上消费者，表不改就判红**，
   所以这笔账不会再变成第二段声明。
+  **R9-B39（§3.39）做了第 0 档：先把「消费」这个词本身判干净**——命中口径剔注释后实测
+  21 份向量只有 1 份端集变化（`native-navigation-decision` 由虚记的 CS+RS 改回 RS），
+  其余 20 份逐份复核确认真在代码里命中；同时把本条上面那句失实的「已有 C# 消费者」改掉。
+  三档缺口**仍在**，且现在才是可信的缺口数。
 
 ### 5.3 CS（Windows 正典）
 
@@ -1227,7 +1236,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    会冒充「测试跑过」。`SCHEMA_LEVEL`（`validate_vector_schemas.py` + 它的输入守卫用例）
    也不算端侧消费者：它判的是「实例对 Schema 的通过/拒绝＝向量自述的 expected」。
 2. 实测结论（15 份）：`url-origin-valid/invalid` 是**仅有的两份 CS∧AD 同跑**；
-   `native-navigation-decision` 到 CS+RS；`action-*`/`glob-match`/`approvals-replay-and-expiry`/
+   `native-navigation-decision` 到 CS+RS（**这条 CS 已被 R9-B39 证伪**：唯一的命中是注释，
+   登记表已回到 `{"RS"}`，见 §3.39 / §二 R9-SH-15）；`action-*`/`glob-match`/`approvals-replay-and-expiry`/
    `native-navigation-confirmation`/`update-manifest-invalid` 只 RS；`update-manifest-canonical`
    RS+PY（`tests/python/release_tools_test.py`，真实消费者）；`update-manifest-valid` RS+CI
    （`supply-chain.yml`）；`capability-*` 与 `audit-event-*` 四份**零端侧执行者**。
@@ -1805,6 +1815,39 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    那处改锚**净零增行**（注释放台账与核心注记里，不在基线文件里挤行数，第 3 点的说明因此
    不在这个文件里）。**未跑真机/桌面冒烟**——本批改的正是
    只能在真 WebView2/System WebView 里观测其行为的注入 JS，验证结论要等那一跑。
+
+### 3.39 R9-B39（2026-10-13，队列 Q53 的第 0 档）：消费面门禁不再被注释喂绿
+
+1. 起因是复查**自己写的这张表**：Q53 登记时把 `native-navigation-decision.json` 写成
+   「已有 C# 消费者 `BrowserPolicyBrokerNativeGateTests.cs`，可作为接法模板」，并据此在
+   `CONSUMER_MANIFEST` 里记了 `{"CS","RS"}`。逐行回读该文件：唯一的命中是 `:260` 的一句注释
+   （`// 公网 https + 已注册会话 ⇒ 核心判 allow（native-navigation-decision 向量同口径）`），
+   断言里的期望值是手写的，**没有任何代码打开那份向量**。「这端跑过」这句话的来源于是文档式
+   自我声明——而覆盖面正是靠这句话立起来的，所以这不是措辞问题，是判据问题。
+2. 落地＝命中口径改成**剔注释后再匹配**（`scripts/verify_vector_consumers.py` 新增
+   `strip_comments()` 并接进 `scan_surface()`），四种形态各覆盖：C 系块注释、行注释、
+   块注释续行的对齐星号、`#` 注释（`.py`/`.yml`）。登记表随之把该份改回 `frozenset({"RS"})`，
+   并在原行写明「Windows 侧真接一份执行者是 §五 Q53 的第②档，本批不顺手补」。
+3. **实测 delta 只有这一份**：同一次扫描跑「剔注释前 / 后」两遍，21 份向量里 1 份端集变化、
+   20 份不变（变化的正是 `native-navigation-decision`：注释命中共 4 个文件——3 份 Rust 注记 +
+   1 份 C# 注记——全被剔掉后剩下的唯一真实消费者是 `vectors_decision.rs`，端集由 `CS,RS` 回落到 `RS`）。
+   这一步必须做：如果剔注释一次改掉六七份的端集，说明整张表是注记堆出来的，要整体重登记
+   而不是改一行。
+4. 反向锚 `tests/python/vector_consumers_test.py::test_comment_only_citation_is_not_a_consumer`：
+   五条注释语料（把上面四种形态分布在 C#/Kotlin/Rust/python/mjs 五个文件上）逐一断言
+   「文件名在原文里 → 剔完不在 → 不算消费者」，再加一条**正面控制**
+   （同一文件名写进代码行必须算命中）。没有那条正面控制，前面五断言全部恒真——等于用
+   「注释被删光了」证明「注释不算消费」，正是 R9-SH-7 / `gate_hollowness_test` 判的那类假绿。
+5. 顺带把那句失实的「可作为接法模板」在两处改成事实——§五 Q53（原位标注由谁推翻，并把
+   登记时的 15 份同步成现在的 21 份、①档零端侧执行者由四份增至八份）与 §3.25 第 2 点的
+   「`native-navigation-decision` 到 CS+RS」。**这句话在台账里出现在两处**（§3.25 第 2 点与
+   §五 Q53；§二 AEG-006 行只写了聚合计数、没点名这份向量的 CS，所以不用改）。历史记录保留
+   当时的措辞，但必须当场写明它已被推翻——否则后来人按 §3.25 读一遍就会以为 Windows 真跑过
+   它。本批定位是「第 0 档：先把『消费』这个
+   词判干净」——三档缺口一条没动，只是缺口数现在可信。
+6. 验证：`python scripts/verify_vector_consumers.py` ⇒ **EXIT 0**（21 份 / 563 个受管源文件）；
+   `pytest tests/python` ⇒ 629 passed / 1 skipped（本批 +1）；`ruff check` 干净；
+   `check_file_sizes` 绿（该门禁 264 行、用例 270 行，均在基线内）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

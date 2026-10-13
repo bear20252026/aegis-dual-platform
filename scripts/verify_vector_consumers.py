@@ -4,7 +4,8 @@
 AEG-006 的原话是「跨语言契约测试覆盖不一致」，并举例「C# 只连部分向量、Kotlin 主要消费
 url-origin-*」。本脚本把这句话变成一个可判定的表：每份向量实测被哪几端执行，改动必须是
 有意识的动作。两条口径，否则数字会被读成另一种意思：
-- 「消费者」＝受管源码面里以「完整文件名」或「词干作为独立词」命中，且落在会被编译/执行的
+- 「消费者」＝受管源码面里以「完整文件名」或「词干作为独立词」**在代码里**命中（注释一律
+  不算——R9-B39），且落在会被编译/执行的
   路径下。markdown 里的提及是**声明**，不算消费（否则文档写一句就冒充「测试跑过」）。
 - `META_LEVEL`（按名遍历整个向量目录的工具面，含本门禁自己）判的是「实例对 Schema 的
    通过/拒绝＝向量自述的 expected」，对
@@ -15,6 +16,8 @@ url-origin-*」。本脚本把这句话变成一个可判定的表：每份向�
 1. 向量数 < MIN_VECTORS 或扫描面为空 ⇒ 退出 2（面塌缩不是「变安全」）。
 2. 实测端集必须等于 CONSUMER_MANIFEST 登记端集——少一面、多一面、新增未登记、过期登记
    四种都判红（同 R9-SH-7 的双向不变量：过期声明与悄悄扩面同等致命）。
+   0a. 命中口径**剔注释**（R9-B39）：只在注记里写出向量文件名的文件不是消费者——否则
+   「文档提到」会被读成「这端跑过」，而覆盖面正是靠这句话立起来的。
 3. 至少 MIN_CROSS_END 份向量同时被 CS 与 AD 执行（今天＝url-origin-* 两份）；这条**不随
    登记表松动**，否则「把跨端两份改成单端登记」就能把 AEG-006 说反。
 4. 至少 MIN_EXECUTABLE 份有端侧执行者（今天 11 份）——防止整体退化成纯 schema 对账。
@@ -78,7 +81,10 @@ CONSUMER_MANIFEST: dict[str, frozenset[str]] = {
     "capability-valid.json": frozenset(),
     "glob-match.json": frozenset({"RS"}),
     "native-navigation-confirmation.json": frozenset({"RS"}),
-    "native-navigation-decision.json": frozenset({"CS", "RS"}),
+    # R9-B39 改回事实：这里的 CS 命中此前全部来自注释（见 strip_comments），
+    # 没有任何 C# 代码真的读这份向量 ⇒ 登记成 {"CS","RS"} 就是把「文档说过」当成
+    # 「跑过了」。Windows 侧真接一份执行者是 §五 Q53 的第②档（未做，不顺手补）。
+    "native-navigation-decision.json": frozenset({"RS"}),
     "update-manifest-canonical.json": frozenset({"RS", "PY"}),
     "update-manifest-invalid.json": frozenset({"RS"}),
     # R9-B35 起 PY 也是它的消费者：semver_schema_parity_test.py 取其首条 manifest
@@ -111,10 +117,25 @@ def scan_surface(files: list[str]) -> dict[str, str]:
         if rel.startswith("contracts/vectors/"):
             continue
         try:
-            texts[rel] = (ROOT / rel).read_text(encoding="utf-8", errors="ignore")
+            texts[rel] = strip_comments((ROOT / rel).read_text(encoding="utf-8", errors="ignore"))
         except OSError:
             continue
     return texts
+
+
+def strip_comments(text: str) -> str:
+    """注释里的文件名**不算消费**（R9-B39 / Q53）。
+
+    这条不是抽象洁癖：`native-navigation-decision.json` 此前被记成「CS 有执行者」，
+    而全部命中只来自 `BrowserPolicyBrokerNativeGateTests.cs` 里一句解释性注释——
+    注记把「读文件名并断言」的活儿说了一遍，却没有任何代码去读那份向量。
+    与本仓其余文本判据同口径：判代码不判注释（注记里逐字抄着被禁形态也是同一件事）。
+    """
+    text = re.sub(r"/\*[\s\S]*?\*/", "", text)      # C 系块注释（.cs/.kt/.js/.rs）
+    text = re.sub(r"(?m)^\s*//.*$", "", text)          # 行注释
+    text = re.sub(r"(?m)^\s*\*.*$", "", text)         # 块注释续行的对齐星号
+    text = re.sub(r"(?m)^\s*#.*$", "", text)           # .py / .yml 注释
+    return text
 
 
 def end_of(rel: str) -> str:
