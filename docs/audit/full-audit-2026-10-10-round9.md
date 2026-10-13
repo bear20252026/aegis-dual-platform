@@ -777,7 +777,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   IPv6 authority 在导航层一律拒 ⇒ `::1`/ULA 的「放行」永不被判定，而
   `LocalTargetHostsTest.kt:26-28`、`ReservedAddressBoundaryTest.kt:62,68` 用
   `http://[::1]:9000/` 当放行样本，读起来像「IPv6 本机可打开」。建议如实写进 KDoc 与
-  测试注释（**不得反向收紧段集**，与 B8 相反）。——**本批已逐行回读并按该处方落地**（§3.5），判定零改动。
+  测试注释（**不得反向收紧段集**，与 B8 相反）。——**部分闭环（R9-B6 / §3.5）**：口径改真那半边已逐行回读并按该处方落地，判定零改动；**仍开着的那半边**是「打通 IPv6 导航面」（要解冻核心 host grammar 并增补向量）⇒ §四 待定稿。
 - ~~Q5 R9-AD-5~~ **本批已闭**（R9-B40 / §3.40：新增 `android/broker/src/main/kotlin/com/aegis/broker/NonceLedger.kt`
   把账本键与回收判据收成同一前缀约定（`nonceLedgerKey` 幂等折算 + `belongsToNonceLedger`），
   两条消费点都经键折算，回收点改用它；新常驻 `ConsumedNonceLedgerTest.kt` 5 例含一条
@@ -811,7 +811,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   路径段」两套解码器，而后者注释正是前者的反驳理由；本仓两处自写纪律「不欢迎第二个解析器」。
   落地时把**查询值**也一并改严格（Windows 侧两处都是 `Uri.UnescapeDataString`，见
   `Core/Downloads/DownloadPolicy.cs:65,130`）——两端对同一个 URL 从此解出同一个名字。
-- Q10 R9-AD-10 | P3 | `AegisHomeBridge.kt:95-121` + `SecureWebViewFactory.kt:127-132`：
+- Q10 R9-AD-10 | P3（**待裁决**：桥传输整体迁移属跨端契约变更，§四） | `AegisHomeBridge.kt:95-121` + `SecureWebViewFactory.kt:127-132`：
   `addJavascriptInterface` 对象对所有帧可见（本类 KDoc 自述）而判据只取 `webView.url`
   （主框架），受信面是整个 `file:///android_asset/` 前缀（首页 + GeoGebra）⇒ 壳页内跨源
   iframe 可驱动 `navigate/setEngine/setWallpaper/goBack`。实测 `shared/shell` 现零 iframe
@@ -889,17 +889,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   （PY-013 的向量面只覆盖 4/7）。
   **登记里有一处需要改准**：PY-279 收紧后的 update-manifest 式**仍放过** `2.2.0-01`
   ——前导零规则不在正则里，而在客户端另一段 `_NUMERIC_ID`（PY-184）。所以本批把三张 schema 一起换成与验证器逐案等价的式子，而不是只把两张旧的改成 PY-279 那份。
-- Q12 R9-SH-2 | P2 | `tests/ui-regression/start_a11y.test.mjs:25-30` ↔
+- ~~Q12 R9-SH-2~~ **已闭（R9-B10 / §3.9；残余的「旧锁本体没删」另由 R9-B33 / §3.33 收掉）** | P2 | `tests/ui-regression/start_a11y.test.mjs:25-30` ↔
   `tests/ui-regression/start_page.test.mjs:443-453` ↔ `shared/shell/start.css:244-258,324,353`：
   `mediaBlock()` 把「媒体块」切成「本 at-rule 到下一个 `@media`」而非闭合 `}`，切片
   5313/19189 字符，含块外的 `.veil-btn {`（:324）与 `.engine-item:focus-visible`（:353），
   且不剔注释（块内注记 :245-247 原文就写着 `.engine-item`）。**内存态注入实证**：从
   `start.css:248` 的选择器列表摘掉 `.engine-item, .veil-btn`（即回退 R8-SH-13 半个修复），
   新锁与旧锁 WB-142 双双仍绿；整块退回 40px 形态才红。——**本批已回读确证并落地**（§二 R9-SH-2）。
-- Q13 R9-SH-3 | P2 | `tests/ui-regression/start_main.test.mjs:313`：注释写「触发按键不得
+- ~~Q13 R9-SH-3~~ **已闭（R9-B10 / §3.9：`assert.ok(true)` 换成 `state.engineCalls` 反向判据）** | P2 | `tests/ui-regression/start_main.test.mjs:313`：注释写「触发按键不得
   选中引擎（仅 Enter/Space）」，实体是一行 `assert.ok(true)`——零判定，而 `makeHost()`
   已提供 `state.engineCalls` 却未取用。**本批已回读确证并落地**（§二 R9-SH-3）；Enter/Space 正向面零覆盖另记为 R9-SH-12（队列新增 Q47）。
-- Q14 R9-SH-4 | P3 | `tests/ui-regression/start_page.test.mjs:403-405`：
+- ~~Q14 R9-SH-4~~ **已闭（R9-B10 / §3.9 外迁 `snake_guard_slice.test.mjs`；恒绿旧断言本体由 R9-B33 / §3.33 删掉）** | P3 | `tests/ui-regression/start_page.test.mjs:403-405`：
   `SNAKE.substring(SNAKE.indexOf("document.addEventListener('keydown'"))` 在 indexOf 返
   `-1` 时退化为全文扫描，而 `if (!isOpen) return;` 在 `shared/shell/start.snake.js`
   出现 2 次（:449 keydown 与触摸处理器）⇒ 实测删除全部 document keydown 注册后仍绿
@@ -969,7 +969,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 ### 5.3 CS（Windows 正典）
 
-- Q22 R9-CS-1 | P2 | `windows/src/Aegis.Windows.App/Chrome/InPrivateWindow.xaml.cs:135-164`：
+- ~~Q22 R9-CS-1~~ **已闭（R9-B11 / §3.10：无痕窗接线体外迁 + 失败闭合 + 对偶锚）** | P2 | `windows/src/Aegis.Windows.App/Chrome/InPrivateWindow.xaml.cs:135-164`：
   无痕窗 `CoreWebView2InitializationCompleted` 回调体（`BindVirtualHosts`→`runtime.OnCoreReady`
   （内含 `WireEvents`→`RegisterSession`：会话池 1024 满即抛 / `WebView2Hardening.Apply` /
   `AddWebResourceRequestedFilter` COM）→`WireNtpBridge`→首次 `Navigate`）**未包**
@@ -1083,7 +1083,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 ### 5.2.1 本批落地时新增队列（同口径：必须带 file:line）
 
-- Q47 R9-SH-12 | P3 | `shared/shell/start.main.js:83` ↔ `tests/ui-regression/start_main.test.mjs:307-313`：`Enter`/`空格` 选中引擎这条**正向**判据全仓零覆盖（:83 的 `if (ev.key === 'Enter' || ev.key === ' ')` 无任何用例驱动），而 :87 的方向键分支刚被 R9-SH-3 补上反向判据——只锁一侧意味着「把 Enter 整条删掉」仍全绿。补法：在同一用例里对 `items[1]` 触发 Enter 并断 `state.engineCalls` 增长（`start_main.test.mjs` 在 579 行零余量基线上，需先净减）。
+- ~~Q47 R9-SH-12~~ **已闭（R9-B11 / §3.10：Enter/Space 正向锚 + 删分支故障注入）** | P3 | `shared/shell/start.main.js:83` ↔ `tests/ui-regression/start_main.test.mjs:307-313`：`Enter`/`空格` 选中引擎这条**正向**判据全仓零覆盖（:83 的 `if (ev.key === 'Enter' || ev.key === ' ')` 无任何用例驱动），而 :87 的方向键分支刚被 R9-SH-3 补上反向判据——只锁一侧意味着「把 Enter 整条删掉」仍全绿。补法：在同一用例里对 `items[1]` 触发 Enter 并断 `state.engineCalls` 增长（`start_main.test.mjs` 在 579 行零余量基线上，需先净减）。
   **本批已落地**（§二 R9-SH-12 / §3.10：正向锚 + 故障注入自证）。
 - ~~Q59 R9-SH-17~~ **本批已闭**（R9-B45 / §3.45，2026-10-13）| P2 | 登记时写「散了 14 份」，
   现读纠正为 **15 个文件各自实现**（C# 9 / Kotlin 3 / Python 3，命令见 §3.45 第 2 点）；原条目：「按文本判源码前剔注释」这条纪律在仓里**散了 14 份、三种覆盖等级**
@@ -1160,7 +1160,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   或注册表，而 `docs/release/AegisSetup-CSharp.iss:73` 注明该标记**刻意不写**（只写
   `RequireNativePolicyCore`，:79）⇒ 唯一发布制品上面板永不出现，验证人会「看不到面板」
   而误判缺陷，或凭 UI 存在与否签一个无证据的通过（§十一 第 5 类「结论无证据」）。
-- Q39-Q46 R9-DOC-08..15 | P3 | 八条（**R9-B21 已落地 DOC-08/09**：「10 项」改 11 项并点名漏掉的第 11 步；README/SECURITY 的 `:70` → 实调行 `:77`。**余六条 DOC-10..15 已由 R9-B41 落地，见 §3.41**）：`docs/runbooks/windows-run-guide.md:63-66` 写「真机验证
+- ~~Q39-Q46 R9-DOC-08..15~~ **已闭（R9-B21 / §3.20 与 R9-B41 / §3.41）** | P3 | 八条（**R9-B21 已落地 DOC-08/09**：「10 项」改 11 项并点名漏掉的第 11 步；README/SECURITY 的 `:70` → 实调行 `:77`。**余六条 DOC-10..15 已由 R9-B41 落地，见 §3.41**）：`docs/runbooks/windows-run-guide.md:63-66` 写「真机验证
   **10 项**」并枚举 10 个名称，漏第 11 步（R8-CS-SEC-03 的唯一实测出口）；`README.md:43` 与
   `SECURITY.md:34` 引 `WebView2Hardening.cs:70` 而该行是空行（实调在 :77）；
   `README.md:146-147`「五门禁常绿」vs `contract-source-of-truth` 约 17 个步骤，且
@@ -2673,6 +2673,40 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    （ruff / bandit / py312-compat）OK；行数红线、表形、链接、`check_doc_claims`、
    `check_workflow_shells` 复跑见本节末；四把 `gradle.lockfile`、`packages.lock.json`、
    `verification-metadata.xml` 均未改动（本批不抬任何版本，也不重算任何字节）。
+
+### 3.52 R9-B52（2026-10-14，第九轮自查）：队列状态变成能红的判据，并当场改掉 8 条「写着已落地却没划线」的行
+
+1. 触发点是本批自己撞出来的两处：①写 §3.50 时发现 **§3.48 整节不存在**，而 §二与 §四 有三处
+   文字在引用它（引用一个没有的小节，比不写指针更坏——它读起来像已经交代过）；②给 §五 收尾时
+   按 `- Q` 数「还剩几条」，发现 Q12 / Q13 / Q14 / Q22 / Q47 / Q39-Q46 六条正文都写着
+   「本批已回读确证并落地」，行头却还是**未划线**的开放形态 ⇒ 队列规模虚高，下一轮会把这些
+   再做一遍。两类都不是新毛病：第八轮的失账就是「只剩计数、不可回读」，而 §五 存在的唯一理由
+   是让人**不用重读代码**就能知道每条的状态。
+2. 新常驻门禁 `scripts/verify_ledger_queue_status.py`，两条判据：
+   - 划线行（`- ~~Qn …~~`）必须含至少一个能在**同一份台账里**解析到的 `§3.nn` 指针；
+   - 未划线行必须含一个**封闭词表**里的开放状态词（待裁决 / 待定稿 / 待设备 / 待实测 /
+     部分闭环 / 需给话 / 登记不顺手 / 仍开着 …）——「已完成」这类自造词不算，因为
+     用例把词表钉死了（`test_unstruck_rows_need_an_explicit_reason`）。
+   判定面塌缩（有 `## 五、待回读队列` 标题却数不出一条队列行）⇒ exit 2 而不是「通过」。
+3. 判定面的边界是**改出来的**，不是设想：第一版把 `^## 五、` 当队列段，于是轮 6 的
+   「## 五、被推翻的子代理结论」也进了判定面，门禁当场 self-report「有 §五 却数不出一条
+   `- Qn` 队列行」并 exit 2——这是**门禁自己**触发了塌缩分支。修法是把标题收紧成
+   `^## 五、待回读队列`，并留一条 `test_ledgers_without_a_queue_section_are_out_of_scope`
+   把「别的轮的 §五 不参与」钉住（否则下一个改标题格式的人会再撞一次）。
+4. 同批改真的 8 处行头：Q12 / Q13 / Q14 划到 §3.9（R9-B10，其中 Q14 的「恒绿旧断言本体」
+   由 §3.33 收掉，两个指针都写上进行头）；Q22 / Q47 / Q39-Q46 划到 §3.10 与 §3.20+§3.41；
+   Q4 改成**部分闭环**（口径改真在 §3.5，「打通 IPv6 导航面」仍列 §四 待定稿）；
+   Q10 补上「待裁决」并说明为什么（桥传输整体迁移是跨端契约变更，不在缺陷批顺手做）。
+   改的是**状态标注**，不是判定：一条也没有被重新裁决，未划线行的正文逐字保留。
+5. 用例 `tests/python/ledger_queue_status_test.py` 12 条：两条判据各配注入必红 + 正面控制、
+   指针只在本文件内解析（跨文件借号＝假闭环）、块边界收在下一条队列行（不许互相借状态词）、
+   非队列段的 §五 不参与、段边界收在下一个 `## ` 标题、塌缩与「无事可做」都走 exit 2、以及一条规模正面控制
+   （§五 必须数出 ≥40 行、其中 ≥30 行已划线——数不出来就是提取口径坏了）。
+   接线走 `contracts.yml` 既有 job（`contract-source-of-truth`），不开新必需检查上下文。
+6. 验证：`pytest tests/python` **747 passed / 1 skipped**（本批 +12）；新门禁现跑现绿；
+   `active_tree_gates all`（ruff / bandit / py312-compat）OK；行数红线 / 表形 / 链接 /
+   `check_doc_claims` / `check_workflow_shells` 全 EXIT 0。本批**不动任何代码行为**：
+   四把 `gradle.lockfile`、`packages.lock.json`、`verification-metadata.xml` 零改动。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
