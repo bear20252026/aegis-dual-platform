@@ -6,10 +6,12 @@
 # 补到 8 段——本文件的现树锚与那条 Rust 用例是同一条判据的两个语言面）。
 # 本文件钉门禁的几件事：现树真的对齐、钉表是下界、**豁免表必须仍然失真**（这条是
 # 白名单式门禁的通用失效口）、收编后的两条 read 包装确实在比较面、注册器别名表按键名
-# 收口不被 close 键冒充、解释层不被宿主引号带偏。
+# 收口不被 close 键冒充、解释层不被宿主引号带偏，以及 Q57-② 那条判定所依赖的**前提**
+# （三端都不覆写 `Object.defineProperty`，见文件末尾）。
 from __future__ import annotations
 
 import pathlib
+import re
 
 import injected_js_text as ijt
 import pytest
@@ -148,3 +150,72 @@ def test_declaration_keyword_drift_is_deliberately_not_judged():
     判它只会诱导下一次「顺手放宽门禁」。真正的对齐另批处理。"""
     assert ijt.canonicalize("function f() { const a = 1; }", "Rust") == \
         ijt.canonicalize("function f() { var a = 1; }", "C#")
+
+# ---------------------------------------------------------------- Q57-② 的前提
+# 台账 §3.55 把 Q57-②（「三端用哪一份定义器不同形，要统一到 Windows 的 origDefineProp」）
+# 判成**不是缺口**。那个判定靠两条现读事实，而不是靠读那段推理的人同意：
+# ①没有任何一端覆写 `Object.defineProperty`；②Windows 之所以提前捕获它，是因为同一段里
+# 还覆写了 `getOwnPropertyDescriptor`/`getOwnPropertyNames`（那是 Windows 独有的一层反检测），
+# 捕获只是那一段的写法习惯。两条都变了，结论就得重判——所以这里把前提做成能红的判据。
+
+# 出货注入文本的全部落点（现取，不是手抄名单：门禁的比较面只覆盖三端共用的那几个函数，
+# 而这条判的是「装防护时用的是哪一份定义器」，它在 installer 里，不在那几个函数里）。
+JS_SHIPPING_GLOBS = (
+    "core/rust-policy-core/src/*.rs",
+    "core/rust-policy-core/src/shield/*.rs",
+    "windows/src/Aegis.Windows.App/WebView/FingerprintShield*.cs",
+    "android/app/src/main/java/com/aegis/browser/WebViewHardening*.kt",
+)
+
+# `=(?!=)` 只认赋值，不认 `==`；`Object.defineProperty;` 这种「取用」也不在判面内。
+DEFINER_ASSIGN = re.compile(r"Object\s*\.\s*defineProperty\s*=(?!=)")
+PROTOTYPE_PROBE_ASSIGN = re.compile(r"Object\s*\.\s*getOwnProperty(?:Descriptor|Names)\s*=(?!=)")
+
+
+def shipping_js_surfaces() -> dict[pathlib.Path, str]:
+    """全部出货注入文本面的代码（剔注释——本仓的注记会把被禁形态逐字抄一遍）。"""
+    found: dict[pathlib.Path, str] = {}
+    for pattern in JS_SHIPPING_GLOBS:
+        for path in sorted(REPO.glob(pattern)):
+            found[path] = ijt.strip_comments(path.read_text(encoding="utf-8", errors="ignore"))
+    assert found, "一个出货注入面都没扫到——提取口径坏了，下面的判据就是假绿"
+    return found
+
+
+def test_nobody_overwrites_the_definer_the_ends_use():
+    """前提①：三端都不覆写 `Object.defineProperty`。
+    既然没人换掉它，而注入又都在 document-start（Windows `AddScriptToExecuteOnDocumentCreatedAsync`、
+    Android `WebViewCompat.addDocumentStartJavaScript`——页面脚本此刻还没机会跑），
+    那么 Windows 提前捕获的 `origDefineProp` 与核心/Android 的直接引用等价 ⇒
+    「必须统一」那条处方不成立（§3.55）。哪天有人真去包它，这条会红，逼着重判而不是靠记性。"""
+    offenders = [
+        f"{path.as_posix()}:{match.start()}"
+        for path, code in shipping_js_surfaces().items()
+        for match in DEFINER_ASSIGN.finditer(code)
+    ]
+    assert not offenders, (
+        f"有出货注入面开始覆写 Object.defineProperty 了：{offenders}——"
+        "§3.55 的等价前提失效，Q57-② 必须重新判（那时『统一形态』就不再是纯外观问题）")
+
+
+def test_the_same_pattern_sees_what_windows_really_overwrites():
+    """正面控制（前提②）：同一个模式必须认出 Windows 确实覆写了 `getOwnProperty*`。
+    没有这条，上面那个 Empty 可能只是模式瞎了——它瞎的方向恰好是让「不用统一」永远成立。"""
+    hits = [
+        path.as_posix()
+        for path, code in shipping_js_surfaces().items()
+        if PROTOTYPE_PROBE_ASSIGN.search(code)
+    ]
+    assert any("FingerprintShield.cs" in hit for hit in hits), (
+        f"Windows 不再覆写 getOwnProperty*（实得 {hits}）——§3.55 那段『捕获只是写法习惯』的解释要重写")
+
+def test_the_definer_pattern_is_narrow_and_genuine():
+    """模式自己的单位控制：赋值要认，**取用与比较不能认**。
+    `var origDefineProp = Object.defineProperty;` 是 Windows 的那次捕获（等号在左边另一侧），
+    `Object.defineProperty(performance, 'now', d)` 是取用——把它认成覆写会让上面那条判据
+    在正常代码上假红，而下一次「让它变绿」的动作就是放松前提。"""
+    assert DEFINER_ASSIGN.search("Object.defineProperty = function () {};")
+    assert DEFINER_ASSIGN.search("Object .defineProperty  =  wrapper;")
+    assert not DEFINER_ASSIGN.search("var origDefineProp = Object.defineProperty;")
+    assert not DEFINER_ASSIGN.search("Object.defineProperty(performance, 'now', d);")
+    assert not DEFINER_ASSIGN.search("if (Object.defineProperty === native) return true;")

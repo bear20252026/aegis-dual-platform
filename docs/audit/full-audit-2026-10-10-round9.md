@@ -1238,11 +1238,14 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   **六条高解析通道两端零包裹**（`getEntriesByType` 在两端主源码零命中）。挂载形态那半边
   已在 R9-B38 三端合一，这一半没做的原因是：rAF 与 `getEntries*` 的圆整是**站点可观察**的
   行为变更（动画回调节奏、性能面板读数），只能由真机/桌面冒烟证明——那是需要用户给话的
-  验证面（见 §四），不在本批顺手改。②残余分歧一处：C# 用它提前捕获的
-  `origDefineProp`（`FingerprintShield.cs:66`，防页面前篡改 `Object.defineProperty`），
-  核心与 Android 直接引用 `Object.defineProperty`——三端「用哪一份定义器」不同形，
-  统一到 `origDefineProp` 形态才是完整收口（本批的三端同形判据只覆盖六个共用片段，
-  没有把这条差异算进去，`timer_parity.rs` 的负向锚也只判冻结实例描述符）。
+  验证面（见 §四），不在本批顺手改。
+  ②**已判不成立**（R9-B55 / §3.55 与 §六）：三端没有任何一处覆写 `Object.defineProperty`
+  （core 30 处取用、Android 10 处、Windows 2 处取用 + 10 处用捕获形态），而注入都在
+  document-start（`WebView2Hardening.cs:106` / `WebViewHardening.kt:55`）⇒ 页面还没机会
+  篡改，「防页面前篡改」保护的是一个不存在的窗口；Windows 那次捕获的真实原因是同一段里
+  它覆写了 `getOwnPropertyDescriptor`/`getOwnPropertyNames`（Windows 独有的原型链反检测层）。
+  前提已做成能红的判据（`tests/python/injected_js_parity_test.py` +3 条），不是留一段推理。
+  所以 Q57 剩下的只有①那一半，仍**需设备/桌面冒烟**。
 
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
 
@@ -2866,7 +2869,63 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
     下一次同型红灯若来自别的记录面，锚不会替它红——它会红在那条用例自己身上，
     而那时的正确处置是照本条再收一处，而不是重跑一次当没事。
 
+### 3.55 R9-B55（2026-10-14，队列 Q57-② 的处方回读）：「统一到 origDefineProp」不是收口，是一条被现读推翻的处方
+
+1. 本批只做一件事：把 Q57-② 那句「三端『用哪一份定义器』不同形，统一到 `origDefineProp`
+   形态才是完整收口」逐条回读。结论是**处方不成立**（不是「不想做」），三条现读事实：
+   - **没有任何一端覆写 `Object.defineProperty`**：三端全部出货注入面
+     （core 的 8 个 `src/**/*.rs` 共 30 处取用、`FingerprintShield*.cs`、`WebViewHardening*.kt` 10 处）
+     里搜不到一处 `Object.defineProperty =`。既然没人换掉它，「用哪一份」就不可能产生行为差。
+   - **注入都在 document-start**：Windows 是 `WebView2Hardening.cs:106`
+     的 `AddScriptToExecuteOnDocumentCreatedAsync`，Android 是 `WebViewHardening.kt:55` 的
+     `WebViewCompat.addDocumentStartJavaScript`（且 R9-AD-1 之后 Android 只有一条 document-start
+     脚本，见同文件 `:45-52` 的注释）。⇒ 我们自己的脚本跑起来时，页面脚本**还没有机会**
+     篡改任何东西，登记里那句「防页面前篡改」在这个时序下保护的是一个不存在的窗口。
+   - **Windows 那次捕获的真实原因在别处**：`FingerprintShield.cs:64-66` 连着捕获
+     `origGetOPD` / `origGetOPN` / `origDefineProp`，而它随后**确实覆写**了
+     `Object.getOwnPropertyDescriptor` / `getOwnPropertyNames`（原型链反检测那一层，全仓只有
+     Windows 有）。捕获是那一段的写法习惯，不是另外两端缺的一道防护。
+2. 所以「统一」的代价与收益是：改掉 core 30 处 + Android 10 处**出货注入 JS** 的取用写法，
+   换 0 个行为差、0 个安全增益；而真正有站点可观察后果的那半边（Q25-① 的六条高解析通道）
+   仍然只能由真机/桌面冒烟证明——两件事不是一个量级，也不是一个方向。
+3. 前提做成了**能红的判据**而不是留一段推理（`tests/python/injected_js_parity_test.py` +3 条）：
+   - `test_nobody_overwrites_the_definer_the_ends_use`：扫描面现取（glob 四条，不是手抄名单），
+     一旦任何出货注入面开始覆写 `Object.defineProperty`，本条红并点名「§3.55 的等价前提失效，
+     Q57-② 必须重判」。判据留在这里的理由写在用例注释里：**判据红的时候人会来改结论，
+     推理不会**。
+   - 正面控制两条：同一个模式必须认出 Windows 真覆写了 `getOwnProperty*`（否则那个 Empty
+     可能只是模式瞎了，而它瞎的方向恰好让「不用统一」永远成立）；以及模式单位控制——
+     捕获形态 `var origDefineProp = Object.defineProperty;`、取用形态
+     `Object.defineProperty(performance, 'now', d)`、比较形态 `===` 都**不能**算覆写
+     （把取用认成覆写会让判据在正常代码上假红，而下一次让它变绿的动作就是放松前提）。
+     两条都在内存态注入下跑红过一次（本机实测，不改文件）：给 Android 那个面拼一句
+     `Object.defineProperty = function () { return 1; };` ⇒ 前提那条报「有出货注入面开始覆写」；
+     把 Windows 的 `getOwnProperty*` 赋值替换掉 ⇒ 正面控制那条报「解释要重写」。
+     也就是说这两条判据各有会失灵的形状，而不是恒真/恒假。
+4. 顺带记下门禁面的一个真实缺口（不在本批修）：`contracts/codegen/verify_injected_js_parity.py`
+   的三端扫描面只含 `shield.rs` / `shield/canvas.rs` / 三个 `FingerprintShield*.cs` /
+   四个 `WebViewHardening*.kt`，比较的又只是 7 个共用函数——**installer 层（`timer_prec.rs`
+   一族）根本不在它的对账面里**。所以「三端注入 JS 同形」这句话在 installer 层目前没有判据；
+   Q25-① 落地时必须先决定比较面扩到哪，否则三端会在没人的地方各自漂。本批不顺手扩：
+   一扩就要当场判 30+10 处的同形，那是 Q25-① 的活，不是这条处方回读的活。
+5. 验证：`pytest tests/python` **752 passed / 1 skipped**（本批 +3）；`active_tree_gates all`
+   （ruff / bandit / py312-compat）OK；行数红线（`injected_js_parity_test.py` 210 行 ≤300）/
+   表形 / 链接 / `check_doc_claims` / `check_workflow_shells` / `verify_ledger_queue_status`
+   / `verify_text_anchor_helpers` 全 EXIT 0；`verify_injected_js_parity.py` 本体现跑仍绿
+   （本批没动任何注入 JS 文本）。**零出货代码改动**。
+
 ## 六、复核后判定为不成立（留此防重复上报）
+
+- **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
+  处方写的是「Windows 提前捕获定义器、核心与 Android 直接引用 ⇒ 三端不同形 ⇒ 要收口」，
+  回读三条事实后它不成立——①三端出货注入面里**没有一处**给 `Object.defineProperty` 赋值
+  （因此「用哪一份」在现树里没有语义差）；②两端注入点都是 document-start API，页面脚本在
+  我们的脚本之前没有执行机会，所以「防页面前篡改」保护的窗口不存在；③Windows 的捕获与它
+  同段覆写 `getOwnPropertyDescriptor`/`getOwnPropertyNames` 那层独有反检测写在一起，是那段
+  的写法习惯而不是别人缺的防护。**反向风险也记在这里**：真要「统一」就是改 core 30 处 +
+  Android 10 处出货注入 JS 换 0 个行为差；下一轮若再有人按「三端同形」的直觉报这条，
+  先跑 `tests/python/injected_js_parity_test.py::test_nobody_overwrites_the_definer_the_ends_use`
+  ——它红了才说明前提变了、这条才值得重判。
 
 - **「Android 也缺 window.open 洪水上限」不成立**（第九轮 2026-10-10，落地 Windows 侧上限时
   同批实测）：`android/app/.../BrowserEngine.kt:65` 显式 `setSupportMultipleWindows(false)`，
