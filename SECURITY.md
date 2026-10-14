@@ -73,8 +73,10 @@
   两条腿各引用一次——抄两份的代价是两条腿会漂，而漂移表现为某平台的构件字节静默缺失（R9-B53）。
   catalog 升级必须**同批重锁+重算校验和**，漏任一面在
   STRICT/strict 下直接解析失败——这个失败就是门禁本身。重锁执行面：
-  `dependency-relock.yml` 的 `gradle` 生态（仅 workflow_dispatch，只写 `deps/*` 分支，
-  永不写 master）。APK 发布前经 apksigner 强制验签（release-android.yml fail-closed）不变
+  `dependency-relock.yml` 的 `gradle` 生态（仅 workflow_dispatch；写回目标的前缀由
+  `target_kind` 选，规则单源 `scripts/relock_branch_guard.sh`——`deps/*` 给人工重锁、
+  `dependabot/*` 给 bump PR 补校验和，永不写 master）。APK 发布前经 apksigner 强制验签
+  （release-android.yml fail-closed）不变
 - C#/.NET（SP-177，2026-10-01 审计落地）：NuGet 依赖锁文件 `packages.lock.json`
   已随三个 csproj（`RestorePackagesWithLockFile`）入库——CI restore/publish 以
   `--locked-mode` 消费，传递依赖变更必须随批更新锁文件（contracts/release-windows/

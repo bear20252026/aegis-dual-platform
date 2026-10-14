@@ -12,8 +12,13 @@
 # 三条硬边界（不是风格，是防呆）：
 # ① 只允许 `workflow_dispatch` 触发——不挂 push/PR/schedule，也不进必需检查
 #    （依赖图类 job 一旦成为必需项，不匹配路径的 PR 会永久停在 waiting）；
-# ② 目标分支必须以 `deps/` 开头，脚本层再兜一次：解析 HEAD 不是 `deps/*` 就终止——
-#    本 job 持 `contents: write`，写回目标是它唯一能造成的越界面；
+# ② 目标分支必须落在**声明过的那一类前缀**里，脚本层再兜一次：不匹配就终止——
+#    本 job 持 `contents: write`，写回目标是它唯一能造成的越界面。两类（R9-B58 / 台账 Q60）：
+#    `kind=deps` ⇒ 只写 `deps/*`（人工/常规重锁）；`kind=dependabot` ⇒ 只写 `dependabot/*`
+#    （给 Dependabot 的 Gradle bump PR 补依赖证据：它自己生成不了 sha256 校验和，
+#    而 STRICT 校验和启用来路就是「缺条目 ⇒ 所有 gradle 作业红 ⇒ 没人能重锁」那个鸡生蛋）。
+#    规则单源在 `scripts/relock_branch_guard.sh`（含「face=dotnet 没有 dependabot 面」这条），
+#    六个调用点只传参；行为用例在 `tests/python/relock_branch_guard_test.py`。
 # ③ 永不写 master：推分支后由人来开 PR 审 diff（`--require-hashes` 能装上才算成功）。
 name: Dependency-Retlock
 
@@ -21,7 +26,7 @@ name: Dependency-Retlock
   workflow_dispatch:
     inputs:
       branch:
-        description: "写回目标分支（必须 deps/ 前缀；本 workflow 永不写 master）"
+        description: "写回目标分支（前缀由 target_kind 决定：deps/ 或 dependabot/；本 workflow 永不写 master）"
         required: true
         default: "deps/relock-round8"
       ecosystem:
@@ -30,6 +35,12 @@ name: Dependency-Retlock
         type: choice
         options: ["all", "dotnet", "python", "gradle"]
         default: "all"
+      target_kind:
+        description: "写回目标属于哪一类（deps=人工重锁；dependabot=给 bump PR 补依赖证据，只有 Gradle 面）"
+        required: false
+        type: choice
+        options: ["deps", "dependabot"]
+        default: "deps"
 
 permissions:
   contents: write
@@ -44,8 +55,8 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 45
     # gradle 面在下面的 gradle-relock job（ubuntu + AGP 所需 SDK/工具链与本 job 不同口径）。
-    # 本 job 只跳过自己——两个 job 各自都带 deps/* 守卫，不依赖对方存在。
-    if: ${{ github.event.inputs.ecosystem != 'gradle' }}
+    # 本 job 只跳过自己——两个 job 各自都带写回面守卫，不依赖对方存在。
+    if: ${{ github.event.inputs.ecosystem != 'gradle' && github.event.inputs.target_kind == 'deps' }}
     # Windows runner 上 Python 的 stdout 被重定向到日志管道时按 ANSI 代码页（实测
     # cp1252）编码——本 job 的 heredoc 与 verify_lock_rids.py 都带中文与 ✅❌，
     # 2026-10-08 首次 dispatch 就死在 `print("头注块已保留（…）")` 抛
@@ -56,28 +67,31 @@ jobs:
     steps:
       # R9-CI-2：dispatch 输入一律经 env 中转，`run:` 文本里不再出现 `${{ }}`。
       # `${{ }}` 在 shell 解析**之前**做文本替换，`branch=x"; git push origin HEAD:master; #`
-      # 会把下面这道 deps/* 守卫自身打断——本 workflow 是全仓唯一持 `contents: write` 的
+      # 会把下面这道写回面守卫自身打断——本 workflow 是全仓唯一持 `contents: write` 的
       # 手工触发面，「永不写 master」此前只是脚本约定。判据见
       # tests/python/workflow_exit_code_test.py（relock 的 run 块内零 in-run 表达式 +
       # 写回步骤自带二次守卫）。**新增 job 同样适用**：守卫写在每个 job 里，
       # 不靠「另一个 job 也会检查」。
-      - name: 校验目标分支（拒绝写回主干）
-        shell: bash
-        env:
-          RELOCK_BRANCH: ${{ github.event.inputs.branch }}
-        run: |
-          set -euo pipefail
-          target="$RELOCK_BRANCH"
-          case "$target" in
-            deps/*) ;;
-            *) echo "❌ branch 必须以 deps/ 开头（当前：$target）——本 job 有写权限"; exit 1 ;;
-          esac
-
+      # 守卫必须排在**检出之后**：R9-B58 起它是一份仓库脚本，而 runner 的 workspace 在第一次
+      # `actions/checkout` 之前是空的——放在检出前面就是「调用一个还不存在的文件」。这条不是推理：
+      # dispatch 实测红在 `bash: scripts/relock_branch_guard.sh: No such file or directory`
+      # （run 38520687580），而当时的判据只数「调用点存在」，抓不到顺序。现在顺序由
+      # `tests/python/relock_branch_guard_test.py::test_every_guard_call_sits_after_a_checkout` 判住。
       - name: 检出目标分支
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
         with:
           ref: ${{ github.event.inputs.branch }}
           fetch-depth: 1
+
+      - name: 校验目标分支（写回面守卫；规则单源 scripts/relock_branch_guard.sh）
+        shell: bash
+        env:
+          RELOCK_BRANCH: ${{ github.event.inputs.branch }}
+          GUARD_KIND: ${{ github.event.inputs.target_kind }}
+        run: |
+          set -euo pipefail
+          # face 写死在这里而不是取自输入：「谁来写回」是代码事实，调用方选不动。
+          bash scripts/relock_branch_guard.sh dotnet "$GUARD_KIND" "$RELOCK_BRANCH"
 
       - name: 设置 .NET 10 SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -174,12 +188,10 @@ jobs:
         env:
           RELOCK_BRANCH: ${{ github.event.inputs.branch }}
           RELOCK_RUN_ID: ${{ github.run_id }}
+          GUARD_KIND: ${{ github.event.inputs.target_kind }}
         run: |
-          # 二次守卫（R9-CI-2）：不依赖第一步的存在——分支不是 deps/* 就不推
-          case "$RELOCK_BRANCH" in
-            deps/*) ;;
-            *) echo "❌ 写回目标必须以 deps/ 开头（当前：$RELOCK_BRANCH）"; exit 1 ;;
-          esac
+          # 二次守卫（R9-CI-2）：不依赖第一步的存在——同一份规则再跑一遍
+          bash scripts/relock_branch_guard.sh dotnet "$GUARD_KIND" "$RELOCK_BRANCH"
 
           set -euo pipefail
           git config user.name  "aegis-relock-bot"
@@ -222,25 +234,23 @@ jobs:
     timeout-minutes: 45
     if: ${{ github.event.inputs.ecosystem == 'gradle' || github.event.inputs.ecosystem == 'all' }}
     steps:
-      # 守卫写在**每个**持写权限的 job 里，不依赖另一个 job 存在（R9-CI-2 同口径：
-      # dispatch 输入经 env 中转，run 正文里不出现 `${{ }}`）。
-      - name: 校验目标分支（拒绝写回主干）
-        shell: bash
-        env:
-          GRADLE_RELOCK_BRANCH: ${{ github.event.inputs.branch }}
-        run: |
-          set -euo pipefail
-          target="$GRADLE_RELOCK_BRANCH"
-          case "$target" in
-            deps/*) ;;
-            *) echo "❌ branch 必须以 deps/ 开头（当前：$target）——本 job 有写权限"; exit 1 ;;
-          esac
-
       - name: 检出目标分支
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
         with:
           ref: ${{ github.event.inputs.branch }}
           fetch-depth: 1
+
+      # 守卫写在**每个**持写权限的 job 里，不依赖另一个 job 存在（R9-CI-2 同口径：dispatch 输入经
+      # env 中转，run 正文里不出现 `${{ }}`）；下面「写回分支」那步再判一次，不依赖本步存在。
+      # 守卫排在检出之后，理由与上面 dotnet job 那条一样（脚本要先在 workspace 里存在）。
+      - name: 校验目标分支（写回面守卫；与 windows 腿同一份规则）
+        shell: bash
+        env:
+          GRADLE_RELOCK_BRANCH: ${{ github.event.inputs.branch }}
+          GUARD_KIND: ${{ github.event.inputs.target_kind }}
+        run: |
+          set -euo pipefail
+          bash scripts/relock_branch_guard.sh gradle "$GUARD_KIND" "$GRADLE_RELOCK_BRANCH"
 
       - name: 工具链装配（JDK 21 + Gradle 缓存 + Android SDK，两条腿同一 composite action）
         uses: ./.github/actions/gradle-android-toolchain
@@ -289,12 +299,10 @@ jobs:
         env:
           RELOCK_BRANCH: ${{ github.event.inputs.branch }}
           RELOCK_RUN_ID: ${{ github.run_id }}
+          GUARD_KIND: ${{ github.event.inputs.target_kind }}
         run: |
-          # 二次守卫：不依赖第一步的存在——分支不是 deps/* 就不推
-          case "$RELOCK_BRANCH" in
-            deps/*) ;;
-            *) echo "❌ 写回目标必须以 deps/ 开头（当前：$RELOCK_BRANCH）"; exit 1 ;;
-          esac
+          # 二次守卫：不依赖第一步的存在——同一份规则再跑一遍
+          bash scripts/relock_branch_guard.sh gradle "$GUARD_KIND" "$RELOCK_BRANCH"
 
           set -euo pipefail
           git config user.name  "aegis-relock-bot"
@@ -358,23 +366,21 @@ jobs:
     if: ${{ github.event.inputs.ecosystem == 'gradle' || github.event.inputs.ecosystem == 'all' }}
     steps:
       # 守卫写在**每个**持写权限的 job 里，不依赖另一个 job 存在（R9-CI-2 同口径）。
-      - name: 校验目标分支（拒绝写回主干）
-        shell: bash
-        env:
-          WINDOWS_LEG_BRANCH: ${{ github.event.inputs.branch }}
-        run: |
-          set -euo pipefail
-          target="$WINDOWS_LEG_BRANCH"
-          case "$target" in
-            deps/*) ;;
-            *) echo "❌ branch 必须以 deps/ 开头（当前：$target）——本 job 有写权限"; exit 1 ;;
-          esac
-
       - name: 检出目标分支（ubuntu 腿写回的同一分支，串行才不会互相覆盖）
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
         with:
           ref: ${{ github.event.inputs.branch }}
           fetch-depth: 1
+
+      # 排在检出之后：守卫是一份仓库脚本，workspace 在 checkout 之前是空的（同 dotnet job 那条注）。
+      - name: 校验目标分支（写回面守卫；两个 gradle 腿共用同一份规则）
+        shell: bash
+        env:
+          WINDOWS_LEG_BRANCH: ${{ github.event.inputs.branch }}
+          GUARD_KIND: ${{ github.event.inputs.target_kind }}
+        run: |
+          set -euo pipefail
+          bash scripts/relock_branch_guard.sh gradle "$GUARD_KIND" "$WINDOWS_LEG_BRANCH"
 
       - name: 工具链装配（与 ubuntu 腿同一个 composite action）
         uses: ./.github/actions/gradle-android-toolchain
@@ -387,11 +393,10 @@ jobs:
         env:
           RELOCK_BRANCH: ${{ github.event.inputs.branch }}
           RELOCK_RUN_ID: ${{ github.run_id }}
+          GUARD_KIND: ${{ github.event.inputs.target_kind }}
         run: |
-          case "$RELOCK_BRANCH" in
-            deps/*) ;;
-            *) echo "❌ 写回目标必须以 deps/ 开头（当前：$RELOCK_BRANCH）"; exit 1 ;;
-          esac
+          # 二次守卫：与 ubuntu 腿同源规则；本腿只许写校验和文档（下面的文件守卫判这个）
+          bash scripts/relock_branch_guard.sh gradle "$GUARD_KIND" "$RELOCK_BRANCH"
 
           set -euo pipefail
           git config user.name  "aegis-relock-bot"

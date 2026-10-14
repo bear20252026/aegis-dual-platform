@@ -849,7 +849,14 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   原条目：Q55 R9-AD-12 | P2 | `android/settings.gradle.kts:9-15`（`dependencyResolutionManagement` 的两个仓库源）↔ `android/gradle/`（**无** `verification-metadata.xml`）：
   项 10 落的是**版本锁定**（`gradle.lockfile` 记 group:name:version，**不含校验和**），  外部审计 AEG-011 处方里的另一半 **dependency verification**（`--write-verification-metadata  sha256` + `verification-metadata.xml` + 构建时 `--dependency-verification=strict`）没有做。  差别是可利用的：锁防住「今天解析到新版本」，防不住「同一个坐标的构件被换成别的字节」  （仓库被投毒 / 镜像与上游不一致 / 本地缓存被改写都落在锁的覆盖面外）。本批不顺手做的原因：  开启后**任何**新增依赖都要重算校验和，且 Gradle 默认对缺失条目 fail-closed ⇒ 与 Dependabot   的自动 bump 流是产品级流程变更（要先定「谁签、校验和从哪来、trusted artifacts 怎么豁免」）  ⇒ §四 待裁决。验收口径：CI 里 `--dependency-verification=strict` 跑通  `:app:assembleRelease`，且注入「改动某个 jar 的字节」必须判红。
 
-- Q60 R9-AD-14 | P2（R9-B50 落地时发现；登记即待裁决） |
+- ~~Q60 R9-AD-14~~ **本批已闭（R9-B58 / §3.58）**：写回面不再只有一个前缀——dispatch 新增
+  `target_kind`（闭集 deps | dependabot），规则单源 `scripts/relock_branch_guard.sh`，
+  六处内联守卫收成同一份脚本调用；`kind=dependabot` 只写 `dependabot/*`、face=dotnet 明确
+  没有这一面（拒到 exit 2）。原登记的「两条人工路」因此不再是必经之路。
+  **验收交代**：原条目要的那条「真实 Dependabot gradle bump PR 同一 PR 带锁+带校验和」本批没有
+  （现树无在途 bump，也无法强制 Dependabot 开一条），实证是 dispatch 双腿 + 反例各一次（§3.58 第 6/10 条）；
+  下一次真实 bump PR 属于观察项，不另立开着的队列 ID。原条目 ↓
+  Q60 R9-AD-14 | P2（R9-B50 落地时发现；登记即待裁决） |
   `.github/workflows/dependency-relock.yml:232`（`case "$target" in deps/*)` 的写回守卫）↔
   `android/gradle.properties:32`（`org.gradle.dependency.verification=strict`）：
   校验和启用后，一条 Gradle 版本 bump 的 PR 会红在「新坐标没有条目」，而**能补条目的那条命令
@@ -3014,6 +3021,98 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    off-screen 窗口、`%TEMP%` 一次性目录、跑完删、逐场景打印 `written=`），compat 仍只跑静态面
    （动态面要有浏览器宿主，属桌面实测面——这点没变，变的只是「桌面能量到」已被证实）。
    `~/Downloads` 跑后复核无残留。
+
+### 3.58 R9-B58（2026-10-14，队列 Q60 = R9-AD-14）：写回面从「一个前缀」改成「调用方声明类别」，规则收进一份能被测的脚本
+
+1. 用户裁决后的形状。Q60 登记时写的就是「改成可写 `dependabot/*` 就是放松一条已被用例钉住的
+   写入面不变量 ⇒ 需用户裁决」，本轮批准按推荐做。落地的形状**不是**把内联那行的模式改成
+   `deps/*|dependabot/*`，而是让调用方**声明这一类是什么**：dispatch 新增 `target_kind`
+   （闭集 `deps` | `dependabot`），`kind=deps` 只写 `deps/*`、`kind=dependabot` 只写
+   `dependabot/*`，两类**互斥**——选错 kind 不会悄悄写到另一类分支上（两个方向各有一条用例）。
+   `dotnet` 这个 face 明确**没有** dependabot 面：NuGet/pip 的锁由 Dependabot 自己在 PR 里改，
+   缺的只有 Gradle 的 sha256 那一面，所以 face=dotnet + kind=dependabot 直接 exit 2，
+   `relock` job 的 `if:` 同条件跳过——**不假装支持**比支持一半稳。
+2. 规则单源。写回守卫原来是六处内联 `case "$target" in deps/*)`（3 个持 `contents: write` 的
+   job × 2 处步骤：job 级 + 写回级二次守卫），要把前缀改成「按 kind 选」就得抄六份能各自漂移的
+   真相 ⇒ 收成 `scripts/relock_branch_guard.sh`，调用点只传参。`git diff` 现读被删的内联判断
+   恰好 6 处；结构判据 `test_every_write_capable_job_calls_the_guard_twice` 从 yaml 数
+   「有写回步骤的 job」并判每个 job ≥2 次调用——把守卫挪进 composite action 仍然算通过，
+   **少一处**必须红。
+3. **本批最值钱的一条是变异测试，不是那段脚本**。判法写真调 bash（不是文本锚），第一版只断言
+   「exit 码 + stderr 非空」，跑 8 个变异有 **3 个活下来**，三个原因是三种不同的病：
+   - 删掉整段主干检查（`master | main`）⇒ 全绿。因为 `master` 不以 `deps/` 开头，
+     被最后那条前缀通配**顺带**拒了。脚本注释里「这一道是独立检查，不依赖上面那张表」
+     因此是一句没人作证的主张——而它恰恰是防「有人把前缀表改成 `master`」的那一道。
+   - 把 `refs/*` 窄化成 `refs/heads/*` ⇒ 全绿，同因。
+   - 删掉「只有前缀没有名字」那段 ⇒ 全绿。这一条不是冗余而是**死代码**：直接 bash 现测
+     `[[ "deps/" != "deps/"?* ]]` 为真 ⇒ `deps/` 在前缀那关就被拒，那段永远到不了，
+     而它的注释写着「拼出来能过通配」——**注释是假的**。
+   处理分两种，不是一律加断言：前两条**保留规则**但让它为自己作证——拒绝用例新增 `rule` 列，
+   断言 stderr 含该规则的措辞，并补一条 `refs/remotes/origin/master`（专抓「窄化成 refs/heads」）；
+   第三条**删掉死块**，注释改成「`?*` 已经要求前缀之后至少一个字符」并写明这段来历。
+   第二轮 9 个变异：4/1/1/1/3/6/2/1 条失败，只有「把结尾日志换成裸 `exit 0`」全绿——那是
+   **等价变异**（少一行日志，判定不变），不算漏洞。
+   还有一条差点被我写进台账当证据：`exit 2`→`exit 1` 那个变异第一轮报「22 failed」，看着像
+   抓得最狠，实际是我的变异脚本吞掉了一个引号、把文件改成了**语法错**（`bash -n` 当场红）。
+   于是判据的「抓到」和文件的「坏掉」在输出里长得一模一样。改成先 `bash -n` 再跑，同一个变异
+   的实数是 1 failed（就是 face 闭集那条）。**「测试变红」不等于「判据抓到了」**——
+   与 §3.39/§3.54 记过的空心门禁同族，只是这次空心的是我自己刚写的判据。
+4. 分支名的形状是**量出来的**：`gh pr list --json headRefName` 现读，本仓真实 Dependabot 分支
+   的段数 3/4/5 都有——`dependabot/pip/cryptography-50.0.2`、
+   `dependabot/gradle/android/minor-and-patch-0bc2cf4c4f`（group 更新）、
+   `dependabot/github_actions/gradle/actions/dependency-submission-6.4.0`。
+   任何「按段数限形」的规则都会把补录面对其中一部分真实分支关掉，所以脚本只认「前缀 + 至少一个
+   字符」，这三条实测形态直接进允许面用例（而不是我自己编一个看着像的名字）。
+5. 文档面五处跟着改口，动作统一是**改指向单源而不是再抄一个新值**：`SECURITY.md`、
+   `README.md` 依赖面那一句、`android/settings.gradle.kts` 两处（其中 ③ 那句「重锁只写
+   `deps/*` 而 Dependabot 的分支名不是它 ⇒ 缺口登记在 Q60」正是这条队列项的**现存证据**，
+   现在它描述的是一个已经不存在的缺口）、workflow 头注 ② 与两处内联注释、以及 dispatch 输入
+   `branch` 的 description（原文写「必须 deps/ 前缀」，现在前缀取决于 kind——输入框里的话
+   也是判据的一部分，写错会让人以为传 `dependabot/…` 是非法输入）。
+6. 验收口径的诚实交代。原条目要求「一条真实的 Dependabot gradle bump PR 必须在同一个 PR 里同时
+   带来四把 `gradle.lockfile` 与 `verification-metadata.xml` 的 diff 且 CI 全绿」——本批**没有**
+   这条：现树没有在途的 Dependabot gradle PR，也无法强制它开一条。落地的是「不需要人再手工补字节」
+   这一件事（那是这条队列项存在的理由），实证走 dispatch，证据分支是**我自己建的**
+   `dependabot/r9-b58-evidence`（从本批分支切出，再在其上删掉
+   `androidx.annotation:annotation:1.9.1` 的校验和条目＝注入一次「新坐标没有条目」的真实后果）。
+   为什么不直接用那条遗留的真实分支 `dependabot/gradle/android/minor-and-patch-0bc2cf4c4f`：
+   它是 Dependabot 命名空间下的一条真实分支，跑成功会往里推提交——分支名形状已经被第 4 条那三条
+   实测形态判住了，没必要借别人的命名空间换这点证据。
+7. **但 dispatch 抓到的第一条不是「补没补上」，而是「守卫脚本在它该跑的那一刻还不存在」**。
+   run **38520687580** 红在 `bash: scripts/relock_branch_guard.sh: No such file or directory`——
+   三个 job 的 job 级守卫步骤原本排在「检出目标分支」**之前**（那是内联 `case` 时代的位置，
+   内联代码不需要 workspace 里有文件），换成调用仓库脚本之后，同一个位置调的是一个还不存在的文件：
+   runner 在第一次 `actions/checkout` 之前 workspace 是空的。
+   当时的两条判据全绿——它们数的是「调用点存在且 ≥2 次」，没有一条判「调用点能不能执行」。
+   这是本仓第 N 次同族收敛，形状很具体：**把一份内联逻辑搬进文件时，「搬动」改变的是执行前提，
+   不只是可读性**（§3.50 的 `strip_comments` 搬到 shell 正文吃掉真实语句、§3.54 的「本地全绿不是证据」
+   都是同一课的不同侧面）。
+   修法：三个 job 的守卫步骤都移到 checkout 之后（写回前那一步的二次守卫位置不变——那一步本来
+   就在工作区里跑），新增 `test_every_guard_call_sits_after_a_checkout` 判**顺序**本身；
+   反向实证做过了：把 gradle 腿的守卫挪回 checkout 之前，这条新用例与那条数调用点的用例**同时红**
+   （正面控制在这里是多余的，两条独立判据各自抓到）。
+8. dispatch 实证两个方向（都跑在 `dependabot/r9-b58-evidence` 上，`ecosystem=gradle`）：
+   - 反例 run **38522538725**（`target_kind=deps` 打到 dependabot 前缀的分支）：conclusion=failure，
+     失败步骤是「校验目标分支」，日志正文 `❌ target_kind=deps 只允许写 deps/<名字>（收到：
+     'dependabot/r9-b58-evidence'）` + `Process completed with exit code 2`，另两个 job `skipped`
+     ——**红因是守卫的措辞而不是脚本缺失**，这条区别就是第 7 条换来的东西。
+   - 正例 run（`target_kind=dependabot`）：见下面第 10 条的结果记录（补回被删条目并写回该分支）。
+9. 本机验证：`tests/python/relock_branch_guard_test.py` 26 条全绿（6 允许 + 17 拒绝各带规则措辞 +
+   3 结构：调用次数、调用顺序、脚本 `bash -n` 可解析），全量 `pytest tests/python`
+   **785 passed / 1 skipped**（本批 +26）；`check_file_sizes` 现读拦下一条真事——
+   `relock_sop_test.py` 在 HEAD 恰好 300 行（零余量），我把那条守卫断言写成多行消息后变 303 行判红
+   ⇒ 改回单行同行替换（与 §3.54 的 `CoreDenylistPublisherTests` 同一口径：不是绕过红线，是同行换掉旧断言）。
+   markdown 表形/链接/计数/队列状态/文本锚/触发面/active_tree_gates（ruff+bandit+py312）全过。
+10. 正例 dispatch run **38522729632**（`ecosystem=gradle target_kind=dependabot`，
+     分支 `dependabot/r9-b58-evidence`）结论 success，三个 job：`Gradle 重锁` success、
+     `重算并写回依赖锁（dotnet）` **skipped**（face=dotnet 没有 dependabot 面，`if:` 生效）、
+     `Gradle 校验和 windows 腿` success（`needs:` 串行照旧成立）。写回提交
+     `ffbbd9c8`（作者 `aegis-relock-bot`）**只**动 `android/gradle/verification-metadata.xml`，
+     `+5 / -0`——正是第 6 条删掉的那一个 `<component>` 块被逐字节补回
+     （`annotation-1.9.1.module` 的 sha256 与删除前同一个值，组件数回到 501）；
+     windows 腿随后无差异可写，所以分支上只有这一条机器人提交。
+     于是「新坐标缺条目 ⇒ 没有自动补录路径」这句话在 Gradle 面已经不成立了：
+     一条 `dependabot/*` 分支可以被 dispatch 授权补字节，写回面仍然只有一类前缀、仍然到不了 master。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

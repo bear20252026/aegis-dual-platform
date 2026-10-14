@@ -144,9 +144,12 @@ def test_dependency_relock_has_no_in_run_expressions():
         if "${{" in ln
     ]
     assert offenders == [], offenders
-    # 写回步骤必须自带二次守卫（不依赖第一步存在）
+    # 写回步骤必须自带二次守卫（不依赖第一步存在）。R9-B58 起边界规则收进
+    # scripts/relock_branch_guard.sh，这里判的就是「每个持写权限的 job 两处都真的调了它」——
+    # 而不是再去匹配一种 shell 写法（写法一改，旧断言会变成假红/假绿各半的噪声）。
     text = (WORKFLOWS / "dependency-relock.yml").read_text(encoding="utf-8")
-    assert text.count("deps/*)") >= 2, "写回步骤缺少二次守卫——deps/* 边界只剩一处约定"
+    calls = text.count("scripts/relock_branch_guard.sh")
+    assert calls >= 6, f"守卫调用只剩 {calls} 处——三个有写权限的 job 各自应有 job 级 + 写回级两处"
 
 
 def test_xaml_resource_gate_runs_on_pr_surface():

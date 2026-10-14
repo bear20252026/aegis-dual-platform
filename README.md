@@ -190,8 +190,8 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
   core-rust / android-quality / supply-chain / agent-redteam / native-policy-artifacts；
   低频定时 2 个——compat（周一）/ legacy-python-guard（周六）；依赖面 3 个——
   gradle-dependency-graph（Dependency Graph 上传：周一 + push:android/** + dispatch）/
-  gradle-dependency-insight（仅 dispatch）/ dependency-relock（仅 dispatch，写回 deps/* 
-  分支的锁重算面——第八轮 B7 定稿）；tag/编排触发 4 个——release 编排器 +
+  gradle-dependency-insight（仅 dispatch）/ dependency-relock（仅 dispatch，写回目标前缀
+  按 `target_kind` 选、规则单源 `scripts/relock_branch_guard.sh` 的锁重算面——第八轮 B7 定稿）；tag/编排触发 4 个——release 编排器 +
   release-{windows,android,core} 三平台链。7+2+3+4=16，与
   `scripts/check_doc_claims.py` 的实树现算同源——WB-214 起这类「文档数 = 实树数」的
   陈述已三次漂移，现由门禁逐处对账）
