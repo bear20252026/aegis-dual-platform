@@ -36,13 +36,17 @@ internal static class Probe
 {
     internal static int Run(string[] args)
     {
-        if (args.Length > 0)
-        {
-            return Fail($"未知参数 {args[0]}（本探针只有默认的静态模式）");
-        }
+        var mode = args.FirstOrDefault() ?? "--surface";
         try
         {
-            return Surface();
+            return mode switch
+            {
+                "--surface" => Surface(),
+                // 动态测量：与正典 App 同一条初始化路径（见 RedirectProbe.cs 的头注）。
+                // 刻意只在本机/桌面跑，不进 compat——它要有可用的浏览器宿主。
+                "--redirect" => RedirectProbe.Run(),
+                _ => Fail($"未知模式 {mode}（--surface / --redirect）"),
+            };
         }
         catch (Exception e)
         {

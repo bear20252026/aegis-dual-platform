@@ -760,7 +760,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   闸门只判**入队** URL，DownloadProvider 默认跟随重定向 ⇒ `302 → 169.254.169.254` 仍
   落盘公共目录（PR #130 消除的后果复活路径）。建议完成后用 `COLUMN_URI` 对最终地址复判
   + `remove()` + 留痕；`setRedirectsAllowed(false)` 会打断正当 CDN 重定向（产品代价，不推荐）。
-- Q58 R9-CS-18 | **P2 部分推进（R9-B56 / §3.56）**：静态那一半已落地——`compat.yml` 的新 job 每周重跑 SDK 的下载面清单（`windows/tools/WebView2SdkSurfaceProbe`；CI 首跑读到 `runtime_version=153.0.4234.48`、`TYPE_ABSENT CoreWebView2DownloadCompletedEventArgs`，R9-B37 那次反射结论从此不再靠记性）。**仍开着的是动态那一半**：`Uri` 报不报重定向后的落点， 只能在跑着的 App 里量——一次性宿主在订阅 `DownloadStarting` 时就抛 `NotImplementedException`（无法转型 `ICoreWebView2_4`，§3.56 第 4 条带栈）， 所以量法已写细到可直接照做（两个 loopback 端口 + 302 + 两个时刻各读一次），但仍**需设备/桌面** ⇒ 需给话。原条目 ↓
+- ~~Q58 R9-CS-18~~ **本批结案（R9-B57 / §3.57，判据进 §六）**：桌面实测三场景（一跳 302、两跳、页面内 `click()` 触发 `download`）同一结论——`DownloadStarting` 时刻的 `CoreWebView2DownloadOperation.Uri` **已经是最后一跳的落点**，`Completed` 时不变 ⇒ 原条目「闸门只判入队地址」的前提不成立；后半句也不成立，落点在放行前会过 `BrowserPolicyBroker.cs:111-127` 的 `ReservedAddressBoundary.DeniesRaw`（169.254/16、云元数据、不可判定地址一律拒；第七轮 R7-CS1-02 落的，Android 侧同形是 R8-AD-03）。两个修法（完成后复判 + 删文件 / 重做下载发起链）连同代价一起作废。测量脚本以 `--redirect` 模式入仓（compat 仍只跑静态面：动态面要有浏览器宿主）。本批过程中我自己误判过一次「Windows 缺这道门」——只读了 `DownloadPolicy` 没读 broker，现读后自纠，未新登条目（§3.57 第 4 条记的是这次误读）。此前的「部分推进（R9-B56 / §3.56）」描述的是静态清单那半，一并归档。原条目 ↓
   Q58 R9-CS-18 | P2 | `windows/src/Aegis.Windows.App/WebView/HostWebView.Downloads.cs:48` ↔
   `:112-118`（R9-B43 落地 Android 侧复判时同批复读的新证）：Windows 的下载闸门同样只判
   `DownloadOperation.Uri`（入队地址），R9-B37 加的 `StateChanged` 只做「终态退订 + 摘表」，
@@ -2973,6 +2973,48 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    / `verify_ci_trigger_surface` / 表形 / 链接 / `check_doc_claims` 全 EXIT 0；
    compat 三条 job 在 run 38503503998 全绿。**未动任何出货代码。**
 
+### 3.57 R9-B57（2026-10-14，Q58 的桌面测量）：量到了，但量的结果把这条目的前提推翻了一半
+
+1. 授权与路径：用户批准「跑一次桌面测量」。先试的是**不进桌面**的那条路（把测量塞进 compat 的
+   Windows runner），失败原因见 §3.56 第 4 条——那次记的结论是「一次性宿主造不出可信下载场景」。
+   **这条结论本批被推翻**：真正的差别不在宿主是否一次性，而在**装配路径**——
+   裸 `CreateCoreWebView2ControllerAsync(hwnd)` 与 App 实际走的
+   `WebView2` 控件 + `EnsureCoreWebView2Async` 不是同一条路，前者在订阅 `DownloadStarting`
+   时抛 `NotImplementedException`（无法转型 `ICoreWebView2_4`），后者一切正常。
+   教训按本仓口径记法：**「做不到」的结论必须先排除「我用了一条没人走的路」**，
+   否则它会变成一个假的能力边界并写进台账（这次就写了）。
+2. 测量本身（本机 Runtime 155.0.4283.45 + SDK 1.0.2903.40，三场景一次跑完）：
+   两个 loopback 端口，origin 只发 302，target 只发 `Content-Disposition: attachment`；
+   用不同端口而不是同端口两条路径，是为了让结论变成一次字符串比较而不是解释。
+   ```
+   RESULT S1 start[uri=…:7882/final.bin  state=InProgress] end[… state=Completed written=True]  verdict S1 start=final end=final
+   RESULT S2（两跳 /start2 → /mid → /final2.bin）                                              verdict S2 start=final end=final
+   RESULT S3（/page 里脚本 click() 一个 href=/start3 download 的链接 → /final3.bin）           verdict S3 start=final end=final
+   ```
+   三场景同一结论：**在 `DownloadStarting` 那一刻，`CoreWebView2DownloadOperation.Uri` 就已经是
+   最后一跳的落点**，到 `Completed` 不变。窗口 off-screen + 透明、文件与用户数据目录都在
+   `%TEMP%` 一次性目录里跑完即删（跑完复核 `~/Downloads` 无残留）。
+3. 于是 Q58 的原命题**两头都不成立**，按 §六 结案：
+   - 前半「闸门判的是入队地址」被测量推翻——被判的那个 `Uri` 就是跳转后的落点；
+   - 后半「所以云元数据端点能落盘」也被现读推翻——那个落点会过
+     `BrowserPolicyBroker.cs:111-127` 里 `AllowDownload` 的
+     `ReservedAddressBoundary.DeniesRaw(origin)`（169.254/16 含 169.254.169.254、
+     回环/私网按归一化后判定、**取不到绝对地址也一并拒**），这条正是第七轮 R7-CS1-02 补的。
+     两端对齐也在：Android 侧同一形状由 R8-AD-03 落过（`WebViewDownloadTargetGuard` 一族）。
+   原条目列的两个修法（完成后复判 + 删文件、或重做下载发起链）因此**都不需要**，
+   连它们各自的代价（ADR-009 制品形态牵连）一起作废。
+4. 本批自己犯的一次误读，按本仓口径记下来（它正是 Step-3 反复抓的那种形态）：
+   我在读完 `DownloadPolicy.RequiresExplicitConfirmation`（只看扩展名与查询串，
+   `Core/Downloads/DownloadPolicy.cs:46-50`）之后，一度写下「Windows 下载层没有保留地址硬拒、
+   要新登一条 Q63」——**漏看了 broker 层那一道**。判据是「这条策略在哪个函数里」而不是
+   「这个文件里有没有」；下载路径的判定横跨 `HostWebView.Downloads.cs` → `DownloadPolicy` →
+   `BrowserPolicyBroker.AllowDownload` 三层，只看中间一层就会把已存在的东西报成缺口。
+   那次误读在提交前被现读否掉，所以台账里没有 Q63 这一条——**没有的东西不该留号**。
+5. 因此本批的可交付物是「一次能被别人重跑的测量」：`--redirect` 模式入仓（含三场景与卫生要求：
+   off-screen 窗口、`%TEMP%` 一次性目录、跑完删、逐场景打印 `written=`），compat 仍只跑静态面
+   （动态面要有浏览器宿主，属桌面实测面——这点没变，变的只是「桌面能量到」已被证实）。
+   `~/Downloads` 跑后复核无残留。
+
 ## 六、复核后判定为不成立（留此防重复上报）
 
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
@@ -2985,6 +3027,21 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   Android 10 处出货注入 JS 换 0 个行为差；下一轮若再有人按「三端同形」的直觉报这条，
   先跑 `tests/python/injected_js_parity_test.py::test_nobody_overwrites_the_definer_the_ends_use`
   ——它红了才说明前提变了、这条才值得重判。
+
+- **「Windows 下载闸门只判入队地址 ⇒ 302 到云元数据那型在正典制品上仍在」不成立**
+  （第九轮 R9-B57 / §3.57，登记于 Q58 = R9-CS-18）：这条目的前提没被量过——它写的是
+  「反射只能给出 `Uri` 这个名字，不等于它报跳转后的地址」，所以修法列了「完成后复判 + 删文件」
+  或「重做下载发起链」两案。本机实测三场景（一跳、两跳、页面内 `click()` 触发，
+  Runtime 155.0.4283.45 + SDK 1.0.2903.40）：`DownloadStarting` 时刻的
+  `CoreWebView2DownloadOperation.Uri` **已经是最后一跳的落点**，`Completed` 时不变
+  ⇒ 两案都不需要，代价也一起作废。**下一轮别再按原句上报**。
+  而且后半句也不成立：那个落点在放行前会过 `BrowserPolicyBroker.cs:111-127` 的
+  `ReservedAddressBoundary.DeniesRaw`（169.254/16 与不可判定地址一律拒，第七轮 R7-CS1-02 落的），
+  Android 侧同形由 R8-AD-03 落过——**所以本批不新登任何 Q**（中途我误判过一次「Windows 缺这道门」，
+  原因是只看了 `DownloadPolicy` 没看 broker，现读后自纠）。
+  顺带留一条方法论：本批第一次「量不到」的结论是假的——那次用的是裸
+  `CreateCoreWebView2ControllerAsync`，而 App 走的是控件 + `EnsureCoreWebView2Async`；
+  「做不到」之前先怀疑自己走了一条没人走的路。
 
 - **「Android 也缺 window.open 洪水上限」不成立**（第九轮 2026-10-10，落地 Windows 侧上限时
   同批实测）：`android/app/.../BrowserEngine.kt:65` 显式 `setSupportMultipleWindows(false)`，

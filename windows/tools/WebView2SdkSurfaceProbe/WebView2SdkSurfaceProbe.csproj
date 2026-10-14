@@ -11,6 +11,7 @@
          探针与它同一套编译环境，测出来的面才是出货那一份——不是压制警告的理由，
          而是「测量环境必须等于生产环境」。 -->
     <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
     <!-- 本工具**不建锁**，这是有意识的偏离而不是漏配：
