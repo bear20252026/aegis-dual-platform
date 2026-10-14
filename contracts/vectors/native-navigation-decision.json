@@ -1,9 +1,11 @@
 {
+  "protocol": "aegis-native-navigation-decision",
   "version": 1,
-  "description": "Rust 原生导航决策 C ABI 的跨端语义向量；每项均绑定 session/tab/generation/origin/path+query/scope/nonce。 审计第六轮（2026-10-03/04）补入 deny-by-content 与高危目标（本机/私网）require_confirmation 向量——此前本文件只覆盖 url_policy/session_not_found 两类拒绝，\"黑名单匹配\"与\"确认只对高危触发\"均无跨端锁定。 第八轮 B9（2026-10-06）：回环/RFC1918/localhost 由 require_confirmation 改为 allow——第七轮 B8 裁决落进核心；确认流域示例改挂云元数据/链路本地/文档段。",
+  "description": "Rust 原生导航决策 C ABI 的跨端语义向量；每项均绑定 session/tab/generation/origin/path+query/scope/nonce。 审计第六轮（2026-10-03/04）补入 deny-by-content 与高危目标（本机/私网）require_confirmation 向量——此前本文件只覆盖 url_policy/session_not_found 两类拒绝，\"黑名单匹配\"与\"确认只对高危触发\"均无跨端锁定。 第八轮 B9（2026-10-06）：回环/RFC1918/localhost 由 require_confirmation 改为 allow——第七轮 B8 裁决落进核心；确认流域示例改挂云元数据/链路本地/文档段。 R9-B59（2026-10-14，§四 第 11 项 ② 定稿）：每条向量新增 platform_decidable——false 的判据是 expected_evaluate=require_confirmation：宿主在自己的托管判定路径上产不出这一支（Windows 单测/Debug 构建 NativePolicyCoreBuildMarker.RequiredByThisBuild=false ⇒ RequestNavigationConfirmation 直接拒 native_confirmation_core_required；Android 无 native core 时顺延 evaluateNavigation），确认面由核心独占。shipping Release 构建 RequiredByThisBuild=true 时两端确实会走原生确认链，那是装机/发布面而不是本仓 PR 必跑面——所以 false 说的是「平台执行者在常跑配置下断不真」，不是「产品里没有这个分支」。同批把 expected_deny_code 改名为 expected_evaluate_code，让两份原生向量的错误码字段统一成 expected_<step>_code。",
   "vectors": [
     {
       "name": "canonical_url_fragment_and_replay",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "HTTPS://Example.COM:443/path?query=1#request",
@@ -18,24 +20,27 @@
     },
     {
       "name": "unknown_session_fails_closed",
+      "platform_decidable": true,
       "register_session": false,
       "generation": 0,
       "url": "https://example.com/known",
       "scope": "navigation",
       "expected_evaluate": "deny",
-      "expected_deny_code": "session_not_found"
+      "expected_evaluate_code": "session_not_found"
     },
     {
       "name": "invalid_scheme_fails_closed",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "javascript:alert(1)",
       "scope": "navigation",
       "expected_evaluate": "deny",
-      "expected_deny_code": "url_policy"
+      "expected_evaluate_code": "url_policy"
     },
     {
       "name": "scope_change_invalidates_authorization",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "http://example.com:8080/export?format=json",
@@ -50,6 +55,7 @@
     },
     {
       "name": "generation_advance_invalidates_pending_action",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://example.com/gen-bound",
@@ -66,6 +72,7 @@
     },
     {
       "name": "session_destroyed_fails_closed_at_consume",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://example.com/destroyed",
@@ -82,6 +89,7 @@
     },
     {
       "name": "public_host_allows_without_confirmation",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://example.org/news?q=1",
@@ -96,6 +104,7 @@
     },
     {
       "name": "loopback_ip_allowed_by_local_and_lan_ruling",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://127.0.0.1:8080/admin",
@@ -111,6 +120,7 @@
     },
     {
       "name": "localhost_name_allowed_by_local_and_lan_ruling",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://localhost/panel",
@@ -126,6 +136,7 @@
     },
     {
       "name": "private_rfc1918_allowed_by_local_and_lan_ruling",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "http://192.168.1.1/set_config",
@@ -141,6 +152,7 @@
     },
     {
       "name": "link_local_metadata_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://169.254.169.254/latest/meta-data/",
@@ -150,6 +162,7 @@
     },
     {
       "name": "blocklisted_host_denied",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "deny_hosts": [
@@ -158,10 +171,11 @@
       "url": "https://bad.example/payload",
       "scope": "navigation",
       "expected_evaluate": "deny",
-      "expected_deny_code": "threat_blocklist"
+      "expected_evaluate_code": "threat_blocklist"
     },
     {
       "name": "blocklist_entry_form_is_case_insensitive",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "deny_hosts": [
@@ -170,10 +184,11 @@
       "url": "https://bad.example/payload",
       "scope": "navigation",
       "expected_evaluate": "deny",
-      "expected_deny_code": "threat_blocklist"
+      "expected_evaluate_code": "threat_blocklist"
     },
     {
       "name": "blocklist_suffix_confusion_does_not_over_block",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://good.example.evil.test/",
@@ -191,6 +206,7 @@
     },
     {
       "name": "blocklisted_host_with_nondefault_port_is_denied",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "deny_hosts": [
@@ -199,10 +215,11 @@
       "url": "https://bad.example:8443/payload",
       "scope": "navigation",
       "expected_evaluate": "deny",
-      "expected_deny_code": "threat_blocklist"
+      "expected_evaluate_code": "threat_blocklist"
     },
     {
       "name": "loopback_nondefault_port_allowed_by_ruling",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://127.0.0.1:6379/",
@@ -218,6 +235,7 @@
     },
     {
       "name": "R7_RS_01_parent_domain_denies_any_subdomain",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "deny_hosts": [
@@ -226,10 +244,11 @@
       "url": "https://x.bad.example/",
       "scope": "navigation",
       "expected_evaluate": "deny",
-      "expected_deny_code": "threat_blocklist"
+      "expected_evaluate_code": "threat_blocklist"
     },
     {
       "name": "R7_RS_01_parent_domain_denies_deep_subdomain",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "deny_hosts": [
@@ -238,10 +257,11 @@
       "url": "https://a.b.c.bad.example/payload",
       "scope": "navigation",
       "expected_evaluate": "deny",
-      "expected_deny_code": "threat_blocklist"
+      "expected_evaluate_code": "threat_blocklist"
     },
     {
       "name": "R7_RS_01_lookalike_prefix_host_is_not_blocked",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "deny_hosts": [
@@ -258,6 +278,7 @@
     },
     {
       "name": "R7_RS_01_lookalike_sibling_suffix_host_is_not_blocked",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "deny_hosts": [
@@ -274,6 +295,7 @@
     },
     {
       "name": "R7_RS_01_entry_ancestors_are_not_pre_expanded",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "deny_hosts": [
@@ -290,6 +312,7 @@
     },
     {
       "name": "R7_RS_05_cgnat_cloud_metadata_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://100.100.100.200/latest/meta-data/",
@@ -299,6 +322,7 @@
     },
     {
       "name": "R7_RS_05_cgnat_lower_boundary_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://100.64.0.1/",
@@ -308,6 +332,7 @@
     },
     {
       "name": "R7_RS_05_cgnat_upper_boundary_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://100.127.255.254/",
@@ -317,6 +342,7 @@
     },
     {
       "name": "R7_RS_05_test_net_1_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://192.0.2.1/",
@@ -326,6 +352,7 @@
     },
     {
       "name": "R7_RS_05_benchmark_lower_boundary_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://198.18.0.1/",
@@ -335,6 +362,7 @@
     },
     {
       "name": "R7_RS_05_benchmark_upper_boundary_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://198.19.255.254/",
@@ -344,6 +372,7 @@
     },
     {
       "name": "R7_RS_05_multicast_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://224.0.0.1/",
@@ -353,6 +382,7 @@
     },
     {
       "name": "R7_RS_05_broadcast_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://255.255.255.255/",
@@ -362,6 +392,7 @@
     },
     {
       "name": "R7_RS_05_public_ip_control_allows_without_confirmation",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://93.184.216.34/",
@@ -375,6 +406,7 @@
     },
     {
       "name": "R7_RS_05_just_below_cgnat_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://100.63.255.254/",
@@ -388,6 +420,7 @@
     },
     {
       "name": "R7_RS_05_just_above_cgnat_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://100.128.0.1/",
@@ -401,6 +434,7 @@
     },
     {
       "name": "R7_RS_05_just_below_test_net_1_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://192.0.1.254/",
@@ -414,6 +448,7 @@
     },
     {
       "name": "R7_RS_05_just_above_benchmark_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://198.20.0.1/",
@@ -427,6 +462,7 @@
     },
     {
       "name": "R7_RS_05_just_below_multicast_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://223.255.255.254/",
@@ -440,6 +476,7 @@
     },
     {
       "name": "R8_B9_test_net_2_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://198.51.100.1/",
@@ -449,6 +486,7 @@
     },
     {
       "name": "R8_B9_test_net_2_upper_boundary_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://198.51.100.254/",
@@ -458,6 +496,7 @@
     },
     {
       "name": "R8_B9_test_net_3_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://203.0.113.7/",
@@ -467,6 +506,7 @@
     },
     {
       "name": "R8_B9_test_net_3_upper_boundary_requires_confirmation",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "http://203.0.113.254/",
@@ -476,6 +516,7 @@
     },
     {
       "name": "R8_B9_just_below_test_net_2_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://198.51.99.254/",
@@ -489,6 +530,7 @@
     },
     {
       "name": "R8_B9_just_above_test_net_2_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://198.51.101.1/",
@@ -502,6 +544,7 @@
     },
     {
       "name": "R8_B9_just_below_test_net_3_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://203.0.112.254/",
@@ -515,6 +558,7 @@
     },
     {
       "name": "R8_B9_just_above_test_net_3_is_public",
+      "platform_decidable": true,
       "register_session": true,
       "generation": 0,
       "url": "https://203.0.114.1/",

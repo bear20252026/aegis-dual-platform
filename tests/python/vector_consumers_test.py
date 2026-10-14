@@ -8,7 +8,7 @@
 # ② 门禁的每条判据都在这里被注入证伪。这部分原本写在脚本的 `--self-test` 里，本批搬进
 #    pytest：一条要人主动敲 flag 的自证就是「跑不动的判据」（R9-SH-7 的同一课）。
 #
-# 「消费者」不包括 markdown 提及（那是声明），也不包括元层 META_LEVEL 那五个文件——
+# 「消费者」不包括 markdown 提及（那是声明），也不包括 META_LEVEL 那批元层文件——
 # 它们（含本门禁自己与它的用例）按名遍历整个向量目录，判的是形状/expected，# 不是「哪端实现了这个裁决」。
 from __future__ import annotations
 
