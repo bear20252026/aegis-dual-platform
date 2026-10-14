@@ -3364,6 +3364,82 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
     等价复检——那属接线面，不在本批射程。
 
 
+### 3.62 R9-B62（2026-10-14，一族三次事故的通则化）：「门禁脚本存在」与「门禁脚本在某个面上被执行」是两件事
+
+1. 这批不是新 bug 的修复，而是**把同一形状收成判据**。三次事故各自的落点：
+   R9-CI-4（`verify_xaml_resources.py` 的唯一调用点在 tag 触发的发布流里，PR/push 面零执行，
+   四条 pytest 用例又全部 monkeypatch ⇒ 常跑面只证明机制、不证明现树）、AEG-006（向量
+   「有形状校验、零真实消费者」）、R9-B60（`gradle-dependency-insight.yml` 那条诊断步骤自
+   R9-B49 起就站在错的 cwd 里、从没跑通，而它是 dispatch-only 面，PR 全绿没人去看它红）。
+   三次的共同点是**判定写好了、执行面没人核**，每次都靠下一轮人肉现读才发现——所以本批
+   把「谁在哪个面上跑它」变成一份登记表加一条常驻判据。
+2. 现读执行面（全部按当前字节，不引用任何前轮结论）：16 份 workflow 里 **7 份有
+   `pull_request` 触发**（agent-redteam / android-quality / ci / contracts / core-rust /
+   native-policy-artifacts / supply-chain）；受管门禁脚本 **35 支**（`scripts` 25 ＋
+   `release` 5 ＋ `contracts` 5），其中 **29 支**从 PR 面的调用点可达、**6 支**不可达。
+   不可达那 6 支全部登记在册（`contracts/ci/gate-execution-face.yaml:21/29/38/46/54/62`）。
+3. 表里两种 `face` 语义不同，别混：`ci` ＝ 有真调用点、但那条流不在 PR 判定面上（发布链与
+   探测面，输入在被判时还不存在）；`manual` ＝ 连 CI 执行点都没有、只有 runbook 里一条人跑的命令，
+   比 `ci` 更弱，所以登记时必须写清为什么不能进 CI。`why` 非空是硬判据：它是这张表唯一的
+   可读信息，也是下一轮判断「该撤还是要动」的依据。
+   其中 `release/verify_checksum_json.py`（`:29`）是本轮**新登记**的一支——它此前从没在任何
+   面上被登记过，而它正是下面第 4 条那两个备选口径会被判成「可达」的那一支。
+4. 三条口径都是**在实测里被逼出来的**，两条备选被数字否掉：
+   - **执行点只取 `run:` 正文**（含沿本地 `uses:` 传递的 composite action / 可复用 workflow）。
+     同文件对照就是证据：`release.yml:188` 是真调用（算），`release.yml:195` 是把命令抄成
+     注记的那一行（不算）。按原文正则判，`verify_artifact_set` 会当场获得一条「CI 执行点」，
+     而 runner 上从没执行过它——这条判据就会假绿。
+   - **闭包只走非测试文件**（`verify_gate_execution_face.py:46` 的 `TEST_PATH`）。备选
+     「允许穿过 `tests/python/`」实测把可达面从 29 抬到 **32**，多出的正是那三支
+     `release/tools/*`——它们只被测试 import。`tests/python` 整目录被一条 pytest 步骤收集，
+     允许穿过它，「可达」就膨胀成「凡被 import 过的都算跑过」，判据恒真；而 R9-CI-4 的事故
+     形状恰好就是「用例全绿＋门禁从没判过现树」。
+   - **文件内引用只取 AST 里会进入代码的字符串与 import 名**（`:65-79`：注释天然不在 AST，
+     docstring 单独剔）。备选「按原文正则数 `.py` 字面量」实测把可达面从 29 抬到 **30**，
+     多出的那支是 `release/verify_checksum_json.py`——它在 PR 面上根本没有调用点，只是被某个
+     可达文件的注记提过一次名字。这条口径的教训本仓早就写过：`scripts/text_anchors.py`
+     的实测条目 2 记着「docstring 里逐字写了被观察的文件名，于是向量门禁立刻报出新消费者」。
+     所以本小节与判据 docstring 里出现的这些文件名**不会**成为调用点，是设计而非漏洞。
+5. 判据本体拆成两份，不是审美而是红线逼的：`scripts/workflow_run_face.py`（86 行，只做提取——
+   `run:` 正文、本地 `uses:` 传递、生效 cwd 复用 `verify_workflow_script_paths.effective_cwd`）
+   ＋ `scripts/verify_gate_execution_face.py`（251 行，只做判定）。第一版单文件 350 行超了
+   「基线外新文件 ≤300 行」红线，而 `check_file_sizes.py` 对这种情形的处方就是拆分
+   （存量超限才走 `--write-baseline`），没有给新文件开豁免。
+6. 判红的六类形状（`violations` `:184-209` ＋ `entry_problems` `:141-178`）：不可达而未登记、
+   同一支登记两次、已可达却留在表里（该撤登记）、`face` 不在 ci/manual 词表内、该带的
+   `workflow`/`evidence` 缺了或不该带的乱填、证据不实（ci 类那条流的正文其实没调用它／manual 类
+   那份文件里根本没有那条命令路径）。判定面塌缩（workflows 目录或登记表缺失、解析失败、
+   受管面或 PR 面入口为空）走 **exit 2**，不写成「读不到东西＝通过」。
+7. 反向证伪：21 条用例（`tests/python/gate_execution_face_test.py`，全部内存注入、不改工作树），
+   其中两条**不靠注入**、直接拿现树做对照——`:144` 钉住「同一份 release.yml 里 188 行算执行点、
+   195 行不算」，`:152` 钉住「docstring 里的文件名不算调用点、代码字符串里的算」。
+   没有这两条，判据可以在「其实是按原文正则算」的形态下全绿。另有两条 exit 2 用例把
+   登记表缺失与 workflows 目录缺失分别摆出来。
+8. 接线时顺手现读改掉两条陈旧路径引用（都是 `release/tools/` 目录化改版留下的平铺旧路径）：
+   `release/verify_release.py:20` 注记里的 `release/tools/verify_manifest.py:18`（文件已搬，
+   且它锚的是仓库根、与本文件锚 `release/` 并不「同一模式」，注记顺带改准）；
+   `release/manifests/signing-policy.yaml:32` 的 `release/tools/verify_provenance.py`。
+   被否的处方：**不做全树「文档里的仓库路径字面量必须存在」判据**。实测全树 629 条路径字面量
+   里 14 条悬空，其中 **11 条是合成夹具**（`agent/a.py`、`scripts/x.py`、
+   `scripts/no_such_gate.py` 这类用例自己造的名字）⇒ 那是误报机器。射程收成本批这一条
+   执行面判据＋这两处定点修正。
+   登记这两行时还自撞一次：新行先写成 `R9-DOC-20`，而 R9-B33 那批早已占用该 ID（Q49
+   `docs/runbooks/device-validation.md` 那条），自家
+   `tests/python/gate_hollowness_test.py::test_ledger_csv_ids_are_unique` 当场判红（重号会让
+   下一轮「按 ID＋位置＋现象去重」把第二条当已登记直接跳过）⇒ 改成 `R9-DOC-21`。
+   「绿本身不是结论」这条纪律对本批同样成立：判据在写台账的这一步就拦了一次。
+9. 验证：`contracts.yml` 的 `contract-source-of-truth` job 现读 39 条 python 门禁步全部退出 0
+   （新那条在第 20 位）；`pytest tests/python` **853 passed / 1 skipped**（本批 +21）；
+   ruff / bandit / 行数红线（566 个受管源文件、基线 86 项、两份新文件 251＋86 行都在红线下）；
+   触发面分类不变（gates 6 / builds 5 / probes 5）；workflow 步骤面 324 → **325**、
+   run 步骤面 147 → **148**，各净增一条，正是本批这条门禁。
+10. 未做的两件事，写清楚以免下一轮当成已做：①执行面口径只认 `python <路径>.py`，pwsh /
+   gradle / cargo 调用点不在射程内——某支门禁若只被 pwsh 脚本调起，它会落进「不可达」一侧、
+   被要求登记并给出证据，退化方向是安全的，但那张表不会自动认出它的真执行面；
+   ②本批判的是「不可达要留痕」，**没有**判「不可达这件事本身该不该存在」——把发布链那几支
+   挪进 PR 面是接线决策（要人定代价），不在本批射程。
+
+
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
   处方写的是「Windows 提前捕获定义器、核心与 Android 直接引用 ⇒ 三端不同形 ⇒ 要收口」，

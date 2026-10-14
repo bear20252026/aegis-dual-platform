@@ -143,6 +143,12 @@ jobs:
       # active_tree_gates.py 在同一 job 被调多次靠的是参数不同，那种重复有语义。
       - name: Workflow step duplication gate (R9-B61——同 job 内的第二份同体步骤没有新语义)
         run: python scripts/verify_workflow_step_duplicates.py
+      # R9-B62（R9-CI-4 / AEG-006 / R9-B60 那一族的通则）：判定写好 ≠ 执行面有人核。
+      # 入口只从 PR 面 workflow 的 `run:` 正文取（注释里的命令不算，release.yml:195 就是那样一行），
+      # 闭包不穿测试文件；闭包外的受管门禁脚本必须在 contracts/ci/gate-execution-face.yaml
+      # 恰好登记一次，且登记的证据（非 PR 面 workflow 的真调用点 / runbook 里的真命令）可回读。
+      - name: Gate execution face registry gate (R9-B62——不可达要留痕，可达不许赖在册)
+        run: python scripts/verify_gate_execution_face.py
       # R9-B51（Q61）：校验和文档只能记录「本次真正落盘的字节」，而平台相关的构件在不同
       # runner 上落的是不同文件（aapt2 的 -windows.jar 与 -linux.jar 是两个 sha256）。
       # 需求平台从 workflow 的 runs-on 现取，所以加一个 macos runner 不需要改判据代码。

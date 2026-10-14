@@ -70,6 +70,13 @@
     新增 workflow 没归类判红、登记了不存在的文件判红、门禁型带任何触发过滤判红、
     门禁型没有 `pull_request` 触发判红（不在 PR 面上判的门禁等于不存在）、
     探测/维护型出现在 PR 判定面上判红（它会进必需检查集合，跑不完就卡 merge box）；
+  - 同一族的第四问「**脚本存在 ≠ 有人跑它**」（第九轮 R9-B62 / 台账 §3.62，2026-10-14）：
+    门禁脚本的执行面也收成机器可读登记表 `contracts/ci/gate-execution-face.yaml`，由
+    `scripts/verify_gate_execution_face.py` 对账——入口只取 PR 面 workflow 的 `run:` **正文**
+    （注释里的命令不算执行点，`release.yml:195` 正是那样一行）且沿本地 `uses:` 传递、闭包不穿
+    `tests/`（穿过它会把「被 import 过」当成「当门禁跑过」）；PR 面上不可达的受管脚本必须
+    **恰好登记一次**并给出可回读证据（非 PR 面那条流的真调用点，或 runbook 里的真命令），
+    已可达的必须撤登记；
 - **构建型 workflow**（native-policy-artifacts / release-*）保留触发过滤
   ——它们产生产物而非判定质量，按需触发合理；
 - **自检入 CI**：CLAUDE.md 要求的 5 个离线自检（session_store / api_bridge /

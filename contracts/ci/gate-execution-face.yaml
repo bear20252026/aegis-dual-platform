@@ -1,0 +1,67 @@
+# 门禁脚本的**执行面**登记表（R9-B62 / 台账 §3.62）——「脚本存在」不等于「有人跑它」。
+#
+# 为什么要有这个文件：本仓三次踩过同一族——R9-CI-4 是 `verify_xaml_resources.py` 的唯一调用点
+# 在 tag 触发的发布流里，PR/push 面零执行，四条 pytest 用例又全部 monkeypatch ⇒ 常跑面只证明
+# 机制、不证明现树；AEG-006 是向量「有形状校验、零真实消费者」；R9-B60 是一条自 R9-B49 起
+# 就从没跑通的诊断步骤（站在错的 cwd 里）。三次的共同形状是：**判定写好了，执行面没人核**。
+#
+# 判据本体是 `scripts/verify_gate_execution_face.py`：它从 PR 面 workflow 的 `run:` 正文
+# （不含 YAML 注释——注释里的命令不是执行点）建入口集合，沿非测试 py 文件的引用做传递闭包，
+# 凡闭包外的受管门禁脚本**必须在这里恰好登记一次**，且登记的证据要真实：
+# - `face: ci` 的 `workflow` 必须存在、不在 PR 面上，且其 `run:` 正文真的出现该文件名；
+# - `face: manual` 的 `evidence` 文件必须存在、正文真的出现该脚本路径（写「见 runbook」而
+#   runbook 里没有那条命令，就是第二条失实陈述）；
+# - 两边都要求 `why` 非空——理由是本表唯一的可读信息，也是下一轮判断「该撤还是要动」的依据。
+#
+# 三种 face 的含义不同，别混：`ci` 是「有 CI 执行点、但不在 PR 判定面」（制品链与探测面，
+# 输入在被判时还不存在）；`manual` 是「发布/部署侧人跑的独立验证」，它连 CI 面都没有，
+# 因此比 `ci` 更弱，登记时要写清为什么不能进 CI。
+
+registered:
+  - script: release/verify_release.py
+    face: ci
+    workflow: release
+    why: >-
+      判的是**打完包的发布 bundle**（逐平台的目录布局、SHA256SUMS 与清单闭合），
+      输入只在制品链跑完后存在；PR 面上没有 dist，硬接进去只能造一条恒真的空跑步骤
+      （SP-231「零信息量步骤」同口径）。发布链里它是 fail-closed 的终止条件。
+
+  - script: release/verify_checksum_json.py
+    face: ci
+    workflow: release
+    why: >-
+      逐平台重算 SHA256SUMS.json 与制品字节（未列明/越界/缺失/空清单都 fail-closed），
+      判据本体在 `release.yml` 的 verify-gate 步骤（170 行的 for 循环）与
+      release-windows/release-android 两条发布流里——全部在发布链上，输入是 dist 目录，
+      PR 面上不存在。它是 PY-173 那类「清单改名后校验面静默空跑」的兜底，所以登记要留痕。
+
+  - script: scripts/verify_gradle_graph_freshness.py
+    face: ci
+    workflow: gradle-dependency-graph
+    why: >-
+      判的是 GitHub 依赖图里**已提交的** Gradle 依赖闭包与入库锁是否一致；图由
+      `dependency-submission` 在 master push / 周检之后写入，PR 面上判它必然拿到旧图
+      ⇒ 假红。该流按 R9-B46 的口径归类为 probes（探测/维护面不进 PR 判定面）。
+
+  - script: release/tools/verify_artifact_set/verify_artifact_set.py
+    face: manual
+    evidence: release/runbooks/security-release.md
+    why: >-
+      输入是发布**后**由部署侧核对产出的 release-manifest.json（含 url/sha256 的 artifacts
+      数组）与本地 dist，CI 的 verify-gate 阶段在发布之前，没有可校验输入——这一条不是新判断，
+      `release.yml` 的 PY-189 注记早已写明，此前只是人读得到、机器读不到，本表把它变成可判红的登记。
+
+  - script: release/tools/verify_manifest/verify_manifest.py
+    face: manual
+    evidence: release/runbooks/security-release.md
+    why: >-
+      验的是**装机端拿到的更新清单**：阈值签名、防回滚（要传已发布最低版本）、过期。
+      三者都要发布产物与已发布版本历史，PR 面既没有清单也没有「上一版」；它是发布链之后的
+      独立验证产品，失败语义是「终止发布/撤回」，不是「这次 PR 不许合」。
+
+  - script: release/tools/verify_provenance/verify_provenance.py
+    face: manual
+    evidence: release/runbooks/security-release.md
+    why: >-
+      逐工件跑 `gh attestation verify` 并固定 signer 身份——attestation 是发布时写入的透明日志
+      记录，发布前不存在可验证对象；且它要联网打 GitHub API，属发布/部署侧的人工步骤。

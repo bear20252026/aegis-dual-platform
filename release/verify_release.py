@@ -16,8 +16,10 @@ from pathlib import Path
 
 # PY-208（2026-09-26 审计）：`from verify_checksum_json import ...` 平铺导入
 # 仅在以脚本方式从 release/ 目录运行时才生效（cwd/sys.path 依赖）——CI 或
-# 其他工作目录下调用即 ImportError。改 sys.path.insert 锚定到本文件所在
-# release/ 目录（同 release/tools/verify_manifest.py:18 的模式）。
+# 其他工作目录下调用即 ImportError。改 sys.path.insert 显式锚定到本文件所在
+# release/ 目录；同一条纪律在 `release/tools/verify_manifest/verify_manifest.py`
+# 里锚的是仓库根（它按包名 `release.update_verifier` 导入），锚点不同但都不许
+# 依赖运行时 cwd。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify_checksum_json import verify_manifest
 from write_checksum_json import sha256_file  # PY-264：流式哈希单源（见下方注记）
