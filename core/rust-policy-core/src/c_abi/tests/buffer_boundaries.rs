@@ -81,6 +81,23 @@ fn c_abi_broker_new_rejects_non_utf8_policy_version() {
     assert!(aegis_policy_core_broker_new(bad).is_null());
 }
 
+#[test]
+fn c_abi_broker_new_rejects_oversized_policy_version() {
+    // R9-B63：`read_utf8` 的 64 KiB 是「读」的口径（防无 NUL 越读），不是「存」的
+    // 口径——版本串会被 clone 进每条签发的授权。两面共用同一个构造期谓词，
+    // 所以这里越界的表现与 uniffi 面退回哨兵是同一个数。
+    let cap = crate::ffi::input_bounds::MAX_POLICY_VERSION_BYTES;
+    let long = c_string(&"v".repeat(cap + 1));
+    assert!(aegis_policy_core_broker_new(long.as_ptr()).is_null());
+    // 边界内侧必须仍建成——否则这条判的是「一律拒」而不是「判长度」
+    let _serial = broker_test_guard();
+    let at_cap = c_string(&"w".repeat(cap));
+    let broker = aegis_policy_core_broker_new(at_cap.as_ptr());
+    assert!(!broker.is_null());
+    // SAFETY: broker 由本测试创建。
+    unsafe { aegis_policy_core_broker_free(broker) };
+}
+
 // ===== R7-RS-02（审计第七轮 2026-10-04）：host 黑名单注入入口的行为面 =====
 // 上面几条只直接测 `read_utf8`，而真实规模下必然越界的是**本入口**
 //（托管侧订阅源上限 5 MiB ≫ FFI_INPUT_MAX_BYTES 64KiB），注入失败即核心侧

@@ -1165,6 +1165,26 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   检查（多一处就地过滤判红、登记出处消失也判红）；验收判据三条全部达成：每语言一个 helper、
   内联过滤 0 处、过剔那两支要么修掉（`//` 切到行尾、`#` 无差别剔）要么写明（JS 文本面不并进来）。。
 
+- Q63 R9-CI-18 | P2 | `scripts/verify_uniffi_binding_surface.py:43`（`_COMMENT`）＋ `:50-53`
+  （`_code`）↔ `scripts/verify_text_anchor_helpers.py:41-49`（`MARKERS`）＋ `:52-58`（`ALLOWED`）：
+  **R9-B45 那条「实现点集合＝登记集合」的判据漏认一种写法**，于是仓里其实有第 6 份自己写的
+  注释过滤而门禁数不到它。现读理由：`MARKERS` 认的是 `def strip_comments(`、`CodeOnly(`、
+  `startsWith("//"`、`starts_with("//")` 这类**字面量形态**，而 `_code` 把注释形态写进
+  `re.compile(r"^\s*(?://|/\*|\*)")` 这个常量里，一条都不匹配 ⇒ 扫描面（`scripts/` 在
+  `GATE_ROOTS` 内）走过了这个文件却不算实现点。它不只是登记问题，覆盖等级也确实不同：
+  `_code` 只按行首整行剔，跨行块注释不处理，而**以 `/*` 开头的整行**（哪怕同行 `*/` 之后
+  还有真代码）会被连代码一起丢掉——这正是 §3.45 记过的「太窄」与「误吃真代码」两种错法同现。
+  同批量到一处同形但不等价：`_brace_body`（`:56-69`）与 R9-B63 抽出的
+  `scripts/rust_code_reader.py:56-73` 的 `fn_body` 是同一遍大括号配平，只差失败值
+  （`""` 由调用方计成漂移、`None` 按判定面塌缩）。
+  **不在本批动**的理由：把 `_code` 并进 `text_anchors.strip_comments` 会改变那份门禁的
+  判定结果（导出面比对从「行首整行」换成「配平块注释」），要先证明它对入库绑定面是等价或更严；
+  而扩 `MARKERS` 认正则常量这条，风险是把门禁自己 docstring 里引用的被禁形态数成命中
+  （它现在靠**拼接构造**避开，`:41-42`），得连带设计自豁免口径。
+  验收判据（下一轮按此判，不要写成「都换成共用件」）：①`_code` 要么并进单源、要么显式登记进
+  `ALLOWED` 并写明它为什么是第 6 种；②`MARKERS` 对「注释形态写进正则常量」这一类要么能认出
+  要么在门禁 docstring 里写明判不到；③`_brace_body` 与 `fn_body` 的失败语义各自写明。
+
 ### 5.5 DOC（文档 vs 实树）
 
 - ~~Q32 R9-DOC-01~~ **R9-B21 已落地**（§3.20）｜原记录 ↓
@@ -3440,6 +3460,121 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    挪进 PR 面是接线决策（要人定代价），不在本批射程。
 
 
+### 3.63 R9-B63（2026-10-14，把 R9-B61 那条通则问完整个导出面）：上限不只该管「分配」，也该管「存」与「回声」
+
+1. 这批不是又找到一个 bug，而是**把上一条通则的射程问全**。R8-RS-13 挂了三轮、R9-B61
+   终于把它落地成「先判长度再分配」，但那条判据当时只覆盖它自己的两个落点（种子解码、
+   黑名单批次）。本批把同一个问题逐入口问一遍：**宿主直传进来的东西，有没有哪一条既没判长
+   就被存下来，或者被写进给宿主看的文案里**。答案是两处，且两处都不是「分配」那一型。
+2. 现读枚举口径：不按源码注释数导出面，按**入库的绑定产物**数——
+   `core/rust-policy-core/bindings/aegis_policy_core.py:1371-1463`（`FfiBrokerProtocol`
+   的 9 支方法）＋ `:1472`（构造子）＋ `:1868-1969`（5 支自由函数）＝ **14 个入口**，
+   与 `scripts/verify_uniffi_binding_surface.py` 对账的那份符号集合同源。逐入口把宿主可传
+   参数分成四类（已判 / 传递性有界 / 无界但只查表 / 无界且会存或回声）：
+   - `try_parse_external` `canonicalize_external` `extract_host`（`ffi/mod.rs:170/179/193`）
+     三条走同一条 `ffi_url_length_ok`（64 KiB）；
+     `build_fingerprint_pipeline(_with_mode)`（`:219/:260`）走 R9-B61 那条定长种子判定＋
+     `MAX_PIPELINE_DOMAIN_BYTES`；
+   - `create_session`（`ffi/broker.rs:520`）会话键 256（RS-223）已判；
+   - `request_navigation_confirmation`（`:371` 块）委托 `evaluate_navigation`，
+     由被委托方判 ⇒ 传递性覆盖；
+   - `reject_navigation_confirmation`（`:487`）与 `destroy_session`、
+     `advance_document_generation` 返回 `bool`，**没有回声面**；`approve` 的 `nonce`
+     只作查表键、四条 deny 文案全静态；
+   - 缺口两条：**构造期 `policy_version`** 与 **`evaluate_navigation` 的
+     `session_id`/`tab_id`**。
+3. 这两条为什么是真缺口：
+   - `policy_version` 会被 `clone()` 进**每一条签发的授权**（`ffi/broker.rs:233`），
+     账本上限 `MAX_ISSUED_ACTIONS`＝50 000（`:58`）⇒ 一份宿主输入换成 50K 份驻留。
+     C ABI 那条 64 KiB（`c_abi::FFI_INPUT_MAX_BYTES`）是为「指针没有 NUL
+     终止就无界越读」设的**读**口径，不是**存**口径——uniffi 面的 `String` 由宿主直接
+     交进来，而那一面本批之前连「存」这个概念都没有；C ABI 侧本批之前只判空串。
+   - 会话键：账本里的键之所以有界，靠的是「池键 ≤256 ⇒ 长键必然查不到」这条**间接**理由；
+     而「查不到」恰恰是核心层把这条未判长的原串写进 detail 与 explanation 各一遍的那条路径
+     （`core/broker.rs:333-339`）。对照同一份核心层对 nonce 就写得规矩——
+     `consume_nonce`（`:429-442`）既判长（`MAX_NONCE_LENGTH`＝128）、文案里只放长度数字，
+     所以本批**不动 nonce**，把它当已经写对过的先例。
+4. 落地形态：判定收进 `core/rust-policy-core/src/ffi/broker/input_bounds.rs`（92 行）
+   而不是留在三个入口各写一遍。理由不是整洁——`raw_url` 那条上限此前在
+   `evaluate`/`approve`/`consume` 里内联了三份逐字相同的代码，而 R9-B61 的第二判据拦的
+   正是「同一件事写两遍」。三个调用点：`ffi/broker.rs:165`（会话键＋scope＋URL 三段）、
+   `:410` 与 `:595`（只判 URL）。构造期那半同理：两面共用一个
+   `FfiBroker::policy_version_ok`（`input_bounds.rs:39`），C ABI 据此返回 null
+   （`c_abi/mod.rs:251`），uniffi 构造器签名不可失败、据此退回 `DEFAULT_POLICY_VERSION`
+   哨兵（`ffi/broker.rs:718`）——收成一个谓词是因为 `c_abi/mod.rs:270` 走的就是
+   `FfiBroker::new`，一处改两面生效。
+   **口径不变**：拒绝码、判定顺序（会话键 → scope → URL）、空 URL 归
+   `canonicalize_external` 判这三样逐字沿用本批之前形态；换码等于换契约，不在本批射程。
+5. 三条备选处方被否掉（留此防下一轮重提）：
+   ①**给 `contracts/schemas/action.schema.json` 的 `policy_version` 加 `maxLength`**——
+   现读该 schema（乃至全仓契约面）**没有任何一处**用 `maxLength`，加它等于开一个新约束维度，
+   要三端再生成＋漂移判据；而 256 这条口径本来就在 Rust 侧的短标识符族里（会话键、scope、
+   管线 domain、脱敏 host、黑名单单条都是 256）。
+   ②**版本上限取 64 KiB**（跟「读」口径同值最省事）——那样 64 KiB×50K 条账本仍是驻留面；
+   版本标签的真实取值是 `contracts/policy/action-catalog.yaml` 的 `"1.0"`，256 已是 128 倍余量，
+   再长的东西就不是标签而是载荷。
+   ③**deny 文案放整串或放前 N 字节**——只放长度数字。判据口径是一句话：
+   拒绝一个 N 字节的输入，不该回一条不比它短的文案，**放大即缺陷**。
+6. 门禁扩展：`scripts/verify_ffi_input_bounds.py` 227 → **267 行**，判据从 4 条涨到 6 条。
+   新增的判据 5 判「单源＋位置」：谓词存在、两面都引用它（任一面退回自己判 `is_empty` 即红）、
+   且走在 `FfiBroker::new(` 与 `Self {` 之前。判据 6 判回声面：判定体里三个输入只许以
+   `.len()` 形态出现，且字面量里的 `{var}` 内插单独立一条——因为「剔除字面量再找标识符」
+   与「字面量内部的内插」是两种不同的漏法，一条判据盖不住（实测：只判前者的话，
+   `{session_id}` 这种写法全绿）。`broker.rs` 里再出现 `MAX_FFI_URL_BYTES` 也算红。
+   读 Rust 源的四件通用事（键／剔注释／函数体／`usize` 常量）抽进
+   `scripts/rust_code_reader.py`（73 行）——两条新判据都写进原文件就越过 300 行红线，
+   抽取后门禁留在 267 行；与 §3.62 第 5 点同一情形、同一处方（存量超限才走
+   `--write-baseline`，新写文件一律 ≤300）。剔注释口径仍单源
+   `scripts/text_anchors.py`，本模块只把「读文件」这一步接上去，所以
+   `verify_text_anchor_helpers.py` 的实现点集合不变（现读 5 处，实测绿）。
+7. 反向证伪（每条都真红过）：
+   - Rust 侧 5 条用例（`ffi/broker/ffi_navigation_tests/input_bounds.rs` 4 条＋
+     `c_abi/tests/buffer_boundaries.rs` 1 条）：超长版本串既不进载荷也不进账本（白盒读
+     `broker.issued_actions` 确认生效的是哨兵）、卡在 256 上界的版本串逐字保留、
+     超长会话键被拒且**两个账本都没被碰**、卡在 256 的会话键仍可正常导航。
+   - 两次临时变异证明「能红」：①把会话键守卫短路 ⇒ 新用例红在 `session_not_found`
+     且 detail 里出现 `会话 sss…` 原文（这就是回声面的原形态）；②把长度项从谓词里删掉 ⇒
+     两条用例红、而 256 边界那条**仍绿**——证明「有上限」与「上限管住了长」是两条独立判据。
+     两处变异都已还原。
+   - python 侧 11 条注入用例（新文件 `tests/python/ffi_input_bounds_face_test.py`）＋
+     主文件扩到的 12 条，全部内存注入、不改工作树。
+8. 本批自撞三次，都记下来：
+   ①回声断言最初写 `tab = "t"`，而文案里有「tab」这个词 ⇒ `"t" in detail` 恒真，
+   一条断言静默失效。改成只对**超长那一侧**断言，并把这次近失写进用例注释。
+   ②文案长度上界最初写 `text.len() <= 4 * cap` 这种魔数 ⇒ 放大 1024 倍也判不出来，
+   改成 `text.len() < oversized.len()`。
+   ③**最值得留的一条**：三条注入锚点最初是从**带注释的源文件**逐字抄的，而门禁读的是
+   剔注释后那份 ⇒ `replace` 静默失配，用例变成「什么都没注入也通过」的假绿。门禁本身
+   现读是绿的，所以这条只会在用例面暴露——它是 R9-B39（§3.39）与 R9-B44（§3.44）同一课
+   的**第三次**撞上，前两次分别教训的是「判据被自己的注记喂绿」与「用例里的文本锚同病」，
+   这次是「注入锚点与判据读的文本不同一份」。修法不写成纪律而写成代码：
+   `inject()` 把「锚点必须咬得住」做成断言，换不动立刻红。
+9. 拆分与红线实况：`ffi/broker.rs` 935 → **909**（−26，判定搬走），基线同批收窄
+   （`check_file_sizes.py --write-baseline`，`git diff` 只有这一行）；`c_abi/mod.rs` 仍
+   318；`buffer_boundaries.rs` 166 → 183；`ffi_input_bounds_test.py` 152 → 169，
+   本批一度涨到 324 越过红线的**基线外 ≤300**那一条，拆分依据是**判据所属的面**
+   （分配前 vs 存／回声），不是批次号——新文件
+   `tests/python/ffi_input_bounds_face_test.py` 194 行。
+10. 验证：`cargo test --lib` **590 passed**（本批 +5）；`pytest tests/python`
+    **864 passed / 1 skipped**（本批 +11）；`contract-source-of-truth` 现读 37 条 run 步骤、
+    其中含 `python` 的命令行 **39** 条（与 §3.62 同单位）——除 pip 安装步外**逐条实跑**、
+    全部退出 0（含 `verify_contract_compatibility.py` 那条三步合并步里的第三腿）；
+    本批未新增 CI 步，步骤面不变（16 份 workflow／148 条 run 步骤，
+    执行面 35 支受管门禁＝29 可达＋6 登记）；
+    ruff／bandit／py312-compat／行数红线（569 个受管源文件、基线 86 项）／
+    文档计数／workflow 路径与步骤重号全部 OK；
+    门禁自己的 ok 行现读：批次口径三面同值 65536 字节、短标识符口径 **5** 份同值 256 字节
+    （族里从 4 份涨到 5 份正是本批加的那条）。`cargo fmt` 与 `cargo clippy --all-targets` 干净。
+11. 未做与边界（写清以免下一轮当成已做）：①**uniffi 面仍未接线**（ADR-009 出货两端都走
+    C ABI），本批在 uniffi 侧的收益是把两面的口径写成同一份、不再是「C ABI 有、uniffi 没有」，
+    不是给宿主新增一条运行时防线；②`policy_version` 的 schema 约束没加（见第 5 条①），
+    若日后要加属契约决策；③nonce 无界但只查表这一判定是**本批的推理**而非新判据，
+    判据面没有钉住「nonce 文案只放长度」——钉它要先钉住 `MAX_NONCE_LENGTH` 那一族；
+    ④`scripts/verify_uniffi_binding_surface.py:56-69` 的 `_brace_body` 与
+    `rust_code_reader.fn_body` 同形（差别只在失败值 `""` vs `None`），本批**没有**合并它，
+    已作为 Q63 登记在 §5.2.1。
+
+
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
   处方写的是「Windows 提前捕获定义器、核心与 Android 直接引用 ⇒ 三端不同形 ⇒ 要收口」，
@@ -3502,6 +3637,19 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   后判长度、uniffi 面 `update_host_denylist(Vec<String>)` 无条目数上限）第九轮登记时记为
   「仍未修、不另立 ID」——**已于本批落地**，两半的修法、上限为什么不拒真实名单与能红判据
   见 §3.61（该形态此前不进 §五 队列、不进任何门禁，故每轮重新发现一次；教训是同批第 1 条）。
+- **「`consume_navigation` 里宿主可构造的 `FfiAuthorizedAction` 是第三条未判长回声面」不成立**
+  （第九轮 R9-B63 / §3.63 现读枚举时量到，判为不成立）：`ffi/broker.rs:589` 那个
+  `action: FfiAuthorizedAction` 是 uniffi record，字段全部由宿主递交，而 `validate_action_at`
+  （`core/broker.rs:333-339`）确实会把 `action.session_id` 与 `action.policy_version` 整串
+  写进 detail 与 explanation——形状与 R9-B63 刚修的那条一模一样。它不成立的理由是**到达路径**：
+  在走到核心层之前，`:644` 那条 match 要求 `same_binding(&issued, &action)` 成立，而
+  `same_binding`（`ffi/broker.rs:757-768`）逐字段比对**含 `session_id` 与 `policy_version`**
+  的账本内 broker 自己签发的那份 ⇒ 走到回声那一步的这两个串必然与账本等值，账本内的会话键由
+  `create_session`（`:520`）判 256、版本串由本批判 256；不相等则拿到的是 `:657` 的
+  `action_not_issued`，四条文案全静态。`Consumed { session_id }` 那处克隆（`:692`）同受这条
+  等值约束。**推理记在这里，判据没有钉它**：钉「到达回声前必须先过逐字段等值」需要跨函数体的
+  数据流分析，超出本仓按文本判源码的口径面；下一轮若把 `same_binding` 改成子集比较，
+  这条就重新成立——`ffi_navigation_tests` 里有绑定比较清单的用例，改它不会全绿。
 
 ## 七、COVERAGE 汇总（置信边界）
 

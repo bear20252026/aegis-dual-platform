@@ -12,7 +12,8 @@ uniffi 面收到的是宿主直传 `String`——`ffi/mod.rs` 自己就写着「
 剔注释口径单源 `scripts/text_anchors.py`（R9-B39 / R9-B45 那两条课：注记里逐字写着被禁形态，
 不剔注释的判据会被自己的注记打绿）。
 
-判据（每条都在 tests/python/ffi_input_bounds_test.py 里以内存注入证伪）：
+判据（每条都在 tests/python/ffi_input_bounds_test.py 与按面拆出的
+ffi_input_bounds_face_test.py 里以内存注入证伪）：
 1. `hex_seed_to_bytes` 里必须有一条走 `hex.len()` 的前置判定，位置在 `hex_decode(` **之前**；
    且它比的数必须能从返回类型 `[u8; N]` 推出来（N×2）——写死一个别的数即红，防「护栏和契约
    不是同一个数」这种假落地。
@@ -21,8 +22,14 @@ uniffi 面收到的是宿主直传 `String`——`ffi/mod.rs` 自己就写着「
 3. 三个 64 KiB 常量（`c_abi::FFI_INPUT_MAX_BYTES` / `ffi::MAX_FFI_URL_BYTES` /
    `denylist::MAX_BATCH_BYTES`）必须同值。「同值」是 RS-173 写进注记的口径，三面各抄一份就是
    漂移面；本判据**现读三份再比**，不在代码里写字面 65536。
-4. 单条上限必须与 `ffi` 面的 host 长度口径（管线 domain / scope / 会话键 / 脱敏 host）同值——
-   同样现读现比。
+4. 单条上限必须与 `ffi` 面的短标识符长度口径（管线 domain / scope / 会话键 / 脱敏
+   host / 构造期策略版本）同值——同样现读现比。
+5. 构造期 `policy_version` 的上限必须是一个**两面共用**的谓词，且两面都走在把它存进
+   结构体/交进构造器之前（R9-B63：它会被 clone 进每条签发的授权，账本上限 50K；
+   C ABI 那条 64 KiB 是防越读的「读」口径，不是「存」口径）。
+6. 三段入口上限（会话键 / scope / raw_url）只能有一个定义处，三个入口都排在
+   `canonicalize_external` 与第一个 `format!` 之前；判定体里三个输入只许以 `.len()`
+   形态出现（回声面），`broker.rs` 里再内联一份 `MAX_FFI_URL_BYTES` 也算红。
 
 退出码：0=通过 / 1=任一判据不成立 / 2=判定面塌缩（受管文件读不到、锚点找不到——函数被改名或
 文件被换，此时「没发现问题」不代表「没有问题」）。
@@ -40,7 +47,8 @@ SEED_FILE = CORE / "ffi" / "mod.rs"
 CABI_FILE = CORE / "c_abi" / "mod.rs"
 BROKER_FILE = CORE / "ffi" / "broker.rs"
 DENYLIST_FILE = CORE / "ffi" / "broker" / "denylist.rs"
-TEXTS = (SEED_FILE, CABI_FILE, BROKER_FILE, DENYLIST_FILE)
+BOUNDS_FILE = CORE / "ffi" / "broker" / "input_bounds.rs"
+TEXTS = (SEED_FILE, CABI_FILE, BROKER_FILE, DENYLIST_FILE, BOUNDS_FILE)
 
 # 「一批能送多少」的同一口径，写在三个文件里（判据 3）
 BIG_BATCH_CONSTS = (
@@ -48,69 +56,22 @@ BIG_BATCH_CONSTS = (
     (SEED_FILE, "MAX_FFI_URL_BYTES"),
     (DENYLIST_FILE, "MAX_BATCH_BYTES"),
 )
-# 「一个 host 能多长」的同一口径（判据 4）；denylist 那份是被比对者
-HOST_LEN_CONSTS = (
+# 「一个短标识符能多长」的同一口径（判据 4）；denylist 那份是被比对者。
+# 这一族从来不止 host：会话键、scope、管线 domain 都不是 host——组名按实际成员改准，
+# R9-B63 把构造期策略版本也收进来（它会被 clone 进每条签发的授权）。
+IDENT_LEN_CONSTS = (
     (SEED_FILE, "MAX_PIPELINE_DOMAIN_BYTES"),
     (BROKER_FILE, "MAX_SCOPE_BYTES"),
     (BROKER_FILE, "MAX_SESSION_KEY_BYTES"),
     (BROKER_FILE, "MAX_REDACT_HOST_BYTES"),
+    (BOUNDS_FILE, "MAX_POLICY_VERSION_BYTES"),
 )
 ENTRY_CAP_CONST = "MAX_ENTRY_BYTES"
 
 sys.path.insert(0, str(ROOT / "scripts"))
-from text_anchors import strip_comments  # 剔注释口径单源（R9-B45）
-
-
-def key(path: Path) -> str:
-    """判定面的键 = 相对路径——`mod.rs` 与 `broker.rs` 各有两份，文件名不够唯一。"""
-    return path.relative_to(ROOT).as_posix()
-
-
-def code_only(path: Path) -> str:
-    """读一份源文件并剔注释——注释里的形态不算证据（R9-B39）。"""
-    return strip_comments(path.read_text(encoding="utf-8", errors="ignore"), key(path))
-
-
-def load_texts(paths=TEXTS) -> dict[str, str]:
-    return {key(p): code_only(p) for p in paths if p.exists()}
-
-
-def const_value(texts: dict[str, str], path: Path, name: str) -> int | None:
-    """读 `const NAME: usize = <表达式>;`，只认十进制与 `*`（够本仓这几个常量用）。
-
-    解不开就当缺失返回 None——调用方按「判定面塌缩」处理，而不是按 0 参与比较。
-    """
-    body = texts.get(key(path), "")
-    match = re.search(rf"const\s+{name}\s*:\s*usize\s*=\s*([^;\n]+);", body)
-    if not match:
-        return None
-    expr = match.group(1).strip()
-    if not re.fullmatch(r"\d+(?:\s*\*\s*\d+)*", expr):
-        return None
-    product = 1
-    for factor in re.split(r"\s*\*\s*", expr):
-        product *= int(factor)
-    return product
-
-
-def fn_body(text: str, name: str) -> str | None:
-    """取函数体（大括号配平）。找不到函数头返回 None=判定面塌缩。"""
-    header = re.search(rf"\bfn\s+{re.escape(name)}\s*(?:<[^>]*>)?\s*\(", text)
-    if not header:
-        return None
-    brace = text.find("{", header.end())
-    if brace < 0:
-        return None
-    depth = 0
-    for index in range(brace, len(text)):
-        char = text[index]
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return text[brace + 1 : index]
-    return None
+# 「读 Rust 源」的四件通用事（键 / 剔注释 / 函数体 / usize 常量）收在 rust_code_reader
+# 一份里；剔注释的口径本身仍是 text_anchors 那一遍（R9-B45 / R9-B63）
+from rust_code_reader import const_value, fn_body, key, load_texts
 
 
 def seed_problems(seed: str) -> list[str]:
@@ -167,10 +128,87 @@ def denylist_problems(texts: dict[str, str]) -> list[str]:
     return problems
 
 
+def policy_version_problems(texts: dict[str, str]) -> list[str]:
+    """判据 5：构造期版本上限单源，且两面都走在**存进结构体之前**（R9-B63）。"""
+    ok = fn_body(texts[key(BOUNDS_FILE)], "policy_version_ok")
+    if ok is None:
+        return ["`policy_version_ok` 不在位——判据 5 的判定面已失效，请连同本文件一起改"]
+    problems: list[str] = []
+    if "MAX_POLICY_VERSION_BYTES" not in ok:
+        problems.append(
+            "`policy_version_ok` 不再引用 `MAX_POLICY_VERSION_BYTES`：版本串会被 clone 进"
+            "每一条签发的授权（账本上限 50K ⇒ 一份宿主输入换成 50K 份驻留）"
+        )
+    for path in (CABI_FILE, BROKER_FILE):
+        if "policy_version_ok" not in texts[key(path)]:
+            problems.append(
+                f"{key(path)} 不再引用 `policy_version_ok`——两面各写一份就是新的漂移面"
+            )
+    cabi = texts[key(CABI_FILE)]
+    if 0 <= cabi.find("FfiBroker::new(") < cabi.find("policy_version_ok"):
+        problems.append("C ABI 的版本判定走在 `FfiBroker::new` 之后：先建后判等于没判")
+    expiry = fn_body(texts[key(BROKER_FILE)], "with_action_expiry")
+    if expiry is None:
+        return problems + ["`with_action_expiry` 不在位——判据 5 的第二半无从定位"]
+    stored_at, judged_at = expiry.find("Self {"), expiry.find("policy_version_ok")
+    if judged_at < 0 or (stored_at >= 0 and judged_at > stored_at):
+        problems.append(
+            "`with_action_expiry` 里版本判定没有走在结构体构造之前：uniffi 构造器不可失败，"
+            "退回哨兵是它唯一的 fail-closed 手段，先存字段就丢了这条"
+        )
+    return problems
+
+
+def entry_guard_problems(texts: dict[str, str]) -> list[str]:
+    """判据 6：三段前置上限走在解析与文案之前，三个入口不各自内联一份（R9-B63）。"""
+    bounds = texts[key(BOUNDS_FILE)]
+    entry, url = fn_body(bounds, "navigation_entry_refusal"), fn_body(bounds, "url_entry_refusal")
+    if entry is None or url is None:
+        return ["`navigation_entry_refusal`/`url_entry_refusal` 不在位——判据 6 的判定面已失效"]
+    problems: list[str] = []
+    if "MAX_FFI_URL_BYTES" not in url:
+        problems.append("`url_entry_refusal` 不再判 `MAX_FFI_URL_BYTES`：raw_url 没了前置上限")
+    if "canonicalize_external(" in entry:
+        problems.append("入口判定里自己做了解析：这里只许按长度拒，解析是第二道防线的事")
+    for const in ("MAX_SESSION_KEY_BYTES", "MAX_SCOPE_BYTES"):
+        if f"> {const}" not in entry:
+            problems.append(f"入口判定里没有了 `> {const}`：这一路的超长输入会先进 deny 文案")
+    # 回声面：未判长的宿主原文既不进解析、也不得整串进 deny 文案。字面量里
+    # "scope 超长" 这类词不算引用，但 `{scope}` 内插算——所以分开判。
+    outside = re.sub(r'"(?:[^"\\]|\\.)*"', "", entry)
+    for var in ("session_id", "tab_id", "scope"):
+        if re.search(rf"\b{var}\b", re.sub(rf"\b{var}\.len\(\)", "", outside)):
+            problems.append(
+                f"入口判定里 `{var}` 以整串形态出现（不只是 `.len()`）——"
+                "超长输入的原样回显正是本批要掐掉的那条放大面"
+            )
+        if re.search(rf"\{{\s*{var}\b", entry):
+            problems.append(f"入口判定的文案内插了 `{var}` 整串：同上，只许放长度数字")
+    broker = texts[key(BROKER_FILE)]
+    if "MAX_FFI_URL_BYTES" in broker:
+        problems.append("`ffi/broker.rs` 里又内联了 `MAX_FFI_URL_BYTES`——同一条上限写三遍就是漂移面")
+    for name in ("evaluate_navigation", "approve_navigation_confirmation", "consume_navigation"):
+        body = fn_body(broker, name)
+        if body is None:
+            problems.append(f"入口 `{name}` 读不出函数体——判据面塌缩")
+            continue
+        called = body.find("input_bounds::")
+        if called < 0:
+            problems.append(f"`{name}` 不再经 `input_bounds::` 判前置上限")
+            continue
+        for anchor in ("canonicalize_external(", "format!("):
+            at = body.find(anchor)
+            if at >= 0 and called > at:
+                problems.append(
+                    f"`{name}` 的前置判定排在 `{anchor}` 之后：深解析或文案拼装已经发生了"
+                )
+    return problems
+
+
 def parity_problems(texts: dict[str, str]) -> list[str]:
     """判据 3+4：同一口径的常量组必须同值（现读现比，不抄字面）。"""
     problems: list[str] = []
-    groups = (("64 KiB 批次口径", BIG_BATCH_CONSTS), ("host 长度口径", HOST_LEN_CONSTS))
+    groups = (("64 KiB 批次口径", BIG_BATCH_CONSTS), ("短标识符长度口径", IDENT_LEN_CONSTS))
     for label, group in groups:
         values = {name: const_value(texts, path, name) for path, name in group}
         missing = sorted(name for name, value in values.items() if value is None)
@@ -181,12 +219,12 @@ def parity_problems(texts: dict[str, str]) -> list[str]:
             detail = "、".join(f"{name}={value}" for name, value in sorted(values.items()))
             problems.append(f"{label}出现分叉：{detail}")
     entry = const_value(texts, DENYLIST_FILE, ENTRY_CAP_CONST)
-    family = {name: const_value(texts, path, name) for path, name in HOST_LEN_CONSTS}
+    family = {name: const_value(texts, path, name) for path, name in IDENT_LEN_CONSTS}
     if entry is None:
         problems.append(f"`{ENTRY_CAP_CONST}` 读不出值——单条上限不在位")
     elif None not in family.values() and len(set(family.values()) | {entry}) > 1:
         detail = "、".join(f"{name}={value}" for name, value in sorted(family.items()))
-        problems.append(f"`{ENTRY_CAP_CONST}={entry}` 与 ffi 面的 host 长度口径分叉：{detail}")
+        problems.append(f"`{ENTRY_CAP_CONST}={entry}` 与 ffi 面的短标识符长度口径分叉：{detail}")
     return problems
 
 
@@ -198,12 +236,14 @@ def check(texts: dict[str, str]) -> list[str]:
     return (
         seed_problems(texts[key(SEED_FILE)])
         + denylist_problems(texts)
+        + policy_version_problems(texts)
+        + entry_guard_problems(texts)
         + parity_problems(texts)
     )
 
 
 def run() -> int:
-    texts = load_texts()
+    texts = load_texts(TEXTS)
     if len(texts) < len(TEXTS):
         missing = sorted(key(p) for p in TEXTS if key(p) not in texts)
         print(f"[环境错误] 受管源文件读不到：{missing}", file=sys.stderr)
@@ -218,7 +258,7 @@ def run() -> int:
     entry = const_value(texts, DENYLIST_FILE, ENTRY_CAP_CONST)
     print(
         f"[ok] FFI 前置上限判据通过：批次口径三面同值 {batch} 字节；"
-        f"单条 host 上限 {entry} 字节（与 ffi 面 host 长度口径同值）"
+        f"短标识符口径 {len(IDENT_LEN_CONSTS)} 份同值 {entry} 字节（含构造期策略版本）"
     )
     return 0
 
