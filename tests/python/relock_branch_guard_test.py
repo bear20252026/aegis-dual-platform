@@ -113,6 +113,30 @@ def test_every_write_capable_job_calls_the_guard_twice() -> None:
     assert not missing, f"这些 job 的守卫调用少于两处：{missing}"
 
 
+def test_every_guard_call_sits_after_a_checkout() -> None:
+    """守卫是**一份仓库脚本**，所以每个调用点前面必须有 checkout——否则 workspace 里根本没有这个文件。
+
+    这条不是理论：把守卫放在「检出目标分支」之前时，dispatch 在 Actions 里红在
+    `bash: scripts/relock_branch_guard.sh: No such file or directory`（run 38520687580），
+    而当时上面那条判据（数调用点）全绿——「调用点存在」和「调用点能执行」是两件事。
+    runner 的 workspace 在第一次 `actions/checkout` 之前是空的，这是 Actions 的事实，不是本仓的约定。
+    """
+    doc = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    for name, job in (doc.get("jobs") or {}).items():
+        steps = job.get("steps", []) or []
+        checkout_at = [i for i, s in enumerate(steps)
+                       if "actions/checkout" in str(s.get("uses", ""))]
+        guard_at = [i for i, s in enumerate(steps)
+                    if "relock_branch_guard.sh" in str(s.get("run", ""))]
+        if not guard_at:
+            continue
+        assert checkout_at, f"job {name} 调了守卫却没有任何 checkout——脚本无从存在"
+        for index in guard_at:
+            assert index > min(checkout_at), (
+                f"job {name} 第 {index} 步调守卫，早于第 {min(checkout_at)} 步的 checkout："
+                "workspace 还没有 scripts/relock_branch_guard.sh")
+
+
 def test_guard_script_is_not_a_dead_file() -> None:
     """脚本本身要能被解析（bash -n），且 workflow 的 header 提到的单源路径就是它。"""
     bash = shutil.which("bash")
