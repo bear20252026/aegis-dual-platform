@@ -67,12 +67,38 @@ classpath 域）。
 > 只是不在出货面上，选错这个枚举值本身就是一种失实陈述。
 
 > **R9-B49（2026-10-13）执行与留痕**：用户授权后，本文档列出的 9 条告警在 GitHub 上以
-> `dismissed_reason=tnt`（对项目不适用）正式 dismiss，dismiss comment 逐条引用本文的锁文件
+> `dismissed_reason=tolerable_risk` 正式 dismiss，dismiss comment 逐条引用本文的锁文件
 > 行号与配置名。**dismiss 不是终点**：它依赖的事实（这 5 个坐标只在工具/测试类路径里）
 > 现在由 `scripts/verify_gradle_alert_scope_boundary.py` 常跑判定——任何一条坐标进
 > `release/debug Runtime|Compile Classpath` 或 `debugAndroidTest*Classpath`（装进设备的那份）
 > 即判红；上游若把节点整体移除（锁里再也找不到该坐标），也判红——那时登记表与本文要同步，
 > 而不是继续挂着一条已无载体的 dismiss。解除条件仍是 AGP 9.5+ 携带修复版传递依赖。
+>
+> （本段原文写 `dismissed_reason=tnt（对项目不适用）`——那是首稿的措辞，R9-B49 实测
+> API 只接受 `fix_started / inaccurate / no_bandwidth / not_used / tolerable_risk`，
+> 实际执行用的是 `tolerable_risk`（上一段的 16:15Z 回读就是它）。留这条更正而不是静默改掉：
+> 一份安全处置文档里写了一个**不存在的枚举值**，读的人就无法复核当时到底做了什么。）
+
+> **R9-B60（2026-10-14）现读：那 9 条 dismiss 已经被 GitHub 重开，本文不再是「已 dismiss」状态**。
+> API 回读（2026-10-14T08:46:08Z 现跑 `gh api .../dependabot/alerts`）：`open=9` / `dismissed=0` / `fixed=3`，9 条编号
+> #12 #11 #10 #9 #8 #7 #6 #3 #2，`updated_at` 全部落在 **2026-10-14T07:09:5xZ**——
+> 也就是 PR #197 并入（07:09:20Z）之后紧接着的那次扫描。
+> 机制不是「谁删了我们的处置」，而是 Dependabot 的正常行为：**只要该 vulnerable 版本仍然
+> 可以在依赖图里解析出来，下一次扫描就会把已 dismiss 的告警重开**。现读锁面给出的正是这一条：
+> `org.bouncycastle:bcprov-jdk18on:1.80.2=androidLintTool`，而 #12/#11 的范围是 `< 1.85`、
+> #8 是 `>= 1.74, < 1.84` ——1.80.2 仍然命中；同批 `1.85` 只出现在 `debugUnitTest*` 三条配置里。
+>
+> 因此这份文档的**当前状态是 open**，而「tolerable_risk」这个判定成立的依据**不是**告警状态，
+> 是 scope 门禁那句现读结论（5 个坐标全在 `androidLintTool` / `ktlint` / `debugUnitTest*`，
+> 零命中出货与装机 classpath）。两条可依赖的东西与一条不可依赖的东西就此分开：
+> - 可依赖：`verify_gradle_alert_scope_boundary.py`（PR 面常驻，判坐标归属）；
+> - 可依赖：本文的判定与证据（锁文件行号 + configuration 名）；
+> - **不可依赖**：GitHub 侧的 alert `state`——它会随扫描自行翻转。
+> 所以 `gradle-dependency-insight.yml`（dispatch-only 诊断面）新增一步**现读并报告**告警状态，
+> 明确 `continue-on-error` 且不参与任何判定：把它做成 PR 门禁就是拿随机波动当红灯。
+> 是否再 dismiss 一次（会再次被重开，形成拉锯）、还是去把 `androidLintTool` 那份 1.80.2
+> 顶到 ≥1.85（需要动 AGP/lint 工具面，属构建面变更）——**都是需要仓库所有者点头的操作**，
+> 本文只把两个事实与代价写清，不代做决定。
 
 > ⚠ **R8-CI-06 更正（第八轮 2026-10-05）**：本段原文写作「处置：tolerable_risk……
 > 附证据 **dismissing**」，把「判定」表述成了「已在 GitHub 上执行的操作」。

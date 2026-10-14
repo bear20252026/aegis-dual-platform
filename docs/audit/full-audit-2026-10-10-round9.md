@@ -734,6 +734,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      门禁判「两端只执行被标记的子集，确认面由核心独占」——这是冻结契约面的词表变更，与
      Q21 R9-SH-11 是同一次定稿。**默认不执行任何一个**：在那之前 `CONSUMER_MANIFEST` 保持
      `{"RS"}`（R9-B39 刚把它从虚记的 `{CS,RS}` 改回来）。
+  12. **那 9 条 Maven 告警要不要再处理一次**（§3.60 现读后新增，两个选项都要仓库所有者点头）：
+     R9-B49 的 dismiss 已被 2026-10-14T07:09:5xZ 那次扫描重开（现读 `open=9 / dismissed=0 / fixed=3`），
+     机制是「vulnerable 版本仍可解析就重开」——`bcprov-jdk18on:1.80.2` 还在 `androidLintTool` 里，
+     而告警范围是 `< 1.85` / `>= 1.74, < 1.84`。可选：
+     **①再 dismiss 一轮**（同样的理由与证据，代价是下一次扫描还会重开，变成拉锯；
+     且每次点击都是一次对外的安全姿态声明）；
+     **②fix-forward**——把 lint 工具面那份顶到 ≥1.85（要动 AGP/lint 工具链版本面，
+     属构建变更，牵连 `verify_gradle_alert_scope_boundary.py` 的登记表与分诊文档证据）。
+     判据面不受影响：`verify_gradle_alert_scope_boundary.py` 常驻判「坐标落在哪条 configuration」，
+     这是 `tolerable_risk` 唯一的事实依据，告警 state 已经不是（也未再被当作）证据。
+     本项**默认两个都不做**，只把状态与代价写清。
 
 ## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
 
@@ -3179,9 +3190,40 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `verify_vectors` / `verify_vector_consumers` / ruff / bandit / py312 / 行数红线 /
    markdown 三件 / 队列状态 / 文本锚全过。
 
+### 3.60 R9-B60（2026-10-14，现读发现的失活）：R9-B49 那次 dismiss 已经被下一次扫描重开——判据面从来不该建在它上面
+
+1. 触发点是顺手的一次 API 读：并入 #197 之后照例看一眼 Dependabot 状态，现读
+   `open=9 / dismissed=0 / fixed=3`（`gh api .../dependabot/alerts?state=…`，2026-10-14T08:46:08Z），
+   编号 #12 #11 #10 #9 #8 #7 #6 #3 #2 与 §3.49 那 9 条逐一对上，
+   `updated_at` 全部是 **2026-10-14T07:09:5xZ** —— 也就是 #197 squash 完成（07:09:20Z）后
+   紧接着的那次扫描。**不是有人删了我们的处置**，是 Dependabot 的正常行为：
+   只要 vulnerable 版本仍然可以在依赖图里解析出来，已 dismiss 的告警就会被重开。
+   现读锁面正好给出这一条：`org.bouncycastle:bcprov-jdk18on:1.80.2=androidLintTool`，
+   而 #12/#11 的范围是 `< 1.85`、#8 是 `>= 1.74, < 1.84`；同批 `1.85` 只出现在 `debugUnitTest*` 三条配置里。
+2. 这件事真正值得记的不是那 9 条告警，而是**我们刚把「已在 GitHub 上 dismiss」写进了一份文档**。
+   §3.49 的回读是有时间戳的（2026-10-13 16:15Z），那份分诊文档也是——所以它没有说谎；
+   但它给读者的**印象**是「这批已经处置完了」，而这个印象的保质期是一次扫描。
+   第八轮 R8-CI-06 抓的是「把判定写成已执行」，这次是同族的反向形态：
+   **把一次执行写成了持续状态**。修法不是再点一次，而是把状态从「证据」降级成「可读但不可依赖」：
+   `tolerable_risk` 的依据是 `verify_gradle_alert_scope_boundary.py` 那句现读结论
+   （5 个坐标全在 `androidLintTool` / `ktlint` / `debugUnitTest*`，零命中出货与装机 classpath），
+   它在告警重开之后依然成立、依然常驻判住——这正是当初把判据建在坐标归属而不是告警状态上的回报。
+3. 因此本批只做两件小事，**不碰服务端**：
+   - 分诊文档补一段带时间戳的现读（含机制、编号、范围与锁行证据），并顺手更正同一份文档里
+     一个**不存在的枚举值**：`dismissed_reason=tnt` → 实际执行用的是 `tolerable_risk`
+     （422 报错清单里根本没有 `tnt`）。留更正记录而不是静默改掉——一份安全处置文档写着
+     非法枚举，读的人就没法复核当时到底做了什么。
+   - `gradle-dependency-insight.yml`（dispatch-only 诊断面）加一步**现读并报告**告警状态，
+     `continue-on-error: true` 且不参与任何判定；`permissions` 补 `security-events: read`。
+     为什么不做成门禁：告警 state 由服务端扫描自行翻转，把它判进 PR 面＝随机红灯
+     （R9-B46 之后触发面与必需检查的对应关系是明确的，这条不进去）。
+4. **要不要再处理一次那 9 条**升入 §四 第 12 项待用户定稿：①再 dismiss 一轮（同样理由，
+   但下一次扫描还会重开，变成拉锯，且每次点击都是一次对外姿态声明）；②fix-forward——
+   把 lint 工具面那份顶到 ≥1.85（动 AGP/lint 工具链版本面，牵连登记表与本文证据）。
+   本批默认两个都不做。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
-
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
   处方写的是「Windows 提前捕获定义器、核心与 Android 直接引用 ⇒ 三端不同形 ⇒ 要收口」，
   回读三条事实后它不成立——①三端出货注入面里**没有一处**给 `Object.defineProperty` 赋值
