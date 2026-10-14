@@ -734,6 +734,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      门禁判「两端只执行被标记的子集，确认面由核心独占」——这是冻结契约面的词表变更，与
      Q21 R9-SH-11 是同一次定稿。**默认不执行任何一个**：在那之前 `CONSUMER_MANIFEST` 保持
      `{"RS"}`（R9-B39 刚把它从虚记的 `{CS,RS}` 改回来）。
+  12. **那 9 条 Maven 告警要不要再处理一次**（§3.60 现读后新增，两个选项都要仓库所有者点头）：
+     R9-B49 的 dismiss 已被 2026-10-14T07:09:5xZ 那次扫描重开（现读 `open=9 / dismissed=0 / fixed=3`），
+     机制是「vulnerable 版本仍可解析就重开」——`bcprov-jdk18on:1.80.2` 还在 `androidLintTool` 里，
+     而告警范围是 `< 1.85` / `>= 1.74, < 1.84`。可选：
+     **①再 dismiss 一轮**（同样的理由与证据，代价是下一次扫描还会重开，变成拉锯；
+     且每次点击都是一次对外的安全姿态声明）；
+     **②fix-forward**——把 lint 工具面那份顶到 ≥1.85（要动 AGP/lint 工具链版本面，
+     属构建变更，牵连 `verify_gradle_alert_scope_boundary.py` 的登记表与分诊文档证据）。
+     判据面不受影响：`verify_gradle_alert_scope_boundary.py` 常驻判「坐标落在哪条 configuration」，
+     这是 `tolerable_risk` 唯一的事实依据，告警 state 已经不是（也未再被当作）证据。
+     本项**默认两个都不做**，只把状态与代价写清。
 
 ## 五、待回读队列（**必须带 file:line**——第八轮失账的修法）
 
@@ -3179,9 +3190,69 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `verify_vectors` / `verify_vector_consumers` / ruff / bandit / py312 / 行数红线 /
    markdown 三件 / 队列状态 / 文本锚全过。
 
+### 3.60 R9-B60（2026-10-14，现读发现的失活）：R9-B49 那次 dismiss 已经被下一次扫描重开——判据面从来不该建在它上面
+
+1. 触发点是顺手的一次 API 读：并入 #197 之后照例看一眼 Dependabot 状态，现读
+   `open=9 / dismissed=0 / fixed=3`（`gh api .../dependabot/alerts?state=…`，2026-10-14T08:46:08Z），
+   编号 #12 #11 #10 #9 #8 #7 #6 #3 #2 与 §3.49 那 9 条逐一对上，
+   `updated_at` 全部是 **2026-10-14T07:09:5xZ** —— 也就是 #197 squash 完成（07:09:20Z）后
+   紧接着的那次扫描。**不是有人删了我们的处置**，是 Dependabot 的正常行为：
+   只要 vulnerable 版本仍然可以在依赖图里解析出来，已 dismiss 的告警就会被重开。
+   现读锁面正好给出这一条：`org.bouncycastle:bcprov-jdk18on:1.80.2=androidLintTool`，
+   而 #12/#11 的范围是 `< 1.85`、#8 是 `>= 1.74, < 1.84`；同批 `1.85` 只出现在 `debugUnitTest*` 三条配置里。
+2. 这件事真正值得记的不是那 9 条告警，而是**我们刚把「已在 GitHub 上 dismiss」写进了一份文档**。
+   §3.49 的回读是有时间戳的（2026-10-13 16:15Z），那份分诊文档也是——所以它没有说谎；
+   但它给读者的**印象**是「这批已经处置完了」，而这个印象的保质期是一次扫描。
+   第八轮 R8-CI-06 抓的是「把判定写成已执行」，这次是同族的反向形态：
+   **把一次执行写成了持续状态**。修法不是再点一次，而是把状态从「证据」降级成「可读但不可依赖」：
+   `tolerable_risk` 的依据是 `verify_gradle_alert_scope_boundary.py` 那句现读结论
+   （5 个坐标全在 `androidLintTool` / `ktlint` / `debugUnitTest*`，零命中出货与装机 classpath），
+   它在告警重开之后依然成立、依然常驻判住——这正是当初把判据建在坐标归属而不是告警状态上的回报。
+3. 因此本批只做两件小事，**不碰服务端**：
+   - 分诊文档补一段带时间戳的现读（含机制、编号、范围与锁行证据），并顺手更正同一份文档里
+     一个**不存在的枚举值**：`dismissed_reason=tnt` → 实际执行用的是 `tolerable_risk`
+     （422 报错清单里根本没有 `tnt`）。留更正记录而不是静默改掉——一份安全处置文档写着
+     非法枚举，读的人就没法复核当时到底做了什么。
+   - `gradle-dependency-insight.yml`（dispatch-only 诊断面）加一步**现读并报告**告警状态，
+     `continue-on-error: true` 且不参与任何判定；`permissions` 补 `security-events: read`。
+     为什么不做成门禁：告警 state 由服务端扫描自行翻转，把它判进 PR 面＝随机红灯
+     （R9-B46 之后触发面与必需检查的对应关系是明确的，这条不进去）。
+4. **要不要再处理一次那 9 条**升入 §四 第 12 项待用户定稿：①再 dismiss 一轮（同样理由，
+   但下一次扫描还会重开，变成拉锯，且每次点击都是一次对外姿态声明）；②fix-forward——
+   把 lint 工具面那份顶到 ≥1.85（动 AGP/lint 工具链版本面，牵连登记表与本文证据）。
+   本批默认两个都不做。
+5. **为了验证新步骤而跑的那次 dispatch，抓到了旁边那一步早就坏了**（run **38539285993**，
+   failure）：失败点不是新加的告警状态步骤，而是它前面的「工具类路径闭包」——那一步写的是
+   `python scripts/verify_gradle_alert_scope_boundary.py` 与 `grep android/*/gradle.lockfile`，
+   而 job 有 `defaults.run.working-directory: android` ⇒ runner 找的是
+   `android/scripts/…`（不存在），glob 也展不开。**自 R9-B49 加进来起这一步从没跑通过**，
+   而它是 dispatch-only 诊断面：PR 面全绿，没人去看它红。
+   更难受的顺序是：`grep … || echo "(零命中)"` 先执行，把「找不到文件」印成了一句
+   看起来像结论的 `(零命中)`，然后最后一行才 exit 2——**日志里失败之前先有一条假陈述**。
+   与本批第 2 条是同一族的第三种形态：§3.58 是「调用点存在但脚本还没被检出」，
+   这条是「调用点存在但站在另一个目录里」，而它比 §3.58 更隐蔽，因为红的是一条诊断流而不是一条门禁。
+6. 修法与判据（都进 PR 面，不再靠人记得跑一次 dispatch）：
+   - 那一步加字面量 `working-directory: .`（ sibling 的做法是 `../scripts/…`；这里选前者是因为
+     新门禁按**字面** cwd 解析路径，`${{ github.workspace }}` 判不到）；
+   - 加「锁一把都没找到 ⇒ exit 1」的前置检查，而不是让 `|| echo "(零命中)"` 有机会把
+     判定面塌缩说成一条结论（与 `verify_gradle_alert_scope_boundary.py` 的空锁 exit 2 同口径）；
+   - 新常驻门禁 `scripts/verify_workflow_script_paths.py`：每条 `python <路径>.py` 必须在其
+     生效 cwd（step → job.defaults.run → workflow.defaults.run）下真实存在；带 `${{ }}` 的
+     路径**点名要求人工核**而不是放过——否则「把路径挪进表达式」就是绕过这条判据的合法通道。
+     实树现读：16 份 workflow / 146 个 run 步骤全过；接进 `contracts.yml` 的
+     `contract-source-of-truth`（紧跟被保护的那条 scope 门禁）。
+   - 反向实证：把 `working-directory: .` 那一行删掉 ⇒ 门禁 exit 1 并指名那一步，
+     用例里两条同时红（`test_real_tree_has_no_unexecutable_python_calls` 与
+     锚住这一步的 `test_the_insight_step_that_started_this_is_now_executable`）；恢复后全绿。
+     对照用例同样重要：`python ../scripts/verify_versions.py` 在 cwd=android 下必须**不红**，
+     否则这条判据就只是「任何带路径的调用都可疑」。
+7. 验证：新增 13 条用例（`tests/python/workflow_script_paths_test.py`），全量
+   `pytest tests/python` **815 passed / 1 skipped**；ruff / bandit / py312 / 行数红线 /
+   markdown 三件 / 队列状态 / 触发面（16 个 workflow 分类不变）/ 新门禁全过。
+   Actions 侧的新步骤实跑结果（含告警状态那一步的输出）记在下面第 8 条。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
-
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
   处方写的是「Windows 提前捕获定义器、核心与 Android 直接引用 ⇒ 三端不同形 ⇒ 要收口」，
   回读三条事实后它不成立——①三端出货注入面里**没有一处**给 `Object.defineProperty` 赋值
