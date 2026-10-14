@@ -327,7 +327,7 @@ impl FfiBroker {
     /// 返回**被接受**的条目数：调用方可用 `输入数 - 返回值` 发现有一批条目
     /// 被形态校验拒收，而不是静默变成死条目。空输入 = 清空（**不** deny-all）——
     /// 未接入订阅源的端行为与既往完全一致，这是本改动能安全落地的前提。
-    /// 匹配口径（精确 + 父域后缀链）见 `ffi::broker::denylist`。
+    /// 匹配口径（精确 + 父域后缀链）、批次总字节上限与「超限整批拒收」单源见 `ffi::broker::denylist`（R8-RS-13 / R9-B61）。
     pub fn update_host_denylist(&self, hosts: Vec<String>) -> u32 {
         self.apply_host_denylist(hosts, true)
     }

@@ -277,6 +277,9 @@ pub fn build_fingerprint_pipeline_with_mode(
     }
 }
 
+/// 定长种子的 hex 字符数（32 字节 × 2）——先判它，再进解码面。
+const HEX_SEED_CHARS: usize = 64;
+
 /// 十六进制种子转字节数组（RS-036 收紧——整体拒绝）。
 ///
 /// 此前逐字节 `unwrap_or(0)` 静默置零 + 长串截断：畸形种子退化为全零
@@ -287,7 +290,16 @@ pub fn build_fingerprint_pipeline_with_mode(
 /// RS-303（2026-10-02 审计）：解码改 util::hex_decode 单源——手写
 /// nibble 循环是 crate 内又一份 hex 解码实现（口径漂移面）；64 字符
 /// 恰好解出 32 字节，`try_into` 收口定长形态。
+///
+/// R8-RS-13（第八轮登记，第九轮 R9-B61 落地）：**长度判定必须在解码之前**。
+/// `hex_decode` 对任意偶数长度先 `with_capacity(len/2)` 再全量扫描，而 uniffi
+/// 面收到的是宿主直传 `String`（无 C 层有界扫描兜底，见 `MAX_FFI_URL_BYTES`
+/// 注记）⇒ 先解后判时，一条超长 hex 串换来的是一次与其等长的堆分配，而判定
+/// 仍落在调用方。定长入口先拒，超出的输入不进 O(n) 面。
 pub fn hex_seed_to_bytes(hex: &str) -> Option<[u8; 32]> {
+    if hex.len() != HEX_SEED_CHARS {
+        return None;
+    }
     crate::util::hex_decode(hex)?.as_slice().try_into().ok()
 }
 
