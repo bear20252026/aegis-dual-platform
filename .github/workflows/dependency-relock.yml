@@ -72,6 +72,17 @@ jobs:
       # tests/python/workflow_exit_code_test.py（relock 的 run 块内零 in-run 表达式 +
       # 写回步骤自带二次守卫）。**新增 job 同样适用**：守卫写在每个 job 里，
       # 不靠「另一个 job 也会检查」。
+      # 守卫必须排在**检出之后**：R9-B58 起它是一份仓库脚本，而 runner 的 workspace 在第一次
+      # `actions/checkout` 之前是空的——放在检出前面就是「调用一个还不存在的文件」。这条不是推理：
+      # dispatch 实测红在 `bash: scripts/relock_branch_guard.sh: No such file or directory`
+      # （run 38520687580），而当时的判据只数「调用点存在」，抓不到顺序。现在顺序由
+      # `tests/python/relock_branch_guard_test.py::test_every_guard_call_sits_after_a_checkout` 判住。
+      - name: 检出目标分支
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          fetch-depth: 1
+
       - name: 校验目标分支（写回面守卫；规则单源 scripts/relock_branch_guard.sh）
         shell: bash
         env:
@@ -81,12 +92,6 @@ jobs:
           set -euo pipefail
           # face 写死在这里而不是取自输入：「谁来写回」是代码事实，调用方选不动。
           bash scripts/relock_branch_guard.sh dotnet "$GUARD_KIND" "$RELOCK_BRANCH"
-
-      - name: 检出目标分支
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
-        with:
-          ref: ${{ github.event.inputs.branch }}
-          fetch-depth: 1
 
       - name: 设置 .NET 10 SDK
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -229,8 +234,15 @@ jobs:
     timeout-minutes: 45
     if: ${{ github.event.inputs.ecosystem == 'gradle' || github.event.inputs.ecosystem == 'all' }}
     steps:
-      # 守卫写在**每个**持写权限的 job 里，不依赖另一个 job 存在（R9-CI-2 同口径：
-      # dispatch 输入经 env 中转，run 正文里不出现 `${{ }}`）。
+      - name: 检出目标分支
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          fetch-depth: 1
+
+      # 守卫写在**每个**持写权限的 job 里，不依赖另一个 job 存在（R9-CI-2 同口径：dispatch 输入经
+      # env 中转，run 正文里不出现 `${{ }}`）；下面「写回分支」那步再判一次，不依赖本步存在。
+      # 守卫排在检出之后，理由与上面 dotnet job 那条一样（脚本要先在 workspace 里存在）。
       - name: 校验目标分支（写回面守卫；与 windows 腿同一份规则）
         shell: bash
         env:
@@ -239,12 +251,6 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/relock_branch_guard.sh gradle "$GUARD_KIND" "$GRADLE_RELOCK_BRANCH"
-
-      - name: 检出目标分支
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
-        with:
-          ref: ${{ github.event.inputs.branch }}
-          fetch-depth: 1
 
       - name: 工具链装配（JDK 21 + Gradle 缓存 + Android SDK，两条腿同一 composite action）
         uses: ./.github/actions/gradle-android-toolchain
@@ -360,6 +366,13 @@ jobs:
     if: ${{ github.event.inputs.ecosystem == 'gradle' || github.event.inputs.ecosystem == 'all' }}
     steps:
       # 守卫写在**每个**持写权限的 job 里，不依赖另一个 job 存在（R9-CI-2 同口径）。
+      - name: 检出目标分支（ubuntu 腿写回的同一分支，串行才不会互相覆盖）
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+        with:
+          ref: ${{ github.event.inputs.branch }}
+          fetch-depth: 1
+
+      # 排在检出之后：守卫是一份仓库脚本，workspace 在 checkout 之前是空的（同 dotnet job 那条注）。
       - name: 校验目标分支（写回面守卫；两个 gradle 腿共用同一份规则）
         shell: bash
         env:
@@ -368,12 +381,6 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/relock_branch_guard.sh gradle "$GUARD_KIND" "$WINDOWS_LEG_BRANCH"
-
-      - name: 检出目标分支（ubuntu 腿写回的同一分支，串行才不会互相覆盖）
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
-        with:
-          ref: ${{ github.event.inputs.branch }}
-          fetch-depth: 1
 
       - name: 工具链装配（与 ubuntu 腿同一个 composite action）
         uses: ./.github/actions/gradle-android-toolchain
