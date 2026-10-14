@@ -137,3 +137,40 @@ jobs:
           trx-name: broker-tests.trx
           label: Broker
           minimum: 160
+
+  # Q58 第一步（R9-B56）：正典 SDK 的下载面**静态**清单——每周重跑一次，而不是靠某次反射
+  # 脚本的口头结论。为什么单独一个 job：上面两个 job 是门禁（红＝不能并/基线断了），
+  # 本 job 是探测（红＝这份事实读不到了，比如 SDK 程序集换了位置、Runtime 装不上）。
+  # 它刻意**不**去起 WebView2 实例：本机实测过一次独立宿主（不可见窗口 + loopback 双端口 +
+  # 302→附件），订阅 DownloadStarting 时抛 NotImplementedException（无法转型 ICoreWebView2_4），
+  # 说明一次性宿主与出货 App 的宿主不是同一个环境——「Uri 跟不跟随重定向」只能在跑着的 App 里量
+  # （装机/桌面面，见台账 §五 Q58 与 §3.56）。
+  webview2-download-surface:
+    name: WebView2 下载面静态探测（Q58 第一步：属性/事件面重跑）
+    runs-on: windows-2025
+    timeout-minutes: 20
+    # 与本文件另两个 job 同口径：runner 控制台代码页非 UTF-8，探测输出的中文/✅❌ 会抛编码异常
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: '10.0.x'
+      - name: 构建探针（与正典栈同一 RID；本工具不出货、不建锁，理由见 csproj）
+        run: dotnet build windows/tools/WebView2SdkSurfaceProbe/WebView2SdkSurfaceProbe.csproj --configuration Release -r win-x64
+      - name: 跑探测：量不到就红，空报告也红（判据不能判空气）
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p probe-report
+          ./windows/tools/WebView2SdkSurfaceProbe/bin/Release/net10.0-windows/win-x64/aegis_wv2_surface.exe             | tee probe-report/webview2-download-surface.txt
+          grep -q '^TYPE' probe-report/webview2-download-surface.txt
+          grep -q '^runtime_version=' probe-report/webview2-download-surface.txt
+      - name: 上传探测报告（30 天留存，与归档栈基线同口径）
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: webview2-download-surface
+          path: probe-report/webview2-download-surface.txt
+          if-no-files-found: error
+          retention-days: 30

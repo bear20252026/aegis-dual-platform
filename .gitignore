@@ -44,8 +44,12 @@ dist/
 aegis-source-*.md
 aegis-review-*.md
 
-# windows/src 构建产物（.NET——不入库）
-windows/src/**/bin/
+# .NET 构建产物（不入库）。规则按 `windows/**` 而不是 `windows/src/**`：
+# R9-B56 加了 windows/tools/（CI 探测工具），只写 src 的那一条让它第一次 build 就把 bin/
+# 摆进了 git status——新工程形状一进目录树就漏判，是这类「按名字列目录」规则的固有失效。
+# 泛化由 tests/python/webview2_surface_probe_test.py 用 `git check-ignore --no-index`
+# 判：拿一个还没存在过的假想路径去问规则，红了就是规则窄了。
+windows/**/bin/
 
 # Rust 构建产物（cargo target——不入库）
 core/rust-policy-core/target/

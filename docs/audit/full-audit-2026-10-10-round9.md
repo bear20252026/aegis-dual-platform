@@ -760,7 +760,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   闸门只判**入队** URL，DownloadProvider 默认跟随重定向 ⇒ `302 → 169.254.169.254` 仍
   落盘公共目录（PR #130 消除的后果复活路径）。建议完成后用 `COLUMN_URI` 对最终地址复判
   + `remove()` + 留痕；`setRedirectsAllowed(false)` 会打断正当 CDN 重定向（产品代价，不推荐）。
-- Q58 R9-CS-18 | P2 | `windows/src/Aegis.Windows.App/WebView/HostWebView.Downloads.cs:48` ↔
+- Q58 R9-CS-18 | **P2 部分推进（R9-B56 / §3.56）**：静态那一半已落地——`compat.yml` 的新 job 每周重跑 SDK 的下载面清单（`windows/tools/WebView2SdkSurfaceProbe`；CI 首跑读到 `runtime_version=153.0.4234.48`、`TYPE_ABSENT CoreWebView2DownloadCompletedEventArgs`，R9-B37 那次反射结论从此不再靠记性）。**仍开着的是动态那一半**：`Uri` 报不报重定向后的落点， 只能在跑着的 App 里量——一次性宿主在订阅 `DownloadStarting` 时就抛 `NotImplementedException`（无法转型 `ICoreWebView2_4`，§3.56 第 4 条带栈）， 所以量法已写细到可直接照做（两个 loopback 端口 + 302 + 两个时刻各读一次），但仍**需设备/桌面** ⇒ 需给话。原条目 ↓
+  Q58 R9-CS-18 | P2 | `windows/src/Aegis.Windows.App/WebView/HostWebView.Downloads.cs:48` ↔
   `:112-118`（R9-B43 落地 Android 侧复判时同批复读的新证）：Windows 的下载闸门同样只判
   `DownloadOperation.Uri`（入队地址），R9-B37 加的 `StateChanged` 只做「终态退订 + 摘表」，
   **不复判落点** ⇒ 与 Q3 同型的 `302 → 169.254.169.254` 缺口在正典 Windows 制品上仍在。
@@ -2913,6 +2914,64 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    表形 / 链接 / `check_doc_claims` / `check_workflow_shells` / `verify_ledger_queue_status`
    / `verify_text_anchor_helpers` 全 EXIT 0；`verify_injected_js_parity.py` 本体现跑仍绿
    （本批没动任何注入 JS 文本）。**零出货代码改动**。
+
+### 3.56 R9-B56（2026-10-14，队列 Q58 = R9-CS-18 的第一步）：把「量不到」写成事实，而不是写成待办
+
+1. 为什么挑 Q58：它是队列里唯一一条 P2 且**卡在一次测量**上——Windows 的下载闸门判的是
+   `CoreWebView2DownloadOperation.Uri`（`HostWebView.Downloads.cs:48`），而这条属性到底报
+   「入队时请求的地址」还是「跟随 302 之后的落点」，SDK 没写：钉版包自带的 XML 文档只有
+   `The URI of the download.` 一句（现读 `~/.nuget/packages/microsoft.web.webview2/1.0.2903.40/
+   lib/net462/Microsoft.Web.WebView2.Core.xml`）。Android 侧 R9-B43 能复判，靠的是
+   DownloadProvider 会改写 `COLUMN_URI` 这条平台事实；这边没有等价事实，照抄就是猜。
+   本批的目标是**把这次测量从你的桌面挪进 CI**；结论是挪了一半，另一半挪不动，原因在下面第 4 条。
+2. 落地的这一半：`windows/tools/WebView2SdkSurfaceProbe`（静态反射）+ `compat.yml` 的新 job
+   `webview2-download-surface`。它每次重跑打印：SDK 程序集版本、Runtime 版本、下载相关类型的
+   属性/事件面、以及全量 `*Download*` 类型清单。CI 首跑（run 38503503998，job 全绿）读到的事实：
+   `sdk_assembly=…Version=1.0.2903.40`、`runtime_version=153.0.4234.48`、
+   `PROP Uri : String`、`EVENT StateChanged : EventHandler`1`（事件共三个）、
+   `TYPE_ABSENT CoreWebView2DownloadCompletedEventArgs` / `…DownloadCompletedHandler`、
+   `SDK_DOWNLOAD_TYPE` 共 13 行。这把 R9-B37 那次「反射脚本的一次性结论」变成了每周重跑的面——
+   上游哪天补上「完成后」那一族，这份报告会自己从 ABSENT 变成 TYPE，不需要有人记得去读 changelog。
+   顺带一条 compat 本职要盯的事实也现读出来了：**runner 的 Runtime 是 153.0.4234.48，本机是
+   155.0.4283.45**（v152 起两周一次节奏的正切样本）。
+3. 它**不是** PR 门禁：compat 只有 `schedule` + `workflow_dispatch`（用例
+   `test_probe_is_a_scheduled_probe_not_a_required_check` 把这条钉住）。理由是探测给的是事实表
+   不是判决；把它挂进必需检查会造出「Windows runner 排队 = 全仓 PR 卡死」的形状。
+   它红的时候，含义是「这份读不到了」，不是「代码错了」。
+4. 挪不动的那一半，以及为什么写在这儿而不是埋在讨论里：动态场景真写过（不可见 WPF 宿主 +
+   loopback 双端口 + `302 → 附件` + 一次性 `%TEMP%` 用户数据目录），本机跑到的结果是
+   订阅事件那一步就抛：
+   ```
+   NotImplementedException: Unable to cast to Microsoft.Web.WebView2.Core.Raw.ICoreWebView2_4
+       at CoreWebView2.add_DownloadStarting(EventHandler`1 value)
+   ```
+   即一次性宿主与出货 App 的宿主不是同一个环境（App 里同一行是好的），**探针造不出可信的下载场景**。
+   据此动态那半代码删掉了——留一份跑不起来的双分叉在树里，比没有更坏。结论：
+   「Uri 跟随不跟随重定向」只能在跑着的 App 里量 ⇒ Q58 仍开着，但它的下一步从
+   「要先实测」变成了具体的量法（第 6 条），而且**为什么不能用一次性探针量**这件事有了可回读的原因。
+5. 两处顺带的真实修复（都不是风格问题）：
+   - `.gitignore` 原来写 `windows/src/**/bin/`——只点 `src` 的名。`windows/tools/` 第一次 build
+     就把产物摆进了 `git status`（我 `git add` 时差点提交进去）。改成 `windows/**/bin/`，
+     并把它做成能红的判据：`git check-ignore --no-index` 去问三个**还不存在**的假想路径
+     （tools/src/tests 三种形状），配正面控制「探针源码本身不得被忽略」——否则「把 windows/** 全忽略」
+     也能让那条用例全绿，那是白名单式规则的反向失效。
+   - 探针**不建锁**是有意偏离而不是漏配：`verify_lock_rids.py` 扫 `windows/**/packages.lock.json`，
+     而它的 `REQUIRED_*` 语义是「出货依赖面」——第一版给工具建锁，当场红在
+     「缺 SQLitePCLRaw.lib.e_sqlite3 等 5 项」。代价是「探针量的就是出货那把 SDK」不能再靠锁保证，
+     于是换成现读两个 csproj 的 `PackageReference` 版本对账
+     （`test_probe_uses_the_same_sdk_version_as_the_shipping_app`）。
+6. Q58 的量法（留给装机/桌面那一次，写细到可以直接照做）：在跑着的 App 内挂一个临时观察器，
+   `GET /start` 返回 302 到**另一个 loopback 端口**的 `/final.bin`（附件 + 一小段字节），
+   在 `DownloadStarting` 与 `StateChanged→Completed` 两个时刻各读一次 `Uri`；
+   如果两次里有任何一次报的是 `/final.bin` 那条 URL，入队闸门就能改成「落点复判 + 必要时删除」
+   （与 Android 同口径），否则必须走请求侧自行解析跳转（牵连 ADR-009 的制品形态）。
+   两个端口而不是同端口不同路径，是为了让结论变成一次字符串比较而不是解释。
+7. 验证：`dotnet build windows/tools/… -c Release -r win-x64` 本机 0 错误 0 警告；
+   探针本机输出 `runtime_version=155.0.4283.45`（与 CI 的 153.0.4234.48 不同，两侧都记在上面）；
+   `pytest tests/python` **759 passed / 1 skipped**（本批 +7）；`active_tree_gates all` 绿；
+   `verify_lock_rids`（3 份锁）/ `check_workflow_shells`（27 个 pwsh 步骤）/ `check_file_sizes`
+   / `verify_ci_trigger_surface` / 表形 / 链接 / `check_doc_claims` 全 EXIT 0；
+   compat 三条 job 在 run 38503503998 全绿。**未动任何出货代码。**
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

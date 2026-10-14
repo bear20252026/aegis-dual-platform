@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Q58（台账 §五 = R9-CS-18）第一步的探针：WebView2 下载语义的一次可重跑测量。
+       公共属性（TFM/Nullable/锁文件/警告即错误/EnableWindowsTargeting）由
+       windows/Directory.Build.props 单源，这里只写工程差异项。 -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>aegis_wv2_surface</AssemblyName>
+    <!-- UseWPF 不是探针自己要画东西：Microsoft.Web.WebView2 的 lib_manual 面把
+         Core/WinForms/Wpf 三个装配一起交出来，缺了 WindowsDesktop 引用包时它们与
+         基础包里的 WindowsBase 4.0 冲突（MSB3277）。正典 App 就是 UseWPF 编译的，
+         探针与它同一套编译环境，测出来的面才是出货那一份——不是压制警告的理由，
+         而是「测量环境必须等于生产环境」。 -->
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <!-- 本工具**不建锁**，这是有意识的偏离而不是漏配：
+         scripts/verify_lock_rids.py 的判定面是 `windows/**/packages.lock.json`，
+         而它的 REQUIRED_* 是「出货依赖面」（Sqlite/WebView2/原生 e_sqlite3 的 RID 图）。
+         给一个不出货的探测工具建锁，等于让那条门禁去判一份它不该判的图——
+         第一版就是这么红的（缺 SQLitePCLRaw.lib.e_sqlite3 等 5 项）。
+         「探针必须与正典 App 同一把 SDK 版本」这条改由 wiring 判据现读两个 csproj 对账
+         （tests/python/webview2_surface_probe_test.py），不靠锁。 -->
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 与正典 App 同版钉死（1.0.2903.40）：语义结论必须对应实际出货的那一份 SDK，
+         不是「runner 上恰好装的最新版」。Runtime 版本另由探针自己打印。 -->
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2903.40" />
+  </ItemGroup>
+</Project>
