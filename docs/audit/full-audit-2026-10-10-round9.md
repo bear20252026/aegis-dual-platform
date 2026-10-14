@@ -854,7 +854,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   六处内联守卫收成同一份脚本调用；`kind=dependabot` 只写 `dependabot/*`、face=dotnet 明确
   没有这一面（拒到 exit 2）。原登记的「两条人工路」因此不再是必经之路。
   **验收交代**：原条目要的那条「真实 Dependabot gradle bump PR 同一 PR 带锁+带校验和」本批没有
-  （现树无在途 bump，也无法强制 Dependabot 开一条），实证是 dispatch 双腿 + 反例各一次（§3.58 第 6/7 条）；
+  （现树无在途 bump，也无法强制 Dependabot 开一条），实证是 dispatch 双腿 + 反例各一次（§3.58 第 6/10 条）；
   下一次真实 bump PR 属于观察项，不另立开着的队列 ID。原条目 ↓
   Q60 R9-AD-14 | P2（R9-B50 落地时发现；登记即待裁决） |
   `.github/workflows/dependency-relock.yml:232`（`case "$target" in deps/*)` 的写回守卫）↔
@@ -3072,16 +3072,47 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. 验收口径的诚实交代。原条目要求「一条真实的 Dependabot gradle bump PR 必须在同一个 PR 里同时
    带来四把 `gradle.lockfile` 与 `verification-metadata.xml` 的 diff 且 CI 全绿」——本批**没有**
    这条：现树没有在途的 Dependabot gradle PR，也无法强制它开一条。落地的是「不需要人再手工补字节」
-   这一件事（那是这条队列项存在的理由），实证走 dispatch：对一条真实的遗留 Dependabot 分支
-   `dependabot/gradle/android/minor-and-patch-0bc2cf4c4f`（PR #167 已合并，分支还在 origin）
-   跑 `ecosystem=gradle target_kind=dependabot`，以及反向跑一次 `target_kind=deps` 期望守卫判红。
-   结果记在下面第 8 条；真实 bump PR 的那次自然验证留作**观察项**，不再挂一条开着的队列 ID。
-7. 本机验证：`tests/python/relock_branch_guard_test.py` 25 条全绿（6 允许 + 17 拒绝各带规则措辞 +
-   2 结构/自检），全量 `pytest tests/python` **784 passed / 1 skipped**（本批 +25）；
-   `check_file_sizes` 现读拦下一条真事——`relock_sop_test.py` 在 HEAD 恰好 300 行（零余量），
-   我把那条守卫断言写成多行消息后变 303 行判红 ⇒ 改回单行同行替换（与 §3.54 的
-   `CoreDenylistPublisherTests` 同一口径：不是绕过红线，是同行换掉旧断言）。
-   markdown 表形/链接/计数/队列状态/文本锚/触发面七个门禁全过。
+   这一件事（那是这条队列项存在的理由），实证走 dispatch，证据分支是**我自己建的**
+   `dependabot/r9-b58-evidence`（从本批分支切出，再在其上删掉
+   `androidx.annotation:annotation:1.9.1` 的校验和条目＝注入一次「新坐标没有条目」的真实后果）。
+   为什么不直接用那条遗留的真实分支 `dependabot/gradle/android/minor-and-patch-0bc2cf4c4f`：
+   它是 Dependabot 命名空间下的一条真实分支，跑成功会往里推提交——分支名形状已经被第 4 条那三条
+   实测形态判住了，没必要借别人的命名空间换这点证据。
+7. **但 dispatch 抓到的第一条不是「补没补上」，而是「守卫脚本在它该跑的那一刻还不存在」**。
+   run **38520687580** 红在 `bash: scripts/relock_branch_guard.sh: No such file or directory`——
+   三个 job 的 job 级守卫步骤原本排在「检出目标分支」**之前**（那是内联 `case` 时代的位置，
+   内联代码不需要 workspace 里有文件），换成调用仓库脚本之后，同一个位置调的是一个还不存在的文件：
+   runner 在第一次 `actions/checkout` 之前 workspace 是空的。
+   当时的两条判据全绿——它们数的是「调用点存在且 ≥2 次」，没有一条判「调用点能不能执行」。
+   这是本仓第 N 次同族收敛，形状很具体：**把一份内联逻辑搬进文件时，「搬动」改变的是执行前提，
+   不只是可读性**（§3.50 的 `strip_comments` 搬到 shell 正文吃掉真实语句、§3.54 的「本地全绿不是证据」
+   都是同一课的不同侧面）。
+   修法：三个 job 的守卫步骤都移到 checkout 之后（写回前那一步的二次守卫位置不变——那一步本来
+   就在工作区里跑），新增 `test_every_guard_call_sits_after_a_checkout` 判**顺序**本身；
+   反向实证做过了：把 gradle 腿的守卫挪回 checkout 之前，这条新用例与那条数调用点的用例**同时红**
+   （正面控制在这里是多余的，两条独立判据各自抓到）。
+8. dispatch 实证两个方向（都跑在 `dependabot/r9-b58-evidence` 上，`ecosystem=gradle`）：
+   - 反例 run **38522538725**（`target_kind=deps` 打到 dependabot 前缀的分支）：conclusion=failure，
+     失败步骤是「校验目标分支」，日志正文 `❌ target_kind=deps 只允许写 deps/<名字>（收到：
+     'dependabot/r9-b58-evidence'）` + `Process completed with exit code 2`，另两个 job `skipped`
+     ——**红因是守卫的措辞而不是脚本缺失**，这条区别就是第 7 条换来的东西。
+   - 正例 run（`target_kind=dependabot`）：见下面第 10 条的结果记录（补回被删条目并写回该分支）。
+9. 本机验证：`tests/python/relock_branch_guard_test.py` 26 条全绿（6 允许 + 17 拒绝各带规则措辞 +
+   3 结构：调用次数、调用顺序、脚本 `bash -n` 可解析），全量 `pytest tests/python`
+   **785 passed / 1 skipped**（本批 +26）；`check_file_sizes` 现读拦下一条真事——
+   `relock_sop_test.py` 在 HEAD 恰好 300 行（零余量），我把那条守卫断言写成多行消息后变 303 行判红
+   ⇒ 改回单行同行替换（与 §3.54 的 `CoreDenylistPublisherTests` 同一口径：不是绕过红线，是同行换掉旧断言）。
+   markdown 表形/链接/计数/队列状态/文本锚/触发面/active_tree_gates（ruff+bandit+py312）全过。
+10. 正例 dispatch run **38522729632**（`ecosystem=gradle target_kind=dependabot`，
+     分支 `dependabot/r9-b58-evidence`）结论 success，三个 job：`Gradle 重锁` success、
+     `重算并写回依赖锁（dotnet）` **skipped**（face=dotnet 没有 dependabot 面，`if:` 生效）、
+     `Gradle 校验和 windows 腿` success（`needs:` 串行照旧成立）。写回提交
+     `ffbbd9c8`（作者 `aegis-relock-bot`）**只**动 `android/gradle/verification-metadata.xml`，
+     `+5 / -0`——正是第 6 条删掉的那一个 `<component>` 块被逐字节补回
+     （`annotation-1.9.1.module` 的 sha256 与删除前同一个值，组件数回到 501）；
+     windows 腿随后无差异可写，所以分支上只有这一条机器人提交。
+     于是「新坐标缺条目 ⇒ 没有自动补录路径」这句话在 Gradle 面已经不成立了：
+     一条 `dependabot/*` 分支可以被 dispatch 授权补字节，写回面仍然只有一类前缀、仍然到不了 master。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
