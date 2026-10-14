@@ -28,7 +28,8 @@ dependencyResolutionManagement {
 //    ⇒ CI/离线解析失败。在 STRICT 下那个失败**就是门禁本身**——它把版本漂移从「静默发生」
 //    变成「必红」，所以代价与收益是同一条。重锁已工具化：
 //    `.github/workflows/dependency-relock.yml` 的 `gradle` 生态（仅 workflow_dispatch，
-//    只写 `deps/*` 分支，永不写 master）。本地等价命令**不是** `writeLocks` 任务
+//    写回目标前缀由 `target_kind` 选，规则单源 `scripts/relock_branch_guard.sh`，
+//    永不写 master）。本地等价命令**不是** `writeLocks` 任务
 //    （Gradle 9.8 实测：`Cannot locate tasks that match ':app:writeLocks'`），而是
 //    「`./gradlew resolveAllConfigurations --write-locks`」——`--write-locks` 只写本次构建
 //    **解析过**的配置，所以解析面必须按模型的集合定义，不能照任务清单抄：R9-B32 实测
@@ -83,8 +84,9 @@ dependencyResolutionManagement {
 //    `--write-verification-metadata sha256`。**先有鸡还是先有蛋已经实证解开**：删掉整个 junit
 //    组件块（等于一次版本升级带来的「新坐标没有条目」）后跑同一条命令，BUILD SUCCESSFUL
 //    并把条目补了回来——生成模式对缺条目是**补录**不是判红。Dependabot 的 gradle bump PR
-//    红在 strict 上是流程的正确表现：跑一次重锁让版本与字节同一批进来（重锁只写 `deps/*`
-//    分支，而 Dependabot 的分支名不是那个前缀 ⇒ 这一面的缺口登记在台账 §五 Q60，需裁决）。
+//    红在 strict 上是流程的正确表现：跑一次重锁让版本与字节同一批进来。R9-B58 起这一面
+//    **不再需要人工搬分支**：dispatch 时选 `target_kind=dependabot`，写回目标落在
+//    `dependabot/*`（台账 §五 Q60 因此闭环）。
 //    别把 `org.gradle.dependency.verification` 改成 off/lenient 绕红灯（用例判的就是这个）。
 // ④ AD-155 留的重开条件「若后续引入动态版本依赖」并未触发（现树仍零动态版本）；
 //    真正增量是传递依赖钉版 + 升级必须同批重锁这条流程约束。

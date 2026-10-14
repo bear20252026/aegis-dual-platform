@@ -283,13 +283,13 @@ def test_dropping_either_gradle_step_turns_the_gate_red() -> None:
 
 
 def test_gradle_writeback_still_needs_its_own_guard_and_lock_only_diff() -> None:
-    """写回步骤不许 `|| true`、必须自带 deps/* 守卫，且「有 diff 但没锁文件」要判红。"""
+    """写回步骤不许 `|| true`、必须自带写回面守卫（规则单源在脚本里），且「有 diff 但没锁文件」要判红。"""
     steps = gradle_job_doc().get("steps", []) or []
     writeback = [s for s in steps if "写回分支" in str(s.get("name", ""))]
     assert len(writeback) == 1, f"gradle 面写回步骤必须恰好一个，实得 {len(writeback)}"
     code = code_only(str(writeback[0]["run"]))
     assert "|| true" not in code, "写回步骤里出现 `|| true`——git add 失败会被静默吞掉"
-    assert "deps/*)" in code, "写回步骤必须自带 deps/* 二次守卫（不依赖前一步存在）"
+    assert "relock_branch_guard.sh" in code, "写回步骤必须自带二次守卫（不依赖前一步存在）；R9-B58 起规则单源在该脚本，这里判「确实调了它」而不是判 case 的写法"
     assert "gradle.lockfile" in code, (
         "必须校验「diff 里确实有一把锁文件」——否则顺手改了版本目录也会被推上去"
     )
