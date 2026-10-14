@@ -3221,6 +3221,35 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    但下一次扫描还会重开，变成拉锯，且每次点击都是一次对外姿态声明）；②fix-forward——
    把 lint 工具面那份顶到 ≥1.85（动 AGP/lint 工具链版本面，牵连登记表与本文证据）。
    本批默认两个都不做。
+5. **为了验证新步骤而跑的那次 dispatch，抓到了旁边那一步早就坏了**（run **38539285993**，
+   failure）：失败点不是新加的告警状态步骤，而是它前面的「工具类路径闭包」——那一步写的是
+   `python scripts/verify_gradle_alert_scope_boundary.py` 与 `grep android/*/gradle.lockfile`，
+   而 job 有 `defaults.run.working-directory: android` ⇒ runner 找的是
+   `android/scripts/…`（不存在），glob 也展不开。**自 R9-B49 加进来起这一步从没跑通过**，
+   而它是 dispatch-only 诊断面：PR 面全绿，没人去看它红。
+   更难受的顺序是：`grep … || echo "(零命中)"` 先执行，把「找不到文件」印成了一句
+   看起来像结论的 `(零命中)`，然后最后一行才 exit 2——**日志里失败之前先有一条假陈述**。
+   与本批第 2 条是同一族的第三种形态：§3.58 是「调用点存在但脚本还没被检出」，
+   这条是「调用点存在但站在另一个目录里」，而它比 §3.58 更隐蔽，因为红的是一条诊断流而不是一条门禁。
+6. 修法与判据（都进 PR 面，不再靠人记得跑一次 dispatch）：
+   - 那一步加字面量 `working-directory: .`（ sibling 的做法是 `../scripts/…`；这里选前者是因为
+     新门禁按**字面** cwd 解析路径，`${{ github.workspace }}` 判不到）；
+   - 加「锁一把都没找到 ⇒ exit 1」的前置检查，而不是让 `|| echo "(零命中)"` 有机会把
+     判定面塌缩说成一条结论（与 `verify_gradle_alert_scope_boundary.py` 的空锁 exit 2 同口径）；
+   - 新常驻门禁 `scripts/verify_workflow_script_paths.py`：每条 `python <路径>.py` 必须在其
+     生效 cwd（step → job.defaults.run → workflow.defaults.run）下真实存在；带 `${{ }}` 的
+     路径**点名要求人工核**而不是放过——否则「把路径挪进表达式」就是绕过这条判据的合法通道。
+     实树现读：16 份 workflow / 146 个 run 步骤全过；接进 `contracts.yml` 的
+     `contract-source-of-truth`（紧跟被保护的那条 scope 门禁）。
+   - 反向实证：把 `working-directory: .` 那一行删掉 ⇒ 门禁 exit 1 并指名那一步，
+     用例里两条同时红（`test_real_tree_has_no_unexecutable_python_calls` 与
+     锚住这一步的 `test_the_insight_step_that_started_this_is_now_executable`）；恢复后全绿。
+     对照用例同样重要：`python ../scripts/verify_versions.py` 在 cwd=android 下必须**不红**，
+     否则这条判据就只是「任何带路径的调用都可疑」。
+7. 验证：新增 13 条用例（`tests/python/workflow_script_paths_test.py`），全量
+   `pytest tests/python` **815 passed / 1 skipped**；ruff / bandit / py312 / 行数红线 /
+   markdown 三件 / 队列状态 / 触发面（16 个 workflow 分类不变）/ 新门禁全过。
+   Actions 侧的新步骤实跑结果（含告警状态那一步的输出）记在下面第 8 条。
 
 
 ## 六、复核后判定为不成立（留此防重复上报）

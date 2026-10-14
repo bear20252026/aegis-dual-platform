@@ -78,11 +78,23 @@ jobs:
       # （锁文件里 logback-core:1.3.16=ktlint 一直在）。补上，且按 STRICT 锁的口径
       # 从锁文件现读，而不是再依赖一次 gradlew 解析（快，且与入库锁同源）。
       - name: 工具类路径闭包（androidLintTool / ktlint——9 条告警的真实落点）
+        # 这一步的路径是**仓库根**相对的（android/*/gradle.lockfile、scripts/*.py），
+        # 而 job 级 defaults.run.working-directory 是 android/ ⇒ 自 R9-B49 加进来起它就没跑通过：
+        # grep 拿字面量 glob 报 No such file，然后 `|| echo "(零命中)"` 把失败印成一条**看似结论的
+        # 陈述**，最后一行 python 路径不存在才 exit 2（dispatch run 38539285993 实测）。
+        # 判「步骤红了」容易，判「红之前那句零命中是假的」只能靠现跑一次。
+        working-directory: .   # 字面量而不是 ${{ github.workspace }}：新门禁按字面 cwd 解析路径
         run: |
-          echo "=== 四把锁里命中工具的坐标 → configuration 归属 ==="
-          grep -HnE "$PKG_REGEX" android/*/gradle.lockfile || echo "(零命中)"
+          shopt -s nullglob
+          locks=(android/*/gradle.lockfile)
+          if [ "${#locks[@]}" -eq 0 ]; then
+            echo "FAIL: 一把锁都没找到——cwd 或布局不对；这里的「零命中」不是结论，是判定面塌缩"
+            exit 1
+          fi
+          echo "=== 四把锁里命中工具的坐标 → configuration 归属（找到 ${#locks[@]} 把锁）==="
+          grep -HnE "$PKG_REGEX" "${locks[@]}" || echo "(零命中)"
           echo "=== 每条命中所在的 configuration（出货面判定依据）==="
-          grep -hE "$PKG_REGEX" android/*/gradle.lockfile \
+          grep -hE "$PKG_REGEX" "${locks[@]}" \
             | awk -F'[=,]' '{for (i = 3; i <= NF; i++) print $i}' | sort -u
           echo "=== 出货/装机面（release|debug Runtime|Compile Classpath、androidTest）里有没有它们 ==="
           python scripts/verify_gradle_alert_scope_boundary.py
