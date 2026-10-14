@@ -1,8 +1,11 @@
 {
-  "protocol": "aegis-native-navigation-confirmation-v3",
+  "protocol": "aegis-native-navigation-confirmation",
+  "version": 3,
+  "description": "Rust 原生导航确认链（request → approve/reject → consume）C ABI 的跨端语义向量。 R9-B59 起信封与 native-navigation-decision.json 同形（protocol/version/description；protocol 字符串原先把修订号 -v3 焊在名字里，现拆成 version=3——它既不是 ABI 版本（NativePolicyCoreGate.ExpectedAbiVersion=4）也不是 broker 握手串（向量传 \"1.0\"，核心只判非空））。每条 platform_decidable=false：本文件整份是确认面，宿主在常跑（托管）配置下到不了 request/approve/reject 这条链，见 native-navigation-decision.json 的同名说明。",
   "vectors": [
     {
       "name": "approve_then_consume_once",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "HTTPS://169.254.169.254:443/confirm?flow=1#request",
@@ -16,6 +19,7 @@
     },
     {
       "name": "approval_url_change_revokes_pending_request",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "https://169.254.169.254/confirm?flow=1",
@@ -29,6 +33,7 @@
     },
     {
       "name": "explicit_rejection_revokes_pending_request",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "url": "https://169.254.169.254/confirm/reject",
@@ -42,6 +47,7 @@
     },
     {
       "name": "generation_advance_revokes_pending_request",
+      "platform_decidable": false,
       "register_session": true,
       "generation": 0,
       "advance_generation": 1,
@@ -55,6 +61,7 @@
     },
     {
       "name": "unknown_session_never_creates_pending_request",
+      "platform_decidable": false,
       "register_session": false,
       "generation": 0,
       "url": "https://169.254.169.254/confirm/unknown",

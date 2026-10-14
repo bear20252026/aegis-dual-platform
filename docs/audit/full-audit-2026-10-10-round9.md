@@ -720,7 +720,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      改成「清空即解除＋删缓存」更符合「把配置项清空＝关掉该功能」的用户心智，但它是
      **放松防护**的方向，且要一并决定「误清一次怎么办」⇒ 需用户给话，不默认执行。
      本轮只把提示文案写成事实。
-  11. **Q53 第②档要怎么闭**（§3.42 核查后新增，两个形状都要人点头）：给
+  11. ~~**Q53 第②档要怎么闭**~~ **已定稿并落地**（用户 2026-10-14 批准推荐方案；形状 ②，见 §3.59）。
+     定稿口径：`platform_decidable` 由期望值推导、不许省略、不许塌成一块；平台执行者仍为零，
+     登记表仍 `{"RS"}`。下面留的是当时的两条候选形状（①未采纳）。
+     Q53 第②档（§3.42 核查后新增，两个形状都要人点头）：给
      `native-navigation-decision.json` 接平台执行者，**不是**加一份 C# / Kotlin 用例就能做的——
      43 条里 13 条期望 `require_confirmation`，而两端在常跑（托管）配置下根本产不出这个分支
      （Windows `BrowserPolicyBroker.cs:286` 直接 Deny `native_confirmation_core_required`；
@@ -939,7 +942,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 - ~~Q20 R9-SH-10~~ **本批已确证并落地**（§二 + §3.16）：note 改成当前实况（拒绝理由就是
   `minItems: 1`）并保留来历（PY-095 记下时确实未设）。`validate_vector_schemas.py` 复跑 ✅，
   向量内容与期望零改动——纯注记改真。
-- Q21 R9-SH-11 | P3 | `contracts/vectors/native-navigation-confirmation.json:2,12-15` ↔
+- ~~Q21 R9-SH-11~~ **本批已闭（R9-B59 / §3.59）**：两份原生向量的信封同形成
+  `protocol`/`version`/`description`/`vectors` 四键（confirmation 把修订号从字符串尾巴拆成
+  `version: 3`），`expected_deny_code` 按 `MULTI_STEP_PREFIXES` 自己的规则改成
+  `expected_evaluate_code`（数据 7 处 + Rust 消费者同批），并同批引入 `platform_decidable`
+  分区。消费者集合**没有**被假装扩面：仍只有 RS。原条目：Q21 R9-SH-11 | P3 |
+  `contracts/vectors/native-navigation-confirmation.json:2,12-15` ↔
   `native-navigation-decision.json:2-3`：同一原生 ABI 的两份向量信封不一致（前者只有
   `protocol`、无 `version/description`；期望字段名 `expected_request` /
   `expected_request_code` vs `expected_evaluate` / `expected_deny_code`），且仅
@@ -973,6 +981,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   **R9-B39（§3.39）做了第 0 档：先把「消费」这个词本身判干净**——命中口径剔注释后实测
   21 份向量只有 1 份端集变化（`native-navigation-decision` 由虚记的 CS+RS 改回 RS），
   其余 20 份逐份复核确认真在代码里命中；同时把本条上面那句失实的「已有 C# 消费者」改掉。
+  **R9-B59（§3.59）把第②档的「要怎么闭」定稿成形状 ②**：两份原生向量每条带
+  `platform_decidable`，标签由该条期望值推导（decision 13 条 false＝`require_confirmation`；
+  确认面 5 条全 false），门禁判「不许省略、不许塌成一块、标签必须可推导」。
+  注意这条**没有**把第②档的覆盖面缺口修掉——平台执行者仍然是零，登记表仍是 `{"RS"}`；
+  它定的是「将来接的那一端必须只覆盖 true 的 30 条」，因此 §3.42 否证过的那种假覆盖
+  （补一份 C# 用例把 13 条断不真的确认分支也断进去）现在会被常驻判据挡住。
   三档缺口**仍在**，且现在才是可信的缺口数。
 
 ### 5.3 CS（Windows 正典）
@@ -3052,6 +3066,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    第三条**删掉死块**，注释改成「`?*` 已经要求前缀之后至少一个字符」并写明这段来历。
    第二轮 9 个变异：4/1/1/1/3/6/2/1 条失败，只有「把结尾日志换成裸 `exit 0`」全绿——那是
    **等价变异**（少一行日志，判定不变），不算漏洞。
+   **等价变异也要记**：不记，下一个人会把「9 个变异全部被抓」当成判据密度的证据，而其中一条
+   其实是判据覆盖不到的语义面（日志内容）——只是那一面本来就不属于这条守卫的职责。
    还有一条差点被我写进台账当证据：`exit 2`→`exit 1` 那个变异第一轮报「22 failed」，看着像
    抓得最狠，实际是我的变异脚本吞掉了一个引号、把文件改成了**语法错**（`bash -n` 当场红）。
    于是判据的「抓到」和文件的「坏掉」在输出里长得一模一样。改成先 `bash -n` 再跑，同一个变异
@@ -3113,6 +3129,56 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      windows 腿随后无差异可写，所以分支上只有这一条机器人提交。
      于是「新坐标缺条目 ⇒ 没有自动补录路径」这句话在 Gradle 面已经不成立了：
      一条 `dependabot/*` 分支可以被 dispatch 授权补字节，写回面仍然只有一类前缀、仍然到不了 master。
+
+### 3.59 R9-B59（2026-10-14，§四 第 11 项 ② 定稿 + 队列 Q21）：给两份原生向量一份共同信封，并把「平台能不能断这条」变成可推导的字段
+
+1. 用户批准的形状是 **②**（加显式分区字段），不是 ①（把原生变体用例提升成 PR 必需检查）。
+   两条都动过前提回读：①的代价是每条 android/** 与 Windows PR 都要跑一次带 `.so`/原生 DLL 的构建，
+   而且它把「宿主产不出这一支」这件事变成用例永远抓不到的形状——用例照样绿，因为它断的是核心。
+   ②的成本只有一句词表变更，换来的是**任何将来接手的平台执行者都必须声明自己覆盖哪一块**。
+2. 落地的语义（写进两份文件的 `description` 与 `scripts/verify_vectors.py` 的注释，不留在提交信息里）：
+   `platform_decidable=false` ＝「**宿主在自己的托管判定路径上产不出这一支**，所以平台用例断它是断不真的」，
+   不等于「产品里没有这个分支」。实测三处支撑：
+   `Aegis.Windows.App.csproj:34-56` 的 `GenerateNativePolicyCoreBuildMarker` 只在
+   `-p:RequireNativePolicyCore=true` 时写 `true`，而 PR 必跑的 dotnet 用例面断言的就是
+   `NativePolicyCoreBuildRequirementTests.cs:58` 的 `Assert.False(RequiredByThisBuild)` ⇒
+   常跑配置里 `BrowserPolicyBroker.cs:285-286` 走 `NativeBridgeDenied("native_confirmation_core_required")`；
+   Android 同形（`AndroidBroker.kt:270-286`：无 native core 时 `requestNavigationConfirmation`
+   顺延 `evaluateNavigation`）； shipping/Release 才是另一回事（发布链验终物那条姿态串）。
+3. **标签不是自由声明**——这是本批的中心判据：`NATIVE_VECTORS[...]["decidable_when"]` 是每条向量
+   期望值的推导式（decision：`expected_evaluate != require_confirmation`；确认面整份是常量 false），
+   门禁逐条判「标签 == 推导值」，另判两件事：不许**省略**（省略不得被读成默认可判定），
+   不许**塌成一块**（全 true / 全 false 都红——塌成一块的分区不描述任何事实）。
+   实测形状：43 条里 30 true / 13 false，确认面 5 条全 false。
+4. 信封（Q21 那一半）：两份此前**没有共同头部**——decision 有 `version`+`description` 无 `protocol`，
+   confirmation 只有 `protocol` 且把修订号焊在字符串尾巴（`aegis-native-navigation-confirmation-v3`）。
+   现同形成 `protocol` / `version` / `description` / `vectors` 四键，confirmation 的修订号拆成
+   `version: 3`（值来自原字符串，不是新发明的号）。顺手把三个「版本」的歧义写进 description：
+   向量文档修订号、`NativePolicyCoreGate.ExpectedAbiVersion=4`、broker 握手串
+   （`c_abi/mod.rs:246-253` 实测**只判非空**，向量传 `"1.0"`）是三个互不相同的计数。
+   `expected_deny_code → expected_evaluate_code`：`MULTI_STEP_PREFIXES` 早就规定「按协议步骤命名」，
+   而 deny 是**值**不是步骤，所以旧名违反的是这份词表自己的规则；两侧同批改（向量 7 处 + Rust 消费者）。
+   **改名只落一半会怎样**是被实测过的：把一条向量换回旧名，Rust 用例当场
+   `panicked at vectors_decision.rs:69 ... unknown_session_fails_closed: evaluate denial code`
+   （`Value::Null` 去比真实码）——所以这条不是「相信同批会做」，是红了就给看。
+5. 判据与元层的一处必然冲突（本批唯一的意外）：新用例
+   `tests/python/native_vector_partition_test.py` 在**代码里**写出两份原生向量的文件名，
+   于是 `verify_vector_consumers.py` 把它算成 PY 消费者、`CONSUMER_MANIFEST` 立刻报漂移——
+   这正是 R9-B39 那条口径在起作用（注释不算，代码算）。处理是把它加进 `META_LEVEL`
+   而不是改登记表：它判的是信封形状与分区自洽，不是「哪端实现了这个裁决」。
+   同批把两处**数 META_LEVEL 成员**的散文（「那五个文件」「15 份」）改成指向集合本身——
+   这类计数是第三次撞到的同一形状（§3.41/§3.45）。
+6. Q53 第②档的状态因此要说准：**「要怎么闭」被定稿了，「平台执行者为零」这个事实没有被修掉**。
+   登记表仍是 `{"RS"}`；将来任何一端真接执行者，它必须只覆盖 `platform_decidable=true` 的 30 条，
+   且这条约束由 `verify_vectors.py` 常驻判住——不会再出现「补一份 C# 用例把 13 条断不真的
+   `require_confirmation` 也断进去」那种假覆盖（§3.42 逐行否证过的就是这个）。
+7. 验证：新增 17 条用例（8 条注入各断言**是哪条规则**红的 + 塌缩用例特意让推导式保持自洽，
+   只有那条专门的规则能红 + 一条正面控制「追加合法 require_confirmation 向量必须仍绿」+
+   范围、接线、两侧同改等）；`cargo test` 全量 **582 passed / 0 failed**（含两份原生向量用例）；
+   全量 `pytest tests/python` **802 passed / 1 skipped**（本批 +17）；
+   `verify_vectors` / `verify_vector_consumers` / ruff / bandit / py312 / 行数红线 /
+   markdown 三件 / 队列状态 / 文本锚全过。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
 

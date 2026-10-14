@@ -4,6 +4,8 @@
 单步协议：顶层 expected ∈ SINGLE_STEP_ACCEPTED；
 多步流协议：expected_request/approve/consume/evaluate ∈ MULTI_STEP_ACCEPTED
 （*_code 后缀字段是错误码不是决策，不校验）。
+R9-B59 起还判**两份原生 C-ABI 向量的信封形状与 platform_decidable 分区**
+（见 NATIVE_VECTORS——分区标签必须能由该条期望值推导，不许省略、不许塌成一块）。
 退出码：0 = 全部向量断言合法；1 = 存在非法断言。
 """
 from __future__ import annotations
@@ -43,6 +45,90 @@ MIN_FILES = {'schemas': 7, 'vectors': 21}
 # 清空（文件在场）即可让全部循环零次执行、门禁仍绿——「删文件」被堵住了，「改内容
 # 清空」这条路还通。现同时钉全树条目总数下界与逐文件非空。
 MIN_VECTOR_ENTRIES = 222
+
+# R9-B59（§四 第 11 项 ② 与 Q21 是同一次定稿）：两份原生 C-ABI 向量的**信封 + 分区**词表。
+#
+# 信封此前不一致是实测的：decision 有 version/description 而没有 protocol，confirmation 只有
+# protocol 且把修订号焊在字符串尾巴（`...-v3`）⇒ 同一 ABI 的两份向量没有共同的头部形状，
+# 任何「按信封识别向量」的工具都得写两套解析。现在判**键集合本身**，不只是值。
+#
+# `platform_decidable` 的语义要写清，否则它会被读成「产品里没有这个分支」：
+# false ＝「**宿主在自己的托管判定路径上产不出这一支**，所以平台执行者断言它是断不真的」——
+# Windows 单测/Debug 构建 `NativePolicyCoreBuildMarker.RequiredByThisBuild=false` ⇒
+# `RequestNavigationConfirmation` 直接拒 `native_confirmation_core_required`；
+# Android 无 native core 时 `requestNavigationConfirmation` 顺延 `evaluateNavigation`。
+# shipping Release 构建 RequiredByThisBuild=true，两端确实会走原生确认链——那是发布/装机面，
+# 不是 PR 必跑面。核心这一侧三种分支都产得出，所以本文件仍然由 RS 全量执行。
+# 关键设计：标签**不是自由声明**，而是由该条的期望值可推导（下面 `decidable_when`），
+# 门禁逐条判这个推导式——「自由填写的分区字段」只会变成第二个会漂移的真相。
+NATIVE_VECTORS: dict[str, dict] = {
+    "native-navigation-decision.json": {
+        "protocol": "aegis-native-navigation-decision",
+        "version": 1,
+        "decidable_when": lambda v: v.get("expected_evaluate") != "require_confirmation",
+        # 分区必须**真的分了两块**：全 true 或全 false 都说明这个字段没在描述任何东西
+        "both_partitions_required": True,
+    },
+    "native-navigation-confirmation.json": {
+        "protocol": "aegis-native-navigation-confirmation",
+        "version": 3,
+        "decidable_when": lambda v: False,
+        "both_partitions_required": False,
+    },
+}
+NATIVE_ENVELOPE_KEYS = {"protocol", "version", "description", "vectors"}
+# R9-B59 同批改名：`MULTI_STEP_PREFIXES` 已经规定了「按协议步骤命名」，错误码字段就该是
+# `expected_<step>_code`；decision 那份此前叫 `expected_deny_code`（deny 是**值**不是步骤）。
+LEGACY_CODE_FIELDS = {"expected_deny_code": "expected_evaluate_code"}
+
+
+def check_native_vector(data: dict, path: Path, failures: list[str]) -> None:
+    """原生向量：信封形状 + 逐条 platform_decidable 的可推导性（不在表里的文件零判定）。"""
+    spec = NATIVE_VECTORS.get(path.name)
+    if spec is None:
+        return
+    keys = set(data)
+    if keys != NATIVE_ENVELOPE_KEYS:
+        failures.append(
+            f"{path.name}: 原生向量信封键集合应为 {sorted(NATIVE_ENVELOPE_KEYS)}，"
+            f"实得 {sorted(keys)}——信封是这次定稿的对象，加/删/改名都要同批改本表")
+    for field in ("protocol", "version"):
+        if data.get(field) != spec[field]:
+            failures.append(
+                f"{path.name}: {field}={data.get(field)!r} 与登记表 {spec[field]!r} 不一致"
+                "——改信封值就是改冻结词表，须写清理由并同批改 NATIVE_VECTORS")
+    if not str(data.get("description", "")).strip():
+        failures.append(f"{path.name}: description 为空——信封统一的意义就在「读头部就知道这是哪族哪版」")
+
+    entries = data.get("vectors", [])
+    decidable_true = 0
+    for vector in entries:
+        name = vector.get("name", "?")
+        for legacy, current in LEGACY_CODE_FIELDS.items():
+            if legacy in vector:
+                failures.append(
+                    f"{path.name}/{name}: 仍用旧字段 {legacy!r}——"
+                    f"词表已定稿为 expected_<步骤>_code，此处应为 {current!r}")
+        if "platform_decidable" not in vector:
+            failures.append(
+                f"{path.name}/{name}: 缺 platform_decidable——省略不得被读成「默认可判定」")
+            continue
+        value = vector["platform_decidable"]
+        if not isinstance(value, bool):
+            failures.append(
+                f"{path.name}/{name}: platform_decidable 必须是布尔，实得 {type(value).__name__}")
+            continue
+        expected = bool(spec["decidable_when"](vector))
+        if value is not expected:
+            failures.append(
+                f"{path.name}/{name}: platform_decidable={value}，但按该条期望值推导应为 {expected}"
+                "——分区标签必须可推导，否则它就是第二个会各自漂移的真相")
+        if value:
+            decidable_true += 1
+    if spec["both_partitions_required"] and (decidable_true == 0 or decidable_true == len(entries)):
+        failures.append(
+            f"{path.name}: platform_decidable 全部{'为 true' if decidable_true else '为 false'}"
+            f"（{len(entries)} 条）——分区塌成一块就说明标签已不再描述任何事实")
 
 
 def check_oversize_anchor(data: dict, path: Path, failures: list[str]) -> int:
@@ -127,6 +213,7 @@ def main() -> int:
                 # PY-187：显式收集（不再依赖 AssertionError 捕获——-O 下
                 # assert 被剥离会导致校验整体失效）
                 validate_vector(vector, str(path.relative_to(ROOT)), failures)
+            check_native_vector(data, path, failures)
             try:
                 anchor_hits += check_oversize_anchor(data, path, failures)
             except OSError as exc:

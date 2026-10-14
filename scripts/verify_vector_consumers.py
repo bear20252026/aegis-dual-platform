@@ -50,12 +50,14 @@ CODE_EXTENSIONS = (".cs", ".kt", ".kts", ".rs", ".py", ".js", ".mjs", ".yml", ".
 EXCLUDED_PARTS = ("/target/", "/obj/", "/bin/", "/node_modules/", "/build/", "/dist/")
 
 # 元面（META_LEVEL）：按名遍历整个向量目录、只判「形状/expected/协议字段对不对」的工具文件，
-# 包括**本门禁自己与它的用例**——它们在源码里写出每一份向量的名字，若算消费者就会让 15 份
-# 全部「被 PY 执行」，把整张表读成假象（CI 首跑实测正是这样红的）。
+# 包括**本门禁自己、它的用例，以及 verify_vectors.py 那条词表门禁的用例**——它们在源码里
+# 写出每一份向量的名字，若算消费者就会让全部向量都「被 PY 执行」，把整张表读成假象
+# （CI 首跑实测正是这样红的）。集合成员不写进散文计数（R9-B41 那一族：抄一个数就多一处会漂移的陈述）。
 # 每一项都要能在实树里解析到（判据 5）。
 META_LEVEL = (
     "contracts/codegen/validate_vector_schemas.py",
     "tests/python/vector_schema_input_guard_test.py",
+    "tests/python/native_vector_partition_test.py",
     "scripts/verify_vectors.py",
     "scripts/verify_vector_consumers.py",
     "tests/python/vector_consumers_test.py",
@@ -88,7 +90,11 @@ CONSUMER_MANIFEST: dict[str, frozenset[str]] = {
     "native-navigation-confirmation.json": frozenset({"RS"}),
     # R9-B39 改回事实：这里的 CS 命中此前全部来自注释（见 strip_comments），
     # 没有任何 C# 代码真的读这份向量 ⇒ 登记成 {"CS","RS"} 就是把「文档说过」当成
-    # 「跑过了」。Windows 侧真接一份执行者是 §五 Q53 的第②档（未做，不顺手补）。
+    # 「跑过了」。Windows 侧真接一份执行者是 §五 Q53 的第②档。
+    # R9-B59（§四 第 11 项 ②）把第②档**定稿成「不接全量」**：这两份向量的每条带
+    # platform_decidable，false 的那 13 条（+ 确认面整份 5 条）在宿主自己的托管判定路径上
+    # 产不出分支 ⇒ 平台执行者将来只能覆盖 true 子集，登记端集不因「有人加了一份读该文件的
+    # C# 用例」就自动变成 {"CS","RS"}——那种用例如果断言了 false 子集就是断不真的陈述。
     "native-navigation-decision.json": frozenset({"RS"}),
     "update-manifest-canonical.json": frozenset({"RS", "PY"}),
     "update-manifest-invalid.json": frozenset({"RS"}),

@@ -67,7 +67,7 @@ fn c_abi_matches_native_navigation_decision_vectors() {
         );
         if evaluated["decision"] == "deny" {
             assert_eq!(
-                evaluated["reason"]["code"], vector["expected_deny_code"],
+                evaluated["reason"]["code"], vector["expected_evaluate_code"],
                 "{name}: evaluate denial code"
             );
             // SAFETY: broker 由本测试创建，且在此后不再使用或释放。
