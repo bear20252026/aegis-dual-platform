@@ -984,8 +984,16 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   （此处原写「`native-navigation-decision` 已有 C# 消费者 `BrowserPolicyBrokerNativeGateTests.cs`，
   可作为接法模板」——**已被 R9-B39 推翻**：该文件唯一的命中是 `:260` 的一句解释性注释，
   没有任何代码读这份向量，登记表已改回 `{"RS"}`；Windows 侧至今仍是零执行者）；
-  ③Agent 端不消费任何契约向量，而 `action-catalog.yaml` 的 `confirmation/risk/audit` 三列
-  也不被 broker 读（R9-SH-5）⇒ 两端各说各话。
+  ③**这一档的后半已被 R9-B46 定稿、并被 R9-B66 现读改真**：`action-catalog.yaml` 的
+  `confirmation`/`risk`/`audit`/`read_only` 不是「没人读的缺口」，而是**设计上就不给运行时读**的治理元数据
+  （列身份写在 catalog 头注第 8-22 行，由 `contracts/codegen/analyze_action_catalog.py` 等静态判据判，
+  并有反向锚 `catalog_governance_columns_test.py::test_broker_never_reads_the_governance_columns`
+  ＋它的正面控制 `::test_broker_really_reads_the_judgment_columns`）⇒ 照原处方「把三列接进裁决」
+  现在会被这条反向锚**判红**，不是可自由执行的改进。
+  ③剩下的真缺口只有一条：**Agent 端不消费任何契约向量**（`CONSUMER_MANIFEST` 现读 `AG` 命中 0）——
+  要不要把红队夹具与 `action-valid/invalid.json` 绑成同一份输入，属排期决定（⇒ §四）。
+  登记本节时这里写的是「三列也不被 broker 读 ⇒ 两端各说各话」——那是 R9-B46 之前的旧状态，
+  改真是因为**同一份文档的指针自己也漂过一次**（见 §3.65）。
   不顺手做的原因：每一档都要在端侧新增/改写裁决实现（不是加测试文件就有数），且第①档与
   AX-02 是同一次改造。门禁已把当前事实钉住：**将来任何一端接上消费者，表不改就判红**，
   所以这笔账不会再变成第二段声明。
@@ -3674,6 +3682,42 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    所以「入库件与工具链自己生成的结果一致」这句本批没有现读证据，与 R9-RS-2 登记时同口径）；
    ⑤§3.63 第 11 条④留下的那条「本批没有合并 `_brace_body`」由本批第 3 点闭掉。
 
+
+### 3.65 R9-B65（2026-10-15，接手后的第一条：文档指向单源，可没人验证那根指针）：catalog 的「谁判哪一列」做成注册表，头注与表互为对照
+
+1. 触发点是一条队列项的回读。Q53 第③档原写「`action-catalog.yaml` 的
+   `confirmation/risk/audit` 三列也不被 broker 读 ⇒ 两端各说各话」。现读三份东西之后它不成立：
+   R9-B46 已把这些列**定稿成治理元数据（设计上就不给运行时读）**，而且已经有反向锚
+   （`catalog_governance_columns_test.py::test_broker_never_reads_the_governance_columns`，
+   broker 源码剔注释后出现列名即判红）＋正面控制（判定面四列必须真的在 broker 里出现，
+   否则反向锚在判空气）。⇒ 照原处方「把三列接进裁决」现在**会撞红**，它不再是一次可自由执行的改进。
+   ③剩下的真缺口只有一条：Agent 端 `AG` 命中 0（`CONSUMER_MANIFEST` 现读），
+   要不要把红队夹具与 `action-valid/invalid.json` 绑成同一份输入属排期决定 ⇒ 留在 §四/队列。
+2. 但回读时抓到一条更小的失实：**头注把那根反向锚指错了文件**——
+   第 21 行写 `tests/python/codegen_and_catalog_test.py`，锚其实在隔壁的
+   `catalog_governance_columns_test.py`（R9-B46 当时因为前者在行数红线基线里才另开新文件，
+   后来头注没跟着改）。这件事本身无害，有害的是**它不可能被发现**：
+   「文档改成指向单源」这条纪律我们已经执行了很多次（§3.41/§3.45/§3.58 第 5 条…），
+   但从来没有一条判据验证「指向的那份文件真的存在、真的含那条锚」。
+   于是本批做的不是改那一行，而是把指针变成能红的东西。
+3. 落地形状：注册表 ⇄ 头注 ⇄ 判据文件**三者互为对照**
+   （`COLUMN_JUDGES` + `check_pointer_agreement()`，判四件事）——
+   表里每个路径必须实存；那份文件的**代码面**（`strip_comments` 后）必须查得到那一列的列名；
+   头注必须逐字写出表里的每条路径；锚点文件必须真的含 `GOVERNANCE_COLUMNS`/`BROKER_PATH`/
+   `JUDGMENT_COLUMNS` 三个符号。再加一条宽度约束：**指针一律写全路径**，
+   裸文件名（头注第 17 行原本写 `analyze_action_catalog.py`）判红——
+   本仓同名文件不止一处，裸名等于让下一个读者自己猜。
+   注册表值允许是多元组：`read_only` 与 `redteam_fixtures` 确实由两份文件分别判
+   （静态一致 vs 执行侧夹具），登记成一元组就是把「谁判」说窄了。
+4. 证伪与正面控制（新增 6 条用例，都在 `catalog_governance_columns_test.py`）：
+   把锚点指针替换成**历史上真写过的那个错值**（不是编的形状）⇒ 红并指名「反向锚」；
+   表指到一份存在但不含该列名的文件 ⇒ 红；指到不存在的文件 ⇒ 红；裸名 ⇒ 红；
+   正面控制是「一致的（列、文件、头注）三元组必须不红」，
+   以及「注册表必须覆盖 `GOVERNANCE_COLUMNS` 全部四条」——防止表悄悄漏列，
+   漏了的那条就回到「没人读也没人判」的装饰字段。
+5. Q53 的登记文本按上面的现读改真（保留「登记时曾这么写」的原话），
+   CSV `R9-SH-13` 同批回写。**这是第九轮第一次把「文档里的指针」本身纳入判据**，
+   而它抓到的第一个缺陷就是它自己的出处那一行。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
