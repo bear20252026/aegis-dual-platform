@@ -39,21 +39,6 @@
       "note": "超长 URL 占位向量（PY-078）：本向量是语义锚点而非真实样本——消费端 vectors.rs 检测到锚点 token 后物化为 https://example.org/ + 'a'×9000（>8192 上限）；Kotlin OriginPolicyTest 与 C# 测试用各自的 9000 字符字面样本同口径覆盖"
     },
     {
-      "url": "http://[::1]/",
-      "expected": "deny",
-      "note": "PY-069 IPv6 环回（authority 方括号形态一律拒绝）"
-    },
-    {
-      "url": "http://[::ffff:192.168.1.1]/",
-      "expected": "deny",
-      "note": "PY-070 IPv4-mapped IPv6（内嵌私网）"
-    },
-    {
-      "url": "http://[::ffff:127.0.0.1]/",
-      "expected": "deny",
-      "note": "PY-070 IPv4-mapped IPv6（内嵌回环）"
-    },
-    {
       "url": "http://2130706433/",
       "expected": "deny",
       "note": "PY-071 十进制整数 = 127.0.0.1（OS 解析器接受——双重解释混淆面）"
@@ -142,6 +127,51 @@
       "url": "https://localhost./",
       "expected": "deny",
       "note": "审计第六轮（2026-10-03）：AD-252 攻击面锚点——Chromium 归一剥尾点后 location.hostname == \"localhost\" 命中 bridge_guard 环回白名单成为 trustedCaller；归一层不得替攻击者完成剥离，三端一律拒绝"
+    },
+    {
+      "url": "https://[1.2.3.4]/",
+      "expected": "deny",
+      "note": "R9-B66：括号内嵌裸 IPv4 是双重解释面（java.net.URI 与 Chromium 不一致）"
+    },
+    {
+      "url": "https://[fe80::1%eth0]/",
+      "expected": "deny",
+      "note": "R9-B66：zone-id 要接口知识，跨机不可移植，一律拒（CS-201 同口径）"
+    },
+    {
+      "url": "https://[2001:db8::1/x",
+      "expected": "deny",
+      "note": "R9-B66：未闭合方括号（RS-177 的原始形态）"
+    },
+    {
+      "url": "https://[]/",
+      "expected": "deny",
+      "note": "R9-B66：空地址体"
+    },
+    {
+      "url": "https://[::1]x/",
+      "expected": "deny",
+      "note": "R9-B66：`]` 之后只允许 `:port`"
+    },
+    {
+      "url": "https://[::1]:0/",
+      "expected": "deny",
+      "note": "R9-B66：端口 0（与非方括号同口径）"
+    },
+    {
+      "url": "https://[1:2:3:4:5:6:7:8:9]/",
+      "expected": "deny",
+      "note": "R9-B66：段数超限"
+    },
+    {
+      "url": "https://::1/",
+      "expected": "deny",
+      "note": "R9-B66：裸 IPv6 缺方括号——authority 分隔符歧义，三端一致拒"
+    },
+    {
+      "url": "https://[::ffff:0177.0.0.1]/",
+      "expected": "deny",
+      "note": "R9-B66：内嵌 IPv4 带前导零八进制（inet_aton 双重解释）——宁拒不可猜"
     }
   ]
 }

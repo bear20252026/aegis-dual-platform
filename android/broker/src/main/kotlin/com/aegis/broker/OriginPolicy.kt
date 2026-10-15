@@ -97,17 +97,33 @@ object OriginPolicy {
      * ①字符集白名单（xn-- punycode 在集内；下划线/引号等 DNS 不安全字符
      * 拒绝，PY-074 向量）；②前导点（空首标签）与 `..`（连续点/空标签）拒绝
      * （PY-073 向量——多数形态 java.net.URI 已折 host=null，此处显式收口防
-     * 解析器漂移）；③`[` 拒绝——java.net.URI 对 IPv6 字面量保留方括号原样
-     * 放行（host="[::1]"），Rust 对 authority 方括号形态一律拒绝
-     * （PY-069/070 向量）。
+     * 解析器漂移）；③方括号形态自 R9-B66（队列 Q4 第二半）起**按字节收下**：以前一律拒
+     *（PY-069/070 向量——java.net.URI 保留括号而 Chromium 剥，双重解释面宁可不放行），
+     * 现在只有解析得动的 IPv6 字面量放行，`[1.2.3.4]`、未闭合、`%eth0` 作用域号、
+     * 段数超限仍拒，与核心 `origin/host_grammar` 和 contracts url-origin-valid/invalid 同口径。
      */
     private fun isAcceptedHostShape(host: String): Boolean =
         !host.endsWith(".") &&
             !host.startsWith(".") &&
             !host.contains("..") &&
-            !host.contains("[") &&
-            host.all(::isAllowedHostChar) &&
-            !isAlternateIpv4Encoding(host)
+            // R9-B66（Q4 第二半）：方括号 IPv6 从「一律拒」改成「按字节解析成功才收下」。
+            // 拒裸 IPv6 authority（缺方括号时 java.net.URI 的 host 语义含糊）与非法
+            // 括号形态（`[1.2.3.4]`、未闭合、zone-id、段数超限）都仍由这个谓词收口——
+            // 括号里的内容交给 AddressText.ipv6ToBytes，与核心/Windows 同一判据。
+            isAcceptedHostBody(host)
+
+    /**
+     * host 体的两条形态分支（R9-B66）：`[…]` 只接受**解析得动的 IPv6**，其余走
+     * DNS 字符白名单 + 备用编码拒绝。括号形态必须跳过白名单——`[`、`]`、`:` 三个字符
+     * 都不在白名单里，`host.all(::isAllowedHostChar)` 会把刚放开的 IPv6 又拒一遍
+     * （核心 origin.rs 同口径：白名单只对非 IPv6 字面量生效）。
+     */
+    private fun isAcceptedHostBody(host: String): Boolean =
+        if (host.startsWith("[")) {
+            hostHasValidBracketedIpv6(host)
+        } else {
+            host.all(::isAllowedHostChar) && !isAlternateIpv4Encoding(host)
+        }
 
     /**
      * AD-299 host 字符集白名单单字判定（detekt-修复（2026-10-02 审计云端实证）：
@@ -115,6 +131,17 @@ object OriginPolicy {
      * 点/连字符（xn-- punycode 在集内）。
      */
     private fun isAllowedHostChar(c: Char): Boolean = c in 'a'..'z' || c.isDigit() || c == '.' || c == '-'
+
+    /**
+     * 方括号 host 的合法性：`[<合法 IPv6>]` 收下，其余（含未闭合、括号内嵌裸 IPv4、
+     * `%eth0` 作用域号）一律拒。调用方（[isAcceptedHostBody]）已保证 host 以 `[` 开头。
+     */
+    private fun hostHasValidBracketedIpv6(host: String): Boolean {
+        if (!host.endsWith("]") || host.length <= 2 || host.indexOf(']', 1) != host.length - 1) {
+            return false
+        }
+        return AddressText.ipv6ToBytes(host.substring(1, host.length - 1)) != null
+    }
 
     /**
      * PY-071/072（审计 2026-09-25）：非点分十进制 IPv4 编码检测——整数/

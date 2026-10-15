@@ -37,6 +37,46 @@
       "url": "http://93.184.216.34/",
       "expected": "allow",
       "note": "PY-081 点分十进制 IP 字面量（合法 host 形态）"
+    },
+    {
+      "url": "http://[::1]/",
+      "expected": "allow",
+      "note": "R9-B66：IPv6 回环从 invalid 移进来（B8「本机与内网必须能打开」在语法被拒时从未生效）"
+    },
+    {
+      "url": "http://[::1]:9000/api",
+      "expected": "allow",
+      "note": "R9-B66：带端口 + 路径的 IPv6 字面量"
+    },
+    {
+      "url": "http://[fd00::1]/",
+      "expected": "allow",
+      "note": "R9-B66：ULA fc00::/7"
+    },
+    {
+      "url": "https://[2001:db8::1]/",
+      "expected": "allow",
+      "note": "R9-B66：文档段——**语法**收下（策略面在 native-navigation-decision 里判）"
+    },
+    {
+      "url": "http://[::ffff:127.0.0.1]/",
+      "expected": "allow",
+      "note": "R9-B66：IPv4-mapped 内嵌回环；语法收下，分类必须折回 127/8"
+    },
+    {
+      "url": "http://[::ffff:192.168.1.1]/",
+      "expected": "allow",
+      "note": "R9-B66：IPv4-mapped 内嵌私网"
+    },
+    {
+      "url": "https://[2001:0DB8::1]/",
+      "expected": "allow",
+      "note": "R9-B66：大写十六进制——三端都必须按同一地址收下（小写归一）"
+    },
+    {
+      "url": "https://[0:0:0:0:0:ffff:7f00:1]/",
+      "expected": "allow",
+      "note": "R9-B66：同一回环的第三种拼法（不压缩 + 十六进制尾段）——按文本前缀判的实现在这里必然分叉，所以按字节判"
     }
   ]
 }

@@ -8,7 +8,11 @@
 
 /// IPv6 字面量的高危判定（R9-B66，入参是**已剥方括号**的地址体）。
 ///
-/// 第一步永远是把内嵌 IPv4 折叠回 IPv4 判定：`::ffff:127.0.0.1` 与
+/// 判定顺序是**回环 → 折叠 → 段集**，不能换：`std::Ipv6Addr::to_ipv4()` 会把
+/// 过时的 IPv4-兼容写法折成 IPv4，`::1` 因此变成 `0.0.0.1`——按段判时撞上
+/// 0/8「未指定」，本机回环就被自己人拦了（B8 不可回退裁决）。
+///
+/// 折叠本身不能省：`::ffff:127.0.0.1` 与
 /// `::ffff:7f00:1` 是同一个回环地址的两种拼法——分类上必须等价，否则归一层
 /// 刚放开字面量，这里就成了绕过口（`::ffff:169.254.169.254` = 云元数据）。
 /// 折叠之后按段判：**链路本地 fe80::/10**（与 IPv4 的 169.254/16 对称，含
@@ -27,12 +31,18 @@ pub(crate) fn is_high_risk(address_body: &str) -> bool {
     let Ok(addr) = address_body.parse::<std::net::Ipv6Addr>() else {
         return true; // 归一层已保证进得来；到不了这里的形态按高危处理（fail-closed）
     };
+    // 回环先判，且必须排在折叠之前：`to_ipv4()` 把过时的 IPv4-兼容写法 `::1`
+    // 折成 `0.0.0.1`，于是 B8 裁决要求放行的本机回环会撞上 0/8 被判高危
+    if addr.is_loopback() {
+        return false;
+    }
     if let Some(v4) = addr.to_ipv4_mapped().or_else(|| addr.to_ipv4()) {
         return super::SecurityPolicy::is_high_risk_host(&v4.to_string());
     }
     let head = addr.segments();
-    // `::` 未指定（`::0.0.0.0` 已由上面的 to_ipv4 折叠，这里兜住纯零地址）
-    head[0] == 0
+    // `::` 未指定——必须用 is_unspecified()：`head[0] == 0` 会把首段本就是 0 的
+    // 地址一起算进来（`::1` 在上一条已被排除，这里钉住纯零地址）
+    addr.is_unspecified()
         // fe80::/10 链路本地
         || (head[0] & 0xffc0) == 0xfe80
         // ff00::/8 组播

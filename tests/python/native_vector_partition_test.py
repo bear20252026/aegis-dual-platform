@@ -76,13 +76,15 @@ def test_envelope_shape_is_exactly_the_registered_one(docs: dict[str, dict]) -> 
 
 
 def test_partition_is_the_measured_thirteen_and_thirty(docs: dict[str, dict]) -> None:
-    """13 条 false / 30 条 true / 确认面 5 条全 false——§3.42 逐行实证过的形状。
+    """现读形状：53 条里 35 true / 18 false（R9-B66 加了 10 条 IPv6 策略向量，
+    其中 5 条 require_confirmation 因此按推导式落进 false），确认面 5 条全 false。
 
-    钉数字不是为了让数字不能变，是为了让「变数字」必须与「改推导式」同批发生。
+    钉数字不是为了让数字不能变，是为了让「变数字」必须与「改推导式」同批发生
+    （R9-B66 就是走这条路改的：新增向量 → 计数同批 → 三端跑同一份表）。
     """
     vectors = docs[DECISION.name]["vectors"]
     flags = [vector["platform_decidable"] for vector in vectors]
-    assert len(vectors) == 43 and sum(flags) == 30 and flags.count(False) == 13
+    assert len(vectors) == 53 and sum(flags) == 35 and flags.count(False) == 18
     confirmation = docs[CONFIRMATION.name]["vectors"]
     assert len(confirmation) == 5 and all(v["platform_decidable"] is False for v in confirmation)
 

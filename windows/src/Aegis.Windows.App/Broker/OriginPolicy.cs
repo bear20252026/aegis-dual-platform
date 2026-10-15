@@ -77,11 +77,36 @@ public static class OriginPolicy
         // CS-418（2026-10-02 审计）：端口 0/越界拒绝（PY-075 向量——见 MaxPort 注）
         if (u.Port is < 1 or > MaxPort)
             return false;
-        if (!IsValidHost(u.Host))
+        var host = u.Host;
+        if (authority.StartsWith('[') && !TryRawBracketedIpv6(authority, out host))
+            return false;
+        if (!IsValidHost(host))
             return false;
         uri = u;
         return true;
     }
+
+    /// <summary>R9-B66：方括号 IPv6 必须从 **raw authority** 取，不能信 <c>Uri.Host</c>——
+    /// .NET 会静默吃掉作用域号（"[fe80::1%eth0]" → Host "[fe80::1]"）与 <c>]</c> 后的
+    /// 垃圾（"[::1]x" → "[::1]"），两条 deny 向量因此在 C# 端放行（dotnet test 实证）。
+    /// 产出的 <paramref name="host"/> 含方括号、不含端口，交给 <see cref="IsValidHost"/>
+    /// 按字节解析；形态不合返回 false（与 Rust origin.rs 的 bracketed_host 分支同口径）。</summary>
+    private static bool TryRawBracketedIpv6(string authority, out string host)
+    {
+        host = string.Empty;
+        var close = authority.IndexOf(']');
+        if (close < 0)
+            return false;  // 未闭合（"[::1/bad"）
+        var tail = authority[(close + 1)..];
+        if (tail.Length > 0 && !IsPortSuffix(tail))
+            return false;  // "]" 之后只有端口这一种形态
+        host = authority[..(close + 1)];
+        return true;
+    }
+
+    /// <summary>"]" 之后只允许 ":" + 纯数字；空串由调用方当"没有尾缀"处理。</summary>
+    private static bool IsPortSuffix(string tail) =>
+        tail.Length > 1 && tail[0] == ':' && tail[1..].All(char.IsAsciiDigit);
 
     /// <summary>host 白名单式校验：剥 IPv6 方括号后按标签校验——字母/数字/
     /// 连字符/点（或 IPv6 字面量）；拒绝尾点、空白折叠、Unicode 控制符与
@@ -107,11 +132,13 @@ public static class OriginPolicy
             return System.Net.IPAddress.TryParse(inner, out var parsed)
                 && parsed.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
         }
-        // 未加方括号的裸 IPv6（`http://2001:db8::1/`）继续拒：authority 的分隔符歧义
-        //（RS-011 同源），三端一致
+        // 走到这里要么带括号（上面已收下）、要么裸 IPv6（`http://2001:db8::1/`）——
+        // 后者继续拒：authority 的分隔符歧义（RS-011 同源），三端一致。
+        // 实测更正（R9-B66，dotnet test 实证）：.NET 10 的 Uri.Host **保留**方括号
+        //（此前注释写「去方括号，要用 DnsSafeHost」是失实声明），所以上面的括号
+        // 分支确实进得来；但它在括号内会静默丢 zone-id，故 raw authority 那关不可省。
         if (host.Contains(':', StringComparison.Ordinal))
             return false;
-        // .NET Uri.Host 对 IPv6 字面量去方括号；DnsSafeHost 保留——按原串判断
         if (host.EndsWith(".", StringComparison.Ordinal))
             return false;  // 尾点 host（"example.com."）——规范化歧义面
         foreach (var ch in host)
