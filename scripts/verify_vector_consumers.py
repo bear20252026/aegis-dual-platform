@@ -68,8 +68,13 @@ META_LEVEL = (
 # update-manifest-invalid/valid 的 PY 命中**全部**来自元层文件（不算端侧），
 # 而 canonical 的 PY 是 tests/python/release_tools_test.py（真实消费者，保留）。
 CONSUMER_MANIFEST: dict[str, frozenset[str]] = {
-    "action-invalid.json": frozenset({"RS"}),
-    "action-valid.json": frozenset({"RS"}),
+    # R9-B68（队列 Q53 第③档）：AG 命中来自 `agent/tests/action_vector_consumption_test.py`
+    # ——Agent 端把两份向量逐条喂进 `ActionContract.payload_violation`（与
+    # `evaluate()` 里同一份从 schema 现算的判定面）。登记的是**契约层**：
+    # `PolicyBroker.decide()` 那条面对核心形态载荷一律 deny_payload（Agent 的
+    # ProposedAction 还要求 intent/budget_used），断它「非 ALLOW」是零信息量断言。
+    "action-invalid.json": frozenset({"AG", "RS"}),
+    "action-valid.json": frozenset({"AG", "RS"}),
     "approvals-replay-and-expiry.json": frozenset({"RS"}),
     "audit-event-invalid.json": frozenset(),
     # R9-B35（第九轮 Q11）：实例级四条只由 schema 层判定（validate_vector_schemas.py
