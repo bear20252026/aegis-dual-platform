@@ -12,7 +12,7 @@ R8-SH-10,P2,问题/门禁有效性,.github/workflows/ci.yml:17-25,SP-235新加pu
 R8-PY-02,P2,问题/fail-closed,contracts/codegen/validate_vector_schemas.py:118-121,invalid侧缺manifest静默continue；MIN_FILES数文件不数条目⇒清空即绿（B5落地：改为有界登记集SCENARIO_ONLY_CASES，并证出singular_signature_field自称deny_schema却无实例=两侧零判定，已补待拒实例）,yes,B5
 R8-PY-08,P2,问题/脚本健壮性,"scripts/check_markdown_links.py:79-85,122-135",链接解析无仓库根包含性判定；扫描0个md也exit0,yes,B5
 R8-RS-02,P2,问题/种子退化,core/rust-policy-core/src/shield.rs:160-181,空站点键⇒与会话无关的常量噪声；worker出口退回本帧host,yes,B2
-R8-RS-13,P2,问题/FFI安全,core/rust-policy-core/src/ffi/mod.rs:219-228,session_seed未做长度前置⇒1GiB十六进制串触发512MiB分配,yes,B7
+R8-RS-13,P2,问题/FFI安全,core/rust-policy-core/src/ffi/mod.rs:219-228（登记时）→ :281/:300 ↔ src/ffi/broker/denylist.rs:40/:50/:99/:180（落地时）,session_seed未做长度前置⇒1GiB十六进制串触发512MiB分配；uniffi面update_host_denylist(Vec<String>)无条目数/单条长度/批次总字节上限⇒第九轮R9-B61两半均落地（定长前置判定＋256单条与64KiB批次上限；判据scripts/verify_ffi_input_bounds.py；状态与能红实证见第九轮§3.61）,yes,B7→R9-B61
 R8-AD-09,P3,问题/测试恒绿,android/broker/src/test/kotlin/com/aegis/broker/AndroidBrokerTest.kt:159-170,变体自适应断言（非恒绿）：真缺口只是发布链置位零锚点与JVM变体语义边界，已由NativeGateWiringAnchorTest钉住,yes,B3
 R8-CS-SEC-04,P2,问题/性能+一致性,windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:155-162,&0xff回绕(0→254/255→1)+无像素上限⇒可被页面冻结渲染进程,yes,B2
 R8-CS-SEC-08,P2,问题/可观测性,"windows/src/Aegis.Windows.App/WebView/HostWebView.cs:493,506-512,527-533",6条静默return false出口无审计无提示（授权链不一致的唯一信号）,yes,B4

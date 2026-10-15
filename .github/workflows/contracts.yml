@@ -137,16 +137,15 @@ jobs:
       # 每条 `python <路径>.py` 必须在其**生效 cwd**（step → job.defaults → workflow.defaults）下真实存在。
       - name: Workflow python call-site path gate (R9-B60——调用点存在 ≠ 能执行)
         run: python scripts/verify_workflow_script_paths.py
+      # R9-B61（本仓自查现读发现）：上面那一步在 PR #199 里连同 6 行注记被写了两遍。
+      # 症状不是红，是门禁跑两遍 + 两份在不同批次各自漂移，而台账只记一处「接进 contracts.yml」。
+      # 判的是「同 job 内整步骤同体（剔掉 name/id）」——不是「同一条命令出现两次」：
+      # active_tree_gates.py 在同一 job 被调多次靠的是参数不同，那种重复有语义。
+      - name: Workflow step duplication gate (R9-B61——同 job 内的第二份同体步骤没有新语义)
+        run: python scripts/verify_workflow_step_duplicates.py
       # R9-B51（Q61）：校验和文档只能记录「本次真正落盘的字节」，而平台相关的构件在不同
       # runner 上落的是不同文件（aapt2 的 -windows.jar 与 -linux.jar 是两个 sha256）。
       # 需求平台从 workflow 的 runs-on 现取，所以加一个 macos runner 不需要改判据代码。
-      # R9-B60：dispatch 实测抓到「工具类路径闭包」那一步自 R9-B49 起就站在 job 的
-      # `working-directory: android` 里找 `scripts/…`（不存在），而它前面那行
-      # `grep … || echo "(零命中)"` 先把失败印成了一条看起来像结论的陈述。诊断面是
-      # dispatch-only，PR 面全绿，所以这条判据把它变成「改了就跑不掉」的形状：
-      # 每条 `python <路径>.py` 必须在其**生效 cwd**（step → job.defaults → workflow.defaults）下真实存在。
-      - name: Workflow python call-site path gate (R9-B60——调用点存在 ≠ 能执行)
-        run: python scripts/verify_workflow_script_paths.py
       - name: Gradle checksum platform coverage gate (R9-B51——字节面跟平台走)
         run: python scripts/verify_gradle_platform_coverage.py
       # R9-B52（第九轮自查）：台账 §五 是「还剩多少事」的唯一依据。两条都会静默发生：
@@ -205,6 +204,13 @@ jobs:
       # 双向对账（少导出/多残留都判红）；权威生成结果的同款比对在 core-rust.yml。
       - name: UniFFI binding export surface gate (R9-RS-2——导出面与入库绑定对账)
         run: python scripts/verify_uniffi_binding_surface.py
+      # R9-B61（第八轮 R8-RS-13 的第九轮落地）：uniffi 面收到的是宿主直传的
+      # `String` / `Vec<String>`，没有 C 层 `read_utf8` 的有界扫描兜底——所以
+      # 「先判长度再进 O(n) 面」的顺序与「批次总字节上限」只能靠文本锚点钉住：
+      # 分配发生在解码里，行为面看不出区别（详见 tests/hex_seed_bound.rs 头注）。
+      # 三面 64KiB 同值、单条 host 256 字节同值都在判据内——数字各抄一份就是漂移面。
+      - name: FFI uniffi-face input bounds gate (R9-B61——先拒再算，上限三面同值)
+        run: python scripts/verify_ffi_input_bounds.py
 
   rust-conformance:
     runs-on: ubuntu-latest

@@ -3266,6 +3266,103 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      这是「dispatch 证据」的第二种价值：第一次抓到旁边的坏步骤，第二次抓到自己新加能力的
      边界——两者都不是本地跑得出来的。
 
+### 3.61 R9-B61（2026-10-14，第八轮 R8-RS-13 的落地 + 一次接线时的现读自查）：宿主直传输入的规模上限必须待在分配之前
+
+1. 这条登记挂了三轮却没动过，原因就在**它的登记形态**：第八轮 §七 记了 ID 与
+   `文件:行号`，本轮 §六 尾部记了一句「**仍未修**，同于第八轮登记，不另立 ID」。
+   「不另立 ID」＝不进 §五 队列＝不进任何门禁，于是每一轮审计都会重新发现它一次、
+   重新「不另立」一次。本批把两半都做完，并把 §六 那句话改成指向本节的落点。
+2. 现读两半（按当前源码，不引用第八轮的 `:219-228`）：
+   - `core/rust-policy-core/src/ffi/mod.rs:299-302`：`hex_seed_to_bytes` 先
+     `util::hex_decode(hex)` 再用 `try_into` 收口成 `[u8; 32]`。`hex_decode` 对**任意偶数长度**
+     先 `Vec::with_capacity(len/2)` 再全量扫描 ⇒ 一条 1 MiB 的 hex 串先换来一次 512 KiB
+     分配，而「长度不对」的判定仍落在解码之后。
+   - uniffi 面 `FfiBroker::update_host_denylist(Vec<String>)`（`ffi/broker.rs:331`）对
+     **条目数、单条长度、批次总字节三项都没有上限**。同一条名单走 C ABI
+     （`c_abi/navigation.rs:261`）时由 `c_abi/mod.rs:31` 的 `FFI_INPUT_MAX_BYTES=64KiB`
+     经 `read_utf8` 的有界扫描兜住；uniffi 面拿到的是宿主直传的已解析数组，没有对应兜底。
+3. 修法（两处都把判定挪到 O(n) 面之前，**数字一个新造都没有**）：
+   - `ffi/mod.rs:281` 新增 `HEX_SEED_CHARS = 64`，`:300` 进 `hex_decode` **之前**判
+     `hex.len() != HEX_SEED_CHARS ⇒ None`。
+   - `ffi/broker/denylist.rs:40` `MAX_ENTRY_BYTES = 256`（与 `broker.rs:77/90/95`、
+     `ffi/mod.rs:160` 那四个 256 同口径，也与域名 RFC 上限相容）；`:50`
+     `MAX_BATCH_BYTES = 64 * 1024`（与 `c_abi/mod.rs:31`、`ffi/mod.rs:155` 同值）；
+     `:99` 单条长度进 `entry_shape_ok`，`:180` 批次总字节在 `trim()/lowercase` **之前**整批拒收。
+   - 超限**整批拒收、快照一字不动**：部分写入会让判定读到一份谁都没登记过的名单，
+     而拒收对宿主是可发现的（`accepted < input`，与形态校验拒收同一口径）。
+   - 死条目那一刀补的是同一句话描述的形状：一条 10 KB 的「host」过得了字符校验，
+     然后永久驻进活动快照，而它不可能等于任何被规范化的导航 host（域名上限 253）——
+     「已登记但永不生效」比不登记更坏。
+4. **上限会不会把真实名单拒掉**——这是本批唯一能静默变成安全回归的方向，逐面现读：
+   - Windows 宿主（唯一的在仓调用方）在 `NativePolicyCoreBridge.Denylist.cs:39` 按
+     `MaxChunkPayloadBytes = 60 * 1024` 切批，`EnumerateBatches` 的逐元素计费取
+     `SerializeToUtf8Bytes(host).Length + 1`（= 原始字节 + 2 引号 + 1 逗号），
+     所以一批的**原始 host 字节和 < 60 KiB < 64 KiB**，永不触界。
+   - C ABI 面按构造也触不到：入口载荷就是那个 JSON 数组本身，`read_utf8` 判的是
+     含括号/引号/逗号的**整段 JSON** ≤ 65536 字节 ⇒ 解出的 host 字节和必然更小。
+     这条上限只对 uniffi 直传生效，正是 R8-RS-13 指的那一面。
+   - Android 侧现读**没有任何黑名单接线**（`android/app/src/main` 全树 grep `denylist`
+     零命中，与 README「未接线」面和 §五 相应队列项一致），因此不存在第三个推送方。
+   - 反向对照留成用例：恰上限（2048×32=65536）全收、超 1 字节整批拒收、
+     同一份名单拆成两批则两批全收——分批协议（⑨）不受影响。
+5. 一条被现读推翻的处方：**不给 `util::hex_decode` 加长度上限**。它看着像「单源收口」
+   的正解，但 `session_state.rs:60-62` 合法地在解 1 MB 级 hex——RS-260 当初把
+   `MAX_JSON_BYTES` 抬到 `1_125_000` 就是为了 512 KB 状态字节 hex 编码后的往返；
+   在公共解码器上加 64 KiB 会**静默打断会话恢复**。判定该待在入口，不在公共件。
+6. 能红判据为什么建在文本锚点：「先判长度」与「先解再判」**返回值逐字相同**，
+   唯一区别是一次分配发生的时机。计数式 `#[global_allocator]` 能钉住它，但那是把 CI
+   挂在 harness 自身的分配噪声上——R9-B54 刚为同类 flaky 红灯付过一整批。于是分两层：
+   - 行为面（能红的是**裁决**，不是时机）：`core/rust-policy-core/tests/hex_seed_bound.rs`
+     2 条——只有定长种子被解出（1 MiB / 8 MiB 输入拒）、两个宿主可见管线入口对超长种子
+     返回空脚本，各配正向对照；`denylist/tests.rs:180/209/221` 3 条钉 256/257、恰上限、
+     超 1 字节整批拒收（含「拒收后不留半开会话」）。
+   - 判据面 `scripts/verify_ffi_input_bounds.py`：按剔注释口径（`text_anchors.py` 单源，
+     R9-B39 / R9-B45）判四件事——守卫排在 `hex_decode(` 之前；`HEX_SEED_CHARS` 与函数
+     签名里的 `[u8; N]` 是同一个数（从签名反推 `N*2`，防「护栏与契约不是同一个数」）；
+     批次判定排在 `host.trim()` 之前；三面 64 KiB 同值 + 256 与那四个常量同值
+     （数字各抄一份就是下一轮的漂移面）。
+   - 12 条注入式反向锚（`tests/python/ffi_input_bounds_test.py`，不改工作树）：守卫挪到
+     解码后 / 守卫被注释掉 / 常量改 66 / 单条上限删掉 / 批次块挪到 trim 之后 / 整块删除 /
+     任一面漂到 32 KiB / `MAX_ENTRY_BYTES` 漂成 512 / 锚点改名 / 文件缺失——逐条摆上去必红。
+     其中一条反向对照必须**不红**：三面**一起**改成 32 KiB 时判据为空（一起动是改口径，
+     只动一面才是漂移）。
+7. 反向实证（不止靠注入用例）：临时删掉 denylist 两处上限 ⇒
+   `oversized_entry_is_refused…` 与 `one_byte_over_the_cap…` FAILED，而「恰上限全收」那条
+   仍绿；恢复后 `ffi::broker::denylist` 10 条全过。没有这一步，「加了判据」与
+   「加了一条永远绿的判据」无法区分。
+8. **接线时的现读自查**：给上面这条门禁接进 `contracts.yml` 时发现，R9-B60 自己那一步
+   （连同 6 行注记）在同一 job 里被写了两遍（第 1 步与第 19 步），来源是 commit `834520c`
+   那次并入。症状不是红，是**门禁跑两遍**＋两份在不同批次各自漂移，而 §3.60 只记了一处
+   「接进 contracts.yml」——读的人以为只有一个。副本已删，并做成常驻判据
+   `scripts/verify_workflow_step_duplicates.py`（紧跟 R9-B60 那条接进同一 job）。口径三条
+   选择与被否的备选：
+   - 判**同一 job 内**：`dependency-relock.yml` 的三个「检出目标分支」分属三个持写权限的
+     job，守卫必须逐 job 写（R9-CI-2 同口径），跨 job 同体不是重复。
+   - 判**整步骤同体**（剔掉 `name`/`id` 后逐字相同）。备选「同一条 python 调用在同一 job
+     出现两次」本批实测会报 6 个 job，其中 **5 个是合法重复**（`active_tree_gates.py` 分
+     ruff / bandit / py312 三次、`release.yml` publish 步两条脚本各跑两次、
+     `release-android.yml` 的 `../scripts/verify_versions.py` 两次……），只有 contracts.yml
+     那一个是真的 ⇒ 误报机器不入库。
+   - 不判「同名不同体」：Actions 允许步骤重名，「注记同一段话抄两遍」不在这条射程里。
+   - 5 条用例（`tests/python/workflow_step_duplicates_test.py`）：现树全绿 + 扫描面不塌缩
+     （16 份 workflow / 324 步）、把 R9-B60 的形状摆回内存必红、两条反向对照（跨 job 同体、
+     同脚本不同参数都不报）、`run` 多一行即不算重复（防判据退化成「名字撞了就红」）。
+9. 行数红线：`ffi/broker.rs` 的导出面注记压成 1 行（理由单源在 `denylist.rs`，抄一份
+   就是第二份漂移面），仍在基线 935 内；`ffi/mod.rs` 797 → 809（1 行 const + 5 行顺序
+   理由 + 3 行守卫），基线用 `--write-baseline` 重建后**人工 diff 确认只有这一项变化**
+   再入库。
+10. 验证：`cargo fmt --check` / `cargo clippy --locked --all-features --all-targets
+    -- -D warnings` / `cargo test --locked --all-features`（lib 585 条 + 各集成面，含新增
+    2 条）全过；`pytest tests/python` **832 passed / 1 skipped**（本批 +17）；ruff / bandit /
+    行数红线（现读 561 个受管源文件、基线 86 项）/ 触发面（16 个 workflow 分类不变）/
+    workflow 路径门禁（147 个 run 步骤，比 §3.60 记的 146 多一步就是本批这两条新门禁的
+    净增）/ 两条新门禁全过。
+11. 未做的两件事，写清楚以免下一轮当成已做：①uniffi 面仍只有整批替换一档（分批档位只在
+    C ABI 面；R7-RS-03 登记的生成绑定滞后是另一条线）；②上限本身可判，但**宿主如何发现
+    自己被拒**只有 Windows 侧成立（`CoreDenylistPublisher.Report` 已有
+    `Accepted/Input` 与 `PartiallyPublished`），Python 绑定面与任何 uniffi 直传方都没有
+    等价复检——那属接线面，不在本批射程。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
@@ -3326,8 +3423,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 - RS 分区交叉核对：`rust-toolchain.toml` 1.99.0 与 9 处 workflow 字面量逐处对齐、nightly
   例外恰好一处（#124 一族成立）；canvas 三端 `aegisNoiseMix`/绝对序号/`BYTE_RGBA_GUARD`
   实质一致（B2/⑦ 成立），余量见 Q31；R8-RS-13（`hex_seed_to_bytes` 先 `with_capacity(len/2)`
-  后判长度、uniffi 面 `update_host_denylist(Vec<String>)` 无条目数上限）**仍未修**，
-  同于第八轮登记，不另立 ID。
+  后判长度、uniffi 面 `update_host_denylist(Vec<String>)` 无条目数上限）第九轮登记时记为
+  「仍未修、不另立 ID」——**已于本批落地**，两半的修法、上限为什么不拒真实名单与能红判据
+  见 §3.61（该形态此前不进 §五 队列、不进任何门禁，故每轮重新发现一次；教训是同批第 1 条）。
 
 ## 七、COVERAGE 汇总（置信边界）
 

@@ -1,10 +1,18 @@
 //! 黑名单快照的单元测试（⑨：暂存 + 提交协议的档位语义）。
 //! 自 `denylist.rs` 外迁：那条文件按 300 行红线管理，而档位判据需要成组测试。
 
-use super::{mode_is_known, HostDenylist, MODE_APPEND, MODE_BEGIN, MODE_COMMIT, MODE_REPLACE};
+use super::{
+    mode_is_known, HostDenylist, MAX_BATCH_BYTES, MAX_ENTRY_BYTES, MODE_APPEND, MODE_BEGIN,
+    MODE_COMMIT, MODE_REPLACE,
+};
 
 fn hosts(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
+}
+
+/// 一批恰好占满上限的条目（每条 32 字节，2048 条 = 65 536）。
+fn batch(count: usize) -> Vec<String> {
+    (0..count).map(|i| format!("{i:0>32}")).collect()
 }
 
 /// 锁中毒的两个 fail-closed 口径（第七轮 R7-RS-01 硬约束，此前全仓零锚点）：
@@ -161,4 +169,84 @@ fn committing_an_empty_session_empties_the_served_snapshot() {
     assert_eq!(commit.accepted, 1, "换了快照就是换了，哪怕换成空");
     assert_eq!(commit.served, 0);
     assert!(!denylist.host_denied("evil.example"));
+}
+
+/// R8-RS-13（第八轮登记，第九轮 R9-B61 落地）：单条 host 有长度上限。
+///
+/// 超限的条目不可能等于任何被规范化的导航 host（域名 RFC 上限 253），收下就是
+/// 本模块自己定义的最坏形态——「已登记但永不生效」的死条目。反向对照同批落地：
+/// **恰在上限**的条目必须收，否则这条判据只是「长条目都可疑」。
+#[test]
+fn oversized_entry_is_refused_while_the_cap_itself_is_accepted() {
+    let suffix = ".example";
+    let at_cap = format!("{}{suffix}", "a".repeat(MAX_ENTRY_BYTES - suffix.len()));
+    let over = format!("{}{suffix}", "a".repeat(MAX_ENTRY_BYTES - suffix.len() + 1));
+    assert_eq!(at_cap.len(), MAX_ENTRY_BYTES);
+    assert_eq!(over.len(), MAX_ENTRY_BYTES + 1);
+
+    let denylist = HostDenylist::default();
+    assert_eq!(
+        denylist.apply(hosts(&[&over]), MODE_REPLACE).accepted,
+        0,
+        "超长条目不得进表"
+    );
+    assert!(!denylist.host_denied(&over));
+
+    assert_eq!(
+        denylist.apply(hosts(&[&at_cap]), MODE_REPLACE).accepted,
+        1,
+        "恰在上限的条目必须接受（反向对照）"
+    );
+    assert!(
+        denylist.host_denied(&at_cap),
+        "收下就得参与判定——否则上限写成了一条静默丢弃"
+    );
+}
+
+/// 恰在批次上限（64 KiB）的推送必须全量生效——分批协议在 C ABI 面本来就送得进
+/// 这个量，上限判的是「超」而不是「大」。
+#[test]
+fn a_batch_exactly_at_the_cap_is_fully_accepted() {
+    let count = MAX_BATCH_BYTES / 32;
+    assert_eq!(count * 32, MAX_BATCH_BYTES, "用例构造必须恰好占满上限");
+    let denylist = HostDenylist::default();
+    let report = denylist.apply(batch(count), MODE_REPLACE);
+    assert_eq!(report.accepted as usize, count, "恰在上限不得有差额");
+    assert_eq!(report.served as usize, count);
+}
+
+/// 超出上限一个字节 ⇒ **整批**拒收、活动快照一字不动、不留半开会话。
+/// 部分写入会让判定读到一份谁都没登记过的名单，而那比拒收更坏。
+#[test]
+fn one_byte_over_the_cap_refuses_the_whole_batch_and_changes_nothing() {
+    let denylist = HostDenylist::default();
+    denylist.apply(hosts(&["keeper.example"]), MODE_REPLACE);
+
+    let oversized = batch(MAX_BATCH_BYTES / 32 + 1);
+    let report = denylist.apply(oversized, MODE_BEGIN);
+    assert_eq!(report.accepted, 0, "超限批次不得声称接受了任何条目");
+    assert_eq!(report.served, 1, "拒收是不动快照，不是写一半");
+    assert!(!report.staged, "超限的 begin 不得留下半开会话");
+    assert!(denylist.host_denied("keeper.example"), "在用名单不受影响");
+    assert!(
+        !denylist.host_denied(&format!("{:0>32}", 0)),
+        "被拒批次里的条目不得出现在判定面"
+    );
+
+    // 反向对照：同一批内容拆成两批推送（各自的量在 C ABI 面本来就送得进去）
+    // ⇒ 全部生效。这条判据拦的是「一批的规模」，不是「名单的规模」。
+    let staged = HostDenylist::default();
+    let half = MAX_BATCH_BYTES / 32;
+    assert_eq!(
+        staged.apply(batch(half), MODE_BEGIN).accepted as usize,
+        half
+    );
+    assert_eq!(
+        staged.apply(batch(half), MODE_APPEND).accepted as usize,
+        half,
+        "accepted 报的是本批被接受的条目数（与暂存区去重后的增量无关——既往口径）"
+    );
+    assert_eq!(staged.apply(hosts(&[]), MODE_COMMIT).accepted, 1);
+    assert_eq!(staged.served_count() as usize, half);
+    assert!(staged.host_denied(&format!("{:0>32}", 1)));
 }

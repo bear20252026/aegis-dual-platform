@@ -34,6 +34,21 @@ pub(crate) const MODE_BEGIN: i32 = 2;
 /// 下一次 `MODE_BEGIN` 会丢弃旧暂存，活动快照始终是一份完整的名单。
 pub(crate) const MODE_COMMIT: i32 = 3;
 
+/// 单条 host 的字节上限——与 `ffi` 面的会话键 / scope / 管线 domain / 脱敏 host
+/// 四个 256 常量同口径（RS-223 / RS-254 / RS-173 一族），也与域名自身的
+/// RFC 上限相容。超出即死条目，见 `entry_shape_ok`。
+pub(crate) const MAX_ENTRY_BYTES: usize = 256;
+
+/// 一批注入的 host 总字节上限——与 C ABI `read_utf8` 的 `FFI_INPUT_MAX_BYTES`、
+/// uniffi 面 `MAX_FFI_URL_BYTES` 同值（64 KiB，R8-RS-13 / R9-B61）。
+///
+/// 两面受的约束原本不对等：C ABI 面那条 JSON 由 `read_utf8` 的有界扫描兜住，
+/// 而 uniffi 面（`FfiBroker::update_host_denylist(Vec<String>)`）是宿主直传的
+/// 已解析数组，核心之前对条目数与总字节**都没有上限**——一次性驻留任意大的
+/// 名单。这条判在形态校验之前，所以超限时连 trim/lowercase 的 O(n) 面都不进。
+/// 分批协议（R7-RS-02 / ⑨）不受影响：一批 64 KiB 正是 C ABI 面能送的量。
+pub(crate) const MAX_BATCH_BYTES: usize = 64 * 1024;
+
 /// 威胁 host 黑名单快照。条目由宿主（订阅源）注入，判定发生在导航的
 /// evaluate 与 consume 两点（同一入口，见 `host_denied`）。
 #[derive(Default)]
@@ -75,8 +90,13 @@ impl ApplyReport {
 /// 黑名单条目 host 形态校验——与 `canonicalize_external` 的 host 口径一致。
 /// 尾点/前导点/空段/越界字符的条目永远不会被命中，收下即制造"已登记但永不生效"
 /// 的死条目（比不登记更坏：订阅源看起来是工作的）。
+///
+/// 长度那一刀（R8-RS-13，第九轮 R9-B61 落地）此前根本不存在：一条 10 KB 的
+/// "host" 同样过得了字符校验，然后永久驻进活动快照——而它不可能等于任何被
+/// 规范化的导航 host（域名上限 253），命中面为空，正是上面那句话描述的死条目。
 fn entry_shape_ok(host: &str) -> bool {
     !host.is_empty()
+        && host.len() <= MAX_ENTRY_BYTES
         && !host.starts_with('.')
         && !host.ends_with('.')
         && !host.contains("..")
@@ -149,8 +169,15 @@ impl HostDenylist {
     /// 空输入 + `MODE_REPLACE` = 清空（**不** deny-all）；空输入 +
     /// `MODE_APPEND` = 无操作；空输入 + `MODE_BEGIN` = 开一次「将提交空名单」的会话。
     /// 锁中毒：不改动快照（保留旧快照比清空/半写安全），如实报 0 接受。
+    ///
+    /// 超出一批的总字节上限（`MAX_BATCH_BYTES`）时**整批拒收**、快照一字不动：
+    /// 部分写入会让判定读到一份谁都没登记过的名单，而拒收是可发现的（宿主按
+    /// `accepted < input` 判别，与形态校验拒收同一口径）。R8-RS-13 / R9-B61。
     pub(crate) fn apply(&self, hosts: Vec<String>, mode: i32) -> ApplyReport {
         if !mode_is_known(mode) {
+            return ApplyReport::refused(mode, self.served_count());
+        }
+        if hosts.iter().map(|host| host.len()).sum::<usize>() > MAX_BATCH_BYTES {
             return ApplyReport::refused(mode, self.served_count());
         }
         let accepted: HashSet<String> = hosts
