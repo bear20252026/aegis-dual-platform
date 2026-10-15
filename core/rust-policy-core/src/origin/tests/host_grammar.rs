@@ -195,7 +195,7 @@ fn bracketed_ipv6_authority_grammar() {
     // host 段保留**字面**小写形态（不重排成平台规范形——三端打印格式不同，
     // 重排会让 origin 跨端不等）；带端口时端口跟在 `]` 之后
     assert_eq!(
-        try_parse_external("HTTP://[FE80::1]:8080/x").map(|(scheme, host)| (scheme, host)),
+        try_parse_external("HTTP://[FE80::1]:8080/x"),
         Some(("http".to_string(), "[fe80::1]:8080".to_string()))
     );
     // 第 3 组：RS-177 的遗产——这些形态**仍**必须拒。逐条都是不同的洞：

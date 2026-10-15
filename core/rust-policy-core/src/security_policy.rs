@@ -295,6 +295,6 @@ impl SecurityPolicy {
 
 use crate::util::hex_digit;
 
-#[cfg(test)]
 mod ipv6;
+#[cfg(test)]
 mod tests;
