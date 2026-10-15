@@ -14,8 +14,6 @@ name: Gradle-Dependency-Insight
 
 permissions:
   contents: read
-  # 现读 Dependabot 告警状态（下面那一步）。只读，不改任何告警。
-  security-events: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -99,26 +97,16 @@ jobs:
           echo "=== 出货/装机面（release|debug Runtime|Compile Classpath、androidTest）里有没有它们 ==="
           python scripts/verify_gradle_alert_scope_boundary.py
 
-      # 为什么要现读告警状态：R9-B49 在 2026-10-13 16:15Z 回读过 `open=0 / dismissed=9`，
-      # 而 2026-10-14 07:09Z（PR #197 并入触发的下一次扫描）再读已经是 `open=9 / dismissed=0`。
-      # **dismiss 不是持久事实**：只要该 vulnerable 版本仍在依赖图里可解析——
-      # `bcprov-jdk18on:1.80.2=androidLintTool` 仍落在告警的 `< 1.85` / `< 1.84` 区间内——
-      # 下一次扫描就会把它重开。所以这里**只输出、不判定**：PR 面去判服务端状态＝随机红灯，
-      # 而真正能红的判据是上面那条（它判「坐标落在哪条 configuration」，那才是 dismiss
-      # 理由的事实基础，且不会因为 GitHub 重开告警而失效）。
-      - name: 告警状态现读（只报不判——重开是 GitHub 的正常行为）
-        continue-on-error: true   # 诊断面：API 权限或瞬态失败不该让整条洞察失败
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          for st in open dismissed fixed; do
-            printf 'state=%-9s ' "$st"
-            gh api "repos/$GITHUB_REPOSITORY/dependabot/alerts?per_page=100&state=$st" --jq 'length'
-          done
-          echo "=== 逐条 open（包名 / 受影响范围 / 首个修复版 / 最后更新时间）==="
-          gh api "repos/$GITHUB_REPOSITORY/dependabot/alerts?per_page=100&state=open" \
-            --jq '.[] | "#\(.number) \(.dependency.package.name) range=\(.security_vulnerability.vulnerable_version_range) patched=\(.security_vulnerability.first_patched_version.identifier // "none") updated=\(.updated_at)"'
+      # 为什么这里**没有**「现读告警状态」那一步（本批试过了，实测不行）：
+      # Actions 的 GITHUB_TOKEN 读 Dependabot alerts 返回 403
+      # `{"message":"Resource not accessible by integration", … "status":"403"}`
+      # （run 38542830575，权限里已写 `security-events: read`；同一条命令在会话里用
+      # 用户凭据跑则正常返回 `open=9 / dismissed=0 / fixed=3`）。
+      # 留着这一步只会产出一段没人读的 403 正文——它带 `continue-on-error`，作业照样绿，
+      # 于是「有报告」变成一种假象，比没有更坏。要么以后配一个只读 PAT（属新增凭据，
+      # 需要用户点头），要么就照现在的做法：状态由人来现读，判据只建在锁面坐标归属上
+      # （见 docs/security/android-build-classpath-triage.md 与
+      # scripts/verify_gradle_alert_scope_boundary.py）。
 
       - name: 依赖链洞察（dependencyInsight——按需解析两条 classpath）
         env:
