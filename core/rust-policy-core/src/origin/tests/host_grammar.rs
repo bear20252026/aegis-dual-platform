@@ -175,15 +175,44 @@ fn port_u16_boundary_values() {
 }
 
 #[test]
-fn bracketed_ipv6_authority_rejected() {
-    // RS-177：'[' 开头 authority 此前拒码路径零用例——IPv6 字面量
-    // authority 在 host 白名单化管线（[a-z0-9.-]）必然无法表达，
-    // fail-closed 拒绝并锁定（含带端口/裸字面量/方括号内嵌冒号形态）
-    assert_eq!(try_parse_external("https://[2001:db8::1]/"), None);
-    assert_eq!(try_parse_external("https://[::1]:8080/x"), None);
-    assert_eq!(try_parse_external("http://[::1]/"), None);
-    // 未闭合方括号同样拒绝（同分支前置 starts_with('[')）
-    assert_eq!(try_parse_external("https://[2001:db8::1/x"), None);
+fn bracketed_ipv6_authority_grammar() {
+    // RS-177 当年锁的是「`[` 开头的 authority 一律拒」——R9-B66（队列 Q4 的第二半）
+    // 把这条换成「**语法收下、分类判**」：拒绝的活儿交给 is_high_risk_host（按字节，
+    // 含 IPv4-mapped 折叠），语法层只负责「这是不是一个合法 IPv6 字面量」。
+    // 因此本用例两半都要钉住：合法形态必须过（含 B8 要能打开的 `[::1]`），
+    // 非法形态仍必须 None——列在下面第 3 组，那一组才是 RS-177 的真实遗产。
+    let accepted = [
+        "https://[2001:db8::1]/",
+        "https://[::1]:8080/x",
+        "http://[::1]/",
+        "http://[::ffff:127.0.0.1]/",
+        "http://[fd00::1]:9000/api",
+    ];
+    for raw in accepted {
+        let parsed = try_parse_external(raw);
+        assert!(parsed.is_some(), "合法 IPv6 字面量不该被语法层拒：{raw}");
+    }
+    // host 段保留**字面**小写形态（不重排成平台规范形——三端打印格式不同，
+    // 重排会让 origin 跨端不等）；带端口时端口跟在 `]` 之后
+    assert_eq!(
+        try_parse_external("HTTP://[FE80::1]:8080/x").map(|(scheme, host)| (scheme, host)),
+        Some(("http".to_string(), "[fe80::1]:8080".to_string()))
+    );
+    // 第 3 组：RS-177 的遗产——这些形态**仍**必须拒。逐条都是不同的洞：
+    // 未闭合、括号内嵌裸 IPv4（双重解释）、作用域号 `%eth0`、段数超限、
+    // 空地址体、`]` 后跟非端口字符、端口 0/越界。
+    for raw in [
+        "https://[2001:db8::1/x",
+        "https://[1.2.3.4]/",
+        "https://[fe80::1%eth0]/",
+        "https://[1:2:3:4:5:6:7:8:9]/",
+        "https://[]/",
+        "https://[::1]x/",
+        "https://[::1]:0/",
+        "https://[::1]:99999/",
+    ] {
+        assert_eq!(try_parse_external(raw), None, "非法 IPv6 字面量必须被拒：{raw}");
+    }
     // 正常 host 不受影响（回归锚点）
     assert!(try_parse_external("https://example.org/").is_some());
 }

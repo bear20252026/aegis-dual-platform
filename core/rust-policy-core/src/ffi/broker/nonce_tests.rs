@@ -53,10 +53,13 @@ fn approve_navigation_rejects_unparseable_url() {
     let FfiDecision::RequireConfirmation { request } = decision else {
         panic!("active session should produce confirmation request");
     };
-    // 畸形 URL approve → deny（url_policy）
+    // 畸形 URL approve → deny（url_policy）。
+    // R9-B66 改过样本：这里原本是 `https://[::1]/bad`——那时它畸形是因为**任何**方括号
+    // authority 都被语法层拒；现在 `[::1]` 是合法 IPv6 字面量，样本必须是真畸形的
+    // （未闭合方括号），否则这条用例就在判一个已经不存在的形态、静默变绿。
     let denied = broker.approve_navigation_confirmation(
         request.nonce.clone(),
-        "https://[::1]/bad".into(),
+        "https://[::1/bad".into(),
         "navigation".into(),
     );
     match denied {
