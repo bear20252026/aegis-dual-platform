@@ -21,6 +21,11 @@
    `user.github.io`，在不含的一侧是 `github.io` —— 同一用户的全部 GitHub Pages
    站点共享一种子，跨站关联面正好从侧门回来。
 
+4. **eTLD+1 未命中的回退口径**（R9-B67 / 队列 Q16）：三端都必须回退到**整个 host**，
+   不得回退「后两段」。本表不含裸 TLD 条目，所以「后两段不在表里」既可能是
+   example.com 也可能是表没收的托管域（a.web.app 与 b.web.app 同键就是后者）——
+   两种情况判不出差别时按更细的一侧收。这条口径以前只写在实现里，注释一删就走样。
+
 退出码：0=一致 / 1=任一端漂移 / 2=环境错误（文件缺失、锚点解析不到、清单为空——
 绝不因"扫到 0 条"而判通过）。
 """
@@ -71,6 +76,16 @@ PINNED_SUFFIXES = (
 # `location.ancestorOrigins` 时，一句注释就能顶掉整条要件（锚点空心化）。
 REQUIRED_CHANNEL = ("var anc = location.ancestorOrigins;", "return location.hostname;")
 FORBIDDEN_FRAME_ONLY = ("getETLD1(location.hostname)", "aegisEtldPlus1(location.hostname")
+
+# R9-B67：eTLD+1 未命中的回退口径。三端变量名不同（Rust `host`、Kotlin `h`、
+# C# 走 `p.join('.')` 以保持与该函数其余分支同一小写口径），所以要件按端登记；
+# 反向件是「退回后两段」那个历史形态——它就是本条要消除的跨站关联面。
+FALLBACK_WHOLE_HOST = {
+    "C#": ("return p.join('.');",),
+    "Kotlin": ("return h;",),
+    "Rust": ("return host;",),
+}
+FORBIDDEN_TAIL_TWO = {"C#": ("return last2;",), "Kotlin": ("return tail2;",), "Rust": ("return last2;",)}
 
 
 def framing_specs() -> dict[str, tuple[list[pathlib.Path], tuple[str, ...], tuple[str, ...]]]:
@@ -183,11 +198,17 @@ def violations() -> list[str]:
         for token in forbidden:
             if token in text:
                 problems.append(f"{label} 残留本帧口径缺陷形态：{token}")
+        for token in FALLBACK_WHOLE_HOST[label]:
+            if token not in text:
+                problems.append(f"{label} 缺 eTLD+1 整主机名回退要件：{token}")
+        for token in FORBIDDEN_TAIL_TWO[label]:
+            if token in text:
+                problems.append(f"{label} 残留「未命中退回后两段」形态：{token}")
     return problems
 
 
 def self_test() -> int:
-    """故障注入：植入四类漂移，逐条确认本门禁真的会红（恒绿门禁不算门禁）。"""
+    """故障注入：植入八类漂移，逐条确认本门禁真的会红（恒绿门禁不算门禁）。"""
     cases = [
         ("Kotlin 少一条", lambda s: s.replace("'co.il',", "", 1), ["Kotlin 缺"]),
         ("C# 多一条", lambda s: s.replace('"co.uk",', '"co.uk","zq.example",', 1), ["C# 多出"]),
@@ -200,6 +221,15 @@ def self_test() -> int:
         ("权威清单被摘掉托管域钉条目", lambda s: "\n".join(
             line for line in s.splitlines() if line.strip() != "web.app"),
          ["权威清单缺托管域钉条目", "web.app"]),
+        # R9-B67：三端各自的「未命中退回后两段」都必须被判红——这条口径以前只写在
+        # 实现里，注释一删就走样；三端各注入一次是因为要件按端登记（漏配任何一端
+        # 就是那一端永远测不到）。
+        ("Kotlin 退回后两段", lambda s: s.replace("return h;", "return tail2;", 1),
+         ["退回后两段"]),
+        ("C# 退回后两段", lambda s: s.replace("return p.join('.');", "return last2;", 1),
+         ["退回后两段"]),
+        ("Rust 退回后两段", lambda s: s.replace("return host;", "return last2;", 1),
+         ["退回后两段"]),
     ]
     planted = 0
     for name, mutate, expect in cases:

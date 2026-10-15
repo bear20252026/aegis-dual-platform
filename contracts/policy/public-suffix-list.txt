@@ -3,7 +3,15 @@
 # 用途：指纹噪声种子按「顶层站的 eTLD+1」派生（per_site_seed.rs 引 Brave 原文
 # "Third party frames and script share the seed value of the top level eTLD+1
 # domain"）。本表列出需要多取一个标签的后缀：命中表内条目的 host，其 eTLD+1 取
-# 后三段（a.co.uk 与 b.co.uk 才是两个站点）；未命中取后两段。
+# 后三段（a.co.uk 与 b.co.uk 才是两个站点）；**未命中取整个主机名**
+#（R9-B67 / 队列 Q16 定稿）。
+#
+# 为什么未命中不再退回后两段：本表**不含裸 TLD 条目**（只列「需要多取一个标签的
+# 后缀」），所以「后两段不在表里」既可能是 example.com 这种正常注册域、也可能是
+# 表还没收的托管域——登记时的实证形态就是 a.web.app 与 b.web.app 共享一种子。
+# 两种情况在本表下判不出差别，于是按更细的一侧收：宁可同站两子域各持一种子
+#（噪声更碎，不构成关联面），也不让两个互不相干的站点共用一种子（那才是本机制
+# 要消除的东西）。代价照实记：同站多子域不再共享种子，这是产品语义变更而非缺陷。
 #
 # 为什么需要一张跨端单源表：三端各自内嵌一份 JS 字面量表（C# FingerprintShield、
 # Kotlin WebViewHardening、Rust shield.rs）。第七轮实测三份是 54 / 51 / 31 条，

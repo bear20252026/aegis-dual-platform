@@ -167,6 +167,12 @@ class WebViewHardeningTest {
         assertTrue("须覆盖最高频共享后缀 co.uk", js.contains("'co.uk'"))
         assertTrue("须覆盖 com.cn", js.contains("'com.cn'"))
         assertTrue("公共后缀命中须取三段推导 eTLD+1", js.contains("p.slice(-3).join('.')"))
+        // R9-B67（队列 Q16）：未命中回退**整个 host**。表内没有裸 TLD 条目，所以
+        // 「后两段不在表里」既可能是 example.com 也可能是表还没收的托管域
+        // （a.web.app 与 b.web.app 同键就是后者）——按更细的一侧收，宁可同站两子域
+        // 各持一种子，也不让两个互不相干的站点共用一种子。
+        assertTrue("未命中须回退整个 host", js.contains("return h;"))
+        assertFalse("不得回归「未命中退回后两段」形态", js.contains("return tail2;"))
     }
 
     @Test

@@ -73,7 +73,8 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
 (function() {
   // AD-107（审计 2026-09-23 清单·A6 批）：getETLD1 迷你公共后缀表——原实现
   // 一律取最后两段，把 a.co.uk 与 b.co.uk 推导出不同 site seed（eTLD+1 应同为
-  // co.uk 域，同站不同源实体各持指纹种子既不隐私正确也不一致）。未命中回落两段式。
+  // co.uk 域，同站不同源实体各持指纹种子既不隐私正确也不一致）。未命中的回落口径
+  // 自 R9-B67 起是「整个 host」，理由写在 getETLD1 里。
   // R7-CS2-10（第七轮 2026-10-04）：表体与 contracts/policy/public-suffix-list.txt
   // 逐项对账（contracts/codegen/verify_seed_framing_parity.py）——三端曾各持 51/54/31 条手抄表，
   // user.github.io 在缺托管域条目的一侧被折成 github.io，该用户全部 GitHub Pages
@@ -100,7 +101,12 @@ Object.defineProperty(window, '__AEGIS_PROTECTION_VERSION', {
       // 公共后缀占两段 → eTLD+1 取三段；三段仍不足以构成注册域时退回原 host
       return p.length >= 3 ? p.slice(-3).join('.') : h;
     }
-    return tail2;
+    // R9-B67（队列 Q16）：未命中退回**整个 host**而不是后两段——本表只收「需要多取
+    // 一个标签的后缀」（无裸 TLD 条目），所以未命中既可能是 example.com 这种正常注册域、
+    // 也可能是表还没收的托管域（a.web.app 与 b.web.app 同键就是后者）。两种判不出差别时
+    // 按更细的一侧收：宁可同站两子域各一种子，也不让两个互不相干的站点共用一种子。
+    // 代价照实记：同站多子域不再共享种子（§四 登记的产品语义变更，定稿走这一档）。
+    return h;
   }
   // AD-005（审计 2026-09-23 清单·真机批次）：自制 acc*31 混合 → 同步 SHA-256。
   // 构造与 Rust per_site_seed（RS-025/P25）对齐：

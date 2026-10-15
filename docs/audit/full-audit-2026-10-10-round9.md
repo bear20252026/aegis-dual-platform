@@ -651,9 +651,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   这半句被本机 SDK 文档现读推翻（default false），但它仍是三条里最不能靠默认的一条——
   同一份文档写着「关掉之前已保存的密码仍会被自动填充」。
 - ~~**R9-SH-5**：`action-catalog.yaml` 的 `confirmation/risk/audit` 三列在 `agent/broker.py` 零消费。~~ **已定稿并落地（R9-B46 / §3.46）**：逐列现读消费者后发现登记的处方本身不成立——`risk`/`audit`/`read_only` 一直各有静态消费者（`analyze_action_catalog.py:81,91`、`verify_agent_catalog.py:43`、`agent/tests/redteam_test.py:87`），只有 `confirmation` 全仓零消费者；而「接进裁决链」正是本节下面那句「默认放行改默认需确认，不默认执行」。定稿走第三条路：列身份写进 catalog 头部、`confirmation` 变成必填的意图声明（analyzer 规则 ⑤）、反向用例钉住运行时不读治理列。
-- **R9-SH-6 的一半**：`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会改变
+- ~~**R9-SH-6 的一半**：`public-suffix-list.txt` 未命中时 fallback 改「整主机名」会改变
   同站多子域共享种子的产品语义。该表的**补条目 + 收录口径 + 只增不减门禁**已落地（§3.6），
-  只剩这一半未决。
+  只剩这一半未决。~~ **已定稿并落地（R9-B67 / §3.67）**：按「未命中→整个 host」执行。
+  定稿理由（写在 §3.67 第 2 点）：本表不含裸 TLD，未命中时「正常注册域」与「表没收的
+  托管域」判不出差别，于是按更细的一侧收——站点键只会变细不会变粗。代价（同站多子域
+  不再共享种子）照实记进头注与实现注释。
 - **本节写作后已推进（2026-10-10 划账）**：`Microsoft.NET.Test.Sdk` 18.10.1 已并 #136；
   `xunit.runner.visualstudio` 4.0.1 走 #138（锁 diff 实测只有那一个包的三字段，零传递漂移）；
   `NewTab` 洪水上限已定稿并落地（§3.4）；Dependabot #125/#126/#127/#133 已全部并完（§3.0）。
@@ -944,12 +947,16 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   裁决只读 `name/scope/budget(+default_deny/policy_version)` ⇒ `confirmation` 一列是装饰；
   `contracts/codegen/analyze_action_catalog.py:93-95` 只断 `redteam_fixtures` 非空。
   出厂两条 action 皆只读 ⇒ 今日零行为变化（如实写明）。
-- Q16 R9-SH-6 | P2 | `contracts/policy/public-suffix-list.txt`（79 条，自述「三端唯一权威」）
+- ~~Q16 R9-SH-6~~ **本批已闭**（R9-B67 / §3.67）| P2 | `contracts/policy/public-suffix-list.txt`（登记时 79 条，自述「三端唯一权威」）
   缺 `com.jp`（而 co/ne/or/go/ac.jp 都在）、`web.app`、`firebaseapp.com`、`workers.dev`、
   `wordpress.com`、`squarespace.com`、`bitbucket.io`；`core/rust-policy-core/src/shield.rs:139-147`
   未命中即返回后两段 ⇒ 表外托管域整域共享站点键（`a.web.app` 与 `b.web.app` 同键）。
-  对账门禁只比三副本与表，**永不判表本身完备**。——**条目半边与「只增不减」门禁已落地**（§3.6，79→92 条 + PINNED_SUFFIXES）；
-  「未命中回退整主机名」那半仍在第四节待定稿。
+  对账门禁只比三副本与表，**永不判表本身完备**。——条目半边与「只增不减」门禁由 R9-B7 / §3.6
+  落地（79→92 条 + `PINNED_SUFFIXES`）；「未命中回退整主机名」那半由本批落地：三端
+  `getETLD1`/`aegisEtldPlus1` 的回退口径改成整个 host，头注与实现同批改口径，
+  判据按端登记要件 + 三端各一条「退回后两段」故障注入（§3.67 第 5 点）。
+  **本批还顺带修掉一条没被点名的连带缺陷**：表里的三段后缀 `storage.googleapis.com`
+  在旧口径下永远命中不到（只查后两段）——§3.67 第 3 点。
 - ~~Q17 R9-SH-7~~ **本批已确证并落地**（§二 裁决行 + §3.11）：判据曾不可达（豁免集＝镜像全集
   ⇒ 每条 `continue`；旧扫描单次 ≈5.6s 且把跨语言同名/测试/构建产物都算消费）。现收窄成
   同语言源码根单遍扫（整条门禁 ≈0.5s）并加「被真实消费的豁免项判红」反向不变量；现树 6 个
@@ -3804,6 +3811,49 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    不同裁决，多拦一层换来的是不一致；②`UrlSafety.IsPublicIp:219` 的 v4-compatible 折叠
    带 `bytes[12] != 0` 条件，于是 `::2`（= `0.0.0.2`）在 Windows 判公网、在核心与
    Android 折回 0/8——改它动的是 Windows 判定面且现树无向量覆盖，转登 Q64 待回读。
+
+### 3.67 R9-B67（2026-10-15，队列 Q16 的后半边 / 第四节那条产品语义定稿）：站点键未命中退回整个 host——本表给不出「这是不是一 TLD」的答案，就别假装答得出
+
+1. 这条是 §四 里唯一「改的是产品语义而不是代码缺陷」的待定稿项，按用户批准的队列顺序
+   （Q4 → Q16 → …）与推荐档落地。位置：`core/rust-policy-core/src/shield.rs:146-154`、
+   `android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesSeed.kt:96-110`、
+   `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:104-116`——三端各有一份
+   内嵌 JS 的 `getETLD1` / `aegisEtldPlus1`，旧口径都是「后两段命中表就取三段，否则取后两段」。
+2. 为什么是「整个 host」而不是「把表补成完整 PSL」：本表的收录口径明写在头注——只列
+   **需要多取一个标签的后缀**，不含裸 TLD。补成完整 PSL 要往三端内嵌副本里塞进上千条 TLD
+   （运行期零 I/O 是这套表的立身前提），而真正的风险面（表还没收的托管域）一条 TLD 都消不掉。
+   未命中时「example.com 这种正常注册域」与「workers.dev 这种缺项托管域」在本表下**判不出
+   差别**，于是按更细的一侧收：站点键只会变细、不会变粗，任何情况下都不会把两个互不相干的
+   站点折进同一种子（那正是 CS-381/AD-107/R7-CS2-10 三代要消除的跨站关联面）。
+3. **顺带修好一条此前没被点名的连带缺陷**（不是顺手加的，是同一判据的必然结果，记下来
+   防下一轮当成新缺陷）：表里已有三段后缀 `storage.googleapis.com`，而旧实现**只查后两段**，
+   所以这种条目永远命中不到——`user.storage.googleapis.com` 旧口径下折成 `googleapis.com`
+   （该后缀下所有用户共享一种子），新口径下未命中→整个 host ✓ 正确。
+4. 口径写在了它能被看见的两个地方：单源清单头注（`contracts/policy/public-suffix-list.txt`
+   「未命中取整个主机名」+ 为什么）与三端实现内注释；代价照实记在同一处——
+   **同站多子域不再共享种子**（`www.` 与 `cdn.` 各拿一种子，噪声更碎，不构成关联面）。
+5. 判据面（`contracts/codegen/verify_seed_framing_parity.py`）：按端登记「整主机名回退」
+   要件与「退回后两段」反向件（`:83-88`，检查在 `:201-206`）。为什么要件要**按端**登记：
+   三端变量名不同（Rust `host`、Kotlin `h`、C# 用 `p.join('.')` 以保持与该函数其余分支
+   同一小写口径），共用一条要件就等于给两端留空转。故障注入从五条扩到**八条**——三端各
+   植入一次「退回后两段」，实测各自判红（`--self-test` 全绿且逐字节还原源文件）；
+   漏配任何一端，那一端就是永远测不到的装饰。三端各加一条常驻用例
+   （Rust `shield/tests.rs::canvas_seed_uses_public_suffix_aware_etld1`、
+   Kotlin `WebViewHardeningTest.etld1DerivationUsesMiniPublicSuffixList`、
+   C# 新 `Fact GetETLD1_MissFallsBackToWholeHost_NotTailTwo`）。
+   C# 那份用例落在**新文件** `windows/tests/Aegis.Windows.Core.Tests/FingerprintShieldSeedFramingTests.cs`：
+   `FingerprintShieldTests.cs` 在零余量基线（356/356）上，而 ratchet 的口径是「基线文件只许减
+   不许增」——正确动作不是抬基线也不是删旧用例，而是按主题拆（站点框定／表体来源／表里没有
+   怎么办，本来就自成一格）。拆后 309 行，`--write-baseline` 同步收窄 356→309（该门禁双向
+   判定：缩了不收窄同样判红），发现数 921 与拆前逐条相等 ⇒ 没有用例在搬动中丢失。
+   `verify_injected_js_parity.py` 与 `verify_bridge_guard.py` 同批复跑未漂移
+   （豁免表真实性仍由它自己的自证判据守着）。
+6. 执行面：`cargo fmt` + `clippy --all-targets -D warnings` 0 警告 + `cargo test` 593 过
+   0 失败；`gradle --offline :app:ktlintCheck :app:detekt :app:testDebugUnitTest` 全绿
+   ——**本机先红过一次**：新写的 Kotlin 注释用了 `//（` 起头，`standard:comment-spacing`
+   判红（同一文件里那几处 `//（` 不红，是因为它们在 JS 字符串模板内而不是 Kotlin 注释）；
+   `dotnet test` Core 921 过 0 失败（比上批 +1，正是新那条 Fact），发现数下界断言 ✅；
+   `pytest tests/python` 878 过 1 跳过；`packages.lock.json` 无漂移。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：

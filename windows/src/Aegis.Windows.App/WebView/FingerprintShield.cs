@@ -103,11 +103,16 @@ public static partial class FingerprintShield
           {{TopLevelHostJs}}
           function getETLD1(h) {
             var p = h.toLowerCase().split('.');
-            if (p.length < 2) return h;
+            if (p.length < 2) return p.join('.');
             var last2 = p.slice(-2).join('.');
             // bbc.co.uk → bbc.co.uk（后 3）；shop.co.uk → shop.co.uk——两站种子不同
             if (p.length > 2 && PUBLIC_SUFFIXES[last2]) return p.slice(-3).join('.');
-            return last2;
+            // R9-B67（队列 Q16）：未命中退回**整个 host**而不是后两段——本表只收「需要
+            // 多取一个标签的后缀」（无裸 TLD 条目），未命中既可能是 example.com 这种正常
+            // 注册域、也可能是表还没收的托管域（a.web.app 与 b.web.app 同键就是后者）。
+            // 判不出差别时按更细的一侧收：宁可同站两子域各一种子，也不让两个互不相干的
+            // 站点共用一种子。代价照实记：同站多子域不再共享种子（§四 产品语义变更定稿）。
+            return p.join('.');
           }
           function deriveSeed(hex, domain) {
             var r = '';

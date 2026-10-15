@@ -135,6 +135,13 @@ impl FingerprintShield {
   //（本模块不再手抄——第七轮实测三端手抄表 54/51/31 条，同一用户在不同端
   // 拿到不同 eTLD+1，user.github.io 一侧为 user.github.io、另一侧为 github.io，
   // 跨站关联面从侧门回来）
+  // R9-B67（队列 Q16）：**未命中不再退回后两段，退回整个 host**。本表只收
+  // 「需要多取一个标签的后缀」（无裸 TLD 条目），所以「不在表里」既可能是
+  // example.com 这种正常注册域、也可能是表还没收的托管域——登记时 a.web.app 与
+  // b.web.app 同键就是后者。两种情况在本表下判不出差别，于是按更细的一侧收：
+  // 宁可同站两子域各一种子（噪声更碎，不构成关联面），也不让两个互不相干的
+  // 站点共用一种子（那才是本机制要消除的东西）。代价照实记：同站多子域不再
+  // 共享种子——§四 登记的产品语义变更，定稿走「整主机名」这一档。
   var AEGIS_PUBLIC_SUFFIXES = {psl};
   function aegisEtldPlus1(host) {{
     var parts = host.split('.');
@@ -143,7 +150,7 @@ impl FingerprintShield {
     if (AEGIS_PUBLIC_SUFFIXES[last2] && parts.length >= 3) {{
       return parts.slice(-3).join('.');
     }}
-    return last2;
+    return host;
   }}
   // R7-CS1-05≡R7-CS2-01：站点键取**顶层** eTLD+1（与 Android 孪生
   // WebViewHardening.aegisTopLevelHostname 逐字同口径）。Chromium/WebView 的

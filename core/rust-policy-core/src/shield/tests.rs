@@ -222,6 +222,17 @@ fn canvas_seed_uses_public_suffix_aware_etld1() {
         script.contains("function aegisEtldPlus1("),
         "eTLD+1 提取单源函数"
     );
+    // R9-B67（队列 Q16）：未命中回退**整个 host**，不再回退后两段——本表不含裸 TLD
+    // 条目，「后两段不在表里」既可能是 example.com 也可能是表没收的托管域
+    //（a.web.app 与 b.web.app 同键就是后者）。按更细的一侧收。
+    assert!(
+        script.contains("return host;"),
+        "未命中必须回退整个 host（R9-B67）"
+    );
+    assert!(
+        !script.contains("return last2;"),
+        "「未命中退回后两段」的旧形态不得回归（R9-B67 / 队列 Q16）"
+    );
 }
 
 // —— RS-292 回归（2026-10-02）：worker 作用域守卫 ——
