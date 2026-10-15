@@ -1,9 +1,12 @@
 package com.aegis.broker
 
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * 保留地址边界（R8-AD-03）的纯 JVM 用例。
@@ -15,79 +18,52 @@ import org.junit.Test
  * 两组用例必须同时存在——只留拒绝组，这条谓词可以在"全拒"下悄悄全绿。
  */
 class ReservedAddressBoundaryTest {
+    /**
+     * ① 谓词表：逐条消费跨端契约向量 reserved-address-boundary.json（R9-B70）。
+     *
+     * 改这张表之前它与 C# 的 `BoundaryMatrix` 各抄一份，实测**只有 12 条是同一个 URL**——
+     * 其余各测各的，「两端都判了这条边界」因此是覆盖假象；而且同一条 URL 已经出现相反期望
+     * （`http://0177.0.0.1/` 在 C# 放行、在本端拒）。现在两端跑同一份表：谁改了判定面而
+     * 没同批改表，那一端就判红。
+     *
+     * 分层事实（R9-AD-4）留在表注里：本层的 host 由 hostOf 剥过方括号 ⇒ `[::1]` 在这里可下载，
+     * 而同一条 URL 在导航层被 OriginPolicy 拒（三端与 url-origin-* 向量同口径）。
+     */
     @Test
-    fun reservedSegmentsAreDenied() {
-        val denied =
-            listOf(
-                // 链路本地（云厂商实例元数据在其内）
-                "http://169.254.169.254/latest/user-data",
-                "http://169.254.1.1/",
-                // 未指定 / 组播 / 广播 / 保留
-                "http://0.0.0.0/x",
-                "http://224.0.0.1/",
-                "http://239.255.255.250/",
-                "http://255.255.255.255/",
-                "http://240.0.0.1/",
-                // 文档与基准测试段
-                "http://192.0.2.3/",
-                "http://198.51.100.4/",
-                "http://203.0.113.5/",
-                "http://198.18.0.1/",
-                "http://198.19.254.3/",
-                // IPv6：:: 未指定、fe80::/10 链路本地、ff00::/8 组播、内嵌 IPv4
-                "http://[::]/",
-                "http://[fe80::1]/",
-                "http://[ff02::1:2]/",
-                "http://[::ffff:169.254.169.254]/",
-                "http://[::ffff:garbage]/",
-                // R9-B69（队列 Q64）：已废弃的 v4-compatible（前置 96 位全零、不带 ffff）。
-                // 本层此前只按 `::ffff:` 文本前缀折内嵌 IPv4，这两条因此穿过；核心
-                // `to_ipv4()` 与同文件的 `LocalTargetHosts.embeddedIpv4`（https 豁免面）都折它。
-                "http://[::169.254.169.254]/",
-                "http://[::2]/",
-                // 与 OS 解释分歧的数字形态（CS-348/AD-213 同族）
-                "http://2852168190/",
-                "http://0xa9fea9fe/",
-                "http://0177.0.0.1/",
-                "http://169.1/",
-                "http://169.254.1/",
+    fun sharedBoundaryVectorsMatchPredicateVerdict() {
+        for ((url, expected) in loadSharedBoundaryVectors()) {
+            val denied = ReservedAddressBoundary.denies(url)
+            assertEquals(
+                "契约向量说 $expected 但 denies=$denied（url=$url）",
+                expected == "deny",
+                denied,
             )
-        for (url in denied) {
-            assertTrue("保留地址必须拒绝：$url", ReservedAddressBoundary.denies(url))
         }
     }
 
-    @Test
-    fun loopbackPrivateAndCgnatStayOpenableByRuling() {
-        // 第七轮 B8「本机与内网必须能打开」——这一组是这条裁决在下载层的下界，
-        // 谁把它们收紧了，本用例就是那条反向证。
-        // 分层事实（R9-AD-4）：本层的 host 由 hostOf 剥过方括号 ⇒ `[::1]` 在这里可下载，
-        // 而同一条 URL 在**导航层**被 OriginPolicy 拒（三端与 url-origin-* 向量同口径）。
-        // 完整口径见 LocalTargetHosts 的对象 KDoc 与跨层锚用例。
-        val allowed =
-            listOf(
-                "http://127.0.0.1:8000/",
-                "http://[::1]:9000/",
-                // 折叠必须排在回环判定之后：`::0.0.0.1` 与 `::1` 是同一个地址
-                // （R9-B69，钉住「折成 0.0.0.1 撞 0/8 被自己人拦掉」这条错法）
-                "http://[::0.0.0.1]:9000/",
-                "http://10.0.0.5/",
-                "http://172.16.0.1/",
-                "http://172.31.255.255/",
-                "http://192.168.1.1:8080/file.zip",
-                "http://100.64.1.2/",
-                "http://[fd12::3]/",
-                // 反向控制：折叠不是「见到 v4-compatible 就拦」——折出来 1.2.3.4 是公网
-                "http://[::1.2.3.4]/",
-                "http://localhost:8000/",
-                "http://api.localhost/x",
-                "http://my-nas.local/share.bin",
-                "http://printer.internal/firmware",
-                "https://example.com/a.apk",
-            )
-        for (url in allowed) {
-            assertFalse("本机/内网/公网目标不得被这条边界拦：$url", ReservedAddressBoundary.denies(url))
+    private fun loadSharedBoundaryVectors(): List<Pair<String, String>> {
+        val path =
+            generateSequence(Path.of(System.getProperty("user.dir")).toAbsolutePath()) { it.parent }
+                .take(8)
+                .map { it.resolve("contracts").resolve("vectors").resolve(BOUNDARY_VECTOR) }
+                .firstOrNull { Files.isRegularFile(it) }
+                ?: error("找不到共享向量 $BOUNDARY_VECTOR（相对仓库根定位失败）")
+        val vectors = JSONObject(String(Files.readAllBytes(path), Charsets.UTF_8)).getJSONArray("vectors")
+        val loaded =
+            (0 until vectors.length())
+                .map { vectors.getJSONObject(it) }
+                .map { it.getString("url") to it.getString("expected") }
+        check(loaded.size >= BOUNDARY_FLOOR) {
+            "契约向量 ${loaded.size} 条，低于下界 $BOUNDARY_FLOOR——清空条目须显式核减（与 verify_vectors 同口径）"
         }
+        val unknown = loaded.map { it.second }.filter { it != "deny" && it != "allow" }.distinct()
+        check(unknown.isEmpty()) { "契约向量 expected 词表外：$unknown" }
+        return loaded
+    }
+
+    private companion object {
+        const val BOUNDARY_VECTOR = "reserved-address-boundary.json"
+        const val BOUNDARY_FLOOR = 40
     }
 
     @Test

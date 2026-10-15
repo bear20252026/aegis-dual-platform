@@ -50,7 +50,9 @@ MIN_FILES = {'schemas': 7, 'vectors': 21}
 # R9-B69（2026-10-15，队列 Q64）：246 → 251，实测增量 native-navigation-decision +3
 # （v4-compatible `::169.254.169.254` / `::2` / `::1.2.3.4`）、url-origin-valid +2
 # （同两种形态的语法面）。
-MIN_VECTOR_ENTRIES = 251
+# R9-B70（2026-10-15）：251 → 298，新增 reserved-address-boundary.json 47 条（26 deny／
+# 21 allow）——这张表此前在 C# 与 Kotlin 各抄一份，条数是两份的并集，由合并实测得出。
+MIN_VECTOR_ENTRIES = 298
 
 # R9-B59（§四 第 11 项 ② 与 Q21 是同一次定稿）：两份原生 C-ABI 向量的**信封 + 分区**词表。
 #

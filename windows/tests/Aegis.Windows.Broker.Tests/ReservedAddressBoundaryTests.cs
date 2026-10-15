@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Aegis.Windows.Broker;
 using Aegis.Windows.Core.Security;
 using Xunit;
@@ -8,7 +9,8 @@ namespace Aegis.Windows.Broker.Tests;
 /// 「本机与内网必须能打开」后，本层只拦**根本不是任何设备**的地址形态
 ///（链路本地/云元数据/组播/广播/保留/文档测试段/未指定地址）。
 ///
-/// 三重锚定：① 谓词矩阵逐形态（含八进制/十进制整数/简写/IPv6 变体——编码变体
+/// 三重锚定：① 谓词矩阵逐形态，且矩阵本身是**跨端契约向量**（与 Kotlin 消费同一份
+/// reserved-address-boundary.json，R9-B70；含八进制/十进制整数/简写/IPv6 变体——编码变体
 /// 归一化前的拒绝就是可绕过的拒绝）；② 导航、消费、下载三类出口各自的拒绝码与
 /// 审计留痕；③ 源码静态锚，证明子资源层（HostWebView.OnWebResourceRequested）
 /// 真的调用了同一谓词。该边界是**纯托管层拒绝码**，Rust 核心向量里没有它，
@@ -43,63 +45,46 @@ public sealed class ReservedAddressBoundaryTests : IDisposable
         return broker;
     }
 
-    // ① 谓词矩阵：(URL, 是否应被保留地址边界拒绝)
-    public static TheoryData<string, bool> BoundaryMatrix => new()
-    {
-        // —— 拒绝：不是任何设备的地址形态 ——
-        { "http://169.254.169.254/latest/meta-data/", true },   // 云元数据
-        { "http://169.254.1.1/", true },                        // 链路本地
-        { "http://169.254.1/", true },                          // 简写 = 169.254.1.0
-        { "http://2852168190/", true },                        // 十进制整数 = 元数据 IP
-        { "http://0251.0376.0251.0376/", true },               // 八进制 = 元数据 IP
-        { "http://224.0.0.1/", true },                          // 组播
-        { "http://255.255.255.255/", true },                    // 广播
-        { "http://0.0.0.0/", true },                            // 未指定
-        { "http://192.0.2.1/", true },                          // TEST-NET-1
-        { "http://198.51.100.7/", true },                      // TEST-NET-2
-        { "http://203.0.113.7/", true },                       // TEST-NET-3
-        { "http://198.18.0.1/", true },                         // 基准测试段
-        { "http://[fe80::1]/", true },                          // IPv6 链路本地
-        { "http://[ff02::1]/", true },                          // IPv6 组播
-        { "http://[::ffff:169.254.169.254]/", true },          // IPv4-mapped 元数据
-        // R9-B69 / 队列 Q64：已废弃的 v4-compatible（前置 96 位全零、不带 ffff）——核心与 Android 都折它
-        { "http://[::169.254.169.254]/", true },                // 元数据端点的第二种拼法
-        { "http://[::2]/", true },                               // 折出来 0.0.0.2（0/8）
-        { "http://[::1.2.3.4]/", false },                        // 反向控制：折出来是公网，仍放行
-        { "http://[::0.0.0.1]/", false },                        // 折叠必须排在回环判定之后
-        { "", true },                                           // 取不到 host = 不可判定
+    // ① 谓词矩阵：逐条消费跨端契约向量 reserved-address-boundary.json（R9-B70）。
+    // 改这张表之前它是 C# 与 Kotlin 各抄一份，实测**只有 12 条是同一个 URL**——其余各测各的，
+    // 于是「两端都判了这条边界」是覆盖假象，且同一条 URL 已出现相反期望（0177.0.0.1 在 C#
+    // 放行、在 Kotlin 拒）。现在两端跑同一份表，任何一端改判定面而表不改，那一端就判红。
+    private const string BoundaryVector = "reserved-address-boundary.json";
 
-        // —— 放行：本机与内网（2026-10-04 用户裁决）——
-        { "http://127.0.0.1:6379/", false },                    // 本机服务
-        { "http://localhost/admin", false },
-        { "http://0177.0.0.1/", false },                        // 八进制回环仍是回环
-        { "http://[::1]/", false },                             // IPv6 回环
-        { "http://192.168.1.1/set_config", false },             // 路由器/NAS
-        { "http://10.0.0.1/", false },
-        { "http://172.16.5.4/", false },
-        { "http://100.64.0.1/", false },                        // CGNAT/Tailscale
-        { "http://[fd00::12]/", false },                        // IPv6 ULA
-        { "http://my-nas.local/", false },                      // mDNS 主机名
-        { "http://printer.internal/", false },
-        { "https://ntp.aegis.local/", false },                  // 宿主自有页面
-        { "https://geo.aegis.local/geogebra/index.html", false },
-        { "https://ntp.aegis.local:8443/", false },             // 主机名形态：本层不再按端口判
-        { "https://example.com/path", false },
-        { "https://8.8.8.8/", false },
-    };
+    public static TheoryData<string, bool> BoundaryMatrix => LoadBoundaryMatrix();
+
+    private static TheoryData<string, bool> LoadBoundaryMatrix()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "contracts", "vectors", BoundaryVector);
+        Assert.True(File.Exists(path), $"跨端契约向量缺失：{path}（csproj 的复制项被摘掉了？）");
+        using var doc = JsonDocument.Parse(File.ReadAllText(path));
+        var data = new TheoryData<string, bool>();
+        foreach (var vector in doc.RootElement.GetProperty("vectors").EnumerateArray())
+        {
+            var expected = vector.GetProperty("expected").GetString();
+            Assert.True(expected is "deny" or "allow", $"契约向量 expected 词表外：{expected}");
+            data.Add(vector.GetProperty("url").GetString()!, expected == "deny");
+        }
+        Assert.True(data.Count >= 40,
+            $"契约向量 {data.Count} 条，低于下界 40——清空条目须显式核减（与 verify_vectors 同口径）");
+        return data;
+    }
 
     [Theory]
     [MemberData(nameof(BoundaryMatrix))]
     public void Predicate_Matrix(string url, bool expected)
     {
-        if (url.Length == 0)
-        {
-            Assert.True(ReservedAddressBoundary.DeniesRaw(url));   // 下载入口：空即拒
-            return;
-        }
         // 走真实入口形态（子资源/下载拿到的就是裸串），不走解析后的 Uri——
         // 编码变体在 Uri.Host 上已被归一，裸串才复现得出 Chromium 看到的东西
         Assert.Equal(expected, ReservedAddressBoundary.DeniesRaw(url));
+    }
+
+    [Fact]
+    public void EmptyHost_IsUndecidableAndDenied()
+    {
+        // 空 host 不在跨端表里：那是各端入口自己的判据（「无法判定即不得放行」）
+        Assert.True(ReservedAddressBoundary.DeniesRaw(""));
+        Assert.True(ReservedAddressBoundary.DeniesRaw("http:///x"));
     }
 
     [Fact]

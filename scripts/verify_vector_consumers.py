@@ -40,10 +40,13 @@ from text_anchors import strip_comments
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS_DIR = ROOT / "contracts" / "vectors"
 
-# 实测面：21 份向量（2026-10-12，R9-B35 加 release/version/semver-form 六份）。
+# 实测面：22 份向量（2026-10-12，R9-B35 加 release/version/semver-form 六份；
+# R9-B70 加 reserved-address-boundary 一份——保留地址边界的 CS+AD 契约表）。
 # 下界只保证「减面必须是有意识的动作」。
-MIN_VECTORS = 21
+MIN_VECTORS = 22
 # 判据 3/4 的下界：CS∧AD 同跑的最小份数、有端侧执行者的最小份数。
+# R9-B70：CS∧AD 同跑由 2 份变 3 份（url-origin-* 两份 + 边界表一份），下界仍按原判据 1，
+# 抬高它等于把「今天的事实」写成「明天的许可」。
 MIN_CROSS_END, MIN_EXECUTABLE = 1, 10
 
 CODE_EXTENSIONS = (".cs", ".kt", ".kts", ".rs", ".py", ".js", ".mjs", ".yml", ".yaml")
@@ -83,6 +86,10 @@ CONSUMER_MANIFEST: dict[str, frozenset[str]] = {
     # （三张 schema × 客户端验证器 × 向量期望的三方对账），故登记 PY。
     "release-invalid.json": frozenset(),
     "release-valid.json": frozenset(),
+    # R9-B70（§3.70）：保留地址边界的契约表。此前这张表在 C# 与 Kotlin **各抄一份**，
+    # 实测只有 12 条是同一个 URL——其余各测各的，「两端都判了这条边界」是覆盖假象，
+    # 且同一条 URL（0177.0.0.1）已经出现相反期望。现在两端逐条消费本文件。
+    "reserved-address-boundary.json": frozenset({"AD", "CS"}),
     "semver-form-invalid.json": frozenset({"PY"}),
     "semver-form-valid.json": frozenset({"PY"}),
 

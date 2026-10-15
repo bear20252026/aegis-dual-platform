@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Broker;
 
 using System;
+using System.Globalization;
 using System.Linq;
 using System.Net;
 
@@ -22,9 +23,12 @@ using System.Net;
 /// 100.100.100.200 落在按裁决放行的 CGNAT 段内——记入残余，不假称已封。
 ///
 /// 编码变体（八进制 0251.0376.0251.0376、十进制整数 2852168190、0x 十六进制、
-/// 简写 169.254.1）先经 UrlSafety 的归一化器还原成 IP 再判定——OS 解析栈接受
-/// 这些形态，只按点分十进制匹配就是留一条绕过路。非 IP 主机名一律放行：本机
-/// hosts 与 mDNS 解析到内网属预期用法，DNS 才是这些名字的权威。</summary>
+/// 简写 169.254.1、前导零 0177.0.0.1）按「形态不规范即拒」处理，**不归一后再判**：
+/// OS/Java 与 Chromium 对这些形态的 inet_aton 解释不同（CS-348/AD-213 记过），
+/// 归一后再判就是让「按谁的解释」变成实现细节。此前本层正是先还原再判，于是
+/// `0177.0.0.1`（=127.0.0.1）与 `169.1`（=169.0.0.1）被放行而 Android 拒它们——
+/// 跨端契约向量 reserved-address-boundary.json 把这条分叉抓红（R9-B70 定稿）。
+/// 非 IP 主机名一律放行：本机 hosts 与 mDNS 解析到内网属预期用法，DNS 才是这些名字的权威。</summary>
 public static class ReservedAddressBoundary
 {
     /// <summary>拒绝码单源（审计 reason 与 UI 文案都取此处，避免字符串分叉）。</summary>
@@ -68,8 +72,17 @@ public static class ReservedAddressBoundary
         return authority.All(char.IsDigit)
             || (authority.StartsWith("0x", StringComparison.Ordinal)
                 && authority.Length > 2
-                && authority[2..].All(char.IsAsciiHexDigit));
+                && authority[2..].All(char.IsAsciiHexDigit))
+            // ⑦ 也必须判在裸 authority 上：.NET 的 Uri 会先把 `169.1` 归一成
+            // `169.0.0.1`、把 `0177.0.0.1` 归一成 `127.0.0.1`，只看归一后的 host 就等于
+            // 让「按谁的 inet_aton 解释」决定放行与否（R9-B70，跨端契约向量抓红的那两条）。
+            || IsNonCanonicalIpv4Authority(authority);
     }
+
+    /// <summary>裸 authority 是否为「非规范的 IPv4 形态」（点分但段数≠4、前导零、空段、
+    /// 0x 混写）。规范四段十进制不在这里判——它交解析后的段表。</summary>
+    private static bool IsNonCanonicalIpv4Authority(string authority) =>
+        HasNonCanonicalDottedForm(authority) && !IsCanonicalDottedIpv4(authority, out _);
 
     /// <summary>host 是否属"永不作为浏览目标"的保留地址形态。</summary>
     public static bool DeniesHost(string? host)
@@ -87,22 +100,55 @@ public static class ReservedAddressBoundary
         // 就是留一条元数据绕过路；真实主机名不会是纯数字，误伤面为零。
         if (normalized.All(char.IsDigit) || normalized.StartsWith("0x", StringComparison.Ordinal))
             return true;
-        if (!TryParseAddress(normalized, out var address))
-            return false;                                   // 其余主机名形态——交 DNS 定权威
-        return IsReserved(address);
+        // IPv6（含方括号形态）交解析器按字节判；带冒号却读不出来＝不可判定即拒。
+        if (normalized.Contains(':'))
+        {
+            if (!IPAddress.TryParse(normalized, out var v6) || v6 is null)
+                return true;
+            return IsReserved(v6);
+        }
+        // ⑥ 规范点分十进制（正好 4 段、每段 1-3 位且无前导零）才进段表。
+        if (IsCanonicalDottedIpv4(normalized, out var address))
+            return IsReserved(address);
+        // ⑦ 像 IPv4 却不规范（八进制 0177.0.0.1、简写 169.1、段数≠4、空段、0x 混写）一律拒：
+        // OS/Java 与 Chromium 的 inet_aton 解释不同（CS-348/AD-213 记过），归一后再判就是把
+        // 「按谁的解释」变成实现细节。此前本层走 UrlSafety 的归一化器，于是 0177.0.0.1
+        //（=127.0.0.1）与 169.1（=169.0.0.1）被放行，而 Android 拒它们——跨端契约向量
+        // reserved-address-boundary.json 把这条分叉抓红（R9-B70）。
+        // ⑧ 其余是主机名 ⇒ 零 DNS，权威交 DNS（本机 hosts 与 mDNS 解析到内网属预期用法）。
+        return HasNonCanonicalDottedForm(normalized);
     }
 
-    private static bool TryParseAddress(string host, out IPAddress address)
+    /// <summary>规范点分十进制：正好 4 段、每段 1-3 位纯数字且无前导零（<c>0</c> 本身除外），
+    /// 每段 ≤255。与 Android `AddressText.octetValueOrMinusOne`／`isDecimalOctet` 同一条判据。</summary>
+    private static bool IsCanonicalDottedIpv4(string host, out IPAddress address)
     {
-        if (Core.UrlSafety.TryParseOctalIpv4(host, out address))
-            return true;
-        if (IPAddress.TryParse(host, out var parsed) && parsed is not null)
+        address = default!;
+        var parts = host.Split('.');
+        if (parts.Length != 4)
+            return false;
+        var octets = new byte[4];
+        for (var i = 0; i < 4; i++)
         {
-            address = parsed;
-            return true;
+            var part = parts[i];
+            if (part.Length is < 1 or > 3 || !part.All(char.IsDigit) ||
+                (part.Length > 1 && part[0] == '0'))
+                return false;
+            var value = int.Parse(part, CultureInfo.InvariantCulture);
+            if (value > 255)
+                return false;
+            octets[i] = (byte)value;
         }
-        return Core.UrlSafety.TryParseAlternateIpv4(host, out address);
+        address = new IPAddress(octets);
+        return true;
     }
+
+    /// <summary>点分但每段都是数字片段（纯数字、空段或 0x 前缀）＝按 inet_aton 解释的 IPv4
+    /// 变体，不是主机名。与 Android `hasNumericAuthority` 同判据。</summary>
+    private static bool HasNonCanonicalDottedForm(string host) =>
+        host.Contains('.') &&
+        host.Split('.').All(part => part.Length == 0 || part.All(char.IsDigit) ||
+                                    part.StartsWith("0x", StringComparison.Ordinal));
 
     private static bool IsReserved(IPAddress address)
     {

@@ -1382,6 +1382,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   前提已做成能红的判据（`tests/python/injected_js_parity_test.py` +3 条），不是留一段推理。
   所以 Q57 剩下的只有①那一半，仍**需设备/桌面冒烟**。
 
+- Q66 R9-SH-22 | P3 | `android/broker/src/test/kotlin/com/aegis/broker/ReservedAddressBoundaryTest.kt:85`（`adjacentAddressesOnBothSidesOfEverySegment`）↔ `windows/tests/Aegis.Windows.Broker.Tests/ReservedAddressBoundaryTests.cs`（同族零用例）↔ `windows/src/Aegis.Windows.App/Broker/ReservedAddressBoundary.cs:54`（`HasNumericAuthority`）↔ `android/broker/src/main/kotlin/com/aegis/broker/ReservedAddressBoundary.kt:181`（`hasNumericAuthority`）：
+  R9-B70 把两张手抄表收成一份跨端向量（§3.70）之后，还剩两族没进表，如实登记而不是当成已闭：
+  ①**逐段左右邻**——只测被点名的地址会放过「段边界写错一位」这一族缺陷，Android 有这一族
+  （`169.253.255.254`、`223.255.255.254` 等），C# 一个都没有，所以「两端都跑同一份表」这句话
+  今天只对表内 47 条成立；②authority 的**剥端口／剥 userinfo** 两端各写一遍，而向量条目全是
+  带 scheme 的完整 URL，恰好绕开这段清洗逻辑。
+  为什么不顺手做：①邻界值一旦进表就是**同时钉住两端**，选错一个会把另一也钉错，得逐条对着
+  段表核过再进（下一批单独做）；②那是入口清洗不是判定面，改它要连带 `DeniesRaw` 的契约。
+  验收判据：①左右邻进 `reserved-address-boundary.json` 且两端的段表逐条对得住；②authority
+  清洗每端一份，并让向量覆盖「带端口／带 userinfo 的保留地址」形态。
+
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
 
 **共同主题：文档说「已做」而实树没做，比文档空白更危险。** 本批九条全是 P2/P3 的
@@ -4004,6 +4015,70 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    ④平台侧对 `native-navigation-decision.json` 仍零执行者（Q53 第②档），策略面这三条新向量
    今天只有 RS 跑——那是登记在案的缺口，不是本批新造的；⑤折叠与回环的先后顺序在四段代码里
    各写一遍（核心／Android 豁免面／Android 拒绝面／Windows 两处），没有一条常驻判据判这个顺序。
+
+### 3.70 R9-B70（2026-10-15）：把两张手抄的保留地址边界表收成一份跨端向量——合并本身量出一条真分叉
+
+1. 起点不是别人报的，是**上一批我自己造的**：R9-B69 为了钉 v4-compatible，往 C# 的
+   `BoundaryMatrix` 与 Kotlin 的 `denied`/`allowed` 各抄了一批同样的形态。本仓的纪律是
+   「同一判据不许写两遍」，所以先量这两张表到底像不像：把两边按 URL 解析后对表——
+   **C# 35 条、Kotlin 39 条，只有 12 条是同一个 URL**，其余各测各的 ⇒
+   「Windows 与 Android 都判了这条边界」是一句覆盖假象；而且同一条 URL 已经有相反期望：
+   `http://0177.0.0.1/` 在 C# 表里是**放行**、在 Kotlin 表里是**拒绝**。
+
+2. 落地＝新建跨端契约向量 `contracts/vectors/reserved-address-boundary.json`（两表并集
+   实测 **47 条：26 deny／21 allow**），两端各自逐条消费同一份：C#
+   `ReservedAddressBoundaryTests.cs:47`（`LoadBoundaryMatrix` 读输出目录里的向量，缺文件即
+   报错而不是静默少跑）、Kotlin `ReservedAddressBoundaryTest.kt:33`
+   （`sharedBoundaryVectorsMatchPredicateVerdict`，按仓库根向上定位，沿用 `OriginPolicyTest`
+   的 AD-315 先例）。登记同批跟上：`CONSUMER_MANIFEST` 加 `{"AD","CS"}`、`MIN_VECTORS`
+   21→22、`MIN_VECTOR_ENTRIES` 251→298，消费面实测随之变成 **14 份有端侧执行者／
+   8 份仅 schema／3 份 CS∧AD 同跑**（此前 13/8/2）。
+
+3. 顺手抓到一处**已经漂移的陈述**：`tests/python/vector_consumers_test.py` 的用例名与
+   docstring 写的是「11 份／4 份／2 份」，而**同一个文件自己的 assert 早就是 13/21**。
+   改名为 `test_current_coverage_facts_are_measured` 并把三个数全部写成实跑值——
+   「抄下来的计数」这条本仓记过不止一次，这次是抄在自己用例的标题里。
+
+4. 合并完的第一次执行就是两条红（全在 Windows 侧）：`http://169.1/` 与
+   `http://0177.0.0.1/` 向量说拒、`DeniesRaw` 放行。根因不是段表，是**判的位置**：
+   Windows 走 `TryParseAddress`（含 `TryParseOctalIpv4`／`TryParseAlternateIpv4`）把 inet_aton
+   形态**归一成 IP 再判**，于是 `169.1`→`169.0.0.1`、`0177.0.0.1`→`127.0.0.1` 都落到
+   「不是保留段」⇒ 放行；Android 是 ⑥规范四段才进段表、⑦不规范的点分形态一律拒。
+   方向取加严（与本仓 CS-348／AD-213 的「宁拒不可猜」同口径，且不放松任何一段已放行的地址）：
+   Windows 采纳同一个 ⑥/⑦ 形状（`ReservedAddressBoundary.cs:111-152`），
+   `TryParseAddress` 随之删除。
+
+5. **第一版改完仍红，这条值得单独记**：我只把 ⑦ 加在 `DeniesHost` 上，而 `DeniesRaw`
+   走的是 `!Uri.TryCreate(...) || Denies(uri)`——**.NET 的 `Uri.Host` 已经把 `169.1` 归一成
+   `169.0.0.1`**，判定面看到的字符串根本不是用户写的那串。所以 ⑦ 必须判在**裸 authority**
+   上（`HasNumericAuthority` 里，`ReservedAddressBoundary.cs:54-85`）。本类的注释早就写着
+   「只看归一后的 host 就等于留一条绕过路」，这次是这个类自己没把这条用到底——
+   与 §3.66 第 5 点「绕过的成因不在分类器而在入口给它的字符串」是同一课的第二遍。
+
+6. 行为影响如实写（这是**收紧**，不是纯重构）：Windows 现在对
+   `0177.0.0.1`／`169.1`／`1.2.3.4.5`／`010.0.0.1` 这类非规范 IPv4 形态在下载、子资源、
+   导航授权出口一律拒，此前按 .NET 的解释归一后放行。`0251.0376.0251.0376`（元数据）
+   结论不变但理由变了：此前是「归一后落在 169.254/16 所以拒」，现在是「形态不规范即拒」——
+   注释里写清了，免得下一轮把「归一器不再被调用」读成元数据面被放松。允许组 21 条
+   （`8.8.8.8`、`my-nas.local`、`[::1]`、`[::1.2.3.4]`…）就是这条的反向控制：
+   只留拒绝组，这条判据可以在「全拒」下悄悄做绿。
+
+7. 执行面（全部本机实跑）：`dotnet test` Core **923**／Broker **221**（改表前 209；
+   47 条向量 + 空 host 独立用例 + 原有出口级锚）全过 0 失败，两条发现数下界 ✅；
+   `gradle --offline` `:broker`／`:app`／`:webview-adapter` 的 ktlint + detekt +
+   testDebugUnitTest 全绿（中间抓到一次我自己的 import 顺序违规）；`cargo test` 593 过
+   0 失败——**新增向量文件必须跑 Rust**：`vectors.rs` 按目录遍历，多一个文件就是多一次
+   解析面；`pytest tests/python` 878 过 1 跳过；`verify_vector_consumers`／`verify_vectors`／
+   行数红线／文档计数／队列状态／markdown 两门禁／ruff·bandit·compat 全绿。
+
+8. 未做与边界（写清以免下一轮当成已做）：①这份表**只有 CS+AD 消费**，核心不读它——
+   边界是纯托管层的拒绝码（`ReservedAddressBoundaryTests` 的类注释原话），Rust 侧的对应物
+   是 `is_high_risk_host`，由 `native-navigation-decision.json` 判，两者不是同一张表，
+   登记成事实而不是「第三端漏了」；②Android 独有的**逐段左右邻**锚没进向量、C# 侧仍零用例
+   ⇒ 转登 **Q66 R9-SH-22**；③authority 的剥端口／剥 userinfo 两端各写一遍，向量条目都是
+   完整 URL 恰好绕开它 ⇒ 同一 Q66；④两端的保留段表本身仍是两份实现（C# 的 if 链、
+   Kotlin 的 `RESERVED_IPV4_SEGMENTS`），本批统一的是**行为**（同一份期望值），不是实现单源。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
