@@ -3213,10 +3213,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      一个**不存在的枚举值**：`dismissed_reason=tnt` → 实际执行用的是 `tolerable_risk`
      （422 报错清单里根本没有 `tnt`）。留更正记录而不是静默改掉——一份安全处置文档写着
      非法枚举，读的人就没法复核当时到底做了什么。
-   - `gradle-dependency-insight.yml`（dispatch-only 诊断面）加一步**现读并报告**告警状态，
-     `continue-on-error: true` 且不参与任何判定；`permissions` 补 `security-events: read`。
-     为什么不做成门禁：告警 state 由服务端扫描自行翻转，把它判进 PR 面＝随机红灯
-     （R9-B46 之后触发面与必需检查的对应关系是明确的，这条不进去）。
+   - ~~`gradle-dependency-insight.yml` 加一步现读并报告告警状态~~ ——**这条本批撤掉了**，
+     原因是实测不成立：Actions 的 `GITHUB_TOKEN` 调 `GET /repos/{owner}/{repo}/dependabot/alerts`
+     返回 **403 `Resource not accessible by integration`**（run 38542830575，权限里已写
+     `security-events: read`；同一条命令在会话里用**用户凭据**跑则正常返回
+     `open=9 / dismissed=0 / fixed=3`）。带着 `continue-on-error` 留着它，作业照样绿而
+     日志里只多一段没人读的 403——「有报告」变成假象，比没有更坏。要接这条得配一个只读
+     PAT（属新增凭据 ⇒ 用户决定），本批不配。
 4. **要不要再处理一次那 9 条**升入 §四 第 12 项待用户定稿：①再 dismiss 一轮（同样理由，
    但下一次扫描还会重开，变成拉锯，且每次点击都是一次对外姿态声明）；②fix-forward——
    把 lint 工具面那份顶到 ≥1.85（动 AGP/lint 工具链版本面，牵连登记表与本文证据）。
@@ -3249,7 +3252,19 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 7. 验证：新增 13 条用例（`tests/python/workflow_script_paths_test.py`），全量
    `pytest tests/python` **815 passed / 1 skipped**；ruff / bandit / py312 / 行数红线 /
    markdown 三件 / 队列状态 / 触发面（16 个 workflow 分类不变）/ 新门禁全过。
-   Actions 侧的新步骤实跑结果（含告警状态那一步的输出）记在下面第 8 条。
+   Actions 侧的实跑结果记在下面第 8 条。
+8. 第二次 dispatch（run **38542830575**，conclusion=success）把两件事都量出来了：
+   - 修好的那一步**终于跑了它该跑的内容**：`=== 四把锁里命中工具的坐标 → configuration 归属
+     （找到 4 把锁）===`，随后 `verify_gradle_alert_scope_boundary.py` 输出
+     「[ok] 被 dismiss 的 5 个坐标仍只在工具/测试面：logback-core←ktlint；
+     commons-lang3←androidLintTool；httpclient←androidLintTool；bcpkix←androidLintTool；
+     bcprov←androidLintTool, debugUnitTest*×3」。对照第一次（run 38539285993）同一段位置
+     写的是 `grep: android/*/gradle.lockfile: No such file`——「找到 4 把锁」这一句
+     就是这一步此前一直在空转的证据。
+   - 而**本批原本要加的那步现读告警状态，被这次 dispatch 否掉**（见第 3 条第二个 bullet 的
+     撤掉记录：403 `Resource not accessible by integration`）。
+     这是「dispatch 证据」的第二种价值：第一次抓到旁边的坏步骤，第二次抓到自己新加能力的
+     边界——两者都不是本地跑得出来的。
 
 
 ## 六、复核后判定为不成立（留此防重复上报）

@@ -94,8 +94,16 @@ classpath 域）。
 > - 可依赖：`verify_gradle_alert_scope_boundary.py`（PR 面常驻，判坐标归属）；
 > - 可依赖：本文的判定与证据（锁文件行号 + configuration 名）；
 > - **不可依赖**：GitHub 侧的 alert `state`——它会随扫描自行翻转。
-> 所以 `gradle-dependency-insight.yml`（dispatch-only 诊断面）新增一步**现读并报告**告警状态，
-> 明确 `continue-on-error` 且不参与任何判定：把它做成 PR 门禁就是拿随机波动当红灯。
+> 本想让 `gradle-dependency-insight.yml`（dispatch-only 诊断面）现读并报告告警状态，
+> **实测做不到**：Actions 的 `GITHUB_TOKEN` 调 `GET /repos/{owner}/{repo}/dependabot/alerts`
+> 返回 **403 `Resource not accessible by integration`**（run 38542830575，权限里已写
+> `security-events: read`；同一条命令在会话里用用户凭据跑则正常返回上面那三个数）。
+> 那一步因此撤掉——留着它只会输出一段没人读的 403 正文，而它带 `continue-on-error`、
+> 作业照样绿，「有报告」就成了一种假象，比没有更坏。以后真要接：需要一个只读 PAT
+> （属新增凭据，需仓库所有者点头）。现状保持**状态由人来现读**，判据只建在锁面坐标归属上。
+> 同批修好的倒是那条一直坏着的诊断步骤（§3.60 第 5 条：它站在 `working-directory: android`
+> 的 job 里找 `scripts/…`，自 R9-B49 起从没跑通过，而失败之前还先打印了一句看起来像结论的
+> `(零命中)`）。
 > 是否再 dismiss 一次（会再次被重开，形成拉锯）、还是去把 `androidLintTool` 那份 1.80.2
 > 顶到 ≥1.85（需要动 AGP/lint 工具面，属构建面变更）——**都是需要仓库所有者点头的操作**，
 > 本文只把两个事实与代价写清，不代做决定。
