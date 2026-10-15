@@ -11,11 +11,17 @@ expires_at 放行」钉成 allow 对照，即门禁反向保护该缺陷。既�
 所以这块缺口一直显示为「契约已对齐」。
 
 本模块的口径：
-- 必填集 / 枚举 / pattern / minLength **从 schema 现算**，不在 Python 侧手抄第二份
-  （抄一份就再造一个漂移面）；
+- 必填集 / 枚举 / pattern / minLength / **minimum** / additionalProperties
+  **从 schema 现算**，不在 Python 侧手抄第二份（抄一份就再造一个漂移面）；
 - 违背契约是一条独立拒绝码 `deny_schema`——与 `contracts/vectors` 既有词汇一致；
 - schema 读不到 / 结构不合预期即 `ActionContractError`，broker 拒绝构造
   （"读不到就算通过" 是本项目已封的失效形态）。
+
+R9-B68 补上第二条入口 `payload_violation`：`contracts/vectors/action-*.json` 里的载荷是
+**核心形态**（AuthorizedAction 的十个字段），而 Agent 自己的 `ProposedAction` 还要求
+`intent`/`budget_used`——同一份向量在 Agent 端此前无处可判，只能被 dataclass 构造层
+统一记成 `deny_payload`（那条命题问的是「能不能构造」，不是「合不合 schema」）。
+两条入口共用 `field_violation`，不写第二份规则。
 """
 
 from __future__ import annotations
@@ -25,6 +31,7 @@ import json
 import pathlib
 import re
 import sys
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -110,6 +117,9 @@ class ActionContract:
     min_lengths: frozenset[str]
     patterns: dict[str, re.Pattern[str]]
     enums: dict[str, frozenset[str]]
+    minimums: dict[str, int]
+    property_names: frozenset[str]
+    allows_extra: bool
 
     @classmethod
     def from_schema(cls, doc: dict[str, Any]) -> ActionContract:
@@ -124,7 +134,8 @@ class ActionContract:
             if spec.get("type") in ("string", "integer")
             or (isinstance(spec.get("minLength"), int) and spec["minLength"] > 0)
             or isinstance(spec.get("pattern"), str)
-            or isinstance(spec.get("enum"), list))
+            or isinstance(spec.get("enum"), list)
+            or isinstance(spec.get("minimum"), int))
         return cls(
             required=frozenset(doc["required"]),
             constrained_fields=constrained,
@@ -141,12 +152,17 @@ class ActionContract:
             enums={name: frozenset(spec["enum"])
                    for name, spec in properties.items()
                    if isinstance(spec.get("enum"), list)},
+            minimums={name: spec["minimum"]
+                      for name, spec in properties.items()
+                      if isinstance(spec.get("minimum"), int)},
+            property_names=frozenset(properties),
+            allows_extra=bool(doc.get("additionalProperties", True)),
         )
 
     def violation(self, action: object) -> str | None:
         """载荷与冻结契约的首个违背（None = 符合）。
 
-        只判 schema 声明的形状（必填/类型/长度/pattern/enum）——语义门禁
+        只判 schema 声明的形状（必填/类型/长度/pattern/enum/minimum）——语义门禁
         （scope 配对、代际、预算、nonce 一次性）仍归 broker，两条面不互相顶替。
         """
         for name in sorted(self.required | self.constrained_fields):
@@ -159,19 +175,54 @@ class ActionContract:
                 if name in self.required:
                     return f"缺必填字段: {name}"
                 continue
-            if name in self.string_fields and not isinstance(value, str):
-                return f"字段 {name} 必须为字符串"
-            if name in self.integer_fields and type(value) is not int:
-                # type 严格判定：bool 是 int 子类，不得冒充 int（PY-251 同口径）
-                return f"字段 {name} 必须为整数"
-            if name in self.min_lengths and not value:
-                return f"字段 {name} 不得为空"
-            pattern = self.patterns.get(name)
-            if pattern is not None and not pattern.match(value):
-                return f"字段 {name} 不合契约 pattern: {value!r}"
-            allowed = self.enums.get(name)
-            if allowed is not None and value not in allowed:
-                return f"字段 {name} 不在契约 enum 内: {value!r}"
+            found = self.field_violation(name, value)
+            if found is not None:
+                return found
+        return None
+
+    def payload_violation(self, data: object) -> str | None:
+        """**未构造的载荷映射**对冻结契约的违背（R9-B68）。
+
+        与 `violation()` 同一份判定面：必填/类型/长度/pattern/enum/minimum 走
+        `field_violation`，另加 schema 的 `additionalProperties: false`——那条只有
+        在载荷形态下才判得了（构造后的对象上多余字段已经不存在了）。
+        """
+        if not isinstance(data, Mapping):
+            return f"action 载荷必须是映射，实际 {type(data).__name__}"
+        if not self.allows_extra:
+            unknown = sorted(set(data) - self.property_names)
+            if unknown:
+                return f"载荷含未知字段（additionalProperties:false）: {unknown}"
+        for name in sorted(self.required):
+            if data.get(name) is None:
+                return f"缺必填字段: {name}"
+        for name in sorted(data):
+            value = data[name]
+            if name not in self.property_names or value is None:
+                continue
+            found = self.field_violation(name, value)
+            if found is not None:
+                return found
+        return None
+
+    def field_violation(self, name: str, value: Any) -> str | None:
+        """单字段判定——`violation` 与 `payload_violation` 共用的唯一一份规则。"""
+        if name in self.string_fields and not isinstance(value, str):
+            return f"字段 {name} 必须为字符串"
+        if name in self.integer_fields and type(value) is not int:
+            # type 严格判定：bool 是 int 子类，不得冒充 int（PY-251 同口径）
+            return f"字段 {name} 必须为整数"
+        if name in self.min_lengths and not value:
+            return f"字段 {name} 不得为空"
+        pattern = self.patterns.get(name)
+        if pattern is not None and not pattern.match(value):
+            return f"字段 {name} 不合契约 pattern: {value!r}"
+        allowed = self.enums.get(name)
+        if allowed is not None and value not in allowed:
+            return f"字段 {name} 不在契约 enum 内: {value!r}"
+        minimum = self.minimums.get(name)
+        if minimum is not None and value < minimum:
+            return f"字段 {name} 低于契约 minimum {minimum}: {value!r}"
         return None
 
 

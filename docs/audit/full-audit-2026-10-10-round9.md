@@ -729,6 +729,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      Q53 第②档（§3.42 核查后新增，两个形状都要人点头）：给
      `native-navigation-decision.json` 接平台执行者，**不是**加一份 C# / Kotlin 用例就能做的——
      43 条里 13 条期望 `require_confirmation`，而两端在常跑（托管）配置下根本产不出这个分支
+     （**计数按 R9-B66 后的实况更新：现 53 条 / 18 条 false / 18 条 `require_confirmation`，
+     新增的都是 IPv6 段集那五条；「产不出该分支」这条结论不变**）
      （Windows `BrowserPolicyBroker.cs:286` 直接 Deny `native_confirmation_core_required`；
      Android `AndroidBroker.kt:284` 顺延到 `evaluateNavigation`）。可选形状：
      **①把原生变体用例提升成 PR 必需检查**（要同批核对必需 context 集合，避免 R8-CI-01 的
@@ -992,7 +994,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `approvals-replay-and-expiry`、`glob-match`、`update-manifest-invalid` 只有 Rust 执行
   ⇒ 「Windows/Android 与核心同一裁决」对这些命题**未被验证**
   （**这一档不能靠「补一份 C# 用例」闭**——§3.42 逐行实证：`native-navigation-decision`
-  的 43 条里 13 条期望 `require_confirmation`，而两端在常跑（托管）配置下都产不出该分支，
+  的 43 条里 13 条期望 `require_confirmation`（R9-B66 后为 53 条 / 18 条 false，
+  新增五条是 IPv6 段集；「产不出该分支」的结论不变），而两端在常跑（托管）配置下都产不出该分支，
   Windows 在 `BrowserPolicyBroker.cs:286` 直接拒、Android 在 `AndroidBroker.kt:284` 顺延到
   evaluate；要么把原生变体用例提升成必需检查，要么给向量加 `platform_decidable` 分区
   ⇒ 升入 §四 第 11 项待裁决，登记表在此之前保持 `{"RS"}`）
@@ -1007,6 +1010,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   现在会被这条反向锚**判红**，不是可自由执行的改进。
   ③剩下的真缺口只有一条：**Agent 端不消费任何契约向量**（`CONSUMER_MANIFEST` 现读 `AG` 命中 0）——
   要不要把红队夹具与 `action-valid/invalid.json` 绑成同一份输入，属排期决定（⇒ §四）。
+  **R9-B68 / §3.68 已按「契约层」绑定**：Agent 端逐条消费两份向量，`AG` 进登记表；
+  绑定过程抓出的第一条缺口是 `minimum` 从未被派生进判定面。载荷面本身的分歧
+  （Agent 的 `ProposedAction` 还要求 `intent`/`budget_used`）转登 **Q65** 待排期。
   登记本节时这里写的是「三列也不被 broker 读 ⇒ 两端各说各话」——那是 R9-B46 之前的旧状态，
   改真是因为**同一份文档的指针自己也漂过一次**（见 §3.65）。
   不顺手做的原因：每一档都要在端侧新增/改写裁决实现（不是加测试文件就有数），且第①档与
@@ -1233,6 +1239,20 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   （`AuditRegressionTests.cs:22-37` 那批 mapped 样本必须仍绿）；②向量补齐后再改判据，
   顺序不能倒——理由见 §3.66 第 1 点；③同时把 6to4/Teredo **不解码**这条口径写进三端
   注释（§3.66 第 6 点已有，别在下一轮被当成漏判补上）。
+
+- Q65 R9-SH-20 | P2 | `agent/broker.py:199-241`（`proposed_action_from_dict` 的
+  `mandatory = dataclass 无默认字段 ∪ CONTRACT_REQUIRED`）↔
+  `contracts/schemas/action.schema.json`（required 只列十字段）↔
+  `agent/tests/action_vector_consumption_test.py::test_agent_payload_face_is_wider_than_the_frozen_schema`：
+  **两张「action」契约不是同一张**——Agent 的 `ProposedAction` 还要求
+  `intent`/`budget_used`（红队夹具与扩展 IPC 的载荷面），冻结 schema 里没有它们
+  ⇒ 核心形态的载荷在 Agent 端 `decide()` 处一律 `deny_payload`，连 `action-valid.json`
+  三条也一样。后果不是漏拦而是**命题被换掉**：`deny_payload` 问的是「能不能构造」，
+  向量里的 `valid`/`deny_schema` 问的是「合不合 schema」，把前者当后者断就是空心断言。
+  R9-B68 因此在契约层绑定（`payload_violation`）并把这条分歧钉成用例。
+  **待回读**的终态两选一：①给 Agent 的 IPC 载荷单立一张 schema 并进向量体系；
+  ②把 `action-*.json` 分成「核心形态／Agent 形态」两套并各记端集。两条都是契约面
+  变更（且第②条要动 Rust 的向量消费循环），不顺手做。
 
 ### 5.5 DOC（文档 vs 实树）
 
@@ -3854,6 +3874,52 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    判红（同一文件里那几处 `//（` 不红，是因为它们在 JS 字符串模板内而不是 Kotlin 注释）；
    `dotnet test` Core 921 过 0 失败（比上批 +1，正是新那条 Fact），发现数下界断言 ✅；
    `pytest tests/python` 878 过 1 跳过；`packages.lock.json` 无漂移。
+
+### 3.68 R9-B68（2026-10-15，队列 Q53 第③档）：把 action 向量绑到 Agent 端——绑的第一件产出不是覆盖，是「schema 声明了却没被派生进判定面」
+
+1. 这条是 Q53 三档缺口里唯一不需要新裁决、也不需要设备的一档：`AG` 命中 0，
+   而 Agent 侧本来就有一张从 `action.schema.json` 现算的判定面（`ActionContract`）。
+   新增 `agent/tests/action_vector_consumption_test.py`（124 行，10 条向量逐条参数化
+   + 4 条结构性用例），并把 `contracts/vectors/action-valid|invalid.json` 的登记端集
+   从 `{RS}` 改成 `{AG,RS}`（`scripts/verify_vector_consumers.py:70-77`；该门禁要求
+   **实测端集与登记相等**，多记与漏记同样判红）。
+2. **绑定当场抓到一条真实缺口**：`action.schema.json` 给 `document_generation` 声明了
+   `{"type": "integer", "minimum": 0}`，而 `from_schema` 派生的是
+   required/type/minLength/pattern/enum——**`minimum` 一条都没收进判定面**。后果：负代际
+   在 Agent 契约层被放行，只在「与当前代际比对」那道语义门上被拒（`deny_generation`），
+   而同一条向量在核心得到 `deny_schema`。这是 R8-PY-03 那条「判定面不得由被证明物自己决定」
+   的**另一半**：不止「摘掉 required 会关掉校验」，「schema 声明了而派生逻辑没覆盖到」
+   同样会静默失效，且现树没有任何用例能发现它（此前 `AG` 零消费正是原因的一部分）。
+3. 故障注入实测（不是推理）：把 `minimums={...}` 换成 `minimums={}` ⇒ 三条用例判红
+   ——逐向量拒绝、判据族覆盖、加宽副本对照，改回后文件逐字节还原（`cmp` 实证）。
+   承重的那条是 `test_reject_reasons_cover_every_derived_constraint_family`：
+   它要求七条 invalid 向量的拒绝理由里**六个族各出现一次**
+   （enum／pattern／minLength／required／additionalProperties／minimum）。
+   没有它，「七条都被拒」这件事一条 `if not data: return "空"` 就能蒙过去。
+4. 两条入口共用一份规则，不写第二实现：`field_violation` 是唯一的单字段判据，
+   `violation()`（构造后的对象）与新增的 `payload_violation()`（未构造的映射，
+   额外管 `additionalProperties:false`——那条只在载荷形态判得了，构造后多余字段已不存在）
+   都调它。R9-B64 数「第二份实现」的那条门禁在这里是直接相关的：抽第二条入口时
+   如果没有共享 primitive，本仓就会多一份字段规则副本。
+   **`payload_violation` 今天只被用例调用**（生产入口 `decide()` 接不上，理由见第 5 点），
+   接线点写在 Q65 里，不是留一段没人走的死码：它把「映射形态的契约层判定」这件事
+   先做成有判据的一面，等两张载荷 schema 并起来时直接换调用点即可。
+5. **为什么不断 `PolicyBroker.decide()`**（这一点决定本批的边界）：实测十向量
+   （含 valid 三条）在 `decide()` 处**全部** `deny_payload`——Agent 的
+   `ProposedAction` 还要求 `intent`/`budget_used`，而冻结 schema 的 required 里没有它们。
+   于是断「非 ALLOW」是零信息量的空心断言（R9-B39 那条「注释不算证据」的纪律同样
+   适用于「被拒不算判据」）。本批把这条分歧**钉成用例**
+   （`test_agent_payload_face_is_wider_than_the_frozen_schema`）而不是假装没有，
+   并转登 **Q65 / R9-SH-20** 待排期：要么给 Agent 的 IPC 载荷单立一张 schema，
+   要么把向量分成「核心形态／Agent 形态」两套——两条都是契约面变更，不在本批顺手做。
+6. 没有向量钉住的新分支不留成不可达码：`payload_violation` 里「载荷不是映射」与
+   「字符串字段给了非字符串」两分支不在七条向量里，补一条直接断言把它们测掉
+   （覆盖率随之到 93%／新文件 98%）。
+7. 执行面：`agent/tests` 96 过 0 失败（+10 向量 +4 结构）；ruff / bandit / py312 OK；
+   `tests/python` 878 过 1 跳过；`check_file_sizes` 通过（新文件与 `action_contract.py`
+   231 行都在红线内，无需动基线）；mypy 报的三条是本机既有环境问题
+   （缺 `yaml` stubs、`update_verifier` 走 sys.path 导入），非本批引入——
+   如实记而不是写成「mypy 全绿」。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
