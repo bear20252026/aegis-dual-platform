@@ -224,17 +224,10 @@ impl SecurityPolicy {
     ///（末段 "254:8080" parse 失败）——不变量从「调用方纪律」换成「函数自证」；私网带端口仍判
     /// 非高危（第七轮 B8 裁决「本机与内网必须能打开」不可回退），用例见 scheme_and_host_predicates.rs。
     ///
-    /// **IPv6 自 R9-B66 起在本函数覆盖面内**（第七轮 R7-RS-05 记的「取不到入参」
-    /// 已随归一层放开而消失）：C# 孪生（`UrlSafety.IsPublicIp`）按 IPAddress 字节判的
-    /// ULA/组播/site-local 语义，核心现在同口径判，段集由
-    /// `contracts/vectors/native-navigation-decision.json` 的 IPv6 向量逐条钉住。
+    /// IPv6 自 R9-B66 起在覆盖面内（判定在 `security_policy/ipv6.rs`），段集由向量钉住。
     pub fn is_high_risk_host(host: &str) -> bool {
-        // 先剥端口，两种形态分开：`[...]:port` 里的冒号属于地址本身，
-        // 统一 split(':') 会把 `[::1]:8080` 截成 `[`——既不 parse 成地址也不是域名，
-        // 于是**静默判成公网**（放开语法后最先要堵的就是这个，见 ipv6_is_high_risk）。
         if let Some(rest) = host.strip_prefix('[') {
-            let inner = rest.split(']').next().unwrap_or("");
-            return Self::ipv6_is_high_risk(inner);
+            return ipv6::is_high_risk(rest.split(']').next().unwrap_or(""));
         }
         let host = host.split(':').next().unwrap_or(host);
         let mut octets = [0u8; 4];
@@ -280,41 +273,6 @@ impl SecurityPolicy {
             || a >= 224
     }
 
-    /// IPv6 字面量的高危判定（R9-B66，入参是**已剥方括号**的地址体）。
-    ///
-    /// 第一步永远是把内嵌 IPv4 折叠回 IPv4 判定：`::ffff:127.0.0.1` 与
-    /// `::ffff:7f00:1` 是同一个回环地址的两种拼法——分类上必须等价，否则归一层
-    /// 刚放开字面量，这里就成了绕过口（`::ffff:169.254.169.254` = 云元数据）。
-    /// 折叠之后按段判：**链路本地 fe80::/10**（与 IPv4 的 169.254/16 对称，含
-    /// 邻居发现/组播约束）、**组播 ff00::/8**、**未指定 `::`**、
-    /// **文档段 2001:db8::/32**（与 TEST-NET-1/2/3 对称）。
-    ///
-    /// **不判** ULA `fc00::/7` 与 `::1`——第七轮 B8 裁决「本机与内网必须能打开」，
-    /// 与 IPv4 侧 127/8、10/8、172.16/12、192.168/16 完全对称；段集边界由
-    /// native-navigation-decision 的 IPv6 向量逐条钉住（含每段左右的公网对照，
-    /// 防「整段扩大化」式过度收紧）。
-    ///
-    /// 6to4（2001::/32）与 Teredo（2001:20::/32）里内嵌的 IPv4 **不解码**：
-    /// Chromium 的 `net::IpAddress` 同样不解，解码会让宿主与内核对该地址给出
-    /// 不同裁决（多拦一层反而不一致）；这是有意的口径选择，不是漏判。
-    pub fn ipv6_is_high_risk(address_body: &str) -> bool {
-        let Ok(addr) = address_body.parse::<std::net::Ipv6Addr>() else {
-            return true; // 归一层已保证进得来；到不了这里的形态按高危处理（fail-closed）
-        };
-        if let Some(v4) = addr.to_ipv4_mapped().or_else(|| addr.to_ipv4()) {
-            return Self::is_high_risk_host(&v4.to_string());
-        }
-        let head = addr.segments();
-        // `::` 未指定（`::0.0.0.0` 已由上面的 to_ipv4 折叠，这里兜住纯零地址）
-        head[0] == 0
-            // fe80::/10 链路本地
-            || (head[0] & 0xffc0) == 0xfe80
-            // ff00::/8 组播
-            || (head[0] & 0xff00) == 0xff00
-            // 2001:db8::/32 文档段
-            || (head[0] == 0x2001 && head[1] == 0x0db8)
-    }
-
     /// 手动 URL 解码（零依赖——处理 %XX 编码）。
     pub fn url_decode(input: &str) -> Option<String> {
         let bytes = input.as_bytes();
@@ -338,4 +296,5 @@ impl SecurityPolicy {
 use crate::util::hex_digit;
 
 #[cfg(test)]
+mod ipv6;
 mod tests;

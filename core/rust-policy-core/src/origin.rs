@@ -75,43 +75,44 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
     // 用 Cow 而不是两边都 to_string()，是为了不在**每次 URL 解析**的热路径上多一次分配
     // （下一行的 to_ascii_lowercase 本来就有一次）。
     use std::borrow::Cow;
-    let (raw_host, port): (Cow<'_, str>, Option<u16>) = if let Some((host_text, tail)) = bracketed_host {
-        if tail.is_empty() {
-            (Cow::Owned(host_text), None)
-        } else {
-            let Some(port_text) = tail.strip_prefix(':') else {
-                return None; // `]x` 这类尾缀不是合法 authority
-            };
-            let Ok(port_num) = port_text.parse::<u16>() else {
+    let (raw_host, port): (Cow<'_, str>, Option<u16>) =
+        if let Some((host_text, tail)) = bracketed_host {
+            if tail.is_empty() {
+                (Cow::Owned(host_text), None)
+            } else {
+                let Some(port_text) = tail.strip_prefix(':') else {
+                    return None; // `]x` 这类尾缀不是合法 authority
+                };
+                let Ok(port_num) = port_text.parse::<u16>() else {
+                    return None;
+                };
+                if port_num == 0 {
+                    return None; // 端口 0（与非方括号分支同口径）
+                }
+                (Cow::Owned(host_text), Some(port_num))
+            }
+        } else if let Some((host, port)) = authority.rsplit_once(':') {
+            if host.is_empty() {
+                return None;
+            }
+            // RS-011（审计 2026-09-24）：host 段拒内嵌冒号——此前 rsplit_once
+            // 取最后一段当端口，"host:8080:1234" 以 host="host:8080" 被接受
+            //（合法端口掩盖非法 authority）
+            if host.contains(':') {
+                return None;
+            }
+            // 非法端口拒绝（contracts/vectors/url-origin-invalid——https://host:99999
+            // ——u16 范围校验——WHATWG 同语义——P0-01）
+            let Ok(port_num) = port.parse::<u16>() else {
                 return None;
             };
             if port_num == 0 {
-                return None; // 端口 0（与非方括号分支同口径）
+                return None;
             }
-            (Cow::Owned(host_text), Some(port_num))
-        }
-    } else if let Some((host, port)) = authority.rsplit_once(':') {
-        if host.is_empty() {
-            return None;
-        }
-        // RS-011（审计 2026-09-24）：host 段拒内嵌冒号——此前 rsplit_once
-        // 取最后一段当端口，"host:8080:1234" 以 host="host:8080" 被接受
-        //（合法端口掩盖非法 authority）
-        if host.contains(':') {
-            return None;
-        }
-        // 非法端口拒绝（contracts/vectors/url-origin-invalid——https://host:99999
-        // ——u16 范围校验——WHATWG 同语义——P0-01）
-        let Ok(port_num) = port.parse::<u16>() else {
-            return None;
+            (Cow::Borrowed(host), Some(port_num))
+        } else {
+            (Cow::Borrowed(authority), None)
         };
-        if port_num == 0 {
-            return None;
-        }
-        (Cow::Borrowed(host), Some(port_num))
-    } else {
-        (Cow::Borrowed(authority), None)
-    };
     let host = raw_host.to_ascii_lowercase();
     if host.is_empty() {
         return None;

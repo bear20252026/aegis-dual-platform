@@ -211,7 +211,11 @@ fn bracketed_ipv6_authority_grammar() {
         "https://[::1]:0/",
         "https://[::1]:99999/",
     ] {
-        assert_eq!(try_parse_external(raw), None, "非法 IPv6 字面量必须被拒：{raw}");
+        assert_eq!(
+            try_parse_external(raw),
+            None,
+            "非法 IPv6 字面量必须被拒：{raw}"
+        );
     }
     // 正常 host 不受影响（回归锚点）
     assert!(try_parse_external("https://example.org/").is_some());
