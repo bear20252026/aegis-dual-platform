@@ -40,6 +40,11 @@ class ReservedAddressBoundaryTest {
                 "http://[ff02::1:2]/",
                 "http://[::ffff:169.254.169.254]/",
                 "http://[::ffff:garbage]/",
+                // R9-B69（队列 Q64）：已废弃的 v4-compatible（前置 96 位全零、不带 ffff）。
+                // 本层此前只按 `::ffff:` 文本前缀折内嵌 IPv4，这两条因此穿过；核心
+                // `to_ipv4()` 与同文件的 `LocalTargetHosts.embeddedIpv4`（https 豁免面）都折它。
+                "http://[::169.254.169.254]/",
+                "http://[::2]/",
                 // 与 OS 解释分歧的数字形态（CS-348/AD-213 同族）
                 "http://2852168190/",
                 "http://0xa9fea9fe/",
@@ -63,12 +68,17 @@ class ReservedAddressBoundaryTest {
             listOf(
                 "http://127.0.0.1:8000/",
                 "http://[::1]:9000/",
+                // 折叠必须排在回环判定之后：`::0.0.0.1` 与 `::1` 是同一个地址
+                // （R9-B69，钉住「折成 0.0.0.1 撞 0/8 被自己人拦掉」这条错法）
+                "http://[::0.0.0.1]:9000/",
                 "http://10.0.0.5/",
                 "http://172.16.0.1/",
                 "http://172.31.255.255/",
                 "http://192.168.1.1:8080/file.zip",
                 "http://100.64.1.2/",
                 "http://[fd12::3]/",
+                // 反向控制：折叠不是「见到 v4-compatible 就拦」——折出来 1.2.3.4 是公网
+                "http://[::1.2.3.4]/",
                 "http://localhost:8000/",
                 "http://api.localhost/x",
                 "http://my-nas.local/share.bin",

@@ -113,10 +113,22 @@ public static class ReservedAddressBoundary
         var bytes = address.GetAddressBytes();
         if (bytes.Length == 16)
         {
-            // IPv4-mapped IPv6（::ffff:169.254.169.254）按内嵌 IPv4 判定；
-            // ULA fc00::/7 是内网单播——按裁决放行，故 IPv6 侧不再有段规则
-            if (bytes.Take(10).All(b => b == 0) && bytes[10] == 0xFF && bytes[11] == 0xFF)
+            // 回环判定必须排在折叠之前（与核心 `security_policy/ipv6.rs`、Android
+            // `LocalTargetHosts.isExemptIpv6` 同一条顺序）：`::1` 折出来是 `0.0.0.1`，
+            // 而 0/8 在本表里是拒绝段——B8 裁决要求放行的本机回环会被自己人拦掉。
+            if (IPAddress.IsLoopback(address))
+                return false;
+            // 内嵌 IPv4 的**两种**写法都要折：v4-mapped（`::ffff:x`，前置 80 位零 +
+            // 第 11-12 字节 0xFF）与已废弃的 v4-compatible（`::x`，前置 96 位全零）。
+            // 此前只折 v4-mapped，于是 `http://[::169.254.169.254]/` 穿过本边界——
+            // 同一个云元数据端点，点分与 v4-mapped 写法被拒、这一写法被放行（R9-B69）。
+            var mapped = bytes[..10].All(b => b == 0) && bytes[10] == 0xFF && bytes[11] == 0xFF;
+            var compatible = bytes[..12].All(b => b == 0);
+            if (mapped || compatible)
                 return IsReserved(new IPAddress(bytes[12..]));
+            // 6to4（2001::/32）与 Teredo（2001:20::/32）里内嵌的 IPv4 **不解码**：
+            // Chromium 的 `net::IpAddress` 同样不解，解了三端会对同一地址给出不同裁决，
+            // 多拦一层换来的是不一致。这是有意的口径选择，不是漏判。
             return false;
         }
         var b0 = bytes[0];

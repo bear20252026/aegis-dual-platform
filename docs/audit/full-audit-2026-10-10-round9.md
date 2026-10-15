@@ -1225,7 +1225,20 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `ALLOWED` 并写明它为什么是第 6 种；②`MARKERS` 对「注释形态写进正则常量」这一类要么能认出
   要么在门禁 docstring 里写明判不到；③`_brace_body` 与 `fn_body` 的失败语义各自写明。
 
-- Q64 R9-RS-12 | P2 | `windows/src/Aegis.Windows.App/Core/UrlSafety.cs:219` ↔
+- ~~Q64 R9-RS-12~~ **本批已闭**（R9-B69 / §3.69：三条验收判据各自先量再做，量的时候把范围改准了）。
+  ①影响量：把 `bytes[12] != 0` 注掉后跑 C# 全套，Core 921／Broker 204 **全绿**——现树零用例依赖它，
+  `AuditRegressionTests.cs:22-37` 那批 mapped 样本同样仍绿。②向量先行：decision 53→56、
+  url-origin-valid 16→18、`MIN_VECTOR_ENTRIES` 246→251 同批，三形态各一条（含 `::1.2.3.4` 反向控制），
+  期望值由 `cargo test` 593 过 0 红确认而非读码。③6to4／Teredo 注记此前只在核心，Android 与
+  Windows 两处都缺，本批补齐 ⇒ 三端都读得到。
+  **原句的两处不实已由执行面推翻，别再按原句上报**：(a)「两端折、Windows 不折」错——真正拦
+  元数据端点的 `ReservedAddressBoundary`（四类出口唯一谓词源）**两个平台都不折** v4-compatible，
+  只有核心折；实测 `EvaluateNavigation` 对 `http://[::169.254.169.254]/latest/meta-data/`
+  给的是 `Decision.Allow`（同端点写成点分或 v4-mapped 都是 `Deny`），分登 R9-CS-20／R9-AD-17。
+  (b) 分叉不止在策略层：Android 的 `AddressText.groupPlan` 把点分尾段紧跟 `::` 的形态切成悬空
+  单冒号，**语法层**就拒这条地址（核心与 .NET 收下），分登 R9-AD-16。可达性本批未做网络实测，
+  按「授权层放行 + 三端不一致」登记，不写成已证实的远程可达。原条目 ↓
+  Q64 R9-RS-12 | P2 | `windows/src/Aegis.Windows.App/Core/UrlSafety.cs:219` ↔
   `core/rust-policy-core/src/security_policy/ipv6.rs:30-41` ↔
   `android/broker/src/main/kotlin/com/aegis/broker/LocalTargetHosts.kt:167-181`（`embeddedIpv4`）：
   v4-compatible（`::a.b.c.d`，RFC 4291 §2.5.5.1 已废弃）折回 IPv4 的**触发条件三端不同**——
@@ -3920,6 +3933,77 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    231 行都在红线内，无需动基线）；mypy 报的三条是本机既有环境问题
    （缺 `yaml` stubs、`update_verifier` 走 sys.path 导入），非本批引入——
    如实记而不是写成「mypy 全绿」。
+
+### 3.69 R9-B69（2026-10-15，队列 Q64 = R9-RS-12）：v4-compatible 的内嵌 IPv4 折叠——量到现在漏的不止原句那一处
+
+1. Q64 是 §3.66 第 6 点②转登的：`UrlSafety.cs:219` 那条 v4-compatible 折叠多带一个
+   `bytes[12] != 0`，同一地址两端裁决相反。三条验收判据按原句顺序做，每条**先量再动**：
+   ①「删掉这个条件对现树的影响」＝把条件注掉后跑 C# 全套，**Core 921／Broker 204 全绿**——
+   现树没有一条用例依赖它（它存在时没被断言过，缺席也不会被断言到）；②向量先行，顺序不许倒
+   （§3.66 第 1 点）；③6to4／Teredo 不解码这条口径三端都要有注记。
+
+2. **原句只说对了一半，要紧的那一半不在 `UrlSafety`**：真正拦元数据端点的是
+   `ReservedAddressBoundary`（顶层导航、授权消费、子资源 403、下载授权四类出口共用的唯一
+   谓词源），而它 `bytes.Length == 16` 那一支**只折 v4-mapped、其余一律 `return false`**
+   （v4-compatible 根本进不了折叠）。实测三条，全部由执行面给：
+   `Predicate_Matrix` 里 `http://[::169.254.169.254]/` 与 `http://[::2]/` 判红，
+   `EvaluateNavigation_DeniesReservedTargetWithExactCode` 对
+   `http://[::169.254.169.254]/latest/meta-data/` 拿到的是 **`Decision.Allow`**——
+   同一个端点写成点分或 v4-mapped 都是 `Deny`。Android 的 `deniesIpv6` 同形（按 `::ffff:`
+   **文本前缀**判，`::2` 这类连折都折不进来），`reservedSegmentsAreDenied` 实测判红。
+   **所以「两端折、Windows 不折」这句原话不成立：两个平台的拒绝边界都不折，只有核心折。**
+   改登 `R9-CS-20`／`R9-AD-17`，`R9-RS-12` 的范围同批改准。
+
+3. 第二处现读纠正（本批最贵的一次自我打脸）：把 Android 的折叠改成按字节之后，我自己加的
+   **回环控制用例** `http://[::0.0.0.1]:9000/` 判红了——不是折叠顺序写错，是
+   `AddressText.groupPlan` 根本读不出这个形态：它用 `body.substring(0, body.lastIndexOf(':'))`
+   切点分尾段，尾段紧跟 `::` 时这一刀切掉了压缩标记两枚冒号之一，`::` 变成悬空单冒号 ⇒
+   整条地址判语法非法。连带 `OriginPolicyTest > sharedUrlOriginVectorsMatchPolicyVerdict`
+   一起红（共享向量说 `https://[::169.254.169.254]/latest` 判 allow，Android 在**语法层**就拒）。
+   核心与 .NET 都收下这个形态 ⇒ 第四处分叉，且分在语法层不在策略层，登 `R9-AD-16`。
+   修法是把切点改成「尾段前那枚冒号若正好是 `::` 的第二枚，两枚都留在十六进制侧」
+   （`android/broker/.../AddressText.kt:74-88`）；没拆成第六个函数——本对象的 detekt
+   `thresholdInObjects: 11` 已被 R9-B66 用满，加一个函数就判 `TooManyFunctions`（实测红过一次）。
+
+4. 向量净增是实测数，计数门禁同批改（理由见 §3.66 第 3 点）：
+   `native-navigation-decision.json` 53→**56**（36 true／20 false，标签由期望值推导）、
+   `url-origin-valid.json` 16→**18**、全树 246→**251**、`MIN_VECTOR_ENTRIES` 246→251、
+   分区用例的三处计数同批跟上。三种形态各一条：元数据端点（`::169.254.169.254`）、
+   `0/8`（`::2`）、以及**反向控制** `::1.2.3.4`（折出来是公网、必须仍放行——没有它，
+   这套改动会被读成「整段 IPv6 字面量收紧」）。期望值不是我说了算：第一版 `cargo test`
+   红在我自己新加的那条上（`canonical parameters` 断言，漏写 `expected_parameters`，
+   补齐 `consume_url`／`consume_scope`／`expected_consume` 三条字段后才 593 过 0 红）——
+   核心对这三条的裁决与我的预判一致，但**一致是被执行面验证出来的，不是读码读出来的**。
+
+5. Windows 两处折叠统一成同一条口径（回环／unspecified 先返回 → 两种内嵌形态都折 →
+   6to4／Teredo 不解码）：`Broker/ReservedAddressBoundary.cs:116-131` 与
+   `Core/UrlSafety.cs:218-220`。拒绝边界那处**新增**了显式回环先判：此前它靠 `return false`
+   兜底恰好对，改完不显式判就会把 `::1` 折成 `0.0.0.1` 撞 0/8 被自己人拦掉——正是
+   §3.66 第 2 点②记过的那次错法，这条控制用例现在就钉在矩阵里（`[::0.0.0.1]` 判放行）。
+
+6. 判据③核对结果：6to4／Teredo 不解码此前**只有核心有**（`security_policy/ipv6.rs:27-30`），
+   Android 与 Windows 两处都缺——本批补进 `LocalTargetHosts.kt:169`（`embeddedIpv4` 的 KDoc）
+   与 `ReservedAddressBoundary.cs:129`。三端同口径现在三处都读得到，不再只靠核心那一条。
+
+7. 执行面（全部本机实跑，无一条是声明）：`cargo test` 593 过 0 失败、`clippy
+   --all-targets -D warnings` 干净、`fmt --check` 干净；`dotnet test` Core **923**（+2 条
+   共享向量）／Broker **209**（+5：4 条谓词矩阵 + 1 条导航出口）全过 0 失败，两条发现数
+   下界断言 ✅；`gradle --offline` 的 `:broker`／`:app`／`:webview-adapter` ktlint + detekt +
+   testDebugUnitTest 全绿（三模块 467 条用例 0 失败）；`pytest tests/python` 878 过 1 跳过；
+   ruff／bandit／py312-compat／行数红线／向量门禁／分区计数全绿。行数面两处是被门禁逼出来的
+   取舍，如实记：`UrlSafety.cs` 是基线文件只许减不许增，注释压到一行才守住 301；
+   `ReservedAddressBoundaryTests.cs` 顶到 **300** 硬上限，为此把「mapped 形态在导航出口」那条
+   `InlineData` 挤掉了（谓词层已有同一条），不是没写。
+
+8. 未做与边界（写清以免下一轮当成已做）：①`::169.254.169.254` **能否真的走到元数据端点**
+   取决于平台栈对 v4-compatible 地址的路由（Windows 的 TCP/IP 不支持 IPv4-兼容过渡），本批
+   **没做网络实测**，所以登记口径是「授权层放行 + 三端裁决不一致」，不是「已证实的远程可达」——
+   下一轮别把它写成后者；②Android 的 https 豁免面（`LocalTargetHosts.isExemptIpv6`）与拒绝面
+   （`ReservedAddressBoundary.deniesIpv6`）现在都按字节折，但仍是两份入口、两份段表，没收成
+   单源；③`AddressText` 没有自己的直接单测文件，`::a.b.c.d` 的解析靠共享向量与边界用例覆盖；
+   ④平台侧对 `native-navigation-decision.json` 仍零执行者（Q53 第②档），策略面这三条新向量
+   今天只有 RS 跑——那是登记在案的缺口，不是本批新造的；⑤折叠与回环的先后顺序在四段代码里
+   各写一遍（核心／Android 豁免面／Android 拒绝面／Windows 两处），没有一条常驻判据判这个顺序。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：

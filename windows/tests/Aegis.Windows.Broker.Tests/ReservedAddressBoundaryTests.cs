@@ -62,6 +62,11 @@ public sealed class ReservedAddressBoundaryTests : IDisposable
         { "http://[fe80::1]/", true },                          // IPv6 链路本地
         { "http://[ff02::1]/", true },                          // IPv6 组播
         { "http://[::ffff:169.254.169.254]/", true },          // IPv4-mapped 元数据
+        // R9-B69 / 队列 Q64：已废弃的 v4-compatible（前置 96 位全零、不带 ffff）——核心与 Android 都折它
+        { "http://[::169.254.169.254]/", true },                // 元数据端点的第二种拼法
+        { "http://[::2]/", true },                               // 折出来 0.0.0.2（0/8）
+        { "http://[::1.2.3.4]/", false },                        // 反向控制：折出来是公网，仍放行
+        { "http://[::0.0.0.1]/", false },                        // 折叠必须排在回环判定之后
         { "", true },                                           // 取不到 host = 不可判定
 
         // —— 放行：本机与内网（2026-10-04 用户裁决）——
@@ -122,6 +127,7 @@ public sealed class ReservedAddressBoundaryTests : IDisposable
     // ② 导航出口
     [Theory]
     [InlineData("http://169.254.169.254/latest/meta-data/")]
+    [InlineData("http://[::169.254.169.254]/latest/meta-data/")]  // R9-B69：同端点的 v4-compatible 拼法
     [InlineData("http://169.254.1.1/")]
     [InlineData("http://224.0.0.1/")]
     public void EvaluateNavigation_DeniesReservedTargetWithExactCode(string url)
