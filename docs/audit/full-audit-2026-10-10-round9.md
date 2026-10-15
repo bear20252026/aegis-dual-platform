@@ -1165,6 +1165,37 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   检查（多一处就地过滤判红、登记出处消失也判红）；验收判据三条全部达成：每语言一个 helper、
   内联过滤 0 处、过剔那两支要么修掉（`//` 切到行尾、`#` 无差别剔）要么写明（JS 文本面不并进来）。。
 
+- ~~Q63 R9-CI-18~~ **本批已闭**（R9-B64 / §3.64：三条验收判据各自先量再做——①`_code` **并进单源**
+  而非登记成第 6 处：现读 78 份 `.rs` 与 2005 行入库绑定，两种口径的导出面**零差异**，而合成语料
+  实测旧口径会在「跨行块注释、续行不带星号」里凭空造出一个只存在于注释里的自由函数（假红方向），
+  所以量到的不是「等价」而是「单源更严」；②`MARKERS` 加了紧判据（同一次 `compile(` 调用里同一行
+  同时出行注释与块注释形态），判据宽度是把 HEAD 那份塞回 280 份内存态面**三条候选对照着量**出来的
+  ——否掉的是「含双斜杠**或**非捕获组起点」（14 处／11 份里 13 处与注释无关），而「含任一形态」
+  今天与本判据**同样准**（各 1 处），取窄是严格性取舍 ⇒ 两条都记 §六；判不到的三种写法写在
+  `scripts/verify_text_anchor_helpers.py:63-70`；③`_brace_body` 下沉成 `rust_code_reader.brace_body`，
+  两份失败语义各自写明（`None`＝判定面塌缩 vs 折成空串＝这一段没有语句，兜它的是本门禁零导出那条
+  exit 2）。本批另关掉一条 Q63 里没有的绕过路：绑定那半边过去不剔注释，「把一行符号注释掉」等于
+  把它留在面上。原条目 ↓
+  Q63 R9-CI-18 | P2 | `scripts/verify_uniffi_binding_surface.py:43`（`_COMMENT`）＋ `:50-53`
+  （`_code`）↔ `scripts/verify_text_anchor_helpers.py:41-49`（`MARKERS`）＋ `:52-58`（`ALLOWED`）：
+  **R9-B45 那条「实现点集合＝登记集合」的判据漏认一种写法**，于是仓里其实有第 6 份自己写的
+  注释过滤而门禁数不到它。现读理由：`MARKERS` 认的是 `def strip_comments(`、`CodeOnly(`、
+  `startsWith("//"`、`starts_with("//")` 这类**字面量形态**，而 `_code` 把注释形态写进
+  `re.compile(r"^\s*(?://|/\*|\*)")` 这个常量里，一条都不匹配 ⇒ 扫描面（`scripts/` 在
+  `GATE_ROOTS` 内）走过了这个文件却不算实现点。它不只是登记问题，覆盖等级也确实不同：
+  `_code` 只按行首整行剔，跨行块注释不处理，而**以 `/*` 开头的整行**（哪怕同行 `*/` 之后
+  还有真代码）会被连代码一起丢掉——这正是 §3.45 记过的「太窄」与「误吃真代码」两种错法同现。
+  同批量到一处同形但不等价：`_brace_body`（`:56-69`）与 R9-B63 抽出的
+  `scripts/rust_code_reader.py:56-73` 的 `fn_body` 是同一遍大括号配平，只差失败值
+  （`""` 由调用方计成漂移、`None` 按判定面塌缩）。
+  **不在本批动**的理由：把 `_code` 并进 `text_anchors.strip_comments` 会改变那份门禁的
+  判定结果（导出面比对从「行首整行」换成「配平块注释」），要先证明它对入库绑定面是等价或更严；
+  而扩 `MARKERS` 认正则常量这条，风险是把门禁自己 docstring 里引用的被禁形态数成命中
+  （它现在靠**拼接构造**避开，`:41-42`），得连带设计自豁免口径。
+  验收判据（下一轮按此判，不要写成「都换成共用件」）：①`_code` 要么并进单源、要么显式登记进
+  `ALLOWED` 并写明它为什么是第 6 种；②`MARKERS` 对「注释形态写进正则常量」这一类要么能认出
+  要么在门禁 docstring 里写明判不到；③`_brace_body` 与 `fn_body` 的失败语义各自写明。
+
 ### 5.5 DOC（文档 vs 实树）
 
 - ~~Q32 R9-DOC-01~~ **R9-B21 已落地**（§3.20）｜原记录 ↓
@@ -3364,6 +3395,286 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
     等价复检——那属接线面，不在本批射程。
 
 
+### 3.62 R9-B62（2026-10-14，一族三次事故的通则化）：「门禁脚本存在」与「门禁脚本在某个面上被执行」是两件事
+
+1. 这批不是新 bug 的修复，而是**把同一形状收成判据**。三次事故各自的落点：
+   R9-CI-4（`verify_xaml_resources.py` 的唯一调用点在 tag 触发的发布流里，PR/push 面零执行，
+   四条 pytest 用例又全部 monkeypatch ⇒ 常跑面只证明机制、不证明现树）、AEG-006（向量
+   「有形状校验、零真实消费者」）、R9-B60（`gradle-dependency-insight.yml` 那条诊断步骤自
+   R9-B49 起就站在错的 cwd 里、从没跑通，而它是 dispatch-only 面，PR 全绿没人去看它红）。
+   三次的共同点是**判定写好了、执行面没人核**，每次都靠下一轮人肉现读才发现——所以本批
+   把「谁在哪个面上跑它」变成一份登记表加一条常驻判据。
+2. 现读执行面（全部按当前字节，不引用任何前轮结论）：16 份 workflow 里 **7 份有
+   `pull_request` 触发**（agent-redteam / android-quality / ci / contracts / core-rust /
+   native-policy-artifacts / supply-chain）；受管门禁脚本 **35 支**（`scripts` 25 ＋
+   `release` 5 ＋ `contracts` 5），其中 **29 支**从 PR 面的调用点可达、**6 支**不可达。
+   不可达那 6 支全部登记在册（`contracts/ci/gate-execution-face.yaml:21/29/38/46/54/62`）。
+3. 表里两种 `face` 语义不同，别混：`ci` ＝ 有真调用点、但那条流不在 PR 判定面上（发布链与
+   探测面，输入在被判时还不存在）；`manual` ＝ 连 CI 执行点都没有、只有 runbook 里一条人跑的命令，
+   比 `ci` 更弱，所以登记时必须写清为什么不能进 CI。`why` 非空是硬判据：它是这张表唯一的
+   可读信息，也是下一轮判断「该撤还是要动」的依据。
+   其中 `release/verify_checksum_json.py`（`:29`）是本轮**新登记**的一支——它此前从没在任何
+   面上被登记过，而它正是下面第 4 条那两个备选口径会被判成「可达」的那一支。
+4. 三条口径都是**在实测里被逼出来的**，两条备选被数字否掉：
+   - **执行点只取 `run:` 正文**（含沿本地 `uses:` 传递的 composite action / 可复用 workflow）。
+     同文件对照就是证据：`release.yml:188` 是真调用（算），`release.yml:195` 是把命令抄成
+     注记的那一行（不算）。按原文正则判，`verify_artifact_set` 会当场获得一条「CI 执行点」，
+     而 runner 上从没执行过它——这条判据就会假绿。
+   - **闭包只走非测试文件**（`verify_gate_execution_face.py:46` 的 `TEST_PATH`）。备选
+     「允许穿过 `tests/python/`」实测把可达面从 29 抬到 **32**，多出的正是那三支
+     `release/tools/*`——它们只被测试 import。`tests/python` 整目录被一条 pytest 步骤收集，
+     允许穿过它，「可达」就膨胀成「凡被 import 过的都算跑过」，判据恒真；而 R9-CI-4 的事故
+     形状恰好就是「用例全绿＋门禁从没判过现树」。
+   - **文件内引用只取 AST 里会进入代码的字符串与 import 名**（`:65-79`：注释天然不在 AST，
+     docstring 单独剔）。备选「按原文正则数 `.py` 字面量」实测把可达面从 29 抬到 **30**，
+     多出的那支是 `release/verify_checksum_json.py`——它在 PR 面上根本没有调用点，只是被某个
+     可达文件的注记提过一次名字。这条口径的教训本仓早就写过：`scripts/text_anchors.py`
+     的实测条目 2 记着「docstring 里逐字写了被观察的文件名，于是向量门禁立刻报出新消费者」。
+     所以本小节与判据 docstring 里出现的这些文件名**不会**成为调用点，是设计而非漏洞。
+5. 判据本体拆成两份，不是审美而是红线逼的：`scripts/workflow_run_face.py`（86 行，只做提取——
+   `run:` 正文、本地 `uses:` 传递、生效 cwd 复用 `verify_workflow_script_paths.effective_cwd`）
+   ＋ `scripts/verify_gate_execution_face.py`（251 行，只做判定）。第一版单文件 350 行超了
+   「基线外新文件 ≤300 行」红线，而 `check_file_sizes.py` 对这种情形的处方就是拆分
+   （存量超限才走 `--write-baseline`），没有给新文件开豁免。
+6. 判红的六类形状（`violations` `:184-209` ＋ `entry_problems` `:141-178`）：不可达而未登记、
+   同一支登记两次、已可达却留在表里（该撤登记）、`face` 不在 ci/manual 词表内、该带的
+   `workflow`/`evidence` 缺了或不该带的乱填、证据不实（ci 类那条流的正文其实没调用它／manual 类
+   那份文件里根本没有那条命令路径）。判定面塌缩（workflows 目录或登记表缺失、解析失败、
+   受管面或 PR 面入口为空）走 **exit 2**，不写成「读不到东西＝通过」。
+7. 反向证伪：21 条用例（`tests/python/gate_execution_face_test.py`，全部内存注入、不改工作树），
+   其中两条**不靠注入**、直接拿现树做对照——`:144` 钉住「同一份 release.yml 里 188 行算执行点、
+   195 行不算」，`:152` 钉住「docstring 里的文件名不算调用点、代码字符串里的算」。
+   没有这两条，判据可以在「其实是按原文正则算」的形态下全绿。另有两条 exit 2 用例把
+   登记表缺失与 workflows 目录缺失分别摆出来。
+8. 接线时顺手现读改掉两条陈旧路径引用（都是 `release/tools/` 目录化改版留下的平铺旧路径）：
+   `release/verify_release.py:20` 注记里的 `release/tools/verify_manifest.py:18`（文件已搬，
+   且它锚的是仓库根、与本文件锚 `release/` 并不「同一模式」，注记顺带改准）；
+   `release/manifests/signing-policy.yaml:32` 的 `release/tools/verify_provenance.py`。
+   被否的处方：**不做全树「文档里的仓库路径字面量必须存在」判据**。实测全树 629 条路径字面量
+   里 14 条悬空，其中 **11 条是合成夹具**（`agent/a.py`、`scripts/x.py`、
+   `scripts/no_such_gate.py` 这类用例自己造的名字）⇒ 那是误报机器。射程收成本批这一条
+   执行面判据＋这两处定点修正。
+   登记这两行时还自撞一次：新行先写成 `R9-DOC-20`，而 R9-B33 那批早已占用该 ID（Q49
+   `docs/runbooks/device-validation.md` 那条），自家
+   `tests/python/gate_hollowness_test.py::test_ledger_csv_ids_are_unique` 当场判红（重号会让
+   下一轮「按 ID＋位置＋现象去重」把第二条当已登记直接跳过）⇒ 改成 `R9-DOC-21`。
+   「绿本身不是结论」这条纪律对本批同样成立：判据在写台账的这一步就拦了一次。
+9. 验证：`contracts.yml` 的 `contract-source-of-truth` job 现读 39 条 python 门禁步全部退出 0
+   （新那条在第 20 位）；`pytest tests/python` **853 passed / 1 skipped**（本批 +21）；
+   ruff / bandit / 行数红线（566 个受管源文件、基线 86 项、两份新文件 251＋86 行都在红线下）；
+   触发面分类不变（gates 6 / builds 5 / probes 5）；workflow 步骤面 324 → **325**、
+   run 步骤面 147 → **148**，各净增一条，正是本批这条门禁。
+10. 未做的两件事，写清楚以免下一轮当成已做：①执行面口径只认 `python <路径>.py`，pwsh /
+   gradle / cargo 调用点不在射程内——某支门禁若只被 pwsh 脚本调起，它会落进「不可达」一侧、
+   被要求登记并给出证据，退化方向是安全的，但那张表不会自动认出它的真执行面；
+   ②本批判的是「不可达要留痕」，**没有**判「不可达这件事本身该不该存在」——把发布链那几支
+   挪进 PR 面是接线决策（要人定代价），不在本批射程。
+
+
+### 3.63 R9-B63（2026-10-14，把 R9-B61 那条通则问完整个导出面）：上限不只该管「分配」，也该管「存」与「回声」
+
+1. 这批不是又找到一个 bug，而是**把上一条通则的射程问全**。R8-RS-13 挂了三轮、R9-B61
+   终于把它落地成「先判长度再分配」，但那条判据当时只覆盖它自己的两个落点（种子解码、
+   黑名单批次）。本批把同一个问题逐入口问一遍：**宿主直传进来的东西，有没有哪一条既没判长
+   就被存下来，或者被写进给宿主看的文案里**。答案是两处，且两处都不是「分配」那一型。
+2. 现读枚举口径：不按源码注释数导出面，按**入库的绑定产物**数——
+   `core/rust-policy-core/bindings/aegis_policy_core.py:1371-1463`（`FfiBrokerProtocol`
+   的 9 支方法）＋ `:1472`（构造子）＋ `:1868-1969`（5 支自由函数）＝ **14 个入口**，
+   与 `scripts/verify_uniffi_binding_surface.py` 对账的那份符号集合同源。逐入口把宿主可传
+   参数分成四类（已判 / 传递性有界 / 无界但只查表 / 无界且会存或回声）：
+   - `try_parse_external` `canonicalize_external` `extract_host`（`ffi/mod.rs:170/179/193`）
+     三条走同一条 `ffi_url_length_ok`（64 KiB）；
+     `build_fingerprint_pipeline(_with_mode)`（`:219/:260`）走 R9-B61 那条定长种子判定＋
+     `MAX_PIPELINE_DOMAIN_BYTES`；
+   - `create_session`（`ffi/broker.rs:520`）会话键 256（RS-223）已判；
+   - `request_navigation_confirmation`（`:371` 块）委托 `evaluate_navigation`，
+     由被委托方判 ⇒ 传递性覆盖；
+   - `reject_navigation_confirmation`（`:487`）与 `destroy_session`、
+     `advance_document_generation` 返回 `bool`，**没有回声面**；`approve` 的 `nonce`
+     只作查表键、四条 deny 文案全静态；
+   - 缺口两条：**构造期 `policy_version`** 与 **`evaluate_navigation` 的
+     `session_id`/`tab_id`**。
+3. 这两条为什么是真缺口：
+   - `policy_version` 会被 `clone()` 进**每一条签发的授权**（`ffi/broker.rs:233`），
+     账本上限 `MAX_ISSUED_ACTIONS`＝50 000（`:58`）⇒ 一份宿主输入换成 50K 份驻留。
+     C ABI 那条 64 KiB（`c_abi::FFI_INPUT_MAX_BYTES`）是为「指针没有 NUL
+     终止就无界越读」设的**读**口径，不是**存**口径——uniffi 面的 `String` 由宿主直接
+     交进来，而那一面本批之前连「存」这个概念都没有；C ABI 侧本批之前只判空串。
+   - 会话键：账本里的键之所以有界，靠的是「池键 ≤256 ⇒ 长键必然查不到」这条**间接**理由；
+     而「查不到」恰恰是核心层把这条未判长的原串写进 detail 与 explanation 各一遍的那条路径
+     （`core/broker.rs:333-339`）。对照同一份核心层对 nonce 就写得规矩——
+     `consume_nonce`（`:429-442`）既判长（`MAX_NONCE_LENGTH`＝128）、文案里只放长度数字，
+     所以本批**不动 nonce**，把它当已经写对过的先例。
+4. 落地形态：判定收进 `core/rust-policy-core/src/ffi/broker/input_bounds.rs`（92 行）
+   而不是留在三个入口各写一遍。理由不是整洁——`raw_url` 那条上限此前在
+   `evaluate`/`approve`/`consume` 里内联了三份逐字相同的代码，而 R9-B61 的第二判据拦的
+   正是「同一件事写两遍」。三个调用点：`ffi/broker.rs:165`（会话键＋scope＋URL 三段）、
+   `:410` 与 `:595`（只判 URL）。构造期那半同理：两面共用一个
+   `FfiBroker::policy_version_ok`（`input_bounds.rs:39`），C ABI 据此返回 null
+   （`c_abi/mod.rs:251`），uniffi 构造器签名不可失败、据此退回 `DEFAULT_POLICY_VERSION`
+   哨兵（`ffi/broker.rs:718`）——收成一个谓词是因为 `c_abi/mod.rs:270` 走的就是
+   `FfiBroker::new`，一处改两面生效。
+   **口径不变**：拒绝码、判定顺序（会话键 → scope → URL）、空 URL 归
+   `canonicalize_external` 判这三样逐字沿用本批之前形态；换码等于换契约，不在本批射程。
+5. 三条备选处方被否掉（留此防下一轮重提）：
+   ①**给 `contracts/schemas/action.schema.json` 的 `policy_version` 加 `maxLength`**——
+   现读该 schema（乃至全仓契约面）**没有任何一处**用 `maxLength`，加它等于开一个新约束维度，
+   要三端再生成＋漂移判据；而 256 这条口径本来就在 Rust 侧的短标识符族里（会话键、scope、
+   管线 domain、脱敏 host、黑名单单条都是 256）。
+   ②**版本上限取 64 KiB**（跟「读」口径同值最省事）——那样 64 KiB×50K 条账本仍是驻留面；
+   版本标签的真实取值是 `contracts/policy/action-catalog.yaml` 的 `"1.0"`，256 已是 128 倍余量，
+   再长的东西就不是标签而是载荷。
+   ③**deny 文案放整串或放前 N 字节**——只放长度数字。判据口径是一句话：
+   拒绝一个 N 字节的输入，不该回一条不比它短的文案，**放大即缺陷**。
+6. 门禁扩展：`scripts/verify_ffi_input_bounds.py` 227 → **267 行**，判据从 4 条涨到 6 条。
+   新增的判据 5 判「单源＋位置」：谓词存在、两面都引用它（任一面退回自己判 `is_empty` 即红）、
+   且走在 `FfiBroker::new(` 与 `Self {` 之前。判据 6 判回声面：判定体里三个输入只许以
+   `.len()` 形态出现，且字面量里的 `{var}` 内插单独立一条——因为「剔除字面量再找标识符」
+   与「字面量内部的内插」是两种不同的漏法，一条判据盖不住（实测：只判前者的话，
+   `{session_id}` 这种写法全绿）。`broker.rs` 里再出现 `MAX_FFI_URL_BYTES` 也算红。
+   读 Rust 源的四件通用事（键／剔注释／函数体／`usize` 常量）抽进
+   `scripts/rust_code_reader.py`（73 行）——两条新判据都写进原文件就越过 300 行红线，
+   抽取后门禁留在 267 行；与 §3.62 第 5 点同一情形、同一处方（存量超限才走
+   `--write-baseline`，新写文件一律 ≤300）。剔注释口径仍单源
+   `scripts/text_anchors.py`，本模块只把「读文件」这一步接上去，所以
+   `verify_text_anchor_helpers.py` 的实现点集合不变（现读 5 处，实测绿）。
+7. 反向证伪（每条都真红过）：
+   - Rust 侧 5 条用例（`ffi/broker/ffi_navigation_tests/input_bounds.rs` 4 条＋
+     `c_abi/tests/buffer_boundaries.rs` 1 条）：超长版本串既不进载荷也不进账本（白盒读
+     `broker.issued_actions` 确认生效的是哨兵）、卡在 256 上界的版本串逐字保留、
+     超长会话键被拒且**两个账本都没被碰**、卡在 256 的会话键仍可正常导航。
+   - 两次临时变异证明「能红」：①把会话键守卫短路 ⇒ 新用例红在 `session_not_found`
+     且 detail 里出现 `会话 sss…` 原文（这就是回声面的原形态）；②把长度项从谓词里删掉 ⇒
+     两条用例红、而 256 边界那条**仍绿**——证明「有上限」与「上限管住了长」是两条独立判据。
+     两处变异都已还原。
+   - python 侧 11 条注入用例（新文件 `tests/python/ffi_input_bounds_face_test.py`）＋
+     主文件扩到的 12 条，全部内存注入、不改工作树。
+8. 本批自撞三次，都记下来：
+   ①回声断言最初写 `tab = "t"`，而文案里有「tab」这个词 ⇒ `"t" in detail` 恒真，
+   一条断言静默失效。改成只对**超长那一侧**断言，并把这次近失写进用例注释。
+   ②文案长度上界最初写 `text.len() <= 4 * cap` 这种魔数 ⇒ 放大 1024 倍也判不出来，
+   改成 `text.len() < oversized.len()`。
+   ③**最值得留的一条**：三条注入锚点最初是从**带注释的源文件**逐字抄的，而门禁读的是
+   剔注释后那份 ⇒ `replace` 静默失配，用例变成「什么都没注入也通过」的假绿。门禁本身
+   现读是绿的，所以这条只会在用例面暴露——它是 R9-B39（§3.39）与 R9-B44（§3.44）同一课
+   的**第三次**撞上，前两次分别教训的是「判据被自己的注记喂绿」与「用例里的文本锚同病」，
+   这次是「注入锚点与判据读的文本不同一份」。修法不写成纪律而写成代码：
+   `inject()` 把「锚点必须咬得住」做成断言，换不动立刻红。
+9. 拆分与红线实况：`ffi/broker.rs` 935 → **909**（−26，判定搬走），基线同批收窄
+   （`check_file_sizes.py --write-baseline`，`git diff` 只有这一行）；`c_abi/mod.rs` 仍
+   318；`buffer_boundaries.rs` 166 → 183；`ffi_input_bounds_test.py` 152 → 169，
+   本批一度涨到 324 越过红线的**基线外 ≤300**那一条，拆分依据是**判据所属的面**
+   （分配前 vs 存／回声），不是批次号——新文件
+   `tests/python/ffi_input_bounds_face_test.py` 194 行。
+10. 验证：`cargo test --lib` **590 passed**（本批 +5）；`pytest tests/python`
+    **864 passed / 1 skipped**（本批 +11）；`contract-source-of-truth` 现读 37 条 run 步骤、
+    其中含 `python` 的命令行 **39** 条（与 §3.62 同单位）——除 pip 安装步外**逐条实跑**、
+    全部退出 0（含 `verify_contract_compatibility.py` 那条三步合并步里的第三腿）；
+    本批未新增 CI 步，步骤面不变（16 份 workflow／148 条 run 步骤，
+    执行面 35 支受管门禁＝29 可达＋6 登记）；
+    ruff／bandit／py312-compat／行数红线（569 个受管源文件、基线 86 项）／
+    文档计数／workflow 路径与步骤重号全部 OK；
+    门禁自己的 ok 行现读：批次口径三面同值 65536 字节、短标识符口径 **5** 份同值 256 字节
+    （族里从 4 份涨到 5 份正是本批加的那条）。`cargo fmt` 与 `cargo clippy --all-targets` 干净。
+11. 未做与边界（写清以免下一轮当成已做）：①**uniffi 面仍未接线**（ADR-009 出货两端都走
+    C ABI），本批在 uniffi 侧的收益是把两面的口径写成同一份、不再是「C ABI 有、uniffi 没有」，
+    不是给宿主新增一条运行时防线；②`policy_version` 的 schema 约束没加（见第 5 条①），
+    若日后要加属契约决策；③nonce 无界但只查表这一判定是**本批的推理**而非新判据，
+    判据面没有钉住「nonce 文案只放长度」——钉它要先钉住 `MAX_NONCE_LENGTH` 那一族；
+    ④`scripts/verify_uniffi_binding_surface.py:56-69` 的 `_brace_body` 与
+    `rust_code_reader.fn_body` 同形（差别只在失败值 `""` vs `None`），本批**没有**合并它，
+    已作为 Q63 登记在 §5.2.1。
+
+
+### 3.64 R9-B64（2026-10-14，队列 Q63 = R9-CI-18）：数「第二份实现」的门禁，看不见写成正则常量的那一份
+
+1. 本批只动判据面、不动 Rust 出货代码。Q63 的三条验收判据各自先量再选形状，没有按
+   「都换成共用件」这句话直接做——那条处方在②上是错的（见第 4 点）。
+   起因的形状是 R9-B45 那次收敛（散在 14+ 份的注释过滤收成 Python／C#／Kotlin 三份单源）
+   配了一条常驻门禁 `scripts/verify_text_anchor_helpers.py`，判「实现点集合＝登记集合」；
+   但 `MARKERS`（`:51-62`）认的是**字面量调用形态**，而
+   `scripts/verify_uniffi_binding_surface.py:43` 把注释形态写进一个 `re.compile` 常量 ⇒
+   扫描面走过了这个文件却一条都不匹配 ⇒ 仓里有第 6 份自己写的注释过滤而门禁全绿。
+
+2. 判据①（`_code` 并进单源）——先证等价或更严，再动：
+   - 逐文件把两种剔注释文本喂进**同一个**解析器比对导出面三面（方法／构造子／自由函数）：
+     现读 `core/rust-policy-core/src` 全树 **78 份 `.rs`，0 份判定不同**；入库绑定
+     （`core/rust-policy-core/bindings/aegis_policy_core.py`，2005 行，面为
+     9 方法＋1 构造子＋5 自由函数）raw 与剔注释后**符号集合相同**（今天没有符号写在注释里）。
+   - 但「等价」不等于「无所谓」——单源**更严**：合成语料实测旧口径在「跨行块注释、续行不
+     带星号」里会凭空造出一个只存在于注释里的自由函数，门禁于是判「绑定缺方法」，是一个
+     **假红**；而假红最容易被做的处置是改判据而不是改代码，那正是空心化的入口。
+     所以按 Q63 两案取第一案（并进单源、删本地实现），不取「登记进 `ALLOWED` 当第 6 处」。
+   - `exports_from_src(text, path)`（`:64`）与 `surface_from_binding(text, path)`（`:96`）
+     的 `path` 只管一件事：`#` 形态在 Rust 是属性行、在 Python 才是注释。用例
+     `tests/python/uniffi_binding_surface_test.py:113` 钉的就是同一份文本在两种 `path`
+     下的判定差。旧 `_code`  docstring 写的「保留行号便于人肉对照 file:line」在本模块
+     **没有任何消费者**（判定消息只报名字不报行号），随行号一起删掉——记在这里是因为
+     下一轮若要把消息改成带行号，就得先解决「块注释匹配会移动行号」这一条。
+
+3. 判据③（大括号配平）：`_brace_body` 删掉，配平收进 `scripts/rust_code_reader.py:59`
+   的 `brace_body(text, from_index) -> str | None`，`fn_body`（`:83`）改为在它之上找函数头。
+   两份失败语义各自写明（`rust_code_reader.py:63-67`）：`fn_body` 的 `None` 由调用方按
+   「判定面塌缩」处理（`verify_ffi_input_bounds.py` 判红或 exit 2）；绑定侧把 `None` 折成
+   **空串**（`:84`，与空 `impl` 同值），兜它的是本门禁自己那条「零导出不作通过判定」的 exit 2。
+   顺手记一条现读纠正：这两处差的**不只是失败值**，还有入口（一个按字节索引、一个按函数名），
+   所以合并只能是往下沉 primitive，不是「删掉一份留一份」。
+
+4. 判据②（`MARKERS` 认正则常量）——三条候选判据在**同一份面**上对照着量：
+   - 量法是把 HEAD 那份还没合并的 `verify_uniffi_binding_surface.py` 原文塞回内存态判据面
+     （280 份），三条候选各数一边：**A**「一次 `compile` 里含任一注释形态（双斜杠、块起点
+     或其转义写法）」命中 **1 处**，就是那个常量；**B**「含双斜杠或非捕获组起点」命中
+     **14 处／11 份文件**，其中 **13 处与注释过滤无关**；**C**（本批落地的「两种形态同行同现」）
+     同样命中 **1 处**。现树（已合并）三条都是 **0**。
+   - 所以被否的是 **B**（已记 §六），不是「宽版会误报」——**A 与 C 今天一样准**，选 C 的理由
+     是它对「双斜杠单独出现」零敏感：URL／glob 类正则里出现双斜杠是合法产品逻辑，A 迟早给
+     自己造一条假红。这条如实写成**严格性取舍**而不是「误报实测」。
+   - 落地的紧判据在 `scripts/verify_text_anchor_helpers.py:61`；**现树命中 0**——唯一这样写的
+     那处已在本批删掉，所以这是一条绊线（防下一次有人把就地过滤藏进正则），不是修已发生的漏网。
+   - 它**判不到**的三种写法写在同一文件 `:63-70`，不写成全覆盖：①两种形态分在两次
+     `compile` 调用里；②块形态写成字符类而不是转义形态；③同一行里两种形态之间隔着右括号。
+   - 两条自纠记在这里（都是本批自己抓自己的）：①草稿最初写的数是「宽判据 8 命中其中 7 处
+     误报」，那是更早一次会话里**另一条规则**的量，本批按可复现口径重量后对不上，已按上面的
+     A／B／C 三档改写；②第一版量 A 时把块起点写成裸的两字符形态——正格里星号是量词，
+     「斜杠紧跟星号」意为「零个或多个斜杠」，于是它匹配空串、把 280 份面里的 **66 处**
+     `compile` 全算成命中。一条判据的**量具**自己错形时给出的数比没有数更坏：它看起来像证据。
+
+5. 关掉一条绕过路（本批现读新发现，不在 Q63 里）：绑定那半边过去**不剔注释**，符号名出现在
+   `#` 注释里也算在面上 ⇒ 「把一行符号注释掉」是一条**不改 Rust、不跑 uniffi_bindgen、
+   不动任何 CI** 就能让本门禁变绿的做法。现在它判「绑定缺方法」
+   （用例 `tests/python/uniffi_binding_surface_test.py:120`）。现树零差异（第 2 点），所以
+   这是关门不是修漏；「注释里的形态不算证据」这条纪律此前只作用在 Rust 半边，是口径没问完。
+
+6. 反向锚与变异回放（「能红」的口径按本批实测写，不按用例条数写）：
+   - 单源门禁新增 3 条用例（`tests/python/text_anchor_helpers_test.py:122`／`:138`／`:152`）。
+     变异＝把 `MARKERS` 末条撤掉 ⇒ `:122` 与 `:152` 判红、`:138`（只含一种形态不算）仍绿；
+     另有一条不靠注入的现读对照：把 HEAD 那份带 `_code` 的实现塞回内存态面，
+     多出的实现点恰好是 `scripts/verify_uniffi_binding_surface.py` 自己。
+   - 绑定门禁新增 4 条用例（`tests/python/uniffi_binding_surface_test.py:98`／`:105`／
+     `:113`／`:120`）。变异＝以 HEAD 的旧实现回放（**保留新签名**，否则 `TypeError`
+     会冒充「用例咬得住」）⇒ **3 条判红**；`test_trailing_block_comment_is_not_an_export`
+     新旧同绿，它是覆盖面控制（同一行「代码在前、块注释在后」旧口径也不判导出，因为
+     `*/` 挡在 `fn` 前面），不是咬合锚——写清以免下一轮把 4 条当成 4 条证据。
+   - 全程内存态注入，工作树没有「改了再回滚」。
+
+7. 验证面：`pytest tests/python` **871 passed／1 skipped**（本批 +7：绑定门禁 13→17、
+   单源门禁 12→15）；ruff／bandit／py312-compat／行数红线（573 个受管源文件、基线 86 项，
+   本批五个被改文件 186／202／88／234／220 行都在 300 以下、没有一个进基线）／文档计数／
+   队列状态全部退出 0；三支受影响门禁自跑绿（`verify_text_anchor_helpers`＝实现点 5 处、
+   `verify_uniffi_binding_surface`＝导出面一致、`verify_ffi_input_bounds`＝六判据）。
+   未跑 cargo：本批没动 Rust 源，`contracts/ci/gate-execution-face.yaml` 与 CI 步骤面
+   也没有增减（门禁脚本零新增零删除，执行面登记不变）。
+
+8. 未做与边界（写清以免下一轮当成已做）：①`MARKERS` 判不到的三种写法（第 4 点）；
+   ②`strip_comments` 对 Python 的 **docstring 无能为力**（单源自己的 docstring 第 2 条已记
+   这一课），所以「绑定半边剔注释」剔的是 `#` 行与块形态，docstring 里写的符号名**仍算在面上**——
+   要把 docstring 也剔，得先有一条 AST 面的口径，那是另一个批；③本批没动 uniffi 接线
+   （ADR-009 出货两端都走 C ABI），收益全在判据面与那份入库镜像的可信度上；
+   ④`core-rust.yml --generated` 那条权威生成腿仍只在 CI 上跑（本机没有跑 uniffi_bindgen，
+   所以「入库件与工具链自己生成的结果一致」这句本批没有现读证据，与 R9-RS-2 登记时同口径）；
+   ⑤§3.63 第 11 条④留下的那条「本批没有合并 `_brace_body`」由本批第 3 点闭掉。
+
+
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
   处方写的是「Windows 提前捕获定义器、核心与 Android 直接引用 ⇒ 三端不同形 ⇒ 要收口」，
@@ -3390,6 +3701,29 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   顺带留一条方法论：本批第一次「量不到」的结论是假的——那次用的是裸
   `CreateCoreWebView2ControllerAsync`，而 App 走的是控件 + `EnsureCoreWebView2Async`；
   「做不到」之前先怀疑自己走了一条没人走的路。
+
+- **「`MARKERS` 认「注释形态写进正则常量」时，把「含双斜杠**或**非捕获组起点」当判据」不成立**
+  （第九轮 R9-B64 / §3.64 第 4 点）：处方只说「认这一类」，落地时把三条候选塞进**同一份**内存态
+  判据面各量一边（280 份；量法＝把 HEAD 那份还没合并的门禁原文塞回面里再数，这样「该被抓的那处」
+  确实在场）：**A**「一次 `compile` 里含任一注释形态」命中 **1 处**（正是那个被合并的常量），
+  **B**「含双斜杠或非捕获组起点」命中 **14 处／11 份文件**、其中 **13 处与注释过滤无关**
+  （`check_doc_claims.py` 的计数声明、`verify_uniffi_binding_surface.py` 的
+  `_FN_AFTER_ATTR`／`_IMPL_AFTER_ATTR`、`verify_xaml_resources.py`、
+  `gradle_lockfile_shape_test.py`、`gradle_relock_surface_test.py`、`injected_js_parity_test.py`、
+  `windows_python_encoding_test.py`、`workflow_exit_code_test.py` 等），**C**（落地的
+  「两种形态同行同现」）命中 **1 处**；现树（已合并）三条都是 **0**。
+  **被否掉的是 B**：本仓正则大量用非捕获组，把 `(?:` 当证据就得为那 13 处各写一条豁免登记——
+  那正是 R9-B45 要消灭的「登记面比判据面大」。
+  **A 没有被实测到误报**，它今天与 C 一样准；选 C 是**严格性取舍**不是「宽版报错」：A 对
+  「双斜杠单独出现」敏感，而 URL／glob 类正则里出现双斜杠是合法产品逻辑，只是判据面上现在恰好
+  没有这种正则，所以今天量不到它的假红；C 对此零敏感。
+  **下一轮别再按「宽版 8 命中里 7 处误报」上报**——那个数出自更早一次会话里**另一条**规则的口径，
+  本批按可现读复现的口径重量后对不上（两处自纠见 §3.64 第 4 点：换口径重数、以及第一版量具把
+  块起点写成裸两字符形态，正格里星号是量词、于是匹配空串把 280 份面的 **66 处** `compile` 全算成命中）。
+  要重判这条，先跑
+  `tests/python/text_anchor_helpers_test.py::test_a_regex_that_is_not_a_comment_filter_is_not_reported`
+  ——它红了才说明现树里真出现了「只含一种形态但确实是注释过滤」的新写法、A 才值得换上来。
+
 
 - **「Android 也缺 window.open 洪水上限」不成立**（第九轮 2026-10-10，落地 Windows 侧上限时
   同批实测）：`android/app/.../BrowserEngine.kt:65` 显式 `setSupportMultipleWindows(false)`，
@@ -3426,6 +3760,19 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   后判长度、uniffi 面 `update_host_denylist(Vec<String>)` 无条目数上限）第九轮登记时记为
   「仍未修、不另立 ID」——**已于本批落地**，两半的修法、上限为什么不拒真实名单与能红判据
   见 §3.61（该形态此前不进 §五 队列、不进任何门禁，故每轮重新发现一次；教训是同批第 1 条）。
+- **「`consume_navigation` 里宿主可构造的 `FfiAuthorizedAction` 是第三条未判长回声面」不成立**
+  （第九轮 R9-B63 / §3.63 现读枚举时量到，判为不成立）：`ffi/broker.rs:589` 那个
+  `action: FfiAuthorizedAction` 是 uniffi record，字段全部由宿主递交，而 `validate_action_at`
+  （`core/broker.rs:333-339`）确实会把 `action.session_id` 与 `action.policy_version` 整串
+  写进 detail 与 explanation——形状与 R9-B63 刚修的那条一模一样。它不成立的理由是**到达路径**：
+  在走到核心层之前，`:644` 那条 match 要求 `same_binding(&issued, &action)` 成立，而
+  `same_binding`（`ffi/broker.rs:757-768`）逐字段比对**含 `session_id` 与 `policy_version`**
+  的账本内 broker 自己签发的那份 ⇒ 走到回声那一步的这两个串必然与账本等值，账本内的会话键由
+  `create_session`（`:520`）判 256、版本串由本批判 256；不相等则拿到的是 `:657` 的
+  `action_not_issued`，四条文案全静态。`Consumed { session_id }` 那处克隆（`:692`）同受这条
+  等值约束。**推理记在这里，判据没有钉它**：钉「到达回声前必须先过逐字段等值」需要跨函数体的
+  数据流分析，超出本仓按文本判源码的口径面；下一轮若把 `same_binding` 改成子集比较，
+  这条就重新成立——`ffi_navigation_tests` 里有绑定比较清单的用例，改它不会全绿。
 
 ## 七、COVERAGE 汇总（置信边界）
 

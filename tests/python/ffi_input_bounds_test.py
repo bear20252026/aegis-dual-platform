@@ -1,9 +1,14 @@
 # ffi_input_bounds_test.py —— R9-B61（R8-RS-13 落地）的门禁用例。
 #
-# 四条不变量全部以**内存注入**证伪（不改工作树），口径与
+# 不变量全部以**内存注入**证伪（不改工作树），口径与
 # core_unwired_modules_test.py 同：先证现树全绿，再逐条把判据要拦的形态摆上去看它红不红。
 # 这里拦的不是「返回值对不对」而是「判定排在分配之前没有」——两种写法的返回值逐字相同，
 # 所以顺序只能按文本判（剔注释口径单源 scripts/text_anchors.py，R9-B39 / R9-B45）。
+# 同一份判据在「存」与「回声」两面（R9-B63）的用例在 ffi_input_bounds_face_test.py——
+# 本文件按 300 行红线放不下它，拆分的依据是判据所属的面，不是批次号。
+#
+# 注入锚点的逐字形态一律从 `g.load_texts` 的**剔注释**文本里取（门禁读的就是那份）——
+# 从源文件抄一份带注释的锚点，replace 会静默失配，用例就退化成「什么都没注入也通过」。
 from __future__ import annotations
 
 import sys
@@ -15,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import verify_ffi_input_bounds as g
+from text_anchors import strip_comments  # 与门禁同一份剔注释口径（R9-B45）
 
 SEED_GUARD = "    if hex.len() != HEX_SEED_CHARS {\n        return None;\n    }\n"
 DECODE_LINE = "    crate::util::hex_decode(hex)?.as_slice().try_into().ok()\n"
@@ -29,7 +35,7 @@ ENTRY_GUARD = "        && host.len() <= MAX_ENTRY_BYTES\n"
 
 @pytest.fixture(scope="module")
 def texts():
-    return g.load_texts()
+    return g.load_texts(g.TEXTS)
 
 
 def swap(texts: dict[str, str], path: Path, value: str) -> dict[str, str]:
@@ -43,17 +49,26 @@ def test_real_tree_satisfies_every_rule(texts):
 
 
 def test_scan_surface_is_not_collapsed(texts):
-    """正面控制的另一半：四个文件、七个常量、三个函数体都得读得出来——
+    """正面控制的另一半：五个文件、九个常量、七个函数体都得读得出来——
     任何一面空了，上面那条断言就可能是在判空气（R7-TOOL-04 同口径）。"""
     assert len(texts) == len(g.TEXTS)
     for path, name in g.BIG_BATCH_CONSTS:
         assert g.const_value(texts, path, name) is not None, name
-    for path, name in g.HOST_LEN_CONSTS:
+    for path, name in g.IDENT_LEN_CONSTS:
         assert g.const_value(texts, path, name) is not None, name
+    assert g.const_value(texts, g.DENYLIST_FILE, g.ENTRY_CAP_CONST) is not None
     assert g.fn_body(texts[g.key(g.SEED_FILE)], "hex_seed_to_bytes") is not None
+    assert g.fn_body(texts[g.key(g.BROKER_FILE)], "with_action_expiry") is not None
     denylist = texts[g.key(g.DENYLIST_FILE)]
-    assert g.fn_body(denylist, "entry_shape_ok") is not None
-    assert g.fn_body(denylist, "apply") is not None
+    bounds = texts[g.key(g.BOUNDS_FILE)]
+    for name, body in (
+        ("entry_shape_ok", denylist),
+        ("apply", denylist),
+        ("policy_version_ok", bounds),
+        ("navigation_entry_refusal", bounds),
+        ("url_entry_refusal", bounds),
+    ):
+        assert g.fn_body(body, name) is not None, name
 
 
 def test_seed_guard_after_the_decode_is_red(texts):
@@ -74,7 +89,7 @@ def test_a_commented_out_guard_is_not_evidence(texts):
     """注记里写着护栏 ≠ 护栏在位（R9-B39：按文本判源码必须先剔注释）。"""
     seed = texts[g.key(g.SEED_FILE)]
     commented = seed.replace(SEED_GUARD, "// if hex.len() != HEX_SEED_CHARS {\n" "//        return None;\n" "//    }\n")
-    stripped = g.strip_comments(commented, g.key(g.SEED_FILE))
+    stripped = strip_comments(commented, g.key(g.SEED_FILE))
     problems = g.check(swap(texts, g.SEED_FILE, stripped))
     assert any("走在" in p for p in problems), problems
 
@@ -133,13 +148,13 @@ def test_a_single_face_drift_on_the_batch_size_is_red(texts):
     assert g.check(together) == []
 
 
-def test_entry_cap_drift_from_the_host_family_is_red(texts):
+def test_entry_cap_drift_from_the_identifier_family_is_red(texts):
     denylist = texts[g.key(g.DENYLIST_FILE)].replace(
         "pub(crate) const MAX_ENTRY_BYTES: usize = 256;",
         "pub(crate) const MAX_ENTRY_BYTES: usize = 512;",
     )
     problems = g.check(swap(texts, g.DENYLIST_FILE, denylist))
-    assert any("host 长度口径分叉" in p for p in problems), problems
+    assert any("短标识符长度口径分叉" in p for p in problems), problems
 
 
 def test_a_renamed_anchor_reports_collapse_not_pass(texts):
@@ -150,3 +165,5 @@ def test_a_renamed_anchor_reports_collapse_not_pass(texts):
 
 def test_missing_file_is_reported_as_collapse():
     assert any("判定面塌缩" in p for p in g.check({"mod.rs": ""}))
+
+

@@ -5,6 +5,9 @@
 # 测试工程链接。另配两条正面控制：现树必须全绿、且**本测试文件自己不能算实现点**——
 # 用例里出现的被禁形态全部拼接构造，否则「测单源纪律」这件事自己就成了第二份副本（R9-B39
 # 的同一条课：判据文本自己也是被扫的源码）。
+#
+# R9-B64（Q63）在①下加了一类写法面：过滤形态写进**正则常量**而不是行前缀调用。它配了
+# 三个用例——能认出、只含一种形态时不算（URL/glob 正则是无关命中）、写在注释里不算。
 from __future__ import annotations
 
 import sys
@@ -20,6 +23,19 @@ import verify_text_anchor_helpers as g
 # 拼接构造：本文件里不成串出现被禁形态
 _LINE = "/" + "/"
 _HELPER = "without" + "Comments"
+# 正则里写块注释起点是「斜杠 + 反斜杠 + 星号」；用 chr(92) 取反斜杠，本文件才不会被
+# 自己新加的那条 MARKERS 数成实现点（判据 4 的同一条自豁免）
+_BLOCK_FORM = "/" + chr(92) + "*"
+
+
+def one_compile_line(inner: str) -> str:
+    """包成一行 `re.compile("…")`——被测的是行内的注释形态，不是引号风格。"""
+    return f'    _X = re.compile("{inner}")\n'
+
+
+def regex_comment_filter() -> str:
+    """「过滤形态写进正则常量」那一类就地实现的一行（R9-B64 / Q63 新认的形态）。"""
+    return one_compile_line("(?:" + _LINE + "|" + _BLOCK_FORM + ")")
 
 
 def cs_inline_filter(indent: str = "                ") -> str:
@@ -101,6 +117,44 @@ def test_comment_mention_of_the_forbidden_form_is_not_an_implementation(corpus) 
             "var x = " + cs_inline_filter("        ")
     }
     assert g.implementation_sites(in_code) == {"windows/tests/Aegis.Windows.Core.Tests/Notes.cs"}
+
+
+def test_regex_constant_filter_is_reported(corpus) -> None:
+    """R9-B64 / Q63：过滤形态写进**正则常量**而不是行前缀调用，也得数成实现点。
+
+    这条之前是本门禁的空心处——「把就地过滤合并成一份正则常量」正好落在 MARKERS 的
+    写法面之外。合并掉的那份实现现读回来时必须判红（本批实测：把 HEAD 的那份塞回内存态
+    面，多出的实现点恰好是它自己）。
+    """
+    texts, projects = corpus
+    injected = dict(texts)
+    injected["scripts/SneakyRegexGate.py"] = (
+        "import re\n\n" + regex_comment_filter() + "\ndef code_only(text):\n    return [l for l in text.splitlines() if not re.search(_CMT, l)]\n"
+    )
+    problems = g.violations(injected, projects)
+    assert any("SneakyRegexGate.py" in p and "就地注释过滤" in p for p in problems), problems
+
+
+def test_a_regex_that_is_not_a_comment_filter_is_not_reported(corpus) -> None:
+    """正面控制：只含一种形态的正则不算——判据取「同一次调用里两种形态同现」。
+
+    现读对照（把 HEAD 那份未合并的门禁塞回内存态面再数）：「含任一注释形态」与本判据
+    今天**同样准**（各命中那一处、无关正则为 0），取窄版是因为它对「双斜杠单独出现」零
+    敏感——URL／glob 类正则里 `//` 是合法产品逻辑，宽版迟早给自己造假红。把 `(?:` 也算
+    证据的写法实测 14 处命中、13 处无关，已记 §六。这里钉的是窄版不该成立的两侧。
+    """
+    line_only = {"scripts/Url.py": one_compile_line("https:" + _LINE + "[w.-]+")}
+    block_only = {"scripts/Glob.py": one_compile_line("x" + _BLOCK_FORM + "y")}
+    assert g.implementation_sites(line_only) == set(), line_only
+    assert g.implementation_sites(block_only) == set(), block_only
+
+
+def test_regex_form_inside_a_comment_is_not_an_implementation(corpus) -> None:
+    """判据 4 对新形态同样成立：同一行写法出现在注释里不算实现（先剔注释再判）。"""
+    in_code = {"scripts/Notes.py": "import re\n\n" + regex_comment_filter()}
+    assert g.implementation_sites(in_code) == {"scripts/Notes.py"}
+    commented = {"scripts/Notes.py": "import re\n\n# 旧写法：" + regex_comment_filter().strip() + "\n"}
+    assert g.implementation_sites(commented) == set(), commented
 
 
 def test_stale_registration_is_reported(corpus) -> None:

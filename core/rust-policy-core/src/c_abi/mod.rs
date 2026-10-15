@@ -240,15 +240,15 @@ fn with_broker<T>(broker: *mut CAbiBroker, operation: impl FnOnce(&CAbiBroker) -
 /// Option<usize> 装箱裸指针地址（usize Send+Sync——裸指针自身不是）。
 static LIVE_BROKER: Mutex<Option<usize>> = Mutex::new(None);
 
-/// 创建独立的原生策略 Broker；`policy_version` 为空、无效 UTF-8、panic、
-/// 活跃单例已存在或锁中毒时返回 null（RS-140 单例互斥）。
+/// 创建独立的原生策略 Broker；`policy_version` 为空或超长、无效 UTF-8、panic、
+/// 活跃单例已存在或锁中毒时返回 null（RS-140 单例互斥；R9-B63 版本上限两面共用一个谓词）。
 #[unsafe(no_mangle)]
 pub extern "C" fn aegis_policy_core_broker_new(policy_version: *const c_char) -> *mut CAbiBroker {
     catch_unwind(AssertUnwindSafe(|| {
         let Ok(policy_version) = read_utf8(policy_version) else {
             return ptr::null_mut();
         };
-        if policy_version.is_empty() {
+        if !FfiBroker::policy_version_ok(&policy_version) {
             return ptr::null_mut();
         }
         let Ok(mut live) = LIVE_BROKER.lock() else {

@@ -32,7 +32,7 @@
     "core/rust-policy-core/src/command_bar.rs": 634,
     "core/rust-policy-core/src/executor.rs": 550,
     "core/rust-policy-core/src/ext_proxy.rs": 479,
-    "core/rust-policy-core/src/ffi/broker.rs": 935,
+    "core/rust-policy-core/src/ffi/broker.rs": 909,
     "core/rust-policy-core/src/ffi/mod.rs": 809,
     "core/rust-policy-core/src/font_norm.rs": 387,
     "core/rust-policy-core/src/https_only.rs": 396,

@@ -3,6 +3,10 @@
 要钉住的失效形态是台账里那个实测事实：`update_host_denylist`（`607d7a1`，2026-10-04）
 进了 `#[uniffi::export]`，入库 Python 绑定没有它，而**没有任何门禁红**——`test -s` 判
 的是刚生成的 Kotlin 文件非空，「stale bindings」那步只 diff 两个契约生成目录。
+
+R9-B64（Q63）加的是**口径面**的用例：本门禁两侧（Rust 源与入库绑定）现在都先走单源
+`text_anchors.strip_comments` 再判。旧写法只认「行首整行」，于是跨行块注释里的属性
+字面量会被当成真导出；而绑定那半边过去完全不剔注释，「把一行符号注释掉」等于把它留在面上。
 """
 from __future__ import annotations
 
@@ -10,6 +14,7 @@ import pathlib
 
 import pytest
 import verify_uniffi_binding_surface as vubs
+from text_anchors import strip_comments
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -72,6 +77,55 @@ def test_comment_and_doc_lines_are_not_exports():
     all_names = {n for s in methods.values() for n in s} | {n for s in ctors.values() for n in s} | funcs
     for absent in ("mentioned_only_in_comment", "not_exported"):
         assert absent not in all_names
+
+
+# R9-B64：剔注释改引单源 `text_anchors.strip_comments`，覆盖等级从「只认行首整行」变成
+# 「行首整行 + 同行块注释 + 跨行块注释」。下面三条钉的就是新覆盖等级里旧写法够不到的两支。
+BLOCK_RUST = (
+    "/*\n"
+    "#[uniffi::export]\n"
+    "fn phantom_free_fn() {}\n"
+    "*/\n"
+    "let guard = 1; /* #[uniffi::export] */\n"
+    "fn phantom_after_trailing_comment() {}\n"
+    "#[uniffi::export]\n"
+    "impl FfiBroker {\n"
+    "    pub fn real_method(&self) -> bool { true }\n"
+    "}\n"
+)
+
+
+def test_block_comment_lines_are_not_exports():
+    """续行不带星号的跨行块注释：旧口径把它当代码，会**凭空造出一个不存在的导出**。"""
+    methods, _, funcs = vubs.exports_from_src(BLOCK_RUST, "core/rust-policy-core/src/ffi/mod.rs")
+    assert funcs == set(), funcs
+    assert sorted(methods["FfiBroker"]) == ["real_method"]
+
+
+def test_trailing_block_comment_is_not_an_export():
+    """代码在前、块注释在后的同一行里，属性字面量仍不算导出，而前半段代码要留住。"""
+    stripped = strip_comments(BLOCK_RUST, "core/rust-policy-core/src/ffi/mod.rs")
+    assert "let guard = 1;" in stripped
+    _, _, funcs = vubs.exports_from_src(BLOCK_RUST, "core/rust-policy-core/src/ffi/mod.rs")
+    assert "phantom_after_trailing_comment" not in funcs
+
+
+def test_attribute_lines_survive_on_rust_but_not_on_python_paths():
+    """`path` 只管一件事：`#` 形态在 Rust 里是属性行、在 Python 里才是注释。"""
+    rust = "#[uniffi::export]\npub fn try_parse_external(u: String) -> Option<u32> { None }\n"
+    assert vubs.exports_from_src(rust, "mod.rs")[2] == {"try_parse_external"}
+    assert vubs.exports_from_src(rust, "aegis_policy_core.py")[2] == set()
+
+
+def test_commented_out_binding_symbol_is_not_on_the_surface():
+    """绑定那半边也剔注释：过去「把一行符号注释掉」等于把它留在面上——一条不改 Rust、
+    不重生成就能让本门禁变绿的绕过路，现在它判「绑定缺方法」。"""
+    line = "_UniffiLib.uniffi_aegis_policy_core_fn_method_ffibroker_destroy_session.restype = 1"
+    commented = BINDING.replace(line, "# " + line)
+    assert vubs.surface_from_binding(BINDING, "aegis_policy_core.py")[0] != (
+        vubs.surface_from_binding(commented, "aegis_policy_core.py")[0])
+    found = _pair(binding=commented)
+    assert len(found) == 1 and "绑定缺方法" in found[0] and "destroy_session" in found[0], found
 
 
 def test_object_name_case_difference_is_not_drift():

@@ -29,7 +29,7 @@ policy:
   signing_tool: gh-attestation
   # SP-147：签名身份承诺约束（gh attestation 口径）——attestation 的 signer
   # workflow 必须锁定本仓库发布编排流（tags 触发）；部署侧
-  # release/tools/verify_provenance.py 的 --signer-workflow 参数取同一值。
+  # release/tools/verify_provenance/verify_provenance.py 的 --signer-workflow 参数取同一值。
   signer_workflow: "https://github.com/bear20252026/aegis-dual-platform/.github/workflows/release.yml@refs/tags/v*"
   # 规划中（planned，未接线）——启用前不得声称已执行
   planned_signing_tool: cosign

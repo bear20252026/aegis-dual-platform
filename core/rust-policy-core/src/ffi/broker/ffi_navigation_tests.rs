@@ -4,6 +4,7 @@ mod approvals_vectors;
 mod common;
 mod decision_details;
 mod evaluate_navigation;
+mod input_bounds;
 mod ledger_capacity;
 mod session_isolation;
 mod session_ttl;

@@ -7,6 +7,9 @@ use super::*;
 // threat_feed.py），对账记录集中在一个文件里才不会与导航状态机互相稀释。
 pub(crate) mod denylist;
 
+// R9-B63：宿主直传输入的前置规模上限（含 policy_version 的两面共用判定）。
+pub(crate) mod input_bounds;
+
 // ===== UniFFI Object（有状态对象——跨调用保持状态）=====
 
 /// FFI 版 Broker——跨语言导航决策（委托 ContextBroker）。
@@ -76,8 +79,8 @@ const MAX_SESSION_TTL_SECONDS: u64 = 86_400;
 /// 键长度的第一道防线，core 层上限管不到本入口）。
 const MAX_SESSION_KEY_BYTES: usize = 256;
 
-/// RS-253（2026-10-01 审计）：UniFFI 构造器的空 policy_version 默认值——
-/// C ABI（aegis_policy_core_broker_new）对空版本返回 null 拒绝；UniFFI
+/// RS-253（2026-10-01 审计）：UniFFI 构造器的空/超长 policy_version 默认值——
+/// C ABI（aegis_policy_core_broker_new）对空/超长版本返回 null 拒绝；UniFFI
 /// constructor 签名必须返回 Self（不可失败），无法同拒。行为分叉按
 /// 「默认版本」收口：空版本在此替换为显式哨兵（文档化），授权签发与
 /// 校验仍自洽（action.policy_version == broker.policy_version）。
@@ -133,9 +136,9 @@ fn policy_host_of(canonical: &crate::origin::CanonicalExternalUrl) -> &str {
 impl FfiBroker {
     /// 创建 Broker（policy_version 锁定——INV-03 一致性）。
     ///
-    /// RS-253（2026-10-01 审计）：空 policy_version 默认化——C ABI 对空版本
-    /// 返回 null；UniFFI constructor 不可失败，无法同拒。空串在此替换为
-    /// DEFAULT_POLICY_VERSION 哨兵（授权签发/校验自洽），行为分叉以
+    /// RS-253（2026-10-01 审计）+ R9-B63：空**或超长** policy_version 默认化——
+    /// C ABI 对此返回 null；UniFFI constructor 不可失败，无法同拒。这类值在此
+    /// 替换为 DEFAULT_POLICY_VERSION 哨兵（授权签发/校验自洽），行为分叉以
     /// 「默认版本」收口（audit 提供的两选项之一），一致性由
     /// empty_policy_version_defaults_on_uniffi_path 测试锁定。
     #[uniffi::constructor]
@@ -156,27 +159,12 @@ impl FfiBroker {
         raw_url: String,
         scope: String,
     ) -> FfiDecision {
-        // RS-254：scope 长度上限（256——与 RS-223 会话键同口径）
-        if scope.len() > MAX_SCOPE_BYTES {
-            return ffi_deny(
-                "ffi_scope_too_long",
-                &format!("scope 超长（{} 字节，上限 {MAX_SCOPE_BYTES}）", scope.len()),
-                "denied — scope exceeds the 256-byte FFI boundary cap",
-            );
-        }
-        // RS-282（2026-10-02 审计）：raw_url 前置长度上限——URL 三入口
-        //（try_parse/canonicalize/extract_host）有 MAX_FFI_URL_BYTES 防线，
-        // 本入口此前直通 canonicalize_external（origin 侧 8KB 是第二道
-        // 防线，深解析的 O(n) 已发生）。超长先拒，不做任何深解析
-        if raw_url.len() > MAX_FFI_URL_BYTES {
-            return ffi_deny(
-                "ffi_url_too_long",
-                &format!(
-                    "URL 超长（{} 字节，上限 {MAX_FFI_URL_BYTES}）",
-                    raw_url.len()
-                ),
-                "denied — raw URL exceeds the 64KB FFI boundary cap",
-            );
+        // RS-254 / RS-282 / R9-B63：会话键、scope、raw_url 三段前置上限单源见
+        // `ffi::broker::input_bounds`——超长先拒：既不深解析，也不拼含宿主原文的文案
+        if let Some(refusal) =
+            input_bounds::navigation_entry_refusal(&session_id, &tab_id, &scope, &raw_url)
+        {
+            return refusal;
         }
         // URL 解析（fail-closed：解析失败 → Deny）
         let canonical_url = match crate::origin::canonicalize_external(&raw_url) {
@@ -417,17 +405,10 @@ impl FfiBroker {
                 "denied — approval nonce was empty",
             );
         }
-        // RS-282：raw_url 前置长度上限（与 evaluate/consume 同口径；先于
+        // RS-282：raw_url 前置长度上限（与 evaluate/consume 同源单点；先于
         // pending 移除检查——超长输入不得改变任何账本状态）
-        if raw_url.len() > MAX_FFI_URL_BYTES {
-            return ffi_deny(
-                "ffi_url_too_long",
-                &format!(
-                    "URL 超长（{} 字节，上限 {MAX_FFI_URL_BYTES}）",
-                    raw_url.len()
-                ),
-                "denied — raw URL exceeds the 64KB FFI boundary cap",
-            );
+        if let Some(refusal) = input_bounds::url_entry_refusal(&raw_url) {
+            return refusal;
         }
         let authorized = match self.pending_navigation_approvals.lock() {
             Ok(mut pending_approvals) => pending_approvals.remove(&nonce),
@@ -609,17 +590,10 @@ impl FfiBroker {
         raw_url: String,
         scope: String,
     ) -> FfiDecision {
-        // RS-282：raw_url 前置长度上限（三入口同口径；先于账本读取——
+        // RS-282：raw_url 前置长度上限（三入口同源单点；先于账本读取——
         // 超长输入不得触碰消费状态）
-        if raw_url.len() > MAX_FFI_URL_BYTES {
-            return ffi_deny(
-                "ffi_url_too_long",
-                &format!(
-                    "URL 超长（{} 字节，上限 {MAX_FFI_URL_BYTES}）",
-                    raw_url.len()
-                ),
-                "denied — raw URL exceeds the 64KB FFI boundary cap",
-            );
+        if let Some(refusal) = input_bounds::url_entry_refusal(&raw_url) {
+            return refusal;
         }
         let Some(canonical_url) = crate::origin::canonicalize_external(&raw_url) else {
             return deny_url(raw_url);
@@ -739,12 +713,12 @@ impl FfiBroker {
     /// ACTION_EXPIRY_SECONDS 默认）；测试注入极小窗口以真实触达
     /// 「过期 approve/consume 拒绝」分支。uniffi 导出块不支持自由关联函数，
     /// 本构造器只走 Rust 内部（不进跨语言绑定面）。
-    /// 空 policy_version 的默认化（RS-253）在此单点实现。
+    /// 空/超长 policy_version 的默认化（RS-253 / R9-B63）在此单点实现，谓词两面共用。
     fn with_action_expiry(policy_version: String, action_expiry_seconds: u64) -> Self {
-        let policy_version = if policy_version.is_empty() {
-            DEFAULT_POLICY_VERSION.to_string()
-        } else {
+        let policy_version = if Self::policy_version_ok(&policy_version) {
             policy_version
+        } else {
+            DEFAULT_POLICY_VERSION.to_string()
         };
         Self {
             inner: std::sync::Mutex::new(crate::broker::ContextBroker::new(
