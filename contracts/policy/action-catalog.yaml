@@ -14,12 +14,19 @@
 #   `risk`、`audit`、`redteam_fixtures` → `contracts/codegen/analyze_action_catalog.py`；
 #   `read_only`、预算形态 → `contracts/codegen/verify_agent_catalog.py` 与
 #   `agent/tests/redteam_test.py`；
-#   `confirmation` → 只由 `analyze_action_catalog.py` 判「显式声明 + 与 read_only 一致」，
+#   `confirmation` → 只由 `contracts/codegen/analyze_action_catalog.py` 判「显式声明 + 与 read_only 一致」，
 #   **没有任何执行者真的去要确认**（Agent 侧没有确认 UI）。
 #   ⇒ 「confirmation: required」 today 只是**意图声明**，不是行为。将来要真判它，
 #   必须另批补契约向量 + 三端实现，而不是在这里把值改掉。
-# 「运行时不读治理列」这件事由 `tests/python/codegen_and_catalog_test.py` 反向钉住
-# （broker 源码里出现这三列的读取 ⇒ 判红）：改判定面必须是有意识的动作。
+# 「运行时不读治理列」这件事由 `tests/python/catalog_governance_columns_test.py` 反向钉住
+# （`test_broker_never_reads_the_governance_columns`：broker 源码剔注释后出现这些列名 ⇒ 判红），
+# 同文件另有它的正面控制 `test_broker_really_reads_the_judgment_columns`
+# （判定面四列必须真的在 broker 里出现，否则反向锚在判空气）：改判定面必须是有意识的动作。
+# ⚠ 上面两组「谁判哪一列」的指针本身也是判据——注册表在
+# `tests/python/catalog_governance_columns_test.py::COLUMN_JUDGES`：路径不存在、
+# 那份文件里查不到该列名、或本头注不再逐字写出注册表里的路径，都会判红。
+# 加这段是因为 R9-B66 实测：本行原先指向 `tests/python/codegen_and_catalog_test.py`，
+# 而反向锚一直在隔壁文件里——「文档指着单源」这句话本身没人证伪过，指错了也不会有任何东西变红。
 
 default_deny: true
 policy_version: "1.0"
