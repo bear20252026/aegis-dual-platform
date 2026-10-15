@@ -10,6 +10,9 @@ pub(crate) mod denylist;
 // R9-B63：宿主直传输入的前置规模上限（含 policy_version 的两面共用判定）。
 pub(crate) mod input_bounds;
 
+// R9-B66：内容判定的 host 口径（剥端口、方括号形态保留）——判定与它的用例同文件。
+pub(crate) mod policy_host;
+
 // ===== UniFFI Object（有状态对象——跨调用保持状态）=====
 
 /// FFI 版 Broker——跨语言导航决策（委托 ContextBroker）。
@@ -114,23 +117,7 @@ impl IssuedAuthorization {
     }
 }
 
-/// 内容判定用的 host 口径单源（evaluate 与 consume 复判共用，R7-RS-01/R7-RS-02）：
-/// **剥去端口**的纯主机名。
-///
-/// CanonicalExternalUrl.host 依 RS-227 口径保留非默认端口（:8080 形态实证在
-/// host 内），直接拿它比对会同时制造两个绕过：
-///   ① 黑名单条目 `bad.example` 匹配不上 `bad.example:8443`；
-///   ② 高危判定把 `169.254.169.254:8080` 当成非高危（split('.') 末段
-///      "254:8080" 解析失败）而放行。
-/// IPv6 字面量（方括号形态）已在归一层被拒（PY-069/070），此处
-/// split(':') 取首段无歧义。host 永不为空（归一层已拒空）。
-fn policy_host_of(canonical: &crate::origin::CanonicalExternalUrl) -> &str {
-    canonical
-        .host
-        .split(':')
-        .next()
-        .unwrap_or(canonical.host.as_str())
-}
+// 内容判定用的 host 口径见 policy_host::policy_host_of（R9-B66 拆出，用例同文件）。
 
 #[uniffi::export]
 impl FfiBroker {
@@ -184,7 +171,7 @@ impl FfiBroker {
             }
         };
         // 内容判定的 host 口径单源见 policy_host_of（剥端口，与 consume 复判同源）
-        let policy_host = policy_host_of(&canonical_url);
+        let policy_host = policy_host::policy_host_of(&canonical_url);
         // 审计第六轮（2026-10-03/04）：deny-by-content 首次在 FFI 通路生效——
         // 命中威胁黑名单即拒（此前黑名单只活在两端宿主代码里，Android 端整体缺失）。
         // 用 policy host 比对，不用 raw_url：raw 可含 userinfo/query 混淆形态。
@@ -607,7 +594,7 @@ impl FfiBroker {
         // 本机/私网导航会被自己否决，把确认流变成死路径。
         // R7-RS-01（第七轮）：复判与 evaluate **同源**——同一个 policy_host_of
         // 口径、同一个 HostDenylist::host_denied 判定，不写第二份后缀链逻辑。
-        let policy_host = policy_host_of(&canonical_url);
+        let policy_host = policy_host::policy_host_of(&canonical_url);
         if self.deny_hosts.host_denied(policy_host) {
             return FfiDecision::Deny {
                 reason: FfiDenyReason {

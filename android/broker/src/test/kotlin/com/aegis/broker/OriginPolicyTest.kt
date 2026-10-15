@@ -234,12 +234,12 @@ class OriginPolicyTest {
     }
 
     @Test
-    fun `ipv6 bracket hosts are rejected`() {
-        // PY-069/070：java.net.URI 保留方括号（host="[::1]"）——Rust 对
-        // authority 方括号形态一律拒绝，此处对齐
-        assertNull(OriginPolicy.tryParseExternal("http://[::1]/"))
-        assertNull(OriginPolicy.tryParseExternal("http://[::ffff:192.168.1.1]/"))
-        assertNull(OriginPolicy.tryParseExternal("http://[::ffff:127.0.0.1]/"))
+    fun `ipv6 bracket hosts parse by bytes now`() {
+        // R9-B66（队列 Q4 第二半）：PY-069/070 的「方括号一律拒」改成「解析得动才收下」。
+        // 逐条形态（含 `[1.2.3.4]`、`%eth0`、未闭合、段数超限）由 url-origin-* 共享向量钉住
+        assertNotNull(OriginPolicy.tryParseExternal("http://[::1]/"))
+        assertNotNull(OriginPolicy.tryParseExternal("http://[::ffff:192.168.1.1]/"))
+        assertNotNull(OriginPolicy.tryParseExternal("http://[::ffff:127.0.0.1]/"))
     }
 
     @Test

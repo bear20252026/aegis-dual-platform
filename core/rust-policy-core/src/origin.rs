@@ -46,31 +46,73 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
         return None; // 拒绝 data:/blob:/javascript:/file: 等（url-origin-invalid 向量）
     }
     let authority = rest.split(['/', '?', '#']).next()?;
-    if authority.is_empty() || authority.contains('@') || authority.starts_with('[') {
+    if authority.is_empty() || authority.contains('@') {
         return None; // 无 host / userinfo（url-origin-invalid 向量）
     }
-    let (raw_host, port) = if let Some((host, port)) = authority.rsplit_once(':') {
-        if host.is_empty() {
+    // R9-B66（第九轮 Q4 = R9-AD-4 的第二半）：方括号 IPv6 字面量从「语法一律拒」
+    // 改为「**语法收下、按字节分类**」。此前 `[` 开头的 authority 直接 None，
+    // 后果是分类层的 IPv6 面（ULA fc00::/7、链路本地 fe80::/10、组播、IPv4-mapped）
+    // 永远取不到入参——第七轮 B8「本机与内网必须能打开」在 IPv6 上等于没落地
+    // （`http://[::1]:9000/` 打不开），而 `LocalTargetHosts.isExemptIpv6` 那套
+    // ::1/ULA 判定只有单测能走到。
+    // 收下不等于放宽：
+    //   ①内层必须能被 `Ipv6Addr` 解析（std 拒 `%eth0` 作用域号、拒裸 IPv4
+    //     `[1.2.3.4]`、拒段数超限）；
+    //   ②host 只保留**字面小写**（不重排成平台规范形——三端的 IPv6 打印格式
+    //     互不相同，重排会让 origin 跨端不等，向量门禁判不住）；分类走字节，
+    //     所以 `::ffff:7f00:1` 与 `::ffff:127.0.0.1` 都会被认成同一个回环；
+    //   ③端口只允许 `]:<port>` 形态，其余紧跟 `]` 的字符一律拒。
+    let bracketed_host = if let Some(after_open) = authority.strip_prefix('[') {
+        let (inner, tail) = after_open.split_once(']')?;
+        if inner.is_empty() || inner.parse::<std::net::Ipv6Addr>().is_err() {
             return None;
         }
-        // RS-011（审计 2026-09-24）：host 段拒内嵌冒号——此前 rsplit_once
-        // 取最后一段当端口，"host:8080:1234" 以 host="host:8080" 被接受
-        //（合法端口掩盖非法 authority）
-        if host.contains(':') {
-            return None;
-        }
-        // 非法端口拒绝（contracts/vectors/url-origin-invalid——https://host:99999
-        // ——u16 范围校验——WHATWG 同语义——P0-01）
-        let Ok(port_num) = port.parse::<u16>() else {
-            return None;
-        };
-        if port_num == 0 {
-            return None;
-        }
-        (host, Some(port_num))
+        Some((format!("[{inner}]"), tail))
     } else {
-        (authority, None)
+        None
     };
+    // host 有两种来源：方括号形态要造 `[<inner>]` 这个新串，其余沿用切片——
+    // 用 Cow 而不是两边都 to_string()，是为了不在**每次 URL 解析**的热路径上多一次分配
+    // （下一行的 to_ascii_lowercase 本来就有一次）。
+    use std::borrow::Cow;
+    let (raw_host, port): (Cow<'_, str>, Option<u16>) =
+        if let Some((host_text, tail)) = bracketed_host {
+            if tail.is_empty() {
+                (Cow::Owned(host_text), None)
+            } else {
+                let Some(port_text) = tail.strip_prefix(':') else {
+                    return None; // `]x` 这类尾缀不是合法 authority
+                };
+                let Ok(port_num) = port_text.parse::<u16>() else {
+                    return None;
+                };
+                if port_num == 0 {
+                    return None; // 端口 0（与非方括号分支同口径）
+                }
+                (Cow::Owned(host_text), Some(port_num))
+            }
+        } else if let Some((host, port)) = authority.rsplit_once(':') {
+            if host.is_empty() {
+                return None;
+            }
+            // RS-011（审计 2026-09-24）：host 段拒内嵌冒号——此前 rsplit_once
+            // 取最后一段当端口，"host:8080:1234" 以 host="host:8080" 被接受
+            //（合法端口掩盖非法 authority）
+            if host.contains(':') {
+                return None;
+            }
+            // 非法端口拒绝（contracts/vectors/url-origin-invalid——https://host:99999
+            // ——u16 范围校验——WHATWG 同语义——P0-01）
+            let Ok(port_num) = port.parse::<u16>() else {
+                return None;
+            };
+            if port_num == 0 {
+                return None;
+            }
+            (Cow::Borrowed(host), Some(port_num))
+        } else {
+            (Cow::Borrowed(authority), None)
+        };
     let host = raw_host.to_ascii_lowercase();
     if host.is_empty() {
         return None;
@@ -89,12 +131,22 @@ pub fn canonicalize_external(raw: &str) -> Option<CanonicalExternalUrl> {
     if host.ends_with('.') {
         return None; // 尾点 host（含 "." 单点形态）拒绝
     }
+    // R9-B66：字符白名单只约束**域名与 IPv4**形态。IPv6 字面量的 host 是
+    // `format!("[{inner}]")` 造出来的——inner 已经过 `Ipv6Addr` 解析，`]` 之后
+    // 只允许 `:port`（上面显式校验），所以它不可能带上这些闸门想防的东西：
+    // 尾点、前导点、`..`、下划线/控制符都构造不出来，而 PY-071/072、RS-228、
+    // RS-238 那三条 IPv4 编码闸门要求「段全数字」或「段以 0x 开头」，
+    // 方括号形态一律不满足（`[::ffff:1.2.3.4]` 的段里含 `[`/`ffff:1`）。
+    // 因此这里只跳过字符白名单一条，其余闸门继续执行（它们对 bracketed 是空转，
+    // 不是漏判；留着是为了「有人以后放宽 inner 校验」时仍然兜得住）。
+    let host_is_ipv6_literal = host.starts_with('[');
     if host.is_empty()
         || host.starts_with('.')
         || host.contains("..")
-        || !host
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+        || !(host_is_ipv6_literal
+            || host
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'))
     {
         return None;
     }

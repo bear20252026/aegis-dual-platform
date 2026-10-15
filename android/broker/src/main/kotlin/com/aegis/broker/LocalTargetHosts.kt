@@ -40,27 +40,19 @@ package com.aegis.broker
  *   导航层才拒：**层序不同、终态相同**，此差异归 R8-CS-SEC-17（共享向量的
  *   `windows_url` 覆盖 + Windows 消费端两条断言把「两条都成立」钉住）。
  *
- * • **方括号 IPv6 字面量在导航层就到不了本函数**（R9-AD-4，第九轮 2026-10-10）：
- *   `OriginPolicy` 对 authority 里的 `[` 一律拒（AD-299，与 Rust `origin/host_grammar`
- *   及 contracts 的 url-origin-invalid 向量同口径——java.net.URI 保留括号而 Chromium 剥，
- *   双重解释面宁可不放行）。所以本函数对 `::1`/ULA 的豁免**实际覆盖的是已剥括号的 host
- *   形态**：HTTPS 升级豁免层（`hostOf` 之后）与下载层（`ReservedAddressBoundary`）。
- *   用户可见后果：地址栏输 `http://[::1]:9000/` 在 Android 打不开，Windows 却能——
- *   这条差异要消掉得解冻核心 host grammar 并增补向量（三端解析器语义变更），已报待定稿。
- *   由 `LocalTargetHostsTest.bracketedIpv6IsRejectedForNavigation_ButExemptOnceHostIsStripped`
- *   钉住三侧结果，**不得**反向收紧段集来「对齐」。
+ * • **方括号 IPv6 字面量自 R9-B66（队列 Q4 第二半）起在导航层被收下**，两端差异随之消掉：
+ *   以前 `OriginPolicy` 对 authority 里的 `[` 一律拒（R9-AD-4 记录的那条「地址栏输
+ *   `http://[::1]:9000/` 在 Android 打不开、Windows 能」），现在三端解析器同口径——
+ *   语法收下、由本函数与核心 `security_policy/ipv6.rs` 按字节分类。本函数的入参契约
+ *   不变：调用面一律先过 [hostOf]（已剥括号），导航边界要的是「这串括号里的地址合法吗」，
+ *   它直接调 [AddressText.ipv6ToBytes] 而不是本函数。判据只有一份：**先认回环 `::1`，再折叠内嵌
+ *   IPv4，最后看段集**——顺序不可换，v4-compatible 折叠会把 `::1` 读成 `0.0.0.1`
+ *   而撞上 0/8。由 `LocalTargetHostsTest.ipv6BracketedLiteralIsParsedAndClassifiedByBytes`
+ *   钉住，**不得**反向收紧段集来「对齐」（裁决是「本机与内网必须能打开」）。
  */
 object LocalTargetHosts {
     private const val SCHEME_SEPARATOR = "://"
     private val LOCAL_SUFFIXES = listOf(".localhost", ".local", ".internal")
-
-    /** ULA 首字节前缀（fc00::/7 的 0xfc/0xfd）。 */
-    private val ULA_PREFIXES = setOf("fc", "fd")
-
-    /** 点分十进制的段数与单段上限。 */
-    private const val IPV4_OCTETS = 4
-    private const val OCTET_MAX_DIGITS = 3
-    private const val OCTET_MAX = 255
 
     /**
      * 放行段表（第七轮 B8 裁决）。命名而不是就地写数字：这张表就是本函数的语义，
@@ -134,8 +126,8 @@ object LocalTargetHosts {
      * （第八轮三轮红灯里第三轮就是这个），而那样只是把格式争论搬进签名行。
      */
     private fun isExemptIpv4(host: String): Boolean {
-        val values = host.split('.').map { text -> octetValueOrMinusOne(text) }
-        if (values.size != IPV4_OCTETS || values.any { it < 0 }) {
+        val values = host.split('.').map { text -> AddressText.octetValueOrMinusOne(text) }
+        if (values.size != AddressText.IPV4_OCTETS || values.any { it < 0 }) {
             return false
         }
         return when (values[0]) {
@@ -147,24 +139,62 @@ object LocalTargetHosts {
         }
     }
 
-    /** 单个点分段的合法形态：1-3 位纯数字、无前导零（`0` 本身除外）。 */
-    private fun isDecimalOctet(text: String): Boolean =
-        text.length in 1..OCTET_MAX_DIGITS && text.all { it.isDigit() } && (text == "0" || !text.startsWith("0"))
-
-    /** 合法段 → 0..255，否则 -1。前导零八进制（`0177`）走 -1：见对象注释。 */
-    private fun octetValueOrMinusOne(text: String): Int {
-        if (!isDecimalOctet(text)) {
-            return -1
+    /**
+     * IPv6 的放行面（R9-B66 / 队列 Q4 第二半）。**先转字节再判**——
+     * 与核心 `security_policy/ipv6.rs`、Windows `UrlSafety.IsPublicIp` 同一个理由：
+     * 同一地址有 N 种合法拼法（`::ffff:127.0.0.1`、`::ffff:7f00:1`、
+     * `0:0:0:0:0:ffff:7f00:1`），按文本前缀判必然出现「一种拼法豁免、另一种不豁免」，
+     * 而那在三端共用向量的契约下就是红灯；折叠成 16 字节后只有一份语义。
+     * 解析不了（含 zone-id、方括号残留、段数超限）→ false，即不豁免 = 维持升 https，
+     * 方向是安全侧。文本解析本身在 [AddressText]（本文件只留分类）。
+     */
+    private fun isExemptIpv6(body: String): Boolean =
+        when (val bytes = AddressText.ipv6ToBytes(body)) {
+            null -> false
+            else -> isLoopbackV6(bytes) || (embeddedIpv4(bytes)?.let { isExemptIpv4(it) } ?: isUla(bytes))
         }
-        val value = text.toInt()
-        return if (value in 0..OCTET_MAX) value else -1
-    }
 
-    private fun isExemptIpv6(host: String): Boolean = host == "::1" || isUla(host.substringBefore(':'))
+    /** `::1`——必须用 `contentEquals`：数组的 `==` 比的是引用，`::1` 永远不相等。 */
+    private fun isLoopbackV6(bytes: ByteArray): Boolean = bytes.contentEquals(LOOPBACK_V6_BYTES)
 
     /**
-     * ULA fc00::/7——首字节 0xfc/0xfd，裁决放行的内网单播；
-     * fe80 链路本地、ff02 组播都不在面内。
+     * 内嵌 IPv4（v4-mapped `::ffff:x` 与已废弃的 v4-compatible `::x`）折成点分文本，
+     * 两种形态都不是时返回 null。
+     *
+     * 折叠必须排在回环判定**之后**（`isExemptIpv6` 的条目顺序就是这条口径）：`::1`
+     * 折出来是 `0.0.0.1`，而 0/8 不在放行段表里——B8 裁决要求放行的本机回环会被
+     * 自己人拦掉。核心 `security_policy/ipv6.rs` 与 Windows `UrlSafety.IsPublicIp`
+     * 是同一条顺序，改这里必须同时改那两处。
      */
-    private fun isUla(firstGroup: String): Boolean = firstGroup.take(2) in ULA_PREFIXES
+    private fun embeddedIpv4(bytes: ByteArray): String? {
+        val headIsZero = bytes.take(IPV6_IPV4_PREFIX).all { it == 0.toByte() }
+        val tailStart = bytes.size - AddressText.IPV4_OCTETS
+        val isMapped = bytes[IPV6_MAPPED_A] == MAPPED_MARKER && bytes[IPV6_MAPPED_B] == MAPPED_MARKER
+        val isCompatible = (IPV6_IPV4_PREFIX until tailStart).all { bytes[it] == 0.toByte() }
+        return if (headIsZero && (isMapped || isCompatible)) {
+            bytes.takeLast(AddressText.IPV4_OCTETS).joinToString(".") { (it.toInt() and OCTET_MASK).toString() }
+        } else {
+            null
+        }
+    }
+
+    private fun isUla(bytes: ByteArray): Boolean {
+        val firstOctet = bytes[FIRST_OCTET].toInt() and ULA_HIGH_BITS_MASK
+        return firstOctet == ULA_HIGH_BITS
+    }
+
+    /**
+     * ULA fc00::/7 的首字节掩码判据；fe80 链路本地与 ff00::/8 组播都不在放行面内。
+     */
+    private const val ULA_HIGH_BITS_MASK = 0xfe
+    private const val ULA_HIGH_BITS = 0xfc
+    private const val IPV6_IPV4_PREFIX = 10
+    private const val IPV6_MAPPED_A = 10
+    private const val IPV6_MAPPED_B = 11
+    private const val MAPPED_MARKER = 0xff.toByte()
+    private const val OCTET_MASK = 0xff
+    private const val FIRST_OCTET = 0
+
+    private val LOOPBACK_V6_BYTES =
+        ByteArray(AddressText.IPV6_BYTES).also { it[AddressText.IPV6_BYTES - 1] = 1.toByte() }
 }

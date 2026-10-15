@@ -224,12 +224,11 @@ impl SecurityPolicy {
     ///（末段 "254:8080" parse 失败）——不变量从「调用方纪律」换成「函数自证」；私网带端口仍判
     /// 非高危（第七轮 B8 裁决「本机与内网必须能打开」不可回退），用例见 scheme_and_host_predicates.rs。
     ///
-    /// **IPv6 不在本函数覆盖面内**（如实记边界，第七轮 R7-RS-05）：入参是归一后的 host，而
-    /// `origin::try_parse_external` 的字符集闸门只允许 `[A-Za-z0-9.-]`——`:`/`[` 形态的 IPv6 字面量
-    /// 在归一层即被拒（RS-177/PY-069/070，见 origin/tests/host_grammar.rs 的
-    /// bracketed_ipv6_authority_rejected）。故 C# 孪生（`UrlSafety.IsPublicIp`）按 IPAddress 字节判的
-    /// IPv6 ULA `fc00::/7`、组播 `ff00::/8`、site-local `fec0::/10` 在本函数**取不到入参**，不是"漏判"而是"无从判定"；要覆盖须先动归一层的 IPv6 支持，属另一批次。
+    /// IPv6 自 R9-B66 起在覆盖面内（判定在 `security_policy/ipv6.rs`），段集由向量钉住。
     pub fn is_high_risk_host(host: &str) -> bool {
+        if let Some(rest) = host.strip_prefix('[') {
+            return ipv6::is_high_risk(rest.split(']').next().unwrap_or(""));
+        }
         let host = host.split(':').next().unwrap_or(host);
         let mut octets = [0u8; 4];
         let mut count = 0usize;
@@ -296,5 +295,6 @@ impl SecurityPolicy {
 
 use crate::util::hex_digit;
 
+mod ipv6;
 #[cfg(test)]
 mod tests;

@@ -44,7 +44,10 @@ MIN_FILES = {'schemas': 7, 'vectors': 21}
 # R8-PY-02（第八轮审计 2026-10-04）：MIN_FILES 只数**文件**，把任一 vectors 数组
 # 清空（文件在场）即可让全部循环零次执行、门禁仍绿——「删文件」被堵住了，「改内容
 # 清空」这条路还通。现同时钉全树条目总数下界与逐文件非空。
-MIN_VECTOR_ENTRIES = 222
+# R9-B66（2026-10-15，IPv6 解冻）：222 → 246，实测增量 url-origin-valid +8、
+# url-origin-invalid +6、native-navigation-decision +10（另有 3 条 IPv6 形态从
+# invalid 移进 valid，对总数净零）。
+MIN_VECTOR_ENTRIES = 246
 
 # R9-B59（§四 第 11 项 ② 与 Q21 是同一次定稿）：两份原生 C-ABI 向量的**信封 + 分区**词表。
 #

@@ -77,11 +77,36 @@ public static class OriginPolicy
         // CS-418（2026-10-02 审计）：端口 0/越界拒绝（PY-075 向量——见 MaxPort 注）
         if (u.Port is < 1 or > MaxPort)
             return false;
-        if (!IsValidHost(u.Host))
+        var host = u.Host;
+        if (authority.StartsWith('[') && !TryRawBracketedIpv6(authority, out host))
+            return false;
+        if (!IsValidHost(host))
             return false;
         uri = u;
         return true;
     }
+
+    /// <summary>R9-B66：方括号 IPv6 必须从 **raw authority** 取，不能信 <c>Uri.Host</c>——
+    /// .NET 会静默吃掉作用域号（"[fe80::1%eth0]" → Host "[fe80::1]"）与 <c>]</c> 后的
+    /// 垃圾（"[::1]x" → "[::1]"），两条 deny 向量因此在 C# 端放行（dotnet test 实证）。
+    /// 产出的 <paramref name="host"/> 含方括号、不含端口，交给 <see cref="IsValidHost"/>
+    /// 按字节解析；形态不合返回 false（与 Rust origin.rs 的 bracketed_host 分支同口径）。</summary>
+    private static bool TryRawBracketedIpv6(string authority, out string host)
+    {
+        host = string.Empty;
+        var close = authority.IndexOf(']');
+        if (close < 0)
+            return false;  // 未闭合（"[::1/bad"）
+        var tail = authority[(close + 1)..];
+        if (tail.Length > 0 && !IsPortSuffix(tail))
+            return false;  // "]" 之后只有端口这一种形态
+        host = authority[..(close + 1)];
+        return true;
+    }
+
+    /// <summary>"]" 之后只允许 ":" + 纯数字；空串由调用方当"没有尾缀"处理。</summary>
+    private static bool IsPortSuffix(string tail) =>
+        tail.Length > 1 && tail[0] == ':' && tail[1..].All(char.IsAsciiDigit);
 
     /// <summary>host 白名单式校验：剥 IPv6 方括号后按标签校验——字母/数字/
     /// 连字符/点（或 IPv6 字面量）；拒绝尾点、空白折叠、Unicode 控制符与
@@ -90,20 +115,30 @@ public static class OriginPolicy
     {
         if (host.Length == 0 || host.Length > MaxHostLength)
             return false;
-        // .NET Uri.Host 对 IPv6 字面量去方括号；DnsSafeHost 保留——按原串判断
-        var isIpv6 = host.Contains(':', StringComparison.Ordinal);
-        if (isIpv6)
+        // R9-B66（队列 Q4 第二半）：IPv6 字面量从「按字符白名单近似判」改成「按字节解析」。
+        // 旧分支只放十六进制/冒号/点，于是 .NET Uri.Host 保留的方括号 `[::1]` 里的 `[`
+        // 自己把整条判拒——共享向量里三条 IPv6 的 deny 就是这么来的，而 B8 裁决
+        // 「本机与内网必须能打开」在 IPv6 上因此从未生效（`http://[::1]:9000/` 打不开）。
+        // 现在语法收下、判定交给分类器（UrlSafety.IsPublicIp 早已按字节判 ULA/组播/
+        // IPv4-mapped，见 :166-185——**这次不用改它**，它一直在等一个进得来的入参）。
+        if (host.Length > 2 && host[0] == '[' && host[^1] == ']')
         {
-            // 仅允许十六进制/冒号/点（v4-mapped 尾段）
-            foreach (var ch in host)
-            {
-                var isHex = char.IsAsciiDigit(ch)
-                    || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
-                if (!(isHex || ch == ':' || ch == '.'))
-                    return false;
-            }
-            return true;
+            var inner = host[1..^1];
+            // 作用域号（fe80::1%eth0）拒：它对解析器是另一个接口标识，跨机可移植性为零
+            if (inner.Contains('%', StringComparison.Ordinal))
+                return false;
+            // IPAddress.TryParse 对 "1.2.3.4" 给 InterNetwork——方括号里出现裸 IPv4
+            // 是双重解释面（Rust/Kotlin 同口径拒），所以必须显式要求 v6 族
+            return System.Net.IPAddress.TryParse(inner, out var parsed)
+                && parsed.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
         }
+        // 走到这里要么带括号（上面已收下）、要么裸 IPv6（`http://2001:db8::1/`）——
+        // 后者继续拒：authority 的分隔符歧义（RS-011 同源），三端一致。
+        // 实测更正（R9-B66，dotnet test 实证）：.NET 10 的 Uri.Host **保留**方括号
+        //（此前注释写「去方括号，要用 DnsSafeHost」是失实声明），所以上面的括号
+        // 分支确实进得来；但它在括号内会静默丢 zone-id，故 raw authority 那关不可省。
+        if (host.Contains(':', StringComparison.Ordinal))
+            return false;
         if (host.EndsWith(".", StringComparison.Ordinal))
             return false;  // 尾点 host（"example.com."）——规范化歧义面
         foreach (var ch in host)

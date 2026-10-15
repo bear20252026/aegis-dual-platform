@@ -788,11 +788,19 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   「完成后复判 + 删文件」还是「改用 `CoreWebView2` 请求侧自行解析跳转」。登记不顺手修：
   前者要先做一次 SDK 语义实测（没有它就只能猜，而猜错的形态是「以为拦住了」），
   后者要重做下载发起链（与 ADR-009 的制品形态牵连）。
-- Q4 R9-AD-4 | P2 | `OriginPolicy.kt:104-110` ↔ `LocalTargetHosts.kt:153-159`：方括号
-  IPv6 authority 在导航层一律拒 ⇒ `::1`/ULA 的「放行」永不被判定，而
-  `LocalTargetHostsTest.kt:26-28`、`ReservedAddressBoundaryTest.kt:62,68` 用
-  `http://[::1]:9000/` 当放行样本，读起来像「IPv6 本机可打开」。建议如实写进 KDoc 与
-  测试注释（**不得反向收紧段集**，与 B8 相反）。——**部分闭环（R9-B6 / §3.5）**：口径改真那半边已逐行回读并按该处方落地，判定零改动；**仍开着的那半边**是「打通 IPv6 导航面」（要解冻核心 host grammar 并增补向量）⇒ §四 待定稿。
+- ~~Q4 R9-AD-4~~ **本批已闭**（R9-B66 / §3.66）| P2 | `OriginPolicy.kt:104-110` ↔
+  `LocalTargetHosts.kt:153-159`：方括号 IPv6 authority 在导航层一律拒 ⇒ `::1`/ULA 的
+  「放行」永不被判定，而 `LocalTargetHostsTest.kt:26-28`、
+  `ReservedAddressBoundaryTest.kt:62,68` 用 `http://[::1]:9000/` 当放行样本，读起来像
+  「IPv6 本机可打开」。登记时的处方是「如实写进 KDoc 与测试注释（**不得反向收紧段集**，
+  与 B8 相反）」⇒ 那半边由 R9-B6 / §3.5 落地（口径改真、判定零改动）；本批做的是
+  **仍开着的那半边**：三端 host grammar 一起解冻 + 向量扩容 + 按字节分类。
+  落地结果与实测出的四处缺陷逐条见 §3.66（含两处「注释里断言了但实测不成立」的现读纠正，
+  以及 §3.66 第 5 点对本条在途注记的更正——注记曾写「保留地址面没有活的绕过」，
+  向量测试把它打红了）。同批把 `cargo test` 从注记里的 590 推进到 593、
+  `MIN_VECTOR_ENTRIES` 222→246、`ffi/broker.rs` 909→896 并收窄行数基线。
+  **不在本批的两件事**（6to4/Teredo 不解码、`IsPublicIp` 的 `bytes[12] != 0` 折叠条件）
+  分别写在 §3.66 第 6 点与下面的 Q64。
 - ~~Q5 R9-AD-5~~ **本批已闭**（R9-B40 / §3.40：新增 `android/broker/src/main/kotlin/com/aegis/broker/NonceLedger.kt`
   把账本键与回收判据收成同一前缀约定（`nonceLedgerKey` 幂等折算 + `belongsToNonceLedger`），
   两条消费点都经键折算，回收点改用它；新常驻 `ConsumedNonceLedgerTest.kt` 5 例含一条
@@ -1203,6 +1211,21 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   验收判据（下一轮按此判，不要写成「都换成共用件」）：①`_code` 要么并进单源、要么显式登记进
   `ALLOWED` 并写明它为什么是第 6 种；②`MARKERS` 对「注释形态写进正则常量」这一类要么能认出
   要么在门禁 docstring 里写明判不到；③`_brace_body` 与 `fn_body` 的失败语义各自写明。
+
+- Q64 R9-RS-12 | P2 | `windows/src/Aegis.Windows.App/Core/UrlSafety.cs:219` ↔
+  `core/rust-policy-core/src/security_policy/ipv6.rs:30-41` ↔
+  `android/broker/src/main/kotlin/com/aegis/broker/LocalTargetHosts.kt:167-181`（`embeddedIpv4`）：
+  v4-compatible（`::a.b.c.d`，RFC 4291 §2.5.5.1 已废弃）折回 IPv4 的**触发条件三端不同**——
+  核心用 `Ipv6Addr::to_ipv4()`（前 96 位为零就折），Android 同（前 10 字节零 + 第 11-12 字节
+  也零），而 Windows 那条多带 `bytes[12] != 0` ⇒ `::2`（折出来是 `0.0.0.2`）在 Windows
+  判「公网」、在核心与 Android 折回 `0/8`。可利用面：同一地址在两端得到不同处置
+  （补 http/升级豁免一侧与判高危一侧分叉），属 Q4 这批刻意**没有**顺手收的第二段——
+  现树没有任何向量覆盖它，所以今天不红；改的是 Windows 判定面的取值，且要先给
+  `::2` / `::0.0.0.2` / `::ffff:0.0.0.2` 这类形态补三端各自消费的向量。
+  **待回读**（验收判据）：①先量「删掉 `bytes[12] != 0`」对 Windows 现树用例的影响
+  （`AuditRegressionTests.cs:22-37` 那批 mapped 样本必须仍绿）；②向量补齐后再改判据，
+  顺序不能倒——理由见 §3.66 第 1 点；③同时把 6to4/Teredo **不解码**这条口径写进三端
+  注释（§3.66 第 6 点已有，别在下一轮被当成漏判补上）。
 
 ### 5.5 DOC（文档 vs 实树）
 
@@ -3718,6 +3741,69 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 5. Q53 的登记文本按上面的现读改真（保留「登记时曾这么写」的原话），
    CSV `R9-SH-13` 同批回写。**这是第九轮第一次把「文档里的指针」本身纳入判据**，
    而它抓到的第一个缺陷就是它自己的出处那一行。
+
+### 3.66 R9-B66（2026-10-15，队列 Q4 的后半边）：把 IPv6 字面量放进导航语法，真正的成本在「谁剥端口」和「按谁的字节判」
+
+1. 这批做的不是「放开一个字符」，而是把一条**已被三端向量钉住**的语法换掉，所以四张
+   面必须同批改：核心 `origin.rs` 的 authority 语法、`is_high_risk_host` 的分类、
+   Kotlin `OriginPolicy` + `LocalTargetHosts`、C# `OriginPolicy`，以及
+   `contracts/vectors/url-origin-*` 与 `native-navigation-decision.json`。
+   只改一端的实测形态就是 PR #204 前几轮的那盏红灯：`url_origin_vectors_match_contracts`
+   在三端共用向量下必然红——这正是它被登记成「跨端契约变更」的原因，也是不拆半并的理由。
+2. **四个「写下来时以为改了、跑过才知道没生效」的缺陷，全部由执行面现形**（没有一条是靠
+   读代码定案的，这决定了两件事：向量必须真被三端执行；以及注释里的断言不算证据）：
+   ① 核心 `ffi/broker.rs` 的 `policy_host_of` 一直用 `split(':').next()` 剥端口，
+   语法放开后 `[::1]:9000` 被截成 `[` ⇒ 归一层收下、分类层判高危 ⇒ 本机回环要用户点确认，
+   正面撞第七轮 B8「本机与内网必须能打开」。这条只有 `ipv6_loopback_allow` 向量抓得到
+   （`cargo test` 589 过 1 红，红的就是它）。修法是把 host 口径拆成
+   `ffi/broker/policy_host.rs`，方括号形态**保留括号**返回——剥掉括号会让
+   `is_high_risk_host` 落回 `split(':')` 那条路径，`[fe80::1]` 被读成 `fe80` 判公网，
+   那是比「误拦」更糟的方向（绕过）。新文件三条用例分别钉「剥端口」「保留括号」与
+   「把这个形状交给真分类器」，最后一条是防上面两种错法的正面控制。
+   ② Rust `Ipv6Addr::to_ipv4()` 把过时的 IPv4-兼容写法也折成 IPv4，于是 `::1` 折成
+   `0.0.0.1` 撞上 0/8 ⇒ 同一条 B8 违规的第二种成因。判定顺序定死为
+   **回环 → 折叠 → 段集**（`security_policy/ipv6.rs:26-42`）；折叠本身必须留着，
+   `::ffff:169.254.169.254` 是这批唯一的真绕过面（`ipv6_mapped_metadata_requires_confirmation`）。
+   ③ Kotlin 侧三处同错：`isExemptIpv6` 同样是折叠先于回环；`bytes == LOOPBACK_V6_BYTES`
+   是**数组引用比较**（编译器警告 `==' on arrays compares only references` 实证——回环分支
+   永远不成立）；`ipv6ToBytes` 把点分尾段算进 `groups` 列表却从不使用它 ⇒
+   `::ffff:127.0.0.1` 解析成 `::ffff`（一个假地址），`0:0:0:0:0:ffff:127.0.0.1` 直接判非法。
+   外加一处最阴险的：`OriginPolicy.isAcceptedHostShape` 的字符白名单不含 `[`、`]`、`:` ⇒
+   语法「放开」之后 IPv6 仍被白名单二次拒绝，看 diff 像是改完了，实际行为一字未动。
+   现在括号形态走独立分支（`OriginPolicy.kt:104-131`），解析器单源进
+   `android/broker/src/main/kotlin/com/aegis/broker/AddressText.kt`（130 行，
+   拆出是 300 行红线 + detekt `thresholdInObjects: 11` 两条一起逼的，不是审美）。
+   ④ C# 侧推翻了一条本仓写下的注释：`.NET 10` 的 `Uri.Host` 对 IPv6 字面量**保留**方括号
+   （原注释写「去方括号，要用 DnsSafeHost」——`[::1]` 能进括号分支就是反证），但它会
+   **静默吃掉** zone-id 与 `]` 后的垃圾：`https://[fe80::1%eth0]/` 与 `https://[::1]x/`
+   两条 deny 向量在 C# 端被放行（`dotnet test` 实测 918 过 2 红）。改判 raw authority
+   （`OriginPolicy.cs:80-113` 新增 `TryRawBracketedIpv6` + `IsPortSuffix`），口径与
+   Rust `origin.rs` 的 `bracketed_host` 分支一致：`]` 之后只允许端口。
+3. 向量的净增是实测数字，不是估的：`url-origin-valid.json` 8→16、
+   `url-origin-invalid.json` 30→36、`native-navigation-decision.json` 43→53
+   （35 条 `platform_decidable: true` / 18 条 false，`native_vector_partition_test.py`
+   钉住），另有 3 条 IPv6 形态从 invalid 移进 valid（对总数净零）。
+   `scripts/verify_vectors.py` 的 `MIN_VECTOR_ENTRIES` 222→246——这条门禁要求与真实面
+   **相等**而不是「不少于」，所以扩容必须同批改它，否则 `gate_hollowness_test` 判红。
+   新条目里承担绕过判据的是 `ipv6_mapped_metadata_requires_confirmation`（云元数据穿成
+   IPv6 字面量）与 `ipv6_mapped_hex_loopback_allow`（同一回环的第三种拼法，钉「按字节」）。
+4. 执行面（全部本地实跑，无一条是声明）：`cargo test` 593 过 0 失败 + `clippy
+   --all-targets -D warnings` 0 警告 + `fmt --check` 干净；`gradle --offline`
+   `:broker`/`:app`/`:webview-adapter` 的 `ktlintCheck`+`detekt`+`testDebugUnitTest` 全绿；
+   `dotnet test` Core 920 过 0 失败、Broker 204 过 0 失败，两条发现数下界断言
+   （≥700 / ≥160）✅；`pytest tests/python` 878 过 1 跳过；ruff/bandit/py312 三条
+   active-tree 门禁 OK；`packages.lock.json` 无漂移。`ffi/broker.rs` 909→896，
+   `check_file_sizes.py --write-baseline` 同批收窄（该门禁对基线文件双向判定）。
+5. 一条**现读纠正**记在这里，免得下一轮又被当成缺陷：我在在途分支的注记里写过
+   「`UrlSafety` 早就按字节判 IPv6，保留地址面没有活的绕过」。前半句成立（`:60-68`
+   剥括号、CS-201 对 `%` fail-closed、`IsPublicIp:178` 折叠 IPv4-mapped），后半句被
+   向量测试推翻——绕过的成因不在分类器而在**入口给它的字符串**（.NET 已经吃掉了 zone-id）。
+   「分类器是对的所以不用管入参」是这批最贵的一次误判，登记为 Q64 的判据的一部分。
+6. 本批**不做**的两件事，理由写清：①6to4（`2001::/32`）与 Teredo（`2001:20::/32`）里
+   内嵌的 IPv4 不解码——Chromium 的 `net::IpAddress` 同样不解，解了三端对同一地址给
+   不同裁决，多拦一层换来的是不一致；②`UrlSafety.IsPublicIp:219` 的 v4-compatible 折叠
+   带 `bytes[12] != 0` 条件，于是 `::2`（= `0.0.0.2`）在 Windows 判公网、在核心与
+   Android 折回 0/8——改它动的是 Windows 判定面且现树无向量覆盖，转登 Q64 待回读。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：

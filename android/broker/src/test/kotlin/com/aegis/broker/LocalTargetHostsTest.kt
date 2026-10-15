@@ -2,6 +2,7 @@ package com.aegis.broker
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -39,24 +40,30 @@ class LocalTargetHostsTest {
     }
 
     /**
-     * R9-AD-4（第九轮 2026-10-10）：三处判定对方括号 IPv6 字面量的结果**故意不同**，
-     * 这条用例把差异钉住，防止任何一侧被当成缺陷顺手改。
+     * R9-B66（队列 Q4 第二半）：方括号 IPv6 在导航层被收下，分类按字节。
      *
-     * • 导航入口 [OriginPolicy] 拒（AD-299：与 Rust origin/host_grammar 及 contracts 的
-     *   url-origin-invalid 向量同口径——java.net.URI 保留方括号而 Chromium 剥，
-     *   双重解释面宁可不放行）；
-     * • host 一旦剥了括号（[LocalTargetHosts.hostOf] 的职责），::1/ULA 就落在第七轮 B8
-     *   裁决的放行段里——HTTPS 升级豁免层与下载层看到的正是这个形态。
+     * 前半是 R9-AD-4 记录的那条差异被消掉：`OriginPolicy` 以前对 authority 里的 `[`
+     * 一律拒（java.net.URI 保留方括号而 Chromium 剥，双重解释面宁可不放行），现在
+     * 三端解析器同口径——语法收下、由字节分类。后半钉住「按字节而不是按拼法」：
+     * 同一个回环的三种写法必须同判，云元数据的 IPv6 写法必须仍不豁免。
      *
-     * 代价如实记：地址栏输 `http://[::1]:9000/` 在 Android 打不开，而 Windows 能。
-     * 要打通它得解冻核心 host grammar 并增补 url-origin-* 向量（三端解析器语义变更），
-     * 已报待用户定稿；**不得**用「收紧段集」来消除这条差异——裁决是本机与内网必须能打开。
+     * **不得**用「收紧段集」消除差异——裁决是「本机与内网必须能打开」（第七轮 B8）。
      */
     @Test
-    fun bracketedIpv6IsRejectedForNavigation_ButExemptOnceHostIsStripped() {
-        assertNull(OriginPolicy.tryParseExternal("http://[::1]:9000/"))
+    fun ipv6BracketedLiteralIsParsedAndClassifiedByBytes() {
+        assertNotNull(OriginPolicy.tryParseExternal("http://[::1]:9000/"))
         assertTrue(LocalTargetHosts.isLocalTarget(LocalTargetHosts.hostOf("http://[::1]:9000/")))
         assertFalse(ReservedAddressBoundary.denies("http://[::1]:9000/"))
+        for (spelling in listOf("::1", "::ffff:127.0.0.1", "0:0:0:0:0:ffff:7f00:1")) {
+            assertTrue("$spelling 是同一个回环，应豁免", LocalTargetHosts.isLocalTarget(spelling))
+        }
+        for (spelling in listOf("::ffff:169.254.169.254", "fe80::1", "ff02::2", "2001:db8::5", "::")) {
+            assertFalse("$spelling 不该豁免", LocalTargetHosts.isLocalTarget(spelling))
+        }
+        // 非法括号形态仍然拒（与 contracts url-origin-invalid 同口径）
+        for (raw in listOf("http://[1.2.3.4]/", "http://[::1%eth0]/", "http://[]/", "http://[::1]:0/")) {
+            assertNull("$raw 仍应拒", OriginPolicy.tryParseExternal(raw))
+        }
     }
 
     @Test
