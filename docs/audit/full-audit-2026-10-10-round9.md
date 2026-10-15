@@ -793,6 +793,25 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `LocalTargetHostsTest.kt:26-28`、`ReservedAddressBoundaryTest.kt:62,68` 用
   `http://[::1]:9000/` 当放行样本，读起来像「IPv6 本机可打开」。建议如实写进 KDoc 与
   测试注释（**不得反向收紧段集**，与 B8 相反）。——**部分闭环（R9-B6 / §3.5）**：口径改真那半边已逐行回读并按该处方落地，判定零改动；**仍开着的那半边**是「打通 IPv6 导航面」（要解冻核心 host grammar 并增补向量）⇒ §四 待定稿。
+  **2026-10-15 续做（在途分支 `fix/q4-ipv6-navigation`，未开 PR、不可并）**：三端里两端已落地并自证，
+  差 Kotlin 与共享向量——
+  ①核心 `origin.rs` 收下 `[<v6>]`（`Ipv6Addr` 解析；host 只保留**字面小写**不重排，因为三端 IPv6
+  打印格式互不相同，重排会让 origin 跨端不等）；`security_policy::is_high_risk_host` 新增
+  `ipv6_is_high_risk`：先把内嵌 IPv4 折叠回 IPv4 判定（`::ffff:7f00:1` 与 `::ffff:127.0.0.1` 必须
+  等价，否则刚放开语法就是绕过口），再判 fe80::/10、ff00::/8、`::`、2001:db8::/32；
+  **不判** ULA 与 `::1`（B8）。`cargo test` 590 全过，含改写后的 `bracketed_ipv6_authority_grammar`
+  （5 个合法 + 8 个仍须拒：`[1.2.3.4]`、`%eth0`、未闭合、`]x`、`:0`、`:99999`、`[]`、段数超限）
+  以及 `nonce_tests` 那条「畸形 URL」样本换成 `https://[::1/bad`——旧样本 `[::1]/bad` 现在合法，
+  不换就等于用例在判一个已不存在的形态。
+  ②C# `OriginPolicy.IsValidHost` 同口径收下并改用 `IPAddress.TryParse` + 要求 InterNetworkV6 族，
+  编译通过（0 警告 0 错误）。**现读纠正一条我先前的担心**：`UrlSafety` 早就按字节判 IPv6
+  （:60-68 剥方括号、CS-201 对 `%`/残留括号 fail-closed、`IsPublicIp` :178 折叠 IPv4-mapped），
+  所以保留地址面**没有活的绕过**——这条队列项缺的确实只有「导航层不放行」。
+  ③还差：Kotlin 两处（`isAcceptedHostShape` 的 `!host.contains("[")`、`isExemptIpv6` 要剥括号 +
+  折叠 mapped），共享向量（`url-origin-invalid` 那三条 IPv6 移进 valid 并补非法形态；
+  `native-navigation-decision` 加 IPv6 段集向量，同批改 `native_vector_partition_test.py`
+  钉住的 43/30/13 计数），三端各跑一遍。**不断开一半的理由**：向量是三端共用的单一事实源，
+  只改一端的语法会让另两端的向量消费测试立刻红——这正是它被标成跨端契约变更的原因。
 - ~~Q5 R9-AD-5~~ **本批已闭**（R9-B40 / §3.40：新增 `android/broker/src/main/kotlin/com/aegis/broker/NonceLedger.kt`
   把账本键与回收判据收成同一前缀约定（`nonceLedgerKey` 幂等折算 + `belongsToNonceLedger`），
   两条消费点都经键折算，回收点改用它；新常驻 `ConsumedNonceLedgerTest.kt` 5 例含一条

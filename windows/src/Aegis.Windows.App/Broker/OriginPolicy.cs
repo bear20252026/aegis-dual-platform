@@ -90,20 +90,28 @@ public static class OriginPolicy
     {
         if (host.Length == 0 || host.Length > MaxHostLength)
             return false;
-        // .NET Uri.Host 对 IPv6 字面量去方括号；DnsSafeHost 保留——按原串判断
-        var isIpv6 = host.Contains(':', StringComparison.Ordinal);
-        if (isIpv6)
+        // R9-B66（队列 Q4 第二半）：IPv6 字面量从「按字符白名单近似判」改成「按字节解析」。
+        // 旧分支只放十六进制/冒号/点，于是 .NET Uri.Host 保留的方括号 `[::1]` 里的 `[`
+        // 自己把整条判拒——共享向量里三条 IPv6 的 deny 就是这么来的，而 B8 裁决
+        // 「本机与内网必须能打开」在 IPv6 上因此从未生效（`http://[::1]:9000/` 打不开）。
+        // 现在语法收下、判定交给分类器（UrlSafety.IsPublicIp 早已按字节判 ULA/组播/
+        // IPv4-mapped，见 :166-185——**这次不用改它**，它一直在等一个进得来的入参）。
+        if (host.Length > 2 && host[0] == '[' && host[^1] == ']')
         {
-            // 仅允许十六进制/冒号/点（v4-mapped 尾段）
-            foreach (var ch in host)
-            {
-                var isHex = char.IsAsciiDigit(ch)
-                    || (ch >= 'a' && ch <= 'f') || (ch >= 'A' && ch <= 'F');
-                if (!(isHex || ch == ':' || ch == '.'))
-                    return false;
-            }
-            return true;
+            var inner = host[1..^1];
+            // 作用域号（fe80::1%eth0）拒：它对解析器是另一个接口标识，跨机可移植性为零
+            if (inner.Contains('%', StringComparison.Ordinal))
+                return false;
+            // IPAddress.TryParse 对 "1.2.3.4" 给 InterNetwork——方括号里出现裸 IPv4
+            // 是双重解释面（Rust/Kotlin 同口径拒），所以必须显式要求 v6 族
+            return System.Net.IPAddress.TryParse(inner, out var parsed)
+                && parsed.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
         }
+        // 未加方括号的裸 IPv6（`http://2001:db8::1/`）继续拒：authority 的分隔符歧义
+        //（RS-011 同源），三端一致
+        if (host.Contains(':', StringComparison.Ordinal))
+            return false;
+        // .NET Uri.Host 对 IPv6 字面量去方括号；DnsSafeHost 保留——按原串判断
         if (host.EndsWith(".", StringComparison.Ordinal))
             return false;  // 尾点 host（"example.com."）——规范化歧义面
         foreach (var ch in host)
