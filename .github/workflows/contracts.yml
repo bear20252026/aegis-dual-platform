@@ -165,6 +165,11 @@ jobs:
       # 范围只判未划线的活行——划线行引的是当时的行号，判它们就是要改写历史或开豁免表。
       - name: Ledger anchor resolvability gate (R9-B81——活行的 file:line 锚必须解析得到)
         run: python scripts/verify_ledger_anchors.py
+      # R9-B82：README「机器判定的只有下界」那条 bullet 抄了四个数，其中三个已过期、
+      # 一处归属写错（份数的单源在 verify_vector_consumers.py，不在 verify_vectors.py），
+      # 而 check_doc_claims.py 只认「N 个 workflow」——本门禁把这条 bullet 与实树常量双向对账。
+      - name: README floor claims gate (R9-B82——文档抄的下界必须逐条等于实树常量)
+        run: python scripts/verify_doc_floors.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)

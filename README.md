@@ -164,8 +164,12 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
   ＋`agent/tests` 81、UI 回归 126 条 ⇒ 每一批落地
   都在让这些数字过期，而它们从没被任何门禁判过（`check_doc_claims.py` 只判 workflow 计数）。
   **机器判定的只有下界**：`scripts/assert_test_counts.py`（dotnet 发现数 Core ≥700 /
-  Broker ≥160）与 `scripts/verify_vectors.py`（向量 ≥21 份 / 条目 ≥222）；各端实际条数
-  看 CI 日志现算，跑法在 [CLAUDE.md](CLAUDE.md) 的本地验证段。
+  Broker ≥160，两个值取自 workflow 调用点）、`scripts/verify_vector_consumers.py`
+  （契约向量 ≥22 份）与 `scripts/verify_vectors.py`（向量条目 ≥375）；各端实际条数
+  看 CI 日志现算，跑法在 [CLAUDE.md](CLAUDE.md) 的本地验证段。这一条此前抄的是 21 份 /
+  222 条目、且份数错挂在 `verify_vectors.py` 名下——三个数过期加一处错归属，而
+  `check_doc_claims.py` 只认「N 个 workflow」所以全绿；R9-B82 起由
+  `scripts/verify_doc_floors.py` 逐条与实树对账（本段里带 `≥` 的数字只能是实树真值）。
   （CHANGELOG 各版本条目里的 "pytest 30" 是当批 agent 红队**单列**口径，不是合计——SP-198）
 - 门禁清单：单源是 `.github/workflows/contracts.yml` 的 `contract-source-of-truth` job，
   **它有哪些步骤就是哪些门禁**（R9-DOC-10：原写「五门禁（validate_release / verify_versions /

@@ -4520,6 +4520,36 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    本批没有顺手判「那一行现在写着什么」，因为第②条候选判据的假红代价（本仓有把被禁形态逐字抄进
    注释的传统，R9-B45／§3.22）一点没变。
 
+### 3.82 R9-B82（2026-10-16，新登 R9-DOC-24 并于本批闭）：README 抄的下界与实树常量双向对账——顺带记下本门禁自己第一版的假绿
+
+1. 现读实测：README「机器判定的只有下界」那条 bullet 抄了四个数（Core ≥700 / Broker ≥160 /
+   向量 ≥21 份 / 条目 ≥222）。实树真值是 700、160、**22**、**375**——`MIN_VECTOR_ENTRIES` 从
+   R9-B66 的「222 → 246」起逐批上调到 375（`scripts/verify_vectors.py:63` 有逐批日期注记），
+   份数下界也早已从 21 变成 22；更要紧的是**归属写错**：份数的单源不在 `verify_vectors.py`，
+   而在 `scripts/verify_vector_consumers.py:46`。⇒ 两个数过期加一处错归属，而
+   `check_doc_claims.py:43` 全绿——它的 `COUNT_CLAIM` 只认「N 个 workflow」。
+   README 在 R9-DOC-10 承认过「新挂的门禁在文档面上隐形」，本条是同一族病的另一半：**数字隐形地过期**。
+2. 新门禁 `scripts/verify_doc_floors.py`：把那条 bullet 解析成「归属脚本 → 抄写数字集合」，与实树
+   下界集合**双向**对账（少＝过期，多＝抄了一个还没接线的下界，挂错脚本＝归属问题）。dotnet 那两个值
+   既不读 README 也不读脚本常量，而是**结构化解析** `uses: ./.github/actions/dotnet-test-suite` 的
+   `with:` 调用点（实树 8 个 label：Core／Core-native／Core-release／Broker／Broker-native／
+   Broker-release 等），同一 label 给出多个值＝调用点漂移，判红（R9-B61 同族）。
+3. **本门禁第一版空转判绿**，形状是老形状、落点是新的：判据写成单向（「实树的值有没有被抄进去」），
+   取数又按「`label:` 之后第一个 `minimum:`」邻行猜——同一 job 里相邻两个调用点被交叉配成
+   `Core=160`，而 160 恰好也在 README 的集合里，于是一条都不缺 ⇒ 绿。改成结构化取数 + 双向对账后
+   同一条 bullet 才真的被判到；`test_call_sites_are_read_structurally` 是给这版假绿立的墓碑
+   （它判**取数方式**，不判数值）。
+4. 真树注入（一律读被测命令自身退出码，R9-CI-20 的修法）：把那条 bullet 回写成 R9-B82 之前的历史原文
+   ⇒ `EXIT=1`，两条消息分别指到「consumers 名下 一个数都没有」与「verify_vectors 名下 多 [21, 222]」；
+   还原 ⇒ `EXIT=0`。用例 9 条：过期／错归属／未知归属／多抄未接线的下界／调用点漂移／
+   语料面漂移→1／常量取不到→2／接入面锚／取数方式墓碑。
+5. README 就地改真：`≥22 份` 挂 `verify_vector_consumers.py`、`≥375 条目` 挂 `verify_vectors.py`，
+   并写明**本段里带 `≥` 的数字只能是实树真值**——历史数字（21／222）改成不带 `≥` 的叙述，
+   否则会被自己的判据当成「抄了一个没接线的下界」。这条口径同时写进门禁 docstring。
+6. 接线 `.github/workflows/contracts.yml`（紧跟锚点门禁）；可达即不进 `gate-execution-face.yaml`。
+   执行面：`pytest tests/python` 全套、ruff／bandit、四道文档门禁、队列状态与锚点门禁、
+   门禁执行面登记表各自 `EXIT=0`（逐条命令与输出见提交信息）。
+
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「R9-B80 本地两轮 `:app` ktlint + detekt + testDebugUnitTest 全绿」不成立**（§3.80 第 6 点，
   新登 R9-CI-20）：两轮命令都以 `… 2>&1 | tail -12` 结尾，退出码是 `tail` 的 0，不是 Gradle 的。
