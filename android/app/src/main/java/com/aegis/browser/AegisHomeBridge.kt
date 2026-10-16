@@ -72,6 +72,13 @@ class AegisHomeBridge(
          * 靠「它在 assets 目录下」自动获得桥。名单从 `BrowserEngine.HOME_URL` 派生
          * 而不是另抄一份字面量——URL 的第二定义源会随首页改名而静默失配
          * （`HomeUrlContractTest` 钉住 HOME_URL 本身）。
+         *
+         * 给「往这里加第二个名字」的人：Q10（R9-AD-10 / §3.79）就是为这一行关掉的。
+         * `@JavascriptInterface` 的对象对该 WebView 的**全部帧**可见，而判定只读顶层
+         * URL——多一个受信文档就多一处「帧能驱动桥、判据看不见帧」的落点。加之前先
+         * 把桥传输迁到 origin-scoped `addWebMessageListener`，否则本条按 P1 重新成立。
+         * 壳页侧的同一触发条件有常驻门禁（`shell_frame_guard.test.mjs` 判 frame-src），
+         * **这一半没有**：名单是 private val，加元素不会让任何现成用例变红。
          */
         private val TRUSTED_SHELL_PAGES =
             setOf(BrowserEngine.HOME_URL.removePrefix(TRUSTED_SHELL_PREFIX))
