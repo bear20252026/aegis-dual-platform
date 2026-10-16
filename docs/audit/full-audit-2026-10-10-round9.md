@@ -1404,7 +1404,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   前提是两端 IPv6 判定面先有对账。Android 独有的 host 级逐段左右邻**保留未删**——
   向量是 URL 级子集，删它是用真锚换覆盖假象。
 
-- Q67 R9-SH-23 | **P2（待裁决：两个候选方向分别是加宽明文面与推翻既有审计断言）** | `windows/src/Aegis.Windows.App/Core/UrlSafety.cs:211-213`（site-local `fec0::/10` 分支）↔ `windows/tests/Aegis.Windows.Core.Tests/UrlSafetyTests.cs:109` ↔ `windows/tests/Aegis.Windows.Core.Tests/AuditRegressionTests.cs:28` ↔ `android/broker/src/main/kotlin/com/aegis/broker/LocalTargetHosts.kt:151-155`（`isExemptIpv6` 只判回环／内嵌 IPv4／ULA `fc00::/7`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 逐条消费的那张 scheme 表，今天不含 fec0）：
+- ~~Q67 R9-SH-23~~ **本批已闭**（R9-B77 / §3.77：取「两边都不豁免」那一侧——`fec0::/10` 已由 RFC 3879 撤销、无真实设备，Android 的 `isExemptIpv6` 三条判据从来不认它，给一段不存在的地址补明文豁免等于开口子；本仓纪律是只加严不加宽。Windows 删掉 site-local 分支、两处旧审计断言按「翻转不静默删行」留名改写，Android 补上它此前缺的 fec0 锚。原条目 ↓
+  Q67 R9-SH-23 | **P2（待裁决：两个候选方向分别是加宽明文面与推翻既有审计断言）** | `windows/src/Aegis.Windows.App/Core/UrlSafety.cs:211-213`（site-local `fec0::/10` 分支）↔ `windows/tests/Aegis.Windows.Core.Tests/UrlSafetyTests.cs:109` ↔ `windows/tests/Aegis.Windows.Core.Tests/AuditRegressionTests.cs:28` ↔ `android/broker/src/main/kotlin/com/aegis/broker/LocalTargetHosts.kt:151-155`（`isExemptIpv6` 只判回环／内嵌 IPv4／ULA `fc00::/7`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 逐条消费的那张 scheme 表，今天不含 fec0）：
   **同一个 host 在两端的 https 升级豁免面拿到相反答案**：`http://[fec0::1]/x` 在 Windows 判非公网
   （`IsPublicIp:212` 的 `bytes[0]==0xFE && (bytes[1]&0xC0)==0xC0`）⇒ `IsExemptFromHttpsUpgrade`
   返回真 ⇒ **不升 https**；Android 的 `isExemptIpv6` 没有这一条 ⇒ 实测（一次性探针，读完即删）
@@ -4320,6 +4321,30 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    关闭/删除属不可逆的共享面动作，等你点头。
 6. 执行面：`pytest tests/python` 878 过 1 跳过；ruff／bandit／py312-compat 三条活跃树门禁 OK；
    `verify_lock_rids`（3 份锁、RID 图与中性图齐全）OK；文档计数／行数红线／队列状态／markdown 全绿。
+
+### 3.77 R9-B77（2026-10-16，队列 Q67）：删掉 Windows 对 fec0::/10 的明文豁免——同一个 host 两端不再给出相反 scheme
+
+1. Q67 的两个候选方向（(a) Android 补豁免＝加宽；(b) Windows 删豁免＝加严但要翻两处既有审计
+   断言）取 **(b)**，三条理由：`fec0::/10` 已由 RFC 3879（2004）撤销、现实中不会有设备用它；
+   Android 的 `isExemptIpv6` 三条判据（回环／内嵌 IPv4／ULA `fc00::/7`）从来不认它；本仓纪律
+   是「只加严不加宽」。
+2. 改动面（Windows 一处判定 + 三处断言）：删 `UrlSafety.IsPublicIp` 里
+   `bytes[0]==0xFE && (bytes[1]&0xC0)==0xC0` 那条；`UrlSafetyTests.cs` 的
+   `[InlineData("http://[fec0::1]/x", false)]` 从「非公网」组移出，改成显式反向用例
+   `WithdrawnSiteLocalIpv6IsNoLongerExempted`——它同时钉住 **ULA `fd00::1` 仍豁免**，防止这次
+   收窄被读成「ULA 也不算内网」；`AuditRegressionTests.RejectsNonPublicIpv6` 的 `fec0::1` 行
+   同理移到公网侧断言。**翻转过来的旧断言不静默删行**，都留名在新用例里，回溯得到是谁改了口径。
+3. Android 侧本批**没有代码改动**，但此前它一个 fec0 断言都没有（全仓 `grep fec0` 零命中），
+   于是在 `LocalTargetHostsTest.nonLocalTargetsStayOnHttps` 的拒绝组里补 `"fec0::1"`，把
+   「本端从不豁免这一段」钉成常驻用例。两端各自的锚都在了：谁想把豁免加回去，立刻红。
+4. 与 Q68 的分工写清，别混着合：`[fec0::1]` 这种**带方括号的裸 host**在地址栏的分类仍属 Q68
+   那面（Windows 判域名、Android 判搜索词），所以本批**没有**把它写进 CS+AD 共用的
+   `search-normalize-vectors.json`——那张表今天容不下它。Q67 修的是「这个 host 算不算本机」
+   这一层，两件事各有各的锚。
+5. 执行面：`dotnet test` Core **925**（净 −1：移出两行旧断言、新增一条反向用例）／Broker **298**
+   全过 0 失败，两条发现数下界 ✅；`gradle --offline` `:broker` ktlint+detekt+test 与 `:app`
+   test 全绿；`verify_vectors`／`verify_vector_consumers`／行数红线／文档计数／队列状态／
+   markdown 两门禁／ruff·bandit·compat 全绿。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「一行 `Performance.prototype.now.call(performance)` 即取无降噪 µs 精度时钟」不成立**

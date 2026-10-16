@@ -110,6 +110,7 @@ class LocalTargetHostsTest {
                 "www.baidu.com",
                 "nas", // 单标签名：判定需 DNS，不在零 DNS 契约内
                 "fe80::1", // IPv6 链路本地
+                "fec0::1", // site-local（RFC 3879 已撤销）：本端从不豁免——Windows 此前豁免，R9-B77/Q67 已把两端对齐
                 "ff02::1",
                 "fe80::1%25eth0", // zone-id：要接口知识，不在零 DNS 契约内
                 "::1%eth0", // 连回环带 zone-id 也不豁免（CS-201 同型）

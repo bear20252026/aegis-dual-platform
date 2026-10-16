@@ -2,6 +2,7 @@ namespace Aegis.Windows.Core.Tests;
 
 using System.Net;
 using Aegis.Windows.Core;
+using Aegis.Windows.WebView;
 using Xunit;
 
 /// <summary>外部链接打开 URL 安全判定单测：仅公网 http/https，拒绝
@@ -96,6 +97,20 @@ public sealed class UrlSafetyTests
 
     // —— 边界补强批次：非点分十进制 IPv4 编码与 IPv6 特殊段 ——
 
+    [Fact]
+    public void WithdrawnSiteLocalIpv6IsNoLongerExempted()
+    {
+        // R9-B77（队列 Q67）：fec0::/10 已由 RFC 3879 撤销、无真实设备，本层此前判它
+        // 「非公网」⇒ 豁免升 https（走明文），而 Android 的 isExemptIpv6 从来不认这一段。
+        // 两端因此对同一个 host 给出相反 scheme 处置；方向取加严——删豁免而不是给 Android
+        // 补豁免（后者是给不存在的段开口子）。原先这条钉在「非公网」组里，翻过来留名于此。
+        Assert.True(UrlSafety.IsPublicHost("fec0::1"));
+        Assert.True(UrlSafety.IsPublicHttpUrl("http://[fec0::1]/x"));
+        Assert.False(HostWebView.IsExemptFromHttpsUpgrade("fec0::1"));
+        // ULA 仍按内网豁免（B8 裁决段表里有 fc00::/7，与本条不同）
+        Assert.False(UrlSafety.IsPublicHost("fd00::1"));
+    }
+
     [Theory]
     [InlineData("http://127.1/x", false)]             // 简写 127.1 = 127.0.0.1
     [InlineData("http://2130706433/x", false)]        // 十进制整数 = 127.0.0.1
@@ -106,7 +121,6 @@ public sealed class UrlSafetyTests
     [InlineData("http://[::ffff:127.0.0.1]/x", false)]   // IPv4-mapped IPv6 → 回环
     [InlineData("http://[fc00::1]/x", false)]         // IPv6 ULA 私网
     [InlineData("http://[fd00::1]/x", false)]         // IPv6 ULA 私网
-    [InlineData("http://[fec0::1]/x", false)]         // IPv6 site-local
     [InlineData("http://[ff02::1]/x", false)]         // IPv6 组播
     [InlineData("http://192.0.2.1/x", false)]         // TEST-NET 文档段
     [InlineData("http://198.18.0.1/x", false)]        // 基准测试段

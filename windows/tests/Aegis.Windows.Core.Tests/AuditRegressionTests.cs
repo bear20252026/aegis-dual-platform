@@ -25,7 +25,6 @@ public sealed class AuditRegressionTests : IDisposable
     [InlineData("fe80::1")]              // 链路本地
     [InlineData("fc00::1")]              // ULA fc00::/7
     [InlineData("fd12:3456::1")]         // ULA（fd 开头）
-    [InlineData("fec0::1")]              // site-local fec0::/10
     public void RejectsNonPublicIpv6(string ip) =>
         Assert.False(UrlSafety.IsPublicIp(System.Net.IPAddress.Parse(ip)));
 
@@ -35,6 +34,8 @@ public sealed class AuditRegressionTests : IDisposable
         Assert.True(UrlSafety.IsPublicIp(System.Net.IPAddress.Parse("2606:4700::1111")));
         // IPv4-mapped 公网地址仍放行（按内嵌 IPv4 判定）
         Assert.True(UrlSafety.IsPublicIp(System.Net.IPAddress.Parse("::ffff:8.8.8.8")));
+        // R9-B77（Q67）：site-local 已撤销，不再算「非公网」——与 Android 同口径
+        Assert.True(UrlSafety.IsPublicIp(System.Net.IPAddress.Parse("fec0::1")));
     }
 
     [Theory]
