@@ -502,6 +502,111 @@
       "url": "http://[::ffff:169.254.169.254]:9000/latest",
       "expected": "deny",
       "note": "mapped 元数据 + 端口 + 路径"
+    },
+    {
+      "url": "http://[fe7f::1]/",
+      "expected": "allow",
+      "note": "fe80::/10 之下邻：/10 掩码不含 0xFE7F"
+    },
+    {
+      "url": "http://[fe80::]/",
+      "expected": "deny",
+      "note": "fe80::/10 下界（含全零接口标识）"
+    },
+    {
+      "url": "http://[febf:ffff::1]/",
+      "expected": "deny",
+      "note": "fe80::/10 上界内的最远值"
+    },
+    {
+      "url": "http://[fec0::1]/",
+      "expected": "allow",
+      "note": "site-local fec0::/10 已撤销（RFC 3879）——本边界不拦它，两侧掩码/属性实现必须给出同一个答案"
+    },
+    {
+      "url": "http://[feff::1]/",
+      "expected": "allow",
+      "note": "组播段之下邻：首字节 0xFE 不在 ff00::/8"
+    },
+    {
+      "url": "http://[ff00::]/",
+      "expected": "deny",
+      "note": "ff00::/8 下界"
+    },
+    {
+      "url": "http://[ffff::1]/",
+      "expected": "deny",
+      "note": "ff00::/8 上界（节点本地组播的全 F 写法）"
+    },
+    {
+      "url": "http://[fbff::1]/",
+      "expected": "allow",
+      "note": "fc00::/7 之下邻（不是 ULA，也不是保留段）"
+    },
+    {
+      "url": "http://[fc00::1]/",
+      "expected": "allow",
+      "note": "ULA 下界"
+    },
+    {
+      "url": "http://[fdff:ffff::1]/",
+      "expected": "allow",
+      "note": "ULA 上界"
+    },
+    {
+      "url": "http://[fe00::1]/",
+      "expected": "allow",
+      "note": "fc00::/7 之上邻：既非 ULA 也非 fe80::/10"
+    },
+    {
+      "url": "http://[::ffff:0.0.0.0]/",
+      "expected": "deny",
+      "note": "mapped 折出 0.0.0.0（0/8）"
+    },
+    {
+      "url": "http://[::ffff:127.0.0.1]/",
+      "expected": "allow",
+      "note": "mapped 折出回环——折叠必须排在回环判定之后（B8）"
+    },
+    {
+      "url": "http://[::ffff:169.254.0.0]/",
+      "expected": "deny",
+      "note": "mapped 折出链路本地段下界"
+    },
+    {
+      "url": "http://[::1.0.0.0]/",
+      "expected": "allow",
+      "note": "v4-compatible 折出 1.0.0.0 是公网——反向控制：折叠不等于一律拦"
+    },
+    {
+      "url": "http://[0:0:0:0:0:ffff:7f00:1]/",
+      "expected": "allow",
+      "note": "同一回环的第三种拼法（不压缩 + 十六进制尾段）——必须按字节判"
+    },
+    {
+      "url": "http://[::ffff:100.100.100.200]/",
+      "expected": "allow",
+      "note": "钉住已知残余：阿里云元数据端点落在按裁决放行的 CGNAT 100.64/10 段内，本边界不拦（台账 §二 已记，不是漏判）"
+    },
+    {
+      "url": "http://user@[fe80::1]/",
+      "expected": "deny",
+      "note": "userinfo + IPv6 字面量：剥 userinfo 不得把链路本地地址洗成放行"
+    },
+    {
+      "url": "http://user@169.254.169.254:8080/latest",
+      "expected": "deny",
+      "note": "userinfo + 端口 + 元数据端点，三重叠加"
+    },
+    {
+      "url": "http://[fe80::1]:8080/x",
+      "expected": "deny",
+      "note": "链路本地带端口带路径"
+    },
+    {
+      "url": "http://[::1]:6379/",
+      "expected": "allow",
+      "note": "回环带端口（B8 放行面的 IPv6 那一支）"
     }
   ]
 }

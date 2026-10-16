@@ -1382,7 +1382,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   前提已做成能红的判据（`tests/python/injected_js_parity_test.py` +3 条），不是留一段推理。
   所以 Q57 剩下的只有①那一半，仍**需设备/桌面冒烟**。
 
-- Q66 R9-SH-22 | **P3（R9-B71 已闭第一半 §3.71，第二半带理由仍开）** | `windows/src/Aegis.Windows.App/Broker/ReservedAddressBoundary.cs:54`（`HasNumericAuthority`）↔ `android/broker/src/main/kotlin/com/aegis/broker/ReservedAddressBoundary.kt:181`（`hasNumericAuthority`）↔ `android/broker/src/test/kotlin/com/aegis/broker/ReservedAddressBoundaryTest.kt:85`（`adjacentAddressesOnBothSidesOfEverySegment`）↔ `contracts/vectors/reserved-address-boundary.json`：
+- ~~Q66 R9-SH-22~~ **本批已闭**（R9-B72 / §3.72：IPv6 段左右邻 21 条进同一张跨端向量，两端逐条跑、**0 条红**——两侧实现不同（Android 掩码位／Windows .NET 属性）但今天同结论，此前没有判据说这件事，现在有了；authority 叠加形态 `user@[fe80::1]`、`user@169.254.169.254:8080` 也进了表，「收成每端一份实现」按字面在两种语言里做不到，能判的是行为对账，而它已经存在。原条目 ↓
+  Q66 R9-SH-22 | **P3（R9-B71 已闭第一半 §3.71，第二半带理由仍开）** | `windows/src/Aegis.Windows.App/Broker/ReservedAddressBoundary.cs:54`（`HasNumericAuthority`）↔ `android/broker/src/main/kotlin/com/aegis/broker/ReservedAddressBoundary.kt:181`（`hasNumericAuthority`）↔ `android/broker/src/test/kotlin/com/aegis/broker/ReservedAddressBoundaryTest.kt:85`（`adjacentAddressesOnBothSidesOfEverySegment`）↔ `contracts/vectors/reserved-address-boundary.json`：
   R9-B70 把两张手抄表收成一份跨端向量（§3.70）之后，还剩两族没进表，如实登记而不是当成已闭：
   ①**逐段左右邻**——只测被点名的地址会放过「段边界写错一位」这一族缺陷，Android 有这一族
   （`169.253.255.254`、`223.255.255.254` 等），C# 一个都没有，所以「两端都跑同一份表」这句话
@@ -1402,6 +1403,25 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   验收判据（剩下的）：①authority 清洗收成每端一份且向量能直接判它；②IPv6 段邻进表，
   前提是两端 IPv6 判定面先有对账。Android 独有的 host 级逐段左右邻**保留未删**——
   向量是 URL 级子集，删它是用真锚换覆盖假象。
+
+- Q67 R9-SH-23 | **P2（待裁决：两个候选方向分别是加宽明文面与推翻既有审计断言）** | `windows/src/Aegis.Windows.App/Core/UrlSafety.cs:211-213`（site-local `fec0::/10` 分支）↔ `windows/tests/Aegis.Windows.Core.Tests/UrlSafetyTests.cs:109` ↔ `windows/tests/Aegis.Windows.Core.Tests/AuditRegressionTests.cs:28` ↔ `android/broker/src/main/kotlin/com/aegis/broker/LocalTargetHosts.kt:151-155`（`isExemptIpv6` 只判回环／内嵌 IPv4／ULA `fc00::/7`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 逐条消费的那张 scheme 表，今天不含 fec0）：
+  **同一个 host 在两端的 https 升级豁免面拿到相反答案**：`http://[fec0::1]/x` 在 Windows 判非公网
+  （`IsPublicIp:212` 的 `bytes[0]==0xFE && (bytes[1]&0xC0)==0xC0`）⇒ `IsExemptFromHttpsUpgrade`
+  返回真 ⇒ **不升 https**；Android 的 `isExemptIpv6` 没有这一条 ⇒ 实测（一次性探针，读完即删）
+  `isExemptFromHttpsUpgrade("http://[fec0::1]/x")` 得 **false** ⇒ **升 https**。Windows 侧有两处
+  永久断言钉住现状，Android 全仓 `grep fec0` 零命中——所以这不是「一端漏测」，是两端语义不同。
+  `fec0::/10` 是 IPv6 site-local，RFC 3879 已于 2004 撤销，今天不会有真实设备用它。
+  两个候选方向与各自代价：(a) Android 补 fec0 豁免——与 Windows 齐平，但这是**加宽**明文放行面，
+  而第七轮 B8 裁决写明的放行段表（`127/8`、`10/8`、`172.16/12`、`192.168/16`、`100.64/10`、
+  `::1`、`fc00::/7` + 主机名后缀）**不含 fec0::/10**，补它等于扩裁决；(b) Windows 删 site-local
+  分支——是加严，但要推翻两处既有审计断言、把「site-local 当内网」这个已写进注释的口径翻掉。
+  为什么不顺手做：本仓纪律是「只加严不加宽」，可 (b) 也不只是加严——它改的是已登记的裁决口径，
+  属 owner 给话（§四）。验收判据（选定方向后）：把 `fec0::1` 的裸 host 形态进
+  `search-normalize-vectors.json`（那张表 CS+AD 逐条跑），并同批改另一端；方向 (a) 要在台账写明
+  「B8 放行段表扩容」的理由，方向 (b) 要一并改 `UrlSafetyTests.cs:109` 与
+  `AuditRegressionTests.cs:28` 并给依据。**本批不新登 Q 之外的东西**：边界那张面今天已核对过，
+  `fec0::1` 在两端的**拒绝边界**上同结论（都放行，见 §3.72 第 1 点的 `fec0::1` 上邻条目），
+  分叉只在 scheme 选择这一面。
 
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
 
@@ -4123,6 +4143,45 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    判据（Windows 走 `IsIPv6LinkLocal` 这类属性、Android 走掩码位，今天恰好同结论但没有锚）；
    ③Android 独有的 host 级 `adjacentAddressesOnBothSidesOfEverySegment` **保留未删**：
    向量这层是 URL 级子集，删它就是拿一条真锚去换覆盖假象。
+
+
+### 3.72 R9-B72（2026-10-16，队列 Q66 第二半）：IPv6 段左右邻进跨端边界向量——负结果也是一条对账，顺带在另一张面量出一处分叉
+
+1. Q66 剩下的两半里这一半本批做掉：**21 条**进同一份 `contracts/vectors/reserved-address-boundary.json`
+   （现 121 条：57 deny／64 allow），全树条目 351→372 同批。覆盖的不是「被点名的地址」而是
+   **每条段的两侧**：`fe80::/10` 取 `fe7f::1`（下邻，放行）／`fe80::`（下界）／`febf:ffff::1`
+   （上界内最远值）／`fec0::1`（上邻，放行）；`ff00::/8` 取 `feff::1`／`ff00::`／`ffff::1`；
+   ULA `fc00::/7` 取 `fbff::1`／`fc00::1`／`fdff:ffff::1`／`fe00::1`；内嵌 IPv4 取
+   `::ffff:0.0.0.0`／`::ffff:127.0.0.1`／`::1.0.0.0`／`0:0:0:0:0:ffff:7f00:1`；authority 叠加取
+   `user@[fe80::1]`、`user@169.254.169.254:8080/latest`、带端口的 `169.254.169.254:8080`。
+2. **两端 0 条红**（Windows Broker **295** 全过；Android 同一张表全过）。这一族两侧的写法本来就不同：
+   Android 是 `head16 and 0xFFC0 == 0xFE80` 这类掩码位，Windows 是 `IsIPv6LinkLocal`／
+   `IsIPv6Multicast` 这类 .NET 属性——**今天同结论，但此前没有任何一条判据说这件事**。现在「差一位
+   就跨段」的邻界值在两端给出同一个答案，这句话是被跑出来的。负结果如实登记，免得下一轮把
+   「没报分歧」读成「没查」。
+3. 顺带钉住一条**已知残余**（不是新漏判）：`[::ffff:100.100.100.200]` 折成 IPv4 后落在按 B8 裁决
+   放行的 CGNAT `100.64/10` 段内，两端都放行。§二 早记过这个代价；把它写成向量条目，是为了让
+   「将来有人收紧 CGNAT 段」必须同时改这条陈述，而不是悄悄改判定面。
+4. 真正的分叉量在**另一张面**上：`fec0::/10`（IPv6 site-local，RFC 3879 已于 2004 撤销）。
+   Windows 有两处永久断言钉它判非公网（`UrlSafetyTests.cs:109`、`AuditRegressionTests.cs:28`），
+   `IsPublicIp` 的 site-local 分支使 `IsExemptFromHttpsUpgrade` 豁免升 https；Android 的
+   `isExemptIpv6` 只有回环／内嵌 IPv4／ULA 三条，全仓 `grep fec0` 零命中。一次性探针实测本端
+   `isExemptFromHttpsUpgrade("http://[fec0::1]/x")` 得 **false** ⇒ Android 升、Windows 不升。
+   **探针读完即删、不留在树里**：把一个错状态钉成用例，等于把分叉做成契约。
+5. 为什么这条不自决而转登 **Q67 R9-SH-23**：两个方向都不是「加严」一个词能盖住的——(a) Android 补
+   fec0 豁免是**加宽**明文面，而 B8 的放行段表不含 fec0::/10，补它等于扩裁决；(b) Windows 删
+   site-local 分支虽属加严，但要推翻两处既有审计断言、翻掉已写进注释的口径。都属 owner 给话。
+   同时把边界面的结论写清以防混谈：`fec0::1` 在两端的**拒绝边界**上同结论（都放行），分叉只在
+   scheme 选择那一面。
+6. Q66 至此闭。它原来的验收判据①「authority 清洗收成每端一份」按字面在两种语言里做不到，
+   真正能判的是**行为对账**，而向量现在直接覆盖 userinfo／端口／IPv6 叠加形态（第 1 点那三条）；
+   判据②（IPv6 段邻进表 + 两端对账）就是第 1–2 点。Android 独有的 host 级
+   `adjacentAddressesOnBothSidesOfEverySegment` **保留未删**——它判 `deniesHost`（裸 host），
+   向量判 `denies(url)`（完整 URL），两层不是一件事，删它是拿真锚换覆盖假象。
+7. 执行面：`dotnet test` Broker **295**（+21）全过 0 失败、发现数下界 ✅；`gradle --offline`
+   `:broker:testDebugUnitTest` 全绿；`verify_vectors`／`verify_vector_consumers`／行数红线／
+   文档计数／队列状态／markdown 两门禁全绿；Core 与 cargo 本批无源改动，收尾仍整套重跑一遍，
+   不引用上一批的数。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：

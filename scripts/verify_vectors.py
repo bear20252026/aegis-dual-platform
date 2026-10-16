@@ -54,7 +54,10 @@ MIN_FILES = {'schemas': 7, 'vectors': 21}
 # 21 allow）——这张表此前在 C# 与 Kotlin 各抄一份，条数是两份的并集，由合并实测得出。
 # R9-B71（2026-10-15，队列 Q66）：298 → 351，同表 +53 条（逐段左右邻 42 条 + authority
 # 清洗形态 11 条），现表 100 条（48 deny／52 allow）。
-MIN_VECTOR_ENTRIES = 351
+# R9-B72（2026-10-16，队列 Q66 第二半）：351 → 372，同表再 +21 条（IPv6 段左右邻：
+# fe80::/10、ff00::/8、fc00::/7 各两侧，内嵌 IPv4 的字节边界，以及 userinfo + IPv6 的
+# authority 叠加形态），现表 121 条（57 deny／64 allow）。
+MIN_VECTOR_ENTRIES = 372
 
 # R9-B59（§四 第 11 项 ② 与 Q21 是同一次定稿）：两份原生 C-ABI 向量的**信封 + 分区**词表。
 #
