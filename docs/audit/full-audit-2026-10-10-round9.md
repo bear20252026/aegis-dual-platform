@@ -4272,6 +4272,32 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    （wiring 判据 `webview2_surface_probe_test.py` 全绿）；`pytest tests/python` 与常驻门禁全绿；
    新文件 217 行在 300 红线内，不需要动基线。
 
+### 3.75 R9-B75（2026-10-16）：量一条自己写的推断——裸 authority 不转小写会不会漏判元数据
+
+1. 起因是 §3.73 第 4 点我自己写下的一句「本仓这条判据已是第三次各写一遍（`HasNumericAuthority`、
+   `SchemeForLocal`、`AndroidBroker` 侧）」。为了收口先把副本数清，结果那句话说得不准：
+   `OriginPolicy.cs:192/217` 那两处 `LastIndexOf(':')` 见到 `[` 开头就早返回，它们判的是
+   「点分 IPv4 的变体编码」，与「括号感知的端口剥离」**不属同一条判据**；C# 里真正的
+   括号感知实现是**两处**（`ReservedAddressBoundary.cs:63-73`、`UrlNormalizer.cs:213-224`），
+   第三处在 Android（`hostOf`）。跨端三处不错，但「C# 三处」是我写快了——按 §3.73 的字面
+   去收口会去动不该动的两处判定面。
+2. 数的过程中读出一条**看起来成立**的疑点：`HasNumericAuthority` 对裸 authority 不转小写，
+   而 `DeniesHost` 会 ⇒ 大写形态 `http://0XA9FEA9FE/`（云元数据 IP 的 0x 十六进制写法）
+   可能从裸 authority 那条路漏过去。按本仓规矩，这不该靠读码定案：**把它做成三条向量条目**
+   （裸形态、带 `/latest/meta-data/` 路径、再叠一层 `user@`），期望一律 deny，两端各跑一遍。
+3. **假设被推翻**：Windows 124 条全过（含这三条），Android 4 个用例也全过——大写 `0X…`
+   形态在两端都被拒。原因是第二支接住了：`Uri.TryCreate` 把 host 归一成小写，
+   `Denies(uri)` → `DeniesHost` 转小写后命中 `0x` 前缀判拒；第一支漏不漏都改不了终态。
+   也就是说「不转小写」是这条判据的一处**冗余强度**而不是缺口。三条向量留下（现表 124 条，
+   全树 372→375），它们现在的身份是「防未来把 `Denies(uri)` 那一支拆掉时无人报警」的绊线。
+4. 因此本批**不改任何判定面**，也不做那个收口重构：既然两端都判拒、两个 C# 实现的输入形状
+   又确实不同（一个吃完整 URL、一个吃地址栏裸串），把它们并成一个抽取器会把
+   「userinfo 是否参与 scheme 判定」这类语义悄悄改掉（现在 `BareHostOf` 不剥 userinfo、
+   `HasNumericAuthority` 剥），那是需要证据的行为变更，不是清理。
+5. 执行面：`dotnet test` Broker 谓词矩阵 **124** 条全过 0 失败；`gradle --offline`
+   `:broker:testDebugUnitTest` 全绿；`verify_vectors`／`verify_vector_consumers`／
+   `check_file_sizes`／文档计数／队列状态／markdown 两门禁／ruff·bandit·compat 全绿。
+
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「一行 `Performance.prototype.now.call(performance)` 即取无降噪 µs 精度时钟」不成立**
   （第九轮 R9-B74 / §3.74，钉在 Q25／Q57 的剩余半边）：这句是台账按推断写的（R9-B38 那批的
@@ -4283,6 +4309,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   不是「µs 级泄漏」。**下一轮别再用 µs 那句立严重性**；要重算就重跑
   `aegis_wv2_surface --timers`（STA 线程 + 控件路径，退出码 2 表示没量到，不是量出「没有差异」）。
   顺带钉一条读数纪律：探针里 rAF 相邻帧最小差 7.1ms 是**刷新周期**，不是精度上限，别读反。
+
+- **「裸 authority 不转小写会让大写 0x 十六进制的元数据 IP 漏判」不成立**
+  （第九轮 R9-B75 / §3.75 第 3 点）：推断的来源是真的差异——`ReservedAddressBoundary.HasNumericAuthority`
+  不 lowercase，而 `DeniesHost` 会。但终态由第二支决定：`Uri.TryCreate` 把 host 归一成小写，
+  `Denies(uri)` → `DeniesHost` 命中 `0x` 前缀 ⇒ 拒。实测三条形态（`http://0XA9FEA9FE/`、
+  带 `/latest/meta-data/`、再叠 `user@`）在 Windows 与 Android 上**都给 deny**。别按那句推断去
+  「补小写」——它不会改变任何终态，只会让那条判据在两个入口长出第三种形状。
 
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
   处方写的是「Windows 提前捕获定义器、核心与 Android 直接引用 ⇒ 三端不同形 ⇒ 要收口」，
