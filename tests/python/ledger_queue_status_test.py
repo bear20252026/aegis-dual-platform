@@ -58,6 +58,32 @@ def test_queue_section_is_bounded_at_the_next_top_level_heading() -> None:
     assert len(g.violations(text)) == 1
 
 
+def test_row_block_is_bounded_at_the_next_subsection_heading() -> None:
+    """R9-B81：块还必须在下一个 `### ` 处收尾——本文件 docstring 从 R9-B52 就这么声明过，实树没做。
+
+    后果不是理论上的：第九轮把 §3.20 之后的批次记录物理写进了 §五 的字节范围，缺这层边界时
+    队列最后一条行的块吞掉整段 §三 尾巴（真台账实测 174947 字符 vs 该行自身正文 1170 字符），
+    于是「未划线的行必须写明为什么开着」在那一行**空转**——下面的注入就是当时的假绿形态。
+    """
+    text = (HEAD + "- Q9 R9-XX-9 | P2 | 没有状态词的一行。\n\n"
+            "### 3.9 R9-B9：批次记录\n那条批注里写着「待裁决」三个字。\n")
+    blocks = g.queue_blocks(text)
+    assert len(blocks) == 1, blocks
+    assert "待裁决" not in blocks[0][1], "块没在 `### ` 处收尾，§三 的正文被当成活行的状态说明"
+    assert len(g.violations(text)) == 1, "借来的状态词把这条活行判成了「已说明为什么开着」"
+
+
+def test_real_ledger_last_row_does_not_swallow_the_batch_log() -> None:
+    """正面控制：真台账的最后一条行只该有它自己的正文那么长。
+
+    这条钉的是**规模**而不是内容——上一批把边界修好后，如果哪天又有人把 §三 写回 §五 范围内
+    并同时放宽块边界，行数看不出来、块长会立刻膨胀。
+    """
+    blocks = g.queue_blocks(ROUND9.read_text(encoding="utf-8"))
+    assert blocks, "§五 一条行都数不出来"
+    assert len(blocks[-1][1]) < 6000, f"最后一条行的块有 {len(blocks[-1][1])} 字符——又在吞 §三 尾巴"
+
+
 def test_pointers_are_resolved_inside_the_same_ledger_only() -> None:
     """指针必须在**同一份**台账里有对应小节——跨文件借用一个号就是假闭环。"""
     assert g.violations(STRUCK_DANGLING), "注入没被判出来"
