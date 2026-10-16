@@ -1422,6 +1422,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `AuditRegressionTests.cs:28` 并给依据。**本批不新登 Q 之外的东西**：边界那张面今天已核对过，
   `fec0::1` 在两端的**拒绝边界**上同结论（都放行，见 §3.72 第 1 点的 `fec0::1` 上邻条目），
   分叉只在 scheme 选择这一面。
+- Q68 R9-SH-24 | **P2（待裁决：一端导航、一端搜索，且「谁是契约」没有既有裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs:87`（CS-140 的 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt:173`（`classifyInput` 的 `when`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，本批 +2 条 IPv6）：
+  本批给这张表装 IPv6 弹时用哨兵探针把 12 个形态在两端各量一遍（跑完即删），结论是**只有 2 个形态端端一致**（裸 `2606:4700:4700::1111` 都判搜索词、`[::ffff:127.0.0.1]` 都判域名且都补 http，这两条已进表），其余全部相反：
+  ①带括号的 IPv6 字面量在 Windows 判**域名并导航**（`[::1]`→`http://[::1]`、`[fd12::3]`→http），在 Android 判**搜索词**（`https://www.baidu.com/s?wd=%5B%3A%3A1%5D`）——同一个人在两台设备上敲同一串字符，一台打开本机服务、一台去搜索引擎；
+  ②Android 的分类实际取决于**拼写里有没有点**，不是地址族：`[fd12::3]`（无点）→SEARCH，而 `[::169.254.169.254]`（带点）→DOMAIN 并产出 `https://[::169.254.169.254]`——同一种地址换个写法就换一条分支；
+  ③Android 对 `[8.8.8.8]` 给出 `kind=DOMAIN` 而 `normalizeInput` 得 **null**——判定说这是网址、归一产不出 URL，而这张表今天**没有**「DOMAIN ⇒ 归一非 null」的锚（`SearchNormalizeVectorsTest` 只锚了「EMPTY/FORBIDDEN_SCHEME ⇒ null」那一个方向）。
+  为什么不顺手做、也不用 `windows_url` 覆盖收编：那张表的覆盖机制是给「同一意图、不同文本」（大小写保留、拒绝发生的层级不同）准备的，且 `DocumentedCrossEndDivergences` 钉着条数；这批是**行为相反**，写成覆盖等于把分叉批准成契约。要合流必须先定「地址栏对 IPv6 字面量到底该导航还是该搜索」，那是产品口径不是实现细节。
+  验收判据（选定方向后）：①把 12 个形态中两端一致的全部进表，并把分叉的那些按裁决后的同一期望进表；②补上「DOMAIN ⇒ `normalizeInput` 非 null」这条锚（Android 现在的 `[8.8.8.8]` 会立刻红，正好当判据）；③若判「导航」，Android 的分类要改成按地址族判而不是按有没有点判，并同批改 `search-normalize-vectors.json` 里既有那条八进制 IPv4（`0177.0.0.1`）的 `windows_url` 覆盖是否仍成立。与 Q67 的分工：那条是 https 升级豁免面的 `fec0::/10`，本条是地址栏分类面，共同根因是「IPv6 段语义在两端各写一遍」，但裁决点不同。
 
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
 
@@ -4182,6 +4189,46 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `:broker:testDebugUnitTest` 全绿；`verify_vectors`／`verify_vector_consumers`／行数红线／
    文档计数／队列状态／markdown 两门禁全绿；Core 与 cargo 本批无源改动，收尾仍整套重跑一遍，
    不引用上一批的数。
+
+### 3.73 R9-B73（2026-10-16）：给跨端 scheme 表装 IPv6 弹——量出「地址栏分类」这一整面分叉，并修掉两支已定口径互相矛盾的那一支
+
+1. 起点是 §3.72 第 5 点自己说的话：`search-normalize-vectors.json`（CS+AD **逐条共用**的那张
+   scheme 表）今天不含任何 IPv6 输入，所以它对 IPv6 一直没机会说话。本批把 12 个形态投进去量。
+   **量法是哨兵探针**：两端各跑一次，实际值从失败信息／临时文件里读出来，**跑完即删**——
+   不把错状态钉成用例（把 `__PROBE__` 留在树里、或把分叉写成 `windows_url`，都是把分叉做成契约）。
+2. 实测结论：**只有 2 个形态端端一致**——裸 `2606:4700:4700::1111`（两端都判搜索词）与
+   `[::ffff:127.0.0.1]`（两端都判域名、都补 http）。这两条进表（现 28 条），其余全部相反，
+   转登 **Q68 R9-SH-24**：带括号 IPv6 在 Windows 是「导航」、在 Android 是「去搜索引擎」；
+   Android 的分类其实取决于**拼写里有没有点**（`[fd12::3]`→SEARCH 而 `[::169.254.169.254]`→DOMAIN）；
+   Android 对 `[8.8.8.8]` 给 `kind=DOMAIN` 却产出 **null**，而这张表只锚了反方向
+   （EMPTY/FORBIDDEN_SCHEME ⇒ null），「DOMAIN ⇒ 非 null」今天没有锚。
+3. 真正修掉的是**两支已定口径互相矛盾**：CS-140（IPv6 字面量走早分支、硬编码 `http://`）与
+   R8-CS-SEC-15（「scheme 的判据只有 `IsPublicHost` 那一个」）。于是公网 IPv6 字面量在输入层
+   拿到 http，要靠 HTTPS-only 升级层改写回 https——该层文档自己把这种补法叫**「白补」**；
+   而用户关掉升级层时这条 http 就真的发出去了。改法：`UrlNormalizer.cs:87` 那一支接回
+   `SchemeForLocal`（`:205`）。方向是加严（公网→https），回环／ULA／保留段一个字节都没放松，
+   因为 `SchemeForLocal` 只会给非公网补 http、不会反向——用例
+   `SearchNormalizeVectorTests.cs:132` 同时钉住 `[::1]`→http 这条反向控制与
+   `[2606:…]:8443` 的端口形态。
+4. 连带的第二处机制错（同一条链上）：`BareHostOf`（`:209`）此前无条件切在**第一个冒号**，
+   `[2606:4700:4700::1111]` 被截成 `[2606` ⇒ `IsPublicHost` 认它是主机名 ⇒ 判非公网。
+   即使 CS-140 不拦，scheme 判据也一样错。现按括号感知剥端口（`]` 之后那一枚才是端口分隔符），
+   与 `ReservedAddressBoundary.HasNumericAuthority` 用的是同一条判据——本仓这条判据第三次
+   在不同地方各写一遍（`HasNumericAuthority`、`SchemeForLocal`、`AndroidBroker` 侧），
+   前两次都在红灯时才对上。
+5. 为什么这条能自决而 Q68 不能：本批改的是**同一端内部两支口径打架**，且改后严格更严
+   （公网不再可能拿到明文），不涉及「哪一端的用户可见行为是对的」；Q68 改的是**两端相反且都有
+   文档依据**的分类，选哪边都会翻掉一端的既有断言，属 owner 给话。
+6. 与 Q67 的分工写清楚免得混谈：Q67 是 https **升级豁免面**的 `fec0::/10` 答案相反；本条
+   （Q68）是地址栏**分类面**相反。共同根因是「IPv6 段语义在两端各写一遍」，但两个裁决点不同，
+   各自要各自的话。另外本批确认：带括号 IPv6 的**保留段**形态（`[::169.254.169.254]` 等）在
+   拒绝边界上两端同结论（都拒，§3.72 已钉），所以 Q68 的分叉只在「敲地址栏之后是导航还是搜索」，
+   不在「能不能打开元数据端点」。
+7. 执行面（本机实跑）：`dotnet test` Core **926**（+3：新用例 + 两条进表条目）／Broker **295**
+   全过 0 失败，两条发现数下界 ✅；`gradle --offline` 三模块 ktlint + detekt + test 全绿；
+   `cargo test` 593 过 0 失败；`pytest tests/python` 878 过 1 跳过；行数红线／文档计数／队列状态／
+   向量与消费面／markdown 两门禁／ruff·bandit·compat 全绿。探针文件与临时输出均已删除，
+   工作树里没有一次性物件。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：

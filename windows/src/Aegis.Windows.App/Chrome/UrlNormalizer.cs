@@ -76,11 +76,19 @@ public static class UrlNormalizer
             return "about:blank";
 
         // CS-140：裸 IPv6 字面量（"[::1]"/"::1"，可含端口/路径）——此前因不含
-        // 点号被当搜索词。URI 正典形态要求方括号，裸冒号形态归一为 [..] 补 http。
+        // 点号被当搜索词。URI 正典形态要求方括号，裸冒号形态归一为 [..]。
         // 仅接手 '[' 或 ':' 起始的输入——字母起始（"fe80::1" 形如 scheme）维持
         // 既有 fail-closed 拒绝路径。
+        // R9-B73：scheme 不再硬编码 http，改走 SchemeForLocal——即 R8-CS-SEC-15 定的
+        // 「判据只有 IsPublicHost 那一个」。此前两支互相矛盾：公网 IPv6 字面量在这里
+        // 拿到 http，要靠 HTTPS-only 升级层改写回 https（该层文档自己称这种补法是「白补」），
+        // 而用户关掉升级层时这条 http 就真的发出去了。回环/ULA/保留段仍按非公网补 http，
+        // 一个字节都没放松（SchemeForLocal 只会给非公网 http，不会反过来）。
         if (trimmed[0] is '[' or ':' && IsIpv6Literal(trimmed))
-            return AsValidUriOrDefault("http://" + BracketIpv6(trimmed), trimmed, engineKey);
+        {
+            var bracketed = BracketIpv6(trimmed);
+            return AsValidUriOrDefault(SchemeForLocal(bracketed) + bracketed, trimmed, engineKey);
+        }
 
         var schemeMatch = SchemePrefix.Match(trimmed);
         if (schemeMatch is { Success: true } match)
@@ -204,7 +212,13 @@ public static class UrlNormalizer
         var slash = host.IndexOf('/');
         if (slash >= 0)
             host = host[..slash];  // 去路径，如 api.localhost/x → api.localhost
-        var colon = host.IndexOf(':');
+        // 剥端口：IPv6 字面量的冒号属于地址本身，`]` 之后那一枚才是端口分隔符
+        // （与 ReservedAddressBoundary.HasNumericAuthority 同一条判据）。此前无条件切在
+        // 第一个冒号上，`[2606:4700:4700::1111]` 被截成 `[2606` ⇒ IsPublicHost 认它是
+        // 主机名、判非公网 ⇒ 给**公网** IPv6 补了 http，与同类自己 IsPublicHost 的
+        // True 相反（R9-B73 实测）。括号不闭合的畸形写法照旧切在第一个冒号。
+        var closeBracket = host.StartsWith('[') ? host.IndexOf(']') : -1;
+        var colon = closeBracket >= 0 ? host.IndexOf(':', closeBracket) : host.IndexOf(':');
         if (colon >= 0)
             host = host[..colon];  // 剥离端口，如 localhost:8080 / 127.0.0.1:8080
         return host.TrimEnd('.').ToLowerInvariant();
