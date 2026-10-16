@@ -77,8 +77,9 @@ class AegisHomeBridge(
          * `@JavascriptInterface` 的对象对该 WebView 的**全部帧**可见，而判定只读顶层
          * URL——多一个受信文档就多一处「帧能驱动桥、判据看不见帧」的落点。加之前先
          * 把桥传输迁到 origin-scoped `addWebMessageListener`，否则本条按 P1 重新成立。
-         * 壳页侧的同一触发条件有常驻门禁（`shell_frame_guard.test.mjs` 判 frame-src），
-         * **这一半没有**：名单是 private val，加元素不会让任何现成用例变红。
+         * 壳页侧的另一半由 `shell_frame_guard.test.mjs` 判 frame-src；这一半由
+         * `BridgeTrustListGuardTest` 判「名单必须一元且由 HOME_URL 派生」＋「壳页语料里
+         * 只有 start.js 取用桥」（R9-B80 / 台账 §3.80，两条都用注入证过会红）。
          */
         private val TRUSTED_SHELL_PAGES =
             setOf(BrowserEngine.HOME_URL.removePrefix(TRUSTED_SHELL_PREFIX))
