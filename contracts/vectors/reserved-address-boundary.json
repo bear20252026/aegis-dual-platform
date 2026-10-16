@@ -607,6 +607,21 @@
       "url": "http://[::1]:6379/",
       "expected": "allow",
       "note": "回环带端口（B8 放行面的 IPv6 那一支）"
+    },
+    {
+      "url": "http://0XA9FEA9FE/",
+      "expected": "deny",
+      "note": "云元数据 IP 的**大写** 0x 十六进制形态：本类另一条入口 DeniesHost 会 lowercase，裸 authority 这条不转 ⇒ 疑漏判"
+    },
+    {
+      "url": "http://0XA9FEA9FE/latest/meta-data/",
+      "expected": "deny",
+      "note": "同上带路径形态，钉住「大写十六进制 + 元数据路径」不会因路径解析而绕开"
+    },
+    {
+      "url": "http://user@0XA9FEA9FE/",
+      "expected": "deny",
+      "note": "userinfo + 大写十六进制：两个清洗步骤（剥 userinfo、大小写归一）叠加时都必须认得这是元数据"
     }
   ]
 }

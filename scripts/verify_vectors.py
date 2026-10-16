@@ -57,7 +57,10 @@ MIN_FILES = {'schemas': 7, 'vectors': 21}
 # R9-B72（2026-10-16，队列 Q66 第二半）：351 → 372，同表再 +21 条（IPv6 段左右邻：
 # fe80::/10、ff00::/8、fc00::/7 各两侧，内嵌 IPv4 的字节边界，以及 userinfo + IPv6 的
 # authority 叠加形态），现表 121 条（57 deny／64 allow）。
-MIN_VECTOR_ENTRIES = 372
+# R9-B75（2026-10-16）：372 → 375，同表 +3 条大小写叠加形态（`0XA9FEA9FE` 裸/带路径/带
+# userinfo）——本批要量的正是「裸 authority 不转小写会不会漏判」这条推断，现表 124 条
+# （60 deny／64 allow）。
+MIN_VECTOR_ENTRIES = 375
 
 # R9-B59（§四 第 11 项 ② 与 Q21 是同一次定稿）：两份原生 C-ABI 向量的**信封 + 分区**词表。
 #
