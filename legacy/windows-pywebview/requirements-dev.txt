@@ -9,7 +9,8 @@
 # B7（第八轮 2026-10-08）：ruff 0.16.9→0.16.10 / mypy 2.3.1→2.4.0 随根
 # requirements-ci.in 同批 bump（PY-220 的对齐口径——两把锁必须同版本，否则
 # legacy-python-guard 与活跃树门禁跑的是两套规则）。
-ruff==0.16.10
+# R9-B76（2026-10-16）：ruff 0.16.10→0.17.0 随根 requirements-ci.in 同批 bump——# Dependabot 那张 PR 只改了两把锁里的一把，被 PY-220 的对齐断言判红；本批把两把一次对齐。
+ruff==0.17.0
 mypy==2.4.0
 bandit==1.9.4
 pyinstaller==6.22.0

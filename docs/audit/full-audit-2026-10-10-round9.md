@@ -4298,6 +4298,29 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `:broker:testDebugUnitTest` 全绿；`verify_vectors`／`verify_vector_consumers`／
    `check_file_sizes`／文档计数／队列状态／markdown 两门禁／ruff·bandit·compat 全绿。
 
+### 3.76 R9-B76（2026-10-16）：三张 Dependabot 的处置——一张红的不是新版本咬人，而是它只改了两把锁里的一把
+
+1. **#212（Rust minor-and-patch，只动 `Cargo.lock`）与 #214（`dtolnay/rust-toolchain` 的 pin）
+   直接合**：两者 CI 全绿 `merge=CLEAN`；#214 换的是**装机器**的 commit，真正的工具链版本仍由
+   `rust-toolchain.toml` 钉 1.99.0，所以它不动判定面。
+2. **#213（ruff 0.16.10→0.17.0）红在别处**：不是 0.17 触发了新规则，而是它只更新
+   `requirements-ci.in/.txt`，**没动 legacy dev 锁** ⇒ PY-220 那条
+   `test_legacy_dev_lock_matches_ci_lock_versions`（`tests/python/scripts_gates_test.py:372`）
+   判红，报错就是漂移表本身：`{'ruff': ('0.16.10', '0.17.0')}`。这条断言的存在理由正是
+   「两把锁漂移＝legacy-python-guard 与活跃树门禁跑两套规则」。
+3. 为什么自己出一张而不是去改它：`maintainerCanModify=false`，dependabot 的分支我写不进去。
+   做法是 **cherry-pick 它那笔锁更新**（保住 pip-compile 已解析出的整棵依赖图与 hash），
+   再补 legacy dev 锁同版本并按该文件既有惯例留 bump 注记。
+4. **跨小版本的前置证明**（这步不能省）：把 `ruff==0.17.0` 装进隔离目录
+   （`pip install --target`，不动本机环境），对同一批面（scripts／release／contracts／agent／
+   `validate_release.py`／tests／bindings）与 0.16.10 各跑一遍 ⇒ **两版都 All checks passed，
+   规则码集合零新增**。也就是说 PY-220 把两把锁钉成同版本之后，必须先说明「对齐过来的新口径
+   不咬现树」，否则对齐本身只是把红灯从「版本不同」换成「满屏新规则」。
+5. #213 的处置：本批落地后由 dependabot 自行 superseded；**我没有去关别人的 PR**——
+   关闭/删除属不可逆的共享面动作，等你点头。
+6. 执行面：`pytest tests/python` 878 过 1 跳过；ruff／bandit／py312-compat 三条活跃树门禁 OK；
+   `verify_lock_rids`（3 份锁、RID 图与中性图齐全）OK；文档计数／行数红线／队列状态／markdown 全绿。
+
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「一行 `Performance.prototype.now.call(performance)` 即取无降噪 µs 精度时钟」不成立**
   （第九轮 R9-B74 / §3.74，钉在 Q25／Q57 的剩余半边）：这句是台账按推断写的（R9-B38 那批的
