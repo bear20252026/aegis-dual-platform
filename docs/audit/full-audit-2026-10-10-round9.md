@@ -999,8 +999,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 - Q53 R9-SH-13 | P2 | `contracts/vectors/`（登记时 15 份，R9-B35 起 **21 份**，R9-B70 起 **22 份**——
   多出的一份是 `reserved-address-boundary.json`）↔
-  `scripts/verify_vector_consumers.py`
-  的 `CONSUMER_MANIFEST`（实测端集）↔ `agent/broker.py`（`AG` 零命中）：
+  `scripts/verify_vector_consumers.py::CONSUMER_MANIFEST`（实测端集）↔ `agent/broker.py`（`AG` 零命中）：
   AEG-006 的**扩面**那一半，本批只把它变成可判定的表，没有替任何端新增执行面。三档缺口按代价排序：
   ①`capability-*` / `audit-event-*` / `release-*` / `version-*` **八份**零端侧执行者
   （它们的 expected 是 schema 级的，
@@ -1076,8 +1075,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   还对已结束项 `Cancel()`（抛→吞）。
 
   **实测补一条登记时没写的**：本 SDK（WebView2 1.0.2903.40）的 `CoreWebView2DownloadOperation` **没有** `Completed` 事件——反射实测只有 BytesReceivedChanged / EstimatedEndTimeChanged / StateChanged（事件参数类型还是 `EventHandler<object>` 而不是强类型 args）。所以终态信号只能取 `StateChanged` + `State` 判定这条路，照 Win32 文档写 `Completed +=` 连编译都过不去。
-- Q51 R9-CS-14 | P2 | `windows/src/Aegis.Windows.App/Core/Settings/SettingsService.cs:24`
-  （`ThreatFeedUrl { get; init; } = ""`）↔ `Chrome/MainWindow.xaml.cs:138,326-337`
+- Q51 R9-CS-14 | P2 | `windows/src/Aegis.Windows.App/Core/Settings/SettingsService.cs::ThreatFeedUrl`（`:24` 的 `ThreatFeedUrl { get; init; } = ""`）↔ `Chrome/MainWindow.xaml.cs:138,326-337`
   ↔ `core/rust-policy-core/src/ffi/broker.rs:331`（`update_host_denylist`）↔ Android 全端
   （grep `Denylist|ThreatFeed|blocklist|isHostBlocked` 在 `android/**` **0 命中**）：
   外部第三轮审计 AEG-003「Android 缺少威胁黑名单防护」**范围要改准**——两端默认都是
@@ -1094,9 +1092,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   关键判断保留：它**已在设置 UI 明示**旧文案，所以不是「声明与行为不符」而是「行为偏弱」，
   改它＝出货行为变更（用户配了源就从「开窗取一次」变「持续取」）⇒ 走 §四 第 9 项定稿，
   定稿后落地为 6 小时节拍 + 退避封顶 24 小时 + 最后成功时间上 UI + 保存即刷。
-- Q54 R9-CS-16 | P3 | `windows/src/Aegis.Windows.App/Chrome/SettingsWindow.xaml.cs:103-129`
-  （`ThreatFeedBox_LostFocus` 的清空分支）↔ `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs:117-139`
-  （`Start()` 无条件 `LoadCached`）：用户在设置页**清空**订阅源只让周期循环不再取源，
+- Q54 R9-CS-16 | P3 | `windows/src/Aegis.Windows.App/Chrome/SettingsWindow.xaml.cs::ThreatFeedBox_LostFocus`（`:103-129` 的清空分支）↔ `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs::LoadCached`（`:117-139`，`Start()` 无条件读它）：用户在设置页**清空**订阅源只让周期循环不再取源，
   已生效的 `BlockedHosts` 快照继续拦截到进程结束；重启后 `Start()` 仍无条件读缓存文件
   `threat_feed.txt`（清空动作不删它），于是那份名单**无限期**留在拦截面里。出厂默认无缓存
   时两端仍是「空名单放行」，所以这不是默认行为缺陷，而是「把配置项清空＝关掉该功能」这个
@@ -1127,7 +1123,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 - Q25 R9-RS-1 | P2 | **部分闭环（R9-B38 / §3.38）；剩余半边的严重性按 §3.74 实测重判——本机 Runtime 下六条通道的引擎默认是 100µs 网格而非 µs**：挂载形态与描述符这一半已三端合一（原型级挂载 + 保留原生描述符 + 实例兜底），三端同形判据落在 `core/rust-policy-core/tests/timer_parity.rs`；六条高解析通道两端零包裹的**剩余半边**续登为 Q57 R9-CS-17（不顺手做：rAF/getEntries*/Event.timeStamp 的包裹是站点可观察的行为变更，只能由真机冒烟证明）。原条目：Q25 R9-RS-1 | P2 | `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:207` +
   `android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt:175` ↔
-  `core/rust-policy-core/src/timer_prec.rs:127-140`、`core/rust-policy-core/tests/timer_parity.rs:69-94`：
+  `core/rust-policy-core/src/timer_prec.rs::inject_script`（`:127-140` 那段原型级挂载）、`core/rust-policy-core/tests/timer_parity.rs:69-94`：
   计时防护**挂载形态与通道集**三端不同口径——两端把包装装在 `performance` **实例**上且
   descriptor 写死 `writable:false, configurable:false`，核心按 RS-216/RS-250 装在
   `Performance.prototype` 并保留原生 descriptor。后果：出货的 Windows/Android 制品里
@@ -1269,8 +1265,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   顺序不能倒——理由见 §3.66 第 1 点；③同时把 6to4/Teredo **不解码**这条口径写进三端
   注释（§3.66 第 6 点已有，别在下一轮被当成漏判补上）。
 
-- Q65 R9-SH-20 | P2 | `agent/broker.py:199-241`（`proposed_action_from_dict` 的
-  `mandatory = dataclass 无默认字段 ∪ CONTRACT_REQUIRED`）↔
+- Q65 R9-SH-20 | P2 | `agent/broker.py::proposed_action_from_dict`（`:199-241`；`mandatory = dataclass 无默认字段 ∪ CONTRACT_REQUIRED`）↔
   `contracts/schemas/action.schema.json`（required 只列十字段）↔
   `agent/tests/action_vector_consumption_test.py::test_agent_payload_face_is_wider_than_the_frozen_schema`：
   **两张「action」契约不是同一张**——Agent 的 `ProposedAction` 还要求
@@ -1382,9 +1377,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   否则这类「只在 master/schedule 跑的提交面」永远没有可失败的判据。
 
 - Q57 R9-CS-17 | P2 | **R9-B38 续登（Q25 的剩余半边）；§3.74 已把「要不要裹」的交换量成 100µs→1ms+jitter，且推翻了自己那句「绕过即取 µs」**：
-  ①`core/rust-policy-core/src/timer_prec.rs:170-244`（RS-279 一组：`mark`/`measure`/
+  ①`core/rust-policy-core/src/timer_prec.rs::inject_script`（`:170-244` 是 RS-279 一组：`mark`/`measure`/
   `getEntries*`/`timeOrigin`/`Event.timeStamp` 的原型级 getter 与 entry 圆整）↔
-  `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs` Stage 8 与
+  `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs::BuildScript` 的 Stage 8 与
   `android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt` Stage 8：
   **六条高解析通道两端零包裹**（`getEntriesByType` 在两端主源码零命中）。挂载形态那半边
   已在 R9-B38 三端合一，这一半没做的原因是：rAF 与 `getEntries*` 的圆整是**站点可观察**的
@@ -1439,7 +1434,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `AuditRegressionTests.cs:28` 并给依据。**本批不新登 Q 之外的东西**：边界那张面今天已核对过，
   `fec0::1` 在两端的**拒绝边界**上同结论（都放行，见 §3.72 第 1 点的 `fec0::1` 上邻条目），
   分叉只在 scheme 选择这一面。
-- Q68 R9-SH-24 | **P2（R9-B78 闭第一片：`[8.8.8.8]` 类两端已同判搜索词；剩余部分待裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs:87`（CS-140 的 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt:173`（`classifyInput` 的 `when`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，本批 +2 条 IPv6）：
+- Q68 R9-SH-24 | **P2（R9-B78 闭第一片：`[8.8.8.8]` 类两端已同判搜索词；剩余部分待裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs::SchemeForLocal`（`:87` 的 CS-140 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt::classifyInput`（`:173` 的 `when`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，本批 +2 条 IPv6）：
   本批给这张表装 IPv6 弹时用哨兵探针把 12 个形态在两端各量一遍（跑完即删），结论是**只有 2 个形态端端一致**（裸 `2606:4700:4700::1111` 都判搜索词、`[::ffff:127.0.0.1]` 都判域名且都补 http，这两条已进表），其余全部相反：
   ①带括号的 IPv6 字面量在 Windows 判**域名并导航**（`[::1]`→`http://[::1]`、`[fd12::3]`→http），在 Android 判**搜索词**（`https://www.baidu.com/s?wd=%5B%3A%3A1%5D`）——同一个人在两台设备上敲同一串字符，一台打开本机服务、一台去搜索引擎；
   ②Android 的分类实际取决于**拼写里有没有点**，不是地址族：`[fd12::3]`（无点）→SEARCH，而 `[::169.254.169.254]`（带点）→DOMAIN 并产出 `https://[::169.254.169.254]`——同一种地址换个写法就换一条分支；
@@ -1447,9 +1442,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   为什么不顺手做、也不用 `windows_url` 覆盖收编：那张表的覆盖机制是给「同一意图、不同文本」（大小写保留、拒绝发生的层级不同）准备的，且 `DocumentedCrossEndDivergences` 钉着条数；这批是**行为相反**，写成覆盖等于把分叉批准成契约。要合流必须先定「地址栏对 IPv6 字面量到底该导航还是该搜索」，那是产品口径不是实现细节。
   验收判据（选定方向后）：①把 12 个形态中两端一致的全部进表，并把分叉的那些按裁决后的同一期望进表；②补上「DOMAIN ⇒ `normalizeInput` 非 null」这条锚（Android 现在的 `[8.8.8.8]` 会立刻红，正好当判据）；③若判「导航」，Android 的分类要改成按地址族判而不是按有没有点判，并同批改 `search-normalize-vectors.json` 里既有那条八进制 IPv4（`0177.0.0.1`）的 `windows_url` 覆盖是否仍成立。与 Q67 的分工：那条是 https 升级豁免面的 `fec0::/10`，本条是地址栏分类面，共同根因是「IPv6 段语义在两端各写一遍」，但裁决点不同。
 
-- Q69 R9-DOC-22 | P2（**第一半已闭：R9-B81 / §3.81**；②内容校验与③符号锚口径仍**待裁决**） | `docs/audit/full-audit-2026-10-10-round9.md:754`（§五 标题写着「必须带 file:line」）↔ `scripts/verify_ledger_anchors.py:1`（本条落地后的新门禁）↔ `scripts/check_doc_claims.py:43`（`COUNT_CLAIM` 只比 workflow 裸数字）：
+- ~~Q69 R9-DOC-22~~ **本批全闭（R9-B81 / §3.81 落地候选①；R9-B83 / §3.83 落地候选③，并把候选②正式判成不做）**：§五 的 file:line 纪律现在有门禁判了——活行必须带锚、锚必须解析得到（路径逐字或裸名唯一、行号在文件行数内、区间非空），并且 8 条活行全部换成**符号锚**（`path.ext::符号名` 形态，按 `text_anchors.strip_comments` 剔注释后判符号真在代码里）；带符号锚的活行行数由 `scripts/verify_ledger_anchors.py::MIN_SYMBOL_ROWS` 钉成**等号**（退回去要红，多锚了不登记也要红）。行号锚仍会漂，但漂不再致命：符号锚不依赖行号，改名/删除当场判红。验收判据按原样兑现——注入一条注定会漂的锚（把 `COUNT_CLAIM` 写成 `COUNT_CLAIM_RENAMED_AWAY`）⇒ `EXIT=1` 两条消息（符号找不到 + 棘轮 7≠8），还原 ⇒ `EXIT=0`。②判成不做的理由进 §六。原条目 ↓
+  Q69 R9-DOC-22 | P2（**第一半已闭：R9-B81 / §3.81**；②内容校验与③符号锚口径仍**待裁决**） | `docs/audit/full-audit-2026-10-10-round9.md:754`（§五 标题写着「必须带 file:line」）↔ `scripts/verify_ledger_anchors.py:1`（本条落地后的新门禁）↔ `scripts/check_doc_claims.py::COUNT_CLAIM`（`:43`，只比 workflow 裸数字）：
   第八轮立下的「队列行**必须带 file:line**」这条纪律，在 R9-B81 之前**没有任何门禁判它**——既判不了「引用的文件与行还存在」，也判不了「那一行现在写着什么」，连「这行到底带没带锚」都没人判：本批按「`文件名.扩展名:数字`」口径实测 §五 62 条队列行，**49 条带锚、共 328 处引用**；剩下 13 条一个行号锚都没有，且**全部是已划线的行**（证据都搬进了 §三 的批次记录，读的人无法机械回读它当初判的是哪一行）。实证还是本批现读抓到的**我自己上一批**的漂移：#218 往 `AegisHomeBridge.kt` 插了 7 行 KDoc，同一个提交里引用的 `:76-77`／`:120-126` 当场变成 `:83-84`／`:127-133`，两道门禁全绿放行（§3.80 第 4 点）。行号失账不是假想事故：本仓「引用一个不存在的小节」在 §3.50 栽过一次，行号这一维当时仍是裸的，而 328 处引用在承重。
-  三条路的现状：①**存在性校验**（每处 `path.ext:NN[-MM]` 必须能在实树解析且 NN≤文件行数）与「带没带锚」**已落地**（R9-B81），代价不是靠豁免表消化，而是**缩小判定面**——只判未划线的活行，历史条目仍由 §三 批次记录自证（§3.81 第 2 点）；②**内容校验**（引用区间内至少要出现该条目正文里的一个标识符 token）仍未做、**待裁决**——本仓有把被禁形态**逐字抄进注释**的传统（R9-B45、§3.22 的 frame-ancestors 注记），引用注释行的条目会假红，要区分就得再加一张白名单，又回到①那个豁免面；③把易漂的引用改成**符号锚**（`File.kt::symbolName`，按文本判），本批 `BridgeTrustListGuardTest` 与 `verify_ledger_anchors.py` 的用例都是这种锚的样板，代价是它只对「引用一个声明」的句子成立，描述一段行为的句子仍然得靠行号。
+  三条路的现状：①**存在性校验**（每处 `path.ext:NN[-MM]` 必须能在实树解析且 NN≤文件行数）与「带没带锚」**已落地**（R9-B81），代价不是靠豁免表消化，而是**缩小判定面**——只判未划线的活行，历史条目仍由 §三 批次记录自证（§3.81 第 2 点）；②**内容校验**（引用区间内至少要出现该条目正文里的一个标识符 token）仍未做、**待裁决**——本仓有把被禁形态**逐字抄进注释**的传统（R9-B45、§3.22 的 frame-ancestors 注记），引用注释行的条目会假红，要区分就得再加一张白名单，又回到①那个豁免面；③把易漂的引用改成**符号锚**（`File.kt::符号名`，按文本判），本批 `BridgeTrustListGuardTest` 与 `verify_ledger_anchors.py` 的用例都是这种锚的样板，代价是它只对「引用一个声明」的句子成立，描述一段行为的句子仍然得靠行号。
   验收判据（选定方向后）：先造一条**注定会漂**的锚（同一提交里改被引文件），证明新门禁当场判红；再证明把那段代码恢复后锚仍绿——只有「能红且能修」同时成立，这条纪律才算被接上而不是被写下。
 
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
@@ -4557,7 +4553,48 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    而不是新缺陷形状；但它说明 `verify_doc_floors.py` 的范围（只判 README 那一条 bullet）确实留了面——
    台账活行里的**数值**（不带 `≥`、也不是路径锚）没有任何门禁判，这与 Q69 第②条是同一道未决口。
 
+### 3.83 R9-B83（2026-10-16，队列 Q69 收尾）：符号锚 + 棘轮等号——并把「内容校验」正式判成不做
+
+1. 落地的是 Q69 候选③：**符号锚** `path.ext::符号名`。判据在
+   [`scripts/verify_ledger_anchors.py`](../../scripts/verify_ledger_anchors.py) 里与行号锚同居一门禁：
+   文件解析同规则（逐字路径或唯一裸名），符号则必须在 `strip_comments` 之后的代码里真出现——
+   剔注释口径单源 `scripts/text_anchors.py`，因为**注记里提到一个符号不算证据**（R9-B39 那个病，
+   这次反过来用）。
+2. **8 条活行全部换掉**（Q53／Q51／Q54／Q25／Q57／Q65／Q68／Q69），锚点取的是该行本来就在说的声明：
+   `CONSUMER_MANIFEST`、`ThreatFeedUrl`、`ThreatFeedBox_LostFocus` 与 `LoadCached`、`inject_script`、
+   `BuildScript`、`proposed_action_from_dict`、`SchemeForLocal` 与 `classifyInput`、`COUNT_CLAIM`。
+   每个都在改锚前用剔注释后的代码验过一遍存在，不是照着名字猜。
+3. **棘轮用等号不用下界**：`MIN_SYMBOL_ROWS` 判的是「带可解析符号锚的活行**行数**」。
+   本批的实跑现场就是这条判据的价值——Q69 一划线，计数立刻从 8 掉到 7，门禁当场判红
+   （`带可解析符号锚的活行数是 7，登记值是 8`），逼我把登记值与结案同批改掉。
+   下界只能拦「退回去」，等号还拦「多锚了不登记」，而这个数与 §五 真实规模的耦合点此前**从没被核对过**。
+4. **踩到一个新形态的坑并记下来**：占位写法 `` `File.kt::symbolName` `` 自己就被当成一条锚
+   （门禁报「文件不存在」）。台账与代码 docstring 里凡是**示例形态**一律写成非 ASCII 的
+   `path.ext::符号名`，否则叙述里的假锚会挤掉真违规。这不是放宽判据：判据照旧逐条解析，
+   改的是「不要把占位写成合法语法」。
+5. 候选②「内容校验」（引用区间内至少要出现条目正文里的一个标识符）**正式判成不做**，理由进 §六：
+   本仓有把被禁形态逐字抄进注释的传统（R9-B45、§3.22 的 frame-ancestors 注记、`InstalledBuildMarkerTests`），
+   那条判据会把**解释历史**写的条目打红，而为变绿最容易被做的是删注记——丢掉的正是不想让人重犯的上下文。
+   符号锚在不依赖行号的方向上判掉了同一件事：改名/删除会红，注记怎么写都不会红。
+6. 真树注入（读被测命令自身退出码）：把 `scripts/check_doc_claims.py::COUNT_CLAIM` 写成
+   `::COUNT_CLAIM_RENAMED_AWAY` ⇒ `EXIT=1` 且两条消息（符号找不到 + 棘轮 7≠8）；还原 ⇒ `EXIT=0`。
+   用例新增 6 条（符号解析／改名红／**只在注记里出现**红／多义符号锚／棘轮双向／现树正面控制），
+   `ledger_anchors_test.py` 共 15 条全绿。
+7. **机器可读索引（CSV）是同批手改的，这一点没有门禁判**：`full-audit-2026-10-10-round9.csv` 的
+   `R9-DOC-22` 行把 `primary_reviewed` 从 `no` 改 `yes`、priority 补「R9-B83 闭第三半 ②判成不做」、
+   batch 追加 `R9-B83 §3.83`，并在 finding 末尾续写结案口径。CSV 侧常驻判据只有三条
+   （`gate_hollowness_test.py`：列数成矩形、ID 唯一、表头逐字），**没有任何判据知道某一行该不该改**——
+   改 md 忘改 CSV 不会红，下一轮按列解析时却会读到一条写着 `no` 的已闭项。改写办法（本批实证可用）：
+   按行 `csv.reader` 解析出 7 列、只替换目标行的列值、再逐列断言不含 ASCII 逗号与引号后 join 回去，
+   其余 123 行逐字节不动（`git diff --numstat` 必须给 `1 1`）。
+
 ## 六、复核后判定为不成立（留此防重复上报）
+- **「给台账行号锚加『内容校验』是可行的第三条路」不成立**（第九轮 R9-B83 / §3.83 第 5 点，Q69 候选②）：
+  这条判据要求「引用区间内至少出现条目正文里的一个标识符 token」，而本仓的传统是把**被禁形态逐字抄进
+  注释**当作防回归的说明（R9-B45 的 `"https://*"`、§3.22 的 frame-ancestors 注记、
+  `InstalledBuildMarkerTests` 里的历史写法原文）。于是解释历史的条目必然假红，而为了变绿最容易被做的
+  是**删掉那段注记**——丢掉的正是不想让人重犯的上下文，判据反而制造它本想防止的失忆。已用符号锚
+  （不依赖行号、判代码不判注记）在同一个方向上把这件事判掉；下一轮**不要再提**「按 token 比对行内容」。
 - **「R9-B80 本地两轮 `:app` ktlint + detekt + testDebugUnitTest 全绿」不成立**（§3.80 第 6 点，
   新登 R9-CI-20）：两轮命令都以 `… 2>&1 | tail -12` 结尾，退出码是 `tail` 的 0，不是 Gradle 的。
   `:app:ktlintTestSourceSetCheck` 从**第一轮**就 `FAILED`（新文件 9 条格式违规），是 CI 的
