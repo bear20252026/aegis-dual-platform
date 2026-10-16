@@ -208,9 +208,9 @@ public static class UrlSafety
             // IPv6 ULA fc00::/7（私网）
             if ((bytes[0] & 0xFE) == 0xFC)
                 return false;
-            // site-local fec0::/10
-            if (bytes[0] == 0xFE && (bytes[1] & 0xC0) == 0xC0)
-                return false;
+            // fec0::/10（IPv6 site-local）不再算「非公网」：该段已由 RFC 3879（2004）
+            // 撤销、今天不存在真实设备，为它保留明文豁免等于给一段不存在的地址开口子；
+            // Android 的 isExemptIpv6 也从来不认它（R9-B77 / 队列 Q67）。
             // 组播 ff00::/8（此前仅靠 IsIPv6Multicast 属性，首字节 0xfe 粗判
             // 同时漏判 ff 段——显式拦）
             if (bytes[0] == 0xFF)
