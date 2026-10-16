@@ -997,7 +997,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `core/rust-policy-core/src/c_abi/tests/vectors_confirmation.rs` 一份消费者（C#/Kotlin 零）
   ⇒ 属 B9 词表入冻结面的余量，需定稿。
 
-- Q53 R9-SH-13 | P2 | `contracts/vectors/`（登记时 15 份，R9-B35 起 **21 份**）↔
+- Q53 R9-SH-13 | P2 | `contracts/vectors/`（登记时 15 份，R9-B35 起 **21 份**，R9-B70 起 **22 份**——
+  多出的一份是 `reserved-address-boundary.json`）↔
   `scripts/verify_vector_consumers.py`
   的 `CONSUMER_MANIFEST`（实测端集）↔ `agent/broker.py`（`AG` 零命中）：
   AEG-006 的**扩面**那一半，本批只把它变成可判定的表，没有替任何端新增执行面。三档缺口按代价排序：
@@ -4549,6 +4550,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. 接线 `.github/workflows/contracts.yml`（紧跟锚点门禁）；可达即不进 `gate-execution-face.yaml`。
    执行面：`pytest tests/python` 全套、ruff／bandit、四道文档门禁、队列状态与锚点门禁、
    门禁执行面登记表各自 `EXIT=0`（逐条命令与输出见提交信息）。
+7. 合入后按同一把尺子回读 §五，当场又抓到一条**活行里的过期数字**：Q53 R9-SH-13 写着
+   「登记时 15 份，R9-B35 起 **21 份**」，而实树是 **22** 份——第 22 份是 R9-B70 落地的
+   `contracts/vectors/reserved-address-boundary.json`（`git log --diff-filter=A` 实证在 c9c93a1）。
+   就地补成「15 → 21 → 22」并点名多出的是哪一份。这条**不进 CSV**：它是 §3.82 判据的回读副产品，
+   而不是新缺陷形状；但它说明 `verify_doc_floors.py` 的范围（只判 README 那一条 bullet）确实留了面——
+   台账活行里的**数值**（不带 `≥`、也不是路径锚）没有任何门禁判，这与 Q69 第②条是同一道未决口。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「R9-B80 本地两轮 `:app` ktlint + detekt + testDebugUnitTest 全绿」不成立**（§3.80 第 6 点，
