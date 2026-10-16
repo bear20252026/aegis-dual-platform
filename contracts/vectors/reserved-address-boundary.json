@@ -237,6 +237,271 @@
       "url": "https://ntp.aegis.local:8443/",
       "expected": "allow",
       "note": "主机名形态：本层不按端口判"
+    },
+    {
+      "url": "http://0.255.255.255/",
+      "expected": "deny",
+      "note": "0/8 上邻"
+    },
+    {
+      "url": "http://9.255.255.255/",
+      "expected": "allow",
+      "note": "10/8 之下邻（公网）"
+    },
+    {
+      "url": "http://10.0.0.0/",
+      "expected": "allow",
+      "note": "10/8 下界（B8 放行内网）"
+    },
+    {
+      "url": "http://10.255.255.255/",
+      "expected": "allow",
+      "note": "10/8 上界"
+    },
+    {
+      "url": "http://11.0.0.0/",
+      "expected": "allow",
+      "note": "10/8 之上邻"
+    },
+    {
+      "url": "http://126.255.255.255/",
+      "expected": "allow",
+      "note": "127/8 之下邻"
+    },
+    {
+      "url": "http://127.0.0.0/",
+      "expected": "allow",
+      "note": "回环段的网络地址：本层按段放行，不按「可否作目标」判"
+    },
+    {
+      "url": "http://128.0.0.0/",
+      "expected": "allow",
+      "note": "127/8 之上邻"
+    },
+    {
+      "url": "http://169.253.255.255/",
+      "expected": "allow",
+      "note": "链路本地段之下邻"
+    },
+    {
+      "url": "http://169.254.0.0/",
+      "expected": "deny",
+      "note": "169.254/16 下界（不是元数据 IP，但整段都不是设备地址）"
+    },
+    {
+      "url": "http://169.254.255.255/",
+      "expected": "deny",
+      "note": "169.254/16 上界"
+    },
+    {
+      "url": "http://169.255.0.0/",
+      "expected": "allow",
+      "note": "链路本地段之上邻"
+    },
+    {
+      "url": "http://172.15.255.255/",
+      "expected": "allow",
+      "note": "172.16/12 之下邻"
+    },
+    {
+      "url": "http://172.16.0.0/",
+      "expected": "allow",
+      "note": "172.16/12 下界"
+    },
+    {
+      "url": "http://172.32.0.0/",
+      "expected": "allow",
+      "note": "172.16/12 之上邻"
+    },
+    {
+      "url": "http://100.63.255.255/",
+      "expected": "allow",
+      "note": "CGNAT 100.64/10 之下邻"
+    },
+    {
+      "url": "http://100.64.0.0/",
+      "expected": "allow",
+      "note": "CGNAT 下界"
+    },
+    {
+      "url": "http://100.127.255.255/",
+      "expected": "allow",
+      "note": "CGNAT 上界"
+    },
+    {
+      "url": "http://100.128.0.0/",
+      "expected": "allow",
+      "note": "CGNAT 之上邻"
+    },
+    {
+      "url": "http://192.0.1.255/",
+      "expected": "allow",
+      "note": "TEST-NET-1 之下邻"
+    },
+    {
+      "url": "http://192.0.2.0/",
+      "expected": "deny",
+      "note": "TEST-NET-1 下界"
+    },
+    {
+      "url": "http://192.0.2.255/",
+      "expected": "deny",
+      "note": "TEST-NET-1 上界"
+    },
+    {
+      "url": "http://192.0.3.0/",
+      "expected": "allow",
+      "note": "TEST-NET-1 之上邻"
+    },
+    {
+      "url": "http://192.167.255.255/",
+      "expected": "allow",
+      "note": "192.168/16 之下邻"
+    },
+    {
+      "url": "http://192.169.0.0/",
+      "expected": "allow",
+      "note": "192.168/16 之上邻"
+    },
+    {
+      "url": "http://198.17.255.255/",
+      "expected": "allow",
+      "note": "198.18/15 之下邻"
+    },
+    {
+      "url": "http://198.18.0.0/",
+      "expected": "deny",
+      "note": "198.18/15 下界"
+    },
+    {
+      "url": "http://198.19.255.255/",
+      "expected": "deny",
+      "note": "198.18/15 上界（第二段 19）"
+    },
+    {
+      "url": "http://198.20.0.0/",
+      "expected": "allow",
+      "note": "198.18/15 之上邻"
+    },
+    {
+      "url": "http://198.51.99.255/",
+      "expected": "allow",
+      "note": "TEST-NET-2 之下邻"
+    },
+    {
+      "url": "http://198.51.100.0/",
+      "expected": "deny",
+      "note": "TEST-NET-2 下界"
+    },
+    {
+      "url": "http://198.51.100.255/",
+      "expected": "deny",
+      "note": "TEST-NET-2 上界"
+    },
+    {
+      "url": "http://198.51.101.0/",
+      "expected": "allow",
+      "note": "TEST-NET-2 之上邻"
+    },
+    {
+      "url": "http://203.0.112.255/",
+      "expected": "allow",
+      "note": "TEST-NET-3 之下邻"
+    },
+    {
+      "url": "http://203.0.113.0/",
+      "expected": "deny",
+      "note": "TEST-NET-3 下界"
+    },
+    {
+      "url": "http://203.0.113.255/",
+      "expected": "deny",
+      "note": "TEST-NET-3 上界"
+    },
+    {
+      "url": "http://203.0.114.0/",
+      "expected": "allow",
+      "note": "TEST-NET-3 之上邻"
+    },
+    {
+      "url": "http://223.255.255.255/",
+      "expected": "allow",
+      "note": "组播 224/4 之下邻（最后一个公网地址）"
+    },
+    {
+      "url": "http://224.0.0.0/",
+      "expected": "deny",
+      "note": "组播下界"
+    },
+    {
+      "url": "http://239.0.0.1/",
+      "expected": "deny",
+      "note": "管理组播"
+    },
+    {
+      "url": "http://240.0.0.0/",
+      "expected": "deny",
+      "note": "240/4 保留段下界"
+    },
+    {
+      "url": "http://255.255.255.254/",
+      "expected": "deny",
+      "note": "广播地址的前一邻——整段 >=224 都在拒绝面内"
+    },
+    {
+      "url": "http://169.254.169.254:8080/latest",
+      "expected": "deny",
+      "note": "带端口的元数据端点：剥端口不得改变判定"
+    },
+    {
+      "url": "http://user@169.254.169.254/latest",
+      "expected": "deny",
+      "note": "userinfo 不参与判定——否则 `@` 前面塞点什么就把段匹配绕开了"
+    },
+    {
+      "url": "http://user:pw@127.0.0.1:8000/",
+      "expected": "allow",
+      "note": "带凭据的本机服务仍要能打开（B8）"
+    },
+    {
+      "url": "http://anonymous@my-nas.local/share.bin",
+      "expected": "allow",
+      "note": "主机名 + userinfo：交 DNS 定权威"
+    },
+    {
+      "url": "http://127.0.0.1./",
+      "expected": "allow",
+      "note": "尾点不改判定（FQDN 写法）"
+    },
+    {
+      "url": "http://169.254.169.254./latest",
+      "expected": "deny",
+      "note": "尾点的元数据端点"
+    },
+    {
+      "url": "http://0177.0.0.1:80/",
+      "expected": "deny",
+      "note": "非规范点分 + 端口（R9-B70 的 ⑦ 在带端口时也必须成立）"
+    },
+    {
+      "url": "http://169.1:80/",
+      "expected": "deny",
+      "note": "两段简写 + 端口"
+    },
+    {
+      "url": "http://[::1]:9000/api",
+      "expected": "allow",
+      "note": "IPv6 回环带端口带路径"
+    },
+    {
+      "url": "http://[fe80::1]:80/",
+      "expected": "deny",
+      "note": "IPv6 链路本地带端口"
+    },
+    {
+      "url": "http://[::ffff:169.254.169.254]:9000/latest",
+      "expected": "deny",
+      "note": "mapped 元数据 + 端口 + 路径"
     }
   ]
 }

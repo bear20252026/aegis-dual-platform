@@ -1382,7 +1382,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   前提已做成能红的判据（`tests/python/injected_js_parity_test.py` +3 条），不是留一段推理。
   所以 Q57 剩下的只有①那一半，仍**需设备/桌面冒烟**。
 
-- Q66 R9-SH-22 | P3 | `android/broker/src/test/kotlin/com/aegis/broker/ReservedAddressBoundaryTest.kt:85`（`adjacentAddressesOnBothSidesOfEverySegment`）↔ `windows/tests/Aegis.Windows.Broker.Tests/ReservedAddressBoundaryTests.cs`（同族零用例）↔ `windows/src/Aegis.Windows.App/Broker/ReservedAddressBoundary.cs:54`（`HasNumericAuthority`）↔ `android/broker/src/main/kotlin/com/aegis/broker/ReservedAddressBoundary.kt:181`（`hasNumericAuthority`）：
+- Q66 R9-SH-22 | **P3（R9-B71 已闭第一半 §3.71，第二半带理由仍开）** | `windows/src/Aegis.Windows.App/Broker/ReservedAddressBoundary.cs:54`（`HasNumericAuthority`）↔ `android/broker/src/main/kotlin/com/aegis/broker/ReservedAddressBoundary.kt:181`（`hasNumericAuthority`）↔ `android/broker/src/test/kotlin/com/aegis/broker/ReservedAddressBoundaryTest.kt:85`（`adjacentAddressesOnBothSidesOfEverySegment`）↔ `contracts/vectors/reserved-address-boundary.json`：
   R9-B70 把两张手抄表收成一份跨端向量（§3.70）之后，还剩两族没进表，如实登记而不是当成已闭：
   ①**逐段左右邻**——只测被点名的地址会放过「段边界写错一位」这一族缺陷，Android 有这一族
   （`169.253.255.254`、`223.255.255.254` 等），C# 一个都没有，所以「两端都跑同一份表」这句话
@@ -1390,8 +1390,18 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   带 scheme 的完整 URL，恰好绕开这段清洗逻辑。
   为什么不顺手做：①邻界值一旦进表就是**同时钉住两端**，选错一个会把另一也钉错，得逐条对着
   段表核过再进（下一批单独做）；②那是入口清洗不是判定面，改它要连带 `DeniesRaw` 的契约。
-  验收判据：①左右邻进 `reserved-address-boundary.json` 且两端的段表逐条对得住；②authority
-  清洗每端一份，并让向量覆盖「带端口／带 userinfo 的保留地址」形态。
+  **R9-B71（§3.71）已闭的前两半**：逐段左右邻 42 条 + authority 形态 11 条进了跨端向量
+  （表现 100 条：48 deny／52 allow），两端逐条跑；这一族进表当天就量出一处 Windows 回归并
+  修掉——`http://127.0.0.1./`（FQDN 尾点）被 R9-B70 新加的 ⑦ 判成「五段不规范」而拒了本机
+  回环，正面撞 B8（`ReservedAddressBoundary.cs:67-73` 改为清洗里先剥尾点再判形态）。
+  剩下的与为什么不算已闭：①两端 authority 清洗**仍是两份实现**，本批统一的是行为不是实现单源，
+  合并它要先把两端的 URL 拆解口径对齐（C# 手工切 `rawUrl`，Kotlin 走 `hostOf`）；②进表的邻界
+  是 IPv4，IPv6 的段邻（`fe80::/10`／`ff00::/8` 掩码边界、ULA `fc00::/7` 与 site-local
+  `fec0::/10` 的重叠）没有进——两端 IPv6 判定面本身还没有对账判据（Windows 用
+  `IsIPv6LinkLocal` 这类属性、Android 用掩码位，今天恰好同结论但没有锚）。
+  验收判据（剩下的）：①authority 清洗收成每端一份且向量能直接判它；②IPv6 段邻进表，
+  前提是两端 IPv6 判定面先有对账。Android 独有的 host 级逐段左右邻**保留未删**——
+  向量是 URL 级子集，删它是用真锚换覆盖假象。
 
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
 
@@ -4079,6 +4089,40 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    完整 URL 恰好绕开它 ⇒ 同一 Q66；④两端的保留段表本身仍是两份实现（C# 的 if 链、
    Kotlin 的 `RESERVED_IPV4_SEGMENTS`），本批统一的是**行为**（同一份期望值），不是实现单源。
 
+
+### 3.71 R9-B71（2026-10-15，队列 Q66 第一半）：左右邻与 authority 形态进跨端向量——量到的是上一批我自己引入的回归
+
+1. 这批只做 R9-B70 收尾时登记的那两族：**逐段左右邻**与 **authority 清洗**。53 条进同一份
+   `contracts/vectors/reserved-address-boundary.json`（42 条邻界 + 11 条端口／userinfo／尾点／
+   非规范点分形态），表现为 **100 条（48 deny／52 allow）**；期望值按已裁决的段语义写
+   （B8 放行面 + 「根本不是任何设备」拒绝面），**由两端执行面判我对不对**，不是我写完就算。
+   计数同批：`MIN_VECTOR_ENTRIES` 298→351（消费端集不变，仍 AD+CS）。
+2. 一条红，红在 Windows，而且红的是**上一批我自己写的判据**：`http://127.0.0.1./`
+   （FQDN 尾点）被判成「五段不规范」⇒ 拒。那是本机回环，正面撞第七轮 B8「本机与内网必须能
+   打开」。根因是 R9-B70 把 ⑦ 加在**裸 authority** 上时没先剥 FQDN 的空尾标签，而同一个类里
+   `DeniesHost` 那条路径是先 `TrimEnd('.')` 的 ⇒ 同一个谓词的两条入口对尾点处理不一致。
+   修法在 `ReservedAddressBoundary.cs:67-73`：清洗里先剥尾点再判形态。改后
+   `127.0.0.1.` 放行、`169.254.169.254.` 仍拒（理由从「非规范点分」变为「落在 169.254/16」）、
+   `0177.0.0.1.` 仍拒。登记为 R9-CS-22。
+3. 这条给本仓的方法学添了一笔实证：**反向控制也有盲区**。§3.70 第 6 点写着「允许组 21 条
+   是这条的反向控制」，但那 21 条全是「被点名的地址」，尾点／FQDN 这一族不在里面 ⇒
+   「有允许组」不等于「收紧不会误伤」。Q66 存在的理由就是这一类，今天用它闭了一半。
+4. Android 侧 **0 条红**：100 条全过（含 `198.18/15` 的第二段边界 `198.19.255.255` 拒／
+   `198.20.0.0` 放行、`100.64/10` 上下界、三个 TEST-NET /24 的左右邻、
+   `http://user@169.254.169.254/latest` 的 userinfo 剥离）。Windows 侧除尾点那条也全过 ⇒
+   「两端在这一族上同口径」这句话说得出口，是因为同一张表在两端各跑了一遍，
+   不是因为两边代码长得像。
+5. 执行面（本机实跑，无一条是声明）：`dotnet test` Core **923**／Broker **274**（+53 条）
+   全过 0 失败，两条发现数下界 ✅；`gradle --offline` `:broker` 的 ktlint + detekt + test 与
+   `:app`／`:webview-adapter` 的 test 全绿；`cargo test` 593 过 0 失败（向量目录加条目必须
+   跑 Rust——`vectors.rs` 按目录遍历）；`pytest tests/python` 全绿；`verify_vectors`／
+   `verify_vector_consumers`／行数红线／文档计数／队列状态／markdown 两门禁／ruff·bandit·compat 全绿。
+6. 没做与边界（所以 Q66 只闭一半、如实保留在队列里）：①authority 清洗仍是两份实现
+   （`HasNumericAuthority`／`hasNumericAuthority`），本批统一的是行为，实现单源要先把两端
+   URL 拆解口径对齐；②进表邻界是 IPv4，IPv6 的段邻没进——两端 IPv6 判定面本身还没有对账
+   判据（Windows 走 `IsIPv6LinkLocal` 这类属性、Android 走掩码位，今天恰好同结论但没有锚）；
+   ③Android 独有的 host 级 `adjacentAddressesOnBothSidesOfEverySegment` **保留未删**：
+   向量这层是 URL 级子集，删它就是拿一条真锚去换覆盖假象。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：

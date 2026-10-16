@@ -67,6 +67,10 @@ public static class ReservedAddressBoundary
         var colon = authority.LastIndexOf(':');
         if (colon > 0 && !authority.EndsWith(']'))
             authority = authority[..colon];                 // 剥端口（IPv6 带方括号，不动）
+        // FQDN 的尾点是一个空标签，不是 inet_aton 变体：先剥掉再判形态，否则
+        // `127.0.0.1.` 会被下面读成「五段不规范」而拒掉本机回环——正是 B8 裁决要求
+        // 必须能打开的那一类（跨端向量条目 http://127.0.0.1./ 实测抓红，R9-B71）。
+        authority = authority.TrimEnd('.');
         if (authority.Length == 0)
             return false;
         return authority.All(char.IsDigit)

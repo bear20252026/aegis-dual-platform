@@ -52,7 +52,9 @@ MIN_FILES = {'schemas': 7, 'vectors': 21}
 # （同两种形态的语法面）。
 # R9-B70（2026-10-15）：251 → 298，新增 reserved-address-boundary.json 47 条（26 deny／
 # 21 allow）——这张表此前在 C# 与 Kotlin 各抄一份，条数是两份的并集，由合并实测得出。
-MIN_VECTOR_ENTRIES = 298
+# R9-B71（2026-10-15，队列 Q66）：298 → 351，同表 +53 条（逐段左右邻 42 条 + authority
+# 清洗形态 11 条），现表 100 条（48 deny／52 allow）。
+MIN_VECTOR_ENTRIES = 351
 
 # R9-B59（§四 第 11 项 ② 与 Q21 是同一次定稿）：两份原生 C-ABI 向量的**信封 + 分区**词表。
 #
