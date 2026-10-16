@@ -12,7 +12,10 @@
    引用一个不存在的小节，比不写指针更坏，因为它读起来像已经交代过。
 
 判据（每条都在 tests/python/ledger_queue_status_test.py 里以内存注入证伪）：
-- 队列行 = 顶层 `- Qn` / `- ~~Qn` 形态；一条行的「块」= 从该行到下一条队列行或下一个 `### ` 标题。
+- 队列行 = 顶层 `- Qn` / `- ~~Qn` 形态；一条行的「块」= 从该行到下一条队列行、下一个
+  `### ` 标题或下一个 `## ` 标题（三者取最近）。第三层边界到 R9-B81 才真正实现——
+  第九轮把 §3.20 之后的批次记录物理写进了 §五 的字节范围，缺它时队列最后一条行吞掉
+  17 万字符的 §三 尾巴，「未划线的行必须写明为什么开着」在那一行空转（实测注入复现）。
 - 未划线的行必须含一个**开放状态词**（词汇表见 `OPEN_STATE_WORDS`）：待裁决 / 待定稿 / 待设备 /
   部分闭环 / 需给话 …。没有状态词的开放行＝下一个读者无法判断它到底要不要动手。
 - 划线的行必须含至少一个能在同一文件里解析到的 `§3.nn` 指针。
@@ -35,6 +38,7 @@ ROW_HEAD = re.compile(r"^- (?:~~)?Q\d+", re.M)
 STRUCK = re.compile(r"^- ~~Q\d+", re.M)
 POINTER = re.compile(r"§(3\.\d+)")
 HEADING = re.compile(r"^### (3\.\d+)", re.M)
+SUBHEADING = re.compile(r"^### ", re.M)
 # 开放状态词：一行「没划线」的队列项必须从中挑一个写明它为什么还开着。
 OPEN_STATE_WORDS = (
     "待裁决",
@@ -61,9 +65,16 @@ OPEN_STATE_WORDS = (
 def queue_blocks(text: str) -> list[tuple[str, str]]:
     """§五 队列段内的队列行 → (行首文本, 整块文本)。
 
-    块的两端都有边界：行到行，段到**下一个 `## ` 标题**。少了后者，§五 最后一条行会把
-    §六/§七 的正文当成自己的状态说明（那些段落里出现「待裁决」是常态），
-    判据就在最该生效的那一行上失效。
+    块有三层边界，缺一层判据就在最该生效的那一行上失效：
+    1. **行到行**：到下一条队列行；
+    2. **段到段**：到下一个 `## ` 标题——少了它，§五 最后一条行会把 §六/§七 的正文当成自己的
+       状态说明（那些段落里出现「待裁决」是常态）；
+    3. **小节到小节**：到下一个 `### ` 标题（R9-B81 才真正做上；本文件 docstring 第 15 行
+       从 R9-B52 起就一直这么声明，实树没实现——典型的「判据写着而执行面没有」）。
+       第九轮把 §3.20 之后的批次记录物理写进了 §五 的字节范围，于是队列最后一条行的「块」
+       连整段 §三 尾巴一起吞掉：实测 **174947 字符 vs 该行自身正文 1170 字符**。
+       后果可注入复现：抹掉最后一条行自身正文里的全部开放状态词，`violations()` 仍返回 0 条
+       ——状态词从被吞的 §3.x 里就地取到了，「未划线的行必须写明为什么开着」在那一行是空转的。
     """
     start = QUEUE_HEAD.search(text)
     if not start:
@@ -76,6 +87,9 @@ def queue_blocks(text: str) -> list[tuple[str, str]]:
     for index, match in enumerate(rows):
         end = rows[index + 1].start() if index + 1 < len(rows) else len(body)
         block = body[match.start():end]
+        heading = SUBHEADING.search(block)
+        if heading:
+            block = block[: heading.start()]
         blocks.append((block.splitlines()[0], block))
     return blocks
 

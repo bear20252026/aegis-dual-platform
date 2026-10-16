@@ -159,6 +159,12 @@ jobs:
       # （规模虚高、下一轮把做完的事再派一遍）。这两条都由下面的门禁判。
       - name: Ledger queue status gate (R9-B52——队列状态必须可读，指针必须落得下)
         run: python scripts/verify_ledger_queue_status.py
+      # R9-B81（Q69 第一半）：§五 标题从第八轮起就写着「必须带 file:line」，但没人判这行
+      # 到底带没带锚、锚指的文件还在不在、行号有没有越界。#218 那批往被引用的文件里插了
+      # 7 行注释，同提交写的 :76-77 当场漂成 :83-84，两道既有门禁都放行。
+      # 范围只判未划线的活行——划线行引的是当时的行号，判它们就是要改写历史或开豁免表。
+      - name: Ledger anchor resolvability gate (R9-B81——活行的 file:line 锚必须解析得到)
+        run: python scripts/verify_ledger_anchors.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
