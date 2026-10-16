@@ -45,7 +45,9 @@ internal static class Probe
                 // 动态测量：与正典 App 同一条初始化路径（见 RedirectProbe.cs 的头注）。
                 // 刻意只在本机/桌面跑，不进 compat——它要有可用的浏览器宿主。
                 "--redirect" => RedirectProbe.Run(),
-                _ => Fail($"未知模式 {mode}（--surface / --redirect）"),
+                // Q57/Q25：六条高解析通道在引擎默认下的分辨率读数（同样只在本机/桌面跑）。
+                "--timers" => TimerSurfaceProbe.Run(),
+                _ => Fail($"未知模式 {mode}（--surface / --redirect / --timers）"),
             };
         }
         catch (Exception e)
