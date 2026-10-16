@@ -703,12 +703,14 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      且现树 `is_high_risk_host` 的私网放行是第七轮 B8 裁决的钉（有专门用例保护
      `192.168.1.1:8080` 不被判高危，见 R9-RS-6）。它建议的「按发起者信任分级」与
      第 1 条是同一次改造，不单独收紧。
-  7. **AX-03 的两半残余**（§五 Q50）：①把 Android 桥的受信面从「整个
-     `file:///android_asset/` 前缀」收窄成壳页精确名单——要先确证内置 GeoGebra 页不消费
-     该桥，而那份资源是构建期下载、不入库，本机 grep 只能对当前副本负责；②把桥传输从
-     `@JavascriptInterface` 迁到 `androidx.webkit` 的 origin-scoped `addWebMessageListener`
-     （唯一能拿到帧 Origin 的路），牵动三端共用的 `shared/shell/start.js` 适配层 ⇒ 跨端
-     契约变更。本批只落了「不需要动这两处」的那一半：CSP 显式 `frame-src 'none'`。
+  7. ~~**AX-03 的两半残余**（§五 Q50）~~ **本批回写状态：①已落地（§3.26）、②带理由关闭（§3.79）**。
+     ①把 Android 桥的受信面从「整个 `file:///android_asset/` 前缀」收窄成壳页精确名单——要先确证
+     内置 GeoGebra 页不消费该桥，而那份资源是构建期下载、不入库，本机 grep 只能对当前副本负责；
+     ②把桥传输从 `@JavascriptInterface` 迁到 `androidx.webkit` 的 origin-scoped
+     `addWebMessageListener`（唯一能拿到帧 Origin 的路），牵动三端共用的 `shared/shell/start.js`
+     适配层 ⇒ 跨端契约变更。本批只落了「不需要动这两处」的那一半：CSP 显式 `frame-src 'none'`。
+     ②今日按「判据已无可区分的输入」结案（§3.79 第 1、3 点），**用户若仍要求走迁移，本条即重启**；
+     放开 frame 或加第二个受信页同样是重启点。
   8. **Q51 R9-CS-14：Android 要不要有威胁订阅源**（外部审计 AEG-003 的准确范围）。两端
      出厂默认都是空名单放行，差别在 Android 连「让用户开启」的地方都没有。补齐＝新_fetch
      →校验→缓存→灌核心 denylist_整条链，要先定源从哪来、谁签、断网时是否保留最后一份
@@ -839,7 +841,18 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   路径段」两套解码器，而后者注释正是前者的反驳理由；本仓两处自写纪律「不欢迎第二个解析器」。
   落地时把**查询值**也一并改严格（Windows 侧两处都是 `Uri.UnescapeDataString`，见
   `Core/Downloads/DownloadPolicy.cs:65,130`）——两端对同一个 URL 从此解出同一个名字。
-- Q10 R9-AD-10 | P3（**待裁决**：桥传输整体迁移属跨端契约变更，§四） | `AegisHomeBridge.kt:95-121` + `SecureWebViewFactory.kt:127-132`：
+- ~~Q10 R9-AD-10~~ **本批与 Q50 第二半合并结案（R9-B79 / §3.79，带理由关闭）**：三个面今日现读重测，
+  「拿不到调用方 frame Origin」这条判据已没有可区分的输入——受信面是 `AegisHomeBridge.kt:76-77`
+  由 `BrowserEngine.HOME_URL` 派生的**一元**名单（§3.26），壳页 CSP 显式 `frame-src 'none'`
+  （`shared/shell/start.html:29`，§3.22），多窗口关着（`BrowserEngine.kt:65`）。
+  **本行原先的证据量错了语料，就地纠正**：「`shared/shell` 零 iframe ⇒ 今日无落点」判的是壳页，
+  而 §3.26 之前受信面是整个 assets 前缀——GeoGebra 页当时受信，其 `dist/geogebra-cache` 副本里
+  **2 个 GWT 编译产物真实拼出** `<iframe …allowfullscreen>`（另 158 个命中是 i18n 串）⇒ 帧驱动桥
+  **曾有落点**，把它关掉的是精确名单而不是「壳页恰好没帧」。触发条件：壳页出现任何 frame，或
+  `TRUSTED_SHELL_PAGES` 加第二个受信页 ⇒ 立即升 **P1** 并先做 origin-scoped `addWebMessageListener`；
+  前者由 `shell_frame_guard.test.mjs` 常驻守，**后者今日无门禁**（空档已登记，见 §3.79 第 3 点）。
+  原条目 ↓
+  Q10 R9-AD-10 | P3（**待裁决**：桥传输整体迁移属跨端契约变更，§四） | `AegisHomeBridge.kt:95-121` + `SecureWebViewFactory.kt:127-132`：
   `addJavascriptInterface` 对象对所有帧可见（本类 KDoc 自述）而判据只取 `webView.url`
   （主框架），受信面是整个 `file:///android_asset/` 前缀（首页 + GeoGebra）⇒ 壳页内跨源
   iframe 可驱动 `navigate/setEngine/setWallpaper/goBack`。实测 `shared/shell` 现零 iframe
@@ -852,7 +865,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   批次 3 先做可直改面：壳页 CSP 把 `frame-src` 从「由 `default-src 'self'` 隐含」写成显式声明、
   来源判据拒空/异常 url、补用例；`addJavascriptInterface` 拿不到调用方 frame origin 这条
   残余属平台能力，迁 WebMessage 传输另行裁决。
-- Q50 R9-AD-11 | **P2 → 第一半已闭（§3.26），第二半带理由挂起** | 收窄已落地：桥受信面从整个 `file:///android_asset/` 前缀改成壳页精确名单（名单由 `BrowserEngine.HOME_URL` 派生），依据是 dist/geogebra-cache 当前副本对桥零引用（grep AegisBridge/__aegis/android_asset/JavascriptInterface/navigate( 全 0）。第二半（迁 origin-scoped addWebMessageListener）在 frame-src 'none' + 精确名单之后已无「可区分的输入」，要动的却是三端共用的 start.js 两个通道选择点 ⇒ 不做，理由见 §3.26 第 5 项。以下为登记原文（事实仍有效，前缀语义已被替换）：
+- ~~Q50 R9-AD-11~~ **本批全闭（第一半 R9-B26 / §3.26；第二半 R9-B79 / §3.79 带理由关闭）** | 收窄已落地：桥受信面从整个 `file:///android_asset/` 前缀改成壳页精确名单（名单由 `BrowserEngine.HOME_URL` 派生），依据是 dist/geogebra-cache 当前副本对桥零引用（grep AegisBridge/__aegis/android_asset/JavascriptInterface/navigate( 全 0）。第二半（迁 origin-scoped addWebMessageListener）在 frame-src 'none' + 精确名单之后已无「可区分的输入」，要动的却是三端共用的 start.js 两个通道选择点 ⇒ **结案，不再挂起**；触发条件与「新增第二个受信页无门禁」这个空档一起写在 §3.79 第 3 点（理由另见 §3.26 第 5 项）。以下为登记原文（事实仍有效，前缀语义已被替换）：
   原条目 ↓
   Q50 R9-AD-11 | P2 | `android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt:55,95-99,109-121`
   （`TRUSTED_SHELL_PREFIX = "file:///android_asset/"` + `isTrustedShellUrl` 前缀匹配）
@@ -4372,6 +4385,49 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 5. 执行面：`gradle --offline` `:app` ktlint + detekt + test 全绿（中途红过三次：假不变量、
    MagicNumber、缩进）；`dotnet test` Core **927**／Broker **298** 全过 0 失败，发现数下界 ✅；
    其余常驻门禁见提交信息。
+
+### 3.79 R9-B79（2026-10-16，队列 Q10 + Q50 第二半合并结案）：桥的「帧身份」残余——带理由关闭，并纠正本行原先量错的那份语料
+
+1. 结案的理由不是「迁移太难」，是**那条判据今日已没有可区分的输入**。三个面全部现读重测（不引用
+   上一轮结论）：
+   - **受信面**：`android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt:76-77` 的
+     `TRUSTED_SHELL_PAGES` 只有由 `BrowserEngine.HOME_URL` 派生的一元（`BrowserEngine.kt:16` =
+     `file:///android_asset/start.html`），判定在 `AegisHomeBridge.kt:120-126`。
+   - **帧面**：`shared/shell/start.html:29` 的 meta CSP 显式 `frame-src 'none'`；壳页五段源
+     （start.html / start.js / start.main.js / start.snake.js / start.import.js）本轮重跑 grep，对
+     `<iframe`、`createElement('iframe')`、`srcdoc`、`document.write`、`window.open` **0 命中**。
+   - **弹窗面**：`BrowserEngine.kt:65` `setSupportMultipleWindows(false)` ⇒ 不存在「另开一个
+     WebView 装攻击者帧、顶层仍是壳页」的通路；真发生 `window.open` 也只是同一 WebView 的顶层
+     导航，判据正对着它。
+2. **本行原先那条证据量错了语料，就地纠正**——这条比结案本身更值得记。Q10 登记时写的是
+   「实测 `shared/shell` 现零 iframe ⇒ 今日无落点」。但 §3.26 之前受信面是**整个 assets 前缀**，
+   该判的语料是「所有受信文档」而不止壳页。本轮对 `dist/geogebra-cache` 现 grep：**160 个 js 文件
+   文本含 `<iframe`**，其中 158 个是 i18n 串（`properties_keys_*.js` 里的 `"Clipboard: <iframe>"`），
+   而 **2 个是 GWT 编译产物里的真代码**——`.../web/BD63B116F66F9CAFD0241E1C1EB84743.cache.js` 拼出
+   `<iframe src="…?embed" width="800" height="600" allowfullscreen>`（GeoGebra 的嵌入导出）。
+   收窄之前那一页是**受信**的（旧测试 `AegisHomeBridgePrefsTest.kt:157` 当时还把它钉成 true），
+   `@JavascriptInterface` 对象又对全部帧可见、判据只读顶层 URL ⇒ 「帧驱动桥」在本仓自己的受信页里
+   **曾有落点**。结论「今日无落点」依旧成立，但成立的原因是 §3.26 的精确名单把那一页移出了受信面，
+   不是「壳页恰好没帧」；原句已按此改写，防下一轮拿一条错的证据去支撑对的结论。
+3. **触发条件（写死，并说清哪一半有门禁、哪一半没有）**：
+   - 壳页一旦出现任何 frame（含 `srcdoc`／`document.write` 形态）⇒ 本条立即以 **P1** 重启，且先做
+     origin-scoped `addWebMessageListener` 传输再谈放宽。这一半**有常驻门禁**：
+     `tests/ui-regression/shell_frame_guard.test.mjs` 5 例（`.github/workflows/ci.yml:57` 每条 PR 都跑
+     `node --test "tests/ui-regression/*.test.mjs"`）——§3.22 实测注入「删 `frame-src 'none'`
+     ⇒ 2 例红 / 塞 `<iframe>` ⇒ 成本哨兵红」，本批**重跑同一注入复现 2 例红**后原样还原；
+     `:73-79` 的装配锚还钉着「这份 CSP 确实随包进 Android（`assets.srcDir(../shared/shell)`）」。
+   - 往 `TRUSTED_SHELL_PAGES` 加第二个受信页 ⇒ 同样重启。这一半**今日无自动门禁**：名单是
+     `private val`，JVM 单测看不到它的元素集合（`AegisHomeBridgePrefsTest.kt:148-175` 判的是「给定
+     URL 通过/拒绝」，加一项不会让任何现成用例变红）。本批的处理是在**编辑点**留一行注释
+     （`AegisHomeBridge.kt:112-119` 的 KDoc：加第二个名字＝重启 Q10）；要再升级成门禁得动 text-anchor
+     登记表，那是另一件事，不顺手做——登记出来胜过假装它已被守住。
+4. 这不是「把待裁决项自己关掉」：§四 第 7 项仍回读可见，状态从「两半都待定稿」改为「①已落地
+   （§3.26）、②带理由关闭 + 触发条件」，并保留「用户若仍要求迁移，本条即重启」的位置。迁移的成本
+   也没变便宜：要动三端共用的 `shared/shell/start.js:30-33`（`andApi`／`csApi` 两个通道探测）与
+   `start_host.test.mjs:119/134` 那种「Android 必须直调 `AegisBridge.goBack`」的常驻锚。
+5. 执行面：台账门禁（队列状态 / 文档陈述 / markdown 链接 / 空转门禁）全跑；`:app` ktlint + detekt +
+   testDebugUnitTest（本批只动一行 KDoc）；`node --test tests/ui-regression/shell_frame_guard.test.mjs`
+   先证明第 3 点那条触发条件真的会红，再把它写进结案理由。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「一行 `Performance.prototype.now.call(performance)` 即取无降噪 µs 精度时钟」不成立**
