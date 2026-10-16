@@ -4473,10 +4473,24 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `shared/shell/start.html:23` 的说明段逐字写着 `AegisBridge`——不补一刀就是假红。
    正向控制同批钉住两侧：`start.js` 剔注释后仍含 `window.AegisBridge`（防「什么都没匹配到」
    的假绿），`start.html` 剔注释后**不含**（防剔除逻辑漂移）。
-6. 执行面：`:app` ktlint + detekt + testDebugUnitTest 全绿（注入证红用的是同一套命令，
-   只是预期相反）；台账门禁见提交信息。
+6. 执行面——**这一条里含本批自己造的一次假绿**：锚写完我在本地连跑两轮
+   `./gradlew :app:ktlintCheck :app:detekt :app:testDebugUnitTest 2>&1 | tail -12`，两轮都按「全绿」
+   写进提交信息与 PR 描述。真相是**管道把退出码换成了 `tail` 的 0**，而
+   `:app:ktlintTestSourceSetCheck` 从第一轮就 `FAILED`（新测试文件 9 条格式违规）——判红它的是 CI
+   （`.github/workflows/android-quality.yml:90` 跑四个模块的 ktlint，我本地只跑了 `:app`）。
+   修正三件：①跑门禁改成 `> 日志 2>&1; echo EXIT=$?` 读真实退出码，且按 CI 原样跑四模块 ktlint +
+   四模块 detekt + 三模块 `testDebugUnitTest`；②原句「`:app` ktlint + detekt + test 全绿（两轮）」
+   进 §六，防下一轮拿它当先例；③这条与本仓「绿本身不是结论」同族，但这次红的是**我读结果的方式**，
+   不是别人的代码。台账门禁（队列状态 / 文档陈述 / markdown 链接与表格 / 行数红线 / 空转门禁）
+   是真跑真绿，逐条命令与输出都在提交信息里。
 
 ## 六、复核后判定为不成立（留此防重复上报）
+- **「R9-B80 本地两轮 `:app` ktlint + detekt + testDebugUnitTest 全绿」不成立**（§3.80 第 6 点，
+  新登 R9-CI-20）：两轮命令都以 `… 2>&1 | tail -12` 结尾，退出码是 `tail` 的 0，不是 Gradle 的。
+  `:app:ktlintTestSourceSetCheck` 从**第一轮**就 `FAILED`（新文件 9 条格式违规），是 CI 的
+  `.github/workflows/android-quality.yml:90` 判红的——那条跑四个模块的 ktlint，而本地我只跑了
+  `:app`，两边覆盖面也不一致。教训不是「CI 会兜住」而是：**读门禁结果必须先拿到被测命令自己的
+  退出码**，`| tail`/`| grep` 之后的 `$?` 属于管道末端；且本地跑的子集不等于 CI 的全集。
 - **「一行 `Performance.prototype.now.call(performance)` 即取无降噪 µs 精度时钟」不成立**
   （第九轮 R9-B74 / §3.74，钉在 Q25／Q57 的剩余半边）：这句是台账按推断写的（R9-B38 那批的
   原话），本批第一次把它量成数字：本机 WebView2 Runtime 155.0.4283.60 下，`performance.now()`

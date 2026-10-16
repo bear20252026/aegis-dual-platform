@@ -79,10 +79,11 @@ class BridgeTrustListGuardTest {
 
     @Test
     fun onlyTheHomeAdapterConsumesTheBridge() {
-        val consumers = shellDocuments()
-            .filter { it.second.contains("AegisBridge") }
-            .map { it.first }
-            .toSet()
+        val consumers =
+            shellDocuments()
+                .filter { it.second.contains("AegisBridge") }
+                .map { it.first }
+                .toSet()
         assertEquals(
             "壳页语料里对 AegisBridge 的代码级引用只允许出现在首页适配层 start.js。" +
                 "第二个文档开始消费桥就必须进受信名单＝重启 §五 Q10（先迁 origin-scoped 传输）",
@@ -112,17 +113,22 @@ class BridgeTrustListGuardTest {
 
     /** 取 `from` 之后第一个 [open] 调用括号内的顶层实参（嵌套括号里的逗号不切；
      *  实参字符串本身不得含逗号——语料里没有这种形态，含了会让本锚多切一段而不是少切）。 */
-    private fun argumentsOf(text: String, open: String, from: Int): List<String> {
+    private fun argumentsOf(
+        text: String,
+        open: String,
+        from: Int,
+    ): List<String> {
         val begin = text.indexOf(open, from)
         assertTrue("找不到 $open（名单写法已漂移）", begin >= 0)
         var depth = 1
         var end = -1
         for (index in (begin + open.length) until text.length) {
-            depth += when (text[index]) {
-                '(' -> 1
-                ')' -> -1
-                else -> 0
-            }
+            depth +=
+                when (text[index]) {
+                    '(' -> 1
+                    ')' -> -1
+                    else -> 0
+                }
             if (depth == 0) {
                 end = index
                 break
@@ -139,11 +145,19 @@ class BridgeTrustListGuardTest {
         var start = 0
         inner.forEachIndexed { index, ch ->
             when (ch) {
-                '(' -> depth++
-                ')' -> depth--
-                ',' -> if (depth == 0) {
-                    parts += inner.substring(start, index).trim()
-                    start = index + 1
+                '(' -> {
+                    depth++
+                }
+
+                ')' -> {
+                    depth--
+                }
+
+                ',' -> {
+                    if (depth == 0) {
+                        parts += inner.substring(start, index).trim()
+                        start = index + 1
+                    }
                 }
             }
         }
