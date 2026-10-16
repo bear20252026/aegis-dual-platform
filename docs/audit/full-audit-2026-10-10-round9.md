@@ -1005,8 +1005,11 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   （它们的 expected 是 schema 级的，
   所以「补消费」要先定**由谁判**——C# 的 capability 校验面与 FFI 的 `capability.validate`
   尚未接线是同一件事，见 §四 第 1 项 AX-02）；
-  ②`action-valid/invalid`、`native-navigation-confirmation`、`native-navigation-decision`、
-  `approvals-replay-and-expiry`、`glob-match`、`update-manifest-invalid` 只有 Rust 执行
+  ②`native-navigation-confirmation`、`native-navigation-decision`、`approvals-replay-and-expiry`、
+  `glob-match`、`update-manifest-invalid` **五份**只有 Rust 执行（**R9-B84 现读改真**：这里原列六份、把
+  `action-valid/invalid` 也算作「只有 Rust 执行」，而 `python scripts/verify_vector_consumers.py` 现读它两份是
+  `AG/RS`——Agent 契约层自 R9-B68 起逐条消费（就在本行第 ③ 段写着），于是同一行里对同一件事留了两套口径；
+  对 Windows/Android 的结论不变，这两份仍无 CS/AD 执行者）
   ⇒ 「Windows/Android 与核心同一裁决」对这些命题**未被验证**
   （**这一档不能靠「补一份 C# 用例」闭**——§3.42 逐行实证：`native-navigation-decision`
   的 43 条里 13 条期望 `require_confirmation`（R9-B66 后为 53 条 / 18 条 false，
@@ -1075,9 +1078,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   还对已结束项 `Cancel()`（抛→吞）。
 
   **实测补一条登记时没写的**：本 SDK（WebView2 1.0.2903.40）的 `CoreWebView2DownloadOperation` **没有** `Completed` 事件——反射实测只有 BytesReceivedChanged / EstimatedEndTimeChanged / StateChanged（事件参数类型还是 `EventHandler<object>` 而不是强类型 args）。所以终态信号只能取 `StateChanged` + `State` 判定这条路，照 Win32 文档写 `Completed +=` 连编译都过不去。
-- Q51 R9-CS-14 | P2 | `windows/src/Aegis.Windows.App/Core/Settings/SettingsService.cs::ThreatFeedUrl`（`:24` 的 `ThreatFeedUrl { get; init; } = ""`）↔ `Chrome/MainWindow.xaml.cs:138,326-337`
-  ↔ `core/rust-policy-core/src/ffi/broker.rs:331`（`update_host_denylist`）↔ Android 全端
-  （grep `Denylist|ThreatFeed|blocklist|isHostBlocked` 在 `android/**` **0 命中**）：
+- Q51 R9-CS-14 | P2 | `windows/src/Aegis.Windows.App/Core/Settings/SettingsService.cs::ThreatFeedUrl`（`:24` 的 `ThreatFeedUrl { get; init; } = ""`）↔ `windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml.cs:138`＋`:326-335`（`StartThreatFeedRefresh`，登记时写的 `:138,326-337` 尾界多数两行，方法体止 `:335`）
+  ↔ `core/rust-policy-core/src/ffi/broker.rs::update_host_denylist`（`:306`；**R9-B84 现读改真**——登记时那条旧锚写作「文件 `broker.rs`、行号 `331`」，逐提交复算是 **#202（→`:319`）与 #204（→`:306`）** 两次把这段顶上移的，`8d7a056` 之后 `331` 行已是「待审批账本」的注释；而行号锚门禁只判「NN ≤ 文件行数」，所以它一路绿着失实；本体 `apply_host_denylist` 现在 `core/rust-policy-core/src/ffi/broker/denylist.rs::apply_host_denylist`）↔ Android 全端
+  （grep `Denylist|ThreatFeed|blocklist|isHostBlocked` 在 `android/**` **0 命中**，R9-B84 按剔注释口径复跑：174 个受管文件，原样与剔注释后均 0，扩展变体 `denylist`/`threat_feed`/`update_host_denylist` 亦 0）：
   外部第三轮审计 AEG-003「Android 缺少威胁黑名单防护」**范围要改准**——两端默认都是
   **空名单即放行**（Windows 的订阅源是用户在设置页填 https URL 或
   `AEGIS_THREAT_FEED_URL`，缺省空 ⇒ 出厂形态两端行为一致）。真实缺口是**能力面**：
@@ -1092,7 +1095,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   关键判断保留：它**已在设置 UI 明示**旧文案，所以不是「声明与行为不符」而是「行为偏弱」，
   改它＝出货行为变更（用户配了源就从「开窗取一次」变「持续取」）⇒ 走 §四 第 9 项定稿，
   定稿后落地为 6 小时节拍 + 退避封顶 24 小时 + 最后成功时间上 UI + 保存即刷。
-- Q54 R9-CS-16 | P3 | `windows/src/Aegis.Windows.App/Chrome/SettingsWindow.xaml.cs::ThreatFeedBox_LostFocus`（`:103-129` 的清空分支）↔ `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs::LoadCached`（`:117-139`，`Start()` 无条件读它）：用户在设置页**清空**订阅源只让周期循环不再取源，
+- Q54 R9-CS-16 | P3 | `windows/src/Aegis.Windows.App/Chrome/SettingsWindow.xaml.cs::ThreatFeedBox_LostFocus`（`:103-129` 的清空分支）↔ `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs::Start`（`:117-139`；**R9-B84 现读改真**：登记时挂的符号 `LoadCached` 在本文件里只有 `:125` 的**调用点**，定义在 `windows/src/Aegis.Windows.App/Core/Security/ThreatFeed.cs::LoadCached`（`:195`，`ThreatFeedUpdater`）——但「`Start()` 无条件读缓存」这件事仍成立：`:125` 在 `:133` 的 `validated is null` 早退**之前**）：用户在设置页**清空**订阅源只让周期循环不再取源，
   已生效的 `BlockedHosts` 快照继续拦截到进程结束；重启后 `Start()` 仍无条件读缓存文件
   `threat_feed.txt`（清空动作不删它），于是那份名单**无限期**留在拦截面里。出厂默认无缓存
   时两端仍是「空名单放行」，所以这不是默认行为缺陷，而是「把配置项清空＝关掉该功能」这个
@@ -1129,8 +1132,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `Performance.prototype` 并保留原生 descriptor。后果：出货的 Windows/Android 制品里
   一行 `Performance.prototype.now.call(performance)` 即取**无降噪 µs 精度时钟**，一行
   `hasOwnProperty.call(performance,'now')` 即检出防护存在；且 mark/measure/getEntries*/
-  rAF/`Event.timeStamp`/`timeOrigin` 六条高解析通道两端零包裹（核心全裹，
-  `getEntriesByType` 在两端主源码零命中）。第十二节 B2 余量段「三端一致地如此」在此出口为假。
+  rAF/`Event.timeStamp`/`timeOrigin` 六条高解析通道两端零包裹（核心全裹，`getEntriesByType` 在两端
+  **出货注入面**零命中——**R9-B84 口径改真**：此处原写「主源码」，按「非测试目录即主源码」的字面读法它今天已不成立：
+  R9-B74 为量六条通道分辨率新增的只读探针 `windows/tools/WebView2SdkSurfaceProbe/TimerSurfaceProbe.cs:169`、`:203`
+  有 2 处代码命中（第三处 `:14` 是注释，按剔注释口径不算），那是**测量面**、不在任何注入路径上）。第十二节 B2 余量段「三端一致地如此」在此出口为假。
 - ~~Q26 R9-RS-2~~ **本批已确证并落地**（§二 裁决行 + §3.12）：两条处方里选了第二条
   ——入库件已按钉住的 1.99.0 + uniffi 0.32.2 重 derive（1,910→2,005 行，diff 只有
   `update_host_denylist` 的 FFI plumbing 与语义收窄后的 docstring），`test -s` 那条空断言
@@ -1377,11 +1382,15 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   否则这类「只在 master/schedule 跑的提交面」永远没有可失败的判据。
 
 - Q57 R9-CS-17 | P2 | **R9-B38 续登（Q25 的剩余半边）；§3.74 已把「要不要裹」的交换量成 100µs→1ms+jitter，且推翻了自己那句「绕过即取 µs」**：
-  ①`core/rust-policy-core/src/timer_prec.rs::inject_script`（`:170-244` 是 RS-279 一组：`mark`/`measure`/
-  `getEntries*`/`timeOrigin`/`Event.timeStamp` 的原型级 getter 与 entry 圆整）↔
+  ①`core/rust-policy-core/src/timer_prec.rs::inject_script`（`:170-244` 是 RS-279／RS-296／RS-217 三组：`mark`/`measure`/
+  `getEntries*` 的原型级 getter 与 entry 圆整。**R9-B84 现读改真**：登记时把 `timeOrigin` 与
+  `Event.timeStamp` 也并进这一句、算作「RS-279 一组」，而这两条属 **RS-244**，分别从 `:272`
+  （`Event.prototype.timeStamp`）与 `:290`（`performance.timeOrigin`）起——`:170-244` 框不住它们，
+  照原句去找会找到别人的代码）↔
   `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs::BuildScript` 的 Stage 8 与
   `android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt` Stage 8：
-  **六条高解析通道两端零包裹**（`getEntriesByType` 在两端主源码零命中）。挂载形态那半边
+  **六条高解析通道两端零包裹**（`getEntriesByType` 在两端**出货注入面**零命中——「主源码」那个读法今天会被
+  R9-B74 的只读探针判出 2 处代码命中，口径与出处见 Q25 同一句）。挂载形态那半边
   已在 R9-B38 三端合一，这一半没做的原因是：rAF 与 `getEntries*` 的圆整是**站点可观察**的
   行为变更（动画回调节奏、性能面板读数），只能由真机/桌面冒烟证明——那是需要用户给话的
   验证面（见 §四），不在本批顺手改。
@@ -1434,13 +1443,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `AuditRegressionTests.cs:28` 并给依据。**本批不新登 Q 之外的东西**：边界那张面今天已核对过，
   `fec0::1` 在两端的**拒绝边界**上同结论（都放行，见 §3.72 第 1 点的 `fec0::1` 上邻条目），
   分叉只在 scheme 选择这一面。
-- Q68 R9-SH-24 | **P2（R9-B78 闭第一片：`[8.8.8.8]` 类两端已同判搜索词；剩余部分待裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs::SchemeForLocal`（`:87` 的 CS-140 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt::classifyInput`（`:173` 的 `when`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，本批 +2 条 IPv6）：
-  本批给这张表装 IPv6 弹时用哨兵探针把 12 个形态在两端各量一遍（跑完即删），结论是**只有 2 个形态端端一致**（裸 `2606:4700:4700::1111` 都判搜索词、`[::ffff:127.0.0.1]` 都判域名且都补 http，这两条已进表），其余全部相反：
+- Q68 R9-SH-24 | **P2（R9-B78 闭第一片：`[8.8.8.8]` 类两端已同判搜索词；剩余部分待裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs::SchemeForLocal`（`:87` 的 CS-140 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt::classifyInput`（`:174`；**R9-B84 现读改真**：登记时写 `:173`，那一行今天是 KDoc 收尾的 `*/`——两个 `when` 实际在 `:177`（EMPTY／ABOUT_BLANK 分派）与 `:197`（scheme 与 host:port 分派））↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，现读 30 条：含 `::` 的 2 条、带方括号的 3 条）：
+  本批给这张表装 IPv6 弹时用哨兵探针把 12 个形态在两端各量一遍（跑完即删），R9-B73 当时的结论是**只有 2 个形态端端一致**（裸 `2606:4700:4700::1111` 都判搜索词、`[::ffff:127.0.0.1]` 都判域名且都补 http）。**R9-B84 现读改真**：那句「只有 2 个」停在了 B73 的数——R9-B78 之后表内已有 **4 条端端一致**（加上 `[8.8.8.8]` 与 `[8.8.8.8]:8080`，两端同判搜索词），其余相反：
   ①带括号的 IPv6 字面量在 Windows 判**域名并导航**（`[::1]`→`http://[::1]`、`[fd12::3]`→http），在 Android 判**搜索词**（`https://www.baidu.com/s?wd=%5B%3A%3A1%5D`）——同一个人在两台设备上敲同一串字符，一台打开本机服务、一台去搜索引擎；
-  ②Android 的分类实际取决于**拼写里有没有点**，不是地址族：`[fd12::3]`（无点）→SEARCH，而 `[::169.254.169.254]`（带点）→DOMAIN 并产出 `https://[::169.254.169.254]`——同一种地址换个写法就换一条分支；
-  ③Android 对 `[8.8.8.8]` 给出 `kind=DOMAIN` 而 `normalizeInput` 得 **null**——判定说这是网址、归一产不出 URL，而这张表今天**没有**「DOMAIN ⇒ 归一非 null」的锚（`SearchNormalizeVectorsTest` 只锚了「EMPTY/FORBIDDEN_SCHEME ⇒ null」那一个方向）。
+  ②Android 的分类实际取决于**拼写里有没有点**，不是地址族：`[fd12::3]`（无点）→SEARCH，而 `[::169.254.169.254]`（带点）→DOMAIN 并产出 `https://[::169.254.169.254]`——同一种地址换个写法就换一条分支；**R9-B84 补一条该句漏掉的例外**：B78 之后「带点」不再必然判 DOMAIN，`SearchEngines.kt::isBracketedDottedIpv4`（`:229-234`）把方括号内四段纯数字的点分形态判回 SEARCH，所以今天准确的表述是「看有没有点，除非括号内是点分 IPv4」——这条例外本身就是本行「按拼写而不是按地址族判」那句话的活证据；
+  ③**这半句已由 R9-B78 闭，但原文写着「今天」，会被读成现状，故 R9-B84 改真**：Android 对 `[8.8.8.8]` 曾给出 `kind=DOMAIN` 而 `normalizeInput` 得 **null**（判定说这是网址、归一产不出 URL），今天 `isBracketedDottedIpv4` 让它判 SEARCH、与 Windows 同侧；而「这张表**没有** DOMAIN 方向的锚」也已不成立——`android/app/src/test/kotlin/com/aegis/browser/SearchNormalizeVectorsTest.kt:84-86` 钉的是「DOMAIN 行必须显式给 `expected_url`，给 null 也要写明理由」。**方向要看准**：更强的「DOMAIN ⇒ 归一必非 null」已在 §3.78 被现树判成假不变量（`0177.0.0.1` 当场红，已入 §六），下一轮不要再把它当待补项。
   为什么不顺手做、也不用 `windows_url` 覆盖收编：那张表的覆盖机制是给「同一意图、不同文本」（大小写保留、拒绝发生的层级不同）准备的，且 `DocumentedCrossEndDivergences` 钉着条数；这批是**行为相反**，写成覆盖等于把分叉批准成契约。要合流必须先定「地址栏对 IPv6 字面量到底该导航还是该搜索」，那是产品口径不是实现细节。
-  验收判据（选定方向后）：①把 12 个形态中两端一致的全部进表，并把分叉的那些按裁决后的同一期望进表；②补上「DOMAIN ⇒ `normalizeInput` 非 null」这条锚（Android 现在的 `[8.8.8.8]` 会立刻红，正好当判据）；③若判「导航」，Android 的分类要改成按地址族判而不是按有没有点判，并同批改 `search-normalize-vectors.json` 里既有那条八进制 IPv4（`0177.0.0.1`）的 `windows_url` 覆盖是否仍成立。与 Q67 的分工：那条是 https 升级豁免面的 `fec0::/10`，本条是地址栏分类面，共同根因是「IPv6 段语义在两端各写一遍」，但裁决点不同。
+  验收判据（选定方向后）：①把 12 个形态中两端一致的全部进表（**R9-B84 现读**：表内今天已有 4 条一致形态进表），并把分叉的那些按裁决后的同一期望进表；②**这条作废**——原写「补上『DOMAIN ⇒ `normalizeInput` 非 null』这条锚（Android 现在的 `[8.8.8.8]` 会立刻红，正好当判据）」，可锚已存在（`SearchNormalizeVectorsTest.kt:84-86`，形态是「显式给 expected_url 或 null＋理由」），而那条强不变量已被 §3.78 现树判假并入 §六，`[8.8.8.8]` 今天也不再判 DOMAIN；裁决后真正要做的只是把选定期望逐条进表；③若判「导航」，Android 的分类要改成按地址族判而不是按有没有点判，并同批改 `search-normalize-vectors.json` 里既有那条八进制 IPv4（`0177.0.0.1`）的 `windows_url` 覆盖是否仍成立。与 Q67 的分工：那条是 https 升级豁免面的 `fec0::/10`，本条是地址栏分类面，共同根因是「IPv6 段语义在两端各写一遍」，但裁决点不同。
 
 - ~~Q69 R9-DOC-22~~ **本批全闭（R9-B81 / §3.81 落地候选①；R9-B83 / §3.83 落地候选③，并把候选②正式判成不做）**：§五 的 file:line 纪律现在有门禁判了——活行必须带锚、锚必须解析得到（路径逐字或裸名唯一、行号在文件行数内、区间非空），并且 8 条活行全部换成**符号锚**（`path.ext::符号名` 形态，按 `text_anchors.strip_comments` 剔注释后判符号真在代码里）；带符号锚的活行行数由 `scripts/verify_ledger_anchors.py::MIN_SYMBOL_ROWS` 钉成**等号**（退回去要红，多锚了不登记也要红）。行号锚仍会漂，但漂不再致命：符号锚不依赖行号，改名/删除当场判红。验收判据按原样兑现——注入一条注定会漂的锚（把 `COUNT_CLAIM` 写成 `COUNT_CLAIM_RENAMED_AWAY`）⇒ `EXIT=1` 两条消息（符号找不到 + 棘轮 7≠8），还原 ⇒ `EXIT=0`。②判成不做的理由进 §六。原条目 ↓
   Q69 R9-DOC-22 | P2（**第一半已闭：R9-B81 / §3.81**；②内容校验与③符号锚口径仍**待裁决**） | `docs/audit/full-audit-2026-10-10-round9.md:754`（§五 标题写着「必须带 file:line」）↔ `scripts/verify_ledger_anchors.py:1`（本条落地后的新门禁）↔ `scripts/check_doc_claims.py::COUNT_CLAIM`（`:43`，只比 workflow 裸数字）：
@@ -4587,6 +4596,66 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    改 md 忘改 CSV 不会红，下一轮按列解析时却会读到一条写着 `no` 的已闭项。改写办法（本批实证可用）：
    按行 `csv.reader` 解析出 7 列、只替换目标行的列值、再逐列断言不含 ASCII 逗号与引号后 join 回去，
    其余 123 行逐字节不动（`git diff --numstat` 必须给 `1 1`）。
+   （**R9-B84 更正这条的普适性**：「断言无 ASCII 逗号之后 join」只在**该行本来不含逗号**时成立——
+   现读 123 行里 **41 行**的字段是带引号的（内含 ASCII 逗号），对那种行 join 会直接写出一条列错位的行。
+   可靠做法是对目标行用 `csv.writer`（`QUOTE_MINIMAL`、`lineterminator=""`）序列化，再回读断言列数＝7；
+   R9-B83 那次恰好赶上不含逗号的 `R9-DOC-22` 行，所以没暴露这条。）
+
+### 3.84 R9-B84（2026-10-16，队列回读批，纯台账零代码）：七条活行逐条现读，抓到五处「行号还在文件里但已指向别的代码」
+
+1. 为什么这一批仍然值得做：§五 剩下 7 条活行**没有一条能本地推进**（要么设备要么裁决），但它们是
+   用户做裁决时唯一的事实来源。#222 已经证明过一次「活行里写着过期数字」（Q53 的 21→22），这次
+   按同一把尺子把 7 条全部复读一遍，又抓到 5 处。
+2. 抓到的五处（每条都改在 §五 原文里，都带**现读命令**而不是推理）：
+   - **Q51**：`core/rust-policy-core/src/ffi/broker.rs:331`（标着 `update_host_denylist`）今天落在
+     「待审批账本」的注释上。逐提交复算（`git show <c>:… | grep -n`）给出漂移链：`:331`（`ce20046` #200）
+     → `:319`（`ac9aba6` #202）→ `:306`（`8d7a056` #204）⇒ 顶上去的是 **#202/#204**，不是登记后没人动过。
+     另补一条：`apply_host_denylist` 本体已外迁到 `core/rust-policy-core/src/ffi/broker/denylist.rs`。
+   - **Q53 ②档**：名单把 `action-valid/invalid` 算进「只有 Rust 执行」，而
+     `python scripts/verify_vector_consumers.py` 现读它两份是 `AG/RS`——**同一行**的 ③ 段就写着 R9-B68
+     已让 Agent 逐条消费。这是同一份文档内部两套口径，比单纯过期更难发现，因为它每一半都「有出处」。
+     ②档真值是**五份**只有 RS；对 Windows/Android 的结论不变。
+   - **Q54**：符号锚 `ThreatFeedCoordinator.cs::LoadCached` 挂的是**调用点**（`:125`）而不是定义
+     （定义在 `windows/src/Aegis.Windows.App/Core/Security/ThreatFeed.cs::LoadCached`，`:195` 的
+     `ThreatFeedUpdater`）。锚照样解析通过——因为门禁判的是「剔注释后该符号在这个文件里出现」。
+     改挂 `::Start` 并把定义另指一处；「`Start()` 无条件读缓存」这件事复核**仍成立**（`:125` 在 `:133`
+     的 `validated is null` 早退之前）。
+   - **Q25／Q57**：「`getEntriesByType` 在两端主源码零命中」——按「非测试目录即主源码」的字面读法已不成立，
+     R9-B74 为量分辨率新增的只读探针 `windows/tools/WebView2SdkSurfaceProbe/TimerSurfaceProbe.cs` 有
+     2 处代码命中（`:169`、`:203`；`:14` 是注释，按剔注释口径不算）。口径改成「**出货注入面**零命中」，
+     并把探针面写明——不是放宽判据：那 2 处不在任何注入路径上。
+   - **Q57 ①**：登记时把 `timeOrigin`/`Event.timeStamp` 并成「RS-279 一组、在 `:170-244`」，实际这两条属
+     **RS-244**，从 `timer_prec.rs:272` 与 `:290` 起——照原句去找会找到别人的代码。
+   - **Q68 四处**：`:173` 今天是 KDoc 收尾 `*/`（`classifyInput` 在 `:174`、两个 `when` 在 `:177`/`:197`）；
+     「只有 2 个形态端端一致」停在 R9-B73 的数，表内今天已有 **4** 条一致形态；③那句「这张表没有 DOMAIN
+     方向的锚」已被 R9-B78 落掉的锚推翻（`SearchNormalizeVectorsTest.kt:84-86`）；验收判据②整条作废——
+     它要求补的那条**强**不变量「DOMAIN ⇒ 归一非 null」正是 §3.78 被 `0177.0.0.1` 判红、已入 §六 的假不变量，
+     留着会让下一轮照着它写出一个必红的用例。
+3. **一条方法论，不是本次的副产品**：这五处的共同形状是「**行号仍在文件行数内、但指向别的代码**」——
+   这正是 R9-B83 判掉候选②之后剩下的那一面。补法不是回头加②，而是两件事：①承重交给符号锚，行号降级成
+   提示（改名/删除会红，挪位置不会）；②要断定「漂移发生在哪一次提交」用**逐提交复算**
+   （`git show <c>:<path> | grep -n <符号>`），不要用推理——本行 2/第一处最初就被我推理成「R9-B61 顶上去的」，
+   复算给出的是 #202/#204。
+4. **一条工具面事实（踩过一次）**：`scripts/text_anchors.py::strip_comments` 是**删行**而不是置空，
+   所以剔注释后的行号与原文件行号不可直接对照（同一处命中在探针文件里剔后是 `:164`/`:197`、原文是
+   `:169`/`:203`）。凡要写进台账的行号，一律从**原文件**取，再用原文行号复核一次。
+5. 复验：七行改完 `verify_ledger_anchors.py`／`verify_ledger_queue_status.py`／`check_markdown_tables.py`／
+   `check_doc_claims.py`／`check_markdown_links.py` 全 EXIT=0，`MIN_SYMBOL_ROWS` 仍是 7（没有把任何一行的
+   符号锚改丢）；CSV 同批把 `R9-CS-14`/`R9-SH-13`/`R9-CS-16`/`R9-RS-1`/`R9-CS-17`/`R9-SH-24` 的 `batch`
+   列追加本批，`primary_reviewed` **不翻**（这几条仍是开放项，翻成 yes 会被读成已裁决）。
+6. **本批自己抓到的一条：上一批写进 §3.83 的 CSV 改写办法不具普适性**（已就地更正那段）。
+   R9-B84 要给 6 行追加 batch 时，脚本里那条「逐列断言不含 ASCII 逗号与引号，否则 exit 1」的守卫
+   当场拦住——`R9-CS-14` 的 location 列本来就是**带引号字段**（内含 `MainWindow.xaml.cs:138,326-337`
+   这种 ASCII 逗号）。现读规模：**123 行里 41 行**含引号字段。所以「join 回去」只对恰好不含逗号的那一行
+   成立，R9-B83 那次是没暴露而不是做对了。改法：目标行一律 `csv.writer(QUOTE_MINIMAL)` 序列化＋回读断言
+   列数＝7；守卫的价值在于它是**写之前**判的——脚本 exit 1 时一个字都没落盘，
+   于是这次修正走的是「先拦住、再改口径」，而不是把错位行提交进去。
+7. **§3.83 第 4 点那条坑换了个形态又出现一次**：本批在 Q51 活行里**引用**登记时的旧锚
+   （写作 `broker.rs` 加行号 331 的那种连写形态）当作「已经漂了」的证据，`verify_ledger_anchors.py`
+   立刻判红——它不区分「这条锚是待核对的事实」还是「这句话在回忆一条旧锚」，一律按锚解析，而裸文件名
+   `broker.rs` 在实树有两处同名（`src/ffi/broker.rs` 与另一份），落进「裸名必须唯一」那条 ⇒ 违规 1 条。
+   改法沿用 §3.83 第 4 点的方向：**把被引用的形态拆开写**（「文件 `broker.rs`、行号 `331`」），
+   而不是给门禁加豁免表。这不是门禁太严：一旦允许「示例锚」混进判定面，真漂的锚就有了同样的藏身处。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「给台账行号锚加『内容校验』是可行的第三条路」不成立**（第九轮 R9-B83 / §3.83 第 5 点，Q69 候选②）：
