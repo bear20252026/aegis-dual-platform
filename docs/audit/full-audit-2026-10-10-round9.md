@@ -842,15 +842,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   落地时把**查询值**也一并改严格（Windows 侧两处都是 `Uri.UnescapeDataString`，见
   `Core/Downloads/DownloadPolicy.cs:65,130`）——两端对同一个 URL 从此解出同一个名字。
 - ~~Q10 R9-AD-10~~ **本批与 Q50 第二半合并结案（R9-B79 / §3.79，带理由关闭）**：三个面今日现读重测，
-  「拿不到调用方 frame Origin」这条判据已没有可区分的输入——受信面是 `AegisHomeBridge.kt:76-77`
-  由 `BrowserEngine.HOME_URL` 派生的**一元**名单（§3.26），壳页 CSP 显式 `frame-src 'none'`
+  「拿不到调用方 frame Origin」这条判据已没有可区分的输入——受信面是 `AegisHomeBridge.kt` 里
+  由 `BrowserEngine.HOME_URL` 派生的**一元** `TRUSTED_SHELL_PAGES`（§3.26；本轮重测在 `:83-84`），
+  壳页 CSP 显式 `frame-src 'none'`
   （`shared/shell/start.html:29`，§3.22），多窗口关着（`BrowserEngine.kt:65`）。
   **本行原先的证据量错了语料，就地纠正**：「`shared/shell` 零 iframe ⇒ 今日无落点」判的是壳页，
   而 §3.26 之前受信面是整个 assets 前缀——GeoGebra 页当时受信，其 `dist/geogebra-cache` 副本里
   **2 个 GWT 编译产物真实拼出** `<iframe …allowfullscreen>`（另 158 个命中是 i18n 串）⇒ 帧驱动桥
   **曾有落点**，把它关掉的是精确名单而不是「壳页恰好没帧」。触发条件：壳页出现任何 frame，或
   `TRUSTED_SHELL_PAGES` 加第二个受信页 ⇒ 立即升 **P1** 并先做 origin-scoped `addWebMessageListener`；
-  前者由 `shell_frame_guard.test.mjs` 常驻守，**后者今日无门禁**（空档已登记，见 §3.79 第 3 点）。
+  前者由 `shell_frame_guard.test.mjs` 常驻守；**后者登记时无门禁**，R9-B80 / §3.80 已把它补成
+  两条按符号文本判的常驻锚（各自用注入证过红）。
   原条目 ↓
   Q10 R9-AD-10 | P3（**待裁决**：桥传输整体迁移属跨端契约变更，§四） | `AegisHomeBridge.kt:95-121` + `SecureWebViewFactory.kt:127-132`：
   `addJavascriptInterface` 对象对所有帧可见（本类 KDoc 自述）而判据只取 `webView.url`
@@ -1443,6 +1445,11 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   ③Android 对 `[8.8.8.8]` 给出 `kind=DOMAIN` 而 `normalizeInput` 得 **null**——判定说这是网址、归一产不出 URL，而这张表今天**没有**「DOMAIN ⇒ 归一非 null」的锚（`SearchNormalizeVectorsTest` 只锚了「EMPTY/FORBIDDEN_SCHEME ⇒ null」那一个方向）。
   为什么不顺手做、也不用 `windows_url` 覆盖收编：那张表的覆盖机制是给「同一意图、不同文本」（大小写保留、拒绝发生的层级不同）准备的，且 `DocumentedCrossEndDivergences` 钉着条数；这批是**行为相反**，写成覆盖等于把分叉批准成契约。要合流必须先定「地址栏对 IPv6 字面量到底该导航还是该搜索」，那是产品口径不是实现细节。
   验收判据（选定方向后）：①把 12 个形态中两端一致的全部进表，并把分叉的那些按裁决后的同一期望进表；②补上「DOMAIN ⇒ `normalizeInput` 非 null」这条锚（Android 现在的 `[8.8.8.8]` 会立刻红，正好当判据）；③若判「导航」，Android 的分类要改成按地址族判而不是按有没有点判，并同批改 `search-normalize-vectors.json` 里既有那条八进制 IPv4（`0177.0.0.1`）的 `windows_url` 覆盖是否仍成立。与 Q67 的分工：那条是 https 升级豁免面的 `fec0::/10`，本条是地址栏分类面，共同根因是「IPv6 段语义在两端各写一遍」，但裁决点不同。
+
+- Q69 R9-DOC-22 | P2（**待裁决**：三条候选判据各有代价，见末尾） | `docs/audit/full-audit-2026-10-10-round9.md:754`（§五 标题写着「必须带 file:line」）↔ `scripts/verify_ledger_queue_status.py:36`（`POINTER` 只解析 `§3.nn`）↔ `scripts/check_doc_claims.py:43`（`COUNT_CLAIM` 只比 workflow 裸数字）：
+  第八轮立下的「队列行**必须带 file:line**」这条纪律，**没有任何门禁判它**——既判不了「引用的文件与行还存在」，也判不了「那一行现在写着什么」，连「这行到底带没带锚」都没人判：本批按「`文件名.扩展名:数字`」口径实测 §五 62 条队列行，**49 条带锚、共 328 处引用**；剩下 13 条一个行号锚都没有，且**全部是已划线的行**（证据都搬进了 §三 的批次记录，读的人无法机械回读它当初判的是哪一行）。实证还是本批现读抓到的**我自己上一批**的漂移：#218 往 `AegisHomeBridge.kt` 插了 7 行 KDoc，同一个提交里引用的 `:76-77`／`:120-126` 当场变成 `:83-84`／`:127-133`，两道门禁全绿放行（§3.80 第 4 点）。行号失账不是假想事故：本仓「引用一个不存在的小节」在 §3.50 栽过一次，行号这一维今天仍是裸的，而 328 处引用在承重。
+  三条路都有代价，选定前不顺手做：①**存在性校验**（每处 `path.ext:NN[-MM]` 必须能在实树解析且 NN≤文件行数）——历史条目引的是**当时**的行号，删码后必然悬空，要么全量改写历史（违反「翻转不静默删行」），要么给旧批次开豁免（豁免面就是下一个假绿源）；②**内容校验**（引用区间内至少要出现该条目正文里的一个标识符 token）——本仓有把被禁形态**逐字抄进注释**的传统（R9-B45、§3.22 的 frame-ancestors 注记），引用注释行的条目会假红，要区分就得再加一张白名单，又回到①的豁免面；③把易漂的引用改成**符号锚**（`File.kt::symbolName`，按文本判），本批 `BridgeTrustListGuardTest` 就是这种锚的样板，代价是它只对「引用一个声明」的句子成立，描述一段行为的句子仍然得靠行号。
+  验收判据（选定方向后）：先造一条**注定会漂**的锚（同一提交里改被引文件），证明新门禁当场判红；再证明把那段代码恢复后锚仍绿——只有「能红且能修」同时成立，这条纪律才算被接上而不是被写下。
 
 ### 3.20 R9-B21（2026-10-10，队列批次 D 第一子批）：九条文档陈述改真 + 两条新队列
 
@@ -4390,9 +4397,11 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 1. 结案的理由不是「迁移太难」，是**那条判据今日已没有可区分的输入**。三个面全部现读重测（不引用
    上一轮结论）：
-   - **受信面**：`android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt:76-77` 的
-     `TRUSTED_SHELL_PAGES` 只有由 `BrowserEngine.HOME_URL` 派生的一元（`BrowserEngine.kt:16` =
-     `file:///android_asset/start.html`），判定在 `AegisHomeBridge.kt:120-126`。
+   - **受信面**：`android/app/src/main/java/com/aegis/browser/AegisHomeBridge.kt` 的
+     `TRUSTED_SHELL_PAGES`（本轮重测在 `:83-84`）只有由 `BrowserEngine.HOME_URL` 派生的一元
+     （`BrowserEngine.kt:16` = `file:///android_asset/start.html`），判定在同类
+     `isTrustedShellUrl`（`:127-133`）。这两个行号上一批刚漂过，所以真正的锚改由
+     `BridgeTrustListGuardTest` 按符号文本判（第 4 点）。
    - **帧面**：`shared/shell/start.html:29` 的 meta CSP 显式 `frame-src 'none'`；壳页五段源
      （start.html / start.js / start.main.js / start.snake.js / start.import.js）本轮重跑 grep，对
      `<iframe`、`createElement('iframe')`、`srcdoc`、`document.write`、`window.open` **0 命中**。
@@ -4416,11 +4425,11 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      `node --test "tests/ui-regression/*.test.mjs"`）——§3.22 实测注入「删 `frame-src 'none'`
      ⇒ 2 例红 / 塞 `<iframe>` ⇒ 成本哨兵红」，本批**重跑同一注入复现 2 例红**后原样还原；
      `:73-79` 的装配锚还钉着「这份 CSP 确实随包进 Android（`assets.srcDir(../shared/shell)`）」。
-   - 往 `TRUSTED_SHELL_PAGES` 加第二个受信页 ⇒ 同样重启。这一半**今日无自动门禁**：名单是
+   - 往 `TRUSTED_SHELL_PAGES` 加第二个受信页 ⇒ 同样重启。这一半**登记当时无自动门禁**：名单是
      `private val`，JVM 单测看不到它的元素集合（`AegisHomeBridgePrefsTest.kt:148-175` 判的是「给定
      URL 通过/拒绝」，加一项不会让任何现成用例变红）。本批的处理是在**编辑点**留一行注释
-     （`AegisHomeBridge.kt:112-119` 的 KDoc：加第二个名字＝重启 Q10）；要再升级成门禁得动 text-anchor
-     登记表，那是另一件事，不顺手做——登记出来胜过假装它已被守住。
+     （`AegisHomeBridge.kt:76-81` 的 KDoc：加第二个名字＝重启 Q10）。**下一批就把这个空档补掉了**
+     （R9-B80 / §3.80：两条常驻锚，各自用注入证红）；登记出来再补，胜过假装它已被守住。
 4. 这不是「把待裁决项自己关掉」：§四 第 7 项仍回读可见，状态从「两半都待定稿」改为「①已落地
    （§3.26）、②带理由关闭 + 触发条件」，并保留「用户若仍要求迁移，本条即重启」的位置。迁移的成本
    也没变便宜：要动三端共用的 `shared/shell/start.js:30-33`（`andApi`／`csApi` 两个通道探测）与
@@ -4429,7 +4438,59 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    testDebugUnitTest（本批只动一行 KDoc）；`node --test tests/ui-regression/shell_frame_guard.test.mjs`
    先证明第 3 点那条触发条件真的会红，再把它写进结案理由。
 
+### 3.80 R9-B80（2026-10-16，§3.79 登记的空档）：把「加第二个受信页」从一行注释升级成两条能红的常驻锚——顺带抓到我自己上一批留下的三处错锚
+
+1. 上一批结案时写下的是实话，也是缺口：触发条件①（壳页出现任何 frame）有
+   `shell_frame_guard.test.mjs` 常驻守，②（往 `TRUSTED_SHELL_PAGES` 加第二个受信页）
+   **没有任何用例会红**——名单是 `private val`，`AegisHomeBridgePrefsTest.kt:148-175` 判的是
+   「给定 URL 通过/拒绝」，加一项它看不见。本批补的就是②。
+2. 两条新常驻锚（`android/app/src/test/kotlin/com/aegis/browser/BridgeTrustListGuardTest.kt`，
+   纯 JVM 不依赖 Robolectric，159 行）：
+   - `trustedShellPageListIsSinglyDerivedFromHomeUrl`：在**剔注释后**的 `AegisHomeBridge.kt`
+     代码文本里定位 `private val TRUSTED_SHELL_PAGES =` 的 `setOf(...)`，按顶层逗号切实参，
+     断言实参**恰好一元**且必须由 `BrowserEngine.HOME_URL` 派生。判的是形状而不是行号——
+     上一批我自己就栽在行号上（第 4 点）。
+   - `onlyTheHomeAdapterConsumesTheBridge`：把 §3.26 那条「审计时 grep」变成常驻判据——
+     对 `shared/shell` 顶层每个 `.html`/`.js` 剔注释后，取用 `AegisBridge` 的文件集合必须
+     **恰好等于 `{start.js}`**。这正是收窄所依据的事实（主页之外没有合法桥消费者），
+     以前只写在台账里，下一个人给壳页加第二个文档时看不见。
+3. 两条都**用注入证过红**，不是「跑过就算守住」：
+   - 名单改成 `setOf(…removePrefix(TRUSTED_SHELL_PREFIX), "panel.html")` ⇒
+     `trustedShellPageListIsSinglyDerivedFromHomeUrl FAILED`；
+   - 新建 `shared/shell/panel.html`（内联脚本真调 `AegisBridge.navigate`）⇒
+     `onlyTheHomeAdapterConsumesTheBridge FAILED`（此时锚①仍绿，两半各自独立生效）；
+     注入文件与源文件都已原样还原（`git status` 干净）。
+   - **锚①第一版是假绿**，而且是「写完先跑绿、注入也绿」那种：深度计数从 0 起算，
+     `removePrefix(` 的闭括号被当成 `setOf(` 的闭括号，实参被截成一段——加第二个元素
+     照样通过。改成从 1 起算后注入才真的判红。「绿本身不是结论，能红才是」在本仓
+     第五次兑现，且这次红的是我自己刚写的锚，不是别人的代码。
+4. **顺手抓到上一批（R9-B79 / #218）我自己留下的错锚**：那批往 `AegisHomeBridge.kt`
+   插了 7 行 KDoc，同一个提交里引用的 `:76-77`（名单）与 `:120-126`（判定函数）就被顶到
+   `:83-84`／`:127-133`——`verify_ledger_queue_status.py` 只判 `§3.nn` 指针能否解析，
+   `check_doc_claims.py` 判的是计数声明，谁都不判「这一行现在写着什么」，两道门禁都放行。
+   本批把相关引用改成**按符号文本判**的锚，并登记新队列项 **Q69**（台账行号锚的可核验性）。
+5. HTML 注释口径：`withoutComments()`（单源，R9-B45）不处理 `<!-- -->`，而
+   `shared/shell/start.html:23` 的说明段逐字写着 `AegisBridge`——不补一刀就是假红。
+   正向控制同批钉住两侧：`start.js` 剔注释后仍含 `window.AegisBridge`（防「什么都没匹配到」
+   的假绿），`start.html` 剔注释后**不含**（防剔除逻辑漂移）。
+6. 执行面——**这一条里含本批自己造的一次假绿**：锚写完我在本地连跑两轮
+   `./gradlew :app:ktlintCheck :app:detekt :app:testDebugUnitTest 2>&1 | tail -12`，两轮都按「全绿」
+   写进提交信息与 PR 描述。真相是**管道把退出码换成了 `tail` 的 0**，而
+   `:app:ktlintTestSourceSetCheck` 从第一轮就 `FAILED`（新测试文件 9 条格式违规）——判红它的是 CI
+   （`.github/workflows/android-quality.yml:90` 跑四个模块的 ktlint，我本地只跑了 `:app`）。
+   修正三件：①跑门禁改成 `> 日志 2>&1; echo EXIT=$?` 读真实退出码，且按 CI 原样跑四模块 ktlint +
+   四模块 detekt + 三模块 `testDebugUnitTest`；②原句「`:app` ktlint + detekt + test 全绿（两轮）」
+   进 §六，防下一轮拿它当先例；③这条与本仓「绿本身不是结论」同族，但这次红的是**我读结果的方式**，
+   不是别人的代码。台账门禁（队列状态 / 文档陈述 / markdown 链接与表格 / 行数红线 / 空转门禁）
+   是真跑真绿，逐条命令与输出都在提交信息里。
+
 ## 六、复核后判定为不成立（留此防重复上报）
+- **「R9-B80 本地两轮 `:app` ktlint + detekt + testDebugUnitTest 全绿」不成立**（§3.80 第 6 点，
+  新登 R9-CI-20）：两轮命令都以 `… 2>&1 | tail -12` 结尾，退出码是 `tail` 的 0，不是 Gradle 的。
+  `:app:ktlintTestSourceSetCheck` 从**第一轮**就 `FAILED`（新文件 9 条格式违规），是 CI 的
+  `.github/workflows/android-quality.yml:90` 判红的——那条跑四个模块的 ktlint，而本地我只跑了
+  `:app`，两边覆盖面也不一致。教训不是「CI 会兜住」而是：**读门禁结果必须先拿到被测命令自己的
+  退出码**，`| tail`/`| grep` 之后的 `$?` 属于管道末端；且本地跑的子集不等于 CI 的全集。
 - **「一行 `Performance.prototype.now.call(performance)` 即取无降噪 µs 精度时钟」不成立**
   （第九轮 R9-B74 / §3.74，钉在 Q25／Q57 的剩余半边）：这句是台账按推断写的（R9-B38 那批的
   原话），本批第一次把它量成数字：本机 WebView2 Runtime 155.0.4283.60 下，`performance.now()`
