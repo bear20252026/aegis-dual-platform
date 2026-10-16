@@ -128,6 +128,24 @@ public sealed class SearchNormalizeVectorTests
         Assert.False(OriginPolicy.TryParseExternal("http://0177.0.0.1", out _));
     }
 
+    [Fact]
+    public void PublicBracketedIpv6GetsHttpsWhileLoopbackKeepsHttp()
+    {
+        // R9-B73：`BareHostOf` 此前无条件切在第一个冒号上，把 `[2606:…]` 截成 `[2606`，
+        // 于是**公网** IPv6 拿到 http——与同一个类里 IsPublicHost 对同一条串返回 True 相反，
+        // 也与本层文档「公网补 https」相反。这条不是 R8-CS-SEC-17 登记的那类受认可残余
+        // （那类讲的是链路本地等保留段），公网段没有任何残余可挡。
+        Assert.True(UrlSafety.IsPublicHost("[2606:4700:4700::1111]"));
+        Assert.Equal("https://[2606:4700:4700::1111]", UrlNormalizer.Normalize("[2606:4700:4700::1111]"));
+        // 端口在 `]` 之后：括号感知必须既认出端口、又不切坏地址本身
+        Assert.Equal(
+            "https://[2606:4700:4700::1111]:8443",
+            UrlNormalizer.Normalize("[2606:4700:4700::1111]:8443"));
+        // 反向控制：回环与 mapped 回环仍按非公网补 http（B8 放行面，不因这条改动而变）
+        Assert.Equal("http://[::1]", UrlNormalizer.Normalize("[::1]"));
+        Assert.Equal("http://[::ffff:127.0.0.1]", UrlNormalizer.Normalize("[::ffff:127.0.0.1]"));
+    }
+
     private static string SchemeOf(string url) =>
         Uri.TryCreate(url, UriKind.Absolute, out var parsed) ? parsed.Scheme : url;
 
