@@ -1109,7 +1109,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 ### 5.4 RS（Rust 核心）
 
-- Q25 R9-RS-1 | P2 | **部分闭环（R9-B38 / §3.38）**：挂载形态与描述符这一半已三端合一（原型级挂载 + 保留原生描述符 + 实例兜底），三端同形判据落在 `core/rust-policy-core/tests/timer_parity.rs`；六条高解析通道两端零包裹的**剩余半边**续登为 Q57 R9-CS-17（不顺手做：rAF/getEntries*/Event.timeStamp 的包裹是站点可观察的行为变更，只能由真机冒烟证明）。原条目：Q25 R9-RS-1 | P2 | `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:207` +
+- Q25 R9-RS-1 | P2 | **部分闭环（R9-B38 / §3.38）；剩余半边的严重性按 §3.74 实测重判——本机 Runtime 下六条通道的引擎默认是 100µs 网格而非 µs**：挂载形态与描述符这一半已三端合一（原型级挂载 + 保留原生描述符 + 实例兜底），三端同形判据落在 `core/rust-policy-core/tests/timer_parity.rs`；六条高解析通道两端零包裹的**剩余半边**续登为 Q57 R9-CS-17（不顺手做：rAF/getEntries*/Event.timeStamp 的包裹是站点可观察的行为变更，只能由真机冒烟证明）。原条目：Q25 R9-RS-1 | P2 | `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:207` +
   `android/app/src/main/java/com/aegis/browser/WebViewHardeningStagesShield.kt:175` ↔
   `core/rust-policy-core/src/timer_prec.rs:127-140`、`core/rust-policy-core/tests/timer_parity.rs:69-94`：
   计时防护**挂载形态与通道集**三端不同口径——两端把包装装在 `performance` **实例**上且
@@ -1365,7 +1365,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   比如每周比对 `last dependency submission` 的时间戳，超过 N 天未提交即判红，
   否则这类「只在 master/schedule 跑的提交面」永远没有可失败的判据。
 
-- Q57 R9-CS-17 | P2 | **R9-B38 续登（Q25 的剩余半边）**：
+- Q57 R9-CS-17 | P2 | **R9-B38 续登（Q25 的剩余半边）；§3.74 已把「要不要裹」的交换量成 100µs→1ms+jitter，且推翻了自己那句「绕过即取 µs」**：
   ①`core/rust-policy-core/src/timer_prec.rs:170-244`（RS-279 一组：`mark`/`measure`/
   `getEntries*`/`timeOrigin`/`Event.timeStamp` 的原型级 getter 与 entry 圆整）↔
   `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs` Stage 8 与
@@ -4230,7 +4230,60 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    向量与消费面／markdown 两门禁／ruff·bandit·compat 全绿。探针文件与临时输出均已删除，
    工作树里没有一次性物件。
 
+### 3.74 R9-B74（2026-10-16）：把六条高解析通道的**实际分辨率**量出来——Q57/Q25 的前提有一句在本机 Runtime 上不成立
+
+1. 为什么要量：Q57 剩下的那半句写的是「rAF／`getEntries*`／`Event.timeStamp`／`timeOrigin`
+   的圆整是站点可观察的行为变更，只能由真机/桌面冒烟证明」——这话要 owner 给话，可给话需要的
+   数字我们从来没有过，台账里那句「一行 `Performance.prototype.now.call(performance)` 即取
+   **无降噪 µs 精度**时钟」一直是按推断写的。
+2. 静态前提先现读核掉：`FingerprintShield.cs` 与 `WebViewHardeningStagesShield.kt` 对
+   `getEntriesByType`／`getEntriesByName`／`timeOrigin`／`requestAnimationFrame`／`timeStamp`
+   五个词 **0 命中** ⇒ 两端对这六条一条都不裹 ⇒ 「引擎默认」就是「出货可见面」，
+   探针不需要引用正点 App 的注入文本也能代表两端。这条等价关系写在探针输出里（`premise=` 行），
+   不埋在讨论中。
+3. 测量工具：`windows/tools/WebView2SdkSurfaceProbe` 加 `--timers` 模式
+   （`TimerSurfaceProbe.cs`）。宿主沿用 `--redirect` 那条**已被验证过的路**：STA 线程 +
+   WinForms 的 `WebView2` 控件 + `EnsureCoreWebView2Async` + loopback http 页。
+   两处踩坑如实记：①第一版在主线程 `ShowDialog()` 撞 `RPC_E_CHANGED_MODE`（控制台 Main 是
+   MTA，COM 套间建线程后才能改）；②第二版忘了关窗，`ShowDialog` 永不返回——探针挂死 240s
+   被我杀掉，现在改成 `Application.Run` + 60s watchdog + 120s 线程 join，三层都不许静等。
+4. **实测数字**（本机 WebView2 Runtime `155.0.4283.60`——由 `--surface` 的
+   `runtime_version` 报出；`--timers` 自己那行 `runtime=155.0.0.0` 是从 UA 里正则取的，而
+   Chromium 交的是 **reduced UA**，别拿它当 Runtime 版本，`crossOriginIsolated=false`、
+   `SharedArrayBuffer=undefined`）：
+   - `performance.now()` 最小非零步进 = **0.1ms（100µs）**；
+   - `Performance.prototype.now.call(performance)` 那条绕过 = **同样 0.1ms**；
+   - `Event.timeStamp` 尾数 = `.0999999940395`（同一张 0.1ms 网格）；
+   - `performance.timeOrigin` 尾数只有一位（0.5ms 网格）、`mark` 的 `startTime` = `.8999999910593`
+     （0.1ms 网格）、`getEntriesByType('mark')` 正常产出 1 条；
+   - rAF 时间戳相邻帧最小差 = 7.1ms（这是刷新周期不是精度上限，别读反）。
+   核心的目标是 **1ms + 随机 jitter**（`timer_prec.rs:5,24,33`，与 Mullvad 同参数）。
+5. 由此推翻的那句写进了 §六：**「一行 prototype 调用就取到无降噪 µs 精度时钟」在本机 Runtime
+   上不成立**——绕过拿到的是同一个 100µs 网格，不是 µs。原因是 Chromium 自己就把时间降到
+   100µs，除非站点做到跨源隔离（实测 `crossOriginIsolated=false`）。所以 Windows 不裹这六条
+   的**残余**不是「µs 级指纹时钟」，而是「100µs 网格、确定无抖动、且与内核对齐」对比核心的
+   「1ms 网格 + jitter」。差仍然真实（10× 粗度 + 有无 jitter），但严重性等级要按这个数重判。
+6. Q25／Q57 **保持开放**（要不要三端同裹仍是产品口径，本批一个字判定面都没改），但两条的
+   正文都加了这条实测指针：给话的人现在看到的是「100µs→1ms+jitter」这个真实交换，
+   而不是「不裹就是 µs 泄漏」这个被推翻的说法。同一批把「rAF 7.1ms 是刷新周期不是精度」
+   写进去，免得这个数字被读反。
+7. 执行面：`dotnet build` 该工具成功；`--timers` 退出码 0 且七个字段全部到位
+   （缺任一项即 `PROBE_ERROR` + 退出 2，不静默）；`--surface` 原报告未受影响
+   （wiring 判据 `webview2_surface_probe_test.py` 全绿）；`pytest tests/python` 与常驻门禁全绿；
+   新文件 217 行在 300 红线内，不需要动基线。
+
 ## 六、复核后判定为不成立（留此防重复上报）
+- **「一行 `Performance.prototype.now.call(performance)` 即取无降噪 µs 精度时钟」不成立**
+  （第九轮 R9-B74 / §3.74，钉在 Q25／Q57 的剩余半边）：这句是台账按推断写的（R9-B38 那批的
+  原话），本批第一次把它量成数字：本机 WebView2 Runtime 155.0.4283.60 下，`performance.now()`
+  与它的 prototype 绕过形态给出**同一个 0.1ms（100µs）网格**，`Event.timeStamp`／`mark`
+  的 `startTime` 也落在同一网格——因为 Chromium 自己在 `crossOriginIsolated=false`
+  （实测，且 `SharedArrayBuffer` 为 `undefined`）时就把时间降到 100µs。所以「不裹这六条」的
+  真实残余是「100µs、确定无抖动」对比核心的「1ms + jitter」（`timer_prec.rs:5,24,33`），
+  不是「µs 级泄漏」。**下一轮别再用 µs 那句立严重性**；要重算就重跑
+  `aegis_wv2_surface --timers`（STA 线程 + 控件路径，退出码 2 表示没量到，不是量出「没有差异」）。
+  顺带钉一条读数纪律：探针里 rAF 相邻帧最小差 7.1ms 是**刷新周期**，不是精度上限，别读反。
+
 - **「三端应统一到提前捕获的 `origDefineProp`」不成立**（第九轮 R9-B55 / §3.55，登记于 Q57-②）：
   处方写的是「Windows 提前捕获定义器、核心与 Android 直接引用 ⇒ 三端不同形 ⇒ 要收口」，
   回读三条事实后它不成立——①三端出货注入面里**没有一处**给 `Object.defineProperty` 赋值
