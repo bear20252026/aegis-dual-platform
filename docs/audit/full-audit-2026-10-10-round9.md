@@ -1423,7 +1423,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `AuditRegressionTests.cs:28` 并给依据。**本批不新登 Q 之外的东西**：边界那张面今天已核对过，
   `fec0::1` 在两端的**拒绝边界**上同结论（都放行，见 §3.72 第 1 点的 `fec0::1` 上邻条目），
   分叉只在 scheme 选择这一面。
-- Q68 R9-SH-24 | **P2（待裁决：一端导航、一端搜索，且「谁是契约」没有既有裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs:87`（CS-140 的 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt:173`（`classifyInput` 的 `when`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，本批 +2 条 IPv6）：
+- Q68 R9-SH-24 | **P2（R9-B78 闭第一片：`[8.8.8.8]` 类两端已同判搜索词；剩余部分待裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs:87`（CS-140 的 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt:173`（`classifyInput` 的 `when`）↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，本批 +2 条 IPv6）：
   本批给这张表装 IPv6 弹时用哨兵探针把 12 个形态在两端各量一遍（跑完即删），结论是**只有 2 个形态端端一致**（裸 `2606:4700:4700::1111` 都判搜索词、`[::ffff:127.0.0.1]` 都判域名且都补 http，这两条已进表），其余全部相反：
   ①带括号的 IPv6 字面量在 Windows 判**域名并导航**（`[::1]`→`http://[::1]`、`[fd12::3]`→http），在 Android 判**搜索词**（`https://www.baidu.com/s?wd=%5B%3A%3A1%5D`）——同一个人在两台设备上敲同一串字符，一台打开本机服务、一台去搜索引擎；
   ②Android 的分类实际取决于**拼写里有没有点**，不是地址族：`[fd12::3]`（无点）→SEARCH，而 `[::169.254.169.254]`（带点）→DOMAIN 并产出 `https://[::169.254.169.254]`——同一种地址换个写法就换一条分支；
@@ -4346,6 +4346,33 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    test 全绿；`verify_vectors`／`verify_vector_consumers`／行数红线／文档计数／队列状态／
    markdown 两门禁／ruff·bandit·compat 全绿。
 
+### 3.78 R9-B78（2026-10-16，队列 Q68 第一片）：`[8.8.8.8]` 两端分类对齐——顺带被现树判掉我自己写的一条假不变量
+
+1. 做的是 Q68 里最小、也最有据的一片：**方括号里直接放点分 IPv4**（`[8.8.8.8]`）不是合法
+   URI host（括号只属于 IPv6 字面量）。Windows 判搜索词，Android 判 DOMAIN 之后什么都不做
+   ⇒ 同一个人敲同一串字符，一台去搜索、一台毫无反应。Android 的 `looksLikeUrl` 加一条
+   `isBracketedDottedIpv4` 与之对齐；反向控制同批进表：`[::ffff:127.0.0.1]` 首段含冒号、
+   不落入新判据，两端仍「域名 + http」，行为一字不变。共享表 +3 行，两端各跑：
+   Windows Core **927** 全过、Android `:app` **333** 条用例全过。
+2. **我自己写错了一条不变量，被现树当场判红**——这条比改动本身更值得记。第一版加的锚是
+   「判 DOMAIN ⇒ `normalizeInput` 必须非 null」，`0177.0.0.1` 立刻红：本端归一链内嵌
+   OriginPolicy，「判成网址却产不出 URL」是**表里写明理由的合法分层行为**
+   （`expected_url: null` + note 讲层序差异），不是矛盾。真正的空档是另一件事：这种 null
+   必须是**显式写明的**，静默的不算——锚改成「DOMAIN 行要么给 expected_url，要么带
+   expected_url:null + note」。同时撤回第 1 点原本的定性：`[8.8.8.8]` 的问题是**两端分类
+   相反**，不是我第一版说的「Android 内部自相矛盾」。原句进 §六，防下一轮再捏一条同样的假不变量。
+3. 两处工具面实测（都是红灯教的，不是预防性遵守）：`AddressText.IPV4_OCTETS` 是 broker 的
+   `internal`，:app 引不到——为一条判据放宽跨模块可见性是本末倒置，改在本模块提常量；
+   detekt `MagicNumber` 不认「注释里说明这是 4 段」，必须真命名；ktlint 对函数体续行要 8 空格缩进。
+4. Q68 **保持开放**，剩下的不是这一片：带方括号的**合法 IPv6**（`[::1]`、`[fd12::3]`、
+   `[fe80::1]`）Android 仍因「无点号」判搜索词，而 Windows 判域名并导航。那片要动的是
+   `looksLikeUrl` 的整条主机判据（按地址族判，而不是按拼写里有没有点判），并且要一并决定
+   scheme 面——Windows 对 `fe80::1` 判非公网补 http、Android 判非本机保持 https（两端的
+   **拒绝边界**对它同结论，见 §3.72 第 6 点，所以是输入层不一致而非逃逸）。仍属产品口径。
+5. 执行面：`gradle --offline` `:app` ktlint + detekt + test 全绿（中途红过三次：假不变量、
+   MagicNumber、缩进）；`dotnet test` Core **927**／Broker **298** 全过 0 失败，发现数下界 ✅；
+   其余常驻门禁见提交信息。
+
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「一行 `Performance.prototype.now.call(performance)` 即取无降噪 µs 精度时钟」不成立**
   （第九轮 R9-B74 / §3.74，钉在 Q25／Q57 的剩余半边）：这句是台账按推断写的（R9-B38 那批的
@@ -4357,6 +4384,14 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   不是「µs 级泄漏」。**下一轮别再用 µs 那句立严重性**；要重算就重跑
   `aegis_wv2_surface --timers`（STA 线程 + 控件路径，退出码 2 表示没量到，不是量出「没有差异」）。
   顺带钉一条读数纪律：探针里 rAF 相邻帧最小差 7.1ms 是**刷新周期**，不是精度上限，别读反。
+
+- **「地址栏判成 DOMAIN 就必须能产出 URL」不成立**（第九轮 R9-B78 / §3.78 第 2 点）：
+  Android 的 `normalizeInput` **内嵌** OriginPolicy（Windows 的输入层不查策略，拒绝发生在导航层），
+  所以「判网址但归一返回 null」是本端记录在共享向量里的合法分层行为——
+  `search-normalize-vectors.json` 的 `0177.0.0.1` 行就是这么写的（`expected_url: null` + note
+  说明层序差异，另有 `windows_url` 记 Windows 侧的对应产出）。我第一版把这条当不变量写成锚，
+  被它当场判红。真正该钉的是「这种 null 必须**显式写明理由**，静默不算」，锚已按那句改。
+  下一轮别再拿「分类与产出必须同向」立判据——两端拒绝发生在不同层，正是这条契约的内容。
 
 - **「裸 authority 不转小写会让大写 0x 十六进制的元数据 IP 漏判」不成立**
   （第九轮 R9-B75 / §3.75 第 3 点）：推断的来源是真的差异——`ReservedAddressBoundary.HasNumericAuthority`

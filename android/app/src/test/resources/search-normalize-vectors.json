@@ -161,6 +161,18 @@
       "expected_kind": "DOMAIN",
       "expected_url": "http://[::ffff:127.0.0.1]",
       "note": "R9-B73：mapped 回环的带括号写法——两端同判域名且同补 http（B8 放行面，回环绕得过分类层）。带括号的其它 IPv6 形态两端答案不同，故意**不**进这张表：把分叉写成 windows_url 覆盖等于把分叉做成契约"
+    },
+    {
+      "input": "[8.8.8.8]",
+      "expected_kind": "SEARCH",
+      "expected_url": null,
+      "note": "R9-B78（Q68 第一片）：方括号里直接放点分 IPv4 不是合法 URI host。Android 此前判 DOMAIN 却产不出 URL（自相矛盾），Windows 判搜索词——本端改成同判，并补上「DOMAIN ⇒ 归一非 null」的锚钉住这个方向"
+    },
+    {
+      "input": "[8.8.8.8]:8080",
+      "expected_kind": "SEARCH",
+      "expected_url": null,
+      "note": "同上带端口形态：括号内的点分判定不能因为尾巴有端口就翻转"
     }
   ]
 }

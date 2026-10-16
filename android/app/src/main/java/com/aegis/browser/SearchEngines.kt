@@ -59,6 +59,10 @@ object SearchEngines {
     /** host:port 形态的端口段长度上限（TCP 端口 ≤5 位数字——T1）。 */
     private const val MAX_PORT_SEGMENT_LENGTH = 5
 
+    /** 点分 IPv4 的段数。不引 broker 的 `AddressText.IPV4_OCTETS`：那是别的模块的
+     * internal，为一条判据放宽跨模块可见性是本末倒置。 */
+    private const val IPV4_DOTTED_SEGMENTS = 4
+
     /**
      * AD-229（2026-09-26 审计）：当前引擎进程内缓存——currentEngine 此前每次
      * 导航都同步读 SharedPreferences（首次磁盘 IO 在主线程；SecureNavigator
@@ -212,7 +216,22 @@ object SearchEngines {
             segment.all { it.isDigit() }
     }
 
-    private fun looksLikeUrl(text: String): Boolean = !text.contains(' ') && '.' in text && !text.endsWith(".")
+    private fun looksLikeUrl(text: String): Boolean =
+        !text.contains(' ') && '.' in text && !text.endsWith(".") && !isBracketedDottedIpv4(text)
+
+    /**
+     * `[8.8.8.8]`：方括号里直接放点分 IPv4 **不是合法 URI host**（括号只属于 IPv6 字面量）。
+     * 本端此前判它 DOMAIN，而归一链产不出 URL ⇒ `normalizeInput` 返回 null，是一个
+     * 「判定说这是网址、归一说不是」的自相矛盾（R9-B78 / 队列 Q68 的第一片）；Windows 对
+     * 同一条串判搜索词，本端改成同判。带点但形如 `[::ffff:127.0.0.1]` 的内嵌写法不在本判据内
+     * （首段含冒号，不是四段纯数字），两端今天都判域名、行为不变。
+     */
+    private fun isBracketedDottedIpv4(text: String): Boolean {
+        if (!text.startsWith('[') || !text.contains('.')) return false
+        val parts = text.substringAfter('[').substringBefore(']').split('.')
+        return parts.size == IPV4_DOTTED_SEGMENTS &&
+            parts.all { it.isNotEmpty() && it.all(Char::isDigit) }
+    }
 
     /** D-1 对齐：完整 URL 内空格编码 %20 后再走校验（浏览器惯例）。 */
     internal fun canonicalizeExternal(text: String): String? =
