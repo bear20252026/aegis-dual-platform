@@ -75,6 +75,18 @@ class SearchNormalizeVectorsTest {
                 )
             }
             // 期望 URL 明确给出的条目：全链输出精确锁定
+            // R9-B78 的锚（第一版写错了，写在这里免得下一轮再写一遍）：本端归一链内嵌
+            // OriginPolicy，所以「判 DOMAIN 却产不出 URL」是**合法的分层行为**——
+            // `0177.0.0.1` 就是这么记录的（expected_url: null + note 说明层序差异），
+            // 我第一版把「DOMAIN ⇒ 非 null」当不变量，被它当场判红。真正没锚的是另一件事：
+            // 这种 null 必须是**写明理由的**，不能是静默的。故判：DOMAIN 行要么给出
+            // expected_url，要么带着 expected_url:null + note，二者皆无即红。
+            if (expectedKind == "DOMAIN" && !vector.has("expected_url")) {
+                assertTrue(
+                    "DOMAIN 行必须显式给 expected_url（给 null 也要写明理由，静默不算）：$input",
+                    vector.has("note"),
+                )
+            }
             if (vector.has("expected_url") && !vector.isNull("expected_url")) {
                 val expectedUrl = vector.getString("expected_url")
                 assertEquals(
