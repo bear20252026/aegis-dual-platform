@@ -1,0 +1,507 @@
+{
+  "protocol": "aegis-reserved-address-boundary",
+  "version": 1,
+  "description": "保留地址边界（四类出口共用的唯一谓词源：顶层导航、授权消费、子资源 403、下载授权）的跨端契约表。R9-B70 之前这张表在 C# 与 Kotlin 各抄一份，实测只有 12 条是同一个 URL——其余各测各的，于是「两端都测了这条边界」是覆盖假象，且同一条 URL 已经出现相反期望（0177.0.0.1 在 C# 放行、在 Kotlin 拒）。现在两端逐条消费本文件：expected=deny 即 DeniesRaw/denies 为真，expected=allow 即为假。空 host 不在这里（那是各端入口自己的判据，另有本地用例）。",
+  "vectors": [
+    {
+      "url": "http://169.254.169.254/latest/meta-data/",
+      "expected": "deny",
+      "note": "云厂商实例元数据端点（SSRF 拿实例凭据的主路径）"
+    },
+    {
+      "url": "http://169.254.1.1/",
+      "expected": "deny",
+      "note": "169.254/16 链路本地"
+    },
+    {
+      "url": "http://169.254.1/",
+      "expected": "deny",
+      "note": "inet_aton 简写＝169.254.1.0，仍是链路本地"
+    },
+    {
+      "url": "http://169.1/",
+      "expected": "deny",
+      "note": "两段简写＝169.0.0.1；本条同时钉「非规范点分不得被归一后放行」（R9-B70）"
+    },
+    {
+      "url": "http://2852168190/",
+      "expected": "deny",
+      "note": "十进制整数编码，Chromium 归一成元数据 IP 而 .NET 给另一串——纯数字主机名一律拒"
+    },
+    {
+      "url": "http://0251.0376.0251.0376/",
+      "expected": "deny",
+      "note": "八进制点分＝元数据 IP"
+    },
+    {
+      "url": "http://0xa9fea9fe/",
+      "expected": "deny",
+      "note": "0x 十六进制整数＝元数据 IP"
+    },
+    {
+      "url": "http://0.0.0.0/",
+      "expected": "deny",
+      "note": "0/8 未指定"
+    },
+    {
+      "url": "http://224.0.0.1/",
+      "expected": "deny",
+      "note": "224/4 组播"
+    },
+    {
+      "url": "http://239.255.255.250/",
+      "expected": "deny",
+      "note": "管理组播（mDNS）"
+    },
+    {
+      "url": "http://255.255.255.255/",
+      "expected": "deny",
+      "note": "广播"
+    },
+    {
+      "url": "http://240.0.0.1/",
+      "expected": "deny",
+      "note": "240/4 保留"
+    },
+    {
+      "url": "http://192.0.2.1/",
+      "expected": "deny",
+      "note": "TEST-NET-1 文档段"
+    },
+    {
+      "url": "http://198.51.100.7/",
+      "expected": "deny",
+      "note": "TEST-NET-2 文档段"
+    },
+    {
+      "url": "http://203.0.113.7/",
+      "expected": "deny",
+      "note": "TEST-NET-3 文档段"
+    },
+    {
+      "url": "http://198.18.0.1/",
+      "expected": "deny",
+      "note": "198.18/15 基准测试段"
+    },
+    {
+      "url": "http://198.19.254.3/",
+      "expected": "deny",
+      "note": "198.18/15 基准测试段（第二段边界）"
+    },
+    {
+      "url": "http://0177.0.0.1/",
+      "expected": "deny",
+      "note": "前导零八进制的 127.0.0.1：与 OS/Chromium 的 inet_aton 解释同族分歧 ⇒ 形态不规范即拒，不担保归一后放行（R9-B70）"
+    },
+    {
+      "url": "http://[::]/",
+      "expected": "deny",
+      "note": "IPv6 未指定"
+    },
+    {
+      "url": "http://[fe80::1]/",
+      "expected": "deny",
+      "note": "fe80::/10 链路本地"
+    },
+    {
+      "url": "http://[ff02::1]/",
+      "expected": "deny",
+      "note": "ff00::/8 组播"
+    },
+    {
+      "url": "http://[ff02::1:2]/",
+      "expected": "deny",
+      "note": "ff00::/8 组播的多组写法"
+    },
+    {
+      "url": "http://[::ffff:169.254.169.254]/",
+      "expected": "deny",
+      "note": "IPv4-mapped 穿成的元数据端点"
+    },
+    {
+      "url": "http://[::169.254.169.254]/",
+      "expected": "deny",
+      "note": "同一端点的 v4-compatible 拼法（R9-B69 / Q64）"
+    },
+    {
+      "url": "http://[::2]/",
+      "expected": "deny",
+      "note": "v4-compatible 折出来 0.0.0.2（0/8）（R9-B69）"
+    },
+    {
+      "url": "http://[::ffff:garbage]/",
+      "expected": "deny",
+      "note": "内嵌段读不出来＝不可判定即拒"
+    },
+    {
+      "url": "http://127.0.0.1:6379/",
+      "expected": "allow",
+      "note": "B8 裁决：本机服务必须能打开"
+    },
+    {
+      "url": "http://localhost/admin",
+      "expected": "allow",
+      "note": "本机名"
+    },
+    {
+      "url": "http://api.localhost/x",
+      "expected": "allow",
+      "note": ".localhost 后缀"
+    },
+    {
+      "url": "http://[::1]/",
+      "expected": "allow",
+      "note": "IPv6 回环"
+    },
+    {
+      "url": "http://[::1]:9000/",
+      "expected": "allow",
+      "note": "带端口的 IPv6 回环"
+    },
+    {
+      "url": "http://[::0.0.0.1]/",
+      "expected": "allow",
+      "note": "回环的 v4-compatible 拼法——折叠必须排在回环判定之后（R9-B69）"
+    },
+    {
+      "url": "http://192.168.1.1/set_config",
+      "expected": "allow",
+      "note": "路由器/NAS"
+    },
+    {
+      "url": "http://10.0.0.1/",
+      "expected": "allow",
+      "note": "10/8"
+    },
+    {
+      "url": "http://172.16.5.4/",
+      "expected": "allow",
+      "note": "172.16/12 下界"
+    },
+    {
+      "url": "http://172.31.255.255/",
+      "expected": "allow",
+      "note": "172.16/12 上界"
+    },
+    {
+      "url": "http://100.64.0.1/",
+      "expected": "allow",
+      "note": "CGNAT/Tailscale（已知残余：阿里云元数据 100.100.100.200 落在本段内）"
+    },
+    {
+      "url": "http://[fd00::12]/",
+      "expected": "allow",
+      "note": "ULA fc00::/7"
+    },
+    {
+      "url": "http://[fd12::3]/",
+      "expected": "allow",
+      "note": "ULA 另一种拼法"
+    },
+    {
+      "url": "http://[::1.2.3.4]/",
+      "expected": "allow",
+      "note": "反向控制：v4-compatible 折出来是公网仍放行，本边界不是「整段 IPv6 收紧」"
+    },
+    {
+      "url": "http://my-nas.local/",
+      "expected": "allow",
+      "note": "mDNS 主机名：权威交 DNS"
+    },
+    {
+      "url": "http://printer.internal/firmware",
+      "expected": "allow",
+      "note": ".internal 主机名"
+    },
+    {
+      "url": "https://example.com/path",
+      "expected": "allow",
+      "note": "公网主机名"
+    },
+    {
+      "url": "https://8.8.8.8/",
+      "expected": "allow",
+      "note": "公网 IP 字面量"
+    },
+    {
+      "url": "https://ntp.aegis.local/",
+      "expected": "allow",
+      "note": "宿主自有页面"
+    },
+    {
+      "url": "https://geo.aegis.local/geogebra/index.html",
+      "expected": "allow",
+      "note": "宿主自有页面（内置离线页）"
+    },
+    {
+      "url": "https://ntp.aegis.local:8443/",
+      "expected": "allow",
+      "note": "主机名形态：本层不按端口判"
+    },
+    {
+      "url": "http://0.255.255.255/",
+      "expected": "deny",
+      "note": "0/8 上邻"
+    },
+    {
+      "url": "http://9.255.255.255/",
+      "expected": "allow",
+      "note": "10/8 之下邻（公网）"
+    },
+    {
+      "url": "http://10.0.0.0/",
+      "expected": "allow",
+      "note": "10/8 下界（B8 放行内网）"
+    },
+    {
+      "url": "http://10.255.255.255/",
+      "expected": "allow",
+      "note": "10/8 上界"
+    },
+    {
+      "url": "http://11.0.0.0/",
+      "expected": "allow",
+      "note": "10/8 之上邻"
+    },
+    {
+      "url": "http://126.255.255.255/",
+      "expected": "allow",
+      "note": "127/8 之下邻"
+    },
+    {
+      "url": "http://127.0.0.0/",
+      "expected": "allow",
+      "note": "回环段的网络地址：本层按段放行，不按「可否作目标」判"
+    },
+    {
+      "url": "http://128.0.0.0/",
+      "expected": "allow",
+      "note": "127/8 之上邻"
+    },
+    {
+      "url": "http://169.253.255.255/",
+      "expected": "allow",
+      "note": "链路本地段之下邻"
+    },
+    {
+      "url": "http://169.254.0.0/",
+      "expected": "deny",
+      "note": "169.254/16 下界（不是元数据 IP，但整段都不是设备地址）"
+    },
+    {
+      "url": "http://169.254.255.255/",
+      "expected": "deny",
+      "note": "169.254/16 上界"
+    },
+    {
+      "url": "http://169.255.0.0/",
+      "expected": "allow",
+      "note": "链路本地段之上邻"
+    },
+    {
+      "url": "http://172.15.255.255/",
+      "expected": "allow",
+      "note": "172.16/12 之下邻"
+    },
+    {
+      "url": "http://172.16.0.0/",
+      "expected": "allow",
+      "note": "172.16/12 下界"
+    },
+    {
+      "url": "http://172.32.0.0/",
+      "expected": "allow",
+      "note": "172.16/12 之上邻"
+    },
+    {
+      "url": "http://100.63.255.255/",
+      "expected": "allow",
+      "note": "CGNAT 100.64/10 之下邻"
+    },
+    {
+      "url": "http://100.64.0.0/",
+      "expected": "allow",
+      "note": "CGNAT 下界"
+    },
+    {
+      "url": "http://100.127.255.255/",
+      "expected": "allow",
+      "note": "CGNAT 上界"
+    },
+    {
+      "url": "http://100.128.0.0/",
+      "expected": "allow",
+      "note": "CGNAT 之上邻"
+    },
+    {
+      "url": "http://192.0.1.255/",
+      "expected": "allow",
+      "note": "TEST-NET-1 之下邻"
+    },
+    {
+      "url": "http://192.0.2.0/",
+      "expected": "deny",
+      "note": "TEST-NET-1 下界"
+    },
+    {
+      "url": "http://192.0.2.255/",
+      "expected": "deny",
+      "note": "TEST-NET-1 上界"
+    },
+    {
+      "url": "http://192.0.3.0/",
+      "expected": "allow",
+      "note": "TEST-NET-1 之上邻"
+    },
+    {
+      "url": "http://192.167.255.255/",
+      "expected": "allow",
+      "note": "192.168/16 之下邻"
+    },
+    {
+      "url": "http://192.169.0.0/",
+      "expected": "allow",
+      "note": "192.168/16 之上邻"
+    },
+    {
+      "url": "http://198.17.255.255/",
+      "expected": "allow",
+      "note": "198.18/15 之下邻"
+    },
+    {
+      "url": "http://198.18.0.0/",
+      "expected": "deny",
+      "note": "198.18/15 下界"
+    },
+    {
+      "url": "http://198.19.255.255/",
+      "expected": "deny",
+      "note": "198.18/15 上界（第二段 19）"
+    },
+    {
+      "url": "http://198.20.0.0/",
+      "expected": "allow",
+      "note": "198.18/15 之上邻"
+    },
+    {
+      "url": "http://198.51.99.255/",
+      "expected": "allow",
+      "note": "TEST-NET-2 之下邻"
+    },
+    {
+      "url": "http://198.51.100.0/",
+      "expected": "deny",
+      "note": "TEST-NET-2 下界"
+    },
+    {
+      "url": "http://198.51.100.255/",
+      "expected": "deny",
+      "note": "TEST-NET-2 上界"
+    },
+    {
+      "url": "http://198.51.101.0/",
+      "expected": "allow",
+      "note": "TEST-NET-2 之上邻"
+    },
+    {
+      "url": "http://203.0.112.255/",
+      "expected": "allow",
+      "note": "TEST-NET-3 之下邻"
+    },
+    {
+      "url": "http://203.0.113.0/",
+      "expected": "deny",
+      "note": "TEST-NET-3 下界"
+    },
+    {
+      "url": "http://203.0.113.255/",
+      "expected": "deny",
+      "note": "TEST-NET-3 上界"
+    },
+    {
+      "url": "http://203.0.114.0/",
+      "expected": "allow",
+      "note": "TEST-NET-3 之上邻"
+    },
+    {
+      "url": "http://223.255.255.255/",
+      "expected": "allow",
+      "note": "组播 224/4 之下邻（最后一个公网地址）"
+    },
+    {
+      "url": "http://224.0.0.0/",
+      "expected": "deny",
+      "note": "组播下界"
+    },
+    {
+      "url": "http://239.0.0.1/",
+      "expected": "deny",
+      "note": "管理组播"
+    },
+    {
+      "url": "http://240.0.0.0/",
+      "expected": "deny",
+      "note": "240/4 保留段下界"
+    },
+    {
+      "url": "http://255.255.255.254/",
+      "expected": "deny",
+      "note": "广播地址的前一邻——整段 >=224 都在拒绝面内"
+    },
+    {
+      "url": "http://169.254.169.254:8080/latest",
+      "expected": "deny",
+      "note": "带端口的元数据端点：剥端口不得改变判定"
+    },
+    {
+      "url": "http://user@169.254.169.254/latest",
+      "expected": "deny",
+      "note": "userinfo 不参与判定——否则 `@` 前面塞点什么就把段匹配绕开了"
+    },
+    {
+      "url": "http://user:pw@127.0.0.1:8000/",
+      "expected": "allow",
+      "note": "带凭据的本机服务仍要能打开（B8）"
+    },
+    {
+      "url": "http://anonymous@my-nas.local/share.bin",
+      "expected": "allow",
+      "note": "主机名 + userinfo：交 DNS 定权威"
+    },
+    {
+      "url": "http://127.0.0.1./",
+      "expected": "allow",
+      "note": "尾点不改判定（FQDN 写法）"
+    },
+    {
+      "url": "http://169.254.169.254./latest",
+      "expected": "deny",
+      "note": "尾点的元数据端点"
+    },
+    {
+      "url": "http://0177.0.0.1:80/",
+      "expected": "deny",
+      "note": "非规范点分 + 端口（R9-B70 的 ⑦ 在带端口时也必须成立）"
+    },
+    {
+      "url": "http://169.1:80/",
+      "expected": "deny",
+      "note": "两段简写 + 端口"
+    },
+    {
+      "url": "http://[::1]:9000/api",
+      "expected": "allow",
+      "note": "IPv6 回环带端口带路径"
+    },
+    {
+      "url": "http://[fe80::1]:80/",
+      "expected": "deny",
+      "note": "IPv6 链路本地带端口"
+    },
+    {
+      "url": "http://[::ffff:169.254.169.254]:9000/latest",
+      "expected": "deny",
+      "note": "mapped 元数据 + 端口 + 路径"
+    }
+  ]
+}

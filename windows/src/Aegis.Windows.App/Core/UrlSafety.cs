@@ -215,8 +215,8 @@ public static class UrlSafety
             // 同时漏判 ff 段——显式拦）
             if (bytes[0] == 0xFF)
                 return false;
-            // IPv4 兼容/映射残留 ::a.b.c.d（前置 96 位零 + 内嵌 IPv4）
-            if (bytes[..12].All(b => b == 0) && bytes[12] != 0)
+            // v4-compatible ::a.b.c.d 也折（此前带 bytes[12]!=0，::2 判公网——与核心/Android 相反，R9-B69/Q64）
+            if (bytes[..12].All(b => b == 0))
                 return IsPublicIp(new IPAddress(bytes[12..]));
             return true;
         }

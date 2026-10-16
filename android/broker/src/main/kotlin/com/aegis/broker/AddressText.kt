@@ -73,7 +73,17 @@ internal object AddressText {
     /** 文本 → 8 个 16 位组（内嵌 IPv4 占末两组）；形态不合返回 null。 */
     private fun groupPlan(body: String): List<Int>? {
         val quad = embeddedQuadGroups(body) ?: return null
-        val hex = if (quad.isEmpty()) body else body.substring(0, body.lastIndexOf(':'))
+        // 点分尾段切在哪一列：尾段**紧跟 `::`** 时（v4-compatible 写法
+        // `::169.254.169.254`）两个冒号都得留在十六进制侧——切掉一个，`::` 就成了悬空的
+        // 单个 `:`，压缩标记消失、整条地址读不出来。R9-B69 实测：Android 因此把这一形态
+        // 判成语法非法，而核心与 .NET 都收下它。其余写法（`::ffff:x.y.z.w`、
+        // `0:0:0:0:0:ffff:127.0.0.1`）的最后一个冒号就是尾段分隔符，照旧切在那儿。
+        // 不拆成第六个函数：本对象的 detekt `thresholdInObjects: 11` 已被 R9-B66 用满。
+        val lastColon = body.lastIndexOf(':')
+        val compatibleTail = body.getOrNull(lastColon - 1) == ':'
+        val tailOffset = if (compatibleTail) 1 else 0
+        val cut = if (quad.isEmpty()) body.length else lastColon + tailOffset
+        val hex = body.substring(0, cut)
         val compression = hex.indexOf("::")
         val head = hexGroups(if (compression < 0) hex else hex.substring(0, compression))
         val tail = if (compression < 0) emptyList() else hexGroups(hex.substring(compression + 2))

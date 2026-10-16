@@ -699,6 +699,43 @@
       "expected_evaluate": "require_confirmation",
       "expected_origin": "http://[::ffff:169.254.169.254]",
       "note": "本批发下来最要紧的一条：语法放开后，云元数据可以穿成 IPv6 字面量——折叠内嵌 IPv4 之后它必须和 169.254.169.254 得到同一个裁决"
+    },
+    {
+      "name": "ipv6_compatible_metadata_requires_confirmation",
+      "platform_decidable": false,
+      "register_session": true,
+      "generation": 0,
+      "url": "http://[::169.254.169.254]/latest",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://[::169.254.169.254]",
+      "note": "同一条元数据绕过面的第二种拼法：已废弃的 IPv4-兼容写法（前置 96 位全零，不带 ffff）。核心与 Android 折回 169.254.169.254，Windows 此前两处折叠都只认 v4-mapped ⇒ 这一形态穿过保留地址边界"
+    },
+    {
+      "name": "ipv6_compatible_this_network_requires_confirmation",
+      "platform_decidable": false,
+      "register_session": true,
+      "generation": 0,
+      "url": "http://[::2]/",
+      "scope": "navigation",
+      "expected_evaluate": "require_confirmation",
+      "expected_origin": "http://[::2]",
+      "note": "队列 Q64 的原始形态：`::2` 折出来是 `0.0.0.2`（0/8）。Windows 那条多带 bytes[12] != 0，首字节为零的 v4-compatible 一律不折 ⇒ 同一地址两端裁决相反"
+    },
+    {
+      "name": "ipv6_compatible_public_allow",
+      "platform_decidable": true,
+      "register_session": true,
+      "generation": 0,
+      "url": "http://[::1.2.3.4]/",
+      "scope": "navigation",
+      "expected_evaluate": "allow",
+      "expected_origin": "http://[::1.2.3.4]",
+      "expected_parameters": "/",
+      "consume_url": "http://[::1.2.3.4]/",
+      "consume_scope": "navigation",
+      "expected_consume": "allow",
+      "note": "反向控制：折叠不是「见到 v4-compatible 就拦」。折出来 1.2.3.4 是公网，必须仍放行——没有这条，上一条会被读成「整段 IPv6 字面量收紧」"
     }
   ]
 }

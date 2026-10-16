@@ -58,8 +58,6 @@ object ReservedAddressBoundary {
     private const val BENCHMARK_SECOND_LAST = 19
     private const val MULTICAST_FROM = 224
     private const val HEX_PREFIX = "0x"
-    private const val IPV4_MAPPED_PREFIX = "::ffff:"
-    private const val UNSPECIFIED_IPV6 = "::"
     private const val HEX_RADIX = 16
     private const val IPV6_GROUP_MAX_DIGITS = 4
     private const val LINK_LOCAL_MASK = 0xFFC0 // fe80::/10 的前 10 位
@@ -122,19 +120,32 @@ object ReservedAddressBoundary {
     }
 
     /**
-     * IPv6 侧只拦三类：未指定 `::`、链路本地 `fe80::/10`、组播 `ff00::/8`。
-     * `::ffff:x.y.z.w` 按内嵌 IPv4 递归判，内嵌段不合点分十进制同样拒（不可判定）；
-     * 首组（第一个 16 位段 `head16`）切不出来也拒。其余——回环 `::1`、ULA `fc00::/7`、
-     * 全局单播——一律放行：
-     * B8 裁决与 Windows 同口径。两条掩码判定写成一行：`when` 条目体另起一行即被判
-     * 为多行体，届时全块每条都得加花括号（含 `else -> { null }`），第八轮实测过。
+     * IPv6 侧拦的是：未指定 `::`、链路本地 `fe80::/10`、组播 `ff00::/8`，以及**内嵌 IPv4
+     * 落在保留段**的两种写法——v4-mapped（`::ffff:x.y.z.w`）与已废弃的 v4-compatible
+     * （`::x.y.z.w`、`::2`）。此前只认 `::ffff:` 文本前缀，于是
+     * `http://[::169.254.169.254]/`（云元数据端点的第二种拼法）穿过本边界，而同一个
+     * 端点写成点分或 v4-mapped 都被拒；核心 `ipv6.rs` 的 `to_ipv4()` 一直折两种
+     * （R9-B69 / 队列 Q64 实测）。
+     *
+     * 折叠交 [LocalTargetHosts.embeddedIpv4]——**按字节**，与本对象自己的 https 豁免面
+     * 用同一份判据；按文本前缀折在 `::2` 这类省略写法上必然分叉（R9-B66 记过一次）。
+     * 折叠必须排在回环判定**之后**：`::1` 与它的 v4-compatible 拼法 `::0.0.0.1` 折出来
+     * 是 `0.0.0.1`，撞 0/8 会被自己人拦掉——B8 裁决要求放行的正是本机回环。
+     * 读不出字节（形态不合）与点分尾段不规范同样按不可判定拒绝。其余——ULA `fc00::/7`、
+     * 全局单播——一律放行，B8 裁决与 Windows 同口径。
      */
     private fun deniesIpv6(host: String): Boolean {
-        val embedded = host.removePrefix(IPV4_MAPPED_PREFIX)
+        // 点分尾段必须规范（`::ffff:0177.0.0.1` 与 OS/Chromium 的 inet_aton 解释不同，
+        // ⑥/⑦ 那条分歧在 IPv6 里的对应面）——判在按字节折叠之前，语义与改法前一致：
+        // 形态不合一律读不出字节，交下面第一条拒。
+        val canonicalTail = !host.contains('.') || isDecimalIpv4(host.substringAfterLast(':'))
+        val bytes = if (canonicalTail) AddressText.ipv6ToBytes(host) else null
+        val embedded = bytes?.let { LocalTargetHosts.embeddedIpv4(it) }
         val head16 = firstGroupOf(host)
         return when {
-            host.startsWith(IPV4_MAPPED_PREFIX) -> !isDecimalIpv4(embedded) || deniesIpv4(octetsOf(embedded))
-            host == UNSPECIFIED_IPV6 -> true
+            bytes == null -> true
+            LocalTargetHosts.isLoopbackV6(bytes) -> false
+            embedded != null -> deniesIpv4(octetsOf(embedded))
             head16 == null -> true
             else -> (head16 and LINK_LOCAL_MASK) == LINK_LOCAL_BITS || (head16 and MULTICAST_MASK) == MULTICAST_BITS
         }

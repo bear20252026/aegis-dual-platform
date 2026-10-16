@@ -155,7 +155,7 @@ object LocalTargetHosts {
         }
 
     /** `::1`——必须用 `contentEquals`：数组的 `==` 比的是引用，`::1` 永远不相等。 */
-    private fun isLoopbackV6(bytes: ByteArray): Boolean = bytes.contentEquals(LOOPBACK_V6_BYTES)
+    internal fun isLoopbackV6(bytes: ByteArray): Boolean = bytes.contentEquals(LOOPBACK_V6_BYTES)
 
     /**
      * 内嵌 IPv4（v4-mapped `::ffff:x` 与已废弃的 v4-compatible `::x`）折成点分文本，
@@ -165,8 +165,12 @@ object LocalTargetHosts {
      * 折出来是 `0.0.0.1`，而 0/8 不在放行段表里——B8 裁决要求放行的本机回环会被
      * 自己人拦掉。核心 `security_policy/ipv6.rs` 与 Windows `UrlSafety.IsPublicIp`
      * 是同一条顺序，改这里必须同时改那两处。
+     *
+     * 6to4（`2001::/32`）与 Teredo（`2001:20::/32`）里内嵌的 IPv4 **不解码**：
+     * Chromium 的 `net::IpAddress` 同样不解，解了三端会对同一地址给出不同裁决，
+     * 多拦一层换来的是不一致。这是有意的口径选择，不是漏判（核心 `ipv6.rs` 同注）。
      */
-    private fun embeddedIpv4(bytes: ByteArray): String? {
+    internal fun embeddedIpv4(bytes: ByteArray): String? {
         val headIsZero = bytes.take(IPV6_IPV4_PREFIX).all { it == 0.toByte() }
         val tailStart = bytes.size - AddressText.IPV4_OCTETS
         val isMapped = bytes[IPV6_MAPPED_A] == MAPPED_MARKER && bytes[IPV6_MAPPED_B] == MAPPED_MARKER
