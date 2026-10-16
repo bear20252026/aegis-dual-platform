@@ -1080,7 +1080,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   **实测补一条登记时没写的**：本 SDK（WebView2 1.0.2903.40）的 `CoreWebView2DownloadOperation` **没有** `Completed` 事件——反射实测只有 BytesReceivedChanged / EstimatedEndTimeChanged / StateChanged（事件参数类型还是 `EventHandler<object>` 而不是强类型 args）。所以终态信号只能取 `StateChanged` + `State` 判定这条路，照 Win32 文档写 `Completed +=` 连编译都过不去。
 - Q51 R9-CS-14 | P2 | `windows/src/Aegis.Windows.App/Core/Settings/SettingsService.cs::ThreatFeedUrl`（`:24` 的 `ThreatFeedUrl { get; init; } = ""`）↔ `windows/src/Aegis.Windows.App/Chrome/MainWindow.xaml.cs:138`＋`:326-335`（`StartThreatFeedRefresh`，登记时写的 `:138,326-337` 尾界多数两行，方法体止 `:335`）
   ↔ `core/rust-policy-core/src/ffi/broker.rs::update_host_denylist`（`:306`；**R9-B84 现读改真**——登记时那条旧锚写作「文件 `broker.rs`、行号 `331`」，逐提交复算是 **#202（→`:319`）与 #204（→`:306`）** 两次把这段顶上移的，`8d7a056` 之后 `331` 行已是「待审批账本」的注释；而行号锚门禁只判「NN ≤ 文件行数」，所以它一路绿着失实；本体 `apply_host_denylist` 现在 `core/rust-policy-core/src/ffi/broker/denylist.rs::apply_host_denylist`）↔ Android 全端
-  （grep `Denylist|ThreatFeed|blocklist|isHostBlocked` 在 `android/**` **0 命中**，R9-B84 按剔注释口径复跑：174 个受管文件，原样与剔注释后均 0，扩展变体 `denylist`/`threat_feed`/`update_host_denylist` 亦 0）：
+  （grep `Denylist|ThreatFeed|blocklist|isHostBlocked` 在 `android/**` **0 命中**，R9-B84 按剔注释口径复跑；**扫描面写清：`git ls-files android` 全扩展名 174 个受管文件，其中 `.kt/.java/.xml/.kts` 141 个——只数后者会得到 141，别据此说台账写错了**；原样与剔注释后均 0，扩展变体 `denylist`/`threat_feed`/`update_host_denylist` 亦 0）：
   外部第三轮审计 AEG-003「Android 缺少威胁黑名单防护」**范围要改准**——两端默认都是
   **空名单即放行**（Windows 的订阅源是用户在设置页填 https URL 或
   `AEGIS_THREAT_FEED_URL`，缺省空 ⇒ 出厂形态两端行为一致）。真实缺口是**能力面**：
@@ -4656,6 +4656,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `broker.rs` 在实树有两处同名（`src/ffi/broker.rs` 与另一份），落进「裸名必须唯一」那条 ⇒ 违规 1 条。
    改法沿用 §3.83 第 4 点的方向：**把被引用的形态拆开写**（「文件 `broker.rs`、行号 `331`」），
    而不是给门禁加豁免表。这不是门禁太严：一旦允许「示例锚」混进判定面，真漂的锚就有了同样的藏身处。
+8. **同批复跑时发现自己抄了一条「数字对但口径没写」的断言**（已随 #224 并入，这里补口径而不是改数）：
+   Q51 那句「174 个受管文件」——`git ls-files android` 全扩展名确实是 174，但**只数
+   `.kt/.java/.xml/.kts` 是 141**，下一轮按后者复算会误判成台账失实。按本仓既有纪律
+   （命中口径、副本数、覆盖等级三者都要现读命令给出）把扫描面两个数都写进活行。
+   教训一句话：**从子代理那里接过来的计数，必须自己复跑一遍才能落进台账**——本批两处复跑，
+   一处（Q65 的「十字段」与 `proposed_action_from_dict`）复算确认无需改动，
+   另一处就是这条 174/141。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「给台账行号锚加『内容校验』是可行的第三条路」不成立**（第九轮 R9-B83 / §3.83 第 5 点，Q69 候选②）：
