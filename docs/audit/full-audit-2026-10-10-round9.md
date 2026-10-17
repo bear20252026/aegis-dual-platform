@@ -1292,7 +1292,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   顺序不能倒——理由见 §3.66 第 1 点；③同时把 6to4/Teredo **不解码**这条口径写进三端
   注释（§3.66 第 6 点已有，别在下一轮被当成漏判补上）。
 
-- Q65 R9-SH-20 | P2 | **部分闭环（R9-B87 / §3.87）**：Agent 的 IPC 载荷面已写成契约
+- ~~Q65 R9-SH-20~~ **本批全闭（R9-B87 契约面 + R9-B90 / §3.90 定稿「不扩向量」**）：契约文件与双向对账门禁已落地（§3.87），两选一里的第二件由用户按推荐档定为**不做**——理由与重启条件进 §六。原条目 ↓
+  Q65 R9-SH-20 | P2 | **部分闭环（R9-B87 / §3.87）**：Agent 的 IPC 载荷面已写成契约
   `agent/agent-action.schema.json`（**不放 `contracts/schemas/`**——那张目录是 codegen 枚举的冻结跨端清单，放进去会被当成参与跨端代码生成，实测 6 条用例红在 `generate_csharp.cs_type` 处理不了 type 联合），并由 `scripts/verify_agent_action_schema.py` 与 broker
   **现算**的必填集合双向对账（不是把 12 这个数抄进文档），运行时也验过（抽掉 `intent`/`budget_used`
   与被拒的形状都有用例）。**没做**的是原终态 ① 的后半「并进向量体系」——续登为 **Q70 R9-SH-25**，
@@ -1311,7 +1312,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   ②把 `action-*.json` 分成「核心形态／Agent 形态」两套并各记端集。两条都是契约面
   变更（且第②条要动 Rust 的向量消费循环），不顺手做。
 
-- Q70 R9-SH-25 | P2（**R9-B87 续登，未排期**）| `scripts/verify_agent_action_schema.py::violations`（本批新增的四条判据落点）↔ `agent/tests/action_vector_consumption_test.py::test_agent_payload_face_is_wider_than_the_frozen_schema`（钉住那张分歧的用例）↔ `contracts/vectors/`（现读 22 份，无一份是 Agent 形态载荷）：
+- ~~Q70 R9-SH-25~~ **本批判成不做并结案（R9-B90 / §3.90；理由与重启条件进 §六）**：「给 Agent 形态补跨端向量」不成立——跨端向量的价值是让**另一端执行同一份输入**，而 Agent 判定面只存在于 Python；扩面要动 `CONSUMER_MANIFEST`、Rust 向量消费循环与 `platform_decidable` 词表，收益是多一张没人能执行的表，正是 §3.42／§3.88 两次否证过的「假覆盖」形状。**今天 Agent 面的真实覆盖面**＝契约层向量（R9-B68）＋`agent/tests/` 逐条判定 ＋ R9-B87 的契约双向对账，「没有跨端向量」不等于「没有测试」。原条目 ↓
+  Q70 R9-SH-25 | P2（**R9-B87 续登，未排期**）| `scripts/verify_agent_action_schema.py::violations`（本批新增的四条判据落点）↔ `agent/tests/action_vector_consumption_test.py::test_agent_payload_face_is_wider_than_the_frozen_schema`（钉住那张分歧的用例）↔ `contracts/vectors/`（现读 22 份，无一份是 Agent 形态载荷）：
   **Agent 的裁决路径今天没有任何契约向量**。Q65 两选一里「并进向量体系」这半件没做，后果不是漏拦而是
   **命题没人断**：`PolicyBroker.decide()` 对核心形态载荷一律落 `deny_payload`（该用例逐条钉住 valid 三条
   也一样），所以「Agent 会不会按 scope／预算／nonce／过期正确裁决」只由 redteam 夹具与 Python 单测覆盖，
@@ -4907,7 +4909,33 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    自身日志实现，另批；②`verify_gradle_alert_scope_boundary.py:114` 那句「被 dismiss 的 5 个坐标」
    框架已落后（其中 5 条现在靠地板站着），但改它要同改台账对这句的逐字引用，混进锁改动会让回退难拆。
 
+### 3.90 R9-B90（2026-10-17，队列 Q70 结案 + Q65 后半定稿）：Agent 形态**不补**跨端向量——「表更大」不是改进
+
+1. 用户按推荐档定「不扩」。这条推荐的判据是一句话：**跨端向量的价值来自「有另一端会执行它」**。
+   Agent 的判定面只在 Python（`agent/broker.py`），所以给它补一张 `AG` 端集的表，另一端不会执行、
+   Rust 消费循环也不认，产出正是一张**没人跑的表**——与本仓两次否证过的「假覆盖」同族
+   （§3.42 的 13 条断不真确认分支、§3.88 的八份 schema 级端侧执行者）。
+2. 扩面的真实成本也要摊开说，不能只说收益：动 `CONSUMER_MANIFEST`（登记面）、
+   Rust 侧向量消费循环（要认新文件与新端集）、`platform_decidable` 词表（R9-B59 冻结的那次词表变更）
+   ——三处都是契约面变更，与 Q53 第②档同一次改造。把它们捆在「给 Agent 加向量」这个名义下推进，
+   只会让那次改造的评审更难判断。
+3. 本批同时把 **Q65 划掉**（它的两选一里第二件由这次定稿关闭：契约文件已成立、双向对账已成立、
+   分歧由 `test_agent_payload_face_is_wider_than_the_frozen_schema` 与 §3.87 的门禁判住；
+   第一件的后半「进向量体系」判成不做）。§五 活行 5 → 3：只剩 Q51（内容待你定）、
+   Q25-①／Q57-①（要真机或桌面冒烟）——**队列第一次短到「没有一条是我能独自推进的」**，
+   这是事实而不是进展：再往前要么给名单内容、要么给设备。
+4. `MIN_SYMBOL_ROWS` 5→3（两条划线）。**如实记一处没做到的**：这批我是**先改登记值、后跑门禁**，所以没有复现「先红一次」的现场（R9-B85/B86/B88 三批各自红过一次才算这条链路的证据，本批没有）。门禁现读是 `符号锚行 3 条与登记值一致`——只证明改完自洽，不证明它能抓；下次结案仍应先跑一次旧值。
+
 ## 六、复核后判定为不成立（留此防重复上报）
+- **「应该给 Agent 形态的载荷补跨端契约向量（并让 `CONSUMER_MANIFEST` 记 `AG`）」不成立**
+  （第九轮 R9-B90 / §3.90，队列 Q70 R9-SH-25 与 Q65 后半）：跨端向量的语义是「让另一端执行同一份输入」，
+  而 Agent 的判定面只存在于 Python——扩这张表要同时动 `CONSUMER_MANIFEST`、Rust 侧向量消费循环与
+  R9-B59 的 `platform_decidable` 词表（三处都是契约面），换回来的是一张**没有任何另一端能执行**的表，
+  形状与 §3.42 否证的「补一份 C# 用例把 13 条断不真的确认分支也断进去」、§3.88 否证的
+  「八份 schema 级向量补端侧执行者」同族。**判据不是「表更大」**：Agent 面今天已有契约层向量消费
+  （R9-B68）＋ `agent/tests/` 逐条判定 ＋ R9-B87 的契约⇄必填双向对账，「没有跨端向量」≠「没有测试」。
+  **重启条件**：出现第二个 Python 之外的 Agent 载荷生产者（例如 UI/扩展 IPC 直接产 `ProposedAction`
+  形态），那时向量才有另一端可执行；或 §四 第 1 项 AX-02 的能力面接线把 Agent 判定接进核心裁决。
 
 - **「给 `capability-*`/`audit-event-*`/`release-*`/`version-*` 这八份向量补端侧执行者是可改进项」不成立**
   （第九轮 R9-B88 / §3.88 第 2 点，队列 Q53 第①档）：它们的 expected 是 **schema 级**的
