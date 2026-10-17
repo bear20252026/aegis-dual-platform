@@ -39,7 +39,7 @@ def test_real_round9_live_rows_have_resolvable_anchors() -> None:
     # 锚从 20+ 降到 19，正红）。这是「门禁把现状钉成期望值」的亲戚。
     # 改成相对判据：每条活行至少一处锚（判据本身的规则，塌成 0 处照样红），
     # 而「活行被清空」这种真事件由 `rows >= 1` 兜住——真要清空第九轮，改这一行必须写理由。
-    assert rows >= 1, f"判定面塌了：§五 没有任何活行（本轮若真已清空，改这里要写理由）"
+    assert rows >= 1, "判定面塌了：§五 没有任何活行（本轮若真已清空，改这里要写理由）"
     assert anchors >= rows, f"判定面塌了：活行 {rows} 条却只有 {anchors} 处锚——至少每条一处"
     assert symbol_rows == g.MIN_SYMBOL_ROWS, f"现树符号锚行 {symbol_rows} 与登记值不符"
     assert g.run() == 0
