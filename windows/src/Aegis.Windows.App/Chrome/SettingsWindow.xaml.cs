@@ -100,7 +100,7 @@ public partial class SettingsWindow : Window
         _owner.ApplyTheme(_settings.Theme);
     }
 
-    private void ThreatFeedBox_LostFocus(object sender, RoutedEventArgs e)
+    private async void ThreatFeedBox_LostFocus(object sender, RoutedEventArgs e)
     {
         var raw = ThreatFeedBox.Text.Trim();
         // 诚实性校验：非法地址（非 https）拒绝保存并回显——绝不静默接受
@@ -110,8 +110,38 @@ public partial class SettingsWindow : Window
             ThreatFeedHint.Foreground = HintErrorBrush;
             return;
         }
+        // R9-B86（Q54，用户定「清空即解除」）：清空是**放松防护**的方向 ⇒ 先确认。
+        // 判据是纯函数（ThreatFeedClear.RequiresConfirmation）——「配过源才问」这一条
+        // 长在 UI 里就永远测不到，下一轮改成「每次都问」也不会有人判红。
+        if (Core.Security.ThreatFeedClear.RequiresConfirmation(_settings.ThreatFeedUrl, raw))
+        {
+            var confirmed = MessageBox.Show(
+                this,
+                Core.Security.ThreatFeedClear.ConfirmationText,
+                Core.Security.ThreatFeedClear.ConfirmationCaption,
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) == MessageBoxResult.Yes;
+            if (confirmed)
+                await ClearThreatFeedAsync();
+            else
+            {
+                // 取消＝什么都没发生：回显旧值，措辞也不能写「已保存」
+                ThreatFeedBox.Text = _settings.ThreatFeedUrl;
+                ThreatFeedHint.Text = Core.Security.ThreatFeedCacheStatus.Join(
+                    Core.Security.ThreatFeedClear.CancelledHint, ThreatFeedStatusLine());
+                ThreatFeedHint.Foreground = HintMutedBrush;
+            }
+            return;
+        }
         _settings.ThreatFeedUrl = raw;
         Save();
+        if (raw.Length == 0)
+        {
+            // 从「空」改成「空」不会走到上面那个确认（没配过源就没有可解除的东西），
+            // 但缓存里可能还留着上一份名单 ⇒ 同样走解除，别把它留给下次启动。
+            await ClearThreatFeedAsync();
+            return;
+        }
         // Q52（外部第三轮审计 AEG-008）：旧文案把「要重启才生效」当成既定行为，两件事上
         // 已经不真——①刷新现在按节拍自己重取并按当前值重新解析源，②保存后这里就发起
         // 一次立即刷新。保留诚实的一半：立即刷新是后台任务，成败要看日志与缓存时间，
@@ -119,12 +149,27 @@ public partial class SettingsWindow : Window
         // 措辞是静态锚判定的面（ThreatFeedCacheStatusTests 反向钉住旧说法不得回潮）。
         var kicked = Core.Security.ThreatFeedCoordinator.Active?.RefreshNow() ?? false;
         ThreatFeedHint.Text = Core.Security.ThreatFeedCacheStatus.Join(
-            raw.Length == 0
-                ? "已清空订阅源：此后不再自动重取，当前名单仍会继续拦截。"
-                : kicked
-                    ? "已保存；已按新源发起刷新。"
-                    : "已保存；将在下一个更新周期内生效。",
+            kicked
+                ? "已保存；已按新源发起刷新。"
+                : "已保存；将在下一个更新周期内生效。",
             ThreatFeedStatusLine());
+        ThreatFeedHint.Foreground = HintMutedBrush;
+    }
+
+    /// <summary>R9-B86：清空订阅源这一步的 UI 侧收口——落盘设置、把解除＋删缓存交给协调器
+    /// （它持着刷新闸，见 <c>ThreatFeedCoordinator.ClearAndDisableAsync</c> 的注释），
+    /// 再按「缓存到底删没删」写措辞。等待是必要的：不等就不知道该怎么说那句话，
+    /// 而把一次 IO 失败写成「已删除」正是本仓最不该再犯的形状。</summary>
+    private async System.Threading.Tasks.Task ClearThreatFeedAsync()
+    {
+        _settings.ThreatFeedUrl = string.Empty;
+        Save();
+        var coordinator = Core.Security.ThreatFeedCoordinator.Active;
+        var cacheCleared = coordinator is null
+            ? (bool?)null
+            : await coordinator.ClearAndDisableAsync();
+        ThreatFeedHint.Text = Core.Security.ThreatFeedCacheStatus.Join(
+            Core.Security.ThreatFeedClear.ClearedHint(cacheCleared), ThreatFeedStatusLine());
         ThreatFeedHint.Foreground = HintMutedBrush;
     }
 

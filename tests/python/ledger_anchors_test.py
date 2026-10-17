@@ -34,7 +34,13 @@ def test_real_round9_live_rows_have_resolvable_anchors() -> None:
     text = ROUND9.read_text(encoding="utf-8")
     problems, rows, anchors, symbol_rows = g.violations(text, real_index())
     assert problems == [], "活行的 file:line 锚失账：" + "；".join(problems)
-    assert rows >= 1 and anchors >= 20, f"判定面塌了：活行 {rows} 条、锚 {anchors} 处"
+    # 塌缩守卫原来写成 `anchors >= 20`——那是与**队列规模**耦合的绝对下界，于是每结一条案
+    # 就少一截，最后会因为「把活干完了」而红（R9-B86 结案时实测：7 条活行降到 5 条、
+    # 锚从 20+ 降到 19，正红）。这是「门禁把现状钉成期望值」的亲戚。
+    # 改成相对判据：每条活行至少一处锚（判据本身的规则，塌成 0 处照样红），
+    # 而「活行被清空」这种真事件由 `rows >= 1` 兜住——真要清空第九轮，改这一行必须写理由。
+    assert rows >= 1, f"判定面塌了：§五 没有任何活行（本轮若真已清空，改这里要写理由）"
+    assert anchors >= rows, f"判定面塌了：活行 {rows} 条却只有 {anchors} 处锚——至少每条一处"
     assert symbol_rows == g.MIN_SYMBOL_ROWS, f"现树符号锚行 {symbol_rows} 与登记值不符"
     assert g.run() == 0
 

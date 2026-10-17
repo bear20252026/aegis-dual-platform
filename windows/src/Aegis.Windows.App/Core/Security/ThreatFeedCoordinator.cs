@@ -2,6 +2,7 @@ namespace Aegis.Windows.Core.Security;
 
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,6 +33,7 @@ public sealed class ThreatFeedCoordinator
     private readonly Func<string?> _resolveFeedUrl;
     private readonly Action<string> _log;
     private readonly Func<string, string, IReadOnlyList<string>> _fetchAndStore;
+    private readonly Action<string> _deleteCache;
     private readonly TimeSpan _refreshInterval;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly Func<DateTimeOffset> _clock;
@@ -63,7 +65,8 @@ public sealed class ThreatFeedCoordinator
     /// [fetchAndStore] 默认走 ThreatFeedUpdater.FetchAndStore（真网络），
     /// 测试注入假实现绕过网络。[refreshInterval] 传 TimeSpan.Zero 关闭周期重取，
     /// [delay]/[clock]/[cancellation] 全部可注入——周期逻辑的唯一不可测面就是
-    /// 「真的等 6 小时」，注入后它是可断言的。</summary>
+    /// 「真的等 6 小时」，注入后它是可断言的。[deleteCache] 同一条理由注入：
+    /// 「清空订阅源」要删掉缓存文件，而测试不能靠真文件系统的时间窗来判断删没删。</summary>
     public ThreatFeedCoordinator(
         Action<IBlockedHosts> applyHosts,
         string cachePath,
@@ -73,7 +76,8 @@ public sealed class ThreatFeedCoordinator
         TimeSpan? refreshInterval = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null,
         Func<DateTimeOffset>? clock = null,
-        CancellationToken cancellation = default)
+        CancellationToken cancellation = default,
+        Action<string>? deleteCache = null)
     {
         _applyHosts = applyHosts;
         _cachePath = cachePath;
@@ -85,6 +89,15 @@ public sealed class ThreatFeedCoordinator
         _delay = delay ?? Task.Delay;
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
         _cancel = cancellation;
+        _deleteCache = deleteCache ?? DeleteCacheFile;
+    }
+
+    /// <summary>缺省删除实现：不存在就当成功（清空的目标是「下次启动不再加载」，
+    /// 而不是「必须删掉一个本来就不存在的文件」）。</summary>
+    private static void DeleteCacheFile(string path)
+    {
+        if (File.Exists(path))
+            File.Delete(path);
     }
 
     /// <summary>Start() 投递的那条后台任务（缓存快照应用 → 订阅源刷新 → 周期重取）。
@@ -162,6 +175,40 @@ public sealed class ThreatFeedCoordinator
             return false;
         _ = Task.Run(() => Refresh(validated));
         return true;
+    }
+
+    /// <summary>Q54（R9-B86，用户定「清空即解除」）：用户在设置页清空订阅源 ⇒ 解除当前
+    /// 已生效的名单 + 删掉缓存文件。**全程持 [_refreshGate]**——不这么做的后果不是
+    /// 「删不掉文件」，而是**名单会被写回来**：在途的那次抓取完成后照样 apply，用户看到的
+    /// 「已清空」随后被一份旧名单覆盖（与 :40-45 那条「后完成的那次决定最终名单」同一个竞态，
+    /// CS-350 也在相邻的句柄问题上栽过一次）。
+    /// 解除与删除有先后：先 apply 空名单（用户要的「关掉」当场生效），删除失败只留痕、
+    /// **不回退解除**——残留一个缓存文件是可诊断的小问题，静默把防护留在线上才是事故。
+    /// 返回值是缓存是否删除成功，UI 措辞按它说真话（删失败时重启仍会加载旧名单）。</summary>
+    internal async Task<bool> ClearAndDisableAsync()
+    {
+        await _refreshGate.WaitAsync();
+        try
+        {
+            _applyHosts(new BlockedHosts(Array.Empty<string>()));
+            _log("[threat] 订阅源已清空：黑名单已解除");
+            try
+            {
+                _deleteCache(_cachePath);
+                _log("[threat] 缓存文件已删除（重启不再加载旧名单）");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _log($"[threat] 缓存文件未删除（{ex.Message}）——名单已解除，"
+                    + "但重启后仍会从该文件加载，请手工清理");
+                return false;
+            }
+        }
+        finally
+        {
+            _refreshGate.Release();
+        }
     }
 
     /// <summary>Q52 周期重取（首轮由 Start 的后台任务做过，所以这里先等再取）。

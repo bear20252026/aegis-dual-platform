@@ -186,6 +186,91 @@ public sealed class ThreatFeedCoordinatorTests : IDisposable
             await SettleAsync(c);  // 等后台链收工，别与 Dispose 抢缓存文件
     }
 
+    [Fact]
+    public async System.Threading.Tasks.Task Clear_releases_the_list_and_deletes_the_cache()
+    {
+        // R9-B86（Q54 用户定「清空即解除」）：清空要同时做掉两件事——内存里那份名单解除、
+        // 缓存文件删掉（不然下次启动 `Start()` 又无条件 LoadCached 把它装回来）。
+        var deleted = new List<string?>();
+        var h = new Harness();
+        var c = new ThreatFeedCoordinator(
+            applyHosts: applied => h.Applied.Record(applied),
+            _cachePath,
+            () => h.FeedUrl,
+            message => h.Logs.Record(message),
+            fetchAndStore: (_, _) => Array.Empty<string>(),
+            refreshInterval: TimeSpan.Zero,
+            deleteCache: path => deleted.Add(path));
+        Assert.True(c.Start());
+        await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any(b => b.IsBlocked("doubleclick.net")));
+        Assert.True(await c.ClearAndDisableAsync());
+        await SettleAsync(c);
+        Assert.Equal(_cachePath, Assert.Single(deleted));
+        Assert.False(LastApplied(h).IsBlocked("doubleclick.net"));
+        Assert.False(LastApplied(h).IsBlocked("tracker.example"));
+        Assert.Contains(h.Logs, l => l.Contains("黑名单已解除"));
+        Assert.Contains(h.Logs, l => l.Contains("缓存文件已删除"));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Clear_beats_an_inflight_refresh_on_the_final_state()
+    {
+        // 这条是本批唯一真正的性质测试：清空必须**排在**在途抓取之后生效。
+        // 协调器持着 _refreshGate，所以 ClearAndDisableAsync 会等这次抓取落定再 apply 空名单。
+        // 哪天有人去掉那道闸（或把清空改成前插/不等），旧名单会后到并把 doubleclick 装回来——
+        // 用户按了「清空」、也看到了那句提示，防护却在线上继续拦（= Q54 反过来发作）。
+        var gate = new System.Threading.Tasks.TaskCompletionSource();
+        var h = new Harness { FetchedCacheContents = ["late-block.example"] };
+        var c = new ThreatFeedCoordinator(
+            applyHosts: applied => h.Applied.Record(applied),
+            _cachePath,
+            () => h.FeedUrl,
+            message => h.Logs.Record(message),
+            fetchAndStore: (_, cache) =>
+            {
+                File.WriteAllLines(cache, h.FetchedCacheContents);
+                if (!gate.Task.Wait(3000))
+                    throw new TimeoutException("在途抓取没等到放行：这条用例的窗口没走通");
+                return h.FetchedCacheContents;
+            },
+            refreshInterval: TimeSpan.Zero,
+            deleteCache: _ => { });
+        Assert.True(c.Start());
+        await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any(b => b.IsBlocked("doubleclick.net")));
+        h.FeedUrl = null;                       // 模拟设置页把订阅源清空（保存后解析不到源）
+        var clearing = c.ClearAndDisableAsync();
+        gate.SetResult();                       // 让那次「先发出、后完成」的抓取跑完
+        Assert.True(await clearing);
+        await SettleAsync(c);
+        // 非空心判据：快照 + 迟到的刷新 + 清空，三次应用都发生才算踩到那个窗口
+        Assert.True(h.Applied.Count >= 3, $"只应用了 {h.Applied.Count} 次：竞态窗口没走到，这条恒绿");
+        Assert.False(LastApplied(h).IsBlocked("late-block.example"));
+        Assert.False(LastApplied(h).IsBlocked("doubleclick.net"));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Clear_with_a_failing_delete_still_releases_the_list()
+    {
+        // 方向要说清：删除失败**不回退解除**。用户要的「关掉」已经当场生效，
+        // 残留一个缓存文件是可诊断的问题——但要留痕，因为它意味着重启会重新加载旧名单。
+        var h = new Harness();
+        var c = new ThreatFeedCoordinator(
+            applyHosts: applied => h.Applied.Record(applied),
+            _cachePath,
+            () => h.FeedUrl,
+            message => h.Logs.Record(message),
+            fetchAndStore: (_, _) => Array.Empty<string>(),
+            refreshInterval: TimeSpan.Zero,
+            deleteCache: _ => throw new IOException("used by another process"));
+        Assert.True(c.Start());
+        await SpinUntil(() => h.Applied.OfType<BlockedHosts>().Any(b => b.IsBlocked("doubleclick.net")));
+        Assert.False(await c.ClearAndDisableAsync());
+        await SettleAsync(c);
+        Assert.False(LastApplied(h).IsBlocked("doubleclick.net"));
+        Assert.Contains(h.Logs, l => l.Contains("黑名单已解除"));
+        Assert.Contains(h.Logs, l => l.Contains("重启后仍会从该文件加载"));
+    }
+
     private static async System.Threading.Tasks.Task SpinUntil(Func<bool> condition, int timeoutMs = 3000)
     {
         var deadline = Environment.TickCount64 + timeoutMs;

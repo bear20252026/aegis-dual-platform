@@ -727,7 +727,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      封顶 24 小时 + 「上次成功更新 / 是否过期」上设置界面 + 保存即刷一次。
      本项残余的「清空订阅源会不会解除已生效名单」**没有**顺手改（那是放松防护的方向）
      ⇒ 新登 §五 Q54。
-  10. **Q54 R9-CS-16（本轮落地时新增）：清空订阅源到底应不应该解除已生效的黑名单**。
+  10. ~~**Q54 R9-CS-16（本轮落地时新增）：清空订阅源到底应不应该解除已生效的黑名单**~~
+     **已定稿并落地（用户 2026-10-17 按推荐档批准；见 §3.86 与 §五 Q54 结案行）**：
+     定稿口径＝清空即解除名单＋删缓存文件，误清风险由**一次确认**承担（不是由「清而不断」承担）。
+     下面三条是当时的登记原文，留着是因为它们构成了这次落地的三条判据：
      现状是「只停止重取，名单继续拦截到进程结束，重启后仍从缓存文件加载」（缓存文件不删）。
      改成「清空即解除＋删缓存」更符合「把配置项清空＝关掉该功能」的用户心智，但它是
      **放松防护**的方向，且要一并决定「误清一次怎么办」⇒ 需用户给话，不默认执行。
@@ -1102,7 +1105,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   关键判断保留：它**已在设置 UI 明示**旧文案，所以不是「声明与行为不符」而是「行为偏弱」，
   改它＝出货行为变更（用户配了源就从「开窗取一次」变「持续取」）⇒ 走 §四 第 9 项定稿，
   定稿后落地为 6 小时节拍 + 退避封顶 24 小时 + 最后成功时间上 UI + 保存即刷。
-- Q54 R9-CS-16 | P3 | `windows/src/Aegis.Windows.App/Chrome/SettingsWindow.xaml.cs::ThreatFeedBox_LostFocus`（`:103-129` 的清空分支）↔ `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs::Start`（`:117-139`；**R9-B84 现读改真**：登记时挂的符号 `LoadCached` 在本文件里只有 `:125` 的**调用点**，定义在 `windows/src/Aegis.Windows.App/Core/Security/ThreatFeed.cs::LoadCached`（`:195`，`ThreatFeedUpdater`）——但「`Start()` 无条件读缓存」这件事仍成立：`:125` 在 `:133` 的 `validated is null` 早退**之前**）：用户在设置页**清空**订阅源只让周期循环不再取源，
+- ~~Q54 R9-CS-16~~ **本批已闭（R9-B86 / §3.86，用户按推荐档定「清空即解除」）**：设置页清空订阅源 ⇒ ①内存里已生效的名单当场解除（`applyHosts` 收到空快照）；②缓存文件删除——不做这半件的话「解除」只活到下次启动，而 `Start()` 是无条件读缓存的（就是本行原来记的那件事）；③方向是**放松防护** ⇒ 先弹一次确认，取消＝什么都没发生（回显旧值，措辞不得写「已保存」）。判定本体 `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs::ClearAndDisableAsync` **全程持刷新闸**——不这么做的后果不是「删不掉文件」，而是在途那次抓取完成后把旧名单装回来，本行反过来发作；顺序定死为先解除再删除，删除失败不回退、只留痕（它意味着重启会重新加载）。「该不该问」与「怎么说」抽成纯函数 `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedClear.cs::RequiresConfirmation`（只有「配过源 → 清空」才问；空→空不 nag、换源不问）。原条目 ↓
+  Q54 R9-CS-16 | P3 | `windows/src/Aegis.Windows.App/Chrome/SettingsWindow.xaml.cs::ThreatFeedBox_LostFocus`（`:103-129` 的清空分支）↔ `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs::Start`（`:117-139`；**R9-B84 现读改真**：登记时挂的符号 `LoadCached` 在本文件里只有 `:125` 的**调用点**，定义在 `windows/src/Aegis.Windows.App/Core/Security/ThreatFeed.cs::LoadCached`（`:195`，`ThreatFeedUpdater`）——但「`Start()` 无条件读缓存」这件事仍成立：`:125` 在 `:133` 的 `validated is null` 早退**之前**）：用户在设置页**清空**订阅源只让周期循环不再取源，
   已生效的 `BlockedHosts` 快照继续拦截到进程结束；重启后 `Start()` 仍无条件读缓存文件
   `threat_feed.txt`（清空动作不删它），于是那份名单**无限期**留在拦截面里。出厂默认无缓存
   时两端仍是「空名单放行」，所以这不是默认行为缺陷，而是「把配置项清空＝关掉该功能」这个
@@ -4673,7 +4677,6 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    另一处就是这条 174/141。
 
 ### 3.85 R9-B85（2026-10-16，队列 Q68 落地）：地址栏对合法 IPv6 字面量判「导航」——先撞上的却是 Windows 输入层
-
 1. **裁决与那条已被推翻的前提**。用户按推荐档定「判导航」。这件事原本记成需要架构级改造——
    §四 写着「要打通得解冻核心 host grammar 并增补 `url-origin-*` 向量」——但现读证明前提不在了：
    #204（R9-B66 / §3.66）已把方括号 IPv6 放进导航语法，`contracts/vectors/url-origin-valid.json`
@@ -4732,6 +4735,42 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    **第一批 lint 是红的**（六条 ktlint＋一条 detekt ReturnCount）：`when` 里只要有一条条目用花括号/多行体，
    其余条目也必须带花括号——这条形状规则已在 `project-ktlint-when-entry-and-body-shape-traps` 记过，
    本批又踩在同一个位置（`normalizeInput` 那族 when）。
+
+### 3.86 R9-B86（2026-10-17，队列 Q54 落地）：清空订阅源＝解除名单＋删缓存＋一次确认
+
+1. 用户按推荐档定「清空即解除」。原状态是「只停止重取，名单继续拦截到进程结束，重启后仍从
+   缓存文件加载」——台账一路把它写成「行为偏弱、方向是放松防护 ⇒ 需用户给话」，本次拿到话就落地。
+   代价按定稿的第三条路消化：**误清一次的风险由一次确认承担**，而不是由「清而不断」这种半成品行为承担。
+2. 判定本体 `windows/src/Aegis.Windows.App/Core/Security/ThreatFeedCoordinator.cs::ClearAndDisableAsync`
+   **全程持 `_refreshGate`**。这不是防御性写法而是这条功能成立的条件：在途的那次抓取完成后
+   照样会 `_applyHosts`，如果清空不等它，用户按下「清空」、也看到了那句提示，一份旧名单随后被
+   后到的刷新装回来——Q54 反过来发作。同一条竞态在本文件已有两处记载（`_refreshGate` 的注释
+   「后完成的那次决定最终名单」、CS-350 的句柄事故），这次是第三个落点。
+   顺序也定死：**先 apply 空名单，再删缓存**——删除失败不回退解除（用户要的「关掉」已当场生效），
+   但必须留痕，因为它意味着重启会重新加载旧名单。
+3. 「该不该问」与「怎么说」抽成纯函数 `ThreatFeedClear`：`RequiresConfirmation` 只在
+   「配过源 → 清空」为真（空→空不 nag、换源不问），`ClearedHint(bool?)` 三态各自说实话，
+   其中 `null`（本进程没有活跃协调器）那支明确**不**说「名单已解除」——把无事发生说成办好了，
+   就是本仓反复修的「声明比行为多」。这些判据此前长在 WPF 事件处理器里，谁也测不到。
+4. 用例：`ThreatFeedCoordinatorTests` 三条（解除＋删缓存、**在途抓取晚于清空完成时最终态仍是解除**、
+   删除失败仍解除且留痕）。第二条带**非空心判据** `Applied.Count >= 3`——快照＋迟到的刷新＋清空
+   三次应用都发生才算真的踩到那个窗口，否则这条会退化成恒绿。
+   `ThreatFeedClearTests` 判确认表、三态措辞、以及「UI 必须真走这条链」的接线锚
+   （`ThreatFeedClear.RequiresConfirmation` / `ClearAndDisableAsync` / `ClearedHint` 三者缺一即红，
+   外加旧措辞「当前名单仍会继续拦截」不得回潮），反向锚配**注入式正面控制**：同一份判定
+   对一段仍写着旧话、且不走这条链的源码必须报出 4 条问题。另有一条专门判
+   「那句话写在注释里不该让锚判红」——本仓有把被禁形态逐字抄进注释当防回归说明的传统（R9-B45）。
+5. 复验：`dotnet test -r win-x64` Core **954 通过 / 0 失败**、Broker **298 通过 / 0 失败**。
+   顺带把 `windows-build-and-ci-traps` 第 1 条改准：**带 `-r win-x64` 跑不再动三把锁，
+   不带 RID 才会把 `net10.0-windows7.0/win-x64` 整段删掉**（R9-B85 那次就是被
+   `lock_rids_test` 判红才发现的），触发条件是「本次 restore 的 RID 集合与已入库的锁不一致」。
+6. **结案把一支守卫判红了，而红的是守卫自己**：`tests/python/ledger_anchors_test.py` 的塌缩守卫
+   原写 `anchors >= 20`——那是与**队列规模**耦合的绝对下界，于是每结一条案就少一截：本批
+   Q68＋Q54 两条结案后活行 7→5、锚 19 处，正红。**因变量写成了常量**是「门禁把缺陷形态钉成期望值」
+   的亲戚：它判的其实是「今天还剩多少活」。改成相对判据（`anchors >= rows`＝每条活行至少一处锚，
+   这是门禁自己的规则，塌成 0 处照样红；`rows >= 1` 兜住「§五 被清空」这种真事件——
+   真要清空第九轮，改那一行必须写理由）。`MIN_SYMBOL_ROWS` 从 6 降到 5 是同批的常规动作，
+   等号棘轮又一次先红一次再改对，这条链路按设计工作。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「给台账行号锚加『内容校验』是可行的第三条路」不成立**（第九轮 R9-B83 / §3.83 第 5 点，Q69 候选②）：
