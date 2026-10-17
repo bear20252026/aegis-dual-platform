@@ -5059,6 +5059,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    （ruff＋bandit＋py312-compat）、`check_file_sizes.py`（门禁 212 行、用例 204 行）本地先跑；
    台账家族（decision status / queue status / anchors）exit 0——§四 表未动，`MIN_SYMBOL_ROWS` 仍 3。
    CSV 同批新增 **R9-DOC-26**，并把 `R9-CI-15`、`R9-DEPS-2` 两行的 `batch` 列改到实况。
+8. **为什么不把「给 CI 配一个只读 PAT 以便现读告警状态」加进 §4.0 表**（R9-B92 刚立的口径：
+   开放决定先进表）：本批读完 §3.93 第 6 点②那条时确实考虑过，判成**不加**——理由是它不挡任何一步：
+   现有形状（状态由人现读、判据只建在树面）已经把结论站稳，配 PAT 是一个「可选的额外自动化」而不是
+   「等人点头才能推进」的事。§4.0 表的意思保持为**挡住下一批的事**，不是所有未做的取舍都进表——
+   否则表会开始收藏备选方案，而那张表唯一的价值就是「读它的人知道还差什么」。
+   重启条件：哪天需要一个「告警状态本身」的判据（例如「出货 classpath 里出现任何 open 告警即红」），
+   那时 PAT 才是被挡住的前置。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）
