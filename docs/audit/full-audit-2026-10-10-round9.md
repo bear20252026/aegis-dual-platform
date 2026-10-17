@@ -4771,6 +4771,16 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    这是门禁自己的规则，塌成 0 处照样红；`rows >= 1` 兜住「§五 被清空」这种真事件——
    真要清空第九轮，改那一行必须写理由）。`MIN_SYMBOL_ROWS` 从 6 降到 5 是同批的常规动作，
    等号棘轮又一次先红一次再改对，这条链路按设计工作。
+7. **本批在 CI 上红过两轮，两轮都是我的顺序问题，记下来**：
+   ①`tests/python/ledger_anchors_test.py` 里新写的 `assert rows >= 1, f"…"` 没有插值 ⇒
+   runner 上的 `active_tree_gates.py ruff` 判 F541 红——我是**先推 PR 才跑 ruff**；
+   ②`ThreatFeedCoordinatorTests.cs` 加了三条用例后 306 行 > 300 ⇒ SP-255 的行数红线门禁判红。
+   正解按本仓既有先例（gradle 校验和那族按「配置面/重算面」拆两份）是**按职责拆文件**，
+   于是新增 `ThreatFeedCoordinatorClearTests.cs`（149 行，三条用例全在那儿），
+   原文件回到 221 行。拆前拆后 Core 用例总数都是 **954**——这个「同数」本身就是
+   「拆文件没丢用例」的核对方式，比口头说「一条没减」可信。
+   顺序教训一句话：`check_file_sizes.py` 与 `active_tree_gates.py ruff` 是**本地就能跑的**，
+   它们红在 runner 上等于用 CI 当 lint 器，一轮 15 分钟。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「给台账行号锚加『内容校验』是可行的第三条路」不成立**（第九轮 R9-B83 / §3.83 第 5 点，Q69 候选②）：
