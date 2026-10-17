@@ -4927,6 +4927,18 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 4. `MIN_SYMBOL_ROWS` 5→3（两条划线）。**如实记一处没做到的**：这批我是**先改登记值、后跑门禁**，所以没有复现「先红一次」的现场（R9-B85/B86/B88 三批各自红过一次才算这条链路的证据，本批没有）。门禁现读是 `符号锚行 3 条与登记值一致`——只证明改完自洽，不证明它能抓；下次结案仍应先跑一次旧值。
 
 ## 六、复核后判定为不成立（留此防重复上报）
+- **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）
+  是无人核验的死镜像，应该连同门禁一起删掉」不成立**（第九轮 R9-B91 复核，2026-10-17；
+  这条处方最初是我自己在推荐档里给的，现读推翻的是我自己）：它确实**零 Python 消费者**，
+  但它不是「无人在看」——①PR 判定面 `verify_uniffi_binding_surface.py`（R9-B64 起按剔注释后的
+  **导出面名字集合**对账，正是它当初抓出 `update_host_denylist` 进 `#[uniffi::export]` 六天而入库件里没有）；
+  ②`core-rust.yml:59-73` 用**锁定的 uniffi 工具链**同时生成 Kotlin 与 Python 绑定，再拿
+  `--generated target/uniffi-python/aegis_policy_core.py` 与入库件比对（方法体漂移走这条，不受本机行尾影响）。
+  ⇒ 删它要同删这两道核验面、改 `CLAUDE.md` 与 `docs/uniffi-integration-technical-plan.md` 的陈述，
+  换来的是「以后改核心签名不用重 derive」这一点便利——**净负**。
+  仍成立的半个观察：这份镜像目前只服务「防止 ABI 陈述失实」，不服务任何运行时消费者；
+  若哪天要把它从仓库里拿掉，前置条件是先把那两个消费点改成显式声明「Python 绑定随构建产出、不入库」
+  （像 Kotlin 那半边一样），而不是直接 `git rm`。
 - **「应该给 Agent 形态的载荷补跨端契约向量（并让 `CONSUMER_MANIFEST` 记 `AG`）」不成立**
   （第九轮 R9-B90 / §3.90，队列 Q70 R9-SH-25 与 Q65 后半）：跨端向量的语义是「让另一端执行同一份输入」，
   而 Agent 的判定面只存在于 Python——扩这张表要同时动 `CONSUMER_MANIFEST`、Rust 侧向量消费循环与
