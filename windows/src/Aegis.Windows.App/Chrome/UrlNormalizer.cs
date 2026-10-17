@@ -157,7 +157,18 @@ public static class UrlNormalizer
         return EngineUrls.GetValueOrDefault(engineKey, EngineUrls[DefaultEngine]) + EscapeQuery(originalQuery);
     }
 
-    /// <summary>CS-140：输入是否为 IPv6 字面量主机（方括号或裸冒号形态，可含端口/路径）。</summary>
+    /// <summary>CS-140：输入是否为 IPv6 字面量主机（方括号或裸冒号形态，可含端口/路径）。
+    ///
+    /// R9-B85 收紧三处，理由都是「输入层不得给出策略层会拒的 URL」——此前只用
+    /// `IPAddress.TryParse` 验括号内的体，于是两支已定口径互相矛盾（与 R9-B73 修掉的
+    /// CS-140×R8-CS-SEC-15 同族）：
+    /// ① zone-id（`[fe80::1%eth0]`）——.NET 的 TryParse 认它（ScopeId），而核心契约
+    ///    `contracts/vectors/url-origin-invalid.json` 一律拒（要接口知识、跨机不可移植）；
+    /// ② `]` 之后的尾巴（`[::1]x`）——只允许 `:端口`，其余形态同样在 invalid 表里；
+    /// ③ 括号里的点分 IPv4（`[8.8.8.8]`）——TryParse 也认（作为 **IPv4**），但那不是
+    ///    IPv6 字面量、也不是合法 URI host。此前它靠下游 `Uri.TryCreate` 恰好失败才落到
+    ///    搜索词，等于「判对了但理由是别人的」；这里按地址族判，与 Android
+    ///    `Ipv6LiteralAuthority.canonicalize` 同一条（两端各自的反向控制在共享向量里）。</summary>
     private static bool IsIpv6Literal(string input)
     {
         var host = input;
@@ -167,9 +178,35 @@ public static class UrlNormalizer
         if (host.StartsWith('['))
         {
             var close = host.IndexOf(']');
-            return close > 1 && System.Net.IPAddress.TryParse(host[1..close], out _);
+            if (close <= 1)
+                return false;
+            var body = host[1..close];
+            // `]` 之后要么没有，要么是一个十进制端口（路径/查询在上面已切掉）
+            var tail = host[(close + 1)..];
+            if (tail.Length > 0 && !IsPortSuffix(tail))
+                return false;
+            return IsIpv6AddressText(body);
         }
-        return host.IndexOf(':') >= 0 && System.Net.IPAddress.TryParse(host, out _);
+        return host.IndexOf(':') >= 0 && IsIpv6AddressText(host);
+    }
+
+    /// <summary>是不是一个 IPv6 地址文本：按地址族判，且不接受 zone-id（`%`）。</summary>
+    private static bool IsIpv6AddressText(string body) =>
+        !body.Contains('%')
+        && System.Net.IPAddress.TryParse(body, out var parsed)
+        && parsed.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6;
+
+    /// <summary>`]` 之后的端口尾巴：`:` 加 1-5 位数字。</summary>
+    private static bool IsPortSuffix(string tail)
+    {
+        if (tail.Length is < 2 or > 6 || tail[0] != ':')
+            return false;
+        foreach (var ch in tail.AsSpan(1))
+        {
+            if (!char.IsAsciiDigit(ch))
+                return false;
+        }
+        return true;
     }
 
     /// <summary>CS-140：裸 IPv6 主机补方括号（"::1" → "[::1]"，路径保留其后）。</summary>

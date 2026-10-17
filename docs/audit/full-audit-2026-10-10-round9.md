@@ -669,10 +669,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   ~~`action-catalog.yaml` 三列（`confirmation/risk/audit`）到底由 broker 消费还是删列并写明
   「治理元数据非判定面」（R9-SH-5，方向是「默认放行改默认需确认」，不默认执行）~~
   **（R9-B46 已定稿：既不接进裁决链也不删列——见 §3.46）**、
-  **IPv6 字面量在导航面**（R9-AD-4 的一半：`[::1]:9000` 这类 authority 被
+  ~~**IPv6 字面量在导航面**（R9-AD-4 的一半：`[::1]:9000` 这类 authority 被
   `OriginPolicy.kt:104-110` 与 Rust `origin/host_grammar` 一致拒，Windows 反而放行 ⇒
   要打通得解冻核心 host grammar 并增补 `url-origin-*` 向量，是跨三端的解析器语义变更，
-  不是「剥个括号」的小改。R9-AD-4 的**口径改真**半边已按第四节处方落地（§3.5：KDoc + 跨层锚用例，判定零改动），剩下的「打通导航面」仍是待定稿项。
+  不是「剥个括号」的小改。R9-AD-4 的**口径改真**半边已按第四节处方落地（§3.5：KDoc + 跨层锚用例，判定零改动），剩下的「打通导航面」仍是待定稿项。~~
+  **R9-B85 现读更正：本项已被 R9-B66 / §3.66（#204，2026-10-15）做完，不是待定稿项。**
+  那句话写于 §3.66 之前，而 §四 没有门禁判它（`check_doc_claims.py` 只判 workflow 计数），
+  所以它一路绿着过期。现读证据：`contracts/vectors/url-origin-valid.json` 里带方括号的
+  IPv6 样本 10 条、`http://[::1]:9000/api` 期望 `allow`；`LocalTargetHosts` 的 KDoc 第 43 行
+  也已写着「方括号 IPv6 字面量自 R9-B66 起在导航层被收下」。
+  ⇒ 这条失实直接改变了队列 Q68 的前提：判「导航」**不再**需要一个架构级批次，
+  只是 Android 输入层按地址族判——R9-B85 就是按这个前提落地的。
 
 - **外部第三轮审计（2026-10-11）里不能照做的条目**——审计报告给的处方有几条会改变
   「默认放行 vs 默认阻断」的语义或出货制品的强制方式，逐条列出而不是静默丢弃：
@@ -1443,7 +1450,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `AuditRegressionTests.cs:28` 并给依据。**本批不新登 Q 之外的东西**：边界那张面今天已核对过，
   `fec0::1` 在两端的**拒绝边界**上同结论（都放行，见 §3.72 第 1 点的 `fec0::1` 上邻条目），
   分叉只在 scheme 选择这一面。
-- Q68 R9-SH-24 | **P2（R9-B78 闭第一片：`[8.8.8.8]` 类两端已同判搜索词；剩余部分待裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs::SchemeForLocal`（`:87` 的 CS-140 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt::classifyInput`（`:174`；**R9-B84 现读改真**：登记时写 `:173`，那一行今天是 KDoc 收尾的 `*/`——两个 `when` 实际在 `:177`（EMPTY／ABOUT_BLANK 分派）与 `:197`（scheme 与 host:port 分派））↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，现读 30 条：含 `::` 的 2 条、带方括号的 3 条）：
+- ~~Q68 R9-SH-24~~ **本批已闭（R9-B85 / §3.85，用户按推荐档定「判导航」）**：地址栏对**合法 IPv6 字面量**三端同判「导航」。落地形状是 Android 输入层按地址族判（新单源 `android/broker/src/main/kotlin/com/aegis/broker/Ipv6LiteralAuthority.kt::canonicalize`，语法仍复用 `AddressText` 那份孪生解析器，不写第四份 IPv6 语法），`DOMAIN` 分支先转 URI 正典（补方括号）再谈 scheme；共享向量 **30 → 42 条**（IPv6/括号形态现读 16 条：7 条锁到具体 URL、3 条只锁判定类并把残余写成 `expected_url: null`＋理由、2 条反向控制）。**量出来的两处真缺陷在 Windows 一侧**：`UrlNormalizer.cs::IsIpv6Literal` 只验括号内的体、不看 `]` 之后 ⇒ `[::1]x` 与 `[fe80::1%eth0]`（.NET 认 ScopeId）都产出了策略层必然拒的 URL；`[8.8.8.8]` 里 `TryParse` 也成功（作为 IPv4），此前靠下游 `Uri.TryCreate` 恰好失败才判对——本批按核心契约收紧并加地址族判。**本行的前提「要打通得先解冻核心 host grammar」由 §四 带过来，现读已推翻**：#204（R9-B66 / §3.66）就收了方括号 IPv6，§四 那条同批改真（成因见 §3.85 第 6 点：§四 不在任何判据面内）。原条目 ↓
+  Q68 R9-SH-24 | **P2（R9-B78 闭第一片：`[8.8.8.8]` 类两端已同判搜索词；剩余部分待裁决）** | `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs::SchemeForLocal`（`:87` 的 CS-140 IPv6 分支）↔ `android/app/src/main/java/com/aegis/browser/SearchEngines.kt::classifyInput`（`:174`；**R9-B84 现读改真**：登记时写 `:173`，那一行今天是 KDoc 收尾的 `*/`——两个 `when` 实际在 `:177`（EMPTY／ABOUT_BLANK 分派）与 `:197`（scheme 与 host:port 分派））↔ `android/app/src/test/resources/search-normalize-vectors.json`（CS+AD 共用表，现读 30 条：含 `::` 的 2 条、带方括号的 3 条）：
   本批给这张表装 IPv6 弹时用哨兵探针把 12 个形态在两端各量一遍（跑完即删），R9-B73 当时的结论是**只有 2 个形态端端一致**（裸 `2606:4700:4700::1111` 都判搜索词、`[::ffff:127.0.0.1]` 都判域名且都补 http）。**R9-B84 现读改真**：那句「只有 2 个」停在了 B73 的数——R9-B78 之后表内已有 **4 条端端一致**（加上 `[8.8.8.8]` 与 `[8.8.8.8]:8080`，两端同判搜索词），其余相反：
   ①带括号的 IPv6 字面量在 Windows 判**域名并导航**（`[::1]`→`http://[::1]`、`[fd12::3]`→http），在 Android 判**搜索词**（`https://www.baidu.com/s?wd=%5B%3A%3A1%5D`）——同一个人在两台设备上敲同一串字符，一台打开本机服务、一台去搜索引擎；
   ②Android 的分类实际取决于**拼写里有没有点**，不是地址族：`[fd12::3]`（无点）→SEARCH，而 `[::169.254.169.254]`（带点）→DOMAIN 并产出 `https://[::169.254.169.254]`——同一种地址换个写法就换一条分支；**R9-B84 补一条该句漏掉的例外**：B78 之后「带点」不再必然判 DOMAIN，`SearchEngines.kt::isBracketedDottedIpv4`（`:229-234`）把方括号内四段纯数字的点分形态判回 SEARCH，所以今天准确的表述是「看有没有点，除非括号内是点分 IPv4」——这条例外本身就是本行「按拼写而不是按地址族判」那句话的活证据；
@@ -4663,6 +4671,67 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    教训一句话：**从子代理那里接过来的计数，必须自己复跑一遍才能落进台账**——本批两处复跑，
    一处（Q65 的「十字段」与 `proposed_action_from_dict`）复算确认无需改动，
    另一处就是这条 174/141。
+
+### 3.85 R9-B85（2026-10-16，队列 Q68 落地）：地址栏对合法 IPv6 字面量判「导航」——先撞上的却是 Windows 输入层
+
+1. **裁决与那条已被推翻的前提**。用户按推荐档定「判导航」。这件事原本记成需要架构级改造——
+   §四 写着「要打通得解冻核心 host grammar 并增补 `url-origin-*` 向量」——但现读证明前提不在了：
+   #204（R9-B66 / §3.66）已把方括号 IPv6 放进导航语法，`contracts/vectors/url-origin-valid.json`
+   现读有 10 条带括号样本、`http://[::1]:9000/api` 期望 `allow`；`LocalTargetHosts` 的头注也已改成
+   「方括号 IPv6 字面量自 R9-B66 起在导航层被收下」。⇒ 剩下的只是 Android 输入层「按拼写里有没有点判」
+   那一条。§四 那条失实已就地改真，它为什么能活到今天的成因在第 6 点。
+2. **Android 侧新单源**：`android/broker/src/main/kotlin/com/aegis/broker/Ipv6LiteralAuthority.kt::canonicalize`
+   只回答两件事——「是不是合法 IPv6 字面量」与「它的 URI 正典整段怎么写」。语法仍归 `AddressText`
+   （那份孪生于 Rust `std::net::Ipv6Addr::from_str` 与 .NET `IPAddress.TryParse` 的解析器），
+   本机/内网分类仍归 `LocalTargetHosts`：**不写第四份 IPv6 语法**是这个对象存在的理由，也是它不塞进
+   `SearchEngines` 的理由。`SearchEngines.looksLikeUrl` 先按地址族判；`normalizeInput` 的 `DOMAIN`
+   分支先转 URI 正典（补方括号）再谈 scheme——因为 `LocalTargetHosts.hostOf` 对缺括号的多冒号形态返回
+   空串（那是有意的 fail-closed），不补括号就永远认不出 `[::1]` / `::1` 是本机。
+3. **共享向量 30 → 42 条**（同一份文件、两端各自消费）。本批 12 条按三种锁法分开，理由写在各自 note 里：
+   - 7 条锁到具体 URL：`[::1]`、`[::1]:9000`、裸 `::1`、`[fd12::3]` 补 http（B8 放行面）；
+     `[2606:4700:4700::1111]` 与其 `:8443` 形态补 https（scheme 判据只有 `IsPublicHost`/`LocalTargetHosts`
+     那一个，R8-CS-SEC-15）；`[::ffff:127.0.0.1]:8080` 补 http（v4-mapped 折回 127/8，与 R9-B66
+     「先转字节再分类」同一条理由）。表内 IPv6/括号形态现读共 **16** 条。
+   - 3 条**只锁判定类**、`expected_url` 写 `null`＋理由：`[fe80::1]`、`[::169.254.169.254]`、`::1:8080`。
+     前两条的 scheme 与「拒绝发生在哪一层」属 R8-CS-SEC-17 **已登记残余**（Windows 判非公网补 http、
+     Android 判非本机保持 https）；第三条是裸形态下「地址段 vs 端口」按文本不可区分。
+     写进表里的必须是同一条契约，**不是把残余做成契约**——这条界线正是 Q68 当初拒绝用 `windows_url`
+     收编全部差异的理由，本次没有把它抹掉。
+   - 2 条反向控制：`[fe80::1%eth0]`、`[::1]x` 判搜索词。
+   同批改真 `[::ffff:127.0.0.1]` 那条注记——它写着「其余带括号形态两端答案不同，故意不进这张表」，
+   正是被本次裁决推翻的旧口径；留着就是同一张表里两套说法（§3.84 抓 Q53 的那种病）。
+4. **量出来的真缺陷在 Windows 一侧，不在 Android**：注入那两条反向控制后 C# 当场判红——
+   `[::1]x` → `http://[::1]x`、`[fe80::1%eth0]` → `http://[fe80::1%eth0]`，即输入层产出了策略层
+   必然拒的 URL。根因是 `windows/src/Aegis.Windows.App/Chrome/UrlNormalizer.cs::IsIpv6Literal`
+   只把括号内的体交给 `IPAddress.TryParse`：① .NET 认 ScopeId ⇒ zone-id 被收下，而核心契约一律拒
+   （要接口知识、跨机不可移植）；② 它不看 `]` 之后写了什么。第三条是同族的**隐性**缺陷：
+   `[8.8.8.8]` 里 TryParse 同样成功（作为 **IPv4**），此前靠下游 `Uri.TryCreate` 恰好失败才落到搜索词——
+   判对了，但理由是别人的。本批按核心契约（`url-origin-invalid.json`：zone-id 拒、`]` 之后只允许
+   `:port`、括号内裸 IPv4 是双重解释面）收紧这三处，并加 `AddressFamily == InterNetworkV6` 改成
+   按地址族判；新增 `MalformedBracketedIpv6AuthoritiesStaySearchTermsOnBothEnds`——四条负例配
+   四条正例控制（合法形态不能被一起判成搜索词，否则就是拿新功能造一条新分叉）。
+   这与 §3.73 修掉的「CS-140 × R8-CS-SEC-15 两支已定口径互相矛盾」是同一族形状。
+5. **Q68 原文三条验收判据逐条兑现**：①「两端一致的全部进表」→ 现 42 条、IPv6/括号形态 16 条；
+   ②「补上『DOMAIN ⇒ 归一非 null』这条锚」按 §3.84 判成**不该补**（那条强不变量被 `0177.0.0.1`
+   当场判红、已入 §六），实际由既有的「DOMAIN 行必须显式 `expected_url` 或 `null`＋理由」锚继续判
+   （`android/app/src/test/kotlin/com/aegis/browser/SearchNormalizeVectorsTest.kt::sharedVectorsDriveClassifyAndNormalize`
+   内 `:84-86` 那段）；③「若判导航，Android 分类要按地址族判而不是按有没有点判」→ 本批第 2 点。
+   ③附带那条「同批复核 `0177.0.0.1` 的 `windows_url` 覆盖是否仍成立」→ **仍成立**：它是裸点分八进制形态，
+   不进 IPv6 分支，由 Windows 侧 `SearchNormalizeVectorTests.OctalIpv4VectorIsRejectedByTheNavigationLayerInstead`
+   继续钉住。
+6. **§四 那条失实为什么能活到今天（残余缺口，如实记在这儿）**：§四 不在任何判据面内——
+   `check_doc_claims.py::COUNT_CLAIM` 只认「N 个 workflow」，`verify_ledger_anchors.py` 与
+   `verify_ledger_queue_status.py` 都只判 §五 的活行。于是「待用户定稿」这一节里的状态词
+   （「仍是待定稿项」）没有任何东西判它。下一轮若还要靠 §四 决定「哪些事要用户给话」，
+   同样的过期还会再发生；本批只把它判掉的那一条改真，没有假装整节已可信。
+7. 复验（一律读被测命令自身退出码／结论字段）：Android `:broker:ktlintCheck`＋`:broker:detekt`＋
+   `:app:ktlintCheck`＋`:app:detekt`＋两模块 `testDebugUnitTest` **BUILD SUCCESSFUL**，产物 mtime 现读为证——
+   `Ipv6LiteralAuthorityTest` 6 条、`SearchNormalizeVectorsTest` 2 条（42 条向量）、既有
+   `SearchEnginesTest` 34 条 0 失败；Windows `Aegis.Windows.Core.Tests` **940 通过 / 0 失败**、
+   `Aegis.Windows.Broker.Tests` **298 通过 / 0 失败**（本批前它们是 911/204 那个量级，这里给的是现读数）。
+   **第一批 lint 是红的**（六条 ktlint＋一条 detekt ReturnCount）：`when` 里只要有一条条目用花括号/多行体，
+   其余条目也必须带花括号——这条形状规则已在 `project-ktlint-when-entry-and-body-shape-traps` 记过，
+   本批又踩在同一个位置（`normalizeInput` 那族 when）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「给台账行号锚加『内容校验』是可行的第三条路」不成立**（第九轮 R9-B83 / §3.83 第 5 点，Q69 候选②）：
