@@ -639,7 +639,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 
 ## 四、待用户定稿（本轮新增四项，其余沿用第八轮 §七）
 
-- **R9-RS-9 的一半（机制对齐）**：Windows 的 ToStringGuard 注册器是**闭包内的本地函数**，
+- ~~**R9-RS-9 的一半（机制对齐）**~~ **R9-B88 判成不做并结案进 §六**（改成 window 键入口＝放宽出货安全面；写法已同形、取用路径在同形门禁里显式别名）。原文 ↓
+  Windows 的 ToStringGuard 注册器是**闭包内的本地函数**，
   Rust/Android 则把同一个注册器发布到 `window[Symbol.for('proxy.register.v1')]` 供各段取用。
   本批已把三端注册尾的**写法**收编同形（try + 真值判定），并把取用路径作为已核等价项在
   同形门禁里显式别名；把 Windows 也改成 window 键入口＝把注册句柄暴露到页面可达的
@@ -661,7 +662,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `xunit.runner.visualstudio` 4.0.1 走 #138（锁 diff 实测只有那一个包的三字段，零传递漂移）；
   `NewTab` 洪水上限已定稿并落地（§3.4）；Dependabot #125/#126/#127/#133 已全部并完（§3.0）。
   这四项从待裁决面划掉；13(b) 发布子链 concurrency 已落地（§3.7）；定稿项 9 步 1（三端注入 JS 同形门禁）已落地（§3.8），步 2「三端改用它」仍待定稿。
-- **真未决**：WebView2 SDK bump（产品行为变更）、子资源 `shouldInterceptRequest`、
+- **真未决**：WebView2 SDK bump（产品行为变更）、~~子资源 `shouldInterceptRequest`~~（**R9-B88 结案进 §六**：「只拒不改」成立但代价落在每个请求的 hot path，子资源面今天由 CSP＋导航＋下载三处覆盖，留了重启条件）、
   **入库 UniFFI Python 绑定要不要删**（R9-RS-2 的另一条处方：该件全仓零 Python 消费者，
   本轮已把它重 derive 成当前真相并加双向对账门禁，但「留一份无人消费的跨语言镜像」本身
   是架构取舍——删除属产品/架构裁决，不默认执行）、
@@ -694,7 +695,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      `false`，两条分支都生成文件所以「忘传参数」不会静默退化。HKCU 标记与环境变量保留为
      第二/第三来源（旧安装升级、运维手工强制）。发布链同时改成验终物（dll 元数据姿态串 +
      ZIP 内容 + Android 生成的 BuildConfig）。
-  3. **AEG-009 / AEG-010（Android 局域网 HTTP 与 HTTPS-only 冲突、无痕与 KillSwitch 缺失）**：
+  3. ~~**AEG-009 / AEG-010（Android 局域网 HTTP 与 HTTPS-only 冲突、无痕与 KillSwitch 缺失）**~~ **R9-B88 正式结案进 §六**（此前每轮都要重读一遍才知道它还是不是待决）。原文与理由 ↓：
      与用户 2026-10-07 定稿「**本机与内网必须能打开**」直接冲突，那条是不可回退裁决；
      Android 无痕模式需要独立数据生命周期设计（`clearCache()` 不等价），先前已否决过
      「退出清 Cookie」「FLAG_SECURE」两刀，同一族不重开。
@@ -706,7 +707,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      dependency **verification**（整树校验和/签名）没做 ⇒ 新登 §五 Q55（**Q55 已由 R9-B50 / §3.50 落地**，2026-10-14）。
   5. **AEG-014（FFI 裸指针/panic 边界）与 §五 攻击面矩阵的十项动态测试**：属审计自述的
      「阶段 C 红队验证」，需要 WebView2 Runtime 与真机（会弹调试窗、写真实数据根）⇒ 需用户在场。
-  6. **AEG-016（本地/内网目标风险分类过宽）**：报告自己标「待源码和动态测试确认」，
+  6. ~~**AEG-016（本地/内网目标风险分类过宽）**~~ **R9-B88 正式结案进 §六**（与第 1 条 AX-02 是同一次改造；重启条件＝具体绕过实证）。原文 ↓：报告自己标「待源码和动态测试确认」，
      且现树 `is_high_risk_host` 的私网放行是第七轮 B8 裁决的钉（有专门用例保护
      `192.168.1.1:8080` 不被判高危，见 R9-RS-6）。它建议的「按发起者信任分级」与
      第 1 条是同一次改造，不单独收紧。
@@ -1007,7 +1008,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `core/rust-policy-core/src/c_abi/tests/vectors_confirmation.rs` 一份消费者（C#/Kotlin 零）
   ⇒ 属 B9 词表入冻结面的余量，需定稿。
 
-- Q53 R9-SH-13 | P2 | `contracts/vectors/`（登记时 15 份，R9-B35 起 **21 份**，R9-B70 起 **22 份**——
+- ~~Q53 R9-SH-13~~ **本批拆行结案（R9-B88 / §3.88）**：这是一条 47 句、把三档不同性质的东西混在一只
+  P2 里的大行，下一个读者无法判断「还要不要动手」，而它每一句单独看都有出处 ⇒ 第八轮失账的轻量版。
+  三档归宿：①八份 `capability-*`/`audit-event-*`/`release-*`/`version-*` 判成**不补**（expected 是 schema 级，
+  端侧执行只能把「形状对不对」再断一遍；同型否证见 §3.42，理由进 §六，真要做的是 §四 第 1 项 AX-02）；
+  ②五份只有 RS 执行者（`native-navigation-confirmation`、`native-navigation-decision`、
+  `approvals-replay-and-expiry`、`glob-match`、`update-manifest-invalid`）归 **§四 第 11 项已定稿的冻结**
+  ——「平台执行者仍为零、`CONSUMER_MANIFEST` 仍 `{RS}`」就是 R9-B59 定稿时明说**不是**修掉缺口的那个状态，
+  Agent 侧同族缺口续登 **Q70 R9-SH-25**，两条一起排期才有意义；③治理列与 Agent 端集已闭
+  （R9-B46 / R9-B65 / R9-B68 / R9-B87）。另：行头那句「`agent/broker.py`（`AG` 零命中）」现读已不成立
+  ——`action-valid.json`／`action-invalid.json` 是 `AG/RS`（§3.84 第 2 点当场改真过）。原条目 ↓
+  Q53 R9-SH-13 | P2 | `contracts/vectors/`（登记时 15 份，R9-B35 起 **21 份**，R9-B70 起 **22 份**——
   多出的一份是 `reserved-address-boundary.json`）↔
   `scripts/verify_vector_consumers.py::CONSUMER_MANIFEST`（实测端集）↔ `agent/broker.py`（`AG` 零命中）：
   AEG-006 的**扩面**那一半，本批只把它变成可判定的表，没有替任何端新增执行面。三档缺口按代价排序：
@@ -4846,7 +4857,55 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    这条与 §3.85 第 4 点同族：**判据红的时候先分清「判据错 / 被测物错 / 自己放错了位置」**，
    三种处置完全不同，而本仓最常见的第一反应是改判据——那正是「门禁把缺陷形态钉成期望值」的入口。
 
+### 3.88 R9-B88（2026-10-17，队列 Q53 拆行结案 + §六 一族正式结案）：一条 47 句的大行拆成三个各有归宿的判定
+
+1. **为什么要拆而不是继续挂着**：Q53 这一行里混着三档不同性质的东西（①八份 schema 级向量的
+   「端侧执行者」、②五份只有 Rust 执行的原生向量、③catalog 治理列），三档各自的处置方式不同——
+   ①是「补了也断不真」，②已定稿并冻结，③已经闭。写成一行 P2 的后果是：下一个读者无法判断
+   「这条到底还要不要动手」，而它每一句单独看都有出处（§3.42、§3.59、§3.68），于是谁都不会去改它。
+   这正是第八轮失账的轻量版：**计数与状态在，可执行的判定不在**。
+2. 三档的归宿：
+   - **①八份判成「不补」**（理由进 §六 第一条）：`capability-*`/`audit-event-*`/`release-*`/`version-*`
+     的 expected 是 schema 级的（现读 `verify_vector_consumers.py` 输出这八份全是「仅元层」），
+     端侧「执行」它们等于把「这份 JSON 形状对不对」再断一遍；而 §3.42 已经逐行证过一次同型形状——
+     给一条断不真的命题补执行者，产出的就是一条恒绿的用例。真要做的是 AX-02 那条能力面接线
+     （§四 第 1 项），那是另一件事、另一次改造。
+   - **②五份归 §四 第 11 项已定稿的冻结**：`native-navigation-confirmation`、`native-navigation-decision`、
+     `approvals-replay-and-expiry`、`glob-match`、`update-manifest-invalid` 只有 RS 执行者（现读端集），
+     「平台执行者仍为零、`CONSUMER_MANIFEST` 仍 `{RS}`」就是 R9-B59 定稿时**明说不是修掉缺口**的那个状态。
+     Q70 R9-SH-25 是同一次契约面扩的 Agent 侧，两条一起排期才有意义。
+   - **③已闭**：治理列身份（R9-B46/R9-B65/R9-B68）＋ Agent 端集从 0 到 `AG/RS`（R9-B68）＋
+     载荷面成契约（R9-B87）。本行原来写「三列也不被 broker 读 ⇒ 两端各说各话」的那半句早在 §3.65 改真。
+3. 同批把 §四 里四条「每轮都要重读一遍才知道还是不是待决」的外部审计条目正式结案进 §六：
+   AEG-009/010（撞 2026-10-07 不可回退裁决）、AEG-016（同一裁决的分级建议，与 AX-02 是同一次改造）、
+   R9-RS-9 的「Windows 注册句柄改 window 键入口」那一半（放宽出货安全面）、
+   子资源 `shouldInterceptRequest`（「只拒不改」成立但代价落在每个请求的 hot path，且子资源面
+   今天由 CSP＋导航＋下载三处覆盖）。结案的作用是**省下一轮的回读预算**，不是宣布它们永久正确——
+   每条都写了重启条件。
+4. `MIN_SYMBOL_ROWS` 6→5（Q53 划线），等号棘轮先红一次再改登记值；CSV 的 `R9-SH-13` 行
+   batch 列追加本批并把「三档归宿」写进 finding（机器索引也要能看出拆行去了哪里）。
+
 ## 六、复核后判定为不成立（留此防重复上报）
+
+- **「给 `capability-*`/`audit-event-*`/`release-*`/`version-*` 这八份向量补端侧执行者是可改进项」不成立**
+  （第九轮 R9-B88 / §3.88 第 2 点，队列 Q53 第①档）：它们的 expected 是 **schema 级**的
+  （现读 `python scripts/verify_vector_consumers.py` 这八份全标「仅元层（schema/协议）」），
+  端侧「执行」只能把「这份 JSON 形状对不对」再断一遍。§3.42 已逐行证过同型形状——
+  给一条断不真的命题补执行者，产出的是恒绿用例而不是防护。
+  **重启条件**：真正要做的是 AX-02 的能力面接线（§四 第 1 项）——那时执行者由「谁来判 capability
+  许可面」这个新问题带出来，不是往这八份上补测试文件。下一轮**不要**再把它当缺口登记。
+- **AEG-009 / AEG-010 / AEG-016（外部第三轮审计）不适用于本仓的既定裁决**（R9-B88 正式结案，此前每轮重读）：
+  局域网 HTTP 与 HTTPS-only 的「冲突」正是用户 2026-10-07 定稿「**本机与内网必须能打开**」的正面要求，
+  现树 `is_high_risk_host` 的私网放行有专门用例保护（R9-RS-6）；AEG-016 建议的「按发起者信任分级」
+  与 AX-02 是同一次改造，不单独收紧。Android 无痕需要独立数据生命周期设计，「退出清 Cookie」
+  「FLAG_SECURE」两刀此前已被否决，同一族不重开。**重启条件**：出现具体的绕过实证（不是分类建议）。
+- **「Windows 的 ToStringGuard 注册器应改成 `window[Symbol.for(...)]` 键入口以与 Rust/Android 同形」不成立**
+  （R9-B88 结案 §四 首项那一半）：改过去＝把注册句柄暴露到页面可达的 window 空间，是**放宽出货安全面**；
+  三端注册尾的写法已同形（try + 真值判定），取用路径差异在 §3.31 的同形门禁里显式别名过。
+- **「子资源层应该上 `shouldInterceptRequest`」不作为缺陷/待办登记**（R9-B88 结案）：
+  「只拒不改」的语义成立，但代价落在**每个请求的 hot path** 上，而子资源面今天由
+  CSP（`frame-src 'none'` 等显式声明）＋导航面＋下载面三处覆盖。**重启条件**：出现一条
+  具体绕过——例如 Q3 那族「重定向落点复判」的缺口在子资源面复现（届时先量落点，再谈要不要接）。
 - **「给台账行号锚加『内容校验』是可行的第三条路」不成立**（第九轮 R9-B83 / §3.83 第 5 点，Q69 候选②）：
   这条判据要求「引用区间内至少出现条目正文里的一个标识符 token」，而本仓的传统是把**被禁形态逐字抄进
   注释**当作防回归的说明（R9-B45 的 `"https://*"`、§3.22 的 frame-ancestors 注记、
