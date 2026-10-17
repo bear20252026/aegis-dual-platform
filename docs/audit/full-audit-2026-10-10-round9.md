@@ -4987,6 +4987,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    台账家族（queue status / anchors / doc floors / gate execution face / workflow script paths /
    step duplicates / text anchor helpers）七个 exit 0；`check_file_sizes.py` 通过（基线 86 项）；ruff 干净；
    `MIN_SYMBOL_ROWS` 未动（§五 活行仍 3 条）。CSV 同批新增 `R9-DOC-25` 一行（124→125 行数据）。
+8. **三个「下一批会不会被抓到」的内存态注入**（不改工作树，直接对真台账文本做替换后跑 `check_ledger`）：
+   **A** 把 §五 的 Q51 划掉而不摘 D3 ⇒ 三条别名红（`Q51`／`R9-CS-14`／`AEG-003` 都撞进 §五 已划线面）；
+   **B** 在 §六 写一条把 `R8-RS-15` 收走的「不成立」⇒ D2 别名红；**C** 在 §四 写一句「§四 第 13 项」⇒
+   悬空引用红，而同一位置写「第 8 项」（真在范围内）不红。**C 第一次试的时候没红，红因是我的注入而不是判据**：
+   我把散文里的「未决项只有」记成了「开放项只有」，`str.replace` 静默没命中，于是看起来像「判据不抓 C」——
+   这正是 `mutated()` 里那句 `assert old in BASE` 存在的理由：**注入必须先证明锚点在位**，否则「没红」这条
+   读数什么都不是（与 §3.89 那条「`grep … || echo "(零命中)"` 会把失败印成结论」同一族）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）
