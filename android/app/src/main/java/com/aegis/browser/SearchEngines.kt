@@ -1,5 +1,6 @@
 package com.aegis.browser
 
+import com.aegis.broker.Ipv6LiteralAuthority
 import com.aegis.broker.LocalTargetHosts
 import com.aegis.broker.OriginPolicy
 
@@ -16,7 +17,12 @@ import com.aegis.broker.OriginPolicy
  *    data: 等非导航 scheme 一律 null（fail-closed——对齐 Windows P0-1
  *    补丁，杜绝 `https://file:///...` 类 urlparse 盲区）
  * ④ 无 scheme：含空格或不含点号 → 搜索词拼引擎 URL；否则当域名补 scheme——
- *    本机/内网目标补 http、其余补 https（② 第八轮；裁决源见 LocalTargetHosts）
+ *    本机/内网目标补 http、其余补 https（② 第八轮；裁决源见 LocalTargetHosts）。
+ *    **IPv6 字面量按地址族判而不是按有没有点判**（R9-B85 / 队列 Q68 裁决「判导航」）：
+ *    `[::1]`、`[fd12::3]`、裸 `::1` 都是网址并补成 URI 正典（带方括号），
+ *    而括号里放点分 IPv4 的 `[8.8.8.8]` 不是合法 IPv6 字面量、也不是合法 URI host，
+ *    与 Windows 同判搜索词（判据单源 Ipv6LiteralAuthority，契约见
+ *    `contracts/vectors/url-origin-invalid.json`）
  * ⑤ 完整 URL 内的空格编码为 %20（浏览器惯例，对齐 Windows D-1 修复）
  *
  * 单源约束：地址栏（SecureNavigator.navigateExternal）与首页搜索框
@@ -145,20 +151,33 @@ object SearchEngines {
         engineKey: String,
     ): String? =
         when (classifyInput(input)) {
-            InputKind.EMPTY, InputKind.FORBIDDEN_SCHEME -> null
+            InputKind.EMPTY, InputKind.FORBIDDEN_SCHEME -> {
+                null
+            }
 
-            InputKind.ABOUT_BLANK -> "about:blank"
+            InputKind.ABOUT_BLANK -> {
+                "about:blank"
+            }
 
             // AD-077（2026-09-26 审计）：不再在调用点预替换空格——
             // canonicalizeExternal 内部已做 %20 编码（此前双处连续 replace）
-            InputKind.ABSOLUTE_URL -> canonicalizeExternal(input.trim())
+            InputKind.ABSOLUTE_URL -> {
+                canonicalizeExternal(input.trim())
+            }
 
             // ②（第八轮 2026-10-07）：本机/内网目标补 http——dev server、NAS、打印机
             // 多数只跑 http，一律补 https 会让第七轮 B8「本机与内网必须能打开」在输入框
             // 这一步就失效（T1 注记所说的「开发/内网最高频输入形态」正是这一类）。
-            InputKind.DOMAIN -> canonicalizeExternal(schemeForDomainInput(input.trim()) + input.trim())
+            // R9-B85：IPv6 字面量先转 URI 正典（补方括号）再谈 scheme——hostOf 对缺括号的
+            // 裸多冒号形态返回空串（那是有意的 fail-closed），不补括号就永远认不出本机回环。
+            InputKind.DOMAIN -> {
+                val authority = Ipv6LiteralAuthority.canonicalize(input) ?: input.trim()
+                canonicalizeExternal(schemeForDomainInput(authority) + authority)
+            }
 
-            InputKind.SEARCH -> searchUrl(input.trim(), engineKey)
+            InputKind.SEARCH -> {
+                searchUrl(input.trim(), engineKey)
+            }
         }
 
     /** 输入分类（P0-2：纯 JVM 可测——判定与 Android 依赖的拼接分离）。 */
@@ -169,7 +188,8 @@ object SearchEngines {
      * - 空输入 / about:blank 单列
      * - 带 scheme：http/https 为绝对 URL；其余（file:/javascript:/data:
      *   等）FORBIDDEN——fail-closed，绝不补 https:// 拼接
-     * - 无 scheme：含空格或不含点号 → 搜索词；否则当域名
+     * - 无 scheme：含空格或不含点号 → 搜索词；否则当域名。IPv6 字面量例外于「有没有点」
+     *   这条规则，按地址族判（R9-B85 / Q68 裁决「判导航」，判据单源 Ipv6LiteralAuthority）
      */
     internal fun classifyInput(text: String): InputKind = classifyTrimmed(text.trim())
 
@@ -216,8 +236,16 @@ object SearchEngines {
             segment.all { it.isDigit() }
     }
 
-    private fun looksLikeUrl(text: String): Boolean =
-        !text.contains(' ') && '.' in text && !text.endsWith(".") && !isBracketedDottedIpv4(text)
+    /**
+     * 「这串文本是不是网址」——R9-B85 起**先按地址族判**：IPv6 字面量按规则不含点
+     * （`[::1]`、`[fd12::3]`），此前因此被读成搜索词，而同一条串在 Windows 导航到本机服务
+     * （队列 Q68，裁决取「判导航」）。点号规则原样保留：它服务的是域名/NAS 这类真实主机名，
+     * 括号里放点分 IPv4 的那条例外也仍由 [isBracketedDottedIpv4] 判回搜索词。
+     */
+    private fun looksLikeUrl(text: String): Boolean {
+        if (Ipv6LiteralAuthority.canonicalize(text) != null) return true
+        return !text.contains(' ') && '.' in text && !text.endsWith(".") && !isBracketedDottedIpv4(text)
+    }
 
     /**
      * `[8.8.8.8]`：方括号里直接放点分 IPv4 **不是合法 URI host**（括号只属于 IPv6 字面量）。

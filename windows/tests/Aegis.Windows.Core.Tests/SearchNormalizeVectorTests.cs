@@ -63,11 +63,7 @@ public sealed class SearchNormalizeVectorTests
             case "SEARCH":
                 // 搜索词：跨端不锁具体引擎（向量 expected_url 因此为 null），
                 // 只锁「走引擎拼接」——产出裸导航 URL 就是把搜索词当网址打开了
-                Assert.NotNull(actual);
-                Assert.True(
-                    UrlNormalizer.EngineUrls.Values.Any(
-                        prefix => actual!.StartsWith(prefix, StringComparison.Ordinal)),
-                    $"搜索词未走引擎拼接: 「{input}」→ {actual}");
+                AssertSearch(input);
                 return;
         }
 
@@ -144,6 +140,33 @@ public sealed class SearchNormalizeVectorTests
         // 反向控制：回环与 mapped 回环仍按非公网补 http（B8 放行面，不因这条改动而变）
         Assert.Equal("http://[::1]", UrlNormalizer.Normalize("[::1]"));
         Assert.Equal("http://[::ffff:127.0.0.1]", UrlNormalizer.Normalize("[::ffff:127.0.0.1]"));
+    }
+
+    [Fact]
+    public void MalformedBracketedIpv6AuthoritiesStaySearchTermsOnBothEnds()
+    {
+        // R9-B85：这三类此前在 Windows 产出「看起来能导航」的 URL，交给策略层再拒——
+        // 而 Android 判搜索词。核心契约对它们都是一律拒
+        // （contracts/vectors/url-origin-invalid.json：zone-id、`]` 之后非端口、括号内裸 IPv4）。
+        AssertSearch("weather forecast");            // 正面控制：搜索词本来的形状
+        AssertSearch("[::1]x");                      // `]` 之后只允许 `:端口`
+        AssertSearch("[fe80::1%eth0]");              // zone-id 要接口知识，跨机不可移植
+        AssertSearch("[8.8.8.8]");                   // 括号里的点分 IPv4 不是 IPv6 字面量
+        AssertSearch("[127.0.0.1]");                 // 同上，且这条此前靠 Uri.TryCreate 恰好失败
+        // 反向控制：收紧不能把合法形态一起判成搜索词，否则就是拿新功能造新分叉
+        Assert.Equal("http://[::1]:9000", UrlNormalizer.Normalize("[::1]:9000"));
+        Assert.Equal("http://[::1]:8443/x", UrlNormalizer.Normalize("[::1]:8443/x"));
+        Assert.Equal("https://[2001:db8::1]", UrlNormalizer.Normalize("[2001:db8::1]"));
+        Assert.Equal("http://[::1]", UrlNormalizer.Normalize("::1"));
+    }
+
+    private static void AssertSearch(string input)
+    {
+        var actual = UrlNormalizer.Normalize(input);
+        Assert.NotNull(actual);
+        Assert.True(
+            UrlNormalizer.EngineUrls.Values.Any(prefix => actual!.StartsWith(prefix, StringComparison.Ordinal)),
+            $"搜索词未走引擎拼接: 「{input}」→ {actual}");
     }
 
     private static string SchemeOf(string url) =>

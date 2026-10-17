@@ -62,7 +62,7 @@ SYMBOL_ANCHOR = re.compile(
 # 等号而不是下界是有意的：下界只拦「退回去」，等号还拦「多锚了几行却没登记」。
 # 结一条活案会把这个数**调小**（R9-B83 就是 8 → 7，Q69 划线后自动退出判定面）——这不是负担，
 # 而是这张表与 §五 真实规模唯一会被机器核对的耦合点：脱钩一次就要靠人现读才发现（§3.82 第 7 点）。
-MIN_SYMBOL_ROWS = 7
+MIN_SYMBOL_ROWS = 6
 
 
 def name_index() -> dict[str, list[Path]]:

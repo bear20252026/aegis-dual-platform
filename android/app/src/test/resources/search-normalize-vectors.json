@@ -160,7 +160,7 @@
       "input": "[::ffff:127.0.0.1]",
       "expected_kind": "DOMAIN",
       "expected_url": "http://[::ffff:127.0.0.1]",
-      "note": "R9-B73：mapped 回环的带括号写法——两端同判域名且同补 http（B8 放行面，回环绕得过分类层）。带括号的其它 IPv6 形态两端答案不同，故意**不**进这张表：把分叉写成 windows_url 覆盖等于把分叉做成契约"
+      "note": "R9-B73：mapped 回环的带括号写法——两端同判域名且同补 http（B8 放行面，回环绕得过分类层）。。R9-B85（Q68 裁决「判导航」）后其余带括号 IPv6 形态已逐条进表：判定类两端同判，只有链路本地/保留段的 scheme 与拒绝发生的层属 R8-CS-SEC-17 已登记残余，那些行的 expected_url 写成 null＋理由，而不是把残余做成契约"
     },
     {
       "input": "[8.8.8.8]",
@@ -173,6 +173,76 @@
       "expected_kind": "SEARCH",
       "expected_url": null,
       "note": "同上带端口形态：括号内的点分判定不能因为尾巴有端口就翻转"
+    },
+    {
+      "input": "[::1]",
+      "expected_kind": "DOMAIN",
+      "expected_url": "http://[::1]",
+      "note": "R9-B85（Q68 裁决「判导航」）：带括号的 IPv6 回环是网址。此前 Android 因为「不含点」判成搜索词、Windows 导航到本机服务——同一个人敲同一串字符得到两种结果。判据改成按地址族判（单源 Ipv6LiteralAuthority），本端补成 http 与 B8「本机与内网必须能打开」同侧。"
+    },
+    {
+      "input": "[::1]:9000",
+      "expected_kind": "DOMAIN",
+      "expected_url": "http://[::1]:9000",
+      "note": "R9-B85：带端口的本机 IPv6 dev server（T1 注记里的「开发/内网最高频输入形态」）。端口在 ] 之后，不能因为地址本身含冒号就当 host:port 切坏。"
+    },
+    {
+      "input": "::1",
+      "expected_kind": "DOMAIN",
+      "expected_url": "http://[::1]",
+      "note": "R9-B85：裸冒号形态按 URI 正典补方括号后判域名——与 Windows BracketIpv6 同一条；不补括号的 authority 喂给 LocalTargetHosts.hostOf 会得到空串（那是有意的 fail-closed）。"
+    },
+    {
+      "input": "[fd12::3]",
+      "expected_kind": "DOMAIN",
+      "expected_url": "http://[fd12::3]",
+      "note": "R9-B85：ULA fc00::/7 属内网放行面 ⇒ 补 http。登记时（R9-B73）这条两端相反：Windows http、Android 判搜索词。"
+    },
+    {
+      "input": "[2606:4700:4700::1111]",
+      "expected_kind": "DOMAIN",
+      "expected_url": "https://[2606:4700:4700::1111]",
+      "note": "R9-B85：公网 IPv6 字面量判域名并补 https——scheme 的判据只有 IsPublicHost/LocalTargetHosts 那一个（R8-CS-SEC-15），输入层不白补 http（R9-B73 钉过的那条）。"
+    },
+    {
+      "input": "[2606:4700:4700::1111]:8443",
+      "expected_kind": "DOMAIN",
+      "expected_url": "https://[2606:4700:4700::1111]:8443",
+      "note": "R9-B85：公网 IPv6 带端口，scheme 仍是 https；C# 侧 SearchNormalizeVectorTests 已单独钉过这条端口形态。"
+    },
+    {
+      "input": "[::ffff:127.0.0.1]:8080",
+      "expected_kind": "DOMAIN",
+      "expected_url": "http://[::ffff:127.0.0.1]:8080",
+      "note": "R9-B85：v4-mapped 回环带端口——内嵌 IPv4 折成 127/8 ⇒ 补 http，与 R9-B66 的「先转字节再分类」同一条理由。"
+    },
+    {
+      "input": "[fe80::1]",
+      "expected_kind": "DOMAIN",
+      "expected_url": null,
+      "note": "R9-B85：判定类两端同判「导航」，但 URL 不在本表锁死——链路本地段的 scheme 与拒绝发生的层属 R8-CS-SEC-17 已登记残余（Windows 判非公网补 http、Android 判非本机保持 https），而两端最终都由保留地址边界给出拒绝码。写进表里的必须是同一条契约，不是把残余做成契约。"
+    },
+    {
+      "input": "[::169.254.169.254]",
+      "expected_kind": "DOMAIN",
+      "expected_url": null,
+      "note": "R9-B85：v4-compatible 写法（R9-B69 三端同折）折成 169.254.169.254＝链路本地/云元数据段 ⇒ 判定同判导航、由边界拒；URL 不锁的原因同 [fe80::1] 那条（残余属 R8-CS-SEC-17，不属本表）。登记时（R9-B73）这条的要点是「Android 的分类取决于拼写里有没有点」——那条现在由地址族判取代。"
+    },
+    {
+      "input": "::1:8080",
+      "expected_kind": "DOMAIN",
+      "expected_url": null,
+      "note": "R9-B85 的边界情形：裸冒号形态下「地址段」与「端口」按文本无法区分，正典是整段进括号（`[::1:8080]` 是一个地址而不是「::1 的 8080 端口」）。两端同判导航；URL 不锁——这条形态属过渡便利，用户要端口该写 `[::1]:8080`（上面已精确锁定）。"
+    },
+    {
+      "input": "[fe80::1%eth0]",
+      "expected_kind": "SEARCH",
+      "note": "R9-B85 的反向控制：zone-id 要接口知识、跨机不可移植，核心契约一律拒（url-origin-invalid 同名向量），所以它**不是**合法 IPv6 字面量——不能因为「加了 IPv6 判据」就把这种写法一起判成网址。"
+    },
+    {
+      "input": "[::1]x",
+      "expected_kind": "SEARCH",
+      "note": "R9-B85 的反向控制：`]` 之后只允许 `:端口`（核心契约同款）。不这么收的话本端判网址、Windows 因 Uri.TryCreate 失败判搜索词 ⇒ 又是一条新分叉，而本批的目的就是消灭这类。"
     }
   ]
 }
