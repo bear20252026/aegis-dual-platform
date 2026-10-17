@@ -53,6 +53,21 @@ AGP 插件 detached 配置的独立解析域，用户侧无法对插件内部传
 版本选择（jose4j/jdom2 之所以能消除，是其脆弱节点仅存在于已修的
 classpath 域）。
 
+**工具/测试面专属坐标登记块**——R9-B93 起这段是**单源**：`scripts/verify_gradle_alert_scope_boundary.py`
+直接读它，代码里不再另存一份清单（旧版代码里那个五元组漏掉了本节证据面已有的
+`bcutil-jdk18on` 与 `logback-classic`——两条都在四把锁的工具面上，但门禁对它们的归属**一条都不判**）。
+加一条坐标＝在这里加一行；读不出任何一行时门禁走 exit 2，不会把「没登记」读成「没问题」。
+
+```tooling-only-coordinates
+org.bouncycastle:bcprov-jdk18on
+org.bouncycastle:bcpkix-jdk18on
+org.bouncycastle:bcutil-jdk18on
+org.apache.commons:commons-lang3
+org.apache.httpcomponents:httpclient
+ch.qos.logback:logback-core
+ch.qos.logback:logback-classic
+```
+
 **判定：tolerable_risk**（构建机侧暴露、产品运行时零命中、上游无稳定修复）。
 
 > **执行结果（2026-10-13 16:15Z 实测，API 回读）**：`open=0` / `dismissed=9` / `fixed=3`；
@@ -68,7 +83,8 @@ classpath 域）。
 
 > **R9-B49（2026-10-13）执行与留痕**：用户授权后，本文档列出的 9 条告警在 GitHub 上以
 > `dismissed_reason=tolerable_risk` 正式 dismiss，dismiss comment 逐条引用本文的锁文件
-> 行号与配置名。**dismiss 不是终点**：它依赖的事实（这 5 个坐标只在工具/测试类路径里）
+> 行号与配置名。**dismiss 不是终点**：它依赖的事实（这 5 个坐标只在工具/测试类路径里——R9-B93 注：
+> 这句写的时候是 5 条，登记块现在是 7 条，条数的单源是上面那块而不是这句）
 > 现在由 `scripts/verify_gradle_alert_scope_boundary.py` 常跑判定——任何一条坐标进
 > `release/debug Runtime|Compile Classpath` 或 `debugAndroidTest*Classpath`（装进设备的那份）
 > 即判红；上游若把节点整体移除（锁里再也找不到该坐标），也判红——那时登记表与本文要同步，
@@ -124,6 +140,25 @@ classpath 域）。
 > 另记一条本批没顺手改的措辞：`scripts/verify_gradle_alert_scope_boundary.py:114` 那句
 > `[ok] 被 dismiss 的 5 个坐标…` 的「被 dismiss」框架已经落后（fix-forward 之后不是靠 dismiss 站着），
 > 改它要同改台账 §3.4x 里对这句的逐字引用，属独立小批，不混进本批的锁改动。
+
+> ✅ **R9-B93（2026-10-17）上面两条都收了**。
+> ①**「未证的一项」现在有读数了**：现跑 `gh api repos/…/dependabot/alerts`（用户凭据；Actions 的
+> `GITHUB_TOKEN` 读不到，见上面第 4 条实测）得 `open=0` / `dismissed=0` / `fixed=12`。逐条
+> `updated_at`：BC 三件＋`commons-lang3`＋`httpclient` 六条在 **2026-10-17T11:46Z**（B89 的地板＋重锁
+> 之后那次扫描），`logback` 三条在 **2026-10-17T16:00Z**，`jose4j`/`jdom2` 早于 10-03，`pytest`(pip) 9-28。
+> ②**logback 那三条的闭合不能记在本仓头上**：四把锁里 `logback-core/classic:1.3.16=ktlint` 逐字节未变
+> （B89 的锁 diff 只动 BC/lang3/httpclient 各 3 行），所以我们既没抬过它的版本、也没有移除它——
+> 本文不猜它为什么变 `fixed`（可能是上游改了脆弱范围，也可能是依赖图提交面变了），只把「状态不是判据」
+> 再钉一遍：同一张告警面 10-13 是 `dismissed=9`、10-14 变回 `open=9`、10-17 是 `fixed=12`，
+> **三次读数三种状态** ⇒ 结论只能建在坐标归属与地板一致性上，这也正是本门禁存在的全部理由。
+> ③**措辞与登记面改掉**：门禁输出与 docstring 不再写「被 dismiss 的 5 个坐标」（那句描述的状态已不存在，
+> 而硬编码的「5」本身就是一条会自己过期的抄写）；登记面从代码里的五元组挪进本文的
+> `tooling-only-coordinates` 块，并补上此前漏掉的 `bcutil-jdk18on` 与 `logback-classic`。
+> 新增一条**双向**判据：正向判「地板说的每条坐标，锁里 `androidLintTool` 面必须真的咬住它、且版本恰好
+> 等于地板钉的」；反向判「登记面内且落在 `androidLintTool` 面上的坐标必须有地板顶着」。反向那半抓的是
+> 最阴的形状——删掉一条 force 时**入库锁此刻还是对的**（1.86），只看正向会全绿，而危险挪到下一次例行
+> `--write-locks`：那时它静默退回 1.80.2，PR 面没人知道。
+> 台账侧同批改：§3.89 第 4 点②与本行那句逐字引用就地补更正注记，本批记录在 §3.93（登记 R9-DOC-26）。
 
 > ⚠ **R8-CI-06 更正（第八轮 2026-10-05）**：本段原文写作「处置：tolerable_risk……
 > 附证据 **dismissing**」，把「判定」表述成了「已在 GitHub 上执行的操作」。

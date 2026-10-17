@@ -765,7 +765,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      门禁判「两端只执行被标记的子集，确认面由核心独占」——这是冻结契约面的词表变更，与
      Q21 R9-SH-11 是同一次定稿。**默认不执行任何一个**：在那之前 `CONSUMER_MANIFEST` 保持
      `{"RS"}`（R9-B39 刚把它从虚记的 `{CS,RS}` 改回来）。
-  12. ~~**那 9 条 Maven 告警要不要再处理一次**（§3.60 现读后新增，两个选项都要仓库所有者点头）~~ **已定稿并落地**（用户 2026-10-17 按推荐档选 fix-forward；见 §3.89）——实落的是第三个形状：不动 AGP/lint 版本，给 `androidLintTool` 加常驻 force ＋重锁（钉住旧版的是我们自己的 dependency locking，不是上游没发版）。下面留当时的两个选项与实况。原文：
+  12. ~~**那 9 条 Maven 告警要不要再处理一次**（§3.60 现读后新增，两个选项都要仓库所有者点头）~~ **已定稿并落地**（用户 2026-10-17 按推荐档选 fix-forward；见 §3.89）——实落的是第三个形状：不动 AGP/lint 版本，给 `androidLintTool` 加常驻 force ＋重锁（钉住旧版的是我们自己的 dependency locking，不是上游没发版）。**§3.89 当时留的那条「未证：GitHub 扫描是否闭合只能等下次扫描复核」由 R9-B93 / §3.93 现读补上：`open=0 / dismissed=0 / fixed=12`（2026-10-17T16:00Z 现跑 API），但其中 logback 三条不能记在本仓头上——锁里 `1.3.16=ktlint` 逐字节未变。下面留当时的两个选项与实况。原文：
      R9-B49 的 dismiss 已被 2026-10-14T07:09:5xZ 那次扫描重开（现读 `open=9 / dismissed=0 / fixed=3`），
      机制是「vulnerable 版本仍可解析就重开」——`bcprov-jdk18on:1.80.2` 还在 `androidLintTool` 里，
      而告警范围是 `< 1.85` / `>= 1.74, < 1.84`。可选：
@@ -4917,10 +4917,16 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    （1.86 的 jar+pom 早被 buildscript 面登记；本地 diff 只有 CRLF 抖动，已 `git checkout --` 还原，
    不把换行噪声提交进去）。这条运气不作规律：换 1.87 就得整批重算校验和。
    边界仍由 `verify_gradle_alert_scope_boundary.py` 常驻判（坐标进出货/装机 classpath 即红）。
-   **未证**：GitHub 扫描是否闭合只能等下次扫描复核，本批不写「已修复」。
+   **未证**：GitHub 扫描是否闭合只能等下次扫描复核，本批不写「已修复」。**（R9-B93 / §3.93 现读补上：
+   2026-10-17T16:00Z 现跑 `gh api …/dependabot/alerts` 得 `open=0 / dismissed=0 / fixed=12`——BC＋lang3＋
+   httpclient 六条 11:46Z 翻，logback 三条 16:00Z 翻；后者锁面 `1.3.16=ktlint` 逐字节未变，所以那三条
+   不是本仓抬版本的结果。同批还给地板补了**双向**判据：删掉一条 force 时入库锁此刻仍然对，
+   只看正向会全绿，见 §3.93 第 3 点。）**
 4. 两条故意不做，写在这儿而不是留给下一轮猜：①`logback×3`（在 `ktlint` 配置）——抬它会改 linter
    自身日志实现，另批；②`verify_gradle_alert_scope_boundary.py:114` 那句「被 dismiss 的 5 个坐标」
    框架已落后（其中 5 条现在靠地板站着），但改它要同改台账对这句的逐字引用，混进锁改动会让回退难拆。
+   **（②由 R9-B93 / §3.93 收掉：措辞与登记面一起改，台账这两处逐字引用就地补注、不重写历史；
+   ①仍未做——`logback` 两条坐标现在在登记面内由边界判据守着归属，但抬版本这件事照旧是独立一批。）**
 
 ### 3.90 R9-B90（2026-10-17，队列 Q70 结案 + Q65 后半定稿）：Agent 形态**不补**跨端向量——「表更大」不是改进
 
@@ -5004,6 +5010,55 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    「台账里写示例形态一律用非 ASCII 占位/别写成形」的同一个坑换了面（当时是 `` `File.kt::symbolName` ``
    被当成真锚报「文件不存在」）。正解不是开豁免表（§3.84 工具坑①同族：豁免面就是下一个假绿源），
    而是把示例改写成判据读不出来的形状（本条现在的写法）。
+
+### 3.93 R9-B93（2026-10-17，§3.89 第 4 点②那条「另批」落地）：边界门禁 v2——登记面比证据面少两条，地板此前没人守
+
+1. **动因是一条明写的「另批」**：§3.89 第 4 点②记下「`verify_gradle_alert_scope_boundary.py:114` 那句
+   『被 dismiss 的 5 个坐标』框架已落后，改它要同改台账对这句的逐字引用，属独立小批」。那次不做的理由
+   （混进锁改动会让回退难拆）随 B89 并入已经消失，本批就是那个独立小批。它和 §3.85 第 6 点那条一样，
+   当时**没有 ID、没进 §五**，只活在批次记录里——这也是 R9-DOC-25 那条病的一半：没有归宿的残余缺口
+   不会自己排队。本批登记为 **R9-DOC-26**。
+2. **实测先把门禁自己的陈述推翻**：现跑 `gh api repos/…/dependabot/alerts`（用户凭据）得
+   `open=0 / dismissed=0 / fixed=12`，逐条 `updated_at`：BC 三件＋`commons-lang3`＋`httpclient` 六条
+   **2026-10-17T11:46Z**（B89 地板＋重锁之后那次扫描），`logback` 三条 **16:00Z**，`jose4j`/`jdom2`
+   10-03，`pytest`(pip) 9-28。⇒ 那句「被 dismiss 的 5 个坐标」描述的状态**已经不存在**。
+   但闭合要分开记账：**logback 那三条不能算在本仓头上**——四把锁里
+   `logback-core/classic:1.3.16=ktlint` 逐字节未变（B89 的锁 diff 只动 BC/lang3/httpclient 各 3 行），
+   我们既没抬它也没移除它，本文不猜它为什么变 `fixed`。同一张告警面三次读数三种状态
+   （10-13 `dismissed=9`、10-14 `open=9`、10-17 `fixed=12`）把一条纪律变成了事实：
+   **任何结论都不能建在告警状态上**，只能建在「坐标落在哪条 configuration」＋「地板 ⇄ 锁一致性」上——
+   这正是这条门禁存在的全部理由，也是它输出里从此不再出现「dismiss」的原因。
+3. **真洞（不是措辞问题）**：旧版把登记坐标硬写成五元组，而分诊文档 §三 的证据面里有七条——
+   `org.bouncycastle:bcutil-jdk18on`（`1.86=androidLintTool`）与 `ch.qos.logback:logback-classic`
+   （`1.3.16=ktlint`）都在四把锁的工具面上，**却不在代码登记表里**。门禁对没登记的坐标一条都不判，
+   所以「出货面边界有人守着」这句话当时只对 5/7 成立：那天有人把 `bcutil` 写成 `implementation`，
+   全绿。修法是把登记面的单源挪进分诊文档那段 ` ```tooling-only-coordinates ` 围栏块，由门禁直接读，
+   读不出任何一行＝exit 2（「没登记」不等于「没问题」）；`test_the_two_blind_spots_b93_found_are_now_registered`
+   是这两条的墓碑，`test_registry_is_read_from_the_doc_not_copied_into_code` 钉住「代码里不许再有第二份」。
+4. **新判据是双向的，而反向那半才是重点**：正向＝地板说的每条坐标必须在 `androidLintTool` 面真的咬住
+   构件、且锁里该面解析到的版本恰好等于地板钉的（顺手判掉「地板空转」——force 写着但那个构件根本不在
+   这条面上）。反向＝**登记面内且落在 `androidLintTool` 面的坐标必须有地板顶着**。反向抓的是最阴的形状：
+   删掉一条 force，**入库锁此刻仍然写着 1.86**，只看正向会全绿；而锁是被例行 `--write-locks` 维护的，
+   下一次重锁就静默退回 1.80.2（B89 实测 1m3s 复现）。此前这件事在 PR 面完全没有判据，红灯只会以
+   「GitHub 重开一条告警」的形式在推送之后出现。
+5. **端到端实测（真树上做，用完对称还原）**：把 `android/app/gradle.lockfile` 里
+   `bcprov-jdk18on:1.86=androidLintTool` 改成 `1.80.2` ⇒ 门禁 exit 1 且报
+   「解析到 ['1.80.2', '1.86']，地板钉的是 1.86」；改回后 `diff` 与备份逐字节一致、门禁 exit 0。
+   **另记两条自己撞的**：①反向判据第一版写成「`androidLintTool` 面上所有坐标都要地板」⇒ 立刻把整条
+   lint 工具链（sdklib 的传递依赖等）都要求钉地板，判据哭狼；收紧成只管**登记面内**的坐标，并配
+   `test_unregistered_lint_tooling_dependency_does_not_demand_a_floor` 作正面控制。②用例想断言「这次红的
+   原因不是版本不一致」，先拿 `"1.80.2"` 当特征词，结果反向那条消息自己的解释文案里就带着这句 ⇒ 断言
+   要挑**只有那条消息才有**的特征（改用「解析到」），并把反向措辞里那个会撞的词去掉——门禁的话术也是接口。
+6. **本批没做与做不到的**：①`logback` 抬版本仍另批（改的是 linter 自身日志实现）；②Dependabot 状态在
+   CI 里仍读不到（`GITHUB_TOKEN` 403，配只读 PAT 属新增凭据、要用户点头）⇒ 判据只能建在树面上；
+   ③`org.bouncycastle:bc-jdk18on-bom` 这类 BOM 节点**没有**进登记面——它不是告警主体，把注册它当成
+   要求会把「分诊面」扩成「工具面全集」，那条边界一旦模糊，哭狼声就会逼人放宽判据。
+7. 复验（一律读被测命令自身退出码）：`verify_gradle_alert_scope_boundary.py` exit 0（输出两行现读数：
+   登记 7 条、地板 5 条逐条一致）；`pytest tests/python/gradle_alert_scope_test.py` **30 passed**（旧 12 条
+   全部按新签名改准，新增 18 条含正向/反向/空转/塌缩/不哭狼）；全量 `pytest`、`active_tree_gates.py`
+   （ruff＋bandit＋py312-compat）、`check_file_sizes.py`（门禁 212 行、用例 204 行）本地先跑；
+   台账家族（decision status / queue status / anchors）exit 0——§四 表未动，`MIN_SYMBOL_ROWS` 仍 3。
+   CSV 同批新增 **R9-DOC-26**，并把 `R9-CI-15`、`R9-DEPS-2` 两行的 `batch` 列改到实况。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）
