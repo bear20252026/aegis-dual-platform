@@ -678,7 +678,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   `NewTab` 洪水上限已定稿并落地（§3.4）；Dependabot #125/#126/#127/#133 已全部并完（§3.0）。
   这四项从待裁决面划掉；13(b) 发布子链 concurrency 已落地（§3.7）；定稿项 9 步 1（三端注入 JS 同形门禁）已落地（§3.8），步 2「三端改用它」＝§4.0 表 D2，仍未定稿。
 - **未决项只有 §4.0 表那四条**（D1 WebView2 SDK bump、D2 核心 JS 生成导出、D3 Android 威胁订阅源、D4 装机/桌面验收）。
-  这一行原来自己抄了一份清单，抄出的六项里**两项按实树根本不成立**，本批摘除并把来历留在这儿，免得又被抄回来：
+  这一行原来自己抄了一份清单：七项里三项是已划线的历史（见本行末），四项声称还开着——而**那四项里有两项按实树根本不成立**，
+  本批摘除并把来历留在这儿，免得又被抄回来：
   ①**入库 UniFFI Python 绑定要不要删**——R9-B91 已判成不成立并写进 §六：该件确实零 Python 消费者，但它有两道核验面
   （PR 面 `verify_uniffi_binding_surface.py` 的导出名双向对账 ＋ `core-rust.yml` 用锁定工具链现生成再比对），
   「零消费者＝无人在看」是错的诊断；
@@ -687,8 +688,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   同一节里一处写「已定稿并落地」、另一处把它列进「真未决」，就是本节自己和自己矛盾。
   这两条不是本批现读时人眼碰巧看到的：新门禁的别名判据当场把它们判红——表行别名分别撞上 §五 的已划线队列行
   `- ~~Q26 …~~` 与 §四 的已划线条目 `4. ~~**AEG-011（Android Gradle dependencyLocking + verification）**~~`。
-  其余四条已划线项不再重述：子资源 `shouldInterceptRequest` 与 AEG-009／AEG-010／AEG-016 一族结案进 §六，
-  `action-catalog.yaml` 三列由 R9-B46 定稿（§3.46），IPv6 字面量在导航面由 R9-B66 / §3.66 做完——
+  本行里另外三项当时已划线的历史不再重述：子资源 `shouldInterceptRequest` 结案进 §六、
+  `action-catalog.yaml` 三列由 R9-B46 定稿（§3.46）、IPv6 字面量在导航面由 R9-B66 / §3.66 做完——
   §3.85 第 6 点记的正是「这一条失实为什么能活到今天」：§四 当时没有任何判据，现在有了。
 
 - **外部第三轮审计（2026-10-11）里不能照做的条目**——审计报告给的处方有几条会改变
@@ -4953,8 +4954,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    （§3.30；实树 `android/build.gradle.kts` 的 `dependencyLocking { lockAllConfigurations() }` 与
    `android/app`、`android/broker`、`android/settings-gradle` 三把 `gradle.lockfile` 在位）——
    **同一节里一处已落地、一处列未决，是台账与自己矛盾**。判据抓法＝别名 `AEG-011` 撞上 §四 的已划线条目。
-   ③ **本节标题写「本轮新增四项」而本节实际有 12 个编号项**：没有任何东西判这个计数（第 1 点），
-   标题改成「开放项＝§4.0 那四条」。
+   ③ **本节标题「本轮新增四项」已指不上本节的规模**：那句话写的时候指的是本节最前面四条子弹
+   （R9-RS-9 的一半／R9-CS-3／R9-SH-5／R9-SH-6 的一半），到本批这一节已是「四条子弹＋一份 12 项的外部审计
+   清单＋一张开放决策表」，而没有任何东西判这个计数（`check_doc_claims.py` 只认「N 个 workflow」形态）；
+   标题改成「开放项＝§4.0 那四条」，不再留一个需要人来维护的数；
    ④ **第 11 项抄走的向量计数「53 条 / 18 条 false / 18 条 `require_confirmation`」静默失真**（R9-B69 +3 之后
    实树是 56／20／20，逐提交复算 `git show 8d7a056:…` 确认写下来那天是准的，之后没人回头改）。
    动作按 R9-B41 的既有口径：**改指向单源而不是再抄一个新值**——散文不再写条数，指向那份向量与
