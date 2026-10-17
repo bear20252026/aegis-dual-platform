@@ -170,6 +170,11 @@ jobs:
       # 而 check_doc_claims.py 只认「N 个 workflow」——本门禁把这条 bullet 与实树常量双向对账。
       - name: README floor claims gate (R9-B82——文档抄的下界必须逐条等于实树常量)
         run: python scripts/verify_doc_floors.py
+      # R9-B92：§四「待用户定稿」此前没有任何判据面（两条台账门禁只扫 §五），于是已被书面结论
+      # 收走的处方仍列在「真未决」里、同一节一处写已落地另一处把同一件事列为未决。现在 §4.0 表是
+      # 「还剩哪些事要人点头」的单源，状态词、双向引用、指针与别名矛盾都由这条门禁判。
+      - name: Ledger decision status gate (R9-B92——待用户给话清单必须有单源且不与自己矛盾)
+        run: python scripts/verify_ledger_decision_status.py
       - name: Verify shared product version declarations
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
