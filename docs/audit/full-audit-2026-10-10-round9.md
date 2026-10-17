@@ -752,7 +752,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
      门禁判「两端只执行被标记的子集，确认面由核心独占」——这是冻结契约面的词表变更，与
      Q21 R9-SH-11 是同一次定稿。**默认不执行任何一个**：在那之前 `CONSUMER_MANIFEST` 保持
      `{"RS"}`（R9-B39 刚把它从虚记的 `{CS,RS}` 改回来）。
-  12. **那 9 条 Maven 告警要不要再处理一次**（§3.60 现读后新增，两个选项都要仓库所有者点头）：
+  12. ~~**那 9 条 Maven 告警要不要再处理一次**（§3.60 现读后新增，两个选项都要仓库所有者点头）~~ **已定稿并落地**（用户 2026-10-17 按推荐档选 fix-forward；见 §3.89）——实落的是第三个形状：不动 AGP/lint 版本，给 `androidLintTool` 加常驻 force ＋重锁（钉住旧版的是我们自己的 dependency locking，不是上游没发版）。下面留当时的两个选项与实况。原文：
      R9-B49 的 dismiss 已被 2026-10-14T07:09:5xZ 那次扫描重开（现读 `open=9 / dismissed=0 / fixed=3`），
      机制是「vulnerable 版本仍可解析就重开」——`bcprov-jdk18on:1.80.2` 还在 `androidLintTool` 里，
      而告警范围是 `< 1.85` / `>= 1.74, < 1.84`。可选：
@@ -4884,6 +4884,28 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    每条都写了重启条件。
 4. `MIN_SYMBOL_ROWS` 6→5（Q53 划线），等号棘轮先红一次再改登记值；CSV 的 `R9-SH-13` 行
    batch 列追加本批并把「三档归宿」写进 finding（机器索引也要能看出拆行去了哪里）。
+
+### 3.89 R9-B89（2026-10-17，§四 第 12 项定稿并落地）：lint 工具面的 BC 地板——「等上游」是错的诊断，钉住旧版的是我们自己的锁
+
+1. 测量先推翻一条我们自己写下的陈述：分诊文档与 `android/build.gradle.kts` 注释都写着
+   「9 条告警全部没有 patched 版本可升 ⇒ 只能结案等上游」，而实测
+   `./gradlew :app:dependencyInsight --configuration androidLintTool --dependency org.bouncycastle:bcprov-jdk18on`
+   给出的选择原因是「By constraint: Dependency version enforced by Dependency Locking」——
+   把 `androidLintTool` 钉在 `bcprov 1.80.2`（告警范围 `< 1.85`）的是**本仓 R9-B50 启用的 dependency
+   locking**，不是 AGP/lint 的要求；`buildscript` 那条 classpath 地板早就到 1.86。
+   ⇒ 「没有可升版本」把「我们主动钉住了旧版」说成了「上游没发版」，与 §3.85 那条 §四 失实同族。
+2. 形状：`subprojects` 里对 `androidLintTool` 加常驻 `resolutionStrategy.force`（BC 三件 1.86
+   ＋同配置 `commons-lang3 3.21.0`／`httpclient 4.5.14`）＋按 SOP 重锁。
+   **为什么必须常驻而不是改一次锁**（两条实测）：force 压过锁（`{strictly 1.80.2} -> 1.86`）；
+   删掉 force 只留锁，下一次例行 `--write-locks` 把锁**退回 1.80.2**（1m3s）⇒ 地板才是修法，改锁不是。
+3. 影响面与运气分开记：四把锁各 3 行；`verification-metadata.xml` **内容零变化**
+   （1.86 的 jar+pom 早被 buildscript 面登记；本地 diff 只有 CRLF 抖动，已 `git checkout --` 还原，
+   不把换行噪声提交进去）。这条运气不作规律：换 1.87 就得整批重算校验和。
+   边界仍由 `verify_gradle_alert_scope_boundary.py` 常驻判（坐标进出货/装机 classpath 即红）。
+   **未证**：GitHub 扫描是否闭合只能等下次扫描复核，本批不写「已修复」。
+4. 两条故意不做，写在这儿而不是留给下一轮猜：①`logback×3`（在 `ktlint` 配置）——抬它会改 linter
+   自身日志实现，另批；②`verify_gradle_alert_scope_boundary.py:114` 那句「被 dismiss 的 5 个坐标」
+   框架已落后（其中 5 条现在靠地板站着），但改它要同改台账对这句的逐字引用，混进锁改动会让回退难拆。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 
