@@ -174,6 +174,14 @@ jobs:
         run: python scripts/verify_versions.py
       - name: Verify release.json against full schema (PY-102——14 字段漂移门禁)
         run: python scripts/verify_release_schema.py
+      # R9-B87（队列 Q65）：Agent 判定层要求的载荷面比冻结的 action.schema.json 宽两个字段
+      # （intent/budget_used），而这张面此前只存在于 broker 的字段表里——调用方要对接 Agent
+      # 得读 Python 才知道该发什么。新契约 agent/agent-action.schema.json（不放 contracts/schemas/：
+      # 那张目录是 codegen 枚举的冻结跨端清单，单端契约进去会被当成参与跨端代码生成）把它写成
+      # 文件，本门禁**双向**对账：required 由 broker 现算（dataclasses.MISSING ∪ CONTRACT_REQUIRED），
+      # 契约改了而字段表没改、或字段表改了而契约没改，都判红（不是把单源的值再抄一遍）。
+      - name: Agent action contract face gate (R9-B87——IPC 载荷面 ⇄ broker 必填面双向对账)
+        run: python scripts/verify_agent_action_schema.py
       - name: Repo-level release integrity validator (审计第六轮 2026-10-03)
         # README 把 validate_release.py 列为「五门禁常绿」之一，但此前它
         # 的唯一 CI 执行点是 legacy-python-guard.yml 的周六 cron 与 compat.yml
