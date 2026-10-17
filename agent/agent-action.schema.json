@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Aegis Agent Action（agent/broker.py::ProposedAction 的 IPC 载荷面）",
+  "description": "R9-B87（队列 Q65）：Agent 判定层要求的载荷面比冻结的 contracts/schemas/action.schema.json 宽——多出 intent 与 budget_used 两个字段，因此核心形态的载荷在 PolicyBroker.decide() 处一律落 deny_payload（这条分歧在 agent/tests/action_vector_consumption_test.py::test_agent_payload_face_is_wider_than_the_frozen_schema 里被显式钉住，不是偶然）。此前这张面**只存在于 broker 源码的字段表里**，任何 IPC 调用方要对接 Agent 都得读 Python 才知道该发什么，而读出来的东西没有可判的形式。本文件把那张面写成契约，并由 scripts/verify_agent_action_schema.py 与 broker 实际必填集合**双向**对账（集合由 dataclasses.MISSING ∪ CONTRACT_REQUIRED 现算，本文件不是新的手抄副本）。**消费面要说清**：运行时判定仍走 agent/broker.py::proposed_action_from_dict，本文件不由它加载——它是给调用方与门禁看的契约面，不是第二套判定实现（把它接进裁决链属行为变更，不在 Q65 的范围）。与 action.schema.json 的关系是**两张面各自成立**：action.schema.json 是跨端冻结契约（核心/Windows/Android 消费），本文件是 Agent IPC 载荷面（超集），二者不得静默合并。",
+  "type": "object",
+  "required": [
+    "session_id",
+    "tab_id",
+    "document_generation",
+    "origin",
+    "method",
+    "canonical_parameters",
+    "scope",
+    "expires_at",
+    "nonce",
+    "policy_version",
+    "intent",
+    "budget_used"
+  ],
+  "properties": {
+    "session_id": { "type": ["string", "null"], "minLength": 1, "description": "SP-140：键必须存在；None/空 ⇒ DENY_SESSION（不再有缺省合法会话）" },
+    "tab_id": { "type": ["string", "null"], "minLength": 1 },
+    "document_generation": { "type": ["integer", "null"], "minimum": 0 },
+    "origin": { "type": ["string", "null"], "pattern": "^https?://" },
+    "method": { "type": ["string", "null"], "enum": ["GET", "POST", "PUT", "DELETE", "NAVIGATE", "DOWNLOAD"] },
+    "canonical_parameters": { "type": ["string", "null"], "description": "规范化参数串（参数变化使批准失效；STDIO 注入面）" },
+    "scope": { "type": ["string", "null"], "minLength": 1 },
+    "expires_at": { "type": ["string", "null"], "format": "date-time", "description": "R7-TOOL-02：None/空 ⇒ deny_schema，没有「不过期」这一态" },
+    "nonce": { "type": ["string", "null"], "minLength": 1 },
+    "policy_version": { "type": ["string", "null"], "minLength": 1, "description": "None ⇒ deny_schema，不回退 broker 版本" },
+    "intent": { "type": "string", "minLength": 1, "description": "catalog action 名（default_deny 判定键）——Agent 判定层专有，冻结 schema 无此字段" },
+    "budget_used": { "type": "integer", "minimum": 0, "description": "自报「已用次数」。SP-149：不可信，仅冗余校验，真正的预算判定在 catalog/服务端" },
+    "max_bytes": { "type": "integer", "minimum": 0, "description": "本调用数据体字节声明（有默认值 0 ⇒ 可省略）" },
+    "tool_description_hash": { "type": ["string", "null"], "minLength": 1 }
+  },
+  "additionalProperties": false
+}

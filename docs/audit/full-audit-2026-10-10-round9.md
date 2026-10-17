@@ -1281,7 +1281,13 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   顺序不能倒——理由见 §3.66 第 1 点；③同时把 6to4/Teredo **不解码**这条口径写进三端
   注释（§3.66 第 6 点已有，别在下一轮被当成漏判补上）。
 
-- Q65 R9-SH-20 | P2 | `agent/broker.py::proposed_action_from_dict`（`:199-241`；`mandatory = dataclass 无默认字段 ∪ CONTRACT_REQUIRED`）↔
+- Q65 R9-SH-20 | P2 | **部分闭环（R9-B87 / §3.87）**：Agent 的 IPC 载荷面已写成契约
+  `agent/agent-action.schema.json`（**不放 `contracts/schemas/`**——那张目录是 codegen 枚举的冻结跨端清单，放进去会被当成参与跨端代码生成，实测 6 条用例红在 `generate_csharp.cs_type` 处理不了 type 联合），并由 `scripts/verify_agent_action_schema.py` 与 broker
+  **现算**的必填集合双向对账（不是把 12 这个数抄进文档），运行时也验过（抽掉 `intent`/`budget_used`
+  与被拒的形状都有用例）。**没做**的是原终态 ① 的后半「并进向量体系」——续登为 **Q70 R9-SH-25**，
+  理由是硬的：那是契约面扩，与 Q53 第②档同一次改造，不该在「写契约文件」这批里顺手扩。
+  原状态与两选一 ↓
+  `agent/broker.py::proposed_action_from_dict`（`:199-241`；`mandatory = dataclass 无默认字段 ∪ CONTRACT_REQUIRED`）↔
   `contracts/schemas/action.schema.json`（required 只列十字段）↔
   `agent/tests/action_vector_consumption_test.py::test_agent_payload_face_is_wider_than_the_frozen_schema`：
   **两张「action」契约不是同一张**——Agent 的 `ProposedAction` 还要求
@@ -1293,6 +1299,17 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   **待回读**的终态两选一：①给 Agent 的 IPC 载荷单立一张 schema 并进向量体系；
   ②把 `action-*.json` 分成「核心形态／Agent 形态」两套并各记端集。两条都是契约面
   变更（且第②条要动 Rust 的向量消费循环），不顺手做。
+
+- Q70 R9-SH-25 | P2（**R9-B87 续登，未排期**）| `scripts/verify_agent_action_schema.py::violations`（本批新增的四条判据落点）↔ `agent/tests/action_vector_consumption_test.py::test_agent_payload_face_is_wider_than_the_frozen_schema`（钉住那张分歧的用例）↔ `contracts/vectors/`（现读 22 份，无一份是 Agent 形态载荷）：
+  **Agent 的裁决路径今天没有任何契约向量**。Q65 两选一里「并进向量体系」这半件没做，后果不是漏拦而是
+  **命题没人断**：`PolicyBroker.decide()` 对核心形态载荷一律落 `deny_payload`（该用例逐条钉住 valid 三条
+  也一样），所以「Agent 会不会按 scope／预算／nonce／过期正确裁决」只由 redteam 夹具与 Python 单测覆盖，
+  跨端向量面是空的。要做的三件事：①新增 Agent 形态向量（载荷带 `intent`/`budget_used`，
+  expected 写 Agent 的 Decision 而不是 schema 违规码）；②`CONSUMER_MANIFEST` 给它记 `AG` 端集，
+  且端集必须由实测推导；③让 R9-B59 那套 `platform_decidable` 词表决定它是否可被平台执行——
+  这与 Q53 第②档是同一次契约面扩，**需要你先定「Agent 端集要不要进跨端向量体系」**。
+  验收判据（选定方向后）：新向量必须被真实消费者逐条执行（按 R9-B39 口径，注释里提到文件名不算消费）；
+  登记端集与现读不一致即红；不得用「形状校验通过」冒充「裁决正确」（AEG-006 原话）。
 
 ### 5.5 DOC（文档 vs 实树）
 
@@ -4737,7 +4754,6 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    本批又踩在同一个位置（`normalizeInput` 那族 when）。
 
 ### 3.86 R9-B86（2026-10-17，队列 Q54 落地）：清空订阅源＝解除名单＋删缓存＋一次确认
-
 1. 用户按推荐档定「清空即解除」。原状态是「只停止重取，名单继续拦截到进程结束，重启后仍从
    缓存文件加载」——台账一路把它写成「行为偏弱、方向是放松防护 ⇒ 需用户给话」，本次拿到话就落地。
    代价按定稿的第三条路消化：**误清一次的风险由一次确认承担**，而不是由「清而不断」这种半成品行为承担。
@@ -4781,6 +4797,54 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    「拆文件没丢用例」的核对方式，比口头说「一条没减」可信。
    顺序教训一句话：`check_file_sizes.py` 与 `active_tree_gates.py ruff` 是**本地就能跑的**，
    它们红在 runner 上等于用 CI 当 lint 器，一轮 15 分钟。
+
+### 3.87 R9-B87（2026-10-17，队列 Q65 第一半）：Agent 的 IPC 载荷面写成契约，并与 broker **现算**的必填集合双向对账
+
+1. 用户按推荐档定：单立 schema，**不**放宽运行时 mandatory。理由写在推荐档里——把 `intent`/
+   `budget_used` 降成可选＝预算与幂等约束静默归零，那是放松方向。
+2. 新契约文件 `agent/agent-action.schema.json`（required 12 字段、properties 14 字段、
+   `additionalProperties: false`）。**它不是第二套判定实现**：运行时判定仍走
+   `agent/broker.py::proposed_action_from_dict`，本文件由调用方与门禁看，所以文件描述里把
+   「谁消费它」写死了（R9-B36 那条「README 说有人消费、实树没人调」的反面教训）。
+3. 新门禁 `scripts/verify_agent_action_schema.py::violations` 四条判据，**核心是「不抄数」**：
+   必填集合由 `dataclasses.MISSING` 字段 ∪ `CONTRACT_REQUIRED` **现算**，契约与它双向等值；
+   properties ⇄ dataclass 字段集双向等值（契约里声明一个 broker 没有的属性＝假契约）；
+   `required` 每一项必须在 `properties` 里；Agent 相对冻结面多出来的字段集合必须恰好等于
+   `mandatory − frozen_required`——这条判的是「分歧还是那条分歧」，有人把两张面静默并成一张就红。
+   集合为空/契约文件缺失/导入失败一律 **exit 2**，不判「通过」（四条判据在那种状态下全恒真）。
+4. 判据④**首跑就红在自己身上**（这是本批最有用的一条）：我第一版写成
+   `agent_required − frozen_required != all_fields − frozen_required`，于是 `max_bytes` 与
+   `tool_description_hash` 这两个「有默认值、因此可省略」的字段被算进差集，门禁报
+   「契约差 [budget_used, intent]，字段表差 [budget_used, intent, max_bytes, tool_description_hash]」。
+   错的是判据不是契约——`mandatory` 才是「必填」的正确基。这条留在台账里是因为它证明了
+   **首跑红并不等于实现错**，必须先分清「判据错」与「被测物错」再动手（第八轮以来反复用的一条）。
+5. 运行时确实遵守契约，这条不是断言而是测出来的：
+   `tests/python/agent_action_schema_test.py::test_runtime_actually_enforces_the_contract_face`
+   构造完整 12 字段载荷→过；抽掉 `intent`／`budget_used`→`BrokerInputError` 且消息点名该字段；
+   多带一个契约外键→被拒（这才配得上 `additionalProperties: false`）。
+   注入用例另有 6 条（少 required、多 required、少 property、多 ghost property、
+   required 指向不存在的属性、把两张面并成一张），每条都走同一个纯函数 `violations()`。
+6. 新门禁接进 PR 判定面：`.github/workflows/contracts.yml` 的 `contract-source-of-truth` 加一步，
+   因此它**不需要**进 `contracts/ci/gate-execution-face.yaml` 登记表（那张表只登记不在 PR 面上的）；
+   `verify_gate_execution_face.py` 现读通过（38 个受管脚本 / 32 个 PR 面可达 / 6 个已登记）。
+7. **本批只闭掉 Q65 的第一半，并且不假装闭了第二半**。该行的终态两选一写的是
+   ①「单立 schema **并进向量体系**」②「把 `action-*.json` 分成核心形态／Agent 形态两套并各记端集」。
+   本批落的是①的前半（成契约＋双向对账＋运行时核）。①的后半没做的原因是硬的：
+   Agent 形态的载荷一旦进向量体系，就要给 `CONSUMER_MANIFEST` 新增端集与文件、
+   并让 Rust 侧的向量消费循环承认它——那是 Q53 第②档与 Q70 的同一次改造，
+   不该在一次「写契约文件」的批次里顺手扩。续登为 **Q70 R9-SH-25**（同一形状：
+   核心形态载荷在 `decide()` 处一律 `deny_payload`，所以「Agent 会不会正确裁决」这件事
+   今天没有任何契约向量在判）。`MIN_SYMBOL_ROWS` 因此 5→6（Q65 仍是活行、Q70 新行也带符号锚），
+   等号棘轮先红一次再改登记值。
+8. **一条位置教训：`contracts/schemas/` 不是「所有 schema 的家」**。我第一版把新契约放进那张目录，
+   本地全套 pytest 立刻红 6 条——`contracts/codegen/verify_contract_compatibility.py` 会枚举该目录
+   给每个 schema **生成 C#/Kotlin 模型**，而 `generate_csharp.py::cs_type` 处理不了
+   `"type": ["string", "null"]` 这种联合形态。红因不是判据太严，而是**我放错了地方**：那张目录是
+   冻结的**跨端**契约清单，Agent 的 IPC 载荷面是 Python 独有，放进去等于宣称它参与跨端代码生成。
+   正解是移到 `agent/agent-action.schema.json`（与 `broker.py`/`action_contract.py` 同级），
+   而不是给 codegen 加联合类型支持（那是为了迁就一个放错位置的文件去扩它的能力面）。
+   这条与 §3.85 第 4 点同族：**判据红的时候先分清「判据错 / 被测物错 / 自己放错了位置」**，
+   三种处置完全不同，而本仓最常见的第一反应是改判据——那正是「门禁把缺陷形态钉成期望值」的入口。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「给台账行号锚加『内容校验』是可行的第三条路」不成立**（第九轮 R9-B83 / §3.83 第 5 点，Q69 候选②）：
