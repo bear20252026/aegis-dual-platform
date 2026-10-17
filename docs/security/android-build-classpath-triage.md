@@ -108,6 +108,23 @@ classpath 域）。
 > 顶到 ≥1.85（需要动 AGP/lint 工具面，属构建面变更）——**都是需要仓库所有者点头的操作**，
 > 本文只把两个事实与代价写清，不代做决定。
 
+> ✅ **R9-B89（2026-10-17）定稿并落地：选 fix-forward，而且比这里预估的便宜——不动 AGP/lint 版本。**
+> 实测（`./gradlew :app:dependencyInsight --configuration androidLintTool --dependency
+> org.bouncycastle:bcprov-jdk18on`）给出的选择原因是
+> 「By constraint: Dependency version enforced by Dependency Locking」——把 1.80.2 钉死的是**本仓自己的
+> dependency locking**，不是 AGP 32.4.1 的要求；`buildscript` 那条 classpath 地板其实早已到 1.86。
+> 所以可做的是给 `androidLintTool` 这条 configuration 加常驻 `resolutionStrategy.force`
+> （BC 三件 1.86 ＋同配置里的 `commons-lang3 3.21.0`/`httpclient 4.5.14`）再按 SOP 重锁。
+> 两条实测细节决定了形状：force 能压过锁（`{strictly 1.80.2} -> 1.86`）；而**删掉 force 只留锁，
+> 下一次例行 `--write-locks` 会把锁退回 1.80.2** ⇒ 地板必须常驻，改锁不是修法。
+> 校验和面运气好：`verification-metadata.xml` 内容零变化（1.86 的 jar+pom 早被 buildscript 面登记过），
+> 但这是巧合不是规律——换 1.87 就得整批重算。`commons-lang3`/`httpclient` 两条一并收掉 ⇒
+> 9 条里 6 条有了 fix-forward；`logback×3` 在 `ktlint` 配置，抬它会改 linter 自身日志实现，本批仍不动。
+> **未证的一项**：GitHub 扫描是否因此闭合只能等下一次扫描复核，本文与台账都不写成「已修复」。
+> 另记一条本批没顺手改的措辞：`scripts/verify_gradle_alert_scope_boundary.py:114` 那句
+> `[ok] 被 dismiss 的 5 个坐标…` 的「被 dismiss」框架已经落后（fix-forward 之后不是靠 dismiss 站着），
+> 改它要同改台账 §3.4x 里对这句的逐字引用，属独立小批，不混进本批的锁改动。
+
 > ⚠ **R8-CI-06 更正（第八轮 2026-10-05）**：本段原文写作「处置：tolerable_risk……
 > 附证据 **dismissing**」，把「判定」表述成了「已在 GitHub 上执行的操作」。
 > 只读复核实测：9 条告警全部 `state=open`、`dismissed_at` 为 null，`dismissed`

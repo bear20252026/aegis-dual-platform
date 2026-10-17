@@ -30,6 +30,14 @@
 // 本地板达不到的两条工具面（androidLintTool / ktlint）才是这 9 条告警的落点，
 // 其边界由 scripts/verify_gradle_alert_scope_boundary.py 常跑判定：这 5 个坐标一旦
 // 进 release/debug Runtime|Compile Classpath 或 debugAndroidTest*（装进设备的那份）即判红。
+// R9-B89 就地更正（2026-10-17）：上面那段「9 条告警全部没有 patched 版本可升 ⇒ 只能结案等上游」
+// 只对了一半，而且对的那半不在告警的落点上。区分两件事：①**buildscript/插件类路径**确实已钉在
+// 各包最新已发布版（1.86/0.9.7/2.0.6.1/3.21.0/4.5.14），那一面「无升级可做」是真的；
+// ②但告警实际命中的是 **androidLintTool / ktlint 两条工具配置**，那里被 dependency locking
+// 钉在 1.80.2（< patched 1.85），而 locking 会压过 buildscript 地板——所以「等上游」是错的诊断，
+// 可做的是给自己那条配置加常驻 force（见下面 subprojects 里的 R9-B89 块）+ 重锁。
+// 仍成立的部分：产品 APK 不受影响（runtime 闭包零命中）；logback×3 在 ktlint 配置，本批不动。
+// 未证的一项：GitHub 侧扫描是否因此闭合——只能等下一次扫描复核，不写成结论。
 // 分诊全文（暴露面证据/剩余告警处置/复检规程）：docs/security/android-build-classpath-triage.md
 // 版本来源：各告警的 first_patched_version（11/12→1.85、7→1.84、5→0.9.6、
 // 4→2.0.6.1、3→3.18.0、2→4.5.13 已被树解析超集 4.5.14 覆盖——显式钉版防回退）。
@@ -80,6 +88,27 @@ subprojects {
     dependencyLocking {
         lockAllConfigurations()
         lockMode = LockMode.STRICT
+    }
+
+    // R9-B89（2026-10-17，§四 第 12 项定稿「fix-forward」）：lint 工具面的 BC 三件抬到 1.86。
+    // 为什么 buildscript 上面那条 classpath 地板（1.86）不够：`androidLintTool` 走的是子项目
+    // 配置解析，实测 `dependencyInsight` 的选择原因是
+    // 「By constraint: Dependency version enforced by Dependency Locking」——锁把它钉在 1.80.2，
+    // 于是同一棵树里 buildscript 已 1.86、lint 工具面仍 1.80.2（告警范围 < 1.85 因此一直不闭）。
+    // 为什么地板必须常驻而不是改一次锁：探针实测「删掉 force 再跑例行 `--write-locks`」，
+    // 锁**退回 1.80.2**（1m3s）——只改锁不钉 force，下一次重锁就静默回退。
+    // 范围：只 `matching { it.name == "androidLintTool" }`，不碰出货面
+    // （`verify_gradle_alert_scope_boundary.py` 判的就是这条边界，坐标进 Runtime/Compile
+    // 或 debugAndroidTest* 即红）。commons-lang3／httpclient 同配置同理由一起收；
+    // logback 3×low 在 `ktlint` 配置——抬它会改 linter 自身日志实现，本批不动（见上面第 15-19 行）。
+    configurations.matching { it.name == "androidLintTool" }.all {
+        resolutionStrategy.force(
+            "org.bouncycastle:bcprov-jdk18on:1.86",
+            "org.bouncycastle:bcutil-jdk18on:1.86",
+            "org.bouncycastle:bcpkix-jdk18on:1.86",
+            "org.apache.commons:commons-lang3:3.21.0",
+            "org.apache.httpcomponents:httpclient:4.5.14",
+        )
     }
 
     // R9-B32（2026-10-12，master 实测红灯）：锁的**覆盖面**不能靠「手抄一份任务清单」。
