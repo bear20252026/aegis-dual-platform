@@ -1,11 +1,20 @@
 namespace Aegis.Windows.Core.Tests;
 
+using System.Collections.Generic;
+using System.IO;
+using System.Text.Json;
 using Aegis.Windows.Core.Security;
 using Xunit;
 
 /// <summary>M1-T2（ADR-009）+ C10 批（审计 2026-09-26 CS-133 合并）：威胁黑名单
-/// 语义单测——Python threat_feed.py 移植的解析/匹配行为锁。原 ThreatFeedTests
-/// 与 ThreatFeedLogicTests 两文件重复覆盖，合并为单一行为锁文件。</summary>
+/// 语义单测——解析/匹配行为锁。原 ThreatFeedTests 与 ThreatFeedLogicTests 两文件
+/// 重复覆盖，合并为单一行为锁文件。
+///
+/// R9-B96（队列 Q71）更正一句陈述：旧注释写「Python threat_feed.py 移植的解析行为」
+/// **不成立**——实测 legacy 那份没有字符白名单/空段/首尾点/长度这四刀（
+/// `under_score.example`、`*wildcard.example`、`.evil.example`、`a..b.example` 它全放行），
+/// 而本端一直拒。跨端的单源现在是 `contracts/vectors/threat-feed-line.json`
+/// （本文件末尾按它逐条断言），下面的内联表保留为「没有向量时也钉得住」的第二面。</summary>
 public sealed class ThreatFeedTests
 {
     // ============ ParseFeedLine（合并自两文件矩阵） ============
@@ -27,7 +36,10 @@ public sealed class ThreatFeedTests
     [InlineData("under_score.example", null)]   // 非主机字符拒绝
     [InlineData("no-dot-hostname", null)]       // 无点非 localhost 拒绝
     [InlineData("notadomain", null)]
-    public void ParseFeedLineMatchesPythonSemantics(string line, string? expected)
+    // R9-B96：旧名 `ParseFeedLineMatchesPythonSemantics` 里「MatchesPythonSemantics」
+    // 是一句没有判据的陈述（本表第 14、15 行恰好与 legacy Python 相反，实测见类注），
+    // 改名成这条真正在判的事。跨端一致的正式判据在文件末尾的共享向量消费。
+    public void ParseFeedLineNormalizesAndRejectsMalformedEntries(string line, string? expected)
     {
         Assert.Equal(expected, ThreatFeedUpdater.ParseFeedLine(line));
     }
@@ -159,4 +171,47 @@ public sealed class ThreatFeedTests
             File.Delete(path);
         }
     }
+
+    // ============ R9-B96（队列 Q71）：跨端共享向量消费 ============
+    // 这份向量判的是「同一行订阅源文本在 Windows 与 Android 给出同一个结论」。
+    // 此前两端各有一份手写矩阵（本文件上面那张内联表），一致性只由注释维持——
+    // 一处改了另一处不会红，正是 Q71 记的那件事。
+
+    private static string FeedLineVectorPath =>
+        Path.Combine(AppContext.BaseDirectory, "contracts", "vectors", "threat-feed-line.json");
+
+    public static IEnumerable<object?[]> FeedLineVectors => ReadFeedLineVectors();
+
+    private static List<object?[]> ReadFeedLineVectors()
+    {
+        Assert.True(
+            File.Exists(FeedLineVectorPath),
+            $"共享向量不在测试输出目录（csproj 少了那条 None Include 拷贝？）：{FeedLineVectorPath}");
+        using var document = JsonDocument.Parse(File.ReadAllText(FeedLineVectorPath));
+        var rows = new List<object?[]>();
+        foreach (var vector in document.RootElement.GetProperty("vectors").EnumerateArray())
+        {
+            var line = vector.GetProperty("line").GetString()!;
+            var expected = vector.GetProperty("expected").GetString()!;
+            if (expected is not ("valid" or "deny"))
+                throw new InvalidOperationException($"向量出现本文件未定义的 expected={expected}：{line}");
+            var host = vector.TryGetProperty("host", out var node) ? node.GetString() : null;
+            // 配对判据不是洁癖：valid 少了 host 就退化成「解析出点什么就行」，
+            // deny 带了 host 会让断言悄悄比错对象。形态错的向量必须当场红。
+            if ((expected == "valid") != (host is not null))
+                throw new InvalidOperationException($"向量 expected/host 配对非法：{line}");
+            rows.Add([line, expected, host]);
+        }
+
+        if (rows.Count < 30)
+            throw new InvalidOperationException($"向量条目数塌缩（{rows.Count} 条）——清空条目等于摘掉判据");
+        return rows;
+    }
+
+    [Theory]
+    [MemberData(nameof(FeedLineVectors))]
+    public void SharedFeedLineVectorParsesToTheSameVerdictOnBothEnds(
+        string line,
+        string expected,
+        string? host) => Assert.Equal(expected == "valid" ? host : null, ThreatFeedUpdater.ParseFeedLine(line));
 }

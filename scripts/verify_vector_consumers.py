@@ -40,10 +40,11 @@ from text_anchors import strip_comments
 ROOT = Path(__file__).resolve().parents[1]
 VECTORS_DIR = ROOT / "contracts" / "vectors"
 
-# 实测面：22 份向量（2026-10-12，R9-B35 加 release/version/semver-form 六份；
-# R9-B70 加 reserved-address-boundary 一份——保留地址边界的 CS+AD 契约表）。
+# 实测面：23 份向量（2026-10-12，R9-B35 加 release/version/semver-form 六份；
+# R9-B70 加 reserved-address-boundary 一份——保留地址边界的 CS+AD 契约表；
+# R9-B96 加 threat-feed-line 一份——威胁名单行文本的 CS+AD 契约表，队列 Q71）。
 # 下界只保证「减面必须是有意识的动作」。
-MIN_VECTORS = 22
+MIN_VECTORS = 23
 # 判据 3/4 的下界：CS∧AD 同跑的最小份数、有端侧执行者的最小份数。
 # R9-B70：CS∧AD 同跑由 2 份变 3 份（url-origin-* 两份 + 边界表一份），下界仍按原判据 1，
 # 抬高它等于把「今天的事实」写成「明天的许可」。
@@ -113,6 +114,12 @@ CONSUMER_MANIFEST: dict[str, frozenset[str]] = {
     # R9-B35 起 PY 也是它的消费者：semver_schema_parity_test.py 取其首条 manifest
     # 当 update-manifest.schema.json 的宿主模板（逐案换 version 做三方对账）。
     "update-manifest-valid.json": frozenset({"CI", "PY", "RS"}),
+    # R9-B96（队列 Q71）：威胁名单行文本 → 规范 host。AD 命中来自
+    # `ThreatHostFeedTest.loadSharedVectors`，CS 命中来自
+    # `ThreatFeedTests.ReadFeedLineVectors`——两端各有一份真消费者，这是本表里
+    # 第四份 CS∧AD 同跑。legacy Python **不登记**：实测它没有字符白名单/空段/
+    # 首尾点/长度四刀，四条样本与两端相反（归档栈按 SP-154 是可选对账端）。
+    "threat-feed-line.json": frozenset({"AD", "CS"}),
     "url-origin-invalid.json": frozenset({"AD", "CS", "PY", "RS"}),
     "url-origin-valid.json": frozenset({"AD", "CS", "RS"}),
 }

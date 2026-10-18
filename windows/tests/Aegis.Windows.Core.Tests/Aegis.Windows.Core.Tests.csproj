@@ -27,6 +27,12 @@
     <None Include="..\..\..\contracts\vectors\url-origin-invalid.json"
           Link="contracts\vectors\url-origin-invalid.json"
           CopyToOutputDirectory="PreserveNewest" />
+    <!-- R9-B96 / 台账 Q71：威胁名单**单行文本 → 规范 host** 的跨端向量（与
+         Kotlin ThreatHostFeedTest 消费同一份），少这条拷贝 ⇒ 测试只会红在
+         「文件缺席」而不会被读成「没有向量可跑」 -->
+    <None Include="..\..\..\contracts\vectors\threat-feed-line.json"
+          Link="contracts\vectors\threat-feed-line.json"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />

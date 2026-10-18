@@ -1360,7 +1360,20 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   验收判据（选定方向后）：新向量必须被真实消费者逐条执行（按 R9-B39 口径，注释里提到文件名不算消费）；
   登记端集与现读不一致即红；不得用「形状校验通过」冒充「裁决正确」（AEG-006 原话）。
 
-- Q71 R9-AD-18 | P3 | `windows/src/Aegis.Windows.App/Core/Security/ThreatFeed.cs::ParseFeedLine`
+- ~~Q71 R9-AD-18~~ **本批已闭（R9-B96 / §3.96）**：三份名单行解析器现在有**一份共享向量＋两端真消费者**——
+  `contracts/vectors/threat-feed-line.json` 34 条（18 valid／16 deny），C# 侧
+  `windows/tests/Aegis.Windows.Core.Tests/ThreatFeedTests.cs::ReadFeedLineVectors` 与 Kotlin 侧
+  `android/broker/src/test/kotlin/com/aegis/broker/ThreatHostFeedTest.kt::loadSharedVectors`
+  逐条跑（两端各 34／34 全过，实测不是推断）。形态向 Android 那一档对齐：核心 `denylist.rs::entry_shape_ok`
+  的三刀（≤256 字节、无首尾点、无空段）由 Windows 端**同批补在端侧**——生效集合不变（这些条目原本就在
+  核心侧被拒，且不可能等于任何规范化后的导航 host），变的是「谁先拒」与留痕里的计数口径。
+  legacy Python 判成**不作执行者**：实测（`importlib` 直接载那份函数）它没有字符白名单/空段/首尾点/长度
+  这四刀，`under_score.example`、`*wildcard.example`、`.evil.example`、`a..b.example` 全放行，
+  把它拉进向量只会得到一张没人执行的表（与 §3.90 否证 Q70 同一条理由）。
+  **expected 词表没有扩**：`valid`＝该行产出 host 且必须逐字符等于 `host` 字段、`deny`＝该行不产出条目，
+  两个 token 都在现有封闭词表内；「注释行 vs 坏条目」这一档**刻意不进向量**——它在解析层同为 null，
+  区分属于端侧计数面，而 C# 侧没有计数面，锁了就会有一条在某一端断不真（R9-B42 那一课）。原条目 ↓
+  Q71 R9-AD-18 | P3 | `windows/src/Aegis.Windows.App/Core/Security/ThreatFeed.cs::ParseFeedLine`
   ↔ `legacy/windows-pywebview/app/threat_feed.py::parse_feed_line` ↔
   `android/broker/src/main/kotlin/com/aegis/broker/ThreatHostFeed.kt::parseLine`：
   **三端订阅源行解析器没有共享向量**（`contracts/vectors/` 现读 22 份，无一份是名单行文本）。
@@ -5273,6 +5286,86 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    broker test＋2 个 app＋1 份 asset）**没有一个需要进基线**＝没有一个越 300 行。
    CSV 登记 **R9-AD-18**（Q71 的出处）与 **R9-AD-19**（第 6 点③那条自查），并把 R9-CS-14 的
    批次字段改成「机制半边落地」而 `primary_reviewed` 仍不翻。
+
+### 3.96 R9-B96（2026-10-18，队列 Q71 落地）：三端名单行解析器收成一份向量＋两端真消费者
+
+1. **收的是什么**：R9-B95 把 Android 的灌入口建起来之后，留下的缺口是「同一行文本在
+   三份实现里可能给出不同结论，而这件事没有判据」。本批的收法是新增
+   `contracts/vectors/threat-feed-line.json` **34 条**（18 valid／16 deny），由两端逐条跑：
+   C# `windows/tests/Aegis.Windows.Core.Tests/ThreatFeedTests.cs::ReadFeedLineVectors`
+   （34／34 过，实测）与 Kotlin
+   `android/broker/src/test/kotlin/com/aegis/broker/ThreatHostFeedTest.kt::loadSharedVectors`
+   （13 条用例里的那一条，实测）。它因此成为 `verify_vector_consumers.py` 口径下第 **4** 份
+   CS∧AD 同跑的向量（前三份：url-origin 两份＋reserved-address-boundary）。
+2. **Windows 侧改了行为，改的是「谁先拒」**：核心
+   `core/rust-policy-core/src/ffi/broker/denylist.rs::entry_shape_ok` 的三刀（≤256 字节、
+   无首尾点、无空段）此前只在核心与 Android 端侧存在，Windows 把 `.evil.example`／`a..b.example`／
+   超长条目**推给核心再由核心拒**，于是两端有效集合相同、可观测计数却两种
+   （核心侧 `accepted<input` vs 端侧「被拒条目数」）。本批把三刀补进
+   `windows/src/Aegis.Windows.App/Core/Security/ThreatFeed.cs::ParseFeedLine`。
+   **为什么不进 §四 裁决**：这些条目不可能等于任何规范化后的导航 host（核心注记原话：
+   「死条目比不登记更坏」），所以既不收紧也不放宽任何一次判定，变的只是过滤发生在哪一层——
+   与本仓「只加严不加宽」那条纪律不冲突，也不是出货可见行为。
+3. **expected 词表一个都没扩**（这是本批最需要判断的一步，而不是最省事的一步）：
+   `verify_vectors.py::validate_vector` 的封闭词表里 `valid`／`deny` 已经能表达
+   「这一行产出 host」与「这一行不产出条目」。**第三档「注释/空行＝不是条目」刻意不进向量**：
+   它在解析层与坏条目同为 null，两态的区分属于**端侧计数面**，而 Android 有计数面、
+   Windows 的调用方直接丢弃 null 没有计数面——把它写进向量就会得到一条在某一端**断不真**的
+   期望（R9-B42 否证「给 Windows 接 require_confirmation 执行者」是同一条课）。
+   配对的形态由两端各自判：`valid` 必须带 `host`、`deny` 必须不带——见第 5 点的注入。
+4. **一句不实陈述就地改真**：C# 那个 Theory 的名字是
+   `ParseFeedLineMatchesPythonSemantics`，类注也写着「Python threat_feed.py 移植」。
+   本批用 `importlib` **直接载 legacy 那份函数跑了一遍**（不是读注释）：
+   `under_score.example`、`*wildcard.example`、`.evil.example`、`a..b.example` 它**全部放行**
+   ——它没有字符白名单/空段/首尾点/长度这四刀。也就是说那张内联表里第 14、15 行的期望
+   恰好与它自称对标的实现相反。动作：Theory 改名
+   `ParseFeedLineNormalizesAndRejectsMalformedEntries`（全仓仅此一处引用，无 workflow `--tests`
+   过滤器挂在它上面，改名的耦合面现读为 0），类注改成「跨端单源是这份向量」，
+   legacy 按 SP-154 保持**可选对账端、不作执行者**。
+5. **注入复验（两次，都是真改工作树）**——判据不空心不是声明出来的：
+   ①把 `under_score.example` 那条从 `deny` 翻成 `valid`＋host ⇒ **两端各红 1 条**
+   （C#：`失败: 1，通过: 33`，消息带那一行；Kotlin：`13 tests completed, 1 failed`）；
+   ②把 `example.com` 那条的 `host` 字段删掉 ⇒ C# 在 `MemberData` 取值阶段抛
+   「expected/host 配对非法」（`失败: 1，通过: 0`，整条 Theory 起不来），Kotlin 同条用例红。
+   两次都还原后再跑：Kotlin BUILD SUCCESSFUL、C# ThreatFeed 面 **115／115**，
+   且还原后向量与注入前**逐字节相同**（`shutil` 备份比对）。
+6. **注入①顺手抓出一个更早的洞（本批最有价值的一条）**：第一次跑 Kotlin 时
+   `BUILD SUCCESSFUL in 7s` ——**测试根本没重跑**：`contracts/vectors/*.json` 不在
+   `:broker:testDebugUnitTest` 的声明输入里，Gradle 判 UP-TO-DATE 直接跳过，只有加
+   `--rerun` 才红。也就是说「两端逐条跑同一份表」这句话，在任何带构建缓存的复跑里是空的；
+   而 C# 侧没有这个洞，因为向量是 csproj 的 `CopyToOutputDirectory` 项（文件变更进增量判定）。
+   修法：`android/broker/build.gradle.kts` 末尾给 `tasks.withType<Test>()` 声明
+   `inputs.files(fileTree(vectorsDir){ include("*.json") })`；声明之后同一注入 **5 秒内当场红**
+   （第 5 点②就是修好后跑的）。这条洞是共享向量体系自 R9-B25/B45 起就带着的
+   （`OriginPolicyTest`、`ReservedAddressBoundaryTest` 读同一目录），本批只是第一次拿注入去撞它。
+7. **框架侧同批改的四处计数**（少改一处就是「登记面比证据面窄」）：
+   `verify_vector_consumers.py::MIN_VECTORS` 22 → 23 与 `CONSUMER_MANIFEST` 新行（端集由实测推导，
+   门禁自己扫出来是 `{AD, CS}`）；`verify_vectors.py::MIN_FILES.vectors` 21 → 23、
+   `MIN_VECTOR_ENTRIES` 375 → **409**（现读总条目）；`tests/python/vector_consumers_test.py` 的
+   精确三元组 `(executable, files)` 14/22 → **15/23** 与 CS∧AD 名单 +1；
+   `README.md` 的下界文案与 `tests/python/doc_floors_test.py` 的 FLOORS（`verify_doc_floors.py`
+   逐条与实树对账）。另有两处**注入锚点失效**同批修好：`doc_floors_test.py` 里
+   `OK.replace("≥375 条目", …)` 与那条 fixture 文案写死了 22/375，改数以后第一条变成
+   静默 no-op（判空气）、第二条会多报两条无关违规——都加了 `assert 锚点在位` 与按标签取实树值，
+   下次再动数就会当场红而不是安静失效。
+8. **§五 Q71 结案 ⇒ `MIN_SYMBOL_ROWS` 4 → 3**（等号棘轮按口径同批改，不做「下界」处理）。
+9. **没做**：Rust 核心不消费这份行向量（核心收的是 JSON 数组，`entry_shape_ok` 已有自己的
+   Rust 用例，行文本解析不在它那一层）；legacy Python 不进向量体系（第 4 点）；
+   Android 的 rejected 计数面仍只有本端用例（第 3 点）；`android/app` 的内置名单装载读的是
+   自己模块的 asset，已在输入面内，无需同条声明。
+10. 复验（各条读自身退出码）：`:broker`＋`:app` 三件套 green（Kotlin 消费用例并入后
+    `ThreatHostFeedTest` 13 条）；`dotnet test --filter FullyQualifiedName~ThreatFeed`
+    **115 通过 0 失败**、单独跑那条 Theory 是 **34 通过**；
+    `verify_vectors` / `verify_vector_consumers` / `verify_doc_floors` / `check_file_sizes` exit 0；
+    台账三条（anchors 现读**符号锚行 3 与登记值一致** / queue status / decision status）、
+    `check_doc_claims`、markdown 两条各 exit 0；全量 `pytest` **1047 passed / 1 skipped**
+    （本批只改了既有 python 用例的期望值，条数不变）。CSV 把 **R9-AD-18** 的 priority 改成
+    「R9-B96 本批已闭」、`primary_reviewed` 保持 yes、批次字段追 §3.96。
+11. **一处自打（ktlint 的 import 布局不是字母序）**：新加的两行 `java.nio.file.*` 我按字典序
+    插在 `org.json.*` 前面，`:broker:ktlintTestSourceSetCheck` 当场判
+    `Imports must be ordered … with "java", "javax", "kotlin" and aliases in the end`
+    ——本仓布局是 **`org.*` 在前、`java.*` 在后**（`OriginPolicyTest.kt:3-11` 就是那份已过 CI 的顺序）。
+    记这条是因为它反直觉：一个人如果把「字典序」当规则，改完还会再犯一次。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）

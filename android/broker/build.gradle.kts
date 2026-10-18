@@ -120,3 +120,13 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.org.json)
 }
+
+// R9-B96（队列 Q71）：把跨端共享向量**声明成测试输入**——这不是洁癖而是实测。
+// 向量里改掉一条期望（本批注入的是 `under_score.example` 那条），
+// `:broker:testDebugUnitTest` 仍判 UP-TO-DATE 直接跳过，于是「两端逐条跑同一份表」
+// 这句话在任何带构建缓存的复跑里是空的；只有加 `--rerun` 才红。
+// C# 侧没有这个洞：那份向量是 csproj 的 CopyToOutputDirectory 项，文件变更会进增量判定。
+tasks.withType<Test>().configureEach {
+    val vectorsDir = rootProject.projectDir.parentFile.resolve("contracts/vectors")
+    inputs.files(fileTree(vectorsDir) { include("*.json") })
+}
