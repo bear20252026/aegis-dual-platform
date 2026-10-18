@@ -1,0 +1,57 @@
+# runner 预装 Rust 工具链的**自愈**步（R9-B94 / 台账 §3.94）。
+#
+# 起因不是我们的构建红了，是 runner 镜像自己坏了：`dtolnay/rust-toolchain` 报
+# `1.99.0-x86_64-unknown-linux-gnu unchanged - (error reading rustc version)`
+# 接着 `error: missing manifest in toolchain '1.99.0-x86_64-unknown-linux-gnu'`
+# （help 自己写着「this may happen if the toolchain installation was interrupted」）。
+# 实测两次、跨两种触发面，**同一个 commit 的另一条触发面是绿的**：
+# run 39081120142（PR 面，2026-10-18T00:00Z）与 run 39082352047（push 面，00:20Z）——
+# 所以这盏灯读起来像「代码有问题」，而它与代码无关。R9-CS-19 那一课记过：
+# 这类红灯的实际处置若是「重跑一次」，每重跑一次门禁就少一分可信 ⇒ 在源头修掉。
+#
+# 形状取舍（如实写下没选的那条）：
+# · **不抽掉** 10 处 `dtolnay/rust-toolchain` 调用把它们收成一支 composite——那是另一个题目
+#   （要同批改 `rust_toolchain_pin_test.py` 里「workflow 内 `toolchain:` 字面量 ≥9 处」这条
+#   正面控制，还要把 SP-178 的 SHA pin 面挪进动作文件）。本批只加**前置自愈**，
+#   现有 9 处字面量 ⇄ `rust-toolchain.toml` 的同值判据不动，回归面最小。
+# · channel 默认**从 `rust-toolchain.toml` 现读**而不是再传一份字面量：单源已经是那个文件
+#   （第八轮 B7 的口径），这里抄一份就是造出第三个会漂移的地方。只有 nightly 那一个
+#   例外 job 显式传 `channel: nightly`（它本来就由 pin 判据允许并另钉 `RUSTUP_TOOLCHAIN`）。
+# · 判据是**行为**而不是文件存在：`rustc +<channel> --version` 读不出来才重装——
+#   健康的时候这一步几乎零成本，坏的时候正是那句 error 的可观察形态。
+name: 'Rust 工具链自愈（runner 预装缺 manifest 时重装）'
+description: 'Reinstall the pinned Rust toolchain when the runner image copy cannot report its rustc version (observed: "missing manifest in toolchain")'
+inputs:
+  channel:
+    description: '要自愈的 rustup channel；留空则现读 rust-toolchain.toml 的 channel（单源）'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: 预装工具链读不出 rustc version 就重装（否则下一步必红）
+      shell: bash
+      # 走 env 而不是把 `${{ inputs.channel }}` 直接展开进脚本体——与 R9-CI-2 那条
+      # 「in-run ${{ }}」同一口径：动作输入进 bash 之前先变成环境变量，脚本里只见变量。
+      env:
+        HEAL_CHANNEL: ${{ inputs.channel }}
+      run: |
+        channel="$HEAL_CHANNEL"
+        if [ -z "$channel" ]; then
+          channel=$(sed -ne 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml)
+        fi
+        if [ -z "$channel" ]; then
+          echo "::error::读不到 channel（rust-toolchain.toml 缺失或 channel 键不在）——自愈步不静默放行"
+          exit 1
+        fi
+        if rustc +"$channel" --version >/dev/null 2>&1; then
+          echo "预装的 $channel 可用，无需重装"
+          exit 0
+        fi
+        echo "::notice::runner 预装的 $channel 读不出 rustc version（missing manifest 形状）⇒ 重装"
+        rustup_home=$(rustup show home 2>/dev/null || echo "${RUSTUP_HOME:-$HOME/.rustup}")
+        rm -rf "$rustup_home"/toolchains/"$channel"-*
+        rustup toolchain install "$channel" --no-self-update
+        # 组件仍由下一步的 dtolnay/rust-toolchain 负责（它按 `components` 输入装齐）；
+        # 这里只保证「这个 channel 能被 rustc 读出来」，不发明第二套组件口径。
+        rustc +"$channel" --version
