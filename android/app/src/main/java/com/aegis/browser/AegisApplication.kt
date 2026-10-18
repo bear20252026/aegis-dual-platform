@@ -24,10 +24,14 @@ class AegisApplication : Application() {
         // REQUIRE_NATIVE_POLICY_CORE=true 时的 JNA Native.load dlopen），
         // 冷启动首帧被同步原生加载拖住。后台线程提前触发 lazy 初始化
         // （synchronized 惰性线程安全），主线程首消费退化为已初始化字段读取。
+        // R9-B95：同一条线程顺手发布内置威胁 host 名单——它要读 asset 并跨 JNI 灌核心，
+        // 放主线程就是给冷启动加一次同步跨界；失败只留痕，不影响启动
+        // （核心桥缺席时名单本就该是「未发布」，导航判定按既往空名单放行）。
         Thread(
             {
                 try {
                     broker.toString()
+                    BuiltInThreatHosts.publish(this, broker)
                 } catch (expected: RuntimeException) {
                     // 预热失败不阻塞启动——正式消费点会再次初始化并按其
                     // fail-closed 语义处理（此处仅记录）
