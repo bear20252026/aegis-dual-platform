@@ -5066,6 +5066,15 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    否则表会开始收藏备选方案，而那张表唯一的价值就是「读它的人知道还差什么」。
    重启条件：哪天需要一个「告警状态本身」的判据（例如「出货 classpath 里出现任何 open 告警即红」），
    那时 PAT 才是被挡住的前置。
+9. **本批 PR 面红过一次，红因不在本批**：`supply-chain.yml` 的 `audit` 作业在
+   `dtolnay/rust-toolchain` 那步死于 runner 自己的工具链缓存——`error: missing manifest in toolchain
+   '1.99.0-x86_64-unknown-linux-gnu'`（run 39081120142，00:00:04Z）。同一 commit 的 **push** 面
+   run 39081113193（23:59:59Z，早 5 秒）**成功**，且本批改动全是 Python＋文档、不含任何 Rust 面；
+   回扫最近 60 个 run（全部 workflow）里这句错误**只出现这一条** ⇒ 判为一次性 runner 侧故障。
+   处置＝重跑，**不加**「强制重装工具链」那步：为一次发生的故障写一条永久步骤是猜代价，
+   而 R9-CS-19 那条教训（偶发红变成常态红＝门禁失信）只有在**复发**时才要求我们改判据面。
+   重启条件：同样的 `missing manifest` 再出现第二次，就把它做成常驻形状问题来修（并先确认不是我们
+   钉的 `rust-toolchain.toml` 与 runner 镜像里的预装版本互相咬）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）
