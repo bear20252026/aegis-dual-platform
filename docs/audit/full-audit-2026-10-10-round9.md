@@ -5231,12 +5231,21 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    一定是白名单字符"这种会被调用方打破的前提），测试改成「`JSONArray` 把载荷读回来逐条比对」＋
    「每批按 UTF-8 字节断言 ≤ `MAX_BATCH_BYTES`」。旧断言 `payload.length <= CHUNK_PAYLOAD_BYTES`
    按 char 判，正是同一处算错的表现，一并改真——这是「判据的口径跟着实现的错口径写」的实例。
-7. **新增 32 条用例**（四个新文件）：`ThreatHostFeedTest` 12 条（分支表从 C# `::ParseFeedLine` 逐条推，
+7. **新增 34 条用例**（四个新文件）：`ThreatHostFeedTest` 12 条（分支表从 C# `::ParseFeedLine` 逐条推，
    含新加的两把转义/字节刀）、`CoreDenylistPushTest` 12 条（`FakeCore` 记 `(batchSize, mode)`，
    钉三态与「第 N 批断掉不发提交」「提交被拒不算发布」「空名单出 `Published(0/0)`」）、
    `AbiSurfaceAlignmentTest` 4 条（Kotlin 声明符号集 ⇄ Rust `FROZEN_EXPORTS` **双向**，
-   加上 `MODE_*`/`MAX_*` 跨语言取值）、`BuiltInThreatHostsTest` 4 条（asset 路径常量 ⇄ 仓库真文件、
-   出厂名单为空是决定、非空清单同一口径出多批）。
+   加上 `MODE_*`/`MAX_*` 跨语言取值）、`BuiltInThreatHostsTest` 6 条（asset 路径常量 ⇄ 仓库真文件、
+   出厂名单为空是决定、非空清单同一口径出多批，**加接线锚两条**）。
+   接线那两条是本批最后补上的一处自留缺口：装载调用写在 `AegisApplication` 的预热线程里，
+   而**删掉那一行不会有任何用例变红**（R6-26／R7-CS2-04 同族），所以补
+   `::theLoaderIsWiredIntoTheExistingPrewarmThread`（按 `withoutComments()` 剔注释后判调用点存在且
+   **恰好一处**）＋`::theWiringAnchorCanFail`（正面控制：同一计数面在「只在注释里」必须 0、
+   在「真调用」必须 1——没有这条，锚会在一个被注释掉的接线上绿）。
+   **真树注入复验**（不只内存对照）：删掉 `AegisApplication` 那一行调用 ⇒
+   `:app:testDebugUnitTest --tests "*BuiltInThreatHostsTest*"` 报 **6 tests completed, 1 failed**，
+   红的正是 `theLoaderIsWiredIntoTheExistingPrewarmThread`；注入脚本先 `assert 锚点在位`
+   （「没注射成功」与「钉子没红」必须分开打印），还原后 `git diff --numstat` 为空＝逐字节回到 HEAD。
 8. **刻意没做**：联网取源、缓存原子替换、签名/版本/防回滚、断网保不保留最后一份——都要先定
    「源从哪来、谁签」⇒ §4.0 表 D3 仍是用户的一句话；出厂内置名单**为空**并由用例钉住
    （`android/app/src/main/assets/threat/hosts.txt` 头注写明加条目必须同批改那条断言）；
@@ -5251,9 +5260,9 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    「计数抓不到的三面」，本条属于那一类，写明而不是假装已解决。
 9. **复验**（读被测命令自身退出码，不用管道尾巴）：`:broker` 与 `:app` 的 ktlintCheck / detekt /
    testDebugUnitTest 六项 **BUILD SUCCESSFUL、exit 0**；测试发现数不靠「绿」推断——从
-   `test-results` 的 XML 逐份累加得 Android 两侧共 **460 条用例、0 失败 0 错误**，其中本批四个新 Suite
-   实跑 32 条（`ThreatHostFeedTest` 12／`CoreDenylistPushTest` 12／`AbiSurfaceAlignmentTest` 4／
-   `BuiltInThreatHostsTest` 4）。python 侧全量 `pytest`（口径 `pyproject.toml` 的 testpaths =
+   `test-results` 的 XML 逐份累加得 Android 两侧共 **462 条用例、0 失败 0 错误**，其中本批四个新 Suite
+   实跑 34 条（`ThreatHostFeedTest` 12／`CoreDenylistPushTest` 12／`AbiSurfaceAlignmentTest` 4／
+   `BuiltInThreatHostsTest` 6）。python 侧全量 `pytest`（口径 `pyproject.toml` 的 testpaths =
    `tests/python` ＋ `agent/tests`）**1047 passed / 1 skipped**，`active_tree_gates ruff`／`bandit` 各 OK；
    `verify_ledger_anchors`（符号锚行 4 与登记值一致）/
    `verify_ledger_queue_status` / `verify_ledger_decision_status` / `check_doc_claims` /

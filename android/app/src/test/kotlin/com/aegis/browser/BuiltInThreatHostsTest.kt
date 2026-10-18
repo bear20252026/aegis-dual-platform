@@ -61,6 +61,30 @@ class BuiltInThreatHostsTest {
         assertTrue(ThreatHostFeed.batches(parsed.hosts).size > 1)
     }
 
+    @Test
+    fun theLoaderIsWiredIntoTheExistingPrewarmThread() {
+        // 「机制建了但没人接线」是这个仓反复记过的失效形态：删掉 AegisApplication 里那一行，
+        // 上面四条用例全都还绿，而名单装载静默消失。这条锚判的是**调用点存在于代码里**，
+        // 所以剔注释是必须的（注释里写着同一个调用形态时不许算命中）。
+        val source = repoFile(AEGIS_APPLICATION_UNDER_ROOT).readText().withoutComments()
+        assertTrue("AegisApplication 不再调用内置名单装载（$CALL）——链在但没人踩", source.contains(CALL))
+        assertEquals("装载调用只能有一处", 1L, occurrences(source, CALL).toLong())
+    }
+
+    @Test
+    fun theWiringAnchorCanFail() {
+        // 正面控制：同一个计数面在「只有注释里有」时必须 0、在「真调用」时必须 1——
+        // 没有这一条，上面那条断言在一个被注释掉的接线上也绿。
+        val commentedOnly = "        // $CALL\n        broker.toString()\n"
+        assertEquals(0L, occurrences(commentedOnly.withoutComments(), CALL).toLong())
+        assertEquals(1L, occurrences("Thread({ $CALL })", CALL).toLong())
+    }
+
+    private fun occurrences(
+        text: String,
+        needle: String,
+    ): Int = text.split(needle).size - 1
+
     private fun repoFile(relative: String): File {
         var dir: File? = File(System.getProperty("user.dir")).absoluteFile
         repeat(8) {
@@ -76,5 +100,7 @@ class BuiltInThreatHostsTest {
     private companion object {
         const val THREAT_ASSET_PATH = "threat/hosts.txt"
         const val ASSET_UNDER_ROOT = "android/app/src/main/assets/threat/hosts.txt"
+        const val AEGIS_APPLICATION_UNDER_ROOT = "android/app/src/main/java/com/aegis/browser/AegisApplication.kt"
+        const val CALL = "BuiltInThreatHosts.publish(this, broker)"
     }
 }
