@@ -1,0 +1,188 @@
+{
+  "description": "威胁名单**单行文本 → 规范 host** 的跨端语义向量（R9-B96 / 第九轮队列 Q71）。锁的是「同一份订阅源文本在 Windows 与 Android 必须解析出同一个集合」这件事——此前 C# `ThreatFeed.cs::ParseFeedLine`、Kotlin `ThreatHostFeed.kt::parseLine`、legacy `threat_feed.py::parse_feed_line` 三份各写各的，一致性只由注释与人工对照分支表维持。语义：expected=valid ⇒ 该行产出的 host 必须逐字符等于 host 字段；expected=deny ⇒ 该行不产出条目（host 字段必须缺席，两个消费者都判这个配对，写错形态不会静默通过）。注释/空白行与坏条目在**这一层**同为 deny——「是不是看着像条目」的区分属于端侧计数面（Android 的 parse() 计 rejected 数，C# 的调用方丢弃 null 不计数），向量不锁它，因为锁了就会有一条在某一端断不真（R9-B42 那一课）。执行者两端：C# ThreatFeedLineVectorTests（Aegis.Windows.Core.Tests）与 Kotlin ThreatHostFeedTest（:broker，无 Robolectric）。legacy Python **不作执行者**：实测它没有字符白名单/空段/首尾点/长度这四刀，under_score.example、*wildcard.example、.evil.example、a..b.example 全被放行；归档栈按 SP-154 是可选对账端，把它拉进向量只会得到一张没人执行的表。形态取舍：三刀在端侧先拒（Android 的形状），Windows 侧同批补齐——核心 entry_shape_ok 本来就拒这些条目，最终生效集合不变，变的是「谁先拒」与留痕里的计数口径。",
+  "vectors": [
+    {
+      "line": "example.com",
+      "expected": "valid",
+      "host": "example.com"
+    },
+    {
+      "line": "||ads.example.com^",
+      "expected": "valid",
+      "host": "ads.example.com",
+      "note": "AdBlock 主机语法：|| 前缀与 ^ 后缀"
+    },
+    {
+      "line": "||localhost^",
+      "expected": "valid",
+      "host": "localhost",
+      "note": "localhost 是无点唯一的放行例外"
+    },
+    {
+      "line": "localhost",
+      "expected": "valid",
+      "host": "localhost"
+    },
+    {
+      "line": "||evil.example:8080^",
+      "expected": "valid",
+      "host": "evil.example",
+      "note": "端口剥离：带端口条目永不命中"
+    },
+    {
+      "line": "https://evil.example/path?x=1",
+      "expected": "valid",
+      "host": "evil.example",
+      "note": "协议与路径残留"
+    },
+    {
+      "line": "Tracker.IO:8080",
+      "expected": "valid",
+      "host": "tracker.io",
+      "note": "大小写与端口同时归一"
+    },
+    {
+      "line": "  spaced.example  ",
+      "expected": "valid",
+      "host": "spaced.example"
+    },
+    {
+      "line": "HTTP://UPPER.example/Path",
+      "expected": "valid",
+      "host": "upper.example",
+      "note": "scheme 判定只看 :// 而不问协议名"
+    },
+    {
+      "line": "ftp://files.example/x",
+      "expected": "valid",
+      "host": "files.example",
+      "note": "非 http scheme 同样被剥（剥法是按 :// 找）"
+    },
+    {
+      "line": "evil.example:80/path",
+      "expected": "valid",
+      "host": "evil.example",
+      "note": "端口在路径之后被剥"
+    },
+    {
+      "line": "||sub.domain.example^/c",
+      "expected": "valid",
+      "host": "sub.domain.example",
+      "note": "先剥协议才露出路径分隔符；第二个 ^ 在剥完路径之后才消失"
+    },
+    {
+      "line": "advers.example^\t",
+      "expected": "valid",
+      "host": "advers.example",
+      "note": "行尾制表符由 trim 承担"
+    },
+    {
+      "line": "foo-bar.example",
+      "expected": "valid",
+      "host": "foo-bar.example"
+    },
+    {
+      "line": "-leading.example",
+      "expected": "valid",
+      "host": "-leading.example",
+      "note": "首尾连字符核心不拒——这里不发明额外的严格"
+    },
+    {
+      "line": "trailing-.example",
+      "expected": "valid",
+      "host": "trailing-.example"
+    },
+    {
+      "line": "xn--80ak6aa92e.com",
+      "expected": "valid",
+      "host": "xn--80ak6aa92e.com",
+      "note": "punycode 是纯 ASCII 形态，照常入表"
+    },
+    {
+      "line": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "expected": "valid",
+      "host": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "note": "长度边界内侧：整条 256 字节 = 核心 MAX_ENTRY_BYTES 的上界"
+    },
+    {
+      "line": "tracker.example.",
+      "expected": "deny",
+      "note": "尾点：核心 entry_shape_ok 的三刀（首尾点/空段/长度）——端侧先拒还是核心拒，最终集合相同，区别只在计数口径（Q71）"
+    },
+    {
+      "line": ".evil.example",
+      "expected": "deny",
+      "note": "前导点：核心 entry_shape_ok 的三刀（首尾点/空段/长度）——端侧先拒还是核心拒，最终集合相同，区别只在计数口径（Q71）；legacy Python 归档栈在这一行放行（实测：它没有字符白名单/空段那一刀），不作本向量的执行者"
+    },
+    {
+      "line": "a..b.example",
+      "expected": "deny",
+      "note": "空段：核心 entry_shape_ok 的三刀（首尾点/空段/长度）——端侧先拒还是核心拒，最终集合相同，区别只在计数口径（Q71）；legacy Python 归档栈在这一行放行（实测：它没有字符白名单/空段那一刀），不作本向量的执行者"
+    },
+    {
+      "line": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example",
+      "expected": "deny",
+      "note": "长度边界外侧：257 字节"
+    },
+    {
+      "line": "under_score.example",
+      "expected": "deny",
+      "note": "字符白名单不含下划线；legacy Python 归档栈在这一行放行（实测：它没有字符白名单/空段那一刀），不作本向量的执行者"
+    },
+    {
+      "line": "*wildcard.example",
+      "expected": "deny",
+      "note": "通配残留拒绝；legacy Python 归档栈在这一行放行（实测：它没有字符白名单/空段那一刀），不作本向量的执行者"
+    },
+    {
+      "line": "@@double.example",
+      "expected": "deny",
+      "note": "@"
+    },
+    {
+      "line": "user@evil.example",
+      "expected": "deny",
+      "note": "userinfo 残留拒绝"
+    },
+    {
+      "line": "||[::1]^",
+      "expected": "deny",
+      "note": "IPv6 字面量含冒号与方括号：剥完端口只剩 [ 开头的空段"
+    },
+    {
+      "line": "例え.テスト",
+      "expected": "deny",
+      "note": "非 ASCII（IDN）——本仓 IDN 口径是端侧不解析"
+    },
+    {
+      "line": "no-dot-hostname",
+      "expected": "deny",
+      "note": "无点且非 localhost"
+    },
+    {
+      "line": "# comment",
+      "expected": "deny",
+      "note": "注释行在这一层与坏条目同为不产出；两态区分属于端侧计数面"
+    },
+    {
+      "line": "! Adblock metadata",
+      "expected": "deny",
+      "note": "元数据行同上"
+    },
+    {
+      "line": "",
+      "expected": "deny",
+      "note": "空行"
+    },
+    {
+      "line": "   ",
+      "expected": "deny",
+      "note": "只有空白"
+    },
+    {
+      "line": "||^",
+      "expected": "deny",
+      "note": "剥完装饰是空串"
+    }
+  ]
+}

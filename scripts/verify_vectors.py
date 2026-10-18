@@ -37,9 +37,10 @@ OVERSIZE_ANCHOR = 'oversize-url-limit-test'
 
 # R7-TOOL-04（第七轮）：契约面数量下界（实测 schemas 7 份 / vectors 21 份——
 # R9-B35 加 release/version/semver-form 六份）。
+# R9-B35 起 vectors 面到 22 份，R9-B96（队列 Q71）加 threat-feed-line 一份 ⇒ 现读 23 份。
 # 目录缺失或整体清空此前是静默通过——「删掉一个目录名」即可让本门禁零判定。
 # 下界不是「越多越好」，它只保证减面必须是**有意识**的动作。
-MIN_FILES = {'schemas': 7, 'vectors': 21}
+MIN_FILES = {'schemas': 7, 'vectors': 23}
 
 # R8-PY-02（第八轮审计 2026-10-04）：MIN_FILES 只数**文件**，把任一 vectors 数组
 # 清空（文件在场）即可让全部循环零次执行、门禁仍绿——「删文件」被堵住了，「改内容
@@ -60,7 +61,9 @@ MIN_FILES = {'schemas': 7, 'vectors': 21}
 # R9-B75（2026-10-16）：372 → 375，同表 +3 条大小写叠加形态（`0XA9FEA9FE` 裸/带路径/带
 # userinfo）——本批要量的正是「裸 authority 不转小写会不会漏判」这条推断，现表 124 条
 # （60 deny／64 allow）。
-MIN_VECTOR_ENTRIES = 375
+# R9-B96（2026-10-18，队列 Q71）：375 → 409，新增 threat-feed-line.json 34 条
+# （18 valid／16 deny）——威胁名单「一行文本 → 规范 host」的 CS+AD 契约表。
+MIN_VECTOR_ENTRIES = 409
 
 # R9-B59（§四 第 11 项 ② 与 Q21 是同一次定稿）：两份原生 C-ABI 向量的**信封 + 分区**词表。
 #

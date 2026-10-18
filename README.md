@@ -165,7 +165,7 @@ docs/       ADR/threat-model/runbooks/product/audit（蓝图目标树+全仓审�
   都在让这些数字过期，而它们从没被任何门禁判过（`check_doc_claims.py` 只判 workflow 计数）。
   **机器判定的只有下界**：`scripts/assert_test_counts.py`（dotnet 发现数 Core ≥700 /
   Broker ≥160，两个值取自 workflow 调用点）、`scripts/verify_vector_consumers.py`
-  （契约向量 ≥22 份）与 `scripts/verify_vectors.py`（向量条目 ≥375）；各端实际条数
+  （契约向量 ≥23 份）与 `scripts/verify_vectors.py`（向量条目 ≥409）；各端实际条数
   看 CI 日志现算，跑法在 [CLAUDE.md](CLAUDE.md) 的本地验证段。这一条此前抄的是 21 份 /
   222 条目、且份数错挂在 `verify_vectors.py` 名下——三个数过期加一处错归属，而
   `check_doc_claims.py` 只认「N 个 workflow」所以全绿；R9-B82 起由

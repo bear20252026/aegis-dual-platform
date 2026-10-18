@@ -57,8 +57,8 @@ def test_registered_manifest_covers_every_vector_file(real):
 
 
 def test_current_coverage_facts_are_measured(real):
-    """实测面（R9-B70 后）：22 份向量 / 14 份有端侧执行者 / 8 份仅 schema 级 /
-    3 份 CS∧AD 同跑——AEG-006 的实证口径。用例名与 docstring 一度写着「11 / 4 / 2」，
+    """实测面（R9-B96 后）：23 份向量 / 15 份有端侧执行者 / 8 份仅 schema 级 /
+    4 份 CS∧AD 同跑——AEG-006 的实证口径。用例名与 docstring 一度写着「11 / 4 / 2」，
     与本文件自己的 assert（13 / 21）不符，是又一处「抄下来的计数」；改名并把三个数
     全部写成实跑值，就是让下一次改动必须同时改这三处。
     """
@@ -68,16 +68,16 @@ def test_current_coverage_facts_are_measured(real):
     schema_only = sorted(name for name, hits in consumers.items() if not hits)
     cross = sorted(name for name, hits in consumers.items()
                    if {"CS", "AD"} <= {vvc.end_of(h) for h in hits})
-    assert (executable, len(vectors)) == (14, 22), f"端侧执行面变了：{executable}/{len(vectors)}"
+    assert (executable, len(vectors)) == (15, 23), f"端侧执行面变了：{executable}/{len(vectors)}"
     assert schema_only == [
         "audit-event-invalid.json", "audit-event-valid.json",
         "capability-invalid.json", "capability-valid.json",
         "release-invalid.json", "release-valid.json",
         "version-invalid.json", "version-valid.json"], f"仅 schema 级的集合变了：{schema_only}"
-    assert cross == ["reserved-address-boundary.json",
+    assert cross == ["reserved-address-boundary.json", "threat-feed-line.json",
                      "url-origin-invalid.json", "url-origin-valid.json"], (
         f"两端同跑的向量变了：{cross}——这正是「跨端同一裁决」的全部支点")
-    assert len(report) == 22
+    assert len(report) == 23
 
 
 def test_url_origin_family_is_a_cross_end_pillar(real):

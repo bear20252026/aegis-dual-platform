@@ -20,13 +20,13 @@ import verify_doc_floors as g
 
 README_TEXT = (ROOT / "README.md").read_text(encoding="utf-8", errors="ignore")
 FLOORS = [
-    ("契约向量份数", "scripts/verify_vector_consumers.py", 22),
-    ("向量条目总数", "scripts/verify_vectors.py", 375),
+    ("契约向量份数", "scripts/verify_vector_consumers.py", 23),
+    ("向量条目总数", "scripts/verify_vectors.py", 409),
     ("dotnet Core 发现数", "scripts/assert_test_counts.py", 700),
     ("dotnet Broker 发现数", "scripts/assert_test_counts.py", 160),
 ]
 OK = ("机器判定的只有下界：`scripts/assert_test_counts.py`（Core ≥700 / Broker ≥160）、"
-      "`scripts/verify_vector_consumers.py`（≥22 份）与 `scripts/verify_vectors.py`（≥375 条目）；"
+      "`scripts/verify_vector_consumers.py`（≥23 份）与 `scripts/verify_vectors.py`（≥409 条目）；"
       "各端实际条数看 CI 日志。\n- 下一条 bullet\n")
 
 
@@ -36,7 +36,7 @@ def test_real_readme_matches_real_tree() -> None:
     assert g.run() == 0
     # 正面控制：判定面非空，且值确实来自实树常量而不是 fixture
     assert len(floors) >= 4, floors
-    assert {v for _, _, v in floors} == {22, 160, 375, 700}, floors
+    assert {v for _, _, v in floors} == {23, 160, 409, 700}, floors
 
 
 def test_call_sites_are_read_structurally() -> None:
@@ -49,7 +49,9 @@ def test_call_sites_are_read_structurally() -> None:
 
 
 def test_stale_number_is_reported() -> None:
-    found = g.violations(OK.replace("≥375 条目", "≥222 条目"), FLOORS)
+    stale = OK.replace("≥409 条目", "≥222 条目")
+    assert stale != OK, "注入锚点没命中——OK 里那条文案改了，这条用例就必须同改（否则它在判空气）"
+    found = g.violations(stale, FLOORS)
     assert len(found) == 1 and "scripts/verify_vectors.py" in found[0], found
 
 
@@ -68,8 +70,13 @@ def test_floor_under_a_script_that_owns_none_is_reported() -> None:
     """第三向：数字挂在一个实树没有任何下界的脚本名下（改脚本时把常量搬走就是这种形态）。"""
     text = ("机器判定的只有下界：`scripts/check_doc_claims.py`（≥500 条目）与 "
             "`scripts/assert_test_counts.py`（Core ≥700 / Broker ≥160）、"
-            "`scripts/verify_vector_consumers.py`（≥22 份）与 `scripts/verify_vectors.py`（≥375 条目）；其余。\n- 下一条\n")
-    found = g.violations(text, g.real_floors())
+            "`scripts/verify_vector_consumers.py`（≥23 份）与 `scripts/verify_vectors.py`（≥409 条目）；其余。\n- 下一条\n")
+    real = g.real_floors()
+    by_label = {label: value for label, _, value in real}
+    # 这条判的是「归属错」，所以其余数字必须与实树一致——否则多出来的「数不对」会淹掉那一条真违规
+    assert f"≥{by_label['契约向量份数']} 份" in text, real
+    assert f"≥{by_label['向量条目总数']} 条目" in text, real
+    found = g.violations(text, real)
     assert len(found) == 1 and "没有任何下界归它" in found[0], found
 
 

@@ -1,11 +1,14 @@
 package com.aegis.broker
 
 import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * 内置/外部威胁名单文本的解析与切批（R9-B95）。
@@ -124,8 +127,51 @@ class ThreatHostFeedTest {
         assertEquals(1, ThreatHostFeed.batches(listOf("one.example", "two.example")).size)
     }
 
+    // ---------- R9-B96（队列 Q71）：跨端共享向量消费 ----------
+
+    @Test
+    fun sharedFeedLineVectorParsesToTheSameVerdictOnBothEnds() {
+        // 这份向量判的是「同一行文本在两端给出同一个结论」——Android 侧本批此前只有
+        // 从 C# 分支表推出来的手写用例，那份表能守住 Android 自己，守不住两端的漂移。
+        val vectors = loadSharedVectors(VECTOR_FILE)
+        assertTrue("向量条目数塌缩（${vectors.length()} 条）", vectors.length() >= MIN_VECTOR_ITEMS)
+        for (index in 0 until vectors.length()) {
+            assertOneVector(vectors.getJSONObject(index))
+        }
+    }
+
+    /** 单条向量的三态判定：`valid` 必须带 `host` 并逐字符相等，`deny` 必须不带 `host` 且解析为空。 */
+    private fun assertOneVector(item: JSONObject) {
+        val line = item.getString("line")
+        val expected = item.getString("expected")
+        val host = ThreatHostFeed.parseLine(line)
+        if (expected == "valid") {
+            // 配对判据不是洁癖：把 host 字段从 valid 条目上删掉，断言会退化成「解析出点什么就行」
+            assertTrue("valid 条目必须带 host 字段：$line", item.has("host"))
+            assertEquals("Android 与共享向量不一致：$line", item.getString("host"), host)
+        } else if (expected == "deny") {
+            assertFalse("deny 条目不得带 host 字段：$line", item.has("host"))
+            assertNull("Android 与共享向量不一致（本行不该产出条目）：$line", host)
+        } else {
+            throw AssertionError("向量里出现本文件没有定义的 expected=$expected：$line")
+        }
+    }
+
+    /** 仓库根 `contracts/vectors` 相对定位（与 `OriginPolicyTest.loadSharedVectors` 同一形状）。 */
+    private fun loadSharedVectors(fileName: String): JSONArray {
+        val path =
+            generateSequence(Path.of(System.getProperty("user.dir")).toAbsolutePath()) { it.parent }
+                .take(8)
+                .map { it.resolve("contracts").resolve("vectors").resolve(fileName) }
+                .firstOrNull { Files.isRegularFile(it) }
+                ?: error("找不到共享向量 $fileName（相对仓库根定位失败）")
+        return JSONObject(String(Files.readAllBytes(path), Charsets.UTF_8)).getJSONArray("vectors")
+    }
+
     private companion object {
         const val HOST_COUNT = 9_000
         const val NASTY_COUNT = 4_000
+        const val VECTOR_FILE = "threat-feed-line.json"
+        const val MIN_VECTOR_ITEMS = 30
     }
 }

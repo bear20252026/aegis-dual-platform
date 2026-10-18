@@ -78,6 +78,12 @@ public static class ThreatFeedUpdater
 {
     private const long MaxBytes = 5 * 1024 * 1024;
 
+    /// <summary>单条名单条目的字节上限——与核心 `denylist::MAX_ENTRY_BYTES` 同值
+    /// （R9-B96 把它也接到端侧过滤；跨语言同值由两侧的向量消费与核心用例各自钉）。
+    /// 越界的「host」不可能等于任何被规范化的导航 host（域名上限 253），
+    /// 收下即制造一条永不命中的死条目。</summary>
+    private const int MaxEntryBytes = 256;
+
     /// <summary>校验订阅源地址：仅 https（file:// 需显式离线开关）。非法返回 null。</summary>
     public static string? ValidateFeedUrl(string? feedUrl, bool allowFileForOfflineTest = false)
     {
@@ -92,8 +98,18 @@ public static class ThreatFeedUpdater
         return null;
     }
 
-    /// <summary>解析订阅源一行文本为域名；无效返回 null（Python parse_feed_line
-    /// 同语义）。带端口/通配/非主机字符的条目拒绝（此前原样入表永不命中）。</summary>
+    /// <summary>解析订阅源一行文本为域名；无效返回 null。带端口/通配/非主机字符的
+    /// 条目拒绝（此前原样入表永不命中）。
+    ///
+    /// R9-B96（队列 Q71）改两处陈述与实现：
+    /// ①旧注释写「Python parse_feed_line 同语义」**不成立**——实测 legacy 那份没有字符
+    ///   白名单/空段/首尾点/长度这四刀，`under_score.example`、`*wildcard.example`、
+    ///   `.evil.example`、`a..b.example` 它全都放行（归档栈按 SP-154 是可选对账端，
+    ///   因此共享向量 `contracts/vectors/threat-feed-line.json` 的执行者只有本端与 Android）。
+    /// ②核心的三刀（`denylist.rs::entry_shape_ok`：长度 ≤256、无首尾点、无空段）此前只在
+    ///   核心与 Android 端侧存在：本端把这些条目**推给核心再由核心拒**，于是同一份源在
+    ///   两端得到有效集合相同、可观测计数却两种（核心侧 `accepted<input` vs 端侧「被拒条目数」）。
+    ///   现在两端都在端侧先拒，逐条由那份共享向量钉住。</summary>
     public static string? ParseFeedLine(string line)
     {
         var text = line.Trim();
@@ -117,16 +133,21 @@ public static class ThreatFeedUpdater
             text = text[..colon];
         if (text.Length == 0)
             return null;
-        if (!text.Contains('.') && text != "localhost")
-            return null;
-        // 主机字符白名单（字母/数字/连字符/点）——通配残留等非法形态拒绝
-        foreach (var ch in text)
-        {
-            if (!(char.IsAsciiLetterOrDigit(ch) || ch == '-' || ch == '.') && text != "localhost")
-                return null;
-        }
-        return text;
+        // localhost 是无点唯一的放行例外（与核心同口径：它不要求含点）
+        if (text == "localhost")
+            return text;
+        return text.Contains('.') && EntryShapeOk(text) ? text : null;
     }
+
+    /// <summary>名单条目的形态验收——与核心 `entry_shape_ok`
+    /// （core/rust-policy-core/src/ffi/broker/denylist.rs）逐条同判。
+    /// 长度那一刀按字符数：字符白名单已把非 ASCII 挡在外面，两者在剩下的形态里等值。</summary>
+    private static bool EntryShapeOk(string host) =>
+        !host.StartsWith('.')
+        && !host.EndsWith('.')
+        && !host.Contains("..", StringComparison.Ordinal)
+        && host.Length <= MaxEntryBytes
+        && host.All(ch => char.IsAsciiLetterOrDigit(ch) || ch == '-' || ch == '.');
 
     /// <summary>拉取订阅源并写入缓存文件（原子替换）。失败抛异常由调用方留痕。
     /// 降级防护：最终响应 URL 必须仍为 https（重定向到 http 即拒绝——
