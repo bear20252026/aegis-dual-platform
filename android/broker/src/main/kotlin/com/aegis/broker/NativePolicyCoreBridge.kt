@@ -3,7 +3,6 @@ package com.aegis.broker
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Pointer
-import org.json.JSONObject
 import kotlin.time.Instant
 
 /**
@@ -118,27 +117,6 @@ class NativePolicyCoreBridge private constructor(
     }
 
     /**
-     * AD-144（审计 2026-09-23 清单·A6 批）：AuthorizedAction → 协议 JSON
-     * 映射抽具名函数——原手工 JSONObject 链内联在 consumeNavigation 调用点，
-     * 字段面与 parseDecisionJson 的 allow.action 解析面靠人工对齐；抽函数后
-     * 映射点单一可读，字段增减只改此一处。
-     */
-    private fun actionToJson(action: AuthorizedAction): String =
-        JSONObject()
-            .put("session_id", action.sessionId)
-            .put("tab_id", action.tabId)
-            .put("document_generation", action.documentGeneration)
-            .put("origin", action.origin)
-            .put("method", action.method)
-            .put("canonical_parameters", action.canonicalParameters)
-            .put("scope", action.scope)
-            .put("expires_at", action.expiresAt.epochSeconds)
-            .put("nonce", action.nonce)
-            .put("policy_version", action.policyVersion)
-            .put("explanation", action.explanation)
-            .toString()
-
-    /**
      * 释放 Rust broker 指针。
      *
      * AD-236（2026-09-26 审计）：生产接线中本桥随 AndroidBroker 存活至进程
@@ -179,6 +157,58 @@ class NativePolicyCoreBridge private constructor(
         } catch (e: Exception) {
             android.util.Log.e("AegisBroker", "native 决策异常: ${e.javaClass.simpleName}: ${e.message}")
             null
+        }
+
+    /**
+     * 把威胁 host 快照注入原生核心黑名单（R9-B95 / 队列 Q51 的机制半边）。
+     *
+     * 空集合 = 清空并放行（核心侧默认绝不 deny-all），因此「内置名单为空」这一步
+     * 与既往行为逐字一致——但注入仍然要发生：`Published(0/0)` 与 `NotPublished`
+     * 的分别是「链在跑、名单为空」与「链断了」，前者才是可审计的状态。
+     *
+     * 生命周期：本桥的 `close()` 全工程零调用点（AD-236 记的进程级 broker 生命周期），
+     * 故此处不需要租约；**若将来接 close，必须与本方法同批改**（Windows 侧的
+     * TryAcquireLease 就是为这件事立的）。返回结果由调用方留痕，本函数不吞任何失败。
+     */
+    fun updateHostDenylist(hosts: List<String>): CoreDenylistUpdateResult {
+        val batches = ThreatHostFeed.batches(hosts)
+        return CoreDenylistPush.drive(batches, hosts.size) { batch, mode ->
+            invokeDenylist(ThreatHostFeed.encode(batch), mode, batch.size)
+        }
+    }
+
+    /** 单批注入：应答解析成 `Ack`；符号缺席/异常一律降级为 NotPublished 的短码，
+     * 不抛给导航路径（旧 .so 没有这个导出时，出货 APK 不得因此变砖）。 */
+    @Suppress("TooGenericExceptionCaught")
+    private fun invokeDenylist(
+        payload: String,
+        mode: Int,
+        offered: Int,
+    ): CoreDenylistPush.Ack =
+        try {
+            val response =
+                native
+                    .aegis_policy_core_broker_update_host_denylist_json(broker, payload, mode)
+                    ?: return CoreDenylistPush.Ack(
+                        false,
+                        0,
+                        offered,
+                        false,
+                        false,
+                        false,
+                        "native_denylist_null_response",
+                    )
+            try {
+                CoreDenylistPush.parseAck(response.getString(0, "UTF-8"), offered)
+            } finally {
+                native.aegis_policy_core_string_free(response)
+            }
+        } catch (e: LinkageError) {
+            android.util.Log.e("AegisBroker", "native 黑名单注入链接失败: ${e.javaClass.simpleName}")
+            CoreDenylistPush.Ack(false, 0, offered, false, false, false, "native_denylist_unavailable")
+        } catch (e: Exception) {
+            android.util.Log.e("AegisBroker", "native 黑名单注入异常: ${e.javaClass.simpleName}")
+            CoreDenylistPush.Ack(false, 0, offered, false, false, false, "native_denylist_call_failed")
         }
 
     // JNI 绑定函数名必须与 C ABI 符号逐字一致（snake_case）——豁免命名规范
@@ -248,6 +278,16 @@ class NativePolicyCoreBridge private constructor(
             rawUrl: String,
             scope: String,
         ): Pointer?
+
+        // 审计第六轮遗留缺口 / R9-B95 的 Android 半边：第三参在 v4 起是档位
+        // （0 追加 / 1 整批替换 / 2 开暂存会话 / 3 提交），取值域与核心
+        // ffi/broker/denylist.rs 的 MODE_* 逐值对应，由 AbiSurfaceAlignmentTest 对账。
+        @Suppress("FunctionNaming") // C ABI 符号名逐字映射（JNA 按方法名找符号），与其余导出同口径
+        fun aegis_policy_core_broker_update_host_denylist_json(
+            broker: Pointer,
+            hostsJson: String,
+            mode: Int,
+        ): Pointer?
     }
 
     companion object {
@@ -275,58 +315,8 @@ class NativePolicyCoreBridge private constructor(
                 null
             }
 
-        internal fun parseDecisionJson(payload: String): Decision {
-            val root = JSONObject(payload)
-            check(root.getInt("abi_version") == EXPECTED_C_ABI_VERSION) { "native ABI response mismatch" }
-            return when (root.getString("decision")) {
-                "allow" -> {
-                    val action = root.getJSONObject("action")
-                    Decision.Allow(
-                        AuthorizedAction(
-                            sessionId = action.getString("session_id"),
-                            tabId = action.getString("tab_id"),
-                            documentGeneration = action.getLong("document_generation"),
-                            origin = action.getString("origin"),
-                            method = action.getString("method"),
-                            canonicalParameters = action.getString("canonical_parameters"),
-                            scope = action.getString("scope"),
-                            expiresAt = Instant.fromEpochSeconds(action.getLong("expires_at")),
-                            nonce = action.getString("nonce"),
-                            policyVersion = action.getString("policy_version"),
-                            explanation = action.optString("explanation", ""),
-                        ),
-                    )
-                }
-
-                "deny" -> {
-                    val reason = root.getJSONObject("reason")
-                    Decision.Deny(
-                        DenyReason(
-                            code = reason.getString("code"),
-                            detail = reason.getString("detail"),
-                            explanation = reason.optString("explanation", ""),
-                        ),
-                    )
-                }
-
-                "require_confirmation" -> {
-                    val request = root.getJSONObject("request")
-                    Decision.RequireConfirmation(
-                        ApprovalRequest(
-                            origin = request.getString("origin"),
-                            method = request.getString("method"),
-                            path = request.getString("path"),
-                            scope = request.getString("scope"),
-                            expiresAt = Instant.fromEpochSeconds(request.getLong("expires_at")),
-                            nonce = request.getString("nonce"),
-                        ),
-                    )
-                }
-
-                else -> {
-                    throw IllegalArgumentException("unsupported native decision")
-                }
-            }
-        }
+        /** 编解码已外移到 `NativePolicyCoreCodec.kt`（行数红线只许减不许增）；
+         *  保留这条委托是为了引用面逐字不变（AndroidBrokerTest 仍按类名调用）。 */
+        internal fun parseDecisionJson(payload: String): Decision = parseNativeDecisionJson(payload)
     }
 }

@@ -651,7 +651,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 | --- | --- | --- | --- | --- | --- |
 | D1 | WebView2 SDK bump（现行钉版 1.0.2903.40，runner 与本机 Runtime 已差一个两周节奏） | 待定稿 | - | 升 SDK 改的是出货制品的运行面（ESM 反射探测在现行钉版下恒为拿不到，升级才会变），属产品行为变更而不是修缺陷 | §3.56 |
 | D2 | 核心 JS 生成导出＝定稿项 9 步 2「三端改用它」 | 待定稿 | R8-RS-15 | 现读核心 13 个 C ABI 导出里没有任何脚本生成入口；要「三端改用它」得先给核心加第 14 个导出并让三端弃用手抄注入 JS，属跨端契约变更 | §3.8 |
-| D3 | Android 要不要威胁订阅源＋出厂内置哪份名单 | 需产品决策 | Q51, R9-CS-14, AEG-003 | 机制半边可以自己落（取源→校验→缓存→灌 `update_host_denylist`），但出厂内置哪份名单、接不接联网源、断网时保不保留最后一份已验证情报是发布决定 | §五 Q51、§3.84 |
+| D3 | Android 要不要威胁订阅源＋出厂内置哪份名单 | 需产品决策 | Q51, R9-CS-14, AEG-003 | 机制半边已由 R9-B95 落掉（解析→切批→`update_host_denylist` 的 Begin/Append/Commit→asset 装载→按结论留痕，见 §3.95），但出厂内置哪份名单、接不接联网源、断网时保不保留最后一份已验证情报是发布决定；且真机生效还等 ADR-006 的四 ABI 原生制品 | §五 Q51、§3.84、§3.95 |
 | D4 | 装机/桌面验收与攻击面矩阵十项动态测试 | 待设备 | AEG-014 | 会弹调试窗、写真实数据根，需用户在场；本机一次性 WebView2 宿主在订阅 `DownloadStarting` 那步就抛 `ICoreWebView2_4` 转换失败，造不出可信下载场景 | §3.57、§3.84 |
 
 - ~~**R9-RS-9 的一半（机制对齐）**~~ **R9-B88 / §3.88 判成不做并结案进 §六**（改成 window 键入口＝放宽出货安全面；写法已同形、取用路径在同形门禁里显式别名）。原文 ↓
@@ -1123,6 +1123,29 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   补齐它是一项功能而非一次修补：要网络抓取、缓存原子替换、版本/签名/防回滚、失败降级
   可解释（审计 §AEG-003 的处方方向正确），且要先定「源从哪来、谁签」。⇒ §四 待裁决；
   验收按审计口径：同一威胁测试集在两端输出同一裁决，并能在真机上确认实际拦截。
+
+  **R9-B95（2026-10-18）把上面那段的一半变成过去时**：「`android/**` 0 命中」这句扫描面从今天起
+  **失效**（现读复跑：同一正则在 `android/**` 的 `.kt/.java/.xml/.kts` 面 **131 处命中 / 10 个文件**；
+  受管文件 `git ls-files android` 本批 master 侧现读 **176** → 落地后 **186**、代码文件 **143 → 152**
+  即本批 +10 个文件。顺带记一笔：上面那句抄的 174/141 是 R9-B84 当天的实测，期间别的批次往
+  `android/` 加了 2 个文件而没人回写——**扫描面的份数没有任何门禁判它**（`check_doc_claims.py`
+  只认「N 个 workflow」形态），所以它会静默过期，别再拿它当现读用）。落的是**机制半边**，
+  逐段可回读：
+  `android/broker/src/main/kotlin/com/aegis/broker/ThreatHostFeed.kt::parseLine`（订阅源文本 →
+  规范 host，口径对齐 C#/Python）→ 同文件 `::batches`（60 KiB 预算、按 UTF-8 字节计费）→
+  `android/broker/src/main/kotlin/com/aegis/broker/CoreDenylistPush.kt::drive`（Begin/Append/Commit
+  三态协议，第八轮 ⑨ 的 Android 半边）→
+  `android/broker/src/main/kotlin/com/aegis/broker/NativePolicyCoreBridge.kt::updateHostDenylist` →
+  `android/broker/src/main/kotlin/com/aegis/broker/AndroidBroker.kt::updateThreatHostDenylist` →
+  `android/app/src/main/java/com/aegis/browser/BuiltInThreatHosts.kt::publish`（读 asset + 按结论留痕，
+  接在 `AegisApplication.kt::onCreate` 既有的 broker 预热线程上）。
+  **这一行仍然开着，开着的是两半**：①「出厂内置哪份名单、要不要联网取源／缓存／签名／防回滚」
+  ⇒ 需产品决策（§4.0 表 D3）；②真机上这条链的**远端还没有制品**——`android/**` 内没有任何
+  `libaegis_policy_core.so`（实测 `find android -name '*.so'` 除 `build/` 外 0 个），
+  `NativePolicyCoreBridge.kt::tryCreate` 的 `Native.load` 在设备上走的是「抛 → 捕获 → 返回 null」
+  那一支，所以今天 `publish` 的结论恒为 `NotPublished(native_core_absent)`。这不是回归（既往连
+  灌入口都没有，默认行为逐字不变），但它把「机制落了」与「名单会生效」分开写清：生效前置是
+  ADR-006 的四 ABI 原生制品 + 库名/哈希校验那一半 ⇒ 需设备。验收口径不变。
 - ~~Q52 R9-CS-15~~ **本批已定稿并落地**（§二 裁决行 + §3.29）：外部审计 AEG-008「威胁情报
   仅启动时刷新」属实——`StartThreatFeedRefresh()` 在启动链调用**一次**，同文件的
   `_feedbackTimer`/`_sleepTimer` 都有 DispatcherTimer，唯独订阅源没有周期重取。登记时的
@@ -1336,6 +1359,24 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   这与 Q53 第②档是同一次契约面扩，**需要你先定「Agent 端集要不要进跨端向量体系」**。
   验收判据（选定方向后）：新向量必须被真实消费者逐条执行（按 R9-B39 口径，注释里提到文件名不算消费）；
   登记端集与现读不一致即红；不得用「形状校验通过」冒充「裁决正确」（AEG-006 原话）。
+
+- Q71 R9-AD-18 | P3 | `windows/src/Aegis.Windows.App/Core/Security/ThreatFeed.cs::ParseFeedLine`
+  ↔ `legacy/windows-pywebview/app/threat_feed.py::parse_feed_line` ↔
+  `android/broker/src/main/kotlin/com/aegis/broker/ThreatHostFeed.kt::parseLine`：
+  **三端订阅源行解析器没有共享向量**（`contracts/vectors/` 现读 22 份，无一份是名单行文本）。
+  这条是 R9-B95 落 Android 半边时现读三处实现逐刀对照量出来的，未排期。形状差异不是「谁对谁错」而是
+  **谁先拒**：C# 那一版只判「非空 + 含点或 localhost + ASCII 字母数字与 `.` `-`」，Android 那版额外把
+  核心 `core/rust-policy-core/src/ffi/broker/denylist.rs::entry_shape_ok` 的三刀（≤256 字节、无首尾点、
+  无空段）挪到端侧先判 ⇒ 同一份源里 `.evil.example`／`a..b.example`／超长条目在 Android 计入
+  「被拒条目数」并停在端侧，在 Windows 会推给核心并以 `accepted<input` 的**部分接受**形态露出来。
+  **核心侧最终集合相同**（两侧同判），差别全在可观测的计数口径与留痕文案上——而这件事今天
+  只由 `ThreatHostFeedTest` 的头注（「用例表是从 C# 那版的分支逐条推出来的」）与 KDoc 记录，
+  **没有任何判据能发现第四处漂移或第三次改动**。`ThreatHostFeed.kt::parseLine` 的头注里那条
+  `../etc` 形态的漂移就是这一族的第一个实例。
+  要做的三件事：①新增名单行向量（行文本 → 规范 host 或拒绝码）；②`CONSUMER_MANIFEST` 记三端消费集
+  且端集由实测推导（R9-B25 口径）；③legacy 那端按 SP-154 是**可选对账端**，要先定它算不算向量执行者。
+  与 Q70 的分别是这条**不落在**「没人执行的表」那一档：Windows 与 Android 两端真的会执行同一份输入。
+  ⇒ 未排期（本批不顺手扩向量面：新向量要同改的三处契约面属独立一题）。
 
 ### 5.5 DOC（文档 vs 实树）
 
@@ -5128,6 +5169,110 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `check_workflow_shells` / `verify_workflow_step_duplicates` / `check_doc_claims` /
    `check_file_sizes`）；台账三条（decision status / queue status / anchors）exit 0，
    §五 活行仍 3 条、`MIN_SYMBOL_ROWS` 仍 3、§4.0 表仍 4 条。CSV 登记 **R9-CI-21**。
+
+### 3.95 R9-B95（2026-10-18，队列 Q51 的机制半边）：Android 第一次有了「把威胁名单灌进核心」的入口
+
+1. **这半边原来缺到什么程度**：不是「有链但名单为空」，而是**连灌入口都不存在**——
+   `Denylist|ThreatFeed|blocklist|isHostBlocked` 在 `android/**` 的 `.kt/.java/.xml/.kts` 面 0 命中
+   （R9-B84 实测原样与剔注释后均 0），Rust 侧 `apply_host_denylist` 在 Android 恒不被调用。
+   本批之后同一正则现读 **131 处命中 / 10 个文件**（受管文件 `git ls-files android` 176 → 186、
+   代码文件 143 → 152，两侧都实测）。⇒ §五 Q51 那段的扫描面就地改真，行仍开着（内容半边见第 8 点）。
+2. **落的形状是四层，切法有理由**：解析与切批 `android/broker/src/main/kotlin/com/aegis/broker/ThreatHostFeed.kt::parseLine`
+   ＋ `::batches` → 协议 `android/broker/src/main/kotlin/com/aegis/broker/CoreDenylistPush.kt::drive`
+   → FFI `android/broker/src/main/kotlin/com/aegis/broker/NativePolicyCoreBridge.kt::updateHostDenylist`
+   → 门面 `android/broker/src/main/kotlin/com/aegis/broker/AndroidBroker.kt::updateThreatHostDenylist`
+   → 装载与留痕 `android/app/src/main/java/com/aegis/browser/BuiltInThreatHosts.kt::publish`
+   （接在 `AegisApplication.kt::onCreate` 已有的 broker 预热线程上，不给冷启动加一次同步跨界）。
+   解析/协议留在 `:broker` 是因为那个模块的契约是「不含 Android 类型 ⇒ 纯 JVM 可测」，而 asset 读取
+   要 `Context`——这条切分让协议能在**没有 `.so`、没有 Robolectric** 的常跑面里逐条断言（R8-CI-18
+   那一课：真 JNI 路径的用例在 PR 门禁集体早退，等于没有覆盖）。
+3. **第八轮 ⑨ 的原子性在 Android 补齐**：第三参是档位（0 追加 / 1 整批替换 / 2 开暂存会话 / 3 提交），
+   多批推送走 Begin→Append…→Commit，**半途失败＝没提交**，活动快照仍是上一份完整名单；旧核心
+   不回显 `mode` 时退回既往链并保留 `core_lacks_clear_parameter` 判据，不假装拿到了原子性。
+   既往形状（首批 `clear=1` 立即清空 + 只装第一批）在 5 MiB 名单的约 85 批窗口里让未推到的
+   恶意 host 一律 Allow——Android 此前没有这条链，所以这个缺陷是以「别再这样设计」的形式预防的。
+   协议的两个承重假设是**读核心源码现证**的而不是照抄 Windows 的注记：
+   `core/rust-policy-core/src/ffi/broker/denylist.rs::apply` 里 `MODE_BEGIN` 那支写的是
+   `snapshot.staging = Some(accepted)`——开会话**同时吞下首批**（若它只开会话不收条目，我的首批
+   就会整批丢在协议外面）；`MODE_COMMIT` 那支的 `accepted` 报的是「这次提交换没换快照」而不是条目数
+   （空名单的合法提交报 1），所以「未标 staged 且 accepted==0」才是**唯一**能判「核心没把暂存换进
+   活动快照」的形态，写成 `accepted < input` 会把一次成功的空提交误判成拒绝。
+4. **混版三态在 Android 的可达性，写清楚而不是照抄 Windows 的说法**：`.so` 与 DEX 同批出货
+   （ADR-006：「Android 制品必须显式携带与绑定同版本、同 ABI 的原生库」）⇒ 第三态（旧宿主＋新核心）
+   在本端没有出货形态；而**现树 `android/**` 里没有任何 `libaegis_policy_core.so`**（实测
+   `find android -name '*.so'` 除 `build/` 外 0 个），`NativePolicyCoreBridge.kt::tryCreate` 的
+   `Native.load` 在设备上走「抛 → 捕获 → null」那一支 ⇒ 今天 `publish` 的结论恒为
+   `NotPublished(native_core_absent)`。**默认行为逐字不变**（既往根本没有这条链，核心侧空集合不拦），
+   但这一句必须写在台账里：机制落了 ≠ 名单会生效，生效前置是 ADR-006 的四 ABI 制品＋库名/哈希校验
+   那一半，而那一半要设备。
+5. **与 Windows 的三处有意不一致**（逐条写进 `CoreDenylistPush.kt` 头注，不留给下一轮猜）：
+   ① 结论成员名 `PartialAccept` ⇄ Windows `PartiallyPublished`（语义同）；② Windows 的
+   `ExportMissing`（可选导出探测一次）在 Android 折成短码 `native_core_absent` /
+   `native_denylist_unavailable`——JNA 是在调用点抛 `UnsatisfiedLinkError`，没有探测面可缓存；
+   ③ 结果字段 Windows 带 `CoreEchoesClear`、这里带 `batches`（留痕要写「几批推完」）。
+   `NotPublished` 带不带真实 accepted：Windows 的工厂归零、但它的 `LegacyPush` 带真实前缀数，
+   本端统一取后者那一档——中止时核心侧留下的确实是已推送前缀，把数归零就是丢掉唯一可诊断的量。
+6. **三处在写完之后、回读正典代码时抓到的自己的 bug**（这一族是本轮最值钱的三段，全部由判据或对照现读暴露，
+   不是静态想象）：
+   ① `stripDecorations` 用 `SCHEME_MARKER_LENGTH = 3` 去剥 2 字符的 `||` 前缀——常量串味，
+   `ThreatHostFeedTest.adBlockDecorationsAreStrippedBeforeShapeCheck` 第一次跑就打红；
+   ② `AbiSurfaceAlignmentTest` 的 Rust 常量读取只吃纯数字，遇到源码里的 `64 * 1024` 会报
+   「常量不见了」——那是把算式误报成缺失的哭狼形态，改成捕获 RHS 整段并按乘积求值；
+   ③ **切批按 char 计费、编码不转义**。写完回读 Windows
+   `windows/src/Aegis.Windows.App/Broker/NativePolicyCoreBridge.Denylist.cs::EnumerateBatches`
+   才看清它的口径是 `JsonSerializer.SerializeToUtf8Bytes(host).Length + 1`（JSON 字面量的**字节**数）。
+   我那版按 `host.length + 3` 计，且 `encode` 直接 `joinToString` 拼引号——而 `batches`/`encode`
+   是公开面，`AndroidBroker.updateThreatHostDenylist` 的调用方可以不经 `parse` 递任意字符串：
+   一个含 `"` 的 host 会让整段载荷成为**非良构 JSON**，核心对非良构是**整批拒收**
+   （`core/rust-policy-core/src/ffi/broker/denylist.rs::apply_host_denylist` 那一刀的注释就写着
+   「超出一批的总字节上限时整批拒收、快照一字不动」），于是同批的合法条目被一条坏 host 全带走；
+   多字节 host 又让 char 数**低估**字节数，方向恰好是把某一批推向那把刀。修法：字面量单源
+   `ThreatHostFeed.kt::quote`，`batches` 与 `encode` 共用同一份（估算与实发逐字节同形，不靠"host
+   一定是白名单字符"这种会被调用方打破的前提），测试改成「`JSONArray` 把载荷读回来逐条比对」＋
+   「每批按 UTF-8 字节断言 ≤ `MAX_BATCH_BYTES`」。旧断言 `payload.length <= CHUNK_PAYLOAD_BYTES`
+   按 char 判，正是同一处算错的表现，一并改真——这是「判据的口径跟着实现的错口径写」的实例。
+7. **新增 34 条用例**（四个新文件）：`ThreatHostFeedTest` 12 条（分支表从 C# `::ParseFeedLine` 逐条推，
+   含新加的两把转义/字节刀）、`CoreDenylistPushTest` 12 条（`FakeCore` 记 `(batchSize, mode)`，
+   钉三态与「第 N 批断掉不发提交」「提交被拒不算发布」「空名单出 `Published(0/0)`」）、
+   `AbiSurfaceAlignmentTest` 4 条（Kotlin 声明符号集 ⇄ Rust `FROZEN_EXPORTS` **双向**，
+   加上 `MODE_*`/`MAX_*` 跨语言取值）、`BuiltInThreatHostsTest` 6 条（asset 路径常量 ⇄ 仓库真文件、
+   出厂名单为空是决定、非空清单同一口径出多批，**加接线锚两条**）。
+   接线那两条是本批最后补上的一处自留缺口：装载调用写在 `AegisApplication` 的预热线程里，
+   而**删掉那一行不会有任何用例变红**（R6-26／R7-CS2-04 同族），所以补
+   `::theLoaderIsWiredIntoTheExistingPrewarmThread`（按 `withoutComments()` 剔注释后判调用点存在且
+   **恰好一处**）＋`::theWiringAnchorCanFail`（正面控制：同一计数面在「只在注释里」必须 0、
+   在「真调用」必须 1——没有这条，锚会在一个被注释掉的接线上绿）。
+   **真树注入复验**（不只内存对照）：删掉 `AegisApplication` 那一行调用 ⇒
+   `:app:testDebugUnitTest --tests "*BuiltInThreatHostsTest*"` 报 **6 tests completed, 1 failed**，
+   红的正是 `theLoaderIsWiredIntoTheExistingPrewarmThread`；注入脚本先 `assert 锚点在位`
+   （「没注射成功」与「钉子没红」必须分开打印），还原后 `git diff --numstat` 为空＝逐字节回到 HEAD。
+8. **刻意没做**：联网取源、缓存原子替换、签名/版本/防回滚、断网保不保留最后一份——都要先定
+   「源从哪来、谁签」⇒ §4.0 表 D3 仍是用户的一句话；出厂内置名单**为空**并由用例钉住
+   （`android/app/src/main/assets/threat/hosts.txt` 头注写明加条目必须同批改那条断言）；
+   三端名单行解析器的共享向量**另登 Q71**（本批现读出 C# 少三刀、Android 提前拒的计数口径漂移，
+   它今天只写在注释里），`MIN_SYMBOL_ROWS` 因此 3 → 4（Q71 用符号锚登记，等号棘轮按口径同改）。
+   **顺带发现的一条、本批判成不开门禁**：Q51 那行里「`git ls-files android` 174／141 个文件」这种
+   **扫描面份数**没有任何判据覆盖（`check_doc_claims.py` 只认「N 个 workflow」形态），期间被人加了
+   2 个文件而台账安静——但要给它开判据意味着把「正则面 + 受管扩展名」钉成一份新清单，而那份清单
+   的定义权属于**那条队列行自己**（每行的扫描面都不同），没有单源可指。按本仓既有的解法处理：
+   **数字改成现读命令与现读值**（本批就是这么改的）。口径沿用 §3.41 与 §3.92 第 6 点那两条已经立住的
+   判断：**散文里的动数应当指向单源或写成现读命令，而不是为它再造一张表**——§3.92 第 6 点记的正是
+   「计数抓不到的三面」，本条属于那一类，写明而不是假装已解决。
+9. **复验**（读被测命令自身退出码，不用管道尾巴）：`:broker` 与 `:app` 的 ktlintCheck / detekt /
+   testDebugUnitTest 六项 **BUILD SUCCESSFUL、exit 0**；测试发现数不靠「绿」推断——从
+   `test-results` 的 XML 逐份累加得 Android 两侧共 **462 条用例、0 失败 0 错误**，其中本批四个新 Suite
+   实跑 34 条（`ThreatHostFeedTest` 12／`CoreDenylistPushTest` 12／`AbiSurfaceAlignmentTest` 4／
+   `BuiltInThreatHostsTest` 6）。python 侧全量 `pytest`（口径 `pyproject.toml` 的 testpaths =
+   `tests/python` ＋ `agent/tests`）**1047 passed / 1 skipped**，`active_tree_gates ruff`／`bandit` 各 OK；
+   `verify_ledger_anchors`（符号锚行 4 与登记值一致）/
+   `verify_ledger_queue_status` / `verify_ledger_decision_status` / `check_doc_claims` /
+   `check_markdown_tables` / `check_markdown_links` 各 exit 0。行数红线：`AndroidBroker.kt` 447 → **429**、
+   `NativePolicyCoreBridge.kt` 332 → **322**，两个零余量文件靠 `NativePolicyCoreCodec.kt` /
+   `UriCanonical.kt` 外迁买到空间（沿用 Windows 的 partial-file 先例），`check_file_sizes --write-baseline`
+   的 diff 现读**只有这两行**、其余 84 项一字未动；本批新增的 10 个文件（4 个 broker main＋3 个
+   broker test＋2 个 app＋1 份 asset）**没有一个需要进基线**＝没有一个越 300 行。
+   CSV 登记 **R9-AD-18**（Q71 的出处）与 **R9-AD-19**（第 6 点③那条自查），并把 R9-CS-14 的
+   批次字段改成「机制半边落地」而 `primary_reviewed` 仍不翻。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）
