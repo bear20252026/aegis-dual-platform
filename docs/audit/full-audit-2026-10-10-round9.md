@@ -5075,6 +5075,59 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    而 R9-CS-19 那条教训（偶发红变成常态红＝门禁失信）只有在**复发**时才要求我们改判据面。
    重启条件：同样的 `missing manifest` 再出现第二次，就把它做成常驻形状问题来修（并先确认不是我们
    钉的 `rust-toolchain.toml` 与 runner 镜像里的预装版本互相咬）。
+   **（R9-B94 更正：这条「一次性」的判断在本批合并前就被推翻了——同一 head 的 push 面
+   run 39082352047（00:20Z）第二次报出同一句，而它的 PR 面是绿的。当时回扫 60 个 run 只命中一条
+   是真的，但样本窗口只有 60 个 run、且两条红都在同一天同一作业族里；判「一次性」的依据应当是
+   「它在多大频率上发生」而不是「我这次只看到一次」。按本条自己写的重启条件升为常驻修法，见 §3.94。）**
+
+### 3.94 R9-B94（2026-10-18，§3.93 第 9 点那条判断被同日第二次发生推翻）：runner 预装残缺的常驻自愈
+
+1. **发生与证据**：`.github/workflows/supply-chain.yml` 的 `audit` 作业在
+   `dtolnay/rust-toolchain` 那步报
+   `1.99.0-x86_64-unknown-linux-gnu unchanged - (error reading rustc version)`
+   → `error: missing manifest in toolchain '1.99.0-x86_64-unknown-linux-gnu'`
+   （action 自己打的 help 写着「this may happen if the toolchain installation was interrupted」）。
+   两次、跨两种触发面、**同一个 commit 的另一条面是绿的**：run 39081120142（PR 面 00:00Z，
+   head `433f503`）与 run 39082352047（push 面 00:20Z，head `c7bbf96`）；后者直接把 §3.93 第 9 点
+   那句「判为一次性」推翻在本批合并之前。这类红与代码无关，而它的实际处置若是「重跑一次」，
+   就是 R9-CS-19 记过的那条病：每重跑一次，门禁少一分可信。
+2. **形状**：新增 composite `.github/actions/rust-toolchain-heal/action.yml`（一步、`shell: bash`），
+   插在**每一处** `dtolnay/rust-toolchain` 之前（现读 10 处，分布在 7 份 workflow）；它先跑
+   `rustc +<channel> --version`——**用行为而不是文件存在来判**，健康时几乎零成本，坏时正是那句
+   error 的可观察形态——读不出来就按 `rustup show home` 找到 toolchain 目录、移除那份残缺安装、
+   `rustup toolchain install <channel>` 重装，末尾再 `rustc --version` 自证一次。
+   channel **现读 `rust-toolchain.toml`**（第八轮 B7 定的单源），只有唯一的 nightly 例外 job
+   显式传 `channel: nightly`——再抄一份字面量就是造出第三个会漂移的地方。
+3. **没选的那条路，写清楚而不是留给下一轮猜**：把 10 处 `dtolnay/rust-toolchain` 调用本身收成
+   一支 composite（R9-B53 的装配单源口径）——**本批不做**，因为它要同批改
+   `tests/python/rust_toolchain_pin_test.py` 里「workflow 内 `toolchain:` 字面量 ≥9 处」这条
+   正面控制（合并后字面量会从 9 处变成 1 处，那条判据的语料面直接塌），还要把 SP-178 的
+   SHA-pin 面挪进动作文件；那是独立一题。本批只加**前置自愈**，现有「9 处字面量 ⇄ toml 同值」
+   判据一字未动，回归面最小。
+4. **新增两条判据**（都在 `rust_toolchain_pin_test.py`，共 10 条用例）：
+   ①**配对**判据——任何调用 `dtolnay/rust-toolchain` 的步骤，其**前一步**必须是自愈步，且自愈
+   生效的 channel 与下一步要装的 `toolchain:` 值一致，且该 job 在这之前已经 `actions/checkout`
+   （否则自愈步读不到 `rust-toolchain.toml`）；只判「workflow 里存在自愈步」是不够的，漏掉一个
+   job，那个 job 照样会被坏预装点亮。扫到的 dtolnay 调用数 `<9` 即红（扫描面塌缩＝判据空转）。
+   ②**自愈脚本本身真调 bash**（沿用 `relock_branch_guard_test.py` 的口径：找不到 bash 就抛，
+   不允许一条会被跳过的判据）：健康 ⇒ 不重装也不删任何东西；坏 ⇒ 目录被移除＋
+   `rustup toolchain install 1.99.0` 被调到；传 `channel: nightly` ⇒ 装的是 nightly；
+   读不到 channel ⇒ `::error::` 且 exit 1（fail-closed，不静默放行）。
+5. **两条本批自己撞的**：①第一版把自愈脚本写成 `channel="${{ inputs.channel }}"` 直接展开进
+   bash 体——与本仓 R9-CI-2 那条「in-run `${{ }}`」同一形状，改成 `env: HEAL_CHANNEL` 进脚本；
+   ②第一条判据我写成「动作文件的注释里也不许出现 `dtolnay/rust-toolchain`」，于是它判红在**自己
+   解释自己在等什么**的那段头注上——判据要判的是**调用点**（`uses: dtolnay`），不是名字出现；
+   这与 §3.92 第 8 点那条是同一课（把示例/说明当成了事实）。
+6. **仍未证的**：本批修的是「预装残缺时别再点亮红灯」，不是「预装为什么残缺」（runner 镜像侧，
+   我们改不到）；也没有证据说 10 处里其余 8 处不会再出现别的形状（例如 windows runner 的
+   `x86_64-pc-windows-msvc` 目录名不同——脚本按 `"$channel"-*` 通配，两种三元组都覆盖）。
+   若下一次红落在**别的原因**上，本条自愈不该被当成万能药：它会重装，不会重试其它步骤。
+7. 复验（读被测命令自身退出码）：`pytest tests/python/rust_toolchain_pin_test.py` **10 passed**；
+   全量 `pytest` 1047 passed / 1 skipped；CI 面家族全 exit 0
+   （`verify_workflow_script_paths` / `verify_ci_trigger_surface` / `verify_gate_execution_face` /
+   `check_workflow_shells` / `verify_workflow_step_duplicates` / `check_doc_claims` /
+   `check_file_sizes`）；台账三条（decision status / queue status / anchors）exit 0，
+   §五 活行仍 3 条、`MIN_SYMBOL_ROWS` 仍 3、§4.0 表仍 4 条。CSV 登记 **R9-CI-21**。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）
