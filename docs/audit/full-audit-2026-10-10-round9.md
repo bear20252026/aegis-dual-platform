@@ -5269,7 +5269,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    `check_markdown_tables` / `check_markdown_links` 各 exit 0。行数红线：`AndroidBroker.kt` 447 → **429**、
    `NativePolicyCoreBridge.kt` 332 → **322**，两个零余量文件靠 `NativePolicyCoreCodec.kt` /
    `UriCanonical.kt` 外迁买到空间（沿用 Windows 的 partial-file 先例），`check_file_sizes --write-baseline`
-   的 diff 现读**只有这两行**、其余 84 项一字未动；本批四个新文件都在 300 行红线以内。
+   的 diff 现读**只有这两行**、其余 84 项一字未动；本批新增的 10 个文件（4 个 broker main＋3 个
+   broker test＋2 个 app＋1 份 asset）**没有一个需要进基线**＝没有一个越 300 行。
    CSV 登记 **R9-AD-18**（Q71 的出处）与 **R9-AD-19**（第 6 点③那条自查），并把 R9-CS-14 的
    批次字段改成「机制半边落地」而 `primary_reviewed` 仍不翻。
 
