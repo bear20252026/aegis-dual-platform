@@ -178,7 +178,7 @@ internal static class TimerSurfaceProbe
         return 0;
     }
 
-    private static string Page() =>
+    internal static string Page() =>
         """
         <!doctype html><meta charset=utf-8><title>timer-surface</title>
         <script>window.__raf=[];let __last=null;
@@ -186,10 +186,10 @@ internal static class TimerSurfaceProbe
         """;
 
     // 六个通道各取「最小非零步进」或「小数尾数」——这是分辨率的直接读数，不是推断。
-    private const string StartRaf = "requestAnimationFrame(function s(t){window.__raf.push(t);" +
+    internal const string StartRaf = "requestAnimationFrame(function s(t){window.__raf.push(t);" +
         "if(window.__raf.length<40)requestAnimationFrame(s);});void 0";
 
-    private const string ReadAll = """
+    internal const string ReadAll = """
         (function () {
           var min = function (arr) { var best = -1; arr.forEach(function (d) {
             if (d > 0 && (best < 0 || d < best)) best = d; }); return best; };

@@ -1184,6 +1184,11 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 - Q73 R9-DEPS-5 | P3（**待裁决**：补 Windows 面 hash 链，还是把「CI 工具链只在 Linux 装」写成声明） | `tests/python/relock_sop_test.py::WORKFLOW`（重锁步骤的单源，正因为它只认 workflow 正文，行为面无法用用例覆盖）↔ `requirements-ci.txt` 第 85 行的 `bandit==1.9.4`（Windows 安装时它是 colorama 的唯一入口；`.txt` 不在锚门禁的扩展名集合里，故本行的可解析锚落在左侧测试文件上——这个取舍本身就写在这儿）↔ `.github/workflows/dependency-relock.yml:22`（「`--require-hashes` 能装上才算成功」这条判据的出处）：
   R9-B97 想在 Windows 本机原样复现 CI 那步 `pip install --require-hashes -r requirements-ci.txt`，`EXIT=1`：pip 报 `In --require-hashes mode, all requirements must have their versions pinned with ==. These do not: colorama>=0.3.9 … (from bandit==1.9.4…line 85)`。锁里 `grep -c colorama` = **0**——不是漏算一个包，是整张锁按 **Linux** 解算的，`colorama` 作为 Windows 侧的条件依赖从没进过树。后果面很小但真实存在：Windows 上的贡献者（以及任何 `runs-on: windows` 的 python 工具链步骤）没法从这张锁 bootstrap 出 CI 工具链，只能退回不带 `--require-hashes` 的宽松安装——那正好绕过本仓为 #27/#35/#39 设的那道防线。
   两条出路都有代价：①按 Windows 面重算 hash 链（`pip-compile` 加 `--emit-index-url`/多平台，或 `--platform windows` 解析后合并散列）⇒ 锁会长一片与本批无关的 diff，正是 SOP 要避免的「没人能审」；②把「本锁只在 Linux 安装」写进 `requirements-ci.in` 头注与 CLAUDE.md 的本地验证段 ⇒ 零 diff，但承认 Windows 开发者拿不到可验证的工具链。⇒ 属处置口径，先登记不顺手做。
+
+- Q74 R9-DOC-27 | P3（**未排期**：本批只清掉现场并登记，门禁另批做） | `scripts/check_markdown_links.py::list_markdown_files`（它扫 106 份 .md，但只判相对链接可达）↔ `scripts/verify_ledger_anchors.py::ANCHOR`（只判活行的行号/符号锚）↔ `scripts/check_markdown_tables.py`（只数每张表的列数）：
+  R9-B98 rebase 时发现 **master 的台账里躺着一行 git 冲突标记**：`git show origin/master:docs/audit/full-audit-2026-10-10-round9.md` 第 1809 行是 `>>>>>>> origin/master`（`grep -nE "^(<<<<<<<|=======|>>>>>>>)"` 命中 1 行、其余两种为零）——某次合并手工解冲突时漏删，之后一路随 squash 进主干。本批顺手移除（这是那条标记在仓库里的唯一一处）。
+  为什么值得单独一条而不是当作擦干净的小事：**这道防线目前没有任何门禁判**。三份 markdown 门禁各管一件事（链接可达 / 行号锚可解析 / 表格列数一致），一条混进正文的冲突标记在它们眼里都只是普通文本；而读者看到它只会以为是台账自己的分隔线，实际它的意思是「这里曾经有人没解完冲突，而且没人核对过」。同一形状的失账本仓已经记过三次（§3.50 的「引用一个不存在的小节」、R9-B62 的「判据写好了执行面没人核」、Q69 的「纪律写在标题里没人判」），这是第四条：**结构污染没人判**。
+  验收判据（下一批做）：新增一条扫全仓受管文本的门禁，判 `^<<<<<<< ` 与 `^>>>>>>> ` 零命中（`=======` 单独存在是合法的 setext 标题下划线，不能一并算——这就是判据必须写窄的地方），并用「把标记注回一份 .md」的注入证红；接入 `.github/workflows/contracts.yml`。
 ### 5.4 RS（Rust 核心）
 
 - Q25 R9-RS-1 | P2 | **部分闭环（R9-B38 / §3.38）；剩余半边的严重性按 §3.74 实测重判——本机 Runtime 下六条通道的引擎默认是 100µs 网格而非 µs**：挂载形态与描述符这一半已三端合一（原型级挂载 + 保留原生描述符 + 实例兜底），三端同形判据落在 `core/rust-policy-core/tests/timer_parity.rs`；六条高解析通道两端零包裹的**剩余半边**续登为 Q57 R9-CS-17（不顺手做：rAF/getEntries*/Event.timeStamp 的包裹是站点可观察的行为变更，只能由真机冒烟证明）。原条目：Q25 R9-RS-1 | P2 | `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:207` +
@@ -1198,6 +1203,12 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   **出货注入面**零命中——**R9-B84 口径改真**：此处原写「主源码」，按「非测试目录即主源码」的字面读法它今天已不成立：
   R9-B74 为量六条通道分辨率新增的只读探针 `windows/tools/WebView2SdkSurfaceProbe/TimerSurfaceProbe.cs:169`、`:203`
   有 2 处代码命中（第三处 `:14` 是注释，按剔注释口径不算），那是**测量面**、不在任何注入路径上）。第十二节 B2 余量段「三端一致地如此」在此出口为假。
+
+  **R9-B97 更新严重性依据**：六条通道的「裹 vs 不裹」已量成数字（§3.97 第 4 点的表）。关键不在 100µs→1ms 的交换值，而在**jitter 把这笔交换基本抵消了**（最小步进 0.000095ms、小数位 13 位），且包裹本身一行可检。裁决面拆给 Q72 R9-RS-14，本行保留「剩余半边未做」的事实。
+
+- Q72 R9-RS-14 | P2（**待裁决**：关 jitter 是加严，但它改站点可观察的小数位形态） | `core/rust-policy-core/src/timer_prec.rs::inject_script`（默认配置 1000µs + jitter，逐字节钉在 `contracts/timer-stage8-script.js`）↔ `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:203`（出货的同型 jitter）↔ `windows/tools/WebView2SdkSurfaceProbe/TimerAbProbe.cs`（A/B/C 三组数字的出处）：
+  R9-B97 桌面实测把「要不要裹六条通道」拆成两件事：①裹本身——一行 `String(Performance.prototype.now)` 即可检出（`native code` 消失），今天 Windows 已因 Stage 8 处于该形态；②jitter——它把 1ms 网格重新打成 13 位小数、最小步进从 0.1ms 掉到 0.000095ms，**等于把防护买回来的分辨率又花掉**。关掉 jitter（同一脚本一个布尔）是量到的唯一真降位数形态：`nowMin`=1ms 整、`evtFrac`／`markFrac`=integer。
+  要用户给的只有一句话：`performance.now` 上这个 jitter 留不留。留 ⇒ 六条通道照现在这样不裹也没有损失分辨率可言（因为裹了也白裹）；不留 ⇒ 顺带把出货的 Windows Stage 8 与核心一起变严，但页内动画与性能面板的时间戳会从「亚毫秒带随机尾数」变成「整毫秒」，属站点可观察。裁决前不动判定面。
 - ~~Q26 R9-RS-2~~ **本批已确证并落地**（§二 裁决行 + §3.12）：两条处方里选了第二条
   ——入库件已按钉住的 1.99.0 + uniffi 0.32.2 重 derive（1,910→2,005 行，diff 只有
   `update_host_denylist` 的 FFI plumbing 与语义收窄后的 docstring），`test -s` 那条空断言
@@ -1514,6 +1525,8 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   前提已做成能红的判据（`tests/python/injected_js_parity_test.py` +3 条），不是留一段推理。
   所以 Q57 剩下的只有①那一半，仍**需设备/桌面冒烟**。
 
+  **R9-B97 桌面 A/B 实测**（本机 WebView2，注入 `contracts/timer-stage8-script.js`）：「需桌面冒烟」这句前提今天兑现——不裹 `nowMin`=0.1ms、裹上（jitter 开）反而 0.000095ms 且小数位更花，把 `JITTER_ENABLED` 改 false 才是 1ms 整＋整数尾数；两种裹法都让 `String(Performance.prototype.now)` 里的 `[native code]` 消失（Windows 出货形态 `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:203` 同型，早已如此）。剩下的不是量不了，是 Q72 那个裁决。另：本行的 Stage 8 出处改由符号锚判定（`windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs::BuildScript`）。
+
 - ~~Q66 R9-SH-22~~ **本批已闭**（R9-B72 / §3.72：IPv6 段左右邻 21 条进同一张跨端向量，两端逐条跑、**0 条红**——两侧实现不同（Android 掩码位／Windows .NET 属性）但今天同结论，此前没有判据说这件事，现在有了；authority 叠加形态 `user@[fe80::1]`、`user@169.254.169.254:8080` 也进了表，「收成每端一份实现」按字面在两种语言里做不到，能判的是行为对账，而它已经存在。原条目 ↓
   Q66 R9-SH-22 | **P3（R9-B71 已闭第一半 §3.71，第二半带理由仍开）** | `windows/src/Aegis.Windows.App/Broker/ReservedAddressBoundary.cs:54`（`HasNumericAuthority`）↔ `android/broker/src/main/kotlin/com/aegis/broker/ReservedAddressBoundary.kt:181`（`hasNumericAuthority`）↔ `android/broker/src/test/kotlin/com/aegis/broker/ReservedAddressBoundaryTest.kt:85`（`adjacentAddressesOnBothSidesOfEverySegment`）↔ `contracts/vectors/reserved-address-boundary.json`：
   R9-B70 把两张手抄表收成一份跨端向量（§3.70）之后，还剩两族没进表，如实登记而不是当成已闭：
@@ -1805,8 +1818,6 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 5. 文档同批改真三处：`README.md:23-28`、`docs/adr/ADR-006…:41-45`、
    `docs/runbooks/windows-run-guide.md:57-68`——三处原文都写「由安装期标记驱动」，
    现在标记是第三来源。不留「文档说的 ≠ 实树的」这类账（R9-DOC 一整族就是这么来的）。
-
->>>>>>> origin/master
 
 ### 3.28 R9-B28（2026-10-11，外部审计 AX-02 / AEG-001）：策略层与能力层接入 FFI 通路
 
@@ -5399,6 +5410,46 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
 6. 影响面与本批不动的东西：不改 `.in`、不改任何判定面、不动 Gradle/dotnet 锁。
    #238（Stage-8 A/B 那批）等本 PR 合入后把批次号顺延为 **R9-B98 / §3.98** 再复跑——
    批次号按合并时序排，不让读者看到 98 比 97 先落地。
+### 3.97 R9-B97（2026-10-21，Q57/Q25 的「需桌面冒烟」前提）：把核心 Stage-8 变成可重跑的契约金样本，量出 A/B 两组数字
+
+1. 这条批次做的事只有一件：**把「只能由真机/桌面冒烟证明」这句话变成数字**。Q57 剩的半边、
+   Q25 的严重性判断，都吊在同一个没人量过的数上。本机跑得动 WebView2，所以这不是设备问题，
+   是**注入文本没有可重跑来源**的问题——在探针里手写一份「代表形态」，量到的是我自己的重写。
+2. 可重跑来源做成契约：`contracts/timer-stage8-script.js`（226 行 / 9928 字节）是
+   `core/rust-policy-core/src/timer_prec.rs::inject_script` 在默认配置（1000µs + jitter）下的
+   **逐字节输出**，由新常驻测试
+   `core/rust-policy-core/tests/timer_parity.rs::stage8_golden_matches_the_generated_script_byte_for_byte`
+   钉死。这条测试**在写入金样本的过程中判红两次**（print 分隔换行剥多／剥少都算漂移），
+   也就是说它是先证明能红才被当作依据的，不是「跑过了就算」。
+3. 新探针模式 `dotnet run --project windows/tools/WebView2SdkSurfaceProbe -- --timers-ab [脚本路径]`
+   （`windows/tools/WebView2SdkSurfaceProbe/TimerAbProbe.cs`）：同一控件两次导航，
+   A 组不注入（＝引擎默认，也是两端对六条通道的出货形态），B 组经
+   `AddScriptToExecuteOnDocumentCreatedAsync` 注入金样本，逐项打出
+   `ab <读数> A=… B=…`。缺任一项 ⇒ 退出码 2，不出半份数字。
+   执行面边界写清：这个模式与 `--timers` 一样**只在桌面跑**——`.github/workflows/compat.yml:167` 的每周步骤只调默认 `--surface`，本批不声称 CI 覆盖它；但按 compat 的原样命令行 `dotnet build -c Release -r win-x64` 验过（已成功生成、0 个警告），不留「提交了却编不过」的死面。
+4. 本机实测（Chrome/Edge WebView2 Runtime，同一页面、同一采集脚本）：
+
+   | 读数 | A 不裹 | B 裹（jitter 开） | C 裹（只把 `JITTER_ENABLED` 改 false） |
+   | --- | --- | --- | --- |
+   | `nowMin` 最小正步进 | 0.1ms（100µs 网格） | **0.000095ms** | **1ms 整** |
+   | `evtFrac`／`markFrac` 小数尾数 | 亚毫秒浮点尾数（同页两次跑分别 13／12 位与 13／1 位） | 12–13 位（jitter 造出来的花尾数） | **integer／integer** |
+   | `rafMin` 帧间最小间隔 | 16.2ms | 15.5ms | 16ms |
+   | `nativeNow`（`String(now)` 含 `[native code]`） | true | **false** | **false** |
+   | `nowRegress`／`rafRegress` 回退次数 | 0／0 | 0／0 | 0／0 |
+
+   三个结论都是量出来的，不是推的：①**jitter 开着的裹法买不到分辨率**——1ms 网格被 ±0.5ms 的
+   随机偏移重新打成 13 位小数，最小步进反而比不裹细 1000 倍；②只有 C（同一脚本改一个布尔）
+   真把读数落到 1ms 网格与整数尾数上；③无论 jitter 开关，**一行 `String(Performance.prototype.now)`
+   就能看出被裹**（`native code` 消失），而这条不是本批新引入的——Windows 出货的
+   `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:203` 早已是「圆整 + jitter」同型，
+   所以 B 列描述的是**今天的出货形态**，不是假想。
+5. 因此新开 **Q72 R9-RS-14**：六条通道该不该裹，与「jitter 该不该留在 `performance.now` 上」
+   是两件事，后者现在是**有数可依的待裁决**（关掉是加严方向，但它同时改变站点可观察的小数位形态，
+   且与 R8-RS-04／AD-108 的既有口径纠缠）。Q57／Q25 就地回写：「需桌面冒烟」这一前提今日已兑现，
+   剩下的确实只是裁决。
+6. 本批**不改任何判定面**（金样本测试是新增判据，不是行为变更），也不动两端注入脚本——
+   数字先交给 Q72。执行面：`cargo test --test timer_parity` 6 条全绿（含新钉的金样本逐字节对账），全量 `cargo test`／`clippy`／`fmt --check` 各 `EXIT=0`；探针跑**两轮**各 `EXIT=0`（第二轮只翻 `JITTER_ENABLED`，其 B 列即上表的 C）；
+   `scripts/verify_ledger_anchors.py` 的符号锚棘轮随新活行 3 → 4 同批上调；台账门禁逐条读退出码。
 
 
 ## 六、复核后判定为不成立（留此防重复上报）
