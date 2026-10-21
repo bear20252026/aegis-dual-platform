@@ -1180,6 +1180,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   **不在本批顺手改**：B53 的主题是 Gradle 校验和的生成面，C# 测试面的并发修复放进去会让
   两件事都对不上账。
 
+
+- Q73 R9-DEPS-5 | P3（**待裁决**：补 Windows 面 hash 链，还是把「CI 工具链只在 Linux 装」写成声明） | `tests/python/relock_sop_test.py::WORKFLOW`（重锁步骤的单源，正因为它只认 workflow 正文，行为面无法用用例覆盖）↔ `requirements-ci.txt` 第 85 行的 `bandit==1.9.4`（Windows 安装时它是 colorama 的唯一入口；`.txt` 不在锚门禁的扩展名集合里，故本行的可解析锚落在左侧测试文件上——这个取舍本身就写在这儿）↔ `.github/workflows/dependency-relock.yml:22`（「`--require-hashes` 能装上才算成功」这条判据的出处）：
+  R9-B97 想在 Windows 本机原样复现 CI 那步 `pip install --require-hashes -r requirements-ci.txt`，`EXIT=1`：pip 报 `In --require-hashes mode, all requirements must have their versions pinned with ==. These do not: colorama>=0.3.9 … (from bandit==1.9.4…line 85)`。锁里 `grep -c colorama` = **0**——不是漏算一个包，是整张锁按 **Linux** 解算的，`colorama` 作为 Windows 侧的条件依赖从没进过树。后果面很小但真实存在：Windows 上的贡献者（以及任何 `runs-on: windows` 的 python 工具链步骤）没法从这张锁 bootstrap 出 CI 工具链，只能退回不带 `--require-hashes` 的宽松安装——那正好绕过本仓为 #27/#35/#39 设的那道防线。
+  两条出路都有代价：①按 Windows 面重算 hash 链（`pip-compile` 加 `--emit-index-url`/多平台，或 `--platform windows` 解析后合并散列）⇒ 锁会长一片与本批无关的 diff，正是 SOP 要避免的「没人能审」；②把「本锁只在 Linux 安装」写进 `requirements-ci.in` 头注与 CLAUDE.md 的本地验证段 ⇒ 零 diff，但承认 Windows 开发者拿不到可验证的工具链。⇒ 属处置口径，先登记不顺手做。
 ### 5.4 RS（Rust 核心）
 
 - Q25 R9-RS-1 | P2 | **部分闭环（R9-B38 / §3.38）；剩余半边的严重性按 §3.74 实测重判——本机 Runtime 下六条通道的引擎默认是 100µs 网格而非 µs**：挂载形态与描述符这一半已三端合一（原型级挂载 + 保留原生描述符 + 实例兜底），三端同形判据落在 `core/rust-policy-core/tests/timer_parity.rs`；六条高解析通道两端零包裹的**剩余半边**续登为 Q57 R9-CS-17（不顺手做：rAF/getEntries*/Event.timeStamp 的包裹是站点可观察的行为变更，只能由真机冒烟证明）。原条目：Q25 R9-RS-1 | P2 | `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:207` +
@@ -5366,6 +5370,36 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
     `Imports must be ordered … with "java", "javax", "kotlin" and aliases in the end`
     ——本仓布局是 **`org.*` 在前、`java.*` 在后**（`OriginPolicyTest.kt:3-11` 就是那份已过 CI 的顺序）。
     记这条是因为它反直觉：一个人如果把「字典序」当规则，改完还会再犯一次。
+
+### 3.97 R9-B97（2026-10-21，CI 依赖面）：certifi 的安全 bump——顺带量出「一条锁目带两个散列」其实是放宽匹配
+
+1. 触发点是 #238（下一批，Stage-8 桌面 A/B）的 CI，不是代码：`audit` job 跑
+   `pip-audit -r requirements-ci.txt`，报 `certifi 2026.7.22 → PYSEC-2026-4320`（Fix Versions 2026.10.19）。
+   这一步是硬失败（不像 legacy dev 那两条降成 `::warning::`），所以**重跑不自愈**，任何 PR 都会被它拦住。
+2. 覆盖面按 OSV 直接核对而不是只信报告：`certifi 2026.7.22` 在 OSV 上有 **2 条**公告
+   （`GHSA-6q48-6c7w-9gw2` + `PYSEC-2026-4320`），pip-audit 只报了 PYSEC 那一条 ⇒ 工具的覆盖面
+   不等于上游全集，台账按 OSV 两条记；`2026.10.19` 查回 **0 条**。
+3. 为什么只能显式改锁：certifi 是 `requests` 的传递依赖，不在 `requirements-ci.in` 的顶层 pin 里；
+   而 `requirements-ci.in` 头注与 `tests/python/relock_sop_test.py` 定的规程是「**增量重锁、复用既有 pin**
+   （最小 diff）」——这正是 #27/#35/#39 三连坏 PR 之后刻意保守的地方。于是 dispatch 重锁**不会**
+   自己把它抬到新版，安全 bump 必须手改锁条目并重算散列。改后 diff 只有 3 行（版本 + 两条 sha256），
+   散列取自 PyPI 官方 JSON 并按既有升序排列。
+4. 验证分两步，都能红：①把锁内那三行**原样**喂给临时 venv 的 `pip install --no-deps --require-hashes`
+   ⇒ `EXIT=0`，装上的 `certifi-2026.10.19.dist-info/METADATA` 写着 `Version: 2026.10.19`；
+   ②OSV 直接核对两版（旧 2 条 / 新 0 条）。**整锁的本机复现不通，而且不通得有理**：
+   `pip install --require-hashes -r requirements-ci.txt` 在临时 CPython 3.12 venv 里 `EXIT=1`，
+   报 `colorama>=0.3.9 … (from bandit==1.9.4->-r requirements-ci.txt (line 85))` ——
+   锁里 `grep -c colorama` = **0**，它是 bandit 在 **Windows** 上的传递依赖，Linux CI 用不到它。
+   所以这条不是本批引入、也不是本批能顺手补的（补它要按 Windows 面重算整条 hash 链），
+   新登 **Q73 R9-DEPS-5** 记账。本批对 certifi 的结论只依赖上面①②两步，各自都证过能红。
+5. 反向控制里量到一条值得记的机制事实：**只改两个散列中的这一个，pip 照装（`EXIT=0`）**——
+   一条锁目带多个 `--hash=` 时是「任一匹配即放行」，所以多钉一个散列不是加严而是**放宽**匹配面；
+   只有把两条都改错才 `EXIT=1` 并报 `DO NOT MATCH`。本仓锁条目普遍带 wheel+sdist 两条，
+   这条事实适用于全部（写在这儿，免得下一个人以为多钉一条 hash 更保险）。
+6. 影响面与本批不动的东西：不改 `.in`、不改任何判定面、不动 Gradle/dotnet 锁。
+   #238（Stage-8 A/B 那批）等本 PR 合入后把批次号顺延为 **R9-B98 / §3.98** 再复跑——
+   批次号按合并时序排，不让读者看到 98 比 97 先落地。
+
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）
