@@ -1204,10 +1204,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   R9-B74 为量六条通道分辨率新增的只读探针 `windows/tools/WebView2SdkSurfaceProbe/TimerSurfaceProbe.cs:169`、`:203`
   有 2 处代码命中（第三处 `:14` 是注释，按剔注释口径不算），那是**测量面**、不在任何注入路径上）。第十二节 B2 余量段「三端一致地如此」在此出口为假。
 
-  **R9-B97 更新严重性依据**：六条通道的「裹 vs 不裹」已量成数字（§3.97 第 4 点的表）。关键不在 100µs→1ms 的交换值，而在**jitter 把这笔交换基本抵消了**（最小步进 0.000095ms、小数位 13 位），且包裹本身一行可检。裁决面拆给 Q72 R9-RS-14，本行保留「剩余半边未做」的事实。
+  **R9-B98 更新严重性依据**：六条通道的「裹 vs 不裹」已量成数字（§3.98 第 4 点的表）。关键不在 100µs→1ms 的交换值，而在**jitter 把这笔交换基本抵消了**（最小步进 0.000095ms、小数位 13 位），且包裹本身一行可检。裁决面拆给 Q72 R9-RS-14，本行保留「剩余半边未做」的事实。
 
 - Q72 R9-RS-14 | P2（**待裁决**：关 jitter 是加严，但它改站点可观察的小数位形态） | `core/rust-policy-core/src/timer_prec.rs::inject_script`（默认配置 1000µs + jitter，逐字节钉在 `contracts/timer-stage8-script.js`）↔ `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:203`（出货的同型 jitter）↔ `windows/tools/WebView2SdkSurfaceProbe/TimerAbProbe.cs`（A/B/C 三组数字的出处）：
-  R9-B97 桌面实测把「要不要裹六条通道」拆成两件事：①裹本身——一行 `String(Performance.prototype.now)` 即可检出（`native code` 消失），今天 Windows 已因 Stage 8 处于该形态；②jitter——它把 1ms 网格重新打成 13 位小数、最小步进从 0.1ms 掉到 0.000095ms，**等于把防护买回来的分辨率又花掉**。关掉 jitter（同一脚本一个布尔）是量到的唯一真降位数形态：`nowMin`=1ms 整、`evtFrac`／`markFrac`=integer。
+  R9-B98 桌面实测把「要不要裹六条通道」拆成两件事：①裹本身——一行 `String(Performance.prototype.now)` 即可检出（`native code` 消失），今天 Windows 已因 Stage 8 处于该形态；②jitter——它把 1ms 网格重新打成 13 位小数、最小步进从 0.1ms 掉到 0.000095ms，**等于把防护买回来的分辨率又花掉**。关掉 jitter（同一脚本一个布尔）是量到的唯一真降位数形态：`nowMin`=1ms 整、`evtFrac`／`markFrac`=integer。
   要用户给的只有一句话：`performance.now` 上这个 jitter 留不留。留 ⇒ 六条通道照现在这样不裹也没有损失分辨率可言（因为裹了也白裹）；不留 ⇒ 顺带把出货的 Windows Stage 8 与核心一起变严，但页内动画与性能面板的时间戳会从「亚毫秒带随机尾数」变成「整毫秒」，属站点可观察。裁决前不动判定面。
 - ~~Q26 R9-RS-2~~ **本批已确证并落地**（§二 裁决行 + §3.12）：两条处方里选了第二条
   ——入库件已按钉住的 1.99.0 + uniffi 0.32.2 重 derive（1,910→2,005 行，diff 只有
@@ -1525,7 +1525,7 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
   前提已做成能红的判据（`tests/python/injected_js_parity_test.py` +3 条），不是留一段推理。
   所以 Q57 剩下的只有①那一半，仍**需设备/桌面冒烟**。
 
-  **R9-B97 桌面 A/B 实测**（本机 WebView2，注入 `contracts/timer-stage8-script.js`）：「需桌面冒烟」这句前提今天兑现——不裹 `nowMin`=0.1ms、裹上（jitter 开）反而 0.000095ms 且小数位更花，把 `JITTER_ENABLED` 改 false 才是 1ms 整＋整数尾数；两种裹法都让 `String(Performance.prototype.now)` 里的 `[native code]` 消失（Windows 出货形态 `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:203` 同型，早已如此）。剩下的不是量不了，是 Q72 那个裁决。另：本行的 Stage 8 出处改由符号锚判定（`windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs::BuildScript`）。
+  **R9-B98 桌面 A/B 实测**（本机 WebView2，注入 `contracts/timer-stage8-script.js`）：「需桌面冒烟」这句前提今天兑现——不裹 `nowMin`=0.1ms、裹上（jitter 开）反而 0.000095ms 且小数位更花，把 `JITTER_ENABLED` 改 false 才是 1ms 整＋整数尾数；两种裹法都让 `String(Performance.prototype.now)` 里的 `[native code]` 消失（Windows 出货形态 `windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs:203` 同型，早已如此）。剩下的不是量不了，是 Q72 那个裁决。另：本行的 Stage 8 出处改由符号锚判定（`windows/src/Aegis.Windows.App/WebView/FingerprintShield.cs::BuildScript`）。
 
 - ~~Q66 R9-SH-22~~ **本批已闭**（R9-B72 / §3.72：IPv6 段左右邻 21 条进同一张跨端向量，两端逐条跑、**0 条红**——两侧实现不同（Android 掩码位／Windows .NET 属性）但今天同结论，此前没有判据说这件事，现在有了；authority 叠加形态 `user@[fe80::1]`、`user@169.254.169.254:8080` 也进了表，「收成每端一份实现」按字面在两种语言里做不到，能判的是行为对账，而它已经存在。原条目 ↓
   Q66 R9-SH-22 | **P3（R9-B71 已闭第一半 §3.71，第二半带理由仍开）** | `windows/src/Aegis.Windows.App/Broker/ReservedAddressBoundary.cs:54`（`HasNumericAuthority`）↔ `android/broker/src/main/kotlin/com/aegis/broker/ReservedAddressBoundary.kt:181`（`hasNumericAuthority`）↔ `android/broker/src/test/kotlin/com/aegis/broker/ReservedAddressBoundaryTest.kt:85`（`adjacentAddressesOnBothSidesOfEverySegment`）↔ `contracts/vectors/reserved-address-boundary.json`：
@@ -5408,9 +5408,10 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    只有把两条都改错才 `EXIT=1` 并报 `DO NOT MATCH`。本仓锁条目普遍带 wheel+sdist 两条，
    这条事实适用于全部（写在这儿，免得下一个人以为多钉一条 hash 更保险）。
 6. 影响面与本批不动的东西：不改 `.in`、不改任何判定面、不动 Gradle/dotnet 锁。
-   #238（Stage-8 A/B 那批）等本 PR 合入后把批次号顺延为 **R9-B98 / §3.98** 再复跑——
-   批次号按合并时序排，不让读者看到 98 比 97 先落地。
-### 3.97 R9-B97（2026-10-21，Q57/Q25 的「需桌面冒烟」前提）：把核心 Stage-8 变成可重跑的契约金样本，量出 A/B 两组数字
+   下一批 #238（Stage-8 A/B）随之顺延为 **R9-B98 / §3.98**——批次号按合并时序排，
+   不让读者看到 98 比 97 先落地。**（记录：#238 落地时只改了正文自指、漏改小节标题，
+   master 上因此短暂出现两个 `### 3.97`；由 R9-B99 / §3.99 修掉并补上门禁。）
+### 3.98 R9-B98（2026-10-21，Q57/Q25 的「需桌面冒烟」前提）：把核心 Stage-8 变成可重跑的契约金样本，量出 A/B 两组数字
 
 1. 这条批次做的事只有一件：**把「只能由真机/桌面冒烟证明」这句话变成数字**。Q57 剩的半边、
    Q25 的严重性判断，都吊在同一个没人量过的数上。本机跑得动 WebView2，所以这不是设备问题，
@@ -5451,6 +5452,34 @@ native-policy-artifacts / release-windows 各抄一整行 `dotnet test … -r wi
    数字先交给 Q72。执行面：`cargo test --test timer_parity` 6 条全绿（含新钉的金样本逐字节对账），全量 `cargo test`／`clippy`／`fmt --check` 各 `EXIT=0`；探针跑**两轮**各 `EXIT=0`（第二轮只翻 `JITTER_ENABLED`，其 B 列即上表的 C）；
    `scripts/verify_ledger_anchors.py` 的符号锚棘轮随新活行 3 → 4 同批上调；台账门禁逐条读退出码。
 
+
+### 3.99 R9-B99（2026-10-21，自查 + #240 后果）：我自己 rebase 造出两个 `### 3.97`，而 #240 把一张锁的头注变成假话——两件事都补成能红的
+
+1. **第一件是我自己造成的**（不遮）：R9-B98 那批 rebase 到 #239 之后，我只改了正文里的自指，
+   **漏改了小节标题**，于是 master 上短暂并存两个 `### 3.97`（5385 是 certifi，5413 是 Stage-8）。
+   直接后果不是难看而是**指针落错**：Q25 行里那句「已量成数字（§3.97 第 4 点的表）」当时指的是
+   后一节，读者按编号跳过去看到的是 certifi 的验证步骤——这正是 §3.50 记过的病
+   （「引用一个不存在的小节，比不写指针更坏」的变体：引用一个**有两条**的小节）。
+   现修法：Stage-8 一节改回 §3.98，四处自指（§3.98 标题、Q25／Q57 两行、CSV 的 finding 文本）同批改。
+2. **补一条判据让它不可能再发生**：`scripts/verify_ledger_queue_status.py` 现在除了「划线的行必须有能解析的
+   `§3.nn` 指针」，还判**同一份台账里 `### 3.nn` 编号唯一**。判红方向是双向可注入的：重复编号红、
+   跳号不红（历史批次被撤销过编号，跳号是常态，把它判红只会逼人回填假编号）。
+   用例两条：`test_duplicate_section_number_is_reported` 与
+   `test_gaps_in_section_numbering_are_not_judged`（后者是防过严的对照，红过才写得住）。
+3. **第二件是合并动作造成的**：#240（Dependabot）把
+   `legacy/windows-pywebview/requirements-dev.txt` 的 `Pillow 12.3.0 → 13.0.0` 合进主干，
+   而**那张锁自己的头注写着**「（pyinstaller/Pillow 是归档应用打包专用，根锁无对应面，
+   **维持原 pin**。）」——合并落地的那一刻，这句话就成了假话。核过的事实三条：该文件
+   `grep -c "hash=sha256"` = **0**（不存在"只改版本没重算散列"的坑）、安装它的
+   `legacy-python-guard.yml:88` 用的是不带 `--require-hashes` 的宽松安装、PY-220 的双锁对齐断言
+   只比 `ruff/mypy/bandit/pytest` 四个键（pillow 不在比对面，所以它的 CI 全绿不是巧合也不是漏判）。
+   处置：不 revert（用户给的话是「合并」），把那句话改成记实——抬的是 **dev 面**的 Pillow、
+   pyinstaller 仍维持原 pin、根锁无对应面故不触发 PY-220。
+4. 同一族的第三件小事一并修掉：master 的台账里那一行 `>>>>>>> origin/master`（Q74 已登记）
+   由 R9-B98 清掉；本批给它补上门禁属下一件事，**不混进来**——现在做的只有"编号唯一"这一条，
+   因为它就是本批自己踩出来的。
+5. 执行面：`pytest tests/python` 全套、四道文档门禁、队列状态／锚点／下界／执行面登记表各读
+   被测命令自身退出码（逐条见提交信息）。
 
 ## 六、复核后判定为不成立（留此防重复上报）
 - **「入库的 UniFFI Python 绑定（`core/rust-policy-core/bindings/aegis_policy_core.py`，2004 行）

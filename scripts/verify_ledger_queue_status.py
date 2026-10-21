@@ -19,6 +19,10 @@
 - 未划线的行必须含一个**开放状态词**（词汇表见 `OPEN_STATE_WORDS`）：待裁决 / 待定稿 / 待设备 /
   部分闭环 / 需给话 …。没有状态词的开放行＝下一个读者无法判断它到底要不要动手。
 - 划线的行必须含至少一个能在同一文件里解析到的 `§3.nn` 指针。
+- **同一份台账里 `### 3.nn` 编号必须唯一**（R9-B99）：编号重复时「§3.nn 指针」仍然能解析到东西，
+  却可能指到另一批——R9-B98 rebase 时就漏改过标题，master 上短暂并存两个 `### 3.97`，
+  而 Q25 行那句「见 §3.97 第 4 点的表」当时指的是后一节。跳号**不判**（撤销过编号是常态，
+  判跳号只会逼人回填假编号）。
 - 判定面塌缩（一份带 `## 五、` 标题的台账里一条队列行都数不出来）⇒ 退出 2，不判「通过」。
 
 退出码：0=通过 / 1=状态词缺失或指针悬空 / 2=环境或判定面异常。
@@ -27,6 +31,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,8 +100,14 @@ def queue_blocks(text: str) -> list[tuple[str, str]]:
 
 
 def violations(text: str) -> list[str]:
-    heads = set(HEADING.findall(text))
+    found = HEADING.findall(text)
+    heads = set(found)
     problems: list[str] = []
+    for number, count in sorted(Counter(found).items()):
+        if count > 1:
+            problems.append(
+                f"同一份台账里 `### {number}` 出现 {count} 次——`§{number}` 指针仍然解析得到，"
+                f"但读者不知道指哪一节（跳号不算违规，重复才是）")
     for header, block in queue_blocks(text):
         pointers = set(POINTER.findall(block))
         if STRUCK.match(header):
