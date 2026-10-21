@@ -169,3 +169,25 @@ fn all_three_ends_share_the_same_clamp_form() {
         }
     }
 }
+
+/// R9-B97：桌面 A/B 冒烟注入的就是这份金样本——`TimerPrecision::new()` 的默认配置
+/// （1000µs + jitter）必须与 `contracts/timer-stage8-script.js` **逐字节相同**。
+///
+/// 为什么要有这条：Q57 剩下的半边要的是「裹了之后站点观察到什么」的数字，而数字只有
+/// 注入**真**脚本才有意义——在探针里手写一份「代表形态」量的是我的重写，不是核心。
+/// 金样本因此既是测量输入也是契约：核心脚本一改（精度、jitter、单调钳位、描述符形态），
+/// 这条先红，逼着同批重跑冒烟并重记数字，而不是让台账里的结论继续引用旧字节。
+#[test]
+fn stage8_golden_matches_the_generated_script_byte_for_byte() {
+    let golden = repo_file("../../contracts/timer-stage8-script.js");
+    let generated = TimerPrecision::new().inject_script();
+    assert_eq!(
+        golden,
+        format!(
+            "{generated}
+"
+        )
+        .as_str(),
+        "核心 Stage-8 脚本与金样本漂移——桌面 A/B 冒烟的数字不再代表这份字节，须同批重跑并重记台账"
+    );
+}

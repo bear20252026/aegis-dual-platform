@@ -47,7 +47,10 @@ internal static class Probe
                 "--redirect" => RedirectProbe.Run(),
                 // Q57/Q25：六条高解析通道在引擎默认下的分辨率读数（同样只在本机/桌面跑）。
                 "--timers" => TimerSurfaceProbe.Run(),
-                _ => Fail($"未知模式 {mode}（--surface / --redirect / --timers）"),
+                // R9-B97：同一组读数在**注入核心 Stage-8 金样本之后**的对照——
+                // 「裹了站点会看到什么」的两个数字，Q57 那句话要的就是它。
+                "--timers-ab" => TimerAbProbe.Run(args),
+                _ => Fail($"未知模式 {mode}（--surface / --redirect / --timers / --timers-ab）"),
             };
         }
         catch (Exception e)
