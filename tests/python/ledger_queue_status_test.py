@@ -143,3 +143,26 @@ def test_queue_row_count_is_not_collapsed() -> None:
     assert len(blocks) >= 40, f"§五 只数出 {len(blocks)} 条队列行——提取口径坏了"
     struck = [h for h, _ in blocks if re.match(r"^- ~~Q\d+", h)]
     assert len(struck) >= 30, f"划线的行只有 {len(struck)} 条，与落地规模不符"
+
+def test_duplicate_section_number_is_reported() -> None:
+    """同一个 `### 3.nn` 出现两次 ⇒ 判红：`§3.nn` 指针照样解析得到，但没人知道指哪一节。"""
+    text = HEAD + """- ~~Q20 R9-XX-20~~ **本批已闭（§3.5）** | P2 | 正文
+
+### 3.5 R9-B5：甲批
+正文
+
+### 3.5 R9-B5：乙批
+正文
+"""
+    found = g.violations(text)
+    assert len(found) == 1 and "出现 2 次" in found[0], found
+
+
+def test_gaps_in_section_numbering_are_not_judged() -> None:
+    """反向控制：跳号不判红——历史上撤销过编号，判跳号只会逼人回填一个假编号。"""
+    text = HEAD + """- ~~Q21 R9-XX-21~~ **本批已闭（§3.9）** | P2 | 正文
+
+### 3.9 R9-B9：只有这一节
+正文
+"""
+    assert g.violations(text) == []

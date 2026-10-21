@@ -5,7 +5,11 @@
 # ruff 0.16.3→0.16.9 / mypy 2.3.0→2.3.1 / pytest 9.0.3→9.1.1。
 # legacy-python-guard 用本锁装工具却跑活跃树门禁（scripts/release/contracts/
 # agent），双源版本漂移即两套规则口径——对齐后 guard 与根锁同版本。
-# （pyinstaller/Pillow 是归档应用打包专用，根锁无对应面，维持原 pin。）
+# （pyinstaller/Pillow 是归档应用打包专用，根锁无对应面 ⇒ 不参与 PY-220 的双锁对齐断言，
+#   该断言只比 ruff/mypy/bandit/pytest 四个键。）
+# 2026-10-21 #240（Dependabot）：Pillow 12.3.0→13.0.0（清掉 dev 面 8 条告警，该面按 SP-216
+#   本就只告警不阻断）；pyinstaller 维持原 pin。本文件零 --hash=，安装走
+#   legacy-python-guard.yml 的宽松 `pip install -r`，故无散列链要重算（台账 §3.99 第 3 点）。
 # B7（第八轮 2026-10-08）：ruff 0.16.9→0.16.10 / mypy 2.3.1→2.4.0 随根
 # requirements-ci.in 同批 bump（PY-220 的对齐口径——两把锁必须同版本，否则
 # legacy-python-guard 与活跃树门禁跑的是两套规则）。
