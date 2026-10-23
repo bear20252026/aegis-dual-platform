@@ -54,7 +54,7 @@ jobs:
       # SP-238（2026-10-02 审计）：注释 AGP 9.3→9.4.1 更正（libs.versions.toml
       # 单源 agp = "9.4.1"，原注释已漂移）
       - name: 安装 JDK 21（AGP 9.4.1 要求 ≥17；detekt/ktlint 兼容）
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: "21"

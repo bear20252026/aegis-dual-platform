@@ -73,7 +73,7 @@ jobs:
         with:
           toolchain: 1.99.0
           targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-057)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2 (PY-057)
         with:
           workspaces: core/rust-policy-core
       # PY-193（2026-09-26 审计）：此处重复的第二个 Swatinem/rust-cache 步骤
@@ -170,13 +170,13 @@ jobs:
       # PY-057（2026-09-23 审计·V1 核验批）：原批把缓存写进了 build-windows
       # （且重复两份，后被 PY-193 去重）——build-android 从未补上，cargo-ndk
       # 交叉编译每次冷跑。此处补齐。
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-057)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2 (PY-057)
         with:
           workspaces: core/rust-policy-core
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4 (SP-178 重 pin)
         with:
           packages: 'ndk;28.0.12433566'
-      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: '21'
