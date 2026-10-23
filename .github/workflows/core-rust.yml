@@ -40,7 +40,7 @@ jobs:
         with:
           toolchain: 1.99.0
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-053)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2 (PY-053)
         with:
           workspaces: core/rust-policy-core
       - name: cargo fmt (蓝图阶段 F——cargo fmt 门禁)
@@ -107,7 +107,7 @@ jobs:
         with:
           # cargo-fuzz 的 sanitizer 插桩依赖 nightly 编译器能力
           toolchain: nightly
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: core/rust-policy-core
       - name: Install cargo-fuzz (版本钉 0.13.2——升级随 weekly 批显式 bump)

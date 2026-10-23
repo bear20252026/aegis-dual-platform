@@ -41,7 +41,7 @@ jobs:
 
       # AGP 9.4.1 要求 ≥17；配置解析即需 JDK（依赖图来自 gradle 依赖解析）
       - name: 安装 JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: "21"
