@@ -20,7 +20,7 @@
 # 无 CVE」的版本跟进，二者都被本锁逐条 --hash= 钉住 ⇒ 改 pin 必整链重算，由
 # Dependency-Retlock（dispatch-only，ecosystem=python）承接；增量口径见该 workflow
 # 的「Python 重锁」步骤注记与 tests/python/relock_sop_test.py。
-ruff==0.17.0
+ruff==0.17.1
 bandit==1.9.4
 mypy==2.4.0
 pytest==9.1.1
