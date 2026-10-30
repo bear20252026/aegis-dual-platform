@@ -43,7 +43,7 @@ jobs:
       - uses: ./.github/actions/pin-check
       # SP-196（2026-10-01 审计）：build_review_package.py 依赖镜像预装
       # python3（镜像变更即碎，PY-065 同型）——显式固化
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: 评审包生成器自检（dry-run 到临时目录）
@@ -116,7 +116,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-196（2026-10-01 审计）：verify_checksum_json / verify_release 依赖
       # 镜像预装 python——显式固化（PY-065 同型）
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
 
@@ -215,7 +215,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-196（2026-10-01 审计）：build_review_package / write_checksum_json 等
       # 依赖镜像预装 python——显式固化（PY-065 同型）
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
 

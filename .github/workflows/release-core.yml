@@ -50,7 +50,7 @@ jobs:
         with:
           toolchain: 1.99.0
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2（quality-gate 编译缓存）
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2（quality-gate 编译缓存）
         with:
           workspaces: core/rust-policy-core
       - name: cargo fmt --check
@@ -79,7 +79,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-196（2026-10-01 审计）：build_metadata.py 依赖镜像预装 python
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - uses: ./.github/actions/rust-toolchain-heal
@@ -88,7 +88,7 @@ jobs:
           toolchain: 1.99.0
       # PY-054（2026-09-23 审计·V1 核验批）：原批把缓存错加到 quality-gate（另
       # 一 job 不共享 runner）——被点名的 build job 冷编译依旧。此处补齐。
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-054)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2 (PY-054)
         with:
           workspaces: core/rust-policy-core
       - name: Build release library
