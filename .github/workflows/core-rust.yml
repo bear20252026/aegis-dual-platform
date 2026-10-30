@@ -40,7 +40,7 @@ jobs:
         with:
           toolchain: 1.99.0
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-053)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2 (PY-053)
         with:
           workspaces: core/rust-policy-core
       - name: cargo fmt (蓝图阶段 F——cargo fmt 门禁)
@@ -54,7 +54,7 @@ jobs:
         run: cargo test --locked --all-features
       # PY-065 同口径：不依赖 runner 预装 python（下一步只跑 stdlib 门禁脚本）
       - name: 安装 Python（UniFFI 绑定面对账用——R9-RS-2）
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Generate Kotlin and Python bindings from locked UniFFI toolchain
@@ -107,7 +107,7 @@ jobs:
         with:
           # cargo-fuzz 的 sanitizer 插桩依赖 nightly 编译器能力
           toolchain: nightly
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: core/rust-policy-core
       - name: Install cargo-fuzz (版本钉 0.13.2——升级随 weekly 批显式 bump)

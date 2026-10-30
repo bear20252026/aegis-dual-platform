@@ -68,7 +68,7 @@ jobs:
       # SP-196（2026-10-01 审计）：verify_versions / build_metadata /
       # write_checksum_json / native_artifact_manifest 依赖镜像预装 python——
       # 显式固化（PY-065 同型 5 处之一）
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - uses: ./.github/actions/rust-toolchain-heal
@@ -76,11 +76,11 @@ jobs:
         with:
           toolchain: 1.99.0
           targets: aarch64-linux-android  # 单架构：arm64-v8a（99% 真机）
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2 (PY-056)
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.2 (PY-056)
         with:
           workspaces: core/rust-policy-core
       - name: Install JDK 21
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: "21"
@@ -356,7 +356,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-196（2026-10-01 审计）：write_checksum_json 依赖镜像预装 python
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2 (SP-178 重 pin)
@@ -414,7 +414,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
       # SP-196（2026-10-01 审计）：verify_checksum_json 依赖镜像预装 python
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2 (SP-178 重 pin)
