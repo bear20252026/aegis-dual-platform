@@ -166,6 +166,9 @@ windows/src/Aegis.Windows.App/
 2. **M4「验收：parity 清单 100%」按实树更正为「除 1 项外」**：WebView2
    `NewBrowserVersionAvailable` 的「保存状态/通知/受控重启」从未实现（无 `RuntimeUpdater.cs`，
    正典树零该事件订阅），第八轮 B8 起在 parity 清单里作为未勾验代码项登记。
+   **2026-11-05 更新**：`RuntimeUpdater.cs` + `RuntimeRestartStateStore.cs` 已实现，
+   覆盖事件订阅/状态保存/UI 通知横幅/受控重启/状态恢复全流程，18 个单元测试覆盖核心逻辑。
+   M4 代码项已全部实现，仅剩真机验收待执行。
 3. **M4 段的两条接线描述已过期**：`ApprovalManager` 已删除（WB-122，pending 态由
    `NavigationConfirmationGate` 与 Rust 核心持有）；KillSwitch 的「接线」并不等于全链——
    NTP 宿主桥与前进/后退/重载等 6 个导航入口不查该开关，Android 侧全树零 KillSwitch 代码
