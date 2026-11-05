@@ -74,6 +74,8 @@ public partial class MainWindow : Window
     // CS-393（2026-10-02 审计）：会话重建期抑制「集合清空即关窗」——
     // RestoreSavedSession 先关全部旧标签再重建，瞬时空集不得关窗
     private bool _restoringSession;
+    // ADR-001：WebView2 Runtime 更新处理器（共享环境订阅 NewBrowserVersionAvailable）
+    private WebView.RuntimeUpdater? _runtimeUpdater;
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
@@ -160,6 +162,44 @@ public partial class MainWindow : Window
             TimeSpan.FromMilliseconds(SessionSaveDebounceMs));
         RestoreWindowState();
         StartSleepTimer();
+        // ADR-001：订阅 WebView2 Runtime 更新事件（共享环境创建后接入）
+        InitializeRuntimeUpdaterAsync();
+    }
+
+    /// <summary>
+    /// 初始化 RuntimeUpdater——异步获取共享环境并订阅 NewBrowserVersionAvailable。
+    /// 事件触发时记录日志并可选通知 UI（当前实现仅留痕，UI 通知待后续迭代）。
+    /// </summary>
+    private async void InitializeRuntimeUpdaterAsync()
+    {
+        try
+        {
+            var env = await WebView.WebViewEnvironment.SharedAsync();
+            _runtimeUpdater = new WebView.RuntimeUpdater(
+                env,
+                shouldRestart: () => false, // 生产：用户手动重启
+                onUpdateAvailable: () =>
+                {
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        // TODO: UI 通知（横幅/气泡提示「WebView2 Runtime 更新可用，重启以应用」）
+                        SecurityLog.Write("[runtime-updater] UI 通知已触发（待实现）");
+                    });
+                },
+                onRestartRequested: () =>
+                {
+                    Dispatcher.BeginInvoke(() =>
+                    {
+                        SecurityLog.Write("[runtime-updater] 重启请求已触发（当前不自动重启）");
+                    });
+                });
+            _runtimeUpdater.Subscribe();
+            SecurityLog.Write("[runtime-updater] 已订阅 WebView2 Runtime 更新事件");
+        }
+        catch (Exception ex)
+        {
+            SecurityLog.Write($"[runtime-updater] 初始化失败: {ex.GetType().Name}: {ex.Message}");
+        }
     }
 
     /// <summary>截断标题而不劈开代理对（emoji 等——此前 b.Title[..14] 可把
