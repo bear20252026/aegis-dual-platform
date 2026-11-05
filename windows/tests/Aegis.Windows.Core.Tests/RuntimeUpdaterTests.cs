@@ -1,6 +1,7 @@
 namespace Aegis.Windows.Core.Tests;
 
 using System;
+using System.IO;
 using System.Threading;
 using Aegis.Windows.WebView;
 using Microsoft.Web.WebView2.Core;
@@ -179,5 +180,90 @@ public class RuntimeUpdaterTests
     {
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => new RuntimeUpdater(null!));
+    }
+
+    [Fact]
+    public void OnNewBrowserVersionAvailable_ShouldSaveState()
+    {
+        // Arrange
+        var mockEnv = new Mock<CoreWebView2Environment>();
+        var statePath = Path.Combine(Path.GetTempPath(), $"aegis-test-{Guid.NewGuid():N}.json");
+        var stateStore = new RuntimeRestartStateStore(statePath);
+        var updater = new RuntimeUpdater(mockEnv.Object, stateStore: stateStore);
+        updater.Subscribe();
+
+        try
+        {
+            // Act
+            mockEnv.Raise(e => e.NewBrowserVersionAvailable += null, EventArgs.Empty);
+
+            // Assert
+            Assert.True(stateStore.HasPendingRestart(), "事件触发后应保存状态");
+            var state = stateStore.LoadPendingRestart();
+            Assert.NotNull(state);
+            Assert.Equal("runtime-update", state.Reason);
+        }
+        finally
+        {
+            updater.Dispose();
+            try { File.Delete(statePath); } catch { }
+        }
+    }
+
+    [Fact]
+    public void RequestControlledRestart_ShouldSaveStateAndInvokeCallback()
+    {
+        // Arrange
+        var mockEnv = new Mock<CoreWebView2Environment>();
+        var statePath = Path.Combine(Path.GetTempPath(), $"aegis-test-{Guid.NewGuid():N}.json");
+        var stateStore = new RuntimeRestartStateStore(statePath);
+        var restartRequested = false;
+        Action onRestartRequested = () => restartRequested = true;
+
+        var updater = new RuntimeUpdater(
+            mockEnv.Object,
+            stateStore: stateStore,
+            onRestartRequested: onRestartRequested);
+
+        try
+        {
+            // Act
+            updater.RequestControlledRestart();
+
+            // Assert
+            Assert.True(stateStore.HasPendingRestart(), "受控重启应保存状态");
+            Assert.True(restartRequested, "应触发重启回调");
+        }
+        finally
+        {
+            updater.Dispose();
+            try { File.Delete(statePath); } catch { }
+        }
+    }
+
+    [Fact]
+    public void RequestControlledRestart_ShouldSaveCorrectReason()
+    {
+        // Arrange
+        var mockEnv = new Mock<CoreWebView2Environment>();
+        var statePath = Path.Combine(Path.GetTempPath(), $"aegis-test-{Guid.NewGuid():N}.json");
+        var stateStore = new RuntimeRestartStateStore(statePath);
+        var updater = new RuntimeUpdater(mockEnv.Object, stateStore: stateStore);
+
+        try
+        {
+            // Act
+            updater.RequestControlledRestart();
+
+            // Assert
+            var state = stateStore.LoadPendingRestart();
+            Assert.NotNull(state);
+            Assert.Equal("runtime-update", state.Reason);
+        }
+        finally
+        {
+            updater.Dispose();
+            try { File.Delete(statePath); } catch { }
+        }
     }
 }

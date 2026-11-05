@@ -76,6 +76,8 @@ public partial class MainWindow : Window
     private bool _restoringSession;
     // ADR-001：WebView2 Runtime 更新处理器（共享环境订阅 NewBrowserVersionAvailable）
     private WebView.RuntimeUpdater? _runtimeUpdater;
+    // ADR-001：Runtime 重启状态存取器（独立于会话库，专用于 Runtime 更新重启场景）
+    private readonly WebView.RuntimeRestartStateStore _runtimeStateStore = new();
 
     private const string HomeUrl = Chrome.Ntp.NtpAssets.Url;
 
@@ -168,7 +170,7 @@ public partial class MainWindow : Window
 
     /// <summary>
     /// 初始化 RuntimeUpdater——异步获取共享环境并订阅 NewBrowserVersionAvailable。
-    /// 事件触发时记录日志并可选通知 UI（当前实现仅留痕，UI 通知待后续迭代）。
+    /// 事件触发时保存状态、显示 UI 横幅通知用户。
     /// </summary>
     private async void InitializeRuntimeUpdaterAsync()
     {
@@ -177,13 +179,14 @@ public partial class MainWindow : Window
             var env = await WebView.WebViewEnvironment.SharedAsync();
             _runtimeUpdater = new WebView.RuntimeUpdater(
                 env,
+                stateStore: _runtimeStateStore,
                 shouldRestart: () => false, // 生产：用户手动重启
                 onUpdateAvailable: () =>
                 {
                     Dispatcher.BeginInvoke(() =>
                     {
-                        // TODO: UI 通知（横幅/气泡提示「WebView2 Runtime 更新可用，重启以应用」）
-                        SecurityLog.Write("[runtime-updater] UI 通知已触发（待实现）");
+                        RuntimeUpdateBanner.Visibility = Visibility.Visible;
+                        SecurityLog.Write("[runtime-updater] UI 通知横幅已显示");
                     });
                 },
                 onRestartRequested: () =>
@@ -195,11 +198,75 @@ public partial class MainWindow : Window
                 });
             _runtimeUpdater.Subscribe();
             SecurityLog.Write("[runtime-updater] 已订阅 WebView2 Runtime 更新事件");
+            
+            // 检查是否有待恢复的重启状态
+            CheckPendingRuntimeRestart();
         }
         catch (Exception ex)
         {
             SecurityLog.Write($"[runtime-updater] 初始化失败: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 检查是否有待恢复的 Runtime 重启状态——应用启动时调用。
+    /// 有标记时显示恢复提示并清除标记（状态已保存，重启后可恢复会话）。
+    /// </summary>
+    private void CheckPendingRuntimeRestart()
+    {
+        var state = _runtimeStateStore.LoadPendingRestart();
+        if (state is null)
+            return;
+        
+        SecurityLog.Write($"[runtime-updater] 检测到 Runtime 更新重启标记（{state.Reason}，{state.MarkedAt:yyyy-MM-dd HH:mm:ss}）");
+        _runtimeStateStore.ClearPendingRestart();
+        
+        // 显示恢复提示（复用 RuntimeUpdateBanner 的样式，但文案不同）
+        RuntimeUpdateText.Text = "已从 Runtime 更新重启中恢复：会话已还原（如有丢失请检查标签页）。";
+        RuntimeUpdateBanner.Visibility = Visibility.Visible;
+        RuntimeUpdateRestartButton.Visibility = Visibility.Collapsed;
+        RuntimeUpdateDismissButton.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>
+    /// 「重启以应用」按钮点击——受控重启流程。
+    /// </summary>
+    private void RuntimeUpdateRestartButton_Click(object sender, RoutedEventArgs e)
+    {
+        SecurityLog.Write("[runtime-updater] 用户点击重启按钮");
+        
+        // 保存当前会话状态（已有 SessionSaveScheduler，但重启前强制刷盘）
+        _sessionSaver?.Flush();
+        
+        // 标记重启原因
+        _runtimeStateStore.MarkPendingRestart("runtime-update");
+        
+        // 触发应用重启（关闭所有窗口，App 启动时会检测标记）
+        SecurityLog.Write("[runtime-updater] 正在重启应用...");
+        Application.Current.Shutdown();
+        
+        // 启动新实例（使用相同可执行文件）
+        try
+        {
+            var exePath = System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+            if (!string.IsNullOrEmpty(exePath))
+            {
+                System.Diagnostics.Process.Start(exePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            SecurityLog.Write($"[runtime-updater] 启动新实例失败: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 「稍后」按钮点击——隐藏横幅但保留更新可用状态（下次启动时再次提示）。
+    /// </summary>
+    private void RuntimeUpdateDismissButton_Click(object sender, RoutedEventArgs e)
+    {
+        SecurityLog.Write("[runtime-updater] 用户选择稍后重启");
+        RuntimeUpdateBanner.Visibility = Visibility.Collapsed;
     }
 
     /// <summary>截断标题而不劈开代理对（emoji 等——此前 b.Title[..14] 可把
