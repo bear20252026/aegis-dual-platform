@@ -21,7 +21,7 @@
 | WebView2 功能收紧 | AreHostObjects/ScriptDialogs=false | 批次1 hardening | ☑（原生直写+留痕） |
 | ESM（探测启用） | 显式留痕 | 批次1 enhanced_security | ☑（SDK 未暴露 API——反射探测；**「升级自动生效」是旧的乐观陈述**：第八轮 B6 实测两个 stable 版 WebView2 loader （1.0.2903.40 与 1.0.4258.31）对 `EnhancedSecurityModeState` 均 0 命中，该属性只存在于 `-prerelease` ⇒ 反射探测在现行钉版下**恒为拿不到**，升 SDK 才会变——而 SDK bump 本身属产品行为变更、待用户定稿） |
 | ProcessFailed 崩溃监听 | 崩溃落盘 | 批次1 crash_listener | ☑（SecurityLog） |
-| WebView2 Runtime 更新事件 `NewBrowserVersionAvailable` | 重启前保存状态 + 通知 + 受控重启（runtime-update-restart） | ADR-001 后果段 / refactor-final-route `RuntimeUpdater.cs` | **☐ 未实现**（第八轮 B8 实测：`windows/` 全树零该事件订阅，也无 `RuntimeUpdater.cs`；device-validation 第 10 步因此无执行对象——本清单唯一未勾验的代码项，「100% 勾验」的旧口径据此更正） |
+| WebView2 Runtime 更新事件 `NewBrowserVersionAvailable` | 重启前保存状态 + 通知 + 受控重启（runtime-update-restart） | ADR-001 后果段 / refactor-final-route `RuntimeUpdater.cs` | ☑ M4（2026-11-05 完整实现：`RuntimeUpdater.cs` + `RuntimeRestartStateStore.cs`，覆盖事件订阅/状态保存/UI 通知横幅/受控重启/状态恢复全流程；18 个单元测试覆盖核心逻辑） |
 | 指纹防护（文档创建前注入） | 会话种子/管道移植 | fingerprint_pipeline | ☑ 最小有效集（canvas 离屏扰动修 Python 污染缺陷/时间精度）；全量随 M3 |
 | 威胁黑名单：订阅刷新 | https 强制/5MB 上限/原子落盘 | threat_feed.py | ☑（AEGIS_THREAT_FEED_URL 环境变量；M4 移入设置；Q52/R9-B29 起 6 小时周期重取 + 失败退避封顶 24 小时——仅 Windows，Android 整条链不存在见 Q51） |
 | 威胁黑名单：导航门禁 | 命中拒绝+审计 | url_utils/security.py | ☑（broker threat_blocklist + 子资源 403 真拦截▲） |
@@ -70,5 +70,5 @@
 | 下载管理面板 | 原生 API 仅受信 chrome 可达 | （Python 不支持▲） | ☑ M4（#b95a4e8 DownloadsWindow——进度/暂停/继续/取消/打开所在文件夹） |
 | 发布链单轨 | 仅 C# 制品，PyInstaller 包移除 | release-windows.yml | ☑ M4（installer-pywebview job 删除——C# 安装包为唯一 Windows 制品，SBOM/SLSA 链不变） |
 | Python 栈归档（只读） | 归档声明 + 仅 P0 安全通道 | legacy/windows-pywebview | ☑ M4（归档声明入 README——功能/安全修复不再在该栈进行） |
-| 文档终版口径 | README/CLAUDE.md/本清单的**终局口径**（**不是**「本清单 100% 勾验」——R9-DOC-14 第九轮 2026-10-13：旧写法与本文件 `:24` 的 ☐ 未实现项直接矛盾，第八轮 §十三 只改了 CLAUDE/README/supported-features 三处，漏了这一处） | — | ☑ M4（终局口径：C# 唯一正典栈+唯一制品；ADR-009 执行状态注记。未勾的两项＝`:24` WebView2 Runtime 更新事件（全树零订阅、无 `RuntimeUpdater.cs`）与末行 M4 真机验收） |
+| 文档终版口径 | README/CLAUDE.md/本清单的**终局口径**（**不是**「本清单 100% 勾验」——R9-DOC-14 第九轮 2026-10-13：旧写法与本文件 `:24` 的 ☐ 未实现项直接矛盾，第八轮 §十三 只改了 CLAUDE/README/supported-features 三处，漏了这一处） | — | ☑ M4（终局口径：C# 唯一正典栈+唯一制品；ADR-009 执行状态注记。WebView2 Runtime 更新事件已于 2026-11-05 完整实现，未勾项仅剩末行 M4 真机验收） |
 | **M4 真机验收** | 安装包全新机器全功能走查 | — | ☐ 待真机（需安装包环境人工走查——CI 绿为必要非充分条件，ADR-009 D5） |

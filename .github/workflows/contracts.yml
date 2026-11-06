@@ -96,6 +96,14 @@ jobs:
       # （源码里字句俱在、渲染后内容消失）。本轮实测 12 处，含两处是被脚本追加坏的行。
       - name: Markdown table shape gate (R8-DOC-19——逐行列数与表头一致)
         run: python scripts/check_markdown_tables.py
+      # Q74 R9-DOC-27（第九轮 2026-10-10）：git 冲突标记门禁——某次合并手工解冲突时
+      # 漏删标记，之后一路随 squash 进主干。读者看到它只会以为是台账自己的分隔线，
+      # 实际它的意思是「这里曾经有人没解完冲突，而且没人核对过」。三份 markdown
+      # 门禁各管一件事（链接可达/行号锚/表格列数），冲突标记在它们眼里都只是普通文本；
+      # 而本仓已记过三次「结构污染没人判」。判据必须写窄：`<<<<<<< ` 与 `>>>>>>> `
+      # 行首命中即红，`=======` 单独存在是合法的 setext 标题下划线，不能一并算。
+      - name: Git conflict marker gate (Q74 R9-DOC-27——结构污染 fail-closed)
+        run: python scripts/check_git_conflict_markers.py
       # R9-CI-4（第九轮 2026-10-10）：verify_xaml_resources.py 此前**唯一**调用点在
       # release-windows.yml，而该 workflow 只由 tag/workflow_dispatch 触发 ⇒ XAML
       # `FindResource`↔`x:Key` 对账（V3 启动崩溃类）在 PR 面零执行；它的四条 pytest

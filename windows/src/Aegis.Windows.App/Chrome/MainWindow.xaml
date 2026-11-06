@@ -386,6 +386,24 @@
       <TextBlock Foreground="White" TextWrapping="Wrap"
                  Text="⚠ 紧急终止开关已触发：全部导航与下载已冻结（重启 Aegis 后恢复）。可到 设置 → 紧急终止 查看详情。"/>
     </Border>
+    <!-- ADR-001：WebView2 Runtime 更新横幅——事件触发时显示，用户可点击重启
+         以应用更新（不强制自动重启）。横幅可关闭但重启提示保留在通知区域。 -->
+    <Border x:Name="RuntimeUpdateBanner" DockPanel.Dock="Top" Background="#FF1E3A5F" Padding="12,8"
+            Visibility="Collapsed">
+      <DockPanel>
+        <Button x:Name="RuntimeUpdateRestartButton" DockPanel.Dock="Right" Content="重启以应用" 
+                Click="RuntimeUpdateRestartButton_Click" Margin="8,0,0,0"
+                Padding="8,4" Cursor="Hand" Background="#FF3B82F6" Foreground="White" 
+                BorderThickness="0" FontWeight="SemiBold"/>
+        <Button x:Name="RuntimeUpdateDismissButton" DockPanel.Dock="Right" Content="稍后" 
+                Click="RuntimeUpdateDismissButton_Click" Margin="0,0,4,0"
+                Padding="8,4" Cursor="Hand" Background="Transparent" Foreground="#FFB3D4FF" 
+                BorderThickness="0"/>
+        <TextBlock x:Name="RuntimeUpdateText" Foreground="White" TextWrapping="Wrap" 
+                   VerticalAlignment="Center"
+                   Text="WebView2 Runtime 新版本可用：重启 Aegis 以应用更新（当前版本仍可使用）。"/>
+      </DockPanel>
+    </Border>
     <!-- M1-T2 加载指示（WebView2 不暴露页面加载进度——不定态细条，修复
          Python/Android「无加载反馈」审计缺陷的可观测部分） -->
     <ProgressBar x:Name="LoadingBar" DockPanel.Dock="Top" Height="2" IsIndeterminate="True"
