@@ -23,7 +23,7 @@
 ruff==0.17.0
 bandit==1.9.4
 mypy==2.4.0
-pytest==9.1.1
+pytest==9.2.0
 # SP-258（2026-10-02 审计）：覆盖率度量——contracts.yml/agent-redteam.yml 的
 # pytest 步骤带 --cov 出报告（不设阈值，供补测排序）；coverage 随 pytest-cov
 # 树解算（coverage[toml]>=7.10.6），不单独 pin
