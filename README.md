@@ -72,9 +72,10 @@ Aegis 是一款**双平台隐私安全浏览器**——以"边界驱动架构"�
 - **Agent/MCP 复开面**：action-catalog 单源 + 红队 fixtures——提示注入/重放/预算
   超限逐项测试（deny by default）
 
-> **Windows 终局（ADR-009，M1-M4 全部落地）**：全功能迁移完成（parity 清单代码项
-> 勾验——第八轮 B8 复核后为 **除 1 项外全部勾验**：`NewBrowserVersionAvailable`
-> Runtime 更新事件未实现，见 [feature-parity-checklist](docs/product/feature-parity-checklist.md)）；
+> **Windows 终局（ADR-009，M1-M4 全部落地）**：全功能迁移完成（parity 清单
+> **代码项已全部勾验**——含 2026-11-05 实现的 `NewBrowserVersionAvailable`
+> Runtime 更新事件处理，见 [feature-parity-checklist](docs/product/feature-parity-checklist.md)；
+> 未勾项仅剩 M4 真机验收，需安装包环境人工走查）；
 > `legacy/windows-pywebview/` 为**只读冻结归档**——仅 P0 安全缺陷经安全通道评估，
 > 功能 PR 一律拒绝。
 

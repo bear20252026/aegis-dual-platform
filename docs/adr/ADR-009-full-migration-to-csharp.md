@@ -163,12 +163,13 @@ windows/src/Aegis.Windows.App/
    **功能与安全修复一律不在该栈进行**，P0 安全缺陷**仅经安全披露通道评估**——即归档栈内
    不再直接落补丁，P1 也不在归档栈修。两者不是同一条规则；以 CLAUDE/README 的较严格者
    为操作依据，本 ADR 该句按历史决策保留。
-2. **M4「验收：parity 清单 100%」按实树更正为「除 1 项外」**：WebView2
-   `NewBrowserVersionAvailable` 的「保存状态/通知/受控重启」从未实现（无 `RuntimeUpdater.cs`，
-   正典树零该事件订阅），第八轮 B8 起在 parity 清单里作为未勾验代码项登记。
-   **2026-11-05 更新**：`RuntimeUpdater.cs` + `RuntimeRestartStateStore.cs` 已实现，
-   覆盖事件订阅/状态保存/UI 通知横幅/受控重启/状态恢复全流程，18 个单元测试覆盖核心逻辑。
-   M4 代码项已全部实现，仅剩真机验收待执行。
+2. **M4「验收：parity 清单 100%」**——该口径在 2026-11-05 后重新成立（代码项）：
+   WebView2 `NewBrowserVersionAvailable` 的「保存状态/通知/受控重启」**现已实现**
+   （`RuntimeUpdater.cs` + `RuntimeRestartStateStore.cs`，覆盖事件订阅/状态保存/
+   UI 通知横幅/受控重启/状态恢复全流程，18 个单元测试覆盖核心逻辑）；
+   历史注记：该事件曾在第八轮 B8 起作为未勾验代码项登记（当时正典树零订阅、
+   无 `RuntimeUpdater.cs`）。M4 未勾项仅剩**真机验收**（需安装包环境人工走查，
+   ADR-009 D5）。
 3. **M4 段的两条接线描述已过期**：`ApprovalManager` 已删除（WB-122，pending 态由
    `NavigationConfirmationGate` 与 Rust 核心持有）；KillSwitch 的「接线」并不等于全链——
    NTP 宿主桥与前进/后退/重载等 6 个导航入口不查该开关，Android 侧全树零 KillSwitch 代码
