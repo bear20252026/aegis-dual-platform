@@ -54,7 +54,7 @@ jobs:
       # SP-238（2026-10-02 审计）：注释 AGP 9.3→9.4.1 更正（libs.versions.toml
       # 单源 agp = "9.4.1"，原注释已漂移）
       - name: 安装 JDK 21（AGP 9.4.1 要求 ≥17；detekt/ktlint 兼容）
-        uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1 (SP-178 重 pin)
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.0.1 (SP-178 重 pin)
         with:
           distribution: temurin
           java-version: "21"
@@ -97,7 +97,7 @@ jobs:
 
       # PY-065：verify_versions 依赖 runner 预装 Python（镜像变更即碎）——显式固化
       - name: 安装 Python（verify_versions 依赖——不再依赖 runner 预装）
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: '3.12'
       - name: Verify shared product version declarations
