@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (SP-178 重 pin)
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (SP-180 更正注记)
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.0.0 (SP-180 更正注记)
         with:
           python-version: '3.12'
           # SP-201（2026-10-01 审计）：pip 缓存三口径统一（contracts 同批改
@@ -65,7 +65,7 @@ jobs:
       # （11 项告警实证产出）；本文件的 fail-closed 合入门禁保持 pip/cargo/NuGet
       # 三生态，gradle 走 alerts 持续告警通道（互补分工，终态成立）。
       - name: Setup .NET 10 (NuGet 漏扫工具链——SP-246 显式固化，不依赖镜像预装)
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: '10.0.x'
       - name: NuGet vulnerability scan (发现已知漏洞即非零退出——fail-closed)
