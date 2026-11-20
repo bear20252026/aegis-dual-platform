@@ -6,7 +6,7 @@
 [versions]
 # AD-242（2026-09-26 审计）：插件版本入 catalog 单源——root build.gradle.kts
 # 此前字面量散落（AD-154 只收敛了 app 依赖）
-agp = "9.4.1"
+agp = "9.5.1"
 kotlinComposePlugin = "2.4.21"
 gradleKtlintPlugin = "14.2.0"
 detektPlugin = "1.23.8"
@@ -32,7 +32,7 @@ junit = "4.13.2"
 # mockito 5 默认 inline mock maker——可 mock Kotlin final 类（WebView 等）
 mockito = "5.24.0"
 # AD-055（2026-09-24 审计）：BrowserEngine 硬化标志 Robolectric 逐项回归
-robolectric = "4.17"
+robolectric = "4.18"
 androidxTestCore = "1.7.0"
 # AD-067（2026-09-24 审计）：androidTest 冒烟集运行依赖
 androidxTestRunner = "1.7.0"
